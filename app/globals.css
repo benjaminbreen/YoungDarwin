@@ -3,19 +3,544 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --foreground-rgb: 45, 35, 25;
+  --background-start-rgb: 255, 248, 220;
+  --background-end-rgb: 245, 233, 201;
+  --darwin-primary: 139, 90, 43;
+  --darwin-secondary: 210, 180, 140;
+  --darwin-accent: 160, 82, 45;
+  --darwin-light: 245, 245, 220;
+  --darwin-dark: 74, 55, 40;
+  --ink-color: 43, 31, 16;
+  --parchment-light: 255, 252, 235;
+  --parchment-dark: 243, 230, 196;
+  --specimen-card: 252, 250, 235;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      rgb(var(--background-start-rgb)),
+      rgb(var(--background-end-rgb))
+    );
+  min-height: 100vh;
+  font-family: 'Lora', Georgia, serif;
+  letter-spacing: 0.01em;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'EB Garamond', 'Times New Roman', serif;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: rgb(var(--darwin-dark));
+}
+
+/* Vintage paper texture for containers */
+.bg-darwin-light {
+  background-color: rgb(var(--parchment-light));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' viewBox='0 0 4 4'%3E%3Cpath fill='%23a0522d' fill-opacity='0.03' d='M1 3h1v1H1V3zm2-2h1v1H3V1z'%3E%3C/path%3E%3C/svg%3E");
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+
+
+/* Panel and card styling */
+
+
+.darwin-panel {
+  background-color: rgb(var(--parchment-light));
+  border: 1px solid rgba(var(--darwin-secondary), 0.6);
+  border-radius: 8px;
+  padding: .6rem;
+  transition: all 0.3s ease-in-out;
+  position: relative;
+  overflow: hidden;
+}
+
+
+
+.submit-button {
+  /*  base color */
+  background-color: #2ecc71; 
+  color: #ffffff;
+  padding: 0.75rem 1.5rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 0.375rem;
+  box-shadow: 
+    inset 0 0 6px rgba(46, 204, 113, 0.5), 
+    0 0 10px rgba(46, 204, 113, 0.6);
+  transition: all 0.3s ease-in-out;
+  cursor: pointer;
+}
+
+/* Hover: deepen the shade, intensify the glow, lift button slightly */
+.submit-button:hover {
+
+  background-color: #27ae60 !important; /* Darker green */
+  transform: translateY(-2px);
+  box-shadow: 
+    inset 0 0 10px rgba(46, 204, 113, 0.3), 
+    0 0 15px rgba(46, 204, 113, 0.4);
+}
+
+/* Remove focus outline, add a ring-like glow */
+.submit-button:focus {
+  outline: none;
+  box-shadow: 
+    0 0 0 3px rgba(46, 204, 113, 0.3), 
+    0 0 10px rgba(46, 204, 113, 0.6) ;
+}
+
+/* Disabled: same style as before, non-clickable, no glow */
+.submit-button:disabled {
+  background-color: rgba(180, 180, 180, 0.5) !important;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+
+.darwin-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background: linear-gradient(to right, 
+    rgba(var(--darwin-primary), 0.1), 
+    rgba(var(--darwin-primary), 0.3), 
+    rgba(var(--darwin-primary), 0.1));
+  border-radius: 4px 4px 0 0;
+}
+
+/* Map styling */
+.map-container {
+  background-image: linear-gradient(to bottom, #87CEEB, #4682B4);
+  transition: all 0.3s ease;
+}
+/* HMS Beagle effects */
+.hms-beagle {
+  transition: all 0.3s ease;
+}
+
+.hms-beagle:hover {
+  transform: scale(1.2) rotate(5deg);
+}
+
+/* Expanded map modal */
+.expanded-map-backdrop {
+  backdrop-filter: blur(3px);
+  transition: all 0.3s ease;
+}
+
+.expanded-map-container {
+  transition: all 0.3s ease;
+  transform-origin: center;
+  animation: map-open 0.3s ease-out;
+}
+
+@keyframes map-open {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Direction buttons */
+.direction-button {
+  transition: all 0.2s ease;
+  background-color: #f2e6ce;
+  color: #614E37;
+  border: 1px solid #d3c6a6;
+}
+
+.direction-button:hover {
+  background-color: #e2d6be;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.current-location {
+  animation: map-pulse 1s infinite;
+}
+
+
+
+.location-marker:hover {
+  filter: brightness(1.2);
+  transform: scale(1.15);
+}
+
+/* Collection popup styling */
+.popup-overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.popup-content {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  max-width: 400px;
+  text-align: center;
+}
+
+.method-selection {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.method-button {
+  background: #ddd;
+  border: none;
+  padding: 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.method-button.selected {
+  background: #4caf50;
+  color: white;
+}
+
+.player-notes {
+  width: 100%;
+  min-height: 60px;
+  margin-top: 10px;
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.popup-buttons {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 10px;
+}
+
+.confirm-button {
+  background: #4caf50;
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.cancel-button {
+  background: #f44336;
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+
+/* Specimen card styling */
+.specimen-card {
+  @apply bg-white rounded-md p-2 border transition-all duration-300;
+  background-color: rgb(var(--specimen-card));
+  border-color: rgba(var(--darwin-secondary), 0.5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.specimen-card:hover {
+  border-color: rgba(var(--darwin-accent), 0.5);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.specimen-card.selected {
+  border-color: rgba(var(--darwin-primary), 0.8);
+  box-shadow: 0 0 0 1px rgba(var(--darwin-primary), 0.2), 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+
+
+
+/* Tool button styling */
+.tool-button {
+  @apply flex items-center justify-center px-3 py-1 bg-amber-50 rounded border text-sm font-medium transition-all;
+  border-color: rgba(var(--darwin-secondary), 0.5);
+}
+
+.tool-button:hover {
+  @apply bg-amber-100;
+  border-color: rgba(var(--darwin-accent), 0.7);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Portrait styling */
+.darwin-portrait {
+  background: radial-gradient(
+    circle at center,
+    rgb(var(--parchment-light)), 
+    rgb(var(--parchment-dark))
+  );
+  box-shadow: 
+    0 3px 6px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(var(--darwin-accent), 0.2);
+}
+
+.portrait-image {
+  box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(var(--darwin-secondary), 0.3);
+  transition: all 0.3s ease;
+}
+
+.portrait-image:hover {
+  box-shadow: 0 0 0 3px white, 0 0 0 4px rgba(var(--darwin-primary), 0.4);
+}
+
+/* Input and button styling */
+textarea, input[type="text"] {
+  @apply p-3 rounded-md border transition-all;
+  border-color: rgba(var(--darwin-secondary), 0.5);
+  background-color: rgb(var(--parchment-light));
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+textarea:focus, input[type="text"]:focus {
+  @apply outline-none;
+  border-color: rgba(var(--darwin-primary), 0.7);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05), 0 0 0 3px rgba(var(--darwin-primary), 0.1);
+}
+
+button.submit-button {
+  @apply py-2 px-6 rounded-md text-white font-medium transition-all;
+  background-color: rgb(var(--darwin-primary));
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+button.submit-button:hover {
+  background-color: rgb(var(--darwin-accent));
+  box-shadow: 
+    0 2px 5px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+button.submit-button:disabled {
+  @apply bg-gray-300 text-gray-500 cursor-not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Game text styling */
+.prose {
+  line-height: 1.7;
+  font-size: 1.05rem;
+  color: rgb(var(--ink-color));
+}
+
+.prose p {
+  margin-bottom: 1rem;
+}
+
+/* Custom scrollbar for a more vintage feel */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+/* Fix for map tooltip positioning */
+.location-tooltip {
+  position: absolute;
+  background: rgba(255, 250, 235, 0.9);
+  border: 1px solid rgba(218, 165, 32, 0.5);
+  padding: 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 100; /* Ensure it appears above everything */
+  max-width: 200px;
+  white-space: normal;
+  transform: translate(-50%, -50%); /* Keeps tooltip above marker */
+  transition: opacity 0.2s ease-in-out;
+}
+
+/* Keep tooltip inside map boundaries */
+.map-container {
+  position: relative;
+  overflow: hidden; /* Prevents tooltip from going off-screen */
+}
+
+/* Prevents tooltip from overlapping other elements */
+.location-tooltip::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+}
+
+
+
+
+/* Position Darwin marker at Post Office Bay initially */
+.darwin-marker {
+  position: absolute;
+  left: 30%; /* Approximate position for Post Office Bay */
+  bottom: 15%; /* Adjust as needed */
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(var(--darwin-light), 0.8);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(var(--darwin-primary), 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--darwin-accent), 0.7);
+}
+
+/* Location marker animations */
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--darwin-primary), 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(var(--darwin-primary), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--darwin-primary), 0);
+  }
+}
+
+.location-current {
+  animation: pulse 2s infinite;
+}
+
+/* Loading animation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1.5s linear infinite;
+}
+
+/* Add ink stain decoration to page corners */
+.ink-stain-corner {
+  position: fixed;
+  width: 100px;
+  height: 100px;
+  opacity: 0.035;
+  z-index: -1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%234a3728' d='M95.8,12c-3.5,2.9-13.7,7.4-24.7,10.6C60,26.1,48.7,28.7,38,28.7c-9.1,0-17.7-2-24.8-6.1 C6.8,18.7,2.3,12.9,0.3,5.3C6.9-0.7,20.6,1,32.8,7.9c7.3,4.1,13.5,9.6,18.5,16.2c4.9-6.7,11-12.2,18.3-16.3 C81.8,1,95.5-0.7,102.1,5.3C100.1,12.9,95.6,18.7,89.2,22.6C82.1,26.7,73.5,28.7,64.4,28.7c-10.7,0-22-2.6-33.1-6.1 C20.3,19.4,10.1,14.9,6.6,12H95.8z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.top-left { top: 0; left: 0; transform: rotate(0deg); }
+.top-right { top: 0; right: 0; transform: rotate(90deg); }
+.bottom-left { bottom: 0; left: 0; transform: rotate(270deg); }
+.bottom-right { bottom: 0; right: 0; transform: rotate(180deg); }
+
+/* Add vintage compass to the map */
+.compass {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  opacity: 0.7;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='none' stroke='%23614E37' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='5' fill='%23614E37'/%3E%3Cpath d='M50 5 L55 45 L50 50 L45 45 Z' fill='%23A52A2A'/%3E%3Cpath d='M50 95 L55 55 L50 50 L45 55 Z' fill='%23614E37'/%3E%3Cpath d='M5 50 L45 45 L50 50 L45 55 Z' fill='%23614E37'/%3E%3Cpath d='M95 50 L55 45 L50 50 L55 55 Z' fill='%23614E37'/%3E%3Ctext x='50' y='20' text-anchor='middle' font-family='serif' font-size='10' fill='%23614E37'%3EN%3C/text%3E%3Ctext x='50' y='85' text-anchor='middle' font-family='serif' font-size='10' fill='%23614E37'%3ES%3C/text%3E%3Ctext x='15' y='53' text-anchor='middle' font-family='serif' font-size='10' fill='%23614E37'%3EW%3C/text%3E%3Ctext x='85' y='53' text-anchor='middle' font-family='serif' font-size='10' fill='%23614E37'%3EE%3C/text%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+/* event history pane */
+/* Animation for slide-in drawer */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.event-history-drawer {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+/* Animation for notifications */
+@keyframes fade-in-out {
+  0%, 100% { opacity: 0; }
+  10%, 90% { opacity: 1; }
+}
+
+.notification-popup {
+  animation: fade-in-out 3s ease-in-out;
+}
+
+/* Custom scrollbar for the timeline */
+.event-timeline::-webkit-scrollbar {
+  width: 6px;
+}
+
+.event-timeline::-webkit-scrollbar-track {
+  background: rgba(245, 245, 220, 0.8);
+  border-radius: 4px;
+}
+
+.event-timeline::-webkit-scrollbar-thumb {
+  background: rgba(139, 90, 43, 0.5);
+  border-radius: 4px;
+}
+
+.event-timeline::-webkit-scrollbar-thumb:hover {
+  background: rgba(160, 82, 45, 0.7);
+}
+
+/* Timeline entry hover effect */
+.timeline-entry {
+  transition: transform 0.2s ease-out;
+}
+
+.timeline-entry:hover {
+  transform: translateX(4px);
+}
+
+/* Timeline dot pulse animation */
+@keyframes dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(217, 119, 6, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
+  }
+}
+
+.timeline-dot {
+  animation: dot-pulse 2s infinite;
 }
