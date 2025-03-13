@@ -25,6 +25,9 @@ export default async function handler(req, res) {
       });
     }
 
+    
+console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
+
     // Check if OpenAI API key is configured
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {

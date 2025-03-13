@@ -156,8 +156,9 @@ console.log("Current narrative for memory generation:",
         relevantMemories = darwinContext.memories[memoryCategory];
       }
       
-      // Select a random memory from the relevant category
-      const selectedMemory = relevantMemories[Math.floor(Math.random() * relevantMemories.length)];
+      console.log("Selected memory category:", memoryCategory);
+console.log("Relevant memories:", relevantMemories);
+  
       
       // Provide the memory as context but ask the LLM to elaborate or modify it
       userMessage = `Based on the player's current context:

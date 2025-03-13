@@ -151,18 +151,7 @@ export default async function handler(req, res) {
     
     if (hybrid) {
   try {
-    // Start the image generation process
-    const imageResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/generate-hybrid-image`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        hybridId: hybrid.id || `hybrid_${Date.now()}`,
-        description: hybrid.description,
-        name: hybrid.name
-      }),
-    });
+    
     
     // We don't wait for the image to be ready - just initiate the process
     // The image URL will be retrieved later when needed
