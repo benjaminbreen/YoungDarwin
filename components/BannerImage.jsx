@@ -114,10 +114,10 @@ const getBannerImage = () => {
   if (location.includes('Your Quarters')) return '/banners/darwinquarters.jpg';
   if (location.includes('Captain\'s Cabin')) return '/banners/captainscabin.jpg';
   // Generic Beagle fallback
-  if (location.includes('Beagle') || location.includes('HMS')) return '/banners/hmsbeagle.jpg';
+  if (location.includes('Beagle')) return '/banners/hmsbeagle.jpg';
   
   // Governor's House rooms
-  if (location.includes('Study')) return '/banners/governorstudy.jpg';
+  if (location.includes('Governors Office')) return '/banners/governorstudy.jpg';
   if (location.includes('Private Quarters')) return '/banners/privatequarters.jpg';
   if (location.includes('Library')) return '/banners/governorlibrary.jpg';
   if (location.includes('Dining Room')) return '/banners/diningroom.jpg';
@@ -125,6 +125,11 @@ const getBannerImage = () => {
   if (location.includes('Rear Garden')) return '/banners/reargarden.jpg';
   // Generic Governor's House fallback
   if (location.includes('Governor')) return '/banners/governorshouse.jpg';
+
+   if (location.includes('watkins interior')) return '/banners/watkinsinterior.jpg';
+      if (location.includes('whalers hut')) return '/banners/whalershut.jpg';
+
+        if (location.includes('mail barrel')) return '/banners/mailbarrelinterior.jpg';
       
       // Standard location-based images for the island
       switch (location) {
@@ -168,7 +173,7 @@ const getBannerImage = () => {
   case 'Cerro Pajas':
     return '/banners/cerropajas.jpg';
   case 'Asilo de la Paz (Penal Colony)':
-    return '/banners/settlement.jpg';
+    return '/banners/penalcolony.jpg';
   case 'Rocky Clearing':
     return '/banners/rockyclearing.jpg';
   case 'El Mirador':
@@ -203,6 +208,12 @@ const getBannerImage = () => {
     return '/banners/abandonedhut.jpg';
   case 'Southern Reefs':
     return '/banners/southernreefs.jpg';
+
+     case 'Cabin Interior':
+    return '/banners/watkinscabininterior.jpg';
+
+         case 'Watkins Cabin Interior':
+    return '/banners/watkinscabininterior.jpg';
 
         default:
           return null; // Return null so the emoji placeholder is used

@@ -70,14 +70,11 @@ const getEventSummary = (event) => {
   } = useGameStore();
 
   // Extract location name from ID
-  const getLocationName = (locationId) => {
-    // This is a simplified version - in a real implementation, you'd likely have
-    // a more robust way to map location IDs to names
-    return locationId
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
-  };
+function getLocationName(locationId) {
+  if (!locationId) return 'Unknown';
+  const match = locations.find(loc => loc.id === locationId);
+  return match ? match.name : 'Unknown';
+}
 
   // Format a timestamp for display
   const formatTimestamp = (rawTime) => {

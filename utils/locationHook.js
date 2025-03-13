@@ -167,12 +167,12 @@ export function useLocationSystem(onLocationUpdate) {
           specimens: [],
           npcs: ['gabriel_puig']
         },
-        'hms_beagle': { 
-          id: 'HMS_BEAGLE', 
+        'beagle': { 
+          id: 'BEAGLE', 
           name: "HMS Beagle",
-          description: "Captain FitzRoy's survey vessel.",
+          description: "Captain FitzRoy's trusty survey vessel.",
           type: 'ship',
-          specimens: [],
+          specimens: ['ship_logs'],
           npcs: ['fitzroy']
         },
         'governors_house': { 
@@ -186,23 +186,31 @@ export function useLocationSystem(onLocationUpdate) {
         'watkins_cabin': {
           id: 'WATKINS_CABIN',
           name: "Patrick Watkins's Cabin",
-          description: "A crude shelter built by the Irish castaway who once lived alone on the island.",
-          type: 'cabin',
+          description: "A crude one-room shelter built from driftwood and volcanic stone.",
+          type: 'interior',
           specimens: [],
           npcs: []
         },
         'whalers_hut': {
           id: 'WHALERS_HUT',
           name: "Whaler's Hut",
-          description: "A simple shelter used by whalers when they come ashore for supplies.",
-          type: 'hut',
+          description: "A stone structure with a battered wooden roof and whaling artifacts.",
+          type: 'interior',
           specimens: [],
+          npcs: []
+        },
+        'mail_barrel': {
+          id: 'MAIL_BARREL',
+          name: "Mail Barrel Interior",
+          description: "The cramped interior of the Post Office Bay barrel, mostly filled with sand and very dark.",
+          type: 'interior',
+          specimens: ['whalersletter'],
           npcs: []
         }
       };
       
       return interiorInfo[interiorType] || {
-        id: 'INTERIOR',
+        id: 'interior',
         name: 'Interior Location',
         description: 'You are inside a structure.',
         type: 'interior',
@@ -215,7 +223,7 @@ export function useLocationSystem(onLocationUpdate) {
     
     if (!cell) {
       return {
-        id: 'UNKNOWN',
+        id: 'unknown',
         name: 'Unknown Location',
         description: 'You are lost.',
         specimens: [],
@@ -262,30 +270,40 @@ export function useLocationSystem(onLocationUpdate) {
       'hms_beagle': 'HMS_BEAGLE',
       'governors_house': 'GOVERNORS_HOUSE',
       'watkins_cabin': 'WATKINS_CABIN',
-      'whalers_hut': 'WHALERS_HUT'
+      'whalers_hut': 'WHALERS_HUT',
+      'mail_barrel': 'MAIL_BARREL'
     };
     
-    // CRITICAL FIX: Ensure game store knows we're in an interior
-    if (interiorLocations[type]) {
-      try {
-        // Update the game store, but handle it safely if the method doesn't exist
-        useGameStore.getState().moveToLocation(interiorLocations[type]);
-      } catch (error) {
-        console.warn("Could not update game store with interior location:", error);
-      }
+
+    
+    // Create appropriate message for entering each location type
+    let entryMessage = "";
+    switch(type) {
+      case 'cave':
+        entryMessage = "You have entered Gabriel's Cave. The air is cool and damp, with the scent of earth and burning candles.";
+        break;
+      case 'hms_beagle':
+        entryMessage = "You have boarded HMS Beagle. The familiar creak of timbers and smell of tar welcome you back.";
+        break;
+      case 'governors_house':
+        entryMessage = "You have entered the Vice-Governor's House. The colonial furnishings speak of a man attempting to recreate European comfort.";
+        break;
+      case 'watkins_cabin':
+        entryMessage = "You have entered Watkins's abandoned cabin. The musty air holds traces of a solitary life lived years ago.";
+        break;
+      case 'whalers_hut':
+        entryMessage = "You have entered the whaler's hut. Broken harpoon parts and the lingering smell of blubber reveal its purpose.";
+        break;
+      case 'mail_barrel':
+        entryMessage = "You peer inside the mail barrel. It's dark and mostly filled with sand, but you can make out various letters and parcels.";
+        break;
+      default:
+        entryMessage = "You have entered an interior location.";
     }
-    
-    const messages = {
-      'cave': "You have entered Gabriel's Cave, a hidden revolutionary sanctuary.",
-      'hms_beagle': "You have boarded the HMS Beagle, Captain FitzRoy's survey vessel.",
-      'governors_house': "You have entered the Vice-Governor's House, Nicolás Lawson's residence.",
-      'watkins_cabin': "You have entered Patrick Watkins's crude cabin, abandoned but full of stories.",
-      'whalers_hut': "You have entered the simple Whaler's Hut, used by sailors when they come ashore."
-    };
     
     return {
       success: true,
-      message: messages[type] || `You have entered the ${type}.`
+      message: entryMessage
     };
   };
   
@@ -296,7 +314,7 @@ export function useLocationSystem(onLocationUpdate) {
     setIsInInterior(false);
     setInteriorType(null);
     
-    // CRITICAL FIX: Ensure game store knows we've exited
+    // ensure game store knows we've exited
     const currentCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
     if (currentCell) {
       useGameStore.getState().moveToLocation(currentCell.id);
@@ -304,7 +322,7 @@ export function useLocationSystem(onLocationUpdate) {
     
     return {
       success: true,
-      message: `You have returned to the island.`
+      message: `Darwin has returned to the exterior from an interior location. This is a shift in context that should be noted in the narrative. Consequently, NPCs who had been in the interior are no longer accessible to Darwin, because he is now in the exterior. If he is leaving the Beagle, describe how he has been rowed to shore by two sailors and is now on the island again. No NPCs follow him.`
     };
   };
   
@@ -314,49 +332,18 @@ export function useLocationSystem(onLocationUpdate) {
   const moveInInterior = (newPosition, roomId) => {
     setInteriorPlayerPosition(newPosition);
     
-    // Simple room descriptions
-    const roomDescriptions = {
-      // Gabriel's Cave rooms
-      'CAVE_ENTRANCE': 'You move to the narrow cave entrance.',
-      'CAVE_MAIN': 'You enter the main chamber with its crackling fire.',
-      'CAVE_BACK': 'You move to the back chamber with pamphlets and a printing press.',
-      'CAVE_LEFT': 'You enter the storage area with supplies.',
-      'CAVE_RIGHT': 'You move to the sleeping area with a simple bedroll.',
-      'CAVE_STORAGE': 'You discover a hidden cache of treasured possessions.',
-      'CAVE_LOOKOUT': 'You approach the narrow opening with a view of the settlement.',
-      'CAVE_WRITING': 'You examine the small writing desk with quills and parchment.',
-      'CAVE_ESCAPE': 'You find a tight passage that leads to another exit.',
-      
-      // HMS Beagle rooms
-      'BEAGLE_BOW': 'You move to the ship\'s bow with its view of the ocean.',
-      'BEAGLE_FOREMAST': 'You stand beneath the foremast watching sailors work.',
-      'BEAGLE_MAINMAST': 'You approach the mainmast where the ship\'s bell hangs.',
-      'BEAGLE_QUARTERDECK': 'You step onto the raised quarterdeck with its polished wheel.',
-      'BEAGLE_STERN': 'You move to the stern gallery overlooking the ship\'s wake.',
-      'BEAGLE_FORECASTLE': 'You enter the forecastle with its swinging hammocks.',
-      'BEAGLE_CREW': 'You move through the cramped crew quarters.',
-      'BEAGLE_STORAGE': 'You enter the storage area for specimens.',
-      'BEAGLE_QUARTERS': 'You return to your small but comfortable quarters.',
-      'BEAGLE_CABIN': 'You enter FitzRoy\'s meticulously organized cabin.',
-      
-      // Governor's House rooms
-      'HOUSE_OFFICE': 'You enter the office with its large desk covered in maps.',
-      'HOUSE_PRIVATE': 'You step into Lawson\'s surprisingly elegant private quarters.',
-      'HOUSE_LIBRARY': 'You browse the small library of navigation and natural history books.',
-      'HOUSE_DINING': 'You enter the dining room with its modest table.',
-      'HOUSE_ENTRANCE': 'You return to the entrance hall with colonial furnishings.',
-      'HOUSE_GARDEN': 'You step into the small walled garden with exotic plants.',
-      
-      // Patrick Watkins's Cabin (single room)
-      'WATKINS_CABIN_MAIN': 'You explore the crude single-room cabin of Irish castaway Patrick Watkins. A rough bed of palm fronds lies in one corner, while crude shelves hold primitive tools and a small collection of books.',
-      
-      // Whaler's Hut (single room)
-      'WHALERS_HUT_MAIN': 'You enter the simple whaler\'s hut. Barrels of freshwater, salt meat, and hardtack are stacked against one wall. A few hammocks hang from the ceiling beams.'
-    };
+    // CRITICAL FIX: Update the game store with the new interior room
+    if (useGameStore && useGameStore.getState().moveToLocation) {
+      try {
+        useGameStore.getState().moveToLocation(roomId);
+      } catch (error) {
+        console.warn("Could not update game store with interior room:", error);
+      }
+    }
     
     return {
       success: true,
-      message: roomDescriptions[roomId] || `You move to a different area.`
+      message: `You move to ${roomId}`
     };
   };
 

@@ -5,6 +5,8 @@ import { specimens, analyzeNarrativeForSpecimens } from '../data/specimens';
 import { tools } from '../data/tools'; // Only import the analysis tools
 import SpecimenDetail from './SpecimenDetail';
 import Journal from './Journal';
+import HybridSpecimenImage from './HybridSpecimenImage';
+import { getSpecimenIcon } from '../utils/specimenUtils';
 
 
 export default function SpecimenCollection({ 
@@ -16,7 +18,10 @@ export default function SpecimenCollection({
   narrativeText,
    onViewNearbySpecimenDetail,
   availableSpecimenIds,
-  onOpenCollectionPopup 
+  onOpenCollectionPopup,
+   specimenList,
+   currentLocation,
+   gameTime 
 }) {
   // states
   const [showDetailPopup, setShowDetailPopup] = useState(false);
@@ -24,6 +29,20 @@ export default function SpecimenCollection({
   const [nearbySpecimenIds, setNearbySpecimenIds] = useState([]);
    const [showJournalPopup, setShowJournalPopup] = useState(false);
   const [selectedJournalSpecimen, setSelectedJournalSpecimen] = useState(null);
+
+    const getCurrentTimePeriod = () => {
+    if (!gameTime) return 'Diurnal'; // Default to daytime
+    
+    const hours = Math.floor((gameTime % 1440) / 60);
+    
+    if (hours >= 6 && hours < 18) {
+      return 'Diurnal';     // Daytime: 6:00 AM - 6:00 PM
+    } else if ((hours >= 5 && hours < 6) || (hours >= 18 && hours < 19)) {
+      return 'Crepuscular'; // Dawn/Dusk: 5-6 AM or 6-7 PM
+    } else {
+      return 'Nocturnal';   // Night: 7:00 PM - 5:00 AM
+    }
+  };
 
 //  analyze the narrative to see which specimens are nearby
 useEffect(() => {
@@ -43,52 +62,65 @@ useEffect(() => {
     }
   };
 
-  // getSpecimenIcon logic
- const getSpecimenIcon = (id) => {
-    switch(id) {
-        case 'easternsantacruztortoise': return '🐢';
-        case 'floreanagianttortoise': return '🐢';
-        case 'galapagosmockingbird': return '🐦';
-        case 'floreanamockingbird': return '🐦';
-        case 'largegroundfinch': return '🐤';
-        case 'mediumgroundfinch': return '🐤';
-        case 'marineiguana': return '🐊';
-        case 'terrestrialiguana': return '🐊';
-        case 'cactus': return '🌵';
-        case 'lavaLizard': return '🦎';
-        case 'crab': return '🦀';
-        case 'seaLion': return '🦭';
-        case 'booby': return '🐦';
-        case 'frigatebird': return '🕊️';
-        case 'coralFragment': return '🪸';
-        case 'plicopurpura': return '🐚';
-        case 'seashell': return '🐚';
-        case 'neorapana': return '🐚';
-        case 'olivine': return '🦠';
-        case 'basalt': return '🪨';
-        case 'barnacle': return '🐌';
-        case 'mangrove': return '🌱';
-        case 'greenTurtle': return '🐢';
-        case 'parrotfish': return '🐠';
-        case 'hammerhead': return '🦈';
-        case 'mantaRay': return '🐟';  
-        case 'flamingo': return '🦩';
-        case 'seaurchin': return '🪸';  
-        case 'socialisttreatise': return '📜';
-        case 'memoirsofautopian': return '📖';
-        case 'governorsletter': return '✉️';
-        case 'rumflask': return '⚱️';
-        case 'petmonkey': return '🐵';
-        case 'feralgoat': return '🐐';
-        case 'captainsskull': return '💀';
-        default: return '🔍';
-    }
+
+  
+
+const getEmojiByTaxonomy = (taxonomy) => {
+  const lowercaseTaxonomy = taxonomy.toLowerCase();
+  
+  // Map taxonomic groups to emojis
+  if (lowercaseTaxonomy.includes('tortoise') || lowercaseTaxonomy.includes('turtle')) return '🐢';
+  if (lowercaseTaxonomy.includes('bird') || lowercaseTaxonomy.includes('finch') || 
+      lowercaseTaxonomy.includes('mockingbird')) return '🐦';
+  if (lowercaseTaxonomy.includes('iguana')) return '🦎';
+  if (lowercaseTaxonomy.includes('lizard')) return '🦎';
+  if (lowercaseTaxonomy.includes('crab')) return '🦀';
+  if (lowercaseTaxonomy.includes('plant') || lowercaseTaxonomy.includes('cactus') || 
+      lowercaseTaxonomy.includes('mangrove')) return '🌱';
+  if (lowercaseTaxonomy.includes('shell') || lowercaseTaxonomy.includes('gastropod')) return '🐚';
+  if (lowercaseTaxonomy.includes('fish')) return '🐠';
+  if (lowercaseTaxonomy.includes('shark')) return '🦈';
+  if (lowercaseTaxonomy.includes('ray')) return '🐟';
+  if (lowercaseTaxonomy.includes('mammal')) return '🐾';
+  if (lowercaseTaxonomy.includes('mineral') || lowercaseTaxonomy.includes('rock')) return '🪨';
+  
+  // Default emoji for unrecognized taxonomy
+  return '🧬';
 };
 
-  // finding potentially collectible nearby specimens
- const getNearbySpecimens = () => {
-  return specimens  // Use 'specimens' here instead of 'specimenids'
-    .filter(s => nearbySpecimenIds.includes(s.id) && !inventory.some(item => item.id === s.id));
+const [filteredNearbyIds, setFilteredNearbyIds] = useState([]);
+
+// main game logic for determining nearby specimen
+useEffect(() => {
+    const currentTimePeriod = getCurrentTimePeriod();
+    
+    // Filter specimens by time of day and apply 50% chance
+    const filtered = nearbySpecimenIds.filter(id => {
+      // Find the specimen
+      const specimen = specimenList.find(s => s.id === id);
+      if (!specimen) return false;
+      
+      // Check if time of day matches (or is appropriate)
+      const speciesTimeOfDay = specimen.timeofday || 'Diurnal'; // Default to Diurnal
+      
+      // Determine if time of day is compatible
+      const isTimeCompatible = 
+        speciesTimeOfDay === currentTimePeriod || 
+        (speciesTimeOfDay === 'Crepuscular' && currentTimePeriod !== 'Nocturnal') ||
+        (currentTimePeriod === 'Crepuscular'); // Crepuscular species also visible at dawn/dusk
+      
+      // Apply both time filter and random chance
+      return isTimeCompatible && Math.random() < 0.5;
+    });
+    
+    setFilteredNearbyIds(filtered);
+  }, [nearbySpecimenIds, currentLocation, gameTime, specimenList]);
+
+
+// Then modify getNearbySpecimens to use the stable filtered list
+const getNearbySpecimens = () => {
+  return specimenList
+    .filter(s => filteredNearbyIds.includes(s.id) && !inventory.some(item => item.id === s.id));
 };
 
   const [showDetailedView, setShowDetailedView] = useState(null);
@@ -154,24 +186,38 @@ useEffect(() => {
         <div className="mb-5 p-4 bg-white rounded-lg border border-amber-300 shadow-sm specimen-card selected">
     <div className="flex items-center mb-3">
       <div 
-        className="relative w-16 h-16 bg-amber-50 rounded-lg flex items-center justify-center mr-4 shrink-0 border border-amber-200 cursor-pointer hover:opacity-80 transition-opacity"
-        onClick={() => setShowDetailedView(currentSpecimen)}
-      >
-        <img 
-          src={getSpecimenImagePath(currentSpecimen.id)} 
-          alt={currentSpecimen.name}
-          className="w-full h-full object-cover rounded-lg"
-          onError={handleImageError}
-        />
-        <div className="hidden emoji-fallback text-3xl flex items-center justify-center absolute inset-0">
-          {getSpecimenIcon(currentSpecimen.id)}
-        </div>
-        {/* Decorative corners */}
-        <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-amber-500"></div>
-        <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-amber-500"></div>
-        <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-amber-500"></div>
-        <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-amber-500"></div>
+  className="relative w-16 h-16 bg-amber-50 rounded-lg flex items-center justify-center mr-4 shrink-0 border border-amber-200 cursor-pointer hover:opacity-80 transition-opacity"
+  onClick={() => setShowDetailedView(currentSpecimen)}
+>
+  {currentSpecimen.isHybrid ? (
+    <HybridSpecimenImage 
+      specimen={currentSpecimen}
+      className="w-full h-full"
+      size="full"
+      onImageLoaded={(url) => {
+        // Update the specimen in your store if needed
+        console.log(`Image generated for ${currentSpecimen.name}: ${url}`);
+      }}
+    />
+  ) : (
+    <>
+      <img 
+        src={getSpecimenImagePath(currentSpecimen.id)} 
+        alt={currentSpecimen.name}
+        className="w-full h-full object-cover rounded-lg"
+        onError={handleImageError}
+      />
+      <div className="hidden emoji-fallback text-3xl flex items-center justify-center absolute inset-0">
+        {getSpecimenIcon(currentSpecimen.id)}
       </div>
+    </>
+  )}
+  {/* Decorative corners */}
+  <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-amber-500"></div>
+  <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-amber-500"></div>
+  <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-amber-500"></div>
+  <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-amber-500"></div>
+</div>
       <div>
         <h4 className="font-bold text-lg text-amber-900">{currentSpecimen.name}</h4>
         <p className="text-sm italic text-amber-700 font-serif">{currentSpecimen.latin}</p>

@@ -1,7 +1,8 @@
 'use client';
-import React, { useState } from 'react';
 import JournalView from './JournalView';
 import { debounce } from 'lodash';
+import React, { useState, useEffect } from 'react';
+import CounterNarrative from './CounterNarrative';
 
 const debouncedSubmit = debounce((input) => {
   onSubmit(input);
@@ -20,12 +21,13 @@ export default function PlayerInput({
   isLoading, 
   suggestions = [], 
   rawResponse,
-  rawPrompt  // Add this new prop
+  rawPrompt  
 }) {
   const [userInput, setUserInput] = useState('');
   const [showRawOutput, setShowRawOutput] = useState(false);
   const [showJournalView, setShowJournalView] = useState(false);
   const [activeTab, setActiveTab] = useState('response'); // 'response' or 'prompt'
+  const [showCounterNarrative, setShowCounterNarrative] = useState(false);
   
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -50,6 +52,13 @@ export default function PlayerInput({
     { text: 'Move to highland', action: '/move highland' },
     { text: 'Examine specimen', action: 'Examine the specimen in detail with my hand lens.' },
   ];
+
+    useEffect(() => {
+    if (showRawOutput) {
+      console.log("Raw prompt available:", !!rawPrompt);
+      console.log("Raw response available:", !!rawResponse);
+    }
+  }, [showRawOutput, rawPrompt, rawResponse]);
   
   return (
     <div className="w-full relative">
@@ -67,31 +76,48 @@ export default function PlayerInput({
           }}
         />
         
-        {/* Buttons container */}
-        <div className="flex flex-col space-y-1">
-         
-          
-          {/* Journal View Button */}
-          <button
-            type="button"
-            onClick={() => setShowJournalView(true)}
-            className="w-6 h-6 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
-            title="View journal entries"
-          >
-            📖
-          </button>
-        </div>
+   
         
         <button
-  type="submit"
-  disabled={isLoading || !userInput.trim()}
-  className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 relative"
->
-  {isLoading ? 'Processing...' : 'Submit'}
-  <span className="absolute inset-0 bg-green-000 opacity-05 blur-lg transition-all duration-700"></span>
-</button>
-
+          type="submit"
+          disabled={isLoading || !userInput.trim()}
+          className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 relative"
+        >
+          {isLoading ? 'Processing...' : 'Submit'}
+          <span className="absolute inset-0 bg-green-000 opacity-05 blur-lg transition-all duration-700"></span>
+        </button>
       </form>
+      
+      {/* Utility buttons container - PLACED BELOW THE FORM */}
+      <div className="flex justify-end mt-2 space-x-2">
+        <button
+          onClick={() => setShowRawOutput(true)}
+          className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
+          title="View LLM Exchange"
+        >
+          <span className="text-amber-800">👁️ Raw LLM </span>
+        </button>
+
+        <button
+  onClick={() => setShowCounterNarrative(true)}
+  className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
+  title="View Historian's Critique"
+>
+  <span className="text-amber-800">💡 Counter-narrative</span>
+</button>
+        
+        <button
+          onClick={() => setShowJournalView(true)}
+          className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
+          title="View journal entries"
+        >
+          <span className="text-amber-800">📖 Journal</span>
+        </button>
+      </div>
+
+        
+
+
       
       {/* Quick action suggestions */}
       <div className="mt-3">
@@ -181,11 +207,20 @@ export default function PlayerInput({
         </div>
       )}
 
+{showCounterNarrative && (
+  <CounterNarrative 
+    rawResponse={rawResponse}
+    onClose={() => setShowCounterNarrative(false)}
+  />
+)}
+
       {/* Journal View Modal */}
       <JournalView 
         isOpen={showJournalView}
         onClose={() => setShowJournalView(false)}
       />
     </div>
+
+
   );
 }

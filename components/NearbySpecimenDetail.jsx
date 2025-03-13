@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import HybridSpecimenImage from './HybridSpecimenImage';
 
 export default function NearbySpecimenDetail({ 
   isOpen, 
@@ -25,16 +26,16 @@ export default function NearbySpecimenDetail({
     }
   };
 
-const formatHabitat = (habitat) => {
-  return habitat
-    .replace(/([A-Z])/g, ' $1') // Insert space before capital letters
-    .split(' ') // Split into words
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize each word
-    .join(' '); // Rejoin into a string
-};
+  const formatHabitat = (habitat) => {
+    return habitat
+      .replace(/([A-Z])/g, ' $1') // Insert space before capital letters
+      .split(' ') // Split into words
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize each word
+      .join(' '); // Rejoin into a string
+  };
   
   // Get specimen icon based on type
- const getSpecimenIcon = (id) => {
+  const getSpecimenIcon = (id) => {
     switch(id) {
         case 'easternsantacruztortoise': return '🐢';
         case 'floreanagianttortoise': return '🐢';
@@ -70,7 +71,10 @@ const formatHabitat = (habitat) => {
         case 'captainsskull': return '💀';
         default: return '🔍';
     }
-};
+  };
+  
+  // Check if the specimen is a hybrid
+  const isHybrid = specimen.isHybrid || false;
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -89,23 +93,40 @@ const formatHabitat = (habitat) => {
         
         <div className="p-6 flex flex-col items-center">
           <div className="mb-4 relative w-40 h-40 rounded-full overflow-hidden border-4 border-amber-300 shadow-md">
-            <img 
-              src={getSpecimenImagePath()} 
-              alt={specimen.name}
-              className="w-full h-full object-cover"
-              onError={handleImageError}
-            />
-            <div className="hidden emoji-fallback absolute inset-0 flex items-center justify-center bg-amber-50 text-5xl">
-              {getSpecimenIcon(specimen.id)}
-            </div>
+            {isHybrid ? (
+              <HybridSpecimenImage 
+                specimen={specimen}
+                className="w-full h-full"
+                size="full"
+                fallbackIcon={getSpecimenIcon(specimen.id)}
+                onImageLoaded={(url) => {
+                  console.log(`Image loaded for ${specimen.name}: ${url}`);
+                }}
+              />
+            ) : (
+              <>
+                <img 
+                  src={getSpecimenImagePath()} 
+                  alt={specimen.name}
+                  className="w-full h-full object-cover"
+                  onError={handleImageError}
+                />
+                <div className="hidden emoji-fallback absolute inset-0 flex items-center justify-center bg-amber-50 text-5xl">
+                  {getSpecimenIcon(specimen.id)}
+                </div>
+              </>
+            )}
+            
+
+           
           </div>
           
           <p className="text-sm italic text-amber-700 font-serif mb-3">{specimen.latin}</p>
           <p className="mb-4 text-gray-700">{specimen.description}</p>
           
-   <p className="text-sm mb-3">
-  <strong>Typical habitat:</strong> {formatHabitat(specimen.habitat)}
-</p>
+          <p className="text-sm mb-3">
+            <strong>Typical habitat:</strong> {formatHabitat(specimen.habitat)}
+          </p>
           
           <button
             onClick={() => {

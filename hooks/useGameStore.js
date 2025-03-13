@@ -208,15 +208,29 @@ const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   getRecentHistory: () => get().gameHistory,
 
   // Other game actions:
-  startGame: () => {
-    // Initialize specimens with random locations (or other initializations)
-    const initialSpecimens = initializeSpecimens();
-    set({
-      gameStarted: true,
-      currentScreen: 'exploration',
-      specimenList: initialSpecimens
-    });
-  },
+ startGame: () => {
+  // Get the current state before starting the game
+  const currentState = get();
+  const currentSpecimenList = currentState.specimenList;
+  
+  // Keep track of any hybrid specimens that might have been created
+  const existingHybrids = currentSpecimenList.filter(s => s.isHybrid === true);
+  
+  // Initialize new specimens
+  let initialSpecimens = initializeSpecimens();
+  
+  // If there were hybrids, merge them with the new specimens
+  if (existingHybrids && existingHybrids.length > 0) {
+    console.log(`Preserving ${existingHybrids.length} hybrid specimens during game start`);
+    initialSpecimens = [...initialSpecimens, ...existingHybrids];
+  }
+  
+  set({
+    gameStarted: true,
+    currentScreen: 'exploration',
+    specimenList: initialSpecimens
+  });
+},
 
   setIsLoading: (isLoading) => set({ isLoading }),
   setNarrativeText: (text) => set({ narrativeText: text }),
@@ -237,6 +251,13 @@ const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   // Updated moveToLocation function to include NPC encounters
 moveToLocation: (locationId) => {
   console.log('Moving to locationId:', locationId);
+  
+  // Check if we're already at this location to prevent duplicate entries
+  const currentLocId = get().currentLocationId;
+  if (currentLocId === locationId) {
+    console.log('Already at this location, skipping update');
+    return null;
+  }
   
   const location = locations.find(loc => loc.id === locationId);
   if (location) {

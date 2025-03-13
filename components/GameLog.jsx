@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 
-export default function GameLog({ narrative, isLoading, lastUserInput }) {
+export default function GameLog({ narrative, isLoading, lastUserInput, isMovingViaMap })  {
   const logRef = useRef(null);
   
   // Auto-scroll to bottom when narrative changes
@@ -48,12 +48,20 @@ export default function GameLog({ narrative, isLoading, lastUserInput }) {
     // Default
     let loadingText = 'Darwin is investigating...';
     let loadingImage = '/loading/defaultDarwin.jpg';
+
+     if (isMovingViaMap) {
+      loadingText = 'Darwin is traveling...';
+      loadingImage = '/loading/travelDarwin.jpg';
+    } 
+
+    
     
     // Convert player input to lowercase for easier checks
-    const input = (lastUserInput || '').toLowerCase();
+    else {
+      const input = (lastUserInput || '').toLowerCase();
     
     if (input.includes('travel') || input.includes('move') || input.includes('go') || 
-        input.includes('walk') || input.includes('head') || input.includes('north') ||
+        input.includes('walk') || input.includes('from') || input.includes('north') ||
         input.includes('south') || input.includes('east') || input.includes('west')) {
       loadingText = 'Darwin is traveling...';
       loadingImage = '/loading/travelDarwin.jpg';
@@ -65,8 +73,8 @@ export default function GameLog({ narrative, isLoading, lastUserInput }) {
       loadingText = 'Darwin is observing...';
       loadingImage = '/loading/observingDarwin.jpg';
     } else if (
-      input.includes('collect') || input.includes('gather') || 
-      input.includes('take') || input.includes('uses')
+      input.includes('collect') || input.includes('specimen') || 
+      input.includes('natural') || input.includes('uses')
     ) {
       loadingText = 'Darwin is collecting...';
       loadingImage = '/loading/collectingDarwin.jpg';
@@ -76,6 +84,8 @@ export default function GameLog({ narrative, isLoading, lastUserInput }) {
       loadingText = 'Darwin is talking...';
       loadingImage = '/loading/talkingDarwin.jpg';
     }
+
+  }
     
     return (
       <div ref={logRef} className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center relative">

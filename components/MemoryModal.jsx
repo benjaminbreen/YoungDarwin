@@ -24,7 +24,7 @@ export default function MemoryModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-darwin-light rounded-lg border border-amber-300 shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-        <div className="p-4 border-b border-amber-200 flex justify-between items-center">
+        <div className="p-4 border-b border-amber-400 flex justify-between items-center">
           <h2 className="text-xl font-bold text-darwin-dark font-serif">Darwin's Memory</h2>
           <button 
             onClick={onClose}
@@ -37,7 +37,7 @@ export default function MemoryModal({
         <div className="p-6">
           {memoryContent ? (
             <div 
-              className="font-serif leading-relaxed text-gray-800 italic"
+              className="font-serif leading-relaxed text-gray-800 italic text-2xl"
               dangerouslySetInnerHTML={{ __html: memoryContent }}
             />
           ) : (
@@ -55,7 +55,7 @@ export default function MemoryModal({
               <button
                 onClick={() => onGenerateMemory(inputPrompt)}
                 disabled={isLoadingMemory || inputPrompt.trim() === ''}
-                className="w-full px-4 py-2 bg-darwin-primary text-white rounded-lg hover:bg-darwin-accent disabled:opacity-50"
+                className="w-full px-3 py-2 bg-darwin-primary text-white rounded-lg hover:bg-darwin-accent disabled:opacity-50"
               >
                 {isLoadingMemory ? 'Recalling Memory...' : 'Recall Memory'}
               </button>

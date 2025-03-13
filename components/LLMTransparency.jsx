@@ -1,7 +1,7 @@
 // LLMTransparency.jsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function LLMTransparency({ rawResponse, rawPrompt }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -11,14 +11,7 @@ export default function LLMTransparency({ rawResponse, rawPrompt }) {
   
   return (
     <>
-      {/* Developer button */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="absolute right-2 bottom-2 text-gray-400 hover:text-gray-600 transition-colors"
-        title="View LLM Exchange"
-      >
-        👁️
-      </button>
+   
       
       {/* Modal */}
       {isOpen && (

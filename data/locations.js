@@ -166,10 +166,10 @@ export const locations = [
     ]
   },
 
-  // 8) BLACK_BEACH_OCEAN
+  // 8) BLACK_BEACH_SURF
   {
-    id: 'BLACK_BEACH_OCEAN',
-    name: 'Black Beach, Surf',
+    id: 'BLACK_BEACH_SURF',
+    name: 'Black Beach Surf',
     description: 'Waist-deep in the choppy ocean surf. The undertow seems quite dangerous.',
     x: -1,
     y: 1,
@@ -180,12 +180,12 @@ export const locations = [
     npcs: [],
     boundaries: { west: 'ocean' },
     discoveries: [
-      'Powerful currents swirl around your legs, threatening to pull you seaward.'
+      'Dangerous currents swirl around your legs, threatening to pull you seaward.'
     ],
     notableFeatures: [
       'Foam-topped waves crash rhythmically against volcanic sand.',
       'Dark shapes flicker beneath the surface—perhaps iguanas or large fish.',
-      'The hiss of receding water hints at hidden currents.'
+      'The hiss of receding water hints at hidden currents. Be careful.'
     ]
   },
 
@@ -281,10 +281,10 @@ export const locations = [
     ]
   },
 
-  // 13) ENDERBY
+  // 13) COASTAL SCRUBLAND
   {
-    id: 'ENDERBY',
-    name: 'Enderby Sector',
+    id: 'COASTAL_SCRUBLAND',
+    name: 'Coastal Scrubland',
     description: 'A windswept eastern stretch of scrubland frequented by mockingbirds.',
     x: 4,
     y: 1,
@@ -298,9 +298,9 @@ export const locations = [
       'Enderby is known among whalers for occasional fresh water seeps, though they may be dried up at this season.'
     ],
     notableFeatures: [
-      'Dust devils swirl across the sparse, open ground.',
+      'Sparse, open ground. Not much of visual interest.',
       'Mockingbirds dart between cacti, eager for seeds.',
-      'Gritty wind stings your eyes, carrying faint salt from the distant sea.'
+      'Gritty wind stings your eyes, carrying faint salt from the sea.'
     ]
   },
 
@@ -396,9 +396,9 @@ export const locations = [
     ]
   },
 
-  // 18) SETTLEMENT
+  // 18) PENAL COLONY
   {
-    id: 'SETTLEMENT',
+    id: 'PENAL_COLONY',
     name: 'Asilo de la Paz (Penal Colony)',
     description: 'A small, gloomy settlement of prisoners and soldiers. The Vice Governor’s house stands out.',
     x: 2,
@@ -560,7 +560,7 @@ export const locations = [
   // 25) SE_PROMONTORY
   {
     id: 'SE_PROMONTORY',
-    name: 'Wind-Swept Promontory',
+    name: 'Windy Promontory',
     description: 'A high, rocky outcrop.',
     x: 3,
     y: 3,
@@ -762,7 +762,237 @@ export const locations = [
       'Mosaic of colorful fish flit through crystal-clear water.',
       'A sense of abundance and vitality, though storms can make these waters perilous.'
     ]
-  }
+  },
+  {
+  id: 'CAVE_ENTRANCE',
+  name: "Gabriel's Cave",
+  description: "A hidden revolutionary's sanctuary carved into volcanic rock.",
+  x: 999,
+  y: 999,
+  color: '#333333',
+  type: 'interior',
+  validMoves: [], 
+  specimens: [],
+  npcs: ['gabriel_puig'],
+  boundaries: {},
+  discoveries: [
+    "A dark passage leads deeper into the rock, faintly lit by dripping candles.",
+    "You notice scattered pamphlets and scribbled manifestos in Spanish and Catalan."
+  ],
+  notableFeatures: [
+    "Volcanic walls glistening with condensation.",
+    "Rudimentary living arrangements—a bedroll and hidden stash of supplies."
+  ]
+},
+
+{
+  id: 'GOVERNORS_HOUSE_OFFICE',
+  name: 'GOVERNORS OFFICE',
+  description: "Lawson conducts the island’s sparse official business here.",
+  x: 900,  // Fake coords so these won't appear on the main island map
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['nicolas_lawson'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'A worn wooden desk covered with half-finished paperwork.'
+  ],
+  notableFeatures: [
+    'Maps pinned to the wall, marked with red ink around penal colony boundaries.',
+    'A faint smell of spilled ink and stale coffee.'
+  ]
+},
+{
+  id: 'GOVERNORS_HOUSE_PRIVATE',
+  name: 'PRIVATE QUARTERS',
+  description: "Lawson’s personal living space, surprisingly elegant with items from his travels.",
+  x: 901,
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['nicolas_lawson'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'A hidden drawer containing personal letters and trinkets from faraway places.'
+  ],
+  notableFeatures: [
+    'A plush armchair and small bookshelf with a handful of novels.',
+    'Curtains made from fine fabric, unusual in such a remote penal colony.'
+  ]
+},
+{
+  id: 'GOVERNORS_HOUSE_LIBRARY',
+  name: 'SMALL LIBRARY',
+  description: "Shelves lined with books on navigation, natural history, and colonial administration.",
+  x: 902,
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['nicolas_lawson'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'Most titles concern hydrography, law, and the latest scientific debates from Europe.'
+  ],
+  notableFeatures: [
+    'A large globe stands in the corner, well-worn from repeated use.',
+    'A few volumes have pressed flowers tucked between their pages.'
+  ]
+},
+{
+  id: 'GOVERNORS_HOUSE_DINING',
+  name: 'DINING ROOM',
+  description: "A modest table set with mismatched china. A half-empty bottle of rum beside a maritime chart.",
+  x: 903,
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['nicolas_lawson'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'A scrawled menu in Spanish and English suggests visits from passing sailors.'
+  ],
+  notableFeatures: [
+    'Squeaky wooden chairs that have seen better days.',
+    'Traces of a meal remain—fish bones and a stale crust of bread.'
+  ]
+},
+{
+  id: 'GOVERNORS_HOUSE',
+  name: 'ENTRANCE HALL',
+  description: "A modest foyer with colonial furnishings. Lawson often greets visitors here.",
+  x: 904,
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['nicolas_lawson'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'A small table holds calling cards and a dusty lamp.'
+  ],
+  notableFeatures: [
+    'A coatrack stands near the door, with a single well-worn cloak hanging.',
+    'The floor squeaks with each step, showing its age.'
+  ]
+},
+{
+  id: 'GOVERNORS_HOUSE_GARDEN',
+  name: 'REAR GARDEN',
+  description: "A small walled garden with exotic plants Lawson has collected from around the archipelago.",
+  x: 905,
+  y: 100,
+  color: '#c2b280',
+  type: 'interior',
+  validMoves: [], 
+  npcs: ['maria'],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'Mainland agriculural crops mostly, carefully tended, possibly an experimental project.'
+  ],
+  notableFeatures: [
+    'Vines climbing the walls, bearing strange blossoms unfamiliar to Darwin.',
+    'A faint trickle of water from a makeshift irrigation channel.'
+  ]
+},
+
+// === Patrick Watkins’s Cabin (1x1 interior) ===
+{
+  id: 'WATKINS_INTERIOR',
+  name: 'Watkins Cabin Interior',
+  description: "A crude one-room shelter built from driftwood and volcanic stone. Dried gourds and animal hides litter the dirt floor.",
+  x: 910,
+  y: 100,
+  color: '#2f2f2f',
+  type: 'interior',
+  validMoves: [],
+  npcs: [],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'A rough wooden crate lined with moldy rags, once Watkins’s makeshift bed.',
+  ],
+  notableFeatures: [
+    'A pungent odor of fermentation and unwashed humanity still lingers.',
+    'Dim light peeking through cracks between the driftwood planks.'
+  ]
+},
+
+{ 
+  id: 'MAIL_BARREL', 
+  name: "Mail Barrel", 
+  description: "A wooden barrel serving as a makeshift postal system for sailors passing through the islands. Mostly filled with sand and very dark inside.", 
+  x: 950, 
+  y: 100, 
+  color: '#8B4513', 
+  type: 'interior', 
+  validMoves: [], 
+  specimens: ["oldletter"],  // You could add a discoverable old letter here
+  npcs: [], 
+  boundaries: {}, 
+  discoveries: [
+    "Peering inside, you find a few tattered letters nestled in the sand, some dating back several years.",
+    "The barrel is surprisingly deep, with most of its volume filled with gritty sand."
+  ], 
+  notableFeatures: [
+    "A curious, faint smell of urine lingers in the stale air.",
+    "The wood of the barrel is warped and weathered by sea salt and tropical sun.",
+    "Faded script on one letter mentions a whaling ship lost near Chatham Island."
+  ] 
+},
+
+// === Whaler’s Hut (1x1 interior) ===
+{
+  id: 'WHALERS_HUT_INTERIOR',
+  name: 'HUT INTERIOR',
+  description: "A stone structure with a battered wooden roof. Broken barrel staves and scattered harpoon parts hint at its whaling history.",
+  x: 920,
+  y: 100,
+  color: '#6b6b6b',
+  type: 'interior',
+  validMoves: [],
+  npcs: [],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'Soot-blackened rocks form a rough firepit near the center.',
+  ],
+  notableFeatures: [
+    'A bitter draft seeps through gaps, carrying the scent of old brine.',
+    'Scratched tally marks on a plank—perhaps a crewman’s lonely record of days.'
+  ]
+},
+
+{
+  id: 'hms_beagle_interior',
+  name: "HMS Beagle (Below Decks)",
+  description: "Captain FitzRoy's survey vessel, cramped yet meticulously maintained.",
+  x: 997,
+  y: 999,
+  color: '#8fbc8f',
+  type: 'interior',
+  validMoves: [],
+  specimens: ["ship_logs"],
+  npcs: ['fitzroy'],
+  boundaries: {},
+  discoveries: [
+    "Barrels of ship's biscuits, crates of dried goods, and FitzRoy’s impeccable navigational charts."
+  ],
+  notableFeatures: [
+    "The faint smell of brine and tar permeates the narrow corridors.",
+    "A hammock strung up next to a microscope stand for your many specimens."
+  ]
+},
 
 ]; // end of locations array
 

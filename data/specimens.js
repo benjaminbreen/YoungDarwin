@@ -560,7 +560,7 @@ export const baseSpecimens = [
   // =========================
 
   {
-    id: 'greenTurtle',
+    id: 'greenturtle',
     name: 'Green Sea Turtle',
     latin: 'Chelonia mydas',
     ontology: 'Animal',
@@ -735,17 +735,16 @@ export const baseSpecimens = [
 
   {
     id: 'plicopurpura',
-    name: 'Plicopurpura patula',
+    name: 'Plicopurpura shell',
     latin: 'Plicopurpura patula',
     ontology: 'Animal',
     order: 'Gastropod',
     sub_order: 'Sea Snail',
-    description: 'A snail found in intertidal zones, with a thick shell sometimes stained with dark pigments.',
+    description: 'The empty shell of a snail found in intertidal zones. A common and uninteresting specimen.',
     details: [
       'Shell ridged, appearing robust to withstand wave impacts',
       'Clings to rocks just above the waterline, secreting a faint odor',
       'Sailors note a purple stain left on fingers if handled carelessly',
-      'Moves slowly, grazing on tiny encrustations of algae'
     ],
     habitat: 'beach, tidal pools, bay',
     collected: false,
@@ -764,17 +763,14 @@ export const baseSpecimens = [
 
   {
     id: 'neorapana',
-    name: 'Neorapana grandis',
+    name: 'Neorapana shell',
     latin: 'Neorapana grandis',
     ontology: 'Animal',
     order: 'Gastropod',
     sub_order: 'Sea Snail',
-    description: 'A robust marine snail with a thick shell, found on rocky shores in the Galápagos.',
+    description: 'Large shell that once protected a marine snail. A familiar and not particularly interesting specimen.',
     details: [
-      'Shell often coated with barnacles or seaweed growth',
-      'A strong operculum seals the snail inside when disturbed',
-      'Occasionally found in shallow tidepools or under rocks at low tide',
-      'Mottled coloration blending with wet stones'
+      'Mottled coloration blends in with wet stones'
     ],
     habitat: 'beach, tidal pools',
     collected: false,
@@ -782,14 +778,102 @@ export const baseSpecimens = [
     scientificValue: 5,
     hybrid_ease: 4,
     hybrid_temperature: 3,
-    danger: 2, // Sharp edges, can pinch if the snail closes rapidly
+    danger: 2, 
     timeofday: 'Diurnal',
     quote: '',
     image: '/specimens/neorapana_grandis.jpg',
     memoryText: '“Its shell is formidable, thick and encrusted, suggesting a life spent among harsh waves and opportunistic predators.”',
-    contents: 'Inside, one would find a muscular foot and traces of smaller mollusks or organic debris ingested by this snail.',
+    contents: 'Inside, one would find sand. This is an empty shell.',
     keywords: ['neorapana', 'grandis', 'gastropod', 'shell', 'marine']
   },
+
+  {
+  "id": "galapagospenguin",
+  "name": "Galápagos Penguin",
+  "latin": "Spheniscus mendiculus",
+  "ontology": "Animal",
+  "order": "Bird",
+  "sub_order": "Penguin",
+  "description": "The northernmost penguin species, thriving in cool currents along the rocky shores despite the tropical latitude.",
+  "details": [
+    "Small stature compared to Antarctic relatives",
+    "Black and white plumage with a distinctive band across the chest",
+    "Nests in crevices of lava rocks near the waterline",
+    "Remarkably agile underwater, chasing fish in swift bursts"
+  ],
+  "habitat": "bay",
+  "collected": false,
+  "observations": [],
+  "scientificValue": 7,
+  "hybrid_ease": 1,
+  "hybrid_temperature": 1,
+  "danger": 2,
+  "timeofday": "Diurnal",
+  "quote": "",
+  "image": "/specimens/galapagos_penguin.jpg",
+  "memoryText": "“I confess surprise in seeing these creatures, so reminiscent of the southern latitudes, happily bobbing along the equator.”",
+  "contents": "If opened, the stomach would reveal small fish, bits of crustaceans, and gritty salt residue.",
+  "keywords": ["penguin", "bird", "galapagos", "spheniscus", "marine", "equator"],
+  "emoji": "🐧"
+},
+{
+  "id": "shortearedowl",
+  "name": "Galápagos Short-eared Owl",
+  "latin": "Asio flammeus galapagoensis",
+  "ontology": "Animal",
+  "order": "Bird",
+  "sub_order": "Owl",
+  "description": "A stealthy hunter that has adapted to open arid landscapes, ambushing small birds, reptiles, or rodents.",
+  "details": [
+    "Mottled brown and buff feathers for camouflage",
+    "Short ear-tufts often lie flat, barely visible",
+    "Flight can be silent, skimming near the ground",
+    "Remarkably variable diet, even scavenging on carcasses"
+  ],
+  "habitat": "forest, camp",
+  "collected": false,
+  "observations": [],
+  "scientificValue": 6,
+  "hybrid_ease": 2,
+  "hybrid_temperature": 2,
+  "danger": 3,
+  "timeofday": "Nocturnal",
+  "quote": "",
+  "image": "/specimens/shorteared_owl.jpg",
+  "memoryText": "“Upon a silent wing it glided, all but invisible in the dusk, seizing a finch so quickly I scarcely had time to blink.”",
+  "contents": "Should it be dissected, pellets of fur, feathers, and small bone fragments lie within.",
+  "keywords": ["owl", "bird", "asio", "nocturnal", "raptor"],
+  "emoji": "🦉"
+},
+{
+  "id": "galapagosracer",
+  "name": "Galápagos Racer Snake",
+  "latin": "Pseudalsophis biserialis",
+  "ontology": "Animal",
+  "order": "Reptile",
+  "sub_order": "Snake",
+  "description": "A slender, mildly venomous snake known for its speed when hunting lava lizards and small rodents.",
+  "details": [
+    "Brownish or gray mottled scales, blending with volcanic rocks",
+    "Uncertain temperament—some appear shy, others more boldly investigative",
+    "Primarily diurnal, basking on lava outcrops before foraging",
+    "Delivers quick, targeted strikes at prey"
+  ],
+  "habitat": "lavaField",
+  "collected": false,
+  "observations": [],
+  "scientificValue": 6,
+  "hybrid_ease": 2,
+  "hybrid_temperature": 3,
+  "danger": 4,
+  "timeofday": "Diurnal",
+  "quote": "",
+  "image": "/specimens/galapagos_racer_snake.jpg",
+  "memoryText": "“Its darting movement across the black lava was a fleeting specter—difficult to catch sight of, yet undeniably present.”",
+  "contents": "Lizard scales, rodent fur, or occasional small bird remains may be discovered in its digestive tract.",
+  "keywords": ["galapagos racer", "snake", "reptile", "pseudalsophis", "lava", "fast"],
+  "emoji": "🐍"
+},
 
   // Additional "Outside the Box" Specimens
 
@@ -823,13 +907,42 @@ export const baseSpecimens = [
   keywords: ['document', 'puig', 'revolution', 'saint-simon', 'bolivarian', 'ecuador']
 },
 
+{
+  id: 'whalersletter',
+  name: 'Whaler\'s Letter',
+  latin: 'Epistola marinarii',
+  ontology: 'Document',
+  order: 'Correspondence',
+  sub_order: 'Personal Letter',
+  description: 'A sealed letter addressed to a young woman in Nantucket, penned by a whaling captain who doubts he will return home.',
+  details: [
+    'The paper is waterproofed with beeswax, folded intricately to protect the contents',
+    'Elegant script that belies the rough hands that wrote it',
+    'Several passages suggest the writer fears his own mortality',
+    'A small sketch of a sperm whale adorns the corner of the final page'
+  ],
+  habitat: 'mail barrel',
+  collected: false,
+  observations: [],
+  scientificValue: 2,
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 1,
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/whalersletter.jpg',
+  memoryText: '"These letters—each a fragile tether between men at sea and those who wait for them. How many went unanswered, I wonder?"',
+  contents: 'Inside are three pages of heartfelt prose to a woman named Sarah, describing Pacific islands, whale hunts, and profound loneliness.',
+  keywords: ['letter', 'correspondence', 'whaler', 'mail', 'document', 'nantucket', 'personal']
+},
+
 // 2) Memoirs of a Utopian
 {
   id: 'memoirsofautopian',
   name: 'Memoirs of a Utopian',
   latin: 'Memorabilia Vitae Puig',
   ontology: 'Document',
-  order: 'Personal Account',
+  order: 'Political',
   sub_order: 'Autobiography',
   description: 'Gabriel Puig’s personal writings, detailing his life from Barcelona to Boston to the Galápagos penal colony.',
   details: [
@@ -859,7 +972,7 @@ export const baseSpecimens = [
   name: 'Governor’s Letter',
   latin: 'Epistola Vilamil',
   ontology: 'Document',
-  order: 'Correspondence',
+  order: 'Political',
   sub_order: 'Official Letter',
   description: 'A terse missive from Governor Vilamil to Vice-Governor Nicholas Lawson, criticizing his failures.',
   details: [
@@ -908,7 +1021,7 @@ export const baseSpecimens = [
   quote: '',
   image: '/specimens/rumflask.jpg',
   memoryText: '“Gods alive Syms... what will I do with you?”',
-  contents: 'Inside is a stale, lingering drop of strong liquor, giving off a pungent whiff of molasses and oak cask.',
+  contents: 'Inside is an extermely potent South American style rum, enough to make Darwin quite drunk.',
   keywords: ['rum', 'flask', 'beagle']
 },
 
@@ -973,20 +1086,164 @@ export const baseSpecimens = [
 },
 
 
+{
+  id: 'scrimshawwhaletooth',
+  name: 'Scrimshaw Whale Tooth',
+  latin: 'Dentis Physeteris Incisus',
+  ontology: 'Object',
+  order: 'Maritime Artifact',
+  sub_order: 'Scrimshaw',
+  description: 'A polished sperm whale tooth etched with nautical scenes, likely done by a bored sailor aboard a whaling vessel.',
+  details: [
+    'Fine engravings depict ships and harpoons',
+    'Yellowish ivory color with subtle cracks from age',
+    'Edges smoothed by handling, perhaps a cherished keepsake',
+    'Hints of brine and stale tobacco odor cling to the porous surface'
+  ],
+  habitat: 'shipwreck',
+  collected: false,
+  observations: [],
+  scientificValue: 2, // Interesting cultural artifact, not biologically crucial
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 1, // Generally harmless object
+  timeofday: 'Any',
+  quote: '',
+  image: '/specimens/scrimshaw_whale_tooth.jpg',
+  memoryText: '“Sailors often whittled their stories into bone, so each carved line holds a small piece of their watery world.”',
+  contents: 'If fractured, layers of dense ivory reveal an inner grain once part of a mighty whale’s jaw.',
+  keywords: ['scrimshaw', 'whale tooth', 'ivory', 'artifact', 'maritime']
+},
+
+{
+  id: 'watkinswill',
+  name: 'Last Will and Testament of Patrick Watkins',
+  latin: 'Testamentum Patricii Watkins',
+  ontology: 'Document',
+  order: 'Legal Document',
+  sub_order: 'Handwritten Will',
+  description: 'A rum-stained parchment containing the frenzied final directives of Patrick Watkins, the half-mad Irish castaway said to be Floreana’s earliest settler.',
+  details: [
+    'Barely legible scrawl, blotched with suspicious dark stains',
+    'Mentions a shack, a patch of tobacco, and rumored “hidden gold” inland',
+    'Riddled with profanities and curses upon any who thwart his desires',
+    'Believed to have been scrawled in a final rum-induced delirium'
+  ],
+  habitat: 'camp',
+  collected: false,
+  observations: [],
+  scientificValue: 2, // Historical curiosity, but not scientific
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 4, // Potentially inflammatory or legally risky content
+  timeofday: 'Any',
+  quote: '',
+  image: '/specimens/watkinswill.jpg',
+  memoryText: '“They say Watkins ranted at the surf, cursing sailors and governors alike. His legacy rests in these torn, raging lines.”',
+  contents: 'Broken sentences bequeath a ramshackle hut, empty rum bottles, and dire threats against would-be claimants.',
+  keywords: ['will', 'document', 'patrick watkins', 'castaway', 'history']
+},
+
+{
+  id: 'meteoriron',
+  name: 'Meteoric Iron Fragment',
+  latin: 'Ferrum Meteoriticum',
+  ontology: 'Object',
+  order: 'Cosmic Debris',
+  sub_order: 'Meteorite',
+  description: 'A dark, metallic rock fragment pitted by its fiery descent, bearing cosmic origins beyond this archipelago.',
+  details: [
+    'Considerably heavier than typical island stones',
+    'Surface has a burned, fusion-crust look with faint regmaglypt “thumbprints”',
+    'Slightly magnetic if tested with a metal instrument',
+    'Local sailors whisper it grants luck if kept aboard, but ill fate if left behind'
+  ],
+  habitat: 'lavaField',
+  collected: false,
+  observations: [],
+  scientificValue: 9, // Rare cosmic sample
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 1, // No inherent harm, but prized
+  timeofday: 'Any',
+  quote: '',
+  image: '/specimens/meteor_iron_fragment.jpg',
+  memoryText: '“To hold stardust in one’s hand—an echo of the heavens, grounded here among black volcanic rubble.”',
+  contents: 'Iron-nickel alloy core with tiny sulfide flecks, reminiscent of celestial forging.',
+  keywords: ['meteorite', 'iron', 'nickel', 'cosmic', 'space']
+},
+
+{
+  id: 'solidifiedsulphur',
+  name: 'Solidified Sulphur Deposit',
+  latin: 'Sulphuris Depositum',
+  ontology: 'Object',
+  order: 'Volcanic Curio',
+  sub_order: 'Mineral Formation',
+  description: 'A strange sulphur outgrowth shaped by volcanic gasses, bright yellow with a brittle, crystal-like texture.',
+  details: [
+    'Strong odor of rotten eggs when warmed by direct sun',
+    'Incredibly fragile, leaving powdery residue on the skin',
+    'Formed by sulphurous vapors condensing near fissures',
+    'Stains fingers a pale lemon hue on prolonged contact'
+  ],
+  habitat: 'lavaField',
+  collected: false,
+  observations: [],
+  scientificValue: 7, // Ties to volcanic activity
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 2, // Sulphur dust can irritate eyes or lungs
+  timeofday: 'Any',
+  quote: '',
+  image: '/specimens/solidified_sulphur.jpg',
+  memoryText: '“Nature conjures these brilliant mounds from toxic fumes—the artistry and peril of volcanic life.”',
+  contents: 'Layered sulfur crystals, highly prone to fracturing, with small pockets of trapped volcanic gas.',
+  keywords: ['sulphur', 'volcanic', 'mineral', 'yellow', 'deposit']
+},
+
+{
+  id: 'fennecscurvyremedy',
+  name: 'Fennec’s Scurvy Remedy',
+  latin: 'Medicamentum Anti-Scorbuticum',
+  ontology: 'Object',
+  order: 'Medicine Bottle',
+  sub_order: 'Folk Cure',
+  description: 'A small glass vial labeled “Fennec’s Tonic for Scurvy,” the viscous contents dried to a dark resin.',
+  details: [
+    'Wax-sealed cork stuck fast, slight herbal odor escapes if shaken',
+    'Cartoonish fox (“Fennec”) depicted touting miraculous healing claims',
+    'Instructions advise mixing with rum and frequent prayers',
+    'Fine cracks run along the amber glass from repeated temperature changes'
+  ],
+  habitat: 'ship',
+  collected: false,
+  observations: [],
+  scientificValue: 2, // A quack remedy, interesting cultural item
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 10, // highly toxic
+  timeofday: 'Any',
+  quote: '',
+  image: '/specimens/fennec_scurvy_remedy.jpg',
+  memoryText: '“A questionable elixir promising swift cures. Perhaps it offered hope to scurvy-ridden souls, if not real relief.”',
+  contents: 'Sticky residue, likely a mix of citrus peel extract, odd herbs, and unknown binders.',
+  keywords: ['medicine', 'bottle', 'scurvy', 'folk remedy', 'quackery']
+},
+
 // 8) Murdered Captain’s Skull (Outside the Box #2)
 {
   id: 'captainsskull',
   name: 'Murdered Captain’s Skull',
   latin: 'Calvaria Capitanei Interfecti',
   ontology: 'Object',
-  order: 'Human Remains',
+  order: 'Personal Item',
   sub_order: 'Skull',
   description: 'A sun-bleached human skull found among the bushes near a secluded salt-lake.',
   details: [
     'Yellowed bone, with a jagged fracture near the temple',
-    'Believed to be the remains of a captain slain by mutinous sailors',
-    'Partially hidden by undergrowth, discovered by chance',
-    'A grim testament to violent deeds in a remote land'
+    'There is a half-rotten golden epaullette with threads of blue cloth attached to it. The uniform of a naval sea captain...',
+    'Partially hidden amid a pile of driftwood and sand',
   ],
   habitat: 'shipwreck',
   collected: false,

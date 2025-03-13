@@ -24,12 +24,17 @@ import NearbySpecimenDetail from './NearbySpecimenDetail';
 import EnhancedEventHistory from './EnhancedEventHistory';
 import EventHistoryDebug from './EventHistoryDebug';
 import buildLLMPromptContext from '../utils/generateLLMContext';
-
+import HybridGenerator from './HybridGenerator';
+import HybridsDebug from './HybridsDebug';
 
 // Import the new grid-based location system
 import { useLocationSystem } from '../utils/locationHook';
 import EnhancedMapBox from './EnhancedMapBox';
 import { useMemo } from 'react';
+import HybridSpecimenImage from './HybridSpecimenImage';
+import { getSpecimenIcon } from '../utils/specimenUtils';
+
+
 
 function GameContainer() {
   // Pull all needed functions and state from the game store
@@ -57,7 +62,8 @@ function GameContainer() {
     currentNPC,
     setCurrentNPC,
     daysPassed,
-    gameTime
+    gameTime,
+     setSpecimenList
   } = useGameStore();
   
   // Use the location hook for grid-based movement
@@ -76,22 +82,24 @@ function GameContainer() {
   exitInterior,        
   moveInInterior        
  } = useLocationSystem((locationInfo) => {
+
+   // If we're entering an interior, don't trigger another location update
+  if (isInInterior) return;
+
+const specimen = specimenList?.find(s => s.id === specifiedId);
+
   // This callback runs when location changes
   const currentCell = getCellByCoordinates(locationInfo.position.x, locationInfo.position.y);
   if (currentCell && currentCell.type) {
     // Find all specimens that can exist in this habitat type
-    const habitatSpecimens = specimenList.filter(specimen => {
-      if (!specimen.habitat) return false;
-      const habitats = specimen.habitat.split(', ');
-      return habitats.includes(currentCell.type);
-    });
-    
-    // Get the specimen IDs
-    const specimenIds = habitatSpecimens.map(specimen => specimen.id);
-    setNearbySpecimenIds(specimenIds);
-  } else {
-    setNearbySpecimenIds([]);
+// Just get specimen IDs that match this habitat type
+const specimenIds = specimenList
+  .filter(s => s.habitat && s.habitat.split(', ').includes(currentCell.type))
+  .map(s => s.id);
+
+setNearbySpecimenIds(specimenIds);
   }
+  
   
   // Clear current NPC when location changes
   if (currentNPC) {
@@ -122,6 +130,71 @@ const handleNPCsOnMovement = () => {
     }
   }
 };
+
+const handleHybriditySelection = (mode) => {
+  setHybridityMode(mode);
+  
+  // If selecting 'none', clear any previously generated hybrids
+  if (mode === 'none') {
+    setGeneratedHybrids([]);
+    setHybridsEnabled(false);
+  }
+};
+
+
+const handleHybridsGenerated = (generatedHybrids) => {
+  console.log("Hybrids generated and received in GameContainer:", generatedHybrids);
+  setHybridsEnabled(true);
+  setGeneratedHybrids(generatedHybrids);
+  
+  // Close the hybrid options panel
+  setShowHybridOptions(false);
+
+  
+  // Check if hybrids already have locations
+  const hybridsWithLocations = generatedHybrids.map(hybrid => {
+    // If the hybrid doesn't have a location, assign a random one
+    if (!hybrid.location) {
+      return {
+        ...hybrid,
+        // Assign random location that will likely be on the map
+        location: {
+          x: Math.floor(Math.random() * 4),
+          y: Math.floor(Math.random() * 4)
+        }
+      };
+    }
+    return hybrid;
+  });
+  
+  // Make sure all hybrids have the isHybrid flag set
+  const verifiedHybrids = hybridsWithLocations.map(hybrid => ({
+    ...hybrid,
+    isHybrid: true
+  }));
+  
+  // Update the specimen list with the new hybrids
+  const updatedSpecimenList = [...specimenList, ...verifiedHybrids];
+  setSpecimenList(updatedSpecimenList);
+  
+  // Set state to show hybrids are enabled
+  setHybridsEnabled(true);
+  setGeneratedHybrids(verifiedHybrids);
+  
+  // Close the hybrid options panel
+  setShowHybridOptions(false);
+  
+  // Log the hybrids for debugging
+  console.log("Updated specimen list with hybrids:", 
+    updatedSpecimenList.filter(s => s.isHybrid).map(s => ({
+      id: s.id,
+      name: s.name,
+      habitat: s.habitat,
+      location: s.location
+    }))
+  );
+};
+
   
   // Local state
   const [gameInitialized, setGameInitialized] = useState(false);
@@ -164,7 +237,11 @@ const [encounteredNPCs, setEncounteredNPCs] = useState([]);
 const [showFatigueWarning, setShowFatigueWarning] = useState(false);
 const [showRestButton, setShowRestButton] = useState(false);
 const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
-
+const [showHybridOptions, setShowHybridOptions] = useState(false);
+const [hybridsEnabled, setHybridsEnabled] = useState(false);
+const [generatedHybrids, setGeneratedHybrids] = useState([]);
+const [hybridityMode, setHybridityMode] = useState('none'); // 'none', 'mild', or 'extreme'
+const [isMovingViaMap, setIsMovingViaMap] = useState(false);
 
 
   // Initialize the game
@@ -209,6 +286,7 @@ const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
   
 
 
+
 // Detection of specimens and NPCs in narrative text
 useEffect(() => {
   if (narrativeText) {
@@ -240,32 +318,22 @@ useEffect(() => {
         }
       }
     }
+const npcStatusMatch = narrativeText.match(/\[NPC_STATUS:\s*(.*?)\]/);
+if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
+  console.log("Dismissing NPC based on [NPC_STATUS: dismissed]");
+  setCurrentNPC(null);
+  setVisibleNPCs([]);
+}
 
-    // Check for NPC dismissal
-    const npcStatusMatch = narrativeText.match(/\[NPC_STATUS:\s*(.*?)\]/);
-    if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
-      // Clear current NPC and visible NPCs
-      setCurrentNPC(null);
-      setVisibleNPCs([]);
-    }
-    
-    // Clear current NPC when not mentioned in narrative
-    if (currentNPC) {
-      const npcObject = npcs.find(n => n.id === currentNPC);
-      if (npcObject) {
-        const nameRegex = new RegExp(`\\b${npcObject.name}\\b`, 'i');
-        const firstNameRegex = new RegExp(`\\b${npcObject.name.split(' ')[0]}\\b`, 'i');
-        
-        const nameExists = nameRegex.test(narrativeText);
-        const firstNameExists = firstNameRegex.test(narrativeText);
-        
-        // If NPC is no longer in the narrative, clear the currentNPC
-        if (!nameExists && !firstNameExists) {
-          console.log("Clearing currentNPC as they're no longer in narrative");
-          setCurrentNPC(null);
-        }
-      }
-    }
+// 2) Optionally, check for simple “departure” phrases.
+//    This is only if you want to parse text for “He left” or “He walked away.” 
+//    If you prefer to rely solely on the [NPC_STATUS] marker, skip this.
+const departureRegex = /(left|walked away|departed|farewell)/i;
+if (departureRegex.test(narrativeText)) {
+  console.log("Dismissing NPC based on a departure phrase in the text");
+  setCurrentNPC(null);
+  setVisibleNPCs([]);
+}
     
     // Only detect NPCs if we don't have an active NPC conversation
     if (!currentNPC) {
@@ -288,7 +356,26 @@ useEffect(() => {
 
 }, [narrativeText, currentNPC, lastUserInput, specimenList, gameTime]);
 
+const checkHybridsInLocation = (locationId) => {
+  console.log(`Checking for hybrids in location: ${locationId}`);
 
+    const location = islandGrid.find(cell => cell.id === locationId);
+  if (!location) {
+    console.log(`Location ${locationId} not found in islandGrid`);
+    return;
+  }
+
+    const hybridsForLocation = specimenList.filter(s => 
+    s?.isHybrid && 
+    s.habitat && 
+    (s.habitat.includes(location.type) || true) // true to see all hybrids for debugging
+  );
+  
+  console.log(`Found ${hybridsForLocation.length} hybrids for location type ${location.type}:`,
+    hybridsForLocation.map(h => h.name));
+  
+  return hybridsForLocation;
+};
 
 // NPC clearing
 useEffect(() => {
@@ -361,11 +448,12 @@ const getNPCsForCurrentLocationAndTime = () => {
   if (currentLocation === 'C_NORTH' && currentHour >= 10 && currentHour < 17) {
     availableNPCs.push('maria');
   }
+
+   // Maria Yupanqui: at governors house other times
+  if (currentLocation === 'GOVERNORS_HOUSE_GARDEN' && currentHour >= 18 && currentHour < 9) {
+    availableNPCs.push('maria');
+  }
   
-  // Nicolas Lawson: at SETTLEMENT from 6am to 8pm - commented out to keep him indoors
-  // if (currentLocation === 'SETTLEMENT' && currentHour >= 6 && currentHour < 20) {
-  //  availableNPCs.push('nicolas_lawson');
- // }
   
   // Lascar Joe: at HMS Beagle from 6am to 1pm, at N_OUTCROP from 1pm to 6am
   if ((currentLocation === 'BEAGLE' && currentHour >= 6 && currentHour < 13) || 
@@ -387,24 +475,6 @@ const getNPCsForCurrentLocationAndTime = () => {
   return availableNPCs;
 };
 
-// Utility function to detect NPCs in narrative text (as fallback)
-const detectNPCsInNarrative = (text) => {
-  if (!text) return [];
-  const npcMatches = [];
-  
-  npcs.forEach(npc => {
-    const fullNameRegex = new RegExp(`\\b${npc.name}\\b`, 'i');
-    const firstNameRegex = new RegExp(`\\b${npc.name.split(' ')[0]}\\b`, 'i');
-    
-    if (fullNameRegex.test(text) || firstNameRegex.test(text)) {
-      if (!npcMatches.includes(npc.id)) {
-        npcMatches.push(npc.id);
-      }
-    }
-  });
-  
-  return npcMatches;
-};
 
 // Handle NPC interaction
 const handleTalkToNPC = (npcId) => {
@@ -460,6 +530,45 @@ const handleEnterCave = () => {
     sendToLLM(result.message + " The cave is dimly lit by a few candles. As your eyes adjust to the darkness, you make out the silhouette of a man sitting at a makeshift desk covered in papers.");
   }
 };
+
+// Add this useEffect after your other useEffects
+useEffect(() => {
+  // This runs when hybrids are enabled to ensure they're properly integrated
+  if (hybridsEnabled && generatedHybrids.length > 0) {
+    console.log("Verifying hybrids in specimen list...");
+    
+    // Find hybrids in the specimen list
+    const hybridsInList = specimenList.filter(s => s?.isHybrid);
+    console.log(`Found ${hybridsInList.length} hybrids in specimen list`);
+    
+    // Check if all hybrids have locations
+    const hybridsWithoutLocations = hybridsInList.filter(
+      s => !s.location || (!s.location.x && !s.location.y)
+    );
+    
+    // If any hybrids are missing locations, add them
+    if (hybridsWithoutLocations.length > 0) {
+      console.log(`Found ${hybridsWithoutLocations.length} hybrids without locations, fixing...`);
+      
+      const updatedList = specimenList.map(specimen => {
+        if (specimen?.isHybrid && (!specimen.location || (!specimen.location.x && !specimen.location.y))) {
+          return {
+            ...specimen,
+            location: {
+              x: Math.floor(Math.random() * 4),
+              y: Math.floor(Math.random() * 4)
+            }
+          };
+        }
+        return specimen;
+      });
+      
+      setSpecimenList(updatedList);
+    }
+  }
+}, [hybridsEnabled, generatedHybrids, specimenList]);
+
+
 
   // Collection popup handlers
 const handleOpenCollectionPopup = (specimenId) => {
@@ -649,7 +758,7 @@ const handlePassOut = () => {
   // Get list of NPCs who could find Darwin
   const possibleRescuers = [
     { id: 'syms_covington', name: 'Syms Covington', location: 'POST_OFFICE_BAY', description: "You remember little after your collapse. Syms must have followed you and found you unconscious - he's dragged you back to the ship. 'Blasted fool,' he mutters, handing you water. 'What would the Captain say if I'd lost ye?'" },
-    { id: 'maria_yupanqui', name: 'María Yupanqui', location: 'SETTLEMENT', description: "You wake to the smell of unfamiliar herbs steeping in hot water. María Yupanqui sits nearby, mixing a poultice. 'The island takes those who don't respect its dangers,' she says softly. 'Drink this. It will restore your strength.'" },
+    { id: 'maria', name: 'María Yupanqui', location: 'GOVERNORS_HOUSE_GARDEN', description: "You wake to the smell of unfamiliar herbs steeping in hot water. María Yupanqui sits nearby, mixing a poultice. 'The island takes those who don't respect its dangers,' she says softly. 'Drink this. It will restore your strength.'" },
     { id: 'gabriel_puig', name: 'Gabriel Puig', location: 'E_MID', description: "You wake in a dim cave, a revolutionary's hideout. Gabriel Puig eyes you suspiciously. 'I found you half-dead. A British naturalist shouldn't die from simple exhaustion,' he says, almost disappointed. 'It would be too... ordinary.'" },
     { id: 'lascar_joe', name: 'Lascar Joe', location: 'NW_SHORE', description: "You wake on black sand, the hull of a small boat providing shade. Lascar Joe sits silently nearby, mending a net. He nods when he sees you stir. 'Man must know his limits,' he says simply, offering a waterskin." },
     { id: 'nicolas_lawson', name: 'Nicolás Lawson', location: 'SETTLEMENT', description: "You wake in an unfamiliar bed. Vice-Governor Lawson stands at a desk reviewing papers. 'Ah, the naturalist lives. My men found you sprawled like a shipwreck victim. The islands demand respect, Mr. Darwin. Even from men of science.'" }
@@ -860,6 +969,7 @@ const handleSwitchPOV = async (prompt) => {
           const habitats = spec.habitat.split(', ');
           return habitats.includes(newCell.type);
         });
+
         setNearbySpecimenIds(habitatSpecimens.map(s => s.id));
       } else {
         setNearbySpecimenIds([]);
@@ -878,8 +988,12 @@ const handleSwitchPOV = async (prompt) => {
 const handleInteriorEntry = (interiorType) => {
   // Get current location
   const currentLocation = getCurrentLocation();
-  
   if (!currentLocation) return;
+
+  if (isInInterior && interiorType === interiorType) {
+    console.log("Already in this interior, skipping transition");
+    return;
+  }
   
   // Different entry logic for each interior type
   switch (interiorType) {
@@ -912,7 +1026,7 @@ const handleInteriorEntry = (interiorType) => {
       
       if (beagleResult.success) {
         setVisibleNPCs(['fitzroy']);
-        sendToLLM(beagleResult.message + " The wooden deck creaks beneath your feet. Sailors bustle about, attending to their duties.");
+      
       }
       break;
       
@@ -924,13 +1038,12 @@ const handleInteriorEntry = (interiorType) => {
       }
       
       // Enter the Governor's house
-      const houseResult = enterInterior('governors_house', { x: 0, y: 0 }); // Start at entrance
-      
-      if (houseResult.success) {
-        setVisibleNPCs(['nicolas_lawson']);
-        sendToLLM(houseResult.message + " You step inside the Governor's modest but well-kept residence.");
-      }
-      break;
+     const houseResult = enterInterior('governors_house', { x: 1, y: 1 });
+if (houseResult.success) {
+  setVisibleNPCs(['nicolas_lawson']);
+  
+}
+      break;    
       
     default:
       sendToLLM("There's nothing to enter here.");
@@ -1041,23 +1154,26 @@ if (interiorType) {
 
   // Map location fast travel
 const handleMapLocationClick = (locationIdOrDirection) => {
-  console.log(`Player clicked: ${locationIdOrDirection}`);
+  // Set the movement flag (KEEP THIS LINE)
+  setIsMovingViaMap(true);
 
-  // Call moveToLocation directly for location IDs
-  if (!['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'].includes(locationIdOrDirection)) {
-    const result = moveToLocation(locationIdOrDirection);
-   
-    
+  console.log(`Player clicked: ${locationIdOrDirection}`);
+  
+  // Check if this is an interior location
+  const interiorIDs = ['cave', 'hms_beagle', 'governors_house', 'watkins_cabin', 'whalers_hut'];
+  if (interiorIDs.includes(locationIdOrDirection)) {
+    handleInteriorEntry(locationIdOrDirection);
+    return; // Stop further processing
   }
   
-  // Special case for expand button
+  // Handle the expand button specially
   if (locationIdOrDirection === 'expand') {
-    return; // The EnhancedMapBox component will handle expansion internally
+    return; // The EnhancedMapBox component handles expansion internally
   }
   
   let moveResult;
   
-  // Check if this is a cardinal direction (N, S, E, W, etc.)
+  // Check if this is a cardinal direction
   if (['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'].includes(locationIdOrDirection)) {
     // Convert direction to handleMove format
     const directionMap = {
@@ -1074,41 +1190,50 @@ const handleMapLocationClick = (locationIdOrDirection) => {
     moveResult = handleMove(directionMap[locationIdOrDirection]);
   } else {
     // Otherwise treat as a location ID
-    moveResult = useGameStore.getState().moveToLocation(locationIdOrDirection);
-    
-    // Log to confirm the state update
-    console.log("After moveToLocation, current location ID:", useGameStore.getState().currentLocationId);
+    moveResult = moveToLocation(locationIdOrDirection);
+    console.log("After moveToLocation, result:", moveResult);
   }
 
-handleNPCsOnMovement();
-  // After successfully moving to a new location, update nearby specimens context
-if (moveResult && moveResult.success) {
-  sendToLLM(moveResult.message);
+  // Handle any NPC changes
+  handleNPCsOnMovement();
   
-  // Update fatigue based on movement
-  if (moveResult.fatigueIncrease) {
-    updateMoodAndFatigue(null, fatigue + moveResult.fatigueIncrease);
-  }
-  
-  // Get the new cell and update nearby specimens
-  const newCell = getCellByCoordinates(moveResult.newPosition.x, moveResult.newPosition.y);
-  if (newCell && newCell.type) {
-    // Find all specimens that can exist in this habitat type
-    const habitatSpecimens = specimenList.filter(specimen => {
-      const habitats = specimen.habitat.split(', ');
-      return habitats.includes(newCell.type);
-    });
+  // After successfully moving to a new location, update the game state
+  if (moveResult && moveResult.success) {
+    // IMPORTANT: Generate a narrative for the movement
+    // We'll now directly use sendToLLM to ensure narrative is updated
+    sendToLLM(`You traveled to ${moveResult.newLocationName || getCurrentLocation().name}. ${moveResult.message || ''}`);
     
-    // Update nearby specimens state
-    setNearbySpecimenIds(habitatSpecimens.map(specimen => specimen.id));
-  }
-  
-  // Update suggestions based on new location
+    // Update fatigue based on movement
+    if (moveResult.fatigueIncrease) {
+      updateMoodAndFatigue(null, fatigue + moveResult.fatigueIncrease);
+    }
+    
+    // Update nearby specimens context
+    const newCell = getCellByCoordinates(
+      moveResult.newPosition ? moveResult.newPosition.x : playerPosition.x,
+      moveResult.newPosition ? moveResult.newPosition.y : playerPosition.y
+    );
+    
+    if (newCell && newCell.type) {
+      // Find specimens for this habitat type
+      const habitatSpecimens = specimenList.filter(specimen => {
+        const habitats = specimen.habitat.split(', ');
+        return habitats.includes(newCell.type);
+      });
+      
+      // Update nearby specimens state
+      setNearbySpecimenIds(habitatSpecimens.map(specimen => specimen.id));
+    }
+    
+    // Update suggestions based on new location
     updateNextStepSuggestions();
   } else if (moveResult) {
-    // Show failure message
-    sendToLLM(moveResult.message);
+    // Show failure message for failed movement
+    sendToLLM(moveResult.message || "You cannot travel there.");
   }
+  
+  // Reset the movement flag after a delay
+  setTimeout(() => setIsMovingViaMap(false), 500);
 };
 
   
@@ -1121,18 +1246,21 @@ if (moveResult && moveResult.success) {
     try {
       // Prepare context for Darwin's memory
       const currentLocation = getCurrentLocation();
-      const contextData = {
-        location: currentLocation?.name || 'Unknown',
-        time: formatGameTime(),
-        day: daysPassed,
-        fatigue: fatigue,
-        mood: darwinMood,
-        currentSpecimen: currentSpecimen?.name || "None",
-        collectedSpecimens: inventory.map(item => item.name).join(", ")
-      };
+
+       const contextData = {
+      location: currentLocation?.name || 'Unknown',
+      time: formatGameTime(),
+      day: daysPassed,
+      fatigue: fatigue,
+      mood: darwinMood,
+      currentSpecimen: currentSpecimen?.name || "None",
+      collectedSpecimens: inventory.map(item => item.name).join(", "),
+      narrativeText: narrativeText 
+    };
+    
       
       // Memory prompt
-      const memoryPrompt = `Recall a memory related to your current situation or observations in ${contextData.location}.`;
+      const memoryPrompt = `Recall a self-loathing, elliptical, cryptic, or confused memory SPECIFICALLY related to your current situation, dilemma, or observations in ${contextData.location}. The memory should directly relate to the most eventful or important thing that has just occurred.`;
       
       // Call API
       const response = await fetch('/api/generate', {
@@ -1207,17 +1335,30 @@ if (moveResult && moveResult.success) {
     
    
  
-  // Extract primary collectible for the collection button
-const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
-if (collectibleMatches && collectibleMatches.length > 0) {
-  const primaryCollectible = collectibleMatches[0]
-    .replace('[COLLECTIBLE:', '')
-    .replace(']', '')
-    .trim();
-  
-  // obsolete code, remove - generate.js now asks LLM to select primary
-  setPrimaryCollectible(primaryCollectible); 
-}
+  // Extract primary collectible for the collection button with improved hybrid handling
+  const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
+  if (collectibleMatches && collectibleMatches.length > 0) {
+    const primaryCollectible = collectibleMatches[0]
+      .replace('[COLLECTIBLE:', '')
+      .replace(']', '')
+      .trim();
+    
+    // Check if this is a hybrid specimen ID
+    const hybridSpecimen = specimenList.find(s => 
+      s.isHybrid && (
+        s.id.toLowerCase() === primaryCollectible.toLowerCase() ||
+        s.name.toLowerCase().includes(primaryCollectible.toLowerCase())
+      )
+    );
+    
+    if (hybridSpecimen) {
+      console.log(`Found hybrid specimen as collectible: ${hybridSpecimen.name} (${hybridSpecimen.id})`);
+      setPrimaryCollectible(hybridSpecimen.id);
+    } else {
+      // Regular specimen handling
+      setPrimaryCollectible(primaryCollectible);
+    }
+  }
     
   // Process NPC markers
   const npcMatch = response.match(/\[NPC:\s*(.*?)\]/);
@@ -1254,7 +1395,7 @@ if (collectibleMatches && collectibleMatches.length > 0) {
   }
     
     // Extract potential next steps
-   // Updated code for parseLLMResponse in GameContainer.jsx:
+
 const stepsSection = response.match(/NEXTSTEPS:([\s\S]*?)(?=\[|$)/);
     
 if (stepsSection && stepsSection[1]) {
@@ -1295,6 +1436,11 @@ if (stepsSection && stepsSection[1]) {
        .replace(/\[NPC:.*?\]/g, '')
 
       .trim();
+
+          // Save the latest narrative in a cookie for the historian critique
+    if (typeof document !== 'undefined') {
+      document.cookie = `lastNarrativeText=${encodeURIComponent(cleanedText)}; path=/; max-age=3600`;
+    }
     
     return cleanedText;
   };
@@ -1303,7 +1449,6 @@ if (stepsSection && stepsSection[1]) {
 
 // Send request to LLM API
 // Optimized sendToLLM function for GameContainer.jsx
-// Replace your existing sendToLLM function with this one
 
 const sendToLLM = async (userInput) => {
   setIsLoading(true);
@@ -1318,9 +1463,13 @@ const sendToLLM = async (userInput) => {
     // Get all NPCs that should be at this location
     const locationNPCs = getNPCsForCurrentLocationAndTime();
     
-    // Get names for all nearby specimens
+    // Get names for all nearby specimens INCLUDING HYBRIDS
     const nearbySpecimenNames = nearbySpecimenIds.map(id => {
       const specimen = specimenList.find(s => s.id === id);
+      // For hybrids, include both the ID and name for better context
+      if (specimen?.isHybrid) {
+        return `${specimen.id} (hybrid: ${specimen.name})`;
+      }
       return specimen ? specimen.id : id;
     }).join(", ");
 
@@ -1342,7 +1491,7 @@ const sendToLLM = async (userInput) => {
       primaryCollectible: primaryCollectible || 'None',
       contextSummary: contextSummary
     };
-    
+        
     // Add to history
  addToGameHistory('user', userInput);
     const history = getRecentHistory().slice(-5);
@@ -1449,45 +1598,123 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   
   // Title screen
   if (!gameStarted) {
-    return (
-      <div 
-        className="flex flex-col items-center justify-center min-h-screen p-4 relative overflow-hidden"
-        style={{
-          backgroundImage: 'url("/splashpage.jpg")',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+  return (
+    <div 
+      className="flex flex-col items-center justify-center min-h-screen p-3 relative overflow-hidden"
+      style={{
+        backgroundImage: 'url("/splashpage.jpg")',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundColor: 'rgb(var(--darwin-primary))',
+        backgroundBlendMode: 'soft-light'
+      }}
+    >
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-100">
+        <div className="w-full h-full max-w-3xl max-h-3xl" style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='45' fill='none' stroke='%238B5A2B' stroke-width='1'/%3E%3Ccircle cx='100' cy='100' r='5' fill='none' stroke='%238B5A2B' stroke-width='0.5'/%3E%3Cpath d='M100 10 L100 30 M100 170 L100 190 M10 100 L30 100 M170 100 L190 100' stroke='%238B5A2B' stroke-width='0.5'/%3E%3C/svg%3E")`,
           backgroundRepeat: 'no-repeat',
-          backgroundColor: 'rgb(var(--darwin-primary))',
-          backgroundBlendMode: 'soft-light'
-        }}
-      >
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-100">
-          <div className="w-full h-full max-w-3xl max-h-3xl" style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='100' fill='none' stroke='%238B5A2B' stroke-width='1'/%3E%3Ccircle cx='100' cy='100' r='40' fill='none' stroke='%238B5A2B' stroke-width='0.5'/%3E%3Cpath d='M100 10 L100 30 M100 170 L100 190 M10 100 L30 100 M170 100 L190 100' stroke='%238B5A2B' stroke-width='0.5'/%3E%3C/svg%3E")`,
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center'
-          }}></div>
-        </div>
-        
-        <div className="relative z-10 flex flex-col items-center justify-center">
-          <div className="bg-white/80 rounded-full p-16 text-center max-w-xl">
-            <h1 className="text-4xl font-bold text-darwin-dark mb-3 relative z-10 font-serif tracking-wide">Young Darwin</h1>
-            <div className="w-40 h-1 bg-amber-700 opacity-60 rounded mb-3 mx-auto"></div>
-            <h2 className="text-1xl text-darwin-accent mb-2 font-serif italic">An educational history simulation game by Benjamin Breen (UC Santa Cruz)</h2>
-            
-            <div className="max-w-2xl mb-8 text-left p-8 rounded-lg shadow-md relative z-10 darwin-panel bg-white/90">
-              <p className="mb-4 font-serif leading-relaxed text-gray-800">The year is 1835. As a young naturalist aboard HMS Beagle, you've arrived at the Galápagos archipelago – a volcanic wonderland teeming with unfamiliar creatures.</p>
-              <p className="mb-4 font-serif leading-relaxed text-gray-800">Explore Isla Floreana, collect specimens, and record your observations. Every detail could lead to profound scientific insights. You might even stumble on something unexpected... like an escapee from the penal colony of political prisoners in the central highlands.</p>
-              <div className="flex items-center my-6 text-amber-800 opacity-80">
-                <div className="flex-1 h-px bg-amber-300"></div>
-                <span className="px-4 font-serif italic text-sm">A scientific adventure awaits</span>
-                <div className="flex-1 h-px bg-amber-300"></div>
-              </div>
-              <p className="font-serif leading-relaxed text-gray-800">Will your observations lead to revolutionary understanding, or merely catalog curiosities?</p>
+          backgroundPosition: 'center'
+        }}></div>
+      </div>
+      
+      <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-3xl">
+        <div className="bg-white/80 backdrop-blur-sm rounded-xl p-3 md:p-16 text-center w-full mx-4">
+          <h1 className="text-3xl md:text-4xl font-bold text-darwin-dark mb-3 relative z-10 font-serif tracking-wide">Young Darwin</h1>
+          <div className="w-30 h-1 bg-amber-700 opacity-60 rounded mb-3 mx-auto"></div>
+          <h2 className="text-lg text-darwin-accent mb-2 font-serif italic">An educational history simulation game by Benjamin Breen (UCSC)</h2>
+          
+          <div className="max-w-2xl mb-5 text-left p-4 md:p-8 rounded-lg shadow-md relative z-10 darwin-panel bg-white/90">
+            <p className="mb-3 font-serif leading-relaxed text-gray-800">The year is 1835. As a young naturalist aboard HMS Beagle, you've arrived at the Galápagos archipelago – a volcanic wonderland teeming with unfamiliar creatures.</p>
+            <p className="mb-3 font-serif leading-relaxed text-gray-800">Explore Isla Floreana, collect specimens, and record your observations. Every detail could lead to profound scientific insights. You might even stumble on something unexpected... like an escapee from the penal colony of political prisoners in the central highlands.</p>
+            <div className="flex items-center my-3 text-amber-800 opacity-80">
+              <div className="flex-1 h-px bg-amber-300"></div>
+              <span className="px-4 font-serif italic text-sm">A scientific adventure awaits</span>
+              <div className="flex-1 h-px bg-amber-300"></div>
             </div>
+            <p className="font-serif leading-relaxed text-gray-800">Will your observations lead to revolutionary understanding, or merely catalog curiosities?</p>
+          </div>
+          
+          {/* Hybrid Options Section */}
+          <div className="mb-6">
+            <button
+              className={`px-4 py-2 rounded-lg font-medium transition-all hover:scale-105 flex items-center gap-2 mx-auto mb-2 ${
+                showHybridOptions ? 'bg-amber-200 text-amber-800' : 'bg-amber-100 text-amber-700'
+              }`}
+              onClick={() => setShowHybridOptions(!showHybridOptions)}
+            >
+              <span>🧬</span> Game Options
+            </button>
             
+            {showHybridOptions && (
+              <div className="mt-4 mb-6 max-w-xl mx-auto bg-amber-50/90 backdrop-blur-sm p-4 rounded-lg border border-amber-200">
+                <h3 className="text-xl font-bold text-amber-800 mb-3">Hybrid Species Options</h3>
+                <p className="text-sm text-amber-700 mb-4">
+                  Enable discovery of hybrid species that Darwin might encounter during his exploration.
+                </p>
+                
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <button
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                      hybridityMode === 'mild' 
+                        ? 'bg-amber-600 text-white' 
+                        : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                    }`}
+                    onClick={() => handleHybriditySelection('mild')}
+                  >
+                    <span>🌱</span> Mild Hybridity
+                  </button>
+                  
+                  <button
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                      hybridityMode === 'extreme' 
+                        ? 'bg-amber-600 text-white' 
+                        : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                    }`}
+                    onClick={() => handleHybriditySelection('extreme')}
+                  >
+                    <span>🔬</span> Extreme Hybridity
+                  </button>
+                  
+                  <button
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                      hybridityMode === 'none' 
+                        ? 'bg-amber-600 text-white' 
+                        : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                    }`}
+                    onClick={() => handleHybriditySelection('none')}
+                  >
+                    <span>🚫</span> No Hybrids
+                  </button>
+                </div>
+                
+                <div className="mt-4 text-sm text-amber-700">
+                  {hybridityMode === 'mild' && (
+                    <p><span className="font-bold">Mild Hybridity:</span> Species within the same sub-order can hybridize, creating scientifically plausible new specimens.</p>
+                  )}
+                  {hybridityMode === 'extreme' && (
+                    <p><span className="font-bold">Extreme Hybridity:</span> Species from different orders can hybridize, creating more unusual and fantastical hybrid specimens.</p>
+                  )}
+                  {hybridityMode === 'none' && (
+                    <p><span className="font-bold">No Hybrids:</span> Play with only historically accurate species that Darwin would have encountered.</p>
+                  )}
+                </div>
+                
+                {hybridityMode !== 'none' && (
+                  <HybridGenerator 
+                    onComplete={handleHybridsGenerated}
+                    hybridityMode={hybridityMode}
+                    isVisible={showHybridOptions} 
+                  />
+                )}
+              </div>
+            )}
+          </div>
+          
+          {/* Begin Expedition Button - Now centered */}
+          <div className="flex justify-center">
             <button 
-              className="py-4 px-10 rounded-lg font-medium relative z-10 text-lg transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-opacity-50 group"
+              className="py-4 px-10 rounded-lg font-medium relative z-10 text-lg transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-opacity-50 group flex items-center gap-2"
               onClick={startGame}
               style={{
                 backgroundColor: 'rgb(var(--darwin-primary))',
@@ -1497,12 +1724,18 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
             >
               <span className="absolute inset-0 w-full h-full bg-white rounded-lg opacity-0 group-hover:opacity-10 transition-opacity"></span>
               Begin Expedition
+              {hybridityMode !== 'none' && (
+                <span className="ml-2 text-sm bg-amber-300 text-amber-800 px-2 py-1 rounded-full">
+                  🧬 {hybridityMode === 'extreme' ? 'Extreme' : 'Mild'} Hybrids
+                </span>
+              )}
             </button>
           </div>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
   
   // Main game screen
   return (
@@ -1598,26 +1831,26 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   onExitInterior={() => {
     const result = exitInterior();
     sendToLLM(result.message);
-    setCurrentInteriorRoom(null); // Clear interior room on exit
+    setCurrentInteriorRoom(null);
   }}
   onInteriorMove={(newPos, roomId, room) => {
     const result = moveInInterior(newPos, roomId);
     sendToLLM(result.message);
     
-    // Store current room information
+    // Store current room information and update game state
     setCurrentInteriorRoom({
       id: roomId,
       name: room?.name || roomId,
       description: room?.description || ""
     });
-    
+
     // Check for NPC encounters in this room
     if (interiorType === 'whalershut' && roomId === 'HUT_MAIN') {
       setVisibleNPCs(['stowaway']);
     } else if (interiorType === 'hms_beagle' && roomId === 'BEAGLE_CABIN') {
       setVisibleNPCs(['fitzroy']);
-    } else if (interiorType === 'governors_house' && roomId === 'HOUSE_OFFICE') {
-      setVisibleNPCs(['nicolas_lawson']);
+    } else if (interiorType === 'governors_house' && roomId === 'GOVERNORS_HOUSE_GARDEN') {
+      setVisibleNPCs(['maria']);
     }
   }}
   playerPosition={interiorPlayerPosition}
@@ -1630,14 +1863,18 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     onRestAtBeagle={handleRestAtBeagle}
       onRest={handleRest}  
   showRestButton={showRestButton}  
-    onEnterInterior={(interiorId) => {
-      const result = enterInterior(interiorId);
-      sendToLLM(result.message);
-      
-      
-    }}
+
+  onEnterInterior={(interiorId) => {
+  // Only proceed if not already in this interior
+  if (interiorId) {
+    const result = enterInterior(interiorId);
+
+    
+  }
+}}
     fatigue={fatigue}
     inventory={inventory}
+      currentLocationId={currentLocationId}
   />
 )}
 
@@ -1734,7 +1971,13 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   )
 )}
           
-          <GameLog narrative={narrativeText} isLoading={isLoading} lastUserInput={lastUserInput} />
+          <GameLog 
+          narrative={narrativeText} 
+          isLoading={isLoading} 
+          lastUserInput={lastUserInput} 
+          isMovingViaMap={isMovingViaMap} 
+
+          />
 
 <LLMTransparency rawResponse={rawLLMResponse} rawPrompt={rawLLMPrompt} />
   
@@ -1746,6 +1989,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
               isLoading={isLoading}
               suggestions={nextStepSuggestions}
               rawResponse={rawLLMResponse}
+              rawPrompt={rawLLMPrompt}
             />
 
 
@@ -1767,9 +2011,13 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   onUseTool={handleDetailedToolUse}
   narrativeText={narrativeText}
   onViewNearbySpecimenDetail={handleViewNearbySpecimenDetail}
-  availableSpecimenIds={nearbySpecimenIds}  // Renamed from nearbySpecimenIds
+  availableSpecimenIds={nearbySpecimenIds}  
   onOpenCollectionPopup={handleOpenCollectionPopup}
-/>    </div>
+  specimenList={specimenList}  
+currentLocation={currentLocationId}
+gameTime={gameTime} 
+/>   
+ </div>
       </div>
       
 <div className="mt-4 text-center text-xs text-amber-700/70 font-serif italic">
@@ -1801,7 +2049,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
 
 
 
-  {/* Collection Popup - Enhanced Version with White Title */}
+  {/* Collection Popup - Enhanced Version with Hybrid Support */}
 {showCollectionPopup && (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
     <div className="bg-darwin-light max-w-lg w-full rounded-lg overflow-hidden shadow-xl border border-darwin-secondary/60">
@@ -1809,16 +2057,32 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
       <div className="relative">
         {/* Specimen Image */}
         <div className="w-full h-64 relative overflow-hidden">
-          <div 
-            className="absolute inset-0 bg-cover bg-center transform hover:scale-105 transition-transform duration-7000"
-            style={{ 
-              backgroundImage: `url(/specimens/${collectingSpecimenId?.toLowerCase()}.jpg)`,
-              backgroundSize: 'cover'
-            }}
-          />
+          {(() => {
+            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const isHybrid = currentSpecimen?.isHybrid;
+            
+            return isHybrid ? (
+              <HybridSpecimenImage 
+                specimen={currentSpecimen}
+                className="w-full h-80"
+                size="full"
+                disableGeneration={false}
+              />
+            ) : (
+             <div 
+               className="absolute inset-0 bg-cover bg-top transform hover:scale-105 transition-transform duration-7000"
+               style={{ 
+                 backgroundImage: `url(/specimens/${collectingSpecimenId?.toLowerCase()}.jpg)`,
+                 backgroundSize: 'cover',
+                 backgroundPosition: 'center top 25%'
+               }}
+             />
+
+            );
+          })()}
           
           {/* Gradient Overlay with enhanced depth */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/20" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/10" />
           
           {/* Decorative Corner Elements */}
           <div className="absolute top-3 left-3 w-8 h-8 border-t-2 border-l-2 border-white/80 rounded-tl-md" />
@@ -1829,12 +2093,26 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
         
         {/* Title Overlay with white text and shadow */}
         <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
-          <h3 className="font-bold text-3xl mb-1 tracking-wide text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)]">
-            Collect {specimenList.find(s => s.id === collectingSpecimenId)?.name}
-          </h3>
-          <p className="italic text-white/80 text-lg font-serif drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-            {specimenList.find(s => s.id === collectingSpecimenId)?.latin || ''}
-          </p>
+          {(() => {
+            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            return (
+              <>
+                <h3 className="font-bold text-3xl mb-1 tracking-wide text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)]">
+                  Collect {currentSpecimen?.name}
+                </h3>
+                <p className="italic text-white/80 text-lg font-serif drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                  {currentSpecimen?.latin || ''}
+                </p>
+                {currentSpecimen?.isHybrid && (
+                  <div className="mt-1">
+                    <span className="inline-block px-2 py-1 text-xs font-medium bg-amber-500/80 text-white rounded-md shadow-sm">
+                      🧬 Hybrid Specimen
+                    </span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
       
@@ -1973,6 +2251,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   specimenName={collectionSpecimenName}
   method={collectionMethod}
   specimenId={collectingSpecimenId} 
+  specimenList={specimenList}
   onShowSpecimenDetail={() => {
     // Get the current specimen object
     const specimen = specimenList.find(s => s.name === collectionSpecimenName);
@@ -2016,33 +2295,17 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   </div>
 )}
 
-{process.env.NODE_ENV === 'development' && <EventHistoryDebug />}
+ {process.env.NODE_ENV === 'development' && (
+      <>
+        <EventHistoryDebug />
+        <HybridsDebug />
+      </>
+    )}
+  </div>
 
-    </div>
+
   );
 }
 
-// Helper function to get specimen icon
-const getSpecimenIcon = (id) => {
-  switch(id) {
-    case 'floreana_giant_tortoise': return '🐢';
-      case 'eastern_santa_cruz_tortoise': return '🐢';
-    case 'mockingbird': return '🐦';
-    case 'iguana': return '🦎';
-    case 'finch': return '🐤';
-    case 'cactus': return '🌵';
-    case 'lavaLizard': return '🦎';
-    case 'sallyLightfoot': return '🦀';
-    case 'seaLion': return '🦭';
-    case 'booby': return '🐦';
-    case 'coralFragment': return '🪸';
-    case 'seashell': return '🐚';
-    case 'volcanoRock': return '🪨';
-    case 'frigatebird': return '🕊️';
-    case 'barnacle': return '🪨';
-    case 'mangrove': return '🌱';
-    default: return '🔍';
-  }
-};
 
 export default GameContainer;

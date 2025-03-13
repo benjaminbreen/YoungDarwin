@@ -35,7 +35,7 @@ export default async function handler(req, res) {
               However, sometimes it is quite easy, for instance finches and mockingbirds can always be collected with any method.  
 
               COLLECTION METHOD EFFECTIVENESS:
-              - Shotgun: Effective for birds and larger animals at a distance, but can damage specimens and scare away other animals. Noisy and can lead to severe injuries. On especially bad attempts, there's a chance of Darwin misfiring and hitting nearby NPC if there is one in the immediate turn context. 
+              - Shotgun: Effective for birds and larger animals at a distance, but can damage specimens and scare away other animals. Noisy and can lead to severe injuries. On especially bad attempts, there's a chance of Darwin misfiring and hitting nearby NPC if there is one in the immediate turn context. If fired at something small or breakable, it destroys it.
               - Insect Net: Excellent for flying insects, small birds if they're distracted. Requires skill and good timing.
               - Snare: Good for reptiles and small mammals. Requires patience and proper placement. Almost always works with lizards. 
               - Geologist's Hammer & Chisel: Perfect for mineral samples that are in situ, fossils, and plants growing on rocks. Useless for animals, and if the animal is potentially aggressive, it can lead to Darwin being injured. 
@@ -47,12 +47,13 @@ export default async function handler(req, res) {
               - Lizards: Iguanas can ALWAYS be caught by snare and usually are collectible by being shot. 
               - Plants: Stationary but may require proper tools to extract without damage.
               - Marine creatures: Only collectible by shotgun or snare.
-              - Minerals can ALWAYS be collected with the geologist's hammer and usually with hands. shooting it creates an interesting display of the inner minerals.
+            
               - goats and other large fauna can usually be collected with shotgun 
               - documents like socialisttreatise can always be collected with hands or insect net, unless there is another person nearby who might intercept or take issue with it
               - barnacles and shells are always catchable by hands or geologist's hammer.
               - sharks may attack viciously if collected by hand or net, and could severely injure or even kill darwin. 
               - mysteriousflask and captainsskull can always be collected by hands, no matter what
+              - minerals like basalt, olivine, and related hybrids can always be collected in any way, even without a method or technique specified
 
               PLAYER TECHNIQUE:
               - Patient, careful approaches increase success chances

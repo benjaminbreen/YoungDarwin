@@ -666,20 +666,36 @@ const getWeatherIcon = () => {
 
 
 {weather === 'rainbow' && (
-  <div className="absolute inset-3 overflow-hidden">
+  <div className="absolute inset-0 overflow-hidden">
+    {/* Large rainbow arc across the sky */}
     <div 
       className="absolute"
       style={{
-        width: '100%',
-        height: '150%',
-        left: '20%',
-        top: '-90%',
-        background: 'radial-gradient(circle at top, transparent 10%, rgba(255,0,0,0.1) 70%, rgba(255,165,0,0.1) 71%, rgba(255,255,0,0.1) 72%, rgba(0,128,0,0.1) 73%, rgba(0,0,255,0.1) 74%, rgba(75,0,130,0.1) 75%, rgba(238,130,238,0.1) 76%, transparent 77%)',
-        borderRadius: '50%',
-        transform: 'rotate(40deg)',
-        opacity: 0.99
+        width: '200%',
+        height: '200%',
+        left: '-50%',
+        bottom: '-110%',
+        background: 'radial-gradient(circle at center, transparent 60%, rgba(255,0,0,0.15) 54%, rgba(255,165,0,0.15) 61%, rgba(255,255,0,0.15) 62%, rgba(0,255,0,0.15) 63%, rgba(0,0,255,0.15) 64%, rgba(75,0,130,0.15) 65%, rgba(238,130,238,0.15) 69%, transparent 50%)',
+        borderRadius: '100%',
+        opacity: 0.8
       }}
     ></div>
+  
+    {/* Sun glow */}
+    <div 
+      className="absolute rounded-full blur-md"
+      style={{
+        width: '60px',
+        height: '60px',
+        left: '50%',
+        top: '25%',
+        transform: 'translateX(-50%)',
+        background: 'radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,255,220,0.5) 40%, transparent 70%)',
+        opacity: 0.3
+      }}
+    ></div>
+    
+
   </div>
 )}
 

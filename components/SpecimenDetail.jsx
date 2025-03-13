@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { tools } from '../data/tools';
+import HybridSpecimenImage from './HybridSpecimenImage';
 
 export default function SpecimenDetail({ 
   isOpen, 
@@ -19,33 +20,43 @@ export default function SpecimenDetail({
   // Get specimen icon based on type
   const getSpecimenIcon = (id) => {
     switch(id) {
-    case 'floreana_giant_tortoise': return '🐢';
+      case 'floreana_giant_tortoise': return '🐢';
       case 'eastern_santa_cruz_tortoise': return '🐢';
-      case 'mockingbird': return '🐦';
-      case 'iguana': return '🦎';
-      case 'finch': return '🐤';
+      case 'galapagosmockingbird': return '🐦';
+      case 'floreanamockingbird': return '🐦';
+      case 'largegroundfinch': return '🐤';
+      case 'mediumgroundfinch': return '🐤';
+      case 'marineiguana': return '🦎';
+      case 'terrestrialiguana': return '🦎';
       case 'cactus': return '🌵';
       case 'lavaLizard': return '🦎';
+      case 'crab': return '🦀';
       case 'sallyLightfoot': return '🦀';
       case 'seaLion': return '🦭';
       case 'booby': return '🐦';
       case 'coralFragment': return '🪸';
       case 'seashell': return '🐚';
       case 'volcanoRock': return '🪨';
+      case 'basalt': return '🪨';
       case 'frigatebird': return '🕊️';
       case 'barnacle': return '🐌';
       case 'mangrove': return '🌱';
-      default: return '🔍';
+      default: 
+        // Check if this is a hybrid ID
+        if (id && typeof id === 'string' && id.startsWith('hybrid_')) {
+          return '🧬';
+        }
+        return '🔍';
     }
   };
   
   // Find the tool details from the tools array
   const getToolDetails = () => {
     return tools.find(t => t.name === toolName) || { 
+      id: 'default',
       icon: '🔍', 
       description: 'Examine the specimen',
       detailedDescription: 'A scientific tool for specimen examination',
-      image: '/tools/default.jpg',
       usage: 'Used for detailed scientific examination'
     };
   };
@@ -85,11 +96,15 @@ export default function SpecimenDetail({
     }
   };
 
-  // Get specimen image path
+  // Get specimen image path for normal specimens
   const getSpecimenImagePath = () => {
-    // Try to construct path from specimen ID
-    const imageName = specimen.id.toLowerCase();
-    return `/specimens/${imageName}.jpg`;
+    // For regular specimens
+    if (!specimen.isHybrid) {
+      const imageName = specimen.id.toLowerCase();
+      return `/specimens/${imageName}.jpg`;
+    }
+    // Hybrid specimens will use the HybridSpecimenImage component instead
+    return null;
   };
 
   // Fallback handling for image loading errors
@@ -119,22 +134,44 @@ export default function SpecimenDetail({
           {/* Specimen image with thumbnail */}
           <div className="bg-amber-50 rounded-lg border border-amber-200 p-6 flex flex-col items-center justify-center">
             <div 
-              className="w-60 h-60 rounded-full overflow-hidden border-4 border-amber-300 shadow-md cursor-pointer transition-transform hover:scale-105"
+              className="w-40 h-40 rounded-full overflow-hidden border-4 border-amber-300 shadow-md cursor-pointer transition-transform hover:scale-105"
               onClick={() => setShowDetailedView(true)}
-              title="Click to see detailed view"
+              title="Click for detailed view"
             >
-              <img 
-                src={getSpecimenImagePath()} 
-                alt={specimen.name}
-                className="w-full h-full object-cover"
-                onError={handleImageError}
-              />
-              <div className="text-18xl hidden emoji-fallback flex items-center justify-center h-full">
-                {getSpecimenIcon(specimen.id)}
-              </div>
+              {specimen.isHybrid ? (
+                <HybridSpecimenImage 
+                  specimen={specimen}
+                  className="w-full h-full"
+                  size="full"
+                  fallbackIcon={getSpecimenIcon(specimen.id)}
+                />
+              ) : (
+                <>
+                  <img 
+                    src={getSpecimenImagePath()} 
+                    alt={specimen.name}
+                    className="w-full h-full object-cover"
+                    onError={handleImageError}
+                  />
+                  <div className="text-8xl hidden emoji-fallback flex items-center justify-center h-full">
+                    {getSpecimenIcon(specimen.id)}
+                  </div>
+                </>
+              )}
             </div>
+            
             <div className="text-xs text-center mt-2 text-amber-800 italic">Click for detailed view</div>
- 
+            <div className="text-2xl mt-4 text-center">
+              {/* Show hybrid badge for hybrid specimens */}
+              {specimen.isHybrid ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="text-lg">🧬</span>
+                  <span className="text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">Hybrid</span>
+                </span>
+              ) : (
+                <span>{getSpecimenIcon(specimen.id)}</span>
+              )}
+            </div>
           </div>
           
           {/* Specimen details */}
@@ -143,16 +180,16 @@ export default function SpecimenDetail({
             <p className="text-sm italic text-amber-700 font-serif mb-3">{specimen.latin}</p>
             <p className="text-sm mb-2"><strong>Typical habitat:</strong> {specimen.habitat}</p>
             <p className="mb-4">{specimen.description}</p>
-
-              {specimen.memoryText && (
-                    <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg shadow-inner">
-                      <h4 className="font-medium text-amber-800 flex items-center mb-2">
-                        <span className="mr-2">💭</span>
-                        Darwin's Thoughts
-                      </h4>
-                      <p className="italic text-gray-700">{specimen.memoryText}</p>
-                    </div>
-                  )}
+            
+            {/* Show parent species for hybrids */}
+            {specimen.isHybrid && specimen.parent1Id && specimen.parent2Id && (
+              <div className="mb-4 p-2 bg-amber-50 border border-amber-100 rounded-md">
+                <p className="text-sm font-medium text-amber-800">Hybrid Species</p>
+                <p className="text-xs">
+                  A hybrid of <span className="font-medium">{specimen.parent1Id?.replace(/_/g, ' ')}</span> and <span className="font-medium">{specimen.parent2Id?.replace(/_/g, ' ')}</span>
+                </p>
+              </div>
+            )}
             
             {specimen.observations && specimen.observations.length > 0 && (
               <div className="mb-4">
@@ -166,36 +203,46 @@ export default function SpecimenDetail({
                 </ul>
               </div>
             )}
+            
+            {specimen.memoryText && (
+              <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg shadow-inner">
+                <h4 className="font-medium text-amber-800 flex items-center mb-1 text-sm">
+                  <span className="mr-1">💭</span>
+                  Darwin's Thoughts
+                </h4>
+                <p className="italic text-gray-700 text-sm">{specimen.memoryText}</p>
+              </div>
+            )}
           </div>
         </div>
         
-        {/* Tool information section - NEW */}
+        {/* Tool information section */}
         <div className="px-6 pt-0 pb-6">
           <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-4 shadow-inner">
-            <div className="flex">
-              <div className="shrink-0">
-                <div className="w-40 h-40 rounded-md overflow-hidden border-2 border-amber-300 shadow-sm">
-                 <img 
-  src={`/tools/${toolDetails.id}.jpg`} 
-  alt={toolName}
-  className="w-full h-full object-cover"
-  onError={(e) => {
-    e.target.onerror = null;
-    e.target.src = '/tools/default.jpg';
-  }}
-/>
+            <div className="flex flex-col sm:flex-row">
+              <div className="shrink-0 sm:mr-4 mb-3 sm:mb-0 flex justify-center">
+                <div className="w-20 h-20 sm:w-32 sm:h-32 rounded-md overflow-hidden border-2 border-amber-300 shadow-sm">
+                  <img 
+                    src={`/tools/${toolDetails.id || 'default'}.jpg`} 
+                    alt={toolName}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = '/tools/default.jpg';
+                    }}
+                  />
                 </div>
-             
               </div>
-              <div className="ml-4 flex-1">
-                <h4 className="font-bold text-amber-900 border-b border-amber-200 pb-1 mb-2">
+              <div className="flex-1">
+                <h4 className="font-bold text-amber-900 border-b border-amber-200 pb-1 mb-2 flex items-center">
+                  <span className="mr-2">{toolDetails.icon || '🔍'}</span>
                   {toolName}
                 </h4>
                 <p className="text-sm text-gray-700 mb-2">
-                  {toolDetails.detailedDescription}
+                  {toolDetails.detailedDescription || toolDetails.description}
                 </p>
                 <p className="text-xs text-amber-800 italic">
-                  <span className="font-medium">Usage:</span> {toolDetails.usage}
+                  <span className="font-medium">Usage:</span> {toolDetails.usage || 'For detailed examination of specimens'}
                 </p>
               </div>
             </div>
@@ -239,7 +286,14 @@ export default function SpecimenDetail({
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-lg max-w-7xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="p-4 border-b border-amber-200 flex justify-between items-center bg-amber-50">
-              <h2 className="text-2xl font-bold text-darwin-dark font-serif">{specimen.name}</h2>
+              <h2 className="text-2xl font-bold text-darwin-dark font-serif">
+                {specimen.name}
+                {specimen.isHybrid && (
+                  <span className="ml-2 text-sm bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">
+                    Hybrid Species
+                  </span>
+                )}
+              </h2>
               <button 
                 onClick={() => setShowDetailedView(false)}
                 className="text-gray-500 hover:text-gray-800 text-2xl leading-none"
@@ -251,19 +305,29 @@ export default function SpecimenDetail({
             <div className="flex flex-col lg:flex-row">
               {/* Large specimen image */}
               <div className="lg:w-3/5 h-[40vh] lg:h-[75vh] relative overflow-hidden">
-                <div 
-                  className="absolute inset-0 bg-cover bg-center shadow-inner"
-                  style={{ 
-                    backgroundImage: `url(${getSpecimenImagePath()})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center'
-                  }}
-                >
-                  {/* Fallback for image error */}
-                  <div className="hidden absolute inset-0 flex items-center justify-center bg-amber-50">
-                    <span className="text-[15rem] opacity-50">{getSpecimenIcon(specimen.id)}</span>
+                {specimen.isHybrid ? (
+                  <div className="w-full h-full relative">
+                    <HybridSpecimenImage 
+                      specimen={specimen} 
+                      className="w-full h-full"
+                      size="full"
+                    />
                   </div>
-                </div>
+                ) : (
+                  <div 
+                    className="absolute inset-0 bg-cover bg-center shadow-inner"
+                    style={{ 
+                      backgroundImage: `url(${getSpecimenImagePath()})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
+                  >
+                    {/* Fallback for image error */}
+                    <div className="hidden absolute inset-0 flex items-center justify-center bg-amber-50">
+                      <span className="text-[15rem] opacity-50">{getSpecimenIcon(specimen.id)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
               
               {/* Specimen details panel */}
@@ -271,6 +335,21 @@ export default function SpecimenDetail({
                 <div className="prose max-w-none font-serif">
                   <h3 className="text-xl font-medium mb-2 border-b border-amber-200 pb-2">{specimen.name}</h3>
                   <p className="italic text-amber-800 mb-4">{specimen.latin}</p>
+                  
+                  {/* Hybrid parentage section */}
+                  {specimen.isHybrid && specimen.parent1Id && specimen.parent2Id && (
+                    <div className="mb-4 p-3 bg-amber-50/60 rounded-md border border-amber-200">
+                      <h4 className="font-medium text-amber-900 mb-1">Hybrid Parentage</h4>
+                      <p className="text-sm">
+                        This specimen is a hybrid of <strong>{specimen.parent1Id.replace(/_/g, ' ')}</strong> and <strong>{specimen.parent2Id.replace(/_/g, ' ')}</strong>.
+                      </p>
+                      {specimen.hybridityType && (
+                        <p className="text-xs text-amber-700 mt-1">
+                          Hybridity Type: {specimen.hybridityType === 'extreme' ? 'Extreme (cross-order)' : 'Mild (same sub-order)'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="mb-4">
                     <h4 className="font-medium text-amber-900">Typical habitat</h4>

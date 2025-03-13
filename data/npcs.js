@@ -32,7 +32,7 @@ export const npcs = [
       "En las tierras altas hay un manantial que solo yo conozco. Puedo mostrárselo. ¿Me entiende? No me queda claro. Si es así, dígalo, por favor."
     ],
     gameRole: `A potentially mentor-like figure for Darwin, offering botanical knowledge, but only if he speaks to her in Spanish. Will not respond to English dialogue.`,
-    triggers: ['highland'] // Locations where this NPC might appear
+    triggers: ['GOVERNORS_HOUSE_GARDEN'] // Locations where this NPC might appear
   },
   {
     id: 'gabriel_puig',
@@ -51,7 +51,7 @@ export const npcs = [
     ],
     gameRole: `A dangerous but compelling figure—he will initially flee and disappear if Darwin approaches him, without a word. If approached kindly again, he might want to debate utopian thought or socialism, but only if convinced of Darwin's worthiness. He speaks Catalan and Spanish initially but will switch to broken English.`,
     initialReaction: `As an escaped political prisoner, Gabriel will ALWAYS try to hide or run when first encountered, unless Darwin proves he's not a threat. Only repeated encounters or showing sympathy to his political views will make him open up.`,
-    locations: ['E_MID', 'CAVE'] // Locations where this NPC might appear
+    locations: ['CAVE'] // Locations where this NPC might appear
   },
   {
     id: 'fitzroy',
@@ -68,7 +68,7 @@ export const npcs = [
       "These islands are God-forsaken. I would not wish them even upon a mutineer."
     ],
     gameRole: `A rigid but complex authority figure, who limits how long Darwin can stay and criticizes his growing fascination with species variation.`,
-    triggers: ['ship', 'postOfficeBay'] // Locations where this NPC might appear
+    triggers: ['beagle'] // Locations where this NPC might appear
   },
   {
     id: 'lascar_joe',
@@ -91,18 +91,18 @@ export const npcs = [
     id: 'nicolas_lawson',
     name: 'Nicolás Lawson',
     role: 'Vice-Governor of the Galápagos',
-    shortDescription: "The official British Resident of Galapagos and Vice-Governor of the islands, a shrewd man in his mid-40s who administers the penal colony harshly but has a strong interest in natural history. He will ALWAYS imprison Darwin if he catches him trying to steal the governor's letter or talk to prisoners, and will threaten his life.",
+    shortDescription: "The official British Resident of Galapagos and Vice-Governor of the islands, a shrewd man in his mid-40s who administers the penal colony harshly.",
     portrait: '/portraits/lawson.jpg',
-    background: `Born Nicolai Olaus Lossius in Norway, Lawson reinvented himself as a Chilean naval officer, trader, and administrator. As deputy governor of the Galápagos, he is a shrewd opportunist, eager to make himself indispensable to whalers and explorers alike.`,
+    background: `Born Nicolai Olaus Lossius in Norway, Lawson reinvented himself as a Chilean naval officer, trader, and administrator. As deputy governor of the Galápagos, he is a shrewd opportunist, eager to make himself indispensable to whalers and explorers alike. but has a strong interest in natural history. He will ALWAYS imprison Darwin if he catches him trying to steal the governor's letter or talk to prisoners, and will threaten his life. Lawson met Darwin and Fitzory by chance at Post Office Bay the day before the game begins, as he was visiting with the crew of a whaling ship.`,
     appearance: `Tall, tanned, and graying, with gray-blue eyes. He wears an unbuttoned officer's coat and speaks informally. He is nosy and proud, easily offended by the wrong sort of question, and expects to be treated with extreme deference.`,
     personality: `Clever, ambitious, and slightly theatrical, Lawson prides himself on knowing everything that happens in the colony. He despises the politcal prisoners and is a committed monarchist.`,
     darwinquotes: `I had not as yet noticed by far the most remarkable feature in the natural history of this archipelago; it is, that the different islands to a considerable extent are inhabited by a different set of beings. My attention was first called to this fact by the Vice-Governor, Mr. Lawson, declaring that the tortoises differed from the different islands, and that he could with certainty tell from which island any one was brought. I did not for some time pay sufficient attention to this statement.`,
     dialogueExamples: [
-      "You are most lucky to meet a man who knows these islands like no other. Tell me, did Captain Fitzroy receive my letter inviting him to dinner?",
+      "Darwin, is it? Geologist or such like? I was glad to have met you and Captain Fitzroy yesterday, as I am eager for news of the Empire. Tell me, how has your Captain responded to my invitation to dinner?",
       "Tortoises? Yes, I can tell you from which island each one hails. It is a talent of mine, long cultivated. Though I afraid other matters of greater import now command my attention, Sir.",
       "The prisoners? They are not prisoners. They are settlers. And they are lucky to be alive and allowed their freedom. In Britain, you would pack them into a work house, would you not? Or send them to Australia, perhaps."
     ],
-    gameRole: `Helps Darwin learn more about the flora and fauna of Galapagos, but he gets offended and silent if Darwin asks about politics or the prisoners.`,
+    gameRole: `Helps Darwin learn more about the flora and fauna of Galapagos, but he gets deeply offended and even threatening if Darwin asks about politics or the prisoners. `,
     initialReaction: `Lawson is trying to curry favor with Captain Fitzroy, but he has little time for an unknown young man like Darwin, and he treats him rudely as an inferior, though he tries to manipulate him to gain the favor of Captain Fitzroy, and asks him for information about political events back in the UK.`,
     triggers: ['settlement'], // Locations where this NPC might appear
     

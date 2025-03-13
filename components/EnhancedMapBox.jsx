@@ -1,16 +1,22 @@
+// components/EnhancedMapBox.jsx
+
 'use client';
 
 import React, { useState } from 'react';
 import { islandGrid, getCellByCoordinates } from '../utils/locationSystem';
+import { baseSpecimens } from '../data/specimens';
+import InteriorEntryMenu from './InteriorEntryMenu';
 
 export default function EnhancedMapBox({ 
-  playerPosition, 
+   playerPosition, 
   onLocationClick, 
   onRestAtBeagle, 
   fatigue, 
   inventory = [],
   showRestButton = false,
-  onRest = () => {}
+  onRest = () => {},
+  onEnterInterior,
+  currentLocationId 
 }) {
   const [hoveredBeagle, setHoveredBeagle] = useState(false);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
@@ -49,6 +55,15 @@ export default function EnhancedMapBox({
       return `${hours} hour${hours > 1 ? 's' : ''} ${remainingMinutes > 0 ? `${remainingMinutes} min` : ''}`;
     }
   };
+
+    const getCurrentLocation = () => {
+    return getCellByCoordinates(playerPosition.x, playerPosition.y);
+  };
+
+  const currentLocation = React.useMemo(() => {
+    return getCurrentLocation();
+  }, [playerPosition.x, playerPosition.y]);
+
   
   // Get emoji for each location type
   const getLocationEmoji = (type) => {
@@ -273,36 +288,7 @@ export default function EnhancedMapBox({
           })}
         </div>
         
-        {/* HMS Beagle */}
-        <div 
-          className="absolute w-8 h-8 cursor-pointer transition-transform hover:scale-110 z-1000 hms-beagle"
-          style={{ 
-            right: '10%', 
-            bottom: '86%',
-          }}
-          onMouseEnter={() => setHoveredBeagle(true)}
-          onMouseLeave={() => setHoveredBeagle(false)}
-          onClick={() => onRestAtBeagle && onRestAtBeagle()}
-        >
-          <span className="text-4xl filter drop-shadow-md">🚢</span>
-          
-          {/* Tooltip for HMS Beagle */}
-          {hoveredBeagle && (
-            <div className="absolute right-0 -top-30 bg-white p-2 rounded-md shadow-md border border-amber-200 w-48 z-40 text-xs overflow-show">
-              <p className="font-bold">HMS Beagle</p>
-              <p className="text-gray-600 mb-1">Captain FitzRoy's survey vessel</p>
-              <button 
-                className="bg-amber-100 hover:bg-amber-200 text-amber-800 px-2 py-1 rounded border border-amber-300 w-full z-40 text-center"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRestAtBeagle && onRestAtBeagle();
-                }}
-              >
-                Return to ship and rest
-              </button>
-            </div>
-          )}
-        </div>
+        
         
         {/* Location markers */}
         {islandGrid.map(cell => {
@@ -417,176 +403,462 @@ export default function EnhancedMapBox({
       
       {/* Location Information Popup */}
       {locationPopup && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={handleClosePopup}>
-          <div 
-            className="bg-amber-50 rounded-lg max-w-md w-full shadow-xl border border-amber-300"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="p-4 border-b border-amber-200 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-darwin-dark flex items-center">
-                <span className="text-2xl mr-2">{getLocationEmoji(locationPopup.type)}</span>
-                {locationPopup.name}
-              </h3>
-              <button 
-                className="text-gray-500 hover:text-gray-800"
-                onClick={handleClosePopup}
-              >
-                &times;
-              </button>
+  <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={handleClosePopup}>
+    <div 
+      className="bg-amber-50 rounded-lg max-w-xl w-full shadow-xl border border-amber-300 overflow-hidden"
+      onClick={e => e.stopPropagation()}
+    >
+      {/* Banner Image Header */}
+      <div className="relative h-48 w-full overflow-hidden">
+        {/* Location Image with Overlay */}
+        <div 
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ 
+            backgroundImage: `url(/banners/${locationPopup.name.toLowerCase().replace(/\s+/g, '')}.jpg)`,
+            backgroundSize: 'cover',
+            filter: 'contrast(1.1)'
+          }}
+        ></div>
+        {/* Darkening Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent"></div>
+        
+        {/* Title Section with Type Icon */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 flex items-center">
+          <div className="bg-amber-700/90 text-white p-3 rounded-full mr-3 shadow-lg">
+            <span className="text-2xl">{getLocationEmoji(locationPopup.type)}</span>
+          </div>
+          <div>
+            <h3 className="text-2xl font-bold text-white drop-shadow-md flex items-center tracking-wide">
+              {locationPopup.name}
+            </h3>
+            <p className="text-amber-100/90 text-sm mt-1 font-medium capitalize drop-shadow-md">
+              {locationPopup.type} • {locationPopup.travelTime} from current location
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Main Content */}
+      <div className="p-5">
+        {/* Description Section */}
+        <div className="mb-5">
+          <p className="text-gray-700 italic font-serif border-l-4 border-amber-300 pl-3 py-1">
+            "{locationPopup.description}"
+          </p>
+        </div>
+        
+        {/* Travel & Terrain Info Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          {/* Travel Information Card */}
+          <div className="bg-white rounded-lg border border-amber-200 shadow-sm overflow-hidden">
+            <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+              <h4 className="font-medium text-amber-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                </svg>
+                Travel Details
+              </h4>
             </div>
-            
             <div className="p-4">
-              <p className="text-gray-700 mb-4">{locationPopup.description}</p>
-              
-              <div className="mb-4 p-3 bg-white rounded-lg border border-amber-200">
-                <h4 className="font-medium text-amber-800 mb-2">Travel Information</h4>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-600 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                    </svg>
-                    <span>Estimated Time: {locationPopup.travelTime}</span>
-                  </div>
-                  <div className="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-600 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clipRule="evenodd" />
-                    </svg>
-                    <span>Terrain: {locationPopup.type}</span>
-                  </div>
+              <div className="flex items-center mb-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 </div>
-                
-                {locationPopup.specimens && locationPopup.specimens.length > 0 && (
-                  <div className="mt-3">
-                    <h5 className="text-sm font-medium text-amber-800 mb-1">Potential Specimens:</h5>
-                    <div className="flex flex-wrap gap-1">
-                      {locationPopup.specimens.map((specId, index) => (
-                        <span key={index} className="text-xs bg-amber-100 px-2 py-1 rounded-full">
-                          {specId}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <p className="text-sm text-gray-500">Estimated Time:</p>
+                  <p className="font-semibold text-amber-900">{locationPopup.travelTime}</p>
+                </div>
               </div>
               
-              {locationPopup.notableFeatures && (
-                <div className="mb-4">
-                  <h4 className="font-medium text-amber-800 mb-1">Notable Features:</h4>
-                  <ul className="list-disc list-inside text-sm text-gray-700">
-                    {locationPopup.notableFeatures.map((feature, index) => (
-                      <li key={index}>{feature}</li>
-                    ))}
-                  </ul>
+              <div className="flex items-center">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
                 </div>
-              )}
+                <div>
+                  <p className="text-sm text-gray-500">Coordinates:</p>
+                  <p className="font-semibold text-amber-900">({locationPopup.x}, {locationPopup.y})</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Terrain Information Card */}
+          <div className="bg-white rounded-lg border border-amber-200 shadow-sm overflow-hidden">
+            <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+              <h4 className="font-medium text-amber-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                </svg>
+                Terrain Conditions
+              </h4>
+            </div>
+            <div className="p-4">
+              <div className="flex items-center mb-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Type:</p>
+                  <p className="font-semibold text-amber-900 capitalize">{locationPopup.type}</p>
+                </div>
+              </div>
               
-              <div className="flex justify-between">
-                <button 
-                  onClick={handleClosePopup}
-                  className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-800"
-                >
-                  Close
-                </button>
-                <button 
-                  onClick={handleTravelToLocation}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 rounded-md text-white"
-                >
-                  Travel Here
-                </button>
+              <div className="flex items-center">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Fatigue Impact:</p>
+                  <div className="flex items-center">
+                    <div className="h-2 w-24 bg-gray-200 rounded-full">
+                      <div 
+                        className={`h-full rounded-full ${
+                          locationPopup.type === 'highland' ? 'bg-red-500 w-4/5' : 
+                          locationPopup.type === 'lavaField' ? 'bg-orange-500 w-3/5' :
+                          'bg-green-500 w-2/5'
+                        }`} 
+                      ></div>
+                    </div>
+                    <span className="ml-2 text-sm font-medium text-gray-700">
+                      {locationPopup.type === 'highland' ? 'High' : 
+                       locationPopup.type === 'lavaField' ? 'Moderate' : 
+                       'Low'}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      )}
-      
-      {/* Expanded Map Modal */}
-      {isMapExpanded && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-30"
-          onClick={() => setIsMapExpanded(false)}
-          onKeyDown={handleKeyDown}
-          tabIndex={0}
-        >
-          <div 
-            className="bg-white p-6 rounded-lg max-w-4xl max-h-4xl w-[90vw] h-[90vh] relative"
-            onClick={e => e.stopPropagation()}
-          >
-            <h2 className="text-2xl font-bold mb-4 text-center">Isla Floreana - Detailed Map</h2>
-            
-            <div className="relative w-full h-[calc(100%-3rem)] rounded-md overflow-hidden">
-              {/* Ocean background for expanded map */}
-              <div className="absolute inset-0 bg-blue-300"
-                style={{
-                  backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 10 Q 12.5 0, 25 10 T 50 10 T 75 10 T 100 10 V 20 H 0 Z\' fill=\'%232C7DA0\' fill-opacity=\'0.1\'/%3E%3C/svg%3E")',
-                  backgroundSize: '100px 30px',
-                  animation: 'waveMotion 8s linear infinite'
-                }}
-              ></div>
-              
-              {/* Grid for expanded map */}
-              <div className="relative w-full h-full grid grid-cols-5 grid-rows-5 gap-1 p-4">
-                {islandGrid.map(cell => {
-                  // Skip cells that don't exist in the 5x5 grid
-                  if (cell.x > 4 || cell.y > 4) return null;
-                  
-                  const isCurrentLocation = playerPosition.x === cell.x && playerPosition.y === cell.y;
-                  
-                  return (
-                    <div 
-                      key={cell.id}
-                      className={`relative flex items-center justify-center cursor-pointer transition-transform hover:scale-105 ${
-                        cell.type === 'ocean' ? 'opacity-10' : ''
-                      } ${
-                        isCurrentLocation ? 'ring-2 ring-amber-500 z-10' : ''
-                      }`}
-                      style={{ 
-                        backgroundColor: cell.color,
-                        gridColumn: cell.x + 1,
-                        gridRow: cell.y + 1
-                      }}
-                      onClick={() => handleLocationClick(cell.id)}
-                      title={cell.name}
-                    >
-                      {/* Location icon */}
-                      <div className="text-2xl text-white">
-                        {getLocationEmoji(cell.type)}
+        
+        {/* Specimens & Features */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          {/* Potential Specimens */}
+          <div className="bg-white rounded-lg border border-amber-200 shadow-sm">
+            <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+              <h4 className="font-medium text-amber-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+                  <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
+                </svg>
+                Potential Specimens
+              </h4>
+            </div>
+            <div className="p-4">
+              {locationPopup.specimens && locationPopup.specimens.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {locationPopup.specimens.map((specId, index) => {
+                    // Check if specimen is already collected
+                    const isCollected = inventory.some(item => item.id === specId);
+                    
+                    return (
+                      <div 
+                        key={index} 
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-sm ${
+                          isCollected 
+                            ? 'bg-amber-300 text-amber-800 border border-amber-400' 
+                            : 'bg-amber-100 text-amber-700 border border-amber-200'
+                        }`}
+                      >
+                        {isCollected && (
+                          <svg className="w-3.5 h-3.5 mr-1 text-amber-800" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                          </svg>
+                        )}
+                        {specId}
                       </div>
-                      
-                      {/* Cell name */}
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs text-center py-1">
-                        {cell.name.length > 15 ? cell.name.substring(0, 15) + '...' : cell.name}
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 italic text-sm">No known specimens in this area.</p>
+              )}
+            </div>
+          </div>
+          
+          {/* Notable Features */}
+          <div className="bg-white rounded-lg border border-amber-200 shadow-sm">
+            <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+              <h4 className="font-medium text-amber-800 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                Notable Features
+              </h4>
+            </div>
+            <div className="p-4">
+              {locationPopup.notableFeatures ? (
+                <ul className="text-sm text-gray-700 space-y-2">
+                  {locationPopup.notableFeatures.map((feature, index) => (
+                    <li key={index} className="flex">
+                      <span className="text-amber-500 mr-2">•</span>
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="flex items-center px-4 py-3 bg-amber-50 text-amber-800 rounded-lg">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"></path>
+                  </svg>
+                  <p className="text-sm">This location needs further exploration.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex justify-between gap-3 mt-3">
+          <button 
+            onClick={handleClosePopup}
+            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 transition-colors rounded-md text-gray-800 shadow-sm flex-1 font-medium"
+          >
+            Close
+          </button>
+          <button 
+            onClick={handleTravelToLocation}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 transition-colors rounded-md text-white shadow-md flex-1 font-medium flex items-center justify-center"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+            </svg>
+            Travel Here
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+   
+
+{/* Expanded Map Modal */}
+{isMapExpanded && (
+  <div 
+    className="fixed inset-0 bg-black/80 flex items-center justify-center z-30"
+    onClick={() => setIsMapExpanded(false)}
+    onKeyDown={handleKeyDown}
+    tabIndex={0}
+  >
+    <div 
+      className="bg-amber-50 p-5 rounded-lg max-w-6xl w-[95vw] h-[95vh] relative overflow-hidden border-4 border-amber-800"
+      onClick={e => e.stopPropagation()}
+      style={{
+        backgroundImage: 'url("/textures/aged-paper.jpg")',
+        backgroundSize: 'cover',
+        boxShadow: '0 0 30px rgba(0,0,0,0.5)'
+      }}
+    >
+      <h2 className="text-3xl font-bold mb-4 text-center font-serif text-darwin-dark">
+        Isla Floreana - Detailed Map
+      </h2>
+      
+      <div className="relative w-full h-[calc(100%-5rem)] rounded-md overflow-hidden border-2 border-amber-800">
+        {/* Ocean background */}
+        <div 
+          className="absolute inset-0" 
+          style={{
+            background: 'linear-gradient(to bottom, #4a90e2, #5fb2f4)',
+          }}
+        >
+          {/* Add a subtle wave pattern overlay */}
+          <div 
+            className="absolute inset-0 opacity-30"
+            style={{
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 10 Q 12.5 0, 25 10 T 50 10 T 75 10 T 100 10 V 20 H 0 Z\' fill=\'%23fff\'/%3E%3C/svg%3E")',
+              backgroundSize: '100px 30px',
+              animation: 'waveMotion 10s linear infinite'
+            }}
+          ></div>
+        </div>
+        
+  {/* Island shape backdrop */}
+        <div 
+          className="absolute"
+          style={{ 
+            top: '0%',
+            left: '14%',
+            width: '80%',
+            height: '98%',
+            background: 'linear-gradient(35deg, #5a8d50 0%, #3a6e34 100%)',
+            clipPath: `polygon(
+              20% 3%, 10% 80%, 19% 2%, 84% 13%, 90% 23%, 97% 30%, 99% 38%, 98% 45%, 
+              100% 52%, 98% 58%, 90% 62%, 93% 67%, 92% 72%, 90% 78%, 30% 80%, 5% 20%, 
+             
+              40% 3%, 56% -3%, 59% 6%, 78% 12%, 82% 12%, 90% 17%, 92% 34%, 91% 30%, 100% 38%, 
+              10% 73%, 81% 12%, 89% 62%, 77% 47%, 78% 72%, 88% 78%, 80% 88%, 80% 88%, 
+              64% 92%, 62% 94%, 60% 92%, 40% 108%, 25% 100%, 28% 90%, 
+
+              22% 95%, 5% 85%, 10% 88%, 5% 83%, 10% 81%, 0% 85%, 10% 70%, 3% 64%, 4% 68%, -30% 17%, 20% 30%, 
+              91% 52%, 90% 80%, 20% 46%, 15% 28%, 14% 12%, 10% 9%
+            )`,
+            opacity: 0.9,
+            boxShadow: 'inset 0 0 30px 10px rgba(0,0,0,0.25)'
+          }}
+        >
+          {/* Island silhouette background */}
+         
+          
+          {/* Terrain squares container */}
+          <div className="absolute inset-2 grid grid-cols-6 grid-rows-6 gap-1">
+            {islandGrid
+              .filter(cell => {
+                // Only show cells within the main island area 
+                // Adjusted range to better fit island shape
+                return cell.x >= -1 && cell.x <= 7 && cell.y >= 0 && cell.y <= 7;
+              })
+              .map(cell => {
+                const isCurrentLocation = playerPosition.x === cell.x && playerPosition.y === cell.y;
+                
+                // Check if any specimens have been collected here
+                const hasCollectedSpecimens = cell.specimens && 
+                  cell.specimens.some(specId => inventory.some(item => item.id === specId));
+                
+                // Get emoji for this cell type
+                const emoji = getLocationEmoji(cell.type);
+                
+                // Calculate grid position (x+2 for proper alignment)
+                const gridCol = cell.x + 2; // Shift by 2 to account for -1 position
+                const gridRow = cell.y + 1; // Shift by 1
+                
+                // Style cell based on type and location
+                const cellStyle = {
+                  backgroundColor: cell.color || '#3a6e34',
+                  gridColumn: gridCol,
+                  gridRow: gridRow,
+                  borderRadius: '6px',
+                  boxShadow: isCurrentLocation 
+                    ? '0 0 0 2px #f59e0b, 0 0 10px rgba(0,0,0,0.2)' 
+                    : '0 0 5px rgba(0,0,0,0.2)',
+                  overflow: 'hidden'
+                };
+                
+                return (
+                  <div 
+                    key={cell.id}
+                    className={`relative flex flex-col justify-between transition-all duration-200
+                      ${isCurrentLocation ? 'z-10' : 'hover:z-10 hover:scale-105'}
+                    `}
+                    style={cellStyle}
+                    onClick={() => handleLocationClick(cell.id)}
+                    title={cell.name}
+                  >
+                    {/* Large emoji background */}
+                    <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+                      <span className="text-[300%] transform scale-[2.5]">{emoji}</span>
+                    </div>
+                    
+                    {/* Top bar with location icon */}
+                    <div className="z-10 flex justify-between items-start p-1">
+                      <div className="text-base bg-white/70 rounded-full w-6 h-6 flex items-center justify-center shadow-sm">
+                        {emoji}
                       </div>
                       
                       {/* Player marker */}
                       {isCurrentLocation && (
-                        <div className="absolute top-2 right-2 w-6 h-6 bg-amber-700 rounded-full border-2 border-white shadow-lg z-20">
-                          <span className="text-white font-bold flex items-center justify-center h-full">D</span>
+                        <div className="w-15 h-15 bg-amber-600 rounded-full border border-white overflow-hidden animate-pulse">
+                          <img 
+                            src="/portraits/darwin.jpg" 
+                            alt="Darwin"
+                            className="w-full h-full object-cover"
+                          />
                         </div>
                       )}
-                    </div> 
-                  );
-                })}
-              </div>
-              
-              {/* Close button */}
-              <button 
-                className="absolute top-4 right-4 bg-white p-2 rounded-full shadow-md hover:bg-gray-100 z-30"
-                onClick={() => setIsMapExpanded(false)}
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              
-              {/* Current location info */}
-              <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white p-3">
-                <h3 className="text-lg font-bold">{getCurrentLocationName()}</h3>
-                <p>{getCellByCoordinates(playerPosition.x, playerPosition.y)?.description || ''}</p>
-              </div>
-            </div>
+                    </div>
+                    
+                   {/* Cell name */}
+<div className="mt-auto z-10 bg-black/70 text-white text-[14px] px-1 py-0.5 text-center w-full overflow-hidden whitespace-nowrap overflow-ellipsis">
+  {cell.name}
+</div>
+                    
+                    {/* Specimen indicator */}
+                    {hasCollectedSpecimens && (
+                      <div className="absolute top-1 right-1 z-10">
+                        <div className="w-3 h-3 bg-amber-400 rounded-full border border-white animate-pulse"></div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            }
           </div>
         </div>
-      )}
+        
+        {/* Terrain Legend - repositioned to not overlap with island */}
+       <div className="absolute top-1 left-1 z-20 bg-white/90 rounded-md p-1 shadow-md text-xs border border-amber-700">
+  <h3 className="font-bold text-darwin-dark mb-1 text-center border-b border-amber-200 pb-0">Terrain Legend</h3>
+  <div className="grid grid-cols-2 gap-x-3 gap-y-.5 pt-1">
+    {[
+              {type: 'bay', emoji: '📮', name: 'Bay'},
+              {type: 'beach', emoji: '🏝️', name: 'Beach'},
+              {type: 'cliff', emoji: '🧗', name: 'Cliff'},
+              {type: 'coastalTrail', emoji: '👣', name: 'Trail'},
+              {type: 'coastallava', emoji: '🏜️', name: 'Coastal Lava'},
+              {type: 'forest', emoji: '🌳', name: 'Forest'},
+              {type: 'highland', emoji: '⛰️', name: 'Highland'},
+              {type: 'lavaField', emoji: '🌋', name: 'Lava Field'},
+              {type: 'ocean', emoji: '🌊', name: 'Ocean'},
+              {type: 'promontory', emoji: '🗻', name: 'Promontory'},
+              {type: 'reef', emoji: '🪸', name: 'Reef'},
+              {type: 'scrubland', emoji: '🌵', name: 'Scrubland'},
+              {type: 'settlement', emoji: '🏠', name: 'Settlement'},
+              {type: 'wetland', emoji: '🌿', name: 'Wetland'},
+              {type: 'hut', emoji: '🛖', name: 'Hut'}
+            ].map(item => (
+      <div key={item.type} className="flex items-center">
+        <span className="mr-1 flex-shrink-0 w-5 h-5 bg-white/60 rounded-full flex items-center justify-center">{item.emoji}</span>
+        <span className="text-[11px] truncate">{item.name}</span>
+      </div>
+            ))}
+          </div>
+        </div>
+        
+  
+        
+        {/* Close button */}
+        <button 
+          className="absolute top-2 right-2 bg-white/80 p-1.5 rounded-full shadow-md hover:bg-white transition-colors z-30"
+          onClick={() => setIsMapExpanded(false)}
+        >
+
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+
+        
+        {/* Current location info */}
+        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white p-2 z-20">
+          <h3 className="text-2xl font-bold flex items-center text-white/90">
+            <span className="mr-2">{getLocationEmoji(getCellByCoordinates(playerPosition.x, playerPosition.y)?.type)}</span>
+            {getCurrentLocationName()}
+          </h3>
+          <p className="text-s line-clamp-2">{getCellByCoordinates(playerPosition.x, playerPosition.y)?.description || ''}</p>
+        </div>
+      </div>
+      
+      {/* Animation styles */}
+      <style jsx>{`
+        @keyframes waveMotion {
+          0% { background-position: 0 0; }
+          100% { background-position: 100px 0; }
+        }
+      `}</style>
+    </div>
+  </div>
+)}
+
+
 
 {/* Interior Location Access Notification */}
 {(() => {
@@ -601,6 +873,16 @@ export default function EnhancedMapBox({
     </div>
   );
 })()}
+
+ <InteriorEntryMenu
+    currentLocationId={currentLocation?.id || ''} // Pass the ID, not the full object
+    onSelectInterior={(locationId) => {
+      if (onEnterInterior) {
+        onEnterInterior(locationId);
+      }
+    }}
+    className="mb-2"
+  />
 
     </div>
   );
