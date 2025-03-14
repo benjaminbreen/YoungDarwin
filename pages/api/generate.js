@@ -350,7 +350,7 @@ Additional Weather guidance tips:
 - Asilo de la Paz (Settlement) is ALWAYS rainy. 
 - other mountains and forests are typically misty or cloudy.  
 - the southern coast is humid and misty or rain. 
-- ALWAYS return "rainbow" for the WEATHER metadata in Punta Sur. In general, rainbows usually follow any rain or storm.
+- ALWAYS return "rainbow" for the WEATHER metadata in Punta Sur. In general, rainbows follow a storm. It is often raining on the southern and eastern coasts.
 - ALWAYS return "cold" or "rain" or "windy" for weather if it is after 7 pm or before 5 am
 - there is always a STORM at the Southwestern Cliffs.
 

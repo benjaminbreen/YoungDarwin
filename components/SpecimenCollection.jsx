@@ -21,7 +21,8 @@ export default function SpecimenCollection({
   onOpenCollectionPopup,
    specimenList,
    currentLocation,
-   gameTime 
+   gameTime, 
+   onOpenJournal
 }) {
   // states
   const [showDetailPopup, setShowDetailPopup] = useState(false);
@@ -245,28 +246,21 @@ useEffect(() => {
           )}
           
           {/* Field notes button */}
-          <button
-        onClick={() => {
-          setSelectedJournalSpecimen(currentSpecimen);
-          setShowJournalPopup(true);
-        }}
-        className="text-sm w-full bg-green-600 hover:bg-green-700 p-1 text-white font-bold py-1.5 rounded-lg mb-2 transition"
+         <button
+      onClick={() => {
+
+        onOpenJournal && onOpenJournal(currentSpecimen);
+      }}
+      className="text-sm w-full bg-green-600 hover:bg-green-700 p-1 text-white font-bold py-1.5 rounded-lg mb-2 transition"
       >
-        Document {currentSpecimen.name}
-      </button>
+      Document {currentSpecimen.name}
+    </button>
+
       <p className="text-xs text-gray-600 text-center mb-4 italic">
         Remember to use at least one  Tool first!
       </p>
 
-        <Journal
-        isOpen={showJournalPopup}
-        onClose={() => setShowJournalPopup(false)}
-        specimen={selectedJournalSpecimen}
-        onSave={(entry) => {
-          // Optional: Add logic to handle saved journal entries
-          console.log('Journal entry saved:', entry);
-        }}
-      />
+   
           
           {/* Analysis Tools  */}
           <div className="mt-4">

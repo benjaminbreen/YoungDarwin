@@ -40,12 +40,17 @@ export function getSpecimenIcon(id) {
     case 'memoirsofautopian': return '📖';
     case 'governorsletter': return '✉️';
     case 'rumflask': return '⚱️';
-    case 'petmonkey': return '🐵';
     case 'feralgoat': return '🐐';
     case 'captainsskull': return '💀';
     case 'shortearedowl': return '🦉';
     case 'galapagospenguin': return '🐧';
     case 'galapagosracer': return '🐍';
+    case 'solidifiedsulphur': return '🌕';
+    case 'meteoriron': return '☄️';
+          case 'jackothemonkey': return '🙈';
+          case 'whalersletter': return '💌';
+          case 'scrimshawwhaletooth': return '🦷';
+
     // Handle hybrid IDs by pattern matching
     default:
       // Check if this is a hybrid ID (starts with 'hybrid_')

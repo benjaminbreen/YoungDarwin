@@ -127,7 +127,7 @@ const getBannerImage = () => {
   if (location.includes('Governor')) return '/banners/governorshouse.jpg';
 
    if (location.includes('watkins interior')) return '/banners/watkinsinterior.jpg';
-      if (location.includes('whalers hut')) return '/banners/whalershut.jpg';
+      if (location.includes('Hut Interior')) return '/banners/hutinterior.jpg';
 
         if (location.includes('mail barrel')) return '/banners/mailbarrelinterior.jpg';
       
@@ -172,8 +172,8 @@ const getBannerImage = () => {
     return '/banners/westernhighlands.jpg';
   case 'Cerro Pajas':
     return '/banners/cerropajas.jpg';
-  case 'Asilo de la Paz (Penal Colony)':
-    return '/banners/penalcolony.jpg';
+  case 'Ecuadorian Penal Colony':
+    return '/banners/ecuadorianpenalcolony.jpg';
   case 'Rocky Clearing':
     return '/banners/rockyclearing.jpg';
   case 'El Mirador':
@@ -204,8 +204,8 @@ const getBannerImage = () => {
     return '/banners/wetlandsforest.jpg';
   case 'Intertidal Flats':
     return '/banners/intertidalflats.jpg';
-  case 'Abandoned Beach Hut':
-    return '/banners/abandonedhut.jpg';
+  case 'Beach with Hut':
+    return '/banners/beachwithhut.jpg';
   case 'Southern Reefs':
     return '/banners/southernreefs.jpg';
 

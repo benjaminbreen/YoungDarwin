@@ -74,7 +74,7 @@ export default function EnhancedMapBox({
       case 'highland': return '⛰️';
       case 'wetland': return '🌿';
       case 'forest': return '🌳';
-      case 'lavaField': return '🌋';
+      case 'lavafield': return '🌋';
       case 'coastalTrail': return '👣';
       case 'cliff': return '🧗';
       case 'promontory': return '🗻';
@@ -85,6 +85,9 @@ export default function EnhancedMapBox({
       case 'coastallava': return '🏜️';
       case 'hut': return '🛖';
       case 'camp': return '🏕️';
+      case 'shipwreck': return '🏴‍☠️';
+         case 'clearing': return '⛰️';
+        
       default: return '📍';
     }
   };
@@ -805,14 +808,16 @@ export default function EnhancedMapBox({
               {type: 'coastallava', emoji: '🏜️', name: 'Coastal Lava'},
               {type: 'forest', emoji: '🌳', name: 'Forest'},
               {type: 'highland', emoji: '⛰️', name: 'Highland'},
+               {type: 'clearing', emoji: '⛰️', name: 'Clearing'},
               {type: 'lavaField', emoji: '🌋', name: 'Lava Field'},
               {type: 'ocean', emoji: '🌊', name: 'Ocean'},
               {type: 'promontory', emoji: '🗻', name: 'Promontory'},
               {type: 'reef', emoji: '🪸', name: 'Reef'},
               {type: 'scrubland', emoji: '🌵', name: 'Scrubland'},
-              {type: 'settlement', emoji: '🏠', name: 'Settlement'},
+              {type: 'settlement', emoji: '🏠', name: 'Penal Colony'},
               {type: 'wetland', emoji: '🌿', name: 'Wetland'},
-              {type: 'hut', emoji: '🛖', name: 'Hut'}
+              {type: 'hut', emoji: '🛖', name: 'Hut'},
+              {type: 'shipwreck', emoji: '🏴‍☠️', name: 'Shipwreck'}
             ].map(item => (
       <div key={item.type} className="flex items-center">
         <span className="mr-1 flex-shrink-0 w-5 h-5 bg-white/60 rounded-full flex items-center justify-center">{item.emoji}</span>
@@ -869,7 +874,7 @@ export default function EnhancedMapBox({
   // Check if player is at a location with interior access
   return ['E_MID', 'POST_OFFICE_BAY', 'SETTLEMENT'].includes(currentLocationId) && (
     <div className="mt-3 text-center italic text-amber-800 text-sm border-t border-amber-200 pt-2">
-      A new location is accessible from this square... if you can find it.
+      An interior location is accessible from here... if you can find it.
     </div>
   );
 })()}

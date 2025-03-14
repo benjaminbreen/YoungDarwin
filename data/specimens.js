@@ -219,7 +219,7 @@ export const baseSpecimens = [
       'Feeds primarily on fallen cactus pads and tough vegetation',
       'Slow movements, occasionally bobbing its head in warning'
     ],
-    habitat: 'scrubland, lavaField',
+    habitat: 'scrubland, lavafield',
     collected: false,
     observations: [],
     scientificValue: 6,
@@ -248,7 +248,7 @@ export const baseSpecimens = [
       'Stores water in its pulpy interior',
       'Roots spread widely to capture scant rainfall'
     ],
-    habitat: 'lavaField',
+    habitat: 'lavafield, coastallava',
     collected: false,
     observations: [],
     scientificValue: 3,
@@ -277,7 +277,7 @@ export const baseSpecimens = [
       'Coloration shifts slightly to blend with local rock hues',
       'Defends small patches of ground with bobbing gestures'
     ],
-    habitat: 'lavaField, volcanic rocks',
+    habitat: 'lavafield, coastallava',
     collected: false,
     observations: [],
     scientificValue: 4,
@@ -422,7 +422,7 @@ export const baseSpecimens = [
       'Appears brittle, easily fractured by hand',
       'Often tangled with seaweed or driftwood upon discovery'
     ],
-    habitat: 'shore, beach',
+    habitat: 'shore, beach, reef',
     collected: false,
     observations: [],
     scientificValue: 2,
@@ -452,7 +452,7 @@ export const baseSpecimens = [
     'When prodded, the spines move slightly, revealing a living creature beneath',
     'Can be difficult to pick up, as its spines shift to resist handling'
   ],
-  habitat: 'shore, tidal pools, bay, ocean',
+  habitat: 'shore, reef, bay, ocean',
   collected: false,
   observations: [],
   scientificValue: 3, // A common but intriguing marine invertebrate
@@ -482,7 +482,7 @@ export const baseSpecimens = [
       'A dull, dark coloration that glistens when wet',
       'Occasionally streaked with red scoria or ash deposits'
     ],
-    habitat: 'lavaField, bay',
+    habitat: 'lavafield, bay',
     collected: false,
     observations: [],
     scientificValue: 6,
@@ -602,7 +602,7 @@ export const baseSpecimens = [
       'Makes audible scraping sounds while nibbling algae',
       'Occasionally seen spitting fragments of rock or shell'
     ],
-    habitat: 'ocean',
+    habitat: 'ocean, reef,',
     collected: false,
     observations: [],
     scientificValue: 5,
@@ -631,7 +631,7 @@ export const baseSpecimens = [
       'Swims in slow arcs near drop-offs, sometimes in small groups',
       'Occasionally glimpsed at dawn or dusk, though sightings vary'
     ],
-    habitat: 'ocean',
+    habitat: 'ocean, reef',
     collected: false,
     observations: [],
     scientificValue: 5,
@@ -660,7 +660,7 @@ export const baseSpecimens = [
       'Seen gracefully “flying” through open ocean near the surface',
       'Occasionally leaps clear of the water, creating a splash'
     ],
-    habitat: 'ocean',
+    habitat: 'ocean, reef',
     collected: false,
     observations: [],
     scientificValue: 5,
@@ -718,7 +718,7 @@ export const baseSpecimens = [
       'Loose fragments sometimes spotted in eroded gullies',
       'May appear translucent when held to strong light'
     ],
-    habitat: 'lavaField, coastalTrail',
+    habitat: 'lavafield, coastalTrail',
     collected: false,
     observations: [],
     scientificValue: 7,
@@ -788,92 +788,93 @@ export const baseSpecimens = [
   },
 
   {
-  "id": "galapagospenguin",
-  "name": "Galápagos Penguin",
-  "latin": "Spheniscus mendiculus",
-  "ontology": "Animal",
-  "order": "Bird",
-  "sub_order": "Penguin",
-  "description": "The northernmost penguin species, thriving in cool currents along the rocky shores despite the tropical latitude.",
-  "details": [
-    "Small stature compared to Antarctic relatives",
-    "Black and white plumage with a distinctive band across the chest",
-    "Nests in crevices of lava rocks near the waterline",
-    "Remarkably agile underwater, chasing fish in swift bursts"
+  id: 'galapagospenguin',
+  name: 'Galápagos Penguin',
+  latin: 'Spheniscus mendiculus',
+  ontology: 'Animal',
+  order: 'Bird',
+  sub_order: 'Penguin',
+  description: 'The northernmost penguin species, thriving in cool currents along the rocky shores despite the tropical latitude.',
+  details: [
+    'Small stature compared to Antarctic relatives',
+    'Black and white plumage with a distinctive band across the chest',
+    'Nests in crevices of lava rocks near the waterline',
+    'Remarkably agile underwater, chasing fish in swift bursts'
   ],
-  "habitat": "bay",
-  "collected": false,
-  "observations": [],
-  "scientificValue": 7,
-  "hybrid_ease": 1,
-  "hybrid_temperature": 1,
-  "danger": 2,
-  "timeofday": "Diurnal",
-  "quote": "",
-  "image": "/specimens/galapagos_penguin.jpg",
-  "memoryText": "“I confess surprise in seeing these creatures, so reminiscent of the southern latitudes, happily bobbing along the equator.”",
-  "contents": "If opened, the stomach would reveal small fish, bits of crustaceans, and gritty salt residue.",
-  "keywords": ["penguin", "bird", "galapagos", "spheniscus", "marine", "equator"],
-  "emoji": "🐧"
+  habitat: 'cliff',
+  collected: false,
+  observations: [],
+  scientificValue: 7,
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 2,
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/galapagospenguin.jpg',
+  memoryText: '“I confess surprise in seeing these creatures, so reminiscent of the southern latitudes, happily bobbing along the equator.”',
+  contents: 'If opened, the stomach would reveal small fish, bits of crustaceans, and gritty salt residue.',
+  keywords: ['penguin', 'bird', 'galapagos', 'spheniscus', 'marine', 'equator'],
+  emoji: '🐧'
 },
 {
-  "id": "shortearedowl",
-  "name": "Galápagos Short-eared Owl",
-  "latin": "Asio flammeus galapagoensis",
-  "ontology": "Animal",
-  "order": "Bird",
-  "sub_order": "Owl",
-  "description": "A stealthy hunter that has adapted to open arid landscapes, ambushing small birds, reptiles, or rodents.",
-  "details": [
-    "Mottled brown and buff feathers for camouflage",
-    "Short ear-tufts often lie flat, barely visible",
-    "Flight can be silent, skimming near the ground",
-    "Remarkably variable diet, even scavenging on carcasses"
+  id: 'shortearedowl',
+  name: 'Galápagos Short-eared Owl',
+  latin: 'Asio flammeus galapagoensis',
+  ontology: 'Animal',
+  order: 'Bird',
+  sub_order: 'Owl',
+  description: 'A stealthy hunter that has adapted to open arid landscapes, ambushing small birds, reptiles, or rodents.',
+  details: [
+    'Mottled brown and buff feathers for camouflage',
+    'Short ear-tufts often lie flat, barely visible',
+    'Flight can be silent, skimming near the ground',
+    'Remarkably variable diet, even scavenging on carcasses'
   ],
-  "habitat": "forest, camp",
-  "collected": false,
-  "observations": [],
-  "scientificValue": 6,
-  "hybrid_ease": 2,
-  "hybrid_temperature": 2,
-  "danger": 3,
-  "timeofday": "Nocturnal",
-  "quote": "",
-  "image": "/specimens/shorteared_owl.jpg",
-  "memoryText": "“Upon a silent wing it glided, all but invisible in the dusk, seizing a finch so quickly I scarcely had time to blink.”",
-  "contents": "Should it be dissected, pellets of fur, feathers, and small bone fragments lie within.",
-  "keywords": ["owl", "bird", "asio", "nocturnal", "raptor"],
-  "emoji": "🦉"
+  habitat: 'camp',
+  collected: false,
+  observations: [],
+  scientificValue: 6,
+  hybrid_ease: 2,
+  hybrid_temperature: 2,
+  danger: 3,
+  timeofday: 'Nocturnal',
+  quote: '',
+  image: '/specimens/shortearedowl.jpg',
+  memoryText: '“Upon a silent wing it glided, all but invisible in the dusk, seizing a finch so quickly I scarcely had time to blink.”',
+  contents: 'Should it be dissected, pellets of fur, feathers, and small bone fragments lie within.',
+  keywords: ['owl', 'bird', 'asio', 'nocturnal', 'raptor'],
+  emoji: '🦉'
 },
 {
-  "id": "galapagosracer",
-  "name": "Galápagos Racer Snake",
-  "latin": "Pseudalsophis biserialis",
-  "ontology": "Animal",
-  "order": "Reptile",
-  "sub_order": "Snake",
-  "description": "A slender, mildly venomous snake known for its speed when hunting lava lizards and small rodents.",
-  "details": [
-    "Brownish or gray mottled scales, blending with volcanic rocks",
-    "Uncertain temperament—some appear shy, others more boldly investigative",
-    "Primarily diurnal, basking on lava outcrops before foraging",
-    "Delivers quick, targeted strikes at prey"
+  id: 'galapagosracer',
+  name: 'Galápagos Racer Snake',
+  latin: 'Pseudalsophis biserialis',
+  ontology: 'Animal',
+  order: 'Reptile',
+  sub_order: 'Snake',
+  description: 'A slender, mildly venomous snake known for its speed when hunting lava lizards and small rodents.',
+  details: [
+    'Brownish or gray mottled scales, blending with volcanic rocks',
+    'Uncertain temperament—some appear shy, others more boldly investigative',
+    'Primarily diurnal, basking on lava outcrops before foraging',
+    'Delivers quick, targeted strikes at prey'
   ],
-  "habitat": "lavaField",
-  "collected": false,
-  "observations": [],
-  "scientificValue": 6,
-  "hybrid_ease": 2,
-  "hybrid_temperature": 3,
-  "danger": 4,
-  "timeofday": "Diurnal",
-  "quote": "",
-  "image": "/specimens/galapagos_racer_snake.jpg",
-  "memoryText": "“Its darting movement across the black lava was a fleeting specter—difficult to catch sight of, yet undeniably present.”",
-  "contents": "Lizard scales, rodent fur, or occasional small bird remains may be discovered in its digestive tract.",
-  "keywords": ["galapagos racer", "snake", "reptile", "pseudalsophis", "lava", "fast"],
-  "emoji": "🐍"
+  habitat: 'highland',
+  collected: false,
+  observations: [],
+  scientificValue: 6,
+  hybrid_ease: 2,
+  hybrid_temperature: 3,
+  danger: 4,
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/galapagosracer.jpg',
+  memoryText: '“Its darting movement across the black lava was a fleeting specter—difficult to catch sight of, yet undeniably present.”',
+  contents: 'Lizard scales, rodent fur, or occasional small bird remains may be discovered in its digestive tract.',
+  keywords: ['galapagos racer', 'snake', 'reptile', 'pseudalsophis', 'lava', 'fast'],
+  emoji: '🐍'
 },
+
 
   // Additional "Outside the Box" Specimens
 
@@ -916,12 +917,12 @@ export const baseSpecimens = [
   sub_order: 'Personal Letter',
   description: 'A sealed letter addressed to a young woman in Nantucket, penned by a whaling captain who doubts he will return home.',
   details: [
-    'The paper is waterproofed with beeswax, folded intricately to protect the contents',
-    'Elegant script that belies the rough hands that wrote it',
+
     'Several passages suggest the writer fears his own mortality',
-    'A small sketch of a sperm whale adorns the corner of the final page'
+    'It’s rather sad...',
+
   ],
-  habitat: 'mail barrel',
+  habitat: 'hut',
   collected: false,
   observations: [],
   scientificValue: 2,
@@ -940,7 +941,7 @@ export const baseSpecimens = [
 {
   id: 'memoirsofautopian',
   name: 'Memoirs of a Utopian',
-  latin: 'Memorabilia Vitae Puig',
+  latin: 'It seems to be some sort of radical literature',
   ontology: 'Document',
   order: 'Political',
   sub_order: 'Autobiography',
@@ -951,7 +952,7 @@ export const baseSpecimens = [
     'Chronicles an exile in Boston, inspired by Robert Owen’s communes',
     'Speaks bitterly of British “imperial arrogance,” culminating in captivity'
   ],
-  habitat: 'cave',
+  habitat: 'clearing',
   collected: false,
   observations: [],
   scientificValue: 8, // Historical insight into exiled radicals
@@ -981,7 +982,7 @@ export const baseSpecimens = [
     'Mentions rumored abuses in the penal colony on Charles Island',
     'Signed with Vilamil’s official seal, pressed in red wax'
   ],
-  habitat: 'settlement',
+  habitat: 'office',
   collected: false,
   observations: [],
   scientificValue: 1,
@@ -1027,7 +1028,7 @@ export const baseSpecimens = [
 
 // 5) The Pet Monkey (HMS Beagle)
 {
-  id: 'petmonkey',
+  id: 'jackothemonkey',
   name: 'Jacko the Monkey',
   latin: 'Cebus marinus (colloquial)',
   ontology: 'Animal',
@@ -1100,7 +1101,7 @@ export const baseSpecimens = [
     'Edges smoothed by handling, perhaps a cherished keepsake',
     'Hints of brine and stale tobacco odor cling to the porous surface'
   ],
-  habitat: 'shipwreck',
+  habitat: 'hut',
   collected: false,
   observations: [],
   scientificValue: 2, // Interesting cultural artifact, not biologically crucial
@@ -1158,7 +1159,7 @@ export const baseSpecimens = [
     'Slightly magnetic if tested with a metal instrument',
     'Local sailors whisper it grants luck if kept aboard, but ill fate if left behind'
   ],
-  habitat: 'lavaField',
+  habitat: 'promontory',
   collected: false,
   observations: [],
   scientificValue: 9, // Rare cosmic sample
@@ -1175,7 +1176,7 @@ export const baseSpecimens = [
 
 {
   id: 'solidifiedsulphur',
-  name: 'Solidified Sulphur Deposit',
+  name: 'Solidified Sulphur',
   latin: 'Sulphuris Depositum',
   ontology: 'Object',
   order: 'Volcanic Curio',
@@ -1187,7 +1188,7 @@ export const baseSpecimens = [
     'Formed by sulphurous vapors condensing near fissures',
     'Stains fingers a pale lemon hue on prolonged contact'
   ],
-  habitat: 'lavaField',
+  habitat: 'lavafield, coastallava',
   collected: false,
   observations: [],
   scientificValue: 7, // Ties to volcanic activity
@@ -1203,32 +1204,31 @@ export const baseSpecimens = [
 },
 
 {
-  id: 'fennecscurvyremedy',
-  name: 'Fennec’s Scurvy Remedy',
+  id: 'scurvyremedy',
+  name: 'Scurvy Remedy',
   latin: 'Medicamentum Anti-Scorbuticum',
   ontology: 'Object',
   order: 'Medicine Bottle',
   sub_order: 'Folk Cure',
-  description: 'A small glass vial labeled “Fennec’s Tonic for Scurvy,” the viscous contents dried to a dark resin.',
+  description: 'A small glass vial that appears to be labeled “Fennec’s Tonic for Scurvy,” though the ink is faded and the contents viscous.',
   details: [
-    'Wax-sealed cork stuck fast, slight herbal odor escapes if shaken',
-    'Cartoonish fox (“Fennec”) depicted touting miraculous healing claims',
-    'Instructions advise mixing with rum and frequent prayers',
-    'Fine cracks run along the amber glass from repeated temperature changes'
+    'It looks... good?',
+    'Maybe I should drink it.',
+    'Do I have scurvy?'
   ],
-  habitat: 'ship',
+  habitat: 'shipwreck',
   collected: false,
   observations: [],
   scientificValue: 2, // A quack remedy, interesting cultural item
   hybrid_ease: 1,
   hybrid_temperature: 1,
-  danger: 10, // highly toxic
+  danger: 10, // highly toxic, immediately kills darwin
   timeofday: 'Any',
   quote: '',
   image: '/specimens/fennec_scurvy_remedy.jpg',
   memoryText: '“A questionable elixir promising swift cures. Perhaps it offered hope to scurvy-ridden souls, if not real relief.”',
-  contents: 'Sticky residue, likely a mix of citrus peel extract, odd herbs, and unknown binders.',
-  keywords: ['medicine', 'bottle', 'scurvy', 'folk remedy', 'quackery']
+  contents: 'Sticky residue, likely a mix of citrus peel extract, odd herbs, and exceptionally poisonous binders. Kills Darwin if drunk.',
+  keywords: ['poison', 'bottle', 'scurvy', 'folk remedy', 'quackery']
 },
 
 // 8) Murdered Captain’s Skull (Outside the Box #2)

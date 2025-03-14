@@ -9,9 +9,9 @@ export const locations = [
     x: 0,
     y: -1,
     color: 'tan',
-    type: 'ship',
+    type: 'beagle',
     validMoves: [],
-    specimens: [],
+    specimens: ['Jacko the Monkey'],
     npcs: ['fitzroy', 'lascar_joe'],
     boundaries: { north: 'ocean', west: 'ocean', south: 'ocean' },
     discoveries: [
@@ -220,7 +220,7 @@ export const locations = [
     x: 1,
     y: 1,
     color: '#696969',
-    type: 'lavaField',
+    type: 'lavafield',
     validMoves: ['W','E','SW','S','SE','NW','NE','N'],
     specimens: ['lavaLizard','basalt'],
     npcs: [],
@@ -399,7 +399,7 @@ export const locations = [
   // 18) PENAL COLONY
   {
     id: 'PENAL_COLONY',
-    name: 'Asilo de la Paz (Penal Colony)',
+    name: 'Ecuadorian Penal Colony',
     description: 'A small, gloomy settlement of prisoners and soldiers. The Vice Governor’s house stands out.',
     x: 2,
     y: 2,
@@ -427,9 +427,9 @@ export const locations = [
     x: 3,
     y: 2,
     color: '#bdb76b',
-    type: 'highland',
+    type: 'clearing',
     validMoves: ['N','E','W','S'],
-    specimens: ['floreana_mockingbird','cactus'],
+    specimens: ['unknown'],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -542,7 +542,7 @@ export const locations = [
     x: 2,
     y: 3,
     color: '#696969',
-    type: 'lavaField',
+    type: 'lavafield',
     validMoves: ['N','E','W','S'],
     specimens: ['lavaLizard'],
     npcs: [],
@@ -588,9 +588,9 @@ export const locations = [
     x: 4,
     y: 3,
     color: '#5f9ea0',
-    type: 'coastalTrail',
+    type: 'shipwreck',
     validMoves: ['N','W'],
-    specimens: ['booby','seaLion'],
+    specimens: ['scurvyremedy','seaLion'],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -658,10 +658,10 @@ export const locations = [
     y: 4,
     color: '#8b4513',
     type: 'promontory',
-    validMoves: ['N','E','W'],
+    validMoves: ['N','S','W'],
     specimens: ['frigatebird','booby'],
     npcs: [],
-    boundaries: { south: 'cliff' },
+    boundaries: { east: 'cliff' },
     discoveries: [
       'At certain hours, the crashing spray refracts the light, creating rainbow arcs in mid-air.'
     ],
@@ -721,7 +721,7 @@ export const locations = [
   // 32) S_HUT
   {
     id: 'S_HUT',
-    name: 'Abandoned Beach Hut',
+    name: 'Beach with Hut',
     description: 'A protected beach with a small hut and the remains of a household garden.',
     x: 1,
     y: 5,
@@ -770,7 +770,7 @@ export const locations = [
   x: 999,
   y: 999,
   color: '#333333',
-  type: 'interior',
+  type: 'cave',
   validMoves: [], 
   specimens: [],
   npcs: ['gabriel_puig'],
@@ -792,7 +792,7 @@ export const locations = [
   x: 900,  // Fake coords so these won't appear on the main island map
   y: 100,
   color: '#c2b280',
-  type: 'interior',
+  type: 'office',
   validMoves: [], 
   npcs: ['nicolas_lawson'],
   specimens: [],

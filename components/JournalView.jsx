@@ -205,35 +205,18 @@ export default function JournalView({ isOpen, onClose }) {
   if (!isOpen) return null;
   
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div 
-        ref={drawerRef}
-        className="bg-cream-50 rounded-xl border-2 border-amber-300 shadow-2xl max-w-5xl w-full h-[85vh] animate-slide-in-right overflow-hidden"
-        style={{
-          backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%238B5A2B\' fill-opacity=\'0.03\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3z\'/%3E%3C/g%3E%3C/svg%3E")'
-        }}
-      >
-        {/* Decorative corners */}
-        <div className="absolute top-0 left-0 w-16 h-16 pointer-events-none">
-          <div className="absolute top-3 left-3 w-8 h-8 border-t-2 border-l-2 border-amber-700/30 rounded-tl-md"></div>
-        </div>
-        <div className="absolute top-0 right-0 w-16 h-16 pointer-events-none">
-          <div className="absolute top-3 right-3 w-8 h-8 border-t-2 border-r-2 border-amber-700/30 rounded-tr-md"></div>
-        </div>
-        <div className="absolute bottom-0 left-0 w-16 h-16 pointer-events-none">
-          <div className="absolute bottom-3 left-3 w-8 h-8 border-b-2 border-l-2 border-amber-700/30 rounded-bl-md"></div>
-        </div>
-        <div className="absolute bottom-0 right-0 w-16 h-16 pointer-events-none">
-          <div className="absolute bottom-3 right-3 w-8 h-8 border-b-2 border-r-2 border-amber-700/30 rounded-br-md"></div>
-        </div>
-        
-        {/* Decorative ink stain corners */}
-        <div className="absolute top-0 right-0 w-[100px] h-[100px] opacity-[0.035] z-0 pointer-events-none"
-          style={{
-            backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'%3E%3Cpath fill=\'%234a3728\' d=\'M95.8,12c-3.5,2.9-13.7,7.4-24.7,10.6C60,26.1,48.7,28.7,38,28.7c-9.1,0-17.7-2-24.8-6.1 C6.8,18.7,2.3,12.9,0.3,5.3C6.9-0.7,20.6,1,32.8,7.9c7.3,4.1,13.5,9.6,18.5,16.2c4.9-6.7,11-12.2,18.3-16.3 C81.8,1,95.5-0.7,102.1,5.3C100.1,12.9,95.6,18.7,89.2,22.6C82.1,26.7,73.5,28.7,64.4,28.7c-10.7,0-22-2.6-33.1-6.1 C20.3,19.4,10.1,14.9,6.6,12H95.8z\'/%3E%3C/svg%3E")',
-            transform: 'rotate(90deg)'
-          }}
-        />
+  ref={drawerRef}
+  className="bg-cream-50 rounded-xl border-2 border-amber-300 shadow-3xl max-w-6xl w-full h-[85vh] animate-slide-in-right overflow-hidden"
+  style={{
+    backgroundImage: 'url("/textures/agedpaper.jpg")',
+    backgroundSize: 'cover',
+    backgroundPosition: 'center'
+  }}
+>
+   
+       
         
         <div className="absolute bottom-0 left-0 w-[100px] h-[100px] opacity-[0.035] z-0 pointer-events-none"
           style={{
@@ -244,7 +227,7 @@ export default function JournalView({ isOpen, onClose }) {
         
         {/* Header */}
         <div className="p-4 border-b-2 border-amber-300/70 bg-amber-50/90 backdrop-blur-sm flex justify-between items-center sticky top-0 z-10 shadow-sm">
-          <h2 className="text-2xl font-bold text-amber-900 font-serif flex items-center">
+          <h2 className="text-2xl font-bold text-amber-900 font-serif flex items-center ">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 mr-3 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
             </svg>
@@ -262,14 +245,14 @@ export default function JournalView({ isOpen, onClose }) {
         </div>
         
         {/* Search and filter bar */}
-        <div className="p-3 border-b border-amber-200 bg-amber-50/80 flex flex-wrap gap-2 items-center shadow-sm">
+        <div className="p-3 border-b border-amber-200 bg-amber-50/80 flex flex-wrap gap-3 items-center shadow-sm">
           <div className="relative flex-1 min-w-[200px]">
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search entries..."
-              className="w-full pl-9 pr-3 py-2 border border-amber-300 rounded-md bg-white/90 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-inner"
+              placeholder="     Search entries..."
+              className="w-full pl-10 pr-3 py-3 border border-amber-300 rounded-md bg-white/90 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-inner"
             />
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-500 absolute left-2 top-1/2 transform -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -323,9 +306,9 @@ export default function JournalView({ isOpen, onClose }) {
         </div>
         
         {/* Journal entries */}
-        <div className="p-4 overflow-y-auto h-[calc(85vh-200px)]">
+        <div className=" p-6 overflow-y-auto h-[calc(85vh-200px)]">
           {sortedEntries.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-500 italic px-4">
+            <div className="flex flex-col items-center justify-center h-full text-gray-500 italic px-5">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 text-amber-300 mb-4 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
               </svg>
@@ -339,14 +322,14 @@ export default function JournalView({ isOpen, onClose }) {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {sortedEntries.map(entry => (
                 <div 
                   key={entry.id} 
-                  className="bg-white border border-amber-200 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 hover:border-amber-400 cursor-pointer relative transform hover:-translate-y-1 overflow-hidden"
+                  className="rounded bg-white/80 border border-amber-200 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 hover:border-amber-400 cursor-pointer relative transform hover:-translate-y-1 overflow-hidden"
                   onClick={() => setShowFullEntry(entry)}
                 >
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-amber-300"></div>
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 to-amber-300"></div>
                   
                   <div className="p-4">
                     <div className="flex justify-between items-start mb-2">
@@ -379,9 +362,9 @@ export default function JournalView({ isOpen, onClose }) {
                       </div>
                     </div>
                     
-                    <div className="p-3 rounded-lg border border-amber-100 font-serif text-sm whitespace-pre-wrap bg-amber-50/30 line-clamp-4 h-24 overflow-hidden relative">
+                    <div className="p-3 rounded-lg border border-amber-100 font-serif text-m whitespace-pre-wrap bg-amber-50/30 line-clamp-4 h-24 overflow-hidden relative">
                       {entry.content}
-                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-amber-50/90 to-transparent"></div>
+                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-amber-50/50 to-transparent"></div>
                     </div>
                     
                     <div className="flex justify-end mt-2">

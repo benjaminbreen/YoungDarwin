@@ -26,13 +26,12 @@ import EventHistoryDebug from './EventHistoryDebug';
 import buildLLMPromptContext from '../utils/generateLLMContext';
 import HybridGenerator from './HybridGenerator';
 import HybridsDebug from './HybridsDebug';
-
-// Import the new grid-based location system
 import { useLocationSystem } from '../utils/locationHook';
 import EnhancedMapBox from './EnhancedMapBox';
 import { useMemo } from 'react';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
+import Journal from './Journal';
 
 
 
@@ -242,7 +241,8 @@ const [hybridsEnabled, setHybridsEnabled] = useState(false);
 const [generatedHybrids, setGeneratedHybrids] = useState([]);
 const [hybridityMode, setHybridityMode] = useState('none'); // 'none', 'mild', or 'extreme'
 const [isMovingViaMap, setIsMovingViaMap] = useState(false);
-
+const [journalOpen, setJournalOpen] = useState(false);
+const [journalSpecimen, setJournalSpecimen] = useState(null);
 
   // Initialize the game
   useEffect(() => {
@@ -666,6 +666,7 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
   }
 
   try {
+   
     // Set loading state FIRST
     setIsLoading(true);
     setNarrativeText('');
@@ -728,7 +729,7 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     sendToLLM(`An error occurred while attempting to collect the ${specimen.name}: ${error.message}`);
     setIsLoading(false);
   }
-  // Notice: We don't set isLoading to false here - sendToLLM will do that when complete
+
 }
   
   // Handle detailed tool use
@@ -747,8 +748,12 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     }
   };
 
-/// Resting and fatigue handlers
+/// Resting, journal, and fatigue handlers
 
+const handleOpenJournal = (specimen) => {
+  setJournalSpecimen(specimen);
+  setJournalOpen(true);
+};
 
 //  handlePassOut function with random NPC rescue
 const handlePassOut = () => {
@@ -2016,6 +2021,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   specimenList={specimenList}  
 currentLocation={currentLocationId}
 gameTime={gameTime} 
+  onOpenJournal={handleOpenJournal}
 />   
  </div>
       </div>
@@ -2294,6 +2300,16 @@ gameTime={gameTime}
     </div>
   </div>
 )}
+
+<Journal
+  isOpen={journalOpen}
+  onClose={() => setJournalOpen(false)}
+  specimen={journalSpecimen}
+  onSave={(entry) => {
+    console.log('Journal entry saved:', entry);
+    // Any additional logic
+  }}
+/>
 
  {process.env.NODE_ENV === 'development' && (
       <>

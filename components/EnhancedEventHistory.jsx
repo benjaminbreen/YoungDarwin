@@ -1,321 +1,190 @@
-// EnhancedEventHistory.jsx component for YOUNG DARWIN (for showing and organizing key events)
+// components/EnhancedEventHistory.jsx
+'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import useGameStore from '../hooks/useGameStore';
-import { locations } from '../data/locations';
 
 export default function EnhancedEventHistory() {
   const [isOpen, setIsOpen] = useState(false);
-  const [eventsSummary, setEventsSummary] = useState([]);
-  const [email, setEmail] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
-  const [isEmailSent, setIsEmailSent] = useState(false);
-  const [savedNotification, setSavedNotification] = useState(false);
+  const [email, setEmail] = useState('');
   const drawerRef = useRef(null);
-  const { eventHistory } = useGameStore();
-
-
-  // Helper function to generate unique keys for events
-const generateUniqueKey = (event, index) => {
-  // If event has a unique ID, use it with an index prefix
-  if (event && event.id) {
-    return `event-${index}-${event.id}`;
-  }
+  const eventHistory = useGameStore(state => state.eventHistory);
+  const inventory = useGameStore(state => state.inventory);
   
-  // If no id, create a key from timestamp and index
-  if (event && event.timestamp) {
-    return `event-${index}-${event.timestamp}-${Math.random().toString(36).substring(2, 9)}`;
-  }
-  
-  // Last resort - use index with random string
-  return `event-${index}-${Math.random().toString(36).substring(2, 9)}`;
-};
-
-// Safe event summary extraction - handles all edge cases
-const getEventSummary = (event) => {
-  // Check if event exists
-  if (!event) return 'Event occurred.';
-  
-  // Use LLM summary if available
-  if (event.llmSummary) return event.llmSummary;
-  
-  // Use regular summary if available
-  if (event.summary) return event.summary;
-  
-  // Try to extract from content
-  if (event.content) {
-    const firstSentence = event.content.split(/[.!?](\s|$)/)[0];
-    return firstSentence + (firstSentence.endsWith('.') ? '' : '.');
-  }
-  
-  // Last resort
-  if (event.fullContent) {
-    const firstSentence = event.fullContent.split(/[.!?](\s|$)/)[0];
-    return firstSentence.substring(0, 100) + (firstSentence.endsWith('.') ? '' : '.');
-  }
-  
-  // Absolute fallback
-  return 'Event occurred.';
-};
-  // Get the game history and other required state from the store
-  const { 
-    gameHistory, 
-    formatGameTime,
-    daysPassed,
-    inventory,
-    darwinMood,
-    gameTime,
-    playerLocation,
-    currentLocationId,
-  } = useGameStore();
-
-  // Extract location name from ID
-function getLocationName(locationId) {
-  if (!locationId) return 'Unknown';
-  const match = locations.find(loc => loc.id === locationId);
-  return match ? match.name : 'Unknown';
-}
-
-  // Format a timestamp for display
-  const formatTimestamp = (rawTime) => {
-    if (typeof rawTime === 'number') {
-      // Convert minutes to hours:minutes format
-      const hours = Math.floor(rawTime / 60);
-      const minutes = rawTime % 60;
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const displayHours = hours % 12 || 12;
-      return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-    }
-    return rawTime || formatGameTime();
+  // Toggle drawer visibility
+  const toggleHistory = () => {
+    setIsOpen(!isOpen);
   };
-
-  // Process game history into a summarized format with enhanced metadata
-  // Process game history into a summarized format with enhanced metadata
-useEffect(() => {
-  if (isOpen) {
-    // Use eventHistory directly instead of processing gameHistory from scratch
-    setEventsSummary(eventHistory);
-  }
-}, [isOpen, eventHistory]);
-
-  // Toggle the history drawer
-  const toggleHistory = () => setIsOpen(!isOpen);
-
-  // Filter events
-const getFilteredEvents = () => {
-  if (!eventsSummary || !Array.isArray(eventsSummary)) {
-    return [];
-  }
   
-  // Filter by event type and ensure all events have the required properties
-  const filteredEvents = eventsSummary
-    .filter(event => {
-      // Skip null or undefined events
-      if (!event) return false;
-      
-      // Keep all events if filter is set to 'all'
-      if (activeFilter === 'all') return true;
-      
-      // Otherwise filter by event type
-      return event.eventType === activeFilter;
-    })
-    // Ensure each event has basic required properties to prevent rendering errors
-    .map((event, index) => {
-      if (!event.id) {
-        // Add a unique ID if missing
-        return { ...event, id: `generated-id-${index}-${Date.now()}` };
-      }
-      return event;
-    });
+  // Save expedition log as markdown file
+  const saveHistory = () => {
+    // Create markdown content
+    const markdownContent = `# Darwin's Expedition Log\n\n` +
+      getFilteredEvents().map(event => {
+        const cleanContent = cleanContentForDisplay(event.fullContent || event.summary);
+        return `## Day ${event.day} • ${event.time} at ${event.location}\n` +
+          `**${formatEventType(event.eventType)}**\n\n` +
+          `${cleanContent}\n\n`;
+      }).join('---\n\n');
+    
+    // Create a blob and download
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'darwins-expedition-log.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
   
-  return filteredEvents;
-};
-
-  // Close drawer when Escape key is pressed
+  // Send log to email (placeholder)
+  const sendEmail = (e) => {
+    e.preventDefault();
+    // This would connect to an API endpoint in a real implementation
+    alert(`Log would be sent to ${email} in a production build.`);
+    setEmail('');
+  };
+  
+  // Handle escape key to close drawer
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isOpen) {
         setIsOpen(false);
       }
     };
-
+    
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
-
-  // Handle click outside to close
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const handleClickOutside = (event) => {
-      if (drawerRef.current && !drawerRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
     };
-    
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
-
-  // Get event icon based on type
-  const getEventIcon = (eventType) => {
-    switch (eventType) {
-      case 'action':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" />
-          </svg>
-        );
-      case 'collection':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-          </svg>
-        );
-      case 'observation':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-500" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-          </svg>
-        );
-      case 'movement':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-purple-500" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" />
-          </svg>
-        );
-      case 'field_notes':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-500" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
-            <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
-          </svg>
-        );
-      default:
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-          </svg>
-        );
+  
+  // Generate a unique key for each event
+  const generateUniqueKey = (event, index) => {
+    return `${event.id || ''}${event.timestamp || ''}${index}`;
+  };
+  
+  // Clean content for display by removing metadata markers
+  const cleanContentForDisplay = (content) => {
+    if (!content) return '';
+    
+    return content
+      .replace(/\[MOOD:.*?\]/g, '')
+      .replace(/\[FATIGUE:.*?\]/g, '')
+      .replace(/\[SCIENTIFIC_INSIGHT:.*?\]/g, '')
+      .replace(/\[COLLECTIBLE:.*?\]/g, '')
+      .replace(/\[STATUS:.*?\]/g, '')
+      .replace(/\[WEATHER:.*?\]/g, '')
+      .replace(/\[SOUNDS:.*?\]/g, '')
+      .replace(/\[NPC:.*?\]/g, '')
+      .replace(/NEXTSTEPS:[\s\S]*?(?=\[|$)/g, '')
+      .trim();
+  };
+  
+  // Get display-friendly event summary
+  const getEventSummary = (event) => {
+    // First clean the content
+    let summary = event.llmSummary || event.summary || event.fullContent || '';
+    summary = cleanContentForDisplay(summary);
+    
+    // If it's a user input, keep it as is
+    if (event.role === 'user') {
+      return summary;
+    }
+    
+    // Otherwise, format based on event type
+    if (event.eventType === 'movement') {
+      return `You traveled to ${event.location}.`;
+    }
+    
+    return summary;
+  };
+  
+  // Format event type for display
+  const formatEventType = (type) => {
+    switch (type) {
+      case 'movement': return 'Travel';
+      case 'collection': return 'Collection';
+      case 'observation': return 'Observation';
+      case 'action': return 'Action';
+      case 'field_notes': return 'Field Notes';
+      case 'event': return 'Event';
+      default: return type.charAt(0).toUpperCase() + type.slice(1);
     }
   };
-
-  // Handle saving history as a local file
-  const saveHistory = () => {
-    // Create a formatted markdown version of the history
-    const formattedHistory = `# YOUNG DARWIN: 1835 - EXPEDITION LOG\n\n` +
-      eventsSummary.map(event => {
-        // Special formatting for field notes
-        if (event.eventType === 'field_notes') {
-          return (
-            `## Day ${event.day} - ${event.time} - ${event.location}\n\n` +
-            `**FIELD NOTES: ${event.specimenName || 'Observation'}**\n\n` +
-            `${event.summary}\n\n---\n\n`
-          );
+  
+  // Get icon for each event type
+  const getEventIcon = (type) => {
+    switch (type) {
+      case 'movement':
+        return '🧭';
+      case 'collection':
+        return '🧪';
+      case 'observation':
+        return '🔍';
+      case 'action':
+        return '🔄';
+      case 'field_notes':
+        return '📝';
+      case 'event':
+        return '📣';
+      default:
+        return '📜';
+    }
+  };
+  
+  // Get filtered events with deduplication for movement entries
+  const getFilteredEvents = () => {
+    if (!eventHistory) return [];
+    
+    // Deduplicate movement entries that have the same destination
+    const uniqueEvents = [];
+    const movementTargets = new Set();
+    
+    eventHistory.forEach(event => {
+      // Skip duplicate movements
+      if (event.eventType === 'movement') {
+        const target = event.fullContent?.match(/to\s+([^.]+)/i)?.[1];
+        if (target) {
+          const key = `${event.day}-${event.locationId}`;
+          if (movementTargets.has(key)) return;
+          movementTargets.add(key);
         }
-        
-        // Standard formatting for other event types
-        return (
-          `## Day ${event.day} - ${event.time} - ${event.location}\n\n` +
-          `**${event.eventType.toUpperCase()}**: ${event.summary}\n\n` +
-          `${event.mood ? '**Mood**: ' + event.mood + '\n' : ''}` +
-          `${event.fatigue ? '**Fatigue**: ' + event.fatigue + '/100\n' : ''}` +
-          `${event.weather ? '**Weather**: ' + event.weather + '\n' : ''}` +
-          `${event.specimenCollected ? '**Collected**: ' + event.specimenCollected + '\n' : ''}\n\n`
-        );
-      }).join('---\n\n');
-    
-    // Current inventory section
-    const inventorySection = inventory.length > 0 
-      ? `## Current Inventory\n\n${inventory.map(item => `- ${item.name}`).join('\n')}\n\n` 
-      : '';
-    
-    // Create a Blob with the content
-    const blob = new Blob([
-      formattedHistory,
-      inventorySection
-    ], { type: 'text/markdown' });
-    
-    // Create a download link
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `darwin-expedition-log-day${daysPassed}.md`;
-    
-    // Trigger download and cleanup
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    
-    // Show saved notification
-    setSavedNotification(true);
-    setTimeout(() => setSavedNotification(false), 3000);
-  };
-
-  // Handle sending history via email
-  const sendEmail = (e) => {
-    e.preventDefault();
-    
-    if (!email) return;
-    
-    // Create a formatted text version of the history
-    const formattedHistory = eventsSummary.map(event => (
-      `Day ${event.day} - ${event.time} - ${event.location}\n` +
-      `${event.eventType.toUpperCase()}: ${event.summary}\n` +
-      `${event.mood ? 'Mood: ' + event.mood + '\n' : ''}` +
-      `${event.specimenCollected ? 'Collected: ' + event.specimenCollected + '\n' : ''}\n`
-    )).join('\n');
-
-    // Construct mailto link
-    const subject = encodeURIComponent('Young Darwin: 1835 - Expedition Log');
-    const body = encodeURIComponent(
-      'YOUNG DARWIN: 1835 - EXPEDITION LOG\n\n' + formattedHistory
-    );
-    
-    // Open default email client with pre-filled content
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`);
-    
-    // Reset email field and show confirmation
-    setEmail('');
-    setIsEmailSent(true);
-    setTimeout(() => setIsEmailSent(false), 3000);
-  };
-
-  return (
-    <div className="darwin-panel p-3 relative">
-     
+      }
       
+      // Reclassify narrative descriptions as "event" type
+      const processedEvent = { ...event };
+      if (event.eventType === 'collection' && 
+          !event.fullContent?.toLowerCase().includes('collect')) {
+        processedEvent.eventType = 'event';
+      }
+      
+      // Apply filter
+      if (activeFilter === 'all' || processedEvent.eventType === activeFilter) {
+        uniqueEvents.push(processedEvent);
+      }
+    });
+    
+    return uniqueEvents;
+  };
+  
+return (
+  <div className="darwin-panel p-3">
+   
+    
+    <div className="flex justify-center">
       <button
-        onClick={toggleHistory}
-        className="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium py-3 px-4 rounded-lg border border-amber-300 transition-colors duration-200 flex items-center justify-center shadow-sm"
+        onClick={() => setIsOpen(!isOpen)}
+        className="px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg shadow-md border border-amber-300 transition-colors w-full flex items-center justify-center"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 7a2 2 0 012-2h10a2 2 0 012 2v4M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6" />
-        </svg>
+        <span className="mr-2">📓</span>
         View Expedition Log
       </button>
-      
-      {/* Notification for saved file */}
-      {savedNotification && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-green-100 border border-green-400 text-green-700 px-4 py-2 rounded-md text-sm flex items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          Log saved successfully!
-        </div>
-      )}
-      
-      {/* Email sent notification */}
-      {isEmailSent && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-blue-100 border border-blue-400 text-blue-700 px-4 py-2 rounded-md text-sm flex items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
-          Email prepared successfully!
-        </div>
-      )}
+    </div>
+ 
       
       {/* History Drawer - slide in from right */}
       {isOpen && (
@@ -375,6 +244,16 @@ const getFilteredEvents = () => {
               </button>
               <button 
                 className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap mr-2 transition-colors ${
+                  activeFilter === 'event' 
+                    ? 'bg-amber-600 text-white' 
+                    : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                }`}
+                onClick={() => setActiveFilter('event')}
+              >
+                Events
+              </button>
+              <button 
+                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap mr-2 transition-colors ${
                   activeFilter === 'action' 
                     ? 'bg-blue-600 text-white' 
                     : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
@@ -396,8 +275,8 @@ const getFilteredEvents = () => {
               <button 
                 className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap mr-2 transition-colors ${
                   activeFilter === 'observation' 
-                    ? 'bg-amber-600 text-white' 
-                    : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                    ? 'bg-indigo-600 text-white' 
+                    : 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
                 }`}
                 onClick={() => setActiveFilter('observation')}
               >
@@ -416,8 +295,8 @@ const getFilteredEvents = () => {
               <button 
                 className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap mr-2 transition-colors ${
                   activeFilter === 'field_notes' 
-                    ? 'bg-indigo-600 text-white' 
-                    : 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
+                    ? 'bg-yellow-600 text-white' 
+                    : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
                 }`}
                 onClick={() => setActiveFilter('field_notes')}
               >
@@ -434,55 +313,59 @@ const getFilteredEvents = () => {
                   
                   {/* Timeline entries */}
                   <div className="space-y-6">
-                  {getFilteredEvents().map((event, index) => (
-  <div key={generateUniqueKey(event, index)} className="relative pl-8">
-                       {/* Timeline dot */}
-                       <div className="absolute left-0 top-0 mt-2 w-10 h-10 flex items-center justify-center rounded-full bg-white border-2 border-amber-400 shadow-md">
-                         {getEventIcon(event.eventType)}
-                       </div>
-                       
+                    {getFilteredEvents().map((event, index) => (
+                      <div key={generateUniqueKey(event, index)} className="relative pl-8">
+                        {/* Timeline dot */}
+                        <div className="absolute left-0 top-0 mt-2 w-10 h-10 flex items-center justify-center rounded-full bg-white border-2 border-amber-400 shadow-md">
+                          {getEventIcon(event.eventType)}
+                        </div>
                         
                         {/* Event card */}
-                       <div className="bg-white rounded-lg border border-amber-200 p-3 shadow-sm hover:shadow-md transition-shadow ml-4">
-      <div className="flex justify-between items-start mb-2">
-        <div className="text-sm text-amber-800 font-medium">
-          Day {event.day} • {event.time}
-        </div>
-        <div className="px-2 py-1 bg-amber-50 border border-amber-200 rounded-full text-xs text-amber-800">
-          {event.location}
-        </div>
-      </div>
+                        <div className="bg-white rounded-lg border border-amber-200 p-3 shadow-sm hover:shadow-md transition-shadow ml-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="text-sm text-amber-800 font-medium">
+                              Day {event.day} • {event.time}
+                            </div>
+                            <div className="px-2 py-1 bg-amber-50 border border-amber-200 rounded-full text-xs text-amber-800">
+                              {event.location}
+                            </div>
+                          </div>
                           
                           {/* Field Notes get special styling with full content display */}
-                        {event.eventType === 'field_notes' ? (
-  <div className="bg-indigo-50 border border-indigo-200 rounded-md p-3 my-2 font-serif text-sm whitespace-pre-wrap">
-    <div className="flex items-center mb-2">
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-      </svg>
-      <span className="text-xs font-medium text-indigo-800">
-        Field Notes: {event.specimenName || 'Observation'}
-      </span>
-    </div>
-    {event.summary}
-  </div>
-) : (
-  <p className={`text-sm mb-3 ${event.role === 'user' ? 'text-blue-800 font-medium italic' : 'text-gray-700'}`}>
-    {event.role === 'user' ? '» ' : ''}
-    {getEventSummary(event)}
-    {event.hasLLMSummary && (
-      <span className="inline-flex items-center ml-1 text-xs text-amber-600">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
-        </svg>
-      </span>
-    )}
-  </p>
-)}
-                          
+                          {event.eventType === 'field_notes' ? (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 my-2 font-serif text-sm whitespace-pre-wrap">
+                              <div className="flex items-center mb-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                                <span className="text-xs font-medium text-yellow-800">
+                                  Field Notes: {event.specimenName || 'Observation'}
+                                </span>
+                              </div>
+                              {event.summary}
+                            </div>
+                          ) : (
+                            <p className={`text-sm mb-3 ${event.role === 'user' ? 'text-blue-800 font-medium italic' : 'text-gray-700'}`}>
+                              {event.role === 'user' ? '» ' : ''}
+                              {getEventSummary(event)}
+                            </p>
+                          )}
                           
                           {/* Event metadata badges */}
                           <div className="flex flex-wrap gap-2 mt-2">
+                            {/* Event type badge */}
+                            <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full
+                              ${event.eventType === 'movement' ? 'bg-purple-50 text-purple-800 border border-purple-200' : 
+                                event.eventType === 'collection' ? 'bg-green-50 text-green-800 border border-green-200' :
+                                event.eventType === 'observation' ? 'bg-indigo-50 text-indigo-800 border border-indigo-200' :
+                                event.eventType === 'action' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                                event.eventType === 'field_notes' ? 'bg-yellow-50 text-yellow-800 border border-yellow-200' :
+                                'bg-amber-50 text-amber-800 border border-amber-200'
+                              }`}
+                            >
+                              {formatEventType(event.eventType)}
+                            </span>
+                            
                             {event.mood && (
                               <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-green-50 border border-green-200 text-green-800">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -492,7 +375,7 @@ const getFilteredEvents = () => {
                               </span>
                             )}
                             
-                            {event.fatigue !== null && (
+                            {event.fatigue !== null && event.fatigue !== undefined && (
                               <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-orange-50 border border-orange-200 text-orange-800">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -511,7 +394,7 @@ const getFilteredEvents = () => {
                             )}
                             
                             {event.specimenCollected && (
-                              <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800">
+                              <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-green-50 border border-green-200 text-green-800">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 7a2 2 0 012-2h10a2 2 0 012 2m-4-1v12" />
                                 </svg>
@@ -593,7 +476,7 @@ const getFilteredEvents = () => {
                 )}
               </div>
             </div>
-            
+    
             {/* Decorative ink stain bottom corner */}
             <div className="absolute bottom-0 left-0 w-[100px] h-[100px] opacity-[0.035] z-[-1]"
               style={{

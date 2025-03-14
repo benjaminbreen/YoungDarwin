@@ -79,122 +79,140 @@ const useGameStore = create((set, get) => ({
     )
   })),
 
-  // Enhanced addToGameHistory function with improved summary generation
-  addToGameHistory: (role, content) => set((state) => {
+// Enhanced addToGameHistory function with improved event classification
+addToGameHistory: (role, content) => set((state) => {
   // Get the most current state values
   const currentState = get();
-  console.log('Current state location ID:', currentState.currentLocationId); 
   
   // Use the current state values, not the state parameter
   const { daysPassed, gameTime } = currentState;
   const currentLocationId = currentState.currentLocationId;
   
-  console.log('Inside addToGameHistory, currentLocationId =', currentLocationId);
-    // Ensure content is a string to avoid method errors
-    const contentString = typeof content === 'string' ? content : 
-                          (typeof content === 'object' && content !== null) ? 
-                            (content.content || JSON.stringify(content)) : 
-                            String(content);
-    
-    const newEntry = { role, content: contentString };
-    const updatedHistory = [...state.gameHistory, newEntry].slice(-5);
-    
- 
-    const formattedTime = formatTime(gameTime);
-    const locationName = getLocationName(currentLocationId);
-    
-    // Determine event type based on role and content
-    let eventType = 'narrative';
-    
-    if (role === 'user') {
-      eventType = 'action';
-    } else if (role === 'field_notes') {
-      eventType = 'field_notes';
-    } else if (contentString.toLowerCase().includes('collect')) {
-      eventType = 'collection';
-    } else if (contentString.toLowerCase().includes('examine') || contentString.toLowerCase().includes('observe')) {
+  // Ensure content is a string to avoid method errors
+  const contentString = typeof content === 'string' ? content : 
+                        (typeof content === 'object' && content !== null) ? 
+                          (content.content || JSON.stringify(content)) : 
+                          String(content);
+  
+  const newEntry = { role, content: contentString };
+  const updatedHistory = [...state.gameHistory, newEntry].slice(-5);
+  
+  const formattedTime = formatTime(gameTime);
+  const locationName = getLocationName(currentLocationId);
+  
+  // Determine event type based on role and content
+  let eventType = 'event'; // Default to 'event' instead of 'narrative'
+  
+  if (role === 'user') {
+    // Check if this is an observation (tool use)
+    if (contentString.toLowerCase().includes('use') && 
+        (contentString.toLowerCase().includes('examine') || 
+         contentString.toLowerCase().includes('observe') ||
+         contentString.toLowerCase().includes('dissect') || 
+         contentString.toLowerCase().includes('kit') || 
+         contentString.toLowerCase().includes('lens') || 
+         contentString.toLowerCase().includes('caliper'))) {
       eventType = 'observation';
-    } else if (contentString.toLowerCase().includes('travel') || contentString.toLowerCase().includes('move')) {
-      eventType = 'movement';
-    }
-    
-    // Extract relevant metadata from content
-    const moodMatch = contentString.match(/\[MOOD:\s*(.*?)\]/);
-    const fatigueMatch = contentString.match(/\[FATIGUE:\s*(\d+)\]/);
-    const weatherMatch = contentString.match(/\[WEATHER:\s*(.*?)\]/);
-    const insightMatch = contentString.match(/\[SCIENTIFIC_INSIGHT:\s*(.*?)\]/);
-    const collectibleMatch = contentString.match(/\[COLLECTIBLE:\s*(.*?)\]/);
-    
-    // Create an initial summary
-    let summary = '';
-    
-    if (role === 'field_notes') {
-      // For field notes, use the content directly (it's already formatted)
-      summary = contentString;
-      if (summary.length > 100) {
-        summary = summary.substring(0, 200) + '...';
-      }
     } else {
-      // For other types, clean and process the content
-      const cleanContent = contentString
-        .replace(/\[MOOD:.*?\]/g, '')
-        .replace(/\[FATIGUE:.*?\]/g, '')
-        .replace(/\[WEATHER:.*?\]/g, '')
-        .replace(/\[COLLECTIBLE:.*?\]/g, '')
-        .replace(/\[SCIENTIFIC_INSIGHT:.*?\]/g, '')
-        .replace(/\[NPC:.*?\]/g, '')
-        .replace(/NEXTSTEPS:[\s\S]*?(?=\[|$)/g, '') // Remove the next steps section
-        .trim();
-      
-      // Get first sentence or first 100 chars, avoiding empty results
-      let firstSentence = cleanContent.split(/\.|\!|\?/)[0];
-      if (!firstSentence || firstSentence.length < 5) {
-        // If splitting by sentences fails, just take the first 200 chars
-        firstSentence = cleanContent.substring(0, 200);
-      }
-      
-      summary = firstSentence.length > 200 
-        ? firstSentence.substring(0, 200) + '...' 
-        : firstSentence + (firstSentence.endsWith('.') ? '' : '.');
+      eventType = 'action';
+    }
+  } else if (role === 'field_notes') {
+    eventType = 'field_notes';
+  } else if (contentString.toLowerCase().includes('collect') && 
+             (contentString.toLowerCase().includes('successfully') || 
+              contentString.toLowerCase().includes('added to inventory'))) {
+    eventType = 'collection';
+  } else if (contentString.toLowerCase().includes('travel') || 
+             contentString.toLowerCase().includes('move') ||
+             contentString.toLowerCase().includes('arrive') || 
+             contentString.match(/\bto\s+[^.]+\b/i)) {
+    eventType = 'movement';
+  } else if (contentString.toLowerCase().includes('use') && 
+             (contentString.toLowerCase().includes('kit') || 
+              contentString.toLowerCase().includes('lens') || 
+              contentString.toLowerCase().includes('caliper') ||
+              contentString.toLowerCase().includes('observation'))) {
+    eventType = 'observation';
+  }
+  
+  // Extract relevant metadata from content
+  const moodMatch = contentString.match(/\[MOOD:\s*(.*?)\]/);
+  const fatigueMatch = contentString.match(/\[FATIGUE:\s*(\d+)\]/);
+  const weatherMatch = contentString.match(/\[WEATHER:\s*(.*?)\]/);
+  const insightMatch = contentString.match(/\[SCIENTIFIC_INSIGHT:\s*(.*?)\]/);
+  const collectibleMatch = contentString.match(/\[COLLECTIBLE:\s*(.*?)\]/);
+  
+  // Create an initial summary
+  let summary = '';
+  
+  if (role === 'field_notes') {
+    // For field notes, use the content directly (it's already formatted)
+    summary = contentString;
+    if (summary.length > 100) {
+      summary = summary.substring(0, 200) + '...';
+    }
+  } else {
+    // For other types, clean and process the content
+    const cleanContent = contentString
+      .replace(/\[MOOD:.*?\]/g, '')
+      .replace(/\[FATIGUE:.*?\]/g, '')
+      .replace(/\[WEATHER:.*?\]/g, '')
+      .replace(/\[COLLECTIBLE:.*?\]/g, '')
+      .replace(/\[SCIENTIFIC_INSIGHT:.*?\]/g, '')
+      .replace(/\[NPC:.*?\]/g, '')
+      .replace(/NEXTSTEPS:[\s\S]*?(?=\[|$)/g, '') // Remove the next steps section
+      .trim();
+    
+    // Get first sentence or first 100 chars, avoiding empty results
+    let firstSentence = cleanContent.split(/\.|\!|\?/)[0];
+    if (!firstSentence || firstSentence.length < 5) {
+      // If splitting by sentences fails, just take the first 200 chars
+      firstSentence = cleanContent.substring(0, 200);
     }
     
-    // Add a unique id for the event
-const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    
-    // Create the event entry with extracted details
-    const eventEntry = {
-      id: eventId,
-      day: daysPassed,
-      timestamp: gameTime,
-      time: formattedTime,
-      location: locationName,
-      locationId: currentLocationId,
-      summary,     // Initial summary (will be replaced by LLM summary)
-      llmSummary: null, // Will be filled by background LLM process
-      hasLLMSummary: false,
-      mood: moodMatch ? moodMatch[1].trim() : state.darwinMood,
-      fatigue: fatigueMatch ? parseInt(fatigueMatch[1]) : null,
-      weather: weatherMatch ? weatherMatch[1].trim() : null,
-      scientificInsight: insightMatch ? insightMatch[1].trim() : null,
-      specimenCollected: collectibleMatch ? collectibleMatch[1].trim() : null,
-      role,
-      fullContent: contentString,
-      eventType
-    };
-    
-    // Add to event history, keeping the last 30 events
-    const updatedEventHistory = [...state.eventHistory, eventEntry].slice(-30);
-    
-    // Queue this event for LLM summarization (non-blocking)
-    if (role !== 'user' && contentString.length > 30) {
-      queueEventForSummary(eventEntry, get());
-    }
-    
-    return { 
-      gameHistory: updatedHistory,
-      eventHistory: updatedEventHistory
-    };
-  }),
+    summary = firstSentence.length > 200 
+      ? firstSentence.substring(0, 200) + '...' 
+      : firstSentence + (firstSentence.endsWith('.') ? '' : '.');
+  }
+  
+  // Add a unique id for the event
+  const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  
+  // Create the event entry with extracted details
+  const eventEntry = {
+    id: eventId,
+    day: daysPassed,
+    timestamp: gameTime,
+    time: formattedTime,
+    location: locationName,
+    locationId: currentLocationId,
+    summary,     // Initial summary (will be replaced by LLM summary)
+    llmSummary: null, // Will be filled by background LLM process
+    hasLLMSummary: false,
+    mood: moodMatch ? moodMatch[1].trim() : state.darwinMood,
+    fatigue: fatigueMatch ? parseInt(fatigueMatch[1]) : null,
+    weather: weatherMatch ? weatherMatch[1].trim() : null,
+    scientificInsight: insightMatch ? insightMatch[1].trim() : null,
+    specimenCollected: collectibleMatch ? collectibleMatch[1].trim() : null,
+    role,
+    fullContent: contentString,
+    eventType
+  };
+  
+  // Add to event history, keeping the last 30 events
+  const updatedEventHistory = [...state.eventHistory, eventEntry].slice(-30);
+  
+  // Queue this event for LLM summarization (non-blocking)
+  if (role !== 'user' && contentString.length > 30) {
+    queueEventForSummary(eventEntry, get());
+  }
+  
+  return { 
+    gameHistory: updatedHistory,
+    eventHistory: updatedEventHistory
+  };
+}),
+
 
   // Method to generate compact context for LLM
   generateLLMContext: () => {
