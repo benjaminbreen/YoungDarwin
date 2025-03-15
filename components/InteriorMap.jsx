@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { interiorLayouts } from '../utils/interiorLayouts';
 
 export default function InteriorMap({ 
   locationType,
@@ -9,123 +10,14 @@ export default function InteriorMap({
   playerPosition,
   currentNPC
 }) {
-  // 1) Define your interiorLayouts object first, at the top.
-  const interiorLayouts = {
-    'cave': {
-      name: "Gabriel's Cave",
-      description: "A hidden revolutionary's sanctuary, carved into volcanic rock",
-      rooms: [
-        { id: 'CAVE_ENTRANCE', name: 'Cave Entrance', x: 1, y: 2, description: 'The narrow entrance to the cave, dimly lit by filtered sunlight.', emoji: '🚪', accessible: true },
-        { id: 'CAVE_BACK', name: 'Back Chamber', x: 1, y: 0, description: 'A filthy area filled with the remains of crab legs and goat bones.', emoji: '📚', accessible: true },
-        { id: 'CAVE_LEFT', name: 'Storage Area', x: 1, y: 1, description: 'Supplies and materials are stacked against the wall. Barrels of water and dried food.', emoji: '🛢️', accessible: true },
-        { id: 'CAVE_STORAGE', name: 'Hidden Cache', x: 0, y: 0, description: "A secret compartment containing Gabriel's most treasured possessions and banned books.", emoji: '🗝️', accessible: true },
-        { id: 'CAVE_LOOKOUT', name: 'Lookout Point', x: 2, y: 0, description: 'A narrow opening that provides a view of the eastern coast of the island.', emoji: '👁️', accessible: true },
-        { id: 'CAVE_WRITING', name: 'Writing Nook', x: 0, y: 2, description: 'A small desk with quills and parchment where Gabriel drafts his manifestos.', emoji: '✍️', accessible: true },
-      ],
-      npcs: ['gabriel_puig'],
-      grid: [3, 3],
-      floorColor: 'bg-stone-700',
-      wallColor: 'bg-stone-800',
-      accentColor: 'amber'
-    },
-    'hms_beagle': {
-      name: "HMS Beagle",
-      description: "Captain FitzRoy's meticulously maintained survey vessel",
-      rooms: [
-        // Upper Deck (y=0)
-        { id: 'BEAGLE', name: "Ship's Bow", x: 0, y: 0, description: 'Forward part of the ship, offering views of the open ocean ahead.', emoji: '🌊', accessible: true },
-        { id: 'BEAGLE_FOREMAST', name: 'Foremast', x: 1, y: 0, description: 'Tall foremast with sailors working on the rigging.', emoji: '⛵', accessible: true },
-        { id: 'BEAGLE_MAINMAST', name: 'Mainmast', x: 2, y: 0, description: 'Primary mast with the ship’s bell nearby.', emoji: '🔔', accessible: true },
-        { id: 'BEAGLE_QUARTERDECK', name: 'Quarterdeck', x: 3, y: 0, description: 'Raised deck at the stern; Captain FitzRoy often stands here.', emoji: '🧭', accessible: true },
-    
-        
-        // Lower Deck (y=1)
-        { id: 'BEAGLE_FORECASTLE', name: 'Forecastle', x: 0, y: 1, description: 'Forward lower compartment where some crew sleep.', emoji: '🛌', accessible: true },
-        { id: 'BEAGLE_STORAGE', name: 'Specimen Storage', x: 1, y: 1, description: 'Where collected specimens are stored.', emoji: '🧪', accessible: true },
-        { id: 'BEAGLE_QUARTERS', name: 'Your Quarters', x: 2, y: 1, description: 'Small but comfortable berth for sleeping and studying.', emoji: '📓', accessible: true },
-        { id: 'BEAGLE_CABIN', name: "Captain's Cabin", x: 3, y: 1, description: 'FitzRoy’s private quarters with charts and instruments.', emoji: '📐', accessible: true },
-      ],
-      npcs: ['fitzroy'],
-      grid: [4, 2],
-      floorColor: 'bg-amber-800',
-      wallColor: 'bg-amber-900',
-      accentColor: 'blue'
-    },
-    'governors_house': {
-      name: "Vice-Governor's House",
-      description: "The colonial residence of Nicolás Lawson, modest yet befitting his station",
-      rooms: [
-        // Top row (y=0)
-        { id: 'GOVERNORS_HOUSE', name: 'Office', x: 1, y: 1, description: "Lawson's official business is done here.", emoji: '📜', accessible: true },
-       
-        { id: 'GOVERNORS_HOUSE_LIBRARY', name: 'Small Library', x: 1, y: 0, description: 'Shelves with books on navigation, natural history, admin.', emoji: '📚', accessible: true },
-        
-        // Bottom row (y=1)
-        { id: 'GOVERNORS_HOUSE_DINING', name: 'Dining Room', x: 0, y: 1, description: 'A modest table, half-empty rum bottle, maritime chart.', emoji: '🍽️', accessible: true },
-        { id: 'GOVERNORS_HOUSE_ENTRANCE', name: 'Entrance Hall', x: 0, y: 0, description: 'A modest foyer; Lawson greets visitors here.', emoji: '🚪', accessible: true },
-        { id: 'GOVERNORS_HOUSE_GARDEN', name: 'Rear Garden', x: 2, y: 1, description: 'A walled garden with exotic plants from the archipelago.', emoji: '🌱', accessible: true },
-      ],
-      npcs: ['nicolas_lawson'],
-      grid: [3, 2],
-      floorColor: 'bg-amber-100',
-      wallColor: 'bg-amber-200',
-      accentColor: 'emerald'
-    },
-    'watkins_cabin': {
-      name: "Patrick Watkins's Cabin",
-      description: "The crude shelter of the island's first settler, solitary and mysterious",
-      rooms: [
-        { id: 'WATKINS_INTERIOR', name: 'Watkins Cabin Interior', x: 0, y: 0, description: 'A one-room shelter of driftwood and stone, with pungent smells.', emoji: '🏚️', accessible: true },
-      ],
-      npcs: [],
-      grid: [1, 1],
-      floorColor: 'bg-amber-950',
-      wallColor: 'bg-black-900',
-      accentColor: 'amber'
-    },
-    'whalers_hut': {
-      name: "Whaler's Hut",
-      description: "A seasonal shelter used by American whalers for water/provisions",
-      rooms: [
-        { id: 'WHALERS_INTERIOR', name: 'Hut Interior', x: 0, y: 0, description: 'A simple stone structure, scattered harpoon parts, a rough firepit.', emoji: '🪵', accessible: true },
-      ],
-      npcs: [],
-      grid: [1, 1],
-      floorColor: 'bg-stone-500',
-      wallColor: 'bg-stone-700',
-      accentColor: 'amber'
-    },
-
-    'mail_barrel': {
-  name: "Mail Barrel",
-  description: "A wooden barrel used by sailors for mail exchange. Why are you here?",
-  rooms: [
-    { 
-      id: 'MAIL_BARREL', 
-      name: 'Mail Barrel', 
-      x: 0, 
-      y: 0, 
-      description: 'The cramped interior is mostly filled with sand, leaving just enough space to reach in. A few tattered letters poke out from the grit. Curiously, a faint smell of urine lingers in the stale air.', 
-      emoji: '📨', 
-      accessible: true 
-    },
-  ],
-  npcs: [],
-  grid: [1, 1],
-  floorColor: 'bg-amber-800',
-  wallColor: 'bg-amber-900',
-  accentColor: 'amber'
-}
-  };
-
-  // 2) Grab the layout from the object
+  // Grab the layout from the centralized interiorLayouts
   const layout = interiorLayouts[locationType];
   if (!layout || !layout.rooms) {
     console.error(`InteriorMap: Invalid or missing layout for location type: "${locationType}"`);
     return <div>Invalid interior location: {locationType}</div>;
   }
 
-  // 3) Helper to find the current room based on playerPosition
+  // Helper to find the current room based on playerPosition
   function getCurrentRoom() {
     return (
       layout.rooms.find(r => r.x === playerPosition.x && r.y === playerPosition.y)
@@ -136,16 +28,16 @@ export default function InteriorMap({
   // Determine the current room
   const currentRoom = getCurrentRoom();
 
-  // 4) Local component state for hover and mount animation
+  // Local component state for hover and mount animation
   const [hoveredRoom, setHoveredRoom] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // 5) On mount, set loaded
+  // On mount, set loaded
   useEffect(() => {
     setIsLoaded(true);
   }, []);
 
-  // 6) If we want to inform the parent about the “current room” (for UI or LLM)
+  // If we want to inform the parent about the "current room" (for UI or LLM)
   useEffect(() => {
     if (currentRoom && onInteriorMove) {
       onInteriorMove(playerPosition, currentRoom.id, currentRoom);
@@ -154,7 +46,7 @@ export default function InteriorMap({
   }, [locationType]); 
   // Note: do not pass currentRoom as a dep, or it might cause repeated triggers
 
-  // 7) Handle user clicks on a room
+  // Handle user clicks on a room
   const handleRoomClick = (room) => {
     if (!room || !room.accessible) return;
     // Check adjacency or 1x1
@@ -168,7 +60,7 @@ export default function InteriorMap({
     }
   };
 
-  // 8) Helper to pick text color based on accent
+  // Helper to pick text color based on accent
   const getTextColor = () => {
     switch (layout.accentColor) {
       case 'amber':   return 'text-amber-800';
@@ -178,7 +70,7 @@ export default function InteriorMap({
     }
   };
 
-  // 9) Return the main JSX
+  // Return the main JSX
   return (
     <div className={`darwin-panel p-3 transition-all duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}>
       <div className="flex justify-between items-center mb-3">
@@ -221,7 +113,7 @@ export default function InteriorMap({
         </div>
 
         {/* Show NPC if present */}
-        {currentNPC && layout.npcs.includes(currentNPC) && (
+        {currentNPC && layout.npcs && layout.npcs.includes(currentNPC) && (
           <div className={`mt-2 text-sm text-${layout.accentColor}-700 border-t border-${layout.accentColor}-100 pt-2`}>
             <span className="font-medium">Present:</span> {currentNPC.replace('_', ' ')}
           </div>
@@ -271,7 +163,7 @@ export default function InteriorMap({
               const room = layout.rooms.find(r => r.x === col && r.y === row);
 
               const isCurrent = (playerPosition.x === col && playerPosition.y === row);
-              const isAccessible = room?.accessible;
+              const isAccessible = room?.accessible !== false; // Default to true if not specified
               // Check adjacency for visual highlight
               const isAdjacent = room && (
                 (Math.abs(col - playerPosition.x) === 1 && row === playerPosition.y)
@@ -315,8 +207,6 @@ export default function InteriorMap({
             })}
           </div>
 
-
-
           {/* Hover tooltip */}
           {hoveredRoom && (
             <div className={`absolute -bottom-10 left-0 right-0 text-center text-xs font-medium bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg border border-${layout.accentColor}-200 transition-all`}>
@@ -328,8 +218,7 @@ export default function InteriorMap({
           )}
         </div>
       ) : (
-
-
+        
     // Enhanced single-room interior (Zelda-style in 3x3 grid)
 <div className={`relative rounded-lg overflow-hidden border-2 border-${layout.accentColor}-700 bg-gray-950 p-4 shadow-inner h-64`}>
   {/* Dark grid background */}

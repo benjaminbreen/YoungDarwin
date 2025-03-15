@@ -295,7 +295,7 @@ export const locations = [
     npcs: [],
     boundaries: {},
     discoveries: [
-      'Enderby is known among whalers for occasional fresh water seeps, though they may be dried up at this season.'
+      'An area known among whalers for occasional fresh water seeps, though they may be dried up at this season.'
     ],
     notableFeatures: [
       'Sparse, open ground. Not much of visual interest.',
@@ -832,13 +832,13 @@ export const locations = [
   x: 902,
   y: 100,
   color: '#c2b280',
-  type: 'interior',
+  type: 'governorslibrary',
   validMoves: [], 
   npcs: ['nicolas_lawson'],
-  specimens: [],
+  specimens: ['governorsletter'],
   boundaries: {},
   discoveries: [
-    'Most titles concern hydrography, law, and the latest scientific debates from Europe.'
+    'Most titles concern hydrography, law, and the latest scientific debates from Europe. There is also a recent looking letter from the Governor.'
   ],
   notableFeatures: [
     'A large globe stands in the corner, well-worn from repeated use.',
@@ -852,7 +852,7 @@ export const locations = [
   x: 903,
   y: 100,
   color: '#c2b280',
-  type: 'interior',
+  type: 'governorshouse',
   validMoves: [], 
   npcs: ['nicolas_lawson'],
   specimens: [],
@@ -866,7 +866,7 @@ export const locations = [
   ]
 },
 {
-  id: 'GOVERNORS_HOUSE',
+  id: 'GOVERNORS_HOUSE_ENTRANCE',
   name: 'ENTRANCE HALL',
   description: "A modest foyer with colonial furnishings. Lawson often greets visitors here.",
   x: 904,
@@ -914,7 +914,7 @@ export const locations = [
   x: 910,
   y: 100,
   color: '#2f2f2f',
-  type: 'interior',
+  type: 'cabin',
   validMoves: [],
   npcs: [],
   specimens: [],
@@ -935,9 +935,9 @@ export const locations = [
   x: 950, 
   y: 100, 
   color: '#8B4513', 
-  type: 'interior', 
+  type: 'mailbarrel', 
   validMoves: [], 
-  specimens: ["oldletter"],  // You could add a discoverable old letter here
+  specimens: ["timesoflondon"],  // You could add a discoverable old letter here
   npcs: [], 
   boundaries: {}, 
   discoveries: [
@@ -947,7 +947,7 @@ export const locations = [
   notableFeatures: [
     "A curious, faint smell of urine lingers in the stale air.",
     "The wood of the barrel is warped and weathered by sea salt and tropical sun.",
-    "Faded script on one letter mentions a whaling ship lost near Chatham Island."
+    "You find yourself reflecting mournfully on how you've come to find yourself in a barrel on a desert island."
   ] 
 },
 

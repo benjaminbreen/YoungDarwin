@@ -1,4 +1,4 @@
-// locationHook.js
+// utils/locationHook.js
 import { useState, useEffect } from 'react';
 import { 
   initialPosition, 
@@ -7,10 +7,18 @@ import {
   getCellByCoordinates,
   islandGrid
 } from './locationSystem';
+import interiorLayouts, { 
+  findRoomById, 
+  getInteriorTypeFromRoomId, 
+  getNPCsForRoom,
+  getSpecimensForRoom
+} from './interiorLayouts';
 import useGameStore from '../hooks/useGameStore';
 
 /**
  * Custom hook for managing location in the grid-based system
+ * @param {Function} onLocationUpdate - Callback when location changes
+ * @returns {Object} Location state and functions
  */
 export function useLocationSystem(onLocationUpdate) {
   // State for tracking player's position and current location ID
@@ -19,15 +27,21 @@ export function useLocationSystem(onLocationUpdate) {
   const [isInInterior, setIsInInterior] = useState(false);
   const [interiorType, setInteriorType] = useState(null);
   const [interiorPlayerPosition, setInteriorPlayerPosition] = useState({ x: 0, y: 0 });
+  const [currentRoomId, setCurrentRoomId] = useState(null);
   
-  // Update location ID when position changes
+  // Update location ID when position changes (for exterior locations)
   useEffect(() => {
+    if (isInInterior) return; // Skip this effect when in interiors
+    
     const cell = getCellByCoordinates(playerPosition.x, playerPosition.y);
     if (cell && cell.id !== currentLocationId) {
       setCurrentLocationId(cell.id);
       
-      // CRITICAL FIX: Update game store with the new location ID
-      useGameStore.getState().moveToLocation(cell.id);
+      // Update game store with the new location ID
+      const gameStore = useGameStore.getState();
+      if (gameStore && gameStore.moveToLocation) {
+        gameStore.moveToLocation(cell.id);
+      }
       
       // Call the callback if provided
       if (onLocationUpdate) {
@@ -41,14 +55,22 @@ export function useLocationSystem(onLocationUpdate) {
         });
       }
     }
-  }, [playerPosition, currentLocationId, onLocationUpdate]);
+  }, [playerPosition, currentLocationId, isInInterior, onLocationUpdate]);
   
   /**
-   * Handle movement in a specific direction
+   * Handle movement in a specific direction (exterior only)
    * @param {string} direction - Direction to move (north, south, east, west, etc.)
    * @returns {object} Result of the movement attempt
    */
   const handleMove = (direction) => {
+    // Can't use cardinal directions in interiors
+    if (isInInterior) {
+      return {
+        success: false,
+        message: "You need to exit this interior location before traveling in that direction."
+      };
+    }
+    
     const result = processMovement(playerPosition, direction);
     
     if (result.success) {
@@ -56,10 +78,11 @@ export function useLocationSystem(onLocationUpdate) {
       setPlayerPosition(result.newPosition);
       setCurrentLocationId(result.newLocationId);
       
-      // CRITICAL FIX: Update game store with the new location ID
-      useGameStore.getState().moveToLocation(result.newLocationId);
-      
-      console.log("handleMove succeeded, new locationId:", result.newLocationId);
+      // Update game store with the new location ID
+      const gameStore = useGameStore.getState();
+      if (gameStore && gameStore.moveToLocation) {
+        gameStore.moveToLocation(result.newLocationId);
+      }
     }
     
     return result;
@@ -71,9 +94,49 @@ export function useLocationSystem(onLocationUpdate) {
    * @returns {object} Result with success status and message
    */
   const moveToLocation = (locationId) => {
-    console.log("moveToLocation called with:", locationId);
+    // Handle room IDs in interiors
+    if (isInInterior) {
+      const room = findRoomById(locationId);
+      if (room) {
+        return moveInInterior({ x: room.x, y: room.y }, locationId);
+      }
+      
+      // If this is an exterior location ID, exit first
+      const exteriorCell = islandGrid.find(cell => cell.id === locationId);
+      if (exteriorCell) {
+        const exitResult = exitInterior();
+        if (!exitResult.success) return exitResult;
+        
+        // Now move to the exterior location
+        setPlayerPosition({ x: exteriorCell.x, y: exteriorCell.y });
+        setCurrentLocationId(locationId);
+        
+        // Update game store
+        const gameStore = useGameStore.getState();
+        if (gameStore && gameStore.moveToLocation) {
+          gameStore.moveToLocation(locationId);
+        }
+        
+        return {
+          success: true,
+          message: `You've exited and traveled to ${exteriorCell.name}. ${exteriorCell.description}`,
+          newPosition: { x: exteriorCell.x, y: exteriorCell.y },
+          newLocationId: locationId,
+          newLocationName: exteriorCell.name,
+          fatigueIncrease: 10, // Default fatigue for teleportation
+          specimensInArea: exteriorCell.specimens,
+          npcsInArea: exteriorCell.npcs
+        };
+      }
+      
+      // If we can't find the location ID
+      return {
+        success: false,
+        message: `Cannot move to ${locationId} from within this interior location.`
+      };
+    }
     
-    // If we're just getting a direction (N, S, E, W, etc.)
+    // Handle moving to a different exterior location
     if (['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'].includes(locationId)) {
       // Convert the direction to a full direction name
       const directionMap = {
@@ -90,10 +153,9 @@ export function useLocationSystem(onLocationUpdate) {
       return handleMove(directionMap[locationId]);
     }
     
-    // If we're teleporting to a specific location ID
+    // Direct movement to another exterior location
     const targetCell = islandGrid.find(cell => cell.id === locationId);
     if (!targetCell) {
-      console.warn(`Location "${locationId}" not found.`);
       return {
         success: false,
         message: `Location "${locationId}" not found.`
@@ -102,16 +164,19 @@ export function useLocationSystem(onLocationUpdate) {
     
     // Update position and location
     setPlayerPosition({ x: targetCell.x, y: targetCell.y });
-    setCurrentLocationId(targetCell.id);
+    setCurrentLocationId(locationId);
     
-    // CRITICAL FIX: Update the game store explicitly
-    useGameStore.getState().moveToLocation(targetCell.id);
+    // Update game store
+    const gameStore = useGameStore.getState();
+    if (gameStore && gameStore.moveToLocation) {
+      gameStore.moveToLocation(locationId);
+    }
     
     return {
       success: true,
       message: `You've traveled to ${targetCell.name}. ${targetCell.description}`,
       newPosition: { x: targetCell.x, y: targetCell.y },
-      newLocationId: targetCell.id,
+      newLocationId: locationId,
       newLocationName: targetCell.name,
       fatigueIncrease: 10, // Default fatigue for teleportation
       specimensInArea: targetCell.specimens,
@@ -125,26 +190,18 @@ export function useLocationSystem(onLocationUpdate) {
    * @returns {object|null} Result of the movement if a direction was found, null otherwise
    */
   const detectMovementInText = (text) => {
-    if (!text) return null;
+    if (!text || isInInterior) return null;
     
     // More specific regex that requires movement intent words before directions
-    // This checks for phrases like "go east", "move north", "walk to the west", etc.
     const movementRegex = /\b(?:go|move|walk|travel|head|proceed)(?:\s+(?:to|towards|toward|into))?\s+(?:the\s+)?(?:north|south|east|west|northeast|northwest|southeast|southwest|n|s|e|w|ne|nw|se|sw)\b/i;
     
     const match = text.match(movementRegex);
     
     if (match) {
-      // Extract the actual direction from the matched text
       const directionMatch = match[0].match(/(?:north|south|east|west|northeast|northwest|southeast|southwest|n|s|e|w|ne|nw|se|sw)$/i);
       
       if (directionMatch && directionMatch[0]) {
-        // Process the detected direction
-        const result = handleMove(directionMatch[0].toLowerCase());
-        console.log("detectMovementInText found direction:", directionMatch[0].toLowerCase());
-        if (result.success) {
-          console.log("Movement successful to:", result.newLocationId);
-        }
-        return result;
+        return handleMove(directionMatch[0].toLowerCase());
       }
     }
     
@@ -157,68 +214,38 @@ export function useLocationSystem(onLocationUpdate) {
    */
   const getCurrentLocation = () => {
     if (isInInterior) {
-      // Return interior location info
-      const interiorInfo = {
-        'cave': { 
-          id: 'CAVE', 
-          name: "Gabriel's Cave",
-          description: "A hidden cave serving as refuge for Gabriel Puig.",
-          type: 'interior',
-          specimens: [],
-          npcs: ['gabriel_puig']
-        },
-        'beagle': { 
-          id: 'BEAGLE', 
-          name: "HMS Beagle",
-          description: "Captain FitzRoy's trusty survey vessel.",
-          type: 'ship',
-          specimens: ['ship_logs'],
-          npcs: ['fitzroy']
-        },
-        'governors_house': { 
-          id: 'GOVERNORS_HOUSE', 
-          name: "Vice-Governor's House",
-          description: "The residence of Nicolás Lawson.",
-          type: 'building',
-          specimens: [],
-          npcs: ['nicolas_lawson']
-        },
-        'watkins_cabin': {
-          id: 'WATKINS_CABIN',
-          name: "Patrick Watkins's Cabin",
-          description: "A crude one-room shelter built from driftwood and volcanic stone.",
+      // Get the layout for this interior type
+      const layout = interiorLayouts[interiorType];
+      if (!layout) {
+        return {
+          id: 'unknown_interior',
+          name: 'Unknown Interior',
+          description: 'You are inside an unknown structure.',
           type: 'interior',
           specimens: [],
           npcs: []
-        },
-        'whalers_hut': {
-          id: 'WHALERS_HUT',
-          name: "Whaler's Hut",
-          description: "A stone structure with a battered wooden roof and whaling artifacts.",
-          type: 'interior',
-          specimens: [],
-          npcs: []
-        },
-        'mail_barrel': {
-          id: 'MAIL_BARREL',
-          name: "Mail Barrel Interior",
-          description: "The cramped interior of the Post Office Bay barrel, mostly filled with sand and very dark.",
-          type: 'interior',
-          specimens: ['whalersletter'],
-          npcs: []
-        }
-      };
+        };
+      }
       
-      return interiorInfo[interiorType] || {
-        id: 'interior',
-        name: 'Interior Location',
-        description: 'You are inside a structure.',
+      // Find the current room based on position
+      const currentRoom = layout.rooms.find(room => 
+        room.x === interiorPlayerPosition.x && room.y === interiorPlayerPosition.y
+      ) || layout.rooms[0];
+      
+      return {
+        id: currentRoom.id,
+        name: currentRoom.name,
+        description: currentRoom.description,
         type: 'interior',
-        specimens: [],
-        npcs: []
+        specimens: currentRoom.specimens || [],
+        npcs: currentRoom.npcs || [],
+        interiorType,
+        parentInterior: layout.id,
+        exteriorLocation: layout.exteriorLocation
       };
     }
     
+    // Return exterior location info
     const cell = getCellByCoordinates(playerPosition.x, playerPosition.y);
     
     if (!cell) {
@@ -248,7 +275,7 @@ export function useLocationSystem(onLocationUpdate) {
    */
   const getValidDirections = () => {
     if (isInInterior) {
-      // Return empty array for interiors - direction buttons won't work inside
+      // No cardinal directions in interiors
       return [];
     }
     
@@ -258,93 +285,225 @@ export function useLocationSystem(onLocationUpdate) {
   
   /**
    * Enter an interior location
+   * @param {string} type - Interior type key
+   * @param {object} startPosition - Initial position {x, y}
+   * @returns {object} Result with success status and message
    */
   const enterInterior = (type, startPosition = { x: 0, y: 0 }) => {
+    // Check if the interior type exists
+    const layout = interiorLayouts[type];
+    if (!layout) {
+      return {
+        success: false,
+        message: `Invalid interior type: ${type}`
+      };
+    }
+    
+    // Check if we're already in this interior
+    if (isInInterior && interiorType === type) {
+      return {
+        success: false,
+        message: `Already in ${layout.name}`
+      };
+    }
+    
+    // Validate that we can enter from current location
+    const currentCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
+    if (currentCell?.id !== layout.exteriorLocation) {
+      return {
+        success: false,
+        message: `Cannot enter ${layout.name} from here. You need to be at ${layout.exteriorLocation}.`
+      };
+    }
+    
+    // Find the starting room (or default to first room)
+    const startingRoom = layout.rooms.find(room => 
+      room.x === startPosition.x && room.y === startPosition.y
+    ) || layout.rooms[0];
+    
+    // Update state
     setIsInInterior(true);
     setInteriorType(type);
     setInteriorPlayerPosition(startPosition);
+    setCurrentRoomId(startingRoom.id);
     
-    // Update game store to reflect we're in an interior
-    const interiorLocations = {
-      'cave': 'CAVE',
-      'hms_beagle': 'HMS_BEAGLE',
-      'governors_house': 'GOVERNORS_HOUSE',
-      'watkins_cabin': 'WATKINS_CABIN',
-      'whalers_hut': 'WHALERS_HUT',
-      'mail_barrel': 'MAIL_BARREL'
-    };
-    
-
-    
-    // Create appropriate message for entering each location type
-    let entryMessage = "";
-    switch(type) {
-      case 'cave':
-        entryMessage = "You have entered Gabriel's Cave. The air is cool and damp, with the scent of earth and burning candles.";
-        break;
-      case 'hms_beagle':
-        entryMessage = "You have boarded HMS Beagle. The familiar creak of timbers and smell of tar welcome you back.";
-        break;
-      case 'governors_house':
-        entryMessage = "You have entered the Vice-Governor's House. The colonial furnishings speak of a man attempting to recreate European comfort.";
-        break;
-      case 'watkins_cabin':
-        entryMessage = "You have entered Watkins's abandoned cabin. The musty air holds traces of a solitary life lived years ago.";
-        break;
-      case 'whalers_hut':
-        entryMessage = "You have entered the whaler's hut. Broken harpoon parts and the lingering smell of blubber reveal its purpose.";
-        break;
-      case 'mail_barrel':
-        entryMessage = "You peer inside the mail barrel. It's dark and mostly filled with sand, but you can make out various letters and parcels.";
-        break;
-      default:
-        entryMessage = "You have entered an interior location.";
+    // Update game store
+    const gameStore = useGameStore.getState();
+    if (gameStore && gameStore.moveToLocation) {
+      gameStore.moveToLocation(startingRoom.id);
     }
+    
+    // Create appropriate message for entering
+    let entryMessage = `You have entered ${layout.name}. ${startingRoom.description}`;
     
     return {
       success: true,
-      message: entryMessage
+      message: entryMessage,
+      roomId: startingRoom.id,
+      specimens: startingRoom.specimens || [],
+      npcs: startingRoom.npcs || []
     };
   };
   
   /**
    * Exit an interior location
+   * @returns {object} Result with success status and message
    */
   const exitInterior = () => {
+    if (!isInInterior) {
+      return {
+        success: false,
+        message: "You are already outside."
+      };
+    }
+    
+    // Get the exterior location this interior is connected to
+    const layout = interiorLayouts[interiorType];
+    if (!layout) {
+      setIsInInterior(false);
+      setInteriorType(null);
+      setCurrentRoomId(null);
+      
+      return {
+        success: true,
+        message: "You have exited the interior location.",
+      };
+    }
+    
+    const exteriorLocationId = layout.exteriorLocation;
+    const exteriorCell = islandGrid.find(cell => cell.id === exteriorLocationId);
+    
+    // Reset interior state
     setIsInInterior(false);
     setInteriorType(null);
+    setCurrentRoomId(null);
     
-    // ensure game store knows we've exited
-    const currentCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
-    if (currentCell) {
-      useGameStore.getState().moveToLocation(currentCell.id);
+    // Update position to the exterior location
+    if (exteriorCell) {
+      setPlayerPosition({ x: exteriorCell.x, y: exteriorCell.y });
+      setCurrentLocationId(exteriorLocationId);
+      
+      // Update game store
+      const gameStore = useGameStore.getState();
+      if (gameStore && gameStore.moveToLocation) {
+        gameStore.moveToLocation(exteriorLocationId);
+      }
     }
+    
+    const exitMessageContent = layout.name === "HMS Beagle" 
+      ? "You have disembarked from the HMS Beagle. A small rowboat has taken you to shore." 
+      : `You have exited ${layout.name} and returned to the exterior.`;
     
     return {
       success: true,
-      message: `Darwin has returned to the exterior from an interior location. This is a shift in context that should be noted in the narrative. Consequently, NPCs who had been in the interior are no longer accessible to Darwin, because he is now in the exterior. If he is leaving the Beagle, describe how he has been rowed to shore by two sailors and is now on the island again. No NPCs follow him.`
+      message: exitMessageContent,
+      locationId: exteriorLocationId,
+      newPosition: exteriorCell 
+        ? { x: exteriorCell.x, y: exteriorCell.y }
+        : playerPosition
     };
   };
   
   /**
    * Move within an interior location
+   * @param {object} newPosition - New position {x, y}
+   * @param {string} roomId - ID of the room
+   * @returns {object} Result with success status and message
    */
   const moveInInterior = (newPosition, roomId) => {
-    setInteriorPlayerPosition(newPosition);
+    if (!isInInterior) {
+      return {
+        success: false,
+        message: "Not currently in an interior location."
+      };
+    }
     
-    // CRITICAL FIX: Update the game store with the new interior room
-    if (useGameStore && useGameStore.getState().moveToLocation) {
-      try {
-        useGameStore.getState().moveToLocation(roomId);
-      } catch (error) {
-        console.warn("Could not update game store with interior room:", error);
-      }
+    // Get the layout
+    const layout = interiorLayouts[interiorType];
+    if (!layout) {
+      return {
+        success: false,
+        message: `Invalid interior type: ${interiorType}`
+      };
+    }
+    
+    // Validate the room exists
+    const room = layout.rooms.find(r => r.id === roomId);
+    if (!room) {
+      return {
+        success: false,
+        message: `Room ${roomId} not found.`
+      };
+    }
+    
+    // Check if the room is adjacent to current position
+    const isAdjacent = (
+      (Math.abs(room.x - interiorPlayerPosition.x) === 1 && room.y === interiorPlayerPosition.y) ||
+      (Math.abs(room.y - interiorPlayerPosition.y) === 1 && room.x === interiorPlayerPosition.x)
+    );
+    
+    // Small interiors (1x1) don't need adjacency check
+    const is1x1 = layout.grid[0] === 1 && layout.grid[1] === 1;
+    
+    // Allow movement to same position (looking around the same room)
+    const isSamePosition = (
+      room.x === interiorPlayerPosition.x && room.y === interiorPlayerPosition.y
+    );
+    
+    if (!is1x1 && !isAdjacent && !isSamePosition) {
+      return {
+        success: false,
+        message: "You can only move to adjacent rooms."
+      };
+    }
+    
+    // Update state
+    setInteriorPlayerPosition(newPosition);
+    setCurrentRoomId(roomId);
+    
+    // Update game store
+    const gameStore = useGameStore.getState();
+    if (gameStore && gameStore.moveToLocation) {
+      gameStore.moveToLocation(roomId);
     }
     
     return {
       success: true,
-      message: `You move to ${roomId}`
+      message: isSamePosition
+        ? `You look around the ${room.name}. ${room.description}`
+        : `You move to the ${room.name}. ${room.description}`,
+      roomId: room.id,
+      specimens: room.specimens || [],
+      npcs: room.npcs || []
     };
+  };
+  
+  /**
+   * Check if we can enter an interior from the current location
+   * @param {string} interiorType - Type of interior to check
+   * @returns {boolean} - True if we can enter
+   */
+  const canEnterInterior = (interiorType) => {
+    const layout = interiorLayouts[interiorType];
+    if (!layout) return false;
+    
+    const currentCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
+    return currentCell?.id === layout.exteriorLocation;
+  };
+  
+  /**
+   * Get a list of interiors that can be entered from the current location
+   * @returns {string[]} - Array of interior types that can be entered
+   */
+  const getAvailableInteriors = () => {
+    if (isInInterior) return [];
+    
+    const currentCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
+    if (!currentCell) return [];
+    
+    return Object.keys(interiorLayouts).filter(interiorType => 
+      interiorLayouts[interiorType].exteriorLocation === currentCell.id
+    );
   };
 
   // Return the hook's API
@@ -354,6 +513,7 @@ export function useLocationSystem(onLocationUpdate) {
     isInInterior,
     interiorType,
     interiorPlayerPosition,
+    currentRoomId,
     handleMove,
     moveToLocation,
     detectMovementInText,
@@ -361,6 +521,19 @@ export function useLocationSystem(onLocationUpdate) {
     getValidDirections,
     enterInterior,
     exitInterior,
-    moveInInterior
+    moveInInterior,
+    canEnterInterior,
+    getAvailableInteriors,
+    
+    // Utility functions for working with interiors
+    getNPCsForCurrentRoom: () => {
+      if (!isInInterior || !currentRoomId) return [];
+      return getNPCsForRoom(currentRoomId);
+    },
+    
+    getSpecimensForCurrentRoom: () => {
+      if (!isInInterior || !currentRoomId) return [];
+      return getSpecimensForRoom(currentRoomId);
+    }
   };
 }

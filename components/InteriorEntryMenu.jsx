@@ -29,7 +29,7 @@ export default function InteriorEntryMenu({
       { id: 'watkins_cabin', name: 'Watkins Cabin', icon: '🏚️', description: 'Enter the abandoned cabin' }
     ],
     'PENAL_COLONY': [
-      { id: 'governors_house', name: 'Governor\'s House', icon: '🏠', description: 'Enter Vice Governor Lawson\'s residence' }
+      { id: 'governors_house', name: 'Governor\'s House', icon: '🏠', description: 'Enter the Vice Governor Lawson\'s residence' }
     ],
     'W_LAVA': [
       { id: 'whalers_hut', name: 'Whaler\'s Hut', icon: '🪵', description: 'Enter the old whaling shelter' }

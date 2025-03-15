@@ -327,7 +327,7 @@ Remember: NO OTHER DESCRIPTIONS on tool use turns beyond the actual investigatio
 [STATUS: singleWordStatus]
 [WEATHER: singleWordWeather]
 [SOUNDS: 2 or 3 short sound descriptions separated by ellipses]
-[COLLECTIBLE: oneSpecimenIDFromTheList] *note: specimenid are ALWAYS a single lowercase word. here are some valid inspecimenid - other similar ids may appear via hybrid generation, use only if they appear in nearby specimen: easternsantacruztortoise floreanagianttortoise galapagosmockingbird floreanamockingbird largegroundfinch mediumgroundfinch marineiguana terrestrialiguana cactus lavalizard crab sealion booby frigatebird coral seaurchin basalt barnacle mangrove greenTurtle parrotfish hammerhead mantaRay flamingo olivine plicopurpura neorapana socialisttreatise memoirsofautopian governorsletter rumflask petmonkey feralgoat captainsskull
+[COLLECTIBLE: oneSpecimenIDFromTheList] *note: specimenid are ALWAYS a single lowercase word. here are some valid inspecimenid - other similar ids may appear via hybrid generation, use only if they appear in nearby specimen: easternsantacruztortoise floreanagianttortoise galapagosmockingbird floreanamockingbird largegroundfinch mediumgroundfinch marineiguana terrestrialiguana cactus lavalizard crab sealion booby frigatebird coral seaurchin basalt barnacle mangrove greenTurtle parrotfish hammerhead mantaRay flamingo olivine plicopurpura neorapana socialisttreatise memoirsofautopian governorsletter rumflask petmonkey feralgoat captainsskull meteoriron solidifiedsulphur fennecscurvyremedy scrimshawwhaletooth timesoflondon
 
 [NPC: npc_id or null if none]
 NEXTSTEPS:
@@ -350,7 +350,7 @@ Additional Weather guidance tips:
 - Asilo de la Paz (Settlement) is ALWAYS rainy. 
 - other mountains and forests are typically misty or cloudy.  
 - the southern coast is humid and misty or rain. 
-- ALWAYS return "rainbow" for the WEATHER metadata in Punta Sur. In general, rainbows follow a storm. It is often raining on the southern and eastern coasts.
+- return "rainbow" for the WEATHER metadata in Punta Sur. In general, rainbows follow a storm. It is often raining or stormy on the southern and eastern coasts. Generally, it is hot or humid elsewhere.
 - ALWAYS return "cold" or "rain" or "windy" for weather if it is after 7 pm or before 5 am
 - there is always a STORM at the Southwestern Cliffs.
 

@@ -50,6 +50,7 @@ export function getSpecimenIcon(id) {
           case 'jackothemonkey': return '🙈';
           case 'whalersletter': return '💌';
           case 'scrimshawwhaletooth': return '🦷';
+          case 'timesoflondon': return '📰';
 
     // Handle hybrid IDs by pattern matching
     default:

@@ -32,8 +32,8 @@ import { useMemo } from 'react';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
 import Journal from './Journal';
-
-
+import HamburgerMenu from './HamburgerMenu';
+import EndGame from './EndGame';
 
 function GameContainer() {
   // Pull all needed functions and state from the game store
@@ -82,22 +82,30 @@ function GameContainer() {
   moveInInterior        
  } = useLocationSystem((locationInfo) => {
 
-   // If we're entering an interior, don't trigger another location update
-  if (isInInterior) return;
+   // If we're entering an interior, use interior type instead of exterior cell
+if (isInInterior) {
+  const currentInterior = getCurrentLocation();
+  if (currentInterior && currentInterior.type) {
+    // Find all specimens that can exist in this interior type
+    const specimenIds = specimenList
+      .filter(s => s.habitat && s.habitat.split(', ').includes(currentInterior.type))
+      .map(s => s.id);
+    setNearbySpecimenIds(specimenIds);
+  }
+  return;
+}
 
 const specimen = specimenList?.find(s => s.id === specifiedId);
 
-  // This callback runs when location changes
-  const currentCell = getCellByCoordinates(locationInfo.position.x, locationInfo.position.y);
-  if (currentCell && currentCell.type) {
-    // Find all specimens that can exist in this habitat type
-// Just get specimen IDs that match this habitat type
-const specimenIds = specimenList
-  .filter(s => s.habitat && s.habitat.split(', ').includes(currentCell.type))
-  .map(s => s.id);
-
-setNearbySpecimenIds(specimenIds);
-  }
+// This callback runs when location changes
+const currentCell = getCellByCoordinates(locationInfo.position.x, locationInfo.position.y);
+if (currentCell && currentCell.type) {
+  // Find all specimens that can exist in this habitat type
+  const specimenIds = specimenList
+    .filter(s => s.habitat && s.habitat.split(', ').includes(currentCell.type))
+    .map(s => s.id);
+  setNearbySpecimenIds(specimenIds);
+}
   
   
   // Clear current NPC when location changes
@@ -105,14 +113,7 @@ setNearbySpecimenIds(specimenIds);
     setCurrentNPC(null);
   }
   
-  // Check for NPCs in the new location
-  if (locationInfo.npcs && locationInfo.npcs.length > 0) {
-    // Randomly decide if an NPC should appear (30% chance)
-    if (Math.random() < 0.3) {
-      const randomIndex = Math.floor(Math.random() * locationInfo.npcs.length);
-      setVisibleNPCs([locationInfo.npcs[randomIndex]]);
-    }
-  }
+  
 });
 
    // check for NPCS before changing location
@@ -876,7 +877,7 @@ const handleRest = () => {
     const minutesToNextDay = (24 - currentHour) * 60;
     advanceTime(minutesToNextDay + 6 * 60); // Add 6 hours for next morning at 6 AM
     
-    // Send message about rest
+    // Send message about restc
     sendToLLM("Darwin returns to the HMS Beagle for the night, enjoying a hearty meal with Captain FitzRoy and the crew. After a good night's rest in his small but comfortable cabin, he awakens refreshed and ready to continue his explorations at dawn.");
   };
 
@@ -990,68 +991,29 @@ const handleSwitchPOV = async (prompt) => {
 }
 
  // handling attempts to enter interior maps 
-const handleInteriorEntry = (interiorType) => {
-  // Get current location
-  const currentLocation = getCurrentLocation();
-  if (!currentLocation) return;
+// In GameContainer.jsx, update the handleInteriorEntry function
 
-  if (isInInterior && interiorType === interiorType) {
-    console.log("Already in this interior, skipping transition");
+const handleInteriorEntry = (interiorType) => {
+  const layout = interiorLayouts[interiorType];
+  if (!layout) {
+    sendToLLM("There's nothing to enter here.");
     return;
   }
   
-  // Different entry logic for each interior type
-  switch (interiorType) {
-    case 'cave':
-      // Only allow entry from the Pirate Caves location
-      if (currentLocation.id !== 'E_MID') {
-        sendToLLM("There are no caves nearby to enter.");
-        return;
-      }
-      
-      // Enter Gabriel's Cave
-      const result = enterInterior('cave', { x: 1, y: 2 }); // Start at cave entrance
-      
-      if (result.success) {
-        // Force Gabriel to be present in the cave
-        setVisibleNPCs(['gabriel_puig']);
-        sendToLLM(result.message + " The cave is dimly lit by a few candles. As your eyes adjust to the darkness, you make out the silhouette of a man sitting at a makeshift desk covered in papers.");
-      }
-      break;
-      
-    case 'hms_beagle':
-      // Only allow entry from Post Office Bay
-      if (currentLocation.id !== 'POST_OFFICE_BAY') {
-        sendToLLM("The HMS Beagle is not docked here.");
-        return;
-      }
-      
-      // Enter the HMS Beagle
-      const beagleResult = enterInterior('hms_beagle', { x: 0, y: 0 }); // Start at main deck
-      
-      if (beagleResult.success) {
-        setVisibleNPCs(['fitzroy']);
-      
-      }
-      break;
-      
-    case 'governors_house':
-      // Only allow entry from the Settlement
-      if (currentLocation.id !== 'SETTLEMENT') {
-        sendToLLM("The Governor's house is not in this location.");
-        return;
-      }
-      
-      // Enter the Governor's house
-     const houseResult = enterInterior('governors_house', { x: 1, y: 1 });
-if (houseResult.success) {
-  setVisibleNPCs(['nicolas_lawson']);
+  // Check if we can enter from current location
+  const currentLocation = getCurrentLocation();
+  if (currentLocation.id !== layout.exteriorLocation) {
+    sendToLLM(`The ${layout.name} is not accessible from here.`);
+    return;
+  }
   
-}
-      break;    
-      
-    default:
-      sendToLLM("There's nothing to enter here.");
+  // Enter the interior
+  const result = enterInterior(interiorType);
+  
+  if (result.success) {
+    // The NPCs should now come from the room definition
+    // This automatically happens in getCurrentLocation
+    sendToLLM(result.message);
   }
 };
 
@@ -1746,7 +1708,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   return (
     <div className="max-w-7xl mx-auto p-4 min-h-screen bg-darwin-light relative">
 
-
+   <HamburgerMenu />
       
       <div className="darwin-panel p-4 mb-3 bg-amber-50 relative overflow-hidden shadow-lg rounded-lg">
         {/* Banner image */}
@@ -1828,8 +1790,6 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   </div>
 )}
 
-
-
 {isInInterior ? (
  <InteriorMap
   locationType={interiorType}
@@ -1837,6 +1797,8 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     const result = exitInterior();
     sendToLLM(result.message);
     setCurrentInteriorRoom(null);
+    // Clear interior-specific specimens when exiting
+    setNearbySpecimenIds([]);
   }}
   onInteriorMove={(newPos, roomId, room) => {
     const result = moveInInterior(newPos, roomId);
@@ -1846,18 +1808,47 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     setCurrentInteriorRoom({
       id: roomId,
       name: room?.name || roomId,
-      description: room?.description || ""
+      description: room?.description || "",
+      // Add type property that maps to specimen habitats
+      type: interiorType === 'governors_house' ? 'governorshouse' : 
+            interiorType === 'hms_beagle' ? 'beagle' :
+            interiorType === 'cave' ? 'cave' :
+            interiorType === 'whalers_hut' ? 'whalershut' :
+              interiorType === 'mail_barrel' ? 'mailbarrel' :
+              interiorType === 'watkins_cabin' ? 'watkinscabin' :
+            interiorType
     });
-
-    // Check for NPC encounters in this room
-    if (interiorType === 'whalershut' && roomId === 'HUT_MAIN') {
-      setVisibleNPCs(['stowaway']);
-    } else if (interiorType === 'hms_beagle' && roomId === 'BEAGLE_CABIN') {
-      setVisibleNPCs(['fitzroy']);
-    } else if (interiorType === 'governors_house' && roomId === 'GOVERNORS_HOUSE_GARDEN') {
-      setVisibleNPCs(['maria']);
-    }
-  }}
+    
+    // Update nearby specimens based on interior room type
+    const roomType = interiorType === 'governors_house' ? 'governorshouse' : 
+                    interiorType === 'hms_beagle' ? 'beagle' :
+                    interiorType === 'cave' ? 'cave' :
+                    interiorType === 'whalers_hut' ? 'whalershut' :
+                    interiorType === 'mail_barrel' ? 'mailbarrel' :
+                     interiorType === 'watkins_cabin' ? 'watkinscabin' :
+                    interiorType;
+    
+    // Get specimens matching this interior type
+    const matchingSpecimens = specimenList.filter(s => 
+      s.habitat && s.habitat.split(', ').includes(roomType)
+    );
+    console.log(`Found ${matchingSpecimens.length} specimens for ${roomType}: `, 
+      matchingSpecimens.map(s => s.name));
+    
+    setNearbySpecimenIds(matchingSpecimens.map(s => s.id));
+    
+  // Check for NPC encounters in this room
+if (interiorType === 'whalers_hut' && roomId === 'HUT_MAIN') {
+  setVisibleNPCs(['stowaway']);
+} else if (interiorType === 'hms_beagle' && roomId === 'BEAGLE_CABIN') {
+  setVisibleNPCs(['fitzroy']);
+} else if (interiorType === 'governors_house' && roomId === 'GOVERNORS_HOUSE_GARDEN') {
+  // Set both NPCs in this room
+  setVisibleNPCs(['nicolas_lawson', 'maria']);
+} else if (interiorType === 'governors_house') {
+  // Default for other governor's house rooms
+  setVisibleNPCs(['nicolas_lawson']);
+}  }}
   playerPosition={interiorPlayerPosition}
   currentNPC={currentNPC}
 />
@@ -2025,6 +2016,8 @@ gameTime={gameTime}
 />   
  </div>
       </div>
+
+      <EndGame />
       
 <div className="mt-4 text-center text-xs text-amber-700/70 font-serif italic">
   This is a HistoryLens prototype created by 

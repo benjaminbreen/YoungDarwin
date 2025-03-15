@@ -911,7 +911,7 @@ export const baseSpecimens = [
 {
   id: 'whalersletter',
   name: 'Whaler\'s Letter',
-  latin: 'Epistola marinarii',
+  latin: 'A piece of unsent mail',
   ontology: 'Document',
   order: 'Correspondence',
   sub_order: 'Personal Letter',
@@ -922,7 +922,7 @@ export const baseSpecimens = [
     'It’s rather sad...',
 
   ],
-  habitat: 'hut',
+  habitat: 'hut, mailbarrel',
   collected: false,
   observations: [],
   scientificValue: 2,
@@ -982,7 +982,7 @@ export const baseSpecimens = [
     'Mentions rumored abuses in the penal colony on Charles Island',
     'Signed with Vilamil’s official seal, pressed in red wax'
   ],
-  habitat: 'office',
+  habitat: 'governorshouse',
   collected: false,
   observations: [],
   scientificValue: 1,
@@ -995,6 +995,34 @@ export const baseSpecimens = [
   memoryText: '“The letter bristles with resentment—Governor Vilamil spares no words in censuring Lawson’s lapses and moral shortcomings.”',
   contents: 'Its brief paragraphs contain pointed accusations and dire warnings about the colony’s deteriorating order.',
   keywords: ['letter', 'vilamil', 'governance', 'lawson', 'politics', 'galapagos']
+},
+
+{
+  id: 'timesoflondon',
+  name: 'Times of London',
+  latin: 'June, 1835. Three months out of date... perhaps the Governor is a subscriber.',
+  ontology: 'Document',
+  order: 'Newspaper',
+  sub_order: 'English Press',
+  description: 'A wrinkled copy of The Times from the third week of June, 1835, filled with the latest happenings back in England.',
+ details: [
+  "“We cannot but observe the continued disputes in Parliament regarding labour reform; debates echo the growing public concern for factory conditions and worker welfare.”",
+  "“Let it be remembered that the prosperity of the realm depends, in no small measure, upon just treatment of its industrious classes.”",
+  "“His Majesty’s Government, though wavering on some points, acknowledges that urgent remedies must be sought for these most pressing social ills.”"
+],
+  habitat: 'mailbarrel',
+  collected: false,
+  observations: [],
+  scientificValue: 1,
+  hybrid_ease: 1,
+  hybrid_temperature: 1,
+  danger: 1, // Not dangerous to handle
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/timesoflondonjune1835.jpg',
+  memoryText: '“The paper crackles as you unfold it, its headlines a reminder of a distant home and a world still spinning outside these islands.”',
+  contents: 'Covers the third week of June, 1835, with notable editorials on trade issues, parliamentary reforms, and a smattering of local advertisements.',
+  keywords: ['newspaper', 'London', 'press', 'Times', '1835', 'English news']
 },
 
 // 4) Syms Covington’s Rum Flask
@@ -1119,7 +1147,7 @@ export const baseSpecimens = [
 {
   id: 'watkinswill',
   name: 'Last Will and Testament of Patrick Watkins',
-  latin: 'Testamentum Patricii Watkins',
+  latin: 'Clearly the work of a madman,',
   ontology: 'Document',
   order: 'Legal Document',
   sub_order: 'Handwritten Will',
@@ -1128,9 +1156,8 @@ export const baseSpecimens = [
     'Barely legible scrawl, blotched with suspicious dark stains',
     'Mentions a shack, a patch of tobacco, and rumored “hidden gold” inland',
     'Riddled with profanities and curses upon any who thwart his desires',
-    'Believed to have been scrawled in a final rum-induced delirium'
   ],
-  habitat: 'camp',
+  habitat: 'camp, cabin',
   collected: false,
   observations: [],
   scientificValue: 2, // Historical curiosity, but not scientific
@@ -1263,26 +1290,12 @@ export const baseSpecimens = [
 ];
 
 
-// Function to generate a random location on the island
-const generateRandomLocation = () => {
-  // Ensure locations are within the visible island on the map
-  // These values represent percentages of map width/height
-  const minX = 15; // Left boundary of island
-  const maxX = 85; // Right boundary of island
-  const minY = 15; // Top boundary of island
-  const maxY = 85; // Bottom boundary of island
 
-  return {
-    x: Math.floor(Math.random() * (maxX - minX) + minX),
-    y: Math.floor(Math.random() * (maxY - minY) + minY)
-  };
-};
-
-// Initialize specimens with random locations when the game starts
+// Initialize specimens when the game starts
 export const initializeSpecimens = () => {
   return baseSpecimens.map(specimen => ({
     ...specimen,
-    location: generateRandomLocation(),
+   
     collected: false,
     observations: []
   }));

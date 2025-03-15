@@ -7,6 +7,7 @@ import { initializeSpecimens } from '../data/specimens';
 import { queueEventForSummary, compileEventHistorySummary } from '../utils/generateLLMContext';
 import { locations } from '../data/locations';
 console.log('Our location IDs are:', locations.map(l => l.id));
+console.log('Our habitat types are:', [...new Set(locations.map(l => l.type))]);
 
 const useGameStore = create((set, get) => ({
   // Core game state

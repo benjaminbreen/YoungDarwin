@@ -129,7 +129,7 @@ const getBannerImage = () => {
    if (location.includes('watkins interior')) return '/banners/watkinsinterior.jpg';
       if (location.includes('Hut Interior')) return '/banners/hutinterior.jpg';
 
-        if (location.includes('mail barrel')) return '/banners/mailbarrelinterior.jpg';
+        
       
       // Standard location-based images for the island
       switch (location) {
@@ -138,6 +138,8 @@ const getBannerImage = () => {
     return '/banners/hmsbeagle.jpg';
   case 'Northwest Reef':
     return '/banners/northwestreef.jpg';
+     case 'Mail Barrel':
+    return '/banners/mailbarrel.jpg';
   case 'Desolate Outcrop':
     return '/banners/desolateoutcrop.jpg';
   case 'Black Beach, Surf':
@@ -188,7 +190,7 @@ const getBannerImage = () => {
     return '/banners/southernforest.jpg';
   case 'Basalt Plains':
     return '/banners/basaltplains.jpg';
-  case 'Wind-Swept Promontory':
+  case 'Windy Promontory':
     return '/banners/windsweptpromontory.jpg';
   case 'Southeastern Coast':
     return '/banners/southeasterncoast.jpg';
@@ -464,6 +466,8 @@ const getOverlayGradientStyle = () => {
   return (
     <>
       {/* Banner Container with Click Listener */}
+
+
       <div 
         className="absolute inset-0 z-0 flex items-center justify-center"
         onClick={handleBannerClick}
