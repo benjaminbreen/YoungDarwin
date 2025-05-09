@@ -69,7 +69,7 @@ Darwin was alert to the evocative imagery such a tale of privation and isolation
     // If we have no narrative text, use a sample for testing
     if (!lastNarrativeText || lastNarrativeText === 'No narrative text available.') {
       const sampleText = `
-        You carefully examine the marine iguana with your hand lens. The creature's black scales appear almost metallic in the harsh sunlight, adapted to absorb heat quickly after its cold swimming ventures. Each scale has a subtle pattern of ridges, likely evolved to shed water efficiently after emerging from the sea. The iguana's powerful claws grip the volcanic rock with impressive strength, specially adapted for clinging to slippery surfaces. Its snout shows signs of wear, evidence of its unique feeding behavior - scraping algae from rocks beneath the water's surface. This adaptation to marine feeding is unlike any lizard you've previously encountered.
+        You carefully examine the marine iguana with your hand lens. The creature's black scales appear almost metallic in the harsh sunlight, adapted to absorb heat quickly after its cold swimming ventures. 
       `;
       lastNarrativeText = sampleText;
     }
@@ -82,7 +82,7 @@ Darwin was alert to the evocative imagery such a tale of privation and isolation
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'gpt-4.1-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Please critique this narrative from a historian's perspective:\n\n${lastNarrativeText}` }

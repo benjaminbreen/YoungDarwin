@@ -235,7 +235,7 @@ export default function CollectionResultPopup({
             
             {result?.reason && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
-                <p className="text-md text-gray-700 italic">
+                <p className="text-lg text-gray-700 italic">
                   {result.reason}
                 </p>
               </div>

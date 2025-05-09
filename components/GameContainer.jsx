@@ -1520,7 +1520,7 @@ ${npcContext}
 
 User input: ${userInput}
 
-Remember to respond as if you are Darwin's first-person perspective, using second-person ("you"). Assessment is almost always wittily barbed and critical. Your narratives are never more than two paragraphs. Follow your prompt exactly.
+Remember to respond as if you are Darwin's first-person perspective, using second-person ("you"). Assessment of actions is almost always wittily barbed and critical. REmember the 1835 context. If the player pushes up against social and historical norms of the time, brutally and vividly reveal to them that the past truly is a foreign country, and life in 1835 was hard. But you can also be witty and take things in creative directions - though it must stay strictly within the bounds of historical accuracy. Your narratives are rarely more than two paragraphs. Follow your prompt exactly.
 `;
     
     // Save the raw prompt for transparency
