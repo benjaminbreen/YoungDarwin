@@ -167,10 +167,10 @@ const models = [
   },
   {
     id: 'gemini-flash-lite',
-    name: 'Gemini 2.0 Flash Lite',
+    name: 'Gemini Flash Lite (Latest)',
     provider: 'google',
-    apiModel: 'gemini-2.0-flash-lite', // Often uses same base model
-    description: 'Lighter version',
+    apiModel: 'gemini-flash-lite-latest', // Updated to latest lite model
+    description: 'Best/fastest current Gemini lite model',
     maxTokens: 1000,
     temperature: 0.8,
   },
@@ -556,7 +556,6 @@ Generate the next part of the narrative based on this action and context, follow
                 max_tokens: selectedModelConfig.maxTokens || 450,
             });
             responseContent = completion.choices[0]?.message?.content || '[OpenAI response was empty or incomplete.]';
-            rawLLMResponseData = completion;
             console.log(`[${new Date().toISOString()}] Received OpenAI response (${Date.now() - apiStartTime}ms).`);
        } catch(openaiError) {
            console.error(`[${new Date().toISOString()}] OpenAI API Error:`, openaiError);

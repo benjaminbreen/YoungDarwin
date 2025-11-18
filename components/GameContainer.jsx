@@ -366,10 +366,10 @@ const checkHybridsInLocation = (locationId) => {
     return;
   }
 
-    const hybridsForLocation = specimenList.filter(s => 
-    s?.isHybrid && 
-    s.habitat && 
-    (s.habitat.includes(location.type) || true) // true to see all hybrids for debugging
+    const hybridsForLocation = specimenList.filter(s =>
+    s?.isHybrid &&
+    s.habitat &&
+    s.habitat.includes(location.type)
   );
   
   console.log(`Found ${hybridsForLocation.length} hybrids for location type ${location.type}:`,
@@ -404,6 +404,63 @@ useEffect(() => {
     handlePassOut();
   }
 }, [fatigue]);
+
+// Keyboard arrow key navigation
+useEffect(() => {
+  const handleKeyPress = (event) => {
+    // Only handle arrow keys when not typing in an input or textarea
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // Prevent default scrolling behavior for arrow keys
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+    }
+
+    // Don't allow movement while loading
+    if (isLoading) {
+      return;
+    }
+
+    let direction = null;
+    switch (event.key) {
+      case 'ArrowUp':
+        direction = 'north';
+        break;
+      case 'ArrowDown':
+        direction = 'south';
+        break;
+      case 'ArrowLeft':
+        direction = 'west';
+        break;
+      case 'ArrowRight':
+        direction = 'east';
+        break;
+      default:
+        return;
+    }
+
+    if (direction) {
+      const result = handleMove(direction);
+      if (result.success) {
+        // Movement successful - the location system will handle the state updates
+        console.log(`Moved ${direction} via keyboard`);
+      } else {
+        // Movement failed - could show a message
+        console.log(`Cannot move ${direction}: ${result.message}`);
+      }
+    }
+  };
+
+  // Add event listener
+  window.addEventListener('keydown', handleKeyPress);
+
+  // Cleanup
+  return () => {
+    window.removeEventListener('keydown', handleKeyPress);
+  };
+}, [handleMove, isLoading]);
 
 // Check if current location allows resting
 useEffect(() => {
@@ -657,7 +714,24 @@ const handleViewNearbySpecimenDetail = (specimen) => {
 // specimen collection method handler
 
 const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
-  console.log("Collecting specimen with method:", method?.name, "notes:", notes);
+  // Validate and sanitize notes input
+  let sanitizedNotes = '';
+  if (notes) {
+    // Ensure notes is a string
+    sanitizedNotes = String(notes);
+
+    // Limit length to prevent excessive API payload
+    const MAX_NOTES_LENGTH = 500;
+    if (sanitizedNotes.length > MAX_NOTES_LENGTH) {
+      console.warn(`Collection notes truncated from ${sanitizedNotes.length} to ${MAX_NOTES_LENGTH} characters`);
+      sanitizedNotes = sanitizedNotes.substring(0, MAX_NOTES_LENGTH);
+    }
+
+    // Trim whitespace
+    sanitizedNotes = sanitizedNotes.trim();
+  }
+
+  console.log("Collecting specimen with method:", method?.name, "notes:", sanitizedNotes);
 
   // Find the specimen to be collected
   const specimen = specimenList.find(s => s.id === specimenId);
@@ -679,7 +753,7 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
       location: currentLocationId,
       narrativeContext: narrativeText,
       collectionMethod: method?.name || "",
-      playerNotes: notes || ""
+      playerNotes: sanitizedNotes
     };
 
     // Call the collection-decision API
@@ -728,7 +802,7 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
   } catch (error) {
     console.error('Collection attempt failed:', error);
     sendToLLM(`An error occurred while attempting to collect the ${specimen.name}: ${error.message}`);
-    setIsLoading(false);
+    // Note: setIsLoading is handled by sendToLLM's finally block
   }
 
 }
