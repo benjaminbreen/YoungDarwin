@@ -600,12 +600,20 @@ const handleOpenCollectionPopup = (specimenId) => {
 // Handle collection confirmation
 const handleCollectionConfirm = () => {
   if (!collectingSpecimenId || !selectedMethod) return;
-  
-  // Call the collection method
-  handleCollectSpecimenMethod(collectingSpecimenId, selectedMethod, collectionNotes);
-  
+
+  // Save the values before resetting state
+  const specimenId = collectingSpecimenId;
+  const method = selectedMethod;
+  const notes = collectionNotes;
+
+  // Reset the collecting state immediately so user can start another collection
+  setCollectingSpecimenId(null);
+
   // Close the popup
   setShowCollectionPopup(false);
+
+  // Call the collection method with saved values
+  handleCollectSpecimenMethod(specimenId, method, notes);
 };
 
   // Updated handleCollectNearbySpecimen function
