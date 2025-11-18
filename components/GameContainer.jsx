@@ -574,15 +574,22 @@ useEffect(() => {
   // Collection popup handlers
 const handleOpenCollectionPopup = (specimenId) => {
   console.log("Opening collection popup for:", specimenId);
+
+  // Prevent opening a new collection popup if one is already open
+  if (collectingSpecimenId) {
+    console.warn("Collection already in progress, ignoring duplicate request");
+    return;
+  }
+
   const specimen = specimenList.find(s => s.id === specimenId);
   if (!specimen) {
     console.error("Invalid specimen ID:", specimenId);
     return;
   }
-  
+
   // Set the current specimen (this is important for context)
   setCurrentSpecimen(specimen);
-  
+
   // Set up the collection popup
   setCollectingSpecimenId(specimenId);
   setSelectedMethod(null);
@@ -695,12 +702,20 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
 
     const result = await response.json();
 
+    // Save the specimen ID for the result popup before clearing the collecting state
+    const collectedSpecimenId = specimenId;
+
     // Set popup data and show the popup IMMEDIATELY (while still loading)
     setCollectionResult(result);
     setCollectionSpecimenName(specimen.name);
     setCollectionMethod(method?.name || "your method");
+
+    // Reset the collecting state now that we have all the data we need
+    // This allows new collections to start even while result popup is showing
+    setCollectingSpecimenId(null);
+
     setShowCollectionResult(true);
-    
+
     // Process the result in the background
     if (result.success) {
       // If successful, add to inventory
@@ -729,6 +744,8 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     console.error('Collection attempt failed:', error);
     sendToLLM(`An error occurred while attempting to collect the ${specimen.name}: ${error.message}`);
     setIsLoading(false);
+    // Reset collecting state on error to allow new collection attempts
+    setCollectingSpecimenId(null);
   }
 
 }
