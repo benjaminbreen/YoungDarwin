@@ -444,11 +444,34 @@ useEffect(() => {
     if (direction) {
       const result = handleMove(direction);
       if (result.success) {
-        // Movement successful - the location system will handle the state updates
-        console.log(`Moved ${direction} via keyboard`);
+        // Handle NPCs on movement
+        handleNPCsOnMovement();
+
+        // Generate narrative for the movement
+        const locationName = result.newLocationName || getCurrentLocation().name;
+        sendToLLM(`You traveled ${direction} to ${locationName}. ${result.message || ''}`);
+
+        // Update fatigue based on movement
+        if (result.fatigueIncrease) {
+          updateMoodAndFatigue(null, fatigue + result.fatigueIncrease);
+        }
+
+        // Update suggestions based on new location
+        updateNextStepSuggestions();
+
+        // Update nearby specimens
+        if (result.newPosition) {
+          const newCell = getCellByCoordinates(result.newPosition.x, result.newPosition.y);
+          if (newCell) {
+            const habitatSpecimens = specimenList.filter(specimen =>
+              specimen.habitat && specimen.habitat.includes(newCell.type)
+            );
+            setNearbySpecimenIds(habitatSpecimens.map(s => s.id));
+          }
+        }
       } else {
-        // Movement failed - could show a message
-        console.log(`Cannot move ${direction}: ${result.message}`);
+        // Movement failed - show failure message
+        sendToLLM(result.message || "You cannot travel in that direction.");
       }
     }
   };
@@ -460,7 +483,7 @@ useEffect(() => {
   return () => {
     window.removeEventListener('keydown', handleKeyPress);
   };
-}, [handleMove, isLoading]);
+}, [handleMove, isLoading, handleNPCsOnMovement, sendToLLM, getCurrentLocation, updateMoodAndFatigue, fatigue, updateNextStepSuggestions, getCellByCoordinates, specimenList, setNearbySpecimenIds]);
 
 // Check if current location allows resting
 useEffect(() => {
