@@ -355,6 +355,372 @@ const getNPCsForCurrentLocationAndTime = () => {
   return availableNPCs;
 };
 
+// Pass out handler - must be defined before useEffect that calls it
+const handlePassOut = () => {
+  // Reduce fatigue significantly (but not full reset to 0)
+  const newFatigue = Math.max(0, fatigue - REST_FATIGUE_REDUCTION);
+  updateMoodAndFatigue(null, newFatigue);
+
+  // Get list of NPCs who could find Darwin
+  const possibleRescuers = [
+    { id: 'syms_covington', name: 'Syms Covington', location: 'POST_OFFICE_BAY', description: "You remember little after your collapse. Syms must have followed you and found you unconscious - he's dragged you back to the ship. 'Blasted fool,' he mutters, handing you water. 'What would the Captain say if I'd lost ye?'" },
+    { id: 'maria', name: 'María Yupanqui', location: 'GOVERNORS_HOUSE_GARDEN', description: "You wake to the smell of unfamiliar herbs steeping in hot water. María Yupanqui sits nearby, mixing a poultice. 'The island takes those who don't respect its dangers,' she says softly. 'Drink this. It will restore your strength.'" },
+    { id: 'gabriel_puig', name: 'Gabriel Puig', location: 'E_MID', description: "You wake in a dim cave, a revolutionary's hideout. Gabriel Puig eyes you suspiciously. 'I found you half-dead. A British naturalist shouldn't die from simple exhaustion,' he says, almost disappointed. 'It would be too... ordinary.'" },
+    { id: 'lascar_joe', name: 'Lascar Joe', location: 'NW_SHORE', description: "You wake on black sand, the hull of a small boat providing shade. Lascar Joe sits silently nearby, mending a net. He nods when he sees you stir. 'Man must know his limits,' he says simply, offering a waterskin." },
+    { id: 'nicolas_lawson', name: 'Nicolás Lawson', location: 'SETTLEMENT', description: "You wake in an unfamiliar bed. Vice-Governor Lawson stands at a desk reviewing papers. 'Ah, the naturalist lives. My men found you sprawled like a shipwreck victim. The islands demand respect, Mr. Darwin. Even from men of science.'" }
+  ];
+
+  // Randomly select one rescuer
+  const rescuer = possibleRescuers[Math.floor(Math.random() * possibleRescuers.length)];
+
+  // Advance time to next morning
+  const currentHour = Math.floor((gameTime % 1440) / 60);
+  const minutesToNextDay = (24 - currentHour) * 60;
+  advanceTime(minutesToNextDay + 6 * 60); // Add 6 hours for next morning at 6 AM
+
+  // Move to the rescuer's location
+  moveToLocation(rescuer.location);
+
+  // Set the rescuer as the active NPC
+  setCurrentNPC(rescuer.id);
+
+  // Create the popup message
+  const popupMessage = `
+    <div class="text-center mb-4 ">
+      <p class="text-xl font-bold">Darwin collapsed from exhaustion!</p>
+      <p>You were found by ${rescuer.name}.</p>
+    </div>
+    <p>${rescuer.description}</p>
+  `;
+
+  // Show a popup (you can use your existing popup mechanism or add this simple one)
+  // This assumes you have a way to show popups in your game
+  showPassOutPopup(popupMessage, () => {
+    // After popup is dismissed, send message to LLM about the recovery
+    sendToLLM(`Darwin collapsed from exhaustion yesterday and was found by ${rescuer.name}. It's now morning, and Darwin is recovering in ${getCurrentLocation().name}.`);
+  });
+};
+
+// Simple popup function (if you don't already have one)
+const showPassOutPopup = (message, onClose) => {
+  // Create popup element
+  const popupOverlay = document.createElement('div');
+  popupOverlay.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50';
+
+  const popupContent = document.createElement('div');
+  popupContent.className = 'bg-amber rounded-lg shadow-xl p-6 max-w-md mx-4';
+  popupContent.innerHTML = `
+    ${message}
+    <div class="mt-6 text-center">
+      <button class="bg-amber-700 hover:bg-amber-800 text-white py-2 px-6 rounded-lg">
+        Continue
+      </button>
+    </div>
+  `;
+
+  popupOverlay.appendChild(popupContent);
+  document.body.appendChild(popupOverlay);
+
+  // Add click handler to close button
+  const continueButton = popupContent.querySelector('button');
+  continueButton.addEventListener('click', () => {
+    document.body.removeChild(popupOverlay);
+    if (onClose) onClose();
+  });
+};
+
+// Parse LLM response for game state updates - must be defined before sendToLLM
+const parseLLMResponse = (response, userInput) => {
+  // Extract mood
+  const moodMatch = response.match(/\[MOOD:\s*(.*?)\]/);
+  if (moodMatch && moodMatch[1]) {
+    updateMoodAndFatigue(moodMatch[1].trim(), null);
+  }
+
+  // Extract fatigue
+  const fatigueMatch = response.match(/\[FATIGUE:\s*(\d+)\]/);
+  if (fatigueMatch && fatigueMatch[1]) {
+    const fatigueDelta = parseInt(fatigueMatch[1]);
+    console.log(`Adding fatigue increment: ${fatigueDelta}`);
+
+    // Get current fatigue and add the new delta
+    const currentFatigue = fatigue; // This already has previous accumulated fatigue
+    const newFatigue = currentFatigue + fatigueDelta;
+
+    // Update fatigue with accumulated value, capped at 100
+    if (!isNaN(fatigueDelta)) {
+      updateMoodAndFatigue(null, newFatigue);
+    }
+  }
+
+    // Check for NPC departure cues
+   const npcStatusMatch = response.match(/\[NPC_STATUS:\s*(.*?)\]/);
+  if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
+    // Clear current NPC and visible NPCs
+    setCurrentNPC(null);
+    setVisibleNPCs([]);
+  }
+
+
+
+  // Extract primary collectible for the collection button with improved hybrid handling
+  const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
+  if (collectibleMatches && collectibleMatches.length > 0) {
+    const primaryCollectible = collectibleMatches[0]
+      .replace('[COLLECTIBLE:', '')
+      .replace(']', '')
+      .trim();
+
+    // Check if this is a hybrid specimen ID
+    const hybridSpecimen = specimenList.find(s =>
+      s.isHybrid && (
+        s.id.toLowerCase() === primaryCollectible.toLowerCase() ||
+        s.name.toLowerCase().includes(primaryCollectible.toLowerCase())
+      )
+    );
+
+    if (hybridSpecimen) {
+      console.log(`Found hybrid specimen as collectible: ${hybridSpecimen.name} (${hybridSpecimen.id})`);
+      setPrimaryCollectible(hybridSpecimen.id);
+    } else {
+      // Regular specimen handling
+      setPrimaryCollectible(primaryCollectible);
+    }
+  }
+
+  // Process NPC markers
+  const npcMatch = response.match(/\[NPC:\s*(.*?)\]/);
+  if (npcMatch) {
+    const npcId = npcMatch[1].trim();
+    // If NPC is null or empty, clear the current NPC
+    if (npcId === 'null' || npcId === '') {
+      console.log("NPC dismissed based on LLM response");
+      setCurrentNPC(null);
+      setVisibleNPCs([]);
+    } else if (npcId !== 'null' && !currentNPC) {
+      // Only set NPC if we don't already have one active
+      const npc = npcs.find(n => n.id === npcId);
+      if (npc) {
+        setCurrentNPC(npcId);
+      }
+    }
+  }
+
+  // Check for explicit NPC dismissal in user input
+  const dismissalTerms = [
+    "goodbye", "farewell", "leave", "go away", "dismissed",
+    "that's all", "that will be all", "we're done", "leave me"
+  ];
+
+  const userDismissalAttempt = dismissalTerms.some(term =>
+    userInput.toLowerCase().includes(term)
+  );
+
+  if (userDismissalAttempt && currentNPC) {
+    console.log("User explicitly dismissed NPC");
+    setCurrentNPC(null);
+    setVisibleNPCs([]);
+  }
+
+    // Extract potential next steps
+
+const stepsSection = response.match(/NEXTSTEPS:([\s\S]*?)(?=\[|$)/);
+
+if (stepsSection && stepsSection[1]) {
+  const stepsText = stepsSection[1].trim();
+  const lines = stepsText.split('\n').filter(line => line.trim().startsWith('-'));
+
+  if (lines.length > 0) {
+    const currentLocation = getCurrentLocation();
+    const newSuggestions = lines.map(line => {
+      const stepText = line.replace(/^-\s*/, '').trim();
+
+      return {
+        text: stepText,
+        action: stepText
+      };
+    });
+
+    if (newSuggestions.length > 0) {
+      setNextStepSuggestions(newSuggestions);
+    }
+  }
+}
+
+    // Always advance time (representing the passage of time)
+    advanceTime(60);
+  };
+
+  // Process LLM response for display
+  const processForDisplay = (text) => {
+    // Remove next steps section
+    let cleanedText = text.replace(/NEXTSTEPS[\s\S]*?(?=\[STATUS|\[FATIGUE|\[SCIENTIFIC_INSIGHT|\[COLLECTIBLE|$)/, '');
+
+    // Remove metadata markers
+    cleanedText = cleanedText
+      .replace(/\[STATUS:.*?\]/g, '')
+
+   .replace(/\[NEXTSTEPS:.*?\]/g, '')
+       .replace(/\[NPC:.*?\]/g, '')
+
+      .trim();
+
+          // Save the latest narrative in a cookie for the historian critique
+    if (typeof document !== 'undefined') {
+      document.cookie = `lastNarrativeText=${encodeURIComponent(cleanedText)}; path=/; max-age=3600`;
+    }
+
+    return cleanedText;
+  };
+
+// Send request to LLM API - must be defined before useEffects that call it
+const sendToLLM = async (userInput) => {
+  setIsLoading(true);
+
+  try {
+    // Get current location info
+    const currentLocation = getCurrentLocation();
+
+    // Get current NPC if one is active
+    const npcObject = currentNPC ? npcs.find(n => n.id === currentNPC) : null;
+
+    // Get all NPCs that should be at this location
+    const locationNPCs = getNPCsForCurrentLocationAndTime();
+
+    // Get names for all nearby specimens INCLUDING HYBRIDS
+    const nearbySpecimenNames = nearbySpecimenIds.map(id => {
+      const specimen = specimenMap.get(id);
+      // For hybrids, include both the ID and name for better context
+      if (specimen?.isHybrid) {
+        return `${specimen.id} (hybrid: ${specimen.name})`;
+      }
+      return specimen ? specimen.id : id;
+    }).join(", ");
+
+    const contextSummary = useGameStore.getState().generateLLMContext();
+
+    // Build game context for main narrative
+    const contextData = {
+      location: currentLocation?.name || "Isla Floreana",
+      locationDesc: currentLocation?.description || "",
+      time: formatGameTime(),
+      day: daysPassed,
+      fatigue: fatigue,
+      mood: darwinMood,
+      currentSpecimen: currentSpecimen?.name || 'None',
+      collectedSpecimens: inventory.map(item => item.name).join(", ") || 'None',
+      currentNPC: npcObject ? npcObject.name : 'None',
+      validDirections: getValidDirections().join(", "),
+      potentialSpecimens: nearbySpecimenNames || 'None',
+      primaryCollectible: primaryCollectible || 'None',
+      contextSummary: contextSummary
+    };
+
+    // Add to history
+ addToGameHistory('user', userInput);
+    const history = getRecentHistory().slice(-5);
+
+    // DEFUNCT? TK
+    // This is the key optimization for reducing token count and improving latency
+    // const historySummary = useGameStore.getState().getEventHistorySummary();
+
+    // Create NPC context string
+    let npcContext = '';
+
+    // If we're actively talking to an NPC, add full details
+    if (npcObject) {
+      npcContext = `
+ACTIVE NPC: ${npcObject.name} (${npcObject.role})
+Background: ${npcObject.background || ""}
+Appearance: ${npcObject.appearance || ""}
+Personality: ${npcObject.personality || ""}
+Dialogue Examples:
+${npcObject.dialogueExamples ? npcObject.dialogueExamples.map(ex => `- "${ex}"`).join('\n') : ""}
+
+THIS IS AN NPC INTERACTION TURN. Focus primarily on the NPC's dialogue and reactions.`;
+    }
+
+    // Always add information about NPCs that should be in this location
+    if (locationNPCs.length > 0 && !npcObject) {
+      npcContext += `\n\nNPCs PRESENT IN THIS LOCATION:`;
+
+      locationNPCs.forEach(npcId => {
+        const npc = npcs.find(n => n.id === npcId);
+        if (npc) {
+          npcContext += `\n- ${npc.name} (${npc.role}): ${npc.shortDescription}`;
+
+          // For special cases like Gabriel, add more details
+          if (npcId === 'gabriel_puig') {
+            npcContext += `\n  Note: Gabriel is an escaped political prisoner who will try to flee or yell insults in Catalan when approached initially, but who can speak an odd kind of English littered with Spanish and Catalan words and early socialist terminology, and warms up to Darwin if he shows an interest in the plight of the prisoners.`;
+          }
+          if (npcId === 'fitzroy') {
+            npcContext += `\n  Note: Captain FitzRoy is strictly religious and often in conflict with Darwin's scientific ideas.`;
+          }
+        }
+      });
+    }
+
+    // Build complete prompt with context and summarized history
+    const enhancedInput = `
+[Context: Darwin is at ${contextData.location}. ${contextData.locationDesc}. It's ${contextData.time} on day ${contextData.day}.
+Fatigue: ${contextData.fatigue}/100.
+Status: ${contextData.mood}.
+Currently examining: ${contextData.currentSpecimen}.
+Collected specimens: ${contextData.collectedSpecimens}
+Current NPC: ${contextData.currentNPC}
+Potential specimens visible to Darwin in this setting: ${contextData.potentialSpecimens}
+Most plausibly collectible specimen: use your judgement, pick best option from potential specimens
+Valid movement directions: ${contextData.validDirections}]
+
+${contextData.contextSummary}
+${npcContext}
+
+User input: ${userInput}
+
+Remember to respond as if you are Darwin's first-person perspective, using second-person ("you"). Assessment of actions is almost always wittily barbed and critical. REmember the 1835 context. If the player pushes up against social and historical norms of the time, brutally and vividly reveal to them that the past truly is a foreign country, and life in 1835 was hard. But you can also be witty and take things in creative directions - though it must stay strictly within the bounds of historical accuracy. Your narratives are rarely more than two paragraphs. Follow your prompt exactly.
+`;
+
+    // Save the raw prompt for transparency
+    setRawLLMPrompt(enhancedInput);
+
+    // Call API with timeout and retry
+    const response = await fetchWithRetry('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gameState: contextData,
+        prompt: enhancedInput
+      })
+    }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
+
+    if (!response.ok) {
+      throw new Error(`API returned status ${response.status}`);
+    }
+
+    // Process response
+    const data = await response.json();
+    const llmResponse = data.choices?.[0]?.message?.content ||
+                       data.message?.content || '';
+
+    setRawLLMResponse(llmResponse);
+    parseLLMResponse(llmResponse, userInput);
+
+    // Set narrative text
+    setNarrativeText(processForDisplay(llmResponse));
+
+    // Add to history
+    addToGameHistory('assistant', llmResponse);
+  } catch (error) {
+    console.error("Error with LLM request:", error);
+    const errorMsg = getErrorMessage(error);
+    setNarrativeText(`Error: ${errorMsg}`);
+    setRawLLMResponse(`Error fetching response: ${errorMsg}`);
+    setRawLLMPrompt(`Error sending prompt: ${errorMsg}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 // Detection of specimens and NPCs in narrative text
 useEffect(() => {
   if (narrativeText) {
@@ -878,80 +1244,6 @@ const handleOpenJournal = (specimen) => {
   setJournalOpen(true);
 };
 
-//  handlePassOut function with random NPC rescue
-const handlePassOut = () => {
-  // Reduce fatigue significantly (but not full reset to 0)
-  const newFatigue = Math.max(0, fatigue - REST_FATIGUE_REDUCTION);
-  updateMoodAndFatigue(null, newFatigue);
-  
-  // Get list of NPCs who could find Darwin
-  const possibleRescuers = [
-    { id: 'syms_covington', name: 'Syms Covington', location: 'POST_OFFICE_BAY', description: "You remember little after your collapse. Syms must have followed you and found you unconscious - he's dragged you back to the ship. 'Blasted fool,' he mutters, handing you water. 'What would the Captain say if I'd lost ye?'" },
-    { id: 'maria', name: 'María Yupanqui', location: 'GOVERNORS_HOUSE_GARDEN', description: "You wake to the smell of unfamiliar herbs steeping in hot water. María Yupanqui sits nearby, mixing a poultice. 'The island takes those who don't respect its dangers,' she says softly. 'Drink this. It will restore your strength.'" },
-    { id: 'gabriel_puig', name: 'Gabriel Puig', location: 'E_MID', description: "You wake in a dim cave, a revolutionary's hideout. Gabriel Puig eyes you suspiciously. 'I found you half-dead. A British naturalist shouldn't die from simple exhaustion,' he says, almost disappointed. 'It would be too... ordinary.'" },
-    { id: 'lascar_joe', name: 'Lascar Joe', location: 'NW_SHORE', description: "You wake on black sand, the hull of a small boat providing shade. Lascar Joe sits silently nearby, mending a net. He nods when he sees you stir. 'Man must know his limits,' he says simply, offering a waterskin." },
-    { id: 'nicolas_lawson', name: 'Nicolás Lawson', location: 'SETTLEMENT', description: "You wake in an unfamiliar bed. Vice-Governor Lawson stands at a desk reviewing papers. 'Ah, the naturalist lives. My men found you sprawled like a shipwreck victim. The islands demand respect, Mr. Darwin. Even from men of science.'" }
-  ];
-  
-  // Randomly select one rescuer
-  const rescuer = possibleRescuers[Math.floor(Math.random() * possibleRescuers.length)];
-  
-  // Advance time to next morning
-  const currentHour = Math.floor((gameTime % 1440) / 60);
-  const minutesToNextDay = (24 - currentHour) * 60;
-  advanceTime(minutesToNextDay + 6 * 60); // Add 6 hours for next morning at 6 AM
-  
-  // Move to the rescuer's location
-  moveToLocation(rescuer.location);
-  
-  // Set the rescuer as the active NPC
-  setCurrentNPC(rescuer.id);
-  
-  // Create the popup message
-  const popupMessage = `
-    <div class="text-center mb-4 ">
-      <p class="text-xl font-bold">Darwin collapsed from exhaustion!</p>
-      <p>You were found by ${rescuer.name}.</p>
-    </div>
-    <p>${rescuer.description}</p>
-  `;
-  
-  // Show a popup (you can use your existing popup mechanism or add this simple one)
-  // This assumes you have a way to show popups in your game
-  showPassOutPopup(popupMessage, () => {
-    // After popup is dismissed, send message to LLM about the recovery
-    sendToLLM(`Darwin collapsed from exhaustion yesterday and was found by ${rescuer.name}. It's now morning, and Darwin is recovering in ${getCurrentLocation().name}.`);
-  });
-};
-
-// Simple popup function (if you don't already have one)
-const showPassOutPopup = (message, onClose) => {
-  // Create popup element
-  const popupOverlay = document.createElement('div');
-  popupOverlay.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50';
-  
-  const popupContent = document.createElement('div');
-  popupContent.className = 'bg-amber rounded-lg shadow-xl p-6 max-w-md mx-4';
-  popupContent.innerHTML = `
-    ${message}
-    <div class="mt-6 text-center">
-      <button class="bg-amber-700 hover:bg-amber-800 text-white py-2 px-6 rounded-lg">
-        Continue
-      </button>
-    </div>
-  `;
-  
-  popupOverlay.appendChild(popupContent);
-  document.body.appendChild(popupOverlay);
-  
-  // Add click handler to close button
-  const continueButton = popupContent.querySelector('button');
-  continueButton.addEventListener('click', () => {
-    document.body.removeChild(popupOverlay);
-    if (onClose) onClose();
-  });
-};
-
 // Generic rest function that works in any valid rest location
 const handleRest = () => {
   // Get current location
@@ -1401,303 +1693,6 @@ const handleMapLocationClick = (locationIdOrDirection) => {
       setIsLoadingMemory(false);
     }
   };
-  
-  // Parse LLM response for game state updates
-  const parseLLMResponse = (response, userInput) => {
-  // Extract mood
-  const moodMatch = response.match(/\[MOOD:\s*(.*?)\]/);
-  if (moodMatch && moodMatch[1]) {
-    updateMoodAndFatigue(moodMatch[1].trim(), null);
-  }
-  
-  // Extract fatigue
-  const fatigueMatch = response.match(/\[FATIGUE:\s*(\d+)\]/);
-  if (fatigueMatch && fatigueMatch[1]) {
-    const fatigueDelta = parseInt(fatigueMatch[1]);
-    console.log(`Adding fatigue increment: ${fatigueDelta}`);
-    
-    // Get current fatigue and add the new delta
-    const currentFatigue = fatigue; // This already has previous accumulated fatigue
-    const newFatigue = currentFatigue + fatigueDelta;
-    
-    // Update fatigue with accumulated value, capped at 100
-    if (!isNaN(fatigueDelta)) {
-      updateMoodAndFatigue(null, newFatigue);
-    }
-  }
-    
-    // Check for NPC departure cues
-   const npcStatusMatch = response.match(/\[NPC_STATUS:\s*(.*?)\]/);
-  if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
-    // Clear current NPC and visible NPCs
-    setCurrentNPC(null);
-    setVisibleNPCs([]);
-  }
-    
-   
- 
-  // Extract primary collectible for the collection button with improved hybrid handling
-  const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
-  if (collectibleMatches && collectibleMatches.length > 0) {
-    const primaryCollectible = collectibleMatches[0]
-      .replace('[COLLECTIBLE:', '')
-      .replace(']', '')
-      .trim();
-    
-    // Check if this is a hybrid specimen ID
-    const hybridSpecimen = specimenList.find(s => 
-      s.isHybrid && (
-        s.id.toLowerCase() === primaryCollectible.toLowerCase() ||
-        s.name.toLowerCase().includes(primaryCollectible.toLowerCase())
-      )
-    );
-    
-    if (hybridSpecimen) {
-      console.log(`Found hybrid specimen as collectible: ${hybridSpecimen.name} (${hybridSpecimen.id})`);
-      setPrimaryCollectible(hybridSpecimen.id);
-    } else {
-      // Regular specimen handling
-      setPrimaryCollectible(primaryCollectible);
-    }
-  }
-    
-  // Process NPC markers
-  const npcMatch = response.match(/\[NPC:\s*(.*?)\]/);
-  if (npcMatch) {
-    const npcId = npcMatch[1].trim();
-    // If NPC is null or empty, clear the current NPC
-    if (npcId === 'null' || npcId === '') {
-      console.log("NPC dismissed based on LLM response");
-      setCurrentNPC(null);
-      setVisibleNPCs([]);
-    } else if (npcId !== 'null' && !currentNPC) {
-      // Only set NPC if we don't already have one active
-      const npc = npcs.find(n => n.id === npcId);
-      if (npc) {
-        setCurrentNPC(npcId);
-      }
-    }
-  }
-  
-  // Check for explicit NPC dismissal in user input
-  const dismissalTerms = [
-    "goodbye", "farewell", "leave", "go away", "dismissed", 
-    "that's all", "that will be all", "we're done", "leave me"
-  ];
-  
-  const userDismissalAttempt = dismissalTerms.some(term => 
-    userInput.toLowerCase().includes(term)
-  );
-  
-  if (userDismissalAttempt && currentNPC) {
-    console.log("User explicitly dismissed NPC");
-    setCurrentNPC(null);
-    setVisibleNPCs([]);
-  }
-    
-    // Extract potential next steps
-
-const stepsSection = response.match(/NEXTSTEPS:([\s\S]*?)(?=\[|$)/);
-    
-if (stepsSection && stepsSection[1]) {
-  const stepsText = stepsSection[1].trim();
-  const lines = stepsText.split('\n').filter(line => line.trim().startsWith('-'));
-  
-  if (lines.length > 0) {
-    const currentLocation = getCurrentLocation();
-    const newSuggestions = lines.map(line => {
-      const stepText = line.replace(/^-\s*/, '').trim();
-      
-      return {
-        text: stepText,
-        action: stepText
-      };
-    });
-    
-    if (newSuggestions.length > 0) {
-      setNextStepSuggestions(newSuggestions);
-    }
-  }
-}
-    
-    // Always advance time (representing the passage of time)
-    advanceTime(60);
-  };
-  
-  // Process LLM response for display
-  const processForDisplay = (text) => {
-    // Remove next steps section
-    let cleanedText = text.replace(/NEXTSTEPS[\s\S]*?(?=\[STATUS|\[FATIGUE|\[SCIENTIFIC_INSIGHT|\[COLLECTIBLE|$)/, '');
-    
-    // Remove metadata markers
-    cleanedText = cleanedText
-      .replace(/\[STATUS:.*?\]/g, '')
-
-   .replace(/\[NEXTSTEPS:.*?\]/g, '')
-       .replace(/\[NPC:.*?\]/g, '')
-
-      .trim();
-
-          // Save the latest narrative in a cookie for the historian critique
-    if (typeof document !== 'undefined') {
-      document.cookie = `lastNarrativeText=${encodeURIComponent(cleanedText)}; path=/; max-age=3600`;
-    }
-    
-    return cleanedText;
-  };
-  
-  
-
-// Send request to LLM API
-// Optimized sendToLLM function for GameContainer.jsx
-
-const sendToLLM = async (userInput) => {
-  setIsLoading(true);
-  
-  try {
-    // Get current location info
-    const currentLocation = getCurrentLocation();
-    
-    // Get current NPC if one is active
-    const npcObject = currentNPC ? npcs.find(n => n.id === currentNPC) : null;
-
-    // Get all NPCs that should be at this location
-    const locationNPCs = getNPCsForCurrentLocationAndTime();
-    
-    // Get names for all nearby specimens INCLUDING HYBRIDS
-    const nearbySpecimenNames = nearbySpecimenIds.map(id => {
-      const specimen = specimenMap.get(id);
-      // For hybrids, include both the ID and name for better context
-      if (specimen?.isHybrid) {
-        return `${specimen.id} (hybrid: ${specimen.name})`;
-      }
-      return specimen ? specimen.id : id;
-    }).join(", ");
-
-    const contextSummary = useGameStore.getState().generateLLMContext();
-
-    // Build game context for main narrative
-    const contextData = {
-      location: currentLocation?.name || "Isla Floreana",
-      locationDesc: currentLocation?.description || "",
-      time: formatGameTime(),
-      day: daysPassed,
-      fatigue: fatigue,
-      mood: darwinMood,
-      currentSpecimen: currentSpecimen?.name || 'None',
-      collectedSpecimens: inventory.map(item => item.name).join(", ") || 'None',
-      currentNPC: npcObject ? npcObject.name : 'None',
-      validDirections: getValidDirections().join(", "),
-      potentialSpecimens: nearbySpecimenNames || 'None',
-      primaryCollectible: primaryCollectible || 'None',
-      contextSummary: contextSummary
-    };
-        
-    // Add to history
- addToGameHistory('user', userInput);
-    const history = getRecentHistory().slice(-5);
-    
-    // DEFUNCT? TK 
-    // This is the key optimization for reducing token count and improving latency
-    // const historySummary = useGameStore.getState().getEventHistorySummary();
-    
-    // Create NPC context string
-    let npcContext = '';
-    
-    // If we're actively talking to an NPC, add full details
-    if (npcObject) {
-      npcContext = `
-ACTIVE NPC: ${npcObject.name} (${npcObject.role})
-Background: ${npcObject.background || ""}
-Appearance: ${npcObject.appearance || ""}
-Personality: ${npcObject.personality || ""}
-Dialogue Examples:
-${npcObject.dialogueExamples ? npcObject.dialogueExamples.map(ex => `- "${ex}"`).join('\n') : ""}
-
-THIS IS AN NPC INTERACTION TURN. Focus primarily on the NPC's dialogue and reactions.`;
-    }
-    
-    // Always add information about NPCs that should be in this location
-    if (locationNPCs.length > 0 && !npcObject) {
-      npcContext += `\n\nNPCs PRESENT IN THIS LOCATION:`;
-      
-      locationNPCs.forEach(npcId => {
-        const npc = npcs.find(n => n.id === npcId);
-        if (npc) {
-          npcContext += `\n- ${npc.name} (${npc.role}): ${npc.shortDescription}`;
-          
-          // For special cases like Gabriel, add more details
-          if (npcId === 'gabriel_puig') {
-            npcContext += `\n  Note: Gabriel is an escaped political prisoner who will try to flee or yell insults in Catalan when approached initially, but who can speak an odd kind of English littered with Spanish and Catalan words and early socialist terminology, and warms up to Darwin if he shows an interest in the plight of the prisoners.`;
-          }
-          if (npcId === 'fitzroy') {
-            npcContext += `\n  Note: Captain FitzRoy is strictly religious and often in conflict with Darwin's scientific ideas.`;
-          }
-        }
-      });
-    }
-    
-    // Build complete prompt with context and summarized history
-    const enhancedInput = `
-[Context: Darwin is at ${contextData.location}. ${contextData.locationDesc}. It's ${contextData.time} on day ${contextData.day}.
-Fatigue: ${contextData.fatigue}/100. 
-Status: ${contextData.mood}.
-Currently examining: ${contextData.currentSpecimen}.
-Collected specimens: ${contextData.collectedSpecimens}
-Current NPC: ${contextData.currentNPC}
-Potential specimens visible to Darwin in this setting: ${contextData.potentialSpecimens}
-Most plausibly collectible specimen: use your judgement, pick best option from potential specimens
-Valid movement directions: ${contextData.validDirections}]
-
-${contextData.contextSummary}
-${npcContext}
-
-User input: ${userInput}
-
-Remember to respond as if you are Darwin's first-person perspective, using second-person ("you"). Assessment of actions is almost always wittily barbed and critical. REmember the 1835 context. If the player pushes up against social and historical norms of the time, brutally and vividly reveal to them that the past truly is a foreign country, and life in 1835 was hard. But you can also be witty and take things in creative directions - though it must stay strictly within the bounds of historical accuracy. Your narratives are rarely more than two paragraphs. Follow your prompt exactly.
-`;
-    
-    // Save the raw prompt for transparency
-    setRawLLMPrompt(enhancedInput);
-    
-    // Call API with timeout and retry
-    const response = await fetchWithRetry('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        gameState: contextData,
-        prompt: enhancedInput
-      })
-    }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
-
-    if (!response.ok) {
-      throw new Error(`API returned status ${response.status}`);
-    }
-    
-    // Process response
-    const data = await response.json();
-    const llmResponse = data.choices?.[0]?.message?.content || 
-                       data.message?.content || '';
-    
-    setRawLLMResponse(llmResponse);
-    parseLLMResponse(llmResponse, userInput);
-    
-    // Set narrative text
-    setNarrativeText(processForDisplay(llmResponse));
-    
-    // Add to history
-    addToGameHistory('assistant', llmResponse);
-  } catch (error) {
-    console.error("Error with LLM request:", error);
-    const errorMsg = getErrorMessage(error);
-    setNarrativeText(`Error: ${errorMsg}`);
-    setRawLLMResponse(`Error fetching response: ${errorMsg}`);
-    setRawLLMPrompt(`Error sending prompt: ${errorMsg}`);
-  } finally {
-    setIsLoading(false);
-  }
-};
-  
   // Title screen
   if (!gameStarted) {
   return (
