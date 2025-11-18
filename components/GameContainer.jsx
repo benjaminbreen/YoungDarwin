@@ -38,7 +38,6 @@ import HybridGenerator from './HybridGenerator';
 import HybridsDebug from './HybridsDebug';
 import { useLocationSystem } from '../utils/locationHook';
 import EnhancedMapBox from './EnhancedMapBox';
-import { useMemo } from 'react';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
 import Journal from './Journal';
