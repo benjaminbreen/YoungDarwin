@@ -73,7 +73,49 @@ function GameContainer() {
     gameTime,
      setSpecimenList
   } = useGameStore();
-  
+
+  // Local state - MUST be declared before useLocationSystem callback uses them
+  const [gameInitialized, setGameInitialized] = useState(false);
+  const [activeTool, setActiveTool] = useState(null);
+  const [nearbySpecimenIds, setNearbySpecimenIds] = useState([]);
+  const [discoveredNPCs, setDiscoveredNPCs] = useState([]);
+  const [visibleNPCs, setVisibleNPCs] = useState([]);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [memoryContent, setMemoryContent] = useState('');
+  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
+  const [nextStepSuggestions, setNextStepSuggestions] = useState([
+    { text: 'Observe surroundings', action: 'Carefully observe the surroundings for any interesting specimens.' },
+    { text: 'Take notes', action: 'Record detailed observations in my journal about what I see.' },
+    { text: 'Move north', action: 'Go north' },
+    { text: 'Examine area', action: 'Examine the area for marine specimens.' }
+  ]);
+  const [lastUserInput, setLastUserInput] = useState('');
+  const [showCollectionPopup, setShowCollectionPopup] = useState(false);
+  const [collectingSpecimenId, setCollectingSpecimenId] = useState(null);
+  const [selectedMethod, setSelectedMethod] = useState(null);
+  const [collectionNotes, setCollectionNotes] = useState('');
+  const [tortoiseThoughts, setTortoiseThoughts] = useState(null);
+  const [rawLLMResponse, setRawLLMResponse] = useState('');
+  const [rawLLMPrompt, setRawLLMPrompt] = useState('');
+  const [showCollectionResult, setShowCollectionResult] = useState(false);
+  const [collectionResult, setCollectionResult] = useState(null);
+  const [collectionSpecimenName, setCollectionSpecimenName] = useState('');
+  const [collectionMethod, setCollectionMethod] = useState('');
+  const [showNearbySpecimenDetail, setShowNearbySpecimenDetail] = useState(false);
+  const [selectedNearbySpecimen, setSelectedNearbySpecimen] = useState(null);
+  const [primaryCollectible, setPrimaryCollectible] = useState(null);
+  const [encounteredNPCs, setEncounteredNPCs] = useState([]);
+  const [showFatigueWarning, setShowFatigueWarning] = useState(false);
+  const [showRestButton, setShowRestButton] = useState(false);
+  const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
+  const [showHybridOptions, setShowHybridOptions] = useState(false);
+  const [hybridsEnabled, setHybridsEnabled] = useState(false);
+  const [generatedHybrids, setGeneratedHybrids] = useState([]);
+  const [hybridityMode, setHybridityMode] = useState('none');
+  const [isMovingViaMap, setIsMovingViaMap] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [journalSpecimen, setJournalSpecimen] = useState(null);
+
   // Use the location hook for grid-based movement
   const { 
   playerPosition, 
@@ -205,55 +247,6 @@ const handleHybridsGenerated = (generatedHybrids) => {
   );
 };
 
-  
-  // Local state
-  const [gameInitialized, setGameInitialized] = useState(false);
-  const [activeTool, setActiveTool] = useState(null);
-  const [nearbySpecimenIds, setNearbySpecimenIds] = useState([]);
-  const [discoveredNPCs, setDiscoveredNPCs] = useState([]);
-  const [visibleNPCs, setVisibleNPCs] = useState([]);
-  const [showMemoryModal, setShowMemoryModal] = useState(false);
-  const [memoryContent, setMemoryContent] = useState('');
-  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
-  const [nextStepSuggestions, setNextStepSuggestions] = useState([
-    { text: 'Observe surroundings', action: 'Carefully observe the surroundings for any interesting specimens.' },
-    { text: 'Take notes', action: 'Record detailed observations in my journal about what I see.' },
-    { text: 'Move north', action: 'Go north' },
-    { text: 'Examine area', action: 'Examine the area for marine specimens.' }
-  ]);
-  const [lastUserInput, setLastUserInput] = useState('');
-  const [showCollectionPopup, setShowCollectionPopup] = useState(false);
-  const [collectingSpecimenId, setCollectingSpecimenId] = useState(null);
-  const [selectedMethod, setSelectedMethod] = useState(null);
-  const [collectionNotes, setCollectionNotes] = useState('');
-  // tk should change this to make it more modular for other POVs - i.e. POVthoughts 
-const [tortoiseThoughts, setTortoiseThoughts] = useState(null);
-
-
-// for LLMtransparency.jtx
-const [rawLLMResponse, setRawLLMResponse] = useState('');
-const [rawLLMPrompt, setRawLLMPrompt] = useState('');
-
-
-const [showCollectionResult, setShowCollectionResult] = useState(false);
-const [collectionResult, setCollectionResult] = useState(null);
-const [collectionSpecimenName, setCollectionSpecimenName] = useState('');
-const [collectionMethod, setCollectionMethod] = useState('');
-const [showNearbySpecimenDetail, setShowNearbySpecimenDetail] = useState(false);
-const [selectedNearbySpecimen, setSelectedNearbySpecimen] = useState(null);
-const [primaryCollectible, setPrimaryCollectible] = useState(null);
-const [encounteredNPCs, setEncounteredNPCs] = useState([]);
-const [showFatigueWarning, setShowFatigueWarning] = useState(false);
-const [showRestButton, setShowRestButton] = useState(false);
-const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
-const [showHybridOptions, setShowHybridOptions] = useState(false);
-const [hybridsEnabled, setHybridsEnabled] = useState(false);
-const [generatedHybrids, setGeneratedHybrids] = useState([]);
-const [hybridityMode, setHybridityMode] = useState('none'); // 'none', 'mild', or 'extreme'
-const [isMovingViaMap, setIsMovingViaMap] = useState(false);
-const [journalOpen, setJournalOpen] = useState(false);
-const [journalSpecimen, setJournalSpecimen] = useState(null);
-
   // Create a specimen lookup map for O(1) access by ID
   // This significantly improves performance compared to array.find()
   const specimenMap = useMemo(() => {
@@ -265,6 +258,30 @@ const [journalSpecimen, setJournalSpecimen] = useState(null);
     });
     return map;
   }, [specimenList]);
+
+  // Update direction suggestions based on current location
+  const updateNextStepSuggestions = () => {
+    const validDirs = getValidDirections();
+    const dirNames = {
+      'N': 'north',
+      'S': 'south',
+      'E': 'east',
+      'W': 'west',
+      'NE': 'northeast',
+      'NW': 'northwest',
+      'SE': 'southeast',
+      'SW': 'southwest'
+    };
+
+    const locationSuggestions = validDirs.map(dir => ({
+      text: `Move ${dirNames[dir]}`,
+      action: `Go ${dirNames[dir]}`
+    }));
+
+    // Combine and limit to 4 suggestions
+    const allSuggestions = [...locationSuggestions];
+    setNextStepSuggestions(allSuggestions.slice(0, 4));
+  };
 
   // Initialize the game
   useEffect(() => {
@@ -282,32 +299,61 @@ const [journalSpecimen, setJournalSpecimen] = useState(null);
     }
   }, [gameStarted, gameInitialized, setNarrativeText, updateMoodAndFatigue]);
 
-  // Update direction suggestions based on current location
-  const updateNextStepSuggestions = () => {
-    const validDirs = getValidDirections();
-    const dirNames = {
-      'N': 'north',
-      'S': 'south',
-      'E': 'east',
-      'W': 'west',
-      'NE': 'northeast',
-      'NW': 'northwest',
-      'SE': 'southeast',
-      'SW': 'southwest'
-    };
-    
-    const locationSuggestions = validDirs.map(dir => ({
-      text: `Move ${dirNames[dir]}`,
-      action: `Go ${dirNames[dir]}`
-    }));
-    
-    // Combine and limit to 4 suggestions
-    const allSuggestions = [...locationSuggestions];
-    setNextStepSuggestions(allSuggestions.slice(0, 4));
-  };
-  
+// Helper function to get NPCs at current location and time
+const getNPCsForCurrentLocationAndTime = () => {
+  const currentLocation = getCurrentLocation()?.id;
+  const currentHour = Math.floor((gameTime % 1440) / 60);
+
+  if (!currentLocation) return [];
+
+  // Simple time-based rules for NPCs
+  const availableNPCs = [];
+
+  // Syms Covington: at Post Office Bay from 6pm-8am
+  if (currentLocation === 'POST_OFFICE_BAY' && (currentHour >= 18 || currentHour < 8)) {
+    availableNPCs.push('syms_covington');
+  }
+
+  // FitzRoy: always on the HMS Beagle
+  if (currentLocation === 'BEAGLE') {
+    availableNPCs.push('fitzroy');
+  }
+
+  // Gabriel Puig: always at Pirate Caves, TK commented out because of duplicate IDs
+  //if (currentLocation === 'CAVE') {
+  //  availableNPCs.push('gabriel_puig');
+  //}
+
+  // Maria Yupanqui: at C_NORTH from 10am to 5pm
+  if (currentLocation === 'C_NORTH' && currentHour >= 10 && currentHour < 17) {
+    availableNPCs.push('maria');
+  }
+
+   // Maria Yupanqui: at governors house other times
+  if (currentLocation === 'GOVERNORS_HOUSE_GARDEN' && currentHour >= 18 && currentHour < 9) {
+    availableNPCs.push('maria');
+  }
 
 
+  // Lascar Joe: at HMS Beagle from 6am to 1pm, at N_OUTCROP from 1pm to 6am
+  if ((currentLocation === 'BEAGLE' && currentHour >= 6 && currentHour < 13) ||
+      (currentLocation === 'N_OUTCROP' && (currentHour >= 13 || currentHour < 6))) {
+    availableNPCs.push('lascar_joe');
+  }
+
+  // Special cases for interior locations
+  if (isInInterior) {
+    if (interiorType === 'cave') {
+      availableNPCs.push('gabriel_puig');
+    } else if (interiorType === 'hms_beagle') {
+      availableNPCs.push('fitzroy');
+    } else if (interiorType === 'governors_house') {
+      availableNPCs.push('nicolas_lawson');
+    }
+  }
+
+  return availableNPCs;
+};
 
 // Detection of specimens and NPCs in narrative text
 useEffect(() => {
@@ -520,63 +566,6 @@ useEffect(() => {
     setShowRestButton(false);
   }
 }, [playerPosition, fatigue]);
-
-// Helper function to get NPCs at current location and time
-const getNPCsForCurrentLocationAndTime = () => {
-  const currentLocation = getCurrentLocation()?.id;
-  const currentHour = Math.floor((gameTime % 1440) / 60);
-  
-  if (!currentLocation) return [];
-  
-  // Simple time-based rules for NPCs
-  const availableNPCs = [];
-  
-  // Syms Covington: at Post Office Bay from 6pm-8am
-  if (currentLocation === 'POST_OFFICE_BAY' && (currentHour >= 18 || currentHour < 8)) {
-    availableNPCs.push('syms_covington');
-  }
-  
-  // FitzRoy: always on the HMS Beagle
-  if (currentLocation === 'BEAGLE') {
-    availableNPCs.push('fitzroy');
-  }
-  
-  // Gabriel Puig: always at Pirate Caves, TK commented out because of duplicate IDs
-  //if (currentLocation === 'CAVE') {
-  //  availableNPCs.push('gabriel_puig');
-  //}
-  
-  // Maria Yupanqui: at C_NORTH from 10am to 5pm
-  if (currentLocation === 'C_NORTH' && currentHour >= 10 && currentHour < 17) {
-    availableNPCs.push('maria');
-  }
-
-   // Maria Yupanqui: at governors house other times
-  if (currentLocation === 'GOVERNORS_HOUSE_GARDEN' && currentHour >= 18 && currentHour < 9) {
-    availableNPCs.push('maria');
-  }
-  
-  
-  // Lascar Joe: at HMS Beagle from 6am to 1pm, at N_OUTCROP from 1pm to 6am
-  if ((currentLocation === 'BEAGLE' && currentHour >= 6 && currentHour < 13) || 
-      (currentLocation === 'N_OUTCROP' && (currentHour >= 13 || currentHour < 6))) {
-    availableNPCs.push('lascar_joe');
-  }
-  
-  // Special cases for interior locations
-  if (isInInterior) {
-    if (interiorType === 'cave') {
-      availableNPCs.push('gabriel_puig');
-    } else if (interiorType === 'hms_beagle') {
-      availableNPCs.push('fitzroy');
-    } else if (interiorType === 'governors_house') {
-      availableNPCs.push('nicolas_lawson');
-    }
-  }
-  
-  return availableNPCs;
-};
-
 
 // Handle NPC interaction
 const handleTalkToNPC = (npcId) => {
