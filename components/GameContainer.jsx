@@ -123,6 +123,9 @@ if (currentCell && currentCell.type) {
   
 });
 
+  // Memoized current location - must come after useLocationSystem
+  const currentLocation = useMemo(() => getCurrentLocation(), [playerPosition, getCurrentLocation]);
+
    // check for NPCS before changing location
 const handleNPCsOnMovement = () => {
   // If there's a current NPC
@@ -236,7 +239,6 @@ const [showCollectionResult, setShowCollectionResult] = useState(false);
 const [collectionResult, setCollectionResult] = useState(null);
 const [collectionSpecimenName, setCollectionSpecimenName] = useState('');
 const [collectionMethod, setCollectionMethod] = useState('');
-const currentLocation = useMemo(() => getCurrentLocation(), [playerPosition]);
 const [showNearbySpecimenDetail, setShowNearbySpecimenDetail] = useState(false);
 const [selectedNearbySpecimen, setSelectedNearbySpecimen] = useState(null);
 const [primaryCollectible, setPrimaryCollectible] = useState(null);
