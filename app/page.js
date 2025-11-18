@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import GameContainer from '../components/GameContainer';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 export default function Home() {
   // Load Google Fonts
@@ -11,15 +12,17 @@ export default function Home() {
     link.href = 'https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap';
     link.rel = 'stylesheet';
     document.head.appendChild(link);
-    
+
     return () => {
       document.head.removeChild(link);
     };
   }, []);
 
   return (
-    <div className="min-h-screen bg-darwin-light">
-      <GameContainer />
-    </div>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-darwin-light">
+        <GameContainer />
+      </div>
+    </ErrorBoundary>
   );
 }

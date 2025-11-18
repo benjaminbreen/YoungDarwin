@@ -2,12 +2,22 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import useGameStore from '../hooks/useGameStore';
 import Portrait from './Portrait';
 import PlayerInput from './PlayerInput';
 import SpecimenCollection from './SpecimenCollection';
 import GameLog from './GameLog';
+import { fetchWithRetry, getErrorMessage, isOnline } from '../utils/apiHelpers';
+import { sanitizeCommand, sanitizeCollectionNotes, validateInput } from '../utils/sanitize';
+import {
+  HIGH_FATIGUE_WARNING_THRESHOLD,
+  CRITICAL_FATIGUE_THRESHOLD,
+  FATIGUE_WARNING_DISPLAY_DURATION,
+  DEFAULT_API_TIMEOUT,
+  DEFAULT_MAX_RETRIES,
+  REST_FATIGUE_REDUCTION
+} from '../utils/gameConstants';
 import BannerImage from './BannerImage';
 import { tools, collectionTools } from '../data/tools';
 import { openingTexts } from '../data/openingTexts';
@@ -245,6 +255,18 @@ const [isMovingViaMap, setIsMovingViaMap] = useState(false);
 const [journalOpen, setJournalOpen] = useState(false);
 const [journalSpecimen, setJournalSpecimen] = useState(null);
 
+  // Create a specimen lookup map for O(1) access by ID
+  // This significantly improves performance compared to array.find()
+  const specimenMap = useMemo(() => {
+    const map = new Map();
+    specimenList.forEach(specimen => {
+      if (specimen && specimen.id) {
+        map.set(specimen.id, specimen);
+      }
+    });
+    return map;
+  }, [specimenList]);
+
   // Initialize the game
   useEffect(() => {
     if (gameStarted && !gameInitialized) {
@@ -389,18 +411,18 @@ useEffect(() => {
 // After your other useEffect hooks
 // Monitor fatigue and show warnings or trigger pass out
 useEffect(() => {
-  // High fatigue warning (75% or higher)
-  if (fatigue >= 75 && fatigue < 95) {
+  // High fatigue warning
+  if (fatigue >= HIGH_FATIGUE_WARNING_THRESHOLD && fatigue < CRITICAL_FATIGUE_THRESHOLD) {
     setShowFatigueWarning(true);
-    // Auto-hide warning after 5 seconds
+    // Auto-hide warning after configured duration
     const timer = setTimeout(() => {
       setShowFatigueWarning(false);
-    }, 5000);
+    }, FATIGUE_WARNING_DISPLAY_DURATION);
     return () => clearTimeout(timer);
   }
-  
-  // Critical fatigue - pass out (95% or higher)
-  if (fatigue >= 95) {
+
+  // Critical fatigue - pass out
+  if (fatigue >= CRITICAL_FATIGUE_THRESHOLD) {
     handlePassOut();
   }
 }, [fatigue]);
@@ -654,7 +676,7 @@ useEffect(() => {
   // Collection popup handlers
 const handleOpenCollectionPopup = (specimenId) => {
   console.log("Opening collection popup for:", specimenId);
-  const specimen = specimenList.find(s => s.id === specimenId);
+  const specimen = specimenMap.get(specimenId);
   if (!specimen) {
     console.error("Invalid specimen ID:", specimenId);
     return;
@@ -683,10 +705,19 @@ const handleCollectionConfirm = () => {
 
   // Updated handleCollectNearbySpecimen function
 const handleCollectNearbySpecimen = async (specimenId) => {
-  const specimen = specimenList.find(s => s.id === specimenId);
-  
+  // Prevent race condition - don't allow multiple simultaneous collection attempts
+  if (isLoading || collectingSpecimenId) {
+    console.warn('Collection already in progress, ignoring duplicate request');
+    return;
+  }
+
+  const specimen = specimenMap.get(specimenId);
+
   if (specimen) {
     try {
+      // Mark this specimen as being collected
+      setCollectingSpecimenId(specimenId);
+
       // Prepare context for collection attempt
       const collectionContext = {
         specimenId,
@@ -695,11 +726,15 @@ const handleCollectNearbySpecimen = async (specimenId) => {
         narrativeContext: narrativeText
       };
 
-      const response = await fetch('/api/collection-decision', {
+      const response = await fetchWithRetry('/api/collection-decision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(collectionContext)
-      });
+      }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
 
       const result = await response.json();
 
@@ -722,7 +757,11 @@ const handleCollectNearbySpecimen = async (specimenId) => {
       
     } catch (error) {
       console.error('Collection attempt failed:', error);
-      sendToLLM(`There was an error attempting to collect the ${specimen.name}.`);
+      const errorMsg = getErrorMessage(error);
+      sendToLLM(`There was an error attempting to collect the ${specimen.name}: ${errorMsg}`);
+    } finally {
+      // Clear the collecting flag to allow new collection attempts
+      setCollectingSpecimenId(null);
     }
   }
 };
@@ -737,35 +776,29 @@ const handleViewNearbySpecimenDetail = (specimen) => {
 // specimen collection method handler
 
 const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
-  // Validate and sanitize notes input
-  let sanitizedNotes = '';
-  if (notes) {
-    // Ensure notes is a string
-    sanitizedNotes = String(notes);
-
-    // Limit length to prevent excessive API payload
-    const MAX_NOTES_LENGTH = 500;
-    if (sanitizedNotes.length > MAX_NOTES_LENGTH) {
-      console.warn(`Collection notes truncated from ${sanitizedNotes.length} to ${MAX_NOTES_LENGTH} characters`);
-      sanitizedNotes = sanitizedNotes.substring(0, MAX_NOTES_LENGTH);
-    }
-
-    // Trim whitespace
-    sanitizedNotes = sanitizedNotes.trim();
+  // Prevent race condition - don't allow multiple simultaneous collection attempts
+  if (isLoading || collectingSpecimenId) {
+    console.warn('Collection already in progress, ignoring duplicate request');
+    return;
   }
+
+  // Validate and sanitize notes input
+  const sanitizedNotes = notes ? sanitizeCollectionNotes(notes) : '';
 
   console.log("Collecting specimen with method:", method?.name, "notes:", sanitizedNotes);
 
   // Find the specimen to be collected
-  const specimen = specimenList.find(s => s.id === specimenId);
+  const specimen = specimenMap.get(specimenId);
   if (!specimen) {
     console.error("Specimen not found:", specimenId);
     return;
   }
 
   try {
-   
-    // Set loading state FIRST
+    // Mark this specimen as being collected to prevent duplicate requests
+    setCollectingSpecimenId(specimenId);
+
+    // Set loading state
     setIsLoading(true);
     setNarrativeText('');
     
@@ -780,11 +813,11 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     };
 
     // Call the collection-decision API
-    const response = await fetch('/api/collection-decision', {
+    const response = await fetchWithRetry('/api/collection-decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(collectionContext)
-    });
+    }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
 
     if (!response.ok) {
       throw new Error(`API returned status ${response.status}`);
@@ -824,8 +857,12 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     
   } catch (error) {
     console.error('Collection attempt failed:', error);
-    sendToLLM(`An error occurred while attempting to collect the ${specimen.name}: ${error.message}`);
+    const errorMsg = getErrorMessage(error);
+    sendToLLM(`An error occurred while attempting to collect the ${specimen.name}: ${errorMsg}`);
     // Note: setIsLoading is handled by sendToLLM's finally block
+  } finally {
+    // Clear the collecting flag to allow new collection attempts
+    setCollectingSpecimenId(null);
   }
 
 }
@@ -833,7 +870,7 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
   // Handle detailed tool use
   const handleDetailedToolUse = (toolId, specimenId, userDetails) => {
     const tool = tools.find(t => t.id === toolId);
-    const specimen = specimenList.find(s => s.id === specimenId);
+    const specimen = specimenMap.get(specimenId);
     
     if (tool && specimen) {
       // Set active tool temporarily for banner image
@@ -855,8 +892,9 @@ const handleOpenJournal = (specimen) => {
 
 //  handlePassOut function with random NPC rescue
 const handlePassOut = () => {
-  // Reset fatigue
-  updateMoodAndFatigue(null, 0);
+  // Reduce fatigue significantly (but not full reset to 0)
+  const newFatigue = Math.max(0, fatigue - REST_FATIGUE_REDUCTION);
+  updateMoodAndFatigue(null, newFatigue);
   
   // Get list of NPCs who could find Darwin
   const possibleRescuers = [
@@ -930,9 +968,10 @@ const showPassOutPopup = (message, onClose) => {
 const handleRest = () => {
   // Get current location
   const currentLocation = getCurrentLocation();
-  
-  // Reset fatigue
-  updateMoodAndFatigue(null, 0);
+
+  // Reduce fatigue significantly (but not full reset to 0)
+  const newFatigue = Math.max(0, fatigue - REST_FATIGUE_REDUCTION);
+  updateMoodAndFatigue(null, newFatigue);
   
   // Advance time (different amounts based on location)
   const currentHour = Math.floor((gameTime % 1440) / 60);
@@ -966,8 +1005,9 @@ const handleRest = () => {
   
   // Handle resting at HMS Beagle
   const handleRestAtBeagle = () => {
-    // Reset fatigue
-    updateMoodAndFatigue(null, 0);
+    // Reduce fatigue significantly (but not full reset to 0)
+    const newFatigue = Math.max(0, fatigue - REST_FATIGUE_REDUCTION);
+    updateMoodAndFatigue(null, newFatigue);
     
     // Advance time to next morning
     const currentHour = Math.floor((gameTime % 1440) / 60);
@@ -995,7 +1035,7 @@ const handleSwitchPOV = async (prompt) => {
     };
     
     // Call the API using the tortoise prompt
-    const response = await fetch('/api/generate', {
+    const response = await fetchWithRetry('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1003,8 +1043,8 @@ const handleSwitchPOV = async (prompt) => {
         prompt: prompt,
         isTortoiseRequest: true // flag to differentiate it
       })
-    });
-    
+    }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
+
     if (!response.ok) {
       throw new Error(`API returned status ${response.status}`);
     }
@@ -1027,9 +1067,18 @@ const handleSwitchPOV = async (prompt) => {
   
   // Process player input
  const handlePlayerInput = async (input) => {
+  // Sanitize input to prevent XSS and injection attacks
+  if (!validateInput(input)) {
+    console.error('Potentially dangerous input blocked');
+    setNarrativeText('Invalid input detected. Please avoid using special characters or scripts.');
+    return;
+  }
+
+  const sanitizedInput = sanitizeCommand(input);
+
   // Check for rest commands
   const restTerms = ['rest', 'sleep', 'nap', 'lay down', 'lie down', 'make camp', 'build shelter'];
-  const isRestCommand = restTerms.some(term => input.toLowerCase().includes(term));
+  const isRestCommand = restTerms.some(term => sanitizedInput.toLowerCase().includes(term));
   
   // If it's a rest command and in a valid location, handle rest
   const currentLocation = getCurrentLocation();
@@ -1039,13 +1088,13 @@ const handleSwitchPOV = async (prompt) => {
     handleRest();
     return;
   }
-    // Save the input for movement detection
-    setLastUserInput(input);
+    // Save the sanitized input for movement detection
+    setLastUserInput(sanitizedInput);
 
 
-    
+
     // Check for movement commands
-    const movementResult = detectMovementInText(input);
+    const movementResult = detectMovementInText(sanitizedInput);
     if (movementResult) {
   // Check if we should remove the current NPC
   handleNPCsOnMovement();
@@ -1181,8 +1230,8 @@ if (interiorType) {
 
     
     // Handle command patterns
-    if (input.startsWith('/move ')) {
-      const locationId = input.replace('/move ', '').trim();
+    if (sanitizedInput.startsWith('/move ')) {
+      const locationId = sanitizedInput.replace('/move ', '').trim();
       const moveResult = moveToLocation(locationId);
       if (moveResult.success) {
         sendToLLM(moveResult.message);
@@ -1192,15 +1241,15 @@ if (interiorType) {
         sendToLLM(moveResult.message);
       }
       return;
-    } else if (input.startsWith('/collect ')) {
-      const specimenId = input.replace('/collect ', '').trim();
+    } else if (sanitizedInput.startsWith('/collect ')) {
+      const specimenId = sanitizedInput.replace('/collect ', '').trim();
       const collectDesc = collectSpecimen(specimenId);
       if (collectDesc) {
         sendToLLM(collectDesc);
       }
       return;
-    } else if (input.startsWith('/use ')) {
-      const parts = input.replace('/use ', '').split(' on ');
+    } else if (sanitizedInput.startsWith('/use ')) {
+      const parts = sanitizedInput.replace('/use ', '').split(' on ');
       if (parts.length === 2) {
         const toolDesc = useScientificTool(parts[0].trim(), parts[1].trim());
         if (toolDesc) {
@@ -1209,9 +1258,9 @@ if (interiorType) {
       }
       return;
     }
-    
+
     // Process all other inputs
-    await sendToLLM(input);
+    await sendToLLM(sanitizedInput);
   };
 
 
@@ -1327,16 +1376,16 @@ const handleMapLocationClick = (locationIdOrDirection) => {
       const memoryPrompt = `Recall a self-loathing, elliptical, cryptic, or confused memory SPECIFICALLY related to your current situation, dilemma, or observations in ${contextData.location}. The memory should directly relate to the most eventful or important thing that has just occurred.`;
       
       // Call API
-      const response = await fetch('/api/generate', {
+      const response = await fetchWithRetry('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           prompt: memoryPrompt,
           gameState: contextData,
           isMemoryRequest: true
         })
-      });
-      
+      }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
+
       if (!response.ok) {
         throw new Error(`API returned status ${response.status}: ${await response.text()}`);
       }
@@ -1529,7 +1578,7 @@ const sendToLLM = async (userInput) => {
     
     // Get names for all nearby specimens INCLUDING HYBRIDS
     const nearbySpecimenNames = nearbySpecimenIds.map(id => {
-      const specimen = specimenList.find(s => s.id === id);
+      const specimen = specimenMap.get(id);
       // For hybrids, include both the ID and name for better context
       if (specimen?.isHybrid) {
         return `${specimen.id} (hybrid: ${specimen.name})`;
@@ -1623,16 +1672,16 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     // Save the raw prompt for transparency
     setRawLLMPrompt(enhancedInput);
     
-    // Call API
-    const response = await fetch('/api/generate', {
+    // Call API with timeout and retry
+    const response = await fetchWithRetry('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         gameState: contextData,
         prompt: enhancedInput
       })
-    });
-    
+    }, DEFAULT_MAX_RETRIES, DEFAULT_API_TIMEOUT);
+
     if (!response.ok) {
       throw new Error(`API returned status ${response.status}`);
     }
@@ -1652,9 +1701,10 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     addToGameHistory('assistant', llmResponse);
   } catch (error) {
     console.error("Error with LLM request:", error);
-    setNarrativeText(`Error: ${error.message}`);
-    setRawLLMResponse(`Error fetching response: ${error.message}`);
-    setRawLLMPrompt(`Error sending prompt: ${error.message}`);
+    const errorMsg = getErrorMessage(error);
+    setNarrativeText(`Error: ${errorMsg}`);
+    setRawLLMResponse(`Error fetching response: ${errorMsg}`);
+    setRawLLMPrompt(`Error sending prompt: ${errorMsg}`);
   } finally {
     setIsLoading(false);
   }
@@ -2154,7 +2204,7 @@ gameTime={gameTime}
         {/* Specimen Image */}
         <div className="w-full h-64 relative overflow-hidden">
           {(() => {
-            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const currentSpecimen = specimenMap.get(collectingSpecimenId);
             const isHybrid = currentSpecimen?.isHybrid;
             
             return isHybrid ? (
@@ -2190,7 +2240,7 @@ gameTime={gameTime}
         {/* Title Overlay with white text and shadow */}
         <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
           {(() => {
-            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const currentSpecimen = specimenMap.get(collectingSpecimenId);
             return (
               <>
                 <h3 className="font-bold text-3xl mb-1 tracking-wide text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)]">

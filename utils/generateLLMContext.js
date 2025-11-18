@@ -1,6 +1,8 @@
 // generateLLMContext.js - Fixed version
 // This addresses the API key issue by using /api/summarize endpoint instead of direct API calls
 
+import { MAX_SUMMARY_QUEUE_SIZE } from './gameConstants.js';
+
 // Queue to manage background summary requests
 let summaryQueue = [];
 let isProcessingQueue = false;
@@ -42,9 +44,15 @@ Collected: ${collectedSpecimens || 'None'}
 
 // Function to add an event to the summary queue
 const queueEventForSummary = async (event, gameStore) => {
+  // Prevent unbounded queue growth - drop oldest if at max size
+  if (summaryQueue.length >= MAX_SUMMARY_QUEUE_SIZE) {
+    console.warn(`Summary queue at max size (${MAX_SUMMARY_QUEUE_SIZE}), dropping oldest event`);
+    summaryQueue.shift();
+  }
+
   // Add the event to the queue
   summaryQueue.push({ event, gameStore });
-  
+
   // Start processing if not already in progress
   if (!isProcessingQueue) {
     processQueue();
@@ -155,8 +163,16 @@ const compileEventHistorySummary = (eventHistory) => {
   }).join('\n');
 };
 
+// Clear the summary queue (useful for cleanup on game end)
+const clearSummaryQueue = () => {
+  summaryQueue = [];
+  isProcessingQueue = false;
+  console.log('Summary queue cleared');
+};
+
 export {
   buildLLMPromptContext as default,
   queueEventForSummary,
-  compileEventHistorySummary
+  compileEventHistorySummary,
+  clearSummaryQueue
 };

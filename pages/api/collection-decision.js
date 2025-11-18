@@ -104,21 +104,10 @@ export default async function handler(req, res) {
         } else {
           result = data.choices[0].message.content;
         }
-        
-        // Add some randomness to make gameplay more interesting
-        // 10% chance to flip the result if the specimen is difficult
-        const difficultSpecimens = ['floreana_giant_tortoise', 'eastern_santa_cruz_tortoise',  'frigatebird', 'seaLion', 'iguana'];
-        const shouldRandomize = difficultSpecimens.includes(specimenId) && Math.random() < 0.1;
-        
-        if (shouldRandomize) {
-          result.success = !result.success;
-          if (result.success) {
-            result.reason = "Through an incredible stroke of luck, you succeed despite the difficulty!";
-          } else {
-            result.reason = "Despite your perfect technique, unexpected circumstances foil your attempt.";
-          }
-        }
-        
+
+        // Success is now determined purely by the LLM's assessment
+        // This provides more consistent and fair gameplay based on player choices
+
         res.status(200).json(result);
       } catch (error) {
         console.error('Error parsing LLM response:', error, data.choices[0].message.content);

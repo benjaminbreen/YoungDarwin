@@ -2,10 +2,18 @@
 
 import { create } from 'zustand';
 import { tools } from '../data/tools';
-import { npcs, getNPC } from '../data/npcs'; 
+import { npcs, getNPC } from '../data/npcs';
 import { initializeSpecimens } from '../data/specimens';
 import { queueEventForSummary, compileEventHistorySummary } from '../utils/generateLLMContext';
 import { locations } from '../data/locations';
+import {
+  GAME_START_TIME,
+  STARTING_DAY,
+  STARTING_FATIGUE,
+  MAX_EVENT_HISTORY,
+  MAX_GAME_HISTORY,
+  MIN_EVENT_CONTENT_LENGTH_FOR_SUMMARY
+} from '../utils/gameConstants';
 console.log('Our location IDs are:', locations.map(l => l.id));
 console.log('Our habitat types are:', [...new Set(locations.map(l => l.type))]);
 
@@ -27,9 +35,9 @@ const useGameStore = create((set, get) => ({
     });
   },
 
-  gameTime: 360, // starting at 6:00 AM (in minutes)
-  daysPassed: 1,
-  fatigue: 1,
+  gameTime: GAME_START_TIME, // starting at 6:00 AM (in minutes)
+  daysPassed: STARTING_DAY,
+  fatigue: STARTING_FATIGUE,
   darwinMood: 'interested',
   specimenList: [], // Initially empty; populated when the game starts
   currentSpecimen: null,
@@ -96,7 +104,7 @@ addToGameHistory: (role, content) => set((state) => {
                           String(content);
   
   const newEntry = { role, content: contentString };
-  const updatedHistory = [...state.gameHistory, newEntry].slice(-5);
+  const updatedHistory = [...state.gameHistory, newEntry].slice(-MAX_GAME_HISTORY);
   
   const formattedTime = formatTime(gameTime);
   const locationName = getLocationName(currentLocationId);
@@ -200,11 +208,14 @@ addToGameHistory: (role, content) => set((state) => {
     eventType
   };
   
-  // Add to event history, keeping the last 30 events
-  const updatedEventHistory = [...state.eventHistory, eventEntry].slice(-30);
+  // Add to event history, keeping the last MAX_EVENT_HISTORY events
+  // Optimize memory by slicing before spreading to prevent unbounded array growth
+  const updatedEventHistory = state.eventHistory.length >= MAX_EVENT_HISTORY
+    ? [...state.eventHistory.slice(-(MAX_EVENT_HISTORY - 1)), eventEntry]
+    : [...state.eventHistory, eventEntry];
   
   // Queue this event for LLM summarization (non-blocking)
-  if (role !== 'user' && contentString.length > 30) {
+  if (role !== 'user' && contentString.length > MIN_EVENT_CONTENT_LENGTH_FOR_SUMMARY) {
     queueEventForSummary(eventEntry, get());
   }
   
