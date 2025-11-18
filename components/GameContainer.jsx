@@ -94,18 +94,16 @@ function GameContainer() {
 
    // If we're entering an interior, use interior type instead of exterior cell
 if (isInInterior) {
-  const currentInterior = getCurrentLocation();
-  if (currentInterior && currentInterior.type) {
+  // Use locationInfo passed to callback instead of calling getCurrentLocation()
+  if (locationInfo && locationInfo.type) {
     // Find all specimens that can exist in this interior type
     const specimenIds = specimenList
-      .filter(s => s.habitat && s.habitat.split(', ').includes(currentInterior.type))
+      .filter(s => s.habitat && s.habitat.split(', ').includes(locationInfo.type))
       .map(s => s.id);
     setNearbySpecimenIds(specimenIds);
   }
   return;
 }
-
-const specimen = specimenList?.find(s => s.id === specifiedId);
 
 // This callback runs when location changes
 const currentCell = getCellByCoordinates(locationInfo.position.x, locationInfo.position.y);
