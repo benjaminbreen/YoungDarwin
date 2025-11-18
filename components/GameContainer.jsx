@@ -2218,7 +2218,10 @@ gameTime={gameTime}
         <div className="flex justify-between gap-3 mt-6">
           <button
             className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 px-4 rounded-md transition-colors border border-gray-300 font-medium"
-            onClick={() => setShowCollectionPopup(false)}
+            onClick={() => {
+              setShowCollectionPopup(false);
+              setCollectingSpecimenId(null);
+            }}
           >
             Cancel
           </button>
@@ -2245,7 +2248,10 @@ gameTime={gameTime}
       {/* Collection Result Popup */}
 <CollectionResultPopup
   isOpen={showCollectionResult}
-  onClose={() => setShowCollectionResult(false)}
+  onClose={() => {
+    setShowCollectionResult(false);
+    setCollectingSpecimenId(null);
+  }}
   result={collectionResult}
   specimenName={collectionSpecimenName}
   method={collectionMethod}
