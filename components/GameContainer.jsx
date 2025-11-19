@@ -2201,9 +2201,9 @@ gameTime={gameTime}
               key={method.id}
               onClick={() => setSelectedMethod(method)}
               className={`
-                relative p-3 rounded-md flex flex-col items-center justify-center transition-all duration-300
-                ${selectedMethod?.id === method.id 
-                  ? 'bg-amber-800 text-white shadow-md transform scale-105 border-2 border-amber-600' 
+                collection-method-button relative p-3 rounded-md flex flex-col items-center justify-center transition-all duration-300
+                ${selectedMethod?.id === method.id
+                  ? 'bg-amber-800 text-white shadow-md transform scale-105 border-2 border-amber-600'
                   : 'bg-amber-50 text-darwin-dark border border-2 border-amber-00/40 hover:bg-amber-100 hover:shadow-md'
                 }
               `}
@@ -2253,8 +2253,8 @@ gameTime={gameTime}
           <button
             className={`
               flex-1 py-3 px-4 rounded-md transition-all duration-200 font-medium
-              ${selectedMethod 
-                ? 'bg-amber-700 hover:bg-amber-800 text-white shadow-md' 
+              ${selectedMethod
+                ? 'bg-amber-700 hover:bg-amber-800 text-white shadow-md collect-button-active'
                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }
             `}

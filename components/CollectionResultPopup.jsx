@@ -107,9 +107,9 @@ export default function CollectionResultPopup({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-lg shadow-xl p-8 max-w-md w-full ${
-        isSuccess 
-          ? 'border-4 border-green-200 shadow-green-600/20 shadow-lg' 
+      <div className={`collection-result-modal bg-white rounded-lg shadow-xl p-8 max-w-md w-full ${
+        isSuccess
+          ? 'border-4 border-green-200 shadow-green-600/20 shadow-lg'
           : 'border-4 border-red-200 shadow-red-600/20 shadow-lg'
       }`}>
         <div className="text-center mb-6 relative">
@@ -153,9 +153,7 @@ export default function CollectionResultPopup({
                     {imageError ? (
                       <div className="text-4xl">{getSpecimenEmoji(specimenId)}</div>
                     ) : (
-                      <div className="animate-pulse flex space-x-4">
-                        <div className="w-full h-full bg-gray-200 rounded"></div>
-                      </div>
+                      <div className="w-full h-full skeleton-shimmer rounded"></div>
                     )}
                   </div>
                 )}

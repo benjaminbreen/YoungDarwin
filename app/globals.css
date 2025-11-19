@@ -262,7 +262,7 @@ h1, h2, h3, h4, h5, h6 {
 .specimen-card:hover {
   border-color: rgba(var(--darwin-accent), 0.5);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
-  transform: translateY(-1px);
+  transform: translateY(-1px) scale(1.02);
 }
 
 .specimen-card.selected {
@@ -543,4 +543,91 @@ button.submit-button:disabled {
 
 .timeline-dot {
   animation: dot-pulse 2s infinite;
+}
+
+/* Ripple effect for collection method buttons */
+@keyframes ripple {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.collection-method-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.collection-method-button::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  border-radius: 100%;
+  transform: scale(1) translate(-50%, -50%);
+  transform-origin: 50% 50%;
+}
+
+.collection-method-button:active::after {
+  animation: ripple 0.6s ease-out;
+}
+
+/* Pulse animation for collect button when method is selected */
+@keyframes button-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(180, 83, 9, 0);
+  }
+}
+
+.collect-button-active {
+  animation: button-pulse 2s ease-in-out infinite;
+}
+
+/* Fade-in animation for collection result modal */
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.collection-result-modal {
+  animation: modal-fade-in 0.3s ease-out;
+}
+
+/* Loading skeleton shimmer effect for specimen images */
+@keyframes shimmer {
+  0% {
+    background-position: -468px 0;
+  }
+  100% {
+    background-position: 468px 0;
+  }
+}
+
+.skeleton-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 0%,
+    #f8f8f8 20%,
+    #f0f0f0 40%,
+    #f0f0f0 100%
+  );
+  background-size: 800px 100%;
 }
