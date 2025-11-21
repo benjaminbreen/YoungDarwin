@@ -103,10 +103,9 @@ export default function PlayerInput({
         <button
           type="submit"
           disabled={isLoading || !userInput.trim()}
-          className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 relative active:scale-95 active:shadow-inner"
+          className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 active:scale-95 active:shadow-inner"
         >
           {isLoading ? 'Processing...' : 'Submit'}
-          <span className="absolute inset-0 bg-green-600 opacity-05 blur-lg transition-all duration-700"></span>
         </button>
       </form>
       

@@ -420,6 +420,43 @@ useEffect(() => {
   }
 }, [playerPosition, fatigue]);
 
+// Arrow key navigation
+useEffect(() => {
+  const handleKeyPress = (e) => {
+    // Don't trigger navigation if user is typing in an input or textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // Don't trigger if loading
+    if (isLoading) {
+      return;
+    }
+
+    // Map arrow keys to directions
+    const keyToDirection = {
+      'ArrowUp': 'N',
+      'ArrowDown': 'S',
+      'ArrowLeft': 'W',
+      'ArrowRight': 'E'
+    };
+
+    const direction = keyToDirection[e.key];
+    if (direction) {
+      e.preventDefault(); // Prevent page scrolling
+      handleMapLocationClick(direction);
+    }
+  };
+
+  // Add event listener
+  window.addEventListener('keydown', handleKeyPress);
+
+  // Cleanup
+  return () => {
+    window.removeEventListener('keydown', handleKeyPress);
+  };
+}, [isLoading, handleMapLocationClick]);
+
 // Helper function to get NPCs at current location and time
 const getNPCsForCurrentLocationAndTime = () => {
   const currentLocation = getCurrentLocation()?.id;
