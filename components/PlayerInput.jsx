@@ -1,20 +1,7 @@
 'use client';
 import JournalView from './JournalView';
-import { debounce } from 'lodash';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import CounterNarrative from './CounterNarrative';
-
-const debouncedSubmit = debounce((input) => {
-  onSubmit(input);
-}, 300);
-
-const handleKeyDown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    debouncedSubmit(userInput);
-    setUserInput('');
-  }
-};
 
 export default function PlayerInput({ 
   onSubmit, 
@@ -28,7 +15,8 @@ export default function PlayerInput({
   const [showJournalView, setShowJournalView] = useState(false);
   const [activeTab, setActiveTab] = useState('response'); // 'response' or 'prompt'
   const [showCounterNarrative, setShowCounterNarrative] = useState(false);
-  
+  const modalRef = useRef(null);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (userInput.trim() && !isLoading) {
@@ -59,7 +47,41 @@ export default function PlayerInput({
       console.log("Raw response available:", !!rawResponse);
     }
   }, [showRawOutput, rawPrompt, rawResponse]);
-  
+
+  // Keyboard trap for modal accessibility
+  useEffect(() => {
+    if (showRawOutput && modalRef.current) {
+      const modal = modalRef.current;
+      const focusableElements = modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      const handleTabKey = (e) => {
+        if (e.key === 'Tab') {
+          if (e.shiftKey && document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          } else if (!e.shiftKey && document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+        if (e.key === 'Escape') {
+          setShowRawOutput(false);
+        }
+      };
+
+      modal.addEventListener('keydown', handleTabKey);
+      firstElement?.focus();
+
+      return () => {
+        modal.removeEventListener('keydown', handleTabKey);
+      };
+    }
+  }, [showRawOutput]);
+
   return (
     <div className="w-full relative">
       <form onSubmit={handleSubmit} className="relative flex items-center">
@@ -81,10 +103,10 @@ export default function PlayerInput({
         <button
           type="submit"
           disabled={isLoading || !userInput.trim()}
-          className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 relative"
+          className="submit-button mt-2 ml-2 px-6 py-2 rounded-md text-white font-medium transition-all focus:ring-2 shadow-md disabled:bg-gray-300 relative active:scale-95 active:shadow-inner"
         >
           {isLoading ? 'Processing...' : 'Submit'}
-          <span className="absolute inset-0 bg-green-000 opacity-05 blur-lg transition-all duration-700"></span>
+          <span className="absolute inset-0 bg-green-600 opacity-05 blur-lg transition-all duration-700"></span>
         </button>
       </form>
       
@@ -94,24 +116,27 @@ export default function PlayerInput({
           onClick={() => setShowRawOutput(true)}
           className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
           title="View LLM Exchange"
+          aria-label="View raw LLM exchange showing prompt and response"
         >
-          <span className="text-amber-800">👁️ Raw LLM </span>
+          <span className="text-amber-800" aria-hidden="true">👁️ Raw LLM </span>
         </button>
 
         <button
-  onClick={() => setShowCounterNarrative(true)}
-  className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
-  title="View Historian's Critique"
->
-  <span className="text-amber-800">💡 Counter-narrative</span>
-</button>
-        
+          onClick={() => setShowCounterNarrative(true)}
+          className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
+          title="View Historian's Critique"
+          aria-label="View historian's counter-narrative critique"
+        >
+          <span className="text-amber-800" aria-hidden="true">💡 Counter-narrative</span>
+        </button>
+
         <button
           onClick={() => setShowJournalView(true)}
           className="flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 transition-colors"
           title="View journal entries"
+          aria-label="View and manage journal entries"
         >
-          <span className="text-amber-800">📖 Journal</span>
+          <span className="text-amber-800" aria-hidden="true">📖 Journal</span>
         </button>
       </div>
 
@@ -140,12 +165,13 @@ export default function PlayerInput({
       {/* Raw LLM Exchange Modal */}
       {showRawOutput && (rawResponse || rawPrompt) && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div ref={modalRef} className="bg-white rounded-lg shadow-xl max-w-full md:max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h3 className="font-bold text-lg">Raw LLM Exchange</h3>
-              <button 
+              <h3 id="modal-title" className="font-bold text-lg">Raw LLM Exchange</h3>
+              <button
                 onClick={() => setShowRawOutput(false)}
                 className="text-gray-500 hover:text-gray-800 text-2xl"
+                aria-label="Close modal"
               >
                 &times;
               </button>

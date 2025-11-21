@@ -320,29 +320,6 @@ textarea:focus, input[type="text"]:focus {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05), 0 0 0 3px rgba(var(--darwin-primary), 0.1);
 }
 
-button.submit-button {
-  @apply py-2 px-6 rounded-md text-white font-medium transition-all;
-  background-color: rgb(var(--darwin-primary));
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 
-    0 1px 3px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-button.submit-button:hover {
-  background-color: rgb(var(--darwin-accent));
-  box-shadow: 
-    0 2px 5px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px);
-}
-
-button.submit-button:disabled {
-  @apply bg-gray-300 text-gray-500 cursor-not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
 /* Game text styling */
 .prose {
   line-height: 1.7;

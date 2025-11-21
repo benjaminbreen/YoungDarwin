@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { specimens, analyzeNarrativeForSpecimens } from '../data/specimens';
 import { tools } from '../data/tools'; // Only import the analysis tools
 import SpecimenDetail from './SpecimenDetail';
@@ -9,7 +9,7 @@ import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
 
 
-export default function SpecimenCollection({ 
+export default function SpecimenCollection({
   currentSpecimen,
   inventory,
   onSpecimenSelect,
@@ -21,7 +21,7 @@ export default function SpecimenCollection({
   onOpenCollectionPopup,
    specimenList,
    currentLocation,
-   gameTime, 
+   gameTime,
    onOpenJournal
 }) {
   // states
@@ -30,6 +30,8 @@ export default function SpecimenCollection({
   const [nearbySpecimenIds, setNearbySpecimenIds] = useState([]);
    const [showJournalPopup, setShowJournalPopup] = useState(false);
   const [selectedJournalSpecimen, setSelectedJournalSpecimen] = useState(null);
+  const [imageLoadedStates, setImageLoadedStates] = useState({});
+  const detailModalRef = useRef(null);
 
     const getCurrentTimePeriod = () => {
     if (!gameTime) return 'Diurnal'; // Default to daytime
@@ -131,14 +133,14 @@ const getNearbySpecimens = () => {
     return `/specimens/${specimenId.toLowerCase()}.jpg`;
   };
 
+  // Handle image loading success
+  const handleImageLoad = (specimenId) => {
+    setImageLoadedStates(prev => ({ ...prev, [specimenId]: true }));
+  };
+
   // Fallback handling for image loading errors
-  const handleImageError = (e) => {
-    e.target.onerror = null; // Prevent infinite error loops
-    e.target.src = `/specimens/placeholder.jpg`; // Use placeholder
-    if (!e.target.classList.contains('emoji-fallback')) {
-      e.target.style.display = 'none';
-      e.target.nextElementSibling.style.display = 'block';
-    }
+  const handleImageError = (specimenId) => {
+    setImageLoadedStates(prev => ({ ...prev, [specimenId]: false }));
   };
 
   // Inside the SpecimenCollection component, add this useEffect:
@@ -146,20 +148,54 @@ useEffect(() => {
   const handleShowDetail = (event) => {
     const { specimenId } = event.detail;
     if (specimenId) {
-      // Find the specimen 
+      // Find the specimen
       const specimen = inventory.find(s => s.id === specimenId);
       if (specimen) {
         setShowDetailedView(specimen);
       }
     }
   };
-  
+
   document.addEventListener('showSpecimenDetail', handleShowDetail);
-  
+
   return () => {
     document.removeEventListener('showSpecimenDetail', handleShowDetail);
   };
 }, [inventory]);
+
+  // Keyboard trap for specimen detail modal
+  useEffect(() => {
+    if (showDetailedView && detailModalRef.current) {
+      const modal = detailModalRef.current;
+      const focusableElements = modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      const handleTabKey = (e) => {
+        if (e.key === 'Tab') {
+          if (e.shiftKey && document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          } else if (!e.shiftKey && document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+        if (e.key === 'Escape') {
+          setShowDetailedView(null);
+        }
+      };
+
+      modal.addEventListener('keydown', handleTabKey);
+      firstElement?.focus();
+
+      return () => {
+        modal.removeEventListener('keydown', handleTabKey);
+      };
+    }
+  }, [showDetailedView]);
 
   return (
     <div className="darwin-panel">
@@ -191,7 +227,7 @@ useEffect(() => {
   onClick={() => setShowDetailedView(currentSpecimen)}
 >
   {currentSpecimen.isHybrid ? (
-    <HybridSpecimenImage 
+    <HybridSpecimenImage
       specimen={currentSpecimen}
       className="w-full h-full"
       size="full"
@@ -202,15 +238,24 @@ useEffect(() => {
     />
   ) : (
     <>
-      <img 
-        src={getSpecimenImagePath(currentSpecimen.id)} 
-        alt={currentSpecimen.name}
-        className="w-full h-full object-cover rounded-lg"
-        onError={handleImageError}
-      />
-      <div className="hidden emoji-fallback text-3xl flex items-center justify-center absolute inset-0">
+      {/* Show emoji immediately, hide when image loads */}
+      <div
+        className={`text-3xl flex items-center justify-center absolute inset-0 transition-opacity duration-300 ${
+          imageLoadedStates[currentSpecimen.id] ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
         {getSpecimenIcon(currentSpecimen.id)}
       </div>
+      {/* Image fades in when loaded */}
+      <img
+        src={getSpecimenImagePath(currentSpecimen.id)}
+        alt={currentSpecimen.name}
+        className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${
+          imageLoadedStates[currentSpecimen.id] ? 'opacity-100' : 'opacity-0'
+        }`}
+        onLoad={() => handleImageLoad(currentSpecimen.id)}
+        onError={() => handleImageError(currentSpecimen.id)}
+      />
     </>
   )}
   {/* Decorative corners */}
@@ -252,6 +297,7 @@ useEffect(() => {
         onOpenJournal && onOpenJournal(currentSpecimen);
       }}
       className="text-sm w-full bg-green-600 hover:bg-green-700 p-1 text-white font-bold py-1.5 rounded-lg mb-2 transition"
+      aria-label={`Document ${currentSpecimen.name} in journal`}
       >
       Document {currentSpecimen.name}
     </button>
@@ -282,10 +328,11 @@ useEffect(() => {
                   onClick={() => handleToolUse(tool.id)}
                   className="tool-button group"
                   title={tool.description}
+                  aria-label={`Use ${tool.name} to examine ${currentSpecimen.name}`}
                 >
-                  <span className="mr-1.5 text-lg group-hover:scale-110 transition-transform inline-block">
+                  <span className="mr-1.5 text-lg group-hover:scale-110 transition-transform inline-block" aria-hidden="true">
                     {tool.icon}
-                  </span> 
+                  </span>
                   <span className="text-xs">{tool.name}</span>
                 </button>
               ))}
@@ -324,23 +371,26 @@ useEffect(() => {
         {inventory.length > 0 ? (
           <div className="grid grid-cols-2 gap-2 mb-2">
             {inventory.map(item => (
-              <div 
+              <button
                 key={item.id}
                 onClick={() => onSpecimenSelect(item.id)}
                 className={`p-2 rounded-lg cursor-pointer border transition-all duration-200 flex items-center specimen-card ${
-                  currentSpecimen && currentSpecimen.id === item.id 
-                    ? 'selected' 
+                  currentSpecimen && currentSpecimen.id === item.id
+                    ? 'selected'
                     : ''
                 }`}
+                aria-label={`Select ${item.name} for examination`}
+                aria-pressed={currentSpecimen && currentSpecimen.id === item.id}
+                title={item.name}
               >
                 <div className="w-8 h-8 bg-amber-50 rounded-md flex items-center justify-center mr-2 border border-amber-200">
-                  <span className="text-lg">{getSpecimenIcon(item.id)}</span>
+                  <span className="text-lg" aria-hidden="true">{getSpecimenIcon(item.id)}</span>
                 </div>
-                <div className="text-xs flex-1 overflow-hidden">
+                <div className="text-xs flex-1 overflow-hidden text-left">
                   <p className="font-medium text-amber-900 truncate">{item.name}</p>
                   <p className="text-amber-700 opacity-75 truncate text-xs italic font-serif">{item.latin}</p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
@@ -353,12 +403,13 @@ useEffect(() => {
       {/* Detailed Specimen View Modal */}
 {showDetailedView && (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-    <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div ref={detailModalRef} className="bg-white rounded-lg max-w-full md:max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="specimen-modal-title">
       <div className="p-4 border-b border-amber-200 flex justify-between items-center bg-amber-50">
-        <h2 className="text-2xl font-bold text-darwin-dark font-serif">{showDetailedView.name}</h2>
-        <button 
+        <h2 id="specimen-modal-title" className="text-2xl font-bold text-darwin-dark font-serif">{showDetailedView.name}</h2>
+        <button
           onClick={() => setShowDetailedView(null)}
           className="text-gray-500 hover:text-gray-800 text-2xl leading-none"
+          aria-label="Close specimen detail"
         >
           &times;
         </button>
@@ -445,9 +496,11 @@ useEffect(() => {
     key={specimen.id}
     onClick={() => onViewNearbySpecimenDetail(specimen)}
     className="specimen-card p-2 flex items-center group"
+    aria-label={`View details for ${specimen.name}`}
+    title={specimen.name}
   >
     <div className="w-8 h-8 bg-amber-50 rounded-md flex items-center justify-center mr-2 border border-amber-200 group-hover:bg-amber-100 transition-colors">
-      <span className="text-lg">{getSpecimenIcon(specimen.id)}</span>
+      <span className="text-lg" aria-hidden="true">{getSpecimenIcon(specimen.id)}</span>
     </div>
     <div className="text-xs text-left flex-1 overflow-hidden">
       <p className="font-medium text-amber-900 truncate">{specimen.name}</p>
