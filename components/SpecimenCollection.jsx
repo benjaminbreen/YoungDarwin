@@ -70,15 +70,15 @@ useEffect(() => {
 
 const getEmojiByTaxonomy = (taxonomy) => {
   const lowercaseTaxonomy = taxonomy.toLowerCase();
-  
+
   // Map taxonomic groups to emojis
   if (lowercaseTaxonomy.includes('tortoise') || lowercaseTaxonomy.includes('turtle')) return '🐢';
-  if (lowercaseTaxonomy.includes('bird') || lowercaseTaxonomy.includes('finch') || 
+  if (lowercaseTaxonomy.includes('bird') || lowercaseTaxonomy.includes('finch') ||
       lowercaseTaxonomy.includes('mockingbird')) return '🐦';
   if (lowercaseTaxonomy.includes('iguana')) return '🦎';
   if (lowercaseTaxonomy.includes('lizard')) return '🦎';
   if (lowercaseTaxonomy.includes('crab')) return '🦀';
-  if (lowercaseTaxonomy.includes('plant') || lowercaseTaxonomy.includes('cactus') || 
+  if (lowercaseTaxonomy.includes('plant') || lowercaseTaxonomy.includes('cactus') ||
       lowercaseTaxonomy.includes('mangrove')) return '🌱';
   if (lowercaseTaxonomy.includes('shell') || lowercaseTaxonomy.includes('gastropod')) return '🐚';
   if (lowercaseTaxonomy.includes('fish')) return '🐠';
@@ -86,9 +86,15 @@ const getEmojiByTaxonomy = (taxonomy) => {
   if (lowercaseTaxonomy.includes('ray')) return '🐟';
   if (lowercaseTaxonomy.includes('mammal')) return '🐾';
   if (lowercaseTaxonomy.includes('mineral') || lowercaseTaxonomy.includes('rock')) return '🪨';
-  
+
   // Default emoji for unrecognized taxonomy
   return '🧬';
+};
+
+// Helper function to determine if specimen is "easy" to collect
+const isEasyToCollect = (specimen) => {
+  // Easy specimens have danger <= 3 (rocks, common plants, small creatures)
+  return specimen.danger !== undefined && specimen.danger <= 3;
 };
 
 const [filteredNearbyIds, setFilteredNearbyIds] = useState([]);
@@ -490,24 +496,56 @@ useEffect(() => {
         </h4>
         
         {getNearbySpecimens().length > 0 ? (
-          <div className="grid grid-cols-2 gap-2">
-           {getNearbySpecimens().map(specimen => (
-  <button
+          <div className="grid grid-cols-1 gap-2">
+           {getNearbySpecimens().map(specimen => {
+             const isEasy = isEasyToCollect(specimen);
+             return (
+  <div
     key={specimen.id}
-    onClick={() => onViewNearbySpecimenDetail(specimen)}
-    className="specimen-card p-2 flex items-center group"
-    aria-label={`View details for ${specimen.name}`}
-    title={specimen.name}
+    className="specimen-card p-2"
   >
-    <div className="w-8 h-8 bg-amber-50 rounded-md flex items-center justify-center mr-2 border border-amber-200 group-hover:bg-amber-100 transition-colors">
-      <span className="text-lg" aria-hidden="true">{getSpecimenIcon(specimen.id)}</span>
+    <div className="flex items-center mb-1">
+      <div className="w-8 h-8 bg-amber-50 rounded-md flex items-center justify-center mr-2 border border-amber-200">
+        <span className="text-lg" aria-hidden="true">{getSpecimenIcon(specimen.id)}</span>
+      </div>
+      <div className="text-xs text-left flex-1 overflow-hidden">
+        <p className="font-medium text-amber-900 truncate">{specimen.name}</p>
+        <p className="text-amber-700 opacity-75 truncate text-[10px]">{specimen.habitat}</p>
+        {isEasy && <p className="text-green-600 font-medium text-[10px]">✓ Easy to collect</p>}
+        {!isEasy && <p className="text-orange-600 font-medium text-[10px]">⚠ Difficult specimen</p>}
+      </div>
     </div>
-    <div className="text-xs text-left flex-1 overflow-hidden">
-      <p className="font-medium text-amber-900 truncate">{specimen.name}</p>
-      <p className="text-amber-700 opacity-75 truncate">{specimen.habitat}</p>
+    <div className="flex gap-1">
+      {isEasy ? (
+        <>
+          <button
+            onClick={() => onOpenCollectionPopup(specimen)}
+            className="flex-1 text-[10px] px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded transition-colors font-medium"
+            aria-label={`Quick collect ${specimen.name}`}
+          >
+            ⚡ Quick Collect
+          </button>
+          <button
+            onClick={() => onViewNearbySpecimenDetail(specimen)}
+            className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded transition-colors text-[10px]"
+            aria-label={`View details for ${specimen.name}`}
+          >
+            👁️
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => onViewNearbySpecimenDetail(specimen)}
+          className="flex-1 text-[10px] px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded transition-colors"
+          aria-label={`View details for ${specimen.name}`}
+        >
+          View & Collect
+        </button>
+      )}
     </div>
-  </button>
-))}
+  </div>
+);
+           })}
           </div>
         ) : (
           <div className="text-sm text-gray-500 py-3 px-4 bg-amber-50/50 rounded-lg italic text-center">

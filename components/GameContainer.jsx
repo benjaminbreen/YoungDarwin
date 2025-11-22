@@ -235,6 +235,8 @@ const [selectedNearbySpecimen, setSelectedNearbySpecimen] = useState(null);
 const [primaryCollectible, setPrimaryCollectible] = useState(null);
 const [encounteredNPCs, setEncounteredNPCs] = useState([]);
 const [showFatigueWarning, setShowFatigueWarning] = useState(false);
+const [fatigueWarningLevel, setFatigueWarningLevel] = useState(null); // 'moderate', 'high', 'severe', 'critical'
+const [fatigueWarningMessage, setFatigueWarningMessage] = useState('');
 const [showRestButton, setShowRestButton] = useState(false);
 const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
 const [showHybridOptions, setShowHybridOptions] = useState(false);
@@ -389,16 +391,39 @@ useEffect(() => {
 // After your other useEffect hooks
 // Monitor fatigue and show warnings or trigger pass out
 useEffect(() => {
-  // High fatigue warning (75% or higher)
-  if (fatigue >= 75 && fatigue < 95) {
+  // Progressive fatigue warnings with different severity levels
+  let warningLevel = null;
+  let warningMessage = '';
+
+  if (fatigue >= 85 && fatigue < 95) {
+    warningLevel = 'critical';
+    warningMessage = 'Darwin is about to collapse from exhaustion! Find shelter immediately or you will pass out.';
+  } else if (fatigue >= 75 && fatigue < 85) {
+    warningLevel = 'severe';
+    warningMessage = 'Darwin is dangerously exhausted. Find shelter to rest soon or risk collapse.';
+  } else if (fatigue >= 65 && fatigue < 75) {
+    warningLevel = 'high';
+    warningMessage = 'Darwin is quite fatigued. Consider finding shelter to rest before continuing exploration.';
+  } else if (fatigue >= 50 && fatigue < 65) {
+    warningLevel = 'moderate';
+    warningMessage = 'Darwin is getting tired. You may want to rest at the HMS Beagle or a settlement soon.';
+  }
+
+  if (warningLevel) {
+    setFatigueWarningLevel(warningLevel);
+    setFatigueWarningMessage(warningMessage);
     setShowFatigueWarning(true);
-    // Auto-hide warning after 5 seconds
+
+    // Auto-hide warning after varying durations based on severity
+    const duration = warningLevel === 'critical' ? 8000 : warningLevel === 'severe' ? 6000 : 5000;
     const timer = setTimeout(() => {
       setShowFatigueWarning(false);
-    }, 5000);
+    }, duration);
     return () => clearTimeout(timer);
+  } else {
+    setShowFatigueWarning(false);
   }
-  
+
   // Critical fatigue - pass out (95% or higher)
   if (fatigue >= 95) {
     handlePassOut();
@@ -1743,6 +1768,21 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   // Main game screen
   return (
     <div className="max-w-7xl mx-auto p-4 min-h-screen bg-darwin-light relative">
+      {/* Fatigue Vignette Overlay */}
+      {fatigue >= 50 && (
+        <div
+          className="fixed inset-0 pointer-events-none z-40 transition-opacity duration-1000"
+          style={{
+            background: `radial-gradient(circle, transparent 20%, rgba(0, 0, 0, ${
+              fatigue >= 85 ? 0.4 :
+              fatigue >= 75 ? 0.3 :
+              fatigue >= 65 ? 0.2 :
+              0.1
+            }) 100%)`,
+            opacity: fatigue >= 85 ? 1 : fatigue >= 75 ? 0.9 : fatigue >= 65 ? 0.7 : 0.5
+          }}
+        />
+      )}
 
    <HamburgerMenu />
       
@@ -2313,18 +2353,48 @@ gameTime={gameTime}
   onAttemptCollection={handleOpenCollectionPopup}
 />
 
-{/* Fatigue Warning Popup */}
+{/* Progressive Fatigue Warning Popup */}
 {showFatigueWarning && (
-  <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-lg z-50 max-w-md">
-    <div className="flex">
-      <div className="py-1">
-        <svg className="h-6 w-6 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
+  <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 p-4 rounded shadow-lg z-50 max-w-md transition-all duration-300 ${
+    fatigueWarningLevel === 'critical' ? 'bg-red-100 border-l-4 border-red-600 text-red-800' :
+    fatigueWarningLevel === 'severe' ? 'bg-orange-100 border-l-4 border-orange-600 text-orange-800' :
+    fatigueWarningLevel === 'high' ? 'bg-yellow-100 border-l-4 border-yellow-600 text-yellow-800' :
+    'bg-blue-100 border-l-4 border-blue-500 text-blue-800'
+  }`}>
+    <div className="flex items-start">
+      <div className="flex-shrink-0">
+        {fatigueWarningLevel === 'critical' && (
+          <svg className="h-6 w-6 text-red-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        )}
+        {fatigueWarningLevel === 'severe' && (
+          <svg className="h-6 w-6 text-orange-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        )}
+        {fatigueWarningLevel === 'high' && (
+          <svg className="h-6 w-6 text-yellow-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        )}
+        {fatigueWarningLevel === 'moderate' && (
+          <svg className="h-6 w-6 text-blue-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        )}
       </div>
-      <div>
-        <p className="font-bold">Extreme Fatigue</p>
-        <p className="text-sm">Darwin is becoming dangerously exhausted. Find shelter to rest soon or risk collapse. Try returning to the Beagle or finding shelter in a settlement.</p>
+      <div className="flex-1">
+        <p className="font-bold text-sm mb-1">
+          {fatigueWarningLevel === 'critical' && '⚠️ Critical Exhaustion'}
+          {fatigueWarningLevel === 'severe' && '⚠️ Severe Fatigue'}
+          {fatigueWarningLevel === 'high' && '⚠ High Fatigue'}
+          {fatigueWarningLevel === 'moderate' && 'ℹ️ Getting Tired'}
+        </p>
+        <p className="text-sm">{fatigueWarningMessage}</p>
+        <div className="mt-2 text-xs opacity-75">
+          Fatigue: {fatigue}% | Estimated actions before collapse: ~{Math.max(1, Math.floor((95 - fatigue) / 3))}
+        </div>
       </div>
     </div>
   </div>
