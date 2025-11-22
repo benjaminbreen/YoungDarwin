@@ -40,7 +40,18 @@ const useGameStore = create((set, get) => ({
   narrativeText: '',
   isLoading: false,
   visibleNPCs: [],
-  currentNPC: null, 
+  currentNPC: null,
+
+  // NPC Relationship System
+  npcRelationships: {
+    syms_covington: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+    fitzroy: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+    maria: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+    nicolas_lawson: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+    lascar_joe: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+    gabriel_puig: { score: 50, lastInteraction: null, interactions: 0, unlockedDialogue: [] },
+  },
+  relationshipNotification: null, // For showing relationship change notifications
 
   // Add event history for the EnhancedEventHistory component
   eventHistory: [],
@@ -382,7 +393,87 @@ moveToLocation: (locationId) => {
       timestamp: state.gameTime,
       day: state.daysPassed
     }]
-  }))
+  })),
+
+  // NPC Relationship Methods
+  modifyRelationship: (npcId, change, reason) => set(state => {
+    const currentRel = state.npcRelationships[npcId];
+    if (!currentRel) return state;
+
+    const newScore = Math.max(0, Math.min(100, currentRel.score + change));
+    const oldScore = currentRel.score;
+
+    // Determine relationship level and tier changes
+    const getRelationshipTier = (score) => {
+      if (score >= 80) return 'trusted';
+      if (score >= 60) return 'friendly';
+      if (score >= 40) return 'neutral';
+      if (score >= 20) return 'cold';
+      return 'hostile';
+    };
+
+    const oldTier = getRelationshipTier(oldScore);
+    const newTier = getRelationshipTier(newScore);
+    const tierChanged = oldTier !== newTier;
+
+    // Check for unlockable dialogue thresholds
+    const unlockedDialogue = [...currentRel.unlockedDialogue];
+    if (newScore >= 80 && !unlockedDialogue.includes('trusted_secrets')) {
+      unlockedDialogue.push('trusted_secrets');
+    }
+    if (newScore >= 60 && !unlockedDialogue.includes('personal_stories')) {
+      unlockedDialogue.push('personal_stories');
+    }
+
+    return {
+      npcRelationships: {
+        ...state.npcRelationships,
+        [npcId]: {
+          ...currentRel,
+          score: newScore,
+          lastInteraction: Date.now(),
+          interactions: currentRel.interactions + 1,
+          unlockedDialogue
+        }
+      },
+      relationshipNotification: change !== 0 ? {
+        npcId,
+        change,
+        newScore,
+        reason,
+        tierChanged,
+        newTier,
+        timestamp: Date.now()
+      } : null
+    };
+  }),
+
+  // Get relationship status for an NPC
+  getRelationship: (npcId) => {
+    const rel = get().npcRelationships[npcId];
+    if (!rel) return null;
+
+    const tier = rel.score >= 80 ? 'trusted' :
+                 rel.score >= 60 ? 'friendly' :
+                 rel.score >= 40 ? 'neutral' :
+                 rel.score >= 20 ? 'cold' : 'hostile';
+
+    const emoji = rel.score >= 80 ? '💚' :
+                  rel.score >= 60 ? '💙' :
+                  rel.score >= 40 ? '💛' :
+                  rel.score >= 20 ? '🧡' : '❤️‍🔥';
+
+    return { ...rel, tier, emoji };
+  },
+
+  // Clear relationship notification
+  clearRelationshipNotification: () => set({ relationshipNotification: null }),
+
+  // Check if dialogue is unlocked
+  isDialogueUnlocked: (npcId, dialogueType) => {
+    const rel = get().npcRelationships[npcId];
+    return rel ? rel.unlockedDialogue.includes(dialogueType) : false;
+  }
 }));
 
 // Helper function to format time display

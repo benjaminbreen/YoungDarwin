@@ -34,6 +34,8 @@ import { getSpecimenIcon } from '../utils/specimenUtils';
 import Journal from './Journal';
 import HamburgerMenu from './HamburgerMenu';
 import EndGame from './EndGame';
+import RelationshipNotification from './RelationshipNotification';
+import NPCRelationshipsPanel from './NPCRelationshipsPanel';
 
 function GameContainer() {
   // Pull all needed functions and state from the game store
@@ -62,7 +64,12 @@ function GameContainer() {
     setCurrentNPC,
     daysPassed,
     gameTime,
-     setSpecimenList
+     setSpecimenList,
+    // Relationship methods
+    modifyRelationship,
+    getRelationship,
+    relationshipNotification,
+    clearRelationshipNotification
   } = useGameStore();
   
   // Use the location hook for grid-based movement
@@ -246,6 +253,7 @@ const [hybridityMode, setHybridityMode] = useState('none'); // 'none', 'mild', o
 const [isMovingViaMap, setIsMovingViaMap] = useState(false);
 const [journalOpen, setJournalOpen] = useState(false);
 const [journalSpecimen, setJournalSpecimen] = useState(null);
+const [showRelationshipsPanel, setShowRelationshipsPanel] = useState(false);
 
   // Initialize the game
   useEffect(() => {
@@ -507,10 +515,13 @@ const handleTalkToNPC = (npcId) => {
   // Get full NPC data
   const npc = npcs.find(n => n.id === npcId);
   if (!npc) return;
-  
+
   // Set the current NPC
   setCurrentNPC(npcId);
-  
+
+  // Add small relationship boost for initiating conversation
+  modifyRelationship(npcId, 2, "Started a conversation");
+
   // Build a detailed prompt about the NPC
   const prompt = `
 You are now in conversation with ${npc.name}, ${npc.role}.
@@ -528,7 +539,7 @@ Character details:
 
 Start a conversation with ${npc.name}.
 `;
-  
+
   // Send to LLM
   sendToLLM(prompt);
 };
@@ -797,17 +808,20 @@ const handlePassOut = () => {
   
   // Randomly select one rescuer
   const rescuer = possibleRescuers[Math.floor(Math.random() * possibleRescuers.length)];
-  
+
   // Advance time to next morning
   const currentHour = Math.floor((gameTime % 1440) / 60);
   const minutesToNextDay = (24 - currentHour) * 60;
   advanceTime(minutesToNextDay + 6 * 60); // Add 6 hours for next morning at 6 AM
-  
+
   // Move to the rescuer's location
   moveToLocation(rescuer.location);
-  
+
   // Set the rescuer as the active NPC
   setCurrentNPC(rescuer.id);
+
+  // Significant relationship boost for saving Darwin's life
+  modifyRelationship(rescuer.id, 15, "Saved you from exhaustion");
   
   // Create the popup message
   const popupMessage = `
@@ -1478,15 +1492,99 @@ if (stepsSection && stepsSection[1]) {
 // Send request to LLM API
 // Optimized sendToLLM function for GameContainer.jsx
 
+// Detect relationship-affecting actions in player input
+const analyzePlayerAction = (userInput, npcId) => {
+  if (!userInput || !npcId) return;
+
+  const lowerInput = userInput.toLowerCase();
+
+  // Positive actions - sharing and giving
+  const sharingPatterns = [
+    /\b(?:give|offer|share|present|show)\b.*\b(?:specimen|finding|discovery|sample|collection)\b/i,
+    /\b(?:help|assist|aid)\b/i,
+    /\b(?:thank|grateful|appreciate)\b/i,
+    /\b(?:gift|donate|contribute)\b/i,
+  ];
+
+  // Respectful/interested patterns
+  const respectfulPatterns = [
+    /\b(?:please|kindly|would you|could you|may i)\b/i,
+    /\b(?:tell me about|teach me|explain|share your knowledge)\b/i,
+    /\b(?:fascinating|interesting|remarkable|wonderful)\b/i,
+    /\b(?:respect|admire|appreciate)\b/i,
+  ];
+
+  // Negative actions - dismissive or rude
+  const negativePatterns = [
+    /\b(?:shut up|be quiet|silence|enough|boring)\b/i,
+    /\b(?:stupid|foolish|ignorant|primitive|savage)\b/i,
+    /\b(?:leave me alone|go away|don't care)\b/i,
+    /\b(?:waste of time|pointless|useless)\b/i,
+  ];
+
+  // Check for sharing/giving specimens or items
+  for (const pattern of sharingPatterns) {
+    if (pattern.test(lowerInput)) {
+      modifyRelationship(npcId, 8, "Shared specimens or offered help");
+      return;
+    }
+  }
+
+  // Check for respectful, interested dialogue
+  for (const pattern of respectfulPatterns) {
+    if (pattern.test(lowerInput)) {
+      modifyRelationship(npcId, 3, "Showed genuine interest and respect");
+      return;
+    }
+  }
+
+  // Check for dismissive or rude behavior
+  for (const pattern of negativePatterns) {
+    if (pattern.test(lowerInput)) {
+      modifyRelationship(npcId, -10, "Was dismissive or disrespectful");
+      return;
+    }
+  }
+};
+
 const sendToLLM = async (userInput) => {
   setIsLoading(true);
-  
+
   try {
     // Get current location info
     const currentLocation = getCurrentLocation();
-    
+
     // Get current NPC if one is active
     const npcObject = currentNPC ? npcs.find(n => n.id === currentNPC) : null;
+
+    // Analyze player action for relationship impacts if talking to NPC
+    if (currentNPC && userInput) {
+      analyzePlayerAction(userInput, currentNPC);
+
+      // Check for special unlocks at high relationship levels
+      const relationship = getRelationship(currentNPC);
+      if (relationship && relationship.score >= 80) {
+        // Special unlock for María - secret tortoise location
+        if (currentNPC === 'maria' && !relationship.unlockedDialogue.includes('secret_location')) {
+          const secretPatterns = [
+            /\b(?:secret|hidden|special|rare)\b.*\b(?:location|place|spot|tortoise|specimen)\b/i,
+            /\b(?:where|know|tell me)\b.*\b(?:find|locate|discover)\b.*\b(?:best|rare|special)\b/i,
+          ];
+
+          for (const pattern of secretPatterns) {
+            if (pattern.test(userInput.toLowerCase())) {
+              // Mark this special dialogue as unlocked
+              const currentRelationships = useGameStore.getState().npcRelationships;
+              const mariaRel = currentRelationships.maria;
+              if (mariaRel && !mariaRel.unlockedDialogue.includes('secret_location')) {
+                mariaRel.unlockedDialogue.push('secret_location');
+                useGameStore.setState({ npcRelationships: currentRelationships });
+              }
+            }
+          }
+        }
+      }
+    }
 
     // Get all NPCs that should be at this location
     const locationNPCs = getNPCsForCurrentLocationAndTime();
@@ -1533,6 +1631,19 @@ const sendToLLM = async (userInput) => {
     
     // If we're actively talking to an NPC, add full details
     if (npcObject) {
+      // Get relationship data for this NPC
+      const relationship = getRelationship(currentNPC);
+      const relationshipContext = relationship
+        ? `\nRELATIONSHIP STATUS: ${relationship.tier} (${relationship.score}/100)
+${relationship.tier === 'trusted' ? '- This NPC trusts Darwin completely and may share secrets or special knowledge' : ''}
+${relationship.tier === 'friendly' ? '- This NPC is friendly and open to deeper conversations' : ''}
+${relationship.tier === 'neutral' ? '- This NPC is polite but not particularly close to Darwin' : ''}
+${relationship.tier === 'cold' ? '- This NPC is wary and somewhat distant with Darwin' : ''}
+${relationship.tier === 'hostile' ? '- This NPC actively dislikes Darwin and may be uncooperative' : ''}
+${relationship.score >= 80 ? '- At this trust level, the NPC may reveal hidden locations, share personal secrets, or offer unique assistance' : ''}
+${relationship.score >= 60 ? '- At this friendship level, the NPC is willing to share personal stories and deeper thoughts' : ''}`
+        : '';
+
       npcContext = `
 ACTIVE NPC: ${npcObject.name} (${npcObject.role})
 Background: ${npcObject.background || ""}
@@ -1540,8 +1651,9 @@ Appearance: ${npcObject.appearance || ""}
 Personality: ${npcObject.personality || ""}
 Dialogue Examples:
 ${npcObject.dialogueExamples ? npcObject.dialogueExamples.map(ex => `- "${ex}"`).join('\n') : ""}
+${relationshipContext}
 
-THIS IS AN NPC INTERACTION TURN. Focus primarily on the NPC's dialogue and reactions.`;
+THIS IS AN NPC INTERACTION TURN. Focus primarily on the NPC's dialogue and reactions. Adjust the NPC's warmth, openness, and willingness to help based on their relationship tier with Darwin.`;
     }
     
     // Always add information about NPCs that should be in this location
@@ -2075,6 +2187,18 @@ if (interiorType === 'whalers_hut' && roomId === 'HUT_MAIN') {
   {/*  weather/time display */}
   <WeatherTimeDisplay />
 
+  {/* NPC Relationships Button */}
+  <button
+    onClick={() => setShowRelationshipsPanel(true)}
+    className="darwin-panel p-2 flex items-center justify-center bg-purple-50 hover:bg-purple-100 border border-purple-300 rounded-lg transition-colors shadow-sm"
+    aria-label="View NPC relationships"
+  >
+    <span className="text-sm font-medium text-purple-800 flex items-center">
+      <span className="mr-2 text-lg">💝</span>
+      NPC Relationships
+    </span>
+  </button>
+
       <SpecimenCollection 
   currentSpecimen={currentSpecimen}
   inventory={inventory}
@@ -2408,6 +2532,18 @@ gameTime={gameTime}
     console.log('Journal entry saved:', entry);
     // Any additional logic
   }}
+/>
+
+{/* NPC Relationship Notification */}
+<RelationshipNotification
+  notification={relationshipNotification}
+  onClose={clearRelationshipNotification}
+/>
+
+{/* NPC Relationships Panel */}
+<NPCRelationshipsPanel
+  isOpen={showRelationshipsPanel}
+  onClose={() => setShowRelationshipsPanel(false)}
 />
 
  {process.env.NODE_ENV === 'development' && (

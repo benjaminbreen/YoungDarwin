@@ -2,9 +2,12 @@
 
 import React, { useEffect } from 'react';
 import { npcs } from '../data/npcs';
-import SwitchPOV from './SwitchPOV'; // Add this import
+import SwitchPOV from './SwitchPOV';
+import useGameStore from '../hooks/useGameStore';
 
-export default function Portrait({ character, mood, fatigue, onSwitchPOV }) { // Add onSwitchPOV prop
+export default function Portrait({ character, mood, fatigue, onSwitchPOV }) {
+  const { getRelationship } = useGameStore();
+
   useEffect(() => {
     // Debug to see what's being passed
     console.log("Portrait received character:", character);
@@ -128,9 +131,47 @@ return (
         )}
 
         {isNPC && npcData && (
-          <div className="mt-2 text-xs text-gray-600">
-            <span className="px-2 py-1 bg-amber-100 rounded-full">{characterRole}</span>
-          </div>
+          <>
+            <div className="mt-2 text-xs text-gray-600">
+              <span className="px-2 py-1 bg-amber-100 rounded-full">{characterRole}</span>
+            </div>
+
+            {/* Relationship Indicator */}
+            {(() => {
+              const relationship = getRelationship(npcData.id);
+              if (!relationship) return null;
+
+              return (
+                <div className="mt-3 w-full">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-600">Relationship</span>
+                    <span className="text-lg">{relationship.emoji}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all ${
+                        relationship.score >= 80 ? 'bg-green-500' :
+                        relationship.score >= 60 ? 'bg-blue-500' :
+                        relationship.score >= 40 ? 'bg-yellow-500' :
+                        relationship.score >= 20 ? 'bg-orange-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${relationship.score}%` }}
+                    />
+                  </div>
+                  <div className="text-center mt-1">
+                    <span className={`text-xs font-medium ${
+                      relationship.tier === 'trusted' ? 'text-green-700' :
+                      relationship.tier === 'friendly' ? 'text-blue-700' :
+                      relationship.tier === 'neutral' ? 'text-yellow-700' :
+                      relationship.tier === 'cold' ? 'text-orange-700' : 'text-red-700'
+                    }`}>
+                      {relationship.tier.charAt(0).toUpperCase() + relationship.tier.slice(1)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+          </>
         )}
       </div>
     </div>
