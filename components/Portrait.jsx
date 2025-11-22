@@ -5,7 +5,7 @@ import { npcs } from '../data/npcs';
 import SwitchPOV from './SwitchPOV';
 import useGameStore from '../hooks/useGameStore';
 
-export default function Portrait({ character, mood, fatigue, onSwitchPOV }) {
+export default function Portrait({ character, mood, fatigue, onSwitchPOV, onPortraitClick }) {
   const { getRelationship } = useGameStore();
 
   useEffect(() => {
@@ -87,14 +87,25 @@ export default function Portrait({ character, mood, fatigue, onSwitchPOV }) {
   const characterName = isNPC && npcData ? npcData.name : 'Charles Darwin';
   const characterRole = isNPC && npcData ? npcData.role : 'Naturalist';
   
+  const handlePortraitClick = () => {
+    if (onPortraitClick) {
+      if (isNPC && npcData) {
+        onPortraitClick(npcData.id, 'npc');
+      } else {
+        onPortraitClick(null, 'player');
+      }
+    }
+  };
+
 return (
     <div className="darwin-panel darwin-portrait flex flex-col items-center">
       <div className="relative mb-2">
         <div className="portrait-frame absolute inset-0 rounded-full border-2 border-amber-700 opacity-10"></div>
-        <img 
-          src={getPortraitImage()} 
+        <img
+          src={getPortraitImage()}
           alt={`${characterName}`}
-          className="w-24 h-24 rounded-full object-cover portrait-image" 
+          onClick={handlePortraitClick}
+          className="w-24 h-24 rounded-full object-cover portrait-image cursor-pointer hover:ring-4 hover:ring-amber-400 transition-all hover:scale-105" 
           onError={(e) => {
             // Fallback to placeholder on error
             e.target.src = `https://placehold.co/150x150/8B5A2B/FFFFFF?text=${characterName.split(' ')[0]}`;

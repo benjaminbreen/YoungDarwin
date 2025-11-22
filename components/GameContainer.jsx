@@ -36,6 +36,8 @@ import HamburgerMenu from './HamburgerMenu';
 import EndGame from './EndGame';
 import RelationshipNotification from './RelationshipNotification';
 import NPCRelationshipsPanel from './NPCRelationshipsPanel';
+import NPCModal from './NPCModal';
+import PlayerModal from './PlayerModal';
 
 function GameContainer() {
   // Pull all needed functions and state from the game store
@@ -254,6 +256,27 @@ const [isMovingViaMap, setIsMovingViaMap] = useState(false);
 const [journalOpen, setJournalOpen] = useState(false);
 const [journalSpecimen, setJournalSpecimen] = useState(null);
 const [showRelationshipsPanel, setShowRelationshipsPanel] = useState(false);
+const [showPlayerModal, setShowPlayerModal] = useState(false);
+const [showNPCModal, setShowNPCModal] = useState(false);
+const [selectedNPCId, setSelectedNPCId] = useState(null);
+
+  // Event listener for NPC name clicks in narrative
+  useEffect(() => {
+    const handleNPCNameClick = (e) => {
+      if (e.target.classList.contains('npc-name-link')) {
+        const npcId = e.target.getAttribute('data-npc-id');
+        if (npcId) {
+          handleNPCClick(npcId);
+        }
+      }
+    };
+
+    document.addEventListener('click', handleNPCNameClick);
+
+    return () => {
+      document.removeEventListener('click', handleNPCNameClick);
+    };
+  }, []);
 
   // Initialize the game
   useEffect(() => {
@@ -1465,11 +1488,44 @@ if (stepsSection && stepsSection[1]) {
     advanceTime(60);
   };
   
+  // Handle NPC click from narrative
+  const handleNPCClick = (npcId) => {
+    setSelectedNPCId(npcId);
+    setShowNPCModal(true);
+  };
+
+  // Make NPC names clickable in narrative text
+  const makeNPCNamesClickable = (text) => {
+    let processedText = text;
+
+    // Find all NPCs and make their names clickable
+    npcs.forEach(npc => {
+      // Create regex for full name and first name
+      const fullNameRegex = new RegExp(`\\b(${npc.name})\\b`, 'g');
+      const firstName = npc.name.split(' ')[0];
+      const firstNameRegex = new RegExp(`\\b(${firstName})\\b`, 'g');
+
+      // Replace with clickable span
+      processedText = processedText.replace(fullNameRegex, (match) => {
+        return `<span class="npc-name-link cursor-pointer text-amber-700 hover:text-amber-900 underline decoration-dotted font-medium" data-npc-id="${npc.id}">${match}</span>`;
+      });
+
+      // Also handle first name (but only if not already replaced)
+      if (firstName !== npc.name && !processedText.includes(`data-npc-id="${npc.id}"`)) {
+        processedText = processedText.replace(firstNameRegex, (match) => {
+          return `<span class="npc-name-link cursor-pointer text-amber-700 hover:text-amber-900 underline decoration-dotted font-medium" data-npc-id="${npc.id}">${match}</span>`;
+        });
+      }
+    });
+
+    return processedText;
+  };
+
   // Process LLM response for display
   const processForDisplay = (text) => {
     // Remove next steps section
     let cleanedText = text.replace(/NEXTSTEPS[\s\S]*?(?=\[STATUS|\[FATIGUE|\[SCIENTIFIC_INSIGHT|\[COLLECTIBLE|$)/, '');
-    
+
     // Remove metadata markers
     cleanedText = cleanedText
       .replace(/\[STATUS:.*?\]/g, '')
@@ -1720,9 +1776,11 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     
     setRawLLMResponse(llmResponse);
     parseLLMResponse(llmResponse, userInput);
-    
-    // Set narrative text
-    setNarrativeText(processForDisplay(llmResponse));
+
+    // Set narrative text with clickable NPC names
+    const processedText = processForDisplay(llmResponse);
+    const clickableText = makeNPCNamesClickable(processedText);
+    setNarrativeText(clickableText);
     
     // Add to history
     addToGameHistory('assistant', llmResponse);
@@ -1937,10 +1995,18 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left column - Portrait and Map */}
         <div className="lg:col-span-3 flex flex-col gap-4">
-          <Portrait 
-            character={currentNPC || 'darwin'} 
-            status={darwinMood} 
-            fatigue={fatigue} 
+          <Portrait
+            character={currentNPC || 'darwin'}
+            status={darwinMood}
+            fatigue={fatigue}
+            onPortraitClick={(npcId, type) => {
+              if (type === 'npc') {
+                setSelectedNPCId(npcId);
+                setShowNPCModal(true);
+              } else {
+                setShowPlayerModal(true);
+              }
+            }} 
             onSwitchPOV={handleSwitchPOV}
           />
 
@@ -2544,6 +2610,23 @@ gameTime={gameTime}
 <NPCRelationshipsPanel
   isOpen={showRelationshipsPanel}
   onClose={() => setShowRelationshipsPanel(false)}
+  onNPCClick={(npcId) => {
+    setSelectedNPCId(npcId);
+    setShowNPCModal(true);
+  }}
+/>
+
+{/* Player Modal */}
+<PlayerModal
+  isOpen={showPlayerModal}
+  onClose={() => setShowPlayerModal(false)}
+/>
+
+{/* NPC Modal */}
+<NPCModal
+  npcId={selectedNPCId}
+  isOpen={showNPCModal}
+  onClose={() => setShowNPCModal(false)}
 />
 
  {process.env.NODE_ENV === 'development' && (

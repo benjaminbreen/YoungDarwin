@@ -4,7 +4,7 @@ import React from 'react';
 import { npcs } from '../data/npcs';
 import useGameStore from '../hooks/useGameStore';
 
-export default function NPCRelationshipsPanel({ isOpen, onClose }) {
+export default function NPCRelationshipsPanel({ isOpen, onClose, onNPCClick }) {
   const { npcRelationships, getRelationship } = useGameStore();
 
   if (!isOpen) return null;
@@ -54,7 +54,8 @@ export default function NPCRelationshipsPanel({ isOpen, onClose }) {
               return (
                 <div
                   key={npc.id}
-                  className="bg-darwin-light border border-amber-300 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow"
+                  onClick={() => onNPCClick && onNPCClick(npc.id)}
+                  className="bg-darwin-light border border-amber-300 rounded-lg p-4 shadow-sm hover:shadow-lg transition-all cursor-pointer hover:border-amber-400 hover:scale-[1.02]"
                 >
                   {/* NPC Header */}
                   <div className="flex items-start mb-3">
