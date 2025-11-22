@@ -56,7 +56,7 @@ export default function PlayerModal({ isOpen, onClose }) {
             <div className="flex-shrink-0">
               <div className="w-32 h-32 rounded-xl overflow-hidden border-4 border-amber-400 shadow-lg bg-gradient-to-br from-amber-100 to-amber-200">
                 <img
-                  src="/darwin-portrait.jpg"
+                  src="/portraits/darwin.jpg"
                   alt="Charles Darwin"
                   className="w-full h-full object-cover"
                   onError={(e) => {

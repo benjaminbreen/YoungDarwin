@@ -52,7 +52,7 @@ export default function NPCModal({ npcId, isOpen, onClose }) {
             <div className="flex-shrink-0">
               <div className="w-32 h-32 rounded-xl overflow-hidden border-4 border-amber-300 shadow-lg bg-gradient-to-br from-amber-100 to-amber-200">
                 <img
-                  src={npc.portrait || '/default-npc.jpg'}
+                  src={`/portraits/${npc.id}.jpg`}
                   alt={npc.name}
                   className="w-full h-full object-cover"
                   onError={(e) => {

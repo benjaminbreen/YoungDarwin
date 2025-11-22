@@ -93,8 +93,17 @@ const getEmojiByTaxonomy = (taxonomy) => {
 
 // Helper function to determine if specimen is "easy" to collect
 const isEasyToCollect = (specimen) => {
-  // Easy specimens have danger <= 3 (rocks, common plants, small creatures)
-  return specimen.danger !== undefined && specimen.danger <= 3;
+  // Minerals and plants are always easy to collect
+  if (specimen.ontology === 'Mineral' || specimen.ontology === 'Plant') {
+    return true;
+  }
+
+  // Only very easy animals (danger <= 2) - like small insects, shells, small crabs
+  if (specimen.ontology === 'Animal' && specimen.danger !== undefined && specimen.danger <= 2) {
+    return true;
+  }
+
+  return false;
 };
 
 const [filteredNearbyIds, setFilteredNearbyIds] = useState([]);
@@ -519,7 +528,7 @@ useEffect(() => {
       {isEasy ? (
         <>
           <button
-            onClick={() => onOpenCollectionPopup(specimen)}
+            onClick={() => onOpenCollectionPopup(specimen.id)}
             className="flex-1 text-[10px] px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded transition-colors font-medium"
             aria-label={`Quick collect ${specimen.name}`}
           >
