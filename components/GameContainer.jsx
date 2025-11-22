@@ -1997,7 +1997,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
         <div className="lg:col-span-3 flex flex-col gap-4">
           <Portrait
             character={currentNPC || 'darwin'}
-            status={darwinMood}
+            mood={darwinMood}
             fatigue={fatigue}
             onPortraitClick={(npcId, type) => {
               if (type === 'npc') {
@@ -2006,7 +2006,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
               } else {
                 setShowPlayerModal(true);
               }
-            }} 
+            }}
             onSwitchPOV={handleSwitchPOV}
           />
 
