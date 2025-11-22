@@ -3,11 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 // About Page content component
 const AboutPage = () => {
   return (
-  <div className="darwin-panel h-full  p-6 bg-amber-50 rounded-lg border border-amber-300 shadow-lg">
-      <h2 className="text-3xl font-bold text-amber-900 font-serif p-2 mb-4 border-b border-amber-300 pb-3 text-center">
+  <div className="darwin-panel h-full p-6 bg-gradient-to-br from-amber-50 via-white to-amber-50/50 rounded-xl border border-amber-300 shadow-2xl">
+      <h2 className="text-4xl font-bold text-amber-900 font-serif p-2 mb-6 border-b-2 border-amber-400 pb-4 text-center bg-gradient-to-r from-transparent via-amber-50 to-transparent">
         About Young Darwin
       </h2>
-      <section className="mb-8 bg-amber-100/50 p-6 rounded-lg border border-amber-200">
+      <section className="mb-8 bg-gradient-to-br from-amber-100/60 to-amber-50/40 p-6 rounded-xl border border-amber-200 shadow-sm">
         <p className="text-gray-700 font-serif mb-4 leading-relaxed text-lg">
           <b><em>Young Darwin</em> is an educational simulation game set in 1835, on Isla Floreana (Charles Island) in the Galápagos Islands. This is a very early prototype version. </b> Players take on the role of a young Charles Darwin, exploring diverse habitats, collecting and analyzing specimens, and reflecting in their journals about the species and other artifacts they discover.
         </p>
@@ -20,21 +20,21 @@ const AboutPage = () => {
         </p>
 
       </section>
-      <section className="mb-8 p-1">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">Why This Game?</h3>
-        <p className="text-gray-700 font-serif mb-4 leading-relaxed px-2">
+      <section className="mb-8 p-5 bg-white/60 rounded-xl border border-amber-100 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">Why This Game?</h3>
+        <p className="text-gray-700 font-serif mb-4 leading-relaxed">
           This game was created by <a href="https://benjaminpbreen.com" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">Benjamin Breen</a>, Associate Professor of History at <a href="https://ucsc.edu" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">UC Santa Cruz</a>, in association with Professor of Linguistics Pranav Anand and Associate Professor of Literature Zac Zimmer. It was mostly coded by Claude Sonnet 3.7. <em>Young Darwin</em> emerged from experiments with using AI-driven simulations to enrich historical pedagogy. By placing students directly in Darwin's shoes, the game encourages them to engage deeply with primary sources, critique generative AI outputs, and develop "experiential historical reasoning" abilities by asking them to think through what they would do if they were in the shoes of historical figures, then respond to the results dynamically, in real time.
         </p>
       </section>
-      <section className="mb-8 bg-amber-100/20 p-5 rounded-lg border border-amber-100">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">The HistoryLens Framework</h3>
-        <p className="text-gray-700 font-serif mb-3 leading-relaxed px-2">
+      <section className="mb-8 bg-gradient-to-r from-amber-100/30 to-amber-50/20 p-6 rounded-xl border border-amber-200 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">The HistoryLens Framework</h3>
+        <p className="text-gray-700 font-serif mb-3 leading-relaxed">
           This game is part of the larger <a href="https://historylens.org" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">HistoryLens framework</a>, which uses generative AI to simulate historical environments, enabling dynamic, text-based interactions informed by rigorous historical research. HistoryLens scenarios empower students to practice critical thinking by directly interacting with complex historical issues and sources.
         </p>
       </section>
-      <section className="mb-8">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">The THINK Project at UCSC</h3>
-        <p className="text-gray-700 font-serif mb-3 leading-relaxed px-2">
+      <section className="mb-8 p-6 bg-white/60 rounded-xl border border-amber-100 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">The THINK Project at UCSC</h3>
+        <p className="text-gray-700 font-serif mb-3 leading-relaxed">
           <em>Young Darwin</em> is an early prototype of a platform and format that will be developed further as part of the THINK (Technology + Humanities Integrated Knowledge) initiative at <a href="https://ucsc.edu" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">UC Santa Cruz</a>, which was funded by the <a href="https://www.neh.gov/" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">National Endowment for the Humanities</a> (NEH) via a Humanities Initiatives grant in February, 2025. THINK explores innovative ways to integrate AI and humanistic methodologies in higher education, emphasizing experiential learning and interdisciplinary collaboration.
         </p>
       </section>
@@ -50,12 +50,12 @@ const AboutPage = () => {
 // Learn More component with enhanced reading suggestions
 const LearnMore = () => {
   return (
-    <div className="darwin-panel  max-w-3xl mx-auto p-6 bg-amber-50 rounded-lg border border-amber-300 shadow-lg overflow-y-auto">
-      <h2 className="text-3xl font-bold text-amber-900 font-serif mb-4 border-b border-amber-300 pb-3 text-center">
+    <div className="darwin-panel max-w-3xl mx-auto p-6 bg-gradient-to-br from-amber-50 via-white to-amber-50/50 rounded-xl border border-amber-300 shadow-2xl overflow-y-auto">
+      <h2 className="text-4xl font-bold text-amber-900 font-serif mb-6 border-b-2 border-amber-400 pb-4 text-center bg-gradient-to-r from-transparent via-amber-50 to-transparent">
         Learn More
       </h2>
-      <section className="mb-8 p-5 bg-amber-100/30 rounded-lg border border-amber-200">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">Darwin's Voyage</h3>
+      <section className="mb-8 p-6 bg-gradient-to-br from-amber-100/50 to-amber-50/30 rounded-xl border border-amber-200 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">Darwin's Voyage</h3>
         <p className="text-gray-700 font-serif mb-4 leading-relaxed">
           In 1835, Charles Darwin visited the Galápagos Islands as the naturalist aboard HMS Beagle. His observations of the unique wildlife, particularly the variations between islands, would later influence his theory of evolution by natural selection.
         </p>
@@ -63,12 +63,12 @@ const LearnMore = () => {
           The variety of finches, mockingbirds, and tortoises on different islands prompted Darwin to question the immutability of species, though he didn't immediately recognize the significance of these variations during his five-week stay.
         </p>
       </section>
-      
+
       <section className="mb-8">
-        <h3 className="text-xl font-medium text-amber-800 mb-4 px-2">Further Reading</h3>
+        <h3 className="text-2xl font-semibold text-amber-800 mb-5 border-l-4 border-amber-400 pl-3">Further Reading</h3>
         <div className="space-y-5">
-          <div className="bg-white rounded-lg p-5 border border-amber-200 shadow-sm hover:shadow-md transition-shadow">
-            <h4 className="font-bold text-amber-900 mb-2">On Darwin and Natural History</h4>
+          <div className="bg-gradient-to-br from-white to-amber-50/20 rounded-xl p-6 border border-amber-200 shadow-md hover:shadow-lg transition-all hover:border-amber-300">
+            <h4 className="font-bold text-amber-900 mb-3 text-lg border-b border-amber-200 pb-2">On Darwin and Natural History</h4>
             <ul className="list-disc pl-6 space-y-3 text-gray-700 font-serif mt-3">
               <li>Browne, Janet. <em>Charles Darwin: Voyaging</em> (Princeton University Press, 1995) - Definitive biography covering Darwin's early life and the Beagle voyage.</li>
               <li>Sulloway, Frank J. "Darwin's Conversion: The Beagle Voyage and Its Aftermath," <em>Journal of the History of Biology</em> 15.3 (1982): 325-396.</li>
@@ -76,9 +76,9 @@ const LearnMore = () => {
               <li>Browne, Janet. "Darwin in Caricature: A Study in the Popularization and Dissemination of Evolution," <em>Proceedings of the American Philosophical Society</em> 145.4 (2001): 496-509.</li>
             </ul>
           </div>
-          
-          <div className="bg-white rounded-lg p-5 border border-amber-200 shadow-sm hover:shadow-md transition-shadow">
-            <h4 className="font-bold text-amber-900 mb-2">19th Century Scientific Collecting and Practice</h4>
+
+          <div className="bg-gradient-to-br from-white to-amber-50/20 rounded-xl p-6 border border-amber-200 shadow-md hover:shadow-lg transition-all hover:border-amber-300">
+            <h4 className="font-bold text-amber-900 mb-3 text-lg border-b border-amber-200 pb-2">19th Century Scientific Collecting and Practice</h4>
             <ul className="list-disc pl-6 space-y-3 text-gray-700 font-serif mt-3">
               <li>Endersby, Jim. <em>Imperial Nature: Joseph Hooker and the Practices of Victorian Science</em> (University of Chicago Press, 2008).</li>
               <li>Secord, James A. <em>Victorian Sensation: The Extraordinary Publication, Reception, and Secret Authorship of Vestiges of the Natural History of Creation</em> (University of Chicago Press, 2000).</li>
@@ -86,9 +86,9 @@ const LearnMore = () => {
               <li>Larsen, Anne. "Equipment for the Field," in <em>Cultures of Natural History</em>, eds. Jardine, Secord, and Spary (Cambridge University Press, 1996): 358-377.</li>
             </ul>
           </div>
-          
-          <div className="bg-white rounded-lg p-5 border border-amber-200 shadow-sm hover:shadow-md transition-shadow">
-            <h4 className="font-bold text-amber-900 mb-2">Colonial Science and Exploration</h4>
+
+          <div className="bg-gradient-to-br from-white to-amber-50/20 rounded-xl p-6 border border-amber-200 shadow-md hover:shadow-lg transition-all hover:border-amber-300">
+            <h4 className="font-bold text-amber-900 mb-3 text-lg border-b border-amber-200 pb-2">Colonial Science and Exploration</h4>
             <ul className="list-disc pl-6 space-y-3 text-gray-700 font-serif mt-3">
               <li>Sivasundaram, Sujit. <em>Nature and the Godly Empire: Science and Evangelical Mission in the Pacific, 1795-1850</em> (Cambridge University Press, 2005).</li>
               <li>Safier, Neil. <em>Measuring the New World: Enlightenment Science and South America</em> (University of Chicago Press, 2008).</li>
@@ -98,9 +98,9 @@ const LearnMore = () => {
           </div>
         </div>
       </section>
-      
-      <section className="mb-8 bg-amber-100/30 p-5 rounded-lg border border-amber-200">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">Historical Resources</h3>
+
+      <section className="mb-8 bg-gradient-to-br from-amber-100/40 to-amber-50/30 p-6 rounded-xl border border-amber-200 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">Historical Resources</h3>
         <ul className="list-disc pl-6 space-y-3 text-gray-700 font-serif">
           <li><a href="https://darwin-online.org.uk/" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">Darwin Online</a> - Complete works, manuscripts, and primary sources</li>
           <li><a href="https://www.darwinproject.ac.uk/" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">Darwin Correspondence Project</a> - Letters and correspondence</li>
@@ -108,9 +108,9 @@ const LearnMore = () => {
           <li><a href="https://www.nhm.ac.uk/our-science/departments-and-staff/library-and-archives/digital-collections/darwin-manuscripts.html" target="_blank" rel="noopener noreferrer" className="text-amber-700 hover:underline font-medium">Natural History Museum Darwin Manuscripts</a> - Digital collection of Darwin's scientific notes</li>
         </ul>
       </section>
-      
-      <section className="mb-6 p-5 rounded-lg border border-amber-100">
-        <h3 className="text-xl font-medium text-amber-800 mb-3">Educational Applications</h3>
+
+      <section className="mb-6 p-6 bg-white/60 rounded-xl border border-amber-200 shadow-sm">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-4 border-l-4 border-amber-400 pl-3">Educational Applications</h3>
         <p className="text-gray-700 font-serif mb-4 leading-relaxed">
           This simulation can be used as an engaging supplement to traditional biology and history curricula, encouraging students to:
         </p>
@@ -187,8 +187,8 @@ const Share = () => {
   };
 
   return (
-    <div className="darwin-panel max-w-3xl mx-auto p-6 bg-amber-50 rounded-lg border border-amber-300 shadow-lg overflow-y-auto">
-      <h2 className="text-3xl font-bold text-amber-900 font-serif mb-5 border-b border-amber-300 pb-3 text-center">
+    <div className="darwin-panel max-w-3xl mx-auto p-6 bg-gradient-to-br from-amber-50 via-white to-amber-50/50 rounded-xl border border-amber-300 shadow-2xl overflow-y-auto">
+      <h2 className="text-4xl font-bold text-amber-900 font-serif mb-6 border-b-2 border-amber-400 pb-4 text-center bg-gradient-to-r from-transparent via-amber-50 to-transparent">
         Share Young Darwin
       </h2>
       <section className="mb-6 px-3">
@@ -196,18 +196,18 @@ const Share = () => {
           Thank you for your interest in sharing this educational simulation! You can share Young Darwin with your students, colleagues, or friends using the following methods:
         </p>
       </section>
-      
+
       <section className="mb-8 px-3">
-        <h3 className="text-xl font-medium text-amber-800 mb-4">Share via Link</h3>
-        <div className="flex items-center bg-white rounded-lg border border-amber-200 p-3 shadow-sm">
-          <input 
-            type="text" 
+        <h3 className="text-2xl font-semibold text-amber-800 mb-5 border-l-4 border-amber-400 pl-3">Share via Link</h3>
+        <div className="flex items-center bg-gradient-to-r from-white to-amber-50/30 rounded-xl border border-amber-200 p-4 shadow-md">
+          <input
+            type="text"
             value={gameUrl}
-            readOnly 
+            readOnly
             className="flex-1 bg-transparent border-none focus:outline-none text-gray-700 p-2 font-medium"
           />
-          <button 
-            className={`ml-2 px-5 py-3 rounded-lg transition-colors relative ${
+          <button
+            className={`ml-2 px-6 py-3 rounded-lg transition-all relative shadow-md hover:shadow-lg ${
               copySuccess ? 'bg-green-600 text-white font-medium' : 'bg-amber-600 hover:bg-amber-700 text-white font-medium'
             }`}
             onClick={handleCopyLink}
@@ -216,9 +216,9 @@ const Share = () => {
           </button>
         </div>
       </section>
-      
+
       <section className="mb-10 px-3">
-        <h3 className="text-xl font-medium text-amber-800 mb-4">Share on Social Media</h3>
+        <h3 className="text-2xl font-semibold text-amber-800 mb-5 border-l-4 border-amber-400 pl-3">Share on Social Media</h3>
         <div className="space-y-4 sm:space-y-0 sm:flex sm:flex-wrap sm:gap-4 justify-center">
           <button 
             onClick={() => shareOnSocial('facebook')}
@@ -263,9 +263,9 @@ const Share = () => {
           )}
         </div>
       </section>
-      
-      <section className="bg-amber-100/50 p-6 rounded-lg border border-amber-200 mb-6">
-        <h3 className="text-xl font-medium text-amber-800 mb-4">For Educators</h3>
+
+      <section className="bg-gradient-to-br from-amber-100/60 to-amber-50/40 p-6 rounded-xl border border-amber-200 shadow-md mb-6">
+        <h3 className="text-2xl font-semibold text-amber-800 mb-5 border-l-4 border-amber-400 pl-3">For Educators</h3>
         <p className="text-gray-700 font-serif mb-4 leading-relaxed">
           If you're an educator interested in using Young Darwin in your classroom, we plan to (eventually!) offer additional resources including:
         </p>
@@ -500,9 +500,10 @@ const HamburgerMenu = () => {
       onClick={(e) => e.stopPropagation()} // stop clicks from closing
     >
       {/* Close button */}
-      <button 
-        className="absolute top-2 right-2 ..."
+      <button
+        className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-amber-100 hover:bg-amber-200 text-amber-800 text-3xl font-bold transition-all hover:scale-110 shadow-md hover:shadow-lg border border-amber-300"
         onClick={() => handleCloseContent()}
+        aria-label="Close"
       >
         &times;
       </button>
