@@ -1,11 +1,12 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import useGameStore from '../hooks/useGameStore';
+import { npcs } from '../data/npcs';
 
 export default function NPCModal({ npcId, isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
   const modalRef = useRef(null);
-  const { npcRelationships, getRelationship, npcs } = useGameStore();
+  const { getRelationship } = useGameStore();
 
   // Find the NPC data
   const npc = npcs.find(n => n.id === npcId);
