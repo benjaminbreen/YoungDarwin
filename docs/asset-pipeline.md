@@ -6,7 +6,7 @@ This project uses procedural placeholder models until optimized GLBs are availab
 
 ```text
 assets-src/
-  raw/              # downloaded/generated GLB, FBX, OBJ files
+  raw/              # downloaded/generated GLB, FBX, OBJ files kept local by default
   references/       # concept images, multiview sheets, prompts
   processed/        # optional Blender intermediate exports
 public/assets/models/
@@ -20,6 +20,23 @@ public/assets/models/
   beagle.glb
 three-game/modelAssets.js
 ```
+
+## Git Policy
+
+Runtime assets required by the current 3D route should be committed through Git LFS. Raw asset sources are local/archive material by default and are ignored unless intentionally promoted.
+
+Use `public/assets/models/` for runtime-ready files only: optimized GLBs and the small `.gltf` sidecar sets that the game loads directly. Do not leave source ZIPs, raw FBXs/OBJs, or extracted texture dumps in `public`.
+
+Use `assets-src/` for raw source material, conversion reports, Blender inputs, and provider downloads. These files can be large and duplicated across formats, so they should be force-added only when they are canonical source material needed to reproduce a runtime asset.
+
+To promote a raw source asset:
+
+```bash
+git add -f assets-src/path/to/source-file.fbx
+git add -f assets-src/path/to/conversion-report.json
+```
+
+Then add a short note explaining which runtime asset it rebuilds and why this source is canonical.
 
 ## Environment Variables
 

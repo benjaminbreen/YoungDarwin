@@ -30,6 +30,43 @@ desktop.ini
 /darwin_meshy.glb
 *.pem
 
+# local/raw 3D asset source dumps
+# Runtime assets required by the game live in public/assets/models and are
+# tracked intentionally, usually through Git LFS. Raw import/source material is
+# kept local unless explicitly promoted with git add -f and a manifest note.
+/assets-src/**
+!/assets-src/
+!/assets-src/.gitkeep
+!/assets-src/raw/
+!/assets-src/raw/.gitkeep
+!/assets-src/processed/
+!/assets-src/processed/.gitkeep
+!/assets-src/references/
+!/assets-src/references/.gitkeep
+
+# public should contain runtime-ready assets only; ignore source/import leftovers
+/public/assets/models/**/source/
+/public/assets/models/**/*.zip
+/public/assets/models/**/*.rar
+/public/assets/models/**/*.fbx
+/public/assets/models/**/*.FBX
+/public/assets/models/**/*.obj
+/public/assets/models/**/*.OBJ
+/public/assets/models/animals/*.glb
+/public/assets/models/animals/*/textures/
+/public/assets/models/animals/alt iguana/
+/public/assets/models/animals/iguana/
+/public/assets/models/animals/hawk/
+/public/assets/models/animals/lizard/
+/public/assets/models/animals/red-tailed-hawk-in-flight/
+/public/assets/models/animals/seal/
+/public/assets/models/animals/snake/
+/public/assets/models/livestock/
+/public/assets/models/nature/*.glb
+/public/assets/models/nature/*/source/
+/public/assets/models/nature/*/textures/
+/public/assets/models/nature/source/*
+
 # debug
 npm-debug.log*
 yarn-debug.log*
