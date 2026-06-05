@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import SafeFormattedText from './SafeFormattedText';
 
 export default function MemoryModal({ 
   isOpen, 
@@ -36,9 +37,9 @@ export default function MemoryModal({
         
         <div className="p-6">
           {memoryContent ? (
-            <div 
+            <SafeFormattedText
+              text={memoryContent}
               className="font-serif leading-relaxed text-gray-800 italic text-2xl"
-              dangerouslySetInnerHTML={{ __html: memoryContent }}
             />
           ) : (
             <div className="space-y-4">

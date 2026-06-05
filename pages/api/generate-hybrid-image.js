@@ -1,9 +1,16 @@
 // pages/api/generate-hybrid-image.js
 import { OpenAI } from 'openai';
+import {
+  beginLLMRequest,
+  estimateTokens,
+  finishLLMRequest,
+  getRequestIdentity,
+} from '../../utils/server/llmSafety';
 
 // Configuration constants
 const TIMEOUT_MS = 60000; // 60 seconds timeout (longer to allow for rate limits)
-const MAX_RETRIES = 3;    // Maximum number of retries for failed requests
+const MAX_RETRIES = Number(process.env.IMAGE_MAX_RETRIES || 1);
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'dall-e-2';
 
 // Track request timestamps to implement rate limiting
 let requestTimestamps = [];
@@ -15,6 +22,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let guard = null;
+
   try {
     const { hybridName, hybridDescription, parent1Name, parent2Name, hybridityMode } = req.body;
     
@@ -24,9 +33,6 @@ export default async function handler(req, res) {
         success: false 
       });
     }
-
-    
-console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
 
     // Check if OpenAI API key is configured
     const apiKey = process.env.OPENAI_API_KEY;
@@ -42,6 +48,51 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
     
     // Generate a stable cache key for this hybrid
     const cacheKey = `${hybridName}-${parent1Name || ''}-${parent2Name || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+    // Craft a simplified prompt for faster generation
+    let prompt = `A wordless, simple, realistic, full color, detailed pixel art representation of ${hybridName}. No text.`;
+    
+    if (parent1Name && parent2Name) {
+      prompt += `, a hybrid of ${parent1Name} and ${parent2Name}`;
+    }
+    
+    // Much simpler style specification for faster generation
+    prompt += `. Scientific illustration style, minimal details, no text.`;
+    // Create a placeholder URL as fallback
+    const encodedName = encodeURIComponent(hybridName);
+    const placeholderUrl = `https://via.placeholder.com/256x256/8B5A2B/FFFFFF?text=${encodedName}`;
+
+    const identity = getRequestIdentity({
+      req,
+      route: '/api/generate-hybrid-image',
+      prompt,
+      idempotencyKey: req.body?.idempotencyKey || cacheKey,
+    });
+    guard = beginLLMRequest({
+      route: '/api/generate-hybrid-image',
+      provider: 'openai-image',
+      model: IMAGE_MODEL,
+      sessionId: identity.sessionId,
+      idempotencyKey: identity.idempotencyKey,
+      prompt,
+      background: true,
+      estimatedInputTokens: estimateTokens(prompt),
+    });
+
+    if (!guard.allowed) {
+      if (guard.cached && guard.cachedResponse) {
+        return res.status(200).json(guard.cachedResponse);
+      }
+      return res.status(200).json({
+        success: true,
+        imageUrl: placeholderUrl,
+        fallback: true,
+        blocked: true,
+        reason: guard.reason,
+        message: 'Image generation skipped by the safety guard; using fallback art.',
+        cacheKey,
+      });
+    }
     
     // Check if we need to wait for rate limiting
     await enforceRateLimit();
@@ -52,22 +103,6 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
       timeout: TIMEOUT_MS,
     });
     
-    // Craft a simplified prompt for faster generation
-    let prompt = `A wordless, simple, realistic, full color, detailed pixel art representation of ${hybridName}. No text.`;
-    
-    if (parent1Name && parent2Name) {
-      prompt += `, a hybrid of ${parent1Name} and ${parent2Name}`;
-    }
-    
-    // Much simpler style specification for faster generation
-    prompt += `. Scientific illustration style, minimal details, no text.`;
-    
-    console.log(`[Image Generator] Request for: ${hybridName}, using DALL-E 2 model`);
-    
-    // Create a placeholder URL as fallback
-    const encodedName = encodeURIComponent(hybridName);
-    const placeholderUrl = `https://via.placeholder.com/256x256/8B5A2B/FFFFFF?text=${encodedName}`;
-    
     // Attempt generation with retries
     let imageUrl = null;
     let error = null;
@@ -77,12 +112,11 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
     while (attempt < MAX_RETRIES && !success) {
       attempt++;
       try {
-        console.log(`[Image Generator] Attempt ${attempt} for ${hybridName}`);
         // Record the request timestamp for rate limiting
         recordRequest();
         
         const response = await openai.images.generate({
-          model: "dall-e-2", // Use DALL-E 2 for faster generation
+          model: IMAGE_MODEL,
           prompt: prompt,
           n: 1,
           size: "256x256", // Smaller size for faster generation
@@ -92,8 +126,6 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
         // Get the image URL from the response
         imageUrl = response.data[0].url;
         success = true;
-        
-        console.log(`[Image Generator] Success for ${hybridName} on attempt ${attempt}`);
       } catch (err) {
         error = err;
         console.error(`[Image Generator] Error on attempt ${attempt} for ${hybridName}:`, err.message);
@@ -101,7 +133,6 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
         // If it's a rate limit error, wait longer before retrying
         if (err.message.includes('rate limit') || err.status === 429) {
           const waitTime = 15000 * attempt; // 15s, 30s, 45s for consecutive rate limit errors
-          console.log(`[Image Generator] Rate limit hit, waiting ${waitTime/1000}s before retry`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else {
           // For other errors, wait a shorter time
@@ -112,13 +143,20 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
     
     // Return final result (success or fallback)
     if (success) {
-      return res.status(200).json({
+      const responseBody = {
         success: true,
         imageUrl: imageUrl,
         prompt: prompt,
-        model: "dall-e-2",
+        model: IMAGE_MODEL,
         cacheKey: cacheKey
+      };
+      finishLLMRequest({
+        key: guard.key,
+        entryId: guard.entryId,
+        response: responseBody,
+        estimatedOutputTokens: 0,
       });
+      return res.status(200).json(responseBody);
     } else {
       // Provide detailed error information with the fallback
       const errorInfo = {
@@ -127,21 +165,28 @@ console.log(`Hybrid description: ${hybridDescription}, Mode: ${hybridityMode}`);
         type: error ? (error.type || 'unknown') : 'unknown',
         attempts: attempt
       };
-      
-      console.log(`[Image Generator] Falling back to placeholder for ${hybridName} after ${attempt} attempts`);
-      
       // Return a successful response with fallback image
-      return res.status(200).json({
+      const responseBody = {
         success: true,
         imageUrl: placeholderUrl,
         fallback: true,
         error: errorInfo,
         message: `Using fallback image after ${attempt} attempts - ${errorInfo.message}`,
         cacheKey: cacheKey
+      };
+      finishLLMRequest({
+        key: guard.key,
+        entryId: guard.entryId,
+        response: responseBody,
+        estimatedOutputTokens: 0,
       });
+      return res.status(200).json(responseBody);
     }
   } catch (error) {
     console.error("[Image Generator] API error:", error);
+    if (guard?.allowed) {
+      finishLLMRequest({ key: guard.key, entryId: guard.entryId, error });
+    }
     
     // Create a placeholder image for any error case
     const fallbackName = encodeURIComponent(req.body.hybridName || 'Hybrid Species');
@@ -176,7 +221,6 @@ async function enforceRateLimit() {
     const waitTime = RATE_WINDOW - (now - oldestTimestamp);
     
     if (waitTime > 0) {
-      console.log(`[Rate Limiter] Waiting ${waitTime}ms due to rate limits`);
       // Wait until we're under the rate limit again
       await new Promise(resolve => setTimeout(resolve, waitTime + 200)); // Add 200ms buffer
     }

@@ -3,8 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import useGameStore from '../hooks/useGameStore';
 import { getCellByCoordinates } from '../utils/locationSystem';
-import Image from 'next/image';
 import HybridSpecimenImage from './HybridSpecimenImage';
+import { buildReadinessRecommendations, evaluateExpeditionReadiness } from '../utils/expeditionSystems';
+import { buildLLMRequestMeta } from '../utils/llmClient';
+import SafeFormattedText from './SafeFormattedText';
 
 export default function EndGame() {
   // Game state
@@ -15,7 +17,11 @@ export default function EndGame() {
     journal, 
     currentLocationId,
     specimenList,
-    formatGameTime
+    formatGameTime,
+    objectives,
+    fatigue,
+    scientificScore,
+    traps
   } = useGameStore();
 
   // Local state
@@ -27,6 +33,23 @@ export default function EndGame() {
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [gameStats, setGameStats] = useState(null);
   const [buttonHover, setButtonHover] = useState(false);
+  const expeditionReadiness = evaluateExpeditionReadiness({
+    inventory,
+    journal,
+    objectives,
+    fatigue,
+    currentLocationId,
+    traps,
+  });
+  const expeditionRecommendations = buildReadinessRecommendations({
+    inventory,
+    journal,
+    objectives,
+    fatigue,
+    currentLocationId,
+    traps,
+    readiness: expeditionReadiness,
+  });
   
   // Calculate stats when showing end game screen
   useEffect(() => {
@@ -107,6 +130,23 @@ export default function EndGame() {
       totalValue += specimen.scientificValue || 0;
     });
     const avgScientificValue = specimensCollected > 0 ? (totalValue / specimensCollected).toFixed(1) : 0;
+    const readiness = evaluateExpeditionReadiness({
+      inventory,
+      journal,
+      objectives,
+      fatigue,
+      currentLocationId,
+      traps,
+    });
+    const recommendations = buildReadinessRecommendations({
+      inventory,
+      journal,
+      objectives,
+      fatigue,
+      currentLocationId,
+      traps,
+      readiness,
+    });
     
     // Calculate time played
     const gameDays = daysPassed;
@@ -132,6 +172,9 @@ export default function EndGame() {
       },
       fieldNotes: fieldNotes,
       scientificValue: avgScientificValue,
+      scientificScore,
+      readiness,
+      recommendations,
       timePlayed: {
         days: gameDays,
         hours: gameHours,
@@ -152,6 +195,8 @@ export default function EndGame() {
           name: specimen.name,
           latin: specimen.latin,
           scientificValue: specimen.scientificValue,
+          collectionQuality: specimen.collectionQuality,
+          collectionMethod: specimen.collectionMethod,
           isHybrid: specimen.isHybrid || false
         })),
         fieldNotes: journal.map(entry => ({
@@ -162,17 +207,31 @@ export default function EndGame() {
         locations: gameStats.visitedLocations,
         npcs: gameStats.npcsEncountered,
         toolUsage: gameStats.toolUsage,
+        objectives,
+        readiness: gameStats.readiness,
+        scientificScore: gameStats.scientificScore,
         daysPassed: daysPassed,
         events: eventHistory.length
       };
+      const requestMeta = buildLLMRequestMeta({
+        route: '/api/end-game-assessment',
+        kind: 'end-game-assessment',
+        gameTime: daysPassed,
+        locationId: currentLocationId,
+        prompt: JSON.stringify(assessmentData),
+      });
       
       // Call the API endpoint
       const response = await fetch('/api/end-game-assessment', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...requestMeta.headers,
         },
-        body: JSON.stringify(assessmentData),
+        body: JSON.stringify({
+          ...assessmentData,
+          idempotencyKey: requestMeta.idempotencyKey,
+        }),
       });
       
       if (!response.ok) {
@@ -197,15 +256,24 @@ export default function EndGame() {
     setIsLoadingAssessment(true);
     
     try {
+      const requestMeta = buildLLMRequestMeta({
+        route: '/api/end-game-assessment',
+        kind: 'end-game-response',
+        gameTime: daysPassed,
+        locationId: currentLocationId,
+        prompt: `${hensloweDialog}\n${playerResponse}`,
+      });
       const response = await fetch('/api/end-game-assessment', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...requestMeta.headers,
         },
         body: JSON.stringify({
           previousDialog: hensloweDialog,
           playerResponse: playerResponse,
-          responseMode: true
+          responseMode: true,
+          idempotencyKey: requestMeta.idempotencyKey,
         }),
       });
       
@@ -252,8 +320,12 @@ export default function EndGame() {
 
   // Share expedition results
   const shareResults = () => {
-    // Implementation for sharing (could be to social media, etc.)
-    alert("This feature would share your expedition results!");
+    const text = `Young Darwin expedition: ${expeditionReadiness.verdict}, ${expeditionReadiness.readinessScore}/100 readiness, ${inventory.length} specimens, ${journal.length} field notes, ${expeditionReadiness.completedObjectives}/${expeditionReadiness.totalObjectives} objectives.`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      return;
+    }
+    window.prompt('Expedition summary', text);
   };
 
   const getSpecimenIcon = (specimen) => {
@@ -317,7 +389,10 @@ export default function EndGame() {
           {/* Button text with icon */}
           <span className="relative z-10 flex items-center gap-2">
             
-            End the game
+            Conclude expedition
+            <span className="ml-1 text-xs font-normal opacity-90">
+              {expeditionReadiness.readinessScore}/100
+            </span>
           </span>
         </button>
       </div>
@@ -334,8 +409,21 @@ export default function EndGame() {
               </div>
               <h3 className="text-xl font-bold text-amber-900 mb-4 font-serif">Conclude Your Expedition?</h3>
               <p className="text-amber-800 mb-6">
-                Are you certain you wish to conclude your Galápagos expedition? This will end your current exploration and provide a final assessment of your scientific discoveries.
+                Your current readiness is {expeditionReadiness.verdict.toLowerCase()} ({expeditionReadiness.readinessScore}/100). You can conclude now, but Professor Henslow will judge gaps in evidence, specimen labels, safety, and collection method.
               </p>
+              {expeditionReadiness.gaps.length > 0 && (
+                <div className="mb-5 rounded-md border border-amber-300 bg-white/70 p-3 text-left text-sm text-amber-900">
+                  <div className="font-semibold mb-2">Recommended before concluding</div>
+                  <ul className="space-y-2">
+                    {expeditionRecommendations.slice(0, 3).map(item => (
+                      <li key={item.id}>
+                        <div className="font-medium">{item.label}</div>
+                        <div className="text-xs text-amber-800">{item.detail}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="flex justify-center gap-4">
                 <button
                   onClick={returnToGame}
@@ -372,7 +460,7 @@ export default function EndGame() {
                  After nearly five years at sea, Darwin reached England in October, 1836...
                 </h2>
                 <p className="text-amber-200 drop-shadow-xl text-lg italic mt-2" >
-                 You spent {daysPassed} days investigating Charles Island (Isla Floreana). How will your discoveries there be received by Darwin's mentor, John Stepvens Henslow?
+                 You spent {daysPassed} days investigating Charles Island (Isla Floreana). How will your discoveries there be received by Darwin's mentor, John Stevens Henslow?
                 </p>
               </div>
             </div>
@@ -382,7 +470,13 @@ export default function EndGame() {
               {gameStats ? (
                 <div className="space-y-8">
                   {/* Top stats row */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-amber-100/50 p-4 rounded-lg border border-amber-200 text-center">
+                      <div className="text-4xl font-bold text-amber-800 mb-1">{gameStats.readiness.readinessScore}</div>
+                      <div className="text-sm text-amber-700">Readiness</div>
+                      <div className="text-xs text-amber-600 mt-1">{gameStats.readiness.verdict}</div>
+                    </div>
+
                     <div className="bg-amber-100/50 p-4 rounded-lg border border-amber-200 text-center">
                       <div className="text-4xl font-bold text-amber-800 mb-1">{gameStats.visitedLocations.count}</div>
                       <div className="text-sm text-amber-700">Locations Visited</div>
@@ -392,15 +486,31 @@ export default function EndGame() {
                     <div className="bg-amber-100/50 p-4 rounded-lg border border-amber-200 text-center">
                       <div className="text-4xl font-bold text-amber-800 mb-1">{gameStats.specimensCollected.count}</div>
                       <div className="text-sm text-amber-700">Specimens Collected</div>
-                      <div className="text-xs text-amber-600 mt-1">Avg. Value: {gameStats.scientificValue}/10</div>
+                      <div className="text-xs text-amber-600 mt-1">Quality: {gameStats.readiness.quality ?? '-'}/100</div>
                     </div>
                     
                     <div className="bg-amber-100/50 p-4 rounded-lg border border-amber-200 text-center">
-                      <div className="text-4xl font-bold text-amber-800 mb-1">{gameStats.npcsEncountered.count}</div>
-                      <div className="text-sm text-amber-700">People Encountered</div>
-                      <div className="text-xs text-amber-600 mt-1">of {gameStats.npcsEncountered.total}</div>
+                      <div className="text-4xl font-bold text-amber-800 mb-1">{gameStats.readiness.completedObjectives}</div>
+                      <div className="text-sm text-amber-700">Objectives Complete</div>
+                      <div className="text-xs text-amber-600 mt-1">of {gameStats.readiness.totalObjectives}</div>
                     </div>
                   </div>
+
+                  {gameStats.readiness.gaps.length > 0 && (
+                    <div className="bg-white rounded-lg border border-amber-200 shadow-md overflow-hidden">
+                      <div className="bg-amber-800 text-white p-3">
+                        <h3 className="font-bold text-white/80 text-xl">What To Fix Before Cambridge</h3>
+                      </div>
+                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {gameStats.recommendations.slice(0, 4).map(item => (
+                          <div key={item.id} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                            <div className="font-semibold">{item.label}</div>
+                            <div className="mt-1 text-xs text-amber-800">{item.detail}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Specimen collection */}
                   <div className="bg-white rounded-lg border border-amber-200 shadow-md overflow-hidden">
@@ -445,6 +555,11 @@ export default function EndGame() {
                             </div>
                             <div className="text-xs font-medium truncate w-full">{specimen.name}</div>
                             <div className="text-amber-600 text-[10px] italic truncate w-full">{specimen.latin}</div>
+                            {typeof specimen.collectionQuality === 'number' && (
+                              <div className="mt-1 text-[10px] text-amber-800">
+                                {specimen.collectionQuality}/100 · {specimen.collectionMethod || 'method unknown'}
+                              </div>
+                            )}
                           </div>
                         ))}
                         
@@ -518,7 +633,9 @@ export default function EndGame() {
                         explored {gameStats.visitedLocations.count} unique locations and 
                         documented {gameStats.specimensCollected.count} specimens. You encountered  
                         {gameStats.npcsEncountered.count} of the island's inhabitants and recorded 
-                        {gameStats.fieldNotes} detailed field notes.
+                        {gameStats.fieldNotes} detailed field notes. Your expedition readiness is 
+                        {` ${gameStats.readiness.readinessScore}/100`}, with a canonical score of 
+                        {` ${gameStats.scientificScore || 0}`}.
                       </p>
                       
                       <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
@@ -559,7 +676,7 @@ export default function EndGame() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                 </svg>
-                Share Expedition Results
+                Copy Expedition Summary
               </button>
             </div>
           </div>
@@ -651,13 +768,10 @@ export default function EndGame() {
                       <h3 className="font-medium text-amber-900 mb-4 border-b border-amber-100 pb-2">
                         A letter arrives from Professor Henslow a day after you proudly show your Charles Island collections to him...
                       </h3>
-                      <div 
+                      <SafeFormattedText
+                        text={hensloweDialog}
+                        emptyText="Assessment will appear here..."
                         className="prose prose-amber max-w-none font-serif"
-                        dangerouslySetInnerHTML={{ 
-                          __html: hensloweDialog 
-                            ? hensloweDialog.replace(/\n\n/g, '<br><br>').replace(/\*/g, '<span class="text-amber-500">*</span>') 
-                            : '<p class="italic text-gray-500">Assessment will appear here...</p>' 
-                        }}
                       />
                     </div>
                     

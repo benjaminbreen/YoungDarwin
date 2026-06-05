@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import useGameStore from '../hooks/useGameStore';
 
 export default function JournalView({ isOpen, onClose }) {
-  const [entries, setEntries] = useState([]);
   const [exportNotification, setExportNotification] = useState(false);
   const [canvasNotification, setCanvasNotification] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,18 +17,44 @@ export default function JournalView({ isOpen, onClose }) {
   const [showCanvasConfig, setShowCanvasConfig] = useState(false);
   
   // Get game state for context
-  const { formatGameTime, daysPassed } = useGameStore();
+  const {
+    daysPassed,
+    journal,
+    importJournalEntries,
+    deleteJournalEntry,
+  } = useGameStore();
+  const entries = useMemo(() => journal.map(entry => ({
+    ...entry,
+    specimenName: entry.specimenName || entry.specimenId || 'Field observation',
+    content: entry.content || entry.evidence || '',
+    gameDay: entry.gameDay ?? entry.day ?? 1,
+    gameTime: entry.gameTime || entry.time || '',
+    date: entry.date || (entry.day ? `Day ${entry.day}` : ''),
+  })), [journal]);
   
   useEffect(() => {
-    const loadEntries = () => {
+    const migrateLegacyEntries = () => {
+      if (localStorage.getItem('darwinJournalEntriesMigrated') === 'true') return;
       const storedEntries = localStorage.getItem('darwinJournalEntries');
-      if (storedEntries) {
-        setEntries(JSON.parse(storedEntries));
+      if (!storedEntries) return;
+
+      try {
+        const legacyEntries = JSON.parse(storedEntries);
+        if (Array.isArray(legacyEntries) && legacyEntries.length > 0) {
+          importJournalEntries(legacyEntries.map(entry => ({
+            ...entry,
+            type: entry.type || 'field_notes',
+            gameDay: entry.gameDay ?? entry.day ?? 1,
+            day: entry.day ?? entry.gameDay ?? 1,
+          })));
+          localStorage.setItem('darwinJournalEntriesMigrated', 'true');
+        }
+      } catch (error) {
+        console.warn('Failed to migrate legacy journal entries:', error);
       }
     };
     
-    // Load entries when component mounts or when the drawer is opened
-    loadEntries();
+    migrateLegacyEntries();
     
     // Load Canvas settings if any
     const savedCanvasUrl = localStorage.getItem('canvasLmsUrl');
@@ -37,14 +62,7 @@ export default function JournalView({ isOpen, onClose }) {
     
     if (savedCanvasUrl) setCanvasLmsUrl(savedCanvasUrl);
     if (savedCanvasToken) setCanvasToken(savedCanvasToken);
-    
-    // Also set up a listener for storage events to update in real-time
-    window.addEventListener('storage', loadEntries);
-    
-    return () => {
-      window.removeEventListener('storage', loadEntries);
-    };
-  }, [isOpen]);
+  }, [isOpen, importJournalEntries]);
   
   // Handle click outside to close full entry view
   useEffect(() => {
@@ -82,9 +100,7 @@ export default function JournalView({ isOpen, onClose }) {
   
   const handleDeleteEntry = (id, event) => {
     event.stopPropagation();
-    const updatedEntries = entries.filter(entry => entry.id !== id);
-    setEntries(updatedEntries);
-    localStorage.setItem('darwinJournalEntries', JSON.stringify(updatedEntries));
+    deleteJournalEntry(id);
     
     // If deleting the currently viewed entry, close the detail view
     if (showFullEntry && showFullEntry.id === id) {

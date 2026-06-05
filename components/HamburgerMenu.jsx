@@ -16,7 +16,7 @@ const AboutPage = () => {
         </p>
 
 <p className="text-gray-700 font-serif mb-3 leading-relaxed text-lg">
-          Players "win" by demonstrating authentic scientific observation and thoughtful reflection consistent with Darwin's own intellectual context in 1835. The primary LLM used here is GPT-4o-mini, though we intend to eventually provide the option of switching between different AI models.
+          Players "win" by demonstrating authentic scientific observation and thoughtful reflection consistent with Darwin's own intellectual context in 1835. The default text-generation model is GPT-5.4 Nano, with safeguards for request deduplication, rate limits, and background generation caps.
         </p>
 
       </section>

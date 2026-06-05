@@ -1,4 +1,6 @@
 // pages/api/historian-critique.js
+import { generateLLMText } from '../../utils/server/llmProvider';
+import { getRequestIdentity } from '../../utils/server/llmSafety';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -6,13 +8,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get API key
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error("API key is missing");
-      return res.status(500).json({ error: "API key is not configured" });
-    }
-
     // Get the latest narrative from the request
     const cookie = req.headers.cookie || '';
     const lastNarrativeTextMatch = cookie.match(/lastNarrativeText=([^;]+)/);
@@ -51,9 +46,6 @@ Darwin was alert to the evocative imagery such a tale of privation and isolation
       Format your response with bold headings and bullet points for readability. Your tone should be that of a demanding but brilliant academic reviewer. Keep it quite short but extremely information rich and pithy. 
     `;
 
-    // Log what we received
-    console.log("Received narrative text length:", lastNarrativeText ? lastNarrativeText.length : 0);
-    
     // Clean the narrative text of any metadata markers
     if (lastNarrativeText) {
       lastNarrativeText = lastNarrativeText
@@ -74,34 +66,44 @@ Darwin was alert to the evocative imagery such a tale of privation and isolation
       lastNarrativeText = sampleText;
     }
 
-    // Call the OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Please critique this narrative from a historian's perspective:\n\n${lastNarrativeText}` }
-        ],
-        temperature: 0.7,
-        max_tokens: 650
-      })
+    const userPrompt = `Please critique this narrative from a historian's perspective:\n\n${lastNarrativeText}`;
+    const identity = getRequestIdentity({
+      req,
+      route: '/api/historian-critique',
+      prompt: userPrompt,
+      idempotencyKey: req.body?.idempotencyKey,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("OpenAI API error:", errorText);
-      throw new Error(`API returned status ${response.status}`);
+    const llmResult = await generateLLMText({
+      model: process.env.YOUNG_DARWIN_CRITIQUE_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.4-nano',
+      route: '/api/historian-critique',
+      sessionId: identity.sessionId,
+      idempotencyKey: identity.idempotencyKey,
+      systemPrompt,
+      userPrompt,
+      temperature: 0.7,
+      maxTokens: 650,
+    });
+
+    if (llmResult.blocked) {
+      const blockedMessage = 'The historian pauses; too many critiques have been requested in a short interval.';
+      return res.status(200).json({
+        message: { content: blockedMessage },
+        choices: [{ message: { content: blockedMessage } }],
+        blocked: true,
+        reason: llmResult.reason,
+      });
     }
 
-    const data = await response.json();
+    const content = llmResult.text || 'No critique generated.';
 
     // Return the historian's critique
-    return res.status(200).json(data);
+    return res.status(200).json({
+      message: { content },
+      choices: [{ message: { content } }],
+      provider: llmResult.provider,
+      model: llmResult.model,
+    });
   } catch (error) {
     console.error("Error generating historian critique:", error);
     return res.status(500).json({ 

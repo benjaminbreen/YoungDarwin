@@ -1,8 +1,21 @@
 // pages/api/generate.js
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import OpenAI from 'openai';
 // Import NPCs from the data file
 import { npcs } from '../../data/npcs'; // Adjust path IF NEEDED
+import {
+  beginLLMRequest,
+  estimateTokens,
+  fallbackForBlockedRequest,
+  finishLLMRequest,
+  getRequestIdentity,
+} from '../../utils/server/llmSafety';
+import { getGeminiApiKey } from '../../utils/server/llmProvider';
+import { deterministicChoice } from '../../utils/deterministicChoice';
+
+const DEBUG_GENERATE_API = process.env.YOUNG_DARWIN_DEBUG_LLM === '1';
+const apiLog = (...args) => {
+  if (DEBUG_GENERATE_API) console.log(...args);
+};
 
 // --- Define Darwin Context Data Internally ---
 const darwinContext = {
@@ -124,24 +137,24 @@ const darwinContext = {
 
 // --- Model Configuration (JavaScript Array of Objects) ---
 // *** UPDATED DEFAULT MODEL ID ***
-const DEFAULT_MODEL_ID = 'gemini-flash'; // Changed default to GPT-4.1 Mini
+const DEFAULT_MODEL_ID = process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gemini-flash-lite';
 
 const models = [
-   // OpenAI Models (GPT-4.1 Mini is now first as default)
+   // OpenAI Models
    {
-    id: 'gpt-4.1-mini', // Your desired default
-    name: 'GPT-4.1 Mini (Default)', 
+    id: 'gpt-4.1-mini',
+    name: 'GPT-4.1 Mini',
     provider: 'openai',
-    apiModel: 'gpt-4.1-mini',
+    apiModel: process.env.OPENAI_FAST_MODEL || 'gpt-4.1-mini',
     description: 'Balanced speed and power from OpenAI',
     maxTokens: 1000,
     temperature: 0.5,
   },
    {
     id: 'gpt-4.1-nano',
-    name: 'GPT-4.1-nano',
+    name: 'GPT-4.1 Nano',
     provider: 'openai',
-    apiModel: 'gpt-4.1-nano', 
+    apiModel: process.env.OPENAI_SMALL_MODEL || 'gpt-4.1-nano',
     description: 'Fastest OpenAI profile',
     maxTokens: 800,
     temperature: 0.2,
@@ -151,7 +164,7 @@ const models = [
     id: 'gemini-flash',
     name: 'Gemini 2.0 Flash', // Updated name
     provider: 'google',
-    apiModel: 'gemini-2.0-flash', // Use standard identifier
+    apiModel: process.env.GOOGLE_LEGACY_MODEL || 'gemini-2.0-flash',
     description: 'Fast Google model',
     maxTokens: 1000,
     temperature: 0.4,
@@ -160,19 +173,19 @@ const models = [
     id: 'gemini-flash-2.5',
     name: 'Gemini 2.5 Flash', // Updated name
     provider: 'google',
-    apiModel: 'gemini-2.5-flash-preview-04-17', // Use standard identifier
+    apiModel: process.env.GOOGLE_FAST_MODEL || 'gemini-2.5-flash',
     description: 'Fast Google model',
     maxTokens: 1000,
     temperature: 0.4,
   },
   {
     id: 'gemini-flash-lite',
-    name: 'Gemini 2.0 Flash Lite',
+    name: 'Gemini 3.1 Flash-Lite',
     provider: 'google',
-    apiModel: 'gemini-2.0-flash-lite', // Often uses same base model
+    apiModel: process.env.GOOGLE_SMALL_MODEL || 'gemini-3.1-flash-lite',
     description: 'Lighter version',
     maxTokens: 1000,
-    temperature: 0.8,
+    temperature: 0.4,
   },
    {
     id: 'gemini-2.5-pro',
@@ -199,7 +212,7 @@ let openai;
 if (process.env.OPENAI_API_KEY) {
   try {
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    console.log("OpenAI client initialized.");
+    apiLog("OpenAI client initialized.");
   } catch (e) {
     console.error("Failed to initialize OpenAI client:", e.message);
   }
@@ -207,23 +220,9 @@ if (process.env.OPENAI_API_KEY) {
   console.warn("OpenAI API Key not found. OpenAI models will be unavailable.");
 }
 
-let genAI;
-// *** CORRECTED ENVIRONMENT VARIABLE NAME CHECK ***
-// Now checks for the name you have in your .env.local file
-if (process.env.GOOGLE_API_KEY) {
-   try {
-      // *** Pass the key explicitly during initialization ***
-      // The SDK likely expects the key passed here if the env var name is different
-      // from what it might implicitly check (like GOOGLE_APPLICATION_CREDENTIALS)
-      genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-      console.log("Google AI client initialized.");
-   } catch (e) {
-       console.error("Failed to initialize Google AI client:", e.message);
-       genAI = null; // Ensure genAI is null if initialization fails
-   }
-} else {
-  // Keep the warning, but it should now find the key if named GOOGLE_API_KEY
-  console.warn("Environment variable GOOGLE_API_KEY not found. Google models will be unavailable.");
+const geminiApiKey = getGeminiApiKey();
+if (!geminiApiKey) {
+  console.warn("Environment variable GEMINI_API_KEY or GOOGLE_API_KEY not found. Google models will be unavailable.");
 }
 
 // --- System Prompts ---
@@ -296,13 +295,13 @@ You are simulating an authentic, involuntary memory flashing through Charles Dar
  */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    console.log(`[${new Date().toISOString()}] Method Not Allowed: ${req.method}`);
+    apiLog(`[${new Date().toISOString()}] Method Not Allowed: ${req.method}`);
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const requestStartTime = Date.now();
-  console.log(`[${new Date().toISOString()}] Received POST request to /api/generate`);
+  apiLog(`[${new Date().toISOString()}] Received POST request to /api/generate`);
 
   try {
     // --- Request Parsing and Validation ---
@@ -320,7 +319,7 @@ export default async function handler(req, res) {
       console.error(`[${new Date().toISOString()}] Bad Request: Missing gameState or prompt (must be string).`);
       return res.status(400).json({ error: 'Missing required fields: gameState and prompt (must be a string)' });
     }
-    console.log(`[${new Date().toISOString()}] Parsed request body. MemoryRequest: ${!!isMemoryRequest}, Requested Model: ${requestedModel || 'Default'}`);
+    apiLog(`[${new Date().toISOString()}] Parsed request body. MemoryRequest: ${!!isMemoryRequest}, Requested Model: ${requestedModel || 'Default'}`);
 
     // --- Model Selection ---
     const modelIdToUse = requestedModel || DEFAULT_MODEL_ID;
@@ -329,18 +328,20 @@ export default async function handler(req, res) {
     // Fallback logic
     if (!selectedModelConfig ||
         (selectedModelConfig.provider === 'openai' && !openai) ||
-        (selectedModelConfig.provider === 'google' && !genAI)) {
+        (selectedModelConfig.provider === 'google' && !geminiApiKey)) {
       console.warn(`[${new Date().toISOString()}] Model or client for '${modelIdToUse}' not available. Trying default '${DEFAULT_MODEL_ID}'.`);
       selectedModelConfig = getModelConfig(DEFAULT_MODEL_ID);
 
       if (!selectedModelConfig ||
           (selectedModelConfig.provider === 'openai' && !openai) ||
-          (selectedModelConfig.provider === 'google' && !genAI)) {
+          (selectedModelConfig.provider === 'google' && !geminiApiKey)) {
         console.error(`[${new Date().toISOString()}] Default model '${DEFAULT_MODEL_ID}' or its client is also unavailable.`);
         // Attempt hardcoded fallback (e.g., lite model if default was flash)
-         const hardFallbackId = (DEFAULT_MODEL_ID === 'gemini-flash' || DEFAULT_MODEL_ID === 'gpt-4.1-mini') ? 'gemini-flash-lite' : 'gpt-4.1-nano'; // Adjust fallback logic if needed
-         const hardFallback = getModelConfig(hardFallbackId);
-         if (hardFallback && ((hardFallback.provider === 'google' && genAI) || (hardFallback.provider === 'openai' && openai)) ) {
+         const fallbackCandidates = ['gpt-4.1-nano', 'gpt-4.1-mini', 'gemini-flash-lite', 'gemini-flash'];
+         const hardFallback = fallbackCandidates
+           .map(getModelConfig)
+           .find(candidate => candidate && ((candidate.provider === 'google' && geminiApiKey) || (candidate.provider === 'openai' && openai)));
+         if (hardFallback) {
              console.warn(`[${new Date().toISOString()}] Using hardcoded fallback: ${hardFallback.id}`);
              selectedModelConfig = hardFallback;
          } else {
@@ -350,11 +351,10 @@ export default async function handler(req, res) {
       }
     }
 
-    const modelClient = selectedModelConfig.provider === 'openai' ? openai : genAI;
     const modelName = selectedModelConfig.apiModel;
     const modelProvider = selectedModelConfig.provider;
 
-    console.log(`[${new Date().toISOString()}] Using LLM: ${modelName} (Provider: ${modelProvider})`);
+    apiLog(`[${new Date().toISOString()}] Using LLM: ${modelName} (Provider: ${modelProvider})`);
 
     // --- Prompt Construction ---
     let systemPromptContent = isMemoryRequest ? MEMORY_SYSTEM_PROMPT : MAIN_SYSTEM_PROMPT;
@@ -362,7 +362,7 @@ export default async function handler(req, res) {
     let currentNarrative = gameState?.narrativeText || '';
 
     if (isMemoryRequest) {
-        console.log(`[${new Date().toISOString()}] Constructing prompt for Memory Request.`);
+        apiLog(`[${new Date().toISOString()}] Constructing prompt for Memory Request.`);
         const currentLocation = gameState?.location?.toLowerCase() || '';
         const currentSpecimenId = (gameState?.currentSpecimen?.id || gameState?.currentSpecimen || '').toLowerCase();
         const promptLower = userPrompt.toLowerCase();
@@ -377,12 +377,15 @@ export default async function handler(req, res) {
             } else if (currentLocation.includes('bay') || currentLocation.includes('beagle') || promptLower.includes('ship') || promptLower.includes('captain') || promptLower.includes('fitzroy') || promptLower.includes('sailor')) {
                 memoryCategory = darwinContext.memories.beagle ? 'beagle' : availableMemoryCategories[0];
             } else if (availableMemoryCategories.length > 0) {
-                memoryCategory = availableMemoryCategories[Math.floor(Math.random() * availableMemoryCategories.length)];
+                memoryCategory = deterministicChoice(
+                  availableMemoryCategories,
+                  `${currentLocation}:${currentSpecimenId}:${promptLower}`,
+                );
             } else {
                  memoryCategory = 'general';
             }
         }
-        console.log(`[${new Date().toISOString()}] Selected memory category: ${memoryCategory}`);
+        apiLog(`[${new Date().toISOString()}] Selected memory category: ${memoryCategory}`);
 
         const autobiographyExcerpt = `Excerpt from Darwin's Autobiography (Cambridge Period): "...my time was sadly wasted there... passion for shooting and for hunting... got into a sporting set... sometimes drank too much... But I am glad to think that I had many other friends... no pursuit... gave me so much pleasure as collecting beetles... It was the mere passion for collecting... I popped the one which I held in my right hand into my mouth. Alas! it ejected some intensely acrid fluid... This was my friendship with Professor Henslow... I was called by some 'the man who walks with Henslow;'... His knowledge was great... He was deeply religious..."`;
 
@@ -402,7 +405,7 @@ ${autobiographyExcerpt}
 Generate the memory now.`;
 
     } else { // Regular Gameplay Logic
-        console.log(`[${new Date().toISOString()}] Constructing prompt for Regular Gameplay.`);
+        apiLog(`[${new Date().toISOString()}] Constructing prompt for Regular Gameplay.`);
         let additionalContext = '';
         const promptLower = userPrompt.toLowerCase();
 
@@ -421,7 +424,7 @@ Generate the memory now.`;
             }
              if (!currentLocKey && locType && darwinContext.locations[locType]) {
                  currentLocKey = locType;
-                 console.log(`[${new Date().toISOString()}] Using location TYPE context: ${locType}`);
+                 apiLog(`[${new Date().toISOString()}] Using location TYPE context: ${locType}`);
              }
 
             if (currentLocKey) {
@@ -480,7 +483,10 @@ Generate the memory now.`;
                                      speciesKeyFound.includes('finch') ? 'finches' : 'general';
                  const quotes = darwinContext.quotes?.[quoteCategory] || darwinContext.quotes?.['general'];
                  if (quotes && quotes.length > 0) {
-                    const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+                    const randomQuote = deterministicChoice(
+                      quotes,
+                      `${speciesKeyFound}:${gameState?.location || ''}:${userPrompt}`,
+                    );
                     additionalContext += `\n*Relevant Darwin Observation:* ${randomQuote}`;
                  }
              }
@@ -506,28 +512,76 @@ Generate the next part of the narrative based on this action and context, follow
     let responseContent = '';
 
     const apiStartTime = Date.now();
+    const { sessionId, idempotencyKey } = getRequestIdentity({
+      req,
+      route: '/api/generate',
+      prompt: finalUserPrompt,
+      idempotencyKey: body.idempotencyKey,
+    });
+    const guard = beginLLMRequest({
+      route: '/api/generate',
+      provider: modelProvider,
+      model: modelName,
+      sessionId,
+      idempotencyKey,
+      prompt: `${systemPromptContent}\n${finalUserPrompt}`,
+      background: Boolean(body.background),
+      estimatedInputTokens: estimateTokens(systemPromptContent, finalUserPrompt),
+    });
+
+    if (!guard.allowed) {
+      if (guard.cached) {
+        return res.status(200).json(guard.cachedResponse);
+      }
+
+      return res.status(200).json({
+        blocked: true,
+        details: fallbackForBlockedRequest(guard.reason),
+        reason: guard.reason,
+        choices: [{
+          message: {
+            content: fallbackForBlockedRequest(guard.reason),
+          },
+        }],
+      });
+    }
 
     if (modelProvider === 'google') {
-      if (!genAI) throw new Error("Google AI Client not initialized.");
-      console.log(`[${new Date().toISOString()}] Sending request to Google Gemini API (${modelName})...`);
-      const model = modelClient.getGenerativeModel({
-        model: modelName,
-        systemInstruction: systemPromptContent,
-      });
-      const safetySettings = [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-      ];
+      if (!geminiApiKey) throw new Error("Gemini API key not configured.");
+      apiLog(`[${new Date().toISOString()}] Sending request to Google Gemini API (${modelName})...`);
       const generationConfig = {
           maxOutputTokens: Math.min(selectedModelConfig.maxTokens || 800, 8192),
           temperature: selectedModelConfig.temperature || 0.4,
       };
 
       try {
-        const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: finalUserPrompt }] }] }, {generationConfig, safetySettings});
-        const response = await result.response;
+        const googleResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [{ text: systemPromptContent }],
+              },
+              contents: [{ role: "user", parts: [{ text: finalUserPrompt }] }],
+              generationConfig,
+              safetySettings: [
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+              ],
+            }),
+          },
+        );
+
+        if (!googleResponse.ok) {
+          const errorText = await googleResponse.text();
+          throw new Error(`Gemini API request failed (${googleResponse.status}): ${errorText}`);
+        }
+
+        const response = await googleResponse.json();
          if (!response.candidates || response.candidates.length === 0 || !response.candidates[0].content?.parts?.[0]?.text) {
              console.warn(`[${new Date().toISOString()}] Gemini response blocked or empty. Finish Reason: ${response.promptFeedback?.blockReason || response.candidates?.[0]?.finishReason || 'Unknown'}`, response);
              responseContent = "[The model's response was blocked or empty. Try rephrasing your action.]";
@@ -535,16 +589,42 @@ Generate the next part of the narrative based on this action and context, follow
              responseContent = response.candidates[0].content.parts[0].text;
          }
   
-        console.log(`[${new Date().toISOString()}] Received Gemini response (${Date.now() - apiStartTime}ms).`);
+        apiLog(`[${new Date().toISOString()}] Received Gemini response (${Date.now() - apiStartTime}ms).`);
       } catch (googleError) {
          console.error(`[${new Date().toISOString()}] Google API Error:`, googleError);
-         const errorDetails = googleError.message || JSON.stringify(googleError);
-         return res.status(500).json({ error: "Google API request failed", details: errorDetails });
+         if (!openai) {
+           const errorDetails = googleError.message || JSON.stringify(googleError);
+           finishLLMRequest({ key: guard.key, entryId: guard.entryId, error: googleError });
+           return res.status(500).json({ error: "Google API request failed", details: errorDetails });
+         }
+
+         const fallbackConfig = getModelConfig('gpt-4.1-nano') || getModelConfig('gpt-4.1-mini');
+         try {
+           console.warn(`[${new Date().toISOString()}] Falling back to OpenAI after Gemini failure.`);
+           const completion = await openai.chat.completions.create({
+             model: fallbackConfig.apiModel,
+             messages: [
+               { role: 'system', content: systemPromptContent },
+               { role: 'user', content: finalUserPrompt }
+             ],
+             temperature: fallbackConfig.temperature || 0.3,
+             max_tokens: fallbackConfig.maxTokens || 450,
+           });
+           responseContent = completion.choices[0]?.message?.content || '[OpenAI fallback response was empty or incomplete.]';
+         } catch (fallbackError) {
+           console.error(`[${new Date().toISOString()}] OpenAI fallback after Gemini failure also failed:`, fallbackError);
+           finishLLMRequest({ key: guard.key, entryId: guard.entryId, error: fallbackError });
+           return res.status(fallbackError.status || 500).json({
+             error: "Google API request failed and OpenAI fallback failed",
+             details: fallbackError.message || String(fallbackError),
+             googleDetails: googleError.message || String(googleError),
+           });
+         }
       }
 
     } else if (modelProvider === 'openai') {
        if (!openai) throw new Error("OpenAI Client not initialized.");
-       console.log(`[${new Date().toISOString()}] Sending request to OpenAI API (${modelName})...`);
+       apiLog(`[${new Date().toISOString()}] Sending request to OpenAI API (${modelName})...`);
        try {
             const completion = await openai.chat.completions.create({
                 model: modelName,
@@ -556,12 +636,12 @@ Generate the next part of the narrative based on this action and context, follow
                 max_tokens: selectedModelConfig.maxTokens || 450,
             });
             responseContent = completion.choices[0]?.message?.content || '[OpenAI response was empty or incomplete.]';
-            rawLLMResponseData = completion;
-            console.log(`[${new Date().toISOString()}] Received OpenAI response (${Date.now() - apiStartTime}ms).`);
+            apiLog(`[${new Date().toISOString()}] Received OpenAI response (${Date.now() - apiStartTime}ms).`);
        } catch(openaiError) {
            console.error(`[${new Date().toISOString()}] OpenAI API Error:`, openaiError);
            const errorDetails = openaiError.response ? JSON.stringify(openaiError.response.data) : openaiError.message;
            const statusCode = openaiError.status || 500;
+           finishLLMRequest({ key: guard.key, entryId: guard.entryId, error: openaiError });
            return res.status(statusCode).json({ error: "OpenAI API request failed", details: errorDetails });
        }
     } else {
@@ -577,8 +657,14 @@ Generate the next part of the narrative based on this action and context, follow
             }
         }],
     };
+    finishLLMRequest({
+      key: guard.key,
+      entryId: guard.entryId,
+      response: formattedResponse,
+      estimatedOutputTokens: estimateTokens(responseContent),
+    });
 
-    console.log(`[${new Date().toISOString()}] Request processed successfully (${Date.now() - requestStartTime}ms total).`);
+    apiLog(`[${new Date().toISOString()}] Request processed successfully (${Date.now() - requestStartTime}ms total).`);
     return res.status(200).json(formattedResponse);
 
   } catch (error) {

@@ -1,4 +1,6 @@
 // pages/api/end-game-assessment.js
+import { generateLLMText } from '../../utils/server/llmProvider';
+import { getRequestIdentity } from '../../utils/server/llmSafety';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -6,15 +8,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get API key from environment variables
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error("API key is missing");
-      return res.status(500).json({ error: "API key is not configured" });
-    }
-    
     // Determine whether this is an initial assessment or a response to player's comment
-    const { inventory, fieldNotes, locations, npcs, toolUsage, daysPassed, previousDialog, playerResponse, responseMode } = req.body;
+    const {
+      inventory,
+      fieldNotes,
+      locations,
+      npcs,
+      toolUsage,
+      objectives,
+      readiness,
+      scientificScore,
+      daysPassed,
+      previousDialog,
+      playerResponse,
+      responseMode,
+      idempotencyKey,
+    } = req.body;
     
     // Construct system prompt based on the request type
     let systemPrompt = '';
@@ -102,6 +111,12 @@ export default async function handler(req, res) {
       const toolsUsed = toolUsage ? Object.entries(toolUsage).map(([tool, count]) => `${tool}: ${count} uses`).join(', ') : 'Limited tool usage';
       const placesVisited = locations ? `${locations.count} of ${locations.total} possible locations` : 'Unknown';
       const peopleEncountered = npcs ? `${npcs.count} of ${npcs.total} potential informants` : 'Unknown';
+      const objectiveStatus = Array.isArray(objectives) && objectives.length > 0
+        ? objectives.map(objective => `${objective.label}: ${objective.progress || 0}/${objective.target || 1}${objective.complete ? ' complete' : ' incomplete'}`).join('\n')
+        : 'No expedition objectives available';
+      const readinessStatus = readiness
+        ? `${readiness.verdict}; readiness ${readiness.readinessScore}/100; average collection quality ${readiness.quality ?? 'unknown'}/100; unresolved gaps: ${(readiness.gaps || []).join('; ') || 'none'}`
+        : 'No readiness score available';
       const expeditionDuration = `${daysPassed} days`;
       
       userMessage = `
@@ -120,42 +135,46 @@ export default async function handler(req, res) {
         - Duration: ${expeditionDuration}
         - Locations: ${placesVisited}
         - Local informants: ${peopleEncountered}
+
+        CANONICAL GAME ASSESSMENT:
+        - Scientific score: ${scientificScore ?? 0}
+        - Readiness: ${readinessStatus}
+        - Objectives:
+        ${objectiveStatus}
         
         Please highly critically and skeptically assess Darwin's expedition as Professor Henslow, using the criteria provided. 
         Include specific scores for each category and a final overall score out of 10. 
         Your assessment should be 300-400 words and written in Henslow's formal, scientifically precise Victorian style.
       `;
     }
-    
-    // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini', // Use the model specified in the generate.js file
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.7,
-        max_tokens: responseMode ? 550 : 500
-      })
+
+    const identity = getRequestIdentity({
+      req,
+      route: '/api/end-game-assessment',
+      prompt: `${systemPrompt}\n${userMessage}`,
+      idempotencyKey: idempotencyKey || `${responseMode ? 'response' : 'initial'}:${daysPassed || 0}:${scientificScore || 0}:${inventory?.length || 0}:${fieldNotes?.length || 0}`,
     });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("OpenAI API error:", errorText);
-      return res.status(response.status).json({ 
-        error: "Error from OpenAI API", 
-        details: errorText 
+
+    const llmResult = await generateLLMText({
+      model: process.env.YOUNG_DARWIN_ASSESSMENT_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+      route: '/api/end-game-assessment',
+      sessionId: identity.sessionId,
+      idempotencyKey: identity.idempotencyKey,
+      systemPrompt,
+      userPrompt: userMessage,
+      temperature: 0.7,
+      maxTokens: responseMode ? 550 : 500,
+    });
+
+    if (llmResult.blocked) {
+      return res.status(200).json({
+        assessment: 'Professor Henslow has already received a large packet of materials. Let the current assessment stand before requesting another.',
+        blocked: true,
+        reason: llmResult.reason,
       });
     }
-    
-    const data = await response.json();
-    const assessment = data.choices?.[0]?.message?.content || 'Professor Henslow appears to be busy with other matters at the moment.';
+
+    const assessment = llmResult.text || 'Professor Henslow appears to be busy with other matters at the moment.';
     
     return res.status(200).json({ assessment });
     

@@ -62,7 +62,6 @@ export async function generateHybridImage(hybrid, options = {}) {
 
   // If we already have an image in cache, just return it
   if (imageCache[cacheKey]) {
-    console.log(`Using cached image for ${hybrid.name}`);
     return imageCache[cacheKey];
   }
 
@@ -71,8 +70,6 @@ export async function generateHybridImage(hybrid, options = {}) {
 
   // ... but queue the actual generation in the background
   return new Promise((resolve) => {
-    console.log(`Queueing image generation for hybrid: ${hybrid.name}`);
-
     imageQueue.push({
       hybrid,
       options,
@@ -119,15 +116,17 @@ async function processQueue() {
   const item = imageQueue.shift();
 
   try {
-    console.log(`Processing image request for ${item.hybrid.name}`);
-
     // Prepare request body for your /api/generate-hybrid-image endpoint
+    const sessionId = item.options.sessionId || 'anonymous';
+    const idempotencyKey = `hybrid-image:${item.cacheKey}`;
     const requestBody = {
       hybridName: item.hybrid.name,
       hybridDescription: item.hybrid.description,
       parent1Name: item.options.parent1?.name || null,
       parent2Name: item.options.parent2?.name || null,
       hybridityMode: item.options.hybridityMode || 'mild',
+      cacheKey: item.cacheKey,
+      idempotencyKey,
       // no need for a "cacheKey" param if your API doesn’t require it,
       // but you can pass it if you do
     };
@@ -140,7 +139,11 @@ async function processQueue() {
     try {
       const response = await fetch('/api/generate-hybrid-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-young-darwin-session': sessionId,
+          'x-idempotency-key': idempotencyKey,
+        },
         body: JSON.stringify(requestBody),
         signal: controller.signal
       });
@@ -154,7 +157,6 @@ async function processQueue() {
 
       if (data.success && data.imageUrl) {
         finalUrl = data.imageUrl;
-        console.log(`Generated image for ${item.hybrid.name}`);
       } else {
         console.warn(`Fallback used for ${item.hybrid.name}:`, data.message || 'Unknown reason');
       }

@@ -11,29 +11,41 @@ import GameLog from './GameLog';
 import BannerImage from './BannerImage';
 import { tools, collectionTools } from '../data/tools';
 import { openingTexts } from '../data/openingTexts';
-import MemoryButton from './MemoryButton';
 import MemoryModal from './MemoryModal';
-import { initializeSpecimens, analyzeNarrativeForSpecimens } from '../data/specimens';
-import { npcs, getNPCsForLocation, formatNPCForLLM } from '../data/npcs';
+import { npcs } from '../data/npcs';
 import WeatherTimeDisplay from './WeatherTimeDisplay';
 import CollectionResultPopup from './CollectionResultPopup';
 import InteriorMap from './InteriorMap';
 import { getCellByCoordinates, islandGrid } from '../utils/locationSystem';
-import LLMTransparency from './LLMTransparency';
 import NearbySpecimenDetail from './NearbySpecimenDetail';
 import EnhancedEventHistory from './EnhancedEventHistory';
 import EventHistoryDebug from './EventHistoryDebug';
-import buildLLMPromptContext from '../utils/generateLLMContext';
 import HybridGenerator from './HybridGenerator';
 import HybridsDebug from './HybridsDebug';
 import { useLocationSystem } from '../utils/locationHook';
 import EnhancedMapBox from './EnhancedMapBox';
-import { useMemo } from 'react';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
 import Journal from './Journal';
 import HamburgerMenu from './HamburgerMenu';
 import EndGame from './EndGame';
+import ExpeditionStatusPanel from './ExpeditionStatusPanel';
+import TrapLedger from './TrapLedger';
+import CollectionMethodPreview from './CollectionMethodPreview';
+import { canonicalSpecimenId, habitatMatches, resolveSpecimen } from '../utils/canonicalIds';
+import { createTrap, evaluateCollectionAttempt, evaluateTrap, getVisibleEncounterIds } from '../utils/expeditionSystems';
+import { buildActionSuggestions, mergeActionSuggestions } from '../utils/actionSuggestions';
+import { buildLLMRequestMeta } from '../utils/llmClient';
+import { assignHybridLocation, hasUsableLocation } from '../utils/hybridPlacement';
+import { loadExpeditionSummary } from '../utils/localSave';
+import { buildSpecimenDocumentationNote, buildSurveyNote, selectDocumentableSpecimen } from '../utils/fieldworkNotes';
+import routePlayerCommand from '../utils/playerCommandRouter';
+
+const debugLog = (...args) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(...args);
+  }
+};
 
 function GameContainer() {
   // Pull all needed functions and state from the game store
@@ -45,6 +57,7 @@ function GameContainer() {
     specimenList,
     currentSpecimen,
     inventory,
+    journal,
     narrativeText,
     collectSpecimen,
     useScientificTool,
@@ -55,6 +68,7 @@ function GameContainer() {
     getRecentHistory,
     updateMoodAndFatigue,
     addJournalEntry,
+    addFieldEvidence,
     addToGameHistory,
     isLoading,
     setIsLoading,
@@ -62,7 +76,17 @@ function GameContainer() {
     setCurrentNPC,
     daysPassed,
     gameTime,
-     setSpecimenList
+    setSpecimenList,
+    expeditionSeed,
+    objectives,
+    traps,
+    addTrap,
+    updateTrap,
+    saveGame,
+    loadSavedGame,
+    clearSavedGame,
+    refreshObjectives,
+    eventHistory
   } = useGameStore();
   
   // Use the location hook for grid-based movement
@@ -71,7 +95,6 @@ function GameContainer() {
   currentLocationId, 
   handleMove, 
   moveToLocation, 
-  detectMovementInText,
   getCurrentLocation,
   getValidDirections,
   isInInterior,         
@@ -86,24 +109,28 @@ function GameContainer() {
 if (isInInterior) {
   const currentInterior = getCurrentLocation();
   if (currentInterior && currentInterior.type) {
-    // Find all specimens that can exist in this interior type
-    const specimenIds = specimenList
-      .filter(s => s.habitat && s.habitat.split(', ').includes(currentInterior.type))
-      .map(s => s.id);
+    const specimenIds = getVisibleEncounterIds({
+      location: currentInterior,
+      specimenList,
+      inventory,
+      gameTime,
+      seed: expeditionSeed
+    });
     setNearbySpecimenIds(specimenIds);
   }
   return;
 }
 
-const specimen = specimenList?.find(s => s.id === specifiedId);
-
 // This callback runs when location changes
 const currentCell = getCellByCoordinates(locationInfo.position.x, locationInfo.position.y);
 if (currentCell && currentCell.type) {
-  // Find all specimens that can exist in this habitat type
-  const specimenIds = specimenList
-    .filter(s => s.habitat && s.habitat.split(', ').includes(currentCell.type))
-    .map(s => s.id);
+  const specimenIds = getVisibleEncounterIds({
+    location: currentCell,
+    specimenList,
+    inventory,
+    gameTime,
+    seed: expeditionSeed
+  });
   setNearbySpecimenIds(specimenIds);
 }
   
@@ -143,7 +170,7 @@ const handleHybriditySelection = (mode) => {
 
 
 const handleHybridsGenerated = (generatedHybrids) => {
-  console.log("Hybrids generated and received in GameContainer:", generatedHybrids);
+  debugLog("Hybrids generated and received in GameContainer:", generatedHybrids);
   setHybridsEnabled(true);
   setGeneratedHybrids(generatedHybrids);
   
@@ -151,21 +178,9 @@ const handleHybridsGenerated = (generatedHybrids) => {
   setShowHybridOptions(false);
 
   
-  // Check if hybrids already have locations
-  const hybridsWithLocations = generatedHybrids.map(hybrid => {
-    // If the hybrid doesn't have a location, assign a random one
-    if (!hybrid.location) {
-      return {
-        ...hybrid,
-        // Assign random location that will likely be on the map
-        location: {
-          x: Math.floor(Math.random() * 4),
-          y: Math.floor(Math.random() * 4)
-        }
-      };
-    }
-    return hybrid;
-  });
+  const hybridsWithLocations = generatedHybrids.map(hybrid =>
+    assignHybridLocation(hybrid, { seed: `${expeditionSeed || 'young-darwin'}:container` })
+  );
   
   // Make sure all hybrids have the isHybrid flag set
   const verifiedHybrids = hybridsWithLocations.map(hybrid => ({
@@ -185,7 +200,7 @@ const handleHybridsGenerated = (generatedHybrids) => {
   setShowHybridOptions(false);
   
   // Log the hybrids for debugging
-  console.log("Updated specimen list with hybrids:", 
+  debugLog("Updated specimen list with hybrids:", 
     updatedSpecimenList.filter(s => s.isHybrid).map(s => ({
       id: s.id,
       name: s.name,
@@ -200,16 +215,15 @@ const handleHybridsGenerated = (generatedHybrids) => {
   const [gameInitialized, setGameInitialized] = useState(false);
   const [activeTool, setActiveTool] = useState(null);
   const [nearbySpecimenIds, setNearbySpecimenIds] = useState([]);
-  const [discoveredNPCs, setDiscoveredNPCs] = useState([]);
   const [visibleNPCs, setVisibleNPCs] = useState([]);
   const [showMemoryModal, setShowMemoryModal] = useState(false);
   const [memoryContent, setMemoryContent] = useState('');
   const [isLoadingMemory, setIsLoadingMemory] = useState(false);
   const [nextStepSuggestions, setNextStepSuggestions] = useState([
-    { text: 'Observe surroundings', action: 'Carefully observe the surroundings for any interesting specimens.' },
-    { text: 'Take notes', action: 'Record detailed observations in my journal about what I see.' },
-    { text: 'Move north', action: 'Go north' },
-    { text: 'Examine area', action: 'Examine the area for marine specimens.' }
+    { text: 'Survey site', action: 'Survey the site', kind: 'survey' },
+    { text: 'Document specimen', action: 'Document the visible specimen', kind: 'evidence' },
+    { text: 'Travel east', action: 'Go east', kind: 'route' },
+    { text: 'Open journal', action: 'Open journal', kind: 'journal' }
   ]);
   const [lastUserInput, setLastUserInput] = useState('');
   const [showCollectionPopup, setShowCollectionPopup] = useState(false);
@@ -229,12 +243,11 @@ const [showCollectionResult, setShowCollectionResult] = useState(false);
 const [collectionResult, setCollectionResult] = useState(null);
 const [collectionSpecimenName, setCollectionSpecimenName] = useState('');
 const [collectionMethod, setCollectionMethod] = useState('');
-const currentLocation = useMemo(() => getCurrentLocation(), [playerPosition]);
 const [showNearbySpecimenDetail, setShowNearbySpecimenDetail] = useState(false);
 const [selectedNearbySpecimen, setSelectedNearbySpecimen] = useState(null);
 const [primaryCollectible, setPrimaryCollectible] = useState(null);
-const [encounteredNPCs, setEncounteredNPCs] = useState([]);
 const [showFatigueWarning, setShowFatigueWarning] = useState(false);
+const [passOutEvent, setPassOutEvent] = useState(null);
 const [showRestButton, setShowRestButton] = useState(false);
 const [currentInteriorRoom, setCurrentInteriorRoom] = useState(null);
 const [showHybridOptions, setShowHybridOptions] = useState(false);
@@ -244,6 +257,32 @@ const [hybridityMode, setHybridityMode] = useState('none'); // 'none', 'mild', o
 const [isMovingViaMap, setIsMovingViaMap] = useState(false);
 const [journalOpen, setJournalOpen] = useState(false);
 const [journalSpecimen, setJournalSpecimen] = useState(null);
+const [savedExpeditionSummary, setSavedExpeditionSummary] = useState(null);
+const [continueMessage, setContinueMessage] = useState('');
+
+const buildCollectionMetadata = (result, method, notes = '') => ({
+  methodId: result?.methodId || method?.id || method,
+  methodName: method?.name || method || result?.methodId || 'Unknown method',
+  notes,
+  reason: result?.reason || '',
+  outcomeType: result?.outcomeType || (result?.success ? 'clean_specimen' : 'failed'),
+  damage: result?.damage || 0,
+  quality: Math.max(0, Math.round((1 - (result?.damage || 0)) * 100)),
+  scoreDelta: result?.scoreDelta || 0,
+  fatigueDelta: result?.fatigueDelta ?? 5,
+});
+
+const recordFieldEvidence = (specimen, result, method, notes = '') => {
+  if (!result?.evidence || !specimen) return;
+  addFieldEvidence({
+    specimenId: specimen.id,
+    specimenName: specimen.name,
+    methodName: method?.name || method || result.methodId || 'field observation',
+    evidence: result.evidence,
+    notes,
+    scoreDelta: result.scoreDelta || 1,
+  });
+};
 
   // Initialize the game
   useEffect(() => {
@@ -261,29 +300,105 @@ const [journalSpecimen, setJournalSpecimen] = useState(null);
     }
   }, [gameStarted, gameInitialized, setNarrativeText, updateMoodAndFatigue]);
 
-  // Update direction suggestions based on current location
-  const updateNextStepSuggestions = () => {
-    const validDirs = getValidDirections();
-    const dirNames = {
-      'N': 'north',
-      'S': 'south',
-      'E': 'east',
-      'W': 'west',
-      'NE': 'northeast',
-      'NW': 'northwest',
-      'SE': 'southeast',
-      'SW': 'southwest'
-    };
-    
-    const locationSuggestions = validDirs.map(dir => ({
-      text: `Move ${dirNames[dir]}`,
-      action: `Go ${dirNames[dir]}`
-    }));
-    
-    // Combine and limit to 4 suggestions
-    const allSuggestions = [...locationSuggestions];
-    setNextStepSuggestions(allSuggestions.slice(0, 4));
+  useEffect(() => {
+    if (gameStarted) return;
+    setSavedExpeditionSummary(loadExpeditionSummary());
+  }, [gameStarted]);
+
+  const handleContinueSavedExpedition = () => {
+    const loaded = loadSavedGame();
+    if (loaded) {
+      setContinueMessage('');
+      setGameInitialized(false);
+    } else {
+      setSavedExpeditionSummary(null);
+      setContinueMessage('No saved expedition was found.');
+    }
   };
+
+  const handleStartNewExpedition = () => {
+    clearSavedGame();
+    setSavedExpeditionSummary(null);
+    setContinueMessage('');
+    startGame();
+  };
+
+  useEffect(() => {
+    if (!gameStarted || specimenList.length === 0) return;
+    const location = getCurrentLocation();
+    const visibleIds = getVisibleEncounterIds({
+      location,
+      specimenList,
+      inventory,
+      gameTime,
+      seed: expeditionSeed
+    });
+    setNearbySpecimenIds(visibleIds);
+    setPrimaryCollectible(current => {
+      const currentSpecimen = current ? resolveSpecimen(specimenList, current) : null;
+      if (currentSpecimen && !currentSpecimen.collected && visibleIds.includes(canonicalSpecimenId(currentSpecimen.id))) {
+        return canonicalSpecimenId(currentSpecimen.id);
+      }
+      return visibleIds[0] || null;
+    });
+  }, [
+    gameStarted,
+    currentLocationId,
+    isInInterior,
+    interiorPlayerPosition.x,
+    interiorPlayerPosition.y,
+    gameTime,
+    expeditionSeed,
+    specimenList,
+    inventory
+  ]);
+
+  useEffect(() => {
+    if (!gameStarted) return;
+    refreshObjectives();
+  }, [gameStarted, inventory, journal, eventHistory, fatigue]);
+
+  useEffect(() => {
+    if (!gameStarted) return;
+    saveGame();
+  }, [gameStarted, currentLocationId, gameTime, daysPassed, fatigue, inventory, journal, traps, objectives]);
+
+  // Update suggestions based on the current expedition state.
+  const updateNextStepSuggestions = () => {
+    setNextStepSuggestions(buildActionSuggestions({
+      location: getCurrentLocation(),
+      validDirections: getValidDirections(),
+      primaryCollectible,
+      nearbySpecimenIds,
+      specimenList,
+      currentSpecimen,
+      inventory,
+      fatigue,
+      traps,
+      objectives,
+      gameTime,
+      daysPassed,
+      maxSuggestions: 4,
+    }));
+  };
+
+  useEffect(() => {
+    if (!gameStarted) return;
+    updateNextStepSuggestions();
+  }, [
+    gameStarted,
+    currentLocationId,
+    primaryCollectible,
+    nearbySpecimenIds,
+    specimenList,
+    currentSpecimen,
+    inventory,
+    fatigue,
+    traps,
+    objectives,
+    gameTime,
+    daysPassed,
+  ]);
   
 
 
@@ -321,7 +436,7 @@ useEffect(() => {
     }
 const npcStatusMatch = narrativeText.match(/\[NPC_STATUS:\s*(.*?)\]/);
 if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
-  console.log("Dismissing NPC based on [NPC_STATUS: dismissed]");
+  debugLog("Dismissing NPC based on [NPC_STATUS: dismissed]");
   setCurrentNPC(null);
   setVisibleNPCs([]);
 }
@@ -331,7 +446,7 @@ if (npcStatusMatch && npcStatusMatch[1] === 'dismissed') {
 //    If you prefer to rely solely on the [NPC_STATUS] marker, skip this.
 const departureRegex = /(left|walked away|departed|farewell)/i;
 if (departureRegex.test(narrativeText)) {
-  console.log("Dismissing NPC based on a departure phrase in the text");
+  debugLog("Dismissing NPC based on a departure phrase in the text");
   setCurrentNPC(null);
   setVisibleNPCs([]);
 }
@@ -346,33 +461,26 @@ if (departureRegex.test(narrativeText)) {
       }
     }
     
-    // Process narrative for movement directions
-    const movementResult = detectMovementInText(narrativeText);
-    if (movementResult) {
-      console.log("Movement detected in narrative:", movementResult);
-      // Update suggestions based on new location
-      updateNextStepSuggestions();
-    }
   }
 
 }, [narrativeText, currentNPC, lastUserInput, specimenList, gameTime]);
 
 const checkHybridsInLocation = (locationId) => {
-  console.log(`Checking for hybrids in location: ${locationId}`);
+  debugLog(`Checking for hybrids in location: ${locationId}`);
 
     const location = islandGrid.find(cell => cell.id === locationId);
   if (!location) {
-    console.log(`Location ${locationId} not found in islandGrid`);
+    debugLog(`Location ${locationId} not found in islandGrid`);
     return;
   }
 
     const hybridsForLocation = specimenList.filter(s => 
     s?.isHybrid && 
-    s.habitat && 
-    (s.habitat.includes(location.type) || true) // true to see all hybrids for debugging
+    s.habitat &&
+    habitatMatches(s, location.type)
   );
   
-  console.log(`Found ${hybridsForLocation.length} hybrids for location type ${location.type}:`,
+  debugLog(`Found ${hybridsForLocation.length} hybrids for location type ${location.type}:`,
     hybridsForLocation.map(h => h.name));
   
   return hybridsForLocation;
@@ -400,10 +508,10 @@ useEffect(() => {
   }
   
   // Critical fatigue - pass out (95% or higher)
-  if (fatigue >= 95) {
+  if (fatigue >= 95 && !passOutEvent) {
     handlePassOut();
   }
-}, [fatigue]);
+}, [fatigue, passOutEvent]);
 
 // Check if current location allows resting
 useEffect(() => {
@@ -536,30 +644,22 @@ const handleEnterCave = () => {
 useEffect(() => {
   // This runs when hybrids are enabled to ensure they're properly integrated
   if (hybridsEnabled && generatedHybrids.length > 0) {
-    console.log("Verifying hybrids in specimen list...");
+    debugLog("Verifying hybrids in specimen list...");
     
     // Find hybrids in the specimen list
     const hybridsInList = specimenList.filter(s => s?.isHybrid);
-    console.log(`Found ${hybridsInList.length} hybrids in specimen list`);
+    debugLog(`Found ${hybridsInList.length} hybrids in specimen list`);
     
     // Check if all hybrids have locations
-    const hybridsWithoutLocations = hybridsInList.filter(
-      s => !s.location || (!s.location.x && !s.location.y)
-    );
+    const hybridsWithoutLocations = hybridsInList.filter(s => !hasUsableLocation(s.location));
     
     // If any hybrids are missing locations, add them
     if (hybridsWithoutLocations.length > 0) {
-      console.log(`Found ${hybridsWithoutLocations.length} hybrids without locations, fixing...`);
+      debugLog(`Found ${hybridsWithoutLocations.length} hybrids without locations, fixing...`);
       
       const updatedList = specimenList.map(specimen => {
-        if (specimen?.isHybrid && (!specimen.location || (!specimen.location.x && !specimen.location.y))) {
-          return {
-            ...specimen,
-            location: {
-              x: Math.floor(Math.random() * 4),
-              y: Math.floor(Math.random() * 4)
-            }
-          };
+        if (specimen?.isHybrid && !hasUsableLocation(specimen.location)) {
+          return assignHybridLocation(specimen, { seed: `${expeditionSeed || 'young-darwin'}:repair` });
         }
         return specimen;
       });
@@ -573,8 +673,8 @@ useEffect(() => {
 
   // Collection popup handlers
 const handleOpenCollectionPopup = (specimenId) => {
-  console.log("Opening collection popup for:", specimenId);
-  const specimen = specimenList.find(s => s.id === specimenId);
+  debugLog("Opening collection popup for:", specimenId);
+  const specimen = resolveSpecimen(specimenList, specimenId);
   if (!specimen) {
     console.error("Invalid specimen ID:", specimenId);
     return;
@@ -584,7 +684,7 @@ const handleOpenCollectionPopup = (specimenId) => {
   setCurrentSpecimen(specimen);
   
   // Set up the collection popup
-  setCollectingSpecimenId(specimenId);
+  setCollectingSpecimenId(canonicalSpecimenId(specimen.id));
   setSelectedMethod(null);
   setCollectionNotes('');
   setShowCollectionPopup(true);
@@ -601,27 +701,114 @@ const handleCollectionConfirm = () => {
   setShowCollectionPopup(false);
 };
 
+const handleSetTrapConfirm = () => {
+  if (!collectingSpecimenId || !selectedMethod) return;
+  const location = getCurrentLocation();
+  const trap = createTrap({
+    locationId: location?.id || currentLocationId,
+    targetSpecimenId: collectingSpecimenId,
+    method: selectedMethod,
+    placement: collectionNotes || `Placed near signs of ${collectingSpecimenId}`,
+    gameTime,
+    daysPassed,
+    seed: expeditionSeed
+  });
+
+  addTrap(trap);
+  advanceTime(15);
+  setShowCollectionPopup(false);
+  sendToLLM(`Darwin sets a ${selectedMethod.name} as a trap for ${collectingSpecimenId} at ${location?.name || currentLocationId}. This is now a delayed fieldwork action; the trap should be checked later rather than resolved immediately.`);
+};
+
+const handleCheckTraps = (trapId = null) => {
+  const location = getCurrentLocation();
+  const trapsHere = traps.filter(trap => (
+    trap.locationId === location?.id &&
+    trap.status === 'set' &&
+    (!trapId || trap.id === trapId)
+  ));
+  if (trapsHere.length === 0) {
+    sendToLLM(trapId
+      ? "Darwin looks for that trap, but it is not set at his current location."
+      : "Darwin checks for traps here, but none have been set in this location.");
+    return;
+  }
+
+  advanceTime(10);
+  updateMoodAndFatigue(null, fatigue + 1);
+
+  const results = trapsHere.map(trap => evaluateTrap(trap, {
+    location,
+    specimenList,
+    fatigue,
+    gameTime,
+    daysPassed,
+    seed: expeditionSeed
+  }));
+
+  results.forEach(result => {
+    if (!result.ready) return;
+    updateTrap(result.id, result);
+    if (result.result?.success) {
+      collectSpecimen(result.targetSpecimenId, buildCollectionMetadata(result.result, result.methodId, result.placement));
+    } else {
+      const specimen = resolveSpecimen(specimenList, result.targetSpecimenId);
+      recordFieldEvidence(specimen, result.result, result.methodId, result.placement);
+    }
+  });
+
+  const ready = results.filter(result => result.ready);
+  if (ready.length === 0) {
+    sendToLLM("Darwin checks the trap site. Nothing has sprung yet; the placement needs more time. The inspection costs a few minutes and a little energy.");
+    return;
+  }
+
+  const summary = ready.map(result => {
+    const specimen = resolveSpecimen(specimenList, result.targetSpecimenId);
+    return `${specimen?.name || result.targetSpecimenId}: ${result.result?.reason || 'No result.'}`;
+  }).join(' ');
+
+  sendToLLM(`Darwin checks his traps at ${location?.name || currentLocationId}. ${summary}`);
+};
+
+const handleAbandonTrap = (trapId) => {
+  const location = getCurrentLocation();
+  const trap = traps.find(item => item.id === trapId);
+  if (!trap || trap.status !== 'set' || trap.locationId !== location?.id) {
+    sendToLLM("Darwin cannot abandon that trap from here; he must return to its site first.");
+    return;
+  }
+
+  updateTrap(trap.id, {
+    status: 'abandoned',
+    ready: false,
+    abandonedAt: gameTime,
+    abandonedDay: daysPassed,
+  });
+  advanceTime(10);
+  updateMoodAndFatigue(null, fatigue + 1);
+
+  const specimen = resolveSpecimen(specimenList, trap.targetSpecimenId);
+  sendToLLM(`Darwin retrieves and abandons the trap for ${specimen?.name || trap.targetSpecimenId} at ${location?.name || currentLocationId}, recording that the placement was unproductive.`);
+};
+
   // Updated handleCollectNearbySpecimen function
 const handleCollectNearbySpecimen = async (specimenId) => {
-  const specimen = specimenList.find(s => s.id === specimenId);
+  const specimen = resolveSpecimen(specimenList, specimenId);
   
   if (specimen) {
     try {
-      // Prepare context for collection attempt
-      const collectionContext = {
+      const handsMethod = collectionTools.find(tool => tool.id === 'hands') || { id: 'hands', name: 'Hands' };
+      const result = evaluateCollectionAttempt({
+        specimen,
+        method: handsMethod,
+        approach: 'A quick hand collection attempt without special preparation.',
         specimenId,
-        specimenName: specimen.name,
-        location: currentLocationId,
-        narrativeContext: narrativeText
-      };
-
-      const response = await fetch('/api/collection-decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(collectionContext)
+        location: getCurrentLocation(),
+        fatigue,
+        gameTime,
+        seed: expeditionSeed
       });
-
-      const result = await response.json();
 
       // Set popup data
       setCollectionResult(result);
@@ -630,9 +817,10 @@ const handleCollectNearbySpecimen = async (specimenId) => {
       
       // If successful, collect the specimen and send narrative
       if (result.success) {
-        collectSpecimen(specimenId);
+        collectSpecimen(specimenId, buildCollectionMetadata(result, handsMethod, 'A quick hand collection attempt without special preparation.'));
         sendToLLM(`You successfully collected the ${specimen.name} for further study.`);
       } else {
+        recordFieldEvidence(specimen, result, handsMethod, 'A quick hand collection attempt without special preparation.');
         // Send narrative about failed collection attempt
         sendToLLM(`You attempted to collect the ${specimen.name}, but encountered significant challenges. ${result.reason || ''}`);
       }
@@ -657,43 +845,25 @@ const handleViewNearbySpecimenDetail = (specimen) => {
 // specimen collection method handler
 
 const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
-  console.log("Collecting specimen with method:", method?.name, "notes:", notes);
+  debugLog("Collecting specimen with method:", method?.name, "notes:", notes);
 
   // Find the specimen to be collected
-  const specimen = specimenList.find(s => s.id === specimenId);
+  const specimen = resolveSpecimen(specimenList, specimenId);
   if (!specimen) {
     console.error("Specimen not found:", specimenId);
     return;
   }
 
   try {
-   
-    // Set loading state FIRST
-    setIsLoading(true);
-    setNarrativeText('');
-    
-    // Prepare the collection context data
-    const collectionContext = {
-      specimenId,
-      specimenName: specimen.name,
-      location: currentLocationId,
-      narrativeContext: narrativeText,
-      collectionMethod: method?.name || "",
-      playerNotes: notes || ""
-    };
-
-    // Call the collection-decision API
-    const response = await fetch('/api/collection-decision', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(collectionContext)
+    const result = evaluateCollectionAttempt({
+      specimen,
+      method,
+      approach: notes,
+      location: getCurrentLocation(),
+      fatigue,
+      gameTime,
+      seed: expeditionSeed
     });
-
-    if (!response.ok) {
-      throw new Error(`API returned status ${response.status}`);
-    }
-
-    const result = await response.json();
 
     // Set popup data and show the popup IMMEDIATELY (while still loading)
     setCollectionResult(result);
@@ -704,22 +874,18 @@ const handleCollectSpecimenMethod = async (specimenId, method, notes) => {
     // Process the result in the background
     if (result.success) {
       // If successful, add to inventory
-      collectSpecimen(specimenId);
+      collectSpecimen(specimenId, buildCollectionMetadata(result, method, notes));
       
       // Create a descriptive message about the successful collection
-      const successMessage = `You successfully collected the ${specimen.name} using ${method?.name}. ${
-        method?.name === 'Shotgun' ? 'The sound echoes across the landscape.' :
-        method?.name === 'Hands' ? 'You carefully gather the specimen.' :
-        method?.name === 'Snare' ? 'The trap works perfectly.' :
-        method?.name === 'Insect Net' ? 'With a swift motion, you capture it.' :
-        'The collection is successful.'
-      } ${notes ? `Your approach - ${notes} - proved effective.` : ''}`;
+      const successMessage = `Collection result: ${result.reason} Darwin collected ${specimen.name} using ${method?.name}. Method fit ${Math.round(result.methodFit * 100)} percent; damage ${Math.round(result.damage * 100)} percent. ${notes ? `Player approach: ${notes}.` : ''}`;
       
       // Send success message to LLM
       sendToLLM(successMessage);
     } else {
+      recordFieldEvidence(specimen, result, method, notes);
+
       // Create a descriptive message about the failed collection
-      const failureMessage = `You attempted to collect the ${specimen.name} with ${method?.name}, but encountered difficulties. ${result.reason || 'The specimen evaded your efforts.'}`;
+      const failureMessage = `Collection result: ${result.reason} Darwin attempted to collect ${specimen.name} with ${method?.name}. This is a deterministic game outcome; do not reverse it. ${result.evidence ? `Usable evidence gained: ${result.evidence}.` : ''} ${notes ? `Player approach: ${notes}.` : ''}`;
       
       // Send failure message to LLM
       sendToLLM(failureMessage);
@@ -756,6 +922,133 @@ const handleOpenJournal = (specimen) => {
   setJournalOpen(true);
 };
 
+const handleSurveySite = () => {
+  const location = getCurrentLocation();
+  if (!location) return;
+  const note = buildSurveyNote({
+    location,
+    nearbySpecimenIds,
+    specimenList,
+    day: daysPassed,
+    time: formatGameTime(),
+  });
+
+  addJournalEntry(note);
+  addToGameHistory('field_notes', `FIELD SURVEY - ${location.name}: ${note.content}`);
+  advanceTime(20);
+  updateMoodAndFatigue(null, fatigue + 2);
+  refreshObjectives();
+  setNarrativeText(`You make a disciplined survey of ${location.name}, noting habitat, footing, visible life, and collecting conditions. The note is added to your field book.`);
+};
+
+const handleDocumentSpecimen = (specimen) => {
+  const location = getCurrentLocation();
+  const note = buildSpecimenDocumentationNote({
+    specimen,
+    location,
+    method: 'field observation',
+  });
+  if (!note) return;
+
+  addFieldEvidence(note);
+  advanceTime(15);
+  updateMoodAndFatigue(null, fatigue + 1);
+  refreshObjectives();
+  setCurrentSpecimen(specimen);
+  setNarrativeText(`You document ${specimen.name} in place, emphasizing habitat, behavior, condition, and distinguishing characters before deciding whether to collect it.`);
+};
+
+const getPresentSpecimenCandidates = () => {
+  const orderedIds = [
+    currentSpecimen?.id,
+    primaryCollectible,
+    ...nearbySpecimenIds,
+  ].map(canonicalSpecimenId).filter(Boolean);
+  const seen = new Set();
+
+  return orderedIds
+    .filter(id => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map(id => resolveSpecimen(specimenList, id))
+    .filter(Boolean);
+};
+
+const findPresentSpecimen = (query) => {
+  const normalizedQuery = canonicalSpecimenId(query);
+  const queryText = String(query || '').toLowerCase();
+  const candidates = getPresentSpecimenCandidates();
+  if (!queryText && candidates.length === 1) return candidates[0];
+
+  return candidates.find(specimen => (
+    canonicalSpecimenId(specimen.id) === normalizedQuery ||
+    canonicalSpecimenId(specimen.name) === normalizedQuery ||
+    specimen.name.toLowerCase().includes(queryText) ||
+    queryText.includes(specimen.name.toLowerCase()) ||
+    (specimen.keywords || []).some(keyword => queryText.includes(String(keyword).toLowerCase()))
+  )) || null;
+};
+
+const updateNearbySpecimensAfterMovement = (movementResult) => {
+  if (!movementResult?.newPosition) return;
+  const newCell = getCellByCoordinates(
+    movementResult.newPosition.x,
+    movementResult.newPosition.y
+  );
+  if (newCell && newCell.type) {
+    setNearbySpecimenIds(getVisibleEncounterIds({
+      location: newCell,
+      specimenList,
+      inventory,
+      gameTime,
+      seed: expeditionSeed
+    }));
+  } else {
+    setNearbySpecimenIds([]);
+  }
+};
+
+const handleMovementResult = (movementResult) => {
+  if (!movementResult) return false;
+
+  handleNPCsOnMovement();
+  sendToLLM(movementResult.message || "You cannot travel there.");
+
+  if (movementResult.success) {
+    if (movementResult.fatigueIncrease) {
+      updateMoodAndFatigue(null, fatigue + movementResult.fatigueIncrease);
+    }
+    if (movementResult.travelMinutes) {
+      advanceTime(movementResult.travelMinutes);
+    }
+    updateNearbySpecimensAfterMovement(movementResult);
+    updateNextStepSuggestions();
+  }
+
+  return true;
+};
+
+const handleInteriorEntry = (interiorType) => {
+  const layout = interiorLayouts[interiorType];
+  if (!layout) {
+    sendToLLM("There's nothing to enter here.");
+    return;
+  }
+
+  const currentLocation = getCurrentLocation();
+  if (currentLocation.id !== layout.exteriorLocation) {
+    sendToLLM(`The ${layout.name} is not accessible from here.`);
+    return;
+  }
+
+  const result = enterInterior(interiorType);
+  if (result.success) {
+    sendToLLM(result.message);
+  }
+};
+
 //  handlePassOut function with random NPC rescue
 const handlePassOut = () => {
   // Reset fatigue
@@ -784,49 +1077,15 @@ const handlePassOut = () => {
   // Set the rescuer as the active NPC
   setCurrentNPC(rescuer.id);
   
-  // Create the popup message
-  const popupMessage = `
-    <div class="text-center mb-4 ">
-      <p class="text-xl font-bold">Darwin collapsed from exhaustion!</p>
-      <p>You were found by ${rescuer.name}.</p>
-    </div>
-    <p>${rescuer.description}</p>
-  `;
-  
-  // Show a popup (you can use your existing popup mechanism or add this simple one)
-  // This assumes you have a way to show popups in your game
-  showPassOutPopup(popupMessage, () => {
-    // After popup is dismissed, send message to LLM about the recovery
-    sendToLLM(`Darwin collapsed from exhaustion yesterday and was found by ${rescuer.name}. It's now morning, and Darwin is recovering in ${getCurrentLocation().name}.`);
-  });
+  setPassOutEvent(rescuer);
 };
 
-// Simple popup function (if you don't already have one)
-const showPassOutPopup = (message, onClose) => {
-  // Create popup element
-  const popupOverlay = document.createElement('div');
-  popupOverlay.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50';
-  
-  const popupContent = document.createElement('div');
-  popupContent.className = 'bg-amber rounded-lg shadow-xl p-6 max-w-md mx-4';
-  popupContent.innerHTML = `
-    ${message}
-    <div class="mt-6 text-center">
-      <button class="bg-amber-700 hover:bg-amber-800 text-white py-2 px-6 rounded-lg">
-        Continue
-      </button>
-    </div>
-  `;
-  
-  popupOverlay.appendChild(popupContent);
-  document.body.appendChild(popupOverlay);
-  
-  // Add click handler to close button
-  const continueButton = popupContent.querySelector('button');
-  continueButton.addEventListener('click', () => {
-    document.body.removeChild(popupOverlay);
-    if (onClose) onClose();
-  });
+const handlePassOutContinue = () => {
+  if (!passOutEvent) return;
+  const recoveryLocation = getCurrentLocation();
+  const rescuerName = passOutEvent.name;
+  setPassOutEvent(null);
+  sendToLLM(`Darwin collapsed from exhaustion yesterday and was found by ${rescuerName}. It's now morning, and Darwin is recovering in ${recoveryLocation?.name || 'a safer place'}.`);
 };
 
 // Generic rest function that works in any valid rest location
@@ -897,13 +1156,23 @@ const handleSwitchPOV = async (prompt) => {
 
     };
     
+    const requestMeta = buildLLMRequestMeta({
+      sessionId: expeditionSeed,
+      route: '/api/generate',
+      kind: 'switch_pov',
+      gameTime,
+      locationId: currentLocationId,
+      prompt,
+    });
+
     // Call the API using the tortoise prompt
     const response = await fetch('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: requestMeta.headers,
       body: JSON.stringify({
         gameState: contextData,
         prompt: prompt,
+        idempotencyKey: requestMeta.idempotencyKey,
         isTortoiseRequest: true // flag to differentiate it
       })
     });
@@ -930,191 +1199,81 @@ const handleSwitchPOV = async (prompt) => {
   
   // Process player input
  const handlePlayerInput = async (input) => {
-  // Check for rest commands
-  const restTerms = ['rest', 'sleep', 'nap', 'lay down', 'lie down', 'make camp', 'build shelter'];
-  const isRestCommand = restTerms.some(term => input.toLowerCase().includes(term));
-  
-  // If it's a rest command and in a valid location, handle rest
-  const currentLocation = getCurrentLocation();
-  const restableLocations = ['POST_OFFICE_BAY', 'W_LAVA', 'SETTLEMENT'];
-  
-  if (isRestCommand && currentLocation && restableLocations.includes(currentLocation.id)) {
-    handleRest();
-    return;
-  }
-    // Save the input for movement detection
     setLastUserInput(input);
+    const command = routePlayerCommand(input);
 
-
-    
-    // Check for movement commands
-    const movementResult = detectMovementInText(input);
-    if (movementResult) {
-  // Check if we should remove the current NPC
-  handleNPCsOnMovement();
-  
-  if (movementResult.success) {
-    // Movement was successful
-    sendToLLM(movementResult.message);
-    
-    if (movementResult.fatigueIncrease) {
-      updateMoodAndFatigue(null, fatigue + movementResult.fatigueIncrease);
-    }
-    
-    // Update suggestions (directions)
-    updateNextStepSuggestions();
-    
-    // Update nearby specimens
-    if (movementResult.newPosition) {
-      const newCell = getCellByCoordinates(
-        movementResult.newPosition.x,
-        movementResult.newPosition.y
-      );
-      if (newCell && newCell.type) {
-        const habitatSpecimens = specimenList.filter(spec => {
-          const habitats = spec.habitat.split(', ');
-          return habitats.includes(newCell.type);
-        });
-
-        setNearbySpecimenIds(habitatSpecimens.map(s => s.id));
-      } else {
-        setNearbySpecimenIds([]);
-      }
-    }
-    
-    return;  // Stop here
-  } else {
-    // Movement was attempted but failed
-    sendToLLM(movementResult.message);
-    return;  // Stop here
-  }
-}
-
- // handling attempts to enter interior maps 
-// In GameContainer.jsx, update the handleInteriorEntry function
-
-const handleInteriorEntry = (interiorType) => {
-  const layout = interiorLayouts[interiorType];
-  if (!layout) {
-    sendToLLM("There's nothing to enter here.");
-    return;
-  }
-  
-  // Check if we can enter from current location
-  const currentLocation = getCurrentLocation();
-  if (currentLocation.id !== layout.exteriorLocation) {
-    sendToLLM(`The ${layout.name} is not accessible from here.`);
-    return;
-  }
-  
-  // Enter the interior
-  const result = enterInterior(interiorType);
-  
-  if (result.success) {
-    // The NPCs should now come from the room definition
-    // This automatically happens in getCurrentLocation
-    sendToLLM(result.message);
-  }
-};
-
-const detectInteriorEntry = (text) => {
-  if (!text) return null;
-  const lowercaseText = text.toLowerCase();
-  
-  // Patterns for entering different interiors
-  const cavePatterns = [
-    /\b(?:enter|explore|investigate|go\s+in(?:to)?|check\s+out)\s+(?:the\s+)?(?:caves?|pirate'?s?\s+caves?)\b/i,
-    /\b(?:go|head|walk)\s+(?:to|into|in)\s+(?:the\s+)?(?:caves?|pirate'?s?\s+caves?)\b/i,
-    /\bexamine\s+(?:the\s+)?cave\s+entrance\b/i
-  ];
-  
-  const shipPatterns = [
-    /\b(?:board|enter|go\s+(?:on|into|aboard)|return\s+to)\s+(?:the\s+)?(?:beagle|ship|vessel|hms\s+beagle)\b/i,
-    /\b(?:climb|go)\s+(?:up|on)\s+(?:the\s+)?(?:gangplank|ladder|aboard)\b/i,
-    /\bvisit\s+(?:the\s+)?(?:captain|fitzroy|ship|beagle)\b/i
-  ];
-  
-  const housePatterns = [
-    /\b(?:enter|go\s+in(?:to)?|visit|head\s+into)\s+(?:the\s+)?(?:governor'?s?|lawson'?s?|vice[\s-]governor'?s?)\s+(?:house|residence|home|quarters)\b/i,
-    /\b(?:accept|take\s+up)\s+lawson'?s?\s+(?:offer|invitation)\b/i,
-    /\b(?:follow|go\s+with)\s+lawson\b/i,
-    /\bmay\s+i\s+(?:come|go|enter|visit)\s+in(?:side)?\b/i
-  ];
-  
-  // Check each pattern
-  for (const pattern of cavePatterns) {
-    if (pattern.test(lowercaseText)) return 'cave';
-  }
-  
-  for (const pattern of shipPatterns) {
-    if (pattern.test(lowercaseText)) return 'hms_beagle';
-  }
-  
-  for (const pattern of housePatterns) {
-    if (pattern.test(lowercaseText)) return 'governors_house';
-  }
-  
-  return null;
-};
-
-const interiorType = detectInteriorEntry(input);
-if (interiorType) {
-  handleInteriorEntry(interiorType);
-  return;
-}
-    
-    // Check for collect command
-    const collectMatch = input.match(/collect\s+(.+)/i);
-    if (collectMatch && collectMatch[1]) {
-      const specimenName = collectMatch[1].toLowerCase();
-      
-      // Find matching specimen
-      const specimenToCollect = specimenList.find(s => 
-        s.name.toLowerCase().includes(specimenName) || 
-        s.id.toLowerCase() === specimenName ||
-        s.keywords.some(k => specimenName.includes(k.toLowerCase()))
-      );
-      
-      if (specimenToCollect && !specimenToCollect.collected) {
-        handleCollectNearbySpecimen(specimenToCollect.id);
+    switch (command.type) {
+      case 'empty':
+        return;
+      case 'rest': {
+        const currentLocation = getCurrentLocation();
+        const restableLocations = ['POST_OFFICE_BAY', 'W_LAVA', 'SETTLEMENT'];
+        if (currentLocation && restableLocations.includes(currentLocation.id)) {
+          handleRest();
+        } else {
+          sendToLLM("Darwin looks for shelter, but this place offers no sensible rest. He should return to the Beagle, the settlement, or the whaler's huts before exhausting himself.");
+        }
         return;
       }
-    }
-
-
-    
-    // Handle command patterns
-    if (input.startsWith('/move ')) {
-      const locationId = input.replace('/move ', '').trim();
-      const moveResult = moveToLocation(locationId);
-      if (moveResult.success) {
-        sendToLLM(moveResult.message);
-        updateMoodAndFatigue(null, fatigue + (moveResult.fatigueIncrease || 5));
-        updateNextStepSuggestions();
-      } else {
-        sendToLLM(moveResult.message);
-      }
-      return;
-    } else if (input.startsWith('/collect ')) {
-      const specimenId = input.replace('/collect ', '').trim();
-      const collectDesc = collectSpecimen(specimenId);
-      if (collectDesc) {
-        sendToLLM(collectDesc);
-      }
-      return;
-    } else if (input.startsWith('/use ')) {
-      const parts = input.replace('/use ', '').split(' on ');
-      if (parts.length === 2) {
-        const toolDesc = useScientificTool(parts[0].trim(), parts[1].trim());
-        if (toolDesc) {
-          sendToLLM(toolDesc);
+      case 'survey_site':
+        handleSurveySite();
+        return;
+      case 'document_specimen': {
+        const specimen = findPresentSpecimen(command.query) || selectDocumentableSpecimen({
+          primaryCollectible,
+          nearbySpecimenIds,
+          specimenList,
+        });
+        if (specimen) {
+          handleDocumentSpecimen(specimen);
+        } else {
+          sendToLLM("Darwin has no clearly visible specimen to document here. Survey the site first or move to a richer habitat.");
         }
+        return;
       }
-      return;
+      case 'check_traps':
+        handleCheckTraps();
+        return;
+      case 'abandon_trap': {
+        const location = getCurrentLocation();
+        const trapHere = traps.find(trap => trap.locationId === location?.id && trap.status === 'set');
+        if (trapHere) {
+          handleAbandonTrap(trapHere.id);
+        } else {
+          sendToLLM("Darwin finds no active trap to abandon at this site.");
+        }
+        return;
+      }
+      case 'enter_interior':
+        handleInteriorEntry(command.interiorType);
+        return;
+      case 'move_direction':
+        handleMovementResult(handleMove(command.direction));
+        return;
+      case 'move_location':
+        handleMovementResult(moveToLocation(command.locationId));
+        return;
+      case 'collect_specimen': {
+        const specimen = findPresentSpecimen(command.query);
+        if (specimen && !specimen.collected) {
+          handleCollectNearbySpecimen(specimen.id);
+        } else {
+          sendToLLM("Darwin cannot responsibly collect that specimen from here. He must first locate it in the field or select a visible specimen nearby.");
+        }
+        return;
+      }
+      case 'use_tool': {
+        const toolDesc = useScientificTool(command.tool, command.target);
+        if (toolDesc) sendToLLM(toolDesc);
+        else sendToLLM(`Darwin cannot find a sensible way to use ${command.tool} on ${command.target}.`);
+        return;
+      }
+      case 'open_journal':
+        setJournalOpen(true);
+        return;
+      default:
+        await sendToLLM(input);
     }
-    
-    // Process all other inputs
-    await sendToLLM(input);
   };
 
 
@@ -1124,7 +1283,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
   // Set the movement flag (KEEP THIS LINE)
   setIsMovingViaMap(true);
 
-  console.log(`Player clicked: ${locationIdOrDirection}`);
+  debugLog(`Player clicked: ${locationIdOrDirection}`);
   
   // Check if this is an interior location
   const interiorIDs = ['cave', 'hms_beagle', 'governors_house', 'watkins_cabin', 'whalers_hut'];
@@ -1158,7 +1317,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
   } else {
     // Otherwise treat as a location ID
     moveResult = moveToLocation(locationIdOrDirection);
-    console.log("After moveToLocation, result:", moveResult);
+    debugLog("After moveToLocation, result:", moveResult);
   }
 
   // Handle any NPC changes
@@ -1174,6 +1333,9 @@ const handleMapLocationClick = (locationIdOrDirection) => {
     if (moveResult.fatigueIncrease) {
       updateMoodAndFatigue(null, fatigue + moveResult.fatigueIncrease);
     }
+    if (moveResult.travelMinutes) {
+      advanceTime(moveResult.travelMinutes);
+    }
     
     // Update nearby specimens context
     const newCell = getCellByCoordinates(
@@ -1182,14 +1344,13 @@ const handleMapLocationClick = (locationIdOrDirection) => {
     );
     
     if (newCell && newCell.type) {
-      // Find specimens for this habitat type
-      const habitatSpecimens = specimenList.filter(specimen => {
-        const habitats = specimen.habitat.split(', ');
-        return habitats.includes(newCell.type);
-      });
-      
-      // Update nearby specimens state
-      setNearbySpecimenIds(habitatSpecimens.map(specimen => specimen.id));
+      setNearbySpecimenIds(getVisibleEncounterIds({
+        location: newCell,
+        specimenList,
+        inventory,
+        gameTime,
+        seed: expeditionSeed
+      }));
     }
     
     // Update suggestions based on new location
@@ -1229,13 +1390,23 @@ const handleMapLocationClick = (locationIdOrDirection) => {
       // Memory prompt
       const memoryPrompt = `Recall a self-loathing, elliptical, cryptic, or confused memory SPECIFICALLY related to your current situation, dilemma, or observations in ${contextData.location}. The memory should directly relate to the most eventful or important thing that has just occurred.`;
       
+      const requestMeta = buildLLMRequestMeta({
+        sessionId: expeditionSeed,
+        route: '/api/generate',
+        kind: 'memory',
+        gameTime,
+        locationId: currentLocationId,
+        prompt: memoryPrompt,
+      });
+
       // Call API
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: requestMeta.headers,
         body: JSON.stringify({ 
           prompt: memoryPrompt,
           gameState: contextData,
+          idempotencyKey: requestMeta.idempotencyKey,
           isMemoryRequest: true
         })
       });
@@ -1280,7 +1451,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
   const fatigueMatch = response.match(/\[FATIGUE:\s*(\d+)\]/);
   if (fatigueMatch && fatigueMatch[1]) {
     const fatigueDelta = parseInt(fatigueMatch[1]);
-    console.log(`Adding fatigue increment: ${fatigueDelta}`);
+    debugLog(`Adding fatigue increment: ${fatigueDelta}`);
     
     // Get current fatigue and add the new delta
     const currentFatigue = fatigue; // This already has previous accumulated fatigue
@@ -1305,10 +1476,10 @@ const handleMapLocationClick = (locationIdOrDirection) => {
   // Extract primary collectible for the collection button with improved hybrid handling
   const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
   if (collectibleMatches && collectibleMatches.length > 0) {
-    const primaryCollectible = collectibleMatches[0]
+    const primaryCollectible = canonicalSpecimenId(collectibleMatches[0]
       .replace('[COLLECTIBLE:', '')
       .replace(']', '')
-      .trim();
+      .trim());
     
     // Check if this is a hybrid specimen ID
     const hybridSpecimen = specimenList.find(s => 
@@ -1319,7 +1490,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
     );
     
     if (hybridSpecimen) {
-      console.log(`Found hybrid specimen as collectible: ${hybridSpecimen.name} (${hybridSpecimen.id})`);
+      debugLog(`Found hybrid specimen as collectible: ${hybridSpecimen.name} (${hybridSpecimen.id})`);
       setPrimaryCollectible(hybridSpecimen.id);
     } else {
       // Regular specimen handling
@@ -1333,7 +1504,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
     const npcId = npcMatch[1].trim();
     // If NPC is null or empty, clear the current NPC
     if (npcId === 'null' || npcId === '') {
-      console.log("NPC dismissed based on LLM response");
+      debugLog("NPC dismissed based on LLM response");
       setCurrentNPC(null);
       setVisibleNPCs([]);
     } else if (npcId !== 'null' && !currentNPC) {
@@ -1356,7 +1527,7 @@ const handleMapLocationClick = (locationIdOrDirection) => {
   );
   
   if (userDismissalAttempt && currentNPC) {
-    console.log("User explicitly dismissed NPC");
+    debugLog("User explicitly dismissed NPC");
     setCurrentNPC(null);
     setVisibleNPCs([]);
   }
@@ -1370,18 +1541,33 @@ if (stepsSection && stepsSection[1]) {
   const lines = stepsText.split('\n').filter(line => line.trim().startsWith('-'));
   
   if (lines.length > 0) {
-    const currentLocation = getCurrentLocation();
-    const newSuggestions = lines.map(line => {
+    const narrativeSuggestions = lines.map(line => {
       const stepText = line.replace(/^-\s*/, '').trim();
       
       return {
         text: stepText,
-        action: stepText
+        action: stepText,
+        kind: 'narrative',
       };
     });
     
-    if (newSuggestions.length > 0) {
-      setNextStepSuggestions(newSuggestions);
+    if (narrativeSuggestions.length > 0) {
+      const stateSuggestions = buildActionSuggestions({
+        location: getCurrentLocation(),
+        validDirections: getValidDirections(),
+        primaryCollectible,
+        nearbySpecimenIds,
+        specimenList,
+        currentSpecimen,
+        inventory,
+        fatigue,
+        traps,
+        objectives,
+        gameTime,
+        daysPassed,
+        maxSuggestions: 4,
+      });
+      setNextStepSuggestions(mergeActionSuggestions(stateSuggestions, narrativeSuggestions, 4));
     }
   }
 }
@@ -1526,13 +1712,23 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
     // Save the raw prompt for transparency
     setRawLLMPrompt(enhancedInput);
     
+    const requestMeta = buildLLMRequestMeta({
+      sessionId: expeditionSeed,
+      route: '/api/generate',
+      kind: 'main_turn',
+      gameTime,
+      locationId: currentLocationId,
+      prompt: enhancedInput,
+    });
+
     // Call API
     const response = await fetch('/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: requestMeta.headers,
       body: JSON.stringify({
         gameState: contextData,
-        prompt: enhancedInput
+        prompt: enhancedInput,
+        idempotencyKey: requestMeta.idempotencyKey
       })
     });
     
@@ -1678,11 +1874,40 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
             )}
           </div>
           
+          {savedExpeditionSummary && (
+            <div className="mb-4 mx-auto max-w-xl rounded-lg border border-amber-300 bg-white/80 p-3 text-left text-sm text-amber-950">
+              <div className="font-semibold">Saved expedition available</div>
+              <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-amber-800">
+                <span>Day {savedExpeditionSummary.day}, {savedExpeditionSummary.time}</span>
+                <span>Location: {savedExpeditionSummary.locationId}</span>
+                <span>{savedExpeditionSummary.specimens} specimens</span>
+                <span>{savedExpeditionSummary.notes} field notes</span>
+                <span>{savedExpeditionSummary.objectivesComplete}/{savedExpeditionSummary.objectivesTotal} objectives</span>
+                <span>Fatigue {savedExpeditionSummary.fatigue}/100</span>
+              </div>
+            </div>
+          )}
+
+          {continueMessage && (
+            <p className="mb-3 text-sm text-red-700">{continueMessage}</p>
+          )}
+
           {/* Begin Expedition Button - Now centered */}
-          <div className="flex justify-center">
+          <div className="flex flex-col sm:flex-row justify-center gap-3">
+            <button
+              className={`py-4 px-8 rounded-lg font-medium relative z-10 text-lg transition-all focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-opacity-50 border border-amber-300 ${
+                savedExpeditionSummary
+                  ? 'transform hover:scale-105 bg-white/90 text-amber-900'
+                  : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+              }`}
+              onClick={handleContinueSavedExpedition}
+              disabled={!savedExpeditionSummary}
+            >
+              Continue Saved Expedition
+            </button>
             <button 
               className="py-4 px-10 rounded-lg font-medium relative z-10 text-lg transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-opacity-50 group flex items-center gap-2"
-              onClick={startGame}
+              onClick={handleStartNewExpedition}
               style={{
                 backgroundColor: 'rgb(var(--darwin-primary))',
                 color: 'white',
@@ -1690,7 +1915,7 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
               }}
             >
               <span className="absolute inset-0 w-full h-full bg-white rounded-lg opacity-0 group-hover:opacity-10 transition-opacity"></span>
-              Begin Expedition
+              Start New Expedition
               {hybridityMode !== 'none' && (
                 <span className="ml-2 text-sm bg-amber-300 text-amber-800 px-2 py-1 rounded-full">
                   🧬 {hybridityMode === 'extreme' ? 'Extreme' : 'Mild'} Hybrids
@@ -1704,13 +1929,64 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
   );
 }
   
+  const currentLocation = getCurrentLocation();
+  const primaryActionSpecimen = primaryCollectible
+    ? resolveSpecimen(specimenList, primaryCollectible)
+    : null;
+  const documentableSpecimen = selectDocumentableSpecimen({
+    primaryCollectible,
+    nearbySpecimenIds,
+    specimenList,
+  });
+  const activeConversationNPC = currentNPC
+    ? npcs.find(n => n.id === currentNPC)
+    : null;
+  const trapsSetHere = traps.some(trap => trap.locationId === currentLocation?.id && trap.status === 'set');
+  const hasPrimaryActions = Boolean(
+    trapsSetHere ||
+    (primaryActionSpecimen && !primaryActionSpecimen.collected) ||
+    activeConversationNPC ||
+    visibleNPCs.length > 0
+  );
+  const secondaryActionSuggestions = [];
+  const addSecondarySuggestion = (suggestion) => {
+    if (!suggestion?.text || !suggestion?.action) return;
+    const key = `${suggestion.text}:${suggestion.action}`.toLowerCase();
+    if (secondaryActionSuggestions.some(item => `${item.text}:${item.action}`.toLowerCase() === key)) return;
+    secondaryActionSuggestions.push(suggestion);
+  };
+
+  if (currentLocation) {
+    addSecondarySuggestion({
+      text: 'Survey site',
+      action: 'Survey the site',
+      kind: 'survey',
+    });
+  }
+  if (documentableSpecimen) {
+    addSecondarySuggestion({
+      text: `Document ${documentableSpecimen.name}`,
+      action: `Document ${documentableSpecimen.name}`,
+      kind: 'evidence',
+    });
+  }
+  nextStepSuggestions
+    .filter(suggestion => (
+      !['specimen', 'trap', 'npc', 'conversation'].includes(suggestion?.kind) &&
+      !/^collect\b/i.test(suggestion?.text || '') &&
+      !/^talk\b/i.test(suggestion?.text || '') &&
+      !/^check\b/i.test(suggestion?.text || '')
+    ))
+    .forEach(addSecondarySuggestion);
+  const visibleSecondaryActions = secondaryActionSuggestions.slice(0, 4);
+
   // Main game screen
   return (
-    <div className="max-w-7xl mx-auto p-4 min-h-screen bg-darwin-light relative">
+    <div className="game-shell bg-darwin-light relative">
 
    <HamburgerMenu />
       
-      <div className="darwin-panel p-4 mb-3 bg-amber-50 relative overflow-hidden shadow-lg rounded-lg">
+      <div className="darwin-panel game-hero mb-3 bg-amber-50 relative overflow-hidden shadow-sm rounded-lg">
         {/* Banner image */}
         <BannerImage 
   location={isInInterior ? currentInteriorRoom?.name : getCurrentLocation()?.name}
@@ -1720,35 +1996,35 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
 
 
         {/* Text container for title & details */}
-        <div className="relative z-10 flex flex-col items-center text-center">
+        <div className="relative z-10 flex min-h-[inherit] flex-col items-center justify-center px-3 py-5 text-center sm:px-5">
           
           {/* Title */}
-          <h1 className="text-3xl font-bold text-white font-serif uppercase tracking-wide px-8 py-3 
-            bg-black/60 rounded-lg shadow-xl backdrop-blur-md inline-block">
+          <h1 className="game-hero-title font-bold text-white font-serif uppercase px-4 py-3 
+            bg-black/65 rounded-md shadow-lg backdrop-blur-md inline-block sm:px-6">
             YOUNG DARWIN: 1835
           </h1>
 
           {/* Subtitle - Date & Location */}
-          <div className="mt-2 text-lg text-white font-serif px-6 py-2 bg-black/30 rounded-md shadow-md 
+          <div className="game-hero-meta mt-2 text-white font-serif px-4 py-2 bg-black/40 rounded-md shadow-md 
             inline-block opacity-95 backdrop-blur-md">
             {formatGameTime()} • Day {daysPassed} • Isla Floreana (Charles Island), Galápagos
           </div>
 
           {/* Decorative Line & Expedition Text */}
-          <div className="flex items-center justify-center mt-3">
-            <div className="w-24 h-px bg-white/40"></div>
-            <div className="mx-3 text-sm text-white/80 font-medium px-6 bg-black/30 rounded-md shadow-md tracking-wide uppercase
+          <div className="mt-3 hidden items-center justify-center sm:flex">
+            <div className="w-16 h-px bg-white/45 md:w-24"></div>
+            <div className="mx-3 text-xs text-white/90 font-medium px-4 py-1.5 bg-black/35 rounded-md shadow-md uppercase
             inline-block opacity-98 backdrop-blur-md">
               HMS Beagle Expedition
             </div>
-            <div className="w-24 h-px bg-white/40"></div>
+            <div className="w-16 h-px bg-white/45 md:w-24"></div>
           </div>
         </div>
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div className="game-main-grid">
         {/* Left column - Portrait and Map */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
+        <div className="game-side-column order-2 lg:order-1">
           <Portrait 
             character={currentNPC || 'darwin'} 
             status={darwinMood} 
@@ -1828,11 +2104,8 @@ Remember to respond as if you are Darwin's first-person perspective, using secon
                      interiorType === 'watkins_cabin' ? 'watkinscabin' :
                     interiorType;
     
-    // Get specimens matching this interior type
-    const matchingSpecimens = specimenList.filter(s => 
-      s.habitat && s.habitat.split(', ').includes(roomType)
-    );
-    console.log(`Found ${matchingSpecimens.length} specimens for ${roomType}: `, 
+    const matchingSpecimens = specimenList.filter(s => habitatMatches(s, roomType));
+    debugLog(`Found ${matchingSpecimens.length} specimens for ${roomType}: `, 
       matchingSpecimens.map(s => s.name));
     
     setNearbySpecimenIds(matchingSpecimens.map(s => s.id));
@@ -1874,126 +2147,110 @@ if (interiorType === 'whalers_hut' && roomId === 'HUT_MAIN') {
   />
 )}
 
+         <ExpeditionStatusPanel />
+         <TrapLedger
+           traps={traps}
+           specimenList={specimenList}
+           locations={islandGrid}
+           tools={collectionTools}
+           currentLocationId={currentLocationId}
+           gameTime={gameTime}
+           daysPassed={daysPassed}
+           onCheckTrap={handleCheckTraps}
+           onAbandonTrap={handleAbandonTrap}
+         />
+
          <EnhancedEventHistory /> 
     
-                 
-          {/* Memory Button */}
-          <div className="darwin-panel p-3">
-            <h3 className="font-bold text-darwin-dark text-center text-xl mb-3 font-serif">Darwin's Thoughts</h3>
-            <p className="text-sm text-gray-600 mb-2">Reflect on your past experiences and early scientific training.</p>
-            <div className="flex justify-center">
-              <MemoryButton 
-                onRequestMemory={handleRequestMemory}
-                isDisabled={isLoadingMemory}
-              />
-            </div>
-          </div>
         </div>
 
 
         
         {/* Center column - Game narrative */}
-        <div className="lg:col-span-6 darwin-panel p-0 min-h-[500px] flex flex-col">
+        <div className="order-1 lg:order-2 darwin-panel game-narrative-panel p-0">
+          {hasPrimaryActions && (
+            <div className="shrink-0 border-b border-amber-200 bg-stone-50/80 px-3 py-2.5 sm:px-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {trapsSetHere && (
+                  <button
+                    type="button"
+                    onClick={() => handleCheckTraps()}
+                    className="rounded-md border border-stone-400 bg-white/85 px-3 py-2 text-sm font-semibold text-stone-800 shadow-sm transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isLoading}
+                  >
+                    Check traps
+                  </button>
+                )}
 
-          {/* Primary collectible Specimen Button */}
-      {primaryCollectible && (
-  <div className="bg-amber-100 border-b border-amber-300 p-3 flex justify-center">
-    <div className="text-center">
-      <p className="text-sm text-amber-800 mb-2">
-        You notice a specimen nearby worth collecting
-      </p>
-      <div className="flex flex-wrap gap-2 justify-center">
-        {(() => {
-          const specimen = specimenList.find(s => s.id === primaryCollectible && !s.collected);
-          return specimen ? (
-            <button
-              key={specimen.id}
-              onClick={() => handleOpenCollectionPopup(specimen.id)}
-              className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 flex items-center"
-            >
-              <span className="mr-2">{getSpecimenIcon(specimen.id)}</span>
-              Collect {specimen.name}
-            </button>
-          ) : null;
-        })()}
-      </div>
-    </div>
-  </div>
-)}
-          
-{/* NPC Interaction Section - Consolidated */}
-{/* Case 1: Active conversation - show conversation indicator */}
-{currentNPC ? (
-  <div className="bg-emerald-100 border-b border-emerald-300 p-3 flex flex-col items-center">
-    <p className="text-sm text-emerald-800 mb-2">
-      You are conversing with {npcs.find(n => n.id === currentNPC)?.name || "someone"}
-    </p>
-    <button
-      onClick={() => {
-        setCurrentNPC(null);
-        setVisibleNPCs([]);
-        sendToLLM("End conversation and continue exploration");
-      }}
-      className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs px-2 py-1 rounded border border-amber-300"
-    >
-      End conversation
-    </button>
-  </div>
-) : (
-  /* Case 2: No active conversation but NPCs nearby - show talk buttons */
-  visibleNPCs.length > 0 && (
-    <div className="bg-emerald-100 border-b border-emerald-300 p-3 flex justify-center">
-      <div className="text-center">
-        <p className="text-sm text-emerald-800 mb-2">
-          You notice {visibleNPCs.length > 1 ? 'people' : 'someone'} nearby you could talk to
-        </p>
-        <div className="flex flex-wrap gap-2 justify-center">
-          {visibleNPCs.map(id => {
-            const npc = npcs.find(n => n.id === id);
-            return npc ? (
-              <button
-                key={id}
-                onClick={() => handleTalkToNPC(id)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 flex items-center"
-              >
-                <span className="mr-2">💬</span>
-                Talk to {npc.name}
-              </button>
-            ) : null;
-          })}
-        </div>
-      </div>
-    </div>
-  )
-)}
-          
-          <GameLog 
-          narrative={narrativeText} 
-          isLoading={isLoading} 
-          lastUserInput={lastUserInput} 
-          isMovingViaMap={isMovingViaMap} 
+                {primaryActionSpecimen && !primaryActionSpecimen.collected && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCollectionPopup(primaryActionSpecimen.id)}
+                    className="rounded-md border border-amber-700 bg-amber-700 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isLoading}
+                  >
+                    <span className="mr-2">{getSpecimenIcon(primaryActionSpecimen.id)}</span>
+                    Collect {primaryActionSpecimen.name}
+                  </button>
+                )}
 
-          />
+                {activeConversationNPC ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentNPC(null);
+                      setVisibleNPCs([]);
+                      sendToLLM("End conversation and continue exploration");
+                    }}
+                    className="rounded-md border border-emerald-700 bg-white/85 px-3 py-2 text-sm font-semibold text-emerald-900 shadow-sm transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isLoading}
+                  >
+                    End talk with {activeConversationNPC.name}
+                  </button>
+                ) : (
+                  visibleNPCs.map(id => {
+                    const npc = npcs.find(n => n.id === id);
+                    return npc ? (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => handleTalkToNPC(id)}
+                        className="rounded-md border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isLoading}
+                      >
+                        Talk to {npc.name}
+                      </button>
+                    ) : null;
+                  })
+                )}
+              </div>
+            </div>
+          )}
 
-<LLMTransparency rawResponse={rawLLMResponse} rawPrompt={rawLLMPrompt} />
-  
-
-
-          <div className="mt-auto p-4 bg-amber-50 border-t border-amber-200">
-            <PlayerInput 
-              onSubmit={handlePlayerInput} 
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <GameLog
+              narrative={narrativeText}
               isLoading={isLoading}
-              suggestions={nextStepSuggestions}
+              lastUserInput={lastUserInput}
+              isMovingViaMap={isMovingViaMap}
+            />
+          </div>
+
+          <div className="game-input-dock shrink-0 border-t border-amber-200 bg-[rgb(var(--parchment-light))]/95 p-2 shadow-[0_-8px_18px_rgba(74,55,40,0.08)] backdrop-blur sm:p-4">
+
+            <PlayerInput
+              onSubmit={handlePlayerInput}
+              isLoading={isLoading}
+              suggestions={visibleSecondaryActions}
               rawResponse={rawLLMResponse}
               rawPrompt={rawLLMPrompt}
+              showSuggestions={visibleSecondaryActions.length > 0}
             />
-
-
           </div>
-        </div>
+	        </div>
         
         {/* Right column - Weather and Specimen collection */}
-        <div className="lg:col-span-3 flex flex-col gap-3">
+        <div className="game-side-column order-3">
 
 
   {/*  weather/time display */}
@@ -2050,20 +2307,20 @@ gameTime={gameTime}
 
   {/* Collection Popup - Enhanced Version with Hybrid Support */}
 {showCollectionPopup && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-darwin-light max-w-lg w-full rounded-lg overflow-hidden shadow-xl border border-darwin-secondary/60">
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end justify-center z-50 p-2 sm:items-center sm:p-4">
+    <div className="bg-darwin-light max-w-lg w-full max-h-[94dvh] rounded-lg overflow-hidden shadow-xl border border-darwin-secondary/60 flex flex-col">
       {/* Specimen Header with Image */}
       <div className="relative">
         {/* Specimen Image */}
-        <div className="w-full h-64 relative overflow-hidden">
+        <div className="w-full h-44 relative overflow-hidden sm:h-64">
           {(() => {
-            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const currentSpecimen = resolveSpecimen(specimenList, collectingSpecimenId);
             const isHybrid = currentSpecimen?.isHybrid;
             
             return isHybrid ? (
               <HybridSpecimenImage 
                 specimen={currentSpecimen}
-                className="w-full h-80"
+                className="w-full h-full"
                 size="full"
                 disableGeneration={false}
               />
@@ -2091,15 +2348,15 @@ gameTime={gameTime}
         </div>
         
         {/* Title Overlay with white text and shadow */}
-        <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
+        <div className="absolute bottom-0 left-0 right-0 p-4 text-white sm:p-5">
           {(() => {
-            const currentSpecimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const currentSpecimen = resolveSpecimen(specimenList, collectingSpecimenId);
             return (
               <>
-                <h3 className="font-bold text-3xl mb-1 tracking-wide text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)]">
+                <h3 className="font-bold text-2xl mb-1 text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)] sm:text-3xl">
                   Collect {currentSpecimen?.name}
                 </h3>
-                <p className="italic text-white/80 text-lg font-serif drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                <p className="italic text-white/80 text-base font-serif drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:text-lg">
                   {currentSpecimen?.latin || ''}
                 </p>
                 {currentSpecimen?.isHybrid && (
@@ -2116,10 +2373,11 @@ gameTime={gameTime}
       </div>
       
       {/* Specimen Context Information - Redesigned */}
-      <div className="p-5 bg-gradient-to-r from-amber-200/40 to-amber-100/70 border-b border-amber-200/60">
+      <div className="min-h-0 overflow-y-auto">
+      <div className="p-4 bg-gradient-to-r from-amber-200/40 to-amber-100/70 border-b border-amber-200/60 sm:p-5">
         <div className="flex flex-col gap-3">
           {(() => {
-            const specimen = specimenList.find(s => s.id === collectingSpecimenId);
+            const specimen = resolveSpecimen(specimenList, collectingSpecimenId);
             if (!specimen) return null;
             
             // Scientific Value narrative
@@ -2162,8 +2420,8 @@ gameTime={gameTime}
       </div>
       
       {/* Collection Methods - Enhanced Styling */}
-      <div className="p-5 pb-4 bg-cream-100">
-        <h4 className="text-lg text-darwin-dark font-medium mb-4 border-b border-amber-200 pb-2 flex items-center">
+      <div className="p-4 pb-4 bg-amber-50/50 sm:p-5">
+        <h4 className="text-base text-darwin-dark font-medium mb-4 border-b border-amber-200 pb-2 flex items-center sm:text-lg">
           <span className="bg-darwin-primary/10 rounded-full w-7 h-7 flex items-center justify-center mr-2">
             <span className="text-darwin-primary text-sm font-bold">1</span>
           </span>
@@ -2176,10 +2434,10 @@ gameTime={gameTime}
               key={method.id}
               onClick={() => setSelectedMethod(method)}
               className={`
-                relative p-3 rounded-md flex flex-col items-center justify-center transition-all duration-300
+                relative min-h-24 p-3 rounded-md flex flex-col items-center justify-center transition-all duration-200
                 ${selectedMethod?.id === method.id 
-                  ? 'bg-amber-800 text-white shadow-md transform scale-105 border-2 border-amber-600' 
-                  : 'bg-amber-50 text-darwin-dark border border-2 border-amber-00/40 hover:bg-amber-100 hover:shadow-md'
+                  ? 'bg-amber-800 text-white shadow-md border-2 border-amber-600' 
+                  : 'bg-amber-50 text-darwin-dark border-2 border-amber-200/70 hover:bg-amber-100 hover:shadow-md'
                 }
               `}
             >
@@ -2198,7 +2456,17 @@ gameTime={gameTime}
           ))}
         </div>
 
-        <h4 className="text-lg text-darwin-dark font-medium mb-3 flex items-center">
+        <CollectionMethodPreview
+          specimen={resolveSpecimen(specimenList, collectingSpecimenId)}
+          method={selectedMethod}
+          approach={collectionNotes}
+          location={getCurrentLocation()}
+          fatigue={fatigue}
+          gameTime={gameTime}
+          seed={expeditionSeed}
+        />
+
+        <h4 className="text-base text-darwin-dark font-medium mb-3 flex items-center sm:text-lg">
           <span className="bg-darwin-primary/10 rounded-full w-7 h-7 flex items-center justify-center mr-2">
             <span className="text-darwin-primary text-sm font-bold">2</span>
           </span>
@@ -2207,7 +2475,7 @@ gameTime={gameTime}
         
         <div className="mb-5">
           <textarea
-            className="w-full p-4 rounded-md border border-amber-200 focus:border-amber-500 focus:ring-2 focus:ring-amber-400/30 bg-white shadow-inner"
+            className="w-full p-3 rounded-md border border-amber-200 focus:border-amber-500 focus:ring-2 focus:ring-amber-400/30 bg-white shadow-inner sm:p-4"
             rows={3}
             placeholder="Describe how you'll approach the collection (e.g., 'I move slowly and quietly to avoid startling the animal')"
             value={collectionNotes}
@@ -2215,13 +2483,21 @@ gameTime={gameTime}
           />
         </div>
         
-        <div className="flex justify-between gap-3 mt-6">
+        <div className="grid grid-cols-1 gap-2 mt-6 sm:flex sm:justify-between sm:gap-3">
           <button
             className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 px-4 rounded-md transition-colors border border-gray-300 font-medium"
             onClick={() => setShowCollectionPopup(false)}
           >
             Cancel
           </button>
+          {selectedMethod && ['snare', 'insect_net'].includes(selectedMethod.id) && (
+            <button
+              className="flex-1 bg-stone-700 hover:bg-stone-800 text-white py-3 px-4 rounded-md transition-colors font-medium"
+              onClick={handleSetTrapConfirm}
+            >
+              Set Trap
+            </button>
+          )}
           <button
             className={`
               flex-1 py-3 px-4 rounded-md transition-all duration-200 font-medium
@@ -2238,6 +2514,7 @@ gameTime={gameTime}
               : 'Select a method'}
           </button>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -2277,9 +2554,37 @@ gameTime={gameTime}
   onAttemptCollection={handleOpenCollectionPopup}
 />
 
+{passOutEvent && (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="bg-amber-50 rounded-lg border-2 border-amber-700 shadow-xl max-w-lg w-full p-6">
+      <div className="text-center mb-4">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-700">
+          <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
+          </svg>
+        </div>
+        <h3 className="text-xl font-bold text-amber-950 font-serif">Darwin Collapsed From Exhaustion</h3>
+        <p className="mt-1 text-sm text-amber-800">You were found by {passOutEvent.name}.</p>
+      </div>
+      <p className="text-sm leading-relaxed text-gray-800 font-serif">
+        {passOutEvent.description}
+      </p>
+      <div className="mt-6 flex justify-center">
+        <button
+          type="button"
+          onClick={handlePassOutContinue}
+          className="bg-amber-700 hover:bg-amber-800 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
 {/* Fatigue Warning Popup */}
 {showFatigueWarning && (
-  <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-lg z-50 max-w-md">
+  <div className="fixed inset-x-3 top-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-lg z-50 sm:left-1/2 sm:right-auto sm:top-20 sm:w-full sm:max-w-md sm:-translate-x-1/2">
     <div className="flex">
       <div className="py-1">
         <svg className="h-6 w-6 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2299,8 +2604,8 @@ gameTime={gameTime}
   onClose={() => setJournalOpen(false)}
   specimen={journalSpecimen}
   onSave={(entry) => {
-    console.log('Journal entry saved:', entry);
-    // Any additional logic
+    debugLog('Journal entry saved:', entry);
+    addJournalEntry(entry);
   }}
 />
 

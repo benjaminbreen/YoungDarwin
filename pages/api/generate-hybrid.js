@@ -1,4 +1,7 @@
 // pages/api/generate-hybrid.js
+import { generateLLMText } from '../../utils/server/llmProvider';
+import { getRequestIdentity } from '../../utils/server/llmSafety';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -12,17 +15,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ 
         error: 'Missing required parameters',
         required: ['parent1', 'parent2', 'taxonomicGroup']
-      });
-    }
-    
-    // Validate API key exists
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.warn("API key is missing - using fallback hybrid generation");
-      // Return a fallback hybrid since we can't call the LLM
-      return res.status(200).json({ 
-        hybrid: createFallbackHybrid(parent1, parent2, taxonomicGroup, hybridityMode),
-        source: 'fallback'
       });
     }
     
@@ -97,38 +89,34 @@ export default async function handler(req, res) {
         }
       `;
     
-    // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a scientific assistant specializing in evolutionary biology and taxonomy for a ${isExtreme ? 'creative alternative history' : 'realistic, educational historical'} simulation game.`
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: isExtreme ? 0.9 : 0.7, // More creativity for extreme mode
-        max_tokens: 800 // Increased token limit for more detailed responses
-      })
+    const identity = getRequestIdentity({
+      req,
+      route: '/api/generate-hybrid',
+      prompt,
+      idempotencyKey: req.body?.idempotencyKey || `${parent1.id || parent1.name}:${parent2.id || parent2.name}:${taxonomicGroup}:${hybridityMode}`,
     });
-    
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('API error:', errorData);
-      throw new Error(`API returned status ${response.status}`);
+
+    const llmResult = await generateLLMText({
+      model: process.env.YOUNG_DARWIN_HYBRID_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.4-nano',
+      route: '/api/generate-hybrid',
+      sessionId: identity.sessionId,
+      idempotencyKey: identity.idempotencyKey,
+      systemPrompt: `You are a scientific assistant specializing in evolutionary biology and taxonomy for a ${isExtreme ? 'creative alternative history' : 'realistic, educational historical'} simulation game.`,
+      userPrompt: prompt,
+      temperature: isExtreme ? 0.9 : 0.7,
+      maxTokens: 800,
+    });
+
+    if (llmResult.blocked) {
+      return res.status(200).json({
+        hybrid: createFallbackHybrid(parent1, parent2, taxonomicGroup, hybridityMode),
+        source: 'fallback',
+        blocked: true,
+        reason: llmResult.reason,
+      });
     }
     
-    const data = await response.json();
-    const hybridContent = data.choices[0].message.content;
+    const hybridContent = llmResult.text || '';
     
     // Extract JSON from the response
     let hybrid;
@@ -143,39 +131,33 @@ export default async function handler(req, res) {
       }
     } catch (error) {
       console.error('Error parsing hybrid JSON:', error);
-      console.log('Raw response:', hybridContent);
       
       // Use fallback if JSON parsing fails
       hybrid = createFallbackHybrid(parent1, parent2, taxonomicGroup, hybridityMode);
     }
-    
-    if (hybrid) {
-  try {
-    
-    
-    // We don't wait for the image to be ready - just initiate the process
-    // The image URL will be retrieved later when needed
-    console.log(`Initiated image generation for hybrid: ${hybrid.name}`);
-    
-  } catch (error) {
-    // Don't block the hybrid creation if image generation fails
-    console.error('Error initiating hybrid image generation:', error);
-  }
-}
 
 // Return the hybrid data as usual
 return res.status(200).json({
   hybrid,
-  source: 'llm',
+  source: hybridContent ? 'llm' : 'fallback',
+  provider: llmResult.provider,
+  model: llmResult.model,
   hybridityMode
 });
     
   } catch (error) {
     console.error('Error generating hybrid:', error);
-    
-    return res.status(500).json({ 
-      error: 'Error generating hybrid', 
-      details: error.message 
+
+    if (String(error.message || '').includes('No configured LLM provider')) {
+      return res.status(200).json({
+        hybrid: createFallbackHybrid(req.body?.parent1, req.body?.parent2, req.body?.taxonomicGroup, req.body?.hybridityMode),
+        source: 'fallback',
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Error generating hybrid',
+      details: error.message
     });
   }
 }

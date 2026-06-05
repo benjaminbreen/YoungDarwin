@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { islandGrid, getCellByCoordinates } from '../utils/locationSystem';
+import { estimateRouteTravel, formatTravelTime, islandGrid, getCellByCoordinates } from '../utils/locationSystem';
 import { baseSpecimens } from '../data/specimens';
 import InteriorEntryMenu from './InteriorEntryMenu';
 
@@ -22,38 +22,29 @@ export default function EnhancedMapBox({
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [locationPopup, setLocationPopup] = useState(null);
   
-  // Calculate distance between two points
-  const calculateDistance = (x1, y1, x2, y2) => {
-    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-  };
-  
-  // Calculate travel time based on distance and terrain
-  const calculateTravelTime = (fromX, fromY, toX, toY) => {
-    const distanceUnits = calculateDistance(fromX, fromY, toX, toY);
-    const baseMinutes = Math.round(distanceUnits * 30); // Each grid unit is ~30 minutes of travel
-    
-    // Get terrain factors for both cells
-    const fromCell = getCellByCoordinates(fromX, fromY);
-    const toCell = getCellByCoordinates(toX, toY);
-    
-    let terrainFactor = 1.0;
-    if (toCell && toCell.type === 'highland') terrainFactor += 0.5; // Highland is slower
-    if (toCell && toCell.type === 'lavaField') terrainFactor += 0.3; // Lava field is slower
-    
-    // Apply fatigue factor
-    const fatigueFactor = 1 + (fatigue / 100) * 0.5; // Up to 50% slower at max fatigue
-    
-    // Calculate final time
-    const adjustedMinutes = Math.round(baseMinutes * terrainFactor * fatigueFactor);
-    
-    // Format the time
-    if (adjustedMinutes < 60) {
-      return `${adjustedMinutes} minutes`;
-    } else {
-      const hours = Math.floor(adjustedMinutes / 60);
-      const remainingMinutes = adjustedMinutes % 60;
-      return `${hours} hour${hours > 1 ? 's' : ''} ${remainingMinutes > 0 ? `${remainingMinutes} min` : ''}`;
+  const getTravelInfo = (toCell) => {
+    const fromCell = getCellByCoordinates(playerPosition.x, playerPosition.y);
+    if (!fromCell || !toCell) {
+      return { reachable: false, travelTime: 'unknown', fatigueIncrease: 0, routeLabel: '' };
     }
+    if (fromCell.id === toCell.id) {
+      return { reachable: false, alreadyHere: true, travelTime: 'current location', fatigueIncrease: 0, routeLabel: '' };
+    }
+
+    const route = estimateRouteTravel(fromCell, toCell);
+    if (!route) {
+      return { reachable: false, travelTime: 'no mapped route', fatigueIncrease: 0, routeLabel: '' };
+    }
+
+    const fatigueAdjustedMinutes = Math.round(route.travelMinutes * (1 + (fatigue / 100) * 0.25));
+
+    return {
+      reachable: true,
+      travelTime: formatTravelTime(fatigueAdjustedMinutes),
+      fatigueIncrease: route.fatigueIncrease,
+      routeLabel: route.routeLabel,
+      terrainNotes: route.terrainNotes,
+    };
   };
 
     const getCurrentLocation = () => {
@@ -121,16 +112,11 @@ export default function EnhancedMapBox({
     // Find the cell to show popup instead of immediately navigating
     const cell = islandGrid.find(c => c.id === locationId);
     if (cell) {
-      const travelTime = calculateTravelTime(
-        playerPosition.x, 
-        playerPosition.y, 
-        cell.x, 
-        cell.y
-      );
+      const travelInfo = getTravelInfo(cell);
       
       setLocationPopup({
         ...cell,
-        travelTime,
+        ...travelInfo,
         position: cellToPixels(cell.x, cell.y)
       });
     } else {
@@ -435,7 +421,7 @@ export default function EnhancedMapBox({
               {locationPopup.name}
             </h3>
             <p className="text-amber-100/90 text-sm mt-1 font-medium capitalize drop-shadow-md">
-              {locationPopup.type} • {locationPopup.travelTime} from current location
+              {locationPopup.type} • {locationPopup.travelTime}
             </p>
           </div>
         </div>
@@ -475,7 +461,7 @@ export default function EnhancedMapBox({
                 </div>
               </div>
               
-              <div className="flex items-center">
+              <div className="flex items-center mb-3">
                 <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -485,6 +471,16 @@ export default function EnhancedMapBox({
                 <div>
                   <p className="text-sm text-gray-500">Coordinates:</p>
                   <p className="font-semibold text-amber-900">({locationPopup.x}, {locationPopup.y})</p>
+                </div>
+              </div>
+
+              <div className="flex items-center">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mr-3 flex-shrink-0">
+                  <span className="text-amber-700 text-sm font-bold">↗</span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Mapped Route:</p>
+                  <p className="font-semibold text-amber-900">{locationPopup.routeLabel || 'None'}</p>
                 </div>
               </div>
             </div>
@@ -525,16 +521,14 @@ export default function EnhancedMapBox({
                     <div className="h-2 w-24 bg-gray-200 rounded-full">
                       <div 
                         className={`h-full rounded-full ${
-                          locationPopup.type === 'highland' ? 'bg-red-500 w-4/5' : 
-                          locationPopup.type === 'lavaField' ? 'bg-orange-500 w-3/5' :
+                          locationPopup.fatigueIncrease >= 12 ? 'bg-red-500 w-4/5' : 
+                          locationPopup.fatigueIncrease >= 7 ? 'bg-orange-500 w-3/5' :
                           'bg-green-500 w-2/5'
                         }`} 
                       ></div>
                     </div>
                     <span className="ml-2 text-sm font-medium text-gray-700">
-                      {locationPopup.type === 'highland' ? 'High' : 
-                       locationPopup.type === 'lavaField' ? 'Moderate' : 
-                       'Low'}
+                      {locationPopup.reachable ? `+${locationPopup.fatigueIncrease}` : 'Blocked'}
                     </span>
                   </div>
                 </div>
@@ -630,7 +624,12 @@ export default function EnhancedMapBox({
           </button>
           <button 
             onClick={handleTravelToLocation}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 transition-colors rounded-md text-white shadow-md flex-1 font-medium flex items-center justify-center"
+            disabled={!locationPopup.reachable}
+            className={`px-4 py-2 transition-colors rounded-md shadow-md flex-1 font-medium flex items-center justify-center ${
+              locationPopup.reachable
+                ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+            }`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />

@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/test-results/
 
 # next.js
 /.next/
@@ -22,6 +23,11 @@
 
 # misc
 .DS_Store
+desktop.ini
+*.sb-*
+* 2.js
+* 2.jsx
+/darwin_meshy.glb
 *.pem
 
 # debug

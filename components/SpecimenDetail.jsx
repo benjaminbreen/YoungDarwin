@@ -251,7 +251,7 @@ export default function SpecimenDetail({
         
         {/* User input section */}
         <div className="p-6 border-t border-amber-200 bg-amber-50">
-          <p className="mb-4" dangerouslySetInnerHTML={{ __html: getPrompt() }}></p>
+          <p className="mb-4">{getPrompt()}</p>
           
           <form onSubmit={handleSubmit}>
             <textarea

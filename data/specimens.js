@@ -1,5 +1,7 @@
 // specimens.js - Updated with expanded specimen list and dynamic generation
 
+import { canonicalizeSpecimen, canonicalSpecimenId } from '../utils/canonicalIds';
+
 // Base specimen list 
 export const baseSpecimens = [
   {
@@ -54,7 +56,7 @@ export const baseSpecimens = [
     danger: 2,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/floreana_giant_tortoise.jpg',
+    image: '/specimens/floreanagianttortoise.jpg',
     memoryText: '“I met two such massive tortoises amidst black lava and leafless shrubs. If their numbers keep dwindling, shall any remain?”',
     contents: 'Within its broad cavity, one might discover coarse stems of prickly vegetation and fibrous pulp from island flora.',
     keywords: ['tortoise', 'saddleback', 'giant', 'galápagos', 'extinction', 'reptile', 'chelonoidis', 'isolation']
@@ -1293,9 +1295,8 @@ export const baseSpecimens = [
 
 // Initialize specimens when the game starts
 export const initializeSpecimens = () => {
-  return baseSpecimens.map(specimen => ({
+  return baseSpecimens.map(specimen => canonicalizeSpecimen({
     ...specimen,
-   
     collected: false,
     observations: []
   }));
@@ -1324,12 +1325,12 @@ export const analyzeNarrativeForSpecimens = (narrativeText) => {
     
     // Find corresponding specimen ID
     const matchedSpecimen = baseSpecimens.find(specimen => 
-      cleanItem.includes(specimen.id.toLowerCase()) || 
+      cleanItem.includes(canonicalSpecimenId(specimen.id)) || 
       specimen.keywords.some(keyword => cleanItem.includes(keyword.toLowerCase()))
     );
     
     if (matchedSpecimen && !specimenIds.includes(matchedSpecimen.id)) {
-      specimenIds.push(matchedSpecimen.id);
+      specimenIds.push(canonicalSpecimenId(matchedSpecimen.id));
     }
   }
   
@@ -1345,7 +1346,7 @@ export const parseLLMResponseForCollectibility = (response) => {
   const collectibleMatches = response.match(/\[COLLECTIBLE:(.*?)\]/g);
   if (collectibleMatches) {
     collectibleMatches.forEach(match => {
-      const specimenId = match.replace('[COLLECTIBLE:', '').replace(']', '').trim();
+      const specimenId = canonicalSpecimenId(match.replace('[COLLECTIBLE:', '').replace(']', '').trim());
       if (specimenId && !collectibles.includes(specimenId)) {
         collectibles.push(specimenId);
       }

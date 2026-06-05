@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
+import { canonicalSpecimenId } from '../utils/canonicalIds';
 
 export default function CollectionResultPopup({ 
   isOpen, 
@@ -39,6 +40,9 @@ export default function CollectionResultPopup({
   if (!isOpen) return null;
 
   const isSuccess = result?.success;
+  const methodFit = Math.round((result?.methodFit || 0) * 100);
+  const damagePercent = Math.round((result?.damage || 0) * 100);
+  const quality = Math.max(0, 100 - damagePercent);
 
   // Find the full specimen object
   const findSpecimen = () => {
@@ -57,28 +61,11 @@ export default function CollectionResultPopup({
     if (isHybrid) return null;
     
     // Convert camelCase to lowercase (e.g., 'marineIguana' -> 'marineiguana')
-    const formattedId = specimenId.toLowerCase();
+    const formattedId = canonicalSpecimenId(specimenId);
     
     // Check for special case mappings
     const specialCases = {
-      'eastern_santa_cruz_tortoise': 'eastern_santa_cruz_tortoise',
-      'floreana_giant_tortoise': 'floreana_giant_tortoise',
-      'galapagos_mockingbird': 'mockingbird',
-      'floreana_mockingbird': 'mockingbird',
-      'iguana': 'iguana',
-      'medium_ground_finch': 'finch',
-      'large_ground_finch': 'finch',
-      'cactus': 'cactus',
-      'lavaliza': 'lavaLizard',
-      'sallylightfoot': 'sallyLightfoot',
-      'sealion': 'seaLion',
-      'booby': 'booby',
-      'coralfragment': 'coralFragment',
-      'seashell': 'seashell',
-      'volcanorock': 'volcanoRock',
-      'frigatebird': 'frigatebird',
-      'barnacle': 'barnacle',
-      'mangrove': 'mangrove'
+      'lavalizard': 'lavaLizard'
     };
 
     // Specimen file paths in the screenshot are lowercase versions of the IDs
@@ -242,6 +229,39 @@ export default function CollectionResultPopup({
             )}
           </div>
         )}
+
+        {/* Fieldwork outcome details */}
+        {result && (
+          <div className="mb-6 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
+              <div className="text-[10px] uppercase tracking-wide text-amber-700">Method fit</div>
+              <div className="font-mono text-lg font-semibold text-amber-900">{methodFit}%</div>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
+              <div className="text-[10px] uppercase tracking-wide text-amber-700">
+                {isSuccess ? 'Quality' : 'Evidence'}
+              </div>
+              <div className="font-mono text-lg font-semibold text-amber-900">
+                {isSuccess ? `${quality}/100` : (result.evidence ? '+1' : '0')}
+              </div>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
+              <div className="text-[10px] uppercase tracking-wide text-amber-700">
+                {isSuccess ? 'Damage' : 'Difficulty'}
+              </div>
+              <div className="font-mono text-lg font-semibold text-amber-900">
+                {isSuccess ? `${damagePercent}%` : `${Math.round((result.threshold || 0) * 100)}%`}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isSuccess && result?.evidence && (
+          <div className="mb-6 rounded-md border border-green-200 bg-green-50 p-4">
+            <p className="text-sm font-semibold text-green-900">Usable field evidence recorded</p>
+            <p className="mt-1 text-sm text-green-800">{result.evidence}</p>
+          </div>
+        )}
         
         {/* Continue Button */}
         <div className="flex justify-center">
@@ -308,6 +328,7 @@ function getSpecimenEmoji(specimenId) {
     'seaLion': '🦭',
     'sealion': '🦭',
     'booby': '🐦',
+    'coral': '🪸',
     'coralFragment': '🪸',
     'coralfragment': '🪸',
     'seashell': '🐚',
@@ -321,13 +342,12 @@ function getSpecimenEmoji(specimenId) {
     'greenturtle': '🐢',
     'parrotfish': '🐠',
     'hammerhead': '🦈',
-    'mantaRay': '🐟',
     'mantaray': '🐟',
     'flamingo': '🦩',
     'seaurchin': '🪸'
   };
   
-  return emojiMap[specimenId.toLowerCase()] || '🔍';
+  return emojiMap[canonicalSpecimenId(specimenId)] || '🔍';
 }
 
 function getMethodIcon(methodName) {

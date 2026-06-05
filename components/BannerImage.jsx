@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { locations } from '../data/locations';
 import useGameStore from '../hooks/useGameStore';
 
@@ -8,6 +8,16 @@ export default function BannerImage({ location, activeTool }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [locationDetails, setLocationDetails] = useState(null);
   const { formatGameTime, daysPassed } = useGameStore();
+  const rainDrops = useMemo(() => Array.from({ length: 40 }).map((_, index) => {
+    const seed = index + 1;
+    return {
+      height: `${10 + ((seed * 17) % 21)}px`,
+      left: `${(seed * 37) % 100}%`,
+      top: `${(seed * 53) % 100}%`,
+      animationDuration: `${0.7 + (((seed * 19) % 50) / 100)}s`,
+      animationDelay: `${((seed * 23) % 100) / 100}s`,
+    };
+  }), []);
   
   // Use escape key to close expanded view
   useEffect(() => {
@@ -48,11 +58,9 @@ export default function BannerImage({ location, activeTool }) {
                 setLocationDetails(gridLocation);
               }
             }
-          }).catch(err => {
-            console.log("Error importing locationSystem:", err);
-          });
+          }).catch(() => {});
         } catch (err) {
-          console.log("Could not import locationSystem module:", err);
+          // Location details are optional; the banner can still render without them.
         }
       } else {
         setLocationDetails(locationData);
@@ -327,7 +335,6 @@ const getBannerImage = () => {
   
   // Handle banner click
   const handleBannerClick = () => {
-    console.log("Banner clicked, setting isExpanded to true");
     setIsExpanded(true);
   };
   // Add this function inside your BannerImage component, before the return statement
@@ -501,17 +508,13 @@ const getOverlayGradientStyle = () => {
   {/* Rain effect - only show when rainy */}
   {getOverlayStyles().className.includes('rain-overlay') && (
     <div className="absolute inset-0 overflow-hidden">
-      {Array.from({ length: 40 }).map((_, i) => (
+      {rainDrops.map((drop, i) => (
         <div 
           key={i}
           className="absolute bg-white/30 animate-rainfall"
           style={{
             width: '1px',
-            height: `${Math.random() * 20 + 10}px`,
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            animationDuration: `${Math.random() * 0.5 + 0.7}s`,
-            animationDelay: `${Math.random() * 1}s`,
+            ...drop,
           }}
         ></div>
       ))}
@@ -790,4 +793,3 @@ const getOverlayGradientStyle = () => {
     </>
   );
 }
-

@@ -1,16 +1,46 @@
+import { generateLLMText } from '../../utils/server/llmProvider';
+import { getRequestIdentity } from '../../utils/server/llmSafety';
+
+function deterministicScore(value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 1000) / 1000;
+}
+
+function fallbackCollectionResult({ specimenId, specimenName, collectionMethod, playerNotes, location }) {
+  const id = String(specimenId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const method = String(collectionMethod || '').toLowerCase();
+  const notes = String(playerNotes || '').toLowerCase();
+  const easySpecimens = new Set(['cactus', 'volcanorock', 'seashell', 'basalt', 'coralfragment', 'mangrove', 'captainsskull', 'mysteriousflask']);
+  const careful = /careful|slow|quiet|patient|observe|wait|gently/.test(notes);
+  const reckless = /rush|grab|loud|chase|throw|hit|reckless/.test(notes);
+  const goodMethod =
+    easySpecimens.has(id) ||
+    (/(finch|mockingbird)/.test(id) && /(hand|snare|shotgun)/.test(method)) ||
+    (/(iguana|lizard)/.test(id) && /(snare|shotgun|net)/.test(method)) ||
+    (/(basalt|olivine|rock|mineral|sulphur|coral)/.test(id) && /(hammer|hand|chisel)/.test(method)) ||
+    (/(plant|cactus|mangrove)/.test(id) && /(hand|hammer|sketch)/.test(method));
+  const risky = /(shark|mantaray|tortoise|sealion|frigatebird|booby|owl)/.test(id);
+  const score = deterministicScore(`${specimenId}:${specimenName}:${collectionMethod}:${playerNotes}:${location}`);
+  const threshold = (goodMethod ? 0.78 : 0.42) + (careful ? 0.12 : 0) - (reckless ? 0.2 : 0) - (risky ? 0.1 : 0);
+  const success = easySpecimens.has(id) || score < threshold;
+
+  return {
+    success,
+    reason: success
+      ? `The attempt succeeds because the method and approach are suitable for ${specimenName}. Darwin secures the specimen while preserving enough context for later notes.`
+      : `The attempt fails because the method or approach is poorly matched to ${specimenName}. The encounter still provides useful behavioral evidence if Darwin records it carefully.`,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
       const { specimenId, specimenName, location, narrativeContext, collectionMethod, playerNotes } = req.body;
-
-      // Log the received request for debugging
-      console.log('Collection decision request:', {
-        specimenId,
-        specimenName,
-        location,
-        collectionMethod,
-        playerNotesLength: playerNotes ? playerNotes.length : 0
-      });
 
       // Validate required fields
       if (!specimenId || !specimenName) {
@@ -20,18 +50,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: `You are determining whether a specimen collection attempt in 1835 Galapagos Islands will succeed, based on realistic factors. Give the result as a specific, vivid narrative that is happening in present tense, not a hypothetical. Collection attempts can lead to real danger and risk if they are particularly ill-conceived and the species or setting is risky - in fact, Darwin can be severely injured. In other cases, if the player has made a particularly strange choice, the results are embarassing. 
+      const systemPrompt = `You are determining whether a specimen collection attempt in 1835 Galapagos Islands will succeed, based on realistic factors. Give the result as a specific, vivid narrative that is happening in present tense, not a hypothetical. Collection attempts can lead to real danger and risk if they are particularly ill-conceived and the species or setting is risky - in fact, Darwin can be severely injured. In other cases, if the player has made a particularly strange choice, the results are embarassing. 
               However, sometimes it is quite easy, for instance finches and mockingbirds can always be collected with any method.  
 
               COLLECTION METHOD EFFECTIVENESS:
@@ -63,76 +82,50 @@ export default async function handler(req, res) {
 
               Consider the match between collection method and specimen type, the player's described approach, and environmental context.
 
-              Respond with ONLY a JSON object: {"success": true/false, "reason": "Two sentence explanation of why the attempt succeeded or failed"}`
-            },
-            {
-              role: 'user',
-              content: `Collection attempt details:
+              Respond with ONLY a JSON object: {"success": true/false, "reason": "Two sentence explanation of why the attempt succeeded or failed"}`;
+      const userPrompt = `Collection attempt details:
               - Specimen: ${specimenName} (${specimenId})
               - Location: ${location || 'Unknown location'}
               - Collection Method: ${collectionMethod || 'Unspecified method'}
               - Player's Approach: "${playerNotes || 'No specific approach mentioned'}"
               - Context: "${narrativeContext ? narrativeContext.substring(0, 500) : 'No context provided'}${narrativeContext && narrativeContext.length > 500 ? '...' : ''}"
               
-              Determine if this collection attempt succeeds or fails, and explain why in a brief, narrative way that would be interesting to the player.`
-            }
-          ],
-          temperature: 0.7
-        })
+              Determine if this collection attempt succeeds or fails, and explain why in a brief, narrative way that would be interesting to the player.`;
+      const identity = getRequestIdentity({
+        req,
+        route: '/api/collection-decision',
+        prompt: userPrompt,
+        idempotencyKey: req.body?.idempotencyKey,
       });
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error('API error:', errorData);
-        throw new Error(`API returned status ${response.status}`);
+      const llmResult = await generateLLMText({
+        model: process.env.YOUNG_DARWIN_COLLECTION_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.4-nano',
+        route: '/api/collection-decision',
+        sessionId: identity.sessionId,
+        idempotencyKey: identity.idempotencyKey,
+        systemPrompt,
+        userPrompt,
+        temperature: 0.45,
+        maxTokens: 300,
+      });
+
+      if (llmResult.blocked) {
+        return res.status(200).json(fallbackCollectionResult({ specimenId, specimenName, collectionMethod, playerNotes, location }));
       }
 
-      const data = await response.json();
-      
       // Try to parse the response as JSON
       try {
         let result;
         
-        // Check if content is already a parsed object or needs parsing
-        if (typeof data.choices[0].message.content === 'string') {
-          // Clean up the response to ensure it's valid JSON
-          const cleanContent = data.choices[0].message.content.trim()
-            .replace(/```json/g, '')
-            .replace(/```/g, '');
-            
-          result = JSON.parse(cleanContent);
-        } else {
-          result = data.choices[0].message.content;
-        }
-        
-        // Add some randomness to make gameplay more interesting
-        // 10% chance to flip the result if the specimen is difficult
-        const difficultSpecimens = ['floreana_giant_tortoise', 'eastern_santa_cruz_tortoise',  'frigatebird', 'seaLion', 'iguana'];
-        const shouldRandomize = difficultSpecimens.includes(specimenId) && Math.random() < 0.1;
-        
-        if (shouldRandomize) {
-          result.success = !result.success;
-          if (result.success) {
-            result.reason = "Through an incredible stroke of luck, you succeed despite the difficulty!";
-          } else {
-            result.reason = "Despite your perfect technique, unexpected circumstances foil your attempt.";
-          }
-        }
+        const cleanContent = llmResult.text.trim()
+          .replace(/```json/g, '')
+          .replace(/```/g, '');
+        result = JSON.parse(cleanContent);
         
         res.status(200).json(result);
       } catch (error) {
-        console.error('Error parsing LLM response:', error, data.choices[0].message.content);
-        
-        // Fallback to a default response
-        const isEasySpecimen = ['cactus', 'volcanoRock', 'seashell', 'basalt','coralFragment', 'mangrove'].includes(specimenId);
-        const defaultSuccess = isEasySpecimen || Math.random() < 0.5;
-        
-        res.status(200).json({
-          success: defaultSuccess,
-          reason: defaultSuccess 
-            ? "Your collection attempt succeeds." 
-            : "Your collection attempt fails."
-        });
+        console.error('Error parsing LLM response:', error, llmResult.text);
+        res.status(200).json(fallbackCollectionResult({ specimenId, specimenName, collectionMethod, playerNotes, location }));
       }
     } catch (error) {
       console.error('Collection decision error:', error);

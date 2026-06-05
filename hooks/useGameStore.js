@@ -2,19 +2,23 @@
 
 import { create } from 'zustand';
 import { tools } from '../data/tools';
-import { npcs, getNPC } from '../data/npcs'; 
+import { npcs } from '../data/npcs'; 
 import { initializeSpecimens } from '../data/specimens';
 import { queueEventForSummary, compileEventHistorySummary } from '../utils/generateLLMContext';
 import { locations } from '../data/locations';
-console.log('Our location IDs are:', locations.map(l => l.id));
-console.log('Our habitat types are:', [...new Set(locations.map(l => l.type))]);
+import { canonicalSpecimenId, canonicalizeSpecimen, resolveSpecimen } from '../utils/canonicalIds';
+import { createDefaultObjectives, createExpeditionSeed, updateObjectiveProgress } from '../utils/expeditionSystems';
+import { clearExpeditionSave, loadExpedition, saveExpedition } from '../utils/localSave';
 
 const useGameStore = create((set, get) => ({
   // Core game state
   gameStarted: false,
   currentScreen: 'title',
   currentLocationId: 'POST_OFFICE_BAY',
-    playerLocation: { x: 1, y: 0 }, 
+  playerLocation: { x: 1, y: 0 },
+  expeditionSeed: null,
+  objectives: createDefaultObjectives(),
+  traps: [],
 
 
   setPlayerLocation: (position) => {
@@ -69,7 +73,7 @@ const useGameStore = create((set, get) => ({
   clearVisibleNPCs: () => set({ visibleNPCs: [] }),
 
   // Helper: set specimen list (e.g., after randomization)
-  setSpecimenList: (specimens) => set({ specimenList: specimens }),
+  setSpecimenList: (specimens) => set({ specimenList: specimens.map(canonicalizeSpecimen) }),
 
   // Method to update an event's summary with LLM-generated one
   updateEventSummary: (eventId, llmSummary) => set(state => ({
@@ -99,7 +103,8 @@ addToGameHistory: (role, content) => set((state) => {
   const updatedHistory = [...state.gameHistory, newEntry].slice(-5);
   
   const formattedTime = formatTime(gameTime);
-  const locationName = getLocationName(currentLocationId);
+  const currentLocation = locations.find(loc => loc.id === currentLocationId);
+  const locationName = currentLocation ? currentLocation.name : getLocationName(currentLocationId);
   
   // Determine event type based on role and content
   let eventType = 'event'; // Default to 'event' instead of 'narrative'
@@ -187,6 +192,7 @@ addToGameHistory: (role, content) => set((state) => {
     time: formattedTime,
     location: locationName,
     locationId: currentLocationId,
+    locationType: currentLocation?.type || null,
     summary,     // Initial summary (will be replaced by LLM summary)
     llmSummary: null, // Will be filled by background LLM process
     hasLLMSummary: false,
@@ -203,8 +209,9 @@ addToGameHistory: (role, content) => set((state) => {
   // Add to event history, keeping the last 30 events
   const updatedEventHistory = [...state.eventHistory, eventEntry].slice(-30);
   
-  // Queue this event for LLM summarization (non-blocking)
-  if (role !== 'user' && contentString.length > 30) {
+  // Queue only narrative-scale events for LLM summarization. Field notes are
+  // already concise records and should not create background API traffic.
+  if (role !== 'user' && role !== 'field_notes' && contentString.length > 30) {
     queueEventForSummary(eventEntry, get());
   }
   
@@ -226,6 +233,51 @@ addToGameHistory: (role, content) => set((state) => {
   // Helper to retrieve recent history (last 5 turns)
   getRecentHistory: () => get().gameHistory,
 
+  refreshObjectives: () => set((state) => ({
+    objectives: updateObjectiveProgress(state.objectives, state)
+  })),
+
+  addTrap: (trap) => set((state) => ({
+    traps: [...state.traps, trap]
+  })),
+
+  updateTrap: (trapId, updates) => set((state) => ({
+    traps: state.traps.map(trap => trap.id === trapId ? { ...trap, ...updates } : trap)
+  })),
+
+  saveGame: () => saveExpedition(get()),
+
+  loadSavedGame: () => {
+    const saved = loadExpedition();
+    if (!saved) return false;
+
+    set({
+      gameStarted: saved.gameStarted ?? true,
+      currentScreen: saved.currentScreen || 'exploration',
+      currentLocationId: saved.currentLocationId || 'POST_OFFICE_BAY',
+      playerLocation: saved.playerLocation || { x: 1, y: 0 },
+      expeditionSeed: saved.expeditionSeed || createExpeditionSeed(),
+      gameTime: saved.gameTime ?? 360,
+      daysPassed: saved.daysPassed ?? 1,
+      fatigue: saved.fatigue ?? 1,
+      darwinMood: saved.darwinMood || 'interested',
+      scientificScore: saved.scientificScore || 0,
+      inventory: (saved.inventory || []).map(canonicalizeSpecimen),
+      journal: saved.journal || [],
+      traps: saved.traps || [],
+      objectives: saved.objectives || createDefaultObjectives(),
+      eventHistory: saved.eventHistory || [],
+      specimenList: (saved.specimenList && saved.specimenList.length > 0)
+        ? saved.specimenList.map(canonicalizeSpecimen)
+        : initializeSpecimens()
+    });
+
+    get().refreshObjectives();
+    return true;
+  },
+
+  clearSavedGame: () => clearExpeditionSave(),
+
   // Other game actions:
  startGame: () => {
   // Get the current state before starting the game
@@ -241,12 +293,14 @@ addToGameHistory: (role, content) => set((state) => {
   // If there were hybrids, merge them with the new specimens
   if (existingHybrids && existingHybrids.length > 0) {
     console.log(`Preserving ${existingHybrids.length} hybrid specimens during game start`);
-    initialSpecimens = [...initialSpecimens, ...existingHybrids];
+    initialSpecimens = [...initialSpecimens, ...existingHybrids.map(canonicalizeSpecimen)];
   }
   
   set({
     gameStarted: true,
     currentScreen: 'exploration',
+    expeditionSeed: currentState.expeditionSeed || createExpeditionSeed(),
+    objectives: currentState.objectives?.length ? currentState.objectives : createDefaultObjectives(),
     specimenList: initialSpecimens
   });
 },
@@ -263,35 +317,26 @@ addToGameHistory: (role, content) => set((state) => {
 
     const npc = npcs.find(n => n.id === npcId);
     if (npc) {
-      set({ currentNPC: npc });
+      set({ currentNPC: npc.id });
     }
   },
 
   // Updated moveToLocation function to include NPC encounters
 moveToLocation: (locationId) => {
-  console.log('Moving to locationId:', locationId);
-  
   // Check if we're already at this location to prevent duplicate entries
   const currentLocId = get().currentLocationId;
   if (currentLocId === locationId) {
-    console.log('Already at this location, skipping update');
     return null;
   }
   
   const location = locations.find(loc => loc.id === locationId);
   if (location) {
-    console.log('Found location object:', location);
-    
     // First set the state
     set({
       playerLocation: { x: location.x, y: location.y },
       currentLocationId: locationId
     });
-    
-    // Then get the updated state for logging
-    const updatedState = get();
-    console.log('After set, currentLocationId is now:', updatedState.currentLocationId);
-    
+
     // Now add to game history with the updated location ID
     return get().addToGameHistory('movement', `Moved to ${location.name}`);
   } else {
@@ -301,14 +346,28 @@ moveToLocation: (locationId) => {
 },
 
 
-  collectSpecimen: (id) => {
+  collectSpecimen: (id, metadata = {}) => {
     const { specimenList, playerLocation, addToGameHistory } = get();
-    const specimen = specimenList.find(spec => spec.id === id);
+    const specimenId = canonicalSpecimenId(id);
+    const specimen = resolveSpecimen(specimenList, specimenId);
     if (specimen && !specimen.collected) {
+      const quality = metadata.quality ?? Math.max(0, Math.round((1 - (metadata.damage || 0)) * 100));
+      const currentLocation = locations.find(loc => loc.id === get().currentLocationId);
+
       // Add the collection location to the specimen
       const specimenWithLocation = {
         ...specimen,
         collected: true,
+        collectionMethod: metadata.methodName || metadata.methodId || 'Unknown method',
+        collectionNotes: metadata.notes || '',
+        collectionOutcome: metadata.outcomeType || 'collected',
+        collectionReason: metadata.reason || '',
+        collectionQuality: quality,
+        collectionDamage: metadata.damage || 0,
+        collectionScoreDelta: metadata.scoreDelta || 0,
+        collectionTime: formatTime(get().gameTime),
+        collectionDay: get().daysPassed,
+        collectionLocationName: currentLocation?.name || getLocationName(get().currentLocationId),
         collectionLocation: { 
           x: playerLocation.x, 
           y: playerLocation.y 
@@ -317,23 +376,64 @@ moveToLocation: (locationId) => {
       
       set((state) => ({
         specimenList: state.specimenList.map(spec => 
-          spec.id === id ? { ...spec, collected: true } : spec
+          canonicalSpecimenId(spec.id) === specimenId ? { ...spec, id: specimenId, collected: true } : spec
         ),
-        inventory: [...state.inventory, specimenWithLocation], // Add specimen with location to inventory
-        fatigue: Math.min(100, state.fatigue + 5)
+        inventory: state.inventory.some(item => canonicalSpecimenId(item.id) === specimenId)
+          ? state.inventory
+          : [...state.inventory, { ...canonicalizeSpecimen(specimenWithLocation), id: specimenId }],
+        scientificScore: state.scientificScore + (metadata.scoreDelta || 0),
+        fatigue: Math.min(100, state.fatigue + (metadata.fatigueDelta ?? 5))
       }));
       
-      const collectDesc = `Darwin attempts to collect a specimen of ${specimen.name} (${specimen.latin}).`;
+      const collectDesc = `Darwin collects ${specimen.name} (${specimen.latin}) with ${specimenWithLocation.collectionMethod}. Specimen quality: ${quality}/100.`;
       addToGameHistory('narrative', collectDesc);
+      get().refreshObjectives();
       return collectDesc;
     }
     return null;
   },
 
+  addFieldEvidence: ({
+    specimenId,
+    specimenName,
+    methodName,
+    evidence,
+    notes = '',
+    scoreDelta = 1,
+  } = {}) => {
+    if (!evidence || !specimenName) return null;
+
+    const state = get();
+    const location = locations.find(loc => loc.id === state.currentLocationId);
+    const entry = {
+      specimenId: specimenId ? canonicalSpecimenId(specimenId) : null,
+      specimenName,
+      location: location?.name || getLocationName(state.currentLocationId),
+      method: methodName || 'field observation',
+      content: `${specimenName}: ${evidence}. ${notes ? `Player note: ${notes}` : ''}`.trim(),
+      evidence,
+      type: 'field_evidence',
+    };
+
+    set(current => ({
+      journal: [...current.journal, {
+        ...entry,
+        id: Date.now(),
+        timestamp: current.gameTime,
+        day: current.daysPassed,
+      }],
+      scientificScore: current.scientificScore + scoreDelta,
+    }));
+
+    state.addToGameHistory('field_notes', `FIELD EVIDENCE - ${specimenName}: ${entry.content}`);
+    get().refreshObjectives();
+    return entry;
+  },
+
   useScientificTool: (toolId, specimenId) => {
     const { specimenList, addToGameHistory } = get();
     const tool = tools.find(t => t.id === toolId);
-    const specimen = specimenList.find(s => s.id === specimenId);
+    const specimen = resolveSpecimen(specimenList, specimenId);
     if (tool && specimen) {
       set((state) => ({
         fatigue: Math.min(100, state.fatigue + 3),
@@ -348,8 +448,9 @@ moveToLocation: (locationId) => {
 
   setCurrentSpecimen: (specimenId) => {
     const { specimenList, inventory } = get();
-    const specimen = inventory.find(spec => spec.id === specimenId) ||
-                     specimenList.find(spec => spec.id === specimenId);
+    const canonicalId = canonicalSpecimenId(specimenId);
+    const specimen = inventory.find(spec => canonicalSpecimenId(spec.id) === canonicalId) ||
+                     resolveSpecimen(specimenList, canonicalId);
     set({ currentSpecimen: specimen });
   },
 
@@ -375,14 +476,48 @@ moveToLocation: (locationId) => {
   }),
 
   // Method to add a journal entry
-  addJournalEntry: (entry) => set(state => ({
-    journal: [...state.journal, {
-      ...entry,
-      id: Date.now(),
-      timestamp: state.gameTime,
-      day: state.daysPassed
-    }]
-  }))
+  addJournalEntry: (entry) => {
+    set(state => ({
+      journal: [...state.journal, {
+        ...entry,
+        id: entry.id || Date.now(),
+        timestamp: entry.timestamp ?? state.gameTime,
+        day: entry.day ?? entry.gameDay ?? state.daysPassed,
+        gameDay: entry.gameDay ?? entry.day ?? state.daysPassed,
+        gameTime: entry.gameTime || formatTime(state.gameTime),
+        type: entry.type || 'field_notes',
+      }]
+    }));
+    get().refreshObjectives();
+  },
+
+  importJournalEntries: (entries = []) => {
+    set(state => {
+      const existingKeys = new Set(state.journal.map(entry => entry.id || `${entry.specimenName}:${entry.content}`));
+      const imported = entries
+        .filter(entry => entry?.content)
+        .filter(entry => !existingKeys.has(entry.id || `${entry.specimenName}:${entry.content}`))
+        .map(entry => ({
+          ...entry,
+          id: entry.id || Date.now() + Math.random(),
+          timestamp: entry.timestamp ?? entry.gameTime ?? state.gameTime,
+          day: entry.day ?? entry.gameDay ?? state.daysPassed,
+          gameDay: entry.gameDay ?? entry.day ?? state.daysPassed,
+          type: entry.type || 'field_notes',
+        }));
+
+      if (imported.length === 0) return state;
+      return { journal: [...state.journal, ...imported] };
+    });
+    get().refreshObjectives();
+  },
+
+  deleteJournalEntry: (id) => {
+    set(state => ({
+      journal: state.journal.filter(entry => entry.id !== id)
+    }));
+    get().refreshObjectives();
+  }
 }));
 
 // Helper function to format time display
@@ -398,18 +533,14 @@ function formatTime(minutes) {
 // Helper function to get location name from ID
 function getLocationName(locationId) {
   if (!locationId) {
-    console.log('getLocationName called with empty locationId');
     return 'Unknown';
   }
   
-  console.log('Looking up location name for ID:', locationId);
   const found = locations.find(loc => loc.id === locationId);
   
   if (found) {
-    console.log('Found location:', found.name);
     return found.name;
   } else {
-    console.log('No location found for ID:', locationId);
     return locationId; // Return the ID as fallback
   }
 }

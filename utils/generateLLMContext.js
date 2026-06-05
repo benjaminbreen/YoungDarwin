@@ -4,6 +4,8 @@
 // Queue to manage background summary requests
 let summaryQueue = [];
 let isProcessingQueue = false;
+const queuedEventIds = new Set();
+const MAX_SUMMARY_QUEUE_LENGTH = 10;
 
 // Main function to build LLM prompt context
 const buildLLMPromptContext = (gameState) => {
@@ -42,8 +44,18 @@ Collected: ${collectedSpecimens || 'None'}
 
 // Function to add an event to the summary queue
 const queueEventForSummary = async (event, gameStore) => {
+  if (!event?.id || queuedEventIds.has(event.id)) {
+    return;
+  }
+
+  if (summaryQueue.length >= MAX_SUMMARY_QUEUE_LENGTH) {
+    console.warn('Summary queue is full; skipping background LLM summary to protect API usage.');
+    return;
+  }
+
   // Add the event to the queue
   summaryQueue.push({ event, gameStore });
+  queuedEventIds.add(event.id);
   
   // Start processing if not already in progress
   if (!isProcessingQueue) {
@@ -63,7 +75,7 @@ const processQueue = async () => {
 
   try {
     // Generate summary for this event using LLM
-    const summary = await generateEventSummary(event);
+    const summary = await generateEventSummary(event, gameStore);
     
     // Update the event with the LLM-generated summary
     if (summary && gameStore) {
@@ -72,6 +84,8 @@ const processQueue = async () => {
     }
   } catch (error) {
     console.error("Error generating event summary:", error);
+  } finally {
+    if (event?.id) queuedEventIds.delete(event.id);
   }
 
   // Continue processing the queue
@@ -80,18 +94,24 @@ const processQueue = async () => {
 
 // Generate an LLM summary for an event using the API endpoint
 // Instead of direct OpenAI call, use our own API endpoint that has access to env vars
-const generateEventSummary = async (event) => {
+const generateEventSummary = async (event, gameStore) => {
   // Skip empty or malformed events
   if (!event || !event.fullContent) {
     return null;
   }
 
   try {
+    const sessionId = gameStore?.expeditionSeed || 'anonymous';
+
     // Call our own API endpoint (which has access to the API key from env)
     const response = await fetch('/api/summarize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event })
+      headers: {
+        'Content-Type': 'application/json',
+        'x-young-darwin-session': sessionId,
+        'x-idempotency-key': event.id,
+      },
+      body: JSON.stringify({ event, idempotencyKey: event.id })
     });
 
     if (!response.ok) {

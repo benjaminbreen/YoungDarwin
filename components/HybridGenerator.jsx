@@ -5,17 +5,33 @@ import React, { useState, useEffect, useRef } from 'react';
 import useGameStore from '../hooks/useGameStore';
 import { initializeSpecimens } from '../data/specimens';
 import { generateHybridImage } from '../utils/hybridImageGenerator';
+import { assignHybridLocation } from '../utils/hybridPlacement';
+import { buildLLMRequestMeta } from '../utils/llmClient';
+import {
+  DEFAULT_HYBRID_BATCH_SIZE,
+  clampHybridBatchSize,
+  selectDeterministicParentPairs,
+  shouldAutoGenerateHybrids,
+} from '../utils/hybridGenerationPolicy';
+
+const debugLog = (...args) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(...args);
+  }
+};
 
 export default function HybridGenerator({ onComplete, hybridityMode = 'mild', isVisible = true }) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [generatedHybrids, setGeneratedHybrids] = useState([]);
   const [log, setLog] = useState([]);
+  const [batchSize, setBatchSize] = useState(DEFAULT_HYBRID_BATCH_SIZE);
+  const [generateImages, setGenerateImages] = useState(false);
   
   // Get data from game store
   const specimenList = useGameStore(state => state.specimenList);
-  const gameStarted = useGameStore(state => state.gameStarted);
   const setSpecimenList = useGameStore(state => state.setSpecimenList);
+  const expeditionSeed = useGameStore(state => state.expeditionSeed);
   
   // Use refs to prevent stale closures in useEffect
   const specimenListRef = useRef(specimenList);
@@ -42,12 +58,11 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
         const initialSpecimens = initializeSpecimens();
         specimenListRef.current = initialSpecimens;
         addLog('Loaded initial specimen data for hybrids');
-        console.log(`Initialized ${initialSpecimens.length} specimens for potential hybridization`);
+        debugLog(`Initialized ${initialSpecimens.length} specimens for potential hybridization`);
       }
       
-      // Auto-generate hybrids when the component becomes visible and mode is set
-      if (hybridityMode !== 'none') {
-        generateHybrids(4);
+      if (shouldAutoGenerateHybrids({ isVisible, hybridityMode, explicitStart: false })) {
+        generateHybrids(batchSize);
       }
     }
   }, [isVisible, hybridityMode]);
@@ -79,7 +94,7 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
     specimens.forEach(specimen => {
       // Skip if specimen is invalid or missing required properties
       if (!specimen || !specimen[taxonomyLevel]) {
-        console.log("Skipping invalid specimen:", specimen);
+        debugLog("Skipping invalid specimen:", specimen);
         return;
       }
       
@@ -99,62 +114,6 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
     return validGroups;
   };
   
-  // Function to select random parent pairs for hybridization
-  const selectRandomParents = (groups, numHybrids = 4) => {
-    const potentialGroups = Object.entries(groups);
-    const selectedParents = [];
-    
-    console.log("Potential groups for hybridization:", potentialGroups);
-    
-    for (let i = 0; i < numHybrids; i++) {
-      if (potentialGroups.length === 0) {
-        console.log("No more potential groups available");
-        break;
-      }
-      
-      // Select a random group
-      const randomGroupIndex = Math.floor(Math.random() * potentialGroups.length);
-      const [taxonomicGroup, specimens] = potentialGroups[randomGroupIndex];
-      
-      // Select two different specimens from the group
-      if (specimens.length < 2) {
-        console.log(`Not enough specimens in group ${taxonomicGroup}, skipping`);
-        potentialGroups.splice(randomGroupIndex, 1);
-        continue;
-      }
-      
-      const specimenIndices = [...Array(specimens.length).keys()];
-      const firstIndex = specimenIndices.splice(Math.floor(Math.random() * specimenIndices.length), 1)[0];
-      
-      if (specimenIndices.length === 0) {
-        console.log(`Not enough different specimens in group ${taxonomicGroup}, skipping`);
-        potentialGroups.splice(randomGroupIndex, 1);
-        continue;
-      }
-      
-      const secondIndex = specimenIndices[Math.floor(Math.random() * specimenIndices.length)];
-      
-      console.log(`Selected parent pair ${i+1}:`, {
-        taxonomicGroup,
-        parent1: specimens[firstIndex].name,
-        parent2: specimens[secondIndex].name
-      });
-      
-      selectedParents.push({
-        taxonomicGroup,
-        parent1: specimens[firstIndex],
-        parent2: specimens[secondIndex]
-      });
-      
-      // Remove this group to avoid creating multiple hybrids from the same group
-      // This ensures diversity in hybrid types
-      potentialGroups.splice(randomGroupIndex, 1);
-    }
-    
-    addLog(`Selected ${selectedParents.length} potential parent pairs`);
-    return selectedParents;
-  };
-
   // Function to generate a hybrid ID
   const generateHybridId = (parent1, parent2) => {
     // Create a unique ID that clearly identifies it as a hybrid
@@ -162,12 +121,16 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
     return `hybrid_${mode}_${parent1.id.substring(0, 4)}${parent2.id.substring(0, 4)}`;
   };
   
-  // Random location generator
-  const getRandomLocation = () => {
-    return {
-      x: Math.floor(Math.random() * 4),
-      y: Math.floor(Math.random() * 4)
-    };
+  const determineHybridEmoji = (parent1, parent2, taxonomicGroup) => {
+    const text = `${parent1?.sub_order || ''} ${parent2?.sub_order || ''} ${taxonomicGroup || ''} ${parent1?.name || ''} ${parent2?.name || ''}`.toLowerCase();
+    if (text.includes('tortoise')) return '🐢';
+    if (text.includes('iguana') || text.includes('lizard')) return '🦎';
+    if (text.includes('bird') || text.includes('finch') || text.includes('mocking')) return '🐦';
+    if (text.includes('crab')) return '🦀';
+    if (text.includes('plant') || text.includes('cactus') || text.includes('mangrove')) return '🌱';
+    if (text.includes('fish') || text.includes('shark') || text.includes('ray') || text.includes('marine')) return '🐟';
+    if (text.includes('volcanic') || text.includes('mineral') || text.includes('rock')) return '🪨';
+    return '🧬';
   };
 
   // Function to create a hybrid using an LLM
@@ -176,16 +139,21 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
     addLog(`Creating ${mode} hybrid between ${parent1.name} and ${parent2.name}...`);
     
     try {
+      const requestMeta = buildLLMRequestMeta({
+        sessionId: expeditionSeed,
+        route: '/api/generate-hybrid',
+        kind: 'hybrid',
+        prompt: `${mode}:${taxonomicGroup}:${parent1.id || parent1.name}:${parent2.id || parent2.name}`,
+      });
       const response = await fetch('/api/generate-hybrid', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: requestMeta.headers,
         body: JSON.stringify({
           parent1,
           parent2,
           taxonomicGroup,
-          hybridityMode: mode
+          hybridityMode: mode,
+          idempotencyKey: requestMeta.idempotencyKey,
         }),
       });
       
@@ -194,7 +162,7 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
       }
       
       const data = await response.json();
-      console.log("API response data:", data);
+      debugLog("API response data:", data);
       
       // Extract hybrid data or use fallback
       const hybridData = data.hybrid || createFallbackHybrid(parent1, parent2, taxonomicGroup);
@@ -234,7 +202,7 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
           `Could represent a new variety or even species`
         ],
         habitat: Array.from(habitats).join(', '),
-         emoji: hybridData.emoji || determineHybridEmoji(parent1, parent2, sub_order),
+         emoji: hybridData.emoji || determineHybridEmoji(parent1, parent2, taxonomicGroup),
         
         // Status properties
         collected: false,
@@ -272,27 +240,38 @@ export default function HybridGenerator({ onComplete, hybridityMode = 'mild', is
             `"This is the most extraordinary specimen I've ever encountered! It appears to combine traits of both ${parent1.name} and ${parent2.name} in ways I would have thought impossible."` :
             `"I've never seen such a specimen before. It appears to combine traits of both ${parent1.name} and ${parent2.name} in most peculiar ways."`),
         
-        // Random location on the map
-        location: getRandomLocation()
+        location: null
       };
+      const placedHybridSpecimen = assignHybridLocation(hybridSpecimen, {
+        parent1,
+        parent2,
+        seed: `${mode}:${taxonomicGroup}`,
+      });
 
-try {
-  // Generate image asynchronously
-  generateHybridImage(hybridSpecimen)
-    .then(imageUrl => {
-      console.log(`Generated image for ${hybridSpecimen.name}`);
-      // You can update the hybrid with the image URL if needed
-    })
-    .catch(err => {
-      console.warn(`Image generation failed for ${hybridSpecimen.name}:`, err);
-    });
-} catch (error) {
-  console.warn("Error initiating image generation:", error);
-}
+      if (generateImages) {
+        try {
+          generateHybridImage(placedHybridSpecimen, {
+            parent1,
+            parent2,
+            hybridityMode: mode,
+            sessionId: expeditionSeed,
+          })
+            .then(imageUrl => {
+              debugLog(`Generated image for ${placedHybridSpecimen.name}`, imageUrl);
+            })
+            .catch(err => {
+              console.warn(`Image generation failed for ${placedHybridSpecimen.name}:`, err);
+            });
+        } catch (error) {
+          console.warn("Error initiating image generation:", error);
+        }
+      } else {
+        addLog(`Image generation skipped for ${placedHybridSpecimen.name}`);
+      }
 
       
-      addLog(`Successfully created ${mode} hybrid: ${hybridSpecimen.name}!`);
-      return hybridSpecimen;
+      addLog(`Successfully created ${mode} hybrid: ${placedHybridSpecimen.name} near ${placedHybridSpecimen.location?.name || 'a suitable habitat'}!`);
+      return placedHybridSpecimen;
       
     } catch (error) {
       addLog(`Error creating hybrid from API: ${error.message}`);
@@ -306,7 +285,7 @@ try {
   // Fallback method if the API fails
   const createFallbackHybrid = (parent1, parent2, taxonomicGroup) => {
     const mode = hybridityModeRef.current;
-    console.log(`Using fallback ${mode} hybrid creation method`);
+    debugLog(`Using fallback ${mode} hybrid creation method`);
     addLog("Using local hybrid generation (API unavailable)");
     
     const hybridName = `${parent1.name.split(' ')[0]}-${parent2.name.split(' ')[1]} Hybrid`;
@@ -335,7 +314,7 @@ try {
       ])
     ];
     
-    return {
+    return assignHybridLocation({
       id: generateHybridId(parent1, parent2),
       name: hybridName,
       latin: latinName,
@@ -371,12 +350,17 @@ try {
       memoryText: mode === 'extreme' ? 
         `"This is the most extraordinary specimen I've ever encountered! It appears to combine traits of both ${parent1.name} and ${parent2.name} in ways I would have thought impossible."` :
         `"I've never seen such a specimen before. It appears to combine traits of both ${parent1.name} and ${parent2.name} in most peculiar ways."`,
-      location: getRandomLocation()
-    };
+      location: null
+    }, {
+      parent1,
+      parent2,
+      seed: `${mode}:${taxonomicGroup}:fallback`,
+    });
   };
   
   // Main function to generate hybrids
   const generateHybrids = async (numHybrids = 3) => {
+    const requestedCount = clampHybridBatchSize(numHybrids);
     // Set generating state
     setIsGenerating(true);
     setProgress(10);
@@ -402,7 +386,7 @@ try {
     setGeneratedHybrids([]);
     
     const currentMode = hybridityModeRef.current;
-    addLog(`Starting ${currentMode} hybrid generation process...`);
+    addLog(`Starting ${currentMode} hybrid generation process for ${requestedCount} specimen${requestedCount === 1 ? '' : 's'}...`);
     
     try {
       // Group specimens by taxonomy level (sub_order for mild, order for extreme)
@@ -413,7 +397,11 @@ try {
       }
       
       // Select random parents
-      const selectedParents = selectRandomParents(groups, numHybrids);
+      const selectedParents = selectDeterministicParentPairs(
+        groups,
+        requestedCount,
+        `${expeditionSeed || 'young-darwin'}:${currentMode}`,
+      );
       
       if (selectedParents.length === 0) {
         throw new Error("No parent pairs could be selected");
@@ -449,7 +437,7 @@ try {
           // Update the store with the updated specimen list including hybrids
           setSpecimenList(newSpecimenList);
           
-          console.log(`Store updated successfully with ${currentMode} hybrids!`);
+          debugLog(`Store updated successfully with ${currentMode} hybrids!`);
           addLog(`Successfully added ${hybrids.length} ${currentMode} hybrids to the game world!`);
         } catch (error) {
           console.error("Error updating store:", error);
@@ -481,16 +469,39 @@ try {
       <div className="flex items-center mb-4">
         <div className="flex-1 mr-4">
           <p className="text-sm text-gray-700 mb-2">
-            Enable the discovery of natural hybrid species that combine traits from related animals and plants. Darwin will be able to find these unusual specimens during his exploration.
+            Enable a bounded set of natural hybrid species that combine traits from related animals and plants. Text generation runs only when you press the button; image generation is optional.
           </p>
           {!isGenerating && generatedHybrids.length === 0 && (
-            <button
-              onClick={() => generateHybrids(10)}
-              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-              disabled={isGenerating}
-            >
-              Enable Hybrid Species
-            </button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-amber-900">
+                  <span>Count</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="4"
+                    value={batchSize}
+                    onChange={(event) => setBatchSize(clampHybridBatchSize(event.target.value))}
+                    className="w-16 rounded border border-amber-300 bg-white px-2 py-1"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={generateImages}
+                    onChange={(event) => setGenerateImages(event.target.checked)}
+                  />
+                  Generate hybrid images
+                </label>
+              </div>
+              <button
+                onClick={() => generateHybrids(batchSize)}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                disabled={isGenerating}
+              >
+                Generate Hybrid Species
+              </button>
+            </div>
           )}
         </div>
         

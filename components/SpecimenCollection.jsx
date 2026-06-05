@@ -7,6 +7,7 @@ import SpecimenDetail from './SpecimenDetail';
 import Journal from './Journal';
 import HybridSpecimenImage from './HybridSpecimenImage';
 import { getSpecimenIcon } from '../utils/specimenUtils';
+import { canonicalSpecimenId } from '../utils/canonicalIds';
 
 
 export default function SpecimenCollection({ 
@@ -48,7 +49,9 @@ export default function SpecimenCollection({
 //  analyze the narrative to see which specimens are nearby
 useEffect(() => {
   if (availableSpecimenIds && availableSpecimenIds.length > 0) {
-    setNearbySpecimenIds(availableSpecimenIds);
+    setNearbySpecimenIds(Array.from(new Set(availableSpecimenIds.map(canonicalSpecimenId))));
+  } else {
+    setNearbySpecimenIds([]);
   }
 }, [availableSpecimenIds]);
 
@@ -95,10 +98,10 @@ const [filteredNearbyIds, setFilteredNearbyIds] = useState([]);
 useEffect(() => {
     const currentTimePeriod = getCurrentTimePeriod();
     
-    // Filter specimens by time of day and apply 50% chance
+    // Filter specimens by time of day. Encounter chance is handled upstream by the expedition system.
     const filtered = nearbySpecimenIds.filter(id => {
       // Find the specimen
-      const specimen = specimenList.find(s => s.id === id);
+      const specimen = specimenList.find(s => canonicalSpecimenId(s.id) === canonicalSpecimenId(id));
       if (!specimen) return false;
       
       // Check if time of day matches (or is appropriate)
@@ -110,8 +113,7 @@ useEffect(() => {
         (speciesTimeOfDay === 'Crepuscular' && currentTimePeriod !== 'Nocturnal') ||
         (currentTimePeriod === 'Crepuscular'); // Crepuscular species also visible at dawn/dusk
       
-      // Apply both time filter and random chance
-      return isTimeCompatible && Math.random() < 0.5;
+      return isTimeCompatible;
     });
     
     setFilteredNearbyIds(filtered);
@@ -121,7 +123,14 @@ useEffect(() => {
 // Then modify getNearbySpecimens to use the stable filtered list
 const getNearbySpecimens = () => {
   return specimenList
-    .filter(s => filteredNearbyIds.includes(s.id) && !inventory.some(item => item.id === s.id));
+    .filter(s => filteredNearbyIds.includes(canonicalSpecimenId(s.id)) && !inventory.some(item => canonicalSpecimenId(item.id) === canonicalSpecimenId(s.id)));
+};
+
+const getQualityLabel = (quality) => {
+  if (quality === undefined || quality === null) return null;
+  if (quality >= 85) return 'clean';
+  if (quality >= 60) return 'usable';
+  return 'damaged';
 };
 
   const [showDetailedView, setShowDetailedView] = useState(null);
@@ -195,10 +204,6 @@ useEffect(() => {
       specimen={currentSpecimen}
       className="w-full h-full"
       size="full"
-      onImageLoaded={(url) => {
-        // Update the specimen in your store if needed
-        console.log(`Image generated for ${currentSpecimen.name}: ${url}`);
-      }}
     />
   ) : (
     <>
@@ -339,6 +344,11 @@ useEffect(() => {
                 <div className="text-xs flex-1 overflow-hidden">
                   <p className="font-medium text-amber-900 truncate">{item.name}</p>
                   <p className="text-amber-700 opacity-75 truncate text-xs italic font-serif">{item.latin}</p>
+                  {getQualityLabel(item.collectionQuality) && (
+                    <p className="mt-0.5 text-[10px] uppercase tracking-wide text-stone-600">
+                      {getQualityLabel(item.collectionQuality)} specimen · {item.collectionQuality}/100
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
@@ -392,6 +402,19 @@ useEffect(() => {
               <h4 className="font-medium text-amber-900">Typical habitat</h4>
               <p>{showDetailedView.habitat}</p>
             </div>
+
+            {showDetailedView.collectionQuality !== undefined && (
+              <div className="mb-4 grid grid-cols-2 gap-2 not-prose">
+                <div className="rounded-md border border-amber-200 bg-white/70 p-2">
+                  <h4 className="text-sm font-medium text-amber-900">Specimen quality</h4>
+                  <p className="font-mono text-lg">{showDetailedView.collectionQuality}/100</p>
+                </div>
+                <div className="rounded-md border border-amber-200 bg-white/70 p-2">
+                  <h4 className="text-sm font-medium text-amber-900">Collected with</h4>
+                  <p className="text-sm">{showDetailedView.collectionMethod || 'Unknown method'}</p>
+                </div>
+              </div>
+            )}
             
             <div className="mb-4">
               <h4 className="font-medium text-amber-900">Description</h4>

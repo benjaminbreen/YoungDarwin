@@ -99,9 +99,6 @@ export default function NearbySpecimenDetail({
                 className="w-full h-full"
                 size="full"
                 fallbackIcon={getSpecimenIcon(specimen.id)}
-                onImageLoaded={(url) => {
-                  console.log(`Image loaded for ${specimen.name}: ${url}`);
-                }}
               />
             ) : (
               <>

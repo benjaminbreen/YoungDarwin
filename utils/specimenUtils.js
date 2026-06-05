@@ -1,13 +1,16 @@
 // utils/specimenUtils.js
 
+import { canonicalSpecimenId } from './canonicalIds';
+
 /**
  * Returns an emoji icon for a given specimen ID
  * @param {string} id - The specimen ID
  * @returns {string} The emoji representing the specimen
  */
 export function getSpecimenIcon(id) {
+  const canonicalId = canonicalSpecimenId(id);
   // First handle all the standard specimens with a direct mapping
-  switch(id) {
+  switch(canonicalId) {
     case 'easternsantacruztortoise': return '🐢';
     case 'floreanagianttortoise': return '🐢';
     case 'galapagosmockingbird': return '🐦';
@@ -33,7 +36,7 @@ export function getSpecimenIcon(id) {
     case 'greenturtle': return '🐢';
     case 'parrotfish': return '🐠';
     case 'hammerhead': return '🦈';
-    case 'mantaRay': return '🐟';
+    case 'mantaray': return '🐟';
     case 'flamingo': return '🦩';
     case 'seaurchin': return '🪸';
     case 'socialisttreatise': return '📜';
@@ -55,14 +58,14 @@ export function getSpecimenIcon(id) {
     // Handle hybrid IDs by pattern matching
     default:
       // Check if this is a hybrid ID (starts with 'hybrid_')
-      if (id && typeof id === 'string' && id.startsWith('hybrid_')) {
+      if (canonicalId && typeof canonicalId === 'string' && canonicalId.startsWith('hybrid_')) {
         // Extract parent type hints from the hybrid ID if possible
-        if (id.includes('tortoise')) return '🐢';
-        if (id.includes('mock') || id.includes('finch') || id.includes('bird')) return '🐦';
-        if (id.includes('iguana') || id.includes('lizard')) return '🦎';
-        if (id.includes('fish')) return '🐠';
-        if (id.includes('crab')) return '🦀';
-        if (id.includes('plant') || id.includes('cactus')) return '🌱';
+        if (canonicalId.includes('tortoise')) return '🐢';
+        if (canonicalId.includes('mock') || canonicalId.includes('finch') || canonicalId.includes('bird')) return '🐦';
+        if (canonicalId.includes('iguana') || canonicalId.includes('lizard')) return '🦎';
+        if (canonicalId.includes('fish')) return '🐠';
+        if (canonicalId.includes('crab')) return '🦀';
+        if (canonicalId.includes('plant') || canonicalId.includes('cactus')) return '🌱';
         
         // Default hybrid emoji
         return '🧬';

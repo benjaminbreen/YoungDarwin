@@ -1,0 +1,238 @@
+'use client';
+
+import React, { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useThreeGameStore } from '../../store';
+import { terrainHeight } from '../../world/terrain';
+import { addRimLight, toonMaterial } from '../scene/materials';
+import { ModelAsset } from '../assets/ModelAsset';
+
+function specimenColor(id) {
+  if (id === 'crab') return '#e4572e';
+  if (id === 'marineiguana') return '#202124';
+  if (id === 'mediumgroundfinch') return '#6b4a2f';
+  if (id === 'floreanagianttortoise') return '#4d5638';
+  if (id === 'galapagospenguin') return '#1f2326';
+  if (id === 'cactus') return '#5d9239';
+  if (id === 'basalt') return '#38342f';
+  return '#9b7653';
+}
+
+function specimenMaterial(id) {
+  return addRimLight(toonMaterial(specimenColor(id)), { color: '#fff0b0', intensity: id === 'basalt' ? 0.16 : 0.28 });
+}
+
+function assetIdForSpecimen(specimen) {
+  if (specimen.id === 'marineiguana') return 'marineIguana';
+  if (specimen.id === 'mediumgroundfinch') return 'mediumGroundFinch';
+  if (specimen.id === 'floreanagianttortoise') return 'floreanaGiantTortoise';
+  if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';
+  return specimen.id;
+}
+
+function ProceduralSpecimenShape({ specimen }) {
+  const material = useMemo(() => specimenMaterial(specimen.id), [specimen.id]);
+  const warm = useMemo(() => addRimLight(toonMaterial('#d7b66f'), { intensity: 0.2 }), []);
+  const dark = useMemo(() => addRimLight(toonMaterial('#292b28'), { intensity: 0.18 }), []);
+  if (specimen.id === 'cactus') {
+    return (
+      <group>
+        <mesh castShadow position={[0, 0.75, 0]}>
+          <cylinderGeometry args={[0.25, 0.32, 1.5, 8]} />
+          <primitive object={material} attach="material" />
+        </mesh>
+        <mesh castShadow position={[0.38, 0.95, 0]} rotation={[0, 0, -0.35]}>
+          <cylinderGeometry args={[0.12, 0.16, 0.7, 8]} />
+          <meshToonMaterial color="#74a545" />
+        </mesh>
+      </group>
+    );
+  }
+  if (specimen.id === 'basalt') {
+    return (
+      <mesh castShadow receiveShadow position={[0, 0.35, 0]} scale={[1.1, 0.7, 0.9]}>
+        <dodecahedronGeometry args={[0.7, 0]} />
+        <primitive object={material} attach="material" />
+      </mesh>
+    );
+  }
+  if (specimen.id === 'mediumgroundfinch') {
+    return (
+      <group>
+        <mesh castShadow position={[0, 0.42, 0]} scale={[0.52, 0.36, 0.7]}>
+          <sphereGeometry args={[0.55, 18, 18]} />
+          <primitive object={material} attach="material" />
+        </mesh>
+        <mesh castShadow position={[0, 0.68, -0.42]} scale={[0.35, 0.32, 0.35]}>
+          <sphereGeometry args={[0.42, 18, 18]} />
+          <meshToonMaterial color="#7c5c3b" />
+        </mesh>
+        <mesh castShadow position={[0, 0.68, -0.78]} rotation={[Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.14, 0.28, 8]} />
+          <primitive object={warm} attach="material" />
+        </mesh>
+      </group>
+    );
+  }
+  if (specimen.id === 'marineiguana') {
+    return (
+      <group>
+        <mesh castShadow position={[0, 0.28, 0]} scale={[0.55, 0.28, 1.2]}>
+          <sphereGeometry args={[0.65, 18, 18]} />
+          <primitive object={material} attach="material" />
+        </mesh>
+        <mesh castShadow position={[0, 0.32, -0.9]} scale={[0.36, 0.28, 0.38]}>
+          <sphereGeometry args={[0.5, 18, 18]} />
+          <primitive object={dark} attach="material" />
+        </mesh>
+        <mesh position={[0, 0.42, 0.98]} rotation={[Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.16, 1.15, 8]} />
+          <meshToonMaterial color="#1f211f" />
+        </mesh>
+      </group>
+    );
+  }
+  if (specimen.id === 'floreanagianttortoise') {
+    return (
+      <group>
+        <mesh castShadow position={[0, 0.48, 0]} scale={[0.95, 0.44, 0.68]}>
+          <sphereGeometry args={[0.68, 18, 18]} />
+          <primitive object={material} attach="material" />
+        </mesh>
+        <mesh castShadow position={[0, 0.36, -0.52]} scale={[0.36, 0.28, 0.36]}>
+          <sphereGeometry args={[0.45, 18, 18]} />
+          <meshToonMaterial color="#66704b" />
+        </mesh>
+      </group>
+    );
+  }
+  if (specimen.id === 'galapagospenguin') {
+    return (
+      <group>
+        <mesh castShadow position={[0, 0.55, 0]} scale={[0.38, 0.78, 0.32]}>
+          <sphereGeometry args={[0.62, 18, 18]} />
+          <primitive object={material} attach="material" />
+        </mesh>
+        <mesh castShadow position={[0, 0.72, -0.23]} scale={[0.24, 0.34, 0.18]}>
+          <sphereGeometry args={[0.4, 18, 18]} />
+          <meshToonMaterial color="#f3ead1" />
+        </mesh>
+      </group>
+    );
+  }
+  return (
+    <group>
+      <mesh castShadow position={[0, 0.25, 0]} scale={[0.8, 0.25, 0.55]}>
+        <sphereGeometry args={[0.55, 18, 18]} />
+        <primitive object={material} attach="material" />
+      </mesh>
+      {[-0.45, -0.15, 0.15, 0.45].map((x, index) => (
+        <mesh key={index} position={[x, 0.16, -0.34]} rotation={[0.7, 0, 0]}>
+          <capsuleGeometry args={[0.035, 0.4, 3, 6]} />
+          <meshToonMaterial color="#b33a20" />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function SpecimenShape({ specimen }) {
+  return <ModelAsset id={assetIdForSpecimen(specimen)} fallback={<ProceduralSpecimenShape specimen={specimen} />} />;
+}
+
+function AnimatedSpecimenShape({ specimen }) {
+  const group = useRef(null);
+
+  useFrame(({ clock }) => {
+    if (!group.current || specimen.id !== 'crab') return;
+    const t = clock.elapsedTime;
+    const burst = Math.max(0, Math.sin(t * 2.6));
+    group.current.position.y = 0.01 + Math.abs(Math.sin(t * 9.0)) * 0.012 * burst;
+    group.current.rotation.x = Math.sin(t * 6.0) * 0.035 * burst;
+    group.current.rotation.z = Math.sin(t * 7.3) * 0.055 * burst;
+    group.current.scale.setScalar(1 + Math.sin(t * 8.2) * 0.018 * burst);
+  });
+
+  if (specimen.id !== 'crab') return <SpecimenShape specimen={specimen} />;
+
+  return (
+    <group ref={group}>
+      <SpecimenShape specimen={specimen} />
+    </group>
+  );
+}
+
+export function SpecimenActor({ specimen }) {
+  const group = useRef(null);
+  const selectedSpecimenId = useThreeGameStore(state => state.selectedSpecimenId);
+  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const setSelectedSpecimen = useThreeGameStore(state => state.setSelectedSpecimen);
+  const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
+  const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
+  const position = useMemo(() => {
+    const [x, , z] = specimen.spawnPoint;
+    return new THREE.Vector3(x, terrainHeight(x, z) + 0.04, z);
+  }, [specimen.spawnPoint]);
+
+  useFrame(({ clock }) => {
+    if (!group.current || collected) return;
+    const t = clock.elapsedTime;
+    if (specimen.behavior === 'skitter') {
+      const burst = Math.max(0, Math.sin(t * 2.2));
+      group.current.position.x = position.x + Math.sin(t * 1.9) * 0.38 * burst;
+      group.current.position.z = position.z + Math.cos(t * 1.35) * 0.12 * burst;
+      group.current.rotation.y = Math.PI / 2 + Math.sin(t * 3.1) * 0.2 * burst;
+    }
+    if (specimen.behavior === 'curious') group.current.rotation.y = Math.sin(t * 1.2) * 0.8;
+    if (specimen.behavior === 'bask') group.current.rotation.y = Math.sin(t * 0.35) * 0.18;
+    if (specimen.behavior === 'graze') {
+      group.current.rotation.y = -0.45 + Math.sin(t * 0.22) * 0.16;
+      group.current.position.x = position.x + Math.sin(t * 0.18) * 0.12;
+      group.current.position.z = position.z + Math.cos(t * 0.16) * 0.08;
+    }
+    if (specimen.behavior === 'waddle') {
+      group.current.rotation.y = Math.PI + Math.sin(t * 1.4) * 0.18;
+      group.current.rotation.z = Math.sin(t * 5.8) * 0.035;
+      group.current.position.x = position.x + Math.sin(t * 0.75) * 0.18;
+    }
+    group.current.position.y = position.y + Math.abs(Math.sin(t * 1.1)) * (specimen.behavior === 'still' ? 0 : 0.03);
+
+  });
+
+  if (collected) return null;
+
+  const selected = selectedSpecimenId === specimen.id;
+  const nearby = nearbySpecimenId === specimen.id;
+  const markerY = specimen.id === 'cactus' ? 2.15 : specimen.id === 'basalt' ? 1.15 : specimen.id === 'floreanagianttortoise' ? 1.8 : 1.45;
+  return (
+    <group
+      ref={group}
+      position={position}
+      scale={specimen.sceneScale || 1}
+      onClick={event => {
+        event.stopPropagation();
+        setSelectedSpecimen(specimen.id);
+        setNearbySpecimen(specimen.id);
+      }}
+    >
+      <AnimatedSpecimenShape specimen={specimen} />
+      <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
+        <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />
+        <meshBasicMaterial color={nearby ? '#fff2a8' : selected ? '#ffe48a' : '#ffffff'} transparent opacity={nearby ? 0.72 : selected ? 0.52 : 0.14} depthWrite={false} />
+      </mesh>
+      {nearby && (
+        <>
+          <mesh position={[0, 0.075, 0]} rotation-x={-Math.PI / 2}>
+            <ringGeometry args={[1.52, 1.62, 64]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.42} depthWrite={false} />
+          </mesh>
+          <mesh position={[0, markerY, 0]} rotation={[0, Math.PI / 4, 0]}>
+            <octahedronGeometry args={[0.18, 0]} />
+            <meshBasicMaterial color="#fff2a8" transparent opacity={0.9} />
+          </mesh>
+        </>
+      )}
+    </group>
+  );
+}

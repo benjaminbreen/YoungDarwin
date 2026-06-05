@@ -1,0 +1,325 @@
+'use client';
+
+import React, { useMemo, useState } from 'react';
+import { threeSpecimens, threeTools } from '../data';
+import { setTouchControl } from '../input/touchControls';
+import { useThreeGameStore } from '../store';
+import { getZone } from '../world/floreanaZones';
+import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
+
+function Bar({ label, value, color }) {
+  return (
+    <div>
+      <div className="mb-1 flex justify-between text-[10px] uppercase tracking-wide text-amber-100/80">
+        <span>{label}</span>
+        <span>{Math.round(value)}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-black/45">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ToolBelt() {
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const setActiveTool = useThreeGameStore(state => state.setActiveTool);
+  return (
+    <div className="pointer-events-auto flex flex-wrap gap-1.5 rounded-md border border-white/15 bg-stone-950/55 p-1.5 shadow-xl backdrop-blur-md">
+      {threeTools.map((tool, index) => (
+        <button
+          key={tool.id}
+          type="button"
+          onClick={() => setActiveTool(tool.id)}
+          className={`relative flex h-10 min-w-10 items-center justify-center rounded border px-2 text-sm transition ${
+            activeToolId === tool.id
+              ? 'border-amber-200 bg-amber-200 text-stone-950 shadow-[0_0_18px_rgba(253,230,138,0.28)]'
+              : 'border-white/10 bg-black/15 text-amber-50 hover:bg-white/15'
+          }`}
+          title={`${index + 1}: ${tool.name}`}
+        >
+          <span className="text-base">{tool.icon}</span>
+          <span className="pointer-events-none absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded bg-black/65 text-[9px] font-bold text-white">{index + 1}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MiniMap() {
+  const collected = useThreeGameStore(state => state.collectedSpecimenIds);
+  const selected = useThreeGameStore(state => state.selectedSpecimenId);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const zone = getZone(currentZoneId);
+  return (
+    <div className="pointer-events-auto h-28 w-28 rounded-full border border-white/25 bg-[#6fa2c7]/80 p-2 text-amber-50 shadow-xl backdrop-blur-md sm:h-32 sm:w-32">
+      <div className="relative h-full w-full overflow-hidden rounded-full bg-[#6f7f4b] shadow-inner">
+        <div className="absolute inset-x-7 top-1 h-[6.25rem] rounded-[48%_52%_44%_56%] bg-[#4f6138]" />
+        <div className="absolute bottom-1 left-5 h-8 w-24 rounded-[55%] bg-[#b4935f]/90" />
+        <div className="absolute bottom-0 left-8 h-9 w-14 rounded-t-full bg-[#4f9caf]/75" />
+        <div className="absolute left-1/2 top-1 text-[8px] font-bold uppercase tracking-wide text-white/75">{zone.shortName}</div>
+        {threeSpecimens.map(specimen => {
+          const [x, , z] = specimen.spawnPoint;
+          const isCollected = collected.includes(specimen.id);
+          return (
+            <span
+              key={specimen.id}
+              className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border ${
+                selected === specimen.id ? 'border-stone-950 bg-amber-200' : isCollected ? 'border-emerald-900 bg-emerald-300' : 'border-white bg-red-400'
+              }`}
+              style={{ left: `${50 + x * 1.1}%`, top: `${55 + z * 1.1}%` }}
+              title={specimen.name}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function JournalPanel({ onClose }) {
+  const journal = useThreeGameStore(state => state.journal);
+  return (
+    <div className="pointer-events-auto fixed inset-x-3 bottom-3 top-16 z-30 overflow-hidden rounded-md border border-amber-200/40 bg-[#fff7df] text-stone-900 shadow-2xl md:left-auto md:w-[28rem]">
+      <div className="flex items-center justify-between border-b border-amber-300/70 px-4 py-3">
+        <h2 className="font-serif text-xl font-bold">Field Journal</h2>
+        <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm font-semibold hover:bg-amber-100">Close</button>
+      </div>
+      <div className="h-full overflow-auto p-4 pb-20">
+        {journal.length === 0 ? (
+          <p className="italic text-stone-600">No entries yet. Observe or collect a specimen to begin.</p>
+        ) : journal.slice().reverse().map(entry => (
+          <article key={entry.id} className="mb-3 rounded border border-amber-200 bg-white/70 p-3">
+            <h3 className="font-serif text-lg font-bold">{entry.specimenName}</h3>
+            <p className="text-sm italic text-stone-600">{entry.latin}</p>
+            <p className="mt-2 text-sm">{entry.content}</p>
+            <p className="mt-2 text-xs text-amber-800">{entry.location} | {entry.method} | {entry.condition}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InventoryPanel({ onClose }) {
+  const inventory = useThreeGameStore(state => state.inventory);
+  return (
+    <div className="pointer-events-auto fixed inset-x-3 bottom-3 top-16 z-30 overflow-hidden rounded-md border border-amber-200/40 bg-[#fff7df] text-stone-900 shadow-2xl md:left-auto md:w-[24rem]">
+      <div className="flex items-center justify-between border-b border-amber-300/70 px-4 py-3">
+        <h2 className="font-serif text-xl font-bold">Specimen Case</h2>
+        <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm font-semibold hover:bg-amber-100">Close</button>
+      </div>
+      <div className="h-full overflow-auto p-4 pb-20">
+        {inventory.length === 0 ? (
+          <p className="italic text-stone-600">No physical specimens collected yet.</p>
+        ) : inventory.map(item => (
+          <div key={item.id} className="mb-2 rounded border border-amber-200 bg-white/70 p-3">
+            <div className="font-serif font-bold">{item.name}</div>
+            <div className="text-xs italic text-stone-600">{item.latin}</div>
+            <div className="mt-1 text-xs text-amber-800">Condition: {item.condition.replace(/_/g, ' ')}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NarrativePanel({ expanded, onToggleExpanded }) {
+  const message = useThreeGameStore(state => state.message);
+  const educationalNote = useThreeGameStore(state => state.educationalNote);
+  const sounds = useThreeGameStore(state => state.sounds);
+  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const nearby = threeSpecimens.find(specimen => specimen.id === nearbySpecimenId);
+  const tool = threeTools.find(item => item.id === activeToolId);
+
+  return (
+    <div className={`pointer-events-auto rounded-md border border-white/15 bg-stone-950/58 p-2.5 font-serif text-amber-50 shadow-2xl backdrop-blur-md md:p-3 ${expanded ? 'max-w-3xl' : 'max-w-xl'}`}>
+      <div className="flex items-start gap-2">
+        <p className={`${expanded ? 'max-h-[5.2rem]' : 'max-h-[2.75rem]'} flex-1 overflow-hidden text-xs leading-relaxed md:text-base`}>{message}</p>
+        <button type="button" onClick={onToggleExpanded} className="rounded border border-white/10 px-2 py-1 text-[10px] uppercase tracking-wide text-amber-100/80 hover:bg-white/10">
+          {expanded ? 'Less' : 'More'}
+        </button>
+      </div>
+      {expanded && educationalNote && (
+        <p className="mt-2 max-h-[2.8rem] overflow-hidden border-l-2 border-amber-300/70 pl-3 text-xs italic text-amber-100/85 md:text-sm">{educationalNote}</p>
+      )}
+      {expanded && sounds?.length > 0 && (
+        <p className="mt-2 text-xs uppercase tracking-wide text-sky-100/75">Sounds: {sounds.join(' | ')}</p>
+      )}
+      <button
+        type="button"
+        onClick={() => nearby && collectNearby()}
+        className="sr-only"
+        disabled={!nearby}
+      >
+        Use {tool?.name || 'tool'}
+      </button>
+    </div>
+  );
+}
+
+function InteractionPrompt() {
+  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const nearby = threeSpecimens.find(specimen => specimen.id === nearbySpecimenId);
+  const tool = threeTools.find(item => item.id === activeToolId);
+  if (!nearby) return null;
+
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-[42%] w-[min(15rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded border border-amber-200/35 bg-stone-950/62 px-3 py-2 text-center shadow-xl sm:left-[calc(50%+11rem)] sm:top-[56%]">
+      <div className="truncate text-xs font-bold text-amber-50 sm:text-sm">{nearby.name}</div>
+      <div className="truncate text-[11px] italic text-amber-100/75">{nearby.latin}</div>
+      <button
+        type="button"
+        onClick={() => collectNearby()}
+        className="mt-1.5 rounded bg-amber-200 px-3 py-1 text-xs font-bold text-stone-950 hover:bg-amber-100 sm:text-sm"
+      >
+        E - use {tool?.name || 'tool'}
+      </button>
+    </div>
+  );
+}
+
+function TouchButton({ control, label, className = '' }) {
+  const start = event => {
+    event.preventDefault();
+    setTouchControl(control, true);
+  };
+  const stop = event => {
+    event.preventDefault();
+    setTouchControl(control, false);
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+      className={`flex h-11 w-11 items-center justify-center rounded-md border border-white/15 bg-stone-950/58 text-sm font-bold text-amber-50 shadow-lg backdrop-blur active:bg-amber-200 active:text-stone-950 ${className}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function MobileTouchControls() {
+  return (
+    <div className="pointer-events-auto absolute bottom-[4.85rem] left-3 flex items-end gap-2 md:hidden">
+      <div className="grid grid-cols-3 gap-1">
+        <div />
+        <TouchButton control="forward" label="W" className="h-9 w-9 text-xs" />
+        <div />
+        <TouchButton control="left" label="A" className="h-9 w-9 text-xs" />
+        <TouchButton control="backward" label="S" className="h-9 w-9 text-xs" />
+        <TouchButton control="right" label="D" className="h-9 w-9 text-xs" />
+      </div>
+      <div className="grid grid-cols-1 gap-1">
+        <TouchButton control="jump" label="J" className="h-9 w-9 text-xs" />
+        <TouchButton control="run" label="R" className="h-9 w-9 text-xs" />
+        <TouchButton control="interact" label="E" className="h-9 w-9 bg-amber-200/85 text-stone-950 text-xs" />
+      </div>
+    </div>
+  );
+}
+
+export function ThreeHUD({ onTogglePerf }) {
+  const [panel, setPanel] = useState(null);
+  const [narrativeExpanded, setNarrativeExpanded] = useState(false);
+  const health = useThreeGameStore(state => state.health);
+  const fatigue = useThreeGameStore(state => state.fatigue);
+  const curiosity = useThreeGameStore(state => state.curiosity);
+  const questComplete = useThreeGameStore(state => state.questComplete);
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
+  const rest = useThreeGameStore(state => state.rest);
+  const symsLine = useThreeGameStore(state => state.symsLine);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
+  const journalCount = useThreeGameStore(state => state.journal.length);
+  const zone = getZone(currentZoneId);
+
+  const objective = useMemo(() => {
+    if (questComplete) return 'Quest complete: return to Syms with specimen evidence.';
+    return 'Quest: collect or document one animal, plant, or mineral sample.';
+  }, [questComplete]);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10">
+      <div className="absolute left-3 top-3 w-[min(17rem,calc(100vw-7.5rem))] rounded-md border border-white/20 bg-stone-950/62 p-2.5 text-amber-50 shadow-xl backdrop-blur-md">
+        <div className="font-serif text-base font-bold text-amber-50 sm:text-lg">Young Darwin 3D</div>
+        <p className="mt-1 text-xs text-amber-100/75">{zone.name}, {zone.island} | September 1835</p>
+        <div className="mt-2 grid gap-1.5">
+          <Bar label="Health" value={health} color="bg-emerald-400" />
+          <Bar label="Fatigue" value={fatigue} color="bg-orange-400" />
+          <Bar label="Curiosity" value={curiosity} color="bg-sky-300" />
+        </div>
+      </div>
+
+      <div className="absolute right-3 top-3">
+        <MiniMap />
+      </div>
+
+      <InteractionPrompt />
+
+      <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/45 shadow-[0_0_12px_rgba(255,255,255,0.35)]">
+        <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/70" />
+      </div>
+
+      <div className="absolute bottom-3 left-3 right-3 flex flex-col gap-2 md:right-auto md:w-[39rem] lg:w-[45rem]">
+        <NarrativePanel expanded={narrativeExpanded} onToggleExpanded={() => setNarrativeExpanded(value => !value)} />
+        <ToolBelt />
+      </div>
+
+      <div className="pointer-events-auto absolute bottom-3 right-3 hidden max-w-[17rem] flex-col gap-2 rounded-md border border-white/15 bg-stone-950/62 p-2.5 text-sm text-amber-50 shadow-xl backdrop-blur-md lg:flex">
+        <div className="font-serif text-sm font-bold">{objective}</div>
+        <p className="max-h-9 overflow-hidden text-xs italic text-amber-100/80">{symsLine}</p>
+        <div className="grid grid-cols-2 gap-1.5 text-xs text-amber-50/85">
+          <span>Specimens: {collectedCount}</span>
+          <span>Notes: {journalCount}</span>
+          <span>View: {viewMode}</span>
+          <span>Syms nearby</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button type="button" onClick={() => setPanel('journal')} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Journal</button>
+          <button type="button" onClick={() => setPanel('inventory')} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Inventory</button>
+          <button type="button" onClick={cycleViewMode} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Camera</button>
+          <button type="button" onClick={rest} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Rest</button>
+        </div>
+        <div className="grid gap-1">
+          {zone.neighbors.slice(0, 2).map(route => (
+            <button
+              key={route.zoneId}
+              type="button"
+              onClick={() => getZone(route.zoneId).terrainPreset !== 'planned' && beginZoneTransition(route.zoneId)}
+              disabled={getZone(route.zoneId).terrainPreset === 'planned'}
+              className="rounded border border-amber-200/20 bg-white/5 px-2 py-1 text-left text-[11px] text-amber-100/80 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {route.label}{getZone(route.zoneId).terrainPreset === 'planned' ? ' (planned)' : ''}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={onTogglePerf} className="rounded border border-white/10 px-2 py-1 text-xs text-amber-100/75 hover:bg-white/10">Toggle perf</button>
+        <p className="text-[11px] leading-relaxed text-amber-100/60">WASD move | Q crouch | R rifle | F fire | H hammer | N net | G gather | Y write | I inspect | V climb | P pray</p>
+      </div>
+
+      <div className="pointer-events-auto absolute right-3 bottom-3 flex gap-1.5 lg:hidden">
+        <button type="button" onClick={() => setPanel('journal')} className="rounded-md border border-white/15 bg-stone-950/60 px-3 py-2 text-xs font-bold backdrop-blur">Journal</button>
+        <button type="button" onClick={() => setPanel('inventory')} className="rounded-md border border-white/15 bg-stone-950/60 px-3 py-2 text-xs font-bold backdrop-blur">Case</button>
+        <button type="button" onClick={cycleViewMode} className="rounded-md border border-white/15 bg-stone-950/60 px-3 py-2 text-xs font-bold backdrop-blur">Cam</button>
+      </div>
+
+      <MobileTouchControls />
+
+      {panel === 'journal' && <JournalPanel onClose={() => setPanel(null)} />}
+      {panel === 'inventory' && <InventoryPanel onClose={() => setPanel(null)} />}
+      <ZoneTransitionOverlay />
+    </div>
+  );
+}

@@ -4,9 +4,11 @@ import {
   initialPosition, 
   initialLocationId, 
   processMovement, 
+  processTravelToLocation,
   getCellByCoordinates,
   islandGrid
 } from './locationSystem';
+import { canonicalizeSpecimenIds } from './canonicalIds';
 import interiorLayouts, { 
   findRoomById, 
   getInteriorTypeFromRoomId, 
@@ -119,12 +121,12 @@ export function useLocationSystem(onLocationUpdate) {
         
         return {
           success: true,
-          message: `You've exited and traveled to ${exteriorCell.name}. ${exteriorCell.description}`,
+          message: `You exit the interior and travel to ${exteriorCell.name}. ${exteriorCell.description}`,
           newPosition: { x: exteriorCell.x, y: exteriorCell.y },
           newLocationId: locationId,
           newLocationName: exteriorCell.name,
           fatigueIncrease: 10, // Default fatigue for teleportation
-          specimensInArea: exteriorCell.specimens,
+          specimensInArea: canonicalizeSpecimenIds(exteriorCell.specimens || []),
           npcsInArea: exteriorCell.npcs
         };
       }
@@ -162,6 +164,11 @@ export function useLocationSystem(onLocationUpdate) {
       };
     }
     
+    const travelResult = processTravelToLocation(playerPosition, locationId);
+    if (!travelResult.success) {
+      return travelResult;
+    }
+
     // Update position and location
     setPlayerPosition({ x: targetCell.x, y: targetCell.y });
     setCurrentLocationId(locationId);
@@ -172,16 +179,7 @@ export function useLocationSystem(onLocationUpdate) {
       gameStore.moveToLocation(locationId);
     }
     
-    return {
-      success: true,
-      message: `You've traveled to ${targetCell.name}. ${targetCell.description}`,
-      newPosition: { x: targetCell.x, y: targetCell.y },
-      newLocationId: locationId,
-      newLocationName: targetCell.name,
-      fatigueIncrease: 10, // Default fatigue for teleportation
-      specimensInArea: targetCell.specimens,
-      npcsInArea: targetCell.npcs
-    };
+    return travelResult;
   };
   
   /**
@@ -237,7 +235,7 @@ export function useLocationSystem(onLocationUpdate) {
         name: currentRoom.name,
         description: currentRoom.description,
         type: 'interior',
-        specimens: currentRoom.specimens || [],
+        specimens: canonicalizeSpecimenIds(currentRoom.specimens || []),
         npcs: currentRoom.npcs || [],
         interiorType,
         parentInterior: layout.id,
@@ -263,7 +261,7 @@ export function useLocationSystem(onLocationUpdate) {
       name: cell.name,
       description: cell.description,
       type: cell.type,
-      specimens: cell.specimens,
+      specimens: canonicalizeSpecimenIds(cell.specimens || []),
       npcs: cell.npcs,
       position: playerPosition
     };
@@ -340,7 +338,7 @@ export function useLocationSystem(onLocationUpdate) {
       success: true,
       message: entryMessage,
       roomId: startingRoom.id,
-      specimens: startingRoom.specimens || [],
+      specimens: canonicalizeSpecimenIds(startingRoom.specimens || []),
       npcs: startingRoom.npcs || []
     };
   };
@@ -473,7 +471,7 @@ export function useLocationSystem(onLocationUpdate) {
         ? `You look around the ${room.name}. ${room.description}`
         : `You move to the ${room.name}. ${room.description}`,
       roomId: room.id,
-      specimens: room.specimens || [],
+      specimens: canonicalizeSpecimenIds(room.specimens || []),
       npcs: room.npcs || []
     };
   };

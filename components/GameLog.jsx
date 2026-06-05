@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import SafeFormattedText from './SafeFormattedText';
 
 export default function GameLog({ narrative, isLoading, lastUserInput, isMovingViaMap }) {
   const logRef = useRef(null);
@@ -55,45 +56,6 @@ export default function GameLog({ narrative, isLoading, lastUserInput, isMovingV
     }
   }, [displayedNarrative, isFading, showLoadingAnimation]);
   
-  // Process narrative to format markdown-style elements
-  const formatNarrative = (text) => {
-    if (!text) return '';
-    
-    const rawText = text;
-    
-    // Filter out markers but store text first in data attribute
-    const processedText = text
-      .replace(/\[STATUS:.*?\]/g, '')
-      .replace(/\[FATIGUE:.*?\]/g, '')
-      .replace(/\[WEATHER:.*?\]/g, '')
-      .replace(/\[SOUNDS:.*?\]/g, '')
-      .replace(/\[MOOD:.*?\]/g, '')
-      .replace(/\[SCIENTIFIC_INSIGHT:.*?\]/g, '')
-      .replace(/\[COLLECTIBLE:.*?\]/g, '')
-      .replace(/\[NPC:.*?\]/g, '')
-      .replace(/\[NPC_STATUS:.*?\]/g, '')
-      .replace(/\[NEXTSTEPS:.*?\]/g, '')
-      .trim();
-    
-    // Enhanced Markdown -> HTML with more styling options
-    const formattedText = processedText
-      // Bold text
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-amber-900">$1</strong>')
-      // Italic text
-      .replace(/\*(.*?)\*/g, '<em class="text-amber-800">$1</em>')
-      // Paragraphs
-      .replace(/\n\n/g, '</p><p class="mb-3">')
-      // Basic quotes
-      .replace(/>(.*?)(\n|$)/g, '<blockquote class="border-l-4 border-amber-300 pl-3 py-1 italic text-amber-800 my-2">$1</blockquote>');
-    
-    return `
-      <div class="hidden narrative-raw-data">${rawText}</div>
-      <div class="narrative-content font-serif">
-        <p class="mb-3">${formattedText}</p>
-      </div>
-    `;
-  };
-  
   // Determine loading animation based on user input
   const getLoadingContext = () => {
     // Default
@@ -145,7 +107,7 @@ export default function GameLog({ narrative, isLoading, lastUserInput, isMovingV
     const { loadingText, loadingImage } = getLoadingContext();
     
     return (
-      <div ref={logRef} className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center relative">
+      <div ref={logRef} className="h-full overflow-y-auto p-4 flex flex-col items-center justify-center relative sm:p-6">
         {/* Watercolor container with enhanced effects */}
         <div className="watercolor-container">
           <div className="watercolor-image-wrapper">
@@ -191,8 +153,9 @@ export default function GameLog({ narrative, isLoading, lastUserInput, isMovingV
           
           .watercolor-image-wrapper {
             position: relative;
-            width: 500px;
-            height: 500px;
+            width: min(72vw, 500px);
+            height: min(72vw, 500px);
+            max-height: 44dvh;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -271,7 +234,7 @@ export default function GameLog({ narrative, isLoading, lastUserInput, isMovingV
             display: inline-block;
             font-family: 'Georgia', serif;
             font-style: italic;
-            font-size: 1.2rem;
+            font-size: clamp(1rem, 3vw, 1.2rem);
             color: #8B5A2B;
             opacity: 0;
             animation: letterFade forwards;
@@ -329,22 +292,18 @@ export default function GameLog({ narrative, isLoading, lastUserInput, isMovingV
   return (
     <div
       ref={logRef}
-      className="flex-1 overflow-y-auto p-6 prose max-w-none relative"
+      className="h-full overflow-y-auto p-4 prose max-w-none relative sm:p-5 md:p-6"
     >
-      <div 
-        className={`transition-opacity duration-10 ${isFading ? 'opacity-0' : 'opacity-100'}`}
-        dangerouslySetInnerHTML={{ 
-          __html: `
-            ${formatNarrative(displayedNarrative)}
-            <div class="decorative-corner-top-right absolute top-2 right-2 w-8 h-8 opacity-10"
-              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\'%3E%3Cpath fill=\\'%238B5A2B\\' d=\\'M0,0 L24,0 L24,6 C18,6 12,12 12,18 L6,18 C6,12 0,6 0,0 Z\\'/%3E%3C/svg%3E'); background-size: contain;">
-            </div>
-            <div class="decorative-corner-bottom-left absolute bottom-2 left-2 w-8 h-8 opacity-10"
-              style="background-image: url('data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\'%3E%3Cpath fill=\\'%238B5A2B\\' d=\\'M0,24 L0,18 C6,18 12,12 12,6 L18,6 C18,12 24,18 24,24 L0,24 Z\\'/%3E%3C/svg%3E'); background-size: contain;">
-            </div>
-          `
-        }}
-      />
+      <div className={`transition-opacity duration-150 ${isFading ? 'opacity-0' : 'opacity-100'}`}>
+        <SafeFormattedText
+          text={displayedNarrative}
+          sanitizeMetadata
+          className="narrative-content font-serif text-base leading-relaxed sm:text-lg"
+          paragraphClassName="mb-3"
+        />
+        <div className="decorative-corner-top-right absolute top-2 right-2 w-8 h-8 opacity-10" />
+        <div className="decorative-corner-bottom-left absolute bottom-2 left-2 w-8 h-8 opacity-10" />
+      </div>
     </div>
   );
 }

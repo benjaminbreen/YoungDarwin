@@ -10,7 +10,6 @@ export default function Journal({
   onSave 
 }) {
   const [journalEntry, setJournalEntry] = useState('');
-  const [savedEntries, setSavedEntries] = useState([]);
   
   // Access game store to add journal entries to history
   const { addToGameHistory, formatGameTime, daysPassed } = useGameStore();
@@ -28,14 +27,6 @@ export default function Journal({
   
   const modalRef = useRef(null);
   
-  // Load saved entries from localStorage on component mount
-  useEffect(() => {
-    const storedEntries = localStorage.getItem('darwinJournalEntries');
-    if (storedEntries) {
-      setSavedEntries(JSON.parse(storedEntries));
-    }
-  }, []);
-
   // Reset entry when dialog opens or specimen changes
   useEffect(() => {
     if (isOpen) {
@@ -121,20 +112,15 @@ export default function Journal({
       
       const newEntry = {
         id: Date.now(),
+        specimenId: specimen?.id || null,
         specimenName: specimenName,
         date: currentDate.toLocaleString(),
         gameDay: daysPassed || 1,
+        day: daysPassed || 1,
         gameTime: formattedTime,
         content: journalEntry,
         type: 'field_notes'
       };
-      
-      // Update local entries
-      const updatedEntries = [...savedEntries, newEntry];
-      setSavedEntries(updatedEntries);
-      
-      // Save to localStorage
-      localStorage.setItem('darwinJournalEntries', JSON.stringify(updatedEntries));
       
       // Add to game history for the timeline - pass a string instead of an object
       addToGameHistory('field_notes', `FIELD NOTES - ${specimenName}: ${journalEntry}`);

@@ -17,16 +17,19 @@ export default function EnhancedEventHistory() {
     setIsOpen(!isOpen);
   };
   
-  // Save expedition log as markdown file
-  const saveHistory = () => {
-    // Create markdown content
-    const markdownContent = `# Darwin's Expedition Log\n\n` +
+  const buildMarkdownContent = () => (
+    `# Darwin's Expedition Log\n\n` +
       getFilteredEvents().map(event => {
         const cleanContent = cleanContentForDisplay(event.fullContent || event.summary);
         return `## Day ${event.day} • ${event.time} at ${event.location}\n` +
           `**${formatEventType(event.eventType)}**\n\n` +
           `${cleanContent}\n\n`;
-      }).join('---\n\n');
+      }).join('---\n\n')
+  );
+
+  // Save expedition log as markdown file
+  const saveHistory = () => {
+    const markdownContent = buildMarkdownContent();
     
     // Create a blob and download
     const blob = new Blob([markdownContent], { type: 'text/markdown' });
@@ -40,11 +43,12 @@ export default function EnhancedEventHistory() {
     URL.revokeObjectURL(url);
   };
   
-  // Send log to email (placeholder)
+  // Open a local email draft with the expedition log.
   const sendEmail = (e) => {
     e.preventDefault();
-    // This would connect to an API endpoint in a real implementation
-    alert(`Log would be sent to ${email} in a production build.`);
+    const subject = encodeURIComponent("Darwin's Expedition Log");
+    const body = encodeURIComponent(buildMarkdownContent());
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
     setEmail('');
   };
   

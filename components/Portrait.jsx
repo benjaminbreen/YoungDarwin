@@ -1,15 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { npcs } from '../data/npcs';
 import SwitchPOV from './SwitchPOV'; // Add this import
 
 export default function Portrait({ character, mood, fatigue, onSwitchPOV }) { // Add onSwitchPOV prop
-  useEffect(() => {
-    // Debug to see what's being passed
-    console.log("Portrait received character:", character);
-  }, [character]);
-
   // First, determine if we're dealing with an NPC
   let npcData = null;
   
@@ -85,7 +80,7 @@ export default function Portrait({ character, mood, fatigue, onSwitchPOV }) { //
   const characterRole = isNPC && npcData ? npcData.role : 'Naturalist';
   
 return (
-    <div className="darwin-panel darwin-portrait flex flex-col items-center">
+    <div className="darwin-panel darwin-portrait flex w-full flex-col items-center">
       <div className="relative mb-2">
         <div className="portrait-frame absolute inset-0 rounded-full border-2 border-amber-700 opacity-10"></div>
         <img 
@@ -104,7 +99,7 @@ return (
         )}
       </div>
       
-      <div className="text-center">
+      <div className="w-full text-center">
         <h3 className="font-bold text-darwin-dark text-xl font-serif">{characterName}</h3>
         <p className="text-sm italic text-darwin-primary mt-1 mb-2">{getDescriptionText()}</p>
         
