@@ -1,0 +1,2 @@
+public/assets/models/**/*.{glb,fbx,FBX,obj,OBJ,zip,rar,3ds,dae,c4d,png,jpg,jpeg,bin} filter=lfs diff=lfs merge=lfs -text
+assets-src/**/*.{glb,fbx,FBX,obj,OBJ,zip,rar,3ds,dae,c4d,png,jpg,jpeg,bin} filter=lfs diff=lfs merge=lfs -text
