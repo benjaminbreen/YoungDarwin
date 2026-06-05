@@ -3,13 +3,18 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useKeyboardControls } from '@react-three/drei';
+import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { threeSpecimens, threeTools } from '../../data';
+import { getThreeSpecimens, threeTools } from '../../data';
 import { consumeTouchControls } from '../../input/touchControls';
-import { clampToWalkable, getTerrainEdgeRisk, TERRAIN_BOUNDS, terrainHeight } from '../../world/terrain';
-import { findClimbTarget, getObstacleEdgeRisk, getObstacleSupportHeight, resolveObstacleCollision } from '../../world/obstacles';
+import { TERRAIN_BOUNDS } from '../../world/terrain';
 import { getZone } from '../../world/floreanaZones';
+import { createCollisionAdapter } from '../../physics/collisionAdapter';
+import {
+  CHARACTER_CONTROLLER_CONFIG,
+  useKinematicCharacterController,
+} from '../../physics/useKinematicCharacterController';
 import { ModelAsset } from '../assets/ModelAsset';
 
 const PLAYER = {
@@ -18,6 +23,20 @@ const PLAYER = {
   jumpVelocity: 6.8,
   gravity: 15.5,
   bounds: TERRAIN_BOUNDS,
+};
+
+const SPAWN_DROP = {
+  height: 7.2,
+  initialVelocity: -1.2,
+  maxFallSpeed: -16,
+  landingLock: 0.55,
+};
+
+const BUMP_FEEDBACK = {
+  duration: 0.32,
+  cooldown: 0.34,
+  minSpeed: 2.1,
+  minHeadOn: 0.42,
 };
 
 const CAMERA = {
@@ -149,9 +168,32 @@ function collectionAnimationForTool(toolId) {
   return { clip: 'pickUp', duration: ACTION_DURATION.pickUp, lockMovement: true };
 }
 
-export function PlayerController() {
+function formatVector(vector) {
+  if (!vector) return '--';
+  return `${vector.x.toFixed(2)},${vector.y.toFixed(2)},${vector.z.toFixed(2)}`;
+}
+
+function orientDebugVector(group, direction, length) {
+  if (!group) return;
+  const normalized = direction.clone();
+  if (normalized.lengthSq() < 0.0001 || length <= 0.001) {
+    group.visible = false;
+    return;
+  }
+  normalized.normalize();
+  group.visible = true;
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normalized);
+  group.scale.set(1, length, 1);
+}
+
+export function PlayerController({ physicsDebug = false }) {
   const group = useRef(null);
   const warningRef = useRef(null);
+  const modelFeedbackRef = useRef(null);
+  const debugCollisionRef = useRef(null);
+  const debugMovementRef = useRef(null);
+  const characterBodyRef = useRef(null);
+  const characterColliderRef = useRef(null);
   const velocity = useRef(new THREE.Vector3());
   const yaw = useRef(0);
   const zoom = useRef(CAMERA.defaultZoom);
@@ -163,7 +205,21 @@ export function PlayerController() {
   const lastCamera = useRef(false);
   const lastButtons = useRef({});
   const lastTeeterAt = useRef(0);
-  const bounceFeedback = useRef({ startedAt: -10, intensity: 0 });
+  const lastPhysicsDebugAt = useRef(0);
+  const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
+  const bounceFeedback = useRef({
+    startedAt: -10,
+    lastImpactAt: -10,
+    intensity: 0,
+    normal: new THREE.Vector3(),
+  });
+  const characterDebug = useRef({
+    movement: new THREE.Vector3(),
+    normal: new THREE.Vector3(),
+    collisions: 0,
+    grounded: false,
+    source: 'pending',
+  });
   const previousMotion = useRef({ moving: false, running: false });
   const pendingMovementCost = useRef({ fatigue: 0, falling: 0, lastFlushAt: 0 });
   const stateRef = useRef({
@@ -183,19 +239,48 @@ export function PlayerController() {
   });
   const [, getKeys] = useKeyboardControls();
   const { camera, gl } = useThree();
+  const rapierContext = useRapier();
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
   const applyMovementCost = useThreeGameStore(state => state.applyMovementCost);
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
+  const setPhysicsDebug = useThreeGameStore(state => state.setPhysicsDebug);
   const viewMode = useThreeGameStore(state => state.viewMode);
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const zoneSpecimens = useMemo(() => getThreeSpecimens(currentZoneId), [currentZoneId]);
+  const collisionAdapter = useMemo(() => createCollisionAdapter(currentZoneId, rapierContext), [currentZoneId, rapierContext]);
+  const characterController = useKinematicCharacterController(rapierContext, characterBodyRef, characterColliderRef);
+  const [startX, , startZ] = getZone(currentZoneId).playerStart || [0, 0, 7.5];
 
   const cameraTargets = useMemo(() => ({
     shoulder: new THREE.Vector3(1.05, 2.35, 3.75),
     first: new THREE.Vector3(0, 1.72, 0.16),
     top: new THREE.Vector3(0, 20, 0.1),
+  }), []);
+
+  const debugMaterials = useMemo(() => ({
+    capsule: new THREE.MeshBasicMaterial({
+      color: '#34d399',
+      transparent: true,
+      opacity: 0.2,
+      wireframe: true,
+      depthWrite: false,
+    }),
+    collision: new THREE.MeshBasicMaterial({
+      color: '#fb7185',
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+    }),
+    movement: new THREE.MeshBasicMaterial({
+      color: '#60a5fa',
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+    }),
   }), []);
 
   const queueMovementCost = useCallback(({
@@ -263,22 +348,43 @@ export function PlayerController() {
     };
   }, [gl]);
 
+  useEffect(() => {
+    spawnDrop.current = { phase: 'pending', zoneId: currentZoneId, landingUntil: 0 };
+    velocity.current.set(0, SPAWN_DROP.initialVelocity, 0);
+    wasAirborne.current = true;
+    stateRef.current.action = null;
+    stateRef.current.climbMotion = null;
+    stateRef.current.lockMovementUntil = 0;
+  }, [currentZoneId]);
+
   useFrame((_, delta) => {
     if (!group.current || health <= 0) return;
     const keys = getKeys();
     const touch = consumeTouchControls();
     const now = performance.now() / 1000;
+    const feedback = bounceFeedback.current;
+    const feedbackAge = now - feedback.startedAt;
+    const feedbackProgress = THREE.MathUtils.clamp(feedbackAge / BUMP_FEEDBACK.duration, 0, 1);
+    const feedbackEase = Math.sin(feedbackProgress * Math.PI);
     if (warningRef.current) {
-      const feedbackAge = now - bounceFeedback.current.startedAt;
-      const feedbackProgress = THREE.MathUtils.clamp(feedbackAge / 0.72, 0, 1);
-      const opacity = (1 - feedbackProgress) * bounceFeedback.current.intensity;
+      const opacity = (1 - feedbackProgress) * feedback.intensity * 0.42;
       warningRef.current.visible = opacity > 0.015;
-      warningRef.current.position.y = 2.35 + feedbackProgress * 0.42;
-      warningRef.current.scale.setScalar(0.72 + bounceFeedback.current.intensity * 0.42 + Math.sin(feedbackProgress * Math.PI) * 0.22);
-      warningRef.current.quaternion.copy(camera.quaternion);
+      warningRef.current.position.set(-feedback.normal.x * 0.28, 0.055, -feedback.normal.z * 0.28);
+      warningRef.current.scale.setScalar(0.74 + feedbackProgress * 0.95 + feedback.intensity * 0.28);
       warningRef.current.children.forEach(child => {
         if (child.material) child.material.opacity = opacity;
       });
+    }
+    if (modelFeedbackRef.current) {
+      const lean = feedbackEase * feedback.intensity * 0.105;
+      modelFeedbackRef.current.rotation.x = -feedback.normal.z * lean;
+      modelFeedbackRef.current.rotation.z = feedback.normal.x * lean;
+      modelFeedbackRef.current.position.x = feedback.normal.x * feedbackEase * feedback.intensity * 0.045;
+      modelFeedbackRef.current.position.z = feedback.normal.z * feedbackEase * feedback.intensity * 0.045;
+    }
+    if (physicsDebug) {
+      orientDebugVector(debugCollisionRef.current, characterDebug.current.normal, characterDebug.current.normal.length() * 0.85);
+      orientDebugVector(debugMovementRef.current, characterDebug.current.movement, Math.min(1.2, characterDebug.current.movement.length() * 18));
     }
     const startOfFramePosition = group.current.position.clone();
     const startAction = (clip, duration = ACTION_DURATION[clip] || 1.2, {
@@ -299,6 +405,85 @@ export function PlayerController() {
       }
       lastButtons.current[button] = pressed;
     };
+
+    const safeDelta = Math.min(delta, 0.05);
+    if (spawnDrop.current.phase === 'pending') {
+      const spawnGroundY = collisionAdapter.groundInfo(group.current.position).y;
+      group.current.position.set(startX, spawnGroundY + SPAWN_DROP.height, startZ);
+      characterController.sync(group.current.position);
+      group.current.rotation.y = Math.PI;
+      velocity.current.set(0, SPAWN_DROP.initialVelocity, 0);
+      spawnDrop.current.phase = 'dropping';
+      wasAirborne.current = true;
+    }
+    if (spawnDrop.current.phase === 'dropping') {
+      const groundInfo = collisionAdapter.groundInfo(group.current.position);
+      velocity.current.y = Math.max(SPAWN_DROP.maxFallSpeed, velocity.current.y - PLAYER.gravity * safeDelta);
+      group.current.position.y += velocity.current.y * safeDelta;
+      const landed = group.current.position.y <= groundInfo.y;
+      if (now - lastPhysicsDebugAt.current > 0.12) {
+        lastPhysicsDebugAt.current = now;
+        setPhysicsDebug({
+          grounded: landed,
+          groundSource: groundInfo.source,
+          groundY: groundInfo.y,
+          playerY: group.current.position.y,
+          obstacleCount: collisionAdapter.obstacles.length,
+          spawnPhase: 'dropping',
+          controller: characterDebug.current.source,
+          controllerHits: characterDebug.current.collisions,
+          computedMove: formatVector(characterDebug.current.movement),
+        });
+      }
+      if (landed) {
+        group.current.position.y = groundInfo.y;
+        characterController.sync(group.current.position);
+        velocity.current.set(0, 0, 0);
+        spawnDrop.current.phase = 'landing';
+        spawnDrop.current.landingUntil = now + SPAWN_DROP.landingLock;
+        stateRef.current.action = 'landing';
+        stateRef.current.actionStartedAt = now;
+        stateRef.current.actionUntil = now + ACTION_DURATION.landing;
+        stateRef.current.lockMovementUntil = now + SPAWN_DROP.landingLock;
+        stateRef.current.running = false;
+        stateRef.current.walking = false;
+        stateRef.current.airborne = false;
+        wasAirborne.current = false;
+      } else {
+        stateRef.current.running = false;
+        stateRef.current.walking = false;
+        stateRef.current.airborne = true;
+        return;
+      }
+    }
+    if (spawnDrop.current.phase === 'landing') {
+      const groundInfo = collisionAdapter.groundInfo(group.current.position);
+      group.current.position.y = groundInfo.y;
+      characterController.sync(group.current.position);
+      velocity.current.set(0, 0, 0);
+      if (now - lastPhysicsDebugAt.current > 0.2) {
+        lastPhysicsDebugAt.current = now;
+        setPhysicsDebug({
+          grounded: true,
+          groundSource: groundInfo.source,
+          groundY: groundInfo.y,
+          playerY: group.current.position.y,
+          obstacleCount: collisionAdapter.obstacles.length,
+          spawnPhase: 'landing',
+          controller: characterDebug.current.source,
+          controllerHits: characterDebug.current.collisions,
+          computedMove: formatVector(characterDebug.current.movement),
+        });
+      }
+      if (now < spawnDrop.current.landingUntil) {
+        stateRef.current.running = false;
+        stateRef.current.walking = false;
+        stateRef.current.airborne = false;
+        return;
+      }
+      spawnDrop.current.phase = 'complete';
+    }
+
     if (stateRef.current.action && now >= stateRef.current.actionUntil) {
       const recovery = stateRef.current.recoverAction;
       stateRef.current.action = null;
@@ -312,6 +497,7 @@ export function PlayerController() {
       const arc = Math.sin(Math.PI * progress) * Math.max(0.28, climb.heightDelta * 0.32);
       group.current.position.lerpVectors(climb.start, climb.end, eased);
       group.current.position.y += arc;
+      characterController.sync(group.current.position);
       velocity.current.set(0, 0, 0);
       group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, climb.targetYaw, 10, delta);
       stateRef.current.running = false;
@@ -321,6 +507,7 @@ export function PlayerController() {
       stateRef.current.strafeRight = false;
       if (progress >= 1) {
         group.current.position.copy(climb.end);
+        characterController.sync(group.current.position);
         stateRef.current.climbMotion = null;
         stateRef.current.action = null;
         stateRef.current.lockMovementUntil = 0;
@@ -361,11 +548,12 @@ export function PlayerController() {
     const moving = input.lengthSq() > 0;
     const running = Boolean((keys.run || touch.run) && moving && !stateRef.current.crouching);
     const movementSpeed = stateRef.current.crouching ? PLAYER.walkSpeed * 0.45 : running ? PLAYER.runSpeed : PLAYER.walkSpeed;
-    const movementLocked = now < stateRef.current.lockMovementUntil;
+    const movementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
     const climbPressed = Boolean(keys.climb || touch.climb);
     if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked) {
-      const target = findClimbTarget(group.current.position, facing.current);
+      const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
       if (target) {
+        characterController.sync(group.current.position);
         startAction('climb', ACTION_DURATION.climb, { lockMovement: true });
         stateRef.current.climbMotion = {
           start: group.current.position.clone(),
@@ -398,34 +586,96 @@ export function PlayerController() {
       velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, 10, delta);
     }
 
-    const obstacleGroundY = getObstacleSupportHeight(group.current.position.x, group.current.position.z, group.current.position.y);
-    const groundY = Math.max(terrainHeight(group.current.position.x, group.current.position.z) + 0.04, (obstacleGroundY ?? -Infinity) + 0.04);
+    const groundInfo = collisionAdapter.groundInfo(group.current.position);
+    const groundY = groundInfo.y;
     const grounded = group.current.position.y <= groundY + 0.03;
+    if (now - lastPhysicsDebugAt.current > 0.25) {
+      lastPhysicsDebugAt.current = now;
+      setPhysicsDebug({
+        grounded,
+        groundSource: groundInfo.source,
+        groundY,
+        playerY: group.current.position.y,
+        obstacleCount: collisionAdapter.obstacles.length,
+        spawnPhase: spawnDrop.current.phase,
+        controller: characterDebug.current.source,
+        controllerHits: characterDebug.current.collisions,
+        computedMove: formatVector(characterDebug.current.movement),
+      });
+    }
     if ((keys.jump || touch.jump) && grounded && !stateRef.current.crouching && !movementLocked) velocity.current.y = PLAYER.jumpVelocity;
     velocity.current.y -= PLAYER.gravity * delta;
-    group.current.position.addScaledVector(velocity.current, delta);
-    const collision = resolveObstacleCollision(group.current.position, startOfFramePosition);
-    if (collision) {
-      const impactSpeed = Math.hypot(velocity.current.x, velocity.current.z);
-      const intensity = THREE.MathUtils.clamp(0.22 + impactSpeed / 7.5 + collision.penetration * 0.18, 0.28, 1);
-      const shove = 0.26 + intensity * 1.05;
-      group.current.position.copy(collision.position).addScaledVector(collision.normal, shove);
-      velocity.current.x = collision.normal.x * (1.15 + intensity * 3.6);
-      velocity.current.z = collision.normal.z * (1.15 + intensity * 3.6);
-      bounceFeedback.current = { startedAt: now, intensity };
-      if (stateRef.current.action === 'hitReaction' || stateRef.current.action === 'bigHitFall') {
-        stateRef.current.action = null;
-        stateRef.current.lockMovementUntil = 0;
-        stateRef.current.recoverAction = null;
+    const desiredDelta = velocity.current.clone().multiplyScalar(delta);
+    const characterMove = characterController.move(group.current.position, desiredDelta);
+    characterDebug.current.movement.copy(characterMove.movement);
+    characterDebug.current.collisions = characterMove.collisions;
+    characterDebug.current.grounded = characterMove.grounded;
+    characterDebug.current.source = characterMove.source;
+    characterDebug.current.normal.copy(characterMove.collision?.normal || new THREE.Vector3());
+    group.current.position.add(characterMove.movement);
+    let collision = characterMove.collision
+      ? {
+          normal: characterMove.collision.normal,
+          penetration: Math.max(0.02, desiredDelta.length() - characterMove.movement.length()),
+          source: characterMove.source,
+        }
+      : null;
+
+    if (!characterController.ready()) {
+      const fallbackCollision = collisionAdapter.resolveCollision(group.current.position, startOfFramePosition);
+      if (fallbackCollision) {
+        group.current.position.copy(fallbackCollision.position).addScaledVector(fallbackCollision.normal, 0.035);
+        collision = fallbackCollision;
       }
     }
 
-    const nextObstacleGroundY = getObstacleSupportHeight(group.current.position.x, group.current.position.z, group.current.position.y);
-    const nextGroundY = Math.max(terrainHeight(group.current.position.x, group.current.position.z) + 0.04, (nextObstacleGroundY ?? -Infinity) + 0.04);
-    const landed = group.current.position.y < nextGroundY;
+    if (collision) {
+      const normal = collision.normal.clone().normalize();
+      characterDebug.current.normal.copy(normal);
+      const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+      const impactSpeed = horizontalVelocity.length();
+      const intoSurface = impactSpeed > 0.001
+        ? Math.max(0, -horizontalVelocity.clone().normalize().dot(normal))
+        : 0;
+      const normalVelocity = horizontalVelocity.dot(normal);
+      const tangentVelocity = horizontalVelocity.clone().addScaledVector(normal, -normalVelocity);
+
+      if (normalVelocity < 0) {
+        velocity.current.x = tangentVelocity.x * 0.88;
+        velocity.current.z = tangentVelocity.z * 0.88;
+      }
+
+      const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
+      const canReact = now - bounceFeedback.current.lastImpactAt >= BUMP_FEEDBACK.cooldown;
+      if (directImpact && canReact) {
+        const intensity = THREE.MathUtils.clamp(
+          0.22 + impactSpeed / 8.5 + collision.penetration * 0.12 + intoSurface * 0.24,
+          0.26,
+          0.86,
+        );
+        velocity.current.x += normal.x * intensity * 0.72;
+        velocity.current.z += normal.z * intensity * 0.72;
+        bounceFeedback.current = {
+          startedAt: now,
+          lastImpactAt: now,
+          intensity,
+          normal,
+        };
+        if (!stateRef.current.action && impactSpeed > 4.8) {
+          startAction('stopWalking', 0.34, { lockMovement: false });
+        }
+      }
+    }
+
+    const nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
+    const nextGroundY = nextGroundInfo.y;
+    const landed = characterMove.grounded || group.current.position.y < nextGroundY;
     if (landed) {
       const falling = wasAirborne.current ? Math.abs(velocity.current.y) : 0;
-      group.current.position.y = nextGroundY;
+      if (group.current.position.y < nextGroundY) {
+        group.current.position.y = nextGroundY;
+        characterController.sync(group.current.position);
+      }
       velocity.current.y = 0;
       if (falling > 9.5 && !stateRef.current.action) startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
       else if (falling > 3.2 && !stateRef.current.action) startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
@@ -435,9 +685,8 @@ export function PlayerController() {
     } else if (moving || !grounded) {
       queueMovementCost({ running, walking: moving && !running, airborne: !grounded, falling: 0 }, delta, now);
     }
-    wasAirborne.current = !landed && !grounded;
-    const edgeRisk = getObstacleEdgeRisk(group.current.position.x, group.current.position.z, group.current.position.y)
-      || getTerrainEdgeRisk(group.current.position.x, group.current.position.z, facing.current);
+    wasAirborne.current = !landed && !grounded && !characterMove.grounded;
+    const edgeRisk = collisionAdapter.edgeRisk(group.current.position, facing.current);
     if (edgeRisk && edgeRisk.intensity > 0.52 && moving && now - lastTeeterAt.current > 3.4 && !stateRef.current.action) {
       lastTeeterAt.current = now;
       startAction('teeter', 1.0, { lockMovement: false });
@@ -447,9 +696,10 @@ export function PlayerController() {
 
     const p = group.current.position;
     const previous = p.clone().addScaledVector(velocity.current, -delta);
-    const clamped = clampToWalkable(p, previous);
+    const clamped = collisionAdapter.clampToWalkable(p, previous);
     if (!clamped.equals(p)) {
       p.copy(clamped);
+      characterController.sync(p);
       velocity.current.x = 0;
       velocity.current.z = 0;
     }
@@ -457,7 +707,7 @@ export function PlayerController() {
     let nearest = null;
     let nearestDistance = 4.4;
     const collected = useThreeGameStore.getState().collectedSpecimenIds;
-    for (const specimen of threeSpecimens) {
+    for (const specimen of zoneSpecimens) {
       if (collected.includes(specimen.id)) continue;
       const [x, , z] = specimen.spawnPoint;
       const distance = Math.hypot(p.x - x, p.z - z);
@@ -520,20 +770,67 @@ export function PlayerController() {
     previousMotion.current.running = running;
   });
 
-  const [startX, , startZ] = getZone().playerStart || [0, 0, 7.5];
   return (
-    <group ref={group} position={[startX, terrainHeight(startX, startZ) + 0.04, startZ]} rotation={[0, Math.PI, 0]}>
-      <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} />
-      <group ref={warningRef} visible={false} position={[0, 2.35, 0]}>
-        <mesh position={[0, 0.08, 0]}>
-          <sphereGeometry args={[0.09, 16, 12]} />
-          <meshBasicMaterial color="#ff3b30" transparent opacity={0} depthWrite={false} />
+    <group ref={group} position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]} rotation={[0, Math.PI, 0]}>
+      <RigidBody
+        ref={characterBodyRef}
+        type="kinematicPosition"
+        colliders={false}
+        enabledRotations={[false, false, false]}
+        position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]}
+        userData={{ id: 'darwin', kind: 'player' }}
+      >
+        <CapsuleCollider
+          ref={characterColliderRef}
+          args={[CHARACTER_CONTROLLER_CONFIG.halfHeight, CHARACTER_CONTROLLER_CONFIG.radius]}
+          position={[0, CHARACTER_CONTROLLER_CONFIG.centerY, 0]}
+        />
+      </RigidBody>
+      <group ref={modelFeedbackRef}>
+        <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} />
+      </group>
+      <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh>
+          <ringGeometry args={[0.22, 0.34, 28]} />
+          <meshBasicMaterial color="#d9c38b" transparent opacity={0} depthWrite={false} />
         </mesh>
-        <mesh position={[0, -0.11, 0]} scale={[0.58, 1.35, 0.58]}>
-          <boxGeometry args={[0.11, 0.32, 0.11]} />
-          <meshBasicMaterial color="#ff3b30" transparent opacity={0} depthWrite={false} />
+        <mesh position={[0.16, 0.05, 0]} scale={[0.55, 0.55, 0.55]}>
+          <ringGeometry args={[0.18, 0.28, 20]} />
+          <meshBasicMaterial color="#f1ddb0" transparent opacity={0} depthWrite={false} />
         </mesh>
       </group>
+      {physicsDebug && (
+        <group>
+          <group position={[0, CHARACTER_CONTROLLER_CONFIG.centerY, 0]}>
+            <mesh material={debugMaterials.capsule}>
+              <capsuleGeometry
+                args={[
+                  CHARACTER_CONTROLLER_CONFIG.radius,
+                  CHARACTER_CONTROLLER_CONFIG.halfHeight * 2,
+                  10,
+                  20,
+                ]}
+              />
+            </mesh>
+          </group>
+          <group ref={debugCollisionRef} position={[0, 1.2, 0]}>
+            <mesh position={[0, 0.32, 0]} material={debugMaterials.collision}>
+              <cylinderGeometry args={[0.025, 0.025, 0.64, 8]} />
+            </mesh>
+            <mesh position={[0, 0.68, 0]} material={debugMaterials.collision}>
+              <coneGeometry args={[0.08, 0.18, 10]} />
+            </mesh>
+          </group>
+          <group ref={debugMovementRef} position={[0, 0.28, 0]}>
+            <mesh position={[0, 0.26, 0]} material={debugMaterials.movement}>
+              <cylinderGeometry args={[0.018, 0.018, 0.52, 8]} />
+            </mesh>
+            <mesh position={[0, 0.56, 0]} material={debugMaterials.movement}>
+              <coneGeometry args={[0.06, 0.14, 10]} />
+            </mesh>
+          </group>
+        </group>
+      )}
     </group>
   );
 }

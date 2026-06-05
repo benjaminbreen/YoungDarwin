@@ -1,59 +1,24 @@
-import { baseSpecimens } from '../data/specimens';
-import { collectionTools } from '../data/tools';
-import { getZone } from './world/floreanaZones';
+import { currentZoneId } from '../game-core/zones';
+import { getInitialNarration, getIslandLocation, getZoneSpecimens } from '../game-core/specimens';
+import { expeditionTools } from '../game-core/tools';
 
-const activeZone = getZone();
-const SELECTED_IDS = activeZone.specimens || ['crab', 'marineiguana', 'mediumgroundfinch', 'cactus', 'basalt'];
+export function getThreeSpecimens(zoneId = currentZoneId) {
+  return getZoneSpecimens(zoneId);
+}
 
-const SPECIMEN_POSITIONS = activeZone.specimenSpawns;
+export const threeSpecimens = getThreeSpecimens();
 
-const SPECIMEN_SCALE = {
-  crab: 1.45,
-  marineiguana: 1.28,
-  mediumgroundfinch: 1.35,
-  floreanagianttortoise: 1.25,
-  galapagospenguin: 1.18,
-  cactus: 1.55,
-  basalt: 1.25,
-};
+export const threeTools = expeditionTools.map(tool => (
+  tool.id === 'sketch' ? { ...tool, icon: '✒️' } : tool
+));
 
-const SPECIMEN_BEHAVIOR = activeZone.specimenBehaviors;
+export function getThreeIslandLocation(zoneId = currentZoneId) {
+  return getIslandLocation(zoneId);
+}
 
-export const threeSpecimens = SELECTED_IDS
-  .map(id => baseSpecimens.find(specimen => specimen.id === id))
-  .filter(Boolean)
-  .map(specimen => ({
-    ...specimen,
-    spawnPoint: SPECIMEN_POSITIONS[specimen.id],
-    sceneScale: SPECIMEN_SCALE[specimen.id] || 1,
-    behavior: SPECIMEN_BEHAVIOR[specimen.id] || 'still',
-  }));
+export function getThreeInitialNarration(zoneId = currentZoneId) {
+  return getInitialNarration(zoneId);
+}
 
-export const threeTools = [
-  ...collectionTools,
-  {
-    id: 'sketch',
-    name: 'Field Journal',
-    description: 'Observe, sketch, and document without taking the specimen.',
-    detailedDescription: 'A pocket field book for locality, behavior, and specimen condition notes.',
-    action: 'documented',
-    icon: '✒️',
-    usage: 'Best for cautious observation and educational progress.',
-  },
-];
-
-export const islandLocation = {
-  id: activeZone.id,
-  name: activeZone.name,
-  island: activeZone.island,
-  historicalName: activeZone.historicalName,
-  subtitle: activeZone.subtitle,
-  type: activeZone.biome,
-};
-
-export const initialNarration = {
-  narration: 'The boat leaves you on the black volcanic landing shelf of Post Office Bay. The Beagle rides beyond the turquoise water while Syms Covington checks the specimen bag against the ash-colored slopes of Floreana.',
-  educationalNote: activeZone.educationalNote,
-  weather: activeZone.weather,
-  sounds: activeZone.sounds,
-};
+export const islandLocation = getThreeIslandLocation();
+export const initialNarration = getThreeInitialNarration();

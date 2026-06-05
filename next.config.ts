@@ -7,9 +7,6 @@ const nextConfig: NextConfig = {
   experimental: {
     parallelServerBuildTraces: false,
   },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
 
-const ROOTS = ['app', 'components', 'data', 'hooks', 'pages', 'three-game', 'utils'];
+const ROOTS = ['app', 'components', 'data', 'field-notebook', 'game-core', 'hooks', 'pages', 'three-game', 'utils'];
 const EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx']);
 
 function walk(dir, files = []) {

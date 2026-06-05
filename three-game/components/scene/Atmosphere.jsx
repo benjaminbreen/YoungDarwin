@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
 
 function Cloud({ position, scale = 1, speed = 0.02 }) {
   const ref = useRef(null);
@@ -28,29 +27,12 @@ function Cloud({ position, scale = 1, speed = 0.02 }) {
   );
 }
 
+// The sun and moon are now rendered and animated by <SkyController>; this layer
+// keeps only the drifting cloud puffs, which re-tint for free from the
+// sky-driven lighting rig.
 export function Atmosphere() {
-  const sunMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#ffe58a',
-    transparent: true,
-    opacity: 0.9,
-    depthWrite: false,
-  }), []);
-  const glowMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#fff1a9',
-    transparent: true,
-    opacity: 0.18,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  }), []);
-
   return (
     <group renderOrder={-5}>
-      <mesh position={[-18, 21, -48]} material={glowMaterial}>
-        <circleGeometry args={[8.5, 48]} />
-      </mesh>
-      <mesh position={[-18, 21, -47.9]} material={sunMaterial}>
-        <circleGeometry args={[2.1, 48]} />
-      </mesh>
       <Cloud position={[-19, 16, -42]} scale={2.5} speed={0.035} />
       <Cloud position={[8, 18, -48]} scale={1.8} speed={0.026} />
       <Cloud position={[22, 14, -36]} scale={1.45} speed={0.04} />

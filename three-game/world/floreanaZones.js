@@ -1,167 +1,49 @@
-export const FLOREANA_ZONE_IDS = {
-  POST_OFFICE_BAY: 'post-office-bay-anchorage',
-  HIGHLAND_TRAIL: 'floreana-highland-trail',
-  CERRO_PAJAS_RIDGE: 'cerro-pajas-ridge',
-  MARINE_IGUANA_ROCKS: 'marine-iguana-rocks',
-  BLACK_LAVA_FLOW: 'black-lava-flow',
-  DRY_SCRUB: 'floreana-dry-scrub',
-  BEAGLE_SPECIMEN_ROOM: 'beagle-specimen-room',
-};
+import {
+  FLOREANA_ZONE_IDS,
+  currentZoneId,
+  floreanaZones as coreFloreanaZones,
+  getTravelCard,
+  getZone as getCoreZone,
+  getZoneExits,
+  getZoneSpecimenIds,
+  getZoneSpecimenSpawns,
+} from '../../game-core/zones';
 
-export const floreanaZones = {
-  [FLOREANA_ZONE_IDS.POST_OFFICE_BAY]: {
-    id: FLOREANA_ZONE_IDS.POST_OFFICE_BAY,
-    name: 'Post Office Bay Anchorage',
-    shortName: 'Post Office Bay',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Northern Floreana | September 1835',
-    biome: 'volcanic cove',
-    weather: 'sunny',
-    sounds: ['surf below black cliffs', 'rigging from the Beagle', 'distant seabirds'],
-    terrainPreset: 'floreana-cove',
-    bounds: 43,
-    terrainSize: 118,
-    terrainSegments: 360,
-    livestock: false,
-    playerStart: [0, 0, 7.5],
-    beaglePosition: [13.5, -1.08, -48],
-    educationalNote:
-      'Darwin visited Floreana, then called Charles Island, where black lava shores, dry scrub, and human settlement made locality notes especially important.',
-    loadingNote:
-      'A black volcanic landing shelf rises from sheltered water, with the Beagle riding at anchor beyond Post Office Bay.',
+function toRuntimeZone(zone) {
+  const specimenSpawns = Object.fromEntries(
+    zone.specimens.map(spawn => [spawn.specimenId, spawn.position]),
+  );
+  const specimenBehaviors = Object.fromEntries(
+    zone.specimens.map(spawn => [spawn.specimenId, spawn.behavior || 'still']),
+  );
+
+  return {
+    ...zone,
+    terrainPreset: zone.terrain.preset,
+    bounds: zone.terrain.bounds,
+    terrainSize: zone.terrain.size,
+    terrainSegments: zone.terrain.segments,
+    neighbors: zone.exits,
+    specimens: zone.specimens.map(spawn => spawn.specimenId),
+    specimenSpawns,
+    specimenBehaviors,
+    weather: zone.narration.weather,
+    sounds: zone.narration.sounds,
+    educationalNote: zone.narration.educationalNote,
+    loadingNote: zone.narration.loadingNote,
     travelCost: {
       minutes: 0,
       fatigue: 0,
     },
-    neighbors: [
-      {
-        zoneId: FLOREANA_ZONE_IDS.HIGHLAND_TRAIL,
-        label: 'Climb toward the highlands',
-        exit: 'north highland path',
-        minutes: 25,
-        fatigue: 8,
-        note: 'The path steepens toward the humid interior of Charles Island.',
-      },
-      {
-        zoneId: FLOREANA_ZONE_IDS.MARINE_IGUANA_ROCKS,
-        label: 'Scramble down to the lava tide pools',
-        exit: 'southern rocks',
-        minutes: 15,
-        fatigue: 4,
-        note: 'Wet basalt shelves expose crabs, iguanas, and shell fragments.',
-      },
-      {
-        zoneId: FLOREANA_ZONE_IDS.BEAGLE_SPECIMEN_ROOM,
-        label: 'Return to the Beagle',
-        exit: 'ship boat',
-        minutes: 10,
-        fatigue: 1,
-        note: 'Syms can prepare labels and storage aboard ship.',
-      },
-    ],
-    specimens: ['crab', 'marineiguana', 'mediumgroundfinch', 'floreanagianttortoise', 'galapagospenguin', 'cactus', 'basalt'],
-    specimenSpawns: {
-      crab: [-6.4, 0, -10.8],
-      marineiguana: [-13.5, 0, -19.5],
-      mediumgroundfinch: [8.5, 0, 7.2],
-      floreanagianttortoise: [-23.5, 0, 5.4],
-      galapagospenguin: [17.8, 0, -28.5],
-      cactus: [20.5, 0, 14.5],
-      basalt: [-17.5, 0, 10.5],
-    },
-    specimenBehaviors: {
-      crab: 'skitter',
-      marineiguana: 'bask',
-      mediumgroundfinch: 'curious',
-      floreanagianttortoise: 'graze',
-      galapagospenguin: 'waddle',
-      cactus: 'still',
-      basalt: 'still',
-    },
-  },
-  [FLOREANA_ZONE_IDS.HIGHLAND_TRAIL]: {
-    id: FLOREANA_ZONE_IDS.HIGHLAND_TRAIL,
-    name: 'Floreana Highland Trail',
-    shortName: 'Highland Trail',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Path above Post Office Bay',
-    biome: 'volcanic trail and dry scrub',
-    terrainPreset: 'planned',
-    educationalNote: 'The climb inland links shore, dry scrub, and highland habitats, making specimen locality notes central to later comparison.',
-    loadingNote: 'Loose ash and fractured rock make the climb slow, but the view opens rapidly over the anchorage.',
-    neighbors: [],
-  },
-  [FLOREANA_ZONE_IDS.CERRO_PAJAS_RIDGE]: {
-    id: FLOREANA_ZONE_IDS.CERRO_PAJAS_RIDGE,
-    name: 'Cerro Pajas Ridge',
-    shortName: 'Cerro Pajas',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Highland ridge above the coast',
-    biome: 'humid highland ridge',
-    terrainPreset: 'planned',
-    educationalNote: 'Floreana highlands show how elevation changes moisture, vegetation, and the animals a collector is likely to encounter.',
-    loadingNote: 'The trail crests among cooler highland vegetation, far above the black shore.',
-    neighbors: [],
-  },
-  [FLOREANA_ZONE_IDS.MARINE_IGUANA_ROCKS]: {
-    id: FLOREANA_ZONE_IDS.MARINE_IGUANA_ROCKS,
-    name: 'Marine Iguana Rocks',
-    shortName: 'Iguana Rocks',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Basalt shore below Post Office Bay',
-    biome: 'intertidal basalt',
-    terrainPreset: 'planned',
-    educationalNote: 'Marine iguanas and Sally Lightfoot crabs make the shore a compact lesson in adaptation to the intertidal zone.',
-    loadingNote: 'The path drops to slick basalt shelves where tide pools flash between black rock ledges.',
-    neighbors: [],
-  },
-  [FLOREANA_ZONE_IDS.BLACK_LAVA_FLOW]: {
-    id: FLOREANA_ZONE_IDS.BLACK_LAVA_FLOW,
-    name: 'Black Lava Flow',
-    shortName: 'Lava Flow',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Young volcanic ground',
-    biome: 'lava field',
-    terrainPreset: 'planned',
-    educationalNote: 'Fresh lava flows create harsh, low-nutrient surfaces where pioneer plants and lizards are easiest to notice.',
-    loadingNote: 'Broken black lava spreads inland in ropes, plates, and sharp clinker under the equatorial sun.',
-    neighbors: [],
-  },
-  [FLOREANA_ZONE_IDS.DRY_SCRUB]: {
-    id: FLOREANA_ZONE_IDS.DRY_SCRUB,
-    name: 'Floreana Dry Scrub',
-    shortName: 'Dry Scrub',
-    island: 'Floreana Island',
-    historicalName: 'Charles Island',
-    subtitle: 'Dry-zone vegetation above the cove',
-    biome: 'dry scrub',
-    terrainPreset: 'planned',
-    educationalNote: 'Dry-zone plants create feeding and nesting opportunities for finches, iguanas, and tortoises during brief wet periods.',
-    loadingNote: 'Grey-green shrubs and Opuntia stand apart on pale ash, with finches working the seed heads.',
-    neighbors: [],
-  },
-  [FLOREANA_ZONE_IDS.BEAGLE_SPECIMEN_ROOM]: {
-    id: FLOREANA_ZONE_IDS.BEAGLE_SPECIMEN_ROOM,
-    name: 'Beagle Specimen Room',
-    shortName: 'Specimen Room',
-    island: 'HMS Beagle',
-    historicalName: 'HMS Beagle',
-    subtitle: 'Aboard ship, off Floreana',
-    biome: 'interior',
-    terrainPreset: 'planned-interior',
-    educationalNote: 'Specimens only become scientific evidence when labeled, preserved, compared, and tied to locality notes.',
-    loadingNote: 'Below decks, Syms clears a narrow work surface among jars, twine, labels, and drying paper.',
-    neighbors: [],
-  },
-};
+  };
+}
 
-export const currentZoneId = FLOREANA_ZONE_IDS.POST_OFFICE_BAY;
+export { FLOREANA_ZONE_IDS, currentZoneId, getTravelCard, getZoneExits, getZoneSpecimenIds, getZoneSpecimenSpawns };
+
+export const floreanaZones = Object.fromEntries(
+  Object.entries(coreFloreanaZones).map(([zoneId, zone]) => [zoneId, toRuntimeZone(zone)]),
+);
 
 export function getZone(zoneId = currentZoneId) {
-  return floreanaZones[zoneId] || floreanaZones[currentZoneId];
+  return toRuntimeZone(getCoreZone(zoneId));
 }

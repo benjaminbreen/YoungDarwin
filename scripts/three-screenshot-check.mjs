@@ -5,6 +5,12 @@ import path from 'node:path';
 const baseUrl = process.env.THREE_DARWIN_URL || 'http://localhost:3000/three';
 const outDir = path.join(process.cwd(), 'test-results', 'three-darwin');
 
+function screenshotUrl() {
+  const url = new URL(baseUrl);
+  url.searchParams.set('preserveDrawingBuffer', '1');
+  return url.toString();
+}
+
 const viewports = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
@@ -65,7 +71,7 @@ async function run() {
       if (message.type() === 'error') errors.push(message.text());
     });
 
-    await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.goto(screenshotUrl(), { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForTimeout(1500);
     const health = await canvasPixelHealth(page);
     const screenshot = path.join(outDir, `${viewport.name}.png`);

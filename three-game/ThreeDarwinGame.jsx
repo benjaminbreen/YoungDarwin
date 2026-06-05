@@ -3,7 +3,8 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats } from '@react-three/drei';
-import { EffectComposer, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Vignette, Bloom } from '@react-three/postprocessing';
+import { NeutralToneMapping, SRGBColorSpace } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { useThreeGameStore } from './store';
@@ -41,6 +42,8 @@ const KEYBOARD_MAP = [
   { name: 'tool6', keys: ['Digit6'] },
 ];
 
+const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
+
 function getInitialPerfSettings() {
   if (typeof window === 'undefined') {
     return {
@@ -56,6 +59,8 @@ function getInitialPerfSettings() {
       beagle: true,
       specimens: true,
       syms: true,
+      physicsDebug: false,
+      preserveDrawingBuffer: false,
     };
   }
   const params = new URLSearchParams(window.location.search);
@@ -72,6 +77,8 @@ function getInitialPerfSettings() {
     beagle: !params.has('noBeagle'),
     specimens: !params.has('noSpecimens'),
     syms: !params.has('noSyms'),
+    physicsDebug: params.has('physicsDebug'),
+    preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
   };
 }
 
@@ -122,6 +129,21 @@ function PerformanceSampler({ enabled, onSample }) {
   return null;
 }
 
+function ExpeditionClock() {
+  const elapsed = useRef(0);
+  const advanceTime = useThreeGameStore(state => state.advanceTime);
+
+  useFrame((_, delta) => {
+    elapsed.current += delta;
+    if (elapsed.current < 1) return;
+    const wholeSeconds = Math.floor(elapsed.current);
+    elapsed.current -= wholeSeconds;
+    advanceTime(wholeSeconds * GAME_MINUTES_PER_REAL_SECOND);
+  });
+
+  return null;
+}
+
 function Metric({ label, value }) {
   return (
     <div className="rounded border border-white/10 bg-black/20 px-2 py-1">
@@ -145,7 +167,7 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
-function PerformancePanel({ open, settings, metrics, onChange, onClose }) {
+function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onClose }) {
   if (!open) return null;
   const set = patch => onChange(current => ({ ...current, ...patch }));
   return (
@@ -190,7 +212,28 @@ function PerformancePanel({ open, settings, metrics, onChange, onClose }) {
         <Toggle label="Beagle" checked={settings.beagle} onChange={value => set({ beagle: value })} />
         <Toggle label="Specimens" checked={settings.specimens} onChange={value => set({ specimens: value })} />
         <Toggle label="Syms" checked={settings.syms} onChange={value => set({ syms: value })} />
+        <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
       </div>
+      {physicsDebug && (
+        <div className="mt-3 grid grid-cols-2 gap-1.5 rounded border border-white/10 bg-black/15 p-2 text-xs">
+          <span className="text-amber-100/70">Ground</span>
+          <span className="font-mono">{physicsDebug.groundSource}</span>
+          <span className="text-amber-100/70">State</span>
+          <span className="font-mono">{physicsDebug.grounded ? 'grounded' : 'airborne'}</span>
+          <span className="text-amber-100/70">Y</span>
+          <span className="font-mono">{physicsDebug.playerY.toFixed(2)} / {physicsDebug.groundY.toFixed(2)}</span>
+          <span className="text-amber-100/70">Colliders</span>
+          <span className="font-mono">{physicsDebug.obstacleCount}</span>
+          <span className="text-amber-100/70">Spawn</span>
+          <span className="font-mono">{physicsDebug.spawnPhase || 'complete'}</span>
+          <span className="text-amber-100/70">Controller</span>
+          <span className="font-mono">{physicsDebug.controller || '--'}</span>
+          <span className="text-amber-100/70">Hits</span>
+          <span className="font-mono">{physicsDebug.controllerHits ?? 0}</span>
+          <span className="text-amber-100/70">Move</span>
+          <span className="font-mono">{physicsDebug.computedMove || '--'}</span>
+        </div>
+      )}
       <p className="mt-3 text-[11px] text-amber-100/65">Press ` to toggle this panel.</p>
     </section>
   );
@@ -201,6 +244,7 @@ export default function ThreeDarwinGame() {
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const weather = useThreeGameStore(state => state.weather);
+  const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const sky = useMemo(() => {
     if (weather === 'misty') return '#b9d7de';
@@ -226,15 +270,28 @@ export default function ThreeDarwinGame() {
           shadows={perfSettings.shadows}
           dpr={dpr}
           camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
-          gl={{ antialias: true, powerPreference: 'high-performance' }}
+          gl={{
+            antialias: true,
+            powerPreference: 'high-performance',
+            preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
+            toneMapping: NeutralToneMapping,
+            outputColorSpace: SRGBColorSpace,
+          }}
         >
           <color attach="background" args={[sky]} />
           <fog attach="fog" args={[sky, 35, 120]} />
           <Suspense fallback={null}>
             <ThreeScene perfSettings={perfSettings} />
           </Suspense>
+          <ExpeditionClock />
           {perfSettings.postprocessing && (
             <EffectComposer>
+              <Bloom
+                intensity={0.7}
+                luminanceThreshold={0.72}
+                luminanceSmoothing={0.22}
+                mipmapBlur
+              />
               <Vignette eskil={false} offset={0.2} darkness={0.38} />
             </EffectComposer>
           )}
@@ -246,6 +303,7 @@ export default function ThreeDarwinGame() {
           open={showPerf}
           settings={perfSettings}
           metrics={metrics}
+          physicsDebug={physicsDebug}
           onChange={setPerfSettings}
           onClose={() => setShowPerf(false)}
         />

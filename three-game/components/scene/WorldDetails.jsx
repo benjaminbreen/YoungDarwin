@@ -3,7 +3,8 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { makeFloreanaScatter } from '../../world/floreanaCoveLayout';
-import { TAGUS_OBSTACLES, obstacleRenderPosition } from '../../world/obstacles';
+import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
+import { useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
 import { terrainHeight } from '../../world/terrain';
 import { addRimLight, toonMaterial } from './materials';
@@ -32,9 +33,11 @@ function InstancedLayer({ items, geometry, material, transform }) {
 }
 
 function ObstacleProps() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const obstacles = useMemo(() => getRuntimeObstacles(currentZoneId), [currentZoneId]);
   return (
     <group>
-      {TAGUS_OBSTACLES.map(obstacle => (
+      {obstacles.map(obstacle => (
         <StaticGLB
           key={obstacle.id}
           path={obstacle.path}

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { threeSpecimens, threeTools } from '../data';
+import { FieldNotebook } from '../../field-notebook/FieldNotebook';
+import { LocalMap } from '../../field-notebook/LocalMap';
+import { getThreeSpecimens, threeTools } from '../data';
 import { setTouchControl } from '../input/touchControls';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
@@ -16,6 +18,52 @@ function Bar({ label, value, color }) {
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-black/45">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function formatExpeditionDate(day) {
+  const start = new Date(Date.UTC(1835, 8, 17));
+  start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(start);
+}
+
+function formatExpeditionTime(timeOfDay) {
+  const totalMinutes = Math.floor((timeOfDay || 8) * 60);
+  const hours24 = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  const period = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 % 12 || 12;
+  return `${hours12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
+function TopChronometer() {
+  const day = useThreeGameStore(state => state.day);
+  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const zone = getZone(currentZoneId);
+
+  return (
+    <div className="absolute left-1/2 top-3 w-[min(29rem,calc(100vw-8rem))] -translate-x-1/2 text-center sm:w-[min(32rem,calc(100vw-24rem))]">
+      <div className="pointer-events-none inline-flex max-w-full items-center gap-2 rounded-md border border-white/15 bg-stone-950/42 px-3 py-1.5 text-amber-50 shadow-lg backdrop-blur-md">
+        <span className="hidden h-1.5 w-1.5 rounded-full bg-amber-200/75 sm:inline-block" />
+        <span className="truncate font-serif text-xs font-semibold tracking-wide sm:text-sm">
+          {formatExpeditionDate(day)}
+        </span>
+        <span className="text-amber-100/35">|</span>
+        <span className="whitespace-nowrap font-mono text-[11px] text-amber-100/85 sm:text-xs">
+          {formatExpeditionTime(timeOfDay)}
+        </span>
+        <span className="hidden text-amber-100/35 sm:inline">|</span>
+        <span className="hidden truncate text-[11px] text-sky-100/85 sm:inline">
+          {zone.shortName || zone.name}
+        </span>
       </div>
     </div>
   );
@@ -46,84 +94,6 @@ function ToolBelt() {
   );
 }
 
-function MiniMap() {
-  const collected = useThreeGameStore(state => state.collectedSpecimenIds);
-  const selected = useThreeGameStore(state => state.selectedSpecimenId);
-  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const zone = getZone(currentZoneId);
-  return (
-    <div className="pointer-events-auto h-28 w-28 rounded-full border border-white/25 bg-[#6fa2c7]/80 p-2 text-amber-50 shadow-xl backdrop-blur-md sm:h-32 sm:w-32">
-      <div className="relative h-full w-full overflow-hidden rounded-full bg-[#6f7f4b] shadow-inner">
-        <div className="absolute inset-x-7 top-1 h-[6.25rem] rounded-[48%_52%_44%_56%] bg-[#4f6138]" />
-        <div className="absolute bottom-1 left-5 h-8 w-24 rounded-[55%] bg-[#b4935f]/90" />
-        <div className="absolute bottom-0 left-8 h-9 w-14 rounded-t-full bg-[#4f9caf]/75" />
-        <div className="absolute left-1/2 top-1 text-[8px] font-bold uppercase tracking-wide text-white/75">{zone.shortName}</div>
-        {threeSpecimens.map(specimen => {
-          const [x, , z] = specimen.spawnPoint;
-          const isCollected = collected.includes(specimen.id);
-          return (
-            <span
-              key={specimen.id}
-              className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border ${
-                selected === specimen.id ? 'border-stone-950 bg-amber-200' : isCollected ? 'border-emerald-900 bg-emerald-300' : 'border-white bg-red-400'
-              }`}
-              style={{ left: `${50 + x * 1.1}%`, top: `${55 + z * 1.1}%` }}
-              title={specimen.name}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function JournalPanel({ onClose }) {
-  const journal = useThreeGameStore(state => state.journal);
-  return (
-    <div className="pointer-events-auto fixed inset-x-3 bottom-3 top-16 z-30 overflow-hidden rounded-md border border-amber-200/40 bg-[#fff7df] text-stone-900 shadow-2xl md:left-auto md:w-[28rem]">
-      <div className="flex items-center justify-between border-b border-amber-300/70 px-4 py-3">
-        <h2 className="font-serif text-xl font-bold">Field Journal</h2>
-        <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm font-semibold hover:bg-amber-100">Close</button>
-      </div>
-      <div className="h-full overflow-auto p-4 pb-20">
-        {journal.length === 0 ? (
-          <p className="italic text-stone-600">No entries yet. Observe or collect a specimen to begin.</p>
-        ) : journal.slice().reverse().map(entry => (
-          <article key={entry.id} className="mb-3 rounded border border-amber-200 bg-white/70 p-3">
-            <h3 className="font-serif text-lg font-bold">{entry.specimenName}</h3>
-            <p className="text-sm italic text-stone-600">{entry.latin}</p>
-            <p className="mt-2 text-sm">{entry.content}</p>
-            <p className="mt-2 text-xs text-amber-800">{entry.location} | {entry.method} | {entry.condition}</p>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function InventoryPanel({ onClose }) {
-  const inventory = useThreeGameStore(state => state.inventory);
-  return (
-    <div className="pointer-events-auto fixed inset-x-3 bottom-3 top-16 z-30 overflow-hidden rounded-md border border-amber-200/40 bg-[#fff7df] text-stone-900 shadow-2xl md:left-auto md:w-[24rem]">
-      <div className="flex items-center justify-between border-b border-amber-300/70 px-4 py-3">
-        <h2 className="font-serif text-xl font-bold">Specimen Case</h2>
-        <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm font-semibold hover:bg-amber-100">Close</button>
-      </div>
-      <div className="h-full overflow-auto p-4 pb-20">
-        {inventory.length === 0 ? (
-          <p className="italic text-stone-600">No physical specimens collected yet.</p>
-        ) : inventory.map(item => (
-          <div key={item.id} className="mb-2 rounded border border-amber-200 bg-white/70 p-3">
-            <div className="font-serif font-bold">{item.name}</div>
-            <div className="text-xs italic text-stone-600">{item.latin}</div>
-            <div className="mt-1 text-xs text-amber-800">Condition: {item.condition.replace(/_/g, ' ')}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function NarrativePanel({ expanded, onToggleExpanded }) {
   const message = useThreeGameStore(state => state.message);
   const educationalNote = useThreeGameStore(state => state.educationalNote);
@@ -131,7 +101,8 @@ function NarrativePanel({ expanded, onToggleExpanded }) {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
-  const nearby = threeSpecimens.find(specimen => specimen.id === nearbySpecimenId);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const nearby = getThreeSpecimens(currentZoneId).find(specimen => specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
 
   return (
@@ -164,7 +135,8 @@ function InteractionPrompt() {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
-  const nearby = threeSpecimens.find(specimen => specimen.id === nearbySpecimenId);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const nearby = getThreeSpecimens(currentZoneId).find(specimen => specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
   if (!nearby) return null;
 
@@ -252,6 +224,8 @@ export function ThreeHUD({ onTogglePerf }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
+      <TopChronometer />
+
       <div className="absolute left-3 top-3 w-[min(17rem,calc(100vw-7.5rem))] rounded-md border border-white/20 bg-stone-950/62 p-2.5 text-amber-50 shadow-xl backdrop-blur-md">
         <div className="font-serif text-base font-bold text-amber-50 sm:text-lg">Young Darwin 3D</div>
         <p className="mt-1 text-xs text-amber-100/75">{zone.name}, {zone.island} | September 1835</p>
@@ -263,7 +237,7 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <div className="absolute right-3 top-3">
-        <MiniMap />
+        <LocalMap />
       </div>
 
       <InteractionPrompt />
@@ -317,8 +291,7 @@ export function ThreeHUD({ onTogglePerf }) {
 
       <MobileTouchControls />
 
-      {panel === 'journal' && <JournalPanel onClose={() => setPanel(null)} />}
-      {panel === 'inventory' && <InventoryPanel onClose={() => setPanel(null)} />}
+      <FieldNotebook panel={panel} onClose={() => setPanel(null)} />
       <ZoneTransitionOverlay />
     </div>
   );

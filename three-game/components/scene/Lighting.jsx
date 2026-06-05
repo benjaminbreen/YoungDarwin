@@ -7,21 +7,18 @@ export function Lighting() {
   const weather = useThreeGameStore(state => state.weather);
   const cloudy = weather === 'cloudy' || weather === 'misty';
 
+  // Ambient, hemisphere and the sun-tracking key light are owned by
+  // <SkyController>, which drives them from the time of day. This component
+  // keeps only the local fill: a soft sky-bounce directional and the warm
+  // point light near the player, both still nudged by weather.
   return (
     <>
-      <ambientLight intensity={cloudy ? 0.78 : 0.66} />
-      <hemisphereLight args={['#e4f8ff', '#9a7a52', cloudy ? 1.55 : 1.36]} />
-      <directionalLight
-        position={[-9, 18, 7]}
-        intensity={cloudy ? 1.15 : 1.75}
-        color={cloudy ? '#d8ecff' : '#fff0bd'}
-      />
       <directionalLight
         position={[7, 6, -8]}
-        intensity={cloudy ? 0.55 : 0.72}
+        intensity={cloudy ? 0.5 : 0.62}
         color="#9ed7ff"
       />
-      <pointLight position={[0, 2.6, -3.2]} intensity={0.8} distance={8} color="#fff3cf" />
+      <pointLight position={[0, 2.6, -3.2]} intensity={0.7} distance={8} color="#fff3cf" />
     </>
   );
 }
