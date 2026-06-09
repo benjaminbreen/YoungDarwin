@@ -1,11 +1,4 @@
-export type ZoneId =
-  | 'post-office-bay-anchorage'
-  | 'floreana-highland-trail'
-  | 'cerro-pajas-ridge'
-  | 'marine-iguana-rocks'
-  | 'black-lava-flow'
-  | 'floreana-dry-scrub'
-  | 'beagle-specimen-room';
+export type ZoneId = string;
 
 export type LocalCellId = string;
 export type SpecimenId = string;
@@ -85,6 +78,9 @@ export type ObstacleDefinition = {
     jumpable?: boolean;
     edgeRisk?: boolean;
     climbLabel?: string;
+    pushable?: boolean;
+    pushMass?: number;
+    pushFriction?: number;
   };
 };
 

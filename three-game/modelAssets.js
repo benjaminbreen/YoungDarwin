@@ -2,7 +2,7 @@ export const modelAssets = {
   darwin: {
     enabled: true,
     path: '/assets/models/darwin-final-animated.glb',
-    scale: 1,
+    scale: 1.56,
     rotation: [0, 0, 0],
     yOffset: 0,
     normalizeMaterials: true,
@@ -107,6 +107,19 @@ export const modelAssets = {
     yOffset: 0,
     targetTriangles: 1000,
     prompt: 'Stylized low-poly basalt lava rock sample, dark volcanic surface, angular fracture planes, hand-painted texture, cel-shaded game prop, clean topology, GLB.',
+  },
+  dryGrassPatch: {
+    enabled: true,
+    path: '/assets/models/nature/runtime-animated-dry-grass.glb',
+    scale: 0.24,
+    rotation: [0, 0, 0],
+    yOffset: 0.02,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#1d1a0e',
+    materialEmissiveIntensity: 0.08,
+    targetTriangles: 3138,
+    prompt: 'Optimized dry coastal Galapagos grass clump derived from animated_grass_-_vegetation.glb, stripped of texture and morph animation payloads, straw olive material, instanced arid-zone tufts for Floreana Post Office Bay.',
   },
   beagle: {
     enabled: true,

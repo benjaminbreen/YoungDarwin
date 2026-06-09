@@ -169,11 +169,12 @@ export function SpecimenActor({ specimen }) {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const setSelectedSpecimen = useThreeGameStore(state => state.setSelectedSpecimen);
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
   const position = useMemo(() => {
     const [x, , z] = specimen.spawnPoint;
-    return new THREE.Vector3(x, terrainHeight(x, z) + 0.04, z);
-  }, [specimen.spawnPoint]);
+    return new THREE.Vector3(x, terrainHeight(x, z, currentZoneId) + 0.04, z);
+  }, [currentZoneId, specimen.spawnPoint]);
 
   useFrame(({ clock }) => {
     if (!group.current || collected) return;

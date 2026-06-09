@@ -1,4 +1,10 @@
-import { clampToWalkable, getTerrainEdgeRisk, terrainHeight } from '../world/terrain';
+import {
+  clampToWalkable,
+  getTerrainEdgeRisk,
+  movementTerrainHeight,
+  terrainHeight,
+  terrainSlopeAt,
+} from '../world/terrain';
 import {
   findClimbTarget,
   getObstacleEdgeRisk,
@@ -19,33 +25,44 @@ function rapierGroundY(rapierContext, position) {
   return originY - hit.toi + 0.04;
 }
 
-export function createCollisionAdapter(zoneId, rapierContext = null) {
-  const obstacles = getRuntimeObstacles(zoneId);
+export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}) {
+  const obstacles = getRuntimeObstacles(zoneId, obstacleOffsets);
   const getGroundInfo = position => {
-    const terrainGroundY = terrainHeight(position.x, position.z) + 0.04;
+    const visualTerrainY = terrainHeight(position.x, position.z, zoneId) + 0.04;
+    const terrainGroundY = movementTerrainHeight(position.x, position.z, zoneId) + 0.04;
     const physicsGroundY = rapierGroundY(rapierContext, position);
-    if (physicsGroundY !== null && physicsGroundY >= terrainGroundY - 0.35) {
-      return { y: physicsGroundY, source: 'rapier' };
-    }
     const obstacleGroundY = getObstacleSupportHeight(position.x, position.z, position.y, 0.42, obstacles);
     if (obstacleGroundY !== null && obstacleGroundY !== undefined) {
-      return { y: obstacleGroundY + 0.04, source: 'authored-obstacle' };
+      return {
+        y: obstacleGroundY + 0.04,
+        source: 'authored-obstacle',
+        terrainY: visualTerrainY,
+        movementTerrainY: terrainGroundY,
+        physicsY: physicsGroundY,
+      };
     }
-    return { y: terrainGroundY, source: physicsGroundY === null ? 'terrain-function' : 'terrain-function-guard' };
+    return {
+      y: terrainGroundY,
+      source: physicsGroundY === null ? 'terrain-function' : 'terrain-function-over-rapier',
+      terrainY: visualTerrainY,
+      movementTerrainY: terrainGroundY,
+      physicsY: physicsGroundY,
+    };
   };
 
   return {
     obstacles,
-    terrainHeight,
-    spawnY: (x, z) => terrainHeight(x, z) + 0.04,
+    terrainHeight: (x, z) => movementTerrainHeight(x, z, zoneId),
+    terrainSlopeAt: (x, z) => terrainSlopeAt(x, z, zoneId),
+    spawnY: (x, z) => movementTerrainHeight(x, z, zoneId) + 0.04,
     groundInfo: getGroundInfo,
     groundY: position => getGroundInfo(position).y,
     findClimbTarget: (position, facing) => findClimbTarget(position, facing, { obstacles }),
     resolveCollision: (position, previousPosition) => resolveObstacleCollision(position, previousPosition, { obstacles }),
     edgeRisk: (position, facing) => (
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
-      || getTerrainEdgeRisk(position.x, position.z, facing)
+      || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)
     ),
-    clampToWalkable,
+    clampToWalkable: (position, previousPosition) => clampToWalkable(position, previousPosition, zoneId),
   };
 }

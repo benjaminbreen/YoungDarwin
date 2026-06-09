@@ -62,8 +62,11 @@ function colliderBounds(collider, scale = 1) {
   return { radius, height: top - bottom, top, bottom };
 }
 
-function toRuntimeObstacle(obstacle) {
-  const [x, , z] = obstacle.render.position;
+function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
+  const [baseX, , baseZ] = obstacle.render.position;
+  const offset = offsets[`${zoneId}:${obstacle.id}`] || offsets[obstacle.id] || { x: 0, z: 0 };
+  const x = baseX + (offset.x || 0);
+  const z = baseZ + (offset.z || 0);
   const [, yaw = 0] = obstacle.render.rotation || [0, 0, 0];
   const scale = obstacle.render.scale || 1;
   const bounds = colliderBounds(obstacle.collider, scale);
@@ -82,21 +85,25 @@ function toRuntimeObstacle(obstacle) {
     jumpable: Boolean(obstacle.gameplay?.jumpable),
     climbable: Boolean(obstacle.gameplay?.climbable),
     edgeRisk: Boolean(obstacle.gameplay?.edgeRisk),
+    pushable: Boolean(obstacle.gameplay?.pushable),
+    pushMass: obstacle.gameplay?.pushMass || 1,
+    pushFriction: obstacle.gameplay?.pushFriction ?? 0.88,
     climbLabel: obstacle.gameplay?.climbLabel,
     definition: obstacle,
+    zoneId,
     shapes: flattenCollider(obstacle.collider),
   };
 }
 
-export function getRuntimeObstacles(zoneId = currentZoneId) {
-  return getZoneObstacles(zoneId).map(toRuntimeObstacle);
+export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
+  return getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();
 export const TAGUS_OBSTACLES = FLOREANA_OBSTACLES;
 
 export function obstacleBaseY(obstacle) {
-  return terrainHeight(obstacle.x, obstacle.z);
+  return terrainHeight(obstacle.x, obstacle.z, obstacle.zoneId);
 }
 
 export function obstacleRenderPosition(obstacle) {

@@ -2,40 +2,44 @@
 
 import React, { useMemo } from 'react';
 import { HeightfieldCollider, RigidBody } from '@react-three/rapier';
-import { TERRAIN_SIZE, terrainHeight } from '../world/terrain';
+import { getRegionTerrainConfig, movementTerrainHeight } from '../world/terrain';
+import { useThreeGameStore } from '../store';
 
-const COLLIDER_SEGMENTS = 96;
-
-function buildTerrainHeightfield() {
-  const rows = COLLIDER_SEGMENTS + 1;
-  const cols = COLLIDER_SEGMENTS + 1;
+function buildTerrainHeightfield(regionId) {
+  const config = getRegionTerrainConfig(regionId);
+  const colliderSegments = Math.min(192, Math.max(96, Math.floor(config.segments || 96)));
+  const rows = colliderSegments + 1;
+  const cols = colliderSegments + 1;
   const heights = [];
-  const half = TERRAIN_SIZE / 2;
+  const halfWidth = config.width / 2;
+  const halfDepth = config.depth / 2;
 
   for (let zIndex = 0; zIndex < rows; zIndex += 1) {
-    const z = -half + (zIndex / COLLIDER_SEGMENTS) * TERRAIN_SIZE;
+    const z = -halfDepth + (zIndex / colliderSegments) * config.depth;
     for (let xIndex = 0; xIndex < cols; xIndex += 1) {
-      const x = -half + (xIndex / COLLIDER_SEGMENTS) * TERRAIN_SIZE;
-      heights.push(terrainHeight(x, z));
+      const x = -halfWidth + (xIndex / colliderSegments) * config.width;
+      heights.push(movementTerrainHeight(x, z, regionId));
     }
   }
 
   return {
-    subdivisionsX: COLLIDER_SEGMENTS,
-    subdivisionsZ: COLLIDER_SEGMENTS,
+    subdivisionsX: colliderSegments,
+    subdivisionsZ: colliderSegments,
     heights,
-    scale: { x: TERRAIN_SIZE, y: 1, z: TERRAIN_SIZE },
+    scale: { x: config.width, y: 1, z: config.depth },
   };
 }
 
 export function PhysicsTerrain() {
-  const heightfield = useMemo(() => buildTerrainHeightfield(), []);
-  const half = TERRAIN_SIZE / 2;
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const heightfield = useMemo(() => buildTerrainHeightfield(currentZoneId), [currentZoneId]);
+  const config = getRegionTerrainConfig(currentZoneId);
   return (
     <RigidBody
+      key={currentZoneId}
       type="fixed"
       colliders={false}
-      position={[-half, 0, -half]}
+      position={[0, 0, 0]}
       userData={{ id: 'terrain', kind: 'terrain' }}
     >
       <HeightfieldCollider

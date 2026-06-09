@@ -18,14 +18,14 @@ const STAR_COUNT = 1400;
 // day, with a golden-hour push layered on top at the horizon.
 const C = {
   keyNight: new THREE.Color('#41618f'),
-  keyDay: new THREE.Color('#fff4e0'),
+  keyDay: new THREE.Color('#ffe6b8'),     // warm tropical sunlight (was near-white)
   keyGolden: new THREE.Color('#ff9b4d'),
   hemiSkyNight: new THREE.Color('#0b1a33'),
-  hemiSkyDay: new THREE.Color('#bfe3ff'),
+  hemiSkyDay: new THREE.Color('#cfe6ee'),  // sky fill: less blue, so shadows aren't cold
   hemiGroundNight: new THREE.Color('#0a0d12'),
-  hemiGroundDay: new THREE.Color('#9a7a52'),
+  hemiGroundDay: new THREE.Color('#b08a58'), // warmer ground bounce (sand/rock)
   ambNight: new THREE.Color('#2a3a5c'),
-  ambDay: new THREE.Color('#dfe9ff'),
+  ambDay: new THREE.Color('#f2e9d6'),      // warm ambient (was cool blue-white)
   fogNight: new THREE.Color('#0c1830'),
   fogDay: new THREE.Color('#7fc4f2'),
   fogGolden: new THREE.Color('#d9a878'),
@@ -35,6 +35,13 @@ const C = {
 const _sun = new THREE.Vector3();
 const _moon = new THREE.Vector3();
 const _color = new THREE.Color();
+const _sunColor = new THREE.Color();
+const _glowColor = new THREE.Color();
+const _sunDay = new THREE.Color('#ffd48a');    // midday sun — warm amber
+const _sunGolden = new THREE.Color('#ff8a3c'); // low sun — deep warm orange
+const _screenSun = new THREE.Vector3();
+const _flareWorld = new THREE.Vector3();
+const _flareNdc = new THREE.Vector3();
 
 function radialTexture(stops, size = 256) {
   const canvas = document.createElement('canvas');
@@ -325,10 +332,10 @@ export function SkyController({ stars = true, tuning = null }) {
   // Defaults tuned for NeutralToneMapping. Drei/Three Sky is HDR, so it still
   // needs tone mapping, but ACES pushes bright tropical blue toward white.
   const T = tuning || {};
-  const rayleighBase = T.rayleigh ?? 2.6;   // clean tropical blue without blowing out the dome
-  const turbidityBase = T.turbidity ?? 1.15; // low haze; Post Office Bay should read clear, not milky
-  const expBase = T.expBase ?? 0.42;
-  const expGain = T.expGain ?? 0.10;
+  const rayleighBase = T.rayleigh ?? 3.0;   // deeper tropical blue that resists blowing out near the sun
+  const turbidityBase = T.turbidity ?? 0.32; // very low haze: the sky shader must not wash the dome white
+  const expBase = T.expBase ?? 0.31;
+  const expGain = T.expGain ?? 0.045;
   const groupRef = useRef(null);
   const skyRef = useRef(null);
   const keyLightRef = useRef(null);
@@ -336,12 +343,39 @@ export function SkyController({ stars = true, tuning = null }) {
   const hemiRef = useRef(null);
   const moonRef = useRef(null);
   const moonGlowRef = useRef(null);
+  const sunRef = useRef(null);
+  const sunGlowRef = useRef(null);
+  const lensFlareRefs = useRef([]);
   const moonDiscTexture = useMemo(() => crateredMoonTexture(), []);
   const moonGlowTexture = useMemo(() => radialTexture([
     [0.0, 'rgba(214, 227, 255, 0.25)'],
     [0.35, 'rgba(182, 202, 240, 0.10)'],
     [1.0, 'rgba(182, 202, 240, 0)'],
   ]), []);
+  // Warm sun disc: bright but contained. Keep the core below pure white so
+  // bloom does not wash the entire morning sky into a flat white field.
+  const sunDiscTexture = useMemo(() => radialTexture([
+    [0.0, 'rgba(255, 238, 190, 0.96)'],
+    [0.32, 'rgba(255, 204, 112, 0.9)'],
+    [0.62, 'rgba(255, 151, 58, 0.55)'],
+    [0.84, 'rgba(233, 103, 36, 0.2)'],
+    [1.0, 'rgba(255, 145, 65, 0)'],
+  ], 512), []);
+  // Radiant corona: warm, soft, and deliberately low opacity so the sky keeps
+  // color around the sun.
+  const sunGlowTexture = useMemo(() => radialTexture([
+    [0.0, 'rgba(255, 206, 112, 0.52)'],
+    [0.16, 'rgba(255, 178, 76, 0.34)'],
+    [0.38, 'rgba(238, 126, 48, 0.15)'],
+    [0.72, 'rgba(216, 88, 36, 0.035)'],
+    [1.0, 'rgba(255, 118, 50, 0)'],
+  ], 512), []);
+  const lensFlareTexture = useMemo(() => radialTexture([
+    [0.0, 'rgba(255, 216, 128, 0.5)'],
+    [0.24, 'rgba(255, 151, 69, 0.22)'],
+    [0.56, 'rgba(255, 105, 62, 0.06)'],
+    [1.0, 'rgba(255, 105, 62, 0)'],
+  ], 192), []);
 
   // Smoothed game hour so the sky visibly drifts between discrete store updates.
   const hourRef = useRef(null);
@@ -353,7 +387,10 @@ export function SkyController({ stars = true, tuning = null }) {
   useLayoutEffect(() => () => {
     moonDiscTexture.dispose();
     moonGlowTexture.dispose();
-  }, [moonDiscTexture, moonGlowTexture]);
+    sunDiscTexture.dispose();
+    sunGlowTexture.dispose();
+    lensFlareTexture.dispose();
+  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, lensFlareTexture]);
 
   // Keep the drei Sky sized inside the far plane and let terrain depth-occlude it.
   useLayoutEffect(() => {
@@ -364,6 +401,11 @@ export function SkyController({ stars = true, tuning = null }) {
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <tonemapping_fragment>',
           /* glsl */`
+            float rawLuma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float hotSkyMask = smoothstep(0.58, 1.05, rawLuma);
+            vec3 containedBrightSky = mix(vec3(0.46, 0.76, 0.96), vec3(0.78, 0.88, 0.96), smoothstep(0.58, 1.0, gl_FragColor.g));
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, containedBrightSky, hotSkyMask * 0.82);
+            gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(0.82, 0.92, 1.0));
             float skyBlueSignal = gl_FragColor.b - max(gl_FragColor.r, gl_FragColor.g) * 0.72;
             float skyBlueMask = smoothstep(0.015, 0.24, skyBlueSignal);
             float skyLuma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -404,10 +446,13 @@ export function SkyController({ stars = true, tuning = null }) {
     if (skyRef.current) {
       const u = skyRef.current.material.uniforms;
       u.sunPosition.value.copy(_sun);
-      u.turbidity.value = turbidityBase + golden * 2.4 + overcast * 4.0;
-      u.rayleigh.value = rayleighBase + golden * 0.7;
-      u.mieCoefficient.value = 0.0015 + golden * 0.012;
-      u.mieDirectionalG.value = 0.76 - golden * 0.16;
+      u.turbidity.value = turbidityBase + golden * 0.45 + overcast * 2.3;
+      u.rayleigh.value = rayleighBase + golden * 0.18;
+      // Lower Mie -> a much smaller, dimmer white scattering halo around the sun
+      // so the sky stays blue and the disc reads against it (our sprite + bloom
+      // supply the actual glow now).
+      u.mieCoefficient.value = 0.00006 + golden * 0.00045;
+      u.mieDirectionalG.value = 0.58 - golden * 0.08;
     }
 
     // --- celestial bodies ----------------------------------------------------
@@ -425,6 +470,52 @@ export function SkyController({ stars = true, tuning = null }) {
       }
     }
 
+    if (sunRef.current) {
+      // Fade the disc in just above the horizon; warm and swell it at low sun.
+      const sunUp = THREE.MathUtils.clamp((s.elevation + 0.04) / 0.12, 0, 1) * (1 - overcast * 0.7);
+      // Disc stays mostly white-hot; the warm orange lives in the corona.
+      _sunColor.copy(_sunDay).lerp(_sunGolden, golden * 0.55);
+      _glowColor.copy(_sunDay).lerp(_sunGolden, Math.min(1, golden * 1.15));
+      const swell = 1 + golden * 0.55; // a bigger, softer setting/rising sun
+      sunRef.current.position.copy(_sun).multiplyScalar(BODY_DISTANCE);
+      sunRef.current.quaternion.copy(camera.quaternion);
+      sunRef.current.visible = sunUp > 0.01;
+      sunRef.current.scale.set(5.1 * swell, 5.1 * swell, 1);
+      sunRef.current.material.color.copy(_sunColor);
+      sunRef.current.material.opacity = sunUp * (0.82 + golden * 0.1);
+      if (sunGlowRef.current) {
+        sunGlowRef.current.position.copy(sunRef.current.position);
+        sunGlowRef.current.quaternion.copy(camera.quaternion);
+        sunGlowRef.current.visible = sunRef.current.visible;
+        // A contained corona; bloom supplies the wide radiance, so keep this
+        // tight enough that it doesn't paint a white field over the blue sky.
+        sunGlowRef.current.scale.set(22 * swell, 22 * swell, 1);
+        sunGlowRef.current.material.color.copy(_glowColor);
+        sunGlowRef.current.material.opacity = sunUp * (0.28 + golden * 0.18);
+      }
+      _screenSun.copy(sunRef.current.position).add(camera.position).project(camera);
+      const flareVisible = sunUp > 0.08 && _screenSun.z > -1 && _screenSun.z < 1 && Math.abs(_screenSun.x) < 1.25 && Math.abs(_screenSun.y) < 1.25;
+      const flareSpecs = [
+        [0.62, 3.8, 0.15, '#ffc66c'],
+        [0.24, 1.35, 0.22, '#ff9a4a'],
+        [-0.22, 2.1, 0.11, '#ffe0a0'],
+        [-0.48, 4.6, 0.07, '#ff7d45'],
+      ];
+      lensFlareRefs.current.forEach((flare, index) => {
+        if (!flare) return;
+        const spec = flareSpecs[index];
+        flare.visible = flareVisible;
+        if (!flareVisible || !spec) return;
+        _flareNdc.set(_screenSun.x * spec[0], _screenSun.y * spec[0], 0.18);
+        _flareWorld.copy(_flareNdc).unproject(camera).sub(camera.position);
+        flare.position.copy(_flareWorld);
+        flare.quaternion.copy(camera.quaternion);
+        flare.scale.setScalar(spec[1] * swell);
+        flare.material.opacity = sunUp * spec[2] * (1 - overcast * 0.75);
+        flare.material.color.set(spec[3]);
+      });
+    }
+
     // --- lighting rig --------------------------------------------------------
     if (keyLightRef.current) {
       const key = keyLightRef.current;
@@ -432,10 +523,10 @@ export function SkyController({ stars = true, tuning = null }) {
       const fromMoon = s.elevation < -0.04;
       key.position.copy(fromMoon ? _moon : _sun).multiplyScalar(100);
       _color.copy(C.keyNight).lerp(C.keyDay, daylight);
-      _color.lerp(C.keyGolden, golden * 0.85);
+      _color.lerp(C.keyGolden, golden * 0.95);
       key.color.copy(_color);
       const moonlight = fromMoon ? 0.16 * (0.4 + 0.6 * s.moon_phase.fraction) : 0;
-      key.intensity = 0.2 + daylight * 2.5 * (1 - overcast * 0.4) + moonlight;
+      key.intensity = 0.22 + daylight * 2.95 * (1 - overcast * 0.4) + moonlight;
     }
     if (hemiRef.current) {
       hemiRef.current.color.copy(C.hemiSkyNight).lerp(C.hemiSkyDay, daylight);
@@ -452,18 +543,50 @@ export function SkyController({ stars = true, tuning = null }) {
     _color.copy(C.fogNight).lerp(C.fogDay, daylight).lerp(C.fogGolden, golden * 0.7);
     if (scene.fog) scene.fog.color.copy(_color);
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
-    gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.06;
+    gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.025;
   });
 
   return (
     <>
       <hemisphereLight ref={hemiRef} args={['#bfe3ff', '#9a7a52', 1.0]} />
       <ambientLight ref={ambientRef} intensity={0.4} />
-      <directionalLight ref={keyLightRef} position={[0, 100, 0]} intensity={1.4} />
+      <directionalLight
+        ref={keyLightRef}
+        position={[0, 100, 0]}
+        intensity={1.4}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.00018}
+        shadow-normalBias={0.028}
+        shadow-camera-near={8}
+        shadow-camera-far={170}
+        shadow-camera-left={-36}
+        shadow-camera-right={36}
+        shadow-camera-top={36}
+        shadow-camera-bottom={-36}
+      />
       <group ref={groupRef}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
         <TropicalBlueSkyDome nightRef={nightRef} />
         <RealisticCloudLayer nightRef={nightRef} />
+        {/* Sun: warm billboarded disc behind a broad additive halo. */}
+        <sprite ref={sunGlowRef} renderOrder={-8} scale={[30, 30, 1]}>
+          <spriteMaterial map={sunGlowTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+        </sprite>
+        <sprite ref={sunRef} renderOrder={-7} scale={[8, 8, 1]}>
+          <spriteMaterial map={sunDiscTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
+        </sprite>
+        {[0, 1, 2, 3].map(index => (
+          <sprite
+            key={`lens-flare-${index}`}
+            ref={node => { lensFlareRefs.current[index] = node; }}
+            renderOrder={-6}
+            scale={[1, 1, 1]}
+            visible={false}
+          >
+            <spriteMaterial map={lensFlareTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+          </sprite>
+        ))}
         {/* Moon: cooler, smaller billboarded disc + soft halo. */}
         <sprite ref={moonRef} renderOrder={-7} scale={[7, 7, 1]}>
           <spriteMaterial map={moonDiscTexture} color="#dfe8f4" transparent opacity={0} depthWrite={false} depthTest={false} fog={false} />

@@ -5,6 +5,7 @@ const touchState = {
   right: false,
   run: false,
   jump: false,
+  dodge: false,
   interact: false,
   crouch: false,
   rifle: false,
@@ -21,7 +22,7 @@ export function setTouchControl(control, active) {
 
 export function consumeTouchControls() {
   const snapshot = { ...touchState };
-  touchState.jump = false;
+  touchState.dodge = false;
   touchState.interact = false;
   touchState.crouch = false;
   touchState.rifle = false;

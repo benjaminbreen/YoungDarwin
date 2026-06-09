@@ -46,20 +46,21 @@ function prepareScene(scene, options = {}) {
     : null;
   scene.traverse(object => {
     if (!object.isMesh) return;
-    object.castShadow = true;
+    object.castShadow = Boolean(options.castShadow ?? true);
     object.receiveShadow = Boolean(options.receiveShadow ?? true);
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
     const materials = sourceMaterials.map(material => (material ? material.clone() : new THREE.MeshStandardMaterial()));
     materials.forEach(material => {
       if (!material) return;
-      material.side = THREE.FrontSide;
+      material.side = options.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
       if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.04);
       if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.76);
       if (proceduralMap) {
         material.map = proceduralMap;
         if (material.color) material.color.set('#ffffff');
       } else if (material.color && tint) {
-        material.color.lerp(tint, options.tintStrength ?? 0.18);
+        if (options.forceTint) material.color.copy(tint);
+        else material.color.lerp(tint, options.tintStrength ?? 0.18);
       }
       material.needsUpdate = true;
     });
@@ -78,14 +79,17 @@ function StaticGLBPrimitive({
   textureSeed = 1,
   textureStyle = null,
   bob = 0,
+  doubleSide = false,
+  forceTint = false,
+  castShadow = true,
 }) {
   const group = useRef(null);
   const { scene } = useGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle });
-  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle]);
+    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow });
+  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow]);
 
   useFrame(({ clock }) => {
     if (!group.current || !bob) return;

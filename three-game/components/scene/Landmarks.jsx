@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { floreanaTidePools } from '../../world/floreanaCoveLayout';
 import { terrainHeight } from '../../world/terrain';
+import { useThreeGameStore } from '../../store';
 import { addRimLight, toonMaterial } from './materials';
 
 function TidePool({ pool }) {
@@ -65,6 +66,8 @@ function CoveLandingShelf() {
 }
 
 export function Landmarks() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  if (currentZoneId !== 'POST_OFFICE_BAY') return null;
   return (
     <group>
       <CoveLandingShelf />

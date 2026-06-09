@@ -1,4 +1,4 @@
-import { currentZoneId } from '../game-core/zones';
+import { currentRegionId as currentZoneId } from '../game-core/regionMaps';
 import { getInitialNarration, getIslandLocation, getZoneSpecimens } from '../game-core/specimens';
 import { expeditionTools } from '../game-core/tools';
 

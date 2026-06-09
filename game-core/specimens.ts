@@ -1,4 +1,5 @@
 import { baseSpecimens } from '../data/specimens';
+import { getRegionMap, getRegionSpecimenSpawns, regionMaps } from './regionMaps';
 import { currentZoneId, getZone, getZoneSpecimenSpawns } from './zones';
 import type { SpecimenId, ZoneId } from './types';
 
@@ -7,7 +8,8 @@ export function getSpecimenById(specimenId: SpecimenId) {
 }
 
 export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
-  const spawns = getZoneSpecimenSpawns(zoneId);
+  const zoneSpawns = regionMaps[zoneId] ? [] : getZoneSpecimenSpawns(zoneId);
+  const spawns = zoneSpawns.length > 0 ? zoneSpawns : getRegionSpecimenSpawns(zoneId);
   return spawns
     .map(spawn => {
       const specimen = getSpecimenById(spawn.specimenId);
@@ -23,21 +25,22 @@ export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
 }
 
 export function getIslandLocation(zoneId: ZoneId = currentZoneId) {
-  const zone = getZone(zoneId);
+  const region = getRegionMap(zoneId);
+  const zone = regionMaps[zoneId] ? region : getZone(zoneId);
   return {
-    id: zone.id,
-    name: zone.name,
-    island: zone.island,
-    historicalName: zone.historicalName,
-    subtitle: zone.subtitle,
-    type: zone.biome,
+    id: zone.id || region.id,
+    name: zone.name || region.name,
+    island: zone.island || region.island,
+    historicalName: zone.historicalName || region.historicalName,
+    subtitle: zone.subtitle || region.subtitle,
+    type: zone.biome || region.biome,
   };
 }
 
 export function getInitialNarration(zoneId: ZoneId = currentZoneId) {
   const zone = getZone(zoneId);
   return {
-    narration: 'The boat leaves you on the black volcanic landing shelf of Post Office Bay. The Beagle rides beyond the turquoise water while Syms Covington checks the specimen bag against the ash-colored slopes of Floreana.',
+    narration: zone.narration.loadingNote || 'The boat leaves you on the black volcanic landing shelf of Post Office Bay. The Beagle rides beyond the turquoise water while Syms Covington checks the specimen bag against the ash-colored slopes of Floreana.',
     educationalNote: zone.narration.educationalNote,
     weather: zone.narration.weather,
     sounds: zone.narration.sounds || [],

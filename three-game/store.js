@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
-import { currentZoneId, getTravelCard, getZone } from './world/floreanaZones';
+import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -74,8 +74,16 @@ function createSceneSlice() {
     sounds: initialNarration.sounds,
     viewMode: 'shoulder',
     transition: null,
+    edgePrompt: null,
     lastOutcome: null,
     physicsDebug: null,
+    pushableObstacleOffsets: {},
+    playerPose: {
+      position: { x: 0, y: 0, z: 0 },
+      facing: { x: 0, y: 0, z: -1 },
+    },
+    carryPrompt: null,
+    carriedObjectId: null,
     symsLine: 'Syms waits with labels, twine, and a doubtful look at your boots.',
   };
 }
@@ -88,21 +96,46 @@ export const useThreeGameStore = create((set, get) => ({
   setNearbySpecimen: nearbySpecimenId => set({ nearbySpecimenId }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
+  setEdgePrompt: edgePrompt => set({ edgePrompt }),
+  setPlayerPose: playerPose => set({ playerPose }),
+  setCarryPrompt: carryPrompt => set(state => (
+    (state.carryPrompt?.id || null) === (carryPrompt?.id || null)
+      && state.carryPrompt?.mode === carryPrompt?.mode
+      && state.carryPrompt?.text === carryPrompt?.text
+      && Math.abs((state.carryPrompt?.distance ?? 0) - (carryPrompt?.distance ?? 0)) < 0.08
+      ? {}
+      : { carryPrompt }
+  )),
+  setCarriedObject: carriedObjectId => set({ carriedObjectId }),
+  movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId) => set(state => {
+    const key = `${zoneId}:${obstacleId}`;
+    const current = state.pushableObstacleOffsets[key] || { x: 0, z: 0 };
+    return {
+      pushableObstacleOffsets: {
+        ...state.pushableObstacleOffsets,
+        [key]: {
+          x: current.x + (delta?.x || 0),
+          z: current.z + (delta?.z || 0),
+        },
+      },
+    };
+  }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
 
-  beginZoneTransition: zoneId => {
+  beginZoneTransition: (zoneId, options = {}) => {
     const zone = getZone(zoneId);
     const currentZone = getZone(get().currentZoneId);
-    const travelCard = getTravelCard(currentZone.id, zone.id);
+    const travelCard = getTravelCardForRoute(currentZone.id, zone.id);
     set({
       transition: {
         zoneId: zone.id,
+        entryEdge: options.entryEdge || null,
         from: currentZone.name,
         to: zone.name,
         travelCard,
         subtitle: zone.subtitle,
         island: zone.island,
-        note: travelCard?.description || zone.loadingNote,
+        note: options.note || travelCard?.description || zone.loadingNote,
         educationalNote: zone.educationalNote,
         minutes: travelCard?.estimatedMinutes || 0,
         fatigue: travelCard?.fatigueDelta || 0,
@@ -126,12 +159,17 @@ export const useThreeGameStore = create((set, get) => ({
         ? state.visitedLocalCellIds
         : [...state.visitedLocalCellIds, nextLocalCellId],
       transition: null,
+      edgePrompt: null,
+      pushableObstacleOffsets: state.pushableObstacleOffsets,
+      carryPrompt: null,
+      carriedObjectId: null,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
       message: zone.loadingNote || state.message,
       educationalNote: zone.educationalNote || state.educationalNote,
       weather: zone.weather || state.weather,
       sounds: Array.isArray(zone.sounds) ? zone.sounds : state.sounds,
+      playerSpawnId: state.transition.entryEdge || 'default',
       fatigue: clamp(state.fatigue + (state.transition.fatigue || 0), 0, MAX_FATIGUE),
       ...advanceTimeState(state, state.transition.minutes || 0),
     };

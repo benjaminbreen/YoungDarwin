@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { terrainHeight } from '../../world/terrain';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
+import { useThreeGameStore } from '../../store';
 
 function ProceduralCrewFigure({ motion = 0 }) {
   const coat = useMemo(() => addRimLight(toonMaterial('#25323a'), { intensity: 0.18 }), []);
@@ -37,14 +38,16 @@ function ProceduralCrewFigure({ motion = 0 }) {
 }
 
 export function SymsCovington() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const group = useRef(null);
   const animationRef = useRef('idle');
+  const visible = currentZoneId === 'POST_OFFICE_BAY' || currentZoneId === 'BEAGLE';
   const x = 2.9;
   const z = -6.9;
-  const y = terrainHeight(x, z) + 0.04;
+  const y = terrainHeight(x, z, currentZoneId) + 0.04;
 
   useFrame(({ clock }) => {
-    if (!group.current) return;
+    if (!visible || !group.current) return;
     const time = clock.elapsedTime;
     group.current.position.y = y + Math.sin(time * 1.4) * 0.015;
     const cycle = time % 30;
@@ -55,6 +58,8 @@ export function SymsCovington() {
     else if (cycle > 9) animationRef.current = 'point';
     else animationRef.current = 'idle';
   });
+
+  if (!visible) return null;
 
   return (
     <group ref={group} position={[x, y, z]} rotation={[0, Math.PI * 0.82, 0]}>

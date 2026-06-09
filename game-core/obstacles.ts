@@ -1,9 +1,24 @@
-import { currentZoneId } from './zones';
 import type { ObstacleDefinition, ZoneId } from './types';
 
 const NATURE = '/assets/models/nature/';
 
 const postOfficeBayObstacles = [
+  {
+    id: 'landing-push-boulder',
+    kind: 'boulder',
+    render: {
+      path: `${NATURE}Rock_Medium_1.glb`,
+      position: [0.8, 0, -4.8],
+      rotation: [0, -0.85, 0],
+      scale: 0.72,
+    },
+    collider: {
+      type: 'ball',
+      radius: 1.05,
+      offset: [0, 0.74, 0],
+    },
+    gameplay: { pushable: true, pushMass: 1.05, pushFriction: 0.86 },
+  },
   {
     id: 'landing-boulder',
     kind: 'boulder',
@@ -115,9 +130,9 @@ const postOfficeBayObstacles = [
 ] satisfies ObstacleDefinition[];
 
 export const zoneObstacles: Partial<Record<ZoneId, ObstacleDefinition[]>> = {
-  [currentZoneId]: postOfficeBayObstacles,
+  POST_OFFICE_BAY: postOfficeBayObstacles,
 };
 
-export function getZoneObstacles(zoneId: ZoneId = currentZoneId): ObstacleDefinition[] {
+export function getZoneObstacles(zoneId: ZoneId = 'POST_OFFICE_BAY'): ObstacleDefinition[] {
   return zoneObstacles[zoneId] || [];
 }

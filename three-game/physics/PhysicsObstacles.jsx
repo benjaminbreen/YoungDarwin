@@ -60,7 +60,11 @@ function ObstacleCollider({ obstacle }) {
 
 export function PhysicsObstacles() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const obstacles = useMemo(() => getRuntimeObstacles(currentZoneId), [currentZoneId]);
+  const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
+  const obstacles = useMemo(
+    () => getRuntimeObstacles(currentZoneId, pushableObstacleOffsets),
+    [currentZoneId, pushableObstacleOffsets],
+  );
 
   return (
     <>

@@ -1,13 +1,13 @@
-import { currentZoneId } from './zones';
 import type { ExpeditionState } from './types';
 
 export const EXPEDITION_CORE_SCHEMA_VERSION = 2;
+const initialRegionId = 'POST_OFFICE_BAY';
 
 export function createInitialExpeditionState(seed = 'three-darwin-v1'): ExpeditionState {
   return {
     schemaVersion: EXPEDITION_CORE_SCHEMA_VERSION,
     seed,
-    currentZoneId,
+    currentZoneId: initialRegionId,
     currentLocalCellId: 'POST_OFFICE_BAY',
     playerSpawnId: 'default',
     timeMinutes: 7 * 60 + 9,
@@ -18,7 +18,7 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
     journal: [],
     collectedSpecimenIds: [],
     documentedSpecimenIds: [],
-    visitedZoneIds: [currentZoneId],
+    visitedZoneIds: [initialRegionId],
     visitedLocalCellIds: ['POST_OFFICE_BAY'],
   };
 }

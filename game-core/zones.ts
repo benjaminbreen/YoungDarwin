@@ -182,7 +182,8 @@ function plannedZone(input: PlannedZoneInput): ZoneDefinition {
 }
 
 export function getZone(zoneId: ZoneId = currentZoneId): ZoneDefinition {
-  return floreanaZones[zoneId] || floreanaZones[currentZoneId];
+  const zones = floreanaZones as Record<string, ZoneDefinition>;
+  return zones[zoneId] || zones[currentZoneId];
 }
 
 export function getZoneExits(zoneId: ZoneId = currentZoneId) {

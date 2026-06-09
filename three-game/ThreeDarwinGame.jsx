@@ -3,7 +3,7 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats } from '@react-three/drei';
-import { EffectComposer, Vignette, Bloom } from '@react-three/postprocessing';
+import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { NeutralToneMapping, SRGBColorSpace } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
@@ -16,6 +16,7 @@ const KEYBOARD_MAP = [
   { name: 'right', keys: ['KeyD', 'ArrowRight'] },
   { name: 'run', keys: ['ShiftLeft', 'ShiftRight'] },
   { name: 'jump', keys: ['Space'] },
+  { name: 'dodge', keys: ['KeyB'] },
   { name: 'interact', keys: ['KeyE'] },
   { name: 'camera', keys: ['KeyC'] },
   { name: 'rotateLeft', keys: ['KeyZ'] },
@@ -44,34 +45,39 @@ const KEYBOARD_MAP = [
 
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
+const DEFAULT_PERF_SETTINGS = {
+  dprMode: 'default',
+  postprocessing: false,
+  stats: false,
+  shadows: true,
+  water: true,
+  reflections: true,
+  terrain: true,
+  landmarks: false,
+  atmosphere: true,
+  worldDetails: true,
+  beagle: true,
+  specimens: true,
+  syms: true,
+  physicsDebug: false,
+  preserveDrawingBuffer: false,
+};
+
 function getInitialPerfSettings() {
-  if (typeof window === 'undefined') {
-    return {
-      dprMode: 'default',
-      postprocessing: false,
-      stats: false,
-      shadows: true,
-      water: true,
-      terrain: true,
-      landmarks: true,
-      atmosphere: true,
-      worldDetails: true,
-      beagle: true,
-      specimens: true,
-      syms: true,
-      physicsDebug: false,
-      preserveDrawingBuffer: false,
-    };
-  }
-  const params = new URLSearchParams(window.location.search);
+  return { ...DEFAULT_PERF_SETTINGS };
+}
+
+function settingsFromUrlSearch(search) {
+  const params = new URLSearchParams(search);
   return {
-    dprMode: params.get('dpr') || 'default',
-    postprocessing: params.has('post'),
+    dprMode: params.get('dpr') || DEFAULT_PERF_SETTINGS.dprMode,
+    postprocessing: !params.has('noPost') && !params.has('noPostprocessing'),
     stats: false,
     shadows: !params.has('noShadows'),
     water: !params.has('noWater'),
+    reflections: !params.has('noReflections'),
     terrain: !params.has('noTerrain'),
-    landmarks: !params.has('noLandmarks'),
+    landmarks: params.has('landmarks') && !params.has('noLandmarks'),
     atmosphere: !params.has('noAtmosphere'),
     worldDetails: !params.has('noDetails'),
     beagle: !params.has('noBeagle'),
@@ -144,6 +150,55 @@ function ExpeditionClock() {
   return null;
 }
 
+// Selective bloom so the sun (and bright speculars) genuinely radiate. A high
+// luminance threshold keeps the sky/terrain crisp and only blooms near-white
+// highlights, which is why the sun core is pushed white-hot in SkyController.
+function PostFX({ enabled }) {
+  if (!enabled) return null;
+  return (
+    <EffectComposer>
+      <Bloom intensity={0.18} luminanceThreshold={0.985} luminanceSmoothing={0.035} mipmapBlur radius={0.22} />
+    </EffectComposer>
+  );
+}
+
+function CinematicScreenGrade({ enabled, weather }) {
+  if (!enabled) return null;
+  const dampenedSun = weather === 'misty' || weather === 'cloudy';
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: dampenedSun ? 0.035 : 0.055,
+          background: dampenedSun
+            ? 'linear-gradient(180deg, rgba(152, 210, 226, 0.18), rgba(238, 210, 152, 0.08) 62%, rgba(89, 135, 116, 0.05))'
+            : 'linear-gradient(180deg, rgba(118, 190, 228, 0.12), rgba(238, 196, 118, 0.12) 52%, rgba(231, 154, 90, 0.08))',
+          mixBlendMode: 'soft-light',
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background: dampenedSun
+            ? 'radial-gradient(circle at 50% 42%, transparent 55%, rgba(16, 24, 21, 0.09) 100%)'
+            : 'radial-gradient(circle at 50% 42%, transparent 52%, rgba(18, 24, 20, 0.13) 100%)',
+          mixBlendMode: 'multiply',
+        }}
+      />
+      <div
+        className="absolute inset-0 opacity-[0.02]"
+        style={{
+          backgroundImage: 'radial-gradient(circle at 25% 35%, rgba(255,255,255,0.55) 0 1px, transparent 1.3px), radial-gradient(circle at 75% 65%, rgba(0,0,0,0.38) 0 1px, transparent 1.4px)',
+          backgroundPosition: '0 0, 6px 8px',
+          backgroundSize: '13px 13px, 17px 17px',
+          mixBlendMode: 'soft-light',
+        }}
+      />
+    </div>
+  );
+}
+
 function Metric({ label, value }) {
   return (
     <div className="rounded border border-white/10 bg-black/20 px-2 py-1">
@@ -205,6 +260,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
         <Toggle label="Shadows" checked={settings.shadows} onChange={value => set({ shadows: value })} />
         <Toggle label="Water" checked={settings.water} onChange={value => set({ water: value })} />
+        <Toggle label="Reflections" checked={settings.reflections} onChange={value => set({ reflections: value })} />
         <Toggle label="Terrain" checked={settings.terrain} onChange={value => set({ terrain: value })} />
         <Toggle label="Landmarks" checked={settings.landmarks} onChange={value => set({ landmarks: value })} />
         <Toggle label="Atmosphere" checked={settings.atmosphere} onChange={value => set({ atmosphere: value })} />
@@ -220,8 +276,44 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
           <span className="font-mono">{physicsDebug.groundSource}</span>
           <span className="text-amber-100/70">State</span>
           <span className="font-mono">{physicsDebug.grounded ? 'grounded' : 'airborne'}</span>
+          <span className="text-amber-100/70">Jump</span>
+          <span className="font-mono">{physicsDebug.jumpPhase || 'grounded'}</span>
+          <span className="text-amber-100/70">Charge</span>
+          <span className="font-mono">
+            {physicsDebug.jumpChargeAmount !== undefined ? `${Math.round(physicsDebug.jumpChargeAmount * 100)}%` : '--'}
+          </span>
+          <span className="text-amber-100/70">Vy</span>
+          <span className="font-mono">{physicsDebug.velocityY !== undefined ? physicsDebug.velocityY.toFixed(2) : '--'}</span>
+          <span className="text-amber-100/70">Ground gap</span>
+          <span className="font-mono">{physicsDebug.groundDistance !== undefined ? physicsDebug.groundDistance.toFixed(2) : '--'}</span>
+          <span className="text-amber-100/70">Coyote</span>
+          <span className="font-mono">{physicsDebug.coyoteAvailable ? 'yes' : 'no'}</span>
+          <span className="text-amber-100/70">Buffer</span>
+          <span className="font-mono">{physicsDebug.jumpBuffered ? 'yes' : 'no'}</span>
+          <span className="text-amber-100/70">Slope</span>
+          <span className="font-mono">{physicsDebug.slopeGrade !== undefined ? physicsDebug.slopeGrade.toFixed(2) : '--'}</span>
+          <span className="text-amber-100/70">Uphill</span>
+          <span className="font-mono">{physicsDebug.uphillDot !== undefined ? physicsDebug.uphillDot.toFixed(2) : '--'}</span>
+          <span className="text-amber-100/70">Speed</span>
+          <span className="font-mono">{physicsDebug.speedScale !== undefined ? physicsDebug.speedScale.toFixed(2) : '--'}</span>
+          <span className="text-amber-100/70">Fidget</span>
+          <span className="font-mono">{physicsDebug.idleFidgetIn !== null && physicsDebug.idleFidgetIn !== undefined ? `${physicsDebug.idleFidgetIn.toFixed(1)}s` : '--'}</span>
+          <span className="text-amber-100/70">Carry</span>
+          <span className="font-mono">{physicsDebug.inventoryCount ?? 0}</span>
+          <span className="text-amber-100/70">Injured</span>
+          <span className="font-mono">{physicsDebug.injuredGait ? 'yes' : 'no'}</span>
+          <span className="text-amber-100/70">Jog</span>
+          <span className="font-mono">{physicsDebug.tiredRun ? 'yes' : 'no'}</span>
+          <span className="text-amber-100/70">Run scale</span>
+          <span className="font-mono">{physicsDebug.fatigueRunScale !== undefined ? physicsDebug.fatigueRunScale.toFixed(2) : '--'}</span>
           <span className="text-amber-100/70">Y</span>
           <span className="font-mono">{physicsDebug.playerY.toFixed(2)} / {physicsDebug.groundY.toFixed(2)}</span>
+          <span className="text-amber-100/70">T/R Y</span>
+          <span className="font-mono">
+            {physicsDebug.terrainY !== undefined ? physicsDebug.terrainY.toFixed(2) : '--'}
+            {' / '}
+            {physicsDebug.physicsY !== null && physicsDebug.physicsY !== undefined ? physicsDebug.physicsY.toFixed(2) : '--'}
+          </span>
           <span className="text-amber-100/70">Colliders</span>
           <span className="font-mono">{physicsDebug.obstacleCount}</span>
           <span className="text-amber-100/70">Spawn</span>
@@ -253,6 +345,7 @@ export default function ThreeDarwinGame() {
   }, [weather]);
 
   useEffect(() => {
+    setPerfSettings(settingsFromUrlSearch(window.location.search));
     const onKeyDown = event => {
       if (event.code !== 'Backquote') return;
       event.preventDefault();
@@ -283,21 +376,12 @@ export default function ThreeDarwinGame() {
           <Suspense fallback={null}>
             <ThreeScene perfSettings={perfSettings} />
           </Suspense>
+          <PostFX enabled={perfSettings.postprocessing} />
           <ExpeditionClock />
-          {perfSettings.postprocessing && (
-            <EffectComposer>
-              <Bloom
-                intensity={0.7}
-                luminanceThreshold={0.72}
-                luminanceSmoothing={0.22}
-                mipmapBlur
-              />
-              <Vignette eskil={false} offset={0.2} darkness={0.38} />
-            </EffectComposer>
-          )}
           <PerformanceSampler enabled={showPerf} onSample={setMetrics} />
           {showPerf && perfSettings.stats && <Stats />}
         </Canvas>
+        <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />
         <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />
         <PerformancePanel
           open={showPerf}

@@ -1,8 +1,8 @@
-import { chromium } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { launchChromium } from './playwright-launch.mjs';
 
-const baseUrl = process.env.THREE_DARWIN_URL || 'http://localhost:3000/three';
+const baseUrl = process.env.THREE_DARWIN_URL || 'http://localhost:3003/three';
 const outDir = path.join(process.cwd(), 'test-results', 'three-darwin');
 
 function screenshotUrl() {
@@ -45,22 +45,7 @@ async function canvasPixelHealth(page) {
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
-  let browser;
-  const launchAttempts = [
-    () => chromium.launch({ headless: true, args: ['--disable-gpu', '--disable-dev-shm-usage'] }),
-    () => chromium.launch({ headless: true, channel: 'chrome' }),
-    () => chromium.launch({ headless: true, channel: 'chromium' }),
-  ];
-  let launchError = null;
-  for (const launch of launchAttempts) {
-    try {
-      browser = await launch();
-      break;
-    } catch (error) {
-      launchError = error;
-    }
-  }
-  if (!browser) throw launchError;
+  const browser = await launchChromium();
   const results = [];
 
   for (const viewport of viewports) {

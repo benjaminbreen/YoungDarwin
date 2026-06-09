@@ -133,12 +133,38 @@ function NarrativePanel({ expanded, onToggleExpanded }) {
 
 function InteractionPrompt() {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const edgePrompt = useThreeGameStore(state => state.edgePrompt);
+  const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  if (!nearby) return null;
+  if (carryPrompt) {
+    return (
+      <div className="pointer-events-none absolute left-1/2 top-[42%] w-[min(17rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded border border-amber-200/35 bg-stone-950/68 px-3 py-2 text-center shadow-xl sm:left-[calc(50%+11rem)] sm:top-[56%]">
+        <div className="truncate text-xs font-bold text-amber-50 sm:text-sm">{carryPrompt.label}</div>
+        <div className="mt-1.5 rounded bg-amber-200 px-3 py-1 text-xs font-bold text-stone-950 sm:text-sm">
+          {carryPrompt.text}
+        </div>
+      </div>
+    );
+  }
+  if (!nearby && !edgePrompt) return null;
+  if (!nearby && edgePrompt) {
+    const isOpen = edgePrompt.kind === 'open';
+    return (
+      <div className="pointer-events-auto absolute left-1/2 top-[42%] w-[min(17rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded border border-amber-200/35 bg-stone-950/68 px-3 py-2 text-center shadow-xl sm:left-[calc(50%+11rem)] sm:top-[56%]">
+        <div className="truncate text-xs font-bold text-amber-50 sm:text-sm">{edgePrompt.label}</div>
+        <div className="line-clamp-2 text-[11px] italic text-amber-100/75">{edgePrompt.message || edgePrompt.description}</div>
+        {isOpen && (
+          <div className="mt-1.5 rounded bg-amber-200 px-3 py-1 text-xs font-bold text-stone-950 sm:text-sm">
+            E - travel
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-auto absolute left-1/2 top-[42%] w-[min(15rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded border border-amber-200/35 bg-stone-950/62 px-3 py-2 text-center shadow-xl sm:left-[calc(50%+11rem)] sm:top-[56%]">
@@ -193,8 +219,13 @@ function MobileTouchControls() {
       </div>
       <div className="grid grid-cols-1 gap-1">
         <TouchButton control="jump" label="J" className="h-9 w-9 text-xs" />
+        <TouchButton control="dodge" label="B" className="h-9 w-9 text-xs" />
         <TouchButton control="run" label="R" className="h-9 w-9 text-xs" />
         <TouchButton control="interact" label="E" className="h-9 w-9 bg-amber-200/85 text-stone-950 text-xs" />
+      </div>
+      <div className="grid grid-cols-1 gap-1">
+        <TouchButton control="crouch" label="Q" className="h-9 w-9 text-xs" />
+        <TouchButton control="rifle" label="Aim" className="h-9 w-11 text-[10px]" />
       </div>
     </div>
   );
@@ -266,21 +297,20 @@ export function ThreeHUD({ onTogglePerf }) {
           <button type="button" onClick={cycleViewMode} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Camera</button>
           <button type="button" onClick={rest} className="rounded bg-white/10 px-2 py-1.5 hover:bg-white/20">Rest</button>
         </div>
-        <div className="grid gap-1">
-          {zone.neighbors.slice(0, 2).map(route => (
+        <div className="grid max-h-28 gap-1 overflow-auto">
+          {zone.neighbors.map(route => (
             <button
               key={route.zoneId}
               type="button"
-              onClick={() => getZone(route.zoneId).terrainPreset !== 'planned' && beginZoneTransition(route.zoneId)}
-              disabled={getZone(route.zoneId).terrainPreset === 'planned'}
+              onClick={() => beginZoneTransition(route.zoneId, { entryEdge: route.edge ? ({ north: 'south', south: 'north', east: 'west', west: 'east', northeast: 'southwest', northwest: 'southeast', southeast: 'northwest', southwest: 'northeast' }[route.edge]) : null })}
               className="rounded border border-amber-200/20 bg-white/5 px-2 py-1 text-left text-[11px] text-amber-100/80 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              {route.label}{getZone(route.zoneId).terrainPreset === 'planned' ? ' (planned)' : ''}
+              {route.label}
             </button>
           ))}
         </div>
         <button type="button" onClick={onTogglePerf} className="rounded border border-white/10 px-2 py-1 text-xs text-amber-100/75 hover:bg-white/10">Toggle perf</button>
-        <p className="text-[11px] leading-relaxed text-amber-100/60">WASD move | Q crouch | R rifle | F fire | H hammer | N net | G gather | Y write | I inspect | V climb | P pray</p>
+        <p className="text-[11px] leading-relaxed text-amber-100/60">WASD move | E interact/pick up | Space jump | B roll | Z/X camera, tap while still to turn | A/D sidestep while crouched or aiming | Q crouch | R rifle | F fire | H hammer | N net | G gather | Y write | I inspect | V climb | P pray</p>
       </div>
 
       <div className="pointer-events-auto absolute right-3 bottom-3 flex gap-1.5 lg:hidden">

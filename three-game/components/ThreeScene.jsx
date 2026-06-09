@@ -16,7 +16,7 @@ export function ThreeScene({ perfSettings }) {
       <SkyController stars={settings.atmosphere !== false} />
       <Lighting />
       {settings.atmosphere !== false && <Atmosphere />}
-      {settings.water !== false && <Water />}
+      {settings.water !== false && <Water reflections={settings.reflections !== false} />}
       <PhysicsProvider debug={settings.physicsDebug === true}>
         <ActiveZoneContent settings={settings} />
         <PlayerController physicsDebug={settings.physicsDebug === true} />

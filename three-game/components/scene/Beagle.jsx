@@ -4,6 +4,7 @@ import React from 'react';
 import * as THREE from 'three';
 import { StaticGLB } from '../assets/StaticGLB';
 import { getZone } from '../../world/floreanaZones';
+import { useThreeGameStore } from '../../store';
 
 const sailGeometry = new THREE.BufferGeometry();
 sailGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -14,7 +15,10 @@ sailGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
 sailGeometry.computeVertexNormals();
 
 export function Beagle() {
-  const [x, y, z] = getZone().beaglePosition || [13.5, -1.08, -48];
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const zone = getZone(currentZoneId);
+  if (!zone.beaglePosition && currentZoneId !== 'POST_OFFICE_BAY') return null;
+  const [x, y, z] = zone.beaglePosition || [13.5, -1.08, -48];
   return (
     <group position={[x, y, z]} rotation={[0, -0.08, 0]} scale={0.92}>
       <StaticGLB

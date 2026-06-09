@@ -11,6 +11,7 @@ export function LocalMap() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const zone = getZone(currentZoneId);
   const specimens = getThreeSpecimens(currentZoneId);
+  const markerPercent = value => `${value.toFixed(3)}%`;
 
   return (
     <div className="pointer-events-auto h-28 w-28 rounded-full border border-white/25 bg-[#6fa2c7]/80 p-2 text-amber-50 shadow-xl backdrop-blur-md sm:h-32 sm:w-32">
@@ -28,7 +29,7 @@ export function LocalMap() {
               className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border ${
                 selected === specimen.id ? 'border-stone-950 bg-amber-200' : isCollected ? 'border-emerald-900 bg-emerald-300' : 'border-white bg-red-400'
               }`}
-              style={{ left: `${50 + x * 1.1}%`, top: `${55 + z * 1.1}%` }}
+              style={{ left: markerPercent(50 + x * 1.1), top: markerPercent(55 + z * 1.1) }}
               title={specimen.name}
             />
           );

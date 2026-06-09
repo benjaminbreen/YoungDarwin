@@ -1,17 +1,20 @@
 'use client';
 
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { makeFloreanaScatter } from '../../world/floreanaCoveLayout';
 import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
 import { useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
 import { terrainHeight } from '../../world/terrain';
+import { getModelAsset } from '../../modelAssets';
 import { addRimLight, toonMaterial } from './materials';
 
 const dummy = new THREE.Object3D();
 
-function InstancedLayer({ items, geometry, material, transform }) {
+function InstancedLayer({ items, geometry, material, transform, animate = false, castShadow = true, receiveShadow = true }) {
   const ref = useRef(null);
 
   useLayoutEffect(() => {
@@ -29,12 +32,27 @@ function InstancedLayer({ items, geometry, material, transform }) {
     if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
   }, [items, transform]);
 
-  return <instancedMesh ref={ref} args={[geometry, material, items.length]} castShadow receiveShadow />;
+  useFrame(({ clock }) => {
+    if (!animate || !ref.current) return;
+    const time = clock.elapsedTime;
+    items.forEach((item, index) => {
+      transform(dummy, item, index, time);
+      dummy.updateMatrix();
+      ref.current.setMatrixAt(index, dummy.matrix);
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return <instancedMesh ref={ref} args={[geometry, material, items.length]} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled={false} />;
 }
 
 function ObstacleProps() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const obstacles = useMemo(() => getRuntimeObstacles(currentZoneId), [currentZoneId]);
+  const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
+  const obstacles = useMemo(
+    () => getRuntimeObstacles(currentZoneId, pushableObstacleOffsets),
+    [currentZoneId, pushableObstacleOffsets],
+  );
   return (
     <group>
       {obstacles.map(obstacle => (
@@ -146,6 +164,47 @@ function OpuntiaLayer() {
   );
 }
 
+function DryGrassLayer() {
+  const asset = getModelAsset('dryGrassPatch');
+  const { scene } = useGLTF(asset?.path || '/assets/models/nature/runtime-animated-dry-grass.glb');
+  const geometry = useMemo(() => {
+    let found = null;
+    scene.traverse(object => {
+      if (!found && object.isMesh) found = object.geometry;
+    });
+    return found;
+  }, [scene]);
+  const items = useMemo(() => makeFloreanaScatter('dry-grass-patch', 240, 67, {
+    minX: -28,
+    maxX: 28,
+    minZ: -12,
+    maxZ: 27,
+    scale: [0.24, 0.58],
+  }).map(item => ({
+    ...item,
+    color: item.tone > 0.68 ? '#a79750' : item.tone < 0.28 ? '#6f743b' : '#858b44',
+  })), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    color: '#8e8b49',
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    roughness: 0.98,
+    metalness: 0,
+    emissive: '#252711',
+    emissiveIntensity: 0.16,
+  }), []);
+  const transform = useMemo(() => (object, item) => {
+    const width = item.scale * (0.82 + item.tone * 0.42);
+    const height = item.scale * (0.58 + item.tone * 0.24);
+    object.position.set(item.x, item.y + 0.012, item.z);
+    object.rotation.set(0, item.yaw, 0);
+    object.scale.set(width, height, width * (0.85 + item.tone * 0.25));
+  }, []);
+  if (!asset?.enabled) return null;
+  if (!geometry) return null;
+  return <InstancedLayer items={items} geometry={geometry} material={material} transform={transform} castShadow={false} />;
+}
+
 function AssetVegetationLayer() {
   const shrubs = useMemo(() => makeFloreanaScatter('asset-shrub', 16, 37, {
     minX: -22,
@@ -232,11 +291,14 @@ function TrailHints() {
 }
 
 export function WorldDetails() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  if (currentZoneId !== 'POST_OFFICE_BAY') return null;
   return (
     <group>
       <ObstacleProps />
       <BasaltBlocks />
       <Scree />
+      <DryGrassLayer />
       <DryScrub />
       <OpuntiaLayer />
       <AssetVegetationLayer />
