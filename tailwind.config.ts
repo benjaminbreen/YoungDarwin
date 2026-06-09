@@ -14,6 +14,17 @@ module.exports = {
         'darwin-accent': '#A0522D',
         'darwin-light': '#F5F5DC',
         'darwin-dark': '#4A3728',
+        // Victorian expedition HUD palette
+        'expedition-ink': '#14110c',
+        'expedition-panel': '#191511',
+        'expedition-brass': '#8a6d3f',
+        'expedition-gold': '#c9a35f',
+        'expedition-goldbright': '#e3c585',
+        'expedition-parchment': '#e8dcc0',
+        'expedition-faded': '#a89878',
+      },
+      fontFamily: {
+        expedition: ['var(--font-garamond)', 'Georgia', 'Times New Roman', 'serif'],
       },
     },
   },

@@ -3,8 +3,8 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats } from '@react-three/drei';
-import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { NeutralToneMapping, SRGBColorSpace } from 'three';
+import { EffectComposer, Bloom, N8AO, Vignette } from '@react-three/postprocessing';
+import { ACESFilmicToneMapping, SRGBColorSpace } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { useThreeGameStore } from './store';
@@ -48,6 +48,7 @@ const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 const DEFAULT_PERF_SETTINGS = {
   dprMode: 'default',
   postprocessing: false,
+  ao: true,
   stats: false,
   shadows: true,
   water: true,
@@ -72,6 +73,7 @@ function settingsFromUrlSearch(search) {
   return {
     dprMode: params.get('dpr') || DEFAULT_PERF_SETTINGS.dprMode,
     postprocessing: !params.has('noPost') && !params.has('noPostprocessing'),
+    ao: !params.has('noAO'),
     stats: false,
     shadows: !params.has('noShadows'),
     water: !params.has('noWater'),
@@ -153,11 +155,26 @@ function ExpeditionClock() {
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
-function PostFX({ enabled }) {
+// N8AO grounds rocks/characters with contact shading; runs half-res to stay
+// cheap and can be disabled independently of the rest of the stack.
+function PostFX({ enabled, ao }) {
   if (!enabled) return null;
   return (
     <EffectComposer>
+      {ao && (
+        <N8AO
+          halfRes
+          depthAwareUpsampling
+          aoRadius={1.6}
+          distanceFalloff={1.2}
+          intensity={2.4}
+          aoSamples={8}
+          denoiseSamples={8}
+          denoiseRadius={12}
+        />
+      )}
       <Bloom intensity={0.18} luminanceThreshold={0.985} luminanceSmoothing={0.035} mipmapBlur radius={0.22} />
+      <Vignette eskil={false} offset={0.26} darkness={0.42} />
     </EffectComposer>
   );
 }
@@ -257,6 +274,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
+        <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
         <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
         <Toggle label="Shadows" checked={settings.shadows} onChange={value => set({ shadows: value })} />
         <Toggle label="Water" checked={settings.water} onChange={value => set({ water: value })} />
@@ -367,7 +385,7 @@ export default function ThreeDarwinGame() {
             antialias: true,
             powerPreference: 'high-performance',
             preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
-            toneMapping: NeutralToneMapping,
+            toneMapping: ACESFilmicToneMapping,
             outputColorSpace: SRGBColorSpace,
           }}
         >
@@ -376,7 +394,7 @@ export default function ThreeDarwinGame() {
           <Suspense fallback={null}>
             <ThreeScene perfSettings={perfSettings} />
           </Suspense>
-          <PostFX enabled={perfSettings.postprocessing} />
+          <PostFX enabled={perfSettings.postprocessing} ao={perfSettings.ao} />
           <ExpeditionClock />
           <PerformanceSampler enabled={showPerf} onSample={setMetrics} />
           {showPerf && perfSettings.stats && <Stats />}

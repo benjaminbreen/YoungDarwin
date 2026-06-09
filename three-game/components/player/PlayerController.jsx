@@ -976,13 +976,27 @@ export function PlayerController({ physicsDebug = false }) {
       const eased = 1 - Math.pow(1 - progress, 3);
       const target = roll.start.clone().addScaledVector(roll.direction, roll.distance * eased);
       const desired = new THREE.Vector3(target.x - group.current.position.x, 0, target.z - group.current.position.z);
-      const characterMove = characterController.move(group.current.position, desired);
+      const characterMove = {
+        movement: desired.clone(),
+        grounded: false,
+        collisions: 0,
+        collision: null,
+        source: 'analytic-character',
+      };
       characterDebug.current.movement.copy(characterMove.movement);
       characterDebug.current.collisions = characterMove.collisions;
       characterDebug.current.grounded = characterMove.grounded;
       characterDebug.current.source = characterMove.source;
-      characterDebug.current.normal.copy(characterMove.collision?.normal || new THREE.Vector3());
+      characterDebug.current.normal.set(0, 0, 0);
       group.current.position.add(characterMove.movement);
+      const rollCollision = collisionAdapter.resolveCollision(group.current.position, startOfFramePosition);
+      if (rollCollision) {
+        group.current.position.copy(rollCollision.position).addScaledVector(rollCollision.normal, 0.035);
+        characterMove.collisions = 1;
+        characterMove.collision = rollCollision;
+        characterDebug.current.collisions = 1;
+        characterDebug.current.normal.copy(rollCollision.normal);
+      }
       const rollGround = collisionAdapter.groundInfo(group.current.position);
       group.current.position.y = rollGround.y;
       characterController.sync(group.current.position);
@@ -1322,28 +1336,29 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.y = 0;
     }
     const desiredDelta = velocity.current.clone().multiplyScalar(delta);
-    const characterMove = characterController.move(group.current.position, desiredDelta);
+    const characterMove = {
+      movement: desiredDelta.clone(),
+      grounded: false,
+      collisions: 0,
+      collision: null,
+      source: 'analytic-character',
+    };
     characterDebug.current.movement.copy(characterMove.movement);
     characterDebug.current.collisions = characterMove.collisions;
     characterDebug.current.grounded = characterMove.grounded;
     characterDebug.current.source = characterMove.source;
-    characterDebug.current.normal.copy(characterMove.collision?.normal || new THREE.Vector3());
+    characterDebug.current.normal.set(0, 0, 0);
     group.current.position.add(characterMove.movement);
-    let collision = characterMove.collision
-      ? {
-          normal: characterMove.collision.normal,
-          penetration: Math.max(0.02, desiredDelta.length() - characterMove.movement.length()),
-          source: characterMove.source,
-        }
-      : null;
-
-    if (!characterController.ready()) {
-      const fallbackCollision = collisionAdapter.resolveCollision(group.current.position, startOfFramePosition);
-      if (fallbackCollision) {
-        group.current.position.copy(fallbackCollision.position).addScaledVector(fallbackCollision.normal, 0.035);
-        collision = fallbackCollision;
-      }
+    let collision = null;
+    const fallbackCollision = collisionAdapter.resolveCollision(group.current.position, startOfFramePosition);
+    if (fallbackCollision) {
+      group.current.position.copy(fallbackCollision.position).addScaledVector(fallbackCollision.normal, 0.035);
+      characterMove.collisions = 1;
+      characterMove.collision = fallbackCollision;
+      characterDebug.current.collisions = 1;
+      collision = fallbackCollision;
     }
+    characterController.sync(group.current.position);
 
     if (collision) {
       const normal = collision.normal.clone().normalize();
@@ -1417,17 +1432,19 @@ export function PlayerController({ physicsDebug = false }) {
     const nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
     const nextGroundY = nextGroundInfo.y;
     const groundDistance = group.current.position.y - nextGroundY;
+    const belowTerrainFloor = groundDistance < -PLAYER.groundContactEpsilon
+      && (velocity.current.y <= 0 || groundDistance < -PLAYER.groundSnapDistance);
     const canResolveGroundContact = velocity.current.y <= 0 && jumpState.current.phase !== 'takeoff';
     const terrainContact = canResolveGroundContact && groundDistance <= PLAYER.groundContactEpsilon;
     const terrainSnapContact = velocity.current.y <= 0
       && jumpState.current.phase !== 'takeoff'
       && groundDistance <= PLAYER.groundSnapDistance;
     const rapierContact = canResolveGroundContact && characterMove.grounded && Math.abs(groundDistance) <= PLAYER.groundSnapDistance;
-    const landed = terrainContact || terrainSnapContact || rapierContact;
+    const landed = terrainContact || terrainSnapContact || rapierContact || belowTerrainFloor;
     if (landed) {
       const falling = wasAirborne.current ? Math.abs(velocity.current.y) : 0;
       const intentionalPlayerJump = wasAirborne.current && jumpState.current.fromPlayerJump;
-      if (groundDistance <= PLAYER.groundSnapDistance) {
+      if (groundDistance <= PLAYER.groundSnapDistance || belowTerrainFloor) {
         group.current.position.y = nextGroundY;
         characterController.sync(group.current.position);
       }

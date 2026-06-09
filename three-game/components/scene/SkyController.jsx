@@ -334,8 +334,10 @@ export function SkyController({ stars = true, tuning = null }) {
   const T = tuning || {};
   const rayleighBase = T.rayleigh ?? 3.0;   // deeper tropical blue that resists blowing out near the sun
   const turbidityBase = T.turbidity ?? 0.32; // very low haze: the sky shader must not wash the dome white
-  const expBase = T.expBase ?? 0.31;
-  const expGain = T.expGain ?? 0.045;
+  // Exposure floor/gain tuned for ACESFilmicToneMapping (needs more input than
+  // the old Neutral curve to land the same midtone).
+  const expBase = T.expBase ?? 0.46;
+  const expGain = T.expGain ?? 0.07;
   const groupRef = useRef(null);
   const skyRef = useRef(null);
   const keyLightRef = useRef(null);
@@ -380,6 +382,11 @@ export function SkyController({ stars = true, tuning = null }) {
   // Smoothed game hour so the sky visibly drifts between discrete store updates.
   const hourRef = useRef(null);
   const nightRef = useRef(0); // shared with StarField without React re-renders
+
+  // Shadow camera follows the player: a tight frustum that tracks the
+  // character keeps shadow texels small (crisp edges) no matter where they
+  // roam, instead of one blurry map stretched over the whole zone.
+  const shadowTarget = useMemo(() => new THREE.Object3D(), []);
 
   const weather = useThreeGameStore(state => state.weather);
   const overcast = weather === 'cloudy' || weather === 'misty' ? 1 : 0;
@@ -521,7 +528,10 @@ export function SkyController({ stars = true, tuning = null }) {
       const key = keyLightRef.current;
       // Light comes *from* the higher of the two bodies (sun by day, moon by night).
       const fromMoon = s.elevation < -0.04;
-      key.position.copy(fromMoon ? _moon : _sun).multiplyScalar(100);
+      const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
+      shadowTarget.position.set(pose.x, pose.y, pose.z);
+      key.target = shadowTarget;
+      key.position.copy(fromMoon ? _moon : _sun).multiplyScalar(100).add(shadowTarget.position);
       _color.copy(C.keyNight).lerp(C.keyDay, daylight);
       _color.lerp(C.keyGolden, golden * 0.95);
       key.color.copy(_color);
@@ -556,15 +566,16 @@ export function SkyController({ stars = true, tuning = null }) {
         intensity={1.4}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.00018}
-        shadow-normalBias={0.028}
-        shadow-camera-near={8}
+        shadow-bias={-0.00012}
+        shadow-normalBias={0.02}
+        shadow-camera-near={40}
         shadow-camera-far={170}
-        shadow-camera-left={-36}
-        shadow-camera-right={36}
-        shadow-camera-top={36}
-        shadow-camera-bottom={-36}
+        shadow-camera-left={-18}
+        shadow-camera-right={18}
+        shadow-camera-top={18}
+        shadow-camera-bottom={-18}
       />
+      <primitive object={shadowTarget} />
       <group ref={groupRef}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
         <TropicalBlueSkyDome nightRef={nightRef} />
