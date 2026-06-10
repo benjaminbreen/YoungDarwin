@@ -7,6 +7,7 @@ import { EffectComposer, Bloom, N8AO, Vignette } from '@react-three/postprocessi
 import { ACESFilmicToneMapping, SRGBColorSpace } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
+import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { useThreeGameStore } from './store';
 
 const KEYBOARD_MAP = [
@@ -94,9 +95,9 @@ function dprForMode(mode) {
   if (mode === '1x') return [1, 1];
   if (mode === '1.25x') return [1, 1.25];
   if (mode === '1.5x') return [1, 1.5];
-  if (typeof window === 'undefined') return [1, 1.5];
-  const isSafari = /^((?!chrome|android).)*safari/i.test(window.navigator.userAgent);
-  return isSafari ? [1, 1.25] : [1, 1.5];
+  // Default capped at 1.25: with ACES + AO + the splat shaders, 1.5x costs
+  // ~45% more fill for a difference that's invisible at gameplay distance.
+  return [1, 1.25];
 }
 
 function PerformanceSampler({ enabled, onSample }) {
@@ -168,8 +169,8 @@ function PostFX({ enabled, ao }) {
           aoRadius={1.6}
           distanceFalloff={1.2}
           intensity={2.4}
-          aoSamples={8}
-          denoiseSamples={8}
+          aoSamples={4}
+          denoiseSamples={6}
           denoiseRadius={12}
         />
       )}
@@ -351,6 +352,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
 
 export default function ThreeDarwinGame() {
   const [showPerf, setShowPerf] = useState(false);
+  const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const weather = useThreeGameStore(state => state.weather);
@@ -364,7 +366,16 @@ export default function ThreeDarwinGame() {
 
   useEffect(() => {
     setPerfSettings(settingsFromUrlSearch(window.location.search));
+    const zoneParam = new URLSearchParams(window.location.search).get('zone');
+    if (zoneParam) useThreeGameStore.getState().beginZoneTransition(zoneParam, {});
     const onKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (event.code === 'Digit0') {
+        event.preventDefault();
+        setShowAssetBrowser(value => !value);
+        return;
+      }
       if (event.code !== 'Backquote') return;
       event.preventDefault();
       setShowPerf(value => !value);
@@ -401,6 +412,7 @@ export default function ThreeDarwinGame() {
         </Canvas>
         <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />
         <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />
+        <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />
         <PerformancePanel
           open={showPerf}
           settings={perfSettings}

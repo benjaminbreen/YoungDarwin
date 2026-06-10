@@ -25,6 +25,8 @@ function shadeFromNormal(dhdx, dhdz) {
 
 export function bakeTerrainChart(zone) {
   if (typeof document === 'undefined') return null;
+  // Sample the zone's true footprint; non-square zones must not tile or
+  // stretch past their bounds.
   const size = zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
   const n = BAKE_RESOLUTION;
   const step = size / n;

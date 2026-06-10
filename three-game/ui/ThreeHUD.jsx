@@ -28,6 +28,7 @@ import {
 } from './expedition/icons';
 import { useTerrainChart } from './expedition/TerrainMinimap';
 import { GalapagosGlobe } from './expedition/GalapagosGlobe';
+import { IslandMapModal } from './expedition/map/IslandMapModal';
 
 const ROUTE_ENTRY_EDGES = {
   north: 'south',
@@ -287,7 +288,7 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
   );
 }
 
-function GameplayMinimap() {
+function GameplayMinimap({ onOpenMap }) {
   const [view, setView] = useState('local');
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const playerPose = useThreeGameStore(state => state.playerPose);
@@ -314,7 +315,20 @@ function GameplayMinimap() {
         </div>
         <CompassRoseIcon className="h-4 w-4 shrink-0 text-expedition-gold/80" />
       </div>
-      <div className="relative aspect-square overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)]">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={event => {
+          // Ignore clicks on inner controls (route dots) — they travel, not open the map.
+          if (event.target.closest('button')) return;
+          onOpenMap();
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') onOpenMap();
+        }}
+        title="Open island map"
+        className="relative aspect-square cursor-pointer overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-gold focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+      >
         {view === 'globe' ? (
           <GalapagosGlobe />
         ) : view === 'island' ? (
@@ -326,7 +340,8 @@ function GameplayMinimap() {
                 className="absolute inset-0"
                 style={{
                   backgroundImage: `url(${chartUrl})`,
-                  backgroundSize: `${zoom * 100}%`,
+                  backgroundSize: `${zoom * 100}% ${zoom * 100}%`,
+                  backgroundRepeat: 'no-repeat',
                   backgroundPosition: zoom === 1 ? 'center' : `${player.x}% ${player.y}%`,
                   imageRendering: 'auto',
                 }}
@@ -777,6 +792,7 @@ function MobileTouchControls() {
 
 export function ThreeHUD({ onTogglePerf }) {
   const [panel, setPanel] = useState(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const questComplete = useThreeGameStore(state => state.questComplete);
   const viewMode = useThreeGameStore(state => state.viewMode);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
@@ -796,7 +812,7 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <div className="absolute right-3 top-3">
-        <GameplayMinimap />
+        <GameplayMinimap onOpenMap={() => setMapOpen(true)} />
       </div>
 
       <InteractionPrompt />
@@ -824,6 +840,8 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <MobileTouchControls />
+
+      <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
 
       <FieldNotebook panel={panel} onClose={() => setPanel(null)} />
       <ZoneTransitionOverlay />

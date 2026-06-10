@@ -4,7 +4,7 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { terrainHeight } from '../../world/terrain';
+import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 
@@ -173,7 +173,9 @@ export function SpecimenActor({ specimen }) {
   const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
   const position = useMemo(() => {
     const [x, , z] = specimen.spawnPoint;
-    return new THREE.Vector3(x, terrainHeight(x, z, currentZoneId) + 0.04, z);
+    // Auto-generated spawn points can land in the surf; pull them onto land.
+    const safe = clampToWalkable(new THREE.Vector3(x, 0, z), null, currentZoneId);
+    return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
   }, [currentZoneId, specimen.spawnPoint]);
 
   useFrame(({ clock }) => {

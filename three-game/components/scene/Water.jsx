@@ -406,6 +406,16 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   p.elements[14] = _clipPlane.w;
 
   for (let i = 0; i < hidden.length; i += 1) { if (hidden[i]) hidden[i].visible = false; }
+  // Objects flagged noReflect (scatter foliage, footprints, splash sprites)
+  // are invisible in a rippled mirror anyway — skipping them cuts most of the
+  // reflection pass's geometry cost.
+  _noReflect.length = 0;
+  scene.traverse(object => {
+    if (object.visible && object.userData.noReflect) {
+      object.visible = false;
+      _noReflect.push(object);
+    }
+  });
   const prevRT = gl.getRenderTarget();
   const prevShadowAuto = gl.shadowMap.autoUpdate;
   gl.shadowMap.autoUpdate = false;
@@ -415,8 +425,11 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   gl.setRenderTarget(prevRT);
   gl.shadowMap.autoUpdate = prevShadowAuto;
   for (let i = 0; i < hidden.length; i += 1) { if (hidden[i]) hidden[i].visible = true; }
+  for (let i = 0; i < _noReflect.length; i += 1) _noReflect[i].visible = true;
   return true;
 }
+
+const _noReflect = [];
 
 export function Water({ reflections = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -432,7 +445,9 @@ export function Water({ reflections = true }) {
   );
 
   const reflectionRT = useMemo(() => {
-    const rt = new THREE.WebGLRenderTarget(1024, 1024, {
+    // 640px is plenty for a wavy mirror; planar reflection re-renders the
+    // whole scene, so this is one of the biggest single perf dials.
+    const rt = new THREE.WebGLRenderTarget(640, 640, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
@@ -443,6 +458,7 @@ export function Water({ reflections = true }) {
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
+  const reflectionFrame = useRef(0);
   const _sun = useMemo(() => new THREE.Vector3(), []);
   const _white = useMemo(() => new THREE.Color('#ffffff'), []);
 
@@ -483,10 +499,16 @@ export function Water({ reflections = true }) {
     }
 
     // Planar reflection pass (hide our own water so it isn't captured).
+    // Updated every other frame: the swell moves slowly enough that a
+    // one-frame-stale mirror is invisible, and it halves the cost of
+    // re-rendering the scene.
     if (reflections) {
-      const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, disc], wu.uReflMatrix.value);
-      wu.uReflection.value = ok ? reflectionRT.texture : null;
-      wu.uHasReflection.value = ok ? 1 : 0;
+      reflectionFrame.current = (reflectionFrame.current + 1) % 2;
+      if (reflectionFrame.current === 0 || !wu.uReflection.value) {
+        const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, disc], wu.uReflMatrix.value);
+        wu.uReflection.value = ok ? reflectionRT.texture : null;
+        wu.uHasReflection.value = ok ? 1 : 0;
+      }
     } else {
       wu.uHasReflection.value = 0;
     }

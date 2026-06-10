@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getZoneObstacles } from '../../game-core/obstacles';
 import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
+import { getNorthShoreRockObstacles } from './northShoreLayout';
 
 function flattenCollider(collider) {
   if (!collider) return [];
@@ -96,7 +97,13 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
 }
 
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
-  return getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
+  const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
+  if (zoneId === 'N_SHORE') {
+    // Authored basalt boulders double as colliders; layout shared with the
+    // instanced visuals in WorldDetails.
+    return [...mapped, ...getNorthShoreRockObstacles()];
+  }
+  return mapped;
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();

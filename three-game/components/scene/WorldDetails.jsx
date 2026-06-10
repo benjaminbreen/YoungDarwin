@@ -11,6 +11,8 @@ import { StaticGLB } from '../assets/StaticGLB';
 import { terrainHeight } from '../../world/terrain';
 import { getModelAsset } from '../../modelAssets';
 import { addRimLight, toonMaterial } from './materials';
+import { getEcology } from '../../world/ecology';
+import { EcologyRenderer } from './ecology/EcologyRenderer';
 
 const dummy = new THREE.Object3D();
 
@@ -55,7 +57,7 @@ function ObstacleProps() {
   );
   return (
     <group>
-      {obstacles.map(obstacle => (
+      {obstacles.filter(obstacle => obstacle.path).map(obstacle => (
         <StaticGLB
           key={obstacle.id}
           path={obstacle.path}
@@ -79,10 +81,16 @@ function BasaltBlocks() {
     scale: [0.22, 0.72],
   }).map(item => ({
     ...item,
-    color: item.tone > 0.58 ? '#252620' : '#38352f',
+    color: item.tone > 0.58 ? '#5b564b' : '#6b6354',
   })), []);
-  const geometry = useMemo(() => new THREE.DodecahedronGeometry(1, 0), []);
-  const material = useMemo(() => addRimLight(toonMaterial('#ffffff', { vertexColors: true }), { intensity: 0.12 }), []);
+  const geometry = useMemo(() => new THREE.DodecahedronGeometry(1, 1), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: '#ffffff',
+    roughness: 0.95,
+    metalness: 0,
+    flatShading: true,
+  }), []);
   const transform = useMemo(() => (object, item) => {
     object.position.set(item.x, item.y + item.scale * 0.34, item.z);
     object.rotation.set(item.tone * 0.25, item.yaw, -0.18 + item.tone * 0.36);
@@ -100,10 +108,16 @@ function Scree() {
     scale: [0.08, 0.28],
   }).map(item => ({
     ...item,
-    color: item.tone > 0.55 ? '#9f855e' : '#665840',
+    color: item.tone > 0.55 ? '#a8906a' : '#7d6f55',
   })), []);
-  const geometry = useMemo(() => new THREE.TetrahedronGeometry(1, 0), []);
-  const material = useMemo(() => addRimLight(toonMaterial('#ffffff', { vertexColors: true }), { intensity: 0.09 }), []);
+  const geometry = useMemo(() => new THREE.TetrahedronGeometry(1, 1), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: '#ffffff',
+    roughness: 0.96,
+    metalness: 0,
+    flatShading: true,
+  }), []);
   const transform = useMemo(() => (object, item) => {
     object.position.set(item.x, item.y + item.scale * 0.18, item.z);
     object.rotation.set(item.tone, item.yaw, item.tone * 0.6);
@@ -121,10 +135,16 @@ function DryScrub() {
     scale: [0.34, 0.85],
   }).map(item => ({
     ...item,
-    color: item.tone > 0.5 ? '#6b7d42' : '#4f6437',
+    color: item.tone > 0.5 ? '#8a955a' : '#6d7a4b',
   })), []);
-  const geometry = useMemo(() => new THREE.DodecahedronGeometry(0.72, 0), []);
-  const material = useMemo(() => addRimLight(toonMaterial('#ffffff', { vertexColors: true }), { intensity: 0.13 }), []);
+  const geometry = useMemo(() => new THREE.IcosahedronGeometry(0.72, 1), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: '#ffffff',
+    roughness: 0.95,
+    metalness: 0,
+    flatShading: true,
+  }), []);
   const transform = useMemo(() => (object, item) => {
     object.position.set(item.x, item.y + item.scale * 0.34, item.z);
     object.rotation.set(0, item.yaw, item.tone * 0.18);
@@ -290,9 +310,10 @@ function TrailHints() {
   );
 }
 
-export function WorldDetails() {
-  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  if (currentZoneId !== 'POST_OFFICE_BAY') return null;
+// Post Office Bay keeps its original hand-tuned scatter (predates the ecology
+// registry; migrating it is tracked work). Every other authored zone renders
+// through three-game/world/ecology/.
+function PostOfficeBayDetails() {
   return (
     <group>
       <ObstacleProps />
@@ -305,4 +326,19 @@ export function WorldDetails() {
       <TrailHints />
     </group>
   );
+}
+
+export function WorldDetails() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const ecology = getEcology(currentZoneId);
+  if (ecology) {
+    return (
+      <group>
+        <ObstacleProps />
+        <EcologyRenderer ecology={ecology} />
+      </group>
+    );
+  }
+  if (currentZoneId !== 'POST_OFFICE_BAY') return null;
+  return <PostOfficeBayDetails />;
 }

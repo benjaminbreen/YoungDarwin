@@ -82,3 +82,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# raw asset source dumps (root)
+/Dense Bushland/
+/desert plant pack.blend
+/uploads-files-*.rar
