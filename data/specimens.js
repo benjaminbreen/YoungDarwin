@@ -237,6 +237,34 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'galapagoscotton',
+    name: 'Galapagos Cotton',
+    latin: 'Gossypium darwinii',
+    ontology: 'Plant',
+    order: 'Malvaceae',
+    sub_order: 'Cotton',
+    description: 'A dry-zone cotton shrub with soft leaves and pale flowers, rooted in the arid scrub above the shore.',
+    details: [
+      'Grows as a low shrub in dry coastal and scrubland habitats',
+      'Leaves are broad and slightly rough to the touch',
+      'Flowers and cottony seed fibers make it stand out among darker lava plants',
+      'Its island distribution makes locality notes especially important'
+    ],
+    habitat: 'scrubland, bay, coastalTrail',
+    collected: false,
+    observations: [],
+    scientificValue: 5,
+    hybrid_ease: 6,
+    hybrid_temperature: 6,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    memoryText: '“A cotton-like shrub grows here despite the dry heat and black lava. Its place on this island may prove as important as its form.”',
+    contents: 'Pressed leaves, flowers, and seed fibers would preserve the useful characters better than a bulky branch.',
+    keywords: ['galapagos cotton', 'plant', 'gossypium', 'darwinii', 'shrub', 'flora', 'dry scrub']
+  },
+
+  {
     id: 'lavalizard',
     name: 'Floreana Lava Lizard',
     latin: 'Microlophus grayii',

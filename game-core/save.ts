@@ -15,7 +15,21 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
     fatigue: 4,
     health: 100,
     inventory: [],
-    journal: [],
+    journal: [
+      {
+        id: 'seed-marineiguana',
+        specimenId: 'marineiguana',
+        specimenName: 'Marine Iguana',
+        latin: 'Amblyrhynchus cristatus',
+        location: 'Post Office Bay, Charles Island',
+        method: 'observation',
+        day: 1,
+        kind: 'specimen',
+        content:
+          'Observed several large black lizards frequenting the lava rocks near the shore. Their appearance at first repulsive, though they seem remarkably well adapted to this harsh country.\n\nThe nostrils are often encrusted with salt. Individuals repeatedly entered the sea in search of vegetable matter.\n\nQuestion:\nHow are these animals related to the land iguanas observed elsewhere?',
+        createdAt: '1835-09-17T08:00:00.000Z',
+      },
+    ],
     collectedSpecimenIds: [],
     documentedSpecimenIds: [],
     visitedZoneIds: [initialRegionId],
@@ -35,7 +49,7 @@ export function migrateLegacyExpeditionSave(saved: Record<string, unknown> | nul
     fatigue: Number(saved.fatigue ?? initial.fatigue),
     health: Number(saved.health ?? initial.health),
     inventory: Array.isArray(saved.inventory) ? saved.inventory as ExpeditionState['inventory'] : initial.inventory,
-    journal: Array.isArray(saved.journal) ? saved.journal as ExpeditionState['journal'] : initial.journal,
+    journal: Array.isArray(saved.journal) && saved.journal.length > 0 ? saved.journal as ExpeditionState['journal'] : initial.journal,
     collectedSpecimenIds: Array.isArray(saved.collectedSpecimenIds) ? saved.collectedSpecimenIds as string[] : initial.collectedSpecimenIds,
     documentedSpecimenIds: Array.isArray(saved.documentedSpecimenIds) ? saved.documentedSpecimenIds as string[] : initial.documentedSpecimenIds,
   };

@@ -24,14 +24,14 @@ function buildFlora() {
       && (biome === 'sesuvium-flat' || biome === 'dry-scrub' || biome === 'ash-beach'),
   });
   return [
-    { id: 'saltbush-1', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, castShadow: false, motion: { wind: 0.5, bend: 0.7 }, items: saltbush.filter((_, i) => i % 2 === 0) },
-    { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, castShadow: false, motion: { wind: 0.5, bend: 0.7 }, items: saltbush.filter((_, i) => i % 2 === 1) },
+    { id: 'saltbush-1', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 0) },
+    { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 1) },
     {
       id: 'saltbush-large',
       path: `${NATURE}runtime-saltbush-3.glb`,
       sink: 0.04,
       castShadow: false,
-      motion: { wind: 0.35, bend: 0.45 },
+      motion: { wind: 0.85, bend: 0.24, bendRadius: 1.4 },
       items: scatter('saltbush-lg', 8, 47, {
         minX: -44, maxX: 44, minZ: -6, maxZ: 30, scale: [0.32, 0.55],
         accept: (biome, x, z) => drySand(x, z) && nearAnyCluster(scrubClumps, x, z, 11)
@@ -43,7 +43,7 @@ function buildFlora() {
       path: `${NATURE}runtime-croton.glb`,
       sink: 0.06,
       castShadow: false,
-      motion: { wind: 0.6, bend: 0.85 },
+      motion: { wind: 1.35, bend: 0.32, bendRadius: 1.35 },
       items: scatter('croton', 26, 53, {
         minX: -48, maxX: 48, minZ: 0, maxZ: 38, scale: [0.45, 0.85],
         accept: (biome, x, z) => nearAnyCluster(scrubClumps, x, z, 12)
@@ -55,7 +55,7 @@ function buildFlora() {
       path: `${NATURE}runtime-scalesia.glb`,
       sink: 0.08,
       castShadow: false,
-      motion: { wind: 0.55, bend: 0.8 },
+      motion: { wind: 1.25, bend: 0.3, bendRadius: 1.35 },
       items: scatter('scalesia', 12, 67, {
         minX: -44, maxX: 46, minZ: -4, maxZ: 30, scale: [0.5, 0.9],
         accept: (biome, x, z) => drySand(x, z) && nearAnyCluster(scrubClumps, x, z, 11)
@@ -79,7 +79,7 @@ function buildFlora() {
       path: `${NATURE}runtime-saltgrass.glb`,
       sink: 0.16,
       castShadow: false,
-      motion: { wind: 1.0, bend: 1.0 },
+      motion: { wind: 1.45, bend: 0.55, bendRadius: 1.25 },
       items: scatter('saltgrass', 7, 83, {
         minX: -42, maxX: 46, minZ: -10, maxZ: 4, scale: [0.12, 0.2],
         accept: (biome, x, z) => drySand(x, z) && (biome === 'ash-beach' || biome === 'sesuvium-flat'),
@@ -90,7 +90,7 @@ function buildFlora() {
       path: `${NATURE}runtime-sesuvium.glb`,
       sink: 0.03,
       castShadow: false,
-      motion: { wind: 0.25, bend: 0.3 },
+      motion: { wind: 0.7, bend: 0.22, bendRadius: 1.15 },
       ySquash: 0.3,
       items: scatter('sesuvium', 2, 89, {
         minX: -20, maxX: 24, minZ: -8, maxZ: 6, scale: [2.4, 3.4],

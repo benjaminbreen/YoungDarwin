@@ -5,6 +5,7 @@ module.exports = {
     './components/**/*.{js,ts,jsx,tsx,mdx}',
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './three-game/**/*.{js,ts,jsx,tsx,mdx}',
+    './field-notebook/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
@@ -25,6 +26,7 @@ module.exports = {
       },
       fontFamily: {
         expedition: ['var(--font-garamond)', 'Georgia', 'Times New Roman', 'serif'],
+        handwriting: ['var(--font-meddon)', 'Snell Roundhand', 'Apple Chancery', 'Bradley Hand', 'Segoe Script', 'cursive'],
       },
     },
   },

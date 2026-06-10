@@ -91,12 +91,15 @@ function createSceneSlice() {
     lastOutcome: null,
     physicsDebug: null,
     pushableObstacleOffsets: {},
+    specimenRuntimePositions: {},
     playerPose: {
       position: { x: 0, y: 0, z: 0 },
       facing: { x: 0, y: 0, z: -1 },
     },
     carryPrompt: null,
     carriedObjectId: null,
+    inspectedObject: null,
+    inspectedScreenPosition: null,
     brokenPropIds: [],
     symsLine: 'Syms waits with labels, twine, and a doubtful look at your boots.',
   };
@@ -127,6 +130,26 @@ export const useThreeGameStore = create((set, get) => ({
       ? state.favoriteSpecimenIds.filter(id => id !== specimenId)
       : [...state.favoriteSpecimenIds, specimenId],
   })),
+  addUserJournalEntry: content => set(state => {
+    const trimmed = String(content || '').trim();
+    if (!trimmed) return {};
+    const location = getThreeIslandLocation(state.currentZoneId);
+    return {
+      journal: [
+        ...state.journal,
+        {
+          id: `${Date.now()}-field-note`,
+          day: state.day,
+          timeOfDay: state.timeOfDay,
+          location: location.name,
+          content: trimmed,
+          kind: 'note',
+          title: 'Field Note',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }),
   setNearbySpecimen: nearbySpecimenId => set({ nearbySpecimenId }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
@@ -140,7 +163,37 @@ export const useThreeGameStore = create((set, get) => ({
       ? {}
       : { carryPrompt }
   )),
+  setInspectedObject: inspectedObject => set({ inspectedObject, inspectedScreenPosition: null }),
+  setInspectedScreenPosition: inspectedScreenPosition => set({ inspectedScreenPosition }),
+  clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
   setCarriedObject: carriedObjectId => set({ carriedObjectId }),
+  setSpecimenRuntimePosition: (specimenId, position, zoneId = get().currentZoneId) => set(state => {
+    const zone = zoneId || get().currentZoneId;
+    const currentByZone = state.specimenRuntimePositions[zone] || {};
+    const nextX = Number(position?.x);
+    const nextY = Number(position?.y);
+    const nextZ = Number(position?.z);
+    if (!Number.isFinite(nextX) || !Number.isFinite(nextY) || !Number.isFinite(nextZ)) return {};
+    const current = currentByZone[specimenId] || {};
+    if (
+      Math.abs((current.x || 0) - nextX) < 0.001
+      && Math.abs((current.y || 0) - nextY) < 0.001
+      && Math.abs((current.z || 0) - nextZ) < 0.001
+    ) return {};
+    return {
+      specimenRuntimePositions: {
+        ...state.specimenRuntimePositions,
+        [zone]: {
+          ...currentByZone,
+          [specimenId]: {
+            x: nextX,
+            y: nextY,
+            z: nextZ,
+          },
+        },
+      },
+    };
+  }),
   markPropBroken: (propId, loot = null) => set(state => {
     if (state.brokenPropIds.includes(propId)) return {};
     const supplies = { ...state.supplies };
@@ -229,6 +282,19 @@ export const useThreeGameStore = create((set, get) => ({
   applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => ({
     fatigue: clamp(state.fatigue + (fatigueDelta ?? ((running ? 0.026 : walking ? 0.008 : 0) + (airborne ? 0.004 : 0))), 0, MAX_FATIGUE),
     health: clamp(state.health - Math.max(0, falling - 7.5) * 1.25, 0, MAX_HEALTH),
+  })),
+
+  applyDrowningDamage: amount => set(state => ({
+    health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+    message: 'Darwin is out of his depth — the sea is closing over him.',
+    symsLine: '"Sir! Back to the shallows — the Beagle has no second naturalist!"',
+  })),
+
+  applyCactusDamage: (amount = 8) => set(state => ({
+    health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+    message: 'Darwin staggers back from the Opuntia spines.',
+    educationalNote: 'Large prickly pear cactus can dominate dry Galapagos scrub; its spines make careless movement costly.',
+    symsLine: '"Mind the cactus, sir. Those spines will write their own field note."',
   })),
 
   rest: () => set(state => {

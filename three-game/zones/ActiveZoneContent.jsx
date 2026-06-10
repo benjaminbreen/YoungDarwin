@@ -7,6 +7,7 @@ import { Terrain } from '../components/scene/Terrain';
 import { WorldDetails } from '../components/scene/WorldDetails';
 import { SpecimenActor } from '../components/world/SpecimenActor';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
+import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
 import { getThreeSpecimens } from '../data';
 import { PhysicsObstacles } from '../physics/PhysicsObstacles';
@@ -25,9 +26,10 @@ export function ActiveZoneContent({ settings }) {
       {settings.worldDetails !== false && <WorldDetails />}
       <PhysicsObstacles />
       <PhysicsProps />
+      <WaterSplashes />
       {settings.beagle !== false && <Beagle />}
       {settings.specimens !== false && specimens.map(specimen => (
-        <SpecimenActor key={specimen.id} specimen={specimen} />
+        <SpecimenActor key={specimen.instanceId || specimen.id} specimen={specimen} />
       ))}
       {settings.syms !== false && <SymsCovington />}
     </>

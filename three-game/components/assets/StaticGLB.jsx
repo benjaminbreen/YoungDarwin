@@ -4,6 +4,9 @@ import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { useThreeGameStore } from '../../store';
+import { catalogToInspectable } from '../../world/inspectables';
+import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 
 function makeGoatCoatTexture(base = '#c8b99b', patch = '#5a4735', seed = 1) {
   if (typeof document === 'undefined') return null;
@@ -62,6 +65,7 @@ function prepareScene(scene, options = {}) {
         if (options.forceTint) material.color.copy(tint);
         else material.color.lerp(tint, options.tintStrength ?? 0.18);
       }
+      if (options.motion) applyFoliageMotion(material, object.geometry, options.motion);
       material.needsUpdate = true;
     });
     object.material = Array.isArray(object.material) ? materials : materials[0];
@@ -82,14 +86,17 @@ function StaticGLBPrimitive({
   doubleSide = false,
   forceTint = false,
   castShadow = true,
+  motion = null,
+  inspectableType = null,
 }) {
   const group = useRef(null);
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const { scene } = useGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow });
-  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow]);
+    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, motion });
+  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, motion]);
 
   useFrame(({ clock }) => {
     if (!group.current || !bob) return;
@@ -97,7 +104,16 @@ function StaticGLBPrimitive({
   });
 
   return (
-    <group ref={group} position={position} rotation={rotation} scale={scale}>
+    <group
+      ref={group}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      onClick={inspectableType ? event => {
+        event.stopPropagation();
+        setInspectedObject(catalogToInspectable(inspectableType, event.point, { sourceId: path }));
+      } : undefined}
+    >
       <primitive object={clone} />
     </group>
   );

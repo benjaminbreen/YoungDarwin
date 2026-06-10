@@ -5,6 +5,8 @@
 //   carryable  — E-key pickup/carry/drop (object goes kinematic while held)
 //   breakable  — smashed by a tool swing; bursts into debris and grants loot
 //   strikeable — tool hits knock it around instead of breaking it
+//   buoyant    — floats on the sea: bobs at rideHeight above WATER_LEVEL and
+//                drifts with the current (props without it sink to the seabed)
 // Future: hinged (doors), slippery (trip hazard), avalanche triggers.
 
 export const PROP_TYPES = {
@@ -21,6 +23,7 @@ export const PROP_TYPES = {
     angularDamping: 0.12,
     behaviors: {
       carryable: { release: 0.55, holdHeight: 1.02 },
+      buoyant: { rideHeight: 0.12, strength: 34, drag: 2.4, angularDrag: 2.0, bob: 0.07, currentSpeed: 0.55 },
       breakable: {
         tool: 'hammer',
         debris: 'barrel',
@@ -44,6 +47,7 @@ export const PROP_TYPES = {
     angularDamping: 0.5,
     behaviors: {
       carryable: { release: 0.32, holdHeight: 0.95 },
+      buoyant: { rideHeight: 0.05, strength: 30, drag: 2.8, angularDrag: 2.6, bob: 0.05, currentSpeed: 0.4 },
       breakable: {
         tool: 'hammer',
         debris: 'crate',

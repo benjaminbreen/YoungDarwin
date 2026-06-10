@@ -1,7 +1,7 @@
 import { baseSpecimens } from '../data/specimens';
 import { getRegionMap, getRegionSpecimenSpawns, regionMaps } from './regionMaps';
 import { currentZoneId, getZone, getZoneSpecimenSpawns } from './zones';
-import type { SpecimenId, ZoneId } from './types';
+import type { SpecimenId, ZoneId, ZoneSpecimenSpawn } from './types';
 
 export function getSpecimenById(specimenId: SpecimenId) {
   return baseSpecimens.find(specimen => specimen.id === specimenId) || null;
@@ -9,14 +9,17 @@ export function getSpecimenById(specimenId: SpecimenId) {
 
 export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
   const zoneSpawns = regionMaps[zoneId] ? [] : getZoneSpecimenSpawns(zoneId);
-  const spawns = zoneSpawns.length > 0 ? zoneSpawns : getRegionSpecimenSpawns(zoneId);
+  const spawns = (zoneSpawns.length > 0 ? zoneSpawns : getRegionSpecimenSpawns(zoneId)) as ZoneSpecimenSpawn[];
   return spawns
-    .map(spawn => {
+    .map((spawn, index) => {
       const specimen = getSpecimenById(spawn.specimenId);
       if (!specimen) return null;
       return {
         ...specimen,
+        instanceId: `${spawn.specimenId}-${index}`,
         spawnPoint: spawn.position,
+        habitatRadiusX: spawn.habitatRadiusX ?? null,
+        habitatRadiusZ: spawn.habitatRadiusZ ?? null,
         sceneScale: spawn.sceneScale || 1,
         behavior: spawn.behavior || 'still',
       };

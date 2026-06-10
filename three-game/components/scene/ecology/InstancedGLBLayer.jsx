@@ -4,6 +4,8 @@ import React, { useLayoutEffect, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { applyFoliageMotion } from './foliageMotion';
+import { useThreeGameStore } from '../../../store';
+import { catalogToInspectable } from '../../../world/inspectables';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
 // per source primitive, so 30 bushes cost 1-2 draw calls instead of 30+.
@@ -23,8 +25,10 @@ export function InstancedGLBLayer({
   castShadow = true,
   receiveShadow = true,
   motion = null,
+  inspectableType = null,
 }) {
   const { scene } = useGLTF(path);
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
 
   const primitives = useMemo(() => {
     scene.updateMatrixWorld(true);
@@ -76,6 +80,11 @@ export function InstancedGLBLayer({
           receiveShadow={receiveShadow}
           frustumCulled={false}
           userData={{ noReflect: true }}
+          onClick={inspectableType ? event => {
+            event.stopPropagation();
+            const item = items[event.instanceId] || null;
+            setInspectedObject(catalogToInspectable(inspectableType, event.point, { sourceId: item?.id || inspectableType }));
+          } : undefined}
         />
       ))}
     </group>

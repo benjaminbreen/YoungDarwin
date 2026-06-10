@@ -5,8 +5,9 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
+import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 
-function normalizeImportedMaterials(scene, asset) {
+function normalizeImportedMaterials(scene, asset, motion = null) {
   if (!asset.normalizeMaterials) return;
   scene.traverse(object => {
     if (!object.isMesh) return;
@@ -25,6 +26,45 @@ function normalizeImportedMaterials(scene, asset) {
       if (material.emissive) {
         material.emissive.set(asset.materialEmissive || '#241c12');
         material.emissiveIntensity = asset.materialEmissiveIntensity ?? 0.22;
+      }
+      if (motion) applyFoliageMotion(material, object.geometry, motion);
+      material.needsUpdate = true;
+    });
+  });
+}
+
+function prepareImportedScene(scene) {
+  scene.traverse(object => {
+    if (!object.isMesh) return;
+    object.frustumCulled = false;
+    object.castShadow = true;
+    object.receiveShadow = true;
+  });
+  return scene;
+}
+
+function applyDamageFlash(scene, strength = 0) {
+  const amount = THREE.MathUtils.clamp(strength, 0, 1);
+  const flashColor = new THREE.Color('#ff3b2f');
+  scene.traverse(object => {
+    if (!object.isMesh) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach(material => {
+      if (!material) return;
+      if (!material.userData.damageFlashBase) {
+        material.userData.damageFlashBase = {
+          color: material.color?.clone?.() || null,
+          emissive: material.emissive?.clone?.() || null,
+          emissiveIntensity: material.emissiveIntensity ?? 0,
+        };
+      }
+      const base = material.userData.damageFlashBase;
+      if (material.color && base.color) {
+        material.color.copy(base.color).lerp(flashColor, amount * 0.78);
+      }
+      if (material.emissive) {
+        material.emissive.copy(base.emissive || new THREE.Color('#000000')).lerp(flashColor, amount * 0.68);
+        material.emissiveIntensity = base.emissiveIntensity + amount * 0.92;
       }
       material.needsUpdate = true;
     });
@@ -156,7 +196,7 @@ function modelBoundsDebugEnabled() {
     || new URLSearchParams(window.location.search).has('modelBoundsDebug');
 }
 
-function GLBPrimitive({ assetId, asset, animationSelector = null }) {
+function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null, damageFlash = 0 }) {
   const group = useRef(null);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
@@ -164,17 +204,18 @@ function GLBPrimitive({ assetId, asset, animationSelector = null }) {
   const warnedMissing = useRef(new Set());
   const lastBoundsDebugAt = useRef(0);
   const { scene, animations } = useGLTF(asset.path);
-  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
+  const importedScene = useMemo(() => prepareImportedScene(scene), [scene]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   const debugBounds = useMemo(() => new THREE.Box3(), []);
   const debugSize = useMemo(() => new THREE.Vector3(), []);
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
   const actions = useMemo(() => {
     const result = {};
     animations.forEach(clip => {
-      result[clip.name] = mixer.clipAction(clip, scene);
+      result[clip.name] = mixer.clipAction(clip, importedScene);
     });
     return result;
-  }, [animations, mixer, scene]);
+  }, [animations, importedScene, mixer]);
   const actionLookup = useMemo(() => {
     const lookup = new Map();
     Object.entries(actions).forEach(([key, action]) => {
@@ -254,8 +295,12 @@ function GLBPrimitive({ assetId, asset, animationSelector = null }) {
   }, [actions, getAction, publishAnimationDebug]);
 
   useEffect(() => {
-    normalizeImportedMaterials(scene, asset);
-  }, [asset, scene]);
+    normalizeImportedMaterials(importedScene, asset, motion);
+  }, [asset, importedScene, motion]);
+
+  useEffect(() => {
+    applyDamageFlash(importedScene, damageFlash);
+  }, [damageFlash, importedScene]);
 
   useEffect(() => {
     animationSelectorRef.current = animationSelector;
@@ -311,18 +356,18 @@ function GLBPrimitive({ assetId, asset, animationSelector = null }) {
       rotation={asset.rotation || [0, 0, 0]}
       position={[0, asset.yOffset || 0, 0]}
     >
-      <primitive object={scene} />
+      <primitive object={importedScene} />
     </group>
   );
 }
 
-export function ModelAsset({ id, fallback = null, animationSelector = null }) {
+export function ModelAsset({ id, fallback = null, animationSelector = null, motion = null, damageFlash = 0 }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
 
   return (
     <Suspense fallback={fallback}>
-      <GLBPrimitive assetId={id} asset={asset} animationSelector={animationSelector} />
+      <GLBPrimitive assetId={id} asset={asset} animationSelector={animationSelector} motion={motion} damageFlash={damageFlash} />
     </Suspense>
   );
 }

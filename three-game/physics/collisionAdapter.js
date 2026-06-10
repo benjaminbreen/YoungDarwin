@@ -7,6 +7,7 @@ import {
 } from '../world/terrain';
 import {
   findClimbTarget,
+  findTraversalTarget,
   getObstacleEdgeRisk,
   getObstacleSupportHeight,
   getRuntimeObstacles,
@@ -58,11 +59,12 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     groundInfo: getGroundInfo,
     groundY: position => getGroundInfo(position).y,
     findClimbTarget: (position, facing) => findClimbTarget(position, facing, { obstacles }),
+    findTraversalTarget: (position, movement, facing) => findTraversalTarget(position, movement, facing, { obstacles }),
     resolveCollision: (position, previousPosition) => resolveObstacleCollision(position, previousPosition, { obstacles }),
     edgeRisk: (position, facing) => (
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
       || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)
     ),
-    clampToWalkable: (position, previousPosition) => clampToWalkable(position, previousPosition, zoneId),
+    clampToWalkable: (position, previousPosition, options) => clampToWalkable(position, previousPosition, zoneId, options),
   };
 }

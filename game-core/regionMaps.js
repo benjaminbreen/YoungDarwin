@@ -118,7 +118,50 @@ function deterministicPoint(seed, index, width, depth) {
   ];
 }
 
+function normalizeSpawn(seedSpawn) {
+  if (!seedSpawn || typeof seedSpawn !== 'object') return null;
+  const specimenId = canonicalizeSpecimenIds([seedSpawn.specimenId])[0];
+  if (!specimenId) return null;
+  const rawPosition = seedSpawn.position;
+  const radiusX = Number(seedSpawn.habitatRadiusX);
+  const radiusZ = Number(seedSpawn.habitatRadiusZ);
+  if (!Array.isArray(rawPosition) || rawPosition.length < 3 || typeof rawPosition[0] !== 'number' || typeof rawPosition[2] !== 'number') {
+    return null;
+  }
+  return {
+    specimenId,
+    position: [rawPosition[0], rawPosition[1] || 0, rawPosition[2]],
+    behavior: typeof seedSpawn.behavior === 'string' ? seedSpawn.behavior : 'still',
+    sceneScale: Number(seedSpawn.sceneScale) || 1,
+    habitatRadiusX: Number.isFinite(radiusX) && radiusX > 0 ? radiusX : null,
+    habitatRadiusZ: Number.isFinite(radiusZ) && radiusZ > 0 ? radiusZ : null,
+  };
+}
+
 function makeSpecimenSpawns(cell, terrain) {
+  if (Array.isArray(cell.specimenPlacements) && cell.specimenPlacements.length > 0) {
+    const curated = cell.specimenPlacements
+      .map(spawn => normalizeSpawn(spawn))
+      .filter(Boolean);
+    const curatedIds = new Set(curated.map(spawn => spawn.specimenId));
+    const ids = canonicalizeSpecimenIds(cell.specimens || []);
+    const remainingIds = ids.filter(id => !curatedIds.has(id));
+    if (remainingIds.length) {
+      const seed = Array.from(cell.id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+      const seeded = remainingIds
+        .filter(id => id && id !== 'unknown')
+        .slice(0, 8)
+        .map((specimenId, index) => ({
+          specimenId,
+          position: deterministicPoint(seed + specimenId.length * 17, index + curated.length, terrain.width, terrain.depth),
+          behavior: index % 3 === 0 ? 'curious' : 'still',
+          sceneScale: 1,
+        }));
+      return [...curated, ...seeded];
+    }
+    if (curated.length) return curated;
+  }
+
   const ids = canonicalizeSpecimenIds(cell.specimens || []);
   const seed = Array.from(cell.id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return ids

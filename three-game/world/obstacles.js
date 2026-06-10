@@ -3,6 +3,7 @@ import { getZoneObstacles } from '../../game-core/obstacles';
 import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
 import { getNorthShoreRockObstacles } from './northShoreLayout';
+import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 
 function flattenCollider(collider) {
   if (!collider) return [];
@@ -89,6 +90,8 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
     pushable: Boolean(obstacle.gameplay?.pushable),
     pushMass: obstacle.gameplay?.pushMass || 1,
     pushFriction: obstacle.gameplay?.pushFriction ?? 0.88,
+    traversal: obstacle.gameplay?.traversal || null,
+    traversalLabel: obstacle.gameplay?.traversalLabel || null,
     climbLabel: obstacle.gameplay?.climbLabel,
     definition: obstacle,
     zoneId,
@@ -98,6 +101,9 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
 
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
+  if (zoneId === 'POST_OFFICE_BAY') {
+    return [...mapped, ...getPostOfficeBayRockObstacles()];
+  }
   if (zoneId === 'N_SHORE') {
     // Authored basalt boulders double as colliders; layout shared with the
     // instanced visuals in WorldDetails.
@@ -311,6 +317,28 @@ function isStandableObstacleTop(obstacle, top) {
   return top >= obstacleBaseY(obstacle) + 0.72;
 }
 
+function isWalkOverTraversalTop(obstacle, top, maxHeight = 0.78) {
+  if (!obstacle.traversal || top === null || top === undefined) return false;
+  const base = obstacleBaseY(obstacle);
+  return top > base + 0.18 && top <= base + maxHeight;
+}
+
+function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {
+  if (!obstacle.traversal) return null;
+  const base = obstacleBaseY(obstacle);
+  const top = obstacleTopAt(obstacle, x, z, playerRadius);
+  if (!isWalkOverTraversalTop(obstacle, top)) return null;
+
+  const radius = Math.max(0.1, obstacle.radius + playerRadius * 0.45);
+  const distance = Math.hypot(x - obstacle.x, z - obstacle.z);
+  if (distance > radius) return null;
+
+  const normalized = THREE.MathUtils.clamp(distance / radius, 0, 1);
+  const dome = Math.sin((1 - normalized) * Math.PI * 0.5);
+  const lift = (top - base) * dome * dome;
+  return base + lift;
+}
+
 function obstacleSurfaceDistance(obstacle, position, playerRadius = 0.42) {
   let best = null;
   for (const shape of obstacle.shapes) {
@@ -360,10 +388,16 @@ function obstacleSurfaceDistance(obstacle, position, playerRadius = 0.42) {
 export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
   let supported = null;
   for (const obstacle of obstacles) {
-    if (!obstacle.jumpable) continue;
+    if (!obstacle.jumpable && !obstacle.traversal) continue;
+    const traversalTop = traversalSupportHeightAt(obstacle, x, z, playerRadius);
+    if (traversalTop !== null && traversalTop !== undefined && playerY >= obstacleBaseY(obstacle) - 0.18) {
+      supported = Math.max(supported ?? -Infinity, traversalTop);
+      continue;
+    }
     const top = obstacleTopAt(obstacle, x, z, playerRadius);
     if (top === null) continue;
-    if (isStandableObstacleTop(obstacle, top) && playerY >= top - 0.42) {
+    const standable = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && playerY >= top - 0.42;
+    if (standable) {
       supported = Math.max(supported ?? -Infinity, top);
     }
   }
@@ -458,6 +492,62 @@ export function findClimbTarget(position, facing, {
   return best;
 }
 
+export function findTraversalTarget(position, movement, facing, {
+  playerRadius = 0.42,
+  maxReach = 0.78,
+  minHeight = 0.78,
+  maxHeight = 1.25,
+  minFacingDot = 0.24,
+  obstacles = FLOREANA_OBSTACLES,
+} = {}) {
+  const direction = movement?.lengthSq?.() > 0.0001
+    ? movement.clone().setY(0).normalize()
+    : facing?.clone?.().setY(0).normalize();
+  if (!direction || direction.lengthSq() < 0.0001) return null;
+
+  let best = null;
+  for (const obstacle of obstacles) {
+    if (!obstacle.traversal) continue;
+    const height = obstacle.colliderTop - Math.min(0, obstacle.colliderBottom || 0);
+    if (height < minHeight || height > maxHeight) continue;
+
+    const toObstacle = new THREE.Vector3(obstacle.x - position.x, 0, obstacle.z - position.z);
+    const forwardDistance = toObstacle.dot(direction);
+    if (forwardDistance < -0.1 || forwardDistance > obstacle.radius + playerRadius + maxReach) continue;
+
+    const lateralDistance = toObstacle.clone().addScaledVector(direction, -forwardDistance).length();
+    if (lateralDistance > obstacle.radius + playerRadius * 0.85) continue;
+
+    const facingDirection = facing?.lengthSq?.() > 0.001 ? facing.clone().setY(0).normalize() : direction;
+    const facingDot = direction.dot(facingDirection);
+    if (facingDot < minFacingDot) continue;
+
+    const surface = obstacleSurfaceDistance(obstacle, position, playerRadius);
+    if (!surface || surface.penetration < -maxReach) continue;
+
+    const travelDistance = THREE.MathUtils.clamp(
+      forwardDistance + obstacle.radius + playerRadius + 0.46,
+      0.72,
+      2.35,
+    );
+    const end = position.clone().addScaledVector(direction, travelDistance);
+    end.y = terrainHeight(end.x, end.z, obstacle.zoneId) + 0.04;
+    const score = Math.max(0, forwardDistance) + lateralDistance * 0.8 + height * 0.25;
+    if (!best || score < best.score) {
+      best = {
+        obstacle,
+        traversal: obstacle.traversal,
+        score,
+        start: position.clone(),
+        end,
+        direction,
+        heightDelta: Math.max(0.08, height),
+      };
+    }
+  }
+  return best;
+}
+
 export function resolveObstacleCollision(position, previousPosition, {
   playerRadius = 0.42,
   stepTolerance = 0.42,
@@ -467,6 +557,7 @@ export function resolveObstacleCollision(position, previousPosition, {
   let collided = null;
   for (const obstacle of obstacles) {
     const top = obstacleTopAt(obstacle, p.x, p.z, playerRadius) ?? obstacleTopY(obstacle);
+    if (isWalkOverTraversalTop(obstacle, top, 0.78)) continue;
     const canStandOnTop = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && p.y >= top - stepTolerance;
     if (canStandOnTop || p.y > obstacleTopY(obstacle) + 0.45) continue;
 

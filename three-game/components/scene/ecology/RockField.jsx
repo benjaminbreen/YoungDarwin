@@ -2,6 +2,8 @@
 
 import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { useThreeGameStore } from '../../../store';
+import { catalogToInspectable } from '../../../world/inspectables';
 
 // Instanced craggy rocks. Rock items come from a zone layout module (which
 // also feeds the physics obstacle list) — this component is display only.
@@ -25,6 +27,7 @@ function makeCraggyRockGeometry(seed) {
 
 function InstancedRocks({ items, geometry, material }) {
   const ref = useRef(null);
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   useLayoutEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
@@ -40,7 +43,18 @@ function InstancedRocks({ items, geometry, material }) {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, [items]);
   return (
-    <instancedMesh ref={ref} args={[geometry, material, items.length]} castShadow receiveShadow frustumCulled={false} />
+    <instancedMesh
+      ref={ref}
+      args={[geometry, material, items.length]}
+      castShadow
+      receiveShadow
+      frustumCulled={false}
+      onClick={event => {
+        event.stopPropagation();
+        const item = items[event.instanceId] || null;
+        setInspectedObject(catalogToInspectable('basalt_block', event.point, { sourceId: item?.id || 'basalt_block' }));
+      }}
+    />
   );
 }
 

@@ -5,6 +5,13 @@ import { getRegionMap } from '../../game-core/regionMaps';
 
 const activeZone = getZone();
 
+// Sea surface height. Defined here (the dependency root) and re-exported by
+// world/water.js so rendering and physics share one constant.
+export const WATER_LEVEL = -0.9;
+// Deepest seabed Darwin can wade across on foot (armpit depth). Beyond this
+// he can only arrive by falling in — and starts to drown.
+export const WADE_DEPTH = 1.25;
+
 export const TERRAIN_SIZE = activeZone.terrainSize || 118;
 export const TERRAIN_SEGMENTS = activeZone.terrainSegments || 188;
 export const TERRAIN_BOUNDS = activeZone.bounds || 43;
@@ -301,6 +308,25 @@ export function isWalkableTerrain(x, z, regionId = 'POST_OFFICE_BAY') {
   return (landShelf || forgivingDryShelf) && y > -0.82 && cove < 0.76;
 }
 
+// Walkable for the player specifically: normal walkable land, plus the band of
+// shallow seabed where Darwin can wade. The band is gated by depth (seabed no
+// deeper than WADE_DEPTH below the surface) and an upper bound that keeps it
+// from legitimising unwalkable dry ground.
+export function isWadeableTerrain(x, z, regionId = 'POST_OFFICE_BAY', options = null) {
+  if (isWalkableTerrain(x, z, regionId)) return true;
+  const config = getRegionTerrainConfig(regionId);
+  if (isAuthoredPostOffice(regionId)) {
+    if (Math.hypot(x, z) > config.bounds) return false;
+  } else if (Math.abs(x) > config.width * 0.5 - 1.2 || Math.abs(z) > config.depth * 0.5 - 1.2) {
+    return false;
+  }
+  const y = movementTerrainHeight(x, z, regionId);
+  // `deep` drops the depth floor: any water counts (used while the player is
+  // airborne or already drowning, so deep water is enterable but not strollable).
+  if (options?.deep) return y < -0.45;
+  return y > WATER_LEVEL - WADE_DEPTH && y < -0.45;
+}
+
 export function getTerrainEdgeRisk(x, z, facing = null, regionId = 'POST_OFFICE_BAY') {
   const hereY = movementTerrainHeight(x, z, regionId);
   const directions = [
@@ -347,7 +373,10 @@ export function getTerrainEdgeRisk(x, z, facing = null, regionId = 'POST_OFFICE_
   return best;
 }
 
-export function clampToWalkable(position, previousPosition = null, regionId = 'POST_OFFICE_BAY') {
+export function clampToWalkable(position, previousPosition = null, regionId = 'POST_OFFICE_BAY', options = null) {
+  const allowed = options?.wade
+    ? (x, z) => isWadeableTerrain(x, z, regionId, options)
+    : (x, z) => isWalkableTerrain(x, z, regionId);
   const p = position.clone ? position.clone() : new THREE.Vector3(position.x, position.y || 0, position.z);
   const config = getRegionTerrainConfig(regionId);
   if (!isAuthoredPostOffice(regionId)) {
@@ -356,7 +385,7 @@ export function clampToWalkable(position, previousPosition = null, regionId = 'P
     if (isAuthoredNorthernShore(regionId)) {
       // Never spawn/strand the player in the surf: march inland to dry sand.
       let guard = 0;
-      while (!isWalkableTerrain(p.x, p.z, regionId) && p.z < config.depth * 0.5 - 1.5 && guard < 80) {
+      while (!allowed(p.x, p.z) && p.z < config.depth * 0.5 - 1.5 && guard < 80) {
         p.z += 1.1;
         guard += 1;
       }
@@ -368,14 +397,14 @@ export function clampToWalkable(position, previousPosition = null, regionId = 'P
     p.x *= config.bounds / dist;
     p.z *= config.bounds / dist;
   }
-  if (isWalkableTerrain(p.x, p.z, regionId)) return p;
-  if (previousPosition && isWalkableTerrain(previousPosition.x, previousPosition.z, regionId)) {
+  if (allowed(p.x, p.z)) return p;
+  if (previousPosition && allowed(previousPosition.x, previousPosition.z)) {
     const previous = previousPosition.clone
       ? previousPosition.clone()
       : new THREE.Vector3(previousPosition.x, previousPosition.y || 0, previousPosition.z);
     const slideX = new THREE.Vector3(p.x, previous.y, previous.z);
     const slideZ = new THREE.Vector3(previous.x, previous.y, p.z);
-    const candidates = [slideX, slideZ].filter(candidate => isWalkableTerrain(candidate.x, candidate.z, regionId));
+    const candidates = [slideX, slideZ].filter(candidate => allowed(candidate.x, candidate.z));
     if (candidates.length) {
       candidates.sort((a, b) => a.distanceToSquared(p) - b.distanceToSquared(p));
       return candidates[0];
@@ -385,7 +414,7 @@ export function clampToWalkable(position, previousPosition = null, regionId = 'P
   const angle = Math.atan2(p.z, p.x);
   for (let radius = Math.min(dist, config.bounds); radius > 2; radius -= 1.25) {
     const candidate = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-    if (isWalkableTerrain(candidate.x, candidate.z, regionId)) return candidate;
+    if (allowed(candidate.x, candidate.z)) return candidate;
   }
   return new THREE.Vector3(0, 0, 7.5);
 }

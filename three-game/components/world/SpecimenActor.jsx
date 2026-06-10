@@ -1,12 +1,22 @@
 'use client';
 
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
+import { specimenToInspectable } from '../../world/inspectables';
+import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
+import { getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
+
+const CARRY_PICKUP_DISTANCE = 2.15;
+const CARRY_HOLD_DISTANCE = 1.12;
+const CARRY_DROP_DISTANCE = 1.3;
+const COTTON_FOLIAGE_MOTION = { wind: 1.9, bend: 0.35, bendRadius: 1.45 };
+const DRY_GRASS_FOLIAGE_MOTION = { wind: 1.45, bend: 0.55, bendRadius: 1.25 };
+const CACTUS_FOLIAGE_MOTION = { wind: 0.35, bend: 0.35 };
 
 function specimenColor(id) {
   if (id === 'crab') return '#e4572e';
@@ -28,7 +38,19 @@ function assetIdForSpecimen(specimen) {
   if (specimen.id === 'mediumgroundfinch') return 'mediumGroundFinch';
   if (specimen.id === 'floreanagianttortoise') return 'floreanaGiantTortoise';
   if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';
+  if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
   return specimen.id;
+}
+
+function foliageMotionForSpecimen(specimen) {
+  const id = String(specimen.id || '').toLowerCase();
+  const latin = String(specimen.latin || '').toLowerCase();
+  if (id === 'galapagoscotton') return COTTON_FOLIAGE_MOTION;
+  if (id === 'dry_grass' || id === 'drygrass' || id === 'poaceae' || latin.includes('poaceae')) {
+    return DRY_GRASS_FOLIAGE_MOTION;
+  }
+  if (id === 'cactus') return CACTUS_FOLIAGE_MOTION;
+  return null;
 }
 
 function ProceduralSpecimenShape({ specimen }) {
@@ -44,7 +66,7 @@ function ProceduralSpecimenShape({ specimen }) {
         </mesh>
         <mesh castShadow position={[0.38, 0.95, 0]} rotation={[0, 0, -0.35]}>
           <cylinderGeometry args={[0.12, 0.16, 0.7, 8]} />
-          <meshToonMaterial color="#74a545" />
+          <primitive object={warm} attach="material" />
         </mesh>
       </group>
     );
@@ -137,11 +159,19 @@ function ProceduralSpecimenShape({ specimen }) {
   );
 }
 
-export function SpecimenShape({ specimen }) {
-  return <ModelAsset id={assetIdForSpecimen(specimen)} fallback={<ProceduralSpecimenShape specimen={specimen} />} />;
+export function SpecimenShape({ specimen, animationSelector }) {
+  const foliageMotion = foliageMotionForSpecimen(specimen);
+  return (
+    <ModelAsset
+      id={assetIdForSpecimen(specimen)}
+      fallback={<ProceduralSpecimenShape specimen={specimen} />}
+      animationSelector={animationSelector}
+      motion={foliageMotion}
+    />
+  );
 }
 
-function AnimatedSpecimenShape({ specimen }) {
+function AnimatedSpecimenShape({ specimen, animationSelector }) {
   const group = useRef(null);
 
   useFrame(({ clock }) => {
@@ -154,72 +184,180 @@ function AnimatedSpecimenShape({ specimen }) {
     group.current.scale.setScalar(1 + Math.sin(t * 8.2) * 0.018 * burst);
   });
 
-  if (specimen.id !== 'crab') return <SpecimenShape specimen={specimen} />;
+  if (specimen.id !== 'crab') return <SpecimenShape specimen={specimen} animationSelector={animationSelector} />;
 
   return (
     <group ref={group}>
-      <SpecimenShape specimen={specimen} />
+      <SpecimenShape specimen={specimen} animationSelector={animationSelector} />
     </group>
   );
 }
 
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
+  const faunaMotionGroup = useRef(null);
   const selectedSpecimenId = useThreeGameStore(state => state.selectedSpecimenId);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const setSelectedSpecimen = useThreeGameStore(state => state.setSelectedSpecimen);
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
+  const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
+  const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
   const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
+  const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
+  const carriedRef = useRef(false);
+  // Where the animal lives after being put down somewhere new; null = spawn.
+  const carryBase = useRef(null);
   const position = useMemo(() => {
     const [x, , z] = specimen.spawnPoint;
     // Auto-generated spawn points can land in the surf; pull them onto land.
     const safe = clampToWalkable(new THREE.Vector3(x, 0, z), null, currentZoneId);
     return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
   }, [currentZoneId, specimen.spawnPoint]);
+  const faunaBehavior = useFaunaBehavior({
+    specimen,
+    groupRef: faunaMotionGroup,
+    basePosition: position,
+    collected,
+  });
+
+  useEffect(() => {
+    setSpecimenRuntimePosition(specimen.id, {
+      x: position.x,
+      y: position.y,
+      z: position.z,
+    }, currentZoneId);
+  }, [currentZoneId, position, setSpecimenRuntimePosition, specimen.id]);
+
+  // Reset any relocated home when the zone (and therefore spawn) changes.
+  useEffect(() => {
+    carryBase.current = null;
+  }, [currentZoneId, position]);
+
+  // Release carry state if this actor unmounts or gets collected mid-carry.
+  useEffect(() => {
+    if (!carryProfile) return undefined;
+    const release = () => {
+      const state = useThreeGameStore.getState();
+      if (state.carriedObjectId === specimen.id) setCarriedObject(null);
+      if (state.carryPrompt?.id === specimen.id) setCarryPrompt(null);
+    };
+    if (collected) release();
+    return release;
+  }, [carryProfile, collected, setCarriedObject, setCarryPrompt, specimen.id]);
+
+  // Bare-handed pickup of docile animals; mirrors the PhysicsProp carry flow.
+  useFrame(() => {
+    if (!carryProfile || collected || !group.current) return;
+    const state = useThreeGameStore.getState();
+    const pose = state.playerPose;
+    const player = pose?.position || { x: 0, y: 0, z: 0 };
+    const facing = pose?.facing || { x: 0, z: -1 };
+    const facingLength = Math.hypot(facing.x, facing.z) || 1;
+    const aheadX = facing.x / facingLength;
+    const aheadZ = facing.z / facingLength;
+    const carried = state.carriedObjectId === specimen.id;
+
+    if (carried !== carriedRef.current) {
+      carriedRef.current = carried;
+      if (!carried) {
+        // Put down: settle on walkable ground just ahead of the player.
+        const safe = clampToWalkable(
+          new THREE.Vector3(player.x + aheadX * CARRY_DROP_DISTANCE, 0, player.z + aheadZ * CARRY_DROP_DISTANCE),
+          null,
+          currentZoneId,
+        );
+        const groundY = terrainHeight(safe.x, safe.z, currentZoneId) + 0.04;
+        carryBase.current = new THREE.Vector3(safe.x, groundY, safe.z);
+        group.current.position.copy(carryBase.current);
+        setSpecimenRuntimePosition(specimen.id, { x: safe.x, y: groundY, z: safe.z }, currentZoneId);
+      }
+    }
+
+    if (carried) {
+      group.current.position.set(
+        player.x + aheadX * CARRY_HOLD_DISTANCE,
+        player.y + carryProfile.holdHeight,
+        player.z + aheadZ * CARRY_HOLD_DISTANCE,
+      );
+      group.current.rotation.y = Math.atan2(aheadX, aheadZ);
+      setCarryPrompt({
+        id: specimen.id,
+        label: carryProfile.label,
+        mode: 'drop',
+        distance: 0,
+        text: `Press E to put down ${carryProfile.label}`,
+      });
+      setSpecimenRuntimePosition(specimen.id, {
+        x: group.current.position.x,
+        y: group.current.position.y,
+        z: group.current.position.z,
+      }, currentZoneId);
+      return;
+    }
+
+    // Animals are only grabbable bare-handed so E still collects with tools.
+    if (state.activeToolId !== 'hands') {
+      if (state.carryPrompt?.id === specimen.id) setCarryPrompt(null);
+      return;
+    }
+    const distance = Math.hypot(group.current.position.x - player.x, group.current.position.z - player.z);
+    const activePrompt = state.carryPrompt;
+    if (!activePrompt || activePrompt.id === specimen.id || distance < (activePrompt.distance ?? Infinity)) {
+      if (distance <= CARRY_PICKUP_DISTANCE) {
+        setCarryPrompt({
+          id: specimen.id,
+          label: carryProfile.label,
+          mode: 'pickup',
+          distance,
+          text: `Press E to pick up ${carryProfile.label}`,
+        });
+      } else if (activePrompt?.id === specimen.id) {
+        setCarryPrompt(null);
+      }
+    }
+  });
 
   useFrame(({ clock }) => {
     if (!group.current || collected) return;
+    if (faunaBehavior.active) return;
+    if (useThreeGameStore.getState().carriedObjectId === specimen.id) return;
+    const base = carryBase.current || position;
     const t = clock.elapsedTime;
     if (specimen.behavior === 'skitter') {
       const burst = Math.max(0, Math.sin(t * 2.2));
-      group.current.position.x = position.x + Math.sin(t * 1.9) * 0.38 * burst;
-      group.current.position.z = position.z + Math.cos(t * 1.35) * 0.12 * burst;
+      group.current.position.x = base.x + Math.sin(t * 1.9) * 0.38 * burst;
+      group.current.position.z = base.z + Math.cos(t * 1.35) * 0.12 * burst;
       group.current.rotation.y = Math.PI / 2 + Math.sin(t * 3.1) * 0.2 * burst;
     }
     if (specimen.behavior === 'curious') group.current.rotation.y = Math.sin(t * 1.2) * 0.8;
     if (specimen.behavior === 'bask') group.current.rotation.y = Math.sin(t * 0.35) * 0.18;
     if (specimen.behavior === 'graze') {
       group.current.rotation.y = -0.45 + Math.sin(t * 0.22) * 0.16;
-      group.current.position.x = position.x + Math.sin(t * 0.18) * 0.12;
-      group.current.position.z = position.z + Math.cos(t * 0.16) * 0.08;
+      group.current.position.x = base.x + Math.sin(t * 0.18) * 0.12;
+      group.current.position.z = base.z + Math.cos(t * 0.16) * 0.08;
     }
     if (specimen.behavior === 'waddle') {
       group.current.rotation.y = Math.PI + Math.sin(t * 1.4) * 0.18;
       group.current.rotation.z = Math.sin(t * 5.8) * 0.035;
-      group.current.position.x = position.x + Math.sin(t * 0.75) * 0.18;
+      group.current.position.x = base.x + Math.sin(t * 0.75) * 0.18;
     }
-    group.current.position.y = position.y + Math.abs(Math.sin(t * 1.1)) * (specimen.behavior === 'still' ? 0 : 0.03);
-
+    group.current.position.y = base.y + Math.abs(Math.sin(t * 1.1)) * (specimen.behavior === 'still' ? 0 : 0.03);
   });
 
   if (collected) return null;
 
   const selected = selectedSpecimenId === specimen.id;
   const nearby = nearbySpecimenId === specimen.id;
-  const markerY = specimen.id === 'cactus' ? 2.15 : specimen.id === 'basalt' ? 1.15 : specimen.id === 'floreanagianttortoise' ? 1.8 : 1.45;
-  return (
-    <group
-      ref={group}
-      position={position}
-      scale={specimen.sceneScale || 1}
-      onClick={event => {
-        event.stopPropagation();
-        setSelectedSpecimen(specimen.id);
-        setNearbySpecimen(specimen.id);
-      }}
-    >
-      <AnimatedSpecimenShape specimen={specimen} />
+  const markerY = specimen.id === 'galapagoscotton' ? 3.45 : specimen.id === 'cactus' ? 2.15 : specimen.id === 'basalt' ? 1.15 : specimen.id === 'floreanagianttortoise' ? 1.8 : 1.45;
+  const specimenContent = (
+    <>
+      <AnimatedSpecimenShape
+        specimen={specimen}
+        animationSelector={null}
+      />
       <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
         <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />
         <meshBasicMaterial color={nearby ? '#fff2a8' : selected ? '#ffe48a' : '#ffffff'} transparent opacity={nearby ? 0.72 : selected ? 0.52 : 0.14} depthWrite={false} />
@@ -236,6 +374,23 @@ export function SpecimenActor({ specimen }) {
           </mesh>
         </>
       )}
+    </>
+  );
+  return (
+    <group
+      ref={group}
+      position={position}
+      scale={specimen.sceneScale || 1}
+      onClick={event => {
+        event.stopPropagation();
+        setSelectedSpecimen(specimen.id);
+        setNearbySpecimen(specimen.id);
+        setInspectedObject(specimenToInspectable(specimen, event.point || group.current?.position));
+      }}
+    >
+      {faunaBehavior.active ? (
+        <group ref={faunaMotionGroup}>{specimenContent}</group>
+      ) : specimenContent}
     </group>
   );
 }

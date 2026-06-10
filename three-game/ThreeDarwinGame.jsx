@@ -4,7 +4,7 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats } from '@react-three/drei';
 import { EffectComposer, Bloom, N8AO, Vignette } from '@react-three/postprocessing';
-import { ACESFilmicToneMapping, SRGBColorSpace } from 'three';
+import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
@@ -149,6 +149,34 @@ function ExpeditionClock() {
     const wholeSeconds = Math.floor(elapsed.current);
     elapsed.current -= wholeSeconds;
     advanceTime(wholeSeconds * GAME_MINUTES_PER_REAL_SECOND);
+  });
+
+  return null;
+}
+
+function InspectionAnchorProjector() {
+  const { camera, size } = useThree();
+  const inspectedObject = useThreeGameStore(state => state.inspectedObject);
+  const setInspectedScreenPosition = useThreeGameStore(state => state.setInspectedScreenPosition);
+  const projected = useRef(new Vector3());
+  const last = useRef({ key: null, x: -9999, y: -9999, visible: false });
+
+  useFrame(() => {
+    const world = inspectedObject?.worldPosition;
+    if (!world) return;
+    projected.current.set(world.x, world.y, world.z).project(camera);
+    const visible = projected.current.z > -1 && projected.current.z < 1;
+    const x = (projected.current.x * 0.5 + 0.5) * size.width;
+    const y = (-projected.current.y * 0.5 + 0.5) * size.height;
+    const key = `${inspectedObject.openedAt || inspectedObject.id}:${size.width}:${size.height}`;
+    if (
+      last.current.key === key
+      && Math.abs(last.current.x - x) < 0.75
+      && Math.abs(last.current.y - y) < 0.75
+      && last.current.visible === visible
+    ) return;
+    last.current = { key, x, y, visible };
+    setInspectedScreenPosition({ x, y, visible, width: size.width, height: size.height });
   });
 
   return null;
@@ -408,6 +436,7 @@ export default function ThreeDarwinGame() {
           </Suspense>
           <PostFX enabled={perfSettings.postprocessing} ao={perfSettings.ao} />
           <ExpeditionClock />
+          <InspectionAnchorProjector />
           <PerformanceSampler enabled={showPerf} onSample={setMetrics} />
           {showPerf && perfSettings.stats && <Stats />}
         </Canvas>

@@ -7,11 +7,11 @@ import { useThreeGameStore } from '../../store';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
 import { sunDirection, skyState } from '../../world/celestial';
+import { WATER_LEVEL } from '../../world/water';
 
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const WATER_LEVEL = -0.9;     // world Y of the calm surface (matches terrain refs)
 const WATER_SIZE = 150;       // side length of the detailed (Gerstner) water plane
 const WATER_SEGMENTS = 144;   // tessellation for the wave displacement
 const BAKE_RES = 512;         // seafloor depth-texture resolution

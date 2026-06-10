@@ -30,15 +30,18 @@ export function updateFoliageUniforms(elapsedTime, playerPosition, delta) {
   }
 }
 
-export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1 } = {}) {
+export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, bendRadius = 2.25 } = {}) {
   geometry.computeBoundingBox();
-  const refHeight = Math.max(0.2, geometry.boundingBox.max.y);
+  const baseY = geometry.boundingBox.min.y;
+  const refHeight = Math.max(0.2, geometry.boundingBox.max.y - geometry.boundingBox.min.y);
   material.onBeforeCompile = shader => {
     shader.uniforms.uFoliageTime = foliageUniforms.uFoliageTime;
     shader.uniforms.uFoliagePlayer = foliageUniforms.uFoliagePlayer;
     shader.uniforms.uWindDir = foliageUniforms.uWindDir;
-    shader.uniforms.uWindAmp = { value: 0.055 * wind };
-    shader.uniforms.uBendAmp = { value: 0.55 * bend };
+    shader.uniforms.uWindAmp = { value: 0.14 * wind };
+    shader.uniforms.uBendAmp = { value: 1.15 * bend };
+    shader.uniforms.uBendRadius = { value: bendRadius };
+    shader.uniforms.uBaseY = { value: baseY };
     shader.uniforms.uRefHeight = { value: refHeight };
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -49,6 +52,8 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1 } 
         uniform vec2 uWindDir;
         uniform float uWindAmp;
         uniform float uBendAmp;
+        uniform float uBendRadius;
+        uniform float uBaseY;
         uniform float uRefHeight;`,
       )
       .replace(
@@ -58,19 +63,25 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1 } 
           fmPosition = instanceMatrix * fmPosition;
         #endif
         vec4 fmWorld = modelMatrix * fmPosition;
-        // Height weight: roots planted, tips free. Quadratic for a stiff base.
-        float fmW = clamp(transformed.y / uRefHeight, 0.0, 1.0);
-        fmW *= fmW;
+        // Height weight: roots planted, tips free. Use geometry bounds so
+        // centered GLBs and ground-origin GLBs both move correctly.
+        float fmW = clamp((transformed.y - uBaseY) / uRefHeight, 0.0, 1.0);
+        fmW = pow(fmW, 1.35);
+        float fmTipW = pow(fmW, 1.75);
         // --- Wind: two crossed sines + slow gust, phased by world position --
         float fmPhase = fmWorld.x * 0.38 + fmWorld.z * 0.29;
         float fmGust = sin(uFoliageTime * 0.31 + fmPhase * 0.21) * 0.5 + 0.5;
         float fmSway = sin(uFoliageTime * 1.6 + fmPhase) * 0.6
-          + sin(uFoliageTime * 2.7 + fmPhase * 1.7) * 0.25;
-        fmWorld.xz += uWindDir * fmSway * uWindAmp * (0.45 + fmGust) * fmW;
+          + sin(uFoliageTime * 2.7 + fmPhase * 1.7) * 0.28
+          + sin(uFoliageTime * 4.3 + fmWorld.x * 0.91) * 0.14;
+        vec2 fmCrossWind = vec2(-uWindDir.y, uWindDir.x);
+        fmWorld.xz += uWindDir * fmSway * uWindAmp * (0.7 + fmGust) * fmW;
+        fmWorld.xz += fmCrossWind * sin(uFoliageTime * 2.15 + fmPhase * 1.3) * uWindAmp * 0.32 * fmTipW;
         // --- Player bend: push tips radially away, slight crouch ------------
         vec2 fmAway = fmWorld.xz - uFoliagePlayer.xz;
         float fmDist = length(fmAway);
-        float fmPush = smoothstep(1.25, 0.15, fmDist) * uBendAmp * fmW;
+        float fmPush = smoothstep(uBendRadius, 0.12, fmDist) * uBendAmp * fmW;
+        fmPush = min(fmPush, uBendRadius * 0.42);
         if (fmPush > 0.0001 && fmDist > 0.0001) {
           fmWorld.xz += (fmAway / fmDist) * fmPush;
           fmWorld.y -= fmPush * 0.35;
@@ -80,7 +91,7 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1 } 
       );
   };
   // Distinct programs per (wind, bend, refHeight) bucket.
-  material.customProgramCacheKey = () => `foliage-motion|${wind}|${bend}|${refHeight.toFixed(2)}`;
+  material.customProgramCacheKey = () => `foliage-motion|${wind}|${bend}|${bendRadius}|${baseY.toFixed(2)}|${refHeight.toFixed(2)}`;
   material.needsUpdate = true;
   return material;
 }

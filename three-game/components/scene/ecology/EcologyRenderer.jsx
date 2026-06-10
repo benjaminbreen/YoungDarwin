@@ -11,6 +11,7 @@ import { RockSplashes } from './RockSplashes';
 import { BirdFlock } from './BirdFlock';
 import { Skyline } from './Skyline';
 import { StaticGLB } from '../../assets/StaticGLB';
+import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -42,6 +43,7 @@ export function EcologyRenderer({ ecology }) {
           tintStrength={layer.tintStrength || 0}
           motion={layer.motion || null}
           castShadow={layer.castShadow !== false}
+          inspectableType={inspectableTypeForEcologyLayer(layer.id)}
         />
       ))}
       {ecology.props?.map(prop => (
@@ -51,6 +53,7 @@ export function EcologyRenderer({ ecology }) {
           position={prop.position}
           rotation={prop.rotation}
           scale={prop.scale}
+          inspectableType={prop.id?.startsWith('crab-') ? 'crab_prop' : null}
         />
       ))}
       {ecology.splashes?.anchors?.length > 0 && (

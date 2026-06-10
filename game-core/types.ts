@@ -34,6 +34,8 @@ export type ZoneSpecimenSpawn = {
   position: Vec3Tuple;
   behavior?: string;
   sceneScale?: number;
+  habitatRadiusX?: number | null;
+  habitatRadiusZ?: number | null;
 };
 
 export type ModelPlacement = {
@@ -70,7 +72,7 @@ export type ColliderDefinition =
 
 export type ObstacleDefinition = {
   id: string;
-  kind: 'boulder' | 'tree' | 'log' | 'ledge' | 'prop';
+  kind: 'boulder' | 'rock' | 'tree' | 'log' | 'ledge' | 'prop';
   render: ModelPlacement;
   collider: ColliderDefinition;
   gameplay?: {
@@ -78,6 +80,8 @@ export type ObstacleDefinition = {
     jumpable?: boolean;
     edgeRisk?: boolean;
     climbLabel?: string;
+    traversal?: 'step' | 'scramble' | 'vault';
+    traversalLabel?: string;
     pushable?: boolean;
     pushMass?: number;
     pushFriction?: number;
@@ -135,6 +139,10 @@ export type JournalEntry = {
   condition?: string;
   content: string;
   createdAt: string;
+  day?: number;
+  timeOfDay?: string;
+  kind?: 'specimen' | 'location' | 'note';
+  title?: string;
 };
 
 export type ExpeditionState = {

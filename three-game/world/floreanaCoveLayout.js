@@ -103,6 +103,7 @@ function acceptedForLayer(layer, x, z, y) {
   if (layer === 'dry-grass') return dryGrassSuitability(x, z, y) > 0.34 && noise < 0.72;
   if (layer === 'dry-grass-patch') return dryGrassSuitability(x, z, y) > 0.42 && noise < 0.68;
   if (layer === 'opuntia') return biome === 'dry-scrub' && y > 1.4 && x > 7 && noise > -0.05;
+  if (layer === 'galapagos-cotton') return (biome === 'dry-scrub' || biome === 'palo-santo') && y > 1.2 && noise > -0.1;
   return false;
 }
 
@@ -135,4 +136,86 @@ export function makeFloreanaScatter(layer, count, seed, {
     });
   }
   return items;
+}
+
+let postOfficeBayBasaltBlocks = null;
+let postOfficeBayOpuntiaHazards = null;
+
+export function getPostOfficeBayOpuntiaHazards() {
+  if (postOfficeBayOpuntiaHazards) return postOfficeBayOpuntiaHazards;
+  postOfficeBayOpuntiaHazards = makeFloreanaScatter('opuntia', 8, 23, {
+    minX: 8,
+    maxX: 30,
+    minZ: 3,
+    maxZ: 30,
+    scale: [0.65, 1.15],
+  }).map(item => {
+    const renderScale = item.scale * 2.8;
+    return {
+      ...item,
+      renderScale,
+      hazardRadius: THREE.MathUtils.clamp(renderScale * 0.58, 1.15, 2.05),
+      damage: 8,
+    };
+  });
+  return postOfficeBayOpuntiaHazards;
+}
+
+export function getPostOfficeBayBasaltBlocks() {
+  if (postOfficeBayBasaltBlocks) return postOfficeBayBasaltBlocks;
+  postOfficeBayBasaltBlocks = makeFloreanaScatter('basalt', 46, 4, {
+    minX: -29,
+    maxX: 28,
+    minZ: -24,
+    maxZ: 14,
+    scale: [0.22, 0.72],
+  }).map(item => ({
+    ...item,
+    color: item.tone > 0.58 ? '#5b564b' : '#6b6354',
+    radiusX: item.scale * 1.25,
+    radiusY: item.scale * 0.55,
+    radiusZ: item.scale * 0.9,
+    centerLift: item.scale * 0.34,
+    sink: item.scale * 0.08,
+  }));
+  return postOfficeBayBasaltBlocks;
+}
+
+export function getPostOfficeBayRockObstacles() {
+  return getPostOfficeBayBasaltBlocks()
+    .filter(rock => rock.radiusY * 2 - rock.sink > 0.26)
+    .map(rock => {
+      const top = rock.centerLift + rock.radiusY - rock.sink;
+      const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.78;
+      const collider = {
+        type: 'cylinder',
+        radius,
+        height: top,
+        offset: [0, top * 0.5, 0],
+      };
+      return {
+        id: `post-office-bay-${rock.id}`,
+        kind: 'rock',
+        path: null,
+        x: rock.x,
+        z: rock.z,
+        radius,
+        height: top,
+        colliderTop: top,
+        colliderBottom: 0,
+        scale: 1,
+        yaw: rock.yaw,
+        jumpable: false,
+        climbable: false,
+        edgeRisk: false,
+        pushable: false,
+        pushMass: 1,
+        pushFriction: 0.88,
+        traversal: top > 0.48 ? 'vault' : 'scramble',
+        traversalLabel: 'scramble over basalt',
+        definition: { collider },
+        zoneId: 'POST_OFFICE_BAY',
+        shapes: [collider],
+      };
+    });
 }

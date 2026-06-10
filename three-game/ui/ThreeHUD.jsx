@@ -34,6 +34,9 @@ import { InventoryModal } from './expedition/InventoryModal';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
+import { rarityLabel } from '../world/inspectables';
+
+const EMPTY_RUNTIME_SPECIMEN_POSITIONS = Object.freeze({});
 
 const ROUTE_ENTRY_EDGES = {
   north: 'south',
@@ -106,6 +109,63 @@ function formatExpeditionTime(timeOfDay) {
 function formatBannerObjective(objective) {
   const stripped = objective.replace(/^Quest: /, '');
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
+function InspectableTooltip() {
+  const inspectedObject = useThreeGameStore(state => state.inspectedObject);
+  const clearInspectedObject = useThreeGameStore(state => state.clearInspectedObject);
+  const [rendered, setRendered] = useState(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!inspectedObject) {
+      setVisible(false);
+      const timer = window.setTimeout(() => setRendered(null), 360);
+      return () => window.clearTimeout(timer);
+    }
+    setRendered(inspectedObject);
+    const showTimer = window.setTimeout(() => setVisible(true), 20);
+    const fadeTimer = window.setTimeout(() => setVisible(false), 5200);
+    const clearTimer = window.setTimeout(() => clearInspectedObject(), 5660);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [inspectedObject, clearInspectedObject]);
+
+  if (!rendered) return null;
+  const label = rarityLabel(rendered.rarity);
+  return (
+    <div
+      className={`pointer-events-none absolute left-3 top-[11.35rem] z-20 w-[286px] rounded-md border border-expedition-brass/75 bg-[rgba(20,22,21,0.82)] px-3.5 py-3 font-expedition text-expedition-parchment shadow-[0_18px_34px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md transition-all duration-500 ease-out ${visible ? 'translate-y-0 scale-100 opacity-100' : '-translate-y-1 scale-[0.975] opacity-0'}`}
+    >
+      <div className="pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/20" />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-expedition-gold/85">
+            {rendered.category || rendered.kind || 'Field sign'}
+          </div>
+          <div className="mt-0.5 truncate text-[16px] font-semibold leading-tight text-expedition-parchment">
+            {rendered.englishName}
+          </div>
+          {rendered.latinName && (
+            <div className="mt-0.5 truncate text-[12px] italic text-expedition-faded">
+              {rendered.latinName}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 rounded-sm border border-expedition-gold/55 bg-expedition-gold/12 px-2 py-1 text-center">
+          <div className="text-[8px] uppercase tracking-[0.14em] text-expedition-faded">Rarity</div>
+          <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.11em] text-expedition-goldbright">{label}</div>
+        </div>
+      </div>
+      <div className="relative mt-2 h-px bg-gradient-to-r from-transparent via-expedition-brass/45 to-transparent" />
+      <div className="relative mt-2 text-[11px] leading-snug text-expedition-faded">
+        Field label added to the daybook.
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +294,9 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
   const selected = useThreeGameStore(state => state.selectedSpecimenId);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const playerPose = useThreeGameStore(state => state.playerPose);
+  const runtimeSpecimenPositions = useThreeGameStore(state => (
+    state.specimenRuntimePositions?.[zone.id] || EMPTY_RUNTIME_SPECIMEN_POSITIONS
+  ));
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const specimens = getThreeSpecimens(zone.id);
   const player = worldToMapPercent(playerPose.position || { x: 0, z: 0 }, zone);
@@ -266,16 +329,20 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
           </button>
         );
       })}
-      {specimens.map(specimen => {
+      {specimens.map((specimen, index) => {
         const [x, , z] = specimen.spawnPoint || [0, 0, 0];
-        const point = project(worldToMapPercent({ x, z }, zone));
+        const runtime = runtimeSpecimenPositions[specimen.id];
+        const point = project(worldToMapPercent({
+          x: Number.isFinite(runtime?.x) ? runtime.x : x,
+          z: Number.isFinite(runtime?.z) ? runtime.z : z,
+        }, zone));
         if (!visible(point)) return null;
         const isCollected = collected.includes(specimen.id);
         const isDocumented = documented.includes(specimen.id);
         const isSelected = selected === specimen.id || nearbySpecimenId === specimen.id;
         return (
           <span
-            key={specimen.id}
+            key={`${specimen.id}-${index}`}
             className={`absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border shadow ${
               isSelected
                 ? 'border-expedition-ink bg-expedition-goldbright ring-2 ring-expedition-goldbright/60'
@@ -391,7 +458,7 @@ function GameplayMinimap({ onOpenMap }) {
 // ---------------------------------------------------------------------------
 // Hotbar
 
-function ToolBelt() {
+function ToolBelt({ onOpenJournal }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
@@ -406,7 +473,13 @@ function ToolBelt() {
           <button
             key={tool.id}
             type="button"
-            onClick={() => (active ? triggerToolUse(tool.id) : setActiveTool(tool.id))}
+            onClick={() => {
+              if (tool.id === 'sketch') {
+                onOpenJournal();
+                return;
+              }
+              active ? triggerToolUse(tool.id) : setActiveTool(tool.id);
+            }}
             className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
               active
                 ? 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_16px_rgba(227,197,133,0.35),inset_0_1px_0_rgba(227,197,133,0.4)]'
@@ -744,13 +817,13 @@ function SpecimensTab({ condensed = false }) {
 
   return (
     <div className="grid gap-1.5">
-      {shown.map(specimen => {
+      {shown.map((specimen, index) => {
         const isCollected = collected.includes(specimen.id);
         const isDocumented = documented.includes(specimen.id);
         const done = isCollected || isDocumented;
         return (
           <button
-            key={specimen.id}
+            key={`${specimen.id}-${index}`}
             type="button"
             onClick={() => openDetail(specimen)}
             className={`flex min-w-0 items-center gap-2 rounded-sm border px-2.5 py-2 text-left transition hover:border-expedition-gold focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
@@ -786,7 +859,7 @@ function SpecimensTab({ condensed = false }) {
   );
 }
 
-function InventoryTab({ onOpenInventory, condensed = false }) {
+function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
@@ -804,7 +877,13 @@ function InventoryTab({ onOpenInventory, condensed = false }) {
             <button
               key={tool.id}
               type="button"
-              onClick={() => (active ? triggerToolUse(tool.id) : setActiveTool(tool.id))}
+              onClick={() => {
+                if (tool.id === 'sketch') {
+                  onOpenJournal();
+                  return;
+                }
+                active ? triggerToolUse(tool.id) : setActiveTool(tool.id);
+              }}
               className={`group flex min-w-0 items-center gap-2.5 rounded-sm border px-2.5 py-2 text-left transition ${
                 active
                   ? 'border-expedition-gold bg-expedition-gold/18 shadow-[inset_0_1px_0_rgba(227,197,133,0.18)]'
@@ -854,7 +933,7 @@ function InventoryTab({ onOpenInventory, condensed = false }) {
 // panel on top, the field-operations panel below it. The ops panel defaults
 // to a condensed summary; the chevron slides it down to fill the remaining
 // vertical space and reveal the full tab content + action buttons.
-function FieldSidebar({ objective, onOpenInventory, onOpenMap }) {
+function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) {
   const [tab, setTab] = useState('objectives');
   const [expanded, setExpanded] = useState(false);
   const rest = useThreeGameStore(state => state.rest);
@@ -882,12 +961,15 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap }) {
         <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pt-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)]">
           {tab === 'objectives' && <ObjectivesTab objective={objective} condensed={!expanded} />}
           {tab === 'specimens' && <SpecimensTab condensed={!expanded} />}
-          {tab === 'inventory' && <InventoryTab onOpenInventory={onOpenInventory} condensed={!expanded} />}
+          {tab === 'inventory' && <InventoryTab onOpenInventory={onOpenInventory} onOpenJournal={onOpenJournal} condensed={!expanded} />}
         </div>
         {expanded && (
           <div className="mt-2.5 grid shrink-0 grid-cols-2 gap-1.5 border-t border-expedition-brass/40 pt-2.5">
             <button type="button" onClick={onOpenMap} className={GOLD_BUTTON}>
               <span className="inline-flex items-center justify-center gap-1.5"><MapIcon className="h-4 w-4" />View on Map</span>
+            </button>
+            <button type="button" onClick={onOpenJournal} className={GOLD_BUTTON}>
+              <span className="inline-flex items-center justify-center gap-1.5"><OpenBookIcon className="h-4 w-4" />Journal</span>
             </button>
             <button type="button" onClick={rest} className={GOLD_BUTTON}>Rest</button>
           </div>
@@ -1028,19 +1110,28 @@ export function ThreeHUD({ onTogglePerf }) {
   const [mapOpen, setMapOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
+  const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && /^Digit[1-6]$/.test(event.code)) {
+        const index = Number(event.code.replace('Digit', '')) - 1;
+        if (toolbarOrder[index] === 'sketch') {
+          event.preventDefault();
+          setPanel('journal');
+          return;
+        }
+      }
       if (event.code !== 'KeyI' || !(event.metaKey || event.ctrlKey) || event.repeat) return;
       event.preventDefault();
       setInventoryOpen(value => !value);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [toolbarOrder]);
   useEffect(() => {
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
@@ -1068,10 +1159,16 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <div className="absolute bottom-3 right-3 top-3 hidden xl:block">
-        <FieldSidebar objective={objective} onOpenInventory={() => setInventoryOpen(true)} onOpenMap={() => setMapOpen(true)} />
+        <FieldSidebar
+          objective={objective}
+          onOpenInventory={() => setInventoryOpen(true)}
+          onOpenMap={() => setMapOpen(true)}
+          onOpenJournal={() => setPanel('journal')}
+        />
       </div>
 
       <InteractionPrompt />
+      <InspectableTooltip />
 
       <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">
         <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />
@@ -1082,7 +1179,7 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 justify-center md:flex lg:bottom-3">
-        <ToolBelt />
+        <ToolBelt onOpenJournal={() => setPanel('journal')} />
       </div>
 
       <div className="pointer-events-auto absolute right-3 bottom-3 flex gap-1.5 xl:hidden">
@@ -1097,7 +1194,14 @@ export function ThreeHUD({ onTogglePerf }) {
       <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} />
       <SpecimenDetailModal />
 
-      <FieldNotebook panel={panel} onClose={() => setPanel(null)} />
+      <FieldNotebook
+        panel={panel}
+        onClose={() => setPanel(null)}
+        onOpenMap={() => {
+          setPanel(null);
+          setMapOpen(true);
+        }}
+      />
       <ZoneTransitionOverlay />
     </div>
   );

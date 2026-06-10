@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
@@ -11,8 +11,10 @@ import { consumeTouchControls, triggerToolUse } from '../../input/touchControls'
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import { getRegionTerrainConfig, regionSpawnPoint, terrainBiomeAt, TERRAIN_BOUNDS } from '../../world/terrain';
 import { getZone } from '../../world/floreanaZones';
+import { getPostOfficeBayOpuntiaHazards } from '../../world/floreanaCoveLayout';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
 import { emitPropEvent } from '../../physics/props/propEvents';
+import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import {
   CHARACTER_CONTROLLER_CONFIG,
@@ -61,6 +63,12 @@ const BUMP_FEEDBACK = {
   minHeadOn: 0.68,
 };
 
+const CACTUS_HAZARD = {
+  cooldown: 1.15,
+  shove: 3.8,
+  minSpeed: 0.35,
+};
+
 const LANDING_DUST = {
   duration: 0.82,
   particles: 14,
@@ -101,6 +109,7 @@ const ACTION_DURATION = {
   climb: 2.15,
   sprintToWallClimb: 1.25,
   climbingUpWall: 1.55,
+  scramble: 0.58,
   teeter: 1.45,
   startWalking: 0.42,
   stopWalking: 0.38,
@@ -246,12 +255,34 @@ function ProceduralNaturalistModel({ motionRef }) {
 }
 
 function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
+  const [damageFlash, setDamageFlash] = useState(0);
+  const previousHealth = useRef(health);
+  const damageFlashRef = useRef({ startedAt: -10, duration: 0.58 });
   const statusRef = useRef({ health, fatigue, inventoryCount });
   useEffect(() => {
+    if (health < previousHealth.current - 0.01) {
+      damageFlashRef.current = { startedAt: null, duration: 0.58 };
+      setDamageFlash(1);
+    }
+    previousHealth.current = health;
     statusRef.current.health = health;
     statusRef.current.fatigue = fatigue;
     statusRef.current.inventoryCount = inventoryCount;
   }, [health, fatigue, inventoryCount]);
+
+  useFrame(({ clock }) => {
+    if (damageFlashRef.current.startedAt === null) {
+      damageFlashRef.current.startedAt = clock.elapsedTime;
+    }
+    const elapsed = clock.elapsedTime - damageFlashRef.current.startedAt;
+    if (elapsed < 0 || elapsed > damageFlashRef.current.duration) {
+      if (damageFlash !== 0) setDamageFlash(0);
+      return;
+    }
+    const t = THREE.MathUtils.clamp(elapsed / damageFlashRef.current.duration, 0, 1);
+    const next = Math.pow(1 - t, 1.75);
+    if (Math.abs(next - damageFlash) > 0.025) setDamageFlash(next);
+  });
 
   const selectAnimation = useCallback(() => {
     const status = statusRef.current;
@@ -304,7 +335,8 @@ function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
       return { clip: 'run', timeScale: runScale };
     }
     if (motionRef.current.walking) {
-      if (status.inventoryCount > 0) return { clip: 'walkCarry', timeScale: Math.max(0.68, walkScale * 0.92) };
+      const carryingObject = Boolean(useThreeGameStore.getState().carriedObjectId);
+      if (carryingObject || status.inventoryCount > 0) return { clip: 'walkCarry', timeScale: Math.max(0.68, walkScale * 0.92) };
       return { clip: 'walk', timeScale: walkScale };
     }
     if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
@@ -312,7 +344,7 @@ function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
     if (status.fatigue >= 82) return 'exhaustedIdle';
     return 'idle';
   }, [motionRef]);
-  return <ModelAsset id="darwin" animationSelector={selectAnimation} fallback={<ProceduralNaturalistModel motionRef={motionRef} />} />;
+  return <ModelAsset id="darwin" animationSelector={selectAnimation} damageFlash={damageFlash} fallback={<ProceduralNaturalistModel motionRef={motionRef} />} />;
 }
 
 function collectionAnimationForTool(toolId) {
@@ -359,6 +391,25 @@ function findPushableObstacleNear(obstacles, position, horizontalVelocity, colli
     if (!best || score > best.score) best = { obstacle, score };
   }
   return best?.obstacle || null;
+}
+
+function findCactusHazardContact(position, playerRadius = 0.42) {
+  let best = null;
+  for (const cactus of getPostOfficeBayOpuntiaHazards()) {
+    const dx = position.x - cactus.x;
+    const dz = position.z - cactus.z;
+    const distance = Math.hypot(dx, dz);
+    const radius = cactus.hazardRadius + playerRadius;
+    if (distance > radius) continue;
+    const normal = distance > 0.001
+      ? new THREE.Vector3(dx / distance, 0, dz / distance)
+      : new THREE.Vector3(0, 0, 1);
+    const penetration = radius - distance;
+    if (!best || penetration > best.penetration) {
+      best = { cactus, normal, penetration, distance };
+    }
+  }
+  return best;
 }
 
 function LandingDust({ triggerRef }) {
@@ -519,10 +570,16 @@ export function PlayerController({ physicsDebug = false }) {
   const lastCamera = useRef(false);
   const lastButtons = useRef({});
   const footstepDust = useRef({ phase: 0, side: -1 });
+  // How deep the player's feet are below the sea surface (0 on dry land).
+  const wadeDepth = useRef(0);
+  // Accumulates drowning damage so the store isn't hit every frame.
+  const drownDamage = useRef(0);
   const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1 });
   const lastTeeterAt = useRef(0);
+  const lastCactusHitAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
+  const cameraFollowY = useRef(null);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
   const terrainFeedback = useRef({ grade: 0, uphillDot: 0, downhillDot: 0 });
   const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
@@ -560,6 +617,7 @@ export function PlayerController({ physicsDebug = false }) {
     lockMovementUntil: 0,
     recoverAction: null,
     climbMotion: null,
+    traverseMotion: null,
     rollMotion: null,
     turnMotion: null,
     slopeGrade: 0,
@@ -574,6 +632,8 @@ export function PlayerController({ physicsDebug = false }) {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
   const applyMovementCost = useThreeGameStore(state => state.applyMovementCost);
+  const applyCactusDamage = useThreeGameStore(state => state.applyCactusDamage);
+  const applyDrowningDamage = useThreeGameStore(state => state.applyDrowningDamage);
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const setPhysicsDebug = useThreeGameStore(state => state.setPhysicsDebug);
@@ -743,6 +803,7 @@ export function PlayerController({ physicsDebug = false }) {
     stateRef.current.action = null;
     stateRef.current.jumpPhase = 'grounded';
     stateRef.current.climbMotion = null;
+    stateRef.current.traverseMotion = null;
     stateRef.current.rollMotion = null;
     stateRef.current.turnMotion = null;
     stateRef.current.lockMovementUntil = 0;
@@ -759,6 +820,7 @@ export function PlayerController({ physicsDebug = false }) {
     stateRef.current.jumpCharging = false;
     stateRef.current.jumpChargeAmount = 0;
     lastGroundedAt.current = performance.now() / 1000;
+    cameraFollowY.current = groundY;
     jumpBufferedUntil.current = -10;
     touchJumpHoldUntil.current = -10;
     lastModelYaw.current = Math.PI;
@@ -978,6 +1040,35 @@ export function PlayerController({ physicsDebug = false }) {
       wasAirborne.current = false;
       return;
     }
+    if (stateRef.current.traverseMotion) {
+      const traverse = stateRef.current.traverseMotion;
+      const progress = THREE.MathUtils.clamp((now - traverse.startedAt) / traverse.duration, 0, 1);
+      const eased = easeInOutCubic(progress);
+      const arc = Math.sin(Math.PI * progress) * traverse.arcHeight;
+      group.current.position.lerpVectors(traverse.start, traverse.end, eased);
+      group.current.position.y += arc;
+      characterController.sync(group.current.position);
+      velocity.current.set(0, 0, 0);
+      group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, traverse.targetYaw, 14, delta);
+      stateRef.current.running = false;
+      stateRef.current.walking = false;
+      stateRef.current.airborne = false;
+      stateRef.current.crouching = traverse.crouching;
+      stateRef.current.strafeLeft = false;
+      stateRef.current.strafeRight = false;
+      if (progress >= 1) {
+        const landingGround = collisionAdapter.groundInfo(traverse.end);
+        group.current.position.copy(traverse.end);
+        group.current.position.y = landingGround.y;
+        characterController.sync(group.current.position);
+        stateRef.current.traverseMotion = null;
+        stateRef.current.action = null;
+        stateRef.current.lockMovementUntil = 0;
+        stateRef.current.crouching = false;
+      }
+      wasAirborne.current = false;
+      return;
+    }
     if (stateRef.current.rollMotion) {
       const roll = stateRef.current.rollMotion;
       const progress = THREE.MathUtils.clamp((now - roll.startedAt) / roll.duration, 0, 1);
@@ -1103,7 +1194,10 @@ export function PlayerController({ physicsDebug = false }) {
     const fatigueRunScale = running ? THREE.MathUtils.lerp(1, 0.72, fatigueRunT) : 1;
     const rawRunSpeed = PLAYER.runSpeed * fatigueRunScale;
     const carrySpeedScale = carriedObjectId ? 0.62 : 1;
-    const rawMovementSpeed = (stateRef.current.crouching ? PLAYER.walkSpeed * 0.45 : running ? rawRunSpeed : PLAYER.walkSpeed) * carrySpeedScale;
+    // Wading drag: deeper water slows Darwin — about half speed at armpit
+    // depth, slower still when he is in over his head.
+    const wadeSpeedScale = 1 - Math.min(0.66, Math.max(0, wadeDepth.current) * 0.42);
+    const rawMovementSpeed = (stateRef.current.crouching ? PLAYER.walkSpeed * 0.45 : running ? rawRunSpeed : PLAYER.walkSpeed) * carrySpeedScale * wadeSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
     const rawInputDirection = moving ? input.clone().normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current) : facing.current.clone().normalize();
     const uphillVector = new THREE.Vector3(slope.dx, 0, slope.dz);
@@ -1361,6 +1455,37 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.y = 0;
     }
     const desiredDelta = velocity.current.clone().multiplyScalar(delta);
+    const canAutoTraverse = grounded
+      && moving
+      && !movementLocked
+      && !stateRef.current.action
+      && !stateRef.current.aiming
+      && !stateRef.current.crouching
+      && desiredDelta.lengthSq() > 0.0001;
+    if (canAutoTraverse) {
+      const traversalTarget = collisionAdapter.findTraversalTarget(group.current.position, desiredDelta, facing.current);
+      if (traversalTarget) {
+        characterController.sync(group.current.position);
+        const duration = ACTION_DURATION.scramble;
+        const clip = 'crouchWalk';
+        startAction(clip, duration, { lockMovement: true });
+        stateRef.current.traverseMotion = {
+          start: group.current.position.clone(),
+          end: traversalTarget.end.clone(),
+          duration,
+          startedAt: now,
+          targetYaw: Math.atan2(traversalTarget.direction.x, traversalTarget.direction.z),
+          arcHeight: THREE.MathUtils.clamp(0.12 + traversalTarget.heightDelta * 0.18, 0.16, 0.34),
+          crouching: true,
+        };
+        velocity.current.set(0, 0, 0);
+        stateRef.current.running = false;
+        stateRef.current.walking = false;
+        stateRef.current.airborne = false;
+        wasAirborne.current = false;
+        return;
+      }
+    }
     const characterMove = {
       movement: desiredDelta.clone(),
       grounded: false,
@@ -1454,6 +1579,38 @@ export function PlayerController({ physicsDebug = false }) {
       }
     }
 
+    const cactusContact = findCactusHazardContact(group.current.position);
+    if (cactusContact) {
+      const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+      const impactSpeed = horizontalVelocity.length();
+      const movingIntoCactus = impactSpeed > CACTUS_HAZARD.minSpeed
+        ? horizontalVelocity.clone().normalize().dot(cactusContact.normal) < 0.25
+        : true;
+      const canCactusHit = movingIntoCactus && now - lastCactusHitAt.current >= CACTUS_HAZARD.cooldown;
+      group.current.position.addScaledVector(cactusContact.normal, Math.min(0.34, cactusContact.penetration + 0.08));
+      if (canCactusHit) {
+        lastCactusHitAt.current = now;
+        const shove = CACTUS_HAZARD.shove + Math.min(1.4, impactSpeed * 0.24);
+        velocity.current.x = cactusContact.normal.x * shove;
+        velocity.current.z = cactusContact.normal.z * shove;
+        velocity.current.y = Math.max(velocity.current.y, 0.72);
+        applyCactusDamage(cactusContact.cactus.damage || 8);
+        startAction('hitReaction', 0.78, { lockMovement: true });
+        bounceFeedback.current = {
+          startedAt: now,
+          lastImpactAt: now,
+          intensity: 0.72,
+          normal: cactusContact.normal.clone(),
+        };
+        cameraImpulse.current = {
+          startedAt: now,
+          intensity: 0.42,
+          duration: 0.28,
+          seed: cameraImpulse.current.seed + 1,
+        };
+      }
+    }
+
     const nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
     const nextGroundY = nextGroundInfo.y;
     const groundDistance = group.current.position.y - nextGroundY;
@@ -1493,7 +1650,14 @@ export function PlayerController({ physicsDebug = false }) {
           0.24,
           0.95,
         );
+        if (group.current.position.y < WATER_LEVEL + 0.02) {
+          emitPropEvent('water-splash', {
+            position: { x: group.current.position.x, y: WATER_LEVEL, z: group.current.position.z },
+            intensity: Math.min(1, dustIntensity + 0.2),
+          });
+        } else {
         landingDustTriggerRef.current?.({ intensity: dustIntensity });
+        }
         if (falling > 7.2) {
           cameraImpulse.current = {
             startedAt: now,
@@ -1558,7 +1722,10 @@ export function PlayerController({ physicsDebug = false }) {
     }
 
     const p = group.current.position;
-    const clamped = collisionAdapter.clampToWalkable(p, startOfFramePosition);
+    // Deep water can't be walked into, but it can be fallen into (cliff jumps)
+    // — and once in, Darwin can struggle in any direction while he drowns.
+    const allowDeepWater = wasAirborne.current || wadeDepth.current > WADE_DEPTH * 0.96;
+    const clamped = collisionAdapter.clampToWalkable(p, startOfFramePosition, { wade: true, deep: allowDeepWater });
     if (!clamped.equals(p)) {
       const correction = clamped.clone().sub(p);
       p.copy(clamped);
@@ -1578,10 +1745,14 @@ export function PlayerController({ physicsDebug = false }) {
     let nearest = null;
     let nearestDistance = 4.4;
     const collected = useThreeGameStore.getState().collectedSpecimenIds;
+    const specimenRuntimePositions = useThreeGameStore.getState().specimenRuntimePositions?.[currentZoneId] || {};
     for (const specimen of zoneSpecimens) {
       if (collected.includes(specimen.id)) continue;
+      const runtime = specimenRuntimePositions[specimen.id];
       const [x, , z] = specimen.spawnPoint;
-      const distance = Math.hypot(p.x - x, p.z - z);
+      const runtimeX = runtime?.x ?? x;
+      const runtimeZ = runtime?.z ?? z;
+      const distance = Math.hypot(p.x - runtimeX, p.z - runtimeZ);
       if (distance < nearestDistance) {
         nearest = specimen.id;
         nearestDistance = distance;
@@ -1626,8 +1797,19 @@ export function PlayerController({ physicsDebug = false }) {
     lastInteract.current = keys.interact || touch.interact;
     lastCamera.current = keys.camera;
 
+    const terrainCameraY = collisionAdapter.terrainHeight(p.x, p.z) + 0.04;
+    const lowTraversalLift = Math.max(0, p.y - terrainCameraY);
+    const cameraTargetY = lowTraversalLift > 0.05 && lowTraversalLift < 0.85 && !wasAirborne.current
+      ? terrainCameraY
+      : p.y;
+    cameraFollowY.current = cameraFollowY.current === null
+      ? cameraTargetY
+      : THREE.MathUtils.damp(cameraFollowY.current, cameraTargetY, 7, delta);
+    const cameraAnchor = p.clone();
+    cameraAnchor.y = cameraFollowY.current;
+
     const offset = cameraTargets[viewMode] || cameraTargets.shoulder;
-    const desired = offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current).add(p);
+    const desired = offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current).add(cameraAnchor);
     const impulse = cameraImpulse.current;
     const impulseProgress = THREE.MathUtils.clamp((now - impulse.startedAt) / Math.max(0.01, impulse.duration), 0, 1);
     const impulseFade = Math.sin(impulseProgress * Math.PI) * impulse.intensity;
@@ -1646,9 +1828,9 @@ export function PlayerController({ physicsDebug = false }) {
       camera.rotation.order = 'YXZ'; // yaw then pitch -> no unwanted roll
       camera.rotation.set(lookPitch, yaw.current, 0);
     } else if (viewMode === 'top') {
-      const top = p.clone().add(new THREE.Vector3(0, THREE.MathUtils.clamp(zoom.current * 3.4, 9, 42), 0.1));
+      const top = cameraAnchor.clone().add(new THREE.Vector3(0, THREE.MathUtils.clamp(zoom.current * 3.4, 9, 42), 0.1));
       camera.position.lerp(top.add(cameraShake), 0.12);
-      camera.lookAt(p.x, p.y, p.z);
+      camera.lookAt(cameraAnchor.x, cameraAnchor.y, cameraAnchor.z);
     } else {
       // Full spherical orbit around the player: yaw + pitch + pan offset.
       const cameraForward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
@@ -1658,7 +1840,7 @@ export function PlayerController({ physicsDebug = false }) {
       const side = THREE.MathUtils.lerp(0.6, 1.5, zoomT);
       const pitchA = THREE.MathUtils.clamp(pitch.current, CAMERA.minPitch, CAMERA.maxPitch);
       // Pivot around the player's upper body, shifted by any active pan.
-      const pivot = p.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffset.current);
+      const pivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffset.current);
       // Orbit: pull back horizontally by cos(pitch), rise by sin(pitch).
       const horiz = Math.cos(pitchA) * cameraDistance;
       const vert = Math.sin(pitchA) * cameraDistance;
@@ -1685,7 +1867,42 @@ export function PlayerController({ physicsDebug = false }) {
     );
     stateRef.current.walking = horizontalSpeed > 0.55 && !stateRef.current.running;
     stateRef.current.airborne = wasAirborne.current;
+    wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
+    // Drowning: past wading depth the sea takes its toll. Damage accumulates
+    // locally and hits the store in chunks so we don't set state every frame.
+    if (wadeDepth.current > WADE_DEPTH && health > 0) {
+      drownDamage.current += delta * 9;
+      if (drownDamage.current >= 4) {
+        applyDrowningDamage(drownDamage.current);
+        drownDamage.current = 0;
+      }
+    } else {
+      drownDamage.current = 0;
+    }
     if (!stateRef.current.airborne && moving && horizontalSpeed > 0.85 && !jumpCharge.current.active) {
+      if (wadeDepth.current > 0.05) {
+        // Wading: footfalls kick up splashes instead of dust.
+        const cadence = (stateRef.current.running ? 3.1 : 2.1) * THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, 1.6);
+        footstepDust.current.phase += delta * cadence;
+        if (footstepDust.current.phase >= 1) {
+          footstepDust.current.phase -= 1;
+          footstepDust.current.side *= -1;
+          const sideX = -facing.current.z * footstepDust.current.side * 0.18;
+          const sideZ = facing.current.x * footstepDust.current.side * 0.18;
+          emitPropEvent('water-splash', {
+            position: {
+              x: p.x + sideX + facing.current.x * 0.22,
+              y: WATER_LEVEL,
+              z: p.z + sideZ + facing.current.z * 0.22,
+            },
+            intensity: THREE.MathUtils.clamp(
+              0.28 + horizontalSpeed / PLAYER.runSpeed * 0.3 + wadeDepth.current * 0.5,
+              0.3,
+              0.8,
+            ),
+          });
+        }
+      } else {
       const biome = terrainBiomeAt(p.x, p.z, p.y, currentZoneId);
       const dustyBiome = biome === 'ash-slope'
         || biome === 'black-lava'
@@ -1710,6 +1927,7 @@ export function PlayerController({ physicsDebug = false }) {
             position: new THREE.Vector3(footstepDust.current.side * 0.18, 0.055, 0.18),
           });
         }
+      }
       }
     } else {
       footstepDust.current.phase = Math.min(footstepDust.current.phase, 0.35);
