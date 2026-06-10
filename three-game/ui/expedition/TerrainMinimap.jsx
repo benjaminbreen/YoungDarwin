@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { sampleRegionMap } from '../../world/terrain';
 
 // Bakes a top-down hillshaded chart of the zone's real heightfield into a
@@ -103,9 +103,14 @@ export function bakeTerrainChart(zone) {
 const chartCache = new Map();
 
 export function useTerrainChart(zone) {
-  return useMemo(() => {
+  const [chartUrl, setChartUrl] = useState(null);
+
+  useEffect(() => {
     if (!zone?.id) return null;
     if (!chartCache.has(zone.id)) chartCache.set(zone.id, bakeTerrainChart(zone));
-    return chartCache.get(zone.id);
+    setChartUrl(chartCache.get(zone.id));
+    return undefined;
   }, [zone?.id]);
+
+  return chartUrl;
 }

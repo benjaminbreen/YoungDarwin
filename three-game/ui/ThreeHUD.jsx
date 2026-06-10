@@ -59,6 +59,10 @@ function worldToMapPercent(position, zone) {
   };
 }
 
+function percentStyle(value) {
+  return `${Number(value).toFixed(3)}%`;
+}
+
 function routePosition(edge) {
   const positions = {
     north: { x: 50, y: 6 },
@@ -213,7 +217,7 @@ function IslandOverview({ zoneId, zoneName }) {
       {location && (
         <span
           className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-expedition-ink/80 bg-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.85)]"
-          style={{ left: `${location.at.x * 100}%`, top: `${location.at.y * 100}%` }}
+          style={{ left: percentStyle(location.at.x * 100), top: percentStyle(location.at.y * 100) }}
           title={location.name}
         />
       )}
@@ -255,7 +259,7 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
             type="button"
             onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[route.edge] || null })}
             className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright bg-expedition-gold/85 text-[0] shadow-[0_0_10px_rgba(227,197,133,0.5)] transition hover:bg-expedition-goldbright"
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
+            style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
             title={route.label}
           >
             {route.label}
@@ -279,7 +283,7 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
                   ? 'border-emerald-950 bg-emerald-300/90'
                   : 'border-expedition-ink/80 bg-rose-300/95'
             }`}
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
+            style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
             title={specimen.name}
           />
         );
@@ -287,8 +291,8 @@ function MapOverlays({ zone, zoom = 1, focus = null }) {
       <span
         className="absolute flex h-5 w-5 items-center justify-center rounded-full border border-expedition-goldbright/90 bg-expedition-ink/68 shadow-lg"
         style={{
-          left: `${zoom === 1 ? player.x : 50}%`,
-          top: `${zoom === 1 ? player.y : 50}%`,
+          left: percentStyle(zoom === 1 ? player.x : 50),
+          top: percentStyle(zoom === 1 ? player.y : 50),
           transform: `translate(-50%, -50%) rotate(${heading}deg)`,
         }}
         title="Darwin"
@@ -321,7 +325,7 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
         onSelect={setView}
       />
       <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
-        <div className="min-w-0 truncate font-expedition text-[13px] font-semibold tracking-wide text-expedition-parchment">
+        <div className="min-w-0 truncate font-expedition text-[12px] font-light tracking-wide text-expedition-parchment">
           {zone.shortName || zone.name}
         </div>
         <CompassRoseIcon className="h-4 w-4 shrink-0 text-expedition-gold/80" />

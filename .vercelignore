@@ -1,0 +1,32 @@
+node_modules
+.next
+test-results
+coverage
+assets-src
+
+# Local/raw 3D source dumps and references. Runtime GLBs live under public/.
+Action Adventure Pack
+Male Locomotion Pack
+Male Injured Pack copy
+Dense Bushland
+*.fbx
+*.fbx copy
+*.blend
+*.rar
+uploads-files-*.rar
+realistic_animals_small_pack.glb
+blue_footed_booby_for_my_zootopia_fan_film.glb
+
+# Design/reference images kept locally.
+*mockup*.png
+*mockup*.jpg
+current*.png
+current*.jpg
+desired ui*.png
+field journal asset blank.png
+floreana island map.png
+journal_blank_page_asset.png
+splash page background asset.png
+observation modal.png
+island map modal reference.png
+inventory assets

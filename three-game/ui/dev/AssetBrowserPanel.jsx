@@ -30,13 +30,6 @@ const BROWSER_ASSETS = [
   { id: 'driftwood', label: 'Bleached Driftwood', path: '/assets/models/nature/runtime-driftwood.glb' },
   { id: 'lava-scree', label: 'Lava Scree Field', path: '/assets/models/nature/runtime-lava-scree.glb' },
   { id: 'drybrush', label: 'Dry Wrack & Brush Field', path: '/assets/models/nature/runtime-drybrush.glb' },
-  // Unplaced candidates kept for future zones.
-  { id: 'high-grass', label: 'Candidate: High Grass', path: '/assets/models/nature/candidate-high-grass.glb' },
-  { id: 'low-tree', label: 'Candidate: Low Tree', path: '/assets/models/nature/candidate-low-tree.glb' },
-  { id: 'dry-grass-tuft', label: 'Candidate: Dry Grass Tuft', path: '/assets/models/nature/candidate-dry-grass-tuft.glb' },
-  { id: 'ground-chunk', label: 'Candidate: Grass Ground Chunk', path: '/assets/models/nature/candidate-ground-chunk.glb' },
-  { id: 'shore-fescue', label: 'Candidate: Fescue Clump (heavy)', path: '/assets/models/nature/candidate-shore-fescue.glb' },
-  { id: 'sagebrush-small', label: 'Candidate: Sagebrush Spread', path: '/assets/models/nature/candidate-sagebrush-small.glb' },
   { id: 'cur-dry-grass', label: 'Current: Dry Grass', path: '/assets/models/nature/runtime-animated-dry-grass.glb' },
   { id: 'cur-shrub', label: 'Current: Shrub', path: '/assets/models/nature/runtime-plant-shrub.glb' },
   { id: 'cur-small-shrub', label: 'Current: Small Shrub', path: '/assets/models/nature/runtime-small-shrub.glb' },

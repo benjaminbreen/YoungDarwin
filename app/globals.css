@@ -1,11 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-garamond: 'EB Garamond';
   --foreground-rgb: 45, 35, 25;
   --background-start-rgb: 255, 248, 220;
   --background-end-rgb: 245, 233, 201;
@@ -28,12 +25,12 @@ body {
       rgb(var(--background-end-rgb))
     );
   min-height: 100vh;
-  font-family: 'Lora', Georgia, serif;
+  font-family: var(--font-lora), Georgia, serif;
   letter-spacing: 0.01em;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'EB Garamond', 'Times New Roman', serif;
+  font-family: var(--font-garamond), 'Times New Roman', serif;
   font-weight: 500;
   letter-spacing: 0.03em;
   color: rgb(var(--darwin-dark));

@@ -62,7 +62,7 @@ export function PanelTabs({ tabs, active, onSelect, className = '' }) {
             key={tab.id}
             type="button"
             onClick={() => onSelect(tab.id)}
-            className={`flex-1 px-2 py-2 text-[11.5px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none ${
+            className={`flex-1 px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none ${
               isActive
                 ? 'rounded-t-sm border border-b-0 border-expedition-gold/70 bg-expedition-gold/15 text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.25),inset_0_-2px_0_rgba(227,197,133,0.85)]'
                 : 'text-expedition-faded hover:text-expedition-parchment'

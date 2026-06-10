@@ -95,7 +95,7 @@ const postOfficeBayObstacles = [
     id: 'dead-tree-landing',
     kind: 'tree',
     render: {
-      path: `${NATURE}source/DeadTree_1.gltf`,
+      path: `${NATURE}runtime-palo-santo.glb`,
       position: [-10.8, 0, 1.2],
       rotation: [0, -0.35, 0],
       scale: 1.35,
@@ -107,7 +107,7 @@ const postOfficeBayObstacles = [
     id: 'dead-tree-ridge',
     kind: 'tree',
     render: {
-      path: `${NATURE}source/DeadTree_3.gltf`,
+      path: `${NATURE}runtime-palo-santo.glb`,
       position: [5.5, 0, 25.5],
       rotation: [0, 0.62, 0],
       scale: 1.2,
@@ -119,7 +119,7 @@ const postOfficeBayObstacles = [
     id: 'twisted-tree-scrub',
     kind: 'tree',
     render: {
-      path: `${NATURE}source/TwistedTree_2.gltf`,
+      path: `${NATURE}runtime-manzanillo.glb`,
       position: [19.8, 0, 11.8],
       rotation: [0, -1.05, 0],
       scale: 1.1,
