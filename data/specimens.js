@@ -5,35 +5,6 @@ import { canonicalizeSpecimen, canonicalSpecimenId } from '../utils/canonicalIds
 // Base specimen list 
 export const baseSpecimens = [
   {
-    id: 'easternsantacruztortoise',
-    name: 'Eastern Santa Cruz Tortoise',
-    latin: 'Chelonoidis niger donfaustoi',
-    ontology: 'Animal',
-    order: 'Reptile',
-    sub_order: 'Tortoise',
-    description: 'A moderately sized giant tortoise with a domed shell, found in the eastern highlands of Santa Cruz Island.',
-    details: [
-      'Smaller and more rounded shell than western varieties',
-      'Neck proportions suggest browsing on lower vegetation',
-      'Often seen resting for long hours, conserving energy',
-      'Broad, sturdy limbs for steady movement over rocky ground'
-    ],
-    habitat: 'scrubland, forest, CoastalTrail',
-    collected: false,
-    observations: [],
-    scientificValue: 9,
-    hybrid_ease: 7,
-    hybrid_temperature: 5,
-    danger: 2,  
-    timeofday: 'Diurnal',
-    quote: '',
-    image: '/specimens/eastern_santa_cruz_tortoise.jpg',
-    memoryText: '“There can be little doubt this tortoise is native to these islands. Could their isolation alone shape such divergent forms?”',
-    contents: 'Upon opening the creature, one would likely find fibrous green plant matter and a large, spacious body cavity.',
-    keywords: ['tortoise', 'chelonian', 'giant', 'galápagos', 'reptile', 'chelonoidis', 'isolation']
-  },
-
-  {
     id: 'floreanagianttortoise',
     name: 'Floreana Giant Tortoise',
     latin: 'Chelonoidis niger niger',
@@ -85,7 +56,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/galapagos_mockingbird.jpg',
+    image: '/specimens/galapagosmockingbird.jpg',
     memoryText: '“They show no great inclination to flee, a tameness I have observed in many island creatures.”',
     contents: 'Dissection would likely reveal insects, bits of fruit, and occasionally small scraps of carrion within the gizzard.',
     keywords: ['mockingbird', 'bird', 'mimus', 'songbird', 'curved beak', 'foraging', 'island adaptation']
@@ -143,7 +114,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/large_ground_finch.jpg',
+    image: '/specimens/largegroundfinch.jpg',
     memoryText: '“I find the beak so exaggerated as to suggest a separate species entirely. Yet it is but another variety in this curious family.”',
     contents: 'Within the crop, one would discover large, thick-shelled seeds and a scattering of grit used for grinding.',
     keywords: ['large ground finch', 'bird', 'geospiza', 'beak', 'seed-eater', 'darwin', 'floreana']
@@ -172,7 +143,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/medium_ground_finch.jpg',
+    image: '/specimens/mediumgroundfinch.jpg',
     memoryText: '“Within one species, a remarkable range of beak forms exists. This fact perplexes me greatly—what might such variation portend?”',
     contents: 'Upon examination, seeds of varying sizes, fruit pulp, and occasional insect remains would be found.',
     keywords: ['medium ground finch', 'bird', 'geospiza', 'beak', 'variation', 'darwin', 'floreana']
@@ -201,7 +172,7 @@ export const baseSpecimens = [
     danger: 3,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/iguana.jpg',
+    image: '/specimens/marineiguana.jpg',
     memoryText: '“A hideous creature, though fascinating: it swims with ease, living off the sea’s algae. One wonders how it first reached these shores.”',
     contents: 'The stomach would reveal wet clumps of seaweed, occasionally gritty sand, and swallowed fragments of algae-covered rock.',
     keywords: ['iguana', 'lizard', 'reptile', 'marine', 'black', 'swimming', 'amblyrhynchus']
@@ -238,7 +209,7 @@ export const baseSpecimens = [
 
   {
     id: 'cactus',
-    name: 'San Cristóbal Lava Cactus',
+    name: 'Lava Cactus',
     latin: 'Brachycereus nesioticus',
     ontology: 'Plant',
     order: 'Cactus',
@@ -267,8 +238,8 @@ export const baseSpecimens = [
 
   {
     id: 'lavalizard',
-    name: 'Lava Lizard',
-    latin: 'Microlophus bivittatus',
+    name: 'Floreana Lava Lizard',
+    latin: 'Microlophus grayii',
     ontology: 'Animal',
     order: 'Reptile',
     sub_order: 'Lizard',
@@ -317,7 +288,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/sallylightfoot.jpg',
+    image: '/specimens/crab.jpg',
     memoryText: '“The sailors spoke of their agility, which I initially doubted. But indeed, they move in any direction with startling quickness.”',
     contents: 'Within its shell, bits of algae, tiny shell fragments, and occasional morsels of rotting fish may be discovered.',
     keywords: ['crab', 'red', 'crustacean', 'sally', 'lightfoot', 'grapsus', 'tide', 'rock']
@@ -433,7 +404,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/coralfragment.jpg',
+    image: '/specimens/coral.jpg',
     memoryText: '“A relic of the reef—its once-living architecture is now a mere skeleton, polished by the waves.”',
     contents: 'Broken open, one finds only hollow calcified passages, long since emptied of life.',
     keywords: ['coral', 'calcium', 'marine', 'white', 'fragment', 'reef', 'polyp', 'skeleton']
@@ -441,18 +412,18 @@ export const baseSpecimens = [
 
   {
   id: 'seaurchin',
-  name: 'Black Sea Urchin',
-  latin: 'Arbacia galapagensis',
+  name: 'Slate-pencil Urchin',
+  latin: 'Eucidaris galapagensis',
   ontology: 'Animal',
   order: 'Echinoderm',
   sub_order: 'Sea Urchin',
-  description: 'A dark, spiny sea creature found clinging to submerged rocks in tidal pools and along the shore.',
+  description: 'A reddish sea creature bearing thick, blunt spines like stubs of pencil, found wedged into rock crevices in tidal pools and along the shore.',
   details: [
-    'Round body covered in long, needle-like black spines',
-    'Spines sway gently in the current, appearing almost plant-like',
+    'Round body ringed with stout, club-like spines, often worn smooth',
+    'Wedges itself firmly into rock crevices by day',
     'Clings to submerged rocks with hundreds of tiny tube feet',
     'When prodded, the spines move slightly, revealing a living creature beneath',
-    'Can be difficult to pick up, as its spines shift to resist handling'
+    'Old spines are frequently encrusted with coralline algae'
   ],
   habitat: 'shore, reef, bay, ocean',
   collected: false,
@@ -464,9 +435,9 @@ export const baseSpecimens = [
   timeofday: 'Diurnal',
   quote: '',
   image: '/specimens/seaurchin.jpg',
-  memoryText: '“The black spines of these creatures shift slightly when touched, as if resisting capture. Scattered along the rocky pools, they seem almost vegetable-like, until disturbed.”',
+  memoryText: '“Its spines are not needles but stout batons, worn like old pencils. Wedged in its crevice, it resisted my efforts with surprising obstinacy.”',
   contents: 'If split open, the interior reveals five symmetrical orange lobes of soft, edible flesh, surrounded by a delicate web of calcareous plates.',
-  keywords: ['sea urchin', 'echinoderm', 'spines', 'tidal', 'arbacia', 'marine']
+  keywords: ['sea urchin', 'echinoderm', 'spines', 'tidal', 'eucidaris', 'marine']
 },
 
 
@@ -493,7 +464,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/volcanorock.jpg',
+    image: '/specimens/basalt.jpg',
     memoryText: '“Black truncated cones abound, their slopes composed of such basaltic rubble. The heat underfoot can be punishing.”',
     contents: 'Split open, the stone reveals small air pockets and a dense interior of dark minerals.',
     keywords: ['basalt', 'rock', 'lava', 'formation', 'volcanic', 'black', 'vesicular', 'jagged']
@@ -729,7 +700,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/olivine_chrysolite.jpg',
+    image: '/specimens/olivine.jpg',
     memoryText: '“Among the dark volcanic rubble, these green crystals catch the eye, shining like scattered jewels upon the ground.”',
     contents: 'When broken apart, the stone reveals tiny angular crystals with a glossy greenish hue.',
     keywords: ['olivine', 'chrysolite', 'mineral', 'volcanic', 'green']
@@ -757,7 +728,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/plicopurpura_patula.jpg',
+    image: '/specimens/plicopurpura.jpg',
     memoryText: '“In examining these snails, one finds a peculiar purple fluid marking one’s fingers—a curiosity indeed.”',
     contents: 'Upon opening, a soft-bodied mollusk is revealed, and faint traces of purple fluid within the mantle cavity.',
     keywords: ['sea snail', 'gastropod', 'purpura', 'shell', 'tidal', 'intertidal']
@@ -783,42 +754,13 @@ export const baseSpecimens = [
     danger: 2, 
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/neorapana_grandis.jpg',
+    image: '/specimens/neorapana.jpg',
     memoryText: '“Its shell is formidable, thick and encrusted, suggesting a life spent among harsh waves and opportunistic predators.”',
     contents: 'Inside, one would find sand. This is an empty shell.',
     keywords: ['neorapana', 'grandis', 'gastropod', 'shell', 'marine']
   },
 
   {
-  id: 'galapagospenguin',
-  name: 'Galápagos Penguin',
-  latin: 'Spheniscus mendiculus',
-  ontology: 'Animal',
-  order: 'Bird',
-  sub_order: 'Penguin',
-  description: 'The northernmost penguin species, thriving in cool currents along the rocky shores despite the tropical latitude.',
-  details: [
-    'Small stature compared to Antarctic relatives',
-    'Black and white plumage with a distinctive band across the chest',
-    'Nests in crevices of lava rocks near the waterline',
-    'Remarkably agile underwater, chasing fish in swift bursts'
-  ],
-  habitat: 'cliff',
-  collected: false,
-  observations: [],
-  scientificValue: 7,
-  hybrid_ease: 1,
-  hybrid_temperature: 1,
-  danger: 2,
-  timeofday: 'Diurnal',
-  quote: '',
-  image: '/specimens/galapagospenguin.jpg',
-  memoryText: '“I confess surprise in seeing these creatures, so reminiscent of the southern latitudes, happily bobbing along the equator.”',
-  contents: 'If opened, the stomach would reveal small fish, bits of crustaceans, and gritty salt residue.',
-  keywords: ['penguin', 'bird', 'galapagos', 'spheniscus', 'marine', 'equator'],
-  emoji: '🐧'
-},
-{
   id: 'shortearedowl',
   name: 'Galápagos Short-eared Owl',
   latin: 'Asio flammeus galapagoensis',
@@ -832,7 +774,7 @@ export const baseSpecimens = [
     'Flight can be silent, skimming near the ground',
     'Remarkably variable diet, even scavenging on carcasses'
   ],
-  habitat: 'camp',
+  habitat: 'highland, scrubland, camp',
   collected: false,
   observations: [],
   scientificValue: 6,
@@ -861,7 +803,7 @@ export const baseSpecimens = [
     'Primarily diurnal, basking on lava outcrops before foraging',
     'Delivers quick, targeted strikes at prey'
   ],
-  habitat: 'highland',
+  habitat: 'scrubland, lavafield',
   collected: false,
   observations: [],
   scientificValue: 6,
@@ -1021,7 +963,7 @@ export const baseSpecimens = [
   danger: 1, // Not dangerous to handle
   timeofday: 'Diurnal',
   quote: '',
-  image: '/specimens/timesoflondonjune1835.jpg',
+  image: '/specimens/timesoflondon.jpg',
   memoryText: '“The paper crackles as you unfold it, its headlines a reminder of a distant home and a world still spinning outside these islands.”',
   contents: 'Covers the third week of June, 1835, with notable editorials on trade issues, parliamentary reforms, and a smattering of local advertisements.',
   keywords: ['newspaper', 'London', 'press', 'Times', '1835', 'English news']
@@ -1080,7 +1022,7 @@ export const baseSpecimens = [
   danger: 9, // Bites if cornered or frightened
   timeofday: 'Diurnal',
   quote: '',
-  image: '/specimens/petmonkey.jpg',
+  image: '/specimens/jackothemonkey.jpg',
   memoryText: '“The crew has grown fond of Jacko’s antics, though his pranks can rouse even the mildest sailor to fury.”',
   contents: 'Were one to open the poor beast, one might find half-chewed fruit, bits of biscuit, and the occasional shiny trinket swallowed in mischief.',
   keywords: ['monkey', 'beagle', 'capuchin', 'pet', 'mascot']
@@ -1140,7 +1082,7 @@ export const baseSpecimens = [
   danger: 1, // Generally harmless object
   timeofday: 'Any',
   quote: '',
-  image: '/specimens/scrimshaw_whale_tooth.jpg',
+  image: '/specimens/scrimshawwhaletooth.jpg',
   memoryText: '“Sailors often whittled their stories into bone, so each carved line holds a small piece of their watery world.”',
   contents: 'If fractured, layers of dense ivory reveal an inner grain once part of a mighty whale’s jaw.',
   keywords: ['scrimshaw', 'whale tooth', 'ivory', 'artifact', 'maritime']
@@ -1197,7 +1139,7 @@ export const baseSpecimens = [
   danger: 1, // No inherent harm, but prized
   timeofday: 'Any',
   quote: '',
-  image: '/specimens/meteor_iron_fragment.jpg',
+  image: '/specimens/meteoriron.jpg',
   memoryText: '“To hold stardust in one’s hand—an echo of the heavens, grounded here among black volcanic rubble.”',
   contents: 'Iron-nickel alloy core with tiny sulfide flecks, reminiscent of celestial forging.',
   keywords: ['meteorite', 'iron', 'nickel', 'cosmic', 'space']
@@ -1226,7 +1168,7 @@ export const baseSpecimens = [
   danger: 2, // Sulphur dust can irritate eyes or lungs
   timeofday: 'Any',
   quote: '',
-  image: '/specimens/solidified_sulphur.jpg',
+  image: '/specimens/solidifiedsulphur.jpg',
   memoryText: '“Nature conjures these brilliant mounds from toxic fumes—the artistry and peril of volcanic life.”',
   contents: 'Layered sulfur crystals, highly prone to fracturing, with small pockets of trapped volcanic gas.',
   keywords: ['sulphur', 'volcanic', 'mineral', 'yellow', 'deposit']
@@ -1254,7 +1196,7 @@ export const baseSpecimens = [
   danger: 10, // highly toxic, immediately kills darwin
   timeofday: 'Any',
   quote: '',
-  image: '/specimens/fennec_scurvy_remedy.jpg',
+  image: '/specimens/scurvyremedy.jpg',
   memoryText: '“A questionable elixir promising swift cures. Perhaps it offered hope to scurvy-ridden souls, if not real relief.”',
   contents: 'Sticky residue, likely a mix of citrus peel extract, odd herbs, and exceptionally poisonous binders. Kills Darwin if drunk.',
   keywords: ['poison', 'bottle', 'scurvy', 'folk remedy', 'quackery']
@@ -1283,7 +1225,7 @@ export const baseSpecimens = [
   danger: 4, // Symbolic of a violent past
   timeofday: 'Diurnal',
   quote: '',
-  image: '/specimens/skull.jpg',
+  image: '/specimens/captainsskull.jpg',
   memoryText: '“A chilling relic of man’s darker impulses. I stumbled upon it among the bushes, the empty eye sockets staring blankly.”',
   contents: 'Within the cranial cavity, only dust and brittle remnants remain, testifying to a brutal end years ago.',
   keywords: ['skull', 'murder', 'remains', 'captain', 'history']

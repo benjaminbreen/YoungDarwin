@@ -38,7 +38,7 @@ export function ExpeditionPanel({ className = '', innerClassName = '', children,
     <div
       className={`${interactive ? 'pointer-events-auto' : 'pointer-events-none'} relative rounded-md border border-expedition-brass/80 ${PANEL_BG} ${PANEL_TEXT} shadow-[0_16px_38px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(227,197,133,0.18)] ${className}`}
       style={{
-        background: 'linear-gradient(165deg, rgba(24,28,29,0.56), rgba(18,20,18,0.62) 58%, rgba(11,10,8,0.70))',
+        background: 'linear-gradient(165deg, rgba(27,37,48,0.80), rgba(20,28,38,0.84) 58%, rgba(11,16,23,0.90))',
       }}
     >
       {/* inner hairline keeps the brass frame reading as bevelled metal */}
@@ -62,9 +62,9 @@ export function PanelTabs({ tabs, active, onSelect, className = '' }) {
             key={tab.id}
             type="button"
             onClick={() => onSelect(tab.id)}
-            className={`flex-1 px-2 py-1.5 text-[12px] tracking-[0.06em] transition focus:outline-none ${
+            className={`flex-1 px-2 py-2 text-[11.5px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none ${
               isActive
-                ? 'rounded-t-sm border border-b-0 border-expedition-gold/70 bg-expedition-gold/15 font-semibold text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.25)]'
+                ? 'rounded-t-sm border border-b-0 border-expedition-gold/70 bg-expedition-gold/15 text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.25),inset_0_-2px_0_rgba(227,197,133,0.85)]'
                 : 'text-expedition-faded hover:text-expedition-parchment'
             }`}
           >

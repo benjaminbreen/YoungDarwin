@@ -268,7 +268,7 @@ export const locations = [
     color: '#8fbc8f',
     type: 'cliff',
     validMoves: ['N','W','SW','S'],
-    specimens: ['frigatebird','galapagos_mockingbird'],
+    specimens: ['frigatebird','floreana_mockingbird'],
     npcs: ['gabriel_puig'],
     boundaries: {},
     discoveries: [
@@ -383,7 +383,7 @@ export const locations = [
     color: 'black',
     type: 'highland',
     validMoves: ['N','E','S','W'],
-    specimens: ['galapagos_mockingbird'],
+    specimens: ['floreana_mockingbird'],
     npcs: [],
     boundaries: {},
     discoveries: [

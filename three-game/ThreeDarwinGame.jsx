@@ -19,6 +19,7 @@ const KEYBOARD_MAP = [
   { name: 'jump', keys: ['Space'] },
   { name: 'dodge', keys: ['KeyB'] },
   { name: 'interact', keys: ['KeyE'] },
+  { name: 'useTool', keys: ['MetaLeft', 'MetaRight'] },
   { name: 'camera', keys: ['KeyC'] },
   { name: 'rotateLeft', keys: ['KeyZ'] },
   { name: 'rotateRight', keys: ['KeyX'] },

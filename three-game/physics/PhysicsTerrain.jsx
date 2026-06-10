@@ -14,10 +14,12 @@ function buildTerrainHeightfield(regionId) {
   const halfWidth = config.width / 2;
   const halfDepth = config.depth / 2;
 
-  for (let zIndex = 0; zIndex < rows; zIndex += 1) {
-    const z = -halfDepth + (zIndex / colliderSegments) * config.depth;
-    for (let xIndex = 0; xIndex < cols; xIndex += 1) {
-      const x = -halfWidth + (xIndex / colliderSegments) * config.width;
+  // Rapier heightfields are column-major: columns run along x, rows along z,
+  // so x must be the outer loop. The reversed order skews heights by metres.
+  for (let xIndex = 0; xIndex < cols; xIndex += 1) {
+    const x = -halfWidth + (xIndex / colliderSegments) * config.width;
+    for (let zIndex = 0; zIndex < rows; zIndex += 1) {
+      const z = -halfDepth + (zIndex / colliderSegments) * config.depth;
       heights.push(movementTerrainHeight(x, z, regionId));
     }
   }

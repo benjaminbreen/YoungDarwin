@@ -12,7 +12,22 @@ const touchState = {
   net: false,
   hammer: false,
   gather: false,
+  fireRifle: false,
+  write: false,
 };
+
+// Which one-shot action control each equipped tool fires when "used".
+const TOOL_USE_CONTROLS = {
+  hammer: 'hammer',
+  insect_net: 'net',
+  shotgun: 'fireRifle',
+  snare: 'gather',
+  sketch: 'write',
+};
+
+export function triggerToolUse(toolId) {
+  setTouchControl(TOOL_USE_CONTROLS[toolId] || 'gather', true);
+}
 
 export function setTouchControl(control, active) {
   if (Object.prototype.hasOwnProperty.call(touchState, control)) {
@@ -29,5 +44,7 @@ export function consumeTouchControls() {
   touchState.net = false;
   touchState.hammer = false;
   touchState.gather = false;
+  touchState.fireRifle = false;
+  touchState.write = false;
   return snapshot;
 }

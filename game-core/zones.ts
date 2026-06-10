@@ -17,7 +17,7 @@ const postOfficeBaySpecimens = [
   { specimenId: 'marineiguana', position: [-13.5, 0, -19.5], behavior: 'bask', sceneScale: 1.28 },
   { specimenId: 'mediumgroundfinch', position: [8.5, 0, 7.2], behavior: 'curious', sceneScale: 1.35 },
   { specimenId: 'floreanagianttortoise', position: [-23.5, 0, 5.4], behavior: 'graze', sceneScale: 1.25 },
-  { specimenId: 'galapagospenguin', position: [17.8, 0, -28.5], behavior: 'waddle', sceneScale: 1.18 },
+  { specimenId: 'sealion', position: [17.8, 0, -28.5], behavior: 'bask', sceneScale: 1.18 },
   { specimenId: 'cactus', position: [20.5, 0, 14.5], behavior: 'still', sceneScale: 1.55 },
   { specimenId: 'basalt', position: [-17.5, 0, 10.5], behavior: 'still', sceneScale: 1.25 },
 ] satisfies Array<{ specimenId: SpecimenId; position: Vec3Tuple; behavior: string; sceneScale: number }>;

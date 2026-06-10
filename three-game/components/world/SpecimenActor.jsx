@@ -137,7 +137,7 @@ function ProceduralSpecimenShape({ specimen }) {
   );
 }
 
-function SpecimenShape({ specimen }) {
+export function SpecimenShape({ specimen }) {
   return <ModelAsset id={assetIdForSpecimen(specimen)} fallback={<ProceduralSpecimenShape specimen={specimen} />} />;
 }
 

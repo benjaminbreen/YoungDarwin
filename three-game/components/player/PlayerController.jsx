@@ -7,16 +7,22 @@ import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { getThreeSpecimens, threeTools } from '../../data';
-import { consumeTouchControls } from '../../input/touchControls';
+import { consumeTouchControls, triggerToolUse } from '../../input/touchControls';
+import { isGameplayInputBlocked } from '../../input/typingMode';
 import { getRegionTerrainConfig, regionSpawnPoint, terrainBiomeAt, TERRAIN_BOUNDS } from '../../world/terrain';
 import { getZone } from '../../world/floreanaZones';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
+import { emitPropEvent } from '../../physics/props/propEvents';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import {
   CHARACTER_CONTROLLER_CONFIG,
   useKinematicCharacterController,
 } from '../../physics/useKinematicCharacterController';
 import { ModelAsset } from '../assets/ModelAsset';
+
+// Stand-in for getKeys() while a HUD text input has focus: every control
+// reads as released, so typing never drives the character.
+const EMPTY_KEYS = {};
 
 const PLAYER = {
   walkSpeed: 4.45,
@@ -762,7 +768,7 @@ export function PlayerController({ physicsDebug = false }) {
 
   useFrame((_, delta) => {
     if (!group.current || health <= 0) return;
-    const keys = getKeys();
+    const keys = isGameplayInputBlocked() ? EMPTY_KEYS : getKeys();
     const touch = consumeTouchControls();
     const now = performance.now() / 1000;
     const feedback = bounceFeedback.current;
@@ -823,12 +829,14 @@ export function PlayerController({ physicsDebug = false }) {
       lockMovement = true,
       recoverAction = null,
       recoverDuration = ACTION_DURATION[recoverAction] || 1.2,
+      onStart = null,
     } = {}) => {
       stateRef.current.action = clip;
       stateRef.current.actionStartedAt = now;
       stateRef.current.actionUntil = now + duration;
       stateRef.current.lockMovementUntil = lockMovement ? now + duration : stateRef.current.lockMovementUntil;
       stateRef.current.recoverAction = recoverAction ? { clip: recoverAction, duration: recoverDuration } : null;
+      onStart?.();
     };
     const interruptAction = (allowed = MOVEMENT_INTERRUPTIBLE_ACTIONS) => {
       if (!allowed.has(stateRef.current.action)) return false;
@@ -1067,8 +1075,15 @@ export function PlayerController({ physicsDebug = false }) {
     const anyDirectActionPressed = Boolean(
       keys.pray || keys.fireRifle || keys.hammer || keys.net || keys.gather || keys.write || keys.inspect
       || keys.lookAround || keys.point || keys.trip || keys.teeter
-      || touch.net || touch.hammer || touch.gather
+      || touch.net || touch.hammer || touch.gather || touch.fireRifle || touch.write
     );
+    // "Use tool" command (Meta key / clicking the equipped tool): pulse the
+    // control mapped to the active tool; triggerAction picks it up next frame.
+    const useToolPressed = Boolean(keys.useTool);
+    if (useToolPressed && !lastButtons.current.useTool) {
+      triggerToolUse(useThreeGameStore.getState().activeToolId);
+    }
+    lastButtons.current.useTool = useToolPressed;
     if (moving) {
       interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
     }
@@ -1126,7 +1141,17 @@ export function PlayerController({ physicsDebug = false }) {
     const actionOptions = { movementLocked };
     triggerAction('pray', 'pray', ACTION_DURATION.pray, actionOptions);
     triggerAction('fireRifle', 'fireRifle', ACTION_DURATION.fireRifle, actionOptions);
-    triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, actionOptions);
+    triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
+      ...actionOptions,
+      onStart: () => {
+        emitPropEvent('tool-swing', {
+          tool: 'hammer',
+          position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+          facing: { x: facing.current.x, y: 0, z: facing.current.z },
+          impactDelay: 0.55,
+        });
+      },
+    });
     triggerAction('net', 'swingNet', ACTION_DURATION.swingNet, actionOptions);
     triggerAction('gather', 'gather', ACTION_DURATION.gather, actionOptions);
     triggerAction('write', 'write', ACTION_DURATION.write, { ...actionOptions, lockMovement: true });
@@ -1592,9 +1617,10 @@ export function PlayerController({ physicsDebug = false }) {
       }
     }
     if (keys.camera && !lastCamera.current) cycleViewMode();
+    const toolbarOrder = useThreeGameStore.getState().toolbarOrder;
     for (let index = 0; index < 6; index += 1) {
-      if (keys[`tool${index + 1}`] && threeTools[index]) {
-        setActiveTool(threeTools[index].id);
+      if (keys[`tool${index + 1}`] && toolbarOrder[index]) {
+        setActiveTool(toolbarOrder[index]);
       }
     }
     lastInteract.current = keys.interact || touch.interact;
