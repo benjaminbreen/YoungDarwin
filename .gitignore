@@ -63,6 +63,8 @@ desktop.ini
 /public/assets/models/animals/snake/
 /public/assets/models/livestock/
 /public/assets/models/nature/*.glb
+!/public/assets/models/nature/runtime-*.glb
+!/public/assets/models/nature/Rock_Medium_*.glb
 /public/assets/models/nature/*/source/
 /public/assets/models/nature/*/textures/
 /public/assets/models/nature/source/*
