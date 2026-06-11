@@ -6,9 +6,86 @@ import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainBiomeAt, terrainColor, terrainHeight, terrainSurfaceNoise } from '../../world/terrain';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
+import { skyState } from '../../world/celestial';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = -0.9;
+
+// ---------------------------------------------------------------------------
+// Seabed caustics — the dancing light net on submerged sand. Lives in the
+// terrain shader (light belongs on the bottom, where the eye expects it),
+// works for every zone's material, and costs a few noise lookups only on
+// pixels that are actually underwater. Two counter-scrolling Worley layers
+// min()-ed together so the filaments never look static (GPU Gems 2.4 trick).
+const CAUSTICS_GLSL = /* glsl */`
+  uniform float uCausticsTime;
+  uniform float uCausticsStrength;
+  varying vec3 vCausticsW;
+  vec2 cstHash2(vec2 p) {
+    return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+  }
+  float cstWorley(vec2 p, float t) {
+    vec2 cell = floor(p);
+    vec2 frac = fract(p);
+    float d = 1.0;
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        vec2 g = vec2(float(i), float(j));
+        vec2 o = cstHash2(cell + g);
+        o = 0.5 + 0.45 * sin(t + 6.2831 * o);
+        vec2 r = g + o - frac;
+        d = min(d, dot(r, r));
+      }
+    }
+    return d;
+  }
+  float cstLight(vec2 p, float t) {
+    float a = 1.0 - sqrt(cstWorley(p, t));
+    float b = 1.0 - sqrt(cstWorley(p * 1.31 + vec2(4.7, 9.1), -t * 0.83 + 2.0));
+    return pow(max(min(a, b), 0.0), 4.0);
+  }
+`;
+
+const CAUSTICS_APPLY = /* glsl */`
+  float cstDepth = ${WATER_SURFACE_Y.toFixed(2)} - vCausticsW.y;
+  if (cstDepth > 0.02 && uCausticsStrength > 0.001) {
+    float cstFade = smoothstep(0.02, 0.22, cstDepth) * (1.0 - smoothstep(2.2, 4.5, cstDepth));
+    vec2 cstP = vCausticsW.xz * 0.8 + vec2(uCausticsTime * 0.03, -uCausticsTime * 0.022);
+    float cst = cstLight(cstP, uCausticsTime * 0.7);
+    outgoingLight += vec3(1.0, 0.97, 0.85) * cst * cstFade * uCausticsStrength;
+  }
+`;
+
+// Layers caustics onto any terrain material, composing with whatever
+// onBeforeCompile the material already has.
+function injectSeabedCaustics(material) {
+  const previousCompile = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+  material.onBeforeCompile = shader => {
+    if (previousCompile) previousCompile(shader);
+    shader.uniforms.uCausticsTime = { value: 0 };
+    shader.uniforms.uCausticsStrength = { value: 0 };
+    material.userData.shader = shader;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vCausticsW;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vCausticsW = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${CAUSTICS_GLSL}`)
+      .replace('#include <opaque_fragment>', `${CAUSTICS_APPLY}\n#include <opaque_fragment>`);
+  };
+  material.customProgramCacheKey = () =>
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-v1`;
+  material.needsUpdate = true;
+  return material;
+}
 
 function createTerrainMaterial() {
   const material = new THREE.MeshStandardMaterial({
@@ -396,12 +473,16 @@ function createNorthwestReefTerrainMaterial() {
           return max(east, max(back, mid));
         }
         vec3 nwrSand(vec2 p) {
-          // Albedo capped around 0.74 — real coral sand reflects ~0.4-0.6, and
-          // anything brighter blows out to paper white under the noon sun.
+          // Albedo capped near 0.65: at noon the key light is ~3.2 and ACES at
+          // this exposure clips anything brighter to paper white. The sand
+          // still reads bright because the whole frame shares the same sun —
+          // structure (ripples, grain) is what makes it read as sand.
           float grain = nwrFbm(p * 0.7 + vec2(4.0, -9.0));
-          float ripple = smoothstep(0.12, 0.0, abs(sin((p.x * 0.5 + p.y * 1.5) * 1.6)) - 0.05);
-          vec3 color = mix(vec3(0.62, 0.57, 0.44), vec3(0.74, 0.69, 0.56), grain);
-          color = mix(color, vec3(0.81, 0.77, 0.65), ripple * 0.14);
+          float rippleWave = sin((p.x * 0.35 + p.y * 1.25) * 1.7 + nwrFbm(p * 0.5) * 2.4);
+          float ripple = smoothstep(0.18, 0.0, abs(rippleWave) - 0.05);
+          vec3 color = mix(vec3(0.52, 0.48, 0.37), vec3(0.65, 0.60, 0.48), grain);
+          color = mix(color, vec3(0.71, 0.67, 0.56), ripple * 0.2);
+          color = mix(color, vec3(0.45, 0.41, 0.32), smoothstep(0.6, 0.95, nwrFbm(p * 3.1 + vec2(-2.0, 6.0))) * 0.18);
           return color;
         }
         vec3 nwrSeabed(vec2 p, float h) {
@@ -482,12 +563,15 @@ function createNorthwestReefTerrainMaterial() {
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
-        float detailHeight = nwrFbm(vTerrainWorld.xz * 2.2) * 0.4 + nwrFbm(vTerrainWorld.xz * 8.0) * 0.14;
+        // Shore-parallel wind ripples + grain give the sand surface relief so
+        // it shades like sand instead of a flat bright plane.
+        float rippleRelief = sin((vTerrainWorld.x * 0.35 + vTerrainWorld.z * 1.25) * 1.7 + nwrFbm(vTerrainWorld.xz * 0.5) * 2.4) * 0.22;
+        float detailHeight = nwrFbm(vTerrainWorld.xz * 2.2) * 0.4 + nwrFbm(vTerrainWorld.xz * 8.0) * 0.14 + rippleRelief;
         vec3 dpdx = dFdx(vTerrainWorld);
         vec3 dpdy = dFdy(vTerrainWorld);
         float dhdx = dFdx(detailHeight);
         float dhdy = dFdy(detailHeight);
-        normal = normalize(normal - 0.3 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`,
+        normal = normalize(normal - 0.34 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`,
       )
       .replace(
         '#include <dithering_fragment>',
@@ -496,7 +580,7 @@ function createNorthwestReefTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'nw-reef-splat-v3';
+  material.customProgramCacheKey = () => 'nw-reef-splat-v4';
   material.needsUpdate = true;
   return material;
 }
@@ -540,16 +624,23 @@ export function Terrain() {
   }, [currentZoneId]);
 
   const material = useMemo(() => {
-    if (authoredPostOffice) return createTerrainMaterial();
-    if (authoredNorthShore) return createNorthShoreTerrainMaterial();
-    if (authoredNwReef) return createNorthwestReefTerrainMaterial();
-    return new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+    if (authoredPostOffice) return injectSeabedCaustics(createTerrainMaterial());
+    if (authoredNorthShore) return injectSeabedCaustics(createNorthShoreTerrainMaterial());
+    if (authoredNwReef) return injectSeabedCaustics(createNorthwestReefTerrainMaterial());
+    return injectSeabedCaustics(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }));
   }, [authoredPostOffice, authoredNorthShore, authoredNwReef]);
 
-  // Drives the rhythmic swash line in the shore shader.
+  // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {
     const shader = material.userData?.shader;
-    if (shader?.uniforms?.uSwashTime) shader.uniforms.uSwashTime.value = clock.elapsedTime;
+    if (!shader?.uniforms) return;
+    if (shader.uniforms.uSwashTime) shader.uniforms.uSwashTime.value = clock.elapsedTime;
+    if (shader.uniforms.uCausticsTime) {
+      const store = useThreeGameStore.getState();
+      const time = ((store.timeOfDay % 24) + 24) % 24;
+      shader.uniforms.uCausticsTime.value = clock.elapsedTime;
+      shader.uniforms.uCausticsStrength.value = skyState(time, store.day || 1).daylight * 0.5;
+    }
   });
 
   return (
@@ -631,5 +722,7 @@ function buildSkirtGeometry(regionId) {
 function ContinuationTerrainSkirts({ regionId, material }) {
   const geometry = useMemo(() => buildSkirtGeometry(regionId), [regionId]);
   if (!geometry.attributes.position?.count) return null;
+  // Short edge fade only. Neighboring-map topography lives in BorderVistas as
+  // opaque terrain aprons; do not use these skirts as distant scenery.
   return <mesh geometry={geometry} material={material} receiveShadow={false} />;
 }

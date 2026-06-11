@@ -117,7 +117,6 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();
-export const TAGUS_OBSTACLES = FLOREANA_OBSTACLES;
 
 export function obstacleBaseY(obstacle) {
   return terrainHeight(obstacle.x, obstacle.z, obstacle.zoneId);

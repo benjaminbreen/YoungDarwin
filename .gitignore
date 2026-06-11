@@ -89,3 +89,15 @@ next-env.d.ts
 /Dense Bushland/
 /desert plant pack.blend
 /uploads-files-*.rar
+/*.glb
+/*.fbx
+/*.FBX
+/*.blend
+/*.obj
+/*.OBJ
+/Darwin Status Mockup.png
+/journal mockup.png
+/blank journal asset.png
+/sketchbook drawings/
+__pycache__/
+*.pyc

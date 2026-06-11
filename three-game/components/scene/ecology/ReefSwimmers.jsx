@@ -146,7 +146,7 @@ function FishSchool({ spec }) {
   });
 
   return (
-    <group>
+    <group userData={{ noReflect: true }}>
       {fishes.map((fish, i) => (
         <group key={i} ref={el => { groupRefs.current[i] = el; }}>
           <SwimmerIndividual
@@ -182,7 +182,7 @@ function Cruiser({ spec }) {
   });
 
   return (
-    <group ref={group}>
+    <group ref={group} userData={{ noReflect: true }}>
       <SwimmerIndividual
         source={scene}
         spec={{ baseRotation: spec.baseRotation, scaleValue: spec.scale }}

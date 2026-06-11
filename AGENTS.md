@@ -2,7 +2,7 @@
 
 ## Current Young Darwin 3D State
 
-The playable 3D route is `http://localhost:3003/three`, served by `app/three/page.js` and `three-game/ThreeDarwinGame.jsx`.
+The playable 3D route is `/three`, served by `app/three/page.js` and `three-game/ThreeDarwinGame.jsx`. `npm run dev` uses Next's default port (`http://localhost:3000/three`) unless another port is assigned; screenshot tools may use `http://localhost:3003/three` or `THREE_DARWIN_URL`.
 
 Completed major systems so far:
 
@@ -18,10 +18,10 @@ Completed major systems so far:
 - The tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the current runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass.
 - The marine iguana GLB is now enabled as `public/assets/models/animals/runtime/marine-iguana.glb`. Mesh complexity is fine, about 3.5k vertices plus an armature/action, but the embedded textures make the runtime file about 14.8 MB. Next optimization pass should resize/compress the iguana textures rather than decimate the mesh.
 - Crabs, cow/donkey/goat experiments, and nature props have been integrated, but livestock should be used only where Floreana settlement or introduced-grazing context calls for them.
-- Water currently uses `three-stdlib` `Water2` plus a local shoreline overlay in `three-game/components/scene/Water.jsx`.
+- Water uses a custom stylized shader in `three-game/components/scene/Water.jsx`, with Gerstner waves and a baked seafloor depth texture for shallow-water color and transparency.
 - Camera controls use visible cursor drag rotation, `Z`/`X` rotate keys, and scroll zoom. Do not reintroduce pointer-lock camera behavior unless explicitly requested.
 
-Important caveat: `package.json` still references legacy `scripts/verify-syntax.mjs` and `scripts/run-regression-tests.mjs`; if those scripts are absent, do not claim `npm run check` passes until they are restored.
+Use `npm run check` for syntax and regression coverage before claiming a code change is verified.
 
 ## Floreana-Only World Direction
 
@@ -38,9 +38,10 @@ Use Floreana-specific content directly when it fits the zone:
 
 Initial Floreana zone architecture:
 
-- `three-game/world/floreanaZones.js` defines the zone atlas.
-- Active first playable zone: Post Office Bay anchorage, internal id `post-office-bay-anchorage`.
-- Planned neighboring zones include highland trail, Cerro Pajas/highland ridge, marine iguana rocks, black lava flow, dry scrub, settlement/work areas, and `beagle-specimen-room`.
+- `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, and placeholder region maps).
+- `three-game/world/floreanaZones.js` is a runtime bridge that presents region maps through the older zone-shaped API used by UI/store code.
+- `game-core/zones.ts` still contains older planned-zone ids such as `post-office-bay-anchorage`; do not use those ids for new authored 3D region work unless you are deliberately editing legacy/planned-zone compatibility.
+- Planned neighboring region content includes highland trail, Cerro Pajas/highland ridge, marine iguana rocks, black lava flow, dry scrub, settlement/work areas, and Beagle/interior spaces.
 - Zone transitions should use a styled field-notebook/naval-chart interstitial that doubles as a loading screen. The overlay should show zone name, Floreana/Charles Island context, travel note, educational note, loading progress, and travel effects.
 
 ## Terrain Rendering Direction
@@ -61,12 +62,10 @@ For Post Office Bay / northern Floreana specifically:
 - Avoid evenly distributed trees, bushes, livestock, and rocks.
 - Use sparse, purposeful scatter: basalt blocks along the cove and cliff base, grasses in drainage seams, Opuntia/dry shrubs on upper dry-zone shelves.
 
-Current implementation steps:
+Current terrain implementation:
 
-- Step 1 complete/in progress: `floreanaZones.js` and `ZoneTransitionOverlay.jsx` introduce the zone schema and loading interstitial.
-- Step 2 in progress: `terrain.js` and scene components are being replaced with a Floreana-authored terrain and layout.
 - Terrain resolution pass complete: active Floreana terrain now uses `terrainSegments: 360` over a `118` unit map, giving about 130k terrain vertices instead of the visibly low-resolution prototype mesh. `terrainFineDetail()` adds controlled micro-relief, and `Terrain.jsx` adds per-fragment world-space terrain grain so close camera views do not smear into broad blurry patches.
-- Legacy radial `Flora` and `Rocks` layers are disabled. New zone-authored detail lives in `WorldDetails.jsx` and `floreanaCoveLayout.js`, with instanced basalt, scree, grass, scrub, sparse Opuntia, and a small GLB vegetation layer.
+- Legacy radial `Flora` and `Rocks` layers have been removed. New zone-authored detail lives in `WorldDetails.jsx`, ecology modules, and shared layout files such as `floreanaCoveLayout.js`, `northShoreLayout.js`, and `nwReefLayout.js`.
 - New nature runtime assets integrated in `WorldDetails.jsx`: `runtime-flat-cactus.glb`, `runtime-plant-shrub.glb`, and `runtime-small-shrub.glb`. The shrub FBXs converted to tiny ~15 KB GLBs; flat cactus normalized to ~638 KB. Keep placement sparse and dry-zone appropriate for Floreana.
 - Terrain shader pass complete: `Terrain.jsx` now injects procedural tiled material functions into `MeshStandardMaterial` for lava, tuff, ash, and scrub. It blends them by world-space slope/height/cove masks and perturbs normals in the fragment shader for crisp ground detail without adding millions of triangles.
 - The black cone grass layer was removed from rendering. Future grass should be implemented as proper blade clusters/billboards or small GLB vegetation, not vertical cone spikes.
@@ -79,7 +78,7 @@ Three regions are fully authored so far: `POST_OFFICE_BAY` (`floreana-cove`), `N
 2. **`game-core/regionMaps.js`** — add the preset name, include the id in `authored:`, and bump `segments` to ~300.
 3. **`three-game/components/scene/Terrain.jsx`** — add a `create<Region>TerrainMaterial()` splat shader and a branch in the `material` memo. Most of the visual quality lives here, not in vertex colors.
 4. **`three-game/world/<region>Layout.js`** — deterministic rock layout via `makeZoneScatter`, exporting both the render list and `get<Region>RockObstacles()` (visuals and colliders must share one data source). Register the obstacle list in `three-game/world/obstacles.js` `getRuntimeObstacles`.
-5. **`three-game/world/ecology/<region>.js`** — flora layers (GLB scatter with biome `accept()` filters), rocks, splashes, birds, skyline, `footprintBiomes`. Register in `ecology/index.js`. `EcologyRenderer` handles all rendering generically.
+5. **`three-game/world/ecology/<region>.js`** — flora layers (GLB scatter with biome `accept()` filters), rocks, splashes, birds, swimmers, and `footprintBiomes`. Register in `ecology/index.js`. `EcologyRenderer` handles all rendering generically.
 6. **`data/locations.js`** — add curated `specimenPlacements` so key fauna sit in their habitat instead of the deterministic fallback scatter.
 7. **`three-game/world/vistas/index.js`** — when a new authored map is finalized, add or verify low-poly border terrain aprons for its open neighboring routes so adjacent maps read as real nearby topography without loading full neighboring zones. Use opaque ground aprons that blend from the current edge into the neighbor's terrain identity; avoid vertical billboard/panel scenery for nearby map borders.
 

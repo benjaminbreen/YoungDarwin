@@ -46,7 +46,7 @@ function buildCoral() {
       path: `${NATURE}runtime-coral-cluster.glb`,
       sink: 0.16,
       castShadow: false,
-      items: capToDepth(scatter('coral-cluster', 15, 131, {
+      items: capToDepth(scatter('coral-cluster', 11, 131, {
         minX: -24, maxX: 14, minZ: -42, maxZ: -12, scale: [0.5, 1.0], maxGrade: 3,
         accept: (biome, x, z, y) => inRing(x, z) && reefBed(y),
       }), 0.78, 0.35),
@@ -83,7 +83,7 @@ function buildCoral() {
       castShadow: false,
       tint: '#c9a06a',
       tintStrength: 0.18,
-      items: capToDepth(scatter('coral-garden', 9, 157, {
+      items: capToDepth(scatter('coral-garden', 7, 157, {
         minX: -34, maxX: 36, minZ: -22, maxZ: -4, scale: [0.4, 0.75], maxGrade: 3,
         accept: (biome, x, z, y) => inGarden(x, z) && reefBed(y),
       }), 0.78, 0.3),
