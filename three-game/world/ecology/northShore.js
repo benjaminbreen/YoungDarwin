@@ -1,6 +1,7 @@
-import { northShoreCoastZ } from '../terrain';
+import { northShoreCoastZ } from '../regions/northShore/terrain';
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getNorthShoreRocks, N_SHORE } from '../northShoreLayout';
+import { generatedTreePresets } from '../generatedTreePresets';
 
 // Northern Shore (N_SHORE) ecology — Floreana's arid littoral zone as Darwin
 // met it in September 1835. Flora is named for the real species mix:
@@ -14,6 +15,7 @@ const NATURE = '/assets/models/nature/';
 export const NORTH_SHORE_SWASH_PERIOD = (Math.PI * 2) / 0.8976;
 
 const scrubClumps = [[-34, 12], [-12, 6], [4, 18], [22, 8], [40, 16], [-26, 26], [14, 32]];
+const uplandTreeClumps = [[-30, 38], [8, 40], [34, 35]];
 const drySand = (x, z) => z - northShoreCoastZ(x) > 1.6;
 
 function buildFlora() {
@@ -135,6 +137,26 @@ function buildFlora() {
   ];
 }
 
+function buildGeneratedTrees() {
+  const scatter = (layer, count, seed, opts) => makeZoneScatter(N_SHORE, layer, count, seed, opts);
+  return [
+    {
+      id: 'ez-low-upland-trees',
+      variants: generatedTreePresets.pagaPaga.variants,
+      sink: 0.04,
+      motion: { wind: 0.42, bend: 0.08, bendRadius: 1.5 },
+      items: scatter('ez-low-tree', 11, 131, {
+        minX: -46, maxX: 46, minZ: 31, maxZ: 45, scale: [0.46, 0.76], maxGrade: 0.38,
+        accept: (biome, x, z) => {
+          if (z - northShoreCoastZ(x) < 31) return false;
+          if (biome !== 'palo-santo' && biome !== 'dry-scrub') return false;
+          return nearAnyCluster(uplandTreeClumps, x, z, 6.5);
+        },
+      }),
+    },
+  ];
+}
+
 export function buildNorthShoreEcology() {
   const rocks = getNorthShoreRocks();
   const swashRocks = rocks.filter(rock => {
@@ -144,6 +166,7 @@ export function buildNorthShoreEcology() {
   return {
     zoneId: N_SHORE,
     flora: buildFlora(),
+    generatedTrees: buildGeneratedTrees(),
     rocks,
     splashes: { anchors: swashRocks.slice(0, 12), period: NORTH_SHORE_SWASH_PERIOD },
     footprintBiomes: ['black-sand', 'ash-beach', 'sesuvium-flat', 'dry-scrub'],

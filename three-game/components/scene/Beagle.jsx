@@ -20,7 +20,7 @@ export function Beagle() {
   if (!zone.beaglePosition && currentZoneId !== 'POST_OFFICE_BAY') return null;
   const [x, y, z] = zone.beaglePosition || [13.5, -1.08, -48];
   return (
-    <group position={[x, y, z]} rotation={[0, -0.08, 0]} scale={0.92}>
+    <group position={[x, y, z]} rotation={[0, -0.08, 0]} scale={0.92} userData={{ reflect: true }}>
       <StaticGLB
         path="/assets/models/ships/beagle-styrbjorn.glb"
         position={[0, 0, 0]}

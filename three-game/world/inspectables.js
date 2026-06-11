@@ -21,6 +21,8 @@ export const inspectableCatalog = {
   croton: { id: 'croton', kind: 'plant', englishName: 'Chala', latinName: 'Croton scouleri', category: 'Plant', rarity: 'common' },
   scalesia: { id: 'scalesia', kind: 'plant', englishName: 'Floreana scalesia', latinName: 'Scalesia villosa', category: 'Plant', rarity: 'endemic' },
   palo_santo: { id: 'palo_santo', kind: 'plant', englishName: 'Palo santo', latinName: 'Bursera graveolens', category: 'Plant', rarity: 'uncommon' },
+  castela: { id: 'castela', kind: 'plant', englishName: 'Galapagos bitterbush', latinName: 'Castela galapageia', category: 'Plant', rarity: 'endemic' },
+  paga_paga: { id: 'paga_paga', kind: 'plant', englishName: 'Paga-paga', latinName: 'Pisonia floribunda', category: 'Plant', rarity: 'endemic' },
   saltgrass: { id: 'saltgrass', kind: 'plant', englishName: 'Saltgrass', latinName: 'Distichlis spicata', category: 'Plant', rarity: 'scarce' },
   sesuvium: { id: 'sesuvium', kind: 'plant', englishName: 'Sea purslane', latinName: 'Sesuvium portulacastrum', category: 'Plant', rarity: 'scarce' },
   driftwood: { id: 'driftwood', kind: 'plant', englishName: 'Driftwood', latinName: 'weathered shore timber', category: 'Shore sign', rarity: 'uncommon' },
@@ -90,7 +92,8 @@ export function inspectableTypeForEcologyLayer(layerId) {
   if (layerId.startsWith('saltbush')) return 'saltbush';
   if (layerId === 'croton') return 'croton';
   if (layerId === 'scalesia') return 'scalesia';
-  if (layerId === 'palo-santo') return 'palo_santo';
+  if (layerId === 'palo-santo') return 'castela';
+  if (layerId === 'ez-low-upland-trees') return 'paga_paga';
   if (layerId === 'saltgrass') return 'saltgrass';
   if (layerId === 'sesuvium') return 'sesuvium';
   if (layerId === 'driftwood') return 'driftwood';

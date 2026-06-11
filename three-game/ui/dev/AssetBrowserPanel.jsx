@@ -1,10 +1,11 @@
 'use client';
 
-import React, { Suspense, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
+import { generatedTreeBrowserAssets } from '../../world/generatedTreePresets';
 
 // Dev-only asset browser (toggle with the 0 key): preview candidate GLBs in an
 // interactive turntable before committing them to the world. Drag to orbit,
@@ -34,6 +35,7 @@ const BROWSER_ASSETS = [
   { id: 'cur-shrub', label: 'Current: Shrub', path: '/assets/models/nature/runtime-plant-shrub.glb' },
   { id: 'cur-small-shrub', label: 'Current: Small Shrub', path: '/assets/models/nature/runtime-small-shrub.glb' },
   { id: 'cur-flat-cactus', label: 'Current: Flat Cactus', path: '/assets/models/nature/runtime-flat-cactus.glb' },
+  ...generatedTreeBrowserAssets,
 ];
 
 function PreviewModel({ path }) {
@@ -58,6 +60,120 @@ function PreviewModel({ path }) {
   return <primitive object={cloned} />;
 }
 
+function applyTreeOptions(tree, variant, index) {
+  const usingPreset = Boolean(variant.basePreset);
+  if (usingPreset && typeof tree.loadPreset === 'function') tree.loadPreset(variant.basePreset);
+  const options = tree.options;
+  const set = (target, key, value, fallback) => {
+    if (value !== undefined) target[key] = value;
+    else if (!usingPreset && fallback !== undefined) target[key] = fallback;
+  };
+  set(options, 'seed', variant.seed, 9000 + index * 97);
+  set(options, 'type', variant.type, 'deciduous');
+  set(options.bark, 'type', variant.barkType, 'oak');
+  set(options.bark, 'tint', variant.barkTint, 0x7d6a4d);
+  set(options.bark, 'flatShading', variant.flatShading, true);
+  set(options.bark, 'textured', variant.textured, false);
+  set(options.branch, 'levels', variant.levels, 2);
+  set(options.branch.angle, 1, variant.angle1, 58);
+  set(options.branch.angle, 2, variant.angle2, 46);
+  set(options.branch.children, 0, variant.children0, 5);
+  set(options.branch.children, 1, variant.children1, 3);
+  set(options.branch.force.direction, 'x', variant.forceX, 0.18);
+  set(options.branch.force.direction, 'y', variant.forceY, 0.7);
+  set(options.branch.force.direction, 'z', variant.forceZ, 0.06);
+  set(options.branch.force, 'strength', variant.forceStrength, 0.018);
+  set(options.branch.gnarliness, 0, variant.gnarliness0, 0.22);
+  set(options.branch.gnarliness, 1, variant.gnarliness1, 0.34);
+  set(options.branch.gnarliness, 2, variant.gnarliness2, 0.24);
+  set(options.branch.length, 0, variant.trunkLength, 4.7);
+  set(options.branch.length, 1, variant.branchLength1, 2.6);
+  set(options.branch.length, 2, variant.branchLength2, 1.35);
+  set(options.branch.radius, 0, variant.trunkRadius, 0.22);
+  set(options.branch.radius, 1, variant.branchRadius1, 0.1);
+  set(options.branch.radius, 2, variant.branchRadius2, 0.045);
+  set(options.branch.sections, 0, variant.sections0, 5);
+  set(options.branch.sections, 1, variant.sections1, 4);
+  set(options.branch.sections, 2, variant.sections2, 3);
+  set(options.branch.segments, 0, variant.segments0, 5);
+  set(options.branch.segments, 1, variant.segments1, 4);
+  set(options.branch.segments, 2, variant.segments2, 3);
+  set(options.branch.start, 1, variant.start1, 0.24);
+  set(options.branch.start, 2, variant.start2, 0.18);
+  set(options.branch.taper, 0, variant.taper0, 0.78);
+  set(options.branch.taper, 1, variant.taper1, 0.7);
+  set(options.branch.taper, 2, variant.taper2, 0.7);
+  set(options.branch.twist, 0, variant.twist0, 0.12);
+  set(options.branch.twist, 1, variant.twist1, 0.18);
+  set(options.leaves, 'type', variant.leafType, 'oak');
+  set(options.leaves, 'billboard', variant.billboard, 'double');
+  set(options.leaves, 'angle', variant.leafAngle, 24);
+  set(options.leaves, 'count', variant.leafCount, 42);
+  set(options.leaves, 'start', variant.leafStart, 0.12);
+  set(options.leaves, 'size', variant.leafSize, 0.46);
+  set(options.leaves, 'sizeVariance', variant.leafSizeVariance, 0.45);
+  set(options.leaves, 'tint', variant.leafTint, 0x88935e);
+  set(options.leaves, 'alphaTest', variant.alphaTest, 0.42);
+}
+
+function normalizeObject(object) {
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 2 / maxDim;
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.sub(center);
+  object.position.y += size.y / 2;
+  object.scale.setScalar(scale);
+  return object;
+}
+
+function PreviewEzTree({ variants }) {
+  const [ezTree, setEzTree] = useState(null);
+  useEffect(() => {
+    let active = true;
+    import('@dgreenheck/ez-tree').then(module => {
+      if (active) setEzTree(module);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const group = useMemo(() => {
+    if (!ezTree) return null;
+    const root = new THREE.Group();
+    variants.forEach((variant, index) => {
+      const tree = new ezTree.Tree();
+      applyTreeOptions(tree, variant, index);
+      tree.generate();
+      tree.traverse(object => {
+        if (!object.isMesh) return;
+        object.material = object.material.clone();
+        const isLeaf = object.name?.toLowerCase().includes('leaves') || object === tree.leavesMesh;
+        object.material.color = new THREE.Color(isLeaf ? variant.leafColor || '#899260' : variant.barkColor || '#7b684f');
+        if (isLeaf) {
+          object.material.side = THREE.DoubleSide;
+          object.material.transparent = true;
+          object.material.alphaTest = variant.alphaTest ?? 0.42;
+          if (object.material.emissive) object.material.emissive = new THREE.Color(variant.leafColor || '#899260').multiplyScalar(0.08);
+        } else {
+          object.material.map = null;
+          object.material.alphaMap = null;
+        }
+      });
+      const x = variants.length === 1 ? 0 : (index - (variants.length - 1) / 2) * 1.65;
+      tree.position.set(x, 0, 0);
+      root.add(tree);
+    });
+    return normalizeObject(root);
+  }, [ezTree, variants]);
+
+  if (!group) return null;
+  return <primitive object={group} />;
+}
+
 export function AssetBrowserPanel({ open, onClose }) {
   const [index, setIndex] = useState(0);
   if (!open) return null;
@@ -70,7 +186,7 @@ export function AssetBrowserPanel({ open, onClose }) {
           <div>
             <div className={GOLD_LABEL}>Asset Browser (dev)</div>
             <div className="font-expedition text-lg font-semibold text-expedition-parchment">{asset.label}</div>
-            <div className="font-mono text-[10px] text-expedition-faded">{asset.path}</div>
+            <div className="font-mono text-[10px] text-expedition-faded">{asset.path || asset.note}</div>
           </div>
           <button type="button" onClick={onClose} className={GOLD_BUTTON}>Close (0)</button>
         </div>
@@ -98,7 +214,9 @@ export function AssetBrowserPanel({ open, onClose }) {
               <directionalLight position={[4, 6, 3]} intensity={2.2} color="#ffe9c4" />
               <directionalLight position={[-5, 3, -4]} intensity={0.6} color="#9ec8e8" />
               <Suspense fallback={null}>
-                <PreviewModel key={asset.id} path={asset.path} />
+                {asset.kind === 'ez-tree'
+                  ? <PreviewEzTree key={asset.id} variants={asset.variants} />
+                  : <PreviewModel key={asset.id} path={asset.path} />}
               </Suspense>
               <gridHelper args={[10, 20, '#4a5258', '#2c3338']} />
               <OrbitControls makeDefault enableDamping />

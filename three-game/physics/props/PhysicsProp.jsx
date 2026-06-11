@@ -14,6 +14,7 @@ const PICKUP_DISTANCE = 2.15;
 const HOLD_DISTANCE = 1.12;
 const STRIKE_RANGE = 2.6;
 const STRIKE_FACING_DOT = 0.3;
+const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
 
 function vectorFromStore(value, fallback = new THREE.Vector3()) {
   if (!value) return fallback.clone();
@@ -143,6 +144,24 @@ export function PhysicsProp({ prop, onBreak }) {
     }
 
     const playerPose = useThreeGameStore.getState().playerPose;
+    if (
+      body.isSleeping?.()
+      && !isCarried
+      && !buoyant
+      && !inWaterRef.current
+      && !pendingStrikesRef.current.length
+    ) {
+      const playerX = playerPose?.position?.x || 0;
+      const playerZ = playerPose?.position?.z || 0;
+      const dx = translation.x - playerX;
+      const dz = translation.z - playerZ;
+      const activePrompt = useThreeGameStore.getState().carryPrompt;
+      if (dx * dx + dz * dz > IDLE_PROP_ACTIVE_DISTANCE_SQ) {
+        if (activePrompt?.id === prop.id) setCarryPrompt(null);
+        return;
+      }
+    }
+
     const player = vectorFromStore(playerPose.position);
     const facing = vectorFromStore(playerPose.facing, new THREE.Vector3(0, 0, -1));
     if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);

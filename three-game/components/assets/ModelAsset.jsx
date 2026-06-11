@@ -182,11 +182,12 @@ function fadeForTransition(fromName, toName) {
 
 function normalizeAnimationRequest(request) {
   if (!request) return null;
-  if (typeof request === 'string') return { clip: request, timeScale: 1, fade: null };
+  if (typeof request === 'string') return { clip: request, timeScale: 1, fade: null, maxTime: null };
   return {
     clip: request.clip || request.name,
     timeScale: request.timeScale ?? 1,
     fade: request.fade ?? null,
+    maxTime: request.maxTime ?? null,
   };
 }
 
@@ -196,7 +197,7 @@ function modelBoundsDebugEnabled() {
     || new URLSearchParams(window.location.search).has('modelBoundsDebug');
 }
 
-function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null, damageFlash = 0 }) {
+function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null, damageFlash = 0, reflect = false }) {
   const group = useRef(null);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
@@ -259,6 +260,7 @@ function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null,
     const requestedClip = normalized?.clip;
     const fade = normalized?.fade ?? null;
     const timeScale = THREE.MathUtils.clamp(normalized?.timeScale ?? 1, 0.35, 1.8);
+    const maxTime = Number.isFinite(normalized?.maxTime) ? Math.max(0, normalized.maxTime) : null;
     const next = getAction(requestedClip);
     if (!next) {
       if (requestedClip && !warnedMissing.current.has(requestedClip)) {
@@ -270,7 +272,13 @@ function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null,
     }
     if (next === activeAction.current && requestedClip === activeRequest.current) {
       next.setEffectiveTimeScale(timeScale);
-      publishAnimationDebug(requestedClip, next, { held: true });
+      if (maxTime !== null && next.time >= maxTime) {
+        next.time = maxTime;
+        next.paused = true;
+      } else {
+        next.paused = false;
+      }
+      publishAnimationDebug(requestedClip, next, { held: true, maxTime });
       return true;
     }
     const previous = activeAction.current;
@@ -279,6 +287,7 @@ function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null,
     const clipSettings = settingsForClip(requestedClip);
     const oneShot = clipSettings.loop === true ? false : isOneShotClip(requestedClip);
     next.enabled = true;
+    next.paused = false;
     next.clampWhenFinished = oneShot;
     next.setLoop(oneShot ? THREE.LoopOnce : THREE.LoopRepeat, oneShot ? 1 : Infinity);
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
@@ -355,19 +364,20 @@ function GLBPrimitive({ assetId, asset, animationSelector = null, motion = null,
       scale={asset.scale || 1}
       rotation={asset.rotation || [0, 0, 0]}
       position={[0, asset.yOffset || 0, 0]}
+      userData={reflect ? { reflect: true } : undefined}
     >
       <primitive object={importedScene} />
     </group>
   );
 }
 
-export function ModelAsset({ id, fallback = null, animationSelector = null, motion = null, damageFlash = 0 }) {
+export function ModelAsset({ id, fallback = null, animationSelector = null, motion = null, damageFlash = 0, reflect = false }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
 
   return (
     <Suspense fallback={fallback}>
-      <GLBPrimitive assetId={id} asset={asset} animationSelector={animationSelector} motion={motion} damageFlash={damageFlash} />
+      <GLBPrimitive assetId={id} asset={asset} animationSelector={animationSelector} motion={motion} damageFlash={damageFlash} reflect={reflect} />
     </Suspense>
   );
 }

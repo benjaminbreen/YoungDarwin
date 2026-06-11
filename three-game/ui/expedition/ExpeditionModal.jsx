@@ -40,11 +40,11 @@ export function ExpeditionModalHeader({ title, subtitle, onClose }) {
 export function ExpeditionModal({ title, subtitle, onClose, children, className = '' }) {
   return (
     <div
-      className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-[#080705]/92 p-2 font-expedition text-[#ead3ae] backdrop-blur-sm sm:p-4"
+      className="expedition-modal-scrim pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-[#080705]/92 p-2 font-expedition text-[#ead3ae] backdrop-blur-sm sm:p-4"
       onClick={onClose}
     >
       <div
-        className={`relative grid h-[min(67rem,96vh)] w-[min(120rem,98vw)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82),inset_0_0_0_1px_rgba(231,196,133,0.12)] ${className}`}
+        className={`expedition-modal-panel relative grid h-[min(67rem,96vh)] w-[min(120rem,98vw)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82),inset_0_0_0_1px_rgba(231,196,133,0.12)] ${className}`}
         style={{
           backgroundImage:
             'radial-gradient(circle at 55% 10%, rgba(109,84,47,0.10), transparent 28%), linear-gradient(150deg, #0d0c0a, #050604 58%, #0b0907)',

@@ -1,4 +1,4 @@
-import { nwReefCoastZ, nwReefCoralMask } from '../terrain';
+import { nwReefCoastZ, nwReefCoralMask } from '../regions/northwestReef/terrain';
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getNorthwestReefRocks, NW_REEF } from '../nwReefLayout';
 

@@ -153,6 +153,60 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+@keyframes expedition-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes expedition-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes journal-page-turn {
+  from {
+    opacity: 0;
+    transform: translateX(10px) rotate(0.25deg);
+    filter: brightness(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) rotate(0);
+    filter: brightness(1);
+  }
+}
+
+.expedition-modal-scrim {
+  animation: expedition-scrim-in 180ms ease-out both;
+}
+
+.expedition-modal-panel {
+  animation: expedition-panel-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: center center;
+}
+
+.journal-page-turn {
+  animation: journal-page-turn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expedition-modal-scrim,
+  .expedition-modal-panel,
+  .journal-page-turn {
+    animation: none;
+  }
+}
+
 /* Direction buttons */
 .direction-button {
   transition: all 0.2s ease;

@@ -1,4 +1,4 @@
-import { northShoreCoastZ } from './terrain';
+import { northShoreCoastZ } from './regions/northShore/terrain';
 import { makeZoneScatter } from './scatter';
 
 // Deterministic rock layout for the Northern Shore. Rocks live here (not in

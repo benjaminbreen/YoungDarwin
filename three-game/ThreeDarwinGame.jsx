@@ -3,12 +3,13 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats } from '@react-three/drei';
-import { EffectComposer, Bloom, N8AO, Vignette } from '@react-three/postprocessing';
-import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three';
+import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
+import { ACESFilmicToneMapping, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { useThreeGameStore } from './store';
+import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -49,7 +50,7 @@ const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
 const DEFAULT_PERF_SETTINGS = {
   dprMode: 'default',
-  postprocessing: false,
+  postprocessing: true,
   ao: true,
   stats: false,
   shadows: true,
@@ -62,6 +63,10 @@ const DEFAULT_PERF_SETTINGS = {
   beagle: true,
   specimens: true,
   syms: true,
+  physicsObstacles: true,
+  physicsProps: true,
+  waterSplashes: true,
+  weatherFX: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
 };
@@ -72,10 +77,17 @@ function getInitialPerfSettings() {
 
 function settingsFromUrlSearch(search) {
   const params = new URLSearchParams(search);
+  const postprocessing = params.has('post')
+    || params.has('postprocessing')
+    || (
+      DEFAULT_PERF_SETTINGS.postprocessing
+      && !params.has('noPost')
+      && !params.has('noPostprocessing')
+    );
   return {
     dprMode: params.get('dpr') || DEFAULT_PERF_SETTINGS.dprMode,
-    postprocessing: !params.has('noPost') && !params.has('noPostprocessing'),
-    ao: !params.has('noAO'),
+    postprocessing,
+    ao: DEFAULT_PERF_SETTINGS.ao && !params.has('noAO'),
     stats: false,
     shadows: !params.has('noShadows'),
     water: !params.has('noWater'),
@@ -87,6 +99,10 @@ function settingsFromUrlSearch(search) {
     beagle: !params.has('noBeagle'),
     specimens: !params.has('noSpecimens'),
     syms: !params.has('noSyms'),
+    physicsObstacles: !params.has('noPhysicsObstacles'),
+    physicsProps: !params.has('noPhysicsProps'),
+    waterSplashes: !params.has('noWaterSplashes'),
+    weatherFX: !params.has('noWeather'),
     physicsDebug: params.has('physicsDebug'),
     preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
   };
@@ -96,9 +112,10 @@ function dprForMode(mode) {
   if (mode === '1x') return [1, 1];
   if (mode === '1.25x') return [1, 1.25];
   if (mode === '1.5x') return [1, 1.5];
-  // Default capped at 1.25: with ACES + AO + the splat shaders, 1.5x costs
-  // ~45% more fill for a difference that's invisible at gameplay distance.
-  return [1, 1.25];
+  // Default capped at 1x: every fullscreen pass (AO, bloom, SMAA, base
+  // render) scales with DPR squared, and SMAA covers the edge quality that
+  // higher DPR used to buy. 1.25x/1.5x stay available in the dev panel.
+  return [1, 1];
 }
 
 function PerformanceSampler({ enabled, onSample }) {
@@ -197,7 +214,11 @@ function InspectionAnchorProjector() {
 function PostFX({ enabled, ao }) {
   if (!enabled) return null;
   return (
-    <EffectComposer>
+    // multisampling=0 + SMAA: a multisampled HDR composer buffer is the
+    // single most expensive part of the stack; SMAA gives comparable edges
+    // as a shader effect merged into the same pass as bloom/vignette.
+    <EffectComposer multisampling={0}>
+      <SMAA />
       {ao && (
         <N8AO
           halfRes
@@ -206,11 +227,16 @@ function PostFX({ enabled, ao }) {
           distanceFalloff={1.2}
           intensity={2.4}
           aoSamples={4}
-          denoiseSamples={6}
+          denoiseSamples={4}
           denoiseRadius={12}
         />
       )}
-      <Bloom intensity={0.18} luminanceThreshold={0.985} luminanceSmoothing={0.035} mipmapBlur radius={0.22} />
+      <Bloom intensity={0.3} luminanceThreshold={0.96} luminanceSmoothing={0.06} mipmapBlur radius={0.28} />
+      {/* Gentle grade: ACES leaves the midtones a touch flat — a small
+          saturation/contrast lift makes the turquoise and sand read without
+          touching any material. Merges into the existing effect pass. */}
+      <HueSaturation saturation={0.08} />
+      <BrightnessContrast contrast={0.05} />
       <Vignette eskil={false} offset={0.26} darkness={0.42} />
     </EffectComposer>
   );
@@ -218,7 +244,7 @@ function PostFX({ enabled, ao }) {
 
 function CinematicScreenGrade({ enabled, weather }) {
   if (!enabled) return null;
-  const dampenedSun = weather === 'misty' || weather === 'cloudy';
+  const dampenedSun = isOvercastWeather(weather);
   return (
     <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
       <div
@@ -323,6 +349,10 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         <Toggle label="Beagle" checked={settings.beagle} onChange={value => set({ beagle: value })} />
         <Toggle label="Specimens" checked={settings.specimens} onChange={value => set({ specimens: value })} />
         <Toggle label="Syms" checked={settings.syms} onChange={value => set({ syms: value })} />
+        <Toggle label="Phys Obstacles" checked={settings.physicsObstacles} onChange={value => set({ physicsObstacles: value })} />
+        <Toggle label="Phys Props" checked={settings.physicsProps} onChange={value => set({ physicsProps: value })} />
+        <Toggle label="Water Splashes" checked={settings.waterSplashes} onChange={value => set({ waterSplashes: value })} />
+        <Toggle label="Weather FX" checked={settings.weatherFX} onChange={value => set({ weatherFX: value })} />
         <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
       </div>
       {physicsDebug && (
@@ -394,11 +424,7 @@ export default function ThreeDarwinGame() {
   const weather = useThreeGameStore(state => state.weather);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
-  const sky = useMemo(() => {
-    if (weather === 'misty') return '#b9d7de';
-    if (weather === 'cloudy') return '#9fc1d4';
-    return '#78bdf6';
-  }, [weather]);
+  const sky = useMemo(() => weatherSkyTint(weather), [weather]);
 
   useEffect(() => {
     setPerfSettings(settingsFromUrlSearch(window.location.search));
@@ -435,9 +461,18 @@ export default function ThreeDarwinGame() {
             toneMapping: ACESFilmicToneMapping,
             outputColorSpace: SRGBColorSpace,
           }}
+          onCreated={({ gl }) => {
+            // Sharp ground/foliage textures at glancing angles, ~free on any
+            // GPU this game targets. Set before the GLBs stream in so every
+            // texture picks it up.
+            Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
+          }}
         >
           <color attach="background" args={[sky]} />
-          <fog attach="fog" args={[sky, 35, 120]} />
+          {/* Exponential-squared fog: the WeatherDirector drives density per
+              frame (sunny haze through thick garúa); SkyController keeps
+              owning its color. Density 0.012 ≈ the old linear 32..108 reach. */}
+          <fogExp2 attach="fog" args={[sky, 0.012]} />
           <Suspense fallback={null}>
             <ThreeScene perfSettings={perfSettings} />
           </Suspense>

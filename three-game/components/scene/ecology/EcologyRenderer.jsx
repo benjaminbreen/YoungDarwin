@@ -1,10 +1,13 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
 import { useThreeGameStore } from '../../../store';
+import { getEcology } from '../../../world/ecology';
 import { updateFoliageUniforms } from './foliageMotion';
 import { InstancedGLBLayer } from './InstancedGLBLayer';
+import { InstancedEzTreeLayer } from './InstancedEzTreeLayer';
 import { RockField } from './RockField';
 import { Footprints } from './Footprints';
 import { RockSplashes } from './RockSplashes';
@@ -26,7 +29,28 @@ function FoliageMotionDriver() {
   return null;
 }
 
+// Zones the player can travel to from anywhere on the island. Once the
+// current zone has settled, warm the GLB cache for the others so arriving
+// there doesn't stall on network fetches.
+const PREFETCH_ZONES = ['N_SHORE', 'NW_REEF'];
+
+function useNeighborZonePrefetch(currentEcology) {
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      PREFETCH_ZONES.forEach(zoneId => {
+        if (zoneId === currentEcology?.zoneId) return;
+        const other = getEcology(zoneId);
+        if (!other) return;
+        other.flora?.forEach(layer => layer.path && useGLTF.preload(layer.path));
+        other.props?.forEach(prop => prop.path && useGLTF.preload(prop.path));
+      });
+    }, 5000); // let the current zone finish loading first
+    return () => clearTimeout(handle);
+  }, [currentEcology]);
+}
+
 export function EcologyRenderer({ ecology }) {
+  useNeighborZonePrefetch(ecology);
   if (!ecology) return null;
   return (
     <group>
@@ -43,6 +67,18 @@ export function EcologyRenderer({ ecology }) {
           tintStrength={layer.tintStrength || 0}
           motion={layer.motion || null}
           castShadow={layer.castShadow !== false}
+          inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+        />
+      ))}
+      {ecology.generatedTrees?.map(layer => (
+        <InstancedEzTreeLayer
+          key={layer.id}
+          items={layer.items}
+          variants={layer.variants}
+          sink={layer.sink || 0}
+          motion={layer.motion || null}
+          castShadow={layer.castShadow !== false}
+          receiveShadow={layer.receiveShadow !== false}
           inspectableType={inspectableTypeForEcologyLayer(layer.id)}
         />
       ))}

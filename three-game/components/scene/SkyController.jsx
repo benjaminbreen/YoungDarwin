@@ -6,6 +6,7 @@ import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
+import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // Apparent distance of the celestial bodies. Kept well inside the camera far
 // plane (180) since the whole rig follows the camera, so it never clips.
@@ -29,12 +30,94 @@ const C = {
   fogNight: new THREE.Color('#0c1830'),
   fogDay: new THREE.Color('#7fc4f2'),
   fogGolden: new THREE.Color('#d9a878'),
+  fogSunWarm: new THREE.Color('#f2c590'), // aerial perspective: haze blushes toward the sun
+  fogMist: new THREE.Color('#ccdadd'),    // garúa: pale, desaturated mist tone
 };
+
+// Distant island silhouette: a smooth volcanic profile drawn once to a canvas.
+// White fill so the per-frame haze color tints it; alpha-only shape.
+function islandSilhouetteTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 512, 128);
+  ctx.fillStyle = '#ffffff';
+  // Slight softening only — the ridge line stays readable; the heavy haze
+  // belongs at the base (added below).
+  ctx.filter = 'blur(2px)';
+  ctx.beginPath();
+  ctx.moveTo(0, 128);
+  for (let i = 0; i <= 512; i += 1) {
+    const t = i / 512;
+    const taper = Math.sin(Math.PI * t); // ends slide into the sea
+    const ridge = 0.9 * Math.exp(-(((t - 0.42) / 0.17) ** 2)) // shield volcano
+      + 0.45 * Math.exp(-(((t - 0.68) / 0.09) ** 2))          // secondary cone
+      + 0.06 * Math.sin(t * 34.0);                            // ridge texture
+    const h = Math.max(0, ridge) * taper;
+    ctx.lineTo(i, 128 - (8 + h * 100));
+  }
+  ctx.lineTo(512, 128);
+  ctx.closePath();
+  ctx.fill();
+  ctx.filter = 'none';
+  // Dissolve the base into the sea haze: real horizon islands float on a
+  // band of fog, crisp at the ridge and gone at the waterline.
+  ctx.globalCompositeOperation = 'destination-out';
+  const baseFade = ctx.createLinearGradient(0, 128, 0, 62);
+  baseFade.addColorStop(0, 'rgba(0,0,0,0.9)');
+  baseFade.addColorStop(0.5, 'rgba(0,0,0,0.45)');
+  baseFade.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = baseFade;
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.globalCompositeOperation = 'source-over';
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+// Border haze: a world-fixed gradient cylinder around the playable area.
+// Dense at the horizon line, fading to nothing with height — it swallows the
+// terrain/water seams at the map edge and reads as thick distance air.
+function hazeGradientTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 4;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 128);
+  // Long, gentle falloff: the top half is effectively invisible so the
+  // cylinder rim can never read as an edge, even from close by.
+  gradient.addColorStop(0.0, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.4, 'rgba(255,255,255,0.015)');
+  gradient.addColorStop(0.7, 'rgba(255,255,255,0.16)');
+  gradient.addColorStop(0.9, 'rgba(255,255,255,0.38)');
+  gradient.addColorStop(1.0, 'rgba(255,255,255,0.5)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 4, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  return texture;
+}
+// The wall follows the camera (inside the sky rig), so it is always exactly
+// this far away: it can never loom overhead at the map border and never
+// clips at the far plane. The islands (150m out) sit behind it, permanently
+// wrapped in its haze.
+const HAZE_WALL_RADIUS = 130;
+const HAZE_WALL_HEIGHT = 26;
+
+// Bearing (radians from north), distance, width, height, base-below-horizon.
+const DISTANT_ISLANDS = [
+  { bearing: -0.62, width: 105, height: 11, mirror: false }, // big shield profile, NNW
+  { bearing: 0.74, width: 58, height: 6.5, mirror: true },   // low cone, NNE
+];
+const ISLAND_DISTANCE = 150;
 
 // Reusable scratch objects — no per-frame allocation in the render loop.
 const _sun = new THREE.Vector3();
 const _moon = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
 const _color = new THREE.Color();
+const _islandColor = new THREE.Color();
+const _white = new THREE.Color('#ffffff');
 const _sunColor = new THREE.Color();
 const _glowColor = new THREE.Color();
 const _sunDay = new THREE.Color('#ffd48a');    // midday sun — warm amber
@@ -213,8 +296,7 @@ function TropicalBlueSkyDome({ nightRef }) {
 
   useFrame(() => {
     material.uniforms.uNight.value = nightRef.current;
-    const store = useThreeGameStore.getState();
-    material.uniforms.uOvercast.value = store.weather === 'cloudy' || store.weather === 'misty' ? 1 : 0;
+    material.uniforms.uOvercast.value = weatherEnv.overcast;
     if (meshRef.current) meshRef.current.visible = nightRef.current < 0.92;
   });
 
@@ -302,6 +384,8 @@ function RealisticCloudLayer({ nightRef }) {
   useFrame(({ clock }) => {
     material.uniforms.uTime.value = clock.elapsedTime;
     material.uniforms.uNight.value = nightRef.current;
+    // Distant cloud bank thickens as the weather closes over.
+    material.uniforms.uOpacity.value = 0.45 + weatherEnv.overcast * 0.4;
     if (groupRef.current) {
       groupRef.current.children.forEach(child => child.quaternion.copy(camera.quaternion));
     }
@@ -348,6 +432,10 @@ export function SkyController({ stars = true, tuning = null }) {
   const sunRef = useRef(null);
   const sunGlowRef = useRef(null);
   const lensFlareRefs = useRef([]);
+  const islandMatRefs = useRef([]);
+  const hazeWallMatRef = useRef(null);
+  const islandTexture = useMemo(() => islandSilhouetteTexture(), []);
+  const hazeTexture = useMemo(() => hazeGradientTexture(), []);
   const moonDiscTexture = useMemo(() => crateredMoonTexture(), []);
   const moonGlowTexture = useMemo(() => radialTexture([
     [0.0, 'rgba(214, 227, 255, 0.25)'],
@@ -388,8 +476,8 @@ export function SkyController({ stars = true, tuning = null }) {
   // roam, instead of one blurry map stretched over the whole zone.
   const shadowTarget = useMemo(() => new THREE.Object3D(), []);
 
-  const weather = useThreeGameStore(state => state.weather);
-  const overcast = weather === 'cloudy' || weather === 'misty' ? 1 : 0;
+  // Cloud cover is the smoothed 0..1 weatherEnv.overcast, read per frame
+  // inside useFrame, so a weather change rolls in instead of cutting.
 
   useLayoutEffect(() => () => {
     moonDiscTexture.dispose();
@@ -397,7 +485,9 @@ export function SkyController({ stars = true, tuning = null }) {
     sunDiscTexture.dispose();
     sunGlowTexture.dispose();
     lensFlareTexture.dispose();
-  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, lensFlareTexture]);
+    islandTexture.dispose();
+    hazeTexture.dispose();
+  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, lensFlareTexture, islandTexture, hazeTexture]);
 
   // Keep the drei Sky sized inside the far plane and let terrain depth-occlude it.
   useLayoutEffect(() => {
@@ -432,6 +522,7 @@ export function SkyController({ stars = true, tuning = null }) {
 
   useFrame((_, delta) => {
     const store = useThreeGameStore.getState();
+    const overcast = weatherEnv.overcast;
     const targetHour = ((store.timeOfDay % 24) + 24) % 24;
     if (hourRef.current == null) hourRef.current = targetHour;
     // Ease toward the target along the short arc of the 24h clock.
@@ -551,8 +642,25 @@ export function SkyController({ stars = true, tuning = null }) {
 
     // --- fog + background + exposure -----------------------------------------
     _color.copy(C.fogNight).lerp(C.fogDay, daylight).lerp(C.fogGolden, golden * 0.7);
+    // Aerial perspective: haze warms when the camera faces the sun, cools
+    // looking away. Whole-frame approximation (scene.fog is one color), but
+    // every fog-reading material inherits it for free.
+    camera.getWorldDirection(_fwd);
+    const sunFacing = Math.max(0, _fwd.dot(_sun));
+    _color.lerp(C.fogSunWarm, sunFacing * sunFacing * daylight * (0.12 + golden * 0.3) * (1 - overcast * 0.6));
+    // Garúa lifts and desaturates the haze toward a pale grey-white.
+    _color.lerp(C.fogMist, weatherEnv.mistAmount * 0.55 * (0.35 + daylight * 0.65));
     if (scene.fog) scene.fog.color.copy(_color);
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
+    // Distant islands sit barely darker than the haze that swallows them.
+    _islandColor.copy(_color).multiplyScalar(0.95);
+    islandMatRefs.current.forEach(mat => {
+      if (mat) mat.color.copy(_islandColor);
+    });
+    // Border haze tracks the fog, lifted toward white like the water's uHaze.
+    if (hazeWallMatRef.current) {
+      hazeWallMatRef.current.color.copy(_color).lerp(_white, 0.3);
+    }
     gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.025;
   });
 
@@ -578,6 +686,20 @@ export function SkyController({ stars = true, tuning = null }) {
       <primitive object={shadowTarget} />
       <group ref={groupRef}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
+        {/* Camera-following horizon haze ring: a constant band of thick
+            distance air that swallows map-edge seams and the island bases.
+            Renders late so it veils far water too. */}
+        <mesh position={[0, HAZE_WALL_HEIGHT / 2 - 5, 0]} renderOrder={5}>
+          <cylinderGeometry args={[HAZE_WALL_RADIUS, HAZE_WALL_RADIUS, HAZE_WALL_HEIGHT, 64, 1, true]} />
+          <meshBasicMaterial
+            ref={hazeWallMatRef}
+            map={hazeTexture}
+            transparent
+            side={THREE.BackSide}
+            depthWrite={false}
+            fog={false}
+          />
+        </mesh>
         <TropicalBlueSkyDome nightRef={nightRef} />
         <RealisticCloudLayer nightRef={nightRef} />
         {/* Sun: warm billboarded disc behind a broad additive halo. */}
@@ -587,6 +709,33 @@ export function SkyController({ stars = true, tuning = null }) {
         <sprite ref={sunRef} renderOrder={-7} scale={[8, 8, 1]}>
           <spriteMaterial map={sunDiscTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
         </sprite>
+        {/* Distant island silhouettes: hazy landmasses on the sea horizon
+            (Isabela and Santa Cruz are visible from Floreana on clear days).
+            Color tracks the fog per-frame, slightly darker, so they always
+            sit naturally inside the atmosphere. */}
+        {DISTANT_ISLANDS.map((island, index) => {
+          const x = Math.sin(island.bearing) * ISLAND_DISTANCE;
+          const z = -Math.cos(island.bearing) * ISLAND_DISTANCE;
+          return (
+            <mesh
+              key={index}
+              position={[x, island.height * 0.5 - 1.5, z]}
+              rotation={[0, Math.atan2(-x, -z), 0]}
+              scale={[island.mirror ? -island.width : island.width, island.height, 1]}
+              renderOrder={-6}
+            >
+              <planeGeometry args={[1, 1]} />
+              <meshBasicMaterial
+                ref={mat => { islandMatRefs.current[index] = mat; }}
+                map={islandTexture}
+                transparent
+                opacity={0.65}
+                depthWrite={false}
+                fog={false}
+              />
+            </mesh>
+          );
+        })}
         {[0, 1, 2, 3].map(index => (
           <sprite
             key={`lens-flare-${index}`}

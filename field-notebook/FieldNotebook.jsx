@@ -84,8 +84,8 @@ function NotebookShell({ title, onClose, width = '28rem', children }) {
 function EntryThumb({ entry }) {
   if (entry.specimen) {
     return (
-      <div className="h-full w-full bg-[#9a8463]">
-        <SketchPortrait specimen={entry.specimen} className="h-full w-full object-cover mix-blend-multiply" />
+      <div className="flex h-full w-full items-center justify-center bg-[#d8c39a] p-1">
+        <SketchPortrait specimen={entry.specimen} className="h-full w-full object-contain mix-blend-multiply" />
       </div>
     );
   }
@@ -130,7 +130,7 @@ function EntryList({ entries, selectedKey, filter, onFilter, onSelect, onNew }) 
             key={entry.key}
             type="button"
             onClick={() => onSelect(entry.key)}
-            className={`grid w-full grid-cols-[4.5rem_1fr] gap-3.5 rounded-[2px] border px-2.5 py-2.5 text-left transition ${
+            className={`grid w-full grid-cols-[4.5rem_1fr] gap-3.5 rounded-[2px] border px-2.5 py-2.5 text-left transition duration-200 hover:-translate-y-0.5 ${
               selectedKey === entry.key
                 ? 'border-[#7a5d35] bg-[#2a2117]/80 shadow-[inset_0_0_0_1px_rgba(218,181,111,0.14)]'
                 : 'border-[#2f271b] bg-black/10 hover:border-[#6b5130] hover:bg-[#1a1510]'
@@ -203,7 +203,8 @@ function JournalPage({ entry, draft, onDraftChange, onSaveDraft, onViewSpecimen,
 
   return (
     <section
-      className="relative"
+      key={entry.key}
+      className="journal-page-turn relative"
       style={{ width: 'min(100cqw, 133.33cqh)', height: 'min(100cqh, 75cqw)' }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -219,25 +220,28 @@ function JournalPage({ entry, draft, onDraftChange, onSaveDraft, onViewSpecimen,
           <div className="absolute right-[1%] top-0 text-[clamp(11px,1.2vw,16px)] italic text-[#6a583f]/80 font-handwriting">{pageNumber}</div>
         )}
 
-        <div className="flex h-full flex-col pl-[2%] pr-[1%] pt-[2.5%]">
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:#8a7351_transparent]">
-            {specimen && (
-              <div className="float-right mb-[2%] ml-[3%] w-[42%] rotate-[0.6deg] mix-blend-multiply" style={{ filter: 'sepia(0.5) contrast(1.04)' }}>
-                <SketchPortrait specimen={specimen} className="w-full object-contain" />
-              </div>
-            )}
-
-            <div className="rotate-[-0.6deg]">
-              <div className="inline-block whitespace-nowrap border-b border-[#3c2f1e]/45 pb-1 text-[clamp(13px,1.5vw,22px)] leading-none font-handwriting">
+        <div className="flex h-full min-h-0 flex-col pl-[2%] pr-[2%] pt-[2.5%]">
+          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(8rem,34%)] gap-[3%] pr-[2%]">
+            <div className="min-w-0 rotate-[-0.6deg]">
+              <div className="inline-block max-w-full whitespace-nowrap border-b border-[#3c2f1e]/45 pb-1 text-[clamp(13px,1.5vw,22px)] leading-none font-handwriting">
                 <OrnateDate day={entry.day || 1} />
               </div>
-              <div className="mt-[1.6%] block">
+              <div className="mt-[2.2%] block min-w-0">
                 <span className="inline-block max-w-full truncate border-b border-[#3c2f1e]/35 pb-1 text-[clamp(12px,1.35vw,20px)] leading-tight font-handwriting">
                   {location}
                 </span>
               </div>
             </div>
+            {specimen ? (
+              <div className="flex h-[clamp(6rem,19cqh,12.5rem)] min-w-0 rotate-[0.7deg] items-center justify-center justify-self-end self-start mix-blend-multiply" style={{ filter: 'sepia(0.5) contrast(1.04)' }}>
+                <SketchPortrait specimen={specimen} className="max-h-full max-w-full object-contain" />
+              </div>
+            ) : (
+              <div aria-hidden="true" />
+            )}
+          </div>
 
+          <div className="mt-[2.4%] min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-[3%] [scrollbar-width:thin] [scrollbar-color:#8a7351_transparent]">
             {entry.type === 'draft' ? (
               <textarea
                 value={draft}
@@ -246,11 +250,11 @@ function JournalPage({ entry, draft, onDraftChange, onSaveDraft, onViewSpecimen,
                 onBlur={() => setTypingMode(false)}
                 aria-label="Write journal entry"
                 placeholder="Write observations here..."
-                className="mt-[3.5%] block h-[68%] w-full resize-none bg-transparent text-[clamp(11px,1.25vw,18px)] leading-[1.85] text-[#3c2f1e] outline-none placeholder:text-[#6f604b]/45 font-handwriting"
+                className="block h-full w-full resize-none bg-transparent text-[clamp(11px,1.18vw,17px)] leading-[1.8] text-[#3c2f1e] outline-none placeholder:text-[#6f604b]/45 font-handwriting"
                 spellCheck
               />
             ) : (
-              <div className="mt-[3.5%] whitespace-pre-wrap pb-[2%] text-[clamp(11px,1.25vw,18px)] leading-[1.85] font-handwriting">
+              <div className="max-w-[78ch] whitespace-pre-wrap break-words pb-[2%] text-[clamp(11px,1.18vw,17px)] leading-[1.82] font-handwriting [overflow-wrap:anywhere]">
                 {entry.content}
               </div>
             )}

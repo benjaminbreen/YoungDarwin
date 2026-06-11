@@ -14,6 +14,7 @@ export const modelAssets = {
   },
   syms: {
     enabled: true,
+    preload: false,
     path: '/assets/models/syms-animated.glb',
     scale: 0.98,
     rotation: [0, 0, 0],

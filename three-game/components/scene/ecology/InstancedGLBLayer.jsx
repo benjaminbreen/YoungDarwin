@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { applyFoliageMotion } from './foliageMotion';
@@ -13,6 +13,9 @@ import { catalogToInspectable } from '../../../world/inspectables';
 // FBX-style unit scales are handled once at load.
 
 const dummy = new THREE.Object3D();
+const _tintColor = new THREE.Color();
+const _desired = new THREE.Color();
+const _factor = new THREE.Color();
 
 export function InstancedGLBLayer({
   path,
@@ -29,6 +32,9 @@ export function InstancedGLBLayer({
 }) {
   const { scene } = useGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  // Per-item tints ride on instanceColor so one species stays one instanced
+  // mesh per primitive instead of one layer per tint.
+  const hasItemTints = items.some(item => item.tint);
 
   const primitives = useMemo(() => {
     scene.updateMatrixWorld(true);
@@ -38,12 +44,12 @@ export function InstancedGLBLayer({
       const geometry = object.geometry.clone();
       geometry.applyMatrix4(object.matrixWorld);
       const material = object.material.clone();
-      if (tint) material.color = material.color.clone().lerp(new THREE.Color(tint), tintStrength);
+      if (tint && !hasItemTints) material.color = material.color.clone().lerp(new THREE.Color(tint), tintStrength);
       if (motion) applyFoliageMotion(material, geometry, motion);
       list.push({ geometry, material });
     });
     return list;
-  }, [scene, tint, tintStrength, motion]);
+  }, [scene, tint, tintStrength, motion, hasItemTints]);
 
   useLayoutEffect(() => () => {
     primitives.forEach(({ geometry, material }) => {
@@ -52,7 +58,7 @@ export function InstancedGLBLayer({
     });
   }, [primitives]);
 
-  const setMatrices = mesh => {
+  const setMatrices = useCallback(mesh => {
     if (!mesh) return;
     items.forEach((item, index) => {
       dummy.position.set(
@@ -65,8 +71,26 @@ export function InstancedGLBLayer({
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
     });
+    if (hasItemTints) {
+      // instanceColor multiplies the material color, so express each item's
+      // lerp(base, tint, strength) as a per-channel factor relative to base.
+      const base = mesh.material.color;
+      items.forEach((item, index) => {
+        _tintColor.set(item.tint || tint || '#ffffff');
+        _desired.copy(base).lerp(_tintColor, tintStrength);
+        _factor.setRGB(
+          _desired.r / Math.max(base.r, 1e-3),
+          _desired.g / Math.max(base.g, 1e-3),
+          _desired.b / Math.max(base.b, 1e-3),
+        );
+        mesh.setColorAt(index, _factor);
+      });
+      mesh.instanceColor.needsUpdate = true;
+    }
     mesh.instanceMatrix.needsUpdate = true;
-  };
+    mesh.computeBoundingSphere?.();
+    mesh.computeBoundingBox?.();
+  }, [items, sink, slopeSink, ySquash, hasItemTints, tint, tintStrength]);
 
   if (!items.length) return null;
   return (
@@ -78,7 +102,6 @@ export function InstancedGLBLayer({
           args={[geometry, material, items.length]}
           castShadow={castShadow}
           receiveShadow={receiveShadow}
-          frustumCulled={false}
           userData={{ noReflect: true }}
           onClick={inspectableType ? event => {
             event.stopPropagation();

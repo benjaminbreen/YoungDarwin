@@ -1,4 +1,4 @@
-import { nwReefCoastZ, nwReefIsletField, nwReefOutcrop } from './terrain';
+import { nwReefCoastZ, nwReefIsletField, nwReefOutcrop } from './regions/northwestReef/terrain';
 import { makeZoneScatter } from './scatter';
 
 // Deterministic rock layout for the Northwest Reef. Rocks live here (not in

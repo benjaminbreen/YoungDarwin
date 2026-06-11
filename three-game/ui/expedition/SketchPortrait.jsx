@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { canonicalSpecimenId } from '../../../utils/canonicalIds';
 
 // Hand-drawn specimen portraits live in /public/assets/journal/portraits/
 // named <specimenId>.png (e.g. lavalizard.png, marineiguana.png). Until a
@@ -10,7 +11,8 @@ import React, { useEffect, useState } from 'react';
 const PORTRAIT_ROOT = '/assets/journal/portraits';
 
 export function portraitSrc(specimenId) {
-  return specimenId ? `${PORTRAIT_ROOT}/${specimenId}.png` : null;
+  const canonicalId = canonicalSpecimenId(specimenId);
+  return canonicalId ? `${PORTRAIT_ROOT}/${canonicalId}.png` : null;
 }
 
 const SKETCH_FILTER = 'grayscale(1) sepia(0.55) contrast(1.18) brightness(0.85)';

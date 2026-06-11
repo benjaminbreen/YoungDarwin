@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { terrainBiomeAt, terrainHeight, terrainSlopeAt, terrainSurfaceNoise, coveWaterMask, islandMask } from './terrain';
+import { terrainBiomeAt, terrainHeight, terrainSlopeAt, terrainSurfaceNoise } from './terrain';
+import { POST_OFFICE_BAY_TRAIL, coveWaterMask, islandMask, postOfficeTrailInfluence } from './regions/postOfficeBay/terrain';
 
 function seeded(index, salt = 0) {
   const x = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453;
@@ -12,6 +13,8 @@ export const floreanaCoveHeroRocks = [
   [-11, -20, 0.9, 0.8],
   [9, -18, 1.1, -0.35],
   [17, -13, 1.35, 0.7],
+  [22, -24, 1.15, 0.25],
+  [15, -9, 0.95, -0.4],
   [23, -4, 1.8, -0.1],
   [-23, 10, 1.7, 0.45],
   [-15, 20, 1.45, -0.2],
@@ -40,10 +43,7 @@ export const floreanaTidePools = [
 }));
 
 export const floreanaTrailMarkers = [
-  [-3, 8.5, 0.2],
-  [0.8, 14.6, 0.05],
-  [5.5, 20.2, -0.16],
-  [11.5, 25.6, -0.28],
+  ...POST_OFFICE_BAY_TRAIL.map(([x, z], index) => [x, z, index === 0 ? -0.35 : index < 3 ? -0.18 : 0.05]),
 ];
 
 function smoothBand(value, min, max, feather = 2.5) {
@@ -53,24 +53,8 @@ function smoothBand(value, min, max, feather = 2.5) {
   );
 }
 
-function pointSegmentDistance(px, pz, ax, az, bx, bz) {
-  const abx = bx - ax;
-  const abz = bz - az;
-  const lengthSq = abx * abx + abz * abz || 1;
-  const t = THREE.MathUtils.clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
-  const dx = px - (ax + abx * t);
-  const dz = pz - (az + abz * t);
-  return Math.hypot(dx, dz);
-}
-
 function trailInfluence(x, z) {
-  let nearest = Infinity;
-  for (let i = 0; i < floreanaTrailMarkers.length - 1; i += 1) {
-    const a = floreanaTrailMarkers[i];
-    const b = floreanaTrailMarkers[i + 1];
-    nearest = Math.min(nearest, pointSegmentDistance(x, z, a[0], a[1], b[0], b[1]));
-  }
-  return 1 - THREE.MathUtils.smoothstep(nearest, 2.4, 8.5);
+  return postOfficeTrailInfluence(x, z, 2.4, 8.5);
 }
 
 export function dryGrassSuitability(x, z, y = terrainHeight(x, z)) {
@@ -163,11 +147,11 @@ export function getPostOfficeBayOpuntiaHazards() {
 
 export function getPostOfficeBayBasaltBlocks() {
   if (postOfficeBayBasaltBlocks) return postOfficeBayBasaltBlocks;
-  postOfficeBayBasaltBlocks = makeFloreanaScatter('basalt', 46, 4, {
+  postOfficeBayBasaltBlocks = makeFloreanaScatter('basalt', 54, 4, {
     minX: -29,
-    maxX: 28,
+    maxX: 32,
     minZ: -24,
-    maxZ: 14,
+    maxZ: 22,
     scale: [0.22, 0.72],
   }).map(item => ({
     ...item,

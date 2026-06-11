@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
@@ -9,141 +9,30 @@ import { useThreeGameStore } from '../../store';
 import { getThreeSpecimens, threeTools } from '../../data';
 import { consumeTouchControls, triggerToolUse } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
-import { getRegionTerrainConfig, regionSpawnPoint, terrainBiomeAt, TERRAIN_BOUNDS } from '../../world/terrain';
-import { getZone } from '../../world/floreanaZones';
-import { getPostOfficeBayOpuntiaHazards } from '../../world/floreanaCoveLayout';
+import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
-import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import {
   CHARACTER_CONTROLLER_CONFIG,
   useKinematicCharacterController,
 } from '../../physics/useKinematicCharacterController';
 import { ModelAsset } from '../assets/ModelAsset';
-
-// Stand-in for getKeys() while a HUD text input has focus: every control
-// reads as released, so typing never drives the character.
-const EMPTY_KEYS = {};
-
-const PLAYER = {
-  walkSpeed: 4.45,
-  runSpeed: 7.45,
-  jumpVelocity: 6.8,
-  gravity: 10.8,
-  groundAcceleration: 24,
-  groundDeceleration: 22,
-  airAcceleration: 6.2,
-  airDeceleration: 2.4,
-  turnDamping: 15,
-  coyoteTime: 0.16,
-  runningJumpVerticalBonus: 0.65,
-  fallGravityMultiplier: 1.18,
-  jumpReleaseGravityMultiplier: 1.85,
-  groundContactEpsilon: 0.11,
-  groundSnapDistance: 0.62,
-  uphillSpeedPenalty: 0.14,
-  downhillSpeedBoost: 0.05,
-  tiredRunFatigue: 68,
-  exhaustedRunFatigue: 92,
-  bounds: TERRAIN_BOUNDS,
-};
-
-const SPAWN_DROP = {
-  height: 0,
-  initialVelocity: -1.2,
-  maxFallSpeed: -16,
-  landingLock: 0,
-};
-
-const BUMP_FEEDBACK = {
-  duration: 0.24,
-  cooldown: 0.48,
-  minSpeed: 3.4,
-  minHeadOn: 0.68,
-};
-
-const CACTUS_HAZARD = {
-  cooldown: 1.15,
-  shove: 3.8,
-  minSpeed: 0.35,
-};
-
-const LANDING_DUST = {
-  duration: 0.82,
-  particles: 14,
-};
-
-const CAMERA = {
-  minZoom: 2.8,
-  maxZoom: 22,
-  defaultZoom: 5.7,
-  rotateSpeed: 0.0042,
-  pitchSpeed: 0.005,
-  minPitch: -0.45,   // look up from near water level
-  maxPitch: 1.45,    // look down from nearly overhead
-  defaultPitch: 0.3, // gentle downward tilt, matching the old shoulder framing
-  panSpeed: 0.0017,
-  maxPan: 7,
-  keyRotateSpeed: 2.2,
-};
-
-const ACTION_DURATION = {
-  pray: 2.8,
-  fireRifle: 1.25,
-  swingHammer: 1.15,
-  swingNet: 1.6,
-  gather: 3.2,
-  pickUp: 1.35,
-  lookAround: 2.1,
-  lookAroundShort: 1.45,
-  point: 1.4,
-  trip: 1.8,
-  hitReaction: 1.15,
-  bigHitFall: 2.25,
-  shoulderHitAndFall: 2.35,
-  changeItem: 1.0,
-  write: 3.8,
-  kneelInspect: 3.0,
-  standingInspectDownward: 2.4,
-  climb: 2.15,
-  sprintToWallClimb: 1.25,
-  climbingUpWall: 1.55,
-  scramble: 0.58,
-  teeter: 1.45,
-  startWalking: 0.42,
-  stopWalking: 0.38,
-  runToStop: 0.83,
-  standingJump: 1.1,
-  runningJump: 0.82,
-  turnLeft90: 0.48,
-  turnRight90: 0.48,
-  fallingToLanding: 0.55,
-  landing: 1.0,
-  runningLanding: 0.9,
-  hardLanding: 1.8,
-  bigJumpDown: 1.35,
-  fallingToRoll: 1.5,
-  dodgeRoll: 0.95,
-  gettingUp: 1.65,
-  fallingForwardDeath: 2.4,
-  jumpTakeoff: 0.42,
-};
-
-const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([
-  'startWalking',
-  'lookAroundShort',
-  'stopWalking',
-  'runToStop',
-  'landing',
-  'runningLanding',
-  'teeter',
-]);
-
-const CONTROL_INTERRUPTIBLE_ACTIONS = new Set([
-  ...MOVEMENT_INTERRUPTIBLE_ACTIONS,
-  'startWalking',
-]);
+import {
+  ACTION_DURATION,
+  BUMP_FEEDBACK,
+  CACTUS_HAZARD,
+  CAMERA,
+  CONTROL_INTERRUPTIBLE_ACTIONS,
+  EMPTY_KEYS,
+  MOVEMENT_INTERRUPTIBLE_ACTIONS,
+  PLAYER,
+  SPAWN_DROP,
+} from './playerConfig';
+import { usePlayerCameraRig } from './usePlayerCameraRig';
+import { usePlayerActions } from './playerActions';
+import { updatePlayerInteractions } from './playerInteractions';
+import { findCactusHazardContact, findPushableObstacleNear, LandingDust } from './playerFeedback';
 
 function easeInOutCubic(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
@@ -160,44 +49,6 @@ function playerControllerDebugEnabled() {
 function dampAngle(current, target, lambda, delta) {
   const deltaAngle = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + deltaAngle * (1 - Math.exp(-lambda * delta));
-}
-
-function oppositeEdge(edge) {
-  return EDGE_DIRECTIONS[edge]?.opposite || null;
-}
-
-function nearestRegionEdgePrompt(regionId, position, facing) {
-  const config = getRegionTerrainConfig(regionId);
-  const threshold = 5.2;
-  const hints = getRegionEdgeHints(regionId);
-  const distances = {
-    east: config.width / 2 - position.x,
-    west: position.x + config.width / 2,
-    south: config.depth / 2 - position.z,
-    north: position.z + config.depth / 2,
-  };
-  const candidates = [];
-  for (const hint of hints) {
-    const edge = hint.edge;
-    if (edge.includes('north') && distances.north > threshold) continue;
-    if (edge.includes('south') && distances.south > threshold) continue;
-    if (edge.includes('east') && distances.east > threshold) continue;
-    if (edge.includes('west') && distances.west > threshold) continue;
-    const edgeDirection = EDGE_DIRECTIONS[edge];
-    if (!edgeDirection) continue;
-    const direction = new THREE.Vector3(edgeDirection.dx, 0, edgeDirection.dy).normalize();
-    const facingWeight = facing?.lengthSq?.() > 0.001 ? direction.dot(facing.clone().normalize()) : 0;
-    if (facingWeight < -0.15) continue;
-    const distance = Math.min(
-      edge.includes('north') ? distances.north : Infinity,
-      edge.includes('south') ? distances.south : Infinity,
-      edge.includes('east') ? distances.east : Infinity,
-      edge.includes('west') ? distances.west : Infinity,
-    );
-    candidates.push({ ...hint, distance, facingWeight });
-  }
-  candidates.sort((a, b) => (a.distance - b.distance) || (b.facingWeight - a.facingWeight));
-  return candidates[0] || null;
 }
 
 function ProceduralNaturalistModel({ motionRef }) {
@@ -302,6 +153,7 @@ function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
       const charge = THREE.MathUtils.clamp(motionRef.current.jumpChargeAmount || 0, 0, 1);
       const standingJumpScale = THREE.MathUtils.lerp(1.0, 0.76, charge);
       const runningJumpScale = THREE.MathUtils.lerp(0.95, 0.72, charge);
+      const shortStandingJump = !motionRef.current.jumpWasRunning && charge < 0.15;
       if (jumpPhase === 'takeoff') {
         if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
         return motionRef.current.jumpWasRunning
@@ -310,6 +162,7 @@ function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
       }
       if (jumpPhase === 'airborne' || jumpPhase === 'prelanding') {
         if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
+        if (shortStandingJump) return { clip: 'standingJump', fade: 0.05, timeScale: 0.92, maxTime: 0.58 };
         return motionRef.current.jumpWasRunning
           ? { clip: 'runningJumpHold', fade: 0.05 }
           : { clip: 'standingJumpHold', fade: 0.05 };
@@ -344,16 +197,7 @@ function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
     if (status.fatigue >= 82) return 'exhaustedIdle';
     return 'idle';
   }, [motionRef]);
-  return <ModelAsset id="darwin" animationSelector={selectAnimation} damageFlash={damageFlash} fallback={<ProceduralNaturalistModel motionRef={motionRef} />} />;
-}
-
-function collectionAnimationForTool(toolId) {
-  if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true };
-  if (toolId === 'insect_net') return { clip: 'swingNet', duration: ACTION_DURATION.swingNet, lockMovement: true };
-  if (toolId === 'hammer') return { clip: 'swingHammer', duration: ACTION_DURATION.swingHammer, lockMovement: true };
-  if (toolId === 'sketch') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true };
-  if (toolId === 'snare') return { clip: 'gather', duration: ACTION_DURATION.gather, lockMovement: true };
-  return { clip: 'pickUp', duration: ACTION_DURATION.pickUp, lockMovement: true };
+  return <ModelAsset id="darwin" animationSelector={selectAnimation} damageFlash={damageFlash} reflect fallback={<ProceduralNaturalistModel motionRef={motionRef} />} />;
 }
 
 function formatVector(vector) {
@@ -374,166 +218,11 @@ function orientDebugVector(group, direction, length) {
   group.scale.set(1, length, 1);
 }
 
-function findPushableObstacleNear(obstacles, position, horizontalVelocity, collisionNormal = null) {
-  if (!obstacles?.length || horizontalVelocity.lengthSq() < 0.01) return null;
-  const travel = horizontalVelocity.clone().normalize();
-  let best = null;
-  for (const obstacle of obstacles) {
-    if (!obstacle.pushable) continue;
-    const toObstacle = new THREE.Vector3(obstacle.x - position.x, 0, obstacle.z - position.z);
-    const distance = toObstacle.length();
-    if (distance > obstacle.radius + 0.86) continue;
-    const direction = distance > 0.001 ? toObstacle.clone().divideScalar(distance) : travel.clone();
-    const travelDot = travel.dot(direction);
-    const normalDot = collisionNormal?.lengthSq?.() > 0.001 ? Math.max(0, -travel.dot(collisionNormal.clone().normalize())) : 0;
-    const score = travelDot + normalDot * 0.5 - distance * 0.12;
-    if (travelDot < 0.16 && normalDot < 0.18) continue;
-    if (!best || score > best.score) best = { obstacle, score };
-  }
-  return best?.obstacle || null;
-}
-
-function findCactusHazardContact(position, playerRadius = 0.42) {
-  let best = null;
-  for (const cactus of getPostOfficeBayOpuntiaHazards()) {
-    const dx = position.x - cactus.x;
-    const dz = position.z - cactus.z;
-    const distance = Math.hypot(dx, dz);
-    const radius = cactus.hazardRadius + playerRadius;
-    if (distance > radius) continue;
-    const normal = distance > 0.001
-      ? new THREE.Vector3(dx / distance, 0, dz / distance)
-      : new THREE.Vector3(0, 0, 1);
-    const penetration = radius - distance;
-    if (!best || penetration > best.penetration) {
-      best = { cactus, normal, penetration, distance };
-    }
-  }
-  return best;
-}
-
-function LandingDust({ triggerRef }) {
-  const ringRef = useRef(null);
-  const particleRefs = useRef([]);
-  const burst = useRef({
-    startedAt: -10,
-    intensity: 0,
-    origin: new THREE.Vector3(),
-    seed: 1,
-    active: false,
-  });
-  const particles = useMemo(() => Array.from({ length: LANDING_DUST.particles }, (_, index) => ({
-    index,
-    angle: index * (Math.PI * 2 / LANDING_DUST.particles),
-    speed: 0.55 + ((index * 37) % 11) / 10 * 0.42,
-    lift: 0.035 + ((index * 19) % 7) / 100,
-    size: 0.075 + ((index * 13) % 5) / 100,
-  })), []);
-  const ringMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#d6bf8a',
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  }), []);
-  const particleMaterials = useMemo(() => particles.map((_, index) => new THREE.MeshBasicMaterial({
-    color: index % 4 === 0 ? '#e0c993' : '#c7ad78',
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  })), [particles]);
-
-  useEffect(() => () => {
-    ringMaterial.dispose();
-    particleMaterials.forEach(material => material.dispose());
-  }, [particleMaterials, ringMaterial]);
-
-  useEffect(() => {
-    triggerRef.current = ({ intensity = 0.45, position = null } = {}) => {
-      burst.current.startedAt = performance.now() / 1000;
-      burst.current.intensity = THREE.MathUtils.clamp(intensity, 0.18, 1);
-      burst.current.origin.copy(position || new THREE.Vector3());
-      burst.current.seed += 1;
-      burst.current.active = true;
-      if (ringRef.current) ringRef.current.visible = true;
-      particleRefs.current.forEach(mesh => {
-        if (mesh) mesh.visible = true;
-      });
-    };
-    return () => {
-      if (triggerRef.current) triggerRef.current = null;
-    };
-  }, [triggerRef]);
-
-  useFrame((_, delta) => {
-    const state = burst.current;
-    if (!state.active) return;
-    const age = performance.now() / 1000 - state.startedAt;
-    const progress = THREE.MathUtils.clamp(age / LANDING_DUST.duration, 0, 1);
-    const fade = Math.pow(1 - progress, 1.55) * state.intensity;
-    const spread = 0.42 + progress * (0.88 + state.intensity * 0.72);
-
-    if (ringRef.current) {
-      ringRef.current.position.copy(state.origin);
-      ringRef.current.scale.setScalar(spread);
-      ringRef.current.rotation.z += delta * 0.42;
-      ringRef.current.material.opacity = fade * 0.3;
-    }
-
-    particles.forEach(item => {
-      const mesh = particleRefs.current[item.index];
-      if (!mesh) return;
-      const wobble = Math.sin(state.seed * 1.73 + item.index * 2.1) * 0.26;
-      const angle = item.angle + wobble;
-      const distance = progress * item.speed * (0.72 + state.intensity * 0.58);
-      mesh.position.set(
-        state.origin.x + Math.cos(angle) * distance,
-        state.origin.y + 0.035 + Math.sin(progress * Math.PI) * item.lift * (1 + state.intensity),
-        state.origin.z + Math.sin(angle) * distance,
-      );
-      mesh.rotation.z += delta * (0.9 + item.index * 0.02);
-      mesh.scale.setScalar(item.size * (0.75 + state.intensity * 0.7) * (1 + progress * 1.5));
-      mesh.material.opacity = fade * (0.2 + (item.index % 3) * 0.035);
-    });
-
-    if (progress >= 1) {
-      state.active = false;
-      if (ringRef.current) {
-        ringRef.current.visible = false;
-        ringRef.current.material.opacity = 0;
-      }
-      particleRefs.current.forEach(mesh => {
-        if (!mesh) return;
-        mesh.visible = false;
-        mesh.material.opacity = 0;
-      });
-    }
-  });
-
-  return (
-    <group position={[0, 0.065, 0]}>
-      <mesh ref={ringRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} material={ringMaterial} renderOrder={4}>
-        <ringGeometry args={[0.42, 0.72, 40]} />
-      </mesh>
-      {particles.map(item => (
-        <mesh
-          key={item.index}
-          ref={mesh => { particleRefs.current[item.index] = mesh; }}
-          visible={false}
-          rotation={[-Math.PI / 2, 0, item.angle]}
-          material={particleMaterials[item.index]}
-          renderOrder={5}
-        >
-          <circleGeometry args={[1, 10]} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 export function PlayerController({ physicsDebug = false }) {
   const group = useRef(null);
   const warningRef = useRef(null);
   const contactShadowRef = useRef(null);
+  const waterlineRef = useRef(null);
   const landingDustTriggerRef = useRef(null);
   const footstepDustTriggerRef = useRef(null);
   const collisionDustTriggerRef = useRef(null);
@@ -543,14 +232,7 @@ export function PlayerController({ physicsDebug = false }) {
   const characterBodyRef = useRef(null);
   const characterColliderRef = useRef(null);
   const velocity = useRef(new THREE.Vector3());
-  const yaw = useRef(0);
-  const pitch = useRef(CAMERA.defaultPitch);
-  const zoom = useRef(CAMERA.defaultZoom);
-  const dragging = useRef(false);
-  const panning = useRef(false);
-  const panOffset = useRef(new THREE.Vector3());
-  const lastPointerX = useRef(0);
-  const lastPointerY = useRef(0);
+  const { yawRef, resetCameraForSpawn, updateCamera } = usePlayerCameraRig();
   const facing = useRef(new THREE.Vector3(0, 0, -1));
   const wasAirborne = useRef(false);
   const jumpState = useRef({
@@ -563,6 +245,7 @@ export function PlayerController({ physicsDebug = false }) {
     launchY: 0,
   });
   const jumpCharge = useRef({ active: false, startedAt: 0, wasRunning: false, amount: 0 });
+  const pendingStandingJump = useRef({ active: false, startedAt: 0 });
   const lastGroundedAt = useRef(-10);
   const jumpBufferedUntil = useRef(-10);
   const touchJumpHoldUntil = useRef(-10);
@@ -579,13 +262,17 @@ export function PlayerController({ physicsDebug = false }) {
   const lastCactusHitAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
-  const cameraFollowY = useRef(null);
-  // Smoothed look-at point for the diegetic status view; non-null while the
-  // hero shot is active or still easing back out.
-  const statusLook = useRef(null);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
   const terrainFeedback = useRef({ grade: 0, uphillDot: 0, downhillDot: 0 });
   const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
+  const lastPublishedPose = useRef({
+    x: NaN,
+    y: NaN,
+    z: NaN,
+    fx: NaN,
+    fy: NaN,
+    fz: NaN,
+  });
   const bounceFeedback = useRef({
     startedAt: -10,
     lastImpactAt: -10,
@@ -630,7 +317,6 @@ export function PlayerController({ physicsDebug = false }) {
     tiredRun: false,
   });
   const [, getKeys] = useKeyboardControls();
-  const { camera, gl } = useThree();
   const rapierContext = useRapier();
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
@@ -663,12 +349,6 @@ export function PlayerController({ physicsDebug = false }) {
   const startX = spawnPoint.x;
   const startZ = spawnPoint.z;
 
-  const cameraTargets = useMemo(() => ({
-    shoulder: new THREE.Vector3(1.05, 2.35, 3.75),
-    first: new THREE.Vector3(0, 1.72, 0.16),
-    top: new THREE.Vector3(0, 20, 0.1),
-  }), []);
-
   const debugMaterials = useMemo(() => ({
     capsule: new THREE.MeshBasicMaterial({
       color: '#34d399',
@@ -690,6 +370,23 @@ export function PlayerController({ physicsDebug = false }) {
       depthWrite: false,
     }),
   }), []);
+
+  const waterlineMaterial = useMemo(() => new THREE.MeshBasicMaterial({
+    color: '#dffcff',
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }), []);
+  const {
+    startAction: startActionAt,
+    interruptAction: interruptActionAt,
+    triggerAction: triggerActionAt,
+  } = usePlayerActions(stateRef, lastButtons);
+
+  useEffect(() => () => {
+    waterlineMaterial.dispose();
+  }, [waterlineMaterial]);
 
   const queueMovementCost = useCallback(({
     running = false,
@@ -717,68 +414,10 @@ export function PlayerController({ physicsDebug = false }) {
   }, [applyMovementCost]);
 
   useEffect(() => {
-    const element = gl.domElement;
-    const onPointerDown = event => {
-      // Left button orbits; middle button (or Shift+left) pans.
-      if (event.button !== 0 && event.button !== 1) return;
-      dragging.current = true;
-      panning.current = event.button === 1 || event.shiftKey;
-      lastPointerX.current = event.clientX;
-      lastPointerY.current = event.clientY;
-      element.setPointerCapture?.(event.pointerId);
-    };
-    const onPointerMove = event => {
-      if (!dragging.current) return;
-      const dx = event.clientX - lastPointerX.current;
-      const dy = event.clientY - lastPointerY.current;
-      lastPointerX.current = event.clientX;
-      lastPointerY.current = event.clientY;
-      if (panning.current || event.shiftKey) {
-        // Slide the look target in the camera's screen plane (clamped).
-        const dist = THREE.MathUtils.clamp(zoom.current, 4, 14);
-        const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
-        panOffset.current
-          .add(right.multiplyScalar(-dx * CAMERA.panSpeed * dist))
-          .add(new THREE.Vector3(0, dy * CAMERA.panSpeed * dist, 0));
-        if (panOffset.current.length() > CAMERA.maxPan) panOffset.current.setLength(CAMERA.maxPan);
-      } else {
-        // Full free rotation: yaw horizontally, pitch vertically (clamped).
-        yaw.current -= dx * CAMERA.rotateSpeed;
-        pitch.current = THREE.MathUtils.clamp(pitch.current - dy * CAMERA.pitchSpeed, CAMERA.minPitch, CAMERA.maxPitch);
-      }
-    };
-    const stopDrag = event => {
-      dragging.current = false;
-      panning.current = false;
-      if (event?.pointerId !== undefined) element.releasePointerCapture?.(event.pointerId);
-    };
-    const onWheel = event => {
-      event.preventDefault();
-      const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
-      zoom.current = THREE.MathUtils.clamp(zoom.current + normalizedDelta * 0.9, CAMERA.minZoom, CAMERA.maxZoom);
-    };
-    element.style.cursor = 'grab';
-    element.style.touchAction = 'none';
-    element.addEventListener('pointerdown', onPointerDown);
-    element.addEventListener('pointermove', onPointerMove);
-    element.addEventListener('pointerup', stopDrag);
-    element.addEventListener('pointercancel', stopDrag);
-    element.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      element.removeEventListener('pointerdown', onPointerDown);
-      element.removeEventListener('pointermove', onPointerMove);
-      element.removeEventListener('pointerup', stopDrag);
-      element.removeEventListener('pointercancel', stopDrag);
-      element.removeEventListener('wheel', onWheel);
-      element.style.cursor = '';
-      element.style.touchAction = '';
-    };
-  }, [gl]);
-
-  useEffect(() => {
     const cancelPendingJumpCharge = () => {
-      if (!jumpCharge.current.active) return;
+      if (!jumpCharge.current.active && !pendingStandingJump.current.active) return;
       jumpCharge.current = { active: false, startedAt: 0, wasRunning: false, amount: 0 };
+      pendingStandingJump.current = { active: false, startedAt: 0 };
       stateRef.current.jumpCharging = false;
       stateRef.current.jumpChargeAmount = 0;
       if (stateRef.current.jumpPhase === 'charging') stateRef.current.jumpPhase = 'grounded';
@@ -820,16 +459,18 @@ export function PlayerController({ physicsDebug = false }) {
       launchY: group.current?.position?.y || 0,
     };
     jumpCharge.current = { active: false, startedAt: 0, wasRunning: false, amount: 0 };
+    pendingStandingJump.current = { active: false, startedAt: 0 };
     stateRef.current.jumpCharging = false;
     stateRef.current.jumpChargeAmount = 0;
     lastGroundedAt.current = performance.now() / 1000;
-    cameraFollowY.current = groundY;
+    resetCameraForSpawn(groundY);
     jumpBufferedUntil.current = -10;
     touchJumpHoldUntil.current = -10;
     lastModelYaw.current = Math.PI;
+    lastPublishedPose.current.x = NaN;
     footstepDust.current = { phase: 0, side: -1 };
     idleFidget.current = { idleSince: 0, nextAt: 0, count: 0 };
-  }, [currentZoneId, playerSpawnId, spawnPoint.y, startX, startZ]);
+  }, [currentZoneId, playerSpawnId, resetCameraForSpawn, spawnPoint.y, startX, startZ]);
 
   useFrame((_, delta) => {
     if (!group.current || health <= 0) return;
@@ -850,6 +491,10 @@ export function PlayerController({ physicsDebug = false }) {
       });
     }
     if (modelFeedbackRef.current) {
+      // Hide Darwin's body in first person — the camera sits inside the head
+      // mesh, so rendering it shows the interior of the face and clothing.
+      // Keep it visible while the status view's external camera is active.
+      modelFeedbackRef.current.visible = viewMode !== 'first' || useThreeGameStore.getState().statusViewOpen;
       const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
       const speedRatio = THREE.MathUtils.clamp(horizontalVelocity.length() / PLAYER.runSpeed, 0, 1);
       const localVelocity = horizontalVelocity.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -group.current.rotation.y);
@@ -890,36 +535,9 @@ export function PlayerController({ physicsDebug = false }) {
       orientDebugVector(debugMovementRef.current, characterDebug.current.movement, Math.min(1.2, characterDebug.current.movement.length() * 18));
     }
     const startOfFramePosition = group.current.position.clone();
-    const startAction = (clip, duration = ACTION_DURATION[clip] || 1.2, {
-      lockMovement = true,
-      recoverAction = null,
-      recoverDuration = ACTION_DURATION[recoverAction] || 1.2,
-      onStart = null,
-    } = {}) => {
-      stateRef.current.action = clip;
-      stateRef.current.actionStartedAt = now;
-      stateRef.current.actionUntil = now + duration;
-      stateRef.current.lockMovementUntil = lockMovement ? now + duration : stateRef.current.lockMovementUntil;
-      stateRef.current.recoverAction = recoverAction ? { clip: recoverAction, duration: recoverDuration } : null;
-      onStart?.();
-    };
-    const interruptAction = (allowed = MOVEMENT_INTERRUPTIBLE_ACTIONS) => {
-      if (!allowed.has(stateRef.current.action)) return false;
-      stateRef.current.action = null;
-      stateRef.current.recoverAction = null;
-      stateRef.current.actionUntil = 0;
-      stateRef.current.lockMovementUntil = Math.min(stateRef.current.lockMovementUntil, now);
-      return true;
-    };
-    const triggerAction = (button, clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => {
-      const pressed = Boolean(keys[button] || touch[button]);
-      const allowWhileActing = options.allowWhileActing === true;
-      const blocked = options.movementLocked || (!allowWhileActing && stateRef.current.action);
-      if (pressed && !lastButtons.current[button] && !blocked) {
-        startAction(clip, duration, options);
-      }
-      lastButtons.current[button] = pressed;
-    };
+    const startAction = (clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => startActionAt(now, clip, duration, options);
+    const interruptAction = (allowed = MOVEMENT_INTERRUPTIBLE_ACTIONS) => interruptActionAt(now, allowed);
+    const triggerAction = (button, clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => triggerActionAt(now, keys, touch, button, clip, duration, options);
 
     const safeDelta = Math.min(delta, 0.05);
     if (spawnDrop.current.phase === 'pending') {
@@ -1155,8 +773,8 @@ export function PlayerController({ physicsDebug = false }) {
     lastButtons.current.rifle = riflePressed;
     const rotateLeftPressed = Boolean(keys.rotateLeft);
     const rotateRightPressed = Boolean(keys.rotateRight);
-    if (rotateLeftPressed) yaw.current += CAMERA.keyRotateSpeed * delta;
-    if (rotateRightPressed) yaw.current -= CAMERA.keyRotateSpeed * delta;
+    if (rotateLeftPressed) yawRef.current += CAMERA.keyRotateSpeed * delta;
+    if (rotateRightPressed) yawRef.current -= CAMERA.keyRotateSpeed * delta;
     const input = new THREE.Vector3(
       (keys.right || touch.right ? 1 : 0) - (keys.left || touch.left ? 1 : 0),
       0,
@@ -1202,7 +820,7 @@ export function PlayerController({ physicsDebug = false }) {
     const wadeSpeedScale = 1 - Math.min(0.66, Math.max(0, wadeDepth.current) * 0.42);
     const rawMovementSpeed = (stateRef.current.crouching ? PLAYER.walkSpeed * 0.45 : running ? rawRunSpeed : PLAYER.walkSpeed) * carrySpeedScale * wadeSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
-    const rawInputDirection = moving ? input.clone().normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current) : facing.current.clone().normalize();
+    const rawInputDirection = moving ? input.clone().normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yawRef.current) : facing.current.clone().normalize();
     const uphillVector = new THREE.Vector3(slope.dx, 0, slope.dz);
     const uphillDirection = uphillVector.lengthSq() > 0.0001 ? uphillVector.clone().normalize() : new THREE.Vector3();
     const uphillDot = moving && uphillDirection.lengthSq() > 0 ? THREE.MathUtils.clamp(rawInputDirection.dot(uphillDirection), -1, 1) : 0;
@@ -1318,7 +936,7 @@ export function PlayerController({ physicsDebug = false }) {
     if (moving && !movementLocked) {
       input.copy(rawInputDirection);
       const sidestepping = lateralOnlyInput && (stateRef.current.aiming || stateRef.current.crouching);
-      const forwardFacing = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
+      const forwardFacing = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yawRef.current);
       facing.current.copy(sidestepping ? forwardFacing : input);
       const targetVelocity = input.clone().multiplyScalar(movementSpeed);
       const accel = airborneForControl ? PLAYER.airAcceleration : PLAYER.groundAcceleration;
@@ -1402,17 +1020,18 @@ export function PlayerController({ physicsDebug = false }) {
     lastButtons.current.dodge = dodgePressed;
     const jumpHeld = Boolean(keys.jump || touch.jump);
     const jumpJustPressed = jumpHeld && !lastButtons.current.jump;
-    const canJump = jumpJustPressed
-      && !stateRef.current.crouching
+    const canStartJumpInput = !stateRef.current.crouching
       && !stateRef.current.aiming
       && !stateRef.current.action
       && spawnDrop.current.phase === 'complete'
       && now >= stateRef.current.lockMovementUntil
       && jumpState.current.phase !== 'takeoff'
       && (grounded || now - lastGroundedAt.current <= PLAYER.coyoteTime);
-    if (canJump) {
-      const launchRunning = running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.05;
-      const launchVelocity = PLAYER.jumpVelocity + (launchRunning ? PLAYER.runningJumpVerticalBonus : 0);
+
+    const launchJump = (launchRunning, chargeAmount = 0) => {
+      const charge = THREE.MathUtils.clamp(chargeAmount, 0, 1);
+      const launchVelocity = PLAYER.jumpVelocity
+        + (launchRunning ? PLAYER.runningJumpVerticalBonus : PLAYER.chargedJumpBonus * charge);
       velocity.current.y = launchVelocity;
       if (moving || launchRunning) {
         const horizontal = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
@@ -1427,24 +1046,71 @@ export function PlayerController({ physicsDebug = false }) {
         }
       }
       jumpCharge.current.active = false;
+      jumpCharge.current.amount = 0;
+      pendingStandingJump.current.active = false;
       lastGroundedAt.current = -10;
       jumpBufferedUntil.current = -10;
       jumpState.current = {
         phase: 'takeoff',
-        takeoffUntil: now + ACTION_DURATION.jumpTakeoff * 0.52,
+        takeoffUntil: now + ACTION_DURATION.jumpTakeoff * (0.52 + charge * 0.18),
         wasRunning: launchRunning,
         fromPlayerJump: true,
-        chargeAmount: 0,
+        chargeAmount: charge,
         launchedAt: now,
         launchY: group.current.position.y,
       };
       stateRef.current.jumpCharging = false;
       stateRef.current.jumpPhase = 'takeoff';
       stateRef.current.jumpWasRunning = launchRunning;
-      stateRef.current.jumpChargeAmount = 0;
+      stateRef.current.jumpChargeAmount = charge;
       wasAirborne.current = true;
+    };
+
+    if (jumpJustPressed && canStartJumpInput) {
+      const launchRunning = moving || running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.05;
+      if (launchRunning) {
+        launchJump(true, 0);
+      } else {
+        pendingStandingJump.current = { active: true, startedAt: now };
+        jumpCharge.current = { active: false, startedAt: now, wasRunning: false, amount: 0 };
+      }
     }
     stateRef.current.jumpCharging = false;
+    if (pendingStandingJump.current.active) {
+      const stillCanResolveStandingJump = !stateRef.current.crouching
+        && !stateRef.current.aiming
+        && !stateRef.current.action
+        && spawnDrop.current.phase === 'complete'
+        && now >= stateRef.current.lockMovementUntil
+        && grounded
+        && jumpState.current.phase !== 'takeoff';
+      if (!stillCanResolveStandingJump) {
+        pendingStandingJump.current.active = false;
+        jumpCharge.current = { active: false, startedAt: 0, wasRunning: false, amount: 0 };
+      } else if (!jumpHeld) {
+        launchJump(false, jumpCharge.current.active ? jumpCharge.current.amount : 0);
+      } else {
+        const heldFor = now - pendingStandingJump.current.startedAt;
+        if (heldFor >= PLAYER.jumpChargeStartDelay) {
+          const rawCharge = (heldFor - PLAYER.jumpChargeStartDelay) / PLAYER.jumpChargeMaxDuration;
+          const chargeAmount = THREE.MathUtils.smoothstep(
+            THREE.MathUtils.clamp(rawCharge, 0, 1),
+            0,
+            1,
+          );
+          jumpCharge.current.active = true;
+          jumpCharge.current.startedAt = pendingStandingJump.current.startedAt;
+          jumpCharge.current.wasRunning = false;
+          jumpCharge.current.amount = chargeAmount;
+          stateRef.current.jumpCharging = true;
+          stateRef.current.jumpPhase = 'charging';
+          stateRef.current.jumpWasRunning = false;
+          stateRef.current.jumpChargeAmount = chargeAmount;
+          velocity.current.x = THREE.MathUtils.damp(velocity.current.x, 0, PLAYER.groundDeceleration, delta);
+          velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, PLAYER.groundDeceleration, delta);
+        }
+      }
+    }
     lastButtons.current.jump = jumpHeld;
     if (!jumpCharge.current.active && grounded && jumpState.current.phase !== 'takeoff' && velocity.current.y < 0) {
       velocity.current.y = 0;
@@ -1629,6 +1295,12 @@ export function PlayerController({ physicsDebug = false }) {
     if (landed) {
       const falling = wasAirborne.current ? Math.abs(velocity.current.y) : 0;
       const intentionalPlayerJump = wasAirborne.current && jumpState.current.fromPlayerJump;
+      const landedJumpWasRunning = jumpState.current.wasRunning;
+      const landedJumpCharge = jumpState.current.chargeAmount || 0;
+      const softStandingJumpLanding = intentionalPlayerJump
+        && !landedJumpWasRunning
+        && landedJumpCharge < 0.15
+        && falling < 7.8;
       if (groundDistance <= PLAYER.groundSnapDistance || belowTerrainFloor) {
         group.current.position.y = nextGroundY;
         characterController.sync(group.current.position);
@@ -1682,7 +1354,7 @@ export function PlayerController({ physicsDebug = false }) {
         startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
       } else if (falling > 2.4 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
         startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
-      } else if (falling > 2.4 && !stateRef.current.action) {
+      } else if (falling > 2.4 && !softStandingJumpLanding && !stateRef.current.action) {
         startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
       }
       if (moving || running || falling > 0.5) {
@@ -1712,18 +1384,6 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.z -= edgeRisk.direction.z * 0.42;
     }
 
-    const edgePrompt = nearestRegionEdgePrompt(currentZoneId, group.current.position, facing.current);
-    const promptPayload = edgePrompt
-      ? {
-          id: `${currentZoneId}:${edgePrompt.edge}:${edgePrompt.toRegionId || edgePrompt.boundaryKind || edgePrompt.kind}`,
-          ...edgePrompt,
-        }
-      : null;
-    const currentPromptId = useThreeGameStore.getState().edgePrompt?.id || null;
-    if ((promptPayload?.id || null) !== currentPromptId) {
-      setEdgePrompt(promptPayload);
-    }
-
     const p = group.current.position;
     // Deep water can't be walked into, but it can be fallen into (cliff jumps)
     // — and once in, Darwin can struggle in any direction while he drowns.
@@ -1745,147 +1405,36 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.y = 0;
     }
 
-    let nearest = null;
-    let nearestDistance = 4.4;
-    const collected = useThreeGameStore.getState().collectedSpecimenIds;
-    const specimenRuntimePositions = useThreeGameStore.getState().specimenRuntimePositions?.[currentZoneId] || {};
-    for (const specimen of zoneSpecimens) {
-      if (collected.includes(specimen.id)) continue;
-      const runtime = specimenRuntimePositions[specimen.id];
-      const [x, , z] = specimen.spawnPoint;
-      const runtimeX = runtime?.x ?? x;
-      const runtimeZ = runtime?.z ?? z;
-      const distance = Math.hypot(p.x - runtimeX, p.z - runtimeZ);
-      if (distance < nearestDistance) {
-        nearest = specimen.id;
-        nearestDistance = distance;
-      }
-    }
-    if (useThreeGameStore.getState().nearbySpecimenId !== nearest) {
-      setNearbySpecimen(nearest);
-    }
+    updatePlayerInteractions({
+      keys,
+      touch,
+      position: p,
+      facing: facing.current,
+      currentZoneId,
+      zoneSpecimens,
+      stateRef,
+      lastInteractRef: lastInteract,
+      lastCameraRef: lastCamera,
+      startAction,
+      collectNearby,
+      cycleViewMode,
+      setNearbySpecimen,
+      setActiveTool,
+      setEdgePrompt,
+      beginZoneTransition,
+      setCarriedObject,
+    });
 
-    if ((keys.interact || touch.interact) && !lastInteract.current) {
-      const currentState = useThreeGameStore.getState();
-      const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
-      if (currentState.carryPrompt) {
-        if (currentState.carriedObjectId) {
-          setCarriedObject(null);
-        } else if (currentState.carryPrompt.mode === 'pickup') {
-          setCarriedObject(currentState.carryPrompt.id);
-        }
-      } else if (!specimenId && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
-        beginZoneTransition(currentState.edgePrompt.toRegionId, {
-          entryEdge: oppositeEdge(currentState.edgePrompt.edge),
-          note: currentState.edgePrompt.description,
-        });
-      } else if (currentState.edgePrompt?.kind === 'blocked' && !specimenId) {
-        setEdgePrompt({
-          ...currentState.edgePrompt,
-          message: currentState.edgePrompt.description,
-        });
-      } else if (specimenId && !currentState.collectedSpecimenIds.includes(specimenId) && !stateRef.current.action) {
-        const animation = collectionAnimationForTool(currentState.activeToolId);
-        startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
-        collectNearby();
-      }
-    }
-    if (keys.camera && !lastCamera.current) cycleViewMode();
-    const toolbarOrder = useThreeGameStore.getState().toolbarOrder;
-    for (let index = 0; index < 6; index += 1) {
-      if (keys[`tool${index + 1}`] && toolbarOrder[index]) {
-        setActiveTool(toolbarOrder[index]);
-      }
-    }
-    lastInteract.current = keys.interact || touch.interact;
-    lastCamera.current = keys.camera;
-
-    const terrainCameraY = collisionAdapter.terrainHeight(p.x, p.z) + 0.04;
-    const lowTraversalLift = Math.max(0, p.y - terrainCameraY);
-    const cameraTargetY = lowTraversalLift > 0.05 && lowTraversalLift < 0.85 && !wasAirborne.current
-      ? terrainCameraY
-      : p.y;
-    cameraFollowY.current = cameraFollowY.current === null
-      ? cameraTargetY
-      : THREE.MathUtils.damp(cameraFollowY.current, cameraTargetY, 7, delta);
-    const cameraAnchor = p.clone();
-    cameraAnchor.y = cameraFollowY.current;
-
-    const offset = cameraTargets[viewMode] || cameraTargets.shoulder;
-    const desired = offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current).add(cameraAnchor);
-    const impulse = cameraImpulse.current;
-    const impulseProgress = THREE.MathUtils.clamp((now - impulse.startedAt) / Math.max(0.01, impulse.duration), 0, 1);
-    const impulseFade = Math.sin(impulseProgress * Math.PI) * impulse.intensity;
-    const cameraShake = impulseFade > 0.001
-      ? new THREE.Vector3(
-          Math.sin(now * 43.7 + impulse.seed) * 0.035 * impulseFade,
-          Math.sin(now * 51.1 + impulse.seed * 2.3) * 0.025 * impulseFade,
-          Math.cos(now * 39.3 + impulse.seed * 1.7) * 0.03 * impulseFade,
-        )
-      : new THREE.Vector3();
-    const statusViewOpen = useThreeGameStore.getState().statusViewOpen;
-    const statusPivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffset.current);
-    if (statusViewOpen) {
-      // Diegetic status view: ease into a static hero shot just in front of
-      // Darwin, slightly off-axis, framing his head and chest.
-      const forward = new THREE.Vector3(facing.current.x, 0, facing.current.z);
-      if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
-      forward.normalize();
-      const right = new THREE.Vector3(forward.z, 0, -forward.x);
-      const chest = p.clone().add(new THREE.Vector3(0, 1.5, 0));
-      if (!statusLook.current) {
-        // Seed the look point from the current view direction so the first
-        // frame eases rather than snaps.
-        statusLook.current = camera.position.clone()
-          .add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(6));
-      }
-      const ease = 1 - Math.exp(-2.4 * delta);
-      const eye = chest.clone()
-        .add(forward.clone().multiplyScalar(1.15))
-        .add(right.multiplyScalar(0.18))
-        .add(new THREE.Vector3(0, 0.05, 0));
-      camera.position.lerp(eye, ease);
-      statusLook.current.lerp(chest, ease);
-      camera.lookAt(statusLook.current);
-    } else if (viewMode === 'first') {
-      desired.copy(p).add(new THREE.Vector3(0, 1.7, 0));
-      camera.position.lerp(desired, 0.28);
-      // Vertical look from the same pitch control (level at the default pitch).
-      const lookPitch = THREE.MathUtils.clamp((CAMERA.defaultPitch - pitch.current) * 1.5, -1.3, 1.3);
-      camera.rotation.order = 'YXZ'; // yaw then pitch -> no unwanted roll
-      camera.rotation.set(lookPitch, yaw.current, 0);
-    } else if (viewMode === 'top') {
-      const top = cameraAnchor.clone().add(new THREE.Vector3(0, THREE.MathUtils.clamp(zoom.current * 3.4, 9, 42), 0.1));
-      camera.position.lerp(top.add(cameraShake), 0.12);
-      camera.lookAt(cameraAnchor.x, cameraAnchor.y, cameraAnchor.z);
-    } else {
-      // Full spherical orbit around the player: yaw + pitch + pan offset.
-      const cameraForward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
-      const cameraRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
-      const cameraDistance = zoom.current;
-      const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
-      const side = THREE.MathUtils.lerp(0.6, 1.5, zoomT);
-      const pitchA = THREE.MathUtils.clamp(pitch.current, CAMERA.minPitch, CAMERA.maxPitch);
-      // Pivot around the player's upper body, shifted by any active pan.
-      const pivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffset.current);
-      // Orbit: pull back horizontally by cos(pitch), rise by sin(pitch).
-      const horiz = Math.cos(pitchA) * cameraDistance;
-      const vert = Math.sin(pitchA) * cameraDistance;
-      const eye = pivot.clone()
-        .add(cameraForward.clone().multiplyScalar(-horiz))
-        .add(cameraRight.multiplyScalar(side))
-        .add(new THREE.Vector3(0, vert, 0));
-      camera.position.lerp(eye.add(cameraShake), 0.1);
-      camera.lookAt(pivot);
-    }
-    if (!statusViewOpen && statusLook.current) {
-      // Status view just closed: the branch above eases position back while we
-      // ease the look point home, then release it to the regular lookAt.
-      const ease = 1 - Math.exp(-3.2 * delta);
-      statusLook.current.lerp(statusPivot, ease);
-      camera.lookAt(statusLook.current);
-      if (statusLook.current.distanceToSquared(statusPivot) < 0.02) statusLook.current = null;
-    }
+    updateCamera({
+      playerPosition: p,
+      facing: facing.current,
+      collisionAdapter,
+      wasAirborne: wasAirborne.current,
+      cameraImpulse: cameraImpulse.current,
+      viewMode,
+      now,
+      delta,
+    });
 
     const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     stateRef.current.speed = horizontalSpeed;
@@ -1903,6 +1452,14 @@ export function PlayerController({ physicsDebug = false }) {
     stateRef.current.walking = horizontalSpeed > 0.55 && !stateRef.current.running;
     stateRef.current.airborne = wasAirborne.current;
     wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
+    if (waterlineRef.current) {
+      const wet = THREE.MathUtils.clamp(wadeDepth.current / 0.85, 0, 1);
+      waterlineRef.current.visible = wet > 0.025;
+      waterlineRef.current.position.y = WATER_LEVEL - group.current.position.y + 0.018;
+      waterlineRef.current.scale.setScalar(0.8 + wet * 0.18 + THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0, 1) * 0.08);
+      waterlineRef.current.rotation.z += delta * (0.12 + horizontalSpeed * 0.035);
+      waterlineRef.current.material.opacity = wet > 0.025 ? (0.08 + wet * 0.08) : 0;
+    }
     // Drowning: past wading depth the sea takes its toll. Damage accumulates
     // locally and hits the store in chunks so we don't set state every frame.
     if (wadeDepth.current > WADE_DEPTH && health > 0) {
@@ -1974,10 +1531,25 @@ export function PlayerController({ physicsDebug = false }) {
     }
     stateRef.current.strafeLeft = Boolean((keys.left || touch.left) && !(keys.forward || keys.backward || touch.forward || touch.backward));
     stateRef.current.strafeRight = Boolean((keys.right || touch.right) && !(keys.forward || keys.backward || touch.forward || touch.backward));
-    setPlayerPose({
-      position: { x: p.x, y: p.y, z: p.z },
-      facing: { x: facing.current.x, y: facing.current.y, z: facing.current.z },
-    });
+    const publishedPose = lastPublishedPose.current;
+    const positionChanged = Math.abs(publishedPose.x - p.x) > 0.001
+      || Math.abs(publishedPose.y - p.y) > 0.001
+      || Math.abs(publishedPose.z - p.z) > 0.001;
+    const facingChanged = Math.abs(publishedPose.fx - facing.current.x) > 0.0005
+      || Math.abs(publishedPose.fy - facing.current.y) > 0.0005
+      || Math.abs(publishedPose.fz - facing.current.z) > 0.0005;
+    if (positionChanged || facingChanged) {
+      publishedPose.x = p.x;
+      publishedPose.y = p.y;
+      publishedPose.z = p.z;
+      publishedPose.fx = facing.current.x;
+      publishedPose.fy = facing.current.y;
+      publishedPose.fz = facing.current.z;
+      setPlayerPose({
+        position: { x: p.x, y: p.y, z: p.z },
+        facing: { x: facing.current.x, y: facing.current.y, z: facing.current.z },
+      });
+    }
     if (playerControllerDebugEnabled()) {
       window.__darwinControllerDebug = {
         airborne: stateRef.current.airborne,
@@ -2012,6 +1584,9 @@ export function PlayerController({ physicsDebug = false }) {
       <mesh ref={contactShadowRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
         <circleGeometry args={[0.72, 36]} />
         <meshBasicMaterial color="#17130d" transparent opacity={0.24} depthWrite={false} />
+      </mesh>
+      <mesh ref={waterlineRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} material={waterlineMaterial} renderOrder={4}>
+        <ringGeometry args={[0.5, 0.76, 48]} />
       </mesh>
       <LandingDust triggerRef={landingDustTriggerRef} />
       <LandingDust triggerRef={footstepDustTriggerRef} />

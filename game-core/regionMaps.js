@@ -49,6 +49,12 @@ const REGION_SIZE_BY_TYPE = {
   governorshouse: [38, 30],
 };
 
+const AUTHORED_REGION_TERRAIN = {
+  POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
+  N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
+  NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
+};
+
 function humanDirection(edge) {
   return edge.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, char => char.toUpperCase());
 }
@@ -59,7 +65,7 @@ function titleForNeighbor(cell) {
 
 function regionDimensions(cell) {
   const [width, depth] = REGION_SIZE_BY_TYPE[cell.type] || [96, 86];
-  const segments = cell.id === 'POST_OFFICE_BAY' ? 360 : cell.id === 'N_SHORE' || cell.id === 'NW_REEF' ? 300 : 140;
+  const segments = AUTHORED_REGION_TERRAIN[cell.id]?.segments || 140;
   return { width, depth, segments };
 }
 
@@ -177,6 +183,7 @@ function makeSpecimenSpawns(cell, terrain) {
 
 function toRegionMap(cell) {
   const terrain = regionDimensions(cell);
+  const authoredTerrain = AUTHORED_REGION_TERRAIN[cell.id];
   return {
     id: cell.id,
     name: cell.name,
@@ -191,11 +198,8 @@ function toRegionMap(cell) {
     color: cell.color,
     terrain: {
       ...terrain,
-      preset: cell.id === 'POST_OFFICE_BAY' ? 'floreana-cove'
-        : cell.id === 'N_SHORE' ? 'floreana-north-shore'
-          : cell.id === 'NW_REEF' ? 'floreana-nw-reef'
-            : `placeholder-${cell.type}`,
-      authored: cell.id === 'POST_OFFICE_BAY' || cell.id === 'N_SHORE' || cell.id === 'NW_REEF',
+      preset: authoredTerrain?.preset || `placeholder-${cell.type}`,
+      authored: Boolean(authoredTerrain),
     },
     edgeHints: makeEdgeHints(cell),
     specimens: makeSpecimenSpawns(cell, terrain),

@@ -12,6 +12,7 @@ import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
+import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -87,6 +88,9 @@ function createSceneSlice() {
     message: initialNarration.narration,
     educationalNote: initialNarration.educationalNote,
     weather: initialNarration.weather,
+    // Narration/LLM weather pins the sky for a while; the island weather
+    // simulation resumes authority once untilMinutes passes.
+    weatherOverride: null,
     sounds: initialNarration.sounds,
     viewMode: 'shoulder',
     transition: null,
@@ -225,6 +229,9 @@ export const useThreeGameStore = create((set, get) => ({
   }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
 
+  setWeather: weather => set(state => (state.weather === weather ? {} : { weather })),
+  setWeatherOverride: weatherOverride => set({ weatherOverride }),
+
   statusViewOpen: false,
   openStatusView: () => set({ statusViewOpen: true }),
   closeStatusView: () => set({ statusViewOpen: false }),
@@ -259,6 +266,10 @@ export const useThreeGameStore = create((set, get) => ({
     if (!state.transition) return {};
     const zone = getZone(state.transition.zoneId);
     const nextLocalCellId = zone.defaultLocalCellId || state.currentLocalCellId;
+    // Advance the island weather sim through the travel time, then arrive
+    // under whatever sky the destination region currently has.
+    const arrival = advanceTimeState(state, state.transition.minutes || 0);
+    tickWeatherSim((arrival.day || 1) * 1440 + arrival.timeOfDay * 60);
     return {
       currentZoneId: zone.id,
       currentLocalCellId: nextLocalCellId,
@@ -277,11 +288,12 @@ export const useThreeGameStore = create((set, get) => ({
       nearbySpecimenId: null,
       message: zone.loadingNote || state.message,
       educationalNote: zone.educationalNote || state.educationalNote,
-      weather: zone.weather || state.weather,
+      weather: getRegionWeather(zone.id) || zone.weather || state.weather,
+      weatherOverride: null,
       sounds: Array.isArray(zone.sounds) ? zone.sounds : state.sounds,
       playerSpawnId: state.transition.entryEdge || 'default',
       fatigue: clamp(state.fatigue + (state.transition.fatigue || 0), 0, MAX_FATIGUE),
-      ...advanceTimeState(state, state.transition.minutes || 0),
+      ...arrival,
     };
   }),
 
@@ -325,12 +337,17 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
 
-  applyNarration: data => set({
-    message: data.narration || get().message,
-    educationalNote: data.educationalNote || get().educationalNote,
-    weather: data.weather || get().weather,
-    sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : get().sounds,
-  }),
+  applyNarration: data => set(state => ({
+    message: data.narration || state.message,
+    educationalNote: data.educationalNote || state.educationalNote,
+    weather: data.weather || state.weather,
+    // Hold narration weather for ~90 game minutes before the island
+    // simulation takes the sky back.
+    weatherOverride: data.weather
+      ? { state: data.weather, untilMinutes: (state.day || 1) * 1440 + state.timeOfDay * 60 + 90 }
+      : state.weatherOverride,
+    sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : state.sounds,
+  })),
 
   collectNearby: async () => {
     const state = get();

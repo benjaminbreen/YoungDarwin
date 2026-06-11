@@ -26,9 +26,9 @@ export function ActiveZoneContent({ settings }) {
       <PhysicsTerrain />
       {settings.landmarks !== false && <Landmarks />}
       {settings.worldDetails !== false && <WorldDetails />}
-      <PhysicsObstacles />
-      <PhysicsProps />
-      <WaterSplashes />
+      {settings.physicsObstacles !== false && <PhysicsObstacles />}
+      {settings.physicsProps !== false && <PhysicsProps />}
+      {settings.waterSplashes !== false && <WaterSplashes />}
       {settings.beagle !== false && <Beagle />}
       {settings.specimens !== false && specimens.map(specimen => (
         <SpecimenActor key={specimen.instanceId || specimen.id} specimen={specimen} />

@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useThreeGameStore } from '../../store';
 import { SpecimenShape } from '../../components/world/SpecimenActor';
+import { SketchPortrait } from './SketchPortrait';
 
 // ---------------------------------------------------------------------------
 // Derivations — the mockup shows fields the data doesn't store directly.
@@ -285,24 +286,14 @@ function SummaryTab({ specimen, entry }) {
 }
 
 function SketchesTab({ specimen }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [specimen.id]);
   return (
     <div className="grid gap-3">
-      <div className="relative min-h-[20rem] overflow-hidden rounded-[2px] border border-expedition-brass/40 bg-black/30">
-        {failed ? (
-          <Specimen3DPlate specimen={specimen} />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={specimen.image || `/specimens/${specimen.id}.jpg`}
-            alt={`Field sketch of ${specimen.name}`}
-            onError={() => setFailed(true)}
-            className="max-h-[28rem] w-full object-cover"
-            style={{ filter: 'sepia(0.85) contrast(1.25) brightness(0.85)' }}
-            draggable={false}
-          />
-        )}
+      <div className="relative flex min-h-[20rem] items-center justify-center overflow-hidden rounded-[2px] border border-expedition-brass/40 bg-[#e5d3aa] p-5 shadow-inner">
+        <SketchPortrait
+          specimen={specimen}
+          alt={`Field sketch of ${specimen.name}`}
+          className="max-h-[26rem] w-full object-contain mix-blend-multiply"
+        />
       </div>
       <p className="text-center font-expedition text-[13px] italic text-expedition-faded">
         Field sketch, pencil and wash &mdash; drawn at the point of collection.

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
@@ -15,11 +15,11 @@ import { WATER_LEVEL } from '../../world/water';
 // The clear-shallows look is built on three pillars:
 //   1. A baked seafloor depth texture (cheaper than a GPU depth pre-pass and
 //      readable in the vertex stage) drives colour, fade, foam and swash.
-//   2. Screen-space refraction: just before the water draws, the framebuffer
-//      (everything already rendered behind it — seabed, coral, fish) is
-//      grabbed with one copyFramebufferToTexture, then re-sampled with
-//      normal-distorted UVs and Beer-Lambert tinting. The bottom visibly
-//      wobbles through the surface instead of being hidden by alpha.
+//   2. Screen-space refraction: right before the water mesh draws (after all
+//      opaque geometry), the framebuffer is grabbed with one
+//      copyFramebufferToTexture, then sampled with normal-distorted UVs and
+//      Beer-Lambert tinting. The bottom visibly wobbles through the surface
+//      instead of being hidden by alpha — and no second scene render is paid.
 //   3. Per-pixel normals: vertices carry only the (3-wave) Gerstner
 //      displacement for silhouette; the shading normal is re-evaluated
 //      analytically per fragment plus scrolling detail ripples, so the
@@ -32,8 +32,12 @@ import { WATER_LEVEL } from '../../world/water';
 const WATER_SIZE = 150;       // side length of the detailed water plane
 const WATER_SEGMENTS = 96;    // vertex displacement only -> modest mesh is enough
 const BAKE_RES = 512;         // seafloor depth-texture resolution
-const REFLECTION_RES = 448;   // planar mirror is a garnish now, not the core look
-const REFLECTION_INTERVAL = 3; // re-render the mirror every Nth frame
+const REFLECTION_RES = 320;   // planar mirror is a garnish now, not the core look
+const REFLECTION_MIN_INTERVAL = 5; // moving camera: keep the current cadence
+const REFLECTION_STATIC_INTERVAL = 30; // static camera: let the reflection rest
+const REFLECTION_CAMERA_MOVE_SQ = 0.08 * 0.08;
+const REFLECTION_CAMERA_ROT_DELTA = 0.00025;
+const REFLECTION_TIME_DELTA = 0.035; // in-game hours
 // Height range packed into the depth texture's red byte: [HMIN, HMIN + HSPAN].
 const HMIN = -6.0;
 const HSPAN = 9.0;
@@ -128,7 +132,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       // (red dies first), eased into open-ocean blue with depth.
       uScatter: { value: new THREE.Color('#41c0d8') },
       uAbsorb: { value: new THREE.Vector3(0.42, 0.20, 0.10) },
-      uDeep: { value: new THREE.Color('#3a90bd') },
+      uDeep: { value: new THREE.Color('#357fb0') },
       uFoam: { value: new THREE.Color('#f4ffff') },
       uSky: { value: new THREE.Color('#bfe6ff') },
       uSkyHorizon: { value: new THREE.Color('#eaf6ff') },
@@ -138,8 +142,8 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uSun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       uSunColor: { value: new THREE.Color('#fff3da') },
       uDaylight: { value: 1 },
-      // Screen-space refraction grab (copied from the framebuffer just before
-      // the water draws each frame).
+      // Screen-space refraction source (framebuffer grab taken just before
+      // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
       uHasRefraction: { value: 0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
@@ -244,31 +248,47 @@ function createStylizedWaterMaterial(seafloorTexture) {
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
 
-        // --- the water body: refracted scene, absorbed and scattered ---------
+        // --- the water body: art-directed turquoise first, refraction second -
         float shallowFactor = exp(-depth * 0.30); // ~1 at the shore, 0 deep
-        vec3 color;
+        vec3 baseAbsorb = exp(-uAbsorb * depth);
+        vec3 baseWater = uSand * baseAbsorb + uScatter * (1.0 - baseAbsorb);
+        vec3 color = baseWater;
         if (uHasRefraction > 0.5) {
           // Distort harder where the water is deeper; nearly straight at the
           // swash line so the beach doesn't smear.
           vec2 screenUV = gl_FragCoord.xy / uResolution;
-          float distort = 0.012 + min(depth, 2.5) * 0.022;
+          float shallowClarity = 1.0 - smoothstep(0.35, 1.65, depth);
+          float distort = mix(0.004 + min(depth, 2.5) * 0.010, 0.0025, shallowClarity);
           vec2 ruv = clamp(screenUV + normal.xz * distort, vec2(0.001), vec2(0.999));
           vec3 grab = texture2D(uRefraction, ruv).rgb;
           // The grab is tone-mapped sRGB; approximate decode + a small lift to
           // compensate for the second tone-mapping pass on the way out.
           grab = pow(grab, vec3(2.0)) * 1.22;
-          vec3 bed = grab * exp(-uAbsorb * (depth * 1.05 + 0.1));
-          color = bed + uScatter * (1.0 - exp(-depth * 0.36)) * 0.55;
-        } else {
-          vec3 absorb = exp(-uAbsorb * depth);
-          color = uSand * absorb + uScatter * (1.0 - absorb);
+
+          // Captured terrain/props are useful detail, but raw seabed colour
+          // should not define the whole water body. Dark basalt in shallow
+          // water gets lifted toward a plausible submerged turquoise, and
+          // highly saturated reef colours are softened before blending.
+          float grabLum = dot(grab, vec3(0.299, 0.587, 0.114));
+          vec3 liftColor = mix(uScatter, uSand, 0.62);
+          float darkLift = shallowClarity * smoothstep(0.44, 0.08, grabLum);
+          vec3 gradedGrab = mix(vec3(grabLum), grab, mix(0.58, 0.86, smoothstep(1.2, 3.0, depth)));
+          gradedGrab = mix(gradedGrab, max(gradedGrab, liftColor * 0.82), darkLift * 0.75);
+
+          float opticalDepth = depth * mix(0.24, 0.86, smoothstep(0.55, 2.8, depth)) + 0.018;
+          vec3 bed = gradedGrab * exp(-uAbsorb * opticalDepth);
+          float scatterStrength = mix(0.12, 0.5, smoothstep(0.65, 2.8, depth));
+          vec3 refractedDetail = bed + uScatter * (1.0 - exp(-depth * 0.30)) * scatterStrength;
+          float captureMix = mix(0.22, 0.38, smoothstep(0.45, 1.55, depth)) * (1.0 - smoothstep(3.2, 7.5, depth));
+          color = mix(baseWater, refractedDetail, captureMix);
         }
         // Ease into open-ocean blue past the drop-off.
-        color = mix(color, uDeep, smoothstep(2.8, 14.0, depth));
+        color = mix(color, uDeep, smoothstep(3.6, 14.0, depth));
 
         // Opaque body (it *shows* the refracted scene), feathered to nothing
         // exactly at the moving waterline.
-        float alpha = smoothstep(0.0, 0.06, dEff) * 0.985;
+        float shallowOpacity = mix(0.84, 0.985, smoothstep(0.35, 1.6, depth));
+        float alpha = smoothstep(0.0, 0.06, dEff) * shallowOpacity;
 
         // --- reflection: a garnish on top of the clear body -------------------
         vec3 refl = reflect(-viewDir, normal);
@@ -284,14 +304,19 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // Restrained fresnel: stylized lagoons keep the bottom visible far
         // beyond what physics says, so the mirror never takes over.
         float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 4.0);
-        float reflectance = mix(0.06, 0.55, fres);
-        float reflStrength = mix(0.55, 0.12, shallowFactor);
+        // Grazing angles approach a real water fresnel response: mid/far water
+        // takes a glassy sky sheen while the shallows stay clear turquoise.
+        float reflectance = mix(0.05, 0.8, fres);
+        float reflStrength = mix(0.72, 0.12, shallowFactor);
         color = mix(color, reflColor, reflectance * reflStrength);
 
         // --- sun glitter: tight sparkle ---------------------------------------
         vec3 hv = normalize(uSun + viewDir);
         float spec = pow(max(dot(normal, hv), 0.0), 240.0) * uDaylight;
-        color += uSunColor * spec * 0.7;
+        // Sparkle modulation breaks the highlight into glints; pushed past 1.0
+        // so the brightest hits cross the bloom threshold and radiate.
+        float glint = 0.6 + 0.8 * smoothstep(0.45, 0.85, noise(vWorld.xz * 5.2 + uTime * 0.6));
+        color += uSunColor * spec * 1.1 * glint;
 
         // --- foam: crisp lip at the moving waterline + breaking crests --------
         float grad = length(vec2(dRaw - depthAt(vWorld.xz + vec2(0.5, 0.0)),
@@ -309,7 +334,8 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // --- atmospheric haze --------------------------------------------------
         float camDist = length(vWorld.xz - cameraPosition.xz);
         float haze = smoothstep(uHazeNear, uHazeFar, camDist);
-        color = mix(color, uHaze, haze * 0.95);
+        float hazeByDepth = mix(0.22, 0.95, smoothstep(0.85, 2.8, depth));
+        color = mix(color, uHaze, haze * hazeByDepth);
 
         // --- fade the plane edge into the open-ocean disc beyond ----------------
         float rim = uSize * 0.5;
@@ -333,12 +359,17 @@ function createDeepOceanMaterial() {
     depthWrite: false,
     uniforms: {
       time: { value: 0 },
-      shallow: { value: new THREE.Color('#3a90bd') },
-      deep: { value: new THREE.Color('#2f80ad') },
+      // Matches the detailed plane's uDeep at the seam, then travels to a
+      // genuinely deep saturated blue: the long tonal ramp reads as distance.
+      shallow: { value: new THREE.Color('#357fb0') },
+      deep: { value: new THREE.Color('#23689a') },
       fogColor: { value: new THREE.Color('#cfe6f4') },
       fogNear: { value: 64 },
       fogFar: { value: 150 },
       camPos: { value: new THREE.Vector3() },
+      sun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
+      sunColor: { value: new THREE.Color('#fff3da') },
+      daylight: { value: 1 },
     },
     vertexShader: `
       varying vec3 vWorld;
@@ -356,16 +387,47 @@ function createDeepOceanMaterial() {
       uniform float fogNear;
       uniform float fogFar;
       uniform vec3 camPos;
+      uniform vec3 sun;
+      uniform vec3 sunColor;
+      uniform float daylight;
       varying vec3 vWorld;
+
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
+      float noise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
 
       void main() {
         float fromCentre = length(vWorld.xz);
-        float depthMix = smoothstep(70.0, 150.0, fromCentre);
+        // Keep the horizon disc out of the detailed-water area entirely: the
+        // refraction grab must see the real seabed there, not helper blue.
+        if (fromCentre < 58.0) discard;
+        float depthMix = smoothstep(60.0, 150.0, fromCentre);
         vec3 color = mix(shallow, deep, depthMix);
         float shimmer = sin(vWorld.x * 0.06 + time * 0.4) * cos(vWorld.z * 0.05 - time * 0.32);
         color += shimmer * 0.015;
+
+        // Sun glitter: a cheap two-octave noise normal so the open ocean
+        // sparkles along the sun path instead of reading as flat paint.
+        vec2 gp = vWorld.xz * 0.55 + vec2(time * 0.07, -time * 0.05);
+        float e = 0.14;
+        float g0 = noise(gp);
+        vec2 grad = vec2(noise(gp + vec2(e, 0.0)) - g0, noise(gp + vec2(0.0, e)) - g0);
+        vec2 gp2 = vWorld.xz * 1.7 - vec2(time * 0.05, time * 0.08);
+        float h0 = noise(gp2);
+        grad += vec2(noise(gp2 + vec2(e, 0.0)) - h0, noise(gp2 + vec2(0.0, e)) - h0) * 0.5;
+        vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y) * vec3(1.6, 1.0, 1.6));
+        vec3 viewDir = normalize(camPos - vWorld);
+        vec3 hv = normalize(normalize(sun) + viewDir);
+        float spec = pow(max(dot(normal, hv), 0.0), 320.0) * daylight;
+        // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
+        color += sunColor * spec * 1.4 * (1.0 - fog * 0.85);
+
         color = mix(color, fogColor, fog);
         gl_FragColor = vec4(color, 1.0);
       }
@@ -389,6 +451,28 @@ const _reflPlane = new THREE.Plane();
 const _clipPlane = new THREE.Vector4();
 const _qv = new THREE.Vector4();
 const _virtualCam = new THREE.PerspectiveCamera();
+
+function hasReflectionFlag(object, flag) {
+  let current = object;
+  while (current) {
+    if (current.userData?.[flag]) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+// Flags only — visibility is handled at apply time so the cached list stays
+// valid when objects toggle on and off.
+function shouldRenderInReflection(object) {
+  if (hasReflectionFlag(object, 'noReflect')) return false;
+  return hasReflectionFlag(object, 'reflect');
+}
+
+// The reflect/noReflect flags are static per object, so the full scene-graph
+// walk only needs to rerun occasionally (newly spawned objects) or on zone
+// change — not on every reflection refresh.
+const _noReflectCache = { objects: [], refreshIn: 0 };
+const NO_REFLECT_REFRESH = 30; // reflection updates between rebuilds
 
 function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   _camWorldPos.setFromMatrixPosition(camera.matrixWorld);
@@ -431,17 +515,30 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   p.elements[10] = _clipPlane.z + 1.0 - REFLECT_CLIP_BIAS;
   p.elements[14] = _clipPlane.w;
 
-  for (let i = 0; i < hidden.length; i += 1) { if (hidden[i]) hidden[i].visible = false; }
-  // Objects flagged noReflect (scatter foliage, swimmers, splash sprites) are
-  // invisible in a rippled mirror anyway — skipping them cuts most of the
-  // reflection pass's geometry cost.
+  const hiddenState = hidden
+    .filter(Boolean)
+    .map(object => ({ object, visible: object.visible }));
+  for (let i = 0; i < hiddenState.length; i += 1) hiddenState[i].object.visible = false;
+  // Reflection is an explicit whitelist: the rippled water needs the terrain,
+  // ship, and nearby characters/large silhouettes, not every shrub, fish, and
+  // inspectable prop. This keeps reflections on without rendering the full
+  // scene a second time.
+  if (_noReflectCache.refreshIn <= 0) {
+    _noReflectCache.objects.length = 0;
+    scene.traverse(object => {
+      const renderable = object.isMesh || object.isSkinnedMesh || object.isSprite || object.isLine || object.isPoints;
+      if (renderable && !shouldRenderInReflection(object)) _noReflectCache.objects.push(object);
+    });
+    _noReflectCache.refreshIn = NO_REFLECT_REFRESH;
+  }
+  _noReflectCache.refreshIn -= 1;
   _noReflect.length = 0;
-  scene.traverse(object => {
-    if (object.visible && object.userData.noReflect) {
-      object.visible = false;
-      _noReflect.push(object);
-    }
-  });
+  for (let i = 0; i < _noReflectCache.objects.length; i += 1) {
+    const object = _noReflectCache.objects[i];
+    if (!object.parent || !object.visible) continue; // unmounted or already hidden
+    _noReflect.push({ object });
+    object.visible = false;
+  }
   const prevRT = gl.getRenderTarget();
   const prevShadowAuto = gl.shadowMap.autoUpdate;
   gl.shadowMap.autoUpdate = false;
@@ -450,8 +547,8 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   gl.render(scene, _virtualCam);
   gl.setRenderTarget(prevRT);
   gl.shadowMap.autoUpdate = prevShadowAuto;
-  for (let i = 0; i < hidden.length; i += 1) { if (hidden[i]) hidden[i].visible = true; }
-  for (let i = 0; i < _noReflect.length; i += 1) _noReflect[i].visible = true;
+  for (let i = 0; i < hiddenState.length; i += 1) hiddenState[i].object.visible = hiddenState[i].visible;
+  for (let i = 0; i < _noReflect.length; i += 1) _noReflect[i].object.visible = true;
   return true;
 }
 
@@ -461,6 +558,12 @@ const _drawSize = new THREE.Vector2();
 export function Water({ reflections = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const { scene, gl } = useThree();
+
+  // Zone change replaces most of the scene graph: rebuild the reflection
+  // hide-list immediately rather than waiting out the refresh counter.
+  useEffect(() => {
+    _noReflectCache.refreshIn = 0;
+  }, [currentZoneId]);
 
   const seafloor = useMemo(() => bakeSeafloorTexture(currentZoneId), [currentZoneId]);
   const waterMaterial = useMemo(() => createStylizedWaterMaterial(seafloor), [seafloor]);
@@ -483,8 +586,15 @@ export function Water({ reflections = true }) {
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
-  const reflectionFrame = useRef(0);
   const grabRef = useRef(null); // FramebufferTexture for the refraction grab
+  const reflectionFrame = useRef(0);
+  const reflectionState = useRef({
+    initialized: false,
+    framesSinceUpdate: REFLECTION_STATIC_INTERVAL,
+    position: new THREE.Vector3(),
+    quaternion: new THREE.Quaternion(),
+    timeOfDay: null,
+  });
   const _sun = useMemo(() => new THREE.Vector3(), []);
   const _white = useMemo(() => new THREE.Color('#ffffff'), []);
 
@@ -543,15 +653,32 @@ export function Water({ reflections = true }) {
       const du = deepMaterial.uniforms;
       du.time.value = t;
       du.camPos.value.copy(camera.position);
+      du.sun.value.copy(_sun);
+      du.sunColor.value.copy(wu.uSunColor.value);
+      du.daylight.value = wu.uDaylight.value;
       if (scene.fog) du.fogColor.value.copy(wu.uHaze.value);
     }
 
     // Planar reflection pass (hide our own water so it isn't captured). The
-    // mirror is a garnish on top of the refracted body now, so a few-frames-
-    // stale capture at moderate resolution is invisible.
+    // mirror is a garnish on top of the refracted body now. Refresh it at the
+    // current moving-camera cadence, but do not keep re-rendering it while the
+    // camera and lighting are effectively unchanged.
     if (reflections) {
-      reflectionFrame.current = (reflectionFrame.current + 1) % REFLECTION_INTERVAL;
-      if (reflectionFrame.current === 0 || !wu.uReflection.value) {
+      reflectionFrame.current += 1;
+      const rs = reflectionState.current;
+      rs.framesSinceUpdate += 1;
+      const cameraMoved = !rs.initialized || camera.position.distanceToSquared(rs.position) > REFLECTION_CAMERA_MOVE_SQ;
+      const cameraRotated = !rs.initialized || 1 - Math.abs(camera.quaternion.dot(rs.quaternion)) > REFLECTION_CAMERA_ROT_DELTA;
+      const lightingChanged = rs.timeOfDay == null || Math.abs(time - rs.timeOfDay) > REFLECTION_TIME_DELTA;
+      const cadenceReady = reflectionFrame.current >= REFLECTION_MIN_INTERVAL;
+      const stale = rs.framesSinceUpdate >= REFLECTION_STATIC_INTERVAL;
+      if (!wu.uReflection.value || stale || (cadenceReady && (cameraMoved || cameraRotated || lightingChanged))) {
+        reflectionFrame.current = 0;
+        rs.framesSinceUpdate = 0;
+        rs.initialized = true;
+        rs.position.copy(camera.position);
+        rs.quaternion.copy(camera.quaternion);
+        rs.timeOfDay = time;
         const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, disc], wu.uReflMatrix.value);
         wu.uReflection.value = ok ? reflectionRT.texture : null;
         wu.uHasReflection.value = ok ? 1 : 0;
@@ -567,9 +694,9 @@ export function Water({ reflections = true }) {
       waterMaterial.dispose();
       seafloor.dispose();
       deepMaterial.dispose();
-      reflectionRT.dispose();
       grabRef.current?.dispose();
       grabRef.current = null;
+      reflectionRT.dispose();
     };
   }, [waterGeometry, waterMaterial, seafloor, deepMaterial, reflectionRT]);
 

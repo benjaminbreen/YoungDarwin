@@ -8,11 +8,12 @@ import { getPostOfficeBayBasaltBlocks, getPostOfficeBayOpuntiaHazards, makeFlore
 import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
 import { useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
-import { terrainHeight } from '../../world/terrain';
+import { POST_OFFICE_BAY_TRAIL, terrainHeight } from '../../world/terrain';
 import { getModelAsset } from '../../modelAssets';
 import { getEcology } from '../../world/ecology';
 import { catalogToInspectable } from '../../world/inspectables';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
+import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 import { applyFoliageMotion, updateFoliageUniforms } from './ecology/foliageMotion';
 
 const dummy = new THREE.Object3D();
@@ -41,6 +42,8 @@ function InstancedLayer({ items, geometry, material, transform, animate = false,
     });
     ref.current.instanceMatrix.needsUpdate = true;
     if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+    ref.current.computeBoundingSphere?.();
+    ref.current.computeBoundingBox?.();
   }, [items, transform]);
 
   useFrame(({ clock }) => {
@@ -60,7 +63,6 @@ function InstancedLayer({ items, geometry, material, transform, animate = false,
       args={[geometry, material, items.length]}
       castShadow={castShadow}
       receiveShadow={receiveShadow}
-      frustumCulled={false}
       onClick={inspectableType ? event => {
         event.stopPropagation();
         const item = items[event.instanceId] || null;
@@ -176,30 +178,21 @@ function DryScrub() {
 }
 
 function OpuntiaLayer() {
-  const items = useMemo(() => getPostOfficeBayOpuntiaHazards(), []);
-  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const items = useMemo(() => getPostOfficeBayOpuntiaHazards().map(item => ({
+    ...item,
+    y: item.y + 0.02,
+    scale: item.renderScale,
+  })), []);
   return (
-    <group>
-      {items.map(item => (
-        <group
-          key={item.id}
-          onClick={event => {
-            event.stopPropagation();
-            setInspectedObject(catalogToInspectable('opuntia', event.point, { sourceId: item.id }));
-          }}
-        >
-          <StaticGLB
-            path="/assets/models/nature/runtime-big-opuntia.glb"
-            position={[item.x, item.y + 0.02, item.z]}
-            rotation={[0, item.yaw, 0]}
-            scale={item.renderScale}
-            tint="#6fa046"
-            tintStrength={0.08}
-            motion={OPUNTIA_MOTION}
-          />
-        </group>
-      ))}
-    </group>
+    <InstancedGLBLayer
+      path="/assets/models/nature/runtime-big-opuntia.glb"
+      items={items}
+      tint="#6fa046"
+      tintStrength={0.08}
+      motion={OPUNTIA_MOTION}
+      castShadow={false}
+      inspectableType="opuntia"
+    />
   );
 }
 
@@ -269,67 +262,46 @@ function AssetVegetationLayer() {
     { id: 'flat-cactus-3', x: -18.8, z: 9.2, yaw: 1.45, scale: 0.2, tint: '#819c51' },
     { id: 'flat-cactus-4', x: 6.8, z: 26.5, yaw: -0.25, scale: 0.22, tint: '#6d8e3e' },
   ].map(item => ({ ...item, y: terrainHeight(item.x, item.z) })), []);
-  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  // One layer per species: tone-based shading rides on per-item tints
+  // (instanceColor) instead of splitting each model into multiple layers.
+  const shrubItems = useMemo(() => shrubs.map(item => ({
+    ...item,
+    y: item.y + 0.02,
+    tint: item.tone > 0.52 ? '#7b8a48' : '#596d3b',
+  })), [shrubs]);
+  const smallShrubItems = useMemo(() => smallShrubs.map(item => ({
+    ...item,
+    y: item.y + 0.02,
+    tint: item.tone > 0.55 ? '#8a7a48' : '#4f6134',
+  })), [smallShrubs]);
+  const flatCactusItems = useMemo(() => flatCactus.map(item => ({ ...item, y: item.y + 0.02 })), [flatCactus]);
 
   return (
     <group>
-      {shrubs.map(item => (
-        <group
-          key={item.id}
-          onClick={event => {
-            event.stopPropagation();
-            setInspectedObject(catalogToInspectable('shrub', event.point, { sourceId: item.id }));
-          }}
-        >
-          <StaticGLB
-            path="/assets/models/nature/runtime-plant-shrub.glb"
-            position={[item.x, item.y + 0.02, item.z]}
-            rotation={[0, item.yaw, 0]}
-            scale={item.scale}
-            tint={item.tone > 0.52 ? '#7b8a48' : '#596d3b'}
-            tintStrength={0.34}
-            motion={SHRUB_MOTION}
-          />
-        </group>
-      ))}
-      {smallShrubs.map(item => (
-        <group
-          key={item.id}
-          onClick={event => {
-            event.stopPropagation();
-            setInspectedObject(catalogToInspectable('shrub', event.point, { sourceId: item.id }));
-          }}
-        >
-          <StaticGLB
-            path="/assets/models/nature/runtime-small-shrub.glb"
-            position={[item.x, item.y + 0.02, item.z]}
-            rotation={[0, item.yaw, 0]}
-            scale={item.scale}
-            tint={item.tone > 0.55 ? '#8a7a48' : '#4f6134'}
-            tintStrength={0.36}
-            motion={SMALL_SHRUB_MOTION}
-          />
-        </group>
-      ))}
-      {flatCactus.map(item => (
-        <group
-          key={item.id}
-          onClick={event => {
-            event.stopPropagation();
-            setInspectedObject(catalogToInspectable('flat_cactus', event.point, { sourceId: item.id }));
-          }}
-        >
-          <StaticGLB
-            path="/assets/models/nature/runtime-flat-cactus.glb"
-            position={[item.x, item.y + 0.02, item.z]}
-            rotation={[0, item.yaw, 0]}
-            scale={item.scale}
-            tint={item.tint}
-            tintStrength={0.16}
-            motion={FLAT_CACTUS_MOTION}
-          />
-        </group>
-      ))}
+      <InstancedGLBLayer
+        path="/assets/models/nature/runtime-plant-shrub.glb"
+        items={shrubItems}
+        tintStrength={0.34}
+        motion={SHRUB_MOTION}
+        castShadow={false}
+        inspectableType="shrub"
+      />
+      <InstancedGLBLayer
+        path="/assets/models/nature/runtime-small-shrub.glb"
+        items={smallShrubItems}
+        tintStrength={0.36}
+        motion={SMALL_SHRUB_MOTION}
+        castShadow={false}
+        inspectableType="shrub"
+      />
+      <InstancedGLBLayer
+        path="/assets/models/nature/runtime-flat-cactus.glb"
+        items={flatCactusItems}
+        tintStrength={0.16}
+        motion={FLAT_CACTUS_MOTION}
+        castShadow={false}
+        inspectableType="flat_cactus"
+      />
     </group>
   );
 }
@@ -343,51 +315,81 @@ function GalapagosCottonLayer() {
     maxZ: 30,
     scale: [0.22, 0.42],
   }).filter(item => item.z > 8 || item.x > 8), []);
-  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const cottonItems = useMemo(() => items.map(item => ({
+    ...item,
+    y: item.y + (asset?.yOffset || 0.02),
+    scale: (asset?.scale || 1) * item.scale,
+    tint: item.tone > 0.55 ? '#879153' : '#667442',
+  })), [asset?.scale, asset?.yOffset, items]);
 
   if (!asset?.enabled || !asset.path) return null;
   return (
-    <group>
-      {items.map(item => (
-        <group
-          key={item.id}
-          onClick={event => {
-            event.stopPropagation();
-            setInspectedObject(catalogToInspectable('galapagos_cotton', event.point, { sourceId: item.id }));
-          }}
-        >
-          <StaticGLB
-            path={asset.path}
-            position={[item.x, item.y + (asset.yOffset || 0.02), item.z]}
-            rotation={[0, item.yaw, 0]}
-            scale={(asset.scale || 1) * item.scale}
-            tint={item.tone > 0.55 ? '#879153' : '#667442'}
-            tintStrength={0.18}
-            motion={COTTON_MOTION}
-          />
-        </group>
-      ))}
-    </group>
+    <InstancedGLBLayer
+      path={asset.path}
+      items={cottonItems}
+      tintStrength={0.18}
+      motion={COTTON_MOTION}
+      castShadow={false}
+      inspectableType="galapagos_cotton"
+    />
   );
 }
 
 function TrailHints() {
-  const material = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#d6be82',
+  const material = useMemo(() => new THREE.ShaderMaterial({
     transparent: true,
-    opacity: 0.16,
     depthWrite: false,
+    depthTest: true,
+    uniforms: {
+      colorA: { value: new THREE.Color('#c79a55') },
+      colorB: { value: new THREE.Color('#e0c37a') },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 colorA;
+      uniform vec3 colorB;
+      varying vec2 vUv;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      void main() {
+        float center = 1.0 - smoothstep(0.18, 0.50, abs(vUv.y - 0.5));
+        float endFade = smoothstep(0.0, 0.16, vUv.x) * (1.0 - smoothstep(0.84, 1.0, vUv.x));
+        float breakup = noise(vUv * vec2(28.0, 5.0));
+        float alpha = center * endFade * (0.18 + breakup * 0.16);
+        vec3 color = mix(colorA, colorB, noise(vUv * vec2(9.0, 2.0)));
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
   }), []);
-  const points = [
-    [-3, 8.5, 5.8, 0.2],
-    [1.2, 15.2, 5.5, 0.05],
-    [6.2, 21.8, 5, -0.16],
-    [12.2, 27.2, 4, -0.28],
-  ];
+  const points = useMemo(() => POST_OFFICE_BAY_TRAIL.slice(0, -1).map(([x, z], index) => {
+    const [nextX, nextZ] = POST_OFFICE_BAY_TRAIL[index + 1];
+    const dx = nextX - x;
+    const dz = nextZ - z;
+    const length = Math.hypot(dx, dz);
+    return [
+      x + dx * 0.5,
+      z + dz * 0.5,
+        Math.max(4.8, length * 0.9),
+        -Math.atan2(dz, dx),
+      ];
+  }), []);
   return (
     <group>
       {points.map(([x, z, length, yaw], index) => (
-        <mesh key={index} position={[x, terrainHeight(x, z) + 0.045, z]} rotation={[-Math.PI / 2, 0, yaw]} scale={[length, 0.55, 1]} material={material}>
+        <mesh key={index} position={[x, terrainHeight(x, z) + 0.055, z]} rotation={[-Math.PI / 2, 0, yaw]} scale={[length, 1.65, 1]} material={material}>
           <planeGeometry args={[1, 1]} />
         </mesh>
       ))}
