@@ -71,6 +71,16 @@ const WAVE_GLSL = /* glsl */`
     n.y += q * wa * s;
   }
 
+  // Rhythmic swash: the waterline itself rides up and down the beach face in
+  // sync with the terrain shader's foam band (same clock, same 0.8976 rad/s
+  // cycle, same along-shore wobble). Returns a small vertical lift applied
+  // only near the shore, so the geometric water/terrain intersection moves.
+  float swashLift(vec2 wxz, float t, float depthRaw) {
+    float cyc = sin(t * 0.8976) * 0.5 + 0.5;
+    float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.45) * 0.3) * 0.115;
+    return lift * smoothstep(1.3, 0.05, max(depthRaw, 0.0));
+  }
+
   // Returns displacement; writes the surface normal. The atten arg scales
   // amplitude (used to calm waves in the shallows so they don't clip the bed).
   vec3 gerstner(vec2 pos, float t, float atten, out vec3 normal) {
@@ -144,11 +154,14 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float floorH = seafloorAt(world.xz);
         float depth = uWaterLevel - floorH;
         vDepth = depth;
-        // Calm the waves where it's shallow so crests don't punch through sand.
-        float atten = smoothstep(0.05, 1.4, depth);
+        // Calm (but never kill) the swell in the shallows: a third of the
+        // motion survives onto the wadeable shelf so the surface keeps rolling
+        // right up to the swash zone without crests punching through sand.
+        float atten = smoothstep(0.0, 0.25, depth) * (0.32 + 0.68 * smoothstep(0.3, 1.4, depth));
         vec3 normal;
         vec3 disp = gerstner(world.xz, uTime, atten, normal);
         world.xyz += disp;
+        world.y += swashLift(world.xz, uTime, depth);
         vCrest = disp.y;
         vWorld = world.xyz;
         vNormal = normal;
@@ -158,6 +171,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
       }
     `,
     fragmentShader: /* glsl */`
+      float swashLift(vec2 wxz, float t, float depthRaw) {
+        float cyc = sin(t * 0.8976) * 0.5 + 0.5;
+        float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.45) * 0.3) * 0.115;
+        return lift * smoothstep(1.3, 0.05, max(depthRaw, 0.0));
+      }
       uniform float uTime;
       uniform vec3 uSand;
       uniform vec3 uScatter;
@@ -212,8 +230,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         vec3 viewDir = normalize(cameraPosition - vWorld);
 
         // --- per-fragment water depth (smooth; no mesh-grid faceting) ----------
+        // dEff folds in the swash run-up so the colour/foam/alpha shoreline
+        // tracks the vertex-displaced waterline exactly.
         float dRaw = depthAt(vWorld.xz);   // signed: <0 just inland of the waterline
-        float depth = max(0.0, dRaw);
+        float dEff = dRaw + swashLift(vWorld.xz, uTime, dRaw);
+        float depth = max(0.0, dEff);
 
         // --- tropical colour: light sand seen through water --------------------
         // Beer-Lambert: the seabed is dimmed/tinted by depth (red absorbed
@@ -225,9 +246,10 @@ function createStylizedWaterMaterial(seafloorTexture) {
         color = mix(color, uDeep, smoothstep(1.5, 16.0, depth));
         float shallowFactor = absorb.r;    // ~1 at the shore, -> 0 with depth
 
-        // Transparent right at the waterline (wet sand shows), quickly opaque so
-        // the dark volcanic seabed doesn't muddy the turquoise beyond.
-        float alpha = smoothstep(0.0, 0.22, depth) * 0.92;
+        // Crystal-clear tropical opacity: Beer-Lambert body fade instead of a
+        // hard 22cm cutoff, so the real seabed (and coral) stays visible
+        // through the whole wadeable shelf and only deep water goes opaque.
+        float alpha = (1.0 - exp(-depth * 0.8)) * 0.94;
 
         // --- caustics: dancing light net over the shallow seabed ---------------
         vec2 cuv = vWorld.xz * 0.55;
@@ -255,9 +277,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // ship, not only at grazing angles. Open water mirrors more than shallows.
         float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 4.0);
         float reflectance = mix(0.10, 1.0, fres);
-        float reflStrength = mix(0.62, 0.26, shallowFactor);
+        // Shallow water barely mirrors — the seabed showing through is what
+        // sells the tropical clarity; deep water keeps the sky.
+        float reflStrength = mix(0.6, 0.14, shallowFactor);
         color = mix(color, reflColor, reflectance * reflStrength);
-        alpha = max(alpha, fres * 0.9);
+        alpha = max(alpha, fres * 0.85);
 
         // --- sun glitter: tight sparkle, not a broad glare patch ---------------
         vec3 hv = normalize(uSun + viewDir);
@@ -269,9 +293,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // (low gradient) gets no foam, so there are no big blobs.
         float grad = length(vec2(dRaw - depthAt(vWorld.xz + vec2(0.5, 0.0)),
                                  dRaw - depthAt(vWorld.xz + vec2(0.0, 0.5)))) / 0.5;
-        float shoreBand = smoothstep(0.32, 0.0, dRaw) * smoothstep(0.1, 0.45, grad);
+        float shoreBand = smoothstep(0.32, 0.0, dEff) * smoothstep(0.1, 0.45, grad);
         float lace = noise(vWorld.xz * 3.6 - vec2(uTime * 0.5, uTime * 0.35));
         float shoreFoam = shoreBand * smoothstep(0.3, 0.75, lace);
+        // Bright leading lip exactly at the advancing waterline.
+        shoreFoam = max(shoreFoam, smoothstep(0.09, 0.015, abs(dEff - 0.04)) * smoothstep(0.05, 0.4, grad) * 0.85);
         // Crest foam only where waves actually break in the shallows.
         float breakZone = smoothstep(1.6, 0.5, depth);
         float crestFoam = smoothstep(0.09, 0.2, vCrest) * breakZone * smoothstep(0.5, 0.9, lace) * 0.5;

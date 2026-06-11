@@ -71,6 +71,29 @@ Current implementation steps:
 - Terrain shader pass complete: `Terrain.jsx` now injects procedural tiled material functions into `MeshStandardMaterial` for lava, tuff, ash, and scrub. It blends them by world-space slope/height/cove masks and perturbs normals in the fragment shader for crisp ground detail without adding millions of triangles.
 - The black cone grass layer was removed from rendering. Future grass should be implemented as proper blade clusters/billboards or small GLB vegetation, not vertical cone spikes.
 
+## Authored Region Maps: How To Build One
+
+Three regions are fully authored so far: `POST_OFFICE_BAY` (`floreana-cove`), `N_SHORE` (`floreana-north-shore`), and `NW_REEF` (`floreana-nw-reef`, white-sand beach + walkable coral shallows + offshore islet). Every other location in `data/locations.js` falls back to `placeholder-{type}` procedural terrain. Use N_SHORE/NW_REEF as the templates; the checklist for authoring a new region is:
+
+1. **`three-game/world/terrain.js`** — add `<region>Height(x, z, { movementSurface })`, `<region>BiomeAt(x, z, y)`, and `<region>Color(x, z, y)`, plus an `isAuthored<Region>(regionId)` predicate. Wire all three into the dispatchers: `terrainHeight`, `movementTerrainHeight`, `terrainBiomeAt`, `terrainColor`, and add a branch in `isWalkableTerrain` (and the spawn-march guard in `clampToWalkable` for shoreline maps). Export any masks/curves the ecology and shader need.
+2. **`game-core/regionMaps.js`** — add the preset name, include the id in `authored:`, and bump `segments` to ~300.
+3. **`three-game/components/scene/Terrain.jsx`** — add a `create<Region>TerrainMaterial()` splat shader and a branch in the `material` memo. Most of the visual quality lives here, not in vertex colors.
+4. **`three-game/world/<region>Layout.js`** — deterministic rock layout via `makeZoneScatter`, exporting both the render list and `get<Region>RockObstacles()` (visuals and colliders must share one data source). Register the obstacle list in `three-game/world/obstacles.js` `getRuntimeObstacles`.
+5. **`three-game/world/ecology/<region>.js`** — flora layers (GLB scatter with biome `accept()` filters), rocks, splashes, birds, skyline, `footprintBiomes`. Register in `ecology/index.js`. `EcologyRenderer` handles all rendering generically.
+6. **`data/locations.js`** — add curated `specimenPlacements` so key fauna sit in their habitat instead of the deterministic fallback scatter.
+7. **`three-game/world/vistas/index.js`** — when a new authored map is finalized, add or verify low-poly border terrain aprons for its open neighboring routes so adjacent maps read as real nearby topography without loading full neighboring zones. Use opaque ground aprons that blend from the current edge into the neighbor's terrain identity; avoid vertical billboard/panel scenery for nearby map borders.
+
+Hard-won best practices:
+
+- **Keep coastline curves analytically simple** (pure sines, optionally + smoothstep bends) and mirror the exact formula in the GLSL so per-pixel wet-sand/swash bands line up with the heightfield. Same for outcrop gaussians and islet ellipse fields: define once in JS, mirror in the shader.
+- **GLSL ES 3.0 reserved words will silently kill the terrain.** `patch`, `sample`, `filter`, `input`, `output`, etc. as variable names fail shader compilation and the mesh simply doesn't render (symptom: props float over empty ocean). Check new shader code against the reserved-word list.
+- **`movementSurface: true` must return a smoothed height**: damp high-frequency knobs (coral heads, lava rubble, basalt fracture noise) so walking doesn't jitter, while the render height keeps the full detail.
+- **Water/wading is height-driven and free**: `WATER_LEVEL` is -0.9, wadeable seabed is anything in (-2.15, -0.45). To make shallows walkable, just keep the seafloor shelf inside that window; to block an ocean-boundary edge, drop below it. `Water.jsx` bakes the seafloor depth texture from `terrainHeight` automatically, so turquoise shallows come for free from a pale seabed color.
+- **Underwater features (coral, seagrass) can be heightfield + shader only** — a raised, noise-knobbed band with a mottled color material reads well through the depth-tinted water and costs nothing. Add GLB props later only if a region needs close-up relief.
+- **Coral GLBs and animated sea life layer on top of the heightfield reef**: coral models are ordinary instanced flora layers (`accept` gated on `nwReefCoralMask` + a submerged-depth window, `castShadow: false`); animated swimmers (fish schools, manta rays) are driven by an `ecology.swimmers` config rendered by `ReefSwimmers.jsx` (per-fish SkeletonUtils clones with phase-offset mixers, analytic orbit movement). Keep school depth bands inside the local water column — probe seabed heights first, the shelf is only ~0.5m deep and coral knobs rise nearly to the surface.
+- **Numerically probe before launching the app**: `npx tsx -e` importing `terrain.js` and sampling the grid for NaN heights, min/max range, and above-water fraction catches most authoring bugs in seconds (e.g. NW_REEF targets ~50% dry land).
+- Vegetation should be sparse and clustered (`nearAnyCluster`), gated by biome and by distance-from-coast predicates — never uniform scatter.
+
 ## Obstacle And Collision Direction
 
 Obstacle rendering and collision must share a single data source. Do not place a boulder visually in one file and separately approximate collision in another file.

@@ -8,6 +8,7 @@ import { setTouchControl, triggerToolUse } from '../input/touchControls';
 import { setBlockingUiMode, setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
+import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
 import {
   ExpeditionPanel,
@@ -249,13 +250,22 @@ function VitalStatusPanel() {
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
   const curiosity = useThreeGameStore(state => state.curiosity);
+  const openStatusView = useThreeGameStore(state => state.openStatusView);
 
   return (
-    <ExpeditionPanel className="w-[13rem] sm:w-[17.5rem]" innerClassName="grid gap-2.5 px-3.5 py-3">
-      <StatBar icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-      <StatBar icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-      <StatBar icon={CuriosityIcon} label="Curiosity" value={curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
-    </ExpeditionPanel>
+    <button
+      type="button"
+      onClick={openStatusView}
+      title="View Darwin's status"
+      aria-label="View Darwin's status"
+      className="pointer-events-auto block text-left transition hover:brightness-125 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+    >
+      <ExpeditionPanel className="w-[13rem] sm:w-[17.5rem]" innerClassName="grid gap-2.5 px-3.5 py-3">
+        <StatBar icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
+        <StatBar icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
+        <StatBar icon={CuriosityIcon} label="Curiosity" value={curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+      </ExpeditionPanel>
+    </button>
   );
 }
 
@@ -431,9 +441,8 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
             ) : (
               <div className="absolute inset-0 bg-[#27505d]" />
             )}
-            {/* aged-chart wash + vignette */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_58%,rgba(10,8,5,0.42)_100%)]" />
-            <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(227,197,133,0.10),transparent_45%,rgba(10,8,5,0.16))]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_62%,rgba(10,8,5,0.28)_100%)]" />
+            <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(227,197,133,0.05),transparent_45%,rgba(10,8,5,0.10))]" />
             <MapOverlays zone={zone} zoom={zoom} focus={player} />
           </>
         )}
@@ -1110,8 +1119,9 @@ export function ThreeHUD({ onTogglePerf }) {
   const [mapOpen, setMapOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
+  const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -1147,6 +1157,8 @@ export function ThreeHUD({ onTogglePerf }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
+      {/* Regular HUD fades out while the diegetic status view owns the screen */}
+      <div className={`transition-opacity duration-300 ${statusViewOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer />
       <TopObjective objective={objective} />
 
@@ -1189,6 +1201,9 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <MobileTouchControls />
+      </div>
+
+      <StatusView />
 
       <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
       <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} />

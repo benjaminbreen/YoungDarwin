@@ -35,6 +35,8 @@ function specimenMaterial(id) {
 
 function assetIdForSpecimen(specimen) {
   if (specimen.id === 'marineiguana') return 'marineIguana';
+  if (specimen.id === 'greenturtle' || specimen.id === 'greenTurtle') return 'greenTurtle';
+  if (specimen.id === 'sealion' || specimen.id === 'seaLion') return 'seaLion';
   if (specimen.id === 'mediumgroundfinch') return 'mediumGroundFinch';
   if (specimen.id === 'floreanagianttortoise') return 'floreanaGiantTortoise';
   if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';

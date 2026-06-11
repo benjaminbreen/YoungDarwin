@@ -73,6 +73,9 @@ function createExpeditionSlice() {
     timeOfDay: expedition.timeMinutes / 60,
     day: expedition.day,
     questComplete: false,
+    // 0-100 social meter: 0 = distrusted by settlers/crew, 100 = respected.
+    // Nothing moves it yet; quest and dialogue outcomes call adjustLocalStanding.
+    localStanding: 50,
   };
 }
 
@@ -221,6 +224,13 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
+
+  statusViewOpen: false,
+  openStatusView: () => set({ statusViewOpen: true }),
+  closeStatusView: () => set({ statusViewOpen: false }),
+  adjustLocalStanding: delta => set(state => ({
+    localStanding: clamp(state.localStanding + delta, 0, 100),
+  })),
 
   beginZoneTransition: (zoneId, options = {}) => {
     const zone = getZone(zoneId);

@@ -3,6 +3,7 @@ import { getZoneObstacles } from '../../game-core/obstacles';
 import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
 import { getNorthShoreRockObstacles } from './northShoreLayout';
+import { getNorthwestReefRockObstacles } from './nwReefLayout';
 import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 
 function flattenCollider(collider) {
@@ -108,6 +109,9 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
     // Authored basalt boulders double as colliders; layout shared with the
     // instanced visuals in WorldDetails.
     return [...mapped, ...getNorthShoreRockObstacles()];
+  }
+  if (zoneId === 'NW_REEF') {
+    return [...mapped, ...getNorthwestReefRockObstacles()];
   }
   return mapped;
 }

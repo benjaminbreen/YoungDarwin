@@ -142,8 +142,15 @@ function PerformanceSampler({ enabled, onSample }) {
 function ExpeditionClock() {
   const elapsed = useRef(0);
   const advanceTime = useThreeGameStore(state => state.advanceTime);
+  const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
 
   useFrame((_, delta) => {
+    if (statusViewOpen) {
+      // Status view freezes expedition time; drop accumulated real time so the
+      // clock doesn't lurch forward on close.
+      elapsed.current = 0;
+      return;
+    }
     elapsed.current += delta;
     if (elapsed.current < 1) return;
     const wholeSeconds = Math.floor(elapsed.current);

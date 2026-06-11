@@ -9,7 +9,7 @@ import { RockField } from './RockField';
 import { Footprints } from './Footprints';
 import { RockSplashes } from './RockSplashes';
 import { BirdFlock } from './BirdFlock';
-import { Skyline } from './Skyline';
+import { ReefSwimmers } from './ReefSwimmers';
 import { StaticGLB } from '../../assets/StaticGLB';
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 
@@ -60,7 +60,7 @@ export function EcologyRenderer({ ecology }) {
         <RockSplashes anchors={ecology.splashes.anchors} period={ecology.splashes.period} />
       )}
       {ecology.birds?.length > 0 && <BirdFlock birds={ecology.birds} />}
-      {ecology.skyline && <Skyline cones={ecology.skyline.cones} color={ecology.skyline.color} />}
+      {ecology.swimmers && <ReefSwimmers swimmers={ecology.swimmers} />}
       {ecology.footprintBiomes?.length > 0 && (
         <Footprints zoneId={ecology.zoneId} biomes={ecology.footprintBiomes} />
       )}

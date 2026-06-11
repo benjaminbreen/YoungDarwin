@@ -372,8 +372,11 @@ export function ModelAsset({ id, fallback = null, animationSelector = null, moti
   );
 }
 
+// Eager-preload the assets every zone needs. Zone-specific heavyweights
+// (preload: false) load lazily behind their Suspense fallback instead of
+// slowing down every initial load.
 Object.values(modelAssets)
-  .filter(asset => asset.enabled)
+  .filter(asset => asset.enabled && asset.preload !== false)
   .forEach(asset => {
     useGLTF.preload(asset.path);
   });

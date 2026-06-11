@@ -59,7 +59,7 @@ function titleForNeighbor(cell) {
 
 function regionDimensions(cell) {
   const [width, depth] = REGION_SIZE_BY_TYPE[cell.type] || [96, 86];
-  const segments = cell.id === 'POST_OFFICE_BAY' ? 360 : cell.id === 'N_SHORE' ? 300 : 140;
+  const segments = cell.id === 'POST_OFFICE_BAY' ? 360 : cell.id === 'N_SHORE' || cell.id === 'NW_REEF' ? 300 : 140;
   return { width, depth, segments };
 }
 
@@ -193,8 +193,9 @@ function toRegionMap(cell) {
       ...terrain,
       preset: cell.id === 'POST_OFFICE_BAY' ? 'floreana-cove'
         : cell.id === 'N_SHORE' ? 'floreana-north-shore'
-          : `placeholder-${cell.type}`,
-      authored: cell.id === 'POST_OFFICE_BAY' || cell.id === 'N_SHORE',
+          : cell.id === 'NW_REEF' ? 'floreana-nw-reef'
+            : `placeholder-${cell.type}`,
+      authored: cell.id === 'POST_OFFICE_BAY' || cell.id === 'N_SHORE' || cell.id === 'NW_REEF',
     },
     edgeHints: makeEdgeHints(cell),
     specimens: makeSpecimenSpawns(cell, terrain),

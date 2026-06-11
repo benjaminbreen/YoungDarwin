@@ -39,6 +39,30 @@ export const locations = [
     type: 'reef',
     validMoves: ['SE','SW','S','E'],
     specimens: ['greenTurtle','parrotfish','seaLion'],
+    specimenPlacements: [
+      {
+        specimenId: 'greenTurtle',
+        position: [-18, 0, -28],
+        behavior: 'still',
+        sceneScale: 1.1,
+        habitatRadiusX: 0.4,
+        habitatRadiusZ: 0.3,
+      },
+      {
+        specimenId: 'parrotfish',
+        position: [6, 0, -32],
+        behavior: 'skitter',
+        sceneScale: 1,
+        habitatRadiusX: 0.35,
+        habitatRadiusZ: 0.25,
+      },
+      {
+        specimenId: 'seaLion',
+        position: [-7, 0, -23.5],
+        behavior: 'bask',
+        sceneScale: 1.15,
+      },
+    ],
     npcs: [],
     boundaries: { north: 'ocean', west: 'ocean' },
     discoveries: [

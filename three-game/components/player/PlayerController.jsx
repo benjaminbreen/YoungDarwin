@@ -580,6 +580,9 @@ export function PlayerController({ physicsDebug = false }) {
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
   const cameraFollowY = useRef(null);
+  // Smoothed look-at point for the diegetic status view; non-null while the
+  // hero shot is active or still easing back out.
+  const statusLook = useRef(null);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
   const terrainFeedback = useRef({ grade: 0, uphillDot: 0, downhillDot: 0 });
   const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
@@ -1820,7 +1823,31 @@ export function PlayerController({ physicsDebug = false }) {
           Math.cos(now * 39.3 + impulse.seed * 1.7) * 0.03 * impulseFade,
         )
       : new THREE.Vector3();
-    if (viewMode === 'first') {
+    const statusViewOpen = useThreeGameStore.getState().statusViewOpen;
+    const statusPivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffset.current);
+    if (statusViewOpen) {
+      // Diegetic status view: ease into a static hero shot just in front of
+      // Darwin, slightly off-axis, framing his head and chest.
+      const forward = new THREE.Vector3(facing.current.x, 0, facing.current.z);
+      if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
+      forward.normalize();
+      const right = new THREE.Vector3(forward.z, 0, -forward.x);
+      const chest = p.clone().add(new THREE.Vector3(0, 1.5, 0));
+      if (!statusLook.current) {
+        // Seed the look point from the current view direction so the first
+        // frame eases rather than snaps.
+        statusLook.current = camera.position.clone()
+          .add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(6));
+      }
+      const ease = 1 - Math.exp(-2.4 * delta);
+      const eye = chest.clone()
+        .add(forward.clone().multiplyScalar(1.15))
+        .add(right.multiplyScalar(0.18))
+        .add(new THREE.Vector3(0, 0.05, 0));
+      camera.position.lerp(eye, ease);
+      statusLook.current.lerp(chest, ease);
+      camera.lookAt(statusLook.current);
+    } else if (viewMode === 'first') {
       desired.copy(p).add(new THREE.Vector3(0, 1.7, 0));
       camera.position.lerp(desired, 0.28);
       // Vertical look from the same pitch control (level at the default pitch).
@@ -1850,6 +1877,14 @@ export function PlayerController({ physicsDebug = false }) {
         .add(new THREE.Vector3(0, vert, 0));
       camera.position.lerp(eye.add(cameraShake), 0.1);
       camera.lookAt(pivot);
+    }
+    if (!statusViewOpen && statusLook.current) {
+      // Status view just closed: the branch above eases position back while we
+      // ease the look point home, then release it to the regular lookAt.
+      const ease = 1 - Math.exp(-3.2 * delta);
+      statusLook.current.lerp(statusPivot, ease);
+      camera.lookAt(statusLook.current);
+      if (statusLook.current.distanceToSquared(statusPivot) < 0.02) statusLook.current = null;
     }
 
     const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);

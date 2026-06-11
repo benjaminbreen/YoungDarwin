@@ -152,14 +152,6 @@ export function buildNorthShoreEcology() {
       { radius: 24, height: 23, speed: -0.08, phase: 2.1, cx: 14, cz: -14 },
       { radius: 20, height: 20, speed: 0.09, phase: 4.4, cx: -26, cz: -18 },
     ],
-    skyline: {
-      color: '#6b6850',
-      cones: [
-        { position: [14, -3, 102], radius: 52, height: 26 },
-        { position: [-42, -3, 96], radius: 30, height: 13 },
-        { position: [58, -3, 92], radius: 24, height: 9 },
-      ],
-    },
     // Sally Lightfoot crabs perched on swash-zone boulders.
     props: swashRocks
       .filter(rock => rock.radiusY > 0.32)

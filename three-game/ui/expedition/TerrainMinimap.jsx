@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { sampleRegionMap } from '../../world/terrain';
 
-// Bakes a top-down hillshaded chart of the zone's real heightfield into a
-// data-URL once per zone. The result looks like a surveyor's relief map (the
-// mockup's "live terrain" panel) but costs nothing per frame.
+// Bakes a top-down hillshaded view of the zone's real heightfield into a
+// data-URL once per zone. It keeps the authored terrain colors, with just
+// enough relief and contour information to make navigation readable.
 
-const BAKE_RESOLUTION = 168;
+const BAKE_RESOLUTION = 336;
 const CONTOUR_INTERVAL = 0.85;
 
 // Light from the upper-left of the chart, matching a classic relief map.
@@ -21,6 +21,10 @@ function shadeFromNormal(dhdx, dhdz) {
   const len = Math.hypot(nx, ny, nz) * LIGHT_LEN;
   const dot = (nx * LIGHT.x + ny * LIGHT.y + nz * LIGHT.z) / len;
   return 0.72 + Math.max(-0.45, Math.min(0.45, dot)) * 0.62;
+}
+
+function mixChannel(a, b, t) {
+  return a * (1 - t) + b * t;
 }
 
 export function bakeTerrainChart(zone) {
@@ -65,28 +69,36 @@ export function bakeTerrainChart(zone) {
         r = 116 - 70 * depth;
         g = 185 - 90 * depth;
         b = 201 - 75 * depth;
+        if (sample.biome !== 'water') {
+          // Shallow shelves and coral gardens should still read through the
+          // water instead of collapsing into one flat blue field.
+          const seabed = Math.max(0, 1 - depth) * 0.46;
+          r = mixChannel(r, sample.color.r * 255, seabed);
+          g = mixChannel(g, sample.color.g * 255, seabed);
+          b = mixChannel(b, sample.color.b * 255, seabed);
+        }
       } else {
         const shade = shadeFromNormal((hr - h) / step, (hd - h) / step);
         r = sample.color.r * 255 * shade;
         g = sample.color.g * 255 * shade;
         b = sample.color.b * 255 * shade;
-        // Pull land tones toward warm parchment so the chart reads as an
-        // engraved survey rather than a satellite photo.
-        r = r * 0.82 + 214 * 0.18;
-        g = g * 0.82 + 188 * 0.18;
-        b = b * 0.82 + 142 * 0.18;
+        // A very light warm bias keeps the HUD cohesive without turning the
+        // local view into a parchment map.
+        r = r * 0.95 + 214 * 0.05;
+        g = g * 0.95 + 188 * 0.05;
+        b = b * 0.95 + 142 * 0.05;
         // Contour lines at fixed height intervals.
         const band = Math.floor(h / CONTOUR_INTERVAL);
         if (band !== Math.floor(hr / CONTOUR_INTERVAL) || band !== Math.floor(hd / CONTOUR_INTERVAL)) {
-          r *= 0.74;
-          g *= 0.72;
-          b *= 0.68;
+          r *= 0.84;
+          g *= 0.83;
+          b *= 0.8;
         }
         // Darken the waterline so the coast reads as an inked edge.
         if (h < -0.55) {
-          r *= 0.8;
-          g *= 0.84;
-          b *= 0.86;
+          r *= 0.86;
+          g *= 0.88;
+          b *= 0.9;
         }
       }
       data[idx * 4] = Math.max(0, Math.min(255, r));

@@ -4,6 +4,7 @@ import React from 'react';
 import { Beagle } from '../components/scene/Beagle';
 import { Landmarks } from '../components/scene/Landmarks';
 import { Terrain } from '../components/scene/Terrain';
+import { BorderVistas } from '../components/scene/BorderVistas';
 import { WorldDetails } from '../components/scene/WorldDetails';
 import { SpecimenActor } from '../components/world/SpecimenActor';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
@@ -21,6 +22,7 @@ export function ActiveZoneContent({ settings }) {
   return (
     <>
       {settings.terrain !== false && <Terrain />}
+      {settings.terrain !== false && <BorderVistas />}
       <PhysicsTerrain />
       {settings.landmarks !== false && <Landmarks />}
       {settings.worldDetails !== false && <WorldDetails />}
