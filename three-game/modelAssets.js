@@ -1,7 +1,11 @@
 export const modelAssets = {
   darwin: {
     enabled: true,
+    preload: true,
     path: '/assets/models/darwin-final-animated.glb',
+    // Runtime traversal clips are consolidated into the primary GLB so the
+    // player does not parse the larger candidate animation library at startup.
+    // Keep candidate2 below for hotkey-9 visual A/B testing.
     scale: 1.56,
     rotation: [0, 0, 0],
     yOffset: 0,
@@ -9,8 +13,110 @@ export const modelAssets = {
     materialLift: 0.12,
     materialEmissive: '#20170f',
     materialEmissiveIntensity: 0.3,
+    // Player-only material polish layered on top of the cel pipeline: a warm
+    // fresnel rim that catches the silhouette edges (adds form/pop without
+    // scene lights) + a touch less roughness so the sun reads on cloth.
+    // Tunables — ask for a screenshot to dial in. Remove to revert.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.68 },
     targetTriangles: 12000,
     prompt: 'Stylized low-poly young Charles Darwin naturalist, 1835 Galapagos expedition, wide-brim straw hat, brown frock coat, waistcoat, specimen satchel, field notebook, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral A-pose, clean topology, GLB.',
+  },
+  darwinCandidate2: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/darwin-candidate-2-animated.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.1,
+    materialEmissive: '#20170f',
+    materialEmissiveIntensity: 0.22,
+    // Same player rim/sheen as V1 so the hotkey-9 A/B isolates mesh+texture,
+    // not lighting. Drop this line to scope the upgrade to V1 only.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.68 },
+    targetTriangles: 50000,
+    prompt: 'Mixamo-rigged Young Darwin candidate 2 with expanded locomotion, traversal, injured, water, and naturalist action animation set.',
+  },
+  darwinTripo: {
+    enabled: true,
+    preload: false,
+    // ?v bust: the GLB was rebuilt in place (UV fix); bump this if you rebuild
+    // it again so the browser refetches instead of serving a stale cached copy.
+    path: '/assets/models/darwin-tripo.glb',
+    // Tripo v3.1 mesh, Mixamo-rigged (mixamorig:), decimated 1.96M -> 60k,
+    // re-textured + regraded (scripts/regrade-tripo-texture.mjs) + WebP,
+    // normalized to 1.75m. No baked clips — borrows V2's full set via
+    // animationSource (identical skeleton; both ~1.75m so no track rescale).
+    animationSource: 'darwinCandidate2',
+    scale: 1.0,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    // Tripo albedo is already warm/graded; no cream lift, softer emissive, and
+    // a higher roughness + gentler rim so the (lighter) skin doesn't blow out.
+    materialLift: 0,
+    materialEmissive: '#20170f',
+    materialEmissiveIntensity: 0.12,
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.12, roughness: 0.86 },
+    targetTriangles: 60000,
+    prompt: 'Tripo v3.1 Young Darwin, segmented + Mixamo-rigged, game-decimated.',
+  },
+  darwin4: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/darwin4.glb',
+    // Darwin 4: Mixamo-rigged FBX with embedded texture, rebuilt with native
+    // baked clips retargeted onto its own 41-bone armature. Do not borrow V2
+    // clips at runtime; that rig mismatch distorts proportions during gait.
+    scale: 1.0,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.06,
+    materialEmissive: '#20170f',
+    // Match darwin5: drop the self-lit emissive glow at night, lower roughness +
+    // add envMap sheen so cloth/leather read as material, not flat "velvet".
+    materialEmissiveIntensity: 0.08,
+    // toneMapped:true — test running the player through ACES like the world. Flip
+    // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
+    // Sidecar maps (scripts/build-darwin-roughness.mjs + build-darwin-detail.mjs):
+    //  roughnessMapUrl — leather glossier + waistcoat semi-gloss, cloth/skin at 0.6.
+    //  normalMapUrl    — gentle derived micro-detail relief (normalScale tunes it).
+    //  albedoMapUrl    — crisper albedo + tamed hot cream trousers.
+    // ?v bump busts the browser cache when a map is regenerated.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.6, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin4-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin4-normal.webp?v=1', normalScale: 0.8, albedoMapUrl: '/assets/models/darwin4-albedo-enh.webp?v=1' },
+    targetTriangles: 60000,
+    prompt: 'Darwin candidate 4, Mixamo-rigged textured FBX, game-decimated.',
+  },
+  darwin5: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/darwin5.glb',
+    cacheKey: 'darwin5-water-polish-20260622',
+    // Darwin 5 test pass: native Mixamo clips plus carry/rifle/climb sets.
+    // The runtime idle is the skinless 41-bone Mixamo clip from
+    // assets-src/darwin/animations/states/darwin5-idle-new.fbx, transplanted
+    // by matching identical Darwin5 bone names. Darwin5 crouch/traversal,
+    // water-entry/exit, tool, hit, inspect, slide, and running turn clips are
+    // likewise native 41-bone skinless clips.
+    scale: 1.0,
+    rotation: [0, 0, 0],
+    yOffset: 0.08,
+    normalizeMaterials: true,
+    materialLift: 0.06,
+    materialEmissive: '#20170f',
+    // 0.08 (was 0.18): the emissive is toneMapped=false, so a high value reads as
+    // a flat self-lit glow at night — flattens the form and looks plastic.
+    materialEmissiveIntensity: 0.08,
+    // roughness 0.6 (was 0.75) + envMapIntensity adds ambient specular sheen so
+    // cloth/leather stop reading as flat "velvet". envMapIntensity is the dial to
+    // tune: higher = glossier + brighter fill; lower = subtler. See ModelAsset.jsx.
+    // toneMapped:true — test running the player through ACES like the world. Flip
+    // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.15, roughness: 0.6, envMapIntensity: 0.3, toneMapped: true },
+    targetTriangles: 60000,
+    prompt: 'Darwin candidate 5, Mixamo-rigged test model with supplied idle, walking, and running animation clips.',
   },
   syms: {
     enabled: true,
@@ -104,6 +210,20 @@ export const modelAssets = {
     targetTriangles: 15000,
     prompt: 'Game-ready Galapagos penguin, small black and white penguin near lava rocks, naturalistic proportions, optimized GLB.',
   },
+  flightlessCormorant: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/flightless-cormorant.glb',
+    scale: 1.25,
+    rotation: [0, Math.PI, 0],
+    yOffset: 0.02,
+    normalizeMaterials: true,
+    materialLift: 0.05,
+    materialEmissive: '#101513',
+    materialEmissiveIntensity: 0.08,
+    targetTriangles: 6500,
+    prompt: 'Game-ready Galapagos flightless cormorant, compact dark coastal bird, small wings, sturdy legs, procedural walk animation clip, optimized GLB.',
+  },
   greenTurtle: {
     enabled: true,
     preload: false,
@@ -154,6 +274,48 @@ export const modelAssets = {
     targetTriangles: 5000,
     prompt: 'Stylized low-poly Galapagos cotton shrub, Gossypium darwinii, dry coastal scrub plant, broad green leaves, pale flowers or cotton bolls, hand-painted texture, cel-shaded game asset, optimized GLB.',
   },
+  scalesiaPedunculataTree: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-scalesia-pedunculata-tree.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.03,
+    materialEmissive: '#162412',
+    materialEmissiveIntensity: 0.06,
+    targetTriangles: 8000,
+    prompt: 'Stylized Galapagos Scalesia pedunculata tree, broad clustered leaves and humid highland canopy form, used sparsely in Floreana highland forest.',
+  },
+  mangroveTree: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-mangrove-tree.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.03,
+    materialEmissive: '#102113',
+    materialEmissiveIntensity: 0.04,
+    targetTriangles: 19037,
+    prompt: 'Optimized textured mangrove tree with visible trunk and prop-root structure for brackish Floreana lagoon and mangrove-forest scenes.',
+  },
+  candelabraCactus: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-candelabra-cactus.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#17200d',
+    materialEmissiveIntensity: 0.04,
+    targetTriangles: 11321,
+    prompt: 'Optimized Galapagos candelabra cactus, Jasminocereus style dry-zone columnar cactus for sparse arid coastal Floreana scrub.',
+  },
   basalt: {
     enabled: false,
     path: '/assets/models/basalt.glb',
@@ -178,6 +340,7 @@ export const modelAssets = {
   },
   beagle: {
     enabled: true,
+    preload: false,
     path: '/assets/models/ships/beagle-styrbjorn.glb',
     scale: 0.92,
     rotation: [0, 0, 0],

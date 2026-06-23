@@ -46,6 +46,7 @@ const TYPE_LABELS = {
   promontory: 'Promontory',
   settlement: 'Settlement',
   clearing: 'Clearing',
+  grassland: 'Grass test field',
   camp: 'Camp',
   shipwreck: 'Wreck site',
   hut: 'Dwelling',
@@ -231,12 +232,12 @@ function LocalTab() {
   const zone = getZone(currentZoneId);
   const chartUrl = useTerrainChart(zone);
 
-  const size = zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
-  const half = size / 2;
+  const width = zone.terrainWidth || zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
+  const depth = zone.terrainDepth || zone.terrainSize || (zone.bounds ? zone.bounds * 2 : width);
   const position = playerPose.position || { x: 0, z: 0 };
   const player = {
-    x: Math.max(0.04, Math.min(0.96, (position.x + half) / size)),
-    y: Math.max(0.04, Math.min(0.96, (position.z + half) / size)),
+    x: Math.max(0.03, Math.min(0.97, ((position.x || 0) + width / 2) / width)),
+    y: Math.max(0.03, Math.min(0.97, ((position.z || 0) + depth / 2) / depth)),
   };
 
   return (
@@ -250,7 +251,7 @@ function LocalTab() {
             className="max-h-[62vh] w-full"
             overlay={({ zoom, paneWidth, zoomIn, zoomOut }) => (
               <>
-                <MapScaleBar zoom={zoom} paneWidth={paneWidth} mapWidthKm={size / 1000} className="absolute bottom-3 left-3" />
+                <MapScaleBar zoom={zoom} paneWidth={paneWidth} mapWidthKm={width / 1000} className="absolute bottom-3 left-3" />
                 <ZoomControls zoomIn={zoomIn} zoomOut={zoomOut} className="absolute bottom-3 right-3" />
                 <span className="pointer-events-none absolute right-3 top-3 flex items-center text-expedition-parchment/90 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
                   <NorthArrowIcon className="h-4 w-4" />

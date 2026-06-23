@@ -19,20 +19,39 @@ function makeAnchors(zoneId) {
   const zone = getZone(zoneId);
   const band = getRegionClimateBand(zoneId);
   const size = (zone.terrainSize || 100) * 0.5;
-  const count = band === 'highland' ? 4 : 3;
+  const count = band === 'highland' ? 5 : 3;
   const anchors = [];
   for (let i = 0; i < count; i += 1) {
     const angle = (i / count) * Math.PI * 2 + zoneId.length;
-    const radius = size * (band === 'highland' ? 0.34 : 0.5);
+    const radius = size * (band === 'highland' ? 0.28 + (i % 2) * 0.12 : 0.5);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     let y = 6;
+    let pocket = 0.4;
     try {
-      y = Math.max(terrainHeight(x, z, zoneId) + 3.5, 4);
+      const center = terrainHeight(x, z, zoneId);
+      const sampleRadius = band === 'highland' ? 13 : 9;
+      const around = [
+        terrainHeight(x + sampleRadius, z, zoneId),
+        terrainHeight(x - sampleRadius, z, zoneId),
+        terrainHeight(x, z + sampleRadius, zoneId),
+        terrainHeight(x, z - sampleRadius, zoneId),
+      ];
+      const rim = around.reduce((sum, value) => sum + value, 0) / around.length;
+      pocket = THREE.MathUtils.clamp((rim - center + 1.5) / 6, 0.18, 1);
+      y = Math.max(center + THREE.MathUtils.lerp(2.1, 4.0, pocket), 3.5);
     } catch {
       // Unauthored placeholder terrain: keep the default height.
     }
-    anchors.push({ x, y, z, seed: i + 11, scale: band === 'highland' ? 1.25 : 1 });
+    anchors.push({
+      x,
+      y,
+      z,
+      seed: i + 11,
+      scale: (band === 'highland' ? 1.18 : 0.95) + pocket * 0.34,
+      opacity: THREE.MathUtils.lerp(0.26, band === 'highland' ? 0.66 : 0.46, pocket),
+      speed: THREE.MathUtils.lerp(0.035, 0.075, 1 - pocket),
+    });
   }
   return anchors;
 }
@@ -52,8 +71,8 @@ export function MistBanks() {
     if (groupRef.current) {
       groupRef.current.visible = mist > 0.02;
       // Mist creeps downwind far slower than the cumulus overhead.
-      groupRef.current.position.x += weatherEnv.windX * weatherEnv.windSpeed * delta * 0.12;
-      groupRef.current.position.z += weatherEnv.windZ * weatherEnv.windSpeed * delta * 0.12;
+      groupRef.current.position.x += weatherEnv.windX * weatherEnv.mistDriftSpeed * delta * 0.35;
+      groupRef.current.position.z += weatherEnv.windZ * weatherEnv.mistDriftSpeed * delta * 0.35;
       const drift = Math.hypot(groupRef.current.position.x, groupRef.current.position.z);
       if (drift > 14) groupRef.current.position.set(0, 0, 0);
     }
@@ -78,9 +97,9 @@ export function MistBanks() {
             bounds={[16 * anchor.scale, 1.6, 11 * anchor.scale]}
             volume={7 * anchor.scale}
             growth={2}
-            speed={0.08}
+            speed={anchor.speed}
             fade={12}
-            opacity={quantize(mist * 0.5)}
+            opacity={quantize(mist * anchor.opacity)}
             color="#dbe6e9"
           />
         ))}

@@ -29,6 +29,10 @@ export function Beagle() {
         tint="#d7c09a"
         tintStrength={0.04}
         bob={0.025}
+        maxVisibleDistance={180}
+        sourceId="ship:beagle"
+        sourceLabel="Beagle GLB"
+        sourceKind="ship"
       />
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow={false}>
         <planeGeometry args={[5.2, 17.2]} />

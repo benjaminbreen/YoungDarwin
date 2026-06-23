@@ -13,11 +13,29 @@ import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
+import { MOVEMENT_FATIGUE } from './components/player/playerConfig';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
 const MAX_CURIOSITY = 100;
 const HOURS_PER_DAY = 24;
+const INITIAL_PLAYER_POSE = Object.freeze({
+  position: Object.freeze({ x: 0, y: 0, z: 0 }),
+  facing: Object.freeze({ x: 0, y: 0, z: -1 }),
+});
+// Minimap is low-resolution, so the player marker only needs a fresh pose
+// object once the player has moved/turned a perceptible amount. Below these
+// thresholds we reuse the existing minimapPlayerPose so walking doesn't
+// re-render the (always-mounted) minimap subtree on every pose publish.
+const MINIMAP_POSE_EPSILON = 0.2;
+const MINIMAP_HEADING_EPSILON = 1.5;
+
+export const threeRuntimeState = {
+  playerPose: {
+    position: { ...INITIAL_PLAYER_POSE.position },
+    facing: { ...INITIAL_PLAYER_POSE.facing },
+  },
+};
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -30,6 +48,30 @@ function advanceTimeState(state, minutes) {
     timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
     day: state.day + dayDelta,
   };
+}
+
+export function getRuntimePlayerPose() {
+  return threeRuntimeState.playerPose;
+}
+
+export function updateRuntimePlayerPose(playerPose) {
+  const position = playerPose?.position;
+  const facing = playerPose?.facing;
+  if (!position || !facing) return threeRuntimeState.playerPose;
+  const x = Number(position.x);
+  const y = Number(position.y);
+  const z = Number(position.z);
+  const fx = Number(facing.x);
+  const fy = Number(facing.y);
+  const fz = Number(facing.z);
+  if (![x, y, z, fx, fy, fz].every(Number.isFinite)) return threeRuntimeState.playerPose;
+  threeRuntimeState.playerPose.position.x = x;
+  threeRuntimeState.playerPose.position.y = y;
+  threeRuntimeState.playerPose.position.z = z;
+  threeRuntimeState.playerPose.facing.x = fx;
+  threeRuntimeState.playerPose.facing.y = fy;
+  threeRuntimeState.playerPose.facing.z = fz;
+  return threeRuntimeState.playerPose;
 }
 
 function makeJournalEntry({ specimen, tool, result, documented = false, location, day, timeOfDay }) {
@@ -100,8 +142,14 @@ function createSceneSlice() {
     pushableObstacleOffsets: {},
     specimenRuntimePositions: {},
     playerPose: {
-      position: { x: 0, y: 0, z: 0 },
-      facing: { x: 0, y: 0, z: -1 },
+      position: { ...INITIAL_PLAYER_POSE.position },
+      facing: { ...INITIAL_PLAYER_POSE.facing },
+    },
+    minimapPlayerPose: {
+      x: 0,
+      z: 0,
+      heading: 180,
+      zoneId: currentZoneId,
     },
     carryPrompt: null,
     carriedObjectId: null,
@@ -161,7 +209,33 @@ export const useThreeGameStore = create((set, get) => ({
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
   setEdgePrompt: edgePrompt => set({ edgePrompt }),
-  setPlayerPose: playerPose => set({ playerPose }),
+  setPlayerPose: playerPose => {
+    updateRuntimePlayerPose(playerPose);
+    set(state => {
+      const x = Number(playerPose?.position?.x);
+      const z = Number(playerPose?.position?.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return { playerPose };
+      const fx = Number(playerPose?.facing?.x);
+      const fz = Number(playerPose?.facing?.z);
+      const heading = Math.atan2(Number.isFinite(fx) ? fx : 0, Number.isFinite(fz) ? fz : -1) * (180 / Math.PI);
+      // Only emit a new minimapPlayerPose object when the quantised pose
+      // actually changes; otherwise the always-mounted minimap re-renders its
+      // whole marker/trail subtree on every pose publish (~15x/sec while
+      // walking). `playerPose` still updates every call for full-resolution
+      // consumers (island map modal + runtime mirror).
+      const previous = state.minimapPlayerPose;
+      const unchanged = previous
+        && previous.zoneId === state.currentZoneId
+        && Math.abs(previous.x - x) < MINIMAP_POSE_EPSILON
+        && Math.abs(previous.z - z) < MINIMAP_POSE_EPSILON
+        && Math.abs(previous.heading - heading) < MINIMAP_HEADING_EPSILON;
+      if (unchanged) return { playerPose };
+      return {
+        playerPose,
+        minimapPlayerPose: { x, z, heading, zoneId: state.currentZoneId },
+      };
+    });
+  },
   setCarryPrompt: carryPrompt => set(state => (
     (state.carryPrompt?.id || null) === (carryPrompt?.id || null)
       && state.carryPrompt?.mode === carryPrompt?.mode
@@ -228,6 +302,7 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
+  setTimeOfDay: hour => set({ timeOfDay: clamp(Number(hour) || 0, 0, HOURS_PER_DAY - 1 / 60) }),
 
   setWeather: weather => set(state => (state.weather === weather ? {} : { weather })),
   setWeatherOverride: weatherOverride => set({ weatherOverride }),
@@ -302,7 +377,10 @@ export const useThreeGameStore = create((set, get) => ({
   })),
 
   applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => ({
-    fatigue: clamp(state.fatigue + (fatigueDelta ?? ((running ? 0.026 : walking ? 0.008 : 0) + (airborne ? 0.004 : 0))), 0, MAX_FATIGUE),
+    fatigue: clamp(state.fatigue + (fatigueDelta ?? (
+      (running ? MOVEMENT_FATIGUE.runningPerFrame60 : walking ? MOVEMENT_FATIGUE.walkingPerFrame60 : 0)
+      + (airborne ? MOVEMENT_FATIGUE.airbornePerFrame60 : 0)
+    )), 0, MAX_FATIGUE),
     health: clamp(state.health - Math.max(0, falling - 7.5) * 1.25, 0, MAX_HEALTH),
   })),
 

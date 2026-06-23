@@ -150,6 +150,35 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'flightlesscormorant',
+    name: 'Flightless Cormorant',
+    latin: 'Nannopterum harrisi',
+    ontology: 'Animal',
+    order: 'Bird',
+    sub_order: 'Cormorant',
+    description: 'A heavy coastal cormorant with reduced wings and strong legs, better suited to scrambling and diving than flight.',
+    details: [
+      'Small wings contrast sharply with its sturdy body',
+      'Walks with a deliberate coastal waddle over lava and sand',
+      'Feeds by diving after fish and other nearshore prey',
+      'Its form makes flightlessness immediately visible'
+    ],
+    habitat: 'shore, rocky shoreline, bay',
+    collected: false,
+    observations: [],
+    scientificValue: 8,
+    hybrid_ease: 4,
+    hybrid_temperature: 5,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/flightlesscormorant.jpg',
+    memoryText: '“Here is a bird whose wings seem almost an afterthought. It walks the shore as if the sea, not the air, were its proper element.”',
+    contents: 'A careful examination would likely reveal fish remains and grit from the rocky shore.',
+    keywords: ['flightless cormorant', 'bird', 'cormorant', 'galapagos', 'flightless', 'coastal', 'diving']
+  },
+
+  {
     id: 'marineiguana',
     name: 'Marine Iguana',
     latin: 'Amblyrhynchus cristatus',

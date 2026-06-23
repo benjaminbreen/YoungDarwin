@@ -28,10 +28,12 @@ const C = {
   ambNight: new THREE.Color('#2a3a5c'),
   ambDay: new THREE.Color('#f2e9d6'),      // warm ambient (was cool blue-white)
   fogNight: new THREE.Color('#0c1830'),
+  fogMidnight: new THREE.Color('#03112b'),
   fogDay: new THREE.Color('#7fc4f2'),
   fogGolden: new THREE.Color('#d9a878'),
   fogSunWarm: new THREE.Color('#f2c590'), // aerial perspective: haze blushes toward the sun
   fogMist: new THREE.Color('#ccdadd'),    // garúa: pale, desaturated mist tone
+  fogStorm: new THREE.Color('#93a0aa'),   // closed sky: haze loses its blue
 };
 
 // Distant island silhouette: a smooth volcanic profile drawn once to a canvas.
@@ -126,6 +128,12 @@ const _screenSun = new THREE.Vector3();
 const _flareWorld = new THREE.Vector3();
 const _flareNdc = new THREE.Vector3();
 
+function midnightFactor(hour) {
+  return hour >= 12
+    ? smoothstep(20.75, 22.0, hour)
+    : 1 - smoothstep(4.0, 5.25, hour);
+}
+
 function radialTexture(stops, size = 256) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -138,6 +146,33 @@ function radialTexture(stops, size = 256) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
+  return texture;
+}
+
+// Meteor streak: bright head with a long fading tail along +x.
+function meteorTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 16;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 128, 0);
+  gradient.addColorStop(0.0, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.72, 'rgba(214,228,255,0.35)');
+  gradient.addColorStop(0.94, 'rgba(255,255,255,0.95)');
+  gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 16);
+  // Soften vertically.
+  const vertical = ctx.createLinearGradient(0, 0, 0, 16);
+  vertical.addColorStop(0, 'rgba(0,0,0,1)');
+  vertical.addColorStop(0.5, 'rgba(0,0,0,0)');
+  vertical.addColorStop(1, 'rgba(0,0,0,1)');
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = vertical;
+  ctx.fillRect(0, 0, 128, 16);
+  ctx.globalCompositeOperation = 'source-over';
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
@@ -220,22 +255,28 @@ function StarField({ nightRef }) {
       uniform float uTime;
       uniform float uPixelRatio;
       varying float vTwinkle;
+      varying float vTint;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         vTwinkle = 0.55 + 0.45 * sin(uTime * 1.6 + aPhase * 6.2831853);
+        vTint = fract(aPhase * 5.7);
         gl_PointSize = aSize * uPixelRatio * (260.0 / max(1.0, -mv.z));
       }
     `,
     fragmentShader: /* glsl */`
       uniform float uOpacity;
       varying float vTwinkle;
+      varying float vTint;
       void main() {
         vec2 c = gl_PointCoord - 0.5;
         float d = dot(c, c);
         if (d > 0.25) discard;
         float a = smoothstep(0.25, 0.0, d) * vTwinkle * uOpacity;
-        gl_FragColor = vec4(vec3(1.0, 0.96, 0.9), a);
+        // Real star fields aren't monochrome: a subtle spread from warm
+        // K-type amber to cool B-type blue, biased mostly white.
+        vec3 starColor = mix(vec3(1.0, 0.82, 0.6), vec3(0.72, 0.84, 1.0), vTint);
+        gl_FragColor = vec4(mix(vec3(1.0, 0.96, 0.9), starColor, 0.4), a);
       }
     `,
   }), []);
@@ -284,7 +325,7 @@ function TropicalBlueSkyDome({ nightRef }) {
         vec3 zenithBlue = vec3(0.015, 0.30, 0.86);
         vec3 color = mix(horizonBlue, zenithBlue, dome);
         float alpha = mix(0.22, 0.58, dome) * horizon;
-        alpha *= (1.0 - uNight) * (1.0 - uOvercast * 0.72);
+        alpha *= (1.0 - uNight) * (1.0 - uOvercast * 0.96);
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -308,6 +349,63 @@ function TropicalBlueSkyDome({ nightRef }) {
   );
 }
 
+function MidnightSkyDome({ midnightRef }) {
+  const meshRef = useRef(null);
+
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      uMidnight: { value: 0 },
+      uOvercast: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vWorldDir;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldDir = normalize(worldPosition.xyz - cameraPosition);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying vec3 vWorldDir;
+      uniform float uMidnight;
+      uniform float uOvercast;
+      void main() {
+        float up = clamp(vWorldDir.y * 0.5 + 0.5, 0.0, 1.0);
+        float dome = smoothstep(0.36, 0.92, up);
+        vec3 horizon = vec3(0.035, 0.095, 0.19);
+        vec3 zenith = vec3(0.006, 0.022, 0.075);
+        vec3 stormTint = vec3(0.055, 0.065, 0.095);
+        vec3 color = mix(horizon, zenith, dome);
+        color = mix(color, stormTint, uOvercast * 0.18);
+        float horizonHold = 1.0 - smoothstep(0.08, 0.28, up);
+        float alpha = uMidnight * mix(0.62, 0.84, dome) * (1.0 - horizonHold * 0.22);
+        gl_FragColor = vec4(color, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  }), []);
+
+  useLayoutEffect(() => () => material.dispose(), [material]);
+
+  useFrame(() => {
+    const midnight = midnightRef.current;
+    material.uniforms.uMidnight.value = midnight;
+    material.uniforms.uOvercast.value = weatherEnv.overcast;
+    if (meshRef.current) meshRef.current.visible = midnight > 0.01;
+  });
+
+  return (
+    <mesh ref={meshRef} renderOrder={-8.5} frustumCulled={false}>
+      <sphereGeometry args={[SKY_DISTANCE - 1, 48, 24]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
+}
+
 function RealisticCloudLayer({ nightRef }) {
   const groupRef = useRef(null);
   const { camera } = useThree();
@@ -320,6 +418,7 @@ function RealisticCloudLayer({ nightRef }) {
       uTime: { value: 0 },
       uNight: { value: 0 },
       uOpacity: { value: 0.72 },
+      uRain: { value: 0 },
     },
     vertexShader: /* glsl */`
       varying vec2 vUv;
@@ -333,6 +432,7 @@ function RealisticCloudLayer({ nightRef }) {
       uniform float uTime;
       uniform float uNight;
       uniform float uOpacity;
+      uniform float uRain;
 
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -371,7 +471,12 @@ function RealisticCloudLayer({ nightRef }) {
         cloud *= smoothstep(0.02, 0.18, uv.y) * smoothstep(0.02, 0.16, 1.0 - uv.y);
         vec3 base = mix(vec3(0.72, 0.79, 0.82), vec3(1.0), smoothstep(0.35, 0.95, uv.y + detail * 0.35));
         vec3 shade = mix(vec3(0.58, 0.65, 0.66), base, smoothstep(0.25, 0.85, wisps));
-        float alpha = cloud * uOpacity * (1.0 - uNight * 0.86);
+        // Rain curtains: the distant bank goes slate-dark and drags grey
+        // virga streaks below its base toward the sea.
+        shade = mix(shade, vec3(0.36, 0.41, 0.47), uRain * 0.75);
+        float virga = uRain * (1.0 - smoothstep(0.0, 0.42, uv.y))
+          * smoothstep(0.45, 0.75, fbm(vec2(uv.x * 7.0 + uTime * 0.01, uv.y * 1.2)));
+        float alpha = max(cloud, virga * 0.55) * uOpacity * (1.0 - uNight * 0.86);
         gl_FragColor = vec4(shade, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -386,6 +491,7 @@ function RealisticCloudLayer({ nightRef }) {
     material.uniforms.uNight.value = nightRef.current;
     // Distant cloud bank thickens as the weather closes over.
     material.uniforms.uOpacity.value = 0.45 + weatherEnv.overcast * 0.4;
+    material.uniforms.uRain.value = weatherEnv.rainIntensity;
     if (groupRef.current) {
       groupRef.current.children.forEach(child => child.quaternion.copy(camera.quaternion));
     }
@@ -411,6 +517,189 @@ function RealisticCloudLayer({ nightRef }) {
   );
 }
 
+// Double rainbow, placed physically: a spectral ring 40.6–42.4° around the
+// antisolar point (violet inner, red outer), a fainter reversed secondary at
+// ~50–53°, and the real brightened sky inside the primary bow. Appears when a
+// shower is clearing while the sun is out and low enough for the bow to rise
+// above the horizon — exactly the sun-shower moment rainbows belong to.
+function RainbowDome({ celestialRef }) {
+  const meshRef = useRef(null);
+
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uAntisun: { value: new THREE.Vector3(0, -1, 0) },
+      uStrength: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vWorldDir;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldDir = normalize(worldPosition.xyz - cameraPosition);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying vec3 vWorldDir;
+      uniform vec3 uAntisun;
+      uniform float uStrength;
+
+      vec3 spectral(float t) {
+        // t=0 violet -> t=1 red, eyeballed against a real bow.
+        return clamp(vec3(
+          smoothstep(0.45, 0.75, t) + (1.0 - smoothstep(0.0, 0.25, t)) * 0.4,
+          smoothstep(0.15, 0.5, t) * (1.0 - smoothstep(0.65, 0.95, t)),
+          1.0 - smoothstep(0.05, 0.35, t)
+        ), 0.0, 1.0);
+      }
+
+      void main() {
+        vec3 dir = normalize(vWorldDir);
+        float ang = degrees(acos(clamp(dot(dir, uAntisun), -1.0, 1.0)));
+        // Primary bow: 40.6° (violet) to 42.4° (red).
+        float t1 = (ang - 40.6) / 1.8;
+        float band1 = smoothstep(0.0, 0.18, t1) * (1.0 - smoothstep(0.82, 1.0, t1));
+        // Secondary: reversed colors, broader and fainter, ~50.4–53.0°.
+        float t2 = (ang - 50.4) / 2.6;
+        float band2 = smoothstep(0.0, 0.22, t2) * (1.0 - smoothstep(0.78, 1.0, t2));
+        // Brightened sky inside the primary (Alexander's band stays dark
+        // between the bows simply by not being brightened).
+        float inner = 1.0 - smoothstep(34.0, 40.6, ang);
+        vec3 color = spectral(clamp(t1, 0.0, 1.0)) * band1 * 0.55
+          + spectral(1.0 - clamp(t2, 0.0, 1.0)) * band2 * 0.16
+          + vec3(0.9, 0.95, 1.0) * inner * 0.05;
+        float alpha = (band1 * 0.5 + band2 * 0.16 + inner * 0.07) * uStrength;
+        // The bow lives against sky and distant rain, not the ground.
+        alpha *= smoothstep(-0.06, 0.14, dir.y);
+        if (alpha < 0.003) discard;
+        gl_FragColor = vec4(color, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  }), []);
+
+  useLayoutEffect(() => () => material.dispose(), [material]);
+
+  useFrame(() => {
+    const c = celestialRef.current;
+    const rain = weatherEnv.rainIntensity;
+    // Sun-shower window: light rain or a clearing downpour.
+    const rainWindow = smoothstep(0.02, 0.1, rain) * (1 - smoothstep(0.28, 0.5, rain));
+    const sunUp = smoothstep(0.04, 0.14, c.elevation);
+    // Bow center is antisolar: the higher the sun, the more of the bow is
+    // below the horizon. Fade it out entirely once the sun is high.
+    const sunLow = 1 - smoothstep(0.42, 0.66, c.elevation);
+    const strength = rainWindow * c.daylight * sunUp * sunLow * (1 - weatherEnv.overcast * 0.75);
+    material.uniforms.uStrength.value = strength;
+    if (strength > 0.01) {
+      material.uniforms.uAntisun.value.copy(c.sun).multiplyScalar(-1).normalize();
+    }
+    if (meshRef.current) meshRef.current.visible = strength > 0.01;
+  });
+
+  return (
+    <mesh ref={meshRef} renderOrder={-7} frustumCulled={false} visible={false}>
+      <sphereGeometry args={[SKY_DISTANCE - 4, 48, 24]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
+}
+
+// Occasional meteor: a single additive streak that arcs across the dome every
+// half-minute or so on clear nights, brighter and more frequent the darker
+// the sky. One plane, hidden when idle.
+function ShootingStars({ nightRef }) {
+  const meshRef = useRef(null);
+  const texture = useMemo(() => meteorTexture(), []);
+  const state = useRef({
+    countdown: 12,
+    t: -1,
+    life: 0.8,
+    origin: new THREE.Vector3(),
+    velocity: new THREE.Vector3(),
+    position: new THREE.Vector3(),
+  });
+  const { camera } = useThree();
+
+  useLayoutEffect(() => () => texture.dispose(), [texture]);
+
+  useFrame((_, delta) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const night = nightRef.current;
+    const clearSky = 1 - weatherEnv.overcast;
+    const s = state.current;
+
+    if (night < 0.55 || clearSky < 0.3) {
+      mesh.visible = false;
+      s.t = -1;
+      return;
+    }
+
+    if (s.t < 0) {
+      mesh.visible = false;
+      s.countdown -= delta;
+      if (s.countdown > 0) return;
+      // Spawn: random point high on the dome, sliding mostly sideways/down.
+      const azimuth = Math.random() * Math.PI * 2;
+      const altitude = 0.5 + Math.random() * 0.6; // radians above horizon
+      s.origin.set(
+        Math.cos(azimuth) * Math.cos(altitude),
+        Math.sin(altitude),
+        Math.sin(azimuth) * Math.cos(altitude)
+      ).multiplyScalar(STAR_RADIUS - 6);
+      const heading = azimuth + Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+      s.velocity.set(Math.cos(heading), -(0.25 + Math.random() * 0.5), Math.sin(heading)).normalize().multiplyScalar(95 + Math.random() * 60);
+      s.life = 0.55 + Math.random() * 0.5;
+      s.countdown = 18 + Math.random() * 38;
+      s.t = 0;
+    }
+
+    s.t += delta;
+    if (s.t > s.life) {
+      s.t = -1;
+      mesh.visible = false;
+      return;
+    }
+
+    s.position.copy(s.origin).addScaledVector(s.velocity, s.t);
+    mesh.position.copy(s.position);
+    // Billboard, then roll the streak to its on-screen direction of travel.
+    mesh.quaternion.copy(camera.quaternion);
+    _flareWorld.copy(s.position).add(camera.position).project(camera);
+    _flareNdc.copy(s.position).addScaledVector(s.velocity, 0.05).add(camera.position).project(camera);
+    mesh.rotateZ(Math.atan2(_flareNdc.y - _flareWorld.y, _flareNdc.x - _flareWorld.x));
+    const fade = Math.sin(Math.PI * (s.t / s.life));
+    mesh.material.opacity = fade * night * clearSky * 0.85;
+    mesh.visible = true;
+  });
+
+  return (
+    <mesh ref={meshRef} visible={false} renderOrder={-6} frustumCulled={false} scale={[15, 0.65, 1]}>
+      <planeGeometry args={[1, 1]} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        opacity={0}
+        depthWrite={false}
+        depthTest={false}
+        blending={THREE.AdditiveBlending}
+        fog={false}
+      />
+    </mesh>
+  );
+}
+
+// The single shadow light tracks a slowly-moving sun and a player-following
+// frustum, so re-rendering every shadow caster on every frame is wasteful.
+// Refresh the shadow map at this cadence instead (~24Hz reads as smooth for
+// soft shadows). Tunable: lower the divisor for an even bigger saving.
+const SHADOW_REFRESH_INTERVAL = 1 / 24;
+
 export function SkyController({ stars = true, tuning = null }) {
   const { scene, gl, camera } = useThree();
   // Defaults tuned for NeutralToneMapping. Drei/Three Sky is HDR, so it still
@@ -429,6 +718,7 @@ export function SkyController({ stars = true, tuning = null }) {
   const hemiRef = useRef(null);
   const moonRef = useRef(null);
   const moonGlowRef = useRef(null);
+  const moonHaloRef = useRef(null);
   const sunRef = useRef(null);
   const sunGlowRef = useRef(null);
   const lensFlareRefs = useRef([]);
@@ -441,6 +731,15 @@ export function SkyController({ stars = true, tuning = null }) {
     [0.0, 'rgba(214, 227, 255, 0.25)'],
     [0.35, 'rgba(182, 202, 240, 0.10)'],
     [1.0, 'rgba(182, 202, 240, 0)'],
+  ]), []);
+  // 22°-style ice halo: a thin luminous ring that appears around the moon on
+  // humid garúa nights — the classic sign of weather on the way.
+  const moonHaloTexture = useMemo(() => radialTexture([
+    [0.0, 'rgba(0, 0, 0, 0)'],
+    [0.58, 'rgba(0, 0, 0, 0)'],
+    [0.66, 'rgba(206, 220, 252, 0.16)'],
+    [0.72, 'rgba(178, 198, 240, 0.07)'],
+    [0.8, 'rgba(0, 0, 0, 0)'],
   ]), []);
   // Warm sun disc: bright but contained. Keep the core below pure white so
   // bloom does not wash the entire morning sky into a flat white field.
@@ -470,11 +769,17 @@ export function SkyController({ stars = true, tuning = null }) {
   // Smoothed game hour so the sky visibly drifts between discrete store updates.
   const hourRef = useRef(null);
   const nightRef = useRef(0); // shared with StarField without React re-renders
+  // Sun vector + day factors shared with RainbowDome without re-renders.
+  const celestialRef = useRef({ sun: new THREE.Vector3(0, 1, 0), elevation: 0, daylight: 0, golden: 0 });
+  const midnightRef = useRef(0); // late-night blue pass, distinct from twilight
 
   // Shadow camera follows the player: a tight frustum that tracks the
   // character keeps shadow texels small (crisp edges) no matter where they
   // roam, instead of one blurry map stretched over the whole zone.
   const shadowTarget = useMemo(() => new THREE.Object3D(), []);
+  // Accumulates frame delta to gate shadow-map refreshes. Starts "due" so the
+  // very first frame renders shadows.
+  const shadowClock = useRef(SHADOW_REFRESH_INTERVAL);
 
   // Cloud cover is the smoothed 0..1 weatherEnv.overcast, read per frame
   // inside useFrame, so a weather change rolls in instead of cutting.
@@ -487,7 +792,8 @@ export function SkyController({ stars = true, tuning = null }) {
     lensFlareTexture.dispose();
     islandTexture.dispose();
     hazeTexture.dispose();
-  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, lensFlareTexture, islandTexture, hazeTexture]);
+    moonHaloTexture.dispose();
+  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, lensFlareTexture, islandTexture, hazeTexture, moonHaloTexture]);
 
   // Keep the drei Sky sized inside the far plane and let terrain depth-occlude it.
   useLayoutEffect(() => {
@@ -520,6 +826,19 @@ export function SkyController({ stars = true, tuning = null }) {
     }
   }, []);
 
+  // Take manual control of the shadow map so it refreshes on a cadence (see the
+  // useFrame below) instead of every frame. Water save/restores autoUpdate
+  // around its reflection pass, which stays compatible with a global `false`.
+  useLayoutEffect(() => {
+    const prev = gl.shadowMap.autoUpdate;
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => {
+      gl.shadowMap.autoUpdate = prev;
+      gl.shadowMap.needsUpdate = true;
+    };
+  }, [gl]);
+
   useFrame((_, delta) => {
     const store = useThreeGameStore.getState();
     const overcast = weatherEnv.overcast;
@@ -532,10 +851,17 @@ export function SkyController({ stars = true, tuning = null }) {
 
     const s = skyState(hourRef.current, store.day || 1);
     nightRef.current = s.night;
+    midnightRef.current = midnightFactor(hourRef.current) * s.night;
     const { daylight, golden, night } = s;
 
     _sun.set(s.sun[0], s.sun[1], s.sun[2]);
     _moon.set(s.moon[0], s.moon[1], s.moon[2]);
+
+    const cel = celestialRef.current;
+    cel.sun.copy(_sun);
+    cel.elevation = s.elevation;
+    cel.daylight = daylight;
+    cel.golden = golden;
 
     // Rig follows the camera so bodies feel infinitely far and never clip.
     if (groupRef.current) groupRef.current.position.copy(camera.position);
@@ -565,6 +891,15 @@ export function SkyController({ stars = true, tuning = null }) {
         moonGlowRef.current.quaternion.copy(camera.quaternion);
         moonGlowRef.current.visible = moonRef.current.visible;
         moonGlowRef.current.material.opacity = 0.22 * moonVis;
+      }
+      if (moonHaloRef.current) {
+        // Halo needs moonlight *and* humid air: garúa mist or thin high cover.
+        const humidity = Math.max(weatherEnv.mistAmount, weatherEnv.overcast * 0.45);
+        moonHaloRef.current.position.copy(moonRef.current.position);
+        moonHaloRef.current.quaternion.copy(camera.quaternion);
+        const haloOpacity = moonVis * humidity * (1 - weatherEnv.rainIntensity) * 0.85;
+        moonHaloRef.current.visible = haloOpacity > 0.015;
+        moonHaloRef.current.material.opacity = haloOpacity;
       }
     }
 
@@ -637,10 +972,11 @@ export function SkyController({ stars = true, tuning = null }) {
     if (ambientRef.current) {
       ambientRef.current.color.copy(C.ambNight).lerp(C.ambDay, daylight);
       // Keep a soft moonlit floor at night so the world stays readable.
-      ambientRef.current.intensity = 0.22 + daylight * 0.34;
+      ambientRef.current.intensity = 0.32 + daylight * 0.34;
     }
 
     // --- fog + background + exposure -----------------------------------------
+    const midnight = midnightRef.current;
     _color.copy(C.fogNight).lerp(C.fogDay, daylight).lerp(C.fogGolden, golden * 0.7);
     // Aerial perspective: haze warms when the camera faces the sun, cools
     // looking away. Whole-frame approximation (scene.fog is one color), but
@@ -648,8 +984,12 @@ export function SkyController({ stars = true, tuning = null }) {
     camera.getWorldDirection(_fwd);
     const sunFacing = Math.max(0, _fwd.dot(_sun));
     _color.lerp(C.fogSunWarm, sunFacing * sunFacing * daylight * (0.12 + golden * 0.3) * (1 - overcast * 0.6));
+    // A closed sky greys the whole distance haze — no blue horizon band can
+    // survive an overcast day.
+    _color.lerp(C.fogStorm, overcast * 0.65 * (0.25 + daylight * 0.75));
     // Garúa lifts and desaturates the haze toward a pale grey-white.
     _color.lerp(C.fogMist, weatherEnv.mistAmount * 0.55 * (0.35 + daylight * 0.65));
+    _color.lerp(C.fogMidnight, midnight * (1 - weatherEnv.mistAmount * 0.35));
     if (scene.fog) scene.fog.color.copy(_color);
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
     // Distant islands sit barely darker than the haze that swallows them.
@@ -657,11 +997,20 @@ export function SkyController({ stars = true, tuning = null }) {
     islandMatRefs.current.forEach(mat => {
       if (mat) mat.color.copy(_islandColor);
     });
-    // Border haze tracks the fog, lifted toward white like the water's uHaze.
+    // Border haze tracks the fog; only daylight gets the pale tropical lift.
     if (hazeWallMatRef.current) {
-      hazeWallMatRef.current.color.copy(_color).lerp(_white, 0.3);
+      hazeWallMatRef.current.color.copy(_color).lerp(_white, 0.04 + daylight * 0.26);
     }
     gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.025;
+
+    // Refresh the shadow map on a cadence rather than every frame. The light
+    // direction/position above still updates every frame; only the (expensive)
+    // shadow-caster render pass is throttled.
+    shadowClock.current += delta;
+    if (shadowClock.current >= SHADOW_REFRESH_INTERVAL) {
+      shadowClock.current = 0;
+      gl.shadowMap.needsUpdate = true;
+    }
   });
 
   return (
@@ -684,7 +1033,12 @@ export function SkyController({ stars = true, tuning = null }) {
         shadow-camera-bottom={-18}
       />
       <primitive object={shadowTarget} />
-      <group ref={groupRef}>
+      <group ref={groupRef} userData={{
+        renderSource: 'sky-controller',
+        renderLabel: 'Sky controller visuals',
+        renderKind: 'sky',
+        renderPath: null,
+      }}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
         {/* Camera-following horizon haze ring: a constant band of thick
             distance air that swallows map-edge seams and the island bases.
@@ -701,6 +1055,7 @@ export function SkyController({ stars = true, tuning = null }) {
           />
         </mesh>
         <TropicalBlueSkyDome nightRef={nightRef} />
+        <MidnightSkyDome midnightRef={midnightRef} />
         <RealisticCloudLayer nightRef={nightRef} />
         {/* Sun: warm billboarded disc behind a broad additive halo. */}
         <sprite ref={sunGlowRef} renderOrder={-8} scale={[30, 30, 1]}>
@@ -754,7 +1109,12 @@ export function SkyController({ stars = true, tuning = null }) {
         <sprite ref={moonGlowRef} renderOrder={-7} scale={[22, 22, 1]}>
           <spriteMaterial map={moonGlowTexture} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
+        <sprite ref={moonHaloRef} renderOrder={-7} scale={[38, 38, 1]} visible={false}>
+          <spriteMaterial map={moonHaloTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+        </sprite>
+        <RainbowDome celestialRef={celestialRef} />
         {stars && <StarField nightRef={nightRef} />}
+        {stars && <ShootingStars nightRef={nightRef} />}
       </group>
     </>
   );

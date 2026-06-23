@@ -117,7 +117,12 @@ export function WaterSplashes() {
   });
 
   return (
-    <group renderOrder={4}>
+    <group renderOrder={4} userData={{
+      renderSource: 'water-splashes',
+      renderLabel: 'Water splashes',
+      renderKind: 'water-splash',
+      renderPath: null,
+    }}>
       {Array.from({ length: MAX_SPLASHES }, (_, index) => (
         <mesh
           key={index}

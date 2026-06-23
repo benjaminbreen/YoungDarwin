@@ -274,6 +274,9 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
   } else if (entryEdge === 'southwest') {
     x = -config.width * 0.5 + margin;
     z = config.depth * 0.5 - margin;
+  } else if (authoredRegion(regionId)?.id === 'MANGROVES') {
+    x = -3;
+    z = 20;
   } else if (authoredRegion(regionId)?.id === 'POST_OFFICE_BAY') {
     x = 6.6;
     z = 3.4;

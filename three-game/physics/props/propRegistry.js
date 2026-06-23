@@ -63,6 +63,35 @@ export const ZONE_PROPS = {
       rotation: [-0.16, 1.1, 0.1],
     },
   ],
+  POST_OFFICE_BAY_3: [
+    {
+      id: 'pob3-mail-barrel',
+      type: 'barrel',
+      label: 'post-office barrel',
+      x: 25.8,
+      z: 1.2,
+      rotation: [0, 0.65, 0],
+      scale: 1.45,
+    },
+    {
+      id: 'pob3-label-crate',
+      type: 'crate',
+      label: 'label crate',
+      x: 23.7,
+      z: 2.6,
+      rotation: [0.02, 0.28, -0.01],
+      scale: 1.12,
+    },
+    {
+      id: 'pob3-specimen-crate',
+      type: 'crate',
+      label: 'specimen crate',
+      x: 27.7,
+      z: 2.5,
+      rotation: [-0.03, -0.48, 0.02],
+      scale: 1.08,
+    },
+  ],
 };
 
 export function getZoneProps(zoneId) {

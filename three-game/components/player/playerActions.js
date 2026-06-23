@@ -1,17 +1,20 @@
 import { useCallback } from 'react';
-import { ACTION_DURATION, MOVEMENT_INTERRUPTIBLE_ACTIONS } from './playerConfig';
+import { MOVEMENT_INTERRUPTIBLE_ACTIONS, actionDuration } from './playerConfig';
 
 export function usePlayerActions(stateRef, lastButtonsRef) {
-  const startAction = useCallback((now, clip, duration = ACTION_DURATION[clip] || 1.2, {
+  const startAction = useCallback((now, clip, duration = actionDuration(clip, stateRef.current.modelAssetId), {
     lockMovement = true,
     recoverAction = null,
-    recoverDuration = ACTION_DURATION[recoverAction] || 1.2,
+    recoverDuration = actionDuration(recoverAction, stateRef.current.modelAssetId),
     onStart = null,
   } = {}) => {
     stateRef.current.action = clip;
     stateRef.current.actionStartedAt = now;
     stateRef.current.actionUntil = now + duration;
-    stateRef.current.lockMovementUntil = lockMovement ? now + duration : stateRef.current.lockMovementUntil;
+    const lockDuration = typeof lockMovement === 'number'
+      ? Math.max(0, lockMovement)
+      : (lockMovement ? duration : 0);
+    stateRef.current.lockMovementUntil = lockDuration > 0 ? now + lockDuration : stateRef.current.lockMovementUntil;
     stateRef.current.recoverAction = recoverAction ? { clip: recoverAction, duration: recoverDuration } : null;
     onStart?.();
   }, [stateRef]);
@@ -25,7 +28,7 @@ export function usePlayerActions(stateRef, lastButtonsRef) {
     return true;
   }, [stateRef]);
 
-  const triggerAction = useCallback((now, keys, touch, button, clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => {
+  const triggerAction = useCallback((now, keys, touch, button, clip, duration = actionDuration(clip, stateRef.current.modelAssetId), options = {}) => {
     const pressed = Boolean(keys[button] || touch[button]);
     const allowWhileActing = options.allowWhileActing === true;
     const blocked = options.movementLocked || (!allowWhileActing && stateRef.current.action);

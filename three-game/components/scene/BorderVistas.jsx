@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   getRegionTerrainConfig,
@@ -177,15 +177,31 @@ function markerItems(config, vista, marker) {
 
 function VistaMarkers({ config, vista, marker }) {
   const items = useMemo(() => markerItems(config, vista, marker), [config, vista, marker]);
+  const geometry = useMemo(() => {
+    const result = marker.kind === 'rock'
+      ? new THREE.DodecahedronGeometry(1, 0)
+      : new THREE.ConeGeometry(0.5, 1.2, 5);
+    result.clearGroups();
+    return result;
+  }, [marker.kind]);
   const material = useMemo(() => new THREE.MeshStandardMaterial({
     color: marker.color,
     roughness: 0.96,
     metalness: 0,
     fog: true,
   }), [marker.color]);
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
   if (!items.length) return null;
   return (
-    <group>
+    <group userData={{
+      renderSource: `border-vista:${vista.id}:${marker.kind}`,
+      renderLabel: `${vista.toRegionId || vista.id} ${marker.kind} markers`,
+      renderKind: 'border-vista-marker',
+      renderPath: null,
+    }}>
       {items.map(item => (
         <mesh
           key={item.id}
@@ -193,13 +209,10 @@ function VistaMarkers({ config, vista, marker }) {
           rotation={[0, item.yaw, 0]}
           scale={[item.scale, item.scale * (marker.kind === 'rock' ? 0.42 : 0.82), item.scale]}
           material={material}
+          geometry={geometry}
           castShadow={false}
           receiveShadow={false}
-        >
-          {marker.kind === 'rock'
-            ? <dodecahedronGeometry args={[1, 0]} />
-            : <coneGeometry args={[0.5, 1.2, 5]} />}
-        </mesh>
+        />
       ))}
     </group>
   );
@@ -215,7 +228,12 @@ function BorderVista({ regionId, config, vista }) {
   }), []);
   if (!geometry) return null;
   return (
-    <group name={`border-apron-${vista.toRegionId}`}>
+    <group name={`border-apron-${vista.toRegionId}`} userData={{
+      renderSource: `border-vista:${vista.id}`,
+      renderLabel: `${vista.toRegionId || vista.id} border vista`,
+      renderKind: 'border-vista',
+      renderPath: null,
+    }}>
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
       {vista.markers?.map((marker, index) => (
         <VistaMarkers key={`marker-${index}`} config={config} vista={vista} marker={marker} />
@@ -233,7 +251,12 @@ export function BorderVistas() {
 
   if (!vistas.length) return null;
   return (
-    <group name="border-terrain-aprons">
+    <group name="border-terrain-aprons" userData={{
+      renderSource: `border-vistas:${currentZoneId}`,
+      renderLabel: `${currentZoneId} border vistas`,
+      renderKind: 'border-vistas',
+      renderPath: null,
+    }}>
       {vistas.map(vista => (
         <BorderVista key={vista.id} regionId={currentZoneId} config={config} vista={vista} />
       ))}

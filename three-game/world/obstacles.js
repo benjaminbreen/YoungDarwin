@@ -5,6 +5,9 @@ import { terrainHeight } from './terrain';
 import { getNorthShoreRockObstacles } from './northShoreLayout';
 import { getNorthwestReefRockObstacles } from './nwReefLayout';
 import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
+import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
+import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
+import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 
 function flattenCollider(collider) {
   if (!collider) return [];
@@ -86,7 +89,9 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
     scale,
     yaw,
     jumpable: Boolean(obstacle.gameplay?.jumpable),
-    climbable: Boolean(obstacle.gameplay?.climbable),
+    // Default climbable unless authored otherwise; hazards opt out with
+    // gameplay.climbable: false. Very low props aren't worth a climb action.
+    climbable: obstacle.gameplay?.climbable ?? (bounds.top >= 0.8 && obstacle.kind !== 'cactus'),
     edgeRisk: Boolean(obstacle.gameplay?.edgeRisk),
     pushable: Boolean(obstacle.gameplay?.pushable),
     pushMass: obstacle.gameplay?.pushMass || 1,
@@ -105,6 +110,12 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   if (zoneId === 'POST_OFFICE_BAY') {
     return [...mapped, ...getPostOfficeBayRockObstacles()];
   }
+  if (zoneId === 'ALT_POST_OFFICE_BAY') {
+    return [...mapped, ...getAltPostOfficeBayRockObstacles()];
+  }
+  if (zoneId === 'POST_OFFICE_BAY_3') {
+    return [...mapped, ...getPostOfficeBay3RockObstacles()];
+  }
   if (zoneId === 'N_SHORE') {
     // Authored basalt boulders double as colliders; layout shared with the
     // instanced visuals in WorldDetails.
@@ -112,6 +123,9 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   }
   if (zoneId === 'NW_REEF') {
     return [...mapped, ...getNorthwestReefRockObstacles()];
+  }
+  if (zoneId === 'W_HIGH') {
+    return [...mapped, ...getWesternHighlandsRockObstacles()];
   }
   return mapped;
 }
@@ -190,9 +204,10 @@ function polygonBoundaryDistance(point, points, scale = 1) {
   return closestDistance;
 }
 
-function pointInsideStandableConvexTop(point, shape, scale, playerRadius) {
+function pointInsideStandableConvexTop(point, shape, scale, playerRadius, options = {}) {
   if (!pointInPolygon(point, shape.points, scale)) return false;
-  const inset = Math.max(0.62, playerRadius + 0.34);
+  const strictInset = options.strictSupport ? 0.18 : 0;
+  const inset = Math.max(0.62, playerRadius + 0.34 + strictInset);
   return polygonBoundaryDistance(point, shape.points, scale) >= inset;
 }
 
@@ -279,36 +294,40 @@ function climbLandingPoint(obstacle, surface, position, playerRadius) {
   return null;
 }
 
-function shapeTopAt(obstacle, shape, x, z, playerRadius = 0) {
+function shapeTopAt(obstacle, shape, x, z, playerRadius = 0, options = {}) {
   const center = shapeWorldCenter(obstacle, shape);
   if (shape.type === 'convex') {
     const { point } = convexLocalPoint(obstacle, shape, x, z);
-    if (!pointInsideStandableConvexTop(point, shape, obstacle.scale, playerRadius)) return null;
+    if (!pointInsideStandableConvexTop(point, shape, obstacle.scale, playerRadius, options)) return null;
     return center.y + (shape.yMax ?? shape.height) * obstacle.scale;
   }
   if (shape.type === 'box') {
     const { point } = boxLocalPoint(obstacle, shape, x, z);
+    const halfX = shape.size[0] * obstacle.scale * 0.5;
+    const halfZ = shape.size[2] * obstacle.scale * 0.5;
+    const inset = options.strictSupport ? Math.max(0.08, playerRadius * 0.55) : -playerRadius;
     if (
-      Math.abs(point.x) > shape.size[0] * obstacle.scale * 0.5 + playerRadius
-      || Math.abs(point.z) > shape.size[2] * obstacle.scale * 0.5 + playerRadius
+      Math.abs(point.x) > Math.max(0.05, halfX - inset)
+      || Math.abs(point.z) > Math.max(0.05, halfZ - inset)
     ) return null;
     return center.y + shape.size[1] * obstacle.scale * 0.5;
   }
   const radius = (shape.radius || 0.5) * obstacle.scale;
   const distance = Math.hypot(x - center.x, z - center.z);
+  const strictInset = options.strictSupport ? Math.max(0.08, playerRadius * 0.5) : -playerRadius * 0.3;
   if (shape.type === 'ball') {
-    if (distance > radius + playerRadius * 0.3) return null;
+    if (distance > Math.max(0.05, radius - strictInset)) return null;
     const inner = Math.max(0, radius * radius - distance * distance);
     return center.y + Math.sqrt(inner);
   }
-  if (distance > radius + playerRadius * 0.3) return null;
+  if (distance > Math.max(0.05, radius - strictInset)) return null;
   return center.y + (shape.height || 1) * obstacle.scale * 0.5;
 }
 
-function obstacleTopAt(obstacle, x, z, playerRadius = 0) {
+function obstacleTopAt(obstacle, x, z, playerRadius = 0, options = {}) {
   let top = null;
   for (const shape of obstacle.shapes) {
-    const shapeTopValue = shapeTopAt(obstacle, shape, x, z, playerRadius);
+    const shapeTopValue = shapeTopAt(obstacle, shape, x, z, playerRadius, options);
     if (shapeTopValue === null) continue;
     top = Math.max(top ?? -Infinity, shapeTopValue);
   }
@@ -397,7 +416,7 @@ export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obs
       supported = Math.max(supported ?? -Infinity, traversalTop);
       continue;
     }
-    const top = obstacleTopAt(obstacle, x, z, playerRadius);
+    const top = obstacleTopAt(obstacle, x, z, playerRadius, { strictSupport: true });
     if (top === null) continue;
     const standable = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && playerY >= top - 0.42;
     if (standable) {
@@ -443,13 +462,15 @@ export function getObstacleEdgeRisk(x, z, playerY, playerRadius = 0.42, obstacle
 export function findClimbTarget(position, facing, {
   playerRadius = 0.42,
   maxReach = 1.65,
-  maxHeight = 3.85,
+  maxHeight = 4.6,
   minFacingDot = 0.18,
   obstacles = FLOREANA_OBSTACLES,
 } = {}) {
   let best = null;
   for (const obstacle of obstacles) {
-    if (!obstacle.climbable) continue;
+    // Everything with a top is climbable unless explicitly opted out —
+    // Darwin should be able to scramble up trees, boulders, and crates alike.
+    if (obstacle.climbable === false) continue;
     const surface = obstacleSurfaceDistance(obstacle, position, playerRadius);
     if (!surface || surface.penetration < -maxReach) continue;
 

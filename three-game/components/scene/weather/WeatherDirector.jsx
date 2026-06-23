@@ -11,6 +11,8 @@ import { forceRegionWeather, getRegionWeather, tickWeatherSim } from '../../../w
 // roll in over tens of seconds so a state change reads as weather, not a cut.
 const RAIN_LAMBDA = 0.4;
 const SLOW_LAMBDA = 0.12;
+const WIND_LAMBDA = 0.1;
+const FRONT_LAMBDA = 0.18;
 
 // Ticks the island weather simulation from the game clock, keeps the store's
 // weather string in sync for the active zone, and damps the shared runtime
@@ -62,7 +64,21 @@ export function WeatherDirector() {
     windAngle.current += delta * 0.004 * Math.sin(nowMinutes * 0.0007);
     weatherEnv.windX = Math.cos(windAngle.current);
     weatherEnv.windZ = Math.sin(windAngle.current);
-    weatherEnv.windSpeed = dampTowards(weatherEnv.windSpeed, 0.6 + target.rain * 1.8, SLOW_LAMBDA, delta);
+    const surfaceWindTarget = 0.55 + target.overcast * 0.18 + target.rain * 0.65;
+    weatherEnv.windSpeed = dampTowards(weatherEnv.windSpeed, surfaceWindTarget, WIND_LAMBDA, delta);
+
+    const rain = weatherEnv.rainIntensity;
+    const overcast = weatherEnv.overcast;
+    const mist = weatherEnv.mistAmount;
+    const surfaceWind = weatherEnv.windSpeed;
+    weatherEnv.cloudDriftSpeed = 0.12 + surfaceWind * 0.22 + overcast * 0.05 + rain * 0.06;
+    weatherEnv.mistDriftSpeed = 0.08 + surfaceWind * 0.16 + mist * 0.04;
+    weatherEnv.rainShearSpeed = 0.35 + surfaceWind * 0.5 + rain * 0.75;
+    weatherEnv.foliageWindSpeed = 0.62 + surfaceWind * 0.42 + rain * 0.16;
+    const wetFrontTarget = Math.max(target.rain * 0.95, target.mist * 0.45, Math.max(0, target.overcast - 0.55) * 0.75);
+    weatherEnv.frontAmount = dampTowards(weatherEnv.frontAmount, wetFrontTarget, FRONT_LAMBDA, delta);
+    weatherEnv.frontDarkness = 0.2 + overcast * 0.35 + rain * 0.45;
+    weatherEnv.frontProgress += delta * weatherEnv.cloudDriftSpeed * (0.18 + weatherEnv.frontAmount * 0.12);
 
     if (scene.fog && scene.fog.isFogExp2) scene.fog.density = weatherEnv.fogDensity;
   });

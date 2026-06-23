@@ -25,7 +25,7 @@ function makeCraggyRockGeometry(seed) {
   return geo;
 }
 
-function InstancedRocks({ items, geometry, material }) {
+function InstancedRocks({ items, geometry, material, sourceUserData }) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   useLayoutEffect(() => {
@@ -41,14 +41,16 @@ function InstancedRocks({ items, geometry, material }) {
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere?.();
+    mesh.computeBoundingBox?.();
   }, [items]);
   return (
     <instancedMesh
       ref={ref}
       args={[geometry, material, items.length]}
-      castShadow
+      castShadow={false}
       receiveShadow
-      frustumCulled={false}
+      userData={sourceUserData}
       onClick={event => {
         event.stopPropagation();
         const item = items[event.instanceId] || null;
@@ -58,8 +60,14 @@ function InstancedRocks({ items, geometry, material }) {
   );
 }
 
-export function RockField({ rocks }) {
+export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
   const buckets = useMemo(() => [0, 1, 2].map(b => rocks.filter((_, i) => i % 3 === b)), [rocks]);
+  const renderUserData = useMemo(() => ({
+    renderSource: sourceId,
+    renderLabel: sourceLabel || sourceId,
+    renderKind: sourceKind,
+    renderPath: null,
+  }), [sourceId, sourceKind, sourceLabel]);
   const geometries = useMemo(
     () => [makeCraggyRockGeometry(1.7), makeCraggyRockGeometry(4.2), makeCraggyRockGeometry(8.9)],
     [],
@@ -78,7 +86,7 @@ export function RockField({ rocks }) {
   return (
     <group>
       {buckets.map((items, index) => (
-        items.length > 0 && <InstancedRocks key={index} items={items} geometry={geometries[index]} material={material} />
+        items.length > 0 && <InstancedRocks key={index} items={items} geometry={geometries[index]} material={material} sourceUserData={renderUserData} />
       ))}
     </group>
   );

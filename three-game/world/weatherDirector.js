@@ -30,9 +30,9 @@ function climateBand(region) {
 }
 
 const BAND_WEIGHTS = {
-  coast:    { sunny: 38, cloudy: 24, overcast: 8, misty: 4, drizzle: 8, rain: 12, storm: 6 },
-  highland: { sunny: 6, cloudy: 16, overcast: 10, misty: 32, drizzle: 18, rain: 14, storm: 4 },
-  windward: { sunny: 8, cloudy: 16, overcast: 14, misty: 6, drizzle: 18, rain: 26, storm: 12 },
+  coast:    { sunny: 38, cloudy: 24, sunshower: 8, overcast: 8, misty: 4, drizzle: 8, rain: 12, storm: 6 },
+  highland: { sunny: 6, cloudy: 16, sunshower: 4, overcast: 10, misty: 32, drizzle: 18, rain: 14, storm: 4 },
+  windward: { sunny: 8, cloudy: 16, sunshower: 6, overcast: 14, misty: 6, drizzle: 18, rain: 26, storm: 12 },
 };
 
 // Diurnal multipliers: garúa mist belongs to the night and early morning and
@@ -44,6 +44,7 @@ function diurnalWeights(base, band, hour) {
   return {
     ...base,
     sunny: base.sunny * (0.55 + midday * 0.9),
+    sunshower: base.sunshower * (0.45 + midday * 0.8),
     misty: base.misty * mistFactor,
     drizzle: base.drizzle * (band === 'highland' ? mistFactor * 0.8 + 0.4 : 1),
   };

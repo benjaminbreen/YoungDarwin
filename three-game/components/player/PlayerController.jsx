@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { updateRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { getThreeSpecimens, threeTools } from '../../data';
-import { consumeTouchControls, triggerToolUse } from '../../input/touchControls';
+import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
@@ -17,211 +17,59 @@ import {
   CHARACTER_CONTROLLER_CONFIG,
   useKinematicCharacterController,
 } from '../../physics/useKinematicCharacterController';
-import { ModelAsset } from '../assets/ModelAsset';
 import {
   ACTION_DURATION,
+  actionDuration,
   BUMP_FEEDBACK,
   CACTUS_HAZARD,
   CAMERA,
   CONTROL_INTERRUPTIBLE_ACTIONS,
   EMPTY_KEYS,
   MOVEMENT_INTERRUPTIBLE_ACTIONS,
+  MOVEMENT_FATIGUE,
   PLAYER,
   SPAWN_DROP,
+  SWIM,
 } from './playerConfig';
 import { usePlayerCameraRig } from './usePlayerCameraRig';
 import { usePlayerActions } from './playerActions';
+import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { updatePlayerInteractions } from './playerInteractions';
+import { pulseEquippedToolOnUse, readPlayerInput, sanitizeShortcutKeys } from './playerInputState';
 import { findCactusHazardContact, findPushableObstacleNear, LandingDust } from './playerFeedback';
-
-function easeInOutCubic(value) {
-  const t = THREE.MathUtils.clamp(value, 0, 1);
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-function playerControllerDebugEnabled() {
-  if (typeof window === 'undefined') return false;
-  return window.__enablePlayerControllerDebug === true
-    || new URLSearchParams(window.location.search).has('playerControllerDebug')
-    || new URLSearchParams(window.location.search).has('modelBoundsDebug');
-}
-
-function dampAngle(current, target, lambda, delta) {
-  const deltaAngle = Math.atan2(Math.sin(target - current), Math.cos(target - current));
-  return current + deltaAngle * (1 - Math.exp(-lambda * delta));
-}
-
-function ProceduralNaturalistModel({ motionRef }) {
-  const group = useRef(null);
-  useFrame(({ clock }) => {
-    if (!group.current) return;
-    const t = clock.elapsedTime;
-    const running = motionRef.current.running;
-    const airborne = motionRef.current.airborne;
-    const stride = running ? 10 : 6;
-    group.current.children.forEach((child, index) => {
-      if (child.userData.limb) {
-        child.rotation.x = Math.sin(t * stride + index) * (running ? 0.65 : 0.38);
-      }
-    });
-    group.current.position.y = airborne ? 0.08 : Math.abs(Math.sin(t * stride)) * (running ? 0.055 : 0.025);
-  });
-
-  return (
-    <group ref={group}>
-      <mesh castShadow position={[0, 1.65, 0]}>
-        <sphereGeometry args={[0.28, 18, 18]} />
-        <meshToonMaterial color="#d0a070" />
-      </mesh>
-      <mesh castShadow position={[0, 2.0, 0]} rotation={[0.05, 0, 0]}>
-        <cylinderGeometry args={[0.34, 0.43, 0.16, 20]} />
-        <meshToonMaterial color="#b58b46" />
-      </mesh>
-      <mesh castShadow position={[0, 1.08, 0]}>
-        <capsuleGeometry args={[0.3, 0.85, 6, 12]} />
-        <meshToonMaterial color="#4a3527" />
-      </mesh>
-      <mesh userData={{ limb: true }} castShadow position={[-0.26, 0.54, 0]}>
-        <capsuleGeometry args={[0.08, 0.75, 4, 8]} />
-        <meshToonMaterial color="#2b2520" />
-      </mesh>
-      <mesh userData={{ limb: true }} castShadow position={[0.26, 0.54, 0]}>
-        <capsuleGeometry args={[0.08, 0.75, 4, 8]} />
-        <meshToonMaterial color="#2b2520" />
-      </mesh>
-      <mesh userData={{ limb: true }} castShadow position={[-0.42, 1.15, 0]}>
-        <capsuleGeometry args={[0.055, 0.62, 4, 8]} />
-        <meshToonMaterial color="#6d5941" />
-      </mesh>
-      <mesh userData={{ limb: true }} castShadow position={[0.42, 1.15, 0]}>
-        <capsuleGeometry args={[0.055, 0.62, 4, 8]} />
-        <meshToonMaterial color="#6d5941" />
-      </mesh>
-      <mesh castShadow position={[-0.38, 1.02, -0.14]} rotation={[0, 0.2, 0.16]}>
-        <boxGeometry args={[0.36, 0.42, 0.16]} />
-        <meshToonMaterial color="#8a5d30" />
-      </mesh>
-    </group>
-  );
-}
-
-function NaturalistModel({ motionRef, health, fatigue, inventoryCount }) {
-  const [damageFlash, setDamageFlash] = useState(0);
-  const previousHealth = useRef(health);
-  const damageFlashRef = useRef({ startedAt: -10, duration: 0.58 });
-  const statusRef = useRef({ health, fatigue, inventoryCount });
-  useEffect(() => {
-    if (health < previousHealth.current - 0.01) {
-      damageFlashRef.current = { startedAt: null, duration: 0.58 };
-      setDamageFlash(1);
-    }
-    previousHealth.current = health;
-    statusRef.current.health = health;
-    statusRef.current.fatigue = fatigue;
-    statusRef.current.inventoryCount = inventoryCount;
-  }, [health, fatigue, inventoryCount]);
-
-  useFrame(({ clock }) => {
-    if (damageFlashRef.current.startedAt === null) {
-      damageFlashRef.current.startedAt = clock.elapsedTime;
-    }
-    const elapsed = clock.elapsedTime - damageFlashRef.current.startedAt;
-    if (elapsed < 0 || elapsed > damageFlashRef.current.duration) {
-      if (damageFlash !== 0) setDamageFlash(0);
-      return;
-    }
-    const t = THREE.MathUtils.clamp(elapsed / damageFlashRef.current.duration, 0, 1);
-    const next = Math.pow(1 - t, 1.75);
-    if (Math.abs(next - damageFlash) > 0.025) setDamageFlash(next);
-  });
-
-  const selectAnimation = useCallback(() => {
-    const status = statusRef.current;
-    const speed = motionRef.current.speed || 0;
-    const walkScale = THREE.MathUtils.clamp(speed / PLAYER.walkSpeed, 0.72, 1.24);
-    const runScale = THREE.MathUtils.clamp(speed / PLAYER.runSpeed, 0.78, 1.28);
-    const tiredRunScale = THREE.MathUtils.clamp(speed / Math.max(PLAYER.walkSpeed, PLAYER.runSpeed * 0.74), 0.72, 1.18);
-    if (status.health <= 0) return 'fallingForwardDeath';
-    if (motionRef.current.action) return motionRef.current.action;
-    const injured = status.health < 45;
-    const badlyInjured = status.health < 30;
-    if (motionRef.current.jumpCharging) return { clip: 'crouchIdle', fade: 0.08, timeScale: 0.72 };
-    const jumpPhase = motionRef.current.jumpPhase;
-    const activePlayerJump = jumpPhase === 'takeoff' || jumpPhase === 'airborne' || jumpPhase === 'prelanding';
-    const nearGround = Math.abs(motionRef.current.groundDistance ?? Infinity) <= PLAYER.groundSnapDistance * 1.15;
-    if (motionRef.current.airborne && activePlayerJump) {
-      const charge = THREE.MathUtils.clamp(motionRef.current.jumpChargeAmount || 0, 0, 1);
-      const standingJumpScale = THREE.MathUtils.lerp(1.0, 0.76, charge);
-      const runningJumpScale = THREE.MathUtils.lerp(0.95, 0.72, charge);
-      const shortStandingJump = !motionRef.current.jumpWasRunning && charge < 0.15;
-      if (jumpPhase === 'takeoff') {
-        if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
-        return motionRef.current.jumpWasRunning
-          ? { clip: 'runningJump', fade: 0.05, timeScale: runningJumpScale }
-          : { clip: 'standingJump', fade: 0.05, timeScale: standingJumpScale };
-      }
-      if (jumpPhase === 'airborne' || jumpPhase === 'prelanding') {
-        if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
-        if (shortStandingJump) return { clip: 'standingJump', fade: 0.05, timeScale: 0.92, maxTime: 0.58 };
-        return motionRef.current.jumpWasRunning
-          ? { clip: 'runningJumpHold', fade: 0.05 }
-          : { clip: 'standingJumpHold', fade: 0.05 };
-      }
-      return motionRef.current.jumpWasRunning
-        ? { clip: 'runningJumpHold', fade: 0.05 }
-        : { clip: 'standingJumpHold', fade: 0.05 };
-    }
-    if (motionRef.current.airborne && !nearGround) return { clip: 'fallingIdle', fade: 0.1 };
-    if (motionRef.current.aiming && motionRef.current.crouching) return 'crouchRifle';
-    if (motionRef.current.aiming && motionRef.current.strafeLeft) return { clip: 'walkStrafeLeft', timeScale: walkScale };
-    if (motionRef.current.aiming && motionRef.current.strafeRight) return { clip: 'walkStrafeRight', timeScale: walkScale };
-    if (motionRef.current.aiming && motionRef.current.walking) return 'walkRifle';
-    if (motionRef.current.aiming) return 'aim';
-    if (motionRef.current.crouching && motionRef.current.strafeLeft) return { clip: 'crouchSneakLeft', timeScale: Math.max(0.72, walkScale * 0.9) };
-    if (motionRef.current.crouching && motionRef.current.strafeRight) return { clip: 'crouchSneakRight', timeScale: Math.max(0.72, walkScale * 0.9) };
-    if (motionRef.current.crouching && motionRef.current.walking) return { clip: 'crouchWalk', timeScale: Math.max(0.7, walkScale * 0.85) };
-    if (motionRef.current.crouching) return 'crouchIdle';
-    if (badlyInjured && motionRef.current.running) return { clip: 'injuredRun', timeScale: Math.max(0.7, tiredRunScale * 0.92) };
-    if (injured && motionRef.current.walking) return { clip: 'injuredWalk', timeScale: Math.max(0.62, walkScale * 0.88) };
-    if (motionRef.current.running) {
-      if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'jog', timeScale: tiredRunScale };
-      return { clip: 'run', timeScale: runScale };
-    }
-    if (motionRef.current.walking) {
-      const carryingObject = Boolean(useThreeGameStore.getState().carriedObjectId);
-      if (carryingObject || status.inventoryCount > 0) return { clip: 'walkCarry', timeScale: Math.max(0.68, walkScale * 0.92) };
-      return { clip: 'walk', timeScale: walkScale };
-    }
-    if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
-    if (injured) return 'injuredIdle';
-    if (status.fatigue >= 82) return 'exhaustedIdle';
-    return 'idle';
-  }, [motionRef]);
-  return <ModelAsset id="darwin" animationSelector={selectAnimation} damageFlash={damageFlash} reflect fallback={<ProceduralNaturalistModel motionRef={motionRef} />} />;
-}
-
-function formatVector(vector) {
-  if (!vector) return '--';
-  return `${vector.x.toFixed(2)},${vector.y.toFixed(2)},${vector.z.toFixed(2)}`;
-}
-
-function orientDebugVector(group, direction, length) {
-  if (!group) return;
-  const normalized = direction.clone();
-  if (normalized.lengthSq() < 0.0001 || length <= 0.001) {
-    group.visible = false;
-    return;
-  }
-  normalized.normalize();
-  group.visible = true;
-  group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normalized);
-  group.scale.set(1, length, 1);
-}
+import { updatePlayerFrameFeedback } from './playerFrameFeedback';
+import { NaturalistModel } from './PlayerModel';
+import {
+  dampAngle,
+  easeInOutCubic,
+  formatVector,
+  playerControllerDebugEnabled,
+} from './playerUtils';
 
 export function PlayerController({ physicsDebug = false }) {
   const group = useRef(null);
   const warningRef = useRef(null);
   const contactShadowRef = useRef(null);
+  // Soft radial alpha falloff so the contact shadow grounds as ambient occlusion
+  // rather than a hard sticker disc. White centre → black edge; the material's
+  // alphaMap samples this and multiplies the per-frame opacity.
+  const contactShadowAlpha = useMemo(() => {
+    if (typeof document === 'undefined') return null;
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0.0, '#ffffff');
+    g.addColorStop(0.42, '#bdbdbd');
+    g.addColorStop(0.74, '#3a3a3a');
+    g.addColorStop(1.0, '#000000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.NoColorSpace;
+    return tex;
+  }, []);
   const waterlineRef = useRef(null);
   const landingDustTriggerRef = useRef(null);
   const footstepDustTriggerRef = useRef(null);
@@ -229,10 +77,13 @@ export function PlayerController({ physicsDebug = false }) {
   const modelFeedbackRef = useRef(null);
   const debugCollisionRef = useRef(null);
   const debugMovementRef = useRef(null);
+  const debugStanceRefs = useRef([]);
   const characterBodyRef = useRef(null);
   const characterColliderRef = useRef(null);
   const velocity = useRef(new THREE.Vector3());
-  const { yawRef, resetCameraForSpawn, updateCamera } = usePlayerCameraRig();
+  const { yawRef, pointerNdcRef, aimActiveRef, firePulseRef, getAimDirection, resetCameraForSpawn, recenterCamera, updateCamera } = usePlayerCameraRig();
+  const lastToolId = useRef(null);
+  const lastFirePulse = useRef(0);
   const facing = useRef(new THREE.Vector3(0, 0, -1));
   const wasAirborne = useRef(false);
   const jumpState = useRef({
@@ -255,15 +106,28 @@ export function PlayerController({ physicsDebug = false }) {
   const footstepDust = useRef({ phase: 0, side: -1 });
   // How deep the player's feet are below the sea surface (0 on dry land).
   const wadeDepth = useRef(0);
+  const swimState = useRef({ active: false, enteredAt: 0 });
+  const swimFatigue = useRef(0);
   // Accumulates drowning damage so the store isn't hit every frame.
   const drownDamage = useRef(0);
   const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1 });
   const lastTeeterAt = useRef(0);
+  const lastWallRunAt = useRef(0);
+  const lastTurnFlourishAt = useRef(0);
+  const lastAutoClimbAt = useRef(0);
   const lastCactusHitAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
-  const terrainFeedback = useRef({ grade: 0, uphillDot: 0, downhillDot: 0 });
+  const terrainFeedback = useRef({
+    grade: 0,
+    uphillDot: 0,
+    downhillDot: 0,
+    stancePitch: 0,
+    stanceRoll: 0,
+    stanceSpread: 0,
+    groundSource: 'terrain-function',
+  });
   const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
   const lastPublishedPose = useRef({
     x: NaN,
@@ -273,6 +137,7 @@ export function PlayerController({ physicsDebug = false }) {
     fy: NaN,
     fz: NaN,
   });
+  const lastPosePublishAt = useRef(-10);
   const bounceFeedback = useRef({
     startedAt: -10,
     lastImpactAt: -10,
@@ -288,12 +153,38 @@ export function PlayerController({ physicsDebug = false }) {
   });
   const previousMotion = useRef({ moving: false, running: false });
   const pendingMovementCost = useRef({ fatigue: 0, falling: 0, lastFlushAt: 0 });
+  const frameScratch = useMemo(() => ({
+    input: new THREE.Vector3(),
+    startPosition: new THREE.Vector3(),
+    rawInputDirection: new THREE.Vector3(),
+    up: new THREE.Vector3(0, 1, 0),
+    uphillVector: new THREE.Vector3(),
+    uphillDirection: new THREE.Vector3(),
+    forwardFacing: new THREE.Vector3(),
+    targetVelocity: new THREE.Vector3(),
+    desiredDelta: new THREE.Vector3(),
+    launchHorizontal: new THREE.Vector3(),
+    launchDirection: new THREE.Vector3(),
+    turnFacing: new THREE.Vector3(),
+    collisionNormal: new THREE.Vector3(),
+    horizontalVelocity: new THREE.Vector3(),
+    tangentVelocity: new THREE.Vector3(),
+    localNormal: new THREE.Vector3(),
+    pushDirection: new THREE.Vector3(),
+    pushObstaclePosition: new THREE.Vector3(),
+    pushCandidate: new THREE.Vector3(),
+    cactusHorizontalVelocity: new THREE.Vector3(),
+    correction: new THREE.Vector3(),
+    footstepPosition: new THREE.Vector3(),
+  }), []);
   const stateRef = useRef({
+    modelAssetId: 'darwin',
     running: false,
     walking: false,
     airborne: false,
     crouching: false,
     aiming: false,
+    crouchRunning: false,
     strafeLeft: false,
     strafeRight: false,
     speed: 0,
@@ -312,9 +203,16 @@ export function PlayerController({ physicsDebug = false }) {
     turnMotion: null,
     slopeGrade: 0,
     uphillDot: 0,
+    groundPitch: 0,
     groundDistance: 0,
     verticalSpeed: 0,
     tiredRun: false,
+    movingBackward: false,
+    sitting: false,
+    lying: false,
+    swimming: false,
+    wadeDepth: 0,
+    jumpFromHeight: false,
   });
   const [, getKeys] = useKeyboardControls();
   const rapierContext = useRapier();
@@ -344,6 +242,10 @@ export function PlayerController({ physicsDebug = false }) {
     () => createCollisionAdapter(currentZoneId, rapierContext, pushableObstacleOffsets),
     [currentZoneId, pushableObstacleOffsets, rapierContext],
   );
+  const modelGrounding = useMemo(() => ({
+    collisionAdapter,
+    motionRef: stateRef,
+  }), [collisionAdapter]);
   const characterController = useKinematicCharacterController(rapierContext, characterBodyRef, characterColliderRef);
   const spawnPoint = useMemo(() => regionSpawnPoint(currentZoneId, playerSpawnId), [currentZoneId, playerSpawnId]);
   const startX = spawnPoint.x;
@@ -367,6 +269,24 @@ export function PlayerController({ physicsDebug = false }) {
       color: '#60a5fa',
       transparent: true,
       opacity: 0.85,
+      depthWrite: false,
+    }),
+    stanceTerrain: new THREE.MeshBasicMaterial({
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    }),
+    stanceObstacle: new THREE.MeshBasicMaterial({
+      color: '#fbbf24',
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    }),
+    stanceUnstable: new THREE.MeshBasicMaterial({
+      color: '#ef4444',
+      transparent: true,
+      opacity: 0.95,
       depthWrite: false,
     }),
   }), []);
@@ -396,7 +316,10 @@ export function PlayerController({ physicsDebug = false }) {
     flush = false,
   } = {}, frameDelta = 0, now = 0) => {
     const frameScale = Math.min(frameDelta, 0.05) * 60;
-    const fatigueDelta = ((running ? 0.026 : walking ? 0.008 : 0) + (airborne ? 0.004 : 0)) * frameScale;
+    const fatigueDelta = (
+      (running ? MOVEMENT_FATIGUE.runningPerFrame60 : walking ? MOVEMENT_FATIGUE.walkingPerFrame60 : 0)
+      + (airborne ? MOVEMENT_FATIGUE.airbornePerFrame60 : 0)
+    ) * frameScale;
     const pending = pendingMovementCost.current;
     pending.fatigue += fatigueDelta;
     pending.falling = Math.max(pending.falling, falling);
@@ -468,76 +391,49 @@ export function PlayerController({ physicsDebug = false }) {
     touchJumpHoldUntil.current = -10;
     lastModelYaw.current = Math.PI;
     lastPublishedPose.current.x = NaN;
+    lastPosePublishAt.current = -10;
     footstepDust.current = { phase: 0, side: -1 };
     idleFidget.current = { idleSince: 0, nextAt: 0, count: 0 };
   }, [currentZoneId, playerSpawnId, resetCameraForSpawn, spawnPoint.y, startX, startZ]);
 
   useFrame((_, delta) => {
     if (!group.current || health <= 0) return;
-    const keys = isGameplayInputBlocked() ? EMPTY_KEYS : getKeys();
+    collisionAdapter.beginFrame?.();
+    const keys = isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
     const touch = consumeTouchControls();
     const now = performance.now() / 1000;
-    const feedback = bounceFeedback.current;
-    const feedbackAge = now - feedback.startedAt;
-    const feedbackProgress = THREE.MathUtils.clamp(feedbackAge / BUMP_FEEDBACK.duration, 0, 1);
-    const feedbackEase = Math.sin(feedbackProgress * Math.PI);
-    if (warningRef.current) {
-      const opacity = (1 - feedbackProgress) * feedback.intensity * 0.42;
-      warningRef.current.visible = opacity > 0.015;
-      warningRef.current.position.set(-feedback.normal.x * 0.28, 0.055, -feedback.normal.z * 0.28);
-      warningRef.current.scale.setScalar(0.74 + feedbackProgress * 0.95 + feedback.intensity * 0.28);
-      warningRef.current.children.forEach(child => {
-        if (child.material) child.material.opacity = opacity;
-      });
-    }
-    if (modelFeedbackRef.current) {
-      // Hide Darwin's body in first person — the camera sits inside the head
-      // mesh, so rendering it shows the interior of the face and clothing.
-      // Keep it visible while the status view's external camera is active.
-      modelFeedbackRef.current.visible = viewMode !== 'first' || useThreeGameStore.getState().statusViewOpen;
-      const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
-      const speedRatio = THREE.MathUtils.clamp(horizontalVelocity.length() / PLAYER.runSpeed, 0, 1);
-      const localVelocity = horizontalVelocity.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -group.current.rotation.y);
-      const yawDelta = Math.atan2(
-        Math.sin(group.current.rotation.y - lastModelYaw.current),
-        Math.cos(group.current.rotation.y - lastModelYaw.current),
-      );
-      lastModelYaw.current = group.current.rotation.y;
-      const slope = terrainFeedback.current;
-      const collisionLean = feedbackEase * feedback.intensity * 0.105;
-      const slopePitch = THREE.MathUtils.clamp(slope.grade * slope.uphillDot * -0.18, -0.12, 0.09);
-      const targetPitch = -speedRatio * 0.075 + slopePitch - feedback.normal.z * collisionLean;
-      const targetRoll = THREE.MathUtils.clamp((localVelocity.x / PLAYER.runSpeed) * -0.08 + yawDelta * -1.4, -0.16, 0.16)
-        + feedback.normal.x * collisionLean;
-      modelFeedbackRef.current.rotation.x = THREE.MathUtils.damp(modelFeedbackRef.current.rotation.x, targetPitch, 10, delta);
-      modelFeedbackRef.current.rotation.z = THREE.MathUtils.damp(modelFeedbackRef.current.rotation.z, targetRoll, 10, delta);
-      modelFeedbackRef.current.position.x = feedback.normal.x * feedbackEase * feedback.intensity * 0.045;
-      modelFeedbackRef.current.position.z = feedback.normal.z * feedbackEase * feedback.intensity * 0.045;
-    }
-    if (contactShadowRef.current) {
-      const shadowGround = collisionAdapter.groundInfo(group.current.position);
-      const groundOffset = shadowGround.y - group.current.position.y + 0.018;
-      const airGap = Math.max(0, group.current.position.y - shadowGround.y);
-      const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
-      const airborneFade = THREE.MathUtils.clamp(1 - airGap / 3.2, 0, 1);
-      const speedScale = THREE.MathUtils.clamp(horizontalSpeed / PLAYER.runSpeed, 0, 1);
-      contactShadowRef.current.position.y = groundOffset;
-      contactShadowRef.current.scale.set(
-        0.72 + speedScale * 0.18 + airGap * 0.045,
-        0.5 + speedScale * 0.08 + airGap * 0.025,
-        1,
-      );
-      contactShadowRef.current.material.opacity = 0.24 * airborneFade;
-      contactShadowRef.current.visible = airborneFade > 0.02;
-    }
-    if (physicsDebug) {
-      orientDebugVector(debugCollisionRef.current, characterDebug.current.normal, characterDebug.current.normal.length() * 0.85);
-      orientDebugVector(debugMovementRef.current, characterDebug.current.movement, Math.min(1.2, characterDebug.current.movement.length() * 18));
-    }
-    const startOfFramePosition = group.current.position.clone();
-    const startAction = (clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => startActionAt(now, clip, duration, options);
+    updatePlayerFrameFeedback({
+      group,
+      warningRef,
+      modelFeedbackRef,
+      contactShadowRef,
+      debugCollisionRef,
+      debugMovementRef,
+      bounceFeedback,
+      velocity,
+      terrainFeedback,
+      lastModelYaw,
+      collisionAdapter,
+      characterDebug,
+      viewMode,
+      physicsDebug,
+      now,
+      delta,
+    });
+    const startOfFramePosition = frameScratch.startPosition.copy(group.current.position);
+    const durationFor = (clip) => actionDuration(clip, stateRef.current.modelAssetId);
+    const resolveActionDuration = (clip, duration) => (
+      stateRef.current.modelAssetId === 'darwin5' && duration === ACTION_DURATION[clip]
+        ? durationFor(clip)
+        : duration
+    );
+    const startAction = (clip, duration = durationFor(clip), options = {}) => {
+      startActionAt(now, clip, resolveActionDuration(clip, duration), options);
+    };
     const interruptAction = (allowed = MOVEMENT_INTERRUPTIBLE_ACTIONS) => interruptActionAt(now, allowed);
-    const triggerAction = (button, clip, duration = ACTION_DURATION[clip] || 1.2, options = {}) => triggerActionAt(now, keys, touch, button, clip, duration, options);
+    const triggerAction = (button, clip, duration = durationFor(clip), options = {}) => {
+      triggerActionAt(now, keys, touch, button, clip, resolveActionDuration(clip, duration), options);
+    };
 
     const safeDelta = Math.min(delta, 0.05);
     if (spawnDrop.current.phase === 'pending') {
@@ -632,6 +528,10 @@ export function PlayerController({ physicsDebug = false }) {
 
     if (stateRef.current.action && now >= stateRef.current.actionUntil) {
       const recovery = stateRef.current.recoverAction;
+      // Sitting/lying down hold a looping rest pose once the transition
+      // finishes, until the player moves or acts (cleared in input handling).
+      if (stateRef.current.action === 'standToSit' && health > 0) stateRef.current.sitting = true;
+      if (stateRef.current.action === 'lyingDown' && health > 0) stateRef.current.lying = true;
       stateRef.current.action = null;
       stateRef.current.recoverAction = null;
       if (recovery && health > 0) startAction(recovery.clip, recovery.duration, { lockMovement: true });
@@ -686,6 +586,12 @@ export function PlayerController({ physicsDebug = false }) {
         stateRef.current.action = null;
         stateRef.current.lockMovementUntil = 0;
         stateRef.current.crouching = false;
+        if (traverse.exitSpeed) {
+          // Carry momentum out of the vault so it chains back into the run
+          // instead of resetting to a standstill.
+          velocity.current.x = Math.sin(traverse.targetYaw) * traverse.exitSpeed;
+          velocity.current.z = Math.cos(traverse.targetYaw) * traverse.exitSpeed;
+        }
       }
       wasAirborne.current = false;
       return;
@@ -731,6 +637,11 @@ export function PlayerController({ physicsDebug = false }) {
         stateRef.current.rollMotion = null;
         stateRef.current.action = null;
         stateRef.current.lockMovementUntil = 0;
+        if (roll.exitSpeed && !characterMove.collision) {
+          // Come out of the roll moving so it blends into the run.
+          velocity.current.x = roll.direction.x * roll.exitSpeed;
+          velocity.current.z = roll.direction.z * roll.exitSpeed;
+        }
       }
       wasAirborne.current = false;
       return;
@@ -755,55 +666,97 @@ export function PlayerController({ physicsDebug = false }) {
       wasAirborne.current = false;
       return;
     }
-    const crouchPressed = Boolean(keys.crouch || touch.crouch);
+    const {
+      input,
+      moving,
+      crouchPressed,
+      riflePressed,
+      rotateLeftPressed,
+      rotateRightPressed,
+      climbPressed,
+      dodgePressed,
+      jumpPressed,
+      anyDirectActionPressed,
+      lateralOnlyInput,
+    } = readPlayerInput(keys, touch, frameScratch.input);
     const preInputMovementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
-    if (crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action) {
-      stateRef.current.crouching = !stateRef.current.crouching;
-      const transitionClip = stateRef.current.aiming
-        ? (stateRef.current.crouching ? 'standToCover' : 'coverToStand')
-        : (stateRef.current.crouching ? 'standToCrouch' : 'crouchToStand');
-      startAction(transitionClip, stateRef.current.aiming ? 0.74 : 0.8, { lockMovement: true });
+    if (crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action && !swimState.current.active) {
+      const slideSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+      if (!stateRef.current.crouching && slideSpeed > PLAYER.walkSpeed * 1.2 && !stateRef.current.aiming) {
+        // Crouch at sprint = running slide, reusing the roll mover so the
+        // slide travels, keeps direction, and exits back into the run.
+        const slideDirection = new THREE.Vector3(velocity.current.x, 0, velocity.current.z).normalize();
+        characterController.sync(group.current.position);
+        startAction('runningSlide', ACTION_DURATION.runningSlide, { lockMovement: true });
+        stateRef.current.rollMotion = {
+          start: group.current.position.clone(),
+          direction: slideDirection,
+          distance: THREE.MathUtils.clamp(slideSpeed * 0.52, 2.6, 4.3),
+          duration: ACTION_DURATION.runningSlide,
+          startedAt: now,
+          targetYaw: Math.atan2(slideDirection.x, slideDirection.z),
+          exitSpeed: slideSpeed * 0.72,
+        };
+      } else {
+        stateRef.current.crouching = !stateRef.current.crouching;
+        const transitionClip = stateRef.current.aiming
+          ? (stateRef.current.crouching ? 'standToCover' : 'coverToStand')
+          : (stateRef.current.crouching ? 'standToCrouch' : 'crouchToStand');
+        startAction(transitionClip, stateRef.current.aiming ? 0.74 : 0.8, { lockMovement: true });
+      }
     }
     lastButtons.current.crouch = crouchPressed;
-    const riflePressed = Boolean(keys.rifle || touch.rifle);
-    if (riflePressed && !lastButtons.current.rifle && !preInputMovementLocked && !stateRef.current.action) {
-      stateRef.current.aiming = !stateRef.current.aiming;
-      if (stateRef.current.aiming) startAction('changeItem', 0.8, { lockMovement: false });
+    // Tool swaps play a quick change-item gesture (HUD/number-key driven, so it
+    // is detected by watching the active tool rather than a key edge).
+    const activeToolId = useThreeGameStore.getState().activeToolId;
+    const hasRifle = activeToolId === 'shotgun';
+    if (lastToolId.current !== null && activeToolId !== lastToolId.current
+      && !stateRef.current.action && !preInputMovementLocked && !stateRef.current.swimming) {
+      const transitionClip = activeToolId === 'shotgun'
+        ? 'rifleEquip'
+        : (lastToolId.current === 'shotgun' ? 'rifleUnequip' : 'changeItem');
+      startAction(transitionClip, ACTION_DURATION[transitionClip] || ACTION_DURATION.changeItem, { lockMovement: false });
     }
+    lastToolId.current = activeToolId;
+    // F toggles rifle aim mode, but only with the shotgun equipped; losing the
+    // rifle drops aim. Entering aim raises the rifle (change-item gesture). The
+    // cosmetic change-item gesture itself does not block the toggle.
+    const aimToggleAllowed = !stateRef.current.action || stateRef.current.action === 'changeItem';
+    if (riflePressed && !lastButtons.current.rifle && !preInputMovementLocked && aimToggleAllowed && hasRifle) {
+      stateRef.current.aiming = !stateRef.current.aiming;
+      if (stateRef.current.aiming) startAction('rifleEquip', 0.7, { lockMovement: false });
+      else startAction('rifleUnequip', 0.7, { lockMovement: false });
+    }
+    if (!hasRifle) stateRef.current.aiming = false;
     lastButtons.current.rifle = riflePressed;
-    const rotateLeftPressed = Boolean(keys.rotateLeft);
-    const rotateRightPressed = Boolean(keys.rotateRight);
+    if (aimActiveRef) aimActiveRef.current = stateRef.current.aiming;
+    // Left-click while aiming fires the rifle (firePulseRef bumped by the rig).
+    if (stateRef.current.aiming && hasRifle && firePulseRef
+      && firePulseRef.current !== lastFirePulse.current) {
+      lastFirePulse.current = firePulseRef.current;
+      if (!stateRef.current.action) startAction('fireRifle', ACTION_DURATION.fireRifle, { lockMovement: true });
+    }
     if (rotateLeftPressed) yawRef.current += CAMERA.keyRotateSpeed * delta;
     if (rotateRightPressed) yawRef.current -= CAMERA.keyRotateSpeed * delta;
-    const input = new THREE.Vector3(
-      (keys.right || touch.right ? 1 : 0) - (keys.left || touch.left ? 1 : 0),
-      0,
-      (keys.backward || touch.backward ? 1 : 0) - (keys.forward || touch.forward ? 1 : 0),
-    );
-    const moving = input.lengthSq() > 0;
-    const climbPressed = Boolean(keys.climb || touch.climb);
-    const dodgePressed = Boolean(keys.dodge || touch.dodge);
-    const jumpPressed = Boolean(keys.jump || touch.jump);
-    const anyDirectActionPressed = Boolean(
-      keys.pray || keys.fireRifle || keys.hammer || keys.net || keys.gather || keys.write || keys.inspect
-      || keys.lookAround || keys.point || keys.trip || keys.teeter
-      || touch.net || touch.hammer || touch.gather || touch.fireRifle || touch.write
-    );
-    // "Use tool" command (Meta key / clicking the equipped tool): pulse the
-    // control mapped to the active tool; triggerAction picks it up next frame.
-    const useToolPressed = Boolean(keys.useTool);
-    if (useToolPressed && !lastButtons.current.useTool) {
-      triggerToolUse(useThreeGameStore.getState().activeToolId);
+    if (keys.recenterCamera && !lastButtons.current.recenterCamera) {
+      recenterCamera(facing.current);
     }
-    lastButtons.current.useTool = useToolPressed;
+    lastButtons.current.recenterCamera = Boolean(keys.recenterCamera);
+    pulseEquippedToolOnUse(keys, lastButtons);
     if (moving) {
       interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
     }
     if (climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed) {
       interruptAction(CONTROL_INTERRUPTIBLE_ACTIONS);
     }
-    const lateralOnlyInput = input.z === 0 && input.x !== 0;
+    // Any movement or control input ends the seated/lying rest pose.
+    if ((stateRef.current.sitting || stateRef.current.lying)
+      && (moving || climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed)) {
+      stateRef.current.sitting = false;
+      stateRef.current.lying = false;
+    }
     const runIntent = Boolean((keys.run || touch.run) && moving && !stateRef.current.crouching);
+    const crouchRunIntent = Boolean((keys.run || touch.run) && moving && stateRef.current.crouching);
     const fatigueRunT = THREE.MathUtils.clamp(
       (fatigue - PLAYER.tiredRunFatigue) / Math.max(1, PLAYER.exhaustedRunFatigue - PLAYER.tiredRunFatigue),
       0,
@@ -818,11 +771,18 @@ export function PlayerController({ physicsDebug = false }) {
     // Wading drag: deeper water slows Darwin — about half speed at armpit
     // depth, slower still when he is in over his head.
     const wadeSpeedScale = 1 - Math.min(0.66, Math.max(0, wadeDepth.current) * 0.42);
-    const rawMovementSpeed = (stateRef.current.crouching ? PLAYER.walkSpeed * 0.45 : running ? rawRunSpeed : PLAYER.walkSpeed) * carrySpeedScale * wadeSpeedScale;
+    const rawMovementSpeed = swimState.current.active
+      ? (running ? SWIM.sprintSpeed : SWIM.speed)
+      : (stateRef.current.crouching
+        ? PLAYER.walkSpeed * (crouchRunIntent ? 0.92 : 0.45)
+        : running ? rawRunSpeed : PLAYER.walkSpeed) * carrySpeedScale * wadeSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
-    const rawInputDirection = moving ? input.clone().normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yawRef.current) : facing.current.clone().normalize();
-    const uphillVector = new THREE.Vector3(slope.dx, 0, slope.dz);
-    const uphillDirection = uphillVector.lengthSq() > 0.0001 ? uphillVector.clone().normalize() : new THREE.Vector3();
+    const rawInputDirection = frameScratch.rawInputDirection;
+    if (moving) rawInputDirection.copy(input).normalize().applyAxisAngle(frameScratch.up, yawRef.current);
+    else rawInputDirection.copy(facing.current).normalize();
+    const uphillVector = frameScratch.uphillVector.set(slope.dx, 0, slope.dz);
+    const uphillDirection = frameScratch.uphillDirection.set(0, 0, 0);
+    if (uphillVector.lengthSq() > 0.0001) uphillDirection.copy(uphillVector).normalize();
     const uphillDot = moving && uphillDirection.lengthSq() > 0 ? THREE.MathUtils.clamp(rawInputDirection.dot(uphillDirection), -1, 1) : 0;
     const uphillPenalty = Math.max(0, uphillDot) * THREE.MathUtils.clamp(slope.grade * PLAYER.uphillSpeedPenalty, 0, 0.32);
     const downhillBoost = Math.max(0, -uphillDot) * THREE.MathUtils.clamp(slope.grade * PLAYER.downhillSpeedBoost, 0, 0.1);
@@ -853,28 +813,12 @@ export function PlayerController({ physicsDebug = false }) {
     }
     lastButtons.current.rotateLeft = rotateLeftPressed;
     lastButtons.current.rotateRight = rotateRightPressed;
-    const actionOptions = { movementLocked };
-    triggerAction('pray', 'pray', ACTION_DURATION.pray, actionOptions);
-    triggerAction('fireRifle', 'fireRifle', ACTION_DURATION.fireRifle, actionOptions);
-    triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
-      ...actionOptions,
-      onStart: () => {
-        emitPropEvent('tool-swing', {
-          tool: 'hammer',
-          position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
-          facing: { x: facing.current.x, y: 0, z: facing.current.z },
-          impactDelay: 0.55,
-        });
-      },
+    triggerDirectPlayerActions({
+      triggerAction,
+      group,
+      facing,
+      movementLocked,
     });
-    triggerAction('net', 'swingNet', ACTION_DURATION.swingNet, actionOptions);
-    triggerAction('gather', 'gather', ACTION_DURATION.gather, actionOptions);
-    triggerAction('write', 'write', ACTION_DURATION.write, { ...actionOptions, lockMovement: true });
-    triggerAction('inspect', 'kneelInspect', ACTION_DURATION.kneelInspect, { ...actionOptions, lockMovement: true });
-    triggerAction('lookAround', 'lookAround', ACTION_DURATION.lookAround, actionOptions);
-    triggerAction('point', 'point', ACTION_DURATION.point, actionOptions);
-    triggerAction('trip', 'trip', ACTION_DURATION.trip, { ...actionOptions, lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.45 });
-    triggerAction('teeter', 'teeter', ACTION_DURATION.teeter, { ...actionOptions, lockMovement: false });
     const idleEligible = !moving
       && !movementLocked
       && !stateRef.current.action
@@ -897,25 +841,66 @@ export function PlayerController({ physicsDebug = false }) {
       idleFidget.current.idleSince = 0;
       idleFidget.current.nextAt = 0;
     }
-    if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked) {
+    if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
+      const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1) => {
+        characterController.sync(group.current.position);
+        const climbDuration = durationFor(clip) * durationScale;
+        startAction(clip, climbDuration, { lockMovement: true });
+        stateRef.current.climbMotion = {
+          start: group.current.position.clone(),
+          end,
+          heightDelta,
+          duration: climbDuration * 0.92,
+          startedAt: now,
+          targetYaw,
+        };
+        velocity.current.set(0, 0, 0);
+      };
       const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
       if (target) {
-        characterController.sync(group.current.position);
         const climbClip = running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.1
           ? 'sprintToWallClimb'
           : 'climbingUpWall';
-        const climbDuration = ACTION_DURATION[climbClip] || ACTION_DURATION.climb;
-        startAction(climbClip, climbDuration, { lockMovement: true });
-        stateRef.current.climbMotion = {
-          start: group.current.position.clone(),
-          end: target.end,
-          heightDelta: target.heightDelta,
-          duration: climbDuration * 0.92,
-          startedAt: now,
-          targetYaw: Math.atan2(target.obstacle.x - group.current.position.x, target.obstacle.z - group.current.position.z),
-        };
+        beginClimbMotion(
+          climbClip,
+          target.end,
+          target.heightDelta,
+          Math.atan2(target.obstacle.x - group.current.position.x, target.obstacle.z - group.current.position.z),
+          target.heightDelta > 2.4 ? 1.35 : 1,
+        );
       } else {
-        startAction('teeter', 0.95, { lockMovement: false });
+        // No climbable obstacle: scale terrain. A steep rise ahead becomes a
+        // wall climb; a drop just past the toes becomes a controlled descent.
+        const forward = facing.current.clone().setY(0).normalize();
+        const here = group.current.position;
+        const sample = (distance) => collisionAdapter.groundInfo(
+          new THREE.Vector3(here.x + forward.x * distance, here.y, here.z + forward.z * distance),
+        );
+        const climbYaw = Math.atan2(forward.x, forward.z);
+        let handled = false;
+        for (const distance of [1.1, 1.7, 2.4, 3.1]) {
+          const ahead = sample(distance);
+          const rise = ahead.y - here.y;
+          if (rise >= 0.85 && rise <= 4.8) {
+            const end = new THREE.Vector3(here.x + forward.x * distance, ahead.y + 0.04, here.z + forward.z * distance);
+            beginClimbMotion(rise > 2.2 ? 'climb' : 'climbingUpWall', end, rise, climbYaw, rise > 3.4 ? 1.3 : 1);
+            handled = true;
+            break;
+          }
+        }
+        if (!handled) {
+          for (const distance of [0.8, 1.3, 1.9]) {
+            const ahead = sample(distance);
+            const drop = here.y - ahead.y;
+            if (drop >= 0.95 && drop <= 6.5) {
+              const end = new THREE.Vector3(here.x + forward.x * distance, ahead.y + 0.04, here.z + forward.z * distance);
+              beginClimbMotion('climbingDownWall', end, -drop, climbYaw, drop > 3 ? 1.3 : 1);
+              handled = true;
+              break;
+            }
+          }
+        }
+        if (!handled) startAction('teeter', 0.95, { lockMovement: false });
       }
     }
     lastButtons.current.climb = climbPressed;
@@ -923,7 +908,7 @@ export function PlayerController({ physicsDebug = false }) {
     if (!moving && previousMotion.current.moving && previousMotion.current.running && !stateRef.current.action && !movementLocked) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       if (previousSpeed > PLAYER.walkSpeed * 1.28) {
-        startAction('runToStop', Math.min(0.38, ACTION_DURATION.runToStop), { lockMovement: false });
+        startAction('runToStop', Math.min(0.55, ACTION_DURATION.runToStop), { lockMovement: false });
       }
     } else if (canPlayLocomotionFlourish && previousMotion.current.moving && !previousMotion.current.running && !wasAirborne.current) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -936,18 +921,71 @@ export function PlayerController({ physicsDebug = false }) {
     if (moving && !movementLocked) {
       input.copy(rawInputDirection);
       const sidestepping = lateralOnlyInput && (stateRef.current.aiming || stateRef.current.crouching);
-      const forwardFacing = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yawRef.current);
+      const forwardFacing = frameScratch.forwardFacing.set(0, 0, -1).applyAxisAngle(frameScratch.up, yawRef.current);
+      // Pivot flourish: reversing direction at speed plays the authored 180
+      // turn instead of the body silently swivelling mid-run.
+      const currentSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+      const normalizedFacing = frameScratch.turnFacing.copy(facing.current);
+      if (normalizedFacing.lengthSq() > 0.001) normalizedFacing.normalize();
+      const reversalDot = normalizedFacing.lengthSq() > 0.001 ? normalizedFacing.dot(input) : 1;
+      if (!sidestepping
+        && !airborneForControl
+        && !stateRef.current.action
+        && !stateRef.current.crouching
+        && !stateRef.current.aiming
+        && reversalDot < -0.78
+        && currentSpeed > PLAYER.walkSpeed * 0.8
+        && now - lastTurnFlourishAt.current > 1.6) {
+        lastTurnFlourishAt.current = now;
+        const turnClip = currentSpeed > PLAYER.walkSpeed * 1.25 ? 'runningTurn180' : 'walkingTurn180';
+        startAction(turnClip, ACTION_DURATION[turnClip], { lockMovement: false });
+      } else if (!sidestepping
+        && !airborneForControl
+        && !stateRef.current.action
+        && !stateRef.current.crouching
+        && !stateRef.current.aiming
+        && moving
+        && running
+        && reversalDot > -0.5
+        && reversalDot < 0.7
+        && currentSpeed > PLAYER.walkSpeed * 1.25
+        && now - lastTurnFlourishAt.current > 1.2) {
+        lastTurnFlourishAt.current = now;
+        const crossY = normalizedFacing.z * input.x - normalizedFacing.x * input.z;
+        const turnClip = crossY >= 0 ? 'runningTurnRight' : 'runningTurnLeft';
+        startAction(turnClip, durationFor(turnClip), { lockMovement: false });
+      }
       facing.current.copy(sidestepping ? forwardFacing : input);
-      const targetVelocity = input.clone().multiplyScalar(movementSpeed);
+      const targetVelocity = frameScratch.targetVelocity.copy(input).multiplyScalar(movementSpeed);
       const accel = airborneForControl ? PLAYER.airAcceleration : PLAYER.groundAcceleration;
       velocity.current.x = THREE.MathUtils.damp(velocity.current.x, targetVelocity.x, accel, delta);
       velocity.current.z = THREE.MathUtils.damp(velocity.current.z, targetVelocity.z, accel, delta);
       const targetYaw = sidestepping ? Math.atan2(forwardFacing.x, forwardFacing.z) : Math.atan2(input.x, input.z);
-      group.current.rotation.y = dampAngle(group.current.rotation.y, targetYaw, PLAYER.turnDamping, delta);
+      // Stronger turn assist at low speed so direction changes from a near
+      // standstill feel snappy without twitchy full-speed steering.
+      const turnAssist = THREE.MathUtils.lerp(
+        PLAYER.lowSpeedTurnBoost,
+        1,
+        THREE.MathUtils.clamp(currentSpeed / PLAYER.runSpeed, 0, 1),
+      );
+      group.current.rotation.y = dampAngle(group.current.rotation.y, targetYaw, PLAYER.turnDamping * turnAssist, delta);
     } else {
       const decel = airborneForControl ? PLAYER.airDeceleration : PLAYER.groundDeceleration;
       velocity.current.x = THREE.MathUtils.damp(velocity.current.x, 0, decel, delta);
       velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, decel, delta);
+    }
+
+    // Rifle aim mode: the cursor owns Darwin's facing. This overrides the
+    // movement-driven yaw above, so velocity can run opposite/lateral to facing
+    // (real backpedal and strafing) and shots track the pointer.
+    const aimDirection = (stateRef.current.aiming && getAimDirection && !movementLocked && !stateRef.current.action)
+      ? getAimDirection(group.current.position)
+      : null;
+    stateRef.current.aimDirection = aimDirection ? [aimDirection.x, aimDirection.z] : null;
+    if (aimDirection) {
+      facing.current.copy(aimDirection);
+      const aimYaw = Math.atan2(aimDirection.x, aimDirection.z);
+      group.current.rotation.y = dampAngle(group.current.rotation.y, aimYaw, 16, delta);
     }
 
     const groundInfo = collisionAdapter.groundInfo(group.current.position);
@@ -1013,6 +1051,7 @@ export function PlayerController({ physicsDebug = false }) {
         duration: ACTION_DURATION.dodgeRoll,
         startedAt: now,
         targetYaw: Math.atan2(rollDirection.x, rollDirection.z),
+        exitSpeed: running ? PLAYER.runSpeed * 0.8 : 0,
       };
       stateRef.current.crouching = false;
       stateRef.current.aiming = false;
@@ -1034,10 +1073,10 @@ export function PlayerController({ physicsDebug = false }) {
         + (launchRunning ? PLAYER.runningJumpVerticalBonus : PLAYER.chargedJumpBonus * charge);
       velocity.current.y = launchVelocity;
       if (moving || launchRunning) {
-        const horizontal = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+        const horizontal = frameScratch.launchHorizontal.set(velocity.current.x, 0, velocity.current.z);
         const launchDirection = moving
-          ? rawInputDirection.clone().normalize()
-          : facing.current.clone().normalize();
+          ? frameScratch.launchDirection.copy(rawInputDirection).normalize()
+          : frameScratch.launchDirection.copy(facing.current).normalize();
         const minLaunchSpeed = launchRunning ? rawRunSpeed * 0.78 : PLAYER.walkSpeed * 0.52;
         if (horizontal.length() < minLaunchSpeed) {
           horizontal.copy(launchDirection).setLength(minLaunchSpeed);
@@ -1063,10 +1102,18 @@ export function PlayerController({ physicsDebug = false }) {
       stateRef.current.jumpPhase = 'takeoff';
       stateRef.current.jumpWasRunning = launchRunning;
       stateRef.current.jumpChargeAmount = charge;
+      // Leaping off a boulder/ledge (standing well above the terrain) gets
+      // the wall-jump takeoff pose instead of the flat-ground jump.
+      const launchGround = collisionAdapter.groundInfo(group.current.position);
+      stateRef.current.jumpFromHeight = Number.isFinite(launchGround.terrainY)
+        && launchGround.y - launchGround.terrainY > 0.85;
       wasAirborne.current = true;
     };
 
-    if (jumpJustPressed && canStartJumpInput) {
+    if (jumpJustPressed && !canStartJumpInput) {
+      jumpBufferedUntil.current = now + PLAYER.jumpBufferTime;
+    }
+    if ((jumpJustPressed || now <= jumpBufferedUntil.current) && canStartJumpInput && !swimState.current.active) {
       const launchRunning = moving || running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.05;
       if (launchRunning) {
         launchJump(true, 0);
@@ -1123,7 +1170,7 @@ export function PlayerController({ physicsDebug = false }) {
     } else {
       velocity.current.y = 0;
     }
-    const desiredDelta = velocity.current.clone().multiplyScalar(delta);
+    const desiredDelta = frameScratch.desiredDelta.copy(velocity.current).multiplyScalar(delta);
     const canAutoTraverse = grounded
       && moving
       && !movementLocked
@@ -1135,8 +1182,16 @@ export function PlayerController({ physicsDebug = false }) {
       const traversalTarget = collisionAdapter.findTraversalTarget(group.current.position, desiredDelta, facing.current);
       if (traversalTarget) {
         characterController.sync(group.current.position);
-        const duration = ACTION_DURATION.scramble;
-        const clip = 'crouchWalk';
+        // Pick the traversal motion by approach speed and obstacle height:
+        // sprinting into a low obstacle reads as a vault, a taller one as a
+        // quick wall scramble; only a slow walk-up gets the cautious crouch.
+        const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+        const heroic = running || approachSpeed > PLAYER.walkSpeed * 1.1;
+        const tall = traversalTarget.heightDelta > 1.05;
+        const clip = heroic ? (tall ? 'sprintToWallClimb' : 'vault') : 'crouchWalk';
+        const duration = heroic
+          ? (tall ? ACTION_DURATION.sprintToWallClimb : ACTION_DURATION.vault)
+          : ACTION_DURATION.scramble;
         startAction(clip, duration, { lockMovement: true });
         stateRef.current.traverseMotion = {
           start: group.current.position.clone(),
@@ -1144,8 +1199,11 @@ export function PlayerController({ physicsDebug = false }) {
           duration,
           startedAt: now,
           targetYaw: Math.atan2(traversalTarget.direction.x, traversalTarget.direction.z),
-          arcHeight: THREE.MathUtils.clamp(0.12 + traversalTarget.heightDelta * 0.18, 0.16, 0.34),
-          crouching: true,
+          arcHeight: heroic
+            ? THREE.MathUtils.clamp(0.2 + traversalTarget.heightDelta * 0.26, 0.26, 0.52)
+            : THREE.MathUtils.clamp(0.12 + traversalTarget.heightDelta * 0.18, 0.16, 0.34),
+          crouching: !heroic,
+          exitSpeed: heroic ? Math.max(approachSpeed * 0.85, PLAYER.walkSpeed) : 0,
         };
         velocity.current.set(0, 0, 0);
         stateRef.current.running = false;
@@ -1154,9 +1212,44 @@ export function PlayerController({ physicsDebug = false }) {
         wasAirborne.current = false;
         return;
       }
+      // Parkour intent: sprinting head-on into a climbable boulder taller
+      // than the vault range mantles up it automatically — the climb key
+      // remains for deliberate, slower ascents and for taller faces.
+      if (!traversalTarget && running && now - lastAutoClimbAt.current > 1.2) {
+        const climbTarget = collisionAdapter.findClimbTarget(group.current.position, facing.current);
+        if (climbTarget && climbTarget.heightDelta <= 2.9) {
+          const surfaceGap = Math.hypot(
+            climbTarget.obstacle.x - group.current.position.x,
+            climbTarget.obstacle.z - group.current.position.z,
+          ) - climbTarget.obstacle.radius - 0.42;
+          if (surfaceGap < 0.55) {
+            lastAutoClimbAt.current = now;
+            characterController.sync(group.current.position);
+            const climbDuration = durationFor('sprintToWallClimb') * (climbTarget.heightDelta > 1.6 ? 1.25 : 1);
+            startAction('sprintToWallClimb', climbDuration, { lockMovement: true });
+            stateRef.current.climbMotion = {
+              start: group.current.position.clone(),
+              end: climbTarget.end,
+              heightDelta: climbTarget.heightDelta,
+              duration: climbDuration * 0.92,
+              startedAt: now,
+              targetYaw: Math.atan2(
+                climbTarget.obstacle.x - group.current.position.x,
+                climbTarget.obstacle.z - group.current.position.z,
+              ),
+            };
+            velocity.current.set(0, 0, 0);
+            stateRef.current.running = false;
+            stateRef.current.walking = false;
+            stateRef.current.airborne = false;
+            wasAirborne.current = false;
+            return;
+          }
+        }
+      }
     }
     const characterMove = {
-      movement: desiredDelta.clone(),
+      movement: desiredDelta,
       grounded: false,
       collisions: 0,
       collision: null,
@@ -1180,20 +1273,42 @@ export function PlayerController({ physicsDebug = false }) {
     characterController.sync(group.current.position);
 
     if (collision) {
-      const normal = collision.normal.clone().normalize();
+      const normal = frameScratch.collisionNormal.copy(collision.normal).normalize();
       characterDebug.current.normal.copy(normal);
-      const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+      const horizontalVelocity = frameScratch.horizontalVelocity.set(velocity.current.x, 0, velocity.current.z);
       const impactSpeed = horizontalVelocity.length();
       const intoSurface = impactSpeed > 0.001
-        ? Math.max(0, -horizontalVelocity.clone().normalize().dot(normal))
+        ? Math.max(0, -frameScratch.pushDirection.copy(horizontalVelocity).normalize().dot(normal))
         : 0;
       const normalVelocity = horizontalVelocity.dot(normal);
-      const tangentVelocity = horizontalVelocity.clone().addScaledVector(normal, -normalVelocity);
+      const tangentVelocity = frameScratch.tangentVelocity.copy(horizontalVelocity).addScaledVector(normal, -normalVelocity);
 
       if (normalVelocity < 0) {
         const slideKeep = intoSurface > 0.74 ? 0.9 : 0.99;
         velocity.current.x = tangentVelocity.x * slideKeep;
         velocity.current.z = tangentVelocity.z * slideKeep;
+      }
+
+      // Wall run: a running jump into a face too tall to clear plants a foot
+      // on it and kicks Darwin back off instead of pancaking him against it.
+      const airborneRunningJump = wasAirborne.current
+        && jumpState.current.fromPlayerJump
+        && jumpState.current.wasRunning;
+      if (airborneRunningJump
+        && intoSurface > 0.5
+        && impactSpeed > 2.4
+        && now - lastWallRunAt.current > 0.9
+        && !stateRef.current.action) {
+        lastWallRunAt.current = now;
+        startAction('wallRun', ACTION_DURATION.wallRun, { lockMovement: false });
+        const rebound = Math.max(3.4, impactSpeed * 0.6);
+        velocity.current.x = normal.x * rebound;
+        velocity.current.z = normal.z * rebound;
+        velocity.current.y = Math.max(velocity.current.y, 4.4);
+        jumpState.current.phase = 'airborne';
+        jumpState.current.wasRunning = false;
+        stateRef.current.jumpPhase = 'airborne';
+        wasAirborne.current = true;
       }
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
@@ -1204,26 +1319,26 @@ export function PlayerController({ physicsDebug = false }) {
           0.26,
           0.86,
         );
-        const localNormal = normal.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -group.current.rotation.y);
+        const localNormal = frameScratch.localNormal.copy(normal).applyAxisAngle(frameScratch.up, -group.current.rotation.y);
         collisionDustTriggerRef.current?.({
           intensity: Math.min(1, intensity * 0.9),
-          position: new THREE.Vector3(-localNormal.x * 0.46, 0.08, -localNormal.z * 0.46),
+          position: frameScratch.footstepPosition.set(-localNormal.x * 0.46, 0.08, -localNormal.z * 0.46),
         });
         const pushable = collision.obstacle?.pushable
           ? collision.obstacle
           : findPushableObstacleNear(collisionAdapter.obstacles, group.current.position, horizontalVelocity, normal);
         if (pushable && impactSpeed > 1.15) {
           const pushDirection = horizontalVelocity.lengthSq() > 0.001
-            ? horizontalVelocity.clone().normalize()
-            : normal.clone().multiplyScalar(-1).normalize();
+            ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
+            : frameScratch.pushDirection.copy(normal).multiplyScalar(-1).normalize();
           const pushStep = THREE.MathUtils.clamp(
             (0.055 + impactSpeed * 0.012 + intensity * 0.08) / Math.max(0.65, pushable.pushMass),
             0.035,
             0.22,
           );
           const pushDelta = pushDirection.multiplyScalar(pushStep * (pushable.pushFriction ?? 0.88));
-          const currentObstaclePosition = new THREE.Vector3(pushable.x, 0, pushable.z);
-          const candidate = currentObstaclePosition.clone().add(pushDelta);
+          const currentObstaclePosition = frameScratch.pushObstaclePosition.set(pushable.x, 0, pushable.z);
+          const candidate = frameScratch.pushCandidate.copy(currentObstaclePosition).add(pushDelta);
           const clamped = collisionAdapter.clampToWalkable(candidate, currentObstaclePosition);
           if (clamped.distanceTo(candidate) < 0.08) {
             movePushableObstacle(pushable.id, pushDelta, pushable.zoneId);
@@ -1233,12 +1348,15 @@ export function PlayerController({ physicsDebug = false }) {
         }
         velocity.current.x += normal.x * intensity * 0.38;
         velocity.current.z += normal.z * intensity * 0.38;
-        bounceFeedback.current = {
-          startedAt: now,
-          lastImpactAt: now,
-          intensity,
-          normal,
-        };
+        // A run-speed bump reads as a stumble, not a full hit reaction —
+        // movement stays live so it feels like weight, not punishment.
+        if (!stateRef.current.action && impactSpeed > PLAYER.walkSpeed * 1.15) {
+          startAction('stumble', ACTION_DURATION.stumble, { lockMovement: false });
+        }
+        bounceFeedback.current.startedAt = now;
+        bounceFeedback.current.lastImpactAt = now;
+        bounceFeedback.current.intensity = intensity;
+        bounceFeedback.current.normal.copy(normal);
         cameraImpulse.current = {
           startedAt: now,
           intensity: Math.min(0.58, intensity * 0.62),
@@ -1250,10 +1368,10 @@ export function PlayerController({ physicsDebug = false }) {
 
     const cactusContact = findCactusHazardContact(group.current.position);
     if (cactusContact) {
-      const horizontalVelocity = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+      const horizontalVelocity = frameScratch.cactusHorizontalVelocity.set(velocity.current.x, 0, velocity.current.z);
       const impactSpeed = horizontalVelocity.length();
       const movingIntoCactus = impactSpeed > CACTUS_HAZARD.minSpeed
-        ? horizontalVelocity.clone().normalize().dot(cactusContact.normal) < 0.25
+        ? frameScratch.pushDirection.copy(horizontalVelocity).normalize().dot(cactusContact.normal) < 0.25
         : true;
       const canCactusHit = movingIntoCactus && now - lastCactusHitAt.current >= CACTUS_HAZARD.cooldown;
       group.current.position.addScaledVector(cactusContact.normal, Math.min(0.34, cactusContact.penetration + 0.08));
@@ -1265,12 +1383,10 @@ export function PlayerController({ physicsDebug = false }) {
         velocity.current.y = Math.max(velocity.current.y, 0.72);
         applyCactusDamage(cactusContact.cactus.damage || 8);
         startAction('hitReaction', 0.78, { lockMovement: true });
-        bounceFeedback.current = {
-          startedAt: now,
-          lastImpactAt: now,
-          intensity: 0.72,
-          normal: cactusContact.normal.clone(),
-        };
+        bounceFeedback.current.startedAt = now;
+        bounceFeedback.current.lastImpactAt = now;
+        bounceFeedback.current.intensity = 0.72;
+        bounceFeedback.current.normal.copy(cactusContact.normal);
         cameraImpulse.current = {
           startedAt: now,
           intensity: 0.42,
@@ -1280,9 +1396,57 @@ export function PlayerController({ physicsDebug = false }) {
       }
     }
 
-    const nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
+    let nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
+    let stanceGroundInfo = collisionAdapter.stanceGroundInfo?.(group.current.position, facing.current);
+    if (
+      nextGroundInfo.source === 'authored-obstacle'
+      && stanceGroundInfo
+      && stanceGroundInfo.obstacleSupportCount <= 1
+      && stanceGroundInfo.spread > 0.14
+    ) {
+      nextGroundInfo = collisionAdapter.groundInfo(group.current.position, { ignoreObstacles: true });
+      stanceGroundInfo = collisionAdapter.stanceGroundInfo?.(group.current.position, facing.current);
+    }
     const nextGroundY = nextGroundInfo.y;
     const groundDistance = group.current.position.y - nextGroundY;
+    const groundedForStance = groundDistance <= PLAYER.groundSnapDistance && jumpState.current.phase !== 'takeoff';
+    const stancePitch = groundedForStance && stanceGroundInfo
+      ? THREE.MathUtils.clamp(stanceGroundInfo.pitch, -0.12, 0.12)
+      : 0;
+    const stanceRoll = groundedForStance && stanceGroundInfo
+      ? THREE.MathUtils.clamp(stanceGroundInfo.roll, -0.12, 0.12)
+      : 0;
+    terrainFeedback.current.stancePitch = THREE.MathUtils.damp(terrainFeedback.current.stancePitch, stancePitch, 9, delta);
+    terrainFeedback.current.stanceRoll = THREE.MathUtils.damp(terrainFeedback.current.stanceRoll, stanceRoll, 9, delta);
+    terrainFeedback.current.stanceSpread = THREE.MathUtils.damp(
+      terrainFeedback.current.stanceSpread,
+      groundedForStance && stanceGroundInfo ? stanceGroundInfo.spread : 0,
+      8,
+      delta,
+    );
+    terrainFeedback.current.groundSource = nextGroundInfo.source;
+    if (physicsDebug && debugStanceRefs.current.length) {
+      const unstable = stanceGroundInfo?.supportedByObstacle
+        && stanceGroundInfo.obstacleSupportCount <= 1
+        && stanceGroundInfo.spread > 0.14;
+      const samples = stanceGroundInfo?.samples || [];
+      debugStanceRefs.current.forEach((mesh, index) => {
+        if (!mesh) return;
+        const sample = samples[index];
+        mesh.visible = Boolean(sample);
+        if (!sample) return;
+        mesh.position.set(
+          sample.x - group.current.position.x,
+          sample.y - group.current.position.y + 0.035,
+          sample.z - group.current.position.z,
+        );
+        mesh.material = unstable
+          ? debugMaterials.stanceUnstable
+          : sample.source === 'authored-obstacle'
+            ? debugMaterials.stanceObstacle
+            : debugMaterials.stanceTerrain;
+      });
+    }
     const belowTerrainFloor = groundDistance < -PLAYER.groundContactEpsilon
       && (velocity.current.y <= 0 || groundDistance < -PLAYER.groundSnapDistance);
     const canResolveGroundContact = velocity.current.y <= 0 && jumpState.current.phase !== 'takeoff';
@@ -1349,7 +1513,20 @@ export function PlayerController({ physicsDebug = false }) {
       } else if (falling > 13.5 && !stateRef.current.action) {
         startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
       } else if (falling > 9.5 && landingSpeed > 3.6 && !stateRef.current.action) {
-        startAction('fallingToRoll', ACTION_DURATION.fallingToRoll, { lockMovement: true });
+        // Fast damaging landings dive through the impact and preserve most of
+        // the approach speed, so a long jump flows through the touchdown.
+        const rollDirection = new THREE.Vector3(velocity.current.x, 0, velocity.current.z).normalize();
+        const diveDuration = durationFor('runToDive');
+        startAction('runToDive', diveDuration, { lockMovement: true });
+        stateRef.current.rollMotion = {
+          start: group.current.position.clone(),
+          direction: rollDirection,
+          distance: THREE.MathUtils.clamp(landingSpeed * 0.42, 1.5, 3.1),
+          duration: diveDuration,
+          startedAt: now,
+          targetYaw: Math.atan2(rollDirection.x, rollDirection.z),
+          exitSpeed: Math.min(landingSpeed * 0.7, PLAYER.runSpeed * 0.85),
+        };
       } else if (falling > 9.5 && !stateRef.current.action) {
         startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
       } else if (falling > 2.4 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
@@ -1385,12 +1562,54 @@ export function PlayerController({ physicsDebug = false }) {
     }
 
     const p = group.current.position;
-    // Deep water can't be walked into, but it can be fallen into (cliff jumps)
-    // — and once in, Darwin can struggle in any direction while he drowns.
-    const allowDeepWater = wasAirborne.current || wadeDepth.current > WADE_DEPTH * 0.96;
+    // Swimming: water deeper than SWIM.enterDepth floats Darwin instead of
+    // drowning him. Wading in or falling in both transition to a swim state;
+    // shallowing terrain transitions back out through the wade.
+    const swim = swimState.current;
+    const swimGround = collisionAdapter.groundInfo(p);
+    const waterDepthHere = Math.max(0, WATER_LEVEL - swimGround.y);
+    if (!swim.active && health > 0) {
+      const wadedIn = !wasAirborne.current && waterDepthHere > SWIM.enterDepth;
+      const fellIn = wasAirborne.current && p.y <= WATER_LEVEL - 0.18 && waterDepthHere > SWIM.enterDepth;
+      if (wadedIn || fellIn) {
+        swim.active = true;
+        swim.enteredAt = now;
+        stateRef.current.crouching = false;
+        stateRef.current.aiming = false;
+        jumpCharge.current.active = false;
+        pendingStandingJump.current.active = false;
+        jumpState.current.phase = 'grounded';
+        stateRef.current.jumpPhase = 'grounded';
+        if (fellIn) {
+          startAction('fallingIntoPool', ACTION_DURATION.fallingIntoPool, { lockMovement: true });
+          emitPropEvent('water-splash', {
+            position: { x: p.x, y: WATER_LEVEL, z: p.z },
+            intensity: 1,
+          });
+        }
+        velocity.current.y = 0;
+      }
+    }
+    if (swim.active) {
+      // Buoyancy: settle to float height; the seafloor no longer owns Y.
+      const floatY = WATER_LEVEL - SWIM.bodySink;
+      p.y = Math.abs(p.y - floatY) > 2.4 ? floatY : THREE.MathUtils.damp(p.y, floatY, 5, delta);
+      velocity.current.y = 0;
+      wasAirborne.current = false;
+      stateRef.current.jumpPhase = 'grounded';
+      characterController.sync(p);
+      if (waterDepthHere < SWIM.exitDepth) {
+        // Shore reached: stand up through the shallows.
+        swim.active = false;
+        p.y = swimGround.y;
+        characterController.sync(p);
+        if (moving) startAction('swimToEdge', durationFor('swimToEdge'), { lockMovement: 0.34 });
+      }
+    }
+    const allowDeepWater = swim.active || wasAirborne.current || wadeDepth.current > WADE_DEPTH * 0.96;
     const clamped = collisionAdapter.clampToWalkable(p, startOfFramePosition, { wade: true, deep: allowDeepWater });
     if (!clamped.equals(p)) {
-      const correction = clamped.clone().sub(p);
+      const correction = frameScratch.correction.copy(clamped).sub(p);
       p.copy(clamped);
       characterController.sync(p);
       const correctionDistance = Math.hypot(correction.x, correction.z);
@@ -1398,7 +1617,7 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.x *= velocityKeep;
       velocity.current.z *= velocityKeep;
     }
-    if (!wasAirborne.current && jumpState.current.phase !== 'takeoff') {
+    if (!swim.active && !wasAirborne.current && jumpState.current.phase !== 'takeoff') {
       const finalGroundInfo = collisionAdapter.groundInfo(p);
       p.y = finalGroundInfo.y;
       characterController.sync(p);
@@ -1440,6 +1659,19 @@ export function PlayerController({ physicsDebug = false }) {
     stateRef.current.speed = horizontalSpeed;
     stateRef.current.slopeGrade = terrainFeedback.current.grade;
     stateRef.current.uphillDot = terrainFeedback.current.uphillDot;
+    stateRef.current.stanceSpread = terrainFeedback.current.stanceSpread;
+    stateRef.current.groundSource = terrainFeedback.current.groundSource;
+    // Path-relative signed ground pitch for stair clips: grade scaled by how
+    // directly travel heads up/down the slope (uphillDot). Walking level across
+    // a steep hillside reads ~0, so stairs only trigger on real ascent/descent.
+    stateRef.current.groundPitch = terrainFeedback.current.grade * terrainFeedback.current.uphillDot;
+    // Backpedalling reads off velocity vs. facing — the body normally realigns
+    // to its movement direction, so this only trips when facing stays opposed
+    // to travel (aim/strafe reversals), avoiding false moonwalk triggers.
+    const facingDot = (horizontalSpeed > 0.2 && facing.current.lengthSq() > 0.001)
+      ? (velocity.current.x * facing.current.x + velocity.current.z * facing.current.z) / horizontalSpeed
+      : 1;
+    stateRef.current.movingBackward = facingDot < -0.5;
     stateRef.current.groundDistance = groundDistance;
     stateRef.current.verticalSpeed = velocity.current.y;
     stateRef.current.tiredRun = tiredRun;
@@ -1450,8 +1682,11 @@ export function PlayerController({ physicsDebug = false }) {
       || (stateRef.current.running && horizontalSpeed > runningExitSpeed)
     );
     stateRef.current.walking = horizontalSpeed > 0.55 && !stateRef.current.running;
+    stateRef.current.crouchRunning = stateRef.current.crouching && crouchRunIntent && horizontalSpeed > PLAYER.walkSpeed * 0.5;
     stateRef.current.airborne = wasAirborne.current;
+    stateRef.current.swimming = swimState.current.active;
     wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
+    stateRef.current.wadeDepth = wadeDepth.current;
     if (waterlineRef.current) {
       const wet = THREE.MathUtils.clamp(wadeDepth.current / 0.85, 0, 1);
       waterlineRef.current.visible = wet > 0.025;
@@ -1460,9 +1695,27 @@ export function PlayerController({ physicsDebug = false }) {
       waterlineRef.current.rotation.z += delta * (0.12 + horizontalSpeed * 0.035);
       waterlineRef.current.material.opacity = wet > 0.025 ? (0.08 + wet * 0.08) : 0;
     }
-    // Drowning: past wading depth the sea takes its toll. Damage accumulates
-    // locally and hits the store in chunks so we don't set state every frame.
-    if (wadeDepth.current > WADE_DEPTH && health > 0) {
+    // Swimming economy: strokes drain fatigue (faster when sprinting), and an
+    // exhausted swimmer starts to drown. Both accumulate locally and hit the
+    // store in chunks so we don't set state every frame.
+    if (swimState.current.active && health > 0) {
+      const sprintingSwim = running && horizontalSpeed > SWIM.speed * 1.05;
+      swimFatigue.current += delta * (sprintingSwim ? SWIM.sprintFatiguePerSecond : SWIM.fatiguePerSecond);
+      if (swimFatigue.current >= 1.2) {
+        applyMovementCost({ fatigueDelta: swimFatigue.current });
+        swimFatigue.current = 0;
+      }
+      if (fatigue >= SWIM.exhaustedFatigue) {
+        drownDamage.current += delta * 7;
+        if (drownDamage.current >= 4) {
+          applyDrowningDamage(drownDamage.current);
+          drownDamage.current = 0;
+        }
+      } else {
+        drownDamage.current = 0;
+      }
+    } else if (wadeDepth.current > WADE_DEPTH && health > 0) {
+      // Safety net for any non-swim over-depth state (e.g. carried objects later).
       drownDamage.current += delta * 9;
       if (drownDamage.current >= 4) {
         applyDrowningDamage(drownDamage.current);
@@ -1470,6 +1723,7 @@ export function PlayerController({ physicsDebug = false }) {
       }
     } else {
       drownDamage.current = 0;
+      swimFatigue.current = 0;
     }
     if (!stateRef.current.airborne && moving && horizontalSpeed > 0.85 && !jumpCharge.current.active) {
       if (wadeDepth.current > 0.05) {
@@ -1516,7 +1770,7 @@ export function PlayerController({ physicsDebug = false }) {
           );
           footstepDustTriggerRef.current?.({
             intensity: stepIntensity,
-            position: new THREE.Vector3(footstepDust.current.side * 0.18, 0.055, 0.18),
+            position: frameScratch.footstepPosition.set(footstepDust.current.side * 0.18, 0.055, 0.18),
           });
         }
       }
@@ -1531,24 +1785,50 @@ export function PlayerController({ physicsDebug = false }) {
     }
     stateRef.current.strafeLeft = Boolean((keys.left || touch.left) && !(keys.forward || keys.backward || touch.forward || touch.backward));
     stateRef.current.strafeRight = Boolean((keys.right || touch.right) && !(keys.forward || keys.backward || touch.forward || touch.backward));
+    // While aiming, facing is locked to the cursor, so the gait is whatever the
+    // velocity is doing relative to that facing — derive strafe/backpedal from
+    // velocity vs. facing rather than which key is held.
+    if (stateRef.current.aiming) {
+      const aimSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+      const fx = facing.current.x;
+      const fz = facing.current.z;
+      if (aimSpeed > 0.35 && (fx * fx + fz * fz) > 0.001) {
+        const fwd = (velocity.current.x * fx + velocity.current.z * fz) / aimSpeed;
+        // Player's right vector: facing (forward = -Z) rotated -90deg about Y
+        // maps (fx,fz) -> (-fz, fx). rgt>0 means velocity heads to Darwin's right.
+        const rgt = (velocity.current.x * -fz + velocity.current.z * fx) / aimSpeed;
+        const lateral = Math.abs(rgt) >= Math.abs(fwd);
+        stateRef.current.movingBackward = !lateral && fwd < -0.35;
+        stateRef.current.strafeLeft = lateral && rgt < -0.5;
+        stateRef.current.strafeRight = lateral && rgt > 0.5;
+      } else {
+        stateRef.current.movingBackward = false;
+        stateRef.current.strafeLeft = false;
+        stateRef.current.strafeRight = false;
+      }
+    }
+    const nextPose = {
+      position: { x: p.x, y: p.y, z: p.z },
+      facing: { x: facing.current.x, y: facing.current.y, z: facing.current.z },
+    };
+    updateRuntimePlayerPose(nextPose);
     const publishedPose = lastPublishedPose.current;
-    const positionChanged = Math.abs(publishedPose.x - p.x) > 0.001
-      || Math.abs(publishedPose.y - p.y) > 0.001
-      || Math.abs(publishedPose.z - p.z) > 0.001;
-    const facingChanged = Math.abs(publishedPose.fx - facing.current.x) > 0.0005
-      || Math.abs(publishedPose.fy - facing.current.y) > 0.0005
-      || Math.abs(publishedPose.fz - facing.current.z) > 0.0005;
-    if (positionChanged || facingChanged) {
+    const positionChanged = Math.abs(publishedPose.x - p.x) > 0.08
+      || Math.abs(publishedPose.y - p.y) > 0.08
+      || Math.abs(publishedPose.z - p.z) > 0.08;
+    const facingChanged = Math.abs(publishedPose.fx - facing.current.x) > 0.015
+      || Math.abs(publishedPose.fy - facing.current.y) > 0.015
+      || Math.abs(publishedPose.fz - facing.current.z) > 0.015;
+    const posePublishDue = now - lastPosePublishAt.current >= 1 / 15;
+    if ((positionChanged || facingChanged) && posePublishDue) {
       publishedPose.x = p.x;
       publishedPose.y = p.y;
       publishedPose.z = p.z;
       publishedPose.fx = facing.current.x;
       publishedPose.fy = facing.current.y;
       publishedPose.fz = facing.current.z;
-      setPlayerPose({
-        position: { x: p.x, y: p.y, z: p.z },
-        facing: { x: facing.current.x, y: facing.current.y, z: facing.current.z },
-      });
+      lastPosePublishAt.current = now;
+      setPlayerPose(nextPose);
     }
     if (playerControllerDebugEnabled()) {
       window.__darwinControllerDebug = {
@@ -1557,6 +1837,10 @@ export function PlayerController({ physicsDebug = false }) {
         jumpPhase: stateRef.current.jumpPhase,
         jumpCharging: stateRef.current.jumpCharging,
         groundDistance,
+        groundSource: terrainFeedback.current.groundSource,
+        stanceSpread: terrainFeedback.current.stanceSpread,
+        stancePitch: terrainFeedback.current.stancePitch,
+        stanceRoll: terrainFeedback.current.stanceRoll,
         verticalSpeed: velocity.current.y,
         speed: horizontalSpeed,
       };
@@ -1566,7 +1850,12 @@ export function PlayerController({ physicsDebug = false }) {
   });
 
   return (
-    <group ref={group} position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]} rotation={[0, Math.PI, 0]}>
+    <group ref={group} position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]} rotation={[0, Math.PI, 0]} userData={{
+      renderSource: 'player:darwin-controller',
+      renderLabel: 'Darwin controller helpers',
+      renderKind: 'player-controller',
+      renderPath: null,
+    }}>
       <RigidBody
         ref={characterBodyRef}
         type="kinematicPosition"
@@ -1582,8 +1871,8 @@ export function PlayerController({ physicsDebug = false }) {
         />
       </RigidBody>
       <mesh ref={contactShadowRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
-        <circleGeometry args={[0.72, 36]} />
-        <meshBasicMaterial color="#17130d" transparent opacity={0.24} depthWrite={false} />
+        <circleGeometry args={[0.82, 48]} />
+        <meshBasicMaterial color="#17130d" transparent opacity={0.32} depthWrite={false} alphaMap={contactShadowAlpha || undefined} />
       </mesh>
       <mesh ref={waterlineRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} material={waterlineMaterial} renderOrder={4}>
         <ringGeometry args={[0.5, 0.76, 48]} />
@@ -1592,7 +1881,7 @@ export function PlayerController({ physicsDebug = false }) {
       <LandingDust triggerRef={footstepDustTriggerRef} />
       <LandingDust triggerRef={collisionDustTriggerRef} />
       <group ref={modelFeedbackRef}>
-        <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} inventoryCount={inventoryCount} />
+        <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} inventoryCount={inventoryCount} grounding={modelGrounding} />
       </group>
       <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <mesh>
@@ -1634,6 +1923,17 @@ export function PlayerController({ physicsDebug = false }) {
               <coneGeometry args={[0.06, 0.14, 10]} />
             </mesh>
           </group>
+          {[0, 1, 2, 3, 4].map(index => (
+            <mesh
+              key={`stance-debug-${index}`}
+              ref={node => { debugStanceRefs.current[index] = node; }}
+              visible={false}
+              material={debugMaterials.stanceTerrain}
+              renderOrder={6}
+            >
+              <sphereGeometry args={[index === 0 ? 0.055 : 0.042, 10, 8]} />
+            </mesh>
+          ))}
         </group>
       )}
     </group>

@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import bpy
 
 
@@ -8,7 +9,8 @@ def parse_args():
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--scale", type=float, default=1.0)
-    args, _ = parser.parse_known_args()
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
+    args, _ = parser.parse_known_args(argv)
     return args
 
 

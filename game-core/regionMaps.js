@@ -39,6 +39,7 @@ const REGION_SIZE_BY_TYPE = {
   promontory: [96, 90],
   settlement: [94, 82],
   clearing: [96, 86],
+  grassland: [76, 76],
   camp: [78, 68],
   shipwreck: [92, 82],
   hut: [80, 70],
@@ -51,8 +52,17 @@ const REGION_SIZE_BY_TYPE = {
 
 const AUTHORED_REGION_TERRAIN = {
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
+  ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 360 },
+  POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
+  W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
+  MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
+  GRASS_TEST: { preset: 'grass-test-field', segments: 220 },
+  GRASS_HYBRID_TEST: { preset: 'grass-hybrid-test-field', segments: 240 },
+  CORMORANT_BAY_SPLAT_TEST: { preset: 'cormorant-bay-splat-test', segments: 300 },
+  CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
+  CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },
 };
 
 function humanDirection(edge) {
@@ -124,11 +134,65 @@ function deterministicPoint(seed, index, width, depth) {
   ];
 }
 
-function normalizeSpawn(seedSpawn) {
+let runtimeSpawnSeed = null;
+
+function getRuntimeSpawnSeed() {
+  if (runtimeSpawnSeed !== null) return runtimeSpawnSeed;
+  runtimeSpawnSeed = 0;
+  if (typeof window === 'undefined') return runtimeSpawnSeed;
+  try {
+    const key = 'darwin-three-fauna-spawn-seed';
+    const existing = window.sessionStorage?.getItem(key);
+    if (existing) {
+      runtimeSpawnSeed = Number(existing) || 0;
+      return runtimeSpawnSeed;
+    }
+    runtimeSpawnSeed = Math.floor(Math.random() * 1000000);
+    window.sessionStorage?.setItem(key, String(runtimeSpawnSeed));
+  } catch {
+    runtimeSpawnSeed = 0;
+  }
+  return runtimeSpawnSeed;
+}
+
+function hashText(value) {
+  return Array.from(String(value || '')).reduce((sum, char, index) => (
+    (sum + char.charCodeAt(0) * (index + 17)) >>> 0
+  ), 0);
+}
+
+function seededUnit(seed) {
+  const value = Math.sin(seed * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function scatterAuthoredSpawn(seedSpawn, specimenId, zoneId) {
+  const scatter = seedSpawn.spawnScatter;
+  if (!scatter || !Array.isArray(seedSpawn.position)) return seedSpawn.position;
+  const radiusX = Math.max(0, Number(scatter.radiusX) || 0);
+  const radiusZ = Math.max(0, Number(scatter.radiusZ) || 0);
+  if (!radiusX && !radiusZ) return seedSpawn.position;
+  const base = seedSpawn.position;
+  const seed = hashText(`${zoneId}:${specimenId}:${base.join(',')}`) + getRuntimeSpawnSeed();
+  const angle = seededUnit(seed + 11) * Math.PI * 2;
+  const radius = Math.sqrt(seededUnit(seed + 29));
+  const offsetX = Math.cos(angle) * radiusX * radius;
+  const offsetZ = Math.sin(angle) * radiusZ * radius;
+  const x = base[0] + offsetX;
+  const z = base[2] + offsetZ;
+  const bounds = scatter.bounds || null;
+  return [
+    bounds ? Math.max(bounds.minX ?? -Infinity, Math.min(bounds.maxX ?? Infinity, x)) : x,
+    base[1] || 0,
+    bounds ? Math.max(bounds.minZ ?? -Infinity, Math.min(bounds.maxZ ?? Infinity, z)) : z,
+  ];
+}
+
+function normalizeSpawn(seedSpawn, zoneId = '') {
   if (!seedSpawn || typeof seedSpawn !== 'object') return null;
   const specimenId = canonicalizeSpecimenIds([seedSpawn.specimenId])[0];
   if (!specimenId) return null;
-  const rawPosition = seedSpawn.position;
+  const rawPosition = scatterAuthoredSpawn(seedSpawn, specimenId, zoneId);
   const radiusX = Number(seedSpawn.habitatRadiusX);
   const radiusZ = Number(seedSpawn.habitatRadiusZ);
   if (!Array.isArray(rawPosition) || rawPosition.length < 3 || typeof rawPosition[0] !== 'number' || typeof rawPosition[2] !== 'number') {
@@ -147,7 +211,7 @@ function normalizeSpawn(seedSpawn) {
 function makeSpecimenSpawns(cell, terrain) {
   if (Array.isArray(cell.specimenPlacements) && cell.specimenPlacements.length > 0) {
     const curated = cell.specimenPlacements
-      .map(spawn => normalizeSpawn(spawn))
+      .map(spawn => normalizeSpawn(spawn, cell.id))
       .filter(Boolean);
     const curatedIds = new Set(curated.map(spawn => spawn.specimenId));
     const ids = canonicalizeSpecimenIds(cell.specimens || []);
@@ -214,6 +278,7 @@ function toRegionMap(cell) {
         : ['wind over lava', 'distant surf', 'field bag buckles'],
       loadingNote: cell.description,
       educationalNote: `${cell.name} keeps the expedition tied to locality: specimens only matter when their place and terrain are recorded.`,
+      ...(cell.narration || {}),
     },
   };
 }

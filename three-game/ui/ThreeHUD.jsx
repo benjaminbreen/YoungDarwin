@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
@@ -36,8 +36,14 @@ import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
 import { rarityLabel } from '../world/inspectables';
+import { WEATHER_STATES } from '../world/weatherStates';
 
-const EMPTY_RUNTIME_SPECIMEN_POSITIONS = Object.freeze({});
+const MINIMAP_TRAIL_MS = 15000;
+const MINIMAP_TRAIL_MAX_POINTS = 34;
+const MINIMAP_TRAIL_MIN_STEP = 0.7;
+const SIDEBAR_DEFAULT_SIZE = { width: 286, mapHeight: 236 };
+const SIDEBAR_MIN_SIZE = { width: 236, mapHeight: 178 };
+const SIDEBAR_MAX_SIZE = { width: 386, mapHeight: 330 };
 
 const ROUTE_ENTRY_EDGES = {
   north: 'south',
@@ -50,16 +56,31 @@ const ROUTE_ENTRY_EDGES = {
   southwest: 'northeast',
 };
 
-function clampPercent(value) {
-  return Math.max(6, Math.min(94, value));
+const ROUTE_EDGE_ABBR = {
+  north: 'N',
+  south: 'S',
+  east: 'E',
+  west: 'W',
+  northeast: 'NE',
+  northwest: 'NW',
+  southeast: 'SE',
+  southwest: 'SW',
+};
+
+function clampPercent(value, padding = 6) {
+  return Math.max(padding, Math.min(100 - padding, value));
 }
 
-function worldToMapPercent(position, zone) {
-  const size = zone.terrainSize || zone.bounds * 2 || 100;
-  const half = size / 2;
+function worldToMapPercent(position, zone, padding = 6) {
+  const width = zone.terrainWidth || zone.terrainSize || zone.bounds * 2 || 100;
+  const depth = zone.terrainDepth || zone.terrainSize || zone.bounds * 2 || width;
+  const halfWidth = width / 2;
+  const halfDepth = depth / 2;
+  const x = Number.isFinite(position?.x) ? position.x : 0;
+  const z = Number.isFinite(position?.z) ? position.z : 0;
   return {
-    x: clampPercent(((position.x + half) / size) * 100),
-    y: clampPercent(((position.z + half) / size) * 100),
+    x: clampPercent(((x + halfWidth) / width) * 100, padding),
+    y: clampPercent(((z + halfDepth) / depth) * 100, padding),
   };
 }
 
@@ -85,6 +106,11 @@ function directionDegrees(facing) {
   return Math.atan2(facing.x || 0, facing.z || -1) * (180 / Math.PI);
 }
 
+function routeEdgeLabel(route) {
+  const edge = route.edge || route.exit;
+  return ROUTE_EDGE_ABBR[edge] || String(edge || '').slice(0, 2).toUpperCase();
+}
+
 function formatExpeditionDate(day) {
   const start = new Date(Date.UTC(1835, 8, 17));
   start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
@@ -97,7 +123,7 @@ function formatExpeditionDate(day) {
 }
 
 function formatExpeditionTime(timeOfDay) {
-  const totalMinutes = Math.floor((timeOfDay || 8) * 60);
+  const totalMinutes = Math.floor((timeOfDay ?? 8) * 60);
   const hours24 = Math.floor(totalMinutes / 60) % 24;
   const minutes = totalMinutes % 60;
   const period = hours24 >= 12 ? 'PM' : 'AM';
@@ -110,6 +136,12 @@ function formatExpeditionTime(timeOfDay) {
 function formatBannerObjective(objective) {
   const stripped = objective.replace(/^Quest: /, '');
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
+function sentenceCase(value) {
+  return String(value || '')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 function InspectableTooltip() {
@@ -198,26 +230,214 @@ function TopChronometer() {
   );
 }
 
+const WEATHER_OPTIONS = Object.keys(WEATHER_STATES);
+
+const WEATHER_COPY = {
+  sunny: {
+    title: 'Clear Trade Wind',
+    note: 'Bright equatorial light, thin cloud, hard shadows.',
+  },
+  cloudy: {
+    title: 'Broken Cloud',
+    note: 'Cumulus crossing the bay with softened glare.',
+  },
+  sunshower: {
+    title: 'Rainbow Shower',
+    note: 'Sun through light rain; best for bows near dawn or late afternoon.',
+  },
+  overcast: {
+    title: 'Overcast Sky',
+    note: 'A sealed grey deck dims the volcanic shore.',
+  },
+  misty: {
+    title: 'Garua Mist',
+    note: 'Cool low vapour drifts from the higher ground.',
+  },
+  drizzle: {
+    title: 'Fine Drizzle',
+    note: 'Light rain and mist bead on the field notes.',
+  },
+  rain: {
+    title: 'Rain Squall',
+    note: 'A wet cloud deck moves in from the water.',
+  },
+  storm: {
+    title: 'Storm Front',
+    note: 'Heavy rain, low cloud, and uncertain light.',
+  },
+};
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+
+function WeatherGlyph({ weather, className = '' }) {
+  const kind = weather === 'misty' ? 'fog' : weather;
+  const sunshower = kind === 'sunshower';
+  const rain = sunshower || kind === 'drizzle' || kind === 'rain' || kind === 'storm';
+  const storm = kind === 'storm';
+  const sun = kind === 'sunny';
+  const fog = kind === 'fog';
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+      {sun ? (
+        <>
+          <circle cx="12" cy="12" r="3.4" fill="currentColor" fillOpacity="0.22" />
+          <path d="M12 3.5 V5.3 M12 18.7 V20.5 M3.5 12 H5.3 M18.7 12 H20.5 M5.9 5.9 L7.2 7.2 M16.8 16.8 L18.1 18.1 M18.1 5.9 L16.8 7.2 M7.2 16.8 L5.9 18.1" opacity="0.75" />
+        </>
+      ) : (
+        <>
+          {sunshower && (
+            <>
+              <circle cx="7.2" cy="7.2" r="2.3" fill="currentColor" fillOpacity="0.18" />
+              <path d="M7.2 2.8 V4 M7.2 10.4 V11.6 M2.8 7.2 H4 M10.4 7.2 H11.6 M4.1 4.1 L5 5 M9.4 9.4 L10.3 10.3" opacity="0.5" />
+            </>
+          )}
+          <path d="M7.4 15.2 H17.1 C19 15.2 20.5 13.8 20.5 12 C20.5 10.2 19.1 8.9 17.4 8.8 C16.8 6.3 14.7 4.8 12.3 4.8 C9.9 4.8 8 6.2 7.2 8.4 C5.1 8.5 3.5 9.9 3.5 11.8 C3.5 13.7 5.1 15.2 7.4 15.2 Z" fill="currentColor" fillOpacity="0.12" />
+          {(kind === 'cloudy' || kind === 'overcast') && <path d="M5.2 18.2 H18.8" opacity="0.45" />}
+        </>
+      )}
+      {fog && (
+        <>
+          <path d="M4.5 17.2 H19.5 M6.2 20 H17.8" opacity="0.75" />
+        </>
+      )}
+      {rain && (
+        <>
+          <path d="M8.2 17.4 L7.2 20.2 M12 17.4 L11 20.2 M15.8 17.4 L14.8 20.2" opacity="0.75" />
+          {storm && <path d="M13.2 10.8 L10.8 15 H13.2 L11.9 19.1 L16.1 13.6 H13.6 Z" fill="currentColor" fillOpacity="0.35" />}
+        </>
+      )}
+    </svg>
+  );
+}
+
 function TopObjective({ objective }) {
   const day = useThreeGameStore(state => state.day);
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const weather = useThreeGameStore(state => state.weather);
+  const setWeather = useThreeGameStore(state => state.setWeather);
+  const setWeatherOverride = useThreeGameStore(state => state.setWeatherOverride);
+  const setTimeOfDay = useThreeGameStore(state => state.setTimeOfDay);
+  const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const zone = getZone(currentZoneId);
+  const weatherCopy = WEATHER_COPY[weather] || {
+    title: sentenceCase(weather || 'weather'),
+    note: 'Local conditions recorded from the sky.',
+  };
+
+  const selectWeather = nextWeather => {
+    const nowMinutes = (day || 1) * 1440 + (timeOfDay || 0) * 60;
+    setWeather(nextWeather);
+    setWeatherOverride({ state: nextWeather, untilMinutes: nowMinutes + 240 });
+    setMenuOpen(false);
+    setExpanded(true);
+  };
 
   return (
     <div className="absolute left-1/2 top-3 hidden w-[min(36rem,calc(100vw-42rem))] min-w-[22rem] -translate-x-1/2 text-center xl:block">
-      <ExpeditionPanel interactive={false} innerClassName="flex items-center gap-3 px-4 py-2.5">
-        <CompassRoseIcon className="h-7 w-7 shrink-0 text-expedition-gold" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-semibold tracking-wide text-expedition-parchment">
-            {formatBannerObjective(objective)}
+      <ExpeditionPanel innerClassName="p-0">
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(value => !value);
+            if (expanded) setMenuOpen(false);
+          }}
+          aria-expanded={expanded}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+        >
+          <CompassRoseIcon className="h-7 w-7 shrink-0 text-expedition-gold" />
+          <div className="min-w-0 flex-1 text-center">
+            <div className="truncate text-[15px] font-semibold tracking-wide text-expedition-parchment">
+              {formatBannerObjective(objective)}
+            </div>
+            <div className="mt-0.5 flex items-center justify-center gap-2 text-[11.5px] text-expedition-faded">
+              <span className="truncate">{zone.name}</span>
+              <span className="text-expedition-brass">&bull;</span>
+              <span>{formatExpeditionDate(day)}</span>
+              <span className="text-expedition-brass">&bull;</span>
+              <span>{formatExpeditionTime(timeOfDay)}</span>
+            </div>
           </div>
-          <div className="mt-0.5 flex items-center justify-center gap-2 text-[11.5px] text-expedition-faded">
-            <span className="truncate">{zone.name}</span>
-            <span className="text-expedition-brass">&bull;</span>
-            <span>{formatExpeditionDate(day)}</span>
-            <span className="text-expedition-brass">&bull;</span>
-            <span>{formatExpeditionTime(timeOfDay)}</span>
+          <span className={`shrink-0 text-expedition-gold transition ${expanded ? 'rotate-180' : ''}`} aria-hidden="true">
+            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3.5 6 L8 10.5 L12.5 6" />
+            </svg>
+          </span>
+        </button>
+        <div className={`overflow-visible border-t border-expedition-brass/45 transition-all duration-300 ease-out ${expanded ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
+          <div className="relative grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left">
+            <button
+              type="button"
+              onClick={event => {
+                event.stopPropagation();
+                setMenuOpen(value => !value);
+              }}
+              title="Select test weather"
+              aria-label="Select test weather"
+              aria-expanded={menuOpen}
+              className="flex h-10 w-10 items-center justify-center rounded-sm border border-expedition-gold/60 bg-expedition-gold/12 text-expedition-gold transition hover:border-expedition-goldbright hover:bg-expedition-gold/22 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+            >
+              <WeatherGlyph weather={weather} className="h-6 w-6" />
+            </button>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/85">Present Weather</div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className="font-expedition text-[17px] font-semibold leading-none tracking-wide text-expedition-parchment">{weatherCopy.title}</span>
+                <span className="text-[10px] uppercase tracking-[0.16em] text-expedition-faded">{sentenceCase(weather)}</span>
+              </div>
+              <div className="mt-1 truncate text-[11px] italic text-expedition-faded">{weatherCopy.note}</div>
+            </div>
+            <label className="block min-w-[6.8rem] text-left">
+              <span className="block text-[9px] font-semibold uppercase tracking-[0.2em] text-expedition-gold/75">Hour</span>
+              <select
+                value={Math.floor(timeOfDay || 0)}
+                onChange={event => setTimeOfDay(Number(event.target.value))}
+                onClick={event => event.stopPropagation()}
+                className="mt-1 w-full rounded-sm border border-expedition-brass/60 bg-expedition-ink/85 px-2 py-1 font-expedition text-[11px] font-semibold tracking-wide text-expedition-parchment shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)] focus:outline-none focus:ring-1 focus:ring-expedition-gold/70"
+              >
+                {HOUR_OPTIONS.map(hour => (
+                  <option key={hour} value={hour}>
+                    {formatExpeditionTime(hour)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="hidden text-right text-[10px] uppercase tracking-[0.18em] text-expedition-brass/85 2xl:block">
+              Sky log
+            </div>
+            {menuOpen && (
+              <div
+                className="absolute left-4 top-[calc(100%-0.25rem)] z-40 w-[20rem] rounded-md border border-expedition-brass/80 bg-[rgba(13,18,25,0.96)] p-2 shadow-[0_18px_34px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md"
+                onClick={event => event.stopPropagation()}
+              >
+                <div className="mb-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/80">Barometer Drawer</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {WEATHER_OPTIONS.map(option => {
+                    const active = option === weather;
+                    const copy = WEATHER_COPY[option] || { title: sentenceCase(option) };
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => selectWeather(option)}
+                        className={`flex items-center gap-2 rounded-sm border px-2 py-1.5 text-left transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70 ${
+                          active
+                            ? 'border-expedition-gold bg-expedition-gold/22 text-expedition-goldbright'
+                            : 'border-expedition-brass/45 bg-black/20 text-expedition-parchment/85 hover:border-expedition-gold/80 hover:bg-expedition-gold/12'
+                        }`}
+                      >
+                        <WeatherGlyph weather={option} className="h-5 w-5 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block truncate text-[11px] font-semibold tracking-wide">{copy.title}</span>
+                          <span className="block text-[9px] uppercase tracking-[0.14em] text-expedition-faded">{sentenceCase(option)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </ExpeditionPanel>
@@ -298,96 +518,251 @@ function IslandOverview({ zoneId, zoneName }) {
   );
 }
 
-function MapOverlays({ zone, zoom = 1, focus = null }) {
-  const collected = useThreeGameStore(state => state.collectedSpecimenIds);
-  const documented = useThreeGameStore(state => state.documentedSpecimenIds);
-  const selected = useThreeGameStore(state => state.selectedSpecimenId);
-  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
-  const playerPose = useThreeGameStore(state => state.playerPose);
-  const runtimeSpecimenPositions = useThreeGameStore(state => (
-    state.specimenRuntimePositions?.[zone.id] || EMPTY_RUNTIME_SPECIMEN_POSITIONS
+// One marker per specimen, each subscribing only to its own runtime position
+// (plus its own collected/documented/selected flags). Memoised so that when one
+// animal moves, only that animal's marker re-renders — not the whole minimap.
+const SpecimenMarker = memo(function SpecimenMarker({
+  specimen, zone, surveyStyle, showKnown, showNew, active, onToggle,
+}) {
+  const runtime = useThreeGameStore(state => state.specimenRuntimePositions?.[zone.id]?.[specimen.id]);
+  const isCollected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
+  const isDocumented = useThreeGameStore(state => state.documentedSpecimenIds.includes(specimen.id));
+  const isSelected = useThreeGameStore(state => (
+    state.selectedSpecimenId === specimen.id || state.nearbySpecimenId === specimen.id
   ));
-  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
-  const specimens = getThreeSpecimens(zone.id);
-  const player = worldToMapPercent(playerPose.position || { x: 0, z: 0 }, zone);
-  const heading = directionDegrees(playerPose.facing || { x: 0, z: -1 });
+  const [x, , z] = specimen.spawnPoint || [0, 0, 0];
+  const point = worldToMapPercent({
+    x: Number.isFinite(runtime?.x) ? runtime.x : x,
+    z: Number.isFinite(runtime?.z) ? runtime.z : z,
+  }, zone);
+  if (point.x <= -4 || point.x >= 104 || point.y <= -4 || point.y >= 104) return null;
+  const isKnown = isCollected || isDocumented;
+  if ((isKnown && !showKnown) || (!isKnown && !showNew)) return null;
+  const status = isCollected ? 'Collected' : isDocumented ? 'Documented' : 'Unrecorded';
+  return (
+    <button
+      type="button"
+      onClick={event => {
+        event.stopPropagation();
+        onToggle(specimen.id);
+      }}
+      aria-label={`${specimen.name}: ${status}`}
+      className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border shadow transition hover:scale-125 ${
+        isSelected
+          ? 'border-expedition-ink bg-expedition-goldbright ring-2 ring-expedition-goldbright/60'
+          : isCollected || isDocumented
+            ? surveyStyle
+              ? 'border-[#24422c] bg-[#99c98c]/90 ring-1 ring-[#e6d69c]/70'
+              : 'border-emerald-950 bg-emerald-300/90'
+            : surveyStyle
+              ? 'border-[#5c2e2e] bg-[#e5a5a6]/92 ring-1 ring-[#f3dcac]/70'
+              : 'border-expedition-ink/80 bg-rose-300/95'
+      }`}
+      style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
+      title={specimen.name}
+    >
+      {active && (
+        <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-36 -translate-x-1/2 rounded-sm border border-expedition-brass/70 bg-expedition-ink/92 px-2 py-1.5 text-left font-expedition text-[10.5px] leading-tight text-expedition-parchment shadow-lg">
+          <span className="block truncate font-semibold text-expedition-goldbright">{specimen.name}</span>
+          {specimen.latin && <span className="mt-0.5 block truncate italic text-expedition-faded">{specimen.latin}</span>}
+          <span className="mt-1 block uppercase tracking-[0.12em] text-expedition-brass">{status}</span>
+        </span>
+      )}
+    </button>
+  );
+});
 
-  // When zoomed, re-project map percentages so `focus` sits at the center.
-  const project = point => {
-    if (zoom === 1 || !focus) return point;
-    return {
-      x: 50 + (point.x - focus.x) * zoom,
-      y: 50 + (point.y - focus.y) * zoom,
-    };
-  };
-  const visible = point => point.x > -4 && point.x < 104 && point.y > -4 && point.y < 104;
+// Player movement trail. Subscribes only to the (quantised) minimap pose, so it
+// re-renders on player movement without dragging the specimen markers with it.
+function MinimapTrail({ zone }) {
+  const playerX = useThreeGameStore(state => state.minimapPlayerPose.x);
+  const playerZ = useThreeGameStore(state => state.minimapPlayerPose.z);
+  const playerZoneId = useThreeGameStore(state => state.minimapPlayerPose.zoneId);
+  const [trail, setTrail] = useState([]);
+  const playerPosition = playerZoneId === zone.id ? { x: playerX, z: playerZ } : { x: 0, z: 0 };
+
+  useEffect(() => {
+    const now = Date.now();
+    const nextPoint = worldToMapPercent(playerPosition, zone, 3);
+    setTrail(previous => {
+      const recent = previous.filter(point => point.zoneId === zone.id && now - point.t < MINIMAP_TRAIL_MS);
+      const last = recent[recent.length - 1];
+      if (last && Math.hypot(last.x - nextPoint.x, last.y - nextPoint.y) < MINIMAP_TRAIL_MIN_STEP && now - last.t < 1000) {
+        return recent;
+      }
+      return [...recent, { ...nextPoint, zoneId: zone.id, t: now }].slice(-MINIMAP_TRAIL_MAX_POINTS);
+    });
+  }, [playerPosition.x, playerPosition.z, playerZoneId, zone.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setTrail(previous => previous.filter(point => point.zoneId === zone.id && now - point.t < MINIMAP_TRAIL_MS));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [zone.id]);
 
   return (
     <>
-      {zoom === 1 && zone.neighbors.map(route => {
-        const point = routePosition(route.edge || route.exit);
-        return (
-          <button
-            key={route.zoneId}
-            type="button"
-            onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[route.edge] || null })}
-            className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright bg-expedition-gold/85 text-[0] shadow-[0_0_10px_rgba(227,197,133,0.5)] transition hover:bg-expedition-goldbright"
-            style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
-            title={route.label}
-          >
-            {route.label}
-          </button>
-        );
-      })}
-      {specimens.map((specimen, index) => {
-        const [x, , z] = specimen.spawnPoint || [0, 0, 0];
-        const runtime = runtimeSpecimenPositions[specimen.id];
-        const point = project(worldToMapPercent({
-          x: Number.isFinite(runtime?.x) ? runtime.x : x,
-          z: Number.isFinite(runtime?.z) ? runtime.z : z,
-        }, zone));
-        if (!visible(point)) return null;
-        const isCollected = collected.includes(specimen.id);
-        const isDocumented = documented.includes(specimen.id);
-        const isSelected = selected === specimen.id || nearbySpecimenId === specimen.id;
+      {trail.map((point, index) => {
+        const age = Date.now() - point.t;
+        const life = Math.max(0, 1 - age / MINIMAP_TRAIL_MS);
+        const size = 2.5 + life * 2.5;
         return (
           <span
-            key={`${specimen.id}-${index}`}
-            className={`absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border shadow ${
-              isSelected
-                ? 'border-expedition-ink bg-expedition-goldbright ring-2 ring-expedition-goldbright/60'
-                : isCollected || isDocumented
-                  ? 'border-emerald-950 bg-emerald-300/90'
-                  : 'border-expedition-ink/80 bg-rose-300/95'
-            }`}
-            style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
-            title={specimen.name}
+            key={`${point.t}-${index}`}
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright"
+            style={{
+              left: percentStyle(point.x),
+              top: percentStyle(point.y),
+              width: `${size}px`,
+              height: `${size}px`,
+              opacity: 0.08 + life * 0.36,
+              boxShadow: `0 0 ${4 + life * 5}px rgba(227,197,133,${0.15 + life * 0.28})`,
+            }}
           />
         );
       })}
+    </>
+  );
+}
+
+// Player arrow. Kept after the markers (matching the original stacking) and
+// likewise subscribed only to the minimap pose.
+function MinimapPlayerArrow({ zone, surveyStyle }) {
+  const playerX = useThreeGameStore(state => state.minimapPlayerPose.x);
+  const playerZ = useThreeGameStore(state => state.minimapPlayerPose.z);
+  const playerHeading = useThreeGameStore(state => state.minimapPlayerPose.heading);
+  const playerZoneId = useThreeGameStore(state => state.minimapPlayerPose.zoneId);
+  const playerPosition = playerZoneId === zone.id ? { x: playerX, z: playerZ } : { x: 0, z: 0 };
+  const player = worldToMapPercent(playerPosition, zone, 3);
+  const heading = Number.isFinite(playerHeading) ? playerHeading : 180;
+  return (
+    <>
       <span
-        className="absolute flex h-5 w-5 items-center justify-center rounded-full border border-expedition-goldbright/90 bg-expedition-ink/68 shadow-lg"
+        className="pointer-events-none absolute h-14 w-14 -translate-x-1/2 -translate-y-full opacity-45"
         style={{
-          left: percentStyle(zoom === 1 ? player.x : 50),
-          top: percentStyle(zoom === 1 ? player.y : 50),
+          left: percentStyle(player.x),
+          top: percentStyle(player.y),
+          transform: `translate(-50%, -86%) rotate(${heading}deg)`,
+          transformOrigin: '50% 86%',
+          clipPath: 'polygon(50% 0%, 86% 100%, 14% 100%)',
+          background: surveyStyle
+            ? 'linear-gradient(180deg, rgba(65,112,116,0.38), rgba(65,112,116,0))'
+            : 'linear-gradient(180deg, rgba(227,197,133,0.42), rgba(227,197,133,0))',
+          filter: surveyStyle
+            ? 'drop-shadow(0 0 5px rgba(55,91,94,0.35))'
+            : 'drop-shadow(0 0 5px rgba(227,197,133,0.35))',
+        }}
+      />
+      <span
+        className={`absolute flex h-6 w-6 items-center justify-center rounded-full border shadow-lg ${
+          surveyStyle
+            ? 'border-[#f1dca3]/90 bg-[#346f72]/78 shadow-[0_2px_8px_rgba(39,68,70,0.48),inset_0_1px_0_rgba(255,255,255,0.24)]'
+            : 'border-expedition-goldbright/90 bg-expedition-ink/68'
+        }`}
+        style={{
+          left: percentStyle(player.x),
+          top: percentStyle(player.y),
           transform: `translate(-50%, -50%) rotate(${heading}deg)`,
         }}
         title="Darwin"
       >
-        <span className="h-0 w-0 border-b-[7px] border-l-[3.5px] border-r-[3.5px] border-b-expedition-goldbright border-l-transparent border-r-transparent" />
+        <span className={`absolute h-4 w-4 rounded-full border ${surveyStyle ? 'border-[#f6e7b6]/35' : 'border-expedition-gold/30'}`} />
+        <span className={`h-0 w-0 border-b-[8px] border-l-[4px] border-r-[4px] border-l-transparent border-r-transparent ${surveyStyle ? 'border-b-[#f6e7b6]' : 'border-b-expedition-goldbright'}`} />
       </span>
     </>
   );
 }
 
-function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
+function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = false }) {
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const [activeMarkerId, setActiveMarkerId] = useState(null);
+  const specimens = getThreeSpecimens(zone.id);
+  const handleToggleMarker = useCallback(id => {
+    setActiveMarkerId(current => (current === id ? null : id));
+  }, []);
+
+  return (
+    <>
+      {zone.neighbors.map(route => {
+        const edge = route.edge || route.exit;
+        const point = routePosition(edge);
+        const edgeLabel = routeEdgeLabel(route);
+        return (
+          <button
+            key={route.zoneId}
+            type="button"
+            onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[edge] || null })}
+            className={`absolute flex h-5 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-1 font-expedition text-[9px] font-bold leading-none shadow transition hover:scale-105 ${
+              surveyStyle
+                ? 'border-[#6f4f24]/65 bg-[#d7b86d]/82 text-[#3b2812] shadow-[0_1px_5px_rgba(63,42,18,0.32),inset_0_1px_0_rgba(255,240,178,0.48)]'
+                : 'border-expedition-goldbright bg-expedition-gold/90 text-expedition-ink shadow-[0_0_10px_rgba(227,197,133,0.5)] hover:bg-expedition-goldbright'
+            }`}
+            style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
+            title={route.label}
+            aria-label={`Travel ${edgeLabel}: ${route.label}`}
+          >
+            {edgeLabel}
+          </button>
+        );
+      })}
+      <MinimapTrail zone={zone} />
+      {specimens.map((specimen, index) => (
+        <SpecimenMarker
+          key={`${specimen.id}-${index}`}
+          specimen={specimen}
+          zone={zone}
+          surveyStyle={surveyStyle}
+          showKnown={showKnown}
+          showNew={showNew}
+          active={activeMarkerId === specimen.id}
+          onToggle={handleToggleMarker}
+        />
+      ))}
+      <MinimapPlayerArrow zone={zone} surveyStyle={surveyStyle} />
+    </>
+  );
+}
+
+function LocalMapDecoration({ surveyStyle, zoneName }) {
+  return (
+    <>
+      <div
+        className={`pointer-events-none absolute inset-[6px] rounded-[2px] ${
+          surveyStyle
+            ? 'border border-[#6c4a24]/35 shadow-[inset_0_0_0_1px_rgba(247,224,166,0.2),inset_0_0_22px_rgba(80,49,22,0.14)]'
+            : 'border border-expedition-gold/20 shadow-[inset_0_0_18px_rgba(4,9,13,0.22)]'
+        }`}
+      />
+      {surveyStyle && (
+        <>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-35 mix-blend-multiply" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M8 91 C28 75 43 53 50 8" stroke="#6c4a24" strokeWidth="0.18" fill="none" strokeDasharray="1.2 1.8" />
+            <path d="M20 96 C38 73 55 50 76 6" stroke="#6c4a24" strokeWidth="0.16" fill="none" strokeDasharray="1.1 2.2" />
+            <path d="M4 30 C27 37 58 42 95 37" stroke="#6c4a24" strokeWidth="0.14" fill="none" strokeDasharray="1.2 2.1" />
+            <path d="M3 68 C32 62 61 61 96 70" stroke="#6c4a24" strokeWidth="0.14" fill="none" strokeDasharray="1.2 2.1" />
+          </svg>
+          <div className="pointer-events-none absolute left-1/2 top-2 max-w-[72%] -translate-x-1/2 truncate rounded-sm border border-[#725027]/35 bg-[rgba(236,214,159,0.42)] px-2 py-0.5 text-center font-expedition text-[9px] font-semibold uppercase tracking-[0.16em] text-[#4b3116] shadow-sm">
+            {zoneName}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = null }) {
   const [view, setView] = useState('local');
+  const [mapStyle, setMapStyle] = useState('terrain');
+  const [showKnown, setShowKnown] = useState(true);
+  const [showNew, setShowNew] = useState(true);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const playerPose = useThreeGameStore(state => state.playerPose);
   const zone = getZone(currentZoneId);
-  const chartUrl = useTerrainChart(zone);
-  const player = worldToMapPercent(playerPose.position || { x: 0, z: 0 }, zone);
-  const zoom = 1;
+  const chartUrl = useTerrainChart(zone, mapStyle);
+  const toggleKnown = () => setShowKnown(value => (value && !showNew ? value : !value));
+  const toggleNew = () => setShowNew(value => (value && !showKnown ? value : !value));
+  const surveyStyle = mapStyle === 'survey';
 
   return (
     <>
@@ -405,7 +780,23 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
         <div className="min-w-0 truncate font-expedition text-[12px] font-light tracking-wide text-expedition-parchment">
           {zone.shortName || zone.name}
         </div>
-        <CompassRoseIcon className="h-4 w-4 shrink-0 text-expedition-gold/80" />
+        <button
+          type="button"
+          onClick={event => {
+            event.stopPropagation();
+            setMapStyle(style => (style === 'survey' ? 'terrain' : 'survey'));
+          }}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+            surveyStyle
+              ? 'border-expedition-goldbright bg-expedition-gold/25 text-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.24)]'
+              : 'border-expedition-brass/45 bg-black/15 text-expedition-gold/80 hover:border-expedition-gold hover:bg-expedition-gold/15'
+          }`}
+          title={surveyStyle ? 'Show terrain minimap' : 'Show survey chart minimap'}
+          aria-label={surveyStyle ? 'Show terrain minimap' : 'Show survey chart minimap'}
+          aria-pressed={surveyStyle}
+        >
+          <CompassRoseIcon className="h-4 w-4" />
+        </button>
       </div>
       <div
         role="button"
@@ -419,7 +810,8 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
           if (event.key === 'Enter' || event.key === ' ') onOpenMap();
         }}
         title="Open island map"
-        className="relative aspect-square cursor-pointer overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-gold focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+        className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-gold focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-square'}`}
+        style={mapHeight ? { height: `${mapHeight}px` } : undefined}
       >
         {view === 'globe' ? (
           <GalapagosGlobe />
@@ -427,23 +819,66 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex' }) {
           <IslandOverview zoneId={currentZoneId} zoneName={zone.shortName || zone.name} />
         ) : (
           <>
+            <div className="absolute left-1.5 top-1.5 z-10 flex overflow-hidden rounded-sm border border-expedition-brass/45 bg-expedition-ink/62 shadow-[0_2px_8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  toggleKnown();
+                }}
+                className={`flex items-center gap-1 border-r border-expedition-brass/30 px-1.5 py-0.5 font-expedition text-[8.5px] font-semibold uppercase tracking-[0.08em] transition ${
+                  showKnown
+                    ? 'bg-[rgba(210,238,197,0.78)] text-[#17361f]'
+                    : 'bg-transparent text-expedition-faded'
+                }`}
+                title="Toggle documented and collected specimen markers"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_4px_rgba(110,231,183,0.7)]" />
+                Known
+              </button>
+              <button
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  toggleNew();
+                }}
+                className={`flex items-center gap-1 px-1.5 py-0.5 font-expedition text-[8.5px] font-semibold uppercase tracking-[0.08em] transition ${
+                  showNew
+                    ? 'bg-[rgba(245,188,191,0.78)] text-[#4b171d]'
+                    : 'bg-transparent text-expedition-faded'
+                }`}
+                title="Toggle unrecorded specimen markers"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-300 shadow-[0_0_4px_rgba(253,164,175,0.7)]" />
+                New
+              </button>
+            </div>
             {chartUrl ? (
               <div
                 className="absolute inset-0"
                 style={{
                   backgroundImage: `url(${chartUrl})`,
-                  backgroundSize: `${zoom * 100}% ${zoom * 100}%`,
+                  backgroundSize: '100% 100%',
                   backgroundRepeat: 'no-repeat',
-                  backgroundPosition: zoom === 1 ? 'center' : `${player.x}% ${player.y}%`,
+                  backgroundPosition: 'center',
                   imageRendering: 'auto',
                 }}
               />
             ) : (
-              <div className="absolute inset-0 bg-[#27505d]" />
+              <div className={`absolute inset-0 ${surveyStyle ? 'bg-[#cdbb8b]' : 'bg-[#27505d]'}`} />
             )}
+            {surveyStyle && (
+              <>
+                <div className="pointer-events-none absolute inset-[8px] border border-[rgba(62,39,21,0.28)] shadow-[inset_0_0_0_1px_rgba(232,210,157,0.18)]" />
+                <div className="pointer-events-none absolute bottom-2 left-2 rounded-sm border border-[rgba(69,45,26,0.38)] bg-[rgba(238,218,165,0.54)] px-1.5 py-1 font-expedition text-[8px] font-semibold uppercase leading-none tracking-[0.12em] text-[rgba(55,35,20,0.82)] shadow-sm">
+                  100 ft
+                </div>
+              </>
+            )}
+            <LocalMapDecoration surveyStyle={surveyStyle} zoneName={zone.shortName || zone.name} />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_62%,rgba(10,8,5,0.28)_100%)]" />
             <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(227,197,133,0.05),transparent_45%,rgba(10,8,5,0.10))]" />
-            <MapOverlays zone={zone} zoom={zoom} focus={player} />
+            <MapOverlays zone={zone} showKnown={showKnown} showNew={showNew} surveyStyle={surveyStyle} />
           </>
         )}
         <span className="absolute bottom-1 right-1.5 flex items-center text-expedition-parchment/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
@@ -543,9 +978,34 @@ function SpeakerLine({ speaker, icon, portrait, time, children }) {
 const LOG_MIN_HEIGHT = 104;
 const LOG_DEFAULT_HEIGHT = 232;
 
+function HotkeysResponse() {
+  const sections = [
+    ['Movement', ['WASD / arrows: move', 'Shift: run', 'Space: jump', 'C: crouch or running slide', 'B: dodge roll', 'Q or V: climb / mantle / descend']],
+    ['Camera', ['Mouse drag: rotate camera', 'Scroll: zoom', 'Z / X: rotate left / right', 'M: cycle camera mode']],
+    ['Interaction', ['E: interact, collect, carry, or travel when prompted', 'J: use equipped tool', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
+    ['Direct Actions', ['H: hammer', 'N: net', 'G: gather', 'Y: write', 'I: kneel inspect', 'L: look around', 'O: point', 'P: pray', 'T: trip', 'U: teeter', 'K: sit', 'R: rest / lie down']],
+    ['Narrator Commands', ['hotkeys / controls / commands: show this list', 'north / south / east / west, or go north: travel by direction', '/move <place>: travel to a known place', '/collect <specimen>: collect a named specimen', '/use <tool> on <target>: use a tool on something', 'survey site / look around: record the habitat', 'document <specimen> / sketch <specimen>: make field notes', 'check traps / abandon trap: manage traps', 'rest / sleep / make camp: rest', 'journal / field book / open journal: open the journal']],
+    ['Dev / Debug', ['`: performance panel', '0: asset browser', '7: animal animation lab', '8: Darwin animation lab', '9: cycle Darwin model']],
+  ];
+
+  return (
+    <div className="space-y-2">
+      {sections.map(([title, lines]) => (
+        <div key={title}>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-expedition-gold">{title}</div>
+          <div className="mt-1 grid gap-0.5 text-[13px] leading-snug text-expedition-parchment/95">
+            {lines.map(line => <div key={line}>{line}</div>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function NarrativePanel() {
   const [draft, setDraft] = useState('');
   const [localEcho, setLocalEcho] = useState('');
+  const [localNarratorReply, setLocalNarratorReply] = useState(null);
   const [logHeight, setLogHeight] = useState(LOG_DEFAULT_HEIGHT);
   const logRef = React.useRef(null);
   const dragRef = React.useRef(null);
@@ -581,7 +1041,7 @@ function NarrativePanel() {
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [message, symsLine, educationalNote, localEcho]);
+  }, [message, symsLine, educationalNote, localEcho, localNarratorReply]);
   // Never leave the game deaf to hotkeys if the panel unmounts mid-focus.
   useEffect(() => () => setTypingMode(false), []);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
@@ -596,6 +1056,12 @@ function NarrativePanel() {
     if (!trimmed) return;
     setLocalEcho(trimmed);
     setStamps(prev => ({ ...prev, echo: formatExpeditionTime(timeRef.current) }));
+    if (/^(?:hotkeys?|controls?|commands?|help)$/i.test(trimmed)) {
+      setLocalNarratorReply('hotkeys');
+      setStamps(prev => ({ ...prev, localNarrator: formatExpeditionTime(timeRef.current) }));
+    } else {
+      setLocalNarratorReply(null);
+    }
     setDraft('');
   };
 
@@ -642,6 +1108,11 @@ function NarrativePanel() {
         )}
         {localEcho && (
           <SpeakerLine speaker="You" time={stamps.echo || fallbackTime} icon={<NoteIcon className="h-5 w-5" />}>{localEcho}</SpeakerLine>
+        )}
+        {localNarratorReply === 'hotkeys' && (
+          <SpeakerLine speaker="Narrator" time={stamps.localNarrator || fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />}>
+            <HotkeysResponse />
+          </SpeakerLine>
         )}
       </div>
       <form onSubmit={handleSubmit} className="mt-3 flex items-center gap-2 border-t border-expedition-brass/30 pt-3">
@@ -945,15 +1416,76 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
 function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) {
   const [tab, setTab] = useState('objectives');
   const [expanded, setExpanded] = useState(false);
+  const [folded, setFolded] = useState(false);
+  const [sidebarSize, setSidebarSize] = useState(SIDEBAR_DEFAULT_SIZE);
   const rest = useThreeGameStore(state => state.rest);
+  const resizeRef = React.useRef(null);
+
+  const beginResize = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const pointer = event.pointerId;
+    resizeRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      width: sidebarSize.width,
+      mapHeight: sidebarSize.mapHeight,
+    };
+    event.currentTarget.setPointerCapture?.(pointer);
+  };
+
+  const updateResize = event => {
+    if (!resizeRef.current) return;
+    const nextWidth = Math.max(
+      SIDEBAR_MIN_SIZE.width,
+      Math.min(SIDEBAR_MAX_SIZE.width, resizeRef.current.width + (resizeRef.current.startX - event.clientX)),
+    );
+    const nextHeight = Math.max(
+      SIDEBAR_MIN_SIZE.mapHeight,
+      Math.min(SIDEBAR_MAX_SIZE.mapHeight, resizeRef.current.mapHeight + (event.clientY - resizeRef.current.startY)),
+    );
+    setSidebarSize({ width: nextWidth, mapHeight: nextHeight });
+  };
+
+  const endResize = event => {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const selectOpsTab = nextTab => {
+    if (nextTab === tab) {
+      setFolded(value => !value);
+      return;
+    }
+    setTab(nextTab);
+    setFolded(false);
+  };
 
   return (
-    <div className="hidden h-full w-[20rem] flex-col items-stretch gap-2.5 xl:flex">
+    <div
+      className="hidden h-full flex-col items-stretch gap-2.5 xl:flex"
+      style={{ width: `${sidebarSize.width}px` }}
+    >
       <ExpeditionPanel className="shrink-0" innerClassName="p-2">
-        <MinimapBody onOpenMap={onOpenMap} tabsClassName="flex" />
+        <MinimapBody onOpenMap={onOpenMap} tabsClassName="flex" mapHeight={sidebarSize.mapHeight} />
+        <button
+          type="button"
+          onPointerDown={beginResize}
+          onPointerMove={updateResize}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          title="Resize minimap"
+          aria-label="Resize minimap"
+          className="absolute bottom-1 left-1 z-30 flex h-6 w-6 cursor-sw-resize items-end justify-start rounded-sm border border-expedition-brass/55 bg-expedition-ink/70 p-1 text-expedition-gold/80 shadow-md transition hover:border-expedition-gold hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+        >
+          <span className="block h-3.5 w-3.5 border-b border-l border-current">
+            <span className="block h-2.5 w-2.5 border-b border-l border-current opacity-70" />
+          </span>
+        </button>
       </ExpeditionPanel>
       <ExpeditionPanel
-        className={`min-h-0 transition-[flex-grow] duration-300 ease-in-out ${expanded ? 'grow' : 'grow-0'}`}
+        className={`min-h-0 transition-[flex-grow] duration-300 ease-in-out ${expanded && !folded ? 'grow' : 'grow-0'}`}
         innerClassName="flex h-full min-h-0 flex-col p-3 pb-2"
       >
         <div className="shrink-0">
@@ -964,15 +1496,17 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
               { id: 'inventory', label: 'Inventory' },
             ]}
             active={tab}
-            onSelect={setTab}
+            onSelect={selectOpsTab}
           />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pt-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)]">
-          {tab === 'objectives' && <ObjectivesTab objective={objective} condensed={!expanded} />}
-          {tab === 'specimens' && <SpecimensTab condensed={!expanded} />}
-          {tab === 'inventory' && <InventoryTab onOpenInventory={onOpenInventory} onOpenJournal={onOpenJournal} condensed={!expanded} />}
-        </div>
-        {expanded && (
+        {!folded && (
+          <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pt-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)]">
+            {tab === 'objectives' && <ObjectivesTab objective={objective} condensed={!expanded} />}
+            {tab === 'specimens' && <SpecimensTab condensed={!expanded} />}
+            {tab === 'inventory' && <InventoryTab onOpenInventory={onOpenInventory} onOpenJournal={onOpenJournal} condensed={!expanded} />}
+          </div>
+        )}
+        {expanded && !folded && (
           <div className="mt-2.5 grid shrink-0 grid-cols-2 gap-1.5 border-t border-expedition-brass/40 pt-2.5">
             <button type="button" onClick={onOpenMap} className={GOLD_BUTTON}>
               <span className="inline-flex items-center justify-center gap-1.5"><MapIcon className="h-4 w-4" />View on Map</span>
@@ -983,25 +1517,27 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
             <button type="button" onClick={rest} className={GOLD_BUTTON}>Rest</button>
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => setExpanded(value => !value)}
-          aria-expanded={expanded}
-          title={expanded ? 'Collapse panel' : 'Expand panel'}
-          className="mx-auto mt-2 -mb-0.5 flex h-6 w-12 shrink-0 items-center justify-center rounded-md border border-expedition-brass/70 bg-[rgba(10,14,19,0.75)] text-expedition-gold shadow-[0_2px_6px_rgba(0,0,0,0.45)] transition hover:border-expedition-gold hover:bg-expedition-gold/15 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
-        >
-          <svg
-            viewBox="0 0 12 7"
-            aria-hidden="true"
-            className={`h-[0.55rem] w-4 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
+        {!folded && (
+          <button
+            type="button"
+            onClick={() => setExpanded(value => !value)}
+            aria-expanded={expanded}
+            title={expanded ? 'Collapse panel' : 'Expand panel'}
+            className="mx-auto mt-2 -mb-0.5 flex h-6 w-12 shrink-0 items-center justify-center rounded-md border border-expedition-brass/70 bg-[rgba(10,14,19,0.75)] text-expedition-gold shadow-[0_2px_6px_rgba(0,0,0,0.45)] transition hover:border-expedition-gold hover:bg-expedition-gold/15 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
           >
-            <path d="M1 1 L6 6 L11 1" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 12 7"
+              aria-hidden="true"
+              className={`h-[0.55rem] w-4 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            >
+              <path d="M1 1 L6 6 L11 1" />
+            </svg>
+          </button>
+        )}
       </ExpeditionPanel>
     </div>
   );
@@ -1009,6 +1545,76 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
 
 // ---------------------------------------------------------------------------
 // Prompts + touch controls
+
+const CAMERA_MODE_LABELS = {
+  shoulder: 'Shoulder View',
+  first: 'First Person',
+  top: 'Overhead Chart',
+};
+
+function PromptKey({ children, active = false }) {
+  return (
+    <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 font-expedition text-[10px] font-bold leading-none ${
+      active
+        ? 'border-expedition-goldbright bg-expedition-gold text-expedition-ink'
+        : 'border-expedition-brass/60 bg-black/24 text-expedition-goldbright'
+    }`}>
+      {children}
+    </span>
+  );
+}
+
+function PromptAction({ keyLabel, children, primary = false, onClick = null }) {
+  const content = (
+    <>
+      <PromptKey active={primary}>{keyLabel}</PromptKey>
+      <span className={`truncate ${primary ? 'font-semibold text-expedition-parchment' : 'text-expedition-faded'}`}>{children}</span>
+    </>
+  );
+  const className = `inline-flex min-w-0 items-center gap-1.5 rounded-sm border px-2 py-1 text-left font-expedition text-[11px] leading-none transition ${
+    primary
+      ? 'border-expedition-gold/55 bg-expedition-gold/14 hover:border-expedition-goldbright hover:bg-expedition-gold/22'
+      : 'border-expedition-brass/35 bg-black/18'
+  }`;
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+  return <div className={className}>{content}</div>;
+}
+
+function PromptCard({ title, subtitle, children }) {
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-[34%] w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-sm border border-expedition-brass/75 bg-[rgba(19,24,24,0.76)] px-3 py-2.5 font-expedition text-left shadow-[0_14px_34px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md sm:left-[calc(50%+11rem)] sm:top-[56%]">
+      <div className="flex min-w-0 items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[12px] font-semibold tracking-wide text-expedition-parchment">{title}</div>
+          {subtitle && <div className="mt-0.5 truncate text-[10.5px] italic text-expedition-faded">{subtitle}</div>}
+        </div>
+        <div className="h-px w-10 shrink-0 bg-expedition-brass/45" />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function toolUseCopy(tool) {
+  if (!tool) return 'Use tool';
+  if (tool.id === 'sketch') return 'Write note';
+  if (tool.id === 'shotgun') return 'Fire';
+  if (tool.id === 'hands') return 'Use hands';
+  return `Use ${tool.name}`;
+}
+
+function promptActionText(value) {
+  const stripped = String(value || '').replace(/^press\s+e\s+(?:to\s+)?/i, '').trim();
+  return stripped ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : 'Interact';
+}
 
 function InteractionPrompt() {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
@@ -1019,45 +1625,80 @@ function InteractionPrompt() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  const promptShell =
-    'rounded-md border border-expedition-brass/80 bg-expedition-ink/68 px-3 py-2 text-center font-expedition shadow-[0_12px_30px_rgba(0,0,0,0.5)] backdrop-blur-sm';
   if (carryPrompt) {
     return (
-      <div className={`pointer-events-none absolute left-1/2 top-[42%] w-[min(17rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 sm:left-[calc(50%+11rem)] sm:top-[56%] ${promptShell}`}>
-        <div className="truncate text-xs font-bold text-expedition-parchment sm:text-sm">{carryPrompt.label}</div>
-        <div className="mt-1.5 rounded-sm bg-expedition-gold px-3 py-1 text-xs font-bold text-expedition-ink sm:text-sm">
-          {carryPrompt.text}
-        </div>
-      </div>
+      <PromptCard title={carryPrompt.label} subtitle={carryPrompt.mode === 'pickup' ? 'Loose field object' : 'Carried object'}>
+        <PromptAction keyLabel="E" primary>{promptActionText(carryPrompt.text)}</PromptAction>
+      </PromptCard>
     );
   }
   if (!nearby && !edgePrompt) return null;
   if (!nearby && edgePrompt) {
     const isOpen = edgePrompt.kind === 'open';
     return (
-      <div className={`pointer-events-auto absolute left-1/2 top-[42%] w-[min(17rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 sm:left-[calc(50%+11rem)] sm:top-[56%] ${promptShell}`}>
-        <div className="truncate text-xs font-bold text-expedition-parchment sm:text-sm">{edgePrompt.label}</div>
-        <div className="line-clamp-2 text-[11px] italic text-expedition-faded">{edgePrompt.message || edgePrompt.description}</div>
+      <PromptCard title={edgePrompt.label} subtitle={edgePrompt.message || edgePrompt.description}>
         {isOpen && (
-          <div className="mt-1.5 rounded-sm bg-expedition-gold px-3 py-1 text-xs font-bold text-expedition-ink sm:text-sm">
-            E - travel
-          </div>
+          <PromptAction keyLabel="E" primary>Travel</PromptAction>
         )}
-      </div>
+        {edgePrompt.minutes !== undefined && (
+          <PromptAction keyLabel=" ">{edgePrompt.minutes}m</PromptAction>
+        )}
+        {edgePrompt.fatigue !== undefined && edgePrompt.fatigue > 0 && (
+          <PromptAction keyLabel="+">{edgePrompt.fatigue} fatigue</PromptAction>
+        )}
+      </PromptCard>
     );
   }
 
+  const mainAction = activeToolId === 'sketch'
+    ? 'Document specimen'
+    : `Collect with ${tool?.name || 'tool'}`;
   return (
-    <div className={`pointer-events-auto absolute left-1/2 top-[42%] w-[min(15rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 sm:left-[calc(50%+11rem)] sm:top-[56%] ${promptShell}`}>
-      <div className="truncate text-xs font-bold text-expedition-parchment sm:text-sm">{nearby.name}</div>
-      <div className="truncate text-[11px] italic text-expedition-faded">{nearby.latin}</div>
-      <button
-        type="button"
-        onClick={() => collectNearby()}
-        className="mt-1.5 rounded-sm bg-expedition-gold px-3 py-1 text-xs font-bold text-expedition-ink transition hover:bg-expedition-goldbright sm:text-sm"
-      >
-        E - use {tool?.name || 'tool'}
-      </button>
+    <PromptCard title={nearby.name} subtitle={nearby.latin}>
+      <PromptAction keyLabel="E" primary onClick={() => collectNearby()}>{mainAction}</PromptAction>
+      <PromptAction keyLabel="I">Inspect</PromptAction>
+      <PromptAction keyLabel="J">{toolUseCopy(tool)}</PromptAction>
+    </PromptCard>
+  );
+}
+
+function CameraModeToast() {
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const [toast, setToast] = useState(null);
+  const mounted = React.useRef(false);
+
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return undefined;
+    }
+    setToast({ id: Date.now(), label: CAMERA_MODE_LABELS[viewMode] || viewMode, note: 'Camera mode' });
+    return undefined;
+  }, [viewMode]);
+
+  useEffect(() => {
+    const onKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (event.code !== 'Tab' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      setToast({ id: Date.now(), label: 'Recentered', note: 'Camera' });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 1450);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  return (
+    <div className={`pointer-events-none absolute left-1/2 top-[5.4rem] w-[min(14rem,calc(100vw-2rem))] -translate-x-1/2 transition-all duration-300 ${toast ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'}`}>
+      <div className="rounded-sm border border-expedition-brass/65 bg-[rgba(19,24,24,0.68)] px-3 py-2 text-center font-expedition shadow-[0_10px_26px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(227,197,133,0.14)] backdrop-blur-md">
+        <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">{toast?.note || 'Camera'}</div>
+        <div className="mt-0.5 text-[13px] font-semibold text-expedition-parchment">{toast?.label || CAMERA_MODE_LABELS[viewMode] || viewMode}</div>
+      </div>
     </div>
   );
 }
@@ -1089,7 +1730,7 @@ function TouchButton({ control, label, className = '' }) {
 
 function MobileTouchControls() {
   return (
-    <div className="pointer-events-auto absolute bottom-[4.85rem] left-3 flex items-end gap-2 md:hidden">
+    <div className="pointer-events-auto absolute bottom-[23rem] left-3 flex items-end gap-2 md:hidden">
       <div className="grid grid-cols-3 gap-1">
         <div />
         <TouchButton control="forward" label="W" className="h-9 w-9 text-xs" />
@@ -1099,13 +1740,13 @@ function MobileTouchControls() {
         <TouchButton control="right" label="D" className="h-9 w-9 text-xs" />
       </div>
       <div className="grid grid-cols-1 gap-1">
-        <TouchButton control="jump" label="J" className="h-9 w-9 text-xs" />
+        <TouchButton control="jump" label="SPC" className="h-9 w-9 text-[10px]" />
         <TouchButton control="dodge" label="B" className="h-9 w-9 text-xs" />
-        <TouchButton control="run" label="R" className="h-9 w-9 text-xs" />
+        <TouchButton control="run" label="RUN" className="h-9 w-9 text-[10px]" />
         <TouchButton control="interact" label="E" className="h-9 w-9 bg-expedition-gold/90 text-expedition-ink text-xs" />
       </div>
       <div className="grid grid-cols-1 gap-1">
-        <TouchButton control="crouch" label="Q" className="h-9 w-9 text-xs" />
+        <TouchButton control="crouch" label="C" className="h-9 w-9 text-xs" />
         <TouchButton control="rifle" label="Aim" className="h-9 w-11 text-[10px]" />
       </div>
     </div>
@@ -1180,6 +1821,7 @@ export function ThreeHUD({ onTogglePerf }) {
       </div>
 
       <InteractionPrompt />
+      <CameraModeToast />
       <InspectableTooltip />
 
       <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">

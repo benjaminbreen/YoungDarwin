@@ -8,6 +8,7 @@ import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
+import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // ---------------------------------------------------------------------------
 // Stylized tropical water.
@@ -42,22 +43,114 @@ const REFLECTION_TIME_DELTA = 0.035; // in-game hours
 const HMIN = -6.0;
 const HSPAN = 9.0;
 
+const WATER_QUALITY = {
+  performance: {
+    bakeRes: 256,
+    segments: 64,
+    reflectionRes: 256,
+  },
+  cinematic: {
+    bakeRes: BAKE_RES,
+    segments: WATER_SEGMENTS,
+    reflectionRes: REFLECTION_RES,
+  },
+};
+
+function waterQualityConfig(quality) {
+  return WATER_QUALITY[quality] || WATER_QUALITY.performance;
+}
+
+const WATER_DAY = {
+  sand: new THREE.Color('#aed6e2'),
+  scatter: new THREE.Color('#41c0d8'),
+  deep: new THREE.Color('#357fb0'),
+  openDeep: new THREE.Color('#23689a'),
+  // Slightly blue-grey: pure white foam over a bright sea is what blows out.
+  foam: new THREE.Color('#e9f4f0'),
+};
+
+const WATER_NIGHT = {
+  sand: new THREE.Color('#172b37'),
+  scatter: new THREE.Color('#123f55'),
+  deep: new THREE.Color('#081b2d'),
+  openDeep: new THREE.Color('#05111f'),
+  foam: new THREE.Color('#9db6c8'),
+};
+
+// Metres of shoreline distance packed into the depth texture's green byte.
+// Surf lives well inside this range; clamping beyond it is harmless.
+const SHORE_DIST_RANGE = 60;
+
 // Bake the seafloor height under the water plane into a texture so the shader
-// can read water depth per-pixel without a runtime depth prepass.
-function bakeSeafloorTexture(zoneId) {
-  const data = new Uint8Array(BAKE_RES * BAKE_RES * 4);
-  for (let j = 0; j < BAKE_RES; j += 1) {
-    for (let i = 0; i < BAKE_RES; i += 1) {
-      const x = (i / (BAKE_RES - 1) - 0.5) * WATER_SIZE;
-      const z = (j / (BAKE_RES - 1) - 0.5) * WATER_SIZE;
-      const h = terrainHeight(x, z, zoneId);
-      const packed = Math.round(THREE.MathUtils.clamp((h - HMIN) / HSPAN, 0, 1) * 255);
-      const idx = (j * BAKE_RES + i) * 4;
-      data[idx] = packed;
-      data[idx + 3] = 255;
+// can read water depth per-pixel without a runtime depth prepass. The green
+// channel carries the distance to the waterline (a chamfer distance
+// transform), which drives the surf: wave fronts are lines of constant
+// *shore distance*, so their world-space spacing is identical on a steep
+// beach face and a nearly flat reef shelf. Depth-driven fronts (the previous
+// approach) degenerate into huge sheets wherever the bed is flat.
+function bakeSeafloorTexture(zoneId, bakeRes = BAKE_RES) {
+  const heights = new Float32Array(bakeRes * bakeRes);
+  for (let j = 0; j < bakeRes; j += 1) {
+    for (let i = 0; i < bakeRes; i += 1) {
+      const x = (i / (bakeRes - 1) - 0.5) * WATER_SIZE;
+      const z = (j / (bakeRes - 1) - 0.5) * WATER_SIZE;
+      heights[j * bakeRes + i] = terrainHeight(x, z, zoneId);
     }
   }
-  const texture = new THREE.DataTexture(data, BAKE_RES, BAKE_RES, THREE.RGBAFormat);
+
+  // Two-pass chamfer distance to the waterline, in grid cells.
+  const FAR = 1e9;
+  const dist = new Float32Array(bakeRes * bakeRes).fill(FAR);
+  const wet = idx => heights[idx] < WATER_LEVEL;
+  for (let j = 0; j < bakeRes; j += 1) {
+    for (let i = 0; i < bakeRes; i += 1) {
+      const idx = j * bakeRes + i;
+      if (!wet(idx)) {
+        dist[idx] = 0; // land: zero, so the gradient starts at the waterline
+        continue;
+      }
+      const leftDry = i > 0 && !wet(idx - 1);
+      const rightDry = i < bakeRes - 1 && !wet(idx + 1);
+      const upDry = j > 0 && !wet(idx - bakeRes);
+      const downDry = j < bakeRes - 1 && !wet(idx + bakeRes);
+      if (leftDry || rightDry || upDry || downDry) dist[idx] = 0.5;
+    }
+  }
+  const D1 = 1;
+  const D2 = Math.SQRT2;
+  for (let j = 0; j < bakeRes; j += 1) {
+    for (let i = 0; i < bakeRes; i += 1) {
+      const idx = j * bakeRes + i;
+      if (i > 0) dist[idx] = Math.min(dist[idx], dist[idx - 1] + D1);
+      if (j > 0) {
+        dist[idx] = Math.min(dist[idx], dist[idx - bakeRes] + D1);
+        if (i > 0) dist[idx] = Math.min(dist[idx], dist[idx - bakeRes - 1] + D2);
+        if (i < bakeRes - 1) dist[idx] = Math.min(dist[idx], dist[idx - bakeRes + 1] + D2);
+      }
+    }
+  }
+  for (let j = bakeRes - 1; j >= 0; j -= 1) {
+    for (let i = bakeRes - 1; i >= 0; i -= 1) {
+      const idx = j * bakeRes + i;
+      if (i < bakeRes - 1) dist[idx] = Math.min(dist[idx], dist[idx + 1] + D1);
+      if (j < bakeRes - 1) {
+        dist[idx] = Math.min(dist[idx], dist[idx + bakeRes] + D1);
+        if (i < bakeRes - 1) dist[idx] = Math.min(dist[idx], dist[idx + bakeRes + 1] + D2);
+        if (i > 0) dist[idx] = Math.min(dist[idx], dist[idx + bakeRes - 1] + D2);
+      }
+    }
+  }
+
+  const cellSize = WATER_SIZE / (bakeRes - 1);
+  const data = new Uint8Array(bakeRes * bakeRes * 4);
+  for (let idx = 0; idx < bakeRes * bakeRes; idx += 1) {
+    const packedH = Math.round(THREE.MathUtils.clamp((heights[idx] - HMIN) / HSPAN, 0, 1) * 255);
+    const metres = Math.min(dist[idx] * cellSize, SHORE_DIST_RANGE);
+    data[idx * 4] = packedH;
+    data[idx * 4 + 1] = Math.round((metres / SHORE_DIST_RANGE) * 255);
+    data[idx * 4 + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, bakeRes, bakeRes, THREE.RGBAFormat);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -115,6 +208,43 @@ const WAVE_GLSL = /* glsl */`
     float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.45) * 0.3) * 0.115;
     return lift * smoothstep(1.3, 0.05, max(depthRaw, 0.0));
   }
+
+  // --- surf fronts ----------------------------------------------------------
+  // Wave fronts are lines of constant shore distance marching toward the
+  // beach: constant world-space spacing on every coastline. bn* helpers are
+  // namespaced to avoid clashing with the fragment stage's noise.
+  float bnHash(vec2 p) { return fract(sin(dot(p, vec2(157.31, 113.97))) * 43137.71); }
+  float bnNoise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(bnHash(i), bnHash(i + vec2(1.0, 0.0)), u.x),
+               mix(bnHash(i + vec2(0.0, 1.0)), bnHash(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+
+  const float BREAKER_WAVELENGTH = 12.0; // metres between fronts
+  const float BREAKER_SPEED = 1.25;      // shoreward metres per second
+
+  // Phase of the marching fronts. f runs 0 -> 1 between fronts, with the lip
+  // at f = 0; strength varies per front and along the shore so sets of waves
+  // feel uneven; the envelope confines surf to the breaker band.
+  float breakerField(vec2 wxz, float t, float sd, float depth, out float f, out float strength) {
+    float u = sd / BREAKER_WAVELENGTH + t * (BREAKER_SPEED / BREAKER_WAVELENGTH)
+      + bnNoise(wxz * 0.05) * 0.45; // wobble the lines so they aren't ruler-straight
+    f = fract(u);
+    float id = floor(u);
+    strength = 0.5 + 0.5 * bnNoise(vec2(id * 3.7, (wxz.x + wxz.y) * 0.025 + id));
+    float band = smoothstep(30.0, 21.0, sd) * smoothstep(2.4, 4.5, sd);
+    float depthGate = smoothstep(0.08, 0.3, depth) * smoothstep(3.2, 1.9, depth);
+    return band * depthGate;
+  }
+
+  // Vertex-stage swell at the breaking lip so the front has a silhouette.
+  float breakerLift(vec2 wxz, float t, float sd, float depth) {
+    float f, s;
+    float env = breakerField(wxz, t, sd, depth, f, s);
+    float lip = smoothstep(0.14, 0.03, f);
+    return lip * env * s * 0.13;
+  }
 `;
 
 function createStylizedWaterMaterial(seafloorTexture) {
@@ -127,13 +257,13 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
       // Fallback painted colour (used until the first refraction grab lands).
-      uSand: { value: new THREE.Color('#aed6e2') },
+      uSand: { value: WATER_DAY.sand.clone() },
       // Water body: luminous tropical scatter + absorption per channel
       // (red dies first), eased into open-ocean blue with depth.
-      uScatter: { value: new THREE.Color('#41c0d8') },
+      uScatter: { value: WATER_DAY.scatter.clone() },
       uAbsorb: { value: new THREE.Vector3(0.42, 0.20, 0.10) },
-      uDeep: { value: new THREE.Color('#357fb0') },
-      uFoam: { value: new THREE.Color('#f4ffff') },
+      uDeep: { value: WATER_DAY.deep.clone() },
+      uFoam: { value: WATER_DAY.foam.clone() },
       uSky: { value: new THREE.Color('#bfe6ff') },
       uSkyHorizon: { value: new THREE.Color('#eaf6ff') },
       uHaze: { value: new THREE.Color('#cfe6f4') },
@@ -142,6 +272,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uSun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       uSunColor: { value: new THREE.Color('#fff3da') },
       uDaylight: { value: 1 },
+      uRain: { value: 0 },
       // Screen-space refraction source (framebuffer grab taken just before
       // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
@@ -170,6 +301,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         return packed * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)});
       }
 
+      float shoreDistAt(vec2 wxz) {
+        vec2 uv = wxz / uSize + 0.5;
+        return texture2D(uSeafloor, uv).g * ${SHORE_DIST_RANGE.toFixed(1)};
+      }
+
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
         float floorH = seafloorAt(world.xz);
@@ -179,6 +315,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         vec3 disp = gerstner(world.xz, uTime, swellAtten(depth), normal);
         world.xyz += disp;
         world.y += swashLift(world.xz, uTime, depth);
+        world.y += breakerLift(world.xz, uTime, shoreDistAt(world.xz), depth);
         vCrest = disp.y;
         vWorld = world.xyz;
         vReflCoord = uReflMatrix * vec4(world.xyz, 1.0);
@@ -198,6 +335,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform vec3 uSun;
       uniform vec3 uSunColor;
       uniform float uDaylight;
+      uniform float uRain;
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform float uWaterLevel;
@@ -227,6 +365,46 @@ function createStylizedWaterMaterial(seafloorTexture) {
         return uWaterLevel - (texture2D(uSeafloor, uv).r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)}));
       }
 
+      float shoreDistAt(vec2 wxz) {
+        vec2 uv = wxz / uSize + 0.5;
+        return texture2D(uSeafloor, uv).g * ${SHORE_DIST_RANGE.toFixed(1)};
+      }
+
+      // Cellular noise for foam structure: real foam is a lattice of bubbles
+      // and gaps, which Worley captures and smoothstepped value noise cannot.
+      float worley(vec2 p) {
+        vec2 cell = floor(p);
+        vec2 f = fract(p);
+        float d = 1.0;
+        for (int y = -1; y <= 1; y++) {
+          for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(float(x), float(y));
+            vec2 o = vec2(bnHash(cell + g), bnHash(cell + g + 19.7));
+            d = min(d, length(g + o - f));
+          }
+        }
+        return d;
+      }
+
+      // Two octaves of advected Worley lace, shared by every foam source.
+      float foamLace(vec2 wxz, float t) {
+        vec2 p = wxz * 1.55 + vec2(t * 0.2, -t * 0.14);
+        float a = 1.0 - worley(p);
+        float b = 1.0 - worley(p * 2.4 + 7.3);
+        return smoothstep(0.42, 0.92, a * 0.62 + b * 0.38);
+      }
+
+      // Surf: a thin crisp lip at the marching front, dissolving white water
+      // trailing behind it, all torn by the lace so no region is solid white.
+      float breakerFoam(vec2 wxz, float t, float sd, float depth, float lace) {
+        float f, s;
+        float env = breakerField(wxz, t, sd, depth, f, s);
+        float lip = smoothstep(0.10, 0.015, f);
+        float trail = smoothstep(0.55, 0.08, f) * (1.0 - lip);
+        float foam = lip * (0.45 + 0.55 * lace) + trail * lace * 0.62;
+        return foam * env * s;
+      }
+
       void main() {
         // --- per-pixel surface normal: analytic swell + scrolling ripples ----
         float dRaw = depthAt(vWorld.xz);   // signed: <0 just inland of the line
@@ -245,6 +423,15 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float sx = noise(rp2 + vec2(e, 0.0)) - s0;
         float sz = noise(rp2 + vec2(0.0, e)) - s0;
         normal = normalize(normal + vec3(-(rx + sx * 0.45), 0.0, -(rz + sz * 0.45)) * 1.25);
+        if (uRain > 0.001) {
+          vec2 rainP = vWorld.xz * 3.7 + vec2(uTime * 0.72, -uTime * 0.58);
+          float rainN = noise(rainP);
+          vec2 rainGrad = vec2(
+            noise(rainP + vec2(e, 0.0)) - rainN,
+            noise(rainP + vec2(0.0, e)) - rainN
+          );
+          normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85);
+        }
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
 
@@ -261,33 +448,34 @@ function createStylizedWaterMaterial(seafloorTexture) {
           float distort = mix(0.004 + min(depth, 2.5) * 0.010, 0.0025, shallowClarity);
           vec2 ruv = clamp(screenUV + normal.xz * distort, vec2(0.001), vec2(0.999));
           vec3 grab = texture2D(uRefraction, ruv).rgb;
-          // The grab is tone-mapped sRGB; approximate decode + a small lift to
-          // compensate for the second tone-mapping pass on the way out.
-          grab = pow(grab, vec3(2.0)) * 1.22;
+          // The grab is tone-mapped sRGB; decode so the Beer-Lambert tint and
+          // the final tone-mapping pass operate on plausible linear values.
+          grab = pow(grab, vec3(2.2));
 
-          // Captured terrain/props are useful detail, but raw seabed colour
-          // should not define the whole water body. Dark basalt in shallow
-          // water gets lifted toward a plausible submerged turquoise, and
-          // highly saturated reef colours are softened before blending.
+          // Keep the captured scene honest. Only dark basalt in very shallow
+          // water gets a mild lift toward submerged turquoise so it doesn't
+          // read as a hole in the sea.
           float grabLum = dot(grab, vec3(0.299, 0.587, 0.114));
           vec3 liftColor = mix(uScatter, uSand, 0.62);
-          float darkLift = shallowClarity * smoothstep(0.44, 0.08, grabLum);
-          vec3 gradedGrab = mix(vec3(grabLum), grab, mix(0.58, 0.86, smoothstep(1.2, 3.0, depth)));
-          gradedGrab = mix(gradedGrab, max(gradedGrab, liftColor * 0.82), darkLift * 0.75);
+          float darkLift = shallowClarity * smoothstep(0.3, 0.06, grabLum);
+          vec3 gradedGrab = mix(grab, max(grab, liftColor * 0.8), darkLift * 0.4);
 
-          float opticalDepth = depth * mix(0.24, 0.86, smoothstep(0.55, 2.8, depth)) + 0.018;
+          float opticalDepth = depth * mix(0.3, 0.9, smoothstep(0.55, 2.8, depth)) + 0.018;
           vec3 bed = gradedGrab * exp(-uAbsorb * opticalDepth);
-          float scatterStrength = mix(0.12, 0.5, smoothstep(0.65, 2.8, depth));
+          float scatterStrength = mix(0.08, 0.5, smoothstep(0.5, 2.8, depth));
           vec3 refractedDetail = bed + uScatter * (1.0 - exp(-depth * 0.30)) * scatterStrength;
-          float captureMix = mix(0.22, 0.38, smoothstep(0.45, 1.55, depth)) * (1.0 - smoothstep(3.2, 7.5, depth));
+          // Shallow water IS the refracted scene; the painted body takes over
+          // only as real depth accumulates.
+          float captureMix = mix(0.85, 0.4, smoothstep(0.4, 2.6, depth)) * (1.0 - smoothstep(3.5, 7.5, depth));
           color = mix(baseWater, refractedDetail, captureMix);
         }
         // Ease into open-ocean blue past the drop-off.
         color = mix(color, uDeep, smoothstep(3.6, 14.0, depth));
 
-        // Opaque body (it *shows* the refracted scene), feathered to nothing
-        // exactly at the moving waterline.
-        float shallowOpacity = mix(0.84, 0.985, smoothstep(0.35, 1.6, depth));
+        // Mostly-opaque body (it *shows* the refracted scene), but genuinely
+        // clear in the shallows — wading legs and the bed stay visible —
+        // feathered to nothing exactly at the moving waterline.
+        float shallowOpacity = mix(0.62, 0.985, smoothstep(0.3, 1.8, depth));
         float alpha = smoothstep(0.0, 0.06, dEff) * shallowOpacity;
 
         // --- reflection: a garnish on top of the clear body -------------------
@@ -301,35 +489,35 @@ function createStylizedWaterMaterial(seafloorTexture) {
           vec3 planar = min(texture2D(uReflection, clamp(mruv, 0.0, 1.0)).rgb, vec3(0.92));
           reflColor = mix(skyRefl, mix(planar, skyRefl, 0.14), valid);
         }
-        // Restrained fresnel: stylized lagoons keep the bottom visible far
-        // beyond what physics says, so the mirror never takes over.
-        float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 4.0);
-        // Grazing angles approach a real water fresnel response: mid/far water
-        // takes a glassy sky sheen while the shallows stay clear turquoise.
-        float reflectance = mix(0.05, 0.8, fres);
-        float reflStrength = mix(0.72, 0.12, shallowFactor);
-        color = mix(color, reflColor, reflectance * reflStrength);
+        // Schlick fresnel with water's real F0: looking down, the surface is
+        // ~2% mirror (the bed shows through); at grazing angles it goes
+        // glassy. Shallows are kept a touch clearer than physics for the
+        // stylized lagoon read.
+        float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
+        float reflectance = 0.02 + 0.98 * fres;
+        float reflStrength = mix(0.85, 0.22, shallowFactor);
+        color = mix(color, reflColor, clamp(reflectance * reflStrength, 0.0, 0.8));
 
-        // --- sun glitter: tight sparkle ---------------------------------------
+        // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
         float spec = pow(max(dot(normal, hv), 0.0), 240.0) * uDaylight;
-        // Sparkle modulation breaks the highlight into glints; pushed past 1.0
-        // so the brightest hits cross the bloom threshold and radiate.
         float glint = 0.6 + 0.8 * smoothstep(0.45, 0.85, noise(vWorld.xz * 5.2 + uTime * 0.6));
-        color += uSunColor * spec * 1.1 * glint;
+        color += uSunColor * min(spec * glint, 1.0) * 0.85 * (1.0 - uRain * 0.72);
+        color = mix(color, color * vec3(0.70, 0.82, 0.86), uRain * 0.18);
 
         // --- foam: crisp lip at the moving waterline + breaking crests --------
         float grad = length(vec2(dRaw - depthAt(vWorld.xz + vec2(0.5, 0.0)),
                                  dRaw - depthAt(vWorld.xz + vec2(0.0, 0.5)))) / 0.5;
-        float shoreBand = smoothstep(0.32, 0.0, dEff) * smoothstep(0.1, 0.45, grad);
-        float lace = noise(vWorld.xz * 3.6 - vec2(uTime * 0.5, uTime * 0.35));
-        float shoreFoam = shoreBand * smoothstep(0.3, 0.75, lace);
+        float lace = foamLace(vWorld.xz, uTime);
+        float shoreBand = smoothstep(0.4, 0.0, dEff) * smoothstep(0.06, 0.35, grad);
+        float shoreFoam = shoreBand * lace;
         shoreFoam = max(shoreFoam, smoothstep(0.09, 0.015, abs(dEff - 0.04)) * smoothstep(0.05, 0.4, grad) * 0.85);
         float breakZone = smoothstep(1.6, 0.5, depth);
-        float crestFoam = smoothstep(0.085, 0.18, vCrest) * breakZone * smoothstep(0.5, 0.9, lace) * 0.5;
-        float foam = clamp(max(shoreFoam, crestFoam), 0.0, 1.0);
-        color = mix(color, uFoam, foam);
-        alpha = max(alpha, foam * 0.95);
+        float crestFoam = smoothstep(0.07, 0.16, vCrest) * breakZone * lace * 0.55;
+        float surf = breakerFoam(vWorld.xz, uTime, shoreDistAt(vWorld.xz), depth, lace);
+        float foam = clamp(max(max(shoreFoam, crestFoam), surf), 0.0, 1.0);
+        color = mix(color, uFoam, foam * 0.88);
+        alpha = max(alpha, foam * 0.8);
 
         // --- atmospheric haze --------------------------------------------------
         float camDist = length(vWorld.xz - cameraPosition.xz);
@@ -361,8 +549,8 @@ function createDeepOceanMaterial() {
       time: { value: 0 },
       // Matches the detailed plane's uDeep at the seam, then travels to a
       // genuinely deep saturated blue: the long tonal ramp reads as distance.
-      shallow: { value: new THREE.Color('#357fb0') },
-      deep: { value: new THREE.Color('#23689a') },
+      shallow: { value: WATER_DAY.deep.clone() },
+      deep: { value: WATER_DAY.openDeep.clone() },
       fogColor: { value: new THREE.Color('#cfe6f4') },
       fogNear: { value: 64 },
       fogFar: { value: 150 },
@@ -426,7 +614,7 @@ function createDeepOceanMaterial() {
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
-        color += sunColor * spec * 1.4 * (1.0 - fog * 0.85);
+        color += sunColor * min(spec, 1.0) * 0.9 * (1.0 - fog * 0.85);
 
         color = mix(color, fogColor, fog);
         gl_FragColor = vec4(color, 1.0);
@@ -515,10 +703,22 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   p.elements[10] = _clipPlane.z + 1.0 - REFLECT_CLIP_BIAS;
   p.elements[14] = _clipPlane.w;
 
-  const hiddenState = hidden
-    .filter(Boolean)
-    .map(object => ({ object, visible: object.visible }));
-  for (let i = 0; i < hiddenState.length; i += 1) hiddenState[i].object.visible = false;
+  const visibilityState = [];
+  scene.traverse(object => {
+    visibilityState.push({ object, visible: object.visible });
+  });
+  if (typeof globalThis !== 'undefined') {
+    globalThis.__threeReflectionDebug = {
+      before: scene.children.slice(0, 12).map(child => ({
+        name: child.name || child.type || 'Object3D',
+        type: child.type,
+        visible: child.visible !== false,
+      })),
+    };
+  }
+  for (let i = 0; i < hidden.length; i += 1) {
+    if (hidden[i]) hidden[i].visible = false;
+  }
   // Reflection is an explicit whitelist: the rippled water needs the terrain,
   // ship, and nearby characters/large silhouettes, not every shrub, fish, and
   // inspectable prop. This keeps reflections on without rendering the full
@@ -539,25 +739,44 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
     _noReflect.push({ object });
     object.visible = false;
   }
+  if (typeof globalThis !== 'undefined' && globalThis.__threeReflectionDebug) {
+    globalThis.__threeReflectionDebug.afterHide = scene.children.slice(0, 12).map(child => ({
+      name: child.name || child.type || 'Object3D',
+      type: child.type,
+      visible: child.visible !== false,
+    }));
+  }
   const prevRT = gl.getRenderTarget();
   const prevShadowAuto = gl.shadowMap.autoUpdate;
-  gl.shadowMap.autoUpdate = false;
-  gl.setRenderTarget(rt);
-  gl.clear();
-  gl.render(scene, _virtualCam);
-  gl.setRenderTarget(prevRT);
-  gl.shadowMap.autoUpdate = prevShadowAuto;
-  for (let i = 0; i < hiddenState.length; i += 1) hiddenState[i].object.visible = hiddenState[i].visible;
-  for (let i = 0; i < _noReflect.length; i += 1) _noReflect[i].object.visible = true;
-  return true;
+  try {
+    gl.shadowMap.autoUpdate = false;
+    gl.setRenderTarget(rt);
+    gl.clear();
+    gl.render(scene, _virtualCam);
+    return true;
+  } finally {
+    gl.setRenderTarget(prevRT);
+    gl.shadowMap.autoUpdate = prevShadowAuto;
+    for (let i = 0; i < visibilityState.length; i += 1) {
+      visibilityState[i].object.visible = visibilityState[i].visible;
+    }
+    if (typeof globalThis !== 'undefined' && globalThis.__threeReflectionDebug) {
+      globalThis.__threeReflectionDebug.afterRestore = scene.children.slice(0, 12).map(child => ({
+        name: child.name || child.type || 'Object3D',
+        type: child.type,
+        visible: child.visible !== false,
+      }));
+    }
+  }
 }
 
 const _noReflect = [];
 const _drawSize = new THREE.Vector2();
 
-export function Water({ reflections = true }) {
+export function Water({ quality = 'performance', reflections = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const { scene, gl } = useThree();
+  const qualityConfig = useMemo(() => waterQualityConfig(quality), [quality]);
 
   // Zone change replaces most of the scene graph: rebuild the reflection
   // hide-list immediately rather than waiting out the refresh counter.
@@ -565,24 +784,27 @@ export function Water({ reflections = true }) {
     _noReflectCache.refreshIn = 0;
   }, [currentZoneId]);
 
-  const seafloor = useMemo(() => bakeSeafloorTexture(currentZoneId), [currentZoneId]);
+  const seafloor = useMemo(
+    () => bakeSeafloorTexture(currentZoneId, qualityConfig.bakeRes),
+    [currentZoneId, qualityConfig.bakeRes],
+  );
   const waterMaterial = useMemo(() => createStylizedWaterMaterial(seafloor), [seafloor]);
   const deepMaterial = useMemo(() => createDeepOceanMaterial(), []);
 
   const waterGeometry = useMemo(
-    () => new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, WATER_SEGMENTS, WATER_SEGMENTS),
-    [],
+    () => new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, qualityConfig.segments, qualityConfig.segments),
+    [qualityConfig.segments],
   );
 
   const reflectionRT = useMemo(() => {
-    const rt = new THREE.WebGLRenderTarget(REFLECTION_RES, REFLECTION_RES, {
+    const rt = new THREE.WebGLRenderTarget(qualityConfig.reflectionRes, qualityConfig.reflectionRes, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
     rt.texture.colorSpace = THREE.SRGBColorSpace;
     return rt;
-  }, []);
+  }, [qualityConfig.reflectionRes]);
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
@@ -639,11 +861,24 @@ export function Water({ reflections = true }) {
     const wu = waterMaterial.uniforms;
     wu.uTime.value = t;
     wu.uSun.value.copy(_sun);
-    wu.uDaylight.value = skyState(time, store.day || 1).daylight;
+    wu.uRain.value = weatherEnv.rainIntensity;
+    const daylight = skyState(time, store.day || 1).daylight;
+    wu.uDaylight.value = daylight;
+    wu.uSand.value.copy(WATER_NIGHT.sand).lerp(WATER_DAY.sand, daylight);
+    wu.uScatter.value.copy(WATER_NIGHT.scatter).lerp(WATER_DAY.scatter, daylight);
+    wu.uDeep.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight);
+    wu.uFoam.value.copy(WATER_NIGHT.foam).lerp(WATER_DAY.foam, daylight);
     if (scene.fog) {
+      const horizonLift = THREE.MathUtils.lerp(0.04, 0.18, daylight);
+      const hazeLift = THREE.MathUtils.lerp(0.08, 0.42, daylight);
       wu.uSky.value.copy(scene.fog.color);
-      wu.uSkyHorizon.value.copy(scene.fog.color).lerp(_white, 0.18);
-      wu.uHaze.value.copy(scene.fog.color).lerp(_white, 0.42);
+      wu.uSkyHorizon.value.copy(scene.fog.color).lerp(_white, horizonLift);
+      wu.uHaze.value.copy(scene.fog.color).lerp(_white, hazeLift);
+      // Match the water's private haze range to the live FogExp2 density so
+      // garua swallows the sea at the same distance it swallows the land.
+      const visibility = 0.83 / Math.max(0.004, weatherEnv.fogDensity);
+      wu.uHazeNear.value = Math.min(64, visibility * 0.5);
+      wu.uHazeFar.value = Math.min(150, visibility * 1.7);
     }
 
     const disc = deepRef.current;
@@ -656,6 +891,8 @@ export function Water({ reflections = true }) {
       du.sun.value.copy(_sun);
       du.sunColor.value.copy(wu.uSunColor.value);
       du.daylight.value = wu.uDaylight.value;
+      du.shallow.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight);
+      du.deep.value.copy(WATER_NIGHT.openDeep).lerp(WATER_DAY.openDeep, daylight);
       if (scene.fog) du.fogColor.value.copy(wu.uHaze.value);
     }
 
@@ -704,11 +941,26 @@ export function Water({ reflections = true }) {
   if (['beagle', 'interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
 
   return (
-    <group>
-      <mesh ref={deepRef} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL - 0.08, 0]} material={deepMaterial} renderOrder={-4} frustumCulled={false}>
+    <group userData={{
+      renderSource: `water:${currentZoneId}`,
+      renderLabel: `${currentZoneId} water`,
+      renderKind: 'water',
+      renderPath: null,
+    }}>
+      <mesh ref={deepRef} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL - 0.08, 0]} material={deepMaterial} renderOrder={-4} frustumCulled={false} userData={{
+        renderSource: `water:${currentZoneId}:deep-disc`,
+        renderLabel: `${currentZoneId} deep water disc`,
+        renderKind: 'water',
+        renderPath: null,
+      }}>
         <circleGeometry args={[160, 64]} />
       </mesh>
-      <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} />
+      <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} userData={{
+        renderSource: `water:${currentZoneId}:surface`,
+        renderLabel: `${currentZoneId} water surface`,
+        renderKind: 'water',
+        renderPath: null,
+      }} />
     </group>
   );
 }

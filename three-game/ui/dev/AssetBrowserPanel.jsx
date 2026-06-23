@@ -16,6 +16,7 @@ const BROWSER_ASSETS = [
   { id: 'grass-2', label: 'Grass Patch 2 (new)', path: '/assets/models/nature/runtime-grass-patch-2.glb' },
   { id: 'grass-3', label: 'Grass Patch 3 (new)', path: '/assets/models/nature/runtime-grass-patch-3.glb' },
   { id: 'opuntia', label: 'Opuntia / Prickly Pear (new)', path: '/assets/models/nature/runtime-opuntia.glb' },
+  { id: 'candelabra-cactus', label: 'Candelabra Cactus (new)', path: '/assets/models/nature/runtime-candelabra-cactus.glb' },
   { id: 'ground-plants', label: 'Ground Plants (new)', path: '/assets/models/nature/runtime-ground-plants.glb' },
   // Northern Shore flora set — named for the species Darwin would have met on
   // Floreana's arid coastal zone in 1835.
@@ -24,6 +25,7 @@ const BROWSER_ASSETS = [
   { id: 'saltbush-3', label: 'Monte Salado / Saltbush 3 (large)', path: '/assets/models/nature/runtime-saltbush-3.glb' },
   { id: 'croton', label: 'Chala / Croton scouleri', path: '/assets/models/nature/runtime-croton.glb' },
   { id: 'scalesia', label: 'Scalesia villosa (Floreana endemic)', path: '/assets/models/nature/runtime-scalesia.glb' },
+  { id: 'scalesia-pedunculata-tree', label: 'Scalesia pedunculata tree (new)', path: '/assets/models/nature/runtime-scalesia-pedunculata-tree.glb' },
   { id: 'palo-santo', label: 'Palo Santo (Bursera graveolens)', path: '/assets/models/nature/runtime-palo-santo.glb' },
   { id: 'saltgrass', label: 'Saltgrass (Distichlis spicata)', path: '/assets/models/nature/runtime-saltgrass.glb' },
   { id: 'morning-glory', label: 'Beach Morning Glory (Ipomoea pes-caprae)', path: '/assets/models/nature/runtime-morning-glory.glb' },
@@ -31,6 +33,7 @@ const BROWSER_ASSETS = [
   { id: 'driftwood', label: 'Bleached Driftwood', path: '/assets/models/nature/runtime-driftwood.glb' },
   { id: 'lava-scree', label: 'Lava Scree Field', path: '/assets/models/nature/runtime-lava-scree.glb' },
   { id: 'drybrush', label: 'Dry Wrack & Brush Field', path: '/assets/models/nature/runtime-drybrush.glb' },
+  { id: 'mangrove-tree', label: 'Mangrove Tree (new)', path: '/assets/models/nature/runtime-mangrove-tree.glb' },
   { id: 'cur-dry-grass', label: 'Current: Dry Grass', path: '/assets/models/nature/runtime-animated-dry-grass.glb' },
   { id: 'cur-shrub', label: 'Current: Shrub', path: '/assets/models/nature/runtime-plant-shrub.glb' },
   { id: 'cur-small-shrub', label: 'Current: Small Shrub', path: '/assets/models/nature/runtime-small-shrub.glb' },

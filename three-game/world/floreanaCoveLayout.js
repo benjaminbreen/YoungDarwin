@@ -125,15 +125,30 @@ export function makeFloreanaScatter(layer, count, seed, {
 let postOfficeBayBasaltBlocks = null;
 let postOfficeBayOpuntiaHazards = null;
 
+const SOUTHERN_OPUNTIA_GROVE = [
+  { id: 'south-opuntia-1', x: -27, z: 32, scale: 1.12, yaw: 0.2, tone: 0.42 },
+  { id: 'south-opuntia-2', x: -18, z: 38, scale: 1.18, yaw: -0.5, tone: 0.58 },
+  { id: 'south-opuntia-3', x: -9, z: 41, scale: 1.32, yaw: 0.35, tone: 0.66 },
+  { id: 'south-opuntia-4', x: 2, z: 38, scale: 1.05, yaw: 1.1, tone: 0.35 },
+  { id: 'south-opuntia-5', x: 23, z: 36, scale: 1.08, yaw: 0.65, tone: 0.5 },
+  { id: 'south-opuntia-6', x: 0, z: 49, scale: 1.28, yaw: -0.2, tone: 0.62 },
+];
+
 export function getPostOfficeBayOpuntiaHazards() {
   if (postOfficeBayOpuntiaHazards) return postOfficeBayOpuntiaHazards;
-  postOfficeBayOpuntiaHazards = makeFloreanaScatter('opuntia', 8, 23, {
+  const scattered = makeFloreanaScatter('opuntia', 8, 23, {
     minX: 8,
     maxX: 30,
     minZ: 3,
     maxZ: 30,
     scale: [0.65, 1.15],
-  }).map(item => {
+  });
+  const southernGrove = SOUTHERN_OPUNTIA_GROVE.map(item => ({
+    ...item,
+    y: terrainHeight(item.x, item.z),
+    variant: 0,
+  }));
+  postOfficeBayOpuntiaHazards = [...scattered, ...southernGrove].map(item => {
     const renderScale = item.scale * 2.8;
     return {
       ...item,
@@ -189,8 +204,8 @@ export function getPostOfficeBayRockObstacles() {
         colliderBottom: 0,
         scale: 1,
         yaw: rock.yaw,
-        jumpable: false,
-        climbable: false,
+        jumpable: top >= 0.72,
+        climbable: top >= 1.1,
         edgeRisk: false,
         pushable: false,
         pushMass: 1,

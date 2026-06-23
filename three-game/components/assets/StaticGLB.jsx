@@ -7,6 +7,9 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { catalogToInspectable } from '../../world/inspectables';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
+import { stabilizeFoliageMaterial } from './materialStability';
+
+const scratchWorldPosition = new THREE.Vector3();
 
 function makeGoatCoatTexture(base = '#c8b99b', patch = '#5a4735', seed = 1) {
   if (typeof document === 'undefined') return null;
@@ -49,8 +52,9 @@ function prepareScene(scene, options = {}) {
     : null;
   scene.traverse(object => {
     if (!object.isMesh) return;
-    object.castShadow = Boolean(options.castShadow ?? true);
-    object.receiveShadow = Boolean(options.receiveShadow ?? true);
+    object.frustumCulled = options.frustumCulled !== false;
+    object.castShadow = Boolean(options.castShadow);
+    object.receiveShadow = Boolean(options.receiveShadow);
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
     const materials = sourceMaterials.map(material => (material ? material.clone() : new THREE.MeshStandardMaterial()));
     materials.forEach(material => {
@@ -65,6 +69,7 @@ function prepareScene(scene, options = {}) {
         if (options.forceTint) material.color.copy(tint);
         else material.color.lerp(tint, options.tintStrength ?? 0.18);
       }
+      stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
       if (options.motion) applyFoliageMotion(material, object.geometry, options.motion);
       material.needsUpdate = true;
     });
@@ -85,22 +90,44 @@ function StaticGLBPrimitive({
   bob = 0,
   doubleSide = false,
   forceTint = false,
-  castShadow = true,
+  castShadow = false,
+  receiveShadow = false,
+  frustumCulled = true,
+  maxVisibleDistance = null,
   motion = null,
   inspectableType = null,
+  sourceId = null,
+  sourceLabel = null,
+  sourceKind = 'static-glb',
 }) {
   const group = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const { scene } = useGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
+  const maxVisibleDistanceSq = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
+    ? maxVisibleDistance * maxVisibleDistance
+    : null;
+  const renderUserData = useMemo(() => ({
+    renderSource: sourceId || `glb:${path}`,
+    renderLabel: sourceLabel || sourceId || path.split('/').pop() || path,
+    renderKind: sourceKind,
+    renderPath: path,
+  }), [path, sourceId, sourceKind, sourceLabel]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, motion });
-  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, motion]);
+    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion });
+  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion]);
 
-  useFrame(({ clock }) => {
-    if (!group.current || !bob) return;
-    group.current.position.y = position[1] + Math.sin(clock.elapsedTime * 1.7 + position[0]) * bob;
+  useFrame(({ clock, camera }) => {
+    const node = group.current;
+    if (!node) return;
+    if (maxVisibleDistanceSq !== null) {
+      node.getWorldPosition(scratchWorldPosition);
+      const visible = scratchWorldPosition.distanceToSquared(camera.position) <= maxVisibleDistanceSq;
+      node.visible = visible;
+      if (!visible) return;
+    }
+    if (bob) node.position.y = position[1] + Math.sin(clock.elapsedTime * 1.7 + position[0]) * bob;
   });
 
   return (
@@ -109,6 +136,7 @@ function StaticGLBPrimitive({
       position={position}
       rotation={rotation}
       scale={scale}
+      userData={renderUserData}
       onClick={inspectableType ? event => {
         event.stopPropagation();
         setInspectedObject(catalogToInspectable(inspectableType, event.point, { sourceId: path }));

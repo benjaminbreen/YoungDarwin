@@ -42,7 +42,7 @@ export function SymsCovington() {
   const group = useRef(null);
   const animationRef = useRef('idle');
   const visible = currentZoneId === 'POST_OFFICE_BAY' || currentZoneId === 'BEAGLE';
-  const x = 8.0;
+  const x = 4.0;
   const z = 7.0;
   const y = terrainHeight(x, z, currentZoneId) + 0.04;
 
@@ -62,7 +62,12 @@ export function SymsCovington() {
   if (!visible) return null;
 
   return (
-    <group ref={group} position={[x, y, z]} rotation={[0, Math.PI * 0.82, 0]}>
+    <group ref={group} position={[x, y, z]} rotation={[0, Math.PI * 0.82, 0]} userData={{
+      renderSource: 'npc:syms',
+      renderLabel: 'Syms Covington actor',
+      renderKind: 'npc',
+      renderPath: null,
+    }}>
       <ModelAsset id="syms" animationSelector={() => animationRef.current} reflect fallback={<ProceduralCrewFigure motion={0.16} />} />
       <mesh position={[0, 0.04, 0]} rotation-x={-Math.PI / 2}>
         <ringGeometry args={[0.72, 0.82, 36]} />

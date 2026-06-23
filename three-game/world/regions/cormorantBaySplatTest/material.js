@@ -1,0 +1,137 @@
+import * as THREE from 'three';
+
+export function createCormorantBaySplatTestTerrainMaterial() {
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.93,
+    metalness: 0,
+    flatShading: false,
+  });
+
+  material.onBeforeCompile = shader => {
+    material.userData.shader = shader;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vCormorantWorld;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vCormorantWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vCormorantWorld;
+        float cbHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+        float cbNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(cbHash(i), cbHash(i + vec2(1.0, 0.0)), u.x), mix(cbHash(i + vec2(0.0, 1.0)), cbHash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }
+        float cbFbm(vec2 p) {
+          float value = 0.0;
+          float amp = 0.5;
+          for (int i = 0; i < 5; i++) {
+            value += cbNoise(p) * amp;
+            p = mat2(1.68, -0.94, 0.94, 1.68) * p + vec2(4.0, -2.8);
+            amp *= 0.52;
+          }
+          return value;
+        }
+        float cbSplat(vec2 p, float scale, float softness, float threshold, vec2 stretch) {
+          vec2 cell = floor(p * scale);
+          vec2 localPoint = fract(p * scale);
+          float value = 0.0;
+          for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+              vec2 offset = vec2(float(x), float(y));
+              vec2 c = cell + offset;
+              float h = cbHash(c + 19.0);
+              vec2 center = offset + vec2(cbHash(c + 3.1), cbHash(c - 5.7));
+              float angle = cbHash(c + 29.0) * 6.2831853;
+              mat2 rot = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+              vec2 d = rot * ((localPoint - center) * stretch);
+              value = max(value, (1.0 - smoothstep(0.0, softness, dot(d, d))) * smoothstep(threshold, 1.0, h));
+            }
+          }
+          return clamp(value, 0.0, 1.0);
+        }
+        float cbCoastZ(float x) {
+          return -22.0 + sin(x * 0.052 + 0.6) * 3.6 + sin(x * 0.021 - 1.4) * 2.4;
+        }
+        float cbLagoon(vec2 p) {
+          float north = length((p - vec2(-8.0, -1.0)) / vec2(28.0, 14.0));
+          float south = length((p - vec2(14.0, 7.0)) / vec2(20.0, 10.0));
+          return min(north, south);
+        }
+        float cbRim(vec2 p) {
+          float north = smoothstep(17.0, 41.0, -p.y);
+          float east = smoothstep(31.0, 51.0, p.x);
+          float west = smoothstep(42.0, 55.0, -p.x);
+          return clamp(max(north, max(east * 0.75, west * 0.62)) * (0.78 + cbNoise(p * 0.23) * 0.22), 0.0, 1.0);
+        }
+        float cbSegmentDistance(vec2 p, vec2 a, vec2 b) {
+          vec2 ab = b - a;
+          float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+          return length(p - (a + ab * t));
+        }
+        float cbTrail(vec2 p) {
+          float best = cbSegmentDistance(p, vec2(-38.0, 25.0), vec2(-24.0, 14.0));
+          best = min(best, cbSegmentDistance(p, vec2(-24.0, 14.0), vec2(-8.0, 10.0)));
+          best = min(best, cbSegmentDistance(p, vec2(-8.0, 10.0), vec2(10.0, 15.0)));
+          best = min(best, cbSegmentDistance(p, vec2(10.0, 15.0), vec2(31.0, 27.0)));
+          return best + cbNoise(p * 0.55 + vec2(4.0, -7.0)) * 0.32;
+        }`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        vec2 p = vCormorantWorld.xz;
+        float h = vCormorantWorld.y;
+        float lagoon = cbLagoon(p);
+        float lagoonCore = 1.0 - smoothstep(0.70, 1.08, lagoon);
+        float lagoonEdge = 1.0 - smoothstep(1.0, 1.42, lagoon);
+        float shore = p.y - cbCoastZ(p.x);
+        float trail = 1.0 - smoothstep(1.5, 4.7, cbTrail(p));
+        float rim = cbRim(p);
+        float darkAlgae = cbSplat(p + vec2(2.0, -4.0), 0.32, 0.84, 0.36, vec2(0.72, 1.5));
+        float saltMat = cbSplat(p + vec2(-7.0, 5.0), 0.5, 0.56, 0.46, vec2(1.4, 0.78));
+        float scrubMat = cbSplat(p + vec2(11.0, 9.0), 0.36, 0.68, 0.38, vec2(1.1, 0.86));
+        float olivine = cbFbm(p * 0.7 + vec2(4.0, -2.0));
+        float mud = cbFbm(p * vec2(1.2, 0.42) + vec2(-3.0, 8.0));
+        vec3 greenBeach = mix(vec3(0.42, 0.48, 0.27), vec3(0.64, 0.62, 0.35), olivine);
+        greenBeach = mix(greenBeach, vec3(0.28, 0.36, 0.2), darkAlgae * 0.22);
+        greenBeach = mix(greenBeach, vec3(0.75, 0.72, 0.50), saltMat * 0.20);
+        vec3 wetMud = mix(vec3(0.20, 0.18, 0.13), vec3(0.39, 0.34, 0.23), mud);
+        wetMud = mix(wetMud, vec3(0.12, 0.22, 0.16), darkAlgae * 0.55);
+        wetMud = mix(wetMud, vec3(0.68, 0.64, 0.47), saltMat * 0.28);
+        vec3 scrub = mix(vec3(0.28, 0.39, 0.22), vec3(0.51, 0.50, 0.27), cbFbm(p * 0.12));
+        scrub = mix(scrub, vec3(0.18, 0.30, 0.18), scrubMat * 0.5);
+        vec3 tuff = mix(vec3(0.30, 0.22, 0.16), vec3(0.56, 0.42, 0.29), cbFbm(p * 0.32 + vec2(2.0, 4.0)));
+        tuff = mix(tuff, vec3(0.12, 0.10, 0.085), smoothstep(0.68, 0.92, cbFbm(p * 2.7)) * 0.36);
+        vec3 lagoonBed = mix(vec3(0.18, 0.35, 0.31), vec3(0.42, 0.55, 0.42), cbFbm(p * 0.8));
+        lagoonBed = mix(lagoonBed, wetMud, lagoonEdge * 0.55);
+        vec3 color = mix(greenBeach, scrub, smoothstep(7.0, 26.0, shore));
+        color = mix(color, wetMud, lagoonEdge * 0.78);
+        color = mix(color, lagoonBed, lagoonCore * 0.82);
+        color = mix(color, tuff, rim * 0.78);
+        color = mix(color, vec3(0.42, 0.31, 0.18), trail * 0.36);
+        float fine = cbFbm(p * 4.8 + vec2(1.0, -6.0));
+        color *= 0.91 + fine * 0.12;
+        diffuseColor.rgb = mix(diffuseColor.rgb, clamp(color, 0.0, 1.0), 0.95);`,
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        float relief = cbFbm(vCormorantWorld.xz * 1.8) * 0.2 + cbFbm(vCormorantWorld.xz * 5.0) * 0.06;
+        vec3 dpdx = dFdx(vCormorantWorld);
+        vec3 dpdy = dFdy(vCormorantWorld);
+        float dhdx = dFdx(relief);
+        float dhdy = dFdy(relief);
+        normal = normalize(normal - 0.22 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`,
+      );
+  };
+
+  material.customProgramCacheKey = () => 'cormorant-bay-splat-test-v1';
+  material.needsUpdate = true;
+  return material;
+}

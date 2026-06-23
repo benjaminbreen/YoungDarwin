@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { BallCollider, CuboidCollider, CylinderCollider, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { movementTerrainHeight, isWalkableTerrain } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
 import { onPropEvent, emitPropEvent } from './propEvents';
@@ -15,18 +15,32 @@ const HOLD_DISTANCE = 1.12;
 const STRIKE_RANGE = 2.6;
 const STRIKE_FACING_DOT = 0.3;
 const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
+const ZERO_VECTOR = { x: 0, y: 0, z: 0 };
+const DEFAULT_FACING = { x: 0, y: 0, z: -1 };
 
-function vectorFromStore(value, fallback = new THREE.Vector3()) {
-  if (!value) return fallback.clone();
-  return new THREE.Vector3(value.x || 0, value.y || 0, value.z || 0);
+function vectorFromStore(value, target, fallback = ZERO_VECTOR) {
+  const source = value || fallback;
+  return target.set(source.x || 0, source.y || 0, source.z || 0);
+}
+
+function propPickupRadius(prop) {
+  const scale = prop.scale || 1;
+  const collider = prop.collider || {};
+  if (collider.shape === 'cuboid') {
+    const [hx = 0, , hz = 0] = collider.halfExtents || [];
+    return Math.hypot(hx * scale, hz * scale);
+  }
+  if (collider.shape === 'ball') return (collider.radius || 0) * scale;
+  return (collider.radius || 0) * scale;
 }
 
 function PropCollider({ prop, colliderRef, sensor }) {
   const { shape } = prop.collider;
+  const scale = prop.scale || 1;
   const common = { ref: colliderRef, friction: prop.friction, restitution: prop.restitution, sensor };
-  if (shape === 'cuboid') return <CuboidCollider {...common} args={prop.collider.halfExtents} />;
-  if (shape === 'ball') return <BallCollider {...common} args={[prop.collider.radius]} />;
-  return <CylinderCollider {...common} args={[prop.collider.halfHeight, prop.collider.radius]} />;
+  if (shape === 'cuboid') return <CuboidCollider {...common} args={prop.collider.halfExtents.map(value => value * scale)} />;
+  if (shape === 'ball') return <BallCollider {...common} args={[prop.collider.radius * scale]} />;
+  return <CylinderCollider {...common} args={[prop.collider.halfHeight * scale, prop.collider.radius * scale]} />;
 }
 
 // A single dynamic physics prop. Behaviors (carryable / breakable /
@@ -38,10 +52,19 @@ export function PhysicsProp({ prop, onBreak }) {
   const inWaterRef = useRef(false);
   const pendingStrikesRef = useRef([]);
   const clockRef = useRef(0);
+  const scratch = useRef({
+    origin: new THREE.Vector3(),
+    facing: new THREE.Vector3(),
+    toProp: new THREE.Vector3(),
+    propPosition: new THREE.Vector3(),
+    player: new THREE.Vector3(),
+    carryTarget: new THREE.Vector3(),
+  });
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
+  const propScale = prop.scale || 1;
 
   // Stable reference: userData is a "mutable option" in react-three-rapier,
   // and an inline object here makes its options effect re-run every render,
@@ -51,8 +74,8 @@ export function PhysicsProp({ prop, onBreak }) {
     [prop.id, prop.type],
   );
   const spawnY = useMemo(
-    () => movementTerrainHeight(prop.x, prop.z, currentZoneId) + prop.restOffset + 0.05,
-    [currentZoneId, prop],
+    () => movementTerrainHeight(prop.x, prop.z, currentZoneId) + (prop.restOffset * propScale) + 0.05,
+    [currentZoneId, prop, propScale],
   );
   const isPrompted = carryPrompt?.id === prop.id;
   const isCarried = carriedObjectId === prop.id;
@@ -93,8 +116,8 @@ export function PhysicsProp({ prop, onBreak }) {
       body.wakeUp();
     } else if (carriedRef.current) {
       carriedRef.current = false;
-      const pose = useThreeGameStore.getState().playerPose;
-      const facing = vectorFromStore(pose?.facing, new THREE.Vector3(0, 0, -1));
+      const pose = getRuntimePlayerPose();
+      const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
       if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
       facing.normalize();
       body.wakeUp();
@@ -109,7 +132,8 @@ export function PhysicsProp({ prop, onBreak }) {
     clockRef.current += delta;
 
     const translation = body.translation();
-    const propPosition = new THREE.Vector3(translation.x, translation.y, translation.z);
+    const vectors = scratch.current;
+    const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
 
     // Resolve queued tool strikes once their impact moment arrives.
     if (pendingStrikesRef.current.length) {
@@ -117,12 +141,12 @@ export function PhysicsProp({ prop, onBreak }) {
       if (due.length) {
         pendingStrikesRef.current = pendingStrikesRef.current.filter(s => s.at > clockRef.current);
         for (const strike of due) {
-          const origin = vectorFromStore(strike.position);
-          const facing = vectorFromStore(strike.facing, new THREE.Vector3(0, 0, -1)).setY(0).normalize();
-          const toProp = propPosition.clone().sub(origin).setY(0);
+          const origin = vectorFromStore(strike.position, vectors.origin);
+          const facing = vectorFromStore(strike.facing, vectors.facing, DEFAULT_FACING).setY(0).normalize();
+          const toProp = vectors.toProp.copy(propPosition).sub(origin).setY(0);
           const distance = toProp.length();
           if (distance > STRIKE_RANGE) continue;
-          if (distance > 0.2 && toProp.clone().normalize().dot(facing) < STRIKE_FACING_DOT) continue;
+          if (distance > 0.2 && toProp.normalize().dot(facing) < STRIKE_FACING_DOT) continue;
           const impactDir = distance > 0.2 ? toProp.normalize() : facing;
           if (breakable && strike.tool === breakable.tool) {
             onBreak?.(prop, {
@@ -143,7 +167,7 @@ export function PhysicsProp({ prop, onBreak }) {
       }
     }
 
-    const playerPose = useThreeGameStore.getState().playerPose;
+    const playerPose = getRuntimePlayerPose();
     if (
       body.isSleeping?.()
       && !isCarried
@@ -162,8 +186,8 @@ export function PhysicsProp({ prop, onBreak }) {
       }
     }
 
-    const player = vectorFromStore(playerPose.position);
-    const facing = vectorFromStore(playerPose.facing, new THREE.Vector3(0, 0, -1));
+    const player = vectorFromStore(playerPose.position, vectors.player);
+    const facing = vectorFromStore(playerPose.facing, vectors.facing, DEFAULT_FACING);
     if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
     facing.normalize();
 
@@ -174,7 +198,7 @@ export function PhysicsProp({ prop, onBreak }) {
         // Sleeping bodies are skipped by @react-three/rapier's mesh sync and
         // setNextKinematicTranslation does not wake them, so keep it awake.
         body.wakeUp();
-        const target = player.clone().addScaledVector(facing, HOLD_DISTANCE);
+        const target = vectors.carryTarget.copy(player).addScaledVector(facing, HOLD_DISTANCE);
         target.y += carryable.holdHeight;
         body.setNextKinematicTranslation(target);
         setCarryPrompt({
@@ -189,7 +213,8 @@ export function PhysicsProp({ prop, onBreak }) {
       // Transition frame: carried but the effect hasn't run yet — hold off.
       if (isCarried) return;
 
-      const distance = propPosition.distanceTo(player);
+      const horizontalDistance = Math.hypot(propPosition.x - player.x, propPosition.z - player.z);
+      const distance = Math.max(0, horizontalDistance - propPickupRadius(prop));
       const activePrompt = useThreeGameStore.getState().carryPrompt;
       if (!activePrompt || activePrompt.id === prop.id || distance < (activePrompt.distance ?? Infinity)) {
         if (distance <= PICKUP_DISTANCE) {
@@ -285,15 +310,22 @@ export function PhysicsProp({ prop, onBreak }) {
       rotation={prop.rotation}
       linearDamping={prop.linearDamping}
       angularDamping={prop.angularDamping}
-      mass={prop.mass}
+      mass={prop.mass * Math.pow(propScale, 2.2)}
       canSleep
       ccd
       additionalSolverIterations={4}
       userData={userData}
     >
       <PropCollider prop={prop} colliderRef={colliderRef} sensor={isCarried} />
-      <PropVisual visual={prop.visual} />
-      <HighlightRing visible={isPrompted || isCarried} />
+      <group scale={propScale} userData={{
+        renderSource: `physics-prop:${prop.id}`,
+        renderLabel: `Physics prop: ${prop.id}`,
+        renderKind: 'physics-prop',
+        renderPath: null,
+      }}>
+        <PropVisual visual={prop.visual} />
+        <HighlightRing visible={isPrompted || isCarried} />
+      </group>
     </RigidBody>
   );
 }

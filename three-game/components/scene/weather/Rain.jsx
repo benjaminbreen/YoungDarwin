@@ -50,7 +50,7 @@ const VERTEX = /* glsl */`
     // low-seed drops, a downpour wakes the full field.
     float gate = smoothstep(aSeed - 0.12, aSeed + 0.02, uIntensity);
     // Fade near the volume floor/ceiling so wraps never pop.
-    float bandFade = smoothstep(0.0, 1.6, p.y) * smoothstep(uHeight, uHeight - 2.5, p.y);
+    float bandFade = smoothstep(0.0, 1.6, p.y) * (1.0 - smoothstep(uHeight - 2.5, uHeight, p.y));
     vAlpha = gate * bandFade * (0.32 + uIntensity * 0.35);
     vSeed = aSeed;
   }
@@ -67,8 +67,8 @@ const FRAGMENT = /* glsl */`
     // A thin vertical streak that relaxes toward a round drop when the camera
     // pitches down (rain-demo's squash trick), so top-down views stay sane.
     float halfWidth = mix(0.055, 0.24, uSquash);
-    float streak = smoothstep(halfWidth, halfWidth * 0.35, abs(c.x))
-      * smoothstep(0.5, mix(0.12, 0.32, uSquash), abs(c.y));
+    float streak = (1.0 - smoothstep(halfWidth * 0.35, halfWidth, abs(c.x)))
+      * (1.0 - smoothstep(mix(0.12, 0.32, uSquash), 0.5, abs(c.y)));
     if (streak < 0.01) discard;
     vec3 tint = mix(vec3(0.62, 0.70, 0.78), vec3(0.82, 0.88, 0.94), vSeed);
     gl_FragColor = vec4(tint, streak * vAlpha);
@@ -109,7 +109,7 @@ export function Rain({ count = 14000 }) {
     const u = material.uniforms;
     u.uTime.value = clock.elapsedTime;
     u.uIntensity.value = intensity;
-    u.uWind.value.set(weatherEnv.windX * weatherEnv.windSpeed * 0.5, weatherEnv.windZ * weatherEnv.windSpeed * 0.5);
+    u.uWind.value.set(weatherEnv.windX * weatherEnv.rainShearSpeed, weatherEnv.windZ * weatherEnv.rainShearSpeed);
     u.uPixelRatio.value = gl.getPixelRatio();
     // How vertically the camera is looking: 0 level, 1 straight down/up.
     const pitch = Math.abs(camera.getWorldDirection(_dir).y);

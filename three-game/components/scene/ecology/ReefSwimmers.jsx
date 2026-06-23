@@ -1,10 +1,17 @@
 'use client';
 
-import React, { Suspense, useMemo, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { getRuntimePlayerPose } from '../../../store';
+
+// Reef life is underwater scenery the player is usually far from. Beyond this
+// radius from the school/cruiser anchor, skinning + movement update at
+// FAR_REEF_INTERVAL instead of every frame.
+const FAR_REEF_RADIUS_SQ = 55 * 55;
+const FAR_REEF_INTERVAL = 1 / 6;
 
 // Animated underwater life for reef zones: schools of small fish weaving
 // around coral heads, and big slow cruisers (manta rays) orbiting the deeper
@@ -91,7 +98,7 @@ function aimAlongPath(group, position, aheadPosition, roll = 0) {
   if (roll) group.rotation.z += roll;
 }
 
-function SwimmerIndividual({ source, spec, animations, phase, timeScale }) {
+function SwimmerIndividual({ source, spec, animations, phase, timeScale, mixerStore, index }) {
   const inner = useRef(null);
   const sceneClone = useMemo(() => prepareSwimmerScene(cloneSkeleton(source)), [source]);
   const mixer = useMemo(() => {
@@ -105,9 +112,16 @@ function SwimmerIndividual({ source, spec, animations, phase, timeScale }) {
     return m;
   }, [animations, phase, sceneClone]);
 
-  useFrame((state, delta) => {
-    mixer.update(delta * timeScale);
-  });
+  // The mixer is advanced by the parent's single useFrame (one per
+  // school/cruiser) instead of one callback per fish, and can be gated by
+  // distance there.
+  useEffect(() => {
+    if (!mixerStore) return undefined;
+    mixerStore.current[index] = { mixer, timeScale };
+    return () => {
+      if (mixerStore.current[index]?.mixer === mixer) mixerStore.current[index] = null;
+    };
+  }, [index, mixer, mixerStore, timeScale]);
 
   return (
     <group ref={inner} rotation={spec.baseRotation || [0, 0, 0]} scale={spec.scaleValue}>
@@ -119,6 +133,8 @@ function SwimmerIndividual({ source, spec, animations, phase, timeScale }) {
 function FishSchool({ spec }) {
   const { scene, animations } = useGLTF(spec.path);
   const groupRefs = useRef([]);
+  const mixerStore = useRef([]);
+  const farAccum = useRef(0);
   const fishes = useMemo(() => Array.from({ length: spec.count }, (_, i) => ({
     orbitRadius: spec.radius * (0.35 + seeded(i, 1) * 0.65),
     angularSpeed: (spec.speed || 0.5) * (0.7 + seeded(i, 2) * 0.6) * (seeded(i, 3) > 0.5 ? 1 : -1),
@@ -134,15 +150,35 @@ function FishSchool({ spec }) {
     squash: spec.squash ?? 0.8,
   }), [spec]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const t = clock.elapsedTime;
-    fishes.forEach((fish, i) => {
+    // Distance gate: when the player is far from the reef anchor, advance fish
+    // skinning + movement at a reduced rate (the dominant cost is the per-fish
+    // mixer.update).
+    const player = getRuntimePlayerPose()?.position;
+    let stepDelta = delta;
+    if (player) {
+      const dx = player.x - runtime.center[0];
+      const dz = player.z - runtime.center[1];
+      if (dx * dx + dz * dz > FAR_REEF_RADIUS_SQ) {
+        farAccum.current += delta;
+        if (farAccum.current < FAR_REEF_INTERVAL) return;
+        stepDelta = farAccum.current;
+        farAccum.current = 0;
+      } else {
+        farAccum.current = 0;
+      }
+    }
+    for (let i = 0; i < fishes.length; i += 1) {
       const group = groupRefs.current[i];
-      if (!group) return;
-      schoolPosition(_pos, runtime, fish, t);
-      schoolPosition(_ahead, runtime, fish, t + 0.35);
-      aimAlongPath(group, _pos, _ahead);
-    });
+      if (group) {
+        schoolPosition(_pos, runtime, fishes[i], t);
+        schoolPosition(_ahead, runtime, fishes[i], t + 0.35);
+        aimAlongPath(group, _pos, _ahead);
+      }
+      const entry = mixerStore.current[i];
+      if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale);
+    }
   });
 
   return (
@@ -155,6 +191,8 @@ function FishSchool({ spec }) {
             animations={animations}
             phase={fish.phase / (Math.PI * 2)}
             timeScale={fish.timeScale}
+            mixerStore={mixerStore}
+            index={i}
           />
         </group>
       ))}
@@ -165,20 +203,39 @@ function FishSchool({ spec }) {
 function Cruiser({ spec }) {
   const { scene, animations } = useGLTF(spec.path);
   const group = useRef(null);
+  const mixerStore = useRef([]);
+  const farAccum = useRef(0);
   const runtime = useMemo(() => ({
     direction: spec.direction || 1,
     phase: spec.phase || 0,
     ...spec,
   }), [spec]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     if (!group.current) return;
     const t = clock.elapsedTime;
+    // Distance gate around the orbit centre (see FishSchool).
+    const player = getRuntimePlayerPose()?.position;
+    let stepDelta = delta;
+    if (player) {
+      const dx = player.x - runtime.orbit.cx;
+      const dz = player.z - runtime.orbit.cz;
+      if (dx * dx + dz * dz > FAR_REEF_RADIUS_SQ) {
+        farAccum.current += delta;
+        if (farAccum.current < FAR_REEF_INTERVAL) return;
+        stepDelta = farAccum.current;
+        farAccum.current = 0;
+      } else {
+        farAccum.current = 0;
+      }
+    }
     cruiserPosition(_pos, runtime, t);
     cruiserPosition(_ahead, runtime, t + 1.2);
     // Gentle bank into the turn; orbit direction sets the sign.
     const roll = (spec.bank ?? 0.16) * runtime.direction;
     aimAlongPath(group.current, _pos, _ahead, roll);
+    const entry = mixerStore.current[0];
+    if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale);
   });
 
   return (
@@ -189,6 +246,8 @@ function Cruiser({ spec }) {
         animations={animations}
         phase={spec.phase || 0}
         timeScale={spec.timeScale || 1}
+        mixerStore={mixerStore}
+        index={0}
       />
     </group>
   );

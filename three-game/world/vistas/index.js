@@ -1,6 +1,6 @@
 import { getRegionEdgeHints, getRegionMap } from '../../../game-core/regionMaps';
 
-const APRON_SOURCE_REGIONS = new Set(['POST_OFFICE_BAY', 'N_SHORE', 'NW_REEF']);
+const APRON_SOURCE_REGIONS = new Set(['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'POST_OFFICE_BAY_3', 'N_SHORE', 'NW_REEF', 'W_HIGH', 'MANGROVES']);
 
 const DEFAULT_VISTA_BY_TYPE = {
   bay: 'post-office-bay',
@@ -24,8 +24,12 @@ const VISTA_BY_REGION_ID = {
   BLACK_BEACH_SURF: 'black-beach-uplands',
   LAVA_FLATS: 'lava-flats',
   POST_OFFICE_BAY: 'post-office-bay',
+  ALT_POST_OFFICE_BAY: 'post-office-bay',
+  POST_OFFICE_BAY_3: 'post-office-bay',
   N_SHORE: 'north-shore',
   NW_REEF: 'reef-shallows',
+  W_HIGH: 'cloud-forest',
+  MANGROVES: 'mangrove-forest',
 };
 
 export const vistaLibrary = {
@@ -98,6 +102,38 @@ export const vistaLibrary = {
       { from: 42, to: 82, nearY: 6.4, farY: 13.5, colors: ['#707b64', '#87937a'] },
     ],
     markers: [{ kind: 'scrub', count: 20, at: [20, 72], color: '#3d5036', scale: [0.26, 0.58], seed: 41 }],
+  },
+  'cloud-forest': {
+    label: 'Cloud Forest',
+    seed: 47,
+    apronDepth: 104,
+    apronWidthScale: 1.95,
+    bands: [
+      { from: 0, to: 28, nearY: 1.4, farY: 5.8, colors: ['#304334', '#41543e'] },
+      { from: 28, to: 68, nearY: 5.8, farY: 11.5, colors: ['#3c5141', '#62735d'] },
+      { from: 68, to: 96, nearY: 11.5, farY: 16.0, colors: ['#596d5d', '#9bad9c'] },
+    ],
+    markers: [
+      { kind: 'scrub', count: 32, at: [20, 42], color: '#263b2b', scale: [0.42, 0.9], seed: 47 },
+      { kind: 'scrub', count: 24, at: [-24, 68], color: '#314834', scale: [0.34, 0.82], seed: 59 },
+      { kind: 'rock', count: 8, at: [12, 52], color: '#2d342d', scale: [0.28, 0.72], seed: 71 },
+    ],
+  },
+  'mangrove-forest': {
+    label: 'Southern Forest',
+    seed: 53,
+    apronDepth: 96,
+    apronWidthScale: 1.9,
+    bands: [
+      { from: 0, to: 22, nearY: -0.3, farY: 1.2, colors: ['#26322a', '#334331'] },
+      { from: 22, to: 58, nearY: 1.2, farY: 5.4, colors: ['#2b3b2e', '#43573d'] },
+      { from: 58, to: 90, nearY: 5.4, farY: 9.2, colors: ['#3f5747', '#778b78'] },
+    ],
+    markers: [
+      { kind: 'scrub', count: 34, at: [16, 38], color: '#263927', scale: [0.46, 1.0], seed: 53 },
+      { kind: 'scrub', count: 24, at: [-26, 62], color: '#314632', scale: [0.34, 0.86], seed: 67 },
+      { kind: 'rock', count: 6, at: [8, 46], color: '#28302a', scale: [0.22, 0.58], seed: 79 },
+    ],
   },
   'reef-shallows': {
     label: 'Reef Shallows',

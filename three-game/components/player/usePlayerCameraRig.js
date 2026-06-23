@@ -21,6 +21,36 @@ export function usePlayerCameraRig() {
   const cameraFollowYRef = useRef(null);
   const statusLookRef = useRef(null);
   const shoulderPivotRef = useRef(null);
+  // Aim mode: cursor drives Darwin's facing instead of the camera. While
+  // aimActiveRef is true, left-drag no longer rotates the camera (the cursor
+  // aims) and a left-click bumps firePulseRef so the controller can fire.
+  const pointerNdcRef = useRef(new THREE.Vector2(0, 0));
+  const aimActiveRef = useRef(false);
+  const firePulseRef = useRef(0);
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const aimPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const aimHit = useMemo(() => new THREE.Vector3(), []);
+  const aimDir = useMemo(() => new THREE.Vector3(), []);
+
+  const updatePointerNdc = useCallback(event => {
+    const rect = gl.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    pointerNdcRef.current.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+  }, [gl]);
+
+  // Raycast the cursor onto a horizontal plane at chest height and return the
+  // normalized horizontal direction from `origin` to that point (or null).
+  const getAimDirection = useCallback(origin => {
+    raycaster.setFromCamera(pointerNdcRef.current, camera);
+    aimPlane.constant = -(origin.y + 1.1);
+    if (!raycaster.ray.intersectPlane(aimPlane, aimHit)) return null;
+    aimDir.set(aimHit.x - origin.x, 0, aimHit.z - origin.z);
+    if (aimDir.lengthSq() < 1e-4) return null;
+    return aimDir.normalize();
+  }, [camera, raycaster, aimPlane, aimHit, aimDir]);
 
   const cameraTargets = useMemo(() => ({
     shoulder: new THREE.Vector3(1.05, 2.35, 3.75),
@@ -31,6 +61,12 @@ export function usePlayerCameraRig() {
   useEffect(() => {
     const element = gl.domElement;
     const onPointerDown = event => {
+      // Aiming: a left-click fires the rifle instead of starting a camera drag.
+      if (aimActiveRef.current && event.button === 0) {
+        updatePointerNdc(event);
+        firePulseRef.current += 1;
+        return;
+      }
       if (event.button !== 0 && event.button !== 1) return;
       draggingRef.current = true;
       panningRef.current = event.button === 1 || event.shiftKey;
@@ -39,6 +75,7 @@ export function usePlayerCameraRig() {
       element.setPointerCapture?.(event.pointerId);
     };
     const onPointerMove = event => {
+      updatePointerNdc(event);
       if (!draggingRef.current) return;
       const dx = event.clientX - lastPointerXRef.current;
       const dy = event.clientY - lastPointerYRef.current;
@@ -51,7 +88,8 @@ export function usePlayerCameraRig() {
           .add(right.multiplyScalar(-dx * CAMERA.panSpeed * dist))
           .add(new THREE.Vector3(0, dy * CAMERA.panSpeed * dist, 0));
         if (panOffsetRef.current.length() > CAMERA.maxPan) panOffsetRef.current.setLength(CAMERA.maxPan);
-      } else {
+      } else if (!aimActiveRef.current) {
+        // While aiming the cursor controls Darwin's facing, not the camera.
         yawRef.current -= dx * CAMERA.rotateSpeed;
         pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * CAMERA.pitchSpeed, CAMERA.minPitch, CAMERA.maxPitch);
       }
@@ -82,11 +120,20 @@ export function usePlayerCameraRig() {
       element.style.cursor = '';
       element.style.touchAction = '';
     };
-  }, [gl]);
+  }, [gl, updatePointerNdc]);
 
   const resetCameraForSpawn = useCallback(groundY => {
     cameraFollowYRef.current = groundY;
     statusLookRef.current = null;
+    shoulderPivotRef.current = null;
+  }, []);
+
+  const recenterCamera = useCallback(facing => {
+    const forward = new THREE.Vector3(facing?.x || 0, 0, facing?.z || -1);
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
+    forward.normalize();
+    yawRef.current = Math.atan2(forward.x, forward.z);
+    panOffsetRef.current.set(0, 0, 0);
     shoulderPivotRef.current = null;
   }, []);
 
@@ -201,7 +248,12 @@ export function usePlayerCameraRig() {
     pitchRef,
     zoomRef,
     panOffsetRef,
+    pointerNdcRef,
+    aimActiveRef,
+    firePulseRef,
+    getAimDirection,
     resetCameraForSpawn,
+    recenterCamera,
     updateCamera,
   };
 }

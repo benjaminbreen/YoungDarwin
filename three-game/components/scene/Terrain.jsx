@@ -8,6 +8,7 @@ import { getRegionDefinition } from '../../world/regions';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
+import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = -0.9;
@@ -21,6 +22,7 @@ const WATER_SURFACE_Y = -0.9;
 const CAUSTICS_GLSL = /* glsl */`
   uniform float uCausticsTime;
   uniform float uCausticsStrength;
+  uniform float uRainWetness;
   varying vec3 vCausticsW;
   vec2 cstHash2(vec2 p) {
     return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
@@ -48,6 +50,12 @@ const CAUSTICS_GLSL = /* glsl */`
 `;
 
 const CAUSTICS_APPLY = /* glsl */`
+  if (uRainWetness > 0.001) {
+    float wetAboveWater = smoothstep(${(WATER_SURFACE_Y + 0.04).toFixed(2)}, ${(WATER_SURFACE_Y + 0.55).toFixed(2)}, vCausticsW.y);
+    float wetHeightFade = 1.0 - smoothstep(26.0, 42.0, vCausticsW.y);
+    float rainWet = uRainWetness * wetAboveWater * (0.55 + wetHeightFade * 0.45);
+    outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.66, 0.74, 0.72), clamp(rainWet * 0.34, 0.0, 0.34));
+  }
   float cstDepth = ${WATER_SURFACE_Y.toFixed(2)} - vCausticsW.y;
   if (cstDepth > 0.02 && uCausticsStrength > 0.001) {
     float cstFade = smoothstep(0.02, 0.22, cstDepth) * (1.0 - smoothstep(2.2, 4.5, cstDepth));
@@ -66,6 +74,7 @@ function injectSeabedCaustics(material) {
     if (previousCompile) previousCompile(shader);
     shader.uniforms.uCausticsTime = { value: 0 };
     shader.uniforms.uCausticsStrength = { value: 0 };
+    shader.uniforms.uRainWetness = { value: 0 };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -83,7 +92,7 @@ function injectSeabedCaustics(material) {
       .replace('#include <opaque_fragment>', `${CAUSTICS_APPLY}\n#include <opaque_fragment>`);
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-v1`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-rain-wetness-v1`;
   material.needsUpdate = true;
   return material;
 }
@@ -139,14 +148,27 @@ export function Terrain() {
     if (shader.uniforms.uCausticsTime) {
       const store = useThreeGameStore.getState();
       const time = ((store.timeOfDay % 24) + 24) % 24;
+      const rainWetness = weatherEnv.rainIntensity;
       shader.uniforms.uCausticsTime.value = clock.elapsedTime;
-      shader.uniforms.uCausticsStrength.value = skyState(time, store.day || 1).daylight * 0.5;
+      shader.uniforms.uCausticsStrength.value = skyState(time, store.day || 1).daylight * 0.5 * (1 - rainWetness * 0.85);
+      if (shader.uniforms.uRainWetness) shader.uniforms.uRainWetness.value = rainWetness;
     }
   });
 
   return (
-    <group>
-      <mesh geometry={geometry} material={material} receiveShadow userData={{ reflect: true }} />
+    <group userData={{
+      renderSource: `terrain:${currentZoneId}`,
+      renderLabel: `${currentZoneId} terrain`,
+      renderKind: 'terrain',
+      renderPath: null,
+    }}>
+      <mesh geometry={geometry} material={material} receiveShadow userData={{
+        reflect: true,
+        renderSource: `terrain:${currentZoneId}:heightfield`,
+        renderLabel: `${currentZoneId} terrain heightfield`,
+        renderKind: 'terrain',
+        renderPath: null,
+      }} />
       <ContinuationTerrainSkirts regionId={currentZoneId} material={material} />
     </group>
   );
@@ -225,5 +247,10 @@ function ContinuationTerrainSkirts({ regionId, material }) {
   if (!geometry.attributes.position?.count) return null;
   // Short edge fade only. Neighboring-map topography lives in BorderVistas as
   // opaque terrain aprons; do not use these skirts as distant scenery.
-  return <mesh geometry={geometry} material={material} receiveShadow={false} />;
+  return <mesh geometry={geometry} material={material} receiveShadow={false} userData={{
+    renderSource: `terrain:${regionId}:skirts`,
+    renderLabel: `${regionId} terrain skirts`,
+    renderKind: 'terrain-skirt',
+    renderPath: null,
+  }} />;
 }

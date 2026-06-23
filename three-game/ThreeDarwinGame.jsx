@@ -2,12 +2,15 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { KeyboardControls, Stats } from '@react-three/drei';
+import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
 import { ACESFilmicToneMapping, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
+import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
+import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
+import { LaunchOverlay } from './ui/LaunchOverlay';
 import { useThreeGameStore } from './store';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
 
@@ -20,20 +23,23 @@ const KEYBOARD_MAP = [
   { name: 'jump', keys: ['Space'] },
   { name: 'dodge', keys: ['KeyB'] },
   { name: 'interact', keys: ['KeyE'] },
-  { name: 'useTool', keys: ['MetaLeft', 'MetaRight'] },
-  { name: 'camera', keys: ['KeyC'] },
+  { name: 'useTool', keys: ['KeyJ'] },
+  { name: 'camera', keys: ['KeyM'] },
+  { name: 'recenterCamera', keys: ['Tab'] },
   { name: 'rotateLeft', keys: ['KeyZ'] },
   { name: 'rotateRight', keys: ['KeyX'] },
-  { name: 'crouch', keys: ['KeyQ', 'ControlLeft', 'ControlRight'] },
+  { name: 'crouch', keys: ['KeyC'] },
+  { name: 'sit', keys: ['KeyK'] },
+  { name: 'rest', keys: ['KeyR'] },
   { name: 'pray', keys: ['KeyP'] },
-  { name: 'rifle', keys: ['KeyR'] },
-  { name: 'fireRifle', keys: ['KeyF'] },
+  { name: 'rifle', keys: ['KeyF'] },
+  { name: 'fireRifle', keys: [] },
   { name: 'hammer', keys: ['KeyH'] },
   { name: 'net', keys: ['KeyN'] },
   { name: 'gather', keys: ['KeyG'] },
   { name: 'write', keys: ['KeyY'] },
   { name: 'inspect', keys: ['KeyI'] },
-  { name: 'climb', keys: ['KeyV'] },
+  { name: 'climb', keys: ['KeyQ', 'KeyV'] },
   { name: 'lookAround', keys: ['KeyL'] },
   { name: 'point', keys: ['KeyO'] },
   { name: 'trip', keys: ['KeyT'] },
@@ -48,14 +54,22 @@ const KEYBOARD_MAP = [
 
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
+// SMAAPreset.ULTRA from the 'postprocessing' package. That package is only a
+// transitive dep (not re-exported by @react-three/postprocessing), so we inline
+// its stable enum value rather than import from a non-direct dependency.
+const SMAA_PRESET_ULTRA = 3;
+
 const DEFAULT_PERF_SETTINGS = {
+  quality: 'performance',
+  waterQuality: 'performance',
   dprMode: 'default',
+  msaaSamples: 0,
   postprocessing: true,
-  ao: true,
+  ao: false,
   stats: false,
   shadows: true,
   water: true,
-  reflections: true,
+  reflections: false,
   terrain: true,
   landmarks: false,
   atmosphere: true,
@@ -67,31 +81,73 @@ const DEFAULT_PERF_SETTINGS = {
   physicsProps: true,
   waterSplashes: true,
   weatherFX: true,
+  splatBackdrop: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
 };
 
+const QUALITY_PRESETS = {
+  performance: {
+    // 1.5x DPR + 2x MSAA + SMAA-ULTRA: at 1x on a retina panel the silhouette
+    // edges stair-step badly. This is the main anti-alias fix; drop dprMode back
+    // to '1x' (perf panel) on weak GPUs, or push to '2x' for full native res.
+    dprMode: '1.5x',
+    msaaSamples: 2,
+    ao: false,
+    reflections: false,
+    waterQuality: 'performance',
+  },
+  cinematic: {
+    dprMode: 'default',
+    msaaSamples: 2,
+    ao: true,
+    reflections: true,
+    waterQuality: 'cinematic',
+  },
+};
+
+const BOOT_LOADER_STABLE_MS = 900;
+const BOOT_MIN_LOADING_MS = 1400;
+const DEFERRED_CONTENT_DELAY_MS = 700;
+const SCENE_COST_BUCKET_LIMIT = 40;
+
 function getInitialPerfSettings() {
-  return { ...DEFAULT_PERF_SETTINGS };
+  return { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[DEFAULT_PERF_SETTINGS.quality] };
 }
 
 function settingsFromUrlSearch(search) {
   const params = new URLSearchParams(search);
+  const quality = params.get('quality') === 'cinematic' ? 'cinematic' : 'performance';
+  const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
   const postprocessing = params.has('post')
     || params.has('postprocessing')
     || (
-      DEFAULT_PERF_SETTINGS.postprocessing
+      base.postprocessing
       && !params.has('noPost')
       && !params.has('noPostprocessing')
     );
+  const parsedMsaa = Number(params.get('msaa'));
+  const hasExplicitMsaa = params.has('msaa');
+  const msaaSamples = hasExplicitMsaa && Number.isFinite(parsedMsaa)
+    ? (parsedMsaa <= 0 ? 0 : parsedMsaa >= 3 ? 4 : 2)
+    : base.msaaSamples;
+  const ao = (params.has('ao') || params.has('AO')) && !params.has('noAO')
+    ? true
+    : base.ao && !params.has('noAO');
+  const reflections = (params.has('reflections') || params.has('reflection')) && !params.has('noReflections')
+    ? true
+    : base.reflections && !params.has('noReflections');
   return {
-    dprMode: params.get('dpr') || DEFAULT_PERF_SETTINGS.dprMode,
+    quality,
+    waterQuality: params.get('waterQuality') === 'cinematic' ? 'cinematic' : base.waterQuality,
+    dprMode: params.get('dpr') || base.dprMode,
+    msaaSamples,
     postprocessing,
-    ao: DEFAULT_PERF_SETTINGS.ao && !params.has('noAO'),
+    ao,
     stats: false,
     shadows: !params.has('noShadows'),
     water: !params.has('noWater'),
-    reflections: !params.has('noReflections'),
+    reflections,
     terrain: !params.has('noTerrain'),
     landmarks: params.has('landmarks') && !params.has('noLandmarks'),
     atmosphere: !params.has('noAtmosphere'),
@@ -103,6 +159,7 @@ function settingsFromUrlSearch(search) {
     physicsProps: !params.has('noPhysicsProps'),
     waterSplashes: !params.has('noWaterSplashes'),
     weatherFX: !params.has('noWeather'),
+    splatBackdrop: !params.has('noSplatBackdrop'),
     physicsDebug: params.has('physicsDebug'),
     preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
   };
@@ -112,14 +169,174 @@ function dprForMode(mode) {
   if (mode === '1x') return [1, 1];
   if (mode === '1.25x') return [1, 1.25];
   if (mode === '1.5x') return [1, 1.5];
-  // Default capped at 1x: every fullscreen pass (AO, bloom, SMAA, base
-  // render) scales with DPR squared, and SMAA covers the edge quality that
-  // higher DPR used to buy. 1.25x/1.5x stay available in the dev panel.
-  return [1, 1];
+  if (mode === '2x') return [1, 2]; // full native res — sharpest, heaviest
+  // Default uses a modest supersample cap. Thin vegetation is dominated by
+  // subpixel coverage, so 1x + screen AA still shimmers while moving.
+  return [1, 1.25];
 }
 
-function PerformanceSampler({ enabled, onSample }) {
-  const { gl } = useThree();
+function geometryTriangleCount(geometry) {
+  if (!geometry) return 0;
+  if (geometry.index?.count) return Math.floor(geometry.index.count / 3);
+  const position = geometry.attributes?.position;
+  return position?.count ? Math.floor(position.count / 3) : 0;
+}
+
+function materialDrawCallCount(geometry, material) {
+  if (!geometry || !material) return 0;
+  if (Array.isArray(material)) return Math.max(1, geometry.groups?.length || material.length);
+  return Math.max(1, geometry.groups?.length || 1);
+}
+
+function renderSourceFor(object) {
+  let current = object;
+  while (current) {
+    const data = current.userData || {};
+    if (data.renderSource || data.renderLabel || data.renderPath) {
+      const key = data.renderSource || data.renderPath || data.renderLabel;
+      return {
+        key,
+        label: data.renderLabel || key,
+        kind: data.renderKind || 'tagged',
+        path: data.renderPath || null,
+      };
+    }
+    current = current.parent;
+  }
+  const fallback = object.name || object.parent?.name || object.type || 'unlabeled';
+  return {
+    key: `unlabeled:${fallback}`,
+    label: fallback,
+    kind: 'unlabeled',
+    path: null,
+  };
+}
+
+function addSceneCostBucket(buckets, object, cost) {
+  if (!buckets) return;
+  const source = renderSourceFor(object);
+  let bucket = buckets.get(source.key);
+  if (!bucket) {
+    bucket = {
+      key: source.key,
+      label: source.label,
+      kind: source.kind,
+      path: source.path,
+      drawCalls: 0,
+      triangles: 0,
+      meshes: 0,
+      skinnedMeshes: 0,
+      instancedMeshes: 0,
+      instances: 0,
+      points: 0,
+      lines: 0,
+      shadowCasters: 0,
+      shadowReceivers: 0,
+      uncullable: 0,
+    };
+    buckets.set(source.key, bucket);
+  }
+  bucket.drawCalls += cost.drawCalls || 0;
+  bucket.triangles += cost.triangles || 0;
+  bucket.points += cost.points || 0;
+  bucket.lines += cost.lines || 0;
+  bucket.meshes += cost.meshes || 0;
+  bucket.skinnedMeshes += cost.skinnedMeshes || 0;
+  bucket.instancedMeshes += cost.instancedMeshes || 0;
+  bucket.instances += cost.instances || 0;
+  if (object.castShadow) bucket.shadowCasters += 1;
+  if (object.receiveShadow) bucket.shadowReceivers += 1;
+  if (object.frustumCulled === false) bucket.uncullable += 1;
+}
+
+function rankedSceneCostBuckets(buckets, sortKey) {
+  if (!buckets) return undefined;
+  return Array.from(buckets.values())
+    .sort((a, b) => (b[sortKey] - a[sortKey]) || (b.drawCalls - a.drawCalls) || (b.triangles - a.triangles))
+    .slice(0, SCENE_COST_BUCKET_LIMIT)
+    .map(bucket => ({
+      ...bucket,
+      drawCalls: Number(bucket.drawCalls.toFixed(3)),
+      triangles: Math.round(bucket.triangles),
+    }));
+}
+
+function collectSceneRenderStats(root, options = {}) {
+  const buckets = options.includeCosts ? new Map() : null;
+  const stats = {
+    sceneDrawCalls: 0,
+    sceneTriangles: 0,
+    sceneMeshes: 0,
+    sceneSkinnedMeshes: 0,
+    sceneInstancedMeshes: 0,
+    sceneInstances: 0,
+    scenePoints: 0,
+    sceneLines: 0,
+    sceneObjects: 0,
+    sceneChildren: root?.children?.length || 0,
+    sceneVisibleObjects: 0,
+    sceneRootChildren: (root?.children || []).slice(0, 24).map(child => ({
+      name: child.name || child.type || 'Object3D',
+      type: child.type,
+      visible: child.visible !== false,
+      mesh: Boolean(child.isMesh || child.isSkinnedMesh || child.isInstancedMesh),
+      children: child.children?.length || 0,
+    })),
+  };
+
+  function visit(object, parentVisible = true) {
+    stats.sceneObjects += 1;
+    const visible = parentVisible && object.visible !== false;
+    if (visible) {
+      stats.sceneVisibleObjects += 1;
+      if (object.isMesh || object.isSkinnedMesh || object.isInstancedMesh) {
+        const instanceCount = object.isInstancedMesh ? Math.max(0, object.count || 0) : 1;
+        const drawCalls = materialDrawCallCount(object.geometry, object.material);
+        const triangles = geometryTriangleCount(object.geometry) * instanceCount;
+        stats.sceneDrawCalls += drawCalls;
+        stats.sceneTriangles += triangles;
+        stats.sceneMeshes += 1;
+        if (object.isSkinnedMesh) stats.sceneSkinnedMeshes += 1;
+        if (object.isInstancedMesh) {
+          stats.sceneInstancedMeshes += 1;
+          stats.sceneInstances += instanceCount;
+        }
+        addSceneCostBucket(buckets, object, {
+          drawCalls,
+          triangles,
+          meshes: 1,
+          skinnedMeshes: object.isSkinnedMesh ? 1 : 0,
+          instancedMeshes: object.isInstancedMesh ? 1 : 0,
+          instances: object.isInstancedMesh ? instanceCount : 0,
+        });
+      } else if (object.isPoints) {
+        const points = object.geometry?.attributes?.position?.count || 0;
+        const drawCalls = materialDrawCallCount(object.geometry, object.material);
+        stats.scenePoints += points;
+        stats.sceneDrawCalls += drawCalls;
+        addSceneCostBucket(buckets, object, { drawCalls, points });
+      } else if (object.isLine || object.isLineSegments) {
+        const lines = object.geometry?.attributes?.position?.count || 0;
+        const drawCalls = materialDrawCallCount(object.geometry, object.material);
+        stats.sceneLines += lines;
+        stats.sceneDrawCalls += drawCalls;
+        addSceneCostBucket(buckets, object, { drawCalls, lines });
+      }
+    }
+    for (const child of object.children || []) visit(child, visible);
+  }
+
+  visit(root);
+  if (buckets) {
+    stats.sceneCostBuckets = rankedSceneCostBuckets(buckets, 'triangles');
+    stats.sceneCostDrawCallBuckets = rankedSceneCostBuckets(buckets, 'drawCalls');
+    stats.sceneCostUncullableBuckets = rankedSceneCostBuckets(buckets, 'uncullable');
+  }
+  return stats;
+}
+
+function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
+  const { gl, scene } = useThree();
   const samples = useRef({
     frames: 0,
     elapsed: 0,
@@ -140,13 +357,14 @@ function PerformanceSampler({ enabled, onSample }) {
     onSample({
       fps: state.fps,
       frameMs: 1000 / Math.max(1, state.fps),
-      calls: info.render.calls,
-      triangles: info.render.triangles,
+      rawCalls: info.render.calls,
+      rawTriangles: info.render.triangles,
       points: info.render.points,
       lines: info.render.lines,
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       pixelRatio: gl.getPixelRatio(),
+      ...collectSceneRenderStats(scene, { includeCosts }),
     });
     state.frames = 0;
     state.elapsed = 0;
@@ -206,19 +424,34 @@ function InspectionAnchorProjector() {
   return null;
 }
 
+function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onReady }) {
+  const readyFrames = useRef(0);
+
+  useFrame(() => {
+    const waitedLongEnough = !startedAtRef || performance.now() - startedAtRef.current >= minElapsedMs;
+    if (!loadingReady || !waitedLongEnough) {
+      readyFrames.current = 0;
+      return;
+    }
+    readyFrames.current += 1;
+    if (readyFrames.current === 4) onReady();
+  });
+
+  return null;
+}
+
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
-function PostFX({ enabled, ao }) {
+function PostFX({ enabled, ao, multisampling = 2 }) {
   if (!enabled) return null;
   return (
-    // multisampling=0 + SMAA: a multisampled HDR composer buffer is the
-    // single most expensive part of the stack; SMAA gives comparable edges
-    // as a shader effect merged into the same pass as bloom/vignette.
-    <EffectComposer multisampling={0}>
-      <SMAA />
+    // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
+    // coverage before post-processing. Keep this configurable in the perf UI.
+    <EffectComposer multisampling={multisampling}>
+      <SMAA preset={SMAA_PRESET_ULTRA} />
       {ao && (
         <N8AO
           halfRes
@@ -305,6 +538,11 @@ function Toggle({ label, checked, onChange }) {
 function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onClose }) {
   if (!open) return null;
   const set = patch => onChange(current => ({ ...current, ...patch }));
+  const setQuality = quality => onChange(current => ({
+    ...current,
+    ...(QUALITY_PRESETS[quality] || QUALITY_PRESETS.performance),
+    quality,
+  }));
   return (
     <section className="pointer-events-auto fixed right-3 top-3 z-50 w-[min(24rem,calc(100vw-1.5rem))] rounded-md border border-amber-100/25 bg-stone-950/88 p-3 text-amber-50 shadow-2xl backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -315,21 +553,61 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         <Metric label="FPS" value={metrics.fps ? Math.round(metrics.fps) : '--'} />
         <Metric label="Frame" value={metrics.frameMs ? `${metrics.frameMs.toFixed(1)}ms` : '--'} />
         <Metric label="DPR" value={metrics.pixelRatio ? metrics.pixelRatio.toFixed(2) : '--'} />
-        <Metric label="Calls" value={metrics.calls ?? '--'} />
-        <Metric label="Tris" value={metrics.triangles ? `${Math.round(metrics.triangles / 1000)}k` : '0'} />
+        <Metric label="Calls" value={metrics.sceneDrawCalls ?? '--'} />
+        <Metric label="Tris" value={metrics.sceneTriangles ? `${Math.round(metrics.sceneTriangles / 1000)}k` : '0'} />
         <Metric label="Textures" value={metrics.textures ?? '--'} />
         <Metric label="Geoms" value={metrics.geometries ?? '--'} />
-        <Metric label="Lines" value={metrics.lines ?? 0} />
-        <Metric label="Points" value={metrics.points ?? 0} />
+        <Metric label="Meshes" value={metrics.sceneMeshes ?? '--'} />
+        <Metric label="Instances" value={metrics.sceneInstances ? `${Math.round(metrics.sceneInstances / 1000)}k` : '0'} />
+        <Metric label="Raw calls" value={metrics.rawCalls ?? '--'} />
+      </div>
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span className="text-amber-100/70">Quality</span>
+        {['performance', 'cinematic'].map(mode => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setQuality(mode)}
+            className={`rounded border px-2 py-1 ${settings.quality === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+          >
+            {mode}
+          </button>
+        ))}
       </div>
       <div className="mb-3 flex items-center gap-2 text-xs">
         <span className="text-amber-100/70">DPR</span>
-        {['default', '1x', '1.25x', '1.5x'].map(mode => (
+        {['default', '1x', '1.25x', '1.5x', '2x'].map(mode => (
           <button
             key={mode}
             type="button"
             onClick={() => set({ dprMode: mode })}
             className={`rounded border px-2 py-1 ${settings.dprMode === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span className="text-amber-100/70">MSAA</span>
+        {[0, 2, 4].map(samples => (
+          <button
+            key={samples}
+            type="button"
+            onClick={() => set({ msaaSamples: samples })}
+            className={`rounded border px-2 py-1 ${settings.msaaSamples === samples ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+          >
+            {samples}x
+          </button>
+        ))}
+      </div>
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span className="text-amber-100/70">Water</span>
+        {['performance', 'cinematic'].map(mode => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => set({ waterQuality: mode })}
+            className={`rounded border px-2 py-1 ${settings.waterQuality === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
           >
             {mode}
           </button>
@@ -353,6 +631,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         <Toggle label="Phys Props" checked={settings.physicsProps} onChange={value => set({ physicsProps: value })} />
         <Toggle label="Water Splashes" checked={settings.waterSplashes} onChange={value => set({ waterSplashes: value })} />
         <Toggle label="Weather FX" checked={settings.weatherFX} onChange={value => set({ weatherFX: value })} />
+        <Toggle label="Splat Backdrop" checked={settings.splatBackdrop} onChange={value => set({ splatBackdrop: value })} />
         <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
       </div>
       {physicsDebug && (
@@ -417,82 +696,234 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
 }
 
 export default function ThreeDarwinGame() {
+  const [launchState, setLaunchState] = useState('menu');
+  const [sceneReady, setSceneReady] = useState(false);
+  const [loadersStable, setLoadersStable] = useState(false);
+  const [displayedProgress, setDisplayedProgress] = useState(0);
+  const [deferredContentReady, setDeferredContentReady] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
+  const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
+  const [showDarwinAnimationLab, setShowDarwinAnimationLab] = useState(false);
+  const [perfProbe, setPerfProbe] = useState(false);
+  const [costProbe, setCostProbe] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
+  const assetProgress = useProgress();
+  const bootStartedAt = useRef(0);
+  const loaderQuietSince = useRef(0);
   const weather = useThreeGameStore(state => state.weather);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
+  const gameStarted = launchState !== 'menu';
+  const showLaunchOverlay = launchState === 'menu' || !sceneReady;
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
     setPerfSettings(settingsFromUrlSearch(window.location.search));
-    const zoneParam = new URLSearchParams(window.location.search).get('zone');
+    setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
+    setCostProbe(params.has('costProbe'));
+    const zoneParam = params.get('zone');
     if (zoneParam) useThreeGameStore.getState().beginZoneTransition(zoneParam, {});
+    const setShortcutModifierActive = active => {
+      window.__darwinShortcutModifierActive = active;
+    };
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      setShortcutModifierActive(event.metaKey || event.ctrlKey);
+      if (event.code === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        return;
+      }
       if (event.code === 'Digit0') {
         event.preventDefault();
         setShowAssetBrowser(value => !value);
+        return;
+      }
+      if (event.code === 'Digit7') {
+        event.preventDefault();
+        setShowAnimalAnimationLab(value => !value);
+        return;
+      }
+      if (event.code === 'Digit8') {
+        event.preventDefault();
+        setShowDarwinAnimationLab(value => !value);
         return;
       }
       if (event.code !== 'Backquote') return;
       event.preventDefault();
       setShowPerf(value => !value);
     };
+    const onKeyUp = event => {
+      setShortcutModifierActive(event.metaKey || event.ctrlKey);
+    };
+    const clearShortcutModifier = () => setShortcutModifierActive(false);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearShortcutModifier);
+    document.addEventListener('visibilitychange', clearShortcutModifier);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clearShortcutModifier);
+      document.removeEventListener('visibilitychange', clearShortcutModifier);
+      clearShortcutModifier();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!gameStarted || sceneReady) return undefined;
+    const tick = () => {
+      const now = performance.now();
+      const elapsed = now - bootStartedAt.current;
+      const rawProgress = Math.max(0, Math.min(100, assetProgress.progress || 0));
+      const loaderBusy = assetProgress.active || rawProgress < 100;
+
+      if (loaderBusy) {
+        loaderQuietSince.current = 0;
+        setLoadersStable(false);
+      } else {
+        if (!loaderQuietSince.current) loaderQuietSince.current = now;
+        const quietFor = now - loaderQuietSince.current;
+        setLoadersStable(quietFor >= BOOT_LOADER_STABLE_MS && elapsed >= BOOT_MIN_LOADING_MS);
+      }
+
+      const elapsedEase = Math.min(1, elapsed / 9000);
+      const assetTarget = loaderBusy
+        ? 14 + rawProgress * 0.62
+        : 88 + Math.min(8, ((loaderQuietSince.current ? now - loaderQuietSince.current : 0) / BOOT_LOADER_STABLE_MS) * 8);
+      const target = Math.min(sceneReady ? 100 : 98, Math.max(14 + elapsedEase * 28, assetTarget));
+      setDisplayedProgress(current => Math.max(current, current + (target - current) * 0.12));
+    };
+
+    const handle = window.setInterval(tick, 80);
+    tick();
+    return () => window.clearInterval(handle);
+  }, [assetProgress.active, assetProgress.progress, gameStarted, sceneReady]);
+
+  const beginNewExpedition = () => {
+    bootStartedAt.current = performance.now();
+    loaderQuietSince.current = 0;
+    setDisplayedProgress(0);
+    setLoadersStable(false);
+    setSceneReady(false);
+    setDeferredContentReady(false);
+    setLaunchState('loading');
+  };
+
+  const markSceneReady = () => {
+    setSceneReady(true);
+    setDisplayedProgress(100);
+    setLaunchState('playing');
+  };
+
+  useEffect(() => {
+    if (!sceneReady) return undefined;
+    const handle = window.setTimeout(() => {
+      setDeferredContentReady(true);
+    }, DEFERRED_CONTENT_DELAY_MS);
+    return () => window.clearTimeout(handle);
+  }, [sceneReady]);
 
   return (
     <main className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
       <KeyboardControls map={KEYBOARD_MAP}>
-        <Canvas
-          className="absolute inset-0 h-full w-full"
-          shadows={perfSettings.shadows}
-          dpr={dpr}
-          camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
-          gl={{
-            antialias: true,
-            powerPreference: 'high-performance',
-            preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
-            toneMapping: ACESFilmicToneMapping,
-            outputColorSpace: SRGBColorSpace,
-          }}
-          onCreated={({ gl }) => {
-            // Sharp ground/foliage textures at glancing angles, ~free on any
-            // GPU this game targets. Set before the GLBs stream in so every
-            // texture picks it up.
-            Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
-          }}
-        >
-          <color attach="background" args={[sky]} />
-          {/* Exponential-squared fog: the WeatherDirector drives density per
-              frame (sunny haze through thick garúa); SkyController keeps
-              owning its color. Density 0.012 ≈ the old linear 32..108 reach. */}
-          <fogExp2 attach="fog" args={[sky, 0.012]} />
-          <Suspense fallback={null}>
-            <ThreeScene perfSettings={perfSettings} />
-          </Suspense>
-          <PostFX enabled={perfSettings.postprocessing} ao={perfSettings.ao} />
-          <ExpeditionClock />
-          <InspectionAnchorProjector />
-          <PerformanceSampler enabled={showPerf} onSample={setMetrics} />
-          {showPerf && perfSettings.stats && <Stats />}
-        </Canvas>
-        <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />
-        <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />
-        <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />
+        {gameStarted && (
+          <Canvas
+            className="absolute inset-0 h-full w-full"
+            shadows={perfSettings.shadows}
+            dpr={dpr}
+            camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
+            gl={{
+              antialias: true,
+              powerPreference: 'high-performance',
+              preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
+              toneMapping: ACESFilmicToneMapping,
+              outputColorSpace: SRGBColorSpace,
+            }}
+            onCreated={({ gl }) => {
+              // Sharp ground/foliage textures at glancing angles, ~free on any
+              // GPU this game targets. Set before the GLBs stream in so every
+              // texture picks it up.
+              Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
+            }}
+          >
+            <color attach="background" args={[sky]} />
+            {/* Exponential-squared fog: the WeatherDirector drives density per
+                frame (sunny haze through thick garúa); SkyController keeps
+                owning its color. Density 0.012 ≈ the old linear 32..108 reach. */}
+            <fogExp2 attach="fog" args={[sky, 0.012]} />
+            <Suspense fallback={null}>
+              <ThreeScene perfSettings={perfSettings} deferredContentReady={deferredContentReady} />
+              <SceneReadySignal
+                loadingReady={gameStarted}
+                startedAtRef={bootStartedAt}
+                minElapsedMs={BOOT_MIN_LOADING_MS}
+                onReady={markSceneReady}
+              />
+            </Suspense>
+            <PostFX
+              enabled={perfSettings.postprocessing}
+              ao={perfSettings.ao}
+              multisampling={perfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
+            />
+            <ExpeditionClock />
+            <InspectionAnchorProjector />
+            <PerformanceSampler
+              enabled={showPerf || perfProbe}
+              includeCosts={costProbe}
+              onSample={sample => {
+                if (typeof window !== 'undefined') {
+                  window.__threePerfSample = sample;
+                  if (costProbe) {
+                    window.__threeSceneCost = {
+                      byTriangles: sample.sceneCostBuckets || [],
+                      byDrawCalls: sample.sceneCostDrawCallBuckets || [],
+                      byUncullable: sample.sceneCostUncullableBuckets || [],
+                      totals: {
+                        drawCalls: sample.sceneDrawCalls,
+                        triangles: sample.sceneTriangles,
+                        meshes: sample.sceneMeshes,
+                        skinnedMeshes: sample.sceneSkinnedMeshes,
+                        instancedMeshes: sample.sceneInstancedMeshes,
+                        instances: sample.sceneInstances,
+                        visibleObjects: sample.sceneVisibleObjects,
+                      },
+                    };
+                  }
+                }
+                if (showPerf) setMetrics(sample);
+              }}
+            />
+            {showPerf && perfSettings.stats && <Stats />}
+          </Canvas>
+        )}
+        {gameStarted && <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />}
+        {gameStarted && !showLaunchOverlay && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
+        {gameStarted && !showLaunchOverlay && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
+        {gameStarted && !showLaunchOverlay && (
+          <AnimalAnimationDevPanel open={showAnimalAnimationLab} onClose={() => setShowAnimalAnimationLab(false)} />
+        )}
+        {gameStarted && !showLaunchOverlay && (
+          <DarwinAnimationDevPanel open={showDarwinAnimationLab} onClose={() => setShowDarwinAnimationLab(false)} />
+        )}
         <PerformancePanel
-          open={showPerf}
+          open={gameStarted && !showLaunchOverlay && showPerf}
           settings={perfSettings}
           metrics={metrics}
           physicsDebug={physicsDebug}
           onChange={setPerfSettings}
           onClose={() => setShowPerf(false)}
         />
+        {showLaunchOverlay && (
+          <LaunchOverlay
+            mode={launchState === 'menu' ? 'menu' : 'loading'}
+            progress={displayedProgress}
+            onNewExpedition={beginNewExpedition}
+          />
+        )}
       </KeyboardControls>
     </main>
   );

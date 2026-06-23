@@ -1,12 +1,41 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { stabilizeFoliageMaterial } from '../../assets/materialStability';
 
 const dummy = new THREE.Object3D();
+
+function layerCullBounds(items, maxVisibleDistance) {
+  if (!Number.isFinite(maxVisibleDistance) || maxVisibleDistance <= 0 || !items.length) return null;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  items.forEach(item => {
+    const scale = item.scale || 1;
+    minX = Math.min(minX, item.x - scale);
+    maxX = Math.max(maxX, item.x + scale);
+    minY = Math.min(minY, (item.y || 0) - scale);
+    maxY = Math.max(maxY, (item.y || 0) + scale);
+    minZ = Math.min(minZ, item.z - scale);
+    maxZ = Math.max(maxZ, item.z + scale);
+  });
+  const center = new THREE.Vector3(
+    (minX + maxX) * 0.5,
+    (minY + maxY) * 0.5,
+    (minZ + maxZ) * 0.5,
+  );
+  const radius = Math.hypot(maxX - center.x, maxY - center.y, maxZ - center.z);
+  const visibleDistance = maxVisibleDistance + radius;
+  return { center, visibleDistanceSq: visibleDistance * visibleDistance };
+}
 
 function applyTreeOptions(tree, variant, index) {
   const usingPreset = Boolean(variant.basePreset);
@@ -74,6 +103,7 @@ function cloneMaterial(material, geometry, variant, motion, isLeaf) {
     // costs heavy overdraw and sorting against the water.
     cloned.transparent = false;
     cloned.depthWrite = true;
+    cloned.alphaToCoverage = true;
     if (cloned.emissive) cloned.emissive = new THREE.Color(variant.leafColor || '#899260').multiplyScalar(0.08);
   } else {
     cloned.map = null;
@@ -81,6 +111,7 @@ function cloneMaterial(material, geometry, variant, motion, isLeaf) {
     cloned.color = new THREE.Color(variant.barkColor || '#7b684f');
     cloned.roughness = 0.9;
   }
+  stabilizeFoliageMaterial(cloned, { doubleSide: isLeaf, forceCutout: isLeaf });
   if (motion) applyFoliageMotion(cloned, geometry, motion);
   return cloned;
 }
@@ -115,13 +146,25 @@ export function InstancedEzTreeLayer({
   variants,
   sink = 0,
   slopeSink = 0.5,
-  castShadow = true,
+  castShadow = false,
   receiveShadow = true,
+  maxVisibleDistance = null,
   motion = null,
   inspectableType = null,
+  sourceId = 'generated-trees',
+  sourceLabel = 'Generated trees',
+  sourceKind = 'ecology-generated-trees',
 }) {
+  const groupRef = useRef(null);
   const [ezTree, setEzTree] = useState(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const renderUserData = useMemo(() => ({
+    renderSource: sourceId,
+    renderLabel: sourceLabel || sourceId,
+    renderKind: sourceKind,
+    renderPath: null,
+  }), [sourceId, sourceKind, sourceLabel]);
+  const meshUserData = useMemo(() => ({ noReflect: true, ...renderUserData }), [renderUserData]);
 
   useEffect(() => {
     let active = true;
@@ -166,10 +209,18 @@ export function InstancedEzTreeLayer({
     disposePrimitives(variantPrimitives);
   }, [variantPrimitives]);
 
+  const cullBounds = useMemo(() => layerCullBounds(items, maxVisibleDistance), [items, maxVisibleDistance]);
+
+  useFrame(({ camera }) => {
+    const group = groupRef.current;
+    if (!group || !cullBounds) return;
+    group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
+  });
+
   if (!variantPrimitives.length) return null;
 
   return (
-    <group>
+    <group ref={groupRef} userData={renderUserData}>
       {variantPrimitives.map((primitives, variantIndex) => {
         const variantItems = items.filter((_, itemIndex) => itemIndex % variantPrimitives.length === variantIndex);
         return primitives.map(({ geometry, material }, primitiveIndex) => (
@@ -178,8 +229,7 @@ export function InstancedEzTreeLayer({
             args={[geometry, material, variantItems.length]}
             castShadow={castShadow}
             receiveShadow={receiveShadow}
-            frustumCulled={false}
-            userData={{ noReflect: true }}
+            userData={meshUserData}
             onClick={inspectableType ? event => {
               event.stopPropagation();
               const item = variantItems[event.instanceId] || null;
@@ -199,6 +249,8 @@ export function InstancedEzTreeLayer({
                 mesh.setMatrixAt(index, dummy.matrix);
               });
               mesh.instanceMatrix.needsUpdate = true;
+              mesh.computeBoundingSphere?.();
+              mesh.computeBoundingBox?.();
             }}
           />
         ));

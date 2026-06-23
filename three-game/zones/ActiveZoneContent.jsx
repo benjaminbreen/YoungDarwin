@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Beagle } from '../components/scene/Beagle';
 import { Landmarks } from '../components/scene/Landmarks';
 import { Terrain } from '../components/scene/Terrain';
@@ -15,9 +15,9 @@ import { PhysicsObstacles } from '../physics/PhysicsObstacles';
 import { PhysicsTerrain } from '../physics/PhysicsTerrain';
 import { useThreeGameStore } from '../store';
 
-export function ActiveZoneContent({ settings }) {
+export function ActiveZoneContent({ settings, deferredContentReady = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const specimens = getThreeSpecimens(currentZoneId);
+  const specimens = deferredContentReady ? getThreeSpecimens(currentZoneId) : [];
 
   return (
     <>
@@ -25,15 +25,29 @@ export function ActiveZoneContent({ settings }) {
       {settings.terrain !== false && <BorderVistas />}
       <PhysicsTerrain />
       {settings.landmarks !== false && <Landmarks />}
-      {settings.worldDetails !== false && <WorldDetails />}
+      {deferredContentReady && settings.worldDetails !== false && (
+        <Suspense fallback={null}>
+          <WorldDetails settings={settings} />
+        </Suspense>
+      )}
       {settings.physicsObstacles !== false && <PhysicsObstacles />}
       {settings.physicsProps !== false && <PhysicsProps />}
       {settings.waterSplashes !== false && <WaterSplashes />}
-      {settings.beagle !== false && <Beagle />}
+      {deferredContentReady && settings.beagle !== false && (
+        <Suspense fallback={null}>
+          <Beagle />
+        </Suspense>
+      )}
       {settings.specimens !== false && specimens.map(specimen => (
-        <SpecimenActor key={specimen.instanceId || specimen.id} specimen={specimen} />
+        <Suspense key={specimen.instanceId || specimen.id} fallback={null}>
+          <SpecimenActor specimen={specimen} />
+        </Suspense>
       ))}
-      {settings.syms !== false && <SymsCovington />}
+      {deferredContentReady && settings.syms !== false && (
+        <Suspense fallback={null}>
+          <SymsCovington />
+        </Suspense>
+      )}
     </>
   );
 }

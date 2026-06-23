@@ -14,6 +14,7 @@ export const inspectableCatalog = {
   dry_scrub: { id: 'dry_scrub', kind: 'plant', englishName: 'Dry-zone shrub', latinName: 'arid littoral scrub', category: 'Plant', rarity: 'common' },
   dry_grass: { id: 'dry_grass', kind: 'plant', englishName: 'Dry coastal grass', latinName: 'Poaceae', category: 'Plant', rarity: 'common' },
   opuntia: { id: 'opuntia', kind: 'plant', englishName: 'Large Opuntia', latinName: 'Opuntia megasperma group', category: 'Plant', rarity: 'uncommon' },
+  candelabra_cactus: { id: 'candelabra_cactus', kind: 'plant', englishName: 'Candelabra cactus', latinName: 'Jasminocereus thouarsii group', category: 'Plant', rarity: 'uncommon' },
   galapagos_cotton: { id: 'galapagos_cotton', kind: 'plant', englishName: 'Galapagos cotton', latinName: 'Gossypium darwinii', category: 'Plant', rarity: 'endemic' },
   flat_cactus: { id: 'flat_cactus', kind: 'plant', englishName: 'Prickly pear cactus', latinName: 'Opuntia', category: 'Plant', rarity: 'uncommon' },
   shrub: { id: 'shrub', kind: 'plant', englishName: 'Coastal shrub', latinName: 'dry-zone shrub', category: 'Plant', rarity: 'common' },
@@ -91,13 +92,14 @@ export function inspectableTypeForEcologyLayer(layerId) {
   if (!layerId) return 'shrub';
   if (layerId.startsWith('saltbush')) return 'saltbush';
   if (layerId === 'croton') return 'croton';
-  if (layerId === 'scalesia') return 'scalesia';
+  if (layerId.includes('scalesia')) return 'scalesia';
   if (layerId === 'palo-santo') return 'castela';
   if (layerId === 'ez-low-upland-trees') return 'paga_paga';
   if (layerId === 'saltgrass') return 'saltgrass';
   if (layerId === 'sesuvium') return 'sesuvium';
   if (layerId === 'driftwood') return 'driftwood';
   if (layerId === 'opuntia') return 'opuntia';
+  if (layerId.includes('candelabra') || layerId.includes('jasminocereus')) return 'candelabra_cactus';
   if (layerId === 'manzanillo') return 'manzanillo';
   return 'shrub';
 }

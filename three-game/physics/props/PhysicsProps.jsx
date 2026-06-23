@@ -57,7 +57,12 @@ export function PhysicsProps() {
   if (!props.length && !debrisEvents.length) return null;
 
   return (
-    <group>
+    <group userData={{
+      renderSource: `physics-props:${currentZoneId}`,
+      renderLabel: `${currentZoneId} physics props`,
+      renderKind: 'physics-props',
+      renderPath: null,
+    }}>
       {props.map(prop => (
         <PhysicsProp key={prop.id} prop={prop} onBreak={handleBreak} />
       ))}

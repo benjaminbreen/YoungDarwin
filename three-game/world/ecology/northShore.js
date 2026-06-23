@@ -124,6 +124,19 @@ function buildFlora() {
       }),
     },
     {
+      id: 'candelabra-cactus',
+      path: `${NATURE}runtime-candelabra-cactus.glb`,
+      sink: 0.04,
+      tint: '#6f8f4f',
+      tintStrength: 0.08,
+      items: scatter('candelabra-cactus', 3, 106, {
+        minX: -38, maxX: 42, minZ: 10, maxZ: 36, scale: [2.7, 3.9], maxGrade: 0.34,
+        accept: (biome, x, z) => z - northShoreCoastZ(x) > 11
+          && nearAnyCluster(scrubClumps, x, z, 13)
+          && (biome === 'dry-scrub' || biome === 'palo-santo'),
+      }),
+    },
+    {
       id: 'manzanillo',
       path: `${NATURE}runtime-manzanillo.glb`,
       sink: 0.08,

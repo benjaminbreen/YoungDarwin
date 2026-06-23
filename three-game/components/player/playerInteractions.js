@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { getRegionTerrainConfig } from '../../world/terrain';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
@@ -12,6 +11,9 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
   const config = getRegionTerrainConfig(regionId);
   const threshold = 5.2;
   const hints = getRegionEdgeHints(regionId);
+  const facingX = facing?.x || 0;
+  const facingZ = facing?.z || 0;
+  const facingLength = Math.hypot(facingX, facingZ);
   const distances = {
     east: config.width / 2 - position.x,
     west: position.x + config.width / 2,
@@ -27,8 +29,12 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
     if (edge.includes('west') && distances.west > threshold) continue;
     const edgeDirection = EDGE_DIRECTIONS[edge];
     if (!edgeDirection) continue;
-    const direction = new THREE.Vector3(edgeDirection.dx, 0, edgeDirection.dy).normalize();
-    const facingWeight = facing?.lengthSq?.() > 0.001 ? direction.dot(facing.clone().normalize()) : 0;
+    const directionLength = Math.hypot(edgeDirection.dx, edgeDirection.dy) || 1;
+    const directionX = edgeDirection.dx / directionLength;
+    const directionZ = edgeDirection.dy / directionLength;
+    const facingWeight = facingLength > 0.001
+      ? (directionX * facingX + directionZ * facingZ) / facingLength
+      : 0;
     if (facingWeight < -0.15) continue;
     const distance = Math.min(
       edge.includes('north') ? distances.north : Infinity,
@@ -109,6 +115,9 @@ export function updatePlayerInteractions({
       if (currentState.carriedObjectId) {
         setCarriedObject(null);
       } else if (currentState.carryPrompt.mode === 'pickup') {
+        if (!stateRef.current.action) {
+          startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });
+        }
         setCarriedObject(currentState.carryPrompt.id);
       }
     } else if (!specimenId && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {

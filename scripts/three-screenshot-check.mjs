@@ -57,6 +57,9 @@ async function run() {
     });
 
     await page.goto(screenshotUrl(), { waitUntil: 'networkidle', timeout: 60000 });
+    await page.getByRole('button', { name: 'New Expedition' }).click({ timeout: 15000 });
+    await page.waitForSelector('canvas', { timeout: 60000 });
+    await page.waitForSelector('[data-testid="three-launch-overlay"]', { state: 'detached', timeout: 60000 });
     await page.waitForTimeout(1500);
     const health = await canvasPixelHealth(page);
     const screenshot = path.join(outDir, `${viewport.name}.png`);

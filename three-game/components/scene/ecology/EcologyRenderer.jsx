@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-import { useThreeGameStore } from '../../../store';
+import * as THREE from 'three';
+import { getRuntimePlayerPose } from '../../../store';
 import { getEcology } from '../../../world/ecology';
 import { updateFoliageUniforms } from './foliageMotion';
 import { InstancedGLBLayer } from './InstancedGLBLayer';
@@ -15,6 +16,13 @@ import { BirdFlock } from './BirdFlock';
 import { ReefSwimmers } from './ReefSwimmers';
 import { StaticGLB } from '../../assets/StaticGLB';
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
+import { terrainHeight } from '../../../world/terrain';
+import { CanopySilhouetteLayer } from './CanopySilhouetteLayer';
+import { GroundCoverField } from './GroundCoverField';
+import { DenseGrassField } from './DenseGrassField';
+import { HybridGrassTuftField } from './HybridGrassTuftField';
+import { StylizedMeadowField } from './StylizedMeadowField';
+import { DryGrassPatchField } from './DryGrassPatchField';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -23,7 +31,7 @@ import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 // Drives the shared wind/bend uniforms for every foliage material at once.
 function FoliageMotionDriver() {
   useFrame(({ clock }, delta) => {
-    const pose = useThreeGameStore.getState().playerPose;
+    const pose = getRuntimePlayerPose();
     updateFoliageUniforms(clock.elapsedTime, pose?.position, delta);
   });
   return null;
@@ -32,7 +40,81 @@ function FoliageMotionDriver() {
 // Zones the player can travel to from anywhere on the island. Once the
 // current zone has settled, warm the GLB cache for the others so arriving
 // there doesn't stall on network fetches.
-const PREFETCH_ZONES = ['N_SHORE', 'NW_REEF'];
+const PREFETCH_ZONES = ['N_SHORE', 'NW_REEF', 'MANGROVES'];
+
+function drawDistanceFor(item, fallback = 95) {
+  const value = item.maxVisibleDistance ?? item.drawDistance;
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function LagoonSurface({ surface }) {
+  const material = React.useMemo(() => new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uColorA: { value: new THREE.Color(surface.colorA || '#31584a') },
+      uColorB: { value: new THREE.Color(surface.colorB || '#85a16d') },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform float uTime;
+      uniform vec3 uColorA;
+      uniform vec3 uColorB;
+      varying vec2 vUv;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      void main() {
+        vec2 p = vUv * vec2(2.0, 1.0);
+        float ripple = sin((p.x * 6.0 + p.y * 10.0) + uTime * 0.65) * 0.5 + 0.5;
+        float matte = noise(p * 5.0 + vec2(uTime * 0.025, -uTime * 0.015));
+        float edge = smoothstep(0.02, 0.18, vUv.x) * (1.0 - smoothstep(0.82, 0.98, vUv.x))
+          * smoothstep(0.03, 0.18, vUv.y) * (1.0 - smoothstep(0.82, 0.98, vUv.y));
+        vec3 color = mix(uColorA, uColorB, matte * 0.56 + ripple * 0.12);
+        gl_FragColor = vec4(color, edge * 0.34);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+  }), [surface.colorA, surface.colorB]);
+
+  useFrame(({ clock }) => {
+    material.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  useEffect(() => () => material.dispose(), [material]);
+
+  return (
+    <mesh
+      position={surface.position || [0, -0.875, 0]}
+      rotation={[-Math.PI / 2, 0, surface.rotation || 0]}
+      scale={[surface.scale?.[0] || 24, surface.scale?.[1] || 12, 1]}
+      material={material}
+      userData={{ noReflect: true }}
+    >
+      <circleGeometry args={[1, 96]} />
+    </mesh>
+  );
+}
+
+function OptionalSplatBackdrop({ backdrop, enabled }) {
+  // Hook point for a future GaussianSplats3D/Drei implementation. The first
+  // Cormorant Bay pass must stay beautiful without this asset or dependency.
+  if (!enabled || !backdrop?.path) return null;
+  return null;
+}
 
 function useNeighborZonePrefetch(currentEcology) {
   useEffect(() => {
@@ -41,56 +123,148 @@ function useNeighborZonePrefetch(currentEcology) {
         if (zoneId === currentEcology?.zoneId) return;
         const other = getEcology(zoneId);
         if (!other) return;
-        other.flora?.forEach(layer => layer.path && useGLTF.preload(layer.path));
-        other.props?.forEach(prop => prop.path && useGLTF.preload(prop.path));
+        other.flora?.forEach(layer => {
+          if (layer.path && layer.prefetch !== false && (!other.stream || layer.prefetch === true)) useGLTF.preload(layer.path);
+        });
+        other.props?.forEach(prop => {
+          if (prop.path && prop.prefetch !== false && (!other.stream || prop.prefetch === true)) useGLTF.preload(prop.path);
+        });
       });
     }, 5000); // let the current zone finish loading first
     return () => clearTimeout(handle);
   }, [currentEcology]);
 }
 
-export function EcologyRenderer({ ecology }) {
+export function EcologyRenderer({ ecology, settings = {} }) {
   useNeighborZonePrefetch(ecology);
+  const [streamTier, setStreamTier] = useState(0);
+
+  useEffect(() => {
+    setStreamTier(0);
+    if (!ecology?.stream) return undefined;
+    const schedule = ecology.streamSchedule || [700, 1800, 3200];
+    const handles = schedule.map((delay, index) => setTimeout(() => {
+      setStreamTier(index + 1);
+    }, delay));
+    return () => handles.forEach(handle => clearTimeout(handle));
+  }, [ecology]);
+
   if (!ecology) return null;
+  const tierVisible = item => !ecology.stream || (item.loadTier ?? 1) <= streamTier;
+  const flora = (ecology.flora || []).filter(tierVisible);
+  const groundCover = (ecology.groundCover || []).filter(tierVisible);
+  const denseGrass = (ecology.denseGrass || []).filter(tierVisible);
+  const hybridGrassTufts = (ecology.hybridGrassTufts || []).filter(tierVisible);
+  const stylizedMeadows = (ecology.stylizedMeadows || []).filter(tierVisible);
+  const dryGrassPatches = (ecology.dryGrassPatches || []).filter(tierVisible);
+  const lagoonSurfaces = (ecology.lagoonSurfaces || []).filter(tierVisible);
+  const generatedTrees = (ecology.generatedTrees || []).filter(tierVisible);
+  const props = (ecology.props || []).filter(tierVisible);
+  const rocks = (ecology.rocks || []).filter(tierVisible);
+  const canopySilhouettes = (ecology.canopySilhouettes || []).filter(tierVisible);
   return (
     <group>
       <FoliageMotionDriver />
-      {ecology.rocks?.length > 0 && <RockField rocks={ecology.rocks} />}
-      {ecology.flora?.map(layer => (
-        <InstancedGLBLayer
-          key={layer.id}
-          path={layer.path}
-          items={layer.items}
-          sink={layer.sink || 0}
-          ySquash={layer.ySquash || 1}
-          tint={layer.tint || null}
-          tintStrength={layer.tintStrength || 0}
-          motion={layer.motion || null}
-          castShadow={layer.castShadow !== false}
-          inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+      {rocks.length > 0 && (
+        <RockField
+          rocks={rocks}
+          sourceId={`ecology:${ecology.zoneId}:rocks`}
+          sourceLabel={`${ecology.zoneId} rocks`}
         />
-      ))}
-      {ecology.generatedTrees?.map(layer => (
-        <InstancedEzTreeLayer
+      )}
+      {canopySilhouettes.map(layer => (
+        <CanopySilhouetteLayer
           key={layer.id}
           items={layer.items}
-          variants={layer.variants}
-          sink={layer.sink || 0}
-          motion={layer.motion || null}
-          castShadow={layer.castShadow !== false}
-          receiveShadow={layer.receiveShadow !== false}
-          inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+          sourceId={`ecology:${ecology.zoneId}:${layer.id}`}
+          sourceLabel={layer.id}
         />
       ))}
-      {ecology.props?.map(prop => (
-        <StaticGLB
-          key={prop.id}
-          path={prop.path}
-          position={prop.position}
-          rotation={prop.rotation}
-          scale={prop.scale}
-          inspectableType={prop.id?.startsWith('crab-') ? 'crab_prop' : null}
-        />
+      <OptionalSplatBackdrop backdrop={ecology.splatBackdrop} enabled={settings.splatBackdrop !== false} />
+      {lagoonSurfaces.map(surface => (
+        <LagoonSurface key={surface.id} surface={surface} />
+      ))}
+      {groundCover.map(layer => (
+        <GroundCoverField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
+      ))}
+      {denseGrass.map(layer => (
+        <DenseGrassField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
+      ))}
+      {hybridGrassTufts.map(layer => (
+        <HybridGrassTuftField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
+      ))}
+      {stylizedMeadows.map(layer => (
+        <StylizedMeadowField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
+      ))}
+      {dryGrassPatches.map(layer => (
+        <Suspense key={layer.id} fallback={null}>
+          <DryGrassPatchField
+            layer={layer}
+            castShadow={layer.castShadow === true}
+            receiveShadow={layer.receiveShadow !== false}
+            inspectableType={inspectableTypeForEcologyLayer(layer.id) || 'dry_grass'}
+          />
+        </Suspense>
+      ))}
+      {flora.map(layer => (
+        <Suspense key={layer.id} fallback={null}>
+          <InstancedGLBLayer
+            path={layer.path}
+            items={layer.items}
+            sink={layer.sink || 0}
+            ySquash={layer.ySquash || 1}
+            tint={layer.tint || null}
+            tintStrength={layer.tintStrength || 0}
+            motion={layer.motion || null}
+            castShadow={layer.castShadow === true}
+            receiveShadow={layer.receiveShadow !== false}
+            maxVisibleDistance={drawDistanceFor(layer)}
+            sourceId={`ecology:${ecology.zoneId}:${layer.id}`}
+            sourceLabel={layer.id}
+            sourceKind="ecology-flora"
+            inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+          />
+        </Suspense>
+      ))}
+      {generatedTrees.map(layer => (
+        <Suspense key={layer.id} fallback={null}>
+          <InstancedEzTreeLayer
+            items={layer.items}
+            variants={layer.variants}
+            sink={layer.sink || 0}
+            motion={layer.motion || null}
+            castShadow={layer.castShadow === true}
+            receiveShadow={layer.receiveShadow !== false}
+            maxVisibleDistance={drawDistanceFor(layer, 115)}
+            sourceId={`ecology:${ecology.zoneId}:${layer.id}`}
+            sourceLabel={layer.id}
+            sourceKind="ecology-generated-trees"
+            inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+          />
+        </Suspense>
+      ))}
+      {props.map(prop => (
+        <Suspense key={prop.id} fallback={null}>
+          <StaticGLB
+            path={prop.path}
+            position={prop.terrainY
+              ? [
+                prop.position[0],
+                terrainHeight(prop.position[0], prop.position[2], ecology.zoneId) + (prop.position[1] || 0),
+                prop.position[2],
+              ]
+              : prop.position}
+            rotation={prop.rotation}
+            scale={prop.scale}
+            castShadow={prop.castShadow === true}
+            receiveShadow={prop.receiveShadow === true}
+            maxVisibleDistance={drawDistanceFor(prop, 85)}
+            sourceId={`ecology:${ecology.zoneId}:${prop.id}`}
+            sourceLabel={prop.id}
+            sourceKind="ecology-prop"
+            inspectableType={prop.id?.startsWith('crab-') ? 'crab_prop' : null}
+          />
+        </Suspense>
       ))}
       {ecology.splashes?.anchors?.length > 0 && (
         <RockSplashes anchors={ecology.splashes.anchors} period={ecology.splashes.period} />

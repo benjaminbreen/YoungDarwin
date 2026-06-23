@@ -6,7 +6,7 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { getPostOfficeBayBasaltBlocks, getPostOfficeBayOpuntiaHazards, makeFloreanaScatter } from '../../world/floreanaCoveLayout';
 import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
-import { useThreeGameStore } from '../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
 import { POST_OFFICE_BAY_TRAIL, terrainHeight } from '../../world/terrain';
 import { getModelAsset } from '../../modelAssets';
@@ -25,9 +25,27 @@ const OPUNTIA_MOTION = { wind: 0.32, bend: 0.32 };
 const COTTON_MOTION = { wind: 1.8, bend: 0.35, bendRadius: 1.45 };
 const TREE_MOTION = { wind: 0.85, bend: 0.65 };
 
-function InstancedLayer({ items, geometry, material, transform, animate = false, castShadow = true, receiveShadow = true, inspectableType = null }) {
+function InstancedLayer({
+  items,
+  geometry,
+  material,
+  transform,
+  animate = false,
+  castShadow = false,
+  receiveShadow = true,
+  inspectableType = null,
+  sourceId = 'world-detail',
+  sourceLabel = 'World detail',
+  sourceKind = 'world-detail',
+}) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const renderUserData = useMemo(() => ({
+    renderSource: sourceId,
+    renderLabel: sourceLabel || sourceId,
+    renderKind: sourceKind,
+    renderPath: null,
+  }), [sourceId, sourceKind, sourceLabel]);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
@@ -63,6 +81,7 @@ function InstancedLayer({ items, geometry, material, transform, animate = false,
       args={[geometry, material, items.length]}
       castShadow={castShadow}
       receiveShadow={receiveShadow}
+      userData={renderUserData}
       onClick={inspectableType ? event => {
         event.stopPropagation();
         const item = items[event.instanceId] || null;
@@ -74,7 +93,7 @@ function InstancedLayer({ items, geometry, material, transform, animate = false,
 
 function FoliageMotionDriver() {
   useFrame(({ clock }, delta) => {
-    const pose = useThreeGameStore.getState().playerPose;
+    const pose = getRuntimePlayerPose();
     updateFoliageUniforms(clock.elapsedTime, pose?.position, delta);
   });
   return null;
@@ -98,6 +117,12 @@ function ObstacleProps() {
           scale={obstacle.scale}
           tint={obstacle.kind === 'tree' ? '#5d5142' : '#536056'}
           tintStrength={obstacle.kind === 'tree' ? 0.08 : 0.18}
+          castShadow={obstacle.castShadow === true}
+          receiveShadow={obstacle.receiveShadow === true}
+          maxVisibleDistance={obstacle.maxVisibleDistance ?? 105}
+          sourceId={`obstacle:${currentZoneId}:${obstacle.id}`}
+          sourceLabel={obstacle.id}
+          sourceKind={`obstacle-${obstacle.kind || 'prop'}`}
           motion={obstacle.kind === 'tree' ? TREE_MOTION : null}
         />
       ))}
@@ -120,7 +145,18 @@ function BasaltBlocks() {
     object.rotation.set(item.tone * 0.25, item.yaw, -0.18 + item.tone * 0.36);
     object.scale.set(item.radiusX, item.radiusY, item.radiusZ);
   }, []);
-  return <InstancedLayer items={items} geometry={geometry} material={material} transform={transform} inspectableType="basalt_block" />;
+  return (
+    <InstancedLayer
+      items={items}
+      geometry={geometry}
+      material={material}
+      transform={transform}
+      inspectableType="basalt_block"
+      sourceId="post-office-bay:basalt-blocks"
+      sourceLabel="Post Office Bay basalt blocks"
+      sourceKind="world-detail-rocks"
+    />
+  );
 }
 
 function Scree() {
@@ -147,7 +183,18 @@ function Scree() {
     object.rotation.set(item.tone, item.yaw, item.tone * 0.6);
     object.scale.set(item.scale * 1.5, item.scale * 0.52, item.scale);
   }, []);
-  return <InstancedLayer items={items} geometry={geometry} material={material} transform={transform} inspectableType="scree" />;
+  return (
+    <InstancedLayer
+      items={items}
+      geometry={geometry}
+      material={material}
+      transform={transform}
+      inspectableType="scree"
+      sourceId="post-office-bay:scree"
+      sourceLabel="Post Office Bay scree"
+      sourceKind="world-detail-rocks"
+    />
+  );
 }
 
 function DryScrub() {
@@ -174,7 +221,18 @@ function DryScrub() {
     object.rotation.set(0, item.yaw, item.tone * 0.18);
     object.scale.set(item.scale * 1.15, item.scale * 0.68, item.scale);
   }, []);
-  return <InstancedLayer items={items} geometry={geometry} material={material} transform={transform} inspectableType="dry_scrub" />;
+  return (
+    <InstancedLayer
+      items={items}
+      geometry={geometry}
+      material={material}
+      transform={transform}
+      inspectableType="dry_scrub"
+      sourceId="post-office-bay:dry-scrub"
+      sourceLabel="Post Office Bay dry scrub"
+      sourceKind="world-detail-flora"
+    />
+  );
 }
 
 function OpuntiaLayer() {
@@ -191,6 +249,9 @@ function OpuntiaLayer() {
       tintStrength={0.08}
       motion={OPUNTIA_MOTION}
       castShadow={false}
+      sourceId="post-office-bay:opuntia"
+      sourceLabel="Post Office Bay opuntia"
+      sourceKind="world-detail-flora"
       inspectableType="opuntia"
     />
   );
@@ -238,7 +299,19 @@ function DryGrassLayer() {
   }, []);
   if (!asset?.enabled) return null;
   if (!geometry || !material) return null;
-  return <InstancedLayer items={items} geometry={geometry} material={material} transform={transform} castShadow={false} inspectableType="dry_grass" />;
+  return (
+    <InstancedLayer
+      items={items}
+      geometry={geometry}
+      material={material}
+      transform={transform}
+      castShadow={false}
+      inspectableType="dry_grass"
+      sourceId="post-office-bay:dry-grass"
+      sourceLabel="Post Office Bay dry grass"
+      sourceKind="world-detail-flora"
+    />
+  );
 }
 
 function AssetVegetationLayer() {
@@ -262,6 +335,11 @@ function AssetVegetationLayer() {
     { id: 'flat-cactus-3', x: -18.8, z: 9.2, yaw: 1.45, scale: 0.2, tint: '#819c51' },
     { id: 'flat-cactus-4', x: 6.8, z: 26.5, yaw: -0.25, scale: 0.22, tint: '#6d8e3e' },
   ].map(item => ({ ...item, y: terrainHeight(item.x, item.z) })), []);
+  const candelabraCactus = useMemo(() => [
+    { id: 'candelabra-cactus-1', x: -24.5, z: 30.8, yaw: -0.25, scale: 3.4, tint: '#728d4d' },
+    { id: 'candelabra-cactus-2', x: -4.2, z: 34.5, yaw: 0.62, scale: 3.9, tint: '#6f8848' },
+    { id: 'candelabra-cactus-3', x: 18.6, z: 31.2, yaw: -0.9, scale: 3.2, tint: '#7c9655' },
+  ].map(item => ({ ...item, y: terrainHeight(item.x, item.z) })), []);
   // One layer per species: tone-based shading rides on per-item tints
   // (instanceColor) instead of splitting each model into multiple layers.
   const shrubItems = useMemo(() => shrubs.map(item => ({
@@ -275,6 +353,7 @@ function AssetVegetationLayer() {
     tint: item.tone > 0.55 ? '#8a7a48' : '#4f6134',
   })), [smallShrubs]);
   const flatCactusItems = useMemo(() => flatCactus.map(item => ({ ...item, y: item.y + 0.02 })), [flatCactus]);
+  const candelabraCactusItems = useMemo(() => candelabraCactus.map(item => ({ ...item, y: item.y + 0.02 })), [candelabraCactus]);
 
   return (
     <group>
@@ -284,6 +363,9 @@ function AssetVegetationLayer() {
         tintStrength={0.34}
         motion={SHRUB_MOTION}
         castShadow={false}
+        sourceId="post-office-bay:plant-shrub"
+        sourceLabel="Post Office Bay plant shrub"
+        sourceKind="world-detail-flora"
         inspectableType="shrub"
       />
       <InstancedGLBLayer
@@ -292,6 +374,9 @@ function AssetVegetationLayer() {
         tintStrength={0.36}
         motion={SMALL_SHRUB_MOTION}
         castShadow={false}
+        sourceId="post-office-bay:small-shrub"
+        sourceLabel="Post Office Bay small shrub"
+        sourceKind="world-detail-flora"
         inspectableType="shrub"
       />
       <InstancedGLBLayer
@@ -300,7 +385,21 @@ function AssetVegetationLayer() {
         tintStrength={0.16}
         motion={FLAT_CACTUS_MOTION}
         castShadow={false}
+        sourceId="post-office-bay:flat-cactus"
+        sourceLabel="Post Office Bay flat cactus"
+        sourceKind="world-detail-flora"
         inspectableType="flat_cactus"
+      />
+      <InstancedGLBLayer
+        path="/assets/models/nature/runtime-candelabra-cactus.glb"
+        items={candelabraCactusItems}
+        tintStrength={0.12}
+        motion={FLAT_CACTUS_MOTION}
+        castShadow={false}
+        sourceId="post-office-bay:candelabra-cactus"
+        sourceLabel="Post Office Bay candelabra cactus"
+        sourceKind="world-detail-flora"
+        inspectableType="candelabra_cactus"
       />
     </group>
   );
@@ -330,6 +429,9 @@ function GalapagosCottonLayer() {
       tintStrength={0.18}
       motion={COTTON_MOTION}
       castShadow={false}
+      sourceId="post-office-bay:galapagos-cotton"
+      sourceLabel="Post Office Bay Galapagos cotton"
+      sourceKind="world-detail-flora"
       inspectableType="galapagos_cotton"
     />
   );
@@ -417,14 +519,14 @@ function PostOfficeBayDetails() {
   );
 }
 
-export function WorldDetails() {
+export function WorldDetails({ settings = {} }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const ecology = getEcology(currentZoneId);
   if (ecology) {
     return (
       <group>
         <ObstacleProps />
-        <EcologyRenderer ecology={ecology} />
+        <EcologyRenderer ecology={ecology} settings={settings} />
       </group>
     );
   }

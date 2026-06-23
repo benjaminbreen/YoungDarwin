@@ -84,9 +84,22 @@ export const locations = [
     y: 0,
     color: 'beige',
     type: 'bay',
-    validMoves: ['W','E','SW','S','NW'],
-    specimens: ['crab','basalt','barnacle','galapagoscotton'],
+    validMoves: ['W','E','SW','S','NW','N'],
+    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant'],
     specimenPlacements: [
+      {
+        specimenId: 'flightlesscormorant',
+        position: [-26.5, 0, -3.8],
+        behavior: 'waddle',
+        sceneScale: 1.05,
+        habitatRadiusX: 8.5,
+        habitatRadiusZ: 4.2,
+        spawnScatter: {
+          radiusX: 4.2,
+          radiusZ: 2.4,
+          bounds: { minX: -34, maxX: -18, minZ: -8.2, maxZ: 2.4 },
+        },
+      },
       {
         specimenId: 'lavalizard',
         position: [-14.2, 0, -10.4],
@@ -97,9 +110,16 @@ export const locations = [
       },
       {
         specimenId: 'crab',
-        position: [-7.4, 0, -11.8],
+        position: [-29.5, 0, -3.2],
         behavior: 'skitter',
         sceneScale: 1.45,
+        habitatRadiusX: 5.8,
+        habitatRadiusZ: 2.8,
+        spawnScatter: {
+          radiusX: 3.6,
+          radiusZ: 1.2,
+          bounds: { minX: -35, maxX: -22, minZ: -5, maxZ: -0.8 },
+        },
       },
       {
         specimenId: 'galapagoscotton',
@@ -127,7 +147,6 @@ export const locations = [
       },
     ],
     npcs: ['lascar_joe'],
-    boundaries: { north: 'ocean' },
     discoveries: [
       'You notice a weathered barrel filled with letters. If you were nosy, you might read some...'
     ],
@@ -136,6 +155,179 @@ export const locations = [
       'Seabirds and crabs patrol the calm cove.',
       'Footprints in the sand lead inland.'
     ]
+  },
+
+  // 3b) ALT_POST_OFFICE_BAY — experimental rework of the anchorage shaped
+  // from the real satellite contour. Reached from Post Office Bay (north
+  // edge), the island map, or /three?zone=ALT_POST_OFFICE_BAY.
+  {
+    id: 'ALT_POST_OFFICE_BAY',
+    name: 'Post Office Bay (New)',
+    description: 'The sheltered crescent anchorage: pale sand, a mangrove headland, and the sailors’ barrel above the landing.',
+    x: 1,
+    y: -1,
+    color: 'beige',
+    type: 'bay',
+    validMoves: ['S'],
+    specimens: ['crab','basalt','barnacle','galapagoscotton'],
+    specimenPlacements: [
+      {
+        specimenId: 'lavalizard',
+        position: [34, 0, -6],
+        behavior: 'bask',
+        sceneScale: 1.12,
+        habitatRadiusX: 0.42,
+        habitatRadiusZ: 0.18,
+      },
+      {
+        specimenId: 'crab',
+        position: [6, 0, 2],
+        behavior: 'skitter',
+        sceneScale: 1.45,
+      },
+      {
+        specimenId: 'galapagoscotton',
+        position: [14, 0, 22],
+        behavior: 'still',
+        sceneScale: 0.92,
+        habitatRadiusX: 0.74,
+        habitatRadiusZ: 0.52,
+      },
+      {
+        specimenId: 'galapagoscotton',
+        position: [-12, 0, 18],
+        behavior: 'still',
+        sceneScale: 0.78,
+        habitatRadiusX: 0.68,
+        habitatRadiusZ: 0.48,
+      },
+    ],
+    npcs: ['lascar_joe'],
+    boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
+    discoveries: [
+      'You notice a weathered barrel filled with letters. If you were nosy, you might read some...'
+    ],
+    notableFeatures: [
+      'A crescent of pale sand curves between a green mangrove headland and a low basalt point.',
+      'The old sailors’ barrel stands on a white shell-sand flat above the landing.',
+      'A worn trail, lined with weathered posts, climbs inland through the dry scrub.'
+    ]
+  },
+
+  // 3c) POST_OFFICE_BAY_3 — isolated visual prototype for the anchorage.
+  // Reached directly at /postofficebay3 or /three?zone=POST_OFFICE_BAY_3.
+  {
+    id: 'POST_OFFICE_BAY_3',
+    name: 'Post Office Bay III',
+    description: 'A ground-first reconstruction of the sheltered anchorage: shallow northern water, a compacted post trail, and dense dry scrub massing behind the landing.',
+    x: 1,
+    y: -2,
+    color: 'beige',
+    type: 'bay',
+    validMoves: ['S'],
+    specimens: ['crab','basalt','galapagoscotton','cactus'],
+    specimenPlacements: [
+      {
+        specimenId: 'lavalizard',
+        position: [40, 0, -8],
+        behavior: 'bask',
+        sceneScale: 1.08,
+        habitatRadiusX: 0.42,
+        habitatRadiusZ: 0.18,
+      },
+      {
+        specimenId: 'crab',
+        position: [8, 0, -1],
+        behavior: 'skitter',
+        sceneScale: 1.4,
+      },
+      {
+        specimenId: 'galapagoscotton',
+        position: [18, 0, 28],
+        behavior: 'still',
+        sceneScale: 0.86,
+        habitatRadiusX: 0.72,
+        habitatRadiusZ: 0.5,
+      },
+      {
+        specimenId: 'cactus',
+        position: [30, 0, 18],
+        behavior: 'still',
+        sceneScale: 1.08,
+        habitatRadiusX: 0.68,
+        habitatRadiusZ: 0.5,
+      },
+    ],
+    npcs: ['lascar_joe'],
+    boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
+    discoveries: [
+      'The sailors’ barrel stands above a pale landing flat, with a worn track leading inland through close dry scrub.'
+    ],
+    notableFeatures: [
+      'The path is the main landmark: compacted sand and ash run from the post barrel toward the inland scrub.',
+      'Dense salt-pruned shrubs crowd the track edges instead of spreading evenly across the beach.',
+      'Basalt frames the bay mouth, but the landing remains open and readable.'
+    ]
+  },
+
+  // 3d) GRASS_TEST — temporary renderer lab for dense procedural grass.
+  // Reachable from the island map; remove after the grass system is promoted.
+  {
+    id: 'GRASS_TEST',
+    name: 'Grass Test',
+    description: 'A temporary playable field for tuning dense procedural grass, wind, and player parting before the system is folded back into Floreana.',
+    x: 2,
+    y: -2,
+    color: '#79a84c',
+    type: 'grassland',
+    validMoves: [],
+    specimens: [],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The grass bends in waves across the test field, making the wind visible before it is heard.'
+    ],
+    notableFeatures: [
+      'Dense short blades fill the walkable field so the grass reads as a continuous surface instead of isolated props.',
+      'Darwin can walk through the meadow while nearby blade tips part and recover.',
+      'This map is an implementation test and is not intended to remain in the final island route.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['wind through grass', 'soft footfalls', 'distant field insects'],
+      loadingNote: 'A temporary renderer test field for dense grass and player interaction.',
+      educationalNote: 'This test map isolates grass rendering so visual quality can be judged without Floreana coastal clutter.',
+    },
+  },
+
+  // 3e) GRASS_HYBRID_TEST — renderer lab for hybrid grass LOD.
+  // Keeps GRASS_TEST intact while testing terrain splats + near blades + mid impostors.
+  {
+    id: 'GRASS_HYBRID_TEST',
+    name: 'Hybrid Grass Test',
+    description: 'A second temporary grass field for testing a cheaper hybrid rendering stack: splatted underbrush terrain, near interactive blades, and mid-distance tuft impostors.',
+    x: 3,
+    y: -2,
+    color: '#5f8d47',
+    type: 'grassland',
+    validMoves: [],
+    specimens: [],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The field is built in layers: painted undergrowth at distance, clustered tufts in the middle ground, and interactive blades near Darwin.'
+    ],
+    notableFeatures: [
+      'A red dirt path cuts through the field to make grass edges, ruts, and far-field texture easy to judge.',
+      'Near grass should visibly part around Darwin, while distant grass should resolve into terrain splats instead of sparkling hairlines.',
+      'This map is a renderer experiment and should not be treated as final Floreana content.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['wind through uneven grass', 'dry seed heads', 'boots on red dirt'],
+      loadingNote: 'A hybrid renderer test field for grass LOD and path readability.',
+      educationalNote: 'This test isolates a cheaper grass stack: terrain underbrush, clustered impostors, and near interactive blades.',
+    },
   },
 
   // 4) N_SHORE
@@ -197,6 +389,171 @@ export const locations = [
       'Mosquitoes buzz in the humid air.',
       'Faint bird calls echo across the reeds.'
     ]
+  },
+
+  // 5b) CORMORANT_BAY_SPLAT_TEST — side-by-side authored wetland prototype.
+  {
+    id: 'CORMORANT_BAY_SPLAT_TEST',
+    name: 'Cormorant Bay Splat Test',
+    description: 'A renderer-focused reconstruction of the olivine beach and brackish flamingo lagoon at Punta Cormorant.',
+    x: 3,
+    y: -1,
+    color: '#6f8f4e',
+    type: 'wetland',
+    validMoves: ['S'],
+    specimens: ['flamingo','frigatebird','booby'],
+    specimenPlacements: [
+      {
+        specimenId: 'flamingo',
+        position: [-8, 0, -2.5],
+        behavior: 'still',
+        sceneScale: 1.05,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.4,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [3.5, 0, 1.2],
+        behavior: 'still',
+        sceneScale: 0.96,
+        habitatRadiusX: 4.2,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [14, 0, 6.6],
+        behavior: 'still',
+        sceneScale: 0.9,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2,
+      },
+    ],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'A pink line of flamingos feeds in the brackish water while olivine crystals tint the beach a muted green.'
+    ],
+    notableFeatures: [
+      'The lagoon edge is the focus: wet mud, salt crust, algae, and sparse saltgrass should read clearly before any splat backdrop is enabled.',
+      'A walkable olivine path skirts the lagoon and frames the flamingos rather than cutting through them.',
+      'Optional static splats may later enrich the distant reed and scrub shell, but gameplay remains mesh-based.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['soft lagoon wind', 'distant seabirds', 'mud sucking underfoot'],
+      loadingNote: 'A side-by-side Cormorant Bay prototype for lagoon, olivine beach, and optional splat backdrop rendering.',
+      educationalNote: 'Punta Cormorant is known for a brackish flamingo lagoon and greenish olivine sand, making it ideal for testing wetland rendering.',
+    },
+  },
+
+  // 5c) CORMORANT_BAY_TEST_2 — stable grass LOD prototype.
+  {
+    id: 'CORMORANT_BAY_TEST_2',
+    name: 'Cormorant Bay Test 2',
+    description: 'A renderer-focused Cormorant Bay variant testing near blades, mid grass clumps, and far terrain meadow detail.',
+    x: 4,
+    y: -1,
+    color: '#758c4a',
+    type: 'wetland',
+    validMoves: ['SW'],
+    specimens: ['flamingo','frigatebird','booby'],
+    specimenPlacements: [
+      {
+        specimenId: 'flamingo',
+        position: [-8, 0, -2.5],
+        behavior: 'still',
+        sceneScale: 1.05,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.4,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [3.5, 0, 1.2],
+        behavior: 'still',
+        sceneScale: 0.96,
+        habitatRadiusX: 4.2,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [14, 0, 6.6],
+        behavior: 'still',
+        sceneScale: 0.9,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2,
+      },
+    ],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'Dry beach grass resolves into real blades near Darwin, clumps at middle distance, and a stable meadow texture toward the horizon.'
+    ],
+    notableFeatures: [
+      'Near grass keeps the close-up blade quality from the first Cormorant prototype.',
+      'Mid-distance vegetation is card-based and muted to avoid single-pixel shimmer.',
+      'Far meadow detail is carried by the terrain shader rather than thousands of visible straw lines.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['soft lagoon wind', 'distant seabirds', 'dry beach grass'],
+      loadingNote: 'A second Cormorant Bay prototype focused on professional grass LOD stability.',
+      educationalNote: 'Punta Cormorant combines brackish lagoon habitat with dry coastal grasses and olivine sand, making it a useful scene for testing vegetation LOD.',
+    },
+  },
+
+  // 5d) CORMORANT_BAY_TEST_3 — opaque stylized grass LOD prototype.
+  {
+    id: 'CORMORANT_BAY_TEST_3',
+    name: 'Cormorant Bay Test 3',
+    description: 'A stylized Cormorant Bay grass prototype using opaque ribbon tufts and a matching terrain meadow atlas.',
+    x: 5,
+    y: -1,
+    color: '#788d4c',
+    type: 'wetland',
+    validMoves: ['W','SW'],
+    specimens: ['flamingo','frigatebird','booby'],
+    specimenPlacements: [
+      {
+        specimenId: 'flamingo',
+        position: [-8, 0, -2.5],
+        behavior: 'still',
+        sceneScale: 1.05,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.4,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [3.5, 0, 1.2],
+        behavior: 'still',
+        sceneScale: 0.96,
+        habitatRadiusX: 4.2,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [14, 0, 6.6],
+        behavior: 'still',
+        sceneScale: 0.9,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2,
+      },
+    ],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The beach grass resolves as stylized ribbon tufts nearby and a filtered meadow mass toward the horizon.'
+    ],
+    notableFeatures: [
+      'Opaque toon-shaded grass avoids black alpha-card clumps.',
+      'Near and mid grass share the same meadow density, dryness, and direction fields.',
+      'The distant meadow is carried by a filtered terrain atlas instead of sub-pixel blade geometry.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['coherent wind through dry grass', 'distant seabirds', 'lagoon shallows'],
+      loadingNote: 'A third Cormorant Bay prototype focused on unified stylized grass LOD.',
+      educationalNote: 'Punta Cormorant combines brackish lagoon habitat with dry coastal grasses and olivine sand, making it a useful scene for testing readable vegetation at several distances.',
+    },
   },
 
   // 6) DEVILS_CROWN
@@ -440,6 +797,10 @@ export const locations = [
     type: 'forest',
     validMoves: ['N','SE','E','SW','S','W'],
     specimens: ['floreana_giant_tortoise','floreana_mockingbird'],
+    specimenPlacements: [
+      { specimenId: 'floreana_giant_tortoise', position: [-6.5, 0, 13.5], behavior: 'grazing', sceneScale: 1.1, habitatRadiusX: 8, habitatRadiusZ: 6 },
+      { specimenId: 'floreana_mockingbird', position: [8.8, 0, -15.5], behavior: 'curious', sceneScale: 1.0, habitatRadiusX: 10, habitatRadiusZ: 8 },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -601,6 +962,27 @@ export const locations = [
     type: 'forest',
     validMoves: ['N','E','W','S'],
     specimens: ['mangrove','floreana_giant_tortoise'],
+    narration: {
+      weather: 'drizzle',
+    },
+    specimenPlacements: [
+      {
+        specimenId: 'mangrove',
+        position: [-11.5, 0, -11.8],
+        behavior: 'still',
+        sceneScale: 1,
+        habitatRadiusX: 5,
+        habitatRadiusZ: 4,
+      },
+      {
+        specimenId: 'floreana_giant_tortoise',
+        position: [10.8, 0, 18.6],
+        behavior: 'grazing',
+        sceneScale: 1.08,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 5,
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [

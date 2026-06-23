@@ -10,13 +10,15 @@ Completed major systems so far:
 - Darwin animation sources are consolidated under `assets-src/darwin/animations/` and categorized into `locomotion/`, `jumps-climbs/`, `actions/`, `states/`, and `legacy-mismatched/`. Do not place Darwin source FBXs in `public/assets/models`; `public` should contain runtime GLBs and static game assets only.
 - The canonical locomotion clips are the 65-bone FinalDarwinRig-derived files in `assets-src/darwin/animations/locomotion/`. Older 41-bone with-skin locomotion FBXs are quarantined in `legacy-mismatched/` because they caused valid-looking GLB clips that rendered Darwin in a T-pose during movement.
 - Syms Covington is loaded from `public/assets/models/syms-animated.glb` and appears as an NPC via `three-game/components/world/SymsCovington.jsx`.
-- Darwin animation build now includes 53 clips. Recent Mixamo additions include `walk`, `stopWalking`, `run`, `climbJump`, `standingJump`, `climb`, `startWalking`, `runToStop`, `jog`, `exhaustedIdle`, `teeter`, `lookAroundShort`, `write`, `kneelInspect`, `turnLeft90`, `turnRight90`, `gettingUp`, `fallingForwardDeath`, `hardLanding`, and `landing`.
+- Darwin animation clips are bundled in `public/assets/models/darwin-final-animated.glb`. Use `npm run three:animation-audit` when exact clip inventory matters instead of trusting a hardcoded count in this file.
 - Runtime Darwin animation behavior uses the new clips for walking, stop-walking, start-walking, run, run-stop, jumping, fatigue idle, landing/hard landing, death, and direct test/action hotkeys. Current direct action keys: `Y` write, `I` kneel inspect, `V` climb, `U` teeter, plus existing `L` look around, `O` point, `T` trip.
-- Syms animation build now includes 16 clips, including `write`, `kneelInspect`, `lookAroundShort`, `startWalking`, `runToStop`, `jog`, and `exhaustedIdle`. His ambient loop uses writing and kneeling inspection so the NPC feels active.
+- Syms animation clips are bundled in `public/assets/models/syms-animated.glb`. His ambient loop uses writing and kneeling inspection so the NPC feels active.
+- To add a Mixamo clip to `darwin-candidate-2-animated.glb` (the 9-hotkey alternate model): convert the FBX with `scripts/blender_fbx_anim_to_glb.py`, then bake it in with `scripts/transplant-clip.mjs <src.glb> <dst.glb> <clipName>`. The transplant copies rotation tracks only plus a rig-ratio-scaled hips translation — never copy raw translation/scale tracks between the two Darwin rigs (they differ ~1.5x in skeleton scale and Darwin shrinks to a dwarf).
+- Parkour/locomotion clips on candidate-2: `crouchRun` (Ctrl+Shift), `wallRun` (running jump into a tall face rebounds), `runStrafeLeft/Right` (aimed run strafes), `standToSit` (`K`), `climbingDownWall`, `fallingIdle`, plus replaced `idle`/`turnLeft`/`turnRight`. Climb is `Q` (or `V`): obstacle climb first, then steep-terrain rise ahead, then ledge descent; crouch moved to Ctrl only.
 - The Beagle is now an optimized GLB built from the Swedish Hemmema source. Runtime file: `public/assets/models/ships/beagle-styrbjorn.glb`. Source/processing report lives under `assets-src/ships/styrbjorn/`.
 - New starting-zone specimen GLBs are integrated through `three-game/modelAssets.js`: `purple-finch.glb` for the medium ground finch, `galapagos-penguin.glb`, and `galapagos-giant-tortoise.glb`. Runtime files live in `public/assets/models/animals/runtime/`; extracted sources and conversion reports live under `assets-src/animals/imported/`.
 - The tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the current runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass.
-- The marine iguana GLB is now enabled as `public/assets/models/animals/runtime/marine-iguana.glb`. Mesh complexity is fine, about 3.5k vertices plus an armature/action, but the embedded textures make the runtime file about 14.8 MB. Next optimization pass should resize/compress the iguana textures rather than decimate the mesh.
+- The marine iguana GLB is enabled as `public/assets/models/animals/runtime/marine-iguana.glb`. Use `npm run asset:audit` for current file sizes before starting asset optimization work.
 - Crabs, cow/donkey/goat experiments, and nature props have been integrated, but livestock should be used only where Floreana settlement or introduced-grazing context calls for them.
 - Water uses a custom stylized shader in `three-game/components/scene/Water.jsx`, with Gerstner waves and a baked seafloor depth texture for shallow-water color and transparency.
 - Camera controls use visible cursor drag rotation, `Z`/`X` rotate keys, and scroll zoom. Do not reintroduce pointer-lock camera behavior unless explicitly requested.
@@ -41,8 +43,21 @@ Initial Floreana zone architecture:
 - `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, and placeholder region maps).
 - `three-game/world/floreanaZones.js` is a runtime bridge that presents region maps through the older zone-shaped API used by UI/store code.
 - `game-core/zones.ts` still contains older planned-zone ids such as `post-office-bay-anchorage`; do not use those ids for new authored 3D region work unless you are deliberately editing legacy/planned-zone compatibility.
+- `three-game/world/regions/*` is the current authored terrain/material registry. New authored terrain should be added there, not by adding region-specific branches directly to `three-game/world/terrain.js` or `three-game/components/scene/Terrain.jsx`.
+- `three-game/world/ecology/*` is the preferred authored detail/scatter path for newer regions. `WorldDetails.jsx` still contains a legacy hand-tuned Post Office Bay path; migrate it only deliberately.
 - Planned neighboring region content includes highland trail, Cerro Pajas/highland ridge, marine iguana rocks, black lava flow, dry scrub, settlement/work areas, and Beagle/interior spaces.
 - Zone transitions should use a styled field-notebook/naval-chart interstitial that doubles as a loading screen. The overlay should show zone name, Floreana/Charles Island context, travel note, educational note, loading progress, and travel effects.
+
+Current source-of-truth map:
+
+- Content/location data: `data/locations.js`.
+- 3D region map projection: `game-core/regionMaps.js`.
+- Legacy zone compatibility bridge: `three-game/world/floreanaZones.js`.
+- Authored terrain and material modules: `three-game/world/regions/<region>/terrain.js` and `three-game/world/regions/<region>/material.js`, registered in `three-game/world/regions/index.js`.
+- Region facade used by runtime systems: `three-game/world/terrain.js`.
+- Authored ecology/detail layers: `three-game/world/ecology/<region>.js`, registered in `three-game/world/ecology/index.js`.
+- Shared obstacle/collision source: `three-game/world/obstacles.js`.
+- Runtime asset manifest: `three-game/modelAssets.js`.
 
 ## Terrain Rendering Direction
 
@@ -72,15 +87,18 @@ Current terrain implementation:
 
 ## Authored Region Maps: How To Build One
 
-Three regions are fully authored so far: `POST_OFFICE_BAY` (`floreana-cove`), `N_SHORE` (`floreana-north-shore`), and `NW_REEF` (`floreana-nw-reef`, white-sand beach + walkable coral shallows + offshore islet). Every other location in `data/locations.js` falls back to `placeholder-{type}` procedural terrain. Use N_SHORE/NW_REEF as the templates; the checklist for authoring a new region is:
+Three regions are fully authored so far: `POST_OFFICE_BAY` (`floreana-cove`), `N_SHORE` (`floreana-north-shore`), and `NW_REEF` (`floreana-nw-reef`, white-sand beach + walkable coral shallows + offshore islet). Every other location in `data/locations.js` falls back to `placeholder-{type}` procedural terrain. Use `N_SHORE`/`NW_REEF` as the current templates; `POST_OFFICE_BAY` still has some older hand-tuned detail code.
 
-1. **`three-game/world/terrain.js`** — add `<region>Height(x, z, { movementSurface })`, `<region>BiomeAt(x, z, y)`, and `<region>Color(x, z, y)`, plus an `isAuthored<Region>(regionId)` predicate. Wire all three into the dispatchers: `terrainHeight`, `movementTerrainHeight`, `terrainBiomeAt`, `terrainColor`, and add a branch in `isWalkableTerrain` (and the spawn-march guard in `clampToWalkable` for shoreline maps). Export any masks/curves the ecology and shader need.
-2. **`game-core/regionMaps.js`** — add the preset name, include the id in `authored:`, and bump `segments` to ~300.
-3. **`three-game/components/scene/Terrain.jsx`** — add a `create<Region>TerrainMaterial()` splat shader and a branch in the `material` memo. Most of the visual quality lives here, not in vertex colors.
-4. **`three-game/world/<region>Layout.js`** — deterministic rock layout via `makeZoneScatter`, exporting both the render list and `get<Region>RockObstacles()` (visuals and colliders must share one data source). Register the obstacle list in `three-game/world/obstacles.js` `getRuntimeObstacles`.
-5. **`three-game/world/ecology/<region>.js`** — flora layers (GLB scatter with biome `accept()` filters), rocks, splashes, birds, swimmers, and `footprintBiomes`. Register in `ecology/index.js`. `EcologyRenderer` handles all rendering generically.
-6. **`data/locations.js`** — add curated `specimenPlacements` so key fauna sit in their habitat instead of the deterministic fallback scatter.
-7. **`three-game/world/vistas/index.js`** — when a new authored map is finalized, add or verify low-poly border terrain aprons for its open neighboring routes so adjacent maps read as real nearby topography without loading full neighboring zones. Use opaque ground aprons that blend from the current edge into the neighbor's terrain identity; avoid vertical billboard/panel scenery for nearby map borders.
+Checklist for authoring a new region:
+
+1. **`three-game/world/regions/<region>/terrain.js`** — export a region definition with `id`, optional `aliases`, and `terrain` methods for render height, movement height, biome, color, and walkability. Export any analytic masks/curves needed by ecology or shader code.
+2. **`three-game/world/regions/<region>/material.js`** — export `create<Region>TerrainMaterial()`. Mirror coastline/outcrop math carefully in GLSL when shader bands must align with the JS heightfield.
+3. **`three-game/world/regions/index.js`** — import the region definition and material factory, then add them to `authoredRegions`.
+4. **`game-core/regionMaps.js`** — add the region id to `AUTHORED_REGION_TERRAIN` with its preset name and segment count, usually around 300 for authored outdoor maps.
+5. **`three-game/world/<region>Layout.js` or ecology-local helpers** — create deterministic layout data only when visuals and colliders need shared authored positions. Register collider sources in `three-game/world/obstacles.js` `getRuntimeObstacles`.
+6. **`three-game/world/ecology/<region>.js`** — define flora layers, rocks, splashes, birds, swimmers, and `footprintBiomes`. Register in `three-game/world/ecology/index.js`. `EcologyRenderer` handles generic rendering.
+7. **`data/locations.js`** — add curated `specimenPlacements` so key fauna sit in their habitat instead of relying on deterministic fallback scatter.
+8. **`three-game/world/vistas/index.js`** — when a new authored map is finalized, add or verify low-poly border terrain aprons for open neighboring routes so adjacent maps read as real nearby topography without loading full neighboring zones. Use opaque ground aprons that blend from the current edge into the neighbor's terrain identity; avoid vertical billboard/panel scenery for nearby map borders.
 
 Hard-won best practices:
 
@@ -90,7 +108,7 @@ Hard-won best practices:
 - **Water/wading is height-driven and free**: `WATER_LEVEL` is -0.9, wadeable seabed is anything in (-2.15, -0.45). To make shallows walkable, just keep the seafloor shelf inside that window; to block an ocean-boundary edge, drop below it. `Water.jsx` bakes the seafloor depth texture from `terrainHeight` automatically, so turquoise shallows come for free from a pale seabed color.
 - **Underwater features (coral, seagrass) can be heightfield + shader only** — a raised, noise-knobbed band with a mottled color material reads well through the depth-tinted water and costs nothing. Add GLB props later only if a region needs close-up relief.
 - **Coral GLBs and animated sea life layer on top of the heightfield reef**: coral models are ordinary instanced flora layers (`accept` gated on `nwReefCoralMask` + a submerged-depth window, `castShadow: false`); animated swimmers (fish schools, manta rays) are driven by an `ecology.swimmers` config rendered by `ReefSwimmers.jsx` (per-fish SkeletonUtils clones with phase-offset mixers, analytic orbit movement). Keep school depth bands inside the local water column — probe seabed heights first, the shelf is only ~0.5m deep and coral knobs rise nearly to the surface.
-- **Numerically probe before launching the app**: `npx tsx -e` importing `terrain.js` and sampling the grid for NaN heights, min/max range, and above-water fraction catches most authoring bugs in seconds (e.g. NW_REEF targets ~50% dry land).
+- **Numerically probe before launching the app**: `npx tsx -e` importing `terrain.js` and sampling the grid for NaN heights, min/max range, and above-water fraction catches most authoring bugs in seconds (e.g. NW_REEF targets about 50% dry land).
 - Vegetation should be sparse and clustered (`nearAnyCluster`), gated by biome and by distance-from-coast predicates — never uniform scatter.
 
 ## Obstacle And Collision Direction
@@ -163,8 +181,16 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run asset:audit` checks manifest entries against `public/assets/models/`.
 - `npm run asset:optimize` optimizes any raw GLBs from `assets-src/raw/` into `public/assets/models/` when `npx gltf-transform` is available.
 - `npm run check` runs syntax and regression tests.
+- `npm run build` verifies the production Next build.
 - `npm run three:screenshot` captures desktop/mobile screenshots and checks that the 3D canvas is full-screen and nonblank.
+
+Verification expectations:
+
+- General code change: run `npm run check`.
+- Asset manifest/runtime asset change: run `npm run asset:audit` and `npm run check`.
+- Terrain, scene composition, player movement, camera, or visual rendering change: run `npm run check` and `npm run three:screenshot`.
+- Before claiming production readiness or broad integration safety: run `npm run build` as well.
 
 ## Implementation Rule
 
-New GLB work must be manifest-driven. Do not delete procedural models until the replacement GLB is loaded, verified in screenshots, and has a fallback path.
+New GLB work must be manifest-driven through `three-game/modelAssets.js`. Do not delete procedural models until the replacement GLB is loaded, verified in screenshots, and has a fallback path.

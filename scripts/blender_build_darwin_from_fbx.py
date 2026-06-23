@@ -108,6 +108,8 @@ RETARGETED_CLIPS = {
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--animations", required=True)
+    parser.add_argument("--clip-map")
+    parser.add_argument("--retarget-clips", default="")
     parser.add_argument("--base", default="states/Breathing Idle.fbx")
     parser.add_argument("--base-path")
     parser.add_argument("--output", required=True)
@@ -197,6 +199,22 @@ def add_existing_action_to_target(target_armature, action):
     track.name = action.name
     strip = track.strips.new(action.name, int(action.frame_range[0]), action)
     strip.name = action.name
+
+
+def copy_existing_action_to_target(target_armature, source_action, clip_name):
+    if not source_action:
+        return None
+    remove_target_action(target_armature, clip_name)
+    action = source_action.copy()
+    action.name = normalize_name(clip_name)
+    action.use_fake_user = True
+    if not target_armature.animation_data:
+        target_armature.animation_data_create()
+    track = target_armature.animation_data.nla_tracks.new()
+    track.name = action.name
+    strip = track.strips.new(action.name, int(action.frame_range[0]), action)
+    strip.name = action.name
+    return action
 
 
 def clear_pose_constraints(armature):
@@ -321,6 +339,17 @@ def export_glb(path):
 
 def main():
     args = parse_args()
+    clip_sources = CLIP_SOURCES
+    if args.clip_map:
+        with open(args.clip_map, "r", encoding="utf-8") as f:
+            clip_sources = [(item["file"], item["name"]) for item in json.load(f)]
+    retargeted_clips = set(RETARGETED_CLIPS)
+    if args.retarget_clips:
+        retargeted_clips.update(
+            normalize_name(name)
+            for name in args.retarget_clips.split(",")
+            if normalize_name(name)
+        )
     base_path = args.base_path or os.path.join(args.animations, args.base)
     report = {
         "base": base_path,
@@ -348,13 +377,14 @@ def main():
     ]
 
     existing_actions = {action.name: action for action in bpy.data.actions}
+    base_source_action = action_from_armature(target) or next(iter(existing_actions.values()), None)
     if target.animation_data:
         target.animation_data_clear()
     for action in existing_actions.values():
         action.use_fake_user = True
         add_existing_action_to_target(target, action)
 
-    for filename, clip_name in CLIP_SOURCES:
+    for filename, clip_name in clip_sources:
         path = os.path.join(args.animations, filename)
         if not os.path.exists(path):
             preserved = bpy.data.actions.get(normalize_name(clip_name))
@@ -369,14 +399,17 @@ def main():
                 report["warnings"].append(f"Missing {filename}")
             continue
         if filename == args.base:
-            source_armature = target
-            if not source_armature.animation_data:
-                imported = import_fbx(path)
-                source_armature = armatures(imported)[0]
-                action = add_action_to_target(source_armature, target, clip_name)
-                delete_objects(imported)
+            if base_source_action:
+                action = copy_existing_action_to_target(target, base_source_action, clip_name)
             else:
-                action = add_action_to_target(source_armature, target, clip_name)
+                source_armature = target
+                if not source_armature.animation_data:
+                    imported = import_fbx(path)
+                    source_armature = armatures(imported)[0]
+                    action = add_action_to_target(source_armature, target, clip_name)
+                    delete_objects(imported)
+                else:
+                    action = add_action_to_target(source_armature, target, clip_name)
         else:
             imported = import_fbx(path)
             imported_armatures = armatures(imported)
@@ -384,7 +417,7 @@ def main():
                 report["warnings"].append(f"No armature in {filename}")
                 delete_objects(imported)
                 continue
-            if clip_name in RETARGETED_CLIPS:
+            if normalize_name(clip_name) in retargeted_clips:
                 action = add_retargeted_action_to_target(imported_armatures[0], target, clip_name)
             else:
                 action = add_action_to_target(imported_armatures[0], target, clip_name)
@@ -396,7 +429,7 @@ def main():
                 "frameRange": [float(action.frame_range[0]), float(action.frame_range[1])],
             })
 
-    wanted_actions = {normalize_name(name) for _, name in CLIP_SOURCES}
+    wanted_actions = {normalize_name(name) for _, name in clip_sources}
     for action in list(bpy.data.actions):
         if action.name not in wanted_actions:
             bpy.data.actions.remove(action)

@@ -4,7 +4,7 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { terrainHeight, terrainBiomeAt } from '../../../world/terrain';
-import { useThreeGameStore } from '../../../store';
+import { getRuntimePlayerPose } from '../../../store';
 
 // A ring buffer of fading footprint decals stamped under the player's stride
 // on soft ground. One instanced draw call; prints fade over ~42 seconds.
@@ -59,7 +59,7 @@ export function Footprints({ zoneId, biomes }) {
     material.uniforms.uTime.value = clock.elapsedTime;
     const mesh = meshRef.current;
     if (!mesh) return;
-    const pose = useThreeGameStore.getState().playerPose;
+    const pose = getRuntimePlayerPose();
     const { x, z } = pose.position || {};
     if (x === undefined) return;
     const s = state.current;
