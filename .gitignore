@@ -24,6 +24,7 @@
 # misc
 .DS_Store
 desktop.ini
+*.download/
 *.sb-*
 * 2.js
 * 2.jsx
