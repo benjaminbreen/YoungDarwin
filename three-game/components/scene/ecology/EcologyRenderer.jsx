@@ -47,6 +47,63 @@ function drawDistanceFor(item, fallback = 95) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+// A prop can be instanced only if it has no per-object behaviour that the
+// instanced path can't express: interactive (crab) props, bobbing props, props
+// tilted off the Y axis, or non-uniform scales all stay as individual StaticGLBs.
+function propIsInstanceable(prop) {
+  if (!prop.path || prop.id?.startsWith('crab-') || prop.bob) return false;
+  if (typeof prop.scale !== 'number') return false;
+  const rot = prop.rotation || [0, 0, 0];
+  return Math.abs(rot[0] || 0) < 1e-3 && Math.abs(rot[2] || 0) < 1e-3;
+}
+
+// Map a prop onto the flora-style item shape InstancedGLBLayer consumes,
+// resolving `terrainY` up front (the instanced layer doesn't know about it).
+function propToItem(prop, zoneId) {
+  const [px, py = 0, pz] = prop.position;
+  return {
+    id: prop.id,
+    x: px,
+    y: prop.terrainY ? terrainHeight(px, pz, zoneId) + (py || 0) : py,
+    z: pz,
+    yaw: (prop.rotation && prop.rotation[1]) || 0,
+    scale: prop.scale,
+    grade: 0,
+  };
+}
+
+// Split props into instanced groups (≥2 sharing a GLB path) and individual
+// StaticGLBs (one-offs + anything not instanceable). Repeated trail markers /
+// driftwood collapse from N draw calls to ~1-2 per shared GLB.
+function planProps(props, zoneId) {
+  const byPath = new Map();
+  const staticProps = [];
+  props.forEach(prop => {
+    if (!propIsInstanceable(prop)) {
+      staticProps.push(prop);
+      return;
+    }
+    const bucket = byPath.get(prop.path);
+    if (bucket) bucket.push(prop);
+    else byPath.set(prop.path, [prop]);
+  });
+  const instancedGroups = [];
+  byPath.forEach((group, path) => {
+    if (group.length < 2) {
+      staticProps.push(...group);
+      return;
+    }
+    instancedGroups.push({
+      path,
+      items: group.map(prop => propToItem(prop, zoneId)),
+      castShadow: group.some(prop => prop.castShadow === true),
+      receiveShadow: group.some(prop => prop.receiveShadow === true),
+      maxVisibleDistance: Math.max(...group.map(prop => drawDistanceFor(prop, 85))),
+    });
+  });
+  return { instancedGroups, staticProps };
+}
+
 function LagoonSurface({ surface }) {
   const material = React.useMemo(() => new THREE.ShaderMaterial({
     uniforms: {
@@ -160,6 +217,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
   const lagoonSurfaces = (ecology.lagoonSurfaces || []).filter(tierVisible);
   const generatedTrees = (ecology.generatedTrees || []).filter(tierVisible);
   const props = (ecology.props || []).filter(tierVisible);
+  const { instancedGroups: instancedProps, staticProps } = planProps(props, ecology.zoneId);
   const rocks = (ecology.rocks || []).filter(tierVisible);
   const canopySilhouettes = (ecology.canopySilhouettes || []).filter(tierVisible);
   return (
@@ -243,7 +301,21 @@ export function EcologyRenderer({ ecology, settings = {} }) {
           />
         </Suspense>
       ))}
-      {props.map(prop => (
+      {instancedProps.map(group => (
+        <Suspense key={`prop-layer:${group.path}`} fallback={null}>
+          <InstancedGLBLayer
+            path={group.path}
+            items={group.items}
+            castShadow={group.castShadow}
+            receiveShadow={group.receiveShadow}
+            maxVisibleDistance={group.maxVisibleDistance}
+            sourceId={`ecology:${ecology.zoneId}:props:${group.path.split('/').pop()}`}
+            sourceLabel={group.path.split('/').pop()}
+            sourceKind="ecology-prop"
+          />
+        </Suspense>
+      ))}
+      {staticProps.map(prop => (
         <Suspense key={prop.id} fallback={null}>
           <StaticGLB
             path={prop.path}

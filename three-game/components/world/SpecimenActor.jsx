@@ -9,6 +9,7 @@ import { specimenToInspectable } from '../../world/inspectables';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { addRimLight, toonMaterial } from '../scene/materials';
+import { ContactShadow } from '../scene/ContactShadow';
 import { ModelAsset } from '../assets/ModelAsset';
 
 const CARRY_PICKUP_DISTANCE = 2.15;
@@ -41,6 +42,7 @@ function assetIdForSpecimen(specimen) {
   if (specimen.id === 'floreanagianttortoise') return 'floreanaGiantTortoise';
   if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';
   if (specimen.id === 'flightlesscormorant') return 'flightlessCormorant';
+  if (specimen.id === 'frigatebird') return 'frigatebird';
   if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
   return specimen.id;
 }
@@ -252,6 +254,9 @@ export function SpecimenActor({ specimen }) {
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
   const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
+  // Narrow boolean: only flips when this specimen is picked up / put down, so
+  // the contact shadow can hide while the animal is held off the ground.
+  const isCarried = useThreeGameStore(state => state.carriedObjectId === specimen.id);
   const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
   const carriedRef = useRef(false);
   // Where the animal lives after being put down somewhere new; null = spawn.
@@ -400,12 +405,27 @@ export function SpecimenActor({ specimen }) {
 
   const selected = selectedSpecimenId === specimen.id;
   const nearby = nearbySpecimenId === specimen.id;
-  const markerY = specimen.id === 'galapagoscotton' ? 3.45 : specimen.id === 'cactus' ? 2.15 : specimen.id === 'basalt' ? 1.15 : specimen.id === 'floreanagianttortoise' ? 1.8 : 1.45;
+  const markerY = specimen.id === 'galapagoscotton' ? 3.45
+    : specimen.id === 'cactus' ? 2.15
+    : specimen.id === 'basalt' ? 1.15
+    : specimen.id === 'barnacle' ? 0.85
+    : specimen.id === 'floreanagianttortoise' ? 1.8
+    : 1.45;
+  const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
+    : specimen.id === 'basalt' ? 0.85
+    : specimen.id === 'cactus' ? 0.6
+    : specimen.id === 'galapagoscotton' ? 0.9
+    : specimen.id === 'barnacle' ? 0.38
+    : specimen.id === 'frigatebird' ? 0.7
+    : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
+    : specimen.id === 'galapagospenguin' ? 0.55
+    : 0.8;
   const specimenContent = (
     <>
+      {!isCarried && <ContactShadow radius={contactRadius} />}
       <AnimatedSpecimenShape
         specimen={specimen}
-        animationSelector={null}
+        animationSelector={faunaBehavior.animationRef ? () => faunaBehavior.animationRef.current : null}
       />
       <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
         <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />

@@ -33,21 +33,41 @@ const LAMP_ATTACHMENT = {
 };
 
 // Held-tool props. Placeholder GLBs live under /assets/models/tools/ — swap in
-// finished models by replacing the file at the same path. Rifle stays right-hand
-// and body-aimed; field tools use the left-hand grip authored in Darwin 5's
-// torch/held-item animations, so they read as carried rather than pasted onto a
-// reaching right hand.
+// finished models by replacing the file at the same path. Rifle stays body-aimed;
+// field tools follow the right hand so Darwin5's held-tool clips can provide the
+// grip pose instead of borrowing the left-hand torch set.
 const HAND_TOOLS = [
   { toolId: 'shotgun',    path: '/assets/models/tools/shotgun.glb', scale: 1, position: [0, 0, 0], euler: [0, 0, 0], hand: 'right', orient: 'body' },
-  { toolId: 'insect_net', path: '/assets/models/tools/net.glb',     scale: 1, position: [0.0, -0.01, 0.015], euler: [0, 0, Math.PI / 2], hand: 'left', orient: 'hand' },
-  { toolId: 'snare',      path: '/assets/models/tools/snare.glb',   scale: 1, position: [0.0, -0.01, 0.015], euler: [0, 0, Math.PI / 2], hand: 'left', orient: 'hand' },
-  { toolId: 'hammer',     path: '/assets/models/tools/hammer.glb',  scale: 1, position: [0.0, -0.01, 0.015], euler: [0, 0, Math.PI / 2], hand: 'left', orient: 'hand' },
+  { toolId: 'insect_net', path: '/assets/models/tools/net.glb',     scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
+  { toolId: 'snare',      path: '/assets/models/tools/snare.glb',   scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
+  { toolId: 'hammer',     path: '/assets/models/tools/hammer.glb',  scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
 ];
 
 const PLAYER_MODEL_CYCLE = ['darwin', 'darwinCandidate2', 'darwin4', 'darwin5'];
 
 function darwin5StandingJumpClip(charge) {
   return charge >= 0.45 ? 'standingJumpHigh' : 'standingJumpShort';
+}
+
+const DARWIN5_FALL_IDLE_MIN_DISTANCE = 1.35;
+const DARWIN5_FALL_IDLE_MIN_DESCENT_SPEED = -1.05;
+
+function jumpHoldClipForMotion(motion, fade = 0.05) {
+  return motion.jumpWasRunning
+    ? { clip: 'runningJumpHold', fade }
+    : { clip: 'standingJumpHold', fade };
+}
+
+function darwin5UncontrolledFallClip(motion) {
+  const groundDistance = motion.groundDistance ?? 0;
+  const verticalSpeed = motion.verticalSpeed ?? 0;
+  if (
+    verticalSpeed < DARWIN5_FALL_IDLE_MIN_DESCENT_SPEED
+    && groundDistance > DARWIN5_FALL_IDLE_MIN_DISTANCE
+  ) {
+    return { clip: 'fallingIdle', fade: 0.1 };
+  }
+  return jumpHoldClipForMotion(motion, 0.08);
 }
 
 function darwin5TorchActionClip(action, crouching) {
@@ -57,8 +77,14 @@ function darwin5TorchActionClip(action, crouching) {
   if (action === 'crouchToStand') return 'torchCrouchToStand';
   if (action === 'swingHammer' || action === 'swingNet') return 'swingTool';
   if (action === 'kneelInspect') return 'kneelInspect';
-  if (action === 'standingInspectDownward' || action === 'gather') return 'torchInspectForward';
+  if (action === 'gather') return 'gather';
+  if (action === 'standingInspectDownward') return 'torchInspectForward';
   if (action === 'changeItem') return 'torchEquip';
+  return null;
+}
+
+function darwin5HeldToolActionClip(action) {
+  if (action === 'swingHammer' || action === 'swingNet' || action === 'swingTool') return 'heavyToolSwing';
   return null;
 }
 
@@ -70,14 +96,21 @@ function darwin5RifleActionClip(action, crouching) {
 }
 
 function darwin5AdaptedActionClip(action) {
-  if (action === 'swingHammer' || action === 'swingNet') return 'swingTool';
+  if (action === 'climbWaistHeight') return { clip: 'climbWaistHeight', timeScale: 1.65, fade: 0.05 };
+  if (action === 'climbHeadHeight') return { clip: 'climbHeadHeight', timeScale: 1.45, fade: 0.05 };
+  if (action === 'fallingToRoll') return { clip: 'fallingToRoll', timeScale: 1.2, fade: 0.05 };
+  if (action === 'swingHammer' || action === 'swingNet') return 'heavyToolSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
-  if (action === 'gather' || action === 'standingInspectDownward' || action === 'write' || action === 'point') return 'torchInspectForward';
-  if (action === 'vault') return 'climbingUpWall';
+  if (action === 'lookAround' || action === 'lookAroundShort') return action;
+  if (action === 'write') return 'write';
+  if (action === 'gather') return 'gather';
+  if (action === 'standingInspectDownward' || action === 'point') return 'torchInspectForward';
+  if (action === 'vault') return 'vault';
   if (action === 'shoulderHitAndFall') return 'shoulderHitAndFall';
   if (action === 'hitReaction') return 'hitReaction';
-  if (action === 'stumble') return 'hitReaction';
-  if (action === 'gettingUp') return 'rifleKneelToStand';
+  if (action === 'stumble') return 'stumble';
+  if (action === 'trip') return 'trip';
+  if (action === 'gettingUp') return 'gettingUp';
   if (action === 'runningSlide') return 'runningSlide';
   if (action === 'dodgeRoll' || action === 'standToRoll') return 'fallingToRoll';
   return null;
@@ -383,13 +416,18 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     const hasRifle = toolId === 'shotgun';
     const carryingObject = Boolean(gameState.carriedObjectId) || status.inventoryCount > 0;
     const lampMode = modelAssetId === 'darwin5' && !hasRifle && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
-    const torchMode = modelAssetId === 'darwin5' && !hasRifle && (holdingTool || lampMode);
+    const heldToolMode = modelAssetId === 'darwin5' && holdingTool;
+    const torchMode = modelAssetId === 'darwin5' && !hasRifle && !heldToolMode && lampMode;
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
     if (motionRef.current.action) {
       if (modelAssetId === 'darwin5' && hasRifle) {
         const rifleAction = darwin5RifleActionClip(motionRef.current.action, motionRef.current.crouching);
         if (rifleAction) return rifleAction;
+      }
+      if (heldToolMode) {
+        const heldToolAction = darwin5HeldToolActionClip(motionRef.current.action);
+        if (heldToolAction) return heldToolAction;
       }
       if (torchMode) {
         const torchAction = darwin5TorchActionClip(motionRef.current.action, motionRef.current.crouching);
@@ -438,15 +476,14 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       if (jumpPhase === 'airborne' || jumpPhase === 'prelanding') {
         if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
         if (shortStandingJump) return { clip: 'standingJump', fade: 0.05, timeScale: 0.92, maxTime: 0.58 };
-        return motionRef.current.jumpWasRunning
-          ? { clip: 'runningJumpHold', fade: 0.05 }
-          : { clip: 'standingJumpHold', fade: 0.05 };
+        return jumpHoldClipForMotion(motionRef.current, 0.05);
       }
-      return motionRef.current.jumpWasRunning
-        ? { clip: 'runningJumpHold', fade: 0.05 }
-        : { clip: 'standingJumpHold', fade: 0.05 };
+      return jumpHoldClipForMotion(motionRef.current, 0.05);
     }
-    if (motionRef.current.airborne && !nearGround) return { clip: 'fallingIdle', fade: 0.1 };
+    if (motionRef.current.airborne && !nearGround) {
+      if (modelAssetId === 'darwin5') return darwin5UncontrolledFallClip(motionRef.current);
+      return jumpHoldClipForMotion(motionRef.current, 0.08);
+    }
     // Aiming: facing is locked to the cursor, so strafe/backpedal flags are
     // velocity-relative. Priority strafe -> backpedal -> run -> walk -> aim idle.
     if (motionRef.current.aiming) {
@@ -521,6 +558,10 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (hasRifle) {
       if (motionRef.current.running) return { clip: 'runRifle', timeScale: runScale };
       if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: walkScale };
+    }
+    if (heldToolMode) {
+      if (motionRef.current.running) return { clip: 'holdToolRun', timeScale: runScale };
+      if (motionRef.current.walking) return { clip: 'holdToolWalk', timeScale: walkScale };
     }
     if (torchMode) {
       if (motionRef.current.running) return { clip: 'torchRun', timeScale: runScale };

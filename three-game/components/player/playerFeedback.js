@@ -6,6 +6,25 @@ import * as THREE from 'three';
 import { getPostOfficeBayOpuntiaHazards } from '../../world/floreanaCoveLayout';
 import { LANDING_DUST } from './playerConfig';
 
+function dustPaletteForBiome(biome) {
+  if (biome === 'black-lava' || biome === 'wet-basalt' || biome === 'lava-shelf' || biome === 'black-sand') {
+    return { ring: '#3a352b', particles: ['#2a2824', '#4b4438', '#1f211f'], opacity: biome === 'wet-basalt' ? 0.16 : 0.28 };
+  }
+  if (biome === 'tuff-ridge' || biome === 'ash-slope' || biome === 'tuff-rim') {
+    return { ring: '#c6a678', particles: ['#d0b083', '#a88960', '#e0c59b'], opacity: 0.34 };
+  }
+  if (biome === 'white-sand' || biome === 'green-beach' || biome === 'olivine-trail' || biome === 'sand') {
+    return { ring: '#d8cf9a', particles: ['#e4d9a7', '#bfb779', '#f0e5b9'], opacity: 0.3 };
+  }
+  if (biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'salt-scrub') {
+    return { ring: '#bca776', particles: ['#cdbb88', '#9d8e61', '#d8c99d'], opacity: 0.28 };
+  }
+  if (biome === 'wet-mud' || biome === 'sesuvium-flat') {
+    return { ring: '#58553e', particles: ['#4f4c38', '#6b674b', '#3f3d31'], opacity: 0.12 };
+  }
+  return { ring: '#d6bf8a', particles: ['#e0c993', '#c7ad78', '#d3b87f'], opacity: 0.3 };
+}
+
 export function findPushableObstacleNear(obstacles, position, horizontalVelocity, collisionNormal = null) {
   if (!obstacles?.length || horizontalVelocity.lengthSq() < 0.01) return null;
   const travel = horizontalVelocity.clone().normalize();
@@ -53,6 +72,7 @@ export function LandingDust({ triggerRef }) {
     origin: new THREE.Vector3(),
     seed: 1,
     active: false,
+    opacityScale: 0.3,
   });
   const particles = useMemo(() => Array.from({ length: LANDING_DUST.particles }, (_, index) => ({
     index,
@@ -80,12 +100,18 @@ export function LandingDust({ triggerRef }) {
   }, [particleMaterials, ringMaterial]);
 
   useEffect(() => {
-    triggerRef.current = ({ intensity = 0.45, position = null } = {}) => {
+    triggerRef.current = ({ intensity = 0.45, position = null, biome = null } = {}) => {
+      const palette = dustPaletteForBiome(biome);
       burst.current.startedAt = performance.now() / 1000;
       burst.current.intensity = THREE.MathUtils.clamp(intensity, 0.18, 1);
       burst.current.origin.copy(position || new THREE.Vector3());
       burst.current.seed += 1;
       burst.current.active = true;
+      burst.current.opacityScale = palette.opacity;
+      ringMaterial.color.set(palette.ring);
+      particleMaterials.forEach((material, index) => {
+        material.color.set(palette.particles[index % palette.particles.length]);
+      });
       if (ringRef.current) ringRef.current.visible = true;
       particleRefs.current.forEach(mesh => {
         if (mesh) mesh.visible = true;
@@ -108,7 +134,7 @@ export function LandingDust({ triggerRef }) {
       ringRef.current.position.copy(state.origin);
       ringRef.current.scale.setScalar(spread);
       ringRef.current.rotation.z += delta * 0.42;
-      ringRef.current.material.opacity = fade * 0.3;
+      ringRef.current.material.opacity = fade * state.opacityScale;
     }
 
     particles.forEach(item => {
@@ -124,7 +150,7 @@ export function LandingDust({ triggerRef }) {
       );
       mesh.rotation.z += delta * (0.9 + item.index * 0.02);
       mesh.scale.setScalar(item.size * (0.75 + state.intensity * 0.7) * (1 + progress * 1.5));
-      mesh.material.opacity = fade * (0.2 + (item.index % 3) * 0.035);
+      mesh.material.opacity = fade * (state.opacityScale * 0.72 + (item.index % 3) * 0.035);
     });
 
     if (progress >= 1) {

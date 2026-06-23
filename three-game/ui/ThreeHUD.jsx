@@ -1012,31 +1012,31 @@ function NarrativePanel() {
   const message = useThreeGameStore(state => state.message);
   const educationalNote = useThreeGameStore(state => state.educationalNote);
   const symsLine = useThreeGameStore(state => state.symsLine);
-  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
-  // Stamp each line with the in-game time at which it appeared, like a
-  // logbook entry. Lines present at first paint track the live clock until
-  // they change — the world clock is only authoritative after zone load, so
-  // stamping on mount would freeze a stale time (e.g. 7:12 vs an 8:05 clock).
-  const timeRef = React.useRef(timeOfDay);
-  timeRef.current = timeOfDay;
+  // Minute-resolution clock shown on un-stamped lines. Subscribing to the
+  // formatted string instead of raw timeOfDay re-renders this heavy panel only
+  // when the displayed minute changes, not on every ~1s clock tick.
+  const fallbackTime = useThreeGameStore(state => formatExpeditionTime(state.timeOfDay));
+  // Stamp each line with the in-game time at which it appeared, like a logbook
+  // entry. Lines present at first paint track the live clock until they change —
+  // the world clock is only authoritative after zone load, so stamping on mount
+  // would freeze a stale time. Each effect reads the live clock at stamp time.
   const mountedRef = React.useRef(false);
   const [stamps, setStamps] = useState({});
   useEffect(() => {
     if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, narrator: formatExpeditionTime(timeRef.current) }));
+    setStamps(prev => ({ ...prev, narrator: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
   }, [message]);
   useEffect(() => {
     if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, syms: formatExpeditionTime(timeRef.current) }));
+    setStamps(prev => ({ ...prev, syms: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
   }, [symsLine]);
   useEffect(() => {
     if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, note: formatExpeditionTime(timeRef.current) }));
+    setStamps(prev => ({ ...prev, note: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
   }, [educationalNote]);
   useEffect(() => {
     mountedRef.current = true;
   }, []);
-  const fallbackTime = formatExpeditionTime(timeOfDay);
   // Newest line stays in view; the log scrolls like a chat transcript.
   useEffect(() => {
     const el = logRef.current;
@@ -1055,10 +1055,10 @@ function NarrativePanel() {
     const trimmed = draft.trim();
     if (!trimmed) return;
     setLocalEcho(trimmed);
-    setStamps(prev => ({ ...prev, echo: formatExpeditionTime(timeRef.current) }));
+    setStamps(prev => ({ ...prev, echo: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
     if (/^(?:hotkeys?|controls?|commands?|help)$/i.test(trimmed)) {
       setLocalNarratorReply('hotkeys');
-      setStamps(prev => ({ ...prev, localNarrator: formatExpeditionTime(timeRef.current) }));
+      setStamps(prev => ({ ...prev, localNarrator: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
     } else {
       setLocalNarratorReply(null);
     }
@@ -1755,13 +1755,19 @@ function MobileTouchControls() {
 
 // ---------------------------------------------------------------------------
 
+// Isolated so cycling the camera doesn't re-render the entire HUD tree.
+function CameraCycleButton({ className }) {
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
+  return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
+}
+
 export function ThreeHUD({ onTogglePerf }) {
   const [panel, setPanel] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
-  const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen);
 
   useEffect(() => {
@@ -1770,7 +1776,9 @@ export function ThreeHUD({ onTogglePerf }) {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && /^Digit[1-6]$/.test(event.code)) {
         const index = Number(event.code.replace('Digit', '')) - 1;
-        if (toolbarOrder[index] === 'sketch') {
+        // Read the order at keypress time so a reorder doesn't re-subscribe the
+        // whole HUD root.
+        if (useThreeGameStore.getState().toolbarOrder[index] === 'sketch') {
           event.preventDefault();
           setPanel('journal');
           return;
@@ -1782,14 +1790,12 @@ export function ThreeHUD({ onTogglePerf }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toolbarOrder]);
+  }, []);
   useEffect(() => {
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
   }, [blockingUiOpen]);
   const questComplete = useThreeGameStore(state => state.questComplete);
-  const viewMode = useThreeGameStore(state => state.viewMode);
-  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
 
   const objective = useMemo(() => {
     if (questComplete) return 'Quest complete: return to Syms with specimen evidence.';
@@ -1839,7 +1845,7 @@ export function ThreeHUD({ onTogglePerf }) {
       <div className="pointer-events-auto absolute right-3 bottom-3 flex gap-1.5 xl:hidden">
         <button type="button" onClick={() => setPanel('journal')} className={GOLD_BUTTON}>Journal</button>
         <button type="button" onClick={() => setInventoryOpen(true)} className={GOLD_BUTTON}>Case</button>
-        <button type="button" onClick={cycleViewMode} className={GOLD_BUTTON}>{viewMode}</button>
+        <CameraCycleButton className={GOLD_BUTTON} />
       </div>
 
       <MobileTouchControls />

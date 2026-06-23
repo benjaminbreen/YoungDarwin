@@ -37,6 +37,7 @@ const MODEL_ANIMAL_LABELS = {
   floreanaGiantTortoise: 'Floreana Giant Tortoise',
   galapagosPenguin: 'Galapagos Penguin',
   flightlessCormorant: 'Flightless Cormorant',
+  frigatebird: 'Magnificent Frigatebird',
   greenTurtle: 'Green Turtle',
   seaLion: 'Sea Lion',
 };
@@ -49,6 +50,7 @@ const MODEL_ANIMAL_IDS = [
   'floreanaGiantTortoise',
   'galapagosPenguin',
   'flightlessCormorant',
+  'frigatebird',
   'greenTurtle',
   'seaLion',
 ];

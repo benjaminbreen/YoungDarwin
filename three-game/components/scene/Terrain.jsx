@@ -99,6 +99,7 @@ function injectSeabedCaustics(material) {
 
 export function Terrain() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const regionDefinition = getRegionDefinition(currentZoneId);
   const geometry = useMemo(() => {
     const config = getRegionTerrainConfig(currentZoneId);
@@ -134,11 +135,18 @@ export function Terrain() {
   }, [currentZoneId]);
 
   const material = useMemo(() => {
+    // The ground covers most of the screen, so its per-fragment shading cost is
+    // significant. It's matte non-metal, so MeshPhong (no specular) looks the
+    // same as MeshStandard here without the PBR/IBL math. Caustics inject into
+    // core chunks that exist in Phong too. Region-custom terrain materials keep
+    // their own shader untouched.
     const baseMaterial = regionDefinition?.createTerrainMaterial
       ? regionDefinition.createTerrainMaterial()
-      : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+      : cheapMaterials
+        ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 0, specular: new THREE.Color(0x000000) })
+        : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
     return injectSeabedCaustics(baseMaterial);
-  }, [regionDefinition]);
+  }, [regionDefinition, cheapMaterials]);
 
   // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {

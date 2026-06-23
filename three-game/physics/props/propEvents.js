@@ -18,4 +18,5 @@ export function emitPropEvent(type, payload) {
 
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
+// 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }

@@ -8,6 +8,7 @@
 // If srcClipName is omitted, the first animation in the source is used.
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import draco3d from 'draco3d';
 
 const [SRC, DST, CLIP, SRC_CLIP] = process.argv.slice(2);
 if (!SRC || !DST || !CLIP) {
@@ -15,7 +16,12 @@ if (!SRC || !DST || !CLIP) {
   process.exit(1);
 }
 
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+const io = new NodeIO()
+  .registerExtensions(ALL_EXTENSIONS)
+  .registerDependencies({
+    'draco3d.decoder': await draco3d.createDecoderModule(),
+    'draco3d.encoder': await draco3d.createEncoderModule(),
+  });
 const src = await io.read(SRC);
 const dst = await io.read(DST);
 

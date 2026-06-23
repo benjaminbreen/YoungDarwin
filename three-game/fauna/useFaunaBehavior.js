@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { isWalkableTerrain, terrainBiomeAt, terrainHeight } from '../world/terrain';
 import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
+import { onPropEvent } from '../physics/props/propEvents';
 
 // Beyond this distance from the player, fauna simulate at FAR_SIM_INTERVAL
 // instead of every frame. The expensive terrain sampling dominates the cost,
@@ -147,9 +148,19 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
   const waitUntil = useRef(0);
   const phase = useRef(0);
   const simAccumulator = useRef(0);
+  const clockRef = useRef(0);
+  const hammerThreat = useRef({
+    x: 0,
+    z: 0,
+    radius: 0,
+    until: -Infinity,
+    pending: [],
+  });
   const publishRef = useRef({ x: Infinity, y: Infinity, z: Infinity, time: -Infinity });
+  const animationRef = useRef(null);
   const scratch = useRef({
     awayFromPlayer: new THREE.Vector2(),
+    awayFromHammer: new THREE.Vector2(),
     toWaypoint: new THREE.Vector2(),
     direction: new THREE.Vector2(),
     sidestep: new THREE.Vector2(),
@@ -164,6 +175,8 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
     waypointIndex.current = 0;
     waitUntil.current = 0;
     phase.current = seed * 10;
+    animationRef.current = profile.walkClip || null;
+    hammerThreat.current = { x: 0, z: 0, radius: 0, until: -Infinity, pending: [] };
     const initial = {
       x: basePosition.x,
       y: basePosition.y,
@@ -171,6 +184,24 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
     };
     publishRuntimePosition(setSpecimenRuntimePosition, publishRef, specimen.id, currentZoneId, initial, 0, true);
   }, [basePosition, currentZoneId, profile, seed, setSpecimenRuntimePosition, specimen.id]);
+
+  useEffect(() => {
+    if (!profile || !basePosition || collected) return undefined;
+    return onPropEvent('tool-swing', event => {
+      if (event.tool !== 'hammer') return;
+      const source = event.position || null;
+      if (!source) return;
+      const radius = profile.hammerAlertRadius || Math.max(profile.alertRadius + 4.5, 7.5);
+      const baseDistance = Math.hypot((source.x || 0) - basePosition.x, (source.z || 0) - basePosition.z);
+      if (baseDistance > radius + Math.max(habitat?.radiusX || 0, habitat?.radiusZ || 0)) return;
+      hammerThreat.current.pending.push({
+        x: source.x || 0,
+        z: source.z || 0,
+        radius,
+        at: clockRef.current + (event.impactDelay ?? 0.55),
+      });
+    });
+  }, [basePosition, collected, habitat, profile]);
 
   useFrame(({ clock, delta }) => {
     if (!profile || !habitat || !groupRef.current || collected) return;
@@ -199,11 +230,37 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
     const farThreshold = Math.max(FAR_SIM_RADIUS, profile.alertRadius + 8);
     if (distanceToPlayer > farThreshold && simAccumulator.current < FAR_SIM_INTERVAL) return;
     const t = clock.elapsedTime;
+    clockRef.current = t;
     const dt = Math.min(0.2, Math.max(0.001, simAccumulator.current));
     simAccumulator.current = 0;
-    const panic = distanceToPlayer < profile.alertRadius
+    if (hammerThreat.current.pending.length) {
+      const due = hammerThreat.current.pending.filter(event => event.at <= t);
+      hammerThreat.current.pending = hammerThreat.current.pending.filter(event => event.at > t);
+      for (const event of due) {
+        const distanceToStrike = Math.hypot(worldX - event.x, worldZ - event.z);
+        if (distanceToStrike > event.radius) continue;
+        hammerThreat.current.x = event.x;
+        hammerThreat.current.z = event.z;
+        hammerThreat.current.radius = event.radius;
+        hammerThreat.current.until = t + 3.2;
+        waypoint.current.copy(current);
+        waitUntil.current = t;
+      }
+    }
+
+    const playerPanic = distanceToPlayer < profile.alertRadius
       ? THREE.MathUtils.clamp((profile.alertRadius - distanceToPlayer) / Math.max(0.01, profile.alertRadius - profile.panicRadius), 0, 1)
       : 0;
+    const hammer = hammerThreat.current;
+    const hammerDistance = Math.hypot(worldX - hammer.x, worldZ - hammer.z);
+    const hammerFade = t < hammer.until ? THREE.MathUtils.clamp((hammer.until - t) / 3.2, 0, 1) : 0;
+    const hammerPanic = hammerFade > 0
+      ? THREE.MathUtils.clamp((hammer.radius - hammerDistance) / Math.max(0.01, hammer.radius * 0.72), 0, 1) * hammerFade
+      : 0;
+    const panic = Math.max(playerPanic, hammerPanic);
+    const awayFromThreat = hammerPanic > playerPanic
+      ? vectors.awayFromHammer.set(worldX - hammer.x, worldZ - hammer.z)
+      : awayFromPlayer;
 
     phase.current += dt * (profile.patrolRate || 0.5);
     const toWaypoint = vectors.toWaypoint.copy(waypoint.current).sub(current);
@@ -225,7 +282,7 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
 
     const direction = vectors.direction.set(0, 0);
     if (panic > 0.01) {
-      if (awayFromPlayer.lengthSq() > 0.0001) direction.copy(awayFromPlayer).normalize();
+      if (awayFromThreat.lengthSq() > 0.0001) direction.copy(awayFromThreat).normalize();
       else direction.set(1, 0);
       const sidestep = vectors.sidestep
         .set(-direction.y, direction.x)
@@ -275,6 +332,9 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
     const z = base.z + offset.current.y;
     const groundY = terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.04);
     const moving = direction.lengthSq() > 0.0001;
+    animationRef.current = panic > 0.18 && profile.runClip
+      ? profile.runClip
+      : (moving ? profile.walkClip || null : profile.idleClip || profile.walkClip || null);
     const bob = Math.abs(Math.sin(t * (moving ? 5.2 : 1.7) + seed)) * (profile.bobAmount || 0) * (moving ? 1 : 0.25);
     const parentScale = groupRef.current.parent?.scale || { x: 1, y: 1, z: 1 };
     groupRef.current.position.set(
@@ -294,5 +354,6 @@ export function useFaunaBehavior({ specimen, groupRef, basePosition, collected }
   return {
     active: Boolean(profile),
     profile,
+    animationRef,
   };
 }

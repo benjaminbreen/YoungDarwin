@@ -6,6 +6,11 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
+import {
+  darwin5ClipFallback,
+  darwin5ClipSettings,
+  darwin5TransitionFade,
+} from '../player/darwin5AnimationManifest.mjs';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin',
@@ -293,6 +298,8 @@ const ONE_SHOT_CLIPS = new Set([
   'bigJumpDown',
   'jumpDownHandhold',
   'climb',
+  'climbWaistHeight',
+  'climbHeadHeight',
   'climbingDownWall',
   'wallRun',
   'standToSit',
@@ -316,6 +323,7 @@ const ONE_SHOT_CLIPS = new Set([
   'swingHammer',
   'swingNet',
   'swingTool',
+  'heavyToolSwing',
   'torchMeleeAttack',
   'gather',
   'torchInspectForward',
@@ -357,6 +365,8 @@ const CLIP_SETTINGS = {
   crouchRun: { loop: true, fade: 0.14 },
   runStrafeLeft: { loop: true, fade: 0.12 },
   runStrafeRight: { loop: true, fade: 0.12 },
+  walkStrafeLeft: { loop: true, fade: 0.14 },
+  walkStrafeRight: { loop: true, fade: 0.14 },
   crouchIdle: { loop: true, fade: 0.18 },
   torchIdle: { loop: true, fade: 0.2 },
   torchWalk: { loop: true, fade: 0.14 },
@@ -402,7 +412,7 @@ const CLIP_SETTINGS = {
 
 const CLIP_FALLBACKS = {
   lookAround: 'idle',
-  lookAroundShort: 'idle',
+  lookAroundShort: 'lookAround',
   fallingIdle: 'fall',
   sprintToWallClimb: 'climbingUpWall',
   vault: 'climbingUpWall',
@@ -412,6 +422,7 @@ const CLIP_FALLBACKS = {
   standToRoll: 'fallingToRoll',
   hitReaction: 'teeter',
   stumble: 'teeter',
+  trip: 'fallingToRoll',
   shoulderHitAndFall: 'bigHitFall',
   gettingUp: 'rifleKneelToStand',
   walkBackwards: 'walk',
@@ -455,14 +466,21 @@ function isOneShotClip(name) {
   return ONE_SHOT_CLIPS.has(normalizeClipName(name));
 }
 
-function settingsForClip(name) {
-  return CLIP_SETTINGS[name] || CLIP_SETTINGS[normalizeClipName(name)] || {};
+function settingsForClip(name, assetId = null) {
+  const base = CLIP_SETTINGS[name] || CLIP_SETTINGS[normalizeClipName(name)] || {};
+  if (assetId !== 'darwin5') return base;
+  const darwin5Settings = darwin5ClipSettings(name);
+  return Object.keys(darwin5Settings).length ? { ...base, ...darwin5Settings } : base;
 }
 
-function fadeForTransition(fromName, toName) {
+function fadeForTransition(fromName, toName, assetId = null) {
+  if (assetId === 'darwin5') {
+    const darwin5Fade = darwin5TransitionFade(fromName, toName);
+    if (Number.isFinite(darwin5Fade)) return darwin5Fade;
+  }
   const to = normalizeClipName(toName);
   const from = normalizeClipName(fromName);
-  const settings = settingsForClip(toName);
+  const settings = settingsForClip(toName, assetId);
   if (settings.fade !== undefined) return settings.fade;
   if (to.includes('jump') || to.includes('land')) return 0.08;
   if (from.includes('jump') && (to.includes('landing') || to === 'land')) return 0.06;
@@ -624,7 +642,9 @@ function GLBPrimitive({
     const fade = normalized?.fade ?? null;
     const timeScale = THREE.MathUtils.clamp(normalized?.timeScale ?? 1, 0.35, 1.8);
     const maxTime = Number.isFinite(normalized?.maxTime) ? Math.max(0, normalized.maxTime) : null;
-    const fallbackClip = CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)];
+    const fallbackClip = assetId === 'darwin5'
+      ? (darwin5ClipFallback(requestedClip) || CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)])
+      : (CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)]);
     const next = getAction(requestedClip) || getAction(fallbackClip);
     const resolvedClip = next?.getClip?.()?.name || requestedClip;
     if (!next) {
@@ -648,8 +668,8 @@ function GLBPrimitive({
     }
     const previous = activeAction.current;
     const previousName = previous?.getClip?.()?.name || activeRequest.current;
-    const transitionFade = fade ?? fadeForTransition(previousName, resolvedClip);
-    const clipSettings = settingsForClip(resolvedClip);
+    const transitionFade = fade ?? fadeForTransition(previousName, resolvedClip, assetId);
+    const clipSettings = settingsForClip(resolvedClip, assetId);
     const oneShot = clipSettings.loop === true ? false : isOneShotClip(resolvedClip);
     next.enabled = true;
     next.paused = false;

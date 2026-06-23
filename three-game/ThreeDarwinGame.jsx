@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
@@ -13,6 +13,7 @@ import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { useThreeGameStore } from './store';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
+import { WATER_LEVEL } from './world/water';
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -84,18 +85,30 @@ const DEFAULT_PERF_SETTINGS = {
   splatBackdrop: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
+  // Swap world vegetation/terrain from MeshStandard (PBR) to matte MeshPhong —
+  // same matte look, far cheaper per fragment. foliageDrawScale trims vegetation
+  // draw distance to cut overdraw. Both default to the 'performance' tier.
+  cheapMaterials: true,
+  foliageDrawScale: 0.85,
 };
 
 const QUALITY_PRESETS = {
   performance: {
-    // 1.5x DPR + 2x MSAA + SMAA-ULTRA: at 1x on a retina panel the silhouette
-    // edges stair-step badly. This is the main anti-alias fix; drop dprMode back
-    // to '1x' (perf panel) on weak GPUs, or push to '2x' for full native res.
-    dprMode: '1.5x',
-    msaaSamples: 2,
+    // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
+    // every full-screen pass (post chain, water, terrain, sky) pays for all of
+    // them. On integrated/laptop GPUs that's the dominant cost, so the
+    // performance tier renders at native 1x and lets SMAA-ULTRA carry the
+    // anti-aliasing (it cleans silhouette edges well even at 1x). Composer MSAA
+    // is OFF here too (redundant with SMAA, and the multisample resolve is
+    // expensive). Bump dprMode to 1.25x/1.5x/2x in the perf panel — or switch to
+    // the cinematic tier — on a GPU with headroom.
+    dprMode: '1x',
+    msaaSamples: 0,
     ao: false,
     reflections: false,
     waterQuality: 'performance',
+    cheapMaterials: true,
+    foliageDrawScale: 0.85,
   },
   cinematic: {
     dprMode: 'default',
@@ -103,6 +116,8 @@ const QUALITY_PRESETS = {
     ao: true,
     reflections: true,
     waterQuality: 'cinematic',
+    cheapMaterials: false,
+    foliageDrawScale: 1,
   },
 };
 
@@ -162,6 +177,12 @@ function settingsFromUrlSearch(search) {
     splatBackdrop: !params.has('noSplatBackdrop'),
     physicsDebug: params.has('physicsDebug'),
     preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
+    cheapMaterials: params.has('cheapMaterials')
+      ? true
+      : base.cheapMaterials && !params.has('noCheapMaterials'),
+    foliageDrawScale: params.has('foliageDrawScale') && Number.isFinite(Number(params.get('foliageDrawScale')))
+      ? Number(params.get('foliageDrawScale'))
+      : base.foliageDrawScale,
   };
 }
 
@@ -374,6 +395,107 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
   return null;
 }
 
+// Adaptive resolution. The configured DPR cap (1.5x on the default tier) is the
+// single biggest GPU cost — fillrate scales with pixel count, so 1.5x is 2.25x
+// the pixels of 1x. This watches the live frame rate and steps the pixel ratio
+// down a fixed ladder when the game sustains a low frame rate, then eases it
+// back up once there's headroom again. setDpr (not gl.setPixelRatio) is used so
+// the post-processing composer resizes its targets too. Runs every frame
+// independent of the perf panel.
+const ADAPTIVE_DPR_FLOOR_FPS = 25;      // sustained fps below this -> drop a rung
+const ADAPTIVE_DPR_CEIL_FPS = 50;       // sustained fps above this -> restore a rung
+const ADAPTIVE_DPR_WINDOW_S = 1.0;      // averaging window per decision
+const ADAPTIVE_DPR_UPSCALE_WINDOWS = 2; // consecutive good windows before restoring
+const ADAPTIVE_DPR_COOLDOWN_S = 2.0;    // settle time after a change / scene ready
+
+function buildDprLadder(maxDpr) {
+  const rungs = [];
+  for (const candidate of [2, 1.5, 1.25, 1]) {
+    if (candidate <= maxDpr + 1e-3) rungs.push(candidate);
+  }
+  if (!rungs.length || rungs[0] < maxDpr - 1e-3) rungs.unshift(maxDpr);
+  return rungs.filter((value, i) => i === 0 || value < rungs[i - 1] - 1e-3);
+}
+
+function AdaptiveResolution({ enabled, maxDpr }) {
+  const setDpr = useThree(state => state.setDpr);
+  const gl = useThree(state => state.gl);
+  const state = useRef({
+    ladder: [maxDpr],
+    level: 0, // index into ladder; 0 = sharpest (configured cap)
+    frames: 0,
+    elapsed: 0,
+    cooldown: ADAPTIVE_DPR_COOLDOWN_S,
+    goodWindows: 0,
+    deviceDpr: 1,
+  });
+
+  // Rebuild the ladder and snap back to the top rung whenever the configured cap
+  // changes (e.g. the user picks a different quality in the perf panel), so the
+  // controller never fights the new baseline R3F just applied from the prop.
+  useEffect(() => {
+    const s = state.current;
+    s.ladder = buildDprLadder(maxDpr);
+    s.level = 0;
+    s.frames = 0;
+    s.elapsed = 0;
+    s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
+    s.goodWindows = 0;
+    s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+  }, [maxDpr]);
+
+  useFrame((_, delta) => {
+    const s = state.current;
+    // Hold (and keep the window clean) until the scene is ready, then for a
+    // short grace period — boot/asset-streaming hitches must not downscale.
+    if (!enabled) {
+      s.frames = 0;
+      s.elapsed = 0;
+      s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
+      return;
+    }
+    if (s.ladder.length < 2) return; // nothing to adapt (1x display or 1x cap)
+    if (s.cooldown > 0) {
+      s.cooldown -= delta;
+      s.frames = 0;
+      s.elapsed = 0;
+      return;
+    }
+    s.frames += 1;
+    s.elapsed += delta;
+    if (s.elapsed < ADAPTIVE_DPR_WINDOW_S) return;
+
+    const fps = s.frames / s.elapsed;
+    s.frames = 0;
+    s.elapsed = 0;
+
+    if (fps < ADAPTIVE_DPR_FLOOR_FPS && s.level < s.ladder.length - 1) {
+      s.level += 1;
+      s.goodWindows = 0;
+      applyAdaptiveDpr(s, setDpr, gl);
+    } else if (fps > ADAPTIVE_DPR_CEIL_FPS && s.level > 0) {
+      s.goodWindows += 1;
+      if (s.goodWindows >= ADAPTIVE_DPR_UPSCALE_WINDOWS) {
+        s.level -= 1;
+        s.goodWindows = 0;
+        applyAdaptiveDpr(s, setDpr, gl);
+      }
+    } else {
+      s.goodWindows = 0;
+    }
+  });
+
+  return null;
+}
+
+function applyAdaptiveDpr(s, setDpr, gl) {
+  const applied = Math.min(s.deviceDpr, s.ladder[s.level]);
+  s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
+  if (typeof window !== 'undefined') window.__adaptiveDpr = applied;
+  if (Math.abs(gl.getPixelRatio() - applied) < 1e-3) return; // already there
+  setDpr(applied);
+}
+
 function ExpeditionClock() {
   const elapsed = useRef(0);
   const advanceTime = useThreeGameStore(state => state.advanceTime);
@@ -473,6 +595,22 @@ function PostFX({ enabled, ao, multisampling = 2 }) {
       <Vignette eskil={false} offset={0.26} darkness={0.42} />
     </EffectComposer>
   );
+}
+
+function UnderwaterCameraTracker({ onChange }) {
+  const camera = useThree(state => state.camera);
+  const lastAmount = useRef(-1);
+
+  useFrame(() => {
+    const amount = Math.min(1, Math.max(0, (WATER_LEVEL - camera.position.y + 0.08) / 1.65));
+    if (Math.abs(amount - lastAmount.current) < 0.025) return;
+    lastAmount.current = amount;
+    onChange(amount);
+  });
+
+  useEffect(() => () => onChange(0), [onChange]);
+
+  return null;
 }
 
 function CinematicScreenGrade({ enabled, weather }) {
@@ -616,6 +754,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
         <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
+        <Toggle label="Fast Shading" checked={settings.cheapMaterials !== false} onChange={value => set({ cheapMaterials: value, foliageDrawScale: value ? 0.85 : 1 })} />
         <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
         <Toggle label="Shadows" checked={settings.shadows} onChange={value => set({ shadows: value })} />
         <Toggle label="Water" checked={settings.water} onChange={value => set({ water: value })} />
@@ -695,6 +834,37 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
   );
 }
 
+function UnderwaterScreenGrade({ amount }) {
+  const opacity = Math.min(1, Math.max(0, amount));
+  if (opacity <= 0.01) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden" style={{ opacity }}>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: 'linear-gradient(180deg, rgba(64, 177, 218, 0.46), rgba(18, 108, 156, 0.34) 48%, rgba(2, 42, 78, 0.54))',
+          mixBlendMode: 'multiply',
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background: 'radial-gradient(circle at 50% 32%, rgba(188, 238, 255, 0.18), rgba(56, 164, 207, 0.12) 42%, rgba(1, 31, 57, 0.28) 100%)',
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div
+        className="absolute inset-0 opacity-35"
+        style={{
+          backgroundImage: 'linear-gradient(115deg, transparent 0 42%, rgba(208, 246, 255, 0.13) 48%, transparent 55% 100%)',
+          backgroundSize: '220px 180px',
+          mixBlendMode: 'soft-light',
+        }}
+      />
+    </div>
+  );
+}
+
 export default function ThreeDarwinGame() {
   const [launchState, setLaunchState] = useState('menu');
   const [sceneReady, setSceneReady] = useState(false);
@@ -709,6 +879,7 @@ export default function ThreeDarwinGame() {
   const [costProbe, setCostProbe] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
+  const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const assetProgress = useProgress();
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
@@ -718,6 +889,19 @@ export default function ThreeDarwinGame() {
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const gameStarted = launchState !== 'menu';
   const showLaunchOverlay = launchState === 'menu' || !sceneReady;
+  const handleUnderwaterChange = useCallback(amount => {
+    setUnderwaterAmount(amount);
+  }, []);
+
+  // Mirror the material-quality knobs into the store so the scene's
+  // material-building components (terrain, flora, trees) can react to them
+  // without prop-threading through every layer.
+  useEffect(() => {
+    useThreeGameStore.getState().setGraphicsQuality({
+      cheapMaterials: perfSettings.cheapMaterials !== false,
+      foliageDrawScale: perfSettings.foliageDrawScale ?? 1,
+    });
+  }, [perfSettings.cheapMaterials, perfSettings.foliageDrawScale]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -869,6 +1053,8 @@ export default function ThreeDarwinGame() {
               ao={perfSettings.ao}
               multisampling={perfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
             />
+            <AdaptiveResolution enabled={sceneReady} maxDpr={dpr[1]} />
+            <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
             <ExpeditionClock />
             <InspectionAnchorProjector />
             <PerformanceSampler
@@ -901,6 +1087,7 @@ export default function ThreeDarwinGame() {
           </Canvas>
         )}
         {gameStarted && <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />}
+        {gameStarted && <UnderwaterScreenGrade amount={underwaterAmount} />}
         {gameStarted && !showLaunchOverlay && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
         {gameStarted && !showLaunchOverlay && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
         {gameStarted && !showLaunchOverlay && (

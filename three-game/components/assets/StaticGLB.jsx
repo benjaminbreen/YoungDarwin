@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { catalogToInspectable } from '../../world/inspectables';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
+import { ContactShadow } from '../scene/ContactShadow';
 import { stabilizeFoliageMaterial } from './materialStability';
 
 const scratchWorldPosition = new THREE.Vector3();
@@ -95,6 +96,7 @@ function StaticGLBPrimitive({
   frustumCulled = true,
   maxVisibleDistance = null,
   motion = null,
+  contactShadow = null,
   inspectableType = null,
   sourceId = null,
   sourceLabel = null,
@@ -143,6 +145,11 @@ function StaticGLBPrimitive({
       } : undefined}
     >
       <primitive object={clone} />
+      {contactShadow ? (
+        // Divide by scale so the requested radius is the world-space footprint
+        // regardless of the prop's group scale.
+        <ContactShadow radius={contactShadow / (Array.isArray(scale) ? (scale[0] || 1) : (scale || 1))} />
+      ) : null}
     </group>
   );
 }

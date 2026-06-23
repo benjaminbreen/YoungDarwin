@@ -149,6 +149,13 @@ export function PhysicsProp({ prop, onBreak }) {
           if (distance > 0.2 && toProp.normalize().dot(facing) < STRIKE_FACING_DOT) continue;
           const impactDir = distance > 0.2 ? toProp.normalize() : facing;
           if (breakable && strike.tool === breakable.tool) {
+            emitPropEvent('prop-struck', {
+              propId: prop.id,
+              position: { x: translation.x, y: translation.y, z: translation.z },
+              impactDir: { x: impactDir.x, y: 0, z: impactDir.z },
+              dustCount: 14,
+              sparkCount: 3,
+            });
             onBreak?.(prop, {
               position: { x: translation.x, y: translation.y, z: translation.z },
               impactDir: { x: impactDir.x, y: 0, z: impactDir.z },
@@ -162,6 +169,13 @@ export function PhysicsProp({ prop, onBreak }) {
               y: strikeable.impulse * 0.22,
               z: impactDir.z * strikeable.impulse,
             }, true);
+            emitPropEvent('prop-struck', {
+              propId: prop.id,
+              position: { x: translation.x, y: translation.y, z: translation.z },
+              impactDir: { x: impactDir.x, y: 0, z: impactDir.z },
+              dustCount: 16,
+              sparkCount: 5,
+            });
           }
         }
       }

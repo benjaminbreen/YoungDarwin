@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { MOVEMENT_INTERRUPTIBLE_ACTIONS, actionDuration } from './playerConfig';
+import { MOVEMENT_INTERRUPTIBLE_ACTIONS, actionDuration, actionLockDuration } from './playerConfig';
 
 export function usePlayerActions(stateRef, lastButtonsRef) {
   const startAction = useCallback((now, clip, duration = actionDuration(clip, stateRef.current.modelAssetId), {
@@ -13,7 +13,7 @@ export function usePlayerActions(stateRef, lastButtonsRef) {
     stateRef.current.actionUntil = now + duration;
     const lockDuration = typeof lockMovement === 'number'
       ? Math.max(0, lockMovement)
-      : (lockMovement ? duration : 0);
+      : (lockMovement ? actionLockDuration(clip, stateRef.current.modelAssetId, duration) : 0);
     stateRef.current.lockMovementUntil = lockDuration > 0 ? now + lockDuration : stateRef.current.lockMovementUntil;
     stateRef.current.recoverAction = recoverAction ? { clip: recoverAction, duration: recoverDuration } : null;
     onStart?.();

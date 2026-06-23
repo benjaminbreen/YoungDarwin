@@ -103,6 +103,13 @@ const {
   detectInteriorEntry,
   routePlayerCommand,
 } = loadModule('utils/playerCommandRouter.js');
+const {
+  groundHammerMaterial,
+  inferHammerMaterial,
+  rockSampleKey,
+  resolveHammerOutcome,
+  selectRockSampleTarget,
+} = loadModule('three-game/physics/props/rockSampling.js');
 
 test('action suggestions prioritize safety, traps, specimens, and evidence', () => {
   const objectives = createDefaultObjectives();
@@ -153,6 +160,68 @@ test('deterministic choices are stable for prompt construction', () => {
   const items = ['university', 'beagle', 'childhood'];
   assert.equal(deterministicChoice(items, 'same prompt'), deterministicChoice(items, 'same prompt'));
   assert.equal(deterministicChoice([], 'same prompt'), null);
+});
+
+test('rock sample targeting chooses the nearest forward sampleable outcrop', () => {
+  const obstacles = [
+    { id: 'behind', kind: 'rock', x: 0, z: 1.2, radius: 0.4, colliderTop: 1.0 },
+    { id: 'low-chip', kind: 'rock', x: 0.5, z: -1.1, radius: 0.3, colliderTop: 0.2 },
+    { id: 'sample-rock', kind: 'rock', x: 0.45, z: -1.9, radius: 0.7, colliderTop: 1.1 },
+    { id: 'farther-rock', kind: 'rock', x: -0.4, z: -2.9, radius: 0.5, colliderTop: 1.2 },
+  ];
+  const target = selectRockSampleTarget({
+    obstacles,
+    zoneId: 'TEST_ZONE',
+    position: { x: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+  });
+  assert.equal(target.key, rockSampleKey('TEST_ZONE', 'sample-rock'));
+});
+
+test('rock sample targeting skips sampled and currently active source rocks', () => {
+  const obstacles = [
+    { id: 'first-rock', kind: 'rock', x: 0, z: -1.4, radius: 0.4, colliderTop: 1.0 },
+    { id: 'second-rock', kind: 'rock', x: 0.2, z: -2.2, radius: 0.4, colliderTop: 1.0 },
+    { id: 'third-rock', kind: 'rock', x: -0.2, z: -2.6, radius: 0.4, colliderTop: 1.0 },
+  ];
+  const target = selectRockSampleTarget({
+    obstacles,
+    zoneId: 'TEST_ZONE',
+    position: { x: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+    sampledRockIds: [rockSampleKey('TEST_ZONE', 'first-rock')],
+    activeSourceKeys: [rockSampleKey('TEST_ZONE', 'second-rock')],
+  });
+  assert.equal(target.key, rockSampleKey('TEST_ZONE', 'third-rock'));
+});
+
+test('hammer material profiles infer geology from authored hints and terrain biomes', () => {
+  assert.equal(inferHammerMaterial({
+    rock: { id: 'ridge-scree-4', kind: 'rock' },
+    zoneId: 'POST_OFFICE_BAY',
+    biome: 'tuff-ridge',
+  }), 'tuff');
+  assert.equal(inferHammerMaterial({
+    rock: { id: 'reef-coral-stone', kind: 'rock' },
+    zoneId: 'NW_REEF',
+    biome: 'coral',
+  }), 'coral_limestone');
+  assert.equal(inferHammerMaterial({
+    rock: { id: 'custom', hammerProfile: 'scoria' },
+    zoneId: 'TEST_ZONE',
+    biome: 'dry-scrub',
+  }), 'scoria');
+  assert.equal(groundHammerMaterial({ zoneId: 'CORMORANT_BAY_TEST_3', biome: 'green-beach' }), 'olivine');
+  assert.equal(groundHammerMaterial({ zoneId: 'NW_REEF', biome: 'white-sand' }), 'coral_limestone');
+  assert.equal(groundHammerMaterial({ zoneId: 'POST_OFFICE_BAY', biome: 'dry-scrub' }), null);
+});
+
+test('hammer outcomes are deterministic and carry collection metadata', () => {
+  const first = resolveHammerOutcome('tuff', 'same-rock');
+  const second = resolveHammerOutcome('tuff', 'same-rock');
+  assert.deepEqual(first, second);
+  assert.equal(typeof first.condition, 'string');
+  assert.ok(first.collectMessage.includes('tuff') || first.evidence.includes('tuff'));
 });
 
 test('objective progress counts field evidence, labels, surveyed zones, and fatigue safety', () => {

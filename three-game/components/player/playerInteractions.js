@@ -10,23 +10,32 @@ export function oppositeEdge(edge) {
 export function nearestRegionEdgePrompt(regionId, position, facing) {
   const config = getRegionTerrainConfig(regionId);
   const threshold = 5.2;
+  const distEast = config.width / 2 - position.x;
+  const distWest = position.x + config.width / 2;
+  const distSouth = config.depth / 2 - position.z;
+  const distNorth = position.z + config.depth / 2;
+  // Fast path: in the zone interior, far from every edge. This runs every frame
+  // from the player loop, so bail before fetching hints or allocating anything.
+  if (distEast > threshold && distWest > threshold && distSouth > threshold && distNorth > threshold) {
+    return null;
+  }
   const hints = getRegionEdgeHints(regionId);
   const facingX = facing?.x || 0;
   const facingZ = facing?.z || 0;
   const facingLength = Math.hypot(facingX, facingZ);
-  const distances = {
-    east: config.width / 2 - position.x,
-    west: position.x + config.width / 2,
-    south: config.depth / 2 - position.z,
-    north: position.z + config.depth / 2,
-  };
-  const candidates = [];
+
+  // Track the single best candidate with scalars (ordering identical to the old
+  // sort: nearest distance wins, ties break toward the edge we face most) so we
+  // never build/sort a candidates array or spread a hint until the winner.
+  let bestHint = null;
+  let bestDistance = Infinity;
+  let bestFacingWeight = -Infinity;
   for (const hint of hints) {
     const edge = hint.edge;
-    if (edge.includes('north') && distances.north > threshold) continue;
-    if (edge.includes('south') && distances.south > threshold) continue;
-    if (edge.includes('east') && distances.east > threshold) continue;
-    if (edge.includes('west') && distances.west > threshold) continue;
+    if (edge.includes('north') && distNorth > threshold) continue;
+    if (edge.includes('south') && distSouth > threshold) continue;
+    if (edge.includes('east') && distEast > threshold) continue;
+    if (edge.includes('west') && distWest > threshold) continue;
     const edgeDirection = EDGE_DIRECTIONS[edge];
     if (!edgeDirection) continue;
     const directionLength = Math.hypot(edgeDirection.dx, edgeDirection.dy) || 1;
@@ -37,15 +46,18 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
       : 0;
     if (facingWeight < -0.15) continue;
     const distance = Math.min(
-      edge.includes('north') ? distances.north : Infinity,
-      edge.includes('south') ? distances.south : Infinity,
-      edge.includes('east') ? distances.east : Infinity,
-      edge.includes('west') ? distances.west : Infinity,
+      edge.includes('north') ? distNorth : Infinity,
+      edge.includes('south') ? distSouth : Infinity,
+      edge.includes('east') ? distEast : Infinity,
+      edge.includes('west') ? distWest : Infinity,
     );
-    candidates.push({ ...hint, distance, facingWeight });
+    if (distance < bestDistance || (distance === bestDistance && facingWeight > bestFacingWeight)) {
+      bestHint = hint;
+      bestDistance = distance;
+      bestFacingWeight = facingWeight;
+    }
   }
-  candidates.sort((a, b) => (a.distance - b.distance) || (b.facingWeight - a.facingWeight));
-  return candidates[0] || null;
+  return bestHint ? { ...bestHint, distance: bestDistance, facingWeight: bestFacingWeight } : null;
 }
 
 export function collectionAnimationForTool(toolId) {
@@ -112,7 +124,12 @@ export function updatePlayerInteractions({
     const currentState = useThreeGameStore.getState();
     const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
     if (currentState.carryPrompt) {
-      if (currentState.carriedObjectId) {
+      if (currentState.carryPrompt.mode === 'collect-rock-sample') {
+        if (!stateRef.current.action) {
+          startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });
+        }
+        currentState.collectRockSample?.(currentState.carryPrompt.sample);
+      } else if (currentState.carriedObjectId) {
         setCarriedObject(null);
       } else if (currentState.carryPrompt.mode === 'pickup') {
         if (!stateRef.current.action) {

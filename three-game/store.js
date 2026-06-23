@@ -8,6 +8,7 @@ import {
   specimenIsInsect,
   specimenNeedsJar,
 } from '../data/inventoryItems';
+import { baseSpecimens } from '../data/specimens';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
@@ -29,6 +30,15 @@ const INITIAL_PLAYER_POSE = Object.freeze({
 // re-render the (always-mounted) minimap subtree on every pose publish.
 const MINIMAP_POSE_EPSILON = 0.2;
 const MINIMAP_HEADING_EPSILON = 1.5;
+const BASALT_SPECIMEN = baseSpecimens.find(specimen => specimen.id === 'basalt') || {
+  id: 'basalt',
+  name: 'Basalt Formation',
+  latin: 'Lava basaltica',
+  ontology: 'Mineral',
+  description: 'Dark volcanic basalt from Floreana lava outcrops.',
+  scientificValue: 6,
+};
+const HAMMER_TOOL = threeTools.find(tool => tool.id === 'hammer') || { id: 'hammer', name: 'Geological Hammer' };
 
 export const threeRuntimeState = {
   playerPose: {
@@ -39,6 +49,10 @@ export const threeRuntimeState = {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function specimenById(specimenId) {
+  return baseSpecimens.find(specimen => specimen.id === specimenId) || null;
 }
 
 function advanceTimeState(state, minutes) {
@@ -139,6 +153,11 @@ function createSceneSlice() {
     edgePrompt: null,
     lastOutcome: null,
     physicsDebug: null,
+    // Graphics-quality knobs mirrored from perfSettings so material-building
+    // components can react without prop-threading through the whole scene tree.
+    // Defaults match the 'performance' tier (the boot default).
+    cheapMaterials: true,
+    foliageDrawScale: 0.85,
     pushableObstacleOffsets: {},
     specimenRuntimePositions: {},
     playerPose: {
@@ -156,6 +175,7 @@ function createSceneSlice() {
     inspectedObject: null,
     inspectedScreenPosition: null,
     brokenPropIds: [],
+    sampledRockIds: [],
     symsLine: 'Syms waits with labels, twine, and a doubtful look at your boots.',
   };
 }
@@ -208,6 +228,10 @@ export const useThreeGameStore = create((set, get) => ({
   setNearbySpecimen: nearbySpecimenId => set({ nearbySpecimenId }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
+  setGraphicsQuality: ({ cheapMaterials, foliageDrawScale }) => set(state => ({
+    cheapMaterials: cheapMaterials ?? state.cheapMaterials,
+    foliageDrawScale: foliageDrawScale ?? state.foliageDrawScale,
+  })),
   setEdgePrompt: edgePrompt => set({ edgePrompt }),
   setPlayerPose: playerPose => {
     updateRuntimePlayerPose(playerPose);
@@ -288,6 +312,100 @@ export const useThreeGameStore = create((set, get) => ({
       ...(loot?.syms ? { symsLine: loot.syms } : {}),
     };
   }),
+  collectRockSample: sample => {
+    const sourceRockKey = sample?.sourceRockKey || sample?.sampleId || sample?.id;
+    if (!sourceRockKey) return false;
+    let collected = false;
+
+    set(state => {
+      const promptBelongsToSample = state.carryPrompt?.sample?.sourceRockKey === sourceRockKey
+        || state.carryPrompt?.id === sample?.sampleId;
+      if (state.sampledRockIds.includes(sourceRockKey)) {
+        collected = true;
+        return promptBelongsToSample ? { carryPrompt: null } : {};
+      }
+      if (state.inventory.length >= state.caseCapacity) {
+        return {
+          message: 'The specimen case is full. The basalt chip will have to wait.',
+          symsLine: 'Syms taps the case lid. "Not an inch of room left, sir."',
+          lastOutcome: null,
+        };
+      }
+      if (state.supplies.labels <= 0) {
+        return {
+          message: 'No labels remain. An unlabeled rock chip would be nearly useless back aboard the Beagle.',
+          symsLine: 'Syms turns out his pockets. "A clean chip needs a clean label, sir."',
+          lastOutcome: null,
+        };
+      }
+
+      collected = true;
+      const zoneId = sample?.zoneId || state.currentZoneId;
+      const islandLocation = getThreeIslandLocation(zoneId);
+      const specimen = specimenById(sample?.specimenId) || BASALT_SPECIMEN;
+      const outcome = sample?.outcome || {};
+      const sampleLabel = sample?.sampleLabel || specimen.name.toLowerCase();
+      const result = {
+        success: true,
+        reason: outcome.collectMessage || `You collect a ${sampleLabel} and wrap it for the specimen case.`,
+        outcomeType: outcome.condition || 'hammer_sample',
+        evidence: outcome.evidence || `hammer-collected ${sampleLabel}`,
+        damage: 0,
+        scoreDelta: outcome.scoreDelta ?? 2,
+        fatigueDelta: outcome.fatigueDelta ?? 1,
+      };
+      const entry = makeJournalEntry({
+        specimen,
+        tool: HAMMER_TOOL,
+        result,
+        documented: false,
+        location: islandLocation,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+      });
+
+      return {
+        supplies: {
+          ...state.supplies,
+          labels: Math.max(0, state.supplies.labels - 1),
+        },
+        fatigue: clamp(state.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
+        curiosity: clamp(state.curiosity + result.scoreDelta * 5, 0, MAX_CURIOSITY),
+        inventory: [
+          ...state.inventory,
+          {
+            ...specimen,
+            condition: result.outcomeType,
+            material: sample?.material || specimen.id,
+            sampleLabel,
+            quality: outcome.quality || 'field',
+            sourceRockKey,
+            sourceZoneId: zoneId,
+            sampledAt: sample?.position || null,
+          },
+        ],
+        journal: [...state.journal, entry],
+        collectedSpecimenIds: state.collectedSpecimenIds.includes(specimen.id)
+          ? state.collectedSpecimenIds
+          : [...state.collectedSpecimenIds, specimen.id],
+        sampledRockIds: [...state.sampledRockIds, sourceRockKey],
+        questComplete: true,
+        lastOutcome: { specimen, tool: HAMMER_TOOL, result, documented: false },
+        message: result.reason,
+        educationalNote: sample?.educationalNote || 'A hammer sample preserves a fresh fracture surface, which is often more useful than a weathered exterior.',
+        symsLine: outcome.symsLine || sample?.symsLine || `Syms wraps the ${sampleLabel}. "Best keep the locality clear on the label, sir."`,
+        ...(promptBelongsToSample ? { carryPrompt: null } : {}),
+      };
+    });
+
+    return collected;
+  },
+  recordHammerStrikeFeedback: feedback => set(state => ({
+    fatigue: clamp(state.fatigue + Math.max(0, feedback?.fatigueDelta || 0), 0, MAX_FATIGUE),
+    message: feedback?.message || state.message,
+    educationalNote: feedback?.educationalNote || state.educationalNote,
+    symsLine: feedback?.symsLine || state.symsLine,
+  })),
   movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId) => set(state => {
     const key = `${zoneId}:${obstacleId}`;
     const current = state.pushableObstacleOffsets[key] || { x: 0, z: 0 };

@@ -5,6 +5,8 @@ import { useThreeGameStore } from '../../store';
 import { getZoneProps } from './propRegistry';
 import { PhysicsProp } from './PhysicsProp';
 import { PropDebris } from './PropDebris';
+import { HammerImpactFX } from './HammerImpactFX';
+import { RockSampleSystem } from './RockSampleSystem';
 import { emitPropEvent } from './propEvents';
 
 // Mounts every physics prop registered for the current zone, owns the E-key
@@ -54,8 +56,6 @@ export function PhysicsProps() {
     if (state.carriedObjectId) setCarriedObject(null);
   }, [setCarriedObject, setCarryPrompt]);
 
-  if (!props.length && !debrisEvents.length) return null;
-
   return (
     <group userData={{
       renderSource: `physics-props:${currentZoneId}`,
@@ -63,6 +63,8 @@ export function PhysicsProps() {
       renderKind: 'physics-props',
       renderPath: null,
     }}>
+      <HammerImpactFX />
+      <RockSampleSystem />
       {props.map(prop => (
         <PhysicsProp key={prop.id} prop={prop} onBreak={handleBreak} />
       ))}

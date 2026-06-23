@@ -528,6 +528,93 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'scoria',
+    name: 'Red Scoria',
+    latin: 'Scoria rubra',
+    ontology: 'Mineral',
+    order: 'Igneous',
+    sub_order: 'Volcanic',
+    description: 'A rusty red volcanic fragment, light for its size and pocked by escaped gas bubbles.',
+    details: [
+      'Porous texture preserves the froth of gas-rich lava',
+      'Reddish color comes from oxidized iron minerals',
+      'Breaks into rough, sharp-edged chips under a hammer',
+      'Often found mixed with darker basalt rubble on dry volcanic slopes'
+    ],
+    habitat: 'lavafield, cliff, highland',
+    collected: false,
+    observations: [],
+    scientificValue: 5,
+    hybrid_ease: 2,
+    hybrid_temperature: 2,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/scoria.jpg',
+    memoryText: '“Some fragments are red as brick, filled throughout with cavities, as if the lava had boiled in place.”',
+    contents: 'A fresh break shows a reddish, vesicular interior with black mineral flecks and occasional glassy edges.',
+    keywords: ['scoria', 'red', 'volcanic', 'vesicular', 'iron', 'lava', 'porous']
+  },
+
+  {
+    id: 'tuff',
+    name: 'Volcanic Tuff',
+    latin: 'Tufum volcanicum',
+    ontology: 'Mineral',
+    order: 'Igneous',
+    sub_order: 'Pyroclastic',
+    description: 'A pale, compacted ash stone that flakes and powders more readily than dense basalt.',
+    details: [
+      'Formed from consolidated volcanic ash and small ejecta',
+      'Often tan, ochre, or gray rather than black',
+      'A hammer leaves a dusty pale fracture instead of a ringing chip',
+      'Layering can preserve evidence of successive eruptions'
+    ],
+    habitat: 'cliff, highland, coastalTrail',
+    collected: false,
+    observations: [],
+    scientificValue: 6,
+    hybrid_ease: 2,
+    hybrid_temperature: 2,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/tuff.jpg',
+    memoryText: '“The softer volcanic beds crumble beneath the hammer, their pale dust unlike the hard black lava below.”',
+    contents: 'Inside, the sample shows fine ash grains, small lithic fragments, and faint bedding planes.',
+    keywords: ['tuff', 'ash', 'volcanic', 'pyroclastic', 'pale', 'layered', 'soft']
+  },
+
+  {
+    id: 'ironoxidecrust',
+    name: 'Iron-stained Crust',
+    latin: 'Ferrugo oxidata',
+    ontology: 'Mineral',
+    order: 'Oxide',
+    sub_order: 'Weathering Product',
+    description: 'A thin rust-colored weathering crust where iron-rich minerals have oxidized near the surface.',
+    details: [
+      'Usually forms as a coating rather than a solid rock type',
+      'Color can range from ochre to deep reddish brown',
+      'A light hammer tap flakes the crust away from darker stone beneath',
+      'Useful as evidence of weathering, moisture, and mineral alteration'
+    ],
+    habitat: 'lavafield, shore, cliff',
+    collected: false,
+    observations: [],
+    scientificValue: 4,
+    hybrid_ease: 2,
+    hybrid_temperature: 2,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/ironoxidecrust.jpg',
+    memoryText: '“The red stain is no separate lava but a skin of weathering, marking where air and water have worked on the stone.”',
+    contents: 'A flake reveals a rusty outer surface and a darker, denser volcanic substrate beneath.',
+    keywords: ['iron', 'oxide', 'rust', 'weathering', 'crust', 'red', 'mineral']
+  },
+
+  {
     id: 'barnacle',
     name: 'Volcanic Shore Barnacle',
     latin: 'Megabalanus sp.',

@@ -1,14 +1,19 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
-import { stabilizeFoliageMaterial } from '../../assets/materialStability';
+import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 
 const dummy = new THREE.Object3D();
+
+// Leaves carry the alpha-cutout overdraw, so cull them at a fraction of the
+// trunk draw distance: far trees keep their silhouette but shed the expensive
+// foliage (the gap is covered by aerial haze). Tunable.
+const LEAF_LOD_FACTOR = 0.75;
 
 function layerCullBounds(items, maxVisibleDistance) {
   if (!Number.isFinite(maxVisibleDistance) || maxVisibleDistance <= 0 || !items.length) return null;
@@ -93,8 +98,8 @@ function applyTreeOptions(tree, variant, index) {
   set(options.leaves, 'alphaTest', variant.alphaTest, 0.42);
 }
 
-function cloneMaterial(material, geometry, variant, motion, isLeaf) {
-  const cloned = material.clone();
+function cloneMaterial(material, geometry, variant, motion, isLeaf, cheap) {
+  let cloned = material.clone();
   if (isLeaf) {
     cloned.color = new THREE.Color(variant.leafColor || '#899260');
     cloned.alphaTest = variant.alphaTest ?? 0.42;
@@ -111,12 +116,13 @@ function cloneMaterial(material, geometry, variant, motion, isLeaf) {
     cloned.color = new THREE.Color(variant.barkColor || '#7b684f');
     cloned.roughness = 0.9;
   }
+  if (cheap) cloned = toMattePhong(cloned);
   stabilizeFoliageMaterial(cloned, { doubleSide: isLeaf, forceCutout: isLeaf });
   if (motion) applyFoliageMotion(cloned, geometry, motion);
   return cloned;
 }
 
-function buildVariantPrimitives(ezTree, variant, variantIndex, motion) {
+function buildVariantPrimitives(ezTree, variant, variantIndex, motion, cheap) {
   const tree = new ezTree.Tree();
   applyTreeOptions(tree, variant, variantIndex);
   tree.generate();
@@ -128,10 +134,48 @@ function buildVariantPrimitives(ezTree, variant, variantIndex, motion) {
     geometry.applyMatrix4(object.matrixWorld);
     const isLeaf = object.name?.toLowerCase().includes('leaves') || object === tree.leavesMesh;
     const material = object.material.clone();
-    const finalMaterial = cloneMaterial(material, geometry, variant, motion, isLeaf);
-    primitives.push({ geometry, material: finalMaterial });
+    const finalMaterial = cloneMaterial(material, geometry, variant, motion, isLeaf, cheap);
+    primitives.push({ geometry, material: finalMaterial, isLeaf });
   });
   return primitives;
+}
+
+// One InstancedMesh for a (variant × primitive), placing its slice of items.
+function TreeInstancedMesh({
+  geometry, material, items, sink, slopeSink, castShadow, receiveShadow,
+  userData, inspectableType, onInspect,
+}) {
+  const setMesh = useCallback(mesh => {
+    if (!mesh) return;
+    items.forEach((item, index) => {
+      dummy.position.set(
+        item.x,
+        item.y - sink - (item.grade || 0) * item.scale * slopeSink,
+        item.z,
+      );
+      dummy.rotation.set(0, item.yaw, 0);
+      dummy.scale.set(item.scale, item.scale, item.scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(index, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere?.();
+    mesh.computeBoundingBox?.();
+  }, [items, sink, slopeSink]);
+
+  return (
+    <instancedMesh
+      ref={setMesh}
+      args={[geometry, material, items.length]}
+      castShadow={castShadow}
+      receiveShadow={receiveShadow}
+      userData={userData}
+      onClick={inspectableType ? event => {
+        event.stopPropagation();
+        onInspect(items[event.instanceId] || null, event.point);
+      } : undefined}
+    />
+  );
 }
 
 function disposePrimitives(variantPrimitives) {
@@ -158,6 +202,8 @@ export function InstancedEzTreeLayer({
   const groupRef = useRef(null);
   const [ezTree, setEzTree] = useState(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId,
     renderLabel: sourceLabel || sourceId,
@@ -195,7 +241,7 @@ export function InstancedEzTreeLayer({
         disposePrimitives(built);
         return;
       }
-      built.push(buildVariantPrimitives(ezTree, variants[built.length], built.length, motion));
+      built.push(buildVariantPrimitives(ezTree, variants[built.length], built.length, motion, cheapMaterials));
       if (built.length < variants.length) schedule(step);
       else setVariantPrimitives(built);
     };
@@ -203,58 +249,77 @@ export function InstancedEzTreeLayer({
     return () => {
       cancelled = true;
     };
-  }, [ezTree, items.length, variants, motion]);
+  }, [ezTree, items.length, variants, motion, cheapMaterials]);
 
   useLayoutEffect(() => () => {
     disposePrimitives(variantPrimitives);
   }, [variantPrimitives]);
 
-  const cullBounds = useMemo(() => layerCullBounds(items, maxVisibleDistance), [items, maxVisibleDistance]);
+  const effectiveDistance = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
+    ? maxVisibleDistance * foliageDrawScale
+    : maxVisibleDistance;
+  const cullBounds = useMemo(() => layerCullBounds(items, effectiveDistance), [items, effectiveDistance]);
+  const leafCullBounds = useMemo(() => layerCullBounds(
+    items,
+    Number.isFinite(effectiveDistance) && effectiveDistance > 0 ? effectiveDistance * LEAF_LOD_FACTOR : null,
+  ), [items, effectiveDistance]);
+  const leafGroupRef = useRef(null);
+
+  // Partition items across variants once (round-robin) instead of re-filtering
+  // for every variant primitive on every render.
+  const variantItemBuckets = useMemo(() => {
+    const count = variantPrimitives.length;
+    if (!count) return [];
+    const buckets = Array.from({ length: count }, () => []);
+    items.forEach((item, itemIndex) => buckets[itemIndex % count].push(item));
+    return buckets;
+  }, [items, variantPrimitives.length]);
+
+  const handleInspect = useCallback((item, point) => {
+    setInspectedObject(catalogToInspectable(inspectableType, point, { sourceId: item?.id || inspectableType }));
+  }, [inspectableType, setInspectedObject]);
 
   useFrame(({ camera }) => {
     const group = groupRef.current;
-    if (!group || !cullBounds) return;
-    group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
+    if (group && cullBounds) {
+      group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
+    }
+    const leafGroup = leafGroupRef.current;
+    if (leafGroup && leafCullBounds) {
+      leafGroup.visible = camera.position.distanceToSquared(leafCullBounds.center) <= leafCullBounds.visibleDistanceSq;
+    }
   });
 
   if (!variantPrimitives.length) return null;
 
+  const renderMeshes = wantLeaf => variantPrimitives.map((primitives, variantIndex) => {
+    const variantItems = variantItemBuckets[variantIndex] || [];
+    if (!variantItems.length) return null;
+    return primitives.map(({ geometry, material, isLeaf }, primitiveIndex) => (
+      isLeaf === wantLeaf ? (
+        <TreeInstancedMesh
+          key={`${variantIndex}-${primitiveIndex}`}
+          geometry={geometry}
+          material={material}
+          items={variantItems}
+          sink={sink}
+          slopeSink={slopeSink}
+          castShadow={castShadow}
+          receiveShadow={receiveShadow}
+          userData={meshUserData}
+          inspectableType={inspectableType}
+          onInspect={handleInspect}
+        />
+      ) : null
+    ));
+  });
+
   return (
     <group ref={groupRef} userData={renderUserData}>
-      {variantPrimitives.map((primitives, variantIndex) => {
-        const variantItems = items.filter((_, itemIndex) => itemIndex % variantPrimitives.length === variantIndex);
-        return primitives.map(({ geometry, material }, primitiveIndex) => (
-          <instancedMesh
-            key={`${variantIndex}-${primitiveIndex}`}
-            args={[geometry, material, variantItems.length]}
-            castShadow={castShadow}
-            receiveShadow={receiveShadow}
-            userData={meshUserData}
-            onClick={inspectableType ? event => {
-              event.stopPropagation();
-              const item = variantItems[event.instanceId] || null;
-              setInspectedObject(catalogToInspectable(inspectableType, event.point, { sourceId: item?.id || inspectableType }));
-            } : undefined}
-            ref={mesh => {
-              if (!mesh) return;
-              variantItems.forEach((item, index) => {
-                dummy.position.set(
-                  item.x,
-                  item.y - sink - (item.grade || 0) * item.scale * slopeSink,
-                  item.z,
-                );
-                dummy.rotation.set(0, item.yaw, 0);
-                dummy.scale.set(item.scale, item.scale, item.scale);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(index, dummy.matrix);
-              });
-              mesh.instanceMatrix.needsUpdate = true;
-              mesh.computeBoundingSphere?.();
-              mesh.computeBoundingBox?.();
-            }}
-          />
-        ));
-      })}
+      {renderMeshes(false)}
+      <group ref={leafGroupRef}>
+        {renderMeshes(true)}
+      </group>
     </group>
   );
 }

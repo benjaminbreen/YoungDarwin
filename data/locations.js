@@ -343,6 +343,19 @@ export const locations = [
     specimens: ['frigatebird','booby','seaLion'],
     specimenPlacements: [
       {
+        specimenId: 'frigatebird',
+        position: [-30, 0, -13.5],
+        behavior: 'wary',
+        sceneScale: 1.0,
+        habitatRadiusX: 10.5,
+        habitatRadiusZ: 4.8,
+        spawnScatter: {
+          radiusX: 8,
+          radiusZ: 2.8,
+          bounds: { minX: -43, maxX: -16, minZ: -19, maxZ: -6 },
+        },
+      },
+      {
         specimenId: 'lavalizard',
         position: [22.2, 0, -9.7],
         behavior: 'scurry',

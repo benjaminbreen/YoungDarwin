@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { terrainHeight } from '../../world/terrain';
+import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { useThreeGameStore } from '../../store';
+import { onPropEvent } from '../../physics/props/propEvents';
 
 function ProceduralCrewFigure({ motion = 0 }) {
   const coat = useMemo(() => addRimLight(toonMaterial('#25323a'), { intensity: 0.18 }), []);
@@ -45,11 +46,114 @@ export function SymsCovington() {
   const x = 4.0;
   const z = 7.0;
   const y = terrainHeight(x, z, currentZoneId) + 0.04;
+  const clockRef = useRef(0);
+  const reactionRef = useRef({
+    mode: 'idle',
+    until: 0,
+    offsetX: 0,
+    offsetZ: 0,
+    targetX: 0,
+    targetZ: 0,
+    pending: [],
+    lastLineAt: -Infinity,
+    lastPenaltyAt: -Infinity,
+  });
 
-  useFrame(({ clock }) => {
+  useEffect(() => onPropEvent('tool-swing', event => {
+    if (event.tool !== 'hammer') return;
+    reactionRef.current.pending.push({
+      ...event,
+      at: clockRef.current + (event.impactDelay ?? 0.55),
+    });
+  }), []);
+
+  useFrame(({ clock }, delta) => {
     if (!visible || !group.current) return;
     const time = clock.elapsedTime;
-    group.current.position.y = y + Math.sin(time * 1.4) * 0.015;
+    clockRef.current = time;
+    const reaction = reactionRef.current;
+
+    if (reaction.pending.length) {
+      const due = reaction.pending.filter(event => event.at <= time);
+      reaction.pending = reaction.pending.filter(event => event.at > time);
+      for (const event of due) {
+        const sx = x + reaction.offsetX;
+        const sz = z + reaction.offsetZ;
+        const dx = sx - (event.position?.x || 0);
+        const dz = sz - (event.position?.z || 0);
+        const distance = Math.hypot(dx, dz);
+        if (distance > 2.45) continue;
+        const facingLength = Math.hypot(event.facing?.x || 0, event.facing?.z || 0) || 1;
+        const toSymsLength = Math.max(0.001, distance);
+        const facingDot = ((event.facing?.x || 0) / facingLength) * (dx / toSymsLength)
+          + ((event.facing?.z || 0) / facingLength) * (dz / toSymsLength);
+        if (facingDot < 0.12 && distance > 1.15) continue;
+
+        const direct = distance < 1.18;
+        let awayX = dx / toSymsLength;
+        let awayZ = dz / toSymsLength;
+        if (Math.hypot(awayX, awayZ) < 0.001) {
+          awayX = -(event.facing?.x || 0);
+          awayZ = -(event.facing?.z || -1);
+        }
+        const awayLength = Math.hypot(awayX, awayZ) || 1;
+        awayX /= awayLength;
+        awayZ /= awayLength;
+
+        const retreatDistance = direct ? 7.2 : 2.6;
+        const safe = clampToWalkable({
+          x: sx + awayX * retreatDistance,
+          y: 0,
+          z: sz + awayZ * retreatDistance,
+        }, null, currentZoneId);
+        reaction.mode = direct ? 'flee' : 'flinch';
+        reaction.until = time + (direct ? 7.5 : 2.4);
+        reaction.targetX = safe.x - x;
+        reaction.targetZ = safe.z - z;
+
+        const store = useThreeGameStore.getState();
+        if (time - reaction.lastLineAt > 1.8) {
+          store.recordHammerStrikeFeedback?.({
+            message: direct
+              ? 'Syms bolts out of hammer reach, clutching the label book to his chest.'
+              : 'Syms hops back from the hammer swing and gives Darwin a wounded look.',
+            educationalNote: 'Field tools are useful only when handled carefully; reckless hammering can damage trust as well as specimens.',
+            symsLine: direct
+              ? '"Sir! I am your assistant, not a basalt outcrop!"'
+              : '"Careful with that hammer, sir."',
+            fatigueDelta: 0,
+          });
+          reaction.lastLineAt = time;
+        }
+        if (direct && time - reaction.lastPenaltyAt > 12) {
+          store.adjustLocalStanding?.(-3);
+          reaction.lastPenaltyAt = time;
+        }
+      }
+    }
+
+    const activeReaction = time < reaction.until;
+    if (!activeReaction) {
+      reaction.targetX = 0;
+      reaction.targetZ = 0;
+      reaction.mode = 'idle';
+    }
+    const returnRate = activeReaction ? (reaction.mode === 'flee' ? 5.5 : 8.0) : 0.18;
+    const damp = 1 - Math.exp(-Math.max(0.001, delta) * returnRate);
+    reaction.offsetX += (reaction.targetX - reaction.offsetX) * damp;
+    reaction.offsetZ += (reaction.targetZ - reaction.offsetZ) * damp;
+
+    const worldX = x + reaction.offsetX;
+    const worldZ = z + reaction.offsetZ;
+    const groundY = terrainHeight(worldX, worldZ, currentZoneId) + 0.04;
+    group.current.position.set(worldX, groundY + Math.sin(time * 1.4) * 0.015, worldZ);
+    if (activeReaction && Math.hypot(reaction.targetX - reaction.offsetX, reaction.targetZ - reaction.offsetZ) > 0.15) {
+      group.current.rotation.y = Math.atan2(reaction.targetX - reaction.offsetX, reaction.targetZ - reaction.offsetZ);
+      animationRef.current = reaction.mode === 'flee' ? 'gather' : 'lookAroundShort';
+      return;
+    }
+
+    group.current.rotation.y = Math.PI * 0.82;
     const cycle = time % 30;
     if (cycle > 25) animationRef.current = 'kneelInspect';
     else if (cycle > 20) animationRef.current = 'write';

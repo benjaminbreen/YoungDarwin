@@ -8,6 +8,7 @@ import { PROP_PALETTE } from './PropVisuals';
 
 const DEBRIS_LIFETIME = 22;
 const DEBRIS_FADE = 2.5;
+const DUST_LIFETIME = 0.85;
 
 // Hand-authored break patterns per debris kind. Each piece is a cuboid so
 // rapier gets cheap, stable colliders.
@@ -35,6 +36,58 @@ const DEBRIS_PIECES = {
     { size: [0.3, 0.22, 0.3], color: '#c9b98a', offset: [0, 0, 0], rotation: [0.3, 0.5, 0] },
   ],
 };
+
+function BreakDust({ origin, impactDir, kind }) {
+  const ageRef = useRef(0);
+  const color = kind === 'barrel' ? '#b58a55' : '#c2a174';
+  const material = useMemo(() => new THREE.PointsMaterial({
+    color,
+    size: 0.055,
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+  }), [color]);
+  const particles = useMemo(() => Array.from({ length: 20 }, (_, index) => {
+    const seed = ((index * 2654435761) % 1000) / 1000;
+    const angle = seed * Math.PI * 2;
+    const spread = 0.55 + ((index * 97) % 100) / 120;
+    return {
+      x: Math.cos(angle) * spread + impactDir.x * 0.72,
+      y: 0.28 + ((index * 53) % 100) / 100,
+      z: Math.sin(angle) * spread + impactDir.z * 0.72,
+    };
+  }), [impactDir.x, impactDir.z]);
+  const geometry = useMemo(() => {
+    const buffer = new THREE.BufferGeometry();
+    buffer.setAttribute('position', new THREE.BufferAttribute(new Float32Array(particles.length * 3), 3));
+    return buffer;
+  }, [particles.length]);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+
+  useFrame((_, delta) => {
+    ageRef.current += delta;
+    const age = Math.min(DUST_LIFETIME, ageRef.current);
+    const positions = geometry.attributes.position;
+    particles.forEach((velocity, index) => {
+      positions.setXYZ(
+        index,
+        origin.x + velocity.x * age,
+        origin.y + velocity.y * age - 0.9 * age * age,
+        origin.z + velocity.z * age,
+      );
+    });
+    positions.needsUpdate = true;
+    material.opacity = ageRef.current < DUST_LIFETIME
+      ? 0.42 * Math.pow(1 - ageRef.current / DUST_LIFETIME, 1.5)
+      : 0;
+  });
+
+  return <points geometry={geometry} material={material} />;
+}
 
 function DebrisPiece({ piece, origin, impactDir, seed }) {
   const bodyRef = useRef(null);
@@ -111,6 +164,7 @@ export function PropDebris({ event, onExpired }) {
 
   return (
     <group ref={groupRef} visible={opacity > 0.01}>
+      <BreakDust origin={event.position} impactDir={event.impactDir} kind={event.debris} />
       {pieces.map((piece, index) => (
         <DebrisPiece
           key={index}

@@ -1,26 +1,27 @@
 import { TERRAIN_BOUNDS } from '../../world/terrain';
+import { DARWIN5_CLIP_DURATIONS, darwin5ClipLockDuration } from './darwin5AnimationManifest.mjs';
 
 export const EMPTY_KEYS = {};
 
 export const PLAYER = {
   walkSpeed: 4.45,
   runSpeed: 7.45,
-  jumpVelocity: 6.8,
+  jumpVelocity: 7.05,
   gravity: 10.8,
-  groundAcceleration: 29,
-  groundDeceleration: 15,
-  lowSpeedTurnBoost: 1.6,
+  groundAcceleration: 38,
+  groundDeceleration: 22,
+  lowSpeedTurnBoost: 2.15,
   airAcceleration: 6.2,
   airDeceleration: 2.4,
-  turnDamping: 15,
-  coyoteTime: 0.16,
-  jumpBufferTime: 0.14,
-  runningJumpVerticalBonus: 0.65,
+  turnDamping: 20,
+  coyoteTime: 0.2,
+  jumpBufferTime: 0.16,
+  runningJumpVerticalBonus: 0.82,
   chargedJumpBonus: 2.25,
   jumpChargeStartDelay: 0.16,
   jumpChargeMaxDuration: 0.58,
-  fallGravityMultiplier: 1.18,
-  jumpReleaseGravityMultiplier: 1.85,
+  fallGravityMultiplier: 1.34,
+  jumpReleaseGravityMultiplier: 2.05,
   groundContactEpsilon: 0.11,
   groundSnapDistance: 0.62,
   uphillSpeedPenalty: 0.14,
@@ -154,27 +155,20 @@ export const ACTION_DURATION = {
 
 export const DARWIN5_ACTION_DURATION = {
   ...ACTION_DURATION,
-  climbingDownWall: 3.16,
-  climbingUpWall: 2.03,
-  fallingToLanding: 1.1,
-  hitReaction: 2.13,
-  kneelInspect: 4.96,
-  runToDive: 1.23,
-  runningSlide: 1.56,
-  runningTurn180: 0.7,
-  runningTurnLeft: 0.8,
-  runningTurnRight: 0.8,
-  shoulderHitAndFall: 3.13,
-  sprintToWallClimb: 1.83,
-  swimToEdge: 5.03,
-  swingHammer: 2.7,
-  swingNet: 2.7,
-  swingTool: 2.7,
+  ...DARWIN5_CLIP_DURATIONS,
 };
 
 export function actionDuration(clip, modelAssetId = null) {
   if (modelAssetId === 'darwin5') return DARWIN5_ACTION_DURATION[clip] || ACTION_DURATION[clip] || 1.2;
   return ACTION_DURATION[clip] || 1.2;
+}
+
+export function actionLockDuration(clip, modelAssetId = null, fallbackDuration = actionDuration(clip, modelAssetId)) {
+  if (modelAssetId === 'darwin5') {
+    const manifestLock = darwin5ClipLockDuration(clip);
+    if (Number.isFinite(manifestLock)) return Math.max(0, manifestLock);
+  }
+  return Math.max(0, fallbackDuration || 0);
 }
 
 export const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([

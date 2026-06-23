@@ -46,6 +46,52 @@ import {
   playerControllerDebugEnabled,
 } from './playerUtils';
 
+const BOULDER_WAIST_MAX_HEIGHT = 1.28;
+const BOULDER_HEAD_MAX_HEIGHT = 1.9;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+function inputWorldDirection(keys, touch, yaw, target = new THREE.Vector3()) {
+  target.set(
+    (keys.right || touch.right ? 1 : 0) - (keys.left || touch.left ? 1 : 0),
+    0,
+    (keys.backward || touch.backward ? 1 : 0) - (keys.forward || touch.forward ? 1 : 0),
+  );
+  if (target.lengthSq() <= 0.0001) return null;
+  return target.normalize().applyAxisAngle(WORLD_UP, yaw);
+}
+
+function boulderTraversalProfile(heightDelta, heroic, durationFor) {
+  if (heightDelta <= BOULDER_WAIST_MAX_HEIGHT) {
+    const actionDurationValue = durationFor('climbWaistHeight');
+    return {
+      clip: 'climbWaistHeight',
+      actionDuration: Math.min(actionDurationValue, heroic ? 0.62 : 0.72),
+      motionDuration: THREE.MathUtils.clamp(0.24 + heightDelta * (heroic ? 0.16 : 0.2), 0.34, 0.52),
+      arcHeight: THREE.MathUtils.clamp(0.08 + heightDelta * 0.08, 0.12, 0.2),
+      lockMovement: heroic ? 0.16 : 0.22,
+      exitSpeedScale: heroic ? 0.92 : 0.45,
+      crouching: false,
+      earlyExitAt: heroic ? 0.58 : 0.66,
+      cancelAt: heroic ? 0.42 : 0.52,
+    };
+  }
+  if (heightDelta <= BOULDER_HEAD_MAX_HEIGHT) {
+    const actionDurationValue = durationFor('climbHeadHeight');
+    return {
+      clip: 'climbHeadHeight',
+      actionDuration: Math.min(actionDurationValue, heroic ? 0.82 : 0.95),
+      motionDuration: THREE.MathUtils.clamp(0.36 + heightDelta * (heroic ? 0.18 : 0.22), 0.56, 0.78),
+      arcHeight: THREE.MathUtils.clamp(0.1 + heightDelta * 0.09, 0.2, 0.3),
+      lockMovement: heroic ? 0.24 : 0.34,
+      exitSpeedScale: heroic ? 0.76 : 0.32,
+      crouching: false,
+      earlyExitAt: heroic ? 0.64 : 0.72,
+      cancelAt: heroic ? 0.48 : 0.58,
+    };
+  }
+  return null;
+}
+
 export function PlayerController({ physicsDebug = false }) {
   const group = useRef(null);
   const warningRef = useRef(null);
@@ -116,6 +162,8 @@ export function PlayerController({ physicsDebug = false }) {
   const lastTurnFlourishAt = useRef(0);
   const lastAutoClimbAt = useRef(0);
   const lastCactusHitAt = useRef(-10);
+  const lastStepUpDustAt = useRef(-10);
+  const lastSkidDustAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
@@ -540,7 +588,10 @@ export function PlayerController({ physicsDebug = false }) {
       const climb = stateRef.current.climbMotion;
       const progress = THREE.MathUtils.clamp((now - climb.startedAt) / climb.duration, 0, 1);
       const eased = easeInOutCubic(progress);
-      const arc = Math.sin(Math.PI * progress) * Math.max(0.28, climb.heightDelta * 0.32);
+      const arcHeight = Number.isFinite(climb.arcHeight)
+        ? climb.arcHeight
+        : Math.max(0.28, climb.heightDelta * 0.32);
+      const arc = Math.sin(Math.PI * progress) * arcHeight;
       group.current.position.lerpVectors(climb.start, climb.end, eased);
       group.current.position.y += arc;
       characterController.sync(group.current.position);
@@ -551,12 +602,22 @@ export function PlayerController({ physicsDebug = false }) {
       stateRef.current.airborne = false;
       stateRef.current.strafeLeft = false;
       stateRef.current.strafeRight = false;
-      if (progress >= 1) {
+      const climbForward = frameScratch.forwardFacing.set(Math.sin(climb.targetYaw), 0, Math.cos(climb.targetYaw));
+      const climbInput = inputWorldDirection(keys, touch, yawRef.current, frameScratch.targetVelocity);
+      const climbInputDot = climbInput ? climbInput.dot(climbForward) : 0;
+      const climbCancelled = climbInput && Number.isFinite(climb.cancelAt) && progress >= climb.cancelAt && climbInputDot < -0.25;
+      const climbEarlyExit = Number.isFinite(climb.earlyExitAt) && progress >= climb.earlyExitAt && (!climbInput || climbInputDot >= -0.1);
+      if (progress >= 1 || climbCancelled || climbEarlyExit) {
         group.current.position.copy(climb.end);
         characterController.sync(group.current.position);
         stateRef.current.climbMotion = null;
         stateRef.current.action = null;
         stateRef.current.lockMovementUntil = 0;
+        if (climb.exitSpeed && !climbCancelled) {
+          const exitDirection = climbInput && climbInputDot > 0.2 ? climbInput : climbForward;
+          velocity.current.x = exitDirection.x * climb.exitSpeed;
+          velocity.current.z = exitDirection.z * climb.exitSpeed;
+        }
       }
       wasAirborne.current = false;
       return;
@@ -577,7 +638,12 @@ export function PlayerController({ physicsDebug = false }) {
       stateRef.current.crouching = traverse.crouching;
       stateRef.current.strafeLeft = false;
       stateRef.current.strafeRight = false;
-      if (progress >= 1) {
+      const traverseForward = frameScratch.forwardFacing.set(Math.sin(traverse.targetYaw), 0, Math.cos(traverse.targetYaw));
+      const traverseInput = inputWorldDirection(keys, touch, yawRef.current, frameScratch.targetVelocity);
+      const traverseInputDot = traverseInput ? traverseInput.dot(traverseForward) : 0;
+      const traverseCancelled = traverseInput && Number.isFinite(traverse.cancelAt) && progress >= traverse.cancelAt && traverseInputDot < -0.25;
+      const traverseEarlyExit = Number.isFinite(traverse.earlyExitAt) && progress >= traverse.earlyExitAt && (!traverseInput || traverseInputDot >= -0.1);
+      if (progress >= 1 || traverseCancelled || traverseEarlyExit) {
         const landingGround = collisionAdapter.groundInfo(traverse.end);
         group.current.position.copy(traverse.end);
         group.current.position.y = landingGround.y;
@@ -586,11 +652,12 @@ export function PlayerController({ physicsDebug = false }) {
         stateRef.current.action = null;
         stateRef.current.lockMovementUntil = 0;
         stateRef.current.crouching = false;
-        if (traverse.exitSpeed) {
+        if (traverse.exitSpeed && !traverseCancelled) {
           // Carry momentum out of the vault so it chains back into the run
           // instead of resetting to a standstill.
-          velocity.current.x = Math.sin(traverse.targetYaw) * traverse.exitSpeed;
-          velocity.current.z = Math.cos(traverse.targetYaw) * traverse.exitSpeed;
+          const exitDirection = traverseInput && traverseInputDot > 0.2 ? traverseInput : traverseForward;
+          velocity.current.x = exitDirection.x * traverse.exitSpeed;
+          velocity.current.z = exitDirection.z * traverse.exitSpeed;
         }
       }
       wasAirborne.current = false;
@@ -842,31 +909,49 @@ export function PlayerController({ physicsDebug = false }) {
       idleFidget.current.nextAt = 0;
     }
     if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
-      const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1) => {
+      const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1, options = {}) => {
         characterController.sync(group.current.position);
-        const climbDuration = durationFor(clip) * durationScale;
-        startAction(clip, climbDuration, { lockMovement: true });
+        const climbDuration = options.actionDuration ?? durationFor(clip) * durationScale;
+        startAction(clip, climbDuration, { lockMovement: options.lockMovement ?? true });
         stateRef.current.climbMotion = {
           start: group.current.position.clone(),
           end,
           heightDelta,
-          duration: climbDuration * 0.92,
+          duration: options.motionDuration ?? climbDuration * 0.92,
           startedAt: now,
           targetYaw,
+          arcHeight: options.arcHeight,
+          exitSpeed: options.exitSpeed || 0,
+          earlyExitAt: options.earlyExitAt,
+          cancelAt: options.cancelAt,
         };
         velocity.current.set(0, 0, 0);
       };
       const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
       if (target) {
-        const climbClip = running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.1
+        const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+        const heroic = running || approachSpeed > PLAYER.walkSpeed * 1.1;
+        const smallWallProfile = stateRef.current.modelAssetId === 'darwin5'
+          ? boulderTraversalProfile(target.heightDelta, heroic, durationFor)
+          : null;
+        const climbClip = heroic
           ? 'sprintToWallClimb'
           : 'climbingUpWall';
         beginClimbMotion(
-          climbClip,
+          smallWallProfile?.clip || climbClip,
           target.end,
           target.heightDelta,
           Math.atan2(target.obstacle.x - group.current.position.x, target.obstacle.z - group.current.position.z),
           target.heightDelta > 2.4 ? 1.35 : 1,
+          smallWallProfile ? {
+            actionDuration: smallWallProfile.actionDuration,
+            motionDuration: smallWallProfile.motionDuration,
+            arcHeight: smallWallProfile.arcHeight,
+            lockMovement: smallWallProfile.lockMovement,
+            exitSpeed: approachSpeed * smallWallProfile.exitSpeedScale,
+            earlyExitAt: smallWallProfile.earlyExitAt,
+            cancelAt: smallWallProfile.cancelAt,
+          } : {},
         );
       } else {
         // No climbable obstacle: scale terrain. A steep rise ahead becomes a
@@ -909,6 +994,19 @@ export function PlayerController({ physicsDebug = false }) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       if (previousSpeed > PLAYER.walkSpeed * 1.28) {
         startAction('runToStop', Math.min(0.55, ACTION_DURATION.runToStop), { lockMovement: false });
+        if (now - lastSkidDustAt.current > 0.22) {
+          lastSkidDustAt.current = now;
+          collisionDustTriggerRef.current?.({
+            intensity: THREE.MathUtils.clamp(previousSpeed / PLAYER.runSpeed, 0.45, 0.95),
+            position: frameScratch.footstepPosition.set(0, 0.06, -0.34),
+          });
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: 0.13,
+            duration: 0.16,
+            seed: cameraImpulse.current.seed + 1,
+          };
+        }
       }
     } else if (canPlayLocomotionFlourish && previousMotion.current.moving && !previousMotion.current.running && !wasAirborne.current) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -933,12 +1031,35 @@ export function PlayerController({ physicsDebug = false }) {
         && !stateRef.current.action
         && !stateRef.current.crouching
         && !stateRef.current.aiming
-        && reversalDot < -0.78
-        && currentSpeed > PLAYER.walkSpeed * 0.8
-        && now - lastTurnFlourishAt.current > 1.6) {
+        && reversalDot < -0.66
+        && currentSpeed > PLAYER.walkSpeed * 0.7
+        && now - lastTurnFlourishAt.current > 0.85) {
         lastTurnFlourishAt.current = now;
         const turnClip = currentSpeed > PLAYER.walkSpeed * 1.25 ? 'runningTurn180' : 'walkingTurn180';
-        startAction(turnClip, ACTION_DURATION[turnClip], { lockMovement: false });
+        startAction(turnClip, Math.min(durationFor(turnClip), currentSpeed > PLAYER.walkSpeed * 1.25 ? 0.38 : 0.32), { lockMovement: false });
+        const skidSpeed = THREE.MathUtils.clamp(currentSpeed * 0.58, PLAYER.walkSpeed * 0.85, PLAYER.runSpeed * 0.72);
+        velocity.current.x = input.x * skidSpeed;
+        velocity.current.z = input.z * skidSpeed;
+        if (now - lastSkidDustAt.current > 0.18) {
+          lastSkidDustAt.current = now;
+          collisionDustTriggerRef.current?.({
+            intensity: THREE.MathUtils.clamp(currentSpeed / PLAYER.runSpeed, 0.5, 1),
+            position: frameScratch.footstepPosition.set(0, 0.06, -0.28),
+          });
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: 0.16,
+            duration: 0.18,
+            seed: cameraImpulse.current.seed + 1,
+          };
+        }
+        facing.current.copy(input);
+        group.current.rotation.y = dampAngle(
+          group.current.rotation.y,
+          Math.atan2(input.x, input.z),
+          PLAYER.turnDamping * 2.4,
+          delta,
+        );
       } else if (!sidestepping
         && !airborneForControl
         && !stateRef.current.action
@@ -947,13 +1068,23 @@ export function PlayerController({ physicsDebug = false }) {
         && moving
         && running
         && reversalDot > -0.5
-        && reversalDot < 0.7
+        && reversalDot < 0.62
         && currentSpeed > PLAYER.walkSpeed * 1.25
-        && now - lastTurnFlourishAt.current > 1.2) {
+        && now - lastTurnFlourishAt.current > 0.75) {
         lastTurnFlourishAt.current = now;
         const crossY = normalizedFacing.z * input.x - normalizedFacing.x * input.z;
         const turnClip = crossY >= 0 ? 'runningTurnRight' : 'runningTurnLeft';
-        startAction(turnClip, durationFor(turnClip), { lockMovement: false });
+        startAction(turnClip, Math.min(durationFor(turnClip), 0.34), { lockMovement: false });
+        const carveSpeed = THREE.MathUtils.clamp(currentSpeed * 0.82, PLAYER.walkSpeed * 1.15, PLAYER.runSpeed * 0.92);
+        velocity.current.x = input.x * carveSpeed;
+        velocity.current.z = input.z * carveSpeed;
+        if (now - lastSkidDustAt.current > 0.18) {
+          lastSkidDustAt.current = now;
+          collisionDustTriggerRef.current?.({
+            intensity: THREE.MathUtils.clamp(currentSpeed / PLAYER.runSpeed * 0.75, 0.35, 0.78),
+            position: frameScratch.footstepPosition.set(crossY >= 0 ? -0.22 : 0.22, 0.06, -0.2),
+          });
+        }
       }
       facing.current.copy(sidestepping ? forwardFacing : input);
       const targetVelocity = frameScratch.targetVelocity.copy(input).multiplyScalar(movementSpeed);
@@ -1179,31 +1310,38 @@ export function PlayerController({ physicsDebug = false }) {
       && !stateRef.current.crouching
       && desiredDelta.lengthSq() > 0.0001;
     if (canAutoTraverse) {
+      const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       const traversalTarget = collisionAdapter.findTraversalTarget(group.current.position, desiredDelta, facing.current);
       if (traversalTarget) {
         characterController.sync(group.current.position);
         // Pick the traversal motion by approach speed and obstacle height:
-        // sprinting into a low obstacle reads as a vault, a taller one as a
-        // quick wall scramble; only a slow walk-up gets the cautious crouch.
-        const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+        // Darwin5 uses small-wall climb clips for boulders so ordinary rocks
+        // don't borrow the tall wall mantle. Older rigs keep the previous set.
         const heroic = running || approachSpeed > PLAYER.walkSpeed * 1.1;
+        const smallWallProfile = stateRef.current.modelAssetId === 'darwin5'
+          ? boulderTraversalProfile(traversalTarget.heightDelta, heroic, durationFor)
+          : null;
         const tall = traversalTarget.heightDelta > 1.05;
-        const clip = heroic ? (tall ? 'sprintToWallClimb' : 'vault') : 'crouchWalk';
-        const duration = heroic
+        const clip = smallWallProfile?.clip || (heroic ? (tall ? 'sprintToWallClimb' : 'vault') : 'crouchWalk');
+        const duration = smallWallProfile?.actionDuration || (heroic
           ? (tall ? ACTION_DURATION.sprintToWallClimb : ACTION_DURATION.vault)
-          : ACTION_DURATION.scramble;
-        startAction(clip, duration, { lockMovement: true });
+          : ACTION_DURATION.scramble);
+        startAction(clip, duration, { lockMovement: smallWallProfile?.lockMovement ?? true });
         stateRef.current.traverseMotion = {
           start: group.current.position.clone(),
           end: traversalTarget.end.clone(),
-          duration,
+          duration: smallWallProfile?.motionDuration || duration,
           startedAt: now,
           targetYaw: Math.atan2(traversalTarget.direction.x, traversalTarget.direction.z),
-          arcHeight: heroic
+          arcHeight: smallWallProfile?.arcHeight ?? (heroic
             ? THREE.MathUtils.clamp(0.2 + traversalTarget.heightDelta * 0.26, 0.26, 0.52)
-            : THREE.MathUtils.clamp(0.12 + traversalTarget.heightDelta * 0.18, 0.16, 0.34),
-          crouching: !heroic,
-          exitSpeed: heroic ? Math.max(approachSpeed * 0.85, PLAYER.walkSpeed) : 0,
+            : THREE.MathUtils.clamp(0.12 + traversalTarget.heightDelta * 0.18, 0.16, 0.34)),
+          crouching: smallWallProfile?.crouching ?? !heroic,
+          exitSpeed: smallWallProfile
+            ? Math.max(0, approachSpeed * smallWallProfile.exitSpeedScale)
+            : (heroic ? Math.max(approachSpeed * 0.85, PLAYER.walkSpeed) : 0),
+          earlyExitAt: smallWallProfile?.earlyExitAt,
+          cancelAt: smallWallProfile?.cancelAt,
         };
         velocity.current.set(0, 0, 0);
         stateRef.current.running = false;
@@ -1225,18 +1363,29 @@ export function PlayerController({ physicsDebug = false }) {
           if (surfaceGap < 0.55) {
             lastAutoClimbAt.current = now;
             characterController.sync(group.current.position);
-            const climbDuration = durationFor('sprintToWallClimb') * (climbTarget.heightDelta > 1.6 ? 1.25 : 1);
-            startAction('sprintToWallClimb', climbDuration, { lockMovement: true });
+            const smallWallProfile = stateRef.current.modelAssetId === 'darwin5'
+              ? boulderTraversalProfile(climbTarget.heightDelta, true, durationFor)
+              : null;
+            const climbClip = smallWallProfile?.clip || 'sprintToWallClimb';
+            const climbDuration = smallWallProfile?.actionDuration
+              || durationFor('sprintToWallClimb') * (climbTarget.heightDelta > 1.6 ? 1.25 : 1);
+            startAction(climbClip, climbDuration, { lockMovement: smallWallProfile?.lockMovement ?? true });
             stateRef.current.climbMotion = {
               start: group.current.position.clone(),
               end: climbTarget.end,
               heightDelta: climbTarget.heightDelta,
-              duration: climbDuration * 0.92,
+              duration: smallWallProfile?.motionDuration || climbDuration * 0.92,
               startedAt: now,
               targetYaw: Math.atan2(
                 climbTarget.obstacle.x - group.current.position.x,
                 climbTarget.obstacle.z - group.current.position.z,
               ),
+              arcHeight: smallWallProfile?.arcHeight,
+              exitSpeed: smallWallProfile
+                ? approachSpeed * smallWallProfile.exitSpeedScale
+                : Math.max(approachSpeed * 0.55, PLAYER.walkSpeed),
+              earlyExitAt: smallWallProfile?.earlyExitAt,
+              cancelAt: smallWallProfile?.cancelAt,
             };
             velocity.current.set(0, 0, 0);
             stateRef.current.running = false;
@@ -1382,7 +1531,7 @@ export function PlayerController({ physicsDebug = false }) {
         velocity.current.z = cactusContact.normal.z * shove;
         velocity.current.y = Math.max(velocity.current.y, 0.72);
         applyCactusDamage(cactusContact.cactus.damage || 8);
-        startAction('hitReaction', 0.78, { lockMovement: true });
+        startAction('stumble', durationFor('stumble'), { lockMovement: false });
         bounceFeedback.current.startedAt = now;
         bounceFeedback.current.lastImpactAt = now;
         bounceFeedback.current.intensity = 0.72;
@@ -1490,12 +1639,18 @@ export function PlayerController({ physicsDebug = false }) {
           0.95,
         );
         if (group.current.position.y < WATER_LEVEL + 0.02) {
+          const splashPosition = { x: group.current.position.x, y: WATER_LEVEL, z: group.current.position.z };
+          emitPropEvent('water-ripple', {
+            position: splashPosition,
+            intensity: Math.min(1, dustIntensity + 0.12),
+          });
           emitPropEvent('water-splash', {
-            position: { x: group.current.position.x, y: WATER_LEVEL, z: group.current.position.z },
+            position: splashPosition,
             intensity: Math.min(1, dustIntensity + 0.2),
           });
         } else {
-        landingDustTriggerRef.current?.({ intensity: dustIntensity });
+          const biome = terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId);
+          landingDustTriggerRef.current?.({ intensity: dustIntensity, biome });
         }
         if (falling > 7.2) {
           cameraImpulse.current = {
@@ -1513,22 +1668,28 @@ export function PlayerController({ physicsDebug = false }) {
       } else if (falling > 13.5 && !stateRef.current.action) {
         startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
       } else if (falling > 9.5 && landingSpeed > 3.6 && !stateRef.current.action) {
-        // Fast damaging landings dive through the impact and preserve most of
-        // the approach speed, so a long jump flows through the touchdown.
-        const rollDirection = new THREE.Vector3(velocity.current.x, 0, velocity.current.z).normalize();
-        const diveDuration = durationFor('runToDive');
-        startAction('runToDive', diveDuration, { lockMovement: true });
+        // Fast long landings roll through the impact. `runToDive` reads like a
+        // swim entry on dry ground, so reserve it for water and use the roll.
+        const rollDirection = new THREE.Vector3(velocity.current.x, 0, velocity.current.z);
+        if (rollDirection.lengthSq() < 0.0001) rollDirection.copy(facing.current);
+        rollDirection.setY(0).normalize();
+        const rollDuration = durationFor('fallingToRoll');
+        startAction('fallingToRoll', rollDuration, { lockMovement: 0.5 });
         stateRef.current.rollMotion = {
           start: group.current.position.clone(),
           direction: rollDirection,
-          distance: THREE.MathUtils.clamp(landingSpeed * 0.42, 1.5, 3.1),
-          duration: diveDuration,
+          distance: THREE.MathUtils.clamp(landingSpeed * 0.34, 1.25, 2.65),
+          duration: Math.min(rollDuration, 1.05),
           startedAt: now,
           targetYaw: Math.atan2(rollDirection.x, rollDirection.z),
-          exitSpeed: Math.min(landingSpeed * 0.7, PLAYER.runSpeed * 0.85),
+          exitSpeed: Math.min(landingSpeed * 0.62, PLAYER.runSpeed * 0.78),
         };
       } else if (falling > 9.5 && !stateRef.current.action) {
         startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
+      } else if (!intentionalPlayerJump && falling > 6.8 && !stateRef.current.action) {
+        startAction('bigJumpDown', durationFor('bigJumpDown'), { lockMovement: 0.38 });
+      } else if (!intentionalPlayerJump && falling > 3.8 && !stateRef.current.action) {
+        startAction('jumpDown', durationFor('jumpDown'), { lockMovement: 0.28 });
       } else if (falling > 2.4 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
         startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
       } else if (falling > 2.4 && !softStandingJumpLanding && !stateRef.current.action) {
@@ -1553,7 +1714,16 @@ export function PlayerController({ physicsDebug = false }) {
       !landed
       && (jumpState.current.phase === 'takeoff' || velocity.current.y > 0 || (!grounded && !characterMove.grounded))
     );
-    const edgeRisk = collisionAdapter.edgeRisk(group.current.position, facing.current);
+    const p = group.current.position;
+    const swim = swimState.current;
+    const swimGround = collisionAdapter.groundInfo(p);
+    const waterDepthHere = Math.max(0, WATER_LEVEL - swimGround.y);
+    frameScratch.pushCandidate.copy(p).addScaledVector(facing.current, 1.25);
+    const forwardWaterDepth = Math.max(0, WATER_LEVEL - collisionAdapter.groundInfo(frameScratch.pushCandidate).y);
+    const waterEntryAhead = waterDepthHere > 0.22 || forwardWaterDepth > SWIM.exitDepth;
+    const edgeRisk = (!swim.active && !wasAirborne.current && !waterEntryAhead)
+      ? collisionAdapter.edgeRisk(p, facing.current)
+      : null;
     if (edgeRisk && edgeRisk.intensity > 0.52 && moving && now - lastTeeterAt.current > 3.4 && !stateRef.current.action) {
       lastTeeterAt.current = now;
       if (edgeRisk.intensity > 0.72) startAction('teeter', 0.75, { lockMovement: false });
@@ -1561,13 +1731,9 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.z -= edgeRisk.direction.z * 0.42;
     }
 
-    const p = group.current.position;
     // Swimming: water deeper than SWIM.enterDepth floats Darwin instead of
     // drowning him. Wading in or falling in both transition to a swim state;
     // shallowing terrain transitions back out through the wade.
-    const swim = swimState.current;
-    const swimGround = collisionAdapter.groundInfo(p);
-    const waterDepthHere = Math.max(0, WATER_LEVEL - swimGround.y);
     if (!swim.active && health > 0) {
       const wadedIn = !wasAirborne.current && waterDepthHere > SWIM.enterDepth;
       const fellIn = wasAirborne.current && p.y <= WATER_LEVEL - 0.18 && waterDepthHere > SWIM.enterDepth;
@@ -1582,8 +1748,13 @@ export function PlayerController({ physicsDebug = false }) {
         stateRef.current.jumpPhase = 'grounded';
         if (fellIn) {
           startAction('fallingIntoPool', ACTION_DURATION.fallingIntoPool, { lockMovement: true });
+          const entryPosition = { x: p.x, y: WATER_LEVEL, z: p.z };
+          emitPropEvent('water-ripple', {
+            position: entryPosition,
+            intensity: 1,
+          });
           emitPropEvent('water-splash', {
-            position: { x: p.x, y: WATER_LEVEL, z: p.z },
+            position: entryPosition,
             intensity: 1,
           });
         }
@@ -1617,11 +1788,26 @@ export function PlayerController({ physicsDebug = false }) {
       velocity.current.x *= velocityKeep;
       velocity.current.z *= velocityKeep;
     }
+    const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     if (!swim.active && !wasAirborne.current && jumpState.current.phase !== 'takeoff') {
       const finalGroundInfo = collisionAdapter.groundInfo(p);
+      const groundLift = finalGroundInfo.y - p.y;
       p.y = finalGroundInfo.y;
       characterController.sync(p);
       velocity.current.y = 0;
+      if (
+        finalGroundInfo.source === 'authored-obstacle'
+        && groundLift > 0.08
+        && groundLift <= 0.7
+        && horizontalSpeed > 0.8
+        && now - lastStepUpDustAt.current > 0.28
+      ) {
+        lastStepUpDustAt.current = now;
+        footstepDustTriggerRef.current?.({
+          intensity: THREE.MathUtils.clamp(0.25 + groundLift * 0.75 + horizontalSpeed / 18, 0.28, 0.72),
+          position: frameScratch.footstepPosition.set(0, 0.06, 0.18),
+        });
+      }
     }
 
     updatePlayerInteractions({
@@ -1655,7 +1841,6 @@ export function PlayerController({ physicsDebug = false }) {
       delta,
     });
 
-    const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     stateRef.current.speed = horizontalSpeed;
     stateRef.current.slopeGrade = terrainFeedback.current.grade;
     stateRef.current.uphillDot = terrainFeedback.current.uphillDot;
@@ -1727,7 +1912,8 @@ export function PlayerController({ physicsDebug = false }) {
     }
     if (!stateRef.current.airborne && moving && horizontalSpeed > 0.85 && !jumpCharge.current.active) {
       if (wadeDepth.current > 0.05) {
-        // Wading: footfalls kick up splashes instead of dust.
+        // Wading: every footfall makes a ring; droplets are reserved for
+        // deeper, faster movement so shallow water stays understated.
         const cadence = (stateRef.current.running ? 3.1 : 2.1) * THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, 1.6);
         footstepDust.current.phase += delta * cadence;
         if (footstepDust.current.phase >= 1) {
@@ -1735,45 +1921,55 @@ export function PlayerController({ physicsDebug = false }) {
           footstepDust.current.side *= -1;
           const sideX = -facing.current.z * footstepDust.current.side * 0.18;
           const sideZ = facing.current.x * footstepDust.current.side * 0.18;
-          emitPropEvent('water-splash', {
-            position: {
-              x: p.x + sideX + facing.current.x * 0.22,
-              y: WATER_LEVEL,
-              z: p.z + sideZ + facing.current.z * 0.22,
-            },
-            intensity: THREE.MathUtils.clamp(
-              0.28 + horizontalSpeed / PLAYER.runSpeed * 0.3 + wadeDepth.current * 0.5,
-              0.3,
-              0.8,
-            ),
+          const ripplePosition = {
+            x: p.x + sideX + facing.current.x * 0.22,
+            y: WATER_LEVEL,
+            z: p.z + sideZ + facing.current.z * 0.22,
+          };
+          const rippleIntensity = THREE.MathUtils.clamp(
+            0.16 + horizontalSpeed / PLAYER.runSpeed * 0.28 + wadeDepth.current * 0.36,
+            0.18,
+            0.72,
+          );
+          emitPropEvent('water-ripple', {
+            position: ripplePosition,
+            intensity: rippleIntensity,
+            yaw: Math.atan2(facing.current.x, facing.current.z),
           });
+          if (stateRef.current.running || horizontalSpeed > PLAYER.walkSpeed * 1.18 || wadeDepth.current > 0.44) {
+            emitPropEvent('water-splash', {
+              position: ripplePosition,
+              intensity: THREE.MathUtils.clamp(rippleIntensity * 0.78, 0.24, 0.62),
+            });
+          }
         }
       } else {
-      const biome = terrainBiomeAt(p.x, p.z, p.y, currentZoneId);
-      const dustyBiome = biome === 'ash-slope'
-        || biome === 'black-lava'
-        || biome === 'tuff-ridge'
-        || biome === 'dry-scrub'
-        || biome === 'palo-santo'
-        || biome === 'wet-basalt';
-      if (dustyBiome) {
-        const cadence = (stateRef.current.running ? 3.9 : 2.45) * THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, 1.85);
-        footstepDust.current.phase += delta * cadence;
-        if (footstepDust.current.phase >= 1) {
-          footstepDust.current.phase -= 1;
-          footstepDust.current.side *= -1;
-          const wetScale = biome === 'wet-basalt' ? 0.32 : 1;
-          const stepIntensity = THREE.MathUtils.clamp(
-            (stateRef.current.running ? 0.36 : 0.22) * wetScale + horizontalSpeed / PLAYER.runSpeed * 0.18,
-            0.16,
-            0.62,
-          );
-          footstepDustTriggerRef.current?.({
-            intensity: stepIntensity,
-            position: frameScratch.footstepPosition.set(footstepDust.current.side * 0.18, 0.055, 0.18),
-          });
+        const biome = terrainBiomeAt(p.x, p.z, p.y, currentZoneId);
+        const dustyBiome = biome === 'ash-slope'
+          || biome === 'black-lava'
+          || biome === 'tuff-ridge'
+          || biome === 'dry-scrub'
+          || biome === 'palo-santo'
+          || biome === 'wet-basalt';
+        if (dustyBiome) {
+          const cadence = (stateRef.current.running ? 3.9 : 2.45) * THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, 1.85);
+          footstepDust.current.phase += delta * cadence;
+          if (footstepDust.current.phase >= 1) {
+            footstepDust.current.phase -= 1;
+            footstepDust.current.side *= -1;
+            const wetScale = biome === 'wet-basalt' ? 0.32 : 1;
+            const stepIntensity = THREE.MathUtils.clamp(
+              (stateRef.current.running ? 0.36 : 0.22) * wetScale + horizontalSpeed / PLAYER.runSpeed * 0.18,
+              0.16,
+              0.62,
+            );
+            footstepDustTriggerRef.current?.({
+              intensity: stepIntensity,
+              position: frameScratch.footstepPosition.set(footstepDust.current.side * 0.18, 0.055, 0.18),
+              biome,
+            });
+          }
         }
-      }
       }
     } else {
       footstepDust.current.phase = Math.min(footstepDust.current.phase, 0.35);

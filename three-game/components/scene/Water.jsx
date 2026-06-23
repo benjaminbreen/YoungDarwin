@@ -272,6 +272,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uSun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       uSunColor: { value: new THREE.Color('#fff3da') },
       uDaylight: { value: 1 },
+      uSunPathStrength: { value: 0 },
       uRain: { value: 0 },
       // Screen-space refraction source (framebuffer grab taken just before
       // the water mesh draws — one copy, no scene re-render).
@@ -335,6 +336,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform vec3 uSun;
       uniform vec3 uSunColor;
       uniform float uDaylight;
+      uniform float uSunPathStrength;
       uniform float uRain;
       uniform float uSize;
       uniform sampler2D uSeafloor;
@@ -500,9 +502,19 @@ function createStylizedWaterMaterial(seafloorTexture) {
 
         // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
-        float spec = pow(max(dot(normal, hv), 0.0), 240.0) * uDaylight;
+        float spec = pow(max(dot(normal, hv), 0.0), mix(240.0, 150.0, uSunPathStrength)) * uDaylight;
         float glint = 0.6 + 0.8 * smoothstep(0.45, 0.85, noise(vWorld.xz * 5.2 + uTime * 0.6));
-        color += uSunColor * min(spec * glint, 1.0) * 0.85 * (1.0 - uRain * 0.72);
+        vec2 sunPathDir = normalize(uSun.xz + vec2(0.0001, 0.0001));
+        vec2 toWater = normalize(vWorld.xz - cameraPosition.xz + vec2(0.0001, 0.0001));
+        float alongSun = smoothstep(0.02, 0.42, dot(toWater, sunPathDir));
+        float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
+        float path = smoothstep(0.34, 0.035, crossSun) * alongSun;
+        float pathCamDist = length(vWorld.xz - cameraPosition.xz);
+        float pathDistance = smoothstep(8.0, 30.0, pathCamDist) * (1.0 - smoothstep(138.0, 180.0, pathCamDist));
+        float pathGrain = 0.45 + 0.75 * smoothstep(0.35, 0.84, noise(vWorld.xz * 2.35 + vec2(uTime * 0.16, -uTime * 0.09)));
+        float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
+        color += uSunColor * min(spec * glint, 1.0) * (0.85 + uSunPathStrength * 0.42) * (1.0 - uRain * 0.72);
+        color += uSunColor * pathGlitter * 0.32 * (1.0 - uRain * 0.82);
         color = mix(color, color * vec3(0.70, 0.82, 0.86), uRain * 0.18);
 
         // --- foam: crisp lip at the moving waterline + breaking crests --------
@@ -558,6 +570,7 @@ function createDeepOceanMaterial() {
       sun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       sunColor: { value: new THREE.Color('#fff3da') },
       daylight: { value: 1 },
+      sunPathStrength: { value: 0 },
     },
     vertexShader: `
       varying vec3 vWorld;
@@ -578,6 +591,7 @@ function createDeepOceanMaterial() {
       uniform vec3 sun;
       uniform vec3 sunColor;
       uniform float daylight;
+      uniform float sunPathStrength;
       varying vec3 vWorld;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
@@ -610,11 +624,18 @@ function createDeepOceanMaterial() {
         vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y) * vec3(1.6, 1.0, 1.6));
         vec3 viewDir = normalize(camPos - vWorld);
         vec3 hv = normalize(normalize(sun) + viewDir);
-        float spec = pow(max(dot(normal, hv), 0.0), 320.0) * daylight;
+        float spec = pow(max(dot(normal, hv), 0.0), mix(320.0, 185.0, sunPathStrength)) * daylight;
+        vec2 sunPathDir = normalize(sun.xz + vec2(0.0001, 0.0001));
+        vec2 toWater = normalize(vWorld.xz - camPos.xz + vec2(0.0001, 0.0001));
+        float alongSun = smoothstep(0.03, 0.42, dot(toWater, sunPathDir));
+        float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
+        float path = smoothstep(0.28, 0.025, crossSun) * alongSun;
+        float pathSparkle = 0.5 + 0.65 * smoothstep(0.36, 0.8, noise(vWorld.xz * 1.15 + vec2(time * 0.08, -time * 0.05)));
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
-        color += sunColor * min(spec, 1.0) * 0.9 * (1.0 - fog * 0.85);
+        color += sunColor * min(spec, 1.0) * (0.9 + sunPathStrength * 0.36) * (1.0 - fog * 0.85);
+        color += sunColor * path * pathSparkle * sunPathStrength * 0.18 * (1.0 - fog * 0.92);
 
         color = mix(color, fogColor, fog);
         gl_FragColor = vec4(color, 1.0);
@@ -862,8 +883,13 @@ export function Water({ quality = 'performance', reflections = true }) {
     wu.uTime.value = t;
     wu.uSun.value.copy(_sun);
     wu.uRain.value = weatherEnv.rainIntensity;
-    const daylight = skyState(time, store.day || 1).daylight;
+    const sky = skyState(time, store.day || 1);
+    const daylight = sky.daylight;
+    const lowSun = THREE.MathUtils.smoothstep(sky.elevation, 0.0, 0.18)
+      * (1 - THREE.MathUtils.smoothstep(sky.elevation, 0.34, 0.72));
+    const sunPathStrength = daylight * lowSun * (1 - weatherEnv.rainIntensity * 0.72) * (1 - weatherEnv.overcast * 0.55);
     wu.uDaylight.value = daylight;
+    wu.uSunPathStrength.value = sunPathStrength;
     wu.uSand.value.copy(WATER_NIGHT.sand).lerp(WATER_DAY.sand, daylight);
     wu.uScatter.value.copy(WATER_NIGHT.scatter).lerp(WATER_DAY.scatter, daylight);
     wu.uDeep.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight);
@@ -891,6 +917,7 @@ export function Water({ quality = 'performance', reflections = true }) {
       du.sun.value.copy(_sun);
       du.sunColor.value.copy(wu.uSunColor.value);
       du.daylight.value = wu.uDaylight.value;
+      du.sunPathStrength.value = sunPathStrength;
       du.shallow.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight);
       du.deep.value.copy(WATER_NIGHT.openDeep).lerp(WATER_DAY.openDeep, daylight);
       if (scene.fog) du.fogColor.value.copy(wu.uHaze.value);

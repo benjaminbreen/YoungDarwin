@@ -93,13 +93,13 @@ export const modelAssets = {
     enabled: true,
     preload: false,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-water-polish-20260622',
+    cacheKey: 'darwin5-small-wall-climb-roll-20260622',
     // Darwin 5 test pass: native Mixamo clips plus carry/rifle/climb sets.
     // The runtime idle is the skinless 41-bone Mixamo clip from
     // assets-src/darwin/animations/states/darwin5-idle-new.fbx, transplanted
     // by matching identical Darwin5 bone names. Darwin5 crouch/traversal,
-    // water-entry/exit, tool, hit, inspect, slide, and running turn clips are
-    // likewise native 41-bone skinless clips.
+    // water-entry/exit, right-hand held-tool, small-wall climb, fieldwork, rest, fall, get-up, vault, strafe,
+    // trip, jump-down, and running turn clips are likewise native 41-bone skinless clips.
     scale: 1.0,
     rotation: [0, 0, 0],
     yOffset: 0.08,
@@ -224,6 +224,21 @@ export const modelAssets = {
     targetTriangles: 6500,
     prompt: 'Game-ready Galapagos flightless cormorant, compact dark coastal bird, small wings, sturdy legs, procedural walk animation clip, optimized GLB.',
   },
+  frigatebird: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/magnificent-frigatebird.glb',
+    cacheKey: 'frigatebird-rest-pose-run-20260623',
+    scale: 1.35,
+    rotation: [0, Math.PI, 0],
+    yOffset: 0.03,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#0d1112',
+    materialEmissiveIntensity: 0.08,
+    targetTriangles: 5000,
+    prompt: 'Game-ready Magnificent Frigatebird, black Galapagos seabird with forked tail and red gular pouch, simple procedural walk and run clips, optimized GLB.',
+  },
   greenTurtle: {
     enabled: true,
     preload: false,
@@ -315,6 +330,20 @@ export const modelAssets = {
     materialEmissiveIntensity: 0.04,
     targetTriangles: 11321,
     prompt: 'Optimized Galapagos candelabra cactus, Jasminocereus style dry-zone columnar cactus for sparse arid coastal Floreana scrub.',
+  },
+  barnacle: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-barnacle-cluster.glb',
+    scale: 0.42,
+    rotation: [0, 0, 0],
+    yOffset: 0.01,
+    normalizeMaterials: true,
+    materialLift: 0.08,
+    materialEmissive: '#201811',
+    materialEmissiveIntensity: 0.05,
+    targetTriangles: 5000,
+    prompt: 'Game-ready Galapagos volcanic shore barnacle cluster attached to intertidal basalt, compact pale shell plates, optimized GLB specimen prop.',
   },
   basalt: {
     enabled: false,

@@ -124,6 +124,7 @@ function ObstacleProps() {
           sourceLabel={obstacle.id}
           sourceKind={`obstacle-${obstacle.kind || 'prop'}`}
           motion={obstacle.kind === 'tree' ? TREE_MOTION : null}
+          contactShadow={(obstacle.kind === 'tree' ? 1.1 : 0.85) * (typeof obstacle.scale === 'number' ? obstacle.scale : 1)}
         />
       ))}
     </group>

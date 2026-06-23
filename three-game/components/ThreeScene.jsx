@@ -6,6 +6,7 @@ import { Atmosphere } from './scene/Atmosphere';
 import { Lighting } from './scene/Lighting';
 import { SkyController } from './scene/SkyController';
 import { Water } from './scene/Water';
+import { GroundedWorldFX } from './scene/GroundedWorldFX';
 import { WeatherDirector } from './scene/weather/WeatherDirector';
 import { Rain } from './scene/weather/Rain';
 import { MistBanks } from './scene/weather/MistBanks';
@@ -44,6 +45,12 @@ export function ThreeScene({ perfSettings, deferredContentReady = true }) {
         <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
         <PlayerController physicsDebug={settings.physicsDebug === true} />
       </PhysicsProvider>
+      {deferredContentReady && (
+        <GroundedWorldFX
+          enabled={settings.worldDetails !== false}
+          waterRipples={settings.water !== false && settings.waterSplashes !== false}
+        />
+      )}
     </>
   );
 }
