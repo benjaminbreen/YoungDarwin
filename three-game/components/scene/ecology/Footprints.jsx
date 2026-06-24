@@ -4,7 +4,7 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { terrainHeight, terrainBiomeAt } from '../../../world/terrain';
-import { getRuntimePlayerPose } from '../../../store';
+import { getRuntimeFootContacts, getRuntimePlayerPose } from '../../../store';
 
 // A ring buffer of fading footprint decals stamped under the player's stride
 // on soft ground. One instanced draw call; prints fade over ~42 seconds.
@@ -14,7 +14,7 @@ const dummy = new THREE.Object3D();
 
 export function Footprints({ zoneId, biomes }) {
   const meshRef = useRef(null);
-  const state = useRef({ lastX: null, lastZ: null, side: 1, cursor: 0 });
+  const state = useRef({ lastX: null, lastZ: null, side: 1, cursor: 0, lastStepId: 0 });
   const biomeSet = useMemo(() => new Set(biomes), [biomes]);
 
   const { geometry, material, births } = useMemo(() => {
@@ -63,6 +63,25 @@ export function Footprints({ zoneId, biomes }) {
     const { x, z } = pose.position || {};
     if (x === undefined) return;
     const s = state.current;
+    const step = getRuntimeFootContacts().lastStep;
+    if (step?.id > s.lastStepId) {
+      s.lastStepId = step.id;
+      if (!biomeSet.has(terrainBiomeAt(step.x, step.z, step.y, zoneId))) return;
+      const facing = pose.facing || { x: 0, z: -1 };
+      const yaw = Math.atan2(facing.x, facing.z);
+      dummy.position.set(step.x, terrainHeight(step.x, step.z, zoneId) + 0.016, step.z);
+      dummy.rotation.set(0, yaw + (step.side === 'left' ? -0.04 : 0.04), 0);
+      dummy.scale.setScalar(0.86 + THREE.MathUtils.clamp(step.intensity || 0, 0, 1) * 0.28);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(s.cursor, dummy.matrix);
+      births[s.cursor] = clock.elapsedTime;
+      geometry.attributes.aBirth.needsUpdate = true;
+      mesh.instanceMatrix.needsUpdate = true;
+      s.cursor = (s.cursor + 1) % FOOTPRINT_COUNT;
+      s.lastX = x;
+      s.lastZ = z;
+      return;
+    }
     if (s.lastX === null) { s.lastX = x; s.lastZ = z; return; }
     if (Math.hypot(x - s.lastX, z - s.lastZ) < 0.78) return;
     s.lastX = x;

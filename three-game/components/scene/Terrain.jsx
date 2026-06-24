@@ -12,6 +12,9 @@ import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = -0.9;
+const WET_SAND_TINT = new THREE.Color('#7e9487');
+const WET_ROCK_TINT = new THREE.Color('#172d30');
+const WET_SCRUB_TINT = new THREE.Color('#536a55');
 
 // ---------------------------------------------------------------------------
 // Seabed caustics — the dancing light net on submerged sand. Lives in the
@@ -120,12 +123,29 @@ export function Terrain() {
       const grain = terrainSurfaceNoise(x * 2.7, z * 2.7);
       if (biome === 'black-lava' || biome === 'wet-basalt') c.offsetHSL(0, -0.03, grain * 0.045);
       if (biome === 'tuff-ridge' || biome === 'ash-slope') c.offsetHSL(0.015, -0.02, grain * 0.035);
-      // Damp shore band: darken (and smooth) the ground toward the waterline so
-      // the coast reads wet where the tide washes, like the reference beach.
-      const wet = 1 - THREE.MathUtils.smoothstep(y, WATER_SURFACE_Y - 0.3, WATER_SURFACE_Y + 0.8);
-      if (wet > 0 && biome !== 'water') c.multiplyScalar(1 - wet * 0.42);
+      // Damp shore band: keep the old cheap height-based mask, but treat beach
+      // sand and basalt differently so the boundary reads as wet ground rather
+      // than a generic dark outline.
+      const submergedWet = y <= WATER_SURFACE_Y
+        ? 1 - THREE.MathUtils.smoothstep(y, WATER_SURFACE_Y - 0.55, WATER_SURFACE_Y + 0.02)
+        : 0;
+      const exposedDamp = y > WATER_SURFACE_Y
+        ? 1 - THREE.MathUtils.smoothstep(y, WATER_SURFACE_Y + 0.03, WATER_SURFACE_Y + 0.62)
+        : 0;
+      const wet = THREE.MathUtils.clamp(Math.max(submergedWet * 0.62, exposedDamp), 0, 1);
+      if (wet > 0 && biome !== 'water') {
+        const rockWet = biome === 'wet-basalt' || biome === 'black-lava';
+        const beachWet = biome === 'green-beach' || biome === 'olivine-trail' || biome === 'trail';
+        c.multiplyScalar(1 - wet * (rockWet ? 0.34 : beachWet ? 0.22 : 0.16));
+        if (rockWet) c.lerp(WET_ROCK_TINT, wet * 0.2);
+        else if (beachWet) c.lerp(WET_SAND_TINT, wet * 0.18);
+        else c.lerp(WET_SCRUB_TINT, wet * 0.08);
+      }
       colors.push(c.r, c.g, c.b);
-      roughness.push(biome === 'wet-basalt' || wet > 0.5 ? 0.6 : 0.96);
+      const wetRoughness = biome === 'wet-basalt' || biome === 'black-lava'
+        ? THREE.MathUtils.lerp(0.9, 0.5, wet)
+        : THREE.MathUtils.lerp(0.96, 0.72, wet);
+      roughness.push(wet > 0 ? wetRoughness : 0.96);
     }
 
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -185,16 +205,18 @@ export function Terrain() {
 function buildSkirtGeometry(regionId) {
   const config = getRegionTerrainConfig(regionId);
   const openHints = getRegionEdgeHints(regionId).filter(hint => hint.kind === 'open');
-  const stripDepth = 22;
-  const steps = 18;
+  const stripDepth = 12;
+  const steps = 26;
+  const rows = 4;
   const positions = [];
   const colors = [];
   const indices = [];
   const addVertex = (x, z, fade) => {
     const sampleX = THREE.MathUtils.clamp(x, -config.width / 2, config.width / 2);
     const sampleZ = THREE.MathUtils.clamp(z, -config.depth / 2, config.depth / 2);
-    const y = terrainHeight(sampleX, sampleZ, regionId) - fade * 2.4;
-    const color = terrainColor(sampleX, sampleZ, y, regionId).multiplyScalar(1 - fade * 0.48);
+    const edgeY = terrainHeight(sampleX, sampleZ, regionId);
+    const y = edgeY - fade * fade * 1.15;
+    const color = terrainColor(sampleX, sampleZ, edgeY, regionId).multiplyScalar(1 - fade * 0.16);
     positions.push(x, y, z);
     colors.push(color.r, color.g, color.b);
   };
@@ -205,8 +227,8 @@ function buildSkirtGeometry(regionId) {
       const t = i / steps;
       const xBase = -config.width / 2 + t * config.width;
       const zBase = -config.depth / 2 + t * config.depth;
-      for (let j = 0; j <= 1; j += 1) {
-        const fade = j;
+      for (let j = 0; j <= rows; j += 1) {
+        const fade = j / rows;
         if (alongX) {
           const z = edge === 'north' ? -config.depth / 2 - stripDepth * fade : config.depth / 2 + stripDepth * fade;
           addVertex(xBase, z, fade);
@@ -217,8 +239,11 @@ function buildSkirtGeometry(regionId) {
       }
     }
     for (let i = 0; i < steps; i += 1) {
-      const a = startIndex + i * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      for (let j = 0; j < rows; j += 1) {
+        const stride = rows + 1;
+        const a = startIndex + i * stride + j;
+        indices.push(a, a + 1, a + stride, a + 1, a + stride + 1, a + stride);
+      }
     }
   };
   const addCorner = edge => {
@@ -227,14 +252,22 @@ function buildSkirtGeometry(regionId) {
     const south = edge.includes('south');
     const baseX = east ? config.width / 2 : -config.width / 2;
     const baseZ = south ? config.depth / 2 : -config.depth / 2;
-    for (let iz = 0; iz <= 1; iz += 1) {
-      for (let ix = 0; ix <= 1; ix += 1) {
-        const x = baseX + (east ? 1 : -1) * stripDepth * ix;
-        const z = baseZ + (south ? 1 : -1) * stripDepth * iz;
-        addVertex(x, z, Math.max(ix, iz));
+    for (let iz = 0; iz <= rows; iz += 1) {
+      for (let ix = 0; ix <= rows; ix += 1) {
+        const fx = ix / rows;
+        const fz = iz / rows;
+        const x = baseX + (east ? 1 : -1) * stripDepth * fx;
+        const z = baseZ + (south ? 1 : -1) * stripDepth * fz;
+        addVertex(x, z, Math.max(fx, fz));
       }
     }
-    indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex + 1, startIndex + 3, startIndex + 2);
+    const stride = rows + 1;
+    for (let iz = 0; iz < rows; iz += 1) {
+      for (let ix = 0; ix < rows; ix += 1) {
+        const a = startIndex + iz * stride + ix;
+        indices.push(a, a + 1, a + stride, a + 1, a + stride + 1, a + stride);
+      }
+    }
   };
   openHints
     .filter(hint => ['north', 'south', 'east', 'west'].includes(hint.edge))

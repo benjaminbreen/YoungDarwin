@@ -10,7 +10,7 @@ import {
   terrainSlopeAt,
 } from '../../../world/terrain';
 import { seededRandom } from '../../../world/scatter';
-import { getRuntimePlayerPose } from '../../../store';
+import { getRuntimeFootContacts, getRuntimePlayerPose } from '../../../store';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
 
 const TRAIL_COUNT = 8;
@@ -364,6 +364,7 @@ export function GroundCoverField({ layer, zoneId }) {
   const lastTrailPoint = useRef(new THREE.Vector3(0, OFFSCREEN_Y, 0));
   const trailIndex = useRef(0);
   const trailTimer = useRef(0);
+  const lastFootStepId = useRef(0);
   const effectiveLayer = useMemo(() => ({ ...layer, zoneId: layer.zoneId || zoneId }), [layer, zoneId]);
   const geometry = useMemo(() => makeGroundCoverGeometry(effectiveLayer), [effectiveLayer]);
   const material = useMemo(() => makeGroundCoverMaterial(effectiveLayer, trail.current), [effectiveLayer]);
@@ -382,6 +383,18 @@ export function GroundCoverField({ layer, zoneId }) {
     uniforms.uWindSpeed.value = weatherEnv.foliageWindSpeed;
     if (position) {
       uniforms.uPlayerPosition.value.set(position.x || 0, position.y || 0, position.z || 0);
+      const step = getRuntimeFootContacts().lastStep;
+      if (step?.id > lastFootStepId.current) {
+        lastFootStepId.current = step.id;
+        trailIndex.current = (trailIndex.current + 1) % TRAIL_COUNT;
+        trail.current[trailIndex.current].set(
+          Number(step.x) || 0,
+          Number(step.y) || 0,
+          Number(step.z) || 0,
+          1.35 + THREE.MathUtils.clamp(step.intensity || 0, 0, 1) * 0.55,
+        );
+        lastTrailPoint.current.set(Number(step.x) || 0, Number(step.y) || 0, Number(step.z) || 0);
+      }
       trailTimer.current += delta;
       const x = Number(position.x) || 0;
       const y = Number(position.y) || 0;

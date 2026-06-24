@@ -370,7 +370,7 @@ export function InventoryModal({ open, onClose }) {
       onClick={onClose}
       onKeyDown={event => event.stopPropagation()}
     >
-      <ExpeditionPanel className="max-h-full w-[min(58rem,100%)] overflow-y-auto" innerClassName="p-3 sm:p-5">
+      <ExpeditionPanel variant="modal" className="max-h-full w-[min(58rem,100%)] overflow-y-auto" innerClassName="p-3 sm:p-5">
         <div onClick={event => event.stopPropagation()}>
           <div className="relative text-center">
             <h2 className="font-expedition text-[22px] font-semibold uppercase tracking-[0.18em] text-expedition-parchment">

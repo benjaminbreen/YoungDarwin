@@ -8,13 +8,15 @@ import { getPostOfficeBayBasaltBlocks, getPostOfficeBayOpuntiaHazards, makeFlore
 import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
-import { POST_OFFICE_BAY_TRAIL, terrainHeight } from '../../world/terrain';
+import { terrainHeight } from '../../world/terrain';
 import { getModelAsset } from '../../modelAssets';
 import { getEcology } from '../../world/ecology';
 import { catalogToInspectable } from '../../world/inspectables';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
 import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 import { applyFoliageMotion, updateFoliageUniforms } from './ecology/foliageMotion';
+import { DryGrassPatchField } from './ecology/DryGrassPatchField';
+import { buildPostOfficeBayDryGrassLayer } from '../../world/ecology/postOfficeBay';
 
 const dummy = new THREE.Object3D();
 const GRASS_MOTION = { wind: 1.25, bend: 0.45, bendRadius: 1.25 };
@@ -438,72 +440,11 @@ function GalapagosCottonLayer() {
   );
 }
 
-function TrailHints() {
-  const material = useMemo(() => new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    uniforms: {
-      colorA: { value: new THREE.Color('#c79a55') },
-      colorB: { value: new THREE.Color('#e0c37a') },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 colorA;
-      uniform vec3 colorB;
-      varying vec2 vUv;
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-      }
-      float noise(vec2 p) {
-        vec2 i = floor(p);
-        vec2 f = fract(p);
-        vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-      }
-      void main() {
-        float center = 1.0 - smoothstep(0.18, 0.50, abs(vUv.y - 0.5));
-        float endFade = smoothstep(0.0, 0.16, vUv.x) * (1.0 - smoothstep(0.84, 1.0, vUv.x));
-        float breakup = noise(vUv * vec2(28.0, 5.0));
-        float alpha = center * endFade * (0.18 + breakup * 0.16);
-        vec3 color = mix(colorA, colorB, noise(vUv * vec2(9.0, 2.0)));
-        gl_FragColor = vec4(color, alpha);
-      }
-    `,
-  }), []);
-  const points = useMemo(() => POST_OFFICE_BAY_TRAIL.slice(0, -1).map(([x, z], index) => {
-    const [nextX, nextZ] = POST_OFFICE_BAY_TRAIL[index + 1];
-    const dx = nextX - x;
-    const dz = nextZ - z;
-    const length = Math.hypot(dx, dz);
-    return [
-      x + dx * 0.5,
-      z + dz * 0.5,
-        Math.max(4.8, length * 0.9),
-        -Math.atan2(dz, dx),
-      ];
-  }), []);
-  return (
-    <group>
-      {points.map(([x, z, length, yaw], index) => (
-        <mesh key={index} position={[x, terrainHeight(x, z) + 0.055, z]} rotation={[-Math.PI / 2, 0, yaw]} scale={[length, 1.65, 1]} material={material}>
-          <planeGeometry args={[1, 1]} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 // Post Office Bay keeps its original hand-tuned scatter (predates the ecology
 // registry; migrating it is tracked work). Every other authored zone renders
 // through three-game/world/ecology/.
 function PostOfficeBayDetails() {
+  const dryGrassLayer = useMemo(() => buildPostOfficeBayDryGrassLayer(), []);
   return (
     <group>
       <ObstacleProps />
@@ -515,7 +456,7 @@ function PostOfficeBayDetails() {
       <OpuntiaLayer />
       <GalapagosCottonLayer />
       <AssetVegetationLayer />
-      <TrailHints />
+      <DryGrassPatchField layer={dryGrassLayer} />
     </group>
   );
 }

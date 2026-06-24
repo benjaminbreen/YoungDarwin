@@ -405,7 +405,7 @@ export function DarwinAnimationDevPanel({ open, onClose }) {
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-[70] bg-black/58 p-3 backdrop-blur-sm">
-      <ExpeditionPanel className="mx-auto flex h-full max-w-[92rem] flex-col" innerClassName="flex h-full flex-col p-4">
+      <ExpeditionPanel variant="modal" className="mx-auto flex h-full max-w-[92rem] flex-col" innerClassName="flex h-full flex-col p-4">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className={GOLD_LABEL}>Darwin Animation Lab</div>

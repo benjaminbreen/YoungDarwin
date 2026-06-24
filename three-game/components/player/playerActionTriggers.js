@@ -21,8 +21,8 @@ export function triggerDirectPlayerActions({
       });
     },
   });
-  triggerAction('net', 'swingNet', ACTION_DURATION.swingNet, actionOptions);
-  triggerAction('gather', 'gather', ACTION_DURATION.gather, actionOptions);
+  triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, actionOptions);
+  triggerAction('gather', 'gatherGround', ACTION_DURATION.gatherGround, actionOptions);
   triggerAction('write', 'write', ACTION_DURATION.write, { ...actionOptions, lockMovement: true });
   triggerAction('inspect', 'kneelInspect', ACTION_DURATION.kneelInspect, { ...actionOptions, lockMovement: true });
   triggerAction('lookAround', 'lookAround', ACTION_DURATION.lookAround, actionOptions);

@@ -57,8 +57,9 @@ const AUTHORED_REGION_TERRAIN = {
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
   W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
+  EL_MIRADOR: { preset: 'el-mirador-red-dirt-ridge', segments: 320 },
   MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
-  GRASS_TEST: { preset: 'grass-test-field', segments: 220 },
+  GRASS_TEST: { preset: 'grass-test-field', segments: 300 },
   GRASS_HYBRID_TEST: { preset: 'grass-hybrid-test-field', segments: 240 },
   CORMORANT_BAY_SPLAT_TEST: { preset: 'cormorant-bay-splat-test', segments: 300 },
   CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
@@ -199,6 +200,7 @@ function normalizeSpawn(seedSpawn, zoneId = '') {
     return null;
   }
   return {
+    instanceId: typeof seedSpawn.instanceId === 'string' ? seedSpawn.instanceId : (typeof seedSpawn.id === 'string' ? seedSpawn.id : null),
     specimenId,
     position: [rawPosition[0], rawPosition[1] || 0, rawPosition[2]],
     behavior: typeof seedSpawn.behavior === 'string' ? seedSpawn.behavior : 'still',
@@ -222,6 +224,7 @@ function makeSpecimenSpawns(cell, terrain) {
         .filter(id => id && id !== 'unknown')
         .slice(0, 8)
         .map((specimenId, index) => ({
+          instanceId: `${specimenId}-fallback-${index}`,
           specimenId,
           position: deterministicPoint(seed + specimenId.length * 17, index + curated.length, terrain.width, terrain.depth),
           behavior: index % 3 === 0 ? 'curious' : 'still',
@@ -238,6 +241,7 @@ function makeSpecimenSpawns(cell, terrain) {
     .filter(id => id && id !== 'unknown')
     .slice(0, 8)
     .map((specimenId, index) => ({
+      instanceId: `${specimenId}-fallback-${index}`,
       specimenId,
       position: deterministicPoint(seed, index, terrain.width, terrain.depth),
       behavior: index % 3 === 0 ? 'curious' : 'still',

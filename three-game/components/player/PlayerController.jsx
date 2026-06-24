@@ -11,7 +11,7 @@ import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
-import { emitPropEvent } from '../../physics/props/propEvents';
+import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
 import {
   CHARACTER_CONTROLLER_CONFIG,
@@ -48,6 +48,9 @@ import {
 
 const BOULDER_WAIST_MAX_HEIGHT = 1.28;
 const BOULDER_HEAD_MAX_HEIGHT = 1.9;
+const PUSH_ANIMATION_COOLDOWN = 0.42;
+const PUSH_ANIMATION_MIN_SPEED = 0.85;
+const PUSH_ANIMATION_MIN_FORWARD = 0.42;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 function inputWorldDirection(keys, touch, yaw, target = new THREE.Vector3()) {
@@ -89,7 +92,27 @@ function boulderTraversalProfile(heightDelta, heroic, durationFor) {
       cancelAt: heroic ? 0.48 : 0.58,
     };
   }
-  return null;
+  const actionDurationValue = durationFor('climbingUpWall');
+  return {
+    clip: 'climbingUpWall',
+    actionDuration: Math.min(actionDurationValue, THREE.MathUtils.clamp(0.82 + heightDelta * 0.22, 1.18, 1.62)),
+    motionDuration: THREE.MathUtils.clamp(0.72 + heightDelta * 0.22, 1.05, 1.58),
+    arcHeight: THREE.MathUtils.clamp(0.12 + heightDelta * 0.05, 0.2, 0.34),
+    lockMovement: heroic ? 0.34 : 0.48,
+    exitSpeedScale: heroic ? 0.38 : 0.16,
+    crouching: false,
+    earlyExitAt: heroic ? 0.7 : 0.78,
+    cancelAt: heroic ? 0.52 : 0.62,
+  };
+}
+
+function pushAnimationForObstacle(obstacle) {
+  if (!obstacle) return 'pushMedium';
+  const top = Number.isFinite(obstacle.colliderTop) ? obstacle.colliderTop : obstacle.height;
+  const mass = obstacle.pushMass || 1;
+  if (obstacle.kind === 'boulder' || obstacle.kind === 'cliff' || obstacle.kind === 'wall' || top >= 1.35 || mass >= 60) return 'pushHeavy';
+  if (top >= 0.72 || obstacle.height >= 0.78 || mass >= 8) return 'pushMedium';
+  return 'pushLow';
 }
 
 export function PlayerController({ physicsDebug = false }) {
@@ -161,6 +184,8 @@ export function PlayerController({ physicsDebug = false }) {
   const lastWallRunAt = useRef(0);
   const lastTurnFlourishAt = useRef(0);
   const lastAutoClimbAt = useRef(0);
+  const lastPushAnimationAt = useRef(-10);
+  const latestPropPushContact = useRef(null);
   const lastCactusHitAt = useRef(-10);
   const lastStepUpDustAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
@@ -356,6 +381,13 @@ export function PlayerController({ physicsDebug = false }) {
     waterlineMaterial.dispose();
   }, [waterlineMaterial]);
 
+  useEffect(() => onPropEvent('player-push-contact', contact => {
+    latestPropPushContact.current = {
+      ...contact,
+      receivedAt: performance.now() / 1000,
+    };
+  }), []);
+
   const queueMovementCost = useCallback(({
     running = false,
     walking = false,
@@ -477,6 +509,14 @@ export function PlayerController({ physicsDebug = false }) {
     );
     const startAction = (clip, duration = durationFor(clip), options = {}) => {
       startActionAt(now, clip, resolveActionDuration(clip, duration), options);
+    };
+    const startPushFeedback = (target, options = {}) => {
+      if (!target || stateRef.current.airborne || stateRef.current.swimming) return false;
+      if (stateRef.current.action || now - lastPushAnimationAt.current < PUSH_ANIMATION_COOLDOWN) return false;
+      const clip = pushAnimationForObstacle(target);
+      startAction(clip, ACTION_DURATION[clip], { lockMovement: options.lockMovement ?? false });
+      lastPushAnimationAt.current = now;
+      return true;
     };
     const interruptAction = (allowed = MOVEMENT_INTERRUPTIBLE_ACTIONS) => interruptActionAt(now, allowed);
     const triggerAction = (button, clip, duration = durationFor(clip), options = {}) => {
@@ -746,6 +786,19 @@ export function PlayerController({ physicsDebug = false }) {
       anyDirectActionPressed,
       lateralOnlyInput,
     } = readPlayerInput(keys, touch, frameScratch.input);
+    const propPushContact = latestPropPushContact.current;
+    if (
+      moving
+      && propPushContact
+      && now - propPushContact.receivedAt < 0.24
+    ) {
+      startPushFeedback({
+        kind: propPushContact.fixed ? 'wall' : propPushContact.kind,
+        height: propPushContact.height,
+        colliderTop: propPushContact.height,
+        pushMass: propPushContact.mass,
+      });
+    }
     const preInputMovementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
     if (crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action && !swimState.current.active) {
       const slideSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -1461,6 +1514,14 @@ export function PlayerController({ physicsDebug = false }) {
       }
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
+      if (impactSpeed >= PUSH_ANIMATION_MIN_SPEED && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
+        startPushFeedback(collision.obstacle || {
+          kind: 'wall',
+          height: 1.6,
+          colliderTop: 1.6,
+          pushMass: 20,
+        });
+      }
       const canReact = now - bounceFeedback.current.lastImpactAt >= BUMP_FEEDBACK.cooldown;
       if (directImpact && canReact) {
         const intensity = THREE.MathUtils.clamp(
@@ -1491,6 +1552,7 @@ export function PlayerController({ physicsDebug = false }) {
           const clamped = collisionAdapter.clampToWalkable(candidate, currentObstaclePosition);
           if (clamped.distanceTo(candidate) < 0.08) {
             movePushableObstacle(pushable.id, pushDelta, pushable.zoneId);
+            startPushFeedback(pushable);
             velocity.current.x *= 0.78;
             velocity.current.z *= 0.78;
           }
@@ -1784,6 +1846,22 @@ export function PlayerController({ physicsDebug = false }) {
       p.copy(clamped);
       characterController.sync(p);
       const correctionDistance = Math.hypot(correction.x, correction.z);
+      if (moving && desiredDelta.lengthSq() > 0.0001 && correctionDistance > 0.055) {
+        const attempted = frameScratch.pushDirection.copy(desiredDelta).setY(0);
+        const pushedBack = frameScratch.collisionNormal.copy(correction).setY(0);
+        if (attempted.lengthSq() > 0.0001 && pushedBack.lengthSq() > 0.0001) {
+          attempted.normalize();
+          pushedBack.normalize();
+          if (attempted.dot(pushedBack) < -0.35) {
+            startPushFeedback({
+              kind: 'cliff',
+              height: 1.7,
+              colliderTop: 1.7,
+              pushMass: 24,
+            });
+          }
+        }
+      }
       const velocityKeep = correctionDistance < 0.65 ? 0.72 : 0.35;
       velocity.current.x *= velocityKeep;
       velocity.current.z *= velocityKeep;

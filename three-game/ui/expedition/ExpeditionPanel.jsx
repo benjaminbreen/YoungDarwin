@@ -16,12 +16,33 @@ export const GOLD_BUTTON =
 export const GOLD_BUTTON_SOLID =
   'rounded-sm border border-expedition-gold bg-expedition-gold px-3 py-1.5 text-xs font-bold tracking-[0.08em] text-expedition-ink transition hover:bg-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-goldbright';
 
+const PANEL_VARIANTS = {
+  hud: {
+    ornate: true,
+    border: 'border-expedition-brass/75',
+    shadow: 'shadow-[0_16px_38px_rgba(0,0,0,0.40),inset_0_1px_0_rgba(227,197,133,0.15)]',
+    background: 'linear-gradient(165deg, rgba(27,37,48,0.70), rgba(20,28,38,0.74) 58%, rgba(11,16,23,0.80))',
+  },
+  objective: {
+    ornate: false,
+    border: 'border-expedition-brass/45',
+    shadow: 'shadow-[0_9px_24px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(227,197,133,0.10)]',
+    background: 'linear-gradient(165deg, rgba(27,37,48,0.40), rgba(20,28,38,0.44) 58%, rgba(11,16,23,0.54))',
+  },
+  modal: {
+    ornate: true,
+    border: 'border-expedition-brass/80',
+    shadow: 'shadow-[0_18px_46px_rgba(0,0,0,0.52),inset_0_1px_0_rgba(227,197,133,0.20)]',
+    background: 'linear-gradient(165deg, rgba(27,37,48,0.84), rgba(20,28,38,0.88) 58%, rgba(11,16,23,0.94))',
+  },
+};
+
 function CornerOrnament({ className }) {
   return (
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
-      className={`pointer-events-none absolute h-4 w-4 text-expedition-gold/90 ${className}`}
+      className={`pointer-events-none absolute h-4 w-4 text-expedition-gold/75 ${className}`}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.6"
@@ -33,20 +54,36 @@ function CornerOrnament({ className }) {
   );
 }
 
-export function ExpeditionPanel({ className = '', innerClassName = '', children, interactive = true }) {
+export function ExpeditionPanel({
+  className = '',
+  innerClassName = '',
+  children,
+  interactive = true,
+  variant = 'hud',
+  ornate,
+  background,
+}) {
+  const panelVariant = PANEL_VARIANTS[variant] || PANEL_VARIANTS.hud;
+  const showOrnaments = ornate ?? panelVariant.ornate;
+  const panelBackground = background || panelVariant.background;
+
   return (
     <div
-      className={`${interactive ? 'pointer-events-auto' : 'pointer-events-none'} relative rounded-md border border-expedition-brass/80 ${PANEL_BG} ${PANEL_TEXT} shadow-[0_16px_38px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(227,197,133,0.18)] ${className}`}
+      className={`${interactive ? 'pointer-events-auto' : 'pointer-events-none'} relative rounded-md border ${panelVariant.border} ${PANEL_BG} ${PANEL_TEXT} ${panelVariant.shadow} ${className}`}
       style={{
-        background: 'linear-gradient(165deg, rgba(27,37,48,0.80), rgba(20,28,38,0.84) 58%, rgba(11,16,23,0.90))',
+        background: panelBackground,
       }}
     >
-      {/* inner hairline keeps the brass frame reading as bevelled metal */}
-      <div className={`pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/25`} />
-      <CornerOrnament className="left-[1px] top-[1px]" />
-      <CornerOrnament className="right-[1px] top-[1px] rotate-90" />
-      <CornerOrnament className="bottom-[1px] right-[1px] rotate-180" />
-      <CornerOrnament className="bottom-[1px] left-[1px] -rotate-90" />
+      {showOrnaments && (
+        <>
+          {/* inner hairline keeps the brass frame reading as bevelled metal */}
+          <div className={`pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/25`} />
+          <CornerOrnament className="left-[1px] top-[1px]" />
+          <CornerOrnament className="right-[1px] top-[1px] rotate-90" />
+          <CornerOrnament className="bottom-[1px] right-[1px] rotate-180" />
+          <CornerOrnament className="bottom-[1px] left-[1px] -rotate-90" />
+        </>
+      )}
       <div className={`relative ${innerClassName}`}>{children}</div>
     </div>
   );

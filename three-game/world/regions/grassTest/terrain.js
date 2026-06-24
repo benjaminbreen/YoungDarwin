@@ -6,12 +6,12 @@ export const GRASS_TEST = 'GRASS_TEST';
 
 export function grassTestHeight(x, z, { movementSurface = false } = {}) {
   const broad = elevationNoise(x * 0.028 + 4.2, z * 0.03 - 8.5) * 0.78;
-  const roll = Math.sin(x * 0.075 + z * 0.035) * 0.18 + Math.sin(z * 0.066 - 1.4) * 0.14;
+  const roll = Math.sin(x * 0.075 + z * 0.035) * 0.16 + Math.sin(z * 0.066 - 1.4) * 0.12;
   const edge = Math.max(Math.abs(x) / 38, Math.abs(z) / 38);
   const rim = Math.max(0, edge - 0.66) * 1.25;
   const fine = movementSurface ? terrainFineDetail(x, z) * 0.035 : terrainFineDetail(x, z) * 0.22;
   const path = grassTestPathInfo(x, z);
-  const compacted = path.tread * 0.11 + path.center * 0.055;
+  const compacted = path.tread * 0.085 + path.center * 0.045;
   return 0.36 + broad + roll + rim + fine - compacted;
 }
 
@@ -30,19 +30,19 @@ export function grassTestColor(x, z, y) {
   const path = grassTestPathInfo(x, z);
   const broad = terrainSurfaceNoise(x * 0.42 + 3.0, z * 0.42 - 6.0) * 0.5 + 0.5;
   const fine = terrainSurfaceNoise(x * 2.2 - 9.0, z * 2.0 + 4.0) * 0.5 + 0.5;
-  const color = new THREE.Color('#3f6034');
-  color.lerp(new THREE.Color('#6f823f'), broad * 0.28);
-  color.lerp(new THREE.Color('#263f25'), (1 - broad) * 0.22);
-  color.lerp(new THREE.Color('#817d45'), fine * 0.08);
-  if (biome === 'lush-hollow') color.lerp(new THREE.Color('#3f7241'), 0.3);
-  if (biome === 'meadow-rise') color.lerp(new THREE.Color('#777646'), 0.18);
-  if (biome === 'path-shoulder') color.lerp(new THREE.Color('#665f36'), 0.34 + path.shoulder * 0.32);
+  const color = new THREE.Color('#566b36');
+  color.lerp(new THREE.Color('#8d8750'), broad * 0.34);
+  color.lerp(new THREE.Color('#344627'), (1 - broad) * 0.18);
+  color.lerp(new THREE.Color('#b3a060'), fine * 0.1);
+  if (biome === 'lush-hollow') color.lerp(new THREE.Color('#5d7b42'), 0.24);
+  if (biome === 'meadow-rise') color.lerp(new THREE.Color('#9a8d56'), 0.22);
+  if (biome === 'path-shoulder') color.lerp(new THREE.Color('#80734f'), 0.38 + path.shoulder * 0.28);
   if (biome === 'dirt-path') {
-    color.lerp(new THREE.Color('#6f2d17'), 0.72 + path.center * 0.16);
-    color.lerp(new THREE.Color('#28120b'), path.center * 0.34);
-    color.lerp(new THREE.Color('#b45728'), fine * 0.14);
+    color.lerp(new THREE.Color('#b2763c'), 0.66 + path.center * 0.12);
+    color.lerp(new THREE.Color('#6f3b1d'), path.center * 0.16);
+    color.lerp(new THREE.Color('#d7b776'), fine * 0.12);
   }
-  color.multiplyScalar(0.82 + fine * 0.12);
+  color.multiplyScalar(0.86 + fine * 0.12);
   return color;
 }
 

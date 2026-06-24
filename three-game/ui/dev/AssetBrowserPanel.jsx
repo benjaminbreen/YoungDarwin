@@ -184,7 +184,7 @@ export function AssetBrowserPanel({ open, onClose }) {
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
-      <ExpeditionPanel className="w-[min(58rem,calc(100vw-2rem))]" innerClassName="p-4">
+      <ExpeditionPanel variant="modal" className="w-[min(58rem,calc(100vw-2rem))]" innerClassName="p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className={GOLD_LABEL}>Asset Browser (dev)</div>

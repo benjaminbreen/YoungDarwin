@@ -9,6 +9,7 @@ export const modelAssets = {
     scale: 1.56,
     rotation: [0, 0, 0],
     yOffset: 0,
+    visualGrounding: true,
     normalizeMaterials: true,
     materialLift: 0.12,
     materialEmissive: '#20170f',
@@ -28,6 +29,7 @@ export const modelAssets = {
     scale: 1,
     rotation: [0, 0, 0],
     yOffset: 0,
+    visualGrounding: true,
     normalizeMaterials: true,
     materialLift: 0.1,
     materialEmissive: '#20170f',
@@ -52,6 +54,7 @@ export const modelAssets = {
     scale: 1.0,
     rotation: [0, 0, 0],
     yOffset: 0,
+    visualGrounding: true,
     normalizeMaterials: true,
     // Tripo albedo is already warm/graded; no cream lift, softer emissive, and
     // a higher roughness + gentler rim so the (lighter) skin doesn't blow out.
@@ -72,12 +75,13 @@ export const modelAssets = {
     scale: 1.0,
     rotation: [0, 0, 0],
     yOffset: 0,
+    visualGrounding: true,
     normalizeMaterials: true,
-    materialLift: 0.06,
+    materialLift: 0.025,
     materialEmissive: '#20170f',
     // Match darwin5: drop the self-lit emissive glow at night, lower roughness +
     // add envMap sheen so cloth/leather read as material, not flat "velvet".
-    materialEmissiveIntensity: 0.08,
+    materialEmissiveIntensity: 0.035,
     // toneMapped:true — test running the player through ACES like the world. Flip
     // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
     // Sidecar maps (scripts/build-darwin-roughness.mjs + build-darwin-detail.mjs):
@@ -93,7 +97,7 @@ export const modelAssets = {
     enabled: true,
     preload: false,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-small-wall-climb-roll-20260622',
+    cacheKey: 'darwin5-height-aware-gather-push-20260623',
     // Darwin 5 test pass: native Mixamo clips plus carry/rifle/climb sets.
     // The runtime idle is the skinless 41-bone Mixamo clip from
     // assets-src/darwin/animations/states/darwin5-idle-new.fbx, transplanted
@@ -102,7 +106,8 @@ export const modelAssets = {
     // trip, jump-down, and running turn clips are likewise native 41-bone skinless clips.
     scale: 1.0,
     rotation: [0, 0, 0],
-    yOffset: 0.08,
+    yOffset: 0,
+    visualGrounding: true,
     normalizeMaterials: true,
     materialLift: 0.06,
     materialEmissive: '#20170f',
@@ -114,7 +119,7 @@ export const modelAssets = {
     // tune: higher = glossier + brighter fill; lower = subtler. See ModelAsset.jsx.
     // toneMapped:true — test running the player through ACES like the world. Flip
     // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.15, roughness: 0.6, envMapIntensity: 0.3, toneMapped: true },
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.8, rimIntensity: 0.08, roughness: 0.72, envMapIntensity: 0.16, toneMapped: true },
     targetTriangles: 60000,
     prompt: 'Darwin candidate 5, Mixamo-rigged test model with supplied idle, walking, and running animation clips.',
   },
@@ -161,10 +166,12 @@ export const modelAssets = {
   lavalizard: {
     enabled: true,
     path: '/assets/models/animals/runtime/floreana-lava-lizard.glb',
+    cacheKey: 'floreana-lava-lizard-double-side-20260623',
     scale: 0.88,
     rotation: [0, Math.PI, 0],
     yOffset: 0.02,
     normalizeMaterials: true,
+    doubleSide: true,
     materialLift: 0.03,
     materialEmissive: '#14130f',
     materialEmissiveIntensity: 0.07,
@@ -238,6 +245,22 @@ export const modelAssets = {
     materialEmissiveIntensity: 0.08,
     targetTriangles: 5000,
     prompt: 'Game-ready Magnificent Frigatebird, black Galapagos seabird with forked tail and red gular pouch, simple procedural walk and run clips, optimized GLB.',
+  },
+  blueFootedBooby: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/blue-footed-booby.glb',
+    cacheKey: 'blue-footed-booby-double-side-20260623',
+    scale: 1.18,
+    rotation: [0, Math.PI, 0],
+    yOffset: 0.03,
+    normalizeMaterials: true,
+    doubleSide: true,
+    materialLift: 0.035,
+    materialEmissive: '#141413',
+    materialEmissiveIntensity: 0.07,
+    targetTriangles: 5000,
+    prompt: 'Game-ready Blue-footed Booby, brown and white Galapagos seabird with blue feet, idle walk and run clips with wing flapping, optimized GLB.',
   },
   greenTurtle: {
     enabled: true,
@@ -344,6 +367,20 @@ export const modelAssets = {
     materialEmissiveIntensity: 0.05,
     targetTriangles: 5000,
     prompt: 'Game-ready Galapagos volcanic shore barnacle cluster attached to intertidal basalt, compact pale shell plates, optimized GLB specimen prop.',
+  },
+  postOfficeBayBarrel: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-post-office-bay-barrel.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#1b1209',
+    materialEmissiveIntensity: 0.05,
+    targetTriangles: 5000,
+    prompt: 'Large weathered wooden Post Office Bay barrel prop, salt-worn staves and iron bands, used as a breakable physics landmark near Darwin spawn.',
   },
   basalt: {
     enabled: false,

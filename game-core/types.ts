@@ -30,6 +30,7 @@ export type ZoneNarration = {
 };
 
 export type ZoneSpecimenSpawn = {
+  instanceId?: string | null;
   specimenId: SpecimenId;
   position: Vec3Tuple;
   behavior?: string;

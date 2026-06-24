@@ -99,15 +99,68 @@ const POST_OFFICE_BAY_WATER_POLYGON = [
 ];
 
 export const POST_OFFICE_BAY_TRAIL = [
-  [11, 6],
-  [6, 12],
-  [1, 20],
-  [-9, 28],
-  [-23, 31],
-  [-38, 27],
-  [-51, 17],
-  [-58, 6],
+  [5.0, 1.5, 2.45],
+  [3.0, 2.5, 2.85],
+  [6.6, 3.4, 2.7],
+  [8.2, 4.8, 2.55],
+  [6, 12, 2.3],
+  [1, 20, 2.25],
+  [-9, 28, 2.3],
+  [-23, 31, 2.45],
+  [-38, 27, 2.3],
+  [-51, 17, 2.15],
+  [-58, 6, 2.1],
 ];
+
+export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 3.0, z: 2.5, radius: 4.8 };
+export const POST_OFFICE_BAY_PATH_POINTS = POST_OFFICE_BAY_TRAIL;
+
+function pathSegmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
+  const abx = bx - ax;
+  const abz = bz - az;
+  const lengthSq = abx * abx + abz * abz || 1;
+  const t = THREE.MathUtils.clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
+  const cx = ax + abx * t;
+  const cz = az + abz * t;
+  const width = THREE.MathUtils.lerp(aw, bw, t);
+  const dx = px - cx;
+  const dz = pz - cz;
+  return {
+    distance: Math.hypot(dx, dz),
+    width,
+    tangentX: abx / Math.sqrt(lengthSq),
+    tangentZ: abz / Math.sqrt(lengthSq),
+    centerX: cx,
+    centerZ: cz,
+  };
+}
+
+export function postOfficePathInfo(x, z) {
+  let nearest = null;
+  for (let i = 0; i < POST_OFFICE_BAY_PATH_POINTS.length - 1; i += 1) {
+    const [ax, az, aw] = POST_OFFICE_BAY_PATH_POINTS[i];
+    const [bx, bz, bw] = POST_OFFICE_BAY_PATH_POINTS[i + 1];
+    const info = pathSegmentInfo(x, z, ax, az, aw, bx, bz, bw);
+    if (!nearest || info.distance < nearest.distance) nearest = info;
+  }
+  const edgeNoise = Math.sin(nearest.centerX * 0.23 + nearest.centerZ * 0.17) * 0.2
+    + Math.sin(nearest.centerX * 0.09 - nearest.centerZ * 0.31) * 0.14
+    + terrainSurfaceNoise(x * 0.92 + 5.0, z * 0.92 - 2.0) * 0.28;
+  const width = Math.max(1.8, nearest.width + edgeNoise);
+  const center = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.28, width * 0.58);
+  const tread = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.48, width * 0.86);
+  const shoulder = THREE.MathUtils.smoothstep(nearest.distance, width * 0.38, width * 1.25)
+    * (1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.9, width * 1.55));
+  const path = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.55, width * 1.12);
+  return {
+    ...nearest,
+    width,
+    center: THREE.MathUtils.clamp(center, 0, 1),
+    tread: THREE.MathUtils.clamp(tread, 0, 1),
+    shoulder: THREE.MathUtils.clamp(shoulder, 0, 1),
+    path: THREE.MathUtils.clamp(path, 0, 1),
+  };
+}
 
 export function postOfficeTrailInfluence(x, z, width = 3.2, feather = 7.5) {
   let nearest = Infinity;
@@ -151,7 +204,9 @@ function postOfficeTerrainBlend(x, z, y = postOfficeTerrainHeight(x, z)) {
     * (1 - water);
   const paloSanto = THREE.MathUtils.smoothstep(z - (7 + Math.sin(x * 0.11) * 3.4 + broad * 3.2), -5, 8)
     * (1 - water);
-  const trail = postOfficeTrailInfluence(x, z, 2.6, 6.8) * (1 - water);
+  const clearingDistance = Math.hypot(x - POST_OFFICE_BAY_BARREL_CLEARING.x, z - POST_OFFICE_BAY_BARREL_CLEARING.z);
+  const clearing = 1 - THREE.MathUtils.smoothstep(clearingDistance, POST_OFFICE_BAY_BARREL_CLEARING.radius * 0.52, POST_OFFICE_BAY_BARREL_CLEARING.radius);
+  const trail = Math.max(postOfficeTrailInfluence(x, z, 2.6, 6.8), clearing * 0.9) * (1 - water);
 
   return {
     water,
@@ -201,6 +256,14 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   const overlookShoulder = Math.max(0, 1 - ellipseDistance(x, z, 16, 13, 11, 16)) * 2.2;
   const landingShelf = Math.max(0, 1 - ellipseDistance(x, z, 13, 8, -2, -8)) * 0.55;
   const bayLandingShelf = Math.max(0, 1 - ellipseDistance(x, z, 8.5, 5.2, 11.6, 5.2));
+  const mailBarrelClearing = Math.max(0, 1 - ellipseDistance(
+    x,
+    z,
+    POST_OFFICE_BAY_BARREL_CLEARING.radius,
+    POST_OFFICE_BAY_BARREL_CLEARING.radius * 0.78,
+    POST_OFFICE_BAY_BARREL_CLEARING.x,
+    POST_OFFICE_BAY_BARREL_CLEARING.z,
+  ));
   const northBayRim = THREE.MathUtils.smoothstep(x, 20, 36)
     * (1 - THREE.MathUtils.smoothstep(x, 57, 65))
     * Math.exp(-Math.pow((z + 9.8) / 4.0, 2))
@@ -216,6 +279,7 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   y += trail * 0.34;
   y -= coveCut;
   y = THREE.MathUtils.lerp(y, -0.24 + terrainFineDetail(x, z) * 0.08, bayLandingShelf * 0.82);
+  y = THREE.MathUtils.lerp(y, -0.16 + terrainFineDetail(x, z) * 0.05, mailBarrelClearing * 0.74);
   y += northBayRim * 1.55;
   y -= seaFalloff * 15.5;
   y += continuity * 0.35;

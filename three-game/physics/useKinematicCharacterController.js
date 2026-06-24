@@ -6,7 +6,7 @@ import * as THREE from 'three';
 export const CHARACTER_CONTROLLER_CONFIG = {
   radius: 0.36,
   halfHeight: 0.72,
-  centerY: 1.12,
+  centerY: 1.08,
   contactOffset: 0.045,
   autostepHeight: 0.32,
   autostepWidth: 0.34,

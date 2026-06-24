@@ -323,6 +323,7 @@ export function IslandMapModal({ open, onClose }) {
       onClick={onClose}
     >
       <ExpeditionPanel
+        variant="modal"
         className="max-h-full w-[min(64rem,100%)] overflow-y-auto"
         innerClassName="p-3 sm:p-4"
       >

@@ -6,6 +6,7 @@ import {
   getRegionTerrainConfig,
   terrainColor,
   terrainHeight,
+  WATER_LEVEL,
 } from '../../world/terrain';
 import { getBorderVistas } from '../../world/vistas';
 import { useThreeGameStore } from '../../store';
@@ -22,6 +23,8 @@ const EDGE_AXES = {
 };
 
 const ATMOSPHERE = new THREE.Color('#b9d7de');
+const SHALLOW_CONTINUATION = new THREE.Color('#5f9fae');
+const DEEP_CONTINUATION = new THREE.Color('#1f5f90');
 
 function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
@@ -91,25 +94,52 @@ function profileColor(vista, distance, t, sideFade) {
   return color;
 }
 
+function edgeDryRatio(regionId, config, edge) {
+  if (!['north', 'south', 'east', 'west'].includes(edge)) return 0;
+  const samples = 21;
+  let dry = 0;
+  for (let index = 0; index < samples; index += 1) {
+    const t = samples === 1 ? 0.5 : index / (samples - 1);
+    let x = 0;
+    let z = 0;
+    if (edge === 'north' || edge === 'south') {
+      x = -config.width / 2 + t * config.width;
+      z = edge === 'north' ? -config.depth / 2 : config.depth / 2;
+    } else {
+      x = edge === 'west' ? -config.width / 2 : config.width / 2;
+      z = -config.depth / 2 + t * config.depth;
+    }
+    const y = terrainHeight(x, z, regionId);
+    if (y > WATER_LEVEL + 0.18) dry += 1;
+  }
+  return dry / samples;
+}
+
 function makeApronGeometry(regionId, config, vista) {
   const axes = EDGE_AXES[vista.edge];
   if (!axes || vista.render === false) return null;
+  // Connected terrain aprons only work where the current edge is actually
+  // land. Mixed coastlines need separate distant silhouettes; otherwise this
+  // mesh becomes an obvious sheet spanning water.
+  if (edgeDryRatio(regionId, config, vista.edge) < 0.86) return null;
 
   const along = normalize2(axes.along);
   const outward = normalize2(axes.outward);
   const origin = edgeOrigin(config, vista.edge);
   const width = axisLength(config, vista.edge) * (vista.apronWidthScale || 1.75);
   const depth = vista.apronDepth || 86;
-  const cols = vista.edge.length > 5 ? 18 : 24;
-  const rows = 16;
+  const cols = vista.edge.length > 5 ? 24 : 34;
+  const rows = 24;
   const positions = [];
   const colors = [];
   const indices = [];
 
   for (let row = 0; row <= rows; row += 1) {
     const t = row / rows;
-    const distance = t * depth;
-    const seamBlend = THREE.MathUtils.smoothstep(t, 0.0, 0.22);
+    const easedT = t * t * (3 - 2 * t);
+    const distance = easedT * depth;
+    const seamBlend = THREE.MathUtils.smoothstep(t, 0.0, 0.38);
+    const farHaze = THREE.MathUtils.smoothstep(t, 0.72, 1.0);
     for (let col = 0; col <= cols; col += 1) {
       const u = col / cols;
       const side = Math.abs(u - 0.5) * 2;
@@ -118,13 +148,33 @@ function makeApronGeometry(regionId, config, vista) {
       const [x, z] = worldPoint(origin, along, outward, alongDistance, distance);
       const [edgeX, edgeZ] = clampToRegionEdge(config, x, z);
       const edgeY = terrainHeight(edgeX, edgeZ, regionId);
-      const targetY = profileHeight(vista, x, z, distance, t);
-      const y = THREE.MathUtils.lerp(edgeY - sideFade * 0.8, targetY, seamBlend);
+      const innerX = THREE.MathUtils.clamp(edgeX - outward[0] * 4.5, -config.width / 2, config.width / 2);
+      const innerZ = THREE.MathUtils.clamp(edgeZ - outward[1] * 4.5, -config.depth / 2, config.depth / 2);
+      const innerY = terrainHeight(innerX, innerZ, regionId);
+      const edgeLand = Math.max(
+        THREE.MathUtils.smoothstep(edgeY, WATER_LEVEL - 0.34, WATER_LEVEL + 0.42),
+        THREE.MathUtils.smoothstep(innerY, WATER_LEVEL - 0.34, WATER_LEVEL + 0.42),
+      );
+      const edgeWater = 1 - edgeLand;
+      const rawTargetY = profileHeight(vista, x, z, distance, t);
+      const landHold = edgeLand * (1 - THREE.MathUtils.smoothstep(t, 0.2, 0.7));
+      // If the current edge is open water, do not let the connected apron rise
+      // into the neighboring terrain profile. Distant land should be handled as
+      // a separate vista silhouette; this mesh is only for seam continuation.
+      const waterHold = edgeWater;
+      const landContinuationY = Math.max(rawTargetY, edgeY - t * 0.72 + smoothNoise(x, z, (vista.seed || 0) + 91) * 0.08);
+      const waterContinuationY = WATER_LEVEL - 0.28 - t * 0.42 + smoothNoise(x, z, (vista.seed || 0) + 37) * 0.045;
+      let targetY = THREE.MathUtils.lerp(rawTargetY, landContinuationY, landHold);
+      targetY = THREE.MathUtils.lerp(targetY, waterContinuationY, waterHold);
+      const sideDrop = sideFade * seamBlend * 0.45;
+      const y = THREE.MathUtils.lerp(edgeY, targetY, seamBlend) - sideDrop;
 
       const edgeColor = terrainColor(edgeX, edgeZ, edgeY, regionId);
-      const targetColor = profileColor(vista, distance, t, sideFade);
+      const waterColor = SHALLOW_CONTINUATION.clone().lerp(DEEP_CONTINUATION, THREE.MathUtils.clamp(t * 0.8 + edgeWater * 0.25, 0, 1));
+      const rawTargetColor = profileColor(vista, distance, t, sideFade);
+      const targetColor = rawTargetColor.lerp(waterColor, waterHold * 0.9);
       const color = edgeColor.lerp(targetColor, seamBlend);
-      if (t > 0.86) color.lerp(ATMOSPHERE, THREE.MathUtils.smoothstep(t, 0.86, 1.0) * 0.45);
+      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.5);
 
       positions.push(x, y, z);
       colors.push(color.r, color.g, color.b);

@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
+import { StaticGLB } from '../../components/assets/StaticGLB';
+import { getModelAsset } from '../../modelAssets';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -84,7 +86,23 @@ function StoneVisual() {
   );
 }
 
-export function PropVisual({ visual }) {
+export function PropVisual({ visual, assetId, offsetY = 0 }) {
+  const asset = assetId ? getModelAsset(assetId) : null;
+  if (asset?.enabled !== false && asset?.path) {
+    return (
+      <StaticGLB
+        path={asset.path}
+        position={[0, (asset.yOffset || 0) + offsetY, 0]}
+        rotation={asset.rotation || [0, 0, 0]}
+        scale={asset.scale || 1}
+        castShadow
+        receiveShadow
+        sourceId={`physics-prop-visual:${assetId}`}
+        sourceLabel={assetId}
+        sourceKind="physics-prop-visual"
+      />
+    );
+  }
   if (visual === 'crate') return <CrateVisual />;
   if (visual === 'stone') return <StoneVisual />;
   return <BarrelVisual />;

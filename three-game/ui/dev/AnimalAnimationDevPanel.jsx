@@ -38,6 +38,7 @@ const MODEL_ANIMAL_LABELS = {
   galapagosPenguin: 'Galapagos Penguin',
   flightlessCormorant: 'Flightless Cormorant',
   frigatebird: 'Magnificent Frigatebird',
+  blueFootedBooby: 'Blue-footed Booby',
   greenTurtle: 'Green Turtle',
   seaLion: 'Sea Lion',
 };
@@ -51,6 +52,7 @@ const MODEL_ANIMAL_IDS = [
   'galapagosPenguin',
   'flightlessCormorant',
   'frigatebird',
+  'blueFootedBooby',
   'greenTurtle',
   'seaLion',
 ];
@@ -252,7 +254,7 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-[70] bg-black/58 p-3 backdrop-blur-sm">
-      <ExpeditionPanel className="mx-auto flex h-full max-w-[82rem] flex-col" innerClassName="flex h-full flex-col p-4">
+      <ExpeditionPanel variant="modal" className="mx-auto flex h-full max-w-[82rem] flex-col" innerClassName="flex h-full flex-col p-4">
         <div className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0">
           <Canvas frameloop="demand" camera={{ position: [0, 0, 1] }}>
             <Suspense fallback={null}>

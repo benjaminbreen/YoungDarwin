@@ -19,6 +19,51 @@ const COTTON_FOLIAGE_MOTION = { wind: 1.9, bend: 0.35, bendRadius: 1.45 };
 const DRY_GRASS_FOLIAGE_MOTION = { wind: 1.45, bend: 0.55, bendRadius: 1.25 };
 const CACTUS_FOLIAGE_MOTION = { wind: 0.35, bend: 0.35 };
 
+function publishActorRuntimePosition({
+  publisher,
+  ref,
+  actorId,
+  zoneId,
+  position,
+  now = 0,
+  force = false,
+  debug = null,
+}) {
+  if (
+    !Number.isFinite(position?.x)
+    || !Number.isFinite(position?.y)
+    || !Number.isFinite(position?.z)
+  ) return;
+  const previous = ref.current;
+  const dx = position.x - previous.x;
+  const dy = position.y - previous.y;
+  const dz = position.z - previous.z;
+  if (!force && now - previous.time < 0.22 && Math.hypot(dx, dy, dz) < 0.45) return;
+  publisher(actorId, { x: position.x, y: position.y, z: position.z }, zoneId);
+  if (typeof window !== 'undefined' && debug) {
+    window.__faunaMotionDebug = {
+      ...(window.__faunaMotionDebug || {}),
+      [actorId]: debug,
+    };
+  }
+  ref.current = { x: position.x, y: position.y, z: position.z, time: now };
+}
+
+function isFiniteVector3(value) {
+  return (
+    Number.isFinite(value?.x)
+    && Number.isFinite(value?.y)
+    && Number.isFinite(value?.z)
+  );
+}
+
+function copyFinitePosition(target, preferred, fallback) {
+  const source = isFiniteVector3(preferred) ? preferred : fallback;
+  if (!isFiniteVector3(source)) return false;
+  target.copy(source);
+  return source === preferred;
+}
+
 function specimenColor(id) {
   if (id === 'crab') return '#e4572e';
   if (id === 'marineiguana') return '#202124';
@@ -43,6 +88,7 @@ function assetIdForSpecimen(specimen) {
   if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';
   if (specimen.id === 'flightlesscormorant') return 'flightlessCormorant';
   if (specimen.id === 'frigatebird') return 'frigatebird';
+  if (specimen.id === 'booby') return 'blueFootedBooby';
   if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
   return specimen.id;
 }
@@ -243,7 +289,8 @@ function AnimatedSpecimenShape({ specimen, animationSelector }) {
 
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
-  const faunaMotionGroup = useRef(null);
+  const actorId = specimen.instanceId || specimen.id;
+  const runtimePublishRef = useRef({ x: Infinity, y: Infinity, z: Infinity, time: -Infinity });
   const selectedSpecimenId = useThreeGameStore(state => state.selectedSpecimenId);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const setSelectedSpecimen = useThreeGameStore(state => state.setSelectedSpecimen);
@@ -253,14 +300,13 @@ export function SpecimenActor({ specimen }) {
   const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
-  const collected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
   // Narrow boolean: only flips when this specimen is picked up / put down, so
   // the contact shadow can hide while the animal is held off the ground.
-  const isCarried = useThreeGameStore(state => state.carriedObjectId === specimen.id);
+  const isCarried = useThreeGameStore(state => state.carriedObjectId === actorId);
   const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
   const carriedRef = useRef(false);
-  // Where the animal lives after being put down somewhere new; null = spawn.
-  const carryBase = useRef(null);
+  // Where the animal currently lives; moving fauna patrol around this base.
+  const behaviorBaseRef = useRef(null);
   const position = useMemo(() => {
     const [x, , z] = specimen.spawnPoint;
     // Auto-generated spawn points can land in the surf; pull them onto land.
@@ -269,43 +315,46 @@ export function SpecimenActor({ specimen }) {
   }, [currentZoneId, specimen.spawnPoint]);
   const faunaBehavior = useFaunaBehavior({
     specimen,
-    groupRef: faunaMotionGroup,
+    basePositionRef: behaviorBaseRef,
     basePosition: position,
-    collected,
+    paused: isCarried,
   });
 
   useEffect(() => {
-    setSpecimenRuntimePosition(specimen.id, {
-      x: position.x,
-      y: position.y,
-      z: position.z,
-    }, currentZoneId);
-  }, [currentZoneId, position, setSpecimenRuntimePosition, specimen.id]);
+    publishActorRuntimePosition({
+      publisher: setSpecimenRuntimePosition,
+      ref: runtimePublishRef,
+      actorId,
+      zoneId: currentZoneId,
+      position,
+      force: true,
+    });
+  }, [actorId, currentZoneId, position, setSpecimenRuntimePosition]);
 
   // Reset any relocated home when the zone (and therefore spawn) changes.
   useEffect(() => {
-    carryBase.current = null;
+    behaviorBaseRef.current = position;
+    faunaBehavior.reset?.({ basePosition: position, zoneId: currentZoneId });
   }, [currentZoneId, position]);
 
-  // Release carry state if this actor unmounts or gets collected mid-carry.
+  // Release carry state if this actor unmounts while being held.
   useEffect(() => {
     if (!carryProfile) return undefined;
     const release = () => {
       const state = useThreeGameStore.getState();
-      if (state.carriedObjectId === specimen.id) setCarriedObject(null);
-      if (state.carryPrompt?.id === specimen.id) setCarryPrompt(null);
+      if (state.carriedObjectId === actorId) setCarriedObject(null);
+      if (state.carryPrompt?.id === actorId) setCarryPrompt(null);
     };
-    if (collected) release();
     return release;
-  }, [carryProfile, collected, setCarriedObject, setCarryPrompt, specimen.id]);
+  }, [actorId, carryProfile, setCarriedObject, setCarryPrompt]);
 
   // Single per-actor frame callback: bare-handed carry/pickup handling (mirrors
   // the PhysicsProp carry flow) followed by the idle-behaviour fallback for
   // specimens without fauna AI. Merged so each actor registers one useFrame.
   useFrame(({ clock }) => {
-    if (collected || !group.current) return;
+    if (!group.current) return;
     const state = useThreeGameStore.getState();
-    const carriedHere = state.carriedObjectId === specimen.id;
+    const carriedHere = state.carriedObjectId === actorId;
 
     if (carryProfile) {
       const pose = getRuntimePlayerPose();
@@ -325,9 +374,10 @@ export function SpecimenActor({ specimen }) {
             currentZoneId,
           );
           const groundY = terrainHeight(safe.x, safe.z, currentZoneId) + 0.04;
-          carryBase.current = new THREE.Vector3(safe.x, groundY, safe.z);
-          group.current.position.copy(carryBase.current);
-          setSpecimenRuntimePosition(specimen.id, { x: safe.x, y: groundY, z: safe.z }, currentZoneId);
+          behaviorBaseRef.current = new THREE.Vector3(safe.x, groundY, safe.z);
+          faunaBehavior.reset?.({ basePosition: behaviorBaseRef.current, zoneId: currentZoneId });
+          group.current.position.copy(behaviorBaseRef.current);
+          setSpecimenRuntimePosition(actorId, { x: safe.x, y: groundY, z: safe.z }, currentZoneId);
         }
       }
 
@@ -339,13 +389,13 @@ export function SpecimenActor({ specimen }) {
         );
         group.current.rotation.y = Math.atan2(aheadX, aheadZ);
         setCarryPrompt({
-          id: specimen.id,
+          id: actorId,
           label: carryProfile.label,
           mode: 'drop',
           distance: 0,
           text: `Press E to put down ${carryProfile.label}`,
         });
-        setSpecimenRuntimePosition(specimen.id, {
+        setSpecimenRuntimePosition(actorId, {
           x: group.current.position.x,
           y: group.current.position.y,
           z: group.current.position.z,
@@ -355,30 +405,54 @@ export function SpecimenActor({ specimen }) {
 
       // Animals are only grabbable bare-handed so E still collects with tools.
       if (state.activeToolId !== 'hands') {
-        if (state.carryPrompt?.id === specimen.id) setCarryPrompt(null);
+        if (state.carryPrompt?.id === actorId) setCarryPrompt(null);
       } else {
         const distance = Math.hypot(group.current.position.x - player.x, group.current.position.z - player.z);
         const activePrompt = state.carryPrompt;
-        if (!activePrompt || activePrompt.id === specimen.id || distance < (activePrompt.distance ?? Infinity)) {
+        if (!activePrompt || activePrompt.id === actorId || distance < (activePrompt.distance ?? Infinity)) {
           if (distance <= CARRY_PICKUP_DISTANCE) {
             setCarryPrompt({
-              id: specimen.id,
+              id: actorId,
               label: carryProfile.label,
               mode: 'pickup',
               distance,
               text: `Press E to pick up ${carryProfile.label}`,
             });
-          } else if (activePrompt?.id === specimen.id) {
+          } else if (activePrompt?.id === actorId) {
             setCarryPrompt(null);
           }
         }
       }
     }
 
-    // Idle behaviour fallback: fauna with AI drive their own transform, and a
-    // carried animal is positioned above.
-    if (faunaBehavior.active || carriedHere) return;
-    const base = carryBase.current || position;
+    if (faunaBehavior.active) {
+      const base = behaviorBaseRef.current || position;
+      const motionPosition = faunaBehavior.positionRef.current;
+      const usedMotion = copyFinitePosition(group.current.position, motionPosition, base);
+      if (isFiniteVector3(group.current.position)) {
+        group.current.rotation.y = faunaBehavior.yawRef.current || 0;
+        const debug = {
+          ...(faunaBehavior.debugRef.current || {}),
+          motionStatus: faunaBehavior.statusRef.current,
+          usedMotion,
+          fallbackToBase: !usedMotion,
+        };
+        publishActorRuntimePosition({
+          publisher: setSpecimenRuntimePosition,
+          ref: runtimePublishRef,
+          actorId,
+          zoneId: currentZoneId,
+          position: group.current.position,
+          now: clock.elapsedTime,
+          debug,
+        });
+      }
+      return;
+    }
+    if (carriedHere) return;
+
+    // Idle behaviour fallback for specimens without fauna AI.
+    const base = behaviorBaseRef.current || position;
     const t = clock.elapsedTime;
     if (specimen.behavior === 'skitter') {
       const burst = Math.max(0, Math.sin(t * 2.2));
@@ -399,12 +473,18 @@ export function SpecimenActor({ specimen }) {
       group.current.position.x = base.x + Math.sin(t * 0.75) * 0.18;
     }
     group.current.position.y = base.y + Math.abs(Math.sin(t * 1.1)) * (specimen.behavior === 'still' ? 0 : 0.03);
+    publishActorRuntimePosition({
+      publisher: setSpecimenRuntimePosition,
+      ref: runtimePublishRef,
+      actorId,
+      zoneId: currentZoneId,
+      position: group.current.position,
+      now: t,
+    });
   });
 
-  if (collected) return null;
-
-  const selected = selectedSpecimenId === specimen.id;
-  const nearby = nearbySpecimenId === specimen.id;
+  const selected = selectedSpecimenId === actorId;
+  const nearby = nearbySpecimenId === actorId;
   const markerY = specimen.id === 'galapagoscotton' ? 3.45
     : specimen.id === 'cactus' ? 2.15
     : specimen.id === 'basalt' ? 1.15
@@ -417,6 +497,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'galapagoscotton' ? 0.9
     : specimen.id === 'barnacle' ? 0.38
     : specimen.id === 'frigatebird' ? 0.7
+    : specimen.id === 'booby' ? 0.62
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'galapagospenguin' ? 0.55
     : 0.8;
@@ -458,14 +539,12 @@ export function SpecimenActor({ specimen }) {
       }}
       onClick={event => {
         event.stopPropagation();
-        setSelectedSpecimen(specimen.id);
-        setNearbySpecimen(specimen.id);
+        setSelectedSpecimen(actorId);
+        setNearbySpecimen(actorId);
         setInspectedObject(specimenToInspectable(specimen, event.point || group.current?.position));
       }}
     >
-      {faunaBehavior.active ? (
-        <group ref={faunaMotionGroup}>{specimenContent}</group>
-      ) : specimenContent}
+      {specimenContent}
     </group>
   );
 }

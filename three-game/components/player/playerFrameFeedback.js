@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { getRuntimeFootContacts, useThreeGameStore } from '../../store';
 import { BUMP_FEEDBACK, PLAYER } from './playerConfig';
 import { orientDebugVector } from './playerUtils';
 
@@ -85,7 +85,9 @@ export function updatePlayerFrameFeedback({
     // Fake contact-AO, so a touch fainter at night (no hard sun to cast it).
     const hour = storeState.timeOfDay ?? 12;
     const dayFactor = (hour >= 8 && hour <= 17) ? 1 : (hour < 5 || hour > 20) ? 0.7 : 0.85;
-    contactShadowRef.current.material.opacity = 0.32 * airborneFade * dayFactor;
+    const feet = getRuntimeFootContacts();
+    const plantedFeet = Math.max(feet.left.contact || 0, feet.right.contact || 0);
+    contactShadowRef.current.material.opacity = (0.24 - plantedFeet * 0.05) * airborneFade * dayFactor;
     contactShadowRef.current.visible = airborneFade > 0.02;
   }
 

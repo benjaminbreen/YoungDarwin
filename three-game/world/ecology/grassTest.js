@@ -1,169 +1,108 @@
+import { grassTestPathInfo } from '../regions/grassTest/path';
+import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
+
 const GRASS_TEST = 'GRASS_TEST';
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function fract(value) {
+  return value - Math.floor(value);
+}
+
+function hash2(x, z, salt = 0) {
+  return fract(Math.sin((x * 127.1 + z * 311.7 + salt * 17.13) * 12.9898) * 43758.5453123);
+}
+
+function valueNoise(x, z, scale = 1, salt = 0) {
+  const gx = x * scale;
+  const gz = z * scale;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const a = hash2(ix, iz, salt) * (1 - ux) + hash2(ix + 1, iz, salt) * ux;
+  const b = hash2(ix, iz + 1, salt) * (1 - ux) + hash2(ix + 1, iz + 1, salt) * ux;
+  return a * (1 - uz) + b * uz;
+}
+
+function coastalDryness({ x, z, tone, path }) {
+  const rise = Math.max(Math.abs(x) / 38, Math.abs(z) / 38);
+  const windBurn = Math.sin(x * 0.08 - z * 0.05) * 0.08 + Math.sin(x * 0.035 + z * 0.09) * 0.07;
+  return clamp01(
+    0.26
+    + tone * 0.2
+    + (path?.shoulder || 0) * 0.16
+    + Math.max(0, rise - 0.48) * 0.32
+    + windBurn,
+  );
+}
+
+function coastalTint(tone, dryness, pathShoulder = 0) {
+  const warm = clamp01(dryness * 0.7 + tone * 0.16 + pathShoulder * 0.1);
+  if (warm > 0.72) return tone > 0.44 ? '#b7aa5e' : '#8b7e47';
+  if (warm > 0.48) return tone > 0.5 ? '#9da75b' : '#718148';
+  return tone > 0.52 ? '#78914e' : '#5b7440';
+}
+
+function acceptTallCoastalGrass({ x, z, path }) {
+  if (!path) return true;
+  const clearDistance = path.width * 1.82;
+  const sparseDistance = path.width * 2.65;
+  if (path.distance < clearDistance) return false;
+  const shoulderFade = clamp01((path.distance - clearDistance) / Math.max(0.001, sparseDistance - clearDistance));
+  const broadClump = valueNoise(x + 19, z - 7, 0.055, 83);
+  const fineGap = valueNoise(x - 5, z + 13, 0.13, 127);
+  const keepChance = 0.32 + shoulderFade * 0.5 + broadClump * 0.24 - fineGap * 0.16;
+  return hash2(x, z, 211) < clamp01(keepChance);
+}
+
+function buildCoastalGrassItems(count = 1550) {
+  return buildStandardDryGrassPatchItems({
+    zoneId: GRASS_TEST,
+    idPrefix: 'grass-test-coastal-grass',
+    count,
+    seed: 8207,
+    bounds: { minX: -36.8, maxX: 36.8, minZ: -36.8, maxZ: 36.8 },
+    pathInfo: grassTestPathInfo,
+    rejectBiomes: ['dirt-path', 'path-shoulder'],
+    pathCenterMax: 0,
+    pathTreadMax: 0.02,
+    maxGrade: 0.86,
+    slopeStep: 0.78,
+    scale: [0.62, 1.18],
+    windYaw: -0.68,
+    attemptsPerItem: 180,
+    accept: acceptTallCoastalGrass,
+    drynessAt: coastalDryness,
+    tintAt: coastalTint,
+  });
+}
+
 export function buildGrassTestEcology() {
+  const coastalGrassItems = buildCoastalGrassItems();
   return {
     zoneId: GRASS_TEST,
     stream: false,
-    denseGrass: [
-      {
-        id: 'grass-test-dense-meadow',
-        count: 280000,
-        seed: 1207,
-        bounds: { minX: -35.5, maxX: 35.5, minZ: -35.5, maxZ: 35.5 },
-        height: [0.14, 0.92],
-        width: [0.008, 0.028],
-        coverage: 1,
-        minCoverage: 0.78,
-        patchScale: 0.048,
-        tuftScale: 0.19,
-        clusterScale: 0.042,
-        clusterStrength: 0.34,
-        heightClusterScale: 0.018,
-        directionScale: 0.055,
-        windDirectionBias: 0.72,
-        yawJitter: 0.36,
-        pathAware: true,
-        maxGrade: 0.9,
-        baseLift: 0.018,
-        tipBend: 0.54,
-        prelean: 0.36,
-        windAmp: 0.2,
-        bendAmp: 2.15,
-        bendRadius: 2.85,
-        contactRadius: 1.45,
-        recoveryRate: 0.085,
-        fadeFarStart: 50,
-        fadeFarEnd: 76,
-        dryness: 0.1,
-        dryPatchStrength: 0.24,
-        colorVariance: 0.34,
-        deepColor: '#294326',
-        rootColor: '#526f37',
-        midColor: '#8aa650',
-        tipColor: '#cbd87a',
-        dryColor: '#a39b55',
-        dryTipColor: '#ddd188',
-      },
-      {
-        id: 'grass-test-soft-tufts',
-        count: 110000,
-        seed: 4203,
-        bounds: { minX: -34, maxX: 34, minZ: -34, maxZ: 34 },
-        height: [0.34, 1.22],
-        width: [0.006, 0.022],
-        coverage: 0.78,
-        minCoverage: 0.34,
-        patchScale: 0.05,
-        tuftScale: 0.16,
-        clusterScale: 0.038,
-        clusterStrength: 0.72,
-        heightClusterScale: 0.016,
-        directionScale: 0.046,
-        windDirectionBias: 0.78,
-        yawJitter: 0.3,
-        pathAware: true,
-        maxGrade: 0.9,
-        baseLift: 0.02,
-        tipBend: 0.72,
-        prelean: 0.48,
-        windAmp: 0.26,
-        bendAmp: 1.95,
-        bendRadius: 2.65,
-        contactRadius: 1.35,
-        recoveryRate: 0.08,
-        fadeFarStart: 46,
-        fadeFarEnd: 72,
-        dryness: 0.28,
-        dryPatchStrength: 0.34,
-        colorVariance: 0.42,
-        deepColor: '#4f6333',
-        rootColor: '#718345',
-        midColor: '#abb760',
-        tipColor: '#ded783',
-        dryColor: '#aaa05b',
-        dryTipColor: '#e4d58f',
-      },
-      {
-        id: 'grass-test-low-cover',
-        count: 150000,
-        seed: 9121,
-        bounds: { minX: -35, maxX: 35, minZ: -35, maxZ: 35 },
-        height: [0.08, 0.34],
-        width: [0.006, 0.02],
-        coverage: 0.98,
-        minCoverage: 0.7,
-        patchScale: 0.07,
-        tuftScale: 0.28,
-        clusterScale: 0.05,
-        clusterStrength: 0.28,
-        heightClusterScale: 0.03,
-        directionScale: 0.075,
-        windDirectionBias: 0.68,
-        yawJitter: 0.42,
-        pathAware: true,
-        maxGrade: 0.9,
-        baseLift: 0.016,
-        tipBend: 0.36,
-        prelean: 0.26,
-        windAmp: 0.14,
-        bendAmp: 1.35,
-        bendRadius: 2.45,
-        contactRadius: 1.28,
-        recoveryRate: 0.12,
-        fadeFarStart: 54,
-        fadeFarEnd: 82,
-        dryness: 0.18,
-        dryPatchStrength: 0.32,
-        colorVariance: 0.36,
-        deepColor: '#385333',
-        rootColor: '#617d42',
-        midColor: '#8fa95d',
-        tipColor: '#becb76',
-        dryColor: '#968d55',
-        dryTipColor: '#cfc77c',
-      },
-      {
-        id: 'grass-test-path-shoulder-tufts',
-        count: 70000,
-        seed: 6113,
-        bounds: { minX: -35, maxX: 35, minZ: -35, maxZ: 35 },
-        height: [0.2, 0.82],
-        width: [0.007, 0.026],
-        coverage: 0.88,
-        minCoverage: 0.42,
-        patchScale: 0.06,
-        tuftScale: 0.22,
-        clusterScale: 0.045,
-        clusterStrength: 0.46,
-        heightClusterScale: 0.018,
-        directionScale: 0.05,
-        windDirectionBias: 0.74,
-        yawJitter: 0.34,
-        pathAware: true,
-        pathBand: 'shoulder',
-        maxGrade: 0.9,
-        baseLift: 0.02,
-        tipBend: 0.66,
-        prelean: 0.52,
-        windAmp: 0.24,
-        bendAmp: 1.8,
-        bendRadius: 2.7,
-        contactRadius: 1.36,
-        recoveryRate: 0.085,
-        fadeFarStart: 48,
-        fadeFarEnd: 74,
-        dryness: 0.36,
-        dryPatchStrength: 0.38,
-        colorVariance: 0.44,
-        deepColor: '#495931',
-        rootColor: '#6e7740',
-        midColor: '#a0a85b',
-        tipColor: '#d7ce7b',
-        dryColor: '#9d8d52',
-        dryTipColor: '#dfcf86',
-      },
+    dryGrassPatches: [
+      createStandardDryGrassPatchLayer({
+        id: 'grass-test-coastal-dry-grass',
+        items: coastalGrassItems,
+        materialColor: '#f3efce',
+        emissive: '#292b16',
+        emissiveIntensity: 0.06,
+        roughness: 1,
+        widthScale: 1.08,
+        heightScale: 1.14,
+        depthScale: 1.04,
+        maxVisibleDistance: 104,
+        motion: { wind: 1.08, bend: 0.23, bendRadius: 1.18 },
+      }),
     ],
-    footprintBiomes: ['grass-meadow', 'lush-hollow', 'meadow-rise'],
+    footprintBiomes: ['grass-meadow', 'lush-hollow', 'meadow-rise', 'path-shoulder'],
     flora: [],
     rocks: [],
     props: [],

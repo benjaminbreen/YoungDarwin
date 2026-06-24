@@ -14,9 +14,12 @@ export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
     .map((spawn, index) => {
       const specimen = getSpecimenById(spawn.specimenId);
       if (!specimen) return null;
+      const instanceId = typeof spawn.instanceId === 'string' && spawn.instanceId
+        ? spawn.instanceId
+        : `${spawn.specimenId}-${index}`;
       return {
         ...specimen,
-        instanceId: `${spawn.specimenId}-${index}`,
+        instanceId,
         spawnPoint: spawn.position,
         habitatRadiusX: spawn.habitatRadiusX ?? null,
         habitatRadiusZ: spawn.habitatRadiusZ ?? null,

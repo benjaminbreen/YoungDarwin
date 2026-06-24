@@ -97,12 +97,10 @@ const QUALITY_PRESETS = {
     // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
     // every full-screen pass (post chain, water, terrain, sky) pays for all of
     // them. On integrated/laptop GPUs that's the dominant cost, so the
-    // performance tier renders at native 1x and lets SMAA-ULTRA carry the
-    // anti-aliasing (it cleans silhouette edges well even at 1x). Composer MSAA
-    // is OFF here too (redundant with SMAA, and the multisample resolve is
-    // expensive). Bump dprMode to 1.25x/1.5x/2x in the perf panel — or switch to
-    // the cinematic tier — on a GPU with headroom.
-    dprMode: '1x',
+    // performance tier uses a modest 1.25x cap: SMAA cleans polygon edges, but
+    // Darwin's face/buttons and thin vegetation need a little real sample
+    // coverage to avoid crunchy subpixel breakup.
+    dprMode: '1.25x',
     msaaSamples: 0,
     ao: false,
     reflections: false,
@@ -586,7 +584,7 @@ function PostFX({ enabled, ao, multisampling = 2 }) {
           denoiseRadius={12}
         />
       )}
-      <Bloom intensity={0.3} luminanceThreshold={0.96} luminanceSmoothing={0.06} mipmapBlur radius={0.28} />
+      <Bloom intensity={0.22} luminanceThreshold={0.985} luminanceSmoothing={0.04} mipmapBlur radius={0.24} />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
           touching any material. Merges into the existing effect pass. */}

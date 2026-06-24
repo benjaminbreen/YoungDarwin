@@ -102,11 +102,16 @@ export const locations = [
       },
       {
         specimenId: 'lavalizard',
-        position: [-14.2, 0, -10.4],
+        position: [-12, 0, 0],
         behavior: 'bask',
-        sceneScale: 1.12,
-        habitatRadiusX: 0.42,
-        habitatRadiusZ: 0.18,
+        sceneScale: 1.9,
+        habitatRadiusX: 2.4,
+        habitatRadiusZ: 1.2,
+        spawnScatter: {
+          radiusX: 1.8,
+          radiusZ: 0.8,
+          bounds: { minX: -16, maxX: -7, minZ: -2.5, maxZ: 3.5 },
+        },
       },
       {
         specimenId: 'crab',
@@ -175,9 +180,9 @@ export const locations = [
         specimenId: 'lavalizard',
         position: [34, 0, -6],
         behavior: 'bask',
-        sceneScale: 1.12,
-        habitatRadiusX: 0.42,
-        habitatRadiusZ: 0.18,
+        sceneScale: 1.7,
+        habitatRadiusX: 2.4,
+        habitatRadiusZ: 1.2,
       },
       {
         specimenId: 'crab',
@@ -231,9 +236,9 @@ export const locations = [
         specimenId: 'lavalizard',
         position: [40, 0, -8],
         behavior: 'bask',
-        sceneScale: 1.08,
-        habitatRadiusX: 0.42,
-        habitatRadiusZ: 0.18,
+        sceneScale: 1.7,
+        habitatRadiusX: 2.4,
+        habitatRadiusZ: 1.2,
       },
       {
         specimenId: 'crab',
@@ -270,12 +275,12 @@ export const locations = [
     ]
   },
 
-  // 3d) GRASS_TEST — temporary renderer lab for dense procedural grass.
-  // Reachable from the island map; remove after the grass system is promoted.
+  // 3d) GRASS_TEST — textured coastal grass/path material test.
+  // Reachable from the island map; keep as the current art-direction proving ground.
   {
     id: 'GRASS_TEST',
     name: 'Grass Test',
-    description: 'A temporary playable field for tuning dense procedural grass, wind, and player parting before the system is folded back into Floreana.',
+    description: 'A playable coastal grass path test for tuning reusable sandy track textures, dry grass clumps, and shoulder transitions before the setup is folded back into Floreana.',
     x: 2,
     y: -2,
     color: '#79a84c',
@@ -285,18 +290,18 @@ export const locations = [
     npcs: [],
     boundaries: {},
     discoveries: [
-      'The grass bends in waves across the test field, making the wind visible before it is heard.'
+      'A sandy footpath cuts through salt-pruned coastal grass, with dry stems crowding the shoulders.'
     ],
     notableFeatures: [
-      'Dense short blades fill the walkable field so the grass reads as a continuous surface instead of isolated props.',
-      'Darwin can walk through the meadow while nearby blade tips part and recover.',
-      'This map is an implementation test and is not intended to remain in the final island route.'
+      'The ground uses repeated path and shoulder textures blended by splat masks instead of a flat procedural color.',
+      'The grass uses the reusable dry-grass GLB clumps with per-instance scale, tint, and wind variation.',
+      'This map is the current standardization test for reusable coastal grass and footpath assets.'
     ],
     narration: {
       weather: 'sunny',
-      sounds: ['wind through grass', 'soft footfalls', 'distant field insects'],
-      loadingNote: 'A temporary renderer test field for dense grass and player interaction.',
-      educationalNote: 'This test map isolates grass rendering so visual quality can be judged without Floreana coastal clutter.',
+      sounds: ['wind through dry grass', 'soft sand footfalls', 'distant surf'],
+      loadingNote: 'A textured coastal grass path test for reusable Floreana terrain assets.',
+      educationalNote: 'This test map isolates path, shoulder, and dry-grass rendering so the materials can be reused consistently in authored regions.',
     },
   },
 
@@ -311,7 +316,25 @@ export const locations = [
     color: '#5f8d47',
     type: 'grassland',
     validMoves: [],
-    specimens: [],
+    specimens: ['lavalizard','booby'],
+    specimenPlacements: [
+      {
+        specimenId: 'lavalizard',
+        position: [-6, 0, -2],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 5.2,
+        habitatRadiusZ: 3.0,
+      },
+      {
+        specimenId: 'booby',
+        position: [6, 0, -1.5],
+        behavior: 'curious',
+        sceneScale: 1.28,
+        habitatRadiusX: 6.5,
+        habitatRadiusZ: 3.5,
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -357,11 +380,29 @@ export const locations = [
       },
       {
         specimenId: 'lavalizard',
-        position: [22.2, 0, -9.7],
+        position: [10, 0, -8],
         behavior: 'scurry',
-        sceneScale: 1.08,
-        habitatRadiusX: 1.25,
-        habitatRadiusZ: 0.58,
+        sceneScale: 1.45,
+        habitatRadiusX: 3.2,
+        habitatRadiusZ: 1.6,
+        spawnScatter: {
+          radiusX: 2.8,
+          radiusZ: 1.2,
+          bounds: { minX: 5, maxX: 17, minZ: -11.5, maxZ: -5.5 },
+        },
+      },
+      {
+        specimenId: 'booby',
+        position: [-7.5, 0, -8.8],
+        behavior: 'curious',
+        sceneScale: 1.05,
+        habitatRadiusX: 7.5,
+        habitatRadiusZ: 3.2,
+        spawnScatter: {
+          radiusX: 4.4,
+          radiusZ: 1.6,
+          bounds: { minX: -16, maxX: 2, minZ: -12, maxZ: -5.2 },
+        },
       },
       {
         specimenId: 'marineIguana',
@@ -414,7 +455,7 @@ export const locations = [
     color: '#6f8f4e',
     type: 'wetland',
     validMoves: ['S'],
-    specimens: ['flamingo','frigatebird','booby'],
+    specimens: ['flamingo','frigatebird','booby','lavalizard'],
     specimenPlacements: [
       {
         specimenId: 'flamingo',
@@ -439,6 +480,22 @@ export const locations = [
         sceneScale: 0.9,
         habitatRadiusX: 3.8,
         habitatRadiusZ: 2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-18, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 4.6,
+        habitatRadiusZ: 2.5,
+      },
+      {
+        specimenId: 'booby',
+        position: [-6, 0, 14],
+        behavior: 'curious',
+        sceneScale: 1.25,
+        habitatRadiusX: 7.2,
+        habitatRadiusZ: 3.6,
       },
     ],
     npcs: [],
@@ -469,7 +526,7 @@ export const locations = [
     color: '#758c4a',
     type: 'wetland',
     validMoves: ['SW'],
-    specimens: ['flamingo','frigatebird','booby'],
+    specimens: ['flamingo','frigatebird','booby','lavalizard'],
     specimenPlacements: [
       {
         specimenId: 'flamingo',
@@ -494,6 +551,134 @@ export const locations = [
         sceneScale: 0.9,
         habitatRadiusX: 3.8,
         habitatRadiusZ: 2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-24, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-18, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-12, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-6, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [0, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [8, 0, 14.2],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [16, 0, 10],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [24, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.2,
+      },
+      {
+        specimenId: 'booby',
+        position: [-27, 0, 10],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [-20, 0, 10],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [-13, 0, 10],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [-4, 0, 12],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [6, 0, 14.2],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [15, 0, 8],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [22, 0, 14],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'booby',
+        position: [28, 0, -2],
+        behavior: 'curious',
+        sceneScale: 1.32,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.8,
       },
     ],
     npcs: [],
@@ -549,6 +734,22 @@ export const locations = [
         sceneScale: 0.9,
         habitatRadiusX: 3.8,
         habitatRadiusZ: 2,
+      },
+      {
+        specimenId: 'lavalizard',
+        position: [-18, 0, 14],
+        behavior: 'scurry',
+        sceneScale: 2.0,
+        habitatRadiusX: 4.6,
+        habitatRadiusZ: 2.5,
+      },
+      {
+        specimenId: 'booby',
+        position: [-6, 0, 14],
+        behavior: 'curious',
+        sceneScale: 1.25,
+        habitatRadiusX: 7.2,
+        habitatRadiusZ: 3.6,
       },
     ],
     npcs: [],
@@ -899,7 +1100,7 @@ export const locations = [
   {
     id: 'EL_MIRADOR',
     name: 'El Mirador',
-    description: 'A vantage point in the eastern highlands with steep drops and panoramic views.',
+    description: 'A grassy highland lookout where a red dirt footpath climbs toward steep drops and panoramic views.',
     x: 4,
     y: 2,
     color: '#bdb76b',
@@ -909,13 +1110,19 @@ export const locations = [
     npcs: [],
     boundaries: {},
     discoveries: [
-      'From this cliff edge, you glimpse hidden coves along the southeastern coast.'
+      'From this cliff edge, a red dirt track winds through dry grass before the slope falls toward hidden southeastern coves.'
     ],
     notableFeatures: [
-      'Jagged precipices fade into swirling mist down-slope.',
-      'A hush broken only by the breeze rattling sparse foliage.',
-      'A vantage revealing both ocean and highland in a single sweep.'
-    ]
+      'A compacted red dirt path cuts across the hillside and stays readable through grass-litter shoulders.',
+      'Dry highland grass thickens away from the tread, with stones and pale shell flecks breaking up the ground.',
+      'The ridge reveals both ocean and highland in a single sweep.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['wind through dry highland grass', 'loose gravel underfoot', 'distant surf below the ridge'],
+      loadingNote: 'A red dirt highland path climbs through dry grass toward El Mirador.',
+      educationalNote: 'El Mirador tests the transition from coastal dry grass to steeper highland terrain, where slope and wind shape vegetation density.',
+    },
   },
 
   // 21) WATKINS

@@ -3,8 +3,10 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
+import { updateRuntimeFootContacts } from '../../store';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import {
   darwin5ClipFallback,
@@ -33,7 +35,7 @@ function normalizeImportedMaterials(scene, asset, motion = null) {
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material) return;
-      material.side = THREE.FrontSide;
+      material.side = asset.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
       material.toneMapped = false;
       if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.02);
       if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.72);
@@ -326,6 +328,11 @@ const ONE_SHOT_CLIPS = new Set([
   'heavyToolSwing',
   'torchMeleeAttack',
   'gather',
+  'gatherGround',
+  'gatherChestHeight',
+  'butterflyNetSwing',
+  'pushStart',
+  'pushStop',
   'torchInspectForward',
   'write',
   'kneelInspect',
@@ -408,6 +415,9 @@ const CLIP_SETTINGS = {
   runningTurnRight: { fade: 0.05 },
   wallRun: { fade: 0.06 },
   standToSit: { fade: 0.12 },
+  pushLow: { loop: true, fade: 0.08 },
+  pushMedium: { loop: true, fade: 0.08 },
+  pushHeavy: { loop: true, fade: 0.08 },
 };
 
 const CLIP_FALLBACKS = {
@@ -438,9 +448,17 @@ const CLIP_FALLBACKS = {
   swingHammer: 'torchMeleeAttack',
   swingNet: 'torchMeleeAttack',
   swingTool: 'torchMeleeAttack',
+  butterflyNetSwing: 'swingTool',
   runningTurnLeft: 'runningTurn180',
   runningTurnRight: 'runningTurn180',
   gather: 'torchInspectForward',
+  gatherGround: 'gather',
+  gatherChestHeight: 'gatherGround',
+  pushStart: 'pushMedium',
+  pushLow: 'pushMedium',
+  pushMedium: 'gather',
+  pushHeavy: 'pushMedium',
+  pushStop: 'pushMedium',
   kneelInspect: 'torchInspectForward',
   standingInspectDownward: 'torchInspectForward',
   write: 'torchInspectForward',
@@ -457,10 +475,46 @@ const CLIP_FALLBACKS = {
 const FOOT_PLANT_MAX_UP = 0.075;
 const FOOT_PLANT_MAX_DOWN = -0.045;
 const FOOT_PLANT_MAX_SPEED = 2.1;
+const VISUAL_GROUNDING_MAX_UP = 0.1;
+const VISUAL_GROUNDING_SOLE_SINK = 0.006;
+const VISUAL_GROUNDING_PROBE_RANGE = 0.24;
 const FOOT_PLANT_BONE = {
   left: /leftfoot$/i,
   right: /rightfoot$/i,
 };
+const FOOT_PROBE_PATTERNS = {
+  left: [/lefttoebase$/i, /lefttoe_end$/i, /leftfoot$/i],
+  right: [/righttoebase$/i, /righttoe_end$/i, /rightfoot$/i],
+};
+const FOOT_CONTACT_PROFILES = {
+  walk: { left: 0.12, right: 0.62, width: 0.18 },
+  holdWalk: { left: 0.12, right: 0.62, width: 0.18 },
+  holdToolWalk: { left: 0.12, right: 0.62, width: 0.18 },
+  torchWalk: { left: 0.12, right: 0.62, width: 0.18 },
+  walkRifle: { left: 0.12, right: 0.62, width: 0.18 },
+  walkCarry: { left: 0.14, right: 0.64, width: 0.2 },
+  tiredWalk: { left: 0.13, right: 0.63, width: 0.22 },
+  injuredWalk: { left: 0.13, right: 0.63, width: 0.22 },
+  injuredWalkSevere: { left: 0.13, right: 0.63, width: 0.24 },
+  injuredWalkCritical: { left: 0.13, right: 0.63, width: 0.25 },
+  walkBackwards: { left: 0.62, right: 0.12, width: 0.18 },
+  run: { left: 0.08, right: 0.58, width: 0.14 },
+  jog: { left: 0.09, right: 0.59, width: 0.16 },
+  holdToolRun: { left: 0.08, right: 0.58, width: 0.14 },
+  torchRun: { left: 0.08, right: 0.58, width: 0.14 },
+  runRifle: { left: 0.08, right: 0.58, width: 0.14 },
+  wadeWalk: { left: 0.13, right: 0.63, width: 0.21 },
+};
+
+function phasePulse(phase, center, width) {
+  const distance = Math.abs(((phase - center + 0.5) % 1) - 0.5);
+  return THREE.MathUtils.clamp(1 - distance / Math.max(0.001, width), 0, 1);
+}
+
+function footProfileForClip(name) {
+  const normalized = normalizeClipName(name);
+  return FOOT_CONTACT_PROFILES[name] || FOOT_CONTACT_PROFILES[normalized] || null;
+}
 
 function isOneShotClip(name) {
   return ONE_SHOT_CLIPS.has(normalizeClipName(name));
@@ -561,11 +615,21 @@ function GLBPrimitive({
     });
     return ported.length ? ownAnimations.concat(ported) : ownAnimations;
   }, [ownAnimations, sourceAnimations, sourceAsset, asset.scale]);
-  const importedScene = useMemo(() => prepareImportedScene(scene, assetId, asset), [scene, assetId, asset]);
+  const importedScene = useMemo(() => {
+    const cloned = cloneSkeleton(scene);
+    return prepareImportedScene(cloned, assetId, asset);
+  }, [scene, assetId, asset]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   const debugBounds = useMemo(() => new THREE.Box3(), []);
   const debugSize = useMemo(() => new THREE.Vector3(), []);
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
+  const visualGroundWorld = useMemo(() => new THREE.Vector3(), []);
+  const visualGroundOffset = useRef(0);
+  const footGrounding = useRef({
+    left: { bone: null, contact: 0, pulse: 0, wasDown: false },
+    right: { bone: null, contact: 0, pulse: 0, wasDown: false },
+    stepId: 0,
+  });
   const actions = useMemo(() => {
     const result = {};
     animations.forEach(clip => {
@@ -697,12 +761,22 @@ function GLBPrimitive({
       left: { bone: null, offset: 0, correction: new THREE.Vector3() },
       right: { bone: null, offset: 0, correction: new THREE.Vector3() },
     };
+    const probes = {
+      left: { bone: null, contact: 0, pulse: 0, wasDown: false },
+      right: { bone: null, contact: 0, pulse: 0, wasDown: false },
+      stepId: footGrounding.current.stepId,
+    };
     importedScene.traverse(object => {
       if (!object.isBone) return;
       if (FOOT_PLANT_BONE.left.test(object.name)) next.left.bone = object;
       if (FOOT_PLANT_BONE.right.test(object.name)) next.right.bone = object;
+      Object.entries(FOOT_PROBE_PATTERNS).forEach(([side, patterns]) => {
+        if (probes[side].bone) return;
+        if (patterns.some(pattern => pattern.test(object.name))) probes[side].bone = object;
+      });
     });
     footPlant.current = next;
+    footGrounding.current = probes;
   }, [importedScene]);
 
   // Runs after normalize so the rim/roughness override sits on top of the cel
@@ -792,10 +866,125 @@ function GLBPrimitive({
     });
   }, [asset.footPlanting, assetId, footPlantTemps, grounding, positionAnimatedBones]);
 
+  const applyVisualGrounding = useCallback((delta) => {
+    const motionState = grounding?.motionRef?.current;
+    const adapter = grounding?.collisionAdapter;
+    const enabled = asset.visualGrounding === true;
+    const isDarwin = String(assetId).startsWith('darwin');
+    const canGround = Boolean(
+      enabled
+      && adapter
+      && group.current
+      && motionState
+      && !motionState.airborne
+      && !motionState.swimming
+      && Math.abs(motionState.groundDistance ?? 0) <= 0.28,
+    );
+
+    const action = activeAction.current;
+    const clip = action?.getClip?.();
+    const duration = clip?.duration || 0;
+    const phase = duration > 0 ? (((action.time || 0) / duration) % 1 + 1) % 1 : 0;
+    const profile = footProfileForClip(clip?.name || activeRequest.current);
+    const sampled = {};
+    let targetOffset = 0;
+    if (canGround) {
+      const deltas = [];
+      Object.entries(footGrounding.current).forEach(([side, entry]) => {
+        if (side === 'stepId' || !entry.bone) return;
+        entry.bone.getWorldPosition(visualGroundWorld);
+        const ground = adapter.groundInfo(visualGroundWorld, { supportRadius: 0.07 });
+        const footGap = visualGroundWorld.y - ground.y;
+        const phaseContact = profile ? phasePulse(phase, profile[side], profile.width) : 0.5;
+        const proximity = THREE.MathUtils.clamp(1 - Math.abs(footGap) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
+        sampled[side] = {
+          x: visualGroundWorld.x,
+          y: visualGroundWorld.y,
+          z: visualGroundWorld.z,
+          groundY: ground.y,
+          gap: footGap,
+          contact: proximity * (0.34 + phaseContact * 0.66),
+          phaseContact,
+        };
+        if (Math.abs(footGap) <= VISUAL_GROUNDING_PROBE_RANGE || phaseContact > 0.55) {
+          deltas.push((ground.y - VISUAL_GROUNDING_SOLE_SINK) - visualGroundWorld.y);
+        }
+      });
+      if (deltas.length) {
+        const averageDelta = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+        targetOffset = THREE.MathUtils.clamp(
+          visualGroundOffset.current + Math.max(0, averageDelta),
+          0,
+          VISUAL_GROUNDING_MAX_UP,
+        );
+      }
+    }
+
+    visualGroundOffset.current = THREE.MathUtils.damp(visualGroundOffset.current, targetOffset, 18, delta);
+    if (group.current) {
+      group.current.position.y = (asset.yOffset || 0) + visualGroundOffset.current;
+    }
+
+    if (isDarwin) {
+      const contacts = {};
+      let lastStep = null;
+      Object.entries(footGrounding.current).forEach(([side, entry]) => {
+        if (side === 'stepId' || !entry.bone) return;
+        entry.bone.getWorldPosition(visualGroundWorld);
+        const ground = adapter?.groundInfo?.(visualGroundWorld, { supportRadius: 0.07 }) || { y: visualGroundWorld.y };
+        const sample = sampled[side] || {};
+        const proximity = THREE.MathUtils.clamp(1 - Math.abs(visualGroundWorld.y - ground.y) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
+        const phaseContact = profile ? phasePulse(phase, profile[side], profile.width) : (sample.phaseContact ?? 0.5);
+        const rawContact = canGround ? proximity * (0.34 + phaseContact * 0.66) : 0;
+        entry.contact = THREE.MathUtils.damp(entry.contact, rawContact, 20, delta);
+        const down = entry.contact > 0.68 && phaseContact > 0.45 && (motionState?.speed || 0) > 0.45;
+        entry.pulse = Math.max(0, entry.pulse - delta * 5.6);
+        if (down && !entry.wasDown) {
+          entry.pulse = 1;
+          footGrounding.current.stepId += 1;
+          lastStep = {
+            side,
+            id: footGrounding.current.stepId,
+            x: visualGroundWorld.x,
+            y: ground.y + 0.018,
+            z: visualGroundWorld.z,
+            intensity: THREE.MathUtils.clamp(0.32 + (motionState?.speed || 0) / 7.5, 0.22, 1),
+            time: performance.now() / 1000,
+          };
+        }
+        entry.wasDown = down;
+        contacts[side] = {
+          x: visualGroundWorld.x,
+          y: visualGroundWorld.y,
+          z: visualGroundWorld.z,
+          groundY: ground.y,
+          contact: entry.contact,
+          pulse: entry.pulse,
+          phase,
+          active: canGround,
+        };
+      });
+      updateRuntimeFootContacts(lastStep ? { ...contacts, lastStep } : contacts);
+    }
+
+    if (typeof window !== 'undefined' && enabled && isDarwin) {
+      window.__darwinVisualGroundingDebug = {
+        ...(window.__darwinVisualGroundingDebug || {}),
+        [assetId]: {
+          offset: visualGroundOffset.current,
+          left: footGrounding.current.left.contact,
+          right: footGrounding.current.right.contact,
+          canGround,
+        },
+      };
+    }
+  }, [asset.visualGrounding, asset.yOffset, assetId, grounding, visualGroundWorld]);
+
   useFrame((frameState, delta) => {
     if (!animations.length) return;
     mixer.update(delta);
     applyFootPlanting(delta);
+    applyVisualGrounding(delta);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {
       const elapsed = frameState.clock.elapsedTime;
       if (group.current && elapsed - lastBoundsDebugAt.current >= 0.3) {

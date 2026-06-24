@@ -12,6 +12,21 @@ const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
+function loadBladeTexture(path) {
+  if (!path || typeof window === 'undefined') return null;
+  const texture = new THREE.TextureLoader().load(path);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 4;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function firstMeshGeometry(scene) {
   let geometry = null;
   scene.traverse(object => {
@@ -29,6 +44,54 @@ function cloneWithNeutralVertexColors(geometry) {
   white.fill(1);
   clone.setAttribute('color', new THREE.BufferAttribute(white, 3));
   return clone;
+}
+
+function applyBladeAtlasTint(material, texture, strength = 0.26) {
+  if (!texture) return material;
+  const previousHook = material.onBeforeCompile;
+  const previousCacheKey = material.customProgramCacheKey;
+  material.defines = { ...(material.defines || {}), USE_UV: '' };
+  material.onBeforeCompile = (shader, renderer) => {
+    if (previousHook) previousHook(shader, renderer);
+    shader.uniforms.uDryGrassBladeAtlas = { value: texture };
+    shader.uniforms.uDryGrassBladeAtlasStrength = { value: strength };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec2 vDryGrassAtlasUv;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vDryGrassAtlasUv = uv;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform sampler2D uDryGrassBladeAtlas;
+        uniform float uDryGrassBladeAtlasStrength;
+        varying vec2 vDryGrassAtlasUv;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        vec4 bladeAtlasTexel = texture2D(uDryGrassBladeAtlas, clamp(vDryGrassAtlasUv, vec2(0.0), vec2(1.0)));
+        float bladeAtlasMask = smoothstep(0.18, 0.56, bladeAtlasTexel.a);
+        vec3 bladeAtlasColor = pow(max(bladeAtlasTexel.rgb, vec3(0.0)), vec3(2.2));
+        float bladeAtlasLuma = dot(bladeAtlasColor, vec3(0.299, 0.587, 0.114));
+        vec3 bladeAtlasFiber = mix(vec3(bladeAtlasLuma), bladeAtlasColor * vec3(1.08, 1.02, 0.84), 0.72);
+        vec3 bladeAtlasTinted = diffuseColor.rgb * mix(vec3(0.78, 0.88, 0.58), bladeAtlasFiber * 1.38, 0.68);
+        diffuseColor.rgb = mix(diffuseColor.rgb, bladeAtlasTinted, bladeAtlasMask * uDryGrassBladeAtlasStrength);`,
+      );
+  };
+  material.customProgramCacheKey = () => {
+    const base = previousCacheKey ? previousCacheKey() : 'dry-grass-patch';
+    return `${base}|blade-atlas|${strength.toFixed(2)}`;
+  };
+  material.needsUpdate = true;
+  return material;
 }
 
 function layerCullBounds(items, maxVisibleDistance) {
@@ -71,6 +134,7 @@ export function DryGrassPatchField({
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
 
   const geometry = useMemo(() => cloneWithNeutralVertexColors(firstMeshGeometry(scene)), [scene]);
+  const bladeTexture = useMemo(() => loadBladeTexture(layer.bladeTexturePath), [layer.bladeTexturePath]);
   const material = useMemo(() => {
     if (!geometry) return null;
     const grassMaterial = new THREE.MeshStandardMaterial({
@@ -84,13 +148,15 @@ export function DryGrassPatchField({
       dithering: true,
     });
     grassMaterial.forceSinglePass = true;
-    return applyFoliageMotion(grassMaterial, geometry, layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 });
-  }, [geometry, layer]);
+    const motionMaterial = applyFoliageMotion(grassMaterial, geometry, layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 });
+    return applyBladeAtlasTint(motionMaterial, bladeTexture, layer.bladeTextureStrength ?? 0.26);
+  }, [geometry, layer, bladeTexture]);
 
   useLayoutEffect(() => () => {
     geometry?.dispose();
     material?.dispose();
-  }, [geometry, material]);
+    bladeTexture?.dispose();
+  }, [geometry, material, bladeTexture]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;

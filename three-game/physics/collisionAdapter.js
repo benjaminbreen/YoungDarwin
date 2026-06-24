@@ -20,6 +20,7 @@ const STANCE_HALF_WIDTH = 0.28;
 const STANCE_HALF_LENGTH = 0.34;
 const STANCE_TILT_SCALE = 0.32;
 const CACHE_PRECISION = 1000;
+const PLAYER_GROUND_CLEARANCE = 0.015;
 
 function cacheCoord(value) {
   return Math.round((Number(value) || 0) * CACHE_PRECISION);
@@ -46,7 +47,7 @@ function rapierGroundY(rapierContext, position) {
   );
   const hit = rapierContext.world.castRay(ray, 18, true);
   if (!hit) return null;
-  return originY - hit.toi + 0.04;
+  return originY - hit.toi + PLAYER_GROUND_CLEARANCE;
 }
 
 export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}) {
@@ -68,8 +69,8 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     const cached = frameCache.terrain.get(key);
     if (cached) return cached;
     const sample = {
-      visualY: terrainHeight(x, z, zoneId) + 0.04,
-      movementY: movementTerrainHeight(x, z, zoneId) + 0.04,
+      visualY: terrainHeight(x, z, zoneId) + PLAYER_GROUND_CLEARANCE,
+      movementY: movementTerrainHeight(x, z, zoneId) + PLAYER_GROUND_CLEARANCE,
     };
     frameCache.terrain.set(key, sample);
     return sample;
@@ -91,7 +92,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     let result;
     if (obstacleGroundY !== null && obstacleGroundY !== undefined) {
       result = {
-        y: obstacleGroundY + 0.04,
+        y: obstacleGroundY + PLAYER_GROUND_CLEARANCE,
         source: 'authored-obstacle',
         terrainY: visualTerrainY,
         movementTerrainY: terrainGroundY,

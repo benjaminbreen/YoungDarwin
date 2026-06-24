@@ -45,6 +45,11 @@ export const threeRuntimeState = {
     position: { ...INITIAL_PLAYER_POSE.position },
     facing: { ...INITIAL_PLAYER_POSE.facing },
   },
+  footContacts: {
+    left: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
+    right: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
+    lastStep: { side: null, id: 0, x: 0, y: 0, z: 0, intensity: 0, time: 0 },
+  },
 };
 
 function clamp(value, min, max) {
@@ -86,6 +91,48 @@ export function updateRuntimePlayerPose(playerPose) {
   threeRuntimeState.playerPose.facing.y = fy;
   threeRuntimeState.playerPose.facing.z = fz;
   return threeRuntimeState.playerPose;
+}
+
+export function getRuntimeFootContacts() {
+  return threeRuntimeState.footContacts;
+}
+
+export function updateRuntimeFootContacts(next = {}) {
+  const target = threeRuntimeState.footContacts;
+  ['left', 'right'].forEach(side => {
+    const source = next[side];
+    if (!source) return;
+    const contact = target[side];
+    const x = Number(source.x);
+    const y = Number(source.y);
+    const z = Number(source.z);
+    const groundY = Number(source.groundY);
+    const strength = Number(source.contact);
+    const pulse = Number(source.pulse);
+    const phase = Number(source.phase);
+    if (Number.isFinite(x)) contact.x = x;
+    if (Number.isFinite(y)) contact.y = y;
+    if (Number.isFinite(z)) contact.z = z;
+    if (Number.isFinite(groundY)) contact.groundY = groundY;
+    if (Number.isFinite(strength)) contact.contact = clamp(strength, 0, 1);
+    if (Number.isFinite(pulse)) contact.pulse = clamp(pulse, 0, 1);
+    if (Number.isFinite(phase)) contact.phase = phase;
+    contact.active = Boolean(source.active);
+  });
+  if (next.lastStep) {
+    const source = next.lastStep;
+    const id = Number(source.id);
+    if (Number.isFinite(id) && id > target.lastStep.id) {
+      target.lastStep.side = source.side === 'right' ? 'right' : 'left';
+      target.lastStep.id = id;
+      target.lastStep.x = Number.isFinite(Number(source.x)) ? Number(source.x) : target.lastStep.x;
+      target.lastStep.y = Number.isFinite(Number(source.y)) ? Number(source.y) : target.lastStep.y;
+      target.lastStep.z = Number.isFinite(Number(source.z)) ? Number(source.z) : target.lastStep.z;
+      target.lastStep.intensity = clamp(Number(source.intensity) || 0, 0, 1);
+      target.lastStep.time = Number.isFinite(Number(source.time)) ? Number(source.time) : target.lastStep.time;
+    }
+  }
+  return target;
 }
 
 function makeJournalEntry({ specimen, tool, result, documented = false, location, day, timeOfDay }) {
@@ -549,12 +596,13 @@ export const useThreeGameStore = create((set, get) => ({
     const state = get();
     const specimenId = state.nearbySpecimenId || state.selectedSpecimenId;
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
-    const specimen = zoneSpecimens.find(item => item.id === specimenId);
+    const specimen = zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId);
     const tool = threeTools.find(item => item.id === state.activeToolId) || threeTools.find(item => item.id === 'hands');
-    if (!specimen || state.collectedSpecimenIds.includes(specimen.id)) return null;
+    if (!specimen) return null;
 
     const islandLocation = getThreeIslandLocation(state.currentZoneId);
-    const documented = tool.id === 'sketch';
+    const alreadyCollected = state.collectedSpecimenIds.includes(specimen.id);
+    const documented = tool.id === 'sketch' || alreadyCollected;
 
     // Supplies and case space gate physical collection (documenting is always free).
     if (!documented) {
@@ -576,11 +624,13 @@ export const useThreeGameStore = create((set, get) => ({
     const result = documented
       ? {
           success: false,
-          reason: `You document the ${specimen.name} carefully without removing it from its habitat.`,
+          reason: alreadyCollected
+            ? `You already have a ${specimen.name} specimen, so you document this living example without removing it from its habitat.`
+            : `You document the ${specimen.name} carefully without removing it from its habitat.`,
           outcomeType: 'documented',
-          evidence: 'field sketch and behavior note',
+          evidence: alreadyCollected ? 'repeat sighting and behavior note' : 'field sketch and behavior note',
           damage: 0,
-          scoreDelta: 1,
+          scoreDelta: alreadyCollected ? 0 : 1,
           fatigueDelta: 1,
         }
       : evaluateCollectionAttempt({
@@ -611,7 +661,9 @@ export const useThreeGameStore = create((set, get) => ({
       curiosity: clamp(current.curiosity + (documented ? 10 : result.scoreDelta * 5), 0, MAX_CURIOSITY),
       inventory: collected ? [...current.inventory, { ...specimen, condition: result.outcomeType }] : current.inventory,
       journal: [...current.journal, entry],
-      collectedSpecimenIds: collected ? [...current.collectedSpecimenIds, specimen.id] : current.collectedSpecimenIds,
+      collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(specimen.id)
+        ? [...current.collectedSpecimenIds, specimen.id]
+        : current.collectedSpecimenIds,
       documentedSpecimenIds: documented && !current.documentedSpecimenIds.includes(specimen.id)
         ? [...current.documentedSpecimenIds, specimen.id]
         : current.documentedSpecimenIds,

@@ -44,6 +44,28 @@ const HAND_TOOLS = [
 ];
 
 const PLAYER_MODEL_CYCLE = ['darwin', 'darwinCandidate2', 'darwin4', 'darwin5'];
+const STRIDE_TIME_SCALE = {
+  darwin: { walk: 1.03, run: 1.02, jog: 1.03 },
+  darwinCandidate2: { walk: 1.04, run: 1.02, jog: 1.03 },
+  darwin4: { walk: 1.04, run: 1.02, jog: 1.03 },
+  darwin5: {
+    walk: 1.1,
+    run: 1.05,
+    jog: 1.08,
+    holdWalk: 1.08,
+    holdToolWalk: 1.08,
+    torchWalk: 1.08,
+    walkRifle: 1.08,
+    walkCarry: 1.09,
+    tiredWalk: 1.06,
+  },
+};
+
+function calibratedStrideTimeScale(modelAssetId, clip, scale) {
+  const table = STRIDE_TIME_SCALE[modelAssetId] || null;
+  const multiplier = table?.[clip] || table?.[clip.includes('Run') || clip === 'run' ? 'run' : 'walk'] || 1;
+  return scale * multiplier;
+}
 
 function darwin5StandingJumpClip(charge) {
   return charge >= 0.45 ? 'standingJumpHigh' : 'standingJumpShort';
@@ -84,7 +106,8 @@ function darwin5TorchActionClip(action, crouching) {
 }
 
 function darwin5HeldToolActionClip(action) {
-  if (action === 'swingHammer' || action === 'swingNet' || action === 'swingTool') return 'heavyToolSwing';
+  if (action === 'swingNet') return 'butterflyNetSwing';
+  if (action === 'swingHammer' || action === 'swingTool') return 'heavyToolSwing';
   return null;
 }
 
@@ -99,11 +122,15 @@ function darwin5AdaptedActionClip(action) {
   if (action === 'climbWaistHeight') return { clip: 'climbWaistHeight', timeScale: 1.65, fade: 0.05 };
   if (action === 'climbHeadHeight') return { clip: 'climbHeadHeight', timeScale: 1.45, fade: 0.05 };
   if (action === 'fallingToRoll') return { clip: 'fallingToRoll', timeScale: 1.2, fade: 0.05 };
-  if (action === 'swingHammer' || action === 'swingNet') return 'heavyToolSwing';
+  if (action === 'swingNet') return 'butterflyNetSwing';
+  if (action === 'swingHammer') return 'heavyToolSwing';
+  if (action === 'butterflyNetSwing') return 'butterflyNetSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'lookAround' || action === 'lookAroundShort') return action;
   if (action === 'write') return 'write';
-  if (action === 'gather') return 'gather';
+  if (action === 'gather' || action === 'gatherGround') return 'gatherGround';
+  if (action === 'gatherChestHeight') return 'gatherChestHeight';
+  if (action === 'pushStart' || action === 'pushLow' || action === 'pushMedium' || action === 'pushHeavy' || action === 'pushStop') return action;
   if (action === 'standingInspectDownward' || action === 'point') return 'torchInspectForward';
   if (action === 'vault') return 'vault';
   if (action === 'shoulderHitAndFall') return 'shoulderHitAndFall';
@@ -410,6 +437,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     const walkScale = THREE.MathUtils.clamp(speed / PLAYER.walkSpeed, 0.72, 1.24);
     const runScale = THREE.MathUtils.clamp(speed / PLAYER.runSpeed, 0.78, 1.28);
     const tiredRunScale = THREE.MathUtils.clamp(speed / Math.max(PLAYER.walkSpeed, PLAYER.runSpeed * 0.74), 0.72, 1.18);
+    const stride = (clip, scale) => calibratedStrideTimeScale(modelAssetId, clip, scale);
     const gameState = useThreeGameStore.getState();
     const toolId = gameState.activeToolId;
     const holdingTool = toolId === 'insect_net' || toolId === 'snare' || toolId === 'hammer';
@@ -493,7 +521,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
             const crouchScale = motionRef.current.crouchRunning
               ? THREE.MathUtils.clamp(speed / (PLAYER.walkSpeed * 0.92), 0.88, 1.35)
               : Math.max(0.7, walkScale * 0.85);
-            return { clip: 'rifleCrouchWalk', timeScale: crouchScale };
+            return { clip: 'rifleCrouchWalk', timeScale: stride('walkRifle', crouchScale) };
           }
           return 'rifleKneelIdle';
         }
@@ -501,28 +529,28 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       }
       if (motionRef.current.strafeLeft) {
         return speed > PLAYER.walkSpeed * 1.15
-          ? { clip: 'runStrafeLeft', timeScale: runScale }
-          : { clip: 'walkStrafeLeft', timeScale: walkScale };
+          ? { clip: 'runStrafeLeft', timeScale: stride('run', runScale) }
+          : { clip: 'walkStrafeLeft', timeScale: stride('walk', walkScale) };
       }
       if (motionRef.current.strafeRight) {
         return speed > PLAYER.walkSpeed * 1.15
-          ? { clip: 'runStrafeRight', timeScale: runScale }
-          : { clip: 'walkStrafeRight', timeScale: walkScale };
+          ? { clip: 'runStrafeRight', timeScale: stride('run', runScale) }
+          : { clip: 'walkStrafeRight', timeScale: stride('walk', walkScale) };
       }
       if (motionRef.current.movingBackward) {
         return injured
-          ? { clip: 'injuredWalkBackwards', timeScale: Math.max(0.62, walkScale * 0.88) }
-          : { clip: 'walkBackwards', timeScale: walkScale };
+          ? { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) }
+          : { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
       }
-      if (motionRef.current.running) return { clip: 'runRifle', timeScale: runScale };
-      if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: walkScale };
+      if (motionRef.current.running) return { clip: 'runRifle', timeScale: stride('run', runScale) };
+      if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: stride('walkRifle', walkScale) };
       return 'aim';
     }
     if (motionRef.current.crouching && modelAssetId === 'darwin5' && lampMode && (motionRef.current.walking || motionRef.current.crouchRunning)) {
       const crouchScale = motionRef.current.crouchRunning
         ? THREE.MathUtils.clamp(speed / (PLAYER.walkSpeed * 0.92), 0.88, 1.35)
         : Math.max(0.7, walkScale * 0.85);
-      return { clip: 'torchCrouchWalk', timeScale: crouchScale };
+      return { clip: 'torchCrouchWalk', timeScale: stride('torchWalk', crouchScale) };
     }
     if (motionRef.current.crouching && modelAssetId === 'darwin5' && lampMode) return 'torchCrouchIdle';
     if (motionRef.current.crouching && motionRef.current.strafeLeft) return { clip: 'crouchSneakLeft', timeScale: Math.max(0.72, walkScale * 0.9) };
@@ -530,58 +558,58 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (motionRef.current.crouching && motionRef.current.crouchRunning) {
       return { clip: 'crouchRun', timeScale: THREE.MathUtils.clamp(speed / (PLAYER.walkSpeed * 0.95), 0.75, 1.2) };
     }
-    if (motionRef.current.crouching && motionRef.current.walking) return { clip: 'crouchWalk', timeScale: Math.max(0.7, walkScale * 0.85) };
+    if (motionRef.current.crouching && motionRef.current.walking) return { clip: 'crouchWalk', timeScale: stride('walk', Math.max(0.7, walkScale * 0.85)) };
     if (motionRef.current.crouching) return 'crouchIdle';
     if (!motionRef.current.airborne && (motionRef.current.wadeDepth || 0) > 0.42
       && (motionRef.current.walking || motionRef.current.running)) {
       // Thigh-deep water: heavy wading gait regardless of run intent.
-      return { clip: 'wadeWalk', fade: 0.2, timeScale: THREE.MathUtils.clamp(speed / PLAYER.walkSpeed, 0.7, 1.15) };
+      return { clip: 'wadeWalk', fade: 0.2, timeScale: stride('walk', THREE.MathUtils.clamp(speed / PLAYER.walkSpeed, 0.7, 1.15)) };
     }
     // Backpedalling: play a reversed-facing gait instead of the forward cycle
     // so Darwin doesn't moonwalk when moving away from the camera.
     if (motionRef.current.movingBackward && (motionRef.current.walking || motionRef.current.running)) {
-      if (badlyInjured) return { clip: 'injuredRunBackwards', timeScale: Math.max(0.7, tiredRunScale * 0.9) };
-      if (injured) return { clip: 'injuredWalkBackwards', timeScale: Math.max(0.62, walkScale * 0.88) };
-      return { clip: 'walkBackwards', timeScale: walkScale };
+      if (badlyInjured) return { clip: 'injuredRunBackwards', timeScale: stride('run', Math.max(0.7, tiredRunScale * 0.9)) };
+      if (injured) return { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) };
+      return { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
     }
-    if (badlyInjured && motionRef.current.running) return { clip: 'injuredRun', timeScale: Math.max(0.7, tiredRunScale * 0.92) };
+    if (badlyInjured && motionRef.current.running) return { clip: 'injuredRun', timeScale: stride('run', Math.max(0.7, tiredRunScale * 0.92)) };
     if (injured && motionRef.current.walking) {
       if (modelAssetId === 'darwin5' && status.health < 24) {
-        return { clip: 'injuredWalkCritical', timeScale: Math.max(0.58, walkScale * 0.82) };
+        return { clip: 'injuredWalkCritical', timeScale: stride('tiredWalk', Math.max(0.58, walkScale * 0.82)) };
       }
       if (modelAssetId === 'darwin5' && status.health < 34) {
-        return { clip: 'injuredWalkSevere', timeScale: Math.max(0.6, walkScale * 0.84) };
+        return { clip: 'injuredWalkSevere', timeScale: stride('tiredWalk', Math.max(0.6, walkScale * 0.84)) };
       }
-      return { clip: 'injuredWalk', timeScale: Math.max(0.62, walkScale * 0.88) };
+      return { clip: 'injuredWalk', timeScale: stride('tiredWalk', Math.max(0.62, walkScale * 0.88)) };
     }
     // Rifle equipped but not aiming: carried low, normal locomotion with rifle.
     if (hasRifle) {
-      if (motionRef.current.running) return { clip: 'runRifle', timeScale: runScale };
-      if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: walkScale };
+      if (motionRef.current.running) return { clip: 'runRifle', timeScale: stride('run', runScale) };
+      if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: stride('walkRifle', walkScale) };
     }
     if (heldToolMode) {
-      if (motionRef.current.running) return { clip: 'holdToolRun', timeScale: runScale };
-      if (motionRef.current.walking) return { clip: 'holdToolWalk', timeScale: walkScale };
+      if (motionRef.current.running) return { clip: 'holdToolRun', timeScale: stride('run', runScale) };
+      if (motionRef.current.walking) return { clip: 'holdToolWalk', timeScale: stride('holdToolWalk', walkScale) };
     }
     if (torchMode) {
-      if (motionRef.current.running) return { clip: 'torchRun', timeScale: runScale };
-      if (motionRef.current.walking) return { clip: 'torchWalk', timeScale: walkScale };
+      if (motionRef.current.running) return { clip: 'torchRun', timeScale: stride('run', runScale) };
+      if (motionRef.current.walking) return { clip: 'torchWalk', timeScale: stride('torchWalk', walkScale) };
     }
     // Carrying a handheld tool (net/snare/hammer): held walk, paralleling the rifle set.
     if (holdingTool && (motionRef.current.walking || motionRef.current.running)) {
-      return { clip: 'holdWalk', timeScale: Math.max(0.7, walkScale) };
+      return { clip: 'holdWalk', timeScale: stride('holdWalk', Math.max(0.7, walkScale)) };
     }
     if (motionRef.current.running) {
-      if (groundPitch > STAIR_PITCH) return { clip: 'runUpStairs', timeScale: runScale };
-      if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'jog', timeScale: tiredRunScale };
-      return { clip: 'run', timeScale: runScale };
+      if (groundPitch > STAIR_PITCH) return { clip: 'runUpStairs', timeScale: stride('run', runScale) };
+      if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'jog', timeScale: stride('jog', tiredRunScale) };
+      return { clip: 'run', timeScale: stride('run', runScale) };
     }
     if (motionRef.current.walking) {
-      if (groundPitch > STAIR_PITCH) return { clip: 'walkUpStairs', timeScale: walkScale };
-      if (groundPitch < -STAIR_PITCH) return { clip: 'descendStairs', timeScale: walkScale };
-      if (carryingObject) return { clip: 'walkCarry', timeScale: Math.max(0.68, walkScale * 0.92) };
-      if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'tiredWalk', timeScale: Math.max(0.66, walkScale * 0.92) };
-      return { clip: 'walk', timeScale: walkScale };
+      if (groundPitch > STAIR_PITCH) return { clip: 'walkUpStairs', timeScale: stride('walk', walkScale) };
+      if (groundPitch < -STAIR_PITCH) return { clip: 'descendStairs', timeScale: stride('walk', walkScale) };
+      if (carryingObject) return { clip: 'walkCarry', timeScale: stride('walkCarry', Math.max(0.68, walkScale * 0.92)) };
+      if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'tiredWalk', timeScale: stride('tiredWalk', Math.max(0.66, walkScale * 0.92)) };
+      return { clip: 'walk', timeScale: stride('walk', walkScale) };
     }
     if (modelAssetId === 'darwin5') return 'idle';
     if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
