@@ -70,12 +70,12 @@ function regionWaterPlayableSize(zoneId) {
 }
 
 const WATER_DAY = {
-  sand: new THREE.Color('#a8d9de'),
-  scatter: new THREE.Color('#36b7cc'),
-  deep: new THREE.Color('#327cae'),
-  openDeep: new THREE.Color('#1f6494'),
+  sand: new THREE.Color('#aed6e2'),
+  scatter: new THREE.Color('#41c0d8'),
+  deep: new THREE.Color('#357fb0'),
+  openDeep: new THREE.Color('#23689a'),
   // Slightly blue-grey: pure white foam over a bright sea is what blows out.
-  foam: new THREE.Color('#dceee8'),
+  foam: new THREE.Color('#e9f4f0'),
 };
 
 const WATER_NIGHT = {
@@ -398,16 +398,6 @@ function createStylizedWaterMaterial(seafloorTexture) {
                    mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
       }
 
-      float depthAt(vec2 wxz) {
-        vec2 uv = wxz / uSize + 0.5;
-        return uWaterLevel - (texture2D(uSeafloor, uv).r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)}));
-      }
-
-      float shoreDistAt(vec2 wxz) {
-        vec2 uv = wxz / uSize + 0.5;
-        return texture2D(uSeafloor, uv).g * ${SHORE_DIST_RANGE.toFixed(1)};
-      }
-
       // Cellular noise for foam structure: real foam is a lattice of bubbles
       // and gaps, which Worley captures and smoothstepped value noise cannot.
       float worley(vec2 p) {
@@ -450,7 +440,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         float shoreSoftness = floorSample.b;
         float playableFade = floorSample.a;
-        float edgeOcean = 1.0 - smoothstep(0.24, 0.9, playableFade);
+        float edgeOcean = 1.0 - smoothstep(0.08, 0.5, playableFade);
         float dEff = dRaw + swashLift(vWorld.xz, uTime, dRaw);
         float depth = max(0.0, dEff);
 
@@ -465,7 +455,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float s0 = noise(rp2);
         float sx = noise(rp2 + vec2(e, 0.0)) - s0;
         float sz = noise(rp2 + vec2(0.0, e)) - s0;
-        normal = normalize(normal + vec3(-(rx + sx * 0.45), 0.0, -(rz + sz * 0.45)) * 1.05);
+        normal = normalize(normal + vec3(-(rx + sx * 0.45), 0.0, -(rz + sz * 0.45)) * 1.25);
         if (uRain > 0.001) {
           vec2 rainP = vWorld.xz * 3.7 + vec2(uTime * 0.72, -uTime * 0.58);
           float rainN = noise(rainP);
@@ -473,7 +463,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
             noise(rainP + vec2(e, 0.0)) - rainN,
             noise(rainP + vec2(0.0, e)) - rainN
           );
-          normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.62);
+          normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85);
         }
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
@@ -488,7 +478,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
           // swash line so the beach doesn't smear.
           vec2 screenUV = gl_FragCoord.xy / uResolution;
           float shallowClarity = 1.0 - smoothstep(0.35, 1.65, depth);
-          float distort = mix(0.003 + min(depth, 2.5) * 0.0075, 0.0016, shallowClarity);
+          float distort = mix(0.004 + min(depth, 2.5) * 0.010, 0.0025, shallowClarity);
           vec2 ruv = clamp(screenUV + normal.xz * distort, vec2(0.001), vec2(0.999));
           vec3 grab = texture2D(uRefraction, ruv).rgb;
           // The grab is tone-mapped sRGB; decode so the Beer-Lambert tint and
@@ -505,7 +495,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
 
           float opticalDepth = depth * mix(0.3, 0.9, smoothstep(0.55, 2.8, depth)) + 0.018;
           vec3 bed = gradedGrab * exp(-uAbsorb * opticalDepth);
-          float scatterStrength = mix(0.06, 0.42, smoothstep(0.5, 2.8, depth));
+          float scatterStrength = mix(0.08, 0.5, smoothstep(0.5, 2.8, depth));
           vec3 refractedDetail = bed + uScatter * (1.0 - exp(-depth * 0.30)) * scatterStrength;
           // Shallow water IS the refracted scene; the painted body takes over
           // only as real depth accumulates.
@@ -519,7 +509,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // Mostly-opaque body (it *shows* the refracted scene), but genuinely
         // clear in the shallows — wading legs and the bed stay visible —
         // feathered to nothing exactly at the moving waterline.
-        float shallowOpacity = mix(0.48, 0.965, smoothstep(0.25, 2.1, depth));
+        float shallowOpacity = mix(0.62, 0.985, smoothstep(0.25, 2.1, depth));
         float alpha = smoothstep(0.0, 0.075, dEff) * shallowOpacity;
 
         // --- reflection: a garnish on top of the clear body -------------------
@@ -556,33 +546,47 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float pathDistance = smoothstep(8.0, 30.0, pathCamDist) * (1.0 - smoothstep(138.0, 180.0, pathCamDist));
         float pathGrain = 0.5 + 0.58 * smoothstep(0.38, 0.86, noise(vWorld.xz * 2.0 + vec2(uTime * 0.12, -uTime * 0.075)));
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
-        color += uSunColor * min(spec * glint, 0.58) * (0.48 + uSunPathStrength * 0.34);
-        color += uSunColor * pathGlitter * 0.22 * (1.0 - uRain * 0.86);
+        color += uSunColor * min(spec * glint, 1.0) * (0.58 + uSunPathStrength * 0.4);
+        color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86);
         color = mix(color, color * vec3(0.62, 0.76, 0.82), uRain * 0.24);
 
         // --- foam: crisp lip at the moving waterline + breaking crests --------
-        float lace = foamLace(vWorld.xz, uTime);
-        float realCoastGate = smoothstep(0.18, 0.76, playableFade);
-        float beachGate = smoothstep(0.18, 0.72, shoreSoftness) * realCoastGate;
-        float coastWater = smoothstep(0.015, 0.14, dEff) * smoothstep(7.0, 0.55, shoreDist) * realCoastGate;
-        float swashCycle = sin(uTime * 0.8976) * 0.5 + 0.5;
-        float swashFront = 0.45 + swashCycle * 2.15 + sin(vWorld.x * 0.17 + uTime * 0.45) * 0.22;
-        float foamLip = smoothstep(0.42, 0.045, abs(shoreDist - swashFront));
-        float waterlineTrace = smoothstep(0.10, 0.018, dEff) * smoothstep(1.2, 0.0, shoreDist);
-        float shoreFoam = coastWater * beachGate * (
-          foamLip * (0.28 + 0.45 * lace)
-          + waterlineTrace * (0.18 + 0.32 * lace)
+        float realCoastGate = smoothstep(0.02, 0.24, playableFade);
+        float beachGate = mix(0.68, 1.0, smoothstep(0.12, 0.74, shoreSoftness)) * realCoastGate;
+        float coastWater = smoothstep(0.01, 0.12, dEff) * smoothstep(8.5, 0.35, shoreDist) * realCoastGate;
+        float foamCandidate = max(
+          coastWater,
+          max(
+            smoothstep(10.0, 1.8, shoreDist) * smoothstep(0.03, 0.3, depth),
+            smoothstep(0.07, 0.16, vCrest) * smoothstep(1.6, 0.5, depth)
+          )
         );
+        float lace = 0.0;
+        if (foamCandidate > 0.001) {
+          lace = foamLace(vWorld.xz, uTime);
+        }
+        float swashCycle = sin(uTime * 0.8976) * 0.5 + 0.5;
+        float swashFront = 0.38 + swashCycle * 2.35 + sin(vWorld.x * 0.17 + uTime * 0.45) * 0.26;
+        float foamLip = smoothstep(0.58, 0.035, abs(shoreDist - swashFront));
+        float waterlineTrace = smoothstep(0.12, 0.012, dEff) * smoothstep(1.7, 0.0, shoreDist);
+        float contactRim = smoothstep(0.18, 0.018, abs(dEff)) * smoothstep(2.4, 0.0, shoreDist) * realCoastGate;
+        float shoreWash = smoothstep(5.6, 0.35, shoreDist) * smoothstep(0.02, 0.38, depth) * (0.42 + 0.58 * lace);
+        float shoreFoam = coastWater * beachGate * (
+          foamLip * (0.34 + 0.56 * lace)
+          + waterlineTrace * (0.26 + 0.42 * lace)
+          + shoreWash * 0.12
+        );
+        shoreFoam = max(shoreFoam, contactRim * (0.4 + 0.4 * lace));
         float breakZone = smoothstep(1.6, 0.5, depth);
         float crestFoam = smoothstep(0.07, 0.16, vCrest) * breakZone * lace * 0.55;
         float surf = breakerFoam(vWorld.xz, uTime, shoreDist, depth, lace)
           * smoothstep(0.05, 0.24, depth)
-          * mix(0.55, 0.9, beachGate);
-        shoreFoam *= 0.88 + uRain * 0.16;
-        surf *= 0.82 + uRain * 0.22;
+          * mix(0.68, 1.0, beachGate);
+        shoreFoam *= 1.0 + uRain * 0.16;
+        surf *= 0.9 + uRain * 0.22;
         float foam = clamp(max(max(shoreFoam, crestFoam), surf), 0.0, 1.0);
-        color = mix(color, uFoam, foam * 0.76);
-        alpha = max(alpha, foam * 0.68);
+        color = mix(color, uFoam, foam * 0.88);
+        alpha = max(alpha, foam * 0.8);
 
         // --- atmospheric haze --------------------------------------------------
         float camDist = length(vWorld.xz - cameraPosition.xz);

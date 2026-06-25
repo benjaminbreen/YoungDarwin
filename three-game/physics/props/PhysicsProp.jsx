@@ -1,17 +1,23 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { BallCollider, CuboidCollider, CylinderCollider, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { movementTerrainHeight, isWalkableTerrain } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
+import {
+  DEFAULT_MOBILITY,
+  canPickupObject,
+  canPushObject,
+  isDownhillMoveAllowed,
+  normalizeMobility,
+} from '../objectMobility';
 import { onPropEvent, emitPropEvent } from './propEvents';
 import { PropVisual, HighlightRing } from './PropVisuals';
 
 const PICKUP_DISTANCE = 2.15;
-const HOLD_DISTANCE = 1.12;
 const STRIKE_RANGE = 2.6;
 const STRIKE_FACING_DOT = 0.3;
 const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
@@ -19,6 +25,8 @@ const PLAYER_PUSH_CONTACT_COOLDOWN = 0.18;
 const PLAYER_PUSH_FACING_DOT = 0.48;
 const ZERO_VECTOR = { x: 0, y: 0, z: 0 };
 const DEFAULT_FACING = { x: 0, y: 0, z: -1 };
+const DEFAULT_HOLD_OFFSET = [0.32, 1.02, 0.24];
+const DEFAULT_HOLD_ROTATION = [0, 0, -0.18];
 
 function vectorFromStore(value, target, fallback = ZERO_VECTOR) {
   const source = value || fallback;
@@ -42,6 +50,63 @@ function propInteractionHeight(prop) {
   if (collider.shape === 'cuboid') return (collider.halfExtents?.[1] || 0.45) * 2 * scale;
   if (collider.shape === 'ball') return (collider.radius || 0.34) * 2 * scale;
   return (collider.halfHeight || 0.45) * 2 * scale;
+}
+
+function isPlayerCollisionTarget(target) {
+  return target?.rigidBodyObject?.userData?.kind === 'player'
+    || target?.colliderObject?.userData?.kind === 'player'
+    || target?.colliderObject?.parent?.userData?.kind === 'player';
+}
+
+function mobilityFor(prop) {
+  if (prop.behaviors?.mobility) return normalizeMobility(prop.behaviors.mobility);
+  if (prop.fixed) return normalizeMobility(null, 'fixed');
+  if (prop.behaviors?.carryable) return normalizeMobility(null, 'pickup');
+  return normalizeMobility();
+}
+
+function isSidewaysBarrel(prop, mobility) {
+  if (mobility.rotationPolicy !== 'autoBarrel') return false;
+  const [rx = 0, , rz = 0] = prop.rotation || [];
+  return Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
+}
+
+function clampAngularVelocity(body, mobility, sidewaysBarrel) {
+  const angularMax = sidewaysBarrel
+    ? mobility.angularMax
+    : (mobility.uprightAngularMax ?? mobility.angularMax);
+  if (!angularMax) return;
+  const spin = body.angvel();
+  const yawMax = mobility.yawAngularMax ?? Math.max(angularMax, 0.65);
+  const x = THREE.MathUtils.clamp(spin.x, -angularMax, angularMax);
+  const y = THREE.MathUtils.clamp(spin.y, -yawMax, yawMax);
+  const z = THREE.MathUtils.clamp(spin.z, -angularMax, angularMax);
+  if (x !== spin.x || y !== spin.y || z !== spin.z) {
+    body.setAngvel({ x, y, z }, true);
+  }
+}
+
+function computeCarryPose(player, facing, carryable, scratch) {
+  const offset = carryable?.holdOffset || DEFAULT_HOLD_OFFSET;
+  const rotation = carryable?.holdRotation || DEFAULT_HOLD_ROTATION;
+  const { carryTarget: target, carryQuaternion: quaternion, carryForward: forward, carryRight: right, carryEuler: euler } = scratch;
+  forward.copy(facing).setY(0);
+  if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
+  forward.normalize();
+  right.set(forward.z, 0, -forward.x).normalize();
+  target.copy(player)
+    .addScaledVector(right, offset[0] || 0)
+    .addScaledVector(forward, offset[2] ?? 0.24);
+  target.y += offset[1] ?? carryable?.holdHeight ?? 1.02;
+
+  const yaw = Math.atan2(forward.x, forward.z);
+  euler.set(
+    rotation[0] || 0,
+    yaw + (rotation[1] || 0),
+    rotation[2] || 0,
+    'YXZ',
+  );
+  quaternion.setFromEuler(euler);
 }
 
 function PropCollider({ prop, colliderRef, sensor }) {
@@ -70,6 +135,10 @@ export function PhysicsProp({ prop, onBreak }) {
     propPosition: new THREE.Vector3(),
     player: new THREE.Vector3(),
     carryTarget: new THREE.Vector3(),
+    carryQuaternion: new THREE.Quaternion(),
+    carryForward: new THREE.Vector3(),
+    carryRight: new THREE.Vector3(),
+    carryEuler: new THREE.Euler(),
   });
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
@@ -92,8 +161,71 @@ export function PhysicsProp({ prop, onBreak }) {
   const isCarried = carriedObjectId === prop.id;
   const breakable = prop.behaviors?.breakable;
   const strikeable = prop.behaviors?.strikeable;
-  const carryable = prop.behaviors?.carryable;
+  const mobility = mobilityFor(prop);
+  const carryable = canPickupObject(mobility, prop.behaviors?.carryable) ? prop.behaviors.carryable : null;
   const buoyant = prop.behaviors?.buoyant;
+  const propMass = prop.mass * Math.pow(propScale, 2.2);
+  const fixedBody = prop.fixed || mobility.mode === 'fixed';
+  const sidewaysBarrel = isSidewaysBarrel(prop, mobility);
+
+  const handlePlayerContact = useCallback((payload = {}) => {
+    const body = bodyRef.current;
+    if (!body || isCarried || !isPlayerCollisionTarget(payload.other)) return;
+    if (!canPushObject(mobility)) return;
+    if (clockRef.current - lastPlayerPushContactRef.current <= PLAYER_PUSH_CONTACT_COOLDOWN) return;
+
+    const vectors = scratch.current;
+    const pose = getRuntimePlayerPose();
+    const translation = body.translation();
+    const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
+    const player = vectorFromStore(pose?.position, vectors.player);
+    const facing = vectorFromStore(pose?.facing, vectors.facing, DEFAULT_FACING).setY(0);
+    if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
+    facing.normalize();
+
+    const toProp = vectors.toProp.copy(propPosition).sub(player).setY(0);
+    const distance = toProp.length();
+    if (distance > 0.001) toProp.divideScalar(distance);
+    else toProp.copy(facing);
+    const facingDot = toProp.dot(facing);
+    if (facingDot < PLAYER_PUSH_FACING_DOT) return;
+    if (!isDownhillMoveAllowed({ position: propPosition, direction: toProp, zoneId: currentZoneId, mobility })) return;
+
+    lastPlayerPushContactRef.current = clockRef.current;
+
+    if (!fixedBody) {
+      const velocity = body.linvel();
+      const targetSpeed = mobility.assistSpeed ?? mobility.strength ?? DEFAULT_MOBILITY.strength;
+      const currentAlongPush = Math.max(0, velocity.x * toProp.x + velocity.z * toProp.z);
+      const assistedSpeed = Math.max(currentAlongPush, targetSpeed);
+      const maxSpeed = mobility.maxSpeed ?? Math.max(DEFAULT_MOBILITY.maxSpeed, targetSpeed);
+      const blend = mobility.blend ?? DEFAULT_MOBILITY.blend;
+      body.wakeUp();
+      body.setLinvel({
+        x: THREE.MathUtils.clamp(
+          velocity.x + (toProp.x * assistedSpeed - velocity.x) * blend,
+          -maxSpeed,
+          maxSpeed,
+        ),
+        y: velocity.y,
+        z: THREE.MathUtils.clamp(
+          velocity.z + (toProp.z * assistedSpeed - velocity.z) * blend,
+          -maxSpeed,
+          maxSpeed,
+        ),
+      }, true);
+    }
+
+    emitPropEvent('player-push-contact', {
+      propId: prop.id,
+      kind: prop.type,
+      label: prop.label,
+      height: propInteractionHeight(prop),
+      mass: propMass,
+      fixed: Boolean(fixedBody),
+      direction: { x: toProp.x, y: 0, z: toProp.z },
+    });
+  }, [currentZoneId, fixedBody, isCarried, mobility, prop, propMass]);
 
   // Queue tool swings; the hit lands impactDelay seconds into the animation.
   useEffect(() => {
@@ -111,6 +243,12 @@ export function PhysicsProp({ prop, onBreak }) {
     if (state.carryPrompt?.id === prop.id) setCarryPrompt(null);
   }, [prop.id, setCarryPrompt]);
 
+  useEffect(() => {
+    if (carryable) return;
+    const state = useThreeGameStore.getState();
+    if (state.carryPrompt?.id === prop.id) setCarryPrompt(null);
+  }, [carryable, prop.id, setCarryPrompt]);
+
   // Carry transitions. Body type and sensor flips are declared on the JSX
   // below (type/sensor props) because react-three-rapier re-applies its
   // `type` option whenever its options effect re-runs — an imperative
@@ -124,6 +262,12 @@ export function PhysicsProp({ prop, onBreak }) {
       carriedRef.current = true;
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      const pose = getRuntimePlayerPose();
+      const player = vectorFromStore(pose?.position, scratch.current.player);
+      const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
+      computeCarryPose(player, facing, carryable, scratch.current);
+      body.setTranslation(scratch.current.carryTarget, true);
+      body.setRotation(scratch.current.carryQuaternion, true);
       body.wakeUp();
     } else if (carriedRef.current) {
       carriedRef.current = false;
@@ -145,6 +289,7 @@ export function PhysicsProp({ prop, onBreak }) {
     const translation = body.translation();
     const vectors = scratch.current;
     const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
+    if (!fixedBody && !isCarried) clampAngularVelocity(body, mobility, sidewaysBarrel);
 
     // Resolve queued tool strikes once their impact moment arrives.
     if (pendingStrikesRef.current.length) {
@@ -217,28 +362,6 @@ export function PhysicsProp({ prop, onBreak }) {
     facing.normalize();
 
     const horizontalDistance = Math.hypot(propPosition.x - player.x, propPosition.z - player.z);
-    const contactRadius = propPickupRadius(prop) + 0.58;
-    if (!isCarried && horizontalDistance <= contactRadius && clockRef.current - lastPlayerPushContactRef.current > PLAYER_PUSH_CONTACT_COOLDOWN) {
-      const toProp = vectors.toProp.copy(propPosition).sub(player).setY(0);
-      const distance = toProp.length();
-      if (distance > 0.001) toProp.divideScalar(distance);
-      else toProp.copy(facing);
-      const facingDot = toProp.dot(facing);
-      const velocity = body.linvel();
-      const propSpeed = Math.hypot(velocity.x, velocity.z);
-      if (facingDot > PLAYER_PUSH_FACING_DOT && (prop.fixed || propSpeed > 0.04 || horizontalDistance <= contactRadius * 0.72)) {
-        lastPlayerPushContactRef.current = clockRef.current;
-        emitPropEvent('player-push-contact', {
-          propId: prop.id,
-          kind: prop.type,
-          label: prop.label,
-          height: propInteractionHeight(prop),
-          mass: prop.mass * Math.pow(propScale, 2.2),
-          fixed: Boolean(prop.fixed),
-          direction: { x: toProp.x, y: 0, z: toProp.z },
-        });
-      }
-    }
 
     if (carryable) {
       // Only steer the body once the carry effect has flipped it kinematic;
@@ -247,9 +370,11 @@ export function PhysicsProp({ prop, onBreak }) {
         // Sleeping bodies are skipped by @react-three/rapier's mesh sync and
         // setNextKinematicTranslation does not wake them, so keep it awake.
         body.wakeUp();
-        const target = vectors.carryTarget.copy(player).addScaledVector(facing, HOLD_DISTANCE);
-        target.y += carryable.holdHeight;
-        body.setNextKinematicTranslation(target);
+        computeCarryPose(player, facing, carryable, vectors);
+        body.setTranslation(vectors.carryTarget, true);
+        body.setNextKinematicTranslation(vectors.carryTarget);
+        body.setRotation(vectors.carryQuaternion, true);
+        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         setCarryPrompt({
           id: prop.id,
           label: prop.label,
@@ -352,7 +477,7 @@ export function PhysicsProp({ prop, onBreak }) {
   return (
     <RigidBody
       ref={bodyRef}
-      type={prop.fixed ? 'fixed' : (isCarried ? 'kinematicPosition' : 'dynamic')}
+      type={fixedBody ? 'fixed' : (isCarried ? 'kinematicPosition' : 'dynamic')}
       colliders={false}
       position={[prop.x, spawnY, prop.z]}
       rotation={prop.rotation}
@@ -363,9 +488,11 @@ export function PhysicsProp({ prop, onBreak }) {
       ccd
       additionalSolverIterations={4}
       userData={userData}
+      onCollisionEnter={handlePlayerContact}
+      onContactForce={handlePlayerContact}
     >
       <PropCollider prop={prop} colliderRef={colliderRef} sensor={isCarried} />
-      <group scale={propScale} userData={{
+      <group visible={!isCarried} scale={propScale} userData={{
         renderSource: `physics-prop:${prop.id}`,
         renderLabel: `Physics prop: ${prop.id}`,
         renderKind: 'physics-prop',

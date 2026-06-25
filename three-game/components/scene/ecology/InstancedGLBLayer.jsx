@@ -8,6 +8,7 @@ import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
+import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
 // per source primitive, so 30 bushes cost 1-2 draw calls instead of 30+.
@@ -156,6 +157,7 @@ export function InstancedGLBLayer({
 }) {
   const groupRef = useRef(null);
   const bucketRefs = useRef([]);
+  const cullStateRef = useRef(createCameraCullState());
   const { scene } = useGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
@@ -212,6 +214,8 @@ export function InstancedGLBLayer({
   // via each bucket's bounding sphere). Far buckets switch off entirely.
   useFrame(({ camera }) => {
     const refs = bucketRefs.current;
+    if (!refs.length) return;
+    if (!shouldRunCameraCull(camera, cullStateRef.current)) return;
     for (let i = 0; i < refs.length; i += 1) {
       const entry = refs[i];
       if (!entry || !entry.el) continue;

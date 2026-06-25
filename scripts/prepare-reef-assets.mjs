@@ -1,5 +1,5 @@
-// One-off importer for the Northwest Reef asset drop: crunches the raw
-// root-level GLBs into runtime-sized files under public/assets/models/.
+// One-off importer for the Northwest Reef asset drop: crunches archived raw
+// GLBs into runtime-sized files under public/assets/models/.
 // Static corals get welded + simplified; animated creatures keep their
 // skins/clips and just get resampled animation + WebP textures.
 //   node scripts/prepare-reef-assets.mjs
@@ -12,16 +12,17 @@ import { statSync } from 'node:fs';
 
 const NATURE = 'public/assets/models/nature/';
 const ANIMALS = 'public/assets/models/animals/runtime/';
+const RAW = 'assets-src/root-raw-assets/';
 
 const JOBS = [
-  { in: 'coral.glb', out: `${NATURE}runtime-coral-branch.glb`, kind: 'static', texSize: 512 },
-  { in: 'coral_piece.glb', out: `${NATURE}runtime-coral-head.glb`, kind: 'static', ratio: 0.45, texSize: 512 },
-  { in: 'coral_reef_3_l.glb', out: `${NATURE}runtime-coral-cluster.glb`, kind: 'static', ratio: 0.4, texSize: 512 },
-  { in: 'aniamted_seal.glb', out: `${ANIMALS}sea-lion.glb`, kind: 'animated', texSize: 512 },
-  { in: 'model_50a_-_hawksbill_sea_turtle.glb', out: `${ANIMALS}green-turtle.glb`, kind: 'animated', texSize: 512 },
-  { in: 'animated_low_poly_fish.glb', out: `${ANIMALS}reef-fish.glb`, kind: 'animated', texSize: 256 },
-  { in: 'clown_fish_low_poly_animated.glb', out: `${ANIMALS}clownfish.glb`, kind: 'animated', texSize: 128 },
-  { in: 'manta_ray_birostris_animated.glb', out: `${ANIMALS}manta-ray.glb`, kind: 'animated', texSize: 512 },
+  { in: `${RAW}coral.glb`, out: `${NATURE}runtime-coral-branch.glb`, kind: 'static', texSize: 512 },
+  { in: `${RAW}coral_piece.glb`, out: `${NATURE}runtime-coral-head.glb`, kind: 'static', ratio: 0.45, texSize: 512 },
+  { in: `${RAW}coral_reef_3_l.glb`, out: `${NATURE}runtime-coral-cluster.glb`, kind: 'static', ratio: 0.4, texSize: 512 },
+  { in: `${RAW}aniamted_seal.glb`, out: `${ANIMALS}sea-lion.glb`, kind: 'animated', texSize: 512 },
+  { in: `${RAW}model_50a_-_hawksbill_sea_turtle.glb`, out: `${ANIMALS}green-turtle.glb`, kind: 'animated', texSize: 512 },
+  { in: `${RAW}animated_low_poly_fish.glb`, out: `${ANIMALS}reef-fish.glb`, kind: 'animated', texSize: 256 },
+  { in: `${RAW}clown_fish_low_poly_animated.glb`, out: `${ANIMALS}clownfish.glb`, kind: 'animated', texSize: 128 },
+  { in: `${RAW}manta_ray_birostris_animated.glb`, out: `${ANIMALS}manta-ray.glb`, kind: 'animated', texSize: 512 },
 ];
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);

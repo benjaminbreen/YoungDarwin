@@ -9,6 +9,7 @@ import {
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getPostOfficeBay3Rocks } from '../postOfficeBay3Layout';
 import { generatedTreePresets } from '../generatedTreePresets';
+import { modelAssetProp } from './ecologyAssetTransforms';
 
 const NATURE = '/assets/models/nature/';
 
@@ -447,11 +448,13 @@ export function buildPostOfficeBay3Ecology() {
         .filter(rock => rock.radiusY > 0.32)
         .slice(0, 2)
         .map(rock => ({
+          ...modelAssetProp('crab', { yaw: rock.yaw * 2.3, fallbackPath: '/assets/models/crab.glb' }),
           id: `crab-${rock.id}`,
-          path: '/assets/models/crab.glb',
-          position: [rock.x, rock.y + rock.radiusY * 2 - rock.sink * 2 - 0.02, rock.z],
-          rotation: [0, rock.yaw * 2.3, 0],
-          scale: 0.034,
+          position: [
+            rock.x,
+            rock.y + rock.radiusY * 2 - rock.sink * 2 - 0.02 + modelAssetProp('crab').yOffset,
+            rock.z,
+          ],
         })),
     ],
   };

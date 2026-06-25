@@ -1675,6 +1675,38 @@ function PromptCard({ title, subtitle, children }) {
   );
 }
 
+function CompactPrompt({ children }) {
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-[61%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+7rem)] sm:top-[64%]">
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/30 bg-[rgba(14,18,18,0.42)] px-1.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.24)] backdrop-blur-[2px]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CompactAction({ keyLabel, children, primary = false, onClick = null }) {
+  const content = (
+    <>
+      <PromptKey active={primary}>{keyLabel}</PromptKey>
+      <span className={`max-w-[16rem] truncate ${primary ? 'font-semibold text-expedition-parchment' : 'text-expedition-faded'}`}>{children}</span>
+    </>
+  );
+  const className = `inline-flex min-w-0 items-center gap-1.5 rounded-sm border px-2 py-1.5 text-left text-[11px] leading-none shadow-sm transition ${
+    primary
+      ? 'border-expedition-gold/45 bg-[rgba(196,162,91,0.18)] hover:border-expedition-goldbright hover:bg-[rgba(196,162,91,0.26)]'
+      : 'border-expedition-brass/25 bg-black/18 hover:border-expedition-brass/45'
+  }`;
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+  return <div className={className}>{content}</div>;
+}
+
 function toolUseCopy(tool) {
   if (!tool) return 'Use tool';
   if (tool.id === 'sketch') return 'Write note';
@@ -1699,9 +1731,9 @@ function InteractionPrompt() {
   const tool = threeTools.find(item => item.id === activeToolId);
   if (carryPrompt) {
     return (
-      <PromptCard title={carryPrompt.label} subtitle={carryPrompt.mode === 'pickup' ? 'Loose field object' : 'Carried object'}>
-        <PromptAction keyLabel="E" primary>{promptActionText(carryPrompt.text)}</PromptAction>
-      </PromptCard>
+      <CompactPrompt>
+        <CompactAction keyLabel="E" primary>{promptActionText(carryPrompt.text)}</CompactAction>
+      </CompactPrompt>
     );
   }
   if (!nearby && !edgePrompt) return null;
@@ -1726,11 +1758,11 @@ function InteractionPrompt() {
     ? 'Document specimen'
     : `Collect with ${tool?.name || 'tool'}`;
   return (
-    <PromptCard title={nearby.name} subtitle={nearby.latin}>
-      <PromptAction keyLabel="E" primary onClick={() => collectNearby()}>{mainAction}</PromptAction>
-      <PromptAction keyLabel="I">Inspect</PromptAction>
-      <PromptAction keyLabel="J">{toolUseCopy(tool)}</PromptAction>
-    </PromptCard>
+    <CompactPrompt>
+      <CompactAction keyLabel="E" primary onClick={() => collectNearby()}>{mainAction}</CompactAction>
+      <CompactAction keyLabel="I">Inspect</CompactAction>
+      <CompactAction keyLabel="J">{toolUseCopy(tool)}</CompactAction>
+    </CompactPrompt>
   );
 }
 

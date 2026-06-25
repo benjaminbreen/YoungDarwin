@@ -1,6 +1,7 @@
 import { altPostOfficeCoastZ, ALT_POST_OFFICE_TRAIL } from '../regions/altPostOfficeBay/terrain';
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getAltPostOfficeBayRocks, ALT_POST_OFFICE_BAY } from '../altPostOfficeBayLayout';
+import { modelAssetProp } from './ecologyAssetTransforms';
 
 // Alternate Post Office Bay ecology, matched to the mockup: golden beach
 // crescent with driftwood and Sesuvium reds, olive scrub plain dotted with
@@ -245,11 +246,13 @@ export function buildAltPostOfficeBayEcology() {
         .filter(rock => rock.radiusY > 0.32)
         .slice(0, 3)
         .map(rock => ({
+          ...modelAssetProp('crab', { yaw: rock.yaw * 2.3, fallbackPath: '/assets/models/crab.glb' }),
           id: `crab-${rock.id}`,
-          path: '/assets/models/crab.glb',
-          position: [rock.x, rock.y + rock.radiusY * 2 - rock.sink * 2 - 0.02, rock.z],
-          rotation: [0, rock.yaw * 2.3, 0],
-          scale: 0.034,
+          position: [
+            rock.x,
+            rock.y + rock.radiusY * 2 - rock.sink * 2 - 0.02 + modelAssetProp('crab').yOffset,
+            rock.z,
+          ],
         })),
     ],
   };

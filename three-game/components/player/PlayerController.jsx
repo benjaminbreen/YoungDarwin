@@ -11,7 +11,17 @@ import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
+import {
+  computePushAmount,
+  downhillGrade,
+  isDownhillMoveAllowed,
+  mobilityPushAnimationTarget,
+} from '../../physics/objectMobility';
 import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
+import { getZoneProps } from '../../physics/props/propRegistry';
+import { PropVisual } from '../../physics/props/PropVisuals';
+import { resolveSpecimenCollision } from '../../fauna/specimenCollision';
+import { pushSpecimenStimulus } from '../../world/specimenRuntime';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
 import {
   CHARACTER_CONTROLLER_CONFIG,
@@ -52,6 +62,40 @@ const PUSH_ANIMATION_COOLDOWN = 0.42;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
 const PUSH_ANIMATION_MIN_FORWARD = 0.42;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const DEFAULT_CARRIED_OFFSET = [0.32, 1.02, 0.24];
+const DEFAULT_CARRIED_ROTATION = [0, 0, -0.18];
+
+function CarriedObjectVisual() {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
+  const prop = useMemo(() => {
+    if (!carriedObjectId) return null;
+    return getZoneProps(currentZoneId).find(item => item.id === carriedObjectId) || null;
+  }, [carriedObjectId, currentZoneId]);
+
+  if (!prop) return null;
+
+  const carryable = prop.behaviors?.carryable || {};
+  const offset = carryable.holdOffset || DEFAULT_CARRIED_OFFSET;
+  const rotation = carryable.holdRotation || DEFAULT_CARRIED_ROTATION;
+  const scale = (prop.scale || 1) * (carryable.holdScale || 1);
+
+  return (
+    <group
+      position={[offset[0] || 0, offset[1] ?? 1.02, offset[2] ?? 0.24]}
+      rotation={rotation}
+      scale={scale}
+      userData={{
+        renderSource: `carried-prop:${prop.id}`,
+        renderLabel: `Carried prop: ${prop.label}`,
+        renderKind: 'carried-prop',
+        renderPath: prop.visualAsset || prop.visual || null,
+      }}
+    >
+      <PropVisual visual={prop.visual} assetId={prop.visualAsset} offsetY={prop.visualOffsetY || 0} />
+    </group>
+  );
+}
 
 function inputWorldDirection(keys, touch, yaw, target = new THREE.Vector3()) {
   target.set(
@@ -186,6 +230,7 @@ export function PlayerController({ physicsDebug = false }) {
   const lastAutoClimbAt = useRef(0);
   const lastPushAnimationAt = useRef(-10);
   const latestPropPushContact = useRef(null);
+  const sustainedObstaclePush = useRef({ id: null, startedAt: -10, lastAt: -10 });
   const lastCactusHitAt = useRef(-10);
   const lastStepUpDustAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
@@ -961,25 +1006,25 @@ export function PlayerController({ physicsDebug = false }) {
       idleFidget.current.idleSince = 0;
       idleFidget.current.nextAt = 0;
     }
-    if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
-      const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1, options = {}) => {
-        characterController.sync(group.current.position);
-        const climbDuration = options.actionDuration ?? durationFor(clip) * durationScale;
-        startAction(clip, climbDuration, { lockMovement: options.lockMovement ?? true });
-        stateRef.current.climbMotion = {
-          start: group.current.position.clone(),
-          end,
-          heightDelta,
-          duration: options.motionDuration ?? climbDuration * 0.92,
-          startedAt: now,
-          targetYaw,
-          arcHeight: options.arcHeight,
-          exitSpeed: options.exitSpeed || 0,
-          earlyExitAt: options.earlyExitAt,
-          cancelAt: options.cancelAt,
-        };
-        velocity.current.set(0, 0, 0);
+    const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1, options = {}) => {
+      characterController.sync(group.current.position);
+      const climbDuration = options.actionDuration ?? durationFor(clip) * durationScale;
+      startAction(clip, climbDuration, { lockMovement: options.lockMovement ?? true });
+      stateRef.current.climbMotion = {
+        start: group.current.position.clone(),
+        end,
+        heightDelta,
+        duration: options.motionDuration ?? climbDuration * 0.92,
+        startedAt: now,
+        targetYaw,
+        arcHeight: options.arcHeight,
+        exitSpeed: options.exitSpeed || 0,
+        earlyExitAt: options.earlyExitAt,
+        cancelAt: options.cancelAt,
       };
+      velocity.current.set(0, 0, 0);
+    };
+    if (climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
       const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
       if (target) {
         const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -1450,13 +1495,7 @@ export function PlayerController({ physicsDebug = false }) {
         }
       }
     }
-    const characterMove = {
-      movement: desiredDelta,
-      grounded: false,
-      collisions: 0,
-      collision: null,
-      source: 'analytic-character',
-    };
+    const characterMove = characterController.move(group.current.position, desiredDelta);
     characterDebug.current.movement.copy(characterMove.movement);
     characterDebug.current.collisions = characterMove.collisions;
     characterDebug.current.grounded = characterMove.grounded;
@@ -1471,6 +1510,35 @@ export function PlayerController({ physicsDebug = false }) {
       characterMove.collision = fallbackCollision;
       characterDebug.current.collisions = 1;
       collision = fallbackCollision;
+    }
+    const specimenCollision = resolveSpecimenCollision(group.current.position, startOfFramePosition, {
+      zoneId: currentZoneId,
+      specimens: zoneSpecimens,
+      playerRadius: CHARACTER_CONTROLLER_CONFIG.radius,
+      carriedObjectId,
+    });
+    if (specimenCollision) {
+      group.current.position.copy(specimenCollision.position).addScaledVector(specimenCollision.normal, 0.018);
+      pushSpecimenStimulus(currentZoneId, specimenCollision.actorId, {
+        kind: 'contact',
+        position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+        radius: Math.max(2.4, specimenCollision.radius + 2.2),
+        intensity: Math.min(1.4, 0.65 + specimenCollision.penetration * 1.6),
+      });
+      characterMove.collisions = Math.max(characterMove.collisions || 0, 1);
+      characterMove.collision = specimenCollision;
+      characterDebug.current.collisions = Math.max(characterDebug.current.collisions || 0, 1);
+      collision = {
+        ...specimenCollision,
+        obstacle: {
+          id: specimenCollision.actorId,
+          kind: 'specimen',
+          height: specimenCollision.specimen?.interactionHeight || 0.8,
+          colliderTop: specimenCollision.specimen?.interactionHeight || 0.8,
+          pushMass: 2,
+          pushable: false,
+        },
+      };
     }
     characterController.sync(group.current.position);
 
@@ -1514,7 +1582,7 @@ export function PlayerController({ physicsDebug = false }) {
       }
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
-      if (impactSpeed >= PUSH_ANIMATION_MIN_SPEED && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
+      if (!collision.specimen && impactSpeed >= PUSH_ANIMATION_MIN_SPEED && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
         startPushFeedback(collision.obstacle || {
           kind: 'wall',
           height: 1.6,
@@ -1523,6 +1591,49 @@ export function PlayerController({ physicsDebug = false }) {
         });
       }
       const canReact = now - bounceFeedback.current.lastImpactAt >= BUMP_FEEDBACK.cooldown;
+      const pushable = collision.obstacle?.pushable
+        ? collision.obstacle
+        : findPushableObstacleNear(collisionAdapter.obstacles, group.current.position, horizontalVelocity, normal);
+      if (pushable && impactSpeed > 0.55 && intoSurface >= 0.42) {
+        const pushDirection = horizontalVelocity.lengthSq() > 0.001
+          ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
+          : frameScratch.pushDirection.copy(normal).multiplyScalar(-1).normalize();
+        const currentObstaclePosition = frameScratch.pushObstaclePosition.set(pushable.x, 0, pushable.z);
+        const pushState = sustainedObstaclePush.current;
+        const pushKey = `${pushable.zoneId || currentZoneId}:${pushable.id}`;
+        if (pushState.id !== pushKey || now - pushState.lastAt > 0.45) {
+          pushState.id = pushKey;
+          pushState.startedAt = now;
+        }
+        pushState.lastAt = now;
+        startPushFeedback(mobilityPushAnimationTarget(pushable));
+        const slope = downhillGrade({
+          position: currentObstaclePosition,
+          direction: pushDirection,
+          zoneId: pushable.zoneId || currentZoneId,
+        });
+        const pushStep = computePushAmount({
+          mobility: pushable.mobility,
+          impactSpeed,
+          sustainedTime: now - pushState.startedAt,
+          slope,
+        });
+        const pushDelta = pushDirection.multiplyScalar(pushStep * (pushable.pushFriction ?? 0.88));
+        const candidate = frameScratch.pushCandidate.copy(currentObstaclePosition).add(pushDelta);
+        const clamped = collisionAdapter.clampToWalkable(candidate, currentObstaclePosition);
+        if (pushStep > 0
+          && isDownhillMoveAllowed({
+            position: currentObstaclePosition,
+            direction: pushDirection,
+            zoneId: pushable.zoneId || currentZoneId,
+            mobility: pushable.mobility,
+          })
+          && clamped.distanceTo(candidate) < 0.08) {
+          movePushableObstacle(pushable.id, pushDelta, pushable.zoneId);
+          velocity.current.x *= 0.78;
+          velocity.current.z *= 0.78;
+        }
+      }
       if (directImpact && canReact) {
         const intensity = THREE.MathUtils.clamp(
           0.22 + impactSpeed / 8.5 + collision.penetration * 0.12 + intoSurface * 0.24,
@@ -1534,29 +1645,6 @@ export function PlayerController({ physicsDebug = false }) {
           intensity: Math.min(1, intensity * 0.9),
           position: frameScratch.footstepPosition.set(-localNormal.x * 0.46, 0.08, -localNormal.z * 0.46),
         });
-        const pushable = collision.obstacle?.pushable
-          ? collision.obstacle
-          : findPushableObstacleNear(collisionAdapter.obstacles, group.current.position, horizontalVelocity, normal);
-        if (pushable && impactSpeed > 1.15) {
-          const pushDirection = horizontalVelocity.lengthSq() > 0.001
-            ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
-            : frameScratch.pushDirection.copy(normal).multiplyScalar(-1).normalize();
-          const pushStep = THREE.MathUtils.clamp(
-            (0.055 + impactSpeed * 0.012 + intensity * 0.08) / Math.max(0.65, pushable.pushMass),
-            0.035,
-            0.22,
-          );
-          const pushDelta = pushDirection.multiplyScalar(pushStep * (pushable.pushFriction ?? 0.88));
-          const currentObstaclePosition = frameScratch.pushObstaclePosition.set(pushable.x, 0, pushable.z);
-          const candidate = frameScratch.pushCandidate.copy(currentObstaclePosition).add(pushDelta);
-          const clamped = collisionAdapter.clampToWalkable(candidate, currentObstaclePosition);
-          if (clamped.distanceTo(candidate) < 0.08) {
-            movePushableObstacle(pushable.id, pushDelta, pushable.zoneId);
-            startPushFeedback(pushable);
-            velocity.current.x *= 0.78;
-            velocity.current.z *= 0.78;
-          }
-        }
         velocity.current.x += normal.x * intensity * 0.38;
         velocity.current.z += normal.z * intensity * 0.38;
         // A run-speed bump reads as a stumble, not a full hit reaction —
@@ -1831,12 +1919,92 @@ export function PlayerController({ physicsDebug = false }) {
       wasAirborne.current = false;
       stateRef.current.jumpPhase = 'grounded';
       characterController.sync(p);
+      if (moving && !stateRef.current.action && !movementLocked && waterDepthHere > SWIM.exitDepth * 0.75) {
+        const exitDirection = frameScratch.swimExitDirection || new THREE.Vector3();
+        frameScratch.swimExitDirection = exitDirection;
+        exitDirection.copy(rawInputDirection.lengthSq() > 0.001 ? rawInputDirection : facing.current).setY(0);
+        if (exitDirection.lengthSq() > 0.001) {
+          exitDirection.normalize();
+          const start = group.current.position;
+          const heroic = running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 0.85;
+          const facingTowardExit = facing.current.lengthSq() > 0.001
+            ? exitDirection.dot(frameScratch.forwardFacing.copy(facing.current).setY(0).normalize())
+            : 1;
+          const canAutoExitWater = facingTowardExit > 0.34 || heroic;
+          for (const distance of [0.85, 1.2, 1.65, 2.15]) {
+            if (!canAutoExitWater) break;
+            const probe = frameScratch.pushCandidate.set(
+              start.x + exitDirection.x * distance,
+              start.y,
+              start.z + exitDirection.z * distance,
+            );
+            const ahead = collisionAdapter.groundInfo(probe);
+            const landRise = ahead.y - WATER_LEVEL;
+            const actualRise = ahead.y + 0.04 - start.y;
+            if (ahead.y > WATER_LEVEL - 0.16 && landRise >= 0.48 && actualRise >= 0.62 && actualRise <= 1.85) {
+              const candidateEnd = new THREE.Vector3(probe.x, ahead.y + 0.04, probe.z);
+              const walkableEnd = collisionAdapter.clampToWalkable(candidateEnd, start, { wade: false });
+              const landingShift = Math.hypot(walkableEnd.x - candidateEnd.x, walkableEnd.z - candidateEnd.z);
+              if (landingShift > 0.32) continue;
+              const landingGround = collisionAdapter.groundInfo(walkableEnd, { ignoreObstacles: true });
+              const end = new THREE.Vector3(walkableEnd.x, landingGround.y + 0.04, walkableEnd.z);
+              const profile = stateRef.current.modelAssetId === 'darwin5'
+                ? boulderTraversalProfile(actualRise, heroic, durationFor)
+                : null;
+              swim.active = false;
+              stateRef.current.swimming = false;
+              wadeDepth.current = 0;
+              emitPropEvent('water-ripple', {
+                position: { x: start.x, y: WATER_LEVEL, z: start.z },
+                intensity: 0.62,
+                yaw: Math.atan2(exitDirection.x, exitDirection.z),
+              });
+              emitPropEvent('water-splash', {
+                position: { x: start.x, y: WATER_LEVEL, z: start.z },
+                intensity: 0.42,
+                yaw: Math.atan2(exitDirection.x, exitDirection.z),
+              });
+              cameraImpulse.current = {
+                startedAt: now,
+                intensity: 0.12,
+                duration: 0.16,
+                seed: cameraImpulse.current.seed + 1,
+              };
+              beginClimbMotion(
+                profile?.clip || (landRise > 1.45 ? 'climbingUpWall' : 'climbWaistHeight'),
+                end,
+                actualRise,
+                Math.atan2(exitDirection.x, exitDirection.z),
+                0.72,
+                profile ? {
+                  actionDuration: Math.min(profile.actionDuration, THREE.MathUtils.clamp(0.46 + actualRise * 0.2, 0.56, 0.86)),
+                  motionDuration: THREE.MathUtils.clamp(profile.motionDuration * 0.88, 0.34, 0.82),
+                  arcHeight: Math.min(profile.arcHeight ?? 0.18, 0.24),
+                  lockMovement: profile.lockMovement,
+                  exitSpeed: Math.max(PLAYER.walkSpeed * 0.35, PLAYER.walkSpeed * profile.exitSpeedScale),
+                  earlyExitAt: profile.earlyExitAt,
+                  cancelAt: profile.cancelAt,
+                } : {
+                  motionDuration: THREE.MathUtils.clamp(0.32 + actualRise * 0.18, 0.38, 0.82),
+                  arcHeight: THREE.MathUtils.clamp(0.1 + actualRise * 0.06, 0.12, 0.22),
+                  exitSpeed: PLAYER.walkSpeed * 0.35,
+                },
+              );
+              return;
+            }
+          }
+        }
+      }
       if (waterDepthHere < SWIM.exitDepth) {
-        // Shore reached: stand up through the shallows.
+        // Shore reached: stand up through the shallows. Darwin 5's
+        // swim-to-edge source clip is long and reads badly on gentle beaches,
+        // so shallow exits simply become wading/walking.
         swim.active = false;
         p.y = swimGround.y;
         characterController.sync(p);
-        if (moving) startAction('swimToEdge', durationFor('swimToEdge'), { lockMovement: 0.34 });
+        if (moving && stateRef.current.modelAssetId !== 'darwin5') {
+          startAction('swimToEdge', durationFor('swimToEdge'), { lockMovement: 0.34 });
+        }
       }
     }
     const allowDeepWater = swim.active || wasAirborne.current || wadeDepth.current > WADE_DEPTH * 0.96;
@@ -2157,6 +2325,7 @@ export function PlayerController({ physicsDebug = false }) {
       <group ref={modelFeedbackRef}>
         <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} inventoryCount={inventoryCount} grounding={modelGrounding} />
       </group>
+      <CarriedObjectVisual />
       <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <mesh>
           <ringGeometry args={[0.22, 0.34, 28]} />

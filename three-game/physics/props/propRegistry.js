@@ -37,6 +37,20 @@ export const ZONE_PROPS = {
       rotation: [0.02, -0.72, -0.01],
     },
     {
+      id: 'shore-terracotta-pot',
+      type: 'terracottaPot',
+      x: -6.8,
+      z: 12.6,
+      rotation: [0.01, 0.38, -0.02],
+    },
+    {
+      id: 'upper-slope-broken-crate',
+      type: 'brokenWoodenCrate',
+      x: 20.6,
+      z: -6.4,
+      rotation: [0.04, -0.45, -0.02],
+    },
+    {
       id: 'loose-basalt-stone',
       type: 'stone',
       x: 16.2,

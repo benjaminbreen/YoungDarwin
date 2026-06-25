@@ -442,7 +442,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     const toolId = gameState.activeToolId;
     const holdingTool = toolId === 'insect_net' || toolId === 'snare' || toolId === 'hammer';
     const hasRifle = toolId === 'shotgun';
-    const carryingObject = Boolean(gameState.carriedObjectId) || status.inventoryCount > 0;
+    const carryingObject = Boolean(gameState.carriedObjectId);
     const lampMode = modelAssetId === 'darwin5' && !hasRifle && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
     const heldToolMode = modelAssetId === 'darwin5' && holdingTool;
     const torchMode = modelAssetId === 'darwin5' && !hasRifle && !heldToolMode && lampMode;
@@ -611,14 +611,13 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'tiredWalk', timeScale: stride('tiredWalk', Math.max(0.66, walkScale * 0.92)) };
       return { clip: 'walk', timeScale: stride('walk', walkScale) };
     }
-    if (modelAssetId === 'darwin5') return 'idle';
     if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
     if (injured) return 'injuredIdle';
     if (hasRifle) return 'rifleIdle';
     if (carryingObject) return 'holdIdle';
     if (torchMode) return 'torchIdle';
-    if (holdingTool) return 'holdIdle';
-    if (status.fatigue >= 82) return 'exhaustedIdle';
+    if (heldToolMode || holdingTool) return 'holdIdle';
+    if (status.fatigue >= 82 && modelAssetId !== 'darwin5') return 'exhaustedIdle';
     return 'idle';
   }, [modelAssetId, motionRef]);
 

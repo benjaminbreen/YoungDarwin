@@ -85,7 +85,7 @@ export const locations = [
     color: 'beige',
     type: 'bay',
     validMoves: ['W','E','SW','S','NW','N'],
-    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant'],
+    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard'],
     specimenPlacements: [
       {
         specimenId: 'flightlesscormorant',

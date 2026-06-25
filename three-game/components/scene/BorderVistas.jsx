@@ -8,6 +8,7 @@ import {
   terrainHeight,
   WATER_LEVEL,
 } from '../../world/terrain';
+import { isAuthoredRegion } from '../../world/regions';
 import { getBorderVistas } from '../../world/vistas';
 import { useThreeGameStore } from '../../store';
 
@@ -22,9 +23,20 @@ const EDGE_AXES = {
   southwest: { along: [1, 1], outward: [-1, 1] },
 };
 
+const CARDINAL_EDGES = new Set(['north', 'south', 'east', 'west']);
+const OPPOSITE_EDGE = {
+  north: 'south',
+  south: 'north',
+  east: 'west',
+  west: 'east',
+};
+
 const ATMOSPHERE = new THREE.Color('#b9d7de');
 const SHALLOW_CONTINUATION = new THREE.Color('#5f9fae');
 const DEEP_CONTINUATION = new THREE.Color('#1f5f90');
+const BORDER_COLLAR_DEPTH = 3.8;
+const BORDER_COLLAR_DROP = 0.035;
+const BORDER_COLLAR_ROWS = 4;
 
 function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
@@ -54,6 +66,28 @@ function worldPoint(origin, along, outward, alongDistance, outwardDistance) {
     origin[0] + along[0] * alongDistance + outward[0] * outwardDistance,
     origin[1] + along[1] * alongDistance + outward[1] * outwardDistance,
   ];
+}
+
+function borderDistanceForRow(row, rows, depth) {
+  const collarRows = Math.min(BORDER_COLLAR_ROWS, Math.max(1, rows - 2));
+  if (row <= collarRows) {
+    const collarT = row / collarRows;
+    return {
+      signedDistance: -BORDER_COLLAR_DEPTH * (1 - collarT),
+      outsideDistance: 0,
+      outsideT: 0,
+      collarBlend: collarT,
+    };
+  }
+  const t = (row - collarRows) / Math.max(1, rows - collarRows);
+  const easedT = t * t * (3 - 2 * t);
+  const outsideDistance = easedT * depth;
+  return {
+    signedDistance: outsideDistance,
+    outsideDistance,
+    outsideT: t,
+    collarBlend: 1,
+  };
 }
 
 function clampToRegionEdge(config, x, z) {
@@ -115,13 +149,171 @@ function edgeDryRatio(regionId, config, edge) {
   return dry / samples;
 }
 
+function edgePoint(config, edge, u, inset = 0) {
+  const halfW = config.width / 2;
+  const halfD = config.depth / 2;
+  if (edge === 'north') return [(u - 0.5) * config.width, -halfD + inset];
+  if (edge === 'south') return [(u - 0.5) * config.width, halfD - inset];
+  if (edge === 'east') return [halfW - inset, (u - 0.5) * config.depth];
+  return [-halfW + inset, (u - 0.5) * config.depth];
+}
+
+function targetPreviewPoint(config, targetEdge, u, inwardDistance) {
+  return edgePoint(config, targetEdge, u, inwardDistance);
+}
+
+function edgeLandStrength(regionId, config, edge, u) {
+  const [edgeX, edgeZ] = edgePoint(config, edge, u, 0);
+  const [innerX, innerZ] = edgePoint(config, edge, u, 5.5);
+  const edgeY = terrainHeight(edgeX, edgeZ, regionId);
+  const innerY = terrainHeight(innerX, innerZ, regionId);
+  return Math.max(
+    THREE.MathUtils.smoothstep(edgeY, WATER_LEVEL - 0.26, WATER_LEVEL + 0.32),
+    THREE.MathUtils.smoothstep(innerY, WATER_LEVEL - 0.26, WATER_LEVEL + 0.32),
+  );
+}
+
+function triangleIsLand(a, b, c, landStrengths, minStrength = 0.18) {
+  return landStrengths[a] > minStrength
+    && landStrengths[b] > minStrength
+    && landStrengths[c] > minStrength;
+}
+
+function ensureUpwardWinding(geometry) {
+  const position = geometry.getAttribute('position');
+  const index = geometry.getIndex();
+  if (!position || !index) return geometry;
+  const indices = Array.from(index.array);
+  let normalY = 0;
+  const ax = new THREE.Vector3();
+  const bx = new THREE.Vector3();
+  const cx = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+
+  for (let i = 0; i < indices.length; i += 3) {
+    ax.fromBufferAttribute(position, indices[i]);
+    bx.fromBufferAttribute(position, indices[i + 1]);
+    cx.fromBufferAttribute(position, indices[i + 2]);
+    ab.subVectors(bx, ax);
+    ac.subVectors(cx, ax);
+    normal.crossVectors(ab, ac);
+    normalY += normal.y;
+  }
+
+  if (normalY < 0) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const swap = indices[i + 1];
+      indices[i + 1] = indices[i + 2];
+      indices[i + 2] = swap;
+    }
+    geometry.setIndex(indices);
+  }
+  return geometry;
+}
+
+function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetConfig, vista) {
+  if (!CARDINAL_EDGES.has(vista.edge)
+    || !targetRegionId
+    || !targetConfig
+    || !isAuthoredRegion(targetRegionId)
+    || vista.render === false) return null;
+  const axes = EDGE_AXES[vista.edge];
+  const targetEdge = OPPOSITE_EDGE[vista.edge];
+  if (!axes || !targetEdge) return null;
+
+  const along = normalize2(axes.along);
+  const outward = normalize2(axes.outward);
+  const origin = edgeOrigin(config, vista.edge);
+  const previewDepth = Math.min(vista.apronDepth || 72, 64);
+  const targetSampleDepth = Math.min(
+    targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
+    previewDepth + 10,
+  );
+  const width = axisLength(config, vista.edge) * 1.04;
+  const cols = 52;
+  const rows = 28;
+  const positions = [];
+  const colors = [];
+  const landStrengths = [];
+  const indices = [];
+
+  for (let row = 0; row <= rows; row += 1) {
+    const {
+      signedDistance,
+      outsideDistance,
+      outsideT,
+      collarBlend,
+    } = borderDistanceForRow(row, rows, previewDepth);
+    const targetDistance = outsideT * targetSampleDepth;
+    const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, 12.0);
+    const seamHold = 1 - seamBlend;
+    const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.58, 1.0);
+    for (let col = 0; col <= cols; col += 1) {
+      const u = col / cols;
+      const alongDistance = (u - 0.5) * width;
+      const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
+      const clampedU = THREE.MathUtils.clamp(u, 0, 1);
+      const [currentX, currentZ] = clampToRegionEdge(config, x, z);
+      const currentY = terrainHeight(currentX, currentZ, regionId);
+      const [edgeX, edgeZ] = edgePoint(config, vista.edge, clampedU, 0);
+      const edgeY = terrainHeight(edgeX, edgeZ, regionId);
+      const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, 0);
+      const targetEdgeY = terrainHeight(targetEdgeX, targetEdgeZ, targetRegionId);
+      const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
+      const targetY = terrainHeight(targetX, targetZ, targetRegionId);
+      const currentLandHere = THREE.MathUtils.smoothstep(currentY, WATER_LEVEL - 0.26, WATER_LEVEL + 0.32);
+      const currentLand = Math.max(currentLandHere, edgeLandStrength(regionId, config, vista.edge, clampedU));
+      const targetLand = THREE.MathUtils.smoothstep(targetY, WATER_LEVEL - 0.2, WATER_LEVEL + 0.18);
+      const inlandGate = Math.max(currentLand, THREE.MathUtils.smoothstep(outsideT, 0.16, 0.36));
+      const seamLand = currentLand * (1 - THREE.MathUtils.smoothstep(outsideDistance, 0.6, 4.5));
+      const landStrength = Math.max(seamLand, targetLand * inlandGate);
+      const seamOffset = edgeY - targetEdgeY;
+      const previewY = targetY + seamOffset * seamHold + smoothNoise(x, z, (vista.seed || 0) + 173) * 0.08 * seamBlend;
+      const y = THREE.MathUtils.lerp(currentY - BORDER_COLLAR_DROP, previewY, collarBlend);
+
+      const currentColor = terrainColor(currentX, currentZ, currentY, regionId);
+      const targetColor = terrainColor(targetX, targetZ, targetY, targetRegionId);
+      const color = currentColor.lerp(targetColor, seamBlend);
+      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.52);
+
+      positions.push(x, y, z);
+      colors.push(color.r, color.g, color.b);
+      landStrengths.push(landStrength);
+    }
+  }
+
+  const stride = cols + 1;
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const a = row * stride + col;
+      const b = a + stride;
+      const c = a + 1;
+      const d = b + 1;
+      if (triangleIsLand(a, b, c, landStrengths)) indices.push(a, b, c);
+      if (triangleIsLand(c, b, d, landStrengths)) indices.push(c, b, d);
+    }
+  }
+
+  if (!indices.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  ensureUpwardWinding(geometry);
+  geometry.computeVertexNormals();
+  geometry.userData.mode = 'neighbor-preview';
+  return geometry;
+}
+
 function makeApronGeometry(regionId, config, vista) {
   const axes = EDGE_AXES[vista.edge];
   if (!axes || vista.render === false) return null;
-  // Connected terrain aprons only work where the current edge is actually
-  // land. Mixed coastlines need separate distant silhouettes; otherwise this
-  // mesh becomes an obvious sheet spanning water.
-  if (edgeDryRatio(regionId, config, vista.edge) < 0.86) return null;
+  // Fallback aprons are for mostly dry/generic transitions only. Mixed coastal
+  // routes use makeNeighborPreviewGeometry so the mesh never has to impersonate
+  // water, which caused the off-map triangular sheets.
+  if (!CARDINAL_EDGES.has(vista.edge) || edgeDryRatio(regionId, config, vista.edge) < 0.84) return null;
 
   const along = normalize2(axes.along);
   const outward = normalize2(axes.outward);
@@ -135,17 +327,22 @@ function makeApronGeometry(regionId, config, vista) {
   const indices = [];
 
   for (let row = 0; row <= rows; row += 1) {
-    const t = row / rows;
-    const easedT = t * t * (3 - 2 * t);
-    const distance = easedT * depth;
-    const seamBlend = THREE.MathUtils.smoothstep(t, 0.0, 0.38);
+    const {
+      signedDistance,
+      outsideDistance,
+      outsideT,
+      collarBlend,
+    } = borderDistanceForRow(row, rows, depth);
+    const t = outsideT;
+    const distance = outsideDistance;
+    const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, depth * 0.38);
     const farHaze = THREE.MathUtils.smoothstep(t, 0.72, 1.0);
     for (let col = 0; col <= cols; col += 1) {
       const u = col / cols;
       const side = Math.abs(u - 0.5) * 2;
       const sideFade = THREE.MathUtils.smoothstep(side, 0.72, 1.0);
       const alongDistance = (u - 0.5) * width;
-      const [x, z] = worldPoint(origin, along, outward, alongDistance, distance);
+      const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
       const [edgeX, edgeZ] = clampToRegionEdge(config, x, z);
       const edgeY = terrainHeight(edgeX, edgeZ, regionId);
       const innerX = THREE.MathUtils.clamp(edgeX - outward[0] * 4.5, -config.width / 2, config.width / 2);
@@ -167,7 +364,8 @@ function makeApronGeometry(regionId, config, vista) {
       let targetY = THREE.MathUtils.lerp(rawTargetY, landContinuationY, landHold);
       targetY = THREE.MathUtils.lerp(targetY, waterContinuationY, waterHold);
       const sideDrop = sideFade * seamBlend * 0.45;
-      const y = THREE.MathUtils.lerp(edgeY, targetY, seamBlend) - sideDrop;
+      const apronY = THREE.MathUtils.lerp(edgeY, targetY, seamBlend) - sideDrop;
+      const y = THREE.MathUtils.lerp(edgeY - BORDER_COLLAR_DROP, apronY, collarBlend);
 
       const edgeColor = terrainColor(edgeX, edgeZ, edgeY, regionId);
       const waterColor = SHALLOW_CONTINUATION.clone().lerp(DEEP_CONTINUATION, THREE.MathUtils.clamp(t * 0.8 + edgeWater * 0.25, 0, 1));
@@ -193,6 +391,7 @@ function makeApronGeometry(regionId, config, vista) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
+  ensureUpwardWinding(geometry);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -269,14 +468,23 @@ function VistaMarkers({ config, vista, marker }) {
 }
 
 function BorderVista({ regionId, config, vista }) {
-  const geometry = useMemo(() => makeApronGeometry(regionId, config, vista), [regionId, config, vista]);
+  const targetConfig = useMemo(() => (
+    vista.toRegionId ? getRegionTerrainConfig(vista.toRegionId) : null
+  ), [vista.toRegionId]);
+  const geometry = useMemo(() => (
+    makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista)
+      || makeApronGeometry(regionId, config, vista)
+  ), [regionId, config, targetConfig, vista]);
   const material = useMemo(() => new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.94,
     metalness: 0,
     fog: true,
   }), []);
+  useEffect(() => () => geometry?.dispose(), [geometry]);
+  useEffect(() => () => material.dispose(), [material]);
   if (!geometry) return null;
+  const isNeighborPreview = geometry.userData.mode === 'neighbor-preview';
   return (
     <group name={`border-apron-${vista.toRegionId}`} userData={{
       renderSource: `border-vista:${vista.id}`,
@@ -285,7 +493,7 @@ function BorderVista({ regionId, config, vista }) {
       renderPath: null,
     }}>
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
-      {vista.markers?.map((marker, index) => (
+      {!isNeighborPreview && vista.markers?.map((marker, index) => (
         <VistaMarkers key={`marker-${index}`} config={config} vista={vista} marker={marker} />
       ))}
     </group>

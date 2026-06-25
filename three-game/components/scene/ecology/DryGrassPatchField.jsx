@@ -6,6 +6,7 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 import { applyFoliageMotion } from './foliageMotion';
 
 const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
@@ -198,10 +199,12 @@ export function DryGrassPatchField({
     () => layerCullBounds(layer.items || [], layer.maxVisibleDistance ?? layer.drawDistance),
     [layer],
   );
+  const cullStateRef = useRef(createCameraCullState());
 
   useFrame(({ camera }) => {
     const group = groupRef.current;
     if (!group || !cullBounds) return;
+    if (!shouldRunCameraCull(camera, cullStateRef.current)) return;
     group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
   });
 

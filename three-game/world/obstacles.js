@@ -8,6 +8,7 @@ import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
 import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
+import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
 function flattenCollider(collider) {
   if (!collider) return [];
@@ -68,6 +69,47 @@ function colliderBounds(collider, scale = 1) {
   return { radius, height: top - bottom, top, bottom };
 }
 
+function deriveObstacleMobility(obstacle, bounds = obstacle) {
+  const explicit = obstacle.gameplay?.mobility || obstacle.mobility;
+  if (explicit) return normalizeMobility(explicit);
+  if (obstacle.gameplay?.pushable || obstacle.pushable) {
+    return normalizeMobility({
+      mode: 'push',
+      strength: obstacle.gameplay?.pushStrength ?? 0.045,
+      sustainedSeconds: 0,
+    });
+  }
+  const kind = obstacle.kind;
+  const top = bounds.top ?? obstacle.colliderTop ?? obstacle.height ?? 0;
+  const radius = bounds.radius ?? obstacle.radius ?? 0;
+  if ((kind === 'rock' || kind === 'boulder') && top >= 0.45 && radius >= 0.48) {
+    const size = Math.max(top, radius);
+    return normalizeMobility({
+      mode: 'downhill-push',
+      strength: THREE.MathUtils.clamp(0.034 / Math.max(1, size), 0.008, 0.026),
+      maxSpeed: THREE.MathUtils.clamp(0.08 / Math.max(1, size), 0.018, 0.055),
+      sustainedSeconds: THREE.MathUtils.clamp(0.65 + size * 0.38, 0.75, 1.7),
+      minDownhillDrop: THREE.MathUtils.clamp(0.035 + size * 0.018, 0.04, 0.11),
+    });
+  }
+  return normalizeMobility();
+}
+
+function applyObstacleMobility(obstacle) {
+  const mobility = deriveObstacleMobility(obstacle);
+  const movable = canPushObject(mobility) && mobility.mode !== 'fixed';
+  const pushMass = obstacle.pushMass
+    || obstacle.gameplay?.pushMass
+    || THREE.MathUtils.clamp((obstacle.radius || 1) * (obstacle.height || obstacle.colliderTop || 1) * 30, 8, 180);
+  return {
+    ...obstacle,
+    mobility,
+    pushable: movable,
+    pushMass,
+    pushFriction: obstacle.pushFriction ?? obstacle.gameplay?.pushFriction ?? 0.88,
+  };
+}
+
 function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
   const [baseX, , baseZ] = obstacle.render.position;
   const offset = offsets[`${zoneId}:${obstacle.id}`] || offsets[obstacle.id] || { x: 0, z: 0 };
@@ -76,7 +118,7 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
   const [, yaw = 0] = obstacle.render.rotation || [0, 0, 0];
   const scale = obstacle.render.scale || 1;
   const bounds = colliderBounds(obstacle.collider, scale);
-  return {
+  return applyObstacleMobility({
     id: obstacle.id,
     kind: obstacle.kind,
     path: obstacle.render.path,
@@ -102,32 +144,33 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
     definition: obstacle,
     zoneId,
     shapes: flattenCollider(obstacle.collider),
-  };
+  });
 }
 
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
+  const withMobility = obstacles => obstacles.map(applyObstacleMobility);
   if (zoneId === 'POST_OFFICE_BAY') {
-    return [...mapped, ...getPostOfficeBayRockObstacles()];
+    return withMobility([...mapped, ...getPostOfficeBayRockObstacles()]);
   }
   if (zoneId === 'ALT_POST_OFFICE_BAY') {
-    return [...mapped, ...getAltPostOfficeBayRockObstacles()];
+    return withMobility([...mapped, ...getAltPostOfficeBayRockObstacles()]);
   }
   if (zoneId === 'POST_OFFICE_BAY_3') {
-    return [...mapped, ...getPostOfficeBay3RockObstacles()];
+    return withMobility([...mapped, ...getPostOfficeBay3RockObstacles()]);
   }
   if (zoneId === 'N_SHORE') {
     // Authored basalt boulders double as colliders; layout shared with the
     // instanced visuals in WorldDetails.
-    return [...mapped, ...getNorthShoreRockObstacles()];
+    return withMobility([...mapped, ...getNorthShoreRockObstacles()]);
   }
   if (zoneId === 'NW_REEF') {
-    return [...mapped, ...getNorthwestReefRockObstacles()];
+    return withMobility([...mapped, ...getNorthwestReefRockObstacles()]);
   }
   if (zoneId === 'W_HIGH') {
-    return [...mapped, ...getWesternHighlandsRockObstacles()];
+    return withMobility([...mapped, ...getWesternHighlandsRockObstacles()]);
   }
-  return mapped;
+  return withMobility(mapped);
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();

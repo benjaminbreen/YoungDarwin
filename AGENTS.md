@@ -40,7 +40,7 @@ Use Floreana-specific content directly when it fits the zone:
 
 Initial Floreana zone architecture:
 
-- `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, and placeholder region maps).
+- `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps. Authored terrain currently includes `POST_OFFICE_BAY`, `ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `N_SHORE`, `NW_REEF`, `W_HIGH`, `EL_MIRADOR`, `MANGROVES`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, and `CORMORANT_BAY_TEST_3`; other locations can still fall back to placeholder terrain.
 - `three-game/world/floreanaZones.js` is a runtime bridge that presents region maps through the older zone-shaped API used by UI/store code.
 - `game-core/zones.ts` still contains older planned-zone ids such as `post-office-bay-anchorage`; do not use those ids for new authored 3D region work unless you are deliberately editing legacy/planned-zone compatibility.
 - `three-game/world/regions/*` is the current authored terrain/material registry. New authored terrain should be added there, not by adding region-specific branches directly to `three-game/world/terrain.js` or `three-game/components/scene/Terrain.jsx`.
@@ -91,7 +91,7 @@ Current terrain implementation:
 
 ## Authored Region Maps: How To Build One
 
-Three regions are fully authored so far: `POST_OFFICE_BAY` (`floreana-cove`), `N_SHORE` (`floreana-north-shore`), and `NW_REEF` (`floreana-nw-reef`, white-sand beach + walkable coral shallows + offshore islet). Every other location in `data/locations.js` falls back to `placeholder-{type}` procedural terrain. Use `N_SHORE`/`NW_REEF` as the current templates; `POST_OFFICE_BAY` still has some older hand-tuned detail code.
+Several regions are authored now, including the production-ish Floreana maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, `W_HIGH`, `EL_MIRADOR`, `MANGROVES`) plus visual/performance test maps (`ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, `CORMORANT_BAY_TEST_3`). Any location in `data/locations.js` without a registered authored terrain still falls back to `placeholder-{type}` procedural terrain. Use `N_SHORE`, `NW_REEF`, and the newer test-map modules as templates; `POST_OFFICE_BAY` still has older hand-tuned detail code in `WorldDetails.jsx` and should be migrated deliberately rather than copied.
 
 Checklist for authoring a new region:
 
@@ -130,6 +130,24 @@ Current implementation:
 - Teeter is both manually testable with `U` and automatically triggered near the edge of a supported boulder when moving close to the lip, with a small pushback so it reads as balance recovery rather than pure animation.
 - Darwin now has `hitReaction` and `bigHitFall` animation clips, rebuilt into `public/assets/models/darwin-final-animated.glb` from `Hit Reaction.fbx` and `Big Hit and Fall.fbx`.
 
+## Fauna Runtime Direction
+
+Animated/moving specimens should stay visible first, with motion layered on top. Avoid special-case map fixes for a single species unless the bug is truly species-specific.
+
+Current implementation:
+
+- Author spawn/content data in `data/locations.js` (`specimenPlacements`) and runtime asset metadata in `three-game/modelAssets.js`.
+- Render individual specimens through `three-game/components/world/SpecimenActor.jsx`; do not add separate fauna GLB render paths in ecology modules for collectable specimens.
+- Motion profiles live in `three-game/fauna/faunaBehaviorProfiles.js`; movement state and steering live in `three-game/fauna/faunaMotionController.js`; React integration lives in `three-game/fauna/useFaunaBehavior.js`.
+- Dynamic specimen collision uses `three-game/fauna/specimenCollision.js` and `three-game/world/specimenRuntime.js`. `SpecimenActor` publishes each actor pose; `PlayerController` resolves collisions and emits contact stimuli so animals can react.
+- If an animated GLB disappears after adding movement, first check whether `SpecimenActor` still renders the model at the authored/base pose before applying motion. Do not route moving animals through alternate ecology prop layers as a workaround.
+
+Next fauna improvements:
+
+- Keep the basic motion controller small and data-driven; add species behavior by profile fields rather than branching in `SpecimenActor`.
+- Prefer simple, inspectable steering states (`idle`, `wander`, `flee`, `return`) before adding pathfinding.
+- Add visual debug toggles for runtime specimen radii, habitat bounds, and current steering target before tuning more reactions.
+
 Next collision improvements:
 
 - Replace circular footprints with capsule/cylinder footprints plus optional oriented boxes for long fallen logs.
@@ -148,6 +166,8 @@ The current procedural 3D scene is useful as a playable fallback, but the visual
 5. Enable the asset in `three-game/modelAssets.js`.
 6. Keep procedural fallbacks working at all times.
 7. Verify with `npm run check`, `npm run build`, and `npm run three:screenshot`.
+
+Do not add new raw FBX/GLB/Blend/PNG asset drops to the repository root. Some older source assets still live there, but new work should go under `assets-src/` for source/intermediate files and `public/assets/models/` or `public/assets/textures/` only for optimized runtime assets.
 
 Preferred art direction:
 

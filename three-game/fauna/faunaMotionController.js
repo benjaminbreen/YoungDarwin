@@ -1,14 +1,5 @@
 import * as THREE from 'three';
-import { isWalkableTerrain, terrainBiomeAt, terrainHeight } from '../world/terrain';
-
-// Beyond this distance from the player, fauna simulate at FAR_SIM_INTERVAL
-// instead of every frame. Expensive terrain sampling dominates the cost, and
-// distant motion is not closely watched.
-const FAR_SIM_RADIUS = 42;
-const FAR_SIM_INTERVAL = 1 / 6;
-
-const _wpCandidate = new THREE.Vector2();
-const _wpBest = new THREE.Vector2();
+import { isWalkableTerrain, terrainHeight } from '../world/terrain';
 
 export function seedFromSpecimen(specimen) {
   const text = `${specimen.id}:${specimen.spawnPoint?.join(',')}:${specimen.behavior || 'still'}`;
@@ -43,59 +34,11 @@ function yawFromXZ(direction) {
   return Math.atan2(direction.x, direction.y);
 }
 
-function smoothStep(from, to, amount) {
-  const t = THREE.MathUtils.clamp(amount, 0, 1);
-  const eased = t * t * (3 - 2 * t);
-  return THREE.MathUtils.lerp(from, to, eased);
-}
-
-function profileRange(value, fallback) {
-  if (Array.isArray(value)) return value;
-  if (Number.isFinite(value)) return [value, value];
-  return fallback;
-}
-
-function seededUnit(seed) {
-  const value = Math.sin(seed * 12.9898) * 43758.5453;
-  return value - Math.floor(value);
-}
-
-function biomeAllowed(profile, biome) {
-  if (profile.avoidBiomes?.includes(biome)) return false;
-  if (profile.allowedBiomes?.length && !profile.allowedBiomes.includes(biome)) return false;
-  return true;
-}
-
-function pickWaypoint({ profile, habitat, base, zoneId, seed, index, current }) {
-  const radiusX = Math.max(0.05, habitat.radiusX || profile.habitatRadiusX || 0.4);
-  const radiusZ = Math.max(0.05, habitat.radiusZ || profile.habitatRadiusZ || 0.2);
-  const baseSeed = (seed + 0.13) * 1000 + index * 37.17;
-  const best = _wpBest.copy(current);
-  let bestScore = -Infinity;
-
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const angle = seededUnit(baseSeed + attempt * 13.7) * Math.PI * 2;
-    const distance = Math.sqrt(seededUnit(baseSeed + attempt * 19.9));
-    const candidate = _wpCandidate.set(
-      Math.cos(angle) * radiusX * distance,
-      Math.sin(angle) * radiusZ * distance,
-    );
-    const worldX = base.x + candidate.x;
-    const worldZ = base.z + candidate.y;
-    if (!isWalkableTerrain(worldX, worldZ, zoneId)) continue;
-    const groundY = terrainHeight(worldX, worldZ, zoneId);
-    const biome = terrainBiomeAt(worldX, worldZ, groundY, zoneId);
-    if (!biomeAllowed(profile, biome)) continue;
-    const travel = candidate.distanceTo(current);
-    const edge = 1 - Math.min(1, Math.hypot(candidate.x / radiusX, candidate.y / radiusZ));
-    const score = travel * 0.9 + edge * 0.35 + seededUnit(baseSeed + attempt * 7.3) * 0.2;
-    if (score > bestScore) {
-      best.copy(candidate);
-      bestScore = score;
-    }
-  }
-
-  return best;
+function moveTowardOffset(current, target, maxDistance, out) {
+  out.copy(target).sub(current);
+  const distance = out.length();
+  if (distance <= maxDistance || distance <= 0.0001) return out.copy(target);
+  return out.multiplyScalar(maxDistance / distance).add(current);
 }
 
 export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition }) {
@@ -106,21 +49,15 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     debug: null,
   };
   const offset = new THREE.Vector2(0, 0);
-  const waypoint = new THREE.Vector2(0, 0);
   const vectors = {
     awayFromPlayer: new THREE.Vector2(),
     awayFromHammer: new THREE.Vector2(),
-    toWaypoint: new THREE.Vector2(),
+    yawDirection: new THREE.Vector2(),
     direction: new THREE.Vector2(),
-    sidestep: new THREE.Vector2(),
     proposed: new THREE.Vector2(),
     clamped: new THREE.Vector2(),
+    stepTarget: new THREE.Vector2(),
   };
-  let waypointIndex = 0;
-  let waitUntil = 0;
-  let hasWaypoint = false;
-  let phase = seed * 10;
-  let simAccumulator = 0;
   let clock = 0;
   const hammerThreat = {
     x: 0,
@@ -128,6 +65,15 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     radius: 0,
     until: -Infinity,
     pending: [],
+  };
+  const contactThreat = {
+    x: 0,
+    z: 0,
+    radius: 0,
+    until: -Infinity,
+    intensity: 0,
+    dirX: 1,
+    dirZ: 0,
   };
 
   function reset(next = {}) {
@@ -146,17 +92,18 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       panic: 0,
     } : null;
     offset.set(0, 0);
-    waypoint.set(0, 0);
-    waypointIndex = 0;
-    waitUntil = 0;
-    hasWaypoint = false;
-    phase = seed * 10;
-    simAccumulator = 0;
     hammerThreat.x = 0;
     hammerThreat.z = 0;
     hammerThreat.radius = 0;
     hammerThreat.until = -Infinity;
     hammerThreat.pending = [];
+    contactThreat.x = 0;
+    contactThreat.z = 0;
+    contactThreat.radius = 0;
+    contactThreat.until = -Infinity;
+    contactThreat.intensity = 0;
+    contactThreat.dirX = 1;
+    contactThreat.dirZ = 0;
   }
 
   reset({ basePosition, zoneId });
@@ -178,6 +125,26 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         at: clock + (event.impactDelay ?? 0.55),
       });
     },
+    addContactThreat(event, basePositionForEvent) {
+      if (!profile || !basePositionForEvent) return;
+      const source = event.position || null;
+      if (!source) return;
+      const radius = event.radius || profile.contactAlertRadius || profile.alertRadius || 4.5;
+      const baseDistance = Math.hypot((source.x || 0) - basePositionForEvent.x, (source.z || 0) - basePositionForEvent.z);
+      if (baseDistance > radius + Math.max(habitat?.radiusX || 0, habitat?.radiusZ || 0)) return;
+      contactThreat.x = source.x || 0;
+      contactThreat.z = source.z || 0;
+      contactThreat.radius = radius;
+      contactThreat.until = clock + (event.duration || profile.contactReactionDuration || 1.4);
+      contactThreat.intensity = THREE.MathUtils.clamp(event.intensity ?? 1, 0, 1.6);
+      const awayX = state.position.x - contactThreat.x;
+      const awayZ = state.position.z - contactThreat.z;
+      const length = Math.hypot(awayX, awayZ);
+      if (length > 0.0001) {
+        contactThreat.dirX = awayX / length;
+        contactThreat.dirZ = awayZ / length;
+      }
+    },
     update({ basePosition: base, zoneId: currentZoneId, playerPosition, elapsedTime, delta, paused = false }) {
       if (!profile || !habitat) return { ok: false, reason: 'inactive' };
       if (paused) return { ok: true, reason: 'paused', state };
@@ -195,136 +162,121 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         return { ok: false, reason: 'invalid-base-position', state };
       }
 
-      const current = offset;
       const player = playerPosition || { x: base.x, z: base.z };
-      const worldX = base.x + current.x;
-      const worldZ = base.z + current.y;
-      const awayFromPlayer = vectors.awayFromPlayer.set(worldX - player.x, worldZ - player.z);
+      const awayFromPlayer = vectors.awayFromPlayer.set(state.position.x - player.x, state.position.z - player.z);
       const distanceToPlayer = awayFromPlayer.length();
-
-      simAccumulator += delta;
-      const farThreshold = Math.max(FAR_SIM_RADIUS, profile.alertRadius + 8);
-      if (distanceToPlayer > farThreshold && simAccumulator < FAR_SIM_INTERVAL) {
-        return { ok: true, reason: 'throttled', state };
-      }
       const t = elapsedTime;
       clock = t;
-      const dt = Math.min(0.2, Math.max(0.001, simAccumulator));
-      simAccumulator = 0;
+      const dt = Math.min(0.2, Math.max(0.001, delta));
 
       if (hammerThreat.pending.length) {
         const due = hammerThreat.pending.filter(event => event.at <= t);
         hammerThreat.pending = hammerThreat.pending.filter(event => event.at > t);
         for (const event of due) {
-          const distanceToStrike = Math.hypot(worldX - event.x, worldZ - event.z);
+          const distanceToStrike = Math.hypot(state.position.x - event.x, state.position.z - event.z);
           if (distanceToStrike > event.radius) continue;
           hammerThreat.x = event.x;
           hammerThreat.z = event.z;
           hammerThreat.radius = event.radius;
           hammerThreat.until = t + 3.2;
-          waypoint.copy(current);
-          waitUntil = t;
         }
       }
 
       const playerPanic = distanceToPlayer < profile.alertRadius
         ? THREE.MathUtils.clamp((profile.alertRadius - distanceToPlayer) / Math.max(0.01, profile.alertRadius - profile.panicRadius), 0, 1)
         : 0;
-      const hammerDistance = Math.hypot(worldX - hammerThreat.x, worldZ - hammerThreat.z);
+      const hammerDistance = Math.hypot(state.position.x - hammerThreat.x, state.position.z - hammerThreat.z);
       const hammerFade = t < hammerThreat.until ? THREE.MathUtils.clamp((hammerThreat.until - t) / 3.2, 0, 1) : 0;
       const hammerPanic = hammerFade > 0
         ? THREE.MathUtils.clamp((hammerThreat.radius - hammerDistance) / Math.max(0.01, hammerThreat.radius * 0.72), 0, 1) * hammerFade
         : 0;
-      const panic = Math.max(playerPanic, hammerPanic);
-      const awayFromThreat = hammerPanic > playerPanic
-        ? vectors.awayFromHammer.set(worldX - hammerThreat.x, worldZ - hammerThreat.z)
-        : awayFromPlayer;
+      const contactDistance = Math.hypot(state.position.x - contactThreat.x, state.position.z - contactThreat.z);
+      const contactFade = t < contactThreat.until ? THREE.MathUtils.clamp((contactThreat.until - t) / Math.max(0.1, profile.contactReactionDuration || 1.4), 0, 1) : 0;
+      const contactPanic = contactFade > 0
+        ? THREE.MathUtils.clamp((contactThreat.radius - contactDistance) / Math.max(0.01, contactThreat.radius * 0.65), 0, 1) * contactFade * Math.max(0.35, contactThreat.intensity || 1)
+        : 0;
+      const panic = Math.max(playerPanic, hammerPanic, contactPanic);
 
-      phase += dt * (profile.patrolRate || 0.5);
-      if (!hasWaypoint) {
-        waypointIndex += 1;
-        waypoint.copy(pickWaypoint({
-          profile,
-          habitat,
-          base,
-          zoneId: currentZoneId,
-          seed,
-          index: waypointIndex,
-          current,
-        }));
-        hasWaypoint = true;
-        waitUntil = t;
-      }
-
-      const toWaypoint = vectors.toWaypoint.copy(waypoint).sub(current);
-      const waypointDistance = toWaypoint.length();
-      if (t >= waitUntil && waypointDistance < 0.28) {
-        waypointIndex += 1;
-        waypoint.copy(pickWaypoint({
-          profile,
-          habitat,
-          base,
-          zoneId: currentZoneId,
-          seed,
-          index: waypointIndex,
-          current,
-        }));
-        const [minTarget, maxTarget] = profileRange(profile.targetInterval, [1.5, 3.5]);
-        waitUntil = t + THREE.MathUtils.lerp(minTarget, maxTarget, seededUnit(seed * 1000 + waypointIndex * 23));
-      }
-
-      const direction = vectors.direction.set(0, 0);
+      const orbitSpeed = profile.orbitSpeed || Math.max(0.22, profile.patrolRate || 0.5);
+      const orbitPhase = seed * Math.PI * 2 + t * orbitSpeed;
+      const radiusX = Math.max(0.12, (habitat.radiusX || profile.habitatRadiusX || 1) * (profile.orbitRadiusScaleX || 0.42));
+      const radiusZ = Math.max(0.08, (habitat.radiusZ || profile.habitatRadiusZ || 1) * (profile.orbitRadiusScaleZ || 0.42));
+      const scuttleWobble = profile.movementStyle === 'scuttle'
+        ? Math.sin(t * (profile.scuttleFrequency || 8.5) + seed * 9.0) * (profile.scuttleAmplitude || 0.18)
+        : 0;
+      const targetOffset = vectors.proposed.set(
+        Math.cos(orbitPhase) * radiusX,
+        Math.sin(orbitPhase * 0.93 + seed) * radiusZ + scuttleWobble,
+      );
+      const direction = vectors.direction
+        .set(
+          -Math.sin(orbitPhase) * radiusX,
+          Math.cos(orbitPhase * 0.93 + seed) * radiusZ * 0.93,
+        );
       if (panic > 0.01) {
-        if (awayFromThreat.lengthSq() > 0.0001) direction.copy(awayFromThreat).normalize();
-        else direction.set(1, 0);
-        const sidestep = vectors.sidestep
-          .set(-direction.y, direction.x)
-          .multiplyScalar(Math.sin(t * 2.0 + seed * 5.0) * 0.22 * panic);
-        direction.add(sidestep).normalize();
-      } else if (t >= waitUntil) {
-        direction.copy(waypoint).sub(current);
-        if (direction.lengthSq() > 0.0001) direction.normalize();
+        if (contactPanic >= hammerPanic && contactPanic >= playerPanic) {
+          direction.set(contactThreat.dirX, contactThreat.dirZ);
+        } else if (hammerPanic > playerPanic) {
+          direction.set(state.position.x - hammerThreat.x, state.position.z - hammerThreat.z);
+          if (direction.lengthSq() > 0.0001) direction.normalize();
+          else direction.set(1, 0);
+        } else if (awayFromPlayer.lengthSq() > 0.0001) {
+          direction.copy(awayFromPlayer).normalize();
+        } else {
+          direction.set(1, 0);
+        }
+        const contactBoost = contactPanic > 0.01 ? (profile.contactFleeMultiplier || 1.55) : 1;
+        const fleeStep = Math.max(profile.fleeSpeed || 1, 0.8) * (0.7 + panic * 0.75) * contactBoost * dt;
+        targetOffset.copy(offset).addScaledVector(direction, fleeStep);
+      } else if (direction.lengthSq() > 0.0001) {
+        direction.normalize();
+        moveTowardOffset(
+          offset,
+          targetOffset,
+          Math.max(profile.walkSpeed || 0.2, 0.06) * dt,
+          vectors.stepTarget,
+        );
+        targetOffset.copy(vectors.stepTarget);
       }
 
-      const speed = panic > 0.01
-        ? smoothStep(profile.walkSpeed, profile.fleeSpeed, panic)
-        : profile.walkSpeed;
-      const proposed = vectors.proposed.copy(current).addScaledVector(direction, speed * dt);
-      let movementTarget = proposed;
-      const proposedWorldX = base.x + proposed.x;
-      const proposedWorldZ = base.z + proposed.y;
-      const proposedGroundY = terrainHeight(proposedWorldX, proposedWorldZ, currentZoneId);
-      const proposedBiome = terrainBiomeAt(proposedWorldX, proposedWorldZ, proposedGroundY, currentZoneId);
-      if (
-        direction.lengthSq() > 0.0001
-        && (!isWalkableTerrain(proposedWorldX, proposedWorldZ, currentZoneId) || !biomeAllowed(profile, proposedBiome))
-      ) {
-        waypointIndex += 1;
-        waypoint.copy(pickWaypoint({
-          profile,
-          habitat,
-          base,
-          zoneId: currentZoneId,
-          seed,
-          index: waypointIndex,
-          current,
-        }));
-        direction.set(0, 0);
-        movementTarget = current;
+      const clampHabitat = panic > 0.01
+        ? {
+          radiusX: (habitat.radiusX || profile.habitatRadiusX || 1) * (profile.fleeHabitatScale || 1.25),
+          radiusZ: (habitat.radiusZ || profile.habitatRadiusZ || 1) * (profile.fleeHabitatScale || 1.25),
+        }
+        : habitat;
+      let movementTarget = clampOffset(targetOffset, clampHabitat, vectors.clamped);
+      let proposedWorldX = base.x + movementTarget.x;
+      let proposedWorldZ = base.z + movementTarget.y;
+      if (!isWalkableTerrain(proposedWorldX, proposedWorldZ, currentZoneId)) {
+        movementTarget = vectors.clamped.copy(offset).lerp(movementTarget, 0.45);
+        proposedWorldX = base.x + movementTarget.x;
+        proposedWorldZ = base.z + movementTarget.y;
+        if (!isWalkableTerrain(proposedWorldX, proposedWorldZ, currentZoneId)) {
+          movementTarget = vectors.clamped.copy(offset);
+          proposedWorldX = base.x + movementTarget.x;
+          proposedWorldZ = base.z + movementTarget.y;
+        }
       }
 
-      offset.copy(clampOffset(movementTarget, habitat, vectors.clamped));
+      const previousX = state.position.x;
+      const previousZ = state.position.z;
+      offset.copy(movementTarget);
       const x = base.x + offset.x;
       const z = base.z + offset.y;
       const groundY = terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.04);
-      const moving = direction.lengthSq() > 0.0001;
+      const movedDistance = Math.hypot(x - previousX, z - previousZ);
+      const moving = movedDistance > 0.002 || panic > 0.01;
       state.animation = panic > 0.18 && profile.runClip
         ? profile.runClip
         : (moving ? profile.walkClip || null : profile.idleClip || profile.walkClip || null);
       const bob = Math.abs(Math.sin(t * (moving ? 5.2 : 1.7) + seed)) * (profile.bobAmount || 0) * (moving ? 1 : 0.25);
       state.position.set(x, groundY + bob, z);
-      if (direction.lengthSq() > 0.0001) {
-        const targetYaw = yawFromXZ(direction);
+      if (moving) {
+        const yawDirection = vectors.yawDirection.set(x - previousX, z - previousZ);
+        let targetYaw = yawDirection.lengthSq() > 0.000001 ? yawFromXZ(yawDirection) : yawFromXZ(direction);
+        if (profile.movementFacingMode === 'sideways') targetYaw += Math.PI / 2;
+        if (Number.isFinite(profile.facingYawOffset)) targetYaw += profile.facingYawOffset;
         const turnRate = profile.turnRate || 10;
         state.yaw = THREE.MathUtils.damp(state.yaw, targetYaw, turnRate, dt);
       }

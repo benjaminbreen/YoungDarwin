@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -41,6 +41,20 @@ function FoliageMotionDriver() {
 // current zone has settled, warm the GLB cache for the others so arriving
 // there doesn't stall on network fetches.
 const PREFETCH_ZONES = ['N_SHORE', 'NW_REEF', 'MANGROVES'];
+const EMPTY_LAYER_PLAN = {
+  flora: [],
+  groundCover: [],
+  denseGrass: [],
+  hybridGrassTufts: [],
+  stylizedMeadows: [],
+  dryGrassPatches: [],
+  lagoonSurfaces: [],
+  generatedTrees: [],
+  props: [],
+  rocks: [],
+  canopySilhouettes: [],
+};
+const EMPTY_PROP_PLAN = { instancedGroups: [], staticProps: [] };
 
 function drawDistanceFor(item, fallback = 95) {
   const value = item.maxVisibleDistance ?? item.drawDistance;
@@ -206,20 +220,41 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     return () => handles.forEach(handle => clearTimeout(handle));
   }, [ecology]);
 
+  const visibleLayers = useMemo(() => {
+    if (!ecology) return EMPTY_LAYER_PLAN;
+    const tierVisible = item => !ecology.stream || (item.loadTier ?? 1) <= streamTier;
+    return {
+      flora: (ecology.flora || []).filter(tierVisible),
+      groundCover: (ecology.groundCover || []).filter(tierVisible),
+      denseGrass: (ecology.denseGrass || []).filter(tierVisible),
+      hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(tierVisible),
+      stylizedMeadows: (ecology.stylizedMeadows || []).filter(tierVisible),
+      dryGrassPatches: (ecology.dryGrassPatches || []).filter(tierVisible),
+      lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(tierVisible),
+      generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
+      props: (ecology.props || []).filter(tierVisible),
+      rocks: (ecology.rocks || []).filter(tierVisible),
+      canopySilhouettes: (ecology.canopySilhouettes || []).filter(tierVisible),
+    };
+  }, [ecology, streamTier]);
+  const propPlan = useMemo(() => (
+    ecology ? planProps(visibleLayers.props, ecology.zoneId) : EMPTY_PROP_PLAN
+  ), [ecology, visibleLayers.props]);
+
   if (!ecology) return null;
-  const tierVisible = item => !ecology.stream || (item.loadTier ?? 1) <= streamTier;
-  const flora = (ecology.flora || []).filter(tierVisible);
-  const groundCover = (ecology.groundCover || []).filter(tierVisible);
-  const denseGrass = (ecology.denseGrass || []).filter(tierVisible);
-  const hybridGrassTufts = (ecology.hybridGrassTufts || []).filter(tierVisible);
-  const stylizedMeadows = (ecology.stylizedMeadows || []).filter(tierVisible);
-  const dryGrassPatches = (ecology.dryGrassPatches || []).filter(tierVisible);
-  const lagoonSurfaces = (ecology.lagoonSurfaces || []).filter(tierVisible);
-  const generatedTrees = (ecology.generatedTrees || []).filter(tierVisible);
-  const props = (ecology.props || []).filter(tierVisible);
-  const { instancedGroups: instancedProps, staticProps } = planProps(props, ecology.zoneId);
-  const rocks = (ecology.rocks || []).filter(tierVisible);
-  const canopySilhouettes = (ecology.canopySilhouettes || []).filter(tierVisible);
+  const {
+    flora,
+    groundCover,
+    denseGrass,
+    hybridGrassTufts,
+    stylizedMeadows,
+    dryGrassPatches,
+    lagoonSurfaces,
+    generatedTrees,
+    rocks,
+    canopySilhouettes,
+  } = visibleLayers;
+  const { instancedGroups: instancedProps, staticProps } = propPlan;
   return (
     <group>
       <FoliageMotionDriver />

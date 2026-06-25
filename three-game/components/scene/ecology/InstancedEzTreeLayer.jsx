@@ -7,6 +7,7 @@ import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
+import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 
 const dummy = new THREE.Object3D();
 
@@ -264,6 +265,7 @@ export function InstancedEzTreeLayer({
     Number.isFinite(effectiveDistance) && effectiveDistance > 0 ? effectiveDistance * LEAF_LOD_FACTOR : null,
   ), [items, effectiveDistance]);
   const leafGroupRef = useRef(null);
+  const cullStateRef = useRef(createCameraCullState());
 
   // Partition items across variants once (round-robin) instead of re-filtering
   // for every variant primitive on every render.
@@ -280,6 +282,8 @@ export function InstancedEzTreeLayer({
   }, [inspectableType, setInspectedObject]);
 
   useFrame(({ camera }) => {
+    if (!shouldRunCameraCull(camera, cullStateRef.current)) return;
+
     const group = groupRef.current;
     if (group && cullBounds) {
       group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;

@@ -4,6 +4,12 @@ import React, { useState, useEffect } from 'react';
 import useGameStore from '../hooks/useGameStore';
 import { hasGeneratedImage, getCachedImageUrl, generateHybridImage } from '../utils/hybridImageGenerator';
 
+const debugLog = (...args) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(...args);
+  }
+};
+
 /**
  * HybridsDebug - A developer tool for monitoring hybrid species in the game
  * Enhanced with image thumbnails and manual generation capabilities
@@ -34,7 +40,7 @@ export default function HybridsDebug() {
       );
     });
     
-    console.log(`Found ${foundHybrids.length} hybrid specimens:`, foundHybrids);
+    debugLog(`Found ${foundHybrids.length} hybrid specimens:`, foundHybrids);
     setHybrids(foundHybrids);
     
     // Check image status for all hybrids

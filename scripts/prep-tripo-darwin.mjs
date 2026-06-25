@@ -15,7 +15,7 @@ const args = Object.fromEntries(process.argv.slice(2).map(a => {
   const m = a.match(/^--([^=]+)=(.*)$/);
   return m ? [m[1], m[2]] : [a.replace(/^--/, ''), true];
 }));
-const INPUT = args.in || 'darwin-tripo-segmented.glb';
+const INPUT = args.in || 'assets-src/root-raw-assets/darwin-tripo-segmented.glb';
 const TARGET_TRIS = Number(args.tris || 60000);
 const OUT_GLB = 'asset-backups/darwin-tripo-decimated.glb';
 const OUT_OBJ = 'asset-backups/darwin-tripo-for-mixamo.obj';

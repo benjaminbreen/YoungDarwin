@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { Beagle } from '../components/scene/Beagle';
 import { Landmarks } from '../components/scene/Landmarks';
 import { Terrain } from '../components/scene/Terrain';
@@ -17,7 +17,10 @@ import { useThreeGameStore } from '../store';
 
 export function ActiveZoneContent({ settings, deferredContentReady = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const specimens = deferredContentReady ? getThreeSpecimens(currentZoneId) : [];
+  const specimens = useMemo(
+    () => (deferredContentReady ? getThreeSpecimens(currentZoneId) : []),
+    [currentZoneId, deferredContentReady],
+  );
 
   return (
     <>

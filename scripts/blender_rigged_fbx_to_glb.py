@@ -4,7 +4,7 @@ to a triangle target, optionally re-texture / flip UVs, strip animations.
 
 Usage:
   blender --background --python scripts/blender_rigged_fbx_to_glb.py -- \
-    --fbx "Darwin 4 rig Breathing Idle.fbx" --out asset-backups/darwin4.glb \
+    --fbx "assets-src/root-raw-assets/Darwin 4 rig Breathing Idle.fbx" --out asset-backups/darwin4.glb \
     --decimate 60000 [--texture base.png] [--flipuv] [--height 1.75]
 """
 import bpy

@@ -9,6 +9,7 @@ import { catalogToInspectable } from '../../world/inspectables';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import { ContactShadow } from '../scene/ContactShadow';
 import { stabilizeFoliageMaterial } from './materialStability';
+import { createCameraCullState, shouldRunCameraCull } from '../scene/cameraCull';
 
 const scratchWorldPosition = new THREE.Vector3();
 
@@ -94,21 +95,19 @@ function StaticGLBPrimitive({
   castShadow = false,
   receiveShadow = false,
   frustumCulled = true,
-  maxVisibleDistance = null,
   motion = null,
   contactShadow = null,
   inspectableType = null,
   sourceId = null,
   sourceLabel = null,
   sourceKind = 'static-glb',
+  groupRef = null,
 }) {
-  const group = useRef(null);
+  const localGroupRef = useRef(null);
+  const group = groupRef || localGroupRef;
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const { scene } = useGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
-  const maxVisibleDistanceSq = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
-    ? maxVisibleDistance * maxVisibleDistance
-    : null;
   const renderUserData = useMemo(() => ({
     renderSource: sourceId || `glb:${path}`,
     renderLabel: sourceLabel || sourceId || path.split('/').pop() || path,
@@ -119,18 +118,6 @@ function StaticGLBPrimitive({
   useEffect(() => {
     prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion });
   }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion]);
-
-  useFrame(({ clock, camera }) => {
-    const node = group.current;
-    if (!node) return;
-    if (maxVisibleDistanceSq !== null) {
-      node.getWorldPosition(scratchWorldPosition);
-      const visible = scratchWorldPosition.distanceToSquared(camera.position) <= maxVisibleDistanceSq;
-      node.visible = visible;
-      if (!visible) return;
-    }
-    if (bob) node.position.y = position[1] + Math.sin(clock.elapsedTime * 1.7 + position[0]) * bob;
-  });
 
   return (
     <group
@@ -154,10 +141,52 @@ function StaticGLBPrimitive({
   );
 }
 
+function StaticGLBFrameDriver({ group, position, bob, maxVisibleDistanceSq }) {
+  const cullStateRef = useRef(createCameraCullState());
+  useFrame(({ clock, camera }) => {
+    const node = group.current;
+    if (!node) return;
+    if (maxVisibleDistanceSq !== null) {
+      if (shouldRunCameraCull(camera, cullStateRef.current)) {
+        node.getWorldPosition(scratchWorldPosition);
+        node.visible = scratchWorldPosition.distanceToSquared(camera.position) <= maxVisibleDistanceSq;
+      }
+      if (!node.visible) return;
+    }
+    if (bob) node.position.y = position[1] + Math.sin(clock.elapsedTime * 1.7 + position[0]) * bob;
+  });
+  return null;
+}
+
+function StaticGLBActivePrimitive(props) {
+  const {
+    position,
+    bob = 0,
+    maxVisibleDistance = null,
+  } = props;
+  const group = useRef(null);
+  const maxVisibleDistanceSq = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
+    ? maxVisibleDistance * maxVisibleDistance
+    : null;
+  return (
+    <>
+      <StaticGLBPrimitive {...props} groupRef={group} />
+      <StaticGLBFrameDriver
+        group={group}
+        position={position}
+        bob={bob}
+        maxVisibleDistanceSq={maxVisibleDistanceSq}
+      />
+    </>
+  );
+}
+
 export function StaticGLB(props) {
+  const needsFrame = Boolean(props.bob)
+    || (Number.isFinite(props.maxVisibleDistance) && props.maxVisibleDistance > 0);
   return (
     <Suspense fallback={null}>
-      <StaticGLBPrimitive {...props} />
+      {needsFrame ? <StaticGLBActivePrimitive {...props} /> : <StaticGLBPrimitive {...props} />}
     </Suspense>
   );
 }

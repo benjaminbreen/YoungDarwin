@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { specimenToInspectable } from '../../world/inspectables';
+import { removeSpecimenRuntimePose, setSpecimenRuntimePose } from '../../world/specimenRuntime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { addRimLight, toonMaterial } from '../scene/materials';
@@ -34,6 +35,12 @@ function publishActorRuntimePosition({
     || !Number.isFinite(position?.y)
     || !Number.isFinite(position?.z)
   ) return;
+  setSpecimenRuntimePose(zoneId, actorId, {
+    x: position.x,
+    y: position.y,
+    z: position.z,
+    yaw: position.yaw || 0,
+  });
   const previous = ref.current;
   const dx = position.x - previous.x;
   const dy = position.y - previous.y;
@@ -269,8 +276,6 @@ function CrabWiggle({ children }) {
     const t = clock.elapsedTime;
     const burst = Math.max(0, Math.sin(t * 2.6));
     group.current.position.y = 0.01 + Math.abs(Math.sin(t * 9.0)) * 0.012 * burst;
-    group.current.rotation.x = Math.sin(t * 6.0) * 0.035 * burst;
-    group.current.rotation.z = Math.sin(t * 7.3) * 0.055 * burst;
     group.current.scale.setScalar(1 + Math.sin(t * 8.2) * 0.018 * burst);
   });
   return <group ref={group}>{children}</group>;
@@ -347,6 +352,10 @@ export function SpecimenActor({ specimen }) {
     };
     return release;
   }, [actorId, carryProfile, setCarriedObject, setCarryPrompt]);
+
+  useEffect(() => (
+    () => removeSpecimenRuntimePose(currentZoneId, actorId)
+  ), [actorId, currentZoneId]);
 
   // Single per-actor frame callback: bare-handed carry/pickup handling (mirrors
   // the PhysicsProp carry flow) followed by the idle-behaviour fallback for

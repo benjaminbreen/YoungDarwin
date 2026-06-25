@@ -6,6 +6,7 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
 import { createFaunaMotionController, habitatFor, seedFromSpecimen } from './faunaMotionController';
 import { onPropEvent } from '../physics/props/propEvents';
+import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 
 export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -57,6 +58,13 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
   useFrame(({ clock, delta }) => {
     if (!controller || !profile) return;
     const base = basePositionRef?.current || basePosition;
+    const actorId = specimen.instanceId || specimen.id;
+    const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
+    for (const stimulus of stimuli) {
+      if (stimulus.kind === 'contact') {
+        controller.addContactThreat(stimulus, base);
+      }
+    }
     const playerPose = getRuntimePlayerPose();
     const status = controller.update({
       basePosition: base,
