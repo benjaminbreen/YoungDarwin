@@ -38,6 +38,59 @@ const BORDER_COLLAR_DEPTH = 3.8;
 const BORDER_COLLAR_DROP = 0.035;
 const BORDER_COLLAR_ROWS = 4;
 
+const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
+  varying vec3 vBorderWorldPosition;
+  varying vec3 vBorderWorldNormal;
+
+  float bvHash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float bvNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(bvHash(i), bvHash(i + vec2(1.0, 0.0)), u.x),
+      mix(bvHash(i + vec2(0.0, 1.0)), bvHash(i + vec2(1.0, 1.0)), u.x),
+      u.y
+    );
+  }
+
+  float bvFbm(vec2 p) {
+    float value = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+      value += bvNoise(p) * amp;
+      p = mat2(1.58, -0.92, 0.92, 1.58) * p + vec2(4.7, -2.9);
+      amp *= 0.52;
+    }
+    return value;
+  }
+`;
+
+const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
+  float bvDist = length(vBorderWorldPosition.xz);
+  float bvNear = 1.0 - smoothstep(84.0, 142.0, bvDist);
+  float bvCoarse = bvFbm(vBorderWorldPosition.xz * 0.038 + vec2(2.0, -7.0));
+  float bvMedium = bvFbm(vBorderWorldPosition.xz * 0.145 + vec2(11.0, 3.0));
+  float bvFine = bvNoise(vBorderWorldPosition.xz * 0.92);
+  float bvMottle = (bvCoarse - 0.5) * 0.18 + (bvMedium - 0.5) * 0.11 + (bvFine - 0.5) * 0.035;
+  float bvSlope = clamp(1.0 - abs(vBorderWorldNormal.y), 0.0, 1.0);
+  float bvStreak = smoothstep(0.70, 0.96, bvFbm(vec2(
+    vBorderWorldPosition.x * 0.085 + vBorderWorldPosition.z * 0.035,
+    vBorderWorldPosition.z * 0.22 - vBorderWorldPosition.x * 0.018
+  )));
+  float bvVein = abs(sin(vBorderWorldPosition.x * 0.12 + vBorderWorldPosition.z * 0.045 + bvCoarse * 4.4));
+  float bvCrack = smoothstep(0.985, 0.999, bvVein) * (1.0 - smoothstep(0.55, 0.86, bvFine));
+
+  vec3 bvWarmDust = vec3(1.055, 1.025, 0.925);
+  vec3 bvCoolAsh = vec3(0.90, 0.94, 0.92);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvWarmDust, max(0.0, bvCoarse - 0.52) * 0.22 * bvNear);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvCoolAsh, max(0.0, 0.48 - bvCoarse) * 0.14 * bvNear);
+  diffuseColor.rgb *= clamp(1.0 + bvMottle * bvNear - bvSlope * 0.10 - bvStreak * 0.045 * bvNear - bvCrack * 0.16 * bvNear, 0.72, 1.22);
+`;
+
 function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
   return [x / length, z / length];
@@ -213,6 +266,48 @@ function ensureUpwardWinding(geometry) {
   return geometry;
 }
 
+function createBorderVistaMaterial() {
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.98,
+    metalness: 0,
+    fog: true,
+  });
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vBorderWorldPosition;
+        varying vec3 vBorderWorldNormal;`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        vBorderWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vBorderWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        ${BORDER_VISTA_GRAIN_GLSL}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        ${BORDER_VISTA_GRAIN_APPLY}`,
+      );
+  };
+  material.customProgramCacheKey = () => 'border-vista-grain-v1';
+  material.needsUpdate = true;
+  return material;
+}
+
 function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetConfig, vista) {
   if (!CARDINAL_EDGES.has(vista.edge)
     || !targetRegionId
@@ -248,6 +343,7 @@ function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetCon
     } = borderDistanceForRow(row, rows, previewDepth);
     const targetDistance = outsideT * targetSampleDepth;
     const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, 12.0);
+    const toneBlend = THREE.MathUtils.smoothstep(outsideDistance, 6.0, 34.0);
     const seamHold = 1 - seamBlend;
     const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.58, 1.0);
     for (let col = 0; col <= cols; col += 1) {
@@ -275,7 +371,7 @@ function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetCon
 
       const currentColor = terrainColor(currentX, currentZ, currentY, regionId);
       const targetColor = terrainColor(targetX, targetZ, targetY, targetRegionId);
-      const color = currentColor.lerp(targetColor, seamBlend);
+      const color = currentColor.lerp(targetColor, toneBlend);
       if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.52);
 
       positions.push(x, y, z);
@@ -475,12 +571,7 @@ function BorderVista({ regionId, config, vista }) {
     makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista)
       || makeApronGeometry(regionId, config, vista)
   ), [regionId, config, targetConfig, vista]);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.94,
-    metalness: 0,
-    fog: true,
-  }), []);
+  const material = useMemo(() => createBorderVistaMaterial(), []);
   useEffect(() => () => geometry?.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
   if (!geometry) return null;

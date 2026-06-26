@@ -336,6 +336,57 @@ function radialTexture(stops, size = 256) {
   return texture;
 }
 
+function ringTexture(size = 256) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0.0, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.42, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.52, 'rgba(255,238,184,0.16)');
+  gradient.addColorStop(0.59, 'rgba(255,178,88,0.26)');
+  gradient.addColorStop(0.67, 'rgba(255,123,72,0.09)');
+  gradient.addColorStop(0.78, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function streakTexture(width = 512, height = 96) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const horizontal = ctx.createLinearGradient(0, 0, width, 0);
+  horizontal.addColorStop(0.0, 'rgba(255,255,255,0)');
+  horizontal.addColorStop(0.28, 'rgba(255,174,82,0.05)');
+  horizontal.addColorStop(0.47, 'rgba(255,236,178,0.32)');
+  horizontal.addColorStop(0.5, 'rgba(255,255,245,0.62)');
+  horizontal.addColorStop(0.53, 'rgba(255,236,178,0.32)');
+  horizontal.addColorStop(0.72, 'rgba(255,174,82,0.05)');
+  horizontal.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = horizontal;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'destination-in';
+  const vertical = ctx.createLinearGradient(0, 0, 0, height);
+  vertical.addColorStop(0.0, 'rgba(255,255,255,0)');
+  vertical.addColorStop(0.42, 'rgba(255,255,255,0.2)');
+  vertical.addColorStop(0.5, 'rgba(255,255,255,1)');
+  vertical.addColorStop(0.58, 'rgba(255,255,255,0.2)');
+  vertical.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = vertical;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 // Meteor streak: bright head with a long fading tail along +x.
 function meteorTexture() {
   const canvas = document.createElement('canvas');
@@ -588,6 +639,78 @@ function MidnightSkyDome({ midnightRef }) {
   return (
     <mesh ref={meshRef} renderOrder={-8.5} frustumCulled={false}>
       <sphereGeometry args={[SKY_DISTANCE - 1, 48, 24]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
+}
+
+function SolarAureoleDome({ celestialRef }) {
+  const meshRef = useRef(null);
+
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uStrength: { value: 0 },
+      uGolden: { value: 0 },
+      uOvercast: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vWorldDir;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldDir = normalize(worldPosition.xyz - cameraPosition);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying vec3 vWorldDir;
+      uniform vec3 uSunDir;
+      uniform float uStrength;
+      uniform float uGolden;
+      uniform float uOvercast;
+
+      void main() {
+        vec3 dir = normalize(vWorldDir);
+        float sunDot = max(0.0, dot(dir, normalize(uSunDir)));
+        float horizonMask = smoothstep(-0.06, 0.16, dir.y);
+        float broad = pow(sunDot, 7.0);
+        float aureole = pow(sunDot, 24.0);
+        float core = pow(sunDot, 96.0);
+        vec3 noon = vec3(1.0, 0.86, 0.48);
+        vec3 gold = vec3(1.0, 0.52, 0.22);
+        vec3 whiteHot = vec3(1.0, 0.98, 0.82);
+        vec3 color = mix(noon, gold, clamp(uGolden, 0.0, 1.0));
+        color = mix(color, whiteHot, core * 0.65);
+        float weatherCut = 1.0 - uOvercast * 0.86;
+        float alpha = (broad * 0.022 + aureole * 0.095 + core * 0.2) * uStrength * weatherCut * horizonMask;
+        if (alpha < 0.002) discard;
+        gl_FragColor = vec4(color, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  }), []);
+
+  useLayoutEffect(() => () => material.dispose(), [material]);
+
+  useFrame(() => {
+    const c = celestialRef.current;
+    const overcast = weatherEnv.overcast;
+    const strength = c.daylight * (0.45 + c.golden * 0.55) * (1 - weatherEnv.rainIntensity * 0.7);
+    material.uniforms.uSunDir.value.copy(c.sun);
+    material.uniforms.uStrength.value = strength;
+    material.uniforms.uGolden.value = c.golden;
+    material.uniforms.uOvercast.value = overcast;
+    if (meshRef.current) meshRef.current.visible = strength > 0.015 && overcast < 0.95;
+  });
+
+  return (
+    <mesh ref={meshRef} renderOrder={-8.4} frustumCulled={false}>
+      <sphereGeometry args={[SKY_DISTANCE - 3, 48, 24]} />
       <primitive object={material} attach="material" />
     </mesh>
   );
@@ -910,7 +1033,10 @@ export function SkyController({ stars = true, tuning = null }) {
   const sunGlowRef = useRef(null);
   const sunWeatherHaloRef = useRef(null);
   const sunVeilRef = useRef(null);
+  const sunRingRef = useRef(null);
+  const sunStreakRef = useRef(null);
   const lensFlareRefs = useRef([]);
+  const lensRingRef = useRef(null);
   const islandMatRefs = useRef([]);
   const hazeWallMatRef = useRef(null);
   const sunOcclusionRaycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -932,22 +1058,24 @@ export function SkyController({ stars = true, tuning = null }) {
     [0.72, 'rgba(178, 198, 240, 0.07)'],
     [0.8, 'rgba(0, 0, 0, 0)'],
   ]), []);
-  // Warm sun disc: bright but contained. Keep the core below pure white so
-  // bloom does not wash the entire morning sky into a flat white field.
+  // Warm sun disc with a white-hot core. The separate glare overlay carries
+  // the big camera-facing wash, so the sprite can stay readable as a body.
   const sunDiscTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(255, 238, 190, 0.96)'],
-    [0.32, 'rgba(255, 204, 112, 0.9)'],
-    [0.62, 'rgba(255, 151, 58, 0.55)'],
-    [0.84, 'rgba(233, 103, 36, 0.2)'],
+    [0.0, 'rgba(255, 255, 246, 1)'],
+    [0.26, 'rgba(255, 255, 232, 1)'],
+    [0.48, 'rgba(255, 226, 136, 0.98)'],
+    [0.62, 'rgba(255, 177, 66, 0.92)'],
+    [0.72, 'rgba(235, 107, 36, 0.36)'],
+    [0.82, 'rgba(229, 92, 34, 0.08)'],
     [1.0, 'rgba(255, 145, 65, 0)'],
   ], 512), []);
   // Radiant corona: warm, soft, and deliberately low opacity so the sky keeps
   // color around the sun.
   const sunGlowTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(255, 206, 112, 0.52)'],
-    [0.16, 'rgba(255, 178, 76, 0.34)'],
-    [0.38, 'rgba(238, 126, 48, 0.15)'],
-    [0.72, 'rgba(216, 88, 36, 0.035)'],
+    [0.0, 'rgba(255, 242, 190, 0.74)'],
+    [0.15, 'rgba(255, 194, 86, 0.46)'],
+    [0.38, 'rgba(246, 132, 48, 0.19)'],
+    [0.72, 'rgba(216, 88, 36, 0.05)'],
     [1.0, 'rgba(255, 118, 50, 0)'],
   ], 512), []);
   const sunWeatherHaloTexture = useMemo(() => radialTexture([
@@ -960,11 +1088,13 @@ export function SkyController({ stars = true, tuning = null }) {
     [1.0, 'rgba(255, 255, 255, 0)'],
   ], 512), []);
   const lensFlareTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(255, 216, 128, 0.5)'],
-    [0.24, 'rgba(255, 151, 69, 0.22)'],
-    [0.56, 'rgba(255, 105, 62, 0.06)'],
+    [0.0, 'rgba(255, 238, 176, 0.78)'],
+    [0.16, 'rgba(255, 183, 78, 0.36)'],
+    [0.42, 'rgba(255, 105, 62, 0.13)'],
     [1.0, 'rgba(255, 105, 62, 0)'],
   ], 192), []);
+  const lensRingTexture = useMemo(() => ringTexture(256), []);
+  const sunStreakTexture = useMemo(() => streakTexture(), []);
   const sunVeilMaterial = useMemo(() => createSunVeilMaterial(), []);
 
   // Smoothed game hour so the sky visibly drifts between discrete store updates.
@@ -997,11 +1127,13 @@ export function SkyController({ stars = true, tuning = null }) {
     sunGlowTexture.dispose();
     sunWeatherHaloTexture.dispose();
     lensFlareTexture.dispose();
+    lensRingTexture.dispose();
+    sunStreakTexture.dispose();
     islandTexture.dispose();
     hazeTexture.dispose();
     moonHaloTexture.dispose();
     sunVeilMaterial.dispose();
-  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, sunWeatherHaloTexture, lensFlareTexture, islandTexture, hazeTexture, moonHaloTexture, sunVeilMaterial]);
+  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunGlowTexture, sunWeatherHaloTexture, lensFlareTexture, lensRingTexture, sunStreakTexture, islandTexture, hazeTexture, moonHaloTexture, sunVeilMaterial]);
 
   useLayoutEffect(() => {
     patchMoonPhaseMaterial(moonRef.current?.material);
@@ -1132,17 +1264,17 @@ export function SkyController({ stars = true, tuning = null }) {
       sunRef.current.quaternion.copy(camera.quaternion);
       sunRef.current.getWorldPosition(_sunWorld);
       sunRef.current.visible = sunUp > 0.01;
-      sunRef.current.scale.set(5.1 * swell, 5.1 * swell, 1);
+      sunRef.current.scale.set(4.6 * swell, 4.6 * swell, 1);
       sunRef.current.material.color.copy(_sunColor);
       const thinSunCloud = smoothstep(0.08, 0.62, overcast) * (1 - smoothstep(0.72, 1.0, overcast));
       const sunMist = weatherEnv.mistAmount;
       const sunVeilStrength = sunUp * (thinSunCloud * 0.34 + sunMist * 0.18) * (1 - weatherEnv.rainIntensity * 0.78);
-      sunRef.current.material.opacity = sunUp * (0.82 + golden * 0.1) * (1 - sunVeilStrength * 0.48);
+      sunRef.current.material.opacity = sunUp * (0.96 + golden * 0.04) * (1 - sunVeilStrength * 0.42);
       if (sunWeatherHaloRef.current) {
         sunWeatherHaloRef.current.position.copy(sunRef.current.position);
         sunWeatherHaloRef.current.quaternion.copy(camera.quaternion);
         const mistHalo = sunMist * 0.34;
-        const clearHalo = (1 - overcast) * (1 - sunMist) * 0.018;
+        const clearHalo = (1 - overcast) * (1 - sunMist) * 0.035;
         const weatherHalo = sunUp * (clearHalo + thinSunCloud * 0.22 + mistHalo + sunVeilStrength * 0.18) * (1 - weatherEnv.rainIntensity * 0.82);
         sunWeatherHaloRef.current.visible = weatherHalo > 0.006;
         sunWeatherHaloRef.current.scale.setScalar(44 + thinSunCloud * 18 + sunMist * 24 + golden * 12);
@@ -1165,19 +1297,20 @@ export function SkyController({ stars = true, tuning = null }) {
         sunGlowRef.current.position.copy(sunRef.current.position);
         sunGlowRef.current.quaternion.copy(camera.quaternion);
         sunGlowRef.current.visible = sunRef.current.visible;
-        // A contained corona; bloom supplies the wide radiance, so keep this
-        // tight enough that it doesn't paint a white field over the blue sky.
-        sunGlowRef.current.scale.set(22 * swell * (1 + sunVeilStrength * 0.24), 22 * swell * (1 + sunVeilStrength * 0.18), 1);
+        // A contained corona; bloom and the DOM glare supply the wide radiance,
+        // so this stays tied to the visible sun body.
+        sunGlowRef.current.scale.set(20 * swell * (1 + sunVeilStrength * 0.24), 20 * swell * (1 + sunVeilStrength * 0.18), 1);
         sunGlowRef.current.material.color.copy(_glowColor);
-        sunGlowRef.current.material.opacity = sunUp * (0.28 + golden * 0.18 + sunVeilStrength * 0.12);
+        sunGlowRef.current.material.opacity = sunUp * (0.26 + golden * 0.14 + sunVeilStrength * 0.08);
       }
       _screenSun.copy(_sunWorld).project(camera);
       const maxScreenAxis = Math.max(Math.abs(_screenSun.x), Math.abs(_screenSun.y));
       const viewportPresence = _screenSun.z > -1 && _screenSun.z < 1
-        ? 1 - smoothstep(0.94, 1.52, maxScreenAxis)
+        ? 1 - smoothstep(0.98, 1.68, maxScreenAxis)
         : 0;
       const centerDistance = Math.min(1.5, Math.hypot(_screenSun.x, _screenSun.y));
-      const opticalResponse = 0.66 + (1 - smoothstep(0.1, 1.05, centerDistance)) * 0.34;
+      const centerResponse = 1 - smoothstep(0.1, 1.05, centerDistance);
+      const opticalResponse = 0.68 + centerResponse * 0.52;
       sunOcclusionClock.current += delta;
       if (sunOcclusionClock.current >= SUN_OCCLUSION_SAMPLE_INTERVAL) {
         sunOcclusionClock.current = 0;
@@ -1203,7 +1336,11 @@ export function SkyController({ stars = true, tuning = null }) {
         delta
       );
       sunVisibilityRef.current = sunVisibility;
-      const targetFlareStrength = sunUp * viewportPresence * opticalResponse * (1 - overcast * 0.75) * sunVisibility;
+      const targetFlareStrength = THREE.MathUtils.clamp(
+        sunUp * viewportPresence * opticalResponse * (1 - overcast * 0.72) * sunVisibility,
+        0,
+        1
+      );
       const flareStrength = THREE.MathUtils.damp(
         flareStrengthRef.current,
         targetFlareStrength,
@@ -1212,10 +1349,12 @@ export function SkyController({ stars = true, tuning = null }) {
       );
       flareStrengthRef.current = flareStrength;
       const flareSpecs = [
-        [0.62, 3.8, 0.15, '#ffc66c'],
-        [0.24, 1.35, 0.22, '#ff9a4a'],
-        [-0.22, 2.1, 0.11, '#ffe0a0'],
-        [-0.48, 4.6, 0.07, '#ff7d45'],
+        [0.82, 5.8, 0.18, '#fff0b8'],
+        [0.48, 2.9, 0.26, '#ffc66c'],
+        [0.22, 1.55, 0.36, '#ff9a4a'],
+        [-0.26, 3.0, 0.22, '#ffe0a0'],
+        [-0.58, 6.3, 0.15, '#ff7d45'],
+        [-0.96, 9.2, 0.085, '#ffd890'],
       ];
       const flareStretch = 1 + golden * (0.48 + (1 - centerDistance / 1.5) * 0.28);
       const flareSquash = 1 - golden * 0.16;
@@ -1236,6 +1375,53 @@ export function SkyController({ stars = true, tuning = null }) {
         flare.material.opacity = spec[2] * flareStrength;
         _flareColor.set(spec[3]).lerp(_sunGolden, golden * 0.32);
         flare.material.color.copy(_flareColor);
+      });
+      if (sunRingRef.current) {
+        _flareNdc.set(_screenSun.x, _screenSun.y, 0.16);
+        _flareWorld.copy(_flareNdc).unproject(camera).sub(camera.position);
+        sunRingRef.current.position.copy(_flareWorld);
+        sunRingRef.current.quaternion.copy(camera.quaternion);
+        const ringScale = (8.0 + centerResponse * 3.7) * swell;
+        sunRingRef.current.scale.set(ringScale, ringScale, 1);
+        sunRingRef.current.visible = flareStrength > 0.012;
+        sunRingRef.current.material.opacity = flareStrength * (0.12 + centerResponse * 0.1);
+        sunRingRef.current.material.color.copy(_sunColor).lerp(_white, 0.25 + centerResponse * 0.25);
+      }
+      if (sunStreakRef.current) {
+        _flareNdc.set(_screenSun.x, _screenSun.y, 0.14);
+        _flareWorld.copy(_flareNdc).unproject(camera).sub(camera.position);
+        sunStreakRef.current.position.copy(_flareWorld);
+        sunStreakRef.current.quaternion.copy(camera.quaternion);
+        sunStreakRef.current.scale.set(38 + centerResponse * 20, 2.9 + centerResponse * 2.1, 1);
+        sunStreakRef.current.visible = flareStrength > 0.018;
+        sunStreakRef.current.material.opacity = flareStrength * (0.16 + centerResponse * 0.14);
+        sunStreakRef.current.material.color.copy(_sunColor).lerp(_white, 0.18 + centerResponse * 0.28);
+      }
+      if (lensRingRef.current) {
+        _flareNdc.set(_screenSun.x * -0.36, _screenSun.y * -0.36, 0.2);
+        _flareWorld.copy(_flareNdc).unproject(camera).sub(camera.position);
+        lensRingRef.current.position.copy(_flareWorld);
+        lensRingRef.current.quaternion.copy(camera.quaternion);
+        lensRingRef.current.scale.set(7.8 * swell, 7.8 * swell, 1);
+        lensRingRef.current.visible = flareStrength > 0.018;
+        lensRingRef.current.material.opacity = flareStrength * 0.09;
+        lensRingRef.current.material.color.copy(_sunGolden).lerp(_white, 0.18);
+      }
+      camera.getWorldDirection(_fwd);
+      const directness = Math.max(0, _fwd.dot(_sun));
+      const headOn = smoothstep(0.82, 0.998, directness);
+      const glareStrength = THREE.MathUtils.clamp(
+        flareStrength * (0.04 + centerResponse * 0.34 + headOn * 0.46) * (1 - weatherEnv.rainIntensity * 0.55),
+        0,
+        1
+      );
+      store.setSolarGlare?.({
+        x: _screenSun.x * 0.5 + 0.5,
+        y: -_screenSun.y * 0.5 + 0.5,
+        strength: glareStrength,
+        directness: headOn,
+        warmth: THREE.MathUtils.clamp(0.45 + golden * 0.55 + headOn * 0.22, 0, 1),
+        visible: viewportPresence > 0.003 && sunVisibility > 0.12,
       });
     }
 
@@ -1280,7 +1466,7 @@ export function SkyController({ stars = true, tuning = null }) {
       delta
     );
     sunFacingRef.current = sunFacing;
-    _color.lerp(C.fogSunWarm, sunFacing * sunFacing * daylight * (0.12 + golden * 0.3) * (1 - overcast * 0.6));
+    _color.lerp(C.fogSunWarm, sunFacing * sunFacing * daylight * (0.18 + golden * 0.34) * (1 - overcast * 0.6));
     // A closed sky greys the whole distance haze — no blue horizon band can
     // survive an overcast day.
     _color.lerp(C.fogStorm, overcast * 0.65 * (0.25 + daylight * 0.75));
@@ -1298,7 +1484,8 @@ export function SkyController({ stars = true, tuning = null }) {
     if (hazeWallMatRef.current) {
       hazeWallMatRef.current.color.copy(_color).lerp(_white, 0.04 + daylight * 0.26);
     }
-    gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.025;
+    const solarExposureLift = sunFacing * sunFacing * daylight * (1 - overcast * 0.75) * (0.016 + golden * 0.01);
+    gl.toneMappingExposure = expBase + daylight * expGain + golden * 0.025 + solarExposureLift;
 
     // Refresh the shadow map on a cadence rather than every frame. The light
     // direction/position above still updates every frame; only the (expensive)
@@ -1337,6 +1524,7 @@ export function SkyController({ stars = true, tuning = null }) {
         renderPath: null,
       }}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
+        <SolarAureoleDome celestialRef={celestialRef} />
         {/* Camera-following horizon haze ring: a constant band of thick
             distance air that swallows map-edge seams and the island bases.
             Renders late so it veils far water too. */}
@@ -1370,6 +1558,12 @@ export function SkyController({ stars = true, tuning = null }) {
           <planeGeometry args={[1, 1, 1, 1]} />
           <primitive object={sunVeilMaterial} attach="material" />
         </mesh>
+        <sprite ref={sunRingRef} renderOrder={-5.9} scale={[1, 1, 1]} visible={false}>
+          <spriteMaterial map={lensRingTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+        </sprite>
+        <sprite ref={sunStreakRef} renderOrder={-5.8} scale={[1, 1, 1]} visible={false}>
+          <spriteMaterial map={sunStreakTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+        </sprite>
         {/* Distant island silhouettes: hazy landmasses on the sea horizon
             (Isabela and Santa Cruz are visible from Floreana on clear days).
             Color tracks the fog per-frame, slightly darker, so they always
@@ -1397,7 +1591,7 @@ export function SkyController({ stars = true, tuning = null }) {
             </mesh>
           );
         })}
-        {[0, 1, 2, 3].map(index => (
+        {[0, 1, 2, 3, 4, 5].map(index => (
           <sprite
             key={`lens-flare-${index}`}
             ref={node => { lensFlareRefs.current[index] = node; }}
@@ -1408,6 +1602,9 @@ export function SkyController({ stars = true, tuning = null }) {
             <spriteMaterial map={lensFlareTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
           </sprite>
         ))}
+        <sprite ref={lensRingRef} renderOrder={-5.9} scale={[1, 1, 1]} visible={false}>
+          <spriteMaterial map={lensRingTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+        </sprite>
         {/* Moon: cooler, smaller billboarded disc + soft halo. */}
         <sprite ref={moonRef} renderOrder={-7} scale={[7, 7, 1]}>
           <spriteMaterial map={moonDiscTexture} color="#dfe8f4" transparent opacity={0} depthWrite={false} depthTest fog={false} />

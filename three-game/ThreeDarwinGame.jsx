@@ -584,7 +584,7 @@ function PostFX({ enabled, ao, multisampling = 2 }) {
           denoiseRadius={12}
         />
       )}
-      <Bloom intensity={0.22} luminanceThreshold={0.985} luminanceSmoothing={0.04} mipmapBlur radius={0.24} />
+      <Bloom intensity={0.29} luminanceThreshold={0.955} luminanceSmoothing={0.08} mipmapBlur radius={0.3} />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
           touching any material. Merges into the existing effect pass. */}
@@ -642,6 +642,75 @@ function CinematicScreenGrade({ enabled, weather }) {
           backgroundPosition: '0 0, 6px 8px',
           backgroundSize: '13px 13px, 17px 17px',
           mixBlendMode: 'soft-light',
+        }}
+      />
+    </div>
+  );
+}
+
+function SolarScreenGlare({ enabled }) {
+  const glare = useThreeGameStore(state => state.solarGlare);
+  if (!enabled) return null;
+  const strength = Math.min(1, Math.max(0, glare?.visible ? glare.strength : 0));
+  if (strength <= 0.01) return null;
+
+  const x = Math.max(-18, Math.min(118, (glare.x ?? 0.5) * 100));
+  const y = Math.max(-18, Math.min(118, (glare.y ?? 0.42) * 100));
+  const directness = Math.min(1, Math.max(0, glare.directness || 0));
+  const warmth = Math.min(1, Math.max(0, glare.warmth ?? 0.5));
+  const amber = Math.round(142 + warmth * 74);
+  const heat = Math.round(78 + warmth * 82);
+  const coreAlpha = 0.055 * strength + 0.08 * strength * directness;
+  const washAlpha = 0.02 + strength * (0.052 + directness * 0.055);
+  const streakAlpha = strength * (0.24 + directness * 0.28);
+  const veilAlpha = strength * (0.04 + directness * 0.05);
+  const horizonHold = strength * (0.08 + directness * 0.06);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, transparent 2.6%, rgba(255,255,246,${coreAlpha}) 5%, rgba(255,${amber},${heat},${0.07 * strength}) 12%, rgba(255,128,58,${0.04 * strength}) 25%, transparent 52%)`,
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: washAlpha,
+          background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, rgba(255,246,214,0.58) 7%, rgba(255,193,90,0.2) 27%, rgba(255,130,62,0.06) 47%, transparent 70%), linear-gradient(180deg, rgba(255,230,166,0.24), rgba(255,184,96,0.1) 48%, transparent 74%)`,
+          mixBlendMode: 'soft-light',
+          WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
+          maskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
+        }}
+      />
+      <div
+        className="absolute left-0 right-0"
+        style={{
+          top: `${y}%`,
+          height: `${10 + directness * 12}vh`,
+          transform: 'translateY(-50%)',
+          opacity: streakAlpha,
+          background: `radial-gradient(ellipse at ${x}% 50%, rgba(255,252,228,0.78), rgba(255,204,112,0.34) 12%, rgba(255,132,68,0.12) 28%, transparent 62%)`,
+          filter: `blur(${3 + directness * 5}px)`,
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: veilAlpha,
+          background: `linear-gradient(${92 + (x - 50) * 0.16}deg, transparent 0%, rgba(255,245,214,0.22) 42%, rgba(255,190,96,0.16) 50%, transparent 68%)`,
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: horizonHold,
+          background: 'linear-gradient(180deg, transparent 0%, transparent 56%, rgba(88,62,34,0.1) 82%, rgba(34,26,18,0.22) 100%)',
+          mixBlendMode: 'multiply',
         }}
       />
     </div>
@@ -1085,6 +1154,7 @@ export default function ThreeDarwinGame() {
           </Canvas>
         )}
         {gameStarted && <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />}
+        {gameStarted && <SolarScreenGlare enabled={perfSettings.postprocessing} />}
         {gameStarted && <UnderwaterScreenGrade amount={underwaterAmount} />}
         {gameStarted && !showLaunchOverlay && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
         {gameStarted && !showLaunchOverlay && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}

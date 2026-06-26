@@ -221,6 +221,14 @@ function createSceneSlice() {
     carriedObjectId: null,
     inspectedObject: null,
     inspectedScreenPosition: null,
+    solarGlare: {
+      x: 0.5,
+      y: 0.42,
+      strength: 0,
+      directness: 0,
+      warmth: 0,
+      visible: false,
+    },
     brokenPropIds: [],
     sampledRockIds: [],
     symsLine: 'Syms waits with labels, twine, and a doubtful look at your boots.',
@@ -318,6 +326,33 @@ export const useThreeGameStore = create((set, get) => ({
   setInspectedObject: inspectedObject => set({ inspectedObject, inspectedScreenPosition: null }),
   setInspectedScreenPosition: inspectedScreenPosition => set({ inspectedScreenPosition }),
   clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
+  setSolarGlare: solarGlare => set(state => {
+    const nextStrength = clamp(Number(solarGlare?.strength) || 0, 0, 1);
+    const nextDirectness = clamp(Number(solarGlare?.directness) || 0, 0, 1);
+    const nextWarmth = clamp(Number(solarGlare?.warmth) || 0, 0, 1);
+    const nextX = clamp(Number(solarGlare?.x) || 0.5, -0.18, 1.18);
+    const nextY = clamp(Number(solarGlare?.y) || 0.42, -0.18, 1.18);
+    const nextVisible = Boolean(solarGlare?.visible) && nextStrength > 0.006;
+    const previous = state.solarGlare || {};
+    if (
+      previous.visible === nextVisible
+      && Math.abs((previous.strength || 0) - nextStrength) < 0.012
+      && Math.abs((previous.directness || 0) - nextDirectness) < 0.018
+      && Math.abs((previous.warmth || 0) - nextWarmth) < 0.018
+      && Math.abs((previous.x || 0.5) - nextX) < 0.006
+      && Math.abs((previous.y || 0.42) - nextY) < 0.006
+    ) return {};
+    return {
+      solarGlare: {
+        x: nextX,
+        y: nextY,
+        strength: nextStrength,
+        directness: nextDirectness,
+        warmth: nextWarmth,
+        visible: nextVisible,
+      },
+    };
+  }),
   setCarriedObject: carriedObjectId => set({ carriedObjectId }),
   setSpecimenRuntimePosition: (specimenId, position, zoneId = get().currentZoneId) => set(state => {
     const zone = zoneId || get().currentZoneId;
