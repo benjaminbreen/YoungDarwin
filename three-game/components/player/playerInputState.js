@@ -51,7 +51,7 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   const anyDirectActionPressed = Boolean(
     keys.pray || keys.fireRifle || keys.hammer || keys.net || keys.gather || keys.write || keys.inspect
     || keys.lookAround || keys.point || keys.trip || keys.teeter || keys.sit || keys.rest
-    || touch.net || touch.hammer || touch.gather || touch.fireRifle || touch.write
+    || touch.net || touch.hammer || touch.gather || touch.fireRifle || touch.write || touch.inspect
   );
 
   return {

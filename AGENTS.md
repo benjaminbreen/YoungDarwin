@@ -206,7 +206,8 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run asset:optimize` optimizes any raw GLBs from `assets-src/raw/` into `public/assets/models/` when `npx gltf-transform` is available.
 - `npm run check` runs syntax and regression tests.
 - `npm run build` verifies the production Next build.
-- `npm run three:screenshot` captures desktop/mobile screenshots and checks that the 3D canvas is full-screen and nonblank.
+- `npm run three:screenshot` auto-detects an existing local Next dev server on common ports, captures desktop/mobile screenshots, and checks that the 3D canvas is full-screen and nonblank.
+- `npm run three:screenshot:fast` captures the desktop viewport only. Use it for quick smoke checks while iterating; use the full `three:screenshot` before claiming broad visual readiness.
 
 Verification expectations:
 

@@ -225,9 +225,16 @@ function createSceneSlice() {
       x: 0.5,
       y: 0.42,
       strength: 0,
+      rawStrength: 0,
       directness: 0,
       warmth: 0,
+      viewportPresence: 0,
+      centerResponse: 0,
       visible: false,
+    },
+    underwaterCamera: {
+      amount: 0,
+      cameraY: 0,
     },
     brokenPropIds: [],
     sampledRockIds: [],
@@ -287,6 +294,22 @@ export const useThreeGameStore = create((set, get) => ({
     cheapMaterials: cheapMaterials ?? state.cheapMaterials,
     foliageDrawScale: foliageDrawScale ?? state.foliageDrawScale,
   })),
+  setUnderwaterCamera: ({ amount = 0, cameraY = 0 } = {}) => set(state => {
+    const nextAmount = clamp(Number(amount) || 0, 0, 1);
+    const nextCameraY = Number(cameraY);
+    const safeCameraY = Number.isFinite(nextCameraY) ? nextCameraY : 0;
+    const previous = state.underwaterCamera || {};
+    if (
+      Math.abs((previous.amount || 0) - nextAmount) < 0.018
+      && Math.abs((previous.cameraY || 0) - safeCameraY) < 0.08
+    ) return {};
+    return {
+      underwaterCamera: {
+        amount: nextAmount,
+        cameraY: safeCameraY,
+      },
+    };
+  }),
   setEdgePrompt: edgePrompt => set({ edgePrompt }),
   setPlayerPose: playerPose => {
     updateRuntimePlayerPose(playerPose);
@@ -328,8 +351,11 @@ export const useThreeGameStore = create((set, get) => ({
   clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
   setSolarGlare: solarGlare => set(state => {
     const nextStrength = clamp(Number(solarGlare?.strength) || 0, 0, 1);
+    const nextRawStrength = clamp(Number(solarGlare?.rawStrength) || 0, 0, 1);
     const nextDirectness = clamp(Number(solarGlare?.directness) || 0, 0, 1);
     const nextWarmth = clamp(Number(solarGlare?.warmth) || 0, 0, 1);
+    const nextViewportPresence = clamp(Number(solarGlare?.viewportPresence) || 0, 0, 1);
+    const nextCenterResponse = clamp(Number(solarGlare?.centerResponse) || 0, 0, 1);
     const nextX = clamp(Number(solarGlare?.x) || 0.5, -0.18, 1.18);
     const nextY = clamp(Number(solarGlare?.y) || 0.42, -0.18, 1.18);
     const nextVisible = Boolean(solarGlare?.visible) && nextStrength > 0.006;
@@ -337,8 +363,11 @@ export const useThreeGameStore = create((set, get) => ({
     if (
       previous.visible === nextVisible
       && Math.abs((previous.strength || 0) - nextStrength) < 0.012
+      && Math.abs((previous.rawStrength || 0) - nextRawStrength) < 0.012
       && Math.abs((previous.directness || 0) - nextDirectness) < 0.018
       && Math.abs((previous.warmth || 0) - nextWarmth) < 0.018
+      && Math.abs((previous.viewportPresence || 0) - nextViewportPresence) < 0.018
+      && Math.abs((previous.centerResponse || 0) - nextCenterResponse) < 0.018
       && Math.abs((previous.x || 0.5) - nextX) < 0.006
       && Math.abs((previous.y || 0.42) - nextY) < 0.006
     ) return {};
@@ -347,8 +376,11 @@ export const useThreeGameStore = create((set, get) => ({
         x: nextX,
         y: nextY,
         strength: nextStrength,
+        rawStrength: nextRawStrength,
         directness: nextDirectness,
         warmth: nextWarmth,
+        viewportPresence: nextViewportPresence,
+        centerResponse: nextCenterResponse,
         visible: nextVisible,
       },
     };

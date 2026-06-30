@@ -6,6 +6,7 @@ import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
 import { ACESFilmicToneMapping, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
+import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
@@ -83,6 +84,11 @@ const DEFAULT_PERF_SETTINGS = {
   waterSplashes: true,
   weatherFX: true,
   splatBackdrop: true,
+  solarScreenGlare: true,
+  solarLensGhosts: true,
+  solarSunHalo: true,
+  solarSceneFlares: true,
+  solarSunFacingGrade: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
   // Swap world vegetation/terrain from MeshStandard (PBR) to matte MeshPhong —
@@ -173,6 +179,11 @@ function settingsFromUrlSearch(search) {
     waterSplashes: !params.has('noWaterSplashes'),
     weatherFX: !params.has('noWeather'),
     splatBackdrop: !params.has('noSplatBackdrop'),
+    solarScreenGlare: !params.has('noSolarScreenGlare'),
+    solarLensGhosts: !params.has('noSolarLensGhosts'),
+    solarSunHalo: !params.has('noSolarSunHalo'),
+    solarSceneFlares: !params.has('noSolarSceneFlares'),
+    solarSunFacingGrade: !params.has('noSolarSunFacingGrade'),
     physicsDebug: params.has('physicsDebug'),
     preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
     cheapMaterials: params.has('cheapMaterials')
@@ -360,6 +371,9 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     frames: 0,
     elapsed: 0,
     lastPublish: 0,
+    sceneElapsed: Infinity,
+    sceneStats: null,
+    sceneStatsIncludeCosts: null,
     fps: 0,
   });
 
@@ -369,10 +383,21 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     state.frames += 1;
     state.elapsed += delta;
     state.lastPublish += delta;
+    state.sceneElapsed += delta;
     if (state.lastPublish < 0.25) return;
 
     state.fps = state.frames / Math.max(0.001, state.elapsed);
     const info = gl.info;
+    const sceneStatsInterval = includeCosts ? 1.25 : 0.75;
+    if (
+      !state.sceneStats
+      || state.sceneStatsIncludeCosts !== includeCosts
+      || state.sceneElapsed >= sceneStatsInterval
+    ) {
+      state.sceneStats = collectSceneRenderStats(scene, { includeCosts });
+      state.sceneStatsIncludeCosts = includeCosts;
+      state.sceneElapsed = 0;
+    }
     onSample({
       fps: state.fps,
       frameMs: 1000 / Math.max(1, state.fps),
@@ -383,7 +408,7 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       pixelRatio: gl.getPixelRatio(),
-      ...collectSceneRenderStats(scene, { includeCosts }),
+      ...state.sceneStats,
     });
     state.frames = 0;
     state.elapsed = 0;
@@ -565,8 +590,9 @@ function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onRead
 // highlights, which is why the sun core is pushed white-hot in SkyController.
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
-function PostFX({ enabled, ao, multisampling = 2 }) {
+function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   if (!enabled) return null;
+  const underwater = Math.min(1, Math.max(0, underwaterAmount));
   return (
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
@@ -584,7 +610,14 @@ function PostFX({ enabled, ao, multisampling = 2 }) {
           denoiseRadius={12}
         />
       )}
-      <Bloom intensity={0.29} luminanceThreshold={0.955} luminanceSmoothing={0.08} mipmapBlur radius={0.3} />
+      <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
+      <Bloom
+        intensity={0.29 * (1 - underwater * 0.58)}
+        luminanceThreshold={0.955}
+        luminanceSmoothing={0.08}
+        mipmapBlur
+        radius={0.3}
+      />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
           touching any material. Merges into the existing effect pass. */}
@@ -597,6 +630,7 @@ function PostFX({ enabled, ao, multisampling = 2 }) {
 
 function UnderwaterCameraTracker({ onChange }) {
   const camera = useThree(state => state.camera);
+  const setUnderwaterCamera = useThreeGameStore(state => state.setUnderwaterCamera);
   const lastAmount = useRef(-1);
 
   useFrame(() => {
@@ -604,9 +638,13 @@ function UnderwaterCameraTracker({ onChange }) {
     if (Math.abs(amount - lastAmount.current) < 0.025) return;
     lastAmount.current = amount;
     onChange(amount);
+    setUnderwaterCamera({ amount, cameraY: camera.position.y });
   });
 
-  useEffect(() => () => onChange(0), [onChange]);
+  useEffect(() => () => {
+    onChange(0);
+    setUnderwaterCamera({ amount: 0, cameraY: camera.position.y });
+  }, [camera, onChange, setUnderwaterCamera]);
 
   return null;
 }
@@ -619,10 +657,10 @@ function CinematicScreenGrade({ enabled, weather }) {
       <div
         className="absolute inset-0"
         style={{
-          opacity: dampenedSun ? 0.035 : 0.055,
+          opacity: dampenedSun ? 0.03 : 0.04,
           background: dampenedSun
-            ? 'linear-gradient(180deg, rgba(152, 210, 226, 0.18), rgba(238, 210, 152, 0.08) 62%, rgba(89, 135, 116, 0.05))'
-            : 'linear-gradient(180deg, rgba(118, 190, 228, 0.12), rgba(238, 196, 118, 0.12) 52%, rgba(231, 154, 90, 0.08))',
+            ? 'linear-gradient(180deg, rgba(152, 210, 226, 0.16), rgba(232, 212, 166, 0.055) 62%, rgba(89, 135, 116, 0.04))'
+            : 'linear-gradient(180deg, rgba(112, 190, 232, 0.14), rgba(234, 202, 132, 0.07) 52%, rgba(222, 152, 92, 0.045))',
           mixBlendMode: 'soft-light',
         }}
       />
@@ -648,71 +686,142 @@ function CinematicScreenGrade({ enabled, weather }) {
   );
 }
 
-function SolarScreenGlare({ enabled }) {
+function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, suppression = 0 }) {
   const glare = useThreeGameStore(state => state.solarGlare);
-  if (!enabled) return null;
-  const strength = Math.min(1, Math.max(0, glare?.visible ? glare.strength : 0));
-  if (strength <= 0.01) return null;
+  if (!enabled || (!wash && !lensGhostsEnabled)) return null;
+  const strength = Math.min(1, Math.max(0, glare?.strength || 0)) * (1 - Math.min(1, Math.max(0, suppression)));
 
   const x = Math.max(-18, Math.min(118, (glare.x ?? 0.5) * 100));
   const y = Math.max(-18, Math.min(118, (glare.y ?? 0.42) * 100));
   const directness = Math.min(1, Math.max(0, glare.directness || 0));
   const warmth = Math.min(1, Math.max(0, glare.warmth ?? 0.5));
-  const amber = Math.round(142 + warmth * 74);
-  const heat = Math.round(78 + warmth * 82);
-  const coreAlpha = 0.055 * strength + 0.08 * strength * directness;
-  const washAlpha = 0.02 + strength * (0.052 + directness * 0.055);
-  const streakAlpha = strength * (0.24 + directness * 0.28);
-  const veilAlpha = strength * (0.04 + directness * 0.05);
-  const horizonHold = strength * (0.08 + directness * 0.06);
+  const screenStrength = Math.min(1, strength * (1.08 + directness * 0.55));
+  const lemon = Math.round(228 + warmth * 18);
+  const heat = Math.round(146 + warmth * 42);
+  const coreAlpha = 0.07 * screenStrength + 0.08 * screenStrength * directness;
+  const washAlpha = screenStrength * (0.055 + directness * 0.058);
+  const streakAlpha = screenStrength * (0.2 + directness * 0.26);
+  const veilAlpha = screenStrength * (0.04 + directness * 0.045);
+  const horizonHold = screenStrength * (0.055 + directness * 0.05);
+  const transition = 'opacity 140ms linear';
+  const axisX = 50 - x;
+  const axisY = 50 - y;
+  const axisLength = Math.hypot(axisX, axisY);
+  const lensAxisX = axisLength > 4 ? axisX / axisLength : -0.78;
+  const lensAxisY = axisLength > 4 ? axisY / axisLength : 0.34;
+  const offAxis = Math.min(1, axisLength / 58);
+  const lensAlpha = screenStrength * (0.34 + directness * 0.28 + offAxis * 0.24);
+  const clampPct = value => Math.max(-18, Math.min(118, value));
+  const lensGhosts = [
+    { d: 18, size: 5.4, alpha: 0.34, tint: '255,248,204', ring: false },
+    { d: 33, size: 8.8, alpha: 0.26, tint: '255,214,124', ring: true },
+    { d: 51, size: 4.4, alpha: 0.3, tint: '172,220,255', ring: false },
+    { d: 68, size: 12.5, alpha: 0.18, tint: '255,172,116', ring: true },
+    { d: 86, size: 5.8, alpha: 0.18, tint: '210,244,255', ring: false },
+  ];
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, transparent 2.6%, rgba(255,255,246,${coreAlpha}) 5%, rgba(255,${amber},${heat},${0.07 * strength}) 12%, rgba(255,128,58,${0.04 * strength}) 25%, transparent 52%)`,
-          mixBlendMode: 'screen',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          opacity: washAlpha,
-          background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, rgba(255,246,214,0.58) 7%, rgba(255,193,90,0.2) 27%, rgba(255,130,62,0.06) 47%, transparent 70%), linear-gradient(180deg, rgba(255,230,166,0.24), rgba(255,184,96,0.1) 48%, transparent 74%)`,
-          mixBlendMode: 'soft-light',
-          WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
-          maskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
-        }}
-      />
-      <div
-        className="absolute left-0 right-0"
-        style={{
-          top: `${y}%`,
-          height: `${10 + directness * 12}vh`,
-          transform: 'translateY(-50%)',
-          opacity: streakAlpha,
-          background: `radial-gradient(ellipse at ${x}% 50%, rgba(255,252,228,0.78), rgba(255,204,112,0.34) 12%, rgba(255,132,68,0.12) 28%, transparent 62%)`,
-          filter: `blur(${3 + directness * 5}px)`,
-          mixBlendMode: 'screen',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          opacity: veilAlpha,
-          background: `linear-gradient(${92 + (x - 50) * 0.16}deg, transparent 0%, rgba(255,245,214,0.22) 42%, rgba(255,190,96,0.16) 50%, transparent 68%)`,
-          mixBlendMode: 'screen',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          opacity: horizonHold,
-          background: 'linear-gradient(180deg, transparent 0%, transparent 56%, rgba(88,62,34,0.1) 82%, rgba(34,26,18,0.22) 100%)',
-          mixBlendMode: 'multiply',
-        }}
-      />
+      {wash && (
+        <div
+          className="absolute inset-0"
+          style={{
+            opacity: strength > 0.004 ? 1 : 0,
+            background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, transparent 2.1%, rgba(255,255,250,${coreAlpha}) 5%, rgba(255,${lemon},${heat},${0.07 * screenStrength}) 13%, rgba(255,218,128,${0.032 * screenStrength}) 28%, transparent 54%)`,
+            mixBlendMode: 'screen',
+            transition,
+          }}
+        />
+      )}
+      {lensGhostsEnabled && lensGhosts.map((ghost, index) => {
+        const gx = clampPct(x + lensAxisX * ghost.d);
+        const gy = clampPct(y + lensAxisY * ghost.d);
+        const opacity = lensAlpha * ghost.alpha;
+        const background = ghost.ring
+          ? `radial-gradient(circle, transparent 0%, transparent 42%, rgba(${ghost.tint},0.62) 48%, rgba(255,255,245,0.34) 53%, rgba(${ghost.tint},0.12) 61%, transparent 72%)`
+          : `radial-gradient(circle, rgba(255,255,246,0.66) 0%, rgba(${ghost.tint},0.34) 18%, rgba(${ghost.tint},0.12) 38%, transparent 68%)`;
+        return (
+          <div
+            key={`solar-lens-ghost-${index}`}
+            className="absolute rounded-full"
+            style={{
+              left: `${gx}%`,
+              top: `${gy}%`,
+              width: `${ghost.size}vmin`,
+              height: `${ghost.size}vmin`,
+              opacity,
+              transform: `translate(-50%, -50%) scaleX(${ghost.ring ? 1.16 : 1})`,
+              background,
+              filter: `blur(${ghost.ring ? 0.45 : 0.65}px) saturate(1.14)`,
+              mixBlendMode: 'screen',
+              transition,
+            }}
+          />
+        );
+      })}
+      {lensGhostsEnabled && (
+        <div
+          className="absolute"
+          style={{
+            left: `${clampPct(x + lensAxisX * 9)}%`,
+            top: `${clampPct(y + lensAxisY * 9)}%`,
+            width: `${18 + directness * 10}vmin`,
+            height: `${18 + directness * 10}vmin`,
+            opacity: lensAlpha * (0.1 + directness * 0.12),
+            transform: 'translate(-50%, -50%)',
+            background: 'radial-gradient(circle, transparent 0%, transparent 47%, rgba(255,248,204,0.34) 50%, rgba(255,220,136,0.14) 58%, transparent 68%)',
+            filter: 'blur(0.7px)',
+            mixBlendMode: 'screen',
+            transition,
+          }}
+        />
+      )}
+      {wash && (
+        <>
+          <div
+            className="absolute inset-0"
+            style={{
+              opacity: washAlpha,
+              background: `radial-gradient(circle at ${x}% ${y}%, transparent 0%, rgba(255,253,230,0.58) 7%, rgba(255,235,150,0.18) 27%, rgba(184,218,255,0.055) 48%, transparent 70%), linear-gradient(180deg, rgba(145,200,235,0.065), rgba(255,229,150,0.12) 52%, transparent 76%)`,
+              mixBlendMode: 'soft-light',
+              WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
+              maskImage: 'linear-gradient(180deg, black 0%, black 56%, rgba(0,0,0,0.55) 74%, rgba(0,0,0,0.18) 100%)',
+              transition,
+            }}
+          />
+          <div
+            className="absolute left-0 right-0"
+            style={{
+              top: `${y}%`,
+              height: `${10 + directness * 12}vh`,
+              transform: 'translateY(-50%)',
+              opacity: streakAlpha,
+              background: `radial-gradient(ellipse at ${x}% 50%, rgba(255,255,238,0.82), rgba(255,235,156,0.32) 12%, rgba(186,216,255,0.11) 30%, transparent 62%)`,
+              filter: `blur(${3 + directness * 5}px)`,
+              mixBlendMode: 'screen',
+              transition,
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              opacity: veilAlpha,
+              background: `linear-gradient(${92 + (x - 50) * 0.16}deg, transparent 0%, rgba(255,252,224,0.23) 42%, rgba(255,222,132,0.14) 50%, transparent 68%)`,
+              mixBlendMode: 'screen',
+              transition,
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              opacity: horizonHold,
+              background: 'linear-gradient(180deg, transparent 0%, transparent 58%, rgba(68,58,44,0.08) 84%, rgba(30,26,22,0.18) 100%)',
+              mixBlendMode: 'multiply',
+              transition,
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -740,6 +849,35 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
+function SolarDiagnostics({ settings, set }) {
+  const solarGlare = useThreeGameStore(state => state.solarGlare);
+  return (
+    <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Solar Diagnostics</h3>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] ${solarGlare?.visible ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
+          {solarGlare?.visible ? 'active' : 'quiet'}
+        </span>
+      </div>
+      <div className="mb-2 grid grid-cols-3 gap-1.5">
+        <Metric label="Glare" value={solarGlare?.strength !== undefined ? solarGlare.strength.toFixed(2) : '--'} />
+        <Metric label="Raw" value={solarGlare?.rawStrength !== undefined ? solarGlare.rawStrength.toFixed(2) : '--'} />
+        <Metric label="Head-on" value={solarGlare?.directness !== undefined ? solarGlare.directness.toFixed(2) : '--'} />
+        <Metric label="Viewport" value={solarGlare?.viewportPresence !== undefined ? solarGlare.viewportPresence.toFixed(2) : '--'} />
+        <Metric label="Center" value={solarGlare?.centerResponse !== undefined ? solarGlare.centerResponse.toFixed(2) : '--'} />
+        <Metric label="Sun XY" value={solarGlare?.x !== undefined ? `${solarGlare.x.toFixed(2)},${solarGlare.y.toFixed(2)}` : '--'} />
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <Toggle label="Sun Screen Wash" checked={settings.solarScreenGlare !== false} onChange={value => set({ solarScreenGlare: value })} />
+        <Toggle label="DOM Lens Ghosts" checked={settings.solarLensGhosts !== false} onChange={value => set({ solarLensGhosts: value })} />
+        <Toggle label="Sun Halo/Veil" checked={settings.solarSunHalo !== false} onChange={value => set({ solarSunHalo: value })} />
+        <Toggle label="Scene Sun Flares" checked={settings.solarSceneFlares !== false} onChange={value => set({ solarSceneFlares: value })} />
+        <Toggle label="Sun Fog/Exposure" checked={settings.solarSunFacingGrade !== false} onChange={value => set({ solarSunFacingGrade: value })} />
+      </div>
+    </div>
+  );
+}
+
 function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onClose }) {
   if (!open) return null;
   const set = patch => onChange(current => ({ ...current, ...patch }));
@@ -749,7 +887,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
     quality,
   }));
   return (
-    <section className="pointer-events-auto fixed right-3 top-3 z-50 w-[min(24rem,calc(100vw-1.5rem))] rounded-md border border-amber-100/25 bg-stone-950/88 p-3 text-amber-50 shadow-2xl backdrop-blur-md">
+    <section className="pointer-events-auto fixed right-3 top-3 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-md border border-amber-100/25 bg-stone-950/88 p-3 text-amber-50 shadow-2xl backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-sm font-bold uppercase tracking-wide">Performance</h2>
         <button type="button" onClick={onClose} className="rounded border border-white/10 px-2 py-1 text-xs hover:bg-white/10">Close</button>
@@ -818,6 +956,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
           </button>
         ))}
       </div>
+      <SolarDiagnostics settings={settings} set={set} />
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
         <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
@@ -898,37 +1037,6 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       )}
       <p className="mt-3 text-[11px] text-amber-100/65">Press ` to toggle this panel.</p>
     </section>
-  );
-}
-
-function UnderwaterScreenGrade({ amount }) {
-  const opacity = Math.min(1, Math.max(0, amount));
-  if (opacity <= 0.01) return null;
-  return (
-    <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden" style={{ opacity }}>
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'linear-gradient(180deg, rgba(64, 177, 218, 0.46), rgba(18, 108, 156, 0.34) 48%, rgba(2, 42, 78, 0.54))',
-          mixBlendMode: 'multiply',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'radial-gradient(circle at 50% 32%, rgba(188, 238, 255, 0.18), rgba(56, 164, 207, 0.12) 42%, rgba(1, 31, 57, 0.28) 100%)',
-          mixBlendMode: 'screen',
-        }}
-      />
-      <div
-        className="absolute inset-0 opacity-35"
-        style={{
-          backgroundImage: 'linear-gradient(115deg, transparent 0 42%, rgba(208, 246, 255, 0.13) 48%, transparent 55% 100%)',
-          backgroundSize: '220px 180px',
-          mixBlendMode: 'soft-light',
-        }}
-      />
-    </div>
   );
 }
 
@@ -1119,6 +1227,7 @@ export default function ThreeDarwinGame() {
               enabled={perfSettings.postprocessing}
               ao={perfSettings.ao}
               multisampling={perfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
+              underwaterAmount={underwaterAmount}
             />
             <AdaptiveResolution enabled={sceneReady} maxDpr={dpr[1]} />
             <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
@@ -1154,8 +1263,14 @@ export default function ThreeDarwinGame() {
           </Canvas>
         )}
         {gameStarted && <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />}
-        {gameStarted && <SolarScreenGlare enabled={perfSettings.postprocessing} />}
-        {gameStarted && <UnderwaterScreenGrade amount={underwaterAmount} />}
+        {gameStarted && (
+          <SolarScreenGlare
+            enabled={perfSettings.solarScreenGlare !== false || perfSettings.solarLensGhosts !== false}
+            wash={perfSettings.solarScreenGlare !== false}
+            lensGhostsEnabled={perfSettings.solarLensGhosts !== false}
+            suppression={underwaterAmount}
+          />
+        )}
         {gameStarted && !showLaunchOverlay && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
         {gameStarted && !showLaunchOverlay && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
         {gameStarted && !showLaunchOverlay && (

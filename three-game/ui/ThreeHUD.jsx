@@ -6,7 +6,7 @@ import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
 import { setTouchControl, triggerToolUse } from '../input/touchControls';
 import { setBlockingUiMode, setTypingMode } from '../input/typingMode';
-import { useThreeGameStore } from '../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
 import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
@@ -26,6 +26,7 @@ import {
   NoteIcon,
   OpenBookIcon,
   MapIcon,
+  LensIcon,
   NorthArrowIcon,
   TOOL_ICONS,
 } from './expedition/icons';
@@ -41,6 +42,9 @@ import { WEATHER_STATES } from '../world/weatherStates';
 const MINIMAP_TRAIL_MS = 15000;
 const MINIMAP_TRAIL_MAX_POINTS = 34;
 const MINIMAP_TRAIL_MIN_STEP = 0.7;
+const MINIMAP_RUNTIME_POLL_MS = 100;
+const MINIMAP_RUNTIME_MOVE_EPSILON = 0.08;
+const MINIMAP_RUNTIME_HEADING_EPSILON = 1.2;
 const SIDEBAR_DEFAULT_SIZE = { width: 240, mapHeight: 196 };
 const SIDEBAR_MIN_SIZE = { width: 214, mapHeight: 164 };
 const SIDEBAR_MAX_SIZE = { width: 386, mapHeight: 330 };
@@ -86,6 +90,56 @@ function worldToMapPercent(position, zone, padding = 6) {
 
 function percentStyle(value) {
   return `${Number(value).toFixed(3)}%`;
+}
+
+function headingFromFacing(facing) {
+  const fx = Number(facing?.x);
+  const fz = Number(facing?.z);
+  return Math.atan2(Number.isFinite(fx) ? fx : 0, Number.isFinite(fz) ? fz : -1) * (180 / Math.PI);
+}
+
+function minimapPoseFromRuntime(fallback) {
+  const runtime = getRuntimePlayerPose();
+  const x = Number(runtime?.position?.x);
+  const z = Number(runtime?.position?.z);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return fallback;
+  return {
+    x,
+    z,
+    heading: headingFromFacing(runtime?.facing),
+  };
+}
+
+function useLiveMinimapPose() {
+  const storePose = useThreeGameStore(state => state.minimapPlayerPose);
+  const [pose, setPose] = useState(() => minimapPoseFromRuntime(storePose));
+
+  useEffect(() => {
+    setPose(current => {
+      const next = minimapPoseFromRuntime(storePose);
+      return Math.abs(current.x - next.x) < MINIMAP_RUNTIME_MOVE_EPSILON
+        && Math.abs(current.z - next.z) < MINIMAP_RUNTIME_MOVE_EPSILON
+        && Math.abs(current.heading - next.heading) < MINIMAP_RUNTIME_HEADING_EPSILON
+        ? current
+        : next;
+    });
+  }, [storePose]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPose(current => {
+        const next = minimapPoseFromRuntime(current);
+        return Math.abs(current.x - next.x) < MINIMAP_RUNTIME_MOVE_EPSILON
+          && Math.abs(current.z - next.z) < MINIMAP_RUNTIME_MOVE_EPSILON
+          && Math.abs(current.heading - next.heading) < MINIMAP_RUNTIME_HEADING_EPSILON
+          ? current
+          : next;
+      });
+    }, MINIMAP_RUNTIME_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return pose;
 }
 
 function routePosition(edge) {
@@ -231,7 +285,7 @@ function TopChronometer() {
   const zone = getZone(currentZoneId);
 
   return (
-    <div className="absolute left-1/2 top-3 w-[min(29rem,calc(100vw-8rem))] -translate-x-1/2 text-center sm:w-[min(32rem,calc(100vw-24rem))] xl:hidden">
+    <div className="absolute left-1/2 top-3 hidden w-[min(29rem,calc(100vw-8rem))] -translate-x-1/2 text-center md:block sm:w-[min(32rem,calc(100vw-24rem))] xl:hidden">
       <div className="pointer-events-none inline-flex max-w-full items-center gap-2 rounded-full border border-expedition-brass/70 bg-[rgba(20,17,12,0.52)] px-3.5 py-1.5 font-expedition text-expedition-parchment shadow-lg backdrop-blur-md">
         <CompassRoseIcon className="hidden h-3.5 w-3.5 text-expedition-gold sm:block" />
         <span className="truncate text-xs font-semibold tracking-wide sm:text-sm">
@@ -598,12 +652,9 @@ const SpecimenMarker = memo(function SpecimenMarker({
 
 // Player movement trail. Subscribes only to the (quantised) minimap pose, so it
 // re-renders on player movement without dragging the specimen markers with it.
-function MinimapTrail({ zone }) {
-  const playerX = useThreeGameStore(state => state.minimapPlayerPose.x);
-  const playerZ = useThreeGameStore(state => state.minimapPlayerPose.z);
-  const playerZoneId = useThreeGameStore(state => state.minimapPlayerPose.zoneId);
+function MinimapTrail({ zone, playerPose }) {
   const [trail, setTrail] = useState([]);
-  const playerPosition = playerZoneId === zone.id ? { x: playerX, z: playerZ } : { x: 0, z: 0 };
+  const playerPosition = { x: playerPose.x, z: playerPose.z };
 
   useEffect(() => {
     const now = Date.now();
@@ -616,7 +667,7 @@ function MinimapTrail({ zone }) {
       }
       return [...recent, { ...nextPoint, zoneId: zone.id, t: now }].slice(-MINIMAP_TRAIL_MAX_POINTS);
     });
-  }, [playerPosition.x, playerPosition.z, playerZoneId, zone.id]);
+  }, [playerPosition.x, playerPosition.z, zone.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -653,14 +704,10 @@ function MinimapTrail({ zone }) {
 
 // Player arrow. Kept after the markers (matching the original stacking) and
 // likewise subscribed only to the minimap pose.
-function MinimapPlayerArrow({ zone, surveyStyle }) {
-  const playerX = useThreeGameStore(state => state.minimapPlayerPose.x);
-  const playerZ = useThreeGameStore(state => state.minimapPlayerPose.z);
-  const playerHeading = useThreeGameStore(state => state.minimapPlayerPose.heading);
-  const playerZoneId = useThreeGameStore(state => state.minimapPlayerPose.zoneId);
-  const playerPosition = playerZoneId === zone.id ? { x: playerX, z: playerZ } : { x: 0, z: 0 };
+function MinimapPlayerArrow({ zone, surveyStyle, playerPose }) {
+  const playerPosition = { x: playerPose.x, z: playerPose.z };
   const player = worldToMapPercent(playerPosition, zone, 3);
-  const heading = Number.isFinite(playerHeading) ? playerHeading : 180;
+  const heading = Number.isFinite(playerPose.heading) ? playerPose.heading : 180;
   return (
     <>
       <span
@@ -703,6 +750,7 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const [activeMarkerId, setActiveMarkerId] = useState(null);
   const specimens = getThreeSpecimens(zone.id);
+  const playerPose = useLiveMinimapPose();
   const handleToggleMarker = useCallback(id => {
     setActiveMarkerId(current => (current === id ? null : id));
   }, []);
@@ -731,7 +779,7 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
           </button>
         );
       })}
-      <MinimapTrail zone={zone} />
+      <MinimapTrail zone={zone} playerPose={playerPose} />
       {specimens.map((specimen, index) => (
         <SpecimenMarker
           key={`${specimen.id}-${index}`}
@@ -744,7 +792,7 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
           onToggle={handleToggleMarker}
         />
       ))}
-      <MinimapPlayerArrow zone={zone} surveyStyle={surveyStyle} />
+      <MinimapPlayerArrow zone={zone} surveyStyle={surveyStyle} playerPose={playerPose} />
     </>
   );
 }
@@ -1026,7 +1074,7 @@ function HotkeysResponse() {
   );
 }
 
-function NarrativePanel() {
+function NarrativePanel({ forceExpanded = false }) {
   const [draft, setDraft] = useState('');
   const [localEcho, setLocalEcho] = useState('');
   const [localNarratorReply, setLocalNarratorReply] = useState(null);
@@ -1076,7 +1124,7 @@ function NarrativePanel() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  const expanded = hovered || focused || draft.length > 0 || Boolean(localNarratorReply);
+  const expanded = forceExpanded || hovered || focused || draft.length > 0 || Boolean(localNarratorReply);
   const visibleLogHeight = expanded ? logHeight : 88;
   const previewMessage = educationalNote || symsLine || message;
 
@@ -1677,7 +1725,7 @@ function PromptCard({ title, subtitle, children }) {
 
 function CompactPrompt({ children }) {
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-[61%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+7rem)] sm:top-[64%]">
+    <div className="pointer-events-auto absolute left-1/2 top-[52%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+7rem)] sm:top-[64%]">
       <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/30 bg-[rgba(14,18,18,0.42)] px-1.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.24)] backdrop-blur-[2px]">
         {children}
       </div>
@@ -1807,54 +1855,321 @@ function CameraModeToast() {
   );
 }
 
-function TouchButton({ control, label, className = '' }) {
+function MobileVitalsPanel() {
+  const health = useThreeGameStore(state => state.health);
+  const fatigue = useThreeGameStore(state => state.fatigue);
+  const openStatusView = useThreeGameStore(state => state.openStatusView);
+
+  return (
+    <button
+      type="button"
+      onClick={openStatusView}
+      title="View Darwin's status"
+      aria-label="View Darwin's status"
+      className="pointer-events-auto absolute z-20 w-[13.6rem] rounded-[7px] border border-expedition-brass/80 bg-[linear-gradient(165deg,rgba(18,28,36,0.78),rgba(9,15,22,0.82))] px-3 py-2.5 text-left font-expedition text-expedition-parchment shadow-[0_10px_28px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md transition active:scale-[0.99] md:hidden"
+      style={{
+        left: 'max(0.9rem, env(safe-area-inset-left))',
+        top: 'calc(env(safe-area-inset-top) + 0.85rem)',
+      }}
+    >
+      <div className="pointer-events-none absolute inset-[3px] rounded-[4px] border border-expedition-gold/20" />
+      <div className="relative grid gap-2">
+        <StatBar icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#98c98f)" />
+        <StatBar icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#c28b35,#e7b457)" />
+      </div>
+    </button>
+  );
+}
+
+function MobileMapButton({ onOpenMap }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpenMap}
+      aria-label="Open island map"
+      title="Open island map"
+      className="pointer-events-auto absolute z-20 flex h-[4.4rem] w-[4.4rem] items-center justify-center rounded-full border border-expedition-gold/85 bg-[radial-gradient(circle_at_40%_32%,rgba(42,56,63,0.92),rgba(7,12,18,0.94))] text-expedition-gold shadow-[0_10px_28px_rgba(0,0,0,0.38),inset_0_0_0_4px_rgba(201,163,95,0.13),inset_0_0_0_8px_rgba(0,0,0,0.22)] backdrop-blur-md transition active:scale-95 md:hidden"
+      style={{
+        right: 'max(1rem, env(safe-area-inset-right))',
+        top: 'calc(env(safe-area-inset-top) + 0.9rem)',
+      }}
+    >
+      <MapIcon className="h-8 w-8" />
+    </button>
+  );
+}
+
+function MobileJoystick() {
+  const baseRef = React.useRef(null);
+  const pointerRef = React.useRef(null);
+  const lastRef = React.useRef({ forward: false, backward: false, left: false, right: false });
+  const [knob, setKnob] = useState({ x: 0, y: 0, active: false });
+
+  const publishDirections = useCallback(next => {
+    const previous = lastRef.current;
+    ['forward', 'backward', 'left', 'right'].forEach(control => {
+      if (previous[control] !== next[control]) setTouchControl(control, next[control]);
+    });
+    lastRef.current = next;
+  }, []);
+
+  const clearDirections = useCallback(() => {
+    publishDirections({ forward: false, backward: false, left: false, right: false });
+  }, [publishDirections]);
+
+  const updateFromPointer = useCallback(event => {
+    const rect = baseRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const rawX = event.clientX - cx;
+    const rawY = event.clientY - cy;
+    const maxDistance = 38;
+    const distance = Math.hypot(rawX, rawY);
+    const scale = distance > maxDistance ? maxDistance / distance : 1;
+    const x = rawX * scale;
+    const y = rawY * scale;
+    const threshold = 13;
+    setKnob({ x, y, active: true });
+    publishDirections({
+      forward: y < -threshold,
+      backward: y > threshold,
+      left: x < -threshold,
+      right: x > threshold,
+    });
+  }, [publishDirections]);
+
   const start = event => {
     event.preventDefault();
-    setTouchControl(control, true);
+    pointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateFromPointer(event);
+  };
+
+  const move = event => {
+    if (pointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateFromPointer(event);
+  };
+
+  const stop = event => {
+    if (pointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    pointerRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setKnob({ x: 0, y: 0, active: false });
+    clearDirections();
+  };
+
+  useEffect(() => clearDirections, [clearDirections]);
+
+  return (
+    <div
+      ref={baseRef}
+      role="application"
+      aria-label="Move Darwin"
+      onPointerDown={start}
+      onPointerMove={move}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      className="pointer-events-auto absolute z-20 h-[7.4rem] w-[7.4rem] touch-none select-none rounded-full border border-expedition-gold/70 bg-[radial-gradient(circle,rgba(232,206,139,0.10)_0_31%,rgba(5,10,14,0.38)_32%_56%,rgba(9,14,18,0.64)_57%_100%)] shadow-[0_12px_30px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(227,197,133,0.17)] backdrop-blur-[2px] md:hidden"
+      style={{
+        left: 'max(1.15rem, env(safe-area-inset-left))',
+        bottom: 'calc(env(safe-area-inset-bottom) + 6.1rem)',
+      }}
+    >
+      {[
+        ['top-2 left-1/2 -translate-x-1/2 border-b-[7px] border-l-[5px] border-r-[5px] border-b-expedition-gold/70 border-l-transparent border-r-transparent', 'up'],
+        ['bottom-2 left-1/2 -translate-x-1/2 rotate-180 border-b-[7px] border-l-[5px] border-r-[5px] border-b-expedition-gold/55 border-l-transparent border-r-transparent', 'down'],
+        ['left-2 top-1/2 -translate-y-1/2 -rotate-90 border-b-[7px] border-l-[5px] border-r-[5px] border-b-expedition-gold/55 border-l-transparent border-r-transparent', 'left'],
+        ['right-2 top-1/2 -translate-y-1/2 rotate-90 border-b-[7px] border-l-[5px] border-r-[5px] border-b-expedition-gold/55 border-l-transparent border-r-transparent', 'right'],
+      ].map(([className, key]) => <span key={key} className={`pointer-events-none absolute h-0 w-0 ${className}`} />)}
+      <span
+        className={`pointer-events-none absolute left-1/2 top-1/2 h-[3.35rem] w-[3.35rem] rounded-full border border-[#f1d99a]/70 bg-[radial-gradient(circle_at_34%_28%,#fff2c2,#d3a756_58%,#8c642f)] shadow-[0_7px_16px_rgba(0,0,0,0.38),inset_0_2px_7px_rgba(255,255,255,0.42)] transition ${knob.active ? 'duration-75' : 'duration-200'}`}
+        style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+      />
+    </div>
+  );
+}
+
+function pulseTouchControl(control) {
+  setTouchControl(control, true);
+  window.setTimeout(() => setTouchControl(control, false), 120);
+}
+
+function MobileActionButton({
+  label,
+  icon,
+  className = '',
+  size = 'large',
+  onPress,
+  holdControl = null,
+}) {
+  const pointerActivatedRef = React.useRef(false);
+  const start = event => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    if (holdControl) {
+      setTouchControl(holdControl, true);
+    } else {
+      pointerActivatedRef.current = true;
+      onPress?.();
+    }
   };
   const stop = event => {
     event.preventDefault();
-    setTouchControl(control, false);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (holdControl) setTouchControl(holdControl, false);
   };
+  const activate = event => {
+    event.preventDefault();
+    if (pointerActivatedRef.current) {
+      pointerActivatedRef.current = false;
+      return;
+    }
+    if (!holdControl) onPress?.();
+  };
+  const sizeClass = size === 'large' ? 'h-[5.5rem] w-[5.5rem]' : 'h-[4.15rem] w-[4.15rem]';
+  const labelClass = size === 'large' ? 'text-[12px]' : 'text-[10px]';
 
   return (
     <button
       type="button"
       aria-label={label}
+      onClick={activate}
       onPointerDown={start}
       onPointerUp={stop}
       onPointerCancel={stop}
       onPointerLeave={stop}
-      className={`flex h-11 w-11 items-center justify-center rounded-md border border-expedition-brass/70 bg-expedition-ink/65 font-expedition text-sm font-bold text-expedition-parchment shadow-lg backdrop-blur-md active:bg-expedition-gold active:text-expedition-ink ${className}`}
+      className={`pointer-events-auto absolute flex touch-none select-none flex-col items-center justify-center rounded-full border border-expedition-gold/80 bg-[radial-gradient(circle_at_42%_30%,rgba(30,43,50,0.92),rgba(5,10,15,0.96))] font-expedition text-expedition-gold shadow-[0_10px_24px_rgba(0,0,0,0.38),inset_0_0_0_3px_rgba(201,163,95,0.12),inset_0_0_0_7px_rgba(0,0,0,0.18)] backdrop-blur-md transition active:scale-95 active:border-expedition-goldbright active:text-expedition-goldbright ${sizeClass} ${className}`}
     >
-      {label}
+      <span className={size === 'large' ? 'mb-1 h-8 w-8' : 'mb-0.5 h-6 w-6'}>{icon}</span>
+      <span className={`${labelClass} font-semibold uppercase leading-none tracking-[0.08em]`}>{label}</span>
     </button>
   );
 }
 
-function MobileTouchControls() {
+function MobileActionCluster() {
+  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
+    (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId
+  ));
+
+  const collect = () => {
+    if (nearby) {
+      collectNearby();
+      return;
+    }
+    triggerToolUse(activeToolId);
+  };
+
   return (
-    <div className="pointer-events-auto absolute bottom-[23rem] left-3 flex items-end gap-2 md:hidden">
-      <div className="grid grid-cols-3 gap-1">
-        <div />
-        <TouchButton control="forward" label="W" className="h-9 w-9 text-xs" />
-        <div />
-        <TouchButton control="left" label="A" className="h-9 w-9 text-xs" />
-        <TouchButton control="backward" label="S" className="h-9 w-9 text-xs" />
-        <TouchButton control="right" label="D" className="h-9 w-9 text-xs" />
-      </div>
-      <div className="grid grid-cols-1 gap-1">
-        <TouchButton control="jump" label="SPC" className="h-9 w-9 text-[10px]" />
-        <TouchButton control="dodge" label="B" className="h-9 w-9 text-xs" />
-        <TouchButton control="run" label="RUN" className="h-9 w-9 text-[10px]" />
-        <TouchButton control="interact" label="E" className="h-9 w-9 bg-expedition-gold/90 text-expedition-ink text-xs" />
-      </div>
-      <div className="grid grid-cols-1 gap-1">
-        <TouchButton control="crouch" label="C" className="h-9 w-9 text-xs" />
-        <TouchButton control="rifle" label="Aim" className="h-9 w-11 text-[10px]" />
-      </div>
+    <div
+      className="pointer-events-none absolute z-20 h-[10.2rem] w-[10.4rem] md:hidden"
+      style={{
+        right: 'max(0.95rem, env(safe-area-inset-right))',
+        bottom: 'calc(env(safe-area-inset-bottom) + 6.2rem)',
+      }}
+    >
+      <MobileActionButton
+        label="Jump"
+        size="small"
+        holdControl="jump"
+        className="right-0 top-0"
+        icon={(
+          <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M13 4.3 C14.6 4.3 15.8 5.5 15.8 7.1 C15.8 8.7 14.6 9.9 13 9.9 C11.4 9.9 10.2 8.7 10.2 7.1 C10.2 5.5 11.4 4.3 13 4.3 Z" />
+            <path d="M12.2 10.2 L9.5 14.4 L6.5 13.2 M12.1 10.3 L15.4 13.6 L18.8 12.3 M10.2 14.3 L10.4 19.8 M14.4 14.2 L16.8 20" />
+          </svg>
+        )}
+      />
+      <MobileActionButton
+        label="Collect"
+        onPress={collect}
+        className="bottom-8 left-0"
+        icon={<ButterflyIcon className="h-full w-full" />}
+      />
+      <MobileActionButton
+        label="Examine"
+        size="small"
+        onPress={() => pulseTouchControl('inspect')}
+        className="bottom-0 right-0"
+        icon={<LensIcon className="h-full w-full" />}
+      />
     </div>
   );
+}
+
+function KitIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="8" width="16" height="11" rx="1.7" />
+      <path d="M8.5 8 V6.2 C8.5 5.4 9.1 4.8 9.9 4.8 H14.1 C14.9 4.8 15.5 5.4 15.5 6.2 V8 M4 12 H20 M11 12 V14.2 H13 V12" />
+    </svg>
+  );
+}
+
+function MobileBottomNav({ onOpenJournal, onToggleNarrative, onOpenCasebook, onOpenInventory, narrativeOpen }) {
+  const items = [
+    { id: 'journal', label: 'Journal', icon: <OpenBookIcon className="h-6 w-6" />, onClick: onOpenJournal },
+    { id: 'narrative', label: 'Narrative', icon: <NoteIcon className="h-6 w-6" />, onClick: onToggleNarrative, active: narrativeOpen },
+    { id: 'casebook', label: 'Casebook', icon: <ButterflyIcon className="h-6 w-6" />, onClick: onOpenCasebook },
+    { id: 'inventory', label: 'Inventory', icon: <KitIcon className="h-6 w-6" />, onClick: onOpenInventory },
+  ];
+
+  return (
+    <nav
+      aria-label="Mobile expedition navigation"
+      className="pointer-events-auto absolute z-20 rounded-[7px] border border-expedition-gold/75 bg-[linear-gradient(180deg,rgba(12,20,27,0.88),rgba(5,10,16,0.94))] px-2 py-1.5 font-expedition text-expedition-gold shadow-[0_10px_30px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md md:hidden"
+      style={{
+        left: 'max(1rem, env(safe-area-inset-left))',
+        right: 'max(1rem, env(safe-area-inset-right))',
+        bottom: 'calc(env(safe-area-inset-bottom) + 0.8rem)',
+      }}
+    >
+      <div className="grid grid-cols-4">
+        {items.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={item.onClick}
+            className={`flex min-w-0 flex-col items-center justify-center gap-1 border-expedition-brass/45 px-0.5 py-1.5 transition active:scale-95 ${index > 0 ? 'border-l' : ''} ${item.active ? 'text-expedition-goldbright' : 'text-expedition-gold'}`}
+          >
+            {item.icon}
+            <span className="whitespace-nowrap text-[9px] font-semibold uppercase tracking-[0.06em]">{item.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="pointer-events-none absolute inset-[3px] rounded-[4px] border border-expedition-gold/18" />
+    </nav>
+  );
+}
+
+function MobileNarrativeDrawer({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-3 z-30 md:hidden"
+      style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5.8rem)' }}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close narrative"
+        className="pointer-events-auto absolute -top-3 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-expedition-brass/70 bg-expedition-ink/90 text-expedition-gold shadow-lg"
+      >
+        ×
+      </button>
+      <NarrativePanel forceExpanded />
+    </div>
+  );
+}
+
+function MobileTouchControls() {
+  return <MobileJoystick />;
 }
 
 // ---------------------------------------------------------------------------
@@ -1870,6 +2185,8 @@ export function ThreeHUD({ onTogglePerf }) {
   const [panel, setPanel] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [inventoryInitialTab, setInventoryInitialTab] = useState('tools');
+  const [mobileNarrativeOpen, setMobileNarrativeOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen);
@@ -1906,6 +2223,20 @@ export function ThreeHUD({ onTogglePerf }) {
     return 'Quest: collect or document one animal, plant, or mineral sample.';
   }, [questComplete]);
 
+  const openInventoryTab = useCallback(tab => {
+    setMobileNarrativeOpen(false);
+    setInventoryInitialTab(tab);
+    setInventoryOpen(true);
+  }, []);
+  const openJournalPanel = useCallback(() => {
+    setMobileNarrativeOpen(false);
+    setPanel('journal');
+  }, []);
+  const openMapModal = useCallback(() => {
+    setMobileNarrativeOpen(false);
+    setMapOpen(true);
+  }, []);
+
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
       {/* Regular HUD fades out while the diegetic status view owns the screen */}
@@ -1913,20 +2244,23 @@ export function ThreeHUD({ onTogglePerf }) {
       <TopChronometer />
       <TopObjective objective={objective} />
 
-      <div className="absolute left-3 top-3">
+      <MobileVitalsPanel />
+      <MobileMapButton onOpenMap={openMapModal} />
+
+      <div className="absolute left-3 top-3 hidden md:block">
         <VitalStatusPanel />
       </div>
 
-      <div className="absolute right-3 top-3 xl:hidden">
-        <GameplayMinimap onOpenMap={() => setMapOpen(true)} />
+      <div className="absolute right-3 top-3 hidden md:block xl:hidden">
+        <GameplayMinimap onOpenMap={openMapModal} />
       </div>
 
       <div className="absolute bottom-3 right-3 top-3 hidden xl:block">
         <FieldSidebar
           objective={objective}
-          onOpenInventory={() => setInventoryOpen(true)}
-          onOpenMap={() => setMapOpen(true)}
-          onOpenJournal={() => setPanel('journal')}
+          onOpenInventory={() => openInventoryTab('case')}
+          onOpenMap={openMapModal}
+          onOpenJournal={openJournalPanel}
         />
       </div>
 
@@ -1938,27 +2272,37 @@ export function ThreeHUD({ onTogglePerf }) {
         <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />
       </div>
 
-      <div className="absolute bottom-3 left-3 right-3 flex flex-col gap-2 md:right-auto md:w-[31rem]">
+      <MobileNarrativeDrawer open={mobileNarrativeOpen} onClose={() => setMobileNarrativeOpen(false)} />
+
+      <div className="absolute bottom-3 left-3 right-3 hidden flex-col gap-2 md:right-auto md:flex md:w-[31rem]">
         <NarrativePanel />
       </div>
 
       <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 justify-center md:flex lg:bottom-3">
-        <ToolBelt onOpenJournal={() => setPanel('journal')} />
+        <ToolBelt onOpenJournal={openJournalPanel} />
       </div>
 
-      <div className="pointer-events-auto absolute right-3 bottom-[14.25rem] flex gap-1.5 xl:hidden">
-        <button type="button" onClick={() => setPanel('journal')} className={GOLD_BUTTON}>Journal</button>
-        <button type="button" onClick={() => setInventoryOpen(true)} className={GOLD_BUTTON}>Case</button>
+      <div className="pointer-events-auto absolute right-3 bottom-[14.25rem] hidden gap-1.5 md:flex xl:hidden">
+        <button type="button" onClick={openJournalPanel} className={GOLD_BUTTON}>Journal</button>
+        <button type="button" onClick={() => openInventoryTab('case')} className={GOLD_BUTTON}>Case</button>
         <CameraCycleButton className={GOLD_BUTTON} />
       </div>
 
       <MobileTouchControls />
+      <MobileActionCluster />
+      <MobileBottomNav
+        onOpenJournal={openJournalPanel}
+        onToggleNarrative={() => setMobileNarrativeOpen(value => !value)}
+        onOpenCasebook={() => openInventoryTab('case')}
+        onOpenInventory={() => openInventoryTab('tools')}
+        narrativeOpen={mobileNarrativeOpen}
+      />
       </div>
 
       <StatusView />
 
       <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
-      <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} />
+      <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} initialTab={inventoryInitialTab} />
       <SpecimenDetailModal />
 
       <FieldNotebook
@@ -1966,7 +2310,7 @@ export function ThreeHUD({ onTogglePerf }) {
         onClose={() => setPanel(null)}
         onOpenMap={() => {
           setPanel(null);
-          setMapOpen(true);
+          openMapModal();
         }}
       />
       <ZoneTransitionOverlay />

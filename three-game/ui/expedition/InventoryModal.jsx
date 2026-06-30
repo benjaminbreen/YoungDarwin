@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CASE_CAPACITY,
   SUPPLY_DEFS,
@@ -359,8 +359,12 @@ function SpecimenCaseTab() {
 
 // ---------------------------------------------------------------------------
 
-export function InventoryModal({ open, onClose }) {
-  const [tab, setTab] = useState('tools');
+export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
+  const [tab, setTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
 
   if (!open) return null;
 

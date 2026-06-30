@@ -23,7 +23,14 @@ export function ThreeScene({ perfSettings, deferredContentReady = true }) {
       {/* Always mounted: ticks the island weather sim and smooths the shared
           env even when the visual weather FX are toggled off. */}
       <WeatherDirector />
-      <SkyController stars={settings.atmosphere !== false} />
+      <SkyController
+        stars={settings.atmosphere !== false}
+        solarEffects={{
+          halo: settings.solarSunHalo !== false,
+          sceneFlares: settings.solarSceneFlares !== false,
+          sunFacingGrade: settings.solarSunFacingGrade !== false,
+        }}
+      />
       <Lighting />
       {deferredContentReady && (
         <Suspense fallback={null}>
@@ -45,12 +52,11 @@ export function ThreeScene({ perfSettings, deferredContentReady = true }) {
         <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
         <PlayerController physicsDebug={settings.physicsDebug === true} />
       </PhysicsProvider>
-      {deferredContentReady && (
-        <GroundedWorldFX
-          enabled={settings.worldDetails !== false}
-          waterRipples={settings.water !== false && settings.waterSplashes !== false}
-        />
-      )}
+      <GroundedWorldFX
+        enabled={deferredContentReady && settings.worldDetails !== false}
+        terrainDust={settings.playerFX !== false && settings.terrainDust !== false}
+        waterRipples={deferredContentReady && settings.water !== false && settings.waterSplashes !== false}
+      />
     </>
   );
 }

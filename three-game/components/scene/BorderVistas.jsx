@@ -1,15 +1,17 @@
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import {
   getRegionTerrainConfig,
   terrainColor,
   terrainHeight,
+  terrainSurfaceNoise,
   WATER_LEVEL,
 } from '../../world/terrain';
 import { isAuthoredRegion } from '../../world/regions';
 import { getBorderVistas } from '../../world/vistas';
+import { buildBorderTransition, transitionVistaColor } from '../../world/vistas/transitions';
 import { useThreeGameStore } from '../../store';
 
 const EDGE_AXES = {
@@ -37,6 +39,7 @@ const DEEP_CONTINUATION = new THREE.Color('#1f5f90');
 const BORDER_COLLAR_DEPTH = 3.8;
 const BORDER_COLLAR_DROP = 0.035;
 const BORDER_COLLAR_ROWS = 4;
+const MARKER_DUMMY = new THREE.Object3D();
 
 const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
   varying vec3 vBorderWorldPosition;
@@ -57,38 +60,21 @@ const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
     );
   }
 
-  float bvFbm(vec2 p) {
-    float value = 0.0;
-    float amp = 0.5;
-    for (int i = 0; i < 4; i++) {
-      value += bvNoise(p) * amp;
-      p = mat2(1.58, -0.92, 0.92, 1.58) * p + vec2(4.7, -2.9);
-      amp *= 0.52;
-    }
-    return value;
-  }
 `;
 
 const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
   float bvDist = length(vBorderWorldPosition.xz);
   float bvNear = 1.0 - smoothstep(84.0, 142.0, bvDist);
-  float bvCoarse = bvFbm(vBorderWorldPosition.xz * 0.038 + vec2(2.0, -7.0));
-  float bvMedium = bvFbm(vBorderWorldPosition.xz * 0.145 + vec2(11.0, 3.0));
-  float bvFine = bvNoise(vBorderWorldPosition.xz * 0.92);
-  float bvMottle = (bvCoarse - 0.5) * 0.18 + (bvMedium - 0.5) * 0.11 + (bvFine - 0.5) * 0.035;
+  float bvCoarse = bvNoise(vBorderWorldPosition.xz * 0.045 + vec2(2.0, -7.0));
+  float bvFine = bvNoise(vBorderWorldPosition.xz * 0.42 + vec2(11.0, 3.0));
+  float bvMottle = (bvCoarse - 0.5) * 0.10 + (bvFine - 0.5) * 0.035;
   float bvSlope = clamp(1.0 - abs(vBorderWorldNormal.y), 0.0, 1.0);
-  float bvStreak = smoothstep(0.70, 0.96, bvFbm(vec2(
-    vBorderWorldPosition.x * 0.085 + vBorderWorldPosition.z * 0.035,
-    vBorderWorldPosition.z * 0.22 - vBorderWorldPosition.x * 0.018
-  )));
-  float bvVein = abs(sin(vBorderWorldPosition.x * 0.12 + vBorderWorldPosition.z * 0.045 + bvCoarse * 4.4));
-  float bvCrack = smoothstep(0.985, 0.999, bvVein) * (1.0 - smoothstep(0.55, 0.86, bvFine));
 
   vec3 bvWarmDust = vec3(1.055, 1.025, 0.925);
   vec3 bvCoolAsh = vec3(0.90, 0.94, 0.92);
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvWarmDust, max(0.0, bvCoarse - 0.52) * 0.22 * bvNear);
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvCoolAsh, max(0.0, 0.48 - bvCoarse) * 0.14 * bvNear);
-  diffuseColor.rgb *= clamp(1.0 + bvMottle * bvNear - bvSlope * 0.10 - bvStreak * 0.045 * bvNear - bvCrack * 0.16 * bvNear, 0.72, 1.22);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvWarmDust, max(0.0, bvCoarse - 0.54) * 0.10 * bvNear);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * bvCoolAsh, max(0.0, 0.46 - bvCoarse) * 0.08 * bvNear);
+  diffuseColor.rgb *= clamp(1.0 + bvMottle * bvNear - bvSlope * 0.055, 0.82, 1.16);
 `;
 
 function normalize2([x, z]) {
@@ -154,6 +140,20 @@ function smoothNoise(x, z, seed = 0) {
   return Math.sin(x * 0.071 + seed * 1.7) * 0.55
     + Math.sin(z * 0.083 - seed * 2.1) * 0.45
     + Math.sin((x + z) * 0.034 + seed) * 0.35;
+}
+
+function applyApronVertexMottle(color, x, z, options = {}) {
+  const seed = options.seed || 0;
+  const strength = THREE.MathUtils.clamp(options.strength ?? 1, 0, 1);
+  if (strength <= 0) return color;
+  const macro = terrainSurfaceNoise(x * 0.58 + seed * 2.7, z * 0.58 - seed * 1.9);
+  const medium = terrainSurfaceNoise(x * 1.45 - seed * 0.8, z * 1.25 + seed * 0.6);
+  const fine = terrainSurfaceNoise(x * 3.4 + 8.0, z * 3.1 - 4.0);
+  const shade = 1 + (macro * 0.075 + medium * 0.045 + fine * 0.018) * strength;
+  color.multiplyScalar(THREE.MathUtils.clamp(shade, 0.86, 1.14));
+  if (macro > 0.26) color.offsetHSL(0.012, -0.018, 0.018 * strength);
+  if (medium < -0.28) color.offsetHSL(-0.006, -0.012, -0.018 * strength);
+  return color;
 }
 
 function bandAt(vista, distance) {
@@ -266,13 +266,25 @@ function ensureUpwardWinding(geometry) {
   return geometry;
 }
 
-function createBorderVistaMaterial() {
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.98,
-    metalness: 0,
-    fog: true,
-  });
+function createBorderVistaMaterial(cheapMaterials) {
+  const material = cheapMaterials
+    ? new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      shininess: 0,
+      specular: new THREE.Color(0x000000),
+      fog: true,
+    })
+    : new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.98,
+      metalness: 0,
+      fog: true,
+    });
+  if (cheapMaterials) {
+    material.customProgramCacheKey = () => 'border-vista-phong-baked-color-v1';
+    material.needsUpdate = true;
+    return material;
+  }
   material.onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -303,20 +315,22 @@ function createBorderVistaMaterial() {
         ${BORDER_VISTA_GRAIN_APPLY}`,
       );
   };
-  material.customProgramCacheKey = () => 'border-vista-grain-v1';
+  material.customProgramCacheKey = () => (cheapMaterials ? 'border-vista-grain-phong-v2' : 'border-vista-grain-standard-v2');
   material.needsUpdate = true;
   return material;
 }
 
-function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetConfig, vista) {
+function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetConfig, vista, transition) {
   if (!CARDINAL_EDGES.has(vista.edge)
     || !targetRegionId
     || !targetConfig
     || !isAuthoredRegion(targetRegionId)
     || vista.render === false) return null;
   const axes = EDGE_AXES[vista.edge];
-  const targetEdge = OPPOSITE_EDGE[vista.edge];
+  const targetEdge = transition?.targetEdge || OPPOSITE_EDGE[vista.edge];
   if (!axes || !targetEdge) return null;
+  const recipe = transition?.recipe || { shoreFloor: WATER_LEVEL - 0.28, landThreshold: 0.18 };
+  const continuity = transition?.continuity || null;
 
   const along = normalize2(axes.along);
   const outward = normalize2(axes.outward);
@@ -342,9 +356,12 @@ function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetCon
       collarBlend,
     } = borderDistanceForRow(row, rows, previewDepth);
     const targetDistance = outsideT * targetSampleDepth;
-    const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, 12.0);
-    const toneBlend = THREE.MathUtils.smoothstep(outsideDistance, 6.0, 34.0);
-    const seamHold = 1 - seamBlend;
+    const carryEnd = continuity?.carryEnd ?? 12.0;
+    const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, carryEnd);
+    const heightBlend = continuity
+      ? THREE.MathUtils.smoothstep(outsideDistance, continuity.ridgeStart, continuity.ridgeFull)
+      : seamBlend;
+    const seamHold = 1 - heightBlend;
     const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.58, 1.0);
     for (let col = 0; col <= cols; col += 1) {
       const u = col / cols;
@@ -361,17 +378,39 @@ function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetCon
       const targetY = terrainHeight(targetX, targetZ, targetRegionId);
       const currentLandHere = THREE.MathUtils.smoothstep(currentY, WATER_LEVEL - 0.26, WATER_LEVEL + 0.32);
       const currentLand = Math.max(currentLandHere, edgeLandStrength(regionId, config, vista.edge, clampedU));
-      const targetLand = THREE.MathUtils.smoothstep(targetY, WATER_LEVEL - 0.2, WATER_LEVEL + 0.18);
+      const targetLand = THREE.MathUtils.smoothstep(targetY, recipe.shoreFloor, WATER_LEVEL + 0.18);
       const inlandGate = Math.max(currentLand, THREE.MathUtils.smoothstep(outsideT, 0.16, 0.36));
-      const seamLand = currentLand * (1 - THREE.MathUtils.smoothstep(outsideDistance, 0.6, 4.5));
-      const landStrength = Math.max(seamLand, targetLand * inlandGate);
+      const sourceCarryLand = currentLand * (1 - THREE.MathUtils.smoothstep(
+        outsideDistance,
+        carryEnd * 0.58,
+        carryEnd,
+      ));
+      const targetGateEnd = continuity
+        ? Math.max(continuity.shorePatchStart + 6, continuity.targetColorFull * 0.72)
+        : 1;
+      const targetLandGate = continuity
+        ? THREE.MathUtils.smoothstep(outsideDistance, continuity.shorePatchStart, targetGateEnd)
+        : 1;
+      const landStrength = Math.max(sourceCarryLand, targetLand * inlandGate * targetLandGate);
       const seamOffset = edgeY - targetEdgeY;
-      const previewY = targetY + seamOffset * seamHold + smoothNoise(x, z, (vista.seed || 0) + 173) * 0.08 * seamBlend;
+      const sourceCarryY = currentY
+        - BORDER_COLLAR_DROP
+        - outsideT * 0.035
+        + smoothNoise(x, z, (vista.seed || 0) + 211) * 0.045 * (continuity?.seamNoiseStrength ?? 0.35);
+      const targetProfileY = targetY
+        + seamOffset * seamHold
+        + smoothNoise(x, z, (vista.seed || 0) + 173) * 0.08 * heightBlend;
+      const previewY = THREE.MathUtils.lerp(sourceCarryY, targetProfileY, heightBlend);
       const y = THREE.MathUtils.lerp(currentY - BORDER_COLLAR_DROP, previewY, collarBlend);
 
       const currentColor = terrainColor(currentX, currentZ, currentY, regionId);
       const targetColor = terrainColor(targetX, targetZ, targetY, targetRegionId);
-      const color = currentColor.lerp(targetColor, toneBlend);
+      const color = transitionVistaColor(transition, currentColor, targetColor, outsideDistance, outsideT, targetY);
+      const mottleT = THREE.MathUtils.smoothstep(outsideDistance, 2.0, 18.0);
+      applyApronVertexMottle(color, x, z, {
+        seed: (vista.seed || 0) + 31,
+        strength: 0.16 + mottleT * (continuity?.seamNoiseStrength ?? 0.65),
+      });
       if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.52);
 
       positions.push(x, y, z);
@@ -387,8 +426,8 @@ function makeNeighborPreviewGeometry(regionId, config, targetRegionId, targetCon
       const b = a + stride;
       const c = a + 1;
       const d = b + 1;
-      if (triangleIsLand(a, b, c, landStrengths)) indices.push(a, b, c);
-      if (triangleIsLand(c, b, d, landStrengths)) indices.push(c, b, d);
+      if (triangleIsLand(a, b, c, landStrengths, recipe.landThreshold)) indices.push(a, b, c);
+      if (triangleIsLand(c, b, d, landStrengths, recipe.landThreshold)) indices.push(c, b, d);
     }
   }
 
@@ -468,6 +507,10 @@ function makeApronGeometry(regionId, config, vista) {
       const rawTargetColor = profileColor(vista, distance, t, sideFade);
       const targetColor = rawTargetColor.lerp(waterColor, waterHold * 0.9);
       const color = edgeColor.lerp(targetColor, seamBlend);
+      applyApronVertexMottle(color, x, z, {
+        seed: vista.seed || 0,
+        strength: 0.22 + seamBlend * 0.7,
+      });
       if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.5);
 
       positions.push(x, y, z);
@@ -520,7 +563,56 @@ function markerItems(config, vista, marker) {
   });
 }
 
+function transitionDetailColor(transition, kind) {
+  const profile = transition?.sourceProfile || transition?.targetProfile || {};
+  if (kind === 'rock') return profile.wetColor || profile.nearColor || '#323029';
+  return profile.families?.includes('reef-sand')
+    ? '#78805d'
+    : profile.families?.includes('volcanic')
+      ? '#465233'
+      : '#59653d';
+}
+
+function transitionDetailItems(regionId, config, vista, transition, kind) {
+  const axes = EDGE_AXES[vista.edge];
+  const continuity = transition?.continuity;
+  if (!axes || !continuity || !CARDINAL_EDGES.has(vista.edge)) return [];
+  const count = kind === 'rock'
+    ? continuity.detail?.rockCount || 0
+    : continuity.detail?.scrubCount || 0;
+  if (!count) return [];
+
+  const along = normalize2(axes.along);
+  const outward = normalize2(axes.outward);
+  const origin = edgeOrigin(config, vista.edge);
+  const width = axisLength(config, vista.edge) * 0.94;
+  const seed = (vista.seed || 0) + (kind === 'rock' ? 409 : 251);
+  const maxDistance = Math.min(continuity.carryEnd + 4, 22);
+
+  return Array.from({ length: count }, (_, index) => {
+    const u = 0.06 + seededUnit(seed, index, 1) * 0.88;
+    const edgeLand = edgeLandStrength(regionId, config, vista.edge, u);
+    if (edgeLand < 0.52) return null;
+    const alongDistance = (u - 0.5) * width;
+    const outwardDistance = -1.2 + seededUnit(seed, index, 2) * maxDistance;
+    const [x, z] = worldPoint(origin, along, outward, alongDistance, outwardDistance);
+    const [sampleX, sampleZ] = clampToRegionEdge(config, x, z);
+    const y = terrainHeight(sampleX, sampleZ, regionId);
+    const sizeMin = kind === 'rock' ? 0.12 : 0.18;
+    const sizeMax = kind === 'rock' ? 0.34 : 0.44;
+    const scale = sizeMin + seededUnit(seed, index, 3) * (sizeMax - sizeMin);
+    return {
+      id: `${kind}-transition-${index}`,
+      position: [x, y + (kind === 'rock' ? 0.035 : 0.18), z],
+      scale,
+      yaw: seededUnit(seed, index, 5) * Math.PI * 2,
+    };
+  }).filter(Boolean);
+}
+
 function VistaMarkers({ config, vista, marker }) {
+  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const meshRef = useRef(null);
   const items = useMemo(() => markerItems(config, vista, marker), [config, vista, marker]);
   const geometry = useMemo(() => {
     const result = marker.kind === 'rock'
@@ -529,49 +621,129 @@ function VistaMarkers({ config, vista, marker }) {
     result.clearGroups();
     return result;
   }, [marker.kind]);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: marker.color,
-    roughness: 0.96,
-    metalness: 0,
-    fog: true,
-  }), [marker.color]);
+  const material = useMemo(() => (
+    cheapMaterials
+      ? new THREE.MeshPhongMaterial({
+        color: marker.color,
+        shininess: 0,
+        specular: new THREE.Color(0x000000),
+        fog: true,
+      })
+      : new THREE.MeshStandardMaterial({
+        color: marker.color,
+        roughness: 0.96,
+        metalness: 0,
+        fog: true,
+      })
+  ), [cheapMaterials, marker.color]);
   useEffect(() => () => {
     geometry.dispose();
     material.dispose();
   }, [geometry, material]);
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    items.forEach((item, index) => {
+      MARKER_DUMMY.position.fromArray(item.position);
+      MARKER_DUMMY.rotation.set(0, item.yaw, 0);
+      MARKER_DUMMY.scale.set(item.scale, item.scale * (marker.kind === 'rock' ? 0.42 : 0.82), item.scale);
+      MARKER_DUMMY.updateMatrix();
+      mesh.setMatrixAt(index, MARKER_DUMMY.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [items, marker.kind]);
   if (!items.length) return null;
   return (
-    <group userData={{
-      renderSource: `border-vista:${vista.id}:${marker.kind}`,
-      renderLabel: `${vista.toRegionId || vista.id} ${marker.kind} markers`,
-      renderKind: 'border-vista-marker',
-      renderPath: null,
-    }}>
-      {items.map(item => (
-        <mesh
-          key={item.id}
-          position={item.position}
-          rotation={[0, item.yaw, 0]}
-          scale={[item.scale, item.scale * (marker.kind === 'rock' ? 0.42 : 0.82), item.scale]}
-          material={material}
-          geometry={geometry}
-          castShadow={false}
-          receiveShadow={false}
-        />
-      ))}
-    </group>
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, items.length]}
+      castShadow={false}
+      receiveShadow={false}
+      userData={{
+        renderSource: `border-vista:${vista.id}:${marker.kind}`,
+        renderLabel: `${vista.toRegionId || vista.id} ${marker.kind} markers`,
+        renderKind: 'border-vista-marker',
+        renderPath: null,
+      }}
+    />
+  );
+}
+
+function TransitionSeamMarkers({ regionId, config, vista, transition, kind }) {
+  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const meshRef = useRef(null);
+  const color = useMemo(() => transitionDetailColor(transition, kind), [kind, transition]);
+  const items = useMemo(() => (
+    transitionDetailItems(regionId, config, vista, transition, kind)
+  ), [regionId, config, vista, transition, kind]);
+  const geometry = useMemo(() => {
+    const result = kind === 'rock'
+      ? new THREE.DodecahedronGeometry(1, 0)
+      : new THREE.ConeGeometry(0.5, 1.1, 5);
+    result.clearGroups();
+    return result;
+  }, [kind]);
+  const material = useMemo(() => (
+    cheapMaterials
+      ? new THREE.MeshPhongMaterial({
+        color,
+        shininess: 0,
+        specular: new THREE.Color(0x000000),
+        fog: true,
+      })
+      : new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.98,
+        metalness: 0,
+        fog: true,
+      })
+  ), [cheapMaterials, color]);
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    items.forEach((item, index) => {
+      MARKER_DUMMY.position.fromArray(item.position);
+      MARKER_DUMMY.rotation.set(0, item.yaw, 0);
+      MARKER_DUMMY.scale.set(item.scale, item.scale * (kind === 'rock' ? 0.36 : 0.74), item.scale);
+      MARKER_DUMMY.updateMatrix();
+      mesh.setMatrixAt(index, MARKER_DUMMY.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [items, kind]);
+  if (!items.length) return null;
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, items.length]}
+      castShadow={false}
+      receiveShadow={false}
+      userData={{
+        renderSource: `border-vista:${vista.id}:transition-${kind}`,
+        renderLabel: `${vista.toRegionId || vista.id} transition ${kind}`,
+        renderKind: 'border-vista-transition-marker',
+        renderPath: null,
+      }}
+    />
   );
 }
 
 function BorderVista({ regionId, config, vista }) {
+  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const targetConfig = useMemo(() => (
     vista.toRegionId ? getRegionTerrainConfig(vista.toRegionId) : null
   ), [vista.toRegionId]);
-  const geometry = useMemo(() => (
-    makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista)
-      || makeApronGeometry(regionId, config, vista)
+  const transition = useMemo(() => (
+    buildBorderTransition(regionId, config, vista, targetConfig)
   ), [regionId, config, targetConfig, vista]);
-  const material = useMemo(() => createBorderVistaMaterial(), []);
+  const geometry = useMemo(() => (
+    makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista, transition)
+      || makeApronGeometry(regionId, config, vista)
+  ), [regionId, config, targetConfig, vista, transition]);
+  const material = useMemo(() => createBorderVistaMaterial(cheapMaterials), [cheapMaterials]);
   useEffect(() => () => geometry?.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
   if (!geometry) return null;
@@ -584,6 +756,24 @@ function BorderVista({ regionId, config, vista }) {
       renderPath: null,
     }}>
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
+      {isNeighborPreview && (
+        <>
+          <TransitionSeamMarkers
+            regionId={regionId}
+            config={config}
+            vista={vista}
+            transition={transition}
+            kind="scrub"
+          />
+          <TransitionSeamMarkers
+            regionId={regionId}
+            config={config}
+            vista={vista}
+            transition={transition}
+            kind="rock"
+          />
+        </>
+      )}
       {!isNeighborPreview && vista.markers?.map((marker, index) => (
         <VistaMarkers key={`marker-${index}`} config={config} vista={vista} marker={marker} />
       ))}

@@ -87,7 +87,10 @@ export function updatePlayerFrameFeedback({
     const dayFactor = (hour >= 8 && hour <= 17) ? 1 : (hour < 5 || hour > 20) ? 0.7 : 0.85;
     const feet = getRuntimeFootContacts();
     const plantedFeet = Math.max(feet.left.contact || 0, feet.right.contact || 0);
-    contactShadowRef.current.material.opacity = (0.24 - plantedFeet * 0.05) * airborneFade * dayFactor;
+    const bothPlanted = Math.min(feet.left?.contact || 0, feet.right?.contact || 0);
+    contactShadowRef.current.scale.x *= 1 - bothPlanted * 0.08;
+    contactShadowRef.current.scale.y *= 1 - bothPlanted * 0.06;
+    contactShadowRef.current.material.opacity = (0.22 + plantedFeet * 0.04 + bothPlanted * 0.04) * airborneFade * dayFactor;
     contactShadowRef.current.visible = airborneFade > 0.02;
   }
 

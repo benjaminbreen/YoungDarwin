@@ -1,7 +1,5 @@
 import { getRegionEdgeHints, getRegionMap } from '../../../game-core/regionMaps';
 
-const APRON_SOURCE_REGIONS = new Set(['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'POST_OFFICE_BAY_3', 'N_SHORE', 'NW_REEF', 'W_HIGH', 'MANGROVES']);
-
 const DEFAULT_VISTA_BY_TYPE = {
   bay: 'post-office-bay',
   beach: 'black-beach-uplands',
@@ -31,6 +29,147 @@ const VISTA_BY_REGION_ID = {
   W_HIGH: 'cloud-forest',
   MANGROVES: 'mangrove-forest',
 };
+
+const DEFAULT_SURFACE_PROFILE_BY_TYPE = {
+  bay: 'volcanic-coast',
+  beach: 'black-sand-coast',
+  coastallava: 'lava-flats',
+  coastalTrail: 'black-sand-coast',
+  lavafield: 'lava-flats',
+  scrubland: 'dry-scrub',
+  highland: 'highland',
+  forest: 'cloud-forest',
+  reef: 'reef-shelf',
+  ocean: 'open-water',
+  promontory: 'dry-scrub',
+  wetland: 'mangrove-mud',
+  settlement: 'dry-scrub',
+  camp: 'dry-scrub',
+};
+
+const SURFACE_PROFILE_BY_REGION_ID = {
+  POST_OFFICE_BAY: 'volcanic-coast',
+  ALT_POST_OFFICE_BAY: 'volcanic-coast',
+  POST_OFFICE_BAY_3: 'volcanic-coast',
+  N_SHORE: 'black-sand-coast',
+  NW_REEF: 'reef-shelf',
+  W_HIGH: 'cloud-forest',
+  MANGROVES: 'mangrove-mud',
+  LAVA_FLATS: 'lava-flats',
+  BLACK_BEACH: 'black-sand-coast',
+  BLACK_BEACH_SURF: 'black-sand-coast',
+};
+
+export const surfaceProfiles = {
+  'volcanic-coast': {
+    id: 'volcanic-coast',
+    families: ['volcanic', 'ash', 'dry-scrub', 'coast'],
+    coastalStyle: 'rock-to-shallow-shelf',
+    nearColor: '#4f5045',
+    midColor: '#6c654d',
+    farColor: '#8a7c58',
+    wetColor: '#343a36',
+    shoreColor: '#6f684f',
+    targetLiteralWeight: 0.34,
+  },
+  'black-sand-coast': {
+    id: 'black-sand-coast',
+    families: ['black-sand', 'volcanic', 'dry-scrub', 'coast'],
+    coastalStyle: 'black-sand-beach',
+    nearColor: '#454139',
+    midColor: '#6d654b',
+    farColor: '#91835f',
+    wetColor: '#303733',
+    shoreColor: '#605744',
+    targetLiteralWeight: 0.42,
+  },
+  'reef-shelf': {
+    id: 'reef-shelf',
+    families: ['reef-sand', 'white-sand', 'shallow-water', 'coast'],
+    coastalStyle: 'pale-sand-shallows',
+    nearColor: '#817a61',
+    midColor: '#a69d78',
+    farColor: '#c4c1a0',
+    wetColor: '#718a7c',
+    shoreColor: '#b3ae88',
+    targetLiteralWeight: 0.28,
+  },
+  'lava-flats': {
+    id: 'lava-flats',
+    families: ['lava', 'basalt', 'volcanic', 'dry'],
+    coastalStyle: 'dry-lava-shelf',
+    nearColor: '#23231f',
+    midColor: '#3c382d',
+    farColor: '#5e563f',
+    wetColor: '#191d1d',
+    shoreColor: '#363329',
+    targetLiteralWeight: 0.36,
+  },
+  'dry-scrub': {
+    id: 'dry-scrub',
+    families: ['dry-scrub', 'tuff', 'grassland'],
+    coastalStyle: 'dry-upland',
+    nearColor: '#675f45',
+    midColor: '#80744f',
+    farColor: '#968d63',
+    wetColor: '#4a5141',
+    shoreColor: '#74694a',
+    targetLiteralWeight: 0.38,
+  },
+  highland: {
+    id: 'highland',
+    families: ['highland', 'grassland', 'ridge'],
+    coastalStyle: 'misty-ridge',
+    nearColor: '#6d6b50',
+    midColor: '#7f8564',
+    farColor: '#98a082',
+    wetColor: '#56624f',
+    shoreColor: '#74765d',
+    targetLiteralWeight: 0.36,
+  },
+  'cloud-forest': {
+    id: 'cloud-forest',
+    families: ['forest', 'highland', 'humid'],
+    coastalStyle: 'misty-forest-slope',
+    nearColor: '#334633',
+    midColor: '#4d6249',
+    farColor: '#7b8e75',
+    wetColor: '#28382d',
+    shoreColor: '#43523e',
+    targetLiteralWeight: 0.34,
+  },
+  'mangrove-mud': {
+    id: 'mangrove-mud',
+    families: ['mangrove', 'mudflat', 'wetland', 'coast'],
+    coastalStyle: 'mudflat-creek',
+    nearColor: '#2e372c',
+    midColor: '#46563a',
+    farColor: '#708061',
+    wetColor: '#1f2d27',
+    shoreColor: '#3f4b37',
+    targetLiteralWeight: 0.32,
+  },
+  'open-water': {
+    id: 'open-water',
+    families: ['water', 'ocean'],
+    coastalStyle: 'open-water',
+    nearColor: '#2d7094',
+    midColor: '#2a789b',
+    farColor: '#4e98ae',
+    wetColor: '#24647f',
+    shoreColor: '#5c9baa',
+    targetLiteralWeight: 0.2,
+  },
+};
+
+export function surfaceProfileForRegion(regionOrId) {
+  const region = typeof regionOrId === 'string' ? getRegionMap(regionOrId) : regionOrId;
+  if (!region) return surfaceProfiles['dry-scrub'];
+  const profileId = SURFACE_PROFILE_BY_REGION_ID[region.id]
+    || DEFAULT_SURFACE_PROFILE_BY_TYPE[region.type]
+    || 'dry-scrub';
+  return surfaceProfiles[profileId] || surfaceProfiles['dry-scrub'];
+}
 
 export const vistaLibrary = {
   'black-beach-uplands': {
@@ -162,8 +301,13 @@ export function vistaIdForRegion(region) {
   return VISTA_BY_REGION_ID[region.id] || DEFAULT_VISTA_BY_TYPE[region.type] || 'dry-scrub-uplands';
 }
 
+function isApronSourceRegion(regionId) {
+  const region = getRegionMap(regionId);
+  return region?.id === regionId && region?.terrain?.authored === true;
+}
+
 export function getBorderVistas(regionId) {
-  if (!APRON_SOURCE_REGIONS.has(regionId)) return [];
+  if (!isApronSourceRegion(regionId)) return [];
   return getRegionEdgeHints(regionId)
     .filter(hint => hint.kind === 'open' && hint.toRegionId)
     .map(hint => {

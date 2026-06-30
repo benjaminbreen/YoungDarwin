@@ -310,6 +310,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uDaylight: { value: 1 },
       uSunPathStrength: { value: 0 },
       uRain: { value: 0 },
+      uUnderwaterAmount: { value: 0 },
       // Screen-space refraction source (framebuffer grab taken just before
       // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
@@ -320,6 +321,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uReflMatrix: { value: new THREE.Matrix4() },
       uHasReflection: { value: 0 },
     },
+    side: THREE.DoubleSide,
     vertexShader: /* glsl */`
       ${WAVE_GLSL}
       uniform float uTime;
@@ -374,6 +376,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform float uDaylight;
       uniform float uSunPathStrength;
       uniform float uRain;
+      uniform float uUnderwaterAmount;
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform float uWaterLevel;
@@ -465,8 +468,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
           );
           normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85);
         }
+        if (!gl_FrontFacing) normal = -normal;
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
+        float underwaterView = clamp(uUnderwaterAmount, 0.0, 1.0);
+        float underside = gl_FrontFacing ? 0.0 : 1.0;
 
         // --- the water body: art-directed turquoise first, refraction second -
         float shallowFactor = exp(-depth * 0.30); // ~1 at the shore, 0 deep
@@ -529,12 +535,12 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // stylized lagoon read.
         float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
         float reflectance = 0.02 + 0.98 * fres;
-        float reflStrength = mix(0.85, 0.22, shallowFactor);
+        float reflStrength = mix(0.85, 0.22, shallowFactor) * (1.0 - underwaterView * 0.72);
         color = mix(color, reflColor, clamp(reflectance * reflStrength, 0.0, 0.8));
 
         // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
-        float glintVisibility = (0.24 + 0.76 * uSunPathStrength) * (1.0 - uRain * 0.78);
+        float glintVisibility = (0.24 + 0.76 * uSunPathStrength) * (1.0 - uRain * 0.78) * (1.0 - underwaterView * 0.88);
         float spec = pow(max(dot(normal, hv), 0.0), mix(280.0, 170.0, uSunPathStrength)) * uDaylight * glintVisibility;
         float glint = 0.45 + 0.55 * smoothstep(0.5, 0.88, noise(vWorld.xz * 4.4 + uTime * 0.48));
         vec2 sunPathDir = normalize(uSun.xz + vec2(0.0001, 0.0001));
@@ -547,7 +553,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float pathGrain = 0.5 + 0.58 * smoothstep(0.38, 0.86, noise(vWorld.xz * 2.0 + vec2(uTime * 0.12, -uTime * 0.075)));
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
         color += uSunColor * min(spec * glint, 1.0) * (0.58 + uSunPathStrength * 0.4);
-        color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86);
+        color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
         color = mix(color, color * vec3(0.62, 0.76, 0.82), uRain * 0.24);
 
         // --- foam: crisp lip at the moving waterline + breaking crests --------
@@ -587,6 +593,16 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float foam = clamp(max(max(shoreFoam, crestFoam), surf), 0.0, 1.0);
         color = mix(color, uFoam, foam * 0.88);
         alpha = max(alpha, foam * 0.8);
+
+        if (underwaterView > 0.001) {
+          float ceilingNoise = 0.5 + 0.5 * noise(vWorld.xz * 1.75 + vec2(uTime * 0.12, -uTime * 0.09));
+          float faceWeight = mix(0.42, 0.78, underside);
+          float ceiling = underwaterView * faceWeight;
+          vec3 ceilingTint = mix(uDeep, uScatter, 0.62 + ceilingNoise * 0.16);
+          ceilingTint = mix(ceilingTint, uSkyHorizon, smoothstep(0.18, 0.82, reflectance) * 0.24);
+          color = mix(color, ceilingTint + uFoam * foam * 0.16, ceiling);
+          alpha = max(alpha, underwaterView * (0.28 + underside * 0.24 + reflectance * 0.18));
+        }
 
         // --- atmospheric haze --------------------------------------------------
         float camDist = length(vWorld.xz - cameraPosition.xz);
@@ -941,6 +957,7 @@ export function Water({ quality = 'performance', reflections = true }) {
     wu.uTime.value = t;
     wu.uSun.value.copy(_sun);
     wu.uRain.value = weatherEnv.rainIntensity;
+    wu.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
     const sky = skyState(time, store.day || 1);
     const daylight = sky.daylight;
     const lowSun = THREE.MathUtils.smoothstep(sky.elevation, 0.0, 0.18)

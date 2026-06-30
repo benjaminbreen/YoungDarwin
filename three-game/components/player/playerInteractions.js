@@ -61,6 +61,7 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
 }
 
 const GROUND_GATHER_MAX_HEIGHT = 0.82;
+const LOW_INSPECT_MAX_HEIGHT = 0.46;
 const SPECIMEN_INTERACTION_HEIGHT = {
   basalt: 0.28,
   barnacle: 0.12,
@@ -91,6 +92,15 @@ function normalizeSpecimenId(specimen) {
   return String(specimen?.id || specimen?.specimenId || '').replace(/[^a-zA-Z0-9_]/g, '');
 }
 
+function specimenKind(specimen) {
+  return {
+    id: normalizeSpecimenId(specimen).toLowerCase(),
+    ontology: String(specimen?.ontology || '').toLowerCase(),
+    order: String(specimen?.order || '').toLowerCase(),
+    subOrder: String(specimen?.sub_order || specimen?.subOrder || '').toLowerCase(),
+  };
+}
+
 export function specimenInteractionHeight(specimen) {
   if (!specimen) return 0;
   if (Number.isFinite(specimen.interactionHeight)) return Math.max(0, specimen.interactionHeight);
@@ -108,18 +118,49 @@ export function specimenInteractionHeight(specimen) {
 }
 
 function gatherClipForSpecimen(specimen) {
-  return specimenInteractionHeight(specimen) <= GROUND_GATHER_MAX_HEIGHT
-    ? 'gatherGround'
-    : 'gatherChestHeight';
+  const height = specimenInteractionHeight(specimen);
+  const kind = specimenKind(specimen);
+  if (kind.ontology === 'plant' && height > GROUND_GATHER_MAX_HEIGHT) return 'gatherChestHeight';
+  return height <= GROUND_GATHER_MAX_HEIGHT ? 'gatherGround' : 'gatherChestHeight';
 }
 
-export function collectionAnimationForTool(toolId, specimen = null) {
-  if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true };
-  if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true };
-  if (toolId === 'hammer') return { clip: 'swingHammer', duration: ACTION_DURATION.swingHammer, lockMovement: true };
-  if (toolId === 'sketch') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true };
+function documentClipForSpecimen(specimen) {
+  const height = specimenInteractionHeight(specimen);
+  const kind = specimenKind(specimen);
+  if (kind.ontology === 'mineral' || height <= LOW_INSPECT_MAX_HEIGHT) return 'kneelInspect';
+  if (kind.ontology === 'plant' || kind.order === 'reptile' || kind.order === 'crustacean') return 'standingInspectDownward';
+  return 'write';
+}
+
+export function collectionAnimationForTool(toolId, specimen = null, options = {}) {
+  if (options.documented) {
+    const clip = documentClipForSpecimen(specimen);
+    return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
+  }
+  if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true, align: true };
+  if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (toolId === 'hammer') return { clip: 'heavyToolSwing', duration: ACTION_DURATION.heavyToolSwing, lockMovement: true, align: true };
+  if (toolId === 'sketch') {
+    const clip = documentClipForSpecimen(specimen);
+    return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
+  }
+  const kind = specimenKind(specimen);
+  if (kind.order === 'insect') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (kind.ontology === 'mineral') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true, align: true };
   const clip = gatherClipForSpecimen(specimen);
-  return { clip, duration: ACTION_DURATION[clip], lockMovement: true };
+  return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
+}
+
+function runtimeSpecimenPosition(specimen, runtimePositions, fallbackY = 0) {
+  if (!specimen) return null;
+  const actorId = specimen.instanceId || specimen.id;
+  const runtime = runtimePositions?.[actorId];
+  const spawn = specimen.spawnPoint || [0, fallbackY, 0];
+  return {
+    x: runtime?.x ?? spawn[0] ?? 0,
+    y: runtime?.y ?? spawn[1] ?? fallbackY,
+    z: runtime?.z ?? spawn[2] ?? 0,
+  };
 }
 
 export function updatePlayerInteractions({
@@ -182,7 +223,7 @@ export function updatePlayerInteractions({
     if (currentState.carryPrompt) {
       if (currentState.carryPrompt.mode === 'collect-rock-sample') {
         if (!stateRef.current.action) {
-          startAction('gatherGround', ACTION_DURATION.gatherGround, { lockMovement: true });
+          startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
         currentState.collectRockSample?.(currentState.carryPrompt.sample);
       } else if (currentState.carriedObjectId) {
@@ -204,7 +245,22 @@ export function updatePlayerInteractions({
         message: currentState.edgePrompt.description,
       });
     } else if (specimenId && !stateRef.current.action) {
-      const animation = collectionAnimationForTool(currentState.activeToolId, specimen);
+      const alreadyCollected = specimen ? currentState.collectedSpecimenIds?.includes(specimen.id) : false;
+      const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
+      const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
+      const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
+      if (animation.align && target) {
+        const dx = target.x - position.x;
+        const dz = target.z - position.z;
+        if (Math.hypot(dx, dz) > 0.08) {
+          const now = performance.now() / 1000;
+          stateRef.current.collectionFaceMotion = {
+            targetYaw: Math.atan2(dx, dz),
+            startedAt: now,
+            until: now + Math.min(0.58, Math.max(0.24, (animation.duration || 1) * 0.18)),
+          };
+        }
+      }
       startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
       collectNearby();
     }

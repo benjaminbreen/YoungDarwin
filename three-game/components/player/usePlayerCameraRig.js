@@ -5,6 +5,7 @@ import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { CAMERA } from './playerConfig';
+import { WATER_LEVEL } from '../../world/water';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -21,6 +22,7 @@ export function usePlayerCameraRig() {
   const cameraFollowYRef = useRef(null);
   const statusLookRef = useRef(null);
   const shoulderPivotRef = useRef(null);
+  const swimCameraRef = useRef(0);
   // Aim mode: cursor drives Darwin's facing instead of the camera. While
   // aimActiveRef is true, left-drag no longer rotates the camera (the cursor
   // aims) and a left-click bumps firePulseRef so the controller can fire.
@@ -144,9 +146,19 @@ export function usePlayerCameraRig() {
     wasAirborne,
     cameraImpulse,
     viewMode,
+    swimming = false,
+    wadeDepth = 0,
     now,
     delta,
   }) => {
+    const swimTarget = swimming ? 1 : THREE.MathUtils.smoothstep(wadeDepth, 0.45, 1.15) * 0.18;
+    swimCameraRef.current = THREE.MathUtils.damp(
+      swimCameraRef.current,
+      swimTarget,
+      swimTarget > swimCameraRef.current ? 4.8 : 3.2,
+      delta,
+    );
+    const swimCamera = swimCameraRef.current;
     const terrainCameraY = collisionAdapter.terrainHeight(playerPosition.x, playerPosition.z) + 0.04;
     const lowTraversalLift = Math.max(0, playerPosition.y - terrainCameraY);
     const cameraTargetY = lowTraversalLift > 0.05 && lowTraversalLift < 0.85 && !wasAirborne
@@ -211,14 +223,22 @@ export function usePlayerCameraRig() {
     } else {
       const cameraForward = new THREE.Vector3(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const cameraRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(UP, yawRef.current);
-      const cameraDistance = zoomRef.current;
+      const cameraDistance = THREE.MathUtils.lerp(
+        zoomRef.current,
+        THREE.MathUtils.clamp(zoomRef.current, 3.7, 5.4),
+        swimCamera,
+      );
       const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
-      const side = THREE.MathUtils.lerp(0.6, 1.5, zoomT);
+      const side = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimCamera);
       const pitchA = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
+      const effectivePitch = THREE.MathUtils.lerp(pitchA, -0.12, swimCamera * 0.92);
       // Smooth the pivot itself: looking straight at the raw player position
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
       const rawPivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffsetRef.current);
+      if (swimCamera > 0.001) {
+        rawPivot.y = THREE.MathUtils.lerp(rawPivot.y, WATER_LEVEL - 0.28, swimCamera);
+      }
       if (!shoulderPivotRef.current || shoulderPivotRef.current.distanceToSquared(rawPivot) > 36) {
         shoulderPivotRef.current = rawPivot.clone();
       }
@@ -226,8 +246,8 @@ export function usePlayerCameraRig() {
       pivot.x = THREE.MathUtils.damp(pivot.x, rawPivot.x, 9, delta);
       pivot.y = THREE.MathUtils.damp(pivot.y, rawPivot.y, 9, delta);
       pivot.z = THREE.MathUtils.damp(pivot.z, rawPivot.z, 9, delta);
-      const horiz = Math.cos(pitchA) * cameraDistance;
-      const vert = Math.sin(pitchA) * cameraDistance;
+      const horiz = Math.cos(effectivePitch) * cameraDistance;
+      const vert = Math.sin(effectivePitch) * cameraDistance;
       const eye = pivot.clone()
         .add(cameraForward.clone().multiplyScalar(-horiz))
         .add(cameraRight.multiplyScalar(side))

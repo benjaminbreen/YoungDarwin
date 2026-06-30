@@ -136,20 +136,22 @@ const SOUTHERN_OPUNTIA_GROVE = [
 
 export function getPostOfficeBayOpuntiaHazards() {
   if (postOfficeBayOpuntiaHazards) return postOfficeBayOpuntiaHazards;
-  const scattered = makeFloreanaScatter('opuntia', 8, 23, {
+  const scattered = makeFloreanaScatter('opuntia', 5, 23, {
     minX: 8,
     maxX: 30,
     minZ: 3,
     maxZ: 30,
     scale: [0.65, 1.15],
   });
-  const southernGrove = SOUTHERN_OPUNTIA_GROVE.map(item => ({
-    ...item,
-    y: terrainHeight(item.x, item.z),
-    variant: 0,
-  }));
+  const southernGrove = SOUTHERN_OPUNTIA_GROVE
+    .filter((_, index) => index === 0 || index === 2 || index === 4)
+    .map(item => ({
+      ...item,
+      y: terrainHeight(item.x, item.z),
+      variant: 0,
+    }));
   postOfficeBayOpuntiaHazards = [...scattered, ...southernGrove].map(item => {
-    const renderScale = item.scale * 2.8;
+    const renderScale = item.scale * 1.05;
     return {
       ...item,
       renderScale,

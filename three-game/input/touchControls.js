@@ -14,6 +14,7 @@ const touchState = {
   gather: false,
   fireRifle: false,
   write: false,
+  inspect: false,
 };
 
 // Which one-shot action control each equipped tool fires when "used".
@@ -46,5 +47,6 @@ export function consumeTouchControls() {
   touchState.gather = false;
   touchState.fireRifle = false;
   touchState.write = false;
+  touchState.inspect = false;
   return snapshot;
 }

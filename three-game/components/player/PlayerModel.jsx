@@ -8,6 +8,7 @@ import { useThreeGameStore } from '../../store';
 import { ModelAsset } from '../assets/ModelAsset';
 import { PLAYER } from './playerConfig';
 import { attachToBone } from './handAttachment';
+import { calibratedStrideTimeScale } from './gaitProfiles';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -44,28 +45,6 @@ const HAND_TOOLS = [
 ];
 
 const PLAYER_MODEL_CYCLE = ['darwin', 'darwinCandidate2', 'darwin4', 'darwin5'];
-const STRIDE_TIME_SCALE = {
-  darwin: { walk: 1.03, run: 1.02, jog: 1.03 },
-  darwinCandidate2: { walk: 1.04, run: 1.02, jog: 1.03 },
-  darwin4: { walk: 1.04, run: 1.02, jog: 1.03 },
-  darwin5: {
-    walk: 1.1,
-    run: 1.05,
-    jog: 1.08,
-    holdWalk: 1.08,
-    holdToolWalk: 1.08,
-    torchWalk: 1.08,
-    walkRifle: 1.08,
-    walkCarry: 1.09,
-    tiredWalk: 1.06,
-  },
-};
-
-function calibratedStrideTimeScale(modelAssetId, clip, scale) {
-  const table = STRIDE_TIME_SCALE[modelAssetId] || null;
-  const multiplier = table?.[clip] || table?.[clip.includes('Run') || clip === 'run' ? 'run' : 'walk'] || 1;
-  return scale * multiplier;
-}
 
 function darwin5StandingJumpClip(charge) {
   return charge >= 0.45 ? 'standingJumpHigh' : 'standingJumpShort';
@@ -97,17 +76,18 @@ function darwin5TorchActionClip(action, crouching) {
   if (action === 'turnRight90') return crouching ? 'torchCrouchTurnRight90' : 'torchTurnRight90';
   if (action === 'standToCrouch') return 'torchStandToCrouch';
   if (action === 'crouchToStand') return 'torchCrouchToStand';
-  if (action === 'swingHammer' || action === 'swingNet') return 'swingTool';
+  if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'gather') return 'gather';
-  if (action === 'standingInspectDownward') return 'torchInspectForward';
+  if (action === 'standingInspectDownward') return 'standingInspectDownward';
   if (action === 'changeItem') return 'torchEquip';
   return null;
 }
 
 function darwin5HeldToolActionClip(action) {
-  if (action === 'swingNet') return 'butterflyNetSwing';
-  if (action === 'swingHammer' || action === 'swingTool') return 'heavyToolSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingHammer' || action === 'swingTool' || action === 'heavyToolSwing') return 'heavyToolSwing';
   return null;
 }
 
@@ -122,16 +102,15 @@ function darwin5AdaptedActionClip(action) {
   if (action === 'climbWaistHeight') return { clip: 'climbWaistHeight', timeScale: 1.65, fade: 0.05 };
   if (action === 'climbHeadHeight') return { clip: 'climbHeadHeight', timeScale: 1.45, fade: 0.05 };
   if (action === 'fallingToRoll') return { clip: 'fallingToRoll', timeScale: 1.2, fade: 0.05 };
-  if (action === 'swingNet') return 'butterflyNetSwing';
-  if (action === 'swingHammer') return 'heavyToolSwing';
-  if (action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'lookAround' || action === 'lookAroundShort') return action;
   if (action === 'write') return 'write';
-  if (action === 'gather' || action === 'gatherGround') return 'gatherGround';
-  if (action === 'gatherChestHeight') return 'gatherChestHeight';
+  if (action === 'gather' || action === 'gatherGround' || action === 'gatherChestHeight') return action;
   if (action === 'pushStart' || action === 'pushLow' || action === 'pushMedium' || action === 'pushHeavy' || action === 'pushStop') return action;
-  if (action === 'standingInspectDownward' || action === 'point') return 'torchInspectForward';
+  if (action === 'standingInspectDownward') return 'standingInspectDownward';
+  if (action === 'point') return 'point';
   if (action === 'vault') return 'vault';
   if (action === 'shoulderHitAndFall') return 'shoulderHitAndFall';
   if (action === 'hitReaction') return 'hitReaction';
@@ -575,10 +554,10 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (badlyInjured && motionRef.current.running) return { clip: 'injuredRun', timeScale: stride('run', Math.max(0.7, tiredRunScale * 0.92)) };
     if (injured && motionRef.current.walking) {
       if (modelAssetId === 'darwin5' && status.health < 24) {
-        return { clip: 'injuredWalkCritical', timeScale: stride('tiredWalk', Math.max(0.58, walkScale * 0.82)) };
+        return { clip: 'injuredWalk', timeScale: stride('tiredWalk', Math.max(0.58, walkScale * 0.82)) };
       }
       if (modelAssetId === 'darwin5' && status.health < 34) {
-        return { clip: 'injuredWalkSevere', timeScale: stride('tiredWalk', Math.max(0.6, walkScale * 0.84)) };
+        return { clip: 'injuredWalk', timeScale: stride('tiredWalk', Math.max(0.6, walkScale * 0.84)) };
       }
       return { clip: 'injuredWalk', timeScale: stride('tiredWalk', Math.max(0.62, walkScale * 0.88)) };
     }
@@ -588,6 +567,10 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: stride('walkRifle', walkScale) };
     }
     if (heldToolMode) {
+      if (modelAssetId === 'darwin5') {
+        if (motionRef.current.running) return { clip: 'holdToolRun', timeScale: stride('holdToolRun', runScale) };
+        if (motionRef.current.walking) return { clip: 'holdToolWalk', timeScale: stride('holdToolWalk', Math.max(0.7, walkScale)) };
+      }
       if (motionRef.current.running) return { clip: 'holdToolRun', timeScale: stride('run', runScale) };
       if (motionRef.current.walking) return { clip: 'holdToolWalk', timeScale: stride('holdToolWalk', walkScale) };
     }

@@ -386,12 +386,13 @@ export function GroundCoverField({ layer, zoneId }) {
       const step = getRuntimeFootContacts().lastStep;
       if (step?.id > lastFootStepId.current) {
         lastFootStepId.current = step.id;
+        const sidePulse = step.side === 'right' ? 0.06 : -0.02;
         trailIndex.current = (trailIndex.current + 1) % TRAIL_COUNT;
         trail.current[trailIndex.current].set(
           Number(step.x) || 0,
           Number(step.y) || 0,
           Number(step.z) || 0,
-          1.35 + THREE.MathUtils.clamp(step.intensity || 0, 0, 1) * 0.55,
+          1.35 + sidePulse + THREE.MathUtils.clamp(step.intensity || 0, 0, 1) * 0.55,
         );
         lastTrailPoint.current.set(Number(step.x) || 0, Number(step.y) || 0, Number(step.z) || 0);
       }

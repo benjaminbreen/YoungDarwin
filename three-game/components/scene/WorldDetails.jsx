@@ -2,7 +2,6 @@
 
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { getPostOfficeBayBasaltBlocks, getPostOfficeBayOpuntiaHazards, makeFloreanaScatter } from '../../world/floreanaCoveLayout';
 import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacles';
@@ -14,12 +13,11 @@ import { getEcology } from '../../world/ecology';
 import { catalogToInspectable } from '../../world/inspectables';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
 import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
-import { applyFoliageMotion, updateFoliageUniforms } from './ecology/foliageMotion';
+import { updateFoliageUniforms } from './ecology/foliageMotion';
 import { DryGrassPatchField } from './ecology/DryGrassPatchField';
 import { buildPostOfficeBayDryGrassLayer } from '../../world/ecology/postOfficeBay';
 
 const dummy = new THREE.Object3D();
-const GRASS_MOTION = { wind: 1.25, bend: 0.45, bendRadius: 1.25 };
 const SHRUB_MOTION = { wind: 1.25, bend: 0.28, bendRadius: 1.35 };
 const SMALL_SHRUB_MOTION = { wind: 1.55, bend: 0.32, bendRadius: 1.25 };
 const FLAT_CACTUS_MOTION = { wind: 0.35, bend: 0.35 };
@@ -246,7 +244,7 @@ function OpuntiaLayer() {
   })), []);
   return (
     <InstancedGLBLayer
-      path="/assets/models/nature/runtime-big-opuntia.glb"
+      path="/assets/models/nature/runtime-opuntia.glb"
       items={items}
       tint="#6fa046"
       tintStrength={0.08}
@@ -256,63 +254,6 @@ function OpuntiaLayer() {
       sourceLabel="Post Office Bay opuntia"
       sourceKind="world-detail-flora"
       inspectableType="opuntia"
-    />
-  );
-}
-
-function DryGrassLayer() {
-  const asset = getModelAsset('dryGrassPatch');
-  const { scene } = useGLTF(asset?.path || '/assets/models/nature/runtime-animated-dry-grass.glb');
-  const geometry = useMemo(() => {
-    let found = null;
-    scene.traverse(object => {
-      if (!found && object.isMesh) found = object.geometry;
-    });
-    return found;
-  }, [scene]);
-  const items = useMemo(() => makeFloreanaScatter('dry-grass-patch', 240, 67, {
-    minX: -28,
-    maxX: 28,
-    minZ: -12,
-    maxZ: 27,
-    scale: [0.24, 0.58],
-  }).map(item => ({
-    ...item,
-    color: item.tone > 0.68 ? '#a79750' : item.tone < 0.28 ? '#6f743b' : '#858b44',
-  })), []);
-  const material = useMemo(() => {
-    if (!geometry) return null;
-    const grassMaterial = new THREE.MeshStandardMaterial({
-      color: '#8e8b49',
-      vertexColors: true,
-      side: THREE.DoubleSide,
-      roughness: 0.98,
-      metalness: 0,
-      emissive: '#252711',
-      emissiveIntensity: 0.16,
-    });
-    return applyFoliageMotion(grassMaterial, geometry, GRASS_MOTION);
-  }, [geometry]);
-  const transform = useMemo(() => (object, item) => {
-    const width = item.scale * (0.82 + item.tone * 0.42);
-    const height = item.scale * (0.58 + item.tone * 0.24);
-    object.position.set(item.x, item.y + 0.012, item.z);
-    object.rotation.set(0, item.yaw, 0);
-    object.scale.set(width, height, width * (0.85 + item.tone * 0.25));
-  }, []);
-  if (!asset?.enabled) return null;
-  if (!geometry || !material) return null;
-  return (
-    <InstancedLayer
-      items={items}
-      geometry={geometry}
-      material={material}
-      transform={transform}
-      castShadow={false}
-      inspectableType="dry_grass"
-      sourceId="post-office-bay:dry-grass"
-      sourceLabel="Post Office Bay dry grass"
-      sourceKind="world-detail-flora"
     />
   );
 }
@@ -451,7 +392,6 @@ function PostOfficeBayDetails() {
       <FoliageMotionDriver />
       <BasaltBlocks />
       <Scree />
-      <DryGrassLayer />
       <DryScrub />
       <OpuntiaLayer />
       <GalapagosCottonLayer />

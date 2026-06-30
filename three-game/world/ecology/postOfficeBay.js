@@ -51,7 +51,7 @@ export function buildPostOfficeBayDryGrassLayer() {
   const items = buildStandardDryGrassPatchItems({
     zoneId: 'POST_OFFICE_BAY',
     idPrefix: 'post-office-bay-dry-grass',
-    count: 280,
+    count: 120,
     seed: 6185,
     bounds: { minX: -58, maxX: 42, minZ: 4, maxZ: 36 },
     pathInfo: postOfficePathInfo,
