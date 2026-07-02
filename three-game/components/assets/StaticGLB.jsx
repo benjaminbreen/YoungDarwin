@@ -101,6 +101,7 @@ function StaticGLBPrimitive({
   sourceId = null,
   sourceLabel = null,
   sourceKind = 'static-glb',
+  inspectableOverrides = null,
   groupRef = null,
 }) {
   const localGroupRef = useRef(null);
@@ -128,7 +129,10 @@ function StaticGLBPrimitive({
       userData={renderUserData}
       onClick={inspectableType ? event => {
         event.stopPropagation();
-        setInspectedObject(catalogToInspectable(inspectableType, event.point, { sourceId: path }));
+        setInspectedObject(catalogToInspectable(inspectableType, event.point, {
+          sourceId: sourceId || path,
+          ...(inspectableOverrides || {}),
+        }));
       } : undefined}
     >
       <primitive object={clone} />

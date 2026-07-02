@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 
 // Apparent distance of the celestial bodies. Kept well inside the camera far
 // plane (180) since the whole rig follows the camera, so it never clips.
@@ -132,11 +133,37 @@ const _screenSun = new THREE.Vector3();
 const _flareWorld = new THREE.Vector3();
 const _flareNdc = new THREE.Vector3();
 const _sunWorld = new THREE.Vector3();
+const _shadowPose = new THREE.Vector3();
+const _shadowDir = new THREE.Vector3();
+const _shadowRight = new THREE.Vector3();
+const _shadowUp = new THREE.Vector3();
+const _shadowSnapped = new THREE.Vector3();
+const _shadowGroundDirection = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
+const _worldForward = new THREE.Vector3(0, 0, 1);
 
 const FLARE_RESPONSE_LAMBDA = 9.5;
 const SUN_FACING_RESPONSE_LAMBDA = 7.0;
 const GLARE_ADAPT_IN_LAMBDA = 3.4;
 const GLARE_ADAPT_OUT_LAMBDA = 2.2;
+
+function stableShadowAnchor(position, lightDirection, extent, mapSize) {
+  const texelSize = Math.max(0.035, (extent * 2) / Math.max(256, mapSize || 2048));
+  _shadowDir.copy(lightDirection).normalize();
+  _shadowRight.crossVectors(_worldUp, _shadowDir);
+  if (_shadowRight.lengthSq() < 0.00001) _shadowRight.crossVectors(_worldForward, _shadowDir);
+  _shadowRight.normalize();
+  _shadowUp.crossVectors(_shadowDir, _shadowRight).normalize();
+
+  const x = Math.round(position.dot(_shadowRight) / texelSize) * texelSize;
+  const y = Math.round(position.dot(_shadowUp) / texelSize) * texelSize;
+  const z = position.dot(_shadowDir);
+  _shadowSnapped
+    .copy(_shadowRight).multiplyScalar(x)
+    .addScaledVector(_shadowUp, y)
+    .addScaledVector(_shadowDir, z);
+  return texelSize;
+}
 
 function patchMoonPhaseMaterial(material) {
   if (!material || material.userData?.moonPhasePatched) return;
@@ -926,11 +953,39 @@ function ShootingStars({ nightRef }) {
   );
 }
 
-// The single shadow light tracks a slowly-moving sun and a player-following
-// frustum, so re-rendering every shadow caster on every frame is wasteful.
-// Refresh the shadow map at this cadence instead (~24Hz reads as smooth for
-// soft shadows). Tunable: lower the divisor for an even bigger saving.
+// The single shadow light tracks a slowly-moving sun/moon and a player-following
+// frustum. The frustum anchor is snapped to the shadow-map texel grid so static
+// shadows do not shimmer when the player/camera shifts by tiny sub-texel amounts.
+const SHADOW_MAP_SIZE = 2048;
+// Re-rendering every shadow caster on every frame is wasteful; this cadence is
+// enough for Darwin's animated shadow while the texel-snapped anchor keeps
+// static prop shadows stable between refreshes.
 const SHADOW_REFRESH_INTERVAL = 1 / 24;
+const SHADOW_EXTENT_UPDATE_EPSILON = 0.25;
+const DARWIN_SHADOW_CASTER_HEIGHT = 2.1;
+const DARWIN_SHADOW_REACH_LIMIT = 13.5;
+const DARWIN_SHADOW_CENTER_BIAS = 0.48;
+const DARWIN_SHADOW_EXTENT_BIAS = 0.34;
+
+function computeDarwinShadowCoverage(lightDirection, daylight, golden) {
+  _shadowGroundDirection.set(-lightDirection.x, 0, -lightDirection.z);
+  const horizontal = _shadowGroundDirection.length();
+  if (horizontal < 0.001) {
+    _shadowGroundDirection.set(0, 0, -1);
+    return { offset: 0, extraExtent: 0, reach: 0 };
+  }
+  _shadowGroundDirection.multiplyScalar(1 / horizontal);
+  const elevation = Math.max(0.075, Math.abs(lightDirection.y));
+  const lowSun = THREE.MathUtils.clamp(1 - smoothstep(0.14, 0.42, elevation), 0, 1);
+  const visibleLowSun = Math.max(lowSun * daylight, golden * 0.85);
+  const rawReach = (DARWIN_SHADOW_CASTER_HEIGHT * horizontal) / elevation;
+  const reach = THREE.MathUtils.clamp(rawReach * visibleLowSun, 0, DARWIN_SHADOW_REACH_LIMIT);
+  return {
+    offset: reach * DARWIN_SHADOW_CENTER_BIAS,
+    extraExtent: reach * DARWIN_SHADOW_EXTENT_BIAS,
+    reach,
+  };
+}
 
 export function SkyController({ stars = true, tuning = null, solarEffects = null }) {
   const { scene, gl, camera } = useThree();
@@ -1133,6 +1188,17 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     nightRef.current = s.night;
     midnightRef.current = midnightFactor(hourRef.current) * s.night;
     const { daylight, golden, night } = s;
+    const lightRig = computeOutdoorLightRig({
+      daylight,
+      golden,
+      elevation: s.elevation,
+      overcast,
+      mist: weatherEnv.mistAmount,
+      rain: weatherEnv.rainIntensity,
+      lightDim: weatherEnv.lightDim,
+      moonFraction: s.moon_phase.fraction,
+      underwaterAmount,
+    });
 
     _sun.set(s.sun[0], s.sun[1], s.sun[2]);
     _moon.set(s.moon[0], s.moon[1], s.moon[2]);
@@ -1384,29 +1450,58 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     }
 
     // --- lighting rig --------------------------------------------------------
+    let shadowProjectionChanged = false;
+    let shadowTexelSize = 0;
+    let darwinShadowReach = 0;
+    let shadowTargetOffset = 0;
+    let effectiveShadowExtent = lightRig.shadowExtent;
     if (keyLightRef.current) {
       const key = keyLightRef.current;
       // Light comes *from* the higher of the two bodies (sun by day, moon by night).
       const fromMoon = s.elevation < -0.04;
+      const shadowLightDirection = fromMoon ? _moon : _sun;
       const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
-      shadowTarget.position.set(pose.x, pose.y, pose.z);
+      _shadowPose.set(pose.x, pose.y, pose.z);
+      const darwinShadowCoverage = computeDarwinShadowCoverage(shadowLightDirection, daylight, golden);
+      darwinShadowReach = darwinShadowCoverage.reach;
+      shadowTargetOffset = darwinShadowCoverage.offset;
+      effectiveShadowExtent = lightRig.shadowExtent + darwinShadowCoverage.extraExtent;
+      _shadowPose.addScaledVector(_shadowGroundDirection, darwinShadowCoverage.offset);
+      const shadowMapSize = key.shadow?.mapSize?.x || SHADOW_MAP_SIZE;
+      shadowTexelSize = stableShadowAnchor(_shadowPose, shadowLightDirection, effectiveShadowExtent, shadowMapSize);
+      shadowTarget.position.copy(_shadowSnapped);
+      shadowTarget.updateMatrixWorld();
       key.target = shadowTarget;
-      key.position.copy(fromMoon ? _moon : _sun).multiplyScalar(100).add(shadowTarget.position);
+      key.position.copy(shadowLightDirection).multiplyScalar(100).add(shadowTarget.position);
+      key.updateMatrixWorld();
       _color.copy(C.keyNight).lerp(C.keyDay, daylight);
       _color.lerp(C.keyGolden, golden * 0.95);
       key.color.copy(_color);
-      const moonlight = fromMoon ? 0.16 * (0.4 + 0.6 * s.moon_phase.fraction) : 0;
-      key.intensity = 0.22 + daylight * 2.95 * (1 - overcast * 0.4) + moonlight;
+      key.intensity = lightRig.keyIntensity;
+      const shadowCamera = key.shadow?.camera;
+      if (key.shadow) {
+        key.shadow.radius = lightRig.shadowRadius;
+        key.shadow.intensity = lightRig.shadowIntensity;
+        key.shadow.bias = lightRig.shadowBias;
+        key.shadow.normalBias = lightRig.shadowNormalBias;
+      }
+      if (shadowCamera && Math.abs(shadowCamera.right - effectiveShadowExtent) > SHADOW_EXTENT_UPDATE_EPSILON) {
+        shadowCamera.left = -effectiveShadowExtent;
+        shadowCamera.right = effectiveShadowExtent;
+        shadowCamera.top = effectiveShadowExtent;
+        shadowCamera.bottom = -effectiveShadowExtent;
+        shadowCamera.updateProjectionMatrix();
+        shadowProjectionChanged = true;
+      }
     }
     if (hemiRef.current) {
       hemiRef.current.color.copy(C.hemiSkyNight).lerp(C.hemiSkyDay, daylight);
       hemiRef.current.groundColor.copy(C.hemiGroundNight).lerp(C.hemiGroundDay, daylight);
-      hemiRef.current.intensity = 0.36 + daylight * 1.55 + overcast * 0.18;
+      hemiRef.current.intensity = lightRig.hemiIntensity;
     }
     if (ambientRef.current) {
       ambientRef.current.color.copy(C.ambNight).lerp(C.ambDay, daylight);
-      // Keep a soft moonlit floor at night so the world stays readable.
-      ambientRef.current.intensity = 0.28 + daylight * 0.28;
+      ambientRef.current.intensity = lightRig.ambientIntensity;
     }
 
     // --- fog + background + exposure -----------------------------------------
@@ -1462,9 +1557,36 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     // direction/position above still updates every frame; only the (expensive)
     // shadow-caster render pass is throttled.
     shadowClock.current += delta;
-    if (shadowClock.current >= SHADOW_REFRESH_INTERVAL) {
+    if (shadowProjectionChanged || shadowClock.current >= SHADOW_REFRESH_INTERVAL) {
       shadowClock.current = 0;
       gl.shadowMap.needsUpdate = true;
+    }
+    if (typeof window !== 'undefined') {
+      window.__darwinLightingDebug = {
+        ...(window.__darwinLightingDebug || {}),
+        timeOfDay: Number(hourRef.current.toFixed(3)),
+        daylight: Number(daylight.toFixed(3)),
+        golden: Number(golden.toFixed(3)),
+        elevation: Number(s.elevation.toFixed(3)),
+        overcast: Number(overcast.toFixed(3)),
+        mist: Number(weatherEnv.mistAmount.toFixed(3)),
+        rain: Number(weatherEnv.rainIntensity.toFixed(3)),
+        underwater: Number(underwaterAmount.toFixed(3)),
+        keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
+        hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),
+        ambientIntensity: Number(lightRig.ambientIntensity.toFixed(3)),
+        shadowExtent: Number(effectiveShadowExtent.toFixed(2)),
+        baseShadowExtent: Number(lightRig.shadowExtent.toFixed(2)),
+        darwinShadowReach: Number(darwinShadowReach.toFixed(2)),
+        shadowTargetOffset: Number(shadowTargetOffset.toFixed(2)),
+        shadowTexelSize: Number(shadowTexelSize.toFixed(3)),
+        shadowContrast: Number(lightRig.shadowContrast.toFixed(3)),
+        shadowRadius: Number(lightRig.shadowRadius.toFixed(2)),
+        shadowIntensity: Number(lightRig.shadowIntensity.toFixed(3)),
+        clearSky: Number(lightRig.clearSky.toFixed(3)),
+        hardSun: Number(lightRig.hardSun.toFixed(3)),
+        weatherSoftness: Number(lightRig.weatherSoftness.toFixed(3)),
+      };
     }
   });
 
@@ -1477,7 +1599,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         position={[0, 100, 0]}
         intensity={1.4}
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[SHADOW_MAP_SIZE, SHADOW_MAP_SIZE]}
         shadow-bias={-0.00012}
         shadow-normalBias={0.02}
         shadow-camera-near={40}

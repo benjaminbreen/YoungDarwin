@@ -5,6 +5,9 @@
 Current phase ownership:
 
 - `playerActionMotion.js`: authored locked motions such as climb, traverse, roll, turn-in-place, and collection-facing alignment. Add new root-motion-style action movement here.
+- `playerTraversalMotion.js`: traversal profile data and shared helpers for starting climb-style authored motions.
+- `playerAirborneMotion.js`: jump buffering/charge/takeoff gravity and landing resolution, including landing dust, splash, camera impulse, and landing action selection.
+- `playerEquipmentState.js`: equipped-tool transitions, rifle aim toggles, fire-pulse handling, and generic use-tool pulses.
 - `playerFrameFinalization.js`: the mandatory end-of-frame path. It owns camera updates, runtime/store pose publishing, minimap-visible pose, waterline visuals, locomotion visual flags, footstep effects, swim fatigue/drowning ticks, and debug export. Every early return from the frame loop must call `finalizeFrame(...)` first.
 - `playerInteractions.js`: edge prompts, nearby specimen selection, collection/pickup interaction, camera toggle, and toolbar hotkeys.
 - `arcadeLocomotion.js`: terrain traction, skid/scramble tuning, speed scaling, and arcade movement feedback.

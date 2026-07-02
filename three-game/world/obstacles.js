@@ -10,6 +10,19 @@ import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
+const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 1.0;
+const AUTHORED_TRAVERSAL_MIN_HEIGHT = 1.01;
+const AUTHORED_TRAVERSAL_MAX_HEIGHT = 1.9;
+
+const REGION_OBSTACLE_SOURCES = {
+  POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
+  ALT_POST_OFFICE_BAY: [getAltPostOfficeBayRockObstacles],
+  POST_OFFICE_BAY_3: [getPostOfficeBay3RockObstacles],
+  N_SHORE: [getNorthShoreRockObstacles],
+  NW_REEF: [getNorthwestReefRockObstacles],
+  W_HIGH: [getWesternHighlandsRockObstacles],
+};
+
 function flattenCollider(collider) {
   if (!collider) return [];
   if (collider.type === 'compound') return collider.shapes.flatMap(flattenCollider);
@@ -83,30 +96,45 @@ function deriveObstacleMobility(obstacle, bounds = obstacle) {
   const top = bounds.top ?? obstacle.colliderTop ?? obstacle.height ?? 0;
   const radius = bounds.radius ?? obstacle.radius ?? 0;
   if ((kind === 'rock' || kind === 'boulder') && top >= 0.45 && radius >= 0.48) {
-    const size = Math.max(top, radius);
-    return normalizeMobility({
-      mode: 'downhill-push',
-      strength: THREE.MathUtils.clamp(0.034 / Math.max(1, size), 0.008, 0.026),
-      maxSpeed: THREE.MathUtils.clamp(0.08 / Math.max(1, size), 0.018, 0.055),
-      sustainedSeconds: THREE.MathUtils.clamp(0.65 + size * 0.38, 0.75, 1.7),
-      minDownhillDrop: THREE.MathUtils.clamp(0.035 + size * 0.018, 0.04, 0.11),
-    });
+    return normalizeMobility({ mode: 'fixed' });
   }
   return normalizeMobility();
 }
 
 function applyObstacleMobility(obstacle) {
-  const mobility = deriveObstacleMobility(obstacle);
+  const normalizedObstacle = applyDefaultTraversal(obstacle);
+  const mobility = deriveObstacleMobility(normalizedObstacle);
   const movable = canPushObject(mobility) && mobility.mode !== 'fixed';
-  const pushMass = obstacle.pushMass
-    || obstacle.gameplay?.pushMass
-    || THREE.MathUtils.clamp((obstacle.radius || 1) * (obstacle.height || obstacle.colliderTop || 1) * 30, 8, 180);
+  const pushMass = normalizedObstacle.pushMass
+    || normalizedObstacle.gameplay?.pushMass
+    || THREE.MathUtils.clamp((normalizedObstacle.radius || 1) * (normalizedObstacle.height || normalizedObstacle.colliderTop || 1) * 30, 8, 180);
   return {
-    ...obstacle,
+    ...normalizedObstacle,
     mobility,
     pushable: movable,
     pushMass,
-    pushFriction: obstacle.pushFriction ?? obstacle.gameplay?.pushFriction ?? 0.88,
+    pushFriction: normalizedObstacle.pushFriction ?? normalizedObstacle.gameplay?.pushFriction ?? 0.88,
+  };
+}
+
+function defaultTraversalForObstacle(obstacle) {
+  if (obstacle.traversal || obstacle.gameplay?.traversal === false) return null;
+  if (obstacle.kind !== 'rock' && obstacle.kind !== 'boulder') return null;
+  const top = obstacle.colliderTop ?? obstacle.height ?? 0;
+  const radius = obstacle.radius ?? 0;
+  if (top < 0.18 || top > AUTHORED_TRAVERSAL_MAX_HEIGHT || radius < 0.38) return null;
+  return top <= WALK_OVER_TRAVERSAL_MAX_HEIGHT ? 'step-up' : 'scramble';
+}
+
+function applyDefaultTraversal(obstacle) {
+  const traversal = defaultTraversalForObstacle(obstacle);
+  if (!traversal) return obstacle;
+  return {
+    ...obstacle,
+    traversal,
+    traversalLabel: obstacle.traversalLabel || 'scramble over basalt',
+    jumpable: obstacle.jumpable || obstacle.colliderTop >= 0.72,
+    climbable: obstacle.climbable ?? obstacle.colliderTop >= AUTHORED_TRAVERSAL_MIN_HEIGHT,
   };
 }
 
@@ -150,27 +178,8 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
   const withMobility = obstacles => obstacles.map(applyObstacleMobility);
-  if (zoneId === 'POST_OFFICE_BAY') {
-    return withMobility([...mapped, ...getPostOfficeBayRockObstacles()]);
-  }
-  if (zoneId === 'ALT_POST_OFFICE_BAY') {
-    return withMobility([...mapped, ...getAltPostOfficeBayRockObstacles()]);
-  }
-  if (zoneId === 'POST_OFFICE_BAY_3') {
-    return withMobility([...mapped, ...getPostOfficeBay3RockObstacles()]);
-  }
-  if (zoneId === 'N_SHORE') {
-    // Authored basalt boulders double as colliders; layout shared with the
-    // instanced visuals in WorldDetails.
-    return withMobility([...mapped, ...getNorthShoreRockObstacles()]);
-  }
-  if (zoneId === 'NW_REEF') {
-    return withMobility([...mapped, ...getNorthwestReefRockObstacles()]);
-  }
-  if (zoneId === 'W_HIGH') {
-    return withMobility([...mapped, ...getWesternHighlandsRockObstacles()]);
-  }
-  return withMobility(mapped);
+  const regional = (REGION_OBSTACLE_SOURCES[zoneId] || []).flatMap(source => source());
+  return withMobility([...mapped, ...regional]);
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();
@@ -382,24 +391,38 @@ function isStandableObstacleTop(obstacle, top) {
   return top >= obstacleBaseY(obstacle) + 0.72;
 }
 
-function isWalkOverTraversalTop(obstacle, top, maxHeight = 0.78) {
+function isWalkOverTraversalTop(obstacle, top, maxHeight = WALK_OVER_TRAVERSAL_MAX_HEIGHT) {
   if (!obstacle.traversal || top === null || top === undefined) return false;
   const base = obstacleBaseY(obstacle);
   return top > base + 0.18 && top <= base + maxHeight;
 }
 
+function obstacleTraversalHeight(obstacle) {
+  return (obstacle.colliderTop ?? obstacle.height ?? 0) - Math.min(0, obstacle.colliderBottom || 0);
+}
+
+export function isWalkOverTraversalObstacle(obstacle, maxHeight = WALK_OVER_TRAVERSAL_MAX_HEIGHT) {
+  if (!obstacle.traversal) return false;
+  const height = obstacleTraversalHeight(obstacle);
+  return height > 0.18 && height <= maxHeight;
+}
+
 function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {
   if (!obstacle.traversal) return null;
   const base = obstacleBaseY(obstacle);
-  const top = obstacleTopAt(obstacle, x, z, playerRadius);
-  if (!isWalkOverTraversalTop(obstacle, top)) return null;
-
   const radius = Math.max(0.1, obstacle.radius + playerRadius * 0.45);
   const distance = Math.hypot(x - obstacle.x, z - obstacle.z);
   if (distance > radius) return null;
 
   const normalized = THREE.MathUtils.clamp(distance / radius, 0, 1);
   const dome = Math.sin((1 - normalized) * Math.PI * 0.5);
+  if (isWalkOverTraversalObstacle(obstacle)) {
+    return base + obstacleTraversalHeight(obstacle) * dome * dome;
+  }
+
+  const top = obstacleTopAt(obstacle, x, z, playerRadius);
+  if (!isWalkOverTraversalTop(obstacle, top)) return null;
+
   const lift = (top - base) * dome * dome;
   return base + lift;
 }
@@ -562,8 +585,8 @@ export function findClimbTarget(position, facing, {
 export function findTraversalTarget(position, movement, facing, {
   playerRadius = 0.42,
   maxReach = 0.78,
-  minHeight = 0.78,
-  maxHeight = 1.25,
+  minHeight = AUTHORED_TRAVERSAL_MIN_HEIGHT,
+  maxHeight = AUTHORED_TRAVERSAL_MAX_HEIGHT,
   minFacingDot = 0.24,
   obstacles = FLOREANA_OBSTACLES,
 } = {}) {
@@ -624,7 +647,10 @@ export function resolveObstacleCollision(position, previousPosition, {
   let collided = null;
   for (const obstacle of obstacles) {
     const top = obstacleTopAt(obstacle, p.x, p.z, playerRadius) ?? obstacleTopY(obstacle);
-    if (isWalkOverTraversalTop(obstacle, top, 0.78)) continue;
+    if (
+      isWalkOverTraversalObstacle(obstacle, WALK_OVER_TRAVERSAL_MAX_HEIGHT)
+      || isWalkOverTraversalTop(obstacle, top, WALK_OVER_TRAVERSAL_MAX_HEIGHT)
+    ) continue;
     const canStandOnTop = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && p.y >= top - stepTolerance;
     if (canStandOnTop || p.y > obstacleTopY(obstacle) + 0.45) continue;
 

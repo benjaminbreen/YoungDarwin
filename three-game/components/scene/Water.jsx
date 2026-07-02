@@ -287,6 +287,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
+    extensions: { derivatives: true },
     uniforms: {
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
@@ -448,7 +449,13 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float depth = max(0.0, dEff);
 
         vec3 normal;
-        gerstner(vWorld.xz, uTime, swellAtten(max(dRaw, 0.0)), normal);
+        vec3 waveDisp = gerstner(vWorld.xz, uTime, swellAtten(max(dRaw, 0.0)), normal);
+        float crestHeight = waveDisp.y;
+        vec3 waveNormal = normal;
+        float waveSlope = length(waveNormal.xz);
+        float footprint = max(fwidth(vWorld.x), fwidth(vWorld.z));
+        float rippleLod = 1.0 - smoothstep(0.18, 1.05, footprint);
+        float microLod = 1.0 - smoothstep(0.08, 0.54, footprint);
         vec2 rp = vWorld.xz * 0.7 + vec2(uTime * 0.06, -uTime * 0.05);
         float e = 0.12;
         float r0 = noise(rp);
@@ -458,7 +465,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float s0 = noise(rp2);
         float sx = noise(rp2 + vec2(e, 0.0)) - s0;
         float sz = noise(rp2 + vec2(0.0, e)) - s0;
-        normal = normalize(normal + vec3(-(rx + sx * 0.45), 0.0, -(rz + sz * 0.45)) * 1.25);
+        normal = normalize(normal + vec3(
+          -(rx * rippleLod + sx * 0.45 * microLod),
+          0.0,
+          -(rz * rippleLod + sz * 0.45 * microLod)
+        ) * 1.25);
         if (uRain > 0.001) {
           vec2 rainP = vWorld.xz * 3.7 + vec2(uTime * 0.72, -uTime * 0.58);
           float rainN = noise(rainP);
@@ -466,13 +477,14 @@ function createStylizedWaterMaterial(seafloorTexture) {
             noise(rainP + vec2(e, 0.0)) - rainN,
             noise(rainP + vec2(0.0, e)) - rainN
           );
-          normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85);
+          normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85 * mix(0.38, 1.0, microLod));
         }
         if (!gl_FrontFacing) normal = -normal;
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
         float underwaterView = clamp(uUnderwaterAmount, 0.0, 1.0);
         float underside = gl_FrontFacing ? 0.0 : 1.0;
+        float surfaceLook = smoothstep(0.02, 0.58, -viewDir.y);
 
         // --- the water body: art-directed turquoise first, refraction second -
         float shallowFactor = exp(-depth * 0.30); // ~1 at the shore, 0 deep
@@ -508,8 +520,31 @@ function createStylizedWaterMaterial(seafloorTexture) {
           float captureMix = mix(0.92, 0.36, smoothstep(0.45, 2.8, depth)) * (1.0 - smoothstep(3.5, 7.5, depth));
           color = mix(baseWater, refractedDetail, captureMix);
         }
+
+        // Global depth colour ramp. This is intentionally simple: shallow
+        // water should read pale/seafoam, mid-depth turquoise, then blue at
+        // the drop-off. The baked depth texture already gives every region
+        // the needed signal, so this improves the whole water system without
+        // adding regional profiles or passes.
+        float nearShelf = 1.0 - smoothstep(18.0, 52.0, shoreDist);
+        float rampVisibility = playableFade * (0.46 + nearShelf * 0.22) * (1.0 - edgeOcean * 0.35);
+        vec3 paleAqua = mix(uSand, uFoam, 0.24);
+        vec3 seafoamShelf = mix(uSand, uScatter, 0.42);
+        seafoamShelf = mix(
+          seafoamShelf,
+          vec3(seafoamShelf.r * 0.86, max(seafoamShelf.g, seafoamShelf.b * 1.04), seafoamShelf.b * 0.94),
+          0.42
+        );
+        vec3 midTurquoise = mix(uScatter, uDeep, 0.12);
+        vec3 depthRamp = paleAqua;
+        depthRamp = mix(depthRamp, seafoamShelf, smoothstep(0.16, 0.85, depth));
+        depthRamp = mix(depthRamp, midTurquoise, smoothstep(0.9, 2.4, depth));
+        depthRamp = mix(depthRamp, uDeep, smoothstep(2.8, 7.2, depth));
+        float shelfMask = smoothstep(0.025, 0.16, depth) * (1.0 - smoothstep(2.7, 6.5, depth));
+        color = mix(color, depthRamp, shelfMask * rampVisibility);
+
         // Ease into open-ocean blue past the drop-off.
-        color = mix(color, uDeep, smoothstep(3.6, 14.0, depth));
+        color = mix(color, uDeep, smoothstep(2.8, 9.5, depth) * 0.62);
         color = mix(color, uDeep, edgeOcean * (0.42 + 0.28 * smoothstep(0.6, 4.0, depth)));
 
         // Mostly-opaque body (it *shows* the refracted scene), but genuinely
@@ -556,15 +591,27 @@ function createStylizedWaterMaterial(seafloorTexture) {
         color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
         color = mix(color, color * vec3(0.62, 0.76, 0.82), uRain * 0.24);
 
+        // Wave-phase surface bands: a lightweight visual read of the same
+        // Gerstner field that drives displacement/normals. This makes the
+        // bay surface visibly roll even when planar reflections are disabled.
+        float waterSurfaceMask = smoothstep(0.05, 0.28, depth) * playableFade * (1.0 - underwaterView * 0.55);
+        float crestBand = smoothstep(0.018, 0.118, crestHeight) * smoothstep(0.018, 0.12, waveSlope);
+        float troughBand = smoothstep(0.018, 0.11, -crestHeight) * smoothstep(0.014, 0.09, waveSlope);
+        float bandBreakup = 0.68 + 0.32 * noise(vWorld.xz * 0.18 + vec2(uTime * 0.018, -uTime * 0.012));
+        vec3 crestTint = mix(uScatter, uSkyHorizon, 0.74);
+        color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.09 + uDaylight * 0.075);
+        color = mix(color, color * vec3(0.72, 0.88, 1.02), troughBand * waterSurfaceMask * 0.14);
+        color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.055);
+
         // --- foam: crisp lip at the moving waterline + breaking crests --------
         float realCoastGate = smoothstep(0.02, 0.24, playableFade);
         float beachGate = mix(0.68, 1.0, smoothstep(0.12, 0.74, shoreSoftness)) * realCoastGate;
-        float coastWater = smoothstep(0.01, 0.12, dEff) * smoothstep(8.5, 0.35, shoreDist) * realCoastGate;
+        float coastWater = smoothstep(0.01, 0.12, dEff) * smoothstep(11.0, 0.25, shoreDist) * realCoastGate;
         float foamCandidate = max(
           coastWater,
           max(
             smoothstep(10.0, 1.8, shoreDist) * smoothstep(0.03, 0.3, depth),
-            smoothstep(0.07, 0.16, vCrest) * smoothstep(1.6, 0.5, depth)
+            smoothstep(0.04, 0.12, crestHeight) * mix(0.65, 1.25, smoothstep(0.018, 0.13, waveSlope)) * smoothstep(1.9, 0.35, depth)
           )
         );
         float lace = 0.0;
@@ -573,35 +620,45 @@ function createStylizedWaterMaterial(seafloorTexture) {
         }
         float swashCycle = sin(uTime * 0.8976) * 0.5 + 0.5;
         float swashFront = 0.38 + swashCycle * 2.35 + sin(vWorld.x * 0.17 + uTime * 0.45) * 0.26;
-        float foamLip = smoothstep(0.58, 0.035, abs(shoreDist - swashFront));
+        float foamLip = smoothstep(0.86, 0.035, abs(shoreDist - swashFront));
+        float foamSetBack = smoothstep(1.18, 0.05, abs(shoreDist - (swashFront + 2.2)));
+        float foamOuterSet = smoothstep(1.45, 0.08, abs(shoreDist - (swashFront + 4.8)));
         float waterlineTrace = smoothstep(0.12, 0.012, dEff) * smoothstep(1.7, 0.0, shoreDist);
         float contactRim = smoothstep(0.18, 0.018, abs(dEff)) * smoothstep(2.4, 0.0, shoreDist) * realCoastGate;
-        float shoreWash = smoothstep(5.6, 0.35, shoreDist) * smoothstep(0.02, 0.38, depth) * (0.42 + 0.58 * lace);
+        float shoreWash = smoothstep(7.4, 0.35, shoreDist) * smoothstep(0.02, 0.42, depth) * (0.42 + 0.58 * lace);
+        float shoreSetMask = smoothstep(0.05, 0.24, depth) * smoothstep(12.5, 0.55, shoreDist) * beachGate;
+        float shoreFoamSets = (foamLip * 0.46 + foamSetBack * 0.32 + foamOuterSet * 0.2) * shoreSetMask * (0.52 + 0.48 * lace);
         float shoreFoam = coastWater * beachGate * (
-          foamLip * (0.34 + 0.56 * lace)
-          + waterlineTrace * (0.26 + 0.42 * lace)
-          + shoreWash * 0.12
+          foamLip * (0.42 + 0.62 * lace)
+          + waterlineTrace * (0.34 + 0.5 * lace)
+          + shoreWash * 0.18
         );
-        shoreFoam = max(shoreFoam, contactRim * (0.4 + 0.4 * lace));
-        float breakZone = smoothstep(1.6, 0.5, depth);
-        float crestFoam = smoothstep(0.07, 0.16, vCrest) * breakZone * lace * 0.55;
+        shoreFoam = max(shoreFoam, shoreFoamSets * 1.05);
+        shoreFoam = max(shoreFoam, contactRim * (0.62 + 0.52 * lace));
+        float breakZone = smoothstep(1.9, 0.35, depth);
+        float crestShape = smoothstep(0.04, 0.12, crestHeight);
+        float crestSlope = smoothstep(0.018, 0.13, waveSlope);
+        float crestFoam = crestShape * crestSlope * breakZone * lace * (0.42 + crestSlope * 0.42);
         float surf = breakerFoam(vWorld.xz, uTime, shoreDist, depth, lace)
           * smoothstep(0.05, 0.24, depth)
           * mix(0.68, 1.0, beachGate);
         shoreFoam *= 1.0 + uRain * 0.16;
-        surf *= 0.9 + uRain * 0.22;
-        float foam = clamp(max(max(shoreFoam, crestFoam), surf), 0.0, 1.0);
-        color = mix(color, uFoam, foam * 0.88);
-        alpha = max(alpha, foam * 0.8);
+        surf *= 1.55 + uRain * 0.22;
+        float foam = clamp(max(max(shoreFoam * 1.16, crestFoam), surf), 0.0, 1.0);
+        color = mix(color, uFoam, clamp(foam * 0.96 + shoreFoam * 0.08, 0.0, 1.0));
+        alpha = max(alpha, foam * 0.86);
 
         if (underwaterView > 0.001) {
+          float underwaterBlend = smoothstep(0.08, 0.48, underwaterView);
           float ceilingNoise = 0.5 + 0.5 * noise(vWorld.xz * 1.75 + vec2(uTime * 0.12, -uTime * 0.09));
-          float faceWeight = mix(0.42, 0.78, underside);
-          float ceiling = underwaterView * faceWeight;
+          float faceWeight = mix(0.82, 1.08, underside);
+          float ceiling = underwaterBlend * faceWeight * mix(0.08, 0.46, surfaceLook);
           vec3 ceilingTint = mix(uDeep, uScatter, 0.62 + ceilingNoise * 0.16);
           ceilingTint = mix(ceilingTint, uSkyHorizon, smoothstep(0.18, 0.82, reflectance) * 0.24);
           color = mix(color, ceilingTint + uFoam * foam * 0.16, ceiling);
-          alpha = max(alpha, underwaterView * (0.28 + underside * 0.24 + reflectance * 0.18));
+          float underwaterAlpha = 0.095 + surfaceLook * 0.27 + underside * 0.045 + reflectance * 0.06;
+          underwaterAlpha += foam * (0.2 + surfaceLook * 0.22);
+          alpha = mix(alpha, clamp(underwaterAlpha, 0.08, 0.58), underwaterBlend);
         }
 
         // --- atmospheric haze --------------------------------------------------
@@ -615,6 +672,158 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float edgeFade = 1.0 - smoothstep(rim - 14.0, rim - 2.0, length(vWorld.xz));
         alpha *= edgeFade;
 
+        gl_FragColor = vec4(color, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function createSurfRibbonMaterial(seafloorTexture) {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uSeafloor: { value: seafloorTexture },
+      uWaterLevel: { value: WATER_LEVEL },
+      uSize: { value: WATER_SIZE },
+      uFoam: { value: WATER_DAY.foam.clone() },
+      uScatter: { value: WATER_DAY.scatter.clone() },
+      uDaylight: { value: 1 },
+      uRain: { value: 0 },
+      uUnderwaterAmount: { value: 0 },
+    },
+    vertexShader: /* glsl */`
+      ${WAVE_GLSL}
+      uniform float uTime;
+      uniform sampler2D uSeafloor;
+      uniform float uWaterLevel;
+      uniform float uSize;
+      varying vec3 vWorld;
+      varying float vDepth;
+      varying float vShoreDist;
+      varying float vShoreSoftness;
+      varying float vPlayableFade;
+      varying float vCrest;
+      varying float vWaveSlope;
+
+      vec4 seafloorSample(vec2 wxz) {
+        return texture2D(uSeafloor, wxz / uSize + 0.5);
+      }
+
+      void main() {
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        vec4 floorSample = seafloorSample(world.xz);
+        float floorH = floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)});
+        float depth = uWaterLevel - floorH;
+        vec3 waveNormal;
+        vec3 disp = gerstner(world.xz, uTime, swellAtten(max(depth, 0.0)), waveNormal);
+        float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
+        world.xyz += disp;
+        world.y += swashLift(world.xz, uTime, depth);
+        world.y += breakerLift(world.xz, uTime, shoreDist, depth);
+        world.y += 0.035;
+        vWorld = world.xyz;
+        vDepth = max(0.0, depth);
+        vShoreDist = shoreDist;
+        vShoreSoftness = floorSample.b;
+        vPlayableFade = floorSample.a;
+        vCrest = disp.y;
+        vWaveSlope = length(waveNormal.xz);
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      ${WAVE_GLSL}
+      uniform float uTime;
+      uniform vec3 uFoam;
+      uniform vec3 uScatter;
+      uniform float uDaylight;
+      uniform float uRain;
+      uniform float uUnderwaterAmount;
+      varying vec3 vWorld;
+      varying float vDepth;
+      varying float vShoreDist;
+      varying float vShoreSoftness;
+      varying float vPlayableFade;
+      varying float vCrest;
+      varying float vWaveSlope;
+
+      float srHash(vec2 p) { return fract(sin(dot(p, vec2(127.4, 311.7))) * 43758.5453); }
+      float srNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(srHash(i), srHash(i + vec2(1.0, 0.0)), u.x),
+                   mix(srHash(i + vec2(0.0, 1.0)), srHash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float srWorley(vec2 p) {
+        vec2 cell = floor(p);
+        vec2 f = fract(p);
+        float d = 1.0;
+        for (int y = -1; y <= 1; y++) {
+          for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(float(x), float(y));
+            vec2 o = vec2(srHash(cell + g), srHash(cell + g + 17.31));
+            d = min(d, length(g + o - f));
+          }
+        }
+        return d;
+      }
+      float srLace(vec2 wxz, float t) {
+        vec2 p = wxz * 1.25 + vec2(t * 0.16, -t * 0.11);
+        float a = 1.0 - srWorley(p);
+        float b = 1.0 - srWorley(p * 2.1 + 6.8);
+        float cells = smoothstep(0.36, 0.9, a * 0.66 + b * 0.34);
+        float torn = smoothstep(0.24, 0.82, srNoise(wxz * 0.32 + vec2(t * 0.045, -t * 0.031)));
+        return cells * (0.55 + 0.45 * torn);
+      }
+      float srLine(float sd, float centre, float width) {
+        return smoothstep(width, 0.0, abs(sd - centre));
+      }
+
+      void main() {
+        float realCoast = smoothstep(0.02, 0.24, vPlayableFade);
+        float shallow = smoothstep(0.035, 0.19, vDepth) * (1.0 - smoothstep(2.25, 3.9, vDepth));
+        float shoreWindow = smoothstep(15.5, 0.45, vShoreDist);
+        float beach = mix(0.78, 1.18, smoothstep(0.08, 0.78, vShoreSoftness));
+        float lace = srLace(vWorld.xz, uTime);
+
+        float cycle = sin(uTime * 0.8976) * 0.5 + 0.5;
+        float wobble = sin(vWorld.x * 0.17 + uTime * 0.45) * 0.34
+          + (srNoise(vWorld.xz * 0.075) - 0.5) * 0.78;
+        float front = 0.65 + cycle * 2.65 + wobble;
+        float inner = srLine(vShoreDist, front, 0.82) * 0.72;
+        float middle = srLine(vShoreDist, front + 2.45, 1.15) * 0.58;
+        float outer = srLine(vShoreDist, front + 5.25, 1.55) * 0.42;
+        float farOuter = srLine(vShoreDist, front + 8.65, 1.9) * 0.24;
+        float bands = (inner + middle + outer + farOuter) * lace;
+
+        float f;
+        float s;
+        float breakerEnv = breakerField(vWorld.xz, uTime, vShoreDist, vDepth, f, s);
+        float breakerLip = smoothstep(0.16, 0.02, f);
+        float breakerTrail = smoothstep(0.62, 0.08, f) * (1.0 - breakerLip);
+        float breaker = breakerEnv * s * (breakerLip * (0.82 + 0.18 * lace) + breakerTrail * lace * 0.56);
+
+        float crest = smoothstep(0.045, 0.13, vCrest) * smoothstep(0.025, 0.13, vWaveSlope)
+          * smoothstep(1.7, 0.35, vDepth) * lace * 0.36;
+        float contact = smoothstep(0.2, 0.018, abs(vDepth)) * smoothstep(2.65, 0.0, vShoreDist) * (0.42 + lace * 0.58);
+        float wash = smoothstep(8.0, 0.35, vShoreDist) * smoothstep(0.02, 0.42, vDepth) * lace * 0.18;
+
+        float foam = (bands * 1.12 + breaker * 1.18 + crest + contact + wash)
+          * realCoast * shallow * shoreWindow * beach;
+        foam *= 1.0 + uRain * 0.24;
+        foam *= 1.0 - clamp(uUnderwaterAmount, 0.0, 1.0) * 0.72;
+        foam = clamp(foam, 0.0, 1.0);
+        if (foam < 0.01) discard;
+
+        vec3 color = mix(uScatter, uFoam, 0.84 + lace * 0.16);
+        color = mix(color * vec3(0.78, 0.92, 0.96), color, uDaylight);
+        float alpha = foam * (0.34 + 0.52 * smoothstep(0.12, 0.82, foam));
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -884,6 +1093,7 @@ export function Water({ quality = 'performance', reflections = true }) {
     [currentZoneId, qualityConfig.bakeRes],
   );
   const waterMaterial = useMemo(() => createStylizedWaterMaterial(seafloor), [seafloor]);
+  const surfMaterial = useMemo(() => createSurfRibbonMaterial(seafloor), [seafloor]);
   const deepMaterial = useMemo(() => createDeepOceanMaterial(), []);
 
   const waterGeometry = useMemo(
@@ -903,6 +1113,7 @@ export function Water({ quality = 'performance', reflections = true }) {
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
+  const surfRef = useRef(null);
   const grabRef = useRef(null); // FramebufferTexture for the refraction grab
   const reflectionFrame = useRef(0);
   const reflectionState = useRef({
@@ -976,6 +1187,13 @@ export function Water({ quality = 'performance', reflections = true }) {
     wu.uScatter.value.copy(WATER_NIGHT.scatter).lerp(WATER_DAY.scatter, daylight).lerp(WATER_STORM.scatter, stormBlend);
     wu.uDeep.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight).lerp(WATER_STORM.deep, stormBlend);
     wu.uFoam.value.copy(WATER_NIGHT.foam).lerp(WATER_DAY.foam, daylight).lerp(WATER_STORM.foam, stormBlend);
+    const su = surfMaterial.uniforms;
+    su.uTime.value = t;
+    su.uRain.value = weatherEnv.rainIntensity;
+    su.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
+    su.uDaylight.value = daylight;
+    su.uFoam.value.copy(wu.uFoam.value);
+    su.uScatter.value.copy(wu.uScatter.value);
     if (scene.fog) {
       const horizonLift = THREE.MathUtils.lerp(0.04, 0.18, daylight);
       const hazeLift = THREE.MathUtils.lerp(0.08, 0.42, daylight);
@@ -1025,7 +1243,7 @@ export function Water({ quality = 'performance', reflections = true }) {
         rs.position.copy(camera.position);
         rs.quaternion.copy(camera.quaternion);
         rs.timeOfDay = time;
-        const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, disc], wu.uReflMatrix.value);
+        const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, surfRef.current, disc], wu.uReflMatrix.value);
         wu.uReflection.value = ok ? reflectionRT.texture : null;
         wu.uHasReflection.value = ok ? 1 : 0;
       }
@@ -1038,13 +1256,14 @@ export function Water({ quality = 'performance', reflections = true }) {
     return () => {
       waterGeometry.dispose();
       waterMaterial.dispose();
+      surfMaterial.dispose();
       seafloor.dispose();
       deepMaterial.dispose();
       grabRef.current?.dispose();
       grabRef.current = null;
       reflectionRT.dispose();
     };
-  }, [waterGeometry, waterMaterial, seafloor, deepMaterial, reflectionRT]);
+  }, [waterGeometry, waterMaterial, surfMaterial, seafloor, deepMaterial, reflectionRT]);
 
   const regionType = getRegionMap(currentZoneId).type;
   if (['beagle', 'interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
@@ -1067,6 +1286,13 @@ export function Water({ quality = 'performance', reflections = true }) {
       <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} userData={{
         renderSource: `water:${currentZoneId}:surface`,
         renderLabel: `${currentZoneId} water surface`,
+        renderKind: 'water',
+        renderPath: null,
+      }} />
+      <mesh ref={surfRef} geometry={waterGeometry} material={surfMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-1} frustumCulled={false} userData={{
+        noReflect: true,
+        renderSource: `water:${currentZoneId}:surf-ribbons`,
+        renderLabel: `${currentZoneId} surf ribbons`,
         renderKind: 'water',
         renderPath: null,
       }} />

@@ -1,6 +1,8 @@
-import { nwReefCoastZ, nwReefCoralMask } from '../regions/northwestReef/terrain';
-import { makeZoneScatter, nearAnyCluster } from '../scatter';
+import { nwReefCoastZ, nwReefCoralMask, nwReefOutcrop } from '../regions/northwestReef/terrain';
+import { makeZoneScatter, nearAnyCluster, seededRandom } from '../scatter';
 import { getNorthwestReefRocks, NW_REEF } from '../nwReefLayout';
+import { getModelAsset } from '../../modelAssets';
+import { buildBeachFindLayer } from './beachFinds';
 
 // Northwest Reef (NW_REEF) ecology — a bright coral-sand strand on Floreana's
 // northwest corner. Vegetation is deliberately minimal: a salt-pruned fringe
@@ -17,6 +19,7 @@ export const NW_REEF_SWASH_PERIOD = (Math.PI * 2) / 0.8976;
 
 const scrubClumps = [[-24, 36], [2, 32], [24, 38], [-42, 34]];
 const drySand = (x, z) => z - nwReefCoastZ(x) > 1.8;
+const coastDistance = (x, z) => z - nwReefCoastZ(x);
 
 // Hand-picked coral garden patches on the open shelf, away from the ring.
 const shelfGardens = [[16, -10], [30, -16], [-28, -13]];
@@ -33,6 +36,151 @@ function capToDepth(items, modelHeight, minScale) {
   return items
     .map(item => ({ ...item, scale: Math.min(item.scale, (CORAL_CEILING - item.y) / modelHeight) }))
     .filter(item => item.scale >= minScale);
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function smoothstep(value, min, max) {
+  const t = clamp01((value - min) / (max - min));
+  return t * t * (3 - 2 * t);
+}
+
+function band(center, radius, value) {
+  const t = Math.abs(value - center) / radius;
+  return Math.max(0, 1 - t * t);
+}
+
+function litterNoise(x, z, seed) {
+  const v = Math.sin((x * 12.9898 + z * 78.233 + seed * 37.719) * 0.73) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+const LITTER_PALE = ['#d7c7a4', '#c6b692', '#e6d4ad', '#b9aa8b', '#efe0bd', '#cdbf9e'];
+const LITTER_CORAL = ['#c98570', '#d19a7d', '#b8756d', '#d7ad8e', '#ad7466'];
+const LITTER_BASALT = ['#5a554c', '#4d493f', '#625c51', '#48483f'];
+
+function pickColor(palette, i, k) {
+  return palette[Math.floor(seededRandom(i, k) * palette.length) % palette.length];
+}
+
+function chooseStrandVariant(i) {
+  const r = seededRandom(i, 5);
+  if (r < 0.25) return 'shell-cap';
+  if (r < 0.54) return 'shell-shard-a';
+  if (r < 0.70) return 'shell-shard-b';
+  if (r < 0.84) return 'limestone-chip';
+  if (r < 0.985) return 'coral-chip';
+  return 'basalt-pebble';
+}
+
+function chooseDryVariant(i) {
+  const r = seededRandom(i, 7);
+  if (r < 0.22) return 'shell-shard-a';
+  if (r < 0.36) return 'shell-cap';
+  if (r < 0.68) return 'limestone-chip';
+  if (r < 0.97) return 'coral-chip';
+  return 'basalt-pebble';
+}
+
+function chooseBasaltVariant(i) {
+  const r = seededRandom(i, 11);
+  if (r < 0.48) return 'basalt-pebble';
+  if (r < 0.86) return 'limestone-chip';
+  return 'coral-chip';
+}
+
+function decorateLitter(item, index, seed, bandKind) {
+  const i = seed * 10000 + index * 97;
+  const d = coastDistance(item.x, item.z);
+  const variant = bandKind === 'basalt'
+    ? chooseBasaltVariant(i)
+    : bandKind === 'dry'
+      ? chooseDryVariant(i)
+      : chooseStrandVariant(i);
+  const color = variant === 'basalt-pebble'
+    ? pickColor(LITTER_BASALT, i, 19)
+    : variant === 'coral-chip'
+      ? pickColor(LITTER_CORAL, i, 23)
+      : pickColor(LITTER_PALE, i, 29);
+  const wetness = clamp01((1 - smoothstep(d, 0.9, 4.2)) * (bandKind === 'dry' ? 0.35 : 0.85));
+  const shellScale = variant.startsWith('shell') ? 0.62 : variant === 'basalt-pebble' ? 0.36 : 0.5;
+  const strandBoost = bandKind === 'strand' ? 0.82 + band(4.8, 3.6, d) * 0.18 : 0.88;
+  return {
+    ...item,
+    id: `${bandKind}-litter-${index}`,
+    variant,
+    color,
+    wetness,
+    scale: item.scale * shellScale * strandBoost,
+    stretchX: 0.72 + seededRandom(i, 31) * 0.94,
+    stretchZ: 0.64 + seededRandom(i, 37) * 0.68,
+    heightScale: variant.startsWith('shell') ? 1.0 + seededRandom(i, 41) * 0.48 : 0.82 + seededRandom(i, 43) * 0.62,
+    lift: variant.startsWith('shell') ? 0.016 + wetness * 0.006 : 0.008 + seededRandom(i, 47) * 0.014,
+    pitch: (seededRandom(i, 53) - 0.5) * (variant.startsWith('shell') ? 0.17 : 0.25),
+    roll: (seededRandom(i, 59) - 0.5) * (variant.startsWith('shell') ? 0.17 : 0.25),
+    yaw: item.yaw + (bandKind === 'strand' ? Math.sin(item.x * 0.12) * 0.16 : 0),
+  };
+}
+
+function buildSurfaceLitter() {
+  const scatter = (layer, count, seed, opts) => makeZoneScatter(NW_REEF, layer, count, seed, opts);
+  const strandAccept = (biome, x, z, y) => {
+    const d = coastDistance(x, z);
+    if (!(biome === 'white-sand' || biome === 'wet-sand') || d < 0.45 || d > 9.5) return false;
+    const strand = Math.max(band(2.2, 2.1, d), band(5.3, 3.2, d) * 0.86);
+    const clump = 0.44 + litterNoise(x * 0.28, z * 0.36, 11) * 0.56;
+    return litterNoise(x, z, 17) < clamp01(strand * clump + 0.12);
+  };
+  const dryAccept = (biome, x, z) => {
+    const d = coastDistance(x, z);
+    if (biome !== 'white-sand' || d < 7.5 || d > 28) return false;
+    const dunePatch = litterNoise(x * 0.18, z * 0.2, 31);
+    return litterNoise(x, z, 37) < 0.18 + dunePatch * 0.18;
+  };
+  const basaltAccept = (biome, x, z) => {
+    const d = coastDistance(x, z);
+    const nearOutcrop = nwReefOutcrop(x, z) > 0.08;
+    return nearOutcrop && d > -0.2 && d < 22 && (biome === 'white-sand' || biome === 'wet-sand' || biome === 'basalt');
+  };
+  const strand = scatter('strand-shells', 380, 211, {
+    minX: -51, maxX: 51, minZ: -4, maxZ: 18, scale: [0.36, 0.94], maxGrade: 0.42,
+    accept: strandAccept,
+  }).map((item, index) => decorateLitter(item, index, 211, 'strand'));
+  const dry = scatter('dry-shells', 110, 223, {
+    minX: -49, maxX: 49, minZ: 10, maxZ: 34, scale: [0.28, 0.7], maxGrade: 0.46,
+    accept: dryAccept,
+  }).map((item, index) => decorateLitter(item, index, 223, 'dry'));
+  const basalt = scatter('basalt-grit', 42, 239, {
+    minX: -48, maxX: 48, minZ: -2, maxZ: 36, scale: [0.24, 0.58], maxGrade: 0.58,
+    accept: basaltAccept,
+  }).map((item, index) => decorateLitter(item, index, 239, 'basalt'));
+
+  return [{
+    id: 'reef-shell-stone-strandline',
+    maxVisibleDistance: 42,
+    items: [...strand, ...dry, ...basalt],
+  }];
+}
+
+function buildCollectibleBeachFinds() {
+  return [buildBeachFindLayer(NW_REEF, {
+    id: 'northwest-reef-beach-finds',
+    count: 11,
+    seed: 503,
+    bounds: { minX: -48, maxX: 48, minZ: -1, maxZ: 22 },
+    maxGrade: 0.36,
+    maxVisibleDistance: 56,
+    accept: (biome, x, z) => {
+      const d = coastDistance(x, z);
+      if (!(biome === 'white-sand' || biome === 'wet-sand')) return false;
+      if (d < 0.7 || d > 13.5) return false;
+      if (nwReefOutcrop(x, z) > 0.16) return false;
+      const strand = Math.max(band(2.4, 2.2, d), band(6.1, 3.3, d) * 0.7);
+      return litterNoise(x * 0.85, z * 0.9, 71) < 0.18 + strand * 0.58;
+    },
+  })];
 }
 
 function buildCoral() {
@@ -95,6 +243,7 @@ function buildCoral() {
 // water past the drop-off, so spotting one stays an event.
 function buildSwimmers() {
   const FISH = `${ANIMALS}reef-fish.glb`;
+  const LOW_POLY_FISH = getModelAsset('animatedLowPolyFish')?.path || `${ANIMALS}animated-low-poly-fish.glb`;
   return {
     schools: [
       {
@@ -141,6 +290,39 @@ function buildSwimmers() {
         scale: [1.9, 2.7],
         squash: 0.9,
         baseRotation: [0, 0, 0],
+      },
+      {
+        id: 'low-poly-shallows-school-east',
+        path: LOW_POLY_FISH,
+        count: 7,
+        center: [34, -8],
+        radius: 3.2,
+        y: [-1.18, -0.98],
+        speed: 0.66,
+        scale: [0.38, 0.52],
+        squash: 0.72,
+        baseRotation: [0, Math.PI / 2, 0],
+        startleRadius: 8.5,
+        startlePush: 4.8,
+        startleSpeedBoost: 1.55,
+        timeScale: 0.9,
+      },
+      {
+        id: 'low-poly-shallows-school-west',
+        path: LOW_POLY_FISH,
+        count: 6,
+        center: [-31, -10],
+        radius: 2.7,
+        y: [-1.28, -1.02],
+        speed: 0.58,
+        scale: [0.34, 0.48],
+        squash: 0.72,
+        baseRotation: [0, Math.PI / 2, 0],
+        startleRadius: 8,
+        startlePush: 4.4,
+        startleSpeedBoost: 1.45,
+        timeScale: 0.88,
+        drift: 0.28,
       },
     ],
     cruisers: [
@@ -238,6 +420,8 @@ export function buildNorthwestReefEcology() {
   return {
     zoneId: NW_REEF,
     flora: [...buildFlora(), ...buildCoral()],
+    surfaceLitter: buildSurfaceLitter(),
+    collectibleBeachFinds: buildCollectibleBeachFinds(),
     rocks,
     splashes: { anchors: swashRocks.slice(0, 12), period: NW_REEF_SWASH_PERIOD },
     footprintBiomes: ['white-sand', 'wet-sand'],

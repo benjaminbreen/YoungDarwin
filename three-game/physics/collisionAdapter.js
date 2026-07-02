@@ -185,6 +185,12 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
       || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)
     ),
-    clampToWalkable: (position, previousPosition, options) => clampToWalkable(position, previousPosition, zoneId, options),
+    clampToWalkable: (position, previousPosition, options) => {
+      if (options?.allowObstacleSupport !== false) {
+        const supportY = getObstacleSupportHeight(position.x, position.z, position.y, DEFAULT_SUPPORT_RADIUS, obstacles);
+        if (supportY !== null && supportY !== undefined) return position.clone ? position.clone() : position;
+      }
+      return clampToWalkable(position, previousPosition, zoneId, options);
+    },
   };
 }

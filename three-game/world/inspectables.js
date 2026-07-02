@@ -27,6 +27,10 @@ export const inspectableCatalog = {
   saltgrass: { id: 'saltgrass', kind: 'plant', englishName: 'Saltgrass', latinName: 'Distichlis spicata', category: 'Plant', rarity: 'scarce' },
   sesuvium: { id: 'sesuvium', kind: 'plant', englishName: 'Sea purslane', latinName: 'Sesuvium portulacastrum', category: 'Plant', rarity: 'scarce' },
   driftwood: { id: 'driftwood', kind: 'plant', englishName: 'Driftwood', latinName: 'weathered shore timber', category: 'Shore sign', rarity: 'uncommon' },
+  shore_litter: { id: 'shore_litter', kind: 'shore-sign', englishName: 'Shell and stone strandline', latinName: 'littoral shell and coral fragments', category: 'Shore sign', rarity: 'common' },
+  turret_shell: { id: 'turret_shell', kind: 'specimen', englishName: 'Turret shell', latinName: 'Turritellidae / Cerithioidea shore shell', category: 'Marine invertebrate sign', rarity: 'uncommon' },
+  junonia_shell: { id: 'junonia_shell', kind: 'specimen', englishName: 'Spotted volute shell', latinName: 'Volutidae shell', category: 'Marine invertebrate sign', rarity: 'rare' },
+  shore_starfish: { id: 'shore_starfish', kind: 'specimen', englishName: 'Sea star', latinName: 'Asteroidea', category: 'Animal', rarity: 'uncommon' },
   manzanillo: { id: 'manzanillo', kind: 'plant', englishName: 'Manzanillo', latinName: 'Hippomane mancinella', category: 'Plant', rarity: 'rare' },
   crab_prop: { id: 'crab_prop', kind: 'specimen', englishName: 'Sally Lightfoot crab', latinName: 'Grapsus grapsus', category: 'Animal', rarity: 'common' },
 };

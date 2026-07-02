@@ -8,6 +8,7 @@ import { getRegionDefinition } from '../../world/regions';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
+import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
@@ -25,7 +26,16 @@ const WET_SCRUB_TINT = new THREE.Color('#536a55');
 const CAUSTICS_GLSL = /* glsl */`
   uniform float uCausticsTime;
   uniform float uCausticsStrength;
+  uniform float uUnderwaterAmount;
   uniform float uRainWetness;
+  uniform vec3 uTerrainSunDirection;
+  uniform float uTerrainDaylight;
+  uniform float uTerrainGolden;
+  uniform float uTerrainHardSun;
+  uniform float uTerrainWeatherSoftness;
+  uniform float uTerrainSunWarmth;
+  uniform float uTerrainCoolShade;
+  uniform float uTerrainWetShine;
   varying vec3 vCausticsW;
   vec2 cstHash2(vec2 p) {
     return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
@@ -50,9 +60,42 @@ const CAUSTICS_GLSL = /* glsl */`
     float b = 1.0 - sqrt(cstWorley(p * 1.31 + vec2(4.7, 9.1), -t * 0.83 + 2.0));
     return pow(max(min(a, b), 0.0), 4.0);
   }
+  float cstWaveLens(vec2 p, float t) {
+    float a = sin(dot(normalize(vec2( 0.86,  0.51)), p) * 0.4833219 + t * 2.1759);
+    float b = sin(dot(normalize(vec2(-0.62,  0.78)), p) * 0.7391983 + t * 2.6911);
+    float c = sin(dot(normalize(vec2( 0.34, -0.94)), p) * 1.2566371 + t * 3.5091);
+    float ridge = a * 0.44 + b * 0.33 + c * 0.23;
+    return 0.78 + 0.30 * pow(clamp(ridge * 0.5 + 0.5, 0.0, 1.0), 1.85);
+  }
 `;
 
 const CAUSTICS_APPLY = /* glsl */`
+  vec3 terrainWorldNormal = normalize(cross(dFdx(vCausticsW), dFdy(vCausticsW)));
+  if (terrainWorldNormal.y < 0.0) terrainWorldNormal *= -1.0;
+  vec3 terrainSunDir = normalize(uTerrainSunDirection);
+  float terrainSunFace = clamp(dot(terrainWorldNormal, terrainSunDir), 0.0, 1.0);
+  float terrainAwayFromSun = 1.0 - terrainSunFace;
+  float terrainSlope = clamp(1.0 - abs(terrainWorldNormal.y), 0.0, 1.0);
+  float terrainRelief = smoothstep(0.18, 0.78, terrainSlope);
+  float terrainWarmFace = pow(terrainSunFace, 1.45)
+    * uTerrainSunWarmth
+    * (0.38 + terrainRelief * 0.42 + uTerrainGolden * 0.24)
+    * (1.0 - uTerrainWeatherSoftness * 0.62);
+  outgoingLight *= mix(vec3(1.0), vec3(1.075, 1.032, 0.915), clamp(terrainWarmFace, 0.0, 0.24));
+
+  float terrainCoolGully = pow(terrainAwayFromSun, 1.35)
+    * terrainRelief
+    * uTerrainCoolShade
+    * (1.0 - uTerrainWeatherSoftness * 0.42);
+  outgoingLight *= mix(vec3(1.0), vec3(0.76, 0.84, 0.93), clamp(terrainCoolGully, 0.0, 0.2));
+
+  float terrainLowCrease = smoothstep(0.5, 0.92, terrainRelief)
+    * (1.0 - smoothstep(13.0, 31.0, vCausticsW.y))
+    * (0.42 + terrainAwayFromSun * 0.58)
+    * uTerrainDaylight
+    * (1.0 - uTerrainWeatherSoftness * 0.5);
+  outgoingLight *= 1.0 - clamp(terrainLowCrease * 0.055, 0.0, 0.055);
+
   if (uRainWetness > 0.001) {
     float wetAboveWater = smoothstep(${(WATER_SURFACE_Y + 0.04).toFixed(2)}, ${(WATER_SURFACE_Y + 0.55).toFixed(2)}, vCausticsW.y);
     float wetHeightFade = 1.0 - smoothstep(26.0, 42.0, vCausticsW.y);
@@ -64,7 +107,21 @@ const CAUSTICS_APPLY = /* glsl */`
     float cstFade = smoothstep(0.02, 0.22, cstDepth) * (1.0 - smoothstep(2.2, 4.5, cstDepth));
     vec2 cstP = vCausticsW.xz * 0.8 + vec2(uCausticsTime * 0.03, -uCausticsTime * 0.022);
     float cst = cstLight(cstP, uCausticsTime * 0.7);
-    outgoingLight += vec3(1.0, 0.97, 0.85) * cst * cstFade * uCausticsStrength;
+    float waveLens = cstWaveLens(vCausticsW.xz, uCausticsTime);
+    float underwaterBoost = mix(1.0, 1.32, clamp(uUnderwaterAmount, 0.0, 1.0));
+    outgoingLight += vec3(1.0, 0.97, 0.85) * cst * cstFade * uCausticsStrength * waveLens * underwaterBoost;
+  }
+  float shoreWet = (1.0 - smoothstep(${(WATER_SURFACE_Y + 0.02).toFixed(2)}, ${(WATER_SURFACE_Y + 0.68).toFixed(2)}, vCausticsW.y))
+    * smoothstep(${(WATER_SURFACE_Y - 1.9).toFixed(2)}, ${(WATER_SURFACE_Y + 0.03).toFixed(2)}, vCausticsW.y);
+  float terrainRainWet = uRainWetness * (1.0 - smoothstep(18.0, 38.0, vCausticsW.y));
+  float terrainWet = clamp(max(shoreWet, terrainRainWet * 0.42), 0.0, 1.0);
+  if (terrainWet > 0.001) {
+    vec3 terrainViewDir = normalize(cameraPosition - vCausticsW);
+    float grazing = pow(1.0 - clamp(dot(terrainWorldNormal, terrainViewDir), 0.0, 1.0), 2.2);
+    float wetSunGlint = pow(terrainSunFace, 2.8) * (0.35 + grazing * 0.65);
+    float wetSpec = terrainWet * uTerrainWetShine * wetSunGlint * (1.0 - uTerrainWeatherSoftness * 0.42);
+    outgoingLight += vec3(1.0, 0.93, 0.72) * clamp(wetSpec, 0.0, 0.16);
+    outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.86, 0.94, 0.92), terrainWet * (0.045 + uRainWetness * 0.04));
   }
 `;
 
@@ -77,7 +134,16 @@ function injectSeabedCaustics(material) {
     if (previousCompile) previousCompile(shader);
     shader.uniforms.uCausticsTime = { value: 0 };
     shader.uniforms.uCausticsStrength = { value: 0 };
+    shader.uniforms.uUnderwaterAmount = { value: 0 };
     shader.uniforms.uRainWetness = { value: 0 };
+    shader.uniforms.uTerrainSunDirection = { value: new THREE.Vector3(0, 1, 0) };
+    shader.uniforms.uTerrainDaylight = { value: 0 };
+    shader.uniforms.uTerrainGolden = { value: 0 };
+    shader.uniforms.uTerrainHardSun = { value: 0 };
+    shader.uniforms.uTerrainWeatherSoftness = { value: 0 };
+    shader.uniforms.uTerrainSunWarmth = { value: 0 };
+    shader.uniforms.uTerrainCoolShade = { value: 0 };
+    shader.uniforms.uTerrainWetShine = { value: 0 };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -95,7 +161,7 @@ function injectSeabedCaustics(material) {
       .replace('#include <opaque_fragment>', `${CAUSTICS_APPLY}\n#include <opaque_fragment>`);
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-rain-wetness-v1`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v2`;
   material.needsUpdate = true;
   return material;
 }
@@ -177,9 +243,30 @@ export function Terrain() {
       const store = useThreeGameStore.getState();
       const time = ((store.timeOfDay % 24) + 24) % 24;
       const rainWetness = weatherEnv.rainIntensity;
+      const sky = skyState(time, store.day || 1);
+      const lightRig = computeOutdoorLightRig({
+        daylight: sky.daylight,
+        golden: sky.golden,
+        elevation: sky.elevation,
+        overcast: weatherEnv.overcast,
+        mist: weatherEnv.mistAmount,
+        rain: rainWetness,
+        lightDim: weatherEnv.lightDim,
+        moonFraction: sky.moon_phase.fraction,
+        underwaterAmount: store.underwaterCamera?.amount || 0,
+      });
       shader.uniforms.uCausticsTime.value = clock.elapsedTime;
-      shader.uniforms.uCausticsStrength.value = skyState(time, store.day || 1).daylight * 0.5 * (1 - rainWetness * 0.85);
+      shader.uniforms.uCausticsStrength.value = sky.daylight * 0.5 * (1 - rainWetness * 0.85);
+      if (shader.uniforms.uUnderwaterAmount) shader.uniforms.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
       if (shader.uniforms.uRainWetness) shader.uniforms.uRainWetness.value = rainWetness;
+      if (shader.uniforms.uTerrainSunDirection) shader.uniforms.uTerrainSunDirection.value.set(sky.sun[0], sky.sun[1], sky.sun[2]);
+      if (shader.uniforms.uTerrainDaylight) shader.uniforms.uTerrainDaylight.value = sky.daylight;
+      if (shader.uniforms.uTerrainGolden) shader.uniforms.uTerrainGolden.value = sky.golden;
+      if (shader.uniforms.uTerrainHardSun) shader.uniforms.uTerrainHardSun.value = lightRig.hardSun;
+      if (shader.uniforms.uTerrainWeatherSoftness) shader.uniforms.uTerrainWeatherSoftness.value = lightRig.weatherSoftness;
+      if (shader.uniforms.uTerrainSunWarmth) shader.uniforms.uTerrainSunWarmth.value = lightRig.terrainSunWarmth;
+      if (shader.uniforms.uTerrainCoolShade) shader.uniforms.uTerrainCoolShade.value = lightRig.terrainCoolShade;
+      if (shader.uniforms.uTerrainWetShine) shader.uniforms.uTerrainWetShine.value = lightRig.terrainWetShine;
     }
   });
 

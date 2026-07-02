@@ -19,14 +19,16 @@ const FAR_REEF_INTERVAL = 1 / 6;
 //
 //   swimmers: {
 //     schools: [{ id, path, count, center: [x, z], radius, y: [lo, hi],
-//                 speed, scale: [lo, hi], baseRotation, timeScale }],
+//                 speed, scale: [lo, hi], baseRotation, timeScale,
+//                 startleRadius, startlePush, startleSpeedBoost }],
 //     cruisers: [{ id, path, orbit: { cx, cz, rx, rz }, y, bob, speed,
 //                  scale, baseRotation, direction, timeScale, phase }],
 //   }
 //
 // Every individual is a SkeletonUtils clone with its own mixer so the GLB's
 // swim cycle plays per-fish with a phase offset. Movement is analytic
-// (seeded orbits + sine wander), so it is deterministic and cheap.
+// (seeded orbits + sine wander + optional player repulsion), so it is
+// deterministic and cheap.
 
 const _pos = new THREE.Vector3();
 const _ahead = new THREE.Vector3();
@@ -58,7 +60,7 @@ function prepareSwimmerScene(scene) {
 
 // Evaluates a swimmer's position at time t. Schools orbit a slowly-drifting
 // anchor; the per-fish wander keeps neighbours from ever phase-locking.
-function schoolPosition(out, spec, fish, t) {
+function schoolPosition(out, spec, fish, t, player = null, startle = 0) {
   const drift = spec.drift || 0.35;
   const cx = spec.center[0] + Math.sin(t * 0.07 * drift + spec.seed) * spec.radius * 0.45;
   const cz = spec.center[1] + Math.cos(t * 0.055 * drift + spec.seed * 2.1) * spec.radius * 0.4;
@@ -74,6 +76,20 @@ function schoolPosition(out, spec, fish, t) {
     y,
     cz + Math.sin(a) * r * spec.squash + Math.cos(t * 0.8 + fish.phase * 4.0) * 0.3,
   );
+  if (player && startle > 0) {
+    const dx = out.x - player.x;
+    const dz = out.z - player.z;
+    const distSq = dx * dx + dz * dz;
+    const radius = spec.startleRadius || 7.5;
+    if (distSq > 0.0001 && distSq < radius * radius) {
+      const dist = Math.sqrt(distSq);
+      const local = (1 - dist / radius) * startle;
+      const push = (spec.startlePush || 4.2) * local * local;
+      out.x += (dx / dist) * push;
+      out.z += (dz / dist) * push;
+      out.y = THREE.MathUtils.clamp(out.y + (spec.startleLift || 0.16) * local, spec.y[0], spec.y[1] + 0.18);
+    }
+  }
   return out;
 }
 
@@ -135,6 +151,7 @@ function FishSchool({ spec }) {
   const groupRefs = useRef([]);
   const mixerStore = useRef([]);
   const farAccum = useRef(0);
+  const startleRef = useRef(0);
   const fishes = useMemo(() => Array.from({ length: spec.count }, (_, i) => ({
     orbitRadius: spec.radius * (0.35 + seeded(i, 1) * 0.65),
     angularSpeed: (spec.speed || 0.5) * (0.7 + seeded(i, 2) * 0.6) * (seeded(i, 3) > 0.5 ? 1 : -1),
@@ -157,9 +174,13 @@ function FishSchool({ spec }) {
     // mixer.update).
     const player = getRuntimePlayerPose()?.position;
     let stepDelta = delta;
+    let targetStartle = 0;
     if (player) {
       const dx = player.x - runtime.center[0];
       const dz = player.z - runtime.center[1];
+      const centerDistance = Math.hypot(dx, dz);
+      const startleBand = (runtime.startleRadius || 7.5) + runtime.radius * 0.9;
+      targetStartle = THREE.MathUtils.clamp(1 - (centerDistance - runtime.radius * 0.55) / startleBand, 0, 1);
       if (dx * dx + dz * dz > FAR_REEF_RADIUS_SQ) {
         farAccum.current += delta;
         if (farAccum.current < FAR_REEF_INTERVAL) return;
@@ -169,15 +190,19 @@ function FishSchool({ spec }) {
         farAccum.current = 0;
       }
     }
+    const response = targetStartle > startleRef.current ? 5.5 : 2.4;
+    startleRef.current += (targetStartle - startleRef.current) * Math.min(1, stepDelta * response);
+    const startle = startleRef.current;
+    const animationBoost = 1 + startle * (runtime.startleSpeedBoost ?? 1.35);
     for (let i = 0; i < fishes.length; i += 1) {
       const group = groupRefs.current[i];
       if (group) {
-        schoolPosition(_pos, runtime, fishes[i], t);
-        schoolPosition(_ahead, runtime, fishes[i], t + 0.35);
+        schoolPosition(_pos, runtime, fishes[i], t, player, startle);
+        schoolPosition(_ahead, runtime, fishes[i], t + 0.35, player, startle);
         aimAlongPath(group, _pos, _ahead);
       }
       const entry = mixerStore.current[i];
-      if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale);
+      if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale * animationBoost);
     }
   });
 

@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { BallCollider, CapsuleCollider, ConvexHullCollider, CuboidCollider, CylinderCollider, RigidBody } from '@react-three/rapier';
 import { useThreeGameStore } from '../store';
-import { getRuntimeObstacles, obstacleBaseY } from '../world/obstacles';
+import { getRuntimeObstacles, isWalkOverTraversalObstacle, obstacleBaseY } from '../world/obstacles';
 
 function colliderOffset(shape, scale) {
   const [x = 0, y = 0, z = 0] = shape.offset || [0, 0, 0];
@@ -68,7 +68,7 @@ export function PhysicsObstacles() {
 
   return (
     <>
-      {obstacles.map(obstacle => (
+      {obstacles.filter(obstacle => !isWalkOverTraversalObstacle(obstacle)).map(obstacle => (
         <ObstacleCollider key={obstacle.id} obstacle={obstacle} />
       ))}
     </>

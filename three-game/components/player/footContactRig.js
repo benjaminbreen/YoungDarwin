@@ -162,7 +162,7 @@ export function createFootContactRig({
       if (deltas.length) {
         const averageDelta = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
         targetOffset = THREE.MathUtils.clamp(
-          visualGroundOffset + Math.max(0, averageDelta),
+          Math.max(0, averageDelta),
           0,
           VISUAL_GROUNDING_MAX_UP,
         );

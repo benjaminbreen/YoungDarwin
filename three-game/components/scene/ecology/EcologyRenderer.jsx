@@ -23,6 +23,8 @@ import { DenseGrassField } from './DenseGrassField';
 import { HybridGrassTuftField } from './HybridGrassTuftField';
 import { StylizedMeadowField } from './StylizedMeadowField';
 import { DryGrassPatchField } from './DryGrassPatchField';
+import { SurfaceLitterField } from './SurfaceLitterField';
+import { CollectibleBeachFindsLayer } from './CollectibleBeachFindsLayer';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -48,6 +50,8 @@ const EMPTY_LAYER_PLAN = {
   hybridGrassTufts: [],
   stylizedMeadows: [],
   dryGrassPatches: [],
+  surfaceLitter: [],
+  collectibleBeachFinds: [],
   lagoonSurfaces: [],
   generatedTrees: [],
   props: [],
@@ -97,18 +101,23 @@ function planProps(props, zoneId) {
       staticProps.push(prop);
       return;
     }
-    const bucket = byPath.get(prop.path);
+    const key = [
+      prop.path,
+      prop.castShadow === true ? 'casts' : 'no-cast',
+      prop.receiveShadow === true ? 'receives' : 'no-receive',
+    ].join('|');
+    const bucket = byPath.get(key);
     if (bucket) bucket.push(prop);
-    else byPath.set(prop.path, [prop]);
+    else byPath.set(key, [prop]);
   });
   const instancedGroups = [];
-  byPath.forEach((group, path) => {
+  byPath.forEach(group => {
     if (group.length < 2) {
       staticProps.push(...group);
       return;
     }
     instancedGroups.push({
-      path,
+      path: group[0].path,
       items: group.map(prop => propToItem(prop, zoneId)),
       castShadow: group.some(prop => prop.castShadow === true),
       receiveShadow: group.some(prop => prop.receiveShadow === true),
@@ -230,6 +239,8 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(tierVisible),
       stylizedMeadows: (ecology.stylizedMeadows || []).filter(tierVisible),
       dryGrassPatches: (ecology.dryGrassPatches || []).filter(tierVisible),
+      surfaceLitter: (ecology.surfaceLitter || []).filter(tierVisible),
+      collectibleBeachFinds: (ecology.collectibleBeachFinds || []).filter(tierVisible),
       lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(tierVisible),
       generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
       props: (ecology.props || []).filter(tierVisible),
@@ -249,6 +260,8 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     hybridGrassTufts,
     stylizedMeadows,
     dryGrassPatches,
+    surfaceLitter,
+    collectibleBeachFinds,
     lagoonSurfaces,
     generatedTrees,
     rocks,
@@ -298,6 +311,12 @@ export function EcologyRenderer({ ecology, settings = {} }) {
             inspectableType={inspectableTypeForEcologyLayer(layer.id) || 'dry_grass'}
           />
         </Suspense>
+      ))}
+      {surfaceLitter.map(layer => (
+        <SurfaceLitterField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
+      ))}
+      {collectibleBeachFinds.map(layer => (
+        <CollectibleBeachFindsLayer key={layer.id} layer={{ ...layer, zoneId: layer.zoneId || ecology.zoneId }} />
       ))}
       {flora.map(layer => (
         <Suspense key={layer.id} fallback={null}>

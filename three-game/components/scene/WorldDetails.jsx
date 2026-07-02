@@ -16,6 +16,7 @@ import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 import { updateFoliageUniforms } from './ecology/foliageMotion';
 import { DryGrassPatchField } from './ecology/DryGrassPatchField';
 import { buildPostOfficeBayDryGrassLayer } from '../../world/ecology/postOfficeBay';
+import { ContactShadowField } from './ContactShadow';
 
 const dummy = new THREE.Object3D();
 const SHRUB_MOTION = { wind: 1.25, bend: 0.28, bendRadius: 1.35 };
@@ -133,6 +134,30 @@ function ObstacleProps() {
 
 function BasaltBlocks() {
   const items = useMemo(() => getPostOfficeBayBasaltBlocks(), []);
+  const shadowPlan = useMemo(() => {
+    const castsRealShadow = item => (
+      item.y > -1.2
+      && item.radiusY * 2 - item.sink > 0.64
+      && Math.max(item.radiusX, item.radiusZ) > 0.52
+    );
+    const contactShadow = item => ({
+      id: item.id,
+      x: item.x,
+      y: item.y,
+      z: item.z,
+      yaw: item.yaw,
+      radiusX: Math.max(0.2, item.radiusX * 1.08),
+      radiusZ: Math.max(0.18, item.radiusZ * 1.02),
+    });
+    const realCasters = items.filter(castsRealShadow);
+    const contactOnly = items.filter(item => !castsRealShadow(item));
+    const contacts = items
+      .filter(item => item.y > -1.2 && item.radiusY * 2 - item.sink > 0.18)
+      .sort((a, b) => Math.max(b.radiusX, b.radiusZ) - Math.max(a.radiusX, a.radiusZ))
+      .slice(0, 54)
+      .map(contactShadow);
+    return { realCasters, contactOnly, contacts };
+  }, [items]);
   const geometry = useMemo(() => new THREE.DodecahedronGeometry(1, 1), []);
   const material = useMemo(() => new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -147,16 +172,35 @@ function BasaltBlocks() {
     object.scale.set(item.radiusX, item.radiusY, item.radiusZ);
   }, []);
   return (
-    <InstancedLayer
-      items={items}
-      geometry={geometry}
-      material={material}
-      transform={transform}
-      inspectableType="basalt_block"
-      sourceId="post-office-bay:basalt-blocks"
-      sourceLabel="Post Office Bay basalt blocks"
-      sourceKind="world-detail-rocks"
-    />
+    <>
+      {shadowPlan.realCasters.length > 0 && (
+        <InstancedLayer
+          items={shadowPlan.realCasters}
+          geometry={geometry}
+          material={material}
+          transform={transform}
+          inspectableType="basalt_block"
+          sourceId="post-office-bay:basalt-blocks:shadow"
+          sourceLabel="Post Office Bay basalt blocks"
+          sourceKind="world-detail-rocks"
+          castShadow
+        />
+      )}
+      {shadowPlan.contactOnly.length > 0 && (
+        <InstancedLayer
+          items={shadowPlan.contactOnly}
+          geometry={geometry}
+          material={material}
+          transform={transform}
+          inspectableType="basalt_block"
+          sourceId="post-office-bay:basalt-blocks:contact"
+          sourceLabel="Post Office Bay basalt chips"
+          sourceKind="world-detail-rocks"
+          castShadow={false}
+        />
+      )}
+      <ContactShadowField shadows={shadowPlan.contacts} yOffset={0.024} strength={0.52} />
+    </>
   );
 }
 

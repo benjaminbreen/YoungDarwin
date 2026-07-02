@@ -17,7 +17,7 @@ const postOfficeBayObstacles = [
       radius: 1.05,
       offset: [0, 0.74, 0],
     },
-    gameplay: { pushable: true, pushMass: 1.05, pushFriction: 0.86 },
+    gameplay: { traversal: 'scramble', traversalLabel: 'scramble over basalt', climbable: true },
   },
   {
     id: 'landing-boulder',

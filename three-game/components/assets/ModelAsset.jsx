@@ -269,8 +269,6 @@ const ONE_SHOT_CLIPS = new Set([
   'runningTurnLeft',
   'runningTurnRight',
   'standingJump',
-  'standingJumpShort',
-  'standingJumpHigh',
   'runningJump',
   'jumpTakeoff',
   'jump',

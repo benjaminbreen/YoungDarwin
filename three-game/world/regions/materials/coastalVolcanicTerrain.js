@@ -32,7 +32,6 @@ function loadRepeatingTexture(path, fallbackHex) {
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   texture.anisotropy = 8;
-  texture.needsUpdate = true;
   return texture;
 }
 

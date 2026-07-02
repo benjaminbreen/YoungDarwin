@@ -27,8 +27,6 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   runningTurnLeft: { category: 'locomotionTransition', duration: 0.42, lockDuration: 0, fade: 0.04, fallback: 'runningTurn180' },
   runningTurnRight: { category: 'locomotionTransition', duration: 0.42, lockDuration: 0, fade: 0.04, fallback: 'runningTurn180' },
 
-  standingJumpShort: { category: 'jump', fade: 0.04, fallback: 'standingJump' },
-  standingJumpHigh: { category: 'jump', fade: 0.04, fallback: 'standingJump' },
   standingJumpHold: { category: 'jump', loop: true, fade: 0.05 },
   runningJumpHold: { category: 'jump', loop: true, fade: 0.05 },
   fallingIdle: { category: 'fall', duration: 0.73, loop: true, fade: 0.08, fallback: 'fall' },

@@ -1,20 +1,34 @@
 import * as THREE from 'three';
+import { FLOREANA_PBR_TEXTURES, loadPbrTerrainSet } from '../materials/pbrTerrainTextures';
 
 // Per-pixel splat shader for the Northwest Reef: bright coral-sand beach with
-// ripple and shell flecks, a swash line on the authored coast curve, dappled
+// sandy-tuff PBR detail, a swash line on the authored coast curve, dappled
 // turquoise sand shelf seen through the water, mottled coral heads ringing the
 // islet, and dark basalt on the outcrops and islet crown.
 export function createNorthwestReefTerrainMaterial() {
+  const sandyTuffSet = FLOREANA_PBR_TEXTURES.sandyTuff;
+  const sandyTuffTextures = loadPbrTerrainSet(sandyTuffSet);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
     metalness: 0,
     flatShading: false,
   });
+  material.addEventListener('dispose', () => {
+    sandyTuffTextures.albedo.dispose();
+    sandyTuffTextures.normal.dispose();
+    sandyTuffTextures.roughness.dispose();
+  });
   material.onBeforeCompile = shader => {
     shader.uniforms.rimColor = { value: new THREE.Color('#f6e3ae') };
     shader.uniforms.rimIntensity = { value: 0.04 };
     shader.uniforms.uSwashTime = { value: 0 };
+    shader.uniforms.uNwrTuffAlbedo = { value: sandyTuffTextures.albedo };
+    shader.uniforms.uNwrTuffNormal = { value: sandyTuffTextures.normal };
+    shader.uniforms.uNwrTuffRoughness = { value: sandyTuffTextures.roughness };
+    shader.uniforms.uNwrTuffScale = { value: sandyTuffSet.scale };
+    shader.uniforms.uNwrTuffNormalStrength = { value: sandyTuffSet.normalStrength };
+    shader.uniforms.uNwrTuffRoughnessMix = { value: sandyTuffSet.roughnessMix };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -34,6 +48,12 @@ export function createNorthwestReefTerrainMaterial() {
         uniform vec3 rimColor;
         uniform float rimIntensity;
         uniform float uSwashTime;
+        uniform sampler2D uNwrTuffAlbedo;
+        uniform sampler2D uNwrTuffNormal;
+        uniform sampler2D uNwrTuffRoughness;
+        uniform float uNwrTuffScale;
+        uniform float uNwrTuffNormalStrength;
+        uniform float uNwrTuffRoughnessMix;
         varying vec3 vTerrainWorld;
         float nwrHash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -53,6 +73,36 @@ export function createNorthwestReefTerrainMaterial() {
             amp *= 0.52;
           }
           return value;
+        }
+        vec2 nwrRotate(vec2 p, float a) {
+          float c = cos(a);
+          float s = sin(a);
+          return mat2(c, -s, s, c) * p;
+        }
+        vec3 nwrSrgbToLinear(vec3 c) {
+          return pow(max(c, vec3(0.0)), vec3(2.2));
+        }
+        vec3 nwrTuffAlbedo(vec2 p) {
+          float broad = nwrFbm(p * 0.064 + vec2(11.0, -5.0));
+          vec2 uvA = p * uNwrTuffScale + vec2(0.17, -0.09);
+          vec2 uvB = nwrRotate(p, 0.72) * (uNwrTuffScale * 0.63) + vec2(-0.31, 0.23);
+          vec3 a = nwrSrgbToLinear(texture2D(uNwrTuffAlbedo, uvA).rgb);
+          vec3 b = nwrSrgbToLinear(texture2D(uNwrTuffAlbedo, uvB).rgb);
+          return mix(a, b, 0.14 + broad * 0.12);
+        }
+        float nwrTuffRoughness(vec2 p) {
+          vec2 uv = p * uNwrTuffScale + vec2(0.17, -0.09);
+          float r = texture2D(uNwrTuffRoughness, uv).r;
+          return clamp(r, 0.58, 0.98);
+        }
+        vec3 nwrTuffNormal(vec2 p) {
+          vec2 uv = p * uNwrTuffScale + vec2(0.17, -0.09);
+          vec3 mapped = texture2D(uNwrTuffNormal, uv).xyz * 2.0 - 1.0;
+          return normalize(vec3(mapped.xy * uNwrTuffNormalStrength, max(mapped.z, 0.18)));
+        }
+        float nwrDryTuffMask(float h, float basalt, float sub) {
+          float aboveWater = smoothstep(-0.36, 0.08, h);
+          return clamp((1.0 - sub) * aboveWater * (1.0 - basalt), 0.0, 1.0);
         }
         float nwrCoastZ(float x) {
           float bend = smoothstep(34.0, 54.0, -x);
@@ -83,6 +133,8 @@ export function createNorthwestReefTerrainMaterial() {
           float rippleWave = sin((p.x * 0.35 + p.y * 1.25) * 1.7 + nwrFbm(p * 0.5) * 2.4);
           float ripple = smoothstep(0.18, 0.0, abs(rippleWave) - 0.05);
           vec3 color = mix(vec3(0.46, 0.44, 0.35), vec3(0.62, 0.58, 0.46), grain);
+          vec3 tuff = nwrTuffAlbedo(p) * vec3(1.08, 1.04, 0.94);
+          color = mix(color, tuff, 0.68);
           color = mix(color, vec3(0.69, 0.65, 0.52), ripple * 0.14);
           color = mix(color, vec3(0.40, 0.38, 0.31), smoothstep(0.6, 0.95, nwrFbm(p * 3.1 + vec2(-2.0, 6.0))) * 0.2);
           return color;
@@ -124,14 +176,9 @@ export function createNorthwestReefTerrainMaterial() {
         float d = p.y - nwrCoastZ(p.x);
         float di = nwrIslet(p);
         vec3 color = nwrSand(p);
-        // Shell and coral-fragment flecks scattered on the dry beach.
         // Soft dune-scale shading breaks up the flat beach plane.
         float dune = nwrFbm(p * 0.07 + vec2(13.0, 2.0));
         color *= 0.93 + dune * 0.1;
-        // Sparse shell flecks: jittered cells (no grid rows), gentle highlight.
-        vec2 shellCell = floor(p * 5.0 + vec2(nwrHash(floor(p.yx * 5.0)) * 0.9));
-        float shell = step(0.985, nwrHash(shellCell)) * smoothstep(-0.3, 0.2, h);
-        color = mix(color, vec3(0.84, 0.81, 0.73), shell * 0.55);
         // High-water wrack ribbon.
         float wrackPath = abs(d - 4.8 - sin(p.x * 0.19) * 0.7);
         float wrack = smoothstep(0.5, 0.1, wrackPath) * smoothstep(0.4, 0.72, nwrFbm(p * 2.1 + vec2(3.0, -6.0))) * step(0.0, d);
@@ -166,6 +213,18 @@ export function createNorthwestReefTerrainMaterial() {
         diffuseColor.rgb = mix(diffuseColor.rgb, color, 0.9);`,
       )
       .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        vec2 rp = vTerrainWorld.xz;
+        float rh = vTerrainWorld.y;
+        float rSub = smoothstep(-0.32, -0.62, rh);
+        float rDi = nwrIslet(rp);
+        float rBasalt = max(smoothstep(0.3, 0.55, nwrOutcrop(rp)), (1.0 - smoothstep(0.38, 0.58, rDi)) * smoothstep(0.42, 0.7, rh));
+        float rTuffMask = nwrDryTuffMask(rh, clamp(rBasalt, 0.0, 1.0), rSub);
+        float rTuff = nwrTuffRoughness(rp);
+        roughnessFactor = mix(roughnessFactor, rTuff, rTuffMask * uNwrTuffRoughnessMix);`,
+      )
+      .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
         // Shore-parallel wind ripples + grain give the sand surface relief so
@@ -176,7 +235,17 @@ export function createNorthwestReefTerrainMaterial() {
         vec3 dpdy = dFdy(vTerrainWorld);
         float dhdx = dFdx(detailHeight);
         float dhdy = dFdy(detailHeight);
-        normal = normalize(normal - 0.34 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`,
+        normal = normalize(normal - 0.34 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));
+        float nSub = smoothstep(-0.32, -0.62, vTerrainWorld.y);
+        float nDi = nwrIslet(vTerrainWorld.xz);
+        float nBasalt = max(smoothstep(0.3, 0.55, nwrOutcrop(vTerrainWorld.xz)), (1.0 - smoothstep(0.38, 0.58, nDi)) * smoothstep(0.42, 0.7, vTerrainWorld.y));
+        float nTuffMask = nwrDryTuffMask(vTerrainWorld.y, clamp(nBasalt, 0.0, 1.0), nSub);
+        vec3 tuffNormal = nwrTuffNormal(vTerrainWorld.xz);
+        vec3 surfaceNormal = normal;
+        vec3 tangentX = normalize(vec3(1.0, 0.0, 0.0) - surfaceNormal * dot(surfaceNormal, vec3(1.0, 0.0, 0.0)));
+        vec3 tangentZ = normalize(cross(tangentX, surfaceNormal));
+        vec3 mappedNormal = normalize(tangentX * tuffNormal.x + tangentZ * tuffNormal.y + surfaceNormal * tuffNormal.z);
+        normal = normalize(mix(normal, mappedNormal, nTuffMask * 0.86));`,
       )
       .replace(
         '#include <dithering_fragment>',
@@ -185,8 +254,7 @@ export function createNorthwestReefTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'nw-reef-splat-v5';
+  material.customProgramCacheKey = () => 'nw-reef-splat-pbr-tuff-v2';
   material.needsUpdate = true;
   return material;
 }
-

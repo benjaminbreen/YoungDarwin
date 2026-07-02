@@ -634,7 +634,9 @@ function UnderwaterCameraTracker({ onChange }) {
   const lastAmount = useRef(-1);
 
   useFrame(() => {
-    const amount = Math.min(1, Math.max(0, (WATER_LEVEL - camera.position.y + 0.08) / 1.65));
+    const belowSurface = WATER_LEVEL - camera.position.y;
+    const raw = Math.min(1, Math.max(0, (belowSurface + 0.03) / 0.95));
+    const amount = raw * raw * (3 - raw * 2);
     if (Math.abs(amount - lastAmount.current) < 0.025) return;
     lastAmount.current = amount;
     onChange(amount);

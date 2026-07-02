@@ -46,6 +46,7 @@ const FOOT_PROBE_PATTERNS = {
 
 const VISUAL_SOLE_OFFSET = {
   default: { left: 0.006, right: 0.006 },
+  darwin5: { left: 0.018, right: 0.018 },
 };
 
 function normalizeClipName(name = '') {

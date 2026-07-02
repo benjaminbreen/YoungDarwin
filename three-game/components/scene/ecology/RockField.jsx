@@ -4,11 +4,36 @@ import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { ContactShadowField } from '../ContactShadow';
 
 // Instanced craggy rocks. Rock items come from a zone layout module (which
 // also feeds the physics obstacle list) — this component is display only.
 
 const dummy = new THREE.Object3D();
+
+function rockHeight(rock) {
+  return rock.radiusY * 2 - (rock.sink || 0);
+}
+
+function rockFootprint(rock) {
+  return Math.max(rock.radiusX || 0, rock.radiusZ || 0);
+}
+
+function rockCastsRealShadow(rock) {
+  return rock.y > -1.25 && rockHeight(rock) > 0.82 && rockFootprint(rock) > 0.58;
+}
+
+function rockContactShadow(rock) {
+  return {
+    id: rock.id,
+    x: rock.x,
+    y: rock.y,
+    z: rock.z,
+    yaw: rock.yaw,
+    radiusX: Math.max(0.28, (rock.radiusX || 0.4) * 1.08),
+    radiusZ: Math.max(0.24, (rock.radiusZ || 0.34) * 1.02),
+  };
+}
 
 function makeCraggyRockGeometry(seed) {
   const geo = new THREE.IcosahedronGeometry(1, 2);
@@ -25,7 +50,7 @@ function makeCraggyRockGeometry(seed) {
   return geo;
 }
 
-function InstancedRocks({ items, geometry, material, sourceUserData }) {
+function InstancedRocks({ items, geometry, material, castShadow, sourceUserData }) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   useLayoutEffect(() => {
@@ -48,7 +73,7 @@ function InstancedRocks({ items, geometry, material, sourceUserData }) {
     <instancedMesh
       ref={ref}
       args={[geometry, material, items.length]}
-      castShadow={false}
+      castShadow={castShadow}
       receiveShadow
       userData={sourceUserData}
       onClick={event => {
@@ -60,8 +85,30 @@ function InstancedRocks({ items, geometry, material, sourceUserData }) {
   );
 }
 
+function RockContactShadows({ rocks }) {
+  const contactShadows = useMemo(() => (
+    rocks
+      .filter(rock => rock.y > -1.25 && rockHeight(rock) > 0.24)
+      .sort((a, b) => rockFootprint(b) - rockFootprint(a))
+      .slice(0, 56)
+      .map(rockContactShadow)
+  ), [rocks]);
+  if (!contactShadows.length) return null;
+  return <ContactShadowField shadows={contactShadows} yOffset={0.026} strength={0.62} />;
+}
+
 export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
-  const buckets = useMemo(() => [0, 1, 2].map(b => rocks.filter((_, i) => i % 3 === b)), [rocks]);
+  const buckets = useMemo(() => {
+    const byVariant = [0, 1, 2].map(b => rocks.filter((_, i) => i % 3 === b));
+    return byVariant.flatMap((items, geometryIndex) => {
+      const casters = items.filter(rockCastsRealShadow);
+      const contactOnly = items.filter(rock => !rockCastsRealShadow(rock));
+      return [
+        casters.length ? { items: casters, geometryIndex, castShadow: true } : null,
+        contactOnly.length ? { items: contactOnly, geometryIndex, castShadow: false } : null,
+      ].filter(Boolean);
+    });
+  }, [rocks]);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId,
     renderLabel: sourceLabel || sourceId,
@@ -85,9 +132,17 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
   }, [geometries, material]);
   return (
     <group>
-      {buckets.map((items, index) => (
-        items.length > 0 && <InstancedRocks key={index} items={items} geometry={geometries[index]} material={material} sourceUserData={renderUserData} />
+      {buckets.map((bucket, index) => (
+        <InstancedRocks
+          key={`${bucket.geometryIndex}:${bucket.castShadow ? 'shadow' : 'contact'}:${index}`}
+          items={bucket.items}
+          geometry={geometries[bucket.geometryIndex]}
+          material={material}
+          castShadow={bucket.castShadow}
+          sourceUserData={renderUserData}
+        />
       ))}
+      <RockContactShadows rocks={rocks} />
     </group>
   );
 }

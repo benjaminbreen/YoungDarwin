@@ -88,6 +88,10 @@ Current terrain implementation:
 - Standard reusable dense dry grass lives in `three-game/world/ecology/standardGrass.js`, using the runtime GLB `public/assets/models/nature/runtime-animated-dry-grass.glb`. New maps that need the current grass look should use `buildStandardDryGrassPatchItems` plus `createStandardDryGrassPatchLayer`, with a region path mask passed through `pathInfo` so the grass opens around trails and clusters along shoulders. Avoid returning to the older hybrid blade/impostor grass stack for this look.
 - The default dry Floreana terrain material kit lives in `three-game/world/regions/materials/dryFloreanaTerrain.js`. For dry coastal, highland, grass-path, or sandy hillside maps, start with `createDryFloreanaTerrainMaterial({ pathPoints, textureSet, cacheKey })` and one of `DRY_FLOREANA_TEXTURE_SETS` instead of writing a one-off texture-splat shader. The shared runtime textures live in `public/assets/textures/world/dry-floreana/` and currently include red dirt, grass/litter shoulder, dry grass ground cover, and pale shell/stone flecks.
 - Dry path maps should treat low grass and litter as terrain material detail, not as thousands of small meshes. Use `buildStandardDryPathGrassPatchItems` from `three-game/world/ecology/standardGrass.js` for tall dry-grass GLB placement; it keeps the tread and immediate shoulder clear, then increases clumped tall grass density farther from the path. Tall grass may frame a route, but it should not cover the readable path surface.
+- Next terrain graphics target: move from the current albedo-only dry terrain kit toward a layered PBR terrain stack with albedo, normal, roughness, optional AO, and optional height maps per material. Keep the existing albedo kit working while adding the new path. The target runtime texture folder is `public/assets/textures/world/floreana-pbr/`; source/reference outputs should live under `assets-src/textures/floreana-pbr/`. The full plan, naming scheme, file layout, component outline, and image-generation prompts live in `graphicsupdate.md`.
+- Do not treat generated normal/roughness/height maps as interchangeable color textures. Albedo maps are loaded with sRGB color space; normal, roughness, AO, and height maps must be loaded as linear data textures. Start by wiring albedo + normal + roughness, then add AO/height once the shader path is stable.
+- Post Office Bay currently uses `createCoastalVolcanicTerrainMaterial()` with procedural lava/tuff/ash/beach/scrub base materials plus the shared path/shoulder/fleck texture overlay. New PBR textures will improve the path and close ground immediately, but basalt/tuff image layers require extending the coastal material or moving the region to the new layered PBR material.
+- Raised shell, coral-chip, and pebble litter should be close-range instanced ecology geometry, not binary shader flecks baked into terrain color. `three-game/components/scene/ecology/SurfaceLitterField.jsx` renders `surfaceLitter` layers; `NW_REEF` currently uses `reef-shell-stone-strandline` for strandline shells, coral chips, limestone chips, and basalt pebbles sitting slightly above the sandy-tuff terrain.
 
 ## Authored Region Maps: How To Build One
 
@@ -208,6 +212,11 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run build` verifies the production Next build.
 - `npm run three:screenshot` auto-detects an existing local Next dev server on common ports, captures desktop/mobile screenshots, and checks that the 3D canvas is full-screen and nonblank.
 - `npm run three:screenshot:fast` captures the desktop viewport only. Use it for quick smoke checks while iterating; use the full `three:screenshot` before claiming broad visual readiness.
+
+Playwright/Chromium sandbox note:
+
+- If `three:screenshot` or `three:screenshot:fast` fails with Chromium `SIGABRT` before loading the app, rerun the exact npm script with escalated permissions. The Playwright browser binary launches from `~/Library/Caches/ms-playwright`, outside the workspace sandbox, and the normal sandbox can abort it before page load.
+- Prefer exact commands `npm run three:screenshot` and `npm run three:screenshot:fast` so persistent approval rules can match those prefixes. Avoid wrapping them as `env THREE_SCREENSHOT_VIEWPORTS=... npm run three:screenshot`; use the dedicated `three:screenshot:fast` script for desktop-only checks.
 
 Verification expectations:
 

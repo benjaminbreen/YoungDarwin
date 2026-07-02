@@ -47,6 +47,11 @@ function dayEdgeFactor(hour) {
   return Math.max(dawn, dusk);
 }
 
+function isNightHour(hour) {
+  const h = ((Number(hour || 0) % 24) + 24) % 24;
+  return h >= 18.7 || h < 5.65;
+}
+
 function insectBiomeWeight(biome) {
   if (biome === 'wet-mud' || biome === 'salt-scrub' || biome === 'sesuvium-flat') return 1;
   if (biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'grass' || biome === 'saltgrass') return 0.72;
@@ -490,6 +495,11 @@ function TerrainDustPuffs({ enabled }) {
     if (!enabled) return undefined;
     return onPropEvent('terrain-dust', event => {
       if (!event?.position) return;
+      const kind = event.kind || 'dust';
+      if (kind === 'footstep') {
+        const { timeOfDay } = useThreeGameStore.getState();
+        if (isNightHour(timeOfDay)) return;
+      }
       const x = event.position.x;
       const z = event.position.z;
       if (!Number.isFinite(x) || !Number.isFinite(z)) return;
@@ -509,7 +519,6 @@ function TerrainDustPuffs({ enabled }) {
       const surfaceDust = THREE.MathUtils.clamp(event.dustiness ?? Math.max(profile.dustiness, 0.42), 0, 1.5);
       if (surfaceDust <= 0.04) return;
 
-      const kind = event.kind || 'dust';
       const direction = eventDirection(event);
       const fallSpeed = Math.max(0, event.fallSpeed || 0);
       const travelDistance = Math.max(0, event.travelDistance || 0);

@@ -11,14 +11,14 @@ export const modelAssets = {
     yOffset: 0,
     visualGrounding: true,
     normalizeMaterials: true,
-    materialLift: 0.12,
+    materialLift: 0.1,
     materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.3,
-    // Player-only material polish layered on top of the cel pipeline: a warm
-    // fresnel rim that catches the silhouette edges (adds form/pop without
-    // scene lights) + a touch less roughness so the sun reads on cloth.
+    materialEmissiveIntensity: 0.16,
+    // Player-only material polish layered on top of the cel pipeline: a subtle
+    // fresnel rim for silhouette readability plus world tone mapping so Darwin
+    // sits in the scene instead of reading as separately lit.
     // Tunables — ask for a screenshot to dial in. Remove to revert.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.68 },
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.2, rimIntensity: 0.11, roughness: 0.74, toneMapped: true },
     targetTriangles: 12000,
     prompt: 'Stylized low-poly young Charles Darwin naturalist, 1835 Galapagos expedition, wide-brim straw hat, brown frock coat, waistcoat, specimen satchel, field notebook, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral A-pose, clean topology, GLB.',
   },
@@ -31,12 +31,12 @@ export const modelAssets = {
     yOffset: 0,
     visualGrounding: true,
     normalizeMaterials: true,
-    materialLift: 0.1,
+    materialLift: 0.08,
     materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.22,
+    materialEmissiveIntensity: 0.14,
     // Same player rim/sheen as V1 so the hotkey-9 A/B isolates mesh+texture,
-    // not lighting. Drop this line to scope the upgrade to V1 only.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.68 },
+    // not a separate player-lighting treatment.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.2, rimIntensity: 0.11, roughness: 0.74, toneMapped: true },
     targetTriangles: 50000,
     prompt: 'Mixamo-rigged Young Darwin candidate 2 with expanded locomotion, traversal, injured, water, and naturalist action animation set.',
   },
@@ -60,8 +60,8 @@ export const modelAssets = {
     // a higher roughness + gentler rim so the (lighter) skin doesn't blow out.
     materialLift: 0,
     materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.12,
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.12, roughness: 0.86 },
+    materialEmissiveIntensity: 0.09,
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.3, rimIntensity: 0.1, roughness: 0.88, toneMapped: true },
     targetTriangles: 60000,
     prompt: 'Tripo v3.1 Young Darwin, segmented + Mixamo-rigged, game-decimated.',
   },
@@ -89,7 +89,7 @@ export const modelAssets = {
     //  normalMapUrl    — gentle derived micro-detail relief (normalScale tunes it).
     //  albedoMapUrl    — crisper albedo + tamed hot cream trousers.
     // ?v bump busts the browser cache when a map is regenerated.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.0, rimIntensity: 0.2, roughness: 0.6, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin4-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin4-normal.webp?v=1', normalScale: 0.8, albedoMapUrl: '/assets/models/darwin4-albedo-enh.webp?v=1' },
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.4, rimIntensity: 0.12, roughness: 0.64, envMapIntensity: 0.24, toneMapped: true, roughnessMapUrl: '/assets/models/darwin4-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin4-normal.webp?v=1', normalScale: 0.8, albedoMapUrl: '/assets/models/darwin4-albedo-enh.webp?v=1' },
     targetTriangles: 60000,
     prompt: 'Darwin candidate 4, Mixamo-rigged textured FBX, game-decimated.',
   },
@@ -106,20 +106,17 @@ export const modelAssets = {
     // trip, jump-down, and running turn clips are likewise native 41-bone skinless clips.
     scale: 1.0,
     rotation: [0, 0, 0],
-    yOffset: 0,
+    yOffset: -0.025,
     visualGrounding: true,
     normalizeMaterials: true,
-    materialLift: 0.06,
+    materialLift: 0.045,
     materialEmissive: '#20170f',
-    // 0.08 (was 0.18): the emissive is toneMapped=false, so a high value reads as
-    // a flat self-lit glow at night — flattens the form and looks plastic.
-    materialEmissiveIntensity: 0.08,
-    // roughness 0.6 (was 0.75) + envMapIntensity adds ambient specular sheen so
-    // cloth/leather stop reading as flat "velvet". envMapIntensity is the dial to
-    // tune: higher = glossier + brighter fill; lower = subtler. See ModelAsset.jsx.
-    // toneMapped:true — test running the player through ACES like the world. Flip
-    // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.8, rimIntensity: 0.08, roughness: 0.72, envMapIntensity: 0.16, toneMapped: true },
+    // Keep emissive very low; high self-light flattens the face/coat and fights
+    // the outdoor light rig.
+    materialEmissiveIntensity: 0.055,
+    // A small envMap sheen keeps leather/cloth from reading as flat "velvet"
+    // without creating an artificial player-only glow.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.055, roughness: 0.76, envMapIntensity: 0.12, toneMapped: true },
     targetTriangles: 60000,
     prompt: 'Darwin candidate 5, Mixamo-rigged test model with supplied idle, walking, and running animation clips.',
   },
@@ -262,10 +259,24 @@ export const modelAssets = {
     targetTriangles: 5000,
     prompt: 'Game-ready Blue-footed Booby, brown and white Galapagos seabird with blue feet, idle walk and run clips with wing flapping, optimized GLB.',
   },
+  galapagosDoveRigged: {
+    enabled: false,
+    preload: false,
+    path: '/assets/models/animals/runtime/dove-bird-rigged.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0.03,
+    normalizeMaterials: true,
+    materialLift: 0.035,
+    materialEmissive: '#14110d',
+    materialEmissiveIntensity: 0.06,
+    targetTriangles: 5000,
+    prompt: 'Rigged low-poly Galapagos dove / shore bird candidate, imported for later Floreana dry-zone bird integration.',
+  },
   greenTurtle: {
     enabled: true,
     preload: false,
-    path: '/assets/models/animals/runtime/green-turtle.glb',
+    path: '/assets/models/animals/runtime/hawksbill-sea-turtle.glb',
     scale: 3.0,
     rotation: [0, 0, 0],
     yOffset: 0.12,
@@ -274,7 +285,21 @@ export const modelAssets = {
     materialEmissive: '#0e1410',
     materialEmissiveIntensity: 0.06,
     targetTriangles: 8000,
-    prompt: 'Game-ready Galapagos green sea turtle (hawksbill source mesh), looping swim cycle, naturalistic mottled carapace, optimized GLB.',
+    prompt: 'Rigged hawksbill sea turtle runtime replacement for the existing green-turtle slot, looping swim cycle, naturalistic mottled carapace, optimized GLB.',
+  },
+  animatedLowPolyFish: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/animated-low-poly-fish.glb',
+    scale: 0.36,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.03,
+    materialEmissive: '#0b1316',
+    materialEmissiveIntensity: 0.04,
+    targetTriangles: 1000,
+    prompt: 'Small animated low-poly reef fish for instanced shallow-water schools at Northwest Reef.',
   },
   seaLion: {
     enabled: true,
@@ -409,6 +434,62 @@ export const modelAssets = {
     materialEmissiveIntensity: 0.04,
     targetTriangles: 8432,
     prompt: 'Broken weathered wooden crate prop for Post Office Bay shore camp, heavy enough to push but not carry.',
+  },
+  shoreTurretShell: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/shore/finds/turret-shell.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.025,
+    materialEmissive: '#20170f',
+    materialEmissiveIntensity: 0.03,
+    targetTriangles: 4000,
+    prompt: 'Small turret shell collectible shore find for Galapagos beach biomes; spawned sparsely on sand strandlines.',
+  },
+  shoreJunoniaShell: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/shore/finds/junonia-shell.glb',
+    scale: 1,
+    rotation: [Math.PI / 2, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.025,
+    materialEmissive: '#20170f',
+    materialEmissiveIntensity: 0.03,
+    targetTriangles: 5000,
+    prompt: 'Junonia-style spotted shell collectible shore find; uncommon beach-object variant for Darwin to inspect or collect.',
+  },
+  shoreStarfish: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/shore/finds/starfish.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.025,
+    materialEmissive: '#201008',
+    materialEmissiveIntensity: 0.03,
+    targetTriangles: 4000,
+    prompt: 'Detailed starfish collectible shore find, placed rarely on wet and dry beach biomes.',
+  },
+  shoreLowPolyStarfish: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/shore/finds/low-poly-starfish.glb',
+    scale: 1,
+    rotation: [-Math.PI / 2, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.025,
+    materialEmissive: '#201008',
+    materialEmissiveIntensity: 0.03,
+    targetTriangles: 1000,
+    prompt: 'Small low-poly starfish collectible shore find, cheap enough for sparse repeated placement on beaches.',
   },
   basalt: {
     enabled: false,

@@ -33,6 +33,26 @@ export function usePlayerCameraRig() {
   const aimPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
   const aimHit = useMemo(() => new THREE.Vector3(), []);
   const aimDir = useMemo(() => new THREE.Vector3(), []);
+  const scratch = useMemo(() => ({
+    panRight: new THREE.Vector3(),
+    panVertical: new THREE.Vector3(),
+    recenterForward: new THREE.Vector3(),
+    cameraAnchor: new THREE.Vector3(),
+    desired: new THREE.Vector3(),
+    cameraShake: new THREE.Vector3(),
+    statusPivot: new THREE.Vector3(),
+    statusForward: new THREE.Vector3(),
+    statusRight: new THREE.Vector3(),
+    chest: new THREE.Vector3(),
+    statusEye: new THREE.Vector3(),
+    worldDirection: new THREE.Vector3(),
+    eyeForward: new THREE.Vector3(),
+    top: new THREE.Vector3(),
+    cameraForward: new THREE.Vector3(),
+    cameraRight: new THREE.Vector3(),
+    rawPivot: new THREE.Vector3(),
+    shoulderEye: new THREE.Vector3(),
+  }), []);
 
   const updatePointerNdc = useCallback(event => {
     const rect = gl.domElement.getBoundingClientRect();
@@ -85,10 +105,10 @@ export function usePlayerCameraRig() {
       lastPointerYRef.current = event.clientY;
       if (panningRef.current || event.shiftKey) {
         const dist = THREE.MathUtils.clamp(zoomRef.current, 4, 14);
-        const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(UP, yawRef.current);
+        const right = scratch.panRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
         panOffsetRef.current
           .add(right.multiplyScalar(-dx * CAMERA.panSpeed * dist))
-          .add(new THREE.Vector3(0, dy * CAMERA.panSpeed * dist, 0));
+          .add(scratch.panVertical.set(0, dy * CAMERA.panSpeed * dist, 0));
         if (panOffsetRef.current.length() > CAMERA.maxPan) panOffsetRef.current.setLength(CAMERA.maxPan);
       } else if (!aimActiveRef.current) {
         // While aiming the cursor controls Darwin's facing, not the camera.
@@ -122,7 +142,7 @@ export function usePlayerCameraRig() {
       element.style.cursor = '';
       element.style.touchAction = '';
     };
-  }, [gl, updatePointerNdc]);
+  }, [gl, scratch, updatePointerNdc]);
 
   const resetCameraForSpawn = useCallback(groundY => {
     cameraFollowYRef.current = groundY;
@@ -131,13 +151,13 @@ export function usePlayerCameraRig() {
   }, []);
 
   const recenterCamera = useCallback(facing => {
-    const forward = new THREE.Vector3(facing?.x || 0, 0, facing?.z || -1);
+    const forward = scratch.recenterForward.set(facing?.x || 0, 0, facing?.z || -1);
     if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
     forward.normalize();
     yawRef.current = Math.atan2(forward.x, forward.z);
     panOffsetRef.current.set(0, 0, 0);
     shoulderPivotRef.current = null;
-  }, []);
+  }, [scratch]);
 
   const updateCamera = useCallback(({
     playerPosition,
@@ -167,37 +187,40 @@ export function usePlayerCameraRig() {
     cameraFollowYRef.current = cameraFollowYRef.current === null
       ? cameraTargetY
       : THREE.MathUtils.damp(cameraFollowYRef.current, cameraTargetY, 7, delta);
-    const cameraAnchor = playerPosition.clone();
+    const cameraAnchor = scratch.cameraAnchor.copy(playerPosition);
     cameraAnchor.y = cameraFollowYRef.current;
 
     const offset = cameraTargets[viewMode] || cameraTargets.shoulder;
-    const desired = offset.clone().applyAxisAngle(UP, yawRef.current).add(cameraAnchor);
+    const desired = scratch.desired.copy(offset).applyAxisAngle(UP, yawRef.current).add(cameraAnchor);
     const impulseProgress = THREE.MathUtils.clamp((now - cameraImpulse.startedAt) / Math.max(0.01, cameraImpulse.duration), 0, 1);
     const impulseFade = Math.sin(impulseProgress * Math.PI) * cameraImpulse.intensity;
-    const cameraShake = impulseFade > 0.001
-      ? new THREE.Vector3(
-          Math.sin(now * 43.7 + cameraImpulse.seed) * 0.035 * impulseFade,
-          Math.sin(now * 51.1 + cameraImpulse.seed * 2.3) * 0.025 * impulseFade,
-          Math.cos(now * 39.3 + cameraImpulse.seed * 1.7) * 0.03 * impulseFade,
-        )
-      : new THREE.Vector3();
+    const cameraShake = scratch.cameraShake;
+    if (impulseFade > 0.001) {
+      cameraShake.set(
+        Math.sin(now * 43.7 + cameraImpulse.seed) * 0.035 * impulseFade,
+        Math.sin(now * 51.1 + cameraImpulse.seed * 2.3) * 0.025 * impulseFade,
+        Math.cos(now * 39.3 + cameraImpulse.seed * 1.7) * 0.03 * impulseFade,
+      );
+    } else {
+      cameraShake.set(0, 0, 0);
+    }
     const statusViewOpen = useThreeGameStore.getState().statusViewOpen;
-    const statusPivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffsetRef.current);
+    const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
     if (statusViewOpen) {
-      const forward = new THREE.Vector3(facing.x, 0, facing.z);
+      const forward = scratch.statusForward.set(facing.x, 0, facing.z);
       if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
       forward.normalize();
-      const right = new THREE.Vector3(forward.z, 0, -forward.x);
-      const chest = playerPosition.clone().add(new THREE.Vector3(0, 1.5, 0));
+      const right = scratch.statusRight.set(forward.z, 0, -forward.x);
+      const chest = scratch.chest.copy(playerPosition).add(scratch.panVertical.set(0, 1.5, 0));
       if (!statusLookRef.current) {
         statusLookRef.current = camera.position.clone()
-          .add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(6));
+          .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));
       }
       const ease = 1 - Math.exp(-2.4 * delta);
-      const eye = chest.clone()
-        .add(forward.clone().multiplyScalar(1.15))
+      const eye = scratch.statusEye.copy(chest)
+        .add(forward.multiplyScalar(1.15))
         .add(right.multiplyScalar(0.18))
-        .add(new THREE.Vector3(0, 0.05, 0));
+        .add(scratch.panVertical.set(0, 0.05, 0));
       camera.position.lerp(eye, ease);
       statusLookRef.current.lerp(chest, ease);
       camera.lookAt(statusLookRef.current);
@@ -206,23 +229,23 @@ export function usePlayerCameraRig() {
       // inside the skull geometry; vertical motion is snapped, not lerped,
       // because positional lag is what caused the camera to fall behind into
       // the model while moving.
-      const eyeForward = new THREE.Vector3(0, 0, -0.22).applyAxisAngle(UP, yawRef.current);
-      desired.copy(playerPosition).add(new THREE.Vector3(0, 1.66, 0)).add(eyeForward);
+      const eyeForward = scratch.eyeForward.set(0, 0, -0.22).applyAxisAngle(UP, yawRef.current);
+      desired.copy(playerPosition).add(scratch.panVertical.set(0, 1.66, 0)).add(eyeForward);
       camera.position.copy(desired);
       const lookPitch = THREE.MathUtils.clamp((CAMERA.defaultPitch - pitchRef.current) * 1.5, -1.3, 1.3);
       camera.rotation.order = 'YXZ';
       camera.rotation.set(lookPitch, yawRef.current, 0);
     } else if (viewMode === 'top') {
       const height = THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, 85);
-      const top = cameraAnchor.clone().add(new THREE.Vector3(0, height, 0));
+      const top = scratch.top.copy(cameraAnchor).add(scratch.panVertical.set(0, height, 0));
       camera.position.lerp(top.add(cameraShake), 1 - Math.exp(-8 * delta));
       // Fixed straight-down orientation: lookAt near the vertical pole made
       // the camera roll unpredictably as its position lagged the player.
       camera.rotation.order = 'YXZ';
       camera.rotation.set(-Math.PI / 2, yawRef.current, 0);
     } else {
-      const cameraForward = new THREE.Vector3(0, 0, -1).applyAxisAngle(UP, yawRef.current);
-      const cameraRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(UP, yawRef.current);
+      const cameraForward = scratch.cameraForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
+      const cameraRight = scratch.cameraRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       const cameraDistance = THREE.MathUtils.lerp(
         zoomRef.current,
         THREE.MathUtils.clamp(zoomRef.current, 3.7, 5.4),
@@ -235,7 +258,7 @@ export function usePlayerCameraRig() {
       // Smooth the pivot itself: looking straight at the raw player position
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
-      const rawPivot = cameraAnchor.clone().add(new THREE.Vector3(0, 1.22, 0)).add(panOffsetRef.current);
+      const rawPivot = scratch.rawPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
       if (swimCamera > 0.001) {
         rawPivot.y = THREE.MathUtils.lerp(rawPivot.y, WATER_LEVEL - 0.28, swimCamera);
       }
@@ -248,10 +271,10 @@ export function usePlayerCameraRig() {
       pivot.z = THREE.MathUtils.damp(pivot.z, rawPivot.z, 9, delta);
       const horiz = Math.cos(effectivePitch) * cameraDistance;
       const vert = Math.sin(effectivePitch) * cameraDistance;
-      const eye = pivot.clone()
-        .add(cameraForward.clone().multiplyScalar(-horiz))
+      const eye = scratch.shoulderEye.copy(pivot)
+        .add(cameraForward.multiplyScalar(-horiz))
         .add(cameraRight.multiplyScalar(side))
-        .add(new THREE.Vector3(0, vert, 0));
+        .add(scratch.panVertical.set(0, vert, 0));
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-6.5 * delta));
       camera.lookAt(pivot);
     }
@@ -261,7 +284,7 @@ export function usePlayerCameraRig() {
       camera.lookAt(statusLookRef.current);
       if (statusLookRef.current.distanceToSquared(statusPivot) < 0.02) statusLookRef.current = null;
     }
-  }, [camera, cameraTargets]);
+  }, [camera, cameraTargets, scratch]);
 
   return {
     yawRef,

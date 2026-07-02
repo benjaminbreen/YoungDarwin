@@ -46,8 +46,17 @@ const HAND_TOOLS = [
 
 const PLAYER_MODEL_CYCLE = ['darwin', 'darwinCandidate2', 'darwin4', 'darwin5'];
 
-function darwin5StandingJumpClip(charge) {
-  return charge >= 0.45 ? 'standingJumpHigh' : 'standingJumpShort';
+function darwin5StandingJumpRequest(charge, jumpPhase) {
+  const charged = charge >= 0.35;
+  return {
+    clip: 'standingJump',
+    fade: jumpPhase === 'takeoff' ? 0.04 : 0.02,
+    // The source clip is a full 1.93s Mixamo jump cycle, while normal game
+    // airtime is much shorter. Play only the takeoff/air pose window and let
+    // the landing resolver handle impact procedurally.
+    timeScale: THREE.MathUtils.lerp(1.55, 1.28, charge),
+    maxTime: charged ? 1.28 : 0.92,
+  };
 }
 
 const DARWIN5_FALL_IDLE_MIN_DISTANCE = 1.35;
@@ -467,11 +476,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       const shortStandingJump = !motionRef.current.jumpWasRunning && charge < 0.15;
       const useDarwin5FullStandingJump = modelAssetId === 'darwin5' && !motionRef.current.jumpWasRunning;
       if (useDarwin5FullStandingJump) {
-        return {
-          clip: darwin5StandingJumpClip(charge),
-          fade: jumpPhase === 'takeoff' ? 0.04 : 0.02,
-          timeScale: 1,
-        };
+        return darwin5StandingJumpRequest(charge, jumpPhase);
       }
       if (jumpPhase === 'takeoff') {
         if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
