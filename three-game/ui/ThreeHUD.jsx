@@ -15,7 +15,6 @@ import {
   PanelTabs,
   GOLD_LABEL,
   GOLD_BUTTON,
-  GOLD_BUTTON_SOLID,
 } from './expedition/ExpeditionPanel';
 import {
   CompassRoseIcon,
@@ -409,7 +408,7 @@ function TopObjective({ objective }) {
   };
 
   return (
-    <div className="absolute left-1/2 top-3 hidden w-[min(32rem,calc(100vw-42rem))] min-w-[20rem] -translate-x-1/2 text-center xl:block">
+    <div className="absolute left-1/2 top-3 hidden w-[min(32rem,calc(100vw-42rem))] min-w-[20rem] -translate-x-1/2 animate-hud-rise text-center [animation-delay:75ms] motion-reduce:animate-none xl:block">
       <ExpeditionPanel
         innerClassName="p-0"
         variant="objective"
@@ -423,16 +422,18 @@ function TopObjective({ objective }) {
           aria-expanded={expanded}
           className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
         >
-          <CompassRoseIcon className="h-6 w-6 shrink-0 text-expedition-gold" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 shadow-[inset_0_0_8px_rgba(0,0,0,0.35)]">
+            <CompassRoseIcon className="h-6 w-6 text-expedition-gold" />
+          </span>
           <div className="min-w-0 flex-1 text-center">
-            <div className="truncate text-[14px] font-semibold tracking-wide text-expedition-parchment">
+            <div className="truncate text-[15.5px] font-semibold tracking-wide text-expedition-parchment">
               {formatBannerObjective(objective)}
             </div>
-            <div className="mt-0.5 flex items-center justify-center gap-1.5 text-[10.5px] text-expedition-faded">
+            <div className="mt-0.5 flex items-center justify-center gap-1.5 text-[11px] tracking-wide text-expedition-gold/90">
               <span className="truncate">{zone.name}</span>
-              <span className="text-expedition-brass">&bull;</span>
+              <span className="text-expedition-gold/55">&bull;</span>
               <span>{formatExpeditionDate(day)}</span>
-              <span className="text-expedition-brass">&bull;</span>
+              <span className="text-expedition-gold/55">&bull;</span>
               <span>{formatExpeditionTime(timeOfDay)}</span>
             </div>
           </div>
@@ -533,10 +534,13 @@ function StatBar({ icon: Icon, label, value, fill }) {
       <div>
         <div className="mb-1 flex items-baseline justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-expedition-parchment/90">{label}</span>
-          <span className="text-xs font-semibold text-expedition-parchment">{Math.round(safeValue)}</span>
+          <span className="text-[13px] font-semibold text-expedition-parchment">{Math.round(safeValue)}</span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-black/45 ring-1 ring-expedition-brass/40">
-          <div className="h-full rounded-full" style={{ width: `${safeValue}%`, background: fill }} />
+        <div className="h-2 overflow-hidden rounded-full bg-black/45 ring-1 ring-expedition-gold/40">
+          <div
+            className="h-full rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] transition-[width] duration-700 ease-out"
+            style={{ width: `${safeValue}%`, background: fill }}
+          />
         </div>
       </div>
     </div>
@@ -849,7 +853,7 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
         onSelect={setView}
       />
       <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
-        <div className="min-w-0 truncate font-expedition text-[12px] font-light tracking-wide text-expedition-parchment">
+        <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">
           {zone.shortName || zone.name}
         </div>
         <button
@@ -861,7 +865,7 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
             surveyStyle
               ? 'border-expedition-goldbright bg-expedition-gold/25 text-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.24)]'
-              : 'border-expedition-brass/45 bg-black/15 text-expedition-gold/80 hover:border-expedition-gold hover:bg-expedition-gold/15'
+              : 'border-expedition-gold/55 bg-black/15 text-expedition-gold/80 hover:border-expedition-gold hover:bg-expedition-gold/15'
           }`}
           title={surveyStyle ? 'Show terrain minimap' : 'Show survey chart minimap'}
           aria-label={surveyStyle ? 'Show terrain minimap' : 'Show survey chart minimap'}
@@ -882,7 +886,7 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
           if (event.key === 'Enter' || event.key === ' ') onOpenMap();
         }}
         title="Open island map"
-        className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-gold focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-square'}`}
+        className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-square'}`}
         style={mapHeight ? { height: `${mapHeight}px` } : undefined}
       >
         {view === 'globe' ? (
@@ -953,6 +957,8 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
             <MapOverlays zone={zone} showKnown={showKnown} showNew={showNew} surveyStyle={surveyStyle} />
           </>
         )}
+        {/* inner hairline echoes the panel's double gold frame */}
+        <div className="pointer-events-none absolute inset-[3px] z-10 rounded-[2px] border border-expedition-gold/30" />
         <span className="absolute bottom-1 right-1.5 flex items-center text-expedition-parchment/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
           <NorthArrowIcon className="h-3.5 w-3.5" />
           <span className="font-expedition text-[10px] font-semibold">N</span>
@@ -979,7 +985,7 @@ function ToolBelt({ onOpenJournal }) {
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   return (
-    <ExpeditionPanel className="max-w-[min(35rem,calc(100vw-1.5rem))]" innerClassName="flex flex-wrap justify-center gap-1.5 p-2">
+    <ExpeditionPanel className="max-w-[min(35rem,calc(100vw-1.5rem))]" innerClassName="flex flex-wrap justify-center gap-2 p-2">
       {toolbarOrder.map((toolId, index) => {
         const tool = getInventoryItem(toolId);
         if (!tool) return null;
@@ -996,10 +1002,10 @@ function ToolBelt({ onOpenJournal }) {
               }
               active ? triggerToolUse(tool.id) : setActiveTool(tool.id);
             }}
-            className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
+            className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition duration-200 focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
               active
-                ? 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_16px_rgba(227,197,133,0.35),inset_0_1px_0_rgba(227,197,133,0.4)]'
-                : 'border-expedition-brass/55 bg-black/25 text-expedition-parchment/85 hover:border-expedition-gold hover:bg-expedition-gold/15'
+                ? 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_18px_rgba(227,197,133,0.45),inset_0_0_0_1px_rgba(227,197,133,0.45)]'
+                : 'border-expedition-gold/55 bg-[rgba(8,14,27,0.45)] text-expedition-parchment/85 hover:-translate-y-0.5 hover:border-expedition-gold hover:bg-expedition-gold/15'
             }`}
             title={`${index + 1}: ${tool.name}`}
           >
@@ -1007,7 +1013,7 @@ function ToolBelt({ onOpenJournal }) {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={tool.image} alt={tool.name} className="h-10 w-10 object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]" draggable={false} />
             ) : Icon ? <Icon className="h-7 w-7" /> : <span className="text-base">{tool.icon}</span>}
-            <span className="pointer-events-none absolute left-0.5 top-0.5 font-expedition text-[10px] font-semibold text-expedition-gold/90">
+            <span className="pointer-events-none absolute left-1 top-0.5 font-expedition text-[10px] font-semibold text-expedition-goldbright/95 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
               {index + 1}
             </span>
             <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[9rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-brass/60 bg-expedition-ink/90 px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -1171,7 +1177,7 @@ function NarrativePanel({ forceExpanded = false }) {
       }}
     >
     <ExpeditionPanel
-      className={`w-[min(31rem,calc(100vw-1.5rem))] transition-[opacity,transform] duration-300 ease-out ${expanded ? 'opacity-100' : 'translate-y-1 opacity-90'}`}
+      className={`w-[min(28rem,calc(100vw-1.5rem))] transition-[opacity,transform] duration-300 ease-out ${expanded ? 'opacity-100' : 'translate-y-1 opacity-90'}`}
       innerClassName={`transition-[padding] duration-300 ease-out ${expanded ? 'p-4 pt-1.5' : 'px-3 py-2.5'}`}
     >
       <div
@@ -1194,11 +1200,11 @@ function NarrativePanel({ forceExpanded = false }) {
       >
         {!expanded ? (
           <div className="grid grid-cols-[auto_1fr] items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-expedition-brass/60 bg-black/20 text-expedition-gold">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 text-expedition-gold">
               <OpenBookIcon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-expedition-gold">Field Log</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Field Log</div>
               <div className="mt-0.5 max-h-[2.55rem] overflow-hidden font-expedition text-[13px] leading-snug text-expedition-parchment/95">
                 {previewMessage}
               </div>
@@ -1235,10 +1241,10 @@ function NarrativePanel({ forceExpanded = false }) {
             event.stopPropagation();
             if (event.key === 'Escape') event.currentTarget.blur();
           }}
-          className={`min-w-0 flex-1 rounded-sm border border-expedition-brass/55 bg-[rgba(10,14,19,0.82)] px-3 font-expedition text-expedition-parchment outline-none placeholder:italic placeholder:text-expedition-faded/80 focus:border-expedition-gold focus:ring-1 focus:ring-expedition-gold/40 transition-[padding,font-size] duration-300 ${expanded ? 'py-2 text-[14.5px]' : 'py-1.5 text-[13px]'}`}
-          placeholder="Ask the narrator..."
+          className={`min-w-0 flex-1 rounded-sm border border-expedition-gold/50 bg-[rgba(232,220,192,0.9)] px-3 font-expedition text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 transition-[padding,font-size] duration-300 ${expanded ? 'py-2 text-[14.5px]' : 'py-1.5 text-[13px]'}`}
+          placeholder="Write a note or dictate to the narrator..."
         />
-        <button type="submit" className={`${GOLD_BUTTON_SOLID} uppercase transition-[height,padding] duration-300 ${expanded ? 'h-9' : 'h-8 px-2.5'}`}>
+        <button type="submit" className={`${GOLD_BUTTON} transition-[height,padding] duration-300 ${expanded ? 'h-9' : 'h-8 px-2.5'}`}>
           Send
         </button>
       </form>
@@ -1260,7 +1266,7 @@ function NarrativePanel({ forceExpanded = false }) {
 
 function CountChip({ icon: Icon, label, value }) {
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-expedition-brass/50 bg-black/25 px-2 py-1.5">
+    <div className="flex items-center gap-2 rounded-sm border border-expedition-gold/55 bg-black/25 px-2 py-1.5">
       <Icon className="h-5 w-5 shrink-0 text-expedition-gold" />
       <div className="min-w-0">
         <div className="font-expedition text-sm font-semibold leading-none text-expedition-parchment">{value}</div>
@@ -1344,7 +1350,7 @@ function ObjectivesTab({ objective, condensed = false }) {
       </div>
       <div>
       <div className={`${GOLD_LABEL} mb-1.5`}>Nearby NPC</div>
-      <div className="flex items-center gap-2.5 rounded-sm border border-expedition-brass/50 bg-black/25 px-2.5 py-2">
+      <div className="flex items-center gap-2.5 rounded-sm border border-expedition-gold/55 bg-black/25 px-2.5 py-2">
         <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
@@ -1361,15 +1367,15 @@ function ObjectivesTab({ objective, condensed = false }) {
       {zone.neighbors.length > 0 && (
         <div>
           <div className={`${GOLD_LABEL} mb-1.5`}>Nearby Objectives</div>
-          <div className="grid gap-1">
+          <div className="overflow-hidden rounded-sm border border-expedition-gold/50 bg-black/20">
             {zone.neighbors.map(route => (
               <button
                 key={route.zoneId}
                 type="button"
                 onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[route.edge] || null })}
-                className="group flex items-center gap-2 rounded-sm border border-expedition-brass/45 bg-black/20 px-2.5 py-1.5 text-left transition hover:border-expedition-gold hover:bg-expedition-gold/10"
+                className="group flex w-full items-center gap-2 border-t border-expedition-brass/35 px-2.5 py-2 text-left transition duration-200 first:border-t-0 hover:translate-x-0.5 hover:bg-expedition-gold/10"
               >
-                <CompassRoseIcon className="h-[1.1rem] w-[1.1rem] shrink-0 text-expedition-gold/80 group-hover:text-expedition-goldbright" />
+                <CompassRoseIcon className="h-[1.1rem] w-[1.1rem] shrink-0 text-expedition-gold/80 transition group-hover:text-expedition-goldbright" />
                 <span className="min-w-0">
                   <span className="block truncate font-expedition text-[12.5px] font-medium text-expedition-parchment">{route.label}</span>
                   <span className="text-[10.5px] text-expedition-faded">{route.minutes || 0}m &middot; +{route.fatigue || 0} fatigue</span>
@@ -1608,7 +1614,7 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
           />
         </div>
         {!folded && (
-          <div className={`min-h-0 flex-1 overflow-y-auto pr-0.5 pt-2.5 transition-[opacity,transform] duration-300 ease-out [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)] ${expanded ? 'translate-y-0 opacity-100' : 'translate-y-0.5 opacity-95'}`}>
+          <div key={tab} className={`min-h-0 flex-1 overflow-y-auto pr-0.5 pt-2.5 transition-[opacity,transform] duration-300 ease-out [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)] motion-reduce:animate-none animate-hud-fade ${expanded ? 'translate-y-0 opacity-100' : 'translate-y-0.5 opacity-95'}`}>
             {tab === 'objectives' && <ObjectivesTab objective={objective} condensed={!expanded} />}
             {tab === 'specimens' && <SpecimensTab condensed={!expanded} />}
             {tab === 'inventory' && <InventoryTab onOpenInventory={onOpenInventory} onOpenJournal={onOpenJournal} condensed={!expanded} />}
@@ -1634,7 +1640,7 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
             <button type="button" onClick={onOpenJournal} className={GOLD_BUTTON}>
               <span className="inline-flex items-center justify-center gap-1.5"><OpenBookIcon className="h-4 w-4" />Journal</span>
             </button>
-            <button type="button" onClick={rest} className={GOLD_BUTTON}>Rest</button>
+            <button type="button" onClick={rest} className={`${GOLD_BUTTON} col-span-2`}>Rest</button>
           </div>
         )}
         {!folded && (
@@ -2247,15 +2253,15 @@ export function ThreeHUD({ onTogglePerf }) {
       <MobileVitalsPanel />
       <MobileMapButton onOpenMap={openMapModal} />
 
-      <div className="absolute left-3 top-3 hidden md:block">
+      <div className="absolute left-3 top-3 hidden animate-hud-rise motion-reduce:animate-none md:block">
         <VitalStatusPanel />
       </div>
 
-      <div className="absolute right-3 top-3 hidden md:block xl:hidden">
+      <div className="absolute right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none md:block xl:hidden">
         <GameplayMinimap onOpenMap={openMapModal} />
       </div>
 
-      <div className="absolute bottom-3 right-3 top-3 hidden xl:block">
+      <div className="absolute bottom-3 right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block">
         <FieldSidebar
           objective={objective}
           onOpenInventory={() => openInventoryTab('case')}
@@ -2274,11 +2280,11 @@ export function ThreeHUD({ onTogglePerf }) {
 
       <MobileNarrativeDrawer open={mobileNarrativeOpen} onClose={() => setMobileNarrativeOpen(false)} />
 
-      <div className="absolute bottom-3 left-3 right-3 hidden flex-col gap-2 md:right-auto md:flex md:w-[31rem]">
+      <div className="absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex md:w-[28rem]">
         <NarrativePanel />
       </div>
 
-      <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 justify-center md:flex lg:bottom-3">
+      <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise justify-center [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3">
         <ToolBelt onOpenJournal={openJournalPanel} />
       </div>
 

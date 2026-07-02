@@ -407,6 +407,15 @@ export function isWalkOverTraversalObstacle(obstacle, maxHeight = WALK_OVER_TRAV
   return height > 0.18 && height <= maxHeight;
 }
 
+function walkOverTraversalLift(distance, radius, height) {
+  const normalized = THREE.MathUtils.clamp(distance / Math.max(0.001, radius), 0, 1);
+  // Low-poly rocks read as broad, mostly-flat stepping surfaces with a short
+  // rounded edge, not as perfect domes. Keep the middle high so feet plant on
+  // the visible top, then roll off only near the outer rim.
+  const edgeFalloff = THREE.MathUtils.smoothstep(normalized, 0.78, 1.0);
+  return height * (1 - edgeFalloff);
+}
+
 function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {
   if (!obstacle.traversal) return null;
   const base = obstacleBaseY(obstacle);
@@ -417,7 +426,7 @@ function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {
   const normalized = THREE.MathUtils.clamp(distance / radius, 0, 1);
   const dome = Math.sin((1 - normalized) * Math.PI * 0.5);
   if (isWalkOverTraversalObstacle(obstacle)) {
-    return base + obstacleTraversalHeight(obstacle) * dome * dome;
+    return base + walkOverTraversalLift(distance, radius, obstacleTraversalHeight(obstacle));
   }
 
   const top = obstacleTopAt(obstacle, x, z, playerRadius);

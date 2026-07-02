@@ -8,9 +8,13 @@ import {
 } from './gaitProfiles';
 
 const FOOT_PLANT_MAX_UP = 0.075;
+const FOOT_PLANT_OBSTACLE_MAX_UP = 0.22;
+const FOOT_PLANT_FAST_OBSTACLE_MAX_UP = 0.1;
 const FOOT_PLANT_MAX_DOWN = -0.045;
 const FOOT_PLANT_MAX_SPEED = 2.1;
 const VISUAL_GROUNDING_MAX_UP = 0.1;
+const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.34;
+const VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP = 0.14;
 const VISUAL_GROUNDING_PROBE_RANGE = 0.24;
 const FOOT_PLANT_BONE = {
   left: /leftfoot$/i,
@@ -32,6 +36,11 @@ function actionPhase(action) {
   const duration = clip?.duration || 0;
   if (duration <= 0) return 0;
   return (((action.time || 0) / duration) % 1 + 1) % 1;
+}
+
+function speedScaledObstacleLiftCap(speed, slowCap, fastCap) {
+  const speedRatio = THREE.MathUtils.clamp((speed || 0) / FOOT_PLANT_MAX_SPEED, 0, 1);
+  return THREE.MathUtils.lerp(slowCap, fastCap, speedRatio);
 }
 
 export function createFootContactRig({
@@ -103,10 +112,13 @@ export function createFootContactRig({
       if (strength > 0) {
         bone.getWorldPosition(temps.world);
         const ground = adapter.groundInfo(temps.world, { supportRadius: 0.06 });
+        const maxUp = ground.source === 'authored-obstacle'
+          ? speedScaledObstacleLiftCap(motionState?.speed, FOOT_PLANT_OBSTACLE_MAX_UP, FOOT_PLANT_FAST_OBSTACLE_MAX_UP)
+          : FOOT_PLANT_MAX_UP;
         targetOffset = THREE.MathUtils.clamp(
           (ground.y - temps.world.y) * strength,
           FOOT_PLANT_MAX_DOWN,
-          FOOT_PLANT_MAX_UP,
+          maxUp,
         );
       }
       entry.offset = THREE.MathUtils.damp(entry.offset, targetOffset, 14, delta);
@@ -143,15 +155,18 @@ export function createFootContactRig({
     let targetOffset = 0;
     if (canGround) {
       const deltas = [];
+      let obstacleProbeCount = 0;
       Object.entries(footGrounding).forEach(([side, entry]) => {
         if (side === 'stepId' || !entry.bone) return;
         entry.bone.getWorldPosition(probeWorld);
         const ground = adapter.groundInfo(probeWorld, { supportRadius: 0.07 });
+        if (ground.source === 'authored-obstacle') obstacleProbeCount += 1;
         const footGap = probeWorld.y - ground.y;
         const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width) : 0.5;
         const proximity = THREE.MathUtils.clamp(1 - Math.abs(footGap) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
         sampled[side] = {
           groundY: ground.y,
+          groundSource: ground.source,
           phaseContact,
           contact: proximity * (0.34 + phaseContact * 0.66),
         };
@@ -161,10 +176,13 @@ export function createFootContactRig({
       });
       if (deltas.length) {
         const averageDelta = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+        const maxUp = obstacleProbeCount > 0
+          ? speedScaledObstacleLiftCap(motionState?.speed, VISUAL_GROUNDING_OBSTACLE_MAX_UP, VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP)
+          : VISUAL_GROUNDING_MAX_UP;
         targetOffset = THREE.MathUtils.clamp(
           Math.max(0, averageDelta),
           0,
-          VISUAL_GROUNDING_MAX_UP,
+          maxUp,
         );
       }
     }
@@ -205,6 +223,7 @@ export function createFootContactRig({
           y: probeWorld.y,
           z: probeWorld.z,
           groundY: ground.y,
+          groundSource: ground.source,
           contact: entry.contact,
           pulse: entry.pulse,
           phase,

@@ -39,12 +39,13 @@ export function computeOutdoorLightRig({
   const clearSky = clamp01((1 - cloud * 0.9) * (1 - mistAmount * 0.5) * (1 - rainAmount * 0.75));
   const hardSun = clamp01(d * clearSky * highSun * (1 - g * 0.38));
   const goldenSideLight = clamp01(d * g * clearSky);
+  const clearVivid = clamp01(d * clearSky * (0.46 + highSun * 0.42 + g * 0.22));
   const moonlight = (1 - d) * 0.16 * (0.35 + moon * 0.65);
 
   const keyIntensity = Math.max(
     0.08,
     (0.18
-      + d * (2.42 + hardSun * 0.72 + goldenSideLight * 0.36 - weatherSoftness * 0.82)
+      + d * (2.46 + hardSun * 0.92 + goldenSideLight * 0.5 + clearVivid * 0.16 - weatherSoftness * 0.76)
       + moonlight)
       * (1 - dim * 0.24)
       * (1 - underwater * 0.22),
@@ -53,8 +54,8 @@ export function computeOutdoorLightRig({
   const hemiIntensity = Math.max(
     0.16,
     (0.32
-      + d * (0.9 + weatherSoftness * 0.62 + g * 0.08 - hardSun * 0.24)
-      + cloud * 0.1)
+      + d * (0.84 + weatherSoftness * 0.58 + g * 0.06 - hardSun * 0.34 - clearVivid * 0.06)
+      + cloud * 0.08)
       * (1 - dim * 0.18)
       * (1 - underwater * 0.2),
   );
@@ -62,7 +63,7 @@ export function computeOutdoorLightRig({
   const ambientIntensity = Math.max(
     0.12,
     (0.22
-      + d * (0.12 + weatherSoftness * 0.24 + mistAmount * 0.06 - hardSun * 0.08)
+      + d * (0.1 + weatherSoftness * 0.22 + mistAmount * 0.06 - hardSun * 0.15 - clearVivid * 0.04)
       + (1 - d) * 0.04)
       * (1 - underwater * 0.24),
   );
@@ -70,7 +71,7 @@ export function computeOutdoorLightRig({
   const fillIntensity = Math.max(
     0.04,
     (0.12
-      + d * (0.13 + weatherSoftness * 0.4 + g * 0.14 - hardSun * 0.09))
+      + d * (0.1 + weatherSoftness * 0.38 + g * 0.13 - hardSun * 0.17 - clearVivid * 0.04))
       * (1 - dim * 0.32)
       * (1 - underwater * 0.34),
   );
@@ -78,22 +79,22 @@ export function computeOutdoorLightRig({
   const localWarmFillIntensity = Math.max(
     0,
     (0.12
-      + d * (0.16 + g * 0.14 + weatherSoftness * 0.08 - hardSun * 0.08)
+      + d * (0.13 + g * 0.16 + weatherSoftness * 0.08 - hardSun * 0.14 - clearVivid * 0.04)
       + (1 - d) * 0.12)
       * (1 - dim * 0.28)
       * (1 - underwater * 0.58),
   );
 
   const shadowExtent = lerp(17.5, 24, clamp01(lowSun * 0.8 + g * 0.45));
-  const shadowContrast = clamp01(0.26 + hardSun * 0.62 + goldenSideLight * 0.18 - weatherSoftness * 0.32);
-  const shadowSoftness = clamp01(0.16 + weatherSoftness * 0.62 + lowSun * 0.32 + g * 0.22 - hardSun * 0.18);
+  const shadowContrast = clamp01(0.25 + hardSun * 0.72 + goldenSideLight * 0.24 + clearVivid * 0.08 - weatherSoftness * 0.3);
+  const shadowSoftness = clamp01(0.14 + weatherSoftness * 0.62 + lowSun * 0.34 + g * 0.26 - hardSun * 0.22);
   const shadowRadius = lerp(0.65, 3.4, shadowSoftness);
-  const shadowIntensity = clamp01(0.94 - weatherSoftness * 0.48 - g * 0.1 + hardSun * 0.08);
+  const shadowIntensity = clamp01(0.93 - weatherSoftness * 0.46 - g * 0.08 + hardSun * 0.12 + clearVivid * 0.04);
   const shadowNormalBias = lerp(0.018, 0.032, clamp01(lowSun * 0.68 + weatherSoftness * 0.32));
   const shadowBias = lerp(-0.00013, -0.00006, weatherSoftness);
-  const terrainSunWarmth = clamp01(d * clearSky * (0.18 + highSun * 0.26 + g * 0.42));
-  const terrainCoolShade = clamp01(d * (0.16 + hardSun * 0.24) * (1 - weatherSoftness * 0.48));
-  const terrainWetShine = clamp01(d * clearSky * (0.14 + hardSun * 0.34 + g * 0.18) + rainAmount * 0.3);
+  const terrainSunWarmth = clamp01(d * clearSky * (0.2 + highSun * 0.32 + g * 0.5 + clearVivid * 0.12));
+  const terrainCoolShade = clamp01(d * (0.17 + hardSun * 0.3 + clearVivid * 0.08) * (1 - weatherSoftness * 0.5));
+  const terrainWetShine = clamp01(d * clearSky * (0.16 + hardSun * 0.42 + g * 0.24 + clearVivid * 0.12) + rainAmount * 0.34);
 
   return {
     keyIntensity,
@@ -117,5 +118,6 @@ export function computeOutdoorLightRig({
     lowSun,
     weatherSoftness,
     goldenSideLight,
+    clearVivid,
   };
 }

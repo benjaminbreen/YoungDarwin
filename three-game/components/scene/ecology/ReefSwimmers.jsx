@@ -20,9 +20,10 @@ const FAR_REEF_INTERVAL = 1 / 6;
 //   swimmers: {
 //     schools: [{ id, path, count, center: [x, z], radius, y: [lo, hi],
 //                 speed, scale: [lo, hi], baseRotation, timeScale,
-//                 startleRadius, startlePush, startleSpeedBoost }],
+//                 startleRadius, startlePush, startleSpeedBoost, bank }],
 //     cruisers: [{ id, path, orbit: { cx, cz, rx, rz }, y, bob, speed,
-//                  scale, baseRotation, direction, timeScale, phase }],
+//                  scale, baseRotation, direction, timeScale, phase,
+//                  avoidRadius, avoidPush, avoidDive, doubleSide }],
 //   }
 //
 // Every individual is a SkeletonUtils clone with its own mixer so the GLB's
@@ -41,7 +42,7 @@ function seeded(i, k) {
   return v - Math.floor(v);
 }
 
-function prepareSwimmerScene(scene) {
+function prepareSwimmerScene(scene, options = {}) {
   scene.traverse(object => {
     if (!object.isMesh) return;
     object.castShadow = false;
@@ -50,7 +51,7 @@ function prepareSwimmerScene(scene) {
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material) return;
-      material.side = THREE.FrontSide;
+      material.side = options.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
       if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.05);
       if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.6);
     });
@@ -103,6 +104,23 @@ function cruiserPosition(out, spec, t) {
   return out;
 }
 
+function applyPlayerAvoidance(out, spec, player, avoid) {
+  if (!player || avoid <= 0) return out;
+  const radius = spec.avoidRadius || 0;
+  if (!radius) return out;
+  const dx = out.x - player.x;
+  const dz = out.z - player.z;
+  const distSq = dx * dx + dz * dz;
+  if (distSq < 0.0001 || distSq >= radius * radius) return out;
+  const dist = Math.sqrt(distSq);
+  const local = (1 - dist / radius) * avoid;
+  const push = (spec.avoidPush || 5) * local * local;
+  out.x += (dx / dist) * push;
+  out.z += (dz / dist) * push;
+  out.y -= (spec.avoidDive || 0.22) * local;
+  return out;
+}
+
 // Faces the group along its direction of travel (sampled a beat ahead), with
 // pitch following the climb/dive and an optional banked roll for cruisers.
 function aimAlongPath(group, position, aheadPosition, roll = 0) {
@@ -116,7 +134,9 @@ function aimAlongPath(group, position, aheadPosition, roll = 0) {
 
 function SwimmerIndividual({ source, spec, animations, phase, timeScale, mixerStore, index }) {
   const inner = useRef(null);
-  const sceneClone = useMemo(() => prepareSwimmerScene(cloneSkeleton(source)), [source]);
+  const sceneClone = useMemo(() => prepareSwimmerScene(cloneSkeleton(source), {
+    doubleSide: spec.doubleSide,
+  }), [source, spec.doubleSide]);
   const mixer = useMemo(() => {
     const m = new THREE.AnimationMixer(sceneClone);
     const clip = animations[0];
@@ -199,7 +219,11 @@ function FishSchool({ spec }) {
       if (group) {
         schoolPosition(_pos, runtime, fishes[i], t, player, startle);
         schoolPosition(_ahead, runtime, fishes[i], t + 0.35, player, startle);
-        aimAlongPath(group, _pos, _ahead);
+        const turnSign = Math.sign(fishes[i].angularSpeed) || 1;
+        const cruiseBank = (runtime.bank ?? 0.055) * turnSign
+          * (0.65 + Math.sin(t * 0.33 + fishes[i].phase) * 0.35);
+        const startleBank = startle * (runtime.startleBank ?? 0.2) * turnSign;
+        aimAlongPath(group, _pos, _ahead, cruiseBank + startleBank);
       }
       const entry = mixerStore.current[i];
       if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale * animationBoost);
@@ -212,7 +236,7 @@ function FishSchool({ spec }) {
         <group key={i} ref={el => { groupRefs.current[i] = el; }}>
           <SwimmerIndividual
             source={scene}
-            spec={{ baseRotation: spec.baseRotation, scaleValue: fish.scaleValue }}
+            spec={{ baseRotation: spec.baseRotation, scaleValue: fish.scaleValue, doubleSide: spec.doubleSide }}
             animations={animations}
             phase={fish.phase / (Math.PI * 2)}
             timeScale={fish.timeScale}
@@ -230,6 +254,7 @@ function Cruiser({ spec }) {
   const group = useRef(null);
   const mixerStore = useRef([]);
   const farAccum = useRef(0);
+  const avoidRef = useRef(0);
   const runtime = useMemo(() => ({
     direction: spec.direction || 1,
     phase: spec.phase || 0,
@@ -255,19 +280,31 @@ function Cruiser({ spec }) {
       }
     }
     cruiserPosition(_pos, runtime, t);
+    let targetAvoid = 0;
+    if (player && runtime.avoidRadius) {
+      const dx = player.x - _pos.x;
+      const dz = player.z - _pos.z;
+      const dist = Math.hypot(dx, dz);
+      targetAvoid = THREE.MathUtils.clamp(1 - dist / runtime.avoidRadius, 0, 1);
+    }
+    const response = targetAvoid > avoidRef.current ? 2.6 : 1.15;
+    avoidRef.current += (targetAvoid - avoidRef.current) * Math.min(1, stepDelta * response);
+    const avoid = avoidRef.current;
+    applyPlayerAvoidance(_pos, runtime, player, avoid);
     cruiserPosition(_ahead, runtime, t + 1.2);
+    applyPlayerAvoidance(_ahead, runtime, player, avoid);
     // Gentle bank into the turn; orbit direction sets the sign.
-    const roll = (spec.bank ?? 0.16) * runtime.direction;
+    const roll = ((spec.bank ?? 0.16) + avoid * (spec.avoidBank ?? 0.22)) * runtime.direction;
     aimAlongPath(group.current, _pos, _ahead, roll);
     const entry = mixerStore.current[0];
-    if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale);
+    if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale * (1 + avoid * (spec.avoidSpeedBoost ?? 0.35)));
   });
 
   return (
     <group ref={group} userData={{ noReflect: true }}>
       <SwimmerIndividual
         source={scene}
-        spec={{ baseRotation: spec.baseRotation, scaleValue: spec.scale }}
+        spec={{ baseRotation: spec.baseRotation, scaleValue: spec.scale, doubleSide: spec.doubleSide }}
         animations={animations}
         phase={spec.phase || 0}
         timeScale={spec.timeScale || 1}

@@ -1,4 +1,5 @@
 import { nwReefCoastZ, nwReefIsletField, nwReefOutcrop } from './regions/northwestReef/terrain';
+import { ballColliderForVisualRock, visualRockTop } from './rockObstacleUtils';
 import { makeZoneScatter } from './scatter';
 
 // Deterministic rock layout for the Northwest Reef. Rocks live here (not in
@@ -56,8 +57,8 @@ export function getNorthwestReefRockObstacles() {
     .filter(rock => rock.radiusY * 2 - rock.sink > 0.5 && rock.y > -1.6)
     .map(rock => {
       const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.86;
-      const top = rock.radiusY - rock.sink;
-      const ball = { type: 'ball', radius, offset: [0, top - radius * 0.55, 0] };
+      const top = visualRockTop(rock);
+      const ball = ballColliderForVisualRock(radius, top);
       return {
         id: `nwreef-${rock.id}`,
         kind: 'rock',

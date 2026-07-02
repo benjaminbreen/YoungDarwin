@@ -1,4 +1,5 @@
 import { northShoreCoastZ } from './regions/northShore/terrain';
+import { ballColliderForVisualRock, visualRockTop } from './rockObstacleUtils';
 import { makeZoneScatter } from './scatter';
 
 // Deterministic rock layout for the Northern Shore. Rocks live here (not in
@@ -66,8 +67,8 @@ export function getNorthShoreRockObstacles() {
     .filter(rock => rock.radiusY * 2 - rock.sink > 0.5)
     .map(rock => {
       const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.86;
-      const top = rock.radiusY - rock.sink;
-      const ball = { type: 'ball', radius, offset: [0, top - radius * 0.55, 0] };
+      const top = visualRockTop(rock);
+      const ball = ballColliderForVisualRock(radius, top);
       return {
         id: `nshore-${rock.id}`,
         kind: 'rock',

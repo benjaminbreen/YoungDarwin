@@ -8,14 +8,14 @@ export function boulderTraversalProfile(heightDelta, heroic, durationFor) {
     const actionDurationValue = durationFor('climbWaistHeight');
     return {
       clip: 'climbWaistHeight',
-      actionDuration: Math.min(actionDurationValue, heroic ? 0.62 : 0.72),
-      motionDuration: THREE.MathUtils.clamp(0.24 + heightDelta * (heroic ? 0.16 : 0.2), 0.34, 0.52),
-      arcHeight: THREE.MathUtils.clamp(0.08 + heightDelta * 0.08, 0.12, 0.2),
-      lockMovement: heroic ? 0.16 : 0.22,
-      exitSpeedScale: heroic ? 0.92 : 0.45,
+      actionDuration: Math.min(actionDurationValue, heroic ? 0.5 : 0.62),
+      motionDuration: THREE.MathUtils.clamp(0.18 + heightDelta * (heroic ? 0.13 : 0.17), 0.28, 0.44),
+      arcHeight: THREE.MathUtils.clamp(0.06 + heightDelta * 0.065, 0.09, 0.16),
+      lockMovement: heroic ? 0.1 : 0.16,
+      exitSpeedScale: heroic ? 0.98 : 0.58,
       crouching: false,
-      earlyExitAt: heroic ? 0.58 : 0.66,
-      cancelAt: heroic ? 0.42 : 0.52,
+      earlyExitAt: heroic ? 0.48 : 0.58,
+      cancelAt: heroic ? 0.34 : 0.46,
     };
   }
   if (heightDelta <= BOULDER_HEAD_MAX_HEIGHT) {

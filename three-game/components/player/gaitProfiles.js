@@ -10,10 +10,21 @@ const STRIDE_TIME_SCALE = {
     jog: 1.08,
     holdWalk: 1.08,
     holdToolWalk: 1.08,
+    holdToolRun: 1.04,
     torchWalk: 1.08,
+    torchRun: 1.04,
     walkRifle: 1.08,
+    runRifle: 1.04,
     walkCarry: 1.09,
     tiredWalk: 1.06,
+    crouchWalk: 1.04,
+    crouchRun: 1.02,
+    walkBackwards: 1.02,
+    walkStrafeLeft: 1.04,
+    walkStrafeRight: 1.04,
+    runStrafeLeft: 1.02,
+    runStrafeRight: 1.02,
+    wadeWalk: 0.96,
   },
 };
 
@@ -29,12 +40,20 @@ const FOOT_CONTACT_PROFILES = {
   injuredWalkSevere: { left: 0.13, right: 0.63, width: 0.24 },
   injuredWalkCritical: { left: 0.13, right: 0.63, width: 0.25 },
   walkBackwards: { left: 0.62, right: 0.12, width: 0.18 },
+  walkStrafeLeft: { left: 0.18, right: 0.68, width: 0.2 },
+  walkStrafeRight: { left: 0.56, right: 0.06, width: 0.2 },
   run: { left: 0.08, right: 0.58, width: 0.14 },
   jog: { left: 0.09, right: 0.59, width: 0.16 },
+  runStrafeLeft: { left: 0.16, right: 0.66, width: 0.16 },
+  runStrafeRight: { left: 0.54, right: 0.04, width: 0.16 },
   holdToolRun: { left: 0.08, right: 0.58, width: 0.14 },
   torchRun: { left: 0.08, right: 0.58, width: 0.14 },
   runRifle: { left: 0.08, right: 0.58, width: 0.14 },
   wadeWalk: { left: 0.13, right: 0.63, width: 0.21 },
+  crouchWalk: { left: 0.16, right: 0.66, width: 0.24 },
+  crouchRun: { left: 0.12, right: 0.62, width: 0.2 },
+  torchCrouchWalk: { left: 0.16, right: 0.66, width: 0.24 },
+  rifleCrouchWalk: { left: 0.16, right: 0.66, width: 0.24 },
 };
 
 const FOOT_PROBE_PATTERNS = {
@@ -53,6 +72,10 @@ function normalizeClipName(name = '') {
   return String(name).replace(/\s+/g, '').replace(/[^a-z0-9_]/gi, '').toLowerCase();
 }
 
+const FOOT_CONTACT_PROFILE_BY_NORMALIZED = new Map(
+  Object.entries(FOOT_CONTACT_PROFILES).map(([name, profile]) => [normalizeClipName(name), profile]),
+);
+
 function strideFamilyForClip(clip = '') {
   if (clip.includes('Run') || clip === 'run') return 'run';
   return 'walk';
@@ -66,7 +89,7 @@ export function calibratedStrideTimeScale(modelAssetId, clip, scale) {
 
 export function getFootContactProfile(modelAssetId, clip) {
   const normalized = normalizeClipName(clip);
-  return FOOT_CONTACT_PROFILES[clip] || FOOT_CONTACT_PROFILES[normalized] || null;
+  return FOOT_CONTACT_PROFILES[clip] || FOOT_CONTACT_PROFILE_BY_NORMALIZED.get(normalized) || null;
 }
 
 export function getFootProbePatterns(modelAssetId) {

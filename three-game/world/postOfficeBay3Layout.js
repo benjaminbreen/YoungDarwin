@@ -3,6 +3,7 @@ import {
   postOfficeBay3CoastZ,
   postOfficeBay3TerrainHeight,
 } from './regions/postOfficeBay3/terrain';
+import { ballColliderForVisualRock, visualRockTop } from './rockObstacleUtils';
 import { makeZoneScatter } from './scatter';
 
 const scatter = (layer, count, seed, opts) => makeZoneScatter(POST_OFFICE_BAY_3, layer, count, seed, opts);
@@ -61,8 +62,8 @@ export function getPostOfficeBay3RockObstacles() {
     .filter(rock => rock.radiusY * 2 - rock.sink > 0.5)
     .map(rock => {
       const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.84;
-      const top = rock.radiusY - rock.sink;
-      const ball = { type: 'ball', radius, offset: [0, top - radius * 0.55, 0] };
+      const top = visualRockTop(rock);
+      const ball = ballColliderForVisualRock(radius, top);
       return {
         id: `pob3-${rock.id}`,
         kind: 'rock',

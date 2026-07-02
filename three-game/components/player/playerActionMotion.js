@@ -187,15 +187,26 @@ export function updatePlayerActionMotion({
     const turn = stateRef.current.turnMotion;
     const progress = THREE.MathUtils.clamp((now - turn.startedAt) / turn.duration, 0, 1);
     group.current.rotation.y = dampAngle(group.current.rotation.y, turn.targetYaw, 18, delta);
-    velocity.current.set(0, 0, 0);
-    stateRef.current.running = false;
-    stateRef.current.walking = false;
+    const turnForward = frameScratch.forwardFacing.set(Math.sin(group.current.rotation.y), 0, Math.cos(group.current.rotation.y));
+    const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+    if (horizontalSpeed > 0.05) {
+      const keep = THREE.MathUtils.lerp(turn.speedKeep ?? 0.82, 1, progress);
+      velocity.current.x = turnForward.x * horizontalSpeed * keep;
+      velocity.current.z = turnForward.z * horizontalSpeed * keep;
+    }
+    stateRef.current.running = horizontalSpeed > PLAYER.walkSpeed * 1.15;
+    stateRef.current.walking = horizontalSpeed > 0.45 && !stateRef.current.running;
     stateRef.current.airborne = false;
     stateRef.current.strafeLeft = false;
     stateRef.current.strafeRight = false;
     if (progress >= 1) {
       group.current.rotation.y = turn.targetYaw;
       facing.current.set(Math.sin(turn.targetYaw), 0, Math.cos(turn.targetYaw)).normalize();
+      if (horizontalSpeed > 0.05) {
+        const keep = turn.exitSpeedScale ?? 0.88;
+        velocity.current.x = facing.current.x * horizontalSpeed * keep;
+        velocity.current.z = facing.current.z * horizontalSpeed * keep;
+      }
       stateRef.current.turnMotion = null;
       stateRef.current.action = null;
       stateRef.current.lockMovementUntil = 0;

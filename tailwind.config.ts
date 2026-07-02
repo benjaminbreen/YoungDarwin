@@ -28,6 +28,25 @@ module.exports = {
         expedition: ['var(--font-garamond)', 'Georgia', 'Times New Roman', 'serif'],
         handwriting: ['var(--font-meddon)', 'Snell Roundhand', 'Apple Chancery', 'Bradley Hand', 'Segoe Script', 'cursive'],
       },
+      keyframes: {
+        // Animate the standalone `translate` property, not `transform`, so the
+        // entrance composes with Tailwind translate utilities (-translate-x-1/2
+        // centering on the banner and toolbelt) instead of overriding them.
+        'hud-rise': {
+          from: { opacity: '0', translate: '0 8px' },
+          to: { opacity: '1', translate: '0 0' },
+        },
+        'hud-fade': {
+          from: { opacity: '0', translate: '0 3px' },
+          to: { opacity: '1', translate: '0 0' },
+        },
+      },
+      animation: {
+        // 'backwards' (not 'both') so class-driven transforms/opacity take over
+        // cleanly once the entrance finishes.
+        'hud-rise': 'hud-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards',
+        'hud-fade': 'hud-fade 0.3s ease-out backwards',
+      },
     },
   },
   plugins: [],
