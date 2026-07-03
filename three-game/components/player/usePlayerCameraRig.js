@@ -23,6 +23,15 @@ export function usePlayerCameraRig() {
   const statusLookRef = useRef(null);
   const shoulderPivotRef = useRef(null);
   const swimCameraRef = useRef(0);
+  const openingCameraActiveRef = useRef(false);
+  const openingCameraRuntimeRef = useRef({
+    sequenceId: null,
+    startedAt: 0,
+    initialized: false,
+    finalPivot: new THREE.Vector3(),
+    finalEye: new THREE.Vector3(),
+    startTarget: new THREE.Vector3(),
+  });
   // Aim mode: cursor drives Darwin's facing instead of the camera. While
   // aimActiveRef is true, left-drag no longer rotates the camera (the cursor
   // aims) and a left-click bumps firePulseRef so the controller can fire.
@@ -52,6 +61,14 @@ export function usePlayerCameraRig() {
     cameraRight: new THREE.Vector3(),
     rawPivot: new THREE.Vector3(),
     shoulderEye: new THREE.Vector3(),
+    introStartTarget: new THREE.Vector3(),
+    introStartEye: new THREE.Vector3(),
+    introFinalPivot: new THREE.Vector3(),
+    introFinalEye: new THREE.Vector3(),
+    introEye: new THREE.Vector3(),
+    introLookTarget: new THREE.Vector3(),
+    introForward: new THREE.Vector3(),
+    introRight: new THREE.Vector3(),
   }), []);
 
   const updatePointerNdc = useCallback(event => {
@@ -83,6 +100,10 @@ export function usePlayerCameraRig() {
   useEffect(() => {
     const element = gl.domElement;
     const onPointerDown = event => {
+      if (openingCameraActiveRef.current) {
+        updatePointerNdc(event);
+        return;
+      }
       // Aiming: a left-click fires the rifle instead of starting a camera drag.
       if (aimActiveRef.current && event.button === 0) {
         updatePointerNdc(event);
@@ -98,6 +119,7 @@ export function usePlayerCameraRig() {
     };
     const onPointerMove = event => {
       updatePointerNdc(event);
+      if (openingCameraActiveRef.current) return;
       if (!draggingRef.current) return;
       const dx = event.clientX - lastPointerXRef.current;
       const dy = event.clientY - lastPointerYRef.current;
@@ -123,6 +145,7 @@ export function usePlayerCameraRig() {
     };
     const onWheel = event => {
       event.preventDefault();
+      if (openingCameraActiveRef.current) return;
       const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
       zoomRef.current = THREE.MathUtils.clamp(zoomRef.current + normalizedDelta * 0.9, CAMERA.minZoom, CAMERA.maxZoom);
     };
@@ -166,11 +189,19 @@ export function usePlayerCameraRig() {
     wasAirborne,
     cameraImpulse,
     viewMode,
+    openingCamera = null,
     swimming = false,
     wadeDepth = 0,
     now,
     delta,
   }) => {
+    const openingCameraActive = Boolean(openingCamera?.active);
+    openingCameraActiveRef.current = openingCameraActive;
+    if (!openingCameraActive) {
+      openingCameraRuntimeRef.current.sequenceId = null;
+      openingCameraRuntimeRef.current.startedAt = 0;
+      openingCameraRuntimeRef.current.initialized = false;
+    }
     const swimTarget = swimming ? 1 : THREE.MathUtils.smoothstep(wadeDepth, 0.45, 1.15) * 0.18;
     swimCameraRef.current = THREE.MathUtils.damp(
       swimCameraRef.current,
@@ -205,6 +236,78 @@ export function usePlayerCameraRig() {
       cameraShake.set(0, 0, 0);
     }
     const statusViewOpen = useThreeGameStore.getState().statusViewOpen;
+    if (openingCameraActive && !statusViewOpen) {
+      const sequenceId = openingCamera.sequenceId || 'opening-camera';
+      if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
+        openingCameraRuntimeRef.current.sequenceId = sequenceId;
+        openingCameraRuntimeRef.current.startedAt = now;
+        openingCameraRuntimeRef.current.initialized = false;
+      }
+      const duration = Math.max(0.1, openingCamera.duration || 4.2);
+      const rawProgress = THREE.MathUtils.clamp((now - openingCameraRuntimeRef.current.startedAt) / duration, 0, 1);
+      const descentProgress = THREE.MathUtils.smoothstep(rawProgress, 0.12, 1);
+      const flyT = descentProgress * descentProgress * descentProgress * (descentProgress * (descentProgress * 6 - 15) + 10);
+      const orbitT = THREE.MathUtils.smoothstep(rawProgress, 0.08, 0.9);
+      const targetT = THREE.MathUtils.smoothstep(rawProgress, 0.06, 0.78);
+      const introForward = scratch.introForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
+      const introRight = scratch.introRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
+      const currentFinalPivot = scratch.introFinalPivot
+        .copy(cameraAnchor)
+        .add(scratch.panVertical.set(0, 1.22, 0))
+        .add(panOffsetRef.current);
+      const cameraDistance = THREE.MathUtils.clamp(zoomRef.current, CAMERA.minZoom, CAMERA.maxZoom);
+      const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
+      const side = THREE.MathUtils.lerp(0.6, 1.5, zoomT);
+      const pitch = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
+      const horiz = Math.cos(pitch) * cameraDistance;
+      const vert = Math.sin(pitch) * cameraDistance;
+      const currentFinalEye = scratch.introFinalEye
+        .copy(currentFinalPivot)
+        .addScaledVector(introForward, -horiz)
+        .addScaledVector(introRight, side)
+        .add(scratch.panVertical.set(0, vert, 0));
+      const currentStartTarget = scratch.introStartTarget
+        .copy(currentFinalPivot)
+        .addScaledVector(introForward, 9.5)
+        .addScaledVector(introRight, -7.2);
+      const runtime = openingCameraRuntimeRef.current;
+      if (!runtime.initialized) {
+        runtime.finalPivot.copy(currentFinalPivot);
+        runtime.finalEye.copy(currentFinalEye);
+        runtime.startTarget.copy(currentStartTarget);
+        runtime.initialized = true;
+      }
+      const finalPivot = runtime.finalPivot;
+      const finalEye = runtime.finalEye;
+      const startTarget = runtime.startTarget;
+      const orbitTarget = scratch.introLookTarget
+        .copy(startTarget)
+        .lerp(finalPivot, targetT);
+      const finalOffsetX = finalEye.x - finalPivot.x;
+      const finalOffsetZ = finalEye.z - finalPivot.z;
+      const finalHorizontalRadius = Math.max(0.1, Math.hypot(finalOffsetX, finalOffsetZ));
+      const finalAngle = Math.atan2(finalOffsetZ, finalOffsetX);
+      const orbitAngle = finalAngle - (1 - orbitT) * 1.42 + Math.sin(orbitT * Math.PI) * 0.12;
+      const orbitRadius = THREE.MathUtils.lerp(10.5, finalHorizontalRadius, flyT);
+      const orbitHeight = THREE.MathUtils.lerp(92, finalEye.y - finalPivot.y, flyT);
+      const eye = scratch.introEye.set(
+        orbitTarget.x + Math.cos(orbitAngle) * orbitRadius,
+        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 2.8,
+        orbitTarget.z + Math.sin(orbitAngle) * orbitRadius,
+      );
+      const lookTarget = scratch.introLookTarget
+        .copy(orbitTarget);
+      lookTarget.y = THREE.MathUtils.lerp(orbitTarget.y, finalPivot.y + 0.18, THREE.MathUtils.smoothstep(rawProgress, 0.58, 1));
+      camera.position.copy(eye).addScaledVector(cameraShake, rawProgress);
+      camera.lookAt(lookTarget);
+      if (!shoulderPivotRef.current) {
+        shoulderPivotRef.current = finalPivot.clone();
+      } else {
+        shoulderPivotRef.current.copy(finalPivot);
+      }
+      statusLookRef.current = null;
+      return;
+    }
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
     if (statusViewOpen) {
       const forward = scratch.statusForward.set(facing.x, 0, facing.z);

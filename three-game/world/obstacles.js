@@ -8,11 +8,19 @@ import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
 import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
+import { getPenalColonyObstacles } from './penalColonyLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
-const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 1.0;
+const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
 const AUTHORED_TRAVERSAL_MIN_HEIGHT = 1.01;
 const AUTHORED_TRAVERSAL_MAX_HEIGHT = 1.9;
+const LARGE_ROCK_DOWNHILL_PUSH = {
+  mode: 'downhill-push',
+  strength: 0.007,
+  sustainedSeconds: 0.7,
+  minDownhillDrop: 0.035,
+  maxOffset: 0.42,
+};
 
 const REGION_OBSTACLE_SOURCES = {
   POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
@@ -21,6 +29,7 @@ const REGION_OBSTACLE_SOURCES = {
   N_SHORE: [getNorthShoreRockObstacles],
   NW_REEF: [getNorthwestReefRockObstacles],
   W_HIGH: [getWesternHighlandsRockObstacles],
+  PENAL_COLONY: [getPenalColonyObstacles],
 };
 
 function flattenCollider(collider) {
@@ -96,6 +105,14 @@ function deriveObstacleMobility(obstacle, bounds = obstacle) {
   const top = bounds.top ?? obstacle.colliderTop ?? obstacle.height ?? 0;
   const radius = bounds.radius ?? obstacle.radius ?? 0;
   if ((kind === 'rock' || kind === 'boulder') && top >= 0.45 && radius >= 0.48) {
+    if (top >= 1.05 && radius >= 0.72) {
+      const sizeFactor = THREE.MathUtils.clamp(radius * Math.max(0.6, top) / 3.2, 0.75, 1.35);
+      return normalizeMobility({
+        ...LARGE_ROCK_DOWNHILL_PUSH,
+        strength: LARGE_ROCK_DOWNHILL_PUSH.strength / sizeFactor,
+        maxOffset: THREE.MathUtils.clamp(0.52 / sizeFactor, 0.28, 0.48),
+      });
+    }
     return normalizeMobility({ mode: 'fixed' });
   }
   return normalizeMobility();
@@ -113,7 +130,9 @@ function applyObstacleMobility(obstacle) {
     mobility,
     pushable: movable,
     pushMass,
-    pushFriction: normalizedObstacle.pushFriction ?? normalizedObstacle.gameplay?.pushFriction ?? 0.88,
+    pushFriction: normalizedObstacle.pushFriction
+      ?? normalizedObstacle.gameplay?.pushFriction
+      ?? (mobility.mode === 'downhill-push' ? 0.42 : 0.88),
   };
 }
 
@@ -122,8 +141,11 @@ function defaultTraversalForObstacle(obstacle) {
   if (obstacle.kind !== 'rock' && obstacle.kind !== 'boulder') return null;
   const top = obstacle.colliderTop ?? obstacle.height ?? 0;
   const radius = obstacle.radius ?? 0;
-  if (top < 0.18 || top > AUTHORED_TRAVERSAL_MAX_HEIGHT || radius < 0.38) return null;
-  return top <= WALK_OVER_TRAVERSAL_MAX_HEIGHT ? 'step-up' : 'scramble';
+  if (top < 0.18 || top > WALK_OVER_TRAVERSAL_MAX_HEIGHT || radius < 0.38) return null;
+  // Rock traversal should feel arcade-like: the player keeps normal walk/run
+  // locomotion and the obstacle contributes ground support instead of starting
+  // a locked vault or mantle clip.
+  return 'step-up';
 }
 
 function applyDefaultTraversal(obstacle) {
@@ -150,6 +172,10 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
     id: obstacle.id,
     kind: obstacle.kind,
     path: obstacle.render.path,
+    baseX,
+    baseZ,
+    offsetX: offset.x || 0,
+    offsetZ: offset.z || 0,
     x,
     z,
     radius: bounds.radius,
@@ -163,9 +189,11 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
     // gameplay.climbable: false. Very low props aren't worth a climb action.
     climbable: obstacle.gameplay?.climbable ?? (bounds.top >= 0.8 && obstacle.kind !== 'cactus'),
     edgeRisk: Boolean(obstacle.gameplay?.edgeRisk),
+    bendable: obstacle.gameplay?.bendable ?? obstacle.kind === 'tree',
+    bend: obstacle.gameplay?.bend || null,
     pushable: Boolean(obstacle.gameplay?.pushable),
     pushMass: obstacle.gameplay?.pushMass || 1,
-    pushFriction: obstacle.gameplay?.pushFriction ?? 0.88,
+    pushFriction: obstacle.gameplay?.pushFriction,
     traversal: obstacle.gameplay?.traversal || null,
     traversalLabel: obstacle.gameplay?.traversalLabel || null,
     climbLabel: obstacle.gameplay?.climbLabel,
@@ -175,10 +203,27 @@ function toRuntimeObstacle(obstacle, zoneId = currentZoneId, offsets = {}) {
   });
 }
 
+function applyRuntimeObstacleOffset(obstacle, zoneId = currentZoneId, offsets = {}) {
+  const baseX = obstacle.baseX ?? obstacle.x;
+  const baseZ = obstacle.baseZ ?? obstacle.z;
+  const offset = offsets[`${zoneId}:${obstacle.id}`] || offsets[obstacle.id] || { x: 0, z: 0 };
+  return {
+    ...obstacle,
+    baseX,
+    baseZ,
+    offsetX: offset.x || 0,
+    offsetZ: offset.z || 0,
+    x: baseX + (offset.x || 0),
+    z: baseZ + (offset.z || 0),
+  };
+}
+
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
   const withMobility = obstacles => obstacles.map(applyObstacleMobility);
-  const regional = (REGION_OBSTACLE_SOURCES[zoneId] || []).flatMap(source => source());
+  const regional = (REGION_OBSTACLE_SOURCES[zoneId] || [])
+    .flatMap(source => source())
+    .map(obstacle => applyRuntimeObstacleOffset(obstacle, zoneId, offsets));
   return withMobility([...mapped, ...regional]);
 }
 
@@ -519,6 +564,7 @@ export function getSupportedObstacle(x, z, playerY, playerRadius = 0.42, obstacl
 export function getObstacleEdgeRisk(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
   const obstacle = getSupportedObstacle(x, z, playerY, playerRadius, obstacles);
   if (!obstacle) return null;
+  if (!obstacle.edgeRisk) return null;
   const surface = obstacleSurfaceDistance(obstacle, new THREE.Vector3(x, playerY, z), playerRadius);
   if (!surface) return null;
   const edgeDistance = Math.max(0, surface.penetration);
@@ -607,6 +653,7 @@ export function findTraversalTarget(position, movement, facing, {
   let best = null;
   for (const obstacle of obstacles) {
     if (!obstacle.traversal) continue;
+    if (obstacle.kind === 'rock' || obstacle.kind === 'boulder') continue;
     const height = obstacle.colliderTop - Math.min(0, obstacle.colliderBottom || 0);
     if (height < minHeight || height > maxHeight) continue;
 

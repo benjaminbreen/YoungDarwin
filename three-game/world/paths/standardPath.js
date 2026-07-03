@@ -69,13 +69,22 @@ function segmentFrame(px, pz, ax, az, aw, bx, bz, bw) {
   };
 }
 
+// pathPoints may be a single polyline ([[x, z, w], ...]) or a list of
+// polylines (a branching network); consecutive points only connect within a
+// polyline, so branches never grow phantom joining segments.
+function asPolylines(pathPoints) {
+  return Array.isArray(pathPoints[0][0]) ? pathPoints : [pathPoints];
+}
+
 export function pathFrameAt(pathPoints, x, z) {
   let nearest = null;
-  for (let i = 0; i < pathPoints.length - 1; i += 1) {
-    const [ax, az, aw] = pathPoints[i];
-    const [bx, bz, bw] = pathPoints[i + 1];
-    const frame = segmentFrame(x, z, ax, az, aw, bx, bz, bw);
-    if (!nearest || frame.distance < nearest.distance) nearest = frame;
+  for (const polyline of asPolylines(pathPoints)) {
+    for (let i = 0; i < polyline.length - 1; i += 1) {
+      const [ax, az, aw] = polyline[i];
+      const [bx, bz, bw] = polyline[i + 1];
+      const frame = segmentFrame(x, z, ax, az, aw, bx, bz, bw);
+      if (!nearest || frame.distance < nearest.distance) nearest = frame;
+    }
   }
   return nearest;
 }
@@ -211,17 +220,25 @@ export function standardFootPathFrameGLSL(pathPoints, {
     throw new Error('standardFootPathFrameGLSL requires at least two path points.');
   }
 
+  // Flatten (possibly branching) polylines into explicit [a, b] segments so
+  // the emitted GLSL never bridges the gap between two separate polylines.
+  const segments = [];
+  for (const polyline of asPolylines(pathPoints)) {
+    for (let i = 0; i < polyline.length - 1; i += 1) {
+      segments.push([polyline[i], polyline[i + 1]]);
+    }
+  }
+
   const segmentCall = (a, b) => `${segmentFunctionName}(p, vec3(${glslNumber(a[0])}, ${glslNumber(a[1])}, ${glslNumber(a[2])}), vec3(${glslNumber(b[0])}, ${glslNumber(b[1])}, ${glslNumber(b[2])}))`;
-  const first = segmentCall(pathPoints[0], pathPoints[1]);
+  const first = segmentCall(segments[0][0], segments[0][1]);
   const candidates = [];
-  for (let i = 1; i < pathPoints.length - 1; i += 1) {
-    const a = pathPoints[i];
-    const b = pathPoints[i + 1];
+  for (let i = 1; i < segments.length; i += 1) {
+    const [a, b] = segments[i];
     candidates.push(`          candidate = ${segmentCall(a, b)};
           if (candidate.z < nearest.z) { nearest = candidate; dir = normalize(vec2(${glslNumber(b[0] - a[0])}, ${glslNumber(b[1] - a[1])})); }`);
   }
 
-  const [a0, b0] = pathPoints;
+  const [a0, b0] = segments[0];
   return /* glsl */`
         vec4 ${segmentFunctionName}(vec2 p, vec3 a, vec3 b) {
           vec2 ab = b.xy - a.xy;

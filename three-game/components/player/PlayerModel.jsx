@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
+import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { ModelAsset } from '../assets/ModelAsset';
 import { PLAYER } from './playerConfig';
 import { attachToBone } from './handAttachment';
@@ -34,17 +35,36 @@ const LAMP_ATTACHMENT = {
 };
 
 // Held-tool props. Placeholder GLBs live under /assets/models/tools/ — swap in
-// finished models by replacing the file at the same path. Rifle stays body-aimed;
-// field tools follow the right hand so Darwin5's held-tool clips can provide the
-// grip pose instead of borrowing the left-hand torch set.
+// finished models by replacing the file at the same path.
 const HAND_TOOLS = [
-  { toolId: 'shotgun',    path: '/assets/models/tools/shotgun.glb', scale: 1, position: [0, 0, 0], euler: [0, 0, 0], hand: 'right', orient: 'body' },
+  {
+    toolId: 'shotgun',
+    path: '/assets/models/tools/shotgun.glb',
+    scale: 1,
+    position: [0, 0, 0],
+    euler: [0, 0, 0],
+    hand: 'right',
+    orient: 'body',
+    modelOverrides: {
+      darwin5: {
+        position: [0.0, -0.012, -0.015],
+        euler: [1.86, 0.91, -2.74],
+        orient: 'hand',
+      },
+    },
+  },
   { toolId: 'insect_net', path: '/assets/models/tools/net.glb',     scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
   { toolId: 'snare',      path: '/assets/models/tools/snare.glb',   scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
   { toolId: 'hammer',     path: '/assets/models/tools/hammer.glb',  scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
 ];
 
-const PLAYER_MODEL_CYCLE = ['darwin', 'darwinCandidate2', 'darwin4', 'darwin5'];
+const PLAYER_MODEL_CYCLE = Array.from(new Set([
+  DEFAULT_PLAYER_MODEL_ASSET_ID,
+  'darwin4',
+  'darwin',
+  'darwinCandidate2',
+  'darwin5',
+]));
 
 function darwin5StandingJumpRequest(charge, jumpPhase) {
   const charged = charge >= 0.35;
@@ -100,7 +120,7 @@ function darwin5HeldToolActionClip(action) {
   return null;
 }
 
-function darwin5RifleActionClip(action, crouching) {
+function darwin5RifleActionClip(action) {
   if (action === 'standToCover' || action === 'standToCrouch') return 'rifleCrouchWalkToIdle';
   if (action === 'coverToStand' || action === 'crouchToStand') return 'rifleKneelToStand';
   if (action === 'changeItem') return 'rifleEquip';
@@ -117,7 +137,10 @@ function darwin5AdaptedActionClip(action) {
   if (action === 'lookAround' || action === 'lookAroundShort') return action;
   if (action === 'write') return 'write';
   if (action === 'gather' || action === 'gatherGround' || action === 'gatherChestHeight') return action;
-  if (action === 'pushStart' || action === 'pushLow' || action === 'pushMedium' || action === 'pushHeavy' || action === 'pushStop') return action;
+  if (action === 'pushLow') return { clip: 'pushLow', timeScale: 1.35, fade: 0.05 };
+  if (action === 'pushMedium') return { clip: 'pushMedium', timeScale: 1.45, fade: 0.05 };
+  if (action === 'pushHeavy') return { clip: 'pushHeavy', timeScale: 1.6, fade: 0.05 };
+  if (action === 'pushStart' || action === 'pushStop') return action;
   if (action === 'standingInspectDownward') return 'standingInspectDownward';
   if (action === 'point') return 'point';
   if (action === 'vault') return 'vault';
@@ -244,12 +267,14 @@ function HandLamp({ scene, modelAssetId }) {
 }
 
 // Attaches a held-tool GLB to Darwin's right hand and shows it only while that
-// tool is the active one. The prop tracks the hand's *position* but is oriented
-// to Darwin's body (tool -Z -> facing, +Y -> up), with the per-tool `euler` as a
-// body-space fine-tune. Body-orienting keeps every placeholder readable without
-// per-tool blind tuning, and makes the rifle point where Darwin aims.
-function HandProp({ scene, config }) {
-  const { scene: source } = useGLTF(config.path);
+// tool is the active one. Hand-oriented props inherit the animated grip pose;
+// body-oriented props remain supported for future coarse world-facing tools.
+function HandProp({ scene, config, modelAssetId }) {
+  const resolvedConfig = useMemo(() => {
+    const override = config.modelOverrides?.[modelAssetId];
+    return override ? { ...config, ...override } : config;
+  }, [config, modelAssetId]);
+  const { scene: source } = useGLTF(resolvedConfig.path);
   const groupRef = useRef(null);
   const boneQuat = useMemo(() => new THREE.Quaternion(), []);
   const bodyQuat = useMemo(() => new THREE.Quaternion(), []);
@@ -265,32 +290,32 @@ function HandProp({ scene, config }) {
       obj.receiveShadow = true;
       obj.userData.noTint = true;
     });
-    const handRegex = config.hand === 'left' ? LEFT_HAND : RIGHT_HAND;
+    const handRegex = resolvedConfig.hand === 'left' ? LEFT_HAND : RIGHT_HAND;
     const handle = attachToBone(scene, handRegex, object, {
-      worldScale: config.scale,
-      position: config.position,
+      worldScale: resolvedConfig.scale,
+      position: resolvedConfig.position,
     });
     if (!handle) return undefined;
-    handle.group.name = `darwinTool:${config.toolId}`;
+    handle.group.name = `darwinTool:${resolvedConfig.toolId}`;
     handle.group.visible = false;
-    tweakEuler.set(config.euler[0], config.euler[1], config.euler[2]);
+    tweakEuler.set(resolvedConfig.euler[0], resolvedConfig.euler[1], resolvedConfig.euler[2]);
     tweakQuat.setFromEuler(tweakEuler);
     groupRef.current = handle.group;
     return () => {
       handle.dispose();
       groupRef.current = null;
     };
-  }, [scene, source, config, tweakEuler, tweakQuat]);
+  }, [scene, source, resolvedConfig, tweakEuler, tweakQuat]);
 
   useFrame(() => {
     const group = groupRef.current;
     if (!group) return;
-    const visible = useThreeGameStore.getState().activeToolId === config.toolId;
+    const visible = useThreeGameStore.getState().activeToolId === resolvedConfig.toolId;
     if (group.visible !== visible) group.visible = visible;
     if (!visible) return;
     const bone = group.parent;
     if (!bone) return;
-    if (config.orient === 'hand') {
+    if (resolvedConfig.orient === 'hand') {
       group.quaternion.copy(tweakQuat);
       return;
     }
@@ -364,7 +389,7 @@ function ProceduralNaturalistModel({ motionRef }) {
 }
 
 export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, grounding = null }) {
-  const [modelAssetId, setModelAssetId] = useState('darwin');
+  const [modelAssetId, setModelAssetId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
   const [damageFlash, setDamageFlash] = useState(0);
   const [modelScene, setModelScene] = useState(null);
   const previousHealth = useRef(health);
@@ -604,7 +629,8 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (hasRifle) return 'rifleIdle';
     if (carryingObject) return 'holdIdle';
     if (torchMode) return 'torchIdle';
-    if (heldToolMode || holdingTool) return 'holdIdle';
+    if (heldToolMode) return 'holdToolIdle';
+    if (holdingTool) return 'holdIdle';
     if (status.fatigue >= 82 && modelAssetId !== 'darwin5') return 'exhaustedIdle';
     return 'idle';
   }, [modelAssetId, motionRef]);
@@ -623,7 +649,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       />
       {modelScene && <HandLamp scene={modelScene} modelAssetId={modelAssetId} />}
       {modelScene && HAND_TOOLS.map(tool => (
-        <HandProp key={tool.toolId} scene={modelScene} config={tool} />
+        <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} />
       ))}
     </>
   );

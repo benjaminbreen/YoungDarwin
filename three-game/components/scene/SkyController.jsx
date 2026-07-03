@@ -4,7 +4,7 @@ import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
@@ -957,11 +957,14 @@ function ShootingStars({ nightRef }) {
 // frustum. The frustum anchor is snapped to the shadow-map texel grid so static
 // shadows do not shimmer when the player/camera shifts by tiny sub-texel amounts.
 const SHADOW_MAP_SIZE = 2048;
-// Re-rendering every shadow caster on every frame is wasteful; this cadence is
-// enough for Darwin's animated shadow while the texel-snapped anchor keeps
-// static prop shadows stable between refreshes.
-const SHADOW_REFRESH_INTERVAL = 1 / 24;
+// Re-rendering every shadow caster on every frame is wasteful, but Darwin's
+// animated silhouette looks choppy at the old fixed 24 Hz cadence. Refresh
+// faster only while the player/shadow anchor is moving, then settle back.
+const SHADOW_ACTIVE_REFRESH_INTERVAL = 1 / 60;
+const SHADOW_IDLE_REFRESH_INTERVAL = 1 / 30;
 const SHADOW_EXTENT_UPDATE_EPSILON = 0.25;
+const SHADOW_TARGET_MOVE_EPSILON_SQ = 0.00025;
+const SHADOW_PLAYER_MOVE_EPSILON_SQ = 0.0009;
 const DARWIN_SHADOW_CASTER_HEIGHT = 2.1;
 const DARWIN_SHADOW_REACH_LIMIT = 13.5;
 const DARWIN_SHADOW_CENTER_BIAS = 0.48;
@@ -1103,7 +1106,9 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const shadowTarget = useMemo(() => new THREE.Object3D(), []);
   // Accumulates frame delta to gate shadow-map refreshes. Starts "due" so the
   // very first frame renders shadows.
-  const shadowClock = useRef(SHADOW_REFRESH_INTERVAL);
+  const shadowClock = useRef(SHADOW_ACTIVE_REFRESH_INTERVAL);
+  const lastShadowTarget = useRef(new THREE.Vector3(Infinity, Infinity, Infinity));
+  const lastPlayerShadowPose = useRef(new THREE.Vector3(Infinity, Infinity, Infinity));
 
   // Cloud cover is the smoothed 0..1 weatherEnv.overcast, read per frame
   // inside useFrame, so a weather change rolls in instead of cutting.
@@ -1455,13 +1460,17 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     let darwinShadowReach = 0;
     let shadowTargetOffset = 0;
     let effectiveShadowExtent = lightRig.shadowExtent;
+    let shadowTargetMoved = false;
+    let playerShadowMoved = false;
     if (keyLightRef.current) {
       const key = keyLightRef.current;
       // Light comes *from* the higher of the two bodies (sun by day, moon by night).
       const fromMoon = s.elevation < -0.04;
       const shadowLightDirection = fromMoon ? _moon : _sun;
-      const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
+      const pose = getRuntimePlayerPose()?.position || store.playerPose?.position || { x: 0, y: 0, z: 0 };
       _shadowPose.set(pose.x, pose.y, pose.z);
+      playerShadowMoved = lastPlayerShadowPose.current.distanceToSquared(_shadowPose) > SHADOW_PLAYER_MOVE_EPSILON_SQ;
+      lastPlayerShadowPose.current.copy(_shadowPose);
       const darwinShadowCoverage = computeDarwinShadowCoverage(shadowLightDirection, daylight, golden);
       darwinShadowReach = darwinShadowCoverage.reach;
       shadowTargetOffset = darwinShadowCoverage.offset;
@@ -1470,6 +1479,11 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       const shadowMapSize = key.shadow?.mapSize?.x || SHADOW_MAP_SIZE;
       shadowTexelSize = stableShadowAnchor(_shadowPose, shadowLightDirection, effectiveShadowExtent, shadowMapSize);
       shadowTarget.position.copy(_shadowSnapped);
+      shadowTargetMoved = lastShadowTarget.current.distanceToSquared(shadowTarget.position) > Math.max(
+        SHADOW_TARGET_MOVE_EPSILON_SQ,
+        shadowTexelSize * shadowTexelSize * 0.25,
+      );
+      if (shadowTargetMoved) lastShadowTarget.current.copy(shadowTarget.position);
       shadowTarget.updateMatrixWorld();
       key.target = shadowTarget;
       key.position.copy(shadowLightDirection).multiplyScalar(100).add(shadowTarget.position);
@@ -1557,7 +1571,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     // direction/position above still updates every frame; only the (expensive)
     // shadow-caster render pass is throttled.
     shadowClock.current += delta;
-    if (shadowProjectionChanged || shadowClock.current >= SHADOW_REFRESH_INTERVAL) {
+    const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved)
+      ? SHADOW_ACTIVE_REFRESH_INTERVAL
+      : SHADOW_IDLE_REFRESH_INTERVAL;
+    if (shadowProjectionChanged || shadowTargetMoved || shadowClock.current >= shadowRefreshInterval) {
       shadowClock.current = 0;
       gl.shadowMap.needsUpdate = true;
     }

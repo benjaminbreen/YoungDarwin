@@ -88,7 +88,6 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   const handleBackgroundClick = (point, event) => {
     if (event.shiftKey && process.env.NODE_ENV !== 'production') {
       // Dev affordance for tuning marker placement in islandLocations.js.
-      // eslint-disable-next-line no-console
       console.log(`island map coords: [${point.x.toFixed(3)}, ${point.y.toFixed(3)}]`);
     } else {
       onSelectLocation(null);

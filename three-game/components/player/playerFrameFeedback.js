@@ -71,7 +71,13 @@ export function updatePlayerFrameFeedback({
 
   if (contactShadowRef.current) {
     const shadowGround = collisionAdapter.groundInfo(group.current.position);
-    const groundOffset = shadowGround.y - group.current.position.y + 0.018;
+    // The character stands on a smoothed movement surface, but the rendered
+    // terrain keeps sharper visual relief. Place the decal on the visual
+    // surface so it does not disappear under bumps or coral/sand detail.
+    const visualGroundY = Number.isFinite(shadowGround.terrainY)
+      ? Math.max(shadowGround.y, shadowGround.terrainY)
+      : shadowGround.y;
+    const groundOffset = visualGroundY - group.current.position.y + 0.026;
     const airGap = Math.max(0, group.current.position.y - shadowGround.y);
     const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     const airborneFade = THREE.MathUtils.clamp(1 - airGap / 3.2, 0, 1);

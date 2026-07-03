@@ -8,14 +8,14 @@ import {
 } from './gaitProfiles';
 
 const FOOT_PLANT_MAX_UP = 0.075;
-const FOOT_PLANT_OBSTACLE_MAX_UP = 0.22;
-const FOOT_PLANT_FAST_OBSTACLE_MAX_UP = 0.1;
+const FOOT_PLANT_OBSTACLE_MAX_UP = 0.72;
+const FOOT_PLANT_FAST_OBSTACLE_MAX_UP = 0.42;
 const FOOT_PLANT_MAX_DOWN = -0.045;
-const FOOT_PLANT_MAX_SPEED = 2.1;
+const FOOT_PLANT_MAX_SPEED = 5.2;
 const VISUAL_GROUNDING_MAX_UP = 0.1;
-const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.34;
-const VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP = 0.14;
-const VISUAL_GROUNDING_PROBE_RANGE = 0.24;
+const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.9;
+const VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP = 0.58;
+const VISUAL_GROUNDING_PROBE_RANGE = 0.36;
 const FOOT_PLANT_BONE = {
   left: /leftfoot$/i,
   right: /rightfoot$/i,
@@ -100,7 +100,7 @@ export function createFootContactRig({
     );
     const speedStrength = 1 - THREE.MathUtils.clamp((motionState?.speed || 0) / FOOT_PLANT_MAX_SPEED, 0, 1);
     const strength = canPlant ? speedStrength : 0;
-    Object.entries(footPlant).forEach(([side, entry]) => {
+    Object.values(footPlant).forEach(entry => {
       const bone = entry.bone;
       if (!bone?.parent) return;
       const boneHasPositionTrack = animatedPositionBones.has(normalizeClipName(bone.name));

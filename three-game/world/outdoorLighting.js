@@ -87,9 +87,14 @@ export function computeOutdoorLightRig({
 
   const shadowExtent = lerp(17.5, 24, clamp01(lowSun * 0.8 + g * 0.45));
   const shadowContrast = clamp01(0.25 + hardSun * 0.72 + goldenSideLight * 0.24 + clearVivid * 0.08 - weatherSoftness * 0.3);
-  const shadowSoftness = clamp01(0.14 + weatherSoftness * 0.62 + lowSun * 0.34 + g * 0.26 - hardSun * 0.22);
-  const shadowRadius = lerp(0.65, 3.4, shadowSoftness);
-  const shadowIntensity = clamp01(0.93 - weatherSoftness * 0.46 - g * 0.08 + hardSun * 0.12 + clearVivid * 0.04);
+  const shadowSoftness = clamp01(0.2 + weatherSoftness * 0.62 + lowSun * 0.34 + g * 0.24 - hardSun * 0.13);
+  const shadowRadius = lerp(0.95, 3.5, shadowSoftness);
+  // Capped below 1 so even a hard clear-day sun leaves shadowed surfaces some
+  // readable fill rather than crushing to full black.
+  const shadowIntensity = Math.min(
+    0.72,
+    clamp01(0.68 - weatherSoftness * 0.38 - g * 0.06 + hardSun * 0.08 + clearVivid * 0.03),
+  );
   const shadowNormalBias = lerp(0.018, 0.032, clamp01(lowSun * 0.68 + weatherSoftness * 0.32));
   const shadowBias = lerp(-0.00013, -0.00006, weatherSoftness);
   const terrainSunWarmth = clamp01(d * clearSky * (0.2 + highSun * 0.32 + g * 0.5 + clearVivid * 0.12));

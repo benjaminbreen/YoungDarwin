@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { terrainBiomeAt, terrainHeight, terrainSlopeAt, terrainSurfaceNoise } from './terrain';
 import { POST_OFFICE_BAY_TRAIL, coveWaterMask, islandMask, postOfficeTrailInfluence } from './regions/postOfficeBay/terrain';
+import { buildRockObstacles } from './proceduralRocks';
 
 function seeded(index, salt = 0) {
   const x = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453;
@@ -76,7 +77,22 @@ export function dryGrassSuitability(x, z, y = terrainHeight(x, z)) {
   return THREE.MathUtils.clamp(Math.max(backshore, drainage, scrubPocket, ashPocket, lavaCrevice, trailEdge) * drynessBreakup * slopePenalty, 0, 1);
 }
 
+// Footprints of the hero boulders authored in game-core/obstacles.ts
+// (x, z, clearance radius). Scatter must not spawn inside them.
+const COVE_BOULDER_CLEARANCES = [
+  [0.8, -4.8, 1.7],
+  [-4.2, -6.4, 3.5],
+  [8.8, 8.2, 3.1],
+  [-15.4, 6.8, 3.3],
+  [18.6, 21.4, 3.7],
+];
+
+function insideCoveBoulder(x, z) {
+  return COVE_BOULDER_CLEARANCES.some(([bx, bz, r]) => (x - bx) * (x - bx) + (z - bz) * (z - bz) < r * r);
+}
+
 function acceptedForLayer(layer, x, z, y) {
+  if (insideCoveBoulder(x, z)) return false;
   if (islandMask(x, z) > 1.0 || coveWaterMask(x, z) > 0.58 || y < -0.55) return false;
   const biome = terrainBiomeAt(x, z, y);
   const noise = terrainSurfaceNoise(x, z);
@@ -183,40 +199,11 @@ export function getPostOfficeBayBasaltBlocks() {
 }
 
 export function getPostOfficeBayRockObstacles() {
-  return getPostOfficeBayBasaltBlocks()
-    .filter(rock => rock.radiusY * 2 - rock.sink > 0.26)
-    .map(rock => {
-      const top = rock.centerLift + rock.radiusY - rock.sink;
-      const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.78;
-      const collider = {
-        type: 'cylinder',
-        radius,
-        height: top,
-        offset: [0, top * 0.5, 0],
-      };
-      return {
-        id: `post-office-bay-${rock.id}`,
-        kind: 'rock',
-        path: null,
-        x: rock.x,
-        z: rock.z,
-        radius,
-        height: top,
-        colliderTop: top,
-        colliderBottom: 0,
-        scale: 1,
-        yaw: rock.yaw,
-        jumpable: top >= 0.72,
-        climbable: top >= 1.1,
-        edgeRisk: false,
-        pushable: false,
-        pushMass: 1,
-        pushFriction: 0.88,
-        traversal: top > 0.48 ? 'vault' : 'scramble',
-        traversalLabel: 'scramble over basalt',
-        definition: { collider },
-        zoneId: 'POST_OFFICE_BAY',
-        shapes: [collider],
-      };
-    });
+  return buildRockObstacles(getPostOfficeBayBasaltBlocks(), {
+    zoneId: 'POST_OFFICE_BAY',
+    idPrefix: 'post-office-bay',
+    radiusScale: 0.78,
+    colliderShape: 'cylinder',
+    filter: rock => rock.radiusY * 2 - rock.sink > 0.26,
+  });
 }

@@ -172,7 +172,6 @@ export function resolvePlayerLanding({
   arcadeLocomotion,
   landingDustTriggerRef,
   cameraImpulse,
-  collisionAdapter,
   currentZoneId,
   moving,
   running,

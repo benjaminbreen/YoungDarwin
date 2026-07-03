@@ -4,19 +4,27 @@ import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { rockRenderTransform, rockVisualBounds } from '../../../world/proceduralRocks';
+import {
+  FLOREANA_PBR_TEXTURES,
+  disposePbrTerrainSet,
+  loadPbrTerrainSet,
+} from '../../../world/regions/materials/pbrTerrainTextures';
 import { ContactShadowField } from '../ContactShadow';
 
 // Instanced craggy rocks. Rock items come from a zone layout module (which
 // also feeds the physics obstacle list) — this component is display only.
 
 const dummy = new THREE.Object3D();
+const rockTint = new THREE.Color();
+const rockTintLift = new THREE.Color('#d8d1c0');
 
 function rockHeight(rock) {
-  return rock.radiusY * 2 - (rock.sink || 0);
+  return rockVisualBounds(rock).height;
 }
 
 function rockFootprint(rock) {
-  return Math.max(rock.radiusX || 0, rock.radiusZ || 0);
+  return rockVisualBounds(rock).footprint;
 }
 
 function rockCastsRealShadow(rock) {
@@ -36,7 +44,7 @@ function rockContactShadow(rock) {
 }
 
 function makeCraggyRockGeometry(seed) {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const geo = new THREE.IcosahedronGeometry(1, 3);
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < position.count; i += 1) {
@@ -50,6 +58,37 @@ function makeCraggyRockGeometry(seed) {
   return geo;
 }
 
+function configureRockTexture(texture, repeat = 2.6) {
+  if (!texture) return;
+  texture.repeat.set(repeat, repeat);
+  texture.needsUpdate = true;
+}
+
+function createProceduralRockMaterial() {
+  const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
+  configureRockTexture(basalt.albedo, 2.2);
+  configureRockTexture(basalt.normal, 3.1);
+  configureRockTexture(basalt.roughness, 2.2);
+  const material = new THREE.MeshStandardMaterial({
+    map: basalt.albedo,
+    normalMap: basalt.normal,
+    normalScale: new THREE.Vector2(0.42, 0.42),
+    roughnessMap: basalt.roughness,
+    vertexColors: true,
+    color: '#ffffff',
+    roughness: 0.9,
+    metalness: 0,
+    flatShading: true,
+  });
+  material.userData.pbrTextures = basalt;
+  return material;
+}
+
+function disposeProceduralRockMaterial(material) {
+  disposePbrTerrainSet(material?.userData?.pbrTextures);
+  material?.dispose();
+}
+
 function InstancedRocks({ items, geometry, material, castShadow, sourceUserData }) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
@@ -57,12 +96,14 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
     const mesh = ref.current;
     if (!mesh) return;
     items.forEach((item, index) => {
-      dummy.position.set(item.x, item.y + item.radiusY - item.sink * 2, item.z);
-      dummy.rotation.set(0, item.yaw, 0);
-      dummy.scale.set(item.radiusX, item.radiusY, item.radiusZ);
+      const transform = rockRenderTransform(item);
+      dummy.position.fromArray(transform.position);
+      dummy.rotation.fromArray(transform.rotation);
+      dummy.scale.fromArray(transform.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
-      if (item.color) mesh.setColorAt(index, new THREE.Color(item.color));
+      rockTint.set(item.color || '#3c3831').lerp(rockTintLift, 0.34);
+      mesh.setColorAt(index, rockTint);
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -119,16 +160,10 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
     () => [makeCraggyRockGeometry(1.7), makeCraggyRockGeometry(4.2), makeCraggyRockGeometry(8.9)],
     [],
   );
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    color: '#ffffff',
-    roughness: 0.94,
-    metalness: 0,
-    flatShading: true,
-  }), []);
+  const material = useMemo(() => createProceduralRockMaterial(), []);
   useLayoutEffect(() => () => {
     geometries.forEach(g => g.dispose());
-    material.dispose();
+    disposeProceduralRockMaterial(material);
   }, [geometries, material]);
   return (
     <group>

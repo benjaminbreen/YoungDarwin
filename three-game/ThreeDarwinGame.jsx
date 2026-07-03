@@ -4,7 +4,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
-import { ACESFilmicToneMapping, SRGBColorSpace, Texture, Vector3 } from 'three';
+import { ACESFilmicToneMapping, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
@@ -91,6 +91,8 @@ const DEFAULT_PERF_SETTINGS = {
   solarSunFacingGrade: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
+  ao: true,
+  reflections: true,
   // Swap world vegetation/terrain from MeshStandard (PBR) to matte MeshPhong —
   // same matte look, far cheaper per fragment. foliageDrawScale trims vegetation
   // draw distance to cut overdraw. Both default to the 'performance' tier.
@@ -108,8 +110,8 @@ const QUALITY_PRESETS = {
     // coverage to avoid crunchy subpixel breakup.
     dprMode: '1.25x',
     msaaSamples: 0,
-    ao: false,
-    reflections: false,
+    ao: true,
+    reflections: true,
     waterQuality: 'performance',
     cheapMaterials: true,
     foliageDrawScale: 0.85,
@@ -127,7 +129,9 @@ const QUALITY_PRESETS = {
 
 const BOOT_LOADER_STABLE_MS = 900;
 const BOOT_MIN_LOADING_MS = 1400;
-const DEFERRED_CONTENT_DELAY_MS = 700;
+const DEFERRED_CONTENT_DELAY_MS = 350;
+const OPENING_CAMERA_DURATION_MS = 6200;
+const OPENING_CAMERA_MAX_MS = 10500;
 const SCENE_COST_BUCKET_LIMIT = 40;
 
 function getInitialPerfSettings() {
@@ -585,6 +589,48 @@ function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onRead
   return null;
 }
 
+function OpeningIntroCompletion({
+  active,
+  sequenceId,
+  durationMs,
+  maxMs,
+  assetProgressRef,
+  onComplete,
+}) {
+  const state = useRef({
+    sequenceId: null,
+    startedAt: 0,
+    completed: false,
+  });
+
+  useFrame(() => {
+    if (!active) {
+      state.current.sequenceId = null;
+      state.current.startedAt = 0;
+      state.current.completed = false;
+      return;
+    }
+
+    const now = performance.now();
+    if (state.current.sequenceId !== sequenceId) {
+      state.current.sequenceId = sequenceId;
+      state.current.startedAt = now;
+      state.current.completed = false;
+    }
+
+    if (state.current.completed) return;
+    const elapsed = now - state.current.startedAt;
+    const latestProgress = assetProgressRef.current || {};
+    const waitingOnAssets = latestProgress.active === true;
+    if (elapsed >= durationMs && (!waitingOnAssets || elapsed >= maxMs)) {
+      state.current.completed = true;
+      onComplete();
+    }
+  });
+
+  return null;
+}
+
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
@@ -684,6 +730,25 @@ function CinematicScreenGrade({ enabled, weather }) {
           mixBlendMode: 'soft-light',
         }}
       />
+    </div>
+  );
+}
+
+function OpeningCloudVeil({ active, sequenceId, durationMs }) {
+  if (!active) return null;
+  return (
+    <div
+      key={sequenceId || 'opening-cloud-veil'}
+      className="opening-cloud-veil"
+      style={{ '--opening-cloud-duration': `${durationMs}ms` }}
+      aria-hidden="true"
+    >
+      <div className="opening-cloud-wash" />
+      <div className="opening-cloud-bank opening-cloud-bank-left" />
+      <div className="opening-cloud-bank opening-cloud-bank-right" />
+      <div className="opening-cloud-stream opening-cloud-stream-a" />
+      <div className="opening-cloud-stream opening-cloud-stream-b" />
+      <div className="opening-cloud-vapour" />
     </div>
   );
 }
@@ -1048,6 +1113,7 @@ export default function ThreeDarwinGame() {
   const [loadersStable, setLoadersStable] = useState(false);
   const [displayedProgress, setDisplayedProgress] = useState(0);
   const [deferredContentReady, setDeferredContentReady] = useState(false);
+  const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
@@ -1058,6 +1124,7 @@ export default function ThreeDarwinGame() {
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const assetProgress = useProgress();
+  const assetProgressRef = useRef(assetProgress);
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const weather = useThreeGameStore(state => state.weather);
@@ -1065,10 +1132,21 @@ export default function ThreeDarwinGame() {
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const gameStarted = launchState !== 'menu';
+  const openingIntroActive = launchState === 'intro';
   const showLaunchOverlay = launchState === 'menu' || !sceneReady;
+  const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
+  const openingCamera = useMemo(() => ({
+    active: openingIntroActive && openingIntroStartedAt > 0,
+    sequenceId: openingIntroStartedAt,
+    duration: OPENING_CAMERA_DURATION_MS / 1000,
+  }), [openingIntroActive, openingIntroStartedAt]);
   const handleUnderwaterChange = useCallback(amount => {
     setUnderwaterAmount(amount);
   }, []);
+
+  useEffect(() => {
+    assetProgressRef.current = assetProgress;
+  }, [assetProgress]);
 
   // Mirror the material-quality knobs into the store so the scene's
   // material-building components (terrain, flora, trees) can react to them
@@ -1140,7 +1218,8 @@ export default function ThreeDarwinGame() {
       const now = performance.now();
       const elapsed = now - bootStartedAt.current;
       const rawProgress = Math.max(0, Math.min(100, assetProgress.progress || 0));
-      const loaderBusy = assetProgress.active || rawProgress < 100;
+      const knownAssetTotal = Number(assetProgress.total || 0);
+      const loaderBusy = assetProgress.active || (knownAssetTotal > 0 && rawProgress < 100);
 
       if (loaderBusy) {
         loaderQuietSince.current = 0;
@@ -1162,7 +1241,7 @@ export default function ThreeDarwinGame() {
     const handle = window.setInterval(tick, 80);
     tick();
     return () => window.clearInterval(handle);
-  }, [assetProgress.active, assetProgress.progress, gameStarted, sceneReady]);
+  }, [assetProgress.active, assetProgress.progress, assetProgress.total, gameStarted, sceneReady]);
 
   const beginNewExpedition = () => {
     bootStartedAt.current = performance.now();
@@ -1171,13 +1250,17 @@ export default function ThreeDarwinGame() {
     setLoadersStable(false);
     setSceneReady(false);
     setDeferredContentReady(false);
+    setOpeningIntroStartedAt(0);
     setLaunchState('loading');
   };
 
   const markSceneReady = () => {
+    const now = performance.now();
     setSceneReady(true);
     setDisplayedProgress(100);
-    setLaunchState('playing');
+    setDeferredContentReady(false);
+    setOpeningIntroStartedAt(now);
+    setLaunchState('intro');
   };
 
   useEffect(() => {
@@ -1209,6 +1292,7 @@ export default function ThreeDarwinGame() {
               // GPU this game targets. Set before the GLBs stream in so every
               // texture picks it up.
               Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
+              gl.shadowMap.type = PCFSoftShadowMap;
             }}
           >
             <color attach="background" args={[sky]} />
@@ -1217,9 +1301,14 @@ export default function ThreeDarwinGame() {
                 owning its color. Density 0.012 ≈ the old linear 32..108 reach. */}
             <fogExp2 attach="fog" args={[sky, 0.012]} />
             <Suspense fallback={null}>
-              <ThreeScene perfSettings={perfSettings} deferredContentReady={deferredContentReady} />
+              <ThreeScene
+                perfSettings={perfSettings}
+                deferredContentReady={deferredContentReady}
+                openingCamera={openingCamera}
+                inputLocked={openingIntroActive}
+              />
               <SceneReadySignal
-                loadingReady={gameStarted}
+                loadingReady={loadersStable}
                 startedAtRef={bootStartedAt}
                 minElapsedMs={BOOT_MIN_LOADING_MS}
                 onReady={markSceneReady}
@@ -1231,7 +1320,15 @@ export default function ThreeDarwinGame() {
               multisampling={perfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
               underwaterAmount={underwaterAmount}
             />
-            <AdaptiveResolution enabled={sceneReady} maxDpr={dpr[1]} />
+            <AdaptiveResolution enabled={sceneReady && !openingIntroActive} maxDpr={dpr[1]} />
+            <OpeningIntroCompletion
+              active={openingIntroActive}
+              sequenceId={openingIntroStartedAt}
+              durationMs={OPENING_CAMERA_DURATION_MS}
+              maxMs={OPENING_CAMERA_MAX_MS}
+              assetProgressRef={assetProgressRef}
+              onComplete={() => setLaunchState('playing')}
+            />
             <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
             <ExpeditionClock />
             <InspectionAnchorProjector />
@@ -1273,16 +1370,21 @@ export default function ThreeDarwinGame() {
             suppression={underwaterAmount}
           />
         )}
-        {gameStarted && !showLaunchOverlay && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
-        {gameStarted && !showLaunchOverlay && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
-        {gameStarted && !showLaunchOverlay && (
+        <OpeningCloudVeil
+          active={openingIntroActive}
+          sequenceId={openingIntroStartedAt}
+          durationMs={OPENING_CAMERA_DURATION_MS}
+        />
+        {gameUiVisible && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
+        {gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
+        {gameUiVisible && (
           <AnimalAnimationDevPanel open={showAnimalAnimationLab} onClose={() => setShowAnimalAnimationLab(false)} />
         )}
-        {gameStarted && !showLaunchOverlay && (
+        {gameUiVisible && (
           <DarwinAnimationDevPanel open={showDarwinAnimationLab} onClose={() => setShowDarwinAnimationLab(false)} />
         )}
         <PerformancePanel
-          open={gameStarted && !showLaunchOverlay && showPerf}
+          open={gameUiVisible && showPerf}
           settings={perfSettings}
           metrics={metrics}
           physicsDebug={physicsDebug}

@@ -22,19 +22,19 @@ const PANEL_VARIANTS = {
     ornate: true,
     border: 'border-expedition-gold/80',
     shadow: 'shadow-[0_18px_44px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(227,197,133,0.18)]',
-    background: 'linear-gradient(165deg, rgba(23,34,56,0.70), rgba(16,26,45,0.75) 58%, rgba(8,14,27,0.82))',
+    background: 'linear-gradient(165deg, rgba(26,40,66,0.80), rgba(19,31,54,0.84) 58%, rgba(10,18,36,0.90))',
   },
   objective: {
     ornate: true,
     border: 'border-expedition-gold/70',
     shadow: 'shadow-[0_12px_30px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(227,197,133,0.14)]',
-    background: 'linear-gradient(165deg, rgba(23,34,56,0.58), rgba(16,26,45,0.63) 58%, rgba(8,14,27,0.72))',
+    background: 'linear-gradient(165deg, rgba(26,40,66,0.68), rgba(19,31,54,0.72) 58%, rgba(10,18,36,0.80))',
   },
   modal: {
     ornate: true,
     border: 'border-expedition-gold/85',
     shadow: 'shadow-[0_18px_46px_rgba(0,0,0,0.52),inset_0_1px_0_rgba(227,197,133,0.20)]',
-    background: 'linear-gradient(165deg, rgba(23,34,56,0.86), rgba(16,26,45,0.90) 58%, rgba(8,14,27,0.95))',
+    background: 'linear-gradient(165deg, rgba(26,40,66,0.90), rgba(19,31,54,0.93) 58%, rgba(10,18,36,0.97))',
   },
 };
 
@@ -47,9 +47,11 @@ function CornerOrnament({ className }) {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.8"
+      strokeLinecap="round"
     >
-      <path d="M1.5 13 L1.5 1.5 L13 1.5" />
-      <path d="M4.5 8.5 L4.5 4.5 L8.5 4.5" opacity="0.7" />
+      {/* rounded bracket follows the panel's rounded-md corner radius */}
+      <path d="M1.5 13 L1.5 6 Q1.5 1.5 6 1.5 L13 1.5" />
+      <path d="M4.5 8.5 L4.5 7 Q4.5 4.5 7 4.5 L8.5 4.5" opacity="0.7" />
       <circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none" opacity="0.85" />
     </svg>
   );
@@ -77,8 +79,9 @@ export function ExpeditionPanel({
     >
       {showOrnaments && (
         <>
-          {/* inner hairline completes the double gold frame */}
-          <div className={`pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/45`} />
+          {/* inner hairline completes the double gold frame; kept faint so the
+              outer border reads as THE frame */}
+          <div className={`pointer-events-none absolute inset-[3px] rounded-[4px] border border-expedition-gold/25`} />
           <CornerOrnament className="left-[1px] top-[1px]" />
           <CornerOrnament className="right-[1px] top-[1px] rotate-90" />
           <CornerOrnament className="bottom-[1px] right-[1px] rotate-180" />

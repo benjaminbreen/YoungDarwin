@@ -27,8 +27,8 @@
     "asset:audit": "node scripts/asset-pipeline.mjs audit",
     "asset:optimize": "node scripts/asset-pipeline.mjs optimize",
     "start": "next start",
-    "lint": "npm run check:syntax",
-    "lint:next": "eslint app field-notebook game-core three-game next.config.ts --ext .js,.jsx,.ts,.tsx"
+    "lint": "eslint app field-notebook game-core three-game next.config.ts --ext .js,.jsx,.ts,.tsx",
+    "lint:next": "npm run lint"
   },
   "dependencies": {
     "@dgreenheck/ez-tree": "^1.1.0",

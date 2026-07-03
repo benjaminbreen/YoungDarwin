@@ -294,6 +294,93 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'maize',
+    name: 'Maize',
+    latin: 'Zea mays',
+    ontology: 'Plant',
+    order: 'Poaceae',
+    sub_order: 'Cultivated grain',
+    description: 'An ear of maize from the penal colony gardens, grown from mainland seed in the damp highland soil.',
+    details: [
+      'Planted in furrowed rows of dark volcanic earth',
+      'Fed the two to three hundred exiles of the settlement',
+      'A mainland cultivar, wholly foreign to the island flora',
+      'Its survival here depends on the garua mists of the highlands'
+    ],
+    habitat: 'settlement',
+    collected: false,
+    observations: [],
+    scientificValue: 2,
+    hybrid_ease: 6,
+    hybrid_temperature: 6,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/maize.jpg',
+    memoryText: '“The colonists coax Indian corn from this black soil. Cultivation, like the tortoise, tells a story of what these islands can and cannot support.”',
+    contents: 'Kernels stripped from the cob would travel better than the whole ear, though Syms argues for roasting it instead.',
+    keywords: ['maize', 'corn', 'indian corn', 'crop', 'plant', 'cultivated', 'settlement', 'garden']
+  },
+
+  {
+    id: 'sweetpotato',
+    name: 'Sweet Potato',
+    latin: 'Ipomoea batatas',
+    ontology: 'Plant',
+    order: 'Convolvulaceae',
+    sub_order: 'Root crop',
+    description: 'A fat sweet-potato tuber dug from the settlement plots — the staple Darwin saw cultivated on the flat highland ground.',
+    details: [
+      'Grown in low mounded vines over black mud',
+      'One of the two crops Darwin explicitly recorded at the settlement',
+      'The tuber keeps well and feeds the colony through the dry season',
+      'Trailing vines root wherever a node touches wet earth'
+    ],
+    habitat: 'settlement',
+    collected: false,
+    observations: [],
+    scientificValue: 2,
+    hybrid_ease: 6,
+    hybrid_temperature: 6,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/sweetpotato.jpg',
+    memoryText: '“The houses stand on ground cultivated with sweet potatoes and bananas. After the parched coast, the sight of black mud is strangely pleasant.”',
+    contents: 'Cut open, the tuber is pale orange and starchy; a slip pressed between papers would document the vine.',
+    keywords: ['sweet potato', 'tuber', 'crop', 'plant', 'cultivated', 'settlement', 'garden', 'batatas']
+  },
+
+  {
+    id: 'sugarcane',
+    name: 'Sugar Cane',
+    latin: 'Saccharum officinarum',
+    ontology: 'Plant',
+    order: 'Poaceae',
+    sub_order: 'Cultivated cane',
+    description: 'A cut length of sugar cane from the small settlement plot, jointed and sweet with sap.',
+    details: [
+      'Grows in a dense clump taller than a man',
+      'Raised from mainland stock in the wettest corner of the gardens',
+      'Chewed for its sweet pith by colonists and soldiers alike',
+      'Banded stems show the growth of each wet month'
+    ],
+    habitat: 'settlement',
+    collected: false,
+    observations: [],
+    scientificValue: 2,
+    hybrid_ease: 5,
+    hybrid_temperature: 7,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/sugarcane.jpg',
+    memoryText: '“Cane from the tropics, corn from the Andes, potatoes from the coast — the colony is a living experiment in what will take root here.”',
+    contents: 'The jointed stem is heavy with sweet sap; a section with a node would be the useful specimen.',
+    keywords: ['sugar cane', 'cane', 'crop', 'plant', 'cultivated', 'settlement', 'garden', 'saccharum']
+  },
+
+  {
     id: 'lavalizard',
     name: 'Floreana Lava Lizard',
     latin: 'Microlophus grayii',

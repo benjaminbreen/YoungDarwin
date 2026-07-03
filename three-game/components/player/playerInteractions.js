@@ -2,6 +2,7 @@ import { getRegionTerrainConfig } from '../../world/terrain';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { ACTION_DURATION } from './playerConfig';
+import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -60,6 +61,31 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
   return bestHint ? { ...bestHint, distance: bestDistance, facingWeight: bestFacingWeight } : null;
 }
 
+function distanceFromEdge(regionId, edge, position) {
+  const config = getRegionTerrainConfig(regionId);
+  const distances = [];
+  if (edge?.includes('east')) distances.push(config.width / 2 - position.x);
+  if (edge?.includes('west')) distances.push(position.x + config.width / 2);
+  if (edge?.includes('south')) distances.push(config.depth / 2 - position.z);
+  if (edge?.includes('north')) distances.push(position.z + config.depth / 2);
+  if (!distances.length) return Infinity;
+  return Math.min(...distances);
+}
+
+function arrivalEdgeSuppressesPrompt(block, regionId, position, promptPayload) {
+  if (!block || block.zoneId !== regionId || !block.edge) return false;
+  const distance = distanceFromEdge(regionId, block.edge, position);
+  // Arrival spawns are deliberately near the entry border. Suppress the prompt
+  // there, but re-enable it if the player deliberately walks back into the
+  // tight edge band instead of moving inward.
+  if (distance <= (block.returnBand || 2.35)) return false;
+  if (distance > (block.clearance || 10)) {
+    useThreeGameStore.getState().clearArrivalEdgeBlock?.();
+    return false;
+  }
+  return promptPayload?.edge === block.edge;
+}
+
 const GROUND_GATHER_MAX_HEIGHT = 0.82;
 const LOW_INSPECT_MAX_HEIGHT = 0.46;
 const SPECIMEN_INTERACTION_HEIGHT = {
@@ -105,6 +131,8 @@ export function specimenInteractionHeight(specimen) {
   if (!specimen) return 0;
   if (Number.isFinite(specimen.interactionHeight)) return Math.max(0, specimen.interactionHeight);
   const id = normalizeSpecimenId(specimen);
+  const catalogHeight = getWildlifeInteractionHeight(id);
+  if (Number.isFinite(catalogHeight)) return Math.max(0, catalogHeight * (specimen.sceneScale || 1));
   const base = SPECIMEN_INTERACTION_HEIGHT[id]
     ?? SPECIMEN_INTERACTION_HEIGHT[id.toLowerCase()]
     ?? (specimen.ontology === 'Plant'
@@ -191,8 +219,13 @@ export function updatePlayerInteractions({
     : null;
   const storeState = useThreeGameStore.getState();
   const currentPromptId = storeState.edgePrompt?.id || null;
-  if ((promptPayload?.id || null) !== currentPromptId) {
-    setEdgePrompt(promptPayload);
+  const dismissedPromptId = storeState.dismissedEdgePromptId || null;
+  const arrivalSuppressed = arrivalEdgeSuppressesPrompt(storeState.arrivalEdgeBlock, currentZoneId, position, promptPayload);
+  const visiblePromptPayload = arrivalSuppressed || promptPayload?.id === dismissedPromptId ? null : promptPayload;
+  if (!promptPayload && dismissedPromptId) {
+    setEdgePrompt(null);
+  } else if ((visiblePromptPayload?.id || null) !== currentPromptId) {
+    setEdgePrompt(visiblePromptPayload);
   }
 
   let nearest = null;
@@ -226,6 +259,12 @@ export function updatePlayerInteractions({
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
         currentState.collectRockSample?.(currentState.carryPrompt.sample);
+      } else if (currentState.carryPrompt.mode === 'harvest-crop') {
+        if (!stateRef.current.action) {
+          const clip = currentState.carryPrompt.crop?.pickClip === 'ground' ? 'kneelInspect' : 'gatherChestHeight';
+          startAction(clip, ACTION_DURATION[clip], { lockMovement: true });
+        }
+        currentState.harvestCrop?.(currentState.carryPrompt.crop);
       } else if (currentState.carriedObjectId) {
         setCarriedObject(null);
       } else if (currentState.carryPrompt.mode === 'pickup') {
@@ -234,17 +273,17 @@ export function updatePlayerInteractions({
         }
         setCarriedObject(currentState.carryPrompt.id);
       }
-    } else if (!specimenId && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
+    } else if (!specimen && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
       beginZoneTransition(currentState.edgePrompt.toRegionId, {
         entryEdge: oppositeEdge(currentState.edgePrompt.edge),
         note: currentState.edgePrompt.description,
       });
-    } else if (currentState.edgePrompt?.kind === 'blocked' && !specimenId) {
+    } else if (currentState.edgePrompt?.kind === 'blocked' && !specimen) {
       setEdgePrompt({
         ...currentState.edgePrompt,
         message: currentState.edgePrompt.description,
       });
-    } else if (specimenId && !stateRef.current.action) {
+    } else if (specimen && !stateRef.current.action) {
       const alreadyCollected = specimen ? currentState.collectedSpecimenIds?.includes(specimen.id) : false;
       const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
       const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });

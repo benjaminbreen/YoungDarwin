@@ -75,6 +75,13 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     dirX: 1,
     dirZ: 0,
   };
+  const startleThreat = {
+    until: -Infinity,
+    cooldownUntil: -Infinity,
+    dirX: 1,
+    dirZ: 0,
+    intensity: 0,
+  };
 
   function reset(next = {}) {
     const base = next.basePosition || basePosition;
@@ -104,6 +111,11 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     contactThreat.intensity = 0;
     contactThreat.dirX = 1;
     contactThreat.dirZ = 0;
+    startleThreat.until = -Infinity;
+    startleThreat.cooldownUntil = -Infinity;
+    startleThreat.dirX = 1;
+    startleThreat.dirZ = 0;
+    startleThreat.intensity = 0;
   }
 
   reset({ basePosition, zoneId });
@@ -185,6 +197,24 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       const playerPanic = distanceToPlayer < profile.alertRadius
         ? THREE.MathUtils.clamp((profile.alertRadius - distanceToPlayer) / Math.max(0.01, profile.alertRadius - profile.panicRadius), 0, 1)
         : 0;
+      const startleRadius = profile.startleRadius || profile.alertRadius;
+      if (
+        playerPanic > 0.02
+        && distanceToPlayer < startleRadius
+        && t >= startleThreat.cooldownUntil
+        && awayFromPlayer.lengthSq() > 0.0001
+      ) {
+        awayFromPlayer.normalize();
+        startleThreat.dirX = awayFromPlayer.x;
+        startleThreat.dirZ = awayFromPlayer.y;
+        startleThreat.intensity = THREE.MathUtils.clamp(playerPanic * 1.2 + 0.18, 0.35, 1);
+        startleThreat.until = t + (profile.startleDuration || 0.75);
+        startleThreat.cooldownUntil = t + (profile.startleCooldown || 3.0);
+      }
+      const startleDuration = Math.max(0.1, profile.startleDuration || 0.75);
+      const startleFade = t < startleThreat.until
+        ? THREE.MathUtils.clamp((startleThreat.until - t) / startleDuration, 0, 1) * startleThreat.intensity
+        : 0;
       const hammerDistance = Math.hypot(state.position.x - hammerThreat.x, state.position.z - hammerThreat.z);
       const hammerFade = t < hammerThreat.until ? THREE.MathUtils.clamp((hammerThreat.until - t) / 3.2, 0, 1) : 0;
       const hammerPanic = hammerFade > 0
@@ -195,7 +225,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       const contactPanic = contactFade > 0
         ? THREE.MathUtils.clamp((contactThreat.radius - contactDistance) / Math.max(0.01, contactThreat.radius * 0.65), 0, 1) * contactFade * Math.max(0.35, contactThreat.intensity || 1)
         : 0;
-      const panic = Math.max(playerPanic, hammerPanic, contactPanic);
+      const panic = Math.max(playerPanic, hammerPanic, contactPanic, startleFade);
 
       const orbitSpeed = profile.orbitSpeed || Math.max(0.22, profile.patrolRate || 0.5);
       const orbitPhase = seed * Math.PI * 2 + t * orbitSpeed;
@@ -214,7 +244,9 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
           Math.cos(orbitPhase * 0.93 + seed) * radiusZ * 0.93,
         );
       if (panic > 0.01) {
-        if (contactPanic >= hammerPanic && contactPanic >= playerPanic) {
+        if (startleFade >= contactPanic && startleFade >= hammerPanic && startleFade >= playerPanic) {
+          direction.set(startleThreat.dirX, startleThreat.dirZ);
+        } else if (contactPanic >= hammerPanic && contactPanic >= playerPanic) {
           direction.set(contactThreat.dirX, contactThreat.dirZ);
         } else if (hammerPanic > playerPanic) {
           direction.set(state.position.x - hammerThreat.x, state.position.z - hammerThreat.z);
@@ -226,7 +258,8 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
           direction.set(1, 0);
         }
         const contactBoost = contactPanic > 0.01 ? (profile.contactFleeMultiplier || 1.55) : 1;
-        const fleeStep = Math.max(profile.fleeSpeed || 1, 0.8) * (0.7 + panic * 0.75) * contactBoost * dt;
+        const startleBoost = 1 + startleFade * (profile.startleSpeedMultiplier || 0.85);
+        const fleeStep = Math.max(profile.fleeSpeed || 1, 0.8) * (0.7 + panic * 0.75) * contactBoost * startleBoost * dt;
         targetOffset.copy(offset).addScaledVector(direction, fleeStep);
       } else if (direction.lengthSq() > 0.0001) {
         direction.normalize();
@@ -288,6 +321,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         updatedAt: t,
         moving,
         panic,
+        startle: startleFade,
       };
       return { ok: true, reason: 'updated', state };
     },

@@ -6,7 +6,8 @@ import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { getThreeSpecimens, threeTools } from '../../data';
+import { getThreeSpecimens } from '../../data';
+import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
@@ -67,10 +68,14 @@ import {
   formatVector,
 } from './playerUtils';
 
-const PUSH_ANIMATION_COOLDOWN = 0.42;
+const PUSH_ANIMATION_COOLDOWN = 0.34;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
 const PUSH_ANIMATION_MIN_FORWARD = 0.42;
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const PUSH_FEEDBACK_DURATION = {
+  pushLow: 0.34,
+  pushMedium: 0.4,
+  pushHeavy: 0.48,
+};
 const DEFAULT_CARRIED_OFFSET = [0.32, 1.02, 0.24];
 const DEFAULT_CARRIED_ROTATION = [0, 0, -0.18];
 
@@ -106,17 +111,6 @@ function CarriedObjectVisual() {
   );
 }
 
-function inputWorldDirection(keys, touch, yaw, target = new THREE.Vector3()) {
-  target.set(
-    (keys.right || touch.right ? 1 : 0) - (keys.left || touch.left ? 1 : 0),
-    0,
-    (keys.backward || touch.backward ? 1 : 0) - (keys.forward || touch.forward ? 1 : 0),
-  );
-  if (target.lengthSq() <= 0.0001) return null;
-  return target.normalize().applyAxisAngle(WORLD_UP, yaw);
-}
-
-
 function pushAnimationForObstacle(obstacle) {
   if (!obstacle) return 'pushMedium';
   const top = Number.isFinite(obstacle.colliderTop) ? obstacle.colliderTop : obstacle.height;
@@ -127,7 +121,7 @@ function pushAnimationForObstacle(obstacle) {
 }
 
 
-export function PlayerController({ physicsDebug = false }) {
+export function PlayerController({ physicsDebug = false, openingCamera = null, inputLocked = false }) {
   const group = useRef(null);
   const warningRef = useRef(null);
   const contactShadowRef = useRef(null);
@@ -162,7 +156,7 @@ export function PlayerController({ physicsDebug = false }) {
   const characterBodyRef = useRef(null);
   const characterColliderRef = useRef(null);
   const velocity = useRef(new THREE.Vector3());
-  const { yawRef, pointerNdcRef, aimActiveRef, firePulseRef, getAimDirection, resetCameraForSpawn, recenterCamera, updateCamera } = usePlayerCameraRig();
+  const { yawRef, aimActiveRef, firePulseRef, getAimDirection, resetCameraForSpawn, recenterCamera, updateCamera } = usePlayerCameraRig();
   const lastToolId = useRef(null);
   const lastFirePulse = useRef(0);
   const facing = useRef(new THREE.Vector3(0, 0, -1));
@@ -286,7 +280,7 @@ export function PlayerController({ physicsDebug = false }) {
     swimExitEnd: new THREE.Vector3(),
   }), []);
   const stateRef = useRef({
-    modelAssetId: 'darwin',
+    modelAssetId: DEFAULT_PLAYER_MODEL_ASSET_ID,
     running: false,
     walking: false,
     airborne: false,
@@ -581,8 +575,9 @@ export function PlayerController({ physicsDebug = false }) {
   useFrame((_, delta) => {
     if (!group.current || health <= 0) return;
     collisionAdapter.beginFrame?.();
-    const keys = isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
-    const touch = consumeTouchControls();
+    const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
+    const rawTouch = consumeTouchControls();
+    const touch = inputLocked ? EMPTY_KEYS : rawTouch;
     const now = performance.now() / 1000;
     updatePlayerFrameFeedback({
       group,
@@ -616,7 +611,8 @@ export function PlayerController({ physicsDebug = false }) {
       if (!target || stateRef.current.airborne || stateRef.current.swimming) return false;
       if (stateRef.current.action || now - lastPushAnimationAt.current < PUSH_ANIMATION_COOLDOWN) return false;
       const clip = pushAnimationForObstacle(target);
-      startAction(clip, ACTION_DURATION[clip], { lockMovement: options.lockMovement ?? false });
+      const duration = options.duration ?? PUSH_FEEDBACK_DURATION[clip] ?? ACTION_DURATION[clip];
+      startAction(clip, duration, { lockMovement: options.lockMovement ?? false });
       lastPushAnimationAt.current = now;
       return true;
     };
@@ -650,6 +646,7 @@ export function PlayerController({ physicsDebug = false }) {
       swimFatigue,
       currentZoneId,
       viewMode,
+      openingCamera,
       health,
       fatigue,
       now,
@@ -1427,7 +1424,8 @@ export function PlayerController({ physicsDebug = false }) {
       // remains for deliberate, slower ascents and for taller faces.
       if (!traversalTarget && running && now - lastAutoClimbAt.current > 1.2) {
         const climbTarget = collisionAdapter.findClimbTarget(group.current.position, facing.current);
-        if (climbTarget && climbTarget.heightDelta <= 2.9) {
+        const rockLikeTarget = climbTarget?.obstacle?.kind === 'rock' || climbTarget?.obstacle?.kind === 'boulder';
+        if (climbTarget && !rockLikeTarget && climbTarget.heightDelta <= 2.9) {
           const surfaceGap = Math.hypot(
             climbTarget.obstacle.x - group.current.position.x,
             climbTarget.obstacle.z - group.current.position.z,
@@ -1501,12 +1499,27 @@ export function PlayerController({ physicsDebug = false }) {
     });
     if (specimenCollision) {
       group.current.position.copy(specimenCollision.position).addScaledVector(specimenCollision.normal, 0.018);
-      pushSpecimenStimulus(currentZoneId, specimenCollision.actorId, {
+      const contactStimulus = {
         kind: 'contact',
         position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
         radius: Math.max(2.4, specimenCollision.radius + 2.2),
         intensity: Math.min(1.4, 0.65 + specimenCollision.penetration * 1.6),
-      });
+      };
+      pushSpecimenStimulus(currentZoneId, specimenCollision.actorId, contactStimulus);
+      if (typeof window !== 'undefined') {
+        window.__faunaContactDebug = {
+          ...(window.__faunaContactDebug || {}),
+          [specimenCollision.actorId]: {
+            zoneId: currentZoneId,
+            specimenId: specimenCollision.specimen?.id,
+            radius: specimenCollision.radius,
+            playerRadius: CHARACTER_CONTROLLER_CONFIG.radius,
+            penetration: specimenCollision.penetration,
+            stimulus: contactStimulus,
+            at: performance.now() / 1000,
+          },
+        };
+      }
       characterMove.collisions = Math.max(characterMove.collisions || 0, 1);
       characterMove.collision = specimenCollision;
       characterDebug.current.collisions = Math.max(characterDebug.current.collisions || 0, 1);
@@ -1564,6 +1577,18 @@ export function PlayerController({ physicsDebug = false }) {
       }
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
+      if (collision.obstacle?.bendable && impactSpeed > 0.32 && intoSurface > 0.2) {
+        const bendDirection = horizontalVelocity.lengthSq() > 0.001
+          ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
+          : frameScratch.pushDirection.copy(normal).multiplyScalar(-1).normalize();
+        emitPropEvent('obstacle-push-contact', {
+          obstacleId: collision.obstacle.id,
+          zoneId: collision.obstacle.zoneId || currentZoneId,
+          kind: collision.obstacle.kind,
+          direction: { x: bendDirection.x, y: 0, z: bendDirection.z },
+          intensity: THREE.MathUtils.clamp(impactSpeed / 3.2 + collision.penetration * 0.18, 0.15, 1),
+        });
+      }
       if (!collision.specimen && impactSpeed >= PUSH_ANIMATION_MIN_SPEED && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
         startPushFeedback(collision.obstacle || {
           kind: 'wall',
@@ -1611,7 +1636,12 @@ export function PlayerController({ physicsDebug = false }) {
             mobility: pushable.mobility,
           })
           && clamped.distanceTo(candidate) < 0.08) {
-          movePushableObstacle(pushable.id, pushDelta, pushable.zoneId);
+          movePushableObstacle(
+            pushable.id,
+            pushDelta,
+            pushable.zoneId,
+            pushable.mobility?.maxOffset ?? pushable.maxPushOffset ?? null,
+          );
           velocity.current.x *= 0.78;
           velocity.current.z *= 0.78;
         }

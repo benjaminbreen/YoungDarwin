@@ -34,10 +34,6 @@ export function Beagle() {
         sourceLabel="Beagle GLB"
         sourceKind="ship"
       />
-      <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow={false}>
-        <planeGeometry args={[5.2, 17.2]} />
-        <meshBasicMaterial color="#143b4a" transparent opacity={0.12} depthWrite={false} side={THREE.DoubleSide} />
-      </mesh>
       <mesh geometry={sailGeometry} position={[-0.9, 8.6, -1.6]} scale={[0.72, 1.15, 1]} rotation={[0, -0.08, -0.08]}>
         <meshBasicMaterial color="#f6eac9" transparent opacity={0.72} side={THREE.DoubleSide} />
       </mesh>

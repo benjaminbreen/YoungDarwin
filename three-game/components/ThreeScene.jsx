@@ -16,7 +16,12 @@ import { WeatherFront } from './scene/weather/WeatherFront';
 import { ActiveZoneContent } from '../zones/ActiveZoneContent';
 import { PhysicsProvider } from '../physics/PhysicsProvider';
 
-export function ThreeScene({ perfSettings, deferredContentReady = true }) {
+export function ThreeScene({
+  perfSettings,
+  deferredContentReady = true,
+  openingCamera = null,
+  inputLocked = false,
+}) {
   const settings = perfSettings || {};
   return (
     <>
@@ -50,7 +55,11 @@ export function ThreeScene({ perfSettings, deferredContentReady = true }) {
       )}
       <PhysicsProvider debug={settings.physicsDebug === true}>
         <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
-        <PlayerController physicsDebug={settings.physicsDebug === true} />
+        <PlayerController
+          physicsDebug={settings.physicsDebug === true}
+          openingCamera={openingCamera}
+          inputLocked={inputLocked}
+        />
       </PhysicsProvider>
       <GroundedWorldFX
         enabled={deferredContentReady && settings.worldDetails !== false}

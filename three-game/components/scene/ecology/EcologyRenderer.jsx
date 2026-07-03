@@ -25,6 +25,8 @@ import { StylizedMeadowField } from './StylizedMeadowField';
 import { DryGrassPatchField } from './DryGrassPatchField';
 import { SurfaceLitterField } from './SurfaceLitterField';
 import { CollectibleBeachFindsLayer } from './CollectibleBeachFindsLayer';
+import { AmbientWildlifeLayer } from './AmbientWildlifeLayer';
+import { CropFieldLayer } from './CropFieldLayer';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -52,11 +54,13 @@ const EMPTY_LAYER_PLAN = {
   dryGrassPatches: [],
   surfaceLitter: [],
   collectibleBeachFinds: [],
+  ambientWildlife: [],
   lagoonSurfaces: [],
   generatedTrees: [],
   props: [],
   rocks: [],
   canopySilhouettes: [],
+  crops: [],
 };
 const EMPTY_PROP_PLAN = { instancedGroups: [], staticProps: [] };
 
@@ -241,11 +245,13 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       dryGrassPatches: (ecology.dryGrassPatches || []).filter(tierVisible),
       surfaceLitter: (ecology.surfaceLitter || []).filter(tierVisible),
       collectibleBeachFinds: (ecology.collectibleBeachFinds || []).filter(tierVisible),
+      ambientWildlife: (ecology.ambientWildlife || ecology.wildlife || []).filter(tierVisible),
       lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(tierVisible),
       generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
       props: (ecology.props || []).filter(tierVisible),
       rocks: (ecology.rocks || []).filter(tierVisible),
       canopySilhouettes: (ecology.canopySilhouettes || []).filter(tierVisible),
+      crops: (ecology.crops || []).filter(tierVisible),
     };
   }, [ecology, streamTier]);
   const propPlan = useMemo(() => (
@@ -262,10 +268,12 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     dryGrassPatches,
     surfaceLitter,
     collectibleBeachFinds,
+    ambientWildlife,
     lagoonSurfaces,
     generatedTrees,
     rocks,
     canopySilhouettes,
+    crops,
   } = visibleLayers;
   const { instancedGroups: instancedProps, staticProps } = propPlan;
   return (
@@ -317,6 +325,12 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       ))}
       {collectibleBeachFinds.map(layer => (
         <CollectibleBeachFindsLayer key={layer.id} layer={{ ...layer, zoneId: layer.zoneId || ecology.zoneId }} />
+      ))}
+      {ambientWildlife.map(layer => (
+        <AmbientWildlifeLayer key={layer.id} layer={{ ...layer, zoneId: layer.zoneId || ecology.zoneId }} />
+      ))}
+      {crops.map(layer => (
+        <CropFieldLayer key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
       ))}
       {flora.map(layer => (
         <Suspense key={layer.id} fallback={null}>

@@ -17,14 +17,14 @@ export const LLM_MODELS = [
   {
     id: 'openai-fast',
     provider: 'openai',
-    apiModel: process.env.OPENAI_FAST_MODEL || 'gpt-4.1-mini',
+    apiModel: process.env.OPENAI_FAST_MODEL || 'gpt-5.4-mini',
     maxTokens: 900,
     temperature: 0.4,
   },
   {
     id: 'openai-small',
     provider: 'openai',
-    apiModel: process.env.OPENAI_SMALL_MODEL || 'gpt-4.1-nano',
+    apiModel: process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
     maxTokens: 500,
     temperature: 0.25,
   },
@@ -58,6 +58,56 @@ function getOpenAIClient() {
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
   return openaiClient;
+}
+
+function shouldUseResponsesAPI(modelName = '') {
+  return /^gpt-5(?:\.|-|$)/.test(String(modelName));
+}
+
+function extractOpenAIResponseText(response) {
+  if (typeof response?.output_text === 'string') return response.output_text.trim();
+  const parts = [];
+  for (const item of response?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === 'string') parts.push(content.text);
+      else if (typeof content?.output_text === 'string') parts.push(content.output_text);
+    }
+  }
+  return parts.join('').trim();
+}
+
+async function createOpenAIText({
+  client,
+  model,
+  systemPrompt,
+  userPrompt,
+  maxTokens,
+  temperature,
+}) {
+  if (shouldUseResponsesAPI(model) && client.responses?.create) {
+    const response = await client.responses.create({
+      model,
+      instructions: systemPrompt || 'You are a concise historical simulation assistant.',
+      input: userPrompt || '',
+      max_output_tokens: maxTokens,
+      temperature,
+      text: {
+        format: { type: 'text' },
+      },
+    });
+    return extractOpenAIResponseText(response);
+  }
+
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt || 'You are a concise historical simulation assistant.' },
+      { role: 'user', content: userPrompt || '' },
+    ],
+    max_tokens: maxTokens,
+    temperature,
+  });
+  return completion.choices?.[0]?.message?.content || '';
 }
 
 export function resolveModelConfig(modelId = DEFAULT_LLM_MODEL) {
@@ -124,17 +174,16 @@ export async function generateLLMText({
   if (config.provider === 'openai') {
     try {
       const client = getOpenAIClient();
-      const completion = await client.chat.completions.create({
+      const text = await createOpenAIText({
+        client,
         model: config.apiModel,
-        messages: [
-          { role: 'system', content: systemPrompt || 'You are a concise historical simulation assistant.' },
-          { role: 'user', content: userPrompt || '' },
-        ],
-        max_tokens: effectiveMaxTokens,
+        systemPrompt,
+        userPrompt,
+        maxTokens: effectiveMaxTokens,
         temperature: effectiveTemperature,
       });
       const response = {
-        text: completion.choices?.[0]?.message?.content || '',
+        text,
         provider: config.provider,
         model: config.apiModel,
       };
@@ -209,17 +258,16 @@ export async function generateLLMText({
 
     try {
       const client = getOpenAIClient();
-      const completion = await client.chat.completions.create({
+      const text = await createOpenAIText({
+        client,
         model: fallback.apiModel,
-        messages: [
-          { role: 'system', content: systemPrompt || 'You are a concise historical simulation assistant.' },
-          { role: 'user', content: userPrompt || '' },
-        ],
-        max_tokens: effectiveMaxTokens,
+        systemPrompt,
+        userPrompt,
+        maxTokens: effectiveMaxTokens,
         temperature: effectiveTemperature,
       });
       const response = {
-        text: completion.choices?.[0]?.message?.content || '',
+        text,
         provider: fallback.provider,
         model: fallback.apiModel,
         fallbackFrom: config.apiModel,

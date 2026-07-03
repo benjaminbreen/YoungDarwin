@@ -255,9 +255,11 @@ export function sampleRegionMap(regionId, x, z) {
 
 export function regionSpawnPoint(regionId, entryEdge = null) {
   const config = getRegionTerrainConfig(regionId);
+  const region = getRegionMap(regionId);
+  const start = Array.isArray(region.playerStart) ? region.playerStart : null;
   const margin = 5.2;
-  let x = 0;
-  let z = 0;
+  let x = Number.isFinite(start?.[0]) ? start[0] : 0;
+  let z = Number.isFinite(start?.[2]) ? start[2] : 0;
   if (entryEdge === 'east') x = config.width * 0.5 - margin;
   else if (entryEdge === 'west') x = -config.width * 0.5 + margin;
   else if (entryEdge === 'south') z = config.depth * 0.5 - margin;
@@ -274,6 +276,8 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
   } else if (entryEdge === 'southwest') {
     x = -config.width * 0.5 + margin;
     z = config.depth * 0.5 - margin;
+  } else if (start) {
+    // Authored default spawn from the region map.
   } else if (authoredRegion(regionId)?.id === 'MANGROVES') {
     x = -3;
     z = 20;

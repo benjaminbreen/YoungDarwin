@@ -52,15 +52,33 @@ function normalizeImportedMaterials(scene, asset, motion = null) {
   });
 }
 
+// Skinned meshes only get a bind-pose bounding sphere, but animation can carry
+// vertices well outside it (a raised arm, a jump). Pad once per geometry (the
+// SkeletonUtils clone shares the BufferGeometry across instances, so the flag
+// dedupes correctly) so culling doesn't pop meshes off mid-animation.
+function ensurePaddedSkinnedBounds(mesh) {
+  const geometry = mesh.geometry;
+  if (!geometry || geometry.userData.__paddedForSkinning) return;
+  if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+  if (!geometry.boundingSphere) return;
+  geometry.boundingSphere.radius = geometry.boundingSphere.radius * 1.6 + 0.4;
+  geometry.userData.__paddedForSkinning = true;
+}
+
 function prepareImportedScene(scene, assetId, asset) {
   const castShadow = importedAssetCastsShadow(assetId, asset);
   const receiveShadow = asset.receiveShadow === true;
   const cullStaticMeshes = asset.frustumCulled !== false;
-  const cullSkinnedMeshes = asset.frustumCulled === true;
+  // Skinned fauna/specimens cull by default now (opt out per-asset if a model
+  // needs to stay always-drawn). The player/companion stay uncensored: they
+  // sit close to camera anyway, so there's little to gain, and it keeps them
+  // clear of any shadow-camera edge cases around the stabilized shadow anchor.
+  const cullSkinnedMeshes = asset.frustumCulled !== false;
   const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
   scene.traverse(object => {
     if (!object.isMesh) return;
-    object.frustumCulled = (object.isSkinnedMesh || isCharacterAsset) ? cullSkinnedMeshes : cullStaticMeshes;
+    if (object.isSkinnedMesh) ensurePaddedSkinnedBounds(object);
+    object.frustumCulled = isCharacterAsset ? false : (object.isSkinnedMesh ? cullSkinnedMeshes : cullStaticMeshes);
     object.castShadow = castShadow;
     object.receiveShadow = receiveShadow;
   });
@@ -109,7 +127,7 @@ function buildSkyGradientEnvScene() {
     uniforms: {
       uTop: { value: new THREE.Color('#90a6c2') },     // cool skylight
       uHorizon: { value: new THREE.Color('#ccbfa6') },  // neutral-warm horizon
-      uBottom: { value: new THREE.Color('#4a4136') },   // dim warm ground bounce
+      uBottom: { value: new THREE.Color('#6e5c48') },   // sunlit-sand ground bounce
     },
     vertexShader: `
       varying vec3 vDir;
@@ -515,6 +533,13 @@ function modelBoundsDebugEnabled() {
     || new URLSearchParams(window.location.search).has('modelBoundsDebug');
 }
 
+// Animation LOD: within ANIM_LOD_NEAR, update every frame; between NEAR and
+// FAR, update every other frame (delta doubled to keep clip timing correct);
+// beyond FAR, skip the mixer entirely — nobody is close enough to notice a
+// frozen pose. Keeps skinning/mixer cost off distant fauna and specimens.
+const ANIM_LOD_NEAR_SQ = 20 * 20;
+const ANIM_LOD_FAR_SQ = 45 * 45;
+
 function GLBPrimitive({
   assetId,
   asset,
@@ -532,6 +557,8 @@ function GLBPrimitive({
   const animationSelectorRef = useRef(animationSelector);
   const warnedMissing = useRef(new Set());
   const lastBoundsDebugAt = useRef(0);
+  const animLodSkipParity = useRef(false);
+  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
   const assetUrl = assetLoadUrl(asset);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
   // Optional: borrow clips this rig lacks from another asset's GLB. Requires an
@@ -573,6 +600,7 @@ function GLBPrimitive({
   const debugBounds = useMemo(() => new THREE.Box3(), []);
   const debugSize = useMemo(() => new THREE.Vector3(), []);
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
+  const animLodWorldPos = useMemo(() => new THREE.Vector3(), []);
   const actions = useMemo(() => {
     const result = {};
     animations.forEach(clip => {
@@ -737,9 +765,22 @@ function GLBPrimitive({
   useEffect(() => () => footContactRig.dispose(), [footContactRig]);
 
   useFrame((frameState, delta) => {
-    if (!animations.length) return;
-    mixer.update(delta);
-    footContactRig.update(delta, activeAction.current, activeRequest.current);
+    if (!animations.length || !group.current) return;
+    let mixerDelta = delta;
+    if (!isCharacterAsset) {
+      group.current.getWorldPosition(animLodWorldPos);
+      const distanceSq = frameState.camera.position.distanceToSquared(animLodWorldPos);
+      if (distanceSq > ANIM_LOD_FAR_SQ) {
+        return;
+      }
+      if (distanceSq > ANIM_LOD_NEAR_SQ) {
+        animLodSkipParity.current = !animLodSkipParity.current;
+        if (animLodSkipParity.current) return;
+        mixerDelta = delta * 2;
+      }
+    }
+    mixer.update(mixerDelta);
+    footContactRig.update(mixerDelta, activeAction.current, activeRequest.current);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {
       const elapsed = frameState.clock.elapsedTime;
       if (group.current && elapsed - lastBoundsDebugAt.current >= 0.3) {

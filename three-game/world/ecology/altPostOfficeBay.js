@@ -232,7 +232,7 @@ export function buildAltPostOfficeBayEcology() {
     zoneId: ALT_POST_OFFICE_BAY,
     flora: buildFlora(),
     rocks,
-    splashes: { anchors: swashRocks.slice(0, 10), period: (Math.PI * 2) / 0.8976 },
+    splashes: { anchors: swashRocks.slice(0, 10), period: (Math.PI * 2) / 0.5984 },
     footprintBiomes: ['sand-beach', 'wet-sand', 'dry-scrub', 'trail', 'ash-slope'],
     birds: [
       { radius: 18, height: 16, speed: 0.1, phase: 0, cx: 0, cz: -16 },

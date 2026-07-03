@@ -89,7 +89,6 @@ function StaticGLBPrimitive({
   patchTint = null,
   textureSeed = 1,
   textureStyle = null,
-  bob = 0,
   doubleSide = false,
   forceTint = false,
   castShadow = false,
@@ -167,8 +166,10 @@ function StaticGLBActivePrimitive(props) {
     position,
     bob = 0,
     maxVisibleDistance = null,
+    groupRef = null,
   } = props;
-  const group = useRef(null);
+  const localGroup = useRef(null);
+  const group = groupRef || localGroup;
   const maxVisibleDistanceSq = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
     ? maxVisibleDistance * maxVisibleDistance
     : null;

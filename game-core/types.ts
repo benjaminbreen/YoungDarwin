@@ -86,6 +86,13 @@ export type ObstacleDefinition = {
     pushable?: boolean;
     pushMass?: number;
     pushFriction?: number;
+    mobility?: Record<string, unknown>;
+    bendable?: boolean;
+    bend?: {
+      maxRadians?: number;
+      stiffness?: number;
+      damping?: number;
+    };
   };
 };
 

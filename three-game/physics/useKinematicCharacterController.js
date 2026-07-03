@@ -41,8 +41,10 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
     controller.enableSnapToGround(CHARACTER_CONTROLLER_CONFIG.snapToGround);
     controller.setMaxSlopeClimbAngle(THREE.MathUtils.degToRad(CHARACTER_CONTROLLER_CONFIG.maxSlopeClimbDegrees));
     controller.setMinSlopeSlideAngle(THREE.MathUtils.degToRad(CHARACTER_CONTROLLER_CONFIG.minSlopeSlideDegrees));
+    // Keep dynamic props pushable, but use a lower effective character mass;
+    // PhysicsProp applies the authored speed/launch caps after contact.
     controller.setApplyImpulsesToDynamicBodies(true);
-    controller.setCharacterMass(68);
+    controller.setCharacterMass(42);
 
     state.current = {
       ready: true,

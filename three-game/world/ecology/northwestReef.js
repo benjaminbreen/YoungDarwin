@@ -15,7 +15,7 @@ const NATURE = '/assets/models/nature/';
 const ANIMALS = '/assets/models/animals/runtime/';
 
 // Matches the swash rhythm in the Northwest Reef terrain shader.
-export const NW_REEF_SWASH_PERIOD = (Math.PI * 2) / 0.8976;
+export const NW_REEF_SWASH_PERIOD = (Math.PI * 2) / 0.5984;
 
 const scrubClumps = [[-24, 36], [2, 32], [24, 38], [-42, 34]];
 const drySand = (x, z) => z - nwReefCoastZ(x) > 1.8;
@@ -126,7 +126,7 @@ function decorateLitter(item, index, seed, bandKind) {
 
 function buildSurfaceLitter() {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(NW_REEF, layer, count, seed, opts);
-  const strandAccept = (biome, x, z, y) => {
+  const strandAccept = (biome, x, z) => {
     const d = coastDistance(x, z);
     if (!(biome === 'white-sand' || biome === 'wet-sand') || d < 0.45 || d > 9.5) return false;
     const strand = Math.max(band(2.2, 2.1, d), band(5.3, 3.2, d) * 0.86);

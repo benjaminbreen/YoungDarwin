@@ -8,10 +8,10 @@ import {
 
 export const DRY_FLOREANA_TEXTURE_SETS = {
   redDirtHighland: {
-    redDirt: '/assets/textures/world/dry-floreana/red-dirt-path.jpg',
-    shoulderGround: '/assets/textures/world/dry-floreana/grass-shoulder-ground.png',
-    dryGrassGround: '/assets/textures/world/dry-floreana/dry-grass-litter.png',
-    paleFlecks: '/assets/textures/world/dry-floreana/pale-shell-flecks.png',
+    redDirt: '/assets/textures/world/floreana-pbr/red-cinder-dirt_albedo.png',
+    shoulderGround: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_albedo.png',
+    dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.png',
+    paleFlecks: '/assets/textures/world/floreana-pbr/olivine-beach_albedo.png',
     fallbacks: {
       redDirt: '#a75b2e',
       shoulderGround: '#80744d',
@@ -20,10 +20,10 @@ export const DRY_FLOREANA_TEXTURE_SETS = {
     },
   },
   sandyCoastal: {
-    redDirt: '/assets/textures/world/grass-test/path-albedo.jpg',
-    shoulderGround: '/assets/textures/world/grass-test/shoulder-albedo.png',
-    dryGrassGround: '/assets/textures/world/grass-test/low-grass-patch-albedo.png',
-    paleFlecks: '/assets/textures/world/dry-floreana/pale-shell-flecks.png',
+    redDirt: '/assets/textures/world/floreana-pbr/red-cinder-dirt_albedo.png',
+    shoulderGround: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_albedo.png',
+    dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.png',
+    paleFlecks: '/assets/textures/world/floreana-pbr/olivine-beach_albedo.png',
     fallbacks: {
       redDirt: '#b47b3c',
       shoulderGround: '#7a7153',

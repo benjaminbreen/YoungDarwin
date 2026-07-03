@@ -35,7 +35,6 @@ function buildTerrainHeightfield(regionId) {
 export function PhysicsTerrain() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const heightfield = useMemo(() => buildTerrainHeightfield(currentZoneId), [currentZoneId]);
-  const config = getRegionTerrainConfig(currentZoneId);
   return (
     <RigidBody
       key={currentZoneId}

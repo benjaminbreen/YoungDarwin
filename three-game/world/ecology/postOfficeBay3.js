@@ -436,7 +436,7 @@ export function buildPostOfficeBay3Ecology() {
     flora: buildFlora(),
     generatedTrees: buildGeneratedTrees(),
     rocks,
-    splashes: { anchors: swashRocks.slice(0, 8), period: (Math.PI * 2) / 0.8976 },
+    splashes: { anchors: swashRocks.slice(0, 8), period: (Math.PI * 2) / 0.5984 },
     footprintBiomes: ['shell-sand', 'wet-sand', 'trail', 'path-shoulder', 'dry-scrub'],
     birds: [
       { radius: 18, height: 17, speed: 0.1, phase: 0.4, cx: 0, cz: -16 },

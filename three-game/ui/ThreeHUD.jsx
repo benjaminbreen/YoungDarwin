@@ -155,10 +155,6 @@ function routePosition(edge) {
   return positions[edge] || { x: 50, y: 50 };
 }
 
-function directionDegrees(facing) {
-  return Math.atan2(facing.x || 0, facing.z || -1) * (180 / Math.PI);
-}
-
 function routeEdgeLabel(route) {
   const edge = route.edge || route.exit;
   return ROUTE_EDGE_ABBR[edge] || String(edge || '').slice(0, 2).toUpperCase();
@@ -195,6 +191,43 @@ function sentenceCase(value) {
   return String(value || '')
     .replace(/-/g, ' ')
     .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+const ROUTE_DIRECTION_LABELS = {
+  north: 'North',
+  south: 'South',
+  east: 'East',
+  west: 'West',
+  northeast: 'Northeast',
+  northwest: 'Northwest',
+  southeast: 'Southeast',
+  southwest: 'Southwest',
+};
+
+const ROUTE_PLACE_COPY = {
+  POST_OFFICE_BAY: 'A sheltered cove, black lava shore, and the old mail barrel.',
+  N_SHORE: 'Black sand, broken lava, dry coastal scrub.',
+  NW_REEF: 'Clear shallows, dark reef rock, and fish moving over pale sand.',
+  W_HIGH: 'A dry climb into red dirt, scrub, and cooler upland air.',
+  EL_MIRADOR: 'A high red ridge with long views across Charles Island.',
+  MANGROVES: 'Still water, mangrove shade, and soft mud underfoot.',
+  PENAL_COLONY: 'Fenced fields, rough huts, and damp highland ground.',
+};
+
+function directionLabel(edge) {
+  return ROUTE_DIRECTION_LABELS[edge] || sentenceCase(edge || 'route');
+}
+
+function routePlaceCopy(zone, prompt) {
+  if (zone?.id && ROUTE_PLACE_COPY[zone.id]) return ROUTE_PLACE_COPY[zone.id];
+  const source = zone?.narration?.loadingNote || zone?.description || prompt?.description || '';
+  const cleaned = String(source)
+    .replace(/^travel\s+\w+\s+to\s+[^.]+\.?\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return 'The track continues into the next locality.';
+  const first = cleaned.split(/(?<=[.!?])\s+/)[0] || cleaned;
+  return first.length > 110 ? `${first.slice(0, 107).trim()}...` : first;
 }
 
 function InspectableTooltip() {
@@ -242,10 +275,10 @@ function InspectableTooltip() {
   return (
     <div
       style={tooltipStyle}
-      className={`pointer-events-none absolute z-20 rounded-md border border-expedition-brass/60 bg-[rgba(15,19,20,0.74)] px-3 py-2.5 font-expedition text-expedition-parchment shadow-[0_12px_26px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(227,197,133,0.13)] backdrop-blur-md transition-[opacity,transform,left,top] duration-500 ease-out ${visible ? 'translate-y-0 scale-100 opacity-100' : '-translate-y-1 scale-[0.965] opacity-0'}`}
+      className={`pointer-events-none absolute z-20 rounded-md border border-expedition-gold/60 bg-[rgba(14,24,44,0.8)] px-3 py-2.5 font-expedition text-expedition-parchment shadow-[0_12px_26px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(227,197,133,0.13)] backdrop-blur-md transition-[opacity,transform,left,top] duration-500 ease-out ${visible ? 'translate-y-0 scale-100 opacity-100' : '-translate-y-1 scale-[0.965] opacity-0'}`}
     >
       {anchorVisible && (
-        <div className="absolute -left-2 top-9 h-4 w-4 rotate-45 border-b border-l border-expedition-brass/45 bg-[rgba(15,19,20,0.74)]" />
+        <div className="absolute -left-2 top-9 h-4 w-4 rotate-45 border-b border-l border-expedition-gold/45 bg-[rgba(14,24,44,0.8)]" />
       )}
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -285,7 +318,7 @@ function TopChronometer() {
 
   return (
     <div className="absolute left-1/2 top-3 hidden w-[min(29rem,calc(100vw-8rem))] -translate-x-1/2 text-center md:block sm:w-[min(32rem,calc(100vw-24rem))] xl:hidden">
-      <div className="pointer-events-none inline-flex max-w-full items-center gap-2 rounded-full border border-expedition-brass/70 bg-[rgba(20,17,12,0.52)] px-3.5 py-1.5 font-expedition text-expedition-parchment shadow-lg backdrop-blur-md">
+      <div className="pointer-events-none inline-flex max-w-full items-center gap-2 rounded-full border border-expedition-gold/60 bg-[rgba(12,20,38,0.6)] px-3.5 py-1.5 font-expedition text-expedition-parchment shadow-lg backdrop-blur-md">
         <CompassRoseIcon className="hidden h-3.5 w-3.5 text-expedition-gold sm:block" />
         <span className="truncate text-xs font-semibold tracking-wide sm:text-sm">
           {formatExpeditionDate(day)}
@@ -472,7 +505,7 @@ function TopObjective({ objective }) {
                 value={Math.floor(timeOfDay || 0)}
                 onChange={event => setTimeOfDay(Number(event.target.value))}
                 onClick={event => event.stopPropagation()}
-                className="mt-1 w-full rounded-sm border border-expedition-brass/60 bg-expedition-ink/85 px-2 py-1 font-expedition text-[11px] font-semibold tracking-wide text-expedition-parchment shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)] focus:outline-none focus:ring-1 focus:ring-expedition-gold/70"
+                className="mt-1 w-full rounded-sm border border-expedition-gold/55 bg-[rgba(10,18,36,0.88)] px-2 py-1 font-expedition text-[11px] font-semibold tracking-wide text-expedition-parchment shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)] focus:outline-none focus:ring-1 focus:ring-expedition-gold/70"
               >
                 {HOUR_OPTIONS.map(hour => (
                   <option key={hour} value={hour}>
@@ -486,7 +519,7 @@ function TopObjective({ objective }) {
             </div>
             {menuOpen && (
               <div
-                className="absolute left-4 top-[calc(100%-0.25rem)] z-40 w-[20rem] rounded-md border border-expedition-brass/80 bg-[rgba(13,18,25,0.96)] p-2 shadow-[0_18px_34px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md"
+                className="absolute left-4 top-[calc(100%-0.25rem)] z-40 w-[20rem] rounded-md border border-expedition-gold/70 bg-[rgba(14,24,44,0.96)] p-2 shadow-[0_18px_34px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md"
                 onClick={event => event.stopPropagation()}
               >
                 <div className="mb-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/80">Barometer Drawer</div>
@@ -957,8 +990,6 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
             <MapOverlays zone={zone} showKnown={showKnown} showNew={showNew} surveyStyle={surveyStyle} />
           </>
         )}
-        {/* inner hairline echoes the panel's double gold frame */}
-        <div className="pointer-events-none absolute inset-[3px] z-10 rounded-[2px] border border-expedition-gold/30" />
         <span className="absolute bottom-1 right-1.5 flex items-center text-expedition-parchment/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
           <NorthArrowIcon className="h-3.5 w-3.5" />
           <span className="font-expedition text-[10px] font-semibold">N</span>
@@ -1000,12 +1031,16 @@ function ToolBelt({ onOpenJournal }) {
                 onOpenJournal();
                 return;
               }
-              active ? triggerToolUse(tool.id) : setActiveTool(tool.id);
+              if (active) {
+                triggerToolUse(tool.id);
+              } else {
+                setActiveTool(tool.id);
+              }
             }}
-            className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition duration-200 focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
+            className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
               active
                 ? 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_18px_rgba(227,197,133,0.45),inset_0_0_0_1px_rgba(227,197,133,0.45)]'
-                : 'border-expedition-gold/55 bg-[rgba(8,14,27,0.45)] text-expedition-parchment/85 hover:-translate-y-0.5 hover:border-expedition-gold hover:bg-expedition-gold/15'
+                : 'border-expedition-gold/55 bg-[rgba(8,14,27,0.5)] text-expedition-parchment/85 hover:border-expedition-gold hover:bg-expedition-gold/15'
             }`}
             title={`${index + 1}: ${tool.name}`}
           >
@@ -1016,7 +1051,7 @@ function ToolBelt({ onOpenJournal }) {
             <span className="pointer-events-none absolute left-1 top-0.5 font-expedition text-[10px] font-semibold text-expedition-goldbright/95 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
               {index + 1}
             </span>
-            <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[9rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-brass/60 bg-expedition-ink/90 px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
+            <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[9rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-gold/60 bg-[rgba(12,20,38,0.92)] px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
               {tool.name}
             </span>
           </button>
@@ -1029,7 +1064,7 @@ function ToolBelt({ onOpenJournal }) {
 // ---------------------------------------------------------------------------
 // Narration
 
-function SpeakerLine({ speaker, icon, portrait, time, children }) {
+function SpeakerLine({ speaker, icon, portrait, time, italic = false, children }) {
   return (
     <div className="grid grid-cols-[2.4rem_1fr] gap-2.5 border-t border-expedition-brass/30 pt-2.5 first:border-t-0 first:pt-0">
       <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-expedition-brass/70 bg-black/20 text-expedition-gold shadow-[inset_0_0_8px_rgba(0,0,0,0.6)]">
@@ -1045,7 +1080,7 @@ function SpeakerLine({ speaker, icon, portrait, time, children }) {
           <span className={GOLD_LABEL}>{speaker}</span>
           {time && <span className="shrink-0 text-[10px] tracking-[0.08em] text-expedition-faded">{time}</span>}
         </div>
-        <div className="font-expedition text-[15.5px] leading-relaxed text-expedition-parchment">{children}</div>
+        <div className={`font-expedition text-[15.5px] leading-relaxed text-expedition-parchment ${italic ? 'italic text-expedition-parchment/90' : ''}`}>{children}</div>
       </div>
     </div>
   );
@@ -1080,48 +1115,138 @@ function HotkeysResponse() {
   );
 }
 
-function NarrativePanel({ forceExpanded = false }) {
+function NarratorLoadingDots() {
+  return (
+    <div className="flex h-7 items-center gap-1.5" aria-label="Narrator is composing">
+      {[0, 1, 2].map(index => (
+        <span
+          key={index}
+          className="h-1.5 w-1.5 rounded-full bg-expedition-gold/75 motion-safe:animate-pulse"
+          style={{ animationDelay: `${index * 160}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function entryTime(entry, fallbackTime) {
+  return Number.isFinite(Number(entry?.timeOfDay))
+    ? formatExpeditionTime(Number(entry.timeOfDay))
+    : fallbackTime;
+}
+
+function entryPresentation(entry) {
+  if (entry?.kind === 'syms') {
+    return { speaker: 'Syms Covington', portrait: '/portraits/syms_covington.jpg' };
+  }
+  if (entry?.kind === 'fieldNote') {
+    return { speaker: 'Field Note', icon: <OpenBookIcon className="h-5 w-5" /> };
+  }
+  if (entry?.kind === 'player') {
+    return { speaker: 'You', icon: <NoteIcon className="h-5 w-5" /> };
+  }
+  if (entry?.kind === 'darwinThought') {
+    return { speaker: 'Darwin', icon: <OpenBookIcon className="h-5 w-5" />, italic: true };
+  }
+  return { speaker: 'Narrator', icon: <CompassRoseIcon className="h-5 w-5" /> };
+}
+
+const NarratorComposer = memo(function NarratorComposer({
+  expanded,
+  pending,
+  submitNarratorCommand,
+  onDraftActiveChange,
+}) {
   const [draft, setDraft] = useState('');
-  const [localEcho, setLocalEcho] = useState('');
-  const [localNarratorReply, setLocalNarratorReply] = useState(null);
+
+  const updateDraft = useCallback(event => {
+    const next = event.target.value;
+    setDraft(next);
+    onDraftActiveChange(next.length > 0);
+  }, [onDraftActiveChange]);
+
+  const handleSubmit = useCallback(event => {
+    event.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed || pending) return;
+    setDraft('');
+    onDraftActiveChange(false);
+    submitNarratorCommand(trimmed);
+  }, [draft, onDraftActiveChange, pending, submitNarratorCommand]);
+
+  const handleFocus = useCallback(() => {
+    setTypingMode(true);
+  }, []);
+
+  const handleBlur = useCallback(() => {
+    setTypingMode(false);
+  }, []);
+
+  const handleKeyDown = useCallback(event => {
+    // While typing, keys belong to the input: Escape hands control
+    // back to the game, everything else must not reach the hotkeys.
+    event.stopPropagation();
+    if (event.key === 'Escape') event.currentTarget.blur();
+  }, []);
+
+  return (
+    <form onSubmit={handleSubmit} className={`flex items-center gap-2 border-t border-expedition-brass/30 transition-[margin,padding] duration-300 ease-out ${expanded ? 'mt-3 pt-3' : 'mt-2 pt-2'}`}>
+      <input
+        type="text"
+        value={draft}
+        onChange={updateDraft}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className={`min-w-0 flex-1 rounded-sm border border-expedition-gold/50 bg-[rgba(232,220,192,0.92)] px-3.5 font-expedition text-[16px] leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 transition-[padding] duration-300 ${expanded ? 'py-2.5' : 'py-2'}`}
+        placeholder="Write a note or dictate to the narrator..."
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        aria-label={pending ? 'Narrator is composing' : 'Send note to narrator'}
+        className={`${GOLD_BUTTON} min-w-[4.25rem] transition-[height,padding] duration-300 disabled:cursor-wait disabled:opacity-60 ${expanded ? 'h-10' : 'h-9 px-2.5'}`}
+      >
+        {pending ? (
+          <span className="flex items-center justify-center gap-1" aria-hidden="true">
+            {[0, 1, 2].map(index => (
+              <span
+                key={index}
+                className="h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse"
+                style={{ animationDelay: `${index * 160}ms` }}
+              />
+            ))}
+          </span>
+        ) : 'Send'}
+      </button>
+    </form>
+  );
+});
+
+function NarrativePanel({ forceExpanded = false }) {
+  const [composerHasText, setComposerHasText] = useState(false);
   const [logHeight, setLogHeight] = useState(LOG_DEFAULT_HEIGHT);
-  const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [manualCollapsed, setManualCollapsed] = useState(false);
   const logRef = React.useRef(null);
   const dragRef = React.useRef(null);
-  const message = useThreeGameStore(state => state.message);
-  const educationalNote = useThreeGameStore(state => state.educationalNote);
-  const symsLine = useThreeGameStore(state => state.symsLine);
+  const narratorLog = useThreeGameStore(state => state.narratorLog);
+  const narratorPending = useThreeGameStore(state => state.narratorPending);
+  const narratorError = useThreeGameStore(state => state.narratorError);
+  const submitNarratorCommand = useThreeGameStore(state => state.submitNarratorCommand);
   // Minute-resolution clock shown on un-stamped lines. Subscribing to the
   // formatted string instead of raw timeOfDay re-renders this heavy panel only
   // when the displayed minute changes, not on every ~1s clock tick.
   const fallbackTime = useThreeGameStore(state => formatExpeditionTime(state.timeOfDay));
-  // Stamp each line with the in-game time at which it appeared, like a logbook
-  // entry. Lines present at first paint track the live clock until they change —
-  // the world clock is only authoritative after zone load, so stamping on mount
-  // would freeze a stale time. Each effect reads the live clock at stamp time.
-  const mountedRef = React.useRef(false);
-  const [stamps, setStamps] = useState({});
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, narrator: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
-  }, [message]);
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, syms: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
-  }, [symsLine]);
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    setStamps(prev => ({ ...prev, note: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
-  }, [educationalNote]);
-  useEffect(() => {
-    mountedRef.current = true;
-  }, []);
+  const displayEntries = useMemo(
+    () => (Array.isArray(narratorLog) ? narratorLog.slice(-24) : []),
+    [narratorLog],
+  );
   // Newest line stays in view; the log scrolls like a chat transcript.
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [message, symsLine, educationalNote, localEcho, localNarratorReply]);
+  }, [displayEntries, narratorPending, narratorError]);
   // Never leave the game deaf to hotkeys if the panel unmounts mid-focus.
   useEffect(() => () => setTypingMode(false), []);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
@@ -1130,24 +1255,9 @@ function NarrativePanel({ forceExpanded = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  const expanded = forceExpanded || hovered || focused || draft.length > 0 || Boolean(localNarratorReply);
+  const expanded = forceExpanded || !manualCollapsed || focused || composerHasText || narratorPending;
   const visibleLogHeight = expanded ? logHeight : 88;
-  const previewMessage = educationalNote || symsLine || message;
-
-  const handleSubmit = event => {
-    event.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    setLocalEcho(trimmed);
-    setStamps(prev => ({ ...prev, echo: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
-    if (/^(?:hotkeys?|controls?|commands?|help)$/i.test(trimmed)) {
-      setLocalNarratorReply('hotkeys');
-      setStamps(prev => ({ ...prev, localNarrator: formatExpeditionTime(useThreeGameStore.getState().timeOfDay) }));
-    } else {
-      setLocalNarratorReply(null);
-    }
-    setDraft('');
-  };
+  const previewMessage = displayEntries.at(-1)?.text || '';
 
   const onHandlePointerDown = event => {
     if (!expanded) return;
@@ -1169,8 +1279,6 @@ function NarrativePanel({ forceExpanded = false }) {
   return (
     <div
       className="transition-transform duration-300 ease-out"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={event => {
         if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -1180,10 +1288,27 @@ function NarrativePanel({ forceExpanded = false }) {
       className={`w-[min(28rem,calc(100vw-1.5rem))] transition-[opacity,transform] duration-300 ease-out ${expanded ? 'opacity-100' : 'translate-y-1 opacity-90'}`}
       innerClassName={`transition-[padding] duration-300 ease-out ${expanded ? 'p-4 pt-1.5' : 'px-3 py-2.5'}`}
     >
+      {!forceExpanded && (
+        <button
+          type="button"
+          onClick={() => setManualCollapsed(value => !value)}
+          aria-label={expanded ? 'Minimize narrator panel' : 'Open narrator panel'}
+          title={expanded ? 'Minimize narrator panel' : 'Open narrator panel'}
+          className={`absolute right-2.5 top-2.5 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-expedition-gold/45 bg-[rgba(8,14,27,0.55)] font-expedition text-[15px] leading-none text-expedition-gold/85 shadow-[0_2px_8px_rgba(0,0,0,0.35)] transition hover:border-expedition-gold hover:bg-expedition-gold/12 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/70 ${expanded ? '' : 'opacity-80'}`}
+        >
+          {expanded ? (
+            <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
+              <path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" />
+            </svg>
+          ) : (
+            <OpenBookIcon className="h-4 w-4" />
+          )}
+        </button>
+      )}
       <div
         role="separator"
         aria-orientation="horizontal"
-        title={expanded ? 'Drag to resize' : 'Hover or focus to expand'}
+        title={expanded ? 'Drag to resize' : 'Open field log'}
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
         onPointerUp={onHandlePointerEnd}
@@ -1199,7 +1324,11 @@ function NarrativePanel({ forceExpanded = false }) {
         className={`grid content-start overflow-y-auto pr-1.5 transition-[height,gap] duration-300 ease-out [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)] ${expanded ? 'gap-2.5' : 'gap-1.5'}`}
       >
         {!expanded ? (
-          <div className="grid grid-cols-[auto_1fr] items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setManualCollapsed(false)}
+            className="grid w-full grid-cols-[auto_1fr] items-center gap-2.5 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
+          >
             <div className="flex h-8 w-8 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 text-expedition-gold">
               <OpenBookIcon className="h-4 w-4" />
             </div>
@@ -1209,45 +1338,43 @@ function NarrativePanel({ forceExpanded = false }) {
                 {previewMessage}
               </div>
             </div>
-          </div>
+          </button>
         ) : (
           <>
-            <SpeakerLine speaker="Narrator" time={stamps.narrator || fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />}>{message}</SpeakerLine>
-            <SpeakerLine speaker="Syms Covington" time={stamps.syms || fallbackTime} portrait="/portraits/syms_covington.jpg">{symsLine}</SpeakerLine>
-            {educationalNote && (
-              <SpeakerLine speaker="Field Note" time={stamps.note || fallbackTime} icon={<OpenBookIcon className="h-5 w-5" />}>{educationalNote}</SpeakerLine>
+            {displayEntries.map(entry => {
+              const presentation = entryPresentation(entry);
+              return (
+                <SpeakerLine
+                  key={entry.id}
+                  speaker={entry.speaker || presentation.speaker}
+                  time={entryTime(entry, fallbackTime)}
+                  icon={presentation.icon}
+                  portrait={presentation.portrait}
+                  italic={presentation.italic}
+                >
+                  {entry.kind === 'hotkeys' ? <HotkeysResponse /> : entry.text}
+                </SpeakerLine>
+              );
+            })}
+            {narratorPending && (
+              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />}>
+                <NarratorLoadingDots />
+              </SpeakerLine>
             )}
-            {localEcho && (
-              <SpeakerLine speaker="You" time={stamps.echo || fallbackTime} icon={<NoteIcon className="h-5 w-5" />}>{localEcho}</SpeakerLine>
-            )}
-            {localNarratorReply === 'hotkeys' && (
-              <SpeakerLine speaker="Narrator" time={stamps.localNarrator || fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />}>
-                <HotkeysResponse />
+            {narratorError && !narratorPending && (
+              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />} italic>
+                {narratorError}
               </SpeakerLine>
             )}
           </>
         )}
       </div>
-      <form onSubmit={handleSubmit} className={`flex items-center gap-2 border-t border-expedition-brass/30 transition-[margin,padding] duration-300 ease-out ${expanded ? 'mt-3 pt-3' : 'mt-2 pt-2'}`}>
-        <input
-          type="text"
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
-          onFocus={() => setTypingMode(true)}
-          onBlur={() => setTypingMode(false)}
-          onKeyDown={event => {
-            // While typing, keys belong to the input: Escape hands control
-            // back to the game, everything else must not reach the hotkeys.
-            event.stopPropagation();
-            if (event.key === 'Escape') event.currentTarget.blur();
-          }}
-          className={`min-w-0 flex-1 rounded-sm border border-expedition-gold/50 bg-[rgba(232,220,192,0.9)] px-3 font-expedition text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 transition-[padding,font-size] duration-300 ${expanded ? 'py-2 text-[14.5px]' : 'py-1.5 text-[13px]'}`}
-          placeholder="Write a note or dictate to the narrator..."
-        />
-        <button type="submit" className={`${GOLD_BUTTON} transition-[height,padding] duration-300 ${expanded ? 'h-9' : 'h-8 px-2.5'}`}>
-          Send
-        </button>
-      </form>
+      <NarratorComposer
+        expanded={expanded}
+        pending={narratorPending}
+        submitNarratorCommand={submitNarratorCommand}
+        onDraftActiveChange={setComposerHasText}
+      />
       <button
         type="button"
         onClick={() => nearby && collectNearby()}
@@ -1266,7 +1393,7 @@ function NarrativePanel({ forceExpanded = false }) {
 
 function CountChip({ icon: Icon, label, value }) {
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-expedition-gold/55 bg-black/25 px-2 py-1.5">
+    <div className="flex items-center gap-2 rounded-sm border border-expedition-gold/40 bg-black/25 px-2 py-1.5">
       <Icon className="h-5 w-5 shrink-0 text-expedition-gold" />
       <div className="min-w-0">
         <div className="font-expedition text-sm font-semibold leading-none text-expedition-parchment">{value}</div>
@@ -1350,7 +1477,7 @@ function ObjectivesTab({ objective, condensed = false }) {
       </div>
       <div>
       <div className={`${GOLD_LABEL} mb-1.5`}>Nearby NPC</div>
-      <div className="flex items-center gap-2.5 rounded-sm border border-expedition-gold/55 bg-black/25 px-2.5 py-2">
+      <div className="flex items-center gap-2.5 rounded-sm border border-expedition-gold/40 bg-black/25 px-2.5 py-2">
         <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
@@ -1367,13 +1494,13 @@ function ObjectivesTab({ objective, condensed = false }) {
       {zone.neighbors.length > 0 && (
         <div>
           <div className={`${GOLD_LABEL} mb-1.5`}>Nearby Objectives</div>
-          <div className="overflow-hidden rounded-sm border border-expedition-gold/50 bg-black/20">
+          <div className="overflow-hidden rounded-sm border border-expedition-gold/40 bg-black/20">
             {zone.neighbors.map(route => (
               <button
                 key={route.zoneId}
                 type="button"
                 onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[route.edge] || null })}
-                className="group flex w-full items-center gap-2 border-t border-expedition-brass/35 px-2.5 py-2 text-left transition duration-200 first:border-t-0 hover:translate-x-0.5 hover:bg-expedition-gold/10"
+                className="group flex w-full items-center gap-2 border-t border-expedition-brass/35 px-2.5 py-2 text-left transition first:border-t-0 hover:bg-expedition-gold/10"
               >
                 <CompassRoseIcon className="h-[1.1rem] w-[1.1rem] shrink-0 text-expedition-gold/80 transition group-hover:text-expedition-goldbright" />
                 <span className="min-w-0">
@@ -1476,7 +1603,11 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
                   onOpenJournal();
                   return;
                 }
-                active ? triggerToolUse(tool.id) : setActiveTool(tool.id);
+                if (active) {
+                  triggerToolUse(tool.id);
+                } else {
+                  setActiveTool(tool.id);
+                }
               }}
               className={`group flex min-w-0 items-center gap-2.5 rounded-sm border px-2.5 py-2 text-left transition ${
                 active
@@ -1649,7 +1780,7 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
             onClick={() => setExpanded(value => !value)}
             aria-expanded={expanded}
             title={expanded ? 'Collapse panel' : 'Expand panel'}
-            className="mx-auto mt-2 -mb-0.5 flex h-6 w-12 shrink-0 items-center justify-center rounded-md border border-expedition-brass/70 bg-[rgba(10,14,19,0.75)] text-expedition-gold shadow-[0_2px_6px_rgba(0,0,0,0.45)] transition hover:border-expedition-gold hover:bg-expedition-gold/15 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+            className="mx-auto mt-2 -mb-0.5 flex h-6 w-12 shrink-0 items-center justify-center rounded-md border border-expedition-gold/60 bg-[rgba(10,18,36,0.8)] text-expedition-gold shadow-[0_2px_6px_rgba(0,0,0,0.45)] transition hover:border-expedition-gold hover:bg-expedition-gold/15 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
           >
             <svg
               viewBox="0 0 12 7"
@@ -1677,6 +1808,21 @@ const CAMERA_MODE_LABELS = {
   first: 'First Person',
   top: 'Overhead Chart',
 };
+
+const MOVEMENT_HINT_STORAGE_KEY = 'young-darwin-three-movement-hint-v1';
+const MOVEMENT_HINT_VISIBLE_MS = 9500;
+const MOVEMENT_HINT_FADE_MS = 320;
+const MOVEMENT_HINT_MOVE_KEYS = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'ArrowUp',
+  'ArrowLeft',
+  'ArrowDown',
+  'ArrowRight',
+]);
+const MOVEMENT_HINT_ACTION_KEYS = new Set(['Space', 'ShiftLeft', 'ShiftRight']);
 
 function PromptKey({ children, active = false }) {
   return (
@@ -1712,6 +1858,94 @@ function PromptAction({ keyLabel, children, primary = false, onClick = null }) {
   return <div className={className}>{content}</div>;
 }
 
+function MovementHint() {
+  const [rendered, setRendered] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const stateRef = React.useRef({ dismissed: false, moved: false, acted: false });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      if (window.localStorage?.getItem(MOVEMENT_HINT_STORAGE_KEY) === 'dismissed') return undefined;
+    } catch {
+      // Private browsing or blocked storage should not break the HUD.
+    }
+
+    let showTimer = 0;
+    let revealTimer = 0;
+    let hideTimer = 0;
+    let fadeTimer = 0;
+    const dismiss = () => {
+      if (stateRef.current.dismissed) return;
+      stateRef.current.dismissed = true;
+      window.clearTimeout(showTimer);
+      window.clearTimeout(revealTimer);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(fadeTimer);
+      setVisible(false);
+      fadeTimer = window.setTimeout(() => setRendered(false), MOVEMENT_HINT_FADE_MS);
+      try {
+        window.localStorage?.setItem(MOVEMENT_HINT_STORAGE_KEY, 'dismissed');
+      } catch {
+        // Ignore storage failures; the hint can safely reappear next session.
+      }
+    };
+
+    showTimer = window.setTimeout(() => {
+      if (stateRef.current.dismissed) return;
+      setRendered(true);
+      revealTimer = window.setTimeout(() => {
+        if (!stateRef.current.dismissed) setVisible(true);
+      }, 40);
+    }, 450);
+    hideTimer = window.setTimeout(dismiss, MOVEMENT_HINT_VISIBLE_MS);
+    const handleKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat) return;
+      if (MOVEMENT_HINT_MOVE_KEYS.has(event.code)) stateRef.current.moved = true;
+      if (MOVEMENT_HINT_ACTION_KEYS.has(event.code)) stateRef.current.acted = true;
+      if (stateRef.current.moved && stateRef.current.acted) dismiss();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(revealTimer);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(fadeTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  if (!rendered) return null;
+
+  return (
+    <div
+      className={`pointer-events-none absolute left-1/2 top-[5.6rem] z-20 w-[min(28rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-sm border border-expedition-brass/65 bg-[rgba(13,20,24,0.76)] px-3 py-2 font-expedition text-expedition-parchment shadow-[0_14px_32px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-md transition-all duration-300 md:top-auto md:bottom-[8.9rem] lg:bottom-[5.9rem] ${visible ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'}`}
+      aria-live="polite"
+    >
+      <div className="hidden min-w-0 flex-wrap items-center justify-center gap-1.5 text-[11px] leading-none md:flex">
+        <span className="mr-0.5 uppercase tracking-[0.14em] text-expedition-faded">Move</span>
+        <PromptKey active>WASD</PromptKey>
+        <PromptKey>Arrows</PromptKey>
+        <span className="mx-1 h-4 w-px bg-expedition-brass/35" />
+        <span className="uppercase tracking-[0.14em] text-expedition-faded">Jump</span>
+        <PromptKey active>Space</PromptKey>
+        <span className="mx-1 h-4 w-px bg-expedition-brass/35" />
+        <span className="uppercase tracking-[0.14em] text-expedition-faded">Run</span>
+        <PromptKey active>Shift</PromptKey>
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 text-[11px] leading-none md:hidden">
+        <span className="uppercase tracking-[0.14em] text-expedition-faded">Move</span>
+        <PromptKey active>Drag</PromptKey>
+        <span className="mx-1 h-4 w-px bg-expedition-brass/35" />
+        <PromptKey active>Jump</PromptKey>
+        <PromptKey>Run</PromptKey>
+      </div>
+    </div>
+  );
+}
+
 function PromptCard({ title, subtitle, children }) {
   return (
     <div className="pointer-events-auto absolute left-1/2 top-[34%] w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-sm border border-expedition-brass/75 bg-[rgba(19,24,24,0.76)] px-3 py-2.5 font-expedition text-left shadow-[0_14px_34px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md sm:left-[calc(50%+11rem)] sm:top-[56%]">
@@ -1726,6 +1960,105 @@ function PromptCard({ title, subtitle, children }) {
         {children}
       </div>
     </div>
+  );
+}
+
+function RouteDecisionCard({ edgePrompt, fromZone, toZone, onContinue, onStay }) {
+  const routeDirection = directionLabel(edgePrompt.edge);
+  const routeKey = ROUTE_EDGE_ABBR[edgePrompt.edge] || routeDirection.slice(0, 2).toUpperCase();
+  const copy = routePlaceCopy(toZone, edgePrompt);
+  const [visible, setVisible] = useState(false);
+  const closingRef = React.useRef(false);
+  const closeTimerRef = React.useRef(null);
+
+  const closeWith = useCallback(callback => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setVisible(false);
+    closeTimerRef.current = window.setTimeout(callback, 180);
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    closeWith(onContinue);
+  }, [closeWith, onContinue]);
+
+  const handleStay = useCallback(() => {
+    closeWith(onStay);
+  }, [closeWith, onStay]);
+
+  useEffect(() => {
+    setBlockingUiMode(true);
+    const frame = window.requestAnimationFrame(() => setVisible(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+      setBlockingUiMode(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleStay();
+      } else if (event.key?.toLowerCase() === 'e' || event.key === 'Enter') {
+        event.preventDefault();
+        handleContinue();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleContinue, handleStay]);
+
+  return (
+    <section
+      className={`pointer-events-auto absolute left-1/2 top-1/2 z-30 w-[min(40rem,calc(100vw-1.25rem))] -translate-x-1/2 rounded-[3px] border border-expedition-brass/85 bg-[linear-gradient(165deg,rgba(18,29,42,0.94),rgba(7,13,20,0.96))] p-4 font-expedition text-expedition-parchment shadow-[0_24px_70px_rgba(0,0,0,0.64),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md transition-[opacity,transform] duration-200 ease-out sm:p-5 ${visible ? '-translate-y-1/2 scale-100 opacity-100' : 'translate-y-[calc(-50%+0.5rem)] scale-[0.975] opacity-0'}`}
+      aria-label={`Route found: ${fromZone.name} to ${toZone.name}`}
+    >
+      <div className="pointer-events-none absolute inset-[4px] rounded-[2px] border border-expedition-gold/20" />
+      <div className="relative flex items-start justify-between gap-4 border-b border-expedition-brass/45 pb-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/85">Route Found</div>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-[22px] font-bold leading-none tracking-[0.02em] text-expedition-parchment sm:text-[28px]">
+              {toZone.name}
+            </h2>
+            <span className="text-[12px] uppercase tracking-[0.16em] text-expedition-faded">{routeDirection}</span>
+          </div>
+        </div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 text-[15px] font-bold text-expedition-goldbright shadow-[inset_0_0_0_4px_rgba(201,163,95,0.1)]">
+          {routeKey}
+        </div>
+      </div>
+      <div className="relative py-4 sm:py-5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[15px] font-semibold text-expedition-parchment sm:text-[17px]">
+          <span className="truncate">{fromZone.name}</span>
+          <span className="text-expedition-gold/80">{'->'}</span>
+          <span className="truncate text-expedition-goldbright">{toZone.name}</span>
+        </div>
+        <p className="mt-3 max-w-[34rem] text-[14px] leading-relaxed text-expedition-parchment/86 sm:text-[15px]">
+          {copy}
+        </p>
+      </div>
+      <div className="relative grid gap-2 border-t border-expedition-brass/35 pt-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={handleContinue}
+          className="flex min-h-[3.35rem] items-center justify-center gap-3 rounded-sm border border-expedition-gold bg-expedition-gold px-4 py-3 text-[14px] font-bold uppercase tracking-[0.12em] text-expedition-ink shadow-[0_8px_18px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,244,190,0.42)] transition hover:bg-expedition-goldbright focus:outline-none focus:ring-2 focus:ring-expedition-goldbright"
+        >
+          <PromptKey active>E</PromptKey>
+          Continue {routeDirection}
+        </button>
+        <button
+          type="button"
+          onClick={handleStay}
+          className="flex min-h-[3.35rem] items-center justify-center gap-3 rounded-sm border border-expedition-brass/65 bg-black/24 px-4 py-3 text-[14px] font-semibold uppercase tracking-[0.12em] text-expedition-parchment transition hover:border-expedition-gold hover:bg-expedition-gold/10 hover:text-expedition-goldbright focus:outline-none focus:ring-2 focus:ring-expedition-gold/70"
+        >
+          <PromptKey>Esc</PromptKey>
+          Stay Here
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1780,6 +2113,8 @@ function InteractionPrompt() {
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const dismissEdgePrompt = useThreeGameStore(state => state.dismissEdgePrompt);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
@@ -1793,6 +2128,22 @@ function InteractionPrompt() {
   if (!nearby && !edgePrompt) return null;
   if (!nearby && edgePrompt) {
     const isOpen = edgePrompt.kind === 'open';
+    if (isOpen && edgePrompt.toRegionId) {
+      const fromZone = getZone(currentZoneId);
+      const toZone = getZone(edgePrompt.toRegionId);
+      return (
+        <RouteDecisionCard
+          edgePrompt={edgePrompt}
+          fromZone={fromZone}
+          toZone={toZone}
+          onContinue={() => beginZoneTransition(edgePrompt.toRegionId, {
+            entryEdge: ROUTE_ENTRY_EDGES[edgePrompt.edge] || null,
+            note: routePlaceCopy(toZone, edgePrompt),
+          })}
+          onStay={() => dismissEdgePrompt(edgePrompt.id)}
+        />
+      );
+    }
     return (
       <PromptCard title={edgePrompt.label} subtitle={edgePrompt.message || edgePrompt.description}>
         {isOpen && (
@@ -2187,7 +2538,7 @@ function CameraCycleButton({ className }) {
   return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
 }
 
-export function ThreeHUD({ onTogglePerf }) {
+export function ThreeHUD() {
   const [panel, setPanel] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -2272,6 +2623,7 @@ export function ThreeHUD({ onTogglePerf }) {
 
       <InteractionPrompt />
       <CameraModeToast />
+      <MovementHint />
       <InspectableTooltip />
 
       <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">

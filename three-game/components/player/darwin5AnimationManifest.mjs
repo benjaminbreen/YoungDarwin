@@ -1,6 +1,7 @@
 export const DARWIN5_ANIMATION_MANIFEST = {
   idle: { category: 'idle', loop: true, fade: 0.22 },
   holdIdle: { category: 'idle', loop: true, fade: 0.2, fallback: 'idle' },
+  holdToolIdle: { category: 'idle', loop: true, fade: 0.18, fallback: 'idle' },
   lookAround: { category: 'idleAction', duration: 6.93, lockDuration: 0, fade: 0.18, fallback: 'idle' },
   lookAroundShort: { category: 'idleAction', duration: 3.6, lockDuration: 0, fade: 0.16, fallback: 'lookAround' },
   walk: { category: 'locomotion', loop: true, fade: 0.14 },
@@ -121,6 +122,7 @@ export const DARWIN5_REQUIRED_RUNTIME_CLIPS = [
   'runStrafeLeft',
   'runStrafeRight',
   'holdIdle',
+  'holdToolIdle',
   'walkCarry',
   'holdWalk',
   'holdToolWalk',

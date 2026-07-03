@@ -12,6 +12,24 @@ import { baseSpecimens } from '../data/specimens';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
+import {
+  darwinThought,
+  localNarratorFallback,
+  specimenNarration,
+  zoneNarration,
+} from './narrator/narratorContent';
+import {
+  INITIAL_NARRATOR_TIME,
+  SCRIPTED_NARRATION_COOLDOWN_MINUTES,
+  appendNarratorEvents,
+  createInitialNarratorLog,
+  createNarratorEvent,
+  gameClockMinutes,
+  narrationPayloadToEvents,
+  shouldAllowLlmFieldNote,
+  shouldAllowLlmThought,
+  textHash,
+} from './narrator/narratorEvents';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 import { MOVEMENT_FATIGUE } from './components/player/playerConfig';
@@ -39,6 +57,7 @@ const BASALT_SPECIMEN = baseSpecimens.find(specimen => specimen.id === 'basalt')
   scientificValue: 6,
 };
 const HAMMER_TOOL = threeTools.find(tool => tool.id === 'hammer') || { id: 'hammer', name: 'Geological Hammer' };
+const HANDS_TOOL = threeTools.find(tool => tool.id === 'hands') || { id: 'hands', name: 'Bare Hands' };
 
 export const threeRuntimeState = {
   playerPose: {
@@ -66,6 +85,87 @@ function advanceTimeState(state, minutes) {
   return {
     timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
     day: state.day + dayDelta,
+  };
+}
+
+function findRuntimeSpecimen(state, specimenId) {
+  if (!specimenId) return null;
+  return getThreeSpecimens(state.currentZoneId).find(specimen => (
+    (specimen.instanceId || specimen.id) === specimenId || specimen.id === specimenId
+  )) || null;
+}
+
+function narratorSessionId(seed) {
+  if (typeof window === 'undefined') return `three-${seed || 'anonymous'}`;
+  try {
+    const key = 'young-darwin-three-narrator-session';
+    const existing = window.sessionStorage?.getItem(key);
+    if (existing) return existing;
+    const next = `three-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    window.sessionStorage?.setItem(key, next);
+    return next;
+  } catch {
+    return `three-${seed || 'anonymous'}`;
+  }
+}
+
+function playerHeading(playerPose) {
+  const facing = playerPose?.facing || {};
+  const fx = Number(facing.x);
+  const fz = Number(facing.z);
+  if (!Number.isFinite(fx) || !Number.isFinite(fz)) return null;
+  return Math.round(Math.atan2(fx, fz || -1) * (180 / Math.PI));
+}
+
+function nearbyPeopleContext(state, zone) {
+  const people = [];
+  const player = state.playerPose?.position || threeRuntimeState.playerPose.position || {};
+  const px = Number(player.x);
+  const pz = Number(player.z);
+  if ((state.currentZoneId === 'POST_OFFICE_BAY' || state.currentZoneId === 'BEAGLE') && Number.isFinite(px) && Number.isFinite(pz)) {
+    const distance = Math.hypot(px - 4.0, pz - 7.0);
+    people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`}; he is carrying labels, twine, and the specimen bag.`);
+  }
+  for (const npcId of zone?.npcs || []) {
+    if (npcId !== 'syms_covington') people.push(`regional NPC present: ${npcId}`);
+  }
+  return people.slice(0, 4);
+}
+
+const LLM_RECENT_CONTEXT_KINDS = new Set(['player']);
+const LLM_RECENT_CONTEXT_SOURCES = new Set(['player', 'llm', 'scripted-identity', 'scripted-place', 'local']);
+
+function recentNarrationContext(log) {
+  return (Array.isArray(log) ? log : [])
+    .filter(entry => LLM_RECENT_CONTEXT_KINDS.has(entry?.kind))
+    .filter(entry => !entry?.source || LLM_RECENT_CONTEXT_SOURCES.has(entry.source))
+    .map(entry => {
+      const text = String(entry?.text || '').trim();
+      if (!text) return null;
+      const speaker = entry.kind === 'player' ? 'You' : 'Narrator';
+      return `${speaker}: ${text}`;
+    })
+    .filter(Boolean)
+    .slice(-4);
+}
+
+function ambientThoughtPatch(state, { weather = state.weather, timeOfDay = state.timeOfDay, trigger = 'ambient' } = {}) {
+  const zone = getZone(state.currentZoneId);
+  const thoughtState = { ...state, weather, timeOfDay };
+  const thought = darwinThought({ zone, weather, timeOfDay });
+  if (!thought) return {};
+  const nowMinutes = gameClockMinutes(thoughtState);
+  const thoughtKey = `thought:${zone.id}:${trigger}:${weather}:${Math.floor(Number(timeOfDay) || 0)}`;
+  const thoughtSeen = state.narratorScriptedKeys?.[thoughtKey];
+  if (Number.isFinite(thoughtSeen) && nowMinutes - thoughtSeen < SCRIPTED_NARRATION_COOLDOWN_MINUTES) return {};
+  return {
+    narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+      darwinThought: thought,
+    }, thoughtState, 'scripted-thought', { allowThought: true })),
+    narratorScriptedKeys: {
+      ...state.narratorScriptedKeys,
+      [thoughtKey]: nowMinutes,
+    },
   };
 }
 
@@ -184,12 +284,26 @@ function createExpeditionSlice() {
 }
 
 function createSceneSlice() {
-  const initialNarration = getThreeInitialNarration(currentZoneId);
+  const initialZone = getZone(currentZoneId);
+  const initialNarration = {
+    ...getThreeInitialNarration(currentZoneId),
+    ...(zoneNarration(initialZone, {
+      day: 1,
+      timeOfDay: INITIAL_NARRATOR_TIME,
+      source: 'initial',
+    }) || {}),
+  };
   return {
     selectedSpecimenId: null,
     nearbySpecimenId: null,
     message: initialNarration.narration,
     educationalNote: initialNarration.educationalNote,
+    narratorLog: createInitialNarratorLog(initialNarration),
+    narratorPending: false,
+    narratorError: null,
+    narratorScriptedKeys: {
+      [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
+    },
     weather: initialNarration.weather,
     // Narration/LLM weather pins the sky for a while; the island weather
     // simulation resumes authority once untilMinutes passes.
@@ -198,6 +312,8 @@ function createSceneSlice() {
     viewMode: 'shoulder',
     transition: null,
     edgePrompt: null,
+    dismissedEdgePromptId: null,
+    arrivalEdgeBlock: null,
     lastOutcome: null,
     physicsDebug: null,
     // Graphics-quality knobs mirrored from perfSettings so material-building
@@ -238,7 +354,8 @@ function createSceneSlice() {
     },
     brokenPropIds: [],
     sampledRockIds: [],
-    symsLine: 'Syms waits with labels, twine, and a doubtful look at your boots.',
+    harvestedCropIds: [],
+    symsLine: 'Syms waits with labels, twine, and the specimen bag ready.',
   };
 }
 
@@ -287,7 +404,56 @@ export const useThreeGameStore = create((set, get) => ({
       ],
     };
   }),
-  setNearbySpecimen: nearbySpecimenId => set({ nearbySpecimenId }),
+  recordNarratorEvents: events => set(state => ({
+    narratorLog: appendNarratorEvents(
+      state.narratorLog,
+      (Array.isArray(events) ? events : [events]).map(entry => createNarratorEvent({
+        ...entry,
+        day: entry?.day || state.day,
+        timeOfDay: entry?.timeOfDay ?? state.timeOfDay,
+      })),
+    ),
+  })),
+  appendNarratorEntry: entry => set(state => ({
+    narratorLog: appendNarratorEvents(state.narratorLog, [
+      createNarratorEvent({
+        ...entry,
+        day: entry?.day || state.day,
+        timeOfDay: entry?.timeOfDay ?? state.timeOfDay,
+      }),
+    ]),
+  })),
+  setNearbySpecimen: nearbySpecimenId => set(state => {
+    if (state.nearbySpecimenId === nearbySpecimenId) return {};
+    const patch = { nearbySpecimenId };
+    if (!nearbySpecimenId) return patch;
+
+    const specimen = findRuntimeSpecimen(state, nearbySpecimenId);
+    const scripted = specimenNarration(specimen, { zoneId: state.currentZoneId });
+    const key = `specimen:${state.currentZoneId}:${nearbySpecimenId}`;
+    const nowMinutes = gameClockMinutes(state);
+    const lastSeen = state.narratorScriptedKeys[key];
+    if (scripted?.narration && (!Number.isFinite(lastSeen) || nowMinutes - lastSeen >= SCRIPTED_NARRATION_COOLDOWN_MINUTES)) {
+      const zone = getZone(state.currentZoneId);
+      const thoughtKey = `thought:${state.currentZoneId}:${specimen?.id || nearbySpecimenId}`;
+      const thoughtSeen = state.narratorScriptedKeys[thoughtKey];
+      const thought = (!Number.isFinite(thoughtSeen) || nowMinutes - thoughtSeen >= SCRIPTED_NARRATION_COOLDOWN_MINUTES)
+        ? darwinThought({ zone, specimen, weather: state.weather, timeOfDay: state.timeOfDay })
+        : null;
+      patch.message = scripted.narration;
+      patch.educationalNote = scripted.educationalNote || state.educationalNote;
+      patch.narratorLog = appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        ...scripted,
+        darwinThought: thought,
+      }, state, 'scripted-proximity', { allowThought: Boolean(thought) }));
+      patch.narratorScriptedKeys = {
+        ...state.narratorScriptedKeys,
+        [key]: nowMinutes,
+        ...(thought ? { [thoughtKey]: nowMinutes } : {}),
+      };
+    }
+    return patch;
+  }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
   setGraphicsQuality: ({ cheapMaterials, foliageDrawScale }) => set(state => ({
@@ -310,7 +476,17 @@ export const useThreeGameStore = create((set, get) => ({
       },
     };
   }),
-  setEdgePrompt: edgePrompt => set({ edgePrompt }),
+  setEdgePrompt: edgePrompt => set(state => ({
+    edgePrompt,
+    dismissedEdgePromptId: edgePrompt
+      ? (state.dismissedEdgePromptId === edgePrompt.id ? state.dismissedEdgePromptId : null)
+      : null,
+  })),
+  dismissEdgePrompt: edgePromptId => set(state => ({
+    edgePrompt: state.edgePrompt?.id === edgePromptId ? null : state.edgePrompt,
+    dismissedEdgePromptId: edgePromptId || state.edgePrompt?.id || null,
+  })),
+  clearArrivalEdgeBlock: () => set({ arrivalEdgeBlock: null }),
   setPlayerPose: playerPose => {
     updateRuntimePlayerPose(playerPose);
     set(state => {
@@ -419,11 +595,18 @@ export const useThreeGameStore = create((set, get) => ({
     for (const [key, amount] of Object.entries(loot?.supplies || {})) {
       supplies[key] = (supplies[key] || 0) + amount;
     }
+    const hasNarration = Boolean(loot?.message || loot?.syms);
     return {
       brokenPropIds: [...state.brokenPropIds, propId],
       supplies,
       ...(loot?.message ? { message: loot.message } : {}),
       ...(loot?.syms ? { symsLine: loot.syms } : {}),
+      ...(hasNarration ? {
+        narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+          narration: loot?.message,
+          symsLine: loot?.syms,
+        }, state, 'prop-break')),
+      } : {}),
     };
   }),
   collectRockSample: sample => {
@@ -439,17 +622,29 @@ export const useThreeGameStore = create((set, get) => ({
         return promptBelongsToSample ? { carryPrompt: null } : {};
       }
       if (state.inventory.length >= state.caseCapacity) {
+        const message = 'The specimen case is full. The basalt chip will have to wait.';
+        const symsLine = 'Syms taps the case lid. "Not an inch of room left, sir."';
         return {
-          message: 'The specimen case is full. The basalt chip will have to wait.',
-          symsLine: 'Syms taps the case lid. "Not an inch of room left, sir."',
+          message,
+          symsLine,
           lastOutcome: null,
+          narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+            narration: message,
+            symsLine,
+          }, state, 'blocked-action')),
         };
       }
       if (state.supplies.labels <= 0) {
+        const message = 'No labels remain. An unlabeled rock chip would be nearly useless back aboard the Beagle.';
+        const symsLine = 'Syms turns out his pockets. "A clean chip needs a clean label, sir."';
         return {
-          message: 'No labels remain. An unlabeled rock chip would be nearly useless back aboard the Beagle.',
-          symsLine: 'Syms turns out his pockets. "A clean chip needs a clean label, sir."',
+          message,
+          symsLine,
           lastOutcome: null,
+          narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+            narration: message,
+            symsLine,
+          }, state, 'blocked-action')),
         };
       }
 
@@ -477,6 +672,9 @@ export const useThreeGameStore = create((set, get) => ({
         day: state.day,
         timeOfDay: state.timeOfDay,
       });
+
+      const educationalNote = sample?.educationalNote || 'A hammer sample preserves a fresh fracture surface, which is often more useful than a weathered exterior.';
+      const symsLine = outcome.symsLine || sample?.symsLine || `Syms wraps the ${sampleLabel}. "Best keep the locality clear on the label, sir."`;
 
       return {
         supplies: {
@@ -506,37 +704,172 @@ export const useThreeGameStore = create((set, get) => ({
         questComplete: true,
         lastOutcome: { specimen, tool: HAMMER_TOOL, result, documented: false },
         message: result.reason,
-        educationalNote: sample?.educationalNote || 'A hammer sample preserves a fresh fracture surface, which is often more useful than a weathered exterior.',
-        symsLine: outcome.symsLine || sample?.symsLine || `Syms wraps the ${sampleLabel}. "Best keep the locality clear on the label, sir."`,
+        educationalNote,
+        symsLine,
+        narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+          narration: result.reason,
+          symsLine,
+          fieldNote: educationalNote,
+        }, state, 'rock-sample', { allowFieldNote: true })),
         ...(promptBelongsToSample ? { carryPrompt: null } : {}),
       };
     });
 
     return collected;
   },
-  recordHammerStrikeFeedback: feedback => set(state => ({
-    fatigue: clamp(state.fatigue + Math.max(0, feedback?.fatigueDelta || 0), 0, MAX_FATIGUE),
-    message: feedback?.message || state.message,
-    educationalNote: feedback?.educationalNote || state.educationalNote,
-    symsLine: feedback?.symsLine || state.symsLine,
-  })),
-  movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId) => set(state => {
+  // Harvest a settlement crop (E-prompt mode 'harvest-crop'). The first
+  // plant of each kind is documented like a collected specimen; repeat
+  // pickings just add provisions. Mirrors collectRockSample's shape.
+  harvestCrop: crop => {
+    const cropKey = crop?.cropId;
+    if (!cropKey) return false;
+    let collected = false;
+
+    set(state => {
+      const promptBelongsToCrop = state.carryPrompt?.crop?.cropId === cropKey
+        || state.carryPrompt?.id === cropKey;
+      if (state.harvestedCropIds.includes(cropKey)) {
+        collected = true;
+        return promptBelongsToCrop ? { carryPrompt: null } : {};
+      }
+
+      const specimen = specimenById(crop.specimenId);
+      const firstOfKind = specimen && !state.collectedSpecimenIds.includes(specimen.id);
+      if (firstOfKind && state.inventory.length >= state.caseCapacity) {
+        const message = 'The specimen case is full; a cultivated plant sample will have to wait.';
+        const symsLine = 'Syms weighs the case in one hand. "Not room for so much as a leaf, sir."';
+        return {
+          message,
+          symsLine,
+          lastOutcome: null,
+          narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+            narration: message,
+            symsLine,
+          }, state, 'blocked-action')),
+        };
+      }
+
+      collected = true;
+      const zoneId = crop.zoneId || state.currentZoneId;
+      const islandLocation = getThreeIslandLocation(zoneId);
+      const reason = crop.harvestMessage || `You gather ${crop.label || 'a cultivated plant'}.`;
+      const symsLine = crop.harvestSyms || state.symsLine;
+      const patch = {
+        harvestedCropIds: [...state.harvestedCropIds, cropKey],
+        supplies: {
+          ...state.supplies,
+          food: (state.supplies.food || 0) + 1,
+        },
+        fatigue: clamp(state.fatigue + 1, 0, MAX_FATIGUE),
+        message: reason,
+        symsLine,
+        educationalNote: crop.educationalNote || state.educationalNote,
+        narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+          narration: reason,
+          symsLine: crop.harvestSyms || null,
+          fieldNote: firstOfKind ? crop.educationalNote : '',
+        }, state, 'crop-harvest', { allowFieldNote: Boolean(firstOfKind && crop.educationalNote) })),
+        ...(promptBelongsToCrop ? { carryPrompt: null } : {}),
+      };
+
+      if (firstOfKind) {
+        const result = {
+          success: true,
+          reason,
+          outcomeType: 'field_harvest',
+          evidence: `hand-gathered ${specimen.name.toLowerCase()}`,
+          damage: 0,
+          scoreDelta: 2,
+          fatigueDelta: 1,
+        };
+        const entry = makeJournalEntry({
+          specimen,
+          tool: HANDS_TOOL,
+          result,
+          documented: false,
+          location: islandLocation,
+          day: state.day,
+          timeOfDay: state.timeOfDay,
+        });
+        patch.inventory = [
+          ...state.inventory,
+          {
+            ...specimen,
+            condition: result.outcomeType,
+            quality: 'field',
+            sourceZoneId: zoneId,
+            sampledAt: crop.position || null,
+          },
+        ];
+        patch.journal = [...state.journal, entry];
+        patch.collectedSpecimenIds = [...state.collectedSpecimenIds, specimen.id];
+        patch.curiosity = clamp(state.curiosity + result.scoreDelta * 5, 0, MAX_CURIOSITY);
+        patch.questComplete = true;
+        patch.lastOutcome = { specimen, tool: HANDS_TOOL, result, documented: false };
+      }
+
+      return patch;
+    });
+
+    return collected;
+  },
+  recordHammerStrikeFeedback: feedback => set(state => {
+    const hasNarration = Boolean(feedback?.message || feedback?.symsLine);
+    return {
+      fatigue: clamp(state.fatigue + Math.max(0, feedback?.fatigueDelta || 0), 0, MAX_FATIGUE),
+      message: feedback?.message || state.message,
+      educationalNote: feedback?.educationalNote || state.educationalNote,
+      symsLine: feedback?.symsLine || state.symsLine,
+      ...(hasNarration ? {
+        narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+          narration: feedback?.message,
+          symsLine: feedback?.symsLine,
+        }, state, 'hammer-feedback')),
+      } : {}),
+    };
+  }),
+  movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId, maxOffset = null) => set(state => {
     const key = `${zoneId}:${obstacleId}`;
     const current = state.pushableObstacleOffsets[key] || { x: 0, z: 0 };
+    let next = {
+      x: current.x + (delta?.x || 0),
+      z: current.z + (delta?.z || 0),
+    };
+    if (Number.isFinite(maxOffset) && maxOffset > 0) {
+      const distance = Math.hypot(next.x, next.z);
+      if (distance > maxOffset) {
+        const scale = maxOffset / Math.max(0.0001, distance);
+        next = {
+          x: next.x * scale,
+          z: next.z * scale,
+        };
+      }
+    }
     return {
       pushableObstacleOffsets: {
         ...state.pushableObstacleOffsets,
-        [key]: {
-          x: current.x + (delta?.x || 0),
-          z: current.z + (delta?.z || 0),
-        },
+        [key]: next,
       },
     };
   }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
-  setTimeOfDay: hour => set({ timeOfDay: clamp(Number(hour) || 0, 0, HOURS_PER_DAY - 1 / 60) }),
+  setTimeOfDay: hour => set(state => {
+    const timeOfDay = clamp(Number(hour) || 0, 0, HOURS_PER_DAY - 1 / 60);
+    if (state.timeOfDay === timeOfDay) return {};
+    return {
+      timeOfDay,
+      ...ambientThoughtPatch(state, { timeOfDay, trigger: 'time' }),
+    };
+  }),
 
-  setWeather: weather => set(state => (state.weather === weather ? {} : { weather })),
+  setWeather: weather => set(state => (
+    state.weather === weather
+      ? {}
+      : {
+          weather,
+          ...ambientThoughtPatch(state, { weather, trigger: 'weather' }),
+        }
+  )),
   setWeatherOverride: weatherOverride => set({ weatherOverride }),
 
   statusViewOpen: false,
@@ -577,6 +910,16 @@ export const useThreeGameStore = create((set, get) => ({
     // under whatever sky the destination region currently has.
     const arrival = advanceTimeState(state, state.transition.minutes || 0);
     tickWeatherSim((arrival.day || 1) * 1440 + arrival.timeOfDay * 60);
+    const arrivalWeather = getRegionWeather(zone.id) || zone.weather || state.weather;
+    const arrivalState = { ...state, ...arrival, currentZoneId: zone.id, weather: arrivalWeather };
+    const scripted = zoneNarration(zone, arrivalState);
+    const thoughtKey = `thought:${zone.id}:arrival`;
+    const nowMinutes = gameClockMinutes(arrivalState);
+    const thoughtSeen = state.narratorScriptedKeys[thoughtKey];
+    const thought = (!Number.isFinite(thoughtSeen) || nowMinutes - thoughtSeen >= SCRIPTED_NARRATION_COOLDOWN_MINUTES)
+      ? darwinThought({ zone, weather: arrivalWeather, timeOfDay: arrival.timeOfDay })
+      : null;
+    const zoneKey = `zone:${zone.id}`;
     return {
       currentZoneId: zone.id,
       currentLocalCellId: nextLocalCellId,
@@ -588,16 +931,34 @@ export const useThreeGameStore = create((set, get) => ({
         : [...state.visitedLocalCellIds, nextLocalCellId],
       transition: null,
       edgePrompt: null,
+      dismissedEdgePromptId: null,
+      arrivalEdgeBlock: state.transition.entryEdge
+        ? {
+          zoneId: zone.id,
+          edge: state.transition.entryEdge,
+          clearance: 10,
+          returnBand: 2.35,
+        }
+        : null,
       pushableObstacleOffsets: state.pushableObstacleOffsets,
       carryPrompt: null,
       carriedObjectId: null,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
-      message: zone.loadingNote || state.message,
-      educationalNote: zone.educationalNote || state.educationalNote,
-      weather: getRegionWeather(zone.id) || zone.weather || state.weather,
+      message: scripted?.narration || zone.loadingNote || state.message,
+      educationalNote: scripted?.educationalNote || zone.educationalNote || state.educationalNote,
+      weather: arrivalWeather,
       weatherOverride: null,
       sounds: Array.isArray(zone.sounds) ? zone.sounds : state.sounds,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: scripted?.narration || zone.loadingNote,
+        darwinThought: thought,
+      }, arrivalState, 'scripted-zone', { allowThought: Boolean(thought) })),
+      narratorScriptedKeys: {
+        ...state.narratorScriptedKeys,
+        [zoneKey]: nowMinutes,
+        ...(thought ? { [thoughtKey]: nowMinutes } : {}),
+      },
       playerSpawnId: state.transition.entryEdge || 'default',
       fatigue: clamp(state.fatigue + (state.transition.fatigue || 0), 0, MAX_FATIGUE),
       ...arrival,
@@ -616,21 +977,43 @@ export const useThreeGameStore = create((set, get) => ({
     health: clamp(state.health - Math.max(0, falling - 7.5) * 1.25, 0, MAX_HEALTH),
   })),
 
-  applyDrowningDamage: amount => set(state => ({
-    health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
-    message: 'Darwin is out of his depth — the sea is closing over him.',
-    symsLine: '"Sir! Back to the shallows — the Beagle has no second naturalist!"',
-  })),
+  applyDrowningDamage: amount => set(state => {
+    const message = 'You are out of your depth — the sea is closing over you.';
+    const symsLine = '"Sir! Back to the shallows — the Beagle has no second naturalist!"';
+    return {
+      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      message,
+      symsLine,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'hazard')),
+    };
+  }),
 
-  applyCactusDamage: (amount = 8) => set(state => ({
-    health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
-    message: 'Darwin staggers back from the Opuntia spines.',
-    educationalNote: 'Large prickly pear cactus can dominate dry Galapagos scrub; its spines make careless movement costly.',
-    symsLine: '"Mind the cactus, sir. Those spines will write their own field note."',
-  })),
+  applyCactusDamage: (amount = 8) => set(state => {
+    const message = 'You stagger back from the Opuntia spines.';
+    const educationalNote = 'Large prickly pear cactus can dominate dry Galapagos scrub; its spines make careless movement costly.';
+    const symsLine = '"Mind the cactus, sir. Those spines will write their own field note."';
+    return {
+      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      message,
+      educationalNote,
+      symsLine,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+        fieldNote: educationalNote,
+      }, state, 'hazard', { allowFieldNote: true })),
+    };
+  }),
 
   rest: () => set(state => {
     const provisioned = state.supplies.food > 0 && state.supplies.water > 0;
+    const message = provisioned
+      ? 'You rest for two hours in a strip of shade, sharing biscuit and water while Syms reorders the collecting bag.'
+      : 'You rest for two hours in a strip of shade, but the provisions are gone — the rest does little good.';
+    const educationalNote = 'Fieldwork depended on pacing: heat, daylight, and fatigue changed what a naturalist could safely collect.';
     return {
       ...advanceTimeState(state, 120),
       fatigue: clamp(state.fatigue - (provisioned ? 26 : 12), 0, MAX_FATIGUE),
@@ -640,24 +1023,148 @@ export const useThreeGameStore = create((set, get) => ({
         food: Math.max(0, state.supplies.food - 1),
         water: Math.max(0, state.supplies.water - 1),
       },
-      message: provisioned
-        ? 'You rest for two hours in a strip of shade, sharing biscuit and water while Syms reorders the collecting bag.'
-        : 'You rest for two hours in a strip of shade, but the provisions are gone — the rest does little good.',
-      educationalNote: 'Fieldwork depended on pacing: heat, daylight, and fatigue changed what a naturalist could safely collect.',
+      message,
+      educationalNote,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        fieldNote: educationalNote,
+      }, state, 'rest', { allowFieldNote: true })),
     };
   }),
 
-  applyNarration: data => set(state => ({
-    message: data.narration || state.message,
-    educationalNote: data.educationalNote || state.educationalNote,
-    weather: data.weather || state.weather,
-    // Hold narration weather for ~90 game minutes before the island
-    // simulation takes the sky back.
-    weatherOverride: data.weather
-      ? { state: data.weather, untilMinutes: (state.day || 1) * 1440 + state.timeOfDay * 60 + 90 }
-      : state.weatherOverride,
-    sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : state.sounds,
-  })),
+  applyNarration: (data, options = {}) => set(state => {
+    const allowFieldNote = options.allowFieldNote ?? shouldAllowLlmFieldNote(data, options.playerInput || '');
+    const allowThought = options.allowThought ?? shouldAllowLlmThought(data, options.playerInput || '', state);
+    return {
+      message: data.narration || state.message,
+      educationalNote: allowFieldNote && data.educationalNote ? data.educationalNote : state.educationalNote,
+      weather: data.weather || state.weather,
+      // Hold narration weather for ~90 game minutes before the island
+      // simulation takes the sky back.
+      weatherOverride: data.weather
+        ? { state: data.weather, untilMinutes: (state.day || 1) * 1440 + state.timeOfDay * 60 + 90 }
+        : state.weatherOverride,
+      sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : state.sounds,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents(data, state, data.source || 'llm', {
+        allowFieldNote,
+        allowThought,
+      })),
+    };
+  }),
+
+  submitNarratorCommand: async input => {
+    const trimmed = String(input || '').trim();
+    if (!trimmed) return null;
+
+    const isHelp = /^(?:hotkeys?|controls?|commands?|help)$/i.test(trimmed);
+    let requestState = null;
+    set(state => {
+      requestState = state;
+      const playerEntry = createNarratorEvent({
+        kind: 'player',
+        text: trimmed,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        source: 'player',
+      });
+      const hotkeysEntry = isHelp
+        ? createNarratorEvent({
+            kind: 'hotkeys',
+            text: 'The narrator opens the command list.',
+            day: state.day,
+            timeOfDay: state.timeOfDay,
+            source: 'local',
+          })
+        : null;
+      return {
+        narratorLog: appendNarratorEvents(state.narratorLog, [playerEntry, hotkeysEntry]),
+        narratorPending: isHelp ? state.narratorPending : true,
+        narratorError: null,
+      };
+    });
+
+    if (isHelp) return { local: true };
+
+    const state = requestState || get();
+    const zone = getZone(state.currentZoneId);
+    const islandLocation = getThreeIslandLocation(state.currentZoneId);
+    const nearbySpecimen = findRuntimeSpecimen(state, state.nearbySpecimenId || state.selectedSpecimenId);
+    const tool = threeTools.find(item => item.id === state.activeToolId);
+    const nearbyPeople = nearbyPeopleContext(state, zone);
+    const pose = state.playerPose || threeRuntimeState.playerPose;
+    const recentNarration = recentNarrationContext(state.narratorLog);
+    const idempotencyKey = [
+      state.seed || 'three',
+      state.currentZoneId,
+      state.day,
+      Math.round((state.timeOfDay || 0) * 60),
+      textHash(trimmed),
+    ].join(':');
+
+    try {
+      const response = await fetch('/api/three-narrate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-young-darwin-session': narratorSessionId(state.seed),
+          'x-idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          eventType: 'player_action',
+          playerInput: trimmed,
+          objective: state.questComplete
+            ? 'Quest complete: return to Syms with specimen evidence.'
+            : 'Collect or document one animal, plant, or mineral sample.',
+          location: islandLocation.name || zone.name,
+          locationContext: {
+            id: zone.id,
+            localCellId: state.currentLocalCellId,
+            island: zone.island,
+            historicalName: zone.historicalName,
+            biome: zone.biome,
+            description: zone.loadingNote || zone.description || islandLocation.subtitle || '',
+            discoveries: zone.discoveries || [],
+            notableFeatures: zone.notableFeatures || [],
+          },
+          specimenId: nearbySpecimen?.id || null,
+          npcId: nearbyPeople.some(item => item.includes('Syms Covington')) ? 'syms_covington' : null,
+          nearbyPeople,
+          toolId: tool?.id || state.activeToolId || 'hands',
+          weather: state.weather,
+          timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
+          day: state.day,
+          stats: {
+            health: state.health,
+            fatigue: state.fatigue,
+            curiosity: state.curiosity,
+          },
+          playerPose: {
+            x: Number.isFinite(Number(pose?.position?.x)) ? Number(pose.position.x).toFixed(1) : null,
+            z: Number.isFinite(Number(pose?.position?.z)) ? Number(pose.position.z).toFixed(1) : null,
+            heading: playerHeading(pose),
+          },
+          recentNarration,
+          journalContext: state.journal?.at(-1)?.content || '',
+          idempotencyKey,
+        }),
+      });
+      const data = response.ok ? await response.json() : localNarratorFallback({ input: trimmed, nearbySpecimen });
+      set({
+        narratorPending: false,
+        narratorError: data?.fallback ? 'Narration fell back to a local response.' : null,
+      });
+      get().applyNarration(data, { playerInput: trimmed });
+      return data;
+    } catch (error) {
+      const fallback = localNarratorFallback({ input: trimmed, nearbySpecimen });
+      set({
+        narratorPending: false,
+        narratorError: String(error?.message || error || 'Narration unavailable.'),
+      });
+      get().applyNarration(fallback, { playerInput: trimmed, allowFieldNote: false, allowThought: false });
+      return fallback;
+    }
+  },
 
   collectNearby: async () => {
     const state = get();
@@ -682,9 +1189,17 @@ export const useThreeGameStore = create((set, get) => ({
             ? { message: 'No spirit jars remain for a wet specimen. Document it, or come back provisioned.', syms: 'Syms shakes the empty satchel. "Glass is all spoken for, sir."' }
             : tool.id === 'snare' && state.supplies.twine <= 0
               ? { message: 'No twine left to set a snare. The lizards remain at liberty.', syms: '"Used the last of the twine on the case lashings, sir."' }
-              : null;
+	              : null;
       if (blocked) {
-        set({ message: blocked.message, symsLine: blocked.syms, lastOutcome: null });
+        set(current => ({
+          message: blocked.message,
+          symsLine: blocked.syms,
+          lastOutcome: null,
+          narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+            narration: blocked.message,
+            symsLine: blocked.syms,
+          }, current, 'blocked-action')),
+        }));
         return null;
       }
     }
@@ -722,51 +1237,38 @@ export const useThreeGameStore = create((set, get) => ({
       return supplies;
     };
 
-    set(current => ({
-      supplies: spendSupplies(current),
-      fatigue: clamp(current.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
-      curiosity: clamp(current.curiosity + (documented ? 10 : result.scoreDelta * 5), 0, MAX_CURIOSITY),
-      inventory: collected ? [...current.inventory, { ...specimen, condition: result.outcomeType }] : current.inventory,
-      journal: [...current.journal, entry],
-      collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(specimen.id)
-        ? [...current.collectedSpecimenIds, specimen.id]
-        : current.collectedSpecimenIds,
-      documentedSpecimenIds: documented && !current.documentedSpecimenIds.includes(specimen.id)
-        ? [...current.documentedSpecimenIds, specimen.id]
-        : current.documentedSpecimenIds,
-      questComplete: current.questComplete || collected || documented,
-      lastOutcome: { specimen, tool, result, documented },
-      message: result.reason,
-      educationalNote: documented
+    set(current => {
+      const educationalNote = documented
         ? 'Observation without collection was often the least damaging way to preserve locality and behavior evidence.'
-        : 'Specimen condition, collection method, and locality determine scientific usefulness.',
-      symsLine: collected
+        : 'Specimen condition, collection method, and locality determine scientific usefulness.';
+      const symsLine = collected
         ? `Syms wraps the ${specimen.name} label twice. "That one will travel, sir."`
-        : `Syms peers over your shoulder. "A note is better than a ruined specimen, sir."`,
-    }));
-
-    try {
-      const response = await fetch('/api/three-narrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType: documented ? 'journal' : 'collection',
-          location: islandLocation.name,
-          specimenId: specimen.id,
-          toolId: tool.id,
-          outcome: result.outcomeType,
-          stats: {
-            health: get().health,
-            fatigue: get().fatigue,
-            curiosity: get().curiosity,
-          },
-          journalContext: entry.content,
-        }),
-      });
-      if (response.ok) get().applyNarration(await response.json());
-    } catch {
-      // Keep deterministic local outcome if narration is unavailable.
-    }
+        : `Syms peers over your shoulder. "A note is better than a ruined specimen, sir."`;
+      const source = documented ? 'documentation' : 'collection';
+      return {
+        supplies: spendSupplies(current),
+        fatigue: clamp(current.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
+        curiosity: clamp(current.curiosity + (documented ? 10 : result.scoreDelta * 5), 0, MAX_CURIOSITY),
+        inventory: collected ? [...current.inventory, { ...specimen, condition: result.outcomeType }] : current.inventory,
+        journal: [...current.journal, entry],
+        collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(specimen.id)
+          ? [...current.collectedSpecimenIds, specimen.id]
+          : current.collectedSpecimenIds,
+        documentedSpecimenIds: documented && !current.documentedSpecimenIds.includes(specimen.id)
+          ? [...current.documentedSpecimenIds, specimen.id]
+          : current.documentedSpecimenIds,
+        questComplete: current.questComplete || collected || documented,
+        lastOutcome: { specimen, tool, result, documented },
+        message: result.reason,
+        educationalNote,
+        symsLine,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: result.reason,
+          symsLine,
+          fieldNote: educationalNote,
+        }, current, source, { allowFieldNote: true })),
+      };
+    });
 
     return result;
   },

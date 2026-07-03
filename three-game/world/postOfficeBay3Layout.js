@@ -3,7 +3,7 @@ import {
   postOfficeBay3CoastZ,
   postOfficeBay3TerrainHeight,
 } from './regions/postOfficeBay3/terrain';
-import { ballColliderForVisualRock, visualRockTop } from './rockObstacleUtils';
+import { buildRockObstacles, rockVisualBounds } from './proceduralRocks';
 import { makeZoneScatter } from './scatter';
 
 const scatter = (layer, count, seed, opts) => makeZoneScatter(POST_OFFICE_BAY_3, layer, count, seed, opts);
@@ -58,36 +58,12 @@ export function getPostOfficeBay3Rocks() {
 }
 
 export function getPostOfficeBay3RockObstacles() {
-  return getPostOfficeBay3Rocks()
-    .filter(rock => rock.radiusY * 2 - rock.sink > 0.5)
-    .map(rock => {
-      const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.84;
-      const top = visualRockTop(rock);
-      const ball = ballColliderForVisualRock(radius, top);
-      return {
-        id: `pob3-${rock.id}`,
-        kind: 'rock',
-        path: null,
-        x: rock.x,
-        z: rock.z,
-        radius,
-        height: top,
-        colliderTop: top,
-        colliderBottom: 0,
-        scale: 1,
-        yaw: rock.yaw,
-        jumpable: top >= 0.72,
-        climbable: top >= 1.1,
-        edgeRisk: false,
-        pushable: false,
-        pushMass: 1,
-        pushFriction: 0.88,
-        climbLabel: 'basalt boulder',
-        definition: { collider: ball },
-        zoneId: POST_OFFICE_BAY_3,
-        shapes: [ball],
-      };
-    });
+  return buildRockObstacles(getPostOfficeBay3Rocks(), {
+    zoneId: POST_OFFICE_BAY_3,
+    idPrefix: 'pob3',
+    radiusScale: 0.84,
+    filter: rock => rockVisualBounds(rock).height > 0.5,
+  });
 }
 
 export function terrainYForPostOfficeBay3(x, z) {

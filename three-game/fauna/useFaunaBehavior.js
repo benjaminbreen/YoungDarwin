@@ -55,11 +55,23 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     });
   }, [basePosition, basePositionRef, controller, profile]);
 
-  useFrame(({ clock, delta }) => {
+  useFrame(({ clock }, delta) => {
     if (!controller || !profile) return;
     const base = basePositionRef?.current || basePosition;
     const actorId = specimen.instanceId || specimen.id;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
+    if (stimuli.length && typeof window !== 'undefined') {
+      window.__faunaStimulusDebug = {
+        ...(window.__faunaStimulusDebug || {}),
+        [actorId]: {
+          zoneId: currentZoneId,
+          specimenId: specimen.id,
+          count: stimuli.length,
+          last: stimuli[stimuli.length - 1],
+          at: performance.now() / 1000,
+        },
+      };
+    }
     for (const stimulus of stimuli) {
       if (stimulus.kind === 'contact') {
         controller.addContactThreat(stimulus, base);

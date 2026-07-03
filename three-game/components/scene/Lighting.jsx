@@ -12,6 +12,7 @@ const CLEAR_FILL = new THREE.Color('#8fcfff');
 const OVERCAST_FILL = new THREE.Color('#c9d5dc');
 const GOLDEN_FILL = new THREE.Color('#ffe0af');
 const WARM_FILL = new THREE.Color('#f7ead4');
+const SAND_FILL = new THREE.Color('#ffd9ae');
 const _fillColor = new THREE.Color();
 const _warmColor = new THREE.Color();
 const _forward = new THREE.Vector3();
@@ -60,15 +61,22 @@ export function Lighting() {
     }
 
     if (pointRef.current) {
+      // Clear hard sun means *more* bounce onto the player (bright sunlit
+      // ground all around), not less — so unlike the sky fill, hardSun does
+      // not subtract here.
       const playerFillScale = THREE.MathUtils.clamp(
         0.28
           + lightRig.weatherSoftness * 0.54
           + sky.golden * 0.24
-          + (1 - sky.daylight) * 0.44
-          - lightRig.hardSun * 0.18,
+          + (1 - sky.daylight) * 0.44,
         0.22,
         0.92,
       );
+      // Sunlit-ground bounce onto the player's shadow side. The rig's warm
+      // fill is tuned in pre-physical-falloff units and vanishes after the
+      // 1/d² attenuation (~9x at this offset), so the bounce is an explicit
+      // additive term in candela-scale units.
+      const sandBounce = lightRig.hardSun * 1.6 * (1 - underwaterAmount);
       const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
       camera.getWorldDirection(_forward);
       _forward.y = 0;
@@ -81,10 +89,10 @@ export function Lighting() {
       );
       _warmColor
         .copy(WARM_FILL)
-        .lerp(CLEAR_FILL, lightRig.hardSun * 0.18)
+        .lerp(SAND_FILL, lightRig.hardSun * 0.55)
         .lerp(GOLDEN_FILL, sky.golden * 0.28);
       pointRef.current.color.copy(_warmColor);
-      pointRef.current.intensity = lightRig.localWarmFillIntensity * playerFillScale;
+      pointRef.current.intensity = lightRig.localWarmFillIntensity * playerFillScale + sandBounce;
       pointRef.current.distance = 6.5;
     }
 

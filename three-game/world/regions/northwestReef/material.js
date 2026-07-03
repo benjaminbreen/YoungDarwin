@@ -197,10 +197,10 @@ export function createNorthwestReefTerrainMaterial() {
         float basalt = max(smoothstep(0.3, 0.55, nwrOutcrop(p)), (1.0 - smoothstep(0.38, 0.58, di)) * smoothstep(0.42, 0.7, h));
         color = mix(color, nwrBasalt(p), clamp(basalt, 0.0, 1.0));
         // --- Rhythmic swash on the beach face ---
-        float swashCycle = sin(uSwashTime * 0.8976) * 0.5 + 0.5;
-        float swashD = 0.25 + swashCycle * 1.7 + sin(p.x * 0.17 + uSwashTime * 0.45) * 0.3;
+        float swashCycle = sin(uSwashTime * 0.5984) * 0.5 + 0.5;
+        float swashD = 0.25 + swashCycle * 1.7 + sin(p.x * 0.17 + uSwashTime * 0.30) * 0.3;
         float foamEdge = smoothstep(0.5, 0.05, abs(d - swashD)) * step(0.0, d) * (1.0 - basalt);
-        float foamSpeckle = smoothstep(0.35, 0.75, nwrFbm(p * 5.0 + vec2(uSwashTime * 0.6, 0.0)));
+        float foamSpeckle = smoothstep(0.35, 0.75, nwrFbm(p * 5.0 + vec2(uSwashTime * 0.4, 0.0)));
         // Wet sand below the swash line and around every waterline (islet too).
         float wet = max(
           smoothstep(swashD + 1.6, swashD * 0.4, d) * step(0.0, d),

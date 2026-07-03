@@ -25,7 +25,7 @@ export function islandMask(x, z) {
 
 export function coveWaterMask(x, z) {
   const westTidePool = Math.max(0, 1 - ellipseDistance(x, z, 3.8, 2.2, -43, -17));
-  const landingBay = polygonWaterMask(x, z, POST_OFFICE_BAY_WATER_POLYGON, 4.4);
+  const landingBay = polygonWaterMask(x, z, POST_OFFICE_BAY_WATER_POLYGON, 7.5);
   return Math.max(westTidePool * 0.8, landingBay);
 }
 
@@ -248,7 +248,12 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   const cove = coveWaterMask(x, z);
   const continuity = postOfficeLandContinuity(x, z);
   const seaFalloff = Math.max(0, mask - 0.94) * (1 - continuity * 0.92);
-  const coveCut = cove * 3.9;
+  // Two-stage bay floor: the shore eases onto a flat sandy wading shelf, then
+  // a deeper bowl toward the bay centre so the water colour grades from clear
+  // sand to turquoise to blue.
+  const coveShelf = THREE.MathUtils.smoothstep(cove, 0.0, 0.42);
+  const coveBowl = THREE.MathUtils.smoothstep(cove, 0.5, 1.0);
+  const coveCut = coveShelf * 1.75 + Math.pow(coveBowl, 1.35) * 3.3;
 
   const cliffWall = Math.exp(-Math.pow((z + 19) / 7.2, 2)) * Math.exp(-Math.pow((x - 2) / 25, 2)) * 5.3;
   const tuffRidge = Math.exp(-Math.pow((z - 20) / 13, 2)) * (2.1 + Math.exp(-Math.pow((x + 9) / 10, 2)) * 2.7);
@@ -287,7 +292,7 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
 
   if (z < -24) y -= Math.abs(z + 24) * 0.18;
   if (mask > 1.08) y -= (mask - 1.08) * 18 * (1 - continuity * 0.9);
-  return Math.max(-2.4, y);
+  return Math.max(-4.0, y);
 }
 
 
@@ -316,7 +321,7 @@ export function postOfficeTerrainColor(x, z, y) {
   const cove = coveWaterMask(x, z);
   if (biome === 'wet-basalt') {
     color.lerp(new THREE.Color('#8dc5b4'), Math.max(0, cove - 0.24) * 0.24);
-    color.lerp(new THREE.Color('#c9b17b'), THREE.MathUtils.smoothstep(cove, 0.2, 0.62) * 0.34);
+    color.lerp(new THREE.Color('#c9b17b'), THREE.MathUtils.smoothstep(cove, 0.12, 0.55) * 0.48);
   }
   if (Math.abs(noise) > 0.72 && biome !== 'water') color.lerp(new THREE.Color('#d2b776'), 0.26);
   if (z < -25 && biome !== 'water') color.lerp(new THREE.Color('#b79f70'), 0.22);

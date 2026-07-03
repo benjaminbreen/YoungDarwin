@@ -15,26 +15,29 @@ export const ZONE_PROPS = {
       scale: 2.33,
       visualOffsetY: -0.86,
     },
+    // Landing-party supply drop: two crates set snug at an angle on the sandy
+    // shelf east of the spawn, with a barrel lying a little apart as if it
+    // rolled off the pile toward the water.
     {
       id: 'post-office-rollable-barrel',
       type: 'barrel',
-      x: 13.9,
-      z: 8.75,
-      rotation: [Math.PI / 2, 0.25, 0.08],
+      x: 16.6,
+      z: 3.9,
+      rotation: [Math.PI / 2, 1.05, 0.08],
     },
     {
       id: 'shore-supply-crate',
       type: 'crate',
-      x: 11.8,
-      z: 8.1,
-      rotation: [0, 0.62, 0],
+      x: 13.8,
+      z: 4.3,
+      rotation: [0, 0.42, 0],
     },
     {
       id: 'shore-supply-crate-b',
       type: 'crate',
-      x: 15.4,
-      z: 7.05,
-      rotation: [0.02, -0.72, -0.01],
+      x: 15.05,
+      z: 4.95,
+      rotation: [0.02, -0.65, -0.01],
     },
     {
       id: 'shore-terracotta-pot',
@@ -113,6 +116,118 @@ export const ZONE_PROPS = {
       z: 2.5,
       rotation: [-0.03, -0.48, 0.02],
       scale: 1.08,
+    },
+  ],
+  PENAL_COLONY: [
+    // Plaza: watering point by the hitching post.
+    {
+      id: 'penal-plaza-trough',
+      type: 'waterTrough',
+      x: 7.2,
+      z: -5.2,
+      rotation: [0, 0.5, 0],
+    },
+    {
+      id: 'penal-plaza-hitching-post',
+      type: 'hitchingPost',
+      x: 6.4,
+      z: -7.4,
+      rotation: [0, -0.9, 0],
+    },
+    {
+      id: 'penal-plaza-bucket',
+      type: 'woodenBucket',
+      x: 8.3,
+      z: -4.0,
+      rotation: [0, 1.3, 0],
+    },
+    {
+      id: 'penal-plaza-barrel',
+      type: 'settlementBarrel',
+      x: -4.4,
+      z: -6.8,
+      rotation: [0, 0.4, 0],
+    },
+    // Barracks stores.
+    {
+      id: 'penal-barracks-crates',
+      type: 'cratesAndBags',
+      x: 11.2,
+      z: -9.4,
+      rotation: [0, -0.62, 0],
+    },
+    {
+      id: 'penal-barracks-barrel',
+      type: 'settlementBarrel',
+      x: 17.6,
+      z: -10.2,
+      rotation: [0, 2.1, 0],
+    },
+    // Governor's yard.
+    {
+      id: 'penal-gov-barrel-a',
+      type: 'settlementBarrel',
+      x: -22.4,
+      z: -12.2,
+      rotation: [0, 0.9, 0],
+    },
+    {
+      id: 'penal-gov-barrel-b',
+      type: 'settlementBarrel',
+      x: -21.6,
+      z: -13.4,
+      rotation: [0, -0.5, 0],
+    },
+    {
+      id: 'penal-gov-trough',
+      type: 'waterTrough',
+      x: -29.5,
+      z: -10.6,
+      rotation: [0, 2.2, 0],
+    },
+    {
+      id: 'penal-gov-wheelbarrow',
+      type: 'settlementWheelbarrow',
+      x: -24.5,
+      z: -6.4,
+      rotation: [0, 2.5, 0],
+    },
+    // Convict courtyard clutter.
+    {
+      id: 'penal-courtyard-crates',
+      type: 'cratesAndBags',
+      x: -11.6,
+      z: 15.8,
+      rotation: [0, 0.85, 0],
+    },
+    {
+      id: 'penal-courtyard-bucket',
+      type: 'woodenBucket',
+      x: -16.8,
+      z: 13.2,
+      rotation: [0, -0.4, 0],
+    },
+    // Farm cluster.
+    {
+      id: 'penal-threshing-wheelbarrow',
+      type: 'settlementWheelbarrow',
+      x: -16.2,
+      z: 27.4,
+      rotation: [0, -1.9, 0],
+    },
+    {
+      id: 'penal-leanto-trough',
+      type: 'waterTrough',
+      x: 12.4,
+      z: 30.6,
+      rotation: [0, 1.65, 0],
+    },
+    {
+      id: 'penal-leanto-barrel',
+      type: 'settlementBarrel',
+      x: 5.4,
+      z: 31.8,
+      rotation: [0, -1.2, 0],
     },
   ],
 };

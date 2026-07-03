@@ -8,10 +8,12 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { movementTerrainHeight, isWalkableTerrain } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
 import {
-  DEFAULT_MOBILITY,
+  capHorizontalVelocity,
+  computeAssistedPushVelocity,
   canPickupObject,
   canPushObject,
   isDownhillMoveAllowed,
+  mobilityVelocityCaps,
   normalizeMobility,
 } from '../objectMobility';
 import { onPropEvent, emitPropEvent } from './propEvents';
@@ -23,6 +25,8 @@ const STRIKE_FACING_DOT = 0.3;
 const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
 const PLAYER_PUSH_CONTACT_COOLDOWN = 0.18;
 const PLAYER_PUSH_FACING_DOT = 0.48;
+const RECENT_STRIKE_UNCAPPED_SECONDS = 0.7;
+const GROUNDED_PROP_EPSILON = 0.26;
 const ZERO_VECTOR = { x: 0, y: 0, z: 0 };
 const DEFAULT_FACING = { x: 0, y: 0, z: -1 };
 const DEFAULT_HOLD_OFFSET = [0.32, 1.02, 0.24];
@@ -86,6 +90,33 @@ function clampAngularVelocity(body, mobility, sidewaysBarrel) {
   }
 }
 
+function applyMobilityVelocityLimits({ body, mobility, grounded, recentlyStruck, delta }) {
+  const velocity = body.linvel();
+  const caps = mobilityVelocityCaps(mobility);
+  const horizontalMax = recentlyStruck ? caps.struckHorizontalMaxSpeed : caps.horizontalMaxSpeed;
+  let next = capHorizontalVelocity(velocity, horizontalMax);
+  let changed = next.x !== velocity.x || next.z !== velocity.z;
+
+  if (grounded) {
+    const verticalMax = recentlyStruck ? caps.struckVerticalLaunchMax : caps.verticalLaunchMax;
+    if (next.y > verticalMax) {
+      next = { ...next, y: verticalMax };
+      changed = true;
+    }
+    if (!recentlyStruck && caps.groundedExtraDamping > 0) {
+      const keep = Math.exp(-caps.groundedExtraDamping * Math.min(delta, 0.05));
+      const dampedX = next.x * keep;
+      const dampedZ = next.z * keep;
+      if (dampedX !== next.x || dampedZ !== next.z) {
+        next = { ...next, x: dampedX, z: dampedZ };
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) body.setLinvel(next, true);
+}
+
 function computeCarryPose(player, facing, carryable, scratch) {
   const offset = carryable?.holdOffset || DEFAULT_HOLD_OFFSET;
   const rotation = carryable?.holdRotation || DEFAULT_HOLD_ROTATION;
@@ -127,6 +158,7 @@ export function PhysicsProp({ prop, onBreak }) {
   const inWaterRef = useRef(false);
   const pendingStrikesRef = useRef([]);
   const lastPlayerPushContactRef = useRef(-10);
+  const lastStrikeAtRef = useRef(-10);
   const clockRef = useRef(0);
   const scratch = useRef({
     origin: new THREE.Vector3(),
@@ -195,24 +227,17 @@ export function PhysicsProp({ prop, onBreak }) {
 
     if (!fixedBody) {
       const velocity = body.linvel();
-      const targetSpeed = mobility.assistSpeed ?? mobility.strength ?? DEFAULT_MOBILITY.strength;
-      const currentAlongPush = Math.max(0, velocity.x * toProp.x + velocity.z * toProp.z);
-      const assistedSpeed = Math.max(currentAlongPush, targetSpeed);
-      const maxSpeed = mobility.maxSpeed ?? Math.max(DEFAULT_MOBILITY.maxSpeed, targetSpeed);
-      const blend = mobility.blend ?? DEFAULT_MOBILITY.blend;
+      const assistedVelocity = computeAssistedPushVelocity({
+        velocity,
+        direction: toProp,
+        mobility,
+      });
+      const caps = mobilityVelocityCaps(mobility);
       body.wakeUp();
       body.setLinvel({
-        x: THREE.MathUtils.clamp(
-          velocity.x + (toProp.x * assistedSpeed - velocity.x) * blend,
-          -maxSpeed,
-          maxSpeed,
-        ),
-        y: velocity.y,
-        z: THREE.MathUtils.clamp(
-          velocity.z + (toProp.z * assistedSpeed - velocity.z) * blend,
-          -maxSpeed,
-          maxSpeed,
-        ),
+        x: assistedVelocity.x,
+        y: velocity.y > 0 ? Math.min(velocity.y, caps.verticalLaunchMax) : velocity.y,
+        z: assistedVelocity.z,
       }, true);
     }
 
@@ -319,6 +344,7 @@ export function PhysicsProp({ prop, onBreak }) {
             return;
           }
           if (strikeable && strike.tool === strikeable.tool) {
+            lastStrikeAtRef.current = clockRef.current;
             body.wakeUp();
             body.applyImpulse({
               x: impactDir.x * strikeable.impulse,
@@ -404,12 +430,24 @@ export function PhysicsProp({ prop, onBreak }) {
       }
     }
 
-    // --- Water: splash on entry, buoyancy/current for floating props -------
     const seabedY = movementTerrainHeight(translation.x, translation.z, currentZoneId);
     // Deep enough to float in vs. merely off the walkable shelf (wet shallows
     // start well above WATER_LEVEL; isWalkableTerrain cuts off at y <= -0.82).
     const overWater = seabedY < WATER_LEVEL - 0.12;
     const nearWater = seabedY < WATER_LEVEL + 0.55;
+    const wateryMotion = overWater && translation.y < WATER_LEVEL + 0.35;
+    if (!fixedBody && !isCarried && !wateryMotion) {
+      const restY = seabedY + (prop.restOffset * propScale);
+      applyMobilityVelocityLimits({
+        body,
+        mobility,
+        grounded: translation.y <= restY + GROUNDED_PROP_EPSILON,
+        recentlyStruck: clockRef.current - lastStrikeAtRef.current <= RECENT_STRIKE_UNCAPPED_SECONDS,
+        delta,
+      });
+    }
+
+    // --- Water: splash on entry, buoyancy/current for floating props -------
     const inWater = nearWater && translation.y < WATER_LEVEL + 0.08;
     if (inWater && !inWaterRef.current) {
       const velocity = body.linvel();

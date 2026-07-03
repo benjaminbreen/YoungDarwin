@@ -85,6 +85,7 @@ export const locations = [
     color: 'beige',
     type: 'bay',
     validMoves: ['W','E','SW','S','NW','N'],
+    playerStart: [12.6, 0, 13.0],
     specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard'],
     specimenPlacements: [
       {
@@ -125,14 +126,6 @@ export const locations = [
           radiusZ: 1.2,
           bounds: { minX: -35, maxX: -22, minZ: -5, maxZ: -0.8 },
         },
-      },
-      {
-        specimenId: 'galapagoscotton',
-        position: [11.8, 0, 15.6],
-        behavior: 'still',
-        sceneScale: 0.92,
-        habitatRadiusX: 0.74,
-        habitatRadiusZ: 0.52,
       },
       {
         specimenId: 'galapagoscotton',
@@ -1054,23 +1047,29 @@ export const locations = [
   {
     id: 'PENAL_COLONY',
     name: 'Ecuadorian Penal Colony',
-    description: 'A small, gloomy settlement of prisoners and soldiers. The Vice Governor’s house stands out.',
+    description: 'The Asilo de la Paz settlement: scattered huts, black-mud gardens, and soldiers on a green highland flat. The Vice Governor’s house stands apart on its knoll.',
     x: 2,
     y: 2,
     color: '#cd853f',
     type: 'settlement',
     validMoves: ['N','E','W','S'],
-    specimens: ['mangrove','medium_ground_finch'],
+    specimens: ['medium_ground_finch','floreana_mockingbird'],
     npcs: [],
     boundaries: {},
     discoveries: [
       'You overhear whispers of contraband or banned literature hidden somewhere in the colony.'
     ],
     notableFeatures: [
-      'Ramshackle huts ring a central courtyard behind a crude fence.',
-      'Soldiers appear anxious, as if recent troubles have them on edge.',
-      'Garden plots struggle against the dry, rocky soil.'
-    ]
+      'Ramshackle huts ring a trampled courtyard behind a crude fence.',
+      'Furrowed plots of sweet potato, maize, and cane sit dark and wet against the green.',
+      'A red-dirt track climbs in from the north coast and forks toward the springs and caves.'
+    ],
+    narration: {
+      weather: 'misty',
+      sounds: ['hoes striking wet earth', 'a soldier’s cough from the barracks', 'finches in the garden rows'],
+      loadingNote: 'The track levels out onto cultivated ground: Asilo de la Paz, the Ecuadorian penal settlement, Vice-Governor Lawson presiding.',
+      educationalNote: 'Darwin found two to three hundred exiles here in 1835, farming sweet potatoes and bananas on the damp highland flat — and heard Lawson claim he could name any tortoise’s island from its shell.',
+    },
   },
 
   // 19) E_MID

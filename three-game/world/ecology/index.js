@@ -2,6 +2,7 @@ import { buildNorthShoreEcology } from './northShore';
 import { buildNorthwestReefEcology } from './northwestReef';
 import { buildWesternHighlandsEcology } from './westernHighlands';
 import { buildElMiradorEcology } from './elMirador';
+import { buildPenalColonyEcology } from './penalColony';
 import { buildMangroveEcology } from './mangroves';
 import { buildAltPostOfficeBayEcology } from './altPostOfficeBay';
 import { buildPostOfficeBay3Ecology } from './postOfficeBay3';
@@ -20,6 +21,7 @@ const builders = {
   NW_REEF: buildNorthwestReefEcology,
   W_HIGH: buildWesternHighlandsEcology,
   EL_MIRADOR: buildElMiradorEcology,
+  PENAL_COLONY: buildPenalColonyEcology,
   MANGROVES: buildMangroveEcology,
   ALT_POST_OFFICE_BAY: buildAltPostOfficeBayEcology,
   POST_OFFICE_BAY_3: buildPostOfficeBay3Ecology,

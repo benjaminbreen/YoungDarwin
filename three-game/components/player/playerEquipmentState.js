@@ -10,7 +10,6 @@ export function updatePlayerEquipmentState({
   activeToolId,
   riflePressed,
   preInputMovementLocked,
-  swimState,
   firePulseRef,
   aimActiveRef,
   startAction,

@@ -110,6 +110,17 @@ const {
   resolveHammerOutcome,
   selectRockSampleTarget,
 } = loadModule('three-game/physics/props/rockSampling.js');
+const {
+  capHorizontalVelocity,
+  computeAssistedPushVelocity,
+  mobilityVelocityCaps,
+} = loadModule('three-game/physics/objectMobility.js');
+const {
+  getObstacleSupportHeight,
+  getRuntimeObstacles,
+  isWalkOverTraversalObstacle,
+  obstacleBaseY,
+} = loadModule('three-game/world/obstacles.js');
 
 test('action suggestions prioritize safety, traps, specimens, and evidence', () => {
   const objectives = createDefaultObjectives();
@@ -193,6 +204,83 @@ test('rock sample targeting skips sampled and currently active source rocks', ()
     activeSourceKeys: [rockSampleKey('TEST_ZONE', 'second-rock')],
   });
   assert.equal(target.key, rockSampleKey('TEST_ZONE', 'third-rock'));
+});
+
+test('mobility push assistance caps vector speed for heavy props', () => {
+  const next = computeAssistedPushVelocity({
+    velocity: { x: 5, y: 0.25, z: 5 },
+    direction: { x: 1, z: 1 },
+    mobility: {
+      mode: 'pickup-push',
+      assistSpeed: 0.22,
+      contactMaxSpeed: 0.42,
+      blend: 0.1,
+    },
+  });
+
+  assert.ok(Math.hypot(next.x, next.z) <= 0.420001);
+  assert.equal(next.y, 0.25);
+});
+
+test('mobility velocity caps keep strike movement distinct from walk contact', () => {
+  const caps = mobilityVelocityCaps({
+    mode: 'pickup-push',
+    maxSpeed: 0.42,
+    contactMaxSpeed: 0.38,
+    verticalLaunchMax: 0.12,
+    struckMaxSpeed: 1.8,
+    struckVerticalLaunchMax: 0.75,
+  });
+  assert.equal(caps.horizontalMaxSpeed, 0.38);
+  assert.equal(caps.struckHorizontalMaxSpeed, 1.8);
+  assert.equal(caps.verticalLaunchMax, 0.12);
+  assert.equal(caps.struckVerticalLaunchMax, 0.75);
+
+  const capped = capHorizontalVelocity({ x: 3, y: -1, z: 4 }, caps.horizontalMaxSpeed);
+  assert.ok(Math.hypot(capped.x, capped.z) <= caps.horizontalMaxSpeed + 0.000001);
+  assert.equal(capped.y, -1);
+});
+
+test('procedural rock obstacles share visual bounds and traversal support', () => {
+  const zoneIds = ['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'POST_OFFICE_BAY_3', 'N_SHORE', 'NW_REEF', 'W_HIGH'];
+  for (const zoneId of zoneIds) {
+    const obstacles = getRuntimeObstacles(zoneId);
+    const rockObstacles = obstacles.filter(obstacle => obstacle.kind === 'rock' && obstacle.visualBounds);
+    assert.ok(rockObstacles.length > 0, `${zoneId} should expose procedural rock obstacles`);
+    for (const obstacle of rockObstacles) {
+      assert.ok(
+        Math.abs(obstacle.colliderTop - obstacle.visualBounds.top) < 0.001,
+        `${zoneId}:${obstacle.id} collider top should match visual top`,
+      );
+      if (!isWalkOverTraversalObstacle(obstacle)) continue;
+      const baseY = obstacleBaseY(obstacle);
+      const supportY = getObstacleSupportHeight(obstacle.x, obstacle.z, baseY, 0.28, obstacles);
+      assert.ok(supportY !== null && supportY !== undefined, `${zoneId}:${obstacle.id} should provide support`);
+      assert.ok(
+        supportY - baseY >= obstacle.colliderTop * 0.9,
+        `${zoneId}:${obstacle.id} walk-over support should stay near visual top`,
+      );
+    }
+  }
+});
+
+test('large authored rocks creep only as constrained downhill-push obstacles', () => {
+  const obstacles = getRuntimeObstacles('POST_OFFICE_BAY');
+  const downhillRocks = obstacles.filter(obstacle => (
+    (obstacle.kind === 'rock' || obstacle.kind === 'boulder')
+    && obstacle.mobility?.mode === 'downhill-push'
+  ));
+
+  assert.ok(downhillRocks.length > 0, 'expected large rocks to expose downhill-push mobility');
+  assert.ok(downhillRocks.every(obstacle => obstacle.pushable), 'downhill rocks should be pushable by the obstacle mover');
+  assert.ok(
+    downhillRocks.every(obstacle => obstacle.mobility.maxOffset > 0 && obstacle.mobility.maxOffset <= 0.5),
+    'downhill rock movement should stay tightly capped',
+  );
+  assert.ok(
+    downhillRocks.every(obstacle => obstacle.pushFriction <= 0.5),
+    'downhill rock movement should use low creep friction',
+  );
 });
 
 test('hammer material profiles infer geology from authored hints and terrain biomes', () => {

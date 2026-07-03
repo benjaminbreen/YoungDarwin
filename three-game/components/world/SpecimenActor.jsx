@@ -9,6 +9,7 @@ import { specimenToInspectable } from '../../world/inspectables';
 import { removeSpecimenRuntimePose, setSpecimenRuntimePose } from '../../world/specimenRuntime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
+import { getWildlifeAssetId } from '../../wildlife/wildlifeCatalog';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ContactShadow } from '../scene/ContactShadow';
 import { ModelAsset } from '../assets/ModelAsset';
@@ -87,15 +88,8 @@ function specimenMaterial(id) {
 }
 
 function assetIdForSpecimen(specimen) {
-  if (specimen.id === 'marineiguana') return 'marineIguana';
-  if (specimen.id === 'greenturtle' || specimen.id === 'greenTurtle') return 'greenTurtle';
-  if (specimen.id === 'sealion' || specimen.id === 'seaLion') return 'seaLion';
-  if (specimen.id === 'mediumgroundfinch') return 'mediumGroundFinch';
-  if (specimen.id === 'floreanagianttortoise') return 'floreanaGiantTortoise';
-  if (specimen.id === 'galapagospenguin') return 'galapagosPenguin';
-  if (specimen.id === 'flightlesscormorant') return 'flightlessCormorant';
-  if (specimen.id === 'frigatebird') return 'frigatebird';
-  if (specimen.id === 'booby') return 'blueFootedBooby';
+  const wildlifeAssetId = getWildlifeAssetId(specimen);
+  if (wildlifeAssetId) return wildlifeAssetId;
   if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
   return specimen.id;
 }

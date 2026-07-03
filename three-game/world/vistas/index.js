@@ -301,9 +301,22 @@ export function vistaIdForRegion(region) {
   return VISTA_BY_REGION_ID[region.id] || DEFAULT_VISTA_BY_TYPE[region.type] || 'dry-scrub-uplands';
 }
 
+const NON_SCENIC_SOURCE_TYPES = new Set([
+  'beagle',
+  'cave',
+  'governorshouse',
+  'governorslibrary',
+  'hut',
+  'interior',
+  'ocean',
+  'office',
+]);
+
 function isApronSourceRegion(regionId) {
   const region = getRegionMap(regionId);
-  return region?.id === regionId && region?.terrain?.authored === true;
+  return region?.id === regionId
+    && Boolean(region?.terrain)
+    && !NON_SCENIC_SOURCE_TYPES.has(region.type);
 }
 
 export function getBorderVistas(regionId) {

@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainBiomeAt, terrainColor, terrainHeight, terrainSurfaceNoise } from '../../world/terrain';
 import { getRegionDefinition } from '../../world/regions';
+import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
+import { makeCarryStripGeometries } from '../../world/vistas/apronGeometry';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
@@ -221,18 +223,15 @@ export function Terrain() {
   }, [currentZoneId]);
 
   const material = useMemo(() => {
-    // The ground covers most of the screen, so its per-fragment shading cost is
-    // significant. It's matte non-metal, so MeshPhong (no specular) looks the
-    // same as MeshStandard here without the PBR/IBL math. Caustics inject into
-    // core chunks that exist in Phong too. Region-custom terrain materials keep
-    // their own shader untouched.
+    // Authored regions keep their custom material. Placeholder regions use the
+    // shared PBR terrain fallback so unfinished maps still read as Floreana
+    // terrain instead of broad vertex-color planes.
+    const config = getRegionTerrainConfig(currentZoneId);
     const baseMaterial = regionDefinition?.createTerrainMaterial
       ? regionDefinition.createTerrainMaterial()
-      : cheapMaterials
-        ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 0, specular: new THREE.Color(0x000000) })
-        : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+      : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
     return injectSeabedCaustics(baseMaterial);
-  }, [regionDefinition, cheapMaterials]);
+  }, [regionDefinition, currentZoneId, cheapMaterials]);
 
   // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {
@@ -284,12 +283,43 @@ export function Terrain() {
         renderKind: 'terrain',
         renderPath: null,
       }} />
-      <ContinuationTerrainSkirts regionId={currentZoneId} material={material} />
+      <NeighborCarryStrips regionId={currentZoneId} material={material} />
     </group>
   );
 }
 
-function buildSkirtGeometry(regionId) {
+// Renders the near band of each border apron (map edge out to the transition
+// carry distance) with the region's own terrain material. The splat shaders
+// color by world position, so the off-map strip shades pixel-identically to
+// the walkable mesh and the map edge stops reading as a material seam. The
+// far side of each strip is the vista mesh in BorderVistas, which shares the
+// strip's seam-ring vertices.
+function NeighborCarryStrips({ regionId, material }) {
+  const carryStrips = useMemo(() => makeCarryStripGeometries(regionId), [regionId]);
+  const carryEdges = useMemo(() => carryStrips.map(strip => strip.edge), [carryStrips]);
+  useEffect(() => () => carryStrips.forEach(strip => strip.geometry.dispose()), [carryStrips]);
+  return (
+    <>
+      {carryStrips.map(strip => (
+        <mesh
+          key={strip.id}
+          geometry={strip.geometry}
+          material={material}
+          receiveShadow={false}
+          userData={{
+            renderSource: `terrain:${regionId}:carry-strip:${strip.edge}`,
+            renderLabel: `${regionId} ${strip.edge} carry strip`,
+            renderKind: 'terrain-carry-strip',
+            renderPath: null,
+          }}
+        />
+      ))}
+      <ContinuationTerrainSkirts regionId={regionId} material={material} excludeEdges={carryEdges} />
+    </>
+  );
+}
+
+function buildSkirtGeometry(regionId, excludeEdges = []) {
   const config = getRegionTerrainConfig(regionId);
   const openHints = getRegionEdgeHints(regionId).filter(hint => hint.kind === 'open');
   const stripDepth = 12;
@@ -358,6 +388,7 @@ function buildSkirtGeometry(regionId) {
   };
   openHints
     .filter(hint => ['north', 'south', 'east', 'west'].includes(hint.edge))
+    .filter(hint => !excludeEdges.includes(hint.edge))
     .forEach(hint => addStrip(hint.edge));
   openHints
     .filter(hint => ['northeast', 'northwest', 'southeast', 'southwest'].includes(hint.edge))
@@ -370,8 +401,8 @@ function buildSkirtGeometry(regionId) {
   return geo;
 }
 
-function ContinuationTerrainSkirts({ regionId, material }) {
-  const geometry = useMemo(() => buildSkirtGeometry(regionId), [regionId]);
+function ContinuationTerrainSkirts({ regionId, material, excludeEdges = [] }) {
+  const geometry = useMemo(() => buildSkirtGeometry(regionId, excludeEdges), [regionId, excludeEdges]);
   if (!geometry.attributes.position?.count) return null;
   // Short edge fade only. Neighboring-map topography lives in BorderVistas as
   // opaque terrain aprons; do not use these skirts as distant scenery.

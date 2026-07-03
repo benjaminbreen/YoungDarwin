@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { useThreeGameStore, getRuntimePlayerPose } from '../../store';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
 import { sunDirection, skyState } from '../../world/celestial';
@@ -71,9 +71,10 @@ function regionWaterPlayableSize(zoneId) {
 
 const WATER_DAY = {
   sand: new THREE.Color('#aed6e2'),
-  scatter: new THREE.Color('#41c0d8'),
-  deep: new THREE.Color('#357fb0'),
-  openDeep: new THREE.Color('#23689a'),
+  // Mockup palette: saturated cyan lagoon handing off to a rich cobalt deep.
+  scatter: new THREE.Color('#38bfd8'),
+  deep: new THREE.Color('#2a72ad'),
+  openDeep: new THREE.Color('#155a97'),
   // Slightly blue-grey: pure white foam over a bright sea is what blows out.
   foam: new THREE.Color('#e9f4f0'),
 };
@@ -238,10 +239,10 @@ const WAVE_GLSL = /* glsl */`
   }
 
   // Rhythmic swash: the waterline rides up and down the beach face in sync
-  // with the terrain shader's foam band (same clock, same 0.8976 rad/s cycle).
+  // with the terrain shader's foam band (same clock, same 0.5984 rad/s cycle).
   float swashLift(vec2 wxz, float t, float depthRaw) {
-    float cyc = sin(t * 0.8976) * 0.5 + 0.5;
-    float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.45) * 0.3) * 0.115;
+    float cyc = sin(t * 0.5984) * 0.5 + 0.5;
+    float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.30) * 0.3) * 0.115;
     return lift * smoothstep(1.3, 0.05, max(depthRaw, 0.0));
   }
 
@@ -257,28 +258,50 @@ const WAVE_GLSL = /* glsl */`
                mix(bnHash(i + vec2(0.0, 1.0)), bnHash(i + vec2(1.0, 1.0)), u.x), u.y);
   }
 
-  const float BREAKER_WAVELENGTH = 12.0; // metres between fronts
-  const float BREAKER_SPEED = 1.25;      // shoreward metres per second
+  const float BREAKER_WAVELENGTH = 10.0; // metres between fronts
+  const float BREAKER_SPEED = 0.85;      // shoreward metres per second
+
+  // The dominant swell direction (the primary Gerstner wave). Surf breaks on
+  // shores that face into this; lee shores get only a faint wrap-around wash.
+  const vec2 SWELL_DIR = vec2(0.86024, 0.50979);
+
+  // How squarely the local shore faces the incoming swell, in [-1, 1].
+  // The baked shore-distance field's gradient points seaward, so the wave
+  // travel direction at this point is -gradient; exposure is its alignment
+  // with SWELL_DIR. Without this gate the fronts (lines of constant shore
+  // distance) collapse concentrically onto islets from every side.
+  float shoreExposure(sampler2D seafloor, float size, vec2 wxz, float sd) {
+    float e = 1.75;
+    float gx = texture2D(seafloor, (wxz + vec2(e, 0.0)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
+    float gz = texture2D(seafloor, (wxz + vec2(0.0, e)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
+    vec2 grad = vec2(gx, gz);
+    float len = length(grad);
+    if (len < 1e-3) return 1.0; // flat/clamped field: stay neutral
+    return dot(-grad / len, SWELL_DIR);
+  }
 
   // Phase of the marching fronts. f runs 0 -> 1 between fronts, with the lip
   // at f = 0; strength varies per front and along the shore so sets of waves
   // feel uneven; the envelope confines surf to the breaker band.
-  float breakerField(vec2 wxz, float t, float sd, float depth, out float f, out float strength) {
+  float breakerField(vec2 wxz, float t, float sd, float depth, float exposure, out float f, out float strength) {
     float u = sd / BREAKER_WAVELENGTH + t * (BREAKER_SPEED / BREAKER_WAVELENGTH)
       + bnNoise(wxz * 0.05) * 0.45; // wobble the lines so they aren't ruler-straight
     f = fract(u);
     float id = floor(u);
     strength = 0.5 + 0.5 * bnNoise(vec2(id * 3.7, (wxz.x + wxz.y) * 0.025 + id));
-    float band = smoothstep(30.0, 21.0, sd) * smoothstep(2.4, 4.5, sd);
+    // Tight inner band (mockup anatomy: surf is punctuation near the shore,
+    // then clean water) — roughly two fronts visible at a time.
+    float band = smoothstep(20.0, 14.5, sd) * smoothstep(2.6, 4.2, sd);
     float depthGate = smoothstep(0.08, 0.3, depth) * smoothstep(3.2, 1.9, depth);
-    return band * depthGate;
+    float exposureGate = mix(0.18, 1.0, smoothstep(-0.15, 0.6, exposure));
+    return band * depthGate * exposureGate;
   }
 
   // Vertex-stage swell at the breaking lip so the front has a silhouette.
-  float breakerLift(vec2 wxz, float t, float sd, float depth) {
+  float breakerLift(vec2 wxz, float t, float sd, float depth, float exposure) {
     float f, s;
-    float env = breakerField(wxz, t, sd, depth, f, s);
-    float lip = smoothstep(0.14, 0.03, f);
+    float env = breakerField(wxz, t, sd, depth, exposure, f, s);
+    float lip = smoothstep(0.09, 0.02, f);
     return lip * env * s * 0.13;
   }
 `;
@@ -312,6 +335,9 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uSunPathStrength: { value: 0 },
       uRain: { value: 0 },
       uUnderwaterAmount: { value: 0 },
+      // Player wading ripples: world position + strength (0 when on land).
+      uPlayer: { value: new THREE.Vector3() },
+      uPlayerRipple: { value: 0 },
       // Screen-space refraction source (framebuffer grab taken just before
       // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
@@ -332,7 +358,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform mat4 uReflMatrix;
       varying vec3 vWorld;
       varying float vDepth;
-      varying float vCrest;
+      varying float vExposure;
       varying vec4 vReflCoord;
 
       float seafloorAt(vec2 wxz) {
@@ -355,8 +381,9 @@ function createStylizedWaterMaterial(seafloorTexture) {
         vec3 disp = gerstner(world.xz, uTime, swellAtten(depth), normal);
         world.xyz += disp;
         world.y += swashLift(world.xz, uTime, depth);
-        world.y += breakerLift(world.xz, uTime, shoreDistAt(world.xz), depth);
-        vCrest = disp.y;
+        float sd = shoreDistAt(world.xz);
+        vExposure = shoreExposure(uSeafloor, uSize, world.xz, sd);
+        world.y += breakerLift(world.xz, uTime, sd, depth, vExposure);
         vWorld = world.xyz;
         vReflCoord = uReflMatrix * vec4(world.xyz, 1.0);
         gl_Position = projectionMatrix * viewMatrix * world;
@@ -378,6 +405,8 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform float uSunPathStrength;
       uniform float uRain;
       uniform float uUnderwaterAmount;
+      uniform vec3 uPlayer;
+      uniform float uPlayerRipple;
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform float uWaterLevel;
@@ -391,7 +420,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform float uHazeFar;
       varying vec3 vWorld;
       varying float vDepth;
-      varying float vCrest;
+      varying float vExposure;
       varying vec4 vReflCoord;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
@@ -419,22 +448,28 @@ function createStylizedWaterMaterial(seafloorTexture) {
       }
 
       // Two octaves of advected Worley lace, shared by every foam source.
+      // Features are ~1.5m (mockup foam texture reads as streaks, not speckle).
       float foamLace(vec2 wxz, float t) {
-        vec2 p = wxz * 1.55 + vec2(t * 0.2, -t * 0.14);
+        vec2 p = wxz * 0.8 + vec2(t * 0.13, -t * 0.09);
         float a = 1.0 - worley(p);
         float b = 1.0 - worley(p * 2.4 + 7.3);
-        return smoothstep(0.42, 0.92, a * 0.62 + b * 0.38);
+        // High contrast: real holes and filaments, not grey mist.
+        return smoothstep(0.5, 0.88, a * 0.62 + b * 0.38);
       }
 
-      // Surf: a thin crisp lip at the marching front, dissolving white water
-      // trailing behind it, all torn by the lace so no region is solid white.
-      float breakerFoam(vec2 wxz, float t, float sd, float depth, float lace) {
+      // Surf: a crisp mostly-solid lip at the marching front, with the lace
+      // eroding only the dissolving trail behind it (mockup: continuous lines
+      // with frayed edges, not marble).
+      float breakerFoam(vec2 wxz, float t, float sd, float depth, float lace, float exposure) {
         float f, s;
-        float env = breakerField(wxz, t, sd, depth, f, s);
-        float lip = smoothstep(0.10, 0.015, f);
-        float trail = smoothstep(0.55, 0.08, f) * (1.0 - lip);
-        float foam = lip * (0.45 + 0.55 * lace) + trail * lace * 0.62;
-        return foam * env * s;
+        float env = breakerField(wxz, t, sd, depth, exposure, f, s);
+        // Narrow lip with a bright solid core at the leading edge; the trail
+        // dissolves through the lace instead of smearing grey.
+        float core = smoothstep(0.035, 0.008, f);
+        float lip = smoothstep(0.075, 0.015, f);
+        float trail = smoothstep(0.34, 0.07, f) * (1.0 - lip);
+        float foam = core * 0.35 + lip * (0.7 + 0.3 * lace) + trail * lace * 0.45;
+        return min(foam, 1.0) * env * s;
       }
 
       void main() {
@@ -465,11 +500,14 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float s0 = noise(rp2);
         float sx = noise(rp2 + vec2(e, 0.0)) - s0;
         float sz = noise(rp2 + vec2(0.0, e)) - s0;
+        // Glassy lagoon: detail ripples relax with distance so mid/far water
+        // reads as a smooth gradient with sky sheen instead of noise.
+        float glassBy = 1.0 - 0.55 * smoothstep(18.0, 65.0, length(vWorld.xz - cameraPosition.xz));
         normal = normalize(normal + vec3(
           -(rx * rippleLod + sx * 0.45 * microLod),
           0.0,
           -(rz * rippleLod + sz * 0.45 * microLod)
-        ) * 1.25);
+        ) * 1.25 * glassBy);
         if (uRain > 0.001) {
           vec2 rainP = vWorld.xz * 3.7 + vec2(uTime * 0.72, -uTime * 0.58);
           float rainN = noise(rainP);
@@ -478,6 +516,21 @@ function createStylizedWaterMaterial(seafloorTexture) {
             noise(rainP + vec2(0.0, e)) - rainN
           );
           normal = normalize(normal + vec3(-rainGrad.x, 0.0, -rainGrad.y) * uRain * 0.85 * mix(0.38, 1.0, microLod));
+        }
+        // Wading ripples: concentric rings spreading from the player, felt as
+        // a gentle normal perturbation (they catch the sky sheen and glitter).
+        if (uPlayerRipple > 0.001) {
+          vec2 toPlayer = vWorld.xz - uPlayer.xz;
+          float pd = length(toPlayer);
+          float rippleEnv = uPlayerRipple
+            * smoothstep(3.4, 0.7, pd)   // fade out by ~3.4 m
+            * smoothstep(0.05, 0.2, pd); // quiet right at the body
+          if (rippleEnv > 0.003) {
+            float ring = sin(pd * 9.5 - uTime * 5.4) * 0.62
+              + sin(pd * 15.0 - uTime * 7.3) * 0.38;
+            vec2 rippleDir = toPlayer / max(pd, 1e-3);
+            normal = normalize(normal + vec3(rippleDir.x, 0.0, rippleDir.y) * ring * 0.085 * rippleEnv);
+          }
         }
         if (!gl_FrontFacing) normal = -normal;
 
@@ -527,9 +580,11 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // the needed signal, so this improves the whole water system without
         // adding regional profiles or passes.
         float nearShelf = 1.0 - smoothstep(18.0, 52.0, shoreDist);
-        float rampVisibility = playableFade * (0.46 + nearShelf * 0.22) * (1.0 - edgeOcean * 0.35);
-        vec3 paleAqua = mix(uSand, uFoam, 0.24);
-        vec3 seafoamShelf = mix(uSand, uScatter, 0.42);
+        // Trimmed vs the first pass: the ramp is a thin glaze over the
+        // refracted scene now, not a paint layer (the mockup body is glassy).
+        float rampVisibility = playableFade * (0.30 + nearShelf * 0.14) * (1.0 - edgeOcean * 0.35);
+        vec3 paleAqua = mix(uSand, uFoam, 0.12);
+        vec3 seafoamShelf = mix(uSand, uScatter, 0.5);
         seafoamShelf = mix(
           seafoamShelf,
           vec3(seafoamShelf.r * 0.86, max(seafoamShelf.g, seafoamShelf.b * 1.04), seafoamShelf.b * 0.94),
@@ -546,6 +601,14 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // Ease into open-ocean blue past the drop-off.
         color = mix(color, uDeep, smoothstep(2.8, 9.5, depth) * 0.62);
         color = mix(color, uDeep, edgeOcean * (0.42 + 0.28 * smoothstep(0.6, 4.0, depth)));
+
+        // Postcard gradient: colour keeps travelling turquoise -> deep with
+        // distance from the beach even where the bed stays shallow for tens
+        // of metres (wide shelf bays give depth no signal to work with).
+        // Gated off where real depth already runs the deep ramps above.
+        float offshoreTravel = smoothstep(20.0, 55.0, shoreDist) * playableFade
+          * (1.0 - smoothstep(2.8, 7.0, depth));
+        color = mix(color, mix(uScatter, uDeep, 0.6), offshoreTravel * 0.35);
 
         // Mostly-opaque body (it *shows* the refracted scene), but genuinely
         // clear in the shallows — wading legs and the bed stay visible —
@@ -564,6 +627,15 @@ function createStylizedWaterMaterial(seafloorTexture) {
           vec3 planar = min(texture2D(uReflection, clamp(mruv, 0.0, 1.0)).rgb, vec3(0.92));
           reflColor = mix(skyRefl, mix(planar, skyRefl, 0.14), valid);
         }
+        // Analytic sun disc in the mirror direction: a tight bright point at
+        // high sun that widens into a broad grazing-angle streak at low sun
+        // (the reflected-sun "column" real water shows at dawn/dusk — the
+        // planar/sky reflection above has no sun in it to reflect).
+        float sunDot = max(dot(refl, normalize(uSun)), 0.0);
+        float sunDiscExp = mix(700.0, 55.0, uSunPathStrength);
+        float sunDisc = pow(sunDot, sunDiscExp);
+        reflColor += uSunColor * sunDisc * (0.6 + uSunPathStrength * 1.6) * uDaylight
+          * (1.0 - underwaterView * 0.8) * (1.0 - uRain * 0.8);
         // Schlick fresnel with water's real F0: looking down, the surface is
         // ~2% mirror (the bed shows through); at grazing angles it goes
         // glassy. Shallows are kept a touch clearer than physics for the
@@ -589,63 +661,89 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
         color += uSunColor * min(spec * glint, 1.0) * (0.58 + uSunPathStrength * 0.4);
         color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+        // Sparse mid-water twinkle that survives high sun: a handful of tight
+        // glints in the 10-90 m band. This is the "alive" signal the sun-path
+        // glitter can't give outside its low-sun window.
+        float sparkleGate = uDaylight * (1.0 - uRain * 0.8) * (1.0 - underwaterView)
+          * smoothstep(10.0, 22.0, pathCamDist) * (1.0 - smoothstep(60.0, 90.0, pathCamDist));
+        if (sparkleGate > 0.01) {
+          // Second octave rotated off-axis so the two value-noise lattices
+          // don't align: thresholding aligned lattices near their peak
+          // produces boxy, axis-aligned blobs instead of point-like grain.
+          vec2 twRot = vec2(vWorld.x * 0.8 - vWorld.z * 0.6, vWorld.x * 0.6 + vWorld.z * 0.8);
+          float tw = noise(vWorld.xz * 6.5 + vec2(uTime * 0.42, -uTime * 0.36)) * 0.6
+            + noise(twRot * 11.0 - vec2(uTime * 0.3, uTime * 0.37)) * 0.4;
+          // Loosened threshold: the smooth sparkleFacing term below does the
+          // actual tightening into points, so the noise mask only needs to
+          // pick sparse candidate regions, not carve hard cell edges.
+          float sparkle = smoothstep(0.82, 1.0, tw);
+          float sparkleFacing = pow(max(dot(normal, hv), 0.0), 48.0);
+          color += uSunColor * sparkle * sparkleFacing * sparkleGate * 0.85;
+        }
         color = mix(color, color * vec3(0.62, 0.76, 0.82), uRain * 0.24);
 
         // Wave-phase surface bands: a lightweight visual read of the same
         // Gerstner field that drives displacement/normals. This makes the
         // bay surface visibly roll even when planar reflections are disabled.
         float waterSurfaceMask = smoothstep(0.05, 0.28, depth) * playableFade * (1.0 - underwaterView * 0.55);
+        // Shore-parallel lagoon rollers: in the 15-40 m window the visible
+        // swell follows the coastline (lines of constant shore distance,
+        // same marching convention as the breakers but slower and wider),
+        // so the raw diagonal Gerstner streaks yield to them there.
+        float rollerZone = smoothstep(13.0, 19.0, shoreDist) * (1.0 - smoothstep(33.0, 44.0, shoreDist));
+        float rollerU = shoreDist / 16.0 + uTime * (0.6 / 16.0) + bnNoise(vWorld.xz * 0.03) * 0.35;
+        float rollerWave = 0.5 + 0.5 * sin(6.28318530718 * rollerU);
+        float rollerHi = smoothstep(0.6, 0.96, rollerWave);
+        float rollerLo = smoothstep(0.46, 0.1, rollerWave);
+        float rollerMask = rollerZone * waterSurfaceMask
+          * mix(0.25, 1.0, smoothstep(-0.15, 0.6, vExposure));
         float crestBand = smoothstep(0.018, 0.118, crestHeight) * smoothstep(0.018, 0.12, waveSlope);
         float troughBand = smoothstep(0.018, 0.11, -crestHeight) * smoothstep(0.014, 0.09, waveSlope);
+        crestBand *= 1.0 - rollerZone * 0.72;
+        troughBand *= 1.0 - rollerZone * 0.72;
         float bandBreakup = 0.68 + 0.32 * noise(vWorld.xz * 0.18 + vec2(uTime * 0.018, -uTime * 0.012));
         vec3 crestTint = mix(uScatter, uSkyHorizon, 0.74);
         color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.09 + uDaylight * 0.075);
         color = mix(color, color * vec3(0.72, 0.88, 1.02), troughBand * waterSurfaceMask * 0.14);
         color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.055);
+        // Glassy roller read: a soft sky-sheen crest and a slightly deeper
+        // back slope — colour only, no foam (the mockup lagoon is clean).
+        color += crestTint * rollerHi * bandBreakup * rollerMask * (0.05 + uDaylight * 0.045);
+        color = mix(color, color * vec3(0.88, 0.95, 1.01), rollerLo * rollerMask * 0.12);
 
-        // --- foam: crisp lip at the moving waterline + breaking crests --------
+        // --- foam: punctuation, not texture -----------------------------------
+        // Exactly three generators (mockup anatomy): a crisp line at the sand
+        // contact, the rhythmic swash lip riding the beach face, and the
+        // marching breaker fronts. Lines keep a solid core; lace only fringes
+        // their edges. No broad wash, no mid-water crest suds.
         float realCoastGate = smoothstep(0.02, 0.24, playableFade);
         float beachGate = mix(0.68, 1.0, smoothstep(0.12, 0.74, shoreSoftness)) * realCoastGate;
         float coastWater = smoothstep(0.01, 0.12, dEff) * smoothstep(11.0, 0.25, shoreDist) * realCoastGate;
         float foamCandidate = max(
           coastWater,
-          max(
-            smoothstep(10.0, 1.8, shoreDist) * smoothstep(0.03, 0.3, depth),
-            smoothstep(0.04, 0.12, crestHeight) * mix(0.65, 1.25, smoothstep(0.018, 0.13, waveSlope)) * smoothstep(1.9, 0.35, depth)
-          )
+          smoothstep(21.0, 2.0, shoreDist) * smoothstep(0.03, 0.3, depth)
         );
         float lace = 0.0;
         if (foamCandidate > 0.001) {
           lace = foamLace(vWorld.xz, uTime);
         }
-        float swashCycle = sin(uTime * 0.8976) * 0.5 + 0.5;
-        float swashFront = 0.38 + swashCycle * 2.35 + sin(vWorld.x * 0.17 + uTime * 0.45) * 0.26;
-        float foamLip = smoothstep(0.86, 0.035, abs(shoreDist - swashFront));
-        float foamSetBack = smoothstep(1.18, 0.05, abs(shoreDist - (swashFront + 2.2)));
-        float foamOuterSet = smoothstep(1.45, 0.08, abs(shoreDist - (swashFront + 4.8)));
+        float swashCycle = sin(uTime * 0.5984) * 0.5 + 0.5;
+        float swashFront = 0.38 + swashCycle * 2.35 + sin(vWorld.x * 0.17 + uTime * 0.30) * 0.26;
+        float foamLip = smoothstep(0.6, 0.03, abs(shoreDist - swashFront));
         float waterlineTrace = smoothstep(0.12, 0.012, dEff) * smoothstep(1.7, 0.0, shoreDist);
         float contactRim = smoothstep(0.18, 0.018, abs(dEff)) * smoothstep(2.4, 0.0, shoreDist) * realCoastGate;
-        float shoreWash = smoothstep(7.4, 0.35, shoreDist) * smoothstep(0.02, 0.42, depth) * (0.42 + 0.58 * lace);
-        float shoreSetMask = smoothstep(0.05, 0.24, depth) * smoothstep(12.5, 0.55, shoreDist) * beachGate;
-        float shoreFoamSets = (foamLip * 0.46 + foamSetBack * 0.32 + foamOuterSet * 0.2) * shoreSetMask * (0.52 + 0.48 * lace);
         float shoreFoam = coastWater * beachGate * (
-          foamLip * (0.42 + 0.62 * lace)
-          + waterlineTrace * (0.34 + 0.5 * lace)
-          + shoreWash * 0.18
+          foamLip * (0.5 + 0.5 * lace)
+          + waterlineTrace * (0.5 + 0.34 * lace)
         );
-        shoreFoam = max(shoreFoam, shoreFoamSets * 1.05);
-        shoreFoam = max(shoreFoam, contactRim * (0.62 + 0.52 * lace));
-        float breakZone = smoothstep(1.9, 0.35, depth);
-        float crestShape = smoothstep(0.04, 0.12, crestHeight);
-        float crestSlope = smoothstep(0.018, 0.13, waveSlope);
-        float crestFoam = crestShape * crestSlope * breakZone * lace * (0.42 + crestSlope * 0.42);
-        float surf = breakerFoam(vWorld.xz, uTime, shoreDist, depth, lace)
+        shoreFoam = max(shoreFoam, contactRim * (0.74 + 0.26 * lace));
+        float surf = breakerFoam(vWorld.xz, uTime, shoreDist, depth, lace, vExposure)
           * smoothstep(0.05, 0.24, depth)
           * mix(0.68, 1.0, beachGate);
         shoreFoam *= 1.0 + uRain * 0.16;
-        surf *= 1.55 + uRain * 0.22;
-        float foam = clamp(max(max(shoreFoam * 1.16, crestFoam), surf), 0.0, 1.0);
-        color = mix(color, uFoam, clamp(foam * 0.96 + shoreFoam * 0.08, 0.0, 1.0));
+        surf *= 1.2 + uRain * 0.22;
+        float foam = clamp(max(shoreFoam * 1.05, surf), 0.0, 1.0);
+        color = mix(color, uFoam, foam * 0.96);
         alpha = max(alpha, foam * 0.86);
 
         if (underwaterView > 0.001) {
@@ -664,7 +762,9 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // --- atmospheric haze --------------------------------------------------
         float camDist = length(vWorld.xz - cameraPosition.xz);
         float haze = smoothstep(uHazeNear, uHazeFar, camDist);
-        float hazeByDepth = mix(0.22, 0.95, smoothstep(0.85, 2.8, depth));
+        // Deep water resists the haze (mockup: the horizon stays saturated
+        // blue; grey-out is reserved for genuine garua via uHazeNear/Far).
+        float hazeByDepth = mix(0.22, 0.78, smoothstep(0.85, 2.8, depth));
         color = mix(color, uHaze, haze * hazeByDepth);
 
         // --- fade the plane edge into the open-ocean disc beyond ----------------
@@ -707,8 +807,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
       varying float vShoreDist;
       varying float vShoreSoftness;
       varying float vPlayableFade;
-      varying float vCrest;
-      varying float vWaveSlope;
+      varying float vExposure;
 
       vec4 seafloorSample(vec2 wxz) {
         return texture2D(uSeafloor, wxz / uSize + 0.5);
@@ -724,15 +823,14 @@ function createSurfRibbonMaterial(seafloorTexture) {
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         world.xyz += disp;
         world.y += swashLift(world.xz, uTime, depth);
-        world.y += breakerLift(world.xz, uTime, shoreDist, depth);
+        vExposure = shoreExposure(uSeafloor, uSize, world.xz, shoreDist);
+        world.y += breakerLift(world.xz, uTime, shoreDist, depth, vExposure);
         world.y += 0.035;
         vWorld = world.xyz;
         vDepth = max(0.0, depth);
         vShoreDist = shoreDist;
         vShoreSoftness = floorSample.b;
         vPlayableFade = floorSample.a;
-        vCrest = disp.y;
-        vWaveSlope = length(waveNormal.xz);
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
@@ -749,8 +847,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
       varying float vShoreDist;
       varying float vShoreSoftness;
       varying float vPlayableFade;
-      varying float vCrest;
-      varying float vWaveSlope;
+      varying float vExposure;
 
       float srHash(vec2 p) { return fract(sin(dot(p, vec2(127.4, 311.7))) * 43758.5453); }
       float srNoise(vec2 p) {
@@ -774,11 +871,11 @@ function createSurfRibbonMaterial(seafloorTexture) {
         return d;
       }
       float srLace(vec2 wxz, float t) {
-        vec2 p = wxz * 1.25 + vec2(t * 0.16, -t * 0.11);
+        vec2 p = wxz * 0.65 + vec2(t * 0.11, -t * 0.073);
         float a = 1.0 - srWorley(p);
         float b = 1.0 - srWorley(p * 2.1 + 6.8);
-        float cells = smoothstep(0.36, 0.9, a * 0.66 + b * 0.34);
-        float torn = smoothstep(0.24, 0.82, srNoise(wxz * 0.32 + vec2(t * 0.045, -t * 0.031)));
+        float cells = smoothstep(0.46, 0.86, a * 0.66 + b * 0.34);
+        float torn = smoothstep(0.24, 0.82, srNoise(wxz * 0.32 + vec2(t * 0.03, -t * 0.021)));
         return cells * (0.55 + 0.45 * torn);
       }
       float srLine(float sd, float centre, float width) {
@@ -792,30 +889,35 @@ function createSurfRibbonMaterial(seafloorTexture) {
         float beach = mix(0.78, 1.18, smoothstep(0.08, 0.78, vShoreSoftness));
         float lace = srLace(vWorld.xz, uTime);
 
-        float cycle = sin(uTime * 0.8976) * 0.5 + 0.5;
-        float wobble = sin(vWorld.x * 0.17 + uTime * 0.45) * 0.34
+        float cycle = sin(uTime * 0.5984) * 0.5 + 0.5;
+        float wobble = sin(vWorld.x * 0.17 + uTime * 0.30) * 0.34
           + (srNoise(vWorld.xz * 0.075) - 0.5) * 0.78;
         float front = 0.65 + cycle * 2.65 + wobble;
-        float inner = srLine(vShoreDist, front, 0.82) * 0.72;
-        float middle = srLine(vShoreDist, front + 2.45, 1.15) * 0.58;
-        float outer = srLine(vShoreDist, front + 5.25, 1.55) * 0.42;
-        float farOuter = srLine(vShoreDist, front + 8.65, 1.9) * 0.24;
-        float bands = (inner + middle + outer + farOuter) * lace;
+        // Swash lip with a solid core, plus one weak fully-laced outer set
+        // line: the only foam between the swash and the breaker fronts.
+        float inner = srLine(vShoreDist, front, 0.6) * 0.72 * (0.6 + 0.4 * lace);
+        // The outer set line marches like the breakers, so it obeys the same
+        // swell-exposure gate (the immediate swash lip stays omnidirectional —
+        // water laps every shore, but sets arrive from the swell).
+        float outerSet = srLine(vShoreDist, front + 5.1, 1.35) * 0.3 * lace
+          * mix(0.22, 1.0, smoothstep(-0.15, 0.6, vExposure));
+        float bands = inner + outerSet;
 
         float f;
         float s;
-        float breakerEnv = breakerField(vWorld.xz, uTime, vShoreDist, vDepth, f, s);
-        float breakerLip = smoothstep(0.16, 0.02, f);
-        float breakerTrail = smoothstep(0.62, 0.08, f) * (1.0 - breakerLip);
-        float breaker = breakerEnv * s * (breakerLip * (0.82 + 0.18 * lace) + breakerTrail * lace * 0.56);
+        float breakerEnv = breakerField(vWorld.xz, uTime, vShoreDist, vDepth, vExposure, f, s);
+        // Lip/trail widths match the main plane's breakerFoam exactly, so the
+        // two layers reinforce one line instead of splitting into a pair.
+        float breakerLip = smoothstep(0.075, 0.015, f);
+        float breakerTrail = smoothstep(0.34, 0.07, f) * (1.0 - breakerLip);
+        float breaker = breakerEnv * s * (breakerLip * (0.85 + 0.15 * lace) + breakerTrail * lace * 0.45);
 
-        float crest = smoothstep(0.045, 0.13, vCrest) * smoothstep(0.025, 0.13, vWaveSlope)
-          * smoothstep(1.7, 0.35, vDepth) * lace * 0.36;
-        float contact = smoothstep(0.2, 0.018, abs(vDepth)) * smoothstep(2.65, 0.0, vShoreDist) * (0.42 + lace * 0.58);
-        float wash = smoothstep(8.0, 0.35, vShoreDist) * smoothstep(0.02, 0.42, vDepth) * lace * 0.18;
+        float contact = smoothstep(0.2, 0.018, abs(vDepth)) * smoothstep(2.65, 0.0, vShoreDist) * (0.5 + lace * 0.5);
 
-        float foam = (bands * 1.12 + breaker * 1.18 + crest + contact + wash)
-          * realCoast * shallow * shoreWindow * beach;
+        // shoreWindow gates only the swash-anchored lines; the breaker fronts
+        // carry their own envelope out past it.
+        float foam = ((bands + contact) * shoreWindow + breaker * 1.1)
+          * realCoast * shallow * beach;
         foam *= 1.0 + uRain * 0.24;
         foam *= 1.0 - clamp(uUnderwaterAmount, 0.0, 1.0) * 0.72;
         foam = clamp(foam, 0.0, 1.0);
@@ -917,10 +1019,12 @@ function createDeepOceanMaterial() {
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
-        color += sunColor * min(spec, 0.5) * (0.52 + sunPathStrength * 0.28) * (1.0 - fog * 0.85);
+        color += sunColor * min(spec, 0.9) * (0.52 + sunPathStrength * 0.5) * (1.0 - fog * 0.85);
         color += sunColor * path * pathSparkle * sunPathStrength * 0.12 * (1.0 - fog * 0.92);
 
-        color = mix(color, fogColor, fog);
+        // Keep a memory of blue at the horizon line rather than fully greying
+        // out (mockup: saturated deep water meets the sky).
+        color = mix(color, fogColor, fog * 0.9);
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -1007,21 +1111,14 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   p.elements[10] = _clipPlane.z + 1.0 - REFLECT_CLIP_BIAS;
   p.elements[14] = _clipPlane.w;
 
-  const visibilityState = [];
-  scene.traverse(object => {
-    visibilityState.push({ object, visible: object.visible });
-  });
-  if (typeof globalThis !== 'undefined') {
-    globalThis.__threeReflectionDebug = {
-      before: scene.children.slice(0, 12).map(child => ({
-        name: child.name || child.type || 'Object3D',
-        type: child.type,
-        visible: child.visible !== false,
-      })),
-    };
-  }
+  // Only two sets of objects are hidden for the mirror pass (the water meshes
+  // in `hidden`, and the no-reflect list below); track and restore exactly
+  // those instead of snapshotting the whole scene graph every refresh.
+  _hiddenPrev.length = 0;
   for (let i = 0; i < hidden.length; i += 1) {
-    if (hidden[i]) hidden[i].visible = false;
+    if (!hidden[i]) continue;
+    _hiddenPrev.push(hidden[i], hidden[i].visible);
+    hidden[i].visible = false;
   }
   // Reflection is an explicit whitelist: the rippled water needs the terrain,
   // ship, and nearby characters/large silhouettes, not every shrub, fish, and
@@ -1040,20 +1137,18 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   for (let i = 0; i < _noReflectCache.objects.length; i += 1) {
     const object = _noReflectCache.objects[i];
     if (!object.parent || !object.visible) continue; // unmounted or already hidden
-    _noReflect.push({ object });
+    _noReflect.push(object);
     object.visible = false;
-  }
-  if (typeof globalThis !== 'undefined' && globalThis.__threeReflectionDebug) {
-    globalThis.__threeReflectionDebug.afterHide = scene.children.slice(0, 12).map(child => ({
-      name: child.name || child.type || 'Object3D',
-      type: child.type,
-      visible: child.visible !== false,
-    }));
   }
   const prevRT = gl.getRenderTarget();
   const prevShadowAuto = gl.shadowMap.autoUpdate;
+  const prevShadowNeedsUpdate = gl.shadowMap.needsUpdate;
   try {
     gl.shadowMap.autoUpdate = false;
+    // Reflections are a secondary render. If SkyController has queued a main
+    // shadow-map refresh for Darwin, do not let this offscreen pass consume it
+    // while reflection-only visibility masks are active.
+    gl.shadowMap.needsUpdate = false;
     gl.setRenderTarget(rt);
     gl.clear();
     gl.render(scene, _virtualCam);
@@ -1061,20 +1156,22 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   } finally {
     gl.setRenderTarget(prevRT);
     gl.shadowMap.autoUpdate = prevShadowAuto;
-    for (let i = 0; i < visibilityState.length; i += 1) {
-      visibilityState[i].object.visible = visibilityState[i].visible;
+    gl.shadowMap.needsUpdate = prevShadowNeedsUpdate || gl.shadowMap.needsUpdate;
+    // The no-reflect list only ever contains objects that were visible when
+    // hidden (invisible ones are skipped above), so restoring to true is safe.
+    for (let i = 0; i < _noReflect.length; i += 1) {
+      _noReflect[i].visible = true;
     }
-    if (typeof globalThis !== 'undefined' && globalThis.__threeReflectionDebug) {
-      globalThis.__threeReflectionDebug.afterRestore = scene.children.slice(0, 12).map(child => ({
-        name: child.name || child.type || 'Object3D',
-        type: child.type,
-        visible: child.visible !== false,
-      }));
+    for (let i = 0; i < _hiddenPrev.length; i += 2) {
+      _hiddenPrev[i].visible = _hiddenPrev[i + 1];
     }
   }
 }
 
 const _noReflect = [];
+// Flat [object, wasVisible, object, wasVisible, ...] scratch for the meshes
+// explicitly hidden during the mirror pass.
+const _hiddenPrev = [];
 const _drawSize = new THREE.Vector2();
 
 export function Water({ quality = 'performance', reflections = true }) {
@@ -1125,6 +1222,8 @@ export function Water({ quality = 'performance', reflections = true }) {
   });
   const _sun = useMemo(() => new THREE.Vector3(), []);
   const _white = useMemo(() => new THREE.Color('#ffffff'), []);
+  const _sunColorDay = useMemo(() => new THREE.Color('#fff3da'), []);
+  const _sunColorGolden = useMemo(() => new THREE.Color('#ff9d4d'), []);
 
   // Refraction grab: runs in the middle of the render, right before the water
   // mesh draws (transparent pass, after all opaque geometry). One framebuffer
@@ -1169,15 +1268,26 @@ export function Water({ quality = 'performance', reflections = true }) {
     wu.uSun.value.copy(_sun);
     wu.uRain.value = weatherEnv.rainIntensity;
     wu.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
+    // Wading ripples: on only while the player is actually standing in water
+    // (ankle depth in, gone once they are swimming or the camera submerges).
+    const pp = getRuntimePlayerPose().position;
+    const wadeDepth = WATER_LEVEL - terrainHeight(pp.x, pp.z, store.currentZoneId);
+    const wade = THREE.MathUtils.smoothstep(wadeDepth, 0.04, 0.22)
+      * (1 - THREE.MathUtils.smoothstep(wadeDepth, 1.45, 2.3));
+    wu.uPlayer.value.set(pp.x, pp.y, pp.z);
+    wu.uPlayerRipple.value = wade * (1 - wu.uUnderwaterAmount.value);
     const sky = skyState(time, store.day || 1);
     const daylight = sky.daylight;
-    const lowSun = THREE.MathUtils.smoothstep(sky.elevation, 0.0, 0.18)
+    // Floored below the horizon crossing so glitter doesn't vanish exactly
+    // when the sun is lowest (that's when a real sea shows the most sparkle).
+    const lowSun = THREE.MathUtils.smoothstep(sky.elevation, -0.03, 0.18)
       * (1 - THREE.MathUtils.smoothstep(sky.elevation, 0.34, 0.72));
-    const sunPathStrength = daylight * lowSun * (1 - weatherEnv.rainIntensity * 0.72) * (1 - weatherEnv.overcast * 0.55);
+    const sunPathStrength = Math.sqrt(daylight) * lowSun * (1 - weatherEnv.rainIntensity * 0.72) * (1 - weatherEnv.overcast * 0.55);
     const weatherMood = THREE.MathUtils.clamp(weatherEnv.overcast * 0.58 + weatherEnv.rainIntensity * 0.42, 0, 1);
     const stormBlend = weatherMood * THREE.MathUtils.lerp(0.25, 0.85, daylight);
     wu.uDaylight.value = daylight;
     wu.uSunPathStrength.value = sunPathStrength;
+    wu.uSunColor.value.copy(_sunColorDay).lerp(_sunColorGolden, sky.golden);
     wu.uAbsorb.value.set(
       THREE.MathUtils.lerp(0.42, 0.56, weatherMood),
       THREE.MathUtils.lerp(0.20, 0.28, weatherMood),
@@ -1233,7 +1343,9 @@ export function Water({ quality = 'performance', reflections = true }) {
       rs.framesSinceUpdate += 1;
       const cameraMoved = !rs.initialized || camera.position.distanceToSquared(rs.position) > REFLECTION_CAMERA_MOVE_SQ;
       const cameraRotated = !rs.initialized || 1 - Math.abs(camera.quaternion.dot(rs.quaternion)) > REFLECTION_CAMERA_ROT_DELTA;
-      const lightingChanged = rs.timeOfDay == null || Math.abs(time - rs.timeOfDay) > REFLECTION_TIME_DELTA;
+      const timeDelta = rs.timeOfDay == null ? Infinity : Math.abs(time - rs.timeOfDay);
+      const lightingChanged = rs.timeOfDay == null
+        || Math.min(timeDelta, 24 - timeDelta) > REFLECTION_TIME_DELTA;
       const cadenceReady = reflectionFrame.current >= REFLECTION_MIN_INTERVAL;
       const stale = rs.framesSinceUpdate >= REFLECTION_STATIC_INTERVAL;
       if (!wu.uReflection.value || stale || (cadenceReady && (cameraMoved || cameraRotated || lightingChanged))) {

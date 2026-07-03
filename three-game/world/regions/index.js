@@ -12,6 +12,8 @@ import { westernHighlandsRegion } from './westernHighlands/terrain';
 import { createWesternHighlandsTerrainMaterial } from './westernHighlands/material';
 import { elMiradorRegion } from './elMirador/terrain';
 import { createElMiradorTerrainMaterial } from './elMirador/material';
+import { penalColonyRegion } from './penalColony/terrain';
+import { createPenalColonyTerrainMaterial } from './penalColony/material';
 import { mangroveRegion } from './mangroves/terrain';
 import { createMangroveTerrainMaterial } from './mangroves/material';
 import { grassTestRegion } from './grassTest/terrain';
@@ -33,6 +35,7 @@ const authoredRegions = [
   { ...northwestReefRegion, createTerrainMaterial: createNorthwestReefTerrainMaterial },
   { ...westernHighlandsRegion, createTerrainMaterial: createWesternHighlandsTerrainMaterial },
   { ...elMiradorRegion, createTerrainMaterial: createElMiradorTerrainMaterial },
+  { ...penalColonyRegion, createTerrainMaterial: createPenalColonyTerrainMaterial },
   { ...mangroveRegion, createTerrainMaterial: createMangroveTerrainMaterial },
   { ...grassTestRegion, createTerrainMaterial: createGrassTestTerrainMaterial },
   { ...grassHybridTestRegion, createTerrainMaterial: createGrassHybridTestTerrainMaterial },

@@ -181,12 +181,12 @@ export function createPostOfficeBay3TerrainMaterial() {
         color = mix(color, pob3Basalt(p), clamp(basalt * 0.92, 0.0, 1.0));
         color = mix(color, vec3(0.30, 0.55, 0.55), seabed * 0.74);
 
-        float swashCycle = sin(uSwashTime * 0.8976) * 0.5 + 0.5;
-        float swashD = 0.25 + swashCycle * 1.65 + sin(p.x * 0.18 + uSwashTime * 0.45) * 0.25;
+        float swashCycle = sin(uSwashTime * 0.5984) * 0.5 + 0.5;
+        float swashD = 0.25 + swashCycle * 1.65 + sin(p.x * 0.18 + uSwashTime * 0.30) * 0.25;
         float wet = smoothstep(swashD + 1.4, swashD * 0.4, d) * (1.0 - seabed * 0.65);
         wet = max(wet, smoothstep(1.3, 0.0, abs(d)) * 0.65);
         float foamEdge = smoothstep(0.5, 0.05, abs(d - swashD)) * step(0.0, d);
-        float foamSpeckle = smoothstep(0.35, 0.75, pob3Fbm(p * 5.0 + vec2(uSwashTime * 0.6, 0.0)));
+        float foamSpeckle = smoothstep(0.35, 0.75, pob3Fbm(p * 5.0 + vec2(uSwashTime * 0.4, 0.0)));
         color = mix(color, color * vec3(0.50, 0.56, 0.52), clamp(wet, 0.0, 1.0) * 0.45);
         color = mix(color, vec3(0.92, 0.96, 0.94), foamEdge * (0.32 + foamSpeckle * 0.44));
 

@@ -58,6 +58,7 @@ const AUTHORED_REGION_TERRAIN = {
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
   W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
   EL_MIRADOR: { preset: 'el-mirador-red-dirt-ridge', segments: 320 },
+  PENAL_COLONY: { preset: 'penal-colony-settlement', segments: 300 },
   MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
   GRASS_TEST: { preset: 'grass-test-field', segments: 300 },
   GRASS_HYBRID_TEST: { preset: 'grass-hybrid-test-field', segments: 240 },
@@ -68,10 +69,6 @@ const AUTHORED_REGION_TERRAIN = {
 
 function humanDirection(edge) {
   return edge.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, char => char.toUpperCase());
-}
-
-function titleForNeighbor(cell) {
-  return cell ? cell.name : 'Unknown region';
 }
 
 function regionDimensions(cell) {
@@ -274,7 +271,7 @@ function toRegionMap(cell) {
     npcs: cell.npcs || [],
     discoveries: cell.discoveries || [],
     notableFeatures: cell.notableFeatures || [],
-    playerStart: [0, 0, 0],
+    playerStart: Array.isArray(cell.playerStart) ? cell.playerStart : [0, 0, 0],
     narration: {
       weather: cell.type === 'forest' || cell.type === 'highland' ? 'misty' : 'sunny',
       sounds: cell.type === 'beagle'

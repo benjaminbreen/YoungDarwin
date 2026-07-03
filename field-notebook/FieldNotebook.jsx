@@ -51,7 +51,6 @@ function findSpecimen(id) {
 function normalizeEntry(entry, index) {
   const specimen = findSpecimen(entry.specimenId);
   const isLocation = entry.kind === 'location';
-  const isNote = entry.kind === 'note' || !entry.specimenId;
   return {
     ...entry,
     key: entry.id || `entry-${index}`,

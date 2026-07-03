@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getSpecimenRuntimePoses } from '../world/specimenRuntime';
+import { getWildlifeCollisionRadius } from '../wildlife/wildlifeCatalog';
 
 const DEFAULT_SPECIMEN_RADIUS = {
   basalt: 0.78,
@@ -27,6 +28,8 @@ export function specimenCollisionRadius(specimen) {
   if (!specimen) return 0;
   if (Number.isFinite(specimen.collisionRadius)) return Math.max(0, specimen.collisionRadius);
   const id = normalizedId(specimen);
+  const catalogRadius = getWildlifeCollisionRadius(id);
+  if (Number.isFinite(catalogRadius)) return Math.max(0.08, catalogRadius * (specimen.sceneScale || 1));
   const fallback = specimen.ontology === 'Animal'
     ? 0.52
     : specimen.ontology === 'Plant'

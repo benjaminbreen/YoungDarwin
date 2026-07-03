@@ -3,6 +3,7 @@ import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getNorthShoreRocks, N_SHORE } from '../northShoreLayout';
 import { generatedTreePresets } from '../generatedTreePresets';
 import { modelAssetProp } from './ecologyAssetTransforms';
+import { buildAmbientWildlifeLayer } from './ambientWildlife';
 
 // Northern Shore (N_SHORE) ecology — Floreana's arid littoral zone as Darwin
 // met it in September 1835. Flora is named for the real species mix:
@@ -13,7 +14,7 @@ import { modelAssetProp } from './ecologyAssetTransforms';
 const NATURE = '/assets/models/nature/';
 
 // Matches the swash rhythm in the Northern Shore terrain shader.
-export const NORTH_SHORE_SWASH_PERIOD = (Math.PI * 2) / 0.8976;
+export const NORTH_SHORE_SWASH_PERIOD = (Math.PI * 2) / 0.5984;
 
 const scrubClumps = [[-34, 12], [-12, 6], [4, 18], [22, 8], [40, 16], [-26, 26], [14, 32]];
 const uplandTreeClumps = [[-30, 38], [8, 40], [34, 35]];
@@ -171,6 +172,27 @@ function buildGeneratedTrees() {
   ];
 }
 
+function buildAmbientWildlife() {
+  return [
+    buildAmbientWildlifeLayer(N_SHORE, {
+      id: 'north-shore-swash-crabs',
+      speciesId: 'crab',
+      count: 4,
+      seed: 181,
+      bounds: { minX: -44, maxX: 46, minZ: -16, maxZ: 4 },
+      scale: [1.15, 1.55],
+      behavior: 'skitter',
+      habitatRadiusX: 3.2,
+      habitatRadiusZ: 1.7,
+      maxGrade: 0.5,
+      accept: (biome, x, z) => {
+        const d = z - northShoreCoastZ(x);
+        return d > 0.4 && d < 5.8 && (biome === 'ash-beach' || biome === 'sesuvium-flat' || biome === 'wet-sand');
+      },
+    }),
+  ];
+}
+
 export function buildNorthShoreEcology() {
   const rocks = getNorthShoreRocks();
   const swashRocks = rocks.filter(rock => {
@@ -181,6 +203,7 @@ export function buildNorthShoreEcology() {
     zoneId: N_SHORE,
     flora: buildFlora(),
     generatedTrees: buildGeneratedTrees(),
+    ambientWildlife: buildAmbientWildlife(),
     rocks,
     splashes: { anchors: swashRocks.slice(0, 12), period: NORTH_SHORE_SWASH_PERIOD },
     footprintBiomes: ['black-sand', 'ash-beach', 'sesuvium-flat', 'dry-scrub'],

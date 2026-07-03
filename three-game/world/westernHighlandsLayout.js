@@ -1,5 +1,5 @@
-import * as THREE from 'three';
 import { westernHighlandsCanopyMask, westernHighlandsHeight, westernHighlandsTrailInfluence } from './regions/westernHighlands/terrain';
+import { buildRockObstacles } from './proceduralRocks';
 import { terrainSlopeAt } from './terrain';
 import { seededRandom } from './scatter';
 
@@ -61,40 +61,13 @@ export function getWesternHighlandsRocks() {
 }
 
 export function getWesternHighlandsRockObstacles() {
-  return getWesternHighlandsRocks()
-    .filter(rock => rock.scale > 0.82)
-    .map(rock => {
-      const height = Math.max(0.32, rock.radiusY * 1.8 - rock.sink);
-      const radius = Math.max(0.48, Math.max(rock.radiusX, rock.radiusZ) * 0.78);
-      const collider = {
-        type: 'cylinder',
-        radius,
-        height,
-        offset: [0, height * 0.5, 0],
-      };
-      return {
-        id: `western-highlands-${rock.id}`,
-        kind: 'rock',
-        path: null,
-        x: rock.x,
-        z: rock.z,
-        radius,
-        height,
-        colliderTop: height,
-        colliderBottom: 0,
-        scale: 1,
-        yaw: rock.yaw,
-        jumpable: false,
-        climbable: false,
-        edgeRisk: false,
-        pushable: false,
-        pushMass: 1,
-        pushFriction: 0.9,
-        traversal: height > 0.62 ? 'vault' : 'scramble',
-        traversalLabel: 'scramble over mossy lava',
-        definition: { collider },
-        zoneId: W_HIGH,
-        shapes: [collider],
-      };
-    });
+  return buildRockObstacles(getWesternHighlandsRocks(), {
+    zoneId: W_HIGH,
+    idPrefix: 'western-highlands',
+    radiusScale: 0.78,
+    colliderShape: 'cylinder',
+    traversalLabel: 'scramble over mossy lava',
+    pushFriction: 0.9,
+    filter: rock => rock.scale > 0.82,
+  });
 }

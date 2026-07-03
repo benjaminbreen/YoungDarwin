@@ -1,5 +1,5 @@
 import { nwReefCoastZ, nwReefIsletField, nwReefOutcrop } from './regions/northwestReef/terrain';
-import { ballColliderForVisualRock, visualRockTop } from './rockObstacleUtils';
+import { buildRockObstacles, rockVisualBounds } from './proceduralRocks';
 import { makeZoneScatter } from './scatter';
 
 // Deterministic rock layout for the Northwest Reef. Rocks live here (not in
@@ -53,34 +53,9 @@ export function getNorthwestReefRocks() {
 // Rocks big enough to block the player become physics obstacles; pebble-scale
 // and fully drowned rocks stay decorative.
 export function getNorthwestReefRockObstacles() {
-  return getNorthwestReefRocks()
-    .filter(rock => rock.radiusY * 2 - rock.sink > 0.5 && rock.y > -1.6)
-    .map(rock => {
-      const radius = Math.max(rock.radiusX, rock.radiusZ) * 0.86;
-      const top = visualRockTop(rock);
-      const ball = ballColliderForVisualRock(radius, top);
-      return {
-        id: `nwreef-${rock.id}`,
-        kind: 'rock',
-        path: null,
-        x: rock.x,
-        z: rock.z,
-        radius,
-        height: top,
-        colliderTop: top,
-        colliderBottom: 0,
-        scale: 1,
-        yaw: rock.yaw,
-        jumpable: top >= 0.72,
-        climbable: top >= 1.1,
-        edgeRisk: false,
-        pushable: false,
-        pushMass: 1,
-        pushFriction: 0.88,
-        climbLabel: 'basalt boulder',
-        definition: { collider: ball },
-        zoneId: NW_REEF,
-        shapes: [ball],
-      };
-    });
+  return buildRockObstacles(getNorthwestReefRocks(), {
+    zoneId: NW_REEF,
+    idPrefix: 'nwreef',
+    filter: rock => rockVisualBounds(rock).height > 0.5 && rock.y > -1.6,
+  });
 }
