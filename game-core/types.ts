@@ -166,7 +166,9 @@ export type ExpeditionState = {
   inventory: InventoryItem[];
   journal: JournalEntry[];
   collectedSpecimenIds: SpecimenId[];
+  collectedSpecimenActorIds: string[];
   documentedSpecimenIds: SpecimenId[];
+  examinedTypeIds: string[];
   visitedZoneIds: ZoneId[];
   visitedLocalCellIds: LocalCellId[];
 };

@@ -912,8 +912,6 @@ function InsectMotes({ enabled }) {
 export function GroundedWorldFX({ enabled = true, waterRipples = true, terrainDust = true }) {
   return (
     <group userData={{ renderSource: 'grounded-world-fx', renderLabel: 'Grounded world FX', renderKind: 'ambient-vfx', noReflect: true }}>
-      <WaterContactRipples enabled={enabled && waterRipples} />
-      <WaterStepPlops enabled={enabled && waterRipples} />
       <TerrainDustPuffs enabled={terrainDust} />
       <PlayerSkidStreaks enabled={enabled} />
       <InsectMotes enabled={enabled} />

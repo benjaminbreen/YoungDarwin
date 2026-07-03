@@ -125,6 +125,7 @@ export function finalizePlayerFrame({
   const p = group.current?.position;
   if (!p) return;
   const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+  const sprintingSwim = swimState.current.active && running && horizontalSpeed > SWIM.speed * 1.05;
   const resolvedGroundDistance = Number.isFinite(groundDistance)
     ? groundDistance
     : p.y - collisionAdapter.groundInfo(p).y;
@@ -187,6 +188,7 @@ export function finalizePlayerFrame({
   stateRef.current.crouchRunning = stateRef.current.crouching && crouchRunIntent && horizontalSpeed > PLAYER.walkSpeed * 0.5;
   stateRef.current.airborne = wasAirborne.current;
   stateRef.current.swimming = swimState.current.active;
+  stateRef.current.swimSprinting = sprintingSwim;
   wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
   stateRef.current.wadeDepth = wadeDepth.current;
 
@@ -201,7 +203,6 @@ export function finalizePlayerFrame({
 
   if (!skipSwimEconomy) {
     if (swimState.current.active && health > 0) {
-      const sprintingSwim = running && horizontalSpeed > SWIM.speed * 1.05;
       swimFatigue.current += delta * (sprintingSwim ? SWIM.sprintFatiguePerSecond : SWIM.fatiguePerSecond);
       if (swimFatigue.current >= 1.2) {
         applyMovementCost({ fatigueDelta: swimFatigue.current });

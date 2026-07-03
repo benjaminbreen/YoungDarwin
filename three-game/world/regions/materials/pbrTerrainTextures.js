@@ -34,6 +34,36 @@ export const FLOREANA_PBR_TEXTURES = {
       height: [128, 128, 128, 255],
     },
   },
+  whiteSand: {
+    albedo: `${FLOREANA_PBR_BASE}/white-sand_albedo.png`,
+    normal: null,
+    roughness: `${FLOREANA_PBR_BASE}/white-sand_roughness.png`,
+    height: `${FLOREANA_PBR_BASE}/white-sand_height.png`,
+    scale: 0.22,
+    normalStrength: 0.24,
+    roughnessMix: 0.78,
+    fallbacks: {
+      albedo: '#e4d8be',
+      normal: [128, 128, 255, 255],
+      roughness: [236, 236, 236, 255],
+      height: [128, 128, 128, 255],
+    },
+  },
+  normalSand: {
+    albedo: `${FLOREANA_PBR_BASE}/normal-sand_albedo.png`,
+    normal: null,
+    roughness: `${FLOREANA_PBR_BASE}/normal-sand_roughness.png`,
+    height: `${FLOREANA_PBR_BASE}/normal-sand_height.png`,
+    scale: 0.22,
+    normalStrength: 0.22,
+    roughnessMix: 0.76,
+    fallbacks: {
+      albedo: '#c5a675',
+      normal: [128, 128, 255, 255],
+      roughness: [232, 232, 232, 255],
+      height: [128, 128, 128, 255],
+    },
+  },
   redCinderDirt: {
     albedo: `${FLOREANA_PBR_BASE}/red-cinder-dirt_albedo.png`,
     normal: `${FLOREANA_PBR_BASE}/red-cinder-dirt_normal.png`,
@@ -239,6 +269,10 @@ export function loadPbrTerrainSet(textureSet) {
       fallback: textureSet.fallbacks?.roughness || [230, 230, 230, 255],
       colorSpace: THREE.NoColorSpace,
     }),
+    height: loadRepeatingTerrainTexture(textureSet.height, {
+      fallback: textureSet.fallbacks?.height || [128, 128, 128, 255],
+      colorSpace: THREE.NoColorSpace,
+    }),
   };
 }
 
@@ -246,4 +280,5 @@ export function disposePbrTerrainSet(textureSet) {
   textureSet?.albedo?.dispose?.();
   textureSet?.normal?.dispose?.();
   textureSet?.roughness?.dispose?.();
+  textureSet?.height?.dispose?.();
 }

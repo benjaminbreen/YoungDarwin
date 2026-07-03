@@ -5,6 +5,7 @@ import {
   cormorantCoastZ,
   cormorantLagoonField,
   cormorantRimMask,
+  cormorantStandingWaterMask,
   cormorantTrailDistance,
   isCormorantBayWalkable,
 } from '../cormorantBaySplatTest/terrain';
@@ -18,6 +19,7 @@ export {
   cormorantCoastZ,
   cormorantLagoonField,
   cormorantRimMask,
+  cormorantStandingWaterMask,
   cormorantTrailDistance,
   isCormorantBayWalkable,
 };
@@ -30,6 +32,7 @@ export const cormorantBayTest3Region = {
     movementHeight: (x, z) => cormorantBayHeight(x, z, { movementSurface: true }),
     biomeAt: cormorantBayBiomeAt,
     color: cormorantBayColor,
+    standingWaterMask: cormorantStandingWaterMask,
     isWalkable: isCormorantBayWalkable,
     defaultSpawn: [-30, 0, 24],
   },

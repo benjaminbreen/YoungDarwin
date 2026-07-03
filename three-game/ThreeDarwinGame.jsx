@@ -25,6 +25,7 @@ const KEYBOARD_MAP = [
   { name: 'jump', keys: ['Space'] },
   { name: 'dodge', keys: ['KeyB'] },
   { name: 'interact', keys: ['KeyE'] },
+  { name: 'examine', keys: ['Enter', 'NumpadEnter'] },
   { name: 'useTool', keys: ['KeyJ'] },
   { name: 'camera', keys: ['KeyM'] },
   { name: 'recenterCamera', keys: ['Tab'] },
@@ -70,6 +71,7 @@ const DEFAULT_PERF_SETTINGS = {
   ao: false,
   stats: false,
   shadows: true,
+  shadowQuality: 'high',
   water: true,
   reflections: false,
   terrain: true,
@@ -110,6 +112,7 @@ const QUALITY_PRESETS = {
     // coverage to avoid crunchy subpixel breakup.
     dprMode: '1.25x',
     msaaSamples: 0,
+    shadowQuality: 'high',
     ao: true,
     reflections: true,
     waterQuality: 'performance',
@@ -119,6 +122,7 @@ const QUALITY_PRESETS = {
   cinematic: {
     dprMode: 'default',
     msaaSamples: 2,
+    shadowQuality: 'high',
     ao: true,
     reflections: true,
     waterQuality: 'cinematic',
@@ -133,6 +137,12 @@ const DEFERRED_CONTENT_DELAY_MS = 350;
 const OPENING_CAMERA_DURATION_MS = 6200;
 const OPENING_CAMERA_MAX_MS = 10500;
 const SCENE_COST_BUCKET_LIMIT = 40;
+const SHADOW_QUALITY_MODES = ['standard', 'high'];
+
+function normalizeShadowQuality(value, fallback = 'high') {
+  const mode = String(value || '').toLowerCase();
+  return SHADOW_QUALITY_MODES.includes(mode) ? mode : fallback;
+}
 
 function getInitialPerfSettings() {
   return { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[DEFAULT_PERF_SETTINGS.quality] };
@@ -163,6 +173,7 @@ function settingsFromUrlSearch(search) {
   return {
     quality,
     waterQuality: params.get('waterQuality') === 'cinematic' ? 'cinematic' : base.waterQuality,
+    shadowQuality: normalizeShadowQuality(params.get('shadowQuality'), base.shadowQuality),
     dprMode: params.get('dpr') || base.dprMode,
     msaaSamples,
     postprocessing,
@@ -527,11 +538,12 @@ function ExpeditionClock() {
   const elapsed = useRef(0);
   const advanceTime = useThreeGameStore(state => state.advanceTime);
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
+  const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
 
   useFrame((_, delta) => {
-    if (statusViewOpen) {
-      // Status view freezes expedition time; drop accumulated real time so the
-      // clock doesn't lurch forward on close.
+    if (statusViewOpen || examineOpen) {
+      // Status/examine views freeze expedition time; drop accumulated real
+      // time so the clock doesn't lurch forward on close.
       elapsed.current = 0;
       return;
     }
@@ -1018,6 +1030,19 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
             type="button"
             onClick={() => set({ waterQuality: mode })}
             className={`rounded border px-2 py-1 ${settings.waterQuality === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span className="text-amber-100/70">Shadows</span>
+        {SHADOW_QUALITY_MODES.map(mode => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => set({ shadowQuality: mode })}
+            className={`rounded border px-2 py-1 ${normalizeShadowQuality(settings.shadowQuality) === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
           >
             {mode}
           </button>

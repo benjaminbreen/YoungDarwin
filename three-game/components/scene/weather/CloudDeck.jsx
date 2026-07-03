@@ -4,18 +4,31 @@ import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { skyState } from '../../../world/celestial';
+import { useThreeGameStore } from '../../../store';
 
-// Overcast dome: a camera-following sky sphere whose fbm cloud field is
-// planar-projected onto the view direction, so cover reaches all the way down
-// to the horizon — the band players actually look at. Near the horizon the
-// pattern compresses into solid murk (exactly what a real overcast does
-// through distance haze), so no blue gap can survive a closed sky. Coverage
-// (overcast) carves or closes the field; rain flattens it dark. One draw call.
+// The whole sky's cloud range in one camera-following dome (one draw call).
+// The fbm field is planar-projected onto the view direction — broad overhead,
+// compressing naturally toward the horizon — and read by two regimes:
+//
+//  - fair-weather cumulus (weatherEnv.cumulus): detached trade-wind puffs
+//    carved by a high threshold, domain-warped into cauliflower billows and
+//    lit directionally — a cheap gradient probe toward the sun brightens the
+//    sun-facing rims (silver lining) and shades the cores/undersides.
+//  - the overcast deck (weatherEnv.overcast): coverage closes the field into
+//    a ceiling, and near the horizon the projection degenerates into solid
+//    grey murk, guaranteeing no blue gap survives a closed sky. Rain flattens
+//    it dark. This regime's look is unchanged from the original deck.
 const DOME_RADIUS = 164;
 
 const _lightColor = new THREE.Color();
+const _shadeColor = new THREE.Color();
 const _darkColor = new THREE.Color();
+const _sunTint = new THREE.Color();
 const _white = new THREE.Color('#ffffff');
+const _cumulusShade = new THREE.Color('#8ba0b5'); // cool blue-grey underside
+const _sunWarm = new THREE.Color('#fff2d9');
+const _sunGolden = new THREE.Color('#ff9b55');
 
 export function CloudDeck() {
   const { camera, scene } = useThree();
@@ -28,10 +41,15 @@ export function CloudDeck() {
     uniforms: {
       uTime: { value: 0 },
       uCover: { value: 0 },
+      uCumulus: { value: 0 },
       uRain: { value: 0 },
+      uDaylight: { value: 1 },
       uWind: { value: new THREE.Vector2(1, 0) },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uLight: { value: new THREE.Color('#f3f6f7') },
+      uShade: { value: new THREE.Color('#93a5b5') },
       uDark: { value: new THREE.Color('#5d6a74') },
+      uSunTint: { value: new THREE.Color('#fff2d9') },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -45,10 +63,15 @@ export function CloudDeck() {
       varying vec3 vWorldDir;
       uniform float uTime;
       uniform float uCover;
+      uniform float uCumulus;
       uniform float uRain;
+      uniform float uDaylight;
       uniform vec2 uWind;
+      uniform vec3 uSunDir;
       uniform vec3 uLight;
+      uniform vec3 uShade;
       uniform vec3 uDark;
+      uniform vec3 uSunTint;
 
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -63,7 +86,7 @@ export function CloudDeck() {
           u.y
         );
       }
-      float fbm(vec2 p) {
+      float fbm5(vec2 p) {
         float v = 0.0;
         float a = 0.5;
         for (int i = 0; i < 5; i++) {
@@ -73,9 +96,21 @@ export function CloudDeck() {
         }
         return v;
       }
+      // Cheap variant for the warp and lighting probes, where fine octaves
+      // would be invisible anyway.
+      float fbm3(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 3; i++) {
+          v += a * noise(p);
+          p = p * 2.04 + vec2(13.7, 7.3);
+          a *= 0.5;
+        }
+        return v;
+      }
 
       void main() {
-        if (uCover < 0.015) discard;
+        if (max(uCover, uCumulus) < 0.015) discard;
         vec3 dir = normalize(vWorldDir);
         // Cut just below the horizon line; terrain/sea owns everything lower.
         float aboveHorizon = smoothstep(-0.08, 0.02, dir.y);
@@ -87,26 +122,62 @@ export function CloudDeck() {
         vec2 drift = uWind * uTime * 0.014;
         vec2 p = dir.xz / (max(dir.y, 0.0) + 0.18);
         p = p * 1.35 + drift;
-        float shape = fbm(p);
-        float detail = fbm(p * 3.1 - drift * 0.7);
+
+        // Domain warp: billowing cauliflower lobes instead of uniform noise.
+        vec2 warp = vec2(fbm3(p * 0.62 + 19.1), fbm3(p * 0.62 - 7.7)) - 0.5;
+        vec2 q = p + warp * 1.15;
+
+        float shape = fbm5(q);
+        float detail = fbm5(q * 3.1 - drift * 0.7);
         float field = shape + detail * 0.28;
 
-        // Coverage moves the carve threshold: scattered holes at low cover,
-        // an unbroken ceiling when storm-dark.
-        float threshold = mix(0.74, 0.1, uCover);
-        float deck = smoothstep(threshold, threshold + 0.3, field);
+        // --- Fair-weather cumulus: high threshold keeps clouds detached,
+        // the short ramp gives crisp sunlit edges eroded ragged by detail.
+        float cumulusThreshold = mix(0.86, 0.52, uCumulus);
+        float puff = smoothstep(cumulusThreshold, cumulusThreshold + 0.16, field);
+        float interior = smoothstep(cumulusThreshold + 0.06, cumulusThreshold + 0.5, field);
 
-        // Horizon murk: where the projection degenerates, overcast reads as
-        // a solid grey band of distance haze. This is what guarantees zero
-        // blue sky at eye level on a closed day.
+        // --- Overcast deck: coverage moves the carve threshold; horizon murk
+        // reads as solid distance haze so a closed sky has zero blue gap.
+        float deckThreshold = mix(0.74, 0.1, uCover);
+        float deck = smoothstep(deckThreshold, deckThreshold + 0.3, field) * smoothstep(0.04, 0.3, uCover);
         float murk = (1.0 - smoothstep(0.04, 0.38, dir.y)) * smoothstep(0.18, 0.6, uCover);
-        float coverage = max(deck, murk);
 
-        float density = smoothstep(threshold, threshold + 0.55, field);
-        float darkening = max(density * (0.55 + uRain * 0.45), murk * (0.3 + uRain * 0.3));
-        vec3 color = mix(uLight, uDark, darkening);
+        float coverage = max(max(puff, deck), murk);
+        if (coverage < 0.01) discard;
 
-        float alpha = coverage * (0.55 + uCover * 0.45) * aboveHorizon;
+        // --- Directional sun light: probe the field a step toward the sun in
+        // plane space. Where it thins sunward, light pours through the rim;
+        // where it thickens, we're looking at shaded core and underside. Low
+        // sun exaggerates the lateral gradient (long dawn/dusk modelling).
+        vec2 sunPlane = normalize(uSunDir.xz + vec2(0.0001, 0.0));
+        float lateral = 1.0 - clamp(uSunDir.y, 0.0, 1.0);
+        vec2 lightStep = sunPlane * mix(0.2, 0.5, lateral);
+        float sunFacing = clamp((fbm3(q) - fbm3(q + lightStep)) * 3.4 + 0.42, 0.0, 1.0);
+
+        float lit = clamp(0.2 + sunFacing * 0.95 * (1.0 - interior * 0.55), 0.0, 1.0);
+        vec3 color = mix(uShade, uLight, lit);
+        // Silver lining on the lit rim only, restrained; fades with daylight.
+        float rim = pow(sunFacing, 3.0) * (1.0 - interior) * uDaylight;
+        color += uSunTint * rim * 0.35;
+        // Forward scatter: thin cloud near the sun disc glows when backlit.
+        float towardSun = pow(max(dot(dir, uSunDir), 0.0), 6.0);
+        color += uSunTint * towardSun * (1.0 - interior) * 0.25 * uDaylight;
+        // Distance desaturation: the horizon band sinks into the sea haze.
+        float hazeBand = 1.0 - smoothstep(0.02, 0.3, dir.y);
+        color = mix(color, uLight, hazeBand * 0.45 * uDaylight);
+
+        // Overcast/storm darkening takes over as the deck closes (original
+        // deck grading, gated on cover so fair days never see it).
+        float overDensity = smoothstep(deckThreshold, deckThreshold + 0.55, field);
+        float darkening = max(overDensity * (0.55 + uRain * 0.45), murk * (0.3 + uRain * 0.3))
+          * smoothstep(0.1, 0.5, uCover);
+        color = mix(color, uDark, clamp(darkening, 0.0, 1.0));
+
+        float alpha = max(
+          puff * (0.66 + uCumulus * 0.26),
+          max(deck, murk) * (0.55 + uCover * 0.45)
+        ) * aboveHorizon;
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -120,23 +191,34 @@ export function CloudDeck() {
   useFrame(({ clock }) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    mesh.visible = weatherEnv.overcast > 0.02;
+    mesh.visible = weatherEnv.overcast > 0.02 || weatherEnv.cumulus > 0.02;
     if (!mesh.visible) return;
     mesh.position.copy(camera.position);
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
     const u = material.uniforms;
     u.uTime.value = clock.elapsedTime;
     u.uCover.value = weatherEnv.overcast;
+    u.uCumulus.value = weatherEnv.cumulus;
     u.uRain.value = weatherEnv.rainIntensity;
+    u.uDaylight.value = celestial.daylight;
+    u.uSunDir.value.set(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
     u.uWind.value.set(
       weatherEnv.windX * weatherEnv.cloudDriftSpeed,
       weatherEnv.windZ * weatherEnv.cloudDriftSpeed
     );
-    // Tint from the live fog color so the deck inherits day/night and
+    // Tint from the live fog color so the clouds inherit day/night and
     // golden-hour for free; rain pulls the light stop toward storm slate.
     if (scene.fog) {
-      _lightColor.copy(scene.fog.color).lerp(_white, 0.45);
+      _lightColor.copy(scene.fog.color).lerp(_white, 0.35 + celestial.daylight * 0.35);
+      _shadeColor.copy(scene.fog.color).lerp(_cumulusShade, 0.55)
+        .multiplyScalar(0.55 + celestial.daylight * 0.25);
       _darkColor.copy(scene.fog.color).multiplyScalar(0.42);
+      _sunTint.copy(_sunWarm).lerp(_sunGolden, celestial.golden)
+        .multiplyScalar(celestial.daylight);
       u.uDark.value.copy(_darkColor);
+      u.uShade.value.copy(_shadeColor);
+      u.uSunTint.value.copy(_sunTint);
       u.uLight.value.copy(_lightColor).lerp(_darkColor, weatherEnv.rainIntensity * 0.3);
     }
   });

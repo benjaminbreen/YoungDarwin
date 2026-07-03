@@ -56,6 +56,8 @@ const AUTHORED_REGION_TERRAIN = {
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
+  S_HUT: { preset: 'beach-with-hut-southwest', segments: 300 },
+  S_REEFS: { preset: 'southern-white-reef', segments: 300 },
   W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
   EL_MIRADOR: { preset: 'el-mirador-red-dirt-ridge', segments: 320 },
   PENAL_COLONY: { preset: 'penal-colony-settlement', segments: 300 },

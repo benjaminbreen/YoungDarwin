@@ -74,6 +74,7 @@ export function resolveSpecimenCollision(position, previousPosition, {
       const radius = specimenCollisionRadius(specimen);
       if (radius <= 0) continue;
       center.set(pose.x, pose.y || 0, pose.z);
+      if (specimen.ontology === 'Animal' && center.y - (position.y || 0) > 1.25) continue;
       const minDistance = radius + playerRadius;
       const dx = resolved.x - center.x;
       const dz = resolved.z - center.z;

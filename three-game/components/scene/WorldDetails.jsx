@@ -32,6 +32,15 @@ const TREE_CONTACT_BEND = {
   damping: 11,
 };
 
+// Obstacles with a real vertical silhouette cast into the (small, throttled,
+// player-following) shadow map; low scatter keeps contact shadows only.
+// Authored specs can still force either way with an explicit castShadow.
+function obstacleCastsShadow(obstacle) {
+  if (obstacle.castShadow != null) return obstacle.castShadow === true;
+  if (obstacle.kind === 'tree' || obstacle.kind === 'structure') return true;
+  return (obstacle.colliderTop ?? 0) >= 0.85;
+}
+
 function InstancedLayer({
   items,
   geometry,
@@ -176,7 +185,7 @@ function BendableObstacleGLB({ obstacle, currentZoneId }) {
       scale={obstacle.scale}
       tint={obstacle.kind === 'tree' ? '#5d5142' : (obstacle.kind === 'structure' ? null : '#536056')}
       tintStrength={obstacle.kind === 'tree' ? 0.08 : (obstacle.kind === 'structure' ? 0 : 0.18)}
-      castShadow={obstacle.castShadow === true}
+      castShadow={obstacleCastsShadow(obstacle)}
       receiveShadow={obstacle.receiveShadow === true}
       maxVisibleDistance={obstacle.maxVisibleDistance ?? 105}
       sourceId={`obstacle:${currentZoneId}:${obstacle.id}`}
@@ -213,7 +222,7 @@ function ObstacleProps() {
             scale={obstacle.scale}
             tint={obstacle.kind === 'tree' ? '#5d5142' : (obstacle.kind === 'structure' ? null : '#536056')}
             tintStrength={obstacle.kind === 'tree' ? 0.08 : (obstacle.kind === 'structure' ? 0 : 0.18)}
-            castShadow={obstacle.castShadow === true}
+            castShadow={obstacleCastsShadow(obstacle)}
             receiveShadow={obstacle.receiveShadow === true}
             maxVisibleDistance={obstacle.maxVisibleDistance ?? 105}
             sourceId={`obstacle:${currentZoneId}:${obstacle.id}`}
@@ -329,7 +338,7 @@ function OpuntiaLayer() {
       tint="#6fa046"
       tintStrength={0.08}
       motion={OPUNTIA_MOTION}
-      castShadow={false}
+      castShadow
       sourceId="post-office-bay:opuntia"
       sourceLabel="Post Office Bay opuntia"
       sourceKind="world-detail-flora"
@@ -419,7 +428,7 @@ function AssetVegetationLayer() {
         items={candelabraCactusItems}
         tintStrength={0.12}
         motion={FLAT_CACTUS_MOTION}
-        castShadow={false}
+        castShadow
         sourceId="post-office-bay:candelabra-cactus"
         sourceLabel="Post Office Bay candelabra cactus"
         sourceKind="world-detail-flora"

@@ -6,15 +6,15 @@ The playable 3D route is `/three`, served by `app/three/page.js` and `three-game
 
 Completed major systems so far:
 
-- Darwin is loaded from `public/assets/models/darwin-final-animated.glb` with Mixamo-derived animation clips driven by `three-game/components/assets/ModelAsset.jsx`.
+- The current default Darwin model is `darwin5`, loaded from `public/assets/models/darwin5.glb` with Mixamo-derived animation clips driven by `three-game/components/assets/ModelAsset.jsx`. Older Darwin runtime assets may still exist for comparison or hotkey testing; check `three-game/modelAssets.js` before assuming which model is active.
 - Darwin animation sources are consolidated under `assets-src/darwin/animations/` and categorized into `locomotion/`, `jumps-climbs/`, `actions/`, `states/`, and `legacy-mismatched/`. Do not place Darwin source FBXs in `public/assets/models`; `public` should contain runtime GLBs and static game assets only.
 - The canonical locomotion clips are the 65-bone FinalDarwinRig-derived files in `assets-src/darwin/animations/locomotion/`. Older 41-bone with-skin locomotion FBXs are quarantined in `legacy-mismatched/` because they caused valid-looking GLB clips that rendered Darwin in a T-pose during movement.
 - Syms Covington is loaded from `public/assets/models/syms-animated.glb` and appears as an NPC via `three-game/components/world/SymsCovington.jsx`.
-- Darwin animation clips are bundled in `public/assets/models/darwin-final-animated.glb`. Use `npm run three:animation-audit` when exact clip inventory matters instead of trusting a hardcoded count in this file.
-- Runtime Darwin animation behavior uses the new clips for walking, stop-walking, start-walking, run, run-stop, jumping, fatigue idle, landing/hard landing, death, and direct test/action hotkeys. Current direct action keys: `Y` write, `I` kneel inspect, `V` climb, `U` teeter, plus existing `L` look around, `O` point, `T` trip.
+- Default Darwin5 animation clips are bundled in `public/assets/models/darwin5.glb`. Use `npm run three:darwin5-smoke` for Darwin5 manifest/runtime coverage and `npm run three:animation-audit` when exact legacy/final-Darwin clip inventory matters instead of trusting a hardcoded count in this file.
+- Runtime Darwin animation behavior uses the new clips for walking, stop-walking, start-walking, run, run-stop, jumping, fatigue idle, landing/hard landing, death, and direct test/action hotkeys. Current direct action keys: `Y` write, `I` kneel inspect, `Q`/`V` climb, `U` teeter, `K` sit, plus existing `L` look around, `O` point, `T` trip. Crouch is currently `C`; do not describe it as Ctrl-only unless input handling changes.
 - Syms animation clips are bundled in `public/assets/models/syms-animated.glb`. His ambient loop uses writing and kneeling inspection so the NPC feels active.
 - To add a Mixamo clip to `darwin-candidate-2-animated.glb` (the 9-hotkey alternate model): convert the FBX with `scripts/blender_fbx_anim_to_glb.py`, then bake it in with `scripts/transplant-clip.mjs <src.glb> <dst.glb> <clipName>`. The transplant copies rotation tracks only plus a rig-ratio-scaled hips translation — never copy raw translation/scale tracks between the two Darwin rigs (they differ ~1.5x in skeleton scale and Darwin shrinks to a dwarf).
-- Parkour/locomotion clips on candidate-2: `crouchRun` (Ctrl+Shift), `wallRun` (running jump into a tall face rebounds), `runStrafeLeft/Right` (aimed run strafes), `standToSit` (`K`), `climbingDownWall`, `fallingIdle`, plus replaced `idle`/`turnLeft`/`turnRight`. Climb is `Q` (or `V`): obstacle climb first, then steep-terrain rise ahead, then ledge descent; crouch moved to Ctrl only.
+- Parkour/locomotion clips on candidate-2, the `9`-hotkey alternate model, include `crouchRun`, `wallRun` (running jump into a tall face rebounds), `runStrafeLeft/Right` (aimed run strafes), `standToSit` (`K`), `climbingDownWall`, `fallingIdle`, plus replaced `idle`/`turnLeft`/`turnRight`. Climb is `Q` or `V`: obstacle climb first, then steep-terrain rise ahead, then ledge descent.
 - The Beagle is now an optimized GLB built from the Swedish Hemmema source. Runtime file: `public/assets/models/ships/beagle-styrbjorn.glb`. Source/processing report lives under `assets-src/ships/styrbjorn/`.
 - New starting-zone specimen GLBs are integrated through `three-game/modelAssets.js`: `purple-finch.glb` for the medium ground finch, `galapagos-penguin.glb`, and `galapagos-giant-tortoise.glb`. Runtime files live in `public/assets/models/animals/runtime/`; extracted sources and conversion reports live under `assets-src/animals/imported/`.
 - The tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the current runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass.
@@ -40,7 +40,7 @@ Use Floreana-specific content directly when it fits the zone:
 
 Initial Floreana zone architecture:
 
-- `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps. Authored terrain currently includes `POST_OFFICE_BAY`, `ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `N_SHORE`, `NW_REEF`, `W_HIGH`, `EL_MIRADOR`, `MANGROVES`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, and `CORMORANT_BAY_TEST_3`; other locations can still fall back to placeholder terrain.
+- `game-core/regionMaps.js` and `data/locations.js` are authoritative for the current 3D regional maps. Authored terrain currently includes `POST_OFFICE_BAY`, `ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `N_SHORE`, `NW_REEF`, `S_HUT`, `S_REEFS`, `W_HIGH`, `EL_MIRADOR`, `PENAL_COLONY`, `MANGROVES`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, and `CORMORANT_BAY_TEST_3`; other locations can still fall back to placeholder terrain.
 - `three-game/world/floreanaZones.js` is a runtime bridge that presents region maps through the older zone-shaped API used by UI/store code.
 - `game-core/zones.ts` still contains older planned-zone ids such as `post-office-bay-anchorage`; do not use those ids for new authored 3D region work unless you are deliberately editing legacy/planned-zone compatibility.
 - `three-game/world/regions/*` is the current authored terrain/material registry. New authored terrain should be added there, not by adding region-specific branches directly to `three-game/world/terrain.js` or `three-game/components/scene/Terrain.jsx`.
@@ -79,7 +79,7 @@ For Post Office Bay / northern Floreana specifically:
 
 Current terrain implementation:
 
-- Terrain resolution pass complete: active Floreana terrain now uses `terrainSegments: 360` over a `118` unit map, giving about 130k terrain vertices instead of the visibly low-resolution prototype mesh. `terrainFineDetail()` adds controlled micro-relief, and `Terrain.jsx` adds per-fragment world-space terrain grain so close camera views do not smear into broad blurry patches.
+- Terrain resolution pass complete for Post Office Bay: it uses `terrainSegments: 360` over a `118` unit map, giving about 130k terrain vertices instead of the visibly low-resolution prototype mesh. Other authored maps set their own segment counts in `game-core/regionMaps.js`, usually around 240-360. `terrainFineDetail()` adds controlled micro-relief, and `Terrain.jsx` adds per-fragment world-space terrain grain so close camera views do not smear into broad blurry patches.
 - Legacy radial `Flora` and `Rocks` layers have been removed. New zone-authored detail lives in `WorldDetails.jsx`, ecology modules, and shared layout files such as `floreanaCoveLayout.js`, `northShoreLayout.js`, and `nwReefLayout.js`.
 - New nature runtime assets integrated in `WorldDetails.jsx`: `runtime-flat-cactus.glb`, `runtime-plant-shrub.glb`, and `runtime-small-shrub.glb`. The shrub FBXs converted to tiny ~15 KB GLBs; flat cactus normalized to ~638 KB. Keep placement sparse and dry-zone appropriate for Floreana.
 - Terrain shader pass complete: `Terrain.jsx` now injects procedural tiled material functions into `MeshStandardMaterial` for lava, tuff, ash, and scrub. It blends them by world-space slope/height/cove masks and perturbs normals in the fragment shader for crisp ground detail without adding millions of triangles.
@@ -88,6 +88,7 @@ Current terrain implementation:
 - Standard reusable dense dry grass lives in `three-game/world/ecology/standardGrass.js`, using the runtime GLB `public/assets/models/nature/runtime-animated-dry-grass.glb`. New maps that need the current grass look should use `buildStandardDryGrassPatchItems` plus `createStandardDryGrassPatchLayer`, with a region path mask passed through `pathInfo` so the grass opens around trails and clusters along shoulders. Avoid returning to the older hybrid blade/impostor grass stack for this look.
 - The default dry Floreana terrain material kit lives in `three-game/world/regions/materials/dryFloreanaTerrain.js`. For dry coastal, highland, grass-path, or sandy hillside maps, start with `createDryFloreanaTerrainMaterial({ pathPoints, textureSet, cacheKey })` and one of `DRY_FLOREANA_TEXTURE_SETS` instead of writing a one-off texture-splat shader. The shared runtime textures live in `public/assets/textures/world/dry-floreana/` and currently include red dirt, grass/litter shoulder, dry grass ground cover, and pale shell/stone flecks.
 - Dry path maps should treat low grass and litter as terrain material detail, not as thousands of small meshes. Use `buildStandardDryPathGrassPatchItems` from `three-game/world/ecology/standardGrass.js` for tall dry-grass GLB placement; it keeps the tread and immediate shoulder clear, then increases clumped tall grass density farther from the path. Tall grass may frame a route, but it should not cover the readable path surface.
+- Southern Reefs (`S_REEFS`) is the current reference/default tropical ocean-and-white-sand look for future pale beach, reef shelf, and tropical shallows maps. It is implemented as authored terrain in `three-game/world/regions/southernReefs/terrain.js`, a deliberately stable color-only sand/water material in `three-game/world/regions/southernReefs/material.js`, and minimal ecology in `three-game/world/ecology/southernReefs.js`. The material uses `white-sand_albedo.png` as sRGB and `white-sand_height.png` as linear data for visible grain, then keeps the shader path simple: albedo/height texture color, wet-sand/swash bands, and teal submerged shelf color. Do not copy the earlier experimental normal/roughness shader injections unless you are prepared to validate GLSL carefully; a GLSL compile error makes the terrain disappear and can look like a missing texture.
 - Next terrain graphics target: move from the current albedo-only dry terrain kit toward a layered PBR terrain stack with albedo, normal, roughness, optional AO, and optional height maps per material. Keep the existing albedo kit working while adding the new path. The target runtime texture folder is `public/assets/textures/world/floreana-pbr/`; source/reference outputs should live under `assets-src/textures/floreana-pbr/`. The full plan, naming scheme, file layout, component outline, and image-generation prompts live in `graphicsupdate.md`.
 - Do not treat generated normal/roughness/height maps as interchangeable color textures. Albedo maps are loaded with sRGB color space; normal, roughness, AO, and height maps must be loaded as linear data textures. Start by wiring albedo + normal + roughness, then add AO/height once the shader path is stable.
 - Post Office Bay currently uses `createCoastalVolcanicTerrainMaterial()` with procedural lava/tuff/ash/beach/scrub base materials plus the shared path/shoulder/fleck texture overlay. New PBR textures will improve the path and close ground immediately, but basalt/tuff image layers require extending the coastal material or moving the region to the new layered PBR material.
@@ -95,7 +96,7 @@ Current terrain implementation:
 
 ## Authored Region Maps: How To Build One
 
-Several regions are authored now, including the production-ish Floreana maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, `W_HIGH`, `EL_MIRADOR`, `MANGROVES`) plus visual/performance test maps (`ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, `CORMORANT_BAY_TEST_3`). Any location in `data/locations.js` without a registered authored terrain still falls back to `placeholder-{type}` procedural terrain. Use `N_SHORE`, `NW_REEF`, and the newer test-map modules as templates; `POST_OFFICE_BAY` still has older hand-tuned detail code in `WorldDetails.jsx` and should be migrated deliberately rather than copied.
+Several regions are authored now, including the production-ish Floreana maps (`POST_OFFICE_BAY`, `N_SHORE`, `NW_REEF`, `S_HUT`, `S_REEFS`, `W_HIGH`, `EL_MIRADOR`, `PENAL_COLONY`, `MANGROVES`) plus visual/performance test maps (`ALT_POST_OFFICE_BAY`, `POST_OFFICE_BAY_3`, `GRASS_TEST`, `GRASS_HYBRID_TEST`, `CORMORANT_BAY_SPLAT_TEST`, `CORMORANT_BAY_TEST_2`, `CORMORANT_BAY_TEST_3`). Any location in `data/locations.js` without a registered authored terrain still falls back to `placeholder-{type}` procedural terrain. Use `N_SHORE`, `NW_REEF`, `beachWithHut`, `southernReefs`, `penalColony`, and the newer test-map modules as templates; `POST_OFFICE_BAY` still has older hand-tuned detail code in `WorldDetails.jsx` and should be migrated deliberately rather than copied.
 
 Checklist for authoring a new region:
 
@@ -126,13 +127,13 @@ Obstacle rendering and collision must share a single data source. Do not place a
 Current implementation:
 
 - `three-game/world/obstacles.js` defines authored Floreana obstacles with position, radius, height, render path, `jumpable`, and kind.
-- `WorldDetails.jsx` renders those obstacles with `StaticGLB`, using better nature assets such as `Rock_Medium_*.glb`, `DeadTree_*.gltf`, and `TwistedTree_*.gltf`.
+- `WorldDetails.jsx` renders those obstacles with `StaticGLB`, using better nature assets such as `Rock_Medium_*.glb`, `DeadTree_*.gltf`, and `TwistedTree_*.gltf`. `PhysicsObstacles.jsx` and the collision adapter consume the same `getRuntimeObstacles` data for physical colliders; keep rendering and collision authored from that single source.
 - `PlayerController.jsx` resolves horizontal collision against registered obstacles and uses jumpable boulder tops as temporary ground support.
 - `obstacles.js` now also exposes climb and edge-risk queries. Boulder obstacles are marked `climbable`; `V` performs a short authored mantle using the `climb` clip, movement lock, eased root translation, and snap-to-top placement. Tree props are currently blocking scenery, not climbable ledges.
 - `PlayerController.jsx` now has one-shot action handling with optional movement locks and recovery actions. Start-walk, run-stop, landing, hard-landing, fatigue idle, death, climb, and teeter clips are selected from actual movement context.
 - Obstacle collisions are bounce-only. Running into boulders/trees should physically push Darwin back, with stronger collisions producing a larger shove and a short camera-facing red exclamation marker above his head. Obstacle collisions should not trigger `hitReaction`, `bigHitFall`, or knockdown/get-up chains.
 - Teeter is both manually testable with `U` and automatically triggered near the edge of a supported boulder when moving close to the lip, with a small pushback so it reads as balance recovery rather than pure animation.
-- Darwin now has `hitReaction` and `bigHitFall` animation clips, rebuilt into `public/assets/models/darwin-final-animated.glb` from `Hit Reaction.fbx` and `Big Hit and Fall.fbx`.
+- Darwin5 now has `hitReaction`, `bigHitFall`, and related fall/recovery clips in the default `public/assets/models/darwin5.glb` runtime manifest. Older notes about rebuilding only `public/assets/models/darwin-final-animated.glb` are legacy context, not the current default asset.
 
 ## Fauna Runtime Direction
 
@@ -145,6 +146,9 @@ Current implementation:
 - Motion profiles live in `three-game/fauna/faunaBehaviorProfiles.js`; movement state and steering live in `three-game/fauna/faunaMotionController.js`; React integration lives in `three-game/fauna/useFaunaBehavior.js`.
 - Dynamic specimen collision uses `three-game/fauna/specimenCollision.js` and `three-game/world/specimenRuntime.js`. `SpecimenActor` publishes each actor pose; `PlayerController` resolves collisions and emits contact stimuli so animals can react.
 - If an animated GLB disappears after adding movement, first check whether `SpecimenActor` still renders the model at the authored/base pose before applying motion. Do not route moving animals through alternate ecology prop layers as a workaround.
+- Examination and collection are now separate gates. `examinedTypeIds` records species/item types Darwin has examined; `collectedSpecimenIds` is type/catalog/inventory-level; `collectedSpecimenActorIds` is actor-level world state used to remove the collected visible instance. Do not hide all instances of a species just because its type id is in the collection.
+- Collection success/failure is evaluated through `utils/expeditionSystems.evaluateCollectionAttempt`, with `lastOutcome` driving the HUD toast/card in `ThreeHUD.jsx`. If collection behavior changes, keep the outcome math, toast display, inventory update, and actor disappearance wired together.
+- Standalone examinable/collectable items use `three-game/examine/examinables.js` and `three-game/components/world/ExaminableItemActor.jsx`; they collect into `items`, not the specimen case.
 
 Next fauna improvements:
 
@@ -210,19 +214,50 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run asset:optimize` optimizes any raw GLBs from `assets-src/raw/` into `public/assets/models/` when `npx gltf-transform` is available.
 - `npm run check` runs syntax and regression tests.
 - `npm run build` verifies the production Next build.
+- `npm run three:darwin5-smoke` verifies Darwin5 manifest/runtime clip coverage against `public/assets/models/darwin5.glb`.
+- `npm run three:animation-audit` audits Darwin GLB animation inventory and common clip problems.
+- `npm run three:contact-sheet -- --asset <assetId|alias|path> --list-clips` lists animation clips for any animated runtime GLB.
+- `npm run three:contact-sheet -- --asset <assetId|alias|path> --clip <clipName|all> --view <front|side|threeQuarter>` renders repo-visible keyframe contact sheets through Blender and assembles `contact-*.png` when ImageMagick is available.
+- Direct fallback if the wrapper fails: `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --disable-autoexec --python scripts/blender_animation_contact_frames.py -- --asset public/assets/models/darwin5.glb --clip <clipName> --out test-results/animation-sheets/darwin5-<clipName> --frames 12 --size 360 --view threeQuarter`.
 - `npm run three:screenshot` auto-detects an existing local Next dev server on common ports, captures desktop/mobile screenshots, and checks that the 3D canvas is full-screen and nonblank.
 - `npm run three:screenshot:fast` captures the desktop viewport only. Use it for quick smoke checks while iterating; use the full `three:screenshot` before claiming broad visual readiness.
 
+Animation contact-sheet pipeline:
+
+- Use contact sheets for character, NPC, specimen, or creature animation changes where pose quality, retargeting, timing, or root motion matters. A single in-game screenshot is not enough to review animation quality.
+- Write contact-sheet outputs under `test-results/animation-sheets/<asset>-<clip>/`, not `/tmp`, so the user and future agents can find them.
+- For Darwin5 animation work, first run `npm run three:darwin5-smoke`. Then render contact sheets for the changed clips plus any adjacent transitions likely to break, usually 3-5 clips rather than every clip.
+- For specimen/creature animation work, resolve the runtime asset through `three-game/modelAssets.js` when possible and use the wrapper aliases when they fit: `turtle`, `fish`, `manta`, `booby`, `cormorant`, `frigate`, `dove`, `finch`, `penguin`, `iguana`, `lizard`, `crab`, `seaLion`, `syms`, `darwin5`. Use direct `/assets/models/...` paths for ecology-only GLBs that are not in `modelAssets.js`.
+- The in-game Animal Animation Lab (`7` hotkey) is the preferred interactive specimen QA tool when the app is running. It reflects wildlife-catalog/model-manifest specimen assets plus reef swimmer GLBs, previews embedded clips, and its `Generate Contact Sheet` button saves the selected animal+clip through `/api/animation-contact-sheet` into `test-results/animation-sheets/` with the same naming scheme as the CLI.
+- Suggested views: `side` for swim, run, slide, and root-motion clips; `front` for turns, strafes, and symmetry checks; `threeQuarter` for dives, jumps, falls, idles, gestures, and most one-shots.
+- Practical specimen examples:
+
+```bash
+npm run three:contact-sheet -- --asset turtle --list-clips
+npm run three:contact-sheet -- --asset turtle --clip all --view side
+npm run three:contact-sheet -- --asset fish --clip all --view side --frames 10
+npm run three:contact-sheet -- --asset booby --clip all --view threeQuarter
+npm run three:contact-sheet -- --asset /assets/models/animals/runtime/manta-ray.glb --clip all --view side
+```
+
+- The wrapper assembles PNG sheets automatically when ImageMagick is available. If ImageMagick prints a fontconfig cache warning but exits successfully, the generated PNG is still usable. If montage is unavailable, leave the rendered frame sequence in the same folder and open representative frames.
+- Contact sheets are animation QA, not a replacement for canvas smoke tests. Still use `three:screenshot` for terrain, UI, camera framing, lighting, water, scene composition, and broad rendering regressions.
+
 Playwright/Chromium sandbox note:
 
-- If `three:screenshot` or `three:screenshot:fast` fails with Chromium `SIGABRT` before loading the app, rerun the exact npm script with escalated permissions. The Playwright browser binary launches from `~/Library/Caches/ms-playwright`, outside the workspace sandbox, and the normal sandbox can abort it before page load.
-- Prefer exact commands `npm run three:screenshot` and `npm run three:screenshot:fast` so persistent approval rules can match those prefixes. Avoid wrapping them as `env THREE_SCREENSHOT_VIEWPORTS=... npm run three:screenshot`; use the dedicated `three:screenshot:fast` script for desktop-only checks.
+- In Codex on macOS, do **not** run `npm run three:screenshot` or `npm run three:screenshot:fast` inside the normal seatbelt sandbox first. Playwright Chromium can crash before page load (`SIGABRT`/`SIGTRAP`, `ThermalStateObserverMac`, `kill EPERM`), leaving noisy Chrome/Chromium crash behavior and sometimes orphaned browser children.
+- Always run the exact screenshot npm script with `sandbox_permissions: "require_escalated"` on the first attempt. The exact prefixes `npm run three:screenshot` and `npm run three:screenshot:fast` are the approval-stable forms; use them directly so persisted approval rules can match without a new user checkpoint.
+- Do not wrap screenshot commands with inline env vars such as `THREE_SCREENSHOT_TIMEOUT_MS=... npm run three:screenshot` or `env THREE_SCREENSHOT_VIEWPORTS=...`. The screenshot script now defaults to a 120s boot timeout, and `npm run three:screenshot:fast` is the desktop-only path.
+- If a screenshot run is interrupted, check for leftovers with `pgrep -af "playwright|chromium|chrome-headless|Google Chrome for Testing|three-screenshot"` and kill only orphaned Playwright/Chromium/screenshot processes, not the user's existing Next dev server.
 
 Verification expectations:
 
 - General code change: run `npm run check`.
 - Asset manifest/runtime asset change: run `npm run asset:audit` and `npm run check`.
-- Terrain, scene composition, player movement, camera, or visual rendering change: run `npm run check` and `npm run three:screenshot`.
+- Darwin5 animation manifest, clip, retargeting, or blend-selection change: run `npm run three:darwin5-smoke`, render contact sheets for the changed/problem clips, and run `npm run check`.
+- Non-Darwin NPC/specimen/creature animation change: run `npm run asset:audit` if runtime assets changed, render contact sheets for the changed/problem clips when the asset has skeletal animation, and run `npm run check`.
+- Terrain, scene composition, camera, UI, lighting, water, or visual rendering change: run `npm run check` and `npm run three:screenshot`.
+- Player movement code that changes animation selection or physics should use both paths: contact sheets for affected animation clips and `three:screenshot` only when scene/camera/rendering could plausibly regress.
 - Before claiming production readiness or broad integration safety: run `npm run build` as well.
 
 ## Implementation Rule

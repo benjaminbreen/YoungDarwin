@@ -26,6 +26,8 @@ const VISTA_BY_REGION_ID = {
   POST_OFFICE_BAY_3: 'post-office-bay',
   N_SHORE: 'north-shore',
   NW_REEF: 'reef-shallows',
+  S_HUT: 'reef-shallows',
+  S_REEFS: 'reef-shallows',
   W_HIGH: 'cloud-forest',
   MANGROVES: 'mangrove-forest',
 };
@@ -53,6 +55,8 @@ const SURFACE_PROFILE_BY_REGION_ID = {
   POST_OFFICE_BAY_3: 'volcanic-coast',
   N_SHORE: 'black-sand-coast',
   NW_REEF: 'reef-shelf',
+  S_HUT: 'reef-shelf',
+  S_REEFS: 'reef-shelf',
   W_HIGH: 'cloud-forest',
   MANGROVES: 'mangrove-mud',
   LAVA_FLATS: 'lava-flats',

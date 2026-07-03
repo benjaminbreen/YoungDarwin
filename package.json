@@ -21,6 +21,7 @@
     "three:animation-coverage": "node scripts/three-runtime-animation-coverage.mjs",
     "three:animation-consolidate": "node scripts/consolidate-darwin-runtime-clips.mjs",
     "three:animation-convert-darwin5": "node scripts/convert-darwin5-animation-clips.mjs --print-commands",
+    "three:contact-sheet": "node scripts/render-animation-contact-sheet.mjs",
     "asset:darwin": "node scripts/rebuild-darwin-glb.mjs",
     "asset:darwin:holds": "node scripts/create-darwin-jump-holds.mjs",
     "asset:plan": "node scripts/asset-pipeline.mjs plan",

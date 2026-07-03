@@ -346,7 +346,6 @@ function buildFlora() {
       id: 'pob3-scalesia-stand',
       path: `${NATURE}runtime-scalesia.glb`,
       sink: 0.08,
-      castShadow: false,
       tint: '#607346',
       tintStrength: 0.16,
       motion: { wind: 0.88, bend: 0.18, bendRadius: 1.8 },

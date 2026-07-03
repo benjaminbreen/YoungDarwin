@@ -6,6 +6,7 @@ import { OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { modelAssets } from '../../modelAssets';
+import { wildlifeCatalog } from '../../wildlife/wildlifeCatalog';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -13,21 +14,32 @@ const DIRECT_ANIMAL_ASSETS = {
     id: 'reefFish',
     label: 'Reef Fish',
     path: '/assets/models/animals/runtime/reef-fish.glb',
+    runtimePath: '/assets/models/animals/runtime/reef-fish.glb',
+    contactAsset: '/assets/models/animals/runtime/reef-fish.glb',
     source: 'Ecology swimmer',
   },
   clownfish: {
     id: 'clownfish',
     label: 'Clownfish',
     path: '/assets/models/animals/runtime/clownfish.glb',
+    runtimePath: '/assets/models/animals/runtime/clownfish.glb',
+    contactAsset: '/assets/models/animals/runtime/clownfish.glb',
     source: 'Ecology swimmer',
   },
   mantaRayRuntime: {
     id: 'mantaRayRuntime',
     label: 'Manta Ray',
     path: '/assets/models/animals/runtime/manta-ray.glb',
+    runtimePath: '/assets/models/animals/runtime/manta-ray.glb',
+    contactAsset: '/assets/models/animals/runtime/manta-ray.glb',
     source: 'Ecology swimmer',
   },
 };
+
+const wildlifeLabelsByAsset = Object.values(wildlifeCatalog).reduce((labels, entry) => {
+  if (entry.assetId && entry.englishName && !labels[entry.assetId]) labels[entry.assetId] = entry.englishName;
+  return labels;
+}, {});
 
 const MODEL_ANIMAL_LABELS = {
   crab: 'Sally Lightfoot Crab',
@@ -39,11 +51,16 @@ const MODEL_ANIMAL_LABELS = {
   flightlessCormorant: 'Flightless Cormorant',
   frigatebird: 'Magnificent Frigatebird',
   blueFootedBooby: 'Blue-footed Booby',
+  galapagosDoveRigged: 'Galapagos Dove',
   greenTurtle: 'Green Turtle',
+  animatedLowPolyFish: 'Low-poly Reef Fish',
   seaLion: 'Sea Lion',
+  flamingoAnimated: 'American Flamingo',
+  seagull: 'Seagull',
+  hermitCrab: 'Hermit Crab',
 };
 
-const MODEL_ANIMAL_IDS = [
+const PREFERRED_MODEL_ANIMAL_IDS = [
   'crab',
   'marineIguana',
   'lavalizard',
@@ -53,9 +70,19 @@ const MODEL_ANIMAL_IDS = [
   'flightlessCormorant',
   'frigatebird',
   'blueFootedBooby',
+  'galapagosDoveRigged',
   'greenTurtle',
+  'animatedLowPolyFish',
   'seaLion',
+  'flamingoAnimated',
+  'seagull',
+  'hermitCrab',
 ];
+
+const MODEL_ANIMAL_IDS = Array.from(new Set([
+  ...PREFERRED_MODEL_ANIMAL_IDS,
+  ...Object.values(wildlifeCatalog).map(entry => entry.assetId).filter(Boolean),
+]));
 
 function assetLoadUrl(asset) {
   if (!asset?.cacheKey) return asset?.path;
@@ -73,12 +100,14 @@ function animalEntries() {
   const manifestAnimals = MODEL_ANIMAL_IDS
     .map(id => {
       const asset = modelAssets[id];
-      if (!asset?.enabled || !asset.path) return null;
+      if (!asset?.path) return null;
       return {
         id,
-        label: MODEL_ANIMAL_LABELS[id] || titleCaseId(id),
+        label: MODEL_ANIMAL_LABELS[id] || wildlifeLabelsByAsset[id] || titleCaseId(id),
         path: assetLoadUrl(asset),
-        source: 'Model manifest',
+        runtimePath: asset.path,
+        contactAsset: id,
+        source: asset.enabled ? 'Model manifest' : 'Model manifest (disabled)',
         asset,
       };
     })
@@ -110,6 +139,7 @@ function preparePreviewScene(source, asset) {
     const prepared = materials.map(material => {
       if (!material) return material;
       const next = material.clone();
+      if (asset?.doubleSide) next.side = THREE.DoubleSide;
       if ('metalness' in next) next.metalness = Math.min(next.metalness || 0, 0.02);
       if ('roughness' in next) next.roughness = Math.max(next.roughness || 0, 0.76);
       if (next.color && asset?.materialLift) next.color.lerp(new THREE.Color('#f1dfbd'), asset.materialLift);
@@ -222,6 +252,13 @@ function ClipButton({ name, selected, onClick }) {
   );
 }
 
+function recommendedContactView(animal, clip) {
+  const key = `${animal?.id || ''} ${animal?.label || ''} ${clip || ''}`.toLowerCase();
+  if (/(fish|manta|turtle|sea lion|swim|walk|run|slide|crawl|waddle|scuttle)/.test(key)) return 'side';
+  if (/(turn|strafe|symmetry)/.test(key)) return 'front';
+  return 'threeQuarter';
+}
+
 export function AnimalAnimationDevPanel({ open, onClose }) {
   const [selectedAnimalId, setSelectedAnimalId] = useState(
     modelAssets.flightlessCormorant?.enabled ? 'flightlessCormorant' : ANIMAL_ENTRIES[0]?.id,
@@ -230,6 +267,8 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
   const [paused, setPaused] = useState(false);
   const [timeScale, setTimeScale] = useState(1);
   const [animationMap, setAnimationMap] = useState({});
+  const [contactView, setContactView] = useState('threeQuarter');
+  const [contactSheet, setContactSheet] = useState({ status: 'idle' });
 
   const onAnimations = React.useCallback((animalId, names) => {
     setAnimationMap(current => {
@@ -249,6 +288,46 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
     if (!clips.length) return;
     if (!clips.includes(selectedClip)) setSelectedClip(clips.includes('walk') ? 'walk' : clips[0]);
   }, [clips, selectedClip]);
+
+  useEffect(() => {
+    setContactView(recommendedContactView(selectedAnimal, selectedClip));
+    setContactSheet({ status: 'idle' });
+  }, [selectedAnimal?.id, selectedClip]);
+
+  const generateContactSheet = React.useCallback(async () => {
+    if (!selectedAnimal || !selectedClip) return;
+    setContactSheet({ status: 'running', message: 'Rendering Blender contact sheet...' });
+    try {
+      const response = await fetch('/api/animation-contact-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          asset: selectedAnimal.contactAsset || selectedAnimal.runtimePath || selectedAnimal.path?.split('?')[0],
+          outputId: selectedAnimal.id,
+          clip: selectedClip,
+          view: contactView,
+          frames: 12,
+          size: 360,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        const detail = data.stderr || data.error || `Request failed with ${response.status}`;
+        throw new Error(detail);
+      }
+      setContactSheet({
+        status: 'success',
+        sheet: data.sheet,
+        directory: data.directory,
+        message: `Saved ${data.sheet || data.directory}`,
+      });
+    } catch (error) {
+      setContactSheet({
+        status: 'error',
+        message: error.message || 'Failed to generate contact sheet.',
+      });
+    }
+  }, [contactView, selectedAnimal, selectedClip]);
 
   if (!open || !selectedAnimal) return null;
 
@@ -340,7 +419,40 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <div className="font-expedition text-sm font-semibold text-expedition-parchment">{selectedClip || 'static preview'}</div>
                 <div className="font-mono text-[10px] text-expedition-faded">{selectedAnimal.path}</div>
               </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded">
+                  Sheet
+                  <select
+                    value={contactView}
+                    onChange={event => setContactView(event.target.value)}
+                    className="rounded-sm border border-expedition-brass/50 bg-black/40 px-2 py-1 font-mono text-[11px] normal-case tracking-normal text-expedition-parchment outline-none"
+                  >
+                    <option value="side">side</option>
+                    <option value="threeQuarter">three-quarter</option>
+                    <option value="front">front</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={generateContactSheet}
+                  disabled={!selectedClip || !clips.length || contactSheet.status === 'running'}
+                  className={`${GOLD_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {contactSheet.status === 'running' ? 'Rendering...' : 'Generate Contact Sheet'}
+                </button>
+              </div>
             </div>
+            {contactSheet.status !== 'idle' && (
+              <div className={`mb-2 rounded-sm border px-2 py-1 font-mono text-[10px] ${
+                contactSheet.status === 'success'
+                  ? 'border-emerald-300/40 bg-emerald-950/25 text-emerald-100'
+                  : contactSheet.status === 'error'
+                    ? 'border-red-300/40 bg-red-950/25 text-red-100'
+                    : 'border-expedition-brass/40 bg-black/25 text-expedition-faded'
+              }`}>
+                {contactSheet.message}
+              </div>
+            )}
             <div className="h-[32rem] overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#20262a]">
               <Canvas camera={{ position: [2.3, 1.45, 3.0], fov: 42 }} dpr={[1, 1.5]} shadows>
                 <color attach="background" args={['#20262a']} />

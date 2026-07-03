@@ -30,6 +30,12 @@ import {
   shouldAllowLlmThought,
   textHash,
 } from './narrator/narratorEvents';
+import {
+  createExamineSession,
+  examinableFromItem,
+  examinableFromSpecimen,
+  getExaminableItem,
+} from './examine/examinables';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 import { MOVEMENT_FATIGUE } from './components/player/playerConfig';
@@ -91,8 +97,46 @@ function advanceTimeState(state, minutes) {
 function findRuntimeSpecimen(state, specimenId) {
   if (!specimenId) return null;
   return getThreeSpecimens(state.currentZoneId).find(specimen => (
-    (specimen.instanceId || specimen.id) === specimenId || specimen.id === specimenId
+    !state.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
+    && ((specimen.instanceId || specimen.id) === specimenId || specimen.id === specimenId)
   )) || null;
+}
+
+function safeConfidence(value) {
+  const text = String(value || '').toLowerCase();
+  if (text === 'high' || text === 'moderate' || text === 'low') return text;
+  return 'moderate';
+}
+
+const EXAMINE_MEASURE_RE = /\b(measure|how (?:long|wide|tall|big|large|high)|size|length|width|height)\b/i;
+
+// Offline/failed-request stand-in for the field-inquiry LLM: grounded in the
+// examinable's own data so the screen stays usable without a network.
+function localExamineFallback(input, session) {
+  if (EXAMINE_MEASURE_RE.test(input)) {
+    const hint = session.frameHint || {};
+    const size = Math.max(hint.height || 0, (hint.radius || 0) * 2, 0.1);
+    const value = size >= 1 ? `~${size.toFixed(1)} m` : `~${Math.round(size * 100)} cm`;
+    return {
+      reply: `You take out the pocket rule and measure as best the subject allows: roughly ${value} at its greatest extent. The estimate is moderate confidence from the current view.`,
+      fact: { label: 'Size (est.)', value, confidence: 'moderate', measurement: true },
+      behavior: '',
+      uncertainty: '',
+      fallback: true,
+    };
+  }
+  const details = session.details || [];
+  const answered = session.chat.filter(entry => entry.role === 'assistant').length;
+  const detail = details.length ? details[answered % details.length] : '';
+  return {
+    reply: detail
+      ? `You look closely. ${detail}${/[.!?]$/.test(detail) ? '' : '.'}`
+      : `You study it at length. ${session.description || 'It offers no easy answer; a careful note would preserve what you see.'}`,
+    fact: null,
+    behavior: '',
+    uncertainty: '',
+    fallback: true,
+  };
 }
 
 function narratorSessionId(seed) {
@@ -268,7 +312,13 @@ function createExpeditionSlice() {
     inventory: expedition.inventory,
     journal: expedition.journal,
     collectedSpecimenIds: expedition.collectedSpecimenIds,
+    collectedSpecimenActorIds: expedition.collectedSpecimenActorIds || [],
     documentedSpecimenIds: expedition.documentedSpecimenIds,
+    // Type-level examination record: examining one finch of a species unlocks
+    // collecting that species everywhere. Gates both collection and sketching.
+    examinedTypeIds: expedition.examinedTypeIds || [],
+    // Collected non-specimen examinables (letters, books) — sorted as items.
+    items: [],
     currentZoneId: expedition.currentZoneId,
     currentLocalCellId: expedition.currentLocalCellId,
     playerSpawnId: expedition.playerSpawnId,
@@ -296,6 +346,8 @@ function createSceneSlice() {
   return {
     selectedSpecimenId: null,
     nearbySpecimenId: null,
+    nearbyItem: null,
+    examineSession: null,
     message: initialNarration.narration,
     educationalNote: initialNarration.educationalNote,
     narratorLog: createInitialNarratorLog(initialNarration),
@@ -455,6 +507,9 @@ export const useThreeGameStore = create((set, get) => ({
     return patch;
   }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
+  setNearbyItem: nearbyItem => set(state => (
+    (state.nearbyItem?.actorId || null) === (nearbyItem?.actorId || null) ? {} : { nearbyItem }
+  )),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
   setGraphicsQuality: ({ cheapMaterials, foliageDrawScale }) => set(state => ({
     cheapMaterials: cheapMaterials ?? state.cheapMaterials,
@@ -875,6 +930,226 @@ export const useThreeGameStore = create((set, get) => ({
   statusViewOpen: false,
   openStatusView: () => set({ statusViewOpen: true }),
   closeStatusView: () => set({ statusViewOpen: false }),
+
+  // --- Examination ------------------------------------------------------
+  // The diegetic examine screen: camera pulls in on the subject, clock
+  // pauses, and a field-inquiry chat + key-facts panel frame the live shot.
+  // `target` is null (examine the nearby specimen), an actor id, or
+  // { itemTypeId, actorId, focus } for standalone items like letters.
+  openExamine: (target = null) => set(state => {
+    if (state.examineSession) return {};
+    let examinable = null;
+    let focus = target?.focus || null;
+    if (target?.itemTypeId) {
+      examinable = examinableFromItem(getExaminableItem(target.itemTypeId), target.actorId);
+    } else if (!target && !state.nearbySpecimenId && !state.selectedSpecimenId && state.nearbyItem) {
+      examinable = examinableFromItem(getExaminableItem(state.nearbyItem.typeId), state.nearbyItem.actorId);
+      focus = state.nearbyItem.focus || null;
+    } else {
+      const actorId = (typeof target === 'string' && target) || state.nearbySpecimenId || state.selectedSpecimenId;
+      const specimen = findRuntimeSpecimen(state, actorId);
+      examinable = examinableFromSpecimen(specimen);
+      if (examinable && !focus) {
+        const runtime = state.specimenRuntimePositions?.[state.currentZoneId]?.[examinable.actorId];
+        const spawn = specimen.spawnPoint || [0, 0, 0];
+        focus = {
+          x: runtime?.x ?? spawn[0] ?? 0,
+          y: runtime?.y ?? spawn[1] ?? 0,
+          z: runtime?.z ?? spawn[2] ?? 0,
+        };
+      }
+    }
+    if (!examinable) return {};
+    return {
+      examineSession: createExamineSession(examinable, {
+        focus,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+      }),
+    };
+  }),
+  closeExamine: () => set({ examineSession: null }),
+
+  saveExamineFact: factId => set(state => {
+    const session = state.examineSession;
+    if (!session) return {};
+    const facts = session.facts.map(fact => (fact.id === factId ? { ...fact, saved: true } : fact));
+    return { examineSession: { ...session, facts } };
+  }),
+
+  // Saving a written field note is what completes an examination: the note
+  // becomes the player's own journal entry (with any saved facts appended)
+  // and the type unlocks for collection everywhere.
+  saveExamineNote: content => {
+    const trimmed = String(content || '').trim();
+    const session = get().examineSession;
+    if (!trimmed || !session) return false;
+    set(state => {
+      const location = getThreeIslandLocation(state.currentZoneId);
+      const savedFacts = state.examineSession.facts.filter(fact => fact.saved && fact.id !== 'category');
+      const factLines = savedFacts.length
+        ? `\n\nRecorded facts:\n${savedFacts.map(fact => `${fact.label}: ${fact.value}`).join('\n')}`
+        : '';
+      const firstExamination = !state.examinedTypeIds.includes(session.typeId);
+      const entry = {
+        id: `${Date.now()}-examination-${session.typeId}`,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        specimenId: session.kind === 'specimen' ? session.typeId : undefined,
+        specimenName: session.name,
+        latin: session.latin,
+        location: location.name,
+        method: 'field examination',
+        condition: 'examined in field',
+        kind: 'examination',
+        title: `Examination: ${session.name}`,
+        content: `${trimmed}${factLines}`,
+        createdAt: new Date().toISOString(),
+      };
+      const message = firstExamination
+        ? `Your notes on the ${session.name.toLowerCase()} enter the field book. You may now collect one when the chance offers.`
+        : `You add a further note on the ${session.name.toLowerCase()} to the field book.`;
+      return {
+        journal: [...state.journal, entry],
+        examinedTypeIds: firstExamination
+          ? [...state.examinedTypeIds, session.typeId]
+          : state.examinedTypeIds,
+        curiosity: clamp(state.curiosity + (firstExamination ? 8 : 2), 0, MAX_CURIOSITY),
+        message,
+        examineSession: { ...state.examineSession, noteSaved: true },
+        narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+          narration: message,
+        }, state, 'examination')),
+      };
+    });
+    return true;
+  },
+
+  // Collect the examined individual without leaving the screen. Specimens
+  // route through collectNearby (same rules, supplies, and journal shape);
+  // items land in the items list.
+  collectFromExamine: async () => {
+    const state = get();
+    const session = state.examineSession;
+    if (!session || !state.examinedTypeIds.includes(session.typeId)) return null;
+    if (session.kind === 'item') {
+      const item = getExaminableItem(session.typeId);
+      if (!item || state.items.some(entry => entry.typeId === session.typeId)) return null;
+      const message = `You take the ${item.name.toLowerCase()} and stow it flat between the leaves of the field book.`;
+      set(current => ({
+        items: [...current.items, { ...item, collectedAt: new Date().toISOString(), day: current.day }],
+        message,
+        examineSession: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+        }, current, 'item-collect')),
+      }));
+      return { success: true, item };
+    }
+    set({ selectedSpecimenId: session.actorId });
+    const result = await get().collectNearby(session.actorId);
+    set({ examineSession: null, selectedSpecimenId: null });
+    return result;
+  },
+
+  sendExamineMessage: async input => {
+    const trimmed = String(input || '').trim();
+    const state = get();
+    const session = state.examineSession;
+    if (!trimmed || !session || session.pending) return null;
+
+    const entryId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    set(current => (current.examineSession ? {
+      examineSession: {
+        ...current.examineSession,
+        chat: [...current.examineSession.chat, { id: `you-${entryId}`, role: 'you', text: trimmed, at: Date.now() }],
+        pending: true,
+        error: null,
+      },
+    } : {}));
+
+    const zone = getZone(state.currentZoneId);
+    const applyReply = payload => set(current => {
+      const active = current.examineSession;
+      if (!active) return {};
+      const facts = [...active.facts];
+      let measurementCallout = active.measurementCallout;
+      const fact = payload.fact && payload.fact.label && payload.fact.value ? payload.fact : null;
+      if (fact) {
+        const factId = String(fact.label).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const existing = facts.findIndex(item => item.id === factId);
+        const nextFact = {
+          id: factId,
+          label: String(fact.label),
+          value: String(fact.value),
+          confidence: safeConfidence(fact.confidence),
+          measurement: Boolean(fact.measurement),
+          saved: existing >= 0 ? facts[existing].saved : false,
+        };
+        if (existing >= 0) facts[existing] = nextFact;
+        else facts.push(nextFact);
+        if (nextFact.measurement) measurementCallout = nextFact.value;
+      }
+      const uncertainties = payload.uncertainty
+        ? [...new Set([...active.uncertainties, String(payload.uncertainty)])].slice(-4)
+        : active.uncertainties;
+      return {
+        examineSession: {
+          ...active,
+          chat: [...active.chat, {
+            id: `assistant-${entryId}`,
+            role: 'assistant',
+            text: payload.reply,
+            behavior: payload.behavior || '',
+            at: Date.now(),
+          }],
+          facts,
+          uncertainties,
+          measurementCallout,
+          pending: false,
+          error: payload.fallback ? 'Field inquiry fell back to a local response.' : null,
+        },
+      };
+    });
+
+    try {
+      const response = await fetch('/api/three-examine', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-young-darwin-session': narratorSessionId(state.seed),
+        },
+        body: JSON.stringify({
+          playerInput: trimmed,
+          examinable: {
+            typeId: session.typeId,
+            kind: session.kind,
+            living: session.living,
+            name: session.name,
+            latin: session.latin,
+            category: session.category,
+            // Items have no server-side registry entry; ground the LLM from
+            // the session copy. Specimens are looked up by typeId instead.
+            description: session.kind === 'item' ? session.description : '',
+            details: session.kind === 'item' ? session.details : [],
+          },
+          chat: session.chat.slice(-8).map(entry => ({ role: entry.role, text: entry.text })),
+          knownFacts: session.facts.map(fact => `${fact.label}: ${fact.value}`),
+          location: getThreeIslandLocation(state.currentZoneId).name || zone.name,
+          weather: state.weather,
+          day: state.day,
+          timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
+        }),
+      });
+      const payload = response.ok ? await response.json() : localExamineFallback(trimmed, session);
+      applyReply(payload);
+      return payload;
+    } catch {
+      const payload = localExamineFallback(trimmed, session);
+      applyReply(payload);
+      return payload;
+    }
+  },
   adjustLocalStanding: delta => set(state => ({
     localStanding: clamp(state.localStanding + delta, 0, 100),
   })),
@@ -945,6 +1220,8 @@ export const useThreeGameStore = create((set, get) => ({
       carriedObjectId: null,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
+      nearbyItem: null,
+      examineSession: null,
       message: scripted?.narration || zone.loadingNote || state.message,
       educationalNote: scripted?.educationalNote || zone.educationalNote || state.educationalNote,
       weather: arrivalWeather,
@@ -1166,13 +1443,36 @@ export const useThreeGameStore = create((set, get) => ({
     }
   },
 
-  collectNearby: async () => {
+  collectNearby: async (targetSpecimenId = null) => {
     const state = get();
-    const specimenId = state.nearbySpecimenId || state.selectedSpecimenId;
+    const specimenId = targetSpecimenId || state.nearbySpecimenId || state.selectedSpecimenId;
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
-    const specimen = zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId);
+    const collectedActorIds = new Set(state.collectedSpecimenActorIds || []);
+    const specimen = zoneSpecimens.find(item => {
+      const actorId = item.instanceId || item.id;
+      return !collectedActorIds.has(actorId) && (actorId === specimenId || item.id === specimenId);
+    });
     const tool = threeTools.find(item => item.id === state.activeToolId) || threeTools.find(item => item.id === 'hands');
     if (!specimen) return null;
+    const actorId = specimen.instanceId || specimen.id;
+
+    // Examination gates collection and sketching alike: the player must have
+    // studied one individual of this type (any map) before taking or
+    // documenting one. The gate is on types, not individuals.
+    if (!state.examinedTypeIds.includes(specimen.id)) {
+      const message = `You cannot yet say what this ${specimen.name.toLowerCase()} truly is. Examine it first — observation before acquisition.`;
+      const symsLine = 'Syms holds the case shut. "Have a proper look before it goes in the bag, sir."';
+      set(current => ({
+        message,
+        symsLine,
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine,
+        }, current, 'blocked-action')),
+      }));
+      return null;
+    }
 
     const islandLocation = getThreeIslandLocation(state.currentZoneId);
     const alreadyCollected = state.collectedSpecimenIds.includes(specimen.id);
@@ -1254,11 +1554,16 @@ export const useThreeGameStore = create((set, get) => ({
         collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(specimen.id)
           ? [...current.collectedSpecimenIds, specimen.id]
           : current.collectedSpecimenIds,
+        collectedSpecimenActorIds: collected && !(current.collectedSpecimenActorIds || []).includes(actorId)
+          ? [...(current.collectedSpecimenActorIds || []), actorId]
+          : (current.collectedSpecimenActorIds || []),
         documentedSpecimenIds: documented && !current.documentedSpecimenIds.includes(specimen.id)
           ? [...current.documentedSpecimenIds, specimen.id]
           : current.documentedSpecimenIds,
+        nearbySpecimenId: collected && current.nearbySpecimenId === actorId ? null : current.nearbySpecimenId,
+        selectedSpecimenId: collected && current.selectedSpecimenId === actorId ? null : current.selectedSpecimenId,
         questComplete: current.questComplete || collected || documented,
-        lastOutcome: { specimen, tool, result, documented },
+        lastOutcome: { specimen, tool, result, documented, collectedActorId: collected ? actorId : null },
         message: result.reason,
         educationalNote,
         symsLine,

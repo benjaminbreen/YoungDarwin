@@ -30,6 +30,7 @@ export function ThreeScene({
       <WeatherDirector />
       <SkyController
         stars={settings.atmosphere !== false}
+        shadowQuality={settings.shadowQuality || 'high'}
         solarEffects={{
           halo: settings.solarSunHalo !== false,
           sceneFlares: settings.solarSceneFlares !== false,

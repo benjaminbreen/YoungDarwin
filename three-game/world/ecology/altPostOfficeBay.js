@@ -57,7 +57,6 @@ function buildFlora() {
       id: 'darwiniothamnus',
       path: `${NATURE}runtime-darwiniothamnus.glb`,
       sink: 0.05,
-      castShadow: false,
       motion: { wind: 1.05, bend: 0.24, bendRadius: 1.5 },
       items: scatter('darwiniothamnus', 8, 63, {
         minX: -32, maxX: 40, minZ: 4, maxZ: 38, scale: [0.35, 0.55],
@@ -119,7 +118,6 @@ function buildFlora() {
       id: 'scalesia-pedunculata',
       path: `${NATURE}runtime-scalesia-pedunculata.glb`,
       sink: 0.1,
-      castShadow: false,
       motion: { wind: 0.4, bend: 0.06, bendRadius: 3.0 },
       items: scatter('scalesia-stand', 3, 127, {
         minX: -30, maxX: 30, minZ: 38, maxZ: 54, scale: [0.05, 0.065], maxGrade: 0.5,
@@ -133,7 +131,6 @@ function buildFlora() {
       sink: 0.18,
       tint: '#58724f',
       tintStrength: 0.08,
-      castShadow: false,
       motion: { wind: 0.34, bend: 0.05, bendRadius: 3.2 },
       items: scatter('mangrove-hero', 7, 137, {
         minX: -52, maxX: -16, minZ: -42, maxZ: -2, scale: [0.34, 0.5], maxGrade: 3,
@@ -149,7 +146,6 @@ function buildFlora() {
       sink: 0.08,
       tint: '#4c6242',
       tintStrength: 0.22,
-      castShadow: false,
       motion: { wind: 0.42, bend: 0.07, bendRadius: 2.8 },
       items: scatter('mangrove-fringe', 22, 141, {
         minX: -54, maxX: 56, minZ: -44, maxZ: 2, scale: [0.9, 1.5], maxGrade: 3,

@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { onPropEvent } from './propEvents';
 
 // One-shot splash bursts for objects hitting the sea, driven by the
-// 'water-splash' prop event. A small ring buffer of effects, each made of an
-// expanding foam ring on the surface plus a handful of thrown droplets.
+// 'water-splash' prop event. A small ring buffer of thrown droplets; broad
+// surface ripples are handled by the water shader instead of overlay rings.
 const MAX_SPLASHES = 6;
 const DROPLETS_PER_SPLASH = 12;
 const LIFETIME = 0.95;
@@ -28,7 +28,6 @@ export function WaterSplashes() {
     })),
   );
   const cursor = useRef(0);
-  const ringRefs = useRef([]);
   const dropletMeshRef = useRef(null);
 
   useEffect(() => onPropEvent('water-splash', event => {
@@ -50,24 +49,11 @@ export function WaterSplashes() {
     }
   }), []);
 
-  const ringMaterials = useMemo(
-    () => Array.from({ length: MAX_SPLASHES }, () => new THREE.MeshBasicMaterial({
-      color: '#eaf6f4',
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    })),
-    [],
-  );
-
   useFrame((_, delta) => {
     const droplets = dropletMeshRef.current;
     let dropletIndex = 0;
-    splashes.current.forEach((splash, index) => {
-      const ring = ringRefs.current[index];
+    splashes.current.forEach(splash => {
       if (!splash.active) {
-        if (ring) ring.visible = false;
         if (droplets) {
           for (let i = 0; i < DROPLETS_PER_SPLASH; i += 1) {
             dropletDummy.position.set(0, -100, 0);
@@ -83,18 +69,10 @@ export function WaterSplashes() {
       const progress = splash.age / LIFETIME;
       if (progress >= 1) {
         splash.active = false;
-        if (ring) ring.visible = false;
         dropletIndex += DROPLETS_PER_SPLASH;
         return;
       }
       const fade = Math.pow(1 - progress, 1.4);
-      if (ring) {
-        ring.visible = true;
-        ring.position.copy(splash.position);
-        const scale = (0.45 + progress * 2.6) * (0.7 + splash.intensity * 0.6);
-        ring.scale.setScalar(scale);
-        ringMaterials[index].opacity = 0.65 * fade;
-      }
       if (droplets) {
         for (const droplet of splash.droplets) {
           droplet.vy += GRAVITY * delta;
@@ -123,17 +101,6 @@ export function WaterSplashes() {
       renderKind: 'water-splash',
       renderPath: null,
     }}>
-      {Array.from({ length: MAX_SPLASHES }, (_, index) => (
-        <mesh
-          key={index}
-          ref={element => { ringRefs.current[index] = element; }}
-          rotation-x={-Math.PI / 2}
-          visible={false}
-        >
-          <ringGeometry args={[0.55, 0.86, 32]} />
-          <primitive object={ringMaterials[index]} attach="material" />
-        </mesh>
-      ))}
       <instancedMesh
         ref={dropletMeshRef}
         args={[undefined, undefined, MAX_SPLASHES * DROPLETS_PER_SPLASH]}

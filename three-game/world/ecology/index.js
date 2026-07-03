@@ -1,5 +1,7 @@
 import { buildNorthShoreEcology } from './northShore';
 import { buildNorthwestReefEcology } from './northwestReef';
+import { buildBeachWithHutEcology } from './beachWithHut';
+import { buildSouthernReefsEcology } from './southernReefs';
 import { buildWesternHighlandsEcology } from './westernHighlands';
 import { buildElMiradorEcology } from './elMirador';
 import { buildPenalColonyEcology } from './penalColony';
@@ -19,6 +21,8 @@ import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
 const builders = {
   N_SHORE: buildNorthShoreEcology,
   NW_REEF: buildNorthwestReefEcology,
+  S_HUT: buildBeachWithHutEcology,
+  S_REEFS: buildSouthernReefsEcology,
   W_HIGH: buildWesternHighlandsEcology,
   EL_MIRADOR: buildElMiradorEcology,
   PENAL_COLONY: buildPenalColonyEcology,

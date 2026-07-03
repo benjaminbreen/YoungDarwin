@@ -41,6 +41,9 @@ const SPECIMEN_LINES = {
   booby: [
     'The booby watches you with frank island curiosity, not yet convinced that a naturalist is a dangerous thing.',
   ],
+  lavagull: [
+    'The lava gull works the swash line alone, lifting its wings the moment your boots become too interesting.',
+  ],
   frigatebird: [
     'A frigatebird rides the wind overhead, making the air itself look like a usable road.',
   ],
@@ -66,6 +69,7 @@ const SPECIMEN_NOTES = {
   galapagoscotton: 'Dry-zone plants should be tied to slope, soil, and nearby browsing animals.',
   cactus: 'Spines, pads, flowers, and nearby animal feeding signs all help turn a plant sighting into evidence.',
   basalt: 'Rock samples are most useful when fresh fracture, weathered surface, and exact locality are all recorded.',
+  lavagull: 'For shore birds, note whether they were feeding, walking, or flushed into flight before collection.',
 };
 
 const ZONE_LINES = {

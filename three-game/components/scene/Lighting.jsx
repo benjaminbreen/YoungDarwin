@@ -7,6 +7,7 @@ import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { setPlayerEnvBounce } from '../assets/ModelAsset';
 
 const CLEAR_FILL = new THREE.Color('#8fcfff');
 const OVERCAST_FILL = new THREE.Color('#c9d5dc');
@@ -75,8 +76,9 @@ export function Lighting() {
       // Sunlit-ground bounce onto the player's shadow side. The rig's warm
       // fill is tuned in pre-physical-falloff units and vanishes after the
       // 1/d² attenuation (~9x at this offset), so the bounce is an explicit
-      // additive term in candela-scale units.
-      const sandBounce = lightRig.hardSun * 1.6 * (1 - underwaterAmount);
+      // additive term in candela-scale units. groundBounce (not hardSun) so
+      // the bounce also ramps through mid-morning/afternoon sun.
+      const sandBounce = lightRig.groundBounce * 2.9 * (1 - underwaterAmount);
       const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
       camera.getWorldDirection(_forward);
       _forward.y = 0;
@@ -95,6 +97,10 @@ export function Lighting() {
       pointRef.current.intensity = lightRig.localWarmFillIntensity * playerFillScale + sandBounce;
       pointRef.current.distance = 6.5;
     }
+
+    // The character IBL sheen/ambient tracks the same sand-bounce physics: more
+    // clear sun on bright ground, more ambient light on shadow sides.
+    setPlayerEnvBounce(lightRig.groundBounce * (1 - underwaterAmount));
 
     if (typeof window !== 'undefined') {
       window.__darwinLightingDebug = {

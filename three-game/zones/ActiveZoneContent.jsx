@@ -6,6 +6,7 @@ import { Landmarks } from '../components/scene/Landmarks';
 import { Terrain } from '../components/scene/Terrain';
 import { BorderVistas } from '../components/scene/BorderVistas';
 import { WorldDetails } from '../components/scene/WorldDetails';
+import { ExaminableItems } from '../components/world/ExaminableItemActor';
 import { SpecimenActor } from '../components/world/SpecimenActor';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { WaterSplashes } from '../physics/props/WaterSplash';
@@ -17,9 +18,14 @@ import { useThreeGameStore } from '../store';
 
 export function ActiveZoneContent({ settings, deferredContentReady = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const specimens = useMemo(
-    () => (deferredContentReady ? getThreeSpecimens(currentZoneId) : []),
-    [currentZoneId, deferredContentReady],
+    () => {
+      if (!deferredContentReady) return [];
+      const collected = new Set(collectedSpecimenActorIds || []);
+      return getThreeSpecimens(currentZoneId).filter(specimen => !collected.has(specimen.instanceId || specimen.id));
+    },
+    [collectedSpecimenActorIds, currentZoneId, deferredContentReady],
   );
 
   return (
@@ -46,6 +52,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
           <SpecimenActor specimen={specimen} />
         </Suspense>
       ))}
+      {deferredContentReady && settings.worldDetails !== false && <ExaminableItems />}
       {deferredContentReady && settings.syms !== false && (
         <Suspense fallback={null}>
           <SymsCovington />

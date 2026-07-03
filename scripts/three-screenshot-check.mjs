@@ -4,7 +4,7 @@ import { launchChromium } from './playwright-launch.mjs';
 
 const outDir = path.join(process.cwd(), 'test-results', 'three-darwin');
 const DEFAULT_BASE_URL = 'http://localhost:3000/three';
-const BOOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_TIMEOUT_MS || 45000);
+const BOOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_TIMEOUT_MS || 120000);
 const NAVIGATION_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_NAV_TIMEOUT_MS || 20000);
 const SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_WRITE_TIMEOUT_MS || 60000);
 const SETTLE_MS = Number(process.env.THREE_SCREENSHOT_SETTLE_MS || 700);
@@ -81,9 +81,23 @@ async function run() {
   const viewports = selectedViewports();
   console.log(`[three:screenshot] using ${screenshotUrl(baseUrl)}`);
   console.log(`[three:screenshot] viewports: ${viewports.map(viewport => viewport.name).join(', ')}`);
+  console.log(`[three:screenshot] boot timeout: ${BOOT_TIMEOUT_MS}ms`);
 
-  const browser = await launchChromium();
+  let browser = await launchChromium();
   const results = [];
+  const closeBrowser = async () => {
+    if (!browser) return;
+    const openBrowser = browser;
+    browser = null;
+    await openBrowser.close().catch(() => {});
+  };
+  const stop = signal => {
+    closeBrowser().finally(() => {
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    });
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
 
   try {
     for (const viewport of viewports) {
@@ -119,7 +133,9 @@ async function run() {
       await page.close();
     }
   } finally {
-    await browser.close();
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
+    await closeBrowser();
   }
   await fs.writeFile(path.join(outDir, 'summary.json'), JSON.stringify(results, null, 2));
 

@@ -54,6 +54,16 @@ export function WeatherDirector() {
 
     const target = weatherProfile(store.weather);
     weatherEnv.overcast = dampTowards(weatherEnv.overcast, target.overcast, SLOW_LAMBDA, delta);
+    // Cumulus builds and dissolves on its own slow rhythm within a state:
+    // two incommensurate game-time waves (~5.5h and ~15.6h periods) keep a
+    // long sunny spell moving from empty blue to broken puffy fields and
+    // back. Pure functions of the clock, so a reload replays the same sky.
+    const cumulusWave = 0.5 + 0.5 * (
+      Math.sin(nowMinutes * 0.019 + 0.9) * 0.62 +
+      Math.sin(nowMinutes * 0.0067 + 4.2) * 0.38
+    );
+    const cumulusTarget = Math.min(1, (target.cumulus ?? 0.3) + (target.cumulusRange ?? 0.2) * cumulusWave);
+    weatherEnv.cumulus = dampTowards(weatherEnv.cumulus, cumulusTarget, SLOW_LAMBDA, delta);
     weatherEnv.fogDensity = dampTowards(weatherEnv.fogDensity, target.fogDensity, SLOW_LAMBDA, delta);
     weatherEnv.mistAmount = dampTowards(weatherEnv.mistAmount, target.mist, SLOW_LAMBDA, delta);
     weatherEnv.lightDim = dampTowards(weatherEnv.lightDim, target.lightDim, SLOW_LAMBDA, delta);

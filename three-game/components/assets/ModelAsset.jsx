@@ -125,9 +125,9 @@ function buildSkyGradientEnvScene() {
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      uTop: { value: new THREE.Color('#90a6c2') },     // cool skylight
-      uHorizon: { value: new THREE.Color('#ccbfa6') },  // neutral-warm horizon
-      uBottom: { value: new THREE.Color('#6e5c48') },   // sunlit-sand ground bounce
+      uTop: { value: new THREE.Color('#a3bcd8') },     // cool skylight
+      uHorizon: { value: new THREE.Color('#dccfb2') },  // neutral-warm horizon
+      uBottom: { value: new THREE.Color('#a68a64') },   // sunlit-sand ground bounce
     },
     vertexShader: `
       varying vec3 vDir;
@@ -150,6 +150,23 @@ function buildSkyGradientEnvScene() {
   });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), mat));
   return scene;
+}
+
+// Materials using the player envMap register here so the per-frame lighting rig
+// (Lighting.jsx) can scale their IBL with the sand-bounce channel: clear sun on
+// bright ground means more ambient on shadow sides. Holding the references is
+// fine — useGLTF caches these materials for the session anyway.
+const envBounceMaterials = new Set();
+const ENV_BOUNCE_MIN_SCALE = 0.7;
+const ENV_BOUNCE_GAIN = 0.9;
+let lastEnvBounce = 0;
+export function setPlayerEnvBounce(bounce) {
+  const b = Math.max(0, Math.min(1, bounce || 0));
+  if (Math.abs(b - lastEnvBounce) < 0.004) return;
+  lastEnvBounce = b;
+  envBounceMaterials.forEach(material => {
+    material.envMapIntensity = material.userData.envBaseIntensity * (ENV_BOUNCE_MIN_SCALE + b * ENV_BOUNCE_GAIN);
+  });
 }
 
 let cachedPlayerEnv = null;
@@ -226,7 +243,9 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
       }
       if (envMap && 'envMap' in material) {
         material.envMap = envMap;
-        material.envMapIntensity = cfg.envMapIntensity;
+        material.userData.envBaseIntensity = cfg.envMapIntensity;
+        material.envMapIntensity = cfg.envMapIntensity * (ENV_BOUNCE_MIN_SCALE + lastEnvBounce * ENV_BOUNCE_GAIN);
+        envBounceMaterials.add(material);
       }
       // Opt-in tonemapping (normalize sets it false for the cel look). true runs
       // the player through the same ACES curve as the world so he sits *in* the
@@ -297,6 +316,7 @@ const ONE_SHOT_CLIPS = new Set([
   'highJump',
   'vault',
   'runningSlide',
+  'dive',
   'fallingIntoPool',
   'jumpFromWall',
   'swimToEdge',
@@ -422,7 +442,9 @@ const CLIP_SETTINGS = {
   landing: { fade: 0.05 },
   runningLanding: { fade: 0.05 },
   hardLanding: { fade: 0.06 },
+  dive: { fade: 0.05 },
   runToDive: { fade: 0.05 },
+  swimFast: { loop: true, fade: 0.14 },
   fallingToLanding: { fade: 0.05 },
   sprintToWallClimb: { fade: 0.06 },
   climbingUpWall: { fade: 0.06 },
@@ -479,7 +501,9 @@ const CLIP_FALLBACKS = {
   standingInspectDownward: 'torchInspectForward',
   write: 'torchInspectForward',
   point: 'torchInspectForward',
+  dive: 'runToDive',
   runToDive: 'fallingToRoll',
+  swimFast: 'swim',
   rifleEquip: 'changeItem',
   rifleUnequip: 'changeItem',
   rifleKneelIdle: 'crouchRifle',

@@ -3,12 +3,19 @@ import * as THREE from 'three';
 import { getRuntimeFootContacts } from '../../store';
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { terrainBiomeAt } from '../../world/terrain';
+import { getRegionDefinition } from '../../world/regions';
 import { getSurfaceContactProfile, isWaterSurfaceContact } from '../../world/surfaceContact';
 import { WATER_LEVEL } from '../../world/water';
 import { PLAYER } from './playerConfig';
 
 function clamp(value, min, max) {
   return THREE.MathUtils.clamp(value, min, max);
+}
+
+function standingWaterMaskAt(x, z, zoneId) {
+  const maskFn = getRegionDefinition(zoneId)?.terrain?.standingWaterMask;
+  if (!maskFn) return 0;
+  return clamp(maskFn(x, z), 0, 1);
 }
 
 function emitWaterStep({ position, facing, horizontalSpeed, running, wadeDepth, intensity = 0 }) {
@@ -88,18 +95,21 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
       if (!step || step.id <= cadence.current.lastStepId) return false;
       cadence.current.lastStepId = step.id;
       if (Math.hypot(step.x - position.x, step.z - position.z) > 2.6) return false;
-      if (wadeDepth > 0.05) {
+      const biome = terrainBiomeAt(step.x, step.z, step.y, zoneId);
+      const profile = getSurfaceContactProfile({ x: step.x, z: step.z, y: step.y, zoneId, biome });
+      const standingMask = standingWaterMaskAt(step.x, step.z, zoneId);
+      const visualWaterContact = standingMask > 0.22;
+      if (wadeDepth > 0.05 || isWaterSurfaceContact(profile) || visualWaterContact) {
         emitWaterStep({
           position: { x: step.x, y: WATER_LEVEL, z: step.z },
           facing,
           horizontalSpeed,
           running,
-          wadeDepth,
-          intensity: step.intensity || 0,
+          wadeDepth: Math.max(wadeDepth, visualWaterContact ? 0.18 : 0.08),
+          intensity: (step.intensity || 0) + (visualWaterContact ? standingMask * 0.16 : 0),
         });
         return true;
       }
-      const biome = terrainBiomeAt(step.x, step.z, step.y, zoneId);
       emitDustStep({
         worldPosition: step,
         biome,
@@ -113,13 +123,19 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
     }
 
     function emitCadenceFallback({ delta, position, facing, zoneId, horizontalSpeed, running, wadeDepth }) {
-      const rate = (wadeDepth > 0.05 ? (running ? 3.1 : 2.1) : (running ? 3.9 : 2.45))
-        * clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, wadeDepth > 0.05 ? 1.6 : 1.85);
+      const standingMask = standingWaterMaskAt(position.x, position.z, zoneId);
+      const biome = terrainBiomeAt(position.x, position.z, position.y, zoneId);
+      const profile = getSurfaceContactProfile({ x: position.x, z: position.z, y: position.y, zoneId, biome });
+      const visualWaterContact = standingMask > 0.22;
+      const contactWaterDepth = Math.max(wadeDepth, visualWaterContact ? 0.18 : 0);
+      const waterContact = contactWaterDepth > 0.05 || isWaterSurfaceContact(profile);
+      const rate = (waterContact ? (running ? 3.1 : 2.1) : (running ? 3.9 : 2.45))
+        * clamp(horizontalSpeed / PLAYER.walkSpeed, 0.55, waterContact ? 1.6 : 1.85);
       cadence.current.phase += delta * rate;
       if (cadence.current.phase < 1) return;
       cadence.current.phase -= 1;
       cadence.current.side *= -1;
-      if (wadeDepth > 0.05) {
+      if (waterContact) {
         const sideX = -facing.z * cadence.current.side * 0.18;
         const sideZ = facing.x * cadence.current.side * 0.18;
         emitWaterStep({
@@ -131,11 +147,11 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
           facing,
           horizontalSpeed,
           running,
-          wadeDepth,
+          wadeDepth: contactWaterDepth || 0.08,
+          intensity: visualWaterContact ? standingMask * 0.12 : 0,
         });
         return;
       }
-      const biome = terrainBiomeAt(position.x, position.z, position.y, zoneId);
       emitDustStep({
         localPosition: localDustPosition.current.set(cadence.current.side * 0.18, 0.055, 0.18),
         biome,

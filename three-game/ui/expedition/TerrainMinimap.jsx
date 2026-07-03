@@ -11,7 +11,7 @@ const BAKE_RESOLUTION = 336;
 const CONTOUR_INTERVAL = 0.85;
 const SURVEY_MINOR_CONTOUR = 0.7;
 const SURVEY_MAJOR_CONTOUR = 2.1;
-const CHART_CACHE_VERSION = 'v4';
+const CHART_CACHE_VERSION = 'v5';
 
 // Light from the upper-left of the chart, matching a classic relief map.
 const LIGHT = { x: -0.55, y: 0.72, z: -0.42 };

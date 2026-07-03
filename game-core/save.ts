@@ -1,6 +1,6 @@
 import type { ExpeditionState } from './types';
 
-export const EXPEDITION_CORE_SCHEMA_VERSION = 2;
+export const EXPEDITION_CORE_SCHEMA_VERSION = 3;
 const initialRegionId = 'POST_OFFICE_BAY';
 
 export function createInitialExpeditionState(seed = 'three-darwin-v1'): ExpeditionState {
@@ -31,7 +31,9 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
       },
     ],
     collectedSpecimenIds: [],
+    collectedSpecimenActorIds: [],
     documentedSpecimenIds: [],
+    examinedTypeIds: [],
     visitedZoneIds: [initialRegionId],
     visitedLocalCellIds: ['POST_OFFICE_BAY'],
   };
@@ -51,6 +53,8 @@ export function migrateLegacyExpeditionSave(saved: Record<string, unknown> | nul
     inventory: Array.isArray(saved.inventory) ? saved.inventory as ExpeditionState['inventory'] : initial.inventory,
     journal: Array.isArray(saved.journal) && saved.journal.length > 0 ? saved.journal as ExpeditionState['journal'] : initial.journal,
     collectedSpecimenIds: Array.isArray(saved.collectedSpecimenIds) ? saved.collectedSpecimenIds as string[] : initial.collectedSpecimenIds,
+    collectedSpecimenActorIds: Array.isArray(saved.collectedSpecimenActorIds) ? saved.collectedSpecimenActorIds as string[] : initial.collectedSpecimenActorIds,
     documentedSpecimenIds: Array.isArray(saved.documentedSpecimenIds) ? saved.documentedSpecimenIds as string[] : initial.documentedSpecimenIds,
+    examinedTypeIds: Array.isArray(saved.examinedTypeIds) ? saved.examinedTypeIds as string[] : initial.examinedTypeIds,
   };
 }

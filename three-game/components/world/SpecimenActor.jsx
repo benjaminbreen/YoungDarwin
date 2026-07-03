@@ -288,8 +288,10 @@ function AnimatedSpecimenShape({ specimen, animationSelector }) {
 
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
+  const groundAffordanceRef = useRef(null);
   const actorId = specimen.instanceId || specimen.id;
   const runtimePublishRef = useRef({ x: Infinity, y: Infinity, z: Infinity, time: -Infinity });
+  const isCollectedActor = useThreeGameStore(state => state.collectedSpecimenActorIds?.includes(actorId) || false);
   const selectedSpecimenId = useThreeGameStore(state => state.selectedSpecimenId);
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const setSelectedSpecimen = useThreeGameStore(state => state.setSelectedSpecimen);
@@ -302,6 +304,11 @@ export function SpecimenActor({ specimen }) {
   // Narrow boolean: only flips when this specimen is picked up / put down, so
   // the contact shadow can hide while the animal is held off the ground.
   const isCarried = useThreeGameStore(state => state.carriedObjectId === actorId);
+  // While this actor is under examination the camera is framing it; hold its
+  // wander/patrol in place (idle animation keeps playing) so the shot stays
+  // composed and any behavior the inquiry narrates has a steady subject.
+  const isUnderExamination = useThreeGameStore(state => state.examineSession?.actorId === actorId);
+  const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
   const carriedRef = useRef(false);
   // Where the animal currently lives; moving fauna patrol around this base.
@@ -316,10 +323,11 @@ export function SpecimenActor({ specimen }) {
     specimen,
     basePositionRef: behaviorBaseRef,
     basePosition: position,
-    paused: isCarried,
+    paused: isCarried || isUnderExamination,
   });
 
   useEffect(() => {
+    if (isCollectedActor) return;
     publishActorRuntimePosition({
       publisher: setSpecimenRuntimePosition,
       ref: runtimePublishRef,
@@ -328,7 +336,7 @@ export function SpecimenActor({ specimen }) {
       position,
       force: true,
     });
-  }, [actorId, currentZoneId, position, setSpecimenRuntimePosition]);
+  }, [actorId, currentZoneId, isCollectedActor, position, setSpecimenRuntimePosition]);
 
   // Reset any relocated home when the zone (and therefore spawn) changes.
   useEffect(() => {
@@ -351,13 +359,37 @@ export function SpecimenActor({ specimen }) {
     () => removeSpecimenRuntimePose(currentZoneId, actorId)
   ), [actorId, currentZoneId]);
 
+  useEffect(() => {
+    if (!isCollectedActor) return;
+    removeSpecimenRuntimePose(currentZoneId, actorId);
+    if (selectedSpecimenId === actorId) setSelectedSpecimen(null);
+    if (nearbySpecimenId === actorId) setNearbySpecimen(null);
+    const state = useThreeGameStore.getState();
+    if (state.carriedObjectId === actorId) setCarriedObject(null);
+    if (state.carryPrompt?.id === actorId) setCarryPrompt(null);
+  }, [
+    actorId,
+    currentZoneId,
+    isCollectedActor,
+    nearbySpecimenId,
+    selectedSpecimenId,
+    setCarriedObject,
+    setCarryPrompt,
+    setNearbySpecimen,
+    setSelectedSpecimen,
+  ]);
+
   // Single per-actor frame callback: bare-handed carry/pickup handling (mirrors
   // the PhysicsProp carry flow) followed by the idle-behaviour fallback for
   // specimens without fauna AI. Merged so each actor registers one useFrame.
   useFrame(({ clock }) => {
+    if (isCollectedActor) return;
     if (!group.current) return;
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
+    if (groundAffordanceRef.current) {
+      groundAffordanceRef.current.visible = !carriedHere && faunaBehavior.airborneRef?.current !== true;
+    }
 
     if (carryProfile) {
       const pose = getRuntimePlayerPose();
@@ -433,7 +465,11 @@ export function SpecimenActor({ specimen }) {
       const motionPosition = faunaBehavior.positionRef.current;
       const usedMotion = copyFinitePosition(group.current.position, motionPosition, base);
       if (isFiniteVector3(group.current.position)) {
-        group.current.rotation.y = faunaBehavior.yawRef.current || 0;
+        group.current.rotation.set(
+          faunaBehavior.pitchRef.current || 0,
+          faunaBehavior.yawRef.current || 0,
+          faunaBehavior.rollRef.current || 0,
+        );
         const debug = {
           ...(faunaBehavior.debugRef.current || {}),
           motionStatus: faunaBehavior.statusRef.current,
@@ -493,6 +529,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'basalt' ? 1.15
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'floreanagianttortoise' ? 1.8
+    : specimen.id === 'lavagull' ? 1.05
     : 1.45;
   const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
     : specimen.id === 'basalt' ? 0.85
@@ -501,34 +538,42 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'barnacle' ? 0.38
     : specimen.id === 'frigatebird' ? 0.7
     : specimen.id === 'booby' ? 0.62
+    : specimen.id === 'lavagull' ? 0.5
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'galapagospenguin' ? 0.55
     : 0.8;
   const specimenContent = (
     <>
-      {!isCarried && <ContactShadow radius={contactRadius} />}
+      <group ref={groundAffordanceRef}>
+        {!isCarried && <ContactShadow radius={contactRadius} />}
+        {/* Selection rings/marker are HUD affordances — they'd pollute the
+            composed examine shot, so they hide while a session is open. */}
+        {!examineOpen && (
+          <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
+            <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />
+            <meshBasicMaterial color={nearby ? '#fff2a8' : selected ? '#ffe48a' : '#ffffff'} transparent opacity={nearby ? 0.72 : selected ? 0.52 : 0.14} depthWrite={false} />
+          </mesh>
+        )}
+        {nearby && !examineOpen && (
+          <>
+            <mesh position={[0, 0.075, 0]} rotation-x={-Math.PI / 2}>
+              <ringGeometry args={[1.52, 1.62, 64]} />
+              <meshBasicMaterial color="#ffffff" transparent opacity={0.42} depthWrite={false} />
+            </mesh>
+            <mesh position={[0, markerY, 0]} rotation={[0, Math.PI / 4, 0]}>
+              <octahedronGeometry args={[0.18, 0]} />
+              <meshBasicMaterial color="#fff2a8" transparent opacity={0.9} />
+            </mesh>
+          </>
+        )}
+      </group>
       <AnimatedSpecimenShape
         specimen={specimen}
         animationSelector={faunaBehavior.animationRef ? () => faunaBehavior.animationRef.current : null}
       />
-      <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />
-        <meshBasicMaterial color={nearby ? '#fff2a8' : selected ? '#ffe48a' : '#ffffff'} transparent opacity={nearby ? 0.72 : selected ? 0.52 : 0.14} depthWrite={false} />
-      </mesh>
-      {nearby && (
-        <>
-          <mesh position={[0, 0.075, 0]} rotation-x={-Math.PI / 2}>
-            <ringGeometry args={[1.52, 1.62, 64]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.42} depthWrite={false} />
-          </mesh>
-          <mesh position={[0, markerY, 0]} rotation={[0, Math.PI / 4, 0]}>
-            <octahedronGeometry args={[0.18, 0]} />
-            <meshBasicMaterial color="#fff2a8" transparent opacity={0.9} />
-          </mesh>
-        </>
-      )}
     </>
   );
+  if (isCollectedActor) return null;
   return (
     <group
       ref={group}

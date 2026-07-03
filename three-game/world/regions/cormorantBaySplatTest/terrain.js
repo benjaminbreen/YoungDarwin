@@ -13,6 +13,11 @@ export function cormorantLagoonField(x, z) {
   return Math.min(north, south);
 }
 
+export function cormorantStandingWaterMask(x, z) {
+  const lagoon = cormorantLagoonField(x, z);
+  return 1 - THREE.MathUtils.smoothstep(lagoon, 0.98, 1.16);
+}
+
 export function cormorantTrailDistance(x, z) {
   const points = [[-38, 25], [-24, 14], [-8, 10], [10, 15], [31, 27]];
   let best = Infinity;
@@ -105,6 +110,7 @@ export const cormorantBaySplatTestRegion = {
     movementHeight: (x, z) => cormorantBayHeight(x, z, { movementSurface: true }),
     biomeAt: cormorantBayBiomeAt,
     color: cormorantBayColor,
+    standingWaterMask: cormorantStandingWaterMask,
     isWalkable: isCormorantBayWalkable,
     defaultSpawn: [-30, 0, 24],
   },

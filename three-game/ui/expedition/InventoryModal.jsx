@@ -312,6 +312,7 @@ const CONDITION_STYLES = {
 function SpecimenCaseTab() {
   const inventory = useThreeGameStore(state => state.inventory);
   const caseCapacity = useThreeGameStore(state => state.caseCapacity);
+  const items = useThreeGameStore(state => state.items);
   const openSpecimenDetail = useThreeGameStore(state => state.openSpecimenDetail);
   const slots = Array.from({ length: Math.max(caseCapacity, inventory.length) }, (_, index) => inventory[index] || null);
 
@@ -351,6 +352,22 @@ function SpecimenCaseTab() {
         <p className="mt-3 text-center font-expedition text-[12px] italic text-expedition-faded">
           The case stands empty. Everything ahead of you is still uncollected.
         </p>
+      )}
+      {items.length > 0 && (
+        <>
+          <div className="mb-2 mt-5 flex items-baseline justify-between">
+            <div className={GOLD_LABEL}>Items</div>
+            <div className="font-expedition text-[12px] text-expedition-faded">carried loose, outside the case</div>
+          </div>
+          <div className="grid gap-1.5">
+            {items.map(item => (
+              <div key={item.typeId} className="rounded-sm border border-expedition-brass/50 bg-black/25 px-3 py-2">
+                <div className="font-expedition text-[13px] font-medium text-expedition-parchment">{item.name}</div>
+                <div className="mt-0.5 font-expedition text-[11.5px] leading-snug text-expedition-faded">{item.description}</div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

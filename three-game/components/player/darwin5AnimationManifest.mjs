@@ -39,7 +39,9 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   runningLanding: { category: 'landing', duration: 0.9, lockDuration: 0.12, fade: 0.05 },
   hardLanding: { category: 'impact', duration: 1.8, lockDuration: 0.9, fade: 0.06 },
   fallingIntoPool: { category: 'water', duration: 1.1, lockDuration: 0.4, fade: 0.05, fallback: 'runToDive' },
+  dive: { category: 'water', duration: 1.23, lockDuration: 0.36, fade: 0.05, fallback: 'runToDive' },
   runToDive: { category: 'water', duration: 1.23, lockDuration: 0.4, fade: 0.05, fallback: 'fallingToRoll' },
+  swimFast: { category: 'water', loop: true, fade: 0.14, fallback: 'swim' },
   swimToEdge: { category: 'water', duration: 5.03, lockDuration: 0.34, fade: 0.16 },
 
   climb: { category: 'climb', duration: 2.15, lockDuration: 0.85, fade: 0.06, fallback: 'climbingUpWall' },
@@ -100,6 +102,8 @@ export const DARWIN5_REQUIRED_RUNTIME_CLIPS = [
   'fallingToRoll',
   'jumpDown',
   'bigJumpDown',
+  'dive',
+  'swimFast',
   'climbWaistHeight',
   'climbHeadHeight',
   'runToDive',

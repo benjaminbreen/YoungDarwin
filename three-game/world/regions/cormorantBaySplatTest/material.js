@@ -90,6 +90,12 @@ export function createCormorantBaySplatTestTerrainMaterial() {
         float lagoon = cbLagoon(p);
         float lagoonCore = 1.0 - smoothstep(0.70, 1.08, lagoon);
         float lagoonEdge = 1.0 - smoothstep(1.0, 1.42, lagoon);
+        float lagoonWater = 1.0 - smoothstep(0.98, 1.16, lagoon);
+        float wetShore = smoothstep(0.92, 1.03, lagoon) * (1.0 - smoothstep(1.26, 1.66, lagoon));
+        float dampShelf = smoothstep(1.02, 1.18, lagoon) * (1.0 - smoothstep(1.48, 2.08, lagoon));
+        float saltRim = wetShore
+          * smoothstep(0.52, 0.88, cbFbm(p * 1.75 + vec2(-6.0, 3.0)))
+          * (0.55 + 0.45 * cbSplat(p + vec2(5.0, 2.0), 0.74, 0.62, 0.42, vec2(1.8, 0.7)));
         float shore = p.y - cbCoastZ(p.x);
         float trail = 1.0 - smoothstep(1.5, 4.7, cbTrail(p));
         float rim = cbRim(p);
@@ -115,9 +121,21 @@ export function createCormorantBaySplatTestTerrainMaterial() {
         color = mix(color, lagoonBed, lagoonCore * 0.82);
         color = mix(color, tuff, rim * 0.78);
         color = mix(color, vec3(0.42, 0.31, 0.18), trail * 0.36);
+        vec3 wetRimColor = mix(wetMud, vec3(0.12, 0.23, 0.19), 0.42);
+        color = mix(color, wetRimColor, wetShore * 0.68);
+        color = mix(color, vec3(0.24, 0.34, 0.30), lagoonWater * 0.16);
+        color = mix(color, vec3(0.67, 0.65, 0.48), saltRim * 0.32);
+        color = mix(color, vec3(0.21, 0.28, 0.20), dampShelf * (1.0 - saltRim) * 0.18);
         float fine = cbFbm(p * 4.8 + vec2(1.0, -6.0));
         color *= 0.91 + fine * 0.12;
         diffuseColor.rgb = mix(diffuseColor.rgb, clamp(color, 0.0, 1.0), 0.95);`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        float cbRoughLagoon = cbLagoon(vCormorantWorld.xz);
+        float cbWetGloss = smoothstep(0.92, 1.03, cbRoughLagoon) * (1.0 - smoothstep(1.28, 1.74, cbRoughLagoon));
+        roughnessFactor = mix(roughnessFactor, 0.64, cbWetGloss * 0.42);`,
       )
       .replace(
         '#include <normal_fragment_begin>',

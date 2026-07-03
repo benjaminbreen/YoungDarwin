@@ -22,7 +22,7 @@ const TOOL_USE_CONTROLS = {
   hammer: 'hammer',
   insect_net: 'net',
   shotgun: 'fireRifle',
-  snare: 'gather',
+  snare: 'net',
   sketch: 'write',
 };
 

@@ -58,7 +58,6 @@ function buildFlora() {
       id: 'scalesia',
       path: `${NATURE}runtime-scalesia.glb`,
       sink: 0.08,
-      castShadow: false,
       motion: { wind: 1.25, bend: 0.3, bendRadius: 1.35 },
       items: scatter('scalesia', 12, 67, {
         minX: -44, maxX: 46, minZ: -4, maxZ: 30, scale: [0.5, 0.9],

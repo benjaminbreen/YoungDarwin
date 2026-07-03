@@ -167,6 +167,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     wasRunning: false,
     fromPlayerJump: false,
     chargeAmount: 0,
+    waterEntryIntent: null,
     launchedAt: -10,
     launchY: 0,
     launchX: 0,
@@ -178,6 +179,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const jumpBufferedUntil = useRef(-10);
   const touchJumpHoldUntil = useRef(-10);
   const lastInteract = useRef(false);
+  const lastExamine = useRef(false);
   const lastCamera = useRef(false);
   const lastButtons = useRef({});
   const footstepEffects = useFootstepEffects({ playerGroupRef: group, footstepDustTriggerRef });
@@ -295,6 +297,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     jumpWasRunning: false,
     jumpCharging: false,
     jumpChargeAmount: 0,
+    jumpWaterEntryIntent: null,
     actionUntil: 0,
     actionStartedAt: 0,
     lockMovementUntil: 0,
@@ -318,12 +321,14 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     sitting: false,
     lying: false,
     swimming: false,
+    swimSprinting: false,
     wadeDepth: 0,
     jumpFromHeight: false,
   });
   const [, getKeys] = useKeyboardControls();
   const rapierContext = useRapier();
   const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const openExamine = useThreeGameStore(state => state.openExamine);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
   const applyMovementCost = useThreeGameStore(state => state.applyMovementCost);
   const applyCactusDamage = useThreeGameStore(state => state.applyCactusDamage);
@@ -398,22 +403,11 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     }),
   }), []);
 
-  const waterlineMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#dffcff',
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  }), []);
   const {
     startAction: startActionAt,
     interruptAction: interruptActionAt,
     triggerAction: triggerActionAt,
   } = usePlayerActions(stateRef, lastButtons);
-
-  useEffect(() => () => {
-    waterlineMaterial.dispose();
-  }, [waterlineMaterial]);
 
   useEffect(() => onPropEvent('player-push-contact', contact => {
     latestPropPushContact.current = {
@@ -1810,6 +1804,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       const wadedIn = !wasAirborne.current && waterDepthHere > SWIM.enterDepth;
       const fellIn = wasAirborne.current && p.y <= WATER_LEVEL - 0.18 && waterDepthHere > SWIM.enterDepth;
       if (wadedIn || fellIn) {
+        const jumpWaterEntryIntent = jumpState.current.waterEntryIntent;
         swim.active = true;
         swim.enteredAt = now;
         stateRef.current.crouching = false;
@@ -1817,9 +1812,13 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         jumpCharge.current.active = false;
         pendingStandingJump.current.active = false;
         jumpState.current.phase = 'grounded';
+        jumpState.current.waterEntryIntent = null;
         stateRef.current.jumpPhase = 'grounded';
+        stateRef.current.jumpWaterEntryIntent = null;
         if (fellIn) {
-          startAction('fallingIntoPool', ACTION_DURATION.fallingIntoPool, { lockMovement: true });
+          if (jumpWaterEntryIntent !== 'dive') {
+            startAction('fallingIntoPool', durationFor('fallingIntoPool'), { lockMovement: true });
+          }
           const entryPosition = { x: p.x, y: WATER_LEVEL, z: p.z };
           emitPropEvent('water-ripple', {
             position: entryPosition,
@@ -2001,9 +2000,11 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       zoneSpecimens,
       stateRef,
       lastInteractRef: lastInteract,
+      lastExamineRef: lastExamine,
       lastCameraRef: lastCamera,
       startAction,
       collectNearby,
+      openExamine,
       cycleViewMode,
       setNearbySpecimen,
       setActiveTool,
@@ -2046,9 +2047,6 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       <mesh ref={contactShadowRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
         <circleGeometry args={[0.82, 48]} />
         <meshBasicMaterial color="#17130d" transparent opacity={0.32} depthWrite={false} alphaMap={contactShadowAlpha || undefined} />
-      </mesh>
-      <mesh ref={waterlineRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} material={waterlineMaterial} renderOrder={4}>
-        <ringGeometry args={[0.5, 0.76, 48]} />
       </mesh>
       <group ref={modelFeedbackRef}>
         <NaturalistModel motionRef={stateRef} health={health} fatigue={fatigue} inventoryCount={inventoryCount} grounding={modelGrounding} />

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { crackNoise, elevationNoise, ellipseDistance, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { WATER_LEVEL, crackNoise, elevationNoise, ellipseDistance, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 
 // ---------------------------------------------------------------------------
 // Northwest Reef (NW_REEF) — authored white-sand beach and walkable turquoise
@@ -123,11 +123,11 @@ export function northwestReefBiomeAt(x, z, y = northwestReefHeight(x, z)) {
   const di = nwReefIsletField(x, z);
   if (y < -2.0) return 'water';
   if (nwReefOutcrop(x, z) > 0.42 || (di < 0.5 && y > 0.55)) return 'basalt';
-  if (y < -0.45) {
+  if (y < WATER_LEVEL) {
     if (nwReefCoralMask(x, z) > 0.22) return 'coral';
     return 'shallow-sand';
   }
-  if (d >= 0 && d < 2.2 && di > 1.15) return 'wet-sand';
+  if (d < 2.2 && di > 1.15) return 'wet-sand';
   return 'white-sand';
 }
 
@@ -135,6 +135,8 @@ export function northwestReefColor(x, z, y) {
   const noise = terrainSurfaceNoise(x, z);
   const biome = northwestReefBiomeAt(x, z, y);
   const d = z - nwReefCoastZ(x);
+  const beachD = d + 6.35;
+  const shorePearl = (1 - THREE.MathUtils.smoothstep(beachD, 5, 26)) * THREE.MathUtils.smoothstep(beachD, -1.2, 1.4);
   const shell = Math.abs(crackNoise(x * 0.95 + 3, z * 0.88 - 5));
   const swash = Math.max(
     0,
@@ -145,19 +147,21 @@ export function northwestReefColor(x, z, y) {
   if (biome === 'water') color.set('#2f7e95');
   else if (biome === 'shallow-sand') {
     // Bright sand seabed; the water shader's depth tint does the turquoise.
-    color.set('#c3ddc9');
-    const depth = THREE.MathUtils.clamp((-0.45 - y) / 1.0, 0, 1);
-    color.lerp(new THREE.Color('#74bfb0'), depth * 0.65);
-    color.lerp(new THREE.Color('#d5d7b6'), Math.max(0, noise) * 0.18);
-    color.lerp(new THREE.Color('#88b9a1'), garden * 0.22);
+    color.set('#d7ead7');
+    const depth = THREE.MathUtils.clamp((WATER_LEVEL - y) / 1.2, 0, 1);
+    color.lerp(new THREE.Color('#72c7ba'), depth * 0.58);
+    color.lerp(new THREE.Color('#ede6c6'), Math.max(0, noise) * 0.16);
+    color.lerp(new THREE.Color('#94c7b2'), garden * 0.18);
   } else if (biome === 'coral') {
     color.set('#b3837a');
     color.lerp(new THREE.Color('#c06a78'), Math.max(0, noise) * 0.6);
     color.lerp(new THREE.Color('#9c9a62'), Math.max(0, -noise) * 0.5);
   } else if (biome === 'basalt') color.set('#3b372f');
   else if (biome === 'wet-sand') {
-    color.set('#a99b7a');
-    color.lerp(new THREE.Color('#c4b993'), Math.max(0, noise) * 0.28);
+    color.set('#ddd7bd');
+    color.lerp(new THREE.Color('#eee8cf'), Math.max(0, noise) * 0.28);
+    color.lerp(new THREE.Color('#c9c2a9'), Math.max(0, -noise) * 0.1);
+    color.lerp(new THREE.Color('#f4ecd2'), shorePearl * 0.38);
   }
   else {
     // Kept well below white so midday sun doesn't blow the beach out.
@@ -165,7 +169,8 @@ export function northwestReefColor(x, z, y) {
     color.lerp(new THREE.Color('#d8cdaf'), Math.max(0, noise) * 0.45);
     color.lerp(new THREE.Color('#b7a982'), Math.max(0, -noise) * 0.24);
     color.lerp(new THREE.Color('#eee2bf'), Math.max(0, shell - 0.66) * 0.32);
-    color.lerp(new THREE.Color('#9f9271'), swash * 0.22);
+    color.lerp(new THREE.Color('#e8ddbd'), swash * 0.08);
+    color.lerp(new THREE.Color('#f1e8cd'), shorePearl * 0.46);
   }
   color.multiplyScalar(0.94 + noise * 0.07);
   return color;

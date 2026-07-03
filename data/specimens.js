@@ -497,6 +497,35 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'lavagull',
+    name: 'Lava Gull',
+    latin: 'Leucophaeus fuliginosus',
+    ontology: 'Animal',
+    order: 'Bird',
+    sub_order: 'Seabird',
+    description: 'A dark Galapagos gull of lava shores and sheltered beaches, quick to rise from the tideline when approached.',
+    details: [
+      'Charcoal-gray plumage blends with black lava and wet sand',
+      'Forages along the swash line for fish scraps, crabs, and stranded prey',
+      'Often walks alone or in pairs rather than forming dense noisy flocks',
+      'Takes off low over the beach before circling back to feed'
+    ],
+    habitat: 'shore, beach, rocky shoreline',
+    collected: false,
+    observations: [],
+    scientificValue: 4,
+    hybrid_ease: 4,
+    hybrid_temperature: 4,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/lavagull.jpg',
+    memoryText: '“A dark gull works the shore alone, rising only when I press too close to the tide.”',
+    contents: 'A field examination would likely find fish fragments, crab remains, and grit from the beach.',
+    keywords: ['lava gull', 'gull', 'seagull', 'bird', 'seabird', 'galapagos', 'shore', 'leucophaeus']
+  },
+
+  {
     id: 'frigatebird',
     name: 'Magnificent Frigatebird',
     latin: 'Fregata magnificens',

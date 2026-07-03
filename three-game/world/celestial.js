@@ -58,8 +58,11 @@ export function skyState(timeOfDay, day) {
 
   // 0 in deep night → 1 in full day, with a civil-twilight ramp at the horizon.
   const daylight = smoothstep(-0.12, 0.18, elevation);
-  // Bell centred just above the horizon → golden-hour warmth at dawn/dusk only.
-  const golden = (1 - smoothstep(0.0, 0.3, Math.abs(elevation))) * smoothstep(-0.16, 0.04, elevation);
+  // Bell centred just above the horizon → golden-hour warmth at dawn/dusk.
+  // The wide falloff (0.6) matters: the equatorial sun climbs fast, so a
+  // narrow bell made 7:30 AM look like noon. This keeps mornings honeyed
+  // until ~8:30 while leaving midday (elevation ~0.9) completely untouched.
+  const golden = (1 - smoothstep(0.0, 0.6, Math.abs(elevation))) * smoothstep(-0.16, 0.04, elevation);
   // Night factor for stars and moonlight.
   const night = 1 - smoothstep(-0.04, 0.14, elevation);
 

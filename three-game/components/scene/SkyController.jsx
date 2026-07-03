@@ -24,8 +24,18 @@ const C = {
   keyGolden: new THREE.Color('#ff9b4d'),
   hemiSkyNight: new THREE.Color('#0b1a33'),
   hemiSkyDay: new THREE.Color('#b9dfef'),  // cooler sky fill; the key light carries the warmth
+  // Golden hour splits warm/cool: shadowed surfaces are lit only by blue sky
+  // (cooler fill) while the ground bounce goes honeyed — the graded morning
+  // look, driven entirely by these two lerp targets.
+  hemiSkyGolden: new THREE.Color('#9cc4ea'),
   hemiGroundNight: new THREE.Color('#0a0d12'),
   hemiGroundDay: new THREE.Color('#987d5c'), // restrained sand/rock bounce, not orange fill
+  hemiGroundGolden: new THREE.Color('#c2915d'),
+  // Clear hard sun over bright sand: the ground half of the hemisphere brightens
+  // toward sunlit coral sand (lerped in by the rig's groundBounce channel), so
+  // vertical shadow sides pick up real beach bounce while ground planes — lit
+  // mostly by the sky half — keep their contrast.
+  hemiGroundSunlit: new THREE.Color('#c9a97c'),
   ambNight: new THREE.Color('#2a3a5c'),
   ambDay: new THREE.Color('#e4e7de'),      // neutral daylight floor, slightly cool in shadows
   fogNight: new THREE.Color('#0c1830'),
@@ -147,8 +157,33 @@ const SUN_FACING_RESPONSE_LAMBDA = 7.0;
 const GLARE_ADAPT_IN_LAMBDA = 3.4;
 const GLARE_ADAPT_OUT_LAMBDA = 2.2;
 
-function stableShadowAnchor(position, lightDirection, extent, mapSize) {
-  const texelSize = Math.max(0.035, (extent * 2) / Math.max(256, mapSize || 2048));
+const SHADOW_QUALITY = {
+  standard: {
+    mapSize: 2048,
+    extentScale: 1,
+    radiusBoost: 0,
+    anchorMinTexelSize: 0.035,
+  },
+  high: {
+    mapSize: 4096,
+    // Keep the player and nearby tree/rock casters in range while spending
+    // more texels on the close-up character instead of the whole local zone.
+    extentScale: 0.82,
+    radiusBoost: 0.28,
+    anchorMinTexelSize: 0.012,
+  },
+};
+const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.high;
+
+function resolveShadowQuality(mode, gl) {
+  const requested = SHADOW_QUALITY[String(mode || '').toLowerCase()] || DEFAULT_SHADOW_QUALITY;
+  const maxTextureSize = gl?.capabilities?.maxTextureSize || requested.mapSize;
+  const mapSize = maxTextureSize >= requested.mapSize ? requested.mapSize : 2048;
+  return { ...requested, mapSize };
+}
+
+function stableShadowAnchor(position, lightDirection, extent, mapSize, minTexelSize = 0.035) {
+  const texelSize = Math.max(minTexelSize, (extent * 2) / Math.max(256, mapSize || 2048));
   _shadowDir.copy(lightDirection).normalize();
   _shadowRight.crossVectors(_worldUp, _shadowDir);
   if (_shadowRight.lengthSq() < 0.00001) _shadowRight.crossVectors(_worldForward, _shadowDir);
@@ -553,7 +588,11 @@ function StarField({ nightRef }) {
   return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} renderOrder={-6} />;
 }
 
-function TropicalBlueSkyDome({ nightRef }) {
+// Sun-aware tropical sky grade layered over the drei Sky: a milky sea-haze
+// rim rising into a deep vivid zenith, brightened/warmed toward the sun's
+// azimuth (Mie aureole, wider in humid air) and deepened ~90° from it
+// (Rayleigh band) — the asymmetry that makes a real sky read as real.
+function TropicalBlueSkyDome({ nightRef, celestialRef }) {
   const meshRef = useRef(null);
 
   const material = useMemo(() => new THREE.ShaderMaterial({
@@ -563,6 +602,10 @@ function TropicalBlueSkyDome({ nightRef }) {
     uniforms: {
       uNight: { value: 0 },
       uOvercast: { value: 0 },
+      uGolden: { value: 0 },
+      uDaylight: { value: 1 },
+      uHaze: { value: 0 },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -576,14 +619,48 @@ function TropicalBlueSkyDome({ nightRef }) {
       varying vec3 vWorldDir;
       uniform float uNight;
       uniform float uOvercast;
+      uniform float uGolden;
+      uniform float uDaylight;
+      uniform float uHaze;
+      uniform vec3 uSunDir;
       void main() {
-        float up = clamp(vWorldDir.y * 0.5 + 0.5, 0.0, 1.0);
-        float dome = smoothstep(0.48, 0.88, up);
-        float horizon = smoothstep(0.30, 0.55, up);
-        vec3 horizonBlue = vec3(0.34, 0.78, 1.0);
-        vec3 zenithBlue = vec3(0.015, 0.30, 0.86);
-        vec3 color = mix(horizonBlue, zenithBlue, dome);
-        float alpha = mix(0.22, 0.58, dome) * horizon;
+        vec3 dir = normalize(vWorldDir);
+        float y = dir.y;
+        float horizon = smoothstep(-0.1, 0.06, y);
+
+        // The milky sea haze is a thin band hugging the horizon (~12 degrees,
+        // climbing in humid air); vivid blue owns the sky from there up,
+        // deepening toward the zenith.
+        float milk = 1.0 - smoothstep(0.03, 0.2 + uHaze * 0.3, y);
+        float deep = smoothstep(0.08, 0.55, y);
+        vec3 horizonMilk = vec3(0.74, 0.85, 0.93);
+        vec3 midBlue = vec3(0.10, 0.42, 0.94);
+        vec3 zenithBlue = vec3(0.012, 0.24, 0.87);
+        vec3 color = mix(midBlue, zenithBlue, deep);
+        color = mix(color, horizonMilk, milk);
+
+        float sunDot = clamp(dot(dir, uSunDir), -1.0, 1.0);
+
+        // Rayleigh band: deepest blue ~90 degrees from the sun.
+        float band = 1.0 - abs(sunDot);
+        color *= 1.0 - band * 0.18 * deep * uDaylight;
+
+        // Mie aureole: the sky brightens and warms toward the sun — tight in
+        // clear dry air, broad and milky in humid air, strongly warm at
+        // golden hour. Confined mostly to the low sky where the haze path is
+        // long, so it never washes the blue overhead.
+        float aureole = pow(max(sunDot, 0.0), 3.0 + (1.0 - uHaze) * 3.0);
+        vec3 warmHaze = mix(vec3(0.94, 0.96, 0.99), vec3(1.0, 0.76, 0.48), uGolden);
+        float lowSky = 1.0 - deep;
+        color = mix(color, warmHaze, aureole * (0.1 + uGolden * 0.5) * (0.2 + lowSky * 0.8));
+
+        // Anti-solar side cools toward slate at golden hour (shadow-side air).
+        float antisun = pow(max(-sunDot, 0.0), 2.0);
+        color = mix(color, vec3(0.44, 0.56, 0.78), antisun * uGolden * 0.26);
+
+        // The milk band stays translucent (the drei Sky horizon reads
+        // through it); the blue above is opaque enough to actually cover.
+        float alpha = mix(0.42, 0.84, deep) * mix(1.0, 0.6, milk) * horizon;
         alpha *= (1.0 - uNight) * (1.0 - uOvercast * 0.96);
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -595,8 +672,15 @@ function TropicalBlueSkyDome({ nightRef }) {
   useLayoutEffect(() => () => material.dispose(), [material]);
 
   useFrame(() => {
-    material.uniforms.uNight.value = nightRef.current;
-    material.uniforms.uOvercast.value = weatherEnv.overcast;
+    const u = material.uniforms;
+    u.uNight.value = nightRef.current;
+    u.uOvercast.value = weatherEnv.overcast;
+    const cel = celestialRef.current;
+    u.uGolden.value = cel.golden;
+    u.uDaylight.value = cel.daylight;
+    u.uSunDir.value.copy(cel.sun);
+    // Humidity proxy: garúa mist plus any fog thicker than the sunny floor.
+    u.uHaze.value = Math.min(1, weatherEnv.mistAmount + Math.max(0, (weatherEnv.fogDensity - 0.008) * 40));
     if (meshRef.current) meshRef.current.visible = nightRef.current < 0.92;
   });
 
@@ -748,8 +832,9 @@ function RealisticCloudLayer({ nightRef }) {
   useFrame(({ clock }) => {
     material.uniforms.uTime.value = clock.elapsedTime;
     material.uniforms.uNight.value = nightRef.current;
-    // Distant cloud bank thickens as the weather closes over.
-    material.uniforms.uOpacity.value = 0.45 + weatherEnv.overcast * 0.4;
+    // Distant cloud bank: on clear days only a faint maritime rim on the
+    // horizon (the dome owns the sky now); thickens as the weather closes.
+    material.uniforms.uOpacity.value = 0.2 + weatherEnv.overcast * 0.55;
     material.uniforms.uRain.value = weatherEnv.rainIntensity;
     if (groupRef.current) {
       groupRef.current.children.forEach(child => child.quaternion.copy(camera.quaternion));
@@ -956,7 +1041,7 @@ function ShootingStars({ nightRef }) {
 // The single shadow light tracks a slowly-moving sun/moon and a player-following
 // frustum. The frustum anchor is snapped to the shadow-map texel grid so static
 // shadows do not shimmer when the player/camera shifts by tiny sub-texel amounts.
-const SHADOW_MAP_SIZE = 2048;
+const SHADOW_MAP_SIZE = DEFAULT_SHADOW_QUALITY.mapSize;
 // Re-rendering every shadow caster on every frame is wasteful, but Darwin's
 // animated silhouette looks choppy at the old fixed 24 Hz cadence. Refresh
 // faster only while the player/shadow anchor is moving, then settle back.
@@ -990,8 +1075,9 @@ function computeDarwinShadowCoverage(lightDirection, daylight, golden) {
   };
 }
 
-export function SkyController({ stars = true, tuning = null, solarEffects = null }) {
+export function SkyController({ stars = true, tuning = null, solarEffects = null, shadowQuality = 'high' }) {
   const { scene, gl, camera } = useThree();
+  const shadowQualityConfig = useMemo(() => resolveShadowQuality(shadowQuality, gl), [shadowQuality, gl]);
   // Defaults tuned for NeutralToneMapping. Drei/Three Sky is HDR, so it still
   // needs tone mapping, but ACES pushes bright tropical blue toward white.
   const T = tuning || {};
@@ -999,8 +1085,11 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const turbidityBase = T.turbidity ?? 0.32; // very low haze: the sky shader must not wash the dome white
   // Exposure floor/gain tuned for ACESFilmicToneMapping (needs more input than
   // the old Neutral curve to land the same midtone).
-  const expBase = T.expBase ?? 0.46;
-  const expGain = T.expGain ?? 0.07;
+  // Slight daylight exposure lift (0.53 → 0.575 at full day) paired with a small
+  // key-intensity pullback in the rig: sunlit surfaces stay roughly level while
+  // ACES stops crushing ambient-lit shadow sides quite so hard.
+  const expBase = T.expBase ?? 0.485;
+  const expGain = T.expGain ?? 0.09;
   const solarHaloEnabled = solarEffects?.halo !== false;
   const solarSceneFlaresEnabled = solarEffects?.sceneFlares !== false;
   const solarSunFacingGradeEnabled = solarEffects?.sunFacingGrade !== false;
@@ -1177,6 +1266,21 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       gl.shadowMap.needsUpdate = true;
     };
   }, [gl]);
+
+  useLayoutEffect(() => {
+    const shadow = keyLightRef.current?.shadow;
+    if (!shadow) return;
+    shadow.mapSize.set(shadowQualityConfig.mapSize, shadowQualityConfig.mapSize);
+    if (shadow.map) {
+      shadow.map.dispose();
+      shadow.map = null;
+    }
+    if (shadow.mapPass) {
+      shadow.mapPass.dispose();
+      shadow.mapPass = null;
+    }
+    gl.shadowMap.needsUpdate = true;
+  }, [gl, shadowQualityConfig.mapSize]);
 
   useFrame((_, delta) => {
     const store = useThreeGameStore.getState();
@@ -1474,10 +1578,16 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       const darwinShadowCoverage = computeDarwinShadowCoverage(shadowLightDirection, daylight, golden);
       darwinShadowReach = darwinShadowCoverage.reach;
       shadowTargetOffset = darwinShadowCoverage.offset;
-      effectiveShadowExtent = lightRig.shadowExtent + darwinShadowCoverage.extraExtent;
+      effectiveShadowExtent = lightRig.shadowExtent * shadowQualityConfig.extentScale + darwinShadowCoverage.extraExtent;
       _shadowPose.addScaledVector(_shadowGroundDirection, darwinShadowCoverage.offset);
-      const shadowMapSize = key.shadow?.mapSize?.x || SHADOW_MAP_SIZE;
-      shadowTexelSize = stableShadowAnchor(_shadowPose, shadowLightDirection, effectiveShadowExtent, shadowMapSize);
+      const shadowMapSize = key.shadow?.mapSize?.x || shadowQualityConfig.mapSize || SHADOW_MAP_SIZE;
+      shadowTexelSize = stableShadowAnchor(
+        _shadowPose,
+        shadowLightDirection,
+        effectiveShadowExtent,
+        shadowMapSize,
+        shadowQualityConfig.anchorMinTexelSize,
+      );
       shadowTarget.position.copy(_shadowSnapped);
       shadowTargetMoved = lastShadowTarget.current.distanceToSquared(shadowTarget.position) > Math.max(
         SHADOW_TARGET_MOVE_EPSILON_SQ,
@@ -1494,7 +1604,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       key.intensity = lightRig.keyIntensity;
       const shadowCamera = key.shadow?.camera;
       if (key.shadow) {
-        key.shadow.radius = lightRig.shadowRadius;
+        key.shadow.radius = Math.min(4.2, lightRig.shadowRadius + shadowQualityConfig.radiusBoost);
         key.shadow.intensity = lightRig.shadowIntensity;
         key.shadow.bias = lightRig.shadowBias;
         key.shadow.normalBias = lightRig.shadowNormalBias;
@@ -1509,8 +1619,12 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       }
     }
     if (hemiRef.current) {
-      hemiRef.current.color.copy(C.hemiSkyNight).lerp(C.hemiSkyDay, daylight);
-      hemiRef.current.groundColor.copy(C.hemiGroundNight).lerp(C.hemiGroundDay, daylight);
+      hemiRef.current.color.copy(C.hemiSkyNight).lerp(C.hemiSkyDay, daylight).lerp(C.hemiSkyGolden, golden * 0.6);
+      hemiRef.current.groundColor
+        .copy(C.hemiGroundNight)
+        .lerp(C.hemiGroundDay, daylight)
+        .lerp(C.hemiGroundGolden, golden * 0.6)
+        .lerp(C.hemiGroundSunlit, lightRig.groundBounce * 0.8);
       hemiRef.current.intensity = lightRig.hemiIntensity;
     }
     if (ambientRef.current) {
@@ -1589,6 +1703,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         mist: Number(weatherEnv.mistAmount.toFixed(3)),
         rain: Number(weatherEnv.rainIntensity.toFixed(3)),
         underwater: Number(underwaterAmount.toFixed(3)),
+        shadowQuality: shadowQualityConfig.mapSize >= 4096 ? 'high' : 'standard',
+        shadowMapSize: shadowQualityConfig.mapSize,
         keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
         hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),
         ambientIntensity: Number(lightRig.ambientIntensity.toFixed(3)),
@@ -1602,6 +1718,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         shadowIntensity: Number(lightRig.shadowIntensity.toFixed(3)),
         clearSky: Number(lightRig.clearSky.toFixed(3)),
         hardSun: Number(lightRig.hardSun.toFixed(3)),
+        groundBounce: Number(lightRig.groundBounce.toFixed(3)),
         weatherSoftness: Number(lightRig.weatherSoftness.toFixed(3)),
       };
     }
@@ -1616,7 +1733,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         position={[0, 100, 0]}
         intensity={1.4}
         castShadow
-        shadow-mapSize={[SHADOW_MAP_SIZE, SHADOW_MAP_SIZE]}
+        shadow-mapSize={[shadowQualityConfig.mapSize, shadowQualityConfig.mapSize]}
         shadow-bias={-0.00012}
         shadow-normalBias={0.02}
         shadow-camera-near={40}
@@ -1648,7 +1765,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
             fog={false}
           />
         </mesh>
-        <TropicalBlueSkyDome nightRef={nightRef} />
+        <TropicalBlueSkyDome nightRef={nightRef} celestialRef={celestialRef} />
         <MidnightSkyDome midnightRef={midnightRef} />
         <RealisticCloudLayer nightRef={nightRef} />
         {/* Sun: the small disc depth-tests as a physical body. The atmospheric

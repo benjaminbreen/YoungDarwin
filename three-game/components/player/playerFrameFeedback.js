@@ -44,8 +44,10 @@ export function updatePlayerFrameFeedback({
 
   if (modelFeedbackRef.current) {
     // Hide Darwin's body in first person; status view still needs the external
-    // model for inspection.
-    modelFeedbackRef.current.visible = viewMode !== 'first' || storeState.statusViewOpen;
+    // model for inspection. During examination the camera sits between Darwin
+    // and the subject, so his body would intrude into the frame — hide it.
+    modelFeedbackRef.current.visible = (viewMode !== 'first' || storeState.statusViewOpen)
+      && !storeState.examineSession;
     horizontalVelocity.set(velocity.current.x, 0, velocity.current.z);
     const speedRatio = THREE.MathUtils.clamp(horizontalVelocity.length() / PLAYER.runSpeed, 0, 1);
     localVelocity.copy(horizontalVelocity).applyAxisAngle(UP, -group.current.rotation.y);

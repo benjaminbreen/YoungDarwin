@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { ModelAsset } from '../assets/ModelAsset';
-import { PLAYER } from './playerConfig';
+import { PLAYER, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
 import { calibratedStrideTimeScale } from './gaitProfiles';
 
@@ -34,6 +34,213 @@ const LAMP_ATTACHMENT = {
   },
 };
 
+const BUTTERFLY_NET_VISUAL = 'butterflyNet';
+const BUTTERFLY_NET_SEGMENTS = 20;
+const BUTTERFLY_NET_RINGS = 7;
+const BUTTERFLY_NET_WORLD_DOWN = new THREE.Vector3(0, -1, 0);
+// Darwin5's index/thumb chains leave RightHand along local +Y. Rotate the
+// procedural net's shaft (authored along local -Z) onto that axis so it sits in
+// the grip like a sword handle instead of projecting sideways from the palm.
+const DARWIN5_HAND_GRIP_EULER = [Math.PI / 2, 0, 0];
+
+function createNetAlphaTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  for (let offset = -128; offset <= 256; offset += 18) {
+    ctx.beginPath();
+    ctx.moveTo(offset, 0);
+    ctx.lineTo(offset + 128, 128);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(offset, 128);
+    ctx.lineTo(offset + 128, 0);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.8, 2.2);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createButterflyNetVisual() {
+  const group = new THREE.Group();
+  group.name = 'proceduralButterflyNet';
+  const disposables = [];
+
+  const handleMaterial = new THREE.MeshStandardMaterial({
+    color: '#8f6b43',
+    roughness: 0.82,
+    metalness: 0.02,
+  });
+  const wrapMaterial = new THREE.MeshStandardMaterial({
+    color: '#5f4b32',
+    roughness: 0.9,
+  });
+  const hoopMaterial = new THREE.MeshStandardMaterial({
+    color: '#d8ccb0',
+    roughness: 0.7,
+    metalness: 0.08,
+  });
+  const alphaMap = createNetAlphaTexture();
+  const netMaterial = new THREE.MeshStandardMaterial({
+    color: '#d8d2bd',
+    alphaMap,
+    alphaTest: 0.42,
+    roughness: 0.96,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  disposables.push(handleMaterial, wrapMaterial, hoopMaterial, alphaMap, netMaterial);
+
+  const handleGeometry = new THREE.CylinderGeometry(0.011, 0.013, 0.78, 10);
+  handleGeometry.rotateX(Math.PI / 2);
+  const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+  handle.name = 'butterflyNetHandle';
+  handle.position.z = -0.39;
+  handle.castShadow = true;
+  group.add(handle);
+  disposables.push(handleGeometry);
+
+  const gripGeometry = new THREE.CylinderGeometry(0.017, 0.016, 0.16, 10);
+  gripGeometry.rotateX(Math.PI / 2);
+  const grip = new THREE.Mesh(gripGeometry, wrapMaterial);
+  grip.name = 'butterflyNetGrip';
+  grip.position.z = -0.075;
+  grip.castShadow = true;
+  group.add(grip);
+  disposables.push(gripGeometry);
+
+  const collarGeometry = new THREE.CylinderGeometry(0.018, 0.015, 0.055, 12);
+  collarGeometry.rotateX(Math.PI / 2);
+  const collar = new THREE.Mesh(collarGeometry, hoopMaterial);
+  collar.name = 'butterflyNetCollar';
+  collar.position.z = -0.765;
+  collar.castShadow = true;
+  group.add(collar);
+  disposables.push(collarGeometry);
+
+  const hoopGeometry = new THREE.TorusGeometry(0.145, 0.0065, 8, 40);
+  const hoop = new THREE.Mesh(hoopGeometry, hoopMaterial);
+  hoop.name = 'butterflyNetHoop';
+  hoop.position.z = -0.82;
+  hoop.scale.set(0.82, 1.12, 1);
+  hoop.castShadow = true;
+  group.add(hoop);
+  disposables.push(hoopGeometry);
+
+  const vertexCount = BUTTERFLY_NET_SEGMENTS * BUTTERFLY_NET_RINGS;
+  const basePositions = new Float32Array(vertexCount * 3);
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = [];
+  for (let ring = 0; ring < BUTTERFLY_NET_RINGS; ring += 1) {
+    const t = ring / (BUTTERFLY_NET_RINGS - 1);
+    const radiusX = THREE.MathUtils.lerp(0.118, 0.028, t);
+    const radiusY = THREE.MathUtils.lerp(0.162, 0.035, t);
+    const z = -0.835 - t * 0.24;
+    const sag = -0.014 * t * t;
+    for (let seg = 0; seg < BUTTERFLY_NET_SEGMENTS; seg += 1) {
+      const theta = (seg / BUTTERFLY_NET_SEGMENTS) * Math.PI * 2;
+      const idx = ring * BUTTERFLY_NET_SEGMENTS + seg;
+      const p = idx * 3;
+      const u = idx * 2;
+      basePositions[p] = Math.cos(theta) * radiusX;
+      basePositions[p + 1] = Math.sin(theta) * radiusY + sag;
+      basePositions[p + 2] = z;
+      positions[p] = basePositions[p];
+      positions[p + 1] = basePositions[p + 1];
+      positions[p + 2] = basePositions[p + 2];
+      uvs[u] = seg / BUTTERFLY_NET_SEGMENTS;
+      uvs[u + 1] = t;
+    }
+  }
+  for (let ring = 0; ring < BUTTERFLY_NET_RINGS - 1; ring += 1) {
+    for (let seg = 0; seg < BUTTERFLY_NET_SEGMENTS; seg += 1) {
+      const a = ring * BUTTERFLY_NET_SEGMENTS + seg;
+      const b = ring * BUTTERFLY_NET_SEGMENTS + ((seg + 1) % BUTTERFLY_NET_SEGMENTS);
+      const c = (ring + 1) * BUTTERFLY_NET_SEGMENTS + seg;
+      const d = (ring + 1) * BUTTERFLY_NET_SEGMENTS + ((seg + 1) % BUTTERFLY_NET_SEGMENTS);
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const bagGeometry = new THREE.BufferGeometry();
+  bagGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  bagGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  bagGeometry.setIndex(indices);
+  bagGeometry.computeVertexNormals();
+  const bag = new THREE.Mesh(bagGeometry, netMaterial);
+  bag.name = 'butterflyNetSoftBag';
+  bag.castShadow = false;
+  bag.receiveShadow = false;
+  group.add(bag);
+  disposables.push(bagGeometry);
+
+  return {
+    object: group,
+    bag,
+    basePositions,
+    gravityLocal: new THREE.Vector3(0, -1, 0),
+    worldQuaternion: new THREE.Quaternion(),
+    phase: Math.random() * Math.PI * 2,
+    dispose: () => disposables.forEach(item => item.dispose?.()),
+  };
+}
+
+function updateButterflyNetVisual(visual, { time, walking, running, action }) {
+  const attr = visual?.bag?.geometry?.attributes?.position;
+  if (!attr) return;
+  const object = visual.object;
+  if (object) {
+    object.updateWorldMatrix(true, false);
+    object.getWorldQuaternion(visual.worldQuaternion);
+    visual.gravityLocal.copy(BUTTERFLY_NET_WORLD_DOWN).applyQuaternion(visual.worldQuaternion.invert()).normalize();
+  } else {
+    visual.gravityLocal.set(0, -1, 0);
+  }
+  const gravity = visual.gravityLocal;
+  const moving = walking || running;
+  const stride = running ? 9.4 : walking ? 6.2 : 2.2;
+  const sway = running ? 0.034 : walking ? 0.023 : 0.009;
+  const swinging = action === 'butterflyNetSwing' || action === 'swingNet';
+  const ripple = swinging ? 0.035 : 0.012;
+  const sagDepth = swinging ? 0.22 : moving ? 0.26 : 0.31;
+  const positions = attr.array;
+  for (let idx = 0; idx < BUTTERFLY_NET_SEGMENTS * BUTTERFLY_NET_RINGS; idx += 1) {
+    const ring = Math.floor(idx / BUTTERFLY_NET_SEGMENTS);
+    const seg = idx % BUTTERFLY_NET_SEGMENTS;
+    const t = ring / (BUTTERFLY_NET_RINGS - 1);
+    const p = idx * 3;
+    const theta = (seg / BUTTERFLY_NET_SEGMENTS) * Math.PI * 2;
+    const loose = Math.pow(t, 1.35);
+    const gravitySag = sagDepth * Math.pow(t, 1.48);
+    const wave = Math.sin(time * stride + visual.phase + ring * 0.85 + seg * 0.22);
+    const cross = Math.cos(time * (moving ? 4.4 : 1.6) + visual.phase + ring * 0.55);
+    positions[p] = visual.basePositions[p]
+      + gravity.x * gravitySag
+      + cross * sway * loose
+      + Math.cos(theta) * wave * ripple * loose * 0.22;
+    positions[p + 1] = visual.basePositions[p + 1]
+      + gravity.y * gravitySag
+      - loose * (moving ? 0.02 : 0.012)
+      + wave * ripple * loose * 0.45;
+    positions[p + 2] = visual.basePositions[p + 2]
+      + gravity.z * gravitySag
+      + wave * ripple * loose;
+  }
+  attr.needsUpdate = true;
+  visual.bag.geometry.computeVertexNormals();
+}
+
 // Held-tool props. Placeholder GLBs live under /assets/models/tools/ — swap in
 // finished models by replacing the file at the same path.
 const HAND_TOOLS = [
@@ -53,8 +260,41 @@ const HAND_TOOLS = [
       },
     },
   },
-  { toolId: 'insect_net', path: '/assets/models/tools/net.glb',     scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
-  { toolId: 'snare',      path: '/assets/models/tools/snare.glb',   scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
+  {
+    toolId: 'insect_net',
+    path: '/assets/models/tools/net.glb',
+    visual: BUTTERFLY_NET_VISUAL,
+    scale: 1,
+    position: [0.0, -0.012, -0.015],
+    euler: [0, 0, -Math.PI / 2],
+    hand: 'right',
+    orient: 'hand',
+    modelOverrides: {
+      darwin5: {
+        bone: RIGHT_HAND,
+        position: [0.0, -0.012, -0.015],
+        euler: DARWIN5_HAND_GRIP_EULER,
+        orient: 'hand',
+      },
+    },
+  },
+  {
+    toolId: 'snare',
+    path: '/assets/models/tools/snare.glb',
+    scale: 1,
+    position: [0.0, -0.012, -0.015],
+    euler: [0, 0, -Math.PI / 2],
+    hand: 'right',
+    orient: 'hand',
+    modelOverrides: {
+      darwin5: {
+        bone: RIGHT_HAND,
+        position: [0.0, -0.012, -0.015],
+        euler: DARWIN5_HAND_GRIP_EULER,
+        orient: 'hand',
+      },
+    },
+  },
   { toolId: 'hammer',     path: '/assets/models/tools/hammer.glb',  scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
 ];
 
@@ -269,28 +509,51 @@ function HandLamp({ scene, modelAssetId }) {
 // Attaches a held-tool GLB to Darwin's right hand and shows it only while that
 // tool is the active one. Hand-oriented props inherit the animated grip pose;
 // body-oriented props remain supported for future coarse world-facing tools.
-function HandProp({ scene, config, modelAssetId }) {
+function HandProp({ scene, config, modelAssetId, motionRef }) {
   const resolvedConfig = useMemo(() => {
     const override = config.modelOverrides?.[modelAssetId];
     return override ? { ...config, ...override } : config;
   }, [config, modelAssetId]);
   const { scene: source } = useGLTF(resolvedConfig.path);
   const groupRef = useRef(null);
+  const visualRef = useRef(null);
   const boneQuat = useMemo(() => new THREE.Quaternion(), []);
   const bodyQuat = useMemo(() => new THREE.Quaternion(), []);
+  const aimQuat = useMemo(() => new THREE.Quaternion(), []);
+  const aimDir = useMemo(() => new THREE.Vector3(), []);
+  const aimForward = useMemo(() => new THREE.Vector3(), []);
+  const aimRight = useMemo(() => new THREE.Vector3(), []);
+  const localShaftAxis = useMemo(() => new THREE.Vector3(0, 0, -1), []);
   const tweakQuat = useMemo(() => new THREE.Quaternion(), []);
   const tweakEuler = useMemo(() => new THREE.Euler(), []);
 
   useEffect(() => {
     if (!scene || !source) return undefined;
-    const object = source.clone(true);
+    let customVisual = null;
+    const object = resolvedConfig.visual === BUTTERFLY_NET_VISUAL
+      ? (customVisual = createButterflyNetVisual()).object
+      : source.clone(true);
     object.traverse(obj => {
       if (!obj.isMesh) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
       obj.userData.noTint = true;
     });
-    const handRegex = resolvedConfig.hand === 'left' ? LEFT_HAND : RIGHT_HAND;
+    if (resolvedConfig.objectPosition) {
+      object.position.set(
+        resolvedConfig.objectPosition[0] || 0,
+        resolvedConfig.objectPosition[1] || 0,
+        resolvedConfig.objectPosition[2] || 0,
+      );
+    }
+    if (resolvedConfig.objectEuler) {
+      object.rotation.set(
+        resolvedConfig.objectEuler[0] || 0,
+        resolvedConfig.objectEuler[1] || 0,
+        resolvedConfig.objectEuler[2] || 0,
+      );
+    }
+    const handRegex = resolvedConfig.bone || (resolvedConfig.hand === 'left' ? LEFT_HAND : RIGHT_HAND);
     const handle = attachToBone(scene, handRegex, object, {
       worldScale: resolvedConfig.scale,
       position: resolvedConfig.position,
@@ -301,28 +564,55 @@ function HandProp({ scene, config, modelAssetId }) {
     tweakEuler.set(resolvedConfig.euler[0], resolvedConfig.euler[1], resolvedConfig.euler[2]);
     tweakQuat.setFromEuler(tweakEuler);
     groupRef.current = handle.group;
+    visualRef.current = customVisual;
     return () => {
       handle.dispose();
+      customVisual?.dispose?.();
       groupRef.current = null;
+      visualRef.current = null;
     };
   }, [scene, source, resolvedConfig, tweakEuler, tweakQuat]);
 
-  useFrame(() => {
+  useFrame(({ clock }) => {
     const group = groupRef.current;
     if (!group) return;
-    const visible = useThreeGameStore.getState().activeToolId === resolvedConfig.toolId;
+    const storeState = useThreeGameStore.getState();
+    const visible = storeState.activeToolId === resolvedConfig.toolId;
     if (group.visible !== visible) group.visible = visible;
     if (!visible) return;
     const bone = group.parent;
     if (!bone) return;
     if (resolvedConfig.orient === 'hand') {
       group.quaternion.copy(tweakQuat);
-      return;
+    } else {
+      bone.getWorldQuaternion(boneQuat);
+      if (resolvedConfig.orient === 'facing') {
+        const facing = storeState.playerPose?.facing;
+        aimForward.set(facing?.x || 0, 0, facing?.z || -1);
+        if (aimForward.lengthSq() < 1e-4) aimForward.set(0, 0, -1);
+        aimForward.normalize();
+        aimRight.set(-aimForward.z, 0, aimForward.x).normalize();
+        aimDir
+          .copy(aimForward)
+          .addScaledVector(aimRight, resolvedConfig.aimSide ?? 0)
+          .setY(resolvedConfig.aimElevation ?? 0.35)
+          .normalize();
+        aimQuat.setFromUnitVectors(localShaftAxis, aimDir).multiply(tweakQuat);
+        group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+      } else {
+        scene.getWorldQuaternion(bodyQuat);
+        // Cancel the bone's world rotation, re-apply the body's, then the tweak.
+        group.quaternion.copy(boneQuat).invert().multiply(bodyQuat).multiply(tweakQuat);
+      }
     }
-    bone.getWorldQuaternion(boneQuat);
-    scene.getWorldQuaternion(bodyQuat);
-    // Cancel the bone's world rotation, re-apply the body's, then the tweak.
-    group.quaternion.copy(boneQuat).invert().multiply(bodyQuat).multiply(tweakQuat);
+    if (visualRef.current) {
+      updateButterflyNetVisual(visualRef.current, {
+        time: clock.elapsedTime,
+        walking: Boolean(motionRef?.current?.walking),
+        running: Boolean(motionRef?.current?.running),
+        action: motionRef?.current?.action || null,
+      });
+    }
   });
 
   return null;
@@ -483,9 +773,12 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (motionRef.current.lying && !motionRef.current.walking && !motionRef.current.running) return 'layingIdle';
     if (motionRef.current.sitting && !motionRef.current.walking && !motionRef.current.running) return 'sitIdle';
     if (motionRef.current.swimming) {
-      const strokeScale = THREE.MathUtils.clamp(speed / 3.2, 0.85, 1.3);
+      const sprinting = motionRef.current.swimSprinting && speed > SWIM.speed * 1.05;
+      const strokeScale = sprinting
+        ? THREE.MathUtils.clamp(speed / SWIM.sprintSpeed, 0.9, 1.35)
+        : THREE.MathUtils.clamp(speed / SWIM.speed, 0.85, 1.3);
       return speed > 0.7
-        ? { clip: 'swim', fade: 0.24, timeScale: strokeScale }
+        ? { clip: sprinting ? 'swimFast' : 'swim', fade: sprinting ? 0.14 : 0.24, timeScale: strokeScale }
         : { clip: 'treadWater', fade: 0.28 };
     }
     const injured = status.health < 45;
@@ -499,6 +792,9 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       const standingJumpScale = THREE.MathUtils.lerp(1.0, 0.76, charge);
       const runningJumpScale = THREE.MathUtils.lerp(0.95, 0.72, charge);
       const shortStandingJump = !motionRef.current.jumpWasRunning && charge < 0.15;
+      if (modelAssetId === 'darwin5' && motionRef.current.jumpWaterEntryIntent === 'dive' && !injured) {
+        return { clip: 'dive', fade: jumpPhase === 'takeoff' ? 0.04 : 0.08, timeScale: 1 };
+      }
       const useDarwin5FullStandingJump = modelAssetId === 'darwin5' && !motionRef.current.jumpWasRunning;
       if (useDarwin5FullStandingJump) {
         return darwin5StandingJumpRequest(charge, jumpPhase);
@@ -649,7 +945,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       />
       {modelScene && <HandLamp scene={modelScene} modelAssetId={modelAssetId} />}
       {modelScene && HAND_TOOLS.map(tool => (
-        <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} />
+        <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} motionRef={motionRef} />
       ))}
     </>
   );

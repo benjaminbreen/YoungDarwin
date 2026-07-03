@@ -167,6 +167,7 @@ export function collectionAnimationForTool(toolId, specimen = null, options = {}
   }
   if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true, align: true };
   if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (toolId === 'snare') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
   if (toolId === 'hammer') return { clip: 'heavyToolSwing', duration: ACTION_DURATION.heavyToolSwing, lockMovement: true, align: true };
   if (toolId === 'sketch') {
     const clip = documentClipForSpecimen(specimen);
@@ -200,9 +201,11 @@ export function updatePlayerInteractions({
   zoneSpecimens,
   stateRef,
   lastInteractRef,
+  lastExamineRef,
   lastCameraRef,
   startAction,
   collectNearby,
+  openExamine,
   cycleViewMode,
   setNearbySpecimen,
   setActiveTool,
@@ -231,13 +234,18 @@ export function updatePlayerInteractions({
   let nearest = null;
   let nearestDistance = 4.4;
   const specimenRuntimePositions = storeState.specimenRuntimePositions?.[currentZoneId] || {};
+  const collectedSpecimenActorIds = new Set(storeState.collectedSpecimenActorIds || []);
   for (const specimen of zoneSpecimens) {
     const actorId = specimen.instanceId || specimen.id;
+    if (collectedSpecimenActorIds.has(actorId)) continue;
     const runtime = specimenRuntimePositions[actorId];
     const [x, , z] = specimen.spawnPoint;
     const runtimeX = runtime?.x ?? x;
+    const runtimeY = runtime?.y ?? specimen.spawnPoint?.[1] ?? position.y;
     const runtimeZ = runtime?.z ?? z;
-    const distance = Math.hypot(position.x - runtimeX, position.z - runtimeZ);
+    const verticalDelta = Math.max(0, runtimeY - position.y);
+    if (verticalDelta > specimenInteractionHeight(specimen) + 2.4) continue;
+    const distance = Math.hypot(position.x - runtimeX, position.z - runtimeZ) + Math.max(0, verticalDelta - 0.8) * 0.45;
     if (distance < nearestDistance) {
       nearest = actorId;
       nearestDistance = distance;
@@ -246,6 +254,62 @@ export function updatePlayerInteractions({
   if (storeState.nearbySpecimenId !== nearest) {
     setNearbySpecimen(nearest);
   }
+
+  const startSpecimenCollection = (currentState, specimen) => {
+    if (!specimen || stateRef.current.action) return false;
+    if (!currentState.examinedTypeIds?.includes(specimen.id)) {
+      // Collection is gated by examination. The store emits the explanatory
+      // narration and leaves the player free to press Enter to examine.
+      collectNearby();
+      return true;
+    }
+
+    const alreadyCollected = currentState.collectedSpecimenIds?.includes(specimen.id) || false;
+    const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
+    const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
+    const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
+    if (animation.align && target) {
+      const dx = target.x - position.x;
+      const dz = target.z - position.z;
+      if (Math.hypot(dx, dz) > 0.08) {
+        const now = performance.now() / 1000;
+        stateRef.current.collectionFaceMotion = {
+          targetYaw: Math.atan2(dx, dz),
+          startedAt: now,
+          until: now + Math.min(0.58, Math.max(0.24, (animation.duration || 1) * 0.18)),
+        };
+      }
+    }
+    startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
+    collectNearby();
+    return true;
+  };
+
+  // Enter (or the mobile/desktop Examine button, which pulses touch.inspect)
+  // examines first, then becomes the collection command once that type has a
+  // saved field note.
+  const examinePressed = keys.examine || touch.inspect;
+  if (examinePressed && !lastExamineRef.current && !stateRef.current.action) {
+    const currentState = useThreeGameStore.getState();
+    const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
+    const specimen = specimenId
+      ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
+      : null;
+    if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
+      setNearbySpecimen(null);
+    } else if (specimen && currentState.examinedTypeIds?.includes(specimen.id)) {
+      startSpecimenCollection(currentState, specimen);
+    } else if (specimenId && !currentState.examineSession) {
+      openExamine(specimenId);
+    } else if (currentState.nearbyItem && !currentState.examineSession) {
+      openExamine({
+        itemTypeId: currentState.nearbyItem.typeId,
+        actorId: currentState.nearbyItem.actorId,
+        focus: currentState.nearbyItem.focus,
+      });
+    }
+  }
+  lastExamineRef.current = examinePressed;
 
   if ((keys.interact || touch.interact) && !lastInteractRef.current) {
     const currentState = useThreeGameStore.getState();
@@ -273,6 +337,8 @@ export function updatePlayerInteractions({
         }
         setCarriedObject(currentState.carryPrompt.id);
       }
+    } else if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
+      setNearbySpecimen(null);
     } else if (!specimen && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
       beginZoneTransition(currentState.edgePrompt.toRegionId, {
         entryEdge: oppositeEdge(currentState.edgePrompt.edge),
@@ -283,25 +349,8 @@ export function updatePlayerInteractions({
         ...currentState.edgePrompt,
         message: currentState.edgePrompt.description,
       });
-    } else if (specimen && !stateRef.current.action) {
-      const alreadyCollected = specimen ? currentState.collectedSpecimenIds?.includes(specimen.id) : false;
-      const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
-      const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
-      const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
-      if (animation.align && target) {
-        const dx = target.x - position.x;
-        const dz = target.z - position.z;
-        if (Math.hypot(dx, dz) > 0.08) {
-          const now = performance.now() / 1000;
-          stateRef.current.collectionFaceMotion = {
-            targetYaw: Math.atan2(dx, dz),
-            startedAt: now,
-            until: now + Math.min(0.58, Math.max(0.24, (animation.duration || 1) * 0.18)),
-          };
-        }
-      }
-      startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
-      collectNearby();
+    } else if (specimen) {
+      startSpecimenCollection(currentState, specimen);
     }
   }
   if (keys.camera && !lastCameraRef.current) cycleViewMode();

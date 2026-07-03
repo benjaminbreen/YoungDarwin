@@ -2,8 +2,36 @@ import * as THREE from 'three';
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { terrainBiomeAt } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
-import { ACTION_DURATION, PLAYER } from './playerConfig';
+import { ACTION_DURATION, PLAYER, SWIM } from './playerConfig';
 import { arcadeLandingMomentum } from './arcadeLocomotion';
+
+const WATER_JUMP_PREDICT_SECONDS = 2.35;
+const WATER_JUMP_PREDICT_STEP = 0.08;
+const WATER_JUMP_RECHECK_SECONDS = 0.22;
+
+function predictJumpWaterEntry({ position, velocity, collisionAdapter, frameScratch }) {
+  const horizontalSpeed = Math.hypot(velocity.x, velocity.z);
+  if (horizontalSpeed < PLAYER.walkSpeed * 0.25) return null;
+
+  const probe = frameScratch.jumpWaterProbe || new THREE.Vector3();
+  frameScratch.jumpWaterProbe = probe;
+  const gravity = PLAYER.gravity * 1.12;
+  for (let t = WATER_JUMP_PREDICT_STEP; t <= WATER_JUMP_PREDICT_SECONDS; t += WATER_JUMP_PREDICT_STEP) {
+    const x = position.x + velocity.x * t;
+    const z = position.z + velocity.z * t;
+    const y = position.y + velocity.y * t - 0.5 * gravity * t * t;
+    probe.set(x, y, z);
+    const ground = collisionAdapter.groundInfo(probe, { ignoreObstacles: true });
+    const waterDepth = WATER_LEVEL - ground.y;
+    if (waterDepth < SWIM.enterDepth && y <= ground.y + PLAYER.groundContactEpsilon + 0.08) {
+      return null;
+    }
+    if (waterDepth >= SWIM.enterDepth && y <= WATER_LEVEL - 0.08) {
+      return 'dive';
+    }
+  }
+  return null;
+}
 
 export function updatePlayerJumpInputAndGravity({
   keys,
@@ -59,6 +87,12 @@ export function updatePlayerJumpInputAndGravity({
         velocity.current.z = horizontal.z;
       }
     }
+    const waterEntryIntent = predictJumpWaterEntry({
+      position: group.current.position,
+      velocity: velocity.current,
+      collisionAdapter,
+      frameScratch,
+    });
     jumpCharge.current.active = false;
     jumpCharge.current.amount = 0;
     pendingStandingJump.current.active = false;
@@ -70,6 +104,7 @@ export function updatePlayerJumpInputAndGravity({
       wasRunning: launchRunning,
       fromPlayerJump: true,
       chargeAmount: charge,
+      waterEntryIntent,
       launchedAt: now,
       launchY: group.current.position.y,
       launchX: group.current.position.x,
@@ -79,6 +114,7 @@ export function updatePlayerJumpInputAndGravity({
     stateRef.current.jumpPhase = 'takeoff';
     stateRef.current.jumpWasRunning = launchRunning;
     stateRef.current.jumpChargeAmount = charge;
+    stateRef.current.jumpWaterEntryIntent = waterEntryIntent;
     const launchGround = collisionAdapter.groundInfo(group.current.position);
     stateRef.current.jumpFromHeight = Number.isFinite(launchGround.terrainY)
       && launchGround.y - launchGround.terrainY > 0.85;
@@ -142,6 +178,22 @@ export function updatePlayerJumpInputAndGravity({
         velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, PLAYER.groundDeceleration, delta);
       }
     }
+  }
+
+  if (
+    jumpState.current.fromPlayerJump
+    && wasAirborne.current
+    && !swimState.current.active
+    && now - jumpState.current.launchedAt <= WATER_JUMP_RECHECK_SECONDS
+  ) {
+    const waterEntryIntent = predictJumpWaterEntry({
+      position: group.current.position,
+      velocity: velocity.current,
+      collisionAdapter,
+      frameScratch,
+    });
+    jumpState.current.waterEntryIntent = waterEntryIntent;
+    stateRef.current.jumpWaterEntryIntent = waterEntryIntent;
   }
 
   lastButtons.current.jump = jumpHeld;
@@ -223,12 +275,14 @@ export function resolvePlayerLanding({
         wasRunning: false,
         fromPlayerJump: false,
         chargeAmount: 0,
+        waterEntryIntent: null,
         launchedAt: -10,
         launchY: group.current.position.y,
         launchX: group.current.position.x,
         launchZ: group.current.position.z,
       };
       stateRef.current.jumpPhase = 'landing';
+      stateRef.current.jumpWaterEntryIntent = null;
     }
 
     const landingSpeed = Math.hypot(velocity.current.x, velocity.current.z);

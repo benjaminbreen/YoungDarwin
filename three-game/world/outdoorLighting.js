@@ -42,10 +42,14 @@ export function computeOutdoorLightRig({
   const clearVivid = clamp01(d * clearSky * (0.46 + highSun * 0.42 + g * 0.22));
   const moonlight = (1 - d) * 0.16 * (0.35 + moon * 0.65);
 
+  // Golden hour trades fill for key: the ambient/hemisphere floor drops and
+  // the sun gains, so low morning/evening light actually models the terrain
+  // instead of reading as slightly-tinted noon. Net scene brightness stays
+  // roughly level; only the ratio (and so the contrast) shifts.
   const keyIntensity = Math.max(
     0.08,
     (0.18
-      + d * (2.46 + hardSun * 0.92 + goldenSideLight * 0.5 + clearVivid * 0.16 - weatherSoftness * 0.76)
+      + d * (2.34 + hardSun * 0.92 + goldenSideLight * 0.8 + clearVivid * 0.16 - weatherSoftness * 0.76)
       + moonlight)
       * (1 - dim * 0.24)
       * (1 - underwater * 0.22),
@@ -54,7 +58,7 @@ export function computeOutdoorLightRig({
   const hemiIntensity = Math.max(
     0.16,
     (0.32
-      + d * (0.84 + weatherSoftness * 0.58 + g * 0.06 - hardSun * 0.34 - clearVivid * 0.06)
+      + d * (0.84 + weatherSoftness * 0.58 - g * 0.25 - hardSun * 0.34 - clearVivid * 0.06)
       + cloud * 0.08)
       * (1 - dim * 0.18)
       * (1 - underwater * 0.2),
@@ -63,7 +67,7 @@ export function computeOutdoorLightRig({
   const ambientIntensity = Math.max(
     0.12,
     (0.22
-      + d * (0.1 + weatherSoftness * 0.22 + mistAmount * 0.06 - hardSun * 0.15 - clearVivid * 0.04)
+      + d * (0.1 + weatherSoftness * 0.22 + mistAmount * 0.06 - g * 0.08 - hardSun * 0.15 - clearVivid * 0.04)
       + (1 - d) * 0.04)
       * (1 - underwater * 0.24),
   );
@@ -90,13 +94,21 @@ export function computeOutdoorLightRig({
   const shadowSoftness = clamp01(0.2 + weatherSoftness * 0.62 + lowSun * 0.34 + g * 0.24 - hardSun * 0.13);
   const shadowRadius = lerp(0.95, 3.5, shadowSoftness);
   // Capped below 1 so even a hard clear-day sun leaves shadowed surfaces some
-  // readable fill rather than crushing to full black.
+  // readable fill rather than crushing to full black. Low raking sun casts
+  // *stronger* shadows, not weaker — goldenSideLight adds here.
   const shadowIntensity = Math.min(
     0.72,
-    clamp01(0.68 - weatherSoftness * 0.38 - g * 0.06 + hardSun * 0.08 + clearVivid * 0.03),
+    clamp01(0.68 - weatherSoftness * 0.38 + goldenSideLight * 0.12 + hardSun * 0.08 + clearVivid * 0.03),
   );
   const shadowNormalBias = lerp(0.018, 0.032, clamp01(lowSun * 0.68 + weatherSoftness * 0.32));
   const shadowBias = lerp(-0.00013, -0.00006, weatherSoftness);
+  // Bright sand is a reflector: the harder and higher the clear sun, the more
+  // bounce lands on *vertical* shadow sides (people, trunks, rock faces). The
+  // fill channels above deliberately fall as the sun hardens (terrain contrast);
+  // this channel rises instead, and consumers aim it at upright surfaces —
+  // hemisphere ground color, the player bounce light, player IBL — so ground
+  // planes keep their shading while shadow sides get the real-beach lift.
+  const groundBounce = clamp01(d * clearSky * (0.22 + highSun * 0.52 + g * 0.2));
   const terrainSunWarmth = clamp01(d * clearSky * (0.2 + highSun * 0.32 + g * 0.5 + clearVivid * 0.12));
   const terrainCoolShade = clamp01(d * (0.17 + hardSun * 0.3 + clearVivid * 0.08) * (1 - weatherSoftness * 0.5));
   const terrainWetShine = clamp01(d * clearSky * (0.16 + hardSun * 0.42 + g * 0.24 + clearVivid * 0.12) + rainAmount * 0.34);
@@ -117,6 +129,7 @@ export function computeOutdoorLightRig({
     terrainSunWarmth,
     terrainCoolShade,
     terrainWetShine,
+    groundBounce,
     clearSky,
     hardSun,
     highSun,

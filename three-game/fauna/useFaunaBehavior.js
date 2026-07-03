@@ -26,6 +26,9 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
   }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed]);
   const positionRef = useRef(basePosition?.clone?.() || null);
   const yawRef = useRef(0);
+  const pitchRef = useRef(0);
+  const rollRef = useRef(0);
+  const airborneRef = useRef(false);
   const animationRef = useRef(null);
   const debugRef = useRef(null);
   const statusRef = useRef({ ok: false, reason: 'not-started' });
@@ -36,12 +39,18 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       controller.reset({ basePosition: base, zoneId: currentZoneId });
       positionRef.current = controller.state.position;
       yawRef.current = controller.state.yaw;
+      pitchRef.current = controller.state.pitch || 0;
+      rollRef.current = controller.state.roll || 0;
+      airborneRef.current = controller.state.airborne === true;
       animationRef.current = controller.state.animation;
       debugRef.current = controller.state.debug;
       return;
     }
     positionRef.current = base || null;
     yawRef.current = 0;
+    pitchRef.current = 0;
+    rollRef.current = 0;
+    airborneRef.current = false;
     animationRef.current = null;
     debugRef.current = null;
     statusRef.current = { ok: false, reason: 'inactive' };
@@ -89,6 +98,9 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     statusRef.current = status;
     positionRef.current = controller.state.position;
     yawRef.current = controller.state.yaw;
+    pitchRef.current = controller.state.pitch || 0;
+    rollRef.current = controller.state.roll || 0;
+    airborneRef.current = controller.state.airborne === true;
     animationRef.current = controller.state.animation;
     debugRef.current = controller.state.debug;
   });
@@ -98,6 +110,9 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     profile,
     positionRef,
     yawRef,
+    pitchRef,
+    rollRef,
+    airborneRef,
     animationRef,
     debugRef,
     statusRef,

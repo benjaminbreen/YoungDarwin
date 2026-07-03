@@ -129,6 +129,7 @@ export const ACTION_DURATION = {
   stumble: 0.85,
   runningSlide: 1.55,
   fallingIntoPool: 1.1,
+  dive: 1.23,
   jumpFromWall: 0.85,
   swimToEdge: 1.2,
   runningTurn180: 0.7,

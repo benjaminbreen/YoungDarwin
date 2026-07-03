@@ -3,6 +3,9 @@
 // read them every frame without touching React state.
 export const weatherEnv = {
   overcast: 0,
+  // Fair-weather cumulus coverage (0 = empty blue, 1 = broken puffy field).
+  // Independent of `overcast`, which is deck/ceiling closure.
+  cumulus: 0.3,
   fogDensity: 0.011,
   rainIntensity: 0,
   mistAmount: 0,

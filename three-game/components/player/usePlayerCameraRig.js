@@ -235,8 +235,10 @@ export function usePlayerCameraRig() {
     } else {
       cameraShake.set(0, 0, 0);
     }
-    const statusViewOpen = useThreeGameStore.getState().statusViewOpen;
-    if (openingCameraActive && !statusViewOpen) {
+    const rigStoreState = useThreeGameStore.getState();
+    const statusViewOpen = rigStoreState.statusViewOpen;
+    const examineSession = rigStoreState.examineSession?.focus ? rigStoreState.examineSession : null;
+    if (openingCameraActive && !statusViewOpen && !examineSession) {
       const sequenceId = openingCamera.sequenceId || 'opening-camera';
       if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
         openingCameraRuntimeRef.current.sequenceId = sequenceId;
@@ -309,7 +311,44 @@ export function usePlayerCameraRig() {
       return;
     }
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
-    if (statusViewOpen) {
+    if (examineSession) {
+      // Diegetic examine shot: dolly in between Darwin and the subject and
+      // frame the subject by its bulk (frameHint), with a very slow orbital
+      // drift so the held pose still feels alive. Shares statusLookRef with
+      // the status view so open/close easing behaves identically.
+      const focus = examineSession.focus;
+      const hint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
+      const centerY = focus.y + Math.max(0.22, hint.height * 0.55);
+      let dirX = playerPosition.x - focus.x;
+      let dirZ = playerPosition.z - focus.z;
+      const dirLength = Math.hypot(dirX, dirZ);
+      if (dirLength < 0.001) {
+        dirX = 0;
+        dirZ = 1;
+      } else {
+        dirX /= dirLength;
+        dirZ /= dirLength;
+      }
+      const drift = Math.sin(now * 0.14) * 0.16;
+      const driftCos = Math.cos(drift);
+      const driftSin = Math.sin(drift);
+      const orbitX = dirX * driftCos - dirZ * driftSin;
+      const orbitZ = dirX * driftSin + dirZ * driftCos;
+      const distance = Math.max(1.15, hint.radius * 2.7);
+      if (!statusLookRef.current) {
+        statusLookRef.current = camera.position.clone()
+          .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));
+      }
+      const ease = 1 - Math.exp(-2.4 * delta);
+      const eye = scratch.statusEye.set(
+        focus.x + orbitX * distance,
+        centerY + Math.max(0.12, hint.radius * 0.3),
+        focus.z + orbitZ * distance,
+      );
+      camera.position.lerp(eye, ease);
+      statusLookRef.current.lerp(scratch.chest.set(focus.x, centerY, focus.z), ease);
+      camera.lookAt(statusLookRef.current);
+    } else if (statusViewOpen) {
       const forward = scratch.statusForward.set(facing.x, 0, facing.z);
       if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
       forward.normalize();
@@ -381,7 +420,7 @@ export function usePlayerCameraRig() {
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-6.5 * delta));
       camera.lookAt(pivot);
     }
-    if (!statusViewOpen && statusLookRef.current) {
+    if (!statusViewOpen && !examineSession && statusLookRef.current) {
       const ease = 1 - Math.exp(-3.2 * delta);
       statusLookRef.current.lerp(statusPivot, ease);
       camera.lookAt(statusLookRef.current);

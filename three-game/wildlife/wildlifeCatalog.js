@@ -9,6 +9,10 @@ const SPECIES_ALIASES = {
   marine_iguana: 'marineiguana',
   mediumGroundFinch: 'mediumgroundfinch',
   medium_ground_finch: 'mediumgroundfinch',
+  gull: 'lavagull',
+  lava_gull: 'lavagull',
+  lavagull: 'lavagull',
+  seagull: 'lavagull',
   seaLion: 'sealion',
   sea_lion: 'sealion',
 };
@@ -301,6 +305,53 @@ export const wildlifeCatalog = {
       startleCooldown: 3.1,
     },
   },
+  lavagull: {
+    id: 'lavagull',
+    assetId: 'seagull',
+    englishName: 'Lava gull',
+    latinName: 'Leucophaeus fuliginosus',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    collisionRadius: 0.42,
+    interactionHeight: 0.34,
+    behavior: {
+      controller: 'shorebird',
+      habitatRadiusX: 10.5,
+      habitatRadiusZ: 5.2,
+      walkSpeed: 0.28,
+      fleeSpeed: 1.55,
+      patrolRate: 0.24,
+      alertRadius: 7.2,
+      panicRadius: 2.15,
+      bobAmount: 0.012,
+      groundOffset: 0.055,
+      turnRate: 12,
+      idleClip: 'Armature|look',
+      feedClip: 'Armature|eat',
+      preenClip: 'Armature|clearing',
+      walkClip: 'Armature|walk',
+      runClip: 'Armature|run',
+      flyClip: 'Armature|fly',
+      glideClip: 'Armature|glide',
+      contactReaction: 'takeoff',
+      contactAlertRadius: 4.8,
+      contactReactionDuration: 1.25,
+      startleDuration: 1.05,
+      startleSpeedMultiplier: 0.55,
+      startleCooldown: 3.4,
+      takeoffRadius: 3.7,
+      takeoffDuration: 1.45,
+      flightDuration: 10.5,
+      flightHeight: 4.4,
+      flightRadiusX: 7.2,
+      flightRadiusZ: 3.7,
+      landingDuration: 1.8,
+      landClearRadius: 5.6,
+      orbitSpeed: 0.54,
+      rollAmount: 0.11,
+      pitchAmount: 0.055,
+    },
+  },
   lavalizard: {
     id: 'lavalizard',
     assetId: 'lavalizard',
@@ -361,7 +412,7 @@ export const wildlifeCatalog = {
 
 export const wildlifeBehaviorProfiles = Object.fromEntries(
   Object.entries(wildlifeCatalog)
-    .filter(([, entry]) => entry.behavior?.controller === 'ground')
+    .filter(([, entry]) => entry.behavior)
     .map(([id, entry]) => [id, { ...entry.behavior }]),
 );
 
@@ -377,7 +428,7 @@ export function getWildlifeSpecies(input) {
 
 export function getWildlifeBehaviorProfile(input) {
   const entry = getWildlifeSpecies(input);
-  return entry?.behavior?.controller === 'ground' ? entry.behavior : null;
+  return entry?.behavior || null;
 }
 
 export function getWildlifeCarryProfile(input) {

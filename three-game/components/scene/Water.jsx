@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { useThreeGameStore, getRuntimePlayerPose } from '../../store';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
+import { getRegionDefinition } from '../../world/regions';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -71,10 +72,10 @@ function regionWaterPlayableSize(zoneId) {
 
 const WATER_DAY = {
   sand: new THREE.Color('#aed6e2'),
-  // Mockup palette: saturated cyan lagoon handing off to a rich cobalt deep.
+  // Rich tropical palette: cyan lagoon handing off to deep blue with a small teal bias.
   scatter: new THREE.Color('#38bfd8'),
-  deep: new THREE.Color('#2a72ad'),
-  openDeep: new THREE.Color('#155a97'),
+  deep: new THREE.Color('#2476a8'),
+  openDeep: new THREE.Color('#125c92'),
   // Slightly blue-grey: pure white foam over a bright sea is what blows out.
   foam: new THREE.Color('#e9f4f0'),
 };
@@ -196,6 +197,34 @@ function bakeSeafloorTexture(zoneId, bakeRes = BAKE_RES) {
   return texture;
 }
 
+function standingWaterMaskAt(x, z, zoneId) {
+  const maskFn = getRegionDefinition(zoneId)?.terrain?.standingWaterMask;
+  return maskFn ? THREE.MathUtils.clamp(maskFn(x, z), 0, 1) : 0;
+}
+
+function bakeStandingWaterMaskTexture(zoneId, bakeRes = BAKE_RES) {
+  const data = new Uint8Array(bakeRes * bakeRes * 4);
+  for (let j = 0; j < bakeRes; j += 1) {
+    for (let i = 0; i < bakeRes; i += 1) {
+      const x = (i / (bakeRes - 1) - 0.5) * WATER_SIZE;
+      const z = (j / (bakeRes - 1) - 0.5) * WATER_SIZE;
+      const mask = standingWaterMaskAt(x, z, zoneId);
+      const idx = (j * bakeRes + i) * 4;
+      data[idx] = Math.round(mask * 255);
+      data[idx + 1] = 0;
+      data[idx + 2] = 0;
+      data[idx + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, bakeRes, bakeRes, THREE.RGBAFormat);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 // Shared wave bank: three crossing swells for a calm tropical bay. The vertex
 // stage uses the displacement; the fragment stage re-evaluates the analytic
 // normal per pixel. Written for GLSL ES 1.00 (no array constructors).
@@ -306,7 +335,7 @@ const WAVE_GLSL = /* glsl */`
   }
 `;
 
-function createStylizedWaterMaterial(seafloorTexture) {
+function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -314,6 +343,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
     uniforms: {
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
+      uStandingWaterMask: { value: standingWaterMaskTexture },
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
       // Fallback painted colour (used until the first refraction grab lands).
@@ -409,6 +439,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       uniform float uPlayerRipple;
       uniform float uSize;
       uniform sampler2D uSeafloor;
+      uniform sampler2D uStandingWaterMask;
       uniform float uWaterLevel;
       uniform sampler2D uRefraction;
       uniform float uHasRefraction;
@@ -475,6 +506,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
       void main() {
         // --- per-pixel surface normal: analytic swell + scrolling ripples ----
         vec4 floorSample = texture2D(uSeafloor, vWorld.xz / uSize + 0.5);
+        float standingWater = texture2D(uStandingWaterMask, vWorld.xz / uSize + 0.5).r;
         float dRaw = uWaterLevel - (floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)})); // signed: <0 just inland of the line
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         float shoreSoftness = floorSample.b;
@@ -590,7 +622,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
           vec3(seafoamShelf.r * 0.86, max(seafoamShelf.g, seafoamShelf.b * 1.04), seafoamShelf.b * 0.94),
           0.42
         );
-        vec3 midTurquoise = mix(uScatter, uDeep, 0.12);
+        vec3 midTurquoise = mix(uScatter, uDeep, 0.14);
         vec3 depthRamp = paleAqua;
         depthRamp = mix(depthRamp, seafoamShelf, smoothstep(0.16, 0.85, depth));
         depthRamp = mix(depthRamp, midTurquoise, smoothstep(0.9, 2.4, depth));
@@ -608,7 +640,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // Gated off where real depth already runs the deep ramps above.
         float offshoreTravel = smoothstep(20.0, 55.0, shoreDist) * playableFade
           * (1.0 - smoothstep(2.8, 7.0, depth));
-        color = mix(color, mix(uScatter, uDeep, 0.6), offshoreTravel * 0.35);
+        color = mix(color, mix(uScatter, uDeep, 0.62), offshoreTravel * 0.37);
 
         // Mostly-opaque body (it *shows* the refracted scene), but genuinely
         // clear in the shallows — wading legs and the bed stay visible —
@@ -619,6 +651,9 @@ function createStylizedWaterMaterial(seafloorTexture) {
         // --- reflection: a garnish on top of the clear body -------------------
         vec3 refl = reflect(-viewDir, normal);
         vec3 skyRefl = mix(uSkyHorizon, uSky, clamp(refl.y * 1.4, 0.0, 1.0));
+        vec3 waterSheen = mix(uScatter, uSkyHorizon, 0.22);
+        skyRefl = mix(skyRefl, waterSheen, 0.18);
+        skyRefl = mix(skyRefl, skyRefl * vec3(0.96, 1.035, 0.90), 0.22);
         vec3 reflColor = skyRefl;
         if (uHasReflection > 0.5 && vReflCoord.w > 0.0) {
           vec2 mruv = vReflCoord.xy / vReflCoord.w + normal.xz * 0.03;
@@ -627,6 +662,9 @@ function createStylizedWaterMaterial(seafloorTexture) {
           vec3 planar = min(texture2D(uReflection, clamp(mruv, 0.0, 1.0)).rgb, vec3(0.92));
           reflColor = mix(skyRefl, mix(planar, skyRefl, 0.14), valid);
         }
+        // Water-only reflection grade: keep sky sheen, but reduce the violet
+        // bias that ACES/sky saturation can push into glancing highlights.
+        reflColor = mix(reflColor, reflColor * vec3(0.97, 1.025, 0.90), 0.26);
         // Analytic sun disc in the mirror direction: a tight bright point at
         // high sun that widens into a broad grazing-angle streak at low sun
         // (the reflected-sun "column" real water shows at dawn/dusk — the
@@ -702,14 +740,14 @@ function createStylizedWaterMaterial(seafloorTexture) {
         crestBand *= 1.0 - rollerZone * 0.72;
         troughBand *= 1.0 - rollerZone * 0.72;
         float bandBreakup = 0.68 + 0.32 * noise(vWorld.xz * 0.18 + vec2(uTime * 0.018, -uTime * 0.012));
-        vec3 crestTint = mix(uScatter, uSkyHorizon, 0.74);
-        color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.09 + uDaylight * 0.075);
-        color = mix(color, color * vec3(0.72, 0.88, 1.02), troughBand * waterSurfaceMask * 0.14);
+        vec3 crestTint = mix(uScatter, uSkyHorizon, 0.22);
+        color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.06 + uDaylight * 0.045);
+        color = mix(color, color * vec3(0.78, 0.91, 0.96), troughBand * waterSurfaceMask * 0.14);
         color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.055);
         // Glassy roller read: a soft sky-sheen crest and a slightly deeper
         // back slope — colour only, no foam (the mockup lagoon is clean).
-        color += crestTint * rollerHi * bandBreakup * rollerMask * (0.05 + uDaylight * 0.045);
-        color = mix(color, color * vec3(0.88, 0.95, 1.01), rollerLo * rollerMask * 0.12);
+        color += crestTint * rollerHi * bandBreakup * rollerMask * (0.03 + uDaylight * 0.025);
+        color = mix(color, color * vec3(0.90, 0.96, 0.98), rollerLo * rollerMask * 0.12);
 
         // --- foam: punctuation, not texture -----------------------------------
         // Exactly three generators (mockup anatomy): a crisp line at the sand
@@ -771,6 +809,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
         float rim = uSize * 0.5;
         float edgeFade = 1.0 - smoothstep(rim - 14.0, rim - 2.0, length(vWorld.xz));
         alpha *= edgeFade;
+        alpha *= 1.0 - smoothstep(0.34, 0.78, standingWater);
 
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -780,7 +819,7 @@ function createStylizedWaterMaterial(seafloorTexture) {
   });
 }
 
-function createSurfRibbonMaterial(seafloorTexture) {
+function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -788,6 +827,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
     uniforms: {
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
+      uStandingWaterMask: { value: standingWaterMaskTexture },
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
       uFoam: { value: WATER_DAY.foam.clone() },
@@ -800,6 +840,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
       ${WAVE_GLSL}
       uniform float uTime;
       uniform sampler2D uSeafloor;
+      uniform sampler2D uStandingWaterMask;
       uniform float uWaterLevel;
       uniform float uSize;
       varying vec3 vWorld;
@@ -808,6 +849,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
       varying float vShoreSoftness;
       varying float vPlayableFade;
       varying float vExposure;
+      varying float vStandingWater;
 
       vec4 seafloorSample(vec2 wxz) {
         return texture2D(uSeafloor, wxz / uSize + 0.5);
@@ -831,6 +873,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
         vShoreDist = shoreDist;
         vShoreSoftness = floorSample.b;
         vPlayableFade = floorSample.a;
+        vStandingWater = texture2D(uStandingWaterMask, world.xz / uSize + 0.5).r;
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
@@ -848,6 +891,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
       varying float vShoreSoftness;
       varying float vPlayableFade;
       varying float vExposure;
+      varying float vStandingWater;
 
       float srHash(vec2 p) { return fract(sin(dot(p, vec2(127.4, 311.7))) * 43758.5453); }
       float srNoise(vec2 p) {
@@ -918,6 +962,7 @@ function createSurfRibbonMaterial(seafloorTexture) {
         // carry their own envelope out past it.
         float foam = ((bands + contact) * shoreWindow + breaker * 1.1)
           * realCoast * shallow * beach;
+        foam *= 1.0 - smoothstep(0.34, 0.78, vStandingWater);
         foam *= 1.0 + uRain * 0.24;
         foam *= 1.0 - clamp(uUnderwaterAmount, 0.0, 1.0) * 0.72;
         foam = clamp(foam, 0.0, 1.0);
@@ -1189,8 +1234,18 @@ export function Water({ quality = 'performance', reflections = true }) {
     () => bakeSeafloorTexture(currentZoneId, qualityConfig.bakeRes),
     [currentZoneId, qualityConfig.bakeRes],
   );
-  const waterMaterial = useMemo(() => createStylizedWaterMaterial(seafloor), [seafloor]);
-  const surfMaterial = useMemo(() => createSurfRibbonMaterial(seafloor), [seafloor]);
+  const standingWaterMask = useMemo(
+    () => bakeStandingWaterMaskTexture(currentZoneId, qualityConfig.bakeRes),
+    [currentZoneId, qualityConfig.bakeRes],
+  );
+  const waterMaterial = useMemo(
+    () => createStylizedWaterMaterial(seafloor, standingWaterMask),
+    [seafloor, standingWaterMask],
+  );
+  const surfMaterial = useMemo(
+    () => createSurfRibbonMaterial(seafloor, standingWaterMask),
+    [seafloor, standingWaterMask],
+  );
   const deepMaterial = useMemo(() => createDeepOceanMaterial(), []);
 
   const waterGeometry = useMemo(
@@ -1370,12 +1425,13 @@ export function Water({ quality = 'performance', reflections = true }) {
       waterMaterial.dispose();
       surfMaterial.dispose();
       seafloor.dispose();
+      standingWaterMask.dispose();
       deepMaterial.dispose();
       grabRef.current?.dispose();
       grabRef.current = null;
       reflectionRT.dispose();
     };
-  }, [waterGeometry, waterMaterial, surfMaterial, seafloor, deepMaterial, reflectionRT]);
+  }, [waterGeometry, waterMaterial, surfMaterial, seafloor, standingWaterMask, deepMaterial, reflectionRT]);
 
   const regionType = getRegionMap(currentZoneId).type;
   if (['beagle', 'interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;

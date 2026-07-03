@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const DEFAULT_BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender';
 const blender = process.env.BLENDER_CONVERTER_PATH || DEFAULT_BLENDER;
-const dstGlb = process.env.DARWIN_RUNTIME_GLB || 'public/assets/models/darwin-final-animated.glb';
+const dstGlb = process.env.DARWIN_RUNTIME_GLB || 'public/assets/models/darwin5.glb';
 const outDir = process.env.DARWIN_CLIP_CONVERT_DIR || path.join(os.tmpdir(), 'darwin5-animation-clips');
 const printCommands = process.argv.includes('--print-commands');
 
@@ -18,6 +18,8 @@ const ALL_JOBS = [
   ['climbHeadHeight', 'assets-src/root-raw-assets/Climbing Head Height.fbx'],
   ['descendStairs', 'assets-src/root-raw-assets/Descending Stairs.fbx'],
   ['runToDive', 'assets-src/root-raw-assets/Darwin5 Run To Dive.fbx'],
+  ['dive', 'assets-src/darwin/animations/water/darwin5-dive.fbx'],
+  ['swimFast', 'assets-src/darwin/animations/water/darwin5-swim-fast.fbx'],
   ['swingTool', 'assets-src/darwin/animations/actions/darwin5-swing-tool.fbx'],
   ['layingIdle', 'assets-src/root-raw-assets/Laying Idle.fbx'],
 ];

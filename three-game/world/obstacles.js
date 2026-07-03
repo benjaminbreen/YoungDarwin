@@ -4,6 +4,7 @@ import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
 import { getNorthShoreRockObstacles } from './northShoreLayout';
 import { getNorthwestReefRockObstacles } from './nwReefLayout';
+import { getBeachWithHutObstacles } from './beachWithHutLayout';
 import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
 import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
@@ -28,6 +29,7 @@ const REGION_OBSTACLE_SOURCES = {
   POST_OFFICE_BAY_3: [getPostOfficeBay3RockObstacles],
   N_SHORE: [getNorthShoreRockObstacles],
   NW_REEF: [getNorthwestReefRockObstacles],
+  S_HUT: [getBeachWithHutObstacles],
   W_HIGH: [getWesternHighlandsRockObstacles],
   PENAL_COLONY: [getPenalColonyObstacles],
 };

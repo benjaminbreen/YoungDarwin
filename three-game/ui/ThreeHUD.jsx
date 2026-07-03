@@ -5,9 +5,10 @@ import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
 import { setTouchControl, triggerToolUse } from '../input/touchControls';
-import { setBlockingUiMode, setTypingMode } from '../input/typingMode';
+import { isGameplayInputBlocked, setBlockingUiMode, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
+import { ExamineView } from './ExamineView';
 import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
 import {
@@ -208,6 +209,8 @@ const ROUTE_PLACE_COPY = {
   POST_OFFICE_BAY: 'A sheltered cove, black lava shore, and the old mail barrel.',
   N_SHORE: 'Black sand, broken lava, dry coastal scrub.',
   NW_REEF: 'Clear shallows, dark reef rock, and fish moving over pale sand.',
+  S_HUT: 'White shell sand, an abandoned hut, and loam garden beds.',
+  S_REEFS: 'Pure white sand, clear teal shallows, and open southern water.',
   W_HIGH: 'A dry climb into red dirt, scrub, and cooler upland air.',
   EL_MIRADOR: 'A high red ridge with long views across Charles Island.',
   MANGROVES: 'Still water, mangrove shade, and soft mud underfoot.',
@@ -640,6 +643,7 @@ const SpecimenMarker = memo(function SpecimenMarker({
 }) {
   const actorId = specimen.instanceId || specimen.id;
   const runtime = useThreeGameStore(state => state.specimenRuntimePositions?.[zone.id]?.[actorId]);
+  const isActorCollected = useThreeGameStore(state => state.collectedSpecimenActorIds?.includes(actorId) || false);
   const isCollected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
   const isDocumented = useThreeGameStore(state => state.documentedSpecimenIds.includes(specimen.id));
   const isSelected = useThreeGameStore(state => (
@@ -650,6 +654,7 @@ const SpecimenMarker = memo(function SpecimenMarker({
     x: Number.isFinite(runtime?.x) ? runtime.x : x,
     z: Number.isFinite(runtime?.z) ? runtime.z : z,
   }, zone);
+  if (isActorCollected) return null;
   if (point.x <= -4 || point.x >= 104 || point.y <= -4 || point.y >= 104) return null;
   const isKnown = isCollected || isDocumented;
   if ((isKnown && !showKnown) || (!isKnown && !showNew)) return null;
@@ -1095,7 +1100,7 @@ function HotkeysResponse() {
   const sections = [
     ['Movement', ['WASD / arrows: move', 'Shift: run', 'Space: jump', 'C: crouch or running slide', 'B: dodge roll', 'Q or V: climb / mantle / descend']],
     ['Camera', ['Mouse drag: rotate camera', 'Scroll: zoom', 'Z / X: rotate left / right', 'M: cycle camera mode']],
-    ['Interaction', ['E: interact, collect, carry, or travel when prompted', 'J: use equipped tool', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
+    ['Interaction', ['Enter: examine, then collect once a field note is saved', 'Tab: cycle collection method while the collection card is open', 'E: interact, carry, travel, or legacy collect', 'J: use equipped tool', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
     ['Direct Actions', ['H: hammer', 'N: net', 'G: gather', 'Y: write', 'I: kneel inspect', 'L: look around', 'O: point', 'P: pray', 'T: trip', 'U: teeter', 'K: sit', 'R: rest / lie down']],
     ['Narrator Commands', ['hotkeys / controls / commands: show this list', 'north / south / east / west, or go north: travel by direction', '/move <place>: travel to a known place', '/collect <specimen>: collect a named specimen', '/use <tool> on <target>: use a tool on something', 'survey site / look around: record the habitat', 'document <specimen> / sketch <specimen>: make field notes', 'check traps / abandon trap: manage traps', 'rest / sleep / make camp: rest', 'journal / field book / open journal: open the journal']],
     ['Dev / Debug', ['`: performance panel', '0: asset browser', '7: animal animation lab', '8: Darwin animation lab', '9: cycle Darwin model']],
@@ -1823,6 +1828,11 @@ const MOVEMENT_HINT_MOVE_KEYS = new Set([
   'ArrowRight',
 ]);
 const MOVEMENT_HINT_ACTION_KEYS = new Set(['Space', 'ShiftLeft', 'ShiftRight']);
+const COLLECTION_METHOD_IDS = ['hands', 'hammer', 'snare', 'insect_net', 'shotgun'];
+const COLLECTION_METHOD_SET = new Set(COLLECTION_METHOD_IDS);
+const PROMPT_EXIT_MS = 220;
+const RESULT_TOAST_VISIBLE_MS = 5000;
+const RESULT_TOAST_EXIT_MS = 280;
 
 function PromptKey({ children, active = false }) {
   return (
@@ -2072,17 +2082,27 @@ function CompactPrompt({ children }) {
   );
 }
 
-function CompactAction({ keyLabel, children, primary = false, onClick = null }) {
+function CompactAction({ keyLabel, children, primary = false, locked = false, onClick = null }) {
   const content = (
     <>
       <PromptKey active={primary}>{keyLabel}</PromptKey>
-      <span className={`max-w-[16rem] truncate ${primary ? 'font-semibold text-expedition-parchment' : 'text-expedition-faded'}`}>{children}</span>
+      <span className={`max-w-[16rem] truncate ${primary ? 'font-semibold text-expedition-parchment' : locked ? 'text-expedition-faded/60' : 'text-expedition-faded'}`}>
+        {locked && (
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="mr-1 inline-block h-3 w-3 align-[-1px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5.5" y="10.5" width="13" height="9" rx="1.5" />
+            <path d="M8.5 10.5 V7.6 a3.5 3.5 0 0 1 7 0 v2.9" />
+          </svg>
+        )}
+        {children}
+      </span>
     </>
   );
   const className = `inline-flex min-w-0 items-center gap-1.5 rounded-sm border px-2 py-1.5 text-left text-[11px] leading-none shadow-sm transition ${
     primary
       ? 'border-expedition-gold/45 bg-[rgba(196,162,91,0.18)] hover:border-expedition-goldbright hover:bg-[rgba(196,162,91,0.26)]'
-      : 'border-expedition-brass/25 bg-black/18 hover:border-expedition-brass/45'
+      : locked
+        ? 'border-expedition-brass/15 bg-black/14 opacity-80'
+        : 'border-expedition-brass/25 bg-black/18 hover:border-expedition-brass/45'
   }`;
   if (onClick) {
     return (
@@ -2094,17 +2114,288 @@ function CompactAction({ keyLabel, children, primary = false, onClick = null }) 
   return <div className={className}>{content}</div>;
 }
 
-function toolUseCopy(tool) {
-  if (!tool) return 'Use tool';
-  if (tool.id === 'sketch') return 'Write note';
-  if (tool.id === 'shotgun') return 'Fire';
-  if (tool.id === 'hands') return 'Use hands';
-  return `Use ${tool.name}`;
-}
-
 function promptActionText(value) {
   const stripped = String(value || '').replace(/^press\s+e\s+(?:to\s+)?/i, '').trim();
   return stripped ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : 'Interact';
+}
+
+function currentCollectionMethodId(activeToolId) {
+  return COLLECTION_METHOD_SET.has(activeToolId) ? activeToolId : 'hands';
+}
+
+function nextCollectionMethodId(activeToolId, direction = 1) {
+  const current = currentCollectionMethodId(activeToolId);
+  const index = COLLECTION_METHOD_IDS.indexOf(current);
+  const nextIndex = (index + direction + COLLECTION_METHOD_IDS.length) % COLLECTION_METHOD_IDS.length;
+  return COLLECTION_METHOD_IDS[nextIndex];
+}
+
+function collectionMethodName(toolId) {
+  return getInventoryItem(toolId)?.name || threeTools.find(tool => tool.id === toolId)?.name || 'Bare Hands';
+}
+
+function CollectionMethodIcon({ toolId, active = false, compact = false, onSelect = null }) {
+  const item = getInventoryItem(toolId);
+  const Icon = TOOL_ICONS[toolId];
+  const label = item?.name || collectionMethodName(toolId);
+  const sizeClass = compact ? 'h-6 w-6' : 'h-7 w-7';
+  const iconClass = compact ? 'h-4 w-4' : 'h-[18px] w-[18px]';
+  const className = `${sizeClass} inline-flex shrink-0 items-center justify-center rounded-[5px] border transition ${
+    active
+      ? 'border-expedition-goldbright/80 bg-expedition-gold/18 text-expedition-goldbright shadow-[0_0_14px_rgba(227,197,133,0.18),inset_0_0_0_1px_rgba(227,197,133,0.12)]'
+      : 'border-expedition-brass/40 bg-black/18 text-expedition-parchment/78 hover:border-expedition-gold/70 hover:bg-expedition-gold/10 hover:text-expedition-goldbright'
+  }`;
+  const content = item?.image ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={item.image}
+      alt=""
+      draggable={false}
+      className={`${compact ? 'h-5 w-5' : 'h-[22px] w-[22px]'} object-contain drop-shadow-[0_2px_2px_rgba(0,0,0,0.55)]`}
+    />
+  ) : Icon ? (
+    <Icon className={iconClass} />
+  ) : (
+    <span className="text-[13px]">{item?.icon || '?'}</span>
+  );
+
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        title={label}
+        aria-label={`Use ${label}`}
+        onClick={() => onSelect(toolId)}
+        className={className}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <span title={label} aria-label={label} className={className}>
+      {content}
+    </span>
+  );
+}
+
+function CollectionOutcomeIcon({ tone }) {
+  if (tone === 'failure') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M8.8 8.8 L15.2 15.2 M15.2 8.8 L8.8 15.2" />
+      </svg>
+    );
+  }
+  if (tone === 'documented') {
+    return <NoteIcon className="h-5 w-5" />;
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M8.2 12.3 L10.7 14.8 L16 9.3" />
+    </svg>
+  );
+}
+
+function collectionPercent(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : null;
+}
+
+function CollectionOutcomeCard({ toast, onClose }) {
+  const outcome = toast?.outcome;
+  if (!outcome) return null;
+  const { specimen, tool, result, documented } = outcome;
+  const tone = documented || result?.outcomeType === 'documented'
+    ? 'documented'
+    : result?.success
+      ? 'success'
+      : 'failure';
+  const title = tone === 'documented'
+    ? 'Field note added'
+    : tone === 'success'
+      ? 'Specimen collected'
+      : 'Collection failed';
+  const methodName = getInventoryItem(tool?.id)?.name || tool?.name || 'Bare Hands';
+  const detail = result?.evidence
+    ? `Evidence: ${result.evidence}.`
+    : result?.reason || 'The attempt is recorded in the field log.';
+  const chance = collectionPercent(result?.threshold);
+  const roll = collectionPercent(result?.roll);
+  const fit = collectionPercent(result?.methodFit);
+  const toneClass = tone === 'failure'
+    ? 'border-rose-300/45 bg-rose-300/10 text-rose-200'
+    : tone === 'documented'
+      ? 'border-sky-200/35 bg-sky-200/10 text-sky-100'
+      : 'border-emerald-200/45 bg-emerald-200/10 text-emerald-100';
+
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
+      <section
+        aria-live="polite"
+        className={`pointer-events-auto overflow-hidden rounded-[7px] border border-expedition-gold/30 bg-[rgba(12,20,38,0.88)] text-expedition-parchment shadow-[0_16px_40px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md transition-[opacity,transform,filter] duration-[280ms] ease-out ${
+          toast.visible ? 'translate-y-0 scale-100 opacity-100 blur-0' : 'pointer-events-none translate-y-2 scale-[0.975] opacity-0 blur-[1px]'
+        }`}
+      >
+        <div className="mx-4 h-px bg-gradient-to-r from-transparent via-expedition-gold/45 to-transparent" />
+        <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2.5 px-3 py-2.5">
+          <div className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full border ${toneClass}`}>
+            <CollectionOutcomeIcon tone={tone} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold leading-tight tracking-wide text-expedition-parchment">{title}</div>
+            <div className="mt-0.5 truncate text-[12px] italic text-expedition-faded">
+              {specimen?.name || 'Specimen'} · {methodName}
+            </div>
+            <p
+              className="mt-1.5 overflow-hidden text-[12px] leading-snug text-expedition-parchment/82"
+              style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }}
+            >
+              {detail}
+            </p>
+            {chance && roll && (
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10.5px] uppercase tracking-[0.12em] text-expedition-faded">
+                <span>Chance {chance}</span>
+                <span>Roll {roll}</span>
+                {fit && <span>Fit {fit}</span>}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close result"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-expedition-brass/45 bg-black/18 text-[15px] leading-none text-expedition-faded transition hover:border-expedition-gold hover:bg-expedition-gold/12 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+          >
+            ×
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SpecimenInteractionCard({
+  specimen,
+  examined,
+  activeToolId,
+  setActiveTool,
+  collectNearby,
+  openExamine,
+  visible,
+}) {
+  const methodId = currentCollectionMethodId(activeToolId);
+  const methodName = collectionMethodName(methodId);
+  const otherMethods = COLLECTION_METHOD_IDS.filter(id => id !== methodId);
+
+  const selectMethod = useCallback(toolId => {
+    if (COLLECTION_METHOD_SET.has(toolId)) setActiveTool(toolId);
+  }, [setActiveTool]);
+
+  const cycleMethod = useCallback((direction = 1) => {
+    setActiveTool(nextCollectionMethodId(activeToolId, direction));
+  }, [activeToolId, setActiveTool]);
+
+  const collectWithCurrentMethod = useCallback(() => {
+    if (!COLLECTION_METHOD_SET.has(activeToolId)) setActiveTool(methodId);
+    collectNearby();
+  }, [activeToolId, collectNearby, methodId, setActiveTool]);
+
+  useEffect(() => {
+    if (visible && examined && !COLLECTION_METHOD_SET.has(activeToolId)) {
+      setActiveTool('hands');
+    }
+  }, [activeToolId, examined, setActiveTool, visible]);
+
+  useEffect(() => {
+    if (!visible || !examined) return undefined;
+    const onKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (event.key !== 'Tab') return;
+      if (isGameplayInputBlocked()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cycleMethod(event.shiftKey ? -1 : 1);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [cycleMethod, examined, visible]);
+
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
+      <section
+        className={`pointer-events-auto overflow-hidden rounded-[7px] border border-expedition-gold/30 bg-[rgba(12,20,38,0.86)] text-expedition-parchment shadow-[0_16px_40px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md transition-[opacity,transform,filter] duration-[220ms] ease-out ${
+          visible ? 'translate-y-0 scale-100 opacity-100 blur-0' : 'pointer-events-none translate-y-2 scale-[0.975] opacity-0 blur-[1px]'
+        }`}
+      >
+        <div className="mx-4 h-px bg-gradient-to-r from-transparent via-expedition-gold/45 to-transparent" />
+        <div className="px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[15.5px] font-semibold leading-tight tracking-wide text-expedition-parchment">
+                {specimen.name}
+              </div>
+            </div>
+            {examined ? (
+              <button
+                type="button"
+                onClick={collectWithCurrentMethod}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+              >
+                <PromptKey active>Enter</PromptKey>
+                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">Collect</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openExamine(specimen.instanceId || specimen.id)}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+              >
+                <PromptKey active>Enter</PromptKey>
+                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">Examine</span>
+              </button>
+            )}
+          </div>
+
+          {examined && (
+            <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-expedition-brass/25 pt-2">
+              <button
+                type="button"
+                onClick={() => cycleMethod(1)}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[5px] border border-transparent py-0.5 pr-1 text-[11.5px] leading-none text-expedition-faded transition hover:border-expedition-brass/35 hover:bg-black/14 hover:text-expedition-gold focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
+              >
+                <PromptKey>Tab</PromptKey>
+                <span>Method</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => cycleMethod(1)}
+                className="flex min-w-0 items-center gap-1.5 rounded-[6px] border border-expedition-brass/35 bg-black/20 p-0.5 pr-1.5 text-left transition hover:border-expedition-gold/65 hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
+              >
+                <CollectionMethodIcon toolId={methodId} active />
+                <span className="min-w-0 truncate text-[12.5px] font-semibold leading-none text-expedition-parchment">{methodName}</span>
+              </button>
+
+              <div className="flex min-w-0 items-center gap-1 opacity-60 transition hover:opacity-100">
+                {otherMethods.map(toolId => (
+                  <CollectionMethodIcon
+                    key={toolId}
+                    toolId={toolId}
+                    compact
+                    onSelect={selectMethod}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function InteractionPrompt() {
@@ -2112,12 +2403,78 @@ function InteractionPrompt() {
   const edgePrompt = useThreeGameStore(state => state.edgePrompt);
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
+  const openExamine = useThreeGameStore(state => state.openExamine);
+  const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
+  const nearbyItem = useThreeGameStore(state => state.nearbyItem);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const dismissEdgePrompt = useThreeGameStore(state => state.dismissEdgePrompt);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
-  const tool = threeTools.find(item => item.id === activeToolId);
+  const lastOutcome = useThreeGameStore(state => state.lastOutcome);
+  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
+  const nearby = getThreeSpecimens(currentZoneId).find(specimen => {
+    const actorId = specimen.instanceId || specimen.id;
+    return !collectedSpecimenActorIds?.includes(actorId) && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
+  });
+  const nearbyKey = nearby ? `${nearby.instanceId || nearby.id}:${nearby.id}` : null;
+  const [renderedSpecimen, setRenderedSpecimen] = useState(null);
+  const [specimenPromptVisible, setSpecimenPromptVisible] = useState(false);
+  const [outcomeToast, setOutcomeToast] = useState(null);
+  const seenOutcomeRef = React.useRef(lastOutcome);
+  const outcomeTimersRef = React.useRef([]);
+
+  const clearOutcomeTimers = useCallback(() => {
+    outcomeTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    outcomeTimersRef.current = [];
+  }, []);
+
+  const dismissOutcomeToast = useCallback(() => {
+    clearOutcomeTimers();
+    setOutcomeToast(current => current ? { ...current, visible: false } : current);
+    outcomeTimersRef.current.push(window.setTimeout(() => setOutcomeToast(null), RESULT_TOAST_EXIT_MS));
+  }, [clearOutcomeTimers]);
+
+  useEffect(() => () => clearOutcomeTimers(), [clearOutcomeTimers]);
+
+  useEffect(() => {
+    if (!lastOutcome || lastOutcome === seenOutcomeRef.current) {
+      seenOutcomeRef.current = lastOutcome;
+      return undefined;
+    }
+    seenOutcomeRef.current = lastOutcome;
+    clearOutcomeTimers();
+    const id = `${lastOutcome.specimen?.id || 'specimen'}:${lastOutcome.tool?.id || 'tool'}:${Date.now()}`;
+    setOutcomeToast({ id, outcome: lastOutcome, visible: false });
+    outcomeTimersRef.current.push(window.setTimeout(() => {
+      setOutcomeToast(current => current?.id === id ? { ...current, visible: true } : current);
+    }, 20));
+    outcomeTimersRef.current.push(window.setTimeout(() => {
+      setOutcomeToast(current => current?.id === id ? { ...current, visible: false } : current);
+    }, RESULT_TOAST_VISIBLE_MS));
+    outcomeTimersRef.current.push(window.setTimeout(() => {
+      setOutcomeToast(current => current?.id === id ? null : current);
+    }, RESULT_TOAST_VISIBLE_MS + RESULT_TOAST_EXIT_MS));
+    return undefined;
+  }, [clearOutcomeTimers, lastOutcome]);
+
+  useEffect(() => {
+    let timer = 0;
+    if (nearby && !outcomeToast) {
+      setRenderedSpecimen(nearby);
+      setSpecimenPromptVisible(false);
+      timer = window.setTimeout(() => setSpecimenPromptVisible(true), 20);
+    } else {
+      setSpecimenPromptVisible(false);
+      timer = window.setTimeout(() => setRenderedSpecimen(null), PROMPT_EXIT_MS);
+    }
+    return () => window.clearTimeout(timer);
+  }, [nearbyKey, Boolean(outcomeToast)]);
+
+  if (outcomeToast) {
+    return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
+  }
+
   if (carryPrompt) {
     return (
       <CompactPrompt>
@@ -2125,8 +2482,15 @@ function InteractionPrompt() {
       </CompactPrompt>
     );
   }
-  if (!nearby && !edgePrompt) return null;
-  if (!nearby && edgePrompt) {
+  if (!nearby && !renderedSpecimen && nearbyItem) {
+    return (
+      <CompactPrompt>
+        <CompactAction keyLabel="⏎" primary onClick={() => openExamine(null)}>{`Examine ${nearbyItem.name}`}</CompactAction>
+      </CompactPrompt>
+    );
+  }
+  if (!nearby && !renderedSpecimen && !edgePrompt) return null;
+  if (!nearby && !renderedSpecimen && edgePrompt) {
     const isOpen = edgePrompt.kind === 'open';
     if (isOpen && edgePrompt.toRegionId) {
       const fromZone = getZone(currentZoneId);
@@ -2159,15 +2523,19 @@ function InteractionPrompt() {
     );
   }
 
-  const mainAction = activeToolId === 'sketch'
-    ? 'Document specimen'
-    : `Collect with ${tool?.name || 'tool'}`;
+  const displayedSpecimen = renderedSpecimen || nearby;
+  if (!displayedSpecimen) return null;
+  const examined = examinedTypeIds.includes(displayedSpecimen.id);
   return (
-    <CompactPrompt>
-      <CompactAction keyLabel="E" primary onClick={() => collectNearby()}>{mainAction}</CompactAction>
-      <CompactAction keyLabel="I">Inspect</CompactAction>
-      <CompactAction keyLabel="J">{toolUseCopy(tool)}</CompactAction>
-    </CompactPrompt>
+    <SpecimenInteractionCard
+      specimen={displayedSpecimen}
+      examined={examined}
+      activeToolId={activeToolId}
+      setActiveTool={setActiveTool}
+      collectNearby={collectNearby}
+      openExamine={openExamine}
+      visible={specimenPromptVisible}
+    />
   );
 }
 
@@ -2411,8 +2779,10 @@ function MobileActionCluster() {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
-    (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId
+    !collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
+    && ((specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId)
   ));
 
   const collect = () => {
@@ -2456,6 +2826,41 @@ function MobileActionCluster() {
         className="bottom-0 right-0"
         icon={<LensIcon className="h-full w-full" />}
       />
+    </div>
+  );
+}
+
+// Desktop twin of the mobile Examine button: appears in the lower-right when
+// Darwin is near something examinable, mirroring the round brass action style.
+function DesktopExamineButton() {
+  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const nearbyItem = useThreeGameStore(state => state.nearbyItem);
+  const openExamine = useThreeGameStore(state => state.openExamine);
+  const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
+  const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
+    !collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
+    && ((specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId)
+  ));
+  const needsExamine = nearby ? !examinedTypeIds.includes(nearby.id) : false;
+  const visible = Boolean(nearbyItem || needsExamine);
+  return (
+    <div
+      className={`absolute bottom-[5.25rem] right-3 z-20 hidden transition-all duration-300 md:block lg:bottom-16 xl:right-[17rem] ${
+        visible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'
+      }`}
+    >
+      <button
+        type="button"
+        aria-label="Examine"
+        onClick={() => openExamine(null)}
+        className="pointer-events-auto flex h-[5.2rem] w-[5.2rem] flex-col items-center justify-center rounded-full border border-expedition-gold/80 bg-[radial-gradient(circle_at_42%_30%,rgba(30,43,50,0.92),rgba(5,10,15,0.96))] font-expedition text-expedition-gold shadow-[0_10px_24px_rgba(0,0,0,0.38),inset_0_0_0_3px_rgba(201,163,95,0.12),inset_0_0_0_7px_rgba(0,0,0,0.18)] backdrop-blur-md transition active:scale-95 active:border-expedition-goldbright active:text-expedition-goldbright"
+      >
+        <LensIcon className="mb-1 h-7 w-7" />
+        <span className="text-[11px] font-semibold uppercase leading-none tracking-[0.08em]">Examine</span>
+        <span className="mt-1 text-[9px] uppercase tracking-[0.12em] text-expedition-faded">Enter</span>
+      </button>
     </div>
   );
 }
@@ -2546,7 +2951,8 @@ export function ThreeHUD() {
   const [mobileNarrativeOpen, setMobileNarrativeOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen);
+  const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -2596,8 +3002,8 @@ export function ThreeHUD() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
-      {/* Regular HUD fades out while the diegetic status view owns the screen */}
-      <div className={`transition-opacity duration-300 ${statusViewOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+      {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
+      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer />
       <TopObjective objective={objective} />
 
@@ -2646,6 +3052,8 @@ export function ThreeHUD() {
         <CameraCycleButton className={GOLD_BUTTON} />
       </div>
 
+      <DesktopExamineButton />
+
       <MobileTouchControls />
       <MobileActionCluster />
       <MobileBottomNav
@@ -2658,6 +3066,7 @@ export function ThreeHUD() {
       </div>
 
       <StatusView />
+      <ExamineView />
 
       <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
       <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} initialTab={inventoryInitialTab} />

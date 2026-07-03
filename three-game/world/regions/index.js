@@ -8,6 +8,10 @@ import { northShoreRegion } from './northShore/terrain';
 import { createNorthShoreTerrainMaterial } from './northShore/material';
 import { northwestReefRegion } from './northwestReef/terrain';
 import { createNorthwestReefTerrainMaterial } from './northwestReef/material';
+import { beachWithHutRegion } from './beachWithHut/terrain';
+import { createBeachWithHutTerrainMaterial } from './beachWithHut/material';
+import { southernReefsRegion } from './southernReefs/terrain';
+import { createSouthernReefsTerrainMaterial } from './southernReefs/material';
 import { westernHighlandsRegion } from './westernHighlands/terrain';
 import { createWesternHighlandsTerrainMaterial } from './westernHighlands/material';
 import { elMiradorRegion } from './elMirador/terrain';
@@ -33,6 +37,8 @@ const authoredRegions = [
   { ...postOfficeBay3Region, createTerrainMaterial: createPostOfficeBay3TerrainMaterial },
   { ...northShoreRegion, createTerrainMaterial: createNorthShoreTerrainMaterial },
   { ...northwestReefRegion, createTerrainMaterial: createNorthwestReefTerrainMaterial },
+  { ...beachWithHutRegion, createTerrainMaterial: createBeachWithHutTerrainMaterial },
+  { ...southernReefsRegion, createTerrainMaterial: createSouthernReefsTerrainMaterial },
   { ...westernHighlandsRegion, createTerrainMaterial: createWesternHighlandsTerrainMaterial },
   { ...elMiradorRegion, createTerrainMaterial: createElMiradorTerrainMaterial },
   { ...penalColonyRegion, createTerrainMaterial: createPenalColonyTerrainMaterial },

@@ -1,5 +1,5 @@
 import { makeZoneScatter, seededRandom } from '../scatter';
-import { terrainBiomeAt, terrainHeight, terrainSlopeAt } from '../terrain';
+import { terrainBiomeAt, terrainHeight, terrainSlopeAt, WATER_LEVEL } from '../terrain';
 import { cormorantLagoonField, cormorantTrailDistance } from '../regions/cormorantBayTest3/terrain';
 import {
   cormorantTest3DirectionAt,
@@ -9,6 +9,7 @@ import {
 
 const ZONE = 'CORMORANT_BAY_TEST_3';
 const NATURE = '/assets/models/nature/';
+const LAGOON_SURFACE_Y = WATER_LEVEL + 0.035;
 
 function dryGround(biome) {
   return ['green-beach', 'salt-scrub', 'tuff-rim', 'olivine-trail'].includes(biome);
@@ -93,12 +94,40 @@ export function buildCormorantBayTest3Ecology() {
     stream: false,
     lagoonSurfaces: [
       {
-        id: 'test-3-brackish-lagoon',
-        position: [1, -0.875, 2],
-        scale: [34, 15],
-        rotation: -0.08,
-        colorA: '#31584a',
-        colorB: '#85a16d',
+        id: 'test-3-brackish-lagoon-water2',
+        zoneId: ZONE,
+        position: [0, LAGOON_SURFACE_Y, 0],
+        bounds: { minX: -39, maxX: 39, minZ: -17, maxZ: 19 },
+        geometryResolution: [220, 108],
+        colorA: '#264d48',
+        colorB: '#76a28e',
+        mudColor: '#5c5540',
+        algaeColor: '#71845a',
+        waterColor: '#6f9289',
+        opacity: 0.062,
+        reflectivity: 0.048,
+        waterAlpha: 0.78,
+        waterShoreAlpha: 0.34,
+        flowSpeed: 0.0022,
+        flowScale: 2.4,
+        flowDirection: [0.16, 0.11],
+        shoreNoise: 0.035,
+        maskThreshold: 0.3,
+        rippleStrength: 0.62,
+        distortionScale: 0.014,
+        stepRippleStrength: 0.92,
+        stepRippleDisplacement: 0.026,
+        stepRippleEventScale: 1.32,
+        walkRippleEventScale: 1.1,
+        rippleEventScale: 1.18,
+        splashRippleEventScale: 1.68,
+        stepRippleMaxIntensity: 1.45,
+        playerIdleRippleStrength: 0.62,
+        overlayLift: 0.014,
+        playerVeilLift: 0.034,
+        playerVeilScale: [1.34, 0.9],
+        textureWidth: 512,
+        textureHeight: 512,
       },
     ],
     dryGrassPatches: [

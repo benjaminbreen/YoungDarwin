@@ -101,7 +101,7 @@ export const modelAssets = {
     enabled: true,
     preload: true,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-height-aware-gather-push-20260623',
+    cacheKey: 'darwin5-swim-fast-dive-20260702',
     // Darwin 5 is the current default player model: native Mixamo clips plus
     // carry/rifle/climb sets.
     // The runtime idle is the skinless 41-bone Mixamo clip from
@@ -112,17 +112,21 @@ export const modelAssets = {
     scale: 1.0,
     rotation: [0, 0, 0],
     yOffset: -0.025,
+    receiveShadow: true,
     visualGrounding: true,
     normalizeMaterials: true,
-    materialLift: 0.045,
+    materialLift: 0.05,
     materialEmissive: '#20170f',
     // Keep emissive very low; high self-light flattens the face/coat and fights
     // the outdoor light rig.
-    materialEmissiveIntensity: 0.055,
+    materialEmissiveIntensity: 0.035,
     // The envMap doubles as view-independent ambient (IBL diffuse + sheen):
     // the light rig deliberately starves fill on clear days, so this keeps the
     // back-lit player from crushing to black without a player-only glow.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.055, roughness: 0.76, envMapIntensity: 0.3, toneMapped: true },
+    // Sidecar maps generated from the embedded Darwin5 atlas:
+    // roughness adds material separation, normal adds cloth/leather relief, and
+    // albedo keeps detail crisp without rebaking the GLB.
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
     targetTriangles: 60000,
     prompt: 'Darwin candidate 5, Mixamo-rigged test model with supplied idle, walking, and running animation clips.',
   },
@@ -336,6 +340,56 @@ export const modelAssets = {
     materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
     targetTriangles: 12500,
     prompt: 'Game-ready Galapagos sea lion (animated seal source mesh), morph-target idle animation, sleek wet coat, optimized GLB.',
+  },
+  flamingoAnimated: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/flamingo-animated.glb',
+    cacheKey: 'flamingo-fbx-runtime-20260703',
+    scale: 2.35,
+    rotation: [0, 0, 0],
+    yOffset: 0.03,
+    normalizeMaterials: true,
+    doubleSide: true,
+    materialLift: 0.025,
+    materialEmissive: '#221113',
+    materialEmissiveIntensity: 0.045,
+    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.18 },
+    targetTriangles: 2500,
+    prompt: 'Animated American flamingo runtime candidate with walk, feeding/idle, one-leg, and sleep clips for Floreana lagoon specimens.',
+  },
+  seagull: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/seagull.glb',
+    cacheKey: 'seagull-fbx-runtime-facing-20260703',
+    scale: 1.65,
+    rotation: [0, Math.PI, 0],
+    yOffset: 0.02,
+    normalizeMaterials: true,
+    doubleSide: true,
+    materialLift: 0.02,
+    materialEmissive: '#141414',
+    materialEmissiveIntensity: 0.045,
+    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
+    targetTriangles: 2500,
+    prompt: 'Animated gull/seagull runtime candidate with walk, run, fly, glide, eat, look, and preen/clearing clips for coastal bird testing.',
+  },
+  hermitCrab: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/hermit-crab.glb',
+    cacheKey: 'hermit-crab-fbx-runtime-20260703',
+    scale: 0.42,
+    rotation: [0, 0, 0],
+    yOffset: 0.02,
+    normalizeMaterials: true,
+    materialLift: 0.03,
+    materialEmissive: '#1d110b',
+    materialEmissiveIntensity: 0.06,
+    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.18 },
+    targetTriangles: 4000,
+    prompt: 'Animated hermit crab runtime candidate with walk, slow walk, burrow, emerge, eat, sleep, fighting, pinchers, knockback, and death clips for beach/intertidal testing.',
   },
   cactus: {
     enabled: false,
