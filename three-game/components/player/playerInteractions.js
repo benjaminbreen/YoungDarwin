@@ -1,6 +1,8 @@
 import { getRegionTerrainConfig } from '../../world/terrain';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
+import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
 import { useThreeGameStore } from '../../store';
+import { triggerToolUse } from '../../input/touchControls';
 import { ACTION_DURATION } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 
@@ -167,7 +169,7 @@ export function collectionAnimationForTool(toolId, specimen = null, options = {}
   }
   if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true, align: true };
   if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
-  if (toolId === 'snare') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (toolId === 'snare') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true, align: true };
   if (toolId === 'hammer') return { clip: 'heavyToolSwing', duration: ACTION_DURATION.heavyToolSwing, lockMovement: true, align: true };
   if (toolId === 'sketch') {
     const clip = documentClipForSpecimen(specimen);
@@ -212,8 +214,10 @@ export function updatePlayerInteractions({
   setEdgePrompt,
   beginZoneTransition,
   setCarriedObject,
+  allowSpecimenInteractions = true,
 }) {
-  const edgePrompt = nearestRegionEdgePrompt(currentZoneId, position, facing);
+  const edgePrompt = nearestLocalTransitionPrompt(currentZoneId, position, facing)
+    || nearestRegionEdgePrompt(currentZoneId, position, facing);
   const promptPayload = edgePrompt
     ? {
         id: `${currentZoneId}:${edgePrompt.edge}:${edgePrompt.toRegionId || edgePrompt.boundaryKind || edgePrompt.kind}`,
@@ -235,20 +239,22 @@ export function updatePlayerInteractions({
   let nearestDistance = 4.4;
   const specimenRuntimePositions = storeState.specimenRuntimePositions?.[currentZoneId] || {};
   const collectedSpecimenActorIds = new Set(storeState.collectedSpecimenActorIds || []);
-  for (const specimen of zoneSpecimens) {
-    const actorId = specimen.instanceId || specimen.id;
-    if (collectedSpecimenActorIds.has(actorId)) continue;
-    const runtime = specimenRuntimePositions[actorId];
-    const [x, , z] = specimen.spawnPoint;
-    const runtimeX = runtime?.x ?? x;
-    const runtimeY = runtime?.y ?? specimen.spawnPoint?.[1] ?? position.y;
-    const runtimeZ = runtime?.z ?? z;
-    const verticalDelta = Math.max(0, runtimeY - position.y);
-    if (verticalDelta > specimenInteractionHeight(specimen) + 2.4) continue;
-    const distance = Math.hypot(position.x - runtimeX, position.z - runtimeZ) + Math.max(0, verticalDelta - 0.8) * 0.45;
-    if (distance < nearestDistance) {
-      nearest = actorId;
-      nearestDistance = distance;
+  if (allowSpecimenInteractions) {
+    for (const specimen of zoneSpecimens) {
+      const actorId = specimen.instanceId || specimen.id;
+      if (collectedSpecimenActorIds.has(actorId)) continue;
+      const runtime = specimenRuntimePositions[actorId];
+      const [x, , z] = specimen.spawnPoint;
+      const runtimeX = runtime?.x ?? x;
+      const runtimeY = runtime?.y ?? specimen.spawnPoint?.[1] ?? position.y;
+      const runtimeZ = runtime?.z ?? z;
+      const verticalDelta = Math.max(0, runtimeY - position.y);
+      if (verticalDelta > specimenInteractionHeight(specimen) + 2.4) continue;
+      const distance = Math.hypot(position.x - runtimeX, position.z - runtimeZ) + Math.max(0, verticalDelta - 0.8) * 0.45;
+      if (distance < nearestDistance) {
+        nearest = actorId;
+        nearestDistance = distance;
+      }
     }
   }
   if (storeState.nearbySpecimenId !== nearest) {
@@ -257,6 +263,25 @@ export function updatePlayerInteractions({
 
   const startSpecimenCollection = (currentState, specimen) => {
     if (!specimen || stateRef.current.action) return false;
+    if (currentState.activeToolId === 'snare') {
+      const animation = collectionAnimationForTool('snare', specimen);
+      const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
+      if (animation.align && target) {
+        const dx = target.x - position.x;
+        const dz = target.z - position.z;
+        if (Math.hypot(dx, dz) > 0.08) {
+          const now = performance.now() / 1000;
+          stateRef.current.collectionFaceMotion = {
+            targetYaw: Math.atan2(dx, dz),
+            startedAt: now,
+            until: now + Math.min(0.58, Math.max(0.24, (animation.duration || 1) * 0.18)),
+          };
+        }
+      }
+      startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
+      collectNearby();
+      return true;
+    }
     if (!currentState.examinedTypeIds?.includes(specimen.id)) {
       // Collection is gated by examination. The store emits the explanatory
       // narration and leaves the player free to press Enter to examine.
@@ -289,7 +314,7 @@ export function updatePlayerInteractions({
   // examines first, then becomes the collection command once that type has a
   // saved field note.
   const examinePressed = keys.examine || touch.inspect;
-  if (examinePressed && !lastExamineRef.current && !stateRef.current.action) {
+  if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
     const currentState = useThreeGameStore.getState();
     const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
     const specimen = specimenId
@@ -329,6 +354,11 @@ export function updatePlayerInteractions({
           startAction(clip, ACTION_DURATION[clip], { lockMovement: true });
         }
         currentState.harvestCrop?.(currentState.carryPrompt.crop);
+      } else if (currentState.carryPrompt.mode === 'check-snare') {
+        if (!stateRef.current.action) {
+          startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
+        }
+        currentState.checkSnareTrap?.(currentState.carryPrompt.id);
       } else if (currentState.carriedObjectId) {
         setCarriedObject(null);
       } else if (currentState.carryPrompt.mode === 'pickup') {
@@ -341,7 +371,7 @@ export function updatePlayerInteractions({
       setNearbySpecimen(null);
     } else if (!specimen && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
       beginZoneTransition(currentState.edgePrompt.toRegionId, {
-        entryEdge: oppositeEdge(currentState.edgePrompt.edge),
+        entryEdge: currentState.edgePrompt.entryEdge || oppositeEdge(currentState.edgePrompt.edge),
         note: currentState.edgePrompt.description,
       });
     } else if (currentState.edgePrompt?.kind === 'blocked' && !specimen) {
@@ -349,17 +379,30 @@ export function updatePlayerInteractions({
         ...currentState.edgePrompt,
         message: currentState.edgePrompt.description,
       });
-    } else if (specimen) {
+    } else if (allowSpecimenInteractions && specimen) {
       startSpecimenCollection(currentState, specimen);
+    } else if (currentState.activeToolId === 'snare' && !stateRef.current.action) {
+      startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
+      currentState.placeSnareTrap?.({ position, facing });
     }
   }
   if (keys.camera && !lastCameraRef.current) cycleViewMode();
   const toolbarOrder = useThreeGameStore.getState().toolbarOrder;
+  const lastToolHotkeys = stateRef.current.lastToolHotkeys || {};
   for (let index = 0; index < 6; index += 1) {
-    if (keys[`tool${index + 1}`] && toolbarOrder[index]) {
-      setActiveTool(toolbarOrder[index]);
+    const button = `tool${index + 1}`;
+    const toolId = toolbarOrder[index];
+    const pressed = Boolean(keys[button]);
+    if (pressed && !lastToolHotkeys[button] && toolId) {
+      if (useThreeGameStore.getState().activeToolId === toolId) {
+        triggerToolUse(toolId);
+      } else {
+        setActiveTool(toolId);
+      }
     }
+    lastToolHotkeys[button] = pressed;
   }
+  stateRef.current.lastToolHotkeys = lastToolHotkeys;
   lastInteractRef.current = keys.interact || touch.interact;
   lastCameraRef.current = keys.camera;
 }

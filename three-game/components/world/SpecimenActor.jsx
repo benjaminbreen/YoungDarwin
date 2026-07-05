@@ -298,6 +298,9 @@ export function SpecimenActor({ specimen }) {
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const snareTrap = useThreeGameStore(state => (
+    state.snareTraps?.find(trap => trap.status === 'sprung' && trap.caughtActorId === actorId) || null
+  ));
   const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
@@ -323,7 +326,7 @@ export function SpecimenActor({ specimen }) {
     specimen,
     basePositionRef: behaviorBaseRef,
     basePosition: position,
-    paused: isCarried || isUnderExamination,
+    paused: isCarried || isUnderExamination || Boolean(snareTrap),
   });
 
   useEffect(() => {
@@ -388,7 +391,28 @@ export function SpecimenActor({ specimen }) {
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
     if (groundAffordanceRef.current) {
-      groundAffordanceRef.current.visible = !carriedHere && faunaBehavior.airborneRef?.current !== true;
+      groundAffordanceRef.current.visible = !carriedHere && !snareTrap && faunaBehavior.airborneRef?.current !== true;
+    }
+
+    if (snareTrap) {
+      const t = clock.elapsedTime;
+      group.current.position.set(
+        snareTrap.position.x,
+        snareTrap.position.y + 0.045 + Math.sin(t * 8.5 + actorId.length) * 0.008,
+        snareTrap.position.z,
+      );
+      group.current.rotation.set(0, (snareTrap.yaw || 0) + Math.sin(t * 6.2) * 0.12, Math.sin(t * 9.1) * 0.05);
+      publishActorRuntimePosition({
+        publisher: setSpecimenRuntimePosition,
+        ref: runtimePublishRef,
+        actorId,
+        zoneId: currentZoneId,
+        position: group.current.position,
+        now: t,
+        force: true,
+        debug: { motionStatus: 'snared', trapId: snareTrap.id },
+      });
+      return;
     }
 
     if (carryProfile) {
@@ -529,6 +553,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'basalt' ? 1.15
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'floreanagianttortoise' ? 1.8
+    : specimen.id === 'flamingo' ? 2.35
     : specimen.id === 'lavagull' ? 1.05
     : 1.45;
   const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
@@ -538,6 +563,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'barnacle' ? 0.38
     : specimen.id === 'frigatebird' ? 0.7
     : specimen.id === 'booby' ? 0.62
+    : specimen.id === 'flamingo' ? 0.58
     : specimen.id === 'lavagull' ? 0.5
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'galapagospenguin' ? 0.55

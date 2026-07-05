@@ -10,6 +10,7 @@ import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getPostOfficeBay3Rocks } from '../postOfficeBay3Layout';
 import { generatedTreePresets } from '../generatedTreePresets';
 import { modelAssetProp } from './ecologyAssetTransforms';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 const NATURE = '/assets/models/nature/';
 
@@ -437,10 +438,17 @@ export function buildPostOfficeBay3Ecology() {
     rocks,
     splashes: { anchors: swashRocks.slice(0, 8), period: (Math.PI * 2) / 0.5984 },
     footprintBiomes: ['shell-sand', 'wet-sand', 'trail', 'path-shoulder', 'dry-scrub'],
-    birds: [
-      { radius: 18, height: 17, speed: 0.1, phase: 0.4, cx: 0, cz: -16 },
-      { radius: 25, height: 23, speed: -0.075, phase: 2.5, cx: -28, cz: -18 },
+    flyingModels: [
+      flamingoFlyoverLayer('post-office-bay-flamingo-flyover', [
+        { cx: -14, cz: -26, radiusX: 42, radiusZ: 13, height: 37, speed: 0.021, phase: 1.2, scale: 0.8 },
+        { cx: 20, cz: -22, radiusX: 36, radiusZ: 11, height: 42, speed: -0.018, phase: 3.8, scale: 0.74, timeScale: 0.58 },
+      ], { loadTier: 2 }),
     ],
+    birds: coastalBirds([
+      { species: 'frigatebird', radiusX: 25, radiusZ: 14, height: 24, speed: 0.08, phase: 0.4, cx: 0, cz: -18, flapRate: 0.44 },
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 31, radiusZ: 17, height: 28, speed: -0.062, phase: 2.5, cx: -28, cz: -20, flapRate: 0.78 },
+      { species: 'booby', radiusX: 22, radiusZ: 12, height: 25, speed: 0.071, phase: 4.7, cx: 24, cz: -14 },
+    ]),
     props: [
       ...buildProps(),
       ...swashRocks

@@ -14,6 +14,7 @@ function updateVisualLocomotionPhase(visual, {
   action,
   actionUntil,
   disabled,
+  playerConfig = PLAYER,
 }) {
   if (disabled) {
     visual.phase = 'idle';
@@ -59,7 +60,7 @@ function updateVisualLocomotionPhase(visual, {
 
   const keepRun = visual.phase === 'run'
     && moving
-    && speed > PLAYER.walkSpeed * 0.95
+    && speed > playerConfig.walkSpeed * 0.95
     && now - (visual.lastRunAt || -Infinity) <= VISUAL_RUN_HOLD;
   if (keepRun) {
     visual.running = true;
@@ -99,6 +100,9 @@ export function finalizePlayerFrame({
   lastPosePublishAt,
   previousMotion,
   cameraImpulse,
+  playerConfig = PLAYER,
+  swimConfig = SWIM,
+  cameraProfile = null,
   setPlayerPose,
   applyMovementCost,
   applyDrowningDamage,
@@ -125,7 +129,7 @@ export function finalizePlayerFrame({
   const p = group.current?.position;
   if (!p) return;
   const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
-  const sprintingSwim = swimState.current.active && running && horizontalSpeed > SWIM.speed * 1.05;
+  const sprintingSwim = swimState.current.active && running && horizontalSpeed > swimConfig.speed * 1.05;
   const resolvedGroundDistance = Number.isFinite(groundDistance)
     ? groundDistance
     : p.y - collisionAdapter.groundInfo(p).y;
@@ -140,6 +144,9 @@ export function finalizePlayerFrame({
     openingCamera,
     swimming: swimState.current.active,
     wadeDepth: Math.max(0, WATER_LEVEL - p.y),
+    flying: Boolean(stateRef.current.flying),
+    flightSpeedT: stateRef.current.flightSpeedT || 0,
+    cameraProfile,
     now,
     delta,
   });
@@ -160,8 +167,8 @@ export function finalizePlayerFrame({
   stateRef.current.verticalSpeed = velocity.current.y;
   stateRef.current.tiredRun = tiredRun;
   const physicalRunning = running && (
-    horizontalSpeed > PLAYER.walkSpeed * 0.92
-    || (stateRef.current.running && horizontalSpeed > PLAYER.walkSpeed * 0.66)
+    horizontalSpeed > playerConfig.walkSpeed * 0.92
+    || (stateRef.current.running && horizontalSpeed > playerConfig.walkSpeed * 0.66)
   );
   const visual = updateVisualLocomotionPhase(visualLocomotion.current, {
     now,
@@ -170,6 +177,7 @@ export function finalizePlayerFrame({
     speed: horizontalSpeed,
     action: stateRef.current.action,
     actionUntil: stateRef.current.actionUntil,
+    playerConfig,
     disabled: Boolean(
       wasAirborne.current
       || swimState.current.active
@@ -185,7 +193,7 @@ export function finalizePlayerFrame({
   stateRef.current.walking = horizontalSpeed > 0.55 && !stateRef.current.running && (visual.walking || moving);
   stateRef.current.locomotionPhase = visual.phase;
   stateRef.current.locomotionVisualRunning = visual.running;
-  stateRef.current.crouchRunning = stateRef.current.crouching && crouchRunIntent && horizontalSpeed > PLAYER.walkSpeed * 0.5;
+  stateRef.current.crouchRunning = stateRef.current.crouching && crouchRunIntent && horizontalSpeed > playerConfig.walkSpeed * 0.5;
   stateRef.current.airborne = wasAirborne.current;
   stateRef.current.swimming = swimState.current.active;
   stateRef.current.swimSprinting = sprintingSwim;
@@ -196,19 +204,19 @@ export function finalizePlayerFrame({
     const wet = THREE.MathUtils.clamp(wadeDepth.current / 0.85, 0, 1);
     waterlineRef.current.visible = wet > 0.025;
     waterlineRef.current.position.y = WATER_LEVEL - group.current.position.y + 0.018;
-    waterlineRef.current.scale.setScalar(0.8 + wet * 0.18 + THREE.MathUtils.clamp(horizontalSpeed / PLAYER.walkSpeed, 0, 1) * 0.08);
+    waterlineRef.current.scale.setScalar(0.8 + wet * 0.18 + THREE.MathUtils.clamp(horizontalSpeed / playerConfig.walkSpeed, 0, 1) * 0.08);
     waterlineRef.current.rotation.z += delta * (0.12 + horizontalSpeed * 0.035);
     waterlineRef.current.material.opacity = wet > 0.025 ? (0.08 + wet * 0.08) : 0;
   }
 
   if (!skipSwimEconomy) {
     if (swimState.current.active && health > 0) {
-      swimFatigue.current += delta * (sprintingSwim ? SWIM.sprintFatiguePerSecond : SWIM.fatiguePerSecond);
+      swimFatigue.current += delta * (sprintingSwim ? swimConfig.sprintFatiguePerSecond : swimConfig.fatiguePerSecond);
       if (swimFatigue.current >= 1.2) {
         applyMovementCost({ fatigueDelta: swimFatigue.current });
         swimFatigue.current = 0;
       }
-      if (fatigue >= SWIM.exhaustedFatigue) {
+      if (fatigue >= swimConfig.exhaustedFatigue) {
         drownDamage.current += delta * 7;
         if (drownDamage.current >= 4) {
           applyDrowningDamage(drownDamage.current);
@@ -295,6 +303,8 @@ export function finalizePlayerFrame({
   if (playerControllerDebugEnabled()) {
     window.__darwinControllerDebug = {
       airborne: stateRef.current.airborne,
+      playableModeId: stateRef.current.playableModeId,
+      flying: Boolean(stateRef.current.flying),
       action: stateRef.current.action,
       locomotionPhase: stateRef.current.locomotionPhase,
       jumpPhase: stateRef.current.jumpPhase,

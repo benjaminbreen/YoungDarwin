@@ -50,6 +50,26 @@ export const SWIM = {
   exhaustedFatigue: 97,
 };
 
+export const SWIM_POLISH = {
+  enabled: true,
+  // Root sink is measured from waterline down to Darwin's controller origin.
+  // Idle treading should leave head/neck above water; active swimming rides
+  // slightly higher so the stroke reads.
+  idleBodySink: 1.32,
+  movingBodySink: 1.12,
+  sprintBodySink: 1.04,
+  seafloorClearance: 0.12,
+  sinkDamping: 2.8,
+  heightDamping: 7.5,
+  snapDistance: 1.9,
+  cameraPitchBias: 0.22,
+  cameraDistanceBias: 0.28,
+  cameraSideBias: 0.34,
+  cameraPivotBelowSurface: 0.28,
+  cameraDistanceMin: 3.7,
+  cameraDistanceMax: 5.8,
+};
+
 export const SPAWN_DROP = {
   height: 0,
   initialVelocity: -1.2,

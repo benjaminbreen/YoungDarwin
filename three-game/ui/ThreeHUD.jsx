@@ -38,6 +38,11 @@ import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
 import { rarityLabel } from '../world/inspectables';
 import { WEATHER_STATES } from '../world/weatherStates';
+import {
+  getAnimalAction,
+  getPlayableActionItem,
+  getPlayableMode,
+} from '../playable/playableModes';
 
 const MINIMAP_TRAIL_MS = 15000;
 const MINIMAP_TRAIL_MAX_POINTS = 34;
@@ -70,6 +75,37 @@ const ROUTE_EDGE_ABBR = {
   southeast: 'SE',
   southwest: 'SW',
 };
+
+function getToolbarItem(id) {
+  return getInventoryItem(id) || getPlayableActionItem(id);
+}
+
+function AnimalActionIcon({ actionId, className = 'h-7 w-7' }) {
+  if (actionId === 'eat') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5.5 14.5 C8.5 9.4 13.4 6.6 19 6.2 C18.5 11.8 15.5 16.4 10.2 18.8" />
+        <path d="M5 19 C8.1 15.1 11.8 11.6 17.2 7.3" />
+      </svg>
+    );
+  }
+  if (actionId === 'sleep') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 17.5 H19" />
+        <path d="M7 17.5 C7.2 13.7 9.6 11.2 13.3 11.2 C16.1 11.2 18.1 12.9 18.8 15.3" />
+        <path d="M14.5 5 H19 L14.2 10 H19" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 6.2 C10 4.7 13.8 5.4 16 7.8 C18.5 10.6 18.1 15.1 15.2 17.3 C12.1 19.6 7.5 18.7 5.6 15.4" />
+      <path d="M8.5 13.5 C9.4 14.7 10.7 15.2 12.2 15.1" />
+      <path d="M17.2 17.6 L19.4 20" />
+    </svg>
+  );
+}
 
 function clampPercent(value, padding = 6) {
   return Math.max(padding, Math.min(100 - padding, value));
@@ -1023,9 +1059,10 @@ function ToolBelt({ onOpenJournal }) {
   return (
     <ExpeditionPanel className="max-w-[min(35rem,calc(100vw-1.5rem))]" innerClassName="flex flex-wrap justify-center gap-2 p-2">
       {toolbarOrder.map((toolId, index) => {
-        const tool = getInventoryItem(toolId);
+        const tool = getToolbarItem(toolId);
         if (!tool) return null;
         const Icon = TOOL_ICONS[tool.id];
+        const animalAction = getAnimalAction(tool.id);
         const active = activeToolId === tool.id;
         return (
           <button
@@ -1040,6 +1077,7 @@ function ToolBelt({ onOpenJournal }) {
                 triggerToolUse(tool.id);
               } else {
                 setActiveTool(tool.id);
+                if (animalAction) triggerToolUse(tool.id);
               }
             }}
             className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
@@ -1049,7 +1087,9 @@ function ToolBelt({ onOpenJournal }) {
             }`}
             title={`${index + 1}: ${tool.name}`}
           >
-            {tool.image ? (
+            {animalAction ? (
+              <AnimalActionIcon actionId={tool.id} />
+            ) : tool.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={tool.image} alt={tool.name} className="h-10 w-10 object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]" draggable={false} />
             ) : Icon ? <Icon className="h-7 w-7" /> : <span className="text-base">{tool.icon}</span>}
@@ -1589,7 +1629,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
-  const tools = toolbarOrder.map(getInventoryItem).filter(Boolean);
+  const tools = toolbarOrder.map(getToolbarItem).filter(Boolean);
   const shown = condensed ? tools.slice(0, 3) : tools;
 
   return (
@@ -1598,6 +1638,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
         {shown.map(tool => {
           const index = tools.indexOf(tool);
           const Icon = TOOL_ICONS[tool.id];
+          const animalAction = getAnimalAction(tool.id);
           const active = activeToolId === tool.id;
           return (
             <button
@@ -1612,6 +1653,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
                   triggerToolUse(tool.id);
                 } else {
                   setActiveTool(tool.id);
+                  if (animalAction) triggerToolUse(tool.id);
                 }
               }}
               className={`group flex min-w-0 items-center gap-2.5 rounded-sm border px-2.5 py-2 text-left transition ${
@@ -1625,7 +1667,9 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
                   ? 'border-expedition-gold/70 bg-expedition-gold/15 text-expedition-goldbright'
                   : 'border-expedition-brass/35 bg-black/20 text-expedition-gold'
               }`}>
-                {tool.image ? (
+                {animalAction ? (
+                  <AnimalActionIcon actionId={tool.id} className="h-5 w-5" />
+                ) : tool.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={tool.image} alt={tool.name} className="h-7 w-7 object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]" draggable={false} />
                 ) : Icon ? <Icon className="h-5 w-5" /> : <span>{tool.icon}</span>}
@@ -2493,6 +2537,23 @@ function InteractionPrompt() {
   if (!nearby && !renderedSpecimen && edgePrompt) {
     const isOpen = edgePrompt.kind === 'open';
     if (isOpen && edgePrompt.toRegionId) {
+      if (edgePrompt.localTransition) {
+        const toZone = getZone(edgePrompt.toRegionId);
+        return (
+          <PromptCard title={edgePrompt.label || toZone.name} subtitle={edgePrompt.description}>
+            <PromptAction
+              keyLabel="E"
+              primary
+              onClick={() => beginZoneTransition(edgePrompt.toRegionId, {
+                entryEdge: edgePrompt.entryEdge || null,
+                note: edgePrompt.description,
+              })}
+            >
+              Enter
+            </PromptAction>
+          </PromptCard>
+        );
+      }
       const fromZone = getZone(currentZoneId);
       const toZone = getZone(edgePrompt.toRegionId);
       return (
@@ -2779,13 +2840,59 @@ function MobileActionCluster() {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
+  const playableMode = getPlayableMode(playableModeId);
+  const animalAction = getAnimalAction(activeToolId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
     !collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
     && ((specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId)
   ));
 
+  if (playableMode.kind === 'animal') {
+    const actions = ['eat', 'sleep', 'defecate'].map(getAnimalAction).filter(Boolean);
+    const canFly = playableMode.abilities?.includes('fly');
+    return (
+      <div
+        className="pointer-events-none absolute z-20 h-[10.2rem] w-[13.4rem] md:hidden"
+        style={{
+          right: 'max(0.95rem, env(safe-area-inset-right))',
+          bottom: 'calc(env(safe-area-inset-bottom) + 6.2rem)',
+        }}
+      >
+        {canFly && (
+          <MobileActionButton
+            label="Fly"
+            size="small"
+            holdControl="jump"
+            className="right-0 top-0"
+            icon={(
+              <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4.5 12.5 C8.3 6.6 12.2 5.2 19.5 5.8 C16.7 8.8 12.8 11.5 5.4 14" />
+                <path d="M6 15 C10.6 14.8 14.4 16 18.5 19" />
+              </svg>
+            )}
+          />
+        )}
+        {actions.map((action, index) => (
+          <MobileActionButton
+            key={action.id}
+            label={action.name}
+            size="small"
+            onPress={() => triggerToolUse(action.id)}
+            className={index === 0 ? 'bottom-3 left-0' : index === 1 ? 'bottom-7 left-[4.65rem]' : 'bottom-3 right-0'}
+            icon={<AnimalActionIcon actionId={action.id} className="h-full w-full" />}
+          />
+        ))}
+      </div>
+    );
+  }
+
   const collect = () => {
+    if (activeToolId === 'snare') {
+      triggerToolUse(activeToolId);
+      return;
+    }
     if (nearby) {
       collectNearby();
       return;
@@ -2802,7 +2909,7 @@ function MobileActionCluster() {
       }}
     >
       <MobileActionButton
-        label="Jump"
+        label={playableMode.abilities?.includes('fly') ? 'Fly' : 'Jump'}
         size="small"
         holdControl="jump"
         className="right-0 top-0"
@@ -2814,10 +2921,10 @@ function MobileActionCluster() {
         )}
       />
       <MobileActionButton
-        label="Collect"
+        label={animalAction ? animalAction.name : 'Collect'}
         onPress={collect}
         className="bottom-8 left-0"
-        icon={<ButterflyIcon className="h-full w-full" />}
+        icon={animalAction ? <AnimalActionIcon actionId={animalAction.id} className="h-full w-full" /> : <ButterflyIcon className="h-full w-full" />}
       />
       <MobileActionButton
         label="Examine"
@@ -2952,6 +3059,7 @@ export function ThreeHUD() {
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen);
 
   useEffect(() => {
@@ -2982,9 +3090,12 @@ export function ThreeHUD() {
   const questComplete = useThreeGameStore(state => state.questComplete);
 
   const objective = useMemo(() => {
+    const mode = getPlayableMode(playableModeId);
+    if (mode.id === 'finch') return 'Finch mode: W/S climb and sink, A/D carve, Space takes off and lands. Feed when you can and keep clear of Darwin.';
+    if (mode.id === 'tortoise') return 'Tortoise mode: graze, rest, and move slowly through the highland shade.';
     if (questComplete) return 'Quest complete: return to Syms with specimen evidence.';
     return 'Quest: collect or document one animal, plant, or mineral sample.';
-  }, [questComplete]);
+  }, [playableModeId, questComplete]);
 
   const openInventoryTab = useCallback(tab => {
     setMobileNarrativeOpen(false);

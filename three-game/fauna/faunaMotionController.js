@@ -169,6 +169,20 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     return animationRequest(profile.idleClip || profile.walkClip, 0.72, 0.24);
   }
 
+  function faunaIdleAnimation(t) {
+    const variantRate = profile.idleVariantRate || 0.16;
+    if (profile.sleepClip && Math.sin(t * variantRate + seed * 12.7) > 0.78) {
+      return animationRequest(profile.sleepClip, 0.55, 0.32);
+    }
+    if (profile.restClip && Math.sin(t * (variantRate * 1.35) + seed * 8.3) < -0.48) {
+      return animationRequest(profile.restClip, 0.58, 0.3);
+    }
+    if (profile.feedClip && Math.sin(t * (variantRate * 1.9) + seed * 6.1) > 0.18) {
+      return animationRequest(profile.feedClip, 0.62, 0.26);
+    }
+    return animationRequest(profile.idleClip || profile.walkClip, 0.66, 0.24);
+  }
+
   function clampShorebirdOffset(target, scale = 1, out = vectors.clamped) {
     return clampOffset(
       target,
@@ -586,8 +600,10 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       const movedDistance = Math.hypot(x - previousX, z - previousZ);
       const moving = movedDistance > 0.002 || panic > 0.01;
       state.animation = panic > 0.18 && profile.runClip
-        ? profile.runClip
-        : (moving ? profile.walkClip || null : profile.idleClip || profile.walkClip || null);
+        ? animationRequest(profile.runClip, profile.movementStyle === 'wade' ? 0.72 : 1, 0.18)
+        : (moving
+          ? animationRequest(profile.walkClip || profile.idleClip, profile.movementStyle === 'wade' ? 0.58 : 1, 0.18)
+          : faunaIdleAnimation(t));
       const bob = Math.abs(Math.sin(t * (moving ? 5.2 : 1.7) + seed)) * (profile.bobAmount || 0) * (moving ? 1 : 0.25);
       state.position.set(x, groundY + bob, z);
       if (moving) {

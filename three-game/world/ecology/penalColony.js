@@ -10,6 +10,7 @@ import {
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { getPenalColonyFenceProps } from '../penalColonyLayout';
 import { buildPenalColonyCropFields } from '../crops/penalColonyCrops';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 const NATURE = '/assets/models/nature/';
 
@@ -181,10 +182,15 @@ export function buildPenalColonyEcology() {
     footprintBiomes: ['settlement-meadow', 'trampled-court', 'garden-mud', 'trampled-grass-edge', 'dry-rim'],
     props: getPenalColonyFenceProps(),
     crops: buildPenalColonyCropFields(),
-    birds: [
-      { radius: 16, height: 13, speed: 0.1, phase: 0.6, cx: -4, cz: 16 },
-      { radius: 22, height: 17, speed: -0.07, phase: 2.9, cx: 10, cz: -10 },
-      { radius: 14, height: 11, speed: 0.09, phase: 4.4, cx: -22, cz: 26 },
+    flyingModels: [
+      flamingoFlyoverLayer('penal-colony-distant-flamingos', [
+        { cx: -26, cz: -26, radiusX: 40, radiusZ: 12, height: 50, speed: 0.014, phase: 2.0, scale: 0.56, timeScale: 0.5 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 22, radiusZ: 13, height: 28, speed: -0.052, phase: 0.6, cx: -4, cz: 16, flapRate: 0.74 },
+      { species: 'frigatebird', radiusX: 28, radiusZ: 16, height: 32, speed: 0.054, phase: 2.9, cx: 10, cz: -10, flapRate: 0.38 },
+      { species: 'gull', radiusX: 18, radiusZ: 10, height: 27, speed: 0.062, phase: 4.4, cx: -22, cz: 26, flapRate: 0.78 },
+    ]),
   };
 }

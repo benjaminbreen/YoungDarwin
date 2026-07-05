@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
 export const CHARACTER_CONTROLLER_CONFIG = {
@@ -66,16 +66,17 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
     };
   }, [world]);
 
-  return {
-    ready: () => state.current.ready,
-    sync: position => {
+  const ready = useCallback(() => state.current.ready, []);
+
+  const sync = useCallback(position => {
       const current = state.current;
       const body = bodyRef.current;
       if (!current.ready || !body) return;
       body.setTranslation(position, true);
       body.setNextKinematicTranslation(position);
-    },
-    move: (position, desiredDelta) => {
+  }, [bodyRef]);
+
+  const move = useCallback((position, desiredDelta) => {
       const current = state.current;
       const body = bodyRef.current;
       const collider = colliderRef.current;
@@ -118,6 +119,11 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
         collision,
         source: 'rapier-character',
       };
-    },
-  };
+  }, [bodyRef, colliderRef]);
+
+  return useMemo(() => ({
+    ready,
+    sync,
+    move,
+  }), [move, ready, sync]);
 }

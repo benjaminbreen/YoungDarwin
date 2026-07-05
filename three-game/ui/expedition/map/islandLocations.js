@@ -32,7 +32,7 @@ const PLACEMENTS = [
   { id: 'CORMORANT_BAY_TEST_2', at: [0.65, 0.135], kind: 'land' },
   { id: 'CORMORANT_BAY_TEST_3', at: [0.666, 0.146], kind: 'land' },
   { id: 'PUNTA_CORMORANT', at: [0.679, 0.179], kind: 'land' },
-  { id: 'DEVILS_CROWN', at: [0.731, 0.128], kind: 'water', label: true },
+  { id: 'DEVILS_CROWN', at: [0.675, 0.032], kind: 'water', label: true },
   { id: 'BLACK_BEACH_SURF', at: [0.127, 0.419], kind: 'water' },
   { id: 'BLACK_BEACH', at: [0.175, 0.40], kind: 'anchorage', label: true },
   { id: 'LAVA_FLATS', at: [0.33, 0.30], kind: 'land' },

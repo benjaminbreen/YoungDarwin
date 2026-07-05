@@ -4,10 +4,15 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { CAMERA } from './playerConfig';
+import { CAMERA, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+function dampAngle(current, target, lambda, delta) {
+  const wrapped = current + Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return THREE.MathUtils.damp(current, wrapped, lambda, delta);
+}
 
 export function usePlayerCameraRig() {
   const { camera, gl } = useThree();
@@ -23,6 +28,10 @@ export function usePlayerCameraRig() {
   const statusLookRef = useRef(null);
   const shoulderPivotRef = useRef(null);
   const swimCameraRef = useRef(0);
+  // Flight chase camera yields to manual orbiting: dragging suspends the
+  // auto-align for a grace period; Tab (recenter) hands control back.
+  const manualOrbitUntilRef = useRef(0);
+  const manualOrbitBlendRef = useRef(0);
   const openingCameraActiveRef = useRef(false);
   const openingCameraRuntimeRef = useRef({
     sequenceId: null,
@@ -136,6 +145,7 @@ export function usePlayerCameraRig() {
         // While aiming the cursor controls Darwin's facing, not the camera.
         yawRef.current -= dx * CAMERA.rotateSpeed;
         pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * CAMERA.pitchSpeed, CAMERA.minPitch, CAMERA.maxPitch);
+        manualOrbitUntilRef.current = performance.now() / 1000 + 3.2;
       }
     };
     const stopDrag = event => {
@@ -173,11 +183,16 @@ export function usePlayerCameraRig() {
     shoulderPivotRef.current = null;
   }, []);
 
-  const recenterCamera = useCallback(facing => {
+  const recenterCamera = useCallback((facing, options = {}) => {
     const forward = scratch.recenterForward.set(facing?.x || 0, 0, facing?.z || -1);
     if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
     forward.normalize();
-    yawRef.current = Math.atan2(forward.x, forward.z);
+    // behind: chase-view convention (camera look direction = facing), used by
+    // flight so Tab snaps to directly behind the bird.
+    yawRef.current = options.behind
+      ? Math.atan2(-forward.x, -forward.z)
+      : Math.atan2(forward.x, forward.z);
+    manualOrbitUntilRef.current = 0;
     panOffsetRef.current.set(0, 0, 0);
     shoulderPivotRef.current = null;
   }, [scratch]);
@@ -192,6 +207,9 @@ export function usePlayerCameraRig() {
     openingCamera = null,
     swimming = false,
     wadeDepth = 0,
+    flying = false,
+    flightSpeedT = 0,
+    cameraProfile = null,
     now,
     delta,
   }) => {
@@ -220,6 +238,35 @@ export function usePlayerCameraRig() {
       : THREE.MathUtils.damp(cameraFollowYRef.current, cameraTargetY, 7, delta);
     const cameraAnchor = scratch.cameraAnchor.copy(playerPosition);
     cameraAnchor.y = cameraFollowYRef.current;
+    const flightCamera = flying ? cameraProfile?.flight : null;
+    const manualOrbitActive = now < manualOrbitUntilRef.current;
+    manualOrbitBlendRef.current = THREE.MathUtils.damp(
+      manualOrbitBlendRef.current,
+      flightCamera && manualOrbitActive ? 1 : 0,
+      5,
+      delta,
+    );
+    const manualOrbitBlend = flightCamera ? manualOrbitBlendRef.current : 0;
+    // While auto-align owns the flight camera, keep the manual pitch synced
+    // to the flight pitch so starting a drag never snaps the view.
+    if (flightCamera?.pitch != null && manualOrbitBlend < 0.02) {
+      pitchRef.current = THREE.MathUtils.clamp(flightCamera.pitch, CAMERA.minPitch, CAMERA.maxPitch);
+    }
+    if (flightCamera?.autoAlign && facing && manualOrbitBlend < 0.98) {
+      const flightForward = scratch.recenterForward.set(facing.x || 0, 0, facing.z || -1);
+      if (flightForward.lengthSq() > 0.0001) {
+        flightForward.normalize();
+        // Chase view: cameraForward below is the camera's LOOK direction, so
+        // matching it to the bird's facing puts the camera behind the bird
+        // (atan2(f.x, f.z) would park it in front, staring at the beak).
+        yawRef.current = dampAngle(
+          yawRef.current,
+          Math.atan2(-flightForward.x, -flightForward.z),
+          (flightCamera.alignDamping ?? 4) * (1 - manualOrbitBlend),
+          delta,
+        );
+      }
+    }
 
     const offset = cameraTargets[viewMode] || cameraTargets.shoulder;
     const desired = scratch.desired.copy(offset).applyAxisAngle(UP, yawRef.current).add(cameraAnchor);
@@ -310,7 +357,8 @@ export function usePlayerCameraRig() {
       statusLookRef.current = null;
       return;
     }
-    const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
+    const pivotY = cameraProfile?.pivotY ?? 1.22;
+    const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, pivotY, 0)).add(panOffsetRef.current);
     if (examineSession) {
       // Diegetic examine shot: dolly in between Darwin and the subject and
       // frame the subject by its bulk (frameHint), with a very slow orbital
@@ -372,7 +420,7 @@ export function usePlayerCameraRig() {
       // because positional lag is what caused the camera to fall behind into
       // the model while moving.
       const eyeForward = scratch.eyeForward.set(0, 0, -0.22).applyAxisAngle(UP, yawRef.current);
-      desired.copy(playerPosition).add(scratch.panVertical.set(0, 1.66, 0)).add(eyeForward);
+      desired.copy(playerPosition).add(scratch.panVertical.set(0, cameraProfile?.firstPersonEyeY ?? 1.66, 0)).add(eyeForward);
       camera.position.copy(desired);
       const lookPitch = THREE.MathUtils.clamp((CAMERA.defaultPitch - pitchRef.current) * 1.5, -1.3, 1.3);
       camera.rotation.order = 'YXZ';
@@ -388,21 +436,46 @@ export function usePlayerCameraRig() {
     } else {
       const cameraForward = scratch.cameraForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const cameraRight = scratch.cameraRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
-      const cameraDistance = THREE.MathUtils.lerp(
-        zoomRef.current,
-        THREE.MathUtils.clamp(zoomRef.current, 3.7, 5.4),
-        swimCamera,
-      );
+      const swimDistanceBias = SWIM_POLISH.enabled ? swimCamera * SWIM_POLISH.cameraDistanceBias : swimCamera;
+      const swimSideBias = SWIM_POLISH.enabled ? swimCamera * SWIM_POLISH.cameraSideBias : swimCamera;
+      const profileMinDistance = cameraProfile?.minDistance ?? CAMERA.minZoom;
+      const profileMaxDistance = cameraProfile?.maxDistance ?? CAMERA.maxZoom;
+      // In flight the camera distance grows with airspeed so speed reads as
+      // wider framing rather than ground rushing past a fixed camera.
+      const flightDistance = flightCamera?.distance
+        ? flightCamera.distance + (flightCamera.speedDistance ?? 0) * THREE.MathUtils.clamp(flightSpeedT, 0, 1)
+        : null;
+      const profileZoom = flightDistance
+        ? flightDistance
+        : THREE.MathUtils.clamp(zoomRef.current, profileMinDistance, profileMaxDistance);
+      const cameraDistance = flightDistance
+        ? flightDistance
+        : THREE.MathUtils.lerp(
+          profileZoom,
+          THREE.MathUtils.clamp(
+            profileZoom,
+            SWIM_POLISH.enabled ? SWIM_POLISH.cameraDistanceMin : 3.7,
+            SWIM_POLISH.enabled ? SWIM_POLISH.cameraDistanceMax : 5.4,
+          ),
+          swimDistanceBias,
+        );
       const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
-      const side = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimCamera);
+      const side = flightCamera?.side ?? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimSideBias);
       const pitchA = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
-      const effectivePitch = THREE.MathUtils.lerp(pitchA, -0.12, swimCamera * 0.92);
+      const swimPitchBias = SWIM_POLISH.enabled ? SWIM_POLISH.cameraPitchBias : 0.92;
+      const effectivePitch = flightCamera?.pitch != null
+        ? THREE.MathUtils.lerp(flightCamera.pitch, pitchA, manualOrbitBlend)
+        : THREE.MathUtils.lerp(pitchA, -0.12, swimCamera * swimPitchBias);
       // Smooth the pivot itself: looking straight at the raw player position
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
-      const rawPivot = scratch.rawPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, 1.22, 0)).add(panOffsetRef.current);
+      const rawPivot = scratch.rawPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, flightCamera?.pivotY ?? pivotY, 0)).add(panOffsetRef.current);
       if (swimCamera > 0.001) {
-        rawPivot.y = THREE.MathUtils.lerp(rawPivot.y, WATER_LEVEL - 0.28, swimCamera);
+        rawPivot.y = THREE.MathUtils.lerp(
+          rawPivot.y,
+          WATER_LEVEL - (SWIM_POLISH.enabled ? SWIM_POLISH.cameraPivotBelowSurface : 0.28),
+          swimCamera,
+        );
       }
       if (!shoulderPivotRef.current || shoulderPivotRef.current.distanceToSquared(rawPivot) > 36) {
         shoulderPivotRef.current = rawPivot.clone();
@@ -417,7 +490,7 @@ export function usePlayerCameraRig() {
         .add(cameraForward.multiplyScalar(-horiz))
         .add(cameraRight.multiplyScalar(side))
         .add(scratch.panVertical.set(0, vert, 0));
-      camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-6.5 * delta));
+      camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-(flightCamera?.positionDamping ?? 6.5) * delta));
       camera.lookAt(pivot);
     }
     if (!statusViewOpen && !examineSession && statusLookRef.current) {

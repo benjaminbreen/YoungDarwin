@@ -29,7 +29,9 @@ const VISTA_BY_REGION_ID = {
   S_HUT: 'reef-shallows',
   S_REEFS: 'reef-shallows',
   W_HIGH: 'cloud-forest',
+  E_MID: 'rocky-clearing',
   MANGROVES: 'mangrove-forest',
+  PUNTA_CORMORANT: 'punta-cormorant-lagoon',
 };
 
 const DEFAULT_SURFACE_PROFILE_BY_TYPE = {
@@ -58,7 +60,9 @@ const SURFACE_PROFILE_BY_REGION_ID = {
   S_HUT: 'reef-shelf',
   S_REEFS: 'reef-shelf',
   W_HIGH: 'cloud-forest',
+  E_MID: 'highland',
   MANGROVES: 'mangrove-mud',
+  PUNTA_CORMORANT: 'flamingo-lagoon',
   LAVA_FLATS: 'lava-flats',
   BLACK_BEACH: 'black-sand-coast',
   BLACK_BEACH_SURF: 'black-sand-coast',
@@ -152,6 +156,17 @@ export const surfaceProfiles = {
     wetColor: '#1f2d27',
     shoreColor: '#3f4b37',
     targetLiteralWeight: 0.32,
+  },
+  'flamingo-lagoon': {
+    id: 'flamingo-lagoon',
+    families: ['brackish-lagoon', 'olivine-beach', 'mudflat', 'low-hills'],
+    coastalStyle: 'shallow-lagoon',
+    nearColor: '#394f42',
+    midColor: '#637c59',
+    farColor: '#87916c',
+    wetColor: '#243c35',
+    shoreColor: '#7d7b52',
+    targetLiteralWeight: 0.34,
   },
   'open-water': {
     id: 'open-water',
@@ -262,6 +277,21 @@ export const vistaLibrary = {
       { kind: 'rock', count: 8, at: [12, 52], color: '#2d342d', scale: [0.28, 0.72], seed: 71 },
     ],
   },
+  'rocky-clearing': {
+    label: 'Rocky Clearing',
+    seed: 43,
+    apronDepth: 92,
+    apronWidthScale: 1.85,
+    bands: [
+      { from: 0, to: 30, nearY: 0.3, farY: 3.8, colors: ['#5c563e', '#776d49'] },
+      { from: 30, to: 64, nearY: 3.8, farY: 8.8, colors: ['#6d704e', '#858766'] },
+      { from: 64, to: 86, nearY: 8.8, farY: 12.5, colors: ['#6d6956', '#8b846b'] },
+    ],
+    markers: [
+      { kind: 'rock', count: 18, at: [12, 38], color: '#2d2a25', scale: [0.28, 0.78], seed: 43 },
+      { kind: 'scrub', count: 12, at: [-16, 58], color: '#4e5d35', scale: [0.22, 0.5], seed: 55 },
+    ],
+  },
   'mangrove-forest': {
     label: 'Southern Forest',
     seed: 53,
@@ -276,6 +306,21 @@ export const vistaLibrary = {
       { kind: 'scrub', count: 34, at: [16, 38], color: '#263927', scale: [0.46, 1.0], seed: 53 },
       { kind: 'scrub', count: 24, at: [-26, 62], color: '#314632', scale: [0.34, 0.86], seed: 67 },
       { kind: 'rock', count: 6, at: [8, 46], color: '#28302a', scale: [0.22, 0.58], seed: 79 },
+    ],
+  },
+  'punta-cormorant-lagoon': {
+    label: 'Punta Cormorant Lagoon',
+    seed: 61,
+    apronDepth: 94,
+    apronWidthScale: 1.9,
+    bands: [
+      { from: 0, to: 18, nearY: -0.92, farY: -0.72, colors: ['#314d43', '#59715c'] },
+      { from: 18, to: 48, nearY: -0.72, farY: 1.6, colors: ['#46533d', '#67633f'] },
+      { from: 48, to: 84, nearY: 1.6, farY: 7.2, colors: ['#4f5e3c', '#819071'] },
+    ],
+    markers: [
+      { kind: 'scrub', count: 14, at: [18, 52], color: '#3d5435', scale: [0.24, 0.54], seed: 61 },
+      { kind: 'rock', count: 7, at: [-12, 38], color: '#25231e', scale: [0.22, 0.5], seed: 73 },
     ],
   },
   'reef-shallows': {

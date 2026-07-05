@@ -1,4 +1,5 @@
 import { emitPropEvent } from '../../physics/props/propEvents';
+import { useThreeGameStore } from '../../store';
 import { ACTION_DURATION } from './playerConfig';
 
 export function triggerDirectPlayerActions({
@@ -22,6 +23,16 @@ export function triggerDirectPlayerActions({
     },
   });
   triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, actionOptions);
+  triggerAction('snare', 'kneelInspect', ACTION_DURATION.kneelInspect, {
+    ...actionOptions,
+    lockMovement: true,
+    onStart: () => {
+      useThreeGameStore.getState().placeSnareTrap?.({
+        position: group.current?.position,
+        facing: facing.current,
+      });
+    },
+  });
   triggerAction('gather', 'gatherGround', ACTION_DURATION.gatherGround, actionOptions);
   triggerAction('write', 'write', ACTION_DURATION.write, { ...actionOptions, lockMovement: true });
   triggerAction('inspect', 'kneelInspect', ACTION_DURATION.kneelInspect, { ...actionOptions, lockMovement: true });

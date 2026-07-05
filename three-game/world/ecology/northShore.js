@@ -4,6 +4,7 @@ import { getNorthShoreRocks, N_SHORE } from '../northShoreLayout';
 import { generatedTreePresets } from '../generatedTreePresets';
 import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 // Northern Shore (N_SHORE) ecology — Floreana's arid littoral zone as Darwin
 // met it in September 1835. Flora is named for the real species mix:
@@ -206,11 +207,17 @@ export function buildNorthShoreEcology() {
     rocks,
     splashes: { anchors: swashRocks.slice(0, 12), period: NORTH_SHORE_SWASH_PERIOD },
     footprintBiomes: ['black-sand', 'ash-beach', 'sesuvium-flat', 'dry-scrub'],
-    birds: [
-      { radius: 16, height: 17, speed: 0.11, phase: 0, cx: -6, cz: -6 },
-      { radius: 24, height: 23, speed: -0.08, phase: 2.1, cx: 14, cz: -14 },
-      { radius: 20, height: 20, speed: 0.09, phase: 4.4, cx: -26, cz: -18 },
+    flyingModels: [
+      flamingoFlyoverLayer('north-shore-flamingo-flyover', [
+        { cx: -18, cz: -28, radiusX: 42, radiusZ: 13, height: 35, speed: 0.024, phase: 0.7, scale: 0.9 },
+        { cx: 20, cz: -24, radiusX: 38, radiusZ: 12, height: 39, speed: -0.021, phase: 2.9, scale: 0.84, timeScale: 0.6 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'frigatebird', radiusX: 24, radiusZ: 13, height: 22, speed: 0.085, phase: 0, cx: -6, cz: -12, flapRate: 0.48 },
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 28, radiusZ: 15, height: 25, speed: -0.06, phase: 2.1, cx: 14, cz: -18, flapRate: 0.78 },
+      { species: 'booby', radiusX: 22, radiusZ: 12, height: 23, speed: 0.076, phase: 4.4, cx: -26, cz: -20, flapRate: 0.66 },
+    ]),
     // Sally Lightfoot crabs perched on swash-zone boulders.
     props: swashRocks
       .filter(rock => rock.radiusY > 0.32)

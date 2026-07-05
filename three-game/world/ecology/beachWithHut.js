@@ -9,6 +9,7 @@ import { makeZoneScatter, nearAnyCluster, seededRandom } from '../scatter';
 import { getBeachWithHutRocks } from '../beachWithHutLayout';
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { buildBeachFindLayer } from './beachFinds';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 const NATURE = '/assets/models/nature/';
 const BEACH_HUT_SWASH_PERIOD = (Math.PI * 2) / 0.5984;
@@ -266,9 +267,16 @@ export function buildBeachWithHutEcology() {
       }),
     ],
     footprintBiomes: ['wet-white-sand', 'white-sand', 'normal-sand', 'sandy-path', 'garden-loam', 'dry-grass-shelf'],
-    birds: [
-      { radius: 18, height: 15, speed: 0.09, phase: 0.6, cx: -8, cz: 8 },
-      { radius: 24, height: 20, speed: -0.065, phase: 3.1, cx: 20, cz: -16 },
+    flyingModels: [
+      flamingoFlyoverLayer('beach-hut-flamingo-flyover', [
+        { cx: -18, cz: -10, radiusX: 38, radiusZ: 12, height: 33, speed: 0.024, phase: 1.4, scale: 0.86 },
+        { cx: 18, cz: -18, radiusX: 34, radiusZ: 11, height: 37, speed: -0.02, phase: 3.7, scale: 0.8, timeScale: 0.6 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 24, radiusZ: 13, height: 22, speed: -0.06, phase: 0.6, cx: -8, cz: 8, flapRate: 0.8 },
+      { species: 'frigatebird', radiusX: 28, radiusZ: 16, height: 26, speed: 0.064, phase: 3.1, cx: 20, cz: -16, flapRate: 0.44 },
+      { species: 'gull', radiusX: 19, radiusZ: 10, height: 21, speed: 0.075, phase: 5.4, cx: -20, cz: -12, flapRate: 0.84 },
+    ]),
   };
 }

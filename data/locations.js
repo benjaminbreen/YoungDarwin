@@ -821,22 +821,64 @@ export const locations = [
   {
     id: 'DEVILS_CROWN',
     name: "Devil's Crown",
-    description: 'A partially submerged volcanic crater teeming with marine life.',
+    description: 'A broken volcanic crown offshore: Darwin must swim from the landing rock to reach the crater rim and lagoon.',
     x: 4,
-    y: 0,
+    y: -2,
     color: '#20b2aa',
     type: 'coastallava',
-    validMoves: ['W','S'],
-    specimens: ['mantaRay','greenTurtle','booby'],
+    playerStart: [0, 0, 39],
+    validMoves: ['SW','S'],
+    routeOverrides: { SW: 'N_OUTCROP', S: 'PUNTA_CORMORANT' },
+    routeOverrideTravel: {
+      SW: {
+        minutes: 42,
+        fatigue: 5,
+        routeLabel: 'SW',
+        description: 'Return southwest by boat and surf line toward the desolate outcrop.',
+      },
+      S: {
+        minutes: 48,
+        fatigue: 4,
+        routeLabel: 'S',
+        description: 'Swim back to the landing rock, then travel south toward Punta Cormorant.',
+      },
+    },
+    specimens: ['greenTurtle','booby','coral'],
+    specimenPlacements: [
+      {
+        specimenId: 'booby',
+        position: [-12, 0, -24],
+        behavior: 'curious',
+        sceneScale: 1.08,
+        habitatRadiusX: 7.4,
+        habitatRadiusZ: 3.6,
+      },
+      {
+        specimenId: 'greenTurtle',
+        position: [10, 0, 6],
+        behavior: 'still',
+        sceneScale: 1.05,
+        habitatRadiusX: 4.4,
+        habitatRadiusZ: 2.4,
+      },
+      {
+        specimenId: 'coral',
+        position: [-3, 0, 37],
+        behavior: 'still',
+        sceneScale: 0.9,
+        habitatRadiusX: 0.7,
+        habitatRadiusZ: 0.5,
+      },
+    ],
     npcs: [],
-    boundaries: { north: 'ocean', east: 'ocean' },
+    boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
     discoveries: [
-      'Underwater pinnacles hide colorful fish and coral formations—an excellent spot for collecting marine samples.'
+      'Underwater pinnacles hide colorful fish and coral formations, but the crater rim can only be reached by swimming the channel.'
     ],
     notableFeatures: [
-      'Dark lava spires jut from the sea in a ring-like formation.',
-      'Birds wheel overhead, scanning for prey just below the surface.',
-      'A sense of foreboding beauty as currents swirl around the crater walls.'
+      'Dark lava spires form a broken crown around a clear inner lagoon.',
+      'A small southern landing rock leaves a swim-depth channel between Darwin and the crater rim.',
+      'Manta rays and fish move through the blue water while seabirds hold the high black rock.'
     ]
   },
 
@@ -849,8 +891,62 @@ export const locations = [
     y: -1,
     color: '#696969',
     type: 'ocean',
-    validMoves: ['S'],
-    specimens: ['seaLion'],
+    playerStart: [0, 0, 32],
+    validMoves: ['S','NE'],
+    routeOverrides: { NE: 'DEVILS_CROWN' },
+    routeOverrideTravel: {
+      NE: {
+        minutes: 42,
+        fatigue: 5,
+        routeLabel: 'NE',
+        description: 'Cross northeast by boat and swimming approach toward Devil\'s Crown.',
+      },
+    },
+    specimens: ['seaLion','marineIguana','crab','lavaLizard'],
+    specimenPlacements: [
+      {
+        specimenId: 'seaLion',
+        position: [3, 0, -19],
+        behavior: 'bask',
+        sceneScale: 1.12,
+        habitatRadiusX: 5.2,
+        habitatRadiusZ: 2.6,
+      },
+      {
+        specimenId: 'marineIguana',
+        position: [7.5, 0, -7.5],
+        behavior: 'bask',
+        sceneScale: 1.08,
+        habitatRadiusX: 5.2,
+        habitatRadiusZ: 2.8,
+        spawnScatter: {
+          radiusX: 2.8,
+          radiusZ: 1.4,
+          bounds: { minX: 2, maxX: 13, minZ: -13, maxZ: -2 },
+        },
+      },
+      {
+        specimenId: 'crab',
+        position: [13, 0, 20],
+        behavior: 'skitter',
+        sceneScale: 1.38,
+        habitatRadiusX: 3.8,
+        habitatRadiusZ: 2.0,
+      },
+      {
+        specimenId: 'lavaLizard',
+        position: [-3.8, 0, 21.5],
+        behavior: 'scurry',
+        sceneScale: 1.42,
+        habitatRadiusX: 3.2,
+        habitatRadiusZ: 1.6,
+        spawnScatter: {
+          radiusX: 2.4,
+          radiusZ: 1.2,
+          bounds: { minX: -9, maxX: 3, minZ: 17, maxZ: 26 },
+        },
+      },
+    ],
     npcs: ['gabriel_puig'],
     boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
     discoveries: [
@@ -1005,23 +1101,82 @@ export const locations = [
   {
     id: 'PUNTA_CORMORANT',
     name: 'Punta Cormorant',
-    description: 'Headland with a strangely green-colored beach and a brackish lagoon inland.',
+    description: 'An olivine-tinted beach opening onto a broad, shallow brackish lagoon where flamingos feed.',
     x: 5,
     y: 1,
-    color: '#5f9ea0',
-    type: 'beach',
+    color: '#6f8f72',
+    type: 'wetland',
+    playerStart: [0, 0, 38],
     validMoves: ['N','W','SW'],
+    routeOverrides: { N: 'DEVILS_CROWN' },
+    routeOverrideTravel: {
+      N: {
+        minutes: 48,
+        fatigue: 4,
+        routeLabel: 'N',
+        description: 'Travel north along the lagoon rim toward Devil\'s Crown.',
+      },
+    },
     specimens: ['flamingo','frigatebird'],
+    specimenPlacements: [
+      {
+        specimenId: 'flamingo',
+        position: [-28, 0, -7],
+        behavior: 'still',
+        sceneScale: 1.02,
+        habitatRadiusX: 5.2,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [-13, 0, -1.5],
+        behavior: 'still',
+        sceneScale: 0.96,
+        habitatRadiusX: 4.8,
+        habitatRadiusZ: 2.5,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [4, 0, 3.5],
+        behavior: 'still',
+        sceneScale: 1.05,
+        habitatRadiusX: 5.5,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [20, 0, -4],
+        behavior: 'still',
+        sceneScale: 0.92,
+        habitatRadiusX: 4.6,
+        habitatRadiusZ: 2.3,
+      },
+      {
+        specimenId: 'flamingo',
+        position: [31, 0, 7],
+        behavior: 'still',
+        sceneScale: 0.88,
+        habitatRadiusX: 4.2,
+        habitatRadiusZ: 2.2,
+      },
+    ],
     npcs: [],
-    boundaries: {},
+    boundaries: { east: 'ocean', south: 'ocean' },
     discoveries: [
-      'The green tinge of the sand, caused by olivine crystals, intrigues you—perhaps worthy of a geological sample.'
+      'The green tinge of the sand, caused by olivine crystals, intrigues you - perhaps worthy of a geological sample.',
+      'Flamingos feed across the brackish lagoon, their long legs and pink bodies mirrored in the still water.'
     ],
     notableFeatures: [
-      'A short path leads inland to a shallow lagoon, home to wading birds.',
-      'A stiff breeze keeps the insects at bay.',
-      'The beach squeaks softly underfoot, finer than typical black volcanic sand.'
-    ]
+      'A narrow beach shelf gives way almost immediately to shallow lagoon water.',
+      'Dark mangrove-mud texture and saltgrass fringe the lagoon edge without turning the scene into dense forest.',
+      'The northern rim opens toward Devil\'s Crown beyond the lagoon.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['soft lagoon wind', 'distant seabirds', 'slow water around boots'],
+      loadingNote: 'An olivine beach leads into the broad flamingo lagoon at Punta Cormorant.',
+      educationalNote: 'Punta Cormorant is known for greenish olivine sand and a brackish lagoon where flamingos feed in shallow water.',
+    },
   },
 
   // 15) W_LAVA
@@ -1110,6 +1265,26 @@ export const locations = [
     specimens: ['medium_ground_finch','floreana_mockingbird'],
     npcs: [],
     boundaries: {},
+    specimenPlacements: [
+      {
+        instanceId: 'penal-colony-medium-finch-garden-1',
+        specimenId: 'medium_ground_finch',
+        position: [-9.4, 0, 4.8],
+        behavior: 'curious',
+        sceneScale: 1.05,
+        habitatRadiusX: 7.5,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'penal-colony-medium-finch-garden-2',
+        specimenId: 'medium_ground_finch',
+        position: [6.2, 0, -2.6],
+        behavior: 'curious',
+        sceneScale: 0.95,
+        habitatRadiusX: 5.5,
+        habitatRadiusZ: 3.8,
+      },
+    ],
     discoveries: [
       'You overhear whispers of contraband or banned literature hidden somewhere in the colony.'
     ],
@@ -1130,23 +1305,64 @@ export const locations = [
   {
     id: 'E_MID',
     name: 'Rocky Clearing',
-    description: 'Mountainous terrain with mysterious caves.',
+    description: 'A dry highland clearing where a red-dirt path crosses volcanic rubble below a shadowed cave mouth.',
     x: 3,
     y: 2,
     color: '#bdb76b',
     type: 'clearing',
     validMoves: ['N','E','W','S'],
-    specimens: ['unknown'],
+    playerStart: [-5, 0, 3.2],
+    specimens: ['lavalizard','medium_ground_finch','basalt','scoria'],
     npcs: [],
     boundaries: {},
+    specimenPlacements: [
+      {
+        instanceId: 'rocky-clearing-lava-lizard-warm-rocks-1',
+        specimenId: 'lavalizard',
+        position: [11.2, 0, -4.8],
+        behavior: 'skittish',
+        sceneScale: 0.92,
+        habitatRadiusX: 8.5,
+        habitatRadiusZ: 5.4,
+      },
+      {
+        instanceId: 'rocky-clearing-medium-finch-path-edge-1',
+        specimenId: 'medium_ground_finch',
+        position: [-17.8, 0, 6.4],
+        behavior: 'curious',
+        sceneScale: 0.95,
+        habitatRadiusX: 7.0,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'rocky-clearing-basalt-cave-apron-1',
+        specimenId: 'basalt',
+        position: [-7.2, 0, -6.8],
+        behavior: 'still',
+        sceneScale: 0.72,
+      },
+      {
+        instanceId: 'rocky-clearing-scoria-camp-ash-1',
+        specimenId: 'scoria',
+        position: [4.8, 0, -5.2],
+        behavior: 'still',
+        sceneScale: 0.62,
+      },
+    ],
     discoveries: [
       'You find ash from a recent campfire near the largest cave. Someone has been living here.'
     ],
     notableFeatures: [
-      'Sheer walls of volcanic rock overshadow the clearing.',
-      'A faint smell of smoke and damp earth lingers in the air.',
-      'The hush suggests few creatures dwell in these rocky heights.'
-    ]
+      'A compacted red-dirt path cuts east to west through dry highland grass.',
+      'Basalt piles and loose scoria collect around a cave mouth set into the north rise.',
+      'A small ash patch and charred sticks near the threshold suggest recent shelter.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['wind over dry grass', 'loose stones shifting underfoot', 'a finch calling from the scrub'],
+      loadingNote: 'The path opens into a rocky highland clearing, where basalt rubble gathers below Gabriel’s cave.',
+      educationalNote: 'Volcanic clearings expose the island’s recent geology: basalt blocks, red scoria, and ash tell different parts of the same eruptive history.',
+    },
   },
 
   // 20) EL_MIRADOR
@@ -1507,9 +1723,19 @@ export const locations = [
   y: 999,
   color: '#333333',
   type: 'cave',
-  validMoves: [], 
+  validMoves: ['S'],
+  playerStart: [0, 0, 10],
   specimens: [],
   npcs: ['gabriel_puig'],
+  routeOverrides: { S: 'E_MID' },
+  routeOverrideTravel: {
+    S: {
+      description: 'Step back through the cave mouth into Rocky Clearing.',
+      minutes: 2,
+      fatigue: 0,
+      routeLabel: 'Cave mouth',
+    },
+  },
   boundaries: {},
   discoveries: [
     "A dark passage leads deeper into the rock, faintly lit by dripping candles.",

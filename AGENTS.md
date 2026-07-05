@@ -25,6 +25,15 @@ Completed major systems so far:
 
 Use `npm run check` for syntax and regression coverage before claiming a code change is verified.
 
+## Future Ideas
+
+Notes from Ben about possible future paths for the game:
+
+- Add alternate playable modes where the player can choose to play as Darwin, a tortoise, or a finch, with later support for other animals or plants.
+- In non-Darwin play modes, Darwin should exist in the world as an NPC who wanders around occasionally and may collect the player-character if he encounters them.
+- Longer-term multiplayer idea: only one player at a time can play as Darwin, while up to about 100 other players can play as animals on the island observing him.
+- Animal play mode should still use a bottom tool panel, but its options should be intentionally limited to basic animal actions: eat, sleep, or defecate.
+
 ## Floreana-Only World Direction
 
 The 3D game should be set on Floreana Island, historically Charles Island. The old 2D game content is valid source material for geography, specimen data, tools, collection/journal mechanics, NPC/event scaffolding, fatigue costs by terrain, and route graph ideas.
@@ -173,7 +182,7 @@ The current procedural 3D scene is useful as a playable fallback, but the visual
 4. Put optimized files in `public/assets/models/`.
 5. Enable the asset in `three-game/modelAssets.js`.
 6. Keep procedural fallbacks working at all times.
-7. Verify with `npm run check`, `npm run build`, and `npm run three:screenshot`.
+7. Verify with `npm run check` and, for substantial runtime changes, `npm run build`. Use screenshot checks only when the change affects rendered output or visual framing.
 
 Do not add new raw FBX/GLB/Blend/PNG asset drops to the repository root. Some older source assets still live there, but new work should go under `assets-src/` for source/intermediate files and `public/assets/models/` or `public/assets/textures/` only for optimized runtime assets.
 
@@ -220,7 +229,15 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run three:contact-sheet -- --asset <assetId|alias|path> --clip <clipName|all> --view <front|side|threeQuarter>` renders repo-visible keyframe contact sheets through Blender and assembles `contact-*.png` when ImageMagick is available.
 - Direct fallback if the wrapper fails: `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --disable-autoexec --python scripts/blender_animation_contact_frames.py -- --asset public/assets/models/darwin5.glb --clip <clipName> --out test-results/animation-sheets/darwin5-<clipName> --frames 12 --size 360 --view threeQuarter`.
 - `npm run three:screenshot` auto-detects an existing local Next dev server on common ports, captures desktop/mobile screenshots, and checks that the 3D canvas is full-screen and nonblank.
-- `npm run three:screenshot:fast` captures the desktop viewport only. Use it for quick smoke checks while iterating; use the full `three:screenshot` before claiming broad visual readiness.
+- `npm run three:screenshot:fast` captures the desktop WebGL canvas only. Use it for quick canvas smoke checks while iterating; use the full `three:screenshot` before claiming broad page-level visual readiness.
+
+Visual verification policy:
+
+- Do not run screenshots for every code change. `npm run check` is the default syntax/regression gate before claiming a code change is verified.
+- Run `npm run three:screenshot:fast` when a change can affect `/three` rendering: terrain, materials, shaders, lighting, camera, controls, HUD/layout/CSS, 3D asset loading, animation visibility, ecology/scatter, water, or scene composition.
+- Run full `npm run three:screenshot` only before claiming broad visual readiness after substantial visual or 3D changes.
+- If screenshot, dev-server, Playwright, or Chromium verification fails, retry once only when the failure is likely transient or sandbox-related. Do not install browsers, switch Chromium channels, escalate repeatedly, or loop on loading/menu states unless the user explicitly asked for visual proof.
+- If the retry fails, continue with other verification and report the failed command, the likely cause, and any diagnostic files under `test-results/three-darwin/`.
 
 Animation contact-sheet pipeline:
 
@@ -245,9 +262,9 @@ npm run three:contact-sheet -- --asset /assets/models/animals/runtime/manta-ray.
 
 Playwright/Chromium sandbox note:
 
-- In Codex on macOS, do **not** run `npm run three:screenshot` or `npm run three:screenshot:fast` inside the normal seatbelt sandbox first. Playwright Chromium can crash before page load (`SIGABRT`/`SIGTRAP`, `ThermalStateObserverMac`, `kill EPERM`), leaving noisy Chrome/Chromium crash behavior and sometimes orphaned browser children.
-- Always run the exact screenshot npm script with `sandbox_permissions: "require_escalated"` on the first attempt. The exact prefixes `npm run three:screenshot` and `npm run three:screenshot:fast` are the approval-stable forms; use them directly so persisted approval rules can match without a new user checkpoint.
-- Do not wrap screenshot commands with inline env vars such as `THREE_SCREENSHOT_TIMEOUT_MS=... npm run three:screenshot` or `env THREE_SCREENSHOT_VIEWPORTS=...`. The screenshot script now defaults to a 120s boot timeout, and `npm run three:screenshot:fast` is the desktop-only path.
+- In Codex on macOS, Playwright Chromium can crash before page load inside the normal seatbelt sandbox (`SIGABRT`/`SIGTRAP`, `ThermalStateObserverMac`, `kill EPERM`), leaving noisy Chrome/Chromium crash behavior and sometimes orphaned browser children.
+- Start with the normal screenshot command when visual verification is warranted. If Chromium fails before page load with a sandbox-looking launch error, retry once with the exact screenshot npm script and `sandbox_permissions: "require_escalated"`. The exact prefixes `npm run three:screenshot` and `npm run three:screenshot:fast` are the approval-stable forms; use them directly so persisted approval rules can match without a new user checkpoint.
+- Do not wrap screenshot commands with inline env vars such as `THREE_SCREENSHOT_TIMEOUT_MS=... npm run three:screenshot` or `env THREE_SCREENSHOT_VIEWPORTS=...`. Use `npm run three:screenshot:fast` for the desktop-only path, and prefer the script defaults unless deliberately debugging the screenshot script itself.
 - If a screenshot run is interrupted, check for leftovers with `pgrep -af "playwright|chromium|chrome-headless|Google Chrome for Testing|three-screenshot"` and kill only orphaned Playwright/Chromium/screenshot processes, not the user's existing Next dev server.
 
 Verification expectations:

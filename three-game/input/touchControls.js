@@ -10,11 +10,15 @@ const touchState = {
   crouch: false,
   rifle: false,
   net: false,
+  snare: false,
   hammer: false,
   gather: false,
   fireRifle: false,
   write: false,
   inspect: false,
+  animalEat: false,
+  animalSleep: false,
+  animalDefecate: false,
 };
 
 // Which one-shot action control each equipped tool fires when "used".
@@ -22,8 +26,11 @@ const TOOL_USE_CONTROLS = {
   hammer: 'hammer',
   insect_net: 'net',
   shotgun: 'fireRifle',
-  snare: 'net',
+  snare: 'snare',
   sketch: 'write',
+  eat: 'animalEat',
+  sleep: 'animalSleep',
+  defecate: 'animalDefecate',
 };
 
 export function triggerToolUse(toolId) {
@@ -43,10 +50,14 @@ export function consumeTouchControls() {
   touchState.crouch = false;
   touchState.rifle = false;
   touchState.net = false;
+  touchState.snare = false;
   touchState.hammer = false;
   touchState.gather = false;
   touchState.fireRifle = false;
   touchState.write = false;
   touchState.inspect = false;
+  touchState.animalEat = false;
+  touchState.animalSleep = false;
+  touchState.animalDefecate = false;
   return snapshot;
 }

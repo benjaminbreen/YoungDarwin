@@ -1,6 +1,7 @@
 import { makeZoneScatter, nearAnyCluster, seededRandom } from '../scatter';
 import { terrainHeight, terrainSlopeAt } from '../terrain';
 import { generatedTreePresets } from '../generatedTreePresets';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 import {
   MANGROVE_TRAIL,
   mangroveFernBenchMask,
@@ -382,9 +383,16 @@ export function buildMangroveEcology() {
     generatedTrees: buildGeneratedTrees(),
     props: buildTrailRoots(),
     footprintBiomes: ['mud-trail', 'pool-edge', 'fern-bank'],
-    birds: [
-      { radius: 9, height: 9, speed: 0.07, phase: 1.4, cx: -5, cz: -18 },
-      { radius: 13, height: 12, speed: -0.05, phase: 3.6, cx: 16, cz: 11 },
+    flyingModels: [
+      flamingoFlyoverLayer('mangroves-flamingo-overstory', [
+        { cx: -18, cz: -20, radiusX: 34, radiusZ: 11, height: 42, speed: 0.02, phase: 0.9, scale: 0.78, timeScale: 0.58 },
+        { cx: 18, cz: 8, radiusX: 30, radiusZ: 10, height: 46, speed: -0.018, phase: 3.0, scale: 0.72, timeScale: 0.56 },
+      ], { loadTier: 2 }),
     ],
+    birds: coastalBirds([
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 18, radiusZ: 9, height: 20, speed: -0.048, phase: 1.4, cx: -5, cz: -18, flapRate: 0.74 },
+      { species: 'frigatebird', radiusX: 22, radiusZ: 12, height: 25, speed: 0.058, phase: 3.6, cx: 16, cz: 11, flapRate: 0.44 },
+      { species: 'gull', radiusX: 14, radiusZ: 8, height: 22, speed: 0.052, phase: 5.1, cx: -16, cz: 18, flapRate: 0.82 },
+    ]),
   };
 }

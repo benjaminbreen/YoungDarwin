@@ -61,11 +61,16 @@ const FOOT_PROBE_PATTERNS = {
     left: [/lefttoebase$/i, /lefttoe_end$/i, /leftfoot$/i],
     right: [/righttoebase$/i, /righttoe_end$/i, /rightfoot$/i],
   },
+  tripoTortoiseRigged: {
+    left: [/front_left_foot$/i, /rear_left_foot$/i],
+    right: [/front_right_foot$/i, /rear_right_foot$/i],
+  },
 };
 
 const VISUAL_SOLE_OFFSET = {
   default: { left: 0.006, right: 0.006 },
   darwin5: { left: 0.018, right: 0.018 },
+  tripoTortoiseRigged: { left: 0.018, right: 0.018 },
 };
 
 function normalizeClipName(name = '') {

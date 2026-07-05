@@ -1,6 +1,6 @@
 import { locations } from '../data/locations';
 import { canonicalizeSpecimenIds } from '../utils/canonicalIds';
-import { estimateRouteTravel, getCellByCoordinates } from '../utils/locationSystem';
+import { estimateRouteTravel, getCellByCoordinates, getCellById } from '../utils/locationSystem';
 
 export const EDGE_DIRECTIONS = {
   north: { abbr: 'N', dx: 0, dy: -1, opposite: 'south' },
@@ -55,11 +55,14 @@ const AUTHORED_REGION_TERRAIN = {
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 360 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
+  N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
+  DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
   S_HUT: { preset: 'beach-with-hut-southwest', segments: 300 },
   S_REEFS: { preset: 'southern-white-reef', segments: 300 },
   W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
   EL_MIRADOR: { preset: 'el-mirador-red-dirt-ridge', segments: 320 },
+  E_MID: { preset: 'rocky-clearing-cave-path', segments: 320 },
   PENAL_COLONY: { preset: 'penal-colony-settlement', segments: 300 },
   MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
   GRASS_TEST: { preset: 'grass-test-field', segments: 300 },
@@ -67,6 +70,7 @@ const AUTHORED_REGION_TERRAIN = {
   CORMORANT_BAY_SPLAT_TEST: { preset: 'cormorant-bay-splat-test', segments: 300 },
   CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
   CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },
+  PUNTA_CORMORANT: { preset: 'punta-cormorant-lagoon', segments: 320 },
 };
 
 function humanDirection(edge) {
@@ -83,7 +87,11 @@ function makeOpenHint(cell, abbr) {
   const edge = ABBR_TO_EDGE[abbr];
   const dir = EDGE_DIRECTIONS[edge];
   if (!edge || !dir) return null;
-  const neighbor = getCellByCoordinates(cell.x + dir.dx, cell.y + dir.dy);
+  const overrideId = cell.routeOverrides?.[abbr] || cell.routeOverrides?.[edge];
+  const overrideTravel = cell.routeOverrideTravel?.[abbr] || cell.routeOverrideTravel?.[edge] || null;
+  const neighbor = overrideId
+    ? getCellById(overrideId)
+    : getCellByCoordinates(cell.x + dir.dx, cell.y + dir.dy);
   if (!neighbor) return null;
   const travel = estimateRouteTravel(cell, neighbor);
   return {
@@ -92,10 +100,10 @@ function makeOpenHint(cell, abbr) {
     kind: 'open',
     toRegionId: neighbor.id,
     label: `Near ${neighbor.name}`,
-    description: `Travel ${edge} to ${neighbor.name}.`,
-    minutes: travel?.travelMinutes || 35,
-    fatigue: travel?.fatigueIncrease || 2,
-    routeLabel: travel?.routeLabel || abbr,
+    description: overrideTravel?.description || `Travel ${edge} to ${neighbor.name}.`,
+    minutes: overrideTravel?.minutes || travel?.travelMinutes || 35,
+    fatigue: overrideTravel?.fatigue || travel?.fatigueIncrease || 2,
+    routeLabel: overrideTravel?.routeLabel || travel?.routeLabel || abbr,
   };
 }
 

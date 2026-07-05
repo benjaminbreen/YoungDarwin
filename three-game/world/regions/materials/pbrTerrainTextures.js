@@ -49,6 +49,21 @@ export const FLOREANA_PBR_TEXTURES = {
       height: [128, 128, 128, 255],
     },
   },
+  whiterSand: {
+    albedo: `${FLOREANA_PBR_BASE}/whiter-sand_albedo.png`,
+    normal: null,
+    roughness: null,
+    height: null,
+    scale: 0.2,
+    normalStrength: 0.18,
+    roughnessMix: 0.76,
+    fallbacks: {
+      albedo: '#eee3cc',
+      normal: [128, 128, 255, 255],
+      roughness: [236, 236, 236, 255],
+      height: [128, 128, 128, 255],
+    },
+  },
   normalSand: {
     albedo: `${FLOREANA_PBR_BASE}/normal-sand_albedo.png`,
     normal: null,

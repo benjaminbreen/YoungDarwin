@@ -6,6 +6,10 @@ import { postOfficeBay3Region } from './postOfficeBay3/terrain';
 import { createPostOfficeBay3TerrainMaterial } from './postOfficeBay3/material';
 import { northShoreRegion } from './northShore/terrain';
 import { createNorthShoreTerrainMaterial } from './northShore/material';
+import { desolateOutcropRegion } from './desolateOutcrop/terrain';
+import { createDesolateOutcropTerrainMaterial } from './desolateOutcrop/material';
+import { devilsCrownRegion } from './devilsCrown/terrain';
+import { createDevilsCrownTerrainMaterial } from './devilsCrown/material';
 import { northwestReefRegion } from './northwestReef/terrain';
 import { createNorthwestReefTerrainMaterial } from './northwestReef/material';
 import { beachWithHutRegion } from './beachWithHut/terrain';
@@ -16,6 +20,8 @@ import { westernHighlandsRegion } from './westernHighlands/terrain';
 import { createWesternHighlandsTerrainMaterial } from './westernHighlands/material';
 import { elMiradorRegion } from './elMirador/terrain';
 import { createElMiradorTerrainMaterial } from './elMirador/material';
+import { rockyClearingRegion } from './rockyClearing/terrain';
+import { createRockyClearingTerrainMaterial } from './rockyClearing/material';
 import { penalColonyRegion } from './penalColony/terrain';
 import { createPenalColonyTerrainMaterial } from './penalColony/material';
 import { mangroveRegion } from './mangroves/terrain';
@@ -30,17 +36,22 @@ import { cormorantBayTest2Region } from './cormorantBayTest2/terrain';
 import { createCormorantBayTest2TerrainMaterial } from './cormorantBayTest2/material';
 import { cormorantBayTest3Region } from './cormorantBayTest3/terrain';
 import { createCormorantBayTest3TerrainMaterial } from './cormorantBayTest3/material';
+import { puntaCormorantRegion } from './puntaCormorant/terrain';
+import { createPuntaCormorantTerrainMaterial } from './puntaCormorant/material';
 
 const authoredRegions = [
   { ...postOfficeBayRegion, createTerrainMaterial: createPostOfficeBayTerrainMaterial },
   { ...altPostOfficeBayRegion, createTerrainMaterial: createAltPostOfficeBayTerrainMaterial },
   { ...postOfficeBay3Region, createTerrainMaterial: createPostOfficeBay3TerrainMaterial },
   { ...northShoreRegion, createTerrainMaterial: createNorthShoreTerrainMaterial },
+  { ...desolateOutcropRegion, createTerrainMaterial: createDesolateOutcropTerrainMaterial },
+  { ...devilsCrownRegion, createTerrainMaterial: createDevilsCrownTerrainMaterial },
   { ...northwestReefRegion, createTerrainMaterial: createNorthwestReefTerrainMaterial },
   { ...beachWithHutRegion, createTerrainMaterial: createBeachWithHutTerrainMaterial },
   { ...southernReefsRegion, createTerrainMaterial: createSouthernReefsTerrainMaterial },
   { ...westernHighlandsRegion, createTerrainMaterial: createWesternHighlandsTerrainMaterial },
   { ...elMiradorRegion, createTerrainMaterial: createElMiradorTerrainMaterial },
+  { ...rockyClearingRegion, createTerrainMaterial: createRockyClearingTerrainMaterial },
   { ...penalColonyRegion, createTerrainMaterial: createPenalColonyTerrainMaterial },
   { ...mangroveRegion, createTerrainMaterial: createMangroveTerrainMaterial },
   { ...grassTestRegion, createTerrainMaterial: createGrassTestTerrainMaterial },
@@ -48,6 +59,7 @@ const authoredRegions = [
   { ...cormorantBaySplatTestRegion, createTerrainMaterial: createCormorantBaySplatTestTerrainMaterial },
   { ...cormorantBayTest2Region, createTerrainMaterial: createCormorantBayTest2TerrainMaterial },
   { ...cormorantBayTest3Region, createTerrainMaterial: createCormorantBayTest3TerrainMaterial },
+  { ...puntaCormorantRegion, createTerrainMaterial: createPuntaCormorantTerrainMaterial },
 ];
 
 const regionById = new Map();

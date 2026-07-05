@@ -19,6 +19,7 @@ export function emitPropEvent(type, payload) {
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }
+// 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }
 // 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome }
 // 'terrain-dust' { position: {x,y,z}, direction?, intensity, biome?, surfaceProfile?, kind?, fallSpeed?, horizontalSpeed?, travelDistance? }
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }

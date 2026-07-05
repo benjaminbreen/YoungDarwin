@@ -13,6 +13,7 @@ import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
 import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { useThreeGameStore } from './store';
+import { getPlayableMode } from './playable/playableModes';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
 import { WATER_LEVEL } from './world/water';
 
@@ -1153,12 +1154,13 @@ export default function ThreeDarwinGame() {
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const weather = useThreeGameStore(state => state.weather);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
-  const gameStarted = launchState !== 'menu';
+  const gameStarted = launchState !== 'menu' && launchState !== 'character';
   const openingIntroActive = launchState === 'intro';
-  const showLaunchOverlay = launchState === 'menu' || !sceneReady;
+  const showLaunchOverlay = launchState === 'menu' || launchState === 'character' || !sceneReady;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
   const openingCamera = useMemo(() => ({
     active: openingIntroActive && openingIntroStartedAt > 0,
@@ -1268,7 +1270,12 @@ export default function ThreeDarwinGame() {
     return () => window.clearInterval(handle);
   }, [assetProgress.active, assetProgress.progress, assetProgress.total, gameStarted, sceneReady]);
 
-  const beginNewExpedition = () => {
+  const openCharacterSelect = () => {
+    setLaunchState('character');
+  };
+
+  const beginNewExpedition = (modeId = 'darwin') => {
+    useThreeGameStore.getState().setPlayableMode(modeId);
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
     setDisplayedProgress(0);
@@ -1281,11 +1288,17 @@ export default function ThreeDarwinGame() {
 
   const markSceneReady = () => {
     const now = performance.now();
+    const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
     setSceneReady(true);
     setDisplayedProgress(100);
     setDeferredContentReady(false);
-    setOpeningIntroStartedAt(now);
-    setLaunchState('intro');
+    if (mode.kind === 'animal') {
+      setOpeningIntroStartedAt(0);
+      setLaunchState('playing');
+    } else {
+      setOpeningIntroStartedAt(now);
+      setLaunchState('intro');
+    }
   };
 
   useEffect(() => {
@@ -1418,9 +1431,12 @@ export default function ThreeDarwinGame() {
         />
         {showLaunchOverlay && (
           <LaunchOverlay
-            mode={launchState === 'menu' ? 'menu' : 'loading'}
+            mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}
             progress={displayedProgress}
-            onNewExpedition={beginNewExpedition}
+            selectedModeId={playableModeId}
+            onNewExpedition={openCharacterSelect}
+            onModeSelect={beginNewExpedition}
+            onBack={() => setLaunchState('menu')}
           />
         )}
       </KeyboardControls>

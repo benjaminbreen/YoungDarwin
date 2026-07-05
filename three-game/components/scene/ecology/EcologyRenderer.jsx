@@ -12,6 +12,7 @@ import { RockField } from './RockField';
 import { Footprints } from './Footprints';
 import { RockSplashes } from './RockSplashes';
 import { BirdFlock } from './BirdFlock';
+import { FlyingModelFlock } from './FlyingModelFlock';
 import { ReefSwimmers } from './ReefSwimmers';
 import { StaticGLB } from '../../assets/StaticGLB';
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
@@ -27,6 +28,7 @@ import { CollectibleBeachFindsLayer } from './CollectibleBeachFindsLayer';
 import { AmbientWildlifeLayer } from './AmbientWildlifeLayer';
 import { CropFieldLayer } from './CropFieldLayer';
 import { StandingWaterSurface } from './StandingWaterSurface';
+import { CaveEntrance } from './CaveEntrance';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -55,10 +57,12 @@ const EMPTY_LAYER_PLAN = {
   surfaceLitter: [],
   collectibleBeachFinds: [],
   ambientWildlife: [],
+  flyingModels: [],
   lagoonSurfaces: [],
   generatedTrees: [],
   props: [],
   rocks: [],
+  caveEntrances: [],
   canopySilhouettes: [],
   crops: [],
 };
@@ -194,10 +198,12 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       surfaceLitter: (ecology.surfaceLitter || []).filter(tierVisible),
       collectibleBeachFinds: (ecology.collectibleBeachFinds || []).filter(tierVisible),
       ambientWildlife: (ecology.ambientWildlife || ecology.wildlife || []).filter(tierVisible),
+      flyingModels: (ecology.flyingModels || []).filter(tierVisible),
       lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(tierVisible),
       generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
       props: (ecology.props || []).filter(tierVisible),
       rocks: (ecology.rocks || []).filter(tierVisible),
+      caveEntrances: (ecology.caveEntrances || []).filter(tierVisible),
       canopySilhouettes: (ecology.canopySilhouettes || []).filter(tierVisible),
       crops: (ecology.crops || []).filter(tierVisible),
     };
@@ -217,9 +223,11 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     surfaceLitter,
     collectibleBeachFinds,
     ambientWildlife,
+    flyingModels,
     lagoonSurfaces,
     generatedTrees,
     rocks,
+    caveEntrances,
     canopySilhouettes,
     crops,
   } = visibleLayers;
@@ -234,6 +242,9 @@ export function EcologyRenderer({ ecology, settings = {} }) {
           sourceLabel={`${ecology.zoneId} rocks`}
         />
       )}
+      {caveEntrances.map(feature => (
+        <CaveEntrance key={feature.id} feature={feature} zoneId={ecology.zoneId} />
+      ))}
       {canopySilhouettes.map(layer => (
         <CanopySilhouetteLayer
           key={layer.id}
@@ -358,6 +369,9 @@ export function EcologyRenderer({ ecology, settings = {} }) {
         <RockSplashes anchors={ecology.splashes.anchors} period={ecology.splashes.period} />
       )}
       {ecology.birds?.length > 0 && <BirdFlock birds={ecology.birds} />}
+      {flyingModels.map(layer => (
+        <FlyingModelFlock key={layer.id} birds={layer.items || []} />
+      ))}
       {ecology.swimmers && <ReefSwimmers swimmers={ecology.swimmers} />}
       {ecology.footprintBiomes?.length > 0 && (
         <Footprints zoneId={ecology.zoneId} biomes={ecology.footprintBiomes} />

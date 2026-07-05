@@ -136,7 +136,7 @@ export function northwestReefColor(x, z, y) {
   const biome = northwestReefBiomeAt(x, z, y);
   const d = z - nwReefCoastZ(x);
   const beachD = d + 6.35;
-  const shorePearl = (1 - THREE.MathUtils.smoothstep(beachD, 5, 26)) * THREE.MathUtils.smoothstep(beachD, -1.2, 1.4);
+  const whiterBeach = (1 - THREE.MathUtils.smoothstep(beachD, 18, 34)) * THREE.MathUtils.smoothstep(beachD, -0.9, 1.2);
   const shell = Math.abs(crackNoise(x * 0.95 + 3, z * 0.88 - 5));
   const swash = Math.max(
     0,
@@ -161,7 +161,7 @@ export function northwestReefColor(x, z, y) {
     color.set('#ddd7bd');
     color.lerp(new THREE.Color('#eee8cf'), Math.max(0, noise) * 0.28);
     color.lerp(new THREE.Color('#c9c2a9'), Math.max(0, -noise) * 0.1);
-    color.lerp(new THREE.Color('#f4ecd2'), shorePearl * 0.38);
+    color.lerp(new THREE.Color('#ebe3d2'), whiterBeach * 0.22);
   }
   else {
     // Kept well below white so midday sun doesn't blow the beach out.
@@ -170,7 +170,7 @@ export function northwestReefColor(x, z, y) {
     color.lerp(new THREE.Color('#b7a982'), Math.max(0, -noise) * 0.24);
     color.lerp(new THREE.Color('#eee2bf'), Math.max(0, shell - 0.66) * 0.32);
     color.lerp(new THREE.Color('#e8ddbd'), swash * 0.08);
-    color.lerp(new THREE.Color('#f1e8cd'), shorePearl * 0.46);
+    color.lerp(new THREE.Color('#e8dfcf'), whiterBeach * 0.28);
   }
   color.multiplyScalar(0.94 + noise * 0.07);
   return color;

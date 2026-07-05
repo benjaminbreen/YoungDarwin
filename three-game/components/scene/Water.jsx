@@ -10,6 +10,7 @@ import { getRegionDefinition } from '../../world/regions';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { onPropEvent } from '../../physics/props/propEvents';
 
 // ---------------------------------------------------------------------------
 // Stylized tropical water.
@@ -40,6 +41,10 @@ const REFLECTION_STATIC_INTERVAL = 30; // static camera: let the reflection rest
 const REFLECTION_CAMERA_MOVE_SQ = 0.08 * 0.08;
 const REFLECTION_CAMERA_ROT_DELTA = 0.00025;
 const REFLECTION_TIME_DELTA = 0.035; // in-game hours
+// Toggle this off to remove all event-driven player ripple disturbance from
+// the open-ocean shader without touching standing-water/lagoon rendering.
+const ENABLE_OCEAN_PLAYER_RIPPLES = true;
+const OCEAN_PLAYER_RIPPLE_COUNT = 14;
 // Height range packed into the depth texture's red byte: [HMIN, HMIN + HSPAN].
 const HMIN = -6.0;
 const HSPAN = 9.0;
@@ -368,6 +373,11 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       // Player wading ripples: world position + strength (0 when on land).
       uPlayer: { value: new THREE.Vector3() },
       uPlayerRipple: { value: 0 },
+      uOceanPlayerRippleEnabled: { value: ENABLE_OCEAN_PLAYER_RIPPLES ? 1 : 0 },
+      uOceanRippleTime: { value: 0 },
+      uOceanRipples: {
+        value: Array.from({ length: OCEAN_PLAYER_RIPPLE_COUNT }, () => new THREE.Vector4(9999, 9999, -1000, 0)),
+      },
       // Screen-space refraction source (framebuffer grab taken just before
       // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
@@ -437,6 +447,9 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       uniform float uUnderwaterAmount;
       uniform vec3 uPlayer;
       uniform float uPlayerRipple;
+      uniform float uOceanPlayerRippleEnabled;
+      uniform float uOceanRippleTime;
+      uniform vec4 uOceanRipples[${OCEAN_PLAYER_RIPPLE_COUNT}];
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform sampler2D uStandingWaterMask;
@@ -551,19 +564,56 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         }
         // Wading ripples: concentric rings spreading from the player, felt as
         // a gentle normal perturbation (they catch the sky sheen and glitter).
-        if (uPlayerRipple > 0.001) {
+        float oceanRippleMask = uOceanPlayerRippleEnabled
+          * (1.0 - smoothstep(0.12, 0.56, standingWater))
+          * smoothstep(0.045, 0.18, depth)
+          * (1.0 - smoothstep(1.9, 3.25, depth))
+          * playableFade;
+        float playerRippleGlint = 0.0;
+        if (uPlayerRipple * oceanRippleMask > 0.001) {
           vec2 toPlayer = vWorld.xz - uPlayer.xz;
           float pd = length(toPlayer);
           float rippleEnv = uPlayerRipple
-            * smoothstep(3.4, 0.7, pd)   // fade out by ~3.4 m
-            * smoothstep(0.05, 0.2, pd); // quiet right at the body
+            * oceanRippleMask
+            * (1.0 - smoothstep(0.72, 2.25, pd)) // local ankle disturbance
+            * smoothstep(0.04, 0.18, pd); // quiet right at the body
           if (rippleEnv > 0.003) {
-            float ring = sin(pd * 9.5 - uTime * 5.4) * 0.62
-              + sin(pd * 15.0 - uTime * 7.3) * 0.38;
+            float ring = sin(pd * 15.5 - uTime * 7.0) * 0.58
+              + sin(pd * 24.0 - uTime * 9.4) * 0.42;
             vec2 rippleDir = toPlayer / max(pd, 1e-3);
-            normal = normalize(normal + vec3(rippleDir.x, 0.0, rippleDir.y) * ring * 0.085 * rippleEnv);
+            normal = normalize(normal + vec3(rippleDir.x, 0.0, rippleDir.y) * ring * 0.13 * rippleEnv);
+            playerRippleGlint += pow(max(ring * 0.5 + 0.5, 0.0), 3.0) * rippleEnv * 0.035;
           }
         }
+        float eventRippleGlint = 0.0;
+        vec2 eventRippleSlope = vec2(0.0);
+        for (int i = 0; i < ${OCEAN_PLAYER_RIPPLE_COUNT}; i++) {
+          vec4 ripple = uOceanRipples[i];
+          float age = uOceanRippleTime - ripple.z;
+          float impact = clamp(ripple.w, 0.0, 1.75);
+          float impact01 = impact / 1.75;
+          float lifetime = mix(0.72, 1.45, impact01);
+          float alive = step(0.0, age) * (1.0 - smoothstep(lifetime * 0.48, lifetime, age));
+          vec2 deltaRipple = vWorld.xz - ripple.xy;
+          float distRipple = length(deltaRipple);
+          vec2 dirRipple = deltaRipple / max(distRipple, 0.001);
+          float radius = 0.1 + age * mix(1.08, 1.72, impact01);
+          float band = exp(-pow((distRipple - radius) * mix(8.8, 5.4, impact01), 2.0));
+          float localChurn = 1.0 - smoothstep(0.05, mix(0.58, 1.05, impact01), distRipple);
+          float rangeFade = 1.0 - smoothstep(mix(0.95, 1.7, impact01), mix(1.9, 3.4, impact01), distRipple);
+          float eventEnv = alive * impact * oceanRippleMask * rangeFade;
+          float phase = (distRipple - radius) * mix(24.0, 15.5, impact01);
+          float wave = sin(phase);
+          float churn = sin(distRipple * 31.0 - age * 25.0) * localChurn;
+          eventRippleSlope += dirRipple * (cos(phase) * band * 0.9 + churn * 0.24) * eventEnv;
+          eventRippleGlint += pow(max(wave * 0.5 + 0.5, 0.0), 2.35) * band * eventEnv * 0.11;
+        }
+        if (length(eventRippleSlope) > 0.0001) {
+          normal = normalize(normal + vec3(eventRippleSlope.x, 0.0, eventRippleSlope.y) * 0.12);
+        }
+        if (eventRippleGlint + playerRippleGlint > 0.001) {
+          normal = normalize(normal + vec3(eventRippleSlope.x, 0.0, eventRippleSlope.y) * 0.04);
+          }
         if (!gl_FrontFacing) normal = -normal;
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
@@ -699,6 +749,11 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
         color += uSunColor * min(spec * glint, 1.0) * (0.58 + uSunPathStrength * 0.4);
         color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+        color += mix(uSkyHorizon, uFoam, 0.42)
+          * (eventRippleGlint + playerRippleGlint)
+          * uDaylight
+          * (1.0 - uRain * 0.7)
+          * (1.0 - underwaterView * 0.86);
         // Sparse mid-water twinkle that survives high sun: a handful of tight
         // glints in the 10-90 m band. This is the "alive" signal the sun-path
         // glitter can't give outside its low-sun window.
@@ -1267,6 +1322,7 @@ export function Water({ quality = 'performance', reflections = true }) {
   const waterRef = useRef(null);
   const surfRef = useRef(null);
   const grabRef = useRef(null); // FramebufferTexture for the refraction grab
+  const oceanRippleCursor = useRef(0);
   const reflectionFrame = useRef(0);
   const reflectionState = useRef({
     initialized: false,
@@ -1308,6 +1364,59 @@ export function Water({ quality = 'performance', reflections = true }) {
     if (mesh) mesh.onBeforeRender = handleBeforeRender;
   }, [handleBeforeRender]);
 
+  useEffect(() => {
+    if (!ENABLE_OCEAN_PLAYER_RIPPLES) return undefined;
+    const addOceanRipple = (event, eventScale = 1) => {
+      const ripples = waterMaterial.uniforms.uOceanRipples?.value;
+      if (!event?.position || !ripples) return;
+      const x = Number(event.position.x);
+      const z = Number(event.position.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+      const zoneId = useThreeGameStore.getState().currentZoneId;
+      const standingMask = standingWaterMaskAt(x, z, zoneId);
+      if (standingMask > 0.18) return;
+      const depth = WATER_LEVEL - terrainHeight(x, z, zoneId);
+      if (depth < 0.025 || depth > 3.2) return;
+      const depthScale = THREE.MathUtils.smoothstep(depth, 0.04, 0.24)
+        * (1 - THREE.MathUtils.smoothstep(depth, 2.1, 3.2));
+      if (depthScale <= 0.01) return;
+      const intensity = THREE.MathUtils.clamp((event.intensity ?? 0.38) * eventScale * depthScale, 0.14, 1.75);
+      const index = oceanRippleCursor.current;
+      oceanRippleCursor.current = (oceanRippleCursor.current + 1) % OCEAN_PLAYER_RIPPLE_COUNT;
+      ripples[index].set(x, z, performance.now() / 1000, intensity);
+    };
+    const addSplashRipple = event => {
+      addOceanRipple(event, 1.9);
+      if (!event?.position) return;
+      const x = Number(event.position.x);
+      const z = Number(event.position.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+      const yaw = Number.isFinite(event.yaw)
+        ? event.yaw
+        : Math.atan2(event.direction?.x || 0, event.direction?.z || 1);
+      const side = yaw + Math.PI * 0.5;
+      const spread = 0.24 + THREE.MathUtils.clamp(event.intensity ?? 0.45, 0, 1) * 0.24;
+      addOceanRipple({
+        ...event,
+        position: { ...event.position, x: x + Math.cos(side) * spread, z: z + Math.sin(side) * spread },
+        intensity: (event.intensity ?? 0.45) * 0.64,
+      }, 1.55);
+      addOceanRipple({
+        ...event,
+        position: { ...event.position, x: x - Math.cos(side) * spread, z: z - Math.sin(side) * spread },
+        intensity: (event.intensity ?? 0.45) * 0.52,
+      }, 1.55);
+    };
+    const offStep = onPropEvent('water-step', event => addOceanRipple(event, 1.05));
+    const offRipple = onPropEvent('water-ripple', event => addOceanRipple(event, 1.2));
+    const offSplash = onPropEvent('water-splash', addSplashRipple);
+    return () => {
+      offStep();
+      offRipple();
+      offSplash();
+    };
+  }, [waterMaterial]);
+
   useFrame(({ clock, camera }) => {
     const waterMesh = waterRef.current;
     if (!waterMesh) return; // no water in this zone -> skip everything
@@ -1320,6 +1429,8 @@ export function Water({ quality = 'performance', reflections = true }) {
 
     const wu = waterMaterial.uniforms;
     wu.uTime.value = t;
+    wu.uOceanRippleTime.value = performance.now() / 1000;
+    wu.uOceanPlayerRippleEnabled.value = ENABLE_OCEAN_PLAYER_RIPPLES ? 1 : 0;
     wu.uSun.value.copy(_sun);
     wu.uRain.value = weatherEnv.rainIntensity;
     wu.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
@@ -1329,8 +1440,10 @@ export function Water({ quality = 'performance', reflections = true }) {
     const wadeDepth = WATER_LEVEL - terrainHeight(pp.x, pp.z, store.currentZoneId);
     const wade = THREE.MathUtils.smoothstep(wadeDepth, 0.04, 0.22)
       * (1 - THREE.MathUtils.smoothstep(wadeDepth, 1.45, 2.3));
+    const standingMask = standingWaterMaskAt(pp.x, pp.z, store.currentZoneId);
+    const oceanWade = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < 0.18 ? wade : 0;
     wu.uPlayer.value.set(pp.x, pp.y, pp.z);
-    wu.uPlayerRipple.value = wade * (1 - wu.uUnderwaterAmount.value);
+    wu.uPlayerRipple.value = oceanWade * (1 - wu.uUnderwaterAmount.value);
     const sky = skyState(time, store.day || 1);
     const daylight = sky.daylight;
     // Floored below the horizon crossing so glitter doesn't vanish exactly

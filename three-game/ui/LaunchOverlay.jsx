@@ -35,6 +35,26 @@ function MenuButton({ children, primary = false, disabled = false, onClick }) {
   );
 }
 
+function CharacterChoiceButton({ title, subtitle, disabled = false, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled}
+      className={`group relative min-h-[5.25rem] rounded-sm border px-4 py-3 text-left font-expedition transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+        disabled
+          ? 'cursor-default border-expedition-brass/25 bg-black/16 text-expedition-parchment/42'
+          : 'border-expedition-brass/60 bg-expedition-gold/8 text-expedition-parchment shadow-[inset_0_1px_0_rgba(227,197,133,0.12)] hover:border-expedition-goldbright/80 hover:bg-expedition-gold/14 hover:text-expedition-goldbright'
+      }`}
+    >
+      <span className="block text-[22px] leading-none tracking-[0.08em]">{title}</span>
+      <span className="mt-2 block text-[12px] leading-snug tracking-[0.07em] text-expedition-faded group-hover:text-expedition-gold/80">
+        {subtitle}
+      </span>
+    </button>
+  );
+}
+
 function ProgressBar({ value }) {
   const safe = Math.max(0, Math.min(100, value || 0));
   return (
@@ -53,14 +73,27 @@ function ProgressBar({ value }) {
   );
 }
 
-export function LaunchOverlay({ mode = 'menu', progress = 0, onNewExpedition }) {
+export function LaunchOverlay({ mode = 'menu', progress = 0, selectedModeId = 'darwin', onNewExpedition, onModeSelect, onBack }) {
   const loadingLine = useMemo(() => {
+    if (selectedModeId === 'finch') {
+      if (progress < 35) return 'Finding a garden finch above the Asilo de la Paz rows.';
+      if (progress < 72) return 'Opening the Charles Island air, scrub, paths, and thermals.';
+      if (progress < 100) return 'Setting Darwin loose below as a wandering collector.';
+      return 'Taking wing over Floreana.';
+    }
+    if (selectedModeId === 'tortoise') {
+      if (progress < 35) return 'Finding a giant tortoise on the damp highland trail.';
+      if (progress < 72) return 'Opening the scrub, shade, and slow paths of Charles Island.';
+      if (progress < 100) return 'Setting Darwin loose nearby with notebook and collecting bag.';
+      return 'Beginning a tortoise day on Floreana.';
+    }
     if (progress < 35) return 'Preparing the Beagle launch and shore instruments.';
     if (progress < 72) return 'Unfolding Charles Island terrain, weather, and specimens.';
     if (progress < 100) return 'Settling Darwin, Syms, and the Post Office Bay landing.';
     return 'Taking the first bearings ashore.';
-  }, [progress]);
+  }, [progress, selectedModeId]);
   const loading = mode === 'loading';
+  const choosingCharacter = mode === 'character';
 
   return (
     <section
@@ -89,7 +122,7 @@ export function LaunchOverlay({ mode = 'menu', progress = 0, onNewExpedition }) 
           Galapagos, 1835
         </p>
 
-        <div className="mt-9 w-[min(25rem,calc(100vw-2rem))] rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm">
+        <div className={`mt-9 ${choosingCharacter ? 'w-[min(34rem,calc(100vw-2rem))]' : 'w-[min(25rem,calc(100vw-2rem))]'} rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm`}>
           <div className="pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/20" />
           {loading ? (
             <div className="relative px-3 py-5">
@@ -102,6 +135,36 @@ export function LaunchOverlay({ mode = 'menu', progress = 0, onNewExpedition }) 
               </p>
               <ProgressBar value={progress} />
             </div>
+          ) : choosingCharacter ? (
+            <nav className="relative grid gap-2 p-1">
+              <div className="px-2 pb-1 pt-1 text-center">
+                <h2 className="text-[24px] tracking-[0.08em] text-expedition-goldbright">Choose Expedition Mode</h2>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <CharacterChoiceButton
+                  title="Darwin"
+                  subtitle="Naturalist expedition"
+                  onClick={() => onModeSelect?.('darwin')}
+                />
+                <CharacterChoiceButton
+                  title="Finch"
+                  subtitle="Winged island view"
+                  onClick={() => onModeSelect?.('finch')}
+                />
+                <CharacterChoiceButton
+                  title="Tortoise"
+                  subtitle="Slow highland life"
+                  onClick={() => onModeSelect?.('tortoise')}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={onBack}
+                className="mt-1 h-9 rounded-sm border border-transparent font-expedition text-[14px] tracking-[0.08em] text-expedition-faded transition hover:border-expedition-brass/45 hover:bg-expedition-gold/8 hover:text-expedition-gold"
+              >
+                Back
+              </button>
+            </nav>
           ) : (
             <nav className="relative grid gap-1">
               <MenuButton disabled>Continue Expedition</MenuButton>

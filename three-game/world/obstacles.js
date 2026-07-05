@@ -3,12 +3,15 @@ import { getZoneObstacles } from '../../game-core/obstacles';
 import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
 import { getNorthShoreRockObstacles } from './northShoreLayout';
+import { getDesolateOutcropRockObstacles } from './desolateOutcropLayout';
+import { getDevilsCrownRockObstacles } from './devilsCrownLayout';
 import { getNorthwestReefRockObstacles } from './nwReefLayout';
 import { getBeachWithHutObstacles } from './beachWithHutLayout';
 import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
 import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
+import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
 import { getPenalColonyObstacles } from './penalColonyLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
@@ -28,9 +31,12 @@ const REGION_OBSTACLE_SOURCES = {
   ALT_POST_OFFICE_BAY: [getAltPostOfficeBayRockObstacles],
   POST_OFFICE_BAY_3: [getPostOfficeBay3RockObstacles],
   N_SHORE: [getNorthShoreRockObstacles],
+  N_OUTCROP: [getDesolateOutcropRockObstacles],
+  DEVILS_CROWN: [getDevilsCrownRockObstacles],
   NW_REEF: [getNorthwestReefRockObstacles],
   S_HUT: [getBeachWithHutObstacles],
   W_HIGH: [getWesternHighlandsRockObstacles],
+  E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],
   PENAL_COLONY: [getPenalColonyObstacles],
 };
 

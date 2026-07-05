@@ -3,6 +3,7 @@ import { makeZoneScatter, nearAnyCluster, seededRandom } from '../scatter';
 import { getNorthwestReefRocks, NW_REEF } from '../nwReefLayout';
 import { getModelAsset } from '../../modelAssets';
 import { buildBeachFindLayer } from './beachFinds';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 // Northwest Reef (NW_REEF) ecology — a bright coral-sand strand on Floreana's
 // northwest corner. Vegetation is deliberately minimal: a salt-pruned fringe
@@ -447,10 +448,17 @@ export function buildNorthwestReefEcology() {
     rocks,
     splashes: { anchors: swashRocks.slice(0, 12), period: NW_REEF_SWASH_PERIOD },
     footprintBiomes: ['white-sand', 'wet-sand'],
-    birds: [
-      { radius: 16, height: 15, speed: 0.1, phase: 0.6, cx: -6, cz: -27 },
-      { radius: 26, height: 22, speed: -0.07, phase: 3.2, cx: 16, cz: 2 },
+    flyingModels: [
+      flamingoFlyoverLayer('northwest-reef-flamingo-crossing', [
+        { cx: -8, cz: -24, radiusX: 46, radiusZ: 15, height: 36, speed: 0.023, phase: 1.1, scale: 0.84 },
+        { cx: 18, cz: -18, radiusX: 40, radiusZ: 13, height: 41, speed: -0.019, phase: 3.4, scale: 0.78, timeScale: 0.58 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'frigatebird', radiusX: 24, radiusZ: 14, height: 21, speed: 0.082, phase: 0.6, cx: -6, cz: -28, flapRate: 0.45 },
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 30, radiusZ: 17, height: 26, speed: -0.06, phase: 3.2, cx: 16, cz: -2, flapRate: 0.8 },
+      { species: 'booby', radiusX: 22, radiusZ: 12, height: 24, speed: 0.07, phase: 5.1, cx: -22, cz: -16 },
+    ]),
     swimmers: buildSwimmers(),
   };
 }

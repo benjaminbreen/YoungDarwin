@@ -2,6 +2,7 @@ import { seededRandom } from '../scatter';
 import { terrainHeight, terrainSlopeAt } from '../terrain';
 import { EL_MIRADOR, elMiradorPathInfo } from '../regions/elMirador/path';
 import { buildStandardDryPathGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -120,9 +121,15 @@ export function buildElMiradorEcology() {
     flora: [],
     props: [],
     footprintBiomes: ['red-dirt-path', 'path-shoulder', 'dry-highland-grass', 'stony-highland-slope'],
-    birds: [
-      { radius: 18, height: 18, speed: 0.1, phase: 0.6, cx: -10, cz: -12 },
-      { radius: 28, height: 26, speed: -0.065, phase: 3.1, cx: 18, cz: 20 },
+    flyingModels: [
+      flamingoFlyoverLayer('el-mirador-distant-flamingos', [
+        { cx: -22, cz: -26, radiusX: 46, radiusZ: 14, height: 50, speed: 0.017, phase: 1.6, scale: 0.66, timeScale: 0.54 },
+        { cx: 20, cz: -22, radiusX: 42, radiusZ: 13, height: 55, speed: -0.015, phase: 4.1, scale: 0.62, timeScale: 0.52 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'frigatebird', radiusX: 30, radiusZ: 18, height: 31, speed: 0.062, phase: 0.6, cx: -10, cz: -12, flapRate: 0.38 },
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 34, radiusZ: 20, height: 34, speed: -0.052, phase: 3.1, cx: 18, cz: 20, flapRate: 0.74 },
+    ]),
   };
 }

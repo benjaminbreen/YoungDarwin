@@ -35,13 +35,27 @@ const LAMP_ATTACHMENT = {
 };
 
 const BUTTERFLY_NET_VISUAL = 'butterflyNet';
+const SNARE_COIL_VISUAL = 'snareCoil';
 const BUTTERFLY_NET_SEGMENTS = 20;
 const BUTTERFLY_NET_RINGS = 7;
 const BUTTERFLY_NET_WORLD_DOWN = new THREE.Vector3(0, -1, 0);
-// Darwin5's index/thumb chains leave RightHand along local +Y. Rotate the
-// procedural net's shaft (authored along local -Z) onto that axis so it sits in
-// the grip like a sword handle instead of projecting sideways from the palm.
-const DARWIN5_HAND_GRIP_EULER = [Math.PI / 2, 0, 0];
+const BUTTERFLY_NET_HOOP_CENTER_Z = -0.94;
+const BUTTERFLY_NET_HOOP_RADIUS_X = 0.118;
+const BUTTERFLY_NET_HOOP_RADIUS_Z = 0.162;
+// Pole tools are authored with their shaft along local -Z. Darwin5's held-tool
+// idle wrist points downward, so body-orient them: keep the right hand as the
+// pivot, align the shaft to body-local +Z, and roll the hoop plane upright.
+const DARWIN5_POLE_BODY_CARRY_EULER = [-0.18, Math.PI, Math.PI / 2];
+const DARWIN5_POLE_GRIP_OFFSET = [0.0, 0.014, -0.015];
+const DARWIN5_SNARE_COIL_GRIP_OFFSET = [0.018, 0.052, -0.016];
+const DARWIN5_SNARE_COIL_GRIP_EULER = [0, 0.32, 0];
+const SNARE_NOOSE_POINTS = Object.freeze([
+  new THREE.Vector3(0.006, -0.018, 0),
+  new THREE.Vector3(0.064, -0.13, 0.018),
+  new THREE.Vector3(0.035, -0.285, 0.006),
+  new THREE.Vector3(-0.055, -0.18, -0.014),
+  new THREE.Vector3(-0.018, -0.04, -0.004),
+]);
 
 function createNetAlphaTexture() {
   const canvas = document.createElement('canvas');
@@ -132,7 +146,8 @@ function createButterflyNetVisual() {
   const hoopGeometry = new THREE.TorusGeometry(0.145, 0.0065, 8, 40);
   const hoop = new THREE.Mesh(hoopGeometry, hoopMaterial);
   hoop.name = 'butterflyNetHoop';
-  hoop.position.z = -0.82;
+  hoop.position.z = BUTTERFLY_NET_HOOP_CENTER_Z;
+  hoop.rotation.x = Math.PI / 2;
   hoop.scale.set(0.82, 1.12, 1);
   hoop.castShadow = true;
   group.add(hoop);
@@ -145,18 +160,18 @@ function createButterflyNetVisual() {
   const indices = [];
   for (let ring = 0; ring < BUTTERFLY_NET_RINGS; ring += 1) {
     const t = ring / (BUTTERFLY_NET_RINGS - 1);
-    const radiusX = THREE.MathUtils.lerp(0.118, 0.028, t);
-    const radiusY = THREE.MathUtils.lerp(0.162, 0.035, t);
-    const z = -0.835 - t * 0.24;
-    const sag = -0.014 * t * t;
+    const radiusX = THREE.MathUtils.lerp(BUTTERFLY_NET_HOOP_RADIUS_X, 0.026, t);
+    const radiusZ = THREE.MathUtils.lerp(BUTTERFLY_NET_HOOP_RADIUS_Z, 0.032, t);
+    const normalPocket = -0.04 * Math.sin(t * Math.PI);
+    const rimPull = 0.045 * t * t;
     for (let seg = 0; seg < BUTTERFLY_NET_SEGMENTS; seg += 1) {
       const theta = (seg / BUTTERFLY_NET_SEGMENTS) * Math.PI * 2;
       const idx = ring * BUTTERFLY_NET_SEGMENTS + seg;
       const p = idx * 3;
       const u = idx * 2;
       basePositions[p] = Math.cos(theta) * radiusX;
-      basePositions[p + 1] = Math.sin(theta) * radiusY + sag;
-      basePositions[p + 2] = z;
+      basePositions[p + 1] = normalPocket;
+      basePositions[p + 2] = BUTTERFLY_NET_HOOP_CENTER_Z + Math.sin(theta) * radiusZ + rimPull;
       positions[p] = basePositions[p];
       positions[p + 1] = basePositions[p + 1];
       positions[p + 2] = basePositions[p + 2];
@@ -191,27 +206,220 @@ function createButterflyNetVisual() {
     basePositions,
     gravityLocal: new THREE.Vector3(0, -1, 0),
     worldQuaternion: new THREE.Quaternion(),
+    worldInverseQuaternion: new THREE.Quaternion(),
+    worldPosition: new THREE.Vector3(),
+    previousWorldPosition: new THREE.Vector3(),
+    worldDelta: new THREE.Vector3(),
+    dragLocal: new THREE.Vector3(),
+    dragTargetLocal: new THREE.Vector3(),
+    hasPreviousWorldPosition: false,
+    lastUpdateTime: null,
     phase: Math.random() * Math.PI * 2,
     dispose: () => disposables.forEach(item => item.dispose?.()),
   };
+}
+
+function createSnareCoilVisual() {
+  const group = new THREE.Group();
+  group.name = 'proceduralSnareCoil';
+  const disposables = [];
+  const twineMaterial = new THREE.MeshStandardMaterial({
+    color: '#b08a55',
+    roughness: 0.94,
+    metalness: 0.02,
+  });
+  const darkTwineMaterial = new THREE.MeshStandardMaterial({
+    color: '#6f5433',
+    roughness: 0.96,
+    metalness: 0.01,
+  });
+  const waxMaterial = new THREE.MeshStandardMaterial({
+    color: '#d1b56e',
+    roughness: 0.72,
+    metalness: 0.05,
+  });
+  const pegMaterial = new THREE.MeshStandardMaterial({
+    color: '#5f3f22',
+    roughness: 0.9,
+  });
+  disposables.push(twineMaterial, darkTwineMaterial, waxMaterial, pegMaterial);
+
+  for (let index = 0; index < 3; index += 1) {
+    const coilGeometry = new THREE.TorusGeometry(0.038 + index * 0.006, 0.005, 8, 40);
+    const coil = new THREE.Mesh(coilGeometry, twineMaterial);
+    coil.name = `snareCoilLoop${index + 1}`;
+    coil.rotation.z = -0.18 + index * 0.12;
+    coil.scale.set(0.78, 1.14, 1);
+    coil.position.set(0.004 * (index - 1), -0.064 - index * 0.004, -0.012 + index * 0.012);
+    coil.castShadow = true;
+    group.add(coil);
+    disposables.push(coilGeometry);
+  }
+
+  const leadGeometry = new THREE.CylinderGeometry(0.006, 0.006, 1, 8);
+  const lead = new THREE.Mesh(leadGeometry, twineMaterial);
+  lead.name = 'snareCoilLead';
+  lead.castShadow = true;
+  group.add(lead);
+  disposables.push(leadGeometry);
+
+  const nooseCurve = new THREE.CatmullRomCurve3(SNARE_NOOSE_POINTS.map(point => point.clone()), true);
+  const nooseGeometry = new THREE.TubeGeometry(nooseCurve, 32, 0.0045, 6, true);
+  const noose = new THREE.Mesh(nooseGeometry, twineMaterial);
+  noose.name = 'snareCoilLooseNoose';
+  noose.castShadow = true;
+  group.add(noose);
+  disposables.push(nooseGeometry);
+
+  const knotGeometry = new THREE.SphereGeometry(0.017, 10, 7);
+  const knot = new THREE.Mesh(knotGeometry, darkTwineMaterial);
+  knot.name = 'snareCoilRunningKnot';
+  knot.position.set(0.09, 0.012, -0.025);
+  knot.scale.set(1.2, 0.82, 0.95);
+  knot.castShadow = true;
+  group.add(knot);
+  disposables.push(knotGeometry);
+
+  for (let index = 0; index < 3; index += 1) {
+    const bindingGeometry = new THREE.CylinderGeometry(0.0065, 0.0065, 0.072, 8);
+    bindingGeometry.rotateZ(Math.PI / 2);
+    const binding = new THREE.Mesh(bindingGeometry, waxMaterial);
+    binding.name = `snareCoilWaxBinding${index + 1}`;
+    binding.position.set(-0.018 + index * 0.018, -0.034, -0.012 + index * 0.006);
+    binding.rotation.y = 0.18;
+    binding.rotation.z = 0.34;
+    binding.castShadow = true;
+    group.add(binding);
+    disposables.push(bindingGeometry);
+  }
+
+  const pegGeometry = new THREE.CylinderGeometry(0.008, 0.011, 0.15, 8);
+  pegGeometry.rotateX(Math.PI / 2);
+  const peg = new THREE.Mesh(pegGeometry, pegMaterial);
+  peg.name = 'snareCoilPeg';
+  peg.position.set(-0.05, -0.08, -0.03);
+  peg.rotation.y = 0.28;
+  peg.rotation.z = -0.32;
+  peg.castShadow = true;
+  group.add(peg);
+  disposables.push(pegGeometry);
+
+  const pegTipGeometry = new THREE.ConeGeometry(0.011, 0.034, 8);
+  pegTipGeometry.rotateX(-Math.PI / 2);
+  const pegTip = new THREE.Mesh(pegTipGeometry, pegMaterial);
+  pegTip.name = 'snareCoilPegPoint';
+  pegTip.position.set(-0.072, -0.12, -0.082);
+  pegTip.rotation.y = 0.28;
+  pegTip.rotation.z = -0.32;
+  pegTip.castShadow = true;
+  group.add(pegTip);
+  disposables.push(pegTipGeometry);
+
+  return {
+    object: group,
+    lead,
+    noose,
+    knot,
+    nooseCurve,
+    noosePoints: SNARE_NOOSE_POINTS.map(point => point.clone()),
+    gravityLocal: new THREE.Vector3(0, -1, 0),
+    worldQuaternion: new THREE.Quaternion(),
+    worldInverseQuaternion: new THREE.Quaternion(),
+    leadStart: new THREE.Vector3(0.004, -0.024, -0.002),
+    leadEnd: new THREE.Vector3(0.006, -0.018, 0),
+    dispose: () => disposables.forEach(item => item.dispose?.()),
+  };
+}
+
+function orientCylinderBetween(mesh, start, end) {
+  if (!mesh) return;
+  const midpoint = mesh.position;
+  midpoint.copy(start).add(end).multiplyScalar(0.5);
+  const direction = new THREE.Vector3().subVectors(end, start);
+  const length = direction.length();
+  mesh.scale.set(1, Math.max(0.0001, length), 1);
+  if (length > 1e-5) {
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+  }
+}
+
+function updateSnareCoilVisual(visual, { time, walking, running }) {
+  const object = visual?.object;
+  if (!object || !visual.noose || !visual.nooseCurve) return;
+  object.updateWorldMatrix(true, false);
+  object.getWorldQuaternion(visual.worldQuaternion);
+  visual.worldInverseQuaternion.copy(visual.worldQuaternion).invert();
+  visual.gravityLocal.copy(BUTTERFLY_NET_WORLD_DOWN).applyQuaternion(visual.worldInverseQuaternion).normalize();
+  const gravity = visual.gravityLocal;
+  const moving = walking || running;
+  const bob = Math.sin(time * (moving ? 5.8 : 2.1) + visual.leadEnd.x * 11) * (moving ? 0.014 : 0.005);
+  const points = visual.nooseCurve.points;
+  for (let index = 0; index < points.length; index += 1) {
+    const base = visual.noosePoints[index];
+    const free = index === 0 ? 0.06 : index === points.length - 1 ? 0.14 : 1;
+    const sag = (0.045 + Math.sin(index * 1.7 + time * 1.2) * 0.006) * free;
+    points[index].set(
+      base.x + gravity.x * sag,
+      base.y + gravity.y * sag + bob * free,
+      base.z + gravity.z * sag,
+    );
+  }
+  const previousGeometry = visual.noose.geometry;
+  const nextGeometry = new THREE.TubeGeometry(visual.nooseCurve, 32, 0.0045, 6, true);
+  visual.noose.geometry = nextGeometry;
+  previousGeometry?.dispose?.();
+
+  const knotPoint = points[0];
+  if (visual.knot) {
+    visual.knot.position.copy(knotPoint);
+    visual.knot.position.addScaledVector(gravity, 0.018);
+  }
+  const leadEnd = visual.leadEnd.copy(knotPoint).addScaledVector(gravity, 0.012);
+  orientCylinderBetween(visual.lead, visual.leadStart, leadEnd);
 }
 
 function updateButterflyNetVisual(visual, { time, walking, running, action }) {
   const attr = visual?.bag?.geometry?.attributes?.position;
   if (!attr) return;
   const object = visual.object;
+  const previousTime = visual.lastUpdateTime;
+  const rawDeltaTime = typeof previousTime === 'number' ? time - previousTime : 0;
+  const deltaTime = THREE.MathUtils.clamp(rawDeltaTime || 1 / 60, 1 / 120, 1 / 30);
+  visual.lastUpdateTime = time;
+  const moving = walking || running;
+  const swinging = action === 'butterflyNetSwing' || action === 'swingNet';
   if (object) {
     object.updateWorldMatrix(true, false);
     object.getWorldQuaternion(visual.worldQuaternion);
-    visual.gravityLocal.copy(BUTTERFLY_NET_WORLD_DOWN).applyQuaternion(visual.worldQuaternion.invert()).normalize();
+    visual.worldInverseQuaternion.copy(visual.worldQuaternion).invert();
+    visual.gravityLocal.copy(BUTTERFLY_NET_WORLD_DOWN).applyQuaternion(visual.worldInverseQuaternion).normalize();
+    object.getWorldPosition(visual.worldPosition);
+    if (visual.hasPreviousWorldPosition && rawDeltaTime > 0 && rawDeltaTime < 0.2) {
+      visual.worldDelta
+        .subVectors(visual.worldPosition, visual.previousWorldPosition)
+        .multiplyScalar(-1 / deltaTime);
+      visual.dragTargetLocal.copy(visual.worldDelta).applyQuaternion(visual.worldInverseQuaternion);
+      visual.dragTargetLocal.multiplyScalar(swinging ? 0.16 : moving ? 0.045 : 0.018);
+      const maxDrag = swinging ? 0.24 : moving ? 0.085 : 0.035;
+      if (visual.dragTargetLocal.lengthSq() > maxDrag * maxDrag) {
+        visual.dragTargetLocal.setLength(maxDrag);
+      }
+    } else {
+      visual.dragTargetLocal.set(0, 0, 0);
+    }
+    visual.previousWorldPosition.copy(visual.worldPosition);
+    visual.hasPreviousWorldPosition = true;
   } else {
     visual.gravityLocal.set(0, -1, 0);
+    visual.dragTargetLocal.set(0, 0, 0);
+    visual.hasPreviousWorldPosition = false;
   }
+  const dragResponse = 1 - Math.exp(-(swinging ? 18 : 8) * deltaTime);
+  visual.dragLocal.lerp(visual.dragTargetLocal, dragResponse);
   const gravity = visual.gravityLocal;
-  const moving = walking || running;
+  const drag = visual.dragLocal;
   const stride = running ? 9.4 : walking ? 6.2 : 2.2;
   const sway = running ? 0.034 : walking ? 0.023 : 0.009;
-  const swinging = action === 'butterflyNetSwing' || action === 'swingNet';
   const ripple = swinging ? 0.035 : 0.012;
   const sagDepth = swinging ? 0.22 : moving ? 0.26 : 0.31;
   const positions = attr.array;
@@ -223,18 +431,22 @@ function updateButterflyNetVisual(visual, { time, walking, running, action }) {
     const theta = (seg / BUTTERFLY_NET_SEGMENTS) * Math.PI * 2;
     const loose = Math.pow(t, 1.35);
     const gravitySag = sagDepth * Math.pow(t, 1.48);
+    const windTrail = Math.pow(t, 1.18);
     const wave = Math.sin(time * stride + visual.phase + ring * 0.85 + seg * 0.22);
     const cross = Math.cos(time * (moving ? 4.4 : 1.6) + visual.phase + ring * 0.55);
     positions[p] = visual.basePositions[p]
       + gravity.x * gravitySag
+      + drag.x * windTrail
       + cross * sway * loose
       + Math.cos(theta) * wave * ripple * loose * 0.22;
     positions[p + 1] = visual.basePositions[p + 1]
       + gravity.y * gravitySag
+      + drag.y * windTrail
       - loose * (moving ? 0.02 : 0.012)
       + wave * ripple * loose * 0.45;
     positions[p + 2] = visual.basePositions[p + 2]
       + gravity.z * gravitySag
+      + drag.z * windTrail
       + wave * ripple * loose;
   }
   attr.needsUpdate = true;
@@ -272,26 +484,27 @@ const HAND_TOOLS = [
     modelOverrides: {
       darwin5: {
         bone: RIGHT_HAND,
-        position: [0.0, -0.012, -0.015],
-        euler: DARWIN5_HAND_GRIP_EULER,
-        orient: 'hand',
+        position: DARWIN5_POLE_GRIP_OFFSET,
+        euler: DARWIN5_POLE_BODY_CARRY_EULER,
+        orient: 'body',
       },
     },
   },
   {
     toolId: 'snare',
     path: '/assets/models/tools/snare.glb',
+    visual: SNARE_COIL_VISUAL,
     scale: 1,
-    position: [0.0, -0.012, -0.015],
-    euler: [0, 0, -Math.PI / 2],
+    position: [0.018, 0.052, -0.016],
+    euler: DARWIN5_SNARE_COIL_GRIP_EULER,
     hand: 'right',
-    orient: 'hand',
+    orient: 'hanging',
     modelOverrides: {
       darwin5: {
         bone: RIGHT_HAND,
-        position: [0.0, -0.012, -0.015],
-        euler: DARWIN5_HAND_GRIP_EULER,
-        orient: 'hand',
+        position: DARWIN5_SNARE_COIL_GRIP_OFFSET,
+        euler: DARWIN5_SNARE_COIL_GRIP_EULER,
+        orient: 'hanging',
       },
     },
   },
@@ -532,7 +745,9 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     let customVisual = null;
     const object = resolvedConfig.visual === BUTTERFLY_NET_VISUAL
       ? (customVisual = createButterflyNetVisual()).object
-      : source.clone(true);
+      : resolvedConfig.visual === SNARE_COIL_VISUAL
+        ? (customVisual = createSnareCoilVisual()).object
+        : source.clone(true);
     object.traverse(obj => {
       if (!obj.isMesh) return;
       obj.castShadow = true;
@@ -586,7 +801,9 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       group.quaternion.copy(tweakQuat);
     } else {
       bone.getWorldQuaternion(boneQuat);
-      if (resolvedConfig.orient === 'facing') {
+      if (resolvedConfig.orient === 'hanging') {
+        group.quaternion.copy(boneQuat).invert().multiply(tweakQuat);
+      } else if (resolvedConfig.orient === 'facing') {
         const facing = storeState.playerPose?.facing;
         aimForward.set(facing?.x || 0, 0, facing?.z || -1);
         if (aimForward.lengthSq() < 1e-4) aimForward.set(0, 0, -1);
@@ -606,12 +823,17 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       }
     }
     if (visualRef.current) {
-      updateButterflyNetVisual(visualRef.current, {
+      const visualState = {
         time: clock.elapsedTime,
         walking: Boolean(motionRef?.current?.walking),
         running: Boolean(motionRef?.current?.running),
         action: motionRef?.current?.action || null,
-      });
+      };
+      if (resolvedConfig.visual === BUTTERFLY_NET_VISUAL) {
+        updateButterflyNetVisual(visualRef.current, visualState);
+      } else if (resolvedConfig.visual === SNARE_COIL_VISUAL) {
+        updateSnareCoilVisual(visualRef.current, visualState);
+      }
     }
   });
 

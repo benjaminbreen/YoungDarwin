@@ -2,11 +2,13 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { useThreeGameStore } from '../../store';
 import { onPropEvent } from '../../physics/props/propEvents';
+import { SNARE_ARM_SECONDS, SNARE_CHARACTER_TRIGGER_RADIUS } from '../../snareTraps';
 
 function ProceduralCrewFigure({ motion = 0 }) {
   const coat = useMemo(() => addRimLight(toonMaterial('#25323a'), { intensity: 0.18 }), []);
@@ -41,6 +43,7 @@ function ProceduralCrewFigure({ motion = 0 }) {
 export function SymsCovington() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const group = useRef(null);
+  const body = useRef(null);
   const animationRef = useRef('idle');
   const visible = currentZoneId === 'POST_OFFICE_BAY' || currentZoneId === 'BEAGLE';
   const x = 4.0;
@@ -57,6 +60,7 @@ export function SymsCovington() {
     pending: [],
     lastLineAt: -Infinity,
     lastPenaltyAt: -Infinity,
+    snareYaw: Math.PI * 0.82,
   });
 
   useEffect(() => onPropEvent('tool-swing', event => {
@@ -146,7 +150,39 @@ export function SymsCovington() {
     const worldX = x + reaction.offsetX;
     const worldZ = z + reaction.offsetZ;
     const groundY = terrainHeight(worldX, worldZ, currentZoneId) + 0.04;
+    if (reaction.mode !== 'snared') {
+      const store = useThreeGameStore.getState();
+      const trap = (store.snareTraps || []).find(item => (
+        item.zoneId === currentZoneId
+        && item.status === 'set'
+        && Date.now() - (item.placedAtRealMs || Date.now()) >= SNARE_ARM_SECONDS * 1000
+        && Math.hypot(worldX - item.position.x, worldZ - item.position.z) <= SNARE_CHARACTER_TRIGGER_RADIUS
+      ));
+      if (trap) {
+        store.springSnareTrapByCharacter?.(trap.id, 'syms');
+        reaction.mode = 'snared';
+        reaction.until = time + 7.5;
+        reaction.targetX = reaction.offsetX;
+        reaction.targetZ = reaction.offsetZ;
+        reaction.snareYaw = Math.atan2(worldX - trap.position.x, worldZ - trap.position.z) + Math.PI * 0.5;
+      }
+    }
     group.current.position.set(worldX, groundY + Math.sin(time * 1.4) * 0.015, worldZ);
+    if (reaction.mode === 'snared') {
+      group.current.position.y = groundY + 0.08;
+      group.current.rotation.set(0, reaction.snareYaw, 0);
+      if (body.current) {
+        body.current.position.set(0, 0.14, 0);
+        body.current.rotation.set(-Math.PI / 2, 0, 0.08);
+      }
+      animationRef.current = 'idle';
+      return;
+    }
+    if (body.current) {
+      body.current.position.lerp(new THREE.Vector3(0, 0, 0), 1 - Math.exp(-delta * 8));
+      body.current.rotation.x = THREE.MathUtils.damp(body.current.rotation.x, 0, 8, delta);
+      body.current.rotation.z = THREE.MathUtils.damp(body.current.rotation.z, 0, 8, delta);
+    }
     if (activeReaction && Math.hypot(reaction.targetX - reaction.offsetX, reaction.targetZ - reaction.offsetZ) > 0.15) {
       group.current.rotation.y = Math.atan2(reaction.targetX - reaction.offsetX, reaction.targetZ - reaction.offsetZ);
       animationRef.current = reaction.mode === 'flee' ? 'gather' : 'lookAroundShort';
@@ -172,7 +208,9 @@ export function SymsCovington() {
       renderKind: 'npc',
       renderPath: null,
     }}>
-      <ModelAsset id="syms" animationSelector={() => animationRef.current} reflect fallback={<ProceduralCrewFigure motion={0.16} />} />
+      <group ref={body}>
+        <ModelAsset id="syms" animationSelector={() => animationRef.current} reflect fallback={<ProceduralCrewFigure motion={0.16} />} />
+      </group>
       <mesh position={[0, 0.04, 0]} rotation-x={-Math.PI / 2}>
         <ringGeometry args={[0.72, 0.82, 36]} />
         <meshBasicMaterial color="#d9e6ba" transparent opacity={0.42} />

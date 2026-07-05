@@ -29,6 +29,8 @@ export function createNorthwestReefTerrainMaterial() {
   const whiteSandSet = FLOREANA_PBR_TEXTURES.whiteSand;
   const whiteSandAlbedo = loadAlbedo(whiteSandSet);
   const whiteSandHeight = loadDataTexture(whiteSandSet.height, whiteSandSet.fallbacks?.height || [128, 128, 128, 255]);
+  const whiterSandSet = FLOREANA_PBR_TEXTURES.whiterSand;
+  const whiterSandAlbedo = loadAlbedo(whiterSandSet);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
@@ -42,6 +44,7 @@ export function createNorthwestReefTerrainMaterial() {
     sandyTuffTextures.height?.dispose?.();
     whiteSandAlbedo.dispose();
     whiteSandHeight.dispose();
+    whiterSandAlbedo.dispose();
   });
   material.onBeforeCompile = shader => {
     shader.uniforms.rimColor = { value: new THREE.Color('#f6e3ae') };
@@ -56,6 +59,8 @@ export function createNorthwestReefTerrainMaterial() {
     shader.uniforms.uNwrWhiteSandAlbedo = { value: whiteSandAlbedo };
     shader.uniforms.uNwrWhiteSandHeight = { value: whiteSandHeight };
     shader.uniforms.uNwrWhiteSandScale = { value: whiteSandSet.scale };
+    shader.uniforms.uNwrWhiterSandAlbedo = { value: whiterSandAlbedo };
+    shader.uniforms.uNwrWhiterSandScale = { value: whiterSandSet.scale };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -80,10 +85,12 @@ export function createNorthwestReefTerrainMaterial() {
         uniform sampler2D uNwrTuffRoughness;
         uniform sampler2D uNwrWhiteSandAlbedo;
         uniform sampler2D uNwrWhiteSandHeight;
+        uniform sampler2D uNwrWhiterSandAlbedo;
         uniform float uNwrTuffScale;
         uniform float uNwrTuffNormalStrength;
         uniform float uNwrTuffRoughnessMix;
         uniform float uNwrWhiteSandScale;
+        uniform float uNwrWhiterSandScale;
         varying vec3 vTerrainWorld;
         float nwrHash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -172,9 +179,13 @@ export function createNorthwestReefTerrainMaterial() {
           float bd = nwrBeachDistance(p);
           return smoothstep(-1.4, 2.0, bd) * (1.0 - smoothstep(28.0, 44.0, bd));
         }
-        float nwrShorePearl(vec2 p) {
+        float nwrWhiterBeachMask(vec2 p, float h) {
           float bd = nwrBeachDistance(p);
-          return (1.0 - smoothstep(5.0, 26.0, bd)) * smoothstep(-1.2, 1.4, bd);
+          float beachFace = smoothstep(-0.9, 1.2, bd) * (1.0 - smoothstep(18.0, 34.0, bd));
+          float di = nwrIslet(p);
+          float islet = (1.0 - smoothstep(0.82, 1.18, di)) * smoothstep(-0.35, 0.08, h);
+          float outcrop = smoothstep(0.3, 0.55, nwrOutcrop(p));
+          return clamp(max(beachFace, islet) * (1.0 - outcrop), 0.0, 1.0);
         }
         float nwrWhiteBeachMask(vec2 p, float h) {
           float di = nwrIslet(p);
@@ -211,6 +222,20 @@ export function createNorthwestReefTerrainMaterial() {
           sand += heightGrain * vec3(0.16, 0.145, 0.10);
           sand += (fine - 0.5) * vec3(0.065, 0.058, 0.04);
           return clamp(sand, 0.0, 1.0);
+        }
+        vec3 nwrWhiterSand(vec2 p) {
+          float broad = nwrFbm(p * 0.047 + vec2(7.0, -3.0));
+          vec2 uvA = p * uNwrWhiterSandScale + vec2(0.11, -0.07);
+          vec2 uvB = nwrRotate(p, 0.68) * (uNwrWhiterSandScale * 0.58) + vec2(-0.27, 0.19);
+          vec3 a = nwrSrgbToLinear(texture2D(uNwrWhiterSandAlbedo, uvA).rgb);
+          vec3 b = nwrSrgbToLinear(texture2D(uNwrWhiterSandAlbedo, uvB).rgb);
+          vec3 tex = mix(a, b, 0.10 + broad * 0.12);
+          float fine = nwrFbm(p * 5.8 + vec2(2.0, -6.0));
+          float luma = dot(tex, vec3(0.299, 0.587, 0.114));
+          tex = mix(tex, vec3(luma), 0.12);
+          tex *= vec3(0.94, 0.96, 1.02);
+          tex += (fine - 0.5) * vec3(0.04, 0.038, 0.034);
+          return clamp(tex, 0.0, 0.94);
         }
         vec3 nwrSeabed(vec2 p, float h) {
           // Northern Shore-style shallow colour: turquoise-grey sand under
@@ -264,14 +289,12 @@ export function createNorthwestReefTerrainMaterial() {
         // Soft dune-scale shading breaks up the flat beach plane.
         float dune = nwrFbm(p * 0.07 + vec2(13.0, 2.0));
         color *= 0.93 + dune * 0.1;
-        vec3 whiteSand = nwrWhiteSand(p);
+        float whiterSandMask = nwrWhiterBeachMask(p, h);
+        vec3 whiteSand = mix(nwrWhiteSand(p), nwrWhiterSand(p), whiterSandMask * 0.96);
         float shoreWhite = nwrMainWhiteBeach(p);
         float outcropMask = smoothstep(0.3, 0.55, nwrOutcrop(p));
         float whiteSandMask = nwrWhiteBeachMask(p, h);
         color = mix(color, whiteSand, whiteSandMask);
-        float shorePearl = nwrShorePearl(p) * shoreWhite * (1.0 - outcropMask);
-        vec3 pearlSand = mix(whiteSand, vec3(0.98, 0.94, 0.80), 0.36);
-        color = mix(color, pearlSand, shorePearl * 0.5);
         // High-water wrack stays behind the clean white beach face.
         float wrackPath = abs(beachD - 9.0 - sin(p.x * 0.19) * 0.7);
         float wrack = smoothstep(0.5, 0.1, wrackPath) * smoothstep(0.4, 0.72, nwrFbm(p * 2.1 + vec2(3.0, -6.0))) * step(0.0, beachD) * (1.0 - smoothstep(0.45, 0.9, whiteSandMask));
@@ -347,7 +370,7 @@ export function createNorthwestReefTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'nw-reef-tropical-white-shore-v4';
+  material.customProgramCacheKey = () => 'nw-reef-tropical-white-shore-v7';
   material.needsUpdate = true;
   return material;
 }

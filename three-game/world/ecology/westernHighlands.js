@@ -8,6 +8,7 @@ import {
   westernHighlandsTrailInfluence,
   westernHighlandsWetHollowMask,
 } from '../regions/westernHighlands/terrain';
+import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 
 const NATURE = '/assets/models/nature/';
 
@@ -238,10 +239,15 @@ export function buildWesternHighlandsEcology() {
     rocks,
     props: trailMarkerProps(),
     footprintBiomes: ['mud-trail', 'wet-hollow', 'fern-clearing'],
-    birds: [
-      { radius: 12, height: 15, speed: 0.08, phase: 0.3, cx: -4, cz: -18 },
-      { radius: 16, height: 19, speed: -0.06, phase: 2.7, cx: 12, cz: 7 },
-      { radius: 11, height: 13, speed: 0.1, phase: 4.2, cx: -16, cz: 27 },
+    flyingModels: [
+      flamingoFlyoverLayer('western-highlands-distant-flamingos', [
+        { cx: -24, cz: -30, radiusX: 38, radiusZ: 11, height: 54, speed: 0.015, phase: 0.9, scale: 0.58, timeScale: 0.5 },
+      ]),
     ],
+    birds: coastalBirds([
+      { species: 'frigatebird', radiusX: 22, radiusZ: 13, height: 30, speed: 0.052, phase: 0.3, cx: -4, cz: -18, flapRate: 0.36 },
+      { species: 'gull', path: 'lazyFigureEight', radiusX: 24, radiusZ: 14, height: 29, speed: -0.046, phase: 2.7, cx: 12, cz: 7, flapRate: 0.72 },
+      { species: 'frigatebird', radiusX: 18, radiusZ: 11, height: 33, speed: 0.058, phase: 4.2, cx: -16, cz: 27, flapRate: 0.4 },
+    ]),
   };
 }

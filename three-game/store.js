@@ -39,6 +39,22 @@ import {
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 import { MOVEMENT_FATIGUE } from './components/player/playerConfig';
+import {
+  DEFAULT_PLAYABLE_MODE_ID,
+  findPlayableSpawn,
+  getPlayableMode,
+  getPlayableToolbarIds,
+} from './playable/playableModes';
+import { clampToWalkable, terrainHeight } from './world/terrain';
+import {
+  MAX_ACTIVE_SNARES,
+  SNARE_CHECK_AFTER_MINUTES,
+  activeSnareStatuses,
+  isSnareCompatibleSpecimen,
+  normalizeSnareSpecimenId,
+  snareActorId,
+  snareTargetLabel,
+} from './snareTraps';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -64,6 +80,7 @@ const BASALT_SPECIMEN = baseSpecimens.find(specimen => specimen.id === 'basalt')
 };
 const HAMMER_TOOL = threeTools.find(tool => tool.id === 'hammer') || { id: 'hammer', name: 'Geological Hammer' };
 const HANDS_TOOL = threeTools.find(tool => tool.id === 'hands') || { id: 'hands', name: 'Bare Hands' };
+const SNARE_TOOL = threeTools.find(tool => tool.id === 'snare') || { id: 'snare', name: 'Twine Snare' };
 
 export const threeRuntimeState = {
   playerPose: {
@@ -296,6 +313,113 @@ function makeJournalEntry({ specimen, tool, result, documented = false, location
   };
 }
 
+function gameMinutesForState(state) {
+  return Math.round((state.timeOfDay || 0) * 60);
+}
+
+function snareElapsedMinutes(trap, state) {
+  if (!trap) return 0;
+  return Math.max(0, ((state.day || 1) - (trap.setDay || 1)) * 1440 + gameMinutesForState(state) - (trap.setAt || 0));
+}
+
+function snareRuntimePositionForSpecimen(state, specimen, zoneId = state.currentZoneId) {
+  if (!specimen) return null;
+  const actorId = snareActorId(specimen);
+  const runtime = state.specimenRuntimePositions?.[zoneId]?.[actorId];
+  const spawn = specimen.spawnPoint || [0, 0, 0];
+  return {
+    x: runtime?.x ?? spawn[0] ?? 0,
+    y: runtime?.y ?? spawn[1] ?? 0,
+    z: runtime?.z ?? spawn[2] ?? 0,
+  };
+}
+
+function findSnareSpecimen(state, trap) {
+  const zoneId = trap?.zoneId || state.currentZoneId;
+  const specimens = getThreeSpecimens(zoneId);
+  if (trap?.caughtActorId) {
+    return specimens.find(specimen => snareActorId(specimen) === trap.caughtActorId) || null;
+  }
+  if (trap?.targetActorId) {
+    return specimens.find(specimen => snareActorId(specimen) === trap.targetActorId) || null;
+  }
+  if (trap?.targetSpecimenId) {
+    const targetId = normalizeSnareSpecimenId(trap.targetSpecimenId);
+    return specimens.find(specimen => normalizeSnareSpecimenId(specimen.id) === targetId) || null;
+  }
+  const collected = new Set(state.collectedSpecimenActorIds || []);
+  let best = null;
+  let bestDistance = Infinity;
+  for (const specimen of specimens) {
+    const actorId = snareActorId(specimen);
+    if (!actorId || collected.has(actorId) || !isSnareCompatibleSpecimen(specimen)) continue;
+    const runtime = snareRuntimePositionForSpecimen(state, specimen, zoneId);
+    const distance = Math.hypot((runtime?.x || 0) - trap.position.x, (runtime?.z || 0) - trap.position.z);
+    if (distance < bestDistance) {
+      best = specimen;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= 5.5 ? best : null;
+}
+
+function collectionBlockForSpecimen(state, specimen, tool) {
+  if (state.inventory.length >= state.caseCapacity) {
+    return {
+      message: 'The specimen case is full. The snare can hold for now, but there is no room to case the animal properly.',
+      syms: 'Syms taps the case lid. "Not an inch of room left, sir."',
+    };
+  }
+  if (state.supplies.labels <= 0) {
+    return {
+      message: 'No labels remain. Leave the snare undisturbed until the animal can be recorded properly.',
+      syms: 'Syms turns out his pockets. "Last label went on the finch, sir."',
+    };
+  }
+  if (specimenNeedsJar(specimen, tool.id) && state.supplies.spareJars <= 0) {
+    return {
+      message: 'No spirit jars remain for a wet specimen. The snare is holding, but the collection must wait.',
+      syms: 'Syms shakes the empty satchel. "Glass is all spoken for, sir."',
+    };
+  }
+  return null;
+}
+
+function makeSnareSuccessResult(specimen) {
+  const scoreDelta = Math.max(1, Math.round((specimen.scientificValue || 2) * 0.85));
+  return {
+    success: true,
+    reason: `The twine loop has sprung cleanly around the ${specimen.name.toLowerCase()}. You ease it free, record the exact trap site, and pass Syms a usable specimen.`,
+    outcomeType: 'clean_specimen',
+    category: 'snare_trap',
+    methodId: 'snare',
+    methodFit: 1,
+    threshold: 1,
+    roll: 0,
+    damage: 0.12,
+    evidence: 'snare placement, track marks, and the exact capture point',
+    scoreDelta,
+    scientificScoreDelta: 1,
+    fatigueDelta: 1,
+  };
+}
+
+function makeSnareFailedResult(specimen = null) {
+  const name = specimen?.name ? `the ${specimen.name.toLowerCase()}` : 'a wary animal';
+  return {
+    success: false,
+    reason: `The snare has been disturbed but ${name} slipped the loop. The track marks still tell you which path the animal used.`,
+    outcomeType: 'partial_evidence',
+    category: 'snare_trap',
+    methodId: 'snare',
+    damage: 0,
+    evidence: 'disturbed twine, footprints, and a better sense of the animal path',
+    scoreDelta: 1,
+    scientificScoreDelta: 0,
+    fatigueDelta: 1,
+  };
+}
+
 function createExpeditionSlice() {
   const expedition = createInitialExpeditionState();
   return {
@@ -304,6 +428,9 @@ function createExpeditionSlice() {
     health: expedition.health,
     fatigue: expedition.fatigue,
     curiosity: 20,
+    playableModeId: DEFAULT_PLAYABLE_MODE_ID,
+    playableSpawnPoint: null,
+    playableHiddenActorId: null,
     activeToolId: 'hands',
     toolbarOrder: ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'],
     supplies: { ...INITIAL_SUPPLIES, spareJars: (INITIAL_SUPPLIES.spareJars || 0) + SYMS_BONUS_JARS },
@@ -366,7 +493,9 @@ function createSceneSlice() {
     edgePrompt: null,
     dismissedEdgePromptId: null,
     arrivalEdgeBlock: null,
+    animalModeNpcEncounter: null,
     lastOutcome: null,
+    snareTraps: [],
     physicsDebug: null,
     // Graphics-quality knobs mirrored from perfSettings so material-building
     // components can react without prop-threading through the whole scene tree.
@@ -415,6 +544,46 @@ export const useThreeGameStore = create((set, get) => ({
   ...createExpeditionSlice(),
   ...createSceneSlice(),
 
+  setPlayableMode: playableModeId => set(state => {
+    const mode = getPlayableMode(playableModeId);
+    const toolbarOrder = getPlayableToolbarIds(mode.id);
+    const nextActiveToolId = toolbarOrder.includes(state.activeToolId) ? state.activeToolId : toolbarOrder[0];
+    const patch = {
+      playableModeId: mode.id,
+      activeToolId: nextActiveToolId,
+      toolbarOrder,
+      selectedSpecimenId: null,
+      nearbySpecimenId: null,
+      carryPrompt: null,
+      carriedObjectId: null,
+      examineSession: null,
+    };
+
+    if (mode.kind === 'animal') {
+      const spawn = findPlayableSpawn(mode.id, state.currentZoneId);
+      if (spawn) {
+        patch.currentZoneId = spawn.zoneId;
+        patch.playerSpawnId = `playable:${mode.id}`;
+        patch.playableSpawnPoint = spawn.point;
+        patch.playableHiddenActorId = spawn.actorId;
+        patch.minimapPlayerPose = {
+          x: spawn.point.x,
+          z: spawn.point.z,
+          heading: 180,
+          zoneId: spawn.zoneId,
+        };
+      } else {
+        patch.playableSpawnPoint = null;
+        patch.playableHiddenActorId = null;
+      }
+    } else {
+      patch.playableSpawnPoint = null;
+      patch.playableHiddenActorId = null;
+      patch.playerSpawnId = String(state.playerSpawnId || '').startsWith('playable:') ? 'default' : state.playerSpawnId;
+    }
+
+    return patch;
+  }),
   setActiveTool: activeToolId => set({ activeToolId }),
   moveToolbarSlot: (from, to) => set(state => {
     if (from === to || from < 0 || to < 0 || from >= state.toolbarOrder.length || to >= state.toolbarOrder.length) return {};
@@ -881,6 +1050,26 @@ export const useThreeGameStore = create((set, get) => ({
           symsLine: feedback?.symsLine,
         }, state, 'hammer-feedback')),
       } : {}),
+    };
+  }),
+  recordAnimalModeNpcEncounter: encounter => set(state => {
+    const mode = getPlayableMode(state.playableModeId);
+    if (mode.kind !== 'animal') return {};
+    const animalName = mode.label.toLowerCase();
+    const message = encounter?.message
+      || `Darwin crouches near the ${animalName}, notebook open, and considers whether it belongs in the collecting bag.`;
+    return {
+      animalModeNpcEncounter: {
+        ...encounter,
+        modeId: mode.id,
+        modeLabel: mode.label,
+        at: Date.now(),
+      },
+      message,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        educationalNote: encounter?.educationalNote || 'In animal modes, Darwin becomes part of the island ecology: an observer, a collector, and eventually a risk to avoid.',
+      }, state, 'scripted', { timeOfDay: state.timeOfDay, day: state.day })),
     };
   }),
   movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId, maxOffset = null) => set(state => {
@@ -1443,16 +1632,361 @@ export const useThreeGameStore = create((set, get) => ({
     }
   },
 
+  placeSnareTrap: (options = {}) => {
+    const state = get();
+    const activeStatuses = activeSnareStatuses();
+    const activeCount = (state.snareTraps || []).filter(trap => activeStatuses.has(trap.status)).length;
+    const targetId = options.targetActorId || options.targetSpecimenId || state.nearbySpecimenId || state.selectedSpecimenId;
+    const targetSpecimen = findRuntimeSpecimen(state, targetId);
+    const targetActorId = targetSpecimen ? snareActorId(targetSpecimen) : null;
+    const targetLabel = snareTargetLabel(targetSpecimen);
+
+    if (state.supplies.twine <= 0) {
+      const message = 'No twine remains for a snare. Syms will need to cut another length from the kit before you can set one.';
+      set(current => ({
+        message,
+        symsLine: '"Used the last of the twine on the case lashings, sir."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: '"Used the last of the twine on the case lashings, sir."',
+        }, current, 'blocked-action')),
+      }));
+      return null;
+    }
+    if (activeCount >= MAX_ACTIVE_SNARES) {
+      const message = `You already have ${MAX_ACTIVE_SNARES} snares set. Check or retrieve one before laying more twine.`;
+      set(current => ({
+        message,
+        symsLine: '"Too many loops in the scrub and we will lose track of our own work, sir."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: '"Too many loops in the scrub and we will lose track of our own work, sir."',
+        }, current, 'blocked-action')),
+      }));
+      return null;
+    }
+    if (targetSpecimen && !targetLabel) {
+      const message = `A twine snare is a poor choice for ${targetSpecimen.name.toLowerCase()}. Set it on small ground paths: lizards, crabs, finches, and similar animals.`;
+      set(current => ({
+        message,
+        symsLine: '"That one would either break the loop or never touch it, sir."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: '"That one would either break the loop or never touch it, sir."',
+        }, current, 'blocked-action')),
+      }));
+      return null;
+    }
+
+    const pose = options.position || state.playerPose?.position || threeRuntimeState.playerPose.position || INITIAL_PLAYER_POSE.position;
+    const facing = options.facing || state.playerPose?.facing || threeRuntimeState.playerPose.facing || INITIAL_PLAYER_POSE.facing;
+    let forwardX = Number(facing.x) || 0;
+    let forwardZ = Number(facing.z) || -1;
+    const facingLength = Math.hypot(forwardX, forwardZ) || 1;
+    forwardX /= facingLength;
+    forwardZ /= facingLength;
+
+    let x = (Number(pose.x) || 0) + forwardX * 1.12;
+    let z = (Number(pose.z) || 0) + forwardZ * 1.12;
+    const targetRuntime = targetSpecimen ? snareRuntimePositionForSpecimen(state, targetSpecimen) : null;
+    if (targetRuntime) {
+      const dx = targetRuntime.x - (Number(pose.x) || 0);
+      const dz = targetRuntime.z - (Number(pose.z) || 0);
+      const distance = Math.hypot(dx, dz);
+      if (distance > 0.4 && distance < 5.0) {
+        const placementDistance = Math.min(1.65, Math.max(0.9, distance * 0.48));
+        x = (Number(pose.x) || 0) + (dx / distance) * placementDistance;
+        z = (Number(pose.z) || 0) + (dz / distance) * placementDistance;
+        forwardX = dx / distance;
+        forwardZ = dz / distance;
+      }
+    }
+    const safe = clampToWalkable({ x, y: 0, z }, null, state.currentZoneId);
+    const y = terrainHeight(safe.x, safe.z, state.currentZoneId) + 0.035;
+    const yaw = Math.atan2(forwardX, forwardZ);
+    const nowMinutes = gameMinutesForState(state);
+    const placedAtRealMs = Date.now();
+    const trap = {
+      id: `snare-${state.currentZoneId}-${state.day}-${nowMinutes}-${Math.round(safe.x * 10)}-${Math.round(safe.z * 10)}-${placedAtRealMs}`,
+      zoneId: state.currentZoneId,
+      position: { x: safe.x, y, z: safe.z },
+      yaw,
+      targetSpecimenId: targetSpecimen?.id || null,
+      targetActorId,
+      targetName: targetLabel || 'small ground animal',
+      status: 'set',
+      setAt: nowMinutes,
+      setDay: state.day || 1,
+      checkAfter: SNARE_CHECK_AFTER_MINUTES,
+      placedAtRealMs,
+      triggerRadius: 1.02,
+    };
+    const message = targetSpecimen
+      ? `You kneel and set a waxed-twine loop along the ${targetSpecimen.name.toLowerCase()}'s path. It will work only if the animal moves through the loop undisturbed.`
+      : 'You kneel and set a waxed-twine loop on a small animal path, pegging the trigger line lightly into the sand.';
+    set(current => ({
+      snareTraps: [...(current.snareTraps || []), trap],
+      supplies: {
+        ...current.supplies,
+        twine: Math.max(0, current.supplies.twine - 1),
+      },
+      fatigue: clamp(current.fatigue + 1, 0, MAX_FATIGUE),
+      message,
+      symsLine: '"We mark the spot and give it time, sir."',
+      lastOutcome: null,
+      narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine: '"We mark the spot and give it time, sir."',
+        fieldNote: 'A passive snare works by patience: placement, animal paths, and disturbance matter more than speed.',
+      }, current, 'snare-set', { allowFieldNote: true })),
+    }));
+    return trap;
+  },
+
+  springSnareTrap: (trapId, actorId) => set(state => {
+    const trap = (state.snareTraps || []).find(item => item.id === trapId);
+    if (!trap || trap.status !== 'set') return {};
+    const specimen = getThreeSpecimens(trap.zoneId || state.currentZoneId)
+      .find(item => snareActorId(item) === actorId);
+    if (!specimen || !isSnareCompatibleSpecimen(specimen)) return {};
+    const message = `The snare snaps tight as the ${specimen.name.toLowerCase()} crosses the loop. Check it before it works itself loose.`;
+    return {
+      snareTraps: (state.snareTraps || []).map(item => (
+        item.id === trapId
+          ? {
+              ...item,
+              status: 'sprung',
+              caughtActorId: actorId,
+              targetSpecimenId: specimen.id,
+              targetName: specimen.name,
+              sprungAt: gameMinutesForState(state),
+              sprungDay: state.day || 1,
+              sprungAtRealMs: Date.now(),
+            }
+          : item
+      )),
+      message,
+      symsLine: '"There, sir. The loop has taken."',
+    };
+  }),
+
+  springSnareTrapByCharacter: (trapId, characterId = 'darwin') => set(state => {
+    const trap = (state.snareTraps || []).find(item => item.id === trapId);
+    if (!trap || trap.status !== 'set') return {};
+    const character = characterId === 'syms' ? 'syms' : 'darwin';
+    const isSyms = character === 'syms';
+    const message = isSyms
+      ? 'Syms steps into the hidden loop; the peg flips loose and the twine snaps around his boot.'
+      : 'Darwin puts his boot through his own snare. The loop catches, the peg kicks free, and he pitches forward into the sand.';
+    return {
+      snareTraps: (state.snareTraps || []).map(item => (
+        item.id === trapId
+          ? {
+              ...item,
+              status: isSyms ? 'sprung-syms' : 'sprung-darwin',
+              caughtBy: character,
+              targetName: isSyms ? 'Syms Covington' : 'Darwin',
+              sprungAt: gameMinutesForState(state),
+              sprungDay: state.day || 1,
+              sprungAtRealMs: Date.now(),
+            }
+          : item
+      )),
+      message,
+      symsLine: isSyms
+        ? '"That one found me before it found a lizard, sir."'
+        : '"Proof of principle, sir, though perhaps not the intended specimen."',
+      lastOutcome: null,
+    };
+  }),
+
+  checkSnareTrap: trapId => {
+    const state = get();
+    const trap = (state.snareTraps || []).find(item => item.id === trapId);
+    if (!trap) return null;
+    const elapsedMinutes = snareElapsedMinutes(trap, state);
+    const specimen = findSnareSpecimen(state, trap);
+    const islandLocation = getThreeIslandLocation(trap.zoneId || state.currentZoneId);
+
+    if (trap.status === 'sprung-darwin' || trap.status === 'sprung-syms') {
+      const caughtSyms = trap.status === 'sprung-syms';
+      const message = caughtSyms
+        ? 'You unhook the twine from Syms and reset the disturbed sand where the trigger peg tore loose.'
+        : 'Darwin works the twine off his boot, gathers the sprung loop, and clears the trap from the path.';
+      set(current => ({
+        snareTraps: (current.snareTraps || []).map(item => (
+          item.id === trapId ? { ...item, status: 'cleared', checkedAt: gameMinutesForState(current), checkedDay: current.day || 1 } : item
+        )),
+        message,
+        symsLine: caughtSyms
+          ? '"I shall watch the ground more closely, sir."'
+          : '"Best place the next one off our own line of march."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: caughtSyms
+            ? '"I shall watch the ground more closely, sir."'
+            : '"Best place the next one off our own line of march."',
+        }, current, 'snare-clear')),
+      }));
+      return null;
+    }
+
+    if (trap.status === 'failed') {
+      const message = 'You lift the slack twine, smooth the disturbed sand, and clear the failed snare from the path.';
+      set(current => ({
+        snareTraps: (current.snareTraps || []).map(item => (
+          item.id === trapId ? { ...item, status: 'cleared', checkedAt: gameMinutesForState(current), checkedDay: current.day || 1 } : item
+        )),
+        message,
+        symsLine: '"We will knot the next one a little lower, sir."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: '"We will knot the next one a little lower, sir."',
+        }, current, 'snare-clear')),
+      }));
+      return null;
+    }
+
+    if (trap.status === 'set' && elapsedMinutes < (trap.checkAfter || SNARE_CHECK_AFTER_MINUTES)) {
+      const remaining = Math.ceil((trap.checkAfter || SNARE_CHECK_AFTER_MINUTES) - elapsedMinutes);
+      const message = `The loop is still open and clean. Give the snare about ${remaining} more minute${remaining === 1 ? '' : 's'} of quiet.`;
+      set(current => ({
+        message,
+        symsLine: '"Best not fuss with it too soon, sir."',
+        lastOutcome: null,
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: message,
+          symsLine: '"Best not fuss with it too soon, sir."',
+        }, current, 'snare-check')),
+      }));
+      return null;
+    }
+
+    const resolvedSpecimen = specimen && isSnareCompatibleSpecimen(specimen) ? specimen : null;
+    const collectedActorIds = new Set(state.collectedSpecimenActorIds || []);
+    const collectedActorId = resolvedSpecimen ? (trap.caughtActorId || snareActorId(resolvedSpecimen)) : null;
+    const passiveCheck = trap.status === 'set' && resolvedSpecimen
+      ? evaluateCollectionAttempt({
+          specimen: resolvedSpecimen,
+          method: SNARE_TOOL,
+          approach: 'patient quiet ground snare on a fresh animal path',
+          location: islandLocation,
+          fatigue: state.fatigue,
+          gameTime: gameMinutesForState(state),
+          seed: state.seed,
+        })
+      : null;
+    const shouldCollect = resolvedSpecimen
+      && !collectedActorIds.has(collectedActorId)
+      && (trap.status === 'sprung' || passiveCheck?.success);
+    const result = shouldCollect
+      ? makeSnareSuccessResult(resolvedSpecimen)
+      : (passiveCheck || makeSnareFailedResult(resolvedSpecimen));
+
+    if (shouldCollect) {
+      const blocked = collectionBlockForSpecimen(state, resolvedSpecimen, SNARE_TOOL);
+      if (blocked) {
+        set(current => ({
+          message: blocked.message,
+          symsLine: blocked.syms,
+          lastOutcome: null,
+          narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+            narration: blocked.message,
+            symsLine: blocked.syms,
+          }, current, 'blocked-action')),
+        }));
+        return null;
+      }
+    }
+
+    const entry = resolvedSpecimen
+      ? makeJournalEntry({
+          specimen: resolvedSpecimen,
+          tool: SNARE_TOOL,
+          result,
+          documented: !shouldCollect,
+          location: islandLocation,
+          day: state.day,
+          timeOfDay: state.timeOfDay,
+        })
+      : null;
+
+    set(current => {
+      const collected = shouldCollect && resolvedSpecimen;
+      const nextTrapStatus = collected ? 'collected' : 'failed';
+      const educationalNote = collected
+        ? 'A passive snare turns animal movement into evidence: the exact path and capture point are part of the record.'
+        : 'A failed snare is still field evidence when it reveals a route, trackway, or disturbance pattern.';
+      return {
+        snareTraps: (current.snareTraps || []).map(item => (
+          item.id === trapId
+            ? { ...item, status: nextTrapStatus, result, checkedAt: gameMinutesForState(current), checkedDay: current.day || 1 }
+            : item
+        )),
+        fatigue: clamp(current.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
+        curiosity: clamp(current.curiosity + (collected ? result.scoreDelta * 5 : 4), 0, MAX_CURIOSITY),
+        supplies: collected
+          ? {
+              ...current.supplies,
+              labels: Math.max(0, current.supplies.labels - 1),
+              spareJars: specimenNeedsJar(resolvedSpecimen, SNARE_TOOL.id)
+                ? Math.max(0, current.supplies.spareJars - 1)
+                : current.supplies.spareJars,
+            }
+          : current.supplies,
+        inventory: collected ? [...current.inventory, { ...resolvedSpecimen, condition: result.outcomeType }] : current.inventory,
+        journal: entry ? [...current.journal, entry] : current.journal,
+        examinedTypeIds: resolvedSpecimen && !current.examinedTypeIds.includes(resolvedSpecimen.id)
+          ? [...current.examinedTypeIds, resolvedSpecimen.id]
+          : current.examinedTypeIds,
+        collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(resolvedSpecimen.id)
+          ? [...current.collectedSpecimenIds, resolvedSpecimen.id]
+          : current.collectedSpecimenIds,
+        collectedSpecimenActorIds: collected && collectedActorId && !(current.collectedSpecimenActorIds || []).includes(collectedActorId)
+          ? [...(current.collectedSpecimenActorIds || []), collectedActorId]
+          : (current.collectedSpecimenActorIds || []),
+        nearbySpecimenId: collected && current.nearbySpecimenId === collectedActorId ? null : current.nearbySpecimenId,
+        selectedSpecimenId: collected && current.selectedSpecimenId === collectedActorId ? null : current.selectedSpecimenId,
+        questComplete: current.questComplete || Boolean(collected),
+        lastOutcome: resolvedSpecimen ? { specimen: resolvedSpecimen, tool: SNARE_TOOL, result, documented: !collected, collectedActorId: collected ? collectedActorId : null } : null,
+        message: result.reason,
+        educationalNote,
+        symsLine: collected
+          ? `Syms keeps one finger on the twine while labeling the ${resolvedSpecimen.name}. "Neat work, sir."`
+          : '"Worth noting even so, sir. Something passed this way."',
+        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+          narration: result.reason,
+          symsLine: collected
+            ? `Syms keeps one finger on the twine while labeling the ${resolvedSpecimen.name}. "Neat work, sir."`
+            : '"Worth noting even so, sir. Something passed this way."',
+          fieldNote: educationalNote,
+        }, current, collected ? 'snare-collection' : 'snare-check', { allowFieldNote: true })),
+      };
+    });
+    return result;
+  },
+
   collectNearby: async (targetSpecimenId = null) => {
     const state = get();
     const specimenId = targetSpecimenId || state.nearbySpecimenId || state.selectedSpecimenId;
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
     const collectedActorIds = new Set(state.collectedSpecimenActorIds || []);
+    const tool = threeTools.find(item => item.id === state.activeToolId) || threeTools.find(item => item.id === 'hands');
     const specimen = zoneSpecimens.find(item => {
       const actorId = item.instanceId || item.id;
       return !collectedActorIds.has(actorId) && (actorId === specimenId || item.id === specimenId);
     });
-    const tool = threeTools.find(item => item.id === state.activeToolId) || threeTools.find(item => item.id === 'hands');
+    if (tool.id === 'snare') {
+      return get().placeSnareTrap({
+        targetSpecimenId: specimen?.id || null,
+        targetActorId: specimen ? snareActorId(specimen) : null,
+      });
+    }
     if (!specimen) return null;
     const actorId = specimen.instanceId || specimen.id;
 

@@ -12,7 +12,7 @@
     "check": "npm run check:syntax && npm run test",
     "typecheck": "tsc --noEmit",
     "three:screenshot": "node scripts/three-screenshot-check.mjs",
-    "three:screenshot:fast": "THREE_SCREENSHOT_VIEWPORTS=desktop node scripts/three-screenshot-check.mjs",
+    "three:screenshot:fast": "THREE_SCREENSHOT_VIEWPORTS=desktop THREE_SCREENSHOT_CAPTURE=canvas node scripts/three-screenshot-check.mjs",
     "three:perf": "node scripts/three-perf-probe.mjs",
     "three:cost": "node scripts/three-scene-cost-probe.mjs",
     "three:animation-smoke": "node scripts/three-animation-smoke.mjs",
