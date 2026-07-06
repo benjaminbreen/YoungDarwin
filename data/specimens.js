@@ -1318,6 +1318,35 @@ export const baseSpecimens = [
   keywords: ['goat', 'mammal', 'feral', 'invasive', 'capra', 'highlands']
 },
 
+{
+  id: 'cat',
+  name: 'Settlement Cat',
+  latin: 'Felis catus',
+  ontology: 'Animal',
+  order: 'Mammal',
+  sub_order: 'Carnivore',
+  description: 'A lean domestic cat living around the Asilo de la Paz settlement, tolerated for its work around stores and gardens.',
+  details: [
+    'Keeps close to huts, crop edges, and storage sheds rather than open lava',
+    'Moves quietly through trampled ground and pauses to groom in the shade',
+    'A familiar settlement animal, but a dangerous presence for tame island birds',
+    'Likely arrived with colonists or passing ships rather than belonging to the native fauna'
+  ],
+  habitat: 'settlement',
+  collected: false,
+  observations: [],
+  scientificValue: 2,
+  hybrid_ease: 2,
+  hybrid_temperature: 3,
+  danger: 3,
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/cat.jpg',
+  memoryText: '“Even the common animals of a settlement alter an island, for the native birds possess little fear of such hunters.”',
+  contents: 'A field note would record hair, bones, and scraps gathered from stores or around the colony.',
+  keywords: ['cat', 'settlement', 'domestic', 'feral', 'predator', 'asilo', 'penal colony']
+},
+
 
 {
   id: 'scrimshawwhaletooth',

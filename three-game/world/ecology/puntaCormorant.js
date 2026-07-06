@@ -204,17 +204,6 @@ export function buildPuntaCormorantEcology() {
         }),
       },
     ],
-    canopySilhouettes: [
-      {
-        id: 'punta-cormorant-far-rim-silhouette',
-        items: [
-          { id: 'punta-cormorant-rim-left', x: -52, z: -28, y: 0.9, scale: 1.9, yaw: 0.35 },
-          { id: 'punta-cormorant-rim-center-left', x: -26, z: -39, y: 1.2, scale: 2.4, yaw: -0.18 },
-          { id: 'punta-cormorant-rim-center-right', x: 13, z: -40, y: 1.25, scale: 2.6, yaw: 0.22 },
-          { id: 'punta-cormorant-rim-right', x: 48, z: -25, y: 1.0, scale: 2.0, yaw: -0.44 },
-        ],
-      },
-    ],
     flyingModels: [
       {
         id: 'punta-cormorant-flying-flamingos',

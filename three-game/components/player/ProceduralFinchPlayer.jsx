@@ -4,6 +4,9 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
+const FINCH_PLAYER_ROOT_SCALE = 0.45;
+const FINCH_PLAYER_MOTION_SCALE = FINCH_PLAYER_ROOT_SCALE / 0.82;
+
 // ---------------------------------------------------------------------------
 // Geometry
 // ---------------------------------------------------------------------------
@@ -984,10 +987,17 @@ export function ProceduralFinchPlayer({ motionRef }) {
     descend: 0,
     stepPhase: 0,
     walkAmp: 0,
+    visualTime: NaN,
   });
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock }, rawDelta) => {
     const motion = motionRef.current || {};
+    const motionTimeScale = THREE.MathUtils.clamp(motion.timeScale ?? 1, 0.28, 1.25);
+    const delta = rawDelta * motionTimeScale;
+    const a = anim.current;
+    a.visualTime = Number.isFinite(a.visualTime)
+      ? a.visualTime + delta
+      : clock.elapsedTime;
     const flying = Boolean(motion.flying);
     const phase = motion.flightPhase || (flying ? 'cruise' : null);
     const takeoff = phase === 'takeoff';
@@ -998,7 +1008,7 @@ export function ProceduralFinchPlayer({ motionRef }) {
     const flapHeld = Boolean(motion.flightFlap);
     const dive = Boolean(motion.flightDive);
     const descendHeld = Boolean(motion.flightDescend);
-    const t = clock.elapsedTime;
+    const t = a.visualTime;
     const peck = action === 'animalEat' ? Math.max(0, Math.sin(t * 17.5)) : 0;
     const sleep = action === 'animalSleep' ? 1 : 0;
     const defecate = action === 'animalDefecate' ? Math.sin(Math.min(1, (t * 3.2) % 1) * Math.PI) : 0;
@@ -1019,8 +1029,6 @@ export function ProceduralFinchPlayer({ motionRef }) {
     // Wingbeat: a continuous phase accumulator (rate changes never pop) with
     // amplitude crossfading between full flaps, the landing flare, and the
     // near-still glide hold. Gliding means wings out, not slow flapping.
-    const a = anim.current;
-
     // Climb (W) and descend (S) pose blends. Climb is a full powered reach;
     // descend is a swept, swift-like tuck — shift-dive deepens the same tuck
     // rather than being its own pose.
@@ -1094,7 +1102,7 @@ export function ProceduralFinchPlayer({ motionRef }) {
         : Math.sin(t * 3.1) * 0.004;
 
     if (root.current) {
-      root.current.position.y = rootBob;
+      root.current.position.y = rootBob * FINCH_PLAYER_MOTION_SCALE;
     }
     // Grounded stance carries the body closer to horizontal (chest gently
     // lifted, weight over the feet); walking leans a touch forward. Flight
@@ -1232,7 +1240,7 @@ export function ProceduralFinchPlayer({ motionRef }) {
   });
 
   return (
-    <group ref={root} scale={0.82} position={[0, 0.02, 0]}>
+    <group ref={root} scale={FINCH_PLAYER_ROOT_SCALE} position={[0, 0.01, 0]}>
       <group ref={body}>
         <mesh geometry={geometries.body} material={materials.body} castShadow receiveShadow />
         <Wing side={-1} shoulderRef={leftShoulder} handRef={leftHand} featherRefs={leftFeathers} geometries={geometries} materials={materials} />

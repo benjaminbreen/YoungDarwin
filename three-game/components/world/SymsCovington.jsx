@@ -46,8 +46,10 @@ export function SymsCovington() {
   const body = useRef(null);
   const animationRef = useRef('idle');
   const visible = currentZoneId === 'POST_OFFICE_BAY' || currentZoneId === 'BEAGLE';
-  const x = 4.0;
-  const z = 7.0;
+  // Aboard the Beagle, Syms keeps to the waist beside the fore hatch; ashore
+  // he holds his usual spot on the Post Office Bay shelf.
+  const x = currentZoneId === 'BEAGLE' ? 5.4 : 4.0;
+  const z = currentZoneId === 'BEAGLE' ? -1.9 : 7.0;
   const y = terrainHeight(x, z, currentZoneId) + 0.04;
   const clockRef = useRef(0);
   const reactionRef = useRef({

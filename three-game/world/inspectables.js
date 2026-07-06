@@ -22,6 +22,8 @@ export const inspectableCatalog = {
   croton: { id: 'croton', kind: 'plant', englishName: 'Chala', latinName: 'Croton scouleri', category: 'Plant', rarity: 'common' },
   scalesia: { id: 'scalesia', kind: 'plant', englishName: 'Floreana scalesia', latinName: 'Scalesia villosa', category: 'Plant', rarity: 'endemic' },
   palo_santo: { id: 'palo_santo', kind: 'plant', englishName: 'Palo santo', latinName: 'Bursera graveolens', category: 'Plant', rarity: 'uncommon' },
+  highland_ground_plants: { id: 'highland_ground_plants', kind: 'plant', englishName: 'Highland ground plants', latinName: 'humid highland herbs', category: 'Plant', rarity: 'common' },
+  highland_grass: { id: 'highland_grass', kind: 'plant', englishName: 'Highland grass', latinName: 'Poaceae', category: 'Plant', rarity: 'common' },
   castela: { id: 'castela', kind: 'plant', englishName: 'Galapagos bitterbush', latinName: 'Castela galapageia', category: 'Plant', rarity: 'endemic' },
   paga_paga: { id: 'paga_paga', kind: 'plant', englishName: 'Paga-paga', latinName: 'Pisonia floribunda', category: 'Plant', rarity: 'endemic' },
   saltgrass: { id: 'saltgrass', kind: 'plant', englishName: 'Saltgrass', latinName: 'Distichlis spicata', category: 'Plant', rarity: 'scarce' },
@@ -97,7 +99,9 @@ export function inspectableTypeForEcologyLayer(layerId) {
   if (layerId.startsWith('saltbush')) return 'saltbush';
   if (layerId === 'croton') return 'croton';
   if (layerId.includes('scalesia')) return 'scalesia';
-  if (layerId === 'palo-santo') return 'castela';
+  if (layerId.startsWith('palo-santo')) return 'palo_santo';
+  if (layerId === 'ground-plants' || layerId === 'wet-ground-plants') return 'highland_ground_plants';
+  if (layerId === 'highland-grass') return 'highland_grass';
   if (layerId === 'ez-low-upland-trees') return 'paga_paga';
   if (layerId === 'saltgrass') return 'saltgrass';
   if (layerId === 'sesuvium') return 'sesuvium';

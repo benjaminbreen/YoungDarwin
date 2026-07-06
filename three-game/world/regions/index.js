@@ -30,6 +30,8 @@ import { grassTestRegion } from './grassTest/terrain';
 import { createGrassTestTerrainMaterial } from './grassTest/material';
 import { grassHybridTestRegion } from './grassHybridTest/terrain';
 import { createGrassHybridTestTerrainMaterial } from './grassHybridTest/material';
+import { cormorantBayRegion } from './cormorantBay/terrain';
+import { createCormorantBayTerrainMaterial } from './cormorantBay/material';
 import { cormorantBaySplatTestRegion } from './cormorantBaySplatTest/terrain';
 import { createCormorantBaySplatTestTerrainMaterial } from './cormorantBaySplatTest/material';
 import { cormorantBayTest2Region } from './cormorantBayTest2/terrain';
@@ -38,6 +40,8 @@ import { cormorantBayTest3Region } from './cormorantBayTest3/terrain';
 import { createCormorantBayTest3TerrainMaterial } from './cormorantBayTest3/material';
 import { puntaCormorantRegion } from './puntaCormorant/terrain';
 import { createPuntaCormorantTerrainMaterial } from './puntaCormorant/material';
+import { beagleDeckRegion } from './beagleDeck/terrain';
+import { createBeagleDeckTerrainMaterial } from './beagleDeck/material';
 
 const authoredRegions = [
   { ...postOfficeBayRegion, createTerrainMaterial: createPostOfficeBayTerrainMaterial },
@@ -56,10 +60,12 @@ const authoredRegions = [
   { ...mangroveRegion, createTerrainMaterial: createMangroveTerrainMaterial },
   { ...grassTestRegion, createTerrainMaterial: createGrassTestTerrainMaterial },
   { ...grassHybridTestRegion, createTerrainMaterial: createGrassHybridTestTerrainMaterial },
+  { ...cormorantBayRegion, createTerrainMaterial: createCormorantBayTerrainMaterial },
   { ...cormorantBaySplatTestRegion, createTerrainMaterial: createCormorantBaySplatTestTerrainMaterial },
   { ...cormorantBayTest2Region, createTerrainMaterial: createCormorantBayTest2TerrainMaterial },
   { ...cormorantBayTest3Region, createTerrainMaterial: createCormorantBayTest3TerrainMaterial },
   { ...puntaCormorantRegion, createTerrainMaterial: createPuntaCormorantTerrainMaterial },
+  { ...beagleDeckRegion, createTerrainMaterial: createBeagleDeckTerrainMaterial },
 ];
 
 const regionById = new Map();

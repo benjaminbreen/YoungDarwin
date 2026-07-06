@@ -1,21 +1,35 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { launchChromium } from './playwright-launch.mjs';
 
 const outDir = path.join(process.cwd(), 'test-results', 'three-darwin');
 const DEFAULT_BASE_URL = 'http://localhost:3000/three';
-const BOOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_TIMEOUT_MS || 90000);
+const BOOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_TIMEOUT_MS || 75000);
 const NAVIGATION_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_NAV_TIMEOUT_MS || 20000);
-const SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_WRITE_TIMEOUT_MS || 60000);
+const SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_WRITE_TIMEOUT_MS || 15000);
 const SETTLE_MS = Number(process.env.THREE_SCREENSHOT_SETTLE_MS || 700);
-const UI_STEP_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_UI_TIMEOUT_MS || 12000);
+const UI_STEP_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_UI_TIMEOUT_MS || 8000);
 const FAILURE_SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_FAILURE_TIMEOUT_MS || 5000);
+const SERVER_START_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_SERVER_START_TIMEOUT_MS || 60000);
+const LOADING_STALL_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_STALL_TIMEOUT_MS || 30000);
+const AUTO_START_SERVER = process.env.THREE_SCREENSHOT_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const CAPTURE_MODE = screenshotCaptureMode();
 
 const ALL_VIEWPORTS = {
   desktop: { name: 'desktop', width: 1440, height: 900 },
   mobile: { name: 'mobile', width: 390, height: 844 },
 };
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function argValue(name) {
+  const prefix = `${name}=`;
+  return process.argv.find(arg => arg.startsWith(prefix))?.slice(prefix.length);
+}
 
 function screenshotUrl(baseUrl) {
   const url = new URL(baseUrl);
@@ -24,9 +38,7 @@ function screenshotUrl(baseUrl) {
 }
 
 function screenshotCaptureMode() {
-  const raw = process.env.THREE_SCREENSHOT_CAPTURE
-    || process.argv.find(arg => arg.startsWith('--capture='))?.slice('--capture='.length)
-    || 'page';
+  const raw = process.env.THREE_SCREENSHOT_CAPTURE || argValue('--capture') || 'canvas';
   const mode = raw.trim().toLowerCase();
   if (!['page', 'canvas'].includes(mode)) {
     throw new Error(`Unsupported screenshot capture mode "${raw}". Use page or canvas.`);
@@ -35,13 +47,41 @@ function screenshotCaptureMode() {
 }
 
 function selectedViewports() {
-  const raw = process.env.THREE_SCREENSHOT_VIEWPORTS || process.argv.find(arg => arg.startsWith('--viewports='))?.slice('--viewports='.length);
+  const raw = process.env.THREE_SCREENSHOT_VIEWPORTS || argValue('--viewports');
   const names = (raw || 'desktop,mobile').split(',').map(name => name.trim()).filter(Boolean);
   const selected = names.map(name => ALL_VIEWPORTS[name]).filter(Boolean);
   if (!selected.length) {
     throw new Error(`No valid screenshot viewports selected from "${raw}". Use desktop, mobile, or desktop,mobile.`);
   }
   return selected;
+}
+
+async function canReach(url, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.status >= 200 && response.status < 400;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function canBindPort(port) {
+  return new Promise(resolve => {
+    const server = net.createServer();
+    server.once('error', error => resolve({
+      ok: false,
+      code: error?.code || 'UNKNOWN',
+      message: error?.message || String(error),
+    }));
+    server.once('listening', () => {
+      server.close(() => resolve({ ok: true }));
+    });
+    server.listen(port, '127.0.0.1');
+  });
 }
 
 async function readNextDevLockUrl() {
@@ -57,9 +97,92 @@ async function readNextDevLockUrl() {
   return null;
 }
 
+async function chooseDevServerPort() {
+  const candidates = [3000, 3001, 3002, 3003, 3004, 3005];
+  const bindErrors = [];
+  for (const port of candidates) {
+    const result = await canBindPort(port);
+    if (result.ok) return port;
+    bindErrors.push({ port, code: result.code, message: result.message });
+  }
+  if (bindErrors.every(error => error.code === 'EPERM')) {
+    throw new Error(
+      'Local dev-server port binding is blocked by the current sandbox (listen EPERM). '
+      + 'Retry the screenshot command with sandbox_permissions="require_escalated", or start `npm run dev` outside the sandbox and set THREE_DARWIN_URL.'
+    );
+  }
+  throw new Error(`Could not find a free local dev-server port from ${candidates.join(', ')}.`);
+}
+
+function trimServerOutput(lines) {
+  return lines.slice(-24).join('\n');
+}
+
+async function startDevServer() {
+  const port = await chooseDevServerPort();
+  const baseUrl = `http://127.0.0.1:${port}/three`;
+  const output = [];
+  console.log(`[three:screenshot] no reachable dev server found; starting Next dev on ${baseUrl}`);
+  const child = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
+    cwd: process.cwd(),
+    env: { ...process.env, BROWSER: 'none' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const collect = chunk => {
+    const text = String(chunk || '');
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed) output.push(trimmed);
+    }
+  };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < SERVER_START_TIMEOUT_MS) {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `Next dev server exited before ${baseUrl} became reachable.\n`
+        + trimServerOutput(output)
+      );
+    }
+    if (await canReach(baseUrl, 2000)) {
+      return {
+        baseUrl,
+        stop: async () => {
+          if (child.exitCode !== null) return;
+          child.kill('SIGTERM');
+          await Promise.race([
+            new Promise(resolve => child.once('exit', resolve)),
+            delay(4000).then(() => {
+              if (child.exitCode === null) child.kill('SIGKILL');
+            }),
+          ]);
+        },
+      };
+    }
+    await delay(750);
+  }
+
+  child.kill('SIGTERM');
+  throw new Error(
+    `Timed out after ${SERVER_START_TIMEOUT_MS}ms waiting for Next dev server at ${baseUrl}.\n`
+    + trimServerOutput(output)
+  );
+}
+
 async function resolveBaseUrl() {
-  if (process.env.THREE_DARWIN_URL) return process.env.THREE_DARWIN_URL;
-  return (await readNextDevLockUrl()) || DEFAULT_BASE_URL;
+  if (process.env.THREE_DARWIN_URL) return { baseUrl: process.env.THREE_DARWIN_URL, stopServer: null };
+
+  const lockedUrl = await readNextDevLockUrl();
+  if (lockedUrl && await canReach(lockedUrl)) return { baseUrl: lockedUrl, stopServer: null };
+  if (await canReach(DEFAULT_BASE_URL)) return { baseUrl: DEFAULT_BASE_URL, stopServer: null };
+
+  if (!AUTO_START_SERVER) return { baseUrl: lockedUrl || DEFAULT_BASE_URL, stopServer: null };
+
+  const server = await startDevServer();
+  return { baseUrl: server.baseUrl, stopServer: server.stop };
 }
 
 async function canvasPixelHealth(page) {
@@ -232,41 +355,55 @@ async function clickNewExpeditionFlow(page, consoleErrors) {
 }
 
 async function waitForReadyCanvas(page, consoleErrors) {
-  let lastLog = '';
-  const progressLog = setInterval(() => {
-    pageLaunchState(page).then(state => {
+  await withFailureArtifacts(page, 'wait for canvas', consoleErrors, async () => {
+    await page.waitForSelector('canvas', { timeout: BOOT_TIMEOUT_MS });
+  });
+
+  await withFailureArtifacts(page, 'wait for scene ready', consoleErrors, async () => {
+    const deadline = Date.now() + BOOT_TIMEOUT_MS;
+    let lastStateKey = '';
+    let lastProgressKey = '';
+    let lastProgressAt = Date.now();
+
+    while (Date.now() < deadline) {
+      const state = await pageLaunchState(page);
       const overlay = state.overlay
         ? `${state.overlay.mode || 'unknown'} ${state.overlay.progress || ''}`.trim()
         : 'detached';
-      const summary = `overlay=${overlay}; canvas=${state.canvas ? 'present' : 'missing'}`;
-      if (summary !== lastLog) {
-        lastLog = summary;
-        console.log(`[three:screenshot] boot state: ${summary}`);
+      const stateKey = `overlay=${overlay}; canvas=${state.canvas ? 'present' : 'missing'}`;
+      if (stateKey !== lastStateKey) {
+        lastStateKey = stateKey;
+        console.log(`[three:screenshot] boot state: ${stateKey}`);
       }
-    }).catch(() => {});
-  }, 5000);
+      if (!state.overlay) return;
 
-  try {
-    await withFailureArtifacts(page, 'wait for canvas', consoleErrors, async () => {
-      await page.waitForSelector('canvas', { timeout: BOOT_TIMEOUT_MS });
-    });
-    await withFailureArtifacts(page, 'wait for scene ready', consoleErrors, async () => {
-      await page.waitForSelector('[data-testid="three-launch-overlay"]', { state: 'detached', timeout: BOOT_TIMEOUT_MS });
-    });
-  } finally {
-    clearInterval(progressLog);
-  }
+      const progressKey = `${state.overlay.mode || 'unknown'}:${state.overlay.progress || ''}:${state.overlay.text || ''}`;
+      if (progressKey !== lastProgressKey) {
+        lastProgressKey = progressKey;
+        lastProgressAt = Date.now();
+      } else if (Date.now() - lastProgressAt > LOADING_STALL_TIMEOUT_MS) {
+        throw new Error(
+          `Loading overlay stalled for ${LOADING_STALL_TIMEOUT_MS}ms at ${overlay}.`
+        );
+      }
+
+      await delay(1000);
+    }
+
+    throw new Error(`Scene did not become ready before ${BOOT_TIMEOUT_MS}ms timeout.`);
+  });
 }
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
-  const baseUrl = await resolveBaseUrl();
+  const { baseUrl, stopServer } = await resolveBaseUrl();
   const viewports = selectedViewports();
   console.log(`[three:screenshot] using ${screenshotUrl(baseUrl)}`);
   console.log(`[three:screenshot] viewports: ${viewports.map(viewport => viewport.name).join(', ')}`);
   console.log(`[three:screenshot] capture mode: ${CAPTURE_MODE}`);
   console.log(`[three:screenshot] boot timeout: ${BOOT_TIMEOUT_MS}ms`);
   console.log(`[three:screenshot] UI step timeout: ${UI_STEP_TIMEOUT_MS}ms`);
+  console.log(`[three:screenshot] stall timeout: ${LOADING_STALL_TIMEOUT_MS}ms`);
 
   let browser = await launchChromium();
   const results = [];
@@ -277,7 +414,10 @@ async function run() {
     await openBrowser.close().catch(() => {});
   };
   const stop = signal => {
-    closeBrowser().finally(() => {
+    Promise.all([
+      closeBrowser(),
+      stopServer ? stopServer().catch(() => {}) : Promise.resolve(),
+    ]).finally(() => {
       process.exit(signal === 'SIGINT' ? 130 : 143);
     });
   };
@@ -327,6 +467,7 @@ async function run() {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
     await closeBrowser();
+    if (stopServer) await stopServer().catch(() => {});
   }
   await fs.writeFile(path.join(outDir, 'summary.json'), JSON.stringify(results, null, 2));
 

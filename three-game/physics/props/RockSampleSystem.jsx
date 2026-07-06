@@ -624,19 +624,21 @@ export function RockSampleSystem() {
       const outcome = resolveHammerOutcome(profile, target.key);
       const chip = makeChipFromTarget(target, strike, currentZoneId, sequenceRef.current, profile, outcome);
       const shardRisk = {
-        basalt: 0.55,
-        iron_crust: 0.48,
-        scoria: 0.34,
-        olivine: 0.3,
-        coral_limestone: 0.14,
-        tuff: 0.12,
-      }[profile.material] ?? 0.22;
+        basalt: 0.22,
+        iron_crust: 0.18,
+        scoria: 0.12,
+        olivine: 0.1,
+        coral_limestone: 0.05,
+        tuff: 0.04,
+      }[profile.material] ?? 0.08;
+      const store = useThreeGameStore.getState();
       if (
-        clockRef.current - lastShardDilemmaRef.current > 28
+        !store.activeConstraint
+        && clockRef.current - lastShardDilemmaRef.current > 75
         && seededUnit(`${chip.id}:field-dilemma`, 91) < shardRisk
       ) {
         lastShardDilemmaRef.current = clockRef.current;
-        useThreeGameStore.getState().triggerHammerShardDilemma?.({
+        store.triggerHammerShardDilemma?.({
           material: profile.material,
           sampleLabel: chip.sampleNoun,
           sourceRockKey: chip.sourceRockKey,

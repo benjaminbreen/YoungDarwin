@@ -13,6 +13,7 @@ import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
 import { getPenalColonyObstacles } from './penalColonyLayout';
+import { getBeagleDeckObstacles } from './beagleDeckLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
@@ -38,6 +39,7 @@ const REGION_OBSTACLE_SOURCES = {
   W_HIGH: [getWesternHighlandsRockObstacles],
   E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],
   PENAL_COLONY: [getPenalColonyObstacles],
+  BEAGLE: [getBeagleDeckObstacles],
 };
 
 function flattenCollider(collider) {

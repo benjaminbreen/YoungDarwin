@@ -23,7 +23,7 @@ const BLOCKED_BOUNDARY_LABELS = {
 };
 
 const REGION_SIZE_BY_TYPE = {
-  beagle: [58, 42],
+  beagle: [72, 52],
   bay: [118, 118],
   beach: [104, 92],
   coastallava: [108, 96],
@@ -51,6 +51,7 @@ const REGION_SIZE_BY_TYPE = {
 };
 
 const AUTHORED_REGION_TERRAIN = {
+  BEAGLE: { preset: 'hms-beagle-deck', segments: 300 },
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 360 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
@@ -67,6 +68,7 @@ const AUTHORED_REGION_TERRAIN = {
   MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
   GRASS_TEST: { preset: 'grass-test-field', segments: 300 },
   GRASS_HYBRID_TEST: { preset: 'grass-hybrid-test-field', segments: 240 },
+  CORMORANT_BAY: { preset: 'cormorant-bay', segments: 300 },
   CORMORANT_BAY_SPLAT_TEST: { preset: 'cormorant-bay-splat-test', segments: 300 },
   CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
   CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },

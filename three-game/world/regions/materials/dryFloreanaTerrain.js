@@ -9,9 +9,21 @@ import {
 export const DRY_FLOREANA_TEXTURE_SETS = {
   redDirtHighland: {
     redDirt: '/assets/textures/world/floreana-pbr/red-cinder-dirt_albedo.png',
+    redDirtNormal: '/assets/textures/world/floreana-pbr/red-cinder-dirt_normal.png',
+    redDirtRoughness: '/assets/textures/world/floreana-pbr/red-cinder-dirt_roughness.png',
+    redDirtHeight: '/assets/textures/world/floreana-pbr/red-cinder-dirt_height.png',
     shoulderGround: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_albedo.png',
+    shoulderGroundNormal: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_normal.png',
+    shoulderGroundRoughness: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_roughness.png',
+    shoulderGroundHeight: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_height.png',
     dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.png',
+    dryGrassGroundNormal: '/assets/textures/world/floreana-pbr/dry-grass-litter_normal.png',
+    dryGrassGroundRoughness: '/assets/textures/world/floreana-pbr/dry-grass-litter_roughness.png',
+    dryGrassGroundHeight: '/assets/textures/world/floreana-pbr/dry-grass-litter_height.png',
     paleFlecks: '/assets/textures/world/floreana-pbr/olivine-beach_albedo.png',
+    paleFlecksNormal: '/assets/textures/world/floreana-pbr/olivine-beach_normal.png',
+    paleFlecksRoughness: '/assets/textures/world/floreana-pbr/olivine-beach_roughness.png',
+    paleFlecksHeight: '/assets/textures/world/floreana-pbr/olivine-beach_height.png',
     fallbacks: {
       redDirt: '#a75b2e',
       shoulderGround: '#80744d',
@@ -21,9 +33,21 @@ export const DRY_FLOREANA_TEXTURE_SETS = {
   },
   sandyCoastal: {
     redDirt: '/assets/textures/world/floreana-pbr/red-cinder-dirt_albedo.png',
+    redDirtNormal: '/assets/textures/world/floreana-pbr/red-cinder-dirt_normal.png',
+    redDirtRoughness: '/assets/textures/world/floreana-pbr/red-cinder-dirt_roughness.png',
+    redDirtHeight: '/assets/textures/world/floreana-pbr/red-cinder-dirt_height.png',
     shoulderGround: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_albedo.png',
+    shoulderGroundNormal: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_normal.png',
+    shoulderGroundRoughness: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_roughness.png',
+    shoulderGroundHeight: '/assets/textures/world/floreana-pbr/coastal-grass-shoulder_height.png',
     dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.png',
+    dryGrassGroundNormal: '/assets/textures/world/floreana-pbr/dry-grass-litter_normal.png',
+    dryGrassGroundRoughness: '/assets/textures/world/floreana-pbr/dry-grass-litter_roughness.png',
+    dryGrassGroundHeight: '/assets/textures/world/floreana-pbr/dry-grass-litter_height.png',
     paleFlecks: '/assets/textures/world/floreana-pbr/olivine-beach_albedo.png',
+    paleFlecksNormal: '/assets/textures/world/floreana-pbr/olivine-beach_normal.png',
+    paleFlecksRoughness: '/assets/textures/world/floreana-pbr/olivine-beach_roughness.png',
+    paleFlecksHeight: '/assets/textures/world/floreana-pbr/olivine-beach_height.png',
     fallbacks: {
       redDirt: '#b47b3c',
       shoulderGround: '#7a7153',
@@ -33,25 +57,30 @@ export const DRY_FLOREANA_TEXTURE_SETS = {
   },
 };
 
-function fallbackTexture(hex) {
-  const color = new THREE.Color(hex);
-  const data = new Uint8Array([
+function rgbaFromFallback(fallback) {
+  if (Array.isArray(fallback)) return fallback;
+  const color = new THREE.Color(fallback);
+  return [
     Math.round(color.r * 255),
     Math.round(color.g * 255),
     Math.round(color.b * 255),
     255,
-  ]);
+  ];
+}
+
+function fallbackTexture(fallback, colorSpace) {
+  const data = new Uint8Array(rgbaFromFallback(fallback));
   const texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.colorSpace = colorSpace;
   texture.needsUpdate = true;
   return texture;
 }
 
-function loadRepeatingTexture(path, fallbackHex) {
-  const texture = typeof window === 'undefined'
-    ? fallbackTexture(fallbackHex)
+function loadRepeatingTexture(path, fallback, colorSpace = THREE.SRGBColorSpace) {
+  const texture = typeof window === 'undefined' || !path
+    ? fallbackTexture(fallback, colorSpace)
     : new THREE.TextureLoader().load(path);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -73,7 +102,7 @@ function dryTerrainFragmentCommon({
   pathFrameSegmentFunction,
   pathFrameFunction,
 }) {
-  return /* glsl */`
+      return /* glsl */`
         uniform sampler2D uDryTerrainRedDirt;
         uniform sampler2D uDryTerrainShoulderGround;
         uniform sampler2D uDryTerrainGrassGround;
@@ -135,6 +164,24 @@ function dryTerrainFragmentCommon({
           vec3 b = dtSrgbToLinear(texture2D(tex, uvB).rgb);
           vec3 c = dtSrgbToLinear(texture2D(tex, dtRotate(uvA, 0.67) * 0.61 + vec2(-0.13, 0.27)).rgb);
           return mix(mix(a, b, 0.38), c, 0.12 + mixNoise * 0.18);
+        }
+        float dtTextureValue(sampler2D tex, vec2 uvA, vec2 uvB, float mixNoise) {
+          float a = texture2D(tex, uvA).r;
+          float b = texture2D(tex, uvB).r;
+          float c = texture2D(tex, dtRotate(uvA, 0.67) * 0.61 + vec2(-0.13, 0.27)).r;
+          return mix(mix(a, b, 0.38), c, 0.12 + mixNoise * 0.18);
+        }
+        vec3 dtTextureNormal(sampler2D tex, vec2 uvA, vec2 uvB, float mixNoise, float strength) {
+          vec3 a = texture2D(tex, uvA).xyz * 2.0 - 1.0;
+          vec3 b = texture2D(tex, uvB).xyz * 2.0 - 1.0;
+          vec3 c = texture2D(tex, dtRotate(uvA, 0.67) * 0.61 + vec2(-0.13, 0.27)).xyz * 2.0 - 1.0;
+          vec3 mapped = normalize(mix(mix(a, b, 0.38), c, 0.12 + mixNoise * 0.18));
+          return normalize(vec3(mapped.xy * strength, max(mapped.z, 0.16)));
+        }
+        vec3 dtWorldMappedNormal(vec3 surfaceNormal, vec3 mappedNormal) {
+          vec3 tangentX = normalize(vec3(1.0, 0.0, 0.0) - surfaceNormal * dot(surfaceNormal, vec3(1.0, 0.0, 0.0)));
+          vec3 tangentZ = normalize(cross(tangentX, surfaceNormal));
+          return normalize(tangentX * mappedNormal.x + tangentZ * mappedNormal.y + surfaceNormal * mappedNormal.z);
         }
         ${standardFootPathSplatGLSL({
           functionName: pathSplatFunction,
@@ -255,41 +302,99 @@ function dryTerrainNormalFragment({ pathSplatFunction }) {
         float normalAcross = dot(np - normalFrame.xy, normalSide);
         vec4 normalSplat = ${pathSplatFunction}(np);
         float normalPathCover = max(normalMasks.y * 0.34, normalSplat.r);
-        vec3 nRed = dtTextureBlend(
+        float hRed = dtTextureValue(
           uDryTerrainRedDirt,
           vec2(normalAlong * 0.18, normalAcross * 0.32),
           vec2(normalAlong * 0.32 + 0.14, normalAcross * 0.2 - 0.41),
           dtFbm(vec2(normalAlong * 0.12, normalAcross * 0.28))
-        );
-        vec3 nDry = dtTextureBlend(
+        ) - 0.5;
+        float hDry = dtTextureValue(
           uDryTerrainGrassGround,
           np * 0.082,
           dtRotate(np, -0.56) * 0.13 + vec2(0.31, -0.24),
           dtFbm(np * 0.055)
-        );
-        vec3 nShell = dtTextureBlend(
+        ) - 0.5;
+        float hShoulder = dtTextureValue(
+          uDryTerrainShoulderGround,
+          np * 0.112,
+          dtRotate(np, 0.74) * 0.17 + vec2(-0.27, 0.19),
+          dtFbm(np * 0.16)
+        ) - 0.5;
+        float hShell = dtTextureValue(
           uDryTerrainPaleFlecks,
           np * 0.165,
           dtRotate(np, 0.38) * 0.29 + vec2(0.22, 0.37),
           dtFbm(np * 2.6)
-        );
-        float pathHeight = dot(nRed, vec3(0.299, 0.587, 0.114)) * normalPathCover * 0.055
+        ) - 0.5;
+        float normalShoulderCover = clamp(normalMasks.z * 0.82 + normalSplat.a * 0.46, 0.0, 1.0) * (1.0 - normalPathCover * 0.55);
+        float pathHeight = hRed * normalPathCover * 0.16
           - normalSplat.g * 0.042
           + normalSplat.b * 0.028;
-        float grassHeight = dot(nDry, vec3(0.299, 0.587, 0.114)) * (1.0 - normalPathCover) * 0.038;
-        float shellHeight = dot(nShell, vec3(0.299, 0.587, 0.114)) * max(normalSplat.b, normalMasks.z * 0.44) * 0.026;
-        float detailHeight = dtFbm(np * 1.7) * 0.09 + dtFbm(np * 5.6) * 0.03 + pathHeight + grassHeight + shellHeight;
+        float grassHeight = hDry * (1.0 - normalPathCover) * (1.0 - normalShoulderCover * 0.5) * 0.095;
+        float shoulderHeight = hShoulder * normalShoulderCover * 0.08;
+        float shellHeight = hShell * max(normalSplat.b, normalMasks.z * 0.44) * 0.065;
+        float detailHeight = dtFbm(np * 1.7) * 0.09 + dtFbm(np * 5.6) * 0.03 + pathHeight + grassHeight + shoulderHeight + shellHeight;
         vec3 dpdx = dFdx(vDryTerrainWorld);
         vec3 dpdy = dFdy(vDryTerrainWorld);
         float dhdx = dFdx(detailHeight);
         float dhdy = dFdy(detailHeight);
-        normal = normalize(normal - 0.22 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`;
+        normal = normalize(normal - 0.32 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`;
+}
+
+function dryTerrainRoughnessFragment({ pathSplatFunction }) {
+  return /* glsl */`
+        vec2 rp = vDryTerrainWorld.xz;
+        vec4 roughMasks = dtPathMasks(rp);
+        vec4 roughFrame = dtPathFrame(rp);
+        vec2 roughDir = vec2(cos(roughFrame.w), sin(roughFrame.w));
+        vec2 roughSide = vec2(-roughDir.y, roughDir.x);
+        float roughAlong = dot(rp, roughDir);
+        float roughAcross = dot(rp - roughFrame.xy, roughSide);
+        vec4 roughSplat = ${pathSplatFunction}(rp);
+        float roughPathCover = clamp(max(roughMasks.y * 0.34, roughSplat.r), 0.0, 1.0);
+        float roughShoulderCover = clamp(roughMasks.z * 0.82 + roughSplat.a * 0.46, 0.0, 1.0) * (1.0 - roughPathCover * 0.55);
+        float roughShellCover = clamp(roughSplat.b * 0.64 + roughMasks.z * 0.2, 0.0, 1.0);
+        float roughBroad = dtFbm(rp * 0.055 + vec2(6.0, -3.0));
+        float roughMedium = dtFbm(rp * 0.16 + vec2(-9.0, 4.0));
+        float grassRough = dtTextureValue(
+          uDryTerrainGrassGround,
+          rp * 0.082,
+          dtRotate(rp, -0.56) * 0.13 + vec2(0.31, -0.24),
+          roughBroad
+        );
+        float shoulderRough = dtTextureValue(
+          uDryTerrainShoulderGround,
+          rp * 0.112,
+          dtRotate(rp, 0.74) * 0.17 + vec2(-0.27, 0.19),
+          roughMedium
+        );
+        float redRough = dtTextureValue(
+          uDryTerrainRedDirt,
+          vec2(roughAlong * 0.18, roughAcross * 0.32),
+          vec2(roughAlong * 0.32 + 0.14, roughAcross * 0.2 - 0.41),
+          dtFbm(vec2(roughAlong * 0.12, roughAcross * 0.28))
+        );
+        float shellRough = dtTextureValue(
+          uDryTerrainPaleFlecks,
+          rp * 0.165,
+          dtRotate(rp, 0.38) * 0.29 + vec2(0.22, 0.37),
+          dtFbm(rp * 2.6)
+        );
+        grassRough = mix(0.92, 0.72, grassRough);
+        shoulderRough = mix(0.9, 0.7, shoulderRough);
+        redRough = mix(0.88, 0.66, redRough);
+        shellRough = mix(0.82, 0.58, shellRough);
+        float mappedRoughness = mix(grassRough, shoulderRough, roughShoulderCover);
+        mappedRoughness = mix(mappedRoughness, redRough, roughPathCover);
+        mappedRoughness = mix(mappedRoughness, shellRough, roughShellCover * 0.32);
+        mappedRoughness = clamp(mappedRoughness + roughSplat.g * 0.08 - roughPathCover * 0.025, 0.46, 0.98);
+        roughnessFactor = mix(roughnessFactor, mappedRoughness, 0.72);`;
 }
 
 export function createDryFloreanaTerrainMaterial({
   pathPoints,
   textureSet = DRY_FLOREANA_TEXTURE_SETS.redDirtHighland,
-  cacheKey = 'dry-floreana-terrain-v1',
+  cacheKey = 'dry-floreana-terrain-v2-low-sampler',
   roughness = 0.96,
   highFadeStart = 7,
   highFadeEnd = 9.6,
@@ -370,6 +475,11 @@ ${dryTerrainFragmentCommon({
         '#include <color_fragment>',
         `#include <color_fragment>
 ${dryTerrainColorFragment({ highFadeStart, highFadeEnd, pathSplatFunction, pathOnly })}`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+${dryTerrainRoughnessFragment({ pathSplatFunction })}`,
       )
       .replace(
         '#include <normal_fragment_begin>',

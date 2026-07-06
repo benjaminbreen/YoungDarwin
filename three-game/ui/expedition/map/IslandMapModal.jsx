@@ -68,21 +68,23 @@ const LEGEND_ICONS = {
     </svg>
   ),
   water: <span className="h-2 w-2 rotate-45 border border-expedition-parchment/60 bg-transparent" />,
+  test: <span className="h-2.5 w-2.5 rotate-45 border border-expedition-faded bg-expedition-ink/70" />,
 };
 
 // ---------------------------------------------------------------------------
 
 function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const [filters, setFilters] = useState({ surveyed: true, uncharted: true, anchorage: true, water: true });
+  const [filters, setFilters] = useState({ land: true, anchorage: true, water: true, test: false });
 
   const toggle = key => setFilters(prev => ({ ...prev, [key]: !prev[key] }));
 
   const visibleLocations = useMemo(() => islandMapLocations.filter(location => {
     if (location.id === currentZoneId) return true;
+    if (location.isTest) return filters.test;
     if (location.kind === 'anchorage') return filters.anchorage;
     if (location.kind === 'water') return filters.water;
-    return location.status === 'available' ? filters.surveyed : filters.uncharted;
+    return filters.land;
   }), [filters, currentZoneId]);
 
   const handleBackgroundClick = (point, event) => {
@@ -196,10 +198,10 @@ function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, onSelectL
     <div className="grid content-start gap-3">
       <LegendList>
         <LegendRow icon={LEGEND_ICONS.current} label="Current Location" active />
-        <LegendRow icon={LEGEND_ICONS.surveyed} label="Surveyed (fast travel)" active={filters.surveyed} onToggle={() => onToggle('surveyed')} />
-        <LegendRow icon={LEGEND_ICONS.uncharted} label="Uncharted ground" active={filters.uncharted} onToggle={() => onToggle('uncharted')} />
+        <LegendRow icon={LEGEND_ICONS.surveyed} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
         <LegendRow icon={LEGEND_ICONS.anchorage} label="Anchorages" active={filters.anchorage} onToggle={() => onToggle('anchorage')} />
-        <LegendRow icon={LEGEND_ICONS.water} label="Reefs & waters" active={filters.water} onToggle={() => onToggle('water')} />
+        <LegendRow icon={LEGEND_ICONS.water} label="Surf & offshore" active={filters.water} onToggle={() => onToggle('water')} />
+        <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
       </LegendList>
       <GoldDivider />
       {selected ? (

@@ -242,11 +242,6 @@ function buildFlora() {
       && mangrovePoolMask(x, z) < 0.36
       && seededRandom(Math.floor(x * 19 + z * 23), 7) > 0.42,
   });
-  const morningGlory = scatter('morning-glory-vines', 22, 599, {
-    minX: -43, maxX: 43, minZ: -40, maxZ: 42, scale: [0.45, 0.88], maxGrade: 0.7,
-    accept: (biome, x, z) => rootWallAccept(biome, x, z) || (trailEdge(biome, x, z) && mangroveRootWallMask(x, z) > 0.22),
-  });
-
   return [
     {
       id: 'scalesia-foreground-canopy',
@@ -347,17 +342,6 @@ function buildFlora() {
       motion: { wind: 1.05, bend: 0.3, bendRadius: 1.3 },
       castShadow: false,
       items: purpleShrubs,
-    },
-    {
-      id: 'morning-glory-vines',
-      path: `${NATURE}runtime-morning-glory.glb`,
-      loadTier: 3,
-      sink: 0.06,
-      tint: '#587747',
-      tintStrength: 0.28,
-      motion: { wind: 1.05, bend: 0.38, bendRadius: 1.35 },
-      castShadow: false,
-      items: morningGlory,
     },
     {
       id: 'galapagos-bushes',

@@ -10,6 +10,27 @@ import { getRuntimeObstacles } from '../../world/obstacles';
 const PROJECTILE_GRAVITY = 7.8;
 const PROJECTILE_TERMINAL_SPEED = -8.5;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const BIRD_DROPPING_SLOW_MOTION = {
+  minScale: 0.34,
+  attackMs: 120,
+  holdUntilMs: 1050,
+  releaseUntilMs: 2080,
+};
+
+function birdDroppingSlowMotionScale(dropping) {
+  const startedAt = Number(dropping?.createdAtRealMs);
+  if (!Number.isFinite(startedAt)) return 1;
+  const elapsed = Math.max(0, Date.now() - startedAt);
+  if (elapsed >= BIRD_DROPPING_SLOW_MOTION.releaseUntilMs) return 1;
+  const attack = THREE.MathUtils.smoothstep(elapsed, 0, BIRD_DROPPING_SLOW_MOTION.attackMs);
+  const release = 1 - THREE.MathUtils.smoothstep(
+    elapsed,
+    BIRD_DROPPING_SLOW_MOTION.holdUntilMs,
+    BIRD_DROPPING_SLOW_MOTION.releaseUntilMs,
+  );
+  const amount = THREE.MathUtils.clamp(attack * release, 0, 1);
+  return THREE.MathUtils.lerp(1, BIRD_DROPPING_SLOW_MOTION.minScale, amount);
+}
 
 function seededNoise(seed, index) {
   const value = Math.sin(seed * 12.9898 + index * 78.233) * 43758.5453123;
@@ -207,7 +228,7 @@ function FallingBirdDropping({ dropping, materials, obstacles, settleAnimalDropp
     if (frameState.statusViewOpen) return;
     const state = runtime.current;
     if (state.settled || state.initializedFor !== dropping.id || !groupRef.current) return;
-    const dt = Math.min(delta, 0.05);
+    const dt = Math.min(delta * birdDroppingSlowMotionScale(dropping), 0.05);
     const previous = state.position.clone();
     state.velocity.x *= Math.exp(-0.18 * dt);
     state.velocity.z *= Math.exp(-0.18 * dt);
@@ -287,12 +308,7 @@ function DroppingPellet({ pellet, material, smushed }) {
   );
 }
 
-function AnimalDropping({ dropping, materials }) {
-  if (dropping.status === 'falling') return null;
-  if (dropping.status === 'stuck' && dropping.stuckTo?.type === 'darwin') return null;
-  if (dropping.kind === 'bird' || dropping.sourceModeId === 'finch') {
-    return <BirdSplat dropping={dropping} materials={materials} />;
-  }
+function GroundAnimalDropping({ dropping, materials }) {
   const smushed = dropping.status === 'smushed';
   const seed = Number(dropping.seed) || 0.5;
   const pellets = useMemo(() => Array.from({ length: 5 }, (_, index) => {
@@ -350,6 +366,15 @@ function AnimalDropping({ dropping, materials }) {
       )}
     </group>
   );
+}
+
+function AnimalDropping({ dropping, materials }) {
+  if (dropping.status === 'falling') return null;
+  if (dropping.status === 'stuck' && dropping.stuckTo?.type === 'darwin') return null;
+  if (dropping.kind === 'bird' || dropping.sourceModeId === 'finch') {
+    return <BirdSplat dropping={dropping} materials={materials} />;
+  }
+  return <GroundAnimalDropping dropping={dropping} materials={materials} />;
 }
 
 export function AnimalDroppings() {

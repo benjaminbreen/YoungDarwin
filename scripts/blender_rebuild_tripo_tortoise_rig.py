@@ -205,10 +205,11 @@ def create_armature():
 
   bone('root', (0, 0, 0.08), (0, 0, 0.36))
   bone('shell', (0, 0, 0.2), (0, 0, 0.72), 'root')
-  bone('neck_1', (0, 0.24, 0.24), (0, 0.37, 0.3), 'shell')
-  bone('neck_2', (0, 0.37, 0.3), (0, 0.48, 0.32), 'neck_1')
-  bone('head', (0, 0.48, 0.32), (0, 0.61, 0.32), 'neck_2')
-  bone('jaw', (0, 0.54, 0.285), (0, 0.62, 0.27), 'head')
+  bone('neck_1', (0, 0.24, 0.24), (0, 0.34, 0.29), 'shell')
+  bone('neck_2', (0, 0.34, 0.29), (0, 0.44, 0.315), 'neck_1')
+  bone('neck_3', (0, 0.44, 0.315), (0, 0.53, 0.32), 'neck_2')
+  bone('head', (0, 0.53, 0.32), (0, 0.64, 0.31), 'neck_3')
+  bone('jaw', (0, 0.58, 0.285), (0, 0.66, 0.27), 'head')
   bone('tail', (0, -0.43, 0.16), (0, -0.56, 0.08), 'shell')
 
   leg_specs = {
@@ -254,20 +255,30 @@ def assign_weights(mesh_obj, source_positions, armature, leg_specs):
   for index, source in enumerate(source_positions):
     x, height, z = source
     abs_x = abs(x)
-    # Head/neck protrudes as a narrow high region on source -Z.
-    if z < -0.41 and height > 0.19 and abs_x < 0.16:
-      add_weight(groups['head'], index, 0.88)
-      add_weight(groups['neck_2'], index, 0.12)
+    # Head/neck protrudes as a narrow high region on source -Z. Split it into
+    # three short neck segments so browsing/drinking arcs do not telescope.
+    if z < -0.49 and height > 0.18 and abs_x < 0.16:
+      add_weight(groups['head'], index, 0.78)
+      add_weight(groups['neck_3'], index, 0.22)
       continue
-    if z < -0.31 and height > 0.17 and abs_x < 0.18:
-      blend = min(1, max(0, (-z - 0.31) / 0.12))
-      add_weight(groups['neck_2'], index, 0.35 + blend * 0.45)
-      add_weight(groups['neck_1'], index, 0.5 - blend * 0.25)
-      add_weight(groups['head'], index, blend * 0.2)
+    if z < -0.39 and height > 0.17 and abs_x < 0.18:
+      blend = min(1, max(0, (-z - 0.39) / 0.1))
+      add_weight(groups['neck_3'], index, 0.58 + blend * 0.18)
+      add_weight(groups['neck_2'], index, 0.34 - blend * 0.18)
+      add_weight(groups['head'], index, 0.08 + blend * 0.12)
       continue
-    if z < -0.18 and height > 0.15 and abs_x < 0.2:
-      add_weight(groups['neck_1'], index, 0.82)
-      add_weight(groups['shell'], index, 0.18)
+    if z < -0.28 and height > 0.16 and abs_x < 0.2:
+      blend = min(1, max(0, (-z - 0.28) / 0.11))
+      add_weight(groups['neck_2'], index, 0.62 + blend * 0.14)
+      add_weight(groups['neck_1'], index, 0.32 - blend * 0.1)
+      add_weight(groups['neck_3'], index, blend * 0.18)
+      add_weight(groups['shell'], index, 0.06)
+      continue
+    if z < -0.16 and height > 0.145 and abs_x < 0.21:
+      blend = min(1, max(0, (-z - 0.16) / 0.12))
+      add_weight(groups['neck_1'], index, 0.72 + blend * 0.08)
+      add_weight(groups['shell'], index, 0.22 - blend * 0.12)
+      add_weight(groups['neck_2'], index, blend * 0.12)
       continue
 
     if z > 0.42 and height < 0.18 and abs_x < 0.12:
@@ -361,24 +372,21 @@ def make_animations(armature):
     'rear_left': math.pi,
   }
 
-  def idle(bones, t):
-    wave = math.sin(t * math.tau)
-    bones['shell'].scale = (1, 1 + wave * 0.004, 1 + wave * 0.006)
-    bones['neck_1'].rotation_euler.x = wave * 0.025
-    bones['neck_2'].rotation_euler.z = math.sin(t * math.tau * 0.5) * 0.04
-    bones['head'].rotation_euler.x = math.sin(t * math.tau + 0.8) * 0.025
-
-  def walk(bones, t):
+  def apply_walk_cycle(bones, t, strength=1.0, backward=False, mud=0.0, caution=0.0):
     phase = t * math.tau
+    direction = -1 if backward else 1
     step = abs(math.sin(phase))
-    bones['root'].location.x = math.sin(phase + 0.35) * 0.008
-    bones['root'].location.z = step * 0.024
-    bones['shell'].rotation_euler.x = math.sin(phase * 2.0 + 0.4) * 0.018
-    bones['shell'].rotation_euler.y = math.sin(phase) * 0.048
-    bones['neck_1'].rotation_euler.x = math.sin(phase + 0.6) * 0.075
-    bones['neck_2'].rotation_euler.x = math.sin(phase + 1.2) * -0.045
-    bones['head'].rotation_euler.x = math.sin(phase + 1.7) * 0.035
-    bones['tail'].rotation_euler.x = math.sin(phase + 2.1) * 0.08
+    rootsink = 1 + mud * 0.85
+    bones['root'].location.x = math.sin(phase + 0.35) * 0.012 * strength
+    bones['root'].location.z = (step * 0.032 - mud * 0.032 - caution * 0.012) * strength
+    bones['shell'].rotation_euler.x = (math.sin(phase * 2.0 + 0.4) * 0.026 - caution * 0.035) * strength
+    bones['shell'].rotation_euler.y = math.sin(phase) * 0.062 * strength
+    bones['shell'].rotation_euler.z = math.sin(phase * 0.5) * mud * 0.018 * strength
+    bones['neck_1'].rotation_euler.x = (math.sin(phase + 0.6) * 0.07 - mud * 0.04 - caution * 0.12) * strength
+    bones['neck_2'].rotation_euler.x = (math.sin(phase + 1.2) * -0.045 - caution * 0.08) * strength
+    bones['neck_3'].rotation_euler.x = (math.sin(phase + 1.45) * -0.03 - caution * 0.04) * strength
+    bones['head'].rotation_euler.x = (math.sin(phase + 1.7) * 0.035 + caution * 0.08) * strength
+    bones['tail'].rotation_euler.x = math.sin(phase + 2.1) * 0.08 * strength
     for name, phase_offset in phases.items():
       p = phase + phase_offset
       s = math.sin(p)
@@ -387,16 +395,161 @@ def make_animations(armature):
       planted = max(0, -s)
       fore = name.startswith('front')
       side = -1 if name.endswith('left') else 1
-      lift_eased = lift ** 1.25
+      lift_eased = lift ** (1.25 + mud * 0.35)
       planted_eased = planted ** 0.85
-      stride = 0.078 if fore else 0.064
-      bones[f'{name}_upper'].rotation_euler.x = (0.36 if fore else -0.3) * s + (0.035 if fore else -0.03) * planted_eased
-      bones[f'{name}_upper'].rotation_euler.z = side * (0.055 + planted_eased * 0.055 - lift_eased * 0.025)
-      bones[f'{name}_lower'].rotation_euler.x = (-0.52 if fore else 0.47) * lift_eased + (0.15 if fore else -0.13) * planted_eased
-      bones[f'{name}_foot'].rotation_euler.x = (-0.38 if fore else 0.28) * lift_eased + (0.12 if fore else -0.09) * planted_eased
-      bones[f'{name}_foot'].rotation_euler.z = side * (0.045 * lift_eased)
-      bones[f'{name}_foot'].location.y = c * stride
-      bones[f'{name}_foot'].location.z = lift_eased * (0.052 if fore else 0.044)
+      stride = (0.09 if fore else 0.075) * (1 - mud * 0.28)
+      sink = (mud * 0.028 + 0.012) * planted_eased
+      drag = mud * (1 - lift_eased) * -0.04 * direction
+      bones[f'{name}_upper'].rotation_euler.x = ((0.43 if fore else -0.36) * s + (0.07 if fore else -0.055) * planted_eased) * strength
+      bones[f'{name}_upper'].rotation_euler.z = side * (0.07 + planted_eased * 0.08 - lift_eased * 0.035 + mud * 0.045) * strength
+      bones[f'{name}_lower'].rotation_euler.x = ((-0.62 if fore else 0.56) * lift_eased + (0.21 if fore else -0.18) * planted_eased) * strength
+      bones[f'{name}_foot'].rotation_euler.x = ((-0.48 if fore else 0.36) * lift_eased + (0.18 if fore else -0.14) * planted_eased) * strength
+      bones[f'{name}_foot'].rotation_euler.z = side * (0.045 * lift_eased + mud * planted_eased * 0.025) * strength
+      bones[f'{name}_foot'].location.y = (c * stride * direction + drag) * strength
+      bones[f'{name}_foot'].location.z = (lift_eased * (0.078 if fore else 0.066) - sink) * strength * rootsink
+
+  def apply_withdraw_pose(bones, amount, startle=0.0):
+    tuck = smoothstep(amount)
+    bones['root'].location.z = -tuck * 0.085 - startle * 0.012
+    bones['shell'].rotation_euler.x = tuck * 0.075 - startle * 0.025
+    bones['shell'].rotation_euler.y = math.sin(amount * math.tau * 1.8) * tuck * 0.012
+    bones['shell'].scale = (1 + tuck * 0.026, 1 + tuck * 0.034, 1 - tuck * 0.045)
+    bones['neck_1'].location.y = -tuck * 0.048
+    bones['neck_1'].location.z = -tuck * 0.03
+    bones['neck_1'].rotation_euler.x = -tuck * 0.62 - startle * 0.12
+    bones['neck_2'].location.y = -tuck * 0.062
+    bones['neck_2'].location.z = -tuck * 0.034
+    bones['neck_2'].rotation_euler.x = -tuck * 0.78 - startle * 0.08
+    bones['neck_3'].location.y = -tuck * 0.078
+    bones['neck_3'].location.z = -tuck * 0.034
+    bones['neck_3'].rotation_euler.x = -tuck * 0.64 - startle * 0.06
+    bones['head'].location.y = -tuck * 0.12
+    bones['head'].location.z = -tuck * 0.052
+    bones['head'].rotation_euler.x = tuck * 0.42
+    bones['jaw'].rotation_euler.x = tuck * 0.08
+    bones['tail'].location.y = tuck * 0.06
+    bones['tail'].location.z = tuck * 0.03
+    bones['tail'].rotation_euler.x = -tuck * 0.52
+    for name in phases:
+      fore = name.startswith('front')
+      side = -1 if name.endswith('left') else 1
+      bones[f'{name}_upper'].rotation_euler.x = tuck * (0.86 if fore else -0.72)
+      bones[f'{name}_upper'].rotation_euler.z = side * tuck * (0.32 if fore else 0.24)
+      bones[f'{name}_lower'].rotation_euler.x = tuck * (-0.74 if fore else 0.62)
+      bones[f'{name}_foot'].rotation_euler.x = tuck * (-0.44 if fore else 0.34)
+      bones[f'{name}_foot'].rotation_euler.z = side * tuck * 0.08
+      bones[f'{name}_foot'].location.y = tuck * (-0.086 if fore else 0.062)
+      bones[f'{name}_foot'].location.z = -tuck * (0.054 if fore else 0.038)
+
+  def idle(bones, t):
+    wave = math.sin(t * math.tau)
+    bones['shell'].scale = (1, 1 + wave * 0.004, 1 + wave * 0.006)
+    bones['neck_1'].rotation_euler.x = wave * 0.025
+    bones['neck_2'].rotation_euler.z = math.sin(t * math.tau * 0.5) * 0.035
+    bones['neck_3'].rotation_euler.z = math.sin(t * math.tau * 0.5 + 0.4) * 0.026
+    bones['head'].rotation_euler.x = math.sin(t * math.tau + 0.8) * 0.025
+
+  def idle_look(bones, t):
+    idle(bones, t)
+    scan = math.sin(t * math.tau * 0.55)
+    nod = math.sin(t * math.tau * 1.1 + 0.7)
+    bones['neck_1'].location.y = 0.026
+    bones['neck_1'].rotation_euler.x += 0.045 + nod * 0.018
+    bones['neck_2'].rotation_euler.z += scan * 0.1
+    bones['neck_3'].rotation_euler.z += scan * 0.11
+    bones['head'].rotation_euler.z = scan * 0.08
+    bones['head'].rotation_euler.x += nod * 0.035
+
+  def idle_stretch(bones, t):
+    reach = smoothstep(math.sin(t * math.pi) * 0.72 + 0.28)
+    sway = math.sin(t * math.tau * 0.7)
+    bones['shell'].rotation_euler.x = -reach * 0.025
+    bones['neck_1'].location.y = reach * 0.018
+    bones['neck_1'].location.z = reach * 0.004
+    bones['neck_1'].rotation_euler.x = reach * 0.085
+    bones['neck_2'].location.y = reach * 0.018
+    bones['neck_2'].location.z = reach * 0.006
+    bones['neck_2'].rotation_euler.x = reach * 0.07
+    bones['neck_2'].rotation_euler.z = sway * reach * 0.045
+    bones['neck_3'].location.y = reach * 0.02
+    bones['neck_3'].location.z = reach * 0.006
+    bones['neck_3'].rotation_euler.x = reach * 0.04
+    bones['neck_3'].rotation_euler.z = sway * reach * 0.055
+    bones['head'].location.y = reach * 0.032
+    bones['head'].location.z = reach * 0.008
+    bones['head'].rotation_euler.x = reach * -0.035 + sway * 0.02
+
+  def idle_half_tuck(bones, t):
+    tuck = 0.38 + (math.sin(t * math.tau * 0.7) * 0.5 + 0.5) * 0.24
+    apply_withdraw_pose(bones, tuck)
+    bones['head'].rotation_euler.z += math.sin(t * math.tau * 1.4) * 0.055
+    bones['shell'].scale = (1 + tuck * 0.01, 1 + tuck * 0.014, 1 - tuck * 0.016)
+
+  def walk(bones, t):
+    apply_walk_cycle(bones, t)
+
+  def start_walk(bones, t):
+    ease = smoothstep(t)
+    anticipation = 1 - ease
+    push = math.sin(t * math.pi)
+    apply_walk_cycle(bones, t * 0.72, strength=0.25 + ease * 0.9)
+    bones['root'].location.z += push * 0.022 - anticipation * 0.018
+    bones['shell'].rotation_euler.x += anticipation * -0.08 + push * 0.035
+    bones['neck_1'].rotation_euler.x += anticipation * 0.08
+    bones['neck_2'].rotation_euler.x += anticipation * 0.04
+    bones['head'].rotation_euler.x -= push * 0.045
+
+  def stop_walk(bones, t):
+    ease = smoothstep(t)
+    settle = math.sin(t * math.pi)
+    apply_walk_cycle(bones, t * 0.72 + 0.18, strength=max(0.08, 1 - ease * 0.92))
+    bones['shell'].rotation_euler.x += settle * 0.07
+    bones['root'].location.z -= settle * 0.03 + ease * 0.01
+    bones['neck_1'].rotation_euler.x -= settle * 0.06
+    bones['head'].rotation_euler.x += settle * 0.045
+
+  def reverse(bones, t):
+    apply_walk_cycle(bones, t, backward=True, caution=0.8)
+    phase = t * math.tau
+    bones['root'].location.z -= 0.016
+    bones['shell'].rotation_euler.x -= 0.045
+    bones['shell'].rotation_euler.y += math.sin(phase + 0.6) * 0.035
+    bones['neck_1'].location.y -= 0.018
+    bones['neck_1'].rotation_euler.x -= 0.12
+    bones['neck_2'].rotation_euler.x -= 0.08
+    bones['neck_3'].rotation_euler.x -= 0.04
+    bones['head'].rotation_euler.x += 0.12
+    bones['tail'].rotation_euler.x -= 0.14
+
+  def turn_in_place(bones, t):
+    phase = t * math.tau
+    twist = math.sin(phase)
+    counter = math.sin(phase + math.pi * 0.5)
+    bones['root'].location.z = abs(twist) * 0.018
+    bones['root'].rotation_euler.z = twist * 0.16
+    bones['shell'].rotation_euler.y = twist * 0.11
+    bones['shell'].rotation_euler.z = math.sin(phase * 2.0) * 0.028
+    bones['neck_1'].rotation_euler.x = 0.045
+    bones['neck_2'].rotation_euler.z = twist * -0.08
+    bones['neck_3'].rotation_euler.z = twist * -0.1
+    bones['head'].rotation_euler.z = twist * -0.08
+    bones['head'].rotation_euler.x = counter * 0.025
+    for name, phase_offset in phases.items():
+      p = phase + phase_offset
+      s = math.sin(p)
+      fore = name.startswith('front')
+      side = -1 if name.endswith('left') else 1
+      lift = max(0, s) ** 1.25
+      plant = max(0, -s) ** 0.9
+      pivot = side * (0.035 + plant * 0.035) * (1 if fore else -1)
+      bones[f'{name}_upper'].rotation_euler.x = (0.32 if fore else -0.26) * s
+      bones[f'{name}_upper'].rotation_euler.z = side * (0.12 + plant * 0.12)
+      bones[f'{name}_lower'].rotation_euler.x = (-0.46 if fore else 0.4) * lift
+      bones[f'{name}_foot'].rotation_euler.x = (-0.32 if fore else 0.26) * lift
+      bones[f'{name}_foot'].rotation_euler.z = side * (0.15 * lift + 0.06 * plant)
+      bones[f'{name}_foot'].location.x = pivot
+      bones[f'{name}_foot'].location.y = math.cos(p) * 0.04
+      bones[f'{name}_foot'].location.z = lift * 0.062 - plant * 0.008
 
   def eat(bones, t):
     down = smoothstep(t * 2.25)
@@ -404,15 +557,18 @@ def make_animations(armature):
     browse = math.sin(t * math.tau * 1.2)
     bones['root'].location.z = -down * 0.014 + chew * 0.003
     bones['shell'].rotation_euler.x = -down * 0.045
-    bones['neck_1'].location.y = down * 0.055
-    bones['neck_1'].location.z = -down * 0.032
-    bones['neck_1'].rotation_euler.x = -down * 0.22 + browse * 0.03
-    bones['neck_2'].location.y = down * 0.055
-    bones['neck_2'].location.z = -down * 0.03
-    bones['neck_2'].rotation_euler.x = -down * 0.18 + browse * 0.025
-    bones['head'].location.y = down * 0.13
-    bones['head'].location.z = -down * 0.09
-    bones['head'].rotation_euler.x = -down * 0.1 - chew * 0.055
+    bones['neck_1'].location.y = down * 0.024
+    bones['neck_1'].location.z = -down * 0.018
+    bones['neck_1'].rotation_euler.x = -down * 0.24 + browse * 0.025
+    bones['neck_2'].location.y = down * 0.026
+    bones['neck_2'].location.z = -down * 0.02
+    bones['neck_2'].rotation_euler.x = -down * 0.22 + browse * 0.02
+    bones['neck_3'].location.y = down * 0.032
+    bones['neck_3'].location.z = -down * 0.024
+    bones['neck_3'].rotation_euler.x = -down * 0.16 + browse * 0.018
+    bones['head'].location.y = down * 0.052
+    bones['head'].location.z = -down * 0.055
+    bones['head'].rotation_euler.x = -down * 0.11 - chew * 0.055
     bones['jaw'].rotation_euler.x = down * 0.08 + chew * 0.48
     for name in ['front_left', 'front_right']:
       side = -1 if name.endswith('left') else 1
@@ -420,6 +576,82 @@ def make_animations(armature):
       bones[f'{name}_upper'].rotation_euler.z = side * down * 0.1
       bones[f'{name}_lower'].rotation_euler.x = -down * 0.16
       bones[f'{name}_foot'].rotation_euler.x = down * 0.08
+
+  def browse_low(bones, t):
+    eat(bones, t)
+    reach = smoothstep(t * 2.1)
+    chew = max(0, math.sin(t * math.tau * 5.6))
+    bones['neck_1'].location.y += reach * 0.012
+    bones['neck_1'].location.z -= reach * 0.01
+    bones['neck_1'].rotation_euler.x -= reach * 0.08
+    bones['neck_2'].location.y += reach * 0.016
+    bones['neck_2'].location.z -= reach * 0.014
+    bones['neck_2'].rotation_euler.x -= reach * 0.09
+    bones['neck_3'].location.y += reach * 0.02
+    bones['neck_3'].location.z -= reach * 0.016
+    bones['neck_3'].rotation_euler.x -= reach * 0.06
+    bones['head'].location.y += reach * 0.032
+    bones['head'].location.z -= reach * 0.026
+    bones['jaw'].rotation_euler.x += chew * 0.18
+
+  def browse_high(bones, t):
+    reach = smoothstep(t * 2.0) * (1 - smoothstep((t - 0.88) * 5.5) * 0.18)
+    chew = max(0, math.sin(t * math.tau * 4.8))
+    side = math.sin(t * math.tau * 0.85)
+    bones['shell'].rotation_euler.x = -reach * 0.03
+    bones['neck_1'].location.y = reach * 0.018
+    bones['neck_1'].location.z = reach * 0.008
+    bones['neck_1'].rotation_euler.x = reach * 0.2
+    bones['neck_2'].location.y = reach * 0.022
+    bones['neck_2'].location.z = reach * 0.01
+    bones['neck_2'].rotation_euler.x = reach * 0.16
+    bones['neck_2'].rotation_euler.z = side * reach * 0.055
+    bones['neck_3'].location.y = reach * 0.026
+    bones['neck_3'].location.z = reach * 0.012
+    bones['neck_3'].rotation_euler.x = reach * 0.08
+    bones['neck_3'].rotation_euler.z = side * reach * 0.08
+    bones['head'].location.y = reach * 0.045
+    bones['head'].location.z = reach * 0.018
+    bones['head'].rotation_euler.x = reach * -0.06 - chew * 0.035
+    bones['head'].rotation_euler.z = side * reach * 0.065
+    bones['jaw'].rotation_euler.x = reach * 0.08 + chew * 0.42
+    for name in ['front_left', 'front_right']:
+      side_sign = -1 if name.endswith('left') else 1
+      bones[f'{name}_upper'].rotation_euler.x = reach * 0.14
+      bones[f'{name}_upper'].rotation_euler.z = side_sign * reach * 0.06
+      bones[f'{name}_lower'].rotation_euler.x = -reach * 0.08
+
+  def drink(bones, t):
+    settle = smoothstep(t * 2.8)
+    recover = smoothstep((t - 0.9) * 8.0) * 0.08
+    dip = settle * (1 - recover)
+    hold = smoothstep(t * 3.0) * (1 - smoothstep((t - 0.82) * 7.0) * 0.16)
+    swallow = max(0, math.sin(t * math.tau * 3.2)) * hold
+    ripple = math.sin(t * math.tau * 6.4) * hold
+    bones['root'].location.z = -dip * 0.052
+    bones['shell'].rotation_euler.x = -dip * 0.115
+    bones['shell'].rotation_euler.y = ripple * 0.01
+    bones['neck_1'].location.y = dip * 0.026
+    bones['neck_1'].location.z = -dip * 0.045
+    bones['neck_1'].rotation_euler.x = -dip * 0.5 + ripple * 0.018
+    bones['neck_2'].location.y = dip * 0.032
+    bones['neck_2'].location.z = -dip * 0.06
+    bones['neck_2'].rotation_euler.x = -dip * 0.47
+    bones['neck_3'].location.y = dip * 0.038
+    bones['neck_3'].location.z = -dip * 0.062
+    bones['neck_3'].rotation_euler.x = -dip * 0.34
+    bones['head'].location.y = dip * 0.055
+    bones['head'].location.z = -dip * 0.13 + swallow * 0.012
+    bones['head'].rotation_euler.x = dip * 0.03 + swallow * 0.07
+    bones['jaw'].rotation_euler.x = dip * 0.025 + swallow * 0.24
+    for name in ['front_left', 'front_right']:
+      side = -1 if name.endswith('left') else 1
+      bones[f'{name}_upper'].rotation_euler.x = dip * 0.36
+      bones[f'{name}_upper'].rotation_euler.z = side * dip * 0.18
+      bones[f'{name}_lower'].rotation_euler.x = -dip * 0.28
+      bones[f'{name}_foot'].rotation_euler.x = dip * 0.16
+      bones[f'{name}_foot'].location.y = dip * 0.026
+      bones[f'{name}_foot'].location.z = -dip * 0.018
 
   def sleep(bones, t):
     settle = smoothstep(t * 1.65)
@@ -429,8 +661,9 @@ def make_animations(armature):
     bones['shell'].scale = (1, 1 + breath * settle * 0.004, 1 - settle * 0.06 + breath * settle * 0.004)
     bones['neck_1'].rotation_euler.x = -settle * 0.36
     bones['neck_2'].rotation_euler.x = -settle * 0.42
-    bones['head'].location.y = -settle * 0.11
-    bones['head'].location.z = -settle * 0.065
+    bones['neck_3'].rotation_euler.x = -settle * 0.32
+    bones['head'].location.y = -settle * 0.08
+    bones['head'].location.z = -settle * 0.05
     bones['head'].rotation_euler.x = settle * 0.2
     bones['jaw'].rotation_euler.x = settle * 0.08
     bones['tail'].rotation_euler.x = -settle * 0.28
@@ -472,6 +705,116 @@ def make_animations(armature):
       bones[f'{name}_lower'].rotation_euler.x = pulse * -0.16
       bones[f'{name}_foot'].rotation_euler.x = pulse * -0.1
 
+  def alert(bones, t):
+    rise = smoothstep(t * 3.2) * (1 - smoothstep((t - 0.86) * 5.0) * 0.12)
+    scan = math.sin(t * math.tau * 1.2)
+    startle = math.sin(min(1, t * 5.5) * math.pi)
+    bones['root'].location.z = startle * 0.012
+    bones['shell'].rotation_euler.x = -rise * 0.035
+    bones['shell'].rotation_euler.y = scan * rise * 0.022
+    bones['neck_1'].location.y = rise * 0.046
+    bones['neck_1'].location.z = rise * 0.016
+    bones['neck_1'].rotation_euler.x = rise * 0.14
+    bones['neck_2'].location.y = rise * 0.044
+    bones['neck_2'].location.z = rise * 0.014
+    bones['neck_2'].rotation_euler.x = rise * 0.1
+    bones['neck_2'].rotation_euler.z = scan * rise * 0.18
+    bones['neck_3'].location.y = rise * 0.038
+    bones['neck_3'].location.z = rise * 0.012
+    bones['neck_3'].rotation_euler.x = rise * 0.06
+    bones['neck_3'].rotation_euler.z = scan * rise * 0.12
+    bones['head'].location.y = rise * 0.042
+    bones['head'].location.z = rise * 0.014
+    bones['head'].rotation_euler.x = -rise * 0.06
+    bones['head'].rotation_euler.z = scan * rise * 0.12
+
+  def peek_out(bones, t):
+    tucked = 1 - smoothstep(t * 1.9)
+    apply_withdraw_pose(bones, tucked * 0.82)
+    peek = 1 - tucked
+    bones['neck_1'].location.y += peek * 0.018
+    bones['neck_2'].location.y += peek * 0.024
+    bones['neck_3'].location.y += peek * 0.03
+    bones['head'].location.y += peek * 0.045
+    bones['head'].rotation_euler.z += math.sin(t * math.tau * 1.2) * peek * 0.08
+
+  def withdraw(bones, t):
+    startle = math.sin(min(1, t * 5.5) * math.pi) * (1 - smoothstep((t - 0.2) * 6.0))
+    apply_withdraw_pose(bones, smoothstep(t * 1.55), startle)
+
+  def re_emerge(bones, t):
+    tuck = 1 - smoothstep(t * 1.45)
+    apply_withdraw_pose(bones, tuck)
+    emerge = 1 - tuck
+    overshoot = math.sin(t * math.pi) * emerge
+    bones['root'].location.z += overshoot * 0.012
+    bones['neck_1'].location.y += emerge * 0.018
+    bones['neck_2'].location.y += emerge * 0.024
+    bones['neck_3'].location.y += emerge * 0.028
+    bones['head'].location.y += emerge * 0.044
+    bones['head'].rotation_euler.x -= math.sin(t * math.pi) * 0.045
+
+  def mud_step(bones, t):
+    stuck = 1 - smoothstep((t - 0.46) * 4.0)
+    strain = smoothstep((t - 0.22) * 4.5) * (1 - smoothstep((t - 0.62) * 5.5))
+    pop = smoothstep((t - 0.55) * 8.0) * (1 - smoothstep((t - 0.82) * 8.0))
+    settle = smoothstep((t - 0.74) * 5.5)
+    apply_walk_cycle(bones, t * 0.36, strength=0.22, mud=1.0, caution=0.45)
+    bones['root'].location.y -= stuck * 0.026
+    bones['root'].location.z += pop * 0.045 - stuck * 0.042 - settle * 0.01
+    bones['shell'].rotation_euler.x += strain * 0.18 - stuck * 0.06 - settle * 0.025
+    bones['shell'].rotation_euler.y += math.sin(t * math.pi) * 0.09
+    bones['shell'].rotation_euler.z += pop * -0.055
+    bones['neck_1'].rotation_euler.x -= strain * 0.18 + pop * 0.06
+    bones['neck_2'].rotation_euler.x -= strain * 0.11
+    bones['neck_3'].rotation_euler.x -= strain * 0.06
+    bones['head'].rotation_euler.x += strain * 0.14 + pop * 0.08
+    for name in ['front_left', 'front_right']:
+      side = -1 if name.endswith('left') else 1
+      bones[f'{name}_upper'].rotation_euler.x += strain * 0.48 + pop * 0.22
+      bones[f'{name}_upper'].rotation_euler.z += side * (strain * 0.18 + pop * 0.08)
+      bones[f'{name}_lower'].rotation_euler.x -= strain * 0.72 + pop * 0.35
+      bones[f'{name}_foot'].rotation_euler.x -= strain * 0.55 + pop * 0.28
+      bones[f'{name}_foot'].location.y += stuck * -0.05 + pop * 0.12 - settle * 0.025
+      bones[f'{name}_foot'].location.z += -stuck * 0.075 + pop * 0.17 - settle * 0.04
+    bones['rear_left_foot'].location.z -= stuck * 0.016
+    bones['rear_right_foot'].location.z -= stuck * 0.022
+
+  def slope_brace(bones, t):
+    breath = math.sin(t * math.tau * 1.4) * 0.5 + 0.5
+    wobble = math.sin(t * math.tau * 0.8)
+    bones['root'].location.z = -0.06 + breath * 0.006
+    bones['root'].rotation_euler.x = -0.11
+    bones['shell'].rotation_euler.x = 0.18 + wobble * 0.024
+    bones['shell'].rotation_euler.y = -0.09 + wobble * 0.026
+    bones['shell'].rotation_euler.z = 0.055
+    bones['shell'].scale = (1.025, 1.028 + breath * 0.006, 0.955 + breath * 0.004)
+    bones['neck_1'].location.y = -0.028
+    bones['neck_1'].location.z = -0.026
+    bones['neck_1'].rotation_euler.x = -0.36 + wobble * 0.025
+    bones['neck_2'].location.y = -0.036
+    bones['neck_2'].location.z = -0.026
+    bones['neck_2'].rotation_euler.x = -0.42
+    bones['neck_3'].location.y = -0.042
+    bones['neck_3'].location.z = -0.024
+    bones['neck_3'].rotation_euler.x = -0.34
+    bones['head'].location.y = -0.07
+    bones['head'].location.z = -0.04
+    bones['head'].rotation_euler.x = 0.2
+    bones['tail'].rotation_euler.x = -0.35
+    for name in phases:
+      fore = name.startswith('front')
+      side = -1 if name.endswith('left') else 1
+      uphill = 1 if name.endswith('left') else -1
+      bones[f'{name}_upper'].rotation_euler.x = 0.54 if fore else -0.44
+      bones[f'{name}_upper'].rotation_euler.z = side * (0.34 if fore else 0.28)
+      bones[f'{name}_lower'].rotation_euler.x = -0.56 if fore else 0.46
+      bones[f'{name}_foot'].rotation_euler.x = -0.24 if fore else 0.2
+      bones[f'{name}_foot'].rotation_euler.z = side * (0.13 + breath * 0.02)
+      bones[f'{name}_foot'].location.x = side * 0.055
+      bones[f'{name}_foot'].location.y = (-0.09 if fore else 0.065) + uphill * 0.018
+      bones[f'{name}_foot'].location.z = -0.032 - (0.018 if name.endswith('right') else 0)
+
   def hide(bones, t):
     tuck = smoothstep(t * 4.2)
     breath = (math.sin(t * math.tau * 1.7) * 0.5 + 0.5) * tuck
@@ -487,11 +830,14 @@ def make_animations(armature):
     bones['neck_1'].location.y = -tuck * 0.075
     bones['neck_1'].location.z = -tuck * 0.038
     bones['neck_1'].rotation_euler.x = -tuck * 0.72 - startle * 0.12
-    bones['neck_2'].location.y = -tuck * 0.11
-    bones['neck_2'].location.z = -tuck * 0.044
-    bones['neck_2'].rotation_euler.x = -tuck * 0.86 - startle * 0.08
-    bones['head'].location.y = -tuck * 0.24
-    bones['head'].location.z = -tuck * 0.082
+    bones['neck_2'].location.y = -tuck * 0.07
+    bones['neck_2'].location.z = -tuck * 0.038
+    bones['neck_2'].rotation_euler.x = -tuck * 0.76 - startle * 0.08
+    bones['neck_3'].location.y = -tuck * 0.078
+    bones['neck_3'].location.z = -tuck * 0.034
+    bones['neck_3'].rotation_euler.x = -tuck * 0.58 - startle * 0.06
+    bones['head'].location.y = -tuck * 0.12
+    bones['head'].location.z = -tuck * 0.052
     bones['head'].rotation_euler.x = tuck * 0.46
     bones['jaw'].rotation_euler.x = tuck * 0.08
     bones['tail'].location.y = tuck * 0.055
@@ -508,10 +854,26 @@ def make_animations(armature):
       bones[f'{name}_foot'].location.z = -tuck * (0.026 if fore else 0.018)
 
   add_clip(armature, 'idle', 96, idle)
+  add_clip(armature, 'idleLook', 112, idle_look)
+  add_clip(armature, 'idleStretch', 120, idle_stretch)
+  add_clip(armature, 'idleHalfTuck', 118, idle_half_tuck)
+  add_clip(armature, 'startWalk', 38, start_walk)
   add_clip(armature, 'walk', 64, walk)
+  add_clip(armature, 'stopWalk', 42, stop_walk)
+  add_clip(armature, 'turnInPlace', 58, turn_in_place)
+  add_clip(armature, 'reverse', 70, reverse)
   add_clip(armature, 'eat', 86, eat)
+  add_clip(armature, 'browseHigh', 94, browse_high)
+  add_clip(armature, 'browseLow', 88, browse_low)
+  add_clip(armature, 'drink', 92, drink)
   add_clip(armature, 'sleep', 110, sleep)
   add_clip(armature, 'defecate', 76, defecate)
+  add_clip(armature, 'alert', 58, alert)
+  add_clip(armature, 'peekOut', 70, peek_out)
+  add_clip(armature, 'withdraw', 54, withdraw)
+  add_clip(armature, 'reEmerge', 64, re_emerge)
+  add_clip(armature, 'mudStep', 58, mud_step)
+  add_clip(armature, 'slopeBrace', 78, slope_brace)
   add_clip(armature, 'hide', 72, hide)
 
 
@@ -522,8 +884,8 @@ def write_report():
     '- Source visual asset copied to `assets-src/animals/tripo-tortoise-rigged/original-tripo-skeleton-imperfect.glb`.\n'
     '- Runtime asset: `public/assets/models/animals/runtime/tripo-tortoise-rigged.glb`.\n'
     '- The Tripo mesh and PBR textures are preserved; the Tripo autorig is discarded.\n'
-    '- Clean armature: shell/root, neck/head/jaw, tail, and four independent upper/lower/foot leg chains.\n'
-    '- Clips: `idle`, `walk`, `eat`, `sleep`, `defecate`, `hide`.\n'
+    '- Clean armature: shell/root, three articulated neck bones plus head/jaw, tail, and four independent upper/lower/foot leg chains.\n'
+    '- Clips: `idle`, `idleLook`, `idleStretch`, `idleHalfTuck`, `startWalk`, `walk`, `stopWalk`, `turnInPlace`, `reverse`, `eat`, `browseHigh`, `browseLow`, `drink`, `sleep`, `defecate`, `alert`, `peekOut`, `withdraw`, `reEmerge`, `mudStep`, `slopeBrace`, `hide`.\n'
     '- The rebuild bypasses Blender glTF import because the original Tripo file crashes the Blender 5.1 importer in this environment.\n',
     encoding='utf-8',
   )

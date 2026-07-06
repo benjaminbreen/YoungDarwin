@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-const VIEW_OPTIONS = new Set(['front', 'side', 'threeQuarter']);
+const VIEW_OPTIONS = new Set(['front', 'side', 'back', 'top', 'threeQuarter']);
+const PRESET_OPTIONS = new Set(['standard', 'quick', 'review']);
 const ROOT = process.cwd();
 const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'animation-sheets');
 
@@ -14,6 +15,26 @@ function clampNumber(value, fallback, min, max) {
 
 function cleanString(value, fallback = '') {
   return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function cleanBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return fallback;
+}
+
+function cleanViews(value, fallback) {
+  const raw = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? value.split(',') : []);
+  const views = raw
+    .map(item => cleanString(item))
+    .filter(item => VIEW_OPTIONS.has(item));
+  return Array.from(new Set(views.length ? views : fallback));
 }
 
 function safeName(value) {
@@ -72,8 +93,16 @@ export default async function handler(req, res) {
   const clip = cleanString(req.body?.clip);
   const outputId = safeName(req.body?.outputId || asset);
   const view = VIEW_OPTIONS.has(req.body?.view) ? req.body.view : 'threeQuarter';
+  const views = cleanViews(req.body?.views, [view]);
+  const preset = PRESET_OPTIONS.has(req.body?.preset) ? req.body.preset : 'standard';
   const frames = clampNumber(req.body?.frames, 12, 1, 24);
   const size = clampNumber(req.body?.size, 360, 120, 720);
+  const overview = cleanBoolean(req.body?.overview, false);
+  const ground = cleanBoolean(req.body?.ground, true);
+  const motionTrail = cleanBoolean(req.body?.motionTrail, false);
+  const followCamera = cleanBoolean(req.body?.followCamera, false);
+  const yesAll = cleanBoolean(req.body?.yesAll, clip === 'all');
+  const incline = clampNumber(req.body?.incline, 0, -30, 30);
 
   if (!asset) return res.status(400).json({ ok: false, error: 'Missing asset.' });
   if (!clip) return res.status(400).json({ ok: false, error: 'Missing clip.' });
@@ -89,18 +118,31 @@ export default async function handler(req, res) {
     '--report', path.relative(ROOT, reportPath),
     '--frames', String(frames),
     '--size', String(size),
-    '--view', view,
   ];
+  if (preset !== 'standard') args.push('--preset', preset);
+  if (views.length > 1 || req.body?.views) args.push('--views', views.join(','));
+  else args.push('--view', views[0] || view);
+  if (overview) args.push('--overview');
+  else args.push('--no-overview');
+  if (ground) args.push('--ground');
+  else args.push('--no-ground');
+  if (motionTrail) args.push('--motion-trail');
+  else args.push('--no-motion-trail');
+  if (followCamera) args.push('--follow-camera');
+  if (incline) args.push('--incline', String(incline));
+  if (yesAll) args.push('--yes-all');
 
   try {
     const result = await runContactSheet(args);
     const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    const primary = report.clips?.[0] || {};
     return res.status(200).json({
       ok: true,
       report: path.relative(ROOT, reportPath),
-      output: report.clips?.[0]?.output || null,
-      sheet: report.clips?.[0]?.sheet || null,
-      directory: report.clips?.[0]?.directory || null,
+      overview: report.overview || null,
+      output: primary.output || report.overview || null,
+      sheet: primary.sheet || null,
+      directory: primary.directory || null,
       clips: report.clips || [],
       stdout: tail(result.stdout, 2000),
       stderr: tail(result.stderr, 2000),

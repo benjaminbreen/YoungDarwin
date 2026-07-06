@@ -1557,7 +1557,7 @@ export function Water({ quality = 'performance', reflections = true }) {
   }, [waterGeometry, waterMaterial, surfMaterial, seafloor, standingWaterMask, deepMaterial, reflectionRT]);
 
   const regionType = getRegionMap(currentZoneId).type;
-  if (['beagle', 'interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
+  if (['interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
 
   return (
     <group userData={{

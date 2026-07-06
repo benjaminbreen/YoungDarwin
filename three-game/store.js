@@ -38,7 +38,7 @@ import {
 } from './examine/examinables';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
-import { MOVEMENT_FATIGUE } from './components/player/playerConfig';
+import { ACTION_DURATION, MOVEMENT_FATIGUE } from './components/player/playerConfig';
 import {
   DEFAULT_PLAYABLE_MODE_ID,
   findPlayableSpawn,
@@ -46,6 +46,7 @@ import {
   getPlayableToolbarIds,
 } from './playable/playableModes';
 import { clampToWalkable, terrainHeight } from './world/terrain';
+import { forageableAllowsMode } from './world/forageables';
 import {
   MAX_ACTIVE_SNARES,
   SNARE_CHECK_AFTER_MINUTES,
@@ -494,6 +495,30 @@ const FIELD_DILEMMA_CONFIG = {
 
 const FIELD_DILEMMA_TYPES = new Set(Object.keys(FIELD_DILEMMA_CONFIG));
 
+function constraintBlocksTool(constraint, toolId) {
+  if (!constraint || !toolId) return false;
+  return Array.isArray(constraint.blockedTools) && constraint.blockedTools.includes(toolId);
+}
+
+function blockedToolMessage(constraint, toolId) {
+  if (constraint?.type === 'net_snagged' && toolId === 'insect_net') {
+    return {
+      message: 'The insect net is still caught. Free the mesh before trying to use it again.',
+      symsLine: '"The net first, sir. A trapped tool catches nothing."',
+    };
+  }
+  if (constraint?.type === 'hammer_shard' && toolId === 'hammer') {
+    return {
+      message: 'Your hand and eye need attention before more hammering.',
+      symsLine: '"No more blows until that chip is seen to, sir."',
+    };
+  }
+  return {
+    message: 'That tool is not usable until the current problem is dealt with.',
+    symsLine: '"One thing at a time, sir."',
+  };
+}
+
 function localFieldDilemmaResolution(type, input = '') {
   const text = String(input || '').toLowerCase();
   const reckless = /\b(?:yank|pull\s+hard|thrash|run|ignore|keep\s+going|continue\s+hammering|hammer\s+again|rub\s+(?:my\s+)?eye|rub\s+it|kick|tear)\b/.test(text);
@@ -660,6 +685,7 @@ function createSceneSlice() {
     brokenPropIds: [],
     sampledRockIds: [],
     harvestedCropIds: [],
+    foragedObjectIds: [],
     symsLine: 'Syms waits with labels, twine, and the specimen bag ready.',
   };
 }
@@ -1161,6 +1187,60 @@ export const useThreeGameStore = create((set, get) => ({
 
     return collected;
   },
+  consumeForageable: forageable => {
+    const forageKey = forageable?.forageId || forageable?.id;
+    if (!forageKey) return null;
+
+    let result = null;
+    set(state => {
+      const mode = getPlayableMode(state.playableModeId);
+      const promptBelongsToForage = state.carryPrompt?.forageable?.forageId === forageKey
+        || state.carryPrompt?.id === forageKey;
+      if (!forageableAllowsMode(forageable, mode)) {
+        const message = forageable?.blockedMessage
+          || (mode.id === 'darwin'
+            ? 'That is not useful field food or a specimen worth gathering here.'
+            : `${mode.label} cannot feed on that.`);
+        result = { consumed: false, reason: 'wrong-mode', forageId: forageKey, foodLabel: forageable?.foodLabel || forageable?.label };
+        return {
+          message,
+          ...(promptBelongsToForage ? { carryPrompt: null } : {}),
+        };
+      }
+      const foragedObjectIds = state.foragedObjectIds || [];
+      if (foragedObjectIds.includes(forageKey)) {
+        result = { consumed: false, reason: 'already-foraged', forageId: forageKey, foodLabel: forageable?.foodLabel || forageable?.label };
+        return promptBelongsToForage ? { carryPrompt: null } : {};
+      }
+
+      const label = forageable.label || 'forage';
+      const foodLabel = forageable.foodLabel || label;
+      const message = forageable.consumeMessage
+        || (mode.id === 'darwin'
+          ? `You gather ${label}.`
+          : `${mode.label} feeds on ${foodLabel}.`);
+      result = {
+        consumed: true,
+        forageId: forageKey,
+        sourceKind: forageable.sourceKind || 'forageable',
+        layerId: forageable.layerId || null,
+        itemId: forageable.itemId || null,
+        zoneId: forageable.zoneId || state.currentZoneId,
+        label,
+        foodLabel,
+        nutrition: forageable.nutrition ?? 0,
+        water: forageable.water ?? 0,
+      };
+      return {
+        foragedObjectIds: [...foragedObjectIds, forageKey],
+        message,
+        educationalNote: forageable.educationalNote || state.educationalNote,
+        ...(promptBelongsToForage ? { carryPrompt: null } : {}),
+      };
+    });
+
+    return result;
+  },
   recordHammerStrikeFeedback: feedback => set(state => {
     const hasNarration = Boolean(feedback?.message || feedback?.symsLine);
     return {
@@ -1206,6 +1286,7 @@ export const useThreeGameStore = create((set, get) => ({
     const foodLabel = actionId === 'eat'
       ? (payload.foodLabel || previous.foodLabel || (mode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots'))
       : previous.foodLabel;
+    const forage = payload.forage || null;
     return {
       animalModeStats: {
         ...(state.animalModeStats || {}),
@@ -1223,6 +1304,17 @@ export const useThreeGameStore = create((set, get) => ({
               lastDay: state.day || 1,
               lastZoneId: state.currentZoneId,
               ...(foodLabel ? { foodLabel } : {}),
+              ...(forage ? {
+                lastForage: {
+                  forageId: forage.forageId || null,
+                  sourceKind: forage.sourceKind || null,
+                  layerId: forage.layerId || null,
+                  itemId: forage.itemId || null,
+                  zoneId: forage.zoneId || state.currentZoneId,
+                  label: forage.label || forage.foodLabel || foodLabel,
+                },
+                foragedCount: (previous.foragedCount || 0) + 1,
+              } : {}),
             },
           },
         },
@@ -1732,6 +1824,42 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
 
+  reportConstraintBlockedTool: toolId => set(state => {
+    if (!constraintBlocksTool(state.activeConstraint, toolId)) return {};
+    const { message, symsLine } = blockedToolMessage(state.activeConstraint, toolId);
+    return {
+      message,
+      symsLine,
+      lastOutcome: null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'blocked-action')),
+    };
+  }),
+
+  reportConstraintBlockedAction: () => set(state => {
+    const constraint = state.activeConstraint;
+    if (!constraint?.movementLock && constraint?.type !== 'snare_immobilized') return {};
+    const message = constraint.type === 'net_snagged'
+      ? 'The net is still caught fast. Free it before turning back to fieldwork.'
+      : constraint.type === 'snare_immobilized'
+        ? 'The snare is still holding you. Work out the escape in the narrator panel first.'
+        : 'This problem needs your attention before fieldwork can continue.';
+    const symsLine = constraint.type === 'net_snagged'
+      ? '"The cactus has the net for now, sir."'
+      : '"A plan first, sir."';
+    return {
+      message,
+      symsLine,
+      lastOutcome: null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'blocked-action')),
+    };
+  }),
+
   triggerNetSnagDilemma: (details = {}) => set(state => {
     if (state.activeConstraint) return {};
     const config = FIELD_DILEMMA_CONFIG.net_snagged;
@@ -1743,11 +1871,18 @@ export const useThreeGameStore = create((set, get) => ({
         type: 'net_snagged',
         requiresNarratorInput: true,
         movementLock: true,
+        blockedTools: ['insect_net'],
         toolId: 'insect_net',
         startedAt: Date.now(),
         attempts: 0,
         details,
         composerPlaceholder: config.placeholder,
+        reaction: {
+          clip: 'stumble',
+          duration: ACTION_DURATION.stumble,
+          lockMovement: 0.28,
+          interrupt: true,
+        },
       },
       majorEvent: {
         id: eventId,
@@ -1781,12 +1916,20 @@ export const useThreeGameStore = create((set, get) => ({
         type: 'hammer_shard',
         requiresNarratorInput: true,
         movementLock: false,
+        movementSpeedScale: 0.88,
+        blockedTools: ['hammer'],
         toolId: 'hammer',
         startedAt: Date.now(),
         attempts: 0,
         healthPenalty: 6,
         details,
         composerPlaceholder: config.placeholder,
+        reaction: {
+          clip: 'hitReaction',
+          duration: ACTION_DURATION.hitReaction,
+          lockMovement: 0.38,
+          interrupt: true,
+        },
       },
       majorEvent: {
         id: eventId,
@@ -1822,13 +1965,31 @@ export const useThreeGameStore = create((set, get) => ({
           type: 'cactus_spines',
           requiresNarratorInput: true,
           movementLock: false,
+          movementSpeedScale: 0.72,
+          disableRun: true,
           startedAt: Date.now(),
           attempts: 0,
           details: {
             cactusId: options.cactusId || 'cactus',
             impactSpeed: Number.isFinite(Number(options.impactSpeed)) ? Number(options.impactSpeed) : null,
+            severeFall: Boolean(options.severeFall),
           },
           composerPlaceholder: config.placeholder,
+          reaction: options.severeFall
+            ? {
+                clip: 'shoulderHitAndFall',
+                duration: ACTION_DURATION.shoulderHitAndFall,
+                lockMovement: true,
+                recoverAction: 'gettingUp',
+                recoverDuration: ACTION_DURATION.gettingUp,
+                interrupt: true,
+              }
+            : {
+                clip: 'hitReaction',
+                duration: ACTION_DURATION.hitReaction,
+                lockMovement: 0.36,
+                interrupt: true,
+              },
         },
         majorEvent: {
           id: eventId,
@@ -2630,6 +2791,10 @@ export const useThreeGameStore = create((set, get) => ({
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
     const collectedActorIds = new Set(state.collectedSpecimenActorIds || []);
     const tool = threeTools.find(item => item.id === state.activeToolId) || threeTools.find(item => item.id === 'hands');
+    if (constraintBlocksTool(state.activeConstraint, tool.id)) {
+      get().reportConstraintBlockedTool?.(tool.id);
+      return null;
+    }
     const specimen = zoneSpecimens.find(item => {
       const actorId = item.instanceId || item.id;
       return !collectedActorIds.has(actorId) && (actorId === specimenId || item.id === specimenId);

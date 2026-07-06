@@ -6,6 +6,8 @@ import { triggerToolUse } from '../../input/touchControls';
 import { ACTION_DURATION } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
+import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
+import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -226,6 +228,10 @@ export function updatePlayerInteractions({
       }
     : null;
   const storeState = useThreeGameStore.getState();
+  const constraintLocksInteractions = Boolean(
+    storeState.activeConstraint?.movementLock
+    || storeState.activeConstraint?.type === 'snare_immobilized'
+  );
   const currentPromptId = storeState.edgePrompt?.id || null;
   const dismissedPromptId = storeState.dismissedEdgePromptId || null;
   const arrivalSuppressed = arrivalEdgeSuppressesPrompt(storeState.arrivalEdgeBlock, currentZoneId, position, promptPayload);
@@ -264,6 +270,10 @@ export function updatePlayerInteractions({
 
   const startSpecimenCollection = (currentState, specimen) => {
     if (!specimen || stateRef.current.action) return false;
+    if (currentState.activeConstraint?.blockedTools?.includes(currentState.activeToolId)) {
+      currentState.reportConstraintBlockedTool?.(currentState.activeToolId);
+      return true;
+    }
     if (currentState.activeToolId === 'snare') {
       const animation = collectionAnimationForTool('snare', specimen);
       const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
@@ -318,7 +328,9 @@ export function updatePlayerInteractions({
   // examines first, then becomes the collection command once that type has a
   // saved field note.
   const examinePressed = keys.examine || touch.inspect;
-  if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
+  if (constraintLocksInteractions && examinePressed && !lastExamineRef.current) {
+    useThreeGameStore.getState().reportConstraintBlockedAction?.();
+  } else if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
     const currentState = useThreeGameStore.getState();
     const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
     const specimen = specimenId
@@ -342,6 +354,12 @@ export function updatePlayerInteractions({
 
   if ((keys.interact || touch.interact) && !lastInteractRef.current) {
     const currentState = useThreeGameStore.getState();
+    if (constraintLocksInteractions) {
+      currentState.reportConstraintBlockedAction?.();
+      lastInteractRef.current = keys.interact || touch.interact;
+      lastCameraRef.current = keys.camera;
+      return;
+    }
     const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
     const specimen = specimenId
       ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
@@ -358,6 +376,31 @@ export function updatePlayerInteractions({
           startAction(clip, ACTION_DURATION[clip], { lockMovement: true });
         }
         currentState.harvestCrop?.(currentState.carryPrompt.crop);
+      } else if (currentState.carryPrompt.mode === FORAGE_PROMPT_MODE) {
+        const mode = getPlayableMode(currentState.playableModeId);
+        const forageable = currentState.carryPrompt.forageable;
+        if (mode.kind === 'animal') {
+          const eatAction = getAnimalAction('eat');
+          if (eatAction && !stateRef.current.action) {
+            startAction(eatAction.clip, eatAction.duration, {
+              lockMovement: eatAction.lockMovement ?? 0.45,
+              onStart: () => {
+                const forageResult = currentState.consumeForageable?.(forageable);
+                currentState.recordAnimalModeAction?.({
+                  actionId: 'eat',
+                  foodLabel: forageResult?.foodLabel || forageable?.foodLabel,
+                  forage: forageResult?.consumed ? forageResult : null,
+                });
+              },
+            });
+          }
+        } else {
+          if (!stateRef.current.action) {
+            const clip = forageable?.pickClip || 'gatherGround';
+            startAction(clip, ACTION_DURATION[clip] || ACTION_DURATION.gatherGround, { lockMovement: true });
+          }
+          currentState.consumeForageable?.(forageable);
+        }
       } else if (currentState.carryPrompt.mode === 'check-snare') {
         if (!stateRef.current.action) {
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });

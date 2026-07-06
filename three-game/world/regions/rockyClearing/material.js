@@ -42,7 +42,7 @@ export function createRockyClearingTerrainMaterial() {
   const material = createDryFloreanaTerrainMaterial({
     pathPoints: ROCKY_CLEARING_PATH_POINTS,
     textureSet: DRY_FLOREANA_TEXTURE_SETS.redDirtHighland,
-    cacheKey: 'rocky-clearing-red-path-cave-v1',
+    cacheKey: 'rocky-clearing-red-path-cave-v2-low-sampler',
     highFadeStart: 5.4,
     highFadeEnd: 8.2,
   });

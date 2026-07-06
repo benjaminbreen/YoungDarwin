@@ -7,7 +7,8 @@ import {
   cormorantTest3GrassDensityAt,
 } from '../regions/cormorantBayTest3/meadow';
 
-const ZONE = 'CORMORANT_BAY_TEST_3';
+const CORMORANT_BAY_ZONE = 'CORMORANT_BAY';
+const TEST_ZONE = 'CORMORANT_BAY_TEST_3';
 const NATURE = '/assets/models/nature/';
 const LAGOON_SURFACE_Y = WATER_LEVEL + 0.035;
 
@@ -39,7 +40,7 @@ function dryGrassColor(density, dryness, tone) {
   return shade > 0.5 ? '#879a55' : '#687d43';
 }
 
-function buildDryGrassPatches(count = 560) {
+function buildDryGrassPatches(zoneId, idPrefix, count = 560) {
   const items = [];
   const bounds = { minX: -46, maxX: 46, minZ: 2, maxZ: 42 };
   let attempts = 0;
@@ -48,12 +49,12 @@ function buildDryGrassPatches(count = 560) {
     const i = attempts + 9831 * 1000;
     const x = bounds.minX + seededRandom(i, 3) * (bounds.maxX - bounds.minX);
     const z = bounds.minZ + seededRandom(i, 9) * (bounds.maxZ - bounds.minZ);
-    const y = terrainHeight(x, z, ZONE);
-    const biome = terrainBiomeAt(x, z, y, ZONE);
+    const y = terrainHeight(x, z, zoneId);
+    const biome = terrainBiomeAt(x, z, y, zoneId);
     if (!dryGround(biome)) continue;
     if (!notTrail(x, z, 4.9)) continue;
     if (cormorantLagoonField(x, z) < 1.12) continue;
-    const { grade } = terrainSlopeAt(x, z, ZONE, 0.75);
+    const { grade } = terrainSlopeAt(x, z, zoneId, 0.75);
     if (grade > 0.82) continue;
 
     const tone = seededRandom(i, 17);
@@ -70,7 +71,7 @@ function buildDryGrassPatches(count = 560) {
       * lerp(1.08, 0.9, dryness);
 
     items.push({
-      id: `cormorant-test-3-dry-grass-${items.length}`,
+      id: `${idPrefix}-dry-grass-${items.length}`,
       x,
       y,
       z,
@@ -86,16 +87,16 @@ function buildDryGrassPatches(count = 560) {
   return items;
 }
 
-export function buildCormorantBayTest3Ecology() {
-  const scatter = (layer, count, seed, opts) => makeZoneScatter(ZONE, layer, count, seed, opts);
-  const dryGrassPatches = buildDryGrassPatches();
+function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
+  const scatter = (layer, count, seed, opts) => makeZoneScatter(zoneId, layer, count, seed, opts);
+  const dryGrassPatches = buildDryGrassPatches(zoneId, idPrefix);
   return {
-    zoneId: ZONE,
+    zoneId,
     stream: false,
     lagoonSurfaces: [
       {
-        id: 'test-3-brackish-lagoon-water2',
-        zoneId: ZONE,
+        id: `${idPrefix}-brackish-lagoon-water`,
+        zoneId,
         position: [0, LAGOON_SURFACE_Y, 0],
         bounds: { minX: -39, maxX: 39, minZ: -17, maxZ: 19 },
         geometryResolution: [220, 108],
@@ -132,7 +133,7 @@ export function buildCormorantBayTest3Ecology() {
     ],
     dryGrassPatches: [
       {
-        id: 'cormorant-test-3-yellow-dry-grass-patches',
+        id: `${idPrefix}-yellow-dry-grass-patches`,
         loadTier: 1,
         path: `${NATURE}runtime-animated-dry-grass.glb`,
         items: dryGrassPatches,
@@ -155,37 +156,37 @@ export function buildCormorantBayTest3Ecology() {
     ],
     flora: [
       {
-        id: 'test-3-lagoon-saltgrass',
+        id: `${idPrefix}-lagoon-saltgrass`,
         path: `${NATURE}runtime-saltgrass.glb`,
         sink: 0.13,
         castShadow: false,
         motion: { wind: 0.9, bend: 0.28, bendRadius: 1.1 },
-        items: scatter('test-3-lagoon-saltgrass', 18, 321, {
+        items: scatter(`${idPrefix}-lagoon-saltgrass`, 18, 321, {
           minX: -42, maxX: 42, minZ: -16, maxZ: 26, scale: [0.1, 0.19], maxGrade: 0.8,
           accept: (biome, x, z) => lagoonEdge(biome, x, z) && notTrail(x, z, 3.3),
         }),
       },
       {
-        id: 'test-3-sesuvium-mats',
+        id: `${idPrefix}-sesuvium-mats`,
         path: `${NATURE}runtime-sesuvium.glb`,
         sink: 0.025,
         castShadow: false,
         ySquash: 0.28,
         motion: { wind: 0.38, bend: 0.12, bendRadius: 1.0 },
-        items: scatter('test-3-sesuvium', 7, 333, {
+        items: scatter(`${idPrefix}-sesuvium`, 7, 333, {
           minX: -40, maxX: 34, minZ: 5, maxZ: 34, scale: [1.6, 2.7], maxGrade: 0.7,
           accept: (biome, x, z) => dryGround(biome) && cormorantTrailDistance(x, z) > 5.2,
         }),
       },
       {
-        id: 'test-3-lagoon-mangroves',
+        id: `${idPrefix}-lagoon-mangroves`,
         path: `${NATURE}runtime-mangrove-tree.glb`,
         sink: 0.12,
         castShadow: false,
         tint: '#66834f',
         tintStrength: 0.14,
         motion: { wind: 0.28, bend: 0.045, bendRadius: 2.4 },
-        items: scatter('test-3-mangrove-fringe', 5, 403, {
+        items: scatter(`${idPrefix}-mangrove-fringe`, 5, 403, {
           minX: -38, maxX: 36, minZ: -13, maxZ: 12, scale: [0.22, 0.36], maxGrade: 0.9,
           accept: (biome, x, z) => lagoonEdge(biome, x, z)
             && notTrail(x, z, 8.5)
@@ -194,34 +195,24 @@ export function buildCormorantBayTest3Ecology() {
         }),
       },
       {
-        id: 'test-3-driftwood-shell-line',
+        id: `${idPrefix}-driftwood-shell-line`,
         path: `${NATURE}runtime-driftwood.glb`,
         sink: 0.02,
         tint: '#c7b998',
         tintStrength: 0.44,
-        items: scatter('test-3-driftwood-shell-line', 5, 367, {
+        items: scatter(`${idPrefix}-driftwood-shell-line`, 5, 367, {
           minX: -44, maxX: 28, minZ: 8, maxZ: 29, scale: [0.18, 0.42], maxGrade: 0.72,
           accept: (biome, x, z) => dryGround(biome) && cormorantTrailDistance(x, z) > 5,
         }),
       },
     ],
-    canopySilhouettes: [
-      {
-        id: 'test-3-lagoon-scrub-silhouette',
-        items: [
-          { id: 'test-3-scrub-back-left', x: -48, z: -25, y: 0.6, scale: 1.7, yaw: 0.4 },
-          { id: 'test-3-scrub-back-center', x: -25, z: -36, y: 0.9, scale: 2.1, yaw: -0.3 },
-          { id: 'test-3-scrub-back-right', x: 28, z: -34, y: 0.85, scale: 2.2, yaw: 0.8 },
-        ],
-      },
-    ],
     flyingModels: [
       {
-        id: 'test-3-distant-flying-flamingos',
+        id: `${idPrefix}-distant-flying-flamingos`,
         loadTier: 1,
         items: [
           {
-            id: 'test-3-flying-flamingo-1',
+            id: `${idPrefix}-flying-flamingo-1`,
             assetId: 'flyingFlamingo',
             clip: 'flamingo_flyA_',
             cx: -18,
@@ -238,7 +229,7 @@ export function buildCormorantBayTest3Ecology() {
             floatAmount: 0.7,
           },
           {
-            id: 'test-3-flying-flamingo-2',
+            id: `${idPrefix}-flying-flamingo-2`,
             assetId: 'flyingFlamingo',
             clip: 'flamingo_flyA_',
             cx: 16,
@@ -255,7 +246,7 @@ export function buildCormorantBayTest3Ecology() {
             floatAmount: 0.8,
           },
           {
-            id: 'test-3-flying-flamingo-3',
+            id: `${idPrefix}-flying-flamingo-3`,
             assetId: 'flyingFlamingo',
             clip: 'flamingo_flyA_',
             cx: 2,
@@ -280,4 +271,12 @@ export function buildCormorantBayTest3Ecology() {
     ],
     footprintBiomes: ['green-beach', 'wet-mud', 'olivine-trail', 'salt-scrub', 'tuff-rim'],
   };
+}
+
+export function buildCormorantBayEcology() {
+  return buildCormorantBayEcologyForZone(CORMORANT_BAY_ZONE, 'cormorant-bay');
+}
+
+export function buildCormorantBayTest3Ecology() {
+  return buildCormorantBayEcologyForZone(TEST_ZONE, 'test-3');
 }

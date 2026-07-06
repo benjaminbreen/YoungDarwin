@@ -230,6 +230,46 @@ export const ZONE_PROPS = {
       rotation: [0, -1.2, 0],
     },
   ],
+  BEAGLE: [
+    // Scuttlebutt (fresh-water butt) beside the pumps at the mainmast.
+    {
+      id: 'beagle-scuttlebutt',
+      type: 'settlementBarrel',
+      x: -0.5,
+      z: 1.9,
+      rotation: [0, 0.5, 0],
+    },
+    // Landing-party supplies staged by the fore hatch.
+    {
+      id: 'beagle-supply-crate-a',
+      type: 'crate',
+      x: 4.2,
+      z: 1.85,
+      rotation: [0, 0.35, 0],
+    },
+    {
+      id: 'beagle-supply-crate-b',
+      type: 'crate',
+      x: 4.95,
+      z: 2.3,
+      rotation: [0.01, -0.5, 0],
+    },
+    {
+      id: 'beagle-galley-bucket',
+      type: 'woodenBucket',
+      x: 8.1,
+      z: 1.35,
+      rotation: [0, -0.8, 0],
+    },
+    // A barrel that's slipped its lashing, free to roll about the waist.
+    {
+      id: 'beagle-loose-barrel',
+      type: 'barrel',
+      x: -4.6,
+      z: -1.9,
+      rotation: [Math.PI / 2, 0.35, 0.02],
+    },
+  ],
 };
 
 export function getZoneProps(zoneId) {

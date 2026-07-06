@@ -8,7 +8,7 @@ export function createElMiradorTerrainMaterial() {
   return createDryFloreanaTerrainMaterial({
     pathPoints: EL_MIRADOR_PATH_POINTS,
     textureSet: DRY_FLOREANA_TEXTURE_SETS.redDirtHighland,
-    cacheKey: 'el-mirador-red-dirt-grass-v2-dry-floreana-kit',
+    cacheKey: 'el-mirador-red-dirt-grass-v3-dry-floreana-low-sampler',
     highFadeStart: 7,
     highFadeEnd: 9.6,
   });

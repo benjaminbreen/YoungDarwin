@@ -42,6 +42,7 @@ const wildlifeLabelsByAsset = Object.values(wildlifeCatalog).reduce((labels, ent
 }, {});
 
 const MODEL_ANIMAL_LABELS = {
+  tripoTortoiseRigged: 'Playable Tortoise',
   crab: 'Sally Lightfoot Crab',
   marineIguana: 'Marine Iguana',
   lavalizard: 'Floreana Lava Lizard',
@@ -60,7 +61,12 @@ const MODEL_ANIMAL_LABELS = {
   hermitCrab: 'Hermit Crab',
 };
 
+const MODEL_ANIMAL_SOURCES = {
+  tripoTortoiseRigged: 'Playable animal',
+};
+
 const PREFERRED_MODEL_ANIMAL_IDS = [
+  'tripoTortoiseRigged',
   'crab',
   'marineIguana',
   'lavalizard',
@@ -107,7 +113,7 @@ function animalEntries() {
         path: assetLoadUrl(asset),
         runtimePath: asset.path,
         contactAsset: id,
-        source: asset.enabled ? 'Model manifest' : 'Model manifest (disabled)',
+        source: MODEL_ANIMAL_SOURCES[id] || (asset.enabled ? 'Model manifest' : 'Model manifest (disabled)'),
         asset,
       };
     })
@@ -254,20 +260,33 @@ function ClipButton({ name, selected, onClick }) {
 
 function recommendedContactView(animal, clip) {
   const key = `${animal?.id || ''} ${animal?.label || ''} ${clip || ''}`.toLowerCase();
-  if (/(fish|manta|turtle|sea lion|swim|walk|run|slide|crawl|waddle|scuttle)/.test(key)) return 'side';
-  if (/(turn|strafe|symmetry)/.test(key)) return 'front';
+  if (/(turninplace|turn|pivot)/.test(key)) return 'top';
+  if (/(fish|manta|turtle|sea lion|swim|walk|run|reverse|startwalk|stopwalk|browse|drink|mudstep|slide|crawl|waddle|scuttle)/.test(key)) return 'side';
+  if (/(strafe|symmetry)/.test(key)) return 'front';
   return 'threeQuarter';
+}
+
+function recommendedMotionTrail(animal, clip) {
+  const key = `${animal?.id || ''} ${clip || ''}`.toLowerCase();
+  return /(walk|run|reverse|turn|mudstep|swim|crawl|waddle|scuttle|slide)/.test(key);
+}
+
+function recommendedIncline(animal, clip) {
+  const key = `${animal?.id || ''} ${clip || ''}`.toLowerCase();
+  return /tripo.*slopebrace|slopebrace/.test(key);
 }
 
 export function AnimalAnimationDevPanel({ open, onClose }) {
   const [selectedAnimalId, setSelectedAnimalId] = useState(
-    modelAssets.flightlessCormorant?.enabled ? 'flightlessCormorant' : ANIMAL_ENTRIES[0]?.id,
+    modelAssets.tripoTortoiseRigged?.enabled ? 'tripoTortoiseRigged' : (modelAssets.flightlessCormorant?.enabled ? 'flightlessCormorant' : ANIMAL_ENTRIES[0]?.id),
   );
   const [selectedClip, setSelectedClip] = useState('walk');
   const [paused, setPaused] = useState(false);
   const [timeScale, setTimeScale] = useState(1);
   const [animationMap, setAnimationMap] = useState({});
   const [contactView, setContactView] = useState('threeQuarter');
+  const [contactMotionTrail, setContactMotionTrail] = useState(false);
+  const [contactIncline, setContactIncline] = useState(false);
   const [contactSheet, setContactSheet] = useState({ status: 'idle' });
 
   const onAnimations = React.useCallback((animalId, names) => {
@@ -291,10 +310,12 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
 
   useEffect(() => {
     setContactView(recommendedContactView(selectedAnimal, selectedClip));
+    setContactMotionTrail(recommendedMotionTrail(selectedAnimal, selectedClip));
+    setContactIncline(recommendedIncline(selectedAnimal, selectedClip));
     setContactSheet({ status: 'idle' });
   }, [selectedAnimal?.id, selectedClip]);
 
-  const generateContactSheet = React.useCallback(async () => {
+  const requestContactSheet = React.useCallback(async payload => {
     if (!selectedAnimal || !selectedClip) return;
     setContactSheet({ status: 'running', message: 'Rendering Blender contact sheet...' });
     try {
@@ -304,10 +325,7 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
         body: JSON.stringify({
           asset: selectedAnimal.contactAsset || selectedAnimal.runtimePath || selectedAnimal.path?.split('?')[0],
           outputId: selectedAnimal.id,
-          clip: selectedClip,
-          view: contactView,
-          frames: 12,
-          size: 360,
+          ...payload,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -318,8 +336,9 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
       setContactSheet({
         status: 'success',
         sheet: data.sheet,
+        overview: data.overview,
         directory: data.directory,
-        message: `Saved ${data.sheet || data.directory}`,
+        message: `Saved ${data.sheet || data.overview || data.directory}`,
       });
     } catch (error) {
       setContactSheet({
@@ -327,7 +346,29 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
         message: error.message || 'Failed to generate contact sheet.',
       });
     }
-  }, [contactView, selectedAnimal, selectedClip]);
+  }, [selectedAnimal, selectedClip]);
+
+  const generateContactSheet = React.useCallback(() => requestContactSheet({
+    clip: selectedClip,
+    view: contactView,
+    frames: 12,
+    size: 360,
+    ground: true,
+    motionTrail: contactMotionTrail,
+    incline: contactIncline ? 12 : 0,
+    overview: false,
+  }), [contactIncline, contactMotionTrail, contactView, requestContactSheet, selectedClip]);
+
+  const generateOverview = React.useCallback(() => requestContactSheet({
+    clip: 'all',
+    preset: 'quick',
+    views: ['threeQuarter'],
+    frames: 3,
+    size: 220,
+    ground: true,
+    overview: true,
+    yesAll: true,
+  }), [requestContactSheet]);
 
   if (!open || !selectedAnimal) return null;
 
@@ -419,7 +460,7 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <div className="font-expedition text-sm font-semibold text-expedition-parchment">{selectedClip || 'static preview'}</div>
                 <div className="font-mono text-[10px] text-expedition-faded">{selectedAnimal.path}</div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <label className="flex items-center gap-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded">
                   Sheet
                   <select
@@ -430,7 +471,27 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                     <option value="side">side</option>
                     <option value="threeQuarter">three-quarter</option>
                     <option value="front">front</option>
+                    <option value="back">back</option>
+                    <option value="top">top</option>
                   </select>
+                </label>
+                <label className="flex items-center gap-1.5 font-expedition text-[11px] uppercase tracking-[0.16em] text-expedition-faded">
+                  <input
+                    type="checkbox"
+                    checked={contactMotionTrail}
+                    onChange={event => setContactMotionTrail(event.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-200"
+                  />
+                  trail
+                </label>
+                <label className="flex items-center gap-1.5 font-expedition text-[11px] uppercase tracking-[0.16em] text-expedition-faded">
+                  <input
+                    type="checkbox"
+                    checked={contactIncline}
+                    onChange={event => setContactIncline(event.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-200"
+                  />
+                  incline
                 </label>
                 <button
                   type="button"
@@ -439,6 +500,14 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                   className={`${GOLD_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   {contactSheet.status === 'running' ? 'Rendering...' : 'Generate Contact Sheet'}
+                </button>
+                <button
+                  type="button"
+                  onClick={generateOverview}
+                  disabled={!clips.length || contactSheet.status === 'running'}
+                  className={`${GOLD_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  Overview
                 </button>
               </div>
             </div>

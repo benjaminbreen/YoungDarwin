@@ -80,17 +80,13 @@ function buildFlora() {
     accept: (biome, x, z) => notOnTrail(x, z, 3.9)
       && (biome === 'wet-hollow' || biome === 'fern-clearing' || biome === 'humid-understory' || biome === 'scalesia-forest'),
   });
-  const morningGlory = scatter('morning-glory', 34, 269, {
-    minX: -43, maxX: 43, minZ: -38, maxZ: 40, scale: [0.06, 0.14], maxGrade: 0.7,
-    accept: (biome, x, z) => forestAccept(biome, x, z) || clearingEdgeAccept(biome, x, z),
-  });
   const manzanillo = scatter('manzanillo', 18, 281, {
     minX: -46, maxX: 46, minZ: -40, maxZ: 42, scale: [0.82, 1.35], maxGrade: 0.55,
     accept: (biome, x, z) => (forestAccept(biome, x, z) && westernHighlandsCanopyMask(x, z) > 0.46)
       || nearAnyCluster(edgeClusters, x, z, 13),
   });
   const grasses = scatter('highland-grass', 42, 293, {
-    minX: -34, maxX: 34, minZ: -39, maxZ: 43, scale: [0.14, 0.34], maxGrade: 0.65,
+    minX: -34, maxX: 34, minZ: -39, maxZ: 43, scale: [0.32, 0.62], maxGrade: 0.65,
     accept: (biome, x, z) => westernHighlandsClearingMask(x, z) > 0.24 || trailEdgeAccept(biome, x, z),
   });
   const wetPlants = scatter('wet-ground-plants', 36, 307, {
@@ -119,7 +115,7 @@ function buildFlora() {
     {
       id: 'scalesia-pedunculata-tree',
       path: `${NATURE}runtime-scalesia-pedunculata-tree.glb`,
-      sink: -0.96,
+      sink: 0.16,
       tint: '#6f8f55',
       tintStrength: 0.1,
       motion: { wind: 0.48, bend: 0.12, bendRadius: 3.4 },
@@ -144,17 +140,6 @@ function buildFlora() {
       items: tintItems(crotonUnderstory, '#718c57', '#566f45'),
     },
     {
-      id: 'morning-glory',
-      path: `${NATURE}runtime-morning-glory.glb`,
-      sink: 0.05,
-      ySquash: 0.52,
-      tint: '#6f8d5a',
-      tintStrength: 0.28,
-      motion: { wind: 1.05, bend: 0.42, bendRadius: 1.35 },
-      castShadow: false,
-      items: morningGlory,
-    },
-    {
       id: 'ground-plants',
       path: `${NATURE}runtime-ground-plants.glb`,
       sink: 0.04,
@@ -177,8 +162,8 @@ function buildFlora() {
     },
     {
       id: 'highland-grass',
-      path: `${NATURE}runtime-grass-patch-2.glb`,
-      sink: 0.1,
+      path: `${NATURE}runtime-animated-dry-grass.glb`,
+      sink: 0.04,
       tint: '#667047',
       tintStrength: 0.3,
       motion: { wind: 1.45, bend: 0.58, bendRadius: 1.25 },

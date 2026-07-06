@@ -4,12 +4,20 @@ import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 import { applyFoliageMotion } from './foliageMotion';
+import {
+  DEFAULT_DRY_GRASS_FORAGE,
+  FORAGE_PROMPT_MODE,
+  forageKeyForEcologyItem,
+  forageableAllowsMode,
+  mergeForageConfig,
+} from '../../../world/forageables';
 
 const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
+const FORAGE_CELL_SIZE = 4.5;
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
@@ -122,8 +130,20 @@ function layerCullBounds(items, maxVisibleDistance) {
   return { center, visibleDistanceSq: visibleDistance * visibleDistance };
 }
 
+function buildForageGrid(items) {
+  const grid = new Map();
+  items.forEach((item, index) => {
+    const key = `${Math.floor(item.x / FORAGE_CELL_SIZE)}:${Math.floor(item.z / FORAGE_CELL_SIZE)}`;
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(index);
+    else grid.set(key, [index]);
+  });
+  return grid;
+}
+
 export function DryGrassPatchField({
   layer,
+  zoneId = null,
   castShadow = false,
   receiveShadow = true,
   inspectableType = null,
@@ -133,6 +153,16 @@ export function DryGrassPatchField({
   const path = layer.path || DEFAULT_PATH;
   const { scene } = useGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
+  const foragedObjectIds = useThreeGameStore(state => state.foragedObjectIds);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
+  const resolvedZoneId = zoneId || layer.zoneId || null;
+  const forageConfig = useMemo(
+    () => mergeForageConfig(DEFAULT_DRY_GRASS_FORAGE, layer.forage),
+    [layer.forage],
+  );
+  const foragedSet = useMemo(() => new Set(foragedObjectIds || []), [foragedObjectIds]);
+  const forageGrid = useMemo(() => buildForageGrid(layer.items || []), [layer.items]);
 
   const geometry = useMemo(() => cloneWithNeutralVertexColors(firstMeshGeometry(scene)), [scene]);
   const bladeTexture = useMemo(() => loadBladeTexture(layer.bladeTexturePath), [layer.bladeTexturePath]);
@@ -171,29 +201,32 @@ export function DryGrassPatchField({
       depthScale = 1,
     } = layer;
 
+    const eatenVisual = forageConfig?.eatenVisual || {};
     layer.items.forEach((item, index) => {
       const tone = item.tone ?? 0.5;
       const scale = item.scale || 1;
-      const width = scale * widthScale * (0.82 + tone * 0.42);
-      const height = scale * heightScale * (0.58 + tone * 0.24);
-      const depth = width * depthScale * (0.85 + tone * 0.25);
+      const forageKey = forageKeyForEcologyItem({ zoneId: resolvedZoneId, layerId: layer.id, itemId: item.id });
+      const eaten = forageConfig && foragedSet.has(forageKey);
+      const width = scale * widthScale * (0.82 + tone * 0.42) * (eaten ? (eatenVisual.widthScale ?? 0.78) : 1);
+      const height = scale * heightScale * (0.58 + tone * 0.24) * (eaten ? (eatenVisual.heightScale ?? 0.24) : 1);
+      const depth = width * depthScale * (0.85 + tone * 0.25) * (eaten ? (eatenVisual.depthScale ?? 0.82) : 1);
       dummy.position.set(
         item.x,
-        item.y + baseLift - sink - (item.grade || 0) * scale * slopeSink,
+        item.y + baseLift - sink - (item.grade || 0) * scale * slopeSink - (eaten ? scale * (eatenVisual.sinkScale ?? 0.08) : 0),
         item.z,
       );
       dummy.rotation.set(0, item.yaw || 0, 0);
       dummy.scale.set(width, height, depth);
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
-      color.set(item.color || layer.color || '#a99d58');
+      color.set(eaten ? (eatenVisual.color || '#7f7547') : (item.color || layer.color || '#a99d58'));
       mesh.setColorAt(index, color);
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
-  }, [layer]);
+  }, [layer, forageConfig, foragedSet, resolvedZoneId]);
 
   const cullBounds = useMemo(
     () => layerCullBounds(layer.items || [], layer.maxVisibleDistance ?? layer.drawDistance),
@@ -203,9 +236,79 @@ export function DryGrassPatchField({
 
   useFrame(({ camera }) => {
     const group = groupRef.current;
-    if (!group || !cullBounds) return;
-    if (!shouldRunCameraCull(camera, cullStateRef.current)) return;
-    group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
+    if (group && cullBounds && shouldRunCameraCull(camera, cullStateRef.current)) {
+      group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
+    }
+
+    const state = useThreeGameStore.getState();
+    const activePrompt = state.carryPrompt;
+    const promptIsOurs = activePrompt?.mode === FORAGE_PROMPT_MODE
+      && activePrompt?.forageable?.layerId === layer.id
+      && activePrompt?.forageable?.zoneId === resolvedZoneId;
+    if (!forageConfig || !resolvedZoneId || !forageableAllowsMode(forageConfig, {
+      id: playableModeId,
+      kind: playableModeId === 'darwin' ? 'human' : 'animal',
+    })) {
+      if (promptIsOurs) setCarryPrompt(null);
+      return;
+    }
+
+    const pose = getRuntimePlayerPose();
+    const px = pose.position.x;
+    const py = pose.position.y;
+    const pz = pose.position.z;
+    const radius = forageConfig.pickRadius ?? DEFAULT_DRY_GRASS_FORAGE.pickRadius;
+    const heightTolerance = forageConfig.heightTolerance ?? DEFAULT_DRY_GRASS_FORAGE.heightTolerance;
+    const cellX = Math.floor(px / FORAGE_CELL_SIZE);
+    const cellZ = Math.floor(pz / FORAGE_CELL_SIZE);
+    let nearestIndex = -1;
+    let nearestDistance = radius;
+
+    for (let gx = cellX - 1; gx <= cellX + 1; gx += 1) {
+      for (let gz = cellZ - 1; gz <= cellZ + 1; gz += 1) {
+        const bucket = forageGrid.get(`${gx}:${gz}`);
+        if (!bucket) continue;
+        for (const index of bucket) {
+          const item = layer.items[index];
+          const forageKey = forageKeyForEcologyItem({ zoneId: resolvedZoneId, layerId: layer.id, itemId: item.id });
+          if (foragedSet.has(forageKey)) continue;
+          const dx = item.x - px;
+          const dz = item.z - pz;
+          const distance = Math.hypot(dx, dz);
+          if (distance >= nearestDistance) continue;
+          if (Math.abs((item.y || 0) - py) > heightTolerance) continue;
+          nearestIndex = index;
+          nearestDistance = distance;
+        }
+      }
+    }
+
+    if (nearestIndex >= 0) {
+      const item = layer.items[nearestIndex];
+      const forageId = forageKeyForEcologyItem({ zoneId: resolvedZoneId, layerId: layer.id, itemId: item.id });
+      const alreadyOurs = activePrompt?.id === forageId;
+      if (!activePrompt || alreadyOurs || nearestDistance < (activePrompt.distance ?? Infinity)) {
+        if (!alreadyOurs || Math.abs((activePrompt.distance ?? 0) - nearestDistance) > 0.12) {
+          setCarryPrompt({
+            id: forageId,
+            label: forageConfig.label,
+            mode: FORAGE_PROMPT_MODE,
+            distance: nearestDistance,
+            text: forageConfig.promptText || `Eat ${forageConfig.label || 'forage'}`,
+            forageable: {
+              ...forageConfig,
+              forageId,
+              layerId: layer.id,
+              itemId: item.id,
+              zoneId: resolvedZoneId,
+              position: { x: item.x, y: item.y || 0, z: item.z },
+            },
+          });
+        }
+      }
+    } else if (promptIsOurs) {
+      setCarryPrompt(null);
+    }
   });
 
   if (!geometry || !material || !layer.items?.length) return null;

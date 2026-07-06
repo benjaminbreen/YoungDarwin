@@ -12,6 +12,7 @@ import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
 import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
+import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
@@ -71,12 +72,10 @@ const DEFAULT_PERF_SETTINGS = {
   dprMode: 'default',
   msaaSamples: 0,
   postprocessing: true,
-  ao: false,
   stats: false,
   shadows: true,
   shadowQuality: 'high',
   water: true,
-  reflections: false,
   terrain: true,
   landmarks: false,
   atmosphere: true,
@@ -1152,6 +1151,7 @@ export default function ThreeDarwinGame() {
   const [showDarwinAnimationLab, setShowDarwinAnimationLab] = useState(false);
   const [perfProbe, setPerfProbe] = useState(false);
   const [costProbe, setCostProbe] = useState(false);
+  const [e2eMode, setE2EMode] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
@@ -1202,6 +1202,7 @@ export default function ThreeDarwinGame() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    setE2EMode(params.has('e2e') || params.get('testMode') === 'e2e');
     setPerfSettings(settingsFromUrlSearch(window.location.search));
     setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
     setCostProbe(params.has('costProbe'));
@@ -1301,7 +1302,7 @@ export default function ThreeDarwinGame() {
     setLaunchState('loading');
   };
 
-  const markSceneReady = () => {
+  const markSceneReady = useCallback(() => {
     const now = performance.now();
     const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
     setSceneReady(true);
@@ -1314,7 +1315,17 @@ export default function ThreeDarwinGame() {
       setOpeningIntroStartedAt(now);
       setLaunchState('intro');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!e2eMode || !gameStarted || sceneReady) return undefined;
+    const handle = window.setInterval(() => {
+      const startedAt = bootStartedAt.current || performance.now();
+      const waitedLongEnough = performance.now() - startedAt >= Math.max(BOOT_MIN_LOADING_MS, 2500);
+      if (waitedLongEnough && document.querySelector('canvas')) markSceneReady();
+    }, 250);
+    return () => window.clearInterval(handle);
+  }, [e2eMode, gameStarted, markSceneReady, sceneReady]);
 
   useEffect(() => {
     if (!sceneReady) return undefined;
@@ -1367,7 +1378,7 @@ export default function ThreeDarwinGame() {
                 inputLocked={openingIntroActive}
               />
               <SceneReadySignal
-                loadingReady={loadersStable}
+                loadingReady={loadersStable || e2eMode}
                 startedAtRef={bootStartedAt}
                 minElapsedMs={BOOT_MIN_LOADING_MS}
                 onReady={markSceneReady}
@@ -1460,6 +1471,7 @@ export default function ThreeDarwinGame() {
             onBack={() => setLaunchState('menu')}
           />
         )}
+        <ThreeE2EHarness />
       </KeyboardControls>
     </main>
   );

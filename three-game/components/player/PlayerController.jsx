@@ -83,6 +83,25 @@ const PUSH_FEEDBACK_DURATION = {
 };
 const DEFAULT_CARRIED_OFFSET = [0.32, 1.02, 0.24];
 const DEFAULT_CARRIED_ROTATION = [0, 0, -0.18];
+const FINCH_DROPPING_SLOW_MOTION = {
+  minScale: 0.34,
+  attack: 0.12,
+  holdUntil: 1.05,
+  releaseUntil: 2.08,
+};
+
+function finchDroppingSlowMotionScale(event, now) {
+  if (!event || now >= event.until) return 1;
+  const elapsed = Math.max(0, now - (event.startedAt || now));
+  const attack = THREE.MathUtils.smoothstep(elapsed, 0, FINCH_DROPPING_SLOW_MOTION.attack);
+  const release = 1 - THREE.MathUtils.smoothstep(
+    elapsed,
+    FINCH_DROPPING_SLOW_MOTION.holdUntil,
+    FINCH_DROPPING_SLOW_MOTION.releaseUntil,
+  );
+  const amount = THREE.MathUtils.clamp(attack * release, 0, 1);
+  return THREE.MathUtils.lerp(1, FINCH_DROPPING_SLOW_MOTION.minScale, amount);
+}
 
 function PlayerPhysicsCollider({ colliderConfig, colliderRef }) {
   if (colliderConfig.shape === 'cylinder') {
@@ -255,6 +274,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const latestPropPushContact = useRef(null);
   const pendingSnareTrip = useRef(null);
   const pendingAnimalDropping = useRef(null);
+  const lastConstraintReactionKey = useRef(null);
   const sustainedObstaclePush = useRef({ id: null, startedAt: -10, lastAt: -10 });
   const lastCactusHitAt = useRef(-10);
   const cactusHazardStreak = useRef({ count: 0, lastAt: -10 });
@@ -421,6 +441,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const addAnimalDropping = useThreeGameStore(state => state.addAnimalDropping);
   const smushAnimalDropping = useThreeGameStore(state => state.smushAnimalDropping);
   const recordAnimalModeAction = useThreeGameStore(state => state.recordAnimalModeAction);
+  const consumeForageable = useThreeGameStore(state => state.consumeForageable);
   const setPlayerPose = useThreeGameStore(state => state.setPlayerPose);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
@@ -712,6 +733,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     stateRef.current.flightDive = false;
     stateRef.current.flightDescend = false;
     stateRef.current.flightSpeedT = startsInFlight ? 0.55 : 0;
+    stateRef.current.timeScale = 1;
     stateRef.current.wadeDepth = 0;
     lastGroundedAt.current = performance.now() / 1000;
     resetCameraForSpawn(groundY);
@@ -724,13 +746,17 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     idleFidget.current = { idleSince: 0, nextAt: 0, count: 0 };
   }, [currentZoneId, playableMode.id, playerSpawnId, spawnPoint.y, startX, startZ]);
 
-  useFrame((_, delta) => {
+  useFrame((_, rawDelta) => {
     if (!group.current || health <= 0) return;
     collisionAdapter.beginFrame?.();
     const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
     const rawTouch = consumeTouchControls();
     const touch = inputLocked ? EMPTY_KEYS : rawTouch;
     const now = performance.now() / 1000;
+    const activeFinchDroppingCamera = finchDroppingCamera.current.until > now ? finchDroppingCamera.current : null;
+    const timeScale = finchDroppingSlowMotionScale(activeFinchDroppingCamera, now);
+    const delta = rawDelta * timeScale;
+    stateRef.current.timeScale = timeScale;
     updatePlayerFrameFeedback({
       group,
       warningRef,
@@ -860,7 +886,8 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       currentZoneId,
       viewMode,
       openingCamera,
-      finchDroppingCamera: finchDroppingCamera.current.until > now ? finchDroppingCamera.current : null,
+      finchDroppingCamera: activeFinchDroppingCamera,
+      cameraDelta: rawDelta,
       health,
       fatigue,
       now,
@@ -1004,6 +1031,39 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     if (movementConstraintActive) {
       stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, now + 0.35);
     }
+    const constraintReaction = activeConstraint?.reaction;
+    const constraintReactionKey = activeConstraint
+      ? `${activeConstraint.type}:${activeConstraint.startedAt || ''}`
+      : null;
+    if (!constraintReactionKey) {
+      lastConstraintReactionKey.current = null;
+    } else if (
+      isDarwinMode
+      && constraintReaction
+      && lastConstraintReactionKey.current !== constraintReactionKey
+      && (constraintReaction.interrupt || !stateRef.current.action)
+    ) {
+      lastConstraintReactionKey.current = constraintReactionKey;
+      const clip = constraintReaction.clip || 'hitReaction';
+      const duration = Number.isFinite(Number(constraintReaction.duration))
+        ? Number(constraintReaction.duration)
+        : durationFor(clip);
+      stateRef.current.sitting = false;
+      stateRef.current.lying = false;
+      velocity.current.x *= 0.28;
+      velocity.current.z *= 0.28;
+      startAction(clip, duration, {
+        lockMovement: constraintReaction.lockMovement ?? true,
+        recoverAction: constraintReaction.recoverAction || null,
+        recoverDuration: constraintReaction.recoverDuration || undefined,
+      });
+      cameraImpulse.current = {
+        startedAt: now,
+        intensity: clip === 'shoulderHitAndFall' ? 0.24 : 0.14,
+        duration: 0.28,
+        seed: cameraImpulse.current.seed + 1,
+      };
+    }
     const snareTrip = pendingSnareTrip.current;
     if (snareTrip && isDarwinMode) {
       if (now - (snareTrip.receivedAt || now) > 1.2) {
@@ -1132,11 +1192,15 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           startAction(requestedAnimalAction.clip, animalActionDuration, {
             lockMovement: airborneFinchDefecate ? 0 : (requestedAnimalAction.lockMovement ?? 0.45),
             onStart: () => {
+              const forageResult = requestedAnimalAction.id === 'eat'
+                ? consumeForageable?.(useThreeGameStore.getState().carryPrompt?.forageable)
+                : null;
               recordAnimalModeAction?.({
                 actionId: requestedAnimalAction.id,
                 foodLabel: requestedAnimalAction.id === 'eat'
-                  ? (playableMode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots')
+                  ? (forageResult?.foodLabel || (playableMode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots'))
                   : undefined,
+                forage: forageResult?.consumed ? forageResult : null,
               });
               if (requestedAnimalAction.id === 'defecate') {
                 const spawnDelay = airborneFinchDefecate
@@ -1223,12 +1287,16 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const steeringMoving = moving || flightActive;
     const runIntent = Boolean((keys.run || touch.run) && steeringMoving && !stateRef.current.crouching);
     const crouchRunIntent = Boolean((keys.run || touch.run) && moving && stateRef.current.crouching);
+    const constraintSpeedScale = isDarwinMode && Number.isFinite(Number(activeConstraint?.movementSpeedScale))
+      ? THREE.MathUtils.clamp(Number(activeConstraint.movementSpeedScale), 0.25, 1)
+      : 1;
+    const constraintDisablesRun = Boolean(isDarwinMode && activeConstraint?.disableRun);
     const fatigueRunT = THREE.MathUtils.clamp(
       (fatigue - playerConfig.tiredRunFatigue) / Math.max(1, playerConfig.exhaustedRunFatigue - playerConfig.tiredRunFatigue),
       0,
       1,
     );
-    const canRun = runIntent && fatigue < playerConfig.exhaustedRunFatigue && !carriedObjectId;
+    const canRun = runIntent && fatigue < playerConfig.exhaustedRunFatigue && !carriedObjectId && !constraintDisablesRun;
     const running = Boolean(canRun);
     const tiredRun = running && fatigueRunT > 0.04;
     const fatigueRunScale = running ? THREE.MathUtils.lerp(1, 0.72, fatigueRunT) : 1;
@@ -1255,7 +1323,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       ? (running ? swimConfig.sprintSpeed : swimConfig.speed)
       : (stateRef.current.crouching
         ? playerConfig.walkSpeed * (crouchRunIntent ? 0.92 : 0.45)
-        : running ? rawRunSpeed : playerConfig.walkSpeed) * carrySpeedScale * wadeSpeedScale * braceSpeedScale;
+        : running ? rawRunSpeed : playerConfig.walkSpeed) * carrySpeedScale * wadeSpeedScale * braceSpeedScale * constraintSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
     const rawInputDirection = frameScratch.rawInputDirection;
     if (flightActive) {
@@ -1334,6 +1402,10 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         group,
         facing,
         movementLocked,
+        keys,
+        touch,
+        lastButtons,
+        activeConstraint,
       });
     }
     const idleEligible = !moving
@@ -2246,10 +2318,12 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         const streak = cactusHazardStreak.current;
         streak.count = now - streak.lastAt <= 8 ? streak.count + 1 : 1;
         streak.lastAt = now;
+        const severeFall = isDarwinMode && impactSpeed >= playerConfig.runSpeed * 0.86;
         const embedSpines = isDarwinMode && (streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62);
         if (embedSpines) streak.count = 0;
         applyCactusDamage(cactusContact.cactus.damage || 8, {
           embedSpines,
+          severeFall,
           impactSpeed,
           cactusId: cactusContact.cactus.id,
         });

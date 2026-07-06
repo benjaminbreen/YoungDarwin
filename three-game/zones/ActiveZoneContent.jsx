@@ -2,6 +2,7 @@
 
 import React, { Suspense, useMemo } from 'react';
 import { Beagle } from '../components/scene/Beagle';
+import { HmsBeagleDeck } from '../components/scene/HmsBeagleDeck';
 import { Landmarks } from '../components/scene/Landmarks';
 import { Terrain } from '../components/scene/Terrain';
 import { BorderVistas } from '../components/scene/BorderVistas';
@@ -54,6 +55,11 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       {deferredContentReady && settings.beagle !== false && (
         <Suspense fallback={null}>
           <Beagle />
+        </Suspense>
+      )}
+      {currentZoneId === 'BEAGLE' && (
+        <Suspense fallback={null}>
+          <HmsBeagleDeck />
         </Suspense>
       )}
       {settings.specimens !== false && specimens.map(specimen => (

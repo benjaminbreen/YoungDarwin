@@ -16,11 +16,11 @@ Completed major systems so far:
 - To add a Mixamo clip to `darwin-candidate-2-animated.glb` (the 9-hotkey alternate model): convert the FBX with `scripts/blender_fbx_anim_to_glb.py`, then bake it in with `scripts/transplant-clip.mjs <src.glb> <dst.glb> <clipName>`. The transplant copies rotation tracks only plus a rig-ratio-scaled hips translation — never copy raw translation/scale tracks between the two Darwin rigs (they differ ~1.5x in skeleton scale and Darwin shrinks to a dwarf).
 - Parkour/locomotion clips on candidate-2, the `9`-hotkey alternate model, include `crouchRun`, `wallRun` (running jump into a tall face rebounds), `runStrafeLeft/Right` (aimed run strafes), `standToSit` (`K`), `climbingDownWall`, `fallingIdle`, plus replaced `idle`/`turnLeft`/`turnRight`. Climb is `Q` or `V`: obstacle climb first, then steep-terrain rise ahead, then ledge descent.
 - The Beagle is now an optimized GLB built from the Swedish Hemmema source. Runtime file: `public/assets/models/ships/beagle-styrbjorn.glb`. Source/processing report lives under `assets-src/ships/styrbjorn/`.
-- New starting-zone specimen GLBs are integrated through `three-game/modelAssets.js`: `purple-finch.glb` for the medium ground finch, `galapagos-penguin.glb`, and `galapagos-giant-tortoise.glb`. Runtime files live in `public/assets/models/animals/runtime/`; extracted sources and conversion reports live under `assets-src/animals/imported/`.
-- The tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the current runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass.
+- New starting-zone specimen GLBs are integrated through `three-game/modelAssets.js`: `purple-finch.glb` for the medium ground finch, `galapagos-penguin.glb`, and `galapagos-giant-tortoise.glb`. Runtime files live in `public/assets/models/animals/runtime/`; extracted sources and conversion reports live under `assets-src/animals/imported/`. The playable tortoise is a separate runtime asset, `tripoTortoiseRigged`, at `public/assets/models/animals/runtime/tripo-tortoise-rigged.glb`.
+- The older static tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the `floreanaGiantTortoise` runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass. Do not confuse this older static specimen asset with the current playable `tripoTortoiseRigged` model.
 - The marine iguana GLB is enabled as `public/assets/models/animals/runtime/marine-iguana.glb`. Use `npm run asset:audit` for current file sizes before starting asset optimization work.
 - Crabs, cow/donkey/goat experiments, and nature props have been integrated, but livestock should be used only where Floreana settlement or introduced-grazing context calls for them.
-- The playable route now has three active modes: Darwin, finch, and tortoise. Darwin keeps the expedition/tool loop; finch is a small flier with W/S climb/sink, A/D carve, Space takeoff/land, and simple eat/sleep/defecate actions; tortoise is a slow grounded animal using `tripoTortoiseRigged` with graze/rest/defecate plus shell-brace behavior. Animal modes spawn from their specimen context, hide that source actor, place Darwin in the world as an NPC threat/observer, and use animal-specific status readouts and camera framing. Opening the status view pauses spatial simulation while leaving the live model/status shot animated.
+- The playable route now has three active modes: Darwin, finch, and tortoise. Darwin keeps the expedition/tool loop; finch is a small flier with W/S climb/sink, A/D carve, Space takeoff/land, and simple eat/sleep/defecate actions; tortoise is a slow grounded animal using `tripoTortoiseRigged` with start/stop walk, turn-in-place, reverse, idle variants, contextual browse-low/browse-high/drink eating, sleep, defecate, withdraw/re-emerge shell-brace behavior, mud-step, and slope-brace clips. `Space`/jump input holds shell-brace in tortoise mode. Animal modes spawn from their specimen context, hide that source actor, place Darwin in the world as an NPC threat/observer, and use animal-specific status readouts and camera framing. Opening the status view pauses spatial simulation while leaving the live model/status shot animated.
 - Water uses a custom stylized shader in `three-game/components/scene/Water.jsx`, with Gerstner waves and a baked seafloor depth texture for shallow-water color and transparency.
 - Camera controls use visible cursor drag rotation, `Z`/`X` rotate keys, and scroll zoom. Do not reintroduce pointer-lock camera behavior unless explicitly requested.
 
@@ -184,7 +184,7 @@ The current procedural 3D scene is useful as a playable fallback, but the visual
 4. Put optimized files in `public/assets/models/`.
 5. Enable the asset in `three-game/modelAssets.js`.
 6. Keep procedural fallbacks working at all times.
-7. Verify with `npm run check` and, for substantial runtime changes, `npm run build`. Use screenshot checks only when the change affects rendered output or visual framing.
+7. Verify with `npm run check` and, for substantial runtime changes, `npm run build`. For animated GLBs, render contact sheets for changed/problem clips before judging pose or timing quality. Use screenshot checks only when the change affects rendered output, scene composition, UI, or visual framing.
 
 Do not add new raw FBX/GLB/Blend/PNG asset drops to the repository root. Some older source assets still live there, but new work should go under `assets-src/` for source/intermediate files and `public/assets/models/` or `public/assets/textures/` only for optimized runtime assets.
 
@@ -228,31 +228,49 @@ Without API keys, agents should still create concept prompts, asset manifests, B
 - `npm run three:darwin5-smoke` verifies Darwin5 manifest/runtime clip coverage against `public/assets/models/darwin5.glb`.
 - `npm run three:animation-audit` audits Darwin GLB animation inventory and common clip problems.
 - `npm run three:contact-sheet -- --asset <assetId|alias|path> --list-clips` lists animation clips for any animated runtime GLB.
-- `npm run three:contact-sheet -- --asset <assetId|alias|path> --clip <clipName|all> --view <front|side|threeQuarter>` renders repo-visible keyframe contact sheets through Blender and assembles `contact-*.png` when ImageMagick is available.
-- Direct fallback if the wrapper fails: `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --disable-autoexec --python scripts/blender_animation_contact_frames.py -- --asset public/assets/models/darwin5.glb --clip <clipName> --out test-results/animation-sheets/darwin5-<clipName> --frames 12 --size 360 --view threeQuarter`.
-- `npm run three:screenshot` auto-detects an existing local Next dev server on common ports, captures desktop/mobile screenshots, and checks that the 3D canvas is full-screen and nonblank.
-- `npm run three:screenshot:fast` captures the desktop WebGL canvas only. Use it for quick canvas smoke checks while iterating; use the full `three:screenshot` before claiming broad page-level visual readiness.
+- `npm run three:contact-sheet -- --asset <assetId|alias|path> --clip <clipName|all> --view <front|side|back|top|threeQuarter>` renders repo-visible keyframe contact sheets through Blender and assembles `contact-*.png` when ImageMagick is available.
+- `npm run three:contact-sheet -- --asset <assetId|alias|path> --clip <clipName|all> --preset <quick|review> --views <comma,list> --overview --report <file>` is the preferred wrapper shape for serious animation review. `review` defaults to side/three-quarter/front views, labels, ground grid, and motion trails; `quick` is for lightweight clip inventory checks.
+- Direct fallback if the wrapper fails: `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --disable-autoexec --python scripts/blender_animation_contact_frames.py -- --asset public/assets/models/darwin5.glb --clip <clipName> --out test-results/animation-sheets/darwin5-<clipName> --frames 12 --size 360 --view threeQuarter --ground`.
+- `npm run three:screenshot` auto-detects or starts a temporary local Next dev server, captures desktop/mobile WebGL canvas screenshots, and checks that the 3D canvas is full-screen and nonblank.
+- `npm run three:screenshot:fast` uses the same bounded path but captures the desktop WebGL canvas only. Use it for quick canvas smoke checks while iterating.
+- `npm run three:screenshot:page` captures full page screenshots for rare DOM/HUD layout proof. Do not use it as the default visual check; page screenshots are slower and more failure-prone than canvas capture.
+- `npm run three:e2e:smoke` auto-detects or starts a temporary local Next dev server, opens `/three?e2e=1`, clicks through real launch/menu/HUD controls, drives keyboard movement, examines a specimen, and verifies animal-mode toolbar actions. Use this for gameplay interaction proof instead of trying to infer playability from screenshots.
 
 Visual verification policy:
 
 - Do not run screenshots for every code change. `npm run check` is the default syntax/regression gate before claiming a code change is verified.
-- Run `npm run three:screenshot:fast` when a change can affect `/three` rendering: terrain, materials, shaders, lighting, camera, controls, HUD/layout/CSS, 3D asset loading, animation visibility, ecology/scatter, water, or scene composition.
-- Run full `npm run three:screenshot` only before claiming broad visual readiness after substantial visual or 3D changes.
-- If screenshot, dev-server, Playwright, or Chromium verification fails, retry once only when the failure is likely transient or sandbox-related. Do not install browsers, switch Chromium channels, escalate repeatedly, or loop on loading/menu states unless the user explicitly asked for visual proof.
+- Run `npm run three:screenshot:fast` when a change can affect `/three` rendering: terrain, materials, shaders, lighting, camera, controls, HUD/CSS, 3D asset loading, animation visibility, ecology/scatter, water, or scene composition.
+- Run full `npm run three:screenshot` only before claiming broad desktop+mobile canvas readiness after substantial visual or 3D changes.
+- Run `npm run three:screenshot:page` only when the user explicitly needs full DOM/HUD screenshot proof.
+- If screenshot, dev-server, Playwright, or Chromium verification fails, retry once only when the failure is likely transient or sandbox-related. Do not install browsers, switch Chromium channels, escalate repeatedly, keep restarting dev servers, or loop on loading/menu states unless the user explicitly asked for visual proof.
 - If the retry fails, continue with other verification and report the failed command, the likely cause, and any diagnostic files under `test-results/three-darwin/`.
+
+Gameplay interaction verification:
+
+- Use `npm run three:e2e:smoke` when a change affects launch flow, keyboard/player controls, HUD buttons, specimen examination/collection, playable animal modes, toolbar actions, or agent/browser control of gameplay.
+- The E2E harness is gated behind `/three?e2e=1` and exposes `window.__darwinE2E` only in that mode. Do not use it for ordinary gameplay code paths or user-facing UI.
+- Prefer real Playwright clicks and keypresses for UI/control proof; use the harness for stable state assertions and targeted setup/cleanup. Do not replace gameplay checks with repeated screenshot attempts.
 
 Animation contact-sheet pipeline:
 
-- Use contact sheets for character, NPC, specimen, or creature animation changes where pose quality, retargeting, timing, or root motion matters. A single in-game screenshot is not enough to review animation quality.
-- Write contact-sheet outputs under `test-results/animation-sheets/<asset>-<clip>/`, not `/tmp`, so the user and future agents can find them.
-- For Darwin5 animation work, first run `npm run three:darwin5-smoke`. Then render contact sheets for the changed clips plus any adjacent transitions likely to break, usually 3-5 clips rather than every clip.
+- Use contact sheets for character, NPC, specimen, or creature animation changes where pose quality, retargeting, timing, silhouette, contact, deformation, or root motion matters. For animation/model review, contact sheets are the primary visual artifact; a single in-game screenshot is not enough to judge animation quality.
+- Before reviewing animation quality, first confirm the contact-sheet system and asset selection are correct: run `--list-clips`, render one quick sheet or quick overview, and visually confirm the output is nonblank, labeled, fixed-framed, grounded on the diagnostic grid, and showing the intended runtime asset.
+- Write contact-sheet outputs under `test-results/animation-sheets/<asset>-<clip>[-<view>]/`, not `/tmp`, so the user and future agents can find them. Use `--report test-results/animation-sheets/<run>/report.json` for review runs that should be auditable later.
+- For broad inventory sanity, render a compact overview with representative frames, for example `--clip all --preset quick --frames 3 --size 220 --views threeQuarter --overview --yes-all`. Use overview sheets to spot missing/broken clips, then inspect individual contact sheets for actual animation critique.
+- For serious review of changed clips, use `--preset review` or explicit `--frames 8-16 --size 300-360 --views side,threeQuarter`. Review the changed clips plus adjacent transitions likely to break, usually 3-7 core clips rather than every clip.
+- Use `side` for foot contact, swim, walk/run/reverse, browse/drink height, mud steps, slides, and root-motion reads; `top` for turn-in-place, pivoting, strafes, and drift; `front`/`back` for symmetry, shoulder/hip spread, and deformation; `threeQuarter` for personality, silhouette, gestures, idles, jumps, falls, and most one-shots.
+- Use `--motion-trail` when checking root motion or drift. Use `--incline <degrees>` for slope/brace clips; for tortoise slope review, `--incline 12` is a useful first pass. Use `--follow-camera` only when deliberately debugging a moving target, since the default fixed camera better exposes drift and contact.
+- For Darwin5 animation work, first run `npm run three:darwin5-smoke`. Then render contact sheets for the changed clips plus any adjacent transitions likely to break.
 - For specimen/creature animation work, resolve the runtime asset through `three-game/modelAssets.js` when possible and use the wrapper aliases when they fit: `turtle`, `fish`, `manta`, `booby`, `cormorant`, `frigate`, `dove`, `finch`, `penguin`, `iguana`, `lizard`, `crab`, `seaLion`, `syms`, `darwin5`. Use direct `/assets/models/...` paths for ecology-only GLBs that are not in `modelAssets.js`.
-- The in-game Animal Animation Lab (`7` hotkey) is the preferred interactive specimen QA tool when the app is running. It reflects wildlife-catalog/model-manifest specimen assets plus reef swimmer GLBs, previews embedded clips, and its `Generate Contact Sheet` button saves the selected animal+clip through `/api/animation-contact-sheet` into `test-results/animation-sheets/` with the same naming scheme as the CLI.
-- Suggested views: `side` for swim, run, slide, and root-motion clips; `front` for turns, strafes, and symmetry checks; `threeQuarter` for dives, jumps, falls, idles, gestures, and most one-shots.
+- For playable tortoise animation work, use `--asset tripoTortoiseRigged`. Do not use `--asset tortoise` when reviewing the playable tortoise; that alias currently resolves to the older `floreanaGiantTortoise` specimen asset. Core tortoise review clips are usually `idle`, `idleLook`, `idleStretch`, `idleHalfTuck`, `startWalk`, `walk`, `stopWalk`, `turnInPlace`, `reverse`, `browseHigh`, `browseLow`, `drink`, `withdraw`, `reEmerge`, `mudStep`, and `slopeBrace`.
+- The in-game Animal Animation Lab (`7` hotkey) is useful for interactive specimen QA when the app is running. It reflects wildlife-catalog/model-manifest specimen assets plus reef swimmer GLBs, includes the playable `tripoTortoiseRigged` model, previews embedded clips, and its contact-sheet buttons save selected animal+clip sheets or all-clip overviews through `/api/animation-contact-sheet` into `test-results/animation-sheets/` with the same naming scheme as the CLI.
 - Practical specimen examples:
 
 ```bash
 npm run three:contact-sheet -- --asset turtle --list-clips
+npm run three:contact-sheet -- --asset tripoTortoiseRigged --clip all --preset quick --frames 3 --size 220 --views threeQuarter --overview --yes-all
+npm run three:contact-sheet -- --asset tripoTortoiseRigged --clip slopeBrace --preset review --frames 8 --size 300 --views side,threeQuarter --incline 12
+npm run three:contact-sheet -- --asset tripoTortoiseRigged --clip turnInPlace --preset review --frames 8 --size 300 --views top,threeQuarter
 npm run three:contact-sheet -- --asset turtle --clip all --view side
 npm run three:contact-sheet -- --asset fish --clip all --view side --frames 10
 npm run three:contact-sheet -- --asset booby --clip all --view threeQuarter
@@ -266,7 +284,7 @@ Playwright/Chromium sandbox note:
 
 - In Codex on macOS, Playwright Chromium can crash before page load inside the normal seatbelt sandbox (`SIGABRT`/`SIGTRAP`, `ThermalStateObserverMac`, `kill EPERM`), leaving noisy Chrome/Chromium crash behavior and sometimes orphaned browser children.
 - Start with the normal screenshot command when visual verification is warranted. If Chromium fails before page load with a sandbox-looking launch error, retry once with the exact screenshot npm script and `sandbox_permissions: "require_escalated"`. The exact prefixes `npm run three:screenshot` and `npm run three:screenshot:fast` are the approval-stable forms; use them directly so persisted approval rules can match without a new user checkpoint.
-- Do not wrap screenshot commands with inline env vars such as `THREE_SCREENSHOT_TIMEOUT_MS=... npm run three:screenshot` or `env THREE_SCREENSHOT_VIEWPORTS=...`. Use `npm run three:screenshot:fast` for the desktop-only path, and prefer the script defaults unless deliberately debugging the screenshot script itself.
+- Do not wrap screenshot commands with inline env vars such as `THREE_SCREENSHOT_TIMEOUT_MS=... npm run three:screenshot` or `env THREE_SCREENSHOT_VIEWPORTS=...`. Use `npm run three:screenshot:fast` for the desktop-only path and `npm run three:screenshot:page` for rare page-level captures.
 - If a screenshot run is interrupted, check for leftovers with `pgrep -af "playwright|chromium|chrome-headless|Google Chrome for Testing|three-screenshot"` and kill only orphaned Playwright/Chromium/screenshot processes, not the user's existing Next dev server.
 
 Verification expectations:
@@ -275,10 +293,11 @@ Verification expectations:
 - Asset manifest/runtime asset change: run `npm run asset:audit` and `npm run check`.
 - Darwin5 animation manifest, clip, retargeting, or blend-selection change: run `npm run three:darwin5-smoke`, render contact sheets for the changed/problem clips, and run `npm run check`.
 - Non-Darwin NPC/specimen/creature animation change: run `npm run asset:audit` if runtime assets changed, render contact sheets for the changed/problem clips when the asset has skeletal animation, and run `npm run check`.
-- Terrain, scene composition, camera, UI, lighting, water, or visual rendering change: run `npm run check` and `npm run three:screenshot`.
-- Player movement code that changes animation selection or physics should use both paths: contact sheets for affected animation clips and `three:screenshot` only when scene/camera/rendering could plausibly regress.
+- Playable tortoise rig, clip, or animation-selection change: use `--asset tripoTortoiseRigged`, render quick overview plus focused sheets for the affected core clips, use `--incline` for slope-brace review when relevant, run `npm run asset:audit` if the GLB changed, and run `npm run check`.
+- Terrain, scene composition, camera, UI, lighting, water, or visual rendering change: run `npm run check` and usually `npm run three:screenshot:fast`; run full `npm run three:screenshot` only when desktop+mobile canvas coverage matters.
+- Player movement code that changes animation selection or physics should use contact sheets for affected animation clips; add `three:screenshot:fast` only when scene/camera/rendering could plausibly regress.
 - Before claiming production readiness or broad integration safety: run `npm run build` as well.
 
 ## Implementation Rule
 
-New GLB work must be manifest-driven through `three-game/modelAssets.js`. Do not delete procedural models until the replacement GLB is loaded, verified in screenshots, and has a fallback path.
+New GLB work must be manifest-driven through `three-game/modelAssets.js`. Do not delete procedural models until the replacement GLB is loaded, verified with the bounded screenshot path, and has a fallback path.

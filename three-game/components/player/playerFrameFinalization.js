@@ -112,6 +112,7 @@ export function finalizePlayerFrame({
   viewMode,
   openingCamera = null,
   finchDroppingCamera = null,
+  cameraDelta = delta,
   health,
   fatigue,
   now,
@@ -154,7 +155,7 @@ export function finalizePlayerFrame({
     flightSpeedT: stateRef.current.flightSpeedT || 0,
     cameraProfile,
     now,
-    delta,
+    delta: cameraDelta,
   });
 
   stateRef.current.speed = horizontalSpeed;

@@ -3,7 +3,10 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
+import { getRegionEdgeHints } from '../../../../game-core/regionMaps';
 import { getRuntimePlayerPose } from '../../../store';
+import { getModelAsset } from '../../../modelAssets';
+import { getWildlifeAssetId } from '../../../wildlife/wildlifeCatalog';
 import { getEcology } from '../../../world/ecology';
 import { updateFoliageUniforms } from './foliageMotion';
 import { InstancedGLBLayer } from './InstancedGLBLayer';
@@ -43,10 +46,7 @@ function FoliageMotionDriver() {
   return null;
 }
 
-// Zones the player can travel to from anywhere on the island. Once the
-// current zone has settled, warm the GLB cache for the others so arriving
-// there doesn't stall on network fetches.
-const PREFETCH_ZONES = ['N_SHORE', 'NW_REEF', 'S_HUT', 'MANGROVES'];
+const GLB_PATH_RE = /\.(?:glb|gltf)(?:[?#].*)?$/i;
 const EMPTY_LAYER_PLAN = {
   flora: [],
   groundCover: [],
@@ -152,23 +152,75 @@ function OptionalSplatBackdrop({ backdrop, enabled }) {
   return null;
 }
 
+function assetPreloadPath(asset) {
+  if (!asset?.enabled || !asset.path) return null;
+  return asset.cacheKey ? `${asset.path}?v=${encodeURIComponent(asset.cacheKey)}` : asset.path;
+}
+
+function preloadGLBPath(path) {
+  if (typeof path !== 'string' || !GLB_PATH_RE.test(path)) return;
+  useGLTF.preload(path);
+}
+
+function preloadModelAsset(assetId) {
+  const path = assetPreloadPath(getModelAsset(assetId));
+  if (path) useGLTF.preload(path);
+}
+
+function shouldPrefetchAsset(item, ecology) {
+  if (!item || item.prefetch === false) return false;
+  return !ecology.stream || item.prefetch === true;
+}
+
+function prefetchEcologyAssets(ecology) {
+  if (!ecology) return;
+  const preloadLayerPath = item => {
+    if (shouldPrefetchAsset(item, ecology)) preloadGLBPath(item.path);
+  };
+  ecology.flora?.forEach(preloadLayerPath);
+  ecology.dryGrassPatches?.forEach(preloadLayerPath);
+  ecology.props?.forEach(preloadLayerPath);
+  ecology.collectibleBeachFinds?.forEach(layer => {
+    if (!shouldPrefetchAsset(layer, ecology)) return;
+    layer.items?.forEach(item => preloadGLBPath(item.path));
+  });
+  ecology.swimmers?.schools?.forEach(preloadLayerPath);
+  ecology.swimmers?.cruisers?.forEach(preloadLayerPath);
+  ecology.flyingModels?.forEach(item => {
+    if (shouldPrefetchAsset(item, ecology) && item.assetId) preloadModelAsset(item.assetId);
+  });
+  ecology.ambientWildlife?.forEach(layer => {
+    if (!shouldPrefetchAsset(layer, ecology)) return;
+    layer.items?.forEach(item => preloadModelAsset(getWildlifeAssetId(item.speciesId || item.species || item.specimenId || item.id)));
+  });
+}
+
+function neighborZoneIds(zoneId) {
+  if (!zoneId) return [];
+  const seen = new Set();
+  return getRegionEdgeHints(zoneId)
+    .filter(hint => hint.kind === 'open' && hint.toRegionId && hint.toRegionId !== zoneId)
+    .map(hint => hint.toRegionId)
+    .filter(id => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+}
+
 function useNeighborZonePrefetch(currentEcology) {
+  const zoneId = currentEcology?.zoneId;
   useEffect(() => {
+    if (!zoneId) return undefined;
     const handle = setTimeout(() => {
-      PREFETCH_ZONES.forEach(zoneId => {
-        if (zoneId === currentEcology?.zoneId) return;
-        const other = getEcology(zoneId);
+      neighborZoneIds(zoneId).forEach(neighborId => {
+        const other = getEcology(neighborId);
         if (!other) return;
-        other.flora?.forEach(layer => {
-          if (layer.path && layer.prefetch !== false && (!other.stream || layer.prefetch === true)) useGLTF.preload(layer.path);
-        });
-        other.props?.forEach(prop => {
-          if (prop.path && prop.prefetch !== false && (!other.stream || prop.prefetch === true)) useGLTF.preload(prop.path);
-        });
+        prefetchEcologyAssets(other);
       });
     }, 5000); // let the current zone finish loading first
     return () => clearTimeout(handle);
-  }, [currentEcology]);
+  }, [zoneId]);
 }
 
 export function EcologyRenderer({ ecology, settings = {} }) {
@@ -273,6 +325,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
         <Suspense key={layer.id} fallback={null}>
           <DryGrassPatchField
             layer={layer}
+            zoneId={layer.zoneId || ecology.zoneId}
             castShadow={layer.castShadow === true}
             receiveShadow={layer.receiveShadow !== false}
             inspectableType={inspectableTypeForEcologyLayer(layer.id) || 'dry_grass'}

@@ -8,12 +8,27 @@ export function triggerDirectPlayerActions({
   group,
   facing,
   movementLocked,
+  keys = {},
+  touch = {},
+  lastButtons = null,
+  activeConstraint = null,
 }) {
   const actionOptions = { movementLocked };
+  const toolBlocked = (button, toolId) => {
+    const blocked = Array.isArray(activeConstraint?.blockedTools) && activeConstraint.blockedTools.includes(toolId);
+    if (!blocked) return false;
+    const pressed = Boolean(keys[button] || touch[button]);
+    if (pressed && !lastButtons?.current?.[button]) {
+      useThreeGameStore.getState().reportConstraintBlockedTool?.(toolId);
+    }
+    return true;
+  };
   triggerAction('pray', 'pray', ACTION_DURATION.pray, actionOptions);
   triggerAction('fireRifle', 'fireRifle', ACTION_DURATION.fireRifle, actionOptions);
+  const hammerBlocked = toolBlocked('hammer', 'hammer');
   triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
     ...actionOptions,
+    movementLocked: movementLocked || hammerBlocked,
     onStart: () => {
       emitPropEvent('tool-swing', {
         tool: 'hammer',
@@ -23,8 +38,10 @@ export function triggerDirectPlayerActions({
       });
     },
   });
+  const netBlocked = toolBlocked('net', 'insect_net');
   triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, {
     ...actionOptions,
+    movementLocked: movementLocked || netBlocked,
     onStart: () => {
       maybeTriggerNetSnagFromSwing({
         position: group.current?.position,
