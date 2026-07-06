@@ -420,6 +420,125 @@ function makeSnareFailedResult(specimen = null) {
   };
 }
 
+function localSnareEscapeResolution(input = '') {
+  const text = String(input || '').toLowerCase();
+  const sensible = /\b(?:cut|knife|blade|untie|untying|loosen|loose|slacken|unhook|free|remove|work\s+(?:the\s+)?loop|pry|lever|use\s+(?:the\s+)?net|pole|stick|call|ask|summon|syms|assistant|calm|careful|slowly)\b/.test(text);
+  const reckless = /\b(?:run|walk|jump|kick|thrash|yank|pull\s+hard|ignore|drag)\b/.test(text);
+  if (sensible && !reckless) {
+    return {
+      narration: 'You stop pulling against the loop and work at the knot with deliberate fingers. The waxed twine slackens enough to slide free of your boot.',
+      escapeSucceeded: true,
+      consequence: 'freed',
+      healthDelta: 0,
+      actionDisposition: 'observed',
+      targetType: 'self',
+      sounds: ['twine slackening in sand'],
+      source: 'local-snare-escape',
+      fallback: true,
+    };
+  }
+  return {
+    narration: 'The more you pull against the loop, the more faithfully it does its work. You remain caught, with sand in your sleeve and no useful progress made.',
+    escapeSucceeded: false,
+    consequence: reckless ? 'worse' : 'still_trapped',
+    healthDelta: reckless ? -3 : 0,
+    actionDisposition: reckless ? 'unsafe' : 'needs_modal',
+    targetType: 'self',
+    sounds: ['taut twine scraping over sand'],
+    source: 'local-snare-escape',
+    fallback: true,
+  };
+}
+
+const FIELD_DILEMMA_CONFIG = {
+  net_snagged: {
+    eventType: 'net_snag_attempt',
+    objective: 'Free the insect net from cactus or scrub without tearing the mesh.',
+    title: 'The insect net is snagged.',
+    retryTitle: 'The net is still caught.',
+    body: 'The mesh has caught on cactus spines; yanking may tear it.',
+    retryBody: 'The net remains hooked and the mesh is under tension.',
+    helper: 'Describe a careful way to back it out, cut only the caught fibers, or get Syms to help.',
+    placeholder: 'Describe how Darwin frees the net...',
+    failureFallback: 'The net remains caught. You need a more careful plan before it tears.',
+    resolvedFallback: 'You free the net without tearing the useful mesh.',
+    targetType: 'tool',
+  },
+  cactus_spines: {
+    eventType: 'cactus_spine_treatment',
+    objective: 'Treat embedded cactus spines with field tools before continuing.',
+    title: 'Cactus spines are embedded.',
+    retryTitle: 'The spines still hurt.',
+    body: 'Several Opuntia spines have gone in deeply enough to make careless movement costly.',
+    retryBody: 'The spines remain in place and every movement reminds you of them.',
+    helper: 'Describe a concrete treatment: knife point, lens, water, cloth, or Syms helping.',
+    placeholder: 'Describe how Darwin treats the spines...',
+    failureFallback: 'The spines remain embedded. A vague intention is no treatment.',
+    resolvedFallback: 'You work the spines out carefully and can continue.',
+    targetType: 'self',
+  },
+  hammer_shard: {
+    eventType: 'hammer_shard_treatment',
+    objective: 'Deal with a flying rock shard or grit from hammering before continuing fieldwork.',
+    title: 'A hammer chip has struck you.',
+    retryTitle: 'The shard is still a problem.',
+    body: 'A hard rock flake has caught your hand or eye after the hammer blow.',
+    retryBody: 'The shard or grit has not been dealt with safely.',
+    helper: 'Describe a concrete remedy: rinse with water, wrap the hand, remove the shard, or ask Syms.',
+    placeholder: 'Describe how Darwin deals with the shard...',
+    failureFallback: 'The injury is no better, and continuing to hammer would be foolish.',
+    resolvedFallback: 'You treat the chip injury and regain the use of your hand and tools.',
+    targetType: 'self',
+  },
+};
+
+const FIELD_DILEMMA_TYPES = new Set(Object.keys(FIELD_DILEMMA_CONFIG));
+
+function localFieldDilemmaResolution(type, input = '') {
+  const text = String(input || '').toLowerCase();
+  const reckless = /\b(?:yank|pull\s+hard|thrash|run|ignore|keep\s+going|continue\s+hammering|hammer\s+again|rub\s+(?:my\s+)?eye|rub\s+it|kick|tear)\b/.test(text);
+  const sensibleByType = {
+    net_snagged: /\b(?:knife|blade|cut|trim|untangle|unhook|back\s+(?:it|the\s+net)\s+out|reverse|loosen|free|mesh|fiber|fibre|twine|syms|assistant|hold\s+(?:the\s+)?cactus|careful|slowly)\b/,
+    cactus_spines: /\b(?:knife|blade|point|needle|tweezer|magnifier|lens|inspect|spine|pull\s+(?:out|them)|remove|wash|rinse|water|cloth|bandage|wrap|syms|assistant|careful|slowly)\b/,
+    hammer_shard: /\b(?:wash|rinse|water|blink|eye|shard|splinter|chip|remove|knife|blade|tweezer|wrap|cloth|bandage|hand|syms|assistant|stop\s+hammering|careful|slowly)\b/,
+  };
+  const sensible = sensibleByType[type]?.test(text) || false;
+  const config = FIELD_DILEMMA_CONFIG[type] || FIELD_DILEMMA_CONFIG.cactus_spines;
+  if (sensible && !reckless) {
+    const narration = type === 'net_snagged'
+      ? 'You stop pulling against the mesh and work the caught edge back along the spines. The net comes free with only a few fibers frayed.'
+      : type === 'cactus_spines'
+        ? 'You treat the spines as objects, not insults: inspect, lift, and draw them out one by one. The pain becomes manageable.'
+        : 'You stop hammering and attend to the small injury before it becomes a large one. Water, cloth, and patience restore the use of your hand and eye.';
+    return {
+      narration,
+      resolved: true,
+      consequence: 'resolved',
+      healthDelta: 0,
+      actionDisposition: 'observed',
+      targetType: config.targetType,
+      sounds: type === 'net_snagged' ? ['mesh slipping free of spines'] : ['field kit being opened'],
+      source: 'local-field-dilemma',
+      fallback: true,
+    };
+  }
+  return {
+    narration: reckless
+      ? (type === 'net_snagged'
+          ? 'The harder you pull, the more firmly the cactus keeps the net. A few threads part with an unhappy little snap.'
+          : 'Force makes the injury worse, and the island offers no sympathy for haste.')
+      : config.failureFallback,
+    resolved: false,
+    consequence: reckless ? 'worse' : 'still_pending',
+    healthDelta: reckless ? -3 : 0,
+    actionDisposition: reckless ? 'unsafe' : 'needs_modal',
+    targetType: config.targetType,
+    sounds: type === 'net_snagged' ? ['taut mesh scraping over spines'] : ['a sharp breath'],
+    source: 'local-field-dilemma',
+    fallback: true,
+  };
+}
+
 function createExpeditionSlice() {
   const expedition = createInitialExpeditionState();
   return {
@@ -494,8 +613,13 @@ function createSceneSlice() {
     dismissedEdgePromptId: null,
     arrivalEdgeBlock: null,
     animalModeNpcEncounter: null,
+    animalModeDarwinNpcPose: null,
+    animalModeStats: {},
     lastOutcome: null,
+    activeConstraint: null,
+    majorEvent: null,
     snareTraps: [],
+    animalDroppings: [],
     physicsDebug: null,
     // Graphics-quality knobs mirrored from perfSettings so material-building
     // components can react without prop-threading through the whole scene tree.
@@ -1072,6 +1196,157 @@ export const useThreeGameStore = create((set, get) => ({
       }, state, 'scripted', { timeOfDay: state.timeOfDay, day: state.day })),
     };
   }),
+  recordAnimalModeAction: (payload = {}) => set(state => {
+    const mode = getPlayableMode(state.playableModeId);
+    if (mode.kind !== 'animal') return {};
+    const actionId = payload.actionId || payload.id || 'unknown';
+    const current = state.animalModeStats?.[mode.id] || {};
+    const actions = current.actions || {};
+    const previous = actions[actionId] || {};
+    const foodLabel = actionId === 'eat'
+      ? (payload.foodLabel || previous.foodLabel || (mode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots'))
+      : previous.foodLabel;
+    return {
+      animalModeStats: {
+        ...(state.animalModeStats || {}),
+        [mode.id]: {
+          ...current,
+          modeId: mode.id,
+          updatedAtRealMs: Date.now(),
+          lastActionId: actionId,
+          actions: {
+            ...actions,
+            [actionId]: {
+              ...previous,
+              count: (previous.count || 0) + 1,
+              lastAt: gameMinutesForState(state),
+              lastDay: state.day || 1,
+              lastZoneId: state.currentZoneId,
+              ...(foodLabel ? { foodLabel } : {}),
+            },
+          },
+        },
+      },
+    };
+  }),
+  setAnimalModeDarwinNpcPose: pose => set(state => {
+    if (!pose) {
+      return state.animalModeDarwinNpcPose ? { animalModeDarwinNpcPose: null } : {};
+    }
+    const previous = state.animalModeDarwinNpcPose;
+    const next = {
+      zoneId: pose.zoneId || state.currentZoneId,
+      x: Number(pose.x) || 0,
+      y: Number(pose.y) || 0,
+      z: Number(pose.z) || 0,
+      yaw: Number(pose.yaw) || 0,
+      at: Date.now(),
+    };
+    if (
+      previous
+      && previous.zoneId === next.zoneId
+      && Math.abs(previous.x - next.x) < 0.06
+      && Math.abs(previous.y - next.y) < 0.04
+      && Math.abs(previous.z - next.z) < 0.06
+      && Math.abs(previous.yaw - next.yaw) < 0.04
+    ) return {};
+    return { animalModeDarwinNpcPose: next };
+  }),
+  addAnimalDropping: (payload = {}) => set(state => {
+    const zoneId = payload.zoneId || state.currentZoneId;
+    const source = payload.position || state.playerPose?.position || threeRuntimeState.playerPose.position || INITIAL_PLAYER_POSE.position;
+    const rawX = Number(source.x);
+    const rawZ = Number(source.z);
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawZ)) return {};
+    const falling = payload.status === 'falling';
+    const safe = falling ? { x: rawX, z: rawZ } : clampToWalkable({ x: rawX, y: 0, z: rawZ }, null, zoneId);
+    const rawY = Number(source.y);
+    const y = Number.isFinite(rawY)
+      ? Number(source.y)
+      : terrainHeight(safe.x, safe.z, zoneId) + 0.026;
+    const nowRealMs = Date.now();
+    const sourceModeId = payload.sourceModeId || state.playableModeId || null;
+    const dropping = {
+      id: payload.id || `dropping-${zoneId}-${state.day || 1}-${gameMinutesForState(state)}-${Math.round(safe.x * 100)}-${Math.round(safe.z * 100)}-${nowRealMs}`,
+      zoneId,
+      sourceModeId,
+      kind: payload.kind || (sourceModeId === 'finch' ? 'bird' : 'animal'),
+      position: { x: safe.x, y, z: safe.z },
+      velocity: payload.velocity ? {
+        x: Number(payload.velocity.x) || 0,
+        y: Number(payload.velocity.y) || 0,
+        z: Number(payload.velocity.z) || 0,
+      } : null,
+      yaw: Number(payload.yaw) || 0,
+      radius: Number(payload.radius) || 0.24,
+      status: payload.status || 'fresh',
+      stuckTo: payload.stuckTo || null,
+      impact: payload.impact || null,
+      createdAt: gameMinutesForState(state),
+      createdDay: state.day || 1,
+      createdAtRealMs: nowRealMs,
+      smushedAtRealMs: null,
+      smushCount: 0,
+      seed: Number(payload.seed) || Math.abs(Math.sin((safe.x * 12.9898) + (safe.z * 78.233)) * 43758.5453),
+    };
+    const next = [
+      ...(state.animalDroppings || []).filter(item => item.id !== dropping.id),
+      dropping,
+    ];
+    return { animalDroppings: next.slice(-80) };
+  }),
+  settleAnimalDropping: (droppingId, payload = {}) => set(state => {
+    let changed = false;
+    const next = (state.animalDroppings || []).map(item => {
+      if (item.id !== droppingId) return item;
+      changed = true;
+      const nextYaw = Number(payload.yaw);
+      const nextRadius = Number(payload.radius);
+      return {
+        ...item,
+        status: payload.status || 'splat',
+        position: payload.position || item.position,
+        velocity: null,
+        yaw: Number.isFinite(nextYaw) ? nextYaw : (item.yaw || 0),
+        radius: Number.isFinite(nextRadius) ? nextRadius : item.radius,
+        stuckTo: payload.stuckTo || null,
+        impact: payload.impact || null,
+        landedAtRealMs: Date.now(),
+      };
+    });
+    if (!changed) return {};
+    const darwinHit = payload.stuckTo?.type === 'darwin';
+    return {
+      animalDroppings: next,
+      ...(darwinHit ? {
+        message: 'A pale finch dropping lands squarely on Darwin. For once, the naturalist is the specimen under observation.',
+        animalModeNpcEncounter: {
+          ...(state.animalModeNpcEncounter || {}),
+          type: 'finch-dropping-hit',
+          modeId: 'finch',
+          modeLabel: 'Finch',
+          at: Date.now(),
+          npcPosition: payload.position || null,
+          message: 'A pale finch dropping lands squarely on Darwin. For once, the naturalist is the specimen under observation.',
+        },
+      } : {}),
+    };
+  }),
+  smushAnimalDropping: (droppingId, payload = {}) => set(state => {
+    let changed = false;
+    const next = (state.animalDroppings || []).map(item => {
+      if (item.id !== droppingId || item.status === 'smushed') return item;
+      changed = true;
+      return {
+        ...item,
+        status: 'smushed',
+        smushedAtRealMs: Date.now(),
+        smushedBy: payload.by || state.playableModeId || 'player',
+        smushCount: (item.smushCount || 0) + 1,
+      };
+    });
+    return changed ? { animalDroppings: next } : {};
+  }),
   movePushableObstacle: (obstacleId, delta, zoneId = get().currentZoneId, maxOffset = null) => set(state => {
     const key = `${zoneId}:${obstacleId}`;
     const current = state.pushableObstacleOffsets[key] || { x: 0, z: 0 };
@@ -1457,12 +1732,115 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
 
-  applyCactusDamage: (amount = 8) => set(state => {
+  triggerNetSnagDilemma: (details = {}) => set(state => {
+    if (state.activeConstraint) return {};
+    const config = FIELD_DILEMMA_CONFIG.net_snagged;
+    const eventId = `major-net-snag-${Date.now()}`;
+    const hazardLabel = details.hazardLabel || 'cactus spines';
+    const message = `The insect net catches on ${hazardLabel}. The mesh is under tension, and a hard pull would tear it.`;
+    return {
+      activeConstraint: {
+        type: 'net_snagged',
+        requiresNarratorInput: true,
+        movementLock: true,
+        toolId: 'insect_net',
+        startedAt: Date.now(),
+        attempts: 0,
+        details,
+        composerPlaceholder: config.placeholder,
+      },
+      majorEvent: {
+        id: eventId,
+        type: 'net_snagged',
+        severity: 'warning',
+        title: config.title,
+        body: config.body,
+        helper: config.helper,
+        requiresNarratorInput: true,
+        createdAt: Date.now(),
+      },
+      message,
+      symsLine: '"Steady, sir. The mesh will not thank us for brute force."',
+      lastOutcome: null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine: '"Steady, sir. The mesh will not thank us for brute force."',
+      }, state, 'major-event')),
+    };
+  }),
+
+  triggerHammerShardDilemma: (details = {}) => set(state => {
+    if (state.activeConstraint) return {};
+    const config = FIELD_DILEMMA_CONFIG.hammer_shard;
+    const eventId = `major-hammer-shard-${Date.now()}`;
+    const sampleLabel = details.sampleLabel || details.material || 'rock';
+    const message = `A sharp ${sampleLabel} chip snaps back from the hammer strike and catches you before it falls into the dust.`;
+    return {
+      health: clamp(state.health - 6, 0, MAX_HEALTH),
+      activeConstraint: {
+        type: 'hammer_shard',
+        requiresNarratorInput: true,
+        movementLock: false,
+        toolId: 'hammer',
+        startedAt: Date.now(),
+        attempts: 0,
+        healthPenalty: 6,
+        details,
+        composerPlaceholder: config.placeholder,
+      },
+      majorEvent: {
+        id: eventId,
+        type: 'hammer_shard',
+        severity: 'danger',
+        title: config.title,
+        body: config.body,
+        helper: config.helper,
+        requiresNarratorInput: true,
+        createdAt: Date.now(),
+      },
+      message,
+      symsLine: '"Best look to your hand before the stone, sir."',
+      lastOutcome: null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine: '"Best look to your hand before the stone, sir."',
+      }, state, 'major-event')),
+    };
+  }),
+
+  applyCactusDamage: (amount = 8, options = {}) => set(state => {
     const message = 'You stagger back from the Opuntia spines.';
     const educationalNote = 'Large prickly pear cactus can dominate dry Galapagos scrub; its spines make careless movement costly.';
     const symsLine = '"Mind the cactus, sir. Those spines will write their own field note."';
+    const embedSpines = Boolean(options.embedSpines && !state.activeConstraint);
+    const config = FIELD_DILEMMA_CONFIG.cactus_spines;
+    const eventId = `major-cactus-spines-${Date.now()}`;
     return {
       health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      ...(embedSpines ? {
+        activeConstraint: {
+          type: 'cactus_spines',
+          requiresNarratorInput: true,
+          movementLock: false,
+          startedAt: Date.now(),
+          attempts: 0,
+          details: {
+            cactusId: options.cactusId || 'cactus',
+            impactSpeed: Number.isFinite(Number(options.impactSpeed)) ? Number(options.impactSpeed) : null,
+          },
+          composerPlaceholder: config.placeholder,
+        },
+        majorEvent: {
+          id: eventId,
+          type: 'cactus_spines',
+          severity: 'danger',
+          title: config.title,
+          body: config.body,
+          helper: config.helper,
+          requiresNarratorInput: true,
+          createdAt: Date.now(),
+        },
+      } : {}),
       message,
       educationalNote,
       symsLine,
@@ -1472,6 +1850,12 @@ export const useThreeGameStore = create((set, get) => ({
         fieldNote: educationalNote,
       }, state, 'hazard', { allowFieldNote: true })),
     };
+  }),
+
+  dismissMajorEvent: eventId => set(state => {
+    if (!state.majorEvent || (eventId && state.majorEvent.id !== eventId)) return {};
+    if (state.majorEvent.requiresNarratorInput) return {};
+    return { majorEvent: null };
   }),
 
   rest: () => set(state => {
@@ -1495,6 +1879,121 @@ export const useThreeGameStore = create((set, get) => ({
         narration: message,
         fieldNote: educationalNote,
       }, state, 'rest', { allowFieldNote: true })),
+    };
+  }),
+
+  applySnareEscapeResolution: (data, options = {}) => set(state => {
+    const constraint = state.activeConstraint;
+    if (constraint?.type !== 'snare_immobilized') return { narratorPending: false };
+    const consequence = String(data?.consequence || '').trim() || (data?.escapeSucceeded ? 'freed' : 'still_trapped');
+    const escaped = data?.escapeSucceeded === true || consequence === 'freed';
+    const rawHealthDelta = Number(data?.healthDelta);
+    const healthDelta = Number.isFinite(rawHealthDelta)
+      ? clamp(rawHealthDelta, -10, 5)
+      : (consequence === 'worse' ? -3 : 0);
+    const nextAttempts = (constraint.attempts || 0) + 1;
+    const fallback = escaped
+      ? 'You free yourself from the snare and gather the sprung twine from the sand.'
+      : 'The snare holds. You will need a more careful plan before you can move again.';
+    const narration = data?.narration || fallback;
+    const nextConstraint = escaped
+      ? null
+      : {
+          ...constraint,
+          attempts: nextAttempts,
+          lastAttempt: options.playerInput || '',
+          lastAttemptAt: Date.now(),
+        };
+    const nextMajorEvent = escaped
+      ? null
+      : {
+          id: `major-snare-still-${constraint.trapId || 'trap'}-${nextAttempts}`,
+          type: 'snare_immobilized',
+          severity: consequence === 'worse' ? 'danger' : 'warning',
+          title: consequence === 'worse' ? 'The snare tightens.' : 'Still caught in the snare.',
+          body: consequence === 'worse'
+            ? 'The loop bites harder as you struggle against it.'
+            : 'You remain immobilized and must try another escape plan.',
+          helper: 'Describe a careful way to loosen, cut, or get help with the snare in the narrator panel.',
+          requiresNarratorInput: true,
+          createdAt: Date.now(),
+        };
+    return {
+      health: clamp(state.health + healthDelta, 0, MAX_HEALTH),
+      activeConstraint: nextConstraint,
+      majorEvent: nextMajorEvent,
+      snareTraps: escaped && constraint.trapId
+        ? (state.snareTraps || []).map(trap => (
+            trap.id === constraint.trapId && trap.status === 'sprung-darwin'
+              ? { ...trap, status: 'cleared', checkedAt: gameMinutesForState(state), checkedDay: state.day || 1 }
+              : trap
+          ))
+        : state.snareTraps,
+      message: narration,
+      narratorPending: false,
+      narratorError: data?.fallback ? 'Narration fell back to a local escape ruling.' : null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        ...data,
+        narration,
+        fieldNote: '',
+        educationalNote: '',
+      }, state, escaped ? 'snare-escape' : 'snare-escape-failed', {
+        allowFieldNote: false,
+        allowThought: false,
+      })),
+    };
+  }),
+
+  applyFieldDilemmaResolution: (data, options = {}) => set(state => {
+    const constraint = state.activeConstraint;
+    const config = FIELD_DILEMMA_CONFIG[constraint?.type];
+    if (!constraint || !config) return { narratorPending: false };
+    const consequence = String(data?.consequence || '').trim() || (data?.resolved ? 'resolved' : 'still_pending');
+    const resolved = data?.resolved === true || consequence === 'resolved' || consequence === 'freed';
+    const rawHealthDelta = Number(data?.healthDelta);
+    const healthDelta = Number.isFinite(rawHealthDelta)
+      ? clamp(rawHealthDelta, -8, 4)
+      : (consequence === 'worse' ? -3 : 0);
+    const nextAttempts = (constraint.attempts || 0) + 1;
+    const narration = data?.narration || (resolved ? config.resolvedFallback : config.failureFallback);
+    const nextConstraint = resolved
+      ? null
+      : {
+          ...constraint,
+          attempts: nextAttempts,
+          lastAttempt: options.playerInput || '',
+          lastAttemptAt: Date.now(),
+        };
+    const nextMajorEvent = resolved
+      ? null
+      : {
+          id: `major-${constraint.type}-${nextAttempts}-${Date.now()}`,
+          type: constraint.type,
+          severity: consequence === 'worse' ? 'danger' : 'warning',
+          title: consequence === 'worse' ? config.retryTitle : config.retryTitle,
+          body: consequence === 'worse'
+            ? 'The attempted remedy has made the problem worse.'
+            : config.retryBody,
+          helper: config.helper,
+          requiresNarratorInput: true,
+          createdAt: Date.now(),
+        };
+    return {
+      health: clamp(state.health + healthDelta, 0, MAX_HEALTH),
+      activeConstraint: nextConstraint,
+      majorEvent: nextMajorEvent,
+      message: narration,
+      narratorPending: false,
+      narratorError: data?.fallback ? 'Narration fell back to a local field ruling.' : null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        ...data,
+        narration,
+        fieldNote: '',
+        educationalNote: '',
+      }, state, resolved ? `${constraint.type}-resolved` : `${constraint.type}-failed`, {
+        allowFieldNote: false,
+        allowThought: false,
+      })),
     };
   }),
 
@@ -1564,8 +2063,118 @@ export const useThreeGameStore = create((set, get) => ({
       state.currentZoneId,
       state.day,
       Math.round((state.timeOfDay || 0) * 60),
+      state.activeConstraint?.type || 'free',
       textHash(trimmed),
     ].join(':');
+
+    if (state.activeConstraint?.type === 'snare_immobilized') {
+      try {
+        const response = await fetch('/api/three-narrate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-young-darwin-session': narratorSessionId(state.seed),
+            'x-idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            eventType: 'snare_escape_attempt',
+            playerInput: trimmed,
+            objective: 'Escape the snare before resuming fieldwork.',
+            location: islandLocation.name || zone.name,
+            locationContext: {
+              id: zone.id,
+              localCellId: state.currentLocalCellId,
+              island: zone.island,
+              historicalName: zone.historicalName,
+              biome: zone.biome,
+              description: zone.loadingNote || zone.description || islandLocation.subtitle || '',
+              discoveries: zone.discoveries || [],
+              notableFeatures: zone.notableFeatures || [],
+            },
+            weather: state.weather,
+            timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
+            day: state.day,
+            stats: {
+              health: state.health,
+              fatigue: state.fatigue,
+              curiosity: state.curiosity,
+            },
+            playerPose: {
+              x: Number.isFinite(Number(pose?.position?.x)) ? Number(pose.position.x).toFixed(1) : null,
+              z: Number.isFinite(Number(pose?.position?.z)) ? Number(pose.position.z).toFixed(1) : null,
+              heading: playerHeading(pose),
+            },
+            recentNarration,
+            constraint: state.activeConstraint,
+            idempotencyKey,
+          }),
+        });
+        const data = response.ok ? await response.json() : localSnareEscapeResolution(trimmed);
+        const resolved = data?.escapeSucceeded === undefined ? localSnareEscapeResolution(trimmed) : data;
+        get().applySnareEscapeResolution(resolved, { playerInput: trimmed });
+        return resolved;
+      } catch {
+        const fallback = localSnareEscapeResolution(trimmed);
+        get().applySnareEscapeResolution(fallback, { playerInput: trimmed });
+        return fallback;
+      }
+    }
+
+    if (FIELD_DILEMMA_TYPES.has(state.activeConstraint?.type)) {
+      const config = FIELD_DILEMMA_CONFIG[state.activeConstraint.type];
+      try {
+        const response = await fetch('/api/three-narrate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-young-darwin-session': narratorSessionId(state.seed),
+            'x-idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            eventType: config.eventType,
+            playerInput: trimmed,
+            objective: config.objective,
+            location: islandLocation.name || zone.name,
+            locationContext: {
+              id: zone.id,
+              localCellId: state.currentLocalCellId,
+              island: zone.island,
+              historicalName: zone.historicalName,
+              biome: zone.biome,
+              description: zone.loadingNote || zone.description || islandLocation.subtitle || '',
+              discoveries: zone.discoveries || [],
+              notableFeatures: zone.notableFeatures || [],
+            },
+            toolId: state.activeConstraint.toolId || tool?.id || state.activeToolId || 'hands',
+            weather: state.weather,
+            timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
+            day: state.day,
+            stats: {
+              health: state.health,
+              fatigue: state.fatigue,
+              curiosity: state.curiosity,
+            },
+            playerPose: {
+              x: Number.isFinite(Number(pose?.position?.x)) ? Number(pose.position.x).toFixed(1) : null,
+              z: Number.isFinite(Number(pose?.position?.z)) ? Number(pose.position.z).toFixed(1) : null,
+              heading: playerHeading(pose),
+            },
+            recentNarration,
+            nearbyPeople,
+            constraint: state.activeConstraint,
+            idempotencyKey,
+          }),
+        });
+        const data = response.ok ? await response.json() : localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
+        const resolved = data?.resolved === undefined ? localFieldDilemmaResolution(state.activeConstraint.type, trimmed) : data;
+        get().applyFieldDilemmaResolution(resolved, { playerInput: trimmed });
+        return resolved;
+      } catch {
+        const fallback = localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
+        get().applyFieldDilemmaResolution(fallback, { playerInput: trimmed });
+        return fallback;
+      }
+    }
 
     try {
       const response = await fetch('/api/three-narrate', {
@@ -1781,6 +2390,7 @@ export const useThreeGameStore = create((set, get) => ({
     const message = isSyms
       ? 'Syms steps into the hidden loop; the peg flips loose and the twine snaps around his boot.'
       : 'Darwin puts his boot through his own snare. The loop catches, the peg kicks free, and he pitches forward into the sand.';
+    const eventId = `major-snare-${trapId}-${Date.now()}`;
     return {
       snareTraps: (state.snareTraps || []).map(item => (
         item.id === trapId
@@ -1795,11 +2405,41 @@ export const useThreeGameStore = create((set, get) => ({
             }
           : item
       )),
+      health: isSyms ? state.health : clamp(state.health - 25, 0, MAX_HEALTH),
+      activeConstraint: isSyms
+        ? state.activeConstraint
+        : {
+            type: 'snare_immobilized',
+            trapId,
+            requiresNarratorInput: true,
+            movementLock: true,
+            startedAt: Date.now(),
+            attempts: 0,
+            healthPenalty: 25,
+          },
+      majorEvent: isSyms
+        ? state.majorEvent
+        : {
+            id: eventId,
+            type: 'snare_immobilized',
+            severity: 'danger',
+            title: "You've been caught in your own snare.",
+            body: 'You are immobilized for now.',
+            helper: 'Decide on your next move and enter it in the narrator panel.',
+            requiresNarratorInput: true,
+            createdAt: Date.now(),
+          },
       message,
       symsLine: isSyms
         ? '"That one found me before it found a lizard, sir."'
         : '"Proof of principle, sir, though perhaps not the intended specimen."',
       lastOutcome: null,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine: isSyms
+          ? '"That one found me before it found a lizard, sir."'
+          : '"Proof of principle, sir, though perhaps not the intended specimen."',
+      }, state, isSyms ? 'snare-syms-trigger' : 'major-event')),
     };
   }),
 
@@ -1813,6 +2453,19 @@ export const useThreeGameStore = create((set, get) => ({
 
     if (trap.status === 'sprung-darwin' || trap.status === 'sprung-syms') {
       const caughtSyms = trap.status === 'sprung-syms';
+      if (!caughtSyms && state.activeConstraint?.type === 'snare_immobilized' && state.activeConstraint.trapId === trapId) {
+        const message = 'The loop is still under tension. Decide how to extract yourself and write the attempt in the narrator panel.';
+        set(current => ({
+          message,
+          symsLine: '"A plan first, sir. Pulling at random is how the knot earns its keep."',
+          lastOutcome: null,
+          narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
+            narration: message,
+            symsLine: '"A plan first, sir. Pulling at random is how the knot earns its keep."',
+          }, current, 'snare-blocked-clear')),
+        }));
+        return null;
+      }
       const message = caughtSyms
         ? 'You unhook the twine from Syms and reset the disturbed sand where the trigger peg tore loose.'
         : 'Darwin works the twine off his boot, gathers the sprung loop, and clears the trap from the path.';

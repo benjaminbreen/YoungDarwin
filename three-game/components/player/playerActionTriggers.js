@@ -1,6 +1,7 @@
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { useThreeGameStore } from '../../store';
 import { ACTION_DURATION } from './playerConfig';
+import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 
 export function triggerDirectPlayerActions({
   triggerAction,
@@ -22,7 +23,15 @@ export function triggerDirectPlayerActions({
       });
     },
   });
-  triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, actionOptions);
+  triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, {
+    ...actionOptions,
+    onStart: () => {
+      maybeTriggerNetSnagFromSwing({
+        position: group.current?.position,
+        facing: facing.current,
+      });
+    },
+  });
   triggerAction('snare', 'kneelInspect', ACTION_DURATION.kneelInspect, {
     ...actionOptions,
     lockMovement: true,

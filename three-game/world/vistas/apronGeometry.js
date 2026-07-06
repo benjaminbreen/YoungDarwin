@@ -118,6 +118,28 @@ export function clampToRegionEdge(config, x, z) {
   ];
 }
 
+// Area-averaged terrain color. The apron grid samples vertices metres apart,
+// far too coarse to point-sample a splat-sharp palette: adjacent vertices land
+// in different color zones (white sand vs. basalt) and the triangles between
+// them interpolate as hard polygonal shards. Averaging a ring of taps turns
+// zone boundaries into gradients; the radius grows with distance the same way
+// real distant ground blurs together. Build-time only — results are baked into
+// vertex colors and cached, so this costs nothing per frame.
+const APRON_COLOR_TAPS = [
+  [0, 0],
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+  [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7],
+];
+function averagedTerrainColor(x, z, regionId, radius) {
+  const sum = new THREE.Color(0, 0, 0);
+  for (let i = 0; i < APRON_COLOR_TAPS.length; i += 1) {
+    const sx = x + APRON_COLOR_TAPS[i][0] * radius;
+    const sz = z + APRON_COLOR_TAPS[i][1] * radius;
+    sum.add(terrainColor(sx, sz, terrainHeight(sx, sz, regionId), regionId));
+  }
+  return sum.multiplyScalar(1 / APRON_COLOR_TAPS.length);
+}
+
 // Low-frequency relief for the schematic far terrain. Simplex octaves rather
 // than summed sines: the old sine trio repeated visibly as broad regular
 // swells across the apron.
@@ -134,7 +156,10 @@ function applyApronVertexMottle(color, x, z, options = {}) {
   const seed = options.seed || 0;
   const strength = THREE.MathUtils.clamp(options.strength ?? 1, 0, 1);
   if (strength <= 0) return color;
-  const macro = terrainSurfaceNoise(x * 0.42 + seed * 2.7, z * 0.42 - seed * 1.9);
+  // 0.16 keeps the mottle wavelength (~6 m) spanning several grid vertices;
+  // the old 0.42 put ~one vertex per noise feature, which aliased into the
+  // same faceted speckle the comment above warns about.
+  const macro = terrainSurfaceNoise(x * 0.16 + seed * 2.7, z * 0.16 - seed * 1.9);
   const shade = 1 + macro * 0.06 * strength;
   color.multiplyScalar(THREE.MathUtils.clamp(shade, 0.9, 1.1));
   if (macro > 0.3) color.offsetHSL(0.01, -0.015, 0.012 * strength);
@@ -281,8 +306,10 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     previewDepth + 10,
   );
   const width = axisLength(config, vista.edge) * 1.04;
-  const cols = 52;
-  const rows = 28;
+  // Fine enough that the area-averaged vertex colors interpolate as gradients;
+  // still only ~4k triangles per vista, built once and cached.
+  const cols = 64;
+  const rows = 34;
   const collarRows = collarRowCount(rows);
   const positions = [];
   const nearColors = [];
@@ -343,7 +370,10 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
         ? THREE.MathUtils.smoothstep(outsideDistance, continuity.ridgeStart, continuity.ridgeFull)
         : seamBlend;
       const seamHold = 1 - heightBlend;
-      const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.58, 1.0);
+      // Aerial perspective starts about a third of the way out — the vista is
+      // schematic terrain, and hazing it early is what sells it as "distance"
+      // rather than reachable ground with odd colors.
+      const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.34, 1.0);
 
       const alongDistance = (u - 0.5) * width;
       const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
@@ -383,15 +413,24 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       const previewY = THREE.MathUtils.lerp(sourceCarryY, targetProfileY, heightBlend);
       const y = THREE.MathUtils.lerp(currentY - BORDER_COLLAR_DROP, previewY, collarBlend);
 
-      const currentColor = terrainColor(currentX, currentZ, currentY, regionId);
-      const targetColor = terrainColor(targetX, targetZ, targetY, targetRegionId);
+      // Blur radius tracks distance: near the seam stay close to the real
+      // ground color, far out average whole zones together so the neighbor's
+      // beach/basalt patches read as soft gradients instead of shards.
+      const currentColor = averagedTerrainColor(
+        currentX, currentZ, regionId,
+        1.2 + outsideDistance * 0.08,
+      );
+      const targetColor = averagedTerrainColor(
+        targetX, targetZ, targetRegionId,
+        Math.min(7.5, 1.6 + targetDistance * 0.14),
+      );
       const color = transitionVistaColor(transition, currentColor, targetColor, outsideDistance, outsideT, targetY);
       const mottleT = THREE.MathUtils.smoothstep(outsideDistance, 2.0, 18.0);
       applyApronVertexMottle(color, x, z, {
         seed: (vista.seed || 0) + 31,
         strength: 0.16 + mottleT * (continuity?.seamNoiseStrength ?? 0.65),
       });
-      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.52);
+      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.6);
 
       positions.push(x, y, z);
       // Carry-strip vertex colors barely show (the region splat materials
@@ -539,7 +578,7 @@ export function makeApronGeometry(regionId, config, vista) {
     const t = outsideT;
     const distance = outsideDistance;
     const seamBlend = THREE.MathUtils.smoothstep(outsideDistance, 0.0, depth * 0.38);
-    const farHaze = THREE.MathUtils.smoothstep(t, 0.72, 1.0);
+    const farHaze = THREE.MathUtils.smoothstep(t, 0.42, 1.0);
     for (let col = 0; col <= cols; col += 1) {
       const u = col / cols;
       const side = Math.abs(u - 0.5) * 2;
@@ -570,7 +609,7 @@ export function makeApronGeometry(regionId, config, vista) {
       const apronY = THREE.MathUtils.lerp(edgeY, targetY, seamBlend) - sideDrop;
       const y = THREE.MathUtils.lerp(edgeY - BORDER_COLLAR_DROP, apronY, collarBlend);
 
-      const edgeColor = terrainColor(edgeX, edgeZ, edgeY, regionId);
+      const edgeColor = averagedTerrainColor(edgeX, edgeZ, regionId, 1.4 + distance * 0.08);
       const waterColor = SHALLOW_CONTINUATION.clone().lerp(DEEP_CONTINUATION, THREE.MathUtils.clamp(t * 0.8 + edgeWater * 0.25, 0, 1));
       const rawTargetColor = profileColor(vista, distance, t, sideFade);
       const targetColor = rawTargetColor.lerp(waterColor, waterHold * 0.9);
@@ -579,7 +618,7 @@ export function makeApronGeometry(regionId, config, vista) {
         seed: vista.seed || 0,
         strength: 0.22 + seamBlend * 0.7,
       });
-      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.5);
+      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.6);
 
       positions.push(x, y, z);
       colors.push(color.r, color.g, color.b);

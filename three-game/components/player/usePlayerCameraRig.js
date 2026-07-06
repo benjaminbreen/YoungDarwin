@@ -70,6 +70,10 @@ export function usePlayerCameraRig() {
     cameraRight: new THREE.Vector3(),
     rawPivot: new THREE.Vector3(),
     shoulderEye: new THREE.Vector3(),
+    droppingEye: new THREE.Vector3(),
+    droppingLook: new THREE.Vector3(),
+    droppingForward: new THREE.Vector3(),
+    droppingRight: new THREE.Vector3(),
     introStartTarget: new THREE.Vector3(),
     introStartEye: new THREE.Vector3(),
     introFinalPivot: new THREE.Vector3(),
@@ -205,6 +209,7 @@ export function usePlayerCameraRig() {
     cameraImpulse,
     viewMode,
     openingCamera = null,
+    finchDroppingCamera = null,
     swimming = false,
     wadeDepth = 0,
     flying = false,
@@ -397,20 +402,21 @@ export function usePlayerCameraRig() {
       statusLookRef.current.lerp(scratch.chest.set(focus.x, centerY, focus.z), ease);
       camera.lookAt(statusLookRef.current);
     } else if (statusViewOpen) {
+      const statusFrame = cameraProfile?.status || {};
       const forward = scratch.statusForward.set(facing.x, 0, facing.z);
       if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
       forward.normalize();
       const right = scratch.statusRight.set(forward.z, 0, -forward.x);
-      const chest = scratch.chest.copy(playerPosition).add(scratch.panVertical.set(0, 1.5, 0));
+      const chest = scratch.chest.copy(playerPosition).add(scratch.panVertical.set(0, statusFrame.lookY ?? 1.5, 0));
       if (!statusLookRef.current) {
         statusLookRef.current = camera.position.clone()
           .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));
       }
       const ease = 1 - Math.exp(-2.4 * delta);
       const eye = scratch.statusEye.copy(chest)
-        .add(forward.multiplyScalar(1.15))
-        .add(right.multiplyScalar(0.18))
-        .add(scratch.panVertical.set(0, 0.05, 0));
+        .add(forward.multiplyScalar(statusFrame.distance ?? 1.15))
+        .add(right.multiplyScalar(statusFrame.side ?? 0.18))
+        .add(scratch.panVertical.set(0, statusFrame.eyeY ?? 0.05, 0));
       camera.position.lerp(eye, ease);
       statusLookRef.current.lerp(chest, ease);
       camera.lookAt(statusLookRef.current);
@@ -490,8 +496,33 @@ export function usePlayerCameraRig() {
         .add(cameraForward.multiplyScalar(-horiz))
         .add(cameraRight.multiplyScalar(side))
         .add(scratch.panVertical.set(0, vert, 0));
+      let lookTarget = pivot;
+      if (flightCamera && finchDroppingCamera && now < finchDroppingCamera.until) {
+        const sinceDrop = Math.max(0, now - (finchDroppingCamera.startedAt || now));
+        const remaining = Math.max(0, finchDroppingCamera.until - now);
+        const dropBlend = Math.min(
+          THREE.MathUtils.smoothstep(sinceDrop, 0, 0.38),
+          THREE.MathUtils.smoothstep(remaining, 0, 0.72),
+        );
+        if (dropBlend > 0.001) {
+          const dropForward = scratch.droppingForward.set(facing?.x || 0, 0, facing?.z || -1);
+          if (dropForward.lengthSq() < 0.0001) dropForward.set(0, 0, -1);
+          dropForward.normalize();
+          const dropRight = scratch.droppingRight.set(dropForward.z, 0, -dropForward.x);
+          const lookX = playerPosition.x + dropForward.x * 1.45;
+          const lookZ = playerPosition.z + dropForward.z * 1.45;
+          const lookY = collisionAdapter.terrainHeight(lookX, lookZ) + 0.06;
+          const dropLook = scratch.droppingLook.set(lookX, lookY, lookZ);
+          const dropEye = scratch.droppingEye.copy(playerPosition)
+            .addScaledVector(dropForward, -0.36)
+            .addScaledVector(dropRight, 0.16)
+            .add(scratch.panVertical.set(0, 3.35 + THREE.MathUtils.clamp(flightSpeedT, 0, 1) * 0.65, 0));
+          eye.lerp(dropEye, dropBlend);
+          lookTarget = dropLook.lerp(pivot, 1 - dropBlend);
+        }
+      }
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-(flightCamera?.positionDamping ?? 6.5) * delta));
-      camera.lookAt(pivot);
+      camera.lookAt(lookTarget);
     }
     if (!statusViewOpen && !examineSession && statusLookRef.current) {
       const ease = 1 - Math.exp(-3.2 * delta);

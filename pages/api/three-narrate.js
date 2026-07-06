@@ -126,6 +126,10 @@ function normalizeNarratorPayload(payload, fallbackText = '') {
     targetType: safeString(normalized.targetType, 'unknown'),
     weather: safeString(normalized.weather),
     sounds: clampArray(normalized.sounds, 3),
+    ...(typeof normalized.escapeSucceeded === 'boolean' ? { escapeSucceeded: normalized.escapeSucceeded } : {}),
+    ...(typeof normalized.resolved === 'boolean' ? { resolved: normalized.resolved } : {}),
+    ...(safeString(normalized.consequence) ? { consequence: safeString(normalized.consequence) } : {}),
+    ...(Number.isFinite(Number(normalized.healthDelta)) ? { healthDelta: Number(normalized.healthDelta) } : {}),
     source: 'llm',
   };
 }
@@ -207,6 +211,104 @@ function placePayload({ location, locationContext }) {
   };
 }
 
+function snareEscapeFallback(input = '') {
+  const text = String(input || '').toLowerCase();
+  const sensible = /\b(?:cut|knife|blade|untie|loosen|loose|slacken|unhook|free|remove|pry|lever|net|pole|stick|call|ask|syms|assistant|careful|slowly)\b/.test(text);
+  const reckless = /\b(?:run|walk|jump|kick|thrash|yank|pull\s+hard|ignore|drag)\b/.test(text);
+  if (sensible && !reckless) {
+    return {
+      narration: 'You give up the hopeless business of dragging the loop and attend to the knot itself. With patient fingers, the snare slackens and comes free.',
+      escapeSucceeded: true,
+      consequence: 'freed',
+      healthDelta: 0,
+      actionDisposition: 'observed',
+      targetType: 'self',
+      weather: '',
+      sounds: ['twine slackening'],
+      source: 'scripted-snare-escape',
+    };
+  }
+  return {
+    narration: 'The snare answers force with force. The loop remains taut, and the island has not yet returned your liberty.',
+    escapeSucceeded: false,
+    consequence: reckless ? 'worse' : 'still_trapped',
+    healthDelta: reckless ? -3 : 0,
+    actionDisposition: reckless ? 'unsafe' : 'needs_modal',
+    targetType: 'self',
+    weather: '',
+    sounds: ['taut twine scraping'],
+    source: 'scripted-snare-escape',
+  };
+}
+
+const FIELD_DILEMMA_API = {
+  net_snag_attempt: {
+    label: 'net snagged on cactus or dry scrub',
+    objective: 'free the insect net without tearing the useful mesh',
+    situation: 'Darwin has swung or carried the insect net into cactus spines or dry scrub. The mesh is caught under tension.',
+    success: 'cut only the caught fibers, use a pocket knife/blade, back the net out along the spines, untangle the mesh carefully, loosen the caught edge, or ask Syms to hold the cactus/mesh steady',
+    failure: 'vague intent, yanking, pulling hard, continuing to swing, walking away while attached, or ignoring the snag',
+    targetType: 'tool',
+  },
+  cactus_spine_treatment: {
+    label: 'embedded cactus spines',
+    objective: 'remove or treat embedded Opuntia spines before movement or tool work worsens them',
+    situation: 'Darwin has hit cactus hard enough that several spines are embedded in his hand or leg.',
+    success: 'use the pocket knife point, lens, tweezers/needle-like point, water rinse, cloth/bandage, or Syms helping to remove or treat the spines',
+    failure: 'vague rest, rubbing, continuing to run, ignoring the spines, or pulling blindly without inspection',
+    targetType: 'self',
+  },
+  hammer_shard_treatment: {
+    label: 'hammer shard injury',
+    objective: 'deal with a sharp rock chip or grit caused by hammering before continuing fieldwork',
+    situation: 'A hard rock chip has snapped back from Darwin’s geological hammer and caught his hand or eye.',
+    success: 'stop hammering, rinse with water, blink/flush grit, wrap the hand with cloth, remove a visible shard carefully, use a knife point, or ask Syms to help',
+    failure: 'continuing to hammer, rubbing the eye, ignoring bleeding/grit, vague resolve, or striking the rock again immediately',
+    targetType: 'self',
+  },
+};
+
+function fieldDilemmaFallback(eventType, input = '') {
+  const config = FIELD_DILEMMA_API[eventType] || FIELD_DILEMMA_API.cactus_spine_treatment;
+  const text = String(input || '').toLowerCase();
+  const reckless = /\b(?:yank|pull\s+hard|thrash|run|ignore|keep\s+going|continue\s+hammering|hammer\s+again|rub\s+(?:my\s+)?eye|rub\s+it|kick|tear)\b/.test(text);
+  const sensible = eventType === 'net_snag_attempt'
+    ? /\b(?:knife|blade|cut|trim|untangle|unhook|back\s+(?:it|the\s+net)\s+out|reverse|loosen|free|mesh|fiber|fibre|twine|syms|assistant|hold\s+(?:the\s+)?cactus|careful|slowly)\b/.test(text)
+    : eventType === 'hammer_shard_treatment'
+      ? /\b(?:wash|rinse|water|blink|eye|shard|splinter|chip|remove|knife|blade|tweezer|wrap|cloth|bandage|hand|syms|assistant|stop\s+hammering|careful|slowly)\b/.test(text)
+      : /\b(?:knife|blade|point|needle|tweezer|magnifier|lens|inspect|spine|pull\s+(?:out|them)|remove|wash|rinse|water|cloth|bandage|wrap|syms|assistant|careful|slowly)\b/.test(text);
+  if (sensible && !reckless) {
+    return {
+      narration: eventType === 'net_snag_attempt'
+        ? 'You ease the net backward along the spines instead of fighting them. The mesh slips free with its useful shape intact.'
+        : eventType === 'hammer_shard_treatment'
+          ? 'You stop hammering and treat the small injury before it becomes a large one. The field kit proves more useful than bravado.'
+          : 'You inspect the spines and draw them out with small, deliberate motions. The pain remains, but it no longer governs the work.',
+      resolved: true,
+      consequence: 'resolved',
+      healthDelta: 0,
+      actionDisposition: 'observed',
+      targetType: config.targetType,
+      weather: '',
+      sounds: ['field kit rustle'],
+      source: 'scripted-field-dilemma',
+    };
+  }
+  return {
+    narration: reckless
+      ? 'The attempted remedy answers haste with more trouble. This is still a practical problem, and it has not been solved.'
+      : 'That does not yet address the physical problem. Name the tool, hand, or motion that actually frees or treats it.',
+    resolved: false,
+    consequence: reckless ? 'worse' : 'still_pending',
+    healthDelta: reckless ? -3 : 0,
+    actionDisposition: reckless ? 'unsafe' : 'needs_modal',
+    targetType: config.targetType,
+    weather: '',
+    sounds: ['an uncomfortable pause'],
+    source: 'scripted-field-dilemma',
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -233,6 +335,7 @@ export default async function handler(req, res) {
       recentNarration = [],
       nearbyPeople = [],
       playerPose = {},
+      constraint = null,
     } = body;
 
     if (isNarratorIdentityQuestion(playerInput)) {
@@ -243,6 +346,149 @@ export default async function handler(req, res) {
 
     if (isPlaceQuestion(playerInput)) {
       return res.status(200).json(placePayload({ location, locationContext }));
+    }
+
+    if (eventType === 'snare_escape_attempt') {
+      const escapePrompt = `Event: snare_escape_attempt
+Player typed escape plan: ${safeString(playerInput, '(empty)')}
+Situation: Darwin is caught in his own waxed-twine ground snare and cannot walk. The loop is around his boot or ankle, the trigger peg has sprung, and he has already taken a painful fall.
+Current objective: judge whether this plan plausibly frees him.
+Location: ${safeString(location)} (${safeString(locationContext.historicalName || locationContext.island)})
+Terrain/location type: ${safeString(locationContext.biome || locationContext.type, 'unknown')}
+Weather: ${weather || 'unknown'}
+Date/time: day ${day || 1}, ${timeOfDay || 'unknown'}
+Stats: health ${stats.health ?? 100}, fatigue ${stats.fatigue ?? 0}
+Previous escape attempts: ${Number(constraint?.attempts || 0)}
+Recent field log: ${clampArray(recentNarration, 5).join(' | ') || 'none'}
+
+Adjudication rules:
+- Succeed if the player describes a calm, practical extraction: loosen/untie the loop, cut twine, use a blade or tool, use the net pole/stick as a lever, or call Syms for help.
+- Fail if the action is vague, impossible, or does not address the loop/knot.
+- Mark consequence "worse" and healthDelta -3 only for reckless struggling such as running, kicking, thrashing, or pulling hard against the loop.
+- Do not demand perfect technical detail. Reward clear intent and field practicality.
+- Keep the narration concrete and brief; no NPC dialogue.
+
+Return JSON only with:
+{
+  "narration": "1-2 concise sentences describing the result",
+  "escapeSucceeded": true or false,
+  "consequence": "freed | still_trapped | worse",
+  "healthDelta": 0 or -3,
+  "actionDisposition": "observed | impossible | unsafe | needs_modal",
+  "targetType": "self",
+  "fieldNote": "",
+  "darwinThought": "",
+  "sounds": ["optional short sound cue"]
+}`;
+
+      const { sessionId, idempotencyKey } = getRequestIdentity({
+        req,
+        route: '/api/three-narrate',
+        prompt: escapePrompt,
+        idempotencyKey: body.idempotencyKey,
+      });
+
+      const result = await generateLLMText({
+        route: '/api/three-narrate',
+        sessionId,
+        idempotencyKey,
+        model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: escapePrompt,
+        temperature: 0.18,
+        maxTokens: 160,
+      });
+
+      const text = result.text || '';
+      const parsed = parseNarratorJSON(text);
+      const normalized = normalizeNarratorPayload(parsed, text);
+      if (typeof normalized.escapeSucceeded !== 'boolean') {
+        return res.status(200).json({
+          ...snareEscapeFallback(playerInput),
+          provider: result.provider,
+          model: result.model,
+          fallbackFrom: result.fallbackFrom || null,
+        });
+      }
+      return res.status(200).json({
+        ...normalized,
+        provider: result.provider,
+        model: result.model,
+        fallbackFrom: result.fallbackFrom || null,
+      });
+    }
+
+    if (FIELD_DILEMMA_API[eventType]) {
+      const config = FIELD_DILEMMA_API[eventType];
+      const dilemmaPrompt = `Event: ${eventType}
+Player typed remedy: ${safeString(playerInput, '(empty)')}
+Situation: ${config.situation}
+Current objective: ${safeString(objective, config.objective)}
+Location: ${safeString(location)} (${safeString(locationContext.historicalName || locationContext.island)})
+Terrain/location type: ${safeString(locationContext.biome || locationContext.type, 'unknown')}
+Equipped or affected tool: ${toolId || constraint?.toolId || 'unknown'}
+Weather: ${weather || 'unknown'}
+Date/time: day ${day || 1}, ${timeOfDay || 'unknown'}
+Stats: health ${stats.health ?? 100}, fatigue ${stats.fatigue ?? 0}
+Previous attempts: ${Number(constraint?.attempts || 0)}
+Nearby people and activity: ${clampArray(nearbyPeople, 4).join(' | ') || 'none'}
+Recent field log: ${clampArray(recentNarration, 5).join(' | ') || 'none'}
+
+Adjudication rules:
+- Succeed if the player describes a concrete practical remedy: ${config.success}.
+- Fail if the action is vague, impossible, does not address the physical problem, or is merely the desired outcome.
+- Mark consequence "worse" and healthDelta -3 for reckless actions: ${config.failure}.
+- Do not demand perfect technical detail. Reward clear field practicality with actual tools, hands, or Syms.
+- Keep the narration concrete and brief; no NPC dialogue.
+
+Return JSON only with:
+{
+  "narration": "1-2 concise sentences describing the result",
+  "resolved": true or false,
+  "consequence": "resolved | still_pending | worse",
+  "healthDelta": 0 or -3,
+  "actionDisposition": "observed | impossible | unsafe | needs_modal",
+  "targetType": "${config.targetType}",
+  "fieldNote": "",
+  "darwinThought": "",
+  "sounds": ["optional short sound cue"]
+}`;
+
+      const { sessionId, idempotencyKey } = getRequestIdentity({
+        req,
+        route: '/api/three-narrate',
+        prompt: dilemmaPrompt,
+        idempotencyKey: body.idempotencyKey,
+      });
+
+      const result = await generateLLMText({
+        route: '/api/three-narrate',
+        sessionId,
+        idempotencyKey,
+        model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: dilemmaPrompt,
+        temperature: 0.18,
+        maxTokens: 160,
+      });
+
+      const text = result.text || '';
+      const parsed = parseNarratorJSON(text);
+      const normalized = normalizeNarratorPayload(parsed, text);
+      if (typeof normalized.resolved !== 'boolean') {
+        return res.status(200).json({
+          ...fieldDilemmaFallback(eventType, playerInput),
+          provider: result.provider,
+          model: result.model,
+          fallbackFrom: result.fallbackFrom || null,
+        });
+      }
+      return res.status(200).json({
+        ...normalized,
+        provider: result.provider,
+        model: result.model,
+        fallbackFrom: result.fallbackFrom || null,
+      });
     }
 
     const responseGuidance = directQuestionGuidance(playerInput);

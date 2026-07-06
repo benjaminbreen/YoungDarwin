@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { terrainHeight, clampToWalkable } from '../../world/terrain';
@@ -48,6 +48,59 @@ function playerBlockHeightForMode(modeId) {
   return 1.55;
 }
 
+function darwinNpcReactionForDropping(dropping, time) {
+  const part = dropping.stuckTo?.part || 'coat';
+  const verticalSpeed = Number(dropping.impact?.verticalSpeed) || 0;
+  const hardHit = part === 'hat' || verticalSpeed >= 4.6;
+  if (hardHit) {
+    return {
+      kind: 'fall',
+      clip: 'shoulderHitAndFall',
+      clipUntil: time + 2.65,
+      downUntil: time + 3.2,
+      getUpUntil: time + 5.65,
+      doneAt: time + 5.65,
+    };
+  }
+  return {
+    kind: 'stagger',
+    clip: part === 'coat' ? 'stumble' : 'hitReaction',
+    clipUntil: time + 1.45,
+    doneAt: time + 1.65,
+  };
+}
+
+function reactionClipAt(reaction, time) {
+  if (!reaction) return null;
+  if (time < reaction.clipUntil) return reaction.clip;
+  if (reaction.kind === 'fall') {
+    if (time < reaction.downUntil) return 'layingIdle';
+    if (time < reaction.getUpUntil) return 'gettingUp';
+  }
+  return null;
+}
+
+function DarwinPoopSplat({ dropping }) {
+  const local = dropping.stuckTo?.localPosition || { x: 0, y: 1.55, z: 0 };
+  const scale = dropping.stuckTo?.part === 'hat' ? 0.22 : 0.17;
+  return (
+    <group position={[local.x || 0, local.y || 1.55, local.z || 0]} rotation={[-Math.PI / 2, 0, dropping.yaw || 0]}>
+      <mesh renderOrder={6}>
+        <circleGeometry args={[scale, 24]} />
+        <meshBasicMaterial color="#f1edd7" transparent opacity={0.88} depthWrite={false} />
+      </mesh>
+      <mesh position={[scale * 0.38, scale * -0.22, 0.002]} scale={[0.42, 0.2, 1]} renderOrder={6}>
+        <circleGeometry args={[scale, 18]} />
+        <meshBasicMaterial color="#fff8df" transparent opacity={0.78} depthWrite={false} />
+      </mesh>
+      <mesh position={[scale * -0.46, scale * 0.18, 0.003]} scale={[0.26, 0.18, 1]} renderOrder={6}>
+        <circleGeometry args={[scale, 16]} />
+        <meshBasicMaterial color="#e8e0bd" transparent opacity={0.72} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
 function pushOutsidePlayerFootprint(x, z, playerX, playerZ, radius, seed = 0) {
   const dx = x - playerX;
   const dz = z - playerZ;
@@ -66,10 +119,21 @@ export function AnimalModeDarwinNpc() {
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const playableSpawnPoint = useThreeGameStore(state => state.playableSpawnPoint);
   const recordEncounter = useThreeGameStore(state => state.recordAnimalModeNpcEncounter);
+  const setNpcPose = useThreeGameStore(state => state.setAnimalModeDarwinNpcPose);
+  const droppings = useThreeGameStore(state => state.animalDroppings);
   const mode = getPlayableMode(playableModeId);
   const visible = mode.kind === 'animal' && Boolean(playableSpawnPoint);
+  const stuckDroppings = useMemo(() => (
+    (droppings || []).filter(dropping => (
+      dropping.zoneId === currentZoneId
+      && dropping.status === 'stuck'
+      && dropping.stuckTo?.type === 'darwin'
+    ))
+  ), [currentZoneId, droppings]);
   const group = useRef(null);
   const animationRef = useRef('idle');
+  const stuckDroppingsRef = useRef(stuckDroppings);
+  const reactedDroppingIds = useRef(new Set());
   const npc = useRef({
     initialized: false,
     x: 0,
@@ -78,12 +142,18 @@ export function AnimalModeDarwinNpc() {
     targetZ: 0,
     nextTargetAt: 0,
     lastEncounterAt: -Infinity,
+    reaction: null,
     seed: 0,
   });
 
   useEffect(() => {
+    stuckDroppingsRef.current = stuckDroppings;
+  }, [stuckDroppings]);
+
+  useEffect(() => {
     if (!visible) {
       npc.current.initialized = false;
+      setNpcPose?.(null);
       return;
     }
     const spawnX = playableSpawnPoint?.x || 0;
@@ -103,19 +173,64 @@ export function AnimalModeDarwinNpc() {
       targetZ: start.z,
       nextTargetAt: 0,
       lastEncounterAt: -Infinity,
+      reaction: null,
       seed,
     };
+    reactedDroppingIds.current = new Set((stuckDroppingsRef.current || []).map(dropping => dropping.id));
     if (group.current) {
       group.current.position.set(start.x, terrainHeight(start.x, start.z, currentZoneId) + 0.04, start.z);
     }
-  }, [currentZoneId, playableModeId, playableSpawnPoint?.x, playableSpawnPoint?.z, visible]);
+    return () => {
+      setNpcPose?.(null);
+    };
+  }, [currentZoneId, playableModeId, playableSpawnPoint?.x, playableSpawnPoint?.z, setNpcPose, visible]);
 
   useFrame(({ clock }, delta) => {
     if (!visible || !group.current || !playableSpawnPoint) return;
     const state = npc.current;
     if (!state.initialized) return;
-    const time = clock.elapsedTime;
     const store = useThreeGameStore.getState();
+    if (store.statusViewOpen) {
+      const groundY = terrainHeight(state.x, state.z, currentZoneId) + 0.04;
+      group.current.position.set(state.x, groundY, state.z);
+      setNpcPose?.({
+        zoneId: currentZoneId,
+        x: state.x,
+        y: groundY,
+        z: state.z,
+        yaw: group.current.rotation.y || 0,
+      });
+      return;
+    }
+    const time = clock.elapsedTime;
+    const freshDarwinHit = stuckDroppings.find(dropping => (
+      dropping?.id
+      && !reactedDroppingIds.current.has(dropping.id)
+    ));
+    if (freshDarwinHit) {
+      reactedDroppingIds.current.add(freshDarwinHit.id);
+      state.reaction = darwinNpcReactionForDropping(freshDarwinHit, time);
+      state.targetX = state.x;
+      state.targetZ = state.z;
+      state.nextTargetAt = Math.max(state.nextTargetAt, time + 1.4);
+    }
+    const reactionClip = reactionClipAt(state.reaction, time);
+    if (reactionClip) {
+      animationRef.current = reactionClip;
+      const groundY = terrainHeight(state.x, state.z, currentZoneId) + 0.04;
+      group.current.position.set(state.x, groundY, state.z);
+      setNpcPose?.({
+        zoneId: currentZoneId,
+        x: state.x,
+        y: groundY,
+        z: state.z,
+        yaw: group.current.rotation.y || 0,
+      });
+      return;
+    }
+    if (state.reaction && time >= state.reaction.doneAt) {
+      state.reaction = null;
+    }
     const playerPosition = store.playerPose?.position || playableSpawnPoint;
     const playerX = Number.isFinite(playerPosition.x) ? playerPosition.x : playableSpawnPoint.x;
     const playerY = Number.isFinite(playerPosition.y) ? playerPosition.y : playableSpawnPoint.y || 0;
@@ -207,6 +322,13 @@ export function AnimalModeDarwinNpc() {
 
     const groundY = terrainHeight(state.x, state.z, currentZoneId) + 0.04;
     group.current.position.set(state.x, groundY, state.z);
+    setNpcPose?.({
+      zoneId: currentZoneId,
+      x: state.x,
+      y: groundY,
+      z: state.z,
+      yaw: group.current.rotation.y || 0,
+    });
   });
 
   if (!visible) return null;
@@ -221,6 +343,9 @@ export function AnimalModeDarwinNpc() {
       }}
     >
       <ModelAsset id="darwin5" animationSelector={() => animationRef.current} reflect fallback={<ProceduralDarwinNpc />} />
+      {stuckDroppings.map(dropping => (
+        <DarwinPoopSplat key={dropping.id} dropping={dropping} />
+      ))}
       <mesh position={[0, 0.045, 0]} rotation-x={-Math.PI / 2}>
         <ringGeometry args={[0.62, 0.72, 36]} />
         <meshBasicMaterial color="#e1c47a" transparent opacity={0.34} />

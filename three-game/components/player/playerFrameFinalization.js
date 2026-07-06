@@ -111,6 +111,7 @@ export function finalizePlayerFrame({
   currentZoneId,
   viewMode,
   openingCamera = null,
+  finchDroppingCamera = null,
   health,
   fatigue,
   now,
@@ -128,6 +129,10 @@ export function finalizePlayerFrame({
 }) {
   const p = group.current?.position;
   if (!p) return;
+  const currentYaw = Number(group.current?.rotation?.y) || 0;
+  const previousYaw = Number.isFinite(previousMotion.current.yaw) ? previousMotion.current.yaw : currentYaw;
+  const yawDelta = Math.atan2(Math.sin(currentYaw - previousYaw), Math.cos(currentYaw - previousYaw));
+  const turnRate = delta > 0 ? yawDelta / delta : 0;
   const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
   const sprintingSwim = swimState.current.active && running && horizontalSpeed > swimConfig.speed * 1.05;
   const resolvedGroundDistance = Number.isFinite(groundDistance)
@@ -142,6 +147,7 @@ export function finalizePlayerFrame({
     cameraImpulse: cameraImpulse.current,
     viewMode,
     openingCamera,
+    finchDroppingCamera,
     swimming: swimState.current.active,
     wadeDepth: Math.max(0, WATER_LEVEL - p.y),
     flying: Boolean(stateRef.current.flying),
@@ -152,6 +158,8 @@ export function finalizePlayerFrame({
   });
 
   stateRef.current.speed = horizontalSpeed;
+  stateRef.current.turnRate = turnRate;
+  stateRef.current.turnDirection = Math.sign(turnRate);
   stateRef.current.slopeGrade = terrainFeedback.current.grade;
   stateRef.current.uphillDot = terrainFeedback.current.uphillDot;
   stateRef.current.arcadeSkid = arcade?.skid || 0;
@@ -306,6 +314,8 @@ export function finalizePlayerFrame({
       playableModeId: stateRef.current.playableModeId,
       flying: Boolean(stateRef.current.flying),
       action: stateRef.current.action,
+      bracing: Boolean(stateRef.current.bracing),
+      braceIntensity: stateRef.current.braceIntensity || 0,
       locomotionPhase: stateRef.current.locomotionPhase,
       jumpPhase: stateRef.current.jumpPhase,
       jumpCharging: stateRef.current.jumpCharging,
@@ -320,4 +330,5 @@ export function finalizePlayerFrame({
   }
   previousMotion.current.moving = moving;
   previousMotion.current.running = stateRef.current.running;
+  previousMotion.current.yaw = currentYaw;
 }

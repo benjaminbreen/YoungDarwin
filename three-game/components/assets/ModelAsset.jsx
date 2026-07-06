@@ -169,6 +169,26 @@ export function setPlayerEnvBounce(bounce) {
   });
 }
 
+// Scene-wide IBL from the same cached PMREM gradient the player materials use:
+// terrain/rocks/foliage that stay MeshStandardMaterial pick up a faint ambient
+// specular + sky/ground bounce instead of reading as pure direct-lit matte.
+// Materials with an explicit envMap (the player pipeline) are unaffected —
+// material.envMap wins over scene.environment. Kept deliberately faint.
+export function SceneEnvironment({ intensity = 0.25 }) {
+  const gl = useThree(state => state.gl);
+  const scene = useThree(state => state.scene);
+  useEffect(() => {
+    const env = getPlayerEnvMap(gl);
+    if (!env) return undefined;
+    scene.environment = env;
+    scene.environmentIntensity = intensity;
+    return () => {
+      if (scene.environment === env) scene.environment = null;
+    };
+  }, [gl, scene, intensity]);
+  return null;
+}
+
 let cachedPlayerEnv = null;
 function getPlayerEnvMap(renderer) {
   if (cachedPlayerEnv) return cachedPlayerEnv;
@@ -378,6 +398,7 @@ const ONE_SHOT_CLIPS = new Set([
   'pickUp',
   'point',
   'pray',
+  'hide',
   'injuredStandingJump',
   'injuredRunJump',
   'injuredTurnLeft',

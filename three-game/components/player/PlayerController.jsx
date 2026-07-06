@@ -246,6 +246,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   // Accumulates drowning damage so the store isn't hit every frame.
   const drownDamage = useRef(0);
   const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1 });
+  const finchDroppingCamera = useRef({ startedAt: -10, until: -10, sequence: 0 });
   const lastTeeterAt = useRef(0);
   const lastWallRunAt = useRef(0);
   const lastTurnFlourishAt = useRef(0);
@@ -253,13 +254,15 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const lastPushAnimationAt = useRef(-10);
   const latestPropPushContact = useRef(null);
   const pendingSnareTrip = useRef(null);
-  const snareImmobilizedUntil = useRef(-10);
+  const pendingAnimalDropping = useRef(null);
   const sustainedObstaclePush = useRef({ id: null, startedAt: -10, lastAt: -10 });
   const lastCactusHitAt = useRef(-10);
+  const cactusHazardStreak = useRef({ count: 0, lastAt: -10 });
   const lastStepUpDustAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
   const lastDownhillSprintCameraAt = useRef(-10);
   const lastArcadeStumbleAt = useRef(-10);
+  const lastDroppingSmushAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastModelYaw = useRef(Math.PI);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
@@ -295,7 +298,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     grounded: false,
     source: 'pending',
   });
-  const previousMotion = useRef({ moving: false, running: false });
+  const previousMotion = useRef({ moving: false, running: false, yaw: Math.PI });
   const pendingMovementCost = useRef({ fatigue: 0, falling: 0, lastFlushAt: 0 });
   const arcadeLocomotion = useRef(createArcadeLocomotionState());
   const visualLocomotion = useRef({
@@ -338,6 +341,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     swimExitDirection: new THREE.Vector3(),
     swimCandidateEnd: new THREE.Vector3(),
     swimExitEnd: new THREE.Vector3(),
+    droppingPosition: new THREE.Vector3(),
   }), []);
   const stateRef = useRef({
     modelAssetId: DEFAULT_PLAYER_MODEL_ASSET_ID,
@@ -345,6 +349,11 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     playableKind: 'human',
     running: false,
     walking: false,
+    bracing: false,
+    braceStartedAt: 0,
+    braceIntensity: 0,
+    turnRate: 0,
+    turnDirection: 0,
     flying: false,
     flightPhase: null,
     flightPitch: 0,
@@ -408,10 +417,15 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const movePushableObstacle = useThreeGameStore(state => state.movePushableObstacle);
   const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
+  const animalDroppings = useThreeGameStore(state => state.animalDroppings);
+  const addAnimalDropping = useThreeGameStore(state => state.addAnimalDropping);
+  const smushAnimalDropping = useThreeGameStore(state => state.smushAnimalDropping);
+  const recordAnimalModeAction = useThreeGameStore(state => state.recordAnimalModeAction);
   const setPlayerPose = useThreeGameStore(state => state.setPlayerPose);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
   const viewMode = useThreeGameStore(state => state.viewMode);
+  const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
   const inventoryCount = useThreeGameStore(state => state.inventory.length);
@@ -420,6 +434,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const playableSpawnPoint = useThreeGameStore(state => state.playableSpawnPoint);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
+  const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const playableMode = useMemo(() => getPlayableMode(playableModeId), [playableModeId]);
   const playerProfile = useMemo(() => getPlayableControllerProfile(playableMode.id), [playableMode.id]);
   const playerConfig = playerProfile;
@@ -670,6 +685,12 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       lastFlapAt: startsInFlight ? performance.now() / 1000 : -10,
       bankYaw: null,
     };
+    finchDroppingCamera.current = {
+      startedAt: -10,
+      until: -10,
+      sequence: finchDroppingCamera.current.sequence || 0,
+    };
+    pendingAnimalDropping.current = null;
     drownDamage.current = 0;
     stateRef.current.playableModeId = playableMode.id;
     stateRef.current.playableKind = playableMode.kind;
@@ -678,6 +699,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     stateRef.current.jumpChargeAmount = 0;
     stateRef.current.swimming = false;
     stateRef.current.swimSprinting = false;
+    stateRef.current.bracing = false;
+    stateRef.current.braceStartedAt = 0;
+    stateRef.current.braceIntensity = 0;
     stateRef.current.flying = startsInFlight;
     stateRef.current.flightPhase = startsInFlight ? 'cruise' : null;
     stateRef.current.sitting = false;
@@ -748,6 +772,64 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const triggerAction = (button, clip, duration = durationFor(clip), options = {}) => {
       triggerActionAt(now, keys, touch, button, clip, resolveActionDuration(clip, duration), options);
     };
+    const spawnAnimalDropping = (pending = {}) => {
+      if (!group.current || typeof addAnimalDropping !== 'function') return;
+      const forward = frameScratch.forwardFacing.copy(facing.current).setY(0);
+      if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
+      else forward.normalize();
+      const dropDistance = playableMode.id === 'tortoise' ? 1.08 : 0.32;
+      const candidate = frameScratch.droppingPosition
+        .copy(group.current.position)
+        .addScaledVector(forward, -dropDistance);
+      const ground = collisionAdapter.groundInfo(candidate).y;
+      const airborneFinchDropping = playableMode.id === 'finch'
+        && (flightState.current.active || candidate.y > ground + 0.72);
+      if (airborneFinchDropping) {
+        const start = frameScratch.droppingPosition
+          .copy(group.current.position)
+          .addScaledVector(forward, -0.18);
+        start.y = Math.max(ground + 0.42, start.y - 0.08);
+        const inheritedHorizontal = 0.72;
+        addAnimalDropping({
+          zoneId: currentZoneId,
+          sourceModeId: pending.sourceModeId || playableMode.id,
+          kind: 'bird',
+          status: 'falling',
+          position: { x: start.x, y: start.y, z: start.z },
+          velocity: {
+            x: velocity.current.x * inheritedHorizontal + forward.x * 0.22,
+            y: Math.min(velocity.current.y, 0) - 0.55,
+            z: velocity.current.z * inheritedHorizontal + forward.z * 0.22,
+          },
+          yaw: Math.atan2(forward.x, forward.z),
+          radius: 0.085,
+        });
+        emitPropEvent('animal-dropping-projectile-spawned', {
+          zoneId: currentZoneId,
+          sourceModeId: pending.sourceModeId || playableMode.id,
+          position: { x: start.x, y: start.y, z: start.z },
+        });
+        finchDroppingCamera.current = {
+          startedAt: now,
+          until: now + 3,
+          sequence: (finchDroppingCamera.current.sequence || 0) + 1,
+        };
+        return;
+      }
+      addAnimalDropping({
+        zoneId: currentZoneId,
+        sourceModeId: pending.sourceModeId || playableMode.id,
+        kind: playableMode.id === 'finch' ? 'bird' : 'animal',
+        position: { x: candidate.x, y: ground + 0.026, z: candidate.z },
+        yaw: Math.atan2(forward.x, forward.z),
+        radius: playableMode.id === 'tortoise' ? 0.26 : 0.12,
+      });
+      emitPropEvent('animal-dropping-spawned', {
+        zoneId: currentZoneId,
+        sourceModeId: pending.sourceModeId || playableMode.id,
+        position: { x: candidate.x, y: ground + 0.026, z: candidate.z },
+      });
+    };
     const finalizeFrame = (options = {}) => finalizePlayerFrame({
       group,
       updateCamera,
@@ -778,6 +860,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       currentZoneId,
       viewMode,
       openingCamera,
+      finchDroppingCamera: finchDroppingCamera.current.until > now ? finchDroppingCamera.current : null,
       health,
       fatigue,
       now,
@@ -788,6 +871,19 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     });
 
     const safeDelta = Math.min(delta, 0.05);
+    if (statusViewOpen) {
+      finalizeFrame({
+        moving: false,
+        running: false,
+        crouchRunIntent: false,
+        groundDistance: stateRef.current.groundDistance,
+        skipFootsteps: true,
+        skipSwimEconomy: true,
+        keys: EMPTY_KEYS,
+        touch: EMPTY_KEYS,
+      });
+      return;
+    }
     if (spawnDrop.current.phase === 'pending') {
       const spawnGroundY = collisionAdapter.groundInfo(group.current.position).y;
       group.current.position.set(startX, spawnGroundY + SPAWN_DROP.height, startZ);
@@ -891,8 +987,22 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       stateRef.current.recoverAction = null;
       if (recovery && health > 0) startAction(recovery.clip, recovery.duration, { lockMovement: true });
     }
-    if (now < snareImmobilizedUntil.current) {
-      stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, snareImmobilizedUntil.current);
+    const pendingDropping = pendingAnimalDropping.current;
+    if (pendingDropping) {
+      if (pendingDropping.spawned || now > pendingDropping.cancelAt) {
+        pendingAnimalDropping.current = null;
+      } else if (now >= pendingDropping.spawnAt && stateRef.current.action === 'animalDefecate') {
+        spawnAnimalDropping(pendingDropping);
+        pendingDropping.spawned = true;
+        pendingAnimalDropping.current = null;
+      }
+    }
+    const movementConstraintActive = Boolean(
+      activeConstraint?.type === 'snare_immobilized'
+      || activeConstraint?.movementLock
+    );
+    if (movementConstraintActive) {
+      stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, now + 0.35);
     }
     const snareTrip = pendingSnareTrip.current;
     if (snareTrip && isDarwinMode) {
@@ -900,14 +1010,13 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         pendingSnareTrip.current = null;
       } else if (!stateRef.current.lying && stateRef.current.action !== 'shoulderHitAndFall' && stateRef.current.action !== 'lyingDown') {
         pendingSnareTrip.current = null;
-        snareImmobilizedUntil.current = now + 8.2;
         velocity.current.set(0, 0, 0);
         stateRef.current.rollMotion = null;
         stateRef.current.traverseMotion = null;
         stateRef.current.climbMotion = null;
         stateRef.current.sitting = false;
         stateRef.current.lying = false;
-        stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, snareImmobilizedUntil.current);
+        stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, now + 8.2);
         cameraImpulse.current = {
           startedAt: now,
           intensity: 0.22,
@@ -954,7 +1063,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       anyDirectActionPressed,
       lateralOnlyInput,
     } = readPlayerInput(keys, touch, frameScratch.input);
-    const snareImmobilized = now < snareImmobilizedUntil.current;
+    const snareImmobilized = movementConstraintActive;
     pulseEquippedToolOnUse(keys, lastButtons);
     const propPushContact = latestPropPushContact.current;
     if (
@@ -970,7 +1079,42 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       });
     }
     const preInputMovementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
-    if (playableMode.kind === 'animal' && !stateRef.current.action && !preInputMovementLocked) {
+    if (playableMode.id === 'tortoise') {
+      const braceHeld = Boolean(jumpPressed && spawnDrop.current.phase === 'complete' && !snareImmobilized);
+      const currentBraceAction = stateRef.current.action;
+      const braceCanInterruptAction = Boolean(
+        currentBraceAction
+        && currentBraceAction !== 'animalBrace'
+        && MOVEMENT_INTERRUPTIBLE_ACTIONS.has(currentBraceAction)
+      );
+      const braceBlockedByAction = Boolean(
+        currentBraceAction
+        && currentBraceAction !== 'animalBrace'
+        && !braceCanInterruptAction
+      );
+      if (braceHeld && !braceBlockedByAction) {
+        if (braceCanInterruptAction) {
+          interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
+        }
+        if (!lastButtons.current.tortoiseBrace) {
+          startAction('animalBrace', 0.9, { lockMovement: 0.16 });
+          stateRef.current.braceStartedAt = now;
+          velocity.current.x *= 0.35;
+          velocity.current.z *= 0.35;
+        }
+        stateRef.current.bracing = true;
+        stateRef.current.braceIntensity = Math.min(1, Math.max(0, (now - (stateRef.current.braceStartedAt || now)) * 2.6));
+      } else {
+        stateRef.current.bracing = false;
+        stateRef.current.braceIntensity = 0;
+      }
+      lastButtons.current.tortoiseBrace = Boolean(braceHeld && !braceBlockedByAction);
+    } else {
+      stateRef.current.bracing = false;
+      stateRef.current.braceIntensity = 0;
+      lastButtons.current.tortoiseBrace = false;
+    }
+    if (playableMode.kind === 'animal' && !stateRef.current.action && !stateRef.current.bracing && !preInputMovementLocked) {
       const activeAnimalAction = getAnimalAction(useThreeGameStore.getState().activeToolId);
       const requestedAnimalAction = [
         activeAnimalAction,
@@ -979,9 +1123,35 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         getAnimalAction('defecate'),
       ].find(action => action && touch[action.control]);
       if (requestedAnimalAction) {
-        startAction(requestedAnimalAction.clip, requestedAnimalAction.duration || 1.35, {
-          lockMovement: requestedAnimalAction.lockMovement ?? 0.45,
-        });
+        const requiresGround = requestedAnimalAction.id === 'eat' || requestedAnimalAction.id === 'sleep';
+        if (!(flightState.current.active && requiresGround)) {
+          const animalActionDuration = requestedAnimalAction.duration || 1.35;
+          const airborneFinchDefecate = requestedAnimalAction.id === 'defecate'
+            && playableMode.id === 'finch'
+            && flightState.current.active;
+          startAction(requestedAnimalAction.clip, animalActionDuration, {
+            lockMovement: airborneFinchDefecate ? 0 : (requestedAnimalAction.lockMovement ?? 0.45),
+            onStart: () => {
+              recordAnimalModeAction?.({
+                actionId: requestedAnimalAction.id,
+                foodLabel: requestedAnimalAction.id === 'eat'
+                  ? (playableMode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots')
+                  : undefined,
+              });
+              if (requestedAnimalAction.id === 'defecate') {
+                const spawnDelay = airborneFinchDefecate
+                  ? 0.12
+                  : animalActionDuration * 0.62;
+                pendingAnimalDropping.current = {
+                  sourceModeId: playableMode.id,
+                  spawnAt: now + spawnDelay,
+                  cancelAt: now + animalActionDuration + 0.3,
+                  spawned: false,
+                };
+              }
+            },
+          });
+        }
       }
     }
     if (playerConfig.canCrouch !== false && crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action && !swimState.current.active) {
@@ -1064,6 +1234,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const fatigueRunScale = running ? THREE.MathUtils.lerp(1, 0.72, fatigueRunT) : 1;
     const rawRunSpeed = playerConfig.runSpeed * fatigueRunScale;
     const carrySpeedScale = carriedObjectId ? 0.62 : 1;
+    const braceSpeedScale = stateRef.current.bracing ? 0.16 : 1;
     // Wading drag: deeper water slows Darwin — about half speed at armpit
     // depth, slower still when he is in over his head.
     const wadeSpeedScale = 1 - Math.min(0.66, Math.max(0, wadeDepth.current) * 0.42);
@@ -1084,7 +1255,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       ? (running ? swimConfig.sprintSpeed : swimConfig.speed)
       : (stateRef.current.crouching
         ? playerConfig.walkSpeed * (crouchRunIntent ? 0.92 : 0.45)
-        : running ? rawRunSpeed : playerConfig.walkSpeed) * carrySpeedScale * wadeSpeedScale;
+        : running ? rawRunSpeed : playerConfig.walkSpeed) * carrySpeedScale * wadeSpeedScale * braceSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
     const rawInputDirection = frameScratch.rawInputDirection;
     if (flightActive) {
@@ -2072,7 +2243,16 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         velocity.current.x = cactusContact.normal.x * shove;
         velocity.current.z = cactusContact.normal.z * shove;
         velocity.current.y = Math.max(velocity.current.y, 0.72);
-        applyCactusDamage(cactusContact.cactus.damage || 8);
+        const streak = cactusHazardStreak.current;
+        streak.count = now - streak.lastAt <= 8 ? streak.count + 1 : 1;
+        streak.lastAt = now;
+        const embedSpines = isDarwinMode && (streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62);
+        if (embedSpines) streak.count = 0;
+        applyCactusDamage(cactusContact.cactus.damage || 8, {
+          embedSpines,
+          impactSpeed,
+          cactusId: cactusContact.cactus.id,
+        });
         startAction('stumble', durationFor('stumble'), { lockMovement: false });
         bounceFeedback.current.startedAt = now;
         bounceFeedback.current.lastImpactAt = now;
@@ -2398,6 +2578,32 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           kind: 'step-up',
           intensity: THREE.MathUtils.clamp(0.25 + groundLift * 0.75 + horizontalSpeed / 18, 0.28, 0.72),
           position: frameScratch.footstepPosition.set(0, 0.06, 0.18),
+        });
+      }
+    }
+
+    if (!swim.active && (moving || horizontalSpeed > 0.05) && now - lastDroppingSmushAt.current > 0.12) {
+      const realNow = Date.now();
+      const playerSmushRadius = playableMode.id === 'tortoise'
+        ? 0.64
+        : Math.max(0.22, (colliderConfig.radius || CHARACTER_CONTROLLER_CONFIG.radius) * 0.72);
+      const contact = (animalDroppings || []).find(dropping => {
+        if (!dropping || dropping.zoneId !== currentZoneId || dropping.status === 'smushed') return false;
+        if (dropping.status === 'falling' || dropping.status === 'stuck') return false;
+        if (realNow - (dropping.createdAtRealMs || realNow) < 900) return false;
+        const position = dropping.position || {};
+        const dx = p.x - (Number(position.x) || 0);
+        const dz = p.z - (Number(position.z) || 0);
+        return Math.hypot(dx, dz) <= playerSmushRadius + (dropping.radius || 0.22);
+      });
+      if (contact) {
+        lastDroppingSmushAt.current = now;
+        smushAnimalDropping?.(contact.id, { by: playableMode.id });
+        emitPropEvent('animal-dropping-smushed', {
+          zoneId: currentZoneId,
+          id: contact.id,
+          by: playableMode.id,
+          position: contact.position,
         });
       }
     }

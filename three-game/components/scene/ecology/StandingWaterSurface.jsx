@@ -19,22 +19,52 @@ function hash01(x, y, seed = 0) {
   return (Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123) % 1;
 }
 
+function fract(value) {
+  return value - Math.floor(value);
+}
+
 function edgeNoise(x, z) {
   return Math.sin(x * 0.31 + z * 0.17) * 0.46
     + Math.sin(x * -0.19 + z * 0.43 + 2.1) * 0.34
     + Math.sin(x * 0.83 - z * 0.71 + 5.4) * 0.2;
 }
 
-function createStandingWaterNormalTexture(size = 128, seed = 1) {
+function createStandingWaterNormalTexture(size = 256, seed = 1) {
   const data = new Uint8Array(size * size * 4);
-  const waves = [
-    { x: 1.0, y: 0.35, amp: 0.11 },
-    { x: -0.55, y: 1.15, amp: 0.09 },
-    { x: 1.55, y: -1.35, amp: 0.045 },
-    { x: -1.9, y: -0.25, amp: 0.035 },
-    { x: 0.4, y: 2.1, amp: 0.028 },
-    { x: 2.8, y: 2.35, amp: 0.015 },
-  ];
+  const rand = (index, channel = 0) => fract(Math.sin((index + 1) * 91.7 + channel * 37.3 + seed * 19.19) * 43758.5453123);
+  const windAngle = -0.42 + (rand(0, 8) - 0.5) * 0.24;
+  const waves = [];
+
+  for (let i = 0; i < 24; i += 1) {
+    const frequency = 8.0 + i * 1.42 + rand(i, 1) * 2.2;
+    const angle = windAngle + (rand(i, 2) - 0.5) * 0.44;
+    const amp = (0.019 - i * 0.00038) * (0.78 + rand(i, 3) * 0.38);
+    waves.push({
+      dirX: Math.cos(angle),
+      dirY: Math.sin(angle),
+      frequency,
+      amp,
+      phase: rand(i, 4) * Math.PI * 2,
+      wobbleFrequency: 2.4 + rand(i, 5) * 2.8,
+      wobblePhase: rand(i, 6) * Math.PI * 2,
+      wobbleAmp: 0.05 + rand(i, 7) * 0.08,
+    });
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const frequency = 18.0 + i * 3.1 + rand(i, 11) * 2.6;
+    const angle = windAngle + Math.PI * 0.5 + (rand(i, 12) - 0.5) * 0.72;
+    waves.push({
+      dirX: Math.cos(angle),
+      dirY: Math.sin(angle),
+      frequency,
+      amp: (0.0045 + rand(i, 13) * 0.0035),
+      phase: rand(i, 14) * Math.PI * 2,
+      wobbleFrequency: 3.5 + rand(i, 15) * 3.2,
+      wobblePhase: rand(i, 16) * Math.PI * 2,
+      wobbleAmp: 0.03 + rand(i, 17) * 0.05,
+    });
+  }
 
   for (let y = 0; y < size; y += 1) {
     const v = y / size;
@@ -42,16 +72,19 @@ function createStandingWaterNormalTexture(size = 128, seed = 1) {
       const u = x / size;
       let dx = 0;
       let dz = 0;
-      waves.forEach((wave, index) => {
-        const phase = (u * wave.x + v * wave.y + seed * (0.11 + index * 0.037)) * Math.PI * 2;
+      waves.forEach(wave => {
+        const along = u * wave.dirX + v * wave.dirY;
+        const cross = u * -wave.dirY + v * wave.dirX;
+        const wobble = Math.sin(cross * wave.wobbleFrequency * Math.PI * 2 + wave.wobblePhase) * wave.wobbleAmp;
+        const phase = (along * wave.frequency + wobble) * Math.PI * 2 + wave.phase;
         const slope = Math.cos(phase) * wave.amp;
-        dx += slope * wave.x;
-        dz += slope * wave.y;
+        dx += slope * wave.dirX;
+        dz += slope * wave.dirY;
       });
-      const grain = (hash01(x, y, seed) * 2 - 1) * 0.01;
+      const grain = (fract(hash01(x, y, seed)) * 2 - 1) * 0.004;
       const i = (y * size + x) * 4;
-      data[i] = clampByte(128 + (dx + grain) * 38);
-      data[i + 1] = clampByte(128 + (dz - grain) * 38);
+      data[i] = clampByte(128 + (dx + grain) * 52);
+      data[i + 1] = clampByte(128 + (dz - grain) * 52);
       data[i + 2] = 252;
       data[i + 3] = 255;
     }
@@ -500,11 +533,11 @@ export function StandingWaterSurface({ surface }) {
   const playerVeilRef = useRef(null);
   const stepRippleCursor = useRef(0);
   const normalMap0 = useMemo(
-    () => createStandingWaterNormalTexture(surface.normalTextureSize || 128, surface.normalSeed || 7),
+    () => createStandingWaterNormalTexture(surface.normalTextureSize || 256, surface.normalSeed || 7),
     [surface.normalSeed, surface.normalTextureSize],
   );
   const normalMap1 = useMemo(
-    () => createStandingWaterNormalTexture(surface.normalTextureSize || 128, (surface.normalSeed || 7) + 31),
+    () => createStandingWaterNormalTexture(surface.normalTextureSize || 256, (surface.normalSeed || 7) + 31),
     [surface.normalSeed, surface.normalTextureSize],
   );
   const water = useMemo(() => {

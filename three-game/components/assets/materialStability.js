@@ -1,5 +1,16 @@
 import * as THREE from 'three';
 
+// Alpha-to-coverage only anti-aliases cutout edges when the buffer being
+// rendered into actually has MSAA samples. With postprocessing the scene draws
+// into the EffectComposer target, so the composer's multisampling setting — not
+// the canvas context's antialias flag — decides this. Without samples, a2c
+// degrades to a screen-door dither on cutout foliage. ThreeDarwinGame sets this
+// once from the active perf settings before the GLBs stream in.
+let coverageAAAvailable = true;
+export function setCoverageAASupport(available) {
+  coverageAAAvailable = available !== false;
+}
+
 export function stabilizeFoliageMaterial(material, options = {}) {
   if (!material) return material;
   const doubleSide = options.doubleSide === true;
@@ -24,7 +35,7 @@ export function stabilizeFoliageMaterial(material, options = {}) {
 
   if (hasCutout) {
     material.alphaTest = Math.max(material.alphaTest || 0, options.alphaTest || 0.34);
-    material.alphaToCoverage = true;
+    material.alphaToCoverage = coverageAAAvailable;
     material.transparent = false;
     material.depthWrite = true;
   }

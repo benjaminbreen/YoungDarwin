@@ -1090,7 +1090,13 @@ function createDeepOceanMaterial() {
         float fromCentre = length(vWorld.xz);
         // Keep the horizon disc out of the detailed-water area entirely: the
         // refraction grab must see the real seabed there, not helper blue.
-        if (fromCentre < 58.0) discard;
+        if (fromCentre < 56.0) discard;
+        // The detailed plane fades itself out radially over ~61..73m
+        // (edgeFade). The disc must fade IN across that same ring — at full
+        // opacity it pops beneath the still-visible plane as a hard
+        // camera-crossing navy arc. The continued seabed renders under the
+        // feather, so the crossfade reads as the shelf dropping away.
+        float edgeFeather = smoothstep(58.0, 74.0, fromCentre);
         float depthMix = smoothstep(60.0, 150.0, fromCentre);
         vec3 color = mix(shallow, deep, depthMix);
         float shimmer = sin(vWorld.x * 0.06 + time * 0.4) * cos(vWorld.z * 0.05 - time * 0.32);
@@ -1123,9 +1129,13 @@ function createDeepOceanMaterial() {
         color += sunColor * path * pathSparkle * sunPathStrength * 0.12 * (1.0 - fog * 0.92);
 
         // Keep a memory of blue at the horizon line rather than fully greying
-        // out (mockup: saturated deep water meets the sky).
-        color = mix(color, fogColor, fog * 0.9);
-        gl_FragColor = vec4(color, 1.0);
+        // out (mockup: saturated deep water meets the sky) — but the last few
+        // metres before the disc rim (radius 160) must land exactly on the
+        // haze color, or the surviving 10% of deep navy draws a hard sea/sky
+        // band against the sky dome behind it.
+        float rimSeal = smoothstep(142.0, 157.0, fromCentre);
+        color = mix(color, fogColor, max(fog * 0.9, rimSeal));
+        gl_FragColor = vec4(color, edgeFeather);
       }
     `,
   });

@@ -79,11 +79,11 @@ function createBorderVistaMaterial(cheapMaterials) {
       metalness: 0,
       fog: true,
     });
-  if (cheapMaterials) {
-    material.customProgramCacheKey = () => 'border-vista-phong-baked-color-v1';
-    material.needsUpdate = true;
-    return material;
-  }
+  // Both tiers get the shader patch: it carries the seam dither (without it the
+  // cheap tier's vista mesh pops fully-opaque over the carry strip), the
+  // per-pixel grain, and the extra fog reach. The patched chunks exist
+  // identically in Phong and Standard, and the added cost is two noise reads on
+  // apron pixels only.
   material.onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -104,6 +104,17 @@ function createBorderVistaMaterial(cheapMaterials) {
         `#include <begin_vertex>
         vBorderWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vBorderBlend = aBorderBlend;`,
+      )
+      .replace(
+        '#include <fog_vertex>',
+        `#include <fog_vertex>
+        #ifdef USE_FOG
+        // Aerial perspective boost: the apron reads as ~35% farther to the fog
+        // than real terrain at the same distance, so the schematic ground past
+        // the seam sits in noticeably thicker haze. Ramps in with the seam
+        // blend, so the walkable side of the boundary is untouched.
+        vFogDepth *= 1.0 + aBorderBlend * 0.35;
+        #endif`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -117,7 +128,7 @@ function createBorderVistaMaterial(cheapMaterials) {
         ${BORDER_VISTA_GRAIN_APPLY}`,
       );
   };
-  material.customProgramCacheKey = () => (cheapMaterials ? 'border-vista-grain-phong-v2' : 'border-vista-grain-standard-v3');
+  material.customProgramCacheKey = () => (cheapMaterials ? 'border-vista-grain-phong-v3' : 'border-vista-grain-standard-v4');
   material.needsUpdate = true;
   return material;
 }

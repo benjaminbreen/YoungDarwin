@@ -9,6 +9,7 @@ import { WorldDetails } from '../components/scene/WorldDetails';
 import { ExaminableItems } from '../components/world/ExaminableItemActor';
 import { SpecimenActor } from '../components/world/SpecimenActor';
 import { SnareTraps } from '../components/world/SnareTrapActor';
+import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
@@ -49,6 +50,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       {settings.physicsProps !== false && <PhysicsProps />}
       {settings.waterSplashes !== false && <WaterSplashes />}
       {deferredContentReady && <SnareTraps />}
+      {deferredContentReady && <AnimalDroppings />}
       {deferredContentReady && settings.beagle !== false && (
         <Suspense fallback={null}>
           <Beagle />

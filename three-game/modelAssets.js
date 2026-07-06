@@ -236,7 +236,7 @@ export const modelAssets = {
   tripoTortoiseRigged: {
     enabled: true,
     path: '/assets/models/animals/runtime/tripo-tortoise-rigged.glb',
-    cacheKey: 'tripo-rig-heightened-actions-20260705',
+    cacheKey: 'tripo-rig-hide-20260705',
     scale: 2.15,
     rotation: [0, Math.PI, 0],
     yOffset: 0.075,

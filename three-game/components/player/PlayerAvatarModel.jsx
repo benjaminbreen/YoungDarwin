@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { ModelAsset } from '../assets/ModelAsset';
@@ -13,83 +13,23 @@ function clipRequest(clip, timeScale = 1, fade = 0.18, maxTime = null) {
   return clip ? { clip, timeScale, fade, maxTime } : null;
 }
 
-const TORTOISE_PROCEDURAL_VARIANT = 'procedural';
-const TORTOISE_TRIPO_VARIANT = 'tripo';
-const TORTOISE_V2_VARIANT = 'v2';
-const TORTOISE_MODEL_CYCLE = [
-  TORTOISE_PROCEDURAL_VARIANT,
-  TORTOISE_TRIPO_VARIANT,
-  TORTOISE_V2_VARIANT,
-];
-const TORTOISE_TRIPO_ASSET_ID = 'tripoTortoiseRigged';
-const TORTOISE_V2_ASSET_ID = 'playableTortoiseV2';
-const TORTOISE_TRIPO_AVATAR = {
-  idleClip: 'idle',
-  walkClip: 'walk',
-  eatClip: 'eat',
-  sleepClip: 'sleep',
-  defecateClip: 'defecate',
-  walkTimeScale: 0.72,
-  idleTimeScale: 0.72,
-  eatTimeScale: 0.85,
-  sleepTimeScale: 0.68,
-  sleepHoldTime: 4.35,
-  defecateTimeScale: 0.82,
-  runTimeScale: 1.08,
-  walkBob: 0,
-};
-const TORTOISE_V2_AVATAR = {
-  idleClip: 'idle',
-  walkClip: 'walk',
-  eatClip: 'eat',
-  sleepClip: 'sleep',
-  defecateClip: 'defecate',
-  walkTimeScale: 0.72,
-  idleTimeScale: 0.72,
-  eatTimeScale: 0.82,
-  sleepTimeScale: 0.7,
-  defecateTimeScale: 0.78,
-  runTimeScale: 1.08,
-  walkBob: 0,
-};
-
 function AnimalPlayerModel({ mode, profile, motionRef }) {
   const groupRef = useRef(null);
-  const [tortoiseVariant, setTortoiseVariant] = useState(TORTOISE_PROCEDURAL_VARIANT);
-  const proceduralTortoise = mode.id === 'tortoise' && tortoiseVariant === TORTOISE_PROCEDURAL_VARIANT;
-  const activeAssetId = mode.id === 'tortoise'
-    ? (tortoiseVariant === TORTOISE_TRIPO_VARIANT
-      ? TORTOISE_TRIPO_ASSET_ID
-      : (tortoiseVariant === TORTOISE_V2_VARIANT ? TORTOISE_V2_ASSET_ID : mode.assetId))
-    : mode.assetId;
-  const avatar = mode.id === 'tortoise'
-    ? (tortoiseVariant === TORTOISE_TRIPO_VARIANT
-      ? TORTOISE_TRIPO_AVATAR
-      : (tortoiseVariant === TORTOISE_V2_VARIANT ? TORTOISE_V2_AVATAR : (profile.avatar || {})))
-    : (profile.avatar || {});
+  const avatar = profile.avatar || {};
+  const proceduralTortoise = mode.id === 'tortoise' && avatar.render === 'procedural';
+  const activeAssetId = proceduralTortoise ? 'proceduralTortoise' : mode.assetId;
 
   useEffect(() => {
     if (mode.id !== 'tortoise') return undefined;
     if (motionRef?.current) {
-      motionRef.current.tortoiseModelVariant = tortoiseVariant;
-      motionRef.current.modelAssetId = tortoiseVariant === TORTOISE_TRIPO_VARIANT
-        ? TORTOISE_TRIPO_ASSET_ID
-        : (tortoiseVariant === TORTOISE_V2_VARIANT ? TORTOISE_V2_ASSET_ID : 'proceduralTortoise');
+      motionRef.current.tortoiseModelVariant = proceduralTortoise ? 'procedural' : activeAssetId;
+      motionRef.current.modelAssetId = activeAssetId;
     }
     if (typeof window !== 'undefined') {
-      window.__tortoisePlayerModel = tortoiseVariant;
+      window.__tortoisePlayerModel = proceduralTortoise ? 'procedural' : activeAssetId;
     }
-    const onKeyDown = (event) => {
-      if (event.code !== 'Digit9' && event.key !== '9') return;
-      if (event.repeat) return;
-      setTortoiseVariant(current => {
-        const index = TORTOISE_MODEL_CYCLE.indexOf(current);
-        return TORTOISE_MODEL_CYCLE[(index + 1) % TORTOISE_MODEL_CYCLE.length];
-      });
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [mode.id, motionRef, tortoiseVariant]);
+    return undefined;
+  }, [activeAssetId, mode.id, motionRef, proceduralTortoise]);
 
   useFrame(({ clock }, delta) => {
     const group = groupRef.current;
@@ -108,6 +48,7 @@ function AnimalPlayerModel({ mode, profile, motionRef }) {
     if (motion.action === 'animalSleep') return clipRequest(avatar.sleepClip || avatar.idleClip, avatar.sleepTimeScale || 0.45, 0.28);
     if (motion.lying) return clipRequest(avatar.sleepClip || avatar.idleClip, avatar.sleepTimeScale || 0.45, 0.28, avatar.sleepHoldTime ?? null);
     if (motion.action === 'animalDefecate') return clipRequest(avatar.defecateClip || avatar.idleClip, avatar.defecateTimeScale || 0.58, 0.22);
+    if (motion.action === 'animalBrace' || motion.bracing) return clipRequest(avatar.braceClip || avatar.idleClip || avatar.walkClip, avatar.braceTimeScale || avatar.idleTimeScale || 0.72, 0.16);
     if (motion.flying) return clipRequest(avatar.flyClip || avatar.walkClip || avatar.idleClip, 0.86, 0.16);
     if (motion.walking || motion.running || (motion.speed || 0) > 0.08) {
       const clip = motion.running ? (avatar.runClip || avatar.walkClip || avatar.idleClip) : (avatar.walkClip || avatar.idleClip);

@@ -5,6 +5,7 @@ import { useThreeGameStore } from '../../store';
 import { triggerToolUse } from '../../input/touchControls';
 import { ACTION_DURATION } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
+import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -306,6 +307,9 @@ export function updatePlayerInteractions({
       }
     }
     startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
+    if (currentState.activeToolId === 'insect_net' && maybeTriggerNetSnagFromSwing({ position, facing })) {
+      return true;
+    }
     collectNearby();
     return true;
   };

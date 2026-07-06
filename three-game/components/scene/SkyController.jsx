@@ -9,6 +9,16 @@ import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 
+// Dependency-free ordered dither (interleaved gradient noise) appended after
+// colorspace conversion: breaks 8-bit banding on the big smooth sky gradients.
+// Deliberately NOT three's dithering_fragment chunk — that needs rand() from
+// <common>, which these hand-written sky shaders don't include, and the
+// resulting compile failure silently drops the whole dome from the frame.
+const SKY_DITHER_GLSL = /* glsl */`
+        float skyDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+        gl_FragColor.rgb += (skyDither - 0.5) * (1.5 / 255.0);
+`;
+
 // Apparent distance of the celestial bodies. Kept well inside the camera far
 // plane (180) since the whole rig follows the camera, so it never clips.
 const SKY_DISTANCE = 170;
@@ -665,6 +675,7 @@ function TropicalBlueSkyDome({ nightRef, celestialRef }) {
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
+        ${SKY_DITHER_GLSL}
       }
     `,
   }), []);
@@ -728,6 +739,7 @@ function MidnightSkyDome({ midnightRef }) {
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
+        ${SKY_DITHER_GLSL}
       }
     `,
   }), []);
@@ -1246,9 +1258,14 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
             gl_FragColor.rgb = mix(gl_FragColor.rgb, deeperSky, skyBlueMask * 0.45);
             #include <tonemapping_fragment>
           `
+        ).replace(
+          '#include <colorspace_fragment>',
+          /* glsl */`#include <colorspace_fragment>
+            ${SKY_DITHER_GLSL}
+          `
         );
       };
-      mat.customProgramCacheKey = () => 'floreana-sky-blue-grade-v1';
+      mat.customProgramCacheKey = () => 'floreana-sky-blue-grade-v2';
       mat.needsUpdate = true;
       skyRef.current.renderOrder = -10;
     }
@@ -1763,6 +1780,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
             side={THREE.BackSide}
             depthWrite={false}
             fog={false}
+            dithering
           />
         </mesh>
         <TropicalBlueSkyDome nightRef={nightRef} celestialRef={celestialRef} />

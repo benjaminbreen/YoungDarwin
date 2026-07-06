@@ -623,20 +623,25 @@ function VitalStatusPanel() {
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
   const curiosity = useThreeGameStore(state => state.curiosity);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const openStatusView = useThreeGameStore(state => state.openStatusView);
+  const playableMode = getPlayableMode(playableModeId);
+  const animalMode = playableMode.kind === 'animal';
+  const statusTitle = animalMode ? `View ${playableMode.label.toLowerCase()} status` : 'View Darwin\'s status';
+  const energy = Math.max(0, Math.min(100, 100 - fatigue));
 
   return (
     <button
       type="button"
       onClick={openStatusView}
-      title="View Darwin's status"
-      aria-label="View Darwin's status"
+      title={statusTitle}
+      aria-label={statusTitle}
       className="pointer-events-auto block text-left transition hover:brightness-125 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
     >
       <ExpeditionPanel className="w-[13rem] sm:w-[17.5rem]" innerClassName="grid gap-2.5 px-3.5 py-3">
-        <StatBar icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-        <StatBar icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-        <StatBar icon={CuriosityIcon} label="Curiosity" value={curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+        <StatBar icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
+        <StatBar icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
+        <StatBar icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
       </ExpeditionPanel>
     </button>
   );
@@ -1201,6 +1206,8 @@ const NarratorComposer = memo(function NarratorComposer({
   pending,
   submitNarratorCommand,
   onDraftActiveChange,
+  emphasized = false,
+  placeholder = null,
 }) {
   const [draft, setDraft] = useState('');
 
@@ -1243,8 +1250,8 @@ const NarratorComposer = memo(function NarratorComposer({
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className={`min-w-0 flex-1 rounded-sm border border-expedition-gold/50 bg-[rgba(232,220,192,0.92)] px-3.5 font-expedition text-[16px] leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 transition-[padding] duration-300 ${expanded ? 'py-2.5' : 'py-2'}`}
-        placeholder="Write a note or dictate to the narrator..."
+        className={`min-w-0 flex-1 rounded-sm border bg-[rgba(232,220,192,0.92)] px-3.5 font-expedition text-[16px] leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] transition-[padding,border-color,box-shadow] duration-300 focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 ${emphasized ? 'border-expedition-goldbright shadow-[0_0_0_2px_rgba(227,197,133,0.26),0_0_18px_rgba(227,197,133,0.28)]' : 'border-expedition-gold/50'} ${expanded ? 'py-2.5' : 'py-2'}`}
+        placeholder={emphasized ? (placeholder || 'Describe Darwin’s practical remedy...') : 'Write a note or dictate to the narrator...'}
       />
       <button
         type="submit"
@@ -1278,6 +1285,7 @@ function NarrativePanel({ forceExpanded = false }) {
   const narratorLog = useThreeGameStore(state => state.narratorLog);
   const narratorPending = useThreeGameStore(state => state.narratorPending);
   const narratorError = useThreeGameStore(state => state.narratorError);
+  const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const submitNarratorCommand = useThreeGameStore(state => state.submitNarratorCommand);
   // Minute-resolution clock shown on un-stamped lines. Subscribing to the
   // formatted string instead of raw timeOfDay re-renders this heavy panel only
@@ -1300,7 +1308,13 @@ function NarrativePanel({ forceExpanded = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  const expanded = forceExpanded || !manualCollapsed || focused || composerHasText || narratorPending;
+  const dilemmaPromptActive = Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized');
+  const composerPlaceholder = activeConstraint?.composerPlaceholder || (
+    activeConstraint?.type === 'snare_immobilized'
+      ? 'Describe how Darwin gets free...'
+      : null
+  );
+  const expanded = forceExpanded || dilemmaPromptActive || !manualCollapsed || focused || composerHasText || narratorPending;
   const visibleLogHeight = expanded ? logHeight : 88;
   const previewMessage = displayEntries.at(-1)?.text || '';
 
@@ -1419,6 +1433,8 @@ function NarrativePanel({ forceExpanded = false }) {
         pending={narratorPending}
         submitNarratorCommand={submitNarratorCommand}
         onDraftActiveChange={setComposerHasText}
+        emphasized={dilemmaPromptActive}
+        placeholder={composerPlaceholder}
       />
       <button
         type="button"
@@ -2321,6 +2337,40 @@ function CollectionOutcomeCard({ toast, onClose }) {
   );
 }
 
+function MajorEventToast() {
+  const event = useThreeGameStore(state => state.majorEvent);
+  if (!event) return null;
+  const danger = event.severity === 'danger';
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-[7.15rem] z-30 w-[min(28rem,calc(100vw-1.25rem))] -translate-x-1/2 font-expedition md:top-[7.7rem]">
+      <section
+        aria-live="assertive"
+        className={`overflow-hidden rounded-[7px] border text-expedition-parchment shadow-[0_18px_44px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md ${
+          danger
+            ? 'border-rose-200/45 bg-[rgba(45,18,24,0.9)]'
+            : 'border-expedition-gold/45 bg-[rgba(12,20,38,0.9)]'
+        }`}
+      >
+        <div className="mx-4 h-px bg-gradient-to-r from-transparent via-expedition-gold/50 to-transparent" />
+        <div className="grid grid-cols-[auto_1fr] gap-3 px-3.5 py-3">
+          <div className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border ${danger ? 'border-rose-200/50 bg-rose-200/12 text-rose-100' : 'border-expedition-gold/55 bg-expedition-gold/12 text-expedition-goldbright'}`}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 4 L21 20 H3 Z" />
+              <path d="M12 9 V13.4" />
+              <path d="M12 17 H12.01" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <div className="text-[15.5px] font-semibold leading-tight tracking-wide text-expedition-parchment">{event.title}</div>
+            {event.body && <div className="mt-1 text-[13px] leading-snug text-expedition-parchment/88">{event.body}</div>}
+            {event.helper && <div className="mt-1.5 text-[11.5px] leading-snug text-expedition-faded">{event.helper}</div>}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SpecimenInteractionCard({
   specimen,
   examined,
@@ -2644,14 +2694,19 @@ function CameraModeToast() {
 function MobileVitalsPanel() {
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const openStatusView = useThreeGameStore(state => state.openStatusView);
+  const playableMode = getPlayableMode(playableModeId);
+  const animalMode = playableMode.kind === 'animal';
+  const statusTitle = animalMode ? `View ${playableMode.label.toLowerCase()} status` : 'View Darwin\'s status';
+  const energy = Math.max(0, Math.min(100, 100 - fatigue));
 
   return (
     <button
       type="button"
       onClick={openStatusView}
-      title="View Darwin's status"
-      aria-label="View Darwin's status"
+      title={statusTitle}
+      aria-label={statusTitle}
       className="pointer-events-auto absolute z-20 w-[13.6rem] rounded-[7px] border border-expedition-brass/80 bg-[linear-gradient(165deg,rgba(18,28,36,0.78),rgba(9,15,22,0.82))] px-3 py-2.5 text-left font-expedition text-expedition-parchment shadow-[0_10px_28px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md transition active:scale-[0.99] md:hidden"
       style={{
         left: 'max(0.9rem, env(safe-area-inset-left))',
@@ -2660,8 +2715,8 @@ function MobileVitalsPanel() {
     >
       <div className="pointer-events-none absolute inset-[3px] rounded-[4px] border border-expedition-gold/20" />
       <div className="relative grid gap-2">
-        <StatBar icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#98c98f)" />
-        <StatBar icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#c28b35,#e7b457)" />
+        <StatBar icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#98c98f)" />
+        <StatBar icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#c28b35,#e7b457)" />
       </div>
     </button>
   );
@@ -3017,21 +3072,23 @@ function MobileBottomNav({ onOpenJournal, onToggleNarrative, onOpenCasebook, onO
   );
 }
 
-function MobileNarrativeDrawer({ open, onClose }) {
+function MobileNarrativeDrawer({ open, onClose, lockedOpen = false }) {
   if (!open) return null;
   return (
     <div
       className="pointer-events-none absolute inset-x-3 z-30 md:hidden"
       style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5.8rem)' }}
     >
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close narrative"
-        className="pointer-events-auto absolute -top-3 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-expedition-brass/70 bg-expedition-ink/90 text-expedition-gold shadow-lg"
-      >
-        ×
-      </button>
+      {!lockedOpen && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close narrative"
+          className="pointer-events-auto absolute -top-3 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-expedition-brass/70 bg-expedition-ink/90 text-expedition-gold shadow-lg"
+        >
+          ×
+        </button>
+      )}
       <NarrativePanel forceExpanded />
     </div>
   );
@@ -3060,6 +3117,7 @@ export function ThreeHUD() {
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const playableModeId = useThreeGameStore(state => state.playableModeId);
+  const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen);
 
   useEffect(() => {
@@ -3087,6 +3145,11 @@ export function ThreeHUD() {
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
   }, [blockingUiOpen]);
+  useEffect(() => {
+    if (activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized') {
+      setMobileNarrativeOpen(true);
+    }
+  }, [activeConstraint?.requiresNarratorInput, activeConstraint?.type]);
   const questComplete = useThreeGameStore(state => state.questComplete);
 
   const objective = useMemo(() => {
@@ -3139,6 +3202,7 @@ export function ThreeHUD() {
       </div>
 
       <InteractionPrompt />
+      <MajorEventToast />
       <CameraModeToast />
       <MovementHint />
       <InspectableTooltip />
@@ -3147,7 +3211,11 @@ export function ThreeHUD() {
         <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />
       </div>
 
-      <MobileNarrativeDrawer open={mobileNarrativeOpen} onClose={() => setMobileNarrativeOpen(false)} />
+      <MobileNarrativeDrawer
+        open={mobileNarrativeOpen}
+        onClose={() => setMobileNarrativeOpen(false)}
+        lockedOpen={Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized')}
+      />
 
       <div className="absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex md:w-[28rem]">
         <NarrativePanel />

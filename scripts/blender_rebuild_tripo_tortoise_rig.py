@@ -472,11 +472,47 @@ def make_animations(armature):
       bones[f'{name}_lower'].rotation_euler.x = pulse * -0.16
       bones[f'{name}_foot'].rotation_euler.x = pulse * -0.1
 
+  def hide(bones, t):
+    tuck = smoothstep(t * 4.2)
+    breath = (math.sin(t * math.tau * 1.7) * 0.5 + 0.5) * tuck
+    startle = math.sin(min(1, t * 4.0) * math.pi) * (1 - smoothstep((t - 0.18) * 5.0))
+    bones['root'].location.z = -tuck * 0.062 - startle * 0.012 + breath * 0.004
+    bones['shell'].rotation_euler.x = tuck * 0.045 - startle * 0.025
+    bones['shell'].rotation_euler.y = math.sin(t * math.tau * 2.2) * tuck * 0.012
+    bones['shell'].scale = (
+      1 + tuck * 0.018,
+      1 + tuck * 0.026 + breath * 0.004,
+      1 - tuck * 0.03 + breath * 0.003,
+    )
+    bones['neck_1'].location.y = -tuck * 0.075
+    bones['neck_1'].location.z = -tuck * 0.038
+    bones['neck_1'].rotation_euler.x = -tuck * 0.72 - startle * 0.12
+    bones['neck_2'].location.y = -tuck * 0.11
+    bones['neck_2'].location.z = -tuck * 0.044
+    bones['neck_2'].rotation_euler.x = -tuck * 0.86 - startle * 0.08
+    bones['head'].location.y = -tuck * 0.24
+    bones['head'].location.z = -tuck * 0.082
+    bones['head'].rotation_euler.x = tuck * 0.46
+    bones['jaw'].rotation_euler.x = tuck * 0.08
+    bones['tail'].location.y = tuck * 0.055
+    bones['tail'].location.z = tuck * 0.026
+    bones['tail'].rotation_euler.x = -tuck * 0.5
+    for name in phases:
+      fore = name.startswith('front')
+      side = -1 if name.endswith('left') else 1
+      bones[f'{name}_upper'].rotation_euler.x = tuck * (0.7 if fore else -0.58)
+      bones[f'{name}_upper'].rotation_euler.z = side * tuck * (0.18 if fore else 0.14)
+      bones[f'{name}_lower'].rotation_euler.x = tuck * (-0.56 if fore else 0.46)
+      bones[f'{name}_foot'].rotation_euler.x = tuck * (-0.26 if fore else 0.18)
+      bones[f'{name}_foot'].location.y = tuck * (-0.055 if fore else 0.04)
+      bones[f'{name}_foot'].location.z = -tuck * (0.026 if fore else 0.018)
+
   add_clip(armature, 'idle', 96, idle)
   add_clip(armature, 'walk', 64, walk)
   add_clip(armature, 'eat', 86, eat)
   add_clip(armature, 'sleep', 110, sleep)
   add_clip(armature, 'defecate', 76, defecate)
+  add_clip(armature, 'hide', 72, hide)
 
 
 def write_report():
@@ -487,7 +523,7 @@ def write_report():
     '- Runtime asset: `public/assets/models/animals/runtime/tripo-tortoise-rigged.glb`.\n'
     '- The Tripo mesh and PBR textures are preserved; the Tripo autorig is discarded.\n'
     '- Clean armature: shell/root, neck/head/jaw, tail, and four independent upper/lower/foot leg chains.\n'
-    '- Clips: `idle`, `walk`, `eat`, `sleep`, `defecate`.\n'
+    '- Clips: `idle`, `walk`, `eat`, `sleep`, `defecate`, `hide`.\n'
     '- The rebuild bypasses Blender glTF import because the original Tripo file crashes the Blender 5.1 importer in this environment.\n',
     encoding='utf-8',
   )

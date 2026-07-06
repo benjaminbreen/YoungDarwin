@@ -24,6 +24,30 @@ function smoothPulse(value, start, peak, end) {
   return 1 - THREE.MathUtils.smoothstep(value, peak, end);
 }
 
+function tortoiseStepCycle(phase, duty = 0.66) {
+  const cycle = (((phase / (Math.PI * 2)) % 1) + 1) % 1;
+  if (cycle < duty) {
+    const stanceT = cycle / duty;
+    return {
+      stanceT,
+      swingT: 0,
+      lift: 0,
+      plant: 1,
+      travelT: stanceT,
+      swinging: false,
+    };
+  }
+  const swingT = (cycle - duty) / Math.max(0.001, 1 - duty);
+  return {
+    stanceT: 1,
+    swingT,
+    lift: Math.sin(swingT * Math.PI),
+    plant: Math.max(0, 1 - Math.sin(swingT * Math.PI) * 0.82),
+    travelT: THREE.MathUtils.smoothstep(swingT, 0, 1),
+    swinging: true,
+  };
+}
+
 function pseudoRandom(index) {
   const x = Math.sin(index * 127.1 + 311.7) * 43758.5453123;
   return x - Math.floor(x);
@@ -591,11 +615,22 @@ export function ProceduralTortoisePlayer({ motionRef }) {
   const tailRef = useRef(null);
   const droppingRef = useRef(null);
   const legRefs = useMemo(createLegRefs, []);
+  const animationStateRef = useRef({
+    wasMoving: false,
+    wasBracing: false,
+    startedAt: -10,
+    stoppedAt: -10,
+    braceReleasedAt: -10,
+    idleVariant: 0,
+    idleVariantStartedAt: 0,
+    nextIdleVariantAt: 2.5,
+  });
   const blendRef = useRef({
     walk: 0,
     sleep: 0,
     eat: 0,
     defecate: 0,
+    brace: 0,
     idleShift: 0,
   });
 
@@ -720,8 +755,9 @@ export function ProceduralTortoisePlayer({ motionRef }) {
     const sleeping = action === 'animalSleep' || motion.lying;
     const eating = action === 'animalEat';
     const defecating = action === 'animalDefecate';
-    const speedT = THREE.MathUtils.clamp(speed / 0.86, 0, 1.25);
-    const moving = speed > 0.035 && !sleeping && !eating && !defecating;
+    const bracing = action === 'animalBrace' || motion.bracing;
+    const speedT = THREE.MathUtils.clamp(speed / 1.05, 0, 1.35);
+    const moving = speed > 0.035 && !sleeping && !eating && !defecating && !bracing;
     const actionStart = motion.actionStartedAt || now;
     const actionEnd = motion.actionUntil || now;
     const actionDuration = Math.max(0.001, actionEnd - actionStart);
@@ -731,56 +767,90 @@ export function ProceduralTortoisePlayer({ motionRef }) {
     blends.sleep = damp(blends.sleep, sleeping ? 1 : 0, 2.8, delta);
     blends.eat = damp(blends.eat, eating ? 1 : 0, 5.5, delta);
     blends.defecate = damp(blends.defecate, defecating ? 1 : 0, 6, delta);
-    blends.idleShift = damp(blends.idleShift, !moving && !sleeping && !eating && !defecating ? 1 : 0, 1.8, delta);
+    blends.brace = damp(blends.brace, bracing ? 1 : 0, 8.5, delta);
+    blends.idleShift = damp(blends.idleShift, !moving && !sleeping && !eating && !defecating && !bracing ? 1 : 0, 1.8, delta);
 
-    const strideRate = 1.42 + speedT * 1.35;
-    const stride = now * strideRate;
+    const anim = animationStateRef.current;
+    if (moving && !anim.wasMoving) anim.startedAt = now;
+    if (!moving && anim.wasMoving) anim.stoppedAt = now;
+    if (!bracing && anim.wasBracing) anim.braceReleasedAt = now;
+    anim.wasMoving = moving;
+    anim.wasBracing = bracing;
+
+    if (blends.idleShift > 0.25 && now >= anim.nextIdleVariantAt) {
+      const roll = pseudoRandom(Math.floor(now * 10) + 700);
+      anim.idleVariant = Math.floor(roll * 5);
+      anim.idleVariantStartedAt = now;
+      anim.nextIdleVariantAt = now + 3.2 + pseudoRandom(Math.floor(now * 11) + 811) * 4.4;
+    }
+
+    const startPulse = smoothPulse(now - anim.startedAt, 0, 0.22, 1.05);
+    const stopPulse = smoothPulse(now - anim.stoppedAt, 0, 0.3, 1.25);
+    const peekPulse = smoothPulse(now - anim.braceReleasedAt, 0.04, 0.48, 1.4);
+    const idleVariantT = blends.idleShift * smoothPulse(now - anim.idleVariantStartedAt, 0, 0.8, 3.4);
+    const idleStretch = anim.idleVariant === 0 ? idleVariantT : 0;
+    const idleScan = anim.idleVariant === 1 ? idleVariantT : 0;
+    const idleForefootShift = anim.idleVariant === 2 ? idleVariantT : 0;
+    const idleTailTwitch = anim.idleVariant === 3 ? idleVariantT : 0;
+    const idleHalfTuck = anim.idleVariant === 4 ? idleVariantT : 0;
+    const turnRate = Number(motion.turnRate) || 0;
+    const turnDirection = Math.sign(turnRate) || 1;
+    const turnFast = THREE.MathUtils.clamp(Math.abs(turnRate) / 1.35, 0, 1);
+    const turnShuffle = turnFast
+      * (1 - THREE.MathUtils.clamp(speed / 0.72, 0, 1))
+      * (sleeping || eating || defecating || bracing ? 0 : 1);
+    const headLead = THREE.MathUtils.clamp(turnRate * 0.24, -0.32, 0.32);
+
+    const strideRate = 2.15 + speedT * 2.05;
+    const stride = now * (strideRate + turnShuffle * 1.7);
     const shellSway = Math.sin(stride) * blends.walk;
     const shellLift = Math.abs(Math.sin(stride)) * blends.walk;
     const breathing = Math.sin(now * 1.15) * 0.5 + 0.5;
     const idleLook = Math.sin(now * 0.42) * blends.idleShift;
     const idleNod = Math.sin(now * 0.31 + 0.6) * blends.idleShift;
-    const chew = Math.max(0, Math.sin(now * 7.8)) * blends.eat;
+    const grazeReach = (Math.sin(now * 2.15) * 0.5 + 0.5) * blends.eat;
+    const grazeSide = Math.sin(now * 1.72) * blends.eat;
+    const chew = (Math.max(0, Math.sin(now * 8.6)) * 0.74 + Math.max(0, Math.sin(now * 13.4 + 0.6)) * 0.26) * blends.eat;
     const blinkWindow = (now + Math.sin(now * 0.17) * 0.9) % 5.7;
-    const blink = Math.max(blends.sleep, blinkWindow > 5.42 ? Math.sin(((blinkWindow - 5.42) / 0.28) * Math.PI) : 0);
+    const blink = Math.max(blends.sleep, blends.brace * 0.96, blinkWindow > 5.42 ? Math.sin(((blinkWindow - 5.42) / 0.28) * Math.PI) : 0);
     const tailLift = smoothPulse(actionT, 0.08, 0.42, 0.9) * blends.defecate;
 
-    root.position.y = damp(root.position.y, blends.sleep * -0.065 + shellLift * 0.022 + chew * 0.008, 7, delta);
-    root.scale.y = damp(root.scale.y, 1 - blends.sleep * 0.08 + breathing * 0.01, 5, delta);
-    root.rotation.x = damp(root.rotation.x, blends.eat * 0.035 + blends.defecate * -0.025, 5, delta);
+    root.position.y = damp(root.position.y, blends.sleep * -0.065 + blends.brace * -0.085 + blends.defecate * -0.018 + shellLift * 0.022 + chew * 0.008 - stopPulse * 0.026 + startPulse * 0.012, 7, delta);
+    root.scale.y = damp(root.scale.y, 1 - blends.sleep * 0.08 - blends.brace * 0.065 + breathing * 0.01 - stopPulse * 0.018, 5, delta);
+    root.rotation.x = damp(root.rotation.x, blends.eat * (0.035 + grazeReach * 0.025) + blends.defecate * -0.04 + blends.brace * 0.045 - startPulse * 0.06 + stopPulse * 0.045, 5, delta);
 
-    shell.position.y = damp(shell.position.y, 0.02 - blends.sleep * 0.035 + shellLift * 0.012, 6, delta);
-    shell.rotation.x = damp(shell.rotation.x, blends.eat * -0.08 + blends.sleep * 0.035 + blends.defecate * -0.03 + shellSway * 0.018, 8, delta);
-    shell.rotation.z = damp(shell.rotation.z, shellSway * 0.035, 8, delta);
+    shell.position.y = damp(shell.position.y, 0.02 - blends.sleep * 0.035 - blends.brace * 0.06 - blends.defecate * 0.012 + shellLift * 0.012 - stopPulse * 0.018, 6, delta);
+    shell.rotation.x = damp(shell.rotation.x, blends.eat * -0.11 + blends.sleep * 0.035 + blends.defecate * -0.055 + blends.brace * 0.085 + shellSway * 0.018 - startPulse * 0.035 + stopPulse * 0.05, 8, delta);
+    shell.rotation.z = damp(shell.rotation.z, shellSway * 0.035 + blends.defecate * Math.sin(now * 3.2) * 0.012 + turnShuffle * turnDirection * 0.045, 8, delta);
     shell.scale.set(
-      damp(shell.scale.x, 1 + breathing * 0.006, 5, delta),
-      damp(shell.scale.y, 1 + breathing * 0.012 - blends.sleep * 0.035, 5, delta),
-      damp(shell.scale.z, 1 + breathing * 0.004, 5, delta),
+      damp(shell.scale.x, 1 + breathing * 0.006 + blends.brace * 0.055, 5, delta),
+      damp(shell.scale.y, 1 + breathing * 0.012 - blends.sleep * 0.035 + blends.brace * 0.035, 5, delta),
+      damp(shell.scale.z, 1 + breathing * 0.004 + blends.brace * 0.045, 5, delta),
     );
 
-    body.position.y = damp(body.position.y, 0.3 - blends.sleep * 0.045, 6, delta);
-    body.rotation.x = damp(body.rotation.x, blends.eat * -0.04 + shellSway * 0.012, 7, delta);
+    body.position.y = damp(body.position.y, 0.3 - blends.sleep * 0.045 - blends.brace * 0.075 - blends.defecate * 0.018, 6, delta);
+    body.rotation.x = damp(body.rotation.x, blends.eat * -0.055 + blends.defecate * -0.035 + shellSway * 0.012, 7, delta);
     if (plastron) {
-      plastron.position.y = damp(plastron.position.y, 0.245 - blends.sleep * 0.035, 6, delta);
+      plastron.position.y = damp(plastron.position.y, 0.245 - blends.sleep * 0.035 - blends.brace * 0.055 - blends.defecate * 0.02, 6, delta);
     }
 
-    neck.position.y = damp(neck.position.y, 0.395 - blends.sleep * 0.105 - blends.eat * 0.065, 6, delta);
-    neck.position.z = damp(neck.position.z, 0.51 - blends.sleep * 0.14 + blends.eat * 0.14, 6, delta);
-    neck.rotation.x = damp(neck.rotation.x, blends.eat * 0.62 + blends.sleep * -0.18 + idleNod * 0.045, 7, delta);
-    neck.rotation.y = damp(neck.rotation.y, idleLook * 0.28, 3.2, delta);
-    neck.scale.z = damp(neck.scale.z, 1 + blends.eat * 0.22 - blends.sleep * 0.2, 5, delta);
+    neck.position.y = damp(neck.position.y, 0.395 - blends.sleep * 0.105 - blends.eat * (0.065 + grazeReach * 0.045) - blends.brace * 0.31 + idleStretch * 0.04 + peekPulse * 0.055 - idleHalfTuck * 0.045, 6, delta);
+    neck.position.z = damp(neck.position.z, 0.51 - blends.sleep * 0.14 + blends.eat * (0.14 + grazeReach * 0.18) - blends.brace * 0.76 + idleStretch * 0.12 + peekPulse * 0.22 - idleHalfTuck * 0.12, 6, delta);
+    neck.rotation.x = damp(neck.rotation.x, blends.eat * (0.58 + grazeReach * 0.28) + blends.sleep * -0.18 + blends.brace * -0.78 + idleNod * 0.045 - idleStretch * 0.1 - peekPulse * 0.12 - idleHalfTuck * 0.1, 7, delta);
+    neck.rotation.y = damp(neck.rotation.y, idleLook * 0.28 + grazeSide * 0.2 + headLead + idleScan * Math.sin((now - anim.idleVariantStartedAt) * 2.1) * 0.5, 3.2, delta);
+    neck.scale.z = damp(neck.scale.z, 1 + blends.eat * 0.3 - blends.sleep * 0.2 - blends.brace * 0.78 + idleStretch * 0.14 + peekPulse * 0.08, 5, delta);
 
-    head.position.y = damp(head.position.y, 0.025 - blends.eat * 0.032 - blends.sleep * 0.035, 7, delta);
-    head.position.z = damp(head.position.z, 0.48 + blends.eat * 0.055 - blends.sleep * 0.13, 7, delta);
-    head.rotation.x = damp(head.rotation.x, blends.eat * 0.16 - chew * 0.035 + blends.sleep * 0.08 + idleNod * 0.035, 8, delta);
-    head.rotation.y = damp(head.rotation.y, idleLook * 0.18, 4, delta);
-    head.rotation.z = damp(head.rotation.z, shellSway * -0.02, 7, delta);
+    head.position.y = damp(head.position.y, 0.025 - blends.eat * (0.032 + grazeReach * 0.03) - blends.sleep * 0.035 - blends.brace * 0.145 + idleStretch * 0.018 + peekPulse * 0.026, 7, delta);
+    head.position.z = damp(head.position.z, 0.48 + blends.eat * (0.055 + grazeReach * 0.11) - blends.sleep * 0.13 - blends.brace * 0.58 + idleStretch * 0.08 + peekPulse * 0.16 - idleHalfTuck * 0.08, 7, delta);
+    head.rotation.x = damp(head.rotation.x, blends.eat * (0.16 + grazeReach * 0.22) - chew * 0.05 + blends.sleep * 0.08 + blends.brace * 0.32 + idleNod * 0.035 - peekPulse * 0.07, 8, delta);
+    head.rotation.y = damp(head.rotation.y, idleLook * 0.18 + grazeSide * 0.18 + headLead * 0.42 + idleScan * Math.sin((now - anim.idleVariantStartedAt) * 2.4 + 0.6) * 0.32, 4, delta);
+    head.rotation.z = damp(head.rotation.z, shellSway * -0.02 + grazeSide * 0.035 - headLead * 0.08, 7, delta);
 
     if (jaw) {
-      jaw.rotation.x = damp(jaw.rotation.x, chew * 0.42 + blends.eat * 0.08, 12, delta);
+      jaw.rotation.x = damp(jaw.rotation.x, chew * 0.5 + blends.eat * 0.1 - blends.brace * 0.16, 12, delta);
     }
     if (throat) {
-      const throatPulse = 1 + breathing * 0.035 + chew * 0.06;
+      const throatPulse = 1 + breathing * 0.035 + chew * 0.08 + blends.brace * Math.max(0, Math.sin(now * 12)) * 0.035;
       throat.scale.set(
         damp(throat.scale.x, 0.095 * throatPulse, 8, delta),
         damp(throat.scale.y, 0.067 * throatPulse, 8, delta),
@@ -798,9 +868,10 @@ export function ProceduralTortoisePlayer({ motionRef }) {
       lid.scale.y = damp(lid.scale.y, 0.008 + blink * 0.022, 18, delta);
     });
 
-    tail.position.y = damp(tail.position.y, 0.28 - blends.sleep * 0.06 + tailLift * 0.035, 8, delta);
-    tail.rotation.x = damp(tail.rotation.x, blends.sleep * -0.25 + tailLift * 0.95, 7, delta);
-    tail.rotation.z = damp(tail.rotation.z, shellSway * -0.025, 7, delta);
+    tail.position.y = damp(tail.position.y, 0.28 - blends.sleep * 0.06 - blends.brace * 0.065 + tailLift * 0.075 + idleTailTwitch * Math.max(0, Math.sin((now - anim.idleVariantStartedAt) * 10)) * 0.026, 8, delta);
+    tail.position.z = damp(tail.position.z, -0.69 + blends.defecate * -0.035 + blends.brace * 0.16, 8, delta);
+    tail.rotation.x = damp(tail.rotation.x, blends.sleep * -0.25 + blends.brace * -0.42 + tailLift * 1.28, 7, delta);
+    tail.rotation.z = damp(tail.rotation.z, shellSway * -0.025 + blends.defecate * Math.sin(now * 4.8) * 0.04 + idleTailTwitch * Math.sin((now - anim.idleVariantStartedAt) * 12) * 0.18, 7, delta);
 
     legRefs.forEach((refs, index) => {
       const config = LEG_CONFIGS[index];
@@ -812,35 +883,49 @@ export function ProceduralTortoisePlayer({ motionRef }) {
       if (!pivot || !upper || !lower || !foot) return;
 
       const phase = stride + config.phase;
-      const sin = Math.sin(phase);
-      const cos = Math.cos(phase);
-      const lift = Math.max(0, sin) * blends.walk;
-      const plant = Math.max(0, -sin) * blends.walk;
+      const step = tortoiseStepCycle(phase, config.fore ? 0.68 : 0.64);
+      const footSweep = (config.fore ? 0.15 : 0.13) + speedT * (config.fore ? 0.095 : 0.082);
+      const stanceTravel = THREE.MathUtils.lerp(footSweep * 0.52, -footSweep * 0.5, step.stanceT);
+      const swingTravel = THREE.MathUtils.lerp(-footSweep * 0.58, footSweep * 0.54, step.travelT);
+      const locomotionBlend = Math.max(blends.walk, turnShuffle * 0.86);
+      const turnBrace = turnShuffle * config.side * turnDirection;
+      const footTravel = (step.swinging ? swingTravel : stanceTravel) * locomotionBlend
+        + turnBrace * (config.fore ? 0.055 : -0.045);
+      const lift = step.lift * locomotionBlend;
+      const plant = step.plant * locomotionBlend;
+      const legReach = footSweep > 0 ? footTravel / footSweep : 0;
       const foreSign = config.fore ? 1 : -1;
-      const retract = blends.sleep;
+      const retract = Math.max(blends.sleep, blends.brace * 1.35);
       const grazeBrace = blends.eat * (config.fore ? 1 : 0.25);
       const defecateBrace = blends.defecate * (config.fore ? 0.25 : 1);
+      const shellBrace = blends.brace * (config.fore ? 1.62 : 1.34);
 
-      pivot.position.x = damp(pivot.position.x, config.x * (1 - retract * 0.16), 8, delta);
-      pivot.position.y = damp(pivot.position.y, 0.27 - retract * 0.04 + lift * 0.028, 8, delta);
+      pivot.position.x = damp(pivot.position.x, config.x * (1 - retract * 0.16) + turnBrace * 0.026, 8, delta);
+      pivot.position.y = damp(pivot.position.y, 0.27 - retract * 0.04 - blends.defecate * 0.018 + lift * 0.028, 8, delta);
       pivot.position.z = damp(
         pivot.position.z,
-        config.z + retract * (config.fore ? -0.12 : 0.12) + grazeBrace * (config.fore ? 0.035 : -0.02),
+        config.z
+          + retract * (config.fore ? -0.12 : 0.12)
+          + grazeBrace * (config.fore ? 0.055 : -0.02)
+          + defecateBrace * (config.fore ? -0.02 : -0.065)
+          + shellBrace * (config.fore ? -0.12 : 0.1)
+          + footTravel * (config.fore ? 0.12 : 0.08),
         8,
         delta,
       );
       pivot.rotation.x = damp(
         pivot.rotation.x,
-        blends.walk * sin * (config.fore ? 0.22 : 0.18)
+        blends.walk * (-legReach * (config.fore ? 0.18 : 0.14) + lift * (config.fore ? 0.08 : 0.055))
           + retract * (config.fore ? 0.46 : -0.32)
-          + grazeBrace * -0.1
-          + defecateBrace * (config.fore ? -0.06 : 0.18),
+          + grazeBrace * -0.16
+          + defecateBrace * (config.fore ? -0.08 : 0.28)
+          + shellBrace * (config.fore ? 0.5 : -0.38),
         9,
         delta,
       );
       pivot.rotation.z = damp(
         pivot.rotation.z,
-        config.side * (0.18 + retract * 0.42 + plant * 0.045 - lift * 0.035),
+        config.side * (0.18 + retract * 0.52 + plant * 0.045 - lift * 0.035 + blends.defecate * (config.fore ? 0.04 : 0.11)),
         9,
         delta,
       );
@@ -852,29 +937,47 @@ export function ProceduralTortoisePlayer({ motionRef }) {
           damp(shoulder.scale.z, 0.205 + plant * 0.014, 9, delta),
         );
       }
-      upper.rotation.x = damp(upper.rotation.x, foreSign * (0.06 + cos * 0.11 * blends.walk) - retract * 0.16, 9, delta);
-      upper.rotation.z = damp(upper.rotation.z, config.side * (0.34 + plant * 0.08 + retract * 0.2), 9, delta);
-      lower.rotation.x = damp(lower.rotation.x, -foreSign * (0.1 + lift * 0.32) + retract * 0.28, 9, delta);
+      upper.rotation.x = damp(upper.rotation.x, foreSign * (0.06 - legReach * 0.12 + lift * 0.08) - retract * 0.16 + defecateBrace * (config.fore ? -0.05 : 0.12), 9, delta);
+      upper.rotation.z = damp(upper.rotation.z, config.side * (0.34 + plant * 0.055 + lift * 0.018 + retract * 0.26), 9, delta);
+      lower.rotation.x = damp(lower.rotation.x, -foreSign * (0.1 + lift * 0.36 - legReach * 0.07) + retract * 0.28 + defecateBrace * (config.fore ? 0.04 : -0.16), 9, delta);
       lower.rotation.z = damp(lower.rotation.z, config.side * (0.14 + lift * 0.07), 9, delta);
-      foot.position.y = damp(foot.position.y, -0.34 + lift * 0.075 - retract * 0.02, 12, delta);
+      foot.position.x = damp(
+        foot.position.x,
+        turnBrace * (config.fore ? 0.07 : 0.052) + idleForefootShift * (config.fore ? config.side * 0.026 : 0),
+        10,
+        delta,
+      );
+      foot.position.y = damp(foot.position.y, -0.34 + lift * (config.fore ? 0.13 : 0.11) - retract * 0.02 - defecateBrace * 0.012 - plant * 0.006, 12, delta);
       foot.position.z = damp(
         foot.position.z,
-        (config.fore ? 0.12 : -0.1) + blends.walk * cos * (0.07 + speedT * 0.035),
+        (config.fore ? 0.12 : -0.1)
+          + footTravel
+          + idleForefootShift * (config.fore ? Math.sin((now - anim.idleVariantStartedAt) * 3.6 + index) * 0.018 : 0)
+          + grazeBrace * (config.fore ? 0.035 : -0.012)
+          + defecateBrace * (config.fore ? -0.016 : -0.045)
+          + shellBrace * (config.fore ? -0.065 : 0.055),
         11,
         delta,
       );
-      foot.rotation.x = damp(foot.rotation.x, 0.08 - lift * 0.22 + plant * 0.055, 12, delta);
-      foot.rotation.z = damp(foot.rotation.z, config.side * (0.05 + plant * 0.035), 12, delta);
+      foot.rotation.x = damp(foot.rotation.x, 0.065 - lift * 0.16 + plant * 0.028 - legReach * 0.045 + defecateBrace * (config.fore ? -0.03 : 0.1) + shellBrace * 0.08, 12, delta);
+      foot.rotation.z = damp(foot.rotation.z, config.side * (0.045 + plant * 0.024 + lift * 0.012 + defecateBrace * 0.055) - turnBrace * 0.07, 12, delta);
+      foot.scale.set(
+        damp(foot.scale.x, 1 + plant * 0.055 + lift * 0.015, 10, delta),
+        damp(foot.scale.y, 1 - plant * 0.06 + lift * 0.035, 10, delta),
+        damp(foot.scale.z, 1 + plant * 0.035, 10, delta),
+      );
     });
 
     if (dropping) {
-      const visible = defecating && actionT > 0.28 && actionT < 0.96;
+      const visible = defecating && actionT > 0.46 && actionT < 0.96;
       dropping.visible = visible;
       if (visible) {
-        const grow = THREE.MathUtils.smoothstep(actionT, 0.28, 0.58);
-        dropping.position.y = THREE.MathUtils.lerp(0.035, 0.065, grow);
+        const grow = THREE.MathUtils.smoothstep(actionT, 0.46, 0.68);
+        const settle = THREE.MathUtils.smoothstep(actionT, 0.68, 0.92);
+        dropping.position.y = THREE.MathUtils.lerp(0.075, 0.032, settle);
+        dropping.position.z = THREE.MathUtils.lerp(-0.98, -1.06, settle);
         dropping.scale.setScalar(THREE.MathUtils.lerp(0.1, 1, grow));
-        dropping.rotation.y = now * 0.7;
+        dropping.rotation.y = now * 0.7 + settle * 0.35;
       }
     }
   });

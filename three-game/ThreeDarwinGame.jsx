@@ -16,6 +16,8 @@ import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
 import { WATER_LEVEL } from './world/water';
+import { setCoverageAASupport } from './components/assets/materialStability';
+import { SceneEnvironment } from './components/assets/ModelAsset';
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -112,7 +114,11 @@ const QUALITY_PRESETS = {
     // Darwin's face/buttons and thin vegetation need a little real sample
     // coverage to avoid crunchy subpixel breakup.
     dprMode: '1.25x',
-    msaaSamples: 0,
+    // 2x MSAA on the composer target: cheap at the 1.25x DPR cap (the canvas
+    // context's own MSAA is off while postprocessing is on, so this is roughly
+    // a trade, not an addition) and it's what makes alpha-to-coverage actually
+    // anti-alias cutout foliage edges instead of dithering them.
+    msaaSamples: 2,
     shadowQuality: 'high',
     ao: true,
     reflections: true,
@@ -1185,6 +1191,15 @@ export default function ThreeDarwinGame() {
     });
   }, [perfSettings.cheapMaterials, perfSettings.foliageDrawScale]);
 
+  // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
+  // the buffer it draws into: the composer target when postprocessing is on,
+  // the canvas context (antialias: true) when it's off. Applies to materials
+  // stabilized after this runs — which is all of them, since GLBs stream in
+  // once the Canvas mounts.
+  useEffect(() => {
+    setCoverageAASupport(perfSettings.postprocessing ? (perfSettings.msaaSamples ?? 0) > 0 : true);
+  }, [perfSettings.postprocessing, perfSettings.msaaSamples]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setPerfSettings(settingsFromUrlSearch(window.location.search));
@@ -1319,7 +1334,12 @@ export default function ThreeDarwinGame() {
             dpr={dpr}
             camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
             gl={{
-              antialias: true,
+              // With postprocessing on, the scene renders into the
+              // EffectComposer's buffer, so a multisampled default framebuffer
+              // is pure memory/resolve waste — composer `multisampling` (the
+              // msaaSamples setting) is what provides real sample coverage.
+              // Context AA only matters on the direct-to-canvas path (?noPost).
+              antialias: !perfSettings.postprocessing,
               powerPreference: 'high-performance',
               preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
               toneMapping: ACESFilmicToneMapping,
@@ -1338,6 +1358,7 @@ export default function ThreeDarwinGame() {
                 frame (sunny haze through thick garúa); SkyController keeps
                 owning its color. Density 0.012 ≈ the old linear 32..108 reach. */}
             <fogExp2 attach="fog" args={[sky, 0.012]} />
+            <SceneEnvironment />
             <Suspense fallback={null}>
               <ThreeScene
                 perfSettings={perfSettings}

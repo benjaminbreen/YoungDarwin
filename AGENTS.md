@@ -20,6 +20,7 @@ Completed major systems so far:
 - The tortoise OBJ source was about 1.26M triangles and was decimated to about 50k triangles for the current runtime GLB. It is acceptable for one hero specimen, but future passes should retopologize or rebake it and add a real material/texture pass.
 - The marine iguana GLB is enabled as `public/assets/models/animals/runtime/marine-iguana.glb`. Use `npm run asset:audit` for current file sizes before starting asset optimization work.
 - Crabs, cow/donkey/goat experiments, and nature props have been integrated, but livestock should be used only where Floreana settlement or introduced-grazing context calls for them.
+- The playable route now has three active modes: Darwin, finch, and tortoise. Darwin keeps the expedition/tool loop; finch is a small flier with W/S climb/sink, A/D carve, Space takeoff/land, and simple eat/sleep/defecate actions; tortoise is a slow grounded animal using `tripoTortoiseRigged` with graze/rest/defecate plus shell-brace behavior. Animal modes spawn from their specimen context, hide that source actor, place Darwin in the world as an NPC threat/observer, and use animal-specific status readouts and camera framing. Opening the status view pauses spatial simulation while leaving the live model/status shot animated.
 - Water uses a custom stylized shader in `three-game/components/scene/Water.jsx`, with Gerstner waves and a baked seafloor depth texture for shallow-water color and transparency.
 - Camera controls use visible cursor drag rotation, `Z`/`X` rotate keys, and scroll zoom. Do not reintroduce pointer-lock camera behavior unless explicitly requested.
 
@@ -29,10 +30,11 @@ Use `npm run check` for syntax and regression coverage before claiming a code ch
 
 Notes from Ben about possible future paths for the game:
 
-- Add alternate playable modes where the player can choose to play as Darwin, a tortoise, or a finch, with later support for other animals or plants.
-- In non-Darwin play modes, Darwin should exist in the world as an NPC who wanders around occasionally and may collect the player-character if he encounters them.
+- Keep each playable mode focused around a tiny verb set: Darwin observes/collects/travels, finch flies/perches/feeds/evades, and tortoise grazes/rests/braces/moves slowly.
+- Let the same authored maps reveal different affordances by mode: Darwin sees specimens, tools, routes, and notes; finch sees perches, seeds, cover, wind/lift; tortoise sees edible plants, shade, water, mud, and gentle slopes.
+- Use a few persistent ecological traces to connect modes without building simulation soup: finch droppings/seeds, tortoise trails/dung/browsed plants, and Darwin notes/traps/disturbance.
+- Let individual animal life histories carry forward so a played finch or tortoise can be recognized later by status text, Darwin encounters, or world traces.
 - Longer-term multiplayer idea: only one player at a time can play as Darwin, while up to about 100 other players can play as animals on the island observing him.
-- Animal play mode should still use a bottom tool panel, but its options should be intentionally limited to basic animal actions: eat, sleep, or defecate.
 
 ## Floreana-Only World Direction
 

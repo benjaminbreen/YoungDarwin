@@ -5,10 +5,12 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
+import { getRegionDefinition } from '../../world/regions';
+import { WATER_LEVEL } from '../../world/water';
 import { specimenToInspectable } from '../../world/inspectables';
 import { removeSpecimenRuntimePose, setSpecimenRuntimePose } from '../../world/specimenRuntime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
-import { getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
+import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { getWildlifeAssetId } from '../../wildlife/wildlifeCatalog';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ContactShadow } from '../scene/ContactShadow';
@@ -20,6 +22,8 @@ const CARRY_DROP_DISTANCE = 1.3;
 const COTTON_FOLIAGE_MOTION = { wind: 1.9, bend: 0.35, bendRadius: 1.45 };
 const DRY_GRASS_FOLIAGE_MOTION = { wind: 1.45, bend: 0.55, bendRadius: 1.25 };
 const CACTUS_FOLIAGE_MOTION = { wind: 0.35, bend: 0.35 };
+const STANDING_WATER_SURFACE_LIFT = 0.036;
+const NO_RAYCAST = () => null;
 
 function publishActorRuntimePosition({
   publisher,
@@ -70,6 +74,26 @@ function copyFinitePosition(target, preferred, fallback) {
   if (!isFiniteVector3(source)) return false;
   target.copy(source);
   return source === preferred;
+}
+
+function standingWaterMaskAt(x, z, zoneId) {
+  const maskFn = getRegionDefinition(zoneId)?.terrain?.standingWaterMask;
+  return maskFn ? THREE.MathUtils.clamp(maskFn(x, z), 0, 1) : 0;
+}
+
+function specimenStandingWaterState(position, zoneId) {
+  if (!isFiniteVector3(position)) {
+    return { active: false, mask: 0, depth: 0, localSurfaceY: 0 };
+  }
+  const mask = standingWaterMaskAt(position.x, position.z, zoneId);
+  const localSurfaceY = WATER_LEVEL + STANDING_WATER_SURFACE_LIFT - position.y;
+  const depth = WATER_LEVEL - position.y;
+  return {
+    active: mask > 0.28 && depth > 0.08,
+    mask,
+    depth,
+    localSurfaceY,
+  };
 }
 
 function specimenColor(id) {
@@ -286,6 +310,35 @@ function AnimatedSpecimenShape({ specimen, animationSelector }) {
   );
 }
 
+function WadingWaterline({ localY, radius = 0.58, depth = 0.35 }) {
+  const opacity = THREE.MathUtils.clamp(0.12 + depth * 0.08, 0.12, 0.22);
+  const ringOpacity = THREE.MathUtils.clamp(0.08 + depth * 0.04, 0.08, 0.14);
+  return (
+    <group position={[0, localY, 0]} rotation-x={-Math.PI / 2}>
+      <mesh scale={[radius * 1.12, radius * 0.72, 1]} renderOrder={4} raycast={NO_RAYCAST}>
+        <circleGeometry args={[1, 48]} />
+        <meshBasicMaterial
+          color="#496f69"
+          transparent
+          opacity={opacity}
+          depthWrite={false}
+          depthTest={false}
+        />
+      </mesh>
+      <mesh scale={[radius * 1.22, radius * 0.82, 1]} renderOrder={5} raycast={NO_RAYCAST}>
+        <ringGeometry args={[0.86, 1, 64]} />
+        <meshBasicMaterial
+          color="#a8c9c1"
+          transparent
+          opacity={ringOpacity}
+          depthWrite={false}
+          depthTest={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
   const groundAffordanceRef = useRef(null);
@@ -313,6 +366,7 @@ export function SpecimenActor({ specimen }) {
   const isUnderExamination = useThreeGameStore(state => state.examineSession?.actorId === actorId);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
+  const behaviorProfile = useMemo(() => getFaunaBehaviorProfile(specimen), [specimen]);
   const carriedRef = useRef(false);
   // Where the animal currently lives; moving fauna patrol around this base.
   const behaviorBaseRef = useRef(null);
@@ -568,19 +622,26 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'galapagospenguin' ? 0.55
     : 0.8;
+  const standingWater = useMemo(
+    () => specimenStandingWaterState(position, currentZoneId),
+    [currentZoneId, position],
+  );
+  const hideGroundAffordances = standingWater.active;
+  const showWadingWaterline = standingWater.active
+    && (behaviorProfile?.movementStyle === 'wade' || specimen.id === 'flamingo');
   const specimenContent = (
     <>
       <group ref={groundAffordanceRef}>
-        {!isCarried && <ContactShadow radius={contactRadius} />}
+        {!isCarried && !hideGroundAffordances && <ContactShadow radius={contactRadius} />}
         {/* Selection rings/marker are HUD affordances — they'd pollute the
             composed examine shot, so they hide while a session is open. */}
-        {!examineOpen && (
+        {!examineOpen && !hideGroundAffordances && (
           <mesh position={[0, 0.052, 0]} rotation-x={-Math.PI / 2}>
             <ringGeometry args={[0.98, nearby ? 1.42 : selected ? 1.28 : 1.15, 48]} />
             <meshBasicMaterial color={nearby ? '#fff2a8' : selected ? '#ffe48a' : '#ffffff'} transparent opacity={nearby ? 0.72 : selected ? 0.52 : 0.14} depthWrite={false} />
           </mesh>
         )}
-        {nearby && !examineOpen && (
+        {nearby && !examineOpen && !hideGroundAffordances && (
           <>
             <mesh position={[0, 0.075, 0]} rotation-x={-Math.PI / 2}>
               <ringGeometry args={[1.52, 1.62, 64]} />
@@ -593,6 +654,13 @@ export function SpecimenActor({ specimen }) {
           </>
         )}
       </group>
+      {showWadingWaterline && (
+        <WadingWaterline
+          localY={standingWater.localSurfaceY}
+          radius={contactRadius}
+          depth={standingWater.depth}
+        />
+      )}
       <AnimatedSpecimenShape
         specimen={specimen}
         animationSelector={faunaBehavior.animationRef ? () => faunaBehavior.animationRef.current : null}
