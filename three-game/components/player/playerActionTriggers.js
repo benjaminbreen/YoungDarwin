@@ -2,6 +2,8 @@ import { emitPropEvent } from '../../physics/props/propEvents';
 import { useThreeGameStore } from '../../store';
 import { ACTION_DURATION } from './playerConfig';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
+import { tryFireShotgun } from '../../shooting/fireShotgun';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 export function triggerDirectPlayerActions({
   triggerAction,
@@ -24,7 +26,19 @@ export function triggerDirectPlayerActions({
     return true;
   };
   triggerAction('pray', 'pray', ACTION_DURATION.pray, actionOptions);
-  triggerAction('fireRifle', 'fireRifle', ACTION_DURATION.fireRifle, actionOptions);
+  triggerAction('fireRifle', 'fireRifle', SHOTGUN.fireActionDuration, {
+    ...actionOptions,
+    onStart: () => {
+      // Direct fire (touch Fire button) shoots through the crosshair while
+      // aiming, level along Darwin's facing otherwise; empty barrels make the
+      // gesture a dry one — no blast, no smoke.
+      if (useThreeGameStore.getState().activeToolId !== 'shotgun') return;
+      tryFireShotgun({
+        position: group.current?.position,
+        facing: facing.current,
+      });
+    },
+  });
   const hammerBlocked = toolBlocked('hammer', 'hammer');
   triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
     ...actionOptions,

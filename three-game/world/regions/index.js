@@ -42,6 +42,8 @@ import { puntaCormorantRegion } from './puntaCormorant/terrain';
 import { createPuntaCormorantTerrainMaterial } from './puntaCormorant/material';
 import { beagleDeckRegion } from './beagleDeck/terrain';
 import { createBeagleDeckTerrainMaterial } from './beagleDeck/material';
+import { watkinsCampRegion } from './watkinsCamp/terrain';
+import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 
 const authoredRegions = [
   { ...postOfficeBayRegion, createTerrainMaterial: createPostOfficeBayTerrainMaterial },
@@ -66,6 +68,7 @@ const authoredRegions = [
   { ...cormorantBayTest3Region, createTerrainMaterial: createCormorantBayTest3TerrainMaterial },
   { ...puntaCormorantRegion, createTerrainMaterial: createPuntaCormorantTerrainMaterial },
   { ...beagleDeckRegion, createTerrainMaterial: createBeagleDeckTerrainMaterial },
+  { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
 ];
 
 const regionById = new Map();

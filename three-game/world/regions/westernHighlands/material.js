@@ -105,7 +105,9 @@ export function createWesternHighlandsTerrainMaterial() {
         }
         float whRoughness(sampler2D tex, vec2 p, float scale, float salt) {
           vec2 uv = p * scale + vec2(0.11 + salt * 0.05, -0.17);
-          return clamp(texture2D(tex, uv).r, 0.24, 1.0);
+          // Floor keeps the forest floor matte; low map values shine like wet
+          // plastic in clearings.
+          return clamp(texture2D(tex, uv).r, 0.55, 1.0);
         }
         float whTrail(vec2 p) {
           vec2 nodes[9];
@@ -200,7 +202,7 @@ export function createWesternHighlandsTerrainMaterial() {
         float whBasaltR = whRoughness(uWhBasaltRoughness, whRp, uWhBasaltScale, 2.0);
         float whMappedR = mix(whLoamR, whGrassR, clamp(whClearing(whRp) * 0.7 + (1.0 - whTrailRough) * 0.12, 0.0, 1.0));
         whMappedR = mix(whMappedR, whBasaltR, clamp(whWetRough * 0.55 + whRidgeRough * 0.24, 0.0, 0.82));
-        roughnessFactor = mix(roughnessFactor, clamp(whMappedR, 0.48, 0.98), 0.58);
+        roughnessFactor = mix(roughnessFactor, clamp(whMappedR, 0.58, 0.98), 0.58);
         roughnessFactor = mix(roughnessFactor, 0.72, whTrailRough * 0.22 + whWetRough * 0.26);`,
       )
       .replace(
@@ -227,7 +229,7 @@ export function createWesternHighlandsTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'western-highlands-forest-v3';
+  material.customProgramCacheKey = () => 'western-highlands-forest-v4';
   material.needsUpdate = true;
   return material;
 }

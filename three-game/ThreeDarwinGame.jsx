@@ -3,8 +3,9 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
-import { EffectComposer, Bloom, BrightnessContrast, HueSaturation, N8AO, SMAA, Vignette } from '@react-three/postprocessing';
-import { ACESFilmicToneMapping, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
+import { EffectComposer, Bloom, N8AO, SMAA } from '@react-three/postprocessing';
+import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
+import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
@@ -16,7 +17,11 @@ import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
 import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
+import { skyState } from './world/celestial';
+import { weatherEnv } from './world/weatherEnvRuntime';
+import { computeColorGrade } from './world/colorGrade';
 import { WATER_LEVEL } from './world/water';
+import './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 
@@ -65,10 +70,11 @@ const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 // transitive dep (not re-exported by @react-three/postprocessing), so we inline
 // its stable enum value rather than import from a non-direct dependency.
 const SMAA_PRESET_ULTRA = 3;
+const WATER_QUALITY_MODES = ['performance', 'polished', 'cinematic'];
 
 const DEFAULT_PERF_SETTINGS = {
   quality: 'performance',
-  waterQuality: 'performance',
+  waterQuality: 'polished',
   dprMode: 'default',
   msaaSamples: 0,
   postprocessing: true,
@@ -121,7 +127,7 @@ const QUALITY_PRESETS = {
     shadowQuality: 'high',
     ao: true,
     reflections: true,
-    waterQuality: 'performance',
+    waterQuality: 'polished',
     cheapMaterials: true,
     foliageDrawScale: 0.85,
   },
@@ -139,6 +145,7 @@ const QUALITY_PRESETS = {
 
 const BOOT_LOADER_STABLE_MS = 900;
 const BOOT_MIN_LOADING_MS = 1400;
+const SCREENSHOT_MIN_LOADING_MS = 5200;
 const DEFERRED_CONTENT_DELAY_MS = 350;
 const OPENING_CAMERA_DURATION_MS = 6200;
 const OPENING_CAMERA_MAX_MS = 10500;
@@ -148,6 +155,11 @@ const SHADOW_QUALITY_MODES = ['standard', 'high'];
 function normalizeShadowQuality(value, fallback = 'high') {
   const mode = String(value || '').toLowerCase();
   return SHADOW_QUALITY_MODES.includes(mode) ? mode : fallback;
+}
+
+function normalizeWaterQuality(value, fallback = 'polished') {
+  const mode = String(value || '').toLowerCase();
+  return WATER_QUALITY_MODES.includes(mode) ? mode : fallback;
 }
 
 function getInitialPerfSettings() {
@@ -178,7 +190,7 @@ function settingsFromUrlSearch(search) {
     : base.reflections && !params.has('noReflections');
   return {
     quality,
-    waterQuality: params.get('waterQuality') === 'cinematic' ? 'cinematic' : base.waterQuality,
+    waterQuality: normalizeWaterQuality(params.get('waterQuality'), base.waterQuality),
     shadowQuality: normalizeShadowQuality(params.get('shadowQuality'), base.shadowQuality),
     dprMode: params.get('dpr') || base.dprMode,
     msaaSamples,
@@ -214,6 +226,28 @@ function settingsFromUrlSearch(search) {
       ? Number(params.get('foliageDrawScale'))
       : base.foliageDrawScale,
   };
+}
+
+function urlFlagEnabled(params, name) {
+  if (!params.has(name)) return false;
+  const value = String(params.get(name) || '').trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off' && value !== 'no';
+}
+
+function e2eModeFromParams(params) {
+  return params.has('e2e') || params.get('testMode') === 'e2e';
+}
+
+function screenshotModeFromParams(params) {
+  return urlFlagEnabled(params, 'screenshot') || params.get('testMode') === 'screenshot';
+}
+
+function skipOpeningIntroFromParams(params) {
+  if (params.has('skipIntro')) return urlFlagEnabled(params, 'skipIntro');
+  return Boolean(
+    e2eModeFromParams(params)
+    || screenshotModeFromParams(params)
+  );
 }
 
 function dprForMode(mode) {
@@ -655,6 +689,46 @@ function OpeningIntroCompletion({
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
 function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
+  // The grade effects are instantiated directly, NOT via the
+  // @react-three/postprocessing wrappers: those wrappers JSON.stringify their
+  // props as a memo key, so anything non-serializable (a ref prop — React 19
+  // forwards refs as plain props — holding the effect with its circular r3f
+  // instance graph) crashes the render. Direct instances also let the frame
+  // loop below write to them without refs.
+  const gradeFx = useMemo(() => ({
+    hueSat: new HueSaturationEffect({ saturation: 0.08 }),
+    contrast: new BrightnessContrastEffect({ contrast: 0.05 }),
+    vignette: new VignetteEffect({ eskil: false, offset: 0.26, darkness: 0.42 }),
+  }), []);
+  useEffect(() => () => {
+    gradeFx.hueSat.dispose();
+    gradeFx.contrast.dispose();
+    gradeFx.vignette.dispose();
+  }, [gradeFx]);
+  const gradeRef = useRef(null);
+  // Live grade: drives the effects with time-of-day/weather every frame (see
+  // colorGrade.js). Damped so a time jump (sleeping, debug skips) glides
+  // instead of popping.
+  useFrame((_, delta) => {
+    const store = useThreeGameStore.getState();
+    const time = ((store.timeOfDay % 24) + 24) % 24;
+    const s = skyState(time, store.day || 1);
+    const target = computeColorGrade({
+      daylight: s.daylight,
+      golden: s.golden,
+      night: s.night,
+      overcast: weatherEnv.overcast,
+      mist: weatherEnv.mistAmount,
+      underwaterAmount: store.underwaterCamera?.amount || 0,
+    });
+    const grade = gradeRef.current || (gradeRef.current = { ...target });
+    grade.saturation = MathUtils.damp(grade.saturation, target.saturation, 2.5, delta);
+    grade.contrast = MathUtils.damp(grade.contrast, target.contrast, 2.5, delta);
+    grade.vignetteDarkness = MathUtils.damp(grade.vignetteDarkness, target.vignetteDarkness, 2.5, delta);
+    gradeFx.hueSat.saturation = grade.saturation;
+    gradeFx.contrast.contrast = grade.contrast;
+    gradeFx.vignette.darkness = grade.vignetteDarkness;
+  });
   if (!enabled) return null;
   const underwater = Math.min(1, Math.max(0, underwaterAmount));
   return (
@@ -675,19 +749,22 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
         />
       )}
       <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
+      {/* Threshold sits just under the ACES shoulder so deliberate HDR
+          customers — sun core, lantern flame, water glints pushed past 1.0,
+          moon glitter — glow softly, while sky/sand/foliage stay crisp. */}
       <Bloom
-        intensity={0.29 * (1 - underwater * 0.58)}
-        luminanceThreshold={0.955}
-        luminanceSmoothing={0.08}
+        intensity={0.36 * (1 - underwater * 0.58)}
+        luminanceThreshold={0.83}
+        luminanceSmoothing={0.15}
         mipmapBlur
-        radius={0.3}
+        radius={0.34}
       />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
           touching any material. Merges into the existing effect pass. */}
-      <HueSaturation saturation={0.08} />
-      <BrightnessContrast contrast={0.05} />
-      <Vignette eskil={false} offset={0.26} darkness={0.42} />
+      <primitive object={gradeFx.hueSat} />
+      <primitive object={gradeFx.contrast} />
+      <primitive object={gradeFx.vignette} />
     </EffectComposer>
   );
 }
@@ -780,14 +857,14 @@ function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, supp
   const y = Math.max(-18, Math.min(118, (glare.y ?? 0.42) * 100));
   const directness = Math.min(1, Math.max(0, glare.directness || 0));
   const warmth = Math.min(1, Math.max(0, glare.warmth ?? 0.5));
-  const screenStrength = Math.min(1, strength * (1.08 + directness * 0.55));
+  const screenStrength = Math.min(1, strength * (0.92 + directness * 0.48));
   const lemon = Math.round(228 + warmth * 18);
   const heat = Math.round(146 + warmth * 42);
-  const coreAlpha = 0.07 * screenStrength + 0.08 * screenStrength * directness;
-  const washAlpha = screenStrength * (0.055 + directness * 0.058);
-  const streakAlpha = screenStrength * (0.2 + directness * 0.26);
-  const veilAlpha = screenStrength * (0.04 + directness * 0.045);
-  const horizonHold = screenStrength * (0.055 + directness * 0.05);
+  const coreAlpha = 0.052 * screenStrength + 0.068 * screenStrength * directness;
+  const washAlpha = screenStrength * (0.04 + directness * 0.05);
+  const streakAlpha = screenStrength * (0.16 + directness * 0.22);
+  const veilAlpha = screenStrength * (0.03 + directness * 0.038);
+  const horizonHold = screenStrength * (0.045 + directness * 0.04);
   const transition = 'opacity 140ms linear';
   const axisX = 50 - x;
   const axisY = 50 - y;
@@ -795,14 +872,14 @@ function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, supp
   const lensAxisX = axisLength > 4 ? axisX / axisLength : -0.78;
   const lensAxisY = axisLength > 4 ? axisY / axisLength : 0.34;
   const offAxis = Math.min(1, axisLength / 58);
-  const lensAlpha = screenStrength * (0.34 + directness * 0.28 + offAxis * 0.24);
+  const lensAlpha = screenStrength * (0.2 + directness * 0.18 + offAxis * 0.14);
   const clampPct = value => Math.max(-18, Math.min(118, value));
   const lensGhosts = [
-    { d: 18, size: 5.4, alpha: 0.34, tint: '255,248,204', ring: false },
-    { d: 33, size: 8.8, alpha: 0.26, tint: '255,214,124', ring: true },
-    { d: 51, size: 4.4, alpha: 0.3, tint: '172,220,255', ring: false },
+    { d: 18, size: 4.6, alpha: 0.16, tint: '255,226,150', ring: true },
+    { d: 33, size: 8.8, alpha: 0.19, tint: '255,214,124', ring: true },
+    { d: 51, size: 3.8, alpha: 0.16, tint: '172,220,255', ring: false },
     { d: 68, size: 12.5, alpha: 0.18, tint: '255,172,116', ring: true },
-    { d: 86, size: 5.8, alpha: 0.18, tint: '210,244,255', ring: false },
+    { d: 86, size: 5.8, alpha: 0.12, tint: '210,244,255', ring: false },
   ];
 
   return (
@@ -824,7 +901,7 @@ function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, supp
         const opacity = lensAlpha * ghost.alpha;
         const background = ghost.ring
           ? `radial-gradient(circle, transparent 0%, transparent 42%, rgba(${ghost.tint},0.62) 48%, rgba(255,255,245,0.34) 53%, rgba(${ghost.tint},0.12) 61%, transparent 72%)`
-          : `radial-gradient(circle, rgba(255,255,246,0.66) 0%, rgba(${ghost.tint},0.34) 18%, rgba(${ghost.tint},0.12) 38%, transparent 68%)`;
+          : `radial-gradient(circle, rgba(255,255,246,0.34) 0%, rgba(${ghost.tint},0.2) 20%, rgba(${ghost.tint},0.08) 42%, transparent 70%)`;
         return (
           <div
             key={`solar-lens-ghost-${index}`}
@@ -1030,7 +1107,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       </div>
       <div className="mb-3 flex items-center gap-2 text-xs">
         <span className="text-amber-100/70">Water</span>
-        {['performance', 'cinematic'].map(mode => (
+        {WATER_QUALITY_MODES.map(mode => (
           <button
             key={mode}
             type="button"
@@ -1152,6 +1229,8 @@ export default function ThreeDarwinGame() {
   const [perfProbe, setPerfProbe] = useState(false);
   const [costProbe, setCostProbe] = useState(false);
   const [e2eMode, setE2EMode] = useState(false);
+  const [screenshotMode, setScreenshotMode] = useState(false);
+  const [skipOpeningIntro, setSkipOpeningIntro] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
@@ -1165,6 +1244,7 @@ export default function ThreeDarwinGame() {
   const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const gameStarted = launchState !== 'menu' && launchState !== 'character';
+  const automationReadyMode = e2eMode || screenshotMode;
   const openingIntroActive = launchState === 'intro';
   const showLaunchOverlay = launchState === 'menu' || launchState === 'character' || !sceneReady;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
@@ -1202,12 +1282,20 @@ export default function ThreeDarwinGame() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setE2EMode(params.has('e2e') || params.get('testMode') === 'e2e');
+    const nextE2EMode = e2eModeFromParams(params);
+    const nextScreenshotMode = screenshotModeFromParams(params);
+    setE2EMode(nextE2EMode);
+    setScreenshotMode(nextScreenshotMode);
+    setSkipOpeningIntro(skipOpeningIntroFromParams(params));
     setPerfSettings(settingsFromUrlSearch(window.location.search));
     setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
     setCostProbe(params.has('costProbe'));
     const zoneParam = params.get('zone');
-    if (zoneParam) useThreeGameStore.getState().beginZoneTransition(zoneParam, {});
+    if (zoneParam) {
+      const store = useThreeGameStore.getState();
+      store.beginZoneTransition(zoneParam, {});
+      if (nextScreenshotMode || nextE2EMode) useThreeGameStore.getState().completeZoneTransition();
+    }
     const setShortcutModifierActive = active => {
       window.__darwinShortcutModifierActive = active;
     };
@@ -1305,27 +1393,32 @@ export default function ThreeDarwinGame() {
   const markSceneReady = useCallback(() => {
     const now = performance.now();
     const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
+    const params = new URLSearchParams(window.location.search);
+    const skipIntro = skipOpeningIntro || skipOpeningIntroFromParams(params);
     setSceneReady(true);
     setDisplayedProgress(100);
     setDeferredContentReady(false);
-    if (mode.kind === 'animal') {
+    if (mode.kind === 'animal' || skipIntro) {
       setOpeningIntroStartedAt(0);
       setLaunchState('playing');
     } else {
       setOpeningIntroStartedAt(now);
       setLaunchState('intro');
     }
-  }, []);
+  }, [skipOpeningIntro]);
 
   useEffect(() => {
-    if (!e2eMode || !gameStarted || sceneReady) return undefined;
+    if (!automationReadyMode || !gameStarted || sceneReady) return undefined;
     const handle = window.setInterval(() => {
       const startedAt = bootStartedAt.current || performance.now();
-      const waitedLongEnough = performance.now() - startedAt >= Math.max(BOOT_MIN_LOADING_MS, 2500);
+      const minimumWait = screenshotMode && !e2eMode
+        ? SCREENSHOT_MIN_LOADING_MS
+        : Math.max(BOOT_MIN_LOADING_MS, 2500);
+      const waitedLongEnough = performance.now() - startedAt >= minimumWait;
       if (waitedLongEnough && document.querySelector('canvas')) markSceneReady();
     }, 250);
     return () => window.clearInterval(handle);
-  }, [e2eMode, gameStarted, markSceneReady, sceneReady]);
+  }, [automationReadyMode, e2eMode, gameStarted, markSceneReady, sceneReady, screenshotMode]);
 
   useEffect(() => {
     if (!sceneReady) return undefined;

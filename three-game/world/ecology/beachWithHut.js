@@ -1,6 +1,5 @@
 import {
   beachHutCoastDistance,
-  beachHutGardenInfo,
   beachHutPadMask,
   beachHutPathInfo,
   BEACH_WITH_HUT,
@@ -117,7 +116,7 @@ function buildCollectibleBeachFinds() {
 }
 
 function clearOfGardenAndHuts(x, z) {
-  return beachHutGardenInfo(x, z).mask < 0.12 && beachHutPadMask(x, z) < 0.16;
+  return beachHutPadMask(x, z) < 0.16;
 }
 
 function buildFlora() {
@@ -146,13 +145,6 @@ function buildFlora() {
     accept: (biome, x, z) => nearAnyCluster(scrubClumps, x, z, 10.5)
       && biome === 'dry-grass-shelf'
       && clearOfGardenAndHuts(x, z),
-  });
-  const gardenEdgePlants = scatter('hut-garden-edge-plants', 34, 809, {
-    minX: 16, maxX: 34, minZ: -25, maxZ: -10, scale: [0.045, 0.095], maxGrade: 0.7,
-    accept: (biome, x, z) => {
-      const garden = beachHutGardenInfo(x, z).mask;
-      return garden > 0.05 && garden < 0.48 && beachHutPathInfo(x, z).path < 0.24;
-    },
   });
   const driftwood = scatter('hut-driftwood', 5, 821, {
     minX: -28, maxX: 28, minZ: -1, maxZ: 23, scale: [1.25, 2.4], maxGrade: 0.56,
@@ -199,15 +191,6 @@ function buildFlora() {
       items: drybrush,
     },
     {
-      id: 'beach-hut-garden-edge-plants',
-      path: `${NATURE}runtime-ground-plants.glb`,
-      sink: 0.04,
-      castShadow: false,
-      tintStrength: 0.12,
-      motion: { wind: 0.82, bend: 0.18, bendRadius: 1.2 },
-      items: gardenEdgePlants,
-    },
-    {
       id: 'beach-hut-driftwood',
       path: `${NATURE}runtime-driftwood.glb`,
       sink: 0.02,
@@ -220,7 +203,6 @@ function buildFlora() {
 
 function grassAllowedAt({ x, z, biome, path }) {
   if (path.distance < path.width * 1.35) return false;
-  if (beachHutGardenInfo(x, z).mask > 0.08) return false;
   if (beachHutPadMask(x, z) > 0.12) return false;
   const d = beachHutCoastDistance(x, z);
   if (d < 22) return false;
@@ -235,7 +217,7 @@ function buildGrassPatches() {
     seed: 9411,
     bounds: { minX: -6, maxX: 38, minZ: -32, maxZ: 6 },
     pathInfo: beachHutPathInfo,
-    rejectBiomes: ['water', 'shallow-water', 'wet-white-sand', 'white-sand', 'garden-loam', 'sandy-path', 'basalt'],
+    rejectBiomes: ['water', 'shallow-water', 'wet-white-sand', 'white-sand', 'sandy-path', 'basalt'],
     pathCenterMax: 0.05,
     pathTreadMax: 0.14,
     maxGrade: 0.85,
@@ -266,7 +248,7 @@ export function buildBeachWithHutEcology() {
         maxVisibleDistance: 82,
       }),
     ],
-    footprintBiomes: ['wet-white-sand', 'white-sand', 'normal-sand', 'sandy-path', 'garden-loam', 'dry-grass-shelf'],
+    footprintBiomes: ['wet-white-sand', 'white-sand', 'normal-sand', 'sandy-path', 'dry-grass-shelf'],
     flyingModels: [
       flamingoFlyoverLayer('beach-hut-flamingo-flyover', [
         { cx: -18, cz: -10, radiusX: 38, radiusZ: 12, height: 33, speed: 0.024, phase: 1.4, scale: 0.86 },

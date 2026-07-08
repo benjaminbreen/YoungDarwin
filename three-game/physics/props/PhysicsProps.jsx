@@ -8,6 +8,11 @@ import { PropDebris } from './PropDebris';
 import { HammerImpactFX } from './HammerImpactFX';
 import { RockSampleSystem } from './RockSampleSystem';
 import { emitPropEvent } from './propEvents';
+import ShotgunSystem from '../../shooting/ShotgunSystem';
+import ShotgunFX from '../../shooting/ShotgunFX';
+import SplatTextFX from '../../shooting/SplatTextFX';
+import AimReticle from '../../shooting/AimReticle';
+import WorldTimeTicker from '../../world/WorldTimeTicker';
 
 // Mounts every physics prop registered for the current zone, owns the E-key
 // carry input, and swaps broken props for tumbling debris + loot.
@@ -65,6 +70,11 @@ export function PhysicsProps() {
     }}>
       <HammerImpactFX />
       <RockSampleSystem />
+      <WorldTimeTicker />
+      <ShotgunSystem />
+      <ShotgunFX />
+      <SplatTextFX />
+      <AimReticle />
       {props.map(prop => (
         <PhysicsProp key={prop.id} prop={prop} onBreak={handleBreak} />
       ))}

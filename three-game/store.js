@@ -582,6 +582,9 @@ function createExpeditionSlice() {
     favoriteSpecimenIds: [],
     inventory: expedition.inventory,
     journal: expedition.journal,
+    // In-progress journal entry text; lives in the store so an accidental
+    // close of the notebook doesn't lose writing.
+    journalDraft: '',
     collectedSpecimenIds: expedition.collectedSpecimenIds,
     collectedSpecimenActorIds: expedition.collectedSpecimenActorIds || [],
     documentedSpecimenIds: expedition.documentedSpecimenIds,
@@ -667,6 +670,7 @@ function createSceneSlice() {
     carriedObjectId: null,
     inspectedObject: null,
     inspectedScreenPosition: null,
+    beagleTravelPrompt: null,
     solarGlare: {
       x: 0.5,
       y: 0.42,
@@ -735,6 +739,82 @@ export const useThreeGameStore = create((set, get) => ({
     return patch;
   }),
   setActiveTool: activeToolId => set({ activeToolId }),
+  // Double-barreled shotgun ammo. Timestamps are performance.now()-seconds so
+  // the aim/HUD layers can share the clock without a store tick per frame.
+  shotgunShells: 2,
+  shotgunReloadUntil: 0,
+  setShotgunAmmo: ({ shells, reloadUntil }) => set({
+    shotgunShells: shells,
+    shotgunReloadUntil: reloadUntil,
+  }),
+  // Specimens dropped by a clean shotgun hit: they lie where they fell until
+  // Darwin walks over and gathers them (the ordinary collection judgment runs
+  // at pickup). Keyed by actorId.
+  downedSpecimenActors: {},
+  markSpecimenDowned: (actorId, info = {}) => set(state => {
+    if (!actorId || state.downedSpecimenActors?.[actorId]) return {};
+    return {
+      downedSpecimenActors: {
+        ...(state.downedSpecimenActors || {}),
+        [actorId]: {
+          specimenId: info.specimenId || null,
+          x: info.x ?? 0,
+          y: info.y ?? 0,
+          z: info.z ?? 0,
+          at: Date.now(),
+          method: 'shotgun',
+        },
+      },
+    };
+  }),
+  applyShotgunSelfInjury: (amount = 14) => set(state => {
+    const message = 'The charge tears into the ground at your own boot. A stupid, searing mistake.';
+    const symsLine = '"Sir! Point the muzzle at the birds, not the naturalist!"';
+    return {
+      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      message,
+      symsLine,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'hazard')),
+    };
+  }),
+  applyShotgunNpcHit: (npcId, { distance } = {}) => set(state => {
+    const direct = Number.isFinite(distance) && distance < 6;
+    const message = direct
+      ? 'The blast catches Syms across the shoulder. He staggers, white-faced, pellets in his coat.'
+      : 'Stray pellets rattle past Syms. He drops flat behind the nearest rock.';
+    const symsLine = direct
+      ? '"You have SHOT me, sir! Your own assistant!"'
+      : '"Hold your fire, sir — I am not a specimen!"';
+    return {
+      message,
+      symsLine,
+      localStanding: clamp((state.localStanding ?? 50) - (direct ? 8 : 3), 0, 100),
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'major-event')),
+    };
+  }),
+  shotgunStructureHits: {},
+  recordShotgunStructureHit: structureId => set(state => {
+    if (!structureId) return {};
+    const hits = { ...(state.shotgunStructureHits || {}) };
+    hits[structureId] = (hits[structureId] || 0) + 1;
+    const patch = { shotgunStructureHits: hits };
+    if (hits[structureId] === 3) {
+      const message = 'Buckshot in the timbers. Whoever raised this will notice.';
+      patch.message = message;
+      patch.symsLine = 'Syms winces at each report. "That wall did you no wrong, sir."';
+      patch.narratorLog = appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine: patch.symsLine,
+      }, state, 'shotgun-structure'));
+    }
+    return patch;
+  }),
   moveToolbarSlot: (from, to) => set(state => {
     if (from === to || from < 0 || to < 0 || from >= state.toolbarOrder.length || to >= state.toolbarOrder.length) return {};
     const toolbarOrder = [...state.toolbarOrder];
@@ -755,6 +835,7 @@ export const useThreeGameStore = create((set, get) => ({
       ? state.favoriteSpecimenIds.filter(id => id !== specimenId)
       : [...state.favoriteSpecimenIds, specimenId],
   })),
+  setJournalDraft: value => set({ journalDraft: String(value ?? '') }),
   addUserJournalEntry: content => set(state => {
     const trimmed = String(content || '').trim();
     if (!trimmed) return {};
@@ -899,6 +980,16 @@ export const useThreeGameStore = create((set, get) => ({
   setInspectedObject: inspectedObject => set({ inspectedObject, inspectedScreenPosition: null }),
   setInspectedScreenPosition: inspectedScreenPosition => set({ inspectedScreenPosition }),
   clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
+  openBeagleTravelPrompt: (beagleTravelPrompt = {}) => set({
+    beagleTravelPrompt: {
+      id: `beagle-return:${Date.now()}`,
+      openedAt: Date.now(),
+      ...beagleTravelPrompt,
+    },
+    inspectedObject: null,
+    inspectedScreenPosition: null,
+  }),
+  closeBeagleTravelPrompt: () => set({ beagleTravelPrompt: null }),
   setSolarGlare: solarGlare => set(state => {
     const nextStrength = clamp(Number(solarGlare?.strength) || 0, 0, 1);
     const nextRawStrength = clamp(Number(solarGlare?.rawStrength) || 0, 0, 1);
@@ -1713,7 +1804,14 @@ export const useThreeGameStore = create((set, get) => ({
   beginZoneTransition: (zoneId, options = {}) => {
     const zone = getZone(zoneId);
     const currentZone = getZone(get().currentZoneId);
-    const travelCard = getTravelCardForRoute(currentZone.id, zone.id);
+    const routeTravelCard = getTravelCardForRoute(currentZone.id, zone.id);
+    const travelCard = options.travelCard
+      ? { ...(routeTravelCard || {}), ...options.travelCard }
+      : routeTravelCard;
+    const optionMinutes = Number(options.minutes);
+    const optionFatigue = Number(options.fatigue);
+    const minutes = Number.isFinite(optionMinutes) ? optionMinutes : travelCard?.estimatedMinutes || 0;
+    const fatigue = Number.isFinite(optionFatigue) ? optionFatigue : travelCard?.fatigueDelta || 0;
     set({
       transition: {
         zoneId: zone.id,
@@ -1724,12 +1822,15 @@ export const useThreeGameStore = create((set, get) => ({
         subtitle: zone.subtitle,
         island: zone.island,
         note: options.note || travelCard?.description || zone.loadingNote,
-        educationalNote: zone.educationalNote,
-        minutes: travelCard?.estimatedMinutes || 0,
-        fatigue: travelCard?.fatigueDelta || 0,
+        educationalNote: options.educationalNote || travelCard?.educationalNote || zone.educationalNote,
+        minutes,
+        fatigue,
         startedAt: Date.now(),
         progress: 0,
       },
+      beagleTravelPrompt: null,
+      inspectedObject: null,
+      inspectedScreenPosition: null,
     });
   },
 
@@ -1762,6 +1863,7 @@ export const useThreeGameStore = create((set, get) => ({
         : [...state.visitedLocalCellIds, nextLocalCellId],
       transition: null,
       edgePrompt: null,
+      beagleTravelPrompt: null,
       dismissedEdgePromptId: null,
       arrivalEdgeBlock: state.transition.entryEdge
         ? {
@@ -2909,6 +3011,9 @@ export const useThreeGameStore = create((set, get) => ({
         collectedSpecimenActorIds: collected && !(current.collectedSpecimenActorIds || []).includes(actorId)
           ? [...(current.collectedSpecimenActorIds || []), actorId]
           : (current.collectedSpecimenActorIds || []),
+        downedSpecimenActors: collected && current.downedSpecimenActors?.[actorId]
+          ? Object.fromEntries(Object.entries(current.downedSpecimenActors).filter(([key]) => key !== actorId))
+          : (current.downedSpecimenActors || {}),
         documentedSpecimenIds: documented && !current.documentedSpecimenIds.includes(specimen.id)
           ? [...current.documentedSpecimenIds, specimen.id]
           : current.documentedSpecimenIds,

@@ -400,6 +400,9 @@ function tuneWater2Shader(material, surface) {
   const distortionScale = Number.isFinite(surface.distortionScale) ? surface.distortionScale : 0.012;
   const alphaDeep = Number.isFinite(surface.waterAlpha) ? surface.waterAlpha : 0.9;
   const alphaShore = Number.isFinite(surface.waterShoreAlpha) ? surface.waterShoreAlpha : 0.42;
+  // Scales the pale shore-band tint/glow. Lagoons keep the default; narrow
+  // streams set it low so the shoreline seam doesn't read as a bright edge.
+  const shoreBrighten = Number.isFinite(surface.shoreBrighten) ? surface.shoreBrighten : 1;
   material.uniforms.uStepRippleTime = { value: 0 };
   material.uniforms.uStepRippleStrength = { value: surface.stepRippleStrength ?? 0.38 };
   material.uniforms.uStepRippleDisplacement = { value: surface.stepRippleDisplacement ?? 0.028 };
@@ -520,8 +523,8 @@ function tuneWater2Shader(material, surface) {
       `vec4 lagoonOptics = vec4( color, 1.0 ) * mix( refractColor, reflectColor, reflectance );
       float lagoonShore = clamp(vLagoonShore, 0.0, 1.0);
       float lagoonEdge = smoothstep(0.18, 0.95, lagoonShore);
-      lagoonOptics.rgb = mix(lagoonOptics.rgb, lagoonOptics.rgb * vec3(0.78, 0.88, 0.82), lagoonEdge * 0.28);
-      lagoonOptics.rgb += lagoonEdge * vec3(0.035, 0.052, 0.044);
+      lagoonOptics.rgb = mix(lagoonOptics.rgb, lagoonOptics.rgb * vec3(0.78, 0.88, 0.82), lagoonEdge * ${(0.28 * shoreBrighten).toFixed(3)});
+      lagoonOptics.rgb += lagoonEdge * vec3(0.035, 0.052, 0.044) * ${shoreBrighten.toFixed(3)};
       lagoonOptics.rgb += stepRippleBright * vec3(0.10, 0.155, 0.135);
       lagoonOptics.a = mix(${alphaDeep.toFixed(3)}, ${alphaShore.toFixed(3)}, lagoonEdge);
       gl_FragColor = lagoonOptics;`,

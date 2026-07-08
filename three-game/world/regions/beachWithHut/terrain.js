@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { crackNoise, elevationNoise, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { elevationNoise, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 
 // ---------------------------------------------------------------------------
 // Beach with Hut (S_HUT) — a small southwest Floreana beach.
@@ -7,7 +7,7 @@ import { crackNoise, elevationNoise, surfaceNoise, terrainFineDetail, terrainSur
 // Layout (z axis: -35 north → +35 south, x axis: -40 west → +40 east):
 //   west/south ocean wraps a pale shell-sand beach; the back-beach shifts into
 //   warmer beige sand, then rises northeast into a hut shelf with sparse dry
-//   grass, a lean-to, and abandoned loam seedbeds.
+//   grass and a lean-to.
 
 export const BEACH_WITH_HUT = 'S_HUT';
 
@@ -29,12 +29,6 @@ export const BEACH_HUT_PATHS = [
     [7, -14, 2.2],
     [2, -9, 2.0],
   ],
-];
-
-export const BEACH_HUT_GARDENS = [
-  { id: 'upper-seedbed', x: 26, z: -21, halfX: 4.6, halfZ: 2.2, yaw: -0.34, rowAxis: 'x', rowSpacing: 0.86 },
-  { id: 'lower-seedbed', x: 22, z: -15, halfX: 4.0, halfZ: 2.0, yaw: -0.29, rowAxis: 'x', rowSpacing: 0.82 },
-  { id: 'small-seedbed', x: 31, z: -13, halfX: 2.5, halfZ: 1.45, yaw: 0.12, rowAxis: 'z', rowSpacing: 0.76 },
 ];
 
 export const BEACH_HUT_PADS = [
@@ -140,31 +134,6 @@ export function beachHutPathInfo(x, z) {
   };
 }
 
-function rotatedLocal(x, z, cx, cz, yaw) {
-  const dx = x - cx;
-  const dz = z - cz;
-  const cos = Math.cos(yaw);
-  const sin = Math.sin(yaw);
-  return { lx: dx * cos - dz * sin, lz: dx * sin + dz * cos };
-}
-
-export function beachHutGardenInfo(x, z) {
-  let best = { mask: 0, rowPhase: 0, plot: null };
-  for (const plot of BEACH_HUT_GARDENS) {
-    const { lx, lz } = rotatedLocal(x, z, plot.x, plot.z, plot.yaw);
-    const wobble = terrainSurfaceNoise(x * 0.52 + plot.x, z * 0.52 - plot.z) * 0.34;
-    const dx = Math.abs(lx) - plot.halfX + wobble;
-    const dz = Math.abs(lz) - plot.halfZ + wobble;
-    const outside = Math.max(dx, dz);
-    const mask = clamp01(1 - smoothstep01(outside, -0.75, 0.72));
-    if (mask > best.mask) {
-      const across = plot.rowAxis === 'x' ? lz : lx;
-      best = { mask, rowPhase: (across / plot.rowSpacing) * Math.PI * 2, plot };
-    }
-  }
-  return best;
-}
-
 export function beachHutPadMask(x, z) {
   let mask = 0;
   for (const pad of BEACH_HUT_PADS) {
@@ -189,11 +158,9 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
   }
 
   const path = beachHutPathInfo(x, z);
-  const garden = beachHutGardenInfo(x, z);
   const pad = beachHutPadMask(x, z);
 
   y -= path.tread * 0.055 + path.center * 0.035;
-  y -= garden.mask * (0.08 + (movementSurface ? 0 : Math.sin(garden.rowPhase) * 0.035));
 
   if (pad > 0) {
     const padTarget = 0.82 + neRise * 1.45 + smoothstep01(d, 18, 34) * 0.24;
@@ -201,7 +168,9 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
   }
 
   const rock = beachHutRockMask(x, z);
-  y += rock * (0.72 + Math.abs(crackNoise(x * 0.4 + 5, z * 0.37 - 2)) * (movementSurface ? 0.28 : 0.82));
+  const rockBroad = elevationNoise(x * 0.08 + 11, z * 0.075 - 7) * 0.5 + 0.5;
+  const rockKnob = Math.max(0, terrainSurfaceNoise(x * 0.82 + 3, z * 0.76 - 4));
+  y += rock * (0.46 + rockBroad * 0.2 + rockKnob * (movementSurface ? 0.06 : 0.14));
 
   const seaward = 1 - smoothstep01(d, -2.5, 0.0);
   const deepWest = smoothstep01(-x, 34, 40);
@@ -209,7 +178,7 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
   y -= Math.max(deepWest, deepSouth) * seaward * 2.4;
 
   const dry = smoothstep01(y, -0.4, 0.1);
-  const detailSuppression = clamp01(path.path * 0.42 + garden.mask * 0.54 + pad * 0.72);
+  const detailSuppression = clamp01(path.path * 0.42 + pad * 0.72 + rock * 0.88);
   y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.18 : 0.5) * (1 - detailSuppression);
   return Math.max(-4.3, y);
 }
@@ -221,8 +190,6 @@ export function beachWithHutBiomeAt(x, z, y = beachWithHutHeight(x, z)) {
   if (beachHutRockMask(x, z) > 0.45) return 'basalt';
   if (d >= 0 && d < 1.8) return 'wet-white-sand';
 
-  const garden = beachHutGardenInfo(x, z);
-  if (garden.mask > 0.45) return 'garden-loam';
   const path = beachHutPathInfo(x, z);
   if (path.center > 0.24 || path.tread > 0.52) return 'sandy-path';
   if (d < 14.5) return 'white-sand';
@@ -238,11 +205,7 @@ export function beachWithHutColor(x, z, y) {
   else if (biome === 'shallow-water') color.set('#70bfb1');
   else if (biome === 'basalt') color.set('#37342e');
   else if (biome === 'wet-white-sand') color.set('#b8b294');
-  else if (biome === 'garden-loam') {
-    const garden = beachHutGardenInfo(x, z);
-    color.set('#2d2118');
-    color.lerp(new THREE.Color('#4a3322'), (Math.sin(garden.rowPhase) * 0.5 + 0.5) * 0.28);
-  } else if (biome === 'sandy-path') color.set('#9e8052');
+  else if (biome === 'sandy-path') color.set('#9e8052');
   else if (biome === 'white-sand') {
     color.set('#d8cfb5');
     color.lerp(new THREE.Color('#eee2c5'), Math.max(0, noise) * 0.36);

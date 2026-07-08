@@ -53,6 +53,9 @@ import { updatePlayerFrameFeedback } from './playerFrameFeedback';
 import { finalizePlayerFrame } from './playerFrameFinalization';
 import { updatePlayerActionMotion } from './playerActionMotion';
 import { updatePlayerEquipmentState } from './playerEquipmentState';
+import { shotgunAimState, resetShotgunAimState } from '../../shooting/aimState';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { setWorldTimeTarget } from '../../world/worldTime';
 import { beginClimbMotion as beginClimbMotionState, boulderTraversalProfile } from './playerTraversalMotion';
 import { resolvePlayerLanding, updatePlayerJumpInputAndGravity } from './playerAirborneMotion';
 import { PlayerAvatarModel } from './PlayerAvatarModel';
@@ -232,6 +235,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const { yawRef, aimActiveRef, firePulseRef, getAimDirection, resetCameraForSpawn, recenterCamera, updateCamera } = usePlayerCameraRig();
   const lastToolId = useRef(null);
   const lastFirePulse = useRef(0);
+  // Never leave the world stuck in bullet time if the controller unmounts
+  // mid-aim (zone change, mode swap).
+  useEffect(() => () => setWorldTimeTarget(1), []);
   const facing = useRef(new THREE.Vector3(0, 0, -1));
   const wasAirborne = useRef(false);
   const jumpState = useRef({
@@ -385,6 +391,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     airborne: false,
     crouching: false,
     aiming: false,
+    aimToggled: false,
     crouchRunning: false,
     strafeLeft: false,
     strafeRight: false,
@@ -1258,12 +1265,36 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         firePulseRef,
         aimActiveRef,
         startAction,
+        playerPosition: group.current.position,
+        playerFacing: facing.current,
       });
     } else {
       stateRef.current.aiming = false;
       aimActiveRef.current = false;
       lastToolId.current = useThreeGameStore.getState().activeToolId;
     }
+    // Shotgun recoil lands as a camera impulse the frame the barrel fires.
+    if (shotgunAimState.recoilPending) {
+      shotgunAimState.recoilPending = false;
+      cameraImpulse.current = {
+        startedAt: now,
+        intensity: SHOTGUN.recoil.intensity,
+        duration: SHOTGUN.recoil.duration,
+        seed: cameraImpulse.current.seed + 1,
+      };
+    }
+    // A blast into his own feet: Darwin goes down, health follows.
+    if (shotgunAimState.selfHitPending) {
+      shotgunAimState.selfHitPending = false;
+      useThreeGameStore.getState().applyShotgunSelfInjury?.(SHOTGUN.selfHit.damage);
+      startAction('trip', ACTION_DURATION.trip, {
+        lockMovement: true,
+        recoverAction: 'gettingUp',
+        recoverDuration: 1.45,
+      });
+    }
+    // Bullet time: the living world slows while Darwin shoulders the gun.
+    setWorldTimeTarget(stateRef.current.aiming ? SHOTGUN.ads.timeScale : 1);
     if (rotateLeftPressed) yawRef.current += CAMERA.keyRotateSpeed * delta;
     if (rotateRightPressed) yawRef.current -= CAMERA.keyRotateSpeed * delta;
     if (keys.recenterCamera && !lastButtons.current.recenterCamera) {
@@ -1408,6 +1439,8 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         activeConstraint,
       });
     }
+    // The look-around fidget plays bare-handed only: with a tool or gun
+    // equipped the clip's empty-handed gestures clip through the prop.
     const idleEligible = !moving
       && !movementLocked
       && !stateRef.current.action
@@ -1416,7 +1449,8 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       && !wasAirborne.current
       && !rotateLeftPressed
       && !rotateRightPressed
-      && !anyDirectActionPressed;
+      && !anyDirectActionPressed
+      && useThreeGameStore.getState().activeToolId === 'hands';
     if (isDarwinMode && idleEligible) {
       if (!idleFidget.current.idleSince) {
         idleFidget.current.idleSince = now;
@@ -1719,17 +1753,25 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, decel, delta);
     }
 
-    // Rifle aim mode: the cursor owns Darwin's facing. This overrides the
-    // movement-driven yaw above, so velocity can run opposite/lateral to facing
-    // (real backpedal and strafing) and shots track the pointer.
+    // Rifle aim mode: the camera owns Darwin's facing (crosshair at screen
+    // center, shooter-style). This overrides the movement-driven yaw above,
+    // so velocity can run opposite/lateral to facing (real backpedal and
+    // strafing) and shots track the camera. getAimDirection also publishes
+    // the full 3D fire direction (yaw + aim pitch) to shotgunAimState.
     const aimDirection = (stateRef.current.aiming && getAimDirection && !movementLocked && !stateRef.current.action)
-      ? getAimDirection(group.current.position)
+      ? getAimDirection()
       : null;
     stateRef.current.aimDirection = aimDirection ? [aimDirection.x, aimDirection.z] : null;
     if (aimDirection) {
       facing.current.copy(aimDirection);
       const aimYaw = Math.atan2(aimDirection.x, aimDirection.z);
       group.current.rotation.y = dampAngle(group.current.rotation.y, aimYaw, 16, delta);
+      shotgunAimState.active = true;
+      shotgunAimState.playerX = group.current.position.x;
+      shotgunAimState.playerY = group.current.position.y;
+      shotgunAimState.playerZ = group.current.position.z;
+    } else if (shotgunAimState.active && !stateRef.current.aiming) {
+      resetShotgunAimState();
     }
 
     const groundInfo = collisionAdapter.groundInfo(group.current.position);

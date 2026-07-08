@@ -13,14 +13,47 @@ sailGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
   -0.55, 1.0, 0,
 ], 3));
 sailGeometry.computeVertexNormals();
+const beagleClickGeometry = new THREE.BoxGeometry(13.5, 13, 5.5);
 
 export function Beagle() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const openBeagleTravelPrompt = useThreeGameStore(state => state.openBeagleTravelPrompt);
   const zone = getZone(currentZoneId);
+  const canReturnToBeagle = currentZoneId === 'POST_OFFICE_BAY';
+  const handleClick = React.useCallback((event) => {
+    if (!canReturnToBeagle) return;
+    event.stopPropagation();
+    openBeagleTravelPrompt({ source: 'offshore-beagle' });
+  }, [canReturnToBeagle, openBeagleTravelPrompt]);
+  const handlePointerOver = React.useCallback((event) => {
+    if (!canReturnToBeagle || typeof document === 'undefined') return;
+    event.stopPropagation();
+    document.body.style.cursor = 'pointer';
+  }, [canReturnToBeagle]);
+  const handlePointerOut = React.useCallback(() => {
+    if (typeof document !== 'undefined') document.body.style.cursor = '';
+  }, []);
+  React.useEffect(() => () => {
+    if (typeof document !== 'undefined') document.body.style.cursor = '';
+  }, []);
+
   if (!zone.beaglePosition && currentZoneId !== 'POST_OFFICE_BAY') return null;
   const [x, y, z] = zone.beaglePosition || [13.5, -1.08, -48];
   return (
-    <group position={[x, y, z]} rotation={[0, -0.08, 0]} scale={0.92} userData={{ reflect: true }}>
+    <group
+      position={[x, y, z]}
+      rotation={[0, -0.08, 0]}
+      scale={0.92}
+      userData={{ reflect: true }}
+      onClick={handleClick}
+      onPointerOver={handlePointerOver}
+      onPointerOut={handlePointerOut}
+    >
+      {canReturnToBeagle && (
+        <mesh geometry={beagleClickGeometry} position={[0, 4.7, 0]} renderOrder={-1}>
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} color="#ffffff" />
+        </mesh>
+      )}
       <StaticGLB
         path="/assets/models/ships/beagle-styrbjorn.glb"
         position={[0, 0, 0]}

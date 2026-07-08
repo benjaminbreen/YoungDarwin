@@ -157,9 +157,33 @@ function deckFurniture() {
   ];
 }
 
+function riggingClimbTargets() {
+  const mastStations = [
+    { id: 'fore', x: 12.96, halfLength: 1.55, top: 4.15 },
+    { id: 'main', x: -2.16, halfLength: 1.75, top: 4.35 },
+    { id: 'mizzen', x: -17.64, halfLength: 1.25, top: 3.75 },
+  ];
+  return mastStations.flatMap(mast => [1, -1].map(side => {
+    const hb = beagleHalfBeam(mast.x);
+    const sideLabel = side > 0 ? 'port' : 'starboard';
+    return deckObstacle({
+      id: `ratlines-${mast.id}-${sideLabel}`,
+      x: mast.x + (mast.id === 'mizzen' ? 0.35 : -0.25),
+      z: side * Math.max(1.15, hb - 0.88),
+      yaw: side * (mast.id === 'mizzen' ? -0.08 : 0.12),
+      radius: mast.halfLength + 0.9,
+      top: mast.top,
+      shape: box([mast.halfLength * 2, mast.top, 0.76], mast.top * 0.5),
+      climbable: true,
+      jumpable: true,
+      climbLabel: `${mast.id}mast ${sideLabel} ratlines`,
+    });
+  }));
+}
+
 let cache = null;
 
 export function getBeagleDeckObstacles() {
-  if (!cache) cache = [...bulwarkRuns(), ...deckFurniture()];
+  if (!cache) cache = [...bulwarkRuns(), ...deckFurniture(), ...riggingClimbTargets()];
   return cache;
 }

@@ -7,6 +7,7 @@ import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
 import { createFaunaMotionController, habitatFor, seedFromSpecimen } from './faunaMotionController';
 import { onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
+import { worldTime } from '../world/worldTime';
 
 export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -64,7 +65,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     });
   }, [basePosition, basePositionRef, controller, profile]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame(() => {
     if (!controller || !profile) return;
     const base = basePositionRef?.current || basePosition;
     const actorId = specimen.instanceId || specimen.id;
@@ -87,12 +88,14 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       }
     }
     const playerPose = getRuntimePlayerPose();
+    // Fauna live on the world clock, not the frame clock: bullet time while
+    // Darwin shoulders the shotgun (and kill-confirm hitstop) slow them down.
     const status = controller.update({
       basePosition: base,
       zoneId: currentZoneId,
       playerPosition: playerPose?.position,
-      elapsedTime: clock.elapsedTime,
-      delta,
+      elapsedTime: worldTime.elapsed,
+      delta: worldTime.delta,
       paused,
     });
     statusRef.current = status;

@@ -29,6 +29,12 @@ const _white = new THREE.Color('#ffffff');
 const _cumulusShade = new THREE.Color('#8ba0b5'); // cool blue-grey underside
 const _sunWarm = new THREE.Color('#fff2d9');
 const _sunGolden = new THREE.Color('#ff9b55');
+const _dramaDawnWarm = new THREE.Color('#ffb14f');
+const _dramaDuskWarm = new THREE.Color('#ff7d47');
+const _dramaDawnRose = new THREE.Color('#ff91b3');
+const _dramaDuskRose = new THREE.Color('#ee6385');
+const _dramaWarm = new THREE.Color();
+const _dramaRose = new THREE.Color();
 
 export function CloudDeck() {
   const { camera, scene } = useThree();
@@ -50,6 +56,9 @@ export function CloudDeck() {
       uShade: { value: new THREE.Color('#93a5b5') },
       uDark: { value: new THREE.Color('#5d6a74') },
       uSunTint: { value: new THREE.Color('#fff2d9') },
+      uSolarDrama: { value: 0 },
+      uDramaWarm: { value: new THREE.Color('#ff9b55') },
+      uDramaRose: { value: new THREE.Color('#ef86a5') },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -72,6 +81,9 @@ export function CloudDeck() {
       uniform vec3 uShade;
       uniform vec3 uDark;
       uniform vec3 uSunTint;
+      uniform float uSolarDrama;
+      uniform vec3 uDramaWarm;
+      uniform vec3 uDramaRose;
 
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -166,6 +178,13 @@ export function CloudDeck() {
         // Distance desaturation: the horizon band sinks into the sea haze.
         float hazeBand = 1.0 - smoothstep(0.02, 0.3, dir.y);
         color = mix(color, uLight, hazeBand * 0.45 * uDaylight);
+        // Rare dramatic clear dawns/dusks: low cloud rims go coral and
+        // thicker bellies pick up rose, but only while the sun is low.
+        float lowSkyDrama = uSolarDrama * (1.0 - smoothstep(0.28, 0.82, dir.y));
+        float warmRim = lowSkyDrama * (rim * 0.95 + towardSun * (1.0 - interior) * 0.26);
+        float roseBody = lowSkyDrama * interior * (0.18 + hazeBand * 0.2);
+        color = mix(color, uDramaWarm, warmRim * 0.46);
+        color = mix(color, uDramaRose, roseBody * 0.22);
 
         // Overcast/storm darkening takes over as the deck closes (original
         // deck grading, gated on cover so fair days never see it).
@@ -196,6 +215,11 @@ export function CloudDeck() {
     mesh.position.copy(camera.position);
     const store = useThreeGameStore.getState();
     const celestial = skyState(store.timeOfDay, store.day || 1);
+    const solarDrama = Math.max(celestial.dawnDrama || 0, celestial.duskDrama || 0)
+      * (1 - weatherEnv.overcast * 0.86)
+      * (1 - weatherEnv.mistAmount * 0.45)
+      * (1 - weatherEnv.rainIntensity * 0.62);
+    const duskSide = (celestial.duskDrama || 0) > (celestial.dawnDrama || 0) ? 1 : 0;
     const u = material.uniforms;
     u.uTime.value = clock.elapsedTime;
     u.uCover.value = weatherEnv.overcast;
@@ -216,9 +240,14 @@ export function CloudDeck() {
       _darkColor.copy(scene.fog.color).multiplyScalar(0.42);
       _sunTint.copy(_sunWarm).lerp(_sunGolden, celestial.golden)
         .multiplyScalar(celestial.daylight);
+      _dramaWarm.copy(_dramaDawnWarm).lerp(_dramaDuskWarm, duskSide);
+      _dramaRose.copy(_dramaDawnRose).lerp(_dramaDuskRose, duskSide);
       u.uDark.value.copy(_darkColor);
       u.uShade.value.copy(_shadeColor);
       u.uSunTint.value.copy(_sunTint);
+      u.uSolarDrama.value = solarDrama;
+      u.uDramaWarm.value.copy(_dramaWarm);
+      u.uDramaRose.value.copy(_dramaRose);
       u.uLight.value.copy(_lightColor).lerp(_darkColor, weatherEnv.rainIntensity * 0.3);
     }
   });

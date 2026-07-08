@@ -14,6 +14,7 @@ import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
 import { getPenalColonyObstacles } from './penalColonyLayout';
 import { getBeagleDeckObstacles } from './beagleDeckLayout';
+import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
@@ -40,6 +41,7 @@ const REGION_OBSTACLE_SOURCES = {
   E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],
   PENAL_COLONY: [getPenalColonyObstacles],
   BEAGLE: [getBeagleDeckObstacles],
+  WATKINS: [getWatkinsCampObstacles],
 };
 
 function flattenCollider(collider) {

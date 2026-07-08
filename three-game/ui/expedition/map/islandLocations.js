@@ -46,7 +46,7 @@ const PLACEMENTS = [
   { id: 'PENAL_COLONY', at: [0.510, 0.660], kind: 'land', label: true },
   { id: 'E_MID', at: [0.615, 0.475], kind: 'land' },
   { id: 'EL_MIRADOR', at: [0.725, 0.520], kind: 'land' },
-  { id: 'WATKINS', at: [0.791, 0.521], kind: 'land' },
+  { id: 'WATKINS', at: [0.600, 0.588], kind: 'land', label: true },
   { id: 'SW_BEACH', at: [0.230, 0.770], kind: 'land' },
   { id: 'MANGROVES', at: [0.395, 0.755], kind: 'land' },
   { id: 'S_VOLCANIC', at: [0.550, 0.775], kind: 'land' },

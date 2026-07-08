@@ -6,6 +6,7 @@ import { useGLTF } from '@react-three/drei';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
+import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import {
   darwin5ClipFallback,
@@ -37,6 +38,14 @@ function normalizeImportedMaterials(scene, asset, motion = null) {
       if (!material) return;
       material.side = asset.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
       material.toneMapped = false;
+      if (asset.forceOpaque) {
+        material.transparent = false;
+        material.opacity = 1;
+        material.alphaMap = null;
+        material.alphaTest = 0;
+        material.depthWrite = true;
+        material.depthTest = true;
+      }
       if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.02);
       if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.72);
       if (material.color) {
@@ -611,6 +620,10 @@ function modelBoundsDebugEnabled() {
 const ANIM_LOD_NEAR_SQ = 20 * 20;
 const ANIM_LOD_FAR_SQ = 45 * 45;
 
+// Bones the aim overlay owns: torso, arms, head — never hips or legs, so the
+// locomotion clip keeps walking underneath the shouldered pose.
+const OVERLAY_UPPER_BODY_RE = /spine|neck|head|shoulder|clavicle|arm|hand/i;
+
 function GLBPrimitive({
   assetId,
   asset,
@@ -620,12 +633,16 @@ function GLBPrimitive({
   reflect = false,
   onSceneReady = null,
   grounding = null,
+  timeScaled = false,
+  overlaySelector = null,
 }) {
   const group = useRef(null);
   const gl = useThree(state => state.gl);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
   const animationSelectorRef = useRef(animationSelector);
+  const overlaySelectorRef = useRef(overlaySelector);
+  const overlayStateRef = useRef({ action: null, clip: null, weight: 0 });
   const warnedMissing = useRef(new Set());
   const lastBoundsDebugAt = useRef(0);
   const animLodSkipParity = useRef(false);
@@ -668,6 +685,10 @@ function GLBPrimitive({
     return prepareImportedScene(cloned, assetId, asset);
   }, [scene, assetId, asset]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
+  // Second mixer for the masked upper-body overlay (aiming while moving).
+  // It updates after the main mixer each frame, so the bones its filtered
+  // clip animates overwrite the locomotion pose — a cheap bone mask.
+  const overlayMixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   const debugBounds = useMemo(() => new THREE.Box3(), []);
   const debugSize = useMemo(() => new THREE.Vector3(), []);
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
@@ -821,6 +842,29 @@ function GLBPrimitive({
   }, [animationSelector]);
 
   useEffect(() => {
+    overlaySelectorRef.current = overlaySelector;
+  }, [overlaySelector]);
+
+  // Lazily builds (and caches on the state ref) an upper-body-only sub-clip
+  // action for the requested clip name.
+  const getOverlayAction = useCallback(clipName => {
+    const state = overlayStateRef.current;
+    if (state.clip === clipName && state.action) return state.action;
+    const normalized = normalizeClipName(clipName);
+    const source = animations.find(clip => clip.name === clipName || normalizeClipName(clip.name) === normalized);
+    if (!source) return null;
+    const tracks = source.tracks.filter(track => OVERLAY_UPPER_BODY_RE.test(track.name.split('.')[0]));
+    if (!tracks.length) return null;
+    state.action?.stop();
+    const subClip = new THREE.AnimationClip(`${source.name}.upperBody`, source.duration, tracks);
+    const action = overlayMixer.clipAction(subClip, importedScene);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    state.action = action;
+    state.clip = clipName;
+    return action;
+  }, [animations, importedScene, overlayMixer]);
+
+  useEffect(() => {
     const first = getAction('idle') ? 'idle' : animations[0]?.name;
     const selector = animationSelectorRef.current;
     const initial = selector ? selector() : first;
@@ -850,7 +894,25 @@ function GLBPrimitive({
         mixerDelta = delta * 2;
       }
     }
+    // Fauna and other world actors follow the world clock so bullet time
+    // slows their wingbeats/gaits along with their motion.
+    if (timeScaled) mixerDelta *= worldTime.scale;
     mixer.update(mixerDelta);
+    // Masked overlay (e.g. shouldered-aim upper body over walk cycles).
+    const overlayRequest = overlaySelectorRef.current ? overlaySelectorRef.current() : null;
+    const overlayState = overlayStateRef.current;
+    const overlayTarget = overlayRequest?.active && overlayRequest.clip ? 1 : 0;
+    overlayState.weight = THREE.MathUtils.damp(overlayState.weight, overlayTarget, 12, delta);
+    if (overlayState.weight > 0.02) {
+      const overlayAction = getOverlayAction(overlayRequest?.clip || overlayState.clip);
+      if (overlayAction) {
+        if (!overlayAction.isRunning()) overlayAction.reset().play();
+        overlayAction.setEffectiveWeight(overlayState.weight);
+        overlayMixer.update(mixerDelta);
+      }
+    } else if (overlayState.action?.isRunning()) {
+      overlayState.action.stop();
+    }
     footContactRig.update(mixerDelta, activeAction.current, activeRequest.current);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {
       const elapsed = frameState.clock.elapsedTime;
@@ -901,6 +963,8 @@ export function ModelAsset({
   reflect = false,
   onSceneReady = null,
   grounding = null,
+  timeScaled = false,
+  overlaySelector = null,
 }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
@@ -916,6 +980,8 @@ export function ModelAsset({
         reflect={reflect}
         onSceneReady={onSceneReady}
         grounding={grounding}
+        timeScaled={timeScaled}
+        overlaySelector={overlaySelector}
       />
     </Suspense>
   );

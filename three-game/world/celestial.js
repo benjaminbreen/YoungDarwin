@@ -28,6 +28,20 @@ function normalize3(x, y, z) {
   return [x / len, y / len, z / len];
 }
 
+function fract(v) {
+  return v - Math.floor(v);
+}
+
+function hash01(seed) {
+  return fract(Math.sin(seed) * 43758.5453123);
+}
+
+function lowSunColorWindow(elevation, daylight) {
+  return daylight
+    * smoothstep(-0.1, 0.04, elevation)
+    * (1 - smoothstep(0.28, 0.66, elevation));
+}
+
 // Direction *toward* the sun (unit vector) for a given game hour.
 // t=6 → due-east horizon, t=12 → high noon, t=18 → west horizon, t=0 → nadir.
 export function sunDirection(timeOfDay) {
@@ -65,6 +79,17 @@ export function skyState(timeOfDay, day) {
   const golden = (1 - smoothstep(0.0, 0.6, Math.abs(elevation))) * smoothstep(-0.16, 0.04, elevation);
   // Night factor for stars and moonlight.
   const night = 1 - smoothstep(-0.04, 0.14, elevation);
+  // Clear tropical skies saturate most strongly when the sun is high. Keep
+  // this off through early morning/late afternoon so golden hour stays pale.
+  const noonBlue = daylight * smoothstep(0.52, 0.84, elevation);
+  // Some clear Galapagos mornings/evenings are plain and some erupt into
+  // coral-pink cloud color. Seed this per day so the weather feels authored
+  // but not identical every cycle.
+  const colorWindow = lowSunColorWindow(elevation, daylight);
+  const dawnPotential = smoothstep(0.42, 0.98, hash01((day || 1) * 37.41 + 5.2));
+  const duskPotential = smoothstep(0.38, 0.98, hash01((day || 1) * 31.73 + 11.3));
+  const dawnDrama = colorWindow * smoothstep(0.12, 0.58, sun[0]) * dawnPotential;
+  const duskDrama = colorWindow * smoothstep(0.12, 0.58, -sun[0]) * duskPotential;
 
   return {
     sun,
@@ -72,6 +97,9 @@ export function skyState(timeOfDay, day) {
     elevation,
     daylight,
     golden,
+    noonBlue,
+    dawnDrama,
+    duskDrama,
     night,
     moon_phase: moonPhase(day),
   };

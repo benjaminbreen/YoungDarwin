@@ -101,7 +101,7 @@ export const modelAssets = {
     enabled: true,
     preload: true,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-swim-fast-dive-20260702',
+    cacheKey: 'darwin5-aim-idle-walk-20260707',
     // Darwin 5 is the current default player model: native Mixamo clips plus
     // carry/rifle/climb sets.
     // The runtime idle is the skinless 41-bone Mixamo clip from
@@ -178,6 +178,28 @@ export const modelAssets = {
     materialUpgrade: { rimIntensity: 0.015, rimPower: 5.0, envMapIntensity: 0.18 },
     targetTriangles: 3000,
     prompt: 'Single animated settlement cat for Asilo de la Paz / Penal Colony testing, low-poly fur texture, purr, clean, stretch, and walk clips.',
+  },
+  jackoMonkey: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/animals/runtime/jacko-monkey.glb',
+    cacheKey: 'jacko-monkey-fbx-runtime-20260706',
+    // Native exported height is about 0.85m; keep Jacko smaller than Darwin
+    // but large enough to read as a shipboard NPC from the Beagle camera.
+    scale: 1.08,
+    rotation: [0, 0, 0],
+    yOffset: 0.025,
+    normalizeMaterials: true,
+    doubleSide: true,
+    forceOpaque: true,
+    castShadow: true,
+    frustumCulled: false,
+    materialLift: 0.035,
+    materialEmissive: '#1a120d',
+    materialEmissiveIntensity: 0.055,
+    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.18 },
+    targetTriangles: 3500,
+    prompt: 'Rigged animated capuchin-like ship monkey mascot for HMS Beagle deck, small relative to Darwin, with idle, walk, run, and mischievous reaction clips.',
   },
   marineIguana: {
     enabled: true,

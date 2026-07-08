@@ -6,16 +6,24 @@ import { launchChromium } from './playwright-launch.mjs';
 
 const outDir = path.join(process.cwd(), 'test-results', 'three-darwin');
 const DEFAULT_BASE_URL = 'http://localhost:3000/three';
-const BOOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_TIMEOUT_MS || 75000);
-const NAVIGATION_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_NAV_TIMEOUT_MS || 20000);
-const SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_WRITE_TIMEOUT_MS || 15000);
-const SETTLE_MS = Number(process.env.THREE_SCREENSHOT_SETTLE_MS || 700);
-const UI_STEP_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_UI_TIMEOUT_MS || 8000);
-const FAILURE_SCREENSHOT_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_FAILURE_TIMEOUT_MS || 5000);
-const SERVER_START_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_SERVER_START_TIMEOUT_MS || 60000);
-const LOADING_STALL_TIMEOUT_MS = Number(process.env.THREE_SCREENSHOT_STALL_TIMEOUT_MS || 30000);
+const BOOT_TIMEOUT_MS = numberOption('--timeout', 'THREE_SCREENSHOT_TIMEOUT_MS', 75000);
+const NAVIGATION_TIMEOUT_MS = numberOption('--nav-timeout', 'THREE_SCREENSHOT_NAV_TIMEOUT_MS', 20000);
+const SCREENSHOT_TIMEOUT_MS = numberOption('--write-timeout', 'THREE_SCREENSHOT_WRITE_TIMEOUT_MS', 15000);
+const SETTLE_MS = numberOption('--settle', 'THREE_SCREENSHOT_SETTLE_MS', 700);
+const UI_STEP_TIMEOUT_MS = numberOption('--ui-timeout', 'THREE_SCREENSHOT_UI_TIMEOUT_MS', 8000);
+const FAILURE_SCREENSHOT_TIMEOUT_MS = numberOption('--failure-timeout', 'THREE_SCREENSHOT_FAILURE_TIMEOUT_MS', 5000);
+const SERVER_START_TIMEOUT_MS = numberOption('--server-timeout', 'THREE_SCREENSHOT_SERVER_START_TIMEOUT_MS', 60000);
+const LOADING_STALL_TIMEOUT_MS = numberOption('--stall-timeout', 'THREE_SCREENSHOT_STALL_TIMEOUT_MS', 30000);
 const AUTO_START_SERVER = process.env.THREE_SCREENSHOT_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const CAPTURE_MODE = screenshotCaptureMode();
+const ALLOW_LOADING_CANVAS = (
+  process.argv.includes('--allow-loading-canvas')
+  || process.env.THREE_SCREENSHOT_ALLOW_LOADING_CANVAS === '1'
+);
+const PRESERVE_OPENING_INTRO = (
+  process.argv.includes('--with-intro')
+  || process.env.THREE_SCREENSHOT_WITH_INTRO === '1'
+);
 
 const ALL_VIEWPORTS = {
   desktop: { name: 'desktop', width: 1440, height: 900 },
@@ -27,14 +35,93 @@ function delay(ms) {
 }
 
 function argValue(name) {
+  const index = process.argv.indexOf(name);
+  if (index >= 0) {
+    const next = process.argv[index + 1];
+    if (next && !next.startsWith('--')) return next;
+    return '';
+  }
   const prefix = `${name}=`;
   return process.argv.find(arg => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
+function repeatedArgValues(name) {
+  const values = [];
+  const prefix = `${name}=`;
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const arg = process.argv[index];
+    if (arg === name) {
+      const next = process.argv[index + 1];
+      if (next && !next.startsWith('--')) values.push(next);
+    } else if (arg.startsWith(prefix)) {
+      values.push(arg.slice(prefix.length));
+    }
+  }
+  return values;
+}
+
+function numberOption(argName, envName, fallback) {
+  const raw = argValue(argName) || process.env[envName];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid numeric option ${argName}=${raw}.`);
+  }
+  return value;
+}
+
+function safeFilePart(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function requestedSearchParams() {
+  const params = new URLSearchParams();
+  const query = argValue('--query');
+  if (query) {
+    const raw = query.startsWith('?') ? query.slice(1) : query;
+    for (const [key, value] of new URLSearchParams(raw)) params.set(key, value);
+  }
+
+  const zone = argValue('--zone') || argValue('--region');
+  if (zone) params.set('zone', zone);
+
+  const quality = argValue('--quality');
+  if (quality) params.set('quality', quality);
+
+  const mode = argValue('--mode');
+  if (mode) params.set('mode', mode);
+
+  for (const pair of repeatedArgValues('--param')) {
+    const splitAt = pair.indexOf('=');
+    if (splitAt < 0) {
+      params.set(pair, '1');
+    } else {
+      params.set(pair.slice(0, splitAt), pair.slice(splitAt + 1));
+    }
+  }
+
+  if (!params.has('screenshot')) params.set('screenshot', '1');
+  if (!PRESERVE_OPENING_INTRO && !params.has('skipIntro')) params.set('skipIntro', '1');
+  params.set('preserveDrawingBuffer', '1');
+  return params;
+}
+
 function screenshotUrl(baseUrl) {
   const url = new URL(baseUrl);
-  url.searchParams.set('preserveDrawingBuffer', '1');
+  for (const [key, value] of requestedSearchParams()) url.searchParams.set(key, value);
   return url.toString();
+}
+
+function screenshotName(viewportName) {
+  const explicit = safeFilePart(argValue('--name'));
+  const zone = safeFilePart(argValue('--zone') || argValue('--region'));
+  const quality = safeFilePart(argValue('--quality'));
+  const prefix = explicit || [zone, quality].filter(Boolean).join('-');
+  return prefix ? `${prefix}-${viewportName}.png` : `${viewportName}.png`;
 }
 
 function screenshotCaptureMode() {
@@ -173,6 +260,8 @@ async function startDevServer() {
 }
 
 async function resolveBaseUrl() {
+  const cliUrl = argValue('--url');
+  if (cliUrl) return { baseUrl: cliUrl, stopServer: null };
   if (process.env.THREE_DARWIN_URL) return { baseUrl: process.env.THREE_DARWIN_URL, stopServer: null };
 
   const lockedUrl = await readNextDevLockUrl();
@@ -181,7 +270,17 @@ async function resolveBaseUrl() {
 
   if (!AUTO_START_SERVER) return { baseUrl: lockedUrl || DEFAULT_BASE_URL, stopServer: null };
 
-  const server = await startDevServer();
+  let server;
+  try {
+    server = await startDevServer();
+  } catch (error) {
+    const retryLockedUrl = await readNextDevLockUrl();
+    if (retryLockedUrl && await canReach(retryLockedUrl)) {
+      console.log(`[three:screenshot] could not start a temporary dev server; reusing active repo dev server at ${retryLockedUrl}`);
+      return { baseUrl: retryLockedUrl, stopServer: null };
+    }
+    throw error;
+  }
   return { baseUrl: server.baseUrl, stopServer: server.stop };
 }
 
@@ -277,10 +376,15 @@ async function saveFailureArtifacts(page, stage, error, consoleErrors) {
   let screenshot = null;
   let screenshotError = null;
   try {
-    await page.screenshot({ path: screenshotPath, fullPage: false, timeout: FAILURE_SCREENSHOT_TIMEOUT_MS });
+    await saveCanvasScreenshot(page, screenshotPath);
     screenshot = screenshotPath;
-  } catch (screenshotFailure) {
-    screenshotError = String(screenshotFailure?.message || screenshotFailure);
+  } catch (canvasFailure) {
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: false, timeout: FAILURE_SCREENSHOT_TIMEOUT_MS });
+      screenshot = screenshotPath;
+    } catch (screenshotFailure) {
+      screenshotError = `canvas: ${canvasFailure?.message || canvasFailure}; page: ${screenshotFailure?.message || screenshotFailure}`;
+    }
   }
 
   let state = null;
@@ -308,6 +412,10 @@ async function saveViewportScreenshot(page, screenshot) {
     return;
   }
 
+  await saveCanvasScreenshot(page, screenshot);
+}
+
+async function saveCanvasScreenshot(page, screenshot) {
   const dataUrl = await page.evaluate(() => {
     const canvas = document.querySelector('canvas');
     if (!canvas) throw new Error('Cannot capture canvas screenshot: missing canvas.');
@@ -359,14 +467,26 @@ async function waitForReadyCanvas(page, consoleErrors) {
     await page.waitForSelector('canvas', { timeout: BOOT_TIMEOUT_MS });
   });
 
-  await withFailureArtifacts(page, 'wait for scene ready', consoleErrors, async () => {
+  return withFailureArtifacts(page, 'wait for scene ready', consoleErrors, async () => {
     const deadline = Date.now() + BOOT_TIMEOUT_MS;
     let lastStateKey = '';
     let lastProgressKey = '';
     let lastProgressAt = Date.now();
+    let lastState = null;
+
+    const allowCanvasFallback = reason => {
+      if (!ALLOW_LOADING_CANVAS || !lastState?.canvas) return null;
+      console.warn(`[three:screenshot] warning: ${reason}; continuing with canvas capture because --allow-loading-canvas is enabled.`);
+      return {
+        ready: false,
+        warning: reason,
+        state: lastState,
+      };
+    };
 
     while (Date.now() < deadline) {
       const state = await pageLaunchState(page);
+      lastState = state;
       const overlay = state.overlay
         ? `${state.overlay.mode || 'unknown'} ${state.overlay.progress || ''}`.trim()
         : 'detached';
@@ -375,22 +495,26 @@ async function waitForReadyCanvas(page, consoleErrors) {
         lastStateKey = stateKey;
         console.log(`[three:screenshot] boot state: ${stateKey}`);
       }
-      if (!state.overlay) return;
+      if (!state.overlay) return { ready: true, warning: null, state };
 
       const progressKey = `${state.overlay.mode || 'unknown'}:${state.overlay.progress || ''}:${state.overlay.text || ''}`;
       if (progressKey !== lastProgressKey) {
         lastProgressKey = progressKey;
         lastProgressAt = Date.now();
       } else if (Date.now() - lastProgressAt > LOADING_STALL_TIMEOUT_MS) {
-        throw new Error(
-          `Loading overlay stalled for ${LOADING_STALL_TIMEOUT_MS}ms at ${overlay}.`
-        );
+        const message = `Loading overlay stalled for ${LOADING_STALL_TIMEOUT_MS}ms at ${overlay}.`;
+        const fallback = allowCanvasFallback(message);
+        if (fallback) return fallback;
+        throw new Error(message);
       }
 
       await delay(1000);
     }
 
-    throw new Error(`Scene did not become ready before ${BOOT_TIMEOUT_MS}ms timeout.`);
+    const message = `Scene did not become ready before ${BOOT_TIMEOUT_MS}ms timeout.`;
+    const fallback = allowCanvasFallback(message);
+    if (fallback) return fallback;
+    throw new Error(message);
   });
 }
 
@@ -448,18 +572,26 @@ async function run() {
       }
     });
     await clickNewExpeditionFlow(page, errors);
-    await waitForReadyCanvas(page, errors);
+    const boot = await waitForReadyCanvas(page, errors);
 
     for (const viewport of viewports) {
       console.log(`[three:screenshot] ${viewport.name}: capture`);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.waitForTimeout(SETTLE_MS);
       const health = await canvasPixelHealth(page);
-      const screenshot = path.join(outDir, `${viewport.name}.png`);
+      const screenshot = path.join(outDir, screenshotName(viewport.name));
       const captureStartedAt = Date.now();
       await saveViewportScreenshot(page, screenshot);
       const captureMs = Date.now() - captureStartedAt;
-      results.push({ viewport: viewport.name, screenshot, captureMode: CAPTURE_MODE, captureMs, health, errors: [...errors] });
+      results.push({
+        viewport: viewport.name,
+        screenshot,
+        captureMode: CAPTURE_MODE,
+        captureMs,
+        health,
+        boot,
+        errors: [...errors],
+      });
       console.log(`[three:screenshot] ${viewport.name}: ${health.ok && errors.length === 0 ? 'ok' : 'failed'}`);
     }
     await page.close();

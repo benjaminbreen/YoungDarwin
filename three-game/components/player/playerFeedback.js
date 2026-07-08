@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { getPostOfficeBayOpuntiaHazards } from '../../world/floreanaCoveLayout';
 import { LANDING_DUST } from './playerConfig';
 
-function dustPaletteForBiome(biome) {
+export function dustPaletteForBiome(biome) {
   if (biome === 'black-lava' || biome === 'wet-basalt' || biome === 'lava-shelf' || biome === 'black-sand') {
     return { ring: '#3a352b', particles: ['#2a2824', '#4b4438', '#1f211f'], opacity: biome === 'wet-basalt' ? 0.16 : 0.28 };
   }

@@ -40,7 +40,7 @@ const REGION_SIZE_BY_TYPE = {
   settlement: [94, 82],
   clearing: [96, 86],
   grassland: [76, 76],
-  camp: [78, 68],
+  camp: [100, 88],
   shipwreck: [92, 82],
   hut: [80, 70],
   cave: [64, 58],
@@ -73,6 +73,7 @@ const AUTHORED_REGION_TERRAIN = {
   CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
   CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },
   PUNTA_CORMORANT: { preset: 'punta-cormorant-lagoon', segments: 320 },
+  WATKINS: { preset: 'watkins-camp-stream-hollow', segments: 320 },
 };
 
 function humanDirection(edge) {

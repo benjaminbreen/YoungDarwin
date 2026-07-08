@@ -10,6 +10,8 @@ import { ModelAsset } from '../assets/ModelAsset';
 import { PLAYER, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
 import { calibratedStrideTimeScale } from './gaitProfiles';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { shotgunAimState } from '../../shooting/aimState';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -467,8 +469,12 @@ const HAND_TOOLS = [
     modelOverrides: {
       darwin5: {
         position: [0.0, -0.012, -0.015],
-        euler: [1.86, 0.91, -2.74],
-        orient: 'hand',
+        // twoHand: the barrel is procedurally aimed from the right-hand grip
+        // toward the left hand every frame, so the gun lies across both
+        // palms in every carry/walk/run clip instead of relying on one
+        // hand-tuned euler. The euler is a post-alignment trim (roll etc.).
+        euler: [0, 0, 0],
+        orient: 'twoHand',
       },
     },
   },
@@ -730,12 +736,15 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
   const { scene: source } = useGLTF(resolvedConfig.path);
   const groupRef = useRef(null);
   const visualRef = useRef(null);
+  const offHandBoneRef = useRef(null);
   const boneQuat = useMemo(() => new THREE.Quaternion(), []);
   const bodyQuat = useMemo(() => new THREE.Quaternion(), []);
   const aimQuat = useMemo(() => new THREE.Quaternion(), []);
   const aimDir = useMemo(() => new THREE.Vector3(), []);
   const aimForward = useMemo(() => new THREE.Vector3(), []);
   const aimRight = useMemo(() => new THREE.Vector3(), []);
+  const gripPos = useMemo(() => new THREE.Vector3(), []);
+  const offHandPos = useMemo(() => new THREE.Vector3(), []);
   const localShaftAxis = useMemo(() => new THREE.Vector3(0, 0, -1), []);
   const tweakQuat = useMemo(() => new THREE.Quaternion(), []);
   const tweakEuler = useMemo(() => new THREE.Euler(), []);
@@ -774,6 +783,15 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       position: resolvedConfig.position,
     });
     if (!handle) return undefined;
+    // twoHand orientation needs the off hand to aim the shaft at.
+    if (resolvedConfig.orient === 'twoHand') {
+      const offRegex = resolvedConfig.hand === 'left' ? RIGHT_HAND : LEFT_HAND;
+      let offBone = null;
+      scene.traverse(node => {
+        if (!offBone && node.isBone && offRegex.test(node.name)) offBone = node;
+      });
+      offHandBoneRef.current = offBone;
+    }
     handle.group.name = `darwinTool:${resolvedConfig.toolId}`;
     handle.group.visible = false;
     tweakEuler.set(resolvedConfig.euler[0], resolvedConfig.euler[1], resolvedConfig.euler[2]);
@@ -797,7 +815,38 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     if (!visible) return;
     const bone = group.parent;
     if (!bone) return;
-    if (resolvedConfig.orient === 'hand') {
+    // While aiming, the shotgun ignores the hand pose and points along the
+    // live 3D fire direction (barrel = local -Z in the tool GLB), so the gun
+    // always agrees with the crosshair — including skyward shots — no matter
+    // what the current animation does with the wrist.
+    if (resolvedConfig.toolId === 'shotgun' && shotgunAimState.active && motionRef?.current?.aiming) {
+      bone.getWorldQuaternion(boneQuat);
+      aimDir.set(shotgunAimState.dirX, shotgunAimState.dirY, shotgunAimState.dirZ);
+      if (aimDir.lengthSq() < 1e-4) aimDir.set(0, 0, -1);
+      aimDir.normalize();
+      aimQuat.setFromUnitVectors(localShaftAxis, aimDir);
+      group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+      return;
+    }
+    if (resolvedConfig.orient === 'twoHand') {
+      // Carry pose: lay the shaft from the gripping hand toward the off
+      // hand, so the gun sits across both palms in every clip (idle, walk,
+      // run) without per-clip euler tuning.
+      const offBone = offHandBoneRef.current;
+      bone.getWorldQuaternion(boneQuat);
+      if (offBone) {
+        bone.getWorldPosition(gripPos);
+        offBone.getWorldPosition(offHandPos);
+        aimDir.copy(offHandPos).sub(gripPos);
+        if (aimDir.lengthSq() > 1e-6) {
+          aimDir.normalize();
+          aimQuat.setFromUnitVectors(localShaftAxis, aimDir).multiply(tweakQuat);
+          group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+          return;
+        }
+      }
+      group.quaternion.copy(boneQuat).invert().multiply(tweakQuat);
+    } else if (resolvedConfig.orient === 'hand') {
       group.quaternion.copy(tweakQuat);
     } else {
       bone.getWorldQuaternion(boneQuat);
@@ -956,6 +1005,26 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (Math.abs(next - damageFlash) > 0.025) setDamageFlash(next);
   });
 
+  // Upper-body aim layer: forward aim-walk has its own full-body clip
+  // (aimWalk), so the masked overlay only covers strafes and backpedal,
+  // holding the shouldered aimIdle pose over those leg cycles.
+  const selectAimOverlay = useCallback(() => {
+    const m = motionRef.current;
+    const lateral = m.strafeLeft || m.strafeRight || m.movingBackward;
+    return {
+      clip: 'aimIdle',
+      active: Boolean(
+        m.aiming
+        && lateral
+        && !m.action
+        && !m.crouching
+        && !m.airborne
+        && !m.swimming
+        && useThreeGameStore.getState().activeToolId === 'shotgun',
+      ),
+    };
+  }, [motionRef]);
+
   const selectAnimation = useCallback(() => {
     const status = statusRef.current;
     const speed = motionRef.current.speed || 0;
@@ -989,6 +1058,11 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       if (modelAssetId === 'darwin5') {
         const adaptedAction = darwin5AdaptedActionClip(motionRef.current.action);
         if (adaptedAction) return adaptedAction;
+      }
+      // The source firing animation is a multi-shot loop; cap it to a single
+      // trigger pull so one click reads as one report.
+      if (motionRef.current.action === 'fireRifle') {
+        return { clip: 'fireRifle', fade: 0.05, timeScale: 1.12, maxTime: SHOTGUN.fireClipMaxTime };
       }
       return motionRef.current.action;
     }
@@ -1069,7 +1143,14 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
           ? { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) }
           : { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
       }
+      // Shouldered-aim locomotion: running reuses the carry run (runRifle is
+      // already a gun-up pose), walking uses the dedicated aim walk, and
+      // standing still holds the shouldered aim idle.
       if (motionRef.current.running) return { clip: 'runRifle', timeScale: stride('run', runScale) };
+      if (modelAssetId === 'darwin5') {
+        if (motionRef.current.walking) return { clip: 'aimWalk', timeScale: stride('walk', walkScale) };
+        return 'aimIdle';
+      }
       if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: stride('walkRifle', walkScale) };
       return 'aim';
     }
@@ -1159,6 +1240,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
         key={modelAssetId}
         id={modelAssetId}
         animationSelector={selectAnimation}
+        overlaySelector={selectAimOverlay}
         damageFlash={damageFlash}
         reflect
         onSceneReady={setModelScene}

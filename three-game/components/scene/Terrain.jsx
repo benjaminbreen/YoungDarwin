@@ -265,7 +265,13 @@ export function Terrain() {
       if (shader.uniforms.uTerrainWeatherSoftness) shader.uniforms.uTerrainWeatherSoftness.value = lightRig.weatherSoftness;
       if (shader.uniforms.uTerrainSunWarmth) shader.uniforms.uTerrainSunWarmth.value = lightRig.terrainSunWarmth;
       if (shader.uniforms.uTerrainCoolShade) shader.uniforms.uTerrainCoolShade.value = lightRig.terrainCoolShade;
-      if (shader.uniforms.uTerrainWetShine) shader.uniforms.uTerrainWetShine.value = lightRig.terrainWetShine;
+      if (shader.uniforms.uTerrainWetShine) {
+        // The shore-wet glint band is tuned for surf beaches (~1-2 m of wet
+        // sand). On gently-sloped inland banks the same vertical band spans
+        // metres of ground and reads as glare, so damp it there.
+        const inlandBank = store.currentZoneId === 'WATKINS' ? 0.3 : 1;
+        shader.uniforms.uTerrainWetShine.value = lightRig.terrainWetShine * inlandBank;
+      }
     }
   });
 

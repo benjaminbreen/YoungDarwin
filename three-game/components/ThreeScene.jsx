@@ -50,7 +50,7 @@ export function ThreeScene({
       )}
       {deferredContentReady && settings.water !== false && (
         <Water
-          quality={settings.waterQuality || 'performance'}
+          quality={settings.waterQuality || 'polished'}
           reflections={settings.reflections !== false}
         />
       )}

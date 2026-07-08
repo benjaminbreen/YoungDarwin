@@ -17,7 +17,10 @@ import {
   normalizeMobility,
 } from '../objectMobility';
 import { onPropEvent, emitPropEvent } from './propEvents';
+import { catalogToInspectable } from '../../world/inspectables';
 import { PropVisual, HighlightRing } from './PropVisuals';
+import { publishPropPose, removePropPose } from './propRuntime';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 const PICKUP_DISTANCE = 2.15;
 const STRIKE_RANGE = 2.6;
@@ -263,10 +266,72 @@ export function PhysicsProp({ prop, onBreak }) {
     });
   }, [breakable, strikeable]);
 
+  // Shotgun pellets: the resolver has already delayed to the muzzle moment,
+  // so react immediately. Each prop tests itself against the pellet ray;
+  // close passes kick the body, direct hits shatter breakables.
+  useEffect(() => {
+    if (fixedBody && !breakable) return undefined;
+    return onPropEvent('shotgun-blast', event => {
+      const body = bodyRef.current;
+      if (!body || carriedRef.current) return;
+      const o = event.origin;
+      const d = event.dir;
+      if (!o || !d) return;
+      const translation = body.translation();
+      const tx = translation.x - o.x;
+      const ty = translation.y - o.y;
+      const tz = translation.z - o.z;
+      const along = tx * d.x + ty * d.y + tz * d.z;
+      if (along < 0.3 || along > (event.range ?? 24) + 0.6) return;
+      const lateralSq = Math.max(0, tx * tx + ty * ty + tz * tz - along * along);
+      const propRadius = prop.collider?.radius
+        ? prop.collider.radius * propScale
+        : prop.collider?.halfExtents
+          ? Math.max(...prop.collider.halfExtents) * propScale
+          : 0.4;
+      const reach = SHOTGUN.prop.rayRadius + propRadius;
+      if (lateralSq > reach * reach) return;
+      const falloff = Math.max(0.3, 1 - along / Math.max(1, event.range ?? 24));
+      const directness = 1 - Math.sqrt(lateralSq) / reach;
+      if (breakable && along <= SHOTGUN.prop.breakRange && directness > 0.45) {
+        emitPropEvent('prop-struck', {
+          propId: prop.id,
+          position: { x: translation.x, y: translation.y, z: translation.z },
+          impactDir: { x: d.x, y: 0, z: d.z },
+          dustCount: 16,
+          sparkCount: 4,
+        });
+        onBreak?.(prop, {
+          position: { x: translation.x, y: translation.y, z: translation.z },
+          impactDir: { x: d.x, y: 0, z: d.z },
+        });
+        return;
+      }
+      if (fixedBody) return;
+      lastStrikeAtRef.current = clockRef.current;
+      const kick = propMass * SHOTGUN.prop.impulse * falloff * (0.5 + directness * 0.5);
+      body.wakeUp();
+      body.applyImpulse({ x: d.x * kick, y: kick * 0.3, z: d.z * kick }, true);
+      body.applyTorqueImpulse({
+        x: d.z * kick * 0.06,
+        y: (directness - 0.5) * kick * 0.05,
+        z: -d.x * kick * 0.06,
+      }, true);
+      emitPropEvent('prop-struck', {
+        propId: prop.id,
+        position: { x: translation.x, y: translation.y, z: translation.z },
+        impactDir: { x: d.x, y: 0, z: d.z },
+        dustCount: 10,
+        sparkCount: 2,
+      });
+    });
+  }, [breakable, fixedBody, onBreak, prop, propMass, propScale]);
+
   useEffect(() => () => {
     const state = useThreeGameStore.getState();
     if (state.carryPrompt?.id === prop.id) setCarryPrompt(null);
-  }, [prop.id, setCarryPrompt]);
+    removePropPose(currentZoneId, prop.id);
+  }, [currentZoneId, prop.id, setCarryPrompt]);
 
   useEffect(() => {
     if (carryable) return;
@@ -314,6 +379,8 @@ export function PhysicsProp({ prop, onBreak }) {
     const translation = body.translation();
     const vectors = scratch.current;
     const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
+    if (isCarried) removePropPose(currentZoneId, prop.id);
+    else publishPropPose(currentZoneId, prop.id, translation);
     if (!fixedBody && !isCarried) clampAngularVelocity(body, mobility, sidewaysBarrel);
 
     // Resolve queued tool strikes once their impact moment arrives.
@@ -530,7 +597,16 @@ export function PhysicsProp({ prop, onBreak }) {
       onContactForce={handlePlayerContact}
     >
       <PropCollider prop={prop} colliderRef={colliderRef} sensor={isCarried} />
-      <group visible={!isCarried} scale={propScale} userData={{
+      <group
+        visible={!isCarried}
+        scale={propScale}
+        onClick={prop.inspectable ? event => {
+          event.stopPropagation();
+          useThreeGameStore.getState().setInspectedObject?.(
+            catalogToInspectable(prop.inspectable, event.point, { sourceId: prop.id }),
+          );
+        } : undefined}
+        userData={{
         renderSource: `physics-prop:${prop.id}`,
         renderLabel: `Physics prop: ${prop.id}`,
         renderKind: 'physics-prop',

@@ -110,6 +110,11 @@ export function PanelTabs({ tabs, active, onSelect, className = '' }) {
             }`}
           >
             {tab.label}
+            {typeof tab.count === 'number' && tab.count > 0 && (
+              <span className={`ml-1 tracking-normal ${isActive ? 'text-expedition-goldbright/75' : 'opacity-60'}`}>
+                {tab.count}
+              </span>
+            )}
           </button>
         );
       })}

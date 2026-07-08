@@ -1,15 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { baseSpecimens } from '../data/specimens';
 import { getThreeIslandLocation } from '../three-game/data';
 import { setTypingMode } from '../three-game/input/typingMode';
 import { useThreeGameStore } from '../three-game/store';
-import { GOLD_BUTTON_SOLID, PanelTabs } from '../three-game/ui/expedition/ExpeditionPanel';
+import { PanelTabs } from '../three-game/ui/expedition/ExpeditionPanel';
 import { ExpeditionModal } from '../three-game/ui/expedition/ExpeditionModal';
 import { SketchPortrait } from '../three-game/ui/expedition/SketchPortrait';
-
-const PAGE_ASSET = '/assets/ui/blank-journal-page.png';
 
 function expeditionDate(day) {
   const start = new Date(Date.UTC(1835, 8, 17));
@@ -96,7 +94,7 @@ function EntryThumb({ entry }) {
   }
   return (
     <div className="flex h-full w-full items-center justify-center bg-[#d6c39f] text-[#2a2117]">
-      <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
         <path d="M5 4 h10 l4 4 v12 H5 Z" />
         <path d="M15 4 v4 h4 M8 13 h8 M8 16 h6" />
       </svg>
@@ -104,60 +102,62 @@ function EntryThumb({ entry }) {
   );
 }
 
-function EntryList({ entries, selectedKey, filter, onFilter, onSelect, onNew }) {
+function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, onNew, className = '' }) {
   const tabs = [
-    { id: 'all', label: 'All' },
-    { id: 'specimen', label: 'Specimens' },
-    { id: 'location', label: 'Locations' },
-    { id: 'note', label: 'Notes' },
+    { id: 'all', label: 'All', count: counts.all },
+    { id: 'specimen', label: 'Specimens', count: counts.specimen },
+    { id: 'location', label: 'Locations', count: counts.location },
+    { id: 'note', label: 'Notes', count: counts.note },
   ];
   const visible = entries.filter(entry => filter === 'all' || entry.type === filter);
+  const emptyCopy = entries.length === 0
+    ? 'The pages await your observations.'
+    : 'No entries in this section yet.';
 
   return (
     <aside
-      className="relative flex min-h-0 flex-col overflow-hidden rounded-[2px] border border-[#5a4327]/75 bg-[rgba(7,7,5,0.82)] shadow-[inset_0_0_28px_rgba(0,0,0,0.58)]"
+      className={`relative min-h-0 flex-col overflow-hidden rounded-[2px] border border-[#5a4327]/75 bg-[rgba(7,7,5,0.82)] shadow-[inset_0_0_28px_rgba(0,0,0,0.58)] ${className}`}
       style={{
         backgroundImage:
           'radial-gradient(circle at 42% 18%, rgba(115,84,43,0.11), transparent 34%), linear-gradient(180deg, rgba(24,20,14,0.72), rgba(5,6,5,0.86))',
       }}
     >
-      <div className="pointer-events-none absolute inset-[6px] border border-[#5a4327]/45" />
-      <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="px-2 pt-1.5" />
-      <div className="relative min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3 [scrollbar-width:thin] [scrollbar-color:#7a5d35_rgba(0,0,0,0.22)]">
+      <div className="p-2.5 pb-0">
+        <button
+          type="button"
+          onClick={onNew}
+          className="flex w-full items-center justify-center gap-2 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2 text-[15px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
+        >
+          <span className="text-[18px] leading-none">+</span>
+          New Journal Entry
+        </button>
+      </div>
+      <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="mx-2.5 mt-2" />
+      <div className="relative min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5 [scrollbar-width:thin] [scrollbar-color:#7a5d35_rgba(0,0,0,0.22)]">
         {visible.map(entry => (
           <button
             key={entry.key}
             type="button"
             onClick={() => onSelect(entry.key)}
-            className={`grid w-full grid-cols-[4.5rem_1fr] gap-3.5 rounded-[2px] border px-2.5 py-2.5 text-left transition duration-200 hover:-translate-y-0.5 ${
+            className={`grid w-full grid-cols-[3.5rem_1fr] gap-3 rounded-[2px] border px-2 py-2 text-left transition ${
               selectedKey === entry.key
-                ? 'border-[#7a5d35] bg-[#2a2117]/80 shadow-[inset_0_0_0_1px_rgba(218,181,111,0.14)]'
+                ? 'border-[#8a6d3f] bg-[#2a2117]/85'
                 : 'border-[#2f271b] bg-black/10 hover:border-[#6b5130] hover:bg-[#1a1510]'
             }`}
           >
-            <span className="h-[4.5rem] overflow-hidden rounded-[2px] border border-[#6b5130]/65 bg-[#201810]">
+            <span className="h-[3.5rem] overflow-hidden rounded-[2px] border border-[#6b5130]/65 bg-[#201810]">
               <EntryThumb entry={entry} />
             </span>
             <span className="min-w-0 self-center">
-              <span className="block truncate text-[17px] leading-tight text-[#ead3ae]">{entry.title}</span>
-              <span className="mt-1 block truncate text-[13px] text-[#bea47c]">{entry.subtitle}</span>
-              <span className="mt-1 block text-[12px] italic text-[#c3a474]">{entry.date}</span>
+              <span className="block truncate text-[15px] leading-tight text-[#ead3ae]">{entry.title}</span>
+              <span className="mt-0.5 block truncate text-[12px] text-[#bea47c]">{entry.subtitle}</span>
+              <span className="mt-0.5 block text-[11px] italic text-[#c3a474]">{entry.date}</span>
             </span>
           </button>
         ))}
         {visible.length === 0 && (
-          <p className="px-2 py-7 text-center text-[13px] italic text-[#a88f68]">No entries in this section yet.</p>
+          <p className="px-2 py-7 text-center text-[13px] italic text-[#a88f68]">{emptyCopy}</p>
         )}
-      </div>
-      <div className="relative border-t border-[#4a3822] p-3">
-        <button
-          type="button"
-          onClick={onNew}
-          className="flex w-full items-center justify-center gap-2.5 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2.5 text-[16px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
-        >
-          <span className="text-[20px] leading-none">+</span>
-          New Journal Entry
-        </button>
       </div>
     </aside>
   );
@@ -178,14 +178,14 @@ const PAGE_BUTTON_ICONS = {
   ),
 };
 
-// Dark pill button anchored to the journal page footer, as in the mockup.
+// Dark pill button in the footer bar beneath the journal page.
 function PageButton({ icon, onClick, disabled, children }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-2.5 rounded-[3px] border border-[#6d542f] bg-[#2a2117] px-[clamp(1rem,1.6vw,1.6rem)] py-[clamp(0.5rem,0.85vw,0.8rem)] text-[clamp(12px,1.15vw,16px)] tracking-[0.06em] text-[#ead3ae] shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:border-[#8a6d3f] hover:bg-[#3a2c1c] disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex items-center gap-2 rounded-[3px] border border-[#6d542f] bg-[#2a2117] px-4 py-2 text-[13px] tracking-[0.06em] text-[#ead3ae] shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:border-[#8a6d3f] hover:bg-[#3a2c1c] disabled:cursor-not-allowed disabled:opacity-40"
     >
       <svg viewBox="0 0 24 24" className="h-[1.1em] w-[1.1em]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {PAGE_BUTTON_ICONS[icon]}
@@ -195,84 +195,139 @@ function PageButton({ icon, onClick, disabled, children }) {
   );
 }
 
-function JournalPage({ entry, draft, onDraftChange, onSaveDraft, onViewSpecimen, onViewLocation }) {
-  const pageNumber = entry.page || '';
+function PagerButton({ direction, onClick, disabled }) {
+  const isPrev = direction === 'prev';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={isPrev ? 'Previous page' : 'Next page'}
+      className="flex h-9 w-9 items-center justify-center rounded-[3px] border border-[#5a4327] bg-black/25 text-[#c9a35f] transition hover:border-[#8a6d3f] hover:text-[#e3c585] disabled:cursor-not-allowed disabled:opacity-30"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className={`h-4 w-4 ${isPrev ? '' : 'rotate-180'}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M14.5 5.5 L8 12 L14.5 18.5" />
+      </svg>
+    </button>
+  );
+}
+
+// Shows a fade + chevron cue at the bottom of a scrollable page body while
+// more text remains below the fold.
+function useScrollFade(contentKey) {
+  const ref = useRef(null);
+  const [faded, setFaded] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const update = () => {
+      setFaded(
+        el.scrollHeight - el.clientHeight > 4 &&
+        el.scrollTop + el.clientHeight < el.scrollHeight - 6,
+      );
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      observer.disconnect();
+    };
+  }, [contentKey]);
+  return [ref, faded];
+}
+
+function JournalPage({ entry, draft, onDraftChange }) {
+  const [bodyRef, showScrollCue] = useScrollFade(entry.key);
   const location = entry.location || entry.subtitle || 'Charles Island';
   const specimen = entry.specimen;
+  const isDraft = entry.type === 'draft';
 
   return (
     <section
       key={entry.key}
-      className="journal-page-turn relative"
-      style={{ width: 'min(100cqw, 133.33cqh)', height: 'min(100cqh, 75cqw)' }}
+      className="journal-page-turn journal-parchment text-[#3c2f1e]"
+      // Aspect floats between ~portrait (tall screens) and ~4:3 landscape
+      // (wide screens); the slack vs 100cq* leaves room for the page-stack
+      // shadows on the right/bottom edges.
+      style={{ width: 'min(98cqw, 136cqh)', height: 'min(96cqh, 140cqw)' }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={PAGE_ASSET}
-        alt=""
-        className="absolute inset-0 h-full w-full object-contain"
-        style={{ filter: 'sepia(0.3) saturate(1.12) brightness(0.985)' }}
-        draggable={false}
-      />
-      <div className="absolute inset-[6.5%_9%_5%_13.2%] text-[#3c2f1e]">
-        {pageNumber && (
-          <div className="absolute right-[1%] top-0 text-[clamp(11px,1.2vw,16px)] italic text-[#6a583f]/80 font-handwriting">{pageNumber}</div>
-        )}
+      <div
+        className="relative flex h-full min-h-0 flex-col"
+        style={{
+          padding:
+            'clamp(1.1rem, 4.5cqh, 2.4rem) clamp(1.2rem, 4cqw, 2.8rem) clamp(0.9rem, 3cqh, 1.9rem) clamp(1.7rem, 6cqw, 3.6rem)',
+        }}
+      >
+        {entry.page ? (
+          <div className="absolute right-[4.5%] top-[3.5%] font-handwriting text-[clamp(11px,1.9cqh,15px)] italic text-[#6a583f]/80">
+            {entry.page}
+          </div>
+        ) : null}
 
-        <div className="flex h-full min-h-0 flex-col pl-[2%] pr-[2%] pt-[2.5%]">
-          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(8rem,34%)] gap-[3%] pr-[2%]">
-            <div className="min-w-0 rotate-[-0.6deg]">
-              <div className="inline-block max-w-full whitespace-nowrap border-b border-[#3c2f1e]/45 pb-1 text-[clamp(13px,1.5vw,22px)] leading-none font-handwriting">
-                <OrnateDate day={entry.day || 1} />
-              </div>
-              <div className="mt-[2.2%] block min-w-0">
-                <span className="inline-block max-w-full truncate border-b border-[#3c2f1e]/35 pb-1 text-[clamp(12px,1.35vw,20px)] leading-tight font-handwriting">
-                  {location}
-                </span>
-              </div>
+        <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-[4%]">
+          <div className="min-w-0 self-end rotate-[-0.4deg] border-b border-[#3c2f1e]/40 pb-1.5">
+            <div className="font-handwriting text-[clamp(17px,3.4cqh,26px)] leading-tight">
+              <OrnateDate day={entry.day || 1} />
             </div>
-            {specimen ? (
-              <div className="flex h-[clamp(6rem,19cqh,12.5rem)] min-w-0 rotate-[0.7deg] items-center justify-center justify-self-end self-start mix-blend-multiply" style={{ filter: 'sepia(0.5) contrast(1.04)' }}>
-                <SketchPortrait specimen={specimen} className="max-h-full max-w-full object-contain" />
-              </div>
-            ) : (
-              <div aria-hidden="true" />
-            )}
+            <div className="mt-1 truncate font-handwriting text-[clamp(13px,2.6cqh,19px)] leading-tight text-[#4a3a24]">
+              {location}
+            </div>
           </div>
+          {specimen && (
+            <figure
+              className="flex h-[clamp(5.5rem,24cqh,11rem)] rotate-[0.7deg] flex-col items-center justify-self-end mix-blend-multiply"
+              style={{ filter: 'sepia(0.5) contrast(1.04)' }}
+            >
+              <SketchPortrait specimen={specimen} className="min-h-0 flex-1 object-contain" />
+              {specimen.latin && (
+                <figcaption className="mt-1 font-handwriting text-[clamp(10px,1.8cqh,13px)] text-[#5c4a2e]">
+                  {specimen.latin}
+                </figcaption>
+              )}
+            </figure>
+          )}
+        </div>
 
-          <div className="mt-[2.4%] min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-[3%] [scrollbar-width:thin] [scrollbar-color:#8a7351_transparent]">
-            {entry.type === 'draft' ? (
-              <textarea
-                value={draft}
-                onChange={event => onDraftChange(event.target.value)}
-                onFocus={() => setTypingMode(true)}
-                onBlur={() => setTypingMode(false)}
-                aria-label="Write journal entry"
-                placeholder="Write observations here..."
-                className="block h-full w-full resize-none bg-transparent text-[clamp(11px,1.18vw,17px)] leading-[1.8] text-[#3c2f1e] outline-none placeholder:text-[#6f604b]/45 font-handwriting"
-                spellCheck
-              />
-            ) : (
-              <div className="max-w-[78ch] whitespace-pre-wrap break-words pb-[2%] text-[clamp(11px,1.18vw,17px)] leading-[1.82] font-handwriting [overflow-wrap:anywhere]">
-                {entry.content}
-              </div>
-            )}
-          </div>
-
-          <div className="flex shrink-0 items-center justify-center gap-[clamp(0.75rem,1.6vw,1.5rem)] pb-[1.5%] pt-[1.5%]">
-            {entry.type === 'draft' && (
-              <button
-                type="button"
-                onClick={onSaveDraft}
-                disabled={!draft.trim()}
-                className={`${GOLD_BUTTON_SOLID} border-[#6d542f] bg-[#2a2117] text-[#ead3ae] shadow-[0_3px_8px_rgba(0,0,0,0.4)] hover:bg-[#3a2c1c] disabled:cursor-not-allowed disabled:opacity-40`}
+        <div className="relative mt-[2.5cqh] min-h-0 flex-1">
+          {isDraft ? (
+            <textarea
+              value={draft}
+              onChange={event => onDraftChange(event.target.value)}
+              onFocus={() => setTypingMode(true)}
+              onBlur={() => setTypingMode(false)}
+              aria-label="Write journal entry"
+              placeholder="Write observations here..."
+              className="journal-ruled block h-full w-full resize-none bg-transparent font-handwriting text-[clamp(14px,2.6cqh,18px)] leading-[1.85] text-[#3c2f1e] outline-none placeholder:text-[#6f604b]/45"
+              spellCheck
+            />
+          ) : (
+            <>
+              <div
+                ref={bodyRef}
+                className="h-full overflow-y-auto overflow-x-hidden pr-2 [scrollbar-width:thin] [scrollbar-color:#8a7351_transparent]"
               >
-                Save Entry
-              </button>
-            )}
-            <PageButton onClick={onViewSpecimen} disabled={!specimen} icon="eye">View Specimen</PageButton>
-            <PageButton onClick={onViewLocation} icon="pin">View Location</PageButton>
-          </div>
+                <div className="max-w-[68ch] whitespace-pre-wrap break-words pb-3 font-handwriting text-[clamp(14px,2.6cqh,18px)] leading-[1.85] [overflow-wrap:anywhere]">
+                  {entry.content}
+                </div>
+              </div>
+              {showScrollCue && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-end justify-center bg-[linear-gradient(to_top,rgba(238,226,193,0.95),rgba(238,226,193,0))] pb-0.5 text-[13px] text-[#6a583f]">
+                  ▾
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -285,11 +340,25 @@ function JournalPanel({ onClose, onOpenMap }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const addUserJournalEntry = useThreeGameStore(state => state.addUserJournalEntry);
   const openSpecimenDetail = useThreeGameStore(state => state.openSpecimenDetail);
+  const draft = useThreeGameStore(state => state.journalDraft);
+  const setJournalDraft = useThreeGameStore(state => state.setJournalDraft);
   const [filter, setFilter] = useState('all');
   const [selectedKey, setSelectedKey] = useState(() => journal.at(-1)?.id || 'draft');
-  const [draft, setDraft] = useState('');
+  // Below lg the list and page trade places (drill-in) instead of stacking.
+  const [mobileView, setMobileView] = useState('list');
 
   const entries = useMemo(() => journal.map(normalizeEntry).reverse(), [journal]);
+  const counts = useMemo(
+    () => entries.reduce(
+      (acc, entry) => {
+        acc.all += 1;
+        acc[entry.type] = (acc[entry.type] || 0) + 1;
+        return acc;
+      },
+      { all: 0, specimen: 0, location: 0, note: 0 },
+    ),
+    [entries],
+  );
   const currentLocation = getThreeIslandLocation(currentZoneId);
   const selectedEntry = selectedKey === 'draft'
     ? {
@@ -303,6 +372,21 @@ function JournalPanel({ onClose, onOpenMap }) {
         content: '',
       }
     : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
+  const isDraft = selectedEntry?.type === 'draft';
+
+  // Book order: oldest entry first, the blank draft as the final page.
+  const pageKeys = useMemo(
+    () => entries.map(entry => entry.key).reverse().concat('draft'),
+    [entries],
+  );
+  const pageIndex = Math.max(0, pageKeys.indexOf(selectedKey));
+
+  const goToPage = index => {
+    const key = pageKeys[Math.min(pageKeys.length - 1, Math.max(0, index))];
+    if (!key || key === selectedKey) return;
+    setSelectedKey(key);
+    setMobileView('page');
+  };
 
   useEffect(() => {
     if (selectedKey !== 'draft' && !entries.some(entry => entry.key === selectedKey)) {
@@ -310,10 +394,27 @@ function JournalPanel({ onClose, onOpenMap }) {
     }
   }, [entries, selectedKey]);
 
+  useEffect(() => {
+    const onKeyDown = event => {
+      if (event.defaultPrevented) return;
+      const tag = event.target?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT' || event.target?.isContentEditable) return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goToPage(pageIndex - 1);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goToPage(pageIndex + 1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   const handleSaveDraft = () => {
     if (!draft.trim()) return;
     addUserJournalEntry(draft);
-    setDraft('');
+    setJournalDraft('');
     window.setTimeout(() => setSelectedKey(useThreeGameStore.getState().journal.at(-1)?.id || 'draft'), 0);
   };
 
@@ -323,27 +424,67 @@ function JournalPanel({ onClose, onOpenMap }) {
   };
 
   return (
-    <ExpeditionModal title="Journal" subtitle="My observations and notes" onClose={onClose}>
-      <div className="relative grid min-h-0 gap-3 px-4 pb-4 lg:grid-cols-[26rem_minmax(0,1fr)]">
+    <ExpeditionModal title="Journal" subtitle="My observations and notes" onClose={onClose} width="min(100rem, 98vw)">
+      <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 px-4 pb-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <EntryList
+          className={mobileView === 'page' ? 'hidden lg:flex' : 'flex'}
           entries={entries}
+          counts={counts}
           selectedKey={selectedKey}
           filter={filter}
           onFilter={setFilter}
-          onSelect={setSelectedKey}
-          onNew={() => setSelectedKey('draft')}
+          onSelect={key => {
+            setSelectedKey(key);
+            setMobileView('page');
+          }}
+          onNew={() => {
+            setSelectedKey('draft');
+            setMobileView('page');
+          }}
         />
-        <div className="relative flex min-h-0 items-center justify-center overflow-hidden [container-type:size]">
-          {selectedEntry && (
-            <JournalPage
-              entry={selectedEntry}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSaveDraft={handleSaveDraft}
-              onViewSpecimen={handleViewSpecimen}
-              onViewLocation={onOpenMap}
-            />
-          )}
+        <div className={`relative min-h-0 flex-col ${mobileView === 'list' ? 'hidden lg:flex' : 'flex'}`}>
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden [container-type:size]">
+            {selectedEntry && (
+              <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
+            )}
+          </div>
+          <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setMobileView('list')}
+              className="flex items-center gap-1.5 rounded-[3px] border border-[#5a4327] bg-black/25 px-3 py-2 text-[13px] text-[#c9a35f] transition hover:border-[#8a6d3f] hover:text-[#e3c585] lg:hidden"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14.5 5.5 L8 12 L14.5 18.5" />
+              </svg>
+              Entries
+            </button>
+            {/* invisible mirror of the pager so the action cluster stays centered */}
+            <div aria-hidden="true" className="hidden lg:block lg:w-36" />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-2.5">
+              {isDraft && (
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={!draft.trim()}
+                  className="flex items-center gap-2 rounded-[3px] border border-expedition-gold bg-expedition-gold px-5 py-2 text-[13px] font-bold tracking-[0.06em] text-expedition-ink shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:bg-expedition-goldbright disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save Entry
+                </button>
+              )}
+              <PageButton icon="eye" onClick={handleViewSpecimen} disabled={!selectedEntry?.specimen}>
+                View Specimen
+              </PageButton>
+              <PageButton icon="pin" onClick={onOpenMap}>View Location</PageButton>
+            </div>
+            <div className="flex w-36 items-center justify-end gap-1.5">
+              <PagerButton direction="prev" onClick={() => goToPage(pageIndex - 1)} disabled={pageIndex === 0} />
+              <span className="min-w-[3.4rem] text-center text-[12px] tracking-[0.1em] text-[#bea47c]">
+                {pageIndex + 1} / {pageKeys.length}
+              </span>
+              <PagerButton direction="next" onClick={() => goToPage(pageIndex + 1)} disabled={pageIndex === pageKeys.length - 1} />
+            </div>
+          </div>
         </div>
       </div>
     </ExpeditionModal>

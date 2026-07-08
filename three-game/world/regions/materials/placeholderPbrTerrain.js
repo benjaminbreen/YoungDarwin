@@ -12,6 +12,7 @@ const PROFILE_IDS = {
   wetland: 3,
   highland: 4,
   grass: 5,
+  paleBeach: 6,
 };
 
 const PROFILE_BY_TYPE = {
@@ -33,12 +34,16 @@ const PROFILE_BY_TYPE = {
   coastalTrail: 'dry',
   scrubland: 'dry',
   shipwreck: 'beach',
+  paleBeach: 'paleBeach',
+  'pale-beach': 'paleBeach',
+  shellBeach: 'paleBeach',
 };
 
 const PROFILE_LAYERS = {
   dry: ['redCinderDirt', 'coastalScrub', 'dryGrassLitter'],
   lava: ['darkBasaltGravel', 'wetBasalt', 'redCinderDirt'],
   beach: ['olivineBeach', 'sandyTuff', 'wetBasalt'],
+  paleBeach: ['whiteSand', 'normalSand', 'darkBasaltGravel'],
   wetland: ['mangroveLagoon', 'loam', 'grass'],
   highland: ['loam', 'grass', 'wetBasalt'],
   grass: ['grass', 'loam', 'coastalGrassShoulder'],
@@ -112,7 +117,9 @@ const COMMON_GLSL = /* glsl */`
         }
         float phRoughness(sampler2D tex, vec2 p, float scale, float salt) {
           vec2 uv = p * scale + vec2(0.17 + salt * 0.07, -0.09);
-          return clamp(texture2D(tex, uv).r, 0.22, 1.0);
+          // Floor keeps dry ground matte — low roughness map values read as
+          // wet-shiny grass under a high sun.
+          return clamp(texture2D(tex, uv).r, 0.55, 1.0);
         }
         vec3 phNormalMap(sampler2D tex, vec2 p, float scale, float strength, float salt) {
           vec2 uv = p * scale + vec2(0.17 + salt * 0.07, -0.09);
@@ -150,10 +157,15 @@ const COMMON_GLSL = /* glsl */`
             // Highland/forest: loam base, grass clearings, wet dark gullies.
             w1 = smoothstep(0.38, 0.78, broad) * (1.0 - slope * 0.18) * 0.78;
             w2 = clamp(lowWet * 0.4 + slope * 0.32 + (1.0 - fine) * 0.12, 0.0, 0.62);
-          } else {
+          } else if (uPlaceholderProfile < 5.5) {
             // Grass/settlement/clearings: grass base, loam scuffs, trampled shoulder.
             w1 = smoothstep(0.42, 0.82, 1.0 - broad) * 0.62;
             w2 = smoothstep(0.44, 0.84, fine) * (0.32 + slope * 0.22);
+          } else {
+            // Pale shell beach: white sand base, warmer inland sand, basalt on
+            // low wet edges and steeper/darker patches.
+            w1 = smoothstep(0.18, 0.72, broad) * smoothstep(-0.35, 1.2, h) * (1.0 - slope * 0.22) * 0.7;
+            w2 = clamp(lowWet * 0.32 + slope * 0.46 + smoothstep(0.72, 0.94, fine) * 0.22, 0.0, 0.78);
           }
 
           w1 = clamp(w1, 0.0, 0.95);
@@ -170,10 +182,11 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
   const layers = loadLayers(profileName);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.9,
+    roughness: profileName === 'paleBeach' ? 1 : 0.9,
     metalness: 0,
     flatShading: false,
   });
+  if (profileName === 'paleBeach') material.envMapIntensity = 0.35;
 
   material.addEventListener('dispose', () => {
     layers.forEach(layer => disposePbrTerrainSet(layer.loaded));
@@ -222,12 +235,21 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
         vec3 phSurfaceNormal = normalize(cross(dFdx(vPlaceholderWorld), dFdy(vPlaceholderWorld)));
         if (phSurfaceNormal.y < 0.0) phSurfaceNormal *= -1.0;
         vec3 phWeights = phLayerWeights(phSurfaceNormal);
+        if (uPlaceholderProfile > 5.5) {
+          float phVertexLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+          float phDarkGuide = 1.0 - smoothstep(0.22, 0.42, phVertexLuma);
+          phWeights = normalize(mix(phWeights, vec3(0.04, 0.10, 0.86), phDarkGuide * 0.88));
+        }
         vec2 phP = vPlaceholderWorld.xz;
         vec3 phColor0 = phAlbedo(uPlaceholderAlbedo0, phP, uPlaceholderScale.x, 0.0);
         vec3 phColor1 = phAlbedo(uPlaceholderAlbedo1, phP, uPlaceholderScale.y, 1.0);
         vec3 phColor2 = phAlbedo(uPlaceholderAlbedo2, phP, uPlaceholderScale.z, 2.0);
         vec3 phColor = phColor0 * phWeights.x + phColor1 * phWeights.y + phColor2 * phWeights.z;
         phColor *= 0.92 + phFbm(phP * 1.8 + vec2(5.0, -3.0)) * 0.14;
+        if (uPlaceholderProfile > 5.5) {
+          float phBright = max(max(phColor.r, phColor.g), phColor.b);
+          phColor = mix(phColor, phColor * vec3(0.78, 0.80, 0.76), smoothstep(0.66, 0.96, phBright) * 0.5);
+        }
         diffuseColor.rgb = mix(diffuseColor.rgb, clamp(phColor, 0.0, 1.0), 0.88);`,
       )
       .replace(
@@ -245,7 +267,10 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
           phRough = max(phRough, mix(0.76, 0.88, phBasaltCover));
           phRough = mix(phRough, 0.93, phBasaltCover * 0.28);
         }
-        roughnessFactor = mix(roughnessFactor, clamp(phRough, 0.32, 0.98), 0.82);`,
+        if (uPlaceholderProfile > 5.5) {
+          phRough = max(phRough, 0.965);
+        }
+        roughnessFactor = mix(roughnessFactor, clamp(phRough, 0.58, 0.98), 0.82);`,
       )
       .replace(
         '#include <normal_fragment_begin>',
@@ -265,7 +290,7 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
       );
   };
 
-  material.customProgramCacheKey = () => `placeholder-pbr-terrain-${profileName}-v2`;
+  material.customProgramCacheKey = () => `placeholder-pbr-terrain-${profileName}-v3`;
   material.needsUpdate = true;
   return material;
 }

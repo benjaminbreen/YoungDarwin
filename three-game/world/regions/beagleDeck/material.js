@@ -1,5 +1,58 @@
 import * as THREE from 'three';
 
+const BEAGLE_DECK_TEXTURE_BASE = '/assets/textures/world/beagle-deck';
+const BEAGLE_DECK_TEXTURES = {
+  albedo: `${BEAGLE_DECK_TEXTURE_BASE}/Planks037A_1K-JPG_Color.jpg`,
+  normal: `${BEAGLE_DECK_TEXTURE_BASE}/Planks037A_1K-JPG_NormalGL.jpg`,
+  roughness: `${BEAGLE_DECK_TEXTURE_BASE}/Planks037A_1K-JPG_Roughness.jpg`,
+  ao: `${BEAGLE_DECK_TEXTURE_BASE}/Planks037A_1K-JPG_AmbientOcclusion.jpg`,
+};
+const DECK_REPEAT_X = 8.64;
+const DECK_REPEAT_Y = 31.2;
+
+let deckTextureCache = null;
+
+function fallbackTexture(fallback, colorSpace) {
+  const color = new THREE.Color(fallback);
+  const data = new Uint8Array([
+    Math.round(color.r * 255),
+    Math.round(color.g * 255),
+    Math.round(color.b * 255),
+    255,
+  ]);
+  const texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  texture.colorSpace = colorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function loadDeckTexture(path, colorSpace, fallback) {
+  const texture = typeof window === 'undefined'
+    ? fallbackTexture(fallback, colorSpace)
+    : new THREE.TextureLoader().load(path);
+  texture.colorSpace = colorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(DECK_REPEAT_X, DECK_REPEAT_Y);
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function getBeagleDeckTextures() {
+  if (!deckTextureCache) {
+    deckTextureCache = {
+      albedo: loadDeckTexture(BEAGLE_DECK_TEXTURES.albedo, THREE.SRGBColorSpace, '#8f7048'),
+      normal: loadDeckTexture(BEAGLE_DECK_TEXTURES.normal, THREE.NoColorSpace, '#8080ff'),
+      roughness: loadDeckTexture(BEAGLE_DECK_TEXTURES.roughness, THREE.NoColorSpace, '#dddddd'),
+      ao: loadDeckTexture(BEAGLE_DECK_TEXTURES.ao, THREE.NoColorSpace, '#ffffff'),
+    };
+  }
+  return deckTextureCache;
+}
+
 // Deck-plank painting for the BEAGLE region terrain. The heightfield is the
 // walkable ship deck, so the fragment shader draws the planking analytically:
 // fore-aft planks with staggered butts, caulked seams, a tarred waterway
@@ -10,6 +63,9 @@ import * as THREE from 'three';
 // Hull constants inlined below mirror ./hull.js — keep in sync.
 
 const PLANK_GLSL = /* glsl */`
+  uniform sampler2D uBeagleDeckAlbedo;
+  uniform sampler2D uBeagleDeckRoughness;
+  uniform sampler2D uBeagleDeckAo;
   varying vec3 vBeagleW;
   float bgHalfBeam(float x) {
     if (x >= 13.4) return 0.0;
@@ -26,6 +82,16 @@ const PLANK_GLSL = /* glsl */`
   float bgHash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
   }
+  vec2 bgDeckTextureUv(vec3 bp) {
+    return vec2(bp.x * 0.12, bp.z * 0.60);
+  }
+  bool bgOnShip(vec3 bp, float hb) {
+    return bp.y > -3.0 && abs(bp.z) < hb + 2.6 && bp.x > -24.5 && bp.x < 24.5;
+  }
+  float bgDeckTopMask(vec3 bp) {
+    vec3 n = normalize(cross(dFdx(bp), dFdy(bp)));
+    return smoothstep(0.36, 0.64, abs(n.y));
+  }
 `;
 
 const PLANK_APPLY = /* glsl */`
@@ -33,8 +99,9 @@ const PLANK_APPLY = /* glsl */`
     vec3 bp = vBeagleW;
     // Ship modelled in ship units, placed at SHIP_SCALE (1.8) — see hull.js.
     float hb = 1.8 * bgHalfBeam(bp.x / 1.8);
-    bool onShip = bp.y > -3.0 && abs(bp.z) < hb + 2.6 && bp.x > -24.5 && bp.x < 24.5;
-    if (onShip && bp.y > -1.1) {
+    bool onShip = bgOnShip(bp, hb);
+    float deckTopMask = bgDeckTopMask(bp);
+    if (onShip && bp.y > -1.1 && deckTopMask > 0.02) {
       bool ladderBand = abs(bp.z) > 1.76 && abs(bp.z) < 4.18
         && ((bp.x > 14.3 && bp.x < 17.4) || (bp.x > -13.8 && bp.x < -8.9));
       bool boardRamp = bp.z > hb - 0.68 && bp.z < hb + 2.16 && bp.x > 2.1 && bp.x < 10.9;
@@ -55,34 +122,42 @@ const PLANK_APPLY = /* glsl */`
       float sz = fract(plankAxis / plankW);
       float sx = fract(along / buttL);
       float jitter = bgHash(vec2(row, col)) - 0.5;
-      float plankTone = jitter * 0.17 + (bgHash(vec2(row, 18.4)) - 0.5) * 0.07;
+      float plankTone = jitter * 0.30 + (bgHash(vec2(row, 18.4)) - 0.5) * 0.12;
       vec3 deckCol = diffuseColor.rgb * (1.0 + plankTone);
+      vec2 deckUv = bgDeckTextureUv(bp);
+      vec3 deckTex = texture2D(uBeagleDeckAlbedo, deckUv).rgb;
+      float deckAo = texture2D(uBeagleDeckAo, deckUv).r;
+      vec3 warmedDeckTex = deckTex * vec3(1.08, 1.02, 0.88);
+      deckCol = mix(deckCol, warmedDeckTex, 0.78 * deckTopMask);
+      deckCol *= mix(1.0, 0.76 + deckAo * 0.32, deckTopMask);
 
-      float grainWave = sin(alongAxis * 6.8 + sin(alongAxis * 0.85 + row * 1.31) * 2.1 + ph * 18.0 + plankAxis * 0.75);
-      float grainFine = sin(alongAxis * 42.0 + grainWave * 1.8 + ph * 31.0 + plankAxis * 3.0);
-      float grainPore = bgHash(floor(vec2(alongAxis * 13.0, plankAxis * 44.0))) - 0.5;
-      float fiber = grainWave * 0.42 + grainFine * 0.25 + grainPore * 0.22;
-      deckCol *= 0.985 + fiber * 0.045;
-      float ringDark = smoothstep(0.72, 1.0, abs(grainWave));
-      deckCol = mix(deckCol, deckCol * vec3(0.72, 0.62, 0.48), ringDark * 0.10);
+      float grainWander = sin(alongAxis * 0.58 + row * 1.31 + ph * 12.0) * 2.8;
+      float grainWave = sin(alongAxis * 2.6 + grainWander + plankAxis * 1.15 + ph * 18.0);
+      float grainRibbon = sin(alongAxis * 7.5 + grainWave * 2.4 + ph * 23.0 + plankAxis * 2.2);
+      float grainFine = sin(alongAxis * 24.0 + grainRibbon * 1.6 + ph * 31.0 + plankAxis * 5.0);
+      float grainPore = bgHash(floor(vec2(alongAxis * 8.0, plankAxis * 26.0))) - 0.5;
+      float fiber = grainWave * 0.50 + grainRibbon * 0.32 + grainFine * 0.16 + grainPore * 0.18;
+      deckCol *= 0.975 + fiber * 0.095;
+      float ringDark = smoothstep(0.48, 0.98, abs(grainWave + grainRibbon * 0.38));
+      deckCol = mix(deckCol, deckCol * vec3(0.62, 0.50, 0.34), ringDark * 0.22);
       float honeyGrain = smoothstep(0.35, 0.95, fiber * 0.5 + 0.5);
-      deckCol = mix(deckCol, deckCol * vec3(1.08, 1.03, 0.93), honeyGrain * 0.08);
+      deckCol = mix(deckCol, deckCol * vec3(1.16, 1.08, 0.92), honeyGrain * 0.14);
 
-      float knotGate = step(0.80, bgHash(vec2(row * 1.7 + 8.0, col * 2.3 - 2.0)));
+      float knotGate = step(0.70, bgHash(vec2(row * 1.7 + 8.0, col * 2.3 - 2.0)));
       vec2 knotCenter = vec2(
         0.26 + bgHash(vec2(row + 2.0, col + 9.0)) * 0.48,
         0.32 + bgHash(vec2(col + 5.0, row - 3.0)) * 0.36
       );
       vec2 knotUv = vec2(sx, sz) - knotCenter;
-      float knotD = dot(knotUv * vec2(1.25, 5.4), knotUv * vec2(1.25, 5.4));
-      float knotCore = (1.0 - smoothstep(0.0, 0.16, knotD)) * knotGate;
-      float knotRing = (1.0 - smoothstep(0.0, 0.035, abs(knotD - 0.07))) * knotGate;
-      deckCol = mix(deckCol, deckCol * vec3(0.52, 0.40, 0.27), knotCore * 0.45 + knotRing * 0.22);
+      float knotD = dot(knotUv * vec2(1.05, 4.2), knotUv * vec2(1.05, 4.2));
+      float knotCore = (1.0 - smoothstep(0.0, 0.22, knotD)) * knotGate;
+      float knotRing = (1.0 - smoothstep(0.0, 0.055, abs(knotD - 0.10))) * knotGate;
+      deckCol = mix(deckCol, deckCol * vec3(0.42, 0.30, 0.18), knotCore * 0.58 + knotRing * 0.34);
 
       float seam = 1.0 - smoothstep(0.0, 0.085, min(sz, 1.0 - sz));
       float butt = 1.0 - smoothstep(0.0, 0.022, min(sx, 1.0 - sx));
       float seamMix = max(seam, butt * 0.9);
-      deckCol = mix(deckCol, deckCol * 0.42, seamMix * 0.85);
+      deckCol = mix(deckCol, deckCol * 0.42, seamMix * 0.85 * deckTopMask);
       float endDark = 1.0 - smoothstep(0.0, 0.06, min(sx, 1.0 - sx));
       deckCol = mix(deckCol, deckCol * vec3(0.70, 0.60, 0.46), endDark * 0.18);
       float edge = hb - abs(bp.z);
@@ -92,6 +167,10 @@ const PLANK_APPLY = /* glsl */`
       float scuff = smoothstep(0.62, 0.96, bgHash(floor(vec2(bp.x * 1.15, bp.z * 3.2))));
       deckCol = mix(deckCol, deckCol * 1.06 + vec3(0.018), wear * (0.32 + scuff * 0.16));
       diffuseColor.rgb = deckCol;
+    } else if (onShip && bp.y > -3.0) {
+      // Steep hidden heightfield skirts at the hull edge should stay visually
+      // quiet; the GLB hull wraps them, but tiny gaps otherwise reveal triangles.
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.12, 0.085, 0.055), 0.72);
     } else if (bp.y < -3.6) {
       float rip = sin(bp.x * 1.4 + sin(bp.z * 0.9) * 1.8) * 0.5 + 0.5;
       diffuseColor.rgb *= 0.94 + rip * 0.10;
@@ -99,13 +178,31 @@ const PLANK_APPLY = /* glsl */`
   }
 `;
 
+const ROUGHNESS_APPLY = /* glsl */`
+  {
+    vec3 bp = vBeagleW;
+    float hb = 1.8 * bgHalfBeam(bp.x / 1.8);
+    float deckTopMask = bgDeckTopMask(bp);
+    if (bgOnShip(bp, hb) && bp.y > -1.1 && deckTopMask > 0.02) {
+      float deckRoughness = texture2D(uBeagleDeckRoughness, bgDeckTextureUv(bp)).r;
+      roughnessFactor = mix(roughnessFactor, clamp(deckRoughness * 0.78 + 0.18, 0.42, 0.98), 0.82 * deckTopMask);
+    }
+  }
+`;
+
 export function createBeagleDeckTerrainMaterial() {
+  const deckTextures = getBeagleDeckTextures();
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.93,
+    roughness: 0.86,
     metalness: 0.0,
+    normalMap: deckTextures.normal,
+    normalScale: new THREE.Vector2(0.42, 0.42),
   });
   material.onBeforeCompile = shader => {
+    shader.uniforms.uBeagleDeckAlbedo = { value: deckTextures.albedo };
+    shader.uniforms.uBeagleDeckRoughness = { value: deckTextures.roughness };
+    shader.uniforms.uBeagleDeckAo = { value: deckTextures.ao };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -120,9 +217,10 @@ export function createBeagleDeckTerrainMaterial() {
       );
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${PLANK_GLSL}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${PLANK_APPLY}`);
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${PLANK_APPLY}`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\n${ROUGHNESS_APPLY}`);
   };
-  material.customProgramCacheKey = () => 'beagle-deck-planks-v3';
+  material.customProgramCacheKey = () => 'beagle-deck-planks-pbr-v2';
   material.needsUpdate = true;
   return material;
 }

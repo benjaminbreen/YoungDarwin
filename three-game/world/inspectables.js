@@ -35,6 +35,11 @@ export const inspectableCatalog = {
   shore_starfish: { id: 'shore_starfish', kind: 'specimen', englishName: 'Sea star', latinName: 'Asteroidea', category: 'Animal', rarity: 'uncommon' },
   manzanillo: { id: 'manzanillo', kind: 'plant', englishName: 'Manzanillo', latinName: 'Hippomane mancinella', category: 'Plant', rarity: 'rare' },
   crab_prop: { id: 'crab_prop', kind: 'specimen', englishName: 'Sally Lightfoot crab', latinName: 'Grapsus grapsus', category: 'Animal', rarity: 'common' },
+  // Watkins Camp artifacts — relics of Patrick Watkins's 1807-1810 homestead.
+  scrimshaw_tooth: { id: 'scrimshaw_tooth', kind: 'artifact', englishName: 'Scrimshaw whale tooth', latinName: 'Physeter macrocephalus, worked ivory', category: 'Historical artifact', rarity: 'rare' },
+  watkins_diary: { id: 'watkins_diary', kind: 'artifact', englishName: 'Weather-stained diary', latinName: 'manuscript, hand of P. Watkins', category: 'Historical artifact', rarity: 'rare' },
+  charred_tortoise_shell: { id: 'charred_tortoise_shell', kind: 'artifact', englishName: 'Charred tortoise shell', latinName: 'Chelonoidis niger, burnt carapace fragment', category: 'Historical artifact', rarity: 'uncommon' },
+  earthenware_jug: { id: 'earthenware_jug', kind: 'artifact', englishName: 'Earthenware rum jug', latinName: 'stoneware, whaler trade goods', category: 'Historical artifact', rarity: 'uncommon' },
 };
 
 function normalizeRarity(rarity) {

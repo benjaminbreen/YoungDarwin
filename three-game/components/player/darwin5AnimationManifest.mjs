@@ -15,6 +15,10 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   runStrafeLeft: { category: 'locomotion', loop: true, fade: 0.12, fallback: 'run' },
   runStrafeRight: { category: 'locomotion', loop: true, fade: 0.12, fallback: 'run' },
   walkCarry: { category: 'locomotion', loop: true, fade: 0.16, fallback: 'walk' },
+  // Shouldered shotgun (ADS): dedicated aiming idle/walk transplanted from
+  // "Idle Aiming.fbx" / "Walking Aiming.fbx".
+  aimIdle: { category: 'idle', loop: true, fade: 0.16, fallback: 'aim' },
+  aimWalk: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walkRifle' },
   holdWalk: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walkCarry' },
   holdToolWalk: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'torchWalk' },
   holdToolRun: { category: 'locomotion', loop: true, fade: 0.12, fallback: 'holdToolWalk' },

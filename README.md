@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Young Darwin 3D
 
-## Getting Started
+Playable 3D exploration prototype for young Charles Darwin on Floreana Island
+(historically Charles Island). The primary route is `/three`; older 2D systems
+still provide useful data, mechanics, and references.
 
-First, run the development server:
+## Quick Start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000/three`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Useful verification commands:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run check
+npm run build
+npm run asset:audit
+npm run three:screenshot:fast
+npm run three:e2e:smoke
+```
 
-## Learn More
+Use screenshots only when rendering, scene composition, UI, camera, animation
+visibility, or assets changed and a visual check would be useful. They are not
+required for every change. Use `npm run check` as the default code gate.
 
-To learn more about Next.js, take a look at the following resources:
+## Docs Map
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `AGENTS.md`: short operating contract for Codex/GPT-style agents.
+- `CLAUDE.md`: Claude entrypoint that points back to the same shared rules.
+- `docs/design-intent.md`: authorship, classroom use, and game design goals.
+- `docs/architecture.md`: current runtime map and ownership boundaries.
+- `docs/agent-workflows.md`: repeatable recipes for common agent tasks.
+- `docs/asset-pipeline.md`: GLB/source/runtime asset policy.
+- `docs/terrain-graphics.md`: terrain, PBR, water, and ecology rendering notes.
+- `docs/generated/repo-inventory.md`: generated volatile inventory. Regenerate
+  with `npm run docs:generate`; verify with `npm run docs:check`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Root compatibility pointers:
 
-## Deploy on Vercel
+- `architecture.md` points to `docs/architecture.md`.
+- `graphicsupdate.md` points to `docs/terrain-graphics.md`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Authorship And Intent
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Young Darwin 3D is a playable historical simulation by Benjamin Breen, designed
+to support history of science teaching while still standing on its own as a fun
+game. Curriculum, assignments, and assessment materials should grow around the
+game; the runtime should focus on concrete playable systems for observation,
+collection, travel, animal perspectives, uncertainty, and ecological change.
+
+## Source Of Truth
+
+- Runtime route: `app/three/page.js` -> `three-game/ThreeDarwinGame.jsx`.
+- Main scene: `three-game/components/ThreeScene.jsx`.
+- Active 3D store: `three-game/store.js`.
+- Regions and terrain presets: `game-core/regionMaps.js`.
+- Authored terrain/material registry: `three-game/world/regions/index.js`.
+- Ecology registry: `three-game/world/ecology/index.js`.
+- Runtime assets: `three-game/modelAssets.js`.
+- Playable modes: `three-game/playable/playableModes.js`.
+- Wildlife/specimen behavior profiles: `three-game/wildlife/wildlifeCatalog.js`.
+
+Do not trust hand-written region, asset, or command inventories if they disagree
+with the generated inventory or the source files above.
+
+## Agent Notes
+
+Before changing 3D code, read `AGENTS.md`, then follow the task-specific doc it
+points to. Before claiming a code change is verified, run the verification
+command that matches the changed surface and report any command that could not
+run.

@@ -89,6 +89,116 @@ export const ZONE_PROPS = {
       rotation: [-0.16, 1.1, 0.1],
     },
   ],
+  // Watkins Camp: homestead clutter and the relics Darwin can investigate.
+  // The cabin timbers themselves live in physics/structures/WatkinsCabin.jsx;
+  // these are the loose props around and inside it. Cabin centre (-8, -20).
+  WATKINS: [
+    // Supply crates against the cabin's north wall, a barrel rolled off apart.
+    {
+      id: 'watkins-yard-crate-a',
+      type: 'crate',
+      x: -11.2,
+      z: -24.1,
+      rotation: [0, 0.35, 0],
+    },
+    {
+      id: 'watkins-yard-crate-b',
+      type: 'crate',
+      x: -9.9,
+      z: -24.7,
+      rotation: [0.02, -0.5, 0],
+      scale: 0.88,
+    },
+    {
+      id: 'watkins-yard-barrel',
+      type: 'barrel',
+      x: -3.6,
+      z: -24.2,
+      rotation: [Math.PI / 2, 0.8, 0.05],
+    },
+    // Room A floor corner: two loose boards heaped over the diary.
+    {
+      id: 'watkins-floor-board-a',
+      type: 'looseFloorBoard',
+      x: -9.9,
+      z: -19.4,
+      rotation: [0, 0.18, 0],
+    },
+    {
+      id: 'watkins-floor-board-b',
+      type: 'looseFloorBoard',
+      x: -9.5,
+      z: -19.9,
+      rotation: [0, -0.12, 0],
+    },
+    {
+      id: 'watkins-diary',
+      type: 'watkinsDiary',
+      x: -9.7,
+      z: -19.65,
+      rotation: [0, 0.4, 0],
+    },
+    // Room B, open to the sky: the rum jug in the rubble.
+    {
+      id: 'watkins-rum-jug',
+      type: 'earthenwareJug',
+      x: -5.9,
+      z: -19.3,
+      rotation: [0, 1.1, 0],
+    },
+    // The cold fire ring outside the south gate, charred shells in the ash.
+    {
+      id: 'watkins-charred-shell-a',
+      type: 'charredShellFragment',
+      x: 0.2,
+      z: -14.3,
+      rotation: [0.2, 0.7, 0.1],
+    },
+    {
+      id: 'watkins-charred-shell-b',
+      type: 'charredShellFragment',
+      x: 0.9,
+      z: -14.9,
+      rotation: [-0.15, 2.1, 0.05],
+    },
+    {
+      id: 'watkins-charred-shell-c',
+      type: 'charredShellFragment',
+      x: 0.4,
+      z: -15.1,
+      rotation: [0.1, 3.6, -0.12],
+    },
+    // Scrimshaw tooth dropped in the reeds by the ford.
+    {
+      id: 'watkins-scrimshaw-tooth',
+      type: 'scrimshawTooth',
+      x: 5.4,
+      z: 16.4,
+      rotation: [0.3, 1.9, 0.2],
+    },
+    // Loose stones on the terrace slope above the ford — rollable ammunition.
+    {
+      id: 'watkins-slope-stone-a',
+      type: 'stone',
+      x: 9.8,
+      z: 19.4,
+      rotation: [0.2, -0.5, 0.12],
+    },
+    {
+      id: 'watkins-slope-stone-b',
+      type: 'stone',
+      x: -3.4,
+      z: 20.8,
+      rotation: [-0.1, 0.9, 0.2],
+    },
+    {
+      id: 'watkins-yard-stone',
+      type: 'stone',
+      x: 3.4,
+      z: -10.6,
+      rotation: [0.15, 1.7, -0.1],
+    },
+  ],
   POST_OFFICE_BAY_3: [
     {
       id: 'pob3-mail-barrel',

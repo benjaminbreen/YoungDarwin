@@ -15,12 +15,13 @@ export const locations = [
     specimens: ['Jacko the Monkey'],
     specimenPlacements: [
       {
+        instanceId: 'beagle-jacko',
         specimenId: 'jackothemonkey',
-        position: [5.9, 0, 0.6],
-        behavior: 'skitter',
-        sceneScale: 0.85,
-        habitatRadiusX: 3.0,
-        habitatRadiusZ: 1.4,
+        position: [4.8, 0, -1.25],
+        behavior: 'deckMonkey',
+        sceneScale: 1.0,
+        habitatRadiusX: 7.2,
+        habitatRadiusZ: 4.0,
       },
     ],
     npcs: ['fitzroy', 'lascar_joe'],
@@ -1322,6 +1323,15 @@ export const locations = [
     color: '#cd853f',
     type: 'settlement',
     validMoves: ['N','E','W','S'],
+    routeOverrides: { E: 'WATKINS' },
+    routeOverrideTravel: {
+      E: {
+        minutes: 34,
+        fatigue: 3,
+        routeLabel: 'E',
+        description: 'Follow the stream terraces east to Watkins Camp.',
+      },
+    },
     specimens: ['medium_ground_finch','floreana_mockingbird','cat'],
     npcs: [],
     boundaries: {},
@@ -1380,6 +1390,15 @@ export const locations = [
     color: '#bdb76b',
     type: 'clearing',
     validMoves: ['N','E','W','S'],
+    routeOverrides: { S: 'WATKINS' },
+    routeOverrideTravel: {
+      S: {
+        minutes: 30,
+        fatigue: 2,
+        routeLabel: 'S',
+        description: 'Drop south along the old track into the hollow at Watkins Camp.',
+      },
+    },
     playerStart: [-5, 0, 3.2],
     specimens: ['lavalizard','medium_ground_finch','basalt','scoria'],
     npcs: [],
@@ -1443,7 +1462,7 @@ export const locations = [
     y: 2,
     color: '#bdb76b',
     type: 'highland',
-    validMoves: ['W','S','E'],
+    validMoves: ['W','S'],
     specimens: ['floreana_giant_tortoise','large_ground_finch'],
     npcs: [],
     boundaries: {},
@@ -1463,27 +1482,57 @@ export const locations = [
     },
   },
 
-  // 21) WATKINS
+  // 21) WATKINS — off-grid cell between the penal colony, Rocky Clearing, and
+  // Windy Promontory; every route in and out is an explicit override.
   {
     id: 'WATKINS',
     name: 'Watkins Camp',
-    description: 'Ruined campsite of the Irish castaway Patrick Watkins, the first resident of the island.',
-    x: 5,
-    y: 2,
+    description: 'Ruined homestead of the Irish castaway Patrick Watkins, the first resident of the island: a derelict two-room cabin inside a tumbled stone wall, above a clear highland stream.',
+    x: 2.6,
+    y: 2.55,
     color: '#bdb76b',
     type: 'camp',
-    validMoves: ['W'],
+    validMoves: ['N','W','SE'],
+    routeOverrides: { N: 'E_MID', W: 'PENAL_COLONY', SE: 'SE_PROMONTORY' },
+    routeOverrideTravel: {
+      N: {
+        minutes: 30,
+        fatigue: 2,
+        routeLabel: 'N',
+        description: 'Follow the old track north through dry grass toward Rocky Clearing.',
+      },
+      W: {
+        minutes: 34,
+        fatigue: 3,
+        routeLabel: 'W',
+        description: 'Walk west along the stream terraces toward the penal colony gardens.',
+      },
+      SE: {
+        minutes: 38,
+        fatigue: 4,
+        routeLabel: 'SE',
+        description: 'Climb the ravine southeast over basalt terraces toward Windy Promontory.',
+      },
+    },
+    playerStart: [2, 0, -32],
     specimens: ['watkinswill'],
     npcs: [],
-    boundaries: {},
+    boundaries: { south: 'cliff', east: 'cliff' },
     discoveries: [
-      'Tattered remnants of Watkins’ makeshift shelter and half-burned planks remain.'
+      'Tattered remnants of Watkins’ shelter remain: a two-room cabin, its far room open to the sky.',
+      'The ashes of an old fire hold charred tortoise shell, cracked for meat long ago.'
     ],
     notableFeatures: [
-      'Scraps of cloth and old nails litter the site of a long-forsaken camp.',
-      'A battered trunk suggests he once stored valuables or supplies here.',
-      'Local lore insists Watkins grew vegetables to trade with passing ships, but little remains.'
-    ]
+      'A dry-stone wall, half swallowed by weeds, rings the little homestead yard.',
+      'A clear stream crosses the hollow below the cabin, fordable at the stones — deeper where it pools.',
+      'Basalt terraces climb away to the south, loose boulders resting on the slope.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['the stream over stones', 'wind in dry grass', 'loose planks knocking in the breeze'],
+      loadingNote: 'A grassy hollow opens below the track: Patrick Watkins’ abandoned homestead, first dwelling of the Galápagos, empty these twenty-five years.',
+      educationalNote: 'Patrick Watkins, marooned about 1807, grew potatoes and pumpkins here to trade with whalers for rum — the islands’ first settler, gone by 1810. Darwin heard the story from the colonists in 1835.',
+    },
   },
 
   // 22) SW_BEACH
@@ -1585,7 +1634,16 @@ export const locations = [
     y: 3,
     color: 'gray',
     type: 'promontory',
-    validMoves: ['N','W','S'],
+    validMoves: ['N','W','S','NW'],
+    routeOverrides: { NW: 'WATKINS' },
+    routeOverrideTravel: {
+      NW: {
+        minutes: 38,
+        fatigue: 3,
+        routeLabel: 'NW',
+        description: 'Descend the ravine northwest into the stream hollow at Watkins Camp.',
+      },
+    },
     specimens: ['frigatebird'],
     npcs: [],
     boundaries: { east: 'cliff' },

@@ -131,6 +131,9 @@ def section_half_width(x, u):
 # Materials
 # ---------------------------------------------------------------------------
 MATS = {}
+ROOT = Path(__file__).resolve().parents[1]
+BEAGLE_TEXTURE_ROOT = ROOT / 'public/assets/textures/world/beagle-deck'
+TEXTURED_UV_SCALES = {}
 
 
 def mat(name, color, rough=0.85, metal=0.0):
@@ -159,6 +162,63 @@ def pmat(name, hexcode, rough=0.85, metal=0.0):
   return mat(name, to_linear(srgb(hexcode)), rough, metal)
 
 
+def texture_noise01(x, y, seed=0.0):
+  return math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453 % 1.0
+
+
+def packed_canvas_image(name, size=256):
+  image = bpy.data.images.new(name, width=size, height=size)
+  base = to_linear(srgb('#d7ccb0'))
+  warm = to_linear(srgb('#b9ab8a'))
+  dark = to_linear(srgb('#8f8062'))
+  pixels = []
+  for y in range(size):
+    for x in range(size):
+      nx = x / size
+      ny = y / size
+      weave = 0.5 + 0.5 * math.sin(x * 0.55) * math.sin(y * 0.48)
+      thread = 0.5 + 0.5 * math.sin((x + y * 0.18) * 0.19)
+      fleck = texture_noise01(x, y, 3.7)
+      stain = 1.0 - 0.10 * smoothstep(0.72, 1.0, texture_noise01(x * 0.08, y * 0.08, 9.4))
+      edge_wear = 1.0 - 0.06 * (smoothstep(0.00, 0.10, nx) * (1.0 - smoothstep(0.90, 1.0, nx)))
+      mix_warm = 0.10 + 0.10 * weave + 0.05 * thread
+      mix_dark = 0.035 * smoothstep(0.76, 1.0, fleck)
+      color = []
+      for i in range(3):
+        c = base[i] * (1.0 - mix_warm) + warm[i] * mix_warm
+        c = c * (1.0 - mix_dark) + dark[i] * mix_dark
+        color.append(clamp(c * stain * edge_wear, 0.0, 1.0))
+      pixels.extend([color[0], color[1], color[2], 1.0])
+  image.pixels = pixels
+  image.pack()
+  return image
+
+
+def image_pmat(name, image_path=None, image=None, rough=0.85, metal=0.0, uv_scale=1.0):
+  if name in MATS:
+    return MATS[name]
+  if image is None:
+    try:
+      image = bpy.data.images.load(str(image_path))
+      image.pack()
+    except Exception as exc:
+      print(f'texture skipped for {name}: {exc}')
+      return pmat(name, '#8a6b42', rough, metal)
+  m = bpy.data.materials.new(name)
+  m.use_nodes = True
+  nodes = m.node_tree.nodes
+  bsdf = nodes.get('Principled BSDF')
+  bsdf.inputs['Roughness'].default_value = rough
+  bsdf.inputs['Metallic'].default_value = metal
+  tex = nodes.new('ShaderNodeTexImage')
+  tex.image = image
+  tex.extension = 'REPEAT'
+  m.node_tree.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+  MATS[name] = m
+  TEXTURED_UV_SCALES[name] = uv_scale
+  return m
+
+
 def init_materials():
   pmat('HullBlack', '#282219', 0.82)
   pmat('BandWhite', '#d8cfb6', 0.8)
@@ -176,6 +236,11 @@ def init_materials():
   pmat('IronBlack', '#211f1e', 0.55, 0.6)
   pmat('Glass', '#31424a', 0.15, 0.4)
   pmat('BoatWhite', '#d8d2c0', 0.85)
+  pmat('BoatPaintWear', '#b7ad95', 0.9)
+  pmat('BoatWoodDark', '#4c3724', 0.86)
+  pmat('CanvasSeam', '#8d7f60', 0.98)
+  image_pmat('BoatWood', BEAGLE_TEXTURE_ROOT / 'Planks037A_1K-JPG_Color.jpg', rough=0.82, uv_scale=0.62)
+  image_pmat('BoatCanvas', image=packed_canvas_image('BeagleBoatCanvasTexture'), rough=0.98, uv_scale=1.55)
   pmat('GratingOak', '#6e5433', 0.9)
 
 
@@ -191,6 +256,25 @@ def new_object(name, mesh):
   return ob
 
 
+def apply_world_uv(ob, scale=1.0):
+  me = ob.data
+  uv_layer = me.uv_layers.new(name='UVMap') if not me.uv_layers else me.uv_layers[0]
+  me.update()
+  for poly in me.polygons:
+    normal = poly.normal
+    ax, ay, az = abs(normal.x), abs(normal.y), abs(normal.z)
+    for loop_index in poly.loop_indices:
+      vertex = me.vertices[me.loops[loop_index].vertex_index]
+      co = vertex.co
+      if az >= ax and az >= ay:
+        u, v = co.x, co.y
+      elif ax >= ay:
+        u, v = co.y, co.z
+      else:
+        u, v = co.x, co.z
+      uv_layer.data[loop_index].uv = (u * scale, v * scale)
+
+
 def mesh_from_pydata(name, verts, faces, material):
   me = bpy.data.meshes.new(name)
   me.from_pydata(verts, [], faces)
@@ -199,6 +283,9 @@ def mesh_from_pydata(name, verts, faces, material):
   ob = new_object(name, me)
   if material is not None:
     me.materials.append(material)
+    uv_scale = TEXTURED_UV_SCALES.get(material.name)
+    if uv_scale:
+      apply_world_uv(ob, uv_scale)
   return ob
 
 
@@ -283,6 +370,28 @@ def add_rope(name, points, r, material, sides=5):
   """Poly-line rope as chained cylinders (merged later)."""
   for i in range(len(points) - 1):
     add_cylinder(f'{name}.{i}', points[i], points[i + 1], r, r, material, sides=sides, cap=False)
+
+
+def noise01(*values):
+  v = 0.0
+  for i, value in enumerate(values, start=1):
+    v += float(value) * (12.9898 * i + 37.719)
+  return math.sin(v) * 43758.5453 % 1.0
+
+
+def apply_mottled_materials(ob, materials, base_bias=0.68, mid_bias=0.9):
+  """Assign broad, stable face-level color variation to flat GLB materials."""
+  if not ob or not getattr(ob, 'data', None):
+    return
+  for material in materials[1:]:
+    ob.data.materials.append(material)
+  for poly in ob.data.polygons:
+    c = poly.center
+    n = noise01(c.x * 1.7, c.y * 2.3, c.z * 3.1, len(poly.vertices))
+    if n > mid_bias:
+      poly.material_index = min(2, len(materials) - 1)
+    elif n > base_bias:
+      poly.material_index = 1
 
 
 def sag_points(p0, p1, sag, n=5):
@@ -439,11 +548,12 @@ def build_bulwark_trim():
 def build_boarding_steps():
   """Wooden accommodation steps up the port hull side (over the terrain ramp).
 
-  Terrain ramp (hull.js): climbs from water at x=4.2 to the gangway sill at
-  x=1.4, hugging the hull outside the deck outline on the port side.
+  Terrain ramp (hull.js): climbs from just above the waterline at x=4.2 to the
+  gangway sill at x=1.4, hugging the hull outside the deck outline on the port
+  side. Keep y0 in sync with B_BOARD_Y_FOOT in hull.js.
   """
   x0, x1 = 5.8, 1.35
-  y0, y1 = -1.25, WAIST_Y + 0.10
+  y0, y1 = -0.32, WAIST_Y + 0.10
   n = 20
   for i in range(n + 1):
     t = i / n
@@ -625,52 +735,113 @@ def build_waist_fittings():
 
 def build_boats():
   def boat(name, cx, cy, cz, length, beam, covered, yaw=0.0):
+    def half_width_at(t):
+      return beam / 2 * math.sqrt(max(0.02, 1 - abs(2 * t - 1) ** 2.4))
+
+    def sheer_at(t):
+      return 0.34 + 0.1 * (2 * t - 1) ** 2
+
+    def side_curve(side, height, width_frac, inset=0.0, steps=12):
+      pts = []
+      for q in range(steps + 1):
+        t = q / steps
+        x = cx - length / 2 + length * t
+        hw = max(0.05, half_width_at(t) - inset)
+        pts.append((x, cy + height + 0.025 * (2 * t - 1) ** 2, cz + side * hw * width_frac))
+      return pts
+
+    def add_side_line(label, side, height, width_frac, radius, material, steps=12):
+      add_rope(f'{name}{label}.{side}', side_curve(side, height, width_frac, steps=steps), radius, material, sides=5)
+
+    def add_oar(label, tx, side, outward=1.0):
+      start = (cx + tx * length, cy + 0.38, cz + side * beam * 0.08)
+      end = (cx + (tx + 0.20 * outward) * length, cy + 0.39, cz + side * beam * 0.62)
+      add_cylinder(f'{name}OarShaft.{label}.{side}', start, end, 0.014, 0.011, MATS['BoatWood'], sides=6)
+      blade_yaw = side * 0.18
+      add_box(f'{name}OarBlade.{label}.{side}', end, (0.34, 0.018, 0.13), MATS['BoatWood'], yaw=blade_yaw)
+
     rings = []
-    n = 9
+    n = 14
+    section_steps = 13
     for i in range(n + 1):
       t = i / n
       x = -length / 2 + length * t
-      hw = beam / 2 * math.sqrt(max(0.02, 1 - abs(2 * t - 1) ** 2.4))
-      sheer = 0.34 + 0.1 * (2 * t - 1) ** 2
+      hw = half_width_at(t)
+      sheer = sheer_at(t)
       keel = -0.30 * math.sqrt(max(0.05, 1 - (2 * t - 1) ** 2))
       ring = []
-      for j in range(9):
-        u = j / 8
+      for j in range(section_steps):
+        u = j / (section_steps - 1)
         w = hw * math.cos(math.pi * u)          # widest at the gunwales
         zz = sheer - (sheer - keel) * math.sin(math.pi * u) ** 0.9
         ring.append(Vector((cx + x, -(cz - w), cy + zz)))
       rings.append(ring)
-    loft_rings(name, rings, MATS['BoatWhite'], close_start=True, close_end=True)
+    loft_rings(name, rings, MATS['BoatWood'], close_start=True, close_end=True)
+
+    # Ship's boats read mostly from silhouette and strake rhythm at game scale.
+    for side in (1, -1):
+      add_side_line('Gunwale', side, 0.43, 0.98, 0.026, MATS['BoatWoodDark'])
+      add_side_line('RubRail', side, 0.31, 0.91, 0.012, MATS['BoatWoodDark'])
+      add_side_line('Lapstrake1', side, 0.20, 0.78, 0.010, MATS['CanvasSeam'])
+      add_side_line('Lapstrake2', side, 0.10, 0.60, 0.008, MATS['CanvasSeam'])
+    for tx in (-0.46, 0.46):
+      add_cylinder(f'{name}StemPost.{tx}', (cx + tx * length, cy - 0.04, cz), (cx + tx * length, cy + 0.50, cz),
+                   0.022, 0.018, MATS['BoatWoodDark'], sides=6)
+
     if covered:
       cover = []
       for i in range(n + 1):
         t = i / n
         x = -length / 2 + length * t
-        hw = beam / 2 * math.sqrt(max(0.02, 1 - abs(2 * t - 1) ** 2.4)) + 0.06
-        sheer = 0.34 + 0.1 * (2 * t - 1) ** 2
+        hw = half_width_at(t) + 0.06
+        sheer = sheer_at(t)
         ridge = 0.46 * (0.72 + 0.28 * math.sin(t * math.pi))
         ring = []
-        for j in range(9):
-          u = j / 8
+        for j in range(section_steps):
+          u = j / (section_steps - 1)
           side = -1.0 + 2.0 * u
           w = hw * side
           tent = max(0.0, 1.0 - abs(side)) ** 0.9
           zz = sheer + 0.04 + ridge * tent
           ring.append(Vector((cx + x, -(cz - w), cy + zz)))
         cover.append(ring)
-      loft_rings(f'{name}Cover', cover, MATS['Canvas'], close_start=True, close_end=True, smooth=False)
+      loft_rings(f'{name}Cover', cover, MATS['BoatCanvas'], close_start=True, close_end=True, smooth=False)
       add_cylinder(f'{name}CoverRidge', (cx - length * 0.42, cy + 0.82, cz),
-                   (cx + length * 0.42, cy + 0.82, cz), 0.022, 0.022, MATS['RopeHemp'], sides=5)
+                   (cx + length * 0.42, cy + 0.82, cz), 0.016, 0.016, MATS['CanvasSeam'], sides=5)
+      for side in (1, -1):
+        add_side_line('CoverEdge', side, 0.50, 1.05, 0.010, MATS['CanvasSeam'], steps=10)
+      for tx in (-0.34, -0.12, 0.12, 0.34):
+        x = cx + tx * length
+        add_cylinder(f'{name}CoverSeam.{tx}', (x, cy + 0.58, cz - beam * 0.43),
+                     (x, cy + 0.58, cz + beam * 0.43), 0.006, 0.006, MATS['CanvasSeam'], sides=4)
+      for side in (1, -1):
+        for tx in (-0.36, -0.18, 0.0, 0.18, 0.36):
+          x = cx + tx * length
+          z0 = cz + side * beam * 0.43
+          z1 = cz + side * beam * 0.53
+          add_cylinder(f'{name}CoverLashing.{side}.{tx}', (x, cy + 0.47, z0), (x, cy + 0.36, z1),
+                       0.006, 0.006, MATS['RopeHemp'], sides=4)
     else:
-      for tx in (-0.3, 0.0, 0.3):
-        add_box(f'{name}Thwart{tx}', (cx + tx * length, cy + 0.24, cz), (0.14, 0.04, beam * 0.8), MATS['DeckTrim'])
+      for tx in (-0.34, -0.12, 0.12, 0.34):
+        add_box(f'{name}Thwart{tx}', (cx + tx * length, cy + 0.25, cz), (0.13, 0.04, beam * 0.78), MATS['BoatWood'])
+      for dz in (-0.22, 0.0, 0.22):
+        add_box(f'{name}Floorboard{dz}', (cx, cy + 0.055, cz + dz), (length * 0.58, 0.03, 0.075), MATS['BoatWood'])
+      for tx in (-0.42, -0.28, -0.14, 0.0, 0.14, 0.28, 0.42):
+        x = cx + tx * length
+        add_cylinder(f'{name}Rib.{tx}', (x, cy + 0.16, cz - beam * 0.34), (x, cy + 0.16, cz + beam * 0.34),
+                     0.010, 0.010, MATS['BoatWoodDark'], sides=5)
+      add_cylinder(f'{name}Keelson', (cx - length * 0.34, cy + 0.08, cz), (cx + length * 0.34, cy + 0.08, cz),
+                   0.018, 0.018, MATS['BoatWoodDark'], sides=5)
+      for side in (1, -1):
+        add_oar('A', -0.22, side, outward=1)
+        add_oar('B', 0.18, side, outward=-1)
 
   # Midship boats on skid beams over the waist
   for bx in (1.4, 5.6):
-    add_box(f'SkidBeam.{bx}', (bx, WAIST_Y + 2.1, 0), (0.22, 0.16, half_beam(bx) * 2 + 0.5), MATS['CapRail'])
+    add_box(f'SkidBeam.{bx}', (bx, WAIST_Y + 2.1, 0), (0.22, 0.16, half_beam(bx) * 2 + 0.5), MATS['BoatWoodDark'])
     for side in (1, -1):
       add_cylinder(f'SkidPost.{bx}.{side}', (bx, WAIST_Y + BULWARK_H, side * (half_beam(bx) - 0.25)),
-                   (bx, WAIST_Y + 2.1, side * (half_beam(bx) - 0.25)), 0.06, 0.05, MATS['CapRail'], sides=6)
+                   (bx, WAIST_Y + 2.1, side * (half_beam(bx) - 0.25)), 0.06, 0.05, MATS['BoatWoodDark'], sides=6)
   boat('BoatYawl', 3.5, WAIST_Y + 2.18, 1.15, 6.0, 1.85, covered=True)
   boat('BoatCutter', 3.5, WAIST_Y + 2.18, -1.15, 5.4, 1.7, covered=True)
   # Quarter davits with whaleboats

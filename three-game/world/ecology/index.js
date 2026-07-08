@@ -18,6 +18,7 @@ import { buildCormorantBaySplatTestEcology } from './cormorantBaySplatTest';
 import { buildCormorantBayTest2Ecology } from './cormorantBayTest2';
 import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
 import { buildPuntaCormorantEcology } from './puntaCormorant';
+import { buildWatkinsCampEcology } from './watkinsCamp';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
@@ -44,6 +45,7 @@ const builders = {
   CORMORANT_BAY_TEST_2: buildCormorantBayTest2Ecology,
   CORMORANT_BAY_TEST_3: buildCormorantBayTest3Ecology,
   PUNTA_CORMORANT: buildPuntaCormorantEcology,
+  WATKINS: buildWatkinsCampEcology,
 };
 
 const cache = new Map();

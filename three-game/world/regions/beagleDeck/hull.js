@@ -33,7 +33,7 @@ const B_GANGWAY_X1 = 2.2;
 const B_BOARD_X_TOP = 1.35;
 const B_BOARD_X_FOOT = 5.8;
 const B_BOARD_Y_TOP = 1.7;
-const B_BOARD_Y_FOOT = -1.25;
+const B_BOARD_Y_FOOT = -0.32;
 
 // --- world-unit exports ---
 export const WAIST_Y = B_WAIST_Y * S;
@@ -113,7 +113,9 @@ export function beagleOnDeck(x, z) {
   return Math.abs(z) <= beagleHalfBeam(x) + 0.08;
 }
 
-// Boarding ramp footprint: port side, hugging the hull.
+// Boarding ramp footprint: port side, hugging the hull. The visible
+// accommodation steps stop just above the waterline instead of sinking into
+// the sea; the heightfield then fades outboard into the sea floor.
 export function beagleOnBoardingRamp(x, z) {
   if (x < BOARD_X_TOP - 0.25 || x > BOARD_X_FOOT + 4.5) return false;
   const hb = beagleHalfBeam(x);

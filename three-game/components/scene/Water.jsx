@@ -33,11 +33,11 @@ import { onPropEvent } from '../../physics/props/propEvents';
 
 // Tunables
 const WATER_SIZE = 150;       // side length of the detailed water plane
-const WATER_SEGMENTS = 96;    // vertex displacement only -> modest mesh is enough
+const WATER_SEGMENTS = 128;   // vertex displacement only -> modest mesh is enough
 const BAKE_RES = 512;         // seafloor depth-texture resolution
-const REFLECTION_RES = 320;   // planar mirror is a garnish now, not the core look
-const REFLECTION_MIN_INTERVAL = 5; // moving camera: keep the current cadence
-const REFLECTION_STATIC_INTERVAL = 30; // static camera: let the reflection rest
+const REFLECTION_RES = 320;   // cadence matters more than raw resolution here
+const REFLECTION_MIN_INTERVAL = 2; // moving camera: refresh often enough to feel attached
+const REFLECTION_STATIC_INTERVAL = 8; // static camera: keep animated silhouettes current
 const REFLECTION_CAMERA_MOVE_SQ = 0.08 * 0.08;
 const REFLECTION_CAMERA_ROT_DELTA = 0.00025;
 const REFLECTION_TIME_DELTA = 0.035; // in-game hours
@@ -54,11 +54,22 @@ const WATER_QUALITY = {
     bakeRes: 256,
     segments: 64,
     reflectionRes: 256,
+    reflectionMinInterval: 5,
+    reflectionStaticInterval: 24,
   },
-  cinematic: {
+  polished: {
     bakeRes: BAKE_RES,
     segments: WATER_SEGMENTS,
     reflectionRes: REFLECTION_RES,
+    reflectionMinInterval: REFLECTION_MIN_INTERVAL,
+    reflectionStaticInterval: REFLECTION_STATIC_INTERVAL,
+  },
+  cinematic: {
+    bakeRes: BAKE_RES,
+    segments: 160,
+    reflectionRes: 384,
+    reflectionMinInterval: 1,
+    reflectionStaticInterval: 4,
   },
 };
 
@@ -85,6 +96,15 @@ const WATER_DAY = {
   foam: new THREE.Color('#e9f4f0'),
 };
 
+const WATER_CLEAR_MORNING = {
+  // Dawn light hits the water before the sky has reached the clean noon blue.
+  // Pull that window toward a calmer Galapagos blue-green so low-sun glints
+  // do not turn the lagoon into electric cyan/violet.
+  scatter: new THREE.Color('#61b8c6'),
+  deep: new THREE.Color('#2d7198'),
+  openDeep: new THREE.Color('#16547f'),
+};
+
 const WATER_NIGHT = {
   sand: new THREE.Color('#172b37'),
   scatter: new THREE.Color('#123f55'),
@@ -104,6 +124,61 @@ const WATER_STORM = {
 // Metres of shoreline distance packed into the depth texture's green byte.
 // Surf lives well inside this range; clamping beyond it is harmless.
 const SHORE_DIST_RANGE = 60;
+
+const RIPPLE_NORMAL_SIZE = 256;
+
+function rippleNormalHeight(u, v) {
+  const waves = [
+    [1, 2, 0.42, 0.0],
+    [2, -1, 0.32, 1.7],
+    [3, 4, 0.18, 3.1],
+    [-4, 3, 0.16, 4.4],
+    [6, 1, 0.1, 2.2],
+    [5, -6, 0.08, 5.3],
+    [9, 4, 0.045, 0.9],
+    [-7, 10, 0.036, 3.8],
+  ];
+  let h = 0;
+  for (let i = 0; i < waves.length; i += 1) {
+    const [kx, ky, amp, phase] = waves[i];
+    h += Math.sin(Math.PI * 2 * (kx * u + ky * v) + phase) * amp;
+  }
+  return h;
+}
+
+function createRippleNormalTexture(size = RIPPLE_NORMAL_SIZE) {
+  const data = new Uint8Array(size * size * 4);
+  const sample = (x, y) => rippleNormalHeight(
+    ((x % size) + size) % size / size,
+    ((y % size) + size) % size / size,
+  );
+  const normalStrength = 3.35;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dx = (sample(x + 1, y) - sample(x - 1, y)) * normalStrength;
+      const dz = (sample(x, y + 1) - sample(x, y - 1)) * normalStrength;
+      const invLen = 1 / Math.hypot(dx, dz, 1);
+      const nx = -dx * invLen;
+      const nz = -dz * invLen;
+      const ny = invLen;
+      const idx = (y * size + x) * 4;
+      data[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.round((nz * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.round((ny * 0.5 + 0.5) * 255);
+      data[idx + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 8;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 // Bake the seafloor height under the water plane into a texture so the shader
 // can read water depth per-pixel without a runtime depth prepass. The green
@@ -340,7 +415,7 @@ const WAVE_GLSL = /* glsl */`
   }
 `;
 
-function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) {
+function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, rippleNormalTexture) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -349,6 +424,7 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
       uStandingWaterMask: { value: standingWaterMaskTexture },
+      uRippleNormal: { value: rippleNormalTexture },
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
       // Fallback painted colour (used until the first refraction grab lands).
@@ -366,6 +442,9 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       uHazeFar: { value: 120 },
       uSun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       uSunColor: { value: new THREE.Color('#fff3da') },
+      uMoon: { value: new THREE.Vector3(0, -1, 0) },
+      uMoonColor: { value: new THREE.Color('#c9dcf2') },
+      uMoonGlitter: { value: 0 },
       uDaylight: { value: 1 },
       uSunPathStrength: { value: 0 },
       uRain: { value: 0 },
@@ -441,6 +520,9 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       uniform vec3 uSkyHorizon;
       uniform vec3 uSun;
       uniform vec3 uSunColor;
+      uniform vec3 uMoon;
+      uniform vec3 uMoonColor;
+      uniform float uMoonGlitter;
       uniform float uDaylight;
       uniform float uSunPathStrength;
       uniform float uRain;
@@ -453,6 +535,7 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform sampler2D uStandingWaterMask;
+      uniform sampler2D uRippleNormal;
       uniform float uWaterLevel;
       uniform sampler2D uRefraction;
       uniform float uHasRefraction;
@@ -516,6 +599,41 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         return min(foam, 1.0) * env * s;
       }
 
+      vec2 rippleNormalSlope(vec2 wxz, float t, float coarseLod, float fineLod) {
+        vec2 uvA = wxz * 0.048 + vec2(t * 0.008, -t * 0.006);
+        vec2 uvB = vec2(wxz.x * 0.78 - wxz.y * 0.62, wxz.x * 0.62 + wxz.y * 0.78) * 0.135
+          + vec2(-t * 0.014, t * 0.01);
+        vec2 uvC = vec2(wxz.x * 0.36 + wxz.y * 0.93, -wxz.x * 0.93 + wxz.y * 0.36) * 0.27
+          + vec2(t * 0.022, t * 0.017);
+        vec3 a = texture2D(uRippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(uRippleNormal, uvB).rgb * 2.0 - 1.0;
+        vec3 c = texture2D(uRippleNormal, uvC).rgb * 2.0 - 1.0;
+        return a.xy * 0.82 * coarseLod + b.xy * 0.46 * coarseLod + c.xy * 0.26 * fineLod;
+      }
+
+      float rippleSparkleMask(vec2 wxz, float t) {
+        vec2 uvA = vec2(wxz.x * 0.86 - wxz.y * 0.5, wxz.x * 0.5 + wxz.y * 0.86) * 0.18
+          + vec2(t * 0.018, -t * 0.015);
+        vec2 uvB = vec2(wxz.x * 0.34 + wxz.y * 0.94, -wxz.x * 0.94 + wxz.y * 0.34) * 0.34
+          + vec2(-t * 0.026, t * 0.018);
+        vec3 a = texture2D(uRippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(uRippleNormal, uvB).rgb * 2.0 - 1.0;
+        float ridge = max(abs(a.x), abs(a.y)) * 0.64 + max(abs(b.x), abs(b.y)) * 0.36;
+        return smoothstep(0.23, 0.54, ridge);
+      }
+
+      float microSparkleMask(vec2 wxz, float t) {
+        vec2 uvA = vec2(wxz.x * 0.71 - wxz.y * 0.7, wxz.x * 0.7 + wxz.y * 0.71) * 0.82
+          + vec2(t * 0.075, -t * 0.058);
+        vec2 uvB = vec2(wxz.x * 0.2 + wxz.y * 0.98, -wxz.x * 0.98 + wxz.y * 0.2) * 1.18
+          + vec2(-t * 0.095, t * 0.071);
+        vec3 a = texture2D(uRippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(uRippleNormal, uvB).rgb * 2.0 - 1.0;
+        float ridge = max(abs(a.x), abs(a.y)) * 0.55 + max(abs(b.x), abs(b.y)) * 0.45;
+        float fleck = smoothstep(0.46, 0.82, ridge);
+        return fleck * fleck;
+      }
+
       void main() {
         // --- per-pixel surface normal: analytic swell + scrolling ripples ----
         vec4 floorSample = texture2D(uSeafloor, vWorld.xz / uSize + 0.5);
@@ -536,23 +654,12 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         float footprint = max(fwidth(vWorld.x), fwidth(vWorld.z));
         float rippleLod = 1.0 - smoothstep(0.18, 1.05, footprint);
         float microLod = 1.0 - smoothstep(0.08, 0.54, footprint);
-        vec2 rp = vWorld.xz * 0.7 + vec2(uTime * 0.06, -uTime * 0.05);
         float e = 0.12;
-        float r0 = noise(rp);
-        float rx = noise(rp + vec2(e, 0.0)) - r0;
-        float rz = noise(rp + vec2(0.0, e)) - r0;
-        vec2 rp2 = vWorld.xz * 2.3 - vec2(uTime * 0.045, uTime * 0.07);
-        float s0 = noise(rp2);
-        float sx = noise(rp2 + vec2(e, 0.0)) - s0;
-        float sz = noise(rp2 + vec2(0.0, e)) - s0;
         // Glassy lagoon: detail ripples relax with distance so mid/far water
         // reads as a smooth gradient with sky sheen instead of noise.
         float glassBy = 1.0 - 0.55 * smoothstep(18.0, 65.0, length(vWorld.xz - cameraPosition.xz));
-        normal = normalize(normal + vec3(
-          -(rx * rippleLod + sx * 0.45 * microLod),
-          0.0,
-          -(rz * rippleLod + sz * 0.45 * microLod)
-        ) * 1.25 * glassBy);
+        vec2 rippleSlope = rippleNormalSlope(vWorld.xz, uTime, rippleLod, microLod);
+        normal = normalize(normal + vec3(-rippleSlope.x, 0.0, -rippleSlope.y) * 2.15 * glassBy);
         if (uRain > 0.001) {
           vec2 rainP = vWorld.xz * 3.7 + vec2(uTime * 0.72, -uTime * 0.58);
           float rainN = noise(rainP);
@@ -701,9 +808,21 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         // --- reflection: a garnish on top of the clear body -------------------
         vec3 refl = reflect(-viewDir, normal);
         vec3 skyRefl = mix(uSkyHorizon, uSky, clamp(refl.y * 1.4, 0.0, 1.0));
-        vec3 waterSheen = mix(uScatter, uSkyHorizon, 0.22);
-        skyRefl = mix(skyRefl, waterSheen, 0.18);
+        vec3 waterSheen = mix(uScatter, uSkyHorizon, 0.36);
+        skyRefl = mix(skyRefl, waterSheen, 0.12);
         skyRefl = mix(skyRefl, skyRefl * vec3(0.96, 1.035, 0.90), 0.22);
+        // The reflected sky is a gradient, not a fill: it brightens and picks
+        // up the sun's tint toward the sun's azimuth at the horizon band, and
+        // a slow drifting luminance field keeps broad sheen patches reading
+        // as moving water instead of flat paint.
+        vec2 reflAz = normalize(refl.xz + vec2(1e-4, 0.0));
+        float sheenSunward = smoothstep(-0.25, 1.0, dot(reflAz, normalize(uSun.xz + vec2(1e-4, 0.0))));
+        float sheenHorizon = 1.0 - clamp(refl.y * 2.4, 0.0, 1.0);
+        skyRefl += uSunColor * sheenSunward * sheenHorizon * uDaylight
+          * (0.035 + uSunPathStrength * 0.045) * (1.0 - uRain * 0.8);
+        float skyReflLuma = dot(skyRefl, vec3(0.299, 0.587, 0.114));
+        skyRefl = mix(skyRefl, vec3(skyReflLuma), uSunPathStrength * 0.10);
+        skyRefl *= 0.95 + 0.10 * noise(vWorld.xz * 0.05 + vec2(uTime * 0.013, -uTime * 0.009));
         vec3 reflColor = skyRefl;
         if (uHasReflection > 0.5 && vReflCoord.w > 0.0) {
           vec2 mruv = vReflCoord.xy / vReflCoord.w + normal.xz * 0.03;
@@ -735,21 +854,30 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
 
         // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
-        float glintVisibility = (0.24 + 0.76 * uSunPathStrength) * (1.0 - uRain * 0.78) * (1.0 - underwaterView * 0.88);
-        float spec = pow(max(dot(normal, hv), 0.0), mix(280.0, 170.0, uSunPathStrength)) * uDaylight * glintVisibility;
-        float glint = 0.45 + 0.55 * smoothstep(0.5, 0.88, noise(vWorld.xz * 4.4 + uTime * 0.48));
+        vec3 glintWhite = mix(vec3(1.06, 1.035, 0.965), uFoam, 0.24);
+        // Keep specular mostly white-gold. The sky can be rose; the sun flecks
+        // should bloom as small hot points instead of broad pink patches.
+        glintWhite = mix(glintWhite, vec3(1.12, 1.035, 0.82), uSunPathStrength * 0.38);
+        float glintVisibility = (0.36 + 0.64 * uSunPathStrength) * (1.0 - uRain * 0.78) * (1.0 - underwaterView * 0.88);
+        float spec = pow(max(dot(normal, hv), 0.0), mix(260.0, 175.0, uSunPathStrength)) * uDaylight * glintVisibility;
+        float glint = 0.28 + 0.72 * rippleSparkleMask(vWorld.xz, uTime);
         vec2 sunPathDir = normalize(uSun.xz + vec2(0.0001, 0.0001));
         vec2 toWater = normalize(vWorld.xz - cameraPosition.xz + vec2(0.0001, 0.0001));
         float alongSun = smoothstep(0.02, 0.42, dot(toWater, sunPathDir));
         float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
         float path = smoothstep(0.34, 0.035, crossSun) * alongSun;
+        float pathCore = smoothstep(0.24, 0.018, crossSun) * alongSun;
         float pathCamDist = length(vWorld.xz - cameraPosition.xz);
         float pathDistance = smoothstep(8.0, 30.0, pathCamDist) * (1.0 - smoothstep(138.0, 180.0, pathCamDist));
         float pathGrain = 0.5 + 0.58 * smoothstep(0.38, 0.86, noise(vWorld.xz * 2.0 + vec2(uTime * 0.12, -uTime * 0.075)));
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
-        color += uSunColor * min(spec * glint, 1.0) * (0.58 + uSunPathStrength * 0.4);
-        color += uSunColor * pathGlitter * 0.28 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
-        color += mix(uSkyHorizon, uFoam, 0.42)
+        float microGlitter = microSparkleMask(vWorld.xz, uTime) * pathCore * pathDistance * uSunPathStrength;
+        // Peaks are allowed past 1.0 so ACES rolls them off and the brightest
+        // glints cross the bloom threshold (the sparkle is a bloom customer).
+        color += glintWhite * min(spec * glint * 1.55, 1.45) * (0.72 + uSunPathStrength * 0.42);
+        color += glintWhite * pathGlitter * 0.16 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+        color += glintWhite * microGlitter * 1.35 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+        color += glintWhite
           * (eventRippleGlint + playerRippleGlint)
           * uDaylight
           * (1.0 - uRain * 0.7)
@@ -760,18 +888,25 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         float sparkleGate = uDaylight * (1.0 - uRain * 0.8) * (1.0 - underwaterView)
           * smoothstep(10.0, 22.0, pathCamDist) * (1.0 - smoothstep(60.0, 90.0, pathCamDist));
         if (sparkleGate > 0.01) {
-          // Second octave rotated off-axis so the two value-noise lattices
-          // don't align: thresholding aligned lattices near their peak
-          // produces boxy, axis-aligned blobs instead of point-like grain.
-          vec2 twRot = vec2(vWorld.x * 0.8 - vWorld.z * 0.6, vWorld.x * 0.6 + vWorld.z * 0.8);
-          float tw = noise(vWorld.xz * 6.5 + vec2(uTime * 0.42, -uTime * 0.36)) * 0.6
-            + noise(twRot * 11.0 - vec2(uTime * 0.3, uTime * 0.37)) * 0.4;
-          // Loosened threshold: the smooth sparkleFacing term below does the
-          // actual tightening into points, so the noise mask only needs to
-          // pick sparse candidate regions, not carve hard cell edges.
-          float sparkle = smoothstep(0.82, 1.0, tw);
-          float sparkleFacing = pow(max(dot(normal, hv), 0.0), 48.0);
-          color += uSunColor * sparkle * sparkleFacing * sparkleGate * 0.85;
+          float sparkle = rippleSparkleMask(vWorld.xz, uTime);
+          float sparkleFacing = pow(max(dot(normal, hv), 0.0), 38.0);
+          color += glintWhite * sparkle * sparkleFacing * sparkleGate * 1.18;
+        }
+        // --- moon glitter: the sun's math on the night sea, silver, quieter.
+        // uMoonGlitter carries phase, altitude and weather gating from JS.
+        if (uMoonGlitter > 0.005) {
+          vec3 moonDir = normalize(uMoon);
+          float moonFade = 1.0 - underwaterView * 0.85;
+          float moonDisc = pow(max(dot(refl, moonDir), 0.0), mix(700.0, 90.0, uMoonGlitter));
+          vec3 moonHv = normalize(moonDir + viewDir);
+          float moonSpec = pow(max(dot(normal, moonHv), 0.0), mix(240.0, 130.0, uMoonGlitter));
+          vec2 moonPathDir = normalize(uMoon.xz + vec2(0.0001, 0.0001));
+          float moonAlong = smoothstep(0.02, 0.42, dot(toWater, moonPathDir));
+          float moonCross = abs(toWater.x * moonPathDir.y - toWater.y * moonPathDir.x);
+          float moonPath = smoothstep(0.30, 0.03, moonCross) * moonAlong;
+          color += uMoonColor * moonDisc * (0.5 + uMoonGlitter * 0.9) * uMoonGlitter * moonFade;
+          color += uMoonColor * moonSpec * glint * uMoonGlitter * 0.85 * moonFade;
+          color += uMoonColor * moonPath * pathDistance * pathGrain * uMoonGlitter * 0.30 * moonFade;
         }
         color = mix(color, color * vec3(0.62, 0.76, 0.82), uRain * 0.24);
 
@@ -795,13 +930,13 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture) 
         crestBand *= 1.0 - rollerZone * 0.72;
         troughBand *= 1.0 - rollerZone * 0.72;
         float bandBreakup = 0.68 + 0.32 * noise(vWorld.xz * 0.18 + vec2(uTime * 0.018, -uTime * 0.012));
-        vec3 crestTint = mix(uScatter, uSkyHorizon, 0.22);
-        color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.06 + uDaylight * 0.045);
-        color = mix(color, color * vec3(0.78, 0.91, 0.96), troughBand * waterSurfaceMask * 0.14);
-        color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.055);
+        vec3 crestTint = mix(uScatter, uFoam, 0.14);
+        color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.08 + uDaylight * 0.07);
+        color = mix(color, color * vec3(0.76, 0.90, 0.96), troughBand * waterSurfaceMask * 0.18);
+        color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.075);
         // Glassy roller read: a soft sky-sheen crest and a slightly deeper
         // back slope — colour only, no foam (the mockup lagoon is clean).
-        color += crestTint * rollerHi * bandBreakup * rollerMask * (0.03 + uDaylight * 0.025);
+        color += crestTint * rollerHi * bandBreakup * rollerMask * (0.045 + uDaylight * 0.04);
         color = mix(color, color * vec3(0.90, 0.96, 0.98), rollerLo * rollerMask * 0.12);
 
         // --- foam: punctuation, not texture -----------------------------------
@@ -1036,7 +1171,7 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
 
 // Large camera-following disc beneath the detailed water: the apparently
 // infinite open ocean, faded into the sky at the horizon.
-function createDeepOceanMaterial() {
+function createDeepOceanMaterial(rippleNormalTexture) {
   return new THREE.ShaderMaterial({
     fog: false,
     transparent: true,
@@ -1053,8 +1188,12 @@ function createDeepOceanMaterial() {
       camPos: { value: new THREE.Vector3() },
       sun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       sunColor: { value: new THREE.Color('#fff3da') },
+      moon: { value: new THREE.Vector3(0, -1, 0) },
+      moonColor: { value: new THREE.Color('#c9dcf2') },
+      moonGlitter: { value: 0 },
       daylight: { value: 1 },
       sunPathStrength: { value: 0 },
+      rippleNormal: { value: rippleNormalTexture },
     },
     vertexShader: `
       varying vec3 vWorld;
@@ -1074,16 +1213,44 @@ function createDeepOceanMaterial() {
       uniform vec3 camPos;
       uniform vec3 sun;
       uniform vec3 sunColor;
+      uniform vec3 moon;
+      uniform vec3 moonColor;
+      uniform float moonGlitter;
       uniform float daylight;
       uniform float sunPathStrength;
+      uniform sampler2D rippleNormal;
       varying vec3 vWorld;
 
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
-      float noise(vec2 p) {
-        vec2 i = floor(p); vec2 f = fract(p);
-        vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      vec3 rippleNormalAt(vec2 wxz, float t) {
+        vec2 uvA = wxz * 0.042 + vec2(t * 0.006, -t * 0.004);
+        vec2 uvB = vec2(wxz.x * 0.72 - wxz.y * 0.69, wxz.x * 0.69 + wxz.y * 0.72) * 0.12
+          + vec2(-t * 0.011, t * 0.008);
+        vec3 a = texture2D(rippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(rippleNormal, uvB).rgb * 2.0 - 1.0;
+        vec2 slope = (a.xy * 0.82 + b.xy * 0.44) * 1.65;
+        return normalize(vec3(slope.x, 1.0, slope.y));
+      }
+
+      float rippleSparkle(vec2 wxz, float t) {
+        vec2 uvA = wxz * 0.075 + vec2(t * 0.01, -t * 0.007);
+        vec2 uvB = vec2(wxz.x * 0.44 + wxz.y * 0.9, -wxz.x * 0.9 + wxz.y * 0.44) * 0.18
+          + vec2(-t * 0.017, t * 0.012);
+        vec3 a = texture2D(rippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(rippleNormal, uvB).rgb * 2.0 - 1.0;
+        float ridge = max(abs(a.x), abs(a.y)) * 0.58 + max(abs(b.x), abs(b.y)) * 0.42;
+        return smoothstep(0.22, 0.55, ridge);
+      }
+
+      float microSparkle(vec2 wxz, float t) {
+        vec2 uvA = vec2(wxz.x * 0.72 - wxz.y * 0.69, wxz.x * 0.69 + wxz.y * 0.72) * 0.48
+          + vec2(t * 0.043, -t * 0.031);
+        vec2 uvB = vec2(wxz.x * 0.23 + wxz.y * 0.97, -wxz.x * 0.97 + wxz.y * 0.23) * 0.78
+          + vec2(-t * 0.058, t * 0.046);
+        vec3 a = texture2D(rippleNormal, uvA).rgb * 2.0 - 1.0;
+        vec3 b = texture2D(rippleNormal, uvB).rgb * 2.0 - 1.0;
+        float ridge = max(abs(a.x), abs(a.y)) * 0.54 + max(abs(b.x), abs(b.y)) * 0.46;
+        float fleck = smoothstep(0.44, 0.78, ridge);
+        return fleck * fleck;
       }
 
       void main() {
@@ -1102,31 +1269,39 @@ function createDeepOceanMaterial() {
         float shimmer = sin(vWorld.x * 0.06 + time * 0.4) * cos(vWorld.z * 0.05 - time * 0.32);
         color += shimmer * 0.015;
 
-        // Sun glitter: a cheap two-octave noise normal so the open ocean
-        // sparkles along the sun path instead of reading as flat paint.
-        vec2 gp = vWorld.xz * 0.55 + vec2(time * 0.07, -time * 0.05);
-        float e = 0.14;
-        float g0 = noise(gp);
-        vec2 grad = vec2(noise(gp + vec2(e, 0.0)) - g0, noise(gp + vec2(0.0, e)) - g0);
-        vec2 gp2 = vWorld.xz * 1.7 - vec2(time * 0.05, time * 0.08);
-        float h0 = noise(gp2);
-        grad += vec2(noise(gp2 + vec2(e, 0.0)) - h0, noise(gp2 + vec2(0.0, e)) - h0) * 0.5;
-        vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y) * vec3(1.6, 1.0, 1.6));
+        // Sun glitter shares the detailed water's tiled normal source so the
+        // horizon does not fall back to blocky procedural cells.
+        vec3 normal = rippleNormalAt(vWorld.xz, time);
         vec3 viewDir = normalize(camPos - vWorld);
         vec3 hv = normalize(normalize(sun) + viewDir);
         float glintVisibility = 0.22 + 0.78 * sunPathStrength;
-        float spec = pow(max(dot(normal, hv), 0.0), mix(340.0, 210.0, sunPathStrength)) * daylight * glintVisibility;
+        float spec = pow(max(dot(normal, hv), 0.0), mix(260.0, 150.0, sunPathStrength)) * daylight * glintVisibility;
+        vec3 sunGlintColor = mix(vec3(1.05, 1.02, 0.94), vec3(1.12, 1.04, 0.82), sunPathStrength * 0.5);
         vec2 sunPathDir = normalize(sun.xz + vec2(0.0001, 0.0001));
         vec2 toWater = normalize(vWorld.xz - camPos.xz + vec2(0.0001, 0.0001));
         float alongSun = smoothstep(0.03, 0.42, dot(toWater, sunPathDir));
         float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
         float path = smoothstep(0.28, 0.025, crossSun) * alongSun;
-        float pathSparkle = 0.48 + 0.52 * smoothstep(0.38, 0.82, noise(vWorld.xz * 1.05 + vec2(time * 0.07, -time * 0.045)));
+        float pathCore = smoothstep(0.19, 0.018, crossSun) * alongSun;
+        float pathSparkle = 0.48 + 0.52 * rippleSparkle(vWorld.xz, time);
+        float pathFlecks = microSparkle(vWorld.xz, time);
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
-        color += sunColor * min(spec, 0.9) * (0.52 + sunPathStrength * 0.5) * (1.0 - fog * 0.85);
-        color += sunColor * path * pathSparkle * sunPathStrength * 0.12 * (1.0 - fog * 0.92);
+        color += sunGlintColor * min(spec * 1.36, 1.05) * (0.66 + sunPathStrength * 0.48) * (1.0 - fog * 0.85);
+        color += sunGlintColor * path * pathSparkle * sunPathStrength * 0.09 * (1.0 - fog * 0.92);
+        color += sunGlintColor * pathCore * pathFlecks * sunPathStrength * 0.52 * (1.0 - fog * 0.9);
+        // Moon glitter continues the silver path out to the horizon disc.
+        if (moonGlitter > 0.005) {
+          vec3 moonHv = normalize(normalize(moon) + viewDir);
+          float moonSpec = pow(max(dot(normal, moonHv), 0.0), mix(260.0, 120.0, moonGlitter));
+          vec2 moonPathDir = normalize(moon.xz + vec2(0.0001, 0.0001));
+          float moonAlong = smoothstep(0.03, 0.42, dot(toWater, moonPathDir));
+          float moonCross = abs(toWater.x * moonPathDir.y - toWater.y * moonPathDir.x);
+          float moonPath = smoothstep(0.26, 0.025, moonCross) * moonAlong;
+          color += moonColor * moonSpec * (0.5 + moonGlitter * 0.6) * moonGlitter * (1.0 - fog * 0.85);
+          color += moonColor * moonPath * pathSparkle * moonGlitter * 0.14 * (1.0 - fog * 0.92);
+        }
 
         // Keep a memory of blue at the horizon line rather than fully greying
         // out (mockup: saturated deep water meets the sky) — but the last few
@@ -1303,15 +1478,16 @@ export function Water({ quality = 'performance', reflections = true }) {
     () => bakeStandingWaterMaskTexture(currentZoneId, qualityConfig.bakeRes),
     [currentZoneId, qualityConfig.bakeRes],
   );
+  const rippleNormal = useMemo(() => createRippleNormalTexture(), []);
   const waterMaterial = useMemo(
-    () => createStylizedWaterMaterial(seafloor, standingWaterMask),
-    [seafloor, standingWaterMask],
+    () => createStylizedWaterMaterial(seafloor, standingWaterMask, rippleNormal),
+    [seafloor, standingWaterMask, rippleNormal],
   );
   const surfMaterial = useMemo(
     () => createSurfRibbonMaterial(seafloor, standingWaterMask),
     [seafloor, standingWaterMask],
   );
-  const deepMaterial = useMemo(() => createDeepOceanMaterial(), []);
+  const deepMaterial = useMemo(() => createDeepOceanMaterial(rippleNormal), [rippleNormal]);
 
   const waterGeometry = useMemo(
     () => new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, qualityConfig.segments, qualityConfig.segments),
@@ -1342,6 +1518,7 @@ export function Water({ quality = 'performance', reflections = true }) {
     timeOfDay: null,
   });
   const _sun = useMemo(() => new THREE.Vector3(), []);
+  const _moon = useMemo(() => new THREE.Vector3(), []);
   const _white = useMemo(() => new THREE.Color('#ffffff'), []);
   const _sunColorDay = useMemo(() => new THREE.Color('#fff3da'), []);
   const _sunColorGolden = useMemo(() => new THREE.Color('#ff9d4d'), []);
@@ -1452,8 +1629,13 @@ export function Water({ quality = 'performance', reflections = true }) {
       * (1 - THREE.MathUtils.smoothstep(wadeDepth, 1.45, 2.3));
     const standingMask = standingWaterMaskAt(pp.x, pp.z, store.currentZoneId);
     const oceanWade = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < 0.18 ? wade : 0;
+    const oceanSwimSurface = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < 0.18
+      ? THREE.MathUtils.smoothstep(wadeDepth, 0.55, 1.15)
+        * (1 - THREE.MathUtils.smoothstep(wadeDepth, 2.4, 3.4))
+        * 0.72
+      : 0;
     wu.uPlayer.value.set(pp.x, pp.y, pp.z);
-    wu.uPlayerRipple.value = oceanWade * (1 - wu.uUnderwaterAmount.value);
+    wu.uPlayerRipple.value = Math.max(oceanWade, oceanSwimSurface) * (1 - wu.uUnderwaterAmount.value);
     const sky = skyState(time, store.day || 1);
     const daylight = sky.daylight;
     // Floored below the horizon crossing so glitter doesn't vanish exactly
@@ -1463,9 +1645,37 @@ export function Water({ quality = 'performance', reflections = true }) {
     const sunPathStrength = Math.sqrt(daylight) * lowSun * (1 - weatherEnv.rainIntensity * 0.72) * (1 - weatherEnv.overcast * 0.55);
     const weatherMood = THREE.MathUtils.clamp(weatherEnv.overcast * 0.58 + weatherEnv.rainIntensity * 0.42, 0, 1);
     const stormBlend = weatherMood * THREE.MathUtils.lerp(0.25, 0.85, daylight);
+    const clearNoonBlue = (sky.noonBlue || 0)
+      * (1 - weatherEnv.overcast * 0.92)
+      * (1 - weatherEnv.mistAmount * 0.75)
+      * (1 - weatherEnv.rainIntensity * 0.72);
+    const clearMorningWindow = 1 - THREE.MathUtils.smoothstep(time, 8.7, 11.2);
+    const clearMorningWaterCalm = THREE.MathUtils.clamp(
+      clearMorningWindow
+        * lowSun
+        * daylight
+        * (1 - clearNoonBlue * 0.85)
+        * (1 - weatherEnv.overcast * 0.45)
+        * (1 - weatherEnv.rainIntensity * 0.58),
+      0,
+      1
+    );
     wu.uDaylight.value = daylight;
     wu.uSunPathStrength.value = sunPathStrength;
     wu.uSunColor.value.copy(_sunColorDay).lerp(_sunColorGolden, sky.golden);
+    // Moon glitter: night sea sparkle scaled by phase, altitude, and sky
+    // clarity — widest silver streak when the moon rides low (the same
+    // low-light mapping the sun path uses).
+    _moon.set(sky.moon[0], sky.moon[1], sky.moon[2]);
+    wu.uMoon.value.copy(_moon);
+    const moonUp = THREE.MathUtils.smoothstep(_moon.y, -0.02, 0.12);
+    const moonLow = 1 - THREE.MathUtils.smoothstep(_moon.y, 0.5, 0.85);
+    const moonGlitter = sky.night * moonUp * (0.35 + 0.65 * moonLow)
+      * (sky.moon_phase?.fraction ?? 0)
+      * (1 - weatherEnv.overcast * 0.9)
+      * (1 - weatherEnv.rainIntensity * 0.85)
+      * (1 - weatherEnv.mistAmount * 0.6);
+    wu.uMoonGlitter.value = moonGlitter;
     wu.uAbsorb.value.set(
       THREE.MathUtils.lerp(0.42, 0.56, weatherMood),
       THREE.MathUtils.lerp(0.20, 0.28, weatherMood),
@@ -1475,6 +1685,8 @@ export function Water({ quality = 'performance', reflections = true }) {
     wu.uScatter.value.copy(WATER_NIGHT.scatter).lerp(WATER_DAY.scatter, daylight).lerp(WATER_STORM.scatter, stormBlend);
     wu.uDeep.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight).lerp(WATER_STORM.deep, stormBlend);
     wu.uFoam.value.copy(WATER_NIGHT.foam).lerp(WATER_DAY.foam, daylight).lerp(WATER_STORM.foam, stormBlend);
+    wu.uScatter.value.lerp(WATER_CLEAR_MORNING.scatter, clearMorningWaterCalm * 0.56);
+    wu.uDeep.value.lerp(WATER_CLEAR_MORNING.deep, clearMorningWaterCalm * 0.42);
     const su = surfMaterial.uniforms;
     su.uTime.value = t;
     su.uRain.value = weatherEnv.rainIntensity;
@@ -1483,8 +1695,12 @@ export function Water({ quality = 'performance', reflections = true }) {
     su.uFoam.value.copy(wu.uFoam.value);
     su.uScatter.value.copy(wu.uScatter.value);
     if (scene.fog) {
-      const horizonLift = THREE.MathUtils.lerp(0.04, 0.18, daylight);
-      const hazeLift = THREE.MathUtils.lerp(0.08, 0.42, daylight);
+      // The toward-white lift is sunlit haze; under a closed sky the sea
+      // horizon must stay no brighter than the cloud deck feeding it.
+      const litAir = 1 - weatherEnv.overcast * 0.55;
+      const morningHazeRestraint = 1 - clearMorningWaterCalm * 0.3;
+      const horizonLift = THREE.MathUtils.lerp(0.03, 0.18, daylight) * (1 - clearNoonBlue * 0.52) * litAir * morningHazeRestraint;
+      const hazeLift = THREE.MathUtils.lerp(0.05, 0.42, daylight) * (1 - clearNoonBlue * 0.36) * litAir * (1 - clearMorningWaterCalm * 0.22);
       wu.uSky.value.copy(scene.fog.color);
       wu.uSkyHorizon.value.copy(scene.fog.color).lerp(_white, horizonLift);
       wu.uHaze.value.copy(scene.fog.color).lerp(_white, hazeLift);
@@ -1504,10 +1720,14 @@ export function Water({ quality = 'performance', reflections = true }) {
       du.camPos.value.copy(camera.position);
       du.sun.value.copy(_sun);
       du.sunColor.value.copy(wu.uSunColor.value);
+      du.moon.value.copy(_moon);
+      du.moonGlitter.value = wu.uMoonGlitter.value;
       du.daylight.value = wu.uDaylight.value;
       du.sunPathStrength.value = sunPathStrength;
       du.shallow.value.copy(WATER_NIGHT.deep).lerp(WATER_DAY.deep, daylight).lerp(WATER_STORM.deep, stormBlend);
       du.deep.value.copy(WATER_NIGHT.openDeep).lerp(WATER_DAY.openDeep, daylight).lerp(WATER_STORM.openDeep, stormBlend);
+      du.shallow.value.lerp(WATER_CLEAR_MORNING.deep, clearMorningWaterCalm * 0.34);
+      du.deep.value.lerp(WATER_CLEAR_MORNING.openDeep, clearMorningWaterCalm * 0.46);
       if (scene.fog) du.fogColor.value.copy(wu.uHaze.value);
     }
 
@@ -1524,8 +1744,8 @@ export function Water({ quality = 'performance', reflections = true }) {
       const timeDelta = rs.timeOfDay == null ? Infinity : Math.abs(time - rs.timeOfDay);
       const lightingChanged = rs.timeOfDay == null
         || Math.min(timeDelta, 24 - timeDelta) > REFLECTION_TIME_DELTA;
-      const cadenceReady = reflectionFrame.current >= REFLECTION_MIN_INTERVAL;
-      const stale = rs.framesSinceUpdate >= REFLECTION_STATIC_INTERVAL;
+      const cadenceReady = reflectionFrame.current >= (qualityConfig.reflectionMinInterval || REFLECTION_MIN_INTERVAL);
+      const stale = rs.framesSinceUpdate >= (qualityConfig.reflectionStaticInterval || REFLECTION_STATIC_INTERVAL);
       if (!wu.uReflection.value || stale || (cadenceReady && (cameraMoved || cameraRotated || lightingChanged))) {
         reflectionFrame.current = 0;
         rs.framesSinceUpdate = 0;
@@ -1549,12 +1769,13 @@ export function Water({ quality = 'performance', reflections = true }) {
       surfMaterial.dispose();
       seafloor.dispose();
       standingWaterMask.dispose();
+      rippleNormal.dispose();
       deepMaterial.dispose();
       grabRef.current?.dispose();
       grabRef.current = null;
       reflectionRT.dispose();
     };
-  }, [waterGeometry, waterMaterial, surfMaterial, seafloor, standingWaterMask, deepMaterial, reflectionRT]);
+  }, [waterGeometry, waterMaterial, surfMaterial, seafloor, standingWaterMask, rippleNormal, deepMaterial, reflectionRT]);
 
   const regionType = getRegionMap(currentZoneId).type;
   if (['interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
@@ -1572,7 +1793,7 @@ export function Water({ quality = 'performance', reflections = true }) {
         renderKind: 'water',
         renderPath: null,
       }}>
-        <circleGeometry args={[160, 64]} />
+        <circleGeometry args={[160, 128]} />
       </mesh>
       <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} userData={{
         renderSource: `water:${currentZoneId}:surface`,

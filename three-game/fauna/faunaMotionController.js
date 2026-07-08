@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { isWalkableTerrain, terrainHeight } from '../world/terrain';
+import { getRuntimeObstacles, resolveObstacleCollision } from '../world/obstacles';
+import { getZoneProps } from '../physics/props/propRegistry';
+import { getZonePropCollisionProps } from '../physics/props/propRuntime';
 
 export function seedFromSpecimen(specimen) {
   const text = `${specimen.id}:${specimen.spawnPoint?.join(',')}:${specimen.behavior || 'still'}`;
@@ -34,11 +37,96 @@ function yawFromXZ(direction) {
   return Math.atan2(direction.x, direction.y);
 }
 
+function seededUnit(value) {
+  const x = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 function moveTowardOffset(current, target, maxDistance, out) {
   out.copy(target).sub(current);
   const distance = out.length();
   if (distance <= maxDistance || distance <= 0.0001) return out.copy(target);
   return out.multiplyScalar(maxDistance / distance).add(current);
+}
+
+function propHorizontalRadius(prop) {
+  const scale = prop?.scale || 1;
+  const collider = prop?.collider || {};
+  if (collider.shape === 'cuboid') {
+    const [hx = 0.42, , hz = 0.42] = collider.halfExtents || [];
+    return Math.hypot(hx * scale, hz * scale);
+  }
+  if (collider.shape === 'ball') return (collider.radius || 0.34) * scale;
+  if (collider.shape === 'cylinder') {
+    const [rx = 0, , rz = 0] = prop.rotation || [];
+    const sideways = Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
+    const radius = collider.radius || 0.4;
+    const halfHeight = collider.halfHeight || radius;
+    return (sideways ? Math.max(radius, halfHeight) : radius) * scale;
+  }
+  return ((collider.radius || 0.42) * scale);
+}
+
+function propColliderHeight(prop) {
+  const scale = prop?.scale || 1;
+  const collider = prop?.collider || {};
+  if (collider.shape === 'cuboid') return (collider.halfExtents?.[1] || 0.42) * 2 * scale;
+  if (collider.shape === 'ball') return (collider.radius || 0.34) * 2 * scale;
+  if (collider.shape === 'cylinder') {
+    const [rx = 0, , rz = 0] = prop.rotation || [];
+    const sideways = Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
+    return (sideways ? (collider.radius || 0.4) * 2 : (collider.halfHeight || 0.45) * 2) * scale;
+  }
+  return 0.85 * scale;
+}
+
+function resolvePropCollision(position, previousPosition, props, zoneId, actorRadius = 0.42) {
+  const p = position.clone();
+  let collided = null;
+  for (const prop of props || []) {
+    if (!prop?.collider || !Number.isFinite(prop.x) || !Number.isFinite(prop.z)) continue;
+    const propRadius = propHorizontalRadius(prop);
+    const combinedRadius = Math.max(0.05, propRadius + actorRadius);
+    const dx = p.x - prop.x;
+    const dz = p.z - prop.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq >= combinedRadius * combinedRadius) continue;
+
+    const propTop = terrainHeight(prop.x, prop.z, zoneId) + propColliderHeight(prop);
+    if (p.y > propTop + 0.35) continue;
+
+    const distance = Math.sqrt(distanceSq);
+    let normalX = 1;
+    let normalZ = 0;
+    if (distance > 0.0001) {
+      normalX = dx / distance;
+      normalZ = dz / distance;
+    } else if (previousPosition) {
+      const previousDx = previousPosition.x - prop.x;
+      const previousDz = previousPosition.z - prop.z;
+      const previousDistance = Math.hypot(previousDx, previousDz);
+      if (previousDistance > 0.0001) {
+        normalX = previousDx / previousDistance;
+        normalZ = previousDz / previousDistance;
+      }
+    }
+
+    const penetration = combinedRadius - distance;
+    p.x += normalX * penetration;
+    p.z += normalZ * penetration;
+    const previousDistance = previousPosition
+      ? Math.hypot(previousPosition.x - prop.x, previousPosition.z - prop.z)
+      : Infinity;
+    const currentDistance = Math.hypot(position.x - prop.x, position.z - prop.z);
+    collided = {
+      prop,
+      impact: Math.max(0, previousDistance - currentDistance),
+      normal: { x: normalX, y: 0, z: normalZ },
+      penetration,
+      position: p,
+    };
+  }
+  return collided ? { ...collided, position: p } : null;
 }
 
 export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition }) {
@@ -63,6 +151,10 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     shorebirdTarget: new THREE.Vector2(),
     shorebirdCandidate: new THREE.Vector2(),
     shorebirdDirection: new THREE.Vector2(),
+    deckMonkeyTarget: new THREE.Vector3(),
+    deckMonkeyDirection: new THREE.Vector3(),
+    deckMonkeyPrevious: new THREE.Vector3(),
+    deckMonkeyPlanar: new THREE.Vector2(),
   };
   const shorebird = {
     mode: 'ground',
@@ -73,6 +165,23 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     landingStart: new THREE.Vector3(),
     landingTargetOffset: new THREE.Vector2(),
     flightPhase: seed * Math.PI * 2,
+  };
+  const deckMonkey = {
+    targetIndex: 0,
+    waitUntil: 0,
+    escapeUntil: -Infinity,
+    lastEscapePickAt: -Infinity,
+    teasedUntil: -Infinity,
+    settledIndex: -1,
+    blockedUntil: -Infinity,
+    lastBlockedAt: -Infinity,
+    lastBlockedBy: null,
+    mode: 'deck',
+  };
+  const deckCollisionCache = {
+    zoneId: null,
+    obstacles: [],
+    props: [],
   };
   let clock = 0;
   const hammerThreat = {
@@ -128,6 +237,18 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     shorebird.landingStart.copy(state.position);
     shorebird.landingTargetOffset.set(0, 0);
     shorebird.flightPhase = seed * Math.PI * 2;
+    deckMonkey.targetIndex = profile?.strictSurfaceRoute
+      ? 0
+      : Math.floor(seed * Math.max(1, profile?.deckWaypoints?.length || 1));
+    deckMonkey.waitUntil = clock + 0.4 + seed * 0.9;
+    deckMonkey.escapeUntil = -Infinity;
+    deckMonkey.lastEscapePickAt = -Infinity;
+    deckMonkey.teasedUntil = -Infinity;
+    deckMonkey.settledIndex = -1;
+    deckMonkey.blockedUntil = -Infinity;
+    deckMonkey.lastBlockedAt = -Infinity;
+    deckMonkey.lastBlockedBy = null;
+    deckMonkey.mode = 'deck';
     hammerThreat.x = 0;
     hammerThreat.z = 0;
     hammerThreat.radius = 0;
@@ -192,6 +313,271 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       },
       out,
     );
+  }
+
+  function deckMonkeyPointPosition(point, base, currentZoneId, out = vectors.deckMonkeyTarget) {
+    if (!point) return out.copy(base);
+    const source = Array.isArray(point) ? { position: point } : point;
+    const position = source.position || null;
+    const offsetPosition = source.offset || null;
+    const x = Number.isFinite(source.x) ? source.x
+      : Array.isArray(position) && Number.isFinite(position[0]) ? position[0]
+        : Array.isArray(offsetPosition) && Number.isFinite(offsetPosition[0]) ? base.x + offsetPosition[0]
+          : base.x;
+    const z = Number.isFinite(source.z) ? source.z
+      : Array.isArray(position) && Number.isFinite(position[2]) ? position[2]
+        : Array.isArray(offsetPosition) && Number.isFinite(offsetPosition[2]) ? base.z + offsetPosition[2]
+          : base.z;
+    const groundY = terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.04);
+    const y = Number.isFinite(source.y) ? source.y
+      : Array.isArray(position) && Number.isFinite(position[1]) && position[1] !== 0 ? position[1]
+        : groundY + (source.yOffset || 0);
+    return out.set(x, y, z);
+  }
+
+  function deckMonkeyPointMode(point) {
+    return point?.mode || point?.type || ((point?.yOffset || 0) > 0.45 ? 'rigging' : 'deck');
+  }
+
+  function chooseDeckMonkeyEscapeTarget(player, currentZoneId, waypoints) {
+    const escapeModes = new Set(profile.escapeWaypointModes || ['rigging']);
+    let bestIndex = deckMonkey.targetIndex;
+    let bestScore = -Infinity;
+    waypoints.forEach((point, index) => {
+      if (!escapeModes.has(deckMonkeyPointMode(point))) return;
+      const target = deckMonkeyPointPosition(point, state.position, currentZoneId, vectors.deckMonkeyTarget);
+      const distance = Math.hypot(target.x - (player?.x ?? target.x), target.z - (player?.z ?? target.z));
+      const heightBonus = Math.max(0, target.y - terrainHeight(target.x, target.z, currentZoneId)) * 0.8;
+      const tieBreak = seededUnit(seed * 1103 + index * 19 + Math.floor(clock * 0.3)) * 0.15;
+      const score = distance + heightBonus + tieBreak;
+      if (score > bestScore) {
+        bestIndex = index;
+        bestScore = score;
+      }
+    });
+    return bestIndex;
+  }
+
+  function nearestDeckMonkeyNpc(position) {
+    const npcs = profile.deckNpcPositions || [];
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const npc of npcs) {
+      const distance = Math.hypot(position.x - npc.x, position.z - npc.z);
+      if (distance > (npc.radius || 2)) continue;
+      if (distance < nearestDistance) {
+        nearest = npc;
+        nearestDistance = distance;
+      }
+    }
+    return nearest ? { npc: nearest, distance: nearestDistance } : null;
+  }
+
+  function deckCollisionSources(currentZoneId) {
+    if (deckCollisionCache.zoneId !== currentZoneId) {
+      deckCollisionCache.zoneId = currentZoneId;
+      deckCollisionCache.obstacles = getRuntimeObstacles(currentZoneId);
+      deckCollisionCache.props = getZoneProps(currentZoneId);
+    }
+    return {
+      obstacles: deckCollisionCache.obstacles,
+      props: getZonePropCollisionProps(currentZoneId, deckCollisionCache.props),
+    };
+  }
+
+  function advanceDeckMonkeyTarget(t, waypoints) {
+    const jump = profile.strictSurfaceRoute
+      ? 1
+      : seededUnit(seed * 173 + deckMonkey.targetIndex * 37 + Math.floor(t * 0.23)) > 0.74 ? 2 : 1;
+    deckMonkey.targetIndex = (deckMonkey.targetIndex + jump) % waypoints.length;
+    deckMonkey.mode = deckMonkeyPointMode(waypoints[deckMonkey.targetIndex]);
+    deckMonkey.settledIndex = -1;
+  }
+
+  function deckMonkeyIdleAnimation(t, point, panic, npcInterest) {
+    if (panic > 0.28 && profile.alertClip) {
+      return animationRequest(profile.alertClip, 0.92, 0.12);
+    }
+    if (npcInterest && profile.teaseClip && t < deckMonkey.teasedUntil) {
+      return animationRequest(profile.teaseClip, 0.76, 0.16);
+    }
+    const variantRate = profile.idleVariantRate || 0.16;
+    if (profile.restClip && (deckMonkeyPointMode(point) === 'rigging' || Math.sin(t * variantRate + seed * 10.0) < -0.46)) {
+      return animationRequest(profile.restClip, 0.58, 0.24);
+    }
+    if (profile.feedClip && Math.sin(t * (variantRate * 1.45) + seed * 6.3) > 0.38) {
+      return animationRequest(profile.feedClip, 0.62, 0.22);
+    }
+    if (profile.teaseClip && Math.sin(t * (variantRate * 1.9) + seed * 13.0) > 0.72) {
+      return animationRequest(profile.teaseClip, 0.7, 0.22);
+    }
+    return animationRequest(profile.idleClip || profile.walkClip, 0.68, 0.22);
+  }
+
+  function updateDeckMonkey({
+    base,
+    currentZoneId,
+    player,
+    elapsedTime,
+    dt,
+    panic,
+    contactPanic,
+    hammerPanic,
+  }) {
+    const t = elapsedTime;
+    const waypoints = profile.deckWaypoints || [];
+    if (!waypoints.length) {
+      const groundY = terrainHeight(base.x, base.z, currentZoneId) + (profile.groundOffset || 0.04);
+      state.position.set(base.x, groundY, base.z);
+      state.yaw = 0;
+      state.pitch = 0;
+      state.roll = 0;
+      state.airborne = false;
+      state.animation = faunaIdleAnimation(t);
+      state.debug = {
+        x: state.position.x,
+        y: state.position.y,
+        z: state.position.z,
+        zoneId: currentZoneId,
+        updatedAt: t,
+        moving: false,
+        panic,
+        mode: 'deckMonkeyFallback',
+      };
+      return { ok: true, reason: 'updated', state };
+    }
+
+    const threatened = panic > 0.16 || contactPanic > 0.02 || hammerPanic > 0.02;
+    if (threatened && !profile.strictSurfaceRoute && t - deckMonkey.lastEscapePickAt > 0.45) {
+      deckMonkey.targetIndex = chooseDeckMonkeyEscapeTarget(player, currentZoneId, waypoints);
+      deckMonkey.escapeUntil = t + 2.6 + panic * 2.0;
+      deckMonkey.lastEscapePickAt = t;
+      deckMonkey.waitUntil = t + 0.1;
+      deckMonkey.settledIndex = -1;
+      deckMonkey.mode = deckMonkeyPointMode(waypoints[deckMonkey.targetIndex]);
+    }
+
+    let point = waypoints[deckMonkey.targetIndex % waypoints.length];
+    let target = deckMonkeyPointPosition(point, base, currentZoneId, vectors.deckMonkeyTarget);
+    let direction = vectors.deckMonkeyDirection.copy(target).sub(state.position);
+    let distance = direction.length();
+    const isRigging = deckMonkeyPointMode(point) === 'rigging';
+    const reach = point?.reach || (isRigging ? 0.2 : 0.13);
+
+    if (distance <= reach) {
+      state.position.copy(target);
+      const npcInterest = nearestDeckMonkeyNpc(state.position);
+      if (deckMonkey.settledIndex !== deckMonkey.targetIndex) {
+        deckMonkey.settledIndex = deckMonkey.targetIndex;
+        const wait = threatened ? 0.3 : (point?.wait ?? (isRigging ? 2.1 : 1.1));
+        deckMonkey.waitUntil = t + wait + (threatened ? 0 : seededUnit(seed * 281 + deckMonkey.targetIndex * 11 + Math.floor(t)) * 0.7);
+      }
+      if (!threatened && npcInterest && t > deckMonkey.teasedUntil && Math.hypot(state.position.x - player.x, state.position.z - player.z) > 2.1) {
+        deckMonkey.teasedUntil = t + 2.3;
+        deckMonkey.waitUntil = Math.max(deckMonkey.waitUntil, t + 1.3);
+      }
+      if (t > deckMonkey.waitUntil && (!threatened || t > deckMonkey.escapeUntil)) {
+        advanceDeckMonkeyTarget(t, waypoints);
+        point = waypoints[deckMonkey.targetIndex % waypoints.length];
+        target = deckMonkeyPointPosition(point, base, currentZoneId, vectors.deckMonkeyTarget);
+        direction = vectors.deckMonkeyDirection.copy(target).sub(state.position);
+        distance = direction.length();
+      }
+    }
+
+    const nextMode = deckMonkeyPointMode(point);
+    const targetHeight = Math.max(0, target.y - terrainHeight(target.x, target.z, currentZoneId));
+    const onRigging = nextMode === 'rigging' || targetHeight > 0.4;
+    const speed = threatened
+      ? (profile.fleeSpeed || 2.0) * (1 + panic * 0.35)
+      : onRigging ? (profile.climbSpeed || profile.walkSpeed || 1.0) : (profile.walkSpeed || 0.35);
+    const maxStep = Math.max(0.001, speed * dt);
+    let blockedBy = null;
+    let moving = distance > reach && t >= deckMonkey.blockedUntil;
+    if (moving) {
+      vectors.deckMonkeyPrevious.copy(state.position);
+      if (!onRigging) direction.y = 0;
+      direction.normalize();
+      state.position.addScaledVector(direction, Math.min(maxStep, distance));
+      if (!onRigging) {
+        const collisionSources = deckCollisionSources(currentZoneId);
+        const actorRadius = profile.obstacleRadius || profile.collisionRadius || 0.42;
+        const obstacleHit = resolveObstacleCollision(state.position, vectors.deckMonkeyPrevious, {
+          playerRadius: actorRadius,
+          stepTolerance: profile.obstacleStepTolerance || 0.16,
+          obstacles: collisionSources.obstacles,
+        });
+        if (obstacleHit) {
+          state.position.copy(obstacleHit.position);
+          blockedBy = obstacleHit.obstacle?.id || 'deck-obstacle';
+        }
+        const propHit = resolvePropCollision(
+          state.position,
+          vectors.deckMonkeyPrevious,
+          collisionSources.props,
+          currentZoneId,
+          actorRadius,
+        );
+        if (propHit) {
+          state.position.copy(propHit.position);
+          blockedBy = propHit.prop?.id || 'deck-prop';
+        }
+        if (blockedBy) {
+          deckMonkey.blockedUntil = Math.max(deckMonkey.blockedUntil, t + (profile.obstaclePause || 0.85));
+          deckMonkey.lastBlockedBy = blockedBy;
+          if (t - deckMonkey.lastBlockedAt > (profile.obstacleRetargetCooldown || 0.75)) {
+            deckMonkey.lastBlockedAt = t;
+            advanceDeckMonkeyTarget(t + seed * 0.37, waypoints);
+          }
+          moving = false;
+        }
+      }
+      const planar = vectors.deckMonkeyPlanar.set(direction.x, direction.z);
+      if (planar.lengthSq() > 0.000001) {
+        let targetYaw = yawFromXZ(planar);
+        if (Number.isFinite(profile.facingYawOffset)) targetYaw += profile.facingYawOffset;
+        state.yaw = THREE.MathUtils.damp(state.yaw, targetYaw, profile.turnRate || 12, dt);
+      }
+    }
+
+    const localGroundY = terrainHeight(state.position.x, state.position.z, currentZoneId) + (profile.groundOffset || 0.04);
+    if (!onRigging) {
+      state.position.y = localGroundY;
+      if (moving) {
+        state.position.y += Math.abs(Math.sin(t * 10.4 + seed * 4.0)) * (profile.bobAmount || 0.01);
+      }
+    }
+    state.pitch = THREE.MathUtils.damp(state.pitch, onRigging && moving ? -0.26 : 0, 8, dt);
+    state.roll = onRigging ? Math.sin(t * 4.8 + seed * 9.0) * 0.035 : 0;
+    state.airborne = state.position.y - localGroundY > 0.28;
+
+    const npcInterest = nearestDeckMonkeyNpc(state.position);
+    if (moving) {
+      if (onRigging) {
+        state.animation = animationRequest(profile.climbClip || profile.runClip || profile.walkClip, threatened ? 1.18 : 0.92, 0.12);
+      } else if (threatened && profile.runClip) {
+        state.animation = animationRequest(profile.runClip, 1.2, 0.1);
+      } else {
+        state.animation = animationRequest(profile.walkClip || profile.idleClip, 0.95, 0.14);
+      }
+    } else {
+      state.animation = deckMonkeyIdleAnimation(t, point, panic, npcInterest);
+    }
+
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving,
+      panic,
+      airborne: state.airborne,
+      mode: `deckMonkey:${nextMode}`,
+      npcInterest: npcInterest?.npc?.id || null,
+      blockedBy,
+    };
+    return { ok: true, reason: 'updated', state };
   }
 
   function findShorebirdLandingOffset(base, player, t, currentZoneId) {
@@ -514,6 +900,20 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
 
       if (profile.controller === 'shorebird') {
         return updateShorebird({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
+
+      if (profile.controller === 'deckMonkey') {
+        return updateDeckMonkey({
           base,
           currentZoneId,
           player,

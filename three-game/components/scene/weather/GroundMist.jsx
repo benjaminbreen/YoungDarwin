@@ -116,7 +116,13 @@ export function GroundMist() {
     u.uMist.value = weatherEnv.mistAmount;
     u.uCenter.value.copy(camera.position);
     u.uDrift.value.copy(drift.current);
-    if (scene.fog) u.uColor.value.copy(scene.fog.color).lerp(_white, 0.3);
+    if (scene.fog) {
+      // Wisps sit slightly above the ambient haze, scaled by how bright that
+      // haze actually is — dusk/overcast mist must not glow white.
+      const fog = scene.fog.color;
+      const lum = fog.r * 0.2126 + fog.g * 0.7152 + fog.b * 0.0722;
+      u.uColor.value.copy(fog).lerp(_white, 0.08 + 0.3 * Math.min(1, lum * 1.6));
+    }
   });
 
   return <mesh ref={meshRef} geometry={geometry} material={material} frustumCulled={false} renderOrder={3} />;

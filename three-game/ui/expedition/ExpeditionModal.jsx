@@ -3,7 +3,7 @@
 import React from 'react';
 
 // Full-screen modal chrome for the expedition UI: dimmed scrim, near-black
-// framed panel with an inner hairline border, and an ornate centered header
+// panel framed by a single gold border, and an ornate centered header
 // (rule — diamond — TITLE — diamond — rule, with an italic subtitle).
 // Wrap any large expedition modal (journal, map, inventory) in this so they
 // all read as one instrument.
@@ -37,21 +37,21 @@ export function ExpeditionModalHeader({ title, subtitle, onClose }) {
   );
 }
 
-export function ExpeditionModal({ title, subtitle, onClose, children, className = '' }) {
+export function ExpeditionModal({ title, subtitle, onClose, children, className = '', width = 'min(120rem, 98vw)' }) {
   return (
     <div
       className="expedition-modal-scrim pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-[#080705]/92 p-2 font-expedition text-[#ead3ae] backdrop-blur-sm sm:p-4"
       onClick={onClose}
     >
       <div
-        className={`expedition-modal-panel relative grid h-[min(67rem,96vh)] w-[min(120rem,98vw)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82),inset_0_0_0_1px_rgba(231,196,133,0.12)] ${className}`}
+        className={`expedition-modal-panel relative grid h-[min(67rem,96vh)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82)] ${className}`}
         style={{
+          width,
           backgroundImage:
             'radial-gradient(circle at 55% 10%, rgba(109,84,47,0.10), transparent 28%), linear-gradient(150deg, #0d0c0a, #050604 58%, #0b0907)',
         }}
         onClick={event => event.stopPropagation()}
       >
-        <div className="pointer-events-none absolute inset-[7px] border border-[#5a4327]/70" />
         <ExpeditionModalHeader title={title} subtitle={subtitle} onClose={onClose} />
         {children}
       </div>

@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { CAMERA, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
+import { shotgunAimState } from '../../shooting/aimState';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -41,15 +43,18 @@ export function usePlayerCameraRig() {
     finalEye: new THREE.Vector3(),
     startTarget: new THREE.Vector3(),
   });
-  // Aim mode: cursor drives Darwin's facing instead of the camera. While
-  // aimActiveRef is true, left-drag no longer rotates the camera (the cursor
-  // aims) and a left-click bumps firePulseRef so the controller can fire.
+  // Aim (ADS) mode: the mouse drives camera yaw AND pitch under pointer lock
+  // (touch drags do the same without lock), Darwin's facing chases the
+  // camera, the crosshair sits at screen center, and a left-click bumps
+  // firePulseRef so the controller can fire. While aimActiveRef is true the
+  // ordinary click-drag orbit is superseded.
   const pointerNdcRef = useRef(new THREE.Vector2(0, 0));
   const aimActiveRef = useRef(false);
+  const wasAimingRef = useRef(false);
+  const adsBlendRef = useRef(0);
+  const baseFovRef = useRef(null);
   const firePulseRef = useRef(0);
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const aimPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
-  const aimHit = useMemo(() => new THREE.Vector3(), []);
+  const dragPointerTypeRef = useRef('mouse');
   const aimDir = useMemo(() => new THREE.Vector3(), []);
   const scratch = useMemo(() => ({
     panRight: new THREE.Vector3(),
@@ -82,6 +87,11 @@ export function usePlayerCameraRig() {
     introLookTarget: new THREE.Vector3(),
     introForward: new THREE.Vector3(),
     introRight: new THREE.Vector3(),
+    adsDir: new THREE.Vector3(),
+    adsPivot: new THREE.Vector3(),
+    adsEye: new THREE.Vector3(),
+    adsLook: new THREE.Vector3(),
+    adsLookBlend: new THREE.Vector3(),
   }), []);
 
   const updatePointerNdc = useCallback(event => {
@@ -93,16 +103,21 @@ export function usePlayerCameraRig() {
     );
   }, [gl]);
 
-  // Raycast the cursor onto a horizontal plane at chest height and return the
-  // normalized horizontal direction from `origin` to that point (or null).
-  const getAimDirection = useCallback(origin => {
-    raycaster.setFromCamera(pointerNdcRef.current, camera);
-    aimPlane.constant = -(origin.y + 1.1);
-    if (!raycaster.ray.intersectPlane(aimPlane, aimHit)) return null;
-    aimDir.set(aimHit.x - origin.x, 0, aimHit.z - origin.z);
-    if (aimDir.lengthSq() < 1e-4) return null;
-    return aimDir.normalize();
-  }, [camera, raycaster, aimPlane, aimHit, aimDir]);
+  // Camera-relative aim solution: the fire direction comes from the camera's
+  // yaw + pitch (crosshair at screen center), so Darwin turns with the
+  // camera. Publishes the full 3D direction to shotgunAimState and returns
+  // the normalized horizontal facing for the body.
+  const getAimDirection = useCallback(() => {
+    const yaw = yawRef.current;
+    const ads = SHOTGUN.ads;
+    const pitch = THREE.MathUtils.clamp(pitchRef.current, ads.minPitch, ads.maxPitch);
+    const cosP = Math.cos(pitch);
+    shotgunAimState.dirX = -Math.sin(yaw) * cosP;
+    shotgunAimState.dirY = -Math.sin(pitch);
+    shotgunAimState.dirZ = -Math.cos(yaw) * cosP;
+    aimDir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    return aimDir;
+  }, [aimDir]);
 
   const cameraTargets = useMemo(() => ({
     shoulder: new THREE.Vector3(1.05, 2.35, 3.75),
@@ -112,20 +127,44 @@ export function usePlayerCameraRig() {
 
   useEffect(() => {
     const element = gl.domElement;
+    const ads = SHOTGUN.ads;
+    const aimLook = (dx, dy, speed) => {
+      yawRef.current -= dx * speed;
+      pitchRef.current = THREE.MathUtils.clamp(pitchRef.current + dy * speed, ads.minPitch, ads.maxPitch);
+    };
     const onPointerDown = event => {
       if (openingCameraActiveRef.current) {
         updatePointerNdc(event);
         return;
       }
-      // Aiming: a left-click fires the rifle instead of starting a camera drag.
+      // Right mouse held = momentary aim intent (shooter convention). The
+      // equipment state only honors it while the shotgun is equipped. Capture
+      // the pointer so the release is seen even if it happens off-canvas.
+      if (event.button === 2) {
+        shotgunAimState.holdIntent = true;
+        element.setPointerCapture?.(event.pointerId);
+        return;
+      }
       if (aimActiveRef.current && event.button === 0) {
         updatePointerNdc(event);
+        if (event.pointerType === 'touch') {
+          // Touch never fires from a screen tap (the Fire button does); a
+          // drag pans the aim instead.
+          draggingRef.current = true;
+          panningRef.current = false;
+          dragPointerTypeRef.current = 'touch';
+          lastPointerXRef.current = event.clientX;
+          lastPointerYRef.current = event.clientY;
+          element.setPointerCapture?.(event.pointerId);
+          return;
+        }
         firePulseRef.current += 1;
         return;
       }
       if (event.button !== 0 && event.button !== 1) return;
       draggingRef.current = true;
       panningRef.current = event.button === 1 || event.shiftKey;
+      dragPointerTypeRef.current = event.pointerType || 'mouse';
       lastPointerXRef.current = event.clientX;
       lastPointerYRef.current = event.clientY;
       element.setPointerCapture?.(event.pointerId);
@@ -133,11 +172,24 @@ export function usePlayerCameraRig() {
     const onPointerMove = event => {
       updatePointerNdc(event);
       if (openingCameraActiveRef.current) return;
+      // Pointer-locked mouse look while aiming: deltas rotate the camera and
+      // therefore the crosshair. No drag required — the click means "fire".
+      // Slide up = aim up (positive pitch looks down, so movementY feeds in
+      // directly).
+      if (aimActiveRef.current && document.pointerLockElement === element) {
+        aimLook(event.movementX || 0, event.movementY || 0, ads.lookSpeed);
+        return;
+      }
       if (!draggingRef.current) return;
       const dx = event.clientX - lastPointerXRef.current;
       const dy = event.clientY - lastPointerYRef.current;
       lastPointerXRef.current = event.clientX;
       lastPointerYRef.current = event.clientY;
+      if (aimActiveRef.current) {
+        // Unlocked aim drag (touch, or mouse if pointer lock was refused).
+        aimLook(dx, dy, dragPointerTypeRef.current === 'touch' ? ads.touchLookSpeed : ads.lookSpeed * 1.2);
+        return;
+      }
       if (panningRef.current || event.shiftKey) {
         const dist = THREE.MathUtils.clamp(zoomRef.current, 4, 14);
         const right = scratch.panRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
@@ -145,14 +197,14 @@ export function usePlayerCameraRig() {
           .add(right.multiplyScalar(-dx * CAMERA.panSpeed * dist))
           .add(scratch.panVertical.set(0, dy * CAMERA.panSpeed * dist, 0));
         if (panOffsetRef.current.length() > CAMERA.maxPan) panOffsetRef.current.setLength(CAMERA.maxPan);
-      } else if (!aimActiveRef.current) {
-        // While aiming the cursor controls Darwin's facing, not the camera.
+      } else {
         yawRef.current -= dx * CAMERA.rotateSpeed;
         pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * CAMERA.pitchSpeed, CAMERA.minPitch, CAMERA.maxPitch);
         manualOrbitUntilRef.current = performance.now() / 1000 + 3.2;
       }
     };
     const stopDrag = event => {
+      if (event?.button === 2) shotgunAimState.holdIntent = false;
       draggingRef.current = false;
       panningRef.current = false;
       if (event?.pointerId !== undefined) element.releasePointerCapture?.(event.pointerId);
@@ -163,6 +215,8 @@ export function usePlayerCameraRig() {
       const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
       zoomRef.current = THREE.MathUtils.clamp(zoomRef.current + normalizedDelta * 0.9, CAMERA.minZoom, CAMERA.maxZoom);
     };
+    // Right mouse is the aim button; the browser menu would swallow it.
+    const onContextMenu = event => event.preventDefault();
     element.style.cursor = 'grab';
     element.style.touchAction = 'none';
     element.addEventListener('pointerdown', onPointerDown);
@@ -170,14 +224,17 @@ export function usePlayerCameraRig() {
     element.addEventListener('pointerup', stopDrag);
     element.addEventListener('pointercancel', stopDrag);
     element.addEventListener('wheel', onWheel, { passive: false });
+    element.addEventListener('contextmenu', onContextMenu);
     return () => {
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('pointermove', onPointerMove);
       element.removeEventListener('pointerup', stopDrag);
       element.removeEventListener('pointercancel', stopDrag);
       element.removeEventListener('wheel', onWheel);
+      element.removeEventListener('contextmenu', onContextMenu);
       element.style.cursor = '';
       element.style.touchAction = '';
+      shotgunAimState.holdIntent = false;
     };
   }, [gl, scratch, updatePointerNdc]);
 
@@ -224,6 +281,29 @@ export function usePlayerCameraRig() {
       openingCameraRuntimeRef.current.sequenceId = null;
       openingCameraRuntimeRef.current.startedAt = 0;
       openingCameraRuntimeRef.current.initialized = false;
+    }
+    // Aim-mode transitions own the pointer: entering ADS captures the mouse
+    // (called within the activation window of the key/click that started the
+    // aim, so the browser allows it; touch refuses quietly), leaving releases
+    // it. Esc drops the lock without leaving aim — drag-aim still works.
+    const aiming = aimActiveRef.current;
+    if (aiming !== wasAimingRef.current && typeof document !== 'undefined') {
+      wasAimingRef.current = aiming;
+      if (aiming) {
+        try {
+          const lockRequest = gl.domElement.requestPointerLock?.();
+          lockRequest?.catch?.(() => {});
+        } catch { /* pointer lock unavailable (touch/iframe) — drag-aim instead */ }
+      } else if (document.pointerLockElement === gl.domElement) {
+        document.exitPointerLock?.();
+      }
+    }
+    // Ease the orbit pitch back into its normal band after aiming skyward.
+    if (!aiming) {
+      const settled = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
+      if (settled !== pitchRef.current) {
+        pitchRef.current = THREE.MathUtils.damp(pitchRef.current, settled, 7, delta);
+      }
     }
     const swimTarget = swimming ? 1 : THREE.MathUtils.smoothstep(wadeDepth, 0.45, 1.15) * 0.18;
     swimCameraRef.current = THREE.MathUtils.damp(
@@ -290,6 +370,12 @@ export function usePlayerCameraRig() {
     const rigStoreState = useThreeGameStore.getState();
     const statusViewOpen = rigStoreState.statusViewOpen;
     const examineSession = rigStoreState.examineSession?.focus ? rigStoreState.examineSession : null;
+    adsBlendRef.current = THREE.MathUtils.damp(
+      adsBlendRef.current,
+      aiming && !flying && !statusViewOpen && !examineSession && viewMode !== 'top' ? 1 : 0,
+      9,
+      delta,
+    );
     if (openingCameraActive && !statusViewOpen && !examineSession) {
       const sequenceId = openingCamera.sequenceId || 'opening-camera';
       if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
@@ -521,7 +607,34 @@ export function usePlayerCameraRig() {
           lookTarget = dropLook.lerp(pivot, 1 - dropBlend);
         }
       }
-      camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-(flightCamera?.positionDamping ?? 6.5) * delta));
+      const adsBlend = adsBlendRef.current;
+      let positionDamping = flightCamera?.positionDamping ?? 6.5;
+      if (adsBlend > 0.001) {
+        // Over-the-shoulder aim framing: close, offset to the right, pitched
+        // with the aim. Deterministic from yaw/pitch, so a high damping keeps
+        // mouse-look crisp without jitter.
+        const ads = SHOTGUN.ads;
+        const yaw = yawRef.current;
+        const aimPitch = THREE.MathUtils.clamp(pitchRef.current, ads.minPitch, ads.maxPitch);
+        const cosP = Math.cos(aimPitch);
+        const dir3 = scratch.adsDir.set(-Math.sin(yaw) * cosP, -Math.sin(aimPitch), -Math.cos(yaw) * cosP);
+        const adsPivot = scratch.adsPivot.copy(playerPosition);
+        adsPivot.y += ads.shoulderUp;
+        adsPivot.x += Math.cos(yaw) * ads.shoulderSide;
+        adsPivot.z += -Math.sin(yaw) * ads.shoulderSide;
+        // The wheel/two-finger zoom still works while aiming: it scales the
+        // over-the-shoulder distance within a sane band.
+        const adsZoom = THREE.MathUtils.clamp(zoomRef.current / CAMERA.defaultZoom, 0.6, 2.6);
+        const adsEye = scratch.adsEye.copy(adsPivot).addScaledVector(dir3, -ads.shoulderBack * adsZoom);
+        // Keep the aim camera out of the ground when pitching up steeply.
+        const groundBelowEye = collisionAdapter.terrainHeight(adsEye.x, adsEye.z) + 0.32;
+        if (adsEye.y < groundBelowEye) adsEye.y = groundBelowEye;
+        eye.lerp(adsEye, adsBlend);
+        const adsLook = scratch.adsLook.copy(adsPivot).addScaledVector(dir3, 16);
+        lookTarget = scratch.adsLookBlend.copy(lookTarget).lerp(adsLook, adsBlend);
+        positionDamping = THREE.MathUtils.lerp(positionDamping, 20, adsBlend);
+      }
+      camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-positionDamping * delta));
       camera.lookAt(lookTarget);
     }
     if (!statusViewOpen && !examineSession && statusLookRef.current) {
@@ -530,7 +643,23 @@ export function usePlayerCameraRig() {
       camera.lookAt(statusLookRef.current);
       if (statusLookRef.current.distanceToSquared(statusPivot) < 0.02) statusLookRef.current = null;
     }
-  }, [camera, cameraTargets, scratch]);
+    // ADS field-of-view tighten, plus the crosshair ray for the resolver.
+    if (baseFovRef.current === null) baseFovRef.current = camera.fov;
+    const targetFov = THREE.MathUtils.lerp(baseFovRef.current, SHOTGUN.ads.fov, adsBlendRef.current);
+    if (Math.abs(camera.fov - targetFov) > 0.02) {
+      camera.fov = targetFov;
+      camera.updateProjectionMatrix();
+    }
+    if (aiming) {
+      camera.getWorldDirection(scratch.worldDirection);
+      shotgunAimState.camX = camera.position.x;
+      shotgunAimState.camY = camera.position.y;
+      shotgunAimState.camZ = camera.position.z;
+      shotgunAimState.camDirX = scratch.worldDirection.x;
+      shotgunAimState.camDirY = scratch.worldDirection.y;
+      shotgunAimState.camDirZ = scratch.worldDirection.z;
+    }
+  }, [camera, cameraTargets, gl, scratch]);
 
   return {
     yawRef,

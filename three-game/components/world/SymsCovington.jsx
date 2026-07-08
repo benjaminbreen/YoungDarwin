@@ -8,6 +8,7 @@ import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { useThreeGameStore } from '../../store';
 import { onPropEvent } from '../../physics/props/propEvents';
+import { publishNpcPose, removeNpcPose } from '../../world/npcRuntime';
 import { SNARE_ARM_SECONDS, SNARE_CHARACTER_TRIGGER_RADIUS } from '../../snareTraps';
 
 function ProceduralCrewFigure({ motion = 0 }) {
@@ -72,6 +73,48 @@ export function SymsCovington() {
       at: clockRef.current + (event.impactDelay ?? 0.55),
     });
   }), []);
+
+  // Struck by shotgun pellets (the resolver decided the ray reached him):
+  // bolt hard away from the muzzle. Narration/standing land via the store.
+  useEffect(() => onPropEvent('shotgun-npc-hit', event => {
+    if (event.npcId !== 'syms') return;
+    const reaction = reactionRef.current;
+    if (reaction.mode === 'snared') return;
+    const sx = x + reaction.offsetX;
+    const sz = z + reaction.offsetZ;
+    let awayX = sx - (event.origin?.x ?? sx);
+    let awayZ = sz - (event.origin?.z ?? sz);
+    const length = Math.hypot(awayX, awayZ) || 1;
+    awayX /= length;
+    awayZ /= length;
+    const safe = clampToWalkable({ x: sx + awayX * 8.5, y: 0, z: sz + awayZ * 8.5 }, null, currentZoneId);
+    reaction.mode = 'flee';
+    reaction.until = clockRef.current + 8.5;
+    reaction.targetX = safe.x - x;
+    reaction.targetZ = safe.z - z;
+  }), [currentZoneId, x, z]);
+
+  // Any nearby report makes him duck aside even when the shot misses.
+  useEffect(() => onPropEvent('shotgun-fired', event => {
+    const reaction = reactionRef.current;
+    if (reaction.mode === 'flee' || reaction.mode === 'snared') return;
+    const sx = x + reaction.offsetX;
+    const sz = z + reaction.offsetZ;
+    let awayX = sx - (event.position?.x || 0);
+    let awayZ = sz - (event.position?.z || 0);
+    const distance = Math.hypot(awayX, awayZ);
+    if (distance > 11) return;
+    const length = distance || 1;
+    awayX /= length;
+    awayZ /= length;
+    const safe = clampToWalkable({ x: sx + awayX * 2.2, y: 0, z: sz + awayZ * 2.2 }, null, currentZoneId);
+    reaction.mode = 'flinch';
+    reaction.until = clockRef.current + 2.4;
+    reaction.targetX = safe.x - x;
+    reaction.targetZ = safe.z - z;
+  }), [currentZoneId, x, z]);
+
+  useEffect(() => () => removeNpcPose(currentZoneId, 'syms'), [currentZoneId]);
 
   useFrame(({ clock }, delta) => {
     if (!visible || !group.current) return;
@@ -152,6 +195,9 @@ export function SymsCovington() {
     const worldX = x + reaction.offsetX;
     const worldZ = z + reaction.offsetZ;
     const groundY = terrainHeight(worldX, worldZ, currentZoneId) + 0.04;
+    // Line-of-fire systems (the shotgun resolver) test against where Syms
+    // actually stands, offsets and flees included.
+    publishNpcPose(currentZoneId, 'syms', { x: worldX, y: groundY, z: worldZ });
     if (reaction.mode !== 'snared') {
       const store = useThreeGameStore.getState();
       const trap = (store.snareTraps || []).find(item => (

@@ -9,6 +9,7 @@ import { getRegionDefinition } from '../../world/regions';
 import { WATER_LEVEL } from '../../world/water';
 import { specimenToInspectable } from '../../world/inspectables';
 import { removeSpecimenRuntimePose, setSpecimenRuntimePose } from '../../world/specimenRuntime';
+import { worldTime } from '../../world/worldTime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { getWildlifeAssetId } from '../../wildlife/wildlifeCatalog';
@@ -281,6 +282,7 @@ export function SpecimenShape({ specimen, animationSelector }) {
       fallback={<ProceduralSpecimenShape specimen={specimen} />}
       animationSelector={animationSelector}
       motion={foliageMotion}
+      timeScaled
     />
   );
 }
@@ -365,6 +367,10 @@ export function SpecimenActor({ specimen }) {
   // composed and any behavior the inquiry narrates has a steady subject.
   const isUnderExamination = useThreeGameStore(state => state.examineSession?.actorId === actorId);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  // Dropped by a clean shotgun hit: the animal falls where it was struck and
+  // lies as a carcass until Darwin gathers it.
+  const downedInfo = useThreeGameStore(state => state.downedSpecimenActors?.[actorId] || null);
+  const downedAnimRef = useRef(null);
   const carryProfile = useMemo(() => getFaunaCarryProfile(specimen), [specimen]);
   const behaviorProfile = useMemo(() => getFaunaBehaviorProfile(specimen), [specimen]);
   const carriedRef = useRef(false);
@@ -380,7 +386,7 @@ export function SpecimenActor({ specimen }) {
     specimen,
     basePositionRef: behaviorBaseRef,
     basePosition: position,
-    paused: isCarried || isUnderExamination || Boolean(snareTrap),
+    paused: isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo),
   });
 
   useEffect(() => {
@@ -445,7 +451,62 @@ export function SpecimenActor({ specimen }) {
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
     if (groundAffordanceRef.current) {
-      groundAffordanceRef.current.visible = !carriedHere && !snareTrap && faunaBehavior.airborneRef?.current !== true;
+      groundAffordanceRef.current.visible = !carriedHere && !snareTrap
+        && (Boolean(downedInfo) || faunaBehavior.airborneRef?.current !== true);
+    }
+
+    if (downedInfo) {
+      // Fall from wherever it was hit (out of the sky for a flying bird),
+      // tumbling on the way down, then lie on its side awaiting pickup. Runs
+      // on the world clock so bullet time shows the slow tumble.
+      let anim = downedAnimRef.current;
+      if (!anim || anim.actorId !== actorId) {
+        anim = downedAnimRef.current = {
+          actorId,
+          x: downedInfo.x,
+          z: downedInfo.z,
+          y: Math.max(downedInfo.y, terrainHeight(downedInfo.x, downedInfo.z, currentZoneId)) + 0.05,
+          vy: 1.1,
+          rotZ: 0,
+          settled: false,
+          bounced: false,
+          spinDir: actorId.length % 2 === 0 ? 1 : -1,
+        };
+      }
+      const dt = Math.min(0.08, worldTime.delta || 0.016);
+      const downedGroundY = terrainHeight(anim.x, anim.z, currentZoneId) + 0.045;
+      if (!anim.settled) {
+        anim.vy -= 13.5 * dt;
+        anim.y += anim.vy * dt;
+        anim.rotZ += 3.6 * dt * anim.spinDir;
+        if (anim.y <= downedGroundY) {
+          if (anim.vy < -4.2 && !anim.bounced) {
+            anim.bounced = true;
+            anim.vy = -anim.vy * 0.22;
+            anim.y = downedGroundY + 0.01;
+          } else {
+            anim.y = downedGroundY;
+            anim.settled = true;
+          }
+        }
+      } else {
+        // Ease into the lying pose.
+        const target = anim.spinDir * 1.42;
+        anim.rotZ += (target - anim.rotZ) * Math.min(1, dt * 9);
+      }
+      group.current.position.set(anim.x, anim.y, anim.z);
+      group.current.rotation.set(0, group.current.rotation.y, anim.rotZ);
+      publishActorRuntimePosition({
+        publisher: setSpecimenRuntimePosition,
+        ref: runtimePublishRef,
+        actorId,
+        zoneId: currentZoneId,
+        position: group.current.position,
+        now: clock.elapsedTime,
+        force: true,
+        debug: { motionStatus: 'downed' },
+      });
+      return;
     }
 
     if (snareTrap) {

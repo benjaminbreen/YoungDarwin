@@ -1,12 +1,14 @@
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
 import { setTouchControl, triggerToolUse } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { SHOTGUN } from '../shooting/shotgunConfig';
+import { shotgunAimState } from '../shooting/aimState';
 import { getZone } from '../world/floreanaZones';
 import { ExamineView } from './ExamineView';
 import { StatusView } from './StatusView';
@@ -53,6 +55,12 @@ const MINIMAP_RUNTIME_HEADING_EPSILON = 1.2;
 const SIDEBAR_DEFAULT_SIZE = { width: 240, mapHeight: 196 };
 const SIDEBAR_MIN_SIZE = { width: 214, mapHeight: 164 };
 const SIDEBAR_MAX_SIZE = { width: 386, mapHeight: 330 };
+const BEAGLE_RETURN_TRAVEL = Object.freeze({
+  minutes: 30,
+  fatigue: 3,
+  note: "A ship's boat puts off from the beach and carries you back across the anchorage to HMS Beagle.",
+  educationalNote: "Darwin's shore work depended on small boats shuttling specimens, tools, and people between anchorages and landing places.",
+});
 
 const ROUTE_ENTRY_EDGES = {
   north: 'south',
@@ -342,6 +350,100 @@ function InspectableTooltip() {
       <div className="relative mt-1.5 text-[10.5px] leading-snug text-expedition-faded">
         Field label added to the daybook.
       </div>
+    </div>
+  );
+}
+
+function BeagleTravelPrompt() {
+  const prompt = useThreeGameStore(state => state.beagleTravelPrompt);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const closeBeagleTravelPrompt = useThreeGameStore(state => state.closeBeagleTravelPrompt);
+
+  const handleReturn = useCallback(() => {
+    beginZoneTransition('BEAGLE', {
+      minutes: BEAGLE_RETURN_TRAVEL.minutes,
+      fatigue: BEAGLE_RETURN_TRAVEL.fatigue,
+      note: BEAGLE_RETURN_TRAVEL.note,
+      educationalNote: BEAGLE_RETURN_TRAVEL.educationalNote,
+      travelCard: {
+        fromZoneId: 'POST_OFFICE_BAY',
+        toZoneId: 'BEAGLE',
+        title: 'Return by ship boat',
+        terrainType: 'open water',
+        estimatedMinutes: BEAGLE_RETURN_TRAVEL.minutes,
+        fatigueDelta: BEAGLE_RETURN_TRAVEL.fatigue,
+        routeLabel: 'Boat',
+        description: BEAGLE_RETURN_TRAVEL.note,
+        educationalNote: BEAGLE_RETURN_TRAVEL.educationalNote,
+      },
+    });
+  }, [beginZoneTransition]);
+
+  useEffect(() => {
+    if (!prompt) return undefined;
+    const onKeyDown = event => {
+      if (event.key === 'Escape') closeBeagleTravelPrompt();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeBeagleTravelPrompt, prompt]);
+
+  useEffect(() => {
+    if (prompt && currentZoneId !== 'POST_OFFICE_BAY') closeBeagleTravelPrompt();
+  }, [closeBeagleTravelPrompt, currentZoneId, prompt]);
+
+  if (!prompt || currentZoneId !== 'POST_OFFICE_BAY') return null;
+
+  return (
+    <div className="pointer-events-auto absolute left-1/2 top-20 z-30 w-[min(23rem,calc(100vw-1.5rem))] -translate-x-1/2 animate-hud-rise motion-reduce:animate-none md:top-[16%]">
+      <ExpeditionPanel variant="modal" className="w-full" innerClassName="p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-expedition-gold/55 bg-expedition-gold/10 text-expedition-goldbright">
+            <CompassRoseIcon className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className={GOLD_LABEL}>Ship's Boat</div>
+            <h2 className="mt-1 text-[21px] font-bold leading-tight text-expedition-parchment">HMS Beagle</h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss Beagle travel prompt"
+            onClick={closeBeagleTravelPrompt}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-expedition-brass/55 bg-black/18 text-[16px] font-bold text-expedition-gold transition hover:border-expedition-gold hover:bg-expedition-gold/12 focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+          >
+            x
+          </button>
+        </div>
+
+        <p className="mt-3 text-[13px] leading-relaxed text-expedition-parchment/86">
+          Signal the boat and return aboard to sort notes and specimens.
+        </p>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 border-y border-expedition-brass/35 py-2.5 text-[11px] uppercase tracking-[0.12em] text-expedition-faded">
+          <div className="flex items-center gap-1.5">
+            <CompassRoseIcon className="h-4 w-4 text-expedition-gold" />
+            <span>{BEAGLE_RETURN_TRAVEL.minutes} min</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <FatigueIcon className="h-4 w-4 text-expedition-gold" />
+            <span>+{BEAGLE_RETURN_TRAVEL.fatigue} fatigue</span>
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={handleReturn} className={`${GOLD_BUTTON} inline-flex flex-1 items-center justify-center`}>
+            Return to Beagle
+          </button>
+          <button
+            type="button"
+            onClick={closeBeagleTravelPrompt}
+            className="rounded-sm border border-expedition-brass/55 bg-black/18 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-expedition-faded transition hover:border-expedition-gold/70 hover:bg-expedition-gold/10 hover:text-expedition-parchment focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+          >
+            Stay ashore
+          </button>
+        </div>
+      </ExpeditionPanel>
     </div>
   );
 }
@@ -1637,6 +1739,133 @@ function SpecimensTab({ condensed = false }) {
       {specimens.length === 0 && (
         <p className="px-2 py-3 text-center font-expedition text-xs italic text-expedition-faded">No recorded specimens in this survey area.</p>
       )}
+    </div>
+  );
+}
+
+// Ammo chip for the collecting shotgun: two barrel pips and a reload sweep,
+// shown above the tool belt whenever the shotgun is in hand.
+function ShotgunStatusChip() {
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const shells = useThreeGameStore(state => state.shotgunShells);
+  const reloadUntil = useThreeGameStore(state => state.shotgunReloadUntil);
+  const [, forceTick] = useReducer(count => count + 1, 0);
+  const barRef = useRef(null);
+  const nowSeconds = (globalThis.performance?.now?.() ?? Date.now()) / 1000;
+  const reloading = reloadUntil > nowSeconds;
+
+  useEffect(() => {
+    if (!reloading) return undefined;
+    const remaining = Math.max(0.05, reloadUntil - (performance.now() / 1000));
+    const bar = barRef.current;
+    if (bar) {
+      bar.style.transition = 'none';
+      bar.style.width = `${Math.max(0, 100 - (remaining / SHOTGUN.reloadDuration) * 100)}%`;
+      requestAnimationFrame(() => {
+        bar.style.transition = `width ${remaining}s linear`;
+        bar.style.width = '100%';
+      });
+    }
+    const timer = setTimeout(forceTick, remaining * 1000 + 80);
+    return () => clearTimeout(timer);
+  }, [reloadUntil, reloading]);
+
+  if (activeToolId !== 'shotgun') return null;
+  // A finished reload commits lazily in the ammo helper; show it full here.
+  const displayShells = reloading ? 0 : (reloadUntil > 0 && (shells ?? 0) <= 0 ? SHOTGUN.barrels : (shells ?? SHOTGUN.barrels));
+
+  return (
+    <div className="pointer-events-none inline-flex items-center gap-2.5 rounded-full border border-expedition-gold/60 bg-[rgba(12,20,38,0.68)] px-3.5 py-1.5 font-expedition text-expedition-parchment shadow-lg backdrop-blur-md">
+      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-expedition-gold/90">Shotgun</span>
+      <span className="flex items-center gap-1.5" aria-label={`${displayShells} of ${SHOTGUN.barrels} barrels loaded`}>
+        {Array.from({ length: SHOTGUN.barrels }, (_, index) => (
+          <span
+            key={index}
+            className={`h-2 w-2 rounded-full border ${
+              index < displayShells
+                ? 'border-expedition-goldbright bg-expedition-goldbright shadow-[0_0_5px_rgba(227,197,133,0.55)]'
+                : 'border-expedition-brass/60 bg-transparent'
+            }`}
+          />
+        ))}
+      </span>
+      {reloading ? (
+        <span className="flex items-center gap-1.5">
+          <span className="relative h-1 w-14 overflow-hidden rounded-full bg-black/45">
+            <span ref={barRef} className="absolute inset-y-0 left-0 rounded-full bg-expedition-gold/85" style={{ width: '0%' }} />
+          </span>
+          <span className="text-[10.5px] italic text-expedition-faded">Reloading</span>
+        </span>
+      ) : (
+        <span className="text-[10.5px] text-expedition-faded">Hold RMB / F to aim · click fires</span>
+      )}
+    </div>
+  );
+}
+
+// Screen-center crosshair while Darwin shoulders the shotgun. Runs on rAF and
+// writes styles directly — the aim state mutates at 60hz and must never tick
+// React. Warms to bright gold and tightens when a specimen is in the cone;
+// dims while reloading; names the target under the cross.
+function AimCrosshair() {
+  const rootRef = useRef(null);
+  const labelRef = useRef(null);
+
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const root = rootRef.current;
+      if (!root) return;
+      const active = shotgunAimState.active;
+      root.style.opacity = active ? '1' : '0';
+      if (!active) return;
+      const now = (globalThis.performance?.now?.() ?? Date.now()) / 1000;
+      const reloading = shotgunAimState.reloadingUntil > now;
+      const hot = shotgunAimState.onTarget && !reloading;
+      root.style.setProperty('--cross-color', reloading
+        ? 'rgba(232,220,184,0.28)'
+        : hot ? '#ffd36a' : 'rgba(232,220,184,0.85)');
+      root.style.setProperty('--cross-gap', hot ? '7px' : '10px');
+      root.style.setProperty('--cross-glow', hot ? '0 0 6px rgba(255,211,106,0.8)' : 'none');
+      const label = labelRef.current;
+      if (label) {
+        const text = hot && shotgunAimState.targetLabel ? shotgunAimState.targetLabel : (reloading ? 'Reloading…' : '');
+        if (label.textContent !== text) label.textContent = text;
+        label.style.color = reloading ? 'rgba(232,220,184,0.55)' : '#ffd36a';
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const tickStyle = {
+    background: 'var(--cross-color, rgba(232,220,184,0.85))',
+    boxShadow: 'var(--cross-glow, none)',
+    transition: 'transform 120ms ease-out',
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      aria-hidden="true"
+      className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-200"
+    >
+      <div className="relative h-14 w-14">
+        <span className="absolute left-1/2 top-1/2 h-[9px] w-[1.5px] -translate-x-1/2" style={{ ...tickStyle, transform: 'translate(-50%, calc(-50% - var(--cross-gap, 10px) - 4px))' }} />
+        <span className="absolute left-1/2 top-1/2 h-[9px] w-[1.5px] -translate-x-1/2" style={{ ...tickStyle, transform: 'translate(-50%, calc(-50% + var(--cross-gap, 10px) - 4px))' }} />
+        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-[9px] -translate-y-1/2" style={{ ...tickStyle, transform: 'translate(calc(-50% - var(--cross-gap, 10px) - 4px), -50%)' }} />
+        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-[9px] -translate-y-1/2" style={{ ...tickStyle, transform: 'translate(calc(-50% + var(--cross-gap, 10px) - 4px), -50%)' }} />
+        <span
+          className="absolute left-1/2 top-1/2 h-[3px] w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ background: 'var(--cross-color, rgba(232,220,184,0.85))', boxShadow: 'var(--cross-glow, none)' }}
+        />
+      </div>
+      <div
+        ref={labelRef}
+        className="mt-1.5 text-center font-expedition text-[11px] font-semibold uppercase tracking-[0.14em]"
+        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
+      />
     </div>
   );
 }
@@ -2955,6 +3184,63 @@ function MobileActionCluster() {
     triggerToolUse(activeToolId);
   };
 
+  // Shotgun cluster: Aim toggles ADS (drag on the screen pans the camera
+  // while aiming), Fire pulls the trigger, Collect gathers a downed specimen.
+  if (activeToolId === 'shotgun') {
+    return (
+      <div
+        className="pointer-events-none absolute z-20 h-[12.4rem] w-[13.4rem] md:hidden"
+        style={{
+          right: 'max(0.95rem, env(safe-area-inset-right))',
+          bottom: 'calc(env(safe-area-inset-bottom) + 6.2rem)',
+        }}
+      >
+        <MobileActionButton
+          label="Aim"
+          size="small"
+          onPress={() => pulseTouchControl('rifle')}
+          className="left-0 top-0"
+          icon={(
+            <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="6.2" />
+              <path d="M12 2.6 V6 M12 18 V21.4 M2.6 12 H6 M18 12 H21.4" />
+              <circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+          )}
+        />
+        <MobileActionButton
+          label="Jump"
+          size="small"
+          holdControl="jump"
+          className="right-0 top-0"
+          icon={(
+            <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 4.3 C14.6 4.3 15.8 5.5 15.8 7.1 C15.8 8.7 14.6 9.9 13 9.9 C11.4 9.9 10.2 8.7 10.2 7.1 C10.2 5.5 11.4 4.3 13 4.3 Z" />
+              <path d="M12.2 10.2 L9.5 14.4 L6.5 13.2 M12.1 10.3 L15.4 13.6 L18.8 12.3 M10.2 14.3 L10.4 19.8 M14.4 14.2 L16.8 20" />
+            </svg>
+          )}
+        />
+        <MobileActionButton
+          label="Collect"
+          size="small"
+          onPress={() => { if (nearby) collectNearby(); }}
+          className="bottom-0 left-0"
+          icon={<ButterflyIcon className="h-full w-full" />}
+        />
+        <MobileActionButton
+          label="Fire"
+          onPress={() => pulseTouchControl('fireRifle')}
+          className="bottom-2 right-0"
+          icon={(
+            <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3.2 L13.4 8.2 L18.8 5.2 L15.8 10.6 L20.8 12 L15.8 13.4 L18.8 18.8 L13.4 15.8 L12 20.8 L10.6 15.8 L5.2 18.8 L8.2 13.4 L3.2 12 L8.2 10.6 L5.2 5.2 L10.6 8.2 Z" />
+            </svg>
+          )}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="pointer-events-none absolute z-20 h-[10.2rem] w-[10.4rem] md:hidden"
@@ -3116,9 +3402,10 @@ export function ThreeHUD() {
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  const beagleTravelPromptOpen = useThreeGameStore(state => Boolean(state.beagleTravelPrompt));
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || beagleTravelPromptOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -3206,10 +3493,13 @@ export function ThreeHUD() {
       <CameraModeToast />
       <MovementHint />
       <InspectableTooltip />
+      <BeagleTravelPrompt />
 
       <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">
         <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />
       </div>
+
+      <AimCrosshair />
 
       <MobileNarrativeDrawer
         open={mobileNarrativeOpen}
@@ -3221,7 +3511,8 @@ export function ThreeHUD() {
         <NarrativePanel />
       </div>
 
-      <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise justify-center [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3">
+      <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise flex-col items-center gap-1.5 [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3">
+        <ShotgunStatusChip />
         <ToolBelt onOpenJournal={openJournalPanel} />
       </div>
 

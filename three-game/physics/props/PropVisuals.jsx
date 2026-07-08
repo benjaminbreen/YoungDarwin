@@ -4,6 +4,7 @@ import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { StaticGLB } from '../../components/assets/StaticGLB';
 import { getModelAsset } from '../../modelAssets';
+import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,6 +87,78 @@ function StoneVisual() {
   );
 }
 
+function ToothVisual() {
+  const ivory = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#e7dcc2', roughness: 0.55, metalness: 0.02 }));
+  const scrimshaw = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#4a3f33', roughness: 0.7, metalness: 0 }));
+  const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.045, 0.1, 0.26, 10));
+  const tipGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.045, 10, 8));
+  const baseGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.1, 10, 8));
+  const etchGeometry = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.085, 0.006, 6, 14));
+  return (
+    <group rotation={[0, 0, 1.25]}>
+      <mesh castShadow receiveShadow material={ivory} geometry={bodyGeometry} />
+      <mesh castShadow receiveShadow position={[0, 0.13, 0]} material={ivory} geometry={tipGeometry} />
+      <mesh castShadow receiveShadow position={[0, -0.13, 0]} material={ivory} geometry={baseGeometry} scale={[1, 0.7, 1]} />
+      {/* the whaler's etched banding */}
+      <mesh material={scrimshaw} geometry={etchGeometry} position={[0, -0.06, 0]} rotation={[Math.PI / 2, 0, 0]} />
+    </group>
+  );
+}
+
+function BookVisual() {
+  const leather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#4c3623', roughness: 0.85, metalness: 0.01 }));
+  const pages = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#c9bd9c', roughness: 0.95, metalness: 0 }));
+  const coverGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.32, 0.09, 0.24));
+  const pageGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.295, 0.06, 0.215));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={leather} geometry={coverGeometry} />
+      <mesh castShadow receiveShadow position={[0.012, 0, 0]} material={pages} geometry={pageGeometry} />
+    </group>
+  );
+}
+
+function ShellFragmentVisual() {
+  const charred = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    color: '#241f1a',
+    roughness: 0.92,
+    metalness: 0.02,
+    flatShading: true,
+    side: THREE.DoubleSide,
+  }));
+  const geometry = useSingleMaterialGeometry(
+    () => new THREE.SphereGeometry(0.24, 10, 7, 0, Math.PI * 1.3, 0, Math.PI * 0.52),
+  );
+  return (
+    <mesh castShadow receiveShadow material={charred} geometry={geometry} rotation={[Math.PI, 0.4, 0.15]} position={[0, 0.02, 0]} scale={[1, 0.72, 1]} />
+  );
+}
+
+function JugVisual() {
+  const clay = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#8a6a4b', roughness: 0.78, metalness: 0.01 }));
+  const glaze = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5b4530', roughness: 0.5, metalness: 0.04 }));
+  const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.13, 0.17, 0.36, 12));
+  const shoulderGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.135, 12, 8));
+  const neckGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.05, 0.07, 0.1, 10));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={clay} geometry={bodyGeometry} position={[0, -0.04, 0]} />
+      <mesh castShadow receiveShadow material={glaze} geometry={shoulderGeometry} position={[0, 0.15, 0]} scale={[1.02, 0.6, 1.02]} />
+      <mesh castShadow receiveShadow material={glaze} geometry={neckGeometry} position={[0, 0.23, 0]} />
+    </group>
+  );
+}
+
+function LooseBoardVisual() {
+  const wood = useDisposableMaterial(() => createTimberMaterial({
+    tint: '#9b9080',
+    repeat: [0.7, 0.24],
+    normalScale: 0.85,
+  }));
+  const geometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(1.7, 0.07, 0.32));
+  return <mesh castShadow receiveShadow material={wood} geometry={geometry} />;
+}
+
 export function PropVisual({ visual, assetId, offsetY = 0 }) {
   const asset = assetId ? getModelAsset(assetId) : null;
   if (asset?.enabled !== false && asset?.path) {
@@ -105,6 +178,11 @@ export function PropVisual({ visual, assetId, offsetY = 0 }) {
   }
   if (visual === 'crate') return <CrateVisual />;
   if (visual === 'stone') return <StoneVisual />;
+  if (visual === 'tooth') return <ToothVisual />;
+  if (visual === 'book') return <BookVisual />;
+  if (visual === 'shellFragment') return <ShellFragmentVisual />;
+  if (visual === 'jug') return <JugVisual />;
+  if (visual === 'looseBoard') return <LooseBoardVisual />;
   return <BarrelVisual />;
 }
 
