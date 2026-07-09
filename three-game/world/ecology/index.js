@@ -2,6 +2,8 @@ import { buildNorthShoreEcology } from './northShore';
 import { buildDesolateOutcropEcology } from './desolateOutcrop';
 import { buildDevilsCrownEcology } from './devilsCrown';
 import { buildNorthwestReefEcology } from './northwestReef';
+import { buildBlackBeachEcology } from './blackBeach';
+import { buildBlackBeachSurfEcology } from './blackBeachSurf';
 import { buildBeachWithHutEcology } from './beachWithHut';
 import { buildSouthernReefsEcology } from './southernReefs';
 import { buildWesternHighlandsEcology } from './westernHighlands';
@@ -29,6 +31,8 @@ const builders = {
   N_OUTCROP: buildDesolateOutcropEcology,
   DEVILS_CROWN: buildDevilsCrownEcology,
   NW_REEF: buildNorthwestReefEcology,
+  BLACK_BEACH: buildBlackBeachEcology,
+  BLACK_BEACH_SURF: buildBlackBeachSurfEcology,
   S_HUT: buildBeachWithHutEcology,
   S_REEFS: buildSouthernReefsEcology,
   W_HIGH: buildWesternHighlandsEcology,

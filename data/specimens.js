@@ -1318,6 +1318,36 @@ export const baseSpecimens = [
   keywords: ['goat', 'mammal', 'feral', 'invasive', 'capra', 'highlands']
 },
 
+// 7) Feral Horse
+{
+  id: 'feralhorse',
+  name: 'Feral Horse',
+  latin: 'Equus ferus caballus',
+  ontology: 'Animal',
+  order: 'Mammal',
+  sub_order: 'Ungulate',
+  description: 'A wary horse living around the settlement edge, browsing coarse grasses and keeping its distance from people.',
+  details: [
+    'Tall and nervous, with a saddle-worn silhouette from its domestic past',
+    'Browses grasses and low plants near cultivated ground',
+    'Bolts into open space if approached too quickly',
+    'May rear or kick if cornered'
+  ],
+  habitat: 'settlement',
+  collected: false,
+  observations: [],
+  scientificValue: 2,
+  hybrid_ease: 2,
+  hybrid_temperature: 3,
+  danger: 4,
+  timeofday: 'Diurnal',
+  quote: '',
+  image: '/specimens/feralhorse.jpg',
+  memoryText: '“The settlement animals are no less out of place than the men who brought them, shaping the island by tooth and hoof.”',
+  contents: 'The stomach would hold coarse grass, leaves, and settlement weeds cropped close to the ground.',
+  keywords: ['horse', 'mammal', 'feral', 'introduced', 'equus', 'settlement']
+},
+
 {
   id: 'cat',
   name: 'Settlement Cat',

@@ -8,93 +8,17 @@ import {
   watkinsRiverInfo,
 } from './regions/watkinsCamp/terrain';
 
-// Watkins Camp site furniture: the ruined dry-stone wall around the homestead
-// yard, boulder clumps on the south terraces and riverbanks, and the
-// stepping-stone ford. Everything here is a "rock" record so visuals (ecology
-// rocks pass) and collision (obstacles.js) come from the same list.
+// Watkins Camp site furniture: boulder clumps on the south terraces and
+// riverbanks, the stepping-stone ford, and small fire-ring stones. Everything
+// here is a "rock" record so visuals (ecology rocks pass) and collision
+// (obstacles.js) come from the same list.
 
-// Yard wall rectangle (world coords). The cabin sits at (-8, -20).
+// Former yard footprint (world coords). The cabin sits at (-8, -20). Keep this
+// as a no-rock clearing even though the enclosing stone wall has been removed.
 const WALL = { minX: -20, maxX: 6, minZ: -29, maxZ: -8 };
-// Gates: [edge, coordinate along edge, half-width]
-const GATES = [
-  ['north', -0.9, 1.5],  // main track in from Rocky Clearing
-  ['south', 1.3, 1.6],   // track out toward the ford
-  ['west', -16.5, 1.5],  // spur from the penal colony
-];
-
-function gateBlocks(edge, t) {
-  for (const [gateEdge, at, half] of GATES) {
-    if (gateEdge !== edge) continue;
-    if (Math.abs(t - at) < half) return true;
-  }
-  return false;
-}
-
-function wallHeightProfile(i) {
-  // Long ruined stretches: mostly a single course, rising to two where the
-  // wall survived, dipping to nothing where it has tumbled entirely.
-  const wave = seededRandom(i >> 2, 7);
-  if (wave < 0.16) return 0; // collapsed stretch
-  if (wave > 0.62) return 2;
-  return 1;
-}
-
-let wallStones = null;
 
 export function getWatkinsWallStones() {
-  if (wallStones) return wallStones;
-  const stones = [];
-  const spacing = 0.72;
-
-  const runs = [
-    { edge: 'south', from: [WALL.minX, WALL.maxZ], to: [WALL.maxX, WALL.maxZ], axis: 'x' },
-    { edge: 'north', from: [WALL.minX, WALL.minZ], to: [WALL.maxX, WALL.minZ], axis: 'x' },
-    { edge: 'west', from: [WALL.minX, WALL.minZ], to: [WALL.minX, WALL.maxZ], axis: 'z' },
-    { edge: 'east', from: [WALL.maxX, WALL.minZ], to: [WALL.maxX, WALL.maxZ], axis: 'z' },
-  ];
-
-  let index = 0;
-  for (const run of runs) {
-    const length = run.axis === 'x' ? run.to[0] - run.from[0] : run.to[1] - run.from[1];
-    const count = Math.floor(Math.abs(length) / spacing);
-    for (let i = 0; i <= count; i += 1) {
-      index += 1;
-      const t = i / Math.max(1, count);
-      const along = (run.axis === 'x' ? run.from[0] : run.from[1]) + length * t;
-      if (gateBlocks(run.edge, along)) continue;
-      const courses = wallHeightProfile(index);
-      if (courses === 0) {
-        // Tumbled: an occasional stray stone fallen off the line.
-        if (seededRandom(index, 11) < 0.5) continue;
-      }
-      const jitterA = (seededRandom(index, 3) - 0.5) * 0.22;
-      const jitterB = (seededRandom(index, 5) - 0.5) * (courses === 0 ? 1.1 : 0.16);
-      const x = run.axis === 'x' ? along + jitterA : run.from[0] + jitterB;
-      const z = run.axis === 'x' ? run.from[1] + jitterB : along + jitterA;
-      const y = watkinsHeight(x, z);
-      const base = 0.3 + seededRandom(index, 13) * 0.14;
-      for (let c = 0; c < Math.max(1, courses); c += 1) {
-        const s = base * (1 - c * 0.22);
-        stones.push({
-          id: `watkins-wall-${index}-${c}`,
-          x: x + (c > 0 ? (seededRandom(index, 17 + c) - 0.5) * 0.12 : 0),
-          z: z + (c > 0 ? (seededRandom(index, 19 + c) - 0.5) * 0.12 : 0),
-          y: y + c * base * 0.72,
-          scale: s,
-          yaw: seededRandom(index, 23 + c) * Math.PI,
-          tone: 0.3 + seededRandom(index, 29 + c) * 0.5,
-          radiusX: s * (1.15 + seededRandom(index, 31 + c) * 0.4),
-          radiusY: s * 0.62,
-          radiusZ: s * (0.95 + seededRandom(index, 37 + c) * 0.35),
-          sink: s * 0.16,
-          wallCourse: c,
-          collide: c === 0 && courses > 0,
-        });
-      }
-    }
-  }
-  wallStones = stones;
-  return wallStones;
+  return [];
 }
 
 let boulders = null;
@@ -255,8 +179,8 @@ export function getWatkinsCampObstacles() {
     idPrefix: 'watkins-camp',
     radiusScale: 0.8,
     colliderShape: 'cylinder',
-    traversalLabel: 'clamber over the old wall',
-    climbLabel: 'tumbled stone',
+    traversalLabel: 'step over the stone',
+    climbLabel: 'loose stone',
     pushFriction: 0.92,
     filter: rock => rock.collide,
   });

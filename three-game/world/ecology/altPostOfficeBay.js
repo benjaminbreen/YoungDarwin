@@ -1,16 +1,21 @@
-import { altPostOfficeCoastZ, ALT_POST_OFFICE_TRAIL } from '../regions/altPostOfficeBay/terrain';
+import { altPostOfficeCoastZ, altPostOfficeTrailInfluence, ALT_POST_OFFICE_TRAIL } from '../regions/altPostOfficeBay/terrain';
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getAltPostOfficeBayRocks, ALT_POST_OFFICE_BAY } from '../altPostOfficeBayLayout';
 import { modelAssetProp } from './ecologyAssetTransforms';
+import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 
-// Alternate Post Office Bay ecology, matched to the mockup: golden beach
-// crescent with driftwood and Sesuvium reds, olive scrub plain dotted with
-// flowering shrubs and cacti inland, a green mangrove-fringed headland on the
-// west, and the sailors' barrel with weathered fence posts above the landing.
+// Alternate Post Office Bay ecology: a clean pale beach with driftwood, sparse
+// dry-zone shrubs and cacti inland, detailed mangroves at the brackish edges,
+// and the sailors' barrel with a few weathered fence posts above the landing.
 
 const NATURE = '/assets/models/nature/';
 
 const scrubClumps = [[-18, 14], [-2, 10], [14, 16], [28, 12], [-8, 26], [10, 34], [26, 28], [-26, 22]];
+const grassClumps = [[-30, 24], [-16, 34], [2, 30], [20, 38], [34, 28], [-6, 48]];
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
 
 function buildFlora() {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(ALT_POST_OFFICE_BAY, layer, count, seed, opts);
@@ -25,34 +30,6 @@ function buildFlora() {
   return [
     { id: 'saltbush-1', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 0) },
     { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 1) },
-    {
-      // Red Sesuvium carpeting the back of the beach (the mockup's rust-red shrubs).
-      id: 'sesuvium-edmonstonei',
-      path: `${NATURE}runtime-sesuvium-edmonstonei.glb`,
-      sink: 0.04,
-      castShadow: false,
-      motion: { wind: 0.7, bend: 0.18, bendRadius: 1.2 },
-      ySquash: 0.55,
-      items: scatter('sesuvium-red', 16, 89, {
-        minX: -34, maxX: 40, minZ: -10, maxZ: 18, scale: [0.55, 1.0],
-        accept: (biome, x, z) => {
-          const d = inland(x, z);
-          return d > 1.6 && d < 9 && (biome === 'sand-beach' || biome === 'ash-slope' || biome === 'dry-scrub');
-        },
-      }),
-    },
-    {
-      id: 'purple-shrub',
-      path: `${NATURE}runtime-purple-shrub.glb`,
-      sink: 0.04,
-      castShadow: false,
-      motion: { wind: 1.2, bend: 0.3, bendRadius: 1.3 },
-      items: scatter('purple-shrub', 14, 57, {
-        minX: -36, maxX: 42, minZ: 0, maxZ: 36, scale: [0.9, 1.5],
-        accept: (biome, x, z) => inland(x, z) > 4 && nearAnyCluster(scrubClumps, x, z, 11)
-          && (biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'ash-slope'),
-      }),
-    },
     {
       id: 'darwiniothamnus',
       path: `${NATURE}runtime-darwiniothamnus.glb`,
@@ -81,27 +58,18 @@ function buildFlora() {
       id: 'jasminocereus-1',
       path: `${NATURE}runtime-candelabra-cactus.glb`,
       sink: 0.04,
-      items: scatter('jasminocereus-1', 4, 103, {
-        minX: -28, maxX: 38, minZ: 10, maxZ: 42, scale: [3.4, 4.6], maxGrade: 0.4,
-        accept: (biome, x, z) => inland(x, z) > 8 && (biome === 'dry-scrub' || biome === 'palo-santo'),
-      }),
-    },
-    {
-      id: 'jasminocereus-2',
-      path: `${NATURE}runtime-candelabra-cactus.glb`,
-      sink: 0.04,
-      items: scatter('jasminocereus-2', 4, 107, {
-        minX: -34, maxX: 42, minZ: 8, maxZ: 44, scale: [3.2, 4.4], maxGrade: 0.4,
-        accept: (biome, x, z) => inland(x, z) > 8 && (biome === 'dry-scrub' || biome === 'palo-santo'),
+      items: scatter('jasminocereus-1', 2, 103, {
+        minX: -28, maxX: 38, minZ: 18, maxZ: 46, scale: [3.2, 4.3], maxGrade: 0.4,
+        accept: (biome, x, z) => inland(x, z) > 14 && (biome === 'dry-scrub' || biome === 'palo-santo'),
       }),
     },
     {
       id: 'opuntia',
       path: `${NATURE}runtime-opuntia.glb`,
       sink: 0.06,
-      items: scatter('opuntia-tree', 5, 113, {
-        minX: -30, maxX: 40, minZ: 6, maxZ: 36, scale: [0.9, 1.35], maxGrade: 0.4,
-        accept: (biome, x, z) => inland(x, z) > 7 && (biome === 'dry-scrub' || biome === 'ash-slope'),
+      items: scatter('opuntia-tree', 2, 113, {
+        minX: -30, maxX: 40, minZ: 16, maxZ: 44, scale: [0.9, 1.3], maxGrade: 0.4,
+        accept: (biome, x, z) => inland(x, z) > 13 && (biome === 'dry-scrub' || biome === 'ash-slope'),
       }),
     },
     {
@@ -119,7 +87,7 @@ function buildFlora() {
       path: `${NATURE}runtime-scalesia-pedunculata.glb`,
       sink: 0.1,
       motion: { wind: 0.4, bend: 0.06, bendRadius: 3.0 },
-      items: scatter('scalesia-stand', 3, 127, {
+      items: scatter('scalesia-stand', 2, 127, {
         minX: -30, maxX: 30, minZ: 38, maxZ: 54, scale: [0.05, 0.065], maxGrade: 0.5,
         accept: biome => biome === 'palo-santo' || biome === 'dry-scrub',
       }),
@@ -132,28 +100,11 @@ function buildFlora() {
       tint: '#58724f',
       tintStrength: 0.08,
       motion: { wind: 0.34, bend: 0.05, bendRadius: 3.2 },
-      items: scatter('mangrove-hero', 7, 137, {
-        minX: -52, maxX: -16, minZ: -42, maxZ: -2, scale: [0.34, 0.5], maxGrade: 3,
+      items: scatter('mangrove-hero', 10, 137, {
+        minX: -54, maxX: 56, minZ: -44, maxZ: 2, scale: [0.36, 0.54], maxGrade: 3,
         accept: (biome, x, z) => {
           const d = inland(x, z);
-          return d > -0.5 && d < 7;
-        },
-      }),
-    },
-    {
-      id: 'mangrove-lowpoly-fringe',
-      path: `${NATURE}runtime-mangrove-lowpoly.glb`,
-      sink: 0.08,
-      tint: '#4c6242',
-      tintStrength: 0.22,
-      motion: { wind: 0.42, bend: 0.07, bendRadius: 2.8 },
-      items: scatter('mangrove-fringe', 22, 141, {
-        minX: -54, maxX: 56, minZ: -44, maxZ: 2, scale: [0.9, 1.5], maxGrade: 3,
-        accept: (biome, x, z) => {
-          const d = inland(x, z);
-          const onHeadland = x < -18;
-          const onEastPoint = x > 38;
-          return d > -0.5 && d < 9 && (onHeadland || onEastPoint);
+          return d > -0.5 && d < 8 && (x < -18 || x > 38);
         },
       }),
     },
@@ -187,8 +138,54 @@ function buildFlora() {
   ];
 }
 
-// The post barrel and a line of weathered fence posts climbing from the
-// landing flat along the trail, as in the mockup.
+function altPostOfficeGrassDryness({ x, z, biome, tone }) {
+  const d = z - altPostOfficeCoastZ(x);
+  return clamp01(
+    0.42
+    + tone * 0.24
+    + clamp01((d - 14) / 24) * 0.2
+    + (biome === 'palo-santo' ? 0.1 : 0),
+  );
+}
+
+function buildDryGrassPatches() {
+  const items = buildStandardDryGrassPatchItems({
+    zoneId: ALT_POST_OFFICE_BAY,
+    idPrefix: 'alt-post-office-dry-grass',
+    count: 520,
+    seed: 9241,
+    bounds: { minX: -44, maxX: 44, minZ: 14, maxZ: 54 },
+    rejectBiomes: ['water', 'wet-sand', 'sand-beach', 'trail', 'black-lava', 'green-scrub'],
+    maxGrade: 0.9,
+    slopeStep: 0.85,
+    scale: [0.5, 1.08],
+    windYaw: -0.62,
+    attemptsPerItem: 160,
+    accept: ({ x, z, biome }) => {
+      const d = z - altPostOfficeCoastZ(x);
+      if (d < 14) return false;
+      if (altPostOfficeTrailInfluence(x, z, 3.2, 8.4) > 0.08) return false;
+      if (!nearAnyCluster(grassClumps, x, z, 14)) return false;
+      return biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'ash-slope';
+    },
+    drynessAt: altPostOfficeGrassDryness,
+  });
+  return createStandardDryGrassPatchLayer({
+    id: 'alt-post-office-dry-grass-patches',
+    items,
+    materialColor: '#f0edcf',
+    emissive: '#282b16',
+    emissiveIntensity: 0.055,
+    roughness: 1,
+    widthScale: 1.05,
+    heightScale: 1.08,
+    depthScale: 1.0,
+    maxVisibleDistance: 100,
+    motion: { wind: 1.1, bend: 0.22, bendRadius: 1.16 },
+  });
+}
+
+// The post barrel and a short line of weathered fence posts above the landing.
 function buildProps() {
   const props = [
     {
@@ -203,17 +200,16 @@ function buildProps() {
   for (let index = 0; index < ALT_POST_OFFICE_TRAIL.length - 2; index += 1) {
     const [ax, az] = ALT_POST_OFFICE_TRAIL[index];
     const [bx, bz] = ALT_POST_OFFICE_TRAIL[index + 1];
-    for (const t of [0.25, 0.7]) {
-      const side = (index + t) % 2 > 1 ? 1 : -1;
-      props.push({
-        id: `fence-post-${index}-${Math.round(t * 100)}`,
-        path: `${NATURE}runtime-fence-post.glb`,
-        position: [ax + (bx - ax) * t + side * 2.1, 0, az + (bz - az) * t + side * 0.8],
-        terrainY: true,
-        rotation: [0, index * 1.3 + t * 4, 0],
-        scale: 26,
-      });
-    }
+    const t = index % 2 === 0 ? 0.42 : 0.62;
+    const side = index % 2 === 0 ? -1 : 1;
+    props.push({
+      id: `fence-post-${index}`,
+      path: `${NATURE}runtime-fence-post.glb`,
+      position: [ax + (bx - ax) * t + side * 2.4, 0, az + (bz - az) * t + side * 0.9],
+      terrainY: true,
+      rotation: [0, index * 1.3 + t * 4, 0],
+      scale: 38,
+    });
   }
   return props;
 }
@@ -229,6 +225,7 @@ export function buildAltPostOfficeBayEcology() {
     flora: buildFlora(),
     rocks,
     splashes: { anchors: swashRocks.slice(0, 10), period: (Math.PI * 2) / 0.5984 },
+    dryGrassPatches: [buildDryGrassPatches()],
     footprintBiomes: ['sand-beach', 'wet-sand', 'dry-scrub', 'trail', 'ash-slope'],
     birds: [
       { radius: 18, height: 16, speed: 0.1, phase: 0, cx: 0, cz: -16 },

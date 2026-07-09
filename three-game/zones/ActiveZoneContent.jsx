@@ -13,6 +13,7 @@ import { SnareTraps } from '../components/world/SnareTrapActor';
 import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
+import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
 import { AnimalModeDarwinNpc } from '../components/world/AnimalModeDarwinNpc';
@@ -51,6 +52,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       {settings.physicsObstacles !== false && <PhysicsObstacles />}
       {settings.physicsProps !== false && <PhysicsProps />}
       {settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
+      {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
       {settings.waterSplashes !== false && <WaterSplashes />}
       {deferredContentReady && <SnareTraps />}
       {deferredContentReady && <AnimalDroppings />}

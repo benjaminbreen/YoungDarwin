@@ -46,6 +46,10 @@ export const PENAL_COLONY_PLAZA = { x: 2, z: -2, radiusX: 11, radiusZ: 8.5 };
 // Convict courtyard: huts ring a packed-earth yard behind a crude fence.
 export const PENAL_COLONY_COURTYARD = { x: -15, z: 14, halfX: 10.5, halfZ: 6, yaw: 0.05 };
 
+// Isolated punishment/worker hut east of the barracks. It uses the
+// destructible timber-structure path rather than the static GLB building path.
+export const PENAL_COLONY_INMATE_CABIN = { id: 'inmate-cabin', x: 30, z: -19, yaw: -0.42, radius: 5.8 };
+
 // Flattened, scuffed pads under every structure. `pad.y` is resolved lazily
 // from the un-flattened base height so terrain.js and the layout agree.
 export const PENAL_COLONY_PADS = [
@@ -59,6 +63,7 @@ export const PENAL_COLONY_PADS = [
   { id: 'animal-leanto', x: 8, z: 29, radius: 4.6 },
   { id: 'animal-paddock', x: 20, z: 31, radius: 5.6 },
   { id: 'outhouse', x: -9, z: 35, radius: 2.2 },
+  { id: PENAL_COLONY_INMATE_CABIN.id, x: PENAL_COLONY_INMATE_CABIN.x, z: PENAL_COLONY_INMATE_CABIN.z, radius: PENAL_COLONY_INMATE_CABIN.radius },
 ];
 
 // Cultivated plots: dark tilled earth ("black mud", as Darwin recorded) with

@@ -9,7 +9,7 @@ import {
   watkinsRiverInfo,
   watkinsYardMask,
 } from '../regions/watkinsCamp/terrain';
-import { WATKINS_FIRE_RING, getWatkinsCampRocks, getWatkinsWallStones } from '../watkinsCampLayout';
+import { WATKINS_FIRE_RING, getWatkinsCampRocks } from '../watkinsCampLayout';
 import {
   buildStandardDryGrassPatchItems,
   createStandardDryGrassPatchLayer,
@@ -25,10 +25,6 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
 // The "green belt": a lusher pocket along the north bank east of the yard
 // where the stream keeps the ground damp — scalesia bushes, real trees, and
 // greener grass. Mirrored as wkGreen in watkinsCamp/material.js.
@@ -42,8 +38,16 @@ function offTrack(x, z, margin = 3.4) {
   return watkinsPathInfo(x, z).d > margin;
 }
 
+function homesteadClearingMask(x, z) {
+  const cabin = Math.exp(
+    -(((x - WATKINS_CABIN.x) / 16) ** 2) - (((z - WATKINS_CABIN.z) / 11.5) ** 2),
+  );
+  return clamp01(Math.max(cabin, watkinsYardMask(x, z)));
+}
+
 function clearOfHomestead(x, z, margin = 6.5) {
   return Math.hypot(x - WATKINS_CABIN.x, z - WATKINS_CABIN.z) > margin
+    && homesteadClearingMask(x, z) < 0.22
     && Math.hypot(x - WATKINS_FIRE_RING.x, z - WATKINS_FIRE_RING.z) > 1.8;
 }
 
@@ -60,7 +64,7 @@ function buildGrass() {
   return buildStandardDryGrassPatchItems({
     zoneId: ZONE,
     idPrefix: 'watkins-dry-grass',
-    count: 1900,
+    count: 1150,
     seed: 9319,
     bounds: { minX: -47, maxX: 47, minZ: -42, maxZ: 42 },
     pathInfo: watkinsPathInfo,
@@ -75,7 +79,15 @@ function buildGrass() {
       const river = watkinsRiverInfo(x, z);
       if (river.water > 0.04) return false;
       if (watkinsCliffFactor(x, z) > 0.78) return false;
-      return clearOfHomestead(x, z);
+      if (!clearOfHomestead(x, z, 12)) return false;
+      const clearing = homesteadClearingMask(x, z);
+      if (clearing > 0.1 && seededRandom(Math.floor((x + 64) * 31 + (z + 64) * 17), 101) < 0.82) {
+        return false;
+      }
+      const perimeter = Math.max(Math.abs(x) / 47, Math.abs(z) / 42);
+      const cliff = watkinsCliffFactor(x, z);
+      const keepChance = clamp01(0.2 + perimeter * 0.42 + cliff * 0.34 + river.valley * 0.12);
+      return seededRandom(Math.floor((x + 70) * 23 + (z + 70) * 29), 113) < keepChance;
     },
     drynessAt: ({ x, z, tone }) => {
       const river = watkinsRiverInfo(x, z);
@@ -83,38 +95,6 @@ function buildGrass() {
       return clamp01(0.52 + tone * 0.26 - river.valley * 0.3 - green * 0.36);
     },
   });
-}
-
-// Weeds swallowing the old wall: tufts hugging the stone line, densest where
-// the wall still stands (wind-trapped soil), spilling into the yard.
-function buildWallWeeds() {
-  const items = [];
-  const stones = getWatkinsWallStones().filter(stone => stone.wallCourse === 0);
-  stones.forEach((stone, index) => {
-    const clumps = 1 + Math.floor(seededRandom(index, 3) * 3);
-    for (let c = 0; c < clumps; c += 1) {
-      const angle = seededRandom(index, 7 + c) * Math.PI * 2;
-      const spread = 0.35 + seededRandom(index, 11 + c) * 0.9;
-      const x = stone.x + Math.cos(angle) * spread;
-      const z = stone.z + Math.sin(angle) * spread;
-      if (!offTrack(x, z, 1.6)) continue;
-      const tone = seededRandom(index, 17 + c);
-      items.push({
-        id: `watkins-wall-weed-${index}-${c}`,
-        x,
-        y: terrainHeight(x, z, ZONE),
-        z,
-        grade: 0,
-        scale: lerp(0.34, 0.72, seededRandom(index, 23 + c)),
-        yaw: seededRandom(index, 29 + c) * Math.PI * 2,
-        tone,
-        density: 0.7,
-        dryness: clamp01(0.4 + tone * 0.3),
-        color: tone > 0.55 ? '#9aa457' : '#7d9048',
-      });
-    }
-  });
-  return items;
 }
 
 function buildSwimmers() {
@@ -355,10 +335,7 @@ function buildFlora() {
       sink: 0.05,
       castShadow: false,
       motion: { wind: 0.55, bend: 0.16, bendRadius: 1.0 },
-      items: scatter('watkins-garden-gone-wild', 10, 853, {
-        minX: -19, maxX: 5, minZ: -28, maxZ: -9, scale: [0.12, 0.24], maxGrade: 0.6,
-        accept: (biome, x, z) => watkinsYardMask(x, z) > 0.3 && offTrack(x, z, 2.4),
-      }),
+      items: [],
     },
   ];
 }
@@ -422,16 +399,6 @@ export function buildWatkinsCampEcology() {
         depthScale: 1.02,
         maxVisibleDistance: 108,
         motion: { wind: 1.05, bend: 0.22, bendRadius: 1.16 },
-      }),
-      createStandardDryGrassPatchLayer({
-        id: 'watkins-wall-weeds',
-        items: buildWallWeeds(),
-        color: '#87984e',
-        emissive: '#273313',
-        emissiveIntensity: 0.09,
-        heightScale: 1.05,
-        maxVisibleDistance: 64,
-        motion: { wind: 0.82, bend: 0.2, bendRadius: 1.0 },
       }),
     ],
     flora: buildFlora(),

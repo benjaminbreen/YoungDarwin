@@ -7,9 +7,10 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { ModelAsset } from '../assets/ModelAsset';
-import { PLAYER, SWIM } from './playerConfig';
+import { PLAYER, SPRINT, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
 import { calibratedStrideTimeScale } from './gaitProfiles';
+import { darwin5ClipDuration } from './darwin5AnimationManifest.mjs';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
 
@@ -594,6 +595,8 @@ function darwin5AdaptedActionClip(action) {
   if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'lookAround' || action === 'lookAroundShort') return action;
+  if (action === 'fidgetStand' || action === 'neckStretch' || action === 'armStretch'
+    || action === 'neutralIdle' || action === 'happyIdle' || action === 'inspectNearbyIdle') return action;
   if (action === 'write') return 'write';
   if (action === 'gather' || action === 'gatherGround' || action === 'gatherChestHeight') return action;
   if (action === 'pushLow') return { clip: 'pushLow', timeScale: 1.35, fade: 0.05 };
@@ -1056,6 +1059,19 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
         if (torchAction) return torchAction;
       }
       if (modelAssetId === 'darwin5') {
+        // Tall climbs: sync the clip speed to the controller's height-scaled
+        // action span so hand/foot placement tracks short and tall faces alike
+        // instead of playing the wall mantle at one fixed rate.
+        const climbAction = motionRef.current.action;
+        if (climbAction === 'climbingUpWall' || climbAction === 'climb' || climbAction === 'sprintToWallClimb') {
+          const actionSpan = Math.max(0.45, (motionRef.current.actionUntil || 0) - (motionRef.current.actionStartedAt || 0));
+          const climbClipDuration = darwin5ClipDuration(climbAction) || 2.0;
+          return {
+            clip: climbAction,
+            timeScale: THREE.MathUtils.clamp(climbClipDuration / actionSpan, 0.95, 1.7),
+            fade: 0.06,
+          };
+        }
         const adaptedAction = darwin5AdaptedActionClip(motionRef.current.action);
         if (adaptedAction) return adaptedAction;
       }
@@ -1139,9 +1155,11 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
           : { clip: 'walkStrafeRight', timeScale: stride('walk', walkScale) };
       }
       if (motionRef.current.movingBackward) {
-        return injured
-          ? { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) }
-          : { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
+        if (injured) return { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) };
+        if (modelAssetId === 'darwin5' && speed > PLAYER.walkSpeed * 1.15) {
+          return { clip: 'runBackwards', timeScale: stride('runBackwards', runScale) };
+        }
+        return { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
       }
       // Shouldered-aim locomotion: running reuses the carry run (runRifle is
       // already a gun-up pose), walking uses the dedicated aim walk, and
@@ -1178,6 +1196,21 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (motionRef.current.movingBackward && (motionRef.current.walking || motionRef.current.running)) {
       if (badlyInjured) return { clip: 'injuredRunBackwards', timeScale: stride('run', Math.max(0.7, tiredRunScale * 0.9)) };
       if (injured) return { clip: 'injuredWalkBackwards', timeScale: stride('walk', Math.max(0.62, walkScale * 0.88)) };
+      if (modelAssetId === 'darwin5') {
+        // Veering while backpedalling gets the authored backward-turn cycles.
+        const turnRate = motionRef.current.turnRate || 0;
+        if (Math.abs(turnRate) > 0.9 && speed > PLAYER.walkSpeed * 0.5) {
+          return {
+            clip: turnRate > 0 ? 'backwardTurnLeft' : 'backwardTurnRight',
+            timeScale: stride('walkBackwards', walkScale),
+          };
+        }
+        if (motionRef.current.running && speed > PLAYER.walkSpeed * 1.1) {
+          return motionRef.current.tiredRun
+            ? { clip: 'jogBackwards', timeScale: stride('jogBackwards', Math.max(0.72, tiredRunScale * 0.9)) }
+            : { clip: 'runBackwards', timeScale: stride('runBackwards', runScale) };
+        }
+      }
       return { clip: 'walkBackwards', timeScale: stride('walk', walkScale) };
     }
     if (badlyInjured && motionRef.current.running) return { clip: 'injuredRun', timeScale: stride('run', Math.max(0.7, tiredRunScale * 0.92)) };
@@ -1214,6 +1247,18 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (motionRef.current.running) {
       if (groundPitch > STAIR_PITCH) return { clip: 'runUpStairs', timeScale: stride('run', runScale) };
       if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'jog', timeScale: stride('jog', tiredRunScale) };
+      if (modelAssetId === 'darwin5') {
+        // Ankle-to-knee water: high-stepping splash run (wadeWalk owns >0.42).
+        if ((motionRef.current.wadeDepth || 0) > 0.16) {
+          return { clip: 'grassRun', timeScale: stride('grassRun', runScale) };
+        }
+        if (motionRef.current.sprinting) {
+          return {
+            clip: 'sprint',
+            timeScale: stride('sprint', THREE.MathUtils.clamp(speed / (PLAYER.runSpeed * SPRINT.speedScale), 0.85, 1.18)),
+          };
+        }
+      }
       return { clip: 'run', timeScale: stride('run', runScale) };
     }
     if (motionRef.current.walking) {
@@ -1230,7 +1275,16 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (torchMode) return 'torchIdle';
     if (heldToolMode) return 'holdToolIdle';
     if (holdingTool) return 'holdIdle';
-    if (status.fatigue >= 82 && modelAssetId !== 'darwin5') return 'exhaustedIdle';
+    if (modelAssetId === 'darwin5') {
+      // Conditional base idles, most urgent first: exhausted, catching his
+      // breath after a sprint, then the bored long-wait idle. The ready-stance
+      // idle stays the default.
+      if (status.fatigue >= 82) return 'tiredIdle';
+      if (motionRef.current.winded) return 'windedIdle';
+      if (motionRef.current.longIdle) return 'boredIdle';
+      return 'idle';
+    }
+    if (status.fatigue >= 82) return 'exhaustedIdle';
     return 'idle';
   }, [modelAssetId, motionRef]);
 

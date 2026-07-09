@@ -5,7 +5,11 @@ import { getZoneProps } from '../physics/props/propRegistry';
 import { getZonePropCollisionProps } from '../physics/props/propRuntime';
 
 export function seedFromSpecimen(specimen) {
-  const text = `${specimen.id}:${specimen.spawnPoint?.join(',')}:${specimen.behavior || 'still'}`;
+  const spawn = specimen?.spawnPoint || specimen?.position;
+  const spawnText = Array.isArray(spawn)
+    ? spawn.join(',')
+    : spawn?.toArray?.().join(',') || '';
+  const text = `${specimen?.instanceId || specimen?.id}:${specimen?.id}:${spawnText}:${specimen?.behavior || 'still'}`;
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) {
     hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
@@ -129,7 +133,8 @@ function resolvePropCollision(position, previousPosition, props, zoneId, actorRa
   return collided ? { ...collided, position: p } : null;
 }
 
-export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition }) {
+export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition, actorScale = 1 }) {
+  const placementScale = Number.isFinite(Number(actorScale)) ? Math.max(0.1, Number(actorScale)) : 1;
   const state = {
     position: new THREE.Vector3(),
     yaw: 0,
@@ -155,6 +160,11 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     deckMonkeyDirection: new THREE.Vector3(),
     deckMonkeyPrevious: new THREE.Vector3(),
     deckMonkeyPlanar: new THREE.Vector2(),
+    grazerTarget: new THREE.Vector2(),
+    grazerCandidate: new THREE.Vector2(),
+    grazerDirection: new THREE.Vector2(),
+    grazerLateral: new THREE.Vector2(),
+    grazerPrevious: new THREE.Vector3(),
   };
   const shorebird = {
     mode: 'ground',
@@ -179,6 +189,21 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     mode: 'deck',
   };
   const deckCollisionCache = {
+    zoneId: null,
+    obstacles: [],
+    props: [],
+  };
+  const grazer = {
+    targetOffset: new THREE.Vector2(),
+    waitUntil: 0,
+    mode: 'browse',
+    settled: false,
+    lastBlockedAt: -Infinity,
+    reactionUntil: -Infinity,
+    reactionMode: null,
+    lastReactionAt: -Infinity,
+  };
+  const grazerObstacleCache = {
     zoneId: null,
     obstacles: [],
     props: [],
@@ -249,6 +274,14 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     deckMonkey.lastBlockedAt = -Infinity;
     deckMonkey.lastBlockedBy = null;
     deckMonkey.mode = 'deck';
+    grazer.targetOffset.set(0, 0);
+    grazer.waitUntil = clock + 0.4 + seed * 1.2;
+    grazer.mode = 'browse';
+    grazer.settled = false;
+    grazer.lastBlockedAt = -Infinity;
+    grazer.reactionUntil = -Infinity;
+    grazer.reactionMode = null;
+    grazer.lastReactionAt = -Infinity;
     hammerThreat.x = 0;
     hammerThreat.z = 0;
     hammerThreat.radius = 0;
@@ -313,6 +346,314 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       },
       out,
     );
+  }
+
+  function grazerCollisionSources(currentZoneId) {
+    if (grazerObstacleCache.zoneId !== currentZoneId) {
+      grazerObstacleCache.zoneId = currentZoneId;
+      grazerObstacleCache.obstacles = getRuntimeObstacles(currentZoneId);
+      grazerObstacleCache.props = getZoneProps(currentZoneId);
+    }
+    return {
+      obstacles: grazerObstacleCache.obstacles,
+      props: getZonePropCollisionProps(currentZoneId, grazerObstacleCache.props),
+    };
+  }
+
+  function grazerObstacleRadius() {
+    return Math.max(0.08, (profile.obstacleRadius || profile.collisionRadius || 0.54) * placementScale);
+  }
+
+  function grazerGroundOffset() {
+    return (profile.groundOffset || 0.04) * placementScale;
+  }
+
+  function chooseProfileClip(primary, variants, t, salt = 0) {
+    const options = [];
+    if (primary) options.push(primary);
+    if (Array.isArray(variants)) {
+      for (const clip of variants) {
+        if (clip && !options.includes(clip)) options.push(clip);
+      }
+    } else if (variants && !options.includes(variants)) {
+      options.push(variants);
+    }
+    if (!options.length) return null;
+    if (options.length === 1) return options[0];
+    const index = Math.floor(seededUnit(seed * (2101 + salt) + Math.floor(t * 0.19) * (37 + salt)) * options.length);
+    return options[Math.min(options.length - 1, index)];
+  }
+
+  function isGrazerOffsetUsable(base, target, currentZoneId) {
+    const x = base.x + target.x;
+    const z = base.z + target.y;
+    if (!isWalkableTerrain(x, z, currentZoneId)) return false;
+    const y = terrainHeight(x, z, currentZoneId) + grazerGroundOffset();
+    const collisionSources = grazerCollisionSources(currentZoneId);
+    const actorRadius = grazerObstacleRadius();
+    const obstacleHit = resolveObstacleCollision(new THREE.Vector3(x, y, z), null, {
+      playerRadius: actorRadius,
+      stepTolerance: profile.obstacleStepTolerance || 0.2,
+      obstacles: collisionSources.obstacles,
+    });
+    if (obstacleHit) return false;
+    const propHit = resolvePropCollision(
+      new THREE.Vector3(x, y, z),
+      null,
+      collisionSources.props,
+      currentZoneId,
+      actorRadius,
+    );
+    return !propHit;
+  }
+
+  function chooseGrazerTarget(base, currentZoneId, t, fleeDirection = null) {
+    const radiusX = Math.max(1.4, habitat.radiusX || profile.habitatRadiusX || 4);
+    const radiusZ = Math.max(1.0, habitat.radiusZ || profile.habitatRadiusZ || 2.5);
+    const fleeScale = profile.fleeHabitatScale || 1.32;
+    for (let i = 0; i < 14; i += 1) {
+      if (fleeDirection && fleeDirection.lengthSq() > 0.0001) {
+        const side = seededUnit(seed * 733 + i * 17 + Math.floor(t * 3.0)) > 0.5 ? 1 : -1;
+        const lateral = vectors.grazerLateral.set(-fleeDirection.y, fleeDirection.x);
+        const forward = 0.55 + seededUnit(seed * 887 + i * 23 + Math.floor(t * 2.0)) * 0.42;
+        const sideStep = (0.08 + seededUnit(seed * 937 + i * 31 + Math.floor(t)) * 0.28) * side;
+        vectors.grazerCandidate
+          .copy(offset)
+          .addScaledVector(fleeDirection, radiusX * forward)
+          .addScaledVector(lateral, radiusZ * sideStep);
+        clampOffset(vectors.grazerCandidate, {
+          radiusX: radiusX * fleeScale,
+          radiusZ: radiusZ * fleeScale,
+        }, vectors.grazerTarget);
+      } else {
+        const angle = seed * Math.PI * 2
+          + i * 1.47
+          + Math.floor(t * 0.13 + seed * 9.0) * 0.91;
+        const spread = 0.22 + seededUnit(seed * 1201 + i * 41 + Math.floor(t * 0.21)) * 0.76;
+        vectors.grazerTarget.set(
+          Math.cos(angle) * radiusX * spread,
+          Math.sin(angle * 0.93 + seed) * radiusZ * spread,
+        );
+      }
+      if (isGrazerOffsetUsable(base, vectors.grazerTarget, currentZoneId)) {
+        grazer.targetOffset.copy(vectors.grazerTarget);
+        grazer.settled = false;
+        return true;
+      }
+    }
+    grazer.targetOffset.copy(offset);
+    grazer.settled = false;
+    return false;
+  }
+
+  function beginGrazerPause(t) {
+    const roll = seededUnit(seed * 1601 + Math.floor(t * 0.37) * 47 + grazer.targetOffset.x * 0.13);
+    if ((profile.sleepClip || profile.sleepClips?.length) && roll > 0.92) {
+      grazer.mode = 'sleep';
+      grazer.waitUntil = t + 7.5 + seededUnit(seed * 1709 + Math.floor(t)) * 4.5;
+    } else if ((profile.restClip || profile.restClips?.length) && roll > 0.78) {
+      grazer.mode = 'rest';
+      grazer.waitUntil = t + 4.5 + seededUnit(seed * 1693 + Math.floor(t)) * 2.8;
+    } else if ((profile.feedClip || profile.feedClips?.length) && roll > 0.22) {
+      grazer.mode = 'browse';
+      grazer.waitUntil = t + 3.8 + seededUnit(seed * 1721 + Math.floor(t)) * 3.4;
+    } else {
+      grazer.mode = 'idle';
+      grazer.waitUntil = t + 2.0 + seededUnit(seed * 1747 + Math.floor(t)) * 2.4;
+    }
+    grazer.settled = true;
+  }
+
+  function grazerIdleAnimation(t, panic) {
+    const woundClip = chooseProfileClip(profile.woundClip, profile.woundClips, t, 11);
+    const kickClip = chooseProfileClip(profile.kickClip, profile.kickClips, t, 17);
+    if (t < grazer.reactionUntil && grazer.reactionMode === 'wound' && woundClip) {
+      return animationRequest(woundClip, 0.82, 0.12);
+    }
+    if (t < grazer.reactionUntil && grazer.reactionMode === 'kick' && kickClip) {
+      return animationRequest(kickClip, 0.9, 0.12);
+    }
+    if (panic > 0.32 && profile.alertClip) return animationRequest(profile.alertClip, 0.95, 0.12);
+    if (grazer.mode === 'sleep' && profile.wakeClip && t > grazer.waitUntil - (profile.wakeLeadTime || 3.8)) {
+      return animationRequest(profile.wakeClip, 0.72, 0.2);
+    }
+    const sleepClip = chooseProfileClip(profile.sleepClip, profile.sleepClips, t, 23);
+    const restClip = chooseProfileClip(profile.restClip, profile.restClips, t, 29);
+    const feedClip = chooseProfileClip(profile.feedClip, profile.feedClips, t, 31);
+    if (grazer.mode === 'sleep' && sleepClip) return animationRequest(sleepClip, 0.55, 0.28);
+    if (grazer.mode === 'rest' && restClip) return animationRequest(restClip, 0.64, 0.24);
+    if (grazer.mode === 'browse' && feedClip) return animationRequest(feedClip, 0.68, 0.2);
+    const variant = seededUnit(seed * 1801 + Math.floor(t * 0.12));
+    if (feedClip && variant > 0.68) return animationRequest(feedClip, 0.62, 0.24);
+    const idleClip = chooseProfileClip(profile.idleClip || profile.walkClip, profile.idleClips, t, 37);
+    return idleClip ? animationRequest(idleClip, 0.62, 0.24) : null;
+  }
+
+  function updateGrazer({
+    base,
+    currentZoneId,
+    player,
+    elapsedTime,
+    dt,
+    panic,
+    contactPanic,
+    hammerPanic,
+    distanceToPlayer,
+  }) {
+    const t = elapsedTime;
+    const groundOffset = grazerGroundOffset();
+    if (contactPanic > 0.18 && t - grazer.lastReactionAt > 2.2) {
+      grazer.reactionMode = profile.woundClip ? 'wound' : null;
+      grazer.reactionUntil = t + 0.75;
+      grazer.lastReactionAt = t;
+    } else if (
+      distanceToPlayer < (profile.kickRadius || 1.25)
+      && panic > 0.22
+      && profile.kickClip
+      && t - grazer.lastReactionAt > 4.8
+    ) {
+      grazer.reactionMode = 'kick';
+      grazer.reactionUntil = t + 0.85;
+      grazer.lastReactionAt = t;
+    }
+
+    const fleeing = panic > 0.035;
+    if (fleeing) {
+      const fleeDirection = vectors.grazerDirection.set(
+        state.position.x - (player?.x ?? state.position.x - 1),
+        state.position.z - (player?.z ?? state.position.z),
+      );
+      if (hammerPanic > panic * 0.82) {
+        fleeDirection.set(state.position.x - hammerThreat.x, state.position.z - hammerThreat.z);
+      } else if (contactPanic > panic * 0.82) {
+        fleeDirection.set(contactThreat.dirX, contactThreat.dirZ);
+      }
+      if (fleeDirection.lengthSq() < 0.0001) fleeDirection.set(Math.cos(seed * 9.1), Math.sin(seed * 11.3));
+      fleeDirection.normalize();
+      chooseGrazerTarget(base, currentZoneId, t, fleeDirection);
+      grazer.waitUntil = -Infinity;
+      grazer.mode = 'flee';
+    } else if (grazer.mode === 'flee' && distanceToPlayer > (profile.alertRadius || 6.0)) {
+      grazer.mode = 'walk';
+      chooseGrazerTarget(base, currentZoneId, t + 0.5);
+    } else if (grazer.mode === 'flee' && grazer.targetOffset.distanceTo(offset) <= Math.max(profile.reach || 0.18, 0.35)) {
+      beginGrazerPause(t);
+    } else if (!grazer.settled && grazer.targetOffset.distanceTo(offset) <= (profile.reach || 0.18)) {
+      beginGrazerPause(t);
+    } else if (grazer.settled && t >= grazer.waitUntil) {
+      chooseGrazerTarget(base, currentZoneId, t);
+      grazer.mode = 'walk';
+    }
+
+    const maxSpeed = fleeing
+      ? (profile.fleeSpeed || 1.6) * (0.7 + panic * 0.95)
+      : grazer.mode === 'walk' && profile.trotClip && seededUnit(seed * 1901 + Math.floor(t * 0.3)) > 0.78
+        ? (profile.trotSpeed || Math.max(profile.walkSpeed || 0.28, 0.52))
+        : (profile.walkSpeed || 0.28);
+    const currentTarget = fleeing || !grazer.settled ? grazer.targetOffset : offset;
+    let moving = currentTarget.distanceTo(offset) > (profile.reach || 0.18) && t >= grazer.reactionUntil;
+    const previousX = state.position.x;
+    const previousZ = state.position.z;
+
+    if (moving) {
+      moveTowardOffset(offset, currentTarget, Math.max(0.001, maxSpeed * dt), vectors.stepTarget);
+      let movementTarget = clampOffset(vectors.stepTarget, fleeing ? {
+        radiusX: (habitat.radiusX || profile.habitatRadiusX || 1) * (profile.fleeHabitatScale || 1.32),
+        radiusZ: (habitat.radiusZ || profile.habitatRadiusZ || 1) * (profile.fleeHabitatScale || 1.32),
+      } : habitat, vectors.clamped);
+      let x = base.x + movementTarget.x;
+      let z = base.z + movementTarget.y;
+      if (!isWalkableTerrain(x, z, currentZoneId)) {
+        movementTarget = vectors.clamped.copy(offset);
+        chooseGrazerTarget(base, currentZoneId, t + 0.83, fleeing ? vectors.grazerDirection : null);
+        x = base.x + movementTarget.x;
+        z = base.z + movementTarget.y;
+      }
+      vectors.grazerPrevious.copy(state.position);
+      offset.copy(movementTarget);
+      state.position.set(x, terrainHeight(x, z, currentZoneId) + groundOffset, z);
+      const collisionSources = grazerCollisionSources(currentZoneId);
+      const actorRadius = grazerObstacleRadius();
+      const obstacleHit = resolveObstacleCollision(state.position, vectors.grazerPrevious, {
+        playerRadius: actorRadius,
+        stepTolerance: profile.obstacleStepTolerance || 0.2,
+        obstacles: collisionSources.obstacles,
+      });
+      if (obstacleHit) {
+        state.position.copy(obstacleHit.position);
+        state.position.y = terrainHeight(state.position.x, state.position.z, currentZoneId) + groundOffset;
+        offset.set(state.position.x - base.x, state.position.z - base.z);
+        if (t - grazer.lastBlockedAt > 0.8) {
+          chooseGrazerTarget(base, currentZoneId, t + 1.7, fleeing ? vectors.grazerDirection : null);
+          grazer.lastBlockedAt = t;
+        }
+        moving = false;
+      }
+      const propHit = resolvePropCollision(
+        state.position,
+        vectors.grazerPrevious,
+        collisionSources.props,
+        currentZoneId,
+        actorRadius,
+      );
+      if (propHit) {
+        state.position.copy(propHit.position);
+        state.position.y = terrainHeight(state.position.x, state.position.z, currentZoneId) + groundOffset;
+        offset.set(state.position.x - base.x, state.position.z - base.z);
+        if (t - grazer.lastBlockedAt > 0.8) {
+          chooseGrazerTarget(base, currentZoneId, t + 1.9, fleeing ? vectors.grazerDirection : null);
+          grazer.lastBlockedAt = t;
+        }
+        moving = false;
+      }
+    } else {
+      const x = base.x + offset.x;
+      const z = base.z + offset.y;
+      state.position.set(x, terrainHeight(x, z, currentZoneId) + groundOffset, z);
+    }
+
+    const movedDistance = Math.hypot(state.position.x - previousX, state.position.z - previousZ);
+    const isActuallyMoving = moving && movedDistance > 0.002;
+    if (isActuallyMoving) {
+      const yawDirection = vectors.yawDirection.set(state.position.x - previousX, state.position.z - previousZ);
+      if (yawDirection.lengthSq() > 0.000001) {
+        let targetYaw = yawFromXZ(yawDirection);
+        if (Number.isFinite(profile.facingYawOffset)) targetYaw += profile.facingYawOffset;
+        state.yaw = THREE.MathUtils.damp(state.yaw, targetYaw, profile.turnRate || 8, dt);
+      }
+      const stepBob = Math.abs(Math.sin(t * (fleeing ? 10.5 : 5.7) + seed)) * (profile.bobAmount || 0.006);
+      state.position.y += stepBob;
+    }
+
+    state.pitch = 0;
+    state.roll = 0;
+    state.airborne = false;
+    if (isActuallyMoving) {
+      if (fleeing && panic > 0.62 && profile.ramRunClip) {
+        state.animation = animationRequest(profile.ramRunClip, 1.08, 0.12);
+      } else if (fleeing && profile.runClip) {
+        state.animation = animationRequest(profile.runClip, 1.0, 0.12);
+      } else if (profile.trotClip && movedDistance / Math.max(dt, 0.001) > (profile.walkSpeed || 0.28) * 1.35) {
+        state.animation = animationRequest(profile.trotClip, 0.9, 0.16);
+      } else {
+        state.animation = animationRequest(profile.walkClip || profile.idleClip, 0.84, 0.18);
+      }
+    } else {
+      state.animation = grazerIdleAnimation(t, panic);
+    }
+
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving: isActuallyMoving,
+      panic,
+      mode: `grazer:${grazer.mode}`,
+      reaction: t < grazer.reactionUntil ? grazer.reactionMode : null,
+    };
+    return { ok: true, reason: 'updated', state };
   }
 
   function deckMonkeyPointPosition(point, base, currentZoneId, out = vectors.deckMonkeyTarget) {
@@ -914,6 +1255,20 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
 
       if (profile.controller === 'deckMonkey') {
         return updateDeckMonkey({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
+
+      if (profile.controller === 'grazer') {
+        return updateGrazer({
           base,
           currentZoneId,
           player,

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { useThreeGameStore, getRuntimePlayerPose } from '../../store';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
-import { getRegionDefinition } from '../../world/regions';
+import { getStandingWaterRenderingConfig, standingWaterMaskAt } from '../../world/standingWaterRendering';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -277,11 +277,6 @@ function bakeSeafloorTexture(zoneId, bakeRes = BAKE_RES) {
   return texture;
 }
 
-function standingWaterMaskAt(x, z, zoneId) {
-  const maskFn = getRegionDefinition(zoneId)?.terrain?.standingWaterMask;
-  return maskFn ? THREE.MathUtils.clamp(maskFn(x, z), 0, 1) : 0;
-}
-
 function bakeStandingWaterMaskTexture(zoneId, bakeRes = BAKE_RES) {
   const data = new Uint8Array(bakeRes * bakeRes * 4);
   for (let j = 0; j < bakeRes; j += 1) {
@@ -415,7 +410,13 @@ const WAVE_GLSL = /* glsl */`
   }
 `;
 
-function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, rippleNormalTexture) {
+function createStylizedWaterMaterial(
+  seafloorTexture,
+  standingWaterMaskTexture,
+  rippleNormalTexture,
+  standingWaterRendering,
+) {
+  const suppression = standingWaterRendering.globalWaterSuppression;
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -424,6 +425,8 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, 
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
       uStandingWaterMask: { value: standingWaterMaskTexture },
+      uStandingWaterFadeStart: { value: suppression.fadeStart },
+      uStandingWaterFadeEnd: { value: suppression.fadeEnd },
       uRippleNormal: { value: rippleNormalTexture },
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
@@ -535,6 +538,8 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, 
       uniform float uSize;
       uniform sampler2D uSeafloor;
       uniform sampler2D uStandingWaterMask;
+      uniform float uStandingWaterFadeStart;
+      uniform float uStandingWaterFadeEnd;
       uniform sampler2D uRippleNormal;
       uniform float uWaterLevel;
       uniform sampler2D uRefraction;
@@ -999,7 +1004,7 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, 
         float rim = uSize * 0.5;
         float edgeFade = 1.0 - smoothstep(rim - 14.0, rim - 2.0, length(vWorld.xz));
         alpha *= edgeFade;
-        alpha *= 1.0 - smoothstep(0.34, 0.78, standingWater);
+        alpha *= 1.0 - smoothstep(uStandingWaterFadeStart, uStandingWaterFadeEnd, standingWater);
 
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -1009,7 +1014,8 @@ function createStylizedWaterMaterial(seafloorTexture, standingWaterMaskTexture, 
   });
 }
 
-function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
+function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture, standingWaterRendering) {
+  const suppression = standingWaterRendering.globalWaterSuppression;
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -1018,6 +1024,8 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
       uTime: { value: 0 },
       uSeafloor: { value: seafloorTexture },
       uStandingWaterMask: { value: standingWaterMaskTexture },
+      uStandingWaterFadeStart: { value: suppression.fadeStart },
+      uStandingWaterFadeEnd: { value: suppression.fadeEnd },
       uWaterLevel: { value: WATER_LEVEL },
       uSize: { value: WATER_SIZE },
       uFoam: { value: WATER_DAY.foam.clone() },
@@ -1031,6 +1039,8 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
       uniform float uTime;
       uniform sampler2D uSeafloor;
       uniform sampler2D uStandingWaterMask;
+      uniform float uStandingWaterFadeStart;
+      uniform float uStandingWaterFadeEnd;
       uniform float uWaterLevel;
       uniform float uSize;
       varying vec3 vWorld;
@@ -1075,6 +1085,8 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
       uniform float uDaylight;
       uniform float uRain;
       uniform float uUnderwaterAmount;
+      uniform float uStandingWaterFadeStart;
+      uniform float uStandingWaterFadeEnd;
       varying vec3 vWorld;
       varying float vDepth;
       varying float vShoreDist;
@@ -1152,7 +1164,7 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture) {
         // carry their own envelope out past it.
         float foam = ((bands + contact) * shoreWindow + breaker * 1.1)
           * realCoast * shallow * beach;
-        foam *= 1.0 - smoothstep(0.34, 0.78, vStandingWater);
+        foam *= 1.0 - smoothstep(uStandingWaterFadeStart, uStandingWaterFadeEnd, vStandingWater);
         foam *= 1.0 + uRain * 0.24;
         foam *= 1.0 - clamp(uUnderwaterAmount, 0.0, 1.0) * 0.72;
         foam = clamp(foam, 0.0, 1.0);
@@ -1478,14 +1490,18 @@ export function Water({ quality = 'performance', reflections = true }) {
     () => bakeStandingWaterMaskTexture(currentZoneId, qualityConfig.bakeRes),
     [currentZoneId, qualityConfig.bakeRes],
   );
+  const standingWaterRendering = useMemo(
+    () => getStandingWaterRenderingConfig(currentZoneId),
+    [currentZoneId],
+  );
   const rippleNormal = useMemo(() => createRippleNormalTexture(), []);
   const waterMaterial = useMemo(
-    () => createStylizedWaterMaterial(seafloor, standingWaterMask, rippleNormal),
-    [seafloor, standingWaterMask, rippleNormal],
+    () => createStylizedWaterMaterial(seafloor, standingWaterMask, rippleNormal, standingWaterRendering),
+    [seafloor, standingWaterMask, rippleNormal, standingWaterRendering],
   );
   const surfMaterial = useMemo(
-    () => createSurfRibbonMaterial(seafloor, standingWaterMask),
-    [seafloor, standingWaterMask],
+    () => createSurfRibbonMaterial(seafloor, standingWaterMask, standingWaterRendering),
+    [seafloor, standingWaterMask, standingWaterRendering],
   );
   const deepMaterial = useMemo(() => createDeepOceanMaterial(rippleNormal), [rippleNormal]);
 
@@ -1561,7 +1577,7 @@ export function Water({ quality = 'performance', reflections = true }) {
       if (!Number.isFinite(x) || !Number.isFinite(z)) return;
       const zoneId = useThreeGameStore.getState().currentZoneId;
       const standingMask = standingWaterMaskAt(x, z, zoneId);
-      if (standingMask > 0.18) return;
+      if (standingMask > getStandingWaterRenderingConfig(zoneId).oceanRippleMaskCutoff) return;
       const depth = WATER_LEVEL - terrainHeight(x, z, zoneId);
       if (depth < 0.025 || depth > 3.2) return;
       const depthScale = THREE.MathUtils.smoothstep(depth, 0.04, 0.24)
@@ -1628,8 +1644,9 @@ export function Water({ quality = 'performance', reflections = true }) {
     const wade = THREE.MathUtils.smoothstep(wadeDepth, 0.04, 0.22)
       * (1 - THREE.MathUtils.smoothstep(wadeDepth, 1.45, 2.3));
     const standingMask = standingWaterMaskAt(pp.x, pp.z, store.currentZoneId);
-    const oceanWade = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < 0.18 ? wade : 0;
-    const oceanSwimSurface = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < 0.18
+    const { oceanRippleMaskCutoff } = standingWaterRendering;
+    const oceanWade = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < oceanRippleMaskCutoff ? wade : 0;
+    const oceanSwimSurface = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < oceanRippleMaskCutoff
       ? THREE.MathUtils.smoothstep(wadeDepth, 0.55, 1.15)
         * (1 - THREE.MathUtils.smoothstep(wadeDepth, 2.4, 3.4))
         * 0.72

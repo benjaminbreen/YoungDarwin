@@ -23,6 +23,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       seed,
       zoneId: currentZoneId,
       basePosition: base,
+      actorScale: specimen?.sceneScale || 1,
     });
   }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed]);
   const positionRef = useRef(basePosition?.clone?.() || null);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { updateRuntimePlayerPose } from '../../store';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
-import { EMPTY_KEYS, PLAYER, SWIM } from './playerConfig';
+import { EMPTY_KEYS, IDLE_BEHAVIOR, PLAYER, SPRINT, SWIM } from './playerConfig';
 import { playerControllerDebugEnabled } from './playerUtils';
 
 const VISUAL_RUN_HOLD = 0.22;
@@ -153,6 +153,9 @@ export function finalizePlayerFrame({
     wadeDepth: Math.max(0, WATER_LEVEL - p.y),
     flying: Boolean(stateRef.current.flying),
     flightSpeedT: stateRef.current.flightSpeedT || 0,
+    sprintT: stateRef.current.sprinting
+      ? THREE.MathUtils.clamp(horizontalSpeed / (playerConfig.runSpeed * SPRINT.speedScale), 0, 1)
+      : 0,
     cameraProfile,
     now,
     delta: cameraDelta,
@@ -206,6 +209,45 @@ export function finalizePlayerFrame({
   stateRef.current.airborne = wasAirborne.current;
   stateRef.current.swimming = swimState.current.active;
   stateRef.current.swimSprinting = sprintingSwim;
+
+  // Sprint spool-up: sustained near-max running upgrades run into the sprint
+  // tier (gait + FOV + small speed lift). A running jump keeps the spool alive
+  // so a sprint-jump-sprint chain never drops out of the tier mid-air.
+  const sprintEffort = (
+    visual.running
+    && horizontalSpeed > playerConfig.runSpeed * SPRINT.minSpeedRatio
+    && !tiredRun
+    && !stateRef.current.crouching
+    && !stateRef.current.aiming
+    && !swimState.current.active
+  ) || (wasAirborne.current && stateRef.current.jumpWasRunning && (stateRef.current.runHeldFor || 0) > 0);
+  stateRef.current.runHeldFor = sprintEffort
+    ? (stateRef.current.runHeldFor || 0) + delta
+    : Math.max(0, (stateRef.current.runHeldFor || 0) - delta * 3);
+  stateRef.current.sprinting = sprintEffort && stateRef.current.runHeldFor >= SPRINT.spoolTime;
+
+  // Run effort accumulates while running and drains at rest; coming to a stop
+  // with a big effort balance leaves Darwin winded (heavy-breathing idle +
+  // boosted breathing layer) until it drains back down.
+  const previousEffort = stateRef.current.runEffort || 0;
+  stateRef.current.runEffort = (visual.running || sprintingSwim)
+    ? Math.min(previousEffort + delta * (stateRef.current.sprinting ? 1.35 : 1), 14)
+    : Math.max(0, previousEffort - delta * (moving ? 0.55 : 1.35));
+  const restingNow = !moving
+    && !stateRef.current.airborne
+    && !swimState.current.active
+    && horizontalSpeed < 0.5;
+  if (restingNow && !stateRef.current.winded
+    && stateRef.current.runEffort > (fatigue >= 50 ? IDLE_BEHAVIOR.windedEffortFatigued : IDLE_BEHAVIOR.windedEffort)) {
+    stateRef.current.winded = true;
+  }
+  if (stateRef.current.winded && (moving || stateRef.current.runEffort < IDLE_BEHAVIOR.windedRecover)) {
+    stateRef.current.winded = false;
+  }
+  stateRef.current.idleFor = (restingNow && !stateRef.current.aiming && !stateRef.current.crouching)
+    ? (stateRef.current.idleFor || 0) + delta
+    : 0;
+  stateRef.current.longIdle = !stateRef.current.winded && stateRef.current.idleFor >= IDLE_BEHAVIOR.longIdleAfter;
   wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
   stateRef.current.wadeDepth = wadeDepth.current;
 

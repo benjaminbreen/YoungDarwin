@@ -671,6 +671,8 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'flamingo' ? 2.35
     : specimen.id === 'lavagull' ? 1.05
     : specimen.id === 'cat' ? 0.95
+    : specimen.id === 'feralgoat' ? 1.35
+    : specimen.id === 'feralhorse' ? 2.2
     : 1.45;
   const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
     : specimen.id === 'basalt' ? 0.85
@@ -683,6 +685,8 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'lavagull' ? 0.5
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'cat' ? 0.45
+    : specimen.id === 'feralgoat' ? 0.68
+    : specimen.id === 'feralhorse' ? 1.18
     : specimen.id === 'galapagospenguin' ? 0.55
     : 0.8;
   const standingWater = useMemo(

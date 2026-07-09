@@ -14,6 +14,7 @@ import {
   darwin5TransitionFade,
 } from '../player/darwin5AnimationManifest.mjs';
 import { createFootContactRig } from '../player/footContactRig';
+import { getFootContactProfile } from '../player/gaitProfiles';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin',
@@ -414,6 +415,12 @@ const ONE_SHOT_CLIPS = new Set([
   'standingInspectDownward',
   'lookAround',
   'lookAroundShort',
+  'fidgetStand',
+  'neckStretch',
+  'armStretch',
+  'neutralIdle',
+  'happyIdle',
+  'inspectNearbyIdle',
   'pickUp',
   'point',
   'pray',
@@ -441,6 +448,15 @@ const CLIP_SETTINGS = {
   injuredWaveIdle: { loop: true, fade: 0.18 },
   walk: { loop: true, fade: 0.14 },
   run: { loop: true, fade: 0.12 },
+  sprint: { loop: true, fade: 0.16 },
+  grassRun: { loop: true, fade: 0.14 },
+  runBackwards: { loop: true, fade: 0.14 },
+  jogBackwards: { loop: true, fade: 0.14 },
+  backwardTurnLeft: { loop: true, fade: 0.14 },
+  backwardTurnRight: { loop: true, fade: 0.14 },
+  windedIdle: { loop: true, fade: 0.28 },
+  boredIdle: { loop: true, fade: 0.34 },
+  tiredIdle: { loop: true, fade: 0.3 },
   jog: { loop: true, fade: 0.14 },
   startWalk: { fade: 0.08 },
   stopWalk: { fade: 0.1 },
@@ -517,6 +533,21 @@ const CLIP_SETTINGS = {
 const CLIP_FALLBACKS = {
   lookAround: 'idle',
   lookAroundShort: 'lookAround',
+  fidgetStand: 'lookAroundShort',
+  neckStretch: 'lookAroundShort',
+  armStretch: 'lookAroundShort',
+  neutralIdle: 'idle',
+  happyIdle: 'lookAroundShort',
+  inspectNearbyIdle: 'lookAroundShort',
+  windedIdle: 'idle',
+  boredIdle: 'idle',
+  tiredIdle: 'exhaustedIdle',
+  sprint: 'run',
+  grassRun: 'run',
+  runBackwards: 'walkBackwards',
+  jogBackwards: 'walkBackwards',
+  backwardTurnLeft: 'walkBackwards',
+  backwardTurnRight: 'walkBackwards',
   fallingIdle: 'fall',
   sprintToWallClimb: 'climbingUpWall',
   vault: 'climbingUpWall',
@@ -571,6 +602,37 @@ const CLIP_FALLBACKS = {
 function isOneShotClip(name) {
   return ONE_SHOT_CLIPS.has(normalizeClipName(name));
 }
+
+// Looping gait cycles that should stay foot-phase-aligned across crossfades.
+// Without this, every walk<->run/strafe/carry switch restarts the new cycle at
+// time 0 and blends two mismatched leg phases — the classic scissoring seam.
+const GAIT_CLIP_RE = /walk|run|jog|sprint|strafe|backward|wade/i;
+
+function isGaitLoopClip(name) {
+  return Boolean(name) && GAIT_CLIP_RE.test(name) && !isOneShotClip(name);
+}
+
+// Start `next` at the gait phase `previous` is currently in. Where both clips
+// have authored foot-contact profiles, align on the left-foot contact point so
+// opposite-footed cycles (e.g. walk -> walkBackwards) still land in step.
+function syncGaitPhase(previous, next, assetId, resolvedClip) {
+  const prevClip = previous?.getClip?.();
+  const nextClip = next?.getClip?.();
+  const prevDuration = prevClip?.duration || 0;
+  const nextDuration = nextClip?.duration || 0;
+  if (prevDuration < 0.05 || nextDuration < 0.05) return;
+  const prevPhase = (((previous.time || 0) / prevDuration) % 1 + 1) % 1;
+  const prevProfile = getFootContactProfile(assetId, prevClip.name);
+  const nextProfile = getFootContactProfile(assetId, resolvedClip);
+  const phase = prevProfile && nextProfile
+    ? ((prevPhase - prevProfile.left + nextProfile.left) % 1 + 1) % 1
+    : prevPhase;
+  next.time = phase * nextDuration;
+}
+
+// Bones the additive breathing layer may touch: torso, shoulders, neck, head.
+// Arms/hands stay untouched so it can never fight tool grips or aim poses.
+const ADDITIVE_BREATHING_BONE_RE = /spine|neck|head|shoulder/i;
 
 function settingsForClip(name, assetId = null) {
   const base = CLIP_SETTINGS[name] || CLIP_SETTINGS[normalizeClipName(name)] || {};
@@ -723,6 +785,26 @@ function GLBPrimitive({
     });
     return result;
   }, [animations]);
+  // Always-on additive breathing layer (player only, via asset.additiveBreathing).
+  // The clip is filtered to torso/neck rotation tracks and converted to an
+  // additive delta against its own first frame, so at low weight it reads as
+  // subtle chest/shoulder motion under any full-body state.
+  const additiveBreathing = useMemo(() => {
+    const cfg = asset.additiveBreathing;
+    if (!cfg?.clip) return null;
+    const normalized = normalizeClipName(cfg.clip);
+    const source = animations.find(clip => clip.name === cfg.clip || normalizeClipName(clip.name) === normalized);
+    if (!source) return null;
+    const tracks = source.tracks
+      .filter(track => ADDITIVE_BREATHING_BONE_RE.test(track.name.split('.')[0]) && track.name.endsWith('.quaternion'))
+      .map(track => track.clone());
+    if (!tracks.length) return null;
+    const clip = new THREE.AnimationClip(`${source.name}.additive`, source.duration, tracks);
+    THREE.AnimationUtils.makeClipAdditive(clip);
+    const action = mixer.clipAction(clip, importedScene);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    return { action, weight: 0 };
+  }, [animations, asset.additiveBreathing, importedScene, mixer]);
   const footContactRig = useMemo(() => createFootContactRig({
     assetId,
     asset,
@@ -805,6 +887,9 @@ function GLBPrimitive({
     next.setLoop(oneShot ? THREE.LoopOnce : THREE.LoopRepeat, oneShot ? 1 : Infinity);
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
     if (previous && previous !== next) {
+      if (!oneShot && isGaitLoopClip(resolvedClip) && isGaitLoopClip(previousName)) {
+        syncGaitPhase(previous, next, assetId, resolvedClip);
+      }
       previous.crossFadeTo(next, transitionFade, false);
     } else {
       next.fadeIn(transitionFade);
@@ -897,6 +982,31 @@ function GLBPrimitive({
     // Fauna and other world actors follow the world clock so bullet time
     // slows their wingbeats/gaits along with their motion.
     if (timeScaled) mixerDelta *= worldTime.scale;
+    if (additiveBreathing) {
+      const motionState = grounding?.motionRef?.current;
+      let targetWeight = 0.55;
+      let breathScale = 1;
+      if (motionState) {
+        if (motionState.aiming || motionState.action || motionState.swimming) targetWeight = 0;
+        else if (motionState.airborne) targetWeight = 0.1;
+        else if (motionState.running) targetWeight = 0.15;
+        else if (motionState.walking) targetWeight = 0.3;
+        // Winded after a sprint: breathe visibly harder and faster.
+        if (motionState.winded && !motionState.action && !motionState.aiming) {
+          targetWeight = Math.max(targetWeight, 1.0);
+          breathScale = 1.5;
+        }
+      }
+      additiveBreathing.weight = THREE.MathUtils.damp(additiveBreathing.weight, targetWeight, 3.5, delta);
+      const breathing = additiveBreathing.action;
+      if (additiveBreathing.weight > 0.01) {
+        if (!breathing.isRunning()) breathing.play();
+        breathing.setEffectiveWeight(additiveBreathing.weight);
+        breathing.setEffectiveTimeScale(breathScale);
+      } else if (breathing.isRunning()) {
+        breathing.stop();
+      }
+    }
     mixer.update(mixerDelta);
     // Masked overlay (e.g. shouldered-aim upper body over walk cycles).
     const overlayRequest = overlaySelectorRef.current ? overlaySelectorRef.current() : null;

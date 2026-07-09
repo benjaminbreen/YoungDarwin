@@ -119,8 +119,11 @@ export function altPostOfficeTerrainHeight(x, z, { movementSurface = false } = {
   // Compacted trail.
   y += altPostOfficeTrailInfluence(x, z) * 0.16;
 
-  // Fine surface detail (reduced on the movement surface).
-  y += movementSurface ? terrainFineDetail(x, z) * 0.2 : terrainFineDetail(x, z) * 0.8;
+  // Fine surface detail. Keep the larger beach contours intact, but reduce
+  // high-frequency displacement near the waterline where triangulation is most visible.
+  const inlandDetail = smoothstep(d, 8, 22);
+  const renderDetailScale = lerp(0.38, 0.8, inlandDetail);
+  y += terrainFineDetail(x, z) * (movementSurface ? 0.2 : renderDetailScale);
 
   return Math.max(-4.8, y);
 }
@@ -175,13 +178,18 @@ export function altPostOfficeTerrainBiomeAt(x, z, y = altPostOfficeTerrainHeight
 export function altPostOfficeTerrainColor(x, z, y) {
   const blend = altPostOfficeTerrainBlend(x, z, y);
   const noise = terrainSurfaceNoise(x, z);
-  if (blend.water > 0.6) return new THREE.Color('#4fc4cd');
+  if (blend.water > 0.6) {
+    const submergedSand = new THREE.Color('#d8d2b2');
+    submergedSand.lerp(new THREE.Color('#eee2bf'), blend.bay * 0.28);
+    submergedSand.multiplyScalar(0.94 + noise * 0.06);
+    return submergedSand;
+  }
 
-  const color = new THREE.Color('#a08a5c'); // ash/scrub base
+  const color = new THREE.Color('#b5a97c'); // warm pale ash/scrub base
   const layers = [
-    ['#7a6f55', blend.wetSand * 1.2],
-    ['#dcc28a', blend.sandBeach * 1.4],
-    ['#e7d6a8', blend.landing * 1.6],
+    ['#c9c19c', blend.wetSand * 1.2],
+    ['#eadcae', blend.sandBeach * 1.45],
+    ['#f0e4c4', blend.landing * 1.7],
     ['#5d7240', blend.greenScrub * 1.5],
     ['#2b2a24', blend.blackBasalt * 1.2],
     ['#8a7f4e', blend.dryScrub],

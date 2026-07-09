@@ -316,7 +316,13 @@ export function updatePlayerInteractions({
         };
       }
     }
-    startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
+    // First-time captures earn a short celebration flourish after the
+    // collection animation resolves (interruptible, so it never costs input).
+    const celebrate = stateRef.current.modelAssetId === 'darwin5' && !alreadyCollected;
+    startAction(animation.clip, animation.duration, {
+      lockMovement: animation.lockMovement,
+      ...(celebrate ? { recoverAction: 'happyIdle' } : {}),
+    });
     if (currentState.activeToolId === 'insect_net' && maybeTriggerNetSnagFromSwing({ position, facing })) {
       return true;
     }

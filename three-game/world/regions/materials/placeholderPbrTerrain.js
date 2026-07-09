@@ -74,6 +74,11 @@ const COMMON_GLSL = /* glsl */`
         uniform sampler2D uPlaceholderRoughness2;
         uniform vec3 uPlaceholderScale;
         uniform vec3 uPlaceholderNormalStrength;
+        uniform float uPlaceholderColorMix;
+        uniform float uPlaceholderVertexTintStrength;
+        uniform float uPlaceholderDarkGuideStrength;
+        uniform float uPlaceholderBrightMute;
+        uniform float uPlaceholderMinRoughness;
         varying vec3 vPlaceholderWorld;
 
         float phHash(vec2 p) {
@@ -163,9 +168,10 @@ const COMMON_GLSL = /* glsl */`
             w2 = smoothstep(0.44, 0.84, fine) * (0.32 + slope * 0.22);
           } else {
             // Pale shell beach: white sand base, warmer inland sand, basalt on
-            // low wet edges and steeper/darker patches.
+            // steep/darker patches. Wet sand remains sand; water handles its
+            // own tinting and should not become basalt by height alone.
             w1 = smoothstep(0.18, 0.72, broad) * smoothstep(-0.35, 1.2, h) * (1.0 - slope * 0.22) * 0.7;
-            w2 = clamp(lowWet * 0.32 + slope * 0.46 + smoothstep(0.72, 0.94, fine) * 0.22, 0.0, 0.78);
+            w2 = clamp(slope * 0.46 + smoothstep(0.78, 0.96, fine) * 0.16, 0.0, 0.68);
           }
 
           w1 = clamp(w1, 0.0, 0.95);
@@ -176,17 +182,28 @@ const COMMON_GLSL = /* glsl */`
         }
 `;
 
-export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' } = {}) {
+export function createPlaceholderPbrTerrainMaterial({
+  regionType = 'scrubland',
+  colorMix = 0.88,
+  vertexTintStrength = 0,
+  darkGuideStrength = null,
+  brightMute = null,
+  minRoughness = null,
+} = {}) {
   const profileName = terrainProfile(regionType);
   const profileId = PROFILE_IDS[profileName] ?? PROFILE_IDS.dry;
+  const isPaleBeach = profileName === 'paleBeach';
+  const resolvedDarkGuideStrength = darkGuideStrength ?? (isPaleBeach ? 0.88 : 0);
+  const resolvedBrightMute = brightMute ?? (isPaleBeach ? 0.5 : 0);
+  const resolvedMinRoughness = minRoughness ?? (isPaleBeach ? 0.965 : 0);
   const layers = loadLayers(profileName);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: profileName === 'paleBeach' ? 1 : 0.9,
+    roughness: isPaleBeach ? 1 : 0.9,
     metalness: 0,
     flatShading: false,
   });
-  if (profileName === 'paleBeach') material.envMapIntensity = 0.35;
+  if (isPaleBeach) material.envMapIntensity = 0.35;
 
   material.addEventListener('dispose', () => {
     layers.forEach(layer => disposePbrTerrainSet(layer.loaded));
@@ -213,6 +230,11 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
         layers[2].textureSet.normalStrength,
       ),
     };
+    shader.uniforms.uPlaceholderColorMix = { value: colorMix };
+    shader.uniforms.uPlaceholderVertexTintStrength = { value: vertexTintStrength };
+    shader.uniforms.uPlaceholderDarkGuideStrength = { value: resolvedDarkGuideStrength };
+    shader.uniforms.uPlaceholderBrightMute = { value: resolvedBrightMute };
+    shader.uniforms.uPlaceholderMinRoughness = { value: resolvedMinRoughness };
     material.userData.shader = shader;
 
     shader.vertexShader = shader.vertexShader
@@ -232,13 +254,14 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        vec3 phVertexColor = diffuseColor.rgb;
         vec3 phSurfaceNormal = normalize(cross(dFdx(vPlaceholderWorld), dFdy(vPlaceholderWorld)));
         if (phSurfaceNormal.y < 0.0) phSurfaceNormal *= -1.0;
         vec3 phWeights = phLayerWeights(phSurfaceNormal);
         if (uPlaceholderProfile > 5.5) {
-          float phVertexLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-          float phDarkGuide = 1.0 - smoothstep(0.22, 0.42, phVertexLuma);
-          phWeights = normalize(mix(phWeights, vec3(0.04, 0.10, 0.86), phDarkGuide * 0.88));
+          float phVertexLuma = dot(phVertexColor, vec3(0.299, 0.587, 0.114));
+          float phDarkGuide = 1.0 - smoothstep(0.14, 0.30, phVertexLuma);
+          phWeights = normalize(mix(phWeights, vec3(0.04, 0.10, 0.86), phDarkGuide * uPlaceholderDarkGuideStrength));
         }
         vec2 phP = vPlaceholderWorld.xz;
         vec3 phColor0 = phAlbedo(uPlaceholderAlbedo0, phP, uPlaceholderScale.x, 0.0);
@@ -248,9 +271,14 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
         phColor *= 0.92 + phFbm(phP * 1.8 + vec2(5.0, -3.0)) * 0.14;
         if (uPlaceholderProfile > 5.5) {
           float phBright = max(max(phColor.r, phColor.g), phColor.b);
-          phColor = mix(phColor, phColor * vec3(0.78, 0.80, 0.76), smoothstep(0.66, 0.96, phBright) * 0.5);
+          phColor = mix(phColor, phColor * vec3(0.78, 0.80, 0.76), smoothstep(0.66, 0.96, phBright) * uPlaceholderBrightMute);
         }
-        diffuseColor.rgb = mix(diffuseColor.rgb, clamp(phColor, 0.0, 1.0), 0.88);`,
+        if (uPlaceholderVertexTintStrength > 0.001) {
+          float phTintLuma = max(dot(phVertexColor, vec3(0.299, 0.587, 0.114)), 0.08);
+          vec3 phTint = clamp(phVertexColor / phTintLuma, vec3(0.45), vec3(1.75));
+          phColor = mix(phColor, phColor * phTint, uPlaceholderVertexTintStrength);
+        }
+        diffuseColor.rgb = mix(phVertexColor, clamp(phColor, 0.0, 1.0), uPlaceholderColorMix);`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
@@ -267,8 +295,8 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
           phRough = max(phRough, mix(0.76, 0.88, phBasaltCover));
           phRough = mix(phRough, 0.93, phBasaltCover * 0.28);
         }
-        if (uPlaceholderProfile > 5.5) {
-          phRough = max(phRough, 0.965);
+        if (uPlaceholderMinRoughness > 0.0) {
+          phRough = max(phRough, uPlaceholderMinRoughness);
         }
         roughnessFactor = mix(roughnessFactor, clamp(phRough, 0.58, 0.98), 0.82);`,
       )
@@ -290,7 +318,14 @@ export function createPlaceholderPbrTerrainMaterial({ regionType = 'scrubland' }
       );
   };
 
-  material.customProgramCacheKey = () => `placeholder-pbr-terrain-${profileName}-v3`;
+  material.customProgramCacheKey = () => [
+    `placeholder-pbr-terrain-${profileName}-v4`,
+    colorMix.toFixed(2),
+    vertexTintStrength.toFixed(2),
+    resolvedDarkGuideStrength.toFixed(2),
+    resolvedBrightMute.toFixed(2),
+    resolvedMinRoughness.toFixed(2),
+  ].join('-');
   material.needsUpdate = true;
   return material;
 }

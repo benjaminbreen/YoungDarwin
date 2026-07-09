@@ -1024,7 +1024,7 @@ export const locations = [
   {
     id: 'BLACK_BEACH_SURF',
     name: 'Black Beach Surf',
-    description: 'Waist-deep in the choppy ocean surf. The undertow seems quite dangerous.',
+    description: 'Low, wadable surf over black volcanic sand, deepening westward into swimmable water.',
     x: -1,
     y: 1,
     color: '#4682b4',
@@ -1034,7 +1034,7 @@ export const locations = [
     npcs: [],
     boundaries: { west: 'ocean' },
     discoveries: [
-      'Dangerous currents swirl around your legs, threatening to pull you seaward.'
+      'The eastern shallows are calm enough to wade, but the water grows darker and deeper toward the open west.'
     ],
     notableFeatures: [
       'Foam-topped waves crash rhythmically against volcanic sand.',
@@ -1047,13 +1047,24 @@ export const locations = [
   {
     id: 'BLACK_BEACH',
     name: 'Black Beach Uplands',
-    description: 'Volcanic sand, home to sea lions and iguanas.',
+    description: 'A west-facing black-sand coast where shallow water laps across low dunes and sparse dry scrub.',
     x: 0,
     y: 1,
     color: '#bdb76b',
     type: 'coastallava',
     validMoves: ['E','SE','S'],
-    specimens: ['seaLion','marineIguana'],
+    specimens: ['seaLion','marineIguana','feralgoat'],
+    specimenPlacements: [
+      {
+        instanceId: 'black-beach-feral-goat-dune-scrub-1',
+        specimenId: 'feralgoat',
+        position: [28, 0, 18],
+        behavior: 'graze',
+        sceneScale: 1.05,
+        habitatRadiusX: 13,
+        habitatRadiusZ: 8,
+      },
+    ],
     npcs: [],
     boundaries: { west: 'ocean' },
     discoveries: [
@@ -1332,7 +1343,7 @@ export const locations = [
         description: 'Follow the stream terraces east to Watkins Camp.',
       },
     },
-    specimens: ['medium_ground_finch','floreana_mockingbird','cat'],
+    specimens: ['medium_ground_finch','floreana_mockingbird','cat','feralgoat','feralhorse'],
     npcs: [],
     boundaries: {},
     specimenPlacements: [
@@ -1362,6 +1373,24 @@ export const locations = [
         sceneScale: 1,
         habitatRadiusX: 4.8,
         habitatRadiusZ: 2.8,
+      },
+      {
+        instanceId: 'penal-colony-feral-goat-paddock-1',
+        specimenId: 'feralgoat',
+        position: [17.4, 0, 28.2],
+        behavior: 'graze',
+        sceneScale: 1,
+        habitatRadiusX: 10.0,
+        habitatRadiusZ: 6.0,
+      },
+      {
+        instanceId: 'penal-colony-feral-horse-paddock-edge-1',
+        specimenId: 'feralhorse',
+        position: [27.2, 0, 24.6],
+        behavior: 'graze',
+        sceneScale: 1.05,
+        habitatRadiusX: 12.5,
+        habitatRadiusZ: 7.0,
       },
     ],
     discoveries: [
@@ -1400,7 +1429,7 @@ export const locations = [
       },
     },
     playerStart: [-5, 0, 3.2],
-    specimens: ['lavalizard','medium_ground_finch','basalt','scoria'],
+    specimens: ['lavalizard','medium_ground_finch','basalt','scoria','feralgoat'],
     npcs: [],
     boundaries: {},
     specimenPlacements: [
@@ -1436,6 +1465,33 @@ export const locations = [
         behavior: 'still',
         sceneScale: 0.62,
       },
+      {
+        instanceId: 'rocky-clearing-feral-goat-scrub-edge-1',
+        specimenId: 'feralgoat',
+        position: [-23.5, 0, 10.8],
+        behavior: 'graze',
+        sceneScale: 1,
+        habitatRadiusX: 11.0,
+        habitatRadiusZ: 6.5,
+      },
+      {
+        instanceId: 'rocky-clearing-feral-goat-rubble-browse-2',
+        specimenId: 'feralgoat',
+        position: [-31.2, 0, 1.8],
+        behavior: 'graze',
+        sceneScale: 1.28,
+        habitatRadiusX: 9.0,
+        habitatRadiusZ: 5.5,
+      },
+      {
+        instanceId: 'rocky-clearing-feral-goat-cave-grass-3',
+        specimenId: 'feralgoat',
+        position: [-18.8, 0, 17.2],
+        behavior: 'graze',
+        sceneScale: 1.6,
+        habitatRadiusX: 10.5,
+        habitatRadiusZ: 6.2,
+      },
     ],
     discoveries: [
       'You find ash from a recent campfire near the largest cave. Someone has been living here.'
@@ -1463,9 +1519,29 @@ export const locations = [
     color: '#bdb76b',
     type: 'highland',
     validMoves: ['W','S'],
-    specimens: ['floreana_giant_tortoise','large_ground_finch'],
+    specimens: ['floreana_giant_tortoise','large_ground_finch','feralgoat'],
     npcs: [],
     boundaries: {},
+    specimenPlacements: [
+      {
+        instanceId: 'el-mirador-feral-goat-path-shoulder-1',
+        specimenId: 'feralgoat',
+        position: [-18.2, 0, -23.4],
+        behavior: 'graze',
+        sceneScale: 1.18,
+        habitatRadiusX: 10.0,
+        habitatRadiusZ: 5.6,
+      },
+      {
+        instanceId: 'el-mirador-feral-goat-ridge-grass-2',
+        specimenId: 'feralgoat',
+        position: [8.4, 0, 11.8],
+        behavior: 'graze',
+        sceneScale: 1.46,
+        habitatRadiusX: 11.0,
+        habitatRadiusZ: 6.4,
+      },
+    ],
     discoveries: [
       'From this cliff edge, a red dirt track winds through dry grass before the slope falls toward hidden southeastern coves.'
     ],
@@ -2085,6 +2161,269 @@ export const locations = [
 
 ]; // end of locations array
 
+const finalRouteExtraLocations = [
+  {
+    id: 'POST_SCRUB_RISE',
+    name: 'Post Office Scrub Rise',
+    description: 'A dry climb out of Post Office Bay through lava blocks, thorn scrub, cactus, and finch habitat.',
+    x: 2,
+    y: 1,
+    color: '#bdb76b',
+    type: 'scrubland',
+    validMoves: [],
+    specimens: ['cactus', 'lavalizard', 'medium_ground_finch', 'galapagoscotton'],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The landing falls away behind you as the trail rises through cactus, gray shrubs, and sun-warmed basalt.',
+    ],
+    notableFeatures: [
+      'A dry wash cuts across the slope below low cactus pads.',
+      'Small finches move between seed heads and lava cracks.',
+      'The path forks toward both Cormorant Bay and the northern highlands.',
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['dry wind in cactus spines', 'lizards skittering over basalt', 'distant north-shore surf'],
+      loadingNote: 'A scrubby rise lifts the track away from Post Office Bay toward the interior.',
+      educationalNote: 'The first inland climb from the shore makes the ecological transition from arid landing site to highland routes legible through vegetation and slope.',
+    },
+  },
+  {
+    id: 'ASILO_SPRING',
+    name: 'Highland Spring',
+    description: 'A small spring and cave-side seep west of Asilo de la Paz, feeding the greener highland corridor.',
+    x: 1,
+    y: 4,
+    color: '#7cc9bd',
+    type: 'wetland',
+    validMoves: [],
+    specimens: ['mangrove', 'medium_ground_finch', 'floreana_giant_tortoise'],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'Water beads out of porous rock and disappears into a narrow channel running toward cultivated ground.',
+    ],
+    notableFeatures: [
+      'A shaded seep marks the beginning of the highland creek system.',
+      'Tortoise tracks press into the damp soil near the spring.',
+      'The penal colony lies east across a short green corridor.',
+    ],
+    narration: {
+      weather: 'misty',
+      sounds: ['water dripping from porous rock', 'finches calling from wet shrubs', 'distant voices from the colony'],
+      loadingNote: 'The trail reaches a small highland spring near the caves above Asilo de la Paz.',
+      educationalNote: 'Fresh water made the highlands strategically important to settlers, prisoners, tortoises, and visiting ships alike.',
+    },
+  },
+  {
+    id: 'WATKINS_CREEK',
+    name: 'Highland Creek Fork',
+    description: 'A green stream terrace between the penal colony and Watkins Camp, where the creek splits around basalt shelves.',
+    x: 3,
+    y: 4,
+    color: '#7cc9bd',
+    type: 'wetland',
+    validMoves: [],
+    specimens: ['floreana_giant_tortoise', 'medium_ground_finch', 'feralgoat'],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The creek runs clear over dark stone before bending east toward Watkins Camp.',
+    ],
+    notableFeatures: [
+      'Flat stones make a ford across the creek.',
+      'Greener grass follows the watercourse through otherwise dry highland ground.',
+      'Goat tracks and tortoise prints overlap in the mud.',
+    ],
+    narration: {
+      weather: 'misty',
+      sounds: ['water moving over basalt', 'goats in the brush', 'soft mud under boots'],
+      loadingNote: 'A highland creek fork carries water east from the colony toward Watkins Camp.',
+      educationalNote: 'A creek corridor gives the Watkins route ecological continuity instead of making the camp feel isolated from the island’s highland water sources.',
+    },
+  },
+];
+
+for (const location of finalRouteExtraLocations) {
+  if (!locations.some(existing => existing.id === location.id)) {
+    locations.push(location);
+  }
+}
+
+const finalRouteLocationUpdates = {
+  BEAGLE: { x: 2, y: -1, boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' } },
+  NW_REEF: { x: 0, y: 0, boundaries: { north: 'ocean', west: 'ocean' } },
+  POST_OFFICE_BAY: { x: 2, y: 0, boundaries: {} },
+  N_SHORE: { x: 3, y: 0, boundaries: { east: 'ocean' } },
+  N_OUTCROP: { x: 3, y: -1, boundaries: { east: 'ocean', west: 'ocean' } },
+  DEVILS_CROWN: { x: 3, y: -2, boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' } },
+  CORMORANT_BAY: { x: 3, y: 1, boundaries: {} },
+  PUNTA_CORMORANT: { x: 4, y: 1, boundaries: { north: 'ocean', east: 'ocean' } },
+  ALT_POST_OFFICE_BAY: {
+    name: 'North Cormorant Beach',
+    description: 'A north-facing pocket beach below Punta Cormorant, with pale sand, lava shelves, and a direct climb toward the eastern cliffs.',
+    x: 4,
+    y: 2,
+    color: '#d8c27c',
+    type: 'beach',
+    specimens: ['crab', 'barnacle', 'galapagoscotton', 'lavalizard'],
+    npcs: [],
+    boundaries: {},
+    discoveries: [
+      'The beach faces north into a sheltered pocket of water, separated from Punta Cormorant by low lava and scrub.',
+    ],
+    notableFeatures: [
+      'A narrow sand shelf tucks into the coast below Punta Cormorant.',
+      'Lava benches and salt-tolerant plants mark the route inland.',
+      'The eastern cliffs rise beyond the beach path.',
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['small surf on pale sand', 'lizards in the dry scrub', 'wind moving across lava shelves'],
+      loadingNote: 'A north-facing pocket beach opens below Punta Cormorant.',
+      educationalNote: 'Separating the Cormorant Bay lagoon from this nearby north-facing beach makes the coast easier to read as a chain of adjacent habitats.',
+    },
+  },
+  EASTERN_CLIFFS: { x: 5, y: 2, boundaries: { north: 'ocean' } },
+  COASTAL_SCRUBLAND: { x: 6, y: 2, boundaries: { east: 'ocean' } },
+  BLACK_BEACH_SURF: { x: -1, y: 1, boundaries: { north: 'ocean', south: 'ocean', west: 'ocean' } },
+  BLACK_BEACH: {
+    name: 'Black Beach',
+    description: 'A west-facing black-sand coast where shallow water laps across low dunes and sparse dry scrub.',
+    x: 0,
+    y: 1,
+    boundaries: {},
+  },
+  LAVA_FLATS: { x: 1, y: 1, boundaries: {} },
+  POST_SCRUB_RISE: { x: 2, y: 1, boundaries: {} },
+  NORTHERN_HIGHLANDS: { x: 2, y: 2, boundaries: {} },
+  W_LAVA: { x: 0, y: 3, boundaries: { west: 'ocean' } },
+  W_HIGH: { x: 1, y: 3, boundaries: {} },
+  C_HIGH: { x: 2, y: 3, boundaries: {} },
+  ASILO_SPRING: { x: 1, y: 4, boundaries: {} },
+  PENAL_COLONY: { x: 2, y: 4, boundaries: {} },
+  WATKINS_CREEK: { x: 3, y: 4, boundaries: {} },
+  WATKINS: { x: 4, y: 4, boundaries: {} },
+  E_MID: { x: 4, y: 3, boundaries: {} },
+  EL_MIRADOR: { x: 5, y: 3, boundaries: { east: 'cliff' } },
+  SE_COAST: { x: 5, y: 4, boundaries: {} },
+  SE_SHALLOW_SURF: { x: 6, y: 4, boundaries: { north: 'ocean', south: 'ocean', east: 'ocean' } },
+  SE_PROMONTORY: { x: 5, y: 5, boundaries: { east: 'cliff' } },
+  S_HUT: { x: 0, y: 4, boundaries: { west: 'ocean' } },
+  SW_BEACH: { x: 0, y: 5, boundaries: { west: 'ocean' } },
+  SW_CLIFFS: { x: 0, y: 6, boundaries: { south: 'ocean', west: 'ocean' } },
+  MANGROVES: { x: 1, y: 5, boundaries: {} },
+  S_INTERTIDAL: { x: 1, y: 6, boundaries: { south: 'ocean' } },
+  S_VOLCANIC: { x: 2, y: 5, boundaries: {} },
+  PUNTA_SUR: { x: 2, y: 6, boundaries: {} },
+  S_REEFS: { x: 2, y: 7, boundaries: { east: 'ocean', south: 'ocean', west: 'ocean' } },
+  S_WETLANDS: { x: 3, y: 6, boundaries: {} },
+
+  // Keep development/test maps out of the playable topology coordinate space.
+  POST_OFFICE_BAY_3: { x: 700, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+  GRASS_TEST: { x: 701, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+  GRASS_HYBRID_TEST: { x: 702, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+  CORMORANT_BAY_SPLAT_TEST: { x: 703, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+  CORMORANT_BAY_TEST_2: { x: 704, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+  CORMORANT_BAY_TEST_3: { x: 705, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
+};
+
+const finalRouteEdges = [
+  ['BEAGLE', 'S', 'POST_OFFICE_BAY', 'water'],
+  ['NW_REEF', 'E', 'POST_OFFICE_BAY', 'water'],
+  ['NW_REEF', 'S', 'BLACK_BEACH', 'land'],
+  ['POST_OFFICE_BAY', 'E', 'N_SHORE', 'land'],
+  ['POST_OFFICE_BAY', 'S', 'POST_SCRUB_RISE', 'land'],
+
+  ['N_SHORE', 'N', 'N_OUTCROP', 'water'],
+  ['N_OUTCROP', 'N', 'DEVILS_CROWN', 'water'],
+  ['N_SHORE', 'S', 'CORMORANT_BAY', 'land'],
+  ['POST_SCRUB_RISE', 'E', 'CORMORANT_BAY', 'land'],
+  ['CORMORANT_BAY', 'E', 'PUNTA_CORMORANT', 'land'],
+  ['PUNTA_CORMORANT', 'S', 'ALT_POST_OFFICE_BAY', 'land'],
+  ['ALT_POST_OFFICE_BAY', 'E', 'EASTERN_CLIFFS', 'land'],
+  ['EASTERN_CLIFFS', 'E', 'COASTAL_SCRUBLAND', 'land'],
+  ['EASTERN_CLIFFS', 'S', 'EL_MIRADOR', 'land'],
+
+  ['BLACK_BEACH', 'W', 'BLACK_BEACH_SURF', 'water'],
+  ['BLACK_BEACH', 'E', 'LAVA_FLATS', 'land'],
+  ['BLACK_BEACH', 'S', 'W_LAVA', 'land'],
+  ['LAVA_FLATS', 'E', 'POST_SCRUB_RISE', 'land'],
+  ['LAVA_FLATS', 'S', 'W_HIGH', 'land'],
+  ['POST_SCRUB_RISE', 'S', 'NORTHERN_HIGHLANDS', 'land'],
+  ['NORTHERN_HIGHLANDS', 'S', 'C_HIGH', 'land'],
+
+  ['W_LAVA', 'E', 'W_HIGH', 'land'],
+  ['W_LAVA', 'S', 'S_HUT', 'land'],
+  ['W_HIGH', 'E', 'C_HIGH', 'land'],
+  ['C_HIGH', 'S', 'PENAL_COLONY', 'land'],
+  ['PENAL_COLONY', 'W', 'ASILO_SPRING', 'creek'],
+  ['PENAL_COLONY', 'E', 'WATKINS_CREEK', 'creek'],
+  ['PENAL_COLONY', 'S', 'S_VOLCANIC', 'land'],
+  ['ASILO_SPRING', 'S', 'MANGROVES', 'creek'],
+
+  ['WATKINS_CREEK', 'E', 'WATKINS', 'creek'],
+  ['WATKINS', 'N', 'E_MID', 'creek'],
+  ['E_MID', 'E', 'EL_MIRADOR', 'land'],
+  ['EL_MIRADOR', 'S', 'SE_COAST', 'land'],
+  ['SE_COAST', 'E', 'SE_SHALLOW_SURF', 'water'],
+  ['SE_COAST', 'S', 'SE_PROMONTORY', 'land'],
+
+  ['S_HUT', 'E', 'MANGROVES', 'land'],
+  ['S_HUT', 'S', 'SW_BEACH', 'land'],
+  ['SW_BEACH', 'S', 'SW_CLIFFS', 'land'],
+  ['MANGROVES', 'E', 'S_VOLCANIC', 'land'],
+  ['MANGROVES', 'S', 'S_INTERTIDAL', 'land'],
+  ['SW_CLIFFS', 'E', 'S_INTERTIDAL', 'land'],
+  ['S_INTERTIDAL', 'E', 'PUNTA_SUR', 'land'],
+  ['S_VOLCANIC', 'S', 'PUNTA_SUR', 'land'],
+  ['PUNTA_SUR', 'E', 'S_WETLANDS', 'land'],
+  ['PUNTA_SUR', 'S', 'S_REEFS', 'water'],
+];
+
+const finalRouteOpposite = { N: 'S', E: 'W', S: 'N', W: 'E' };
+const finalRouteKindLabel = {
+  creek: 'Follow the creek corridor',
+  land: 'Walk the foot route',
+  water: 'Travel by boat or surf route',
+};
+
+const finalRouteAdjacency = {};
+for (const [fromId, direction, toId, kind] of finalRouteEdges) {
+  finalRouteAdjacency[fromId] ||= {};
+  finalRouteAdjacency[toId] ||= {};
+  finalRouteAdjacency[fromId][direction] = { toId, kind };
+  finalRouteAdjacency[toId][finalRouteOpposite[direction]] = { toId: fromId, kind };
+}
+
+for (const [id, update] of Object.entries(finalRouteLocationUpdates)) {
+  const location = locations.find(item => item.id === id);
+  if (location) Object.assign(location, update);
+}
+
+for (const [id, routes] of Object.entries(finalRouteAdjacency)) {
+  const location = locations.find(item => item.id === id);
+  if (!location) continue;
+  const validMoves = Object.keys(routes);
+  location.validMoves = validMoves;
+  location.routeOverrides = Object.fromEntries(
+    validMoves.map(direction => [direction, routes[direction].toId]),
+  );
+  location.routeOverrideTravel = Object.fromEntries(
+    validMoves.map(direction => {
+      const target = locations.find(item => item.id === routes[direction].toId);
+      const kind = routes[direction].kind;
+      return [
+        direction,
+        {
+          routeLabel: direction,
+          description: `${finalRouteKindLabel[kind] || 'Travel'} ${direction} to ${target?.name || routes[direction].toId}.`,
+        },
+      ];
+    }),
+  );
+}
 
 export default locations;
 

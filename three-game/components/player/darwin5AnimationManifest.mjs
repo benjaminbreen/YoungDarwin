@@ -2,14 +2,37 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   idle: { category: 'idle', loop: true, fade: 0.22 },
   holdIdle: { category: 'idle', loop: true, fade: 0.2, fallback: 'idle' },
   holdToolIdle: { category: 'idle', loop: true, fade: 0.18, fallback: 'idle' },
-  lookAround: { category: 'idleAction', duration: 6.93, lockDuration: 0, fade: 0.18, fallback: 'idle' },
-  lookAroundShort: { category: 'idleAction', duration: 3.6, lockDuration: 0, fade: 0.16, fallback: 'lookAround' },
+  lookAround: { category: 'idleAction', duration: 6.93, lockDuration: 0, fade: 0.18, exitEarly: 0.3, fallback: 'idle' },
+  lookAroundShort: { category: 'idleAction', duration: 3.6, lockDuration: 0, fade: 0.16, exitEarly: 0.28, fallback: 'lookAround' },
+  // Idle variety pool. One-shot fidgets exit early (exitEarly) so the fade
+  // back to idle overlaps the clip's own return-to-base instead of starting
+  // from a clamped final frame.
+  fidgetStand: { category: 'idleAction', duration: 10.6, lockDuration: 0, fade: 0.3, exitEarly: 0.4, fallback: 'lookAroundShort' },
+  neckStretch: { category: 'idleAction', duration: 4.63, lockDuration: 0, fade: 0.3, exitEarly: 0.35, fallback: 'lookAroundShort' },
+  armStretch: { category: 'idleAction', duration: 10.77, lockDuration: 0, fade: 0.3, exitEarly: 0.4, fallback: 'neckStretch' },
+  neutralIdle: { category: 'idleAction', duration: 7.2, lockDuration: 0, fade: 0.32, exitEarly: 0.4, fallback: 'idle' },
+  happyIdle: { category: 'idleAction', duration: 2.03, lockDuration: 0, fade: 0.24, exitEarly: 0.2, fallback: 'lookAroundShort' },
+  // Mixamo "Sad Idle" (head down, fidgety foot kick) repurposed as a
+  // studying-something-on-the-ground fidget — only offered near a specimen.
+  inspectNearbyIdle: { category: 'idleAction', duration: 2.83, lockDuration: 0, fade: 0.28, exitEarly: 0.2, fallback: 'lookAroundShort' },
+  // Conditional base idles: looped, selected by the animation selector while
+  // the condition holds (winded after a sprint, bored after a long idle,
+  // exhausted at high fatigue). boredIdle is a GLB alias of fidgetStand.
+  windedIdle: { category: 'idle', loop: true, fade: 0.28, fallback: 'idle' },
+  boredIdle: { category: 'idle', loop: true, fade: 0.34, fallback: 'idle' },
+  tiredIdle: { category: 'idle', loop: true, fade: 0.3, fallback: 'windedIdle' },
   walk: { category: 'locomotion', loop: true, fade: 0.14 },
   run: { category: 'locomotion', loop: true, fade: 0.12 },
+  sprint: { category: 'locomotion', loop: true, fade: 0.16, fallback: 'run' },
+  grassRun: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'run' },
   jog: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'run' },
   tiredWalk: { category: 'locomotion', loop: true, fade: 0.16, fallback: 'walk' },
   wadeWalk: { category: 'water', loop: true, fade: 0.2, fallback: 'tiredWalk' },
   walkBackwards: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walk' },
+  runBackwards: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walkBackwards' },
+  jogBackwards: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'runBackwards' },
+  backwardTurnLeft: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walkBackwards' },
+  backwardTurnRight: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walkBackwards' },
   walkStrafeLeft: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walk' },
   walkStrafeRight: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'walk' },
   runStrafeLeft: { category: 'locomotion', loop: true, fade: 0.12, fallback: 'run' },
@@ -35,9 +58,9 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   standingJumpHold: { category: 'jump', loop: true, fade: 0.05 },
   runningJumpHold: { category: 'jump', loop: true, fade: 0.05 },
   fallingIdle: { category: 'fall', duration: 0.73, loop: true, fade: 0.08, fallback: 'fall' },
-  fallingToLanding: { category: 'landing', duration: 1.1, lockDuration: 0.18, fade: 0.05 },
-  jumpDown: { category: 'landing', duration: 2.3, lockDuration: 0.28, fade: 0.05, fallback: 'fallingToLanding' },
-  bigJumpDown: { category: 'landing', duration: 2.6, lockDuration: 0.38, fade: 0.05, fallback: 'jumpDown' },
+  fallingToLanding: { category: 'landing', duration: 1.1, lockDuration: 0.18, fade: 0.05, exitEarly: 0.18 },
+  jumpDown: { category: 'landing', duration: 2.3, lockDuration: 0.28, fade: 0.05, exitEarly: 0.3, fallback: 'fallingToLanding' },
+  bigJumpDown: { category: 'landing', duration: 2.6, lockDuration: 0.38, fade: 0.05, exitEarly: 0.3, fallback: 'jumpDown' },
   fallingToRoll: { category: 'landing', duration: 1.83, lockDuration: 0.5, fade: 0.05 },
   landing: { category: 'landing', duration: 1.0, lockDuration: 0.14, fade: 0.05 },
   runningLanding: { category: 'landing', duration: 0.9, lockDuration: 0.12, fade: 0.05 },
@@ -57,11 +80,11 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   vault: { category: 'climb', duration: 2.13, lockDuration: 0.5, fade: 0.05, fallback: 'climbingUpWall' },
   descendStairs: { category: 'locomotion', duration: 0.96, loop: true, fade: 0.16 },
 
-  gather: { category: 'action', duration: 3.7, lockDuration: 1.2, fade: 0.12, fallback: 'gatherGround' },
-  gatherGround: { category: 'action', duration: 3.8, lockDuration: 1.25, fade: 0.12, fallback: 'gather' },
-  gatherChestHeight: { category: 'action', duration: 4.23, lockDuration: 1.35, fade: 0.12, fallback: 'gatherGround' },
-  kneelInspect: { category: 'action', duration: 4.96, lockDuration: 1.2, fade: 0.12, fallback: 'torchInspectForward' },
-  write: { category: 'action', duration: 6.0, lockDuration: 1.0, fade: 0.14, fallback: 'torchInspectForward' },
+  gather: { category: 'action', duration: 3.7, lockDuration: 1.2, fade: 0.12, exitEarly: 0.3, fallback: 'gatherGround' },
+  gatherGround: { category: 'action', duration: 3.8, lockDuration: 1.25, fade: 0.12, exitEarly: 0.3, fallback: 'gather' },
+  gatherChestHeight: { category: 'action', duration: 4.23, lockDuration: 1.35, fade: 0.12, exitEarly: 0.3, fallback: 'gatherGround' },
+  kneelInspect: { category: 'action', duration: 4.96, lockDuration: 1.2, fade: 0.12, exitEarly: 0.35, fallback: 'torchInspectForward' },
+  write: { category: 'action', duration: 6.0, lockDuration: 1.0, fade: 0.14, exitEarly: 0.35, fallback: 'torchInspectForward' },
   swingTool: { category: 'action', duration: 1.63, lockDuration: 0.72, fade: 0.06, fallback: 'heavyToolSwing' },
   swingHammer: { category: 'action', duration: 1.63, lockDuration: 0.72, fade: 0.06, fallback: 'heavyToolSwing' },
   swingNet: { category: 'action', duration: 1.63, lockDuration: 0.72, fade: 0.06, fallback: 'butterflyNetSwing' },
@@ -136,6 +159,17 @@ export const DARWIN5_REQUIRED_RUNTIME_CLIPS = [
   'holdToolWalk',
   'holdToolRun',
   'heavyToolSwing',
+  'sprint',
+  'runBackwards',
+  'jogBackwards',
+  'windedIdle',
+  'boredIdle',
+  'inspectNearbyIdle',
+  'tiredIdle',
+  'fidgetStand',
+  'neckStretch',
+  'armStretch',
+  'breathingIdle',
 ];
 
 function normalizeClipKey(name) {
@@ -160,6 +194,13 @@ export function darwin5ClipLockDuration(clip) {
 
 export function darwin5ClipFallback(clip) {
   return darwin5AnimationMeta(clip)?.fallback ?? null;
+}
+
+// Seconds to end a one-shot action before its clip runs out, so the crossfade
+// back to the base state overlaps the clip's own return-to-base motion rather
+// than starting from a clamped final frame.
+export function darwin5ClipExitEarly(clip) {
+  return darwin5AnimationMeta(clip)?.exitEarly ?? null;
 }
 
 export function darwin5ClipSettings(clip) {

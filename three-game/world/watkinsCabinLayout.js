@@ -17,6 +17,7 @@ import * as THREE from 'three';
 
 export const CABIN = {
   yaw: 0.14,
+  scale: 1.5625,
   halfX: 3.8,
   halfZ: 2.3,
   partitionX: 0.4,
@@ -63,23 +64,30 @@ function seeded(id, k = 1) {
   return v - Math.floor(v);
 }
 
+function scaleSize(size, scale) {
+  return size ? size.map(value => value * scale) : null;
+}
+
 let cached = null;
 
 export function getWatkinsCabinPieces() {
   if (cached) return cached;
-  const { halfX, halfZ, partitionX, eave, ridge, plankH, course, plankT, postR } = CABIN;
+  const { scale, halfX, halfZ, partitionX, eave, ridge, plankH, course, plankT, postR } = CABIN;
   const pieces = [];
 
   const add = (id, kind, { size, radius, halfHeight, at, rot = [0, 0, 0], supports = [], mass, dynamic = false, tone }) => {
     const defaults = PIECE_DEFAULTS[kind] || PIECE_DEFAULTS.plank;
-    const t = transformPiece(at[0], at[1], at[2], rot);
+    const t = transformPiece(at[0] * scale, at[1] * scale, at[2] * scale, rot);
+    const scaledSize = scaleSize(size, scale);
+    const scaledRadius = radius ? radius * scale : null;
+    const scaledHalfHeight = halfHeight ? halfHeight * scale : null;
     pieces.push({
       id,
       kind,
-      shape: radius ? 'cylinder' : 'cuboid',
-      size: size || null,
-      radius: radius || null,
-      halfHeight: halfHeight || null,
+      shape: scaledRadius ? 'cylinder' : 'cuboid',
+      size: scaledSize,
+      radius: scaledRadius,
+      halfHeight: scaledHalfHeight,
       x: t.x,
       y: t.y,
       z: t.z,

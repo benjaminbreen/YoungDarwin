@@ -12,6 +12,10 @@ import { devilsCrownRegion } from './devilsCrown/terrain';
 import { createDevilsCrownTerrainMaterial } from './devilsCrown/material';
 import { northwestReefRegion } from './northwestReef/terrain';
 import { createNorthwestReefTerrainMaterial } from './northwestReef/material';
+import { blackBeachRegion } from './blackBeach/terrain';
+import { createBlackBeachTerrainMaterial } from './blackBeach/material';
+import { blackBeachSurfRegion } from './blackBeachSurf/terrain';
+import { createBlackBeachSurfTerrainMaterial } from './blackBeachSurf/material';
 import { beachWithHutRegion } from './beachWithHut/terrain';
 import { createBeachWithHutTerrainMaterial } from './beachWithHut/material';
 import { southernReefsRegion } from './southernReefs/terrain';
@@ -53,6 +57,8 @@ const authoredRegions = [
   { ...desolateOutcropRegion, createTerrainMaterial: createDesolateOutcropTerrainMaterial },
   { ...devilsCrownRegion, createTerrainMaterial: createDevilsCrownTerrainMaterial },
   { ...northwestReefRegion, createTerrainMaterial: createNorthwestReefTerrainMaterial },
+  { ...blackBeachRegion, createTerrainMaterial: createBlackBeachTerrainMaterial },
+  { ...blackBeachSurfRegion, createTerrainMaterial: createBlackBeachSurfTerrainMaterial },
   { ...beachWithHutRegion, createTerrainMaterial: createBeachWithHutTerrainMaterial },
   { ...southernReefsRegion, createTerrainMaterial: createSouthernReefsTerrainMaterial },
   { ...westernHighlandsRegion, createTerrainMaterial: createWesternHighlandsTerrainMaterial },

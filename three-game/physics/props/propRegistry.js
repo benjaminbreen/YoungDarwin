@@ -112,8 +112,8 @@ export const ZONE_PROPS = {
     {
       id: 'watkins-yard-barrel',
       type: 'barrel',
-      x: -3.6,
-      z: -24.2,
+      x: -1.5,
+      z: -25.6,
       rotation: [Math.PI / 2, 0.8, 0.05],
     },
     // Room A floor corner: two loose boards heaped over the diary.

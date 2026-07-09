@@ -40,6 +40,7 @@ import {
   MOVEMENT_INTERRUPTIBLE_ACTIONS,
   MOVEMENT_FATIGUE,
   SPAWN_DROP,
+  SPRINT,
   SWIM,
   SWIM_POLISH,
 } from './playerConfig';
@@ -84,6 +85,36 @@ const PUSH_FEEDBACK_DURATION = {
   pushMedium: 0.4,
   pushHeavy: 0.48,
 };
+// Idle fidget pool: weighted-random with no immediate repeats. Deep fidgets
+// (long stretches) only surface after Darwin has already fidgeted a couple of
+// times, so a briefly parked player never sees the theatrical ones first.
+// inspectNearbyIdle (head down, studying the ground) only makes sense with a
+// specimen close by — near one it dominates the roll, elsewhere it is skipped.
+const DARWIN5_IDLE_FIDGETS = [
+  { clip: 'lookAroundShort', weight: 3 },
+  { clip: 'inspectNearbyIdle', weight: 5, requiresSpecimen: true },
+  { clip: 'fidgetStand', weight: 2 },
+  { clip: 'neckStretch', weight: 2 },
+  { clip: 'neutralIdle', weight: 2 },
+  { clip: 'lookAround', weight: 1, minCount: 1 },
+  { clip: 'armStretch', weight: 1, minCount: 2 },
+];
+const LEGACY_IDLE_FIDGETS = [{ clip: 'lookAroundShort', weight: 1 }];
+
+function pickIdleFidget(pool, lastClip, count, nearSpecimen) {
+  const options = pool.filter(entry => entry.clip !== lastClip
+    && (entry.minCount ?? 0) <= count
+    && (!entry.requiresSpecimen || nearSpecimen));
+  if (!options.length) return pool[0];
+  const totalWeight = options.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = Math.random() * totalWeight;
+  for (const entry of options) {
+    roll -= entry.weight;
+    if (roll <= 0) return entry;
+  }
+  return options[options.length - 1];
+}
+
 const DEFAULT_CARRIED_OFFSET = [0.32, 1.02, 0.24];
 const DEFAULT_CARRIED_ROTATION = [0, 0, -0.18];
 const FINCH_DROPPING_SLOW_MOTION = {
@@ -1331,7 +1362,10 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const running = Boolean(canRun);
     const tiredRun = running && fatigueRunT > 0.04;
     const fatigueRunScale = running ? THREE.MathUtils.lerp(1, 0.72, fatigueRunT) : 1;
-    const rawRunSpeed = playerConfig.runSpeed * fatigueRunScale;
+    // Spooled-up sprint (see playerFrameFinalization): a small top-speed lift
+    // so committing to a straight makes the sprint tier feel earned.
+    const sprintScale = stateRef.current.sprinting && !tiredRun ? SPRINT.speedScale : 1;
+    const rawRunSpeed = playerConfig.runSpeed * fatigueRunScale * sprintScale;
     const carrySpeedScale = carriedObjectId ? 0.62 : 1;
     const braceSpeedScale = stateRef.current.bracing ? 0.16 : 1;
     // Wading drag: deeper water slows Darwin — about half speed at armpit
@@ -1450,15 +1484,23 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       && !rotateLeftPressed
       && !rotateRightPressed
       && !anyDirectActionPressed
+      // Winded/waiting base idles carry their own body language; layering a
+      // fidget over them reads as twitchy.
+      && !stateRef.current.winded
+      && !stateRef.current.longIdle
       && useThreeGameStore.getState().activeToolId === 'hands';
     if (isDarwinMode && idleEligible) {
       if (!idleFidget.current.idleSince) {
         idleFidget.current.idleSince = now;
-        idleFidget.current.nextAt = now + 7.5;
+        idleFidget.current.nextAt = now + 12;
       } else if (now >= idleFidget.current.nextAt) {
-        startAction('lookAroundShort', ACTION_DURATION.lookAroundShort, { lockMovement: false });
+        const pool = stateRef.current.modelAssetId === 'darwin5' ? DARWIN5_IDLE_FIDGETS : LEGACY_IDLE_FIDGETS;
+        const nearSpecimen = Boolean(useThreeGameStore.getState().nearbySpecimenId);
+        const picked = pickIdleFidget(pool, idleFidget.current.lastClip, idleFidget.current.count, nearSpecimen);
+        startAction(picked.clip, durationFor(picked.clip), { lockMovement: false });
+        idleFidget.current.lastClip = picked.clip;
         idleFidget.current.count += 1;
-        idleFidget.current.nextAt = now + 8.5 + (idleFidget.current.count % 3) * 2.1;
+        idleFidget.current.nextAt = now + 15 + Math.random() * 8;
       }
     } else {
       idleFidget.current.idleSince = 0;
@@ -1989,6 +2031,54 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       stateRef.current.aiming = false;
     }
     lastButtons.current.dodge = dodgePressed;
+    // Run-jump at a climbable face: a fresh jump press while running at a
+    // boulder/wall within reach mantles it directly — no climb key needed.
+    // The jump handler below then sees an action in progress and only buffers
+    // the press, so open-ground jumps are untouched.
+    if (playerConfig.canClimb !== false
+      && isDarwinMode
+      && jumpPressed && !lastButtons.current.jump
+      && running && moving && grounded
+      && !movementLocked
+      && !stateRef.current.action
+      && !stateRef.current.crouching
+      && !stateRef.current.aiming
+      && !swimState.current.active
+      && now - lastAutoClimbAt.current > 0.9) {
+      const jumpClimbTarget = collisionAdapter.findClimbTarget(group.current.position, facing.current);
+      if (jumpClimbTarget && jumpClimbTarget.heightDelta >= 1.05 && jumpClimbTarget.heightDelta <= 3.6) {
+        const jumpClimbGap = Math.hypot(
+          jumpClimbTarget.obstacle.x - group.current.position.x,
+          jumpClimbTarget.obstacle.z - group.current.position.z,
+        ) - (jumpClimbTarget.obstacle.radius || 0) - 0.42;
+        if (jumpClimbGap < 1.35) {
+          lastAutoClimbAt.current = now;
+          const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+          const jumpClimbProfile = stateRef.current.modelAssetId === 'darwin5'
+            ? boulderTraversalProfile(jumpClimbTarget.heightDelta, true, durationFor)
+            : null;
+          beginClimbMotion(
+            jumpClimbProfile?.clip || 'sprintToWallClimb',
+            jumpClimbTarget.end,
+            jumpClimbTarget.heightDelta,
+            Math.atan2(
+              jumpClimbTarget.obstacle.x - group.current.position.x,
+              jumpClimbTarget.obstacle.z - group.current.position.z,
+            ),
+            jumpClimbTarget.heightDelta > 2.4 ? 1.35 : 1,
+            jumpClimbProfile ? {
+              actionDuration: jumpClimbProfile.actionDuration,
+              motionDuration: jumpClimbProfile.motionDuration,
+              arcHeight: jumpClimbProfile.arcHeight,
+              lockMovement: jumpClimbProfile.lockMovement,
+              exitSpeed: approachSpeed * jumpClimbProfile.exitSpeedScale,
+              earlyExitAt: jumpClimbProfile.earlyExitAt,
+              cancelAt: jumpClimbProfile.cancelAt,
+            } : {},
+          );
+        }
+      }
+    }
     if (playerConfig.canJump !== false && !playerConfig.canFly) {
       updatePlayerJumpInputAndGravity({
         keys,

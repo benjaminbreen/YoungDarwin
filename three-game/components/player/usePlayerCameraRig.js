@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { CAMERA, SWIM_POLISH } from './playerConfig';
+import { CAMERA, SPRINT, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
@@ -52,6 +52,7 @@ export function usePlayerCameraRig() {
   const aimActiveRef = useRef(false);
   const wasAimingRef = useRef(false);
   const adsBlendRef = useRef(0);
+  const sprintBlendRef = useRef(0);
   const baseFovRef = useRef(null);
   const firePulseRef = useRef(0);
   const dragPointerTypeRef = useRef('mouse');
@@ -271,10 +272,18 @@ export function usePlayerCameraRig() {
     wadeDepth = 0,
     flying = false,
     flightSpeedT = 0,
+    sprintT = 0,
     cameraProfile = null,
     now,
     delta,
   }) => {
+    // Sprint FOV widen eases in over ~0.4s and back out a touch quicker.
+    sprintBlendRef.current = THREE.MathUtils.damp(
+      sprintBlendRef.current,
+      THREE.MathUtils.clamp(sprintT, 0, 1),
+      sprintT > sprintBlendRef.current ? 4.5 : 6,
+      delta,
+    );
     const openingCameraActive = Boolean(openingCamera?.active);
     openingCameraActiveRef.current = openingCameraActive;
     if (!openingCameraActive) {
@@ -643,9 +652,11 @@ export function usePlayerCameraRig() {
       camera.lookAt(statusLookRef.current);
       if (statusLookRef.current.distanceToSquared(statusPivot) < 0.02) statusLookRef.current = null;
     }
-    // ADS field-of-view tighten, plus the crosshair ray for the resolver.
+    // ADS field-of-view tighten (wins over the sprint widen), plus the
+    // crosshair ray for the resolver.
     if (baseFovRef.current === null) baseFovRef.current = camera.fov;
-    const targetFov = THREE.MathUtils.lerp(baseFovRef.current, SHOTGUN.ads.fov, adsBlendRef.current);
+    const targetFov = THREE.MathUtils.lerp(baseFovRef.current, SHOTGUN.ads.fov, adsBlendRef.current)
+      + sprintBlendRef.current * SPRINT.fovBonus * (1 - adsBlendRef.current);
     if (Math.abs(camera.fov - targetFov) > 0.02) {
       camera.fov = targetFov;
       camera.updateProjectionMatrix();

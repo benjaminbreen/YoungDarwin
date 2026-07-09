@@ -1,5 +1,5 @@
 import { TERRAIN_BOUNDS } from '../../world/terrain';
-import { DARWIN5_CLIP_DURATIONS, darwin5ClipLockDuration } from './darwin5AnimationManifest.mjs';
+import { DARWIN5_CLIP_DURATIONS, darwin5ClipExitEarly, darwin5ClipLockDuration } from './darwin5AnimationManifest.mjs';
 
 export const EMPTY_KEYS = {};
 
@@ -29,6 +29,25 @@ export const PLAYER = {
   tiredRunFatigue: 68,
   exhaustedRunFatigue: 92,
   bounds: TERRAIN_BOUNDS,
+};
+
+// Sprint tier: sustained full-speed running spools up into a faster sprint
+// gait with a widened camera FOV. Dropping below the effort gate (slowing,
+// tiring, crouching, aiming) spools back down.
+export const SPRINT = {
+  spoolTime: 1.15,      // seconds of sustained near-max running before sprint engages
+  speedScale: 1.06,     // sprint ground-speed multiplier over runSpeed
+  fovBonus: 5,          // degrees of FOV widen at full sprint
+  minSpeedRatio: 0.8,   // fraction of runSpeed that counts as sprint effort
+};
+
+// Idle-life behavior: winded recovery after sustained running, and the
+// long-wait idle for a player who parks Darwin.
+export const IDLE_BEHAVIOR = {
+  longIdleAfter: 42,        // seconds of standing still before waitingIdle
+  windedEffort: 5.5,        // run-effort seconds that leave Darwin winded
+  windedEffortFatigued: 3.6, // lower bar when already fatigued
+  windedRecover: 1.1,       // effort level at which breathing settles
 };
 
 export const MOVEMENT_FATIGUE = {
@@ -188,7 +207,14 @@ export const DARWIN5_ACTION_DURATION = {
 };
 
 export function actionDuration(clip, modelAssetId = null) {
-  if (modelAssetId === 'darwin5') return DARWIN5_ACTION_DURATION[clip] || ACTION_DURATION[clip] || 1.2;
+  if (modelAssetId === 'darwin5') {
+    const base = DARWIN5_ACTION_DURATION[clip] || ACTION_DURATION[clip] || 1.2;
+    // End one-shots slightly before the clip runs out so the crossfade back
+    // overlaps the clip's return-to-base pose instead of a clamped last frame.
+    const exitEarly = darwin5ClipExitEarly(clip);
+    if (Number.isFinite(exitEarly) && exitEarly > 0) return Math.max(base * 0.5, base - exitEarly);
+    return base;
+  }
   return ACTION_DURATION[clip] || 1.2;
 }
 
@@ -203,6 +229,13 @@ export function actionLockDuration(clip, modelAssetId = null, fallbackDuration =
 export const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([
   'startWalking',
   'lookAroundShort',
+  'lookAround',
+  'fidgetStand',
+  'neckStretch',
+  'armStretch',
+  'neutralIdle',
+  'happyIdle',
+  'inspectNearbyIdle',
   'stopWalking',
   'runToStop',
   'landing',

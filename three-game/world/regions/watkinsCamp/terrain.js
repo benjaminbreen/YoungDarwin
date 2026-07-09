@@ -250,6 +250,15 @@ export const watkinsCampRegion = {
     biomeAt: watkinsBiomeAt,
     color: watkinsColor,
     standingWaterMask: watkinsStandingWaterMask,
+    // The custom Water2 stream owns the visible river surface. Fade the shared
+    // ocean/surf pass out before the stream mask reaches its shoreline fringe.
+    standingWaterRendering: {
+      globalWaterSuppression: {
+        fadeStart: 0.06,
+        fadeEnd: 0.28,
+        rippleCutoff: 0.12,
+      },
+    },
     isWalkable: isWatkinsWalkable,
     defaultSpawn: [2, 0, -32],
   },

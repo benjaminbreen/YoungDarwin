@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Floreana Route Plan Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #172133;
+      --panel: #202a3c;
+      --paper: #eadcbf;
+      --gold: #d6b56b;
+      --gold-bright: #f1d98b;
+      --line: rgba(237, 218, 170, 0.66);
+      --water: #6db6d3;
+      --creek: #65d5d1;
+      --land: #ceb76e;
+      --human: #c98a54;
+      --danger: #c06f61;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #101827;
+      color: var(--paper);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      padding: 22px 24px 12px;
+      border-bottom: 1px solid rgba(214, 181, 107, 0.28);
+      background: linear-gradient(180deg, #1a2436, #131b2a);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(24px, 3vw, 38px);
+      letter-spacing: 0;
+      color: #f1e8cf;
+    }
+
+    .subtitle {
+      margin: 6px 0 0;
+      max-width: 76rem;
+      color: rgba(234, 220, 191, 0.76);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 24px;
+      border-bottom: 1px solid rgba(214, 181, 107, 0.20);
+      background: #121b2a;
+    }
+
+    button, .toggle {
+      border: 1px solid rgba(214, 181, 107, 0.46);
+      background: rgba(32, 42, 60, 0.92);
+      color: var(--paper);
+      border-radius: 4px;
+      padding: 8px 11px;
+      font: inherit;
+      font-size: 13px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button.active {
+      background: rgba(214, 181, 107, 0.20);
+      border-color: var(--gold-bright);
+      color: var(--gold-bright);
+    }
+
+    .toggle {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 16px;
+      padding: 16px 24px 24px;
+    }
+
+    .board {
+      position: relative;
+      overflow: hidden;
+      min-height: 680px;
+      border: 1px solid rgba(214, 181, 107, 0.50);
+      border-radius: 6px;
+      background:
+        linear-gradient(rgba(214, 181, 107, 0.10) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(214, 181, 107, 0.10) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, rgba(55, 72, 49, 0.65), rgba(18, 27, 42, 1) 70%);
+      background-size: 72px 72px, 72px 72px, auto;
+      box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.45);
+      aspect-ratio: 1402 / 1122;
+    }
+
+    .board.map-mode {
+      min-height: auto;
+      background: #1b3441;
+    }
+
+    .base-map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+
+    .map-mode .base-map {
+      opacity: 0.88;
+    }
+
+    .edge-layer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .edge {
+      stroke: var(--line);
+      stroke-width: 0.32;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+      opacity: 0.72;
+    }
+
+    .edge.water {
+      stroke: var(--water);
+    }
+
+    .edge.creek {
+      stroke: var(--creek);
+      stroke-dasharray: 1.3 0.9;
+      opacity: 0.92;
+    }
+
+    .edge.selected {
+      stroke: var(--gold-bright);
+      stroke-width: 0.58;
+      opacity: 1;
+    }
+
+    .edge.hidden-creek {
+      opacity: 0.14;
+    }
+
+    .nodes {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+    }
+
+    .node {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 132px;
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      transform: translate(-50%, -50%);
+      color: var(--paper);
+      cursor: pointer;
+    }
+
+    .dot {
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #151515;
+      border-radius: 999px;
+      background: var(--land);
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(241, 217, 139, 0.6);
+    }
+
+    .node.water .dot {
+      background: var(--water);
+    }
+
+    .node.human .dot {
+      background: var(--human);
+    }
+
+    .node.summit .dot {
+      width: 0;
+      height: 0;
+      border-left: 11px solid transparent;
+      border-right: 11px solid transparent;
+      border-bottom: 20px solid var(--gold);
+      border-top: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .node.creek .dot {
+      background: var(--creek);
+    }
+
+    .node.selected .dot {
+      box-shadow: 0 0 0 3px rgba(241, 217, 139, 0.46), 0 0 18px rgba(241, 217, 139, 0.78);
+    }
+
+    .node.neighbor .dot {
+      box-shadow: 0 0 0 3px rgba(101, 213, 209, 0.35), 0 0 12px rgba(101, 213, 209, 0.45);
+    }
+
+    .label {
+      margin-top: 4px;
+      max-width: 128px;
+      color: #fff5d4;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 12px;
+      font-style: italic;
+      font-weight: 700;
+      line-height: 1.05;
+      text-align: center;
+      text-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.95),
+        0 0 5px rgba(0, 0, 0, 0.95),
+        0 0 2px rgba(0, 0, 0, 0.95);
+      pointer-events: none;
+    }
+
+    .node:hover .label,
+    .node.selected .label {
+      color: var(--gold-bright);
+    }
+
+    aside {
+      border: 1px solid rgba(214, 181, 107, 0.42);
+      border-radius: 6px;
+      background: rgba(21, 30, 45, 0.94);
+      padding: 14px;
+      min-height: 520px;
+    }
+
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .detail-title {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
+      line-height: 1.1;
+      color: #f1e8cf;
+    }
+
+    .detail-meta {
+      margin: 5px 0 12px;
+      color: rgba(234, 220, 191, 0.68);
+      font-size: 12px;
+    }
+
+    .detail-note {
+      margin: 0 0 12px;
+      color: rgba(234, 220, 191, 0.86);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .routes {
+      display: grid;
+      gap: 6px;
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .routes li {
+      border: 1px solid rgba(214, 181, 107, 0.25);
+      border-radius: 4px;
+      padding: 7px 8px;
+      background: rgba(0, 0, 0, 0.16);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+      font-size: 11px;
+      color: rgba(234, 220, 191, 0.78);
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--land);
+      border: 1px solid #111;
+    }
+
+    .swatch.water {
+      background: var(--water);
+    }
+
+    .swatch.creek {
+      background: var(--creek);
+    }
+
+    .swatch.human {
+      background: var(--human);
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        min-height: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Floreana Route Plan Mockup</h1>
+    <p class="subtitle">
+      Cardinal-only route topology with all maps labelled. The grid view shows gameplay adjacency.
+      The island view shows a first-pass dot-spacing draft on the current painted Floreana map.
+    </p>
+  </header>
+
+  <div class="controls">
+    <button id="gridButton" class="active" type="button">Topology Grid</button>
+    <button id="mapButton" type="button">Island Placement</button>
+    <label class="toggle">
+      <input id="creekToggle" type="checkbox" checked>
+      Highlight Watkins creek line
+    </label>
+  </div>
+
+  <main class="shell">
+    <section id="board" class="board" aria-label="Proposed Floreana route map">
+      <img class="base-map" src="../public/maps/floreana-island-map-new.png" alt="">
+      <svg id="edges" class="edge-layer" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+      <div id="nodes" class="nodes"></div>
+    </section>
+
+    <aside>
+      <p class="kicker">Selected Map</p>
+      <h2 id="detailTitle" class="detail-title"></h2>
+      <p id="detailMeta" class="detail-meta"></p>
+      <p id="detailNote" class="detail-note"></p>
+      <p id="detailHydro" class="detail-note"></p>
+      <p class="kicker">Routes Out</p>
+      <ul id="routeList" class="routes"></ul>
+      <div class="legend">
+        <span><i class="swatch"></i>Land</span>
+        <span><i class="swatch water"></i>Water</span>
+        <span><i class="swatch creek"></i>Creek</span>
+        <span><i class="swatch human"></i>Human</span>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const nodes = [
+      { id: 'BEAGLE', label: 'HMS Beagle', kind: 'water', g: [2, -1], m: [0.322, 0.085], lo: [0, 0], note: 'Anchored off the north coast. Route is by boat to Post Office Bay.' },
+      { id: 'NW_REEF', label: 'Northwest Reef', kind: 'water', g: [0, 0], m: [0.296, 0.160], lo: [-16, 9], note: 'A nearby reef spur west of the main landing. Keep it in the shallow coast/reef band rather than deep water.' },
+      { id: 'POST_OFFICE_BAY', label: 'Post Office Bay', kind: 'human', g: [2, 0], m: [0.396, 0.158], lo: [6, 8], note: 'Primary landfall: barrel, black lava shore, dry scrub, Beagle context.' },
+      { id: 'N_SHORE', label: 'Northern Shore', kind: 'land', g: [3, 0], m: [0.520, 0.106], lo: [0, 0], note: 'Open north-coast beach and dry-shore transition east of the starting area.' },
+      { id: 'CORMORANT_BAY', label: 'Cormorant Bay', kind: 'land', g: [3, 1], m: [0.646, 0.156], lo: [-20, 8], note: 'Brackish bay/lagoon approach. A transition from open shore to Punta Cormorant habitat.' },
+      { id: 'N_CORMORANT_BEACH', label: 'North Cormorant Beach', kind: 'land', g: [4, 2], m: [0.720, 0.220], lo: [14, 4], source: 'reuse ALT_POST_OFFICE_BAY mesh', note: 'Reuse the north-facing Alt Post Office Bay terrain here after removing barrel-specific dressing. It sits on the coast south of Punta Cormorant, with enough separation to read as its own beach.' },
+      { id: 'PUNTA_CORMORANT', label: 'Punta Cormorant', kind: 'land', g: [4, 1], m: [0.704, 0.153], lo: [18, 13], note: 'Olivine beach and flamingo lagoon, placed on the small northern point/islet rather than in open water.' },
+      { id: 'N_OUTCROP', label: 'Desolate Outcrop', kind: 'water', g: [3, -1], m: [0.603, 0.069], lo: [0, 6], note: 'A branch stop: mostly isolation, black rock, surf, marine iguanas, and the approach to Devil\'s Crown.' },
+      { id: 'DEVILS_CROWN', label: 'Devil\'s Crown', kind: 'water', g: [3, -2], m: [0.612, 0.037], lo: [4, -2], note: 'Terminal offshore map. It should feel like a destination, not a through-route.' },
+
+      { id: 'BLACK_BEACH_SURF', label: 'Black Beach Surf', kind: 'water', g: [-1, 1], m: [0.135, 0.355], lo: [-8, 0], note: 'Water/surf spur just off the shifted Black Beach, not out in deep water.' },
+      { id: 'BLACK_BEACH', label: 'Black Beach', kind: 'human', g: [0, 1], m: [0.190, 0.378], lo: [0, 4], note: 'Human-accessible west coast landing, now reached south from Northwest Reef or west from Lava Flats.' },
+      { id: 'POST_SCRUB_RISE', label: 'Post Office Scrub Rise', kind: 'land', g: [2, 1], m: [0.390, 0.238], lo: [0, 4], source: 'new interstitial map', note: 'New first interior climb: dry scrub, lava blocks, cactus, lizards, finches. Its clean exits are north to Post Office Bay, south to Northern Highlands, west to Lava Flats, and east to Cormorant Bay.' },
+      { id: 'LAVA_FLATS', label: 'Lava Flats', kind: 'land', g: [1, 1], m: [0.308, 0.344], lo: [0, 4], note: 'Broken basalt and low dry vegetation, now a real connector rather than an eight-way hub.' },
+      { id: 'NORTHERN_HIGHLANDS', label: 'Northern Highlands', kind: 'land', g: [2, 2], m: [0.500, 0.305], lo: [0, 5], note: 'Dry-to-humid transition below Post Office Scrub Rise and north of Cerro Pajas.' },
+      { id: 'EASTERN_CLIFFS', label: 'Eastern Cliffs', kind: 'land', g: [5, 2], m: [0.815, 0.318], lo: [0, 5], note: 'Eastern rim route below North Cormorant Beach.' },
+      { id: 'COASTAL_SCRUBLAND', label: 'Coastal Scrubland', kind: 'land', g: [6, 2], m: [0.860, 0.405], lo: [0, 4], note: 'Open eastern dry scrub, good for mockingbirds/warblers/cactus rather than dense props.' },
+
+      { id: 'W_LAVA', label: 'Western Lowlands', kind: 'land', g: [0, 3], m: [0.128, 0.596], lo: [-2, 4], note: 'West lowland route, old whaler traces, low dry coast.' },
+      { id: 'W_HIGH', label: 'Western Highlands', kind: 'land', g: [1, 3], m: [0.285, 0.548], lo: [0, 4], note: 'Humid western highlands and tortoise country.' },
+      { id: 'C_HIGH', label: 'Cerro Pajas', kind: 'summit', g: [2, 3], m: [0.515, 0.555], lo: [0, 10], note: 'Central high point, visually northeast of Asilo de la Paz / the penal colony and topologically south of Northern Highlands.' },
+      { id: 'ASILO_SPRING', label: 'Highland Spring', kind: 'creek', g: [1, 4], m: [0.438, 0.635], lo: [-18, 8], source: 'new interstitial map', note: 'A spring/cave map west of Asilo de la Paz, not the settlement itself.', hydro: 'Source of the small creek. It should feed the colony gardens and Watkins route rather than appear as isolated water.' },
+      { id: 'PENAL_COLONY', label: 'Ecuadorian Penal Colony', kind: 'human', g: [2, 4], m: [0.475, 0.665], lo: [0, 8], note: 'Asilo de la Paz: the central highland human hub, with clean exits north, south, east, and west.', hydro: 'Use irrigation ditches or garden channels to visually continue the highland spring water source.' },
+      { id: 'WATKINS_CREEK', label: 'Highland Creek Fork', kind: 'creek', g: [3, 4], m: [0.552, 0.575], lo: [-18, 8], source: 'new interstitial map', note: 'New map in the empty ground west of Rocky Clearing and north of Watkins Camp. It is a stream terrace / fork rather than a second Watkins map.', hydro: 'This lets the horizontal creek at Watkins continue logically through a greener highland corridor before drying into rocky ground near the clearing.' },
+      { id: 'WATKINS', label: 'Watkins Camp', kind: 'human', g: [4, 4], m: [0.610, 0.612], lo: [8, 8], note: 'Watkins homestead remains a creek-side historical map, not just a cabin vignette.', hydro: 'Creek runs west-east across the map, then weakens toward rocky ground and drops south as a ravine.' },
+      { id: 'E_MID', label: 'Rocky Clearing', kind: 'land', g: [4, 3], m: [0.625, 0.475], lo: [6, 5], note: 'Cave/ash/scoria map becomes the dry eastern continuation from Watkins rather than a diagonal hop.' },
+      { id: 'EL_MIRADOR', label: 'El Mirador', kind: 'land', g: [5, 3], m: [0.748, 0.545], lo: [0, 5], note: 'High overlook between Rocky Clearing and the southeastern descent.' },
+
+      { id: 'SW_BEACH', label: 'Marine Iguana Colony', kind: 'land', g: [0, 5], m: [0.245, 0.795], lo: [-12, 8], note: 'Southwest coastal colony, placed on the lava coast rather than offshore.' },
+      { id: 'MANGROVES', label: 'Southern Forest', kind: 'land', g: [1, 5], m: [0.368, 0.705], lo: [0, 8], note: 'Southern humid/forest transition from Cerro Pajas, moved north onto the greener interior mass.' },
+      { id: 'S_VOLCANIC', label: 'Basalt Plains', kind: 'land', g: [2, 5], m: [0.545, 0.790], lo: [0, 7], note: 'Dry southern volcanic ground, linking Asilo/Cerro routes to Punta Sur.' },
+      { id: 'SE_PROMONTORY', label: 'Windy Promontory', kind: 'land', g: [5, 5], m: [0.682, 0.764], lo: [0, 7], note: 'Exposed south/east descent from Watkins. This is where the creek can become a ravine or dry wash.' },
+      { id: 'SE_COAST', label: 'Southeastern Coast', kind: 'land', g: [5, 4], m: [0.775, 0.682], lo: [-12, 8], note: 'Remote wreckage coast, placed lower on the coast between El Mirador and Windy Promontory.' },
+      { id: 'SE_SHALLOW_SURF', label: 'Shallow Surf', kind: 'water', g: [6, 4], m: [0.812, 0.695], lo: [8, 6], note: 'Water spur just off the southeastern coast, in the shallow-water band.' },
+
+      { id: 'SW_CLIFFS', label: 'Southwestern Cliffs', kind: 'land', g: [0, 6], m: [0.318, 0.840], lo: [0, 6], note: 'Dead-end-ish cliff/bird route below Marine Iguana Colony.' },
+      { id: 'S_INTERTIDAL', label: 'Intertidal Flats', kind: 'land', g: [1, 6], m: [0.385, 0.875], lo: [-10, -4], note: 'Tide pools and mangrove edge below Southern Forest.' },
+      { id: 'S_HUT', label: 'Beach with Hut', kind: 'human', g: [0, 4], m: [0.152, 0.715], lo: [-16, 4], note: 'A west-coast cove south of Western Lowlands, north of the Marine Iguana Colony, and west of Southern Forest.' },
+      { id: 'PUNTA_SUR', label: 'Punta Sur', kind: 'land', g: [2, 6], m: [0.494, 0.902], lo: [12, 2], note: 'South headland and main access to southern reef water.' },
+      { id: 'S_WETLANDS', label: 'Wetlands Forest', kind: 'land', g: [3, 6], m: [0.585, 0.824], lo: [0, 6], note: 'Southern wetland spur from Punta Sur, not part of every south-coast route.' },
+      { id: 'S_REEFS', label: 'Southern Reefs', kind: 'water', g: [2, 7], m: [0.432, 0.910], lo: [0, -18], note: 'Southern reef terminal, just offshore from the south coast rather than in deep water.' },
+    ];
+
+    // [from, direction from `from`, to, route kind]. Directions are explicit so
+    // visual dot placement can remain hand-authored without creating duplicate
+    // "west" exits when a route line is oblique on the painting.
+    const edges = [
+      ['BEAGLE', 'S', 'POST_OFFICE_BAY', 'water'],
+      ['NW_REEF', 'E', 'POST_OFFICE_BAY', 'water'],
+      ['NW_REEF', 'S', 'BLACK_BEACH', 'land'],
+      ['POST_OFFICE_BAY', 'E', 'N_SHORE', 'land'],
+      ['POST_OFFICE_BAY', 'S', 'POST_SCRUB_RISE', 'land'],
+
+      ['N_SHORE', 'N', 'N_OUTCROP', 'water'],
+      ['N_OUTCROP', 'N', 'DEVILS_CROWN', 'water'],
+      ['N_SHORE', 'S', 'CORMORANT_BAY', 'land'],
+      ['POST_SCRUB_RISE', 'E', 'CORMORANT_BAY', 'land'],
+      ['CORMORANT_BAY', 'E', 'PUNTA_CORMORANT', 'land'],
+      ['PUNTA_CORMORANT', 'S', 'N_CORMORANT_BEACH', 'land'],
+      ['N_CORMORANT_BEACH', 'E', 'EASTERN_CLIFFS', 'land'],
+      ['EASTERN_CLIFFS', 'E', 'COASTAL_SCRUBLAND', 'land'],
+      ['EASTERN_CLIFFS', 'S', 'EL_MIRADOR', 'land'],
+
+      ['BLACK_BEACH', 'W', 'BLACK_BEACH_SURF', 'water'],
+      ['BLACK_BEACH', 'E', 'LAVA_FLATS', 'land'],
+      ['BLACK_BEACH', 'S', 'W_LAVA', 'land'],
+      ['LAVA_FLATS', 'E', 'POST_SCRUB_RISE', 'land'],
+      ['LAVA_FLATS', 'S', 'W_HIGH', 'land'],
+      ['POST_SCRUB_RISE', 'S', 'NORTHERN_HIGHLANDS', 'land'],
+      ['NORTHERN_HIGHLANDS', 'S', 'C_HIGH', 'land'],
+
+      ['W_LAVA', 'E', 'W_HIGH', 'land'],
+      ['W_LAVA', 'S', 'S_HUT', 'land'],
+      ['W_HIGH', 'E', 'C_HIGH', 'land'],
+      ['C_HIGH', 'S', 'PENAL_COLONY', 'land'],
+      ['PENAL_COLONY', 'W', 'ASILO_SPRING', 'creek'],
+      ['PENAL_COLONY', 'E', 'WATKINS_CREEK', 'creek'],
+      ['PENAL_COLONY', 'S', 'S_VOLCANIC', 'land'],
+      ['ASILO_SPRING', 'S', 'MANGROVES', 'creek'],
+
+      ['WATKINS_CREEK', 'E', 'WATKINS', 'creek'],
+      ['WATKINS', 'N', 'E_MID', 'creek'],
+      ['E_MID', 'E', 'EL_MIRADOR', 'land'],
+      ['EL_MIRADOR', 'S', 'SE_COAST', 'land'],
+      ['SE_COAST', 'E', 'SE_SHALLOW_SURF', 'water'],
+      ['SE_COAST', 'S', 'SE_PROMONTORY', 'land'],
+
+      ['S_HUT', 'E', 'MANGROVES', 'land'],
+      ['S_HUT', 'S', 'SW_BEACH', 'land'],
+      ['SW_BEACH', 'S', 'SW_CLIFFS', 'land'],
+      ['MANGROVES', 'E', 'S_VOLCANIC', 'land'],
+      ['MANGROVES', 'S', 'S_INTERTIDAL', 'land'],
+      ['SW_CLIFFS', 'E', 'S_INTERTIDAL', 'land'],
+      ['S_INTERTIDAL', 'E', 'PUNTA_SUR', 'land'],
+      ['S_VOLCANIC', 'S', 'PUNTA_SUR', 'land'],
+      ['PUNTA_SUR', 'E', 'S_WETLANDS', 'land'],
+      ['PUNTA_SUR', 'S', 'S_REEFS', 'water'],
+    ];
+
+    const byId = Object.fromEntries(nodes.map(node => [node.id, node]));
+    const OPPOSITE = { N: 'S', E: 'W', S: 'N', W: 'E' };
+    const neighbors = new Map(nodes.map(node => [node.id, []]));
+    edges.forEach(([a, direction, b, kind]) => {
+      neighbors.get(a).push({ id: b, kind, direction });
+      neighbors.get(b).push({ id: a, kind, direction: OPPOSITE[direction] });
+    });
+    const duplicateExits = [];
+    neighbors.forEach((routes, nodeId) => {
+      const seen = new Map();
+      routes.forEach(route => {
+        if (seen.has(route.direction)) duplicateExits.push(`${nodeId}:${route.direction} -> ${seen.get(route.direction)}, ${route.id}`);
+        seen.set(route.direction, route.id);
+      });
+    });
+    if (duplicateExits.length) console.warn('Duplicate route directions:', duplicateExits);
+
+    const board = document.getElementById('board');
+    const edgeLayer = document.getElementById('edges');
+    const nodeLayer = document.getElementById('nodes');
+    const gridButton = document.getElementById('gridButton');
+    const mapButton = document.getElementById('mapButton');
+    const creekToggle = document.getElementById('creekToggle');
+    const detailTitle = document.getElementById('detailTitle');
+    const detailMeta = document.getElementById('detailMeta');
+    const detailNote = document.getElementById('detailNote');
+    const detailHydro = document.getElementById('detailHydro');
+    const routeList = document.getElementById('routeList');
+
+    let selectedId = 'POST_OFFICE_BAY';
+    let view = 'map';
+
+    const gridBounds = nodes.reduce((acc, node) => {
+      const [x, y] = node.g;
+      acc.minX = Math.min(acc.minX, x);
+      acc.maxX = Math.max(acc.maxX, x);
+      acc.minY = Math.min(acc.minY, y);
+      acc.maxY = Math.max(acc.maxY, y);
+      return acc;
+    }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+
+    function position(node) {
+      if (view === 'map') {
+        return [node.m[0] * 100, node.m[1] * 100];
+      }
+      const padX = 7;
+      const padY = 8;
+      const x = padX + ((node.g[0] - gridBounds.minX) / (gridBounds.maxX - gridBounds.minX)) * (100 - padX * 2);
+      const y = padY + ((node.g[1] - gridBounds.minY) / (gridBounds.maxY - gridBounds.minY)) * (100 - padY * 2);
+      return [x, y];
+    }
+
+    function drawEdges() {
+      const selectedNeighbors = new Set(neighbors.get(selectedId).map(item => item.id));
+      edgeLayer.innerHTML = edges.map(([a, _direction, b, kind]) => {
+        const from = byId[a];
+        const to = byId[b];
+        const [x1, y1] = position(from);
+        const [x2, y2] = position(to);
+        const selected = a === selectedId || b === selectedId || (selectedNeighbors.has(a) && selectedNeighbors.has(b));
+        const hiddenCreek = kind === 'creek' && !creekToggle.checked;
+        return `<line class="edge ${kind} ${selected ? 'selected' : ''} ${hiddenCreek ? 'hidden-creek' : ''}" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"></line>`;
+      }).join('');
+    }
+
+    function drawNodes() {
+      const selectedNeighbors = new Set(neighbors.get(selectedId).map(item => item.id));
+      nodeLayer.innerHTML = '';
+      nodes.forEach(node => {
+        const [x, y] = position(node);
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = `node ${node.kind} ${node.id === selectedId ? 'selected' : ''} ${selectedNeighbors.has(node.id) ? 'neighbor' : ''}`;
+        el.style.left = `${x}%`;
+        el.style.top = `${y}%`;
+        const labelOffset = view === 'map' && node.lo ? node.lo : [0, 0];
+        el.innerHTML = `<span class="dot"></span><span class="label" style="transform:translate(${labelOffset[0]}px, ${labelOffset[1]}px)">${node.label}</span>`;
+        el.addEventListener('click', () => {
+          selectedId = node.id;
+          render();
+        });
+        nodeLayer.appendChild(el);
+      });
+    }
+
+    function updateDetail() {
+      const node = byId[selectedId];
+      detailTitle.textContent = node.label;
+      detailMeta.textContent = [
+        `Grid (${node.g[0]}, ${node.g[1]})`,
+        node.source || null,
+        node.kind,
+      ].filter(Boolean).join(' | ');
+      detailNote.textContent = node.note || '';
+      detailHydro.textContent = node.hydro || '';
+      detailHydro.style.display = node.hydro ? 'block' : 'none';
+      routeList.innerHTML = neighbors.get(selectedId).map(route => {
+        const to = byId[route.id];
+        return `<li><strong>${route.direction}</strong> to ${to.label}<br><span>${route.kind === 'creek' ? 'Creek/ford continuity' : route.kind === 'water' ? 'Boat/surf movement' : 'Foot route'}</span></li>`;
+      }).join('');
+    }
+
+    function render() {
+      board.classList.toggle('map-mode', view === 'map');
+      gridButton.classList.toggle('active', view === 'grid');
+      mapButton.classList.toggle('active', view === 'map');
+      drawEdges();
+      drawNodes();
+      updateDetail();
+    }
+
+    gridButton.addEventListener('click', () => {
+      view = 'grid';
+      render();
+    });
+
+    mapButton.addEventListener('click', () => {
+      view = 'map';
+      render();
+    });
+
+    creekToggle.addEventListener('change', render);
+
+    render();
+  </script>
+</body>
+</html>

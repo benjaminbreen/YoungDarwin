@@ -53,12 +53,14 @@ const REGION_SIZE_BY_TYPE = {
 const AUTHORED_REGION_TERRAIN = {
   BEAGLE: { preset: 'hms-beagle-deck', segments: 300 },
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
-  ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 360 },
+  ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
+  BLACK_BEACH: { preset: 'black-beach-west-coast', segments: 320 },
+  BLACK_BEACH_SURF: { preset: 'black-beach-surf-shelf', segments: 300 },
   S_HUT: { preset: 'beach-with-hut-southwest', segments: 300 },
   S_REEFS: { preset: 'southern-white-reef', segments: 300 },
   W_HIGH: { preset: 'western-highlands-cloud-forest', segments: 320 },
@@ -284,7 +286,7 @@ function toRegionMap(cell) {
     npcs: cell.npcs || [],
     discoveries: cell.discoveries || [],
     notableFeatures: cell.notableFeatures || [],
-    playerStart: Array.isArray(cell.playerStart) ? cell.playerStart : [0, 0, 0],
+    playerStart: Array.isArray(cell.playerStart) ? cell.playerStart : null,
     narration: {
       weather: cell.type === 'forest' || cell.type === 'highland' ? 'misty' : 'sunny',
       sounds: cell.type === 'beagle'

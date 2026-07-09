@@ -190,11 +190,13 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
   const { kind, status, name } = location;
   const live = status === 'available';
   const glyph = MARKER_GLYPHS[kind];
+  const markerSizeClass = kind === 'anchorage' ? 'h-4 w-4' : 'h-5 w-5';
+  const labelOffset = location.labelOffset || { x: 0, y: 0 };
 
   let face;
   if (glyph) {
     face = (
-      <span className={`flex h-5 w-5 items-center justify-center rounded-full border shadow-[0_1px_4px_rgba(0,0,0,0.6)] ${
+      <span className={`flex ${markerSizeClass} items-center justify-center rounded-full border shadow-[0_1px_4px_rgba(0,0,0,0.6)] ${
         live
           ? 'border-expedition-goldbright bg-expedition-ink/80 text-expedition-goldbright'
           : 'border-expedition-brass/80 bg-expedition-ink/70 text-expedition-gold/70'
@@ -245,7 +247,10 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
         className={`pointer-events-none mt-0.5 max-w-[10rem] whitespace-nowrap font-expedition text-[11px] font-semibold italic tracking-[0.05em] transition ${
           showLabel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         } ${selected ? 'text-expedition-goldbright' : 'text-expedition-parchment'}`}
-        style={{ textShadow: '0 1px 2px rgba(10,8,5,0.9), 0 0 6px rgba(10,8,5,0.85), 0 0 2px rgba(10,8,5,0.9)' }}
+        style={{
+          textShadow: '0 1px 2px rgba(10,8,5,0.9), 0 0 6px rgba(10,8,5,0.85), 0 0 2px rgba(10,8,5,0.9)',
+          transform: `translate(${labelOffset.x}px, ${labelOffset.y}px)`,
+        }}
       >
         {name}
       </span>

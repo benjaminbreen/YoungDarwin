@@ -340,6 +340,11 @@ export function resolvePlayerLanding({
       }
     }
 
+    // A hard fall knocks the wind out: bump run effort so the recovery idle
+    // reads winded (heavy breathing) once Darwin is back on his feet.
+    if (falling > 8) {
+      stateRef.current.runEffort = Math.max(stateRef.current.runEffort || 0, 7);
+    }
     if (intentionalPlayerJump && falling > 19.5 && !stateRef.current.action) {
       startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
     } else if (intentionalPlayerJump && falling > 16.5 && !stateRef.current.action) {
@@ -372,6 +377,50 @@ export function resolvePlayerLanding({
     } else if (!ordinaryStandingJumpLanding && falling > 2.4 && !stateRef.current.action) {
       startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
     }
+    // Walking off an obstacle: the character controller snap-follows steep
+    // obstacle faces, so the descent often never registers as airborne and the
+    // fall-speed thresholds above never fire. Track fast grounded descent by
+    // accumulated height and play a landing when it bottoms out.
+    const groundedY = group.current.position.y;
+    let descent = stateRef.current.groundedDescent;
+    if (!descent) {
+      descent = { lastY: groundedY, drop: 0 };
+      stateRef.current.groundedDescent = descent;
+    }
+    if (wasAirborne.current || stateRef.current.action || stateRef.current.swimming) {
+      descent.drop = 0;
+    } else {
+      const descentDy = descent.lastY - groundedY;
+      const descentRate = delta > 0 ? descentDy / delta : 0;
+      const steepDescent = descentRate > 3
+        && (terrainFeedback.current.groundSource === 'authored-obstacle' || descentRate > 5);
+      if (steepDescent) {
+        descent.drop += descentDy;
+        descent.calmFor = 0;
+      } else if ((descent.calmFor = (descent.calmFor || 0) + delta) > 0.12) {
+        // Only settle after a short calm window so one flat frame mid-descent
+        // doesn't split the drop into two sub-threshold pieces.
+        if (descent.drop > 1.05) {
+          const offLandingSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+          if (descent.drop > 2.3) {
+            startAction('jumpDown', durationFor('jumpDown'), { lockMovement: 0.24 });
+          } else if (offLandingSpeed > PLAYER.walkSpeed * 1.1) {
+            startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
+          } else {
+            startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
+          }
+          landingDustTriggerRef.current?.({
+            kind: 'landing',
+            intensity: THREE.MathUtils.clamp(0.3 + descent.drop * 0.16, 0.3, 0.7),
+            biome: terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId),
+            fallSpeed: descentRate,
+            horizontalSpeed: offLandingSpeed,
+          });
+        }
+        descent.drop = 0;
+      }
+    }
+    descent.lastY = groundedY;
     if (moving || running || falling > 0.5) {
       queueMovementCost({ running, walking: moving && !running, airborne: false, falling, flush: falling > 0.5 }, delta, now);
     }

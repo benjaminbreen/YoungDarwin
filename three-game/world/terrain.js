@@ -256,7 +256,13 @@ export function sampleRegionMap(regionId, x, z) {
 export function regionSpawnPoint(regionId, entryEdge = null) {
   const config = getRegionTerrainConfig(regionId);
   const region = getRegionMap(regionId);
-  const start = Array.isArray(region.playerStart) ? region.playerStart : null;
+  const definition = authoredRegion(regionId);
+  const defaultSpawn = definition?.terrain?.defaultSpawn;
+  const start = Array.isArray(region.playerStart)
+    ? region.playerStart
+    : Array.isArray(defaultSpawn)
+      ? defaultSpawn
+      : null;
   const margin = 5.2;
   let x = Number.isFinite(start?.[0]) ? start[0] : 0;
   let z = Number.isFinite(start?.[2]) ? start[2] : 0;
@@ -278,10 +284,10 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
     z = config.depth * 0.5 - margin;
   } else if (start) {
     // Authored default spawn from the region map.
-  } else if (authoredRegion(regionId)?.id === 'MANGROVES') {
+  } else if (definition?.id === 'MANGROVES') {
     x = -3;
     z = 20;
-  } else if (authoredRegion(regionId)?.id === 'POST_OFFICE_BAY') {
+  } else if (definition?.id === 'POST_OFFICE_BAY') {
     x = 6.6;
     z = 3.4;
   }
