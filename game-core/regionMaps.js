@@ -264,6 +264,7 @@ function makeSpecimenSpawns(cell, terrain) {
 function toRegionMap(cell) {
   const terrain = regionDimensions(cell);
   const authoredTerrain = AUTHORED_REGION_TERRAIN[cell.id];
+  const authoredWeather = cell.narration?.weather || null;
   return {
     id: cell.id,
     name: cell.name,
@@ -288,7 +289,8 @@ function toRegionMap(cell) {
     notableFeatures: cell.notableFeatures || [],
     playerStart: Array.isArray(cell.playerStart) ? cell.playerStart : null,
     narration: {
-      weather: cell.type === 'forest' || cell.type === 'highland' ? 'misty' : 'sunny',
+      weather: authoredWeather || (cell.type === 'forest' || cell.type === 'highland' ? 'misty' : 'sunny'),
+      weatherAuthored: Boolean(authoredWeather),
       sounds: cell.type === 'beagle'
         ? ['creaking timber', 'rigging overhead', 'shipboard footsteps']
         : ['wind over lava', 'distant surf', 'field bag buckles'],

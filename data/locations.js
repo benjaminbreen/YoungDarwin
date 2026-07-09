@@ -1402,7 +1402,7 @@ export const locations = [
       'A red-dirt track climbs in from the north coast and forks toward the springs and caves.'
     ],
     narration: {
-      weather: 'misty',
+      weather: 'cloudy',
       sounds: ['hoes striking wet earth', 'a soldier’s cough from the barracks', 'finches in the garden rows'],
       loadingNote: 'The track levels out onto cultivated ground: Asilo de la Paz, the Ecuadorian penal settlement, Vice-Governor Lawson presiding.',
       educationalNote: 'Darwin found two to three hundred exiles here in 1835, farming sweet potatoes and bananas on the damp highland flat — and heard Lawson claim he could name any tortoise’s island from its shell.',

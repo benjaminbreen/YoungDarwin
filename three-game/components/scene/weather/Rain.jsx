@@ -12,15 +12,24 @@ import { weatherEnv } from '../../../world/weatherEnvRuntime';
 const RAIN_VOLUME = { width: 56, height: 34, depth: 56 };
 const _dir = new THREE.Vector3();
 
+function seededUnit(index, salt = 0) {
+  let h = 2166136261 ^ salt;
+  h ^= index + 0x9e3779b9;
+  h = Math.imul(h, 16777619);
+  h ^= h >>> 13;
+  h = Math.imul(h, 2246822519);
+  return ((h >>> 0) % 100000) / 100000;
+}
+
 function buildGeometry(count) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const seeds = new Float32Array(count);
   for (let i = 0; i < count; i += 1) {
-    positions[i * 3] = (Math.random() - 0.5) * RAIN_VOLUME.width;
-    positions[i * 3 + 1] = Math.random() * RAIN_VOLUME.height;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * RAIN_VOLUME.depth;
-    seeds[i] = Math.random();
+    positions[i * 3] = (seededUnit(i, 11) - 0.5) * RAIN_VOLUME.width;
+    positions[i * 3 + 1] = seededUnit(i, 23) * RAIN_VOLUME.height;
+    positions[i * 3 + 2] = (seededUnit(i, 37) - 0.5) * RAIN_VOLUME.depth;
+    seeds[i] = seededUnit(i, 53);
   }
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));

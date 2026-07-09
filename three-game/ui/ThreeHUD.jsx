@@ -39,7 +39,7 @@ import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
 import { rarityLabel } from '../world/inspectables';
-import { WEATHER_STATES } from '../world/weatherStates';
+import { WEATHER_STATES, normalizeWeatherState } from '../world/weatherStates';
 import {
   getAnimalAction,
   getPlayableActionItem,
@@ -234,6 +234,7 @@ function formatBannerObjective(objective) {
 
 function sentenceCase(value) {
   return String(value || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/-/g, ' ')
     .replace(/\b\w/g, char => char.toUpperCase());
 }
@@ -484,9 +485,21 @@ const WEATHER_COPY = {
     title: 'Clear Trade Wind',
     note: 'Bright equatorial light, thin cloud, hard shadows.',
   },
+  tradeWind: {
+    title: 'Trade Wind',
+    note: 'Bright air, quick cloud shadows, and restless grass.',
+  },
+  marineHaze: {
+    title: 'Marine Haze',
+    note: 'Dry salt haze softens the horizon without closing the sky.',
+  },
   cloudy: {
     title: 'Broken Cloud',
     note: 'Cumulus crossing the bay with softened glare.',
+  },
+  sunbreak: {
+    title: 'Sunbreak',
+    note: 'Cloud opens into moving patches of clean light.',
   },
   sunshower: {
     title: 'Rainbow Shower',
@@ -497,8 +510,16 @@ const WEATHER_COPY = {
     note: 'A sealed grey deck dims the volcanic shore.',
   },
   misty: {
-    title: 'Garua Mist',
-    note: 'Cool low vapour drifts from the higher ground.',
+    title: 'Patchy Mist',
+    note: 'Cool low vapour drifts lightly from the higher ground.',
+  },
+  garua: {
+    title: 'Garua',
+    note: 'Highland low cloud hangs damp and silver over the slopes.',
+  },
+  denseGarua: {
+    title: 'Dense Garua',
+    note: 'A rare white shroud drops visibility across the high ground.',
   },
   drizzle: {
     title: 'Fine Drizzle',
@@ -517,12 +538,13 @@ const WEATHER_COPY = {
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
 
 function WeatherGlyph({ weather, className = '' }) {
-  const kind = weather === 'misty' ? 'fog' : weather;
-  const sunshower = kind === 'sunshower';
-  const rain = sunshower || kind === 'drizzle' || kind === 'rain' || kind === 'storm';
+  const kind = normalizeWeatherState(weather);
+  const sunlitBreak = kind === 'sunshower' || kind === 'sunbreak';
+  const rain = kind === 'sunshower' || kind === 'drizzle' || kind === 'rain' || kind === 'storm';
   const storm = kind === 'storm';
-  const sun = kind === 'sunny';
-  const fog = kind === 'fog';
+  const sun = kind === 'sunny' || kind === 'tradeWind' || kind === 'marineHaze';
+  const fog = kind === 'misty' || kind === 'garua' || kind === 'denseGarua' || kind === 'marineHaze';
+  const cloudLine = ['cloudy', 'overcast', 'tradeWind', 'marineHaze', 'sunbreak'].includes(kind);
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
       {sun ? (
@@ -532,14 +554,14 @@ function WeatherGlyph({ weather, className = '' }) {
         </>
       ) : (
         <>
-          {sunshower && (
+          {sunlitBreak && (
             <>
               <circle cx="7.2" cy="7.2" r="2.3" fill="currentColor" fillOpacity="0.18" />
               <path d="M7.2 2.8 V4 M7.2 10.4 V11.6 M2.8 7.2 H4 M10.4 7.2 H11.6 M4.1 4.1 L5 5 M9.4 9.4 L10.3 10.3" opacity="0.5" />
             </>
           )}
           <path d="M7.4 15.2 H17.1 C19 15.2 20.5 13.8 20.5 12 C20.5 10.2 19.1 8.9 17.4 8.8 C16.8 6.3 14.7 4.8 12.3 4.8 C9.9 4.8 8 6.2 7.2 8.4 C5.1 8.5 3.5 9.9 3.5 11.8 C3.5 13.7 5.1 15.2 7.4 15.2 Z" fill="currentColor" fillOpacity="0.12" />
-          {(kind === 'cloudy' || kind === 'overcast') && <path d="M5.2 18.2 H18.8" opacity="0.45" />}
+          {cloudLine && <path d="M5.2 18.2 H18.8" opacity="0.45" />}
         </>
       )}
       {fog && (
@@ -568,15 +590,17 @@ function TopObjective({ objective }) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const zone = getZone(currentZoneId);
-  const weatherCopy = WEATHER_COPY[weather] || {
-    title: sentenceCase(weather || 'weather'),
+  const normalizedWeather = normalizeWeatherState(weather);
+  const weatherCopy = WEATHER_COPY[normalizedWeather] || {
+    title: sentenceCase(normalizedWeather || 'weather'),
     note: 'Local conditions recorded from the sky.',
   };
 
   const selectWeather = nextWeather => {
     const nowMinutes = (day || 1) * 1440 + (timeOfDay || 0) * 60;
-    setWeather(nextWeather);
-    setWeatherOverride({ state: nextWeather, untilMinutes: nowMinutes + 240 });
+    const normalized = normalizeWeatherState(nextWeather);
+    setWeather(normalized);
+    setWeatherOverride({ state: normalized, untilMinutes: nowMinutes + 240 });
     setMenuOpen(false);
     setExpanded(true);
   };
@@ -630,13 +654,13 @@ function TopObjective({ objective }) {
               aria-expanded={menuOpen}
               className="flex h-10 w-10 items-center justify-center rounded-sm border border-expedition-gold/60 bg-expedition-gold/12 text-expedition-gold transition hover:border-expedition-goldbright hover:bg-expedition-gold/22 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
             >
-              <WeatherGlyph weather={weather} className="h-6 w-6" />
+              <WeatherGlyph weather={normalizedWeather} className="h-6 w-6" />
             </button>
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/85">Present Weather</div>
               <div className="mt-0.5 flex items-baseline gap-2">
                 <span className="font-expedition text-[17px] font-semibold leading-none tracking-wide text-expedition-parchment">{weatherCopy.title}</span>
-                <span className="text-[10px] uppercase tracking-[0.16em] text-expedition-faded">{sentenceCase(weather)}</span>
+                <span className="text-[10px] uppercase tracking-[0.16em] text-expedition-faded">{sentenceCase(normalizedWeather)}</span>
               </div>
               <div className="mt-1 truncate text-[11px] italic text-expedition-faded">{weatherCopy.note}</div>
             </div>
@@ -666,7 +690,7 @@ function TopObjective({ objective }) {
                 <div className="mb-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/80">Barometer Drawer</div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {WEATHER_OPTIONS.map(option => {
-                    const active = option === weather;
+                    const active = option === normalizedWeather;
                     const copy = WEATHER_COPY[option] || { title: sentenceCase(option) };
                     return (
                       <button

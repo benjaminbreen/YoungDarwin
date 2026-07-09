@@ -121,6 +121,22 @@ const {
   isWalkOverTraversalObstacle,
   obstacleBaseY,
 } = loadModule('three-game/world/obstacles.js');
+const {
+  locations,
+} = loadModule('data/locations.js');
+const {
+  regionMaps,
+} = loadModule('game-core/regionMaps.js');
+const {
+  WEATHER_STATES,
+  normalizeWeatherState,
+  weatherProfile,
+} = loadModule('three-game/world/weatherStates.js');
+const {
+  WEATHER_BAND_WEIGHTS,
+  getRegionClimateBand,
+  getRegionWeather,
+} = loadModule('three-game/world/weatherDirector.js');
 
 test('action suggestions prioritize safety, traps, specimens, and evidence', () => {
   const objectives = createDefaultObjectives();
@@ -645,6 +661,48 @@ test('save snapshots expose resume summary without requiring localStorage', () =
   assert.equal(summary.objectivesComplete, 1);
   assert.equal(summary.objectivesTotal, 2);
   assert.equal(summary.fatigue, 42);
+});
+
+test('weather aliases normalize into valid 3D states', () => {
+  assert.equal(normalizeWeatherState('rainy'), 'rain');
+  assert.equal(normalizeWeatherState('fog'), 'misty');
+  assert.equal(normalizeWeatherState('windy'), 'tradeWind');
+  assert.equal(normalizeWeatherState('marine haze'), 'marineHaze');
+  assert.equal(normalizeWeatherState('dense garua'), 'denseGarua');
+  assert.equal(normalizeWeatherState('rainbow'), 'sunshower');
+  assert.ok(weatherProfile('rainy').rain > 0.7);
+  assert.ok(weatherProfile('fog').mist > 0.5);
+  assert.ok(weatherProfile('windy').windBoost > 0.4);
+});
+
+test('weather band weights only reference authored weather states', () => {
+  for (const [band, weights] of Object.entries(WEATHER_BAND_WEIGHTS)) {
+    assert.ok(Object.keys(weights).length > 0, `${band} has weights`);
+    for (const [state, weight] of Object.entries(weights)) {
+      assert.ok(WEATHER_STATES[state], `${band} references ${state}`);
+      assert.equal(typeof weight, 'number', `${band}.${state} is numeric`);
+      assert.ok(weight >= 0, `${band}.${state} is non-negative`);
+    }
+  }
+});
+
+test('location weather metadata normalizes cleanly', () => {
+  for (const location of locations) {
+    if (!location.narration?.weather) continue;
+    const normalized = normalizeWeatherState(location.narration.weather, null);
+    assert.ok(normalized && WEATHER_STATES[normalized], `${location.id} weather is valid`);
+  }
+});
+
+test('penal colony starts inland and no longer pins garua mist', () => {
+  const penalColony = regionMaps.PENAL_COLONY;
+  assert.equal(getRegionClimateBand('PENAL_COLONY'), 'inland');
+  assert.equal(penalColony.narration.weatherAuthored, true);
+  assert.equal(normalizeWeatherState(penalColony.narration.weather), 'cloudy');
+
+  const initialWeather = getRegionWeather('PENAL_COLONY', 1440 + 8 * 60);
+  assert.equal(initialWeather, 'cloudy');
+  assert.ok(!['misty', 'garua', 'denseGarua'].includes(initialWeather));
 });
 
 let failed = false;

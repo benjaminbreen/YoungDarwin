@@ -104,9 +104,9 @@ export function WeatherFront() {
     const windX = weatherEnv.windX || -0.55;
     const windZ = weatherEnv.windZ || -0.83;
     mesh.position.set(
-      camera.position.x + windX * FRONT_DISTANCE,
+      camera.position.x - windX * FRONT_DISTANCE,
       camera.position.y + 12,
-      camera.position.z + windZ * FRONT_DISTANCE
+      camera.position.z - windZ * FRONT_DISTANCE
     );
     mesh.rotation.set(0, Math.atan2(windX, windZ), 0);
 

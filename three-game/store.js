@@ -38,6 +38,7 @@ import {
 } from './examine/examinables';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
+import { normalizeWeatherState } from './world/weatherStates';
 import { ACTION_DURATION, MOVEMENT_FATIGUE } from './components/player/playerConfig';
 import {
   DEFAULT_PLAYABLE_MODE_ID,
@@ -630,7 +631,7 @@ function createSceneSlice() {
     narratorScriptedKeys: {
       [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
     },
-    weather: initialNarration.weather,
+    weather: normalizeWeatherState(initialNarration.weather, 'sunny'),
     // Narration/LLM weather pins the sky for a while; the island weather
     // simulation resumes authority once untilMinutes passes.
     weatherOverride: null,
@@ -1564,15 +1565,23 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
 
-  setWeather: weather => set(state => (
-    state.weather === weather
+  setWeather: weather => set(state => {
+    const normalized = normalizeWeatherState(weather, state.weather);
+    return state.weather === normalized
       ? {}
       : {
-          weather,
-          ...ambientThoughtPatch(state, { weather, trigger: 'weather' }),
+          weather: normalized,
+          ...ambientThoughtPatch(state, { weather: normalized, trigger: 'weather' }),
+        };
+  }),
+  setWeatherOverride: weatherOverride => set(state => ({
+    weatherOverride: weatherOverride?.state
+      ? {
+          ...weatherOverride,
+          state: normalizeWeatherState(weatherOverride.state, state.weather),
         }
-  )),
-  setWeatherOverride: weatherOverride => set({ weatherOverride }),
+      : weatherOverride,
+  })),
 
   statusViewOpen: false,
   openStatusView: () => set({ statusViewOpen: true }),
@@ -1842,7 +1851,7 @@ export const useThreeGameStore = create((set, get) => ({
     // under whatever sky the destination region currently has.
     const arrival = advanceTimeState(state, state.transition.minutes || 0);
     tickWeatherSim((arrival.day || 1) * 1440 + arrival.timeOfDay * 60);
-    const arrivalWeather = getRegionWeather(zone.id) || zone.weather || state.weather;
+    const arrivalWeather = normalizeWeatherState(getRegionWeather(zone.id) || zone.weather, state.weather);
     const arrivalState = { ...state, ...arrival, currentZoneId: zone.id, weather: arrivalWeather };
     const scripted = zoneNarration(zone, arrivalState);
     const thoughtKey = `thought:${zone.id}:arrival`;
@@ -2263,14 +2272,15 @@ export const useThreeGameStore = create((set, get) => ({
   applyNarration: (data, options = {}) => set(state => {
     const allowFieldNote = options.allowFieldNote ?? shouldAllowLlmFieldNote(data, options.playerInput || '');
     const allowThought = options.allowThought ?? shouldAllowLlmThought(data, options.playerInput || '', state);
+    const narratedWeather = data.weather ? normalizeWeatherState(data.weather, null) : null;
     return {
       message: data.narration || state.message,
       educationalNote: allowFieldNote && data.educationalNote ? data.educationalNote : state.educationalNote,
-      weather: data.weather || state.weather,
+      weather: narratedWeather || state.weather,
       // Hold narration weather for ~90 game minutes before the island
       // simulation takes the sky back.
-      weatherOverride: data.weather
-        ? { state: data.weather, untilMinutes: (state.day || 1) * 1440 + state.timeOfDay * 60 + 90 }
+      weatherOverride: narratedWeather
+        ? { state: narratedWeather, untilMinutes: (state.day || 1) * 1440 + state.timeOfDay * 60 + 90 }
         : state.weatherOverride,
       sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : state.sounds,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents(data, state, data.source || 'llm', {

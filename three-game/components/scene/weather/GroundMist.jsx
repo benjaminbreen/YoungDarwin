@@ -3,7 +3,9 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useThreeGameStore } from '../../../store';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { terrainHeight } from '../../../world/terrain';
 
 // Floating garúa: a field of soft billboarded wisps that drifts with the wind
 // at head height around the camera. Offsets wrap inside a fixed volume (the
@@ -13,10 +15,21 @@ import { weatherEnv } from '../../../world/weatherEnvRuntime';
 const COUNT = 44;
 const FIELD = 68; // metres; wisps wrap within this square around the camera
 
+function seededUnit(index, salt = 0) {
+  let h = 2166136261 ^ salt;
+  h ^= index + 0x9e3779b9;
+  h = Math.imul(h, 16777619);
+  h ^= h >>> 13;
+  h = Math.imul(h, 2246822519);
+  return ((h >>> 0) % 100000) / 100000;
+}
+
 export function GroundMist() {
   const { camera, scene } = useThree();
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const meshRef = useRef(null);
   const drift = useRef(new THREE.Vector2());
+  const groundY = useRef(null);
 
   const geometry = useMemo(() => {
     const base = new THREE.PlaneGeometry(1, 1);
@@ -27,10 +40,10 @@ export function GroundMist() {
     const offsets = new Float32Array(COUNT * 3);
     const seeds = new Float32Array(COUNT);
     for (let i = 0; i < COUNT; i += 1) {
-      offsets[i * 3] = (Math.random() - 0.5) * FIELD;
-      offsets[i * 3 + 1] = 0.2 + Math.random() * 2.8;
-      offsets[i * 3 + 2] = (Math.random() - 0.5) * FIELD;
-      seeds[i] = Math.random();
+      offsets[i * 3] = (seededUnit(i, 71) - 0.5) * FIELD;
+      offsets[i * 3 + 1] = 0.2 + seededUnit(i, 83) * 2.8;
+      offsets[i * 3 + 2] = (seededUnit(i, 97) - 0.5) * FIELD;
+      seeds[i] = seededUnit(i, 109);
     }
     geo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3));
     geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
@@ -111,10 +124,19 @@ export function GroundMist() {
     if (!mesh.visible) return;
     drift.current.x += weatherEnv.windX * weatherEnv.mistDriftSpeed * delta;
     drift.current.y += weatherEnv.windZ * weatherEnv.mistDriftSpeed * delta;
+    let targetGroundY = camera.position.y - 1.6;
+    try {
+      targetGroundY = terrainHeight(camera.position.x, camera.position.z, currentZoneId);
+    } catch {
+      // Placeholder or transient zones can fall back to camera-relative mist.
+    }
+    groundY.current = groundY.current == null
+      ? targetGroundY
+      : THREE.MathUtils.damp(groundY.current, targetGroundY, 8, delta);
     const u = material.uniforms;
     u.uTime.value = clock.elapsedTime;
     u.uMist.value = weatherEnv.mistAmount;
-    u.uCenter.value.copy(camera.position);
+    u.uCenter.value.set(camera.position.x, groundY.current + 1.1, camera.position.z);
     u.uDrift.value.copy(drift.current);
     if (scene.fog) {
       // Wisps sit slightly above the ambient haze, scaled by how bright that

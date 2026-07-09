@@ -19,18 +19,18 @@ function makeAnchors(zoneId) {
   const zone = getZone(zoneId);
   const band = getRegionClimateBand(zoneId);
   const size = (zone.terrainSize || 100) * 0.5;
-  const count = band === 'highland' ? 5 : 3;
+  const count = band === 'highland' ? 5 : band === 'windward' ? 3 : band === 'inland' ? 1 : 0;
   const anchors = [];
   for (let i = 0; i < count; i += 1) {
     const angle = (i / count) * Math.PI * 2 + zoneId.length;
-    const radius = size * (band === 'highland' ? 0.28 + (i % 2) * 0.12 : 0.5);
+    const radius = size * (band === 'highland' ? 0.28 + (i % 2) * 0.12 : band === 'windward' ? 0.42 : 0.34);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     let y = 6;
     let pocket = 0.4;
     try {
       const center = terrainHeight(x, z, zoneId);
-      const sampleRadius = band === 'highland' ? 13 : 9;
+      const sampleRadius = band === 'highland' ? 13 : band === 'windward' ? 10 : 8;
       const around = [
         terrainHeight(x + sampleRadius, z, zoneId),
         terrainHeight(x - sampleRadius, z, zoneId),
@@ -43,13 +43,15 @@ function makeAnchors(zoneId) {
     } catch {
       // Unauthored placeholder terrain: keep the default height.
     }
+    const scaleBase = band === 'highland' ? 1.18 : band === 'windward' ? 0.88 : 0.72;
+    const opacityMax = band === 'highland' ? 0.66 : band === 'windward' ? 0.42 : 0.26;
     anchors.push({
       x,
       y,
       z,
       seed: i + 11,
-      scale: (band === 'highland' ? 1.18 : 0.95) + pocket * 0.34,
-      opacity: THREE.MathUtils.lerp(0.26, band === 'highland' ? 0.66 : 0.46, pocket),
+      scale: scaleBase + pocket * 0.3,
+      opacity: THREE.MathUtils.lerp(0.16, opacityMax, pocket),
       speed: THREE.MathUtils.lerp(0.035, 0.075, 1 - pocket),
     });
   }
@@ -64,6 +66,7 @@ export function MistBanks() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const anchors = useMemo(() => makeAnchors(currentZoneId), [currentZoneId]);
   const groupRef = useRef(null);
+  const driftPhase = useRef(0);
   const [mist, setMist] = useState(0);
   const throttle = useRef(0);
 
@@ -71,10 +74,10 @@ export function MistBanks() {
     if (groupRef.current) {
       groupRef.current.visible = mist > 0.02;
       // Mist creeps downwind far slower than the cumulus overhead.
-      groupRef.current.position.x += weatherEnv.windX * weatherEnv.mistDriftSpeed * delta * 0.35;
-      groupRef.current.position.z += weatherEnv.windZ * weatherEnv.mistDriftSpeed * delta * 0.35;
-      const drift = Math.hypot(groupRef.current.position.x, groupRef.current.position.z);
-      if (drift > 14) groupRef.current.position.set(0, 0, 0);
+      driftPhase.current += weatherEnv.mistDriftSpeed * delta * 0.055;
+      const drift = Math.sin(driftPhase.current) * 7;
+      groupRef.current.position.x = weatherEnv.windX * drift;
+      groupRef.current.position.z = weatherEnv.windZ * drift;
     }
     throttle.current += delta;
     if (throttle.current < 0.25) return;
