@@ -116,6 +116,22 @@ function makeSnapshot() {
     selectedSpecimenId: state.selectedSpecimenId || null,
     inventoryCount: Array.isArray(state.inventory) ? state.inventory.length : 0,
     journalCount: Array.isArray(state.journal) ? state.journal.length : 0,
+    curiosity: finiteNumber(state.curiosity),
+    fatigue: finiteNumber(state.fatigue),
+    consultedBookIds: Array.isArray(state.consultedBookIds) ? [...state.consultedBookIds] : [],
+    readableBookSession: state.readableBookSession
+      ? {
+          bookId: state.readableBookSession.bookId || null,
+          page: finiteNumber(state.bookLastPages?.[state.readableBookSession.bookId], 1),
+        }
+      : null,
+    interiorPrompt: state.interiorPrompt
+      ? {
+          id: state.interiorPrompt.id || null,
+          mode: state.interiorPrompt.mode || null,
+          bookId: state.interiorPrompt.bookId || null,
+        }
+      : null,
     examinedTypeIds: Array.isArray(state.examinedTypeIds) ? [...state.examinedTypeIds] : [],
     collectedSpecimenIds: Array.isArray(state.collectedSpecimenIds) ? [...state.collectedSpecimenIds] : [],
     collectedSpecimenActorIds: Array.isArray(state.collectedSpecimenActorIds) ? [...state.collectedSpecimenActorIds] : [],
@@ -237,6 +253,24 @@ function createHarnessApi() {
     saveExamineNote: (content = 'E2E field note: observed through Playwright smoke automation.') => (
       useThreeGameStore.getState().saveExamineNote(content)
     ),
+    openBook: bookId => {
+      useThreeGameStore.getState().openReadableBook(bookId);
+      return makeSnapshot();
+    },
+    setBookPage: page => {
+      const store = useThreeGameStore.getState();
+      store.setReadableBookPage(store.readableBookSession?.bookId, page);
+      return makeSnapshot();
+    },
+    saveBookNote: content => useThreeGameStore.getState().saveReadableBookNote(content),
+    closeBook: () => {
+      useThreeGameStore.getState().closeReadableBook();
+      return makeSnapshot();
+    },
+    restInInterior: label => {
+      useThreeGameStore.getState().restInInterior(label);
+      return makeSnapshot();
+    },
     collectFromExamine: async () => useThreeGameStore.getState().collectFromExamine(),
     collectSelected: async () => {
       const state = useThreeGameStore.getState();

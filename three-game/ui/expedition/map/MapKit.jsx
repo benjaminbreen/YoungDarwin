@@ -184,6 +184,12 @@ const MARKER_GLYPHS = {
       <path d="M12 4 L21 20 H3 Z" />
     </svg>
   ),
+  shipInterior: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+      <path d="M6 21 V4.5 C6 3.7 6.7 3 7.5 3 H17 V21" />
+      <path d="M3.5 21 H20.5 M12.5 12 H15" />
+    </svg>
+  ),
 };
 
 export function MapMarker({ location, zoom = 1, selected = false, isCurrent = false, onSelect }) {

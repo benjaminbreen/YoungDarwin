@@ -46,6 +46,10 @@ import { puntaCormorantRegion } from './puntaCormorant/terrain';
 import { createPuntaCormorantTerrainMaterial } from './puntaCormorant/material';
 import { beagleDeckRegion } from './beagleDeck/terrain';
 import { createBeagleDeckTerrainMaterial } from './beagleDeck/material';
+import { beagleCabinRegion } from './beagleCabin/terrain';
+import { createBeagleCabinTerrainMaterial } from './beagleCabin/material';
+import { lawsonHouseRegion } from './lawsonHouse/terrain';
+import { createLawsonHouseTerrainMaterial } from './lawsonHouse/material';
 import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 
@@ -74,6 +78,8 @@ const authoredRegions = [
   { ...cormorantBayTest3Region, createTerrainMaterial: createCormorantBayTest3TerrainMaterial },
   { ...puntaCormorantRegion, createTerrainMaterial: createPuntaCormorantTerrainMaterial },
   { ...beagleDeckRegion, createTerrainMaterial: createBeagleDeckTerrainMaterial },
+  { ...beagleCabinRegion, createTerrainMaterial: createBeagleCabinTerrainMaterial },
+  { ...lawsonHouseRegion, createTerrainMaterial: createLawsonHouseTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
 ];
 

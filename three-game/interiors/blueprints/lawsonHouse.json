@@ -1,0 +1,110 @@
+{
+  "id": "LAWSON_HOUSE",
+  "label": "Nicholas Lawson's House",
+  "dimensions": {
+    "width": 18,
+    "depth": 14,
+    "ceiling": 3.2,
+    "floorY": 0
+  },
+  "map": {
+    "planLabel": "House plan",
+    "exitLabel": "GOVERNOR'S YARD",
+    "patternId": "lawson-floorboards",
+    "patternAngle": 90,
+    "paper": "#d4c59e",
+    "ink": "#493723"
+  },
+  "navigation": {
+    "defaultSpawn": [-3.4, 0, 3.3],
+    "entrySpawns": {
+      "from-yard": [-3.4, 0, 3.3]
+    },
+    "entryFacings": {
+      "from-yard": [0, 0, -1]
+    },
+    "transitions": [
+      {
+        "id": "lawson-house-to-penal-colony",
+        "toRegionId": "PENAL_COLONY",
+        "label": "Return to the governor's yard",
+        "description": "Step back through the front door into the damp highland air.",
+        "entryEdge": "from-lawson-house",
+        "position": [-3.4, 6.55],
+        "radius": 1.2,
+        "closeRadius": 0.8,
+        "facing": [0, 1],
+        "routeLabel": "Front door"
+      }
+    ]
+  },
+  "outline": [
+    [-9, -7],
+    [9, -7],
+    [9, 7],
+    [-9, 7]
+  ],
+  "rooms": [
+    { "id": "entrance-dining", "label": "Entrance & Dining", "rect": [-9, 0, 11, 7], "available": true },
+    { "id": "office-library", "label": "Office & Library", "rect": [2, 0, 7, 7], "available": false },
+    { "id": "private-quarters", "label": "Private Quarters", "rect": [-9, -7, 10, 7], "available": false },
+    { "id": "colony-store", "label": "Colony Store", "rect": [1, -7, 8, 7], "available": false }
+  ],
+  "fixedColliders": [
+    { "id": "front-wall-west", "kind": "structure", "position": [-6.55, 1.6, 6.9], "size": [4.9, 3.2, 0.2], "yaw": 0 },
+    { "id": "front-wall-east", "kind": "structure", "position": [3.15, 1.6, 6.9], "size": [11.7, 3.2, 0.2], "yaw": 0 },
+    { "id": "rear-wall", "kind": "structure", "position": [0, 1.6, -6.9], "size": [18, 3.2, 0.2], "yaw": 0 },
+    { "id": "west-wall", "kind": "structure", "position": [-8.9, 1.6, 0], "size": [0.2, 3.2, 14], "yaw": 0 },
+    { "id": "east-wall", "kind": "structure", "position": [8.9, 1.6, 0], "size": [0.2, 3.2, 14], "yaw": 0 },
+    { "id": "office-divider", "kind": "structure", "position": [1.92, 1.6, 3.5], "size": [0.18, 3.2, 7], "yaw": 0 },
+    { "id": "rear-divider-west", "kind": "structure", "position": [-4, 1.6, -0.08], "size": [10, 3.2, 0.18], "yaw": 0 },
+    { "id": "rear-divider-east", "kind": "structure", "position": [5, 1.6, -0.08], "size": [8, 3.2, 0.18], "yaw": 0 },
+    { "id": "rear-room-divider", "kind": "structure", "position": [0.92, 1.6, -3.5], "size": [0.18, 3.2, 7], "yaw": 0 },
+    { "id": "dining-table", "kind": "furniture", "position": [-3.5, 0.43, 1.25], "size": [3.25, 0.86, 1.45], "yaw": 0 },
+    { "id": "dining-dresser", "kind": "furniture", "position": [-8.45, 0.86, 1.2], "size": [0.72, 1.72, 2.55], "yaw": 0 },
+    { "id": "calling-table", "kind": "furniture", "position": [-7.35, 0.38, 5.75], "size": [1.55, 0.76, 0.58], "yaw": 0 },
+    { "id": "lawson-armchair", "kind": "furniture", "position": [-7.4, 0.62, -0.7], "size": [0.86, 1.24, 0.82], "yaw": 0.18 },
+    { "id": "sea-chest", "kind": "furniture", "position": [-7.35, 0.34, 4.65], "size": [1.25, 0.68, 0.7], "yaw": 0.08 }
+  ],
+  "inspectables": [
+    {
+      "id": "office-door-closed",
+      "mode": "interior-message",
+      "label": "office door",
+      "text": "Press E to try the office door",
+      "message": "The office door is shut. Lawson keeps his papers and account books beyond it.",
+      "position": [1.82, 1.1, 4.1],
+      "radius": 1.55
+    },
+    {
+      "id": "private-door-closed",
+      "mode": "interior-message",
+      "label": "private door",
+      "text": "Press E to try the private door",
+      "message": "The latch holds. These are Lawson's private quarters.",
+      "position": [-3.2, 1.1, 0.02],
+      "radius": 1.45
+    },
+    {
+      "id": "store-door-closed",
+      "mode": "interior-message",
+      "label": "colony store door",
+      "text": "Press E to try the colony store",
+      "message": "The store is locked. Its barrels, tools, and ration books are held against the colony's account.",
+      "position": [4.8, 1.1, 0.02],
+      "radius": 1.45
+    }
+  ],
+  "propSpawns": [
+    { "id": "lawson-dining-chair-west", "type": "lawsonDiningChair", "x": -5.75, "z": 1.25, "rotation": [0, 1.57, 0] },
+    { "id": "lawson-dining-chair-east", "type": "lawsonDiningChair", "x": -1.25, "z": 1.25, "rotation": [0, -1.57, 0] },
+    { "id": "lawson-dining-chair-north", "type": "lawsonDiningChair", "x": -4.35, "z": 2.35, "rotation": [0, 3.08, 0] },
+    { "id": "lawson-campaign-stool", "type": "lawsonCampaignStool", "x": -2.65, "z": 2.35, "rotation": [0, -2.9, 0] },
+    { "id": "lawson-rum-bottle", "type": "lawsonRumBottle", "x": -4.45, "y": 1.27, "z": 1.1, "rotation": [0, 0.25, 0] },
+    { "id": "lawson-tin-mug", "type": "lawsonTinMug", "x": -2.75, "y": 0.94, "z": 1.05, "rotation": [0, -0.4, 0] },
+    { "id": "lawson-serving-bowl", "type": "lawsonServingBowl", "x": -3.55, "y": 0.93, "z": 1.28, "rotation": [0, 0, 0] },
+    { "id": "lawson-folded-chart", "type": "lawsonFoldedChart", "x": -3.2, "y": 0.91, "z": 1.52, "rotation": [0, 0.12, 0] },
+    { "id": "lawson-supply-ledger", "type": "lawsonSupplyLedger", "x": -7.37, "y": 0.87, "z": 5.72, "rotation": [0, -0.18, 0] },
+    { "id": "lawson-table-candlestick", "type": "lawsonCandlestick", "x": -4.02, "y": 1.23, "z": 1.48, "rotation": [0, 0, 0] }
+  ]
+}

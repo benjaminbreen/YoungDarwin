@@ -4,6 +4,7 @@ import {
   BEAGLE_DECK,
   BOARD_X_FOOT,
   BOARD_X_TOP,
+  POOP_BREAK,
   SEA_FLOOR_Y,
   beagleDeckHeight,
   beagleHalfBeam,
@@ -73,6 +74,12 @@ export const beagleDeckRegion = {
     color: beagleDeckColor,
     isWalkable: isBeagleDeckWalkable,
     defaultSpawn: [-3.6, 0, 0],
+    entrySpawns: {
+      'from-cabin': [POOP_BREAK + 4.9, 0, 0],
+    },
+    entryFacings: {
+      'from-cabin': [1, 0, 0],
+    },
   },
 };
 

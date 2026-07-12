@@ -6,6 +6,10 @@ import { useGLTF } from '@react-three/drei';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
+import { modelAnimationDebugEnabled } from '../../runtimeDebug';
+import { useThreeGameStore } from '../../store';
+import { skyState } from '../../world/celestial';
+import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import {
@@ -159,6 +163,7 @@ function buildSkyGradientEnvScene() {
     `,
   });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), mat));
+  scene.userData.skyGradientMaterial = mat;
   return scene;
 }
 
@@ -179,39 +184,135 @@ export function setPlayerEnvBounce(bounce) {
   });
 }
 
-// Scene-wide IBL from the same cached PMREM gradient the player materials use:
-// terrain/rocks/foliage that stay MeshStandardMaterial pick up a faint ambient
-// specular + sky/ground bounce instead of reading as pure direct-lit matte.
-// Materials with an explicit envMap (the player pipeline) are unaffected —
-// material.envMap wins over scene.environment. Kept deliberately faint.
+const ENVIRONMENT_REFRESH_SECONDS = 2.5;
+const ENVIRONMENT_CHANGE_THRESHOLD = 0.06;
+const ENV_CLEAR_TOP = new THREE.Color('#a3bcd8');
+const ENV_CLEAR_HORIZON = new THREE.Color('#dccfb2');
+const ENV_CLEAR_GROUND = new THREE.Color('#a68a64');
+const ENV_CLOSED_TOP = new THREE.Color('#9aa6ad');
+const ENV_CLOSED_HORIZON = new THREE.Color('#b8bbb4');
+const ENV_CLOSED_GROUND = new THREE.Color('#6f746c');
+const ENV_NIGHT_TOP = new THREE.Color('#263752');
+const ENV_NIGHT_HORIZON = new THREE.Color('#1d2a40');
+const ENV_NIGHT_GROUND = new THREE.Color('#242b34');
+const ENV_GOLDEN_HORIZON = new THREE.Color('#e2b37c');
+
+function environmentPalette(timeOfDay, day) {
+  const sky = skyState(timeOfDay, day || 1);
+  const closure = THREE.MathUtils.clamp(
+    weatherEnv.overcast * 0.8 + weatherEnv.mistAmount * 0.32 + weatherEnv.rainIntensity * 0.2,
+    0,
+    1,
+  );
+  const night = sky.night;
+  const daylight = sky.daylight;
+  const top = ENV_CLEAR_TOP.clone().lerp(ENV_CLOSED_TOP, closure).lerp(ENV_NIGHT_TOP, night);
+  const horizon = ENV_CLEAR_HORIZON.clone()
+    .lerp(ENV_CLOSED_HORIZON, closure)
+    .lerp(ENV_GOLDEN_HORIZON, sky.golden * (1 - closure) * 0.5)
+    .lerp(ENV_NIGHT_HORIZON, night);
+  const ground = ENV_CLEAR_GROUND.clone()
+    .lerp(ENV_CLOSED_GROUND, closure)
+    .lerp(ENV_NIGHT_GROUND, night);
+  // Keep the environment deliberately secondary to direct lighting. In a
+  // storm it darkens with the cloud deck instead of continuing to reflect a
+  // clear studio sky from wet rock and wood.
+  const intensity = THREE.MathUtils.lerp(0.1, 0.25, daylight)
+    * (1 - closure * 0.34)
+    * (1 - weatherEnv.lightDim * 0.18);
+  return { top, horizon, ground, intensity };
+}
+
+function paletteDistance(a, b) {
+  if (typeof a?.top?.distanceTo !== 'function' || typeof a?.horizon?.distanceTo !== 'function' || typeof a?.ground?.distanceTo !== 'function') return Infinity;
+  if (typeof b?.top?.distanceTo !== 'function' || typeof b?.horizon?.distanceTo !== 'function' || typeof b?.ground?.distanceTo !== 'function') return Infinity;
+  return Math.max(
+    a.top.distanceTo(b.top),
+    a.horizon.distanceTo(b.horizon),
+    a.ground.distanceTo(b.ground),
+  );
+}
+
+function disposeEnvironmentScene(scene) {
+  scene?.traverse(object => {
+    if (!object.isMesh) return;
+    object.geometry?.dispose?.();
+    object.material?.dispose?.();
+  });
+}
+
+// Scene-wide IBL from the same PMREM gradient the player materials use. The
+// source palette follows the time of day and smoothed weather, but PMREM is
+// regenerated only after a meaningful change and at a low cadence. Materials
+// with an explicit envMap (the player pipeline) are swapped at the same time.
 export function SceneEnvironment({ intensity = 0.25 }) {
   const gl = useThree(state => state.gl);
   const scene = useThree(state => state.scene);
+  const environmentRef = useRef(null);
+  const refreshClock = useRef(ENVIRONMENT_REFRESH_SECONDS);
+  const lastPalette = useRef(null);
+
   useEffect(() => {
-    const env = getPlayerEnvMap(gl);
-    if (!env) return undefined;
-    scene.environment = env;
-    scene.environmentIntensity = intensity;
+    const sourceScene = buildSkyGradientEnvScene();
+    const pmrem = new THREE.PMREMGenerator(gl);
+    environmentRef.current = { sourceScene, pmrem };
     return () => {
-      if (scene.environment === env) scene.environment = null;
+      if (scene.environment === cachedPlayerEnv) scene.environment = null;
+      environmentRef.current = null;
+      pmrem.dispose();
+      disposeEnvironmentScene(sourceScene);
     };
-  }, [gl, scene, intensity]);
+  }, [gl, scene]);
+
+  useFrame((_, delta) => {
+    const state = environmentRef.current;
+    if (!state) return;
+    const store = useThreeGameStore.getState();
+    const target = environmentPalette(store.timeOfDay, store.day);
+    scene.environmentIntensity = target.intensity * (intensity / 0.25);
+    refreshClock.current += delta;
+    const due = refreshClock.current >= ENVIRONMENT_REFRESH_SECONDS;
+    if (!due || (lastPalette.current && paletteDistance(lastPalette.current, target) < ENVIRONMENT_CHANGE_THRESHOLD)) return;
+
+    const material = state.sourceScene.userData.skyGradientMaterial;
+    material.uniforms.uTop.value.copy(target.top);
+    material.uniforms.uHorizon.value.copy(target.horizon);
+    material.uniforms.uBottom.value.copy(target.ground);
+    const nextTarget = state.pmrem.fromScene(state.sourceScene, 0.04, 0.1, 100, { size: 128 });
+    replacePlayerEnvironment(nextTarget);
+    scene.environment = cachedPlayerEnv;
+    lastPalette.current = target;
+    refreshClock.current = 0;
+  });
+
   return null;
 }
 
 let cachedPlayerEnv = null;
+let cachedPlayerEnvTarget = null;
+
+function replacePlayerEnvironment(target) {
+  const previous = cachedPlayerEnvTarget;
+  cachedPlayerEnvTarget = target;
+  cachedPlayerEnv = target.texture;
+  envBounceMaterials.forEach(material => {
+    if (!material || material.userData?.envBaseIntensity == null) return;
+    material.envMap = cachedPlayerEnv;
+    material.envMapIntensity = material.userData.envBaseIntensity * (ENV_BOUNCE_MIN_SCALE + lastEnvBounce * ENV_BOUNCE_GAIN);
+    material.needsUpdate = true;
+  });
+  if (previous && previous !== target) previous.dispose();
+}
+
 function getPlayerEnvMap(renderer) {
   if (cachedPlayerEnv) return cachedPlayerEnv;
   if (!renderer) return null;
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = buildSkyGradientEnvScene();
-  cachedPlayerEnv = pmrem.fromScene(envScene, 0.04).texture;
+  const target = pmrem.fromScene(envScene, 0.04);
+  replacePlayerEnvironment(target);
   pmrem.dispose();
-  envScene.traverse(obj => {
-    if (!obj.isMesh) return;
-    obj.geometry.dispose();
-    obj.material.dispose();
-  });
+  disposeEnvironmentScene(envScene);
   return cachedPlayerEnv;
 }
 
@@ -826,8 +927,10 @@ function GLBPrimitive({
     return actionLookup.get(name) || actionLookup.get(normalizeClipName(name)) || null;
   }, [actionLookup]);
 
+  const animationDebugEnabled = useMemo(modelAnimationDebugEnabled, []);
+  const lastHeldAnimationDebugAt = useRef(-Infinity);
   const publishAnimationDebug = useCallback((requested, action, metadata = {}) => {
-    if (typeof window === 'undefined') return;
+    if (!animationDebugEnabled || typeof window === 'undefined') return;
     const debugPayload = {
       assetId,
       requested,
@@ -844,7 +947,7 @@ function GLBPrimitive({
     if (String(assetId).startsWith('darwin')) {
       window.__darwinAnimationDebug = debugPayload;
     }
-  }, [actions, assetId]);
+  }, [actions, animationDebugEnabled, assetId]);
 
   const playAnimation = useCallback((request) => {
     const normalized = normalizeAnimationRequest(request);
@@ -873,7 +976,13 @@ function GLBPrimitive({
       } else {
         next.paused = false;
       }
-      publishAnimationDebug(requestedClip, next, { held: true, maxTime });
+      if (animationDebugEnabled) {
+        const now = performance.now();
+        if (now - lastHeldAnimationDebugAt.current >= 250) {
+          lastHeldAnimationDebugAt.current = now;
+          publishAnimationDebug(requestedClip, next, { held: true, maxTime });
+        }
+      }
       return true;
     }
     const previous = activeAction.current;
@@ -899,7 +1008,7 @@ function GLBPrimitive({
     activeRequest.current = requestedClip;
     publishAnimationDebug(requestedClip, next, { fade: transitionFade, oneShot });
     return true;
-  }, [actions, getAction, publishAnimationDebug]);
+  }, [actions, animationDebugEnabled, getAction, publishAnimationDebug]);
 
   useEffect(() => {
     normalizeImportedMaterials(importedScene, asset, motion);

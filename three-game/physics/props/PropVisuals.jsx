@@ -1,10 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { StaticGLB } from '../../components/assets/StaticGLB';
 import { getModelAsset } from '../../modelAssets';
+import { useThreeGameStore } from '../../store';
+import { skyState } from '../../world/celestial';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
+import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -159,21 +163,175 @@ function LooseBoardVisual() {
   return <mesh castShadow receiveShadow material={wood} geometry={geometry} />;
 }
 
+function CabinChairVisual() {
+  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a321c', roughness: 0.76 }));
+  const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.82, 0.12, 0.78));
+  const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.1, 0.72, 0.1));
+  const rail = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.72, 0.1, 0.1));
+  return (
+    <group>
+      <mesh castShadow receiveShadow geometry={seat} material={wood} position={[0, -0.18, 0]} />
+      {[[-0.32, -0.55, -0.28], [0.32, -0.55, -0.28], [-0.32, -0.55, 0.28], [0.32, -0.55, 0.28]].map((position, index) => (
+        <mesh key={index} castShadow receiveShadow geometry={leg} material={wood} position={position} />
+      ))}
+      <mesh castShadow receiveShadow geometry={leg} material={wood} position={[-0.32, 0.22, 0.3]} scale={[1, 1.35, 1]} />
+      <mesh castShadow receiveShadow geometry={leg} material={wood} position={[0.32, 0.22, 0.3]} scale={[1, 1.35, 1]} />
+      {[0.03, 0.3, 0.57].map(y => <mesh key={y} castShadow geometry={rail} material={wood} position={[0, y, 0.3]} />)}
+    </group>
+  );
+}
+
+function CabinStoolVisual() {
+  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#704727', roughness: 0.82 }));
+  const canvas = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#b6aa88', roughness: 0.94 }));
+  const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.64, 0.1, 0.55));
+  const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.09, 0.72, 0.09));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={canvas} geometry={seat} position={[0, 0.31, 0]} />
+      <mesh castShadow receiveShadow material={wood} geometry={leg} rotation={[0, 0, 0.38]} position={[-0.12, -0.04, 0]} />
+      <mesh castShadow receiveShadow material={wood} geometry={leg} rotation={[0, 0, -0.38]} position={[0.12, -0.04, 0]} />
+    </group>
+  );
+}
+
+function SeaChestVisual() {
+  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a3922', roughness: 0.83 }));
+  const iron = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#2a2925', roughness: 0.62, metalness: 0.35 }));
+  const body = useSingleMaterialGeometry(() => new THREE.BoxGeometry(1.38, 0.74, 0.86));
+  const lid = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.43, 0.43, 1.38, 12, 1, false, 0, Math.PI));
+  const band = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.08, 0.82, 0.92));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={wood} geometry={body} position={[0, -0.06, 0]} />
+      <mesh castShadow receiveShadow material={wood} geometry={lid} rotation={[0, 0, Math.PI / 2]} position={[0, 0.32, 0]} />
+      {[-0.47, 0.47].map(x => <mesh key={x} castShadow material={iron} geometry={band} position={[x, 0, 0]} />)}
+      <mesh castShadow material={iron} geometry={band} position={[0, 0, -0.45]} scale={[1.4, 0.28, 0.5]} />
+    </group>
+  );
+}
+
+function CabinBucketVisual() {
+  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#765035', roughness: 0.88 }));
+  const iron = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#35332e', roughness: 0.58, metalness: 0.42 }));
+  const body = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.3, 0.24, 0.56, 14, 1, true));
+  const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.24, 0.24, 0.05, 14));
+  const band = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.285, 0.018, 6, 16));
+  const handle = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.34, 0.018, 6, 18, Math.PI));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={wood} geometry={body} />
+      <mesh castShadow receiveShadow material={wood} geometry={base} position={[0, -0.28, 0]} />
+      {[-0.19, 0.2].map(y => <mesh key={y} castShadow material={iron} geometry={band} rotation={[Math.PI / 2, 0, 0]} position={[0, y, 0]} />)}
+      <mesh castShadow material={iron} geometry={handle} rotation={[0, 0, Math.PI / 2]} position={[0, 0.22, 0]} />
+    </group>
+  );
+}
+
+function RolledChartVisual() {
+  const paper = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#d3c49d', roughness: 0.96 }));
+  const tie = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#76543a', roughness: 0.86 }));
+  const roll = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.07, 0.07, 0.75, 14));
+  const band = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.076, 0.076, 0.045, 14, 1, true));
+  return (
+    <group>
+      <mesh castShadow receiveShadow material={paper} geometry={roll} />
+      <mesh castShadow material={tie} geometry={band} />
+    </group>
+  );
+}
+
+function ChartWeightVisual() {
+  const brass = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#9e7b35', roughness: 0.42, metalness: 0.64 }));
+  const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.13, 0.15, 0.12, 14));
+  const knob = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.055, 10, 8));
+  return <group><mesh castShadow material={brass} geometry={base} /><mesh castShadow material={brass} geometry={knob} position={[0, 0.09, 0]} /></group>;
+}
+
+function CabinMugVisual() {
+  const tin = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#85877f', roughness: 0.58, metalness: 0.46 }));
+  const cup = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.1, 0.09, 0.23, 14, 1, true));
+  const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.09, 0.09, 0.025, 14));
+  const handle = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.075, 0.018, 6, 12, Math.PI * 1.55));
+  return <group><mesh castShadow material={tin} geometry={cup} /><mesh castShadow material={tin} geometry={base} position={[0, -0.115, 0]} /><mesh castShadow material={tin} geometry={handle} rotation={[Math.PI / 2, 0, 0]} position={[0.1, 0, 0]} /></group>;
+}
+
+function CandlestickVisual() {
+  const brass = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#a88642', roughness: 0.4, metalness: 0.62 }));
+  const wax = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#d9cfaa', roughness: 0.92 }));
+  const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.14, 0.16, 0.06, 14));
+  const stem = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.035, 0.055, 0.28, 12));
+  const candle = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.035, 0.038, 0.17, 12));
+  return <group><mesh castShadow material={brass} geometry={base} position={[0, -0.21, 0]} /><mesh castShadow material={brass} geometry={stem} position={[0, -0.04, 0]} /><mesh castShadow material={wax} geometry={candle} position={[0, 0.18, 0]} /></group>;
+}
+
+function CandlestickFlame({ offsetY = 0 }) {
+  const lightRef = useRef(null);
+  const flameRef = useRef(null);
+  const phaseOffset = useMemo(() => Math.random() * Math.PI * 2, []);
+  const flame = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    color: '#ffd186',
+    emissive: '#ff6d1f',
+    emissiveIntensity: 2.4,
+    roughness: 0.28,
+    metalness: 0,
+    toneMapped: true,
+  }));
+  const flameGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.034, 12, 8));
+
+  useFrame(({ clock }) => {
+    const light = lightRef.current;
+    const flameMesh = flameRef.current;
+    if (!light || !flameMesh) return;
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const darkness = THREE.MathUtils.clamp(
+      celestial.night + weatherEnv.lightDim * 0.2 + weatherEnv.rainIntensity * 0.08,
+      0,
+      1,
+    );
+    const activation = THREE.MathUtils.smoothstep(darkness, 0.08, 0.92);
+    const phase = clock.elapsedTime * 13.4 + phaseOffset;
+    const flicker = 0.96 + Math.sin(phase) * 0.026 + Math.sin(phase * 1.87) * 0.014;
+    light.intensity = THREE.MathUtils.lerp(0.14, 3.25, activation) * flicker;
+    flame.emissiveIntensity = THREE.MathUtils.lerp(2.45, 4.4, activation) * flicker;
+    flameMesh.scale.set(0.74, 1.28 + Math.sin(phase * 0.83) * 0.06, 0.74);
+  });
+
+  return (
+    <group position={[0, offsetY + 0.275, 0]}>
+      <mesh ref={flameRef} material={flame} geometry={flameGeometry} />
+      <pointLight
+        ref={lightRef}
+        position={[0, 0.025, 0]}
+        color="#ff9a48"
+        intensity={0.14}
+        distance={2.5}
+        decay={2}
+      />
+    </group>
+  );
+}
+
 export function PropVisual({ visual, assetId, offsetY = 0 }) {
   const asset = assetId ? getModelAsset(assetId) : null;
   if (asset?.enabled !== false && asset?.path) {
     return (
-      <StaticGLB
-        path={asset.path}
-        position={[0, (asset.yOffset || 0) + offsetY, 0]}
-        rotation={asset.rotation || [0, 0, 0]}
-        scale={asset.scale || 1}
-        castShadow
-        receiveShadow
-        sourceId={`physics-prop-visual:${assetId}`}
-        sourceLabel={assetId}
-        sourceKind="physics-prop-visual"
-      />
+      <group>
+        <StaticGLB
+          path={asset.path}
+          position={[0, (asset.yOffset || 0) + offsetY, 0]}
+          rotation={asset.rotation || [0, 0, 0]}
+          scale={asset.scale || 1}
+          castShadow
+          receiveShadow
+          preserveMaterials={asset.preserveMaterials === true}
+          sourceId={`physics-prop-visual:${assetId}`}
+          sourceLabel={assetId}
+          sourceKind="physics-prop-visual"
+        />
+        {visual === 'cabinCandlestick' && <CandlestickFlame offsetY={(asset.yOffset || 0) + offsetY} />}
+      </group>
     );
   }
   if (visual === 'crate') return <CrateVisual />;
@@ -183,6 +341,14 @@ export function PropVisual({ visual, assetId, offsetY = 0 }) {
   if (visual === 'shellFragment') return <ShellFragmentVisual />;
   if (visual === 'jug') return <JugVisual />;
   if (visual === 'looseBoard') return <LooseBoardVisual />;
+  if (visual === 'cabinChair') return <CabinChairVisual />;
+  if (visual === 'cabinStool') return <CabinStoolVisual />;
+  if (visual === 'cabinSeaChest') return <SeaChestVisual />;
+  if (visual === 'cabinBucket') return <CabinBucketVisual />;
+  if (visual === 'rolledChart') return <RolledChartVisual />;
+  if (visual === 'chartWeight') return <ChartWeightVisual />;
+  if (visual === 'cabinMug') return <CabinMugVisual />;
+  if (visual === 'cabinCandlestick') return <group><CandlestickVisual /><CandlestickFlame offsetY={offsetY} /></group>;
   return <BarrelVisual />;
 }
 

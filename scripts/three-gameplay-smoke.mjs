@@ -12,6 +12,7 @@ const UI_STEP_TIMEOUT_MS = Number(process.env.THREE_E2E_UI_TIMEOUT_MS || 10000);
 const SERVER_START_TIMEOUT_MS = Number(process.env.THREE_E2E_SERVER_START_TIMEOUT_MS || 60000);
 const AUTO_START_SERVER = process.env.THREE_E2E_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const REUSE_EXISTING_SERVER = process.env.THREE_E2E_REUSE_SERVER === '1';
+const requestedScenario = process.argv.find(argument => argument.startsWith('--scenario='))?.split('=')[1] || 'all';
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -158,10 +159,11 @@ async function resolveBaseUrl() {
   return { baseUrl: server.baseUrl, stopServer: server.stop };
 }
 
-function e2eUrl(baseUrl) {
+function e2eUrl(baseUrl, search = {}) {
   const url = new URL(baseUrl);
   url.searchParams.set('e2e', '1');
   url.searchParams.set('preserveDrawingBuffer', '1');
+  for (const [key, value] of Object.entries(search)) url.searchParams.set(key, String(value));
   return url.toString();
 }
 
@@ -414,10 +416,10 @@ function collectPageErrors(page) {
   return errors;
 }
 
-async function openE2EPage(browser, baseUrl) {
+async function openE2EPage(browser, baseUrl, search = {}) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = collectPageErrors(page);
-  const targetUrl = e2eUrl(baseUrl);
+  const targetUrl = e2eUrl(baseUrl, search);
   await withFailureArtifacts(page, 'navigate', errors, async () => {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
     await page.waitForFunction(() => window.__darwinE2EReady === true, null, { timeout: UI_STEP_TIMEOUT_MS });
@@ -530,6 +532,68 @@ async function runFinchScenario(browser, baseUrl) {
   }
 }
 
+async function runCabinScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'BEAGLE_CABIN',
+    quality: 'performance',
+  });
+  try {
+    console.log('[three:e2e] Beagle cabin: launch, read, take notes, rest');
+    await launchMode(page, errors, 'Darwin');
+    const initial = await page.evaluate(() => window.__darwinE2E.getState());
+    assertCondition(initial.currentZoneId === 'BEAGLE_CABIN', 'Cabin scenario launched in the wrong zone.', initial);
+
+    const firstOpen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
+    assertCondition(firstOpen.curiosity === initial.curiosity + 1, 'First book consultation did not add exactly one curiosity.', { initial, firstOpen });
+    assertCondition(firstOpen.consultedBookIds.includes('lyell-principles-vol1'), 'Book consultation was not persisted.', firstOpen);
+
+    await withFailureArtifacts(page, 'render Lyell book scan', errors, async () => {
+      await page.getByRole('region', { name: /Reading Principles of Geology/i }).waitFor({ timeout: GAMEPLAY_TIMEOUT_MS });
+      await page.waitForFunction(() => {
+        const canvas = document.querySelector('canvas[aria-label^="Scanned page"]');
+        return canvas && canvas.className.includes('opacity-100') && canvas.width > 100;
+      }, null, { timeout: GAMEPLAY_TIMEOUT_MS });
+      await page.screenshot({ path: path.join(outDir, 'beagle-cabin-book-reader.png'), fullPage: false });
+      await page.getByRole('button', { name: 'Next page' }).click({ force: true, timeout: UI_STEP_TIMEOUT_MS });
+      await page.waitForTimeout(900);
+    });
+
+    const afterTurn = await page.evaluate(() => window.__darwinE2E.getState());
+    assertCondition(afterTurn.readableBookSession?.page > firstOpen.readableBookSession?.page, 'Turning the scanned book did not persist its page.', { firstOpen, afterTurn });
+
+    await withFailureArtifacts(page, 'save cabin reading note', errors, async () => {
+      await page.getByRole('button', { name: /^Field note$/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await page.getByPlaceholder(/Record what in this passage/i).fill('Lyell asks the observer to compare present causes with traces preserved in the rocks.');
+      await page.getByRole('button', { name: /Enter in journal/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    });
+    const afterNote = await page.evaluate(() => window.__darwinE2E.getState());
+    assertCondition(afterNote.journalCount === initial.journalCount + 1, 'Reading note was not added to the field journal.', { initial, afterNote });
+    assertCondition(afterNote.curiosity === initial.curiosity + 2, 'Reading note did not add exactly one curiosity.', { initial, afterNote });
+    await page.getByRole('button', { name: 'Close book' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    const reopen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
+    assertCondition(reopen.curiosity === afterNote.curiosity, 'Repeated consultation awarded duplicate curiosity.', { afterNote, reopen });
+    await page.evaluate(() => window.__darwinE2E.closeBook());
+
+    const rested = await page.evaluate(() => window.__darwinE2E.restInInterior("captain's berth"));
+    assertCondition(rested.fatigue <= initial.fatigue, 'Cabin rest did not recover fatigue.', { initial, rested });
+    assertCondition(/Two hours pass/.test(rested.message || ''), 'Cabin rest did not report elapsed time.', rested);
+
+    await page.close();
+    return {
+      name: 'beagle-cabin',
+      bookPage: afterTurn.readableBookSession?.page,
+      curiosityGained: afterNote.curiosity - initial.curiosity,
+      journalEntriesAdded: afterNote.journalCount - initial.journalCount,
+      restedFatigue: rested.fatigue,
+      finalState: rested,
+      errors,
+    };
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
+  }
+}
+
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const { baseUrl, stopServer } = await resolveBaseUrl();
@@ -555,10 +619,20 @@ async function run() {
 
   let results;
   try {
-    results = [
-      await runDarwinScenario(browser, baseUrl),
-      await runFinchScenario(browser, baseUrl),
-    ];
+    const scenarios = {
+      darwin: runDarwinScenario,
+      finch: runFinchScenario,
+      cabin: runCabinScenario,
+    };
+    assertCondition(
+      requestedScenario === 'all' || scenarios[requestedScenario],
+      `Unknown gameplay smoke scenario "${requestedScenario}".`,
+    );
+    const selected = requestedScenario === 'all'
+      ? Object.values(scenarios)
+      : [scenarios[requestedScenario]];
+    results = [];
+    for (const scenario of selected) results.push(await scenario(browser, baseUrl));
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
@@ -580,6 +654,9 @@ async function run() {
     collected: result.collected?.success ?? null,
     defecateCount: result.defecateCount,
     animalDroppingsCount: result.animalDroppingsCount,
+    bookPage: result.bookPage,
+    curiosityGained: result.curiosityGained,
+    journalEntriesAdded: result.journalEntriesAdded,
   })), null, 2));
   console.log(`[three:e2e] summary: ${summaryPath}`);
 }

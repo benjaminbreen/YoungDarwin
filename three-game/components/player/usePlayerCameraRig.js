@@ -379,13 +379,20 @@ export function usePlayerCameraRig() {
     const rigStoreState = useThreeGameStore.getState();
     const statusViewOpen = rigStoreState.statusViewOpen;
     const examineSession = rigStoreState.examineSession?.focus ? rigStoreState.examineSession : null;
+    const readableBookSession = rigStoreState.readableBookSession?.focus
+      ? {
+          focus: rigStoreState.readableBookSession.focus,
+          frameHint: { height: 0.2, radius: 0.34 },
+        }
+      : null;
+    const focusSession = examineSession || readableBookSession;
     adsBlendRef.current = THREE.MathUtils.damp(
       adsBlendRef.current,
-      aiming && !flying && !statusViewOpen && !examineSession && viewMode !== 'top' ? 1 : 0,
+      aiming && !flying && !statusViewOpen && !focusSession && viewMode !== 'top' ? 1 : 0,
       9,
       delta,
     );
-    if (openingCameraActive && !statusViewOpen && !examineSession) {
+    if (openingCameraActive && !statusViewOpen && !focusSession) {
       const sequenceId = openingCamera.sequenceId || 'opening-camera';
       if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
         openingCameraRuntimeRef.current.sequenceId = sequenceId;
@@ -459,13 +466,13 @@ export function usePlayerCameraRig() {
     }
     const pivotY = cameraProfile?.pivotY ?? 1.22;
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, pivotY, 0)).add(panOffsetRef.current);
-    if (examineSession) {
+    if (focusSession) {
       // Diegetic examine shot: dolly in between Darwin and the subject and
       // frame the subject by its bulk (frameHint), with a very slow orbital
       // drift so the held pose still feels alive. Shares statusLookRef with
       // the status view so open/close easing behaves identically.
-      const focus = examineSession.focus;
-      const hint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
+      const focus = focusSession.focus;
+      const hint = focusSession.frameHint || { height: 0.8, radius: 0.6 };
       const centerY = focus.y + Math.max(0.22, hint.height * 0.55);
       let dirX = playerPosition.x - focus.x;
       let dirZ = playerPosition.z - focus.z;
@@ -527,7 +534,7 @@ export function usePlayerCameraRig() {
       camera.rotation.order = 'YXZ';
       camera.rotation.set(lookPitch, yawRef.current, 0);
     } else if (viewMode === 'top') {
-      const height = THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, 85);
+      const height = cameraProfile?.topHeight ?? THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, 85);
       const top = scratch.top.copy(cameraAnchor).add(scratch.panVertical.set(0, height, 0));
       camera.position.lerp(top.add(cameraShake), 1 - Math.exp(-8 * delta));
       // Fixed straight-down orientation: lookAt near the vertical pole made
@@ -643,10 +650,19 @@ export function usePlayerCameraRig() {
         lookTarget = scratch.adsLookBlend.copy(lookTarget).lerp(adsLook, adsBlend);
         positionDamping = THREE.MathUtils.lerp(positionDamping, 20, adsBlend);
       }
+      const cameraCollision = cameraProfile?.collision;
+      if (cameraCollision?.enabled && collisionAdapter.cameraDistanceLimit) {
+        const limitedDistance = collisionAdapter.cameraDistanceLimit(pivot, eye, cameraCollision);
+        const requestedDistance = eye.distanceTo(pivot);
+        if (limitedDistance < requestedDistance - 0.001) {
+          eye.sub(pivot).setLength(limitedDistance).add(pivot);
+          positionDamping = Math.max(positionDamping, 12);
+        }
+      }
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-positionDamping * delta));
       camera.lookAt(lookTarget);
     }
-    if (!statusViewOpen && !examineSession && statusLookRef.current) {
+    if (!statusViewOpen && !focusSession && statusLookRef.current) {
       const ease = 1 - Math.exp(-3.2 * delta);
       statusLookRef.current.lerp(statusPivot, ease);
       camera.lookAt(statusLookRef.current);

@@ -50,6 +50,7 @@ const TYPE_LABELS = {
   camp: 'Camp',
   shipwreck: 'Wreck site',
   hut: 'Dwelling',
+  shipInterior: 'Shipboard interior',
 };
 
 const LEGEND_ICONS = {
@@ -82,7 +83,7 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   const visibleLocations = useMemo(() => islandMapLocations.filter(location => {
     if (location.id === currentZoneId) return true;
     if (location.isTest) return filters.test;
-    if (location.kind === 'anchorage') return filters.anchorage;
+    if (location.kind === 'anchorage' || location.kind === 'shipInterior') return filters.anchorage;
     if (location.kind === 'water') return filters.water;
     return filters.land;
   }), [filters, currentZoneId]);

@@ -1,6 +1,6 @@
 import type { ExpeditionState } from './types';
 
-export const EXPEDITION_CORE_SCHEMA_VERSION = 3;
+export const EXPEDITION_CORE_SCHEMA_VERSION = 5;
 const initialRegionId = 'POST_OFFICE_BAY';
 
 export function createInitialExpeditionState(seed = 'three-darwin-v1'): ExpeditionState {
@@ -34,8 +34,11 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
     collectedSpecimenActorIds: [],
     documentedSpecimenIds: [],
     examinedTypeIds: [],
+    consultedBookIds: [],
+    bookLastPages: {},
     visitedZoneIds: [initialRegionId],
     visitedLocalCellIds: ['POST_OFFICE_BAY'],
+    npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
   };
 }
 
@@ -56,5 +59,12 @@ export function migrateLegacyExpeditionSave(saved: Record<string, unknown> | nul
     collectedSpecimenActorIds: Array.isArray(saved.collectedSpecimenActorIds) ? saved.collectedSpecimenActorIds as string[] : initial.collectedSpecimenActorIds,
     documentedSpecimenIds: Array.isArray(saved.documentedSpecimenIds) ? saved.documentedSpecimenIds as string[] : initial.documentedSpecimenIds,
     examinedTypeIds: Array.isArray(saved.examinedTypeIds) ? saved.examinedTypeIds as string[] : initial.examinedTypeIds,
+    consultedBookIds: Array.isArray(saved.consultedBookIds) ? saved.consultedBookIds as string[] : initial.consultedBookIds,
+    bookLastPages: saved.bookLastPages && typeof saved.bookLastPages === 'object'
+      ? saved.bookLastPages as Record<string, number>
+      : initial.bookLastPages,
+    npcEncounterState: saved.npcEncounterState && typeof saved.npcEncounterState === 'object'
+      ? saved.npcEncounterState as ExpeditionState['npcEncounterState']
+      : initial.npcEncounterState,
   };
 }

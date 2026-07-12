@@ -6,11 +6,12 @@ import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
+import { faunaDebugEnabled } from '../../runtimeDebug';
 import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
-import { regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
+import { regionSpawnFacing, regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
 import { getSurfaceContactProfile } from '../../world/surfaceContact';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
 import {
@@ -76,6 +77,7 @@ import {
   dampAngle,
   formatVector,
 } from './playerUtils';
+import { getInteriorCameraProfile } from '../../interiors/interiorRegistry';
 
 const PUSH_ANIMATION_COOLDOWN = 0.34;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
@@ -229,6 +231,7 @@ function pushAnimationForObstacle(obstacle) {
 
 
 export function PlayerController({ physicsDebug = false, openingCamera = null, inputLocked = false }) {
+  const faunaDebug = useMemo(faunaDebugEnabled, []);
   const group = useRef(null);
   const warningRef = useRef(null);
   const contactShadowRef = useRef(null);
@@ -496,6 +499,18 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const playableMode = useMemo(() => getPlayableMode(playableModeId), [playableModeId]);
   const playerProfile = useMemo(() => getPlayableControllerProfile(playableMode.id), [playableMode.id]);
+  const cameraProfile = useMemo(() => {
+    const interior = getInteriorCameraProfile(currentZoneId);
+    if (!interior) return playerProfile.camera;
+    return {
+      ...(playerProfile.camera || {}),
+      ...interior,
+      collision: {
+        ...(playerProfile.camera?.collision || {}),
+        ...(interior.collision || {}),
+      },
+    };
+  }, [currentZoneId, playerProfile.camera]);
   const playerConfig = playerProfile;
   const swimConfig = playerProfile.swim || SWIM;
   const isDarwinMode = playableMode.kind !== 'animal';
@@ -518,6 +533,10 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     }
     return regionSpawnPoint(currentZoneId, playerSpawnId);
   }, [currentZoneId, playableMode.kind, playableSpawnPoint, playerSpawnId]);
+  const spawnFacing = useMemo(
+    () => regionSpawnFacing(currentZoneId, playerSpawnId),
+    [currentZoneId, playerSpawnId],
+  );
   const startX = spawnPoint.x;
   const startZ = spawnPoint.z;
 
@@ -699,9 +718,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const spawnY = startsInFlight ? groundY + (playerProfile.startFlightHeight || 2.8) : groundY;
     if (group.current) {
       group.current.position.set(startX, spawnY, startZ);
-      group.current.rotation.y = Math.PI;
+      group.current.rotation.y = Math.atan2(spawnFacing.x, spawnFacing.z);
     }
-    facing.current.set(0, 0, -1);
+    facing.current.copy(spawnFacing);
     setPlayerPose({
       position: { x: startX, y: spawnY, z: startZ },
       facing: { x: facing.current.x, y: facing.current.y, z: facing.current.z },
@@ -782,7 +801,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     lastPosePublishAt.current = -10;
     footstepEffects.reset();
     idleFidget.current = { idleSince: 0, nextAt: 0, count: 0 };
-  }, [currentZoneId, playableMode.id, playerSpawnId, spawnPoint.y, startX, startZ]);
+  }, [currentZoneId, playableMode.id, playerSpawnId, spawnFacing, spawnPoint.y, startX, startZ]);
 
   useFrame((_, rawDelta) => {
     if (!group.current || health <= 0) return;
@@ -920,7 +939,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       swimFatigue,
       playerConfig,
       swimConfig,
-      cameraProfile: playerProfile.camera,
+      cameraProfile,
       currentZoneId,
       viewMode,
       openingCamera,
@@ -963,7 +982,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       velocity.current.y = Math.max(SPAWN_DROP.maxFallSpeed, velocity.current.y - playerConfig.gravity * safeDelta);
       group.current.position.y += velocity.current.y * safeDelta;
       const landed = group.current.position.y <= groundInfo.y;
-      if (now - lastPhysicsDebugAt.current > 0.12) {
+      if (physicsDebug && now - lastPhysicsDebugAt.current > 0.12) {
         lastPhysicsDebugAt.current = now;
         setPhysicsDebug({
           grounded: landed,
@@ -1012,7 +1031,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       group.current.position.y = groundInfo.y;
       characterController.sync(group.current.position);
       velocity.current.set(0, 0, 0);
-      if (now - lastPhysicsDebugAt.current > 0.2) {
+      if (physicsDebug && now - lastPhysicsDebugAt.current > 0.2) {
         lastPhysicsDebugAt.current = now;
         setPhysicsDebug({
           grounded: true,
@@ -1829,7 +1848,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       velocity.current.y = 0;
     }
     const grounded = group.current.position.y <= groundY + playerConfig.groundContactEpsilon;
-    if (now - lastPhysicsDebugAt.current > 0.25) {
+    if (physicsDebug && now - lastPhysicsDebugAt.current > 0.25) {
       lastPhysicsDebugAt.current = now;
       setPhysicsDebug({
         grounded,
@@ -2260,7 +2279,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         intensity: Math.min(1.4, 0.65 + specimenCollision.penetration * 1.6),
       };
       pushSpecimenStimulus(currentZoneId, specimenCollision.actorId, contactStimulus);
-      if (typeof window !== 'undefined') {
+      if (faunaDebug && typeof window !== 'undefined') {
         window.__faunaContactDebug = {
           ...(window.__faunaContactDebug || {}),
           [specimenCollision.actorId]: {
@@ -2834,6 +2853,22 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       setEdgePrompt,
       beginZoneTransition,
       setCarriedObject,
+      placePlayerAt: target => {
+        const targetPosition = target?.position;
+        if (!group.current || !Array.isArray(targetPosition)) return;
+        group.current.position.set(
+          Number(targetPosition[0]) || 0,
+          Number(targetPosition[1]) || 0,
+          Number(targetPosition[2]) || 0,
+        );
+        const targetFacing = target?.facing;
+        if (Array.isArray(targetFacing)) {
+          facing.current.set(targetFacing[0] || 0, 0, targetFacing[2] ?? 1).normalize();
+          group.current.rotation.y = Math.atan2(facing.current.x, facing.current.z);
+        }
+        characterController.sync(group.current.position);
+        velocity.current.set(0, 0, 0);
+      },
       allowSpecimenInteractions: playerConfig.canUseDarwinInteractions !== false,
     });
 

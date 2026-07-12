@@ -1471,7 +1471,7 @@ const _noReflect = [];
 const _hiddenPrev = [];
 const _drawSize = new THREE.Vector2();
 
-export function Water({ quality = 'performance', reflections = true }) {
+export function Water({ quality = 'performance', reflections = true, allowInterior = false, openOceanOnly = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const { scene, gl } = useThree();
   const qualityConfig = useMemo(() => waterQualityConfig(quality), [quality]);
@@ -1622,7 +1622,7 @@ export function Water({ quality = 'performance', reflections = true }) {
 
   useFrame(({ clock, camera }) => {
     const waterMesh = waterRef.current;
-    if (!waterMesh) return; // no water in this zone -> skip everything
+    if (!waterMesh && !openOceanOnly) return; // no water in this zone -> skip everything
 
     const store = useThreeGameStore.getState();
     const t = clock.elapsedTime;
@@ -1752,7 +1752,7 @@ export function Water({ quality = 'performance', reflections = true }) {
     // mirror is a garnish on top of the refracted body now. Refresh it at the
     // current moving-camera cadence, but do not keep re-rendering it while the
     // camera and lighting are effectively unchanged.
-    if (reflections) {
+    if (reflections && waterMesh) {
       reflectionFrame.current += 1;
       const rs = reflectionState.current;
       rs.framesSinceUpdate += 1;
@@ -1795,7 +1795,7 @@ export function Water({ quality = 'performance', reflections = true }) {
   }, [waterGeometry, waterMaterial, surfMaterial, seafloor, standingWaterMask, rippleNormal, deepMaterial, reflectionRT]);
 
   const regionType = getRegionMap(currentZoneId).type;
-  if (['interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
+  if (!allowInterior && ['interior', 'office', 'governorslibrary', 'governorshouse', 'cave'].includes(regionType)) return null;
 
   return (
     <group userData={{
@@ -1812,19 +1812,23 @@ export function Water({ quality = 'performance', reflections = true }) {
       }}>
         <circleGeometry args={[160, 128]} />
       </mesh>
-      <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} userData={{
-        renderSource: `water:${currentZoneId}:surface`,
-        renderLabel: `${currentZoneId} water surface`,
-        renderKind: 'water',
-        renderPath: null,
-      }} />
-      <mesh ref={surfRef} geometry={waterGeometry} material={surfMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-1} frustumCulled={false} userData={{
-        noReflect: true,
-        renderSource: `water:${currentZoneId}:surf-ribbons`,
-        renderLabel: `${currentZoneId} surf ribbons`,
-        renderKind: 'water',
-        renderPath: null,
-      }} />
+      {!openOceanOnly && (
+        <>
+          <mesh ref={bindWaterMesh} geometry={waterGeometry} material={waterMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-2} frustumCulled={false} userData={{
+            renderSource: `water:${currentZoneId}:surface`,
+            renderLabel: `${currentZoneId} water surface`,
+            renderKind: 'water',
+            renderPath: null,
+          }} />
+          <mesh ref={surfRef} geometry={waterGeometry} material={surfMaterial} rotation-x={-Math.PI / 2} position={[0, WATER_LEVEL, 0]} renderOrder={-1} frustumCulled={false} userData={{
+            noReflect: true,
+            renderSource: `water:${currentZoneId}:surf-ribbons`,
+            renderLabel: `${currentZoneId} surf ribbons`,
+            renderKind: 'water',
+            renderPath: null,
+          }} />
+        </>
+      )}
     </group>
   );
 }

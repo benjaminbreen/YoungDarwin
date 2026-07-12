@@ -127,5 +127,11 @@ export const penalColonyRegion = {
     color: penalColonyColor,
     isWalkable: isPenalColonyWalkable,
     defaultSpawn: [5, 0, -12],
+    entrySpawns: {
+      'from-lawson-house': [-22.28, 0, -10.79],
+    },
+    entryFacings: {
+      'from-lawson-house': [0.581, 0, 0.814],
+    },
   },
 };

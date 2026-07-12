@@ -172,6 +172,19 @@ function rotatePoint(x, z, cx, cz, yaw) {
   return { x: cx + x * cos + z * sin, z: cz - x * sin + z * cos };
 }
 
+export function getGovernorHouseFrontEntry() {
+  const house = { x: -26, z: -16, yaw: 0.62 };
+  const position = rotatePoint(0, 5.25, house.x, house.z, house.yaw);
+  const inward = rotatePoint(0, 4.25, house.x, house.z, house.yaw);
+  const dx = inward.x - position.x;
+  const dz = inward.z - position.z;
+  const length = Math.hypot(dx, dz) || 1;
+  return {
+    position,
+    facing: { x: dx / length, z: dz / length },
+  };
+}
+
 // A fence side in ring-local coords from corner A to corner B, with optional
 // centered gap (world units) for a gate or opening.
 function ringSides(ring) {

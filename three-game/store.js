@@ -48,6 +48,9 @@ import {
 } from './playable/playableModes';
 import { clampToWalkable, terrainHeight } from './world/terrain';
 import { forageableAllowsMode } from './world/forageables';
+import { getReadableBook } from './books/bookCatalog';
+import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { encounterAmbientLine, getNpcEncounter } from './encounters/npcEncounters';
 import {
   MAX_ACTIVE_SNARES,
   SNARE_CHECK_AFTER_MINUTES,
@@ -195,7 +198,7 @@ function nearbyPeopleContext(state, zone) {
   return people.slice(0, 4);
 }
 
-const LLM_RECENT_CONTEXT_KINDS = new Set(['player']);
+const LLM_RECENT_CONTEXT_KINDS = new Set(['player', 'narrator']);
 const LLM_RECENT_CONTEXT_SOURCES = new Set(['player', 'llm', 'scripted-identity', 'scripted-place', 'local']);
 
 function recentNarrationContext(log) {
@@ -594,6 +597,8 @@ function createExpeditionSlice() {
     examinedTypeIds: expedition.examinedTypeIds || [],
     // Collected non-specimen examinables (letters, books) — sorted as items.
     items: [],
+    consultedBookIds: expedition.consultedBookIds || [],
+    bookLastPages: expedition.bookLastPages || {},
     currentZoneId: expedition.currentZoneId,
     currentLocalCellId: expedition.currentLocalCellId,
     playerSpawnId: expedition.playerSpawnId,
@@ -621,13 +626,20 @@ function createSceneSlice() {
   return {
     selectedSpecimenId: null,
     nearbySpecimenId: null,
+    nearbyNpcEncounter: null,
     nearbyItem: null,
     examineSession: null,
+    readableBookSession: null,
+    interiorPrompt: null,
     message: initialNarration.narration,
     educationalNote: initialNarration.educationalNote,
     narratorLog: createInitialNarratorLog(initialNarration),
     narratorPending: false,
     narratorError: null,
+    activeNpcEncounter: null,
+    npcEncounterPending: false,
+    npcEncounterError: null,
+    npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
     narratorScriptedKeys: {
       [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
     },
@@ -709,9 +721,13 @@ export const useThreeGameStore = create((set, get) => ({
       toolbarOrder,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
+      nearbyNpcEncounter: null,
+      activeNpcEncounter: null,
       carryPrompt: null,
       carriedObjectId: null,
       examineSession: null,
+      readableBookSession: null,
+      interiorPrompt: null,
     };
 
     if (mode.kind === 'animal') {
@@ -842,6 +858,7 @@ export const useThreeGameStore = create((set, get) => ({
     if (!trimmed) return {};
     const location = getThreeIslandLocation(state.currentZoneId);
     return {
+      curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
       journal: [
         ...state.journal,
         {
@@ -867,6 +884,21 @@ export const useThreeGameStore = create((set, get) => ({
       })),
     ),
   })),
+  recordScriptedNarration: ({ key, text, kind = 'narrator', speaker, meta = {} } = {}) => set(state => {
+    if (!key || !text || state.narratorScriptedKeys?.[key]) return {};
+    return {
+      narratorLog: appendNarratorEvents(state.narratorLog, createNarratorEvent({
+        kind,
+        speaker,
+        text,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        source: 'scripted-proximity',
+        meta,
+      })),
+      narratorScriptedKeys: { ...state.narratorScriptedKeys, [key]: gameClockMinutes(state) },
+    };
+  }),
   appendNarratorEntry: entry => set(state => ({
     narratorLog: appendNarratorEvents(state.narratorLog, [
       createNarratorEvent({
@@ -876,8 +908,143 @@ export const useThreeGameStore = create((set, get) => ({
       }),
     ]),
   })),
+  setNearbyNpcEncounter: nearbyNpcEncounter => set(state => (
+    (state.nearbyNpcEncounter?.npcId || null) === (nearbyNpcEncounter?.npcId || null)
+      ? state
+      : { nearbyNpcEncounter }
+  )),
+  recordNpcActivity: (npcId, event = 'nearby') => set(state => {
+    const encounter = getNpcEncounter(npcId);
+    const line = encounterAmbientLine(npcId, event);
+    if (!encounter || !line) return {};
+    const key = `npc-activity:${npcId}:${event}:${state.currentZoneId}`;
+    const nowMinutes = gameClockMinutes(state);
+    const lastSeen = state.narratorScriptedKeys?.[key];
+    if (Number.isFinite(lastSeen) && nowMinutes - lastSeen < SCRIPTED_NARRATION_COOLDOWN_MINUTES) return {};
+    return {
+      narratorLog: appendNarratorEvents(state.narratorLog, createNarratorEvent({
+        kind: 'npcActivity',
+        speaker: encounter.name || 'Syms Covington',
+        text: line,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        source: 'scripted-npc-activity',
+        meta: { npcId, event },
+      })),
+      narratorScriptedKeys: { ...state.narratorScriptedKeys, [key]: nowMinutes },
+    };
+  }),
+  openNpcEncounter: npcId => set(state => {
+    const encounter = getNpcEncounter(npcId);
+    if (!encounter) return {};
+    const relation = state.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+    return {
+      activeNpcEncounter: {
+        npcId,
+        openedAt: Date.now(),
+        turns: [{ role: 'npc', text: encounter.opener }],
+        suggestedReplies: encounter.suggestedReplies,
+        trust: relation.trust,
+        flags: relation.flags || [],
+      },
+      npcEncounterPending: false,
+      npcEncounterError: null,
+    };
+  }),
+  closeNpcEncounter: () => set({ activeNpcEncounter: null, npcEncounterPending: false, npcEncounterError: null }),
+  submitNpcEncounter: async input => {
+    const playerInput = String(input || '').trim();
+    const state = get();
+    const active = state.activeNpcEncounter;
+    if (!active || !playerInput || state.npcEncounterPending) return null;
+    const npcId = active.npcId;
+    const encounter = getNpcEncounter(npcId);
+    if (!encounter) return null;
+    const zone = getZone(state.currentZoneId);
+    const location = getThreeIslandLocation(state.currentZoneId);
+    const turn = { role: 'player', text: playerInput };
+    const turns = [...(active.turns || []), turn].slice(-8);
+    set(current => ({
+      activeNpcEncounter: current.activeNpcEncounter?.npcId === npcId
+        ? { ...current.activeNpcEncounter, turns }
+        : current.activeNpcEncounter,
+      npcEncounterPending: true,
+      npcEncounterError: null,
+    }));
+    const requestState = get();
+    const idempotencyKey = [
+      requestState.seed || 'three',
+      npcId,
+      requestState.currentZoneId,
+      requestState.day,
+      Math.round((requestState.timeOfDay || 0) * 60),
+      textHash(playerInput),
+    ].join(':');
+    try {
+      const response = await fetch('/api/three-encounter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-young-darwin-session': narratorSessionId(requestState.seed),
+          'x-idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          npcId,
+          playerInput,
+          location: location.name || zone.name,
+          locationContext: {
+            id: zone.id,
+            historicalName: zone.historicalName,
+            description: zone.loadingNote || zone.description || location.subtitle || '',
+          },
+          weather: requestState.weather,
+          timeOfDay: `${Math.floor(requestState.timeOfDay || 0)}:${String(Math.floor(((requestState.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
+          trust: active.trust,
+          flags: active.flags,
+          subjectContext: requestState.lastOutcome?.specimen?.name || requestState.nearbySpecimenId || '',
+          recentTurns: turns.map(item => `${item.role === 'npc' ? 'NPC' : 'Darwin'}: ${item.text}`),
+          idempotencyKey,
+        }),
+      });
+      const data = response.ok ? await response.json() : null;
+      const dialogue = String(data?.dialogue || '“I beg your pardon, sir; I have lost the thread of it.”').trim();
+      const trustDelta = Math.max(-5, Math.min(5, Math.round(Number(data?.trustDelta) || 0)));
+      const flags = Array.isArray(data?.flags) ? data.flags.filter(flag => encounter.allowedFlags.includes(flag)) : [];
+      set(current => {
+        if (current.activeNpcEncounter?.npcId !== npcId) return { npcEncounterPending: false };
+        const previous = current.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+        const nextTrust = Math.max(0, Math.min(100, previous.trust + trustDelta));
+        const nextFlags = [...new Set([...(previous.flags || []), ...flags])];
+        const nextTurns = [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: dialogue }].slice(-8);
+        return {
+          activeNpcEncounter: {
+            ...current.activeNpcEncounter,
+            turns: nextTurns,
+            trust: nextTrust,
+            flags: nextFlags,
+          },
+          npcEncounterState: {
+            ...current.npcEncounterState,
+            [npcId]: { trust: nextTrust, flags: nextFlags },
+          },
+          npcEncounterPending: false,
+          npcEncounterError: data?.fallback ? 'The reply is constrained by a local fallback.' : null,
+        };
+      });
+      return data;
+    } catch {
+      set(current => ({
+        activeNpcEncounter: current.activeNpcEncounter?.npcId === npcId
+          ? { ...current.activeNpcEncounter, turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: '“The wind has made a muddle of the moment, sir. Try me again.”' }].slice(-8) }
+          : current.activeNpcEncounter,
+        npcEncounterPending: false,
+        npcEncounterError: 'Conversation is temporarily unavailable.',
+      }));
+      return null;
+    }
+  },
   setNearbySpecimen: nearbySpecimenId => set(state => {
-    if (state.nearbySpecimenId === nearbySpecimenId) return {};
+    if (state.nearbySpecimenId === nearbySpecimenId) return state;
     const patch = { nearbySpecimenId };
     if (!nearbySpecimenId) return patch;
 
@@ -909,7 +1076,7 @@ export const useThreeGameStore = create((set, get) => ({
   }),
   setSelectedSpecimen: selectedSpecimenId => set({ selectedSpecimenId }),
   setNearbyItem: nearbyItem => set(state => (
-    (state.nearbyItem?.actorId || null) === (nearbyItem?.actorId || null) ? {} : { nearbyItem }
+    (state.nearbyItem?.actorId || null) === (nearbyItem?.actorId || null) ? state : { nearbyItem }
   )),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
   setGraphicsQuality: ({ cheapMaterials, foliageDrawScale }) => set(state => ({
@@ -924,7 +1091,7 @@ export const useThreeGameStore = create((set, get) => ({
     if (
       Math.abs((previous.amount || 0) - nextAmount) < 0.018
       && Math.abs((previous.cameraY || 0) - safeCameraY) < 0.08
-    ) return {};
+    ) return state;
     return {
       underwaterCamera: {
         amount: nextAmount,
@@ -975,9 +1142,85 @@ export const useThreeGameStore = create((set, get) => ({
       && state.carryPrompt?.mode === carryPrompt?.mode
       && state.carryPrompt?.text === carryPrompt?.text
       && Math.abs((state.carryPrompt?.distance ?? 0) - (carryPrompt?.distance ?? 0)) < 0.08
-      ? {}
+      ? state
       : { carryPrompt }
   )),
+  setInteriorPrompt: interiorPrompt => set(state => (
+    (state.interiorPrompt?.id || null) === (interiorPrompt?.id || null)
+      && Math.abs((state.interiorPrompt?.distance ?? 0) - (interiorPrompt?.distance ?? 0)) < 0.08
+      ? state
+      : { interiorPrompt }
+  )),
+  openReadableBook: (bookId, options = {}) => set(state => {
+    const book = getReadableBook(bookId);
+    if (!book) return {};
+    const firstConsultation = !state.consultedBookIds.includes(book.id);
+    return {
+      readableBookSession: {
+        bookId: book.id,
+        focus: options.focus || null,
+        openedAt: Date.now(),
+      },
+      consultedBookIds: firstConsultation
+        ? [...state.consultedBookIds, book.id]
+        : state.consultedBookIds,
+      curiosity: firstConsultation ? clamp(state.curiosity + 1, 0, MAX_CURIOSITY) : state.curiosity,
+      inspectedObject: null,
+      inspectedScreenPosition: null,
+    };
+  }),
+  closeReadableBook: () => set({ readableBookSession: null }),
+  setReadableBookPage: (bookId, page) => set(state => ({
+    bookLastPages: {
+      ...state.bookLastPages,
+      [bookId]: Math.max(1, Math.round(Number(page) || 1)),
+    },
+  })),
+  saveReadableBookNote: ({ bookId, page, content }) => set(state => {
+    const book = getReadableBook(bookId);
+    const trimmed = String(content || '').trim();
+    if (!book || !trimmed) return {};
+    const location = getThreeIslandLocation(state.currentZoneId);
+    const pageNumber = Math.max(1, Math.round(Number(page) || 1));
+    return {
+      curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
+      journal: [...state.journal, {
+        id: `${Date.now()}-reading-${book.id}-${pageNumber}`,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        location: location.name,
+        method: 'reading and comparison',
+        kind: 'reading',
+        title: `${book.shortTitle}, page ${pageNumber}`,
+        content: trimmed,
+        source: { type: 'book', bookId: book.id, page: pageNumber },
+        createdAt: new Date().toISOString(),
+      }],
+      message: `You add a note from ${book.shortTitle} to the field journal.`,
+    };
+  }),
+  restInInterior: (label, authoredMessage = null) => set(state => {
+    const rested = advanceTimeState(state, 120);
+    const place = String(label || 'berth');
+    const interior = getInteriorDefinition(state.currentZoneId);
+    const message = authoredMessage
+      || interior?.restNarration
+      || `You lie down in the ${place}. Two hours pass with the creak of timbers and water against the stern.`;
+    return {
+      ...rested,
+      fatigue: clamp(state.fatigue - 30, 0, MAX_FATIGUE),
+      health: clamp(state.health + 8, 0, MAX_HEALTH),
+      message,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({ narration: message }, state, 'rest')),
+    };
+  }),
+  reportInteriorMessage: message => set(state => {
+    const narration = String(message || 'There is nothing more to do here.');
+    return {
+      message: narration,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({ narration }, state, 'interior')),
+    };
+  }),
   setInspectedObject: inspectedObject => set({ inspectedObject, inspectedScreenPosition: null }),
   setInspectedScreenPosition: inspectedScreenPosition => set({ inspectedScreenPosition }),
   clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
@@ -1012,7 +1255,7 @@ export const useThreeGameStore = create((set, get) => ({
       && Math.abs((previous.centerResponse || 0) - nextCenterResponse) < 0.018
       && Math.abs((previous.x || 0.5) - nextX) < 0.006
       && Math.abs((previous.y || 0.42) - nextY) < 0.006
-    ) return {};
+    ) return state;
     return {
       solarGlare: {
         x: nextX,
@@ -1034,13 +1277,13 @@ export const useThreeGameStore = create((set, get) => ({
     const nextX = Number(position?.x);
     const nextY = Number(position?.y);
     const nextZ = Number(position?.z);
-    if (!Number.isFinite(nextX) || !Number.isFinite(nextY) || !Number.isFinite(nextZ)) return {};
+    if (!Number.isFinite(nextX) || !Number.isFinite(nextY) || !Number.isFinite(nextZ)) return state;
     const current = currentByZone[specimenId] || {};
     if (
       Math.abs((current.x || 0) - nextX) < 0.001
       && Math.abs((current.y || 0) - nextY) < 0.001
       && Math.abs((current.z || 0) - nextZ) < 0.001
-    ) return {};
+    ) return state;
     return {
       specimenRuntimePositions: {
         ...state.specimenRuntimePositions,
@@ -1415,7 +1658,7 @@ export const useThreeGameStore = create((set, get) => ({
   }),
   setAnimalModeDarwinNpcPose: pose => set(state => {
     if (!pose) {
-      return state.animalModeDarwinNpcPose ? { animalModeDarwinNpcPose: null } : {};
+      return state.animalModeDarwinNpcPose ? { animalModeDarwinNpcPose: null } : state;
     }
     const previous = state.animalModeDarwinNpcPose;
     const next = {
@@ -1433,7 +1676,7 @@ export const useThreeGameStore = create((set, get) => ({
       && Math.abs(previous.y - next.y) < 0.04
       && Math.abs(previous.z - next.z) < 0.06
       && Math.abs(previous.yaw - next.yaw) < 0.04
-    ) return {};
+    ) return state;
     return { animalModeDarwinNpcPose: next };
   }),
   addAnimalDropping: (payload = {}) => set(state => {
@@ -1670,7 +1913,7 @@ export const useThreeGameStore = create((set, get) => ({
         examinedTypeIds: firstExamination
           ? [...state.examinedTypeIds, session.typeId]
           : state.examinedTypeIds,
-        curiosity: clamp(state.curiosity + (firstExamination ? 8 : 2), 0, MAX_CURIOSITY),
+        curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
         message,
         examineSession: { ...state.examineSession, noteSaved: true },
         narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
@@ -1840,6 +2083,8 @@ export const useThreeGameStore = create((set, get) => ({
       beagleTravelPrompt: null,
       inspectedObject: null,
       inspectedScreenPosition: null,
+      readableBookSession: null,
+      interiorPrompt: null,
     });
   },
 
@@ -1887,8 +2132,12 @@ export const useThreeGameStore = create((set, get) => ({
       carriedObjectId: null,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
+      nearbyNpcEncounter: null,
+      activeNpcEncounter: null,
       nearbyItem: null,
       examineSession: null,
+      readableBookSession: null,
+      interiorPrompt: null,
       message: scripted?.narration || zone.loadingNote || state.message,
       educationalNote: scripted?.educationalNote || zone.educationalNote || state.educationalNote,
       weather: arrivalWeather,
@@ -3034,11 +3283,20 @@ export const useThreeGameStore = create((set, get) => ({
         message: result.reason,
         educationalNote,
         symsLine,
-        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
-          narration: result.reason,
-          symsLine,
-          fieldNote: educationalNote,
-        }, current, source, { allowFieldNote: true })),
+        narratorLog: appendNarratorEvents(current.narratorLog, [
+          ...narrationPayloadToEvents({ narration: result.reason }, current, source),
+          ...(collected && current.nearbyNpcEncounter?.npcId === 'syms_covington'
+            ? [createNarratorEvent({
+                kind: 'npcActivity',
+                speaker: 'Syms Covington',
+                text: encounterAmbientLine('syms_covington', 'collected'),
+                day: current.day,
+                timeOfDay: current.timeOfDay,
+                source: 'collection-npc-activity',
+                meta: { npcId: 'syms_covington', event: 'collected' },
+              })]
+            : []),
+        ]),
       };
     });
 

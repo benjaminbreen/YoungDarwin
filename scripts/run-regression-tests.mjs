@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 const projectRequire = createRequire(import.meta.url);
 const moduleCache = new Map();
-const EXTENSIONS = ['', '.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.jsx'];
+const EXTENSIONS = ['', '.js', '.jsx', '.ts', '.tsx', '.json', '/index.js', '/index.jsx'];
 
 function resolveLocalModule(specifier, fromFile) {
   const base = path.resolve(path.dirname(fromFile), specifier);
@@ -25,6 +25,11 @@ function loadModule(filePath) {
 
   const source = fs.readFileSync(absolutePath, 'utf8');
   const extension = path.extname(absolutePath);
+  if (extension === '.json') {
+    const module = { exports: JSON.parse(source) };
+    moduleCache.set(absolutePath, module);
+    return module.exports;
+  }
   const jsx = extension === '.tsx' || extension === '.jsx'
     ? ts.JsxEmit.ReactJSX
     : ts.JsxEmit.Preserve;
@@ -127,6 +132,23 @@ const {
 const {
   regionMaps,
 } = loadModule('game-core/regionMaps.js');
+const {
+  getInteriorDefinition,
+  getInteriorPropSpawns,
+} = loadModule('three-game/interiors/interiorRegistry.js');
+const {
+  beagleCabinRegion,
+} = loadModule('three-game/world/regions/beagleCabin/terrain.js');
+const {
+  lawsonHouseRegion,
+} = loadModule('three-game/world/regions/lawsonHouse/terrain.js');
+const {
+  getLocalTransitions,
+  nearestLocalTransitionPrompt,
+} = loadModule('three-game/world/localTransitions.js');
+const {
+  getIslandMapLocation,
+} = loadModule('three-game/ui/expedition/map/islandLocations.js');
 const {
   WEATHER_STATES,
   normalizeWeatherState,
@@ -703,6 +725,81 @@ test('penal colony starts inland and no longer pins garua mist', () => {
   const initialWeather = getRegionWeather('PENAL_COLONY', 1440 + 8 * 60);
   assert.equal(initialWeather, 'cloudy');
   assert.ok(!['misty', 'garua', 'denseGarua'].includes(initialWeather));
+});
+
+test('Beagle cabin blueprint defines a large navigable indoor region', () => {
+  const definition = getInteriorDefinition('BEAGLE_CABIN');
+  const navigation = definition.blueprint.navigation;
+  const [spawnX, , spawnZ] = navigation.defaultSpawn;
+
+  assert.equal(regionMaps.BEAGLE_CABIN.type, 'shipInterior');
+  assert.ok(definition.blueprint.dimensions.width >= 18);
+  assert.ok(definition.blueprint.dimensions.depth >= 23);
+  assert.equal(beagleCabinRegion.terrain.isWalkable(spawnX, spawnZ), true);
+  assert.equal(beagleCabinRegion.terrain.isWalkable(0, -10), true);
+  assert.equal(beagleCabinRegion.terrain.isWalkable(9, 0), false);
+  assert.ok(definition.blueprint.fixedColliders.length >= 20);
+  assert.ok(getInteriorPropSpawns('BEAGLE_CABIN').length >= 10);
+});
+
+test('Beagle cabin doorway transition does not immediately catch the arrival spawn', () => {
+  const transition = getLocalTransitions('BEAGLE_CABIN')[0];
+  const [spawnX, , spawnZ] = beagleCabinRegion.terrain.entrySpawns['from-deck'];
+  const arrivalDistance = Math.hypot(transition.position.x - spawnX, transition.position.z - spawnZ);
+  assert.ok(arrivalDistance > transition.radius);
+
+  const prompt = nearestLocalTransitionPrompt(
+    'BEAGLE_CABIN',
+    { x: 0, z: 10.1 },
+    { x: 0, z: 1 },
+  );
+  assert.equal(prompt.toRegionId, 'BEAGLE');
+  assert.equal(prompt.entryEdge, 'from-cabin');
+});
+
+test('Beagle deck exposes a generous cabin entrance and a nearby island-chart destination', () => {
+  const deckEntrance = getLocalTransitions('BEAGLE').find(item => item.toRegionId === 'BEAGLE_CABIN');
+  assert.ok(deckEntrance.radius >= 4.5);
+  assert.equal(deckEntrance.label, 'Open the aft-cabin doors');
+
+  const shipMarker = getIslandMapLocation('BEAGLE');
+  const cabinMarker = getIslandMapLocation('BEAGLE_CABIN');
+  assert.equal(cabinMarker.kind, 'shipInterior');
+  assert.equal(cabinMarker.status, 'available');
+  assert.ok(Math.hypot(cabinMarker.at.x - shipMarker.at.x, cabinMarker.at.y - shipMarker.at.y) < 0.04);
+});
+
+test('Lawson house blueprint preserves a spacious four-room plan at human furniture scale', () => {
+  const definition = getInteriorDefinition('LAWSON_HOUSE');
+  const blueprint = definition.blueprint;
+  const [spawnX, , spawnZ] = blueprint.navigation.defaultSpawn;
+
+  assert.equal(regionMaps.LAWSON_HOUSE.type, 'houseInterior');
+  assert.ok(blueprint.dimensions.width >= 16);
+  assert.ok(blueprint.dimensions.depth >= 14);
+  assert.equal(blueprint.rooms.length, 4);
+  assert.equal(blueprint.rooms.filter(room => room.available).length, 1);
+  assert.equal(lawsonHouseRegion.terrain.isWalkable(spawnX, spawnZ), true);
+  assert.ok(blueprint.fixedColliders.length >= 14);
+  assert.ok(getInteriorPropSpawns('LAWSON_HOUSE').length >= 10);
+});
+
+test('Lawson house transitions connect the authored doorway without catching arrival', () => {
+  const exterior = getLocalTransitions('PENAL_COLONY').find(item => item.toRegionId === 'LAWSON_HOUSE');
+  const interior = getLocalTransitions('LAWSON_HOUSE')[0];
+  const [spawnX, , spawnZ] = lawsonHouseRegion.terrain.entrySpawns['from-yard'];
+  const arrivalDistance = Math.hypot(interior.position.x - spawnX, interior.position.z - spawnZ);
+
+  assert.equal(exterior.label, "Enter Lawson's house");
+  assert.ok(exterior.radius >= 3);
+  assert.ok(arrivalDistance > interior.radius);
+  assert.equal(interior.toRegionId, 'PENAL_COLONY');
+  assert.equal(interior.entryEdge, 'from-lawson-house');
+
+  const penalMarker = getIslandMapLocation('PENAL_COLONY');
+  const houseMarker = getIslandMapLocation('LAWSON_HOUSE');
+  assert.equal(houseMarker.kind, 'houseInterior');
+  assert.ok(Math.hypot(houseMarker.at.x - penalMarker.at.x, houseMarker.at.y - penalMarker.at.y) < 0.04);
 });
 
 let failed = false;

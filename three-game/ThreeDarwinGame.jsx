@@ -24,6 +24,7 @@ import { WATER_LEVEL } from './world/water';
 import './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
+import { getInteriorDefinition } from './interiors/interiorRegistry';
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -78,6 +79,7 @@ const DEFAULT_PERF_SETTINGS = {
   dprMode: 'default',
   msaaSamples: 0,
   postprocessing: true,
+  contextAntialias: true,
   stats: false,
   shadows: true,
   shadowQuality: 'high',
@@ -111,6 +113,25 @@ const DEFAULT_PERF_SETTINGS = {
 };
 
 const QUALITY_PRESETS = {
+  mobile: {
+    dprMode: '1x',
+    msaaSamples: 0,
+    postprocessing: false,
+    contextAntialias: false,
+    shadowQuality: 'low',
+    ao: false,
+    reflections: false,
+    waterQuality: 'performance',
+    waterSplashes: false,
+    weatherFX: false,
+    splatBackdrop: false,
+    solarScreenGlare: false,
+    solarLensGhosts: false,
+    solarSunHalo: false,
+    solarSceneFlares: false,
+    cheapMaterials: true,
+    foliageDrawScale: 0.68,
+  },
   performance: {
     // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
     // every full-screen pass (post chain, water, terrain, sky) pays for all of
@@ -119,25 +140,41 @@ const QUALITY_PRESETS = {
     // Darwin's face/buttons and thin vegetation need a little real sample
     // coverage to avoid crunchy subpixel breakup.
     dprMode: '1.25x',
-    // 2x MSAA on the composer target: cheap at the 1.25x DPR cap (the canvas
-    // context's own MSAA is off while postprocessing is on, so this is roughly
-    // a trade, not an addition) and it's what makes alpha-to-coverage actually
-    // anti-alias cutout foliage edges instead of dithering them.
-    msaaSamples: 2,
-    shadowQuality: 'high',
-    ao: true,
-    reflections: true,
-    waterQuality: 'polished',
+    // SMAA handles the direct polygon edges without paying for a multisampled
+    // full-resolution composer target on integrated GPUs.
+    msaaSamples: 0,
+    postprocessing: true,
+    contextAntialias: true,
+    shadowQuality: 'standard',
+    ao: false,
+    reflections: false,
+    waterQuality: 'performance',
+    waterSplashes: true,
+    weatherFX: true,
+    splatBackdrop: true,
+    solarScreenGlare: true,
+    solarLensGhosts: true,
+    solarSunHalo: true,
+    solarSceneFlares: true,
     cheapMaterials: true,
     foliageDrawScale: 0.85,
   },
   cinematic: {
     dprMode: 'default',
     msaaSamples: 2,
+    postprocessing: true,
+    contextAntialias: true,
     shadowQuality: 'high',
     ao: true,
     reflections: true,
     waterQuality: 'cinematic',
+    waterSplashes: true,
+    weatherFX: true,
+    splatBackdrop: true,
+    solarScreenGlare: true,
+    solarLensGhosts: true,
+    solarSunHalo: true,
+    solarSceneFlares: true,
     cheapMaterials: false,
     foliageDrawScale: 1,
   },
@@ -150,7 +187,7 @@ const DEFERRED_CONTENT_DELAY_MS = 350;
 const OPENING_CAMERA_DURATION_MS = 6200;
 const OPENING_CAMERA_MAX_MS = 10500;
 const SCENE_COST_BUCKET_LIMIT = 40;
-const SHADOW_QUALITY_MODES = ['standard', 'high'];
+const SHADOW_QUALITY_MODES = ['low', 'standard', 'high'];
 
 function normalizeShadowQuality(value, fallback = 'high') {
   const mode = String(value || '').toLowerCase();
@@ -166,9 +203,30 @@ function getInitialPerfSettings() {
   return { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[DEFAULT_PERF_SETTINGS.quality] };
 }
 
-function settingsFromUrlSearch(search) {
+function recommendedQualityFromDevice() {
+  if (typeof window === 'undefined') return 'performance';
+  const memory = Number(window.navigator?.deviceMemory);
+  const cores = Number(window.navigator?.hardwareConcurrency);
+  const compactTouch = window.matchMedia?.('(pointer: coarse)').matches
+    && Math.min(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight) <= 1024;
+  const constrainedMemory = Number.isFinite(memory) && memory > 0 && memory <= 4;
+  const constrainedCpu = Number.isFinite(cores) && cores > 0 && cores <= 4;
+  return compactTouch || constrainedMemory || constrainedCpu ? 'mobile' : 'performance';
+}
+
+function settingEnabled(params, baseValue, enabledNames, disabledNames) {
+  if (enabledNames.some(name => params.has(name))) return true;
+  return baseValue !== false && !disabledNames.some(name => params.has(name));
+}
+
+function settingsFromUrlSearch(search, automaticQuality = 'performance') {
   const params = new URLSearchParams(search);
-  const quality = params.get('quality') === 'cinematic' ? 'cinematic' : 'performance';
+  const requestedQuality = String(params.get('quality') || '').toLowerCase();
+  const quality = requestedQuality === 'low'
+    ? 'mobile'
+    : Object.prototype.hasOwnProperty.call(QUALITY_PRESETS, requestedQuality)
+      ? requestedQuality
+      : automaticQuality;
   const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
   const postprocessing = params.has('post')
     || params.has('postprocessing')
@@ -197,8 +255,9 @@ function settingsFromUrlSearch(search) {
     postprocessing,
     ao,
     stats: false,
-    shadows: !params.has('noShadows'),
-    water: !params.has('noWater'),
+    contextAntialias: base.contextAntialias !== false,
+    shadows: settingEnabled(params, base.shadows, ['shadows'], ['noShadows']),
+    water: settingEnabled(params, base.water, ['water'], ['noWater']),
     reflections,
     terrain: !params.has('noTerrain'),
     landmarks: params.has('landmarks') && !params.has('noLandmarks'),
@@ -209,14 +268,14 @@ function settingsFromUrlSearch(search) {
     syms: !params.has('noSyms'),
     physicsObstacles: !params.has('noPhysicsObstacles'),
     physicsProps: !params.has('noPhysicsProps'),
-    waterSplashes: !params.has('noWaterSplashes'),
-    weatherFX: !params.has('noWeather'),
-    splatBackdrop: !params.has('noSplatBackdrop'),
-    solarScreenGlare: !params.has('noSolarScreenGlare'),
-    solarLensGhosts: !params.has('noSolarLensGhosts'),
-    solarSunHalo: !params.has('noSolarSunHalo'),
-    solarSceneFlares: !params.has('noSolarSceneFlares'),
-    solarSunFacingGrade: !params.has('noSolarSunFacingGrade'),
+    waterSplashes: settingEnabled(params, base.waterSplashes, ['waterSplashes'], ['noWaterSplashes']),
+    weatherFX: settingEnabled(params, base.weatherFX, ['weather', 'weatherFX'], ['noWeather']),
+    splatBackdrop: settingEnabled(params, base.splatBackdrop, ['splatBackdrop'], ['noSplatBackdrop']),
+    solarScreenGlare: settingEnabled(params, base.solarScreenGlare, ['solarScreenGlare'], ['noSolarScreenGlare']),
+    solarLensGhosts: settingEnabled(params, base.solarLensGhosts, ['solarLensGhosts'], ['noSolarLensGhosts']),
+    solarSunHalo: settingEnabled(params, base.solarSunHalo, ['solarSunHalo'], ['noSolarSunHalo']),
+    solarSceneFlares: settingEnabled(params, base.solarSceneFlares, ['solarSceneFlares'], ['noSolarSceneFlares']),
+    solarSunFacingGrade: settingEnabled(params, base.solarSunFacingGrade, ['solarSunFacingGrade'], ['noSolarSunFacingGrade']),
     physicsDebug: params.has('physicsDebug'),
     preserveDrawingBuffer: params.has('preserveDrawingBuffer'),
     cheapMaterials: params.has('cheapMaterials')
@@ -579,9 +638,10 @@ function ExpeditionClock() {
   const advanceTime = useThreeGameStore(state => state.advanceTime);
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  const readableBookOpen = useThreeGameStore(state => Boolean(state.readableBookSession));
 
   useFrame((_, delta) => {
-    if (statusViewOpen || examineOpen) {
+    if (statusViewOpen || examineOpen || readableBookOpen) {
       // Status/examine views freeze expedition time; drop accumulated real
       // time so the clock doesn't lurch forward on close.
       elapsed.current = 0;
@@ -689,6 +749,11 @@ function OpeningIntroCompletion({
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
 function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
+  const expeditionDay = useThreeGameStore(state => state.day);
+  const interiorDefinition = getInteriorDefinition(currentZoneId);
+  const interiorFx = interiorDefinition?.lighting?.postprocessing;
   // The grade effects are instantiated directly, NOT via the
   // @react-three/postprocessing wrappers: those wrappers JSON.stringify their
   // props as a memo key, so anything non-serializable (a ref prop — React 19
@@ -731,21 +796,37 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   });
   if (!enabled) return null;
   const underwater = Math.min(1, Math.max(0, underwaterAmount));
+  const composerMultisampling = interiorFx?.multisampling ?? multisampling;
+  const interiorDaylight = interiorFx ? skyState(timeOfDay, expeditionDay || 1).daylight : 1;
+  const bloomIntensity = interiorFx
+    ? MathUtils.lerp(
+      interiorFx.bloomNightIntensity ?? 0.62,
+      interiorFx.bloomDayIntensity ?? 0.62,
+      interiorDaylight,
+    )
+    : 0.36;
+  const bloomThreshold = interiorFx
+    ? MathUtils.lerp(
+      interiorFx.bloomNightThreshold ?? 0.58,
+      interiorFx.bloomDayThreshold ?? 0.58,
+      interiorDaylight,
+    )
+    : 0.83;
   return (
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
-    <EffectComposer multisampling={multisampling}>
+    <EffectComposer multisampling={composerMultisampling}>
       <SMAA preset={SMAA_PRESET_ULTRA} />
       {ao && (
         <N8AO
-          halfRes
+          halfRes={!interiorFx?.aoFullResolution}
           depthAwareUpsampling
-          aoRadius={1.6}
-          distanceFalloff={1.2}
-          intensity={2.4}
+          aoRadius={interiorFx?.aoRadius ?? 1.6}
+          distanceFalloff={interiorFx?.aoDistanceFalloff ?? 1.2}
+          intensity={interiorFx?.aoIntensity ?? 2.4}
           aoSamples={4}
           denoiseSamples={4}
-          denoiseRadius={12}
+          denoiseRadius={interiorFx?.aoDenoiseRadius ?? 12}
         />
       )}
       <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
@@ -753,11 +834,11 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
           customers — sun core, lantern flame, water glints pushed past 1.0,
           moon glitter — glow softly, while sky/sand/foliage stay crisp. */}
       <Bloom
-        intensity={0.36 * (1 - underwater * 0.58)}
-        luminanceThreshold={0.83}
-        luminanceSmoothing={0.15}
+        intensity={bloomIntensity * (1 - underwater * 0.58)}
+        luminanceThreshold={bloomThreshold}
+        luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.15}
         mipmapBlur
-        radius={0.34}
+        radius={interiorFx?.bloomRadius ?? 0.34}
       />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
@@ -1068,7 +1149,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       </div>
       <div className="mb-3 flex items-center gap-2 text-xs">
         <span className="text-amber-100/70">Quality</span>
-        {['performance', 'cinematic'].map(mode => (
+        {['mobile', 'performance', 'cinematic'].map(mode => (
           <button
             key={mode}
             type="button"
@@ -1277,8 +1358,12 @@ export default function ThreeDarwinGame() {
   // stabilized after this runs — which is all of them, since GLBs stream in
   // once the Canvas mounts.
   useEffect(() => {
-    setCoverageAASupport(perfSettings.postprocessing ? (perfSettings.msaaSamples ?? 0) > 0 : true);
-  }, [perfSettings.postprocessing, perfSettings.msaaSamples]);
+    setCoverageAASupport(
+      perfSettings.postprocessing
+        ? (perfSettings.msaaSamples ?? 0) > 0
+        : perfSettings.contextAntialias !== false,
+    );
+  }, [perfSettings.contextAntialias, perfSettings.postprocessing, perfSettings.msaaSamples]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1287,7 +1372,7 @@ export default function ThreeDarwinGame() {
     setE2EMode(nextE2EMode);
     setScreenshotMode(nextScreenshotMode);
     setSkipOpeningIntro(skipOpeningIntroFromParams(params));
-    setPerfSettings(settingsFromUrlSearch(window.location.search));
+    setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
     setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
     setCostProbe(params.has('costProbe'));
     const zoneParam = params.get('zone');
@@ -1443,7 +1528,7 @@ export default function ThreeDarwinGame() {
               // is pure memory/resolve waste — composer `multisampling` (the
               // msaaSamples setting) is what provides real sample coverage.
               // Context AA only matters on the direct-to-canvas path (?noPost).
-              antialias: !perfSettings.postprocessing,
+              antialias: perfSettings.contextAntialias !== false && !perfSettings.postprocessing,
               powerPreference: 'high-performance',
               preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
               toneMapping: ACESFilmicToneMapping,

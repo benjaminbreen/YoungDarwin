@@ -13,6 +13,8 @@ import { getZone } from '../world/floreanaZones';
 import { ExamineView } from './ExamineView';
 import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
+import { BookReaderView } from './BookReaderView';
+import { NpcEncounterModal } from './NpcEncounterModal';
 import {
   ExpeditionPanel,
   PanelTabs,
@@ -38,6 +40,8 @@ import { InventoryModal } from './expedition/InventoryModal';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
+import { getInteriorDefinition } from '../interiors/interiorRegistry';
+import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
 import { WEATHER_STATES, normalizeWeatherState } from '../world/weatherStates';
 import {
@@ -1040,10 +1044,28 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
   const [showNew, setShowNew] = useState(true);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const zone = getZone(currentZoneId);
+  const interior = getInteriorDefinition(currentZoneId);
   const chartUrl = useTerrainChart(zone, mapStyle);
   const toggleKnown = () => setShowKnown(value => (value && !showNew ? value : !value));
   const toggleNew = () => setShowNew(value => (value && !showKnown ? value : !value));
   const surveyStyle = mapStyle === 'survey';
+
+  if (interior) {
+    return (
+      <>
+        <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
+          <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">{interior.label}</div>
+          <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-expedition-gold/75">{interior.blueprint?.map?.planLabel || 'Interior plan'}</span>
+        </div>
+        <div
+          className={`relative overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#d8c89e] shadow-[inset_0_0_18px_rgba(0,0,0,0.4)] ${mapHeight ? '' : 'aspect-square'}`}
+          style={mapHeight ? { height: `${mapHeight}px` } : undefined}
+        >
+          <InteriorFloorPlan definition={interior} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1312,7 +1334,7 @@ function entryTime(entry, fallbackTime) {
 }
 
 function entryPresentation(entry) {
-  if (entry?.kind === 'syms') {
+  if (entry?.kind === 'npcActivity' || entry?.kind === 'syms') {
     return { speaker: 'Syms Covington', portrait: '/portraits/syms_covington.jpg' };
   }
   if (entry?.kind === 'fieldNote') {
@@ -1377,7 +1399,7 @@ const NarratorComposer = memo(function NarratorComposer({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         className={`min-w-0 flex-1 rounded-sm border bg-[rgba(232,220,192,0.92)] px-3.5 font-expedition text-[16px] leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] transition-[padding,border-color,box-shadow] duration-300 focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 ${emphasized ? 'border-expedition-goldbright shadow-[0_0_0_2px_rgba(227,197,133,0.26),0_0_18px_rgba(227,197,133,0.28)]' : 'border-expedition-gold/50'} ${expanded ? 'py-2.5' : 'py-2'}`}
-        placeholder={emphasized ? (placeholder || 'Describe Darwin’s practical remedy...') : 'Write a note or dictate to the narrator...'}
+        placeholder={emphasized ? (placeholder || 'Describe Darwin’s practical remedy...') : 'Ask the narrator or describe an action...'}
       />
       <button
         type="submit"
@@ -1592,6 +1614,7 @@ function CountChip({ icon: Icon, label, value }) {
 
 function ObjectivesTab({ objective, condensed = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const interior = getInteriorDefinition(currentZoneId);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
   const journalCount = useThreeGameStore(state => state.journal.length);
@@ -1620,14 +1643,14 @@ function ObjectivesTab({ objective, condensed = false }) {
             notes
           </span>
         </div>
-        <div className="flex items-center gap-2.5 border-t border-expedition-brass/30 pt-2.5">
+        {!interior && <div className="flex items-center gap-2.5 border-t border-expedition-brass/30 pt-2.5">
           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
           </div>
           <span className="truncate font-expedition text-[14px] font-semibold text-expedition-parchment">Syms Covington</span>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-        </div>
+        </div>}
         {zone.neighbors.length > 0 && (
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-expedition-brass/30 pt-2.5">
             {zone.neighbors.slice(0, 2).map(route => (
@@ -1662,7 +1685,7 @@ function ObjectivesTab({ objective, condensed = false }) {
         <CountChip icon={ButterflyIcon} label="Specimens" value={`${collectedCount}/${zoneSpecimenCount}`} />
         <CountChip icon={NoteIcon} label="Notes" value={journalCount} />
       </div>
-      <div>
+      {!interior && <div>
       <div className={`${GOLD_LABEL} mb-1.5`}>Nearby NPC</div>
       <div className="flex items-center gap-2.5 rounded-sm border border-expedition-gold/40 bg-black/25 px-2.5 py-2">
         <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
@@ -1677,7 +1700,7 @@ function ObjectivesTab({ objective, condensed = false }) {
           <p className="truncate font-expedition text-[11.5px] italic text-expedition-faded">Labels ready. Nearby.</p>
         </div>
       </div>
-      </div>
+      </div>}
       {zone.neighbors.length > 0 && (
         <div>
           <div className={`${GOLD_LABEL} mb-1.5`}>Nearby Objectives</div>
@@ -2747,8 +2770,11 @@ function SpecimenInteractionCard({
 
 function InteractionPrompt() {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
+  const nearbyNpcEncounter = useThreeGameStore(state => state.nearbyNpcEncounter);
+  const openNpcEncounter = useThreeGameStore(state => state.openNpcEncounter);
   const edgePrompt = useThreeGameStore(state => state.edgePrompt);
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
+  const interiorPrompt = useThreeGameStore(state => state.interiorPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
@@ -2822,6 +2848,21 @@ function InteractionPrompt() {
     return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
   }
 
+  if (nearbyNpcEncounter) {
+    return (
+      <CompactPrompt>
+        <CompactAction keyLabel="E" primary onClick={() => openNpcEncounter?.(nearbyNpcEncounter.npcId)}>{`Speak with ${nearbyNpcEncounter.name}`}</CompactAction>
+      </CompactPrompt>
+    );
+  }
+
+  if (interiorPrompt) {
+    return (
+      <CompactPrompt>
+        <CompactAction keyLabel="E" primary>{promptActionText(interiorPrompt.text)}</CompactAction>
+      </CompactPrompt>
+    );
+  }
   if (carryPrompt) {
     return (
       <CompactPrompt>
@@ -3426,10 +3467,12 @@ export function ThreeHUD() {
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
+  const readableBookOpen = useThreeGameStore(state => Boolean(state.readableBookSession));
   const beagleTravelPromptOpen = useThreeGameStore(state => Boolean(state.beagleTravelPrompt));
+  const npcEncounterOpen = useThreeGameStore(state => Boolean(state.activeNpcEncounter));
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || beagleTravelPromptOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -3488,7 +3531,7 @@ export function ThreeHUD() {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
       {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
-      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer />
       <TopObjective objective={objective} />
 
@@ -3561,10 +3604,12 @@ export function ThreeHUD() {
 
       <StatusView />
       <ExamineView />
+      <BookReaderView />
 
       <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
       <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} initialTab={inventoryInitialTab} />
       <SpecimenDetailModal />
+      <NpcEncounterModal />
 
       <FieldNotebook
         panel={panel}

@@ -1,0 +1,158 @@
+@import url("https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap");
+
+:root {
+  --ink: #090b10;
+  --navy: #111a2b;
+  --navy-deep: #0c1423;
+  --brass: #8d7042;
+  --gold: #c9a35f;
+  --gold-light: #e3c585;
+  --parchment: #eadfc7;
+  --faded: #a99b80;
+  --line: rgba(201, 163, 95, 0.36);
+  --garamond: "EB Garamond", Georgia, serif;
+  --lora: "Lora", Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; margin: 0; }
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: #0b111b;
+  color: var(--parchment);
+  font-family: var(--garamond);
+  letter-spacing: 0;
+}
+
+button, input { font: inherit; }
+button { cursor: pointer; }
+
+.scene {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(8, 10, 14, 0.78), transparent 38%, rgba(8, 10, 14, 0.54)),
+    linear-gradient(180deg, rgba(8, 9, 12, 0.18), rgba(8, 9, 12, 0.7)),
+    url("../public/portraits/syms_covington.jpg") center / cover;
+  filter: saturate(0.45) brightness(0.45) blur(3px);
+  transform: scale(1.035);
+}
+
+.scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 4px);
+}
+
+.veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 5, 9, 0.46);
+}
+
+.screen-note {
+  position: fixed;
+  top: 22px;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100vw - 40px);
+  transform: translateX(-50%);
+  color: rgba(234, 223, 199, 0.7);
+  font-family: var(--lora);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.screen-note strong { color: var(--gold-light); font-weight: 500; }
+
+.ornament {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  color: var(--gold);
+  font-size: 13px;
+}
+.ornament::before, .ornament::after {
+  content: "";
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201,163,95,0.62));
+}
+.ornament::after { transform: scaleX(-1); }
+
+.key {
+  display: inline-grid;
+  min-width: 26px;
+  height: 21px;
+  place-items: center;
+  padding: 0 6px;
+  border: 1px solid rgba(227, 197, 133, 0.55);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--gold-light);
+  font-family: var(--lora);
+  font-size: 9px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.portrait {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(201, 163, 95, 0.63);
+  background: #1a2029;
+  box-shadow: inset 0 0 0 4px rgba(6, 10, 18, 0.62), 0 8px 22px rgba(0,0,0,0.3);
+}
+.portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center top; filter: sepia(0.34) saturate(0.75) contrast(1.08); }
+.portrait::after { content: ""; position: absolute; inset: 0; border: 1px solid rgba(227, 197, 133, 0.24); pointer-events: none; }
+
+.choice {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 9px 12px;
+  border: 1px solid rgba(201,163,95,0.27);
+  border-radius: 3px;
+  background: rgba(0,0,0,0.16);
+  color: var(--parchment);
+  font-size: 16px;
+  line-height: 1.16;
+  text-align: left;
+  transition: 130ms ease;
+}
+.choice:hover, .choice:focus-visible, .choice.selected {
+  border-color: rgba(227,197,133,0.76);
+  background: rgba(201,163,95,0.15);
+  color: #fff4dc;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(227,197,133,0.12), 0 0 18px rgba(201,163,95,0.1);
+}
+.choice-number { color: var(--gold); font-family: var(--lora); font-size: 11px; }
+
+.quiet-button {
+  min-height: 32px;
+  border: 1px solid rgba(201,163,95,0.4);
+  border-radius: 3px;
+  background: rgba(0,0,0,0.18);
+  color: var(--faded);
+  font-family: var(--lora);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.quiet-button:hover, .quiet-button:focus-visible { border-color: var(--gold); color: var(--gold-light); outline: none; }
+
+@media (max-width: 620px) {
+  .screen-note { top: 14px; font-size: 9px; }
+  .choice { font-size: 15px; }
+}

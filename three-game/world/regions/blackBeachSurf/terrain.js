@@ -21,23 +21,20 @@ function gaussian(x, z, cx, cz, rx, rz) {
   return Math.exp(-(dx * dx + dz * dz));
 }
 
-function segmentDistance(px, pz, ax, az, bx, bz) {
-  const abx = bx - ax;
-  const abz = bz - az;
-  const lengthSq = abx * abx + abz * abz || 1;
-  const t = clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
-  return Math.hypot(px - (ax + abx * t), pz - (az + abz * t));
-}
-
 export function blackBeachSurfProgressWest(x) {
   return clamp((44 - x) / 88, 0, 1);
 }
 
-// Matching route sandbar on the east side, tying into Black Beach's west edge.
+// Broken east-side shoal tying into Black Beach's cove without drawing a
+// straight causeway across the surf map.
 export function blackBeachSurfSandbarMask(x, z) {
-  const bar = 1 - smoothstep(segmentDistance(x, z, 47, 0.5, 27, 1.4), 4.4, 10.6);
-  const eastGate = smoothstep(x, 21, 42);
-  return clamp(bar * eastGate, 0, 1);
+  const eastGate = smoothstep(x, 22, 40);
+  const edgeFade = 1 - smoothstep(x, 43, 49);
+  const centralShoal = gaussian(x, z, 37, 1, 10, 11);
+  const northLobe = gaussian(x, z, 31, -14, 11, 8) * 0.58;
+  const southLobe = gaussian(x, z, 30, 16, 12, 9) * 0.5;
+  const notch = gaussian(x, z, 42, 12, 5, 5) * 0.34;
+  return clamp(eastGate * edgeFade * Math.max(centralShoal, northLobe, southLobe) - notch, 0, 1);
 }
 
 export function blackBeachSurfHeight(x, z, { movementSurface = false } = {}) {
@@ -61,9 +58,9 @@ export function blackBeachSurfHeight(x, z, { movementSurface = false } = {}) {
   y += elevationNoise(x * 0.035 - 4, z * 0.04 + 7) * 0.08;
 
   if (sandbar > 0) {
-    const target = -0.34 + smoothstep(x, 28, 47) * 0.09
+    const target = WATER_LEVEL - 0.22 + smoothstep(x, 28, 43) * 0.12
       + terrainFineDetail(x, z) * (movementSurface ? 0.04 : 0.11);
-    y = lerp(y, target, sandbar * 0.95);
+    y = lerp(y, target, sandbar * 0.9);
   }
 
   // A few drowned basalt teeth should be visible, but remain mostly decorative.
@@ -108,9 +105,11 @@ export function blackBeachSurfColor(x, z, y) {
 
 export function isBlackBeachSurfWalkable(x, z, config) {
   const inBounds = Math.abs(x) <= config.width * 0.5 - 1.2 && Math.abs(z) <= config.depth * 0.5 - 1.2;
+  const y = blackBeachSurfHeight(x, z, { movementSurface: true });
   return inBounds
     && blackBeachSurfSandbarMask(x, z) > 0.22
-    && blackBeachSurfHeight(x, z, { movementSurface: true }) > -0.45;
+    && y > WATER_LEVEL - WADE_DEPTH + 0.22
+    && y < WATER_LEVEL + 0.08;
 }
 
 export const blackBeachSurfRegion = {
@@ -123,5 +122,8 @@ export const blackBeachSurfRegion = {
     color: blackBeachSurfColor,
     isWalkable: isBlackBeachSurfWalkable,
     defaultSpawn: [38, 0, 1],
+    entrySpawns: {
+      east: [38, 0, 1],
+    },
   },
 };

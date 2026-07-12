@@ -4,6 +4,7 @@ import React, { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
+import { lightingDebugEnabled } from '../../runtimeDebug';
 import { skyState } from '../../world/celestial';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -22,6 +23,7 @@ export function Lighting() {
   const fillRef = useRef(null);
   const pointRef = useRef(null);
   const { camera } = useThree();
+  const debugEnabled = useRef(lightingDebugEnabled());
 
   // Ambient, hemisphere and the sun-tracking key light are owned by
   // <SkyController>, which drives them from the time of day. This component
@@ -102,7 +104,7 @@ export function Lighting() {
     // clear sun on bright ground, more ambient light on shadow sides.
     setPlayerEnvBounce(lightRig.groundBounce * (1 - underwaterAmount));
 
-    if (typeof window !== 'undefined') {
+    if (debugEnabled.current && typeof window !== 'undefined') {
       window.__darwinLightingDebug = {
         ...(window.__darwinLightingDebug || {}),
         fillIntensity: Number((fillRef.current?.intensity || 0).toFixed(3)),

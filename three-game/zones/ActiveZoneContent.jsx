@@ -14,6 +14,7 @@ import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
 import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
+import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
 import { AnimalModeDarwinNpc } from '../components/world/AnimalModeDarwinNpc';
@@ -21,11 +22,14 @@ import { getThreeSpecimens } from '../data';
 import { PhysicsObstacles } from '../physics/PhysicsObstacles';
 import { PhysicsTerrain } from '../physics/PhysicsTerrain';
 import { useThreeGameStore } from '../store';
+import { InteriorZone } from '../interiors/InteriorZone';
+import { getInteriorDefinition } from '../interiors/interiorRegistry';
 
 export function ActiveZoneContent({ settings, deferredContentReady = true }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
+  const interior = getInteriorDefinition(currentZoneId);
   const specimens = useMemo(
     () => {
       if (!deferredContentReady) return [];
@@ -37,6 +41,19 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
     },
     [collectedSpecimenActorIds, currentZoneId, deferredContentReady, playableHiddenActorId],
   );
+
+  if (interior) {
+    return (
+      <>
+        <PhysicsTerrain />
+        {settings.physicsObstacles !== false && <PhysicsObstacles />}
+        {settings.physicsProps !== false && <PhysicsProps />}
+        <Suspense fallback={null}>
+          <InteriorZone />
+        </Suspense>
+      </>
+    );
+  }
 
   return (
     <>
@@ -53,6 +70,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       {settings.physicsProps !== false && <PhysicsProps />}
       {settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
       {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
+      {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
       {settings.waterSplashes !== false && <WaterSplashes />}
       {deferredContentReady && <SnareTraps />}
       {deferredContentReady && <AnimalDroppings />}

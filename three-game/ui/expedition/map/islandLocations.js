@@ -1,6 +1,7 @@
 import { regionMaps } from '../../../../game-core/regionMaps';
 
-// Registry of every outdoor location on the Floreana island chart.
+// Registry of every playable destination on the Floreana island chart,
+// including shipboard spaces shown beside their anchorage.
 // `at` is the marker position in normalized image coordinates (0..1 across the
 // painted map in /maps/floreana-island-map-new.png). Positions are hand-tuned —
 // shift-click the map in dev to log coordinates for adjustment.
@@ -20,6 +21,7 @@ export const ISLAND_MAP_WIDTH_KM = 14.5;
 // playable; `test: true` maps are hidden by default and parked below the island.
 const PLACEMENTS = [
   { id: 'BEAGLE', at: [0.322, 0.085], kind: 'anchorage', label: true, labelOffset: [0, 4] },
+  { id: 'BEAGLE_CABIN', at: [0.346, 0.108], kind: 'shipInterior', label: true, labelOffset: [48, 10] },
   { id: 'NW_REEF', at: [0.304, 0.166], kind: 'water', labelOffset: [-34, 14] },
   { id: 'POST_OFFICE_BAY', at: [0.396, 0.158], kind: 'anchorage', label: true, labelOffset: [34, 12] },
   { id: 'POST_OFFICE_BAY_3', at: [0.325, 0.962], kind: 'test', test: true },
@@ -46,6 +48,7 @@ const PLACEMENTS = [
   { id: 'C_HIGH', at: [0.510, 0.520], kind: 'summit', label: true, labelOffset: [-26, 16] },
   { id: 'ASILO_SPRING', at: [0.438, 0.635], kind: 'land', labelOffset: [-52, 8] },
   { id: 'PENAL_COLONY', at: [0.475, 0.665], kind: 'land', label: true, labelOffset: [0, 22] },
+  { id: 'LAWSON_HOUSE', at: [0.493, 0.678], kind: 'houseInterior', label: true, labelOffset: [52, 14] },
   { id: 'WATKINS_CREEK', at: [0.552, 0.570], kind: 'land', labelOffset: [46, 10] },
   { id: 'E_MID', at: [0.625, 0.475], kind: 'land' },
   { id: 'EL_MIRADOR', at: [0.748, 0.545], kind: 'land' },

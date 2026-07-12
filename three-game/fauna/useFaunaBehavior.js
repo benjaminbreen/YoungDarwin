@@ -8,12 +8,14 @@ import { createFaunaMotionController, habitatFor, seedFromSpecimen } from './fau
 import { onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 import { worldTime } from '../world/worldTime';
+import { faunaDebugEnabled } from '../runtimeDebug';
 
 export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const profile = useMemo(() => getFaunaBehaviorProfile(specimen), [specimen]);
   const seed = useMemo(() => seedFromSpecimen(specimen), [specimen]);
   const habitat = useMemo(() => (profile ? habitatFor(specimen, profile) : null), [profile, specimen]);
+  const debugEnabled = useMemo(faunaDebugEnabled, []);
   const controller = useMemo(() => {
     if (!profile || !habitat) return null;
     const base = basePositionRef?.current || basePosition;
@@ -71,7 +73,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     const base = basePositionRef?.current || basePosition;
     const actorId = specimen.instanceId || specimen.id;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
-    if (stimuli.length && typeof window !== 'undefined') {
+    if (debugEnabled && stimuli.length && typeof window !== 'undefined') {
       window.__faunaStimulusDebug = {
         ...(window.__faunaStimulusDebug || {}),
         [actorId]: {

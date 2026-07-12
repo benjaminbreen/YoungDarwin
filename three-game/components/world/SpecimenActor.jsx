@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
+import { faunaDebugEnabled } from '../../runtimeDebug';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { getRegionDefinition } from '../../world/regions';
 import { WATER_LEVEL } from '../../world/water';
@@ -53,7 +54,7 @@ function publishActorRuntimePosition({
   const dz = position.z - previous.z;
   if (!force && now - previous.time < 0.22 && Math.hypot(dx, dy, dz) < 0.45) return;
   publisher(actorId, { x: position.x, y: position.y, z: position.z }, zoneId);
-  if (typeof window !== 'undefined' && debug) {
+  if (typeof window !== 'undefined' && debug && faunaDebugEnabled()) {
     window.__faunaMotionDebug = {
       ...(window.__faunaMotionDebug || {}),
       [actorId]: debug,

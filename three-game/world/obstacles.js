@@ -14,6 +14,8 @@ import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
 import { getPenalColonyObstacles } from './penalColonyLayout';
 import { getBeagleDeckObstacles } from './beagleDeckLayout';
+import { getBeagleCabinObstacles } from './beagleCabinLayout';
+import { getLawsonHouseObstacles } from './lawsonHouseLayout';
 import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
@@ -41,6 +43,8 @@ const REGION_OBSTACLE_SOURCES = {
   E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],
   PENAL_COLONY: [getPenalColonyObstacles],
   BEAGLE: [getBeagleDeckObstacles],
+  BEAGLE_CABIN: [getBeagleCabinObstacles],
+  LAWSON_HOUSE: [getLawsonHouseObstacles],
   WATKINS: [getWatkinsCampObstacles],
 };
 

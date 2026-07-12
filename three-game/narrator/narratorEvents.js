@@ -5,8 +5,7 @@ export const INITIAL_NARRATOR_TIME = 7 + 9 / 60;
 const DEFAULT_SPEAKERS = {
   narrator: 'Narrator',
   player: 'You',
-  syms: 'Syms Covington',
-  fieldNote: 'Field Note',
+  npcActivity: 'Syms Covington',
   darwinThought: 'Darwin',
   hotkeys: 'Narrator',
 };
@@ -65,7 +64,6 @@ export function appendNarratorEvents(log, events, limit = NARRATOR_LOG_LIMIT) {
 export function createInitialNarratorLog(initialNarration, {
   day = 1,
   timeOfDay = INITIAL_NARRATOR_TIME,
-  symsLine = 'Syms waits with labels, twine, and the specimen bag ready.',
 } = {}) {
   return appendNarratorEvents([], [
     createNarratorEvent({
@@ -73,13 +71,6 @@ export function createInitialNarratorLog(initialNarration, {
       text: initialNarration?.narration,
       day,
       timeOfDay,
-      source: 'initial',
-    }),
-    createNarratorEvent({
-      kind: 'syms',
-      text: symsLine,
-      day,
-      timeOfDay: timeOfDay + 2 / 60,
       source: 'initial',
     }),
   ]);
@@ -108,7 +99,6 @@ export function narrationPayloadToEvents(data = {}, state = {}, source = 'script
   allowFieldNote = false,
   allowThought = false,
 } = {}) {
-  const fieldNoteText = data.fieldNote || (data.logFieldNote ? data.educationalNote : null);
   return [
     createNarratorEvent({
       kind: 'narrator',
@@ -119,22 +109,8 @@ export function narrationPayloadToEvents(data = {}, state = {}, source = 'script
       meta: { disposition: data.actionDisposition || null, targetType: data.targetType || null },
     }),
     createNarratorEvent({
-      kind: 'syms',
-      text: data.symsLine || data.syms,
-      day: state.day,
-      timeOfDay: state.timeOfDay,
-      source,
-    }),
-    createNarratorEvent({
       kind: 'darwinThought',
       text: allowThought ? data.darwinThought : '',
-      day: state.day,
-      timeOfDay: state.timeOfDay,
-      source,
-    }),
-    createNarratorEvent({
-      kind: 'fieldNote',
-      text: allowFieldNote ? fieldNoteText : '',
       day: state.day,
       timeOfDay: state.timeOfDay,
       source,

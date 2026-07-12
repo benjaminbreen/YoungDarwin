@@ -8,6 +8,7 @@ import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
 import { FORAGE_PROMPT_MODE } from '../../world/forageables';
+import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -217,6 +218,7 @@ export function updatePlayerInteractions({
   setEdgePrompt,
   beginZoneTransition,
   setCarriedObject,
+  placePlayerAt,
   allowSpecimenInteractions = true,
 }) {
   const edgePrompt = nearestLocalTransitionPrompt(currentZoneId, position, facing)
@@ -228,6 +230,11 @@ export function updatePlayerInteractions({
       }
     : null;
   const storeState = useThreeGameStore.getState();
+  const nearbyNpcEncounter = getNearestNpcEncounter(currentZoneId, position);
+  if ((storeState.nearbyNpcEncounter?.npcId || null) !== (nearbyNpcEncounter?.npcId || null)) {
+    storeState.setNearbyNpcEncounter?.(nearbyNpcEncounter);
+    if (nearbyNpcEncounter) storeState.recordNpcActivity?.(nearbyNpcEncounter.npcId, 'nearby');
+  }
   const constraintLocksInteractions = Boolean(
     storeState.activeConstraint?.movementLock
     || storeState.activeConstraint?.type === 'snare_immobilized'
@@ -370,7 +377,35 @@ export function updatePlayerInteractions({
     const specimen = specimenId
       ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
       : null;
-    if (currentState.carryPrompt) {
+    if (currentState.nearbyNpcEncounter && !stateRef.current.action) {
+      currentState.openNpcEncounter?.(currentState.nearbyNpcEncounter.npcId);
+    } else if (currentState.interiorPrompt) {
+      const prompt = currentState.interiorPrompt;
+      if (prompt.mode === 'read-book' && prompt.bookId && !stateRef.current.action) {
+        currentState.openReadableBook?.(prompt.bookId, {
+          focus: {
+            x: prompt.position?.[0] || 0,
+            y: prompt.position?.[1] || 0,
+            z: prompt.position?.[2] || 0,
+          },
+        });
+      } else if (prompt.mode === 'interior-rest' && !stateRef.current.action) {
+        if (currentState.carriedObjectId) setCarriedObject(null);
+        placePlayerAt?.({ position: prompt.restPose, facing: prompt.facing });
+        const restFacing = prompt.facing || [0, 0, 1];
+        stateRef.current.collectionFaceMotion = {
+          targetYaw: Math.atan2(restFacing[0] || 0, restFacing[2] ?? 1),
+          startedAt: performance.now() / 1000,
+          until: performance.now() / 1000 + 0.65,
+        };
+        startAction('lyingDown', ACTION_DURATION.lyingDown, {
+          lockMovement: true,
+          onStart: () => currentState.restInInterior?.(prompt.label, prompt.message),
+        });
+      } else if (prompt.mode === 'interior-message') {
+        currentState.reportInteriorMessage?.(prompt.message || prompt.text);
+      }
+    } else if (currentState.carryPrompt) {
       if (currentState.carryPrompt.mode === 'collect-rock-sample') {
         if (!stateRef.current.action) {
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });

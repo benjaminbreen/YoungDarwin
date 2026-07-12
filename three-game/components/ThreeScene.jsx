@@ -15,6 +15,8 @@ import { GroundMist } from './scene/weather/GroundMist';
 import { WeatherFront } from './scene/weather/WeatherFront';
 import { ActiveZoneContent } from '../zones/ActiveZoneContent';
 import { PhysicsProvider } from '../physics/PhysicsProvider';
+import { useThreeGameStore } from '../store';
+import { getInteriorDefinition } from '../interiors/interiorRegistry';
 
 export function ThreeScene({
   perfSettings,
@@ -23,36 +25,49 @@ export function ThreeScene({
   inputLocked = false,
 }) {
   const settings = perfSettings || {};
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const interior = getInteriorDefinition(currentZoneId);
+  const outdoors = !interior;
+  const exteriorAtmosphere = outdoors || interior?.scene?.exteriorAtmosphere === true;
   return (
     <>
       {/* Always mounted: ticks the island weather sim and smooths the shared
           env even when the visual weather FX are toggled off. */}
       <WeatherDirector />
-      <SkyController
-        stars={settings.atmosphere !== false}
-        shadowQuality={settings.shadowQuality || 'high'}
-        solarEffects={{
-          halo: settings.solarSunHalo !== false,
-          sceneFlares: settings.solarSceneFlares !== false,
-          sunFacingGrade: settings.solarSunFacingGrade !== false,
-        }}
-      />
-      <Lighting />
-      {deferredContentReady && (
+      {outdoors && (
+        <SkyController
+          stars={settings.atmosphere !== false}
+          shadowQuality={settings.shadowQuality || 'high'}
+          solarEffects={{
+            halo: settings.solarSunHalo !== false,
+            sceneFlares: settings.solarSceneFlares !== false,
+            sunFacingGrade: settings.solarSunFacingGrade !== false,
+            screenGlare: settings.solarScreenGlare !== false || settings.solarLensGhosts !== false,
+          }}
+        />
+      )}
+      {outdoors && <Lighting />}
+      {exteriorAtmosphere && deferredContentReady && (
         <Suspense fallback={null}>
           {settings.atmosphere !== false && <Atmosphere />}
-          {settings.weatherFX !== false && <WeatherFront />}
-          {settings.weatherFX !== false && <Rain />}
-          {settings.weatherFX !== false && <MistBanks />}
-          {settings.weatherFX !== false && <LightningFX />}
-          {settings.weatherFX !== false && <GroundMist />}
+          {outdoors && settings.weatherFX !== false && <WeatherFront />}
+          {outdoors && settings.weatherFX !== false && <Rain />}
+          {outdoors && settings.weatherFX !== false && <MistBanks />}
+          {outdoors && settings.weatherFX !== false && <LightningFX />}
+          {outdoors && settings.weatherFX !== false && <GroundMist />}
         </Suspense>
       )}
-      {deferredContentReady && settings.water !== false && (
-        <Water
-          quality={settings.waterQuality || 'polished'}
-          reflections={settings.reflections !== false}
-        />
+      {deferredContentReady && settings.water !== false && (!interior || interior.scene?.water !== false) && (
+        interior ? (
+          <group position={[0, -1.25, 0]}>
+            <Water quality={settings.waterQuality || 'polished'} reflections={false} allowInterior openOceanOnly />
+          </group>
+        ) : (
+          <Water
+            quality={settings.waterQuality || 'polished'}
+            reflections={settings.reflections !== false}
+          />
+        )
       )}
       <PhysicsProvider debug={settings.physicsDebug === true}>
         <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
@@ -62,11 +77,11 @@ export function ThreeScene({
           inputLocked={inputLocked}
         />
       </PhysicsProvider>
-      <GroundedWorldFX
+      {outdoors && <GroundedWorldFX
         enabled={deferredContentReady && settings.worldDetails !== false}
         terrainDust={settings.playerFX !== false && settings.terrainDust !== false}
         waterRipples={deferredContentReady && settings.water !== false && settings.waterSplashes !== false}
-      />
+      />}
     </>
   );
 }

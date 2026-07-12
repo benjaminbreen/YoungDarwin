@@ -734,6 +734,48 @@ export const modelAssets = {
     // wraps the region's terrain plateau (see world/regions/beagleDeck/hull.js).
     prompt: 'Walkable HMS Beagle, 1835 bark rig at anchor: lofted hull with copper bottom and white gunport band, bulwarks, furled sails, quarter davit whaleboats, deck fittings at player scale.',
   },
+  beagleCabinShip: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/ships/hms-beagle-cabin.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    targetTriangles: 65000,
+    // Procedurally built from the shared indoor blueprint by
+    // scripts/blender_build_hms_beagle_cabin.py.
+    prompt: 'Large playable aft interior of HMS Beagle: captain cabin, drawing cabin and library with curved hull walls, stern windows, beams, fitted furniture, berth, hammock and scientific instruments.',
+  },
+  beagleCabinChair: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/cabin-chair.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 7000, prompt: 'Textured 1830s ship cabin ladder-back chair with turned legs and stretchers.' },
+  beagleCabinStool: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/folding-stool.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 5000, prompt: 'Folding campaign stool with crossed oak frames, brass pivots, and canvas seat.' },
+  beagleCabinSeaChest: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/sea-chest.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 8000, prompt: 'Varnished oak sea chest with iron strapping, side handles, and brass lock plate.' },
+  beagleCabinBucket: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/stave-bucket.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 5000, prompt: 'Tapered wooden stave bucket with blackened iron hoops and swinging handle.' },
+  beagleCabinRolledChart: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/rolled-chart.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 3000, prompt: 'Tightly rolled cream survey chart secured by two brown cords.' },
+  beagleCabinChartWeight: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/chart-weight.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 3000, prompt: 'Small turned polished-brass chart weight with ringed foot and spherical knob.' },
+  beagleCabinTinMug: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/tin-mug.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 3000, prompt: 'Open pewter shipboard mug with rolled lip and curved handle.' },
+  beagleCabinCandlestick: { enabled: true, preload: false, path: '/assets/models/props/beagle-cabin/brass-candlestick.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 4000, prompt: 'Turned brass cabin candlestick with wax candle and blackened wick.' },
+  lawsonHouseInterior: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/structures/lawson-house-interior.glb',
+    cacheKey: 'lawson-house-authored-shell-20260712',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    preserveMaterials: true,
+    targetTriangles: 80000,
+    // Procedurally built from the shared four-room blueprint by
+    // scripts/blender_build_lawson_house.py.
+    prompt: "Nicholas Lawson's damp 1835 Floreana government house interior: four-room weatherboard residence, atmospheric entrance and dining room, veranda and highland garden views.",
+  },
+  lawsonDiningChair: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/dining-chair.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 5000, prompt: 'Mismatched spindle-back dining chair with rush seat, repaired for a remote 1830s settlement.' },
+  lawsonCampaignStool: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/campaign-stool.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 3500, prompt: 'Plain folding campaign stool with canvas seat and brass pivots.' },
+  lawsonRumBottle: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/rum-bottle.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 2500, prompt: 'Dark hand-blown rum bottle with cork and damp paper label.' },
+  lawsonTinMug: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/tin-mug.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 1800, prompt: 'Worn pewter or tinned mug with rolled rim.' },
+  lawsonServingBowl: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/serving-bowl.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 3500, prompt: 'Coarse earthenware serving bowl filled with sweet potatoes.' },
+  lawsonFoldedChart: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/folded-chart.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 1200, prompt: 'Damp folded maritime chart reused at the dining table.' },
+  lawsonSupplyLedger: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/supply-ledger.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 1500, prompt: 'Leather-bound bilingual colony supply ledger with paper label.' },
+  lawsonCandlestick: { enabled: true, preload: false, path: '/assets/models/props/lawson-house/brass-candlestick.glb', scale: 1, rotation: [0, 0, 0], yOffset: 0, preserveMaterials: true, targetTriangles: 2200, prompt: 'Simple turned brass candlestick with a well-used tallow candle.' },
   // --- Penal colony settlement structures (Tripo, unit-normalized; scale ==
   // target real-world size in meters). Prepared by
   // scripts/prepare-penal-colony-assets.mjs into /assets/models/structures/.

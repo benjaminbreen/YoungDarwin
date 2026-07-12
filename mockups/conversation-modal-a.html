@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversation Modal A: Captain's Correspondence</title>
+  <link rel="stylesheet" href="./conversation-modal.css">
+  <style>
+    .correspondence {
+      position: relative;
+      display: grid;
+      grid-template-columns: 132px minmax(0, 1fr);
+      width: min(710px, calc(100vw - 32px));
+      margin: 12vh auto 0;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.045), transparent 35%),
+        linear-gradient(110deg, rgba(201,163,95,0.04), transparent 42%),
+        rgba(12, 20, 35, 0.96);
+      box-shadow: 0 24px 70px rgba(0,0,0,0.62), inset 0 1px 0 rgba(227,197,133,0.16);
+    }
+    .correspondence::before, .correspondence::after {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      border: 1px solid rgba(201,163,95,0.15);
+      border-radius: 3px;
+      pointer-events: none;
+    }
+    .identity {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 22px 15px;
+      border-right: 1px solid rgba(201,163,95,0.25);
+      background: rgba(3,6,12,0.18);
+      text-align: center;
+    }
+    .identity .portrait { width: 88px; height: 112px; }
+    .identity h1 { margin: 13px 0 3px; color: var(--parchment); font-size: 16px; font-weight: 600; line-height: 1.05; }
+    .identity p { margin: 0; color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.11em; line-height: 1.45; text-transform: uppercase; }
+    .identity .status { display: flex; align-items: center; gap: 6px; margin-top: 17px; color: var(--gold); font-family: var(--lora); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .identity .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #9ecb93; box-shadow: 0 0 8px rgba(158,203,147,0.75); }
+    .contents { padding: 19px 22px 17px; }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--gold); font-family: var(--lora); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .modal-head time { color: var(--faded); font-size: 9px; }
+    .message { max-width: 430px; margin: 20px 0 18px; color: var(--parchment); font-size: 22px; line-height: 1.22; }
+    .message em { color: #f7e9ca; }
+    .context { margin: 0 0 13px; color: var(--faded); font-family: var(--lora); font-size: 11px; font-style: italic; line-height: 1.45; }
+    .choices { display: grid; gap: 7px; padding-top: 14px; border-top: 1px solid rgba(201,163,95,0.22); }
+    .modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .modal-foot .quiet-button { min-width: 154px; }
+    @media (max-width: 520px) {
+      .correspondence { grid-template-columns: 1fr; margin-top: 56px; }
+      .identity { display: grid; grid-template-columns: 56px 1fr; column-gap: 12px; padding: 14px 18px; border-right: 0; border-bottom: 1px solid rgba(201,163,95,0.25); text-align: left; }
+      .identity .portrait { grid-row: span 2; width: 56px; height: 64px; }
+      .identity h1 { margin: 0; align-self: end; }
+      .identity p { align-self: start; }
+      .identity .status { display: none; }
+      .contents { padding: 17px; }
+      .message { margin: 16px 0; font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" aria-hidden="true"></div>
+  <div class="veil" aria-hidden="true"></div>
+  <div class="screen-note"><strong>HMS Beagle Aft Cabins</strong> &nbsp;•&nbsp; conversation mockup A</div>
+
+  <main class="correspondence" aria-label="Conversation with Syms Covington">
+    <aside class="identity">
+      <div class="portrait"><img src="../public/portraits/syms_covington.jpg" alt="Syms Covington"></div>
+      <h1>Syms<br>Covington</h1>
+      <p>Assistant to<br>Mr. Darwin</p>
+      <div class="status">Nearby</div>
+    </aside>
+
+    <section class="contents">
+      <header class="modal-head">
+        <span>Private Conversation</span>
+        <time>18 Sept. 1835 &nbsp;•&nbsp; 6:12 PM</time>
+      </header>
+      <div class="ornament" aria-hidden="true">✦</div>
+      <p class="context">Syms has set aside the specimen bag and waits for instruction.</p>
+      <p class="message">“The gull is tagged, sir. Shall I put it in the case, or keep it out for your notes?”</p>
+      <div class="choices" aria-label="Conversation replies">
+        <button class="choice selected" type="button"><span class="choice-number">1</span><span>Have it labelled and packed.</span></button>
+        <button class="choice" type="button"><span class="choice-number">2</span><span>Leave it out. I want another look.</span></button>
+        <button class="choice" type="button"><span class="choice-number">3</span><span>Ask what Syms observed before it fell.</span></button>
+      </div>
+      <footer class="modal-foot">
+        <span><span class="key">↑↓</span> choose &nbsp; <span class="key">Enter</span> speak</span>
+        <button class="quiet-button" type="button">End conversation <span class="key">Esc</span></button>
+      </footer>
+    </section>
+  </main>
+
+  <script>
+    const choices = [...document.querySelectorAll('.choice')];
+    choices.forEach(choice => choice.addEventListener('click', () => {
+      choices.forEach(item => item.classList.remove('selected'));
+      choice.classList.add('selected');
+    }));
+  </script>
+</body>
+</html>

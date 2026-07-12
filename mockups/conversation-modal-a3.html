@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversation Modal A3: Field Dispatch</title>
+  <link rel="stylesheet" href="./conversation-modal.css">
+  <style>
+    :root { --dispatch-green: #49645d; --dispatch-paper: #e1d5bb; --dispatch-red: #a4674f; }
+    .dispatch {
+      position: fixed;
+      right: clamp(18px, 5vw, 86px);
+      bottom: clamp(18px, 5vh, 58px);
+      left: clamp(18px, 5vw, 86px);
+      display: grid;
+      grid-template-columns: 206px minmax(0, 1fr);
+      max-width: 1160px;
+      margin: auto;
+      border-top: 3px solid var(--dispatch-green);
+      border-bottom: 1px solid rgba(201,163,95,0.5);
+      background: rgba(15, 24, 35, 0.96);
+      box-shadow: 0 28px 76px rgba(0,0,0,0.64);
+    }
+    .dispatch-speaker {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-height: 330px;
+      padding: 0 0 18px 21px;
+      border-right: 1px solid rgba(201,163,95,0.3);
+      background: #1b2c35;
+    }
+    .dispatch-speaker .portrait {
+      align-self: start;
+      width: 133px;
+      height: 174px;
+      margin: -31px 0 0 13px;
+      border: 5px solid var(--dispatch-paper);
+      border-radius: 0 0 62px 62px;
+      box-shadow: 0 12px 24px rgba(0,0,0,0.38), inset 0 0 0 1px #7c6850;
+    }
+    .dispatch-speaker .portrait::after { border: 0; }
+    .speaker-copy { padding-right: 13px; }
+    .speaker-copy .eyebrow { margin-bottom: 8px; color: var(--dispatch-paper); font-family: var(--lora); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; }
+    .speaker-copy h1 { margin: 0; color: #f3e7ce; font-size: 24px; font-weight: 500; line-height: 0.9; }
+    .speaker-copy p { margin: 7px 0 0; color: rgba(226,213,187,0.68); font-family: var(--lora); font-size: 10px; font-style: italic; line-height: 1.45; }
+    .dispatch-body { position: relative; display: grid; grid-template-rows: auto 1fr auto; min-width: 0; padding: 19px 30px 16px; }
+    .dispatch-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .dispatch-head .label { color: var(--dispatch-green); font-family: var(--lora); font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; }
+    .dispatch-head .record { color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .dispatch-head button { padding: 0; border: 0; background: none; color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .dispatch-head button:hover, .dispatch-head button:focus-visible { color: var(--gold-light); outline: none; }
+    .dispatch-message { align-self: center; max-width: 720px; padding: 18px 0 17px; }
+    .dispatch-message .scene-detail { margin: 0 0 9px; color: var(--dispatch-paper); font-family: var(--lora); font-size: 12px; font-style: italic; line-height: 1.35; }
+    .dispatch-message blockquote { margin: 0; color: #f6ecd6; font-size: clamp(24px, 2.7vw, 34px); font-weight: 500; line-height: 1.08; }
+    .dispatch-replies { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; border-top: 1px solid rgba(201,163,95,0.28); }
+    .dispatch-replies .choice { grid-template-columns: 31px 1fr; min-height: 52px; padding: 10px 0; border: 0; border-bottom: 1px solid rgba(201,163,95,0.19); border-radius: 0; background: transparent; font-size: 16px; }
+    .dispatch-replies .choice:hover, .dispatch-replies .choice:focus-visible, .dispatch-replies .choice.selected { padding-left: 10px; background: rgba(73,100,93,0.2); color: #fff0d5; box-shadow: inset 3px 0 0 var(--dispatch-red); }
+    .dispatch-replies .choice:last-child { grid-column: span 2; }
+    .dispatch-replies .choice-number { color: var(--dispatch-red); }
+    .dispatch-footer { position: absolute; right: 30px; bottom: -23px; color: rgba(234,223,199,0.62); font-family: var(--lora); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    @media (max-width: 740px) {
+      .dispatch { grid-template-columns: 130px minmax(0, 1fr); }
+      .dispatch-speaker { min-height: 294px; padding-left: 14px; }
+      .dispatch-speaker .portrait { width: 94px; height: 126px; margin-left: 4px; }
+      .speaker-copy h1 { font-size: 19px; }
+      .dispatch-body { padding: 17px 19px 14px; }
+      .dispatch-message blockquote { font-size: 25px; }
+      .dispatch-replies { grid-template-columns: 1fr; }
+      .dispatch-replies .choice:last-child { grid-column: auto; }
+    }
+    @media (max-width: 500px) {
+      .dispatch { right: 10px; bottom: 12px; left: 10px; grid-template-columns: 1fr; }
+      .dispatch-speaker { display: grid; grid-template-columns: 70px 1fr; min-height: 78px; padding: 10px 15px; border-right: 0; border-bottom: 1px solid rgba(201,163,95,0.3); }
+      .dispatch-speaker .portrait { grid-row: span 2; width: 59px; height: 59px; margin: 0; border-width: 3px; border-radius: 50%; }
+      .speaker-copy { align-self: center; padding: 0; }
+      .speaker-copy .eyebrow, .speaker-copy p { display: none; }
+      .speaker-copy h1 { font-size: 18px; }
+      .dispatch-body { padding: 14px 15px; }
+      .dispatch-head .record { display: none; }
+      .dispatch-message { padding: 13px 0; }
+      .dispatch-message blockquote { font-size: 22px; }
+      .dispatch-footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" aria-hidden="true"></div>
+  <div class="veil" aria-hidden="true"></div>
+  <div class="screen-note"><strong>Post Office Bay</strong> &nbsp;•&nbsp; field dispatch</div>
+
+  <main class="dispatch" aria-label="Conversation with Syms Covington">
+    <aside class="dispatch-speaker">
+      <div class="portrait"><img src="../public/portraits/syms_covington.jpg" alt="Syms Covington"></div>
+      <div class="speaker-copy">
+        <div class="eyebrow">Your assistant</div>
+        <h1>Syms<br>Covington</h1>
+        <p>Within speaking distance.<br>He is waiting for a decision.</p>
+      </div>
+    </aside>
+    <section class="dispatch-body">
+      <header class="dispatch-head">
+        <div><span class="label">Field dispatch</span> <span class="record"> / recorded privately</span></div>
+        <button type="button">End audience <span class="key">Esc</span></button>
+      </header>
+      <div class="dispatch-message">
+        <p class="scene-detail">Syms kneels beside the gull, looking from its damaged wing to the open specimen bag.</p>
+        <blockquote>“It is a handsome bird, sir. A shame about the wing.”</blockquote>
+      </div>
+      <div class="dispatch-replies" aria-label="Conversation replies">
+        <button class="choice selected" type="button"><span class="choice-number">I.</span><span>Label it for the collection.</span></button>
+        <button class="choice" type="button"><span class="choice-number">II.</span><span>What did you notice before it fell?</span></button>
+        <button class="choice" type="button"><span class="choice-number">III.</span><span>Keep it outside the case for now.</span></button>
+      </div>
+    </section>
+    <div class="dispatch-footer"><span class="key">1–3</span> reply &nbsp; <span class="key">Enter</span> speak</div>
+  </main>
+  <script>
+    const choices = [...document.querySelectorAll('.choice')];
+    choices.forEach(choice => choice.addEventListener('click', () => {
+      choices.forEach(item => item.classList.remove('selected'));
+      choice.classList.add('selected');
+    }));
+  </script>
+</body>
+</html>

@@ -21,36 +21,39 @@ function gaussian(x, z, cx, cz, rx, rz) {
   return Math.exp(-(dx * dx + dz * dz));
 }
 
-function segmentDistance(px, pz, ax, az, bx, bz) {
-  const abx = bx - ax;
-  const abz = bz - az;
-  const lengthSq = abx * abx + abz * abz || 1;
-  const t = clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
-  return Math.hypot(px - (ax + abx * t), pz - (az + abz * t));
-}
-
 // West-facing coast: water is x < coast, land rises slowly to the east.
 export function blackBeachCoastX(z) {
-  const northPocket = gaussian(0, z, 0, -27, 1, 13) * 4.2;
-  const southPoint = gaussian(0, z, 0, 31, 1, 15) * -3.6;
-  return 4.0
-    + Math.sin(z * 0.071 + 0.8) * 3.2
-    + Math.sin(z * 0.026 - 1.4) * 1.55
+  const centralCove = gaussian(0, z, 0, 2, 1, 28) * 29;
+  const northHeadland = gaussian(0, z, 0, -36, 1, 15) * -10.5;
+  const southPoint = gaussian(0, z, 0, 34, 1, 16) * -8.5;
+  const northPocket = gaussian(0, z, 0, -15, 1, 9) * 4.2;
+  return -15.5
+    + centralCove
     + northPocket
-    + southPoint;
+    + northHeadland
+    + southPoint
+    + Math.sin(z * 0.095 + 0.9) * 2.0
+    + Math.sin(z * 0.041 - 1.6) * 1.35
+    + elevationNoise(z * 0.045 + 5, 8.7) * 1.35;
 }
 
 export function blackBeachInlandDistance(x, z) {
   return x - blackBeachCoastX(z);
 }
 
-// A low wet-sand tongue at the west route seam. It keeps route transitions
-// reliable while the surrounding half of the map remains shallow water.
+// Curved wet-sand and swash shelves along the cove. This should read like a
+// beach face, not like a causeway from the route edge.
 export function blackBeachSandbarMask(x, z) {
-  const coast = blackBeachCoastX(z);
-  const bar = 1 - smoothstep(segmentDistance(x, z, -53, 0, coast + 5, 1.6), 4.6, 11.5);
-  const endSoft = 1 - smoothstep(x, coast + 8, coast + 17);
-  return clamp(bar * endSoft, 0, 1);
+  const d = blackBeachInlandDistance(x, z);
+  const cove = gaussian(0, z, 0, 2, 1, 31);
+  const shoreBand = 1 - smoothstep(Math.abs(d), 1.4, 8.8);
+  const northPocket = gaussian(d, z, -1.5, -18, 7, 9) * 0.65;
+  const southPocket = gaussian(d, z, -1.0, 21, 8, 11) * 0.48;
+  const brokenBars = Math.max(
+    gaussian(d, z, -6.4, -7, 5.4, 8.2),
+    gaussian(d, z, -7.8, 13, 6.2, 8.8) * 0.72,
+  );
+  return clamp((shoreBand * (0.36 + cove * 0.64)) + northPocket + southPocket + brokenBars * 0.42, 0, 1);
 }
 
 export function blackBeachDuneMask(x, z) {
@@ -58,9 +61,9 @@ export function blackBeachDuneMask(x, z) {
   const broad = smoothstep(d, 9, 38);
   const duneNoise = elevationNoise(x * 0.052 + 3, z * 0.048 - 8) * 0.5 + 0.5;
   const lobes = Math.max(
-    gaussian(x, z, 20, -25, 14, 10),
-    gaussian(x, z, 33, -6, 16, 12),
-    gaussian(x, z, 22, 22, 18, 14),
+    gaussian(x, z, 18, -28, 13, 10),
+    gaussian(x, z, 34, -7, 17, 13),
+    gaussian(x, z, 24, 22, 18, 14),
   );
   return clamp(broad * (duneNoise * 0.45 + lobes * 0.72), 0, 1);
 }
@@ -72,24 +75,26 @@ export function blackBeachHeight(x, z, { movementSurface = false } = {}) {
 
   let y;
   if (d < 0) {
-    // Broad, very shallow black-sand shelf. Even the far west side of this
-    // map stays wadeable; swimming belongs to BLACK_BEACH_SURF.
-    y = WATER_LEVEL - 0.08 + d * 0.028;
-    y = Math.max(WATER_LEVEL - WADE_DEPTH + 0.18, y);
+    // Broad, very shallow black-sand shelf inside the cove. The bottom slopes
+    // slowly offshore and never becomes swim-depth on this map.
+    const offshore = Math.max(0, -d);
+    const cove = gaussian(0, z, 0, 2, 1, 32);
+    y = WATER_LEVEL - 0.06 - Math.pow(offshore, 1.08) * lerp(0.026, 0.016, cove);
+    y = Math.max(WATER_LEVEL - WADE_DEPTH + 0.16, y);
     y += surfaceNoise(x * 0.15 + 4, z * 0.17 - 6) * (movementSurface ? 0.018 : 0.055);
   } else {
-    // Slow black-sand rise into low hillocks, intentionally shallower than the
-    // north-facing Cormorant beach.
-    y = -0.34 + 0.82 * (1 - Math.exp(-d * 0.055));
-    y += smoothstep(d, 10, 44) * 0.72;
-    y += smoothstep(x, 22, 54) * 0.58;
+    // Slow black-sand rise into low hillocks, similar in readability to the
+    // north-facing Cormorant beach but darker and flatter.
+    y = -0.32 + 1.04 * (1 - Math.exp(-d * 0.074));
+    y += smoothstep(d, 14, 42) * 0.58;
+    y += smoothstep(x, 26, 54) * 0.46;
     y += dunes * (movementSurface ? 0.18 : 0.36);
   }
 
   if (sandbar > 0) {
-    const barTarget = -0.22 + smoothstep(x, -50, -9) * 0.16
+    const barTarget = -0.22 + smoothstep(d, -5, 5) * 0.22
       + elevationNoise(x * 0.11 - 8, z * 0.13 + 2) * (movementSurface ? 0.015 : 0.04);
-    y = lerp(y, barTarget, sandbar * 0.98);
+    y = lerp(y, barTarget, sandbar * 0.72);
   }
 
   // A few low black lava ribs interrupt the sand without making traversal
@@ -164,6 +169,9 @@ export const blackBeachRegion = {
     biomeAt: blackBeachBiomeAt,
     color: blackBeachColor,
     isWalkable: isBlackBeachWalkable,
-    defaultSpawn: [16, 0, 0],
+    defaultSpawn: [12, 0, 3],
+    entrySpawns: {
+      west: [12, 0, 3],
+    },
   },
 };

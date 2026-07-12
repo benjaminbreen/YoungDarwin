@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { StaticGLB } from '../assets/StaticGLB';
 import { useThreeGameStore } from '../../store';
-import { POOP_Y, SHIP_SCALE, STERN, WAIST_Y } from '../../world/regions/beagleDeck/hull';
+import { POOP_BREAK, POOP_Y, SHIP_SCALE, STERN, WAIST_Y } from '../../world/regions/beagleDeck/hull';
 
 // Walkable HMS Beagle for the BEAGLE deck region. The terrain heightfield is
 // the deck itself; this renders the ship GLB that wraps it, plus the animated
@@ -71,6 +71,62 @@ function makePennantTexture() {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
+}
+
+function makeCabinDoorSignTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 768;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#172238';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#c7a65d';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+  ctx.strokeStyle = '#6f5831';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(27, 27, canvas.width - 54, canvas.height - 54);
+  ctx.fillStyle = '#ead8a7';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '600 58px Georgia, serif';
+  ctx.fillText('AFT CABINS', canvas.width / 2, 76);
+  ctx.fillStyle = '#c7a65d';
+  ctx.font = 'italic 31px Georgia, serif';
+  ctx.fillText('FitzRoy  |  Darwin  |  Library', canvas.width / 2, 132);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function CabinDoorMarker() {
+  const sign = useMemo(makeCabinDoorSignTexture, []);
+  return (
+    <group position={[POOP_BREAK + 0.28, WAIST_Y + 2.18, 0]}>
+      <mesh position={[0.035, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <boxGeometry args={[3.62, 1.03, 0.09]} />
+        <meshStandardMaterial color="#6b4b25" roughness={0.7} metalness={0.04} />
+      </mesh>
+      <mesh position={[0.09, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[3.45, 0.86]} />
+        <meshStandardMaterial map={sign} roughness={0.78} metalness={0.02} emissive="#6d5527" emissiveIntensity={0.11} />
+      </mesh>
+      {[-1, 1].map(side => (
+        <group key={side} position={[0.12, -1.38, side * 1.18]}>
+          <mesh>
+            <cylinderGeometry args={[0.1, 0.14, 0.44, 8]} />
+            <meshStandardMaterial color="#8f6f32" roughness={0.42} metalness={0.34} />
+          </mesh>
+          <mesh position={[0, 0.28, 0]}>
+            <sphereGeometry args={[0.13, 10, 8]} />
+            <meshStandardMaterial color="#f4c36b" emissive="#e6a94f" emissiveIntensity={1.2} />
+          </mesh>
+          <pointLight position={[0.28, 0.3, 0]} color="#ffc873" intensity={0.8} distance={5.5} decay={1.8} />
+        </group>
+      ))}
+    </group>
+  );
 }
 
 // Cloth wave: pinned at the hoist (uv.x = 0), amplitude grows toward the fly.
@@ -148,6 +204,7 @@ export function HmsBeagleDeck() {
         sourceLabel="Beagle deck GLB"
         sourceKind="ship"
       />
+      <CabinDoorMarker />
       {/* white ensign on the stern staff (staff rakes aft; hang from near the truck) */}
       <Cloth
         position={[STERN - shipUnits(0.72), POOP_Y + shipUnits(4.05), 0]}

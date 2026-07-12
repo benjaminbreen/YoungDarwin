@@ -1,0 +1,500 @@
+'use client';
+
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Sparkles, SpotLight } from '@react-three/drei';
+import { useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useThreeGameStore } from '../store';
+import { skyState } from '../world/celestial';
+import { fogAtmosphereUniforms } from '../world/fogAtmosphere';
+import { computeOutdoorLightRig } from '../world/outdoorLighting';
+import { weatherEnv } from '../world/weatherEnvRuntime';
+
+const RECT_NORMAL = new THREE.Vector3(0, 0, -1);
+const DUST_AXIS = new THREE.Vector3(0, 1, 0);
+
+const PANE_SHAFT_VERTEX = /* glsl */ `
+  varying vec3 vLocalPosition;
+
+  void main() {
+    vLocalPosition = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const PANE_SHAFT_FRAGMENT = /* glsl */ `
+  uniform vec3 beamColor;
+  uniform float beamOpacity;
+  varying vec3 vLocalPosition;
+
+  void main() {
+    float edgeX = 1.0 - smoothstep(0.3, 0.5, abs(vLocalPosition.x));
+    float edgeZ = 1.0 - smoothstep(0.3, 0.5, abs(vLocalPosition.z));
+    float entryFade = smoothstep(-0.5, -0.34, vLocalPosition.y);
+    float distanceFade = 1.0 - smoothstep(0.18, 0.5, vLocalPosition.y);
+    float alpha = beamOpacity * edgeX * edgeZ * entryFade * distanceFade;
+    if (alpha < 0.002) discard;
+    gl_FragColor = vec4(beamColor, alpha);
+  }
+`;
+
+function InteriorFogIsolation({ density = 0.00025 }) {
+  const scene = useThree(state => state.scene);
+  useFrame(() => {
+    if (scene.fog?.isFogExp2) scene.fog.density = density;
+    const atmosphere = fogAtmosphereUniforms.uFogAtmo.value;
+    atmosphere.x = 0;
+    atmosphere.z = 0;
+    atmosphere.w = 0;
+  });
+  return null;
+}
+
+function InteriorEnvironmentControl({ lighting }) {
+  const scene = useThree(state => state.scene);
+  useEffect(() => {
+    const previous = scene.environmentIntensity;
+    return () => { scene.environmentIntensity = previous; };
+  }, [scene]);
+  useFrame(() => {
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const dayIntensity = lighting.environmentDay ?? 0.28;
+    const nightIntensity = lighting.environmentNight ?? 0.055;
+    scene.environmentIntensity = THREE.MathUtils.lerp(
+      nightIntensity,
+      dayIntensity,
+      celestial.daylight,
+    ) * (1 - weatherEnv.lightDim * 0.24);
+  });
+  return null;
+}
+
+function InteriorExposureControl({ lighting }) {
+  const gl = useThree(state => state.gl);
+  const previousRef = useRef(null);
+  const exposureRef = useRef(null);
+  useEffect(() => {
+    previousRef.current = gl.toneMappingExposure;
+    exposureRef.current = gl.toneMappingExposure;
+    return () => {
+      if (previousRef.current != null) gl.toneMappingExposure = previousRef.current;
+      exposureRef.current = null;
+    };
+  }, [gl]);
+  useFrame((_, delta) => {
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const target = THREE.MathUtils.lerp(
+      lighting.exposureNight ?? 0.53,
+      lighting.exposureDay ?? 0.64,
+      celestial.daylight,
+    );
+    exposureRef.current = THREE.MathUtils.damp(
+      exposureRef.current ?? gl.toneMappingExposure,
+      target,
+      lighting.exposureResponse ?? 1.9,
+      delta,
+    );
+    gl.toneMappingExposure = exposureRef.current;
+  });
+  return null;
+}
+
+function InteriorPracticalMaterials({ groupRef, lighting }) {
+  const rootRef = useRef(null);
+  const flameMaterialsRef = useRef([]);
+  useFrame(({ clock }) => {
+    const root = groupRef.current;
+    if (!root) return;
+    if (rootRef.current !== root) {
+      rootRef.current = root;
+      const flameMaterials = new Set();
+      root.traverse(object => {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (material?.name?.toLowerCase().includes('lampflame')) flameMaterials.add(material);
+        }
+      });
+      flameMaterialsRef.current = [...flameMaterials];
+    }
+
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const darkness = THREE.MathUtils.clamp(
+      celestial.night + weatherEnv.lightDim * 0.24 + weatherEnv.rainIntensity * 0.1,
+      0,
+      1,
+    );
+    const activation = THREE.MathUtils.smoothstep(darkness, 0.08, 0.92);
+    const dayEmission = lighting.flameDayEmission ?? 0.55;
+    const nightEmission = lighting.flameNightEmission ?? 3.6;
+    const flicker = 0.96 + Math.sin(clock.elapsedTime * 11.7) * 0.025 + Math.sin(clock.elapsedTime * 23.1) * 0.015;
+    const strength = THREE.MathUtils.lerp(dayEmission, nightEmission, activation) * flicker;
+    for (const material of flameMaterialsRef.current) {
+      material.emissiveIntensity = strength;
+      material.toneMapped = true;
+    }
+  });
+  return null;
+}
+
+function InteriorAmbientLights({ lighting }) {
+  const ambientRef = useRef(null);
+  const hemisphereRef = useRef(null);
+  useFrame(() => {
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const rig = computeOutdoorLightRig({
+      daylight: celestial.daylight,
+      golden: celestial.golden,
+      elevation: celestial.elevation,
+      overcast: weatherEnv.overcast,
+      mist: weatherEnv.mistAmount,
+      rain: weatherEnv.rainIntensity,
+      lightDim: weatherEnv.lightDim,
+      moonFraction: celestial.moon_phase.fraction,
+    });
+    ambientRef.current.intensity = THREE.MathUtils.lerp(
+      lighting.ambientNight ?? 0.004,
+      lighting.ambientDay ?? 0.03,
+      celestial.daylight,
+    ) + rig.weatherSoftness * celestial.daylight * 0.006;
+    hemisphereRef.current.intensity = THREE.MathUtils.lerp(
+      lighting.hemisphereNight ?? 0.012,
+      lighting.hemisphereDay ?? 0.105,
+      celestial.daylight,
+    ) + rig.weatherSoftness * celestial.daylight * 0.014;
+  });
+  return (
+    <>
+      <ambientLight ref={ambientRef} color={lighting.ambientColor || '#778288'} intensity={0.02} />
+      <hemisphereLight
+        ref={hemisphereRef}
+        args={[
+          lighting.hemisphereSkyColor || '#91abb4',
+          lighting.hemisphereGroundColor || '#140b06',
+          0.08,
+        ]}
+      />
+    </>
+  );
+}
+
+function applyRectDirection(light, direction) {
+  if (!light) return;
+  light.quaternion.setFromUnitVectors(RECT_NORMAL, direction);
+}
+
+function PortalLight({ portal }) {
+  const direct = portal.direct;
+  const shaft = direct?.shaft;
+  const panes = shaft?.panes;
+  const scene = useThree(state => state.scene);
+  const areaRef = useRef(null);
+  const bounceRef = useRef(null);
+  const spotRef = useRef(null);
+  const dustGroupRef = useRef(null);
+  const paneShaftGroupRef = useRef(null);
+  const volumeMaterialRef = useRef(null);
+  const target = useMemo(() => new THREE.Object3D(), []);
+  const aperture = useMemo(() => new THREE.Vector3(...portal.position), [portal.position]);
+  const outward = useMemo(() => new THREE.Vector3(...portal.normal).normalize(), [portal.normal]);
+  const inward = useMemo(() => outward.clone().multiplyScalar(-1), [outward]);
+  const sun = useMemo(() => new THREE.Vector3(), []);
+  const dustRay = useMemo(() => new THREE.Vector3(), []);
+  const paneAxisWorld = useMemo(
+    () => new THREE.Vector3(...(panes?.axis || [1, 0, 0])).normalize(),
+    [panes?.axis],
+  );
+  const paneAxis = useMemo(() => new THREE.Vector3(), []);
+  const paneCross = useMemo(() => new THREE.Vector3(), []);
+  const paneBasis = useMemo(() => new THREE.Matrix4(), []);
+  const cool = useMemo(() => new THREE.Color(portal.color || '#c3d8de'), [portal.color]);
+  const warm = useMemo(() => new THREE.Color(portal.goldenColor || '#ffd08a'), [portal.goldenColor]);
+  const lightColor = useMemo(() => cool.clone(), [cool]);
+  const directColor = useMemo(() => cool.clone(), [cool]);
+  const bounceDirection = useMemo(
+    () => new THREE.Vector3(...(portal.bounce?.direction || [0, 1, 0])).normalize(),
+    [portal.bounce?.direction],
+  );
+  const paneOffsets = useMemo(() => {
+    if (!panes) return [];
+    const count = Math.max(1, panes.count ?? 1);
+    const spacing = panes.spacing ?? (portal.width / count);
+    return Array.from({ length: count }, (_, index) => (index - (count - 1) / 2) * spacing);
+  }, [panes, portal.width]);
+  const paneShaftMaterial = useMemo(() => {
+    if (!panes) return null;
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        beamColor: { value: new THREE.Color(portal.color || '#c3d8de') },
+        beamOpacity: { value: 0 },
+      },
+      vertexShader: PANE_SHAFT_VERTEX,
+      fragmentShader: PANE_SHAFT_FRAGMENT,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      side: THREE.BackSide,
+      toneMapped: true,
+    });
+  }, [panes, portal.color]);
+
+  useEffect(() => () => paneShaftMaterial?.dispose(), [paneShaftMaterial]);
+
+  useEffect(() => {
+    scene.add(target);
+    if (spotRef.current) spotRef.current.target = target;
+    applyRectDirection(areaRef.current, inward);
+    applyRectDirection(bounceRef.current, bounceDirection);
+    return () => scene.remove(target);
+  }, [bounceDirection, inward, scene, target]);
+
+  useFrame(() => {
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const rig = computeOutdoorLightRig({
+      daylight: celestial.daylight,
+      golden: celestial.golden,
+      elevation: celestial.elevation,
+      overcast: weatherEnv.overcast,
+      mist: weatherEnv.mistAmount,
+      rain: weatherEnv.rainIntensity,
+      lightDim: weatherEnv.lightDim,
+      moonFraction: celestial.moon_phase.fraction,
+    });
+    sun.set(...celestial.sun).normalize();
+    lightColor.copy(cool).lerp(warm, celestial.golden * 0.88);
+    directColor.copy(lightColor).lerp(warm, direct?.warmth ?? 0);
+
+    const facing = Math.max(0, sun.dot(outward));
+    const directStrength = direct
+      ? celestial.daylight
+        * THREE.MathUtils.smoothstep(facing, direct.facingStart ?? 0.04, direct.facingFull ?? 0.32)
+        * (0.12 + rig.hardSun * 0.88 + rig.goldenSideLight * 0.35)
+        * (1 - weatherEnv.overcast * 0.8)
+        * (1 - weatherEnv.rainIntensity * 0.8)
+      : 0;
+
+    const diffuseStrength = celestial.daylight
+      * (0.46 + rig.weatherSoftness * 0.46)
+      * (1 - weatherEnv.lightDim * 0.42)
+      + celestial.night * 0.018 * (0.25 + celestial.moon_phase.fraction * 0.75);
+    if (areaRef.current) {
+      const directContrast = 1 - directStrength * (direct?.diffuseCut ?? 0);
+      areaRef.current.intensity = (portal.diffuseIntensity ?? 0.7) * diffuseStrength * directContrast;
+      areaRef.current.color.copy(lightColor);
+    }
+
+    const spot = spotRef.current;
+    if (spot && direct) {
+      const sourceDistance = direct.sourceDistance ?? 4;
+      const throwDistance = direct.distance ?? 9;
+      spot.position.copy(aperture).addScaledVector(sun, sourceDistance);
+      target.position.copy(aperture).addScaledVector(sun, -throwDistance * 0.78);
+      spot.color.copy(directColor);
+      spot.intensity = (direct.intensity ?? 24) * directStrength;
+      spot.penumbra = THREE.MathUtils.lerp(
+        direct.penumbraClear ?? direct.penumbra ?? 0.34,
+        direct.penumbraOvercast ?? Math.max(direct.penumbra ?? 0.34, 0.58),
+        rig.weatherSoftness,
+      );
+      spot.shadow.radius = THREE.MathUtils.lerp(
+        direct.shadowRadiusClear ?? direct.shadowRadius ?? 2.2,
+        direct.shadowRadiusOvercast ?? direct.shadowRadius ?? 2.2,
+        rig.weatherSoftness,
+      );
+      spot.shadow.needsUpdate = true;
+
+      if (!volumeMaterialRef.current) {
+        spot.traverse(object => {
+          if (object.isMesh && object.material?.uniforms?.opacity) volumeMaterialRef.current = object.material;
+        });
+      }
+      const opacityUniform = volumeMaterialRef.current?.uniforms?.opacity;
+      if (opacityUniform) opacityUniform.value = panes ? 0 : (shaft?.opacity ?? 0) * directStrength;
+      const volumeColor = volumeMaterialRef.current?.uniforms?.lightColor?.value;
+      if (volumeColor?.copy) volumeColor.copy(directColor);
+    }
+
+    if (paneShaftGroupRef.current && paneShaftMaterial && panes) {
+      const paneVisibilityThreshold = panes.visibilityThreshold ?? 0.12;
+      paneShaftGroupRef.current.visible = directStrength > paneVisibilityThreshold;
+      dustRay.copy(sun).multiplyScalar(-1);
+      paneShaftGroupRef.current.position.copy(aperture);
+      paneAxis.copy(paneAxisWorld).addScaledVector(dustRay, -paneAxisWorld.dot(dustRay));
+      if (paneAxis.lengthSq() < 0.001) paneAxis.set(1, 0, 0).addScaledVector(dustRay, -dustRay.x);
+      paneAxis.normalize();
+      paneCross.crossVectors(paneAxis, dustRay).normalize();
+      paneBasis.makeBasis(paneAxis, dustRay, paneCross);
+      paneShaftGroupRef.current.quaternion.setFromRotationMatrix(paneBasis);
+      paneShaftMaterial.uniforms.beamOpacity.value = (panes.opacity ?? 0.1) * directStrength;
+      paneShaftMaterial.uniforms.beamColor.value.copy(directColor);
+    }
+
+    if (dustGroupRef.current && shaft?.dust && !panes) {
+      const dustLength = shaft.dust.length ?? 3.4;
+      dustGroupRef.current.visible = directStrength > (shaft.dust.visibilityThreshold ?? 0.16);
+      dustRay.copy(sun).multiplyScalar(-1);
+      dustGroupRef.current.position.copy(aperture).addScaledVector(dustRay, dustLength * 0.52);
+      dustGroupRef.current.quaternion.setFromUnitVectors(DUST_AXIS, dustRay);
+    }
+
+    if (bounceRef.current) {
+      bounceRef.current.intensity = (portal.bounce?.intensity ?? 0) * directStrength;
+      bounceRef.current.color.copy(directColor).lerp(warm, 0.2 + celestial.golden * 0.42);
+    }
+  });
+
+  const areaPosition = aperture.clone().addScaledVector(inward, portal.inset ?? 0.07);
+  const paneLength = panes?.length ?? shaft?.dust?.length ?? 3.4;
+  const paneWidth = panes?.width ?? 0.56;
+  const paneDepth = panes?.depth ?? portal.height * 0.64;
+  const paneDust = panes?.dust === false ? null : shaft?.dust;
+  const paneDustCount = paneDust
+    ? Math.max(1, Math.round((paneDust.count ?? 72) / Math.max(1, paneOffsets.length)))
+    : 0;
+  return (
+    <group userData={{ renderSource: `interior-portal:${portal.id}`, renderKind: 'interior-light' }}>
+      <rectAreaLight
+        ref={areaRef}
+        position={areaPosition.toArray()}
+        width={portal.width}
+        height={portal.height}
+        color={portal.color || '#c3d8de'}
+        intensity={0}
+      />
+      {direct && (
+        <SpotLight
+          ref={spotRef}
+          position={portal.position}
+          intensity={0}
+          color={portal.color || '#fff1cf'}
+          angle={direct.angle ?? 0.48}
+          penumbra={direct.penumbra ?? 0.42}
+          distance={direct.distance ?? 9}
+          decay={direct.decay ?? 1.45}
+          castShadow={direct.castShadow !== false}
+          shadow-mapSize-width={direct.shadowMapSize ?? 1024}
+          shadow-mapSize-height={direct.shadowMapSize ?? 1024}
+          shadow-bias={direct.shadowBias ?? -0.0001}
+          volumetric={Boolean(shaft && !panes)}
+          opacity={shaft?.opacity ?? 0}
+          radiusTop={shaft?.radiusTop ?? 0.08}
+          radiusBottom={shaft?.radiusBottom ?? 1.6}
+          attenuation={shaft?.attenuation ?? 5}
+          anglePower={shaft?.anglePower ?? 7}
+        />
+      )}
+      {portal.bounce && (
+        <rectAreaLight
+          ref={bounceRef}
+          position={portal.bounce.position}
+          width={portal.bounce.width}
+          height={portal.bounce.height}
+          color={portal.goldenColor || '#ffd08a'}
+          intensity={0}
+        />
+      )}
+      {panes && paneShaftMaterial && (
+        <group ref={paneShaftGroupRef} visible={false}>
+          {paneOffsets.map((offset, index) => (
+            <group key={`${portal.id}-pane-shaft-${index}`} position={[offset, paneLength * 0.5, 0]}>
+              <mesh scale={[paneWidth, paneLength, paneDepth]} material={paneShaftMaterial} frustumCulled={false}>
+                <boxGeometry args={[1, 1, 1]} />
+              </mesh>
+              {paneDust && (
+                <Sparkles
+                  count={paneDustCount}
+                  speed={paneDust.speed ?? 0.12}
+                  opacity={paneDust.opacity ?? 0.48}
+                  size={paneDust.size ?? 0.16}
+                  noise={paneDust.noise ?? 0.32}
+                  color={paneDust.color || '#ffe2ad'}
+                  scale={[paneWidth * 0.72, paneLength * 0.9, paneDepth * 0.72]}
+                />
+              )}
+            </group>
+          ))}
+        </group>
+      )}
+      {shaft?.dust && !panes && (
+        <group ref={dustGroupRef} visible={false}>
+          <Sparkles
+            count={shaft.dust.count ?? 72}
+            speed={shaft.dust.speed ?? 0.12}
+            opacity={shaft.dust.opacity ?? 0.48}
+            size={shaft.dust.size ?? 0.16}
+            noise={shaft.dust.noise ?? 0.32}
+            color={shaft.dust.color || '#ffe2ad'}
+            scale={[
+              shaft.dust.width ?? portal.width * 0.7,
+              shaft.dust.length ?? 3.4,
+              shaft.dust.depth ?? portal.height * 0.62,
+            ]}
+          />
+        </group>
+      )}
+    </group>
+  );
+}
+
+function PracticalLamp({ lamp, index }) {
+  const lightRef = useRef(null);
+  useFrame(({ clock }) => {
+    const light = lightRef.current;
+    if (!light) return;
+    const store = useThreeGameStore.getState();
+    const celestial = skyState(store.timeOfDay, store.day || 1);
+    const darkness = THREE.MathUtils.clamp(
+      celestial.night + weatherEnv.lightDim * 0.24 + weatherEnv.rainIntensity * 0.1,
+      0,
+      1,
+    );
+    const activation = THREE.MathUtils.smoothstep(darkness, 0.08, 0.92);
+    const base = THREE.MathUtils.lerp(
+      lamp.dayIntensity ?? 0.3,
+      lamp.nightIntensity ?? 6,
+      activation,
+    );
+    const flicker = 0.965
+      + Math.sin(clock.elapsedTime * (7.1 + index * 0.43) + index * 1.9) * 0.025
+      + Math.sin(clock.elapsedTime * 16.3 + index * 2.7) * 0.01;
+    light.intensity = base * flicker;
+  });
+  return (
+    <pointLight
+      ref={lightRef}
+      position={lamp.position}
+      color={lamp.color || '#ff9a49'}
+      intensity={lamp.dayIntensity ?? 0.3}
+      distance={lamp.distance ?? 5.2}
+      decay={lamp.decay ?? 2}
+      castShadow={Boolean(lamp.castShadow)}
+      shadow-mapSize-width={lamp.shadowMapSize ?? 512}
+      shadow-mapSize-height={lamp.shadowMapSize ?? 512}
+      shadow-bias={lamp.shadowBias ?? -0.00012}
+    />
+  );
+}
+
+export function InteriorLightingRig({ definition, groupRef }) {
+  const lighting = definition.lighting || {};
+  return (
+    <>
+      <InteriorFogIsolation density={lighting.fogDensity} />
+      <InteriorEnvironmentControl lighting={lighting} />
+      <InteriorExposureControl lighting={lighting} />
+      <InteriorAmbientLights lighting={lighting} />
+      {(lighting.portals || []).map(portal => (
+        <PortalLight key={portal.id} portal={portal} />
+      ))}
+      {(lighting.lamps || []).map((lamp, index) => (
+        <PracticalLamp key={lamp.id || index} lamp={lamp} index={index} />
+      ))}
+      <InteriorPracticalMaterials groupRef={groupRef} lighting={lighting} />
+    </>
+  );
+}

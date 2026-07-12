@@ -11,6 +11,7 @@ import {
   getObstacleEdgeRisk,
   getObstacleSupportHeight,
   getRuntimeObstacles,
+  obstacleBaseY,
   resolveObstacleCollision,
 } from '../world/obstacles';
 
@@ -48,6 +49,71 @@ function rapierGroundY(rapierContext, position) {
   const hit = rapierContext.world.castRay(ray, 18, true);
   if (!hit) return null;
   return originY - hit.toi + PLAYER_GROUND_CLEARANCE;
+}
+
+function axisSlab(origin, direction, halfExtent, range) {
+  if (Math.abs(direction) < 0.000001) {
+    return Math.abs(origin) <= halfExtent ? range : null;
+  }
+  const t0 = (-halfExtent - origin) / direction;
+  const t1 = (halfExtent - origin) / direction;
+  const near = Math.min(t0, t1);
+  const far = Math.max(t0, t1);
+  const next = { near: Math.max(range.near, near), far: Math.min(range.far, far) };
+  return next.near <= next.far ? next : null;
+}
+
+function boxRayDistance(origin, direction, maxDistance, obstacle, shape) {
+  const scale = obstacle.scale || 1;
+  const [offsetX = 0, offsetY = 0, offsetZ = 0] = shape.offset || [];
+  const yaw = obstacle.yaw || 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const centerX = obstacle.x + (offsetX * cos + offsetZ * sin) * scale;
+  const centerZ = obstacle.z + (-offsetX * sin + offsetZ * cos) * scale;
+  const centerY = obstacleBaseY(obstacle) + offsetY * scale;
+  const relativeX = origin.x - centerX;
+  const relativeZ = origin.z - centerZ;
+  const localOrigin = {
+    x: relativeX * cos - relativeZ * sin,
+    y: origin.y - centerY,
+    z: relativeX * sin + relativeZ * cos,
+  };
+  const localDirection = {
+    x: direction.x * cos - direction.z * sin,
+    y: direction.y,
+    z: direction.x * sin + direction.z * cos,
+  };
+  const [width = 1, height = 1, depth = 1] = shape.size || [];
+  let range = { near: 0, far: maxDistance };
+  range = axisSlab(localOrigin.x, localDirection.x, width * scale * 0.5, range);
+  if (!range) return null;
+  range = axisSlab(localOrigin.y, localDirection.y, height * scale * 0.5, range);
+  if (!range) return null;
+  range = axisSlab(localOrigin.z, localDirection.z, depth * scale * 0.5, range);
+  if (!range) return null;
+  return range.near;
+}
+
+function cameraDistanceLimit(origin, target, obstacles, options = {}) {
+  const dx = target.x - origin.x;
+  const dy = target.y - origin.y;
+  const dz = target.z - origin.z;
+  const requested = Math.hypot(dx, dy, dz);
+  if (requested < 0.001) return requested;
+  const direction = { x: dx / requested, y: dy / requested, z: dz / requested };
+  let hitDistance = requested;
+  for (const obstacle of obstacles) {
+    for (const shape of obstacle.shapes || []) {
+      if (shape.type !== 'box') continue;
+      const distance = boxRayDistance(origin, direction, requested, obstacle, shape);
+      if (distance !== null && distance < hitDistance) hitDistance = distance;
+    }
+  }
+  if (hitDistance >= requested) return requested;
+  const minimum = Math.max(0.25, Number(options.minimumDistance) || 0.65);
+  const padding = Math.max(0, Number(options.padding) || 0.22);
+  return Math.max(minimum, hitDistance - padding);
 }
 
 export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}) {
@@ -185,6 +251,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
       || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)
     ),
+    cameraDistanceLimit: (origin, target, options) => cameraDistanceLimit(origin, target, obstacles, options),
     clampToWalkable: (position, previousPosition, options) => {
       if (options?.allowObstacleSupport !== false) {
         const supportY = getObstacleSupportHeight(position.x, position.z, position.y, DEFAULT_SUPPORT_RADIUS, obstacles);

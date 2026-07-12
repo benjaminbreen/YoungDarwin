@@ -1,7 +1,7 @@
 'use client';
 
 import React, { Suspense, useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
@@ -62,8 +62,10 @@ function prepareScene(scene, options = {}) {
     materials.forEach(material => {
       if (!material) return;
       material.side = options.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.04);
-      if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.76);
+      if (!options.preserveMaterials) {
+        if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.04);
+        if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.76);
+      }
       if (proceduralMap) {
         material.map = proceduralMap;
         if (material.color) material.color.set('#ffffff');
@@ -71,7 +73,30 @@ function prepareScene(scene, options = {}) {
         if (options.forceTint) material.color.copy(tint);
         else material.color.lerp(tint, options.tintStrength ?? 0.18);
       }
-      stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
+      if (options.preserveMaterials) {
+        for (const texture of [material.map, material.normalMap, material.roughnessMap, material.metalnessMap, material.aoMap]) {
+          if (!texture) continue;
+          texture.minFilter = THREE.LinearMipmapLinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.anisotropy = Math.max(texture.anisotropy || 1, options.anisotropy || 6);
+          texture.generateMipmaps = texture.generateMipmaps !== false;
+        }
+        if (material.transparent || material.opacity < 0.98) {
+          material.depthWrite = false;
+          object.castShadow = false;
+        }
+        if (material.name?.toLowerCase().includes('glass')) {
+          material.transparent = true;
+          material.opacity = Math.min(material.opacity ?? 1, 0.09);
+          material.depthWrite = false;
+          material.roughness = Math.min(material.roughness ?? 0.1, 0.055);
+          material.metalness = 0;
+          material.color?.set('#e5efec');
+          object.castShadow = false;
+        }
+      } else {
+        stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
+      }
       if (options.motion) applyFoliageMotion(material, object.geometry, options.motion);
       material.needsUpdate = true;
     });
@@ -93,6 +118,7 @@ function StaticGLBPrimitive({
   forceTint = false,
   castShadow = false,
   receiveShadow = false,
+  preserveMaterials = false,
   frustumCulled = true,
   motion = null,
   contactShadow = null,
@@ -106,8 +132,10 @@ function StaticGLBPrimitive({
   const localGroupRef = useRef(null);
   const group = groupRef || localGroupRef;
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const gl = useThree(state => state.gl);
   const { scene } = useGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
+  const anisotropy = useMemo(() => Math.min(16, gl.capabilities.getMaxAnisotropy?.() || 8), [gl]);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId || `glb:${path}`,
     renderLabel: sourceLabel || sourceId || path.split('/').pop() || path,
@@ -116,8 +144,8 @@ function StaticGLBPrimitive({
   }), [path, sourceId, sourceKind, sourceLabel]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion });
-  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, frustumCulled, motion]);
+    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy });
+  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy]);
 
   return (
     <group

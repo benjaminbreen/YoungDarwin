@@ -13,6 +13,7 @@ import { calibratedStrideTimeScale } from './gaitProfiles';
 import { darwin5ClipDuration } from './darwin5AnimationManifest.mjs';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
+import { isInteriorZone } from '../../interiors/interiorRegistry';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -719,7 +720,12 @@ function HandLamp({ scene, modelAssetId }) {
       group.quaternion.copy(boneQuat).invert().multiply(swingQuat);
     }
     const flicker = 0.82 + 0.12 * Math.sin(t * 11.3) + 0.06 * Math.sin(t * 24.7 + 1.3);
-    if (lightRef.current) lightRef.current.intensity = night * LAMP_LIGHT_INTENSITY * flicker;
+    if (lightRef.current) {
+      const indoors = isInteriorZone(state.currentZoneId);
+      lightRef.current.intensity = night * LAMP_LIGHT_INTENSITY * flicker * (indoors ? 0.62 : 1);
+      lightRef.current.distance = indoors ? 5.2 : LAMP_LIGHT_DISTANCE;
+      lightRef.current.decay = indoors ? 1.9 : 1.4;
+    }
     for (let i = 0; i < flameMatsRef.current.length; i += 1) {
       flameMatsRef.current[i].emissiveIntensity = night * (1.6 + 0.6 * flicker);
     }

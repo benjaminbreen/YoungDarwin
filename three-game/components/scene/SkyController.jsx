@@ -5,6 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
+import { lightingDebugEnabled } from '../../runtimeDebug';
 import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
@@ -175,11 +176,21 @@ const GLARE_ADAPT_IN_LAMBDA = 3.4;
 const GLARE_ADAPT_OUT_LAMBDA = 2.2;
 
 const SHADOW_QUALITY = {
+  low: {
+    mapSize: 1024,
+    extentScale: 1.08,
+    radiusBoost: 0,
+    anchorMinTexelSize: 0.055,
+    activeRefreshInterval: 1 / 24,
+    idleRefreshInterval: 1 / 12,
+  },
   standard: {
     mapSize: 2048,
     extentScale: 1,
     radiusBoost: 0,
     anchorMinTexelSize: 0.035,
+    activeRefreshInterval: 1 / 40,
+    idleRefreshInterval: 1 / 20,
   },
   high: {
     mapSize: 4096,
@@ -188,6 +199,8 @@ const SHADOW_QUALITY = {
     extentScale: 0.82,
     radiusBoost: 0.28,
     anchorMinTexelSize: 0.012,
+    activeRefreshInterval: 1 / 60,
+    idleRefreshInterval: 1 / 30,
   },
 };
 const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.high;
@@ -195,7 +208,7 @@ const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.high;
 function resolveShadowQuality(mode, gl) {
   const requested = SHADOW_QUALITY[String(mode || '').toLowerCase()] || DEFAULT_SHADOW_QUALITY;
   const maxTextureSize = gl?.capabilities?.maxTextureSize || requested.mapSize;
-  const mapSize = maxTextureSize >= requested.mapSize ? requested.mapSize : 2048;
+  const mapSize = Math.min(requested.mapSize, maxTextureSize);
   return { ...requested, mapSize };
 }
 
@@ -1250,8 +1263,7 @@ const SHADOW_MAP_SIZE = DEFAULT_SHADOW_QUALITY.mapSize;
 // Re-rendering every shadow caster on every frame is wasteful, but Darwin's
 // animated silhouette looks choppy at the old fixed 24 Hz cadence. Refresh
 // faster only while the player/shadow anchor is moving, then settle back.
-const SHADOW_ACTIVE_REFRESH_INTERVAL = 1 / 60;
-const SHADOW_IDLE_REFRESH_INTERVAL = 1 / 30;
+const SHADOW_ACTIVE_REFRESH_INTERVAL = DEFAULT_SHADOW_QUALITY.activeRefreshInterval;
 const SHADOW_EXTENT_UPDATE_EPSILON = 0.25;
 const SHADOW_TARGET_MOVE_EPSILON_SQ = 0.00025;
 const SHADOW_PLAYER_MOVE_EPSILON_SQ = 0.0009;
@@ -1280,7 +1292,7 @@ function computeDarwinShadowCoverage(lightDirection, daylight, golden) {
   };
 }
 
-export function SkyController({ stars = true, tuning = null, solarEffects = null, shadowQuality = 'high' }) {
+export function SkyController({ stars = true, tuning = null, solarEffects = null, shadowQuality = 'high', lighting = true, celestialBodies = true }) {
   const { scene, gl, camera } = useThree();
   const shadowQualityConfig = useMemo(() => resolveShadowQuality(shadowQuality, gl), [shadowQuality, gl]);
   // Defaults tuned for NeutralToneMapping. Drei/Three Sky is HDR, so it still
@@ -1298,6 +1310,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const solarHaloEnabled = solarEffects?.halo !== false;
   const solarSceneFlaresEnabled = solarEffects?.sceneFlares !== false;
   const solarSunFacingGradeEnabled = solarEffects?.sunFacingGrade !== false;
+  const solarScreenGlareEnabled = solarEffects?.screenGlare !== false;
+  const debugEnabled = useRef(lightingDebugEnabled());
   const groupRef = useRef(null);
   const skyRef = useRef(null);
   const keyLightRef = useRef(null);
@@ -1593,7 +1607,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         * (1 - smoothstep(0.16, 0.42, _moon.y))
         * (1 - overcast * 0.62)
         * (1 - weatherEnv.rainIntensity * 0.66);
-      moonRef.current.visible = moonVis > 0.02;
+      moonRef.current.visible = celestialBodies && moonVis > 0.02;
       const moonScale = 7.15 + moonIllumination * 0.55 + moonHorizon * 1.9;
       moonRef.current.scale.set(moonScale, moonScale * (1 - moonHorizon * 0.04), 1);
       _color.set('#dfe8f4').lerp(_moonHorizonWarm, moonHorizon * 0.46).lerp(_white, moonIllumination * 0.06);
@@ -1614,7 +1628,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         moonVeilRef.current.position.copy(moonRef.current.position);
         moonVeilRef.current.quaternion.copy(camera.quaternion);
         moonVeilRef.current.scale.set(18 + moonHorizon * 8, 10 + moonHorizon * 4, 1);
-        moonVeilRef.current.visible = moonHorizon > 0.02;
+        moonVeilRef.current.visible = celestialBodies && moonHorizon > 0.02;
         const mu = moonVeilMaterial.uniforms;
         mu.uTime.value += delta * 0.78;
         mu.uStrength.value = 0;
@@ -1630,7 +1644,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         moonHaloRef.current.quaternion.copy(camera.quaternion);
         moonHaloRef.current.scale.setScalar(32 + humidity * 18 + thinCloud * 8 + moonHorizon * 10);
         const haloOpacity = moonVis * (0.35 + moonIllumination * 0.65) * (humidity * 0.62 + thinCloud * 0.24 + moonHorizon * 0.18) * (1 - weatherEnv.rainIntensity * 0.85);
-        moonHaloRef.current.visible = haloOpacity > 0.015;
+        moonHaloRef.current.visible = celestialBodies && haloOpacity > 0.015;
         moonHaloRef.current.material.opacity = haloOpacity;
         moonHaloRef.current.material.color.set(overcast > 0.45 ? '#d8e8ff' : (moonHorizon > 0.1 ? '#ffe0aa' : '#cdd8f0'));
       }
@@ -1651,8 +1665,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       sunRef.current.position.copy(_sun).multiplyScalar(BODY_DISTANCE);
       sunRef.current.quaternion.copy(camera.quaternion);
       sunRef.current.getWorldPosition(_sunWorld);
-      sunRef.current.visible = sunUp > 0.01;
-      const sunCanEmitOptics = sunUp > 0.01;
+      sunRef.current.visible = celestialBodies && sunUp > 0.01;
+      const sunCanEmitOptics = celestialBodies && sunUp > 0.01;
       sunRef.current.scale.set(4.45 * swell, 4.45 * swell * (1 - horizonSun * 0.08), 1);
       sunRef.current.material.color.copy(_sunColor);
       const thinSunCloud = smoothstep(0.08, 0.62, overcast) * (1 - smoothstep(0.72, 1.0, overcast));
@@ -1827,17 +1841,19 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         delta
       );
       glareStrengthRef.current = glareStrength;
-      store.setSolarGlare?.({
-        x: _screenSun.x * 0.5 + 0.5,
-        y: -_screenSun.y * 0.5 + 0.5,
-        strength: glareStrength,
-        rawStrength: rawGlareStrength,
-        directness: headOn,
-        warmth: THREE.MathUtils.clamp(0.34 + golden * 0.64 + headOn * 0.08, 0, 1),
-        viewportPresence,
-        centerResponse,
-        visible: glareStrength > 0.006,
-      });
+      if (solarScreenGlareEnabled) {
+        store.setSolarGlare?.({
+          x: _screenSun.x * 0.5 + 0.5,
+          y: -_screenSun.y * 0.5 + 0.5,
+          strength: glareStrength,
+          rawStrength: rawGlareStrength,
+          directness: headOn,
+          warmth: THREE.MathUtils.clamp(0.34 + golden * 0.64 + headOn * 0.08, 0, 1),
+          viewportPresence,
+          centerResponse,
+          visible: glareStrength > 0.006,
+        });
+      }
     }
 
     // --- lighting rig --------------------------------------------------------
@@ -2004,13 +2020,13 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     // shadow-caster render pass is throttled.
     shadowClock.current += delta;
     const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved)
-      ? SHADOW_ACTIVE_REFRESH_INTERVAL
-      : SHADOW_IDLE_REFRESH_INTERVAL;
-    if (shadowProjectionChanged || shadowTargetMoved || shadowClock.current >= shadowRefreshInterval) {
+      ? shadowQualityConfig.activeRefreshInterval
+      : shadowQualityConfig.idleRefreshInterval;
+    if (shadowProjectionChanged || shadowClock.current >= shadowRefreshInterval) {
       shadowClock.current = 0;
       gl.shadowMap.needsUpdate = true;
     }
-    if (typeof window !== 'undefined') {
+    if (debugEnabled.current && typeof window !== 'undefined') {
       window.__darwinLightingDebug = {
         ...(window.__darwinLightingDebug || {}),
         timeOfDay: Number(hourRef.current.toFixed(3)),
@@ -2021,7 +2037,9 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         mist: Number(weatherEnv.mistAmount.toFixed(3)),
         rain: Number(weatherEnv.rainIntensity.toFixed(3)),
         underwater: Number(underwaterAmount.toFixed(3)),
-        shadowQuality: shadowQualityConfig.mapSize >= 4096 ? 'high' : 'standard',
+        shadowQuality: shadowQualityConfig.mapSize >= 4096
+          ? 'high'
+          : shadowQualityConfig.mapSize >= 2048 ? 'standard' : 'low',
         shadowMapSize: shadowQualityConfig.mapSize,
         keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
         hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),
@@ -2047,24 +2065,28 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
 
   return (
     <>
-      <hemisphereLight ref={hemiRef} args={['#bfe3ff', '#9a7a52', 1.0]} />
-      <ambientLight ref={ambientRef} intensity={0.4} />
-      <directionalLight
-        ref={keyLightRef}
-        position={[0, 100, 0]}
-        intensity={1.4}
-        castShadow
-        shadow-mapSize={[shadowQualityConfig.mapSize, shadowQualityConfig.mapSize]}
-        shadow-bias={-0.00012}
-        shadow-normalBias={0.02}
-        shadow-camera-near={40}
-        shadow-camera-far={170}
-        shadow-camera-left={-18}
-        shadow-camera-right={18}
-        shadow-camera-top={18}
-        shadow-camera-bottom={-18}
-      />
-      <primitive object={shadowTarget} />
+      {lighting && (
+        <>
+          <hemisphereLight ref={hemiRef} args={['#bfe3ff', '#9a7a52', 1.0]} />
+          <ambientLight ref={ambientRef} intensity={0.4} />
+          <directionalLight
+            ref={keyLightRef}
+            position={[0, 100, 0]}
+            intensity={1.4}
+            castShadow
+            shadow-mapSize={[shadowQualityConfig.mapSize, shadowQualityConfig.mapSize]}
+            shadow-bias={-0.00012}
+            shadow-normalBias={0.02}
+            shadow-camera-near={40}
+            shadow-camera-far={170}
+            shadow-camera-left={-18}
+            shadow-camera-right={18}
+            shadow-camera-top={18}
+            shadow-camera-bottom={-18}
+          />
+          <primitive object={shadowTarget} />
+        </>
+      )}
       <group ref={groupRef} userData={{
         renderSource: 'sky-controller',
         renderLabel: 'Sky controller visuals',

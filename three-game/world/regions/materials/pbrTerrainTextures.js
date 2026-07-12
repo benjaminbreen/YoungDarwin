@@ -21,9 +21,9 @@ export const FLOREANA_PBR_TEXTURES = {
   },
   sandyBeach: {
     albedo: `${FLOREANA_PBR_BASE}/sandy-beach_albedo.png`,
-    normal: null,
-    roughness: null,
-    height: null,
+    normal: `${FLOREANA_PBR_BASE}/sandy-beach_normal.png`,
+    roughness: `${FLOREANA_PBR_BASE}/sandy-beach_roughness.png`,
+    height: `${FLOREANA_PBR_BASE}/sandy-beach_height.png`,
     scale: 0.23,
     normalStrength: 0.18,
     roughnessMix: 0.72,
@@ -36,7 +36,7 @@ export const FLOREANA_PBR_TEXTURES = {
   },
   whiteSand: {
     albedo: `${FLOREANA_PBR_BASE}/white-sand_albedo.png`,
-    normal: null,
+    normal: `${FLOREANA_PBR_BASE}/white-sand_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/white-sand_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/white-sand_height.png`,
     scale: 0.22,
@@ -51,9 +51,9 @@ export const FLOREANA_PBR_TEXTURES = {
   },
   whiterSand: {
     albedo: `${FLOREANA_PBR_BASE}/whiter-sand_albedo.png`,
-    normal: null,
-    roughness: null,
-    height: null,
+    normal: `${FLOREANA_PBR_BASE}/whiter-sand_normal.png`,
+    roughness: `${FLOREANA_PBR_BASE}/whiter-sand_roughness.png`,
+    height: `${FLOREANA_PBR_BASE}/whiter-sand_height.png`,
     scale: 0.2,
     normalStrength: 0.18,
     roughnessMix: 0.76,
@@ -66,7 +66,7 @@ export const FLOREANA_PBR_TEXTURES = {
   },
   normalSand: {
     albedo: `${FLOREANA_PBR_BASE}/normal-sand_albedo.png`,
-    normal: null,
+    normal: `${FLOREANA_PBR_BASE}/normal-sand_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/normal-sand_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/normal-sand_height.png`,
     scale: 0.22,

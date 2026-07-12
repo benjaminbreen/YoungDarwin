@@ -189,7 +189,9 @@ export function PhysicsProp({ prop, onBreak }) {
     [prop.id, prop.type],
   );
   const spawnY = useMemo(
-    () => movementTerrainHeight(prop.x, prop.z, currentZoneId) + (prop.restOffset * propScale) + 0.05,
+    () => (Number.isFinite(prop.y)
+      ? prop.y
+      : movementTerrainHeight(prop.x, prop.z, currentZoneId) + (prop.restOffset * propScale) + 0.05),
     [currentZoneId, prop, propScale],
   );
   const isPrompted = carryPrompt?.id === prop.id;

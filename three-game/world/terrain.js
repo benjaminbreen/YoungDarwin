@@ -258,15 +258,21 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
   const region = getRegionMap(regionId);
   const definition = authoredRegion(regionId);
   const defaultSpawn = definition?.terrain?.defaultSpawn;
-  const start = Array.isArray(region.playerStart)
-    ? region.playerStart
-    : Array.isArray(defaultSpawn)
+  const entrySpawn = entryEdge ? definition?.terrain?.entrySpawns?.[entryEdge] : null;
+  const start = Array.isArray(entrySpawn)
+    ? entrySpawn
+    : Array.isArray(region.playerStart)
+      ? region.playerStart
+      : Array.isArray(defaultSpawn)
       ? defaultSpawn
       : null;
   const margin = 5.2;
   let x = Number.isFinite(start?.[0]) ? start[0] : 0;
   let z = Number.isFinite(start?.[2]) ? start[2] : 0;
-  if (entryEdge === 'east') x = config.width * 0.5 - margin;
+  if (Array.isArray(entrySpawn)) {
+    // Authored route entry: useful for beaches/coves where the playable seam
+    // should be a natural landing point instead of the rectangular map edge.
+  } else if (entryEdge === 'east') x = config.width * 0.5 - margin;
   else if (entryEdge === 'west') x = -config.width * 0.5 + margin;
   else if (entryEdge === 'south') z = config.depth * 0.5 - margin;
   else if (entryEdge === 'north') z = -config.depth * 0.5 + margin;
@@ -294,4 +300,16 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
   const clamped = clampToWalkable(new THREE.Vector3(x, 0, z), null, regionId);
   clamped.y = movementTerrainHeight(clamped.x, clamped.z, regionId) + 0.04;
   return clamped;
+}
+
+export function regionSpawnFacing(regionId, entryId = null) {
+  const definition = authoredRegion(regionId);
+  const authored = entryId ? definition?.terrain?.entryFacings?.[entryId] : null;
+  const source = Array.isArray(authored) ? authored : definition?.terrain?.defaultFacing;
+  const facing = Array.isArray(source)
+    ? new THREE.Vector3(source[0] || 0, source[1] || 0, source[2] ?? -1)
+    : new THREE.Vector3(0, 0, -1);
+  facing.y = 0;
+  if (facing.lengthSq() < 0.0001) facing.set(0, 0, -1);
+  return facing.normalize();
 }

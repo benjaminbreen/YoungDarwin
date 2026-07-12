@@ -2139,24 +2139,62 @@ export const locations = [
 },
 
 {
-  id: 'hms_beagle_interior',
-  name: "HMS Beagle (Below Decks)",
-  description: "Captain FitzRoy's survey vessel, cramped yet meticulously maintained.",
+  id: 'LAWSON_HOUSE',
+  name: "Nicholas Lawson's House",
+  description: "The Vice-Governor's damp highland residence joins hospitality, private life, official business, and the colony store beneath one low roof.",
+  x: 906,
+  y: 100,
+  color: '#9b7b4b',
+  type: 'houseInterior',
+  validMoves: [],
+  playerStart: null,
+  specimens: [],
+  npcs: [],
+  boundaries: {},
+  discoveries: [
+    'Moisture curls the edges of papers and blooms orange around the iron nails.',
+    "Lawson's dining table is better supplied than the settlement's rough buildings suggest."
+  ],
+  notableFeatures: [
+    'The entrance and dining room mixes imported objects with locally repaired furniture.',
+    'Closed doors lead toward the office, private quarters, and colony store.',
+    'Cool green light from the garden window makes the warm oil lamps feel unusually intimate.'
+  ],
+  narration: {
+    weather: 'cloudy',
+    sounds: ['rain tapping the roof boards', 'a chair creaking softly', 'distant hoes in wet earth'],
+    loadingNote: "You step into Lawson's house, leaving the cool highland wind at the door.",
+    educationalNote: 'The government house joined domestic hospitality to the records, stores, and unequal obligations through which the colony was administered.'
+  }
+},
+
+{
+  id: 'BEAGLE_CABIN',
+  name: 'HMS Beagle Aft Cabins',
+  description: "The Beagle's enlarged playable aft interior joins FitzRoy's cabin to Darwin's drawing cabin and the shipboard library.",
   x: 997,
   y: 999,
   color: '#8fbc8f',
-  type: 'interior',
+  type: 'shipInterior',
   validMoves: [],
-  specimens: ["ship_logs"],
-  npcs: ['fitzroy'],
+  playerStart: null,
+  specimens: [],
+  npcs: [],
   boundaries: {},
   discoveries: [
-    "Barrels of ship's biscuits, crates of dried goods, and FitzRoy’s impeccable navigational charts."
+    "FitzRoy's charts and chronometer cases occupy the captain's working cabin.",
+    "The adjoining drawing cabin contains Darwin's microscope, hammock, worktable, and the Beagle library."
   ],
   notableFeatures: [
-    "The faint smell of brine and tar permeates the narrow corridors.",
-    "A hammock strung up next to a microscope stand for your many specimens."
-  ]
+    'Stern windows look back across the anchorage beneath the overhanging poop deck.',
+    'Bookcases are fitted tightly against the hull beside the large drawing table.',
+    "A built-in berth, chart desk, and bank of chronometer boxes define FitzRoy's side of the interior."
+  ],
+  narration: {
+    sounds: ['muffled water against the stern', 'timbers working in the swell', 'a chronometer ticking'],
+    loadingNote: 'You duck beneath the poop bulkhead and enter the Beagle’s aft cabins.',
+    educationalNote: 'Shipboard observation continued through reading, comparison, labeling, and the difficult work of turning field encounters into durable records.',
+  },
 },
 
 ]; // end of locations array

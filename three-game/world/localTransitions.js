@@ -1,4 +1,13 @@
 import { ROCKY_CLEARING, ROCKY_CLEARING_CAVE } from './regions/rockyClearing/path';
+import { POOP_BREAK } from './regions/beagleDeck/hull';
+import {
+  BEAGLE_CABIN_ZONE_ID,
+  LAWSON_HOUSE_ZONE_ID,
+  getInteriorTransitions,
+} from '../interiors/interiorRegistry';
+import { getGovernorHouseFrontEntry } from './penalColonyLayout';
+
+const governorHouseEntry = getGovernorHouseFrontEntry();
 
 const LOCAL_TRANSITIONS = {
   [ROCKY_CLEARING]: [
@@ -16,6 +25,38 @@ const LOCAL_TRANSITIONS = {
       routeLabel: 'Cave mouth',
     },
   ],
+  BEAGLE: [
+    {
+      id: 'beagle-deck-to-aft-cabins',
+      zoneId: 'BEAGLE',
+      toRegionId: BEAGLE_CABIN_ZONE_ID,
+      label: 'Open the aft-cabin doors',
+      description: 'The paired doors beneath the raised poop deck lead into the Beagle’s working cabins.',
+      entryEdge: 'from-deck',
+      position: { x: POOP_BREAK + 1.35, z: 0 },
+      radius: 4.8,
+      closeRadius: 2.5,
+      facing: { x: -1, z: 0 },
+      routeLabel: 'Poop cabin doors',
+    },
+  ],
+  PENAL_COLONY: [
+    {
+      id: 'penal-colony-to-lawson-house',
+      zoneId: 'PENAL_COLONY',
+      toRegionId: LAWSON_HOUSE_ZONE_ID,
+      label: "Enter Lawson's house",
+      description: 'The Vice-Governor receives visitors through the veranda door.',
+      entryEdge: 'from-yard',
+      position: governorHouseEntry.position,
+      radius: 3.2,
+      closeRadius: 1.8,
+      facing: governorHouseEntry.facing,
+      routeLabel: "Lawson's front door",
+    },
+  ],
+  [BEAGLE_CABIN_ZONE_ID]: getInteriorTransitions(BEAGLE_CABIN_ZONE_ID),
+  [LAWSON_HOUSE_ZONE_ID]: getInteriorTransitions(LAWSON_HOUSE_ZONE_ID),
 };
 
 export function getLocalTransitions(zoneId) {

@@ -3,8 +3,11 @@
 // mount from the movement terrain. Add new zones/props here.
 
 import { PROP_TYPES } from './propTypes';
+import { BEAGLE_CABIN_ZONE_ID, LAWSON_HOUSE_ZONE_ID, getInteriorPropSpawns } from '../../interiors/interiorRegistry';
 
 export const ZONE_PROPS = {
+  [BEAGLE_CABIN_ZONE_ID]: getInteriorPropSpawns(BEAGLE_CABIN_ZONE_ID),
+  [LAWSON_HOUSE_ZONE_ID]: getInteriorPropSpawns(LAWSON_HOUSE_ZONE_ID),
   POST_OFFICE_BAY: [
     {
       id: 'post-office-bay-large-barrel',

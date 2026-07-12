@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversation Modal A2: Shipboard Correspondence</title>
+  <link rel="stylesheet" href="./conversation-modal.css">
+  <style>
+    :root { --folio-paper: #d9cfb6; --folio-ink: #272316; --sea-glass: #7fa39d; }
+    .folio {
+      position: fixed;
+      right: clamp(18px, 4vw, 70px);
+      bottom: clamp(18px, 4vh, 54px);
+      left: clamp(18px, 4vw, 70px);
+      display: grid;
+      grid-template-columns: 172px minmax(0, 1fr);
+      min-height: min(424px, 48vh);
+      max-width: 1260px;
+      margin: auto;
+      border: 1px solid rgba(201,163,95,0.48);
+      border-radius: 4px;
+      background: #111a29;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.7), inset 0 0 0 7px rgba(4,8,14,0.42), inset 0 1px 0 rgba(234,223,199,0.11);
+    }
+    .folio::before {
+      content: "";
+      position: absolute;
+      top: -25px;
+      right: 34px;
+      width: 260px;
+      height: 24px;
+      border: 1px solid rgba(201,163,95,0.46);
+      border-bottom: 0;
+      border-radius: 4px 4px 0 0;
+      background: #141e2c;
+    }
+    .folio::after { content: ""; position: absolute; inset: 10px; border: 1px solid rgba(201,163,95,0.14); pointer-events: none; }
+    .folio-aside {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 16px 17px 23px;
+      border-right: 1px solid rgba(201,163,95,0.22);
+      background: #172534;
+      text-align: center;
+    }
+    .folio-aside::before {
+      content: "";
+      position: absolute;
+      top: 24px;
+      left: 50%;
+      width: 86px;
+      height: 86px;
+      transform: translateX(-50%);
+      border: 1px solid rgba(127,163,157,0.8);
+      border-radius: 50%;
+      box-shadow: 0 0 0 7px rgba(127,163,157,0.08), 0 0 28px rgba(127,163,157,0.12);
+    }
+    .folio-aside .portrait { position: absolute; top: 31px; width: 72px; height: 72px; border-color: rgba(227,197,133,0.55); border-radius: 50%; }
+    .folio-aside h1 { margin: 0; color: var(--parchment); font-size: 21px; font-weight: 600; line-height: 0.96; }
+    .folio-aside p { margin: 6px 0 0; color: var(--sea-glass); font-family: var(--lora); font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; }
+    .folio-aside .location { margin-top: 19px; color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.09em; line-height: 1.5; text-transform: uppercase; }
+    .folio-body { position: relative; z-index: 1; display: grid; grid-template-rows: auto 1fr auto; min-width: 0; padding: 24px 32px 19px; }
+    .folio-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--gold); font-family: var(--lora); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .folio-meta .private { color: var(--sea-glass); }
+    .folio-meta button { padding: 0; border: 0; background: transparent; color: var(--faded); font-family: var(--lora); font-size: 9px; letter-spacing: 0.11em; text-transform: uppercase; }
+    .folio-meta button:hover, .folio-meta button:focus-visible { color: var(--gold-light); outline: none; }
+    .message-sheet {
+      align-self: center;
+      max-width: 820px;
+      padding: 17px 21px 19px;
+      border-left: 3px solid var(--sea-glass);
+      background: var(--folio-paper);
+      box-shadow: 10px 10px 0 rgba(0,0,0,0.13);
+      color: var(--folio-ink);
+    }
+    .message-sheet .scene-detail { margin: 0 0 6px; color: #625b49; font-family: var(--lora); font-size: 11px; font-style: italic; line-height: 1.35; }
+    .message-sheet blockquote { margin: 0; font-size: clamp(21px, 2.2vw, 29px); font-weight: 500; line-height: 1.13; }
+    .folio-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin-top: 21px; }
+    .folio-actions .choice { position: relative; grid-template-columns: 1fr; min-height: 63px; padding: 8px 2px 7px 14px; border: 0; border-top: 1px solid rgba(201,163,95,0.42); border-radius: 0; background: transparent; font-size: 16px; }
+    .folio-actions .choice::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; background: transparent; }
+    .folio-actions .choice:hover, .folio-actions .choice:focus-visible, .folio-actions .choice.selected { border-top-color: var(--gold-light); background: transparent; box-shadow: none; }
+    .folio-actions .choice:hover::before, .folio-actions .choice:focus-visible::before, .folio-actions .choice.selected::before { background: var(--sea-glass); }
+    .folio-actions .choice-number { display: block; margin-bottom: 5px; color: var(--gold); }
+    .folio-actions .choice-copy { display: block; }
+    .folio-footer { position: absolute; right: 34px; bottom: -22px; color: rgba(234,223,199,0.64); font-family: var(--lora); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+    @media (max-width: 780px) {
+      .folio { grid-template-columns: 1fr; min-height: 0; }
+      .folio-aside { display: grid; grid-template-columns: 56px 1fr; column-gap: 12px; justify-content: start; align-items: center; min-height: 84px; padding: 13px 20px; border-right: 0; border-bottom: 1px solid rgba(201,163,95,0.22); text-align: left; }
+      .folio-aside::before { display: none; }
+      .folio-aside .portrait { position: static; grid-row: span 2; width: 54px; height: 54px; }
+      .folio-aside h1 { align-self: end; font-size: 17px; }
+      .folio-aside p { margin: 0; align-self: start; }
+      .folio-aside .location { display: none; }
+      .folio-body { padding: 17px 20px; }
+      .folio-actions { gap: 8px; }
+    }
+    @media (max-width: 560px) {
+      .folio { right: 10px; bottom: 14px; left: 10px; }
+      .folio::before { display: none; }
+      .folio-body { padding: 15px; }
+      .folio-meta { font-size: 9px; }
+      .message-sheet { margin-top: 13px; padding: 13px; }
+      .folio-actions { grid-template-columns: 1fr; margin-top: 14px; }
+      .folio-actions .choice { min-height: 39px; }
+      .folio-actions .choice-number { display: inline; margin: 0 8px 0 0; }
+      .folio-actions .choice-copy { display: inline; }
+      .folio-footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" aria-hidden="true"></div>
+  <div class="veil" aria-hidden="true"></div>
+  <div class="screen-note"><strong>HMS Beagle Aft Cabins</strong> &nbsp;•&nbsp; correspondence folio</div>
+
+  <main class="folio" aria-label="Conversation with Syms Covington">
+    <aside class="folio-aside">
+      <div class="portrait"><img src="../public/portraits/syms_covington.jpg" alt="Syms Covington"></div>
+      <h1>Syms<br>Covington</h1>
+      <p>Assistant to Mr. Darwin</p>
+      <div class="location">Aboard the Beagle<br>Off Floreana</div>
+    </aside>
+    <section class="folio-body">
+      <header class="folio-meta">
+        <span><span class="private">Private correspondence</span> &nbsp; / &nbsp; 18 September 1835</span>
+        <button type="button">Dismiss <span class="key">Esc</span></button>
+      </header>
+      <div class="message-sheet">
+        <p class="scene-detail">Syms has unpacked the specimen case and is waiting for your instruction.</p>
+        <blockquote>“The gull is tagged, sir. Shall I put it in the case, or keep it out for your notes?”</blockquote>
+      </div>
+      <div class="folio-actions" aria-label="Conversation replies">
+        <button class="choice selected" type="button"><span class="choice-number">01</span><span class="choice-copy">Have it labelled and packed.</span></button>
+        <button class="choice" type="button"><span class="choice-number">02</span><span class="choice-copy">Leave it out. I want another look.</span></button>
+        <button class="choice" type="button"><span class="choice-number">03</span><span class="choice-copy">Ask what Syms observed before it fell.</span></button>
+      </div>
+    </section>
+    <div class="folio-footer"><span class="key">1–3</span> reply &nbsp; <span class="key">Enter</span> speak</div>
+  </main>
+  <script>
+    const choices = [...document.querySelectorAll('.choice')];
+    choices.forEach(choice => choice.addEventListener('click', () => {
+      choices.forEach(item => item.classList.remove('selected'));
+      choice.classList.add('selected');
+    }));
+  </script>
+</body>
+</html>

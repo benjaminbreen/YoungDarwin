@@ -46,12 +46,16 @@ const REGION_SIZE_BY_TYPE = {
   cave: [64, 58],
   office: [38, 30],
   interior: [38, 30],
+  shipInterior: [22, 25],
+  houseInterior: [21, 17],
   governorslibrary: [38, 30],
   governorshouse: [38, 30],
 };
 
 const AUTHORED_REGION_TERRAIN = {
   BEAGLE: { preset: 'hms-beagle-deck', segments: 300 },
+  BEAGLE_CABIN: { preset: 'hms-beagle-aft-cabins', segments: 96 },
+  LAWSON_HOUSE: { preset: 'lawson-house-interior', segments: 72 },
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
@@ -265,12 +269,13 @@ function toRegionMap(cell) {
   const terrain = regionDimensions(cell);
   const authoredTerrain = AUTHORED_REGION_TERRAIN[cell.id];
   const authoredWeather = cell.narration?.weather || null;
+  const aboardBeagle = cell.type === 'beagle' || cell.type === 'shipInterior';
   return {
     id: cell.id,
     name: cell.name,
     shortName: cell.name,
-    island: cell.type === 'beagle' ? 'HMS Beagle' : 'Floreana Island',
-    historicalName: cell.type === 'beagle' ? 'HMS Beagle' : 'Charles Island',
+    island: aboardBeagle ? 'HMS Beagle' : 'Floreana Island',
+    historicalName: aboardBeagle ? 'HMS Beagle' : 'Charles Island',
     subtitle: `${cell.name} | Floreana regional map`,
     description: cell.description,
     grid: { x: cell.x, y: cell.y },
@@ -291,7 +296,7 @@ function toRegionMap(cell) {
     narration: {
       weather: authoredWeather || (cell.type === 'forest' || cell.type === 'highland' ? 'misty' : 'sunny'),
       weatherAuthored: Boolean(authoredWeather),
-      sounds: cell.type === 'beagle'
+      sounds: aboardBeagle
         ? ['creaking timber', 'rigging overhead', 'shipboard footsteps']
         : ['wind over lava', 'distant surf', 'field bag buckles'],
       loadingNote: cell.description,

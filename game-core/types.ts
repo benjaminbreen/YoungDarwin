@@ -149,8 +149,13 @@ export type JournalEntry = {
   createdAt: string;
   day?: number;
   timeOfDay?: string;
-  kind?: 'specimen' | 'location' | 'note';
+  kind?: 'specimen' | 'location' | 'note' | 'reading';
   title?: string;
+  source?: {
+    type: 'book';
+    bookId: string;
+    page: number;
+  };
 };
 
 export type ExpeditionState = {
@@ -169,6 +174,9 @@ export type ExpeditionState = {
   collectedSpecimenActorIds: string[];
   documentedSpecimenIds: SpecimenId[];
   examinedTypeIds: string[];
+  consultedBookIds: string[];
+  bookLastPages: Record<string, number>;
   visitedZoneIds: ZoneId[];
   visitedLocalCellIds: LocalCellId[];
+  npcEncounterState: Record<string, { trust: number; flags: string[] }>;
 };
