@@ -12,6 +12,7 @@ import {
   getObstacleSupportHeight,
   getRuntimeObstacles,
   obstacleBaseY,
+  queryObstacleBounds,
   resolveObstacleCollision,
 } from '../world/obstacles';
 
@@ -103,7 +104,14 @@ function cameraDistanceLimit(origin, target, obstacles, options = {}) {
   if (requested < 0.001) return requested;
   const direction = { x: dx / requested, y: dy / requested, z: dz / requested };
   let hitDistance = requested;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstacleBounds(
+    obstacles,
+    Math.min(origin.x, target.x),
+    Math.min(origin.z, target.z),
+    Math.max(origin.x, target.x),
+    Math.max(origin.z, target.z),
+  );
+  for (const obstacle of candidates) {
     for (const shape of obstacle.shapes || []) {
       if (shape.type !== 'box') continue;
       const distance = boxRayDistance(origin, direction, requested, obstacle, shape);
@@ -116,8 +124,9 @@ function cameraDistanceLimit(origin, target, obstacles, options = {}) {
   return Math.max(minimum, hitDistance - padding);
 }
 
-export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}) {
+export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}, options = {}) {
   const obstacles = getRuntimeObstacles(zoneId, obstacleOffsets);
+  const diagnostics = options.diagnostics === true;
   const frameCache = {
     terrain: new Map(),
     ground: new Map(),
@@ -151,7 +160,10 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     const terrain = getTerrainSample(position.x, position.z);
     const visualTerrainY = terrain.visualY;
     const terrainGroundY = terrain.movementY;
-    const physicsGroundY = rapierGroundY(rapierContext, position);
+    // The analytic movement height is authoritative. Rapier ground rays exist
+    // only to compare collider height in the physics diagnostics panel, so do
+    // not pay for several world queries per frame during normal gameplay.
+    const physicsGroundY = diagnostics ? rapierGroundY(rapierContext, position) : null;
     const obstacleGroundY = ignoreObstacles
       ? null
       : getObstacleSupportHeight(position.x, position.z, position.y, supportRadius, obstacles);

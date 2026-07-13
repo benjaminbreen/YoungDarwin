@@ -15,8 +15,7 @@ For direct questions, prioritize useful information over atmosphere. For actions
 You may gracefully refuse impossible, anachronistic, unsafe, or out-of-scope actions in-world. Do this with charm, not scolding.
 Do not speak direct dialogue for NPCs. If the player tries to converse with a person, say that a direct conversation would require engaging them separately with E when nearby.
 Do not claim Darwin understands natural selection in 1835, and do not mention his later theory by name.
-Darwin's stray thoughts, when useful, must be present tense, impressionistic, and brief. Do not preface them with "he thinks" or name Darwin. Prefer silence unless the scene strongly suggests one.
-Return a field note only when the action is actually observation, documentation, surveying, sampling, collection, or another fieldwork act. For jokes, yelling, identity questions, failed actions, or casual remarks, leave fieldNote empty.`;
+Darwin's stray thoughts, when useful, must be present tense, impressionistic, and brief. Do not preface them with "he thinks" or name Darwin. Prefer silence unless the scene strongly suggests one.`;
 
 const IDENTITY_RESPONSES = [
   'Who do you think?',
@@ -111,7 +110,6 @@ function parseNarratorJSON(text) {
 
 function normalizeNarratorPayload(payload, fallbackText = '') {
   const normalized = payload && typeof payload === 'object' ? payload : {};
-  const fieldNote = safeString(normalized.fieldNote);
   const fallbackNarration = secondPersonNarration(
     safeString(fallbackText, 'The action enters the field log, though the island supplies no grand consequence.'),
   );
@@ -120,8 +118,6 @@ function normalizeNarratorPayload(payload, fallbackText = '') {
       secondPersonNarration(normalized.narration),
       fallbackNarration,
     ),
-    educationalNote: fieldNote,
-    fieldNote,
     darwinThought: safeString(normalized.darwinThought),
     actionDisposition: safeString(normalized.actionDisposition, 'observed'),
     targetType: safeString(normalized.targetType, 'unknown'),
@@ -172,8 +168,6 @@ function identityIndex(recentNarration = []) {
 function narratorIdentityPayload({ recentNarration }) {
   return {
     narration: IDENTITY_RESPONSES[identityIndex(recentNarration)],
-    educationalNote: '',
-    fieldNote: '',
     darwinThought: '',
     actionDisposition: 'observed',
     targetType: 'self',
@@ -201,8 +195,6 @@ function placePayload({ location, locationContext }) {
   ].filter(Boolean);
   return {
     narration: parts.join(' '),
-    educationalNote: '',
-    fieldNote: '',
     darwinThought: '',
     actionDisposition: 'observed',
     targetType: 'setting',
@@ -377,7 +369,6 @@ Return JSON only with:
   "healthDelta": 0 or -3,
   "actionDisposition": "observed | impossible | unsafe | needs_modal",
   "targetType": "self",
-  "fieldNote": "",
   "darwinThought": "",
   "sounds": ["optional short sound cue"]
 }`;
@@ -450,7 +441,6 @@ Return JSON only with:
   "healthDelta": 0 or -3,
   "actionDisposition": "observed | impossible | unsafe | needs_modal",
   "targetType": "${config.targetType}",
-  "fieldNote": "",
   "darwinThought": "",
   "sounds": ["optional short sound cue"]
 }`;
@@ -519,7 +509,6 @@ Journal context: ${safeString(journalContext, 'none')}
 Return JSON only with:
 {
   "narration": "1-3 concise sentences responding to the typed action",
-  "fieldNote": "optional 1 sentence field-method or historical note, or empty string",
   "darwinThought": "optional brief present-tense impressionistic thought, or empty string",
   "actionDisposition": "observed | impossible | needs_modal | unsafe | ignored",
   "targetType": "specimen | npc | setting | self | tool | none",
@@ -557,8 +546,6 @@ Return JSON only with:
     console.error('three-narrate error:', error);
     return res.status(200).json({
       narration: 'The narrator is momentarily unavailable; you are left with the more severe but reliable prose of the island itself.',
-      educationalNote: '',
-      fieldNote: '',
       darwinThought: '',
       actionDisposition: 'unavailable',
       targetType: 'none',

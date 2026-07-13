@@ -3,7 +3,13 @@
 import React, { useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getRegionTerrainConfig, terrainBiomeAt, terrainColor, terrainHeight, terrainSurfaceNoise } from '../../world/terrain';
+import { getRegionTerrainConfig, terrainColor, terrainHeight } from '../../world/terrain';
+import {
+  getCachedTerrainGeometry,
+  releaseTerrainGeometry,
+  retainTerrainGeometry,
+  TERRAIN_WATER_SURFACE_Y,
+} from '../../world/terrainGeometry';
 import { getRegionDefinition } from '../../world/regions';
 import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
 import { makeCarryStripGeometries } from '../../world/vistas/apronGeometry';
@@ -14,10 +20,7 @@ import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
-const WATER_SURFACE_Y = -0.9;
-const WET_SAND_TINT = new THREE.Color('#7e9487');
-const WET_ROCK_TINT = new THREE.Color('#172d30');
-const WET_SCRUB_TINT = new THREE.Color('#536a55');
+const WATER_SURFACE_Y = TERRAIN_WATER_SURFACE_Y;
 
 // ---------------------------------------------------------------------------
 // Seabed caustics — the dancing light net on submerged sand. Lives in the
@@ -168,59 +171,19 @@ function injectSeabedCaustics(material) {
   return material;
 }
 
-export function Terrain() {
+export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const regionDefinition = getRegionDefinition(currentZoneId);
-  const geometry = useMemo(() => {
-    const config = getRegionTerrainConfig(currentZoneId);
-    const geo = new THREE.PlaneGeometry(config.width, config.depth, config.segments, config.segments);
-    geo.rotateX(-Math.PI / 2);
-    const colors = [];
-    const roughness = [];
-    const position = geo.attributes.position;
-
-    for (let i = 0; i < position.count; i += 1) {
-      const x = position.getX(i);
-      const z = position.getZ(i);
-      const y = terrainHeight(x, z, currentZoneId);
-      position.setY(i, y);
-
-      const c = terrainColor(x, z, y, currentZoneId);
-      const biome = terrainBiomeAt(x, z, y, currentZoneId);
-      const grain = terrainSurfaceNoise(x * 2.7, z * 2.7);
-      if (biome === 'black-lava' || biome === 'wet-basalt') c.offsetHSL(0, -0.03, grain * 0.045);
-      if (biome === 'tuff-ridge' || biome === 'ash-slope') c.offsetHSL(0.015, -0.02, grain * 0.035);
-      // Damp shore band: keep the old cheap height-based mask, but treat beach
-      // sand and basalt differently so the boundary reads as wet ground rather
-      // than a generic dark outline.
-      const submergedWet = y <= WATER_SURFACE_Y
-        ? 1 - THREE.MathUtils.smoothstep(y, WATER_SURFACE_Y - 0.55, WATER_SURFACE_Y + 0.02)
-        : 0;
-      const exposedDamp = y > WATER_SURFACE_Y
-        ? 1 - THREE.MathUtils.smoothstep(y, WATER_SURFACE_Y + 0.03, WATER_SURFACE_Y + 0.62)
-        : 0;
-      const wet = THREE.MathUtils.clamp(Math.max(submergedWet * 0.62, exposedDamp), 0, 1);
-      if (wet > 0 && biome !== 'water') {
-        const rockWet = biome === 'wet-basalt' || biome === 'black-lava';
-        const beachWet = biome === 'green-beach' || biome === 'olivine-trail' || biome === 'trail';
-        c.multiplyScalar(1 - wet * (rockWet ? 0.34 : beachWet ? 0.22 : 0.16));
-        if (rockWet) c.lerp(WET_ROCK_TINT, wet * 0.2);
-        else if (beachWet) c.lerp(WET_SAND_TINT, wet * 0.18);
-        else c.lerp(WET_SCRUB_TINT, wet * 0.08);
-      }
-      colors.push(c.r, c.g, c.b);
-      const wetRoughness = biome === 'wet-basalt' || biome === 'black-lava'
-        ? THREE.MathUtils.lerp(0.9, 0.5, wet)
-        : THREE.MathUtils.lerp(0.96, 0.72, wet);
-      roughness.push(wet > 0 ? wetRoughness : 0.96);
-    }
-
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geo.setAttribute('roughnessMix', new THREE.Float32BufferAttribute(roughness, 1));
-    geo.computeVertexNormals();
-    return geo;
-  }, [currentZoneId]);
+  const geometryEntry = useMemo(
+    () => getCachedTerrainGeometry(currentZoneId, segmentCap),
+    [currentZoneId, segmentCap],
+  );
+  const geometry = geometryEntry.geometry;
+  useEffect(() => {
+    retainTerrainGeometry(geometryEntry.key);
+    return () => releaseTerrainGeometry(geometryEntry.key);
+  }, [geometryEntry.key]);
 
   const material = useMemo(() => {
     // Authored regions keep their custom material. Placeholder regions use the

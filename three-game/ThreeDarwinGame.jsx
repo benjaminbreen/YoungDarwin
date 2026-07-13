@@ -110,6 +110,7 @@ const DEFAULT_PERF_SETTINGS = {
   // draw distance to cut overdraw. Both default to the 'performance' tier.
   cheapMaterials: true,
   foliageDrawScale: 0.85,
+  terrainSegmentCap: 200,
 };
 
 const QUALITY_PRESETS = {
@@ -131,6 +132,7 @@ const QUALITY_PRESETS = {
     solarSceneFlares: false,
     cheapMaterials: true,
     foliageDrawScale: 0.68,
+    terrainSegmentCap: 160,
   },
   performance: {
     // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
@@ -158,6 +160,7 @@ const QUALITY_PRESETS = {
     solarSceneFlares: true,
     cheapMaterials: true,
     foliageDrawScale: 0.85,
+    terrainSegmentCap: 200,
   },
   cinematic: {
     dprMode: 'default',
@@ -177,6 +180,7 @@ const QUALITY_PRESETS = {
     solarSceneFlares: true,
     cheapMaterials: false,
     foliageDrawScale: 1,
+    terrainSegmentCap: null,
   },
 };
 
@@ -246,6 +250,13 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
   const reflections = (params.has('reflections') || params.has('reflection')) && !params.has('noReflections')
     ? true
     : base.reflections && !params.has('noReflections');
+  const terrainSegmentsParam = String(params.get('terrainSegments') || '').toLowerCase();
+  const parsedTerrainSegments = Number(terrainSegmentsParam);
+  const terrainSegmentCap = terrainSegmentsParam === 'authored' || terrainSegmentsParam === 'full'
+    ? null
+    : params.has('terrainSegments') && Number.isFinite(parsedTerrainSegments)
+      ? MathUtils.clamp(Math.floor(parsedTerrainSegments), 64, 512)
+      : base.terrainSegmentCap;
   return {
     quality,
     waterQuality: normalizeWaterQuality(params.get('waterQuality'), base.waterQuality),
@@ -284,6 +295,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
     foliageDrawScale: params.has('foliageDrawScale') && Number.isFinite(Number(params.get('foliageDrawScale')))
       ? Number(params.get('foliageDrawScale'))
       : base.foliageDrawScale,
+    terrainSegmentCap,
   };
 }
 
@@ -1380,6 +1392,10 @@ export default function ThreeDarwinGame() {
       const store = useThreeGameStore.getState();
       store.beginZoneTransition(zoneParam, {});
       if (nextScreenshotMode || nextE2EMode) useThreeGameStore.getState().completeZoneTransition();
+    }
+    if ((nextScreenshotMode || nextE2EMode) && params.has('time')) {
+      const requestedTime = Number(params.get('time'));
+      if (Number.isFinite(requestedTime)) useThreeGameStore.getState().setTimeOfDay(requestedTime);
     }
     const setShortcutModifierActive = active => {
       window.__darwinShortcutModifierActive = active;

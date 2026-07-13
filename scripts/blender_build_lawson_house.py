@@ -4,6 +4,13 @@ Run:
   /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \
     --disable-autoexec --python scripts/blender_build_lawson_house.py
 
+Then optimize the authored shell for runtime delivery while preserving its
+named ceiling and flame nodes:
+  npx @gltf-transform/cli optimize public/assets/models/structures/lawson-house-interior.glb \
+    /tmp/lawson-house-interior-optimized.glb --compress meshopt --flatten false \
+    --join false --instance false --palette false --simplify false \
+    --texture-compress webp --texture-size 512
+
 The shared JSON blueprint owns runtime dimensions, colliders, spawns, and room
 labels. This builder supplies the visual shell and authored entrance/dining
 details. Game coordinates are +x east, +y up, +z toward the front door.
@@ -118,6 +125,9 @@ def init_materials():
   pbr_material('LimewashedBoards', SHARED_TEXTURES, 'painted-planks-diff-1k.jpg', 'painted-planks-rough-1k.jpg', 'painted-planks-normal-1k.jpg', (1.25, 1.25, 1), '#9c957d', 0.2)
   pbr_material('FurnitureWood', SHARED_TEXTURES, 'varnished-oak-diff-1k.jpg', 'varnished-oak-rough-1k.jpg', 'varnished-oak-normal-1k.jpg', (1.3, 1.3, 1), '#87664d', 0.32)
   material('DarkTimber', '#34271e', 0.86)
+  material('DadoPaint', '#66705f', 0.9)
+  material('HighlandHaze', '#7d9189', 1, emission=('#71877f', 0.16))
+  material('WetGrass', '#455b42', 1)
   material('OldPine', '#725037', 0.88)
   material('Iron', '#302f2b', 0.48, 0.68)
   material('Rust', '#7a351f', 0.94, 0.08)
@@ -267,63 +277,95 @@ def build_shell():
   wall_x = half_w - 0.1
   public = MATS['PublicLimewash']
 
-  add_box('LawsonHouse_Floor', (0, 0, 0), (width, 0.16, depth), MATS['HouseFloor'])
+  plank_width = 0.24
+  plank_count = math.ceil(width / plank_width)
+  for index in range(plank_count):
+    x = -half_w + (index + 0.5) * (width / plank_count)
+    add_box(f'LawsonHouse_FloorPlank_{index}', (x, -0.015, 0), ((width / plank_count) - 0.012, 0.13, depth), MATS['HouseFloor'], bevel=0.006)
   add_box('LawsonHouse_Ceiling', (0, ceiling + 0.03, 0), (width, 0.14, depth), MATS['PublicLimewash'])
 
   window_bottom = 0.9
   window_top = 2.22
   front_openings = [
-    {'center': -6.55, 'width': 1.45, 'bottom': window_bottom, 'top': window_top},
-    {'center': -3.4, 'width': 1.4, 'bottom': 0, 'top': 2.38},
-    {'center': 0.15, 'width': 1.55, 'bottom': window_bottom, 'top': window_top},
-    {'center': 3.15, 'width': 1.55, 'bottom': window_bottom, 'top': window_top},
+    {'center': -8.35, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
+    {'center': -5.3, 'width': 1.4, 'bottom': 0, 'top': 2.42},
+    {'center': -0.65, 'width': 1.6, 'bottom': window_bottom, 'top': window_top},
+    {'center': 2.0, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
   ]
   front_wall_with_openings('FrontWall', wall_z, -half_w, half_w, front_openings, public, ceiling)
   side_wall_with_openings('WestWall', -wall_x, -half_d, half_d, [
-    {'center': 3.05, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
+    {'center': 3.0, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
+    {'center': 6.2, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
   ], public, ceiling)
   add_box('EastWall', (wall_x, ceiling / 2, 0), (0.18, ceiling, depth), public, bevel=0.012)
   add_box('RearWall', (0, ceiling / 2, -wall_z), (width, ceiling, 0.18), MATS['PrivateLimewash'], bevel=0.012)
 
   # Four-room partitions with properly framed, closed doors.
-  side_wall_with_openings('OfficePartition', 1.92, 0, half_d, [
-    {'center': 4.1, 'width': 1.08, 'bottom': 0, 'top': 2.36},
+  side_wall_with_openings('OfficePartition', 2.92, 0, half_d, [
+    {'center': 5.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
   ], public, ceiling, 0.16)
   front_wall_with_openings('RearPartition', -0.08, -half_w, half_w, [
-    {'center': -3.2, 'width': 1.08, 'bottom': 0, 'top': 2.36},
-    {'center': 4.8, 'width': 1.08, 'bottom': 0, 'top': 2.36},
+    {'center': -4.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
+    {'center': 5.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
   ], public, ceiling, 0.16)
-  add_box('RearRoomsPartition', (0.92, ceiling / 2, -3.54), (0.16, ceiling, 6.92), MATS['PrivateLimewash'], bevel=0.012)
-  add_box('OfficeTintPanel', (2.015, ceiling / 2, 3.5), (0.025, ceiling - 0.12, 6.8), MATS['OfficeLimewash'])
-  add_box('StoreRawPanel', (1.015, ceiling / 2, -3.5), (0.025, ceiling - 0.12, 6.8), MATS['LimewashedBoards'])
+  add_box('RearRoomsPartition', (-0.08, ceiling / 2, -4.29), (0.16, ceiling, 8.42), MATS['PrivateLimewash'], bevel=0.012)
+  add_box('OfficeTintPanel', (3.015, ceiling / 2, 4.25), (0.025, ceiling - 0.12, 8.3), MATS['OfficeLimewash'])
+  add_box('StoreRawPanel', (0.015, ceiling / 2, -4.25), (0.025, ceiling - 0.12, 8.3), MATS['LimewashedBoards'])
 
-  add_box('OfficeDoor', (1.82, 1.18, 4.1), (0.12, 2.36, 1.04), MATS['OldPine'], bevel=0.025)
-  add_box('PrivateDoor', (-3.2, 1.18, -0.01), (1.04, 2.36, 0.12), MATS['OldPine'], bevel=0.025)
-  add_box('StoreDoor', (4.8, 1.18, -0.01), (1.04, 2.36, 0.12), MATS['LimewashedBoards'], bevel=0.025)
+  add_box('OfficeDoor', (2.82, 1.2, 5.1), (0.12, 2.4, 1.04), MATS['OldPine'], bevel=0.025)
+  add_box('PrivateDoor', (-4.1, 1.2, -0.01), (1.04, 2.4, 0.12), MATS['OldPine'], bevel=0.025)
+  add_box('StoreDoor', (5.1, 1.2, -0.01), (1.04, 2.4, 0.12), MATS['LimewashedBoards'], bevel=0.025)
   for door_name, knob in (
-    ('Office', (1.74, 1.17, 3.75)),
-    ('Private', (-2.86, 1.17, 0.07)),
-    ('Store', (4.46, 1.17, 0.07)),
+    ('Office', (2.74, 1.18, 4.75)),
+    ('Private', (-3.76, 1.18, 0.07)),
+    ('Store', (4.76, 1.18, 0.07)),
   ):
     add_sphere(f'{door_name}DoorKnob', knob, 0.052, MATS['Brass'])
 
   # Open front door, complete frame, and threshold.
-  add_box('FrontDoor', (-4.08, 1.19, 6.22), (0.12, 2.38, 1.34), MATS['OldPine'], yaw=-0.08, bevel=0.035)
-  add_box('FrontThreshold', (-3.4, 0.09, wall_z), (1.58, 0.18, 0.34), MATS['DarkTimber'], bevel=0.025)
-  for x in (-4.16, -2.64):
+  add_box('FrontDoor', (-5.98, 1.21, wall_z - 0.68), (0.12, 2.42, 1.34), MATS['OldPine'], yaw=-0.08, bevel=0.035)
+  add_box('FrontThreshold', (-5.3, 0.09, wall_z), (1.58, 0.18, 0.34), MATS['DarkTimber'], bevel=0.025)
+  for x in (-6.06, -4.54):
     add_box(f'FrontDoorJamb_{x}', (x, 1.25, wall_z - 0.03), (0.11, 2.5, 0.28), MATS['DarkTimber'], bevel=0.018)
-  add_box('FrontDoorHeader', (-3.4, 2.45, wall_z - 0.03), (1.62, 0.14, 0.28), MATS['DarkTimber'], bevel=0.018)
+  add_box('FrontDoorHeader', (-5.3, 2.49, wall_z - 0.03), (1.62, 0.14, 0.28), MATS['DarkTimber'], bevel=0.018)
 
-  simple_window('CallingWindow', -6.55, 1.56, wall_z - 0.11, 1.45, 1.32)
-  simple_window('DiningWindowA', 0.15, 1.56, wall_z - 0.11, 1.55, 1.32)
-  simple_window('DiningWindowB', 3.15, 1.56, wall_z - 0.11, 1.55, 1.32)
-  simple_window('GardenWindow', -wall_x + 0.11, 1.56, 3.05, 1.5, 1.32, 'side')
+  simple_window('CallingWindow', -8.35, 1.56, wall_z - 0.11, 1.5, 1.32)
+  simple_window('DiningWindowA', -0.65, 1.56, wall_z - 0.11, 1.6, 1.32)
+  simple_window('DiningWindowB', 2.0, 1.56, wall_z - 0.11, 1.5, 1.32)
+  simple_window('GardenWindowA', -wall_x + 0.11, 1.56, 3.0, 1.5, 1.32, 'side')
+  simple_window('GardenWindowB', -wall_x + 0.11, 1.56, 6.2, 1.5, 1.32, 'side')
+  for x in (-8.35, -0.65, 2.0):
+    add_box(f'FrontShutterLeft_{x}', (x - 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
+    add_box(f'FrontShutterRight_{x}', (x + 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
 
   # Human-scale framing and a restrained damp line—no ship-cabin wall reuse.
-  for index, z in enumerate((-5.6, -2.8, 0, 2.8, 5.6)):
-    add_box(f'LawsonHouse_CeilingBeam_{index}', (0, ceiling - 0.12, z), (width - 0.35, 0.2, 0.16), MATS['DarkTimber'], bevel=0.018)
-  add_box('FrontChairRail', (-0.1, 0.92, wall_z - 0.12), (17.4, 0.1, 0.1), MATS['FurnitureWood'], bevel=0.018)
-  add_box('WestChairRail', (-wall_x + 0.12, 0.92, 0), (0.1, 0.1, 13.4), MATS['FurnitureWood'], bevel=0.018)
+  for index, z in enumerate((-7.0, -3.5, 0, 3.5, 7.0)):
+    add_box(f'LawsonHouse_CeilingBeam_{index}', (0, ceiling - 0.09, z), (width - 0.35, 0.13, 0.11), MATS['DarkTimber'], bevel=0.012)
+  # A plain grey-green painted dado gives the public suite a domestic identity
+  # without implying imported wallpaper in the damp highland settlement.
+  for index, (left, right) in enumerate((
+    (-10.5, -9.1), (-7.6, -6.0), (-4.6, -1.45), (0.15, 1.25), (2.75, 10.5),
+  )):
+    add_box(f'FrontDado_{index}', ((left + right) / 2, 0.44, wall_z - 0.105), (right - left, 0.86, 0.035), MATS['DadoPaint'])
+  for index, (near, far) in enumerate(((0, 2.25), (3.75, 5.45), (6.95, 8.5))):
+    add_box(f'WestDado_{index}', (-wall_x + 0.105, 0.44, (near + far) / 2), (0.035, 0.86, far - near), MATS['DadoPaint'])
+  add_box('OfficeDado', (2.805, 0.44, 2.25), (0.035, 0.86, 4.3), MATS['DadoPaint'])
+  for index, (left, right) in enumerate(((-10.5, -4.64), (-3.56, 2.92), (2.92, 4.56), (5.64, 10.5))):
+    add_box(f'RearDado_{index}', ((left + right) / 2, 0.44, 0.025), (right - left, 0.86, 0.035), MATS['DadoPaint'])
+
+  for index, (left, right) in enumerate((
+    (-10.3, -9.1), (-7.6, -6.0), (-4.6, -1.45), (0.15, 1.25), (2.75, 10.3),
+  )):
+    add_box(f'FrontChairRail_{index}', ((left + right) / 2, 0.92, wall_z - 0.13), (right - left, 0.1, 0.1), MATS['FurnitureWood'], bevel=0.018)
+  for index, (near, far) in enumerate(((0, 2.25), (3.75, 5.45), (6.95, 8.3))):
+    add_box(f'WestChairRail_{index}', (-wall_x + 0.13, 0.92, (near + far) / 2), (0.1, 0.1, far - near), MATS['FurnitureWood'], bevel=0.018)
+  for index, (left, right) in enumerate(((-10.3, -4.64), (-3.56, 2.8))):
+    add_box(f'RearChairRail_{index}', ((left + right) / 2, 0.92, 0.04), (right - left, 0.1, 0.1), MATS['FurnitureWood'], bevel=0.018)
+  for index, (left, right) in enumerate(((-10.3, -6.0), (-4.6, 10.3))):
+    add_box(f'FrontBaseboard_{index}', ((left + right) / 2, 0.12, wall_z - 0.14), (right - left, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
+  add_box('WestBaseboard', (-wall_x + 0.14, 0.12, 4.15), (0.12, 0.22, 8.3), MATS['DarkTimber'], bevel=0.012)
+  for index, (left, right) in enumerate(((-10.3, -4.64), (-3.56, 4.56), (5.64, 10.3))):
+    add_box(f'RearBaseboard_{index}', ((left + right) / 2, 0.12, 0.05), (right - left, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
   add_box('WestDampBand', (-wall_x + 0.025, 0.17, 1.2), (0.022, 0.24, 4.8), MATS['WetEarth'])
   for x, z in ((-8.75, 4.9), (-5.8, 6.77), (1.1, 6.77)):
     add_box(f'RustBloom_{x}_{z}', (x, 0.38, z), (0.03, 0.14, 0.03), MATS['Rust'])
@@ -333,63 +375,91 @@ def build_shell():
 
 
 def build_fixed_furniture():
-  table('DiningTable', -3.5, 1.25, 3.25, 1.45)
-  table('CallingTable', -7.35, 5.75, 1.55, 0.58, 0.76)
+  table('DiningTable', -2.35, 2.05, 2.8, 1.2, 0.84)
+  table('CallingTable', -9.05, 6.35, 1.55, 0.58, 0.76)
 
   # Tall dresser, deliberately uneven and repaired.
-  add_box('DresserBody', (-8.48, 0.76, 1.2), (0.62, 1.52, 2.45), MATS['OldPine'], bevel=0.035)
+  add_box('DresserBody', (-9.95, 0.76, 1.65), (0.62, 1.52, 2.36), MATS['OldPine'], bevel=0.035)
   for y in (0.48, 1.02):
-    add_box(f'DresserShelf_{y}', (-8.12, y, 1.2), (0.72, 0.08, 2.45), MATS['FurnitureWood'], bevel=0.018)
+    add_box(f'DresserShelf_{y}', (-9.59, y, 1.65), (0.72, 0.08, 2.36), MATS['FurnitureWood'], bevel=0.018)
   for row, y in enumerate((0.72, 1.26)):
-    for z in (0.7, 1.7):
-      add_box(f'DresserPlate_{row}_{z}', (-8.08, y, z), (0.045, 0.32, 0.32), MATS['CreamCeramic'], bevel=0.02)
-  add_box('DresserTop', (-8.44, 1.58, 1.2), (0.78, 0.12, 2.6), MATS['FurnitureWood'], bevel=0.035)
+    for z in (1.18, 2.12):
+      add_box(f'DresserPlate_{row}_{z}', (-9.55, y, z), (0.045, 0.32, 0.32), MATS['CreamCeramic'], bevel=0.02)
+  add_box('DresserTop', (-9.91, 1.58, 1.65), (0.78, 0.12, 2.5), MATS['FurnitureWood'], bevel=0.035)
 
   # Lawson's armchair is fixed and subtly more imposing than the loose chairs.
-  add_box('ArmchairSeat', (-7.4, 0.48, -0.7), (0.72, 0.18, 0.72), MATS['FurnitureWood'], bevel=0.035)
-  add_box('ArmchairBack', (-7.4, 1.02, -1.01), (0.72, 0.96, 0.14), MATS['DarkTimber'], bevel=0.03)
-  for x in (-7.72, -7.08):
-    add_cylinder(f'ArmchairLeg_{x}', (x, 0.25, -0.7), 0.055, 0.5, MATS['DarkTimber'], 12)
-    add_box(f'ArmchairArm_{x}', (x, 0.76, -0.7), (0.09, 0.1, 0.75), MATS['FurnitureWood'], bevel=0.025)
+  add_box('ArmchairSeat', (-8.25, 0.48, 4.6), (0.72, 0.18, 0.72), MATS['FurnitureWood'], yaw=0.25, bevel=0.035)
+  add_box('ArmchairBack', (-8.33, 1.02, 4.3), (0.72, 0.96, 0.14), MATS['DarkTimber'], yaw=0.25, bevel=0.03)
+  for index, x in enumerate((-8.57, -7.93)):
+    add_cylinder(f'ArmchairLeg_{index}', (x, 0.25, 4.6), 0.055, 0.5, MATS['DarkTimber'], 12)
+    add_box(f'ArmchairArm_{index}', (x, 0.76, 4.6), (0.09, 0.1, 0.75), MATS['FurnitureWood'], yaw=0.25, bevel=0.025)
 
   # Sea chest, coat pegs, clothing, and repaired domestic traces.
-  add_box('SeaChestBody', (-7.35, 0.28, 4.65), (1.25, 0.56, 0.7), MATS['OldPine'], yaw=0.08, bevel=0.05)
-  for x in (-7.75, -7.35, -6.95):
-    add_box(f'SeaChestStrap_{x}', (x, 0.32, 4.64), (0.055, 0.62, 0.74), MATS['Iron'], yaw=0.08, bevel=0.008)
-  add_box('PegRail', (-8.68, 1.88, 4.0), (0.12, 0.16, 2.2), MATS['DarkTimber'], bevel=0.025)
-  for z in (3.4, 4.0, 4.6):
-    beam_between(f'CoatPeg_{z}', (-8.62, 1.85, z), (-8.36, 1.85, z), 0.035, MATS['DarkTimber'], 10)
-  add_box('LawsonCoatBody', (-8.32, 1.35, 4.0), (0.08, 0.82, 0.68), MATS['IndigoCloth'], bevel=0.08)
-  add_box('LawsonCoatTail', (-8.32, 0.92, 4.0), (0.07, 0.52, 0.82), MATS['IndigoCloth'], bevel=0.08)
+  add_box('SeaChestBody', (-7.65, 0.28, 7.3), (1.25, 0.56, 0.7), MATS['OldPine'], yaw=0.08, bevel=0.05)
+  for x in (-8.05, -7.65, -7.25):
+    add_box(f'SeaChestStrap_{x}', (x, 0.32, 7.3), (0.055, 0.62, 0.74), MATS['Iron'], yaw=0.08, bevel=0.008)
+  add_box('PegRail', (-10.31, 1.88, 3.9), (0.12, 0.16, 1.65), MATS['DarkTimber'], bevel=0.025)
+  for z in (3.4, 3.9, 4.4):
+    beam_between(f'CoatPeg_{z}', (-10.25, 1.85, z), (-9.99, 1.85, z), 0.035, MATS['DarkTimber'], 10)
+  add_box('LawsonCoatBody', (-9.95, 1.35, 3.9), (0.08, 0.82, 0.68), MATS['IndigoCloth'], bevel=0.08)
+  add_box('LawsonCoatTail', (-9.95, 0.92, 3.9), (0.07, 0.52, 0.82), MATS['IndigoCloth'], bevel=0.08)
 
   # Guitar, wall chart, calling cards, clumped salt, wax, and ceiling lamp.
-  add_sphere('GuitarBody', (-8.28, 0.58, 2.8), 0.3, MATS['OldPine'], (0.35, 1, 0.72))
-  add_box('GuitarNeck', (-8.23, 1.05, 2.8), (0.08, 0.85, 0.11), MATS['DarkTimber'], bevel=0.018)
-  add_box('BoundaryMapPaper', (-8.78, 1.76, -0.7), (0.035, 0.92, 1.3), MATS['Paper'], bevel=0.018)
-  for z in (-1.1, -0.7, -0.3):
-    add_box(f'BoundaryMapInk_{z}', (-8.75, 1.76, z), (0.012, 0.025, 0.62), MATS['Ink'])
-  add_box('CallingCards', (-7.35, 0.81, 5.75), (0.55, 0.025, 0.34), MATS['Paper'], yaw=-0.12, bevel=0.008)
-  add_cylinder('SaltJar', (-4.75, 0.94, 1.5), 0.11, 0.24, MATS['CreamCeramic'], 16)
+  add_sphere('GuitarBody', (-9.98, 0.58, 5.15), 0.3, MATS['OldPine'], (0.35, 1, 0.72))
+  add_box('GuitarNeck', (-9.93, 1.05, 5.15), (0.08, 0.85, 0.11), MATS['DarkTimber'], bevel=0.018)
+  add_box('BoundaryMapPaper', (-10.34, 1.78, 0.1), (0.035, 0.92, 1.3), MATS['Paper'], bevel=0.018)
+  for z in (-0.3, 0.1, 0.5):
+    add_box(f'BoundaryMapInk_{z}', (-10.31, 1.78, z), (0.012, 0.025, 0.62), MATS['Ink'])
+  # A modest Spanish-language appointment notice rather than grand wallpaper:
+  # official authority represented by one damp, locally framed sheet.
+  add_box('OfficialNoticePaper', (-1.25, 1.72, 0.075), (1.08, 0.76, 0.025), MATS['Paper'], bevel=0.012)
+  add_box('OfficialNoticeFrameTop', (-1.25, 2.14, 0.095), (1.22, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
+  add_box('OfficialNoticeFrameBottom', (-1.25, 1.3, 0.095), (1.22, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
+  for x in (-1.86, -0.64):
+    add_box(f'OfficialNoticeFrameSide_{x}', (x, 1.72, 0.095), (0.07, 0.9, 0.07), MATS['DarkTimber'], bevel=0.012)
+  for index, y in enumerate((1.93, 1.8, 1.68, 1.56, 1.44)):
+    add_box(f'OfficialNoticeInk_{index}', (-1.25, y, 0.094), (0.72 if index else 0.48, 0.018, 0.012), MATS['Ink'])
+  add_sphere('OfficialNoticeSeal', (-0.92, 1.44, 0.105), 0.055, MATS['Rust'], (1, 1, 0.35))
+  add_box('CallingCards', (-9.05, 0.81, 6.35), (0.55, 0.025, 0.34), MATS['Paper'], yaw=-0.12, bevel=0.008)
+  add_cylinder('CallingLampFoot', (-9.48, 0.82, 6.32), 0.12, 0.055, MATS['Brass'], 18)
+  add_cylinder('CallingLampStem', (-9.48, 1.0, 6.32), 0.035, 0.34, MATS['Brass'], 14)
+  add_cylinder('CallingLampCandle', (-9.48, 1.18, 6.32), 0.055, 0.28, MATS['CreamCeramic'], 16)
+  add_sphere('LampFlame_Calling', (-9.48, 1.36, 6.32), 0.04, MATS['LampFlame'], (0.68, 1.5, 0.68))
+  add_cylinder('SaltJar', (-3.25, 0.92, 1.85), 0.11, 0.24, MATS['CreamCeramic'], 16)
   for index, offset in enumerate((-0.045, 0.01, 0.06)):
-    add_sphere(f'ClumpedSalt_{index}', (-4.75 + offset, 1.08, 1.5), 0.055, MATS['Paper'], (1, 0.55, 1))
-  add_cylinder('HangingLampChain', (-3.5, 2.95, 1.25), 0.018, 0.5, MATS['Iron'], 10)
-  add_cylinder('HangingLampReservoir', (-3.5, 2.65, 1.25), 0.14, 0.16, MATS['Brass'], 18)
-  add_sphere('HangingLampGlass', (-3.5, 2.75, 1.25), 0.17, MATS['WindowGlass'], (1, 1.3, 1))
-  add_sphere('LampFlame_Main', (-3.5, 2.71, 1.25), 0.045, MATS['LampFlame'], (0.68, 1.45, 0.68))
+    add_sphere(f'ClumpedSalt_{index}', (-3.25 + offset, 1.06, 1.85), 0.055, MATS['Paper'], (1, 0.55, 1))
+  add_cylinder('HangingLampChain', (-2.35, 3.28, 2.05), 0.018, 0.56, MATS['Iron'], 10)
+  add_cylinder('HangingLampReservoir', (-2.35, 2.95, 2.05), 0.14, 0.16, MATS['Brass'], 18)
+  add_sphere('HangingLampGlass', (-2.35, 3.04, 2.05), 0.17, MATS['WindowGlass'], (1, 1.3, 1))
+  add_sphere('LampFlame_Main', (-2.35, 3.0, 2.05), 0.045, MATS['LampFlame'], (0.68, 1.45, 0.68))
+
+  # A small woven mat makes the threshold legible and leaves a generous,
+  # uninterrupted route from the door to all three internal doors.
+  add_box('EntryCoirMat', (-5.3, 0.018, 7.15), (1.5, 0.035, 0.82), MATS['Canvas'], bevel=0.012)
+  for index in range(7):
+    add_box(f'EntryMatStripe_{index}', (-5.9 + index * 0.2, 0.039, 7.15), (0.035, 0.009, 0.75), MATS['DarkTimber'])
 
 
 def build_veranda_diorama():
-  add_box('ExteriorVeranda', (0, -0.05, 8.1), (18, 0.12, 2.3), MATS['HouseFloor'])
-  for x in (-8.35, -5.2, -1.8, 1.8, 5.2, 8.35):
-    add_cylinder(f'VerandaPost_{x}', (x, 1.55, 8.75), 0.07, 3.1, MATS['DarkTimber'], 12)
-  add_box('ExteriorWetGround', (0, -0.18, 13.2), (26, 0.15, 8), MATS['WetEarth'])
+  add_box('ExteriorVeranda', (0, -0.05, 9.65), (21, 0.12, 2.25), MATS['HouseFloor'])
+  for x in (-10.1, -6.7, -3.3, 0.1, 3.5, 6.9, 10.1):
+    add_cylinder(f'VerandaPost_{x}', (x, 1.55, 10.28), 0.07, 3.1, MATS['DarkTimber'], 12)
+  add_box('ExteriorWetGround', (0, -0.18, 14.6), (29, 0.15, 9.5), MATS['WetEarth'])
+  add_box('ExteriorFrontHaze', (0, 2.1, 19.25), (29, 4.5, 0.08), MATS['HighlandHaze'])
   for index, x in enumerate((-10, -7, -4, 4, 7, 10)):
-    add_cylinder(f'ExteriorFencePost_{index}', (x, 0.55, 10.6), 0.07, 1.1, MATS['OldPine'], 10)
-  add_box('ExteriorFenceRail', (0, 0.5, 10.6), (21, 0.1, 0.1), MATS['OldPine'])
-  for index, (x, z, scale) in enumerate(((-8, 12, 1.1), (-4.5, 12.8, 0.8), (4.6, 12.3, 0.9), (8.5, 13.2, 1.2))):
+    add_cylinder(f'ExteriorFencePost_{index}', (x, 0.55, 12.1), 0.07, 1.1, MATS['OldPine'], 10)
+  add_box('ExteriorFenceRail', (0, 0.5, 12.1), (21, 0.1, 0.1), MATS['OldPine'])
+  for index, (x, z, scale) in enumerate(((-8, 13.5, 1.1), (-4.5, 14.3, 0.8), (4.6, 13.8, 0.9), (8.5, 14.7, 1.2))):
     add_sphere(f'ExteriorGardenMass_{index}', (x, 0.35 * scale, z), 0.75 * scale, MATS['LeafGreen'], (1.4, 0.7, 1))
-  for index, (x, z, scale) in enumerate(((-10.4, 15.1, 1.3), (-6.7, 16.2, 0.9), (6.3, 15.5, 1.2), (10.6, 16.4, 1.5))):
+  for index, (x, z, scale) in enumerate(((-10.4, 16.6, 1.3), (-6.7, 17.7, 0.9), (6.3, 17, 1.2), (10.6, 17.9, 1.5))):
     add_sphere(f'ExteriorBasalt_{index}', (x, 0.4 * scale, z), 0.55 * scale, MATS['Basalt'], (1.3, 0.75, 1))
+
+  # Side-window diorama: close enough to register as vegetation and wet soil,
+  # but clear of the playable shell and never mistaken for an interior wall.
+  add_box('ExteriorWestGround', (-13.4, -0.16, 3.9), (5.7, 0.13, 17.5), MATS['WetGrass'])
+  add_box('ExteriorWestHaze', (-16.2, 2.15, 3.9), (0.08, 4.6, 17.5), MATS['HighlandHaze'])
+  for index, (x, z, scale) in enumerate(((-12.1, 1.5, 0.65), (-13.4, 2.8, 0.9), (-12.6, 4.6, 0.72), (-14.1, 6.1, 1.0), (-12.3, 7.3, 0.6))):
+    add_sphere(f'ExteriorWestFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafGreen'], (1.35, 0.65, 1))
 
 
 def join_by_material():
@@ -476,7 +546,6 @@ def prop_candlestick():
   add_cylinder('CandlestickStem', (0, 0.19, 0), 0.035, 0.3, MATS['Brass'], 16)
   add_cylinder('CandlestickCup', (0, 0.34, 0), 0.08, 0.07, MATS['Brass'], 20)
   add_cylinder('Candle', (0, 0.52, 0), 0.045, 0.32, MATS['CreamCeramic'], 18)
-  add_sphere('LampFlame_Candlestick', (0, 0.71, 0), 0.035, MATS['LampFlame'], (0.68, 1.4, 0.68))
 
 
 def build_all():

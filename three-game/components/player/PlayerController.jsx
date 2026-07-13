@@ -519,8 +519,13 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     getThreeSpecimens(currentZoneId).filter(specimen => (specimen.instanceId || specimen.id) !== playableHiddenActorId)
   ), [currentZoneId, playableHiddenActorId]);
   const collisionAdapter = useMemo(
-    () => createCollisionAdapter(currentZoneId, rapierContext, pushableObstacleOffsets),
-    [currentZoneId, pushableObstacleOffsets, rapierContext],
+    () => createCollisionAdapter(
+      currentZoneId,
+      rapierContext,
+      pushableObstacleOffsets,
+      { diagnostics: physicsDebug },
+    ),
+    [currentZoneId, physicsDebug, pushableObstacleOffsets, rapierContext],
   );
   const modelGrounding = useMemo(() => ({
     collisionAdapter,

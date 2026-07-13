@@ -12,6 +12,7 @@ import { weatherEnv } from '../world/weatherEnvRuntime';
 
 const RECT_NORMAL = new THREE.Vector3(0, 0, -1);
 const DUST_AXIS = new THREE.Vector3(0, 1, 0);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 const PANE_SHAFT_VERTEX = /* glsl */ `
   varying vec3 vLocalPosition;
@@ -186,7 +187,7 @@ function applyRectDirection(light, direction) {
   light.quaternion.setFromUnitVectors(RECT_NORMAL, direction);
 }
 
-function PortalLight({ portal }) {
+function PortalLight({ portal, worldYaw = 0 }) {
   const direct = portal.direct;
   const shaft = direct?.shaft;
   const panes = shaft?.panes;
@@ -265,7 +266,13 @@ function PortalLight({ portal }) {
       lightDim: weatherEnv.lightDim,
       moonFraction: celestial.moon_phase.fraction,
     });
-    sun.set(...celestial.sun).normalize();
+    // Celestial vectors are expressed in world space. Interior portal normals
+    // are authored in the house's local frame, so rotate the sun back through
+    // the exterior building yaw before testing which windows it can reach.
+    sun.set(...celestial.sun).normalize().applyAxisAngle(
+      WORLD_UP,
+      -(portal.worldYaw ?? worldYaw),
+    );
     lightColor.copy(cool).lerp(warm, celestial.golden * 0.88);
     directColor.copy(lightColor).lerp(warm, direct?.warmth ?? 0);
 
@@ -489,7 +496,7 @@ export function InteriorLightingRig({ definition, groupRef }) {
       <InteriorExposureControl lighting={lighting} />
       <InteriorAmbientLights lighting={lighting} />
       {(lighting.portals || []).map(portal => (
-        <PortalLight key={portal.id} portal={portal} />
+        <PortalLight key={portal.id} portal={portal} worldYaw={lighting.worldYaw || 0} />
       ))}
       {(lighting.lamps || []).map((lamp, index) => (
         <PracticalLamp key={lamp.id || index} lamp={lamp} index={index} />

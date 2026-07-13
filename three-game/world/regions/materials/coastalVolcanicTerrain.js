@@ -21,11 +21,11 @@ function fallbackTexture(hex) {
   return texture;
 }
 
-function loadRepeatingTexture(path, fallbackHex) {
+function loadRepeatingTexture(path, fallbackHex, colorSpace = THREE.SRGBColorSpace) {
   const texture = typeof window === 'undefined'
     ? fallbackTexture(fallbackHex)
     : new THREE.TextureLoader().load(path);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -65,6 +65,7 @@ function coastalVolcanicCommonGLSL({
   pathSplatFunction,
   pathFrameSegmentFunction,
   pathFrameFunction,
+  hasBaseSand,
 }) {
   return /* glsl */`
         uniform vec3 cvRimColor;
@@ -172,6 +173,32 @@ function coastalVolcanicCommonGLSL({
           color = mix(color, vec3(0.70, 0.62, 0.36), drySeed * 0.28);
           return color;
         }
+        ${hasBaseSand ? /* glsl */`
+        uniform sampler2D uCoastalBaseSand;
+        uniform sampler2D uCoastalBaseSandRough;
+        uniform sampler2D uCoastalBaseSandHeight;
+        float cvTextureValue(sampler2D tex, vec2 uvA, vec2 uvB, float mixNoise) {
+          float a = texture2D(tex, uvA).r;
+          float b = texture2D(tex, uvB).r;
+          float c = texture2D(tex, cvRotate(uvA, 0.67) * 0.61 + vec2(-0.13, 0.27)).r;
+          return mix(mix(a, b, 0.38), c, 0.12 + mixNoise * 0.18);
+        }
+        // Where the textured sand shows through; must stay in step with the
+        // lava/ridge/scrub weights in the base-color stage.
+        float cvSandCover(vec2 p, float height, float slope) {
+          float waterByHeight = 1.0 - smoothstep(-1.08, -0.16, height);
+          float shoreBand = 1.0 - smoothstep(0.0, 0.78, abs(height + 0.42));
+          float wet = max(waterByHeight, shoreBand * 0.58);
+          float ridge = max(smoothstep(15.0, 30.0, p.y), smoothstep(5.0, 7.6, height));
+          float lava = max(smoothstep(0.22, 0.72, cvFbm(p * 0.12 + vec2(8.0, -3.0))), smoothstep(-7.0, -18.0, p.x));
+          float scrub = smoothstep(5.0, 20.0, p.x) * smoothstep(-3.0, 13.0, p.y) * (1.0 - slope * 0.85);
+          float lavaW = clamp(lava * 0.88 + wet * 0.45, 0.0, 1.0);
+          float ridgeW = clamp(ridge * 0.78 + slope * 0.35, 0.0, 1.0);
+          float scrubW = clamp(scrub * 0.62, 0.0, 1.0);
+          return (1.0 - lavaW) * (1.0 - ridgeW * 0.85) * (1.0 - scrubW * 0.75);
+        }
+        vec2 cvSandUvA(vec2 p) { return p * 0.13; }
+        vec2 cvSandUvB(vec2 p) { return cvRotate(p, 0.52) * 0.083 + vec2(0.4, -0.16); }` : ''}
         ${standardFootPathSplatGLSL({
           functionName: pathSplatFunction,
           textureUniform: pathSplatUniform,
@@ -206,7 +233,7 @@ function coastalVolcanicCommonGLSL({
         }`;
 }
 
-function coastalBaseColorGLSL() {
+function coastalBaseColorGLSL({ hasBaseSand } = {}) {
   return /* glsl */`
         vec2 p = vCoastalTerrainWorld.xz;
         vec3 n = normalize(vNormal);
@@ -225,6 +252,10 @@ function coastalBaseColorGLSL() {
         color = mix(color, cvTuffMaterial(p), clamp(ridge * 0.78 + slope * 0.35, 0.0, 1.0));
         color = mix(color, cvScrubMaterial(p), clamp(scrub * 0.62, 0.0, 1.0));
         color = mix(color, cvBeachMaterial(p), clamp(beach * 0.58, 0.0, 1.0));
+        ${hasBaseSand ? /* glsl */`
+        float sandCover = cvSandCover(p, height, slope);
+        vec3 sandTex = cvTextureBlend(uCoastalBaseSand, cvSandUvA(p), cvSandUvB(p), cvFbm(p * 0.07 + vec2(3.0, 5.0)));
+        color = mix(color, sandTex, sandCover * 0.92);` : ''}
         color = mix(color, vec3(0.10, 0.18, 0.16), wet * 0.18);
         float fine = cvFbm(p * 6.5);
         float grit = smoothstep(0.62, 0.96, fine);
@@ -295,7 +326,17 @@ function coastalPathOverlayGLSL({ pathSplatFunction }) {
         }`;
 }
 
-function coastalNormalGLSL({ pathSplatFunction }) {
+function coastalSandRoughnessGLSL() {
+  return /* glsl */`
+        vec2 srp = vCoastalTerrainWorld.xz;
+        vec3 srn = normalize(vNormal);
+        float srSlope = smoothstep(0.34, 0.86, 1.0 - abs(srn.y));
+        float srCover = cvSandCover(srp, vCoastalTerrainWorld.y, srSlope);
+        float sandRoughSample = cvTextureValue(uCoastalBaseSandRough, cvSandUvA(srp), cvSandUvB(srp), cvFbm(srp * 0.07 + vec2(3.0, 5.0)));
+        roughnessFactor = mix(roughnessFactor, clamp(mix(0.72, 0.97, sandRoughSample), 0.6, 0.98), srCover * 0.6);`;
+}
+
+function coastalNormalGLSL({ pathSplatFunction, hasBaseSand }) {
   return /* glsl */`
         vec2 np = vCoastalTerrainWorld.xz;
         vec4 normalMasks = cvPathMasks(np);
@@ -309,6 +350,11 @@ function coastalNormalGLSL({ pathSplatFunction }) {
         float normalPathCover = max(max(normalMasks.y * 0.34, normalSplat.r), normalClearing * 0.95);
         float baseDetail = cvFbm(np * 2.2) * 0.6 + cvFbm(np * 7.5) * 0.18;
         float detailHeight = baseDetail;
+        ${hasBaseSand ? /* glsl */`
+        float sandSlopeN = smoothstep(0.34, 0.86, 1.0 - abs(normal.y));
+        float sandCoverN = cvSandCover(np, vCoastalTerrainWorld.y, sandSlopeN);
+        float sandH = cvTextureValue(uCoastalBaseSandHeight, cvSandUvA(np), cvSandUvB(np), cvFbm(np * 0.07 + vec2(3.0, 5.0)));
+        detailHeight += (sandH - 0.5) * 0.45 * sandCoverN;` : ''}
         float normalOverlay = clamp(normalPathCover + normalMasks.z * 0.45 + normalSplat.b * 0.35, 0.0, 1.0);
         if (normalOverlay > 0.005) {
           vec3 nRed = cvTextureBlend(
@@ -365,6 +411,16 @@ export function createCoastalVolcanicTerrainMaterial({
   const pathShoulder = loadRepeatingTexture(textureSet.shoulderGround, fallbacks.shoulderGround || '#7a7153');
   const pathGrass = loadRepeatingTexture(textureSet.dryGrassGround, fallbacks.dryGrassGround || '#8b7d50');
   const pathFlecks = loadRepeatingTexture(textureSet.paleFlecks, fallbacks.paleFlecks || '#d5c7a3');
+  const hasBaseSand = Boolean(textureSet.baseSand);
+  const baseSand = hasBaseSand
+    ? loadRepeatingTexture(textureSet.baseSand, fallbacks.baseSand || '#c9a878')
+    : null;
+  const baseSandRough = hasBaseSand
+    ? loadRepeatingTexture(textureSet.baseSandRoughness, '#b0b0b0', THREE.NoColorSpace)
+    : null;
+  const baseSandHeight = hasBaseSand
+    ? loadRepeatingTexture(textureSet.baseSandHeight, '#808080', THREE.NoColorSpace)
+    : null;
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -379,6 +435,9 @@ export function createCoastalVolcanicTerrainMaterial({
     pathShoulder.dispose();
     pathGrass.dispose();
     pathFlecks.dispose();
+    baseSand?.dispose();
+    baseSandRough?.dispose();
+    baseSandHeight?.dispose();
   });
 
   const pathSplatUniform = 'uCoastalPathSplat';
@@ -398,6 +457,11 @@ export function createCoastalVolcanicTerrainMaterial({
     shader.uniforms.uCoastalPathShoulder = { value: pathShoulder };
     shader.uniforms.uCoastalPathGrass = { value: pathGrass };
     shader.uniforms.uCoastalPathFlecks = { value: pathFlecks };
+    if (hasBaseSand) {
+      shader.uniforms.uCoastalBaseSand = { value: baseSand };
+      shader.uniforms.uCoastalBaseSandRough = { value: baseSandRough };
+      shader.uniforms.uCoastalBaseSandHeight = { value: baseSandHeight };
+    }
     material.userData.shader = shader;
 
     shader.vertexShader = shader.vertexShader
@@ -424,18 +488,24 @@ ${coastalVolcanicCommonGLSL({
           pathSplatFunction,
           pathFrameSegmentFunction,
           pathFrameFunction,
+          hasBaseSand,
         })}`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-${coastalBaseColorGLSL()}
+${coastalBaseColorGLSL({ hasBaseSand })}
 ${coastalPathOverlayGLSL({ pathSplatFunction })}`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+${hasBaseSand ? coastalSandRoughnessGLSL() : ''}`,
       )
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
-${coastalNormalGLSL({ pathSplatFunction })}`,
+${coastalNormalGLSL({ pathSplatFunction, hasBaseSand })}`,
       )
       .replace(
         '#include <dithering_fragment>',
@@ -445,7 +515,7 @@ ${coastalNormalGLSL({ pathSplatFunction })}`,
       );
   };
 
-  material.customProgramCacheKey = () => cacheKey;
+  material.customProgramCacheKey = () => cacheKey + (hasBaseSand ? '-base-sand' : '');
   material.needsUpdate = true;
   return material;
 }

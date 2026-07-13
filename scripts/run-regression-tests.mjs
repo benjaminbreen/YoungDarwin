@@ -82,6 +82,10 @@ const {
   finishLLMRequest,
 } = loadModule('utils/server/llmSafety.js');
 const {
+  clampNpcEncounterEffects,
+  getNpcEncounterPresentation,
+} = loadModule('three-game/encounters/npcEncounters.js');
+const {
   assignHybridLocation,
   hasUsableLocation,
   selectHybridLocation,
@@ -125,7 +129,19 @@ const {
   getRuntimeObstacles,
   isWalkOverTraversalObstacle,
   obstacleBaseY,
+  queryObstacleBounds,
+  queryObstaclesNear,
 } = loadModule('three-game/world/obstacles.js');
+const {
+  createCollisionAdapter,
+} = loadModule('three-game/physics/collisionAdapter.js');
+const {
+  createLazyAnimationActions,
+} = loadModule('three-game/components/assets/lazyAnimationActions.js');
+const {
+  resolveTerrainSegments,
+  terrainGeometryStats,
+} = loadModule('three-game/world/terrainGeometry.js');
 const {
   locations,
 } = loadModule('data/locations.js');
@@ -300,6 +316,109 @@ test('procedural rock obstacles share visual bounds and traversal support', () =
       );
     }
   }
+});
+
+test('obstacle broad phase returns nearby candidates in authored order', () => {
+  const obstacles = [
+    { id: 'near-a', x: 0, z: 0, radius: 1 },
+    { id: 'near-b', x: 5, z: 0, radius: 1 },
+    { id: 'cell-edge', x: 11.8, z: 0, radius: 1.2 },
+    { id: 'far-a', x: 48, z: 48, radius: 1 },
+    { id: 'far-b', x: -48, z: -48, radius: 1 },
+    { id: 'far-c', x: 72, z: 0, radius: 1 },
+    { id: 'far-d', x: 0, z: 72, radius: 1 },
+    { id: 'far-e', x: -72, z: 0, radius: 1 },
+    { id: 'far-f', x: 0, z: -72, radius: 1 },
+  ];
+  assert.deepEqual(
+    queryObstaclesNear(obstacles, 0, 0, 0.42).map(obstacle => obstacle.id),
+    ['near-a', 'near-b', 'cell-edge'],
+  );
+  assert.ok(
+    queryObstaclesNear(obstacles, 12.25, 0, 0.42).some(obstacle => obstacle.id === 'cell-edge'),
+    'an obstacle overlapping a cell boundary should remain queryable from the adjacent cell',
+  );
+  assert.deepEqual(
+    queryObstacleBounds(obstacles, -1, -1, 14, 1).map(obstacle => obstacle.id),
+    ['near-a', 'near-b', 'cell-edge'],
+  );
+});
+
+test('static runtime obstacle arrays are shared across collision consumers', () => {
+  const first = getRuntimeObstacles('BEAGLE');
+  const second = getRuntimeObstacles('BEAGLE');
+  assert.equal(first, second);
+  assert.notEqual(
+    getRuntimeObstacles('BEAGLE', { 'BEAGLE:test-offset': { x: 1, z: 0 } }),
+    first,
+    'offset-aware obstacle sets must remain isolated from the shared static index',
+  );
+});
+
+test('Rapier ground rays run only when collision diagnostics are enabled', () => {
+  let raycasts = 0;
+  class Ray {
+    constructor(origin, direction) {
+      this.origin = origin;
+      this.direction = direction;
+    }
+  }
+  const rapierContext = {
+    rapier: { Ray },
+    world: {
+      castRay: () => {
+        raycasts += 1;
+        return { toi: 8 };
+      },
+    },
+  };
+  const position = { x: 0, y: 2, z: 0 };
+  const normalAdapter = createCollisionAdapter('BEAGLE', rapierContext, {}, { diagnostics: false });
+  normalAdapter.groundInfo(position, { ignoreObstacles: true });
+  assert.equal(raycasts, 0);
+
+  const diagnosticAdapter = createCollisionAdapter('BEAGLE', rapierContext, {}, { diagnostics: true });
+  const diagnosticGround = diagnosticAdapter.groundInfo(position, { ignoreObstacles: true });
+  assert.equal(raycasts, 1);
+  assert.equal(typeof diagnosticGround.physicsY, 'number');
+});
+
+test('animation actions are created on first use and cached by clip', () => {
+  const animations = [{ name: 'Idle' }, { name: 'Walking' }, { name: 'Wave' }];
+  const created = [];
+  const uncached = [];
+  const mixer = {
+    clipAction: clip => {
+      const action = { clip, stopped: false, stop() { this.stopped = true; } };
+      created.push(action);
+      return action;
+    },
+    uncacheAction: clip => uncached.push(clip),
+  };
+  const lazyActions = createLazyAnimationActions({ animations, mixer, root: {} });
+  assert.equal(created.length, 0);
+  assert.equal(lazyActions.has('idle'), true);
+  assert.equal(created.length, 0, 'availability checks must not instantiate actions');
+  const idle = lazyActions.get('idle');
+  assert.equal(created.length, 1);
+  assert.equal(lazyActions.get('IDLE'), idle);
+  assert.equal(created.length, 1, 'aliases should reuse the same cached action');
+  lazyActions.get('Walking');
+  assert.equal(lazyActions.size, 2);
+  assert.deepEqual(lazyActions.availableNames, ['Idle', 'Walking', 'Wave']);
+  lazyActions.dispose();
+  assert.equal(idle.stopped, true);
+  assert.equal(uncached.length, 2);
+  assert.equal(lazyActions.size, 0);
+});
+
+test('terrain quality caps reduce mesh work without upsampling small interiors', () => {
+  assert.equal(resolveTerrainSegments(360, 200), 200);
+  assert.equal(resolveTerrainSegments(300, 160), 160);
+  assert.equal(resolveTerrainSegments(96, 200), 96);
+  assert.equal(resolveTerrainSegments(360, null), 360);
+  assert.deepEqual(terrainGeometryStats(200), { segments: 200, vertices: 40401, triangles: 80000 });
+  assert.deepEqual(terrainGeometryStats(300), { segments: 300, vertices: 90601, triangles: 180000 });
 });
 
 test('large authored rocks creep only as constrained downhill-push obstacles', () => {
@@ -648,6 +767,26 @@ test('player command router sends mechanical actions to deterministic systems', 
 test('player command router preserves narrative turns when no mechanic is implied', () => {
   assert.deepEqual(routePlayerCommand('ask Lawson what he knows about island tortoises'), { type: 'narrative' });
   assert.deepEqual(routePlayerCommand('think carefully about the strange distribution of finches'), { type: 'narrative' });
+});
+
+test('NPC encounter effects are bounded and flags stay allowlisted', () => {
+  assert.deepEqual(
+    clampNpcEncounterEffects('syms_covington', {
+      trustDelta: 99,
+      flags: ['discussed_specimens', 'not-a-real-flag', 'syms_covington:offered_practical_help'],
+    }),
+    { trustDelta: 5, flags: ['discussed_specimens', 'offered_practical_help'] },
+  );
+  assert.deepEqual(clampNpcEncounterEffects('unknown', { trustDelta: -99, flags: ['anything'] }), { trustDelta: 0, flags: [] });
+});
+
+test('Syms encounter presentation reflects session flags without mutating the base encounter', () => {
+  const presentation = getNpcEncounterPresentation('syms_covington', {
+    trust: 50,
+    flags: ['offered_practical_help'],
+  });
+  assert.match(presentation.opener, /labels, twine, and spare paper/i);
+  assert.equal(presentation.suggestedReplies.length, 2);
 });
 
 test('interior entry detection is shared by typed commands and map dispatch', () => {

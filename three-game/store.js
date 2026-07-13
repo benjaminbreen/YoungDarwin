@@ -26,7 +26,6 @@ import {
   createNarratorEvent,
   gameClockMinutes,
   narrationPayloadToEvents,
-  shouldAllowLlmFieldNote,
   shouldAllowLlmThought,
   textHash,
 } from './narrator/narratorEvents';
@@ -50,7 +49,12 @@ import { clampToWalkable, terrainHeight } from './world/terrain';
 import { forageableAllowsMode } from './world/forageables';
 import { getReadableBook } from './books/bookCatalog';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
-import { encounterAmbientLine, getNpcEncounter } from './encounters/npcEncounters';
+import {
+  clampNpcEncounterEffects,
+  encounterAmbientLine,
+  getNpcEncounter,
+  getNpcEncounterPresentation,
+} from './encounters/npcEncounters';
 import {
   MAX_ACTIVE_SNARES,
   SNARE_CHECK_AFTER_MINUTES,
@@ -639,6 +643,8 @@ function createSceneSlice() {
     activeNpcEncounter: null,
     npcEncounterPending: false,
     npcEncounterError: null,
+    // The current /three runtime has no save/load bridge. Keep encounter
+    // consequences stable for this play session without implying persistence.
     npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
     narratorScriptedKeys: {
       [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
@@ -915,7 +921,8 @@ export const useThreeGameStore = create((set, get) => ({
   )),
   recordNpcActivity: (npcId, event = 'nearby') => set(state => {
     const encounter = getNpcEncounter(npcId);
-    const line = encounterAmbientLine(npcId, event);
+    const relation = state.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+    const line = encounterAmbientLine(npcId, event, relation);
     if (!encounter || !line) return {};
     const key = `npc-activity:${npcId}:${event}:${state.currentZoneId}`;
     const nowMinutes = gameClockMinutes(state);
@@ -938,12 +945,13 @@ export const useThreeGameStore = create((set, get) => ({
     const encounter = getNpcEncounter(npcId);
     if (!encounter) return {};
     const relation = state.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+    const presentation = getNpcEncounterPresentation(npcId, relation) || encounter;
     return {
       activeNpcEncounter: {
         npcId,
         openedAt: Date.now(),
-        turns: [{ role: 'npc', text: encounter.opener }],
-        suggestedReplies: encounter.suggestedReplies,
+        turns: [{ role: 'npc', text: presentation.opener }],
+        suggestedReplies: presentation.suggestedReplies,
         trust: relation.trust,
         flags: relation.flags || [],
       },
@@ -972,14 +980,10 @@ export const useThreeGameStore = create((set, get) => ({
       npcEncounterError: null,
     }));
     const requestState = get();
-    const idempotencyKey = [
-      requestState.seed || 'three',
-      npcId,
-      requestState.currentZoneId,
-      requestState.day,
-      Math.round((requestState.timeOfDay || 0) * 60),
-      textHash(playerInput),
-    ].join(':');
+    // One player turn has one request identity. Do not derive this from the
+    // reply text: repeated questions are valid new turns with new trust effects.
+    const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    const idempotencyKey = [requestState.seed || 'three', npcId, 'encounter-turn', turnId].join(':');
     try {
       const response = await fetch('/api/three-encounter', {
         method: 'POST',
@@ -1003,13 +1007,13 @@ export const useThreeGameStore = create((set, get) => ({
           flags: active.flags,
           subjectContext: requestState.lastOutcome?.specimen?.name || requestState.nearbySpecimenId || '',
           recentTurns: turns.map(item => `${item.role === 'npc' ? 'NPC' : 'Darwin'}: ${item.text}`),
+          turnId,
           idempotencyKey,
         }),
       });
       const data = response.ok ? await response.json() : null;
       const dialogue = String(data?.dialogue || '“I beg your pardon, sir; I have lost the thread of it.”').trim();
-      const trustDelta = Math.max(-5, Math.min(5, Math.round(Number(data?.trustDelta) || 0)));
-      const flags = Array.isArray(data?.flags) ? data.flags.filter(flag => encounter.allowedFlags.includes(flag)) : [];
+      const { trustDelta, flags } = clampNpcEncounterEffects(npcId, data);
       set(current => {
         if (current.activeNpcEncounter?.npcId !== npcId) return { npcEncounterPending: false };
         const previous = current.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
@@ -1418,8 +1422,7 @@ export const useThreeGameStore = create((set, get) => ({
         narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
           narration: result.reason,
           symsLine,
-          fieldNote: educationalNote,
-        }, state, 'rock-sample', { allowFieldNote: true })),
+        }, state, 'rock-sample')),
         ...(promptBelongsToSample ? { carryPrompt: null } : {}),
       };
     });
@@ -1476,8 +1479,7 @@ export const useThreeGameStore = create((set, get) => ({
         narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
           narration: reason,
           symsLine: crop.harvestSyms || null,
-          fieldNote: firstOfKind ? crop.educationalNote : '',
-        }, state, 'crop-harvest', { allowFieldNote: Boolean(firstOfKind && crop.educationalNote) })),
+        }, state, 'crop-harvest')),
         ...(promptBelongsToCrop ? { carryPrompt: null } : {}),
       };
 
@@ -2368,8 +2370,7 @@ export const useThreeGameStore = create((set, get) => ({
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
         narration: message,
         symsLine,
-        fieldNote: educationalNote,
-      }, state, 'hazard', { allowFieldNote: true })),
+      }, state, 'hazard')),
     };
   }),
 
@@ -2398,8 +2399,7 @@ export const useThreeGameStore = create((set, get) => ({
       educationalNote,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
         narration: message,
-        fieldNote: educationalNote,
-      }, state, 'rest', { allowFieldNote: true })),
+      }, state, 'rest')),
     };
   }),
 
@@ -2456,10 +2456,7 @@ export const useThreeGameStore = create((set, get) => ({
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
         ...data,
         narration,
-        fieldNote: '',
-        educationalNote: '',
       }, state, escaped ? 'snare-escape' : 'snare-escape-failed', {
-        allowFieldNote: false,
         allowThought: false,
       })),
     };
@@ -2509,22 +2506,18 @@ export const useThreeGameStore = create((set, get) => ({
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
         ...data,
         narration,
-        fieldNote: '',
-        educationalNote: '',
       }, state, resolved ? `${constraint.type}-resolved` : `${constraint.type}-failed`, {
-        allowFieldNote: false,
         allowThought: false,
       })),
     };
   }),
 
   applyNarration: (data, options = {}) => set(state => {
-    const allowFieldNote = options.allowFieldNote ?? shouldAllowLlmFieldNote(data, options.playerInput || '');
     const allowThought = options.allowThought ?? shouldAllowLlmThought(data, options.playerInput || '', state);
     const narratedWeather = data.weather ? normalizeWeatherState(data.weather, null) : null;
     return {
       message: data.narration || state.message,
-      educationalNote: allowFieldNote && data.educationalNote ? data.educationalNote : state.educationalNote,
+      educationalNote: state.educationalNote,
       weather: narratedWeather || state.weather,
       // Hold narration weather for ~90 game minutes before the island
       // simulation takes the sky back.
@@ -2533,7 +2526,6 @@ export const useThreeGameStore = create((set, get) => ({
         : state.weatherOverride,
       sounds: Array.isArray(data.sounds) ? data.sounds.slice(0, 3) : state.sounds,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents(data, state, data.source || 'llm', {
-        allowFieldNote,
         allowThought,
       })),
     };
@@ -2758,7 +2750,7 @@ export const useThreeGameStore = create((set, get) => ({
         narratorPending: false,
         narratorError: String(error?.message || error || 'Narration unavailable.'),
       });
-      get().applyNarration(fallback, { playerInput: trimmed, allowFieldNote: false, allowThought: false });
+      get().applyNarration(fallback, { playerInput: trimmed, allowThought: false });
       return fallback;
     }
   },
@@ -2871,8 +2863,7 @@ export const useThreeGameStore = create((set, get) => ({
       narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
         narration: message,
         symsLine: '"We mark the spot and give it time, sir."',
-        fieldNote: 'A passive snare works by patience: placement, animal paths, and disturbance matter more than speed.',
-      }, current, 'snare-set', { allowFieldNote: true })),
+      }, current, 'snare-set')),
     }));
     return trap;
   },
@@ -3139,8 +3130,7 @@ export const useThreeGameStore = create((set, get) => ({
           symsLine: collected
             ? `Syms keeps one finger on the twine while labeling the ${resolvedSpecimen.name}. "Neat work, sir."`
             : '"Worth noting even so, sir. Something passed this way."',
-          fieldNote: educationalNote,
-        }, current, collected ? 'snare-collection' : 'snare-check', { allowFieldNote: true })),
+        }, current, collected ? 'snare-collection' : 'snare-check')),
       };
     });
     return result;
@@ -3289,7 +3279,7 @@ export const useThreeGameStore = create((set, get) => ({
             ? [createNarratorEvent({
                 kind: 'npcActivity',
                 speaker: 'Syms Covington',
-                text: encounterAmbientLine('syms_covington', 'collected'),
+                text: encounterAmbientLine('syms_covington', 'collected', current.npcEncounterState?.syms_covington),
                 day: current.day,
                 timeOfDay: current.timeOfDay,
                 source: 'collection-npc-activity',

@@ -31,6 +31,44 @@ export function getNpcEncounter(npcId) {
   return NPC_ENCOUNTERS[npcId] || null;
 }
 
+export function getNpcEncounterPresentation(npcId, relation = {}) {
+  const encounter = getNpcEncounter(npcId);
+  if (!encounter) return null;
+  const flags = new Set(relation.flags || []);
+  const trust = Math.max(0, Math.min(100, Number(relation.trust) || 50));
+  if (npcId !== 'syms_covington') return encounter;
+  if (flags.has('offered_practical_help')) {
+    return {
+      ...encounter,
+      opener: '“I have put the labels, twine, and spare paper where you can reach them, sir. What shall we make of the day?”',
+      suggestedReplies: ['What work needs doing next?', 'Let us review the specimens we have gathered.'],
+    };
+  }
+  if (flags.has('discussed_specimens') || trust >= 60) {
+    return {
+      ...encounter,
+      opener: '“The specimen case is in better order than yesterday, sir. I have been thinking about the labels.”',
+      suggestedReplies: ['What have you noticed about the specimens?', 'What work needs doing next?'],
+    };
+  }
+  return encounter;
+}
+
+export function clampNpcEncounterEffects(npcId, effects = {}) {
+  const encounter = getNpcEncounter(npcId);
+  if (!encounter) return { trustDelta: 0, flags: [] };
+  const allowedFlags = new Set(encounter.allowedFlags || []);
+  const flags = Array.isArray(effects.flags)
+    ? effects.flags
+      .map(flag => String(flag || '').replace(/^.*:/, '').replace(/[^a-z0-9_]/gi, '').toLowerCase())
+      .filter(flag => allowedFlags.has(flag))
+    : [];
+  return {
+    trustDelta: Math.max(-5, Math.min(5, Math.round(Number(effects.trustDelta) || 0))),
+    flags: [...new Set(flags)],
+  };
+}
+
 export function getNearestNpcEncounter(zoneId, position) {
   if (!zoneId || !position) return null;
   const poses = getNpcPoses(zoneId);
@@ -47,6 +85,10 @@ export function getNearestNpcEncounter(zoneId, position) {
   return nearest;
 }
 
-export function encounterAmbientLine(npcId, event = 'nearby') {
-  return getNpcEncounter(npcId)?.ambient?.[event] || null;
+export function encounterAmbientLine(npcId, event = 'nearby', relation = {}) {
+  const encounter = getNpcEncounter(npcId);
+  if (npcId === 'syms_covington' && event === 'nearby' && (relation.flags || []).includes('offered_practical_help')) {
+    return 'Syms has already laid out twine and labels near the specimen bag, anticipating the next task.';
+  }
+  return encounter?.ambient?.[event] || null;
 }

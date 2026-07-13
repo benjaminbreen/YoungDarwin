@@ -48,11 +48,15 @@ export const DRY_FLOREANA_TEXTURE_SETS = {
     paleFlecksNormal: '/assets/textures/world/floreana-pbr/olivine-beach_normal.png',
     paleFlecksRoughness: '/assets/textures/world/floreana-pbr/olivine-beach_roughness.png',
     paleFlecksHeight: '/assets/textures/world/floreana-pbr/olivine-beach_height.png',
+    baseSand: '/assets/textures/world/floreana-pbr/galapagos-sand_albedo.png',
+    baseSandRoughness: '/assets/textures/world/floreana-pbr/galapagos-sand_roughness.png',
+    baseSandHeight: '/assets/textures/world/floreana-pbr/galapagos-sand_height.png',
     fallbacks: {
       redDirt: '#b47b3c',
       shoulderGround: '#7a7153',
       dryGrassGround: '#8b7d50',
       paleFlecks: '#d5c7a3',
+      baseSand: '#c9a878',
     },
   },
 };

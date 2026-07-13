@@ -178,5 +178,4 @@ export type ExpeditionState = {
   bookLastPages: Record<string, number>;
   visitedZoneIds: ZoneId[];
   visitedLocalCellIds: LocalCellId[];
-  npcEncounterState: Record<string, { trust: number; flags: string[] }>;
 };

@@ -57,7 +57,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
 
   return (
     <>
-      {settings.terrain !== false && <Terrain />}
+      {settings.terrain !== false && <Terrain segmentCap={settings.terrainSegmentCap} />}
       {settings.terrain !== false && <BorderVistas />}
       <PhysicsTerrain />
       {settings.landmarks !== false && <Landmarks />}

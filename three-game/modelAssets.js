@@ -758,7 +758,7 @@ export const modelAssets = {
     enabled: true,
     preload: false,
     path: '/assets/models/structures/lawson-house-interior.glb',
-    cacheKey: 'lawson-house-authored-shell-20260712',
+    cacheKey: 'lawson-house-public-suite-optimized-20260712',
     scale: 1,
     rotation: [0, 0, 0],
     yOffset: 0,

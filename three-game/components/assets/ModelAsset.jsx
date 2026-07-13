@@ -19,6 +19,7 @@ import {
 } from '../player/darwin5AnimationManifest.mjs';
 import { createFootContactRig } from '../player/footContactRig';
 import { getFootContactProfile } from '../player/gaitProfiles';
+import { createLazyAnimationActions } from './lazyAnimationActions';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin',
@@ -856,25 +857,12 @@ function GLBPrimitive({
   const debugSize = useMemo(() => new THREE.Vector3(), []);
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
   const animLodWorldPos = useMemo(() => new THREE.Vector3(), []);
-  const actions = useMemo(() => {
-    const result = {};
-    animations.forEach(clip => {
-      result[clip.name] = mixer.clipAction(clip, importedScene);
-    });
-    return result;
-  }, [animations, importedScene, mixer]);
-  const actionLookup = useMemo(() => {
-    const lookup = new Map();
-    Object.entries(actions).forEach(([key, action]) => {
-      if (!action) return;
-      const clipName = action.getClip()?.name || key;
-      lookup.set(key, action);
-      lookup.set(clipName, action);
-      lookup.set(normalizeClipName(key), action);
-      lookup.set(normalizeClipName(clipName), action);
-    });
-    return lookup;
-  }, [actions]);
+  const lazyActions = useMemo(() => createLazyAnimationActions({
+    animations,
+    mixer,
+    root: importedScene,
+    normalizeClipName,
+  }), [animations, importedScene, mixer]);
   const positionAnimatedBones = useMemo(() => {
     const result = new Set();
     animations.forEach(clip => {
@@ -923,9 +911,8 @@ function GLBPrimitive({
   }), [asset.path, assetId, reflect]);
 
   const getAction = useCallback((name) => {
-    if (!name) return null;
-    return actionLookup.get(name) || actionLookup.get(normalizeClipName(name)) || null;
-  }, [actionLookup]);
+    return lazyActions.get(name);
+  }, [lazyActions]);
 
   const animationDebugEnabled = useMemo(modelAnimationDebugEnabled, []);
   const lastHeldAnimationDebugAt = useRef(-Infinity);
@@ -938,7 +925,8 @@ function GLBPrimitive({
       timeScale: action?.getEffectiveTimeScale?.() ?? null,
       weight: action?.getEffectiveWeight?.() ?? null,
       ...metadata,
-      available: Object.keys(actions),
+      available: lazyActions.availableNames,
+      loadedActions: lazyActions.size,
     };
     window.__modelAnimationDebug = {
       ...(window.__modelAnimationDebug || {}),
@@ -947,7 +935,7 @@ function GLBPrimitive({
     if (String(assetId).startsWith('darwin')) {
       window.__darwinAnimationDebug = debugPayload;
     }
-  }, [actions, animationDebugEnabled, assetId]);
+  }, [animationDebugEnabled, assetId, lazyActions]);
 
   const playAnimation = useCallback((request) => {
     const normalized = normalizeAnimationRequest(request);
@@ -963,7 +951,7 @@ function GLBPrimitive({
     if (!next) {
       if (requestedClip && !warnedMissing.current.has(requestedClip)) {
         warnedMissing.current.add(requestedClip);
-        console.warn(`Missing GLB animation clip: ${requestedClip}`, Object.keys(actions));
+        console.warn(`Missing GLB animation clip: ${requestedClip}`, lazyActions.availableNames);
       }
       publishAnimationDebug(requestedClip, activeAction.current, { missing: true });
       return false;
@@ -1008,7 +996,7 @@ function GLBPrimitive({
     activeRequest.current = requestedClip;
     publishAnimationDebug(requestedClip, next, { fade: transitionFade, oneShot });
     return true;
-  }, [actions, animationDebugEnabled, getAction, publishAnimationDebug]);
+  }, [animationDebugEnabled, assetId, getAction, lazyActions, publishAnimationDebug]);
 
   useEffect(() => {
     normalizeImportedMaterials(importedScene, asset, motion);
@@ -1059,17 +1047,16 @@ function GLBPrimitive({
   }, [animations, importedScene, overlayMixer]);
 
   useEffect(() => {
-    const first = getAction('idle') ? 'idle' : animations[0]?.name;
+    const first = lazyActions.has('idle') ? 'idle' : animations[0]?.name;
     const selector = animationSelectorRef.current;
     const initial = selector ? selector() : first;
-    Object.values(actions).forEach(item => item?.stop());
     playAnimation(initial || { clip: first, fade: 0.15 });
     return () => {
-      Object.values(actions).forEach(item => item?.stop());
+      lazyActions.dispose();
       activeAction.current = null;
       activeRequest.current = null;
     };
-  }, [actions, animations, getAction, playAnimation]);
+  }, [animations, lazyActions, playAnimation]);
 
   useEffect(() => () => footContactRig.dispose(), [footContactRig]);
 

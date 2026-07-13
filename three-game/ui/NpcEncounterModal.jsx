@@ -5,10 +5,14 @@ import { getNpcEncounter } from '../encounters/npcEncounters';
 import { setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 
-function EncounterTurn({ turn }) {
+function EncounterTurn({ turn, featured = false }) {
   const isPlayer = turn.role === 'player';
   return (
-    <p className={isPlayer ? 'text-expedition-parchment/78 italic' : 'text-expedition-parchment'}>
+    <p className={isPlayer
+      ? 'text-expedition-parchment/78 italic'
+      : featured
+        ? 'font-expedition text-[1.2rem] font-medium leading-[1.37] text-expedition-parchment sm:text-[1.32rem]'
+        : 'text-expedition-parchment'}>
       {isPlayer ? `You: ${turn.text}` : turn.text}
     </p>
   );
@@ -48,9 +52,7 @@ export function NpcEncounterModal() {
 
   if (!active || !encounter) return null;
   const turns = active.turns || [];
-  const npcTurns = turns.filter(turn => turn.role === 'npc');
-  const latestNpcTurn = npcTurns.at(-1);
-  const earlierTurns = turns.slice(0, Math.max(0, turns.length - 1));
+  const visibleTurns = turns.slice(-5);
   const submitReply = value => {
     const text = String(value || '').trim();
     if (!text || pending) return;
@@ -86,12 +88,13 @@ export function NpcEncounterModal() {
           </button>
           <div ref={transcriptRef} className="min-h-0 flex-1 overflow-y-auto pr-1 sm:pr-3">
             <div className="max-w-[50rem] space-y-2 pb-5 pr-7 sm:pb-7">
-              {earlierTurns.length > 1 && (
-                <div className="space-y-2 border-l-2 border-[#527b77]/55 pl-3 text-[0.98rem] leading-[1.34] sm:text-[1.05rem]">
-                  {earlierTurns.slice(-4).map((turn, index) => <EncounterTurn key={`${turn.role}-${index}-${turn.text}`} turn={turn} />)}
-                </div>
-              )}
-              {latestNpcTurn && <p className="font-expedition text-[1.2rem] font-medium leading-[1.37] text-expedition-parchment sm:text-[1.32rem]">{latestNpcTurn.text}</p>}
+              {visibleTurns.map((turn, index) => (
+                <EncounterTurn
+                  key={`${turn.role}-${index}-${turn.text}`}
+                  turn={turn}
+                  featured={turn.role === 'npc' && index === visibleTurns.length - 1}
+                />
+              ))}
               {pending && <p className="font-expedition text-[1.05rem] italic text-expedition-faded">Syms considers the matter…</p>}
               {error && !pending && <p className="text-[0.82rem] italic text-expedition-faded">{error}</p>}
             </div>

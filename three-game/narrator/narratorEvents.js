@@ -10,8 +10,6 @@ const DEFAULT_SPEAKERS = {
   hotkeys: 'Narrator',
 };
 
-const FIELDWORK_COMMAND_RE = /\b(?:observe|study|inspect|examine|document|sketch|draw|collect|sample|survey|measure|note|record|classify|compare|label|preserve|use|look closely)\b/i;
-const BLOCKED_DISPOSITIONS = new Set(['impossible', 'needs_modal', 'unsafe', 'ignored', 'unavailable']);
 const THOUGHT_TARGETS = new Set(['setting', 'specimen']);
 
 function hashNumber(value) {
@@ -76,14 +74,6 @@ export function createInitialNarratorLog(initialNarration, {
   ]);
 }
 
-export function shouldAllowLlmFieldNote(payload = {}, playerInput = '') {
-  const fieldNote = String(payload.fieldNote || '').trim();
-  if (!fieldNote) return false;
-  const disposition = String(payload.actionDisposition || '').toLowerCase();
-  if (BLOCKED_DISPOSITIONS.has(disposition)) return false;
-  return FIELDWORK_COMMAND_RE.test(playerInput);
-}
-
 export function shouldAllowLlmThought(payload = {}, playerInput = '', state = {}) {
   const thought = String(payload.darwinThought || '').trim();
   if (!thought) return false;
@@ -96,7 +86,6 @@ export function shouldAllowLlmThought(payload = {}, playerInput = '', state = {}
 }
 
 export function narrationPayloadToEvents(data = {}, state = {}, source = 'scripted', {
-  allowFieldNote = false,
   allowThought = false,
 } = {}) {
   return [

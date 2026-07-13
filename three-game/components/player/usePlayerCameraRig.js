@@ -21,6 +21,7 @@ export function usePlayerCameraRig() {
   const yawRef = useRef(0);
   const pitchRef = useRef(CAMERA.defaultPitch);
   const zoomRef = useRef(CAMERA.defaultZoom);
+  const cameraProfileRef = useRef(null);
   const draggingRef = useRef(false);
   const panningRef = useRef(false);
   const panOffsetRef = useRef(new THREE.Vector3());
@@ -277,6 +278,19 @@ export function usePlayerCameraRig() {
     now,
     delta,
   }) => {
+    if (cameraProfileRef.current !== cameraProfile) {
+      cameraProfileRef.current = cameraProfile;
+      if (Number.isFinite(cameraProfile?.defaultDistance)) {
+        zoomRef.current = THREE.MathUtils.clamp(
+          cameraProfile.defaultDistance,
+          cameraProfile.minDistance ?? CAMERA.minZoom,
+          cameraProfile.maxDistance ?? CAMERA.maxZoom,
+        );
+      }
+      if (Number.isFinite(cameraProfile?.defaultPitch)) {
+        pitchRef.current = THREE.MathUtils.clamp(cameraProfile.defaultPitch, CAMERA.minPitch, CAMERA.maxPitch);
+      }
+    }
     // Sprint FOV widen eases in over ~0.4s and back out a touch quicker.
     sprintBlendRef.current = THREE.MathUtils.damp(
       sprintBlendRef.current,
@@ -568,7 +582,9 @@ export function usePlayerCameraRig() {
           swimDistanceBias,
         );
       const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
-      const side = flightCamera?.side ?? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimSideBias);
+      const side = flightCamera?.side
+        ?? cameraProfile?.side
+        ?? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimSideBias);
       const pitchA = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
       const swimPitchBias = SWIM_POLISH.enabled ? SWIM_POLISH.cameraPitchBias : 0.92;
       const effectivePitch = flightCamera?.pitch != null

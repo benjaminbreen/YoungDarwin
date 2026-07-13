@@ -1,5 +1,5 @@
 import { npcs } from '../../data/npcs';
-import { getNpcEncounter } from '../../three-game/encounters/npcEncounters';
+import { clampNpcEncounterEffects, getNpcEncounter } from '../../three-game/encounters/npcEncounters';
 import { generateLLMText } from '../../utils/server/llmProvider';
 import { getRequestIdentity } from '../../utils/server/llmSafety';
 
@@ -30,16 +30,11 @@ function fallbackReply(npc) {
   return 'The conversation falters for a moment, though the person before you remains attentive.';
 }
 
-function normalizeReply(payload, npcId, encounter) {
-  const allowedFlags = new Set(encounter?.allowedFlags || []);
-  const proposedFlags = list(payload?.flags, 4)
-    .map(flag => String(flag).replace(/^.*:/, '').replace(/[^a-z0-9_]/gi, '').toLowerCase())
-    .filter(flag => allowedFlags.has(flag));
-  const trustDelta = Math.max(-5, Math.min(5, Math.round(Number(payload?.trustDelta) || 0)));
+function normalizeReply(payload, npcId) {
+  const effects = clampNpcEncounterEffects(npcId, payload);
   return {
     dialogue: text(payload?.dialogue, fallbackReply(npcs.find(item => item.id === npcId))),
-    trustDelta,
-    flags: [...new Set(proposedFlags)],
+    ...effects,
   };
 }
 
@@ -49,10 +44,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let npc = null;
   try {
     const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
     const npcId = text(body.npcId);
-    const npc = npcs.find(item => item.id === npcId);
+    npc = npcs.find(item => item.id === npcId);
     const encounter = getNpcEncounter(npcId);
     const playerInput = text(body.playerInput);
     if (!npc || !encounter || !playerInput) {
@@ -105,7 +101,7 @@ Return JSON only:
       maxTokens: 260,
     });
     return res.status(200).json({
-      ...normalizeReply(parseJSON(result.text), npcId, encounter),
+      ...normalizeReply(parseJSON(result.text), npcId),
       provider: result.provider,
       model: result.model,
       fallbackFrom: result.fallbackFrom || null,
@@ -114,7 +110,7 @@ Return JSON only:
   } catch (error) {
     console.error('three-encounter error:', error);
     return res.status(200).json({
-      dialogue: fallbackReply(null),
+      dialogue: fallbackReply(npc),
       trustDelta: 0,
       flags: [],
       fallback: true,

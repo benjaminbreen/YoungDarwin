@@ -9,6 +9,6 @@ export function createPostOfficeBayTerrainMaterial() {
     pathPoints: POST_OFFICE_BAY_PATH_POINTS,
     pathClearings: [POST_OFFICE_BAY_BARREL_CLEARING],
     textureSet: DRY_FLOREANA_TEXTURE_SETS.sandyCoastal,
-    cacheKey: 'post-office-bay-coastal-volcanic-with-standard-path-v1',
+    cacheKey: 'post-office-bay-coastal-volcanic-with-standard-path-v2',
   });
 }

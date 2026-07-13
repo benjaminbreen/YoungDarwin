@@ -29,6 +29,11 @@ const LARGE_ROCK_DOWNHILL_PUSH = {
   minDownhillDrop: 0.035,
   maxOffset: 0.42,
 };
+const OBSTACLE_INDEX_CELL_SIZE = 12;
+const OBSTACLE_INDEX_MIN_COUNT = 8;
+const EMPTY_OBSTACLE_CANDIDATES = Object.freeze([]);
+const obstacleSpatialIndexCache = new WeakMap();
+const staticRuntimeObstacleCache = new Map();
 
 const REGION_OBSTACLE_SOURCES = {
   POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
@@ -47,6 +52,99 @@ const REGION_OBSTACLE_SOURCES = {
   LAWSON_HOUSE: [getLawsonHouseObstacles],
   WATKINS: [getWatkinsCampObstacles],
 };
+
+function obstacleCellCoordinate(value, cellSize = OBSTACLE_INDEX_CELL_SIZE) {
+  return Math.floor((Number(value) || 0) / cellSize);
+}
+
+function obstacleCellKey(cellX, cellZ) {
+  return `${cellX}:${cellZ}`;
+}
+
+function obstacleBroadphaseRadius(obstacle) {
+  return Math.max(0.05, Number(obstacle?.radius) || 0.5);
+}
+
+function buildObstacleSpatialIndex(obstacles) {
+  const cells = new Map();
+  const order = new Map();
+  for (let index = 0; index < obstacles.length; index += 1) {
+    const obstacle = obstacles[index];
+    order.set(obstacle, index);
+    const radius = obstacleBroadphaseRadius(obstacle);
+    const minCellX = obstacleCellCoordinate(obstacle.x - radius);
+    const maxCellX = obstacleCellCoordinate(obstacle.x + radius);
+    const minCellZ = obstacleCellCoordinate(obstacle.z - radius);
+    const maxCellZ = obstacleCellCoordinate(obstacle.z + radius);
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+        const key = obstacleCellKey(cellX, cellZ);
+        const cell = cells.get(key);
+        if (cell) cell.push(obstacle);
+        else cells.set(key, [obstacle]);
+      }
+    }
+  }
+  return {
+    cells,
+    order,
+    queryCache: new Map(),
+  };
+}
+
+function obstacleSpatialIndex(obstacles) {
+  let index = obstacleSpatialIndexCache.get(obstacles);
+  if (!index) {
+    index = buildObstacleSpatialIndex(obstacles);
+    obstacleSpatialIndexCache.set(obstacles, index);
+  }
+  return index;
+}
+
+// Static authored obstacles are broad-phased into a coarse X/Z grid. Runtime
+// offset changes create a new obstacle array (and therefore a new index), while
+// repeated player/fauna/camera queries reuse the same cached cell result.
+export function queryObstacleBounds(obstacles, minX, minZ, maxX, maxZ) {
+  if (!Array.isArray(obstacles) || obstacles.length < OBSTACLE_INDEX_MIN_COUNT) return obstacles || EMPTY_OBSTACLE_CANDIDATES;
+  if (![minX, minZ, maxX, maxZ].every(Number.isFinite)) return obstacles;
+  const startCellX = obstacleCellCoordinate(Math.min(minX, maxX));
+  const endCellX = obstacleCellCoordinate(Math.max(minX, maxX));
+  const startCellZ = obstacleCellCoordinate(Math.min(minZ, maxZ));
+  const endCellZ = obstacleCellCoordinate(Math.max(minZ, maxZ));
+  const index = obstacleSpatialIndex(obstacles);
+  const queryKey = `${startCellX}:${endCellX}:${startCellZ}:${endCellZ}`;
+  const cached = index.queryCache.get(queryKey);
+  if (cached) return cached;
+
+  if (startCellX === endCellX && startCellZ === endCellZ) {
+    const cell = index.cells.get(obstacleCellKey(startCellX, startCellZ)) || EMPTY_OBSTACLE_CANDIDATES;
+    index.queryCache.set(queryKey, cell);
+    return cell;
+  }
+
+  const seen = new Set();
+  const candidates = [];
+  for (let cellX = startCellX; cellX <= endCellX; cellX += 1) {
+    for (let cellZ = startCellZ; cellZ <= endCellZ; cellZ += 1) {
+      const cell = index.cells.get(obstacleCellKey(cellX, cellZ));
+      if (!cell) continue;
+      for (const obstacle of cell) {
+        if (seen.has(obstacle)) continue;
+        seen.add(obstacle);
+        candidates.push(obstacle);
+      }
+    }
+  }
+  candidates.sort((a, b) => index.order.get(a) - index.order.get(b));
+  const result = candidates.length ? candidates : EMPTY_OBSTACLE_CANDIDATES;
+  index.queryCache.set(queryKey, result);
+  return result;
+}
+
+export function queryObstaclesNear(obstacles, x, z, radius = 0) {
+  const padding = Math.max(0, Number(radius) || 0);
+  return queryObstacleBounds(obstacles, x - padding, z - padding, x + padding, z + padding);
+}
 
 function flattenCollider(collider) {
   if (!collider) return [];
@@ -235,12 +333,19 @@ function applyRuntimeObstacleOffset(obstacle, zoneId = currentZoneId, offsets = 
 }
 
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
+  const hasRuntimeOffsets = offsets && Object.keys(offsets).length > 0;
+  if (!hasRuntimeOffsets) {
+    const cached = staticRuntimeObstacleCache.get(zoneId);
+    if (cached) return cached;
+  }
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
   const withMobility = obstacles => obstacles.map(applyObstacleMobility);
   const regional = (REGION_OBSTACLE_SOURCES[zoneId] || [])
     .flatMap(source => source())
     .map(obstacle => applyRuntimeObstacleOffset(obstacle, zoneId, offsets));
-  return withMobility([...mapped, ...regional]);
+  const runtimeObstacles = withMobility([...mapped, ...regional]);
+  if (!hasRuntimeOffsets) staticRuntimeObstacleCache.set(zoneId, runtimeObstacles);
+  return runtimeObstacles;
 }
 
 export const FLOREANA_OBSTACLES = getRuntimeObstacles();
@@ -545,7 +650,8 @@ function obstacleSurfaceDistance(obstacle, position, playerRadius = 0.42) {
 
 export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
   let supported = null;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstaclesNear(obstacles, x, z, playerRadius);
+  for (const obstacle of candidates) {
     if (!obstacle.jumpable && !obstacle.traversal) continue;
     const traversalTop = traversalSupportHeightAt(obstacle, x, z, playerRadius);
     if (traversalTop !== null && traversalTop !== undefined && playerY >= obstacleBaseY(obstacle) - 0.18) {
@@ -565,7 +671,8 @@ export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obs
 export function getSupportedObstacle(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
   let supported = null;
   let supportedTop = -Infinity;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstaclesNear(obstacles, x, z, playerRadius);
+  for (const obstacle of candidates) {
     if (!obstacle.jumpable) continue;
     const top = obstacleTopAt(obstacle, x, z, playerRadius);
     if (top === null) continue;
@@ -604,7 +711,8 @@ export function findClimbTarget(position, facing, {
   obstacles = FLOREANA_OBSTACLES,
 } = {}) {
   let best = null;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstaclesNear(obstacles, position.x, position.z, playerRadius + maxReach);
+  for (const obstacle of candidates) {
     // Everything with a top is climbable unless explicitly opted out —
     // Darwin should be able to scramble up trees, boulders, and crates alike.
     if (obstacle.climbable === false) continue;
@@ -667,7 +775,8 @@ export function findTraversalTarget(position, movement, facing, {
   if (!direction || direction.lengthSq() < 0.0001) return null;
 
   let best = null;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstaclesNear(obstacles, position.x, position.z, playerRadius + maxReach);
+  for (const obstacle of candidates) {
     if (!obstacle.traversal) continue;
     if (obstacle.kind === 'rock' || obstacle.kind === 'boulder') continue;
     const height = obstacle.colliderTop - Math.min(0, obstacle.colliderBottom || 0);
@@ -717,7 +826,8 @@ export function resolveObstacleCollision(position, previousPosition, {
 } = {}) {
   const p = position.clone();
   let collided = null;
-  for (const obstacle of obstacles) {
+  const candidates = queryObstaclesNear(obstacles, p.x, p.z, playerRadius);
+  for (const obstacle of candidates) {
     const top = obstacleTopAt(obstacle, p.x, p.z, playerRadius) ?? obstacleTopY(obstacle);
     if (
       isWalkOverTraversalObstacle(obstacle, WALK_OVER_TRAVERSAL_MAX_HEIGHT)

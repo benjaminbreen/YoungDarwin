@@ -285,6 +285,7 @@ function CandlestickFlame({ offsetY = 0 }) {
     if (!light || !flameMesh) return;
     const store = useThreeGameStore.getState();
     const celestial = skyState(store.timeOfDay, store.day || 1);
+    const daylightHouse = store.currentZoneId === 'LAWSON_HOUSE';
     const darkness = THREE.MathUtils.clamp(
       celestial.night + weatherEnv.lightDim * 0.2 + weatherEnv.rainIntensity * 0.08,
       0,
@@ -293,8 +294,8 @@ function CandlestickFlame({ offsetY = 0 }) {
     const activation = THREE.MathUtils.smoothstep(darkness, 0.08, 0.92);
     const phase = clock.elapsedTime * 13.4 + phaseOffset;
     const flicker = 0.96 + Math.sin(phase) * 0.026 + Math.sin(phase * 1.87) * 0.014;
-    light.intensity = THREE.MathUtils.lerp(0.14, 3.25, activation) * flicker;
-    flame.emissiveIntensity = THREE.MathUtils.lerp(2.45, 4.4, activation) * flicker;
+    light.intensity = THREE.MathUtils.lerp(daylightHouse ? 0.005 : 0.14, 3.25, activation) * flicker;
+    flame.emissiveIntensity = THREE.MathUtils.lerp(daylightHouse ? 0.035 : 2.45, 4.4, activation) * flicker;
     flameMesh.scale.set(0.74, 1.28 + Math.sin(phase * 0.83) * 0.06, 0.74);
   });
 
@@ -330,7 +331,9 @@ export function PropVisual({ visual, assetId, offsetY = 0 }) {
           sourceLabel={assetId}
           sourceKind="physics-prop-visual"
         />
-        {visual === 'cabinCandlestick' && <CandlestickFlame offsetY={(asset.yOffset || 0) + offsetY} />}
+        {visual === 'cabinCandlestick' && (
+          <CandlestickFlame offsetY={(asset.yOffset || 0) + offsetY + 0.435} />
+        )}
       </group>
     );
   }

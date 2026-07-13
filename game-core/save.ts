@@ -1,6 +1,6 @@
 import type { ExpeditionState } from './types';
 
-export const EXPEDITION_CORE_SCHEMA_VERSION = 5;
+export const EXPEDITION_CORE_SCHEMA_VERSION = 4;
 const initialRegionId = 'POST_OFFICE_BAY';
 
 export function createInitialExpeditionState(seed = 'three-darwin-v1'): ExpeditionState {
@@ -38,7 +38,6 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
     bookLastPages: {},
     visitedZoneIds: [initialRegionId],
     visitedLocalCellIds: ['POST_OFFICE_BAY'],
-    npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
   };
 }
 
@@ -63,8 +62,5 @@ export function migrateLegacyExpeditionSave(saved: Record<string, unknown> | nul
     bookLastPages: saved.bookLastPages && typeof saved.bookLastPages === 'object'
       ? saved.bookLastPages as Record<string, number>
       : initial.bookLastPages,
-    npcEncounterState: saved.npcEncounterState && typeof saved.npcEncounterState === 'object'
-      ? saved.npcEncounterState as ExpeditionState['npcEncounterState']
-      : initial.npcEncounterState,
   };
 }
