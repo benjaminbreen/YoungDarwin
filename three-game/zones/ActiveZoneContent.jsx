@@ -27,21 +27,26 @@ import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 
-export function ActiveZoneContent({ settings, deferredContentReady = true }) {
+export function ActiveZoneContent({ settings, contentPhase = 6 }) {
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
+  const gameplayReady = stagedPhase >= 1;
+  const environmentReady = stagedPhase >= 2;
+  const interactablesReady = stagedPhase >= 3;
+  const actorsReady = stagedPhase >= 4;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
   const interior = getInteriorDefinition(currentZoneId);
   const specimens = useMemo(
     () => {
-      if (!deferredContentReady) return [];
+      if (!interactablesReady) return [];
       const collected = new Set(collectedSpecimenActorIds || []);
       return getThreeSpecimens(currentZoneId).filter(specimen => {
         const actorId = specimen.instanceId || specimen.id;
         return actorId !== playableHiddenActorId && !collected.has(actorId);
       });
     },
-    [collectedSpecimenActorIds, currentZoneId, deferredContentReady, playableHiddenActorId],
+    [collectedSpecimenActorIds, currentZoneId, interactablesReady, playableHiddenActorId],
   );
 
   if (interior) {
@@ -49,7 +54,7 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       <>
         <PhysicsTerrain />
         {settings.physicsObstacles !== false && <PhysicsObstacles />}
-        {settings.physicsProps !== false && <PhysicsProps />}
+        {gameplayReady && settings.physicsProps !== false && <PhysicsProps />}
         <Suspense fallback={null}>
           <InteriorZone />
         </Suspense>
@@ -63,27 +68,27 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       {settings.terrain !== false && <BorderVistas />}
       <PhysicsTerrain />
       {settings.landmarks !== false && <Landmarks />}
-      {deferredContentReady && settings.worldDetails !== false && (
+      {environmentReady && settings.worldDetails !== false && (
         <Suspense fallback={null}>
           <WorldDetails settings={settings} />
         </Suspense>
       )}
       {settings.physicsObstacles !== false && <PhysicsObstacles />}
-      {settings.physicsProps !== false && <PhysicsProps />}
-      {settings.physicsProps !== false && <PricklyPearField />}
-      {settings.physicsProps !== false && <LavaCactusField />}
-      {settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
-      {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
-      {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
-      {settings.waterSplashes !== false && <WaterSplashes />}
-      {deferredContentReady && <SnareTraps />}
-      {deferredContentReady && <AnimalDroppings />}
-      {deferredContentReady && settings.beagle !== false && (
+      {gameplayReady && settings.physicsProps !== false && <PhysicsProps />}
+      {environmentReady && settings.physicsProps !== false && <PricklyPearField />}
+      {environmentReady && settings.physicsProps !== false && <LavaCactusField />}
+      {environmentReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
+      {environmentReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
+      {environmentReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
+      {gameplayReady && settings.waterSplashes !== false && <WaterSplashes />}
+      {interactablesReady && <SnareTraps />}
+      {interactablesReady && <AnimalDroppings />}
+      {actorsReady && settings.beagle !== false && (
         <Suspense fallback={null}>
           <Beagle />
         </Suspense>
       )}
-      {currentZoneId === 'BEAGLE' && (
+      {actorsReady && currentZoneId === 'BEAGLE' && (
         <Suspense fallback={null}>
           <HmsBeagleDeck />
         </Suspense>
@@ -93,13 +98,13 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
           <SpecimenActor specimen={specimen} />
         </Suspense>
       ))}
-      {deferredContentReady && settings.worldDetails !== false && <ExaminableItems />}
-      {deferredContentReady && settings.syms !== false && (
+      {interactablesReady && settings.worldDetails !== false && <ExaminableItems />}
+      {actorsReady && settings.syms !== false && (
         <Suspense fallback={null}>
           <SymsCovington />
         </Suspense>
       )}
-      {deferredContentReady && settings.npcDarwin !== false && (
+      {actorsReady && settings.npcDarwin !== false && (
         <Suspense fallback={null}>
           <AnimalModeDarwinNpc />
         </Suspense>

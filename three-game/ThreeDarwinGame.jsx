@@ -192,12 +192,12 @@ const QUALITY_PRESETS = {
   },
 };
 
-const BOOT_LOADER_STABLE_MS = 900;
-const BOOT_MIN_LOADING_MS = 1400;
+const BOOT_LOADER_STABLE_MS = 250;
+const BOOT_MIN_LOADING_MS = 800;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const DEFERRED_CONTENT_DELAY_MS = 350;
 const OPENING_CAMERA_DURATION_MS = 6200;
-const OPENING_CAMERA_MAX_MS = 10500;
+const STARTUP_FULL_CONTENT_PHASE = 6;
+const POST_INTRO_PHASE_TIMINGS_MS = [120, 420, 780, 1180, 1650, 2200];
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 
@@ -209,6 +209,30 @@ function normalizeShadowQuality(value, fallback = 'high') {
 function normalizeWaterQuality(value, fallback = 'polished') {
   const mode = String(value || '').toLowerCase();
   return WATER_QUALITY_MODES.includes(mode) ? mode : fallback;
+}
+
+function startupRenderSettings(settings, contentPhase, gameStarted) {
+  if (!gameStarted || contentPhase >= 5) return settings;
+  const terrainSegmentCap = settings.terrainSegmentCap == null
+    ? 160
+    : Math.min(160, settings.terrainSegmentCap);
+  return {
+    ...settings,
+    msaaSamples: 0,
+    shadowQuality: 'standard',
+    ao: false,
+    reflections: false,
+    waterQuality: 'performance',
+    weatherFX: contentPhase >= 2 && settings.weatherFX !== false,
+    splatBackdrop: false,
+    solarScreenGlare: false,
+    solarLensGhosts: false,
+    solarSceneFlares: false,
+    solarSunFacingGrade: false,
+    cheapMaterials: true,
+    foliageDrawScale: Math.min(0.75, settings.foliageDrawScale ?? 1),
+    terrainSegmentCap,
+  };
 }
 
 function getInitialPerfSettings() {
@@ -721,12 +745,72 @@ function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onRead
   return null;
 }
 
+function CriticalShaderWarmup({ enabled, sequenceId, onReady }) {
+  const gl = useThree(state => state.gl);
+  const scene = useThree(state => state.scene);
+  const camera = useThree(state => state.camera);
+  const completedSequence = useRef(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      completedSequence.current = null;
+      return undefined;
+    }
+    if (!sequenceId || completedSequence.current === sequenceId) return undefined;
+
+    let cancelled = false;
+    let compileTimeoutId = null;
+    const nextFrame = () => new Promise(resolve => window.requestAnimationFrame(resolve));
+    const warmCriticalScene = async () => {
+      // Let the final loaded model commit before asking Three to compile every
+      // material in the fixed intro scene. The launch overlay remains opaque.
+      await nextFrame();
+      await nextFrame();
+      if (typeof gl.compileAsync === 'function') {
+        try {
+          await Promise.race([
+            gl.compileAsync(scene, camera),
+            new Promise((_, reject) => {
+              compileTimeoutId = window.setTimeout(
+                () => reject(new Error('Critical shader warm-up timed out.')),
+                4000,
+              );
+            }),
+          ]);
+        } finally {
+          if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+          compileTimeoutId = null;
+        }
+      } else {
+        gl.compile(scene, camera);
+      }
+      await nextFrame();
+      if (cancelled) return;
+      completedSequence.current = sequenceId;
+      onReady();
+    };
+
+    warmCriticalScene().catch(error => {
+      if (cancelled) return;
+      // Shader warm-up is an optimization, not a reason to strand the player
+      // on the loading screen on an unusual WebGL implementation.
+      console.warn('Critical scene shader warm-up failed; continuing launch.', error);
+      completedSequence.current = sequenceId;
+      onReady();
+    });
+    return () => {
+      cancelled = true;
+      if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+    };
+  }, [camera, enabled, gl, onReady, scene, sequenceId]);
+
+  return null;
+}
+
 function OpeningIntroCompletion({
   active,
   sequenceId,
   durationMs,
-  maxMs,
-  assetProgressRef,
   onComplete,
 }) {
   const state = useRef({
@@ -752,9 +836,7 @@ function OpeningIntroCompletion({
 
     if (state.current.completed) return;
     const elapsed = now - state.current.startedAt;
-    const latestProgress = assetProgressRef.current || {};
-    const waitingOnAssets = latestProgress.active === true;
-    if (elapsed >= durationMs && (!waitingOnAssets || elapsed >= maxMs)) {
+    if (elapsed >= durationMs) {
       state.current.completed = true;
       onComplete();
     }
@@ -1321,8 +1403,9 @@ export default function ThreeDarwinGame() {
   const [launchState, setLaunchState] = useState('menu');
   const [sceneReady, setSceneReady] = useState(false);
   const [loadersStable, setLoadersStable] = useState(false);
+  const [criticalShadersReady, setCriticalShadersReady] = useState(false);
   const [displayedProgress, setDisplayedProgress] = useState(0);
-  const [deferredContentReady, setDeferredContentReady] = useState(false);
+  const [startupContentPhase, setStartupContentPhase] = useState(0);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
@@ -1337,17 +1420,25 @@ export default function ThreeDarwinGame() {
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const assetProgress = useProgress();
-  const assetProgressRef = useRef(assetProgress);
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const weather = useThreeGameStore(state => state.weather);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
-  const dpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
-  const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const gameStarted = launchState !== 'menu' && launchState !== 'character';
   const automationReadyMode = e2eMode || screenshotMode;
   const openingIntroActive = launchState === 'intro';
+  const scenePerfSettings = useMemo(
+    () => startupRenderSettings(perfSettings, startupContentPhase, gameStarted),
+    [gameStarted, perfSettings, startupContentPhase],
+  );
+  const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
+  const renderDpr = useMemo(() => {
+    if (!gameStarted || startupContentPhase >= STARTUP_FULL_CONTENT_PHASE) return configuredDpr;
+    if (startupContentPhase >= 5) return [1, Math.min(1.25, configuredDpr[1])];
+    return [1, 1];
+  }, [configuredDpr, gameStarted, startupContentPhase]);
+  const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const showLaunchOverlay = launchState === 'menu' || launchState === 'character' || !sceneReady;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
   const openingCamera = useMemo(() => ({
@@ -1358,20 +1449,19 @@ export default function ThreeDarwinGame() {
   const handleUnderwaterChange = useCallback(amount => {
     setUnderwaterAmount(amount);
   }, []);
-
-  useEffect(() => {
-    assetProgressRef.current = assetProgress;
-  }, [assetProgress]);
+  const markCriticalShadersReady = useCallback(() => {
+    setCriticalShadersReady(true);
+  }, []);
 
   // Mirror the material-quality knobs into the store so the scene's
   // material-building components (terrain, flora, trees) can react to them
   // without prop-threading through every layer.
   useEffect(() => {
     useThreeGameStore.getState().setGraphicsQuality({
-      cheapMaterials: perfSettings.cheapMaterials !== false,
-      foliageDrawScale: perfSettings.foliageDrawScale ?? 1,
+      cheapMaterials: scenePerfSettings.cheapMaterials !== false,
+      foliageDrawScale: scenePerfSettings.foliageDrawScale ?? 1,
     });
-  }, [perfSettings.cheapMaterials, perfSettings.foliageDrawScale]);
+  }, [scenePerfSettings.cheapMaterials, scenePerfSettings.foliageDrawScale]);
 
   // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
   // the buffer it draws into: the composer target when postprocessing is on,
@@ -1380,11 +1470,11 @@ export default function ThreeDarwinGame() {
   // once the Canvas mounts.
   useEffect(() => {
     setCoverageAASupport(
-      perfSettings.postprocessing
-        ? (perfSettings.msaaSamples ?? 0) > 0
-        : perfSettings.contextAntialias !== false,
+      scenePerfSettings.postprocessing
+        ? (scenePerfSettings.msaaSamples ?? 0) > 0
+        : scenePerfSettings.contextAntialias !== false,
     );
-  }, [perfSettings.contextAntialias, perfSettings.postprocessing, perfSettings.msaaSamples]);
+  }, [scenePerfSettings.contextAntialias, scenePerfSettings.postprocessing, scenePerfSettings.msaaSamples]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1465,6 +1555,7 @@ export default function ThreeDarwinGame() {
       if (loaderBusy) {
         loaderQuietSince.current = 0;
         setLoadersStable(false);
+        setCriticalShadersReady(false);
       } else {
         if (!loaderQuietSince.current) loaderQuietSince.current = now;
         const quietFor = now - loaderQuietSince.current;
@@ -1494,8 +1585,9 @@ export default function ThreeDarwinGame() {
     loaderQuietSince.current = 0;
     setDisplayedProgress(0);
     setLoadersStable(false);
+    setCriticalShadersReady(false);
     setSceneReady(false);
-    setDeferredContentReady(false);
+    setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
     setLaunchState('loading');
   };
@@ -1507,7 +1599,6 @@ export default function ThreeDarwinGame() {
     const skipIntro = skipOpeningIntro || skipOpeningIntroFromParams(params);
     setSceneReady(true);
     setDisplayedProgress(100);
-    setDeferredContentReady(false);
     if (mode.kind === 'animal' || skipIntro) {
       setOpeningIntroStartedAt(0);
       setLaunchState('playing');
@@ -1531,12 +1622,18 @@ export default function ThreeDarwinGame() {
   }, [automationReadyMode, e2eMode, gameStarted, markSceneReady, sceneReady, screenshotMode]);
 
   useEffect(() => {
-    if (!sceneReady) return undefined;
-    const handle = window.setTimeout(() => {
-      setDeferredContentReady(true);
-    }, DEFERRED_CONTENT_DELAY_MS);
-    return () => window.clearTimeout(handle);
-  }, [sceneReady]);
+    if (launchState !== 'playing') return undefined;
+    if (automationReadyMode) {
+      setStartupContentPhase(STARTUP_FULL_CONTENT_PHASE);
+      return undefined;
+    }
+    const handles = POST_INTRO_PHASE_TIMINGS_MS.map((delay, index) => (
+      window.setTimeout(() => {
+        setStartupContentPhase(current => Math.max(current, index + 1));
+      }, delay)
+    ));
+    return () => handles.forEach(handle => window.clearTimeout(handle));
+  }, [automationReadyMode, launchState]);
 
   return (
     <main className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
@@ -1544,8 +1641,8 @@ export default function ThreeDarwinGame() {
         {gameStarted && (
           <Canvas
             className="absolute inset-0 h-full w-full"
-            shadows={perfSettings.shadows}
-            dpr={dpr}
+            shadows={scenePerfSettings.shadows}
+            dpr={renderDpr}
             camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
             gl={{
               // With postprocessing on, the scene renders into the
@@ -1553,9 +1650,9 @@ export default function ThreeDarwinGame() {
               // is pure memory/resolve waste — composer `multisampling` (the
               // msaaSamples setting) is what provides real sample coverage.
               // Context AA only matters on the direct-to-canvas path (?noPost).
-              antialias: perfSettings.contextAntialias !== false && !perfSettings.postprocessing,
+              antialias: scenePerfSettings.contextAntialias !== false && !scenePerfSettings.postprocessing,
               powerPreference: 'high-performance',
-              preserveDrawingBuffer: perfSettings.preserveDrawingBuffer,
+              preserveDrawingBuffer: scenePerfSettings.preserveDrawingBuffer,
               toneMapping: ACESFilmicToneMapping,
               outputColorSpace: SRGBColorSpace,
             }}
@@ -1575,31 +1672,37 @@ export default function ThreeDarwinGame() {
             <SceneEnvironment />
             <Suspense fallback={null}>
               <ThreeScene
-                perfSettings={perfSettings}
-                deferredContentReady={deferredContentReady}
+                perfSettings={scenePerfSettings}
+                contentPhase={startupContentPhase}
                 openingCamera={openingCamera}
                 inputLocked={openingIntroActive}
               />
+              <CriticalShaderWarmup
+                enabled={loadersStable && !sceneReady}
+                sequenceId={bootStartedAt.current}
+                onReady={markCriticalShadersReady}
+              />
               <SceneReadySignal
-                loadingReady={loadersStable || e2eMode}
+                loadingReady={(loadersStable && criticalShadersReady) || e2eMode}
                 startedAtRef={bootStartedAt}
                 minElapsedMs={BOOT_MIN_LOADING_MS}
                 onReady={markSceneReady}
               />
             </Suspense>
             <PostFX
-              enabled={perfSettings.postprocessing}
-              ao={perfSettings.ao}
-              multisampling={perfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
+              enabled={scenePerfSettings.postprocessing}
+              ao={scenePerfSettings.ao}
+              multisampling={scenePerfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
               underwaterAmount={underwaterAmount}
             />
-            <AdaptiveResolution enabled={sceneReady && !openingIntroActive} maxDpr={dpr[1]} />
+            <AdaptiveResolution
+              enabled={sceneReady && !openingIntroActive && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              maxDpr={configuredDpr[1]}
+            />
             <OpeningIntroCompletion
               active={openingIntroActive}
               sequenceId={openingIntroStartedAt}
               durationMs={OPENING_CAMERA_DURATION_MS}
-              maxMs={OPENING_CAMERA_MAX_MS}
-              assetProgressRef={assetProgressRef}
               onComplete={() => setLaunchState('playing')}
             />
             <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
@@ -1634,12 +1737,12 @@ export default function ThreeDarwinGame() {
             {showPerf && perfSettings.stats && <Stats />}
           </Canvas>
         )}
-        {gameStarted && <CinematicScreenGrade enabled={perfSettings.postprocessing} weather={weather} />}
+        {gameStarted && <CinematicScreenGrade enabled={scenePerfSettings.postprocessing} weather={weather} />}
         {gameStarted && (
           <SolarScreenGlare
-            enabled={perfSettings.solarScreenGlare !== false || perfSettings.solarLensGhosts !== false}
-            wash={perfSettings.solarScreenGlare !== false}
-            lensGhostsEnabled={perfSettings.solarLensGhosts !== false}
+            enabled={scenePerfSettings.solarScreenGlare !== false || scenePerfSettings.solarLensGhosts !== false}
+            wash={scenePerfSettings.solarScreenGlare !== false}
+            lensGhostsEnabled={scenePerfSettings.solarLensGhosts !== false}
             suppression={underwaterAmount}
           />
         )}

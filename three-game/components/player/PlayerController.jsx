@@ -453,6 +453,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
   const viewMode = useThreeGameStore(state => state.viewMode);
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
+  const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
   const inventoryCount = useThreeGameStore(state => state.inventory.length);
@@ -953,7 +954,10 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     });
 
     const safeDelta = Math.min(delta, 0.05);
-    if (statusViewOpen) {
+    if (statusViewOpen || examineOpen) {
+      // Examination owns the camera and freezes player/world locomotion, while
+      // a low non-zero world scale keeps the subject's idle animation alive.
+      setWorldTimeTarget(examineOpen ? 0.18 : 1);
       finalizeFrame({
         moving: false,
         running: false,

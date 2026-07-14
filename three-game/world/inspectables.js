@@ -62,7 +62,10 @@ export function inferSpecimenRarity(specimen) {
   if (id.includes('scalesia') || latin.includes('grayii') || latin.includes('villosa')) return 'endemic';
   if (id.includes('basalt') || specimen?.ontology === 'Mineral') return 'common';
   if (id.includes('crab') || id.includes('finch')) return 'common';
-  return 'uncommon';
+  // Unauthored rarity should not flood the world with the scarce/green tier.
+  // Only explicitly scarce/endemic/historical specimens graduate from the
+  // calm common marker language.
+  return 'common';
 }
 
 function vectorPayload(position) {

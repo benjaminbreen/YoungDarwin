@@ -3,8 +3,8 @@
 // entirely from lofts and merged primitives — no GLB, no skinning — aiming at
 // the detail level of the retired photo-textured GLB rather than a toy:
 // angular lofted skull with a painted head map, pale gold dorsolateral
-// stripes over dark saddle blotches, scale-grain bump relief, socket-rimmed
-// amber eyes with slit pupils, and tapered limbs in an alert raised stance.
+// stripes over dark saddle blotches, scale-grain bump relief, dark lidded
+// eyes with a narrow amber iris ring, and tapered limbs in an alert stance.
 // Dimorphic variants: dark males with sooty throats, browner females with
 // the brick-red throat and cheeks and stronger cream striping.
 //
@@ -33,23 +33,23 @@ export const LAVA_LIZARD_VARIANTS = {
     lip: '#b7a582',
   },
   female: {
-    flank: '#6d5e47',
-    flankWash: '#82684a',
-    dorsal: '#463c2f',
-    belly: '#d3c4a3',
-    stripe: '#e2d3a4', // strong cream stripes
-    saddle: '#2c251c',
-    fleck: '#e6d7b2',
-    skin: '#6b5c48',
-    snout: '#584b3a',
-    brow: '#8c7a5f',
+    flank: '#75644b',
+    flankWash: '#8a6c4c',
+    dorsal: '#4a3f30',
+    belly: '#d8c9a8',
+    stripe: '#e8d9a9', // strong cream stripes
+    saddle: '#2a231a',
+    fleck: '#efe1bd',
+    skin: '#7c5540', // rusty head wash — the female's red face
+    snout: '#69452f',
+    brow: '#9a6e4e',
     throat: '#b8452f', // the brick-red throat
-    cheek: '#a94a33',
-    leg: '#5d5040',
-    lip: '#cbb890',
+    cheek: '#bb4f2e',
+    leg: '#60513f',
+    lip: '#d3bf95',
   },
 };
-export const EYE_IRIS = '#b8862c';
+export const EYE_IRIS = '#a06b22';
 export const EYE_PUPIL = '#131009';
 export const TONGUE_COLOR = '#7c2532';
 export const SKIN_ROUGHNESS = 0.78;
@@ -59,16 +59,36 @@ export const BUMP_SCALE = 0.45;
 // belly. The gait config below re-exports it so animator and rig agree.
 export const LIZARD_ROOT_HEIGHT = 0.056;
 
-// Gait character for this species — small, wiry, brittle-quick.
+// Gait character for this species — small and wiry but unhurried between
+// darts: longer, slower strides, deliberate blinks, calm eye darts, and a
+// draped tail that drifts rather than twitches.
 export const LAVA_LIZARD_GAIT = {
   rootHeight: LIZARD_ROOT_HEIGHT,
-  strideLength: 0.13,
+  strideLength: 0.165,
+  maxStrideHz: 4.4,
   sprintSpeed: 1.25,
-  hipSwingAmp: 0.42,
-  kneeLiftAmp: 0.3,
-  undulationAmp: 0.13,
-  tailSwingAmp: 0.24,
+  hipSwingAmp: 0.36,
+  kneeLiftAmp: 0.26,
+  undulationAmp: 0.11,
+  tailSwingAmp: 0.2,
   bobAmp: 0.003,
+  blinkMin: 4,
+  blinkMax: 11,
+  blinkDuration: 0.26,
+  doubleBlinkChance: 0.18,
+  saccadeMin: 1.4,
+  saccadeMax: 4.6,
+  saccadeAmp: 0.11,
+  saccadeDamp: 10,
+  scanRate: 0.3,
+  tongueDuration: 0.3,
+  pushup: { rate: 2.1 },
+  tailIdleAmp: 0.085,
+  tailIdleRate: 0.45,
+  // Rest droop per segment (radians): the tail arcs down off the raised
+  // hips toward the ground, tip easing back up — no more straight spike.
+  tailRestPitch: [0.16, 0.12, -0.05],
+  tailRestCurl: 0.07,
 };
 
 function seededUnit(seed, salt = 0) {
@@ -85,6 +105,15 @@ function seededUnit(seed, salt = 0) {
 
 export function pickLavaLizardVariant(actorId) {
   return seededUnit(actorId, 11) < 0.55 ? 'male' : 'female';
+}
+
+// Adult size spread. The base rig is the smallest animal in the population;
+// males run noticeably larger (up to +50%), females stay slighter — the
+// species' real dimorphism. Smoothstep biases toward mid-sized adults.
+export function pickLavaLizardSize(actorId, variantKey = pickLavaLizardVariant(actorId)) {
+  const u = seededUnit(actorId, 29);
+  const eased = u * u * (3 - 2 * u);
+  return variantKey === 'male' ? 1.14 + eased * 0.36 : 1 + eased * 0.24;
 }
 
 function hexToRgba(hex, alpha) {
@@ -388,6 +417,20 @@ export function getBodySkinTexture(variantKey) {
     ctx.fill();
   }
 
+  // Fine peppered speckling across the dorsum — the salt-and-pepper grain
+  // that reads so strongly in photos of the species.
+  for (let i = 0; i < 340; i += 1) {
+    const x = size * (0.26 + seededUnit(variantKey, i * 13 + 700) * 0.48);
+    const y = seededUnit(variantKey, i * 13 + 701) * tailStartY;
+    const r = 1.2 + seededUnit(variantKey, i * 13 + 702) * 2.2;
+    ctx.fillStyle = seededUnit(variantKey, i * 13 + 703) > 0.7
+      ? hexToRgba(p.fleck, 0.5)
+      : hexToRgba(p.saddle, 0.32);
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // Tail: transverse whorl bands that wrap the tapering tail.
   for (let y = tailStartY + 6; y < size; y += 13) {
     const alpha = 0.3 + seededUnit(variantKey, y) * 0.25;
@@ -608,7 +651,7 @@ function tintedSphere(radius, scale, position, hex, { widthSegments = 9, heightS
 // Eye placement on the skull loft (the orbit rides high on the side of the
 // head). The ball is embedded so about a third protrudes as the orbital
 // bulge.
-export const EYE_POS = side => [side * 0.0135, 0.012, -0.03];
+export const EYE_POS = side => [side * 0.0127, 0.012, -0.03];
 
 // Non-blinking head furniture in one merged mesh: raised eye-socket rims,
 // nostril beads, and the tympanum (ear) ovals behind the jaw hinge.
@@ -638,9 +681,11 @@ const jawGeometryCache = new Map();
 export function getJawGeometry(variantKey) {
   if (!jawGeometryCache.has(variantKey)) {
     const p = LAVA_LIZARD_VARIANTS[variantKey];
+    // Tucked up under the skull — long/low enough to color the throat but
+    // never poking past the snout silhouette as a red spike.
     jawGeometryCache.set(
       variantKey,
-      tintedSphere(0.0135, [0.82, 0.28, 1.6], [0, -0.0025, -0.022], p.throat, { jitter: 0.06, seed: 'jaw' }),
+      tintedSphere(0.0125, [0.78, 0.26, 1.35], [0, -0.001, -0.017], p.throat, { jitter: 0.06, seed: 'jaw' }),
     );
   }
   return jawGeometryCache.get(variantKey);
@@ -670,28 +715,52 @@ export function getTongueGeometry() {
   return tongueGeometryCache;
 }
 
-// Eye: warm amber ball with a narrow vertical slit pupil. Geometric so it
-// stays crisp at examine distance.
+// Eye: a dark bead like the real animal — big soft-edged black pupil facing
+// out and slightly forward, narrow amber iris ring, dark sclera hidden in
+// the socket. Painted per-vertex on a single sphere so saccade rotations
+// carry the pupil with them. (The old build merged a separate pupil sphere
+// that sat entirely *inside* the iris ball — the eyes read as blank balls.)
 const eyeGeometryCache = new Map();
 export function getEyeGeometry(side) {
   if (!eyeGeometryCache.has(side)) {
-    const ball = new THREE.SphereGeometry(0.0078, 12, 9);
-    tintGeometry(ball, EYE_IRIS, { jitter: 0.08, seed: 'iris' });
-    const pupil = new THREE.SphereGeometry(0.0034, 8, 8);
-    pupil.scale(0.26, 1.05, 0.6);
-    pupil.translate(side * 0.006, 0, -0.0016);
-    tintGeometry(pupil, EYE_PUPIL, { jitter: 0, seed: 'pupil' });
-    const merged = mergeGeometries([ball, pupil], false);
-    ball.dispose();
-    pupil.dispose();
-    eyeGeometryCache.set(side, merged);
+    const geometry = new THREE.SphereGeometry(0.0072, 16, 12);
+    const positions = geometry.attributes.position;
+    const colors = new Float32Array(positions.count * 3);
+    const pupil = new THREE.Color(EYE_PUPIL);
+    const iris = new THREE.Color(EYE_IRIS);
+    const sclera = new THREE.Color('#33261a');
+    const gaze = new THREE.Vector3(side, 0.1, -0.42).normalize();
+    const v = new THREE.Vector3();
+    const c = new THREE.Color();
+    for (let i = 0; i < positions.count; i += 1) {
+      v.fromBufferAttribute(positions, i).normalize();
+      const angle = Math.acos(Math.min(1, Math.max(-1, v.dot(gaze))));
+      if (angle < 0.6) {
+        c.copy(pupil);
+      } else if (angle < 0.94) {
+        const f = (angle - 0.6) / 0.34;
+        // Pupil melts through the amber ring into the sclera.
+        c.copy(pupil).lerp(iris, Math.min(1, f * 2.6));
+        if (f > 0.5) c.lerp(sclera, (f - 0.5) / 0.5);
+      } else {
+        c.copy(sclera);
+      }
+      const m = 1 + (seededUnit('eye', i) - 0.5) * 0.12;
+      colors[i * 3] = c.r * m;
+      colors[i * 3 + 1] = c.g * m;
+      colors[i * 3 + 2] = c.b * m;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    eyeGeometryCache.set(side, geometry);
   }
   return eyeGeometryCache.get(side);
 }
 
-// Eyelid: skin-toned dome the animator swings down over the eye (group
-// rotation.x 0 → LID_CLOSED_ANGLE). At rest it tucks up under the brow rim.
-export const LID_CLOSED_ANGLE = 1.05;
+// Eyelid: skin-toned dome the animator swings over the eye (group rotation.x
+// 0 → LID_CLOSED_ANGLE). Lizards blink with the LOWER lid, so at rest the
+// dome tucks down into the cheek and the closed angle is negative — the lid
+// wipes upward across the eye.
+export const LID_CLOSED_ANGLE = -1.05;
 const lidGeometryCache = new Map();
 export function getLidGeometry(variantKey) {
   if (!lidGeometryCache.has(variantKey)) {
@@ -817,17 +886,27 @@ export function getLavaLizardMaterials(variantKey) {
   const headTexture = getHeadSkinTexture(variantKey);
   const bump = getScaleBumpTexture();
   const bumpProps = bump ? { bumpMap: bump, bumpScale: BUMP_SCALE } : {};
+  // Faint thin-film iridescence gives the scales a beetle-wing shimmer at
+  // grazing angles — stronger on the dark males, whisper-quiet on females.
+  // Deliberately subtle: it should only read when the light rakes the flank.
+  const iridescenceProps = {
+    iridescence: variantKey === 'male' ? 0.3 : 0.16,
+    iridescenceIOR: 1.3,
+    iridescenceThicknessRange: [140, 420],
+  };
   const materials = {
-    body: new THREE.MeshStandardMaterial({
+    body: new THREE.MeshPhysicalMaterial({
       ...(bodyTexture ? { map: bodyTexture } : {}),
       ...bumpProps,
+      ...iridescenceProps,
       color: '#ffffff',
       roughness: SKIN_ROUGHNESS,
       metalness: 0,
     }),
-    head: new THREE.MeshStandardMaterial({
+    head: new THREE.MeshPhysicalMaterial({
       ...(headTexture ? { map: headTexture } : {}),
       ...bumpProps,
+      ...iridescenceProps,
       color: '#ffffff',
       roughness: SKIN_ROUGHNESS - 0.04,
       metalness: 0,
@@ -895,7 +974,8 @@ export function createLavaLizardRig(variantKey = 'male') {
   const jaw = new THREE.Group();
   jaw.position.set(0, -0.0075, -0.004);
   head.add(jaw);
-  jaw.add(new THREE.Mesh(getJawGeometry(variantKey), materials.parts));
+  const jawMesh = new THREE.Mesh(getJawGeometry(variantKey), materials.parts);
+  jaw.add(jawMesh);
 
   const tongue = new THREE.Group();
   tongue.position.set(0, -0.0035, -0.032);
@@ -914,9 +994,10 @@ export function createLavaLizardRig(variantKey = 'male') {
     lid.position.set(...EYE_POS(side));
     head.add(lid);
     const lidMesh = new THREE.Mesh(getLidGeometry(variantKey), materials.parts);
-    // Rest pose: the dome tucks up under the brow; the animator's rotation.x
-    // (0 → LID_CLOSED_ANGLE) wipes it down over the eye.
-    lidMesh.rotation.x = -1.25;
+    // Rest pose: the dome tucks down into the cheek; the animator's rotation.x
+    // (0 → negative LID_CLOSED_ANGLE) wipes it up over the eye, lower-lid
+    // first like a real lizard.
+    lidMesh.rotation.x = 1.25;
     lid.add(lidMesh);
     if (side < 0) { eyes.L = eye; lids.L = lid; } else { eyes.R = eye; lids.R = lid; }
   }
@@ -965,6 +1046,7 @@ export function createLavaLizardRig(variantKey = 'male') {
     torso,
     head,
     jaw,
+    gular: jawMesh,
     tongue,
     eyeL: eyes.L,
     eyeR: eyes.R,

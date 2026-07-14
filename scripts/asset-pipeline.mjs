@@ -13,26 +13,100 @@ async function readManifestSource() {
   return fs.readFile(manifestPath, 'utf8');
 }
 
-function parseAssets(source) {
-  const assets = [];
-  const blockPattern = /(\w+):\s*\{([\s\S]*?)\n\s*\},/g;
+function matchingBrace(source, openIndex) {
+  let depth = 0;
+  let state = 'code';
+  for (let i = openIndex; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+
+    if (state === 'line') {
+      if (char === '\n') state = 'code';
+      continue;
+    }
+    if (state === 'block') {
+      if (char === '*' && next === '/') {
+        state = 'code';
+        i += 1;
+      }
+      continue;
+    }
+    if (state === 'single' || state === 'double' || state === 'template') {
+      if (char === '\\') {
+        i += 1;
+        continue;
+      }
+      if ((state === 'single' && char === "'")
+        || (state === 'double' && char === '"')
+        || (state === 'template' && char === '`')) {
+        state = 'code';
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      state = 'line';
+      i += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      state = 'block';
+      i += 1;
+      continue;
+    }
+    if (char === "'") state = 'single';
+    else if (char === '"') state = 'double';
+    else if (char === '`') state = 'template';
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  throw new Error(`No matching brace found at ${openIndex}.`);
+}
+
+function objectBody(source, name) {
+  const marker = new RegExp(`(?:export\\s+)?const\\s+${name}\\s*=`);
+  const match = marker.exec(source);
+  if (!match) return '';
+  const open = source.indexOf('{', match.index);
+  if (open === -1) return '';
+  const close = matchingBrace(source, open);
+  return source.slice(open + 1, close);
+}
+
+function topLevelObjectEntries(body) {
+  const entries = [];
+  const keyPattern = /(?:^|,|\n)\s*([A-Za-z_$][\w$]*)\s*:/g;
   let match;
-  while ((match = blockPattern.exec(source))) {
-    const [, id, body] = match;
+  while ((match = keyPattern.exec(body))) {
+    const key = match[1];
+    let cursor = keyPattern.lastIndex;
+    while (/\s/.test(body[cursor] || '')) cursor += 1;
+    if (body[cursor] !== '{') continue;
+    const close = matchingBrace(body, cursor);
+    entries.push({ key, body: body.slice(cursor + 1, close) });
+    keyPattern.lastIndex = close + 1;
+  }
+  return entries;
+}
+
+function parseAssets(source) {
+  return topLevelObjectEntries(objectBody(source, 'modelAssets')).flatMap(({ key: id, body }) => {
     const pathMatch = body.match(/path:\s*'([^']+)'/);
     const promptMatch = body.match(/prompt:\s*'([^']+)'/);
     const targetMatch = body.match(/targetTriangles:\s*(\d+)/);
     const enabledMatch = body.match(/enabled:\s*(true|false)/);
-    if (!pathMatch) continue;
-    assets.push({
+    if (!pathMatch) return [];
+    return [{
       id,
       path: pathMatch[1],
       prompt: promptMatch?.[1] || '',
       targetTriangles: Number(targetMatch?.[1] || 0),
       enabled: enabledMatch?.[1] === 'true',
-    });
-  }
-  return assets;
+    }];
+  });
 }
 
 async function ensureDirs() {

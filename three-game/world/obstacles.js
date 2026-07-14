@@ -510,6 +510,45 @@ function shapeTopAt(obstacle, shape, x, z, playerRadius = 0, options = {}) {
   return center.y + (shape.height || 1) * obstacle.scale * 0.5;
 }
 
+// Actual collider-surface height for a small creature standing on an obstacle
+// at (x, z) — the same shapes the player system collides with, but inset by
+// the creature's own footprint instead of Darwin's hard-coded margins. Balls
+// report the true dome height, so climbing fauna track the curved surface.
+// Returns a world Y, or null when (x, z) is off the obstacle's footprint.
+export function obstacleSurfaceHeightForActor(obstacle, x, z, actorRadius = 0.06) {
+  let top = null;
+  for (const shape of obstacle.shapes || []) {
+    const center = shapeWorldCenter(obstacle, shape);
+    let value = null;
+    if (shape.type === 'convex') {
+      const { point } = convexLocalPoint(obstacle, shape, x, z);
+      if (
+        pointInPolygon(point, shape.points, obstacle.scale)
+        && polygonBoundaryDistance(point, shape.points, obstacle.scale) >= actorRadius
+      ) {
+        value = center.y + (shape.yMax ?? shape.height) * obstacle.scale;
+      }
+    } else if (shape.type === 'box') {
+      const { point } = boxLocalPoint(obstacle, shape, x, z);
+      const halfX = shape.size[0] * obstacle.scale * 0.5 - actorRadius;
+      const halfZ = shape.size[2] * obstacle.scale * 0.5 - actorRadius;
+      if (Math.abs(point.x) <= Math.max(0.02, halfX) && Math.abs(point.z) <= Math.max(0.02, halfZ)) {
+        value = center.y + shape.size[1] * obstacle.scale * 0.5;
+      }
+    } else {
+      const radius = (shape.radius || 0.5) * obstacle.scale;
+      const distance = Math.hypot(x - center.x, z - center.z);
+      if (distance <= Math.max(0.02, radius - actorRadius)) {
+        value = shape.type === 'ball'
+          ? center.y + Math.sqrt(Math.max(0, radius * radius - distance * distance))
+          : center.y + (shape.height || 1) * obstacle.scale * 0.5;
+      }
+    }
+    if (value !== null) top = Math.max(top ?? -Infinity, value);
+  }
+  return top;
+}
+
 function obstacleTopAt(obstacle, x, z, playerRadius = 0, options = {}) {
   let top = null;
   for (const shape of obstacle.shapes) {

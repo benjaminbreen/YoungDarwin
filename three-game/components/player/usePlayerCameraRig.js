@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { CAMERA, SPRINT, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
+import { getSpecimenRuntimePoses } from '../../world/specimenRuntime';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
@@ -29,6 +30,13 @@ export function usePlayerCameraRig() {
   const lastPointerYRef = useRef(0);
   const cameraFollowYRef = useRef(null);
   const statusLookRef = useRef(null);
+  const examineOrbitRef = useRef({
+    sessionKey: null,
+    yaw: 0,
+    pitch: 0.18,
+    zoom: 1,
+    manualUntil: 0,
+  });
   const shoulderPivotRef = useRef(null);
   const swimCameraRef = useRef(0);
   // Flight chase camera yields to manual orbiting: dragging suspends the
@@ -97,6 +105,9 @@ export function usePlayerCameraRig() {
     adsEye: new THREE.Vector3(),
     adsLook: new THREE.Vector3(),
     adsLookBlend: new THREE.Vector3(),
+    examineFocus: new THREE.Vector3(),
+    examineEye: new THREE.Vector3(),
+    examineLook: new THREE.Vector3(),
   }), []);
 
   const updatePointerNdc = useCallback(event => {
@@ -142,6 +153,20 @@ export function usePlayerCameraRig() {
         updatePointerNdc(event);
         return;
       }
+      const examineSession = useThreeGameStore.getState().examineSession;
+      if (examineSession?.kind === 'specimen') {
+        if (event.button !== 0) return;
+        draggingRef.current = true;
+        panningRef.current = false;
+        dragPointerTypeRef.current = event.pointerType || 'mouse';
+        lastPointerXRef.current = event.clientX;
+        lastPointerYRef.current = event.clientY;
+        examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
+        element.setPointerCapture?.(event.pointerId);
+        element.style.cursor = 'grabbing';
+        return;
+      }
+      if (examineSession) return;
       // Right mouse held = momentary aim intent (shooter convention). The
       // equipment state only honors it while the shotgun is equipped. Capture
       // the pointer so the release is seen even if it happens off-canvas.
@@ -177,6 +202,24 @@ export function usePlayerCameraRig() {
     const onPointerMove = event => {
       updatePointerNdc(event);
       if (openingCameraActiveRef.current) return;
+      const examineSession = useThreeGameStore.getState().examineSession;
+      if (examineSession?.kind === 'specimen') {
+        if (!draggingRef.current) return;
+        const dx = event.clientX - lastPointerXRef.current;
+        const dy = event.clientY - lastPointerYRef.current;
+        lastPointerXRef.current = event.clientX;
+        lastPointerYRef.current = event.clientY;
+        const speed = dragPointerTypeRef.current === 'touch' ? 0.006 : 0.0045;
+        examineOrbitRef.current.yaw -= dx * speed;
+        examineOrbitRef.current.pitch = THREE.MathUtils.clamp(
+          examineOrbitRef.current.pitch - dy * speed,
+          -0.12,
+          0.78,
+        );
+        examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
+        return;
+      }
+      if (examineSession) return;
       // Pointer-locked mouse look while aiming: deltas rotate the camera and
       // therefore the crosshair. No drag required — the click means "fire".
       // Slide up = aim up (positive pitch looks down, so movementY feeds in
@@ -212,12 +255,24 @@ export function usePlayerCameraRig() {
       if (event?.button === 2) shotgunAimState.holdIntent = false;
       draggingRef.current = false;
       panningRef.current = false;
+      element.style.cursor = 'grab';
       if (event?.pointerId !== undefined) element.releasePointerCapture?.(event.pointerId);
     };
     const onWheel = event => {
       event.preventDefault();
       if (openingCameraActiveRef.current) return;
       const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
+      const examineSession = useThreeGameStore.getState().examineSession;
+      if (examineSession?.kind === 'specimen') {
+        examineOrbitRef.current.zoom = THREE.MathUtils.clamp(
+          examineOrbitRef.current.zoom + normalizedDelta * 0.1,
+          0.72,
+          1.7,
+        );
+        examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
+        return;
+      }
+      if (examineSession) return;
       zoomRef.current = THREE.MathUtils.clamp(zoomRef.current + normalizedDelta * 0.9, CAMERA.minZoom, CAMERA.maxZoom);
     };
     // Right mouse is the aim button; the browser menu would swallow it.
@@ -495,7 +550,74 @@ export function usePlayerCameraRig() {
     }
     const pivotY = cameraProfile?.pivotY ?? 1.22;
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, pivotY, 0)).add(panOffsetRef.current);
-    if (focusSession) {
+    if (examineSession?.kind === 'specimen') {
+      // A live, subject-owned inspection orbit. Runtime pose data is kept out
+      // of React so the camera can follow a moving/falling actor without a
+      // stale one-time focus snapshot. The framing distance is derived from
+      // both vertical and horizontal FOV, which keeps the whole specimen in
+      // view on narrow portrait screens as well as desktop.
+      const liveFocus = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(examineSession.actorId);
+      const focus = liveFocus || examineSession.focus;
+      const hint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
+      const centerOffset = hint.closeup
+        ? Math.max(0.015, hint.height * 0.5)
+        : Math.max(0.12, hint.height * 0.52);
+      const center = scratch.examineFocus.set(
+        focus.x,
+        focus.y + centerOffset,
+        focus.z,
+      );
+      const sessionKey = `${rigStoreState.currentZoneId}:${examineSession.actorId}:${examineSession.openedAt || 0}`;
+      const orbit = examineOrbitRef.current;
+      if (orbit.sessionKey !== sessionKey) {
+        const cameraDx = camera.position.x - center.x;
+        const cameraDz = camera.position.z - center.z;
+        const cameraPlanarDistance = Math.hypot(cameraDx, cameraDz);
+        const fallbackDx = playerPosition.x - center.x;
+        const fallbackDz = playerPosition.z - center.z;
+        orbit.sessionKey = sessionKey;
+        orbit.yaw = cameraPlanarDistance > 0.05
+          ? Math.atan2(cameraDx, cameraDz)
+          : Math.atan2(fallbackDx, fallbackDz);
+        orbit.pitch = 0.18;
+        orbit.zoom = 1;
+        orbit.manualUntil = now + 1.8;
+      }
+      if (!draggingRef.current && now >= orbit.manualUntil) {
+        orbit.yaw += delta * 0.045;
+      }
+
+      const verticalFov = THREE.MathUtils.degToRad(camera.fov || 50);
+      const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.25, camera.aspect || 1));
+      const halfWidth = Math.max(0.025, hint.radius || 0.6);
+      const halfHeight = Math.max(0.025, (hint.height || 0.8) * 0.54);
+      const fitDistance = Math.max(
+        halfWidth / Math.max(0.08, Math.tan(horizontalFov / 2)),
+        halfHeight / Math.max(0.08, Math.tan(verticalFov / 2)),
+      ) * 1.22;
+      const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, 0.16, 10);
+      const horizontalDistance = Math.cos(orbit.pitch) * distance;
+      const eye = scratch.examineEye.set(
+        center.x + Math.sin(orbit.yaw) * horizontalDistance,
+        center.y + Math.sin(orbit.pitch) * distance,
+        center.z + Math.cos(orbit.yaw) * horizontalDistance,
+      );
+      // Low subjects should never push the inspection camera under a beach or
+      // hillside as the automatic orbit crosses the uphill side.
+      const eyeGroundY = collisionAdapter.terrainHeight(eye.x, eye.z);
+      eye.y = Math.max(eye.y, eyeGroundY + 0.16);
+      const portrait = (camera.aspect || 1) < 0.8;
+      const verticalBias = distance * (portrait ? 0.16 : 0.045);
+      const look = scratch.examineLook.set(center.x, center.y - verticalBias, center.z);
+      if (!statusLookRef.current) {
+        statusLookRef.current = camera.position.clone()
+          .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));
+      }
+      const ease = 1 - Math.exp(-3.2 * delta);
+      camera.position.lerp(eye, ease);
+      statusLookRef.current.lerp(look, ease);
+      camera.lookAt(statusLookRef.current);
+    } else if (focusSession) {
       // Diegetic examine shot: dolly in between Darwin and the subject and
       // frame the subject by its bulk (frameHint), with a very slow orbital
       // drift so the held pose still feels alive. Shares statusLookRef with

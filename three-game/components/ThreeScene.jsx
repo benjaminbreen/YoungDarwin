@@ -21,11 +21,13 @@ import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
 
 export function ThreeScene({
   perfSettings,
-  deferredContentReady = true,
+  contentPhase = 6,
   openingCamera = null,
   inputLocked = false,
 }) {
   const settings = perfSettings || {};
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
+  const environmentReady = stagedPhase >= 2;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const outdoors = !interior;
@@ -48,7 +50,7 @@ export function ThreeScene({
         />
       )}
       {outdoors && <Lighting />}
-      {exteriorAtmosphere && deferredContentReady && (
+      {exteriorAtmosphere && environmentReady && (
         <Suspense fallback={null}>
           {settings.atmosphere !== false && <Atmosphere />}
           {outdoors && settings.weatherFX !== false && <WeatherFront />}
@@ -58,7 +60,7 @@ export function ThreeScene({
           {outdoors && settings.weatherFX !== false && <GroundMist />}
         </Suspense>
       )}
-      {deferredContentReady && settings.water !== false && (!interior || interior.scene?.water !== false) && (
+      {settings.water !== false && (!interior || interior.scene?.water !== false) && (
         interior ? (
           <group position={[0, -1.25, 0]}>
             <Water quality={settings.waterQuality || 'polished'} reflections={false} allowInterior openOceanOnly />
@@ -72,7 +74,7 @@ export function ThreeScene({
       )}
       <PhysicsProvider debug={settings.physicsDebug === true}>
         <FaunaFrameScheduler />
-        <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
+        <ActiveZoneContent settings={settings} contentPhase={stagedPhase} />
         <PlayerController
           physicsDebug={settings.physicsDebug === true}
           openingCamera={openingCamera}
@@ -80,9 +82,9 @@ export function ThreeScene({
         />
       </PhysicsProvider>
       {outdoors && <GroundedWorldFX
-        enabled={deferredContentReady && settings.worldDetails !== false}
+        enabled={environmentReady && settings.worldDetails !== false}
         terrainDust={settings.playerFX !== false && settings.terrainDust !== false}
-        waterRipples={deferredContentReady && settings.water !== false && settings.waterSplashes !== false}
+        waterRipples={environmentReady && settings.water !== false && settings.waterSplashes !== false}
       />}
     </>
   );

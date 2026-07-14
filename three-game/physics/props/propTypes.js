@@ -637,6 +637,7 @@ export const PROP_TYPES = {
   },
   lawsonDiningChair: {
     label: 'dining chair', visual: 'cabinChair', visualAsset: 'lawsonDiningChair',
+    interactionRing: false,
     visualOffsetY: -0.55, fixed: true,
     collider: { shape: 'cuboid', halfExtents: [0.31, 0.54, 0.29] }, restOffset: 0.55,
     mass: 19, friction: 2.3, restitution: 0, linearDamping: 4, angularDamping: 4.2,
@@ -644,6 +645,7 @@ export const PROP_TYPES = {
   },
   lawsonCampaignStool: {
     label: 'campaign stool', visual: 'cabinStool', visualAsset: 'lawsonCampaignStool',
+    interactionRing: false,
     visualOffsetY: -0.3,
     collider: { shape: 'cuboid', halfExtents: [0.32, 0.29, 0.25] }, restOffset: 0.3,
     mass: 8, friction: 1.9, restitution: 0, linearDamping: 3, angularDamping: 3,
@@ -661,6 +663,7 @@ export const PROP_TYPES = {
   },
   lawsonRumBottle: {
     label: 'rum bottle', visual: 'jug', visualAsset: 'lawsonRumBottle',
+    interactionRing: false,
     visualOffsetY: -0.4,
     collider: { shape: 'cylinder', halfHeight: 0.39, radius: 0.14 }, restOffset: 0.4,
     mass: 1.4, friction: 1.45, restitution: 0.02, linearDamping: 2.1, angularDamping: 1.8,
@@ -668,6 +671,7 @@ export const PROP_TYPES = {
   },
   lawsonTinMug: {
     label: 'tin mug', visual: 'cabinMug', visualAsset: 'lawsonTinMug',
+    interactionRing: false,
     visualOffsetY: -0.13,
     collider: { shape: 'cylinder', halfHeight: 0.125, radius: 0.12 }, restOffset: 0.13,
     mass: 0.75, friction: 1.5, restitution: 0.01, linearDamping: 1.8, angularDamping: 1.7,
@@ -675,6 +679,7 @@ export const PROP_TYPES = {
   },
   lawsonServingBowl: {
     label: 'serving bowl', visual: 'cabinMug', visualAsset: 'lawsonServingBowl',
+    interactionRing: false,
     visualOffsetY: -0.14,
     collider: { shape: 'cylinder', halfHeight: 0.13, radius: 0.29 }, restOffset: 0.14,
     mass: 2.8, friction: 1.8, restitution: 0, linearDamping: 2.4, angularDamping: 2.2,
@@ -682,6 +687,7 @@ export const PROP_TYPES = {
   },
   lawsonFoldedChart: {
     label: 'folded chart', visual: 'rolledChart', visualAsset: 'lawsonFoldedChart',
+    interactionRing: false,
     visualOffsetY: -0.03,
     collider: { shape: 'cuboid', halfExtents: [0.31, 0.025, 0.21] }, restOffset: 0.03,
     mass: 0.35, friction: 1.6, restitution: 0, linearDamping: 2, angularDamping: 1.7,
@@ -689,6 +695,7 @@ export const PROP_TYPES = {
   },
   lawsonSupplyLedger: {
     label: 'supply ledger', visual: 'book', visualAsset: 'lawsonSupplyLedger',
+    interactionRing: false,
     visualOffsetY: -0.11,
     collider: { shape: 'cuboid', halfExtents: [0.3, 0.1, 0.4] }, restOffset: 0.11,
     mass: 1.7, friction: 1.7, restitution: 0, linearDamping: 2.2, angularDamping: 1.9,
@@ -696,6 +703,7 @@ export const PROP_TYPES = {
   },
   lawsonCandlestick: {
     label: 'brass candlestick', visual: 'cabinCandlestick', visualAsset: 'lawsonCandlestick',
+    interactionRing: false,
     visualOffsetY: -0.37,
     collider: { shape: 'cylinder', halfHeight: 0.36, radius: 0.15 }, restOffset: 0.37,
     mass: 2.2, friction: 1.75, restitution: 0, linearDamping: 2.3, angularDamping: 2.1,

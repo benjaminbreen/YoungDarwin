@@ -9,7 +9,7 @@ named ceiling and flame nodes:
   npx @gltf-transform/cli optimize public/assets/models/structures/lawson-house-interior.glb \
     /tmp/lawson-house-interior-optimized.glb --compress meshopt --flatten false \
     --join false --instance false --palette false --simplify false \
-    --texture-compress webp --texture-size 2048
+    --texture-compress webp --texture-size 1024
 
 The shared JSON blueprint owns runtime dimensions, colliders, spawns, and room
 labels. This builder supplies the visual shell and authored entrance/dining
@@ -118,6 +118,60 @@ def pbr_material(name, root, color_file, rough_file, normal_file, scale=(1, 1, 1
   return mat
 
 
+def detail_pbr_material(name, root, rough_file, normal_file, color, scale=(1, 1, 1), normal_strength=0.35, roughness_floor=0.72):
+  """Use scanned microsurface detail without importing a conspicuous color pattern."""
+  mat = bpy.data.materials.new(name)
+  mat.use_nodes = True
+  nodes = mat.node_tree.nodes
+  links = mat.node_tree.links
+  bsdf = nodes.get('Principled BSDF')
+  bsdf.inputs['Base Color'].default_value = (*linear(srgb(color)), 1)
+  tex = nodes.new('ShaderNodeTexCoord')
+  mapping = nodes.new('ShaderNodeMapping')
+  mapping.inputs['Scale'].default_value = scale
+  links.new(tex.outputs['UV'], mapping.inputs['Vector'])
+  rough = nodes.new('ShaderNodeTexImage')
+  rough.image = bpy.data.images.load(str(root / rough_file), check_existing=True)
+  rough.image.colorspace_settings.name = 'Non-Color'
+  links.new(mapping.outputs['Vector'], rough.inputs['Vector'])
+  ramp = nodes.new('ShaderNodeValToRGB')
+  ramp.color_ramp.elements[0].position = 0.08
+  ramp.color_ramp.elements[0].color = (roughness_floor, roughness_floor, roughness_floor, 1)
+  ramp.color_ramp.elements[1].position = 0.92
+  ramp.color_ramp.elements[1].color = (1, 1, 1, 1)
+  links.new(rough.outputs['Color'], ramp.inputs['Fac'])
+  links.new(ramp.outputs['Color'], bsdf.inputs['Roughness'])
+  normal_tex = nodes.new('ShaderNodeTexImage')
+  normal_tex.image = bpy.data.images.load(str(root / normal_file), check_existing=True)
+  normal_tex.image.colorspace_settings.name = 'Non-Color'
+  normal = nodes.new('ShaderNodeNormalMap')
+  normal.inputs['Strength'].default_value = normal_strength
+  links.new(mapping.outputs['Vector'], normal_tex.inputs['Vector'])
+  links.new(normal_tex.outputs['Color'], normal.inputs['Color'])
+  links.new(normal.outputs['Normal'], bsdf.inputs['Normal'])
+  MATS[name] = mat
+  return mat
+
+
+def glass_material(name, color, roughness=0.1, transmission=0.9, ior=1.52):
+  """Principled transmission exports as KHR_materials_transmission/ior."""
+  mat = bpy.data.materials.new(name)
+  mat.use_nodes = True
+  bsdf = mat.node_tree.nodes.get('Principled BSDF')
+  bsdf.inputs['Base Color'].default_value = (*linear(srgb(color)), 1)
+  bsdf.inputs['Roughness'].default_value = roughness
+  transmission_input = bsdf.inputs.get('Transmission Weight') or bsdf.inputs.get('Transmission')
+  if transmission_input:
+    transmission_input.default_value = transmission
+  if bsdf.inputs.get('IOR'):
+    bsdf.inputs['IOR'].default_value = ior
+  coat = bsdf.inputs.get('Coat Weight') or bsdf.inputs.get('Clearcoat')
+  if coat:
+    coat.default_value = 0.08
+  MATS[name] = mat
+  return mat
+
+
 def image_material(name, image_path, roughness=0.9):
   mat = bpy.data.materials.new(name)
   mat.use_nodes = True
@@ -141,22 +195,29 @@ def init_materials():
   pbr_material('LimewashedBoards', SHARED_TEXTURES, 'painted-planks-diff-1k.jpg', 'painted-planks-rough-1k.jpg', 'painted-planks-normal-1k.jpg', (1.25, 1.25, 1), '#aaa38c', 0.28)
   pbr_material('FurnitureWood', TEXTURES, 'fine-wood-diff-2k.jpg', 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', (1.35, 1.35, 1), '#a77e5f', 0.48)
   pbr_material('OldPine', TEXTURES, 'fine-wood-diff-2k.jpg', 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', (1.8, 1.8, 1), '#8f6849', 0.36)
-  pbr_material('Canvas', TEXTURES, 'woven-fabric-diff-2k.jpg', 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', (1.45, 1.45, 1), '#b8aa86', 0.66)
-  pbr_material('IndigoCloth', TEXTURES, 'woven-fabric-diff-2k.jpg', 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', (1.7, 1.7, 1), '#50677a', 0.72)
+  detail_pbr_material('Canvas', TEXTURES, 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', '#a99b78', (2.8, 2.8, 1), 0.72, 0.8)
+  # Preserve the readable blue-and-cream check that gave the earlier Lawson
+  # textiles a distinct identity. The scan supplies color, weave, roughness,
+  # and normal detail instead of reducing every soft prop to a flat blue slab.
+  pbr_material('IndigoCloth', TEXTURES, 'woven-fabric-diff-2k.jpg', 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', (1.7, 1.7, 1), '#d6ded7', 0.72)
+  detail_pbr_material('PaintedChair', TEXTURES, 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', '#5f685c', (1.6, 1.6, 1), 0.42, 0.58)
   image_material('ArrowsmithMap', SHARED_TEXTURES / 'maps/arrowsmith-world-map.jpg', 0.94)
+  image_material('OfficialAppointmentNotice', TEXTURES / 'official-appointment-notice.png', 0.88)
   material('DarkTimber', '#433329', 0.84)
   material('CeilingTimber', '#76583f', 0.76)
   material('TrimPaint', '#8b927d', 0.88)
   material('DadoPaint', '#66705f', 0.9)
-  material('HighlandMistNear', '#9eaea9', 1, alpha=0.62, emission=('#a7b8b2', 1.15))
-  material('HighlandMistFar', '#bdc8c2', 1, alpha=0.88, emission=('#c8d3ce', 1.8))
+  material('HighlandMistNear', '#aab8b0', 1, alpha=0.16, emission=('#aebbb4', 0.08))
   material('WetGrass', '#455b42', 1)
+  material('LeafNear', '#405943', 0.94)
+  material('LeafMiddle', '#607263', 0.98)
+  material('LeafFar', '#7d897c', 1)
   material('Iron', '#302f2b', 0.48, 0.68)
   material('Rust', '#7a351f', 0.94, 0.08)
-  material('Brass', '#a57635', 0.3, 0.72)
+  material('Brass', '#b0792f', 0.26, 0.94)
   material('Pewter', '#7e817c', 0.46, 0.58)
-  material('BottleGlass', '#334a38', 0.18, 0.03, 0.42)
-  material('WindowGlass', '#abc2ba', 0.12, 0, 0.12)
+  glass_material('BottleGlass', '#274532', 0.18, 0.78, 1.51)
+  glass_material('WindowGlass', '#d4dfda', 0.16, 0.88, 1.52)
   material('Paper', '#cdbf91', 0.96)
   material('Ink', '#24211d', 0.9)
   material('Leather', '#4d2e22', 0.78)
@@ -338,6 +399,26 @@ def beam_between(name, start, end, radius, mat, sides=12):
   return obj
 
 
+def board_between(name, start, end, width, depth, mat, bevel=0.008):
+  """Create a rectangular furniture rail aligned between two game-space points."""
+  a = Vector(game_to_blender(start))
+  b = Vector(game_to_blender(end))
+  delta = b - a
+  bpy.ops.mesh.primitive_cube_add(size=1, location=(a + b) * 0.5)
+  obj = bpy.context.object
+  obj.name = name
+  obj.dimensions = (width, depth, delta.length)
+  bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+  obj.rotation_mode = 'QUATERNION'
+  obj.rotation_quaternion = delta.to_track_quat('Z', 'Y')
+  obj.data.materials.append(mat)
+  if bevel:
+    modifier = obj.modifiers.new('RailEdgeWear', 'BEVEL')
+    modifier.width = bevel
+    modifier.segments = 2
+  return obj
+
+
 def simple_window(name, x, y, z, width, height, orientation='front'):
   """Build a deep painted sash with four separate, slightly irregular panes."""
   if orientation == 'front':
@@ -480,6 +561,33 @@ def add_floor_surface(name, width, depth, mat):
   solidify.offset = -1
   bevel = obj.modifiers.new('FloorEdgeSoftness', 'BEVEL')
   bevel.width = 0.008
+  bevel.segments = 2
+  return obj
+
+
+def add_front_image_plane(name, position, width, height, mat, thickness=0.012):
+  """Create a front-facing wall image with one deliberate 0..1 UV island."""
+  x, y, z = position
+  vertices = [
+    game_to_blender((x - width * 0.5, y - height * 0.5, z)),
+    game_to_blender((x + width * 0.5, y - height * 0.5, z)),
+    game_to_blender((x + width * 0.5, y + height * 0.5, z)),
+    game_to_blender((x - width * 0.5, y + height * 0.5, z)),
+  ]
+  mesh = bpy.data.meshes.new(name)
+  mesh.from_pydata(vertices, [], [[0, 1, 2, 3]])
+  mesh.update()
+  uv_layer = mesh.uv_layers.new(name='UVMap')
+  for loop_index, uv in zip(mesh.polygons[0].loop_indices, ((0, 0), (1, 0), (1, 1), (0, 1))):
+    uv_layer.data[loop_index].uv = uv
+  obj = bpy.data.objects.new(name, mesh)
+  bpy.context.scene.collection.objects.link(obj)
+  obj.data.materials.append(mat)
+  solidify = obj.modifiers.new('DampPaperThickness', 'SOLIDIFY')
+  solidify.thickness = thickness
+  solidify.offset = -0.5
+  bevel = obj.modifiers.new('SoftPaperEdge', 'BEVEL')
+  bevel.width = 0.004
   bevel.segments = 2
   return obj
 
@@ -642,6 +750,65 @@ def build_fixed_furniture():
   table('CallingTable', -9.05, 6.35, 1.55, 0.58, 0.76)
   add_sagged_panel('DiningTableRunner', (-2.35, 0.858, 2.05), 0.72, 1.1, MATS['IndigoCloth'], sag=0.008, x_segments=8, z_segments=12, thickness=0.012)
 
+  # Three restrained place settings give the dining group believable scale and
+  # surface complexity. Thin lathed plates, pewter cutlery, and folded linen
+  # replace the earlier handful of oversized blockout objects.
+  place_settings = (
+    ('West', -3.28, 2.04, 0),
+    ('East', -1.42, 2.04, math.pi),
+    ('North', -2.35, 2.48, -math.pi / 2),
+  )
+  for label, x, z, yaw in place_settings:
+    add_lathe(
+      f'DiningPlate_{label}',
+      (x, 0.858, z),
+      ((0.09, 0), (0.18, 0.008), (0.235, 0.022), (0.25, 0.038)),
+      MATS['CreamCeramic'],
+      36,
+    )
+    add_torus(f'DiningPlateRim_{label}', (x, 0.896, z), 0.235, 0.01, MATS['Earthenware'])
+    add_sagged_panel(
+      f'DiningNapkin_{label}',
+      (x + math.cos(yaw) * 0.02, 0.904, z + math.sin(yaw) * 0.02),
+      0.24,
+      0.18,
+      MATS['Canvas'],
+      sag=0.006,
+      yaw=yaw + 0.08,
+      x_segments=5,
+      z_segments=4,
+      thickness=0.008,
+    )
+    # Knife and spoon are deliberately thin but broad enough to catch the
+    # rectangular window highlights at the normal third-person distance.
+    utensil_x = x + math.cos(yaw) * 0.34
+    utensil_z = z + math.sin(yaw) * 0.34
+    beam_between(
+      f'DiningKnife_{label}',
+      (utensil_x - math.sin(yaw) * 0.13, 0.91, utensil_z + math.cos(yaw) * 0.13),
+      (utensil_x + math.sin(yaw) * 0.13, 0.91, utensil_z - math.cos(yaw) * 0.13),
+      0.009,
+      MATS['Pewter'],
+      10,
+    )
+    spoon_x = x - math.cos(yaw) * 0.34
+    spoon_z = z - math.sin(yaw) * 0.34
+    beam_between(
+      f'DiningSpoonStem_{label}',
+      (spoon_x - math.sin(yaw) * 0.1, 0.91, spoon_z + math.cos(yaw) * 0.1),
+      (spoon_x + math.sin(yaw) * 0.1, 0.91, spoon_z - math.cos(yaw) * 0.1),
+      0.008,
+      MATS['Pewter'],
+      10,
+    )
+    add_sphere(
+      f'DiningSpoonBowl_{label}',
+      (spoon_x + math.sin(yaw) * 0.13, 0.912, spoon_z - math.cos(yaw) * 0.13),
+      0.025,
+      MATS['Pewter'],
+      (0.55, 0.18, 1.15),
+    )
+
   # Open Welsh-dresser construction replaces the monolithic cupboard block.
   add_box('DresserBack', (-10.13, 0.94, 1.65), (0.12, 1.88, 2.36), MATS['OldPine'], bevel=0.022)
   add_box('DresserLowerCarcass', (-9.91, 0.42, 1.65), (0.55, 0.78, 2.3), MATS['FurnitureWood'], bevel=0.032)
@@ -666,7 +833,7 @@ def build_fixed_furniture():
   # Lawson's fixed armchair now reads as assembled furniture: turned legs,
   # splayed rear posts, curved arm rails, spindles, and a lightly sagged seat.
   add_box('ArmchairSeatFrame', (-8.25, 0.48, 4.6), (0.76, 0.12, 0.72), MATS['FurnitureWood'], yaw=0.25, bevel=0.032)
-  add_sagged_panel('ArmchairCushion', (-8.25, 0.585, 4.6), 0.66, 0.6, MATS['Canvas'], sag=0.025, yaw=0.25, x_segments=8, z_segments=8, thickness=0.06)
+  add_sagged_panel('ArmchairCushion', (-8.25, 0.585, 4.6), 0.66, 0.6, MATS['IndigoCloth'], sag=0.025, yaw=0.25, x_segments=8, z_segments=8, thickness=0.06)
   for x in (-8.55, -7.95):
     for z in (4.34, 4.86):
       add_lathe(f'ArmchairLeg_{x}_{z}', (x, 0, z), ((0.038, 0.02), (0.052, 0.09), (0.042, 0.24), (0.06, 0.46)), MATS['CeilingTimber'], 18)
@@ -678,47 +845,34 @@ def build_fixed_furniture():
   for index, x in enumerate((-8.47, -8.36, -8.25, -8.14, -8.03)):
     beam_between(f'ArmchairBackSpindle_{index}', (x, 0.58, 4.31), (x, 1.2 + (0.03 if index == 2 else 0), 4.25), 0.018, MATS['OldPine'], 12)
 
-  # Sea chest, coat pegs, clothing, and repaired domestic traces.
+  # Sea chest and restrained coat pegs keep the receiving area legible. The
+  # earlier slab-like coat and guitar crowded the west windows and read as a
+  # pile of intersecting blockout meshes, so they are deliberately omitted.
   add_box('SeaChestBody', (-7.65, 0.28, 7.3), (1.25, 0.56, 0.7), MATS['OldPine'], yaw=0.08, bevel=0.05)
   for x in (-8.05, -7.65, -7.25):
     add_box(f'SeaChestStrap_{x}', (x, 0.32, 7.3), (0.055, 0.62, 0.74), MATS['Iron'], yaw=0.08, bevel=0.008)
   add_box('PegRail', (-10.31, 1.88, 3.9), (0.12, 0.16, 1.65), MATS['DarkTimber'], bevel=0.025)
   for z in (3.4, 3.9, 4.4):
     beam_between(f'CoatPeg_{z}', (-10.25, 1.85, z), (-9.99, 1.85, z), 0.035, MATS['DarkTimber'], 10)
-  add_box('LawsonCoatBody', (-9.95, 1.35, 3.9), (0.08, 0.82, 0.68), MATS['IndigoCloth'], bevel=0.08)
-  add_box('LawsonCoatTail', (-9.95, 0.92, 3.9), (0.07, 0.52, 0.82), MATS['IndigoCloth'], bevel=0.08)
-
-  # Guitar, wall chart, calling cards, clumped salt, wax, and ceiling lamp.
-  add_sphere('GuitarLowerBout', (-9.98, 0.48, 5.15), 0.28, MATS['OldPine'], (0.22, 1, 0.76))
-  add_sphere('GuitarUpperBout', (-9.98, 0.76, 5.15), 0.2, MATS['OldPine'], (0.18, 1, 0.72))
-  add_sphere('GuitarSoundHole', (-9.9, 0.62, 5.15), 0.075, MATS['Ink'], (0.08, 1, 1))
-  add_box('GuitarNeck', (-9.93, 1.1, 5.15), (0.07, 0.78, 0.1), MATS['DarkTimber'], bevel=0.018)
-  for string in (-0.025, 0, 0.025):
-    beam_between(f'GuitarString_{string}', (-9.885, 0.56, 5.15 + string), (-9.885, 1.46, 5.15 + string), 0.0022, MATS['Brass'], 6)
+  # Wall chart, calling cards, and clumped salt.
   add_box('BoundaryMapPaper', (-10.34, 1.78, 0.1), (0.035, 0.92, 1.3), MATS['ArrowsmithMap'], bevel=0.018)
-  # A modest Spanish-language appointment notice rather than grand wallpaper:
-  # official authority represented by one damp, locally framed sheet.
-  add_box('OfficialNoticePaper', (-1.25, 1.72, 0.075), (1.08, 0.76, 0.025), MATS['Paper'], bevel=0.012)
-  add_box('OfficialNoticeFrameTop', (-1.25, 2.14, 0.095), (1.22, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
-  add_box('OfficialNoticeFrameBottom', (-1.25, 1.3, 0.095), (1.22, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
-  for x in (-1.86, -0.64):
-    add_box(f'OfficialNoticeFrameSide_{x}', (x, 1.72, 0.095), (0.07, 0.9, 0.07), MATS['DarkTimber'], bevel=0.012)
-  for index, y in enumerate((1.93, 1.8, 1.68, 1.56, 1.44)):
-    add_box(f'OfficialNoticeInk_{index}', (-1.25, y, 0.094), (0.72 if index else 0.48, 0.018, 0.012), MATS['Ink'])
-  add_sphere('OfficialNoticeSeal', (-0.92, 1.44, 0.105), 0.055, MATS['Rust'], (1, 1, 0.35))
+  # A real document face replaces the blocky geometric lines used in the
+  # blockout. The portrait ratio, restrained frame, and damp paper edge read at
+  # gameplay distance without becoming an oversized UI icon on the wall.
+  notice_width = 0.72
+  notice_height = 1.08
+  add_front_image_plane('OfficialNoticePaper', (-1.25, 1.72, 0.075), notice_width, notice_height, MATS['OfficialAppointmentNotice'])
+  add_box('OfficialNoticeFrameTop', (-1.25, 2.3, 0.095), (0.86, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
+  add_box('OfficialNoticeFrameBottom', (-1.25, 1.14, 0.095), (0.86, 0.07, 0.07), MATS['DarkTimber'], bevel=0.012)
+  for x in (-1.68, -0.82):
+    add_box(f'OfficialNoticeFrameSide_{x}', (x, 1.72, 0.095), (0.07, 1.22, 0.07), MATS['DarkTimber'], bevel=0.012)
   add_box('CallingCards', (-9.05, 0.81, 6.35), (0.55, 0.025, 0.34), MATS['Paper'], yaw=-0.12, bevel=0.008)
-  add_lathe('CallingLampReservoir', (-9.48, 0.79, 6.32), ((0.1, 0), (0.16, 0.04), (0.18, 0.1), (0.12, 0.18), (0.07, 0.24)), MATS['Brass'], 28)
-  add_lathe('CallingLampChimney', (-9.48, 1.03, 6.32), ((0.07, 0), (0.12, 0.08), (0.1, 0.26), (0.075, 0.42), (0.085, 0.52)), MATS['WindowGlass'], 28)
-  add_sphere('LampFlame_Calling', (-9.48, 1.17, 6.32), 0.038, MATS['LampFlame'], (0.68, 1.55, 0.68))
   add_cylinder('SaltJar', (-3.25, 0.92, 1.85), 0.11, 0.24, MATS['CreamCeramic'], 16)
   for index, offset in enumerate((-0.045, 0.01, 0.06)):
     add_sphere(f'ClumpedSalt_{index}', (-3.25 + offset, 1.06, 1.85), 0.055, MATS['Paper'], (1, 0.55, 1))
-  add_cylinder('HangingLampChain', (-2.35, 3.31, 2.05), 0.012, 0.5, MATS['Iron'], 12)
-  add_torus('HangingLampUpperRing', (-2.35, 3.12, 2.05), 0.12, 0.018, MATS['Brass'])
-  add_lathe('HangingLampReservoir', (-2.35, 2.72, 2.05), ((0.08, 0), (0.18, 0.06), (0.2, 0.13), (0.14, 0.22), (0.075, 0.3)), MATS['Brass'], 30)
-  add_lathe('HangingLampGlass', (-2.35, 2.98, 2.05), ((0.075, 0), (0.15, 0.08), (0.14, 0.3), (0.09, 0.5), (0.1, 0.62)), MATS['WindowGlass'], 30)
-  add_torus('HangingLampShadeRim', (-2.35, 3.07, 2.05), 0.27, 0.022, MATS['Brass'])
-  add_sphere('LampFlame_Main', (-2.35, 3.12, 2.05), 0.04, MATS['LampFlame'], (0.68, 1.5, 0.68))
+  # Shared oil-lamp GLBs are placed by the interior blueprint. Keeping them out
+  # of this monolithic shell lets Lawson and the Beagle share the same improved
+  # brass, glass, burner, wick, and chimney construction.
 
   # A small woven mat makes the threshold legible and leaves a generous,
   # uninterrupted route from the door to all three internal doors.
@@ -739,34 +893,33 @@ def build_veranda_diorama():
   for x in (-10.1, -6.7, -3.3, 0.1, 3.5, 6.9, 10.1):
     add_cylinder(f'VerandaPost_{x}', (x, 1.55, 10.28), 0.07, 3.1, MATS['DarkTimber'], 12)
   add_box('ExteriorWetGround', (0, -0.18, 14.6), (29, 0.15, 9.5), MATS['WetEarth'])
-  # Layered luminous mist keeps the opening brighter than the room and gives
-  # the veranda real depth instead of ending in one flat blue-grey card.
-  add_box('ExteriorFrontMistNear', (0, 2.0, 18.1), (29, 4.25, 0.05), MATS['HighlandMistNear'])
-  add_box('ExteriorFrontMistFar', (0, 2.25, 21.4), (32, 5.1, 0.05), MATS['HighlandMistFar'])
+  # One restrained near-haze veil leaves the shared sky and cloud atmosphere
+  # visible beyond it. The old second emissive card clipped the entire opening
+  # to white and reduced every tree to a black cardboard silhouette.
+  add_box('ExteriorFrontMistNear', (0, 1.8, 18.7), (29, 3.7, 0.035), MATS['HighlandMistNear'])
   for index, x in enumerate((-10, -7, -4, 4, 7, 10)):
     add_cylinder(f'ExteriorFencePost_{index}', (x, 0.55, 12.1), 0.07, 1.1, MATS['OldPine'], 10)
   add_box('ExteriorFenceRail', (0, 0.5, 12.1), (21, 0.1, 0.1), MATS['OldPine'])
   for index, (x, z, scale) in enumerate(((-8, 13.5, 1.1), (-4.5, 14.3, 0.8), (4.6, 13.8, 0.9), (8.5, 14.7, 1.2))):
-    add_sphere(f'ExteriorGardenMass_{index}', (x, 0.35 * scale, z), 0.75 * scale, MATS['LeafGreen'], (1.4, 0.7, 1))
+    add_sphere(f'ExteriorGardenMass_{index}', (x, 0.35 * scale, z), 0.75 * scale, MATS['LeafNear'], (1.4, 0.7, 1))
     for leaf_index, angle in enumerate((-0.75, -0.2, 0.35, 0.9)):
       leaf_x = x + math.sin(angle) * 0.5 * scale
       leaf_z = z + math.cos(angle) * 0.35 * scale
-      leaf = add_box(f'ExteriorGardenLeaf_{index}_{leaf_index}', (leaf_x, 0.58 * scale, leaf_z), (0.16 * scale, 0.68 * scale, 0.34 * scale), MATS['LeafGreen'], yaw=angle, bevel=0.06)
+      leaf = add_box(f'ExteriorGardenLeaf_{index}_{leaf_index}', (leaf_x, 0.58 * scale, leaf_z), (0.16 * scale, 0.68 * scale, 0.34 * scale), MATS['LeafNear'], yaw=angle, bevel=0.06)
       leaf.rotation_euler[0] = angle * 0.22
   for index, (x, z, scale) in enumerate(((-8.8, 16.2, 1.0), (-2.8, 17.0, 1.25), (3.4, 16.4, 0.92), (9.2, 17.1, 1.18))):
     add_cylinder(f'ExteriorScalesiaTrunk_{index}', (x, 1.05 * scale, z), 0.09 * scale, 2.1 * scale, MATS['DarkTimber'], 12)
     for crown, offset in enumerate(((-0.42, 0.06), (0.12, 0.0), (0.52, -0.08))):
-      add_sphere(f'ExteriorScalesiaCrown_{index}_{crown}', (x + crown * 0.26, 2.1 * scale + offset[1], z + offset[0]), 0.62 * scale, MATS['LeafGreen'], (1.2, 0.72, 1))
+      add_sphere(f'ExteriorScalesiaCrown_{index}_{crown}', (x + crown * 0.26, 2.1 * scale + offset[1], z + offset[0]), 0.62 * scale, MATS['LeafMiddle'], (1.2, 0.72, 1))
   for index, (x, z, scale) in enumerate(((-10.4, 16.6, 1.3), (-6.7, 17.7, 0.9), (6.3, 17, 1.2), (10.6, 17.9, 1.5))):
     add_sphere(f'ExteriorBasalt_{index}', (x, 0.4 * scale, z), 0.55 * scale, MATS['Basalt'], (1.3, 0.75, 1))
 
   # Side-window diorama: close enough to register as vegetation and wet soil,
   # but clear of the playable shell and never mistaken for an interior wall.
   add_box('ExteriorWestGround', (-13.4, -0.16, 3.9), (5.7, 0.13, 17.5), MATS['WetGrass'])
-  add_box('ExteriorWestMistNear', (-16.2, 2.15, 3.9), (0.05, 4.6, 17.5), MATS['HighlandMistNear'])
-  add_box('ExteriorWestMistFar', (-18.2, 2.4, 3.9), (0.05, 5.2, 19.5), MATS['HighlandMistFar'])
+  add_box('ExteriorWestMistNear', (-17.0, 1.95, 3.9), (0.035, 3.9, 17.5), MATS['HighlandMistNear'])
   for index, (x, z, scale) in enumerate(((-12.1, 1.5, 0.65), (-13.4, 2.8, 0.9), (-12.6, 4.6, 0.72), (-14.1, 6.1, 1.0), (-12.3, 7.3, 0.6))):
-    add_sphere(f'ExteriorWestFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafGreen'], (1.35, 0.65, 1))
+    add_sphere(f'ExteriorWestFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafNear' if x > -13 else 'LeafMiddle'], (1.35, 0.65, 1))
 
 
 def join_by_material():
@@ -835,7 +988,7 @@ def prop_chair():
     obj.name = f'LawsonPaintedDiningChair_{index}'
     for material_slot in obj.material_slots:
       if material_slot.material:
-        material_slot.material.name = 'LawsonChairDistressedPaint'
+        material_slot.material = MATS['PaintedChair']
   root = bpy.data.objects.new('LawsonPaintedDiningChairRoot', None)
   bpy.context.scene.collection.objects.link(root)
   imported_set = set(imported)
@@ -862,15 +1015,16 @@ def prop_chair():
 
 
 def prop_stool():
-  add_sagged_panel('StoolCanvas', (0, 0.59, 0), 0.68, 0.5, MATS['Canvas'], sag=0.055, x_segments=10, z_segments=8, thickness=0.026)
+  add_sagged_panel('StoolCanvas', (0, 0.59, 0), 0.68, 0.5, MATS['IndigoCloth'], sag=0.055, x_segments=10, z_segments=8, thickness=0.026)
   for edge in (-1, 1):
     add_box(f'StoolLeatherEdge_{edge}', (edge * 0.315, 0.57, 0), (0.04, 0.045, 0.49), MATS['Leather'], bevel=0.012)
   for side in (-1, 1):
-    beam_between(f'StoolFrameA_{side}', (side * 0.26, 0.035, -0.25), (side * 0.26, 0.57, 0.23), 0.038, MATS['OldPine'], 16)
-    beam_between(f'StoolFrameB_{side}', (side * 0.26, 0.035, 0.25), (side * 0.26, 0.57, -0.23), 0.038, MATS['OldPine'], 16)
-    add_sphere(f'StoolPivot_{side}', (side * 0.295, 0.32, 0), 0.052, MATS['Brass'], (0.35, 1, 1))
+    board_between(f'StoolFrameA_{side}', (side * 0.26, 0.035, -0.25), (side * 0.26, 0.57, 0.23), 0.065, 0.047, MATS['OldPine'])
+    board_between(f'StoolFrameB_{side}', (side * 0.26, 0.035, 0.25), (side * 0.26, 0.57, -0.23), 0.065, 0.047, MATS['OldPine'])
+    add_cylinder(f'StoolPivot_{side}', (side * 0.292, 0.32, 0), 0.052, 0.032, MATS['Brass'], 24, rotation=(0, 0, math.pi / 2))
+    add_sphere(f'StoolPivotCap_{side}', (side * 0.312, 0.32, 0), 0.027, MATS['Brass'], (0.34, 1, 1))
     for z in (-0.25, 0.25):
-      add_sphere(f'StoolFoot_{side}_{z}', (side * 0.26, 0.035, z), 0.045, MATS['Iron'], (1, 0.45, 1))
+      add_box(f'StoolFoot_{side}_{z}', (side * 0.26, 0.025, z), (0.09, 0.045, 0.08), MATS['Iron'], bevel=0.012)
   beam_between('StoolCrossBrace', (-0.26, 0.31, 0), (0.26, 0.31, 0), 0.024, MATS['Iron'], 12)
 
 
@@ -921,16 +1075,6 @@ def prop_ledger():
   add_box('LedgerLabelInk', (0.06, 0.179, -0.04), (0.18, 0.004, 0.016), MATS['Ink'], yaw=-0.018, bevel=0.002)
 
 
-def prop_candlestick():
-  add_lathe('CandlestickTurnedBrass', (0, 0, 0), (
-    (0.14, 0.01), (0.155, 0.035), (0.11, 0.075), (0.05, 0.11),
-    (0.035, 0.22), (0.055, 0.29), (0.075, 0.34), (0.065, 0.39),
-  ), MATS['Brass'], 32)
-  add_torus('CandlestickDripPan', (0, 0.36, 0), 0.09, 0.016, MATS['Brass'])
-  add_cylinder('Candle', (0, 0.52, 0), 0.045, 0.32, MATS['CreamCeramic'], 18)
-  add_sphere('CandleWaxDrip', (0.036, 0.61, 0), 0.018, MATS['CreamCeramic'], (0.5, 1.6, 0.5))
-
-
 def build_all():
   clear_scene()
   init_materials()
@@ -946,7 +1090,6 @@ def build_all():
     'serving-bowl.glb': prop_bowl,
     'folded-chart.glb': prop_chart,
     'supply-ledger.glb': prop_ledger,
-    'brass-candlestick.glb': prop_candlestick,
   }
   for filename, builder in prop_builders.items():
     clear_scene()

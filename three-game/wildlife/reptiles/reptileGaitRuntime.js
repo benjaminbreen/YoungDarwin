@@ -13,10 +13,12 @@
 //                  the walking undulation, pitch carries push-up displays.
 //   head         — group at the neck pivot, forward -z.
 //   jaw          — optional lower-jaw group; rotation.x > 0 opens.
+//   gular        — optional throat mesh; scale pulses with the gular pump.
 //   tongue       — optional group scaled along z (0 hidden → 1 full flick).
-//   eyeL/eyeR    — optional eyeball groups (only posed for look-at shine).
+//   eyeL/eyeR    — optional eyeball groups; posed with micro-saccades and a
+//                  player-tracking lead ahead of the head turn.
 //   lidL/lidR    — optional eyelid groups; rotation.x runs 0 (open) →
-//                  `lidClosedAngle` (closed).
+//                  `lidClosedAngle` (closed; sign sets wipe direction).
 //   lidClosedAngle — number, radians for a fully closed lid.
 //   legs         — [{ hip, knee, side (+1 right / -1 left), front, phase }]
 //                  hip yaw swings the sprawled limb fore-aft, knee z lifts.
@@ -61,6 +63,18 @@ export const DEFAULT_REPTILE_GAIT = {
   tongueDuration: 0.2,
   tongueNearRange: 3.2, // player inside this range makes flicks more frequent
   tongueNearScale: 0.45,
+  // --- eye saccades -------------------------------------------------------------
+  saccadeMin: 0.8, // independent micro-darts of the eyes between blinks
+  saccadeMax: 3.4,
+  saccadeAmp: 0.16,
+  saccadeDamp: 16, // snappy — saccades jump, they don't glide
+  eyeLead: 0.55, // eyes reach the player this far ahead of the head turn
+  // --- gular pump (throat breathing, faster than the body cycle) ---------------
+  gularAmp: 0.09,
+  gularRateScale: 2.3,
+  // --- idle head scanning (slow lookout sweep while stationary) ------------------
+  scanAmp: 0.1,
+  scanRate: 0.42,
   // --- push-up territorial display --------------------------------------------
   pushup: {
     range: 4.8, // player must be watching from inside this
@@ -80,8 +94,8 @@ export const DEFAULT_REPTILE_GAIT = {
   cockChance: 0.85,
   // --- basking -----------------------------------------------------------------
   bask: {
-    after: 9, // idle seconds before settling
-    playerRange: 6, // only with the player at a comfortable distance
+    after: 6, // idle seconds before settling (baskers rest a lot)
+    playerRange: 4.8, // only with the player at a comfortable distance
     minDaylight: 0.45,
     maxRain: 0.35,
     drop: 0.014, // belly settles toward the rock
@@ -89,6 +103,7 @@ export const DEFAULT_REPTILE_GAIT = {
     lid: 0.45, // half-lidded doze
     breathScale: 0.55, // slower, deeper breaths
     blendRate: 1.1,
+    tailCurl: 0.14, // tail sweeps into a lazy sideways curl
   },
   // --- head tracking -------------------------------------------------------------
   look: {
@@ -99,9 +114,15 @@ export const DEFAULT_REPTILE_GAIT = {
   },
   // --- idle tail life --------------------------------------------------------------
   tailIdleAmp: 0.05,
+  tailIdleRate: 0.4,
   tailFlickMin: 7,
   tailFlickMax: 16,
   tailFlickDuration: 0.5,
+  // Rest pose baked by the animator (the rig authors segments straight):
+  // per-segment pitch droop in radians, plus a lazy sideways rest curl
+  // (signed per-lizard by curlDir) so the tail never reads as a spike.
+  tailRestPitch: null,
+  tailRestCurl: 0,
 };
 
 function hashSeed(value) {
@@ -150,6 +171,15 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
     // tongue
     nextTongueAt: range(1, 4),
     tongueT: -1,
+    // eye saccades
+    nextSaccadeAt: range(0.4, 2),
+    saccadeYaw: 0,
+    saccadePitch: 0,
+    eyeYaw: 0,
+    eyePitch: 0,
+    // idle scanning + bask tail curl personality
+    scanPhase: rng() * TAU,
+    curlDir: rng() < 0.5 ? -1 : 1,
     // push-up
     nextPushupAt: range(2, config.pushup.maxGap),
     pushup: null, // { t, duration }
@@ -339,6 +369,25 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
     state.lookYaw = damp(state.lookYaw, lookYawTarget * alive, config.look.damp, dt);
     state.lookPitch = damp(state.lookPitch, lookPitchTarget * alive, config.look.damp, dt);
 
+    // --- eye saccades -------------------------------------------------------------------------------
+    // Eyes lead the head: they snap to the target the head is still turning
+    // toward, plus independent micro-darts while idle. Dozing eyes go still.
+    let eyeYawTarget = (lookYawTarget - state.lookYaw) * config.eyeLead;
+    let eyePitchTarget = (lookPitchTarget - state.lookPitch) * config.eyeLead;
+    if (!downed) {
+      state.nextSaccadeAt -= dt;
+      if (state.nextSaccadeAt <= 0) {
+        state.nextSaccadeAt = range(config.saccadeMin, config.saccadeMax);
+        state.saccadeYaw = (rng() - 0.5) * 2 * config.saccadeAmp;
+        state.saccadePitch = (rng() - 0.5) * 1.2 * config.saccadeAmp;
+      }
+      const calm = 1 - bask * 0.85;
+      eyeYawTarget += state.saccadeYaw * calm;
+      eyePitchTarget += state.saccadePitch * calm;
+    }
+    state.eyeYaw = damp(state.eyeYaw, eyeYawTarget * alive, config.saccadeDamp, dt);
+    state.eyePitch = damp(state.eyePitch, eyePitchTarget * alive, config.saccadeDamp, dt);
+
     // --- tail flick scheduler -----------------------------------------------------------------------
     let tailFlick = 0;
     if (!downed && move < 0.3) {
@@ -380,17 +429,36 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
       nodes.torso.rotation.z = 0;
     }
 
-    // Head: stabilized against the trunk wave, plus look-at and the cock.
+    // Head: stabilized against the trunk wave, plus look-at, a slow lookout
+    // scan while stationary, and the cock.
     if (nodes.head) {
       const stabilize = nodes.torso ? -nodes.torso.rotation.y * config.headStabilize : 0;
-      nodes.head.rotation.y = stabilize + state.lookYaw;
+      const scan = Math.sin(time * config.scanRate + state.scanPhase)
+        * config.scanAmp * (1 - move) * (1 - bask * 0.6) * alive;
+      nodes.head.rotation.y = stabilize + state.lookYaw + scan;
       nodes.head.rotation.x = (state.lookPitch + pump * 0.1) * alive - state.slack * 0.12;
       nodes.head.rotation.z = cock * config.cockRoll * state.cockDir * alive;
+    }
+
+    if (nodes.eyeL) {
+      nodes.eyeL.rotation.y = state.eyeYaw;
+      nodes.eyeL.rotation.x = state.eyePitch;
+    }
+    if (nodes.eyeR) {
+      nodes.eyeR.rotation.y = state.eyeYaw;
+      nodes.eyeR.rotation.x = state.eyePitch;
     }
 
     if (nodes.jaw) {
       nodes.jaw.rotation.x = (pump * config.pushup.jawGape + tongueOut * 0.08) * alive
         + state.slack * 0.1;
+    }
+    if (nodes.gular) {
+      // Throat pump runs faster than the body breath — the visible tell of a
+      // reptile at rest, quickening when alert.
+      const gular = Math.max(0, Math.sin(state.breathPhase * config.gularRateScale))
+        * config.gularAmp * (alert ? 1.4 : 0.7 + bask * 0.3) * alive;
+      nodes.gular.scale.set(1 + gular * 0.85, 1 + gular, 1 + gular * 0.35);
     }
     if (nodes.tongue) {
       const out = Math.max(0.02, tongueOut);
@@ -427,17 +495,28 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
       }
     }
 
-    // Tail: travelling wave while moving, lazy drift + occasional tip flick
-    // at rest, raised slightly at full sprint.
+    // Tail: travelling wave while moving; at rest a baked droop with a slow
+    // sideways drift, a gentle vertical breathe, and the occasional tip
+    // flick. Straightens and lifts slightly at full sprint.
     if (nodes.tailSegments) {
       const segments = nodes.tailSegments;
+      const restPitch = config.tailRestPitch;
       for (let k = 0; k < segments.length; k += 1) {
         const wave = Math.sin(phase - (k + 1) * config.tailLag)
           * config.tailSwingAmp * (0.45 + k * 0.55) * move * speedCurve;
-        const idle = Math.sin(time * 0.4 + k * 0.9) * config.tailIdleAmp * (1 - move) * (0.4 + k * 0.6);
+        const idle = Math.sin(time * config.tailIdleRate + state.scanPhase + k * 1.05)
+          * config.tailIdleAmp * (1 - move) * (0.4 + k * 0.6);
         const flick = k === segments.length - 1 ? tailFlick * 0.5 : tailFlick * 0.12 * k;
-        segments[k].rotation.y = (wave + idle + flick) * alive;
-        segments[k].rotation.x = -sprintFactor * move * 0.06 * (k === 0 ? 1 : 0.4);
+        const curl = (bask * config.bask.tailCurl
+          + config.tailRestCurl * (1 - move * 0.6))
+          * state.curlDir * (0.4 + k * 0.6);
+        segments[k].rotation.y = (wave + idle + flick + curl) * alive;
+        const droop = (restPitch ? restPitch[k] ?? 0 : 0)
+          * (1 - sprintFactor * move * 0.6);
+        const settle = Math.sin(time * 0.55 + state.scanPhase + k * 0.7)
+          * 0.018 * (1 - move) * alive;
+        segments[k].rotation.x = droop + settle
+          - sprintFactor * move * 0.06 * (k === 0 ? 1 : 0.4);
       }
     }
 

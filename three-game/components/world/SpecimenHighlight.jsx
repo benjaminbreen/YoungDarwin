@@ -16,6 +16,13 @@ const PROJECTION_MATRIX = new THREE.Matrix4();
 const PROJECTION_INVERSE = new THREE.Matrix4();
 const PROJECTION_POINT = new THREE.Vector3();
 const SCHEDULER_POSITION = new THREE.Vector3();
+const HIGHLIGHT_WORLD_ORIGIN = new THREE.Vector3();
+const HIGHLIGHT_WORLD_TARGET = new THREE.Vector3();
+const HIGHLIGHT_WORLD_SCALE = new THREE.Vector3();
+const HIGHLIGHT_PARENT_QUATERNION = new THREE.Quaternion();
+const HIGHLIGHT_TARGET_QUATERNION = new THREE.Quaternion();
+const HIGHLIGHT_TARGET_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
+let diamondAuraTexture = null;
 
 const VISUAL_TIER_BY_RARITY = Object.freeze({
   abundant: 'common',
@@ -31,24 +38,53 @@ const VISUAL_TIER_BY_RARITY = Object.freeze({
 // to the field-note UI, but the world language stays immediately readable.
 const TIER_STYLES = Object.freeze({
   common: {
-    color: '#d9e6ba',
-    shell: '#e7eed5',
-    ringGain: 1,
-    diamondGlow: 0.48,
+    color: '#69c98a',
+    shell: '#bce7c9',
+    ringGain: 1.04,
+    diamondGlow: 0.66,
+    shellOpacity: 0.9,
+    auraOpacity: 0.045,
   },
   scarce: {
-    color: '#71c68e',
-    shell: '#c8e7d1',
-    ringGain: 1.08,
-    diamondGlow: 0.62,
+    color: '#6faee8',
+    shell: '#c4ddf3',
+    ringGain: 1.1,
+    diamondGlow: 0.82,
+    shellOpacity: 0.91,
+    auraOpacity: 0.06,
   },
   rare: {
     color: '#aa72df',
     shell: '#ddc9f0',
     ringGain: 1.34,
-    diamondGlow: 0.96,
+    diamondGlow: 1.24,
+    shellOpacity: 0.93,
+    auraOpacity: 0.095,
   },
 });
+
+function getDiamondAuraTexture() {
+  if (diamondAuraTexture || typeof document === 'undefined') return diamondAuraTexture;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  const half = size / 2;
+  const gradient = context.createRadialGradient(half, half, 0, half, half, half);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.72)');
+  gradient.addColorStop(0.28, 'rgba(255,255,255,0.24)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  diamondAuraTexture = new THREE.CanvasTexture(canvas);
+  diamondAuraTexture.colorSpace = THREE.NoColorSpace;
+  diamondAuraTexture.minFilter = THREE.LinearFilter;
+  diamondAuraTexture.magFilter = THREE.LinearFilter;
+  diamondAuraTexture.generateMipmaps = false;
+  diamondAuraTexture.needsUpdate = true;
+  return diamondAuraTexture;
+}
 
 const GLOW_VERTEX_SHADER = /* glsl */`
   varying vec2 vUv;
@@ -149,10 +185,29 @@ function distanceVisibility(distance, near, far) {
   return 1 - THREE.MathUtils.smoothstep(distance, near, far);
 }
 
-export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, nearby, selected }) {
+function setWorldTransform(object, worldPosition, worldQuaternion) {
+  const parent = object?.parent;
+  if (!object || !parent) return;
+  parent.updateWorldMatrix(true, false);
+  object.position.copy(parent.worldToLocal(worldPosition));
+  parent.getWorldQuaternion(HIGHLIGHT_PARENT_QUATERNION).invert();
+  object.quaternion.copy(HIGHLIGHT_PARENT_QUATERNION).multiply(worldQuaternion);
+}
+
+export function SpecimenHighlight({
+  specimen,
+  zoneId,
+  markerY,
+  footprintRadius,
+  nearby,
+  selected,
+  groundedRef = null,
+}) {
   const actorId = specimen.instanceId || specimen.id;
+  const highlightRootRef = useRef(null);
   const diamondRef = useRef(null);
   const diamondMaterialRef = useRef(null);
+  const diamondAuraMaterialRef = useRef(null);
   const glowMeshRef = useRef(null);
   const glowMaterialRef = useRef(null);
   const markerVisibilityRef = useRef(0);
@@ -167,6 +222,7 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
   const glowRadius = THREE.MathUtils.clamp(footprintRadius * 1.5, 0.46, 1.55);
   const markerScale = THREE.MathUtils.clamp(0.69 + footprintRadius * 0.14, 0.72, 0.92);
   const glowGeometry = useMemo(() => createTerrainGlowGeometry(), []);
+  const auraTexture = useMemo(() => getDiamondAuraTexture(), []);
   const glowUniforms = useMemo(() => ({
     uColor: { value: new THREE.Color(style.color).multiplyScalar(style.ringGain) },
     uOpacity: { value: 0 },
@@ -192,12 +248,13 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
       lastUpdateAtRef.current = realElapsed;
       const distance = Math.sqrt(Math.max(0, distanceSquared || 0));
       const forceVisible = selected || nearby;
+      const grounded = groundedRef?.current !== false;
       const markerTarget = forceVisible
         ? 1
         : distanceVisibility(distance, MARKER_FADE_NEAR, MARKER_FADE_FAR);
-      const glowTarget = forceVisible
-        ? 1
-        : distanceVisibility(distance, GLOW_FADE_NEAR, GLOW_FADE_FAR);
+      const glowTarget = grounded
+        ? (forceVisible ? 1 : distanceVisibility(distance, GLOW_FADE_NEAR, GLOW_FADE_FAR))
+        : 0;
 
       markerVisibilityRef.current = THREE.MathUtils.damp(
         markerVisibilityRef.current,
@@ -205,28 +262,47 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
         markerTarget > markerVisibilityRef.current ? 1.8 : 2.5,
         delta,
       );
-      glowVisibilityRef.current = THREE.MathUtils.damp(
-        glowVisibilityRef.current,
-        glowTarget,
-        glowTarget > glowVisibilityRef.current ? 1.6 : 2.8,
-        delta,
-      );
+      glowVisibilityRef.current = grounded
+        ? THREE.MathUtils.damp(
+          glowVisibilityRef.current,
+          glowTarget,
+          glowTarget > glowVisibilityRef.current ? 1.6 : 2.8,
+          delta,
+        )
+        : 0;
 
       const markerVisibility = markerVisibilityRef.current;
       const glowVisibility = glowVisibilityRef.current;
-      if (diamondRef.current) {
+      const root = highlightRootRef.current;
+      if (root) {
+        root.getWorldPosition(HIGHLIGHT_WORLD_ORIGIN);
+        root.getWorldScale(HIGHLIGHT_WORLD_SCALE);
+      }
+      if (diamondRef.current && root) {
         diamondRef.current.visible = markerVisibility > 0.002;
-        diamondRef.current.rotation.y = realElapsed * 0.14 + phase;
-        diamondRef.current.rotation.x = 0.08;
-        diamondRef.current.rotation.z = 0;
-        diamondRef.current.position.y = markerY + Math.sin(realElapsed * 0.9 + phase) * 0.038;
+        const bob = Math.sin(realElapsed * 0.9 + phase) * 0.038;
+        HIGHLIGHT_WORLD_TARGET.copy(HIGHLIGHT_WORLD_ORIGIN);
+        HIGHLIGHT_WORLD_TARGET.y += (markerY + bob) * HIGHLIGHT_WORLD_SCALE.y;
+        HIGHLIGHT_TARGET_EULER.set(0.08, realElapsed * 0.14 + phase, 0, 'YXZ');
+        HIGHLIGHT_TARGET_QUATERNION.setFromEuler(HIGHLIGHT_TARGET_EULER);
+        setWorldTransform(diamondRef.current, HIGHLIGHT_WORLD_TARGET, HIGHLIGHT_TARGET_QUATERNION);
       }
       if (diamondMaterialRef.current) {
-        diamondMaterialRef.current.opacity = markerVisibility * 0.74;
+        diamondMaterialRef.current.opacity = markerVisibility * style.shellOpacity;
         diamondMaterialRef.current.emissiveIntensity = style.diamondGlow
-          * (0.68 + markerVisibility * 0.32);
+          * (0.82 + markerVisibility * 0.18);
       }
-      if (glowMeshRef.current) glowMeshRef.current.visible = glowVisibility > 0.002;
+      if (diamondAuraMaterialRef.current) {
+        diamondAuraMaterialRef.current.opacity = markerVisibility
+          * style.auraOpacity
+          * (0.96 + Math.sin(realElapsed * 0.72 + phase) * 0.04);
+      }
+      if (glowMeshRef.current && root) {
+        glowMeshRef.current.visible = glowVisibility > 0.002;
+        HIGHLIGHT_WORLD_TARGET.copy(HIGHLIGHT_WORLD_ORIGIN);
+        HIGHLIGHT_TARGET_QUATERNION.identity();
+        setWorldTransform(glowMeshRef.current, HIGHLIGHT_WORLD_TARGET, HIGHLIGHT_TARGET_QUATERNION);
+      }
       if (glowMaterialRef.current) {
         glowMaterialRef.current.uniforms.uOpacity.value = glowVisibility
           * (nearby ? 0.46 : 0.38)
@@ -250,6 +326,7 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
 
   return (
     <group
+      ref={highlightRootRef}
       userData={{
         renderSource: `specimen-highlight:${actorId}`,
         renderLabel: `Specimen highlight: ${visualTier}`,
@@ -284,6 +361,20 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
         scale={markerScale}
         visible={false}
       >
+        {auraTexture && (
+          <sprite scale={[0.42, 0.42, 1]} renderOrder={4} raycast={NO_RAYCAST}>
+            <spriteMaterial
+              ref={diamondAuraMaterialRef}
+              map={auraTexture}
+              color={style.color}
+              transparent
+              opacity={0}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped={false}
+            />
+          </sprite>
+        )}
         <mesh renderOrder={5} raycast={NO_RAYCAST}>
           <octahedronGeometry args={[0.145, 0]} />
           <meshPhysicalMaterial
@@ -291,14 +382,14 @@ export function SpecimenHighlight({ specimen, zoneId, markerY, footprintRadius, 
             color={style.shell}
             emissive={style.color}
             emissiveIntensity={style.diamondGlow}
-            roughness={0.16}
-            metalness={0.06}
-            clearcoat={1}
-            clearcoatRoughness={0.06}
-            envMapIntensity={1.8}
-            transmission={0.06}
-            thickness={0.16}
-            ior={1.38}
+            roughness={0.22}
+            metalness={0.025}
+            clearcoat={0.92}
+            clearcoatRoughness={0.11}
+            envMapIntensity={1.45}
+            transmission={0.015}
+            thickness={0.08}
+            ior={1.42}
             transparent
             opacity={0}
             depthWrite={false}

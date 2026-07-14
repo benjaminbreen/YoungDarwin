@@ -14,8 +14,8 @@ import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { getWildlifeAssetId } from '../../wildlife/wildlifeCatalog';
 import { LavaLizardShape } from '../../wildlife/reptiles/LavaLizardShape';
+import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSpecimenShape';
 import { addRimLight, toonMaterial } from '../scene/materials';
-import { ContactShadow } from '../scene/ContactShadow';
 import { ModelAsset } from '../assets/ModelAsset';
 import { SpecimenHighlight } from './SpecimenHighlight';
 
@@ -277,6 +277,7 @@ function ProceduralSpecimenShape({ specimen }) {
 }
 
 export function SpecimenShape({ specimen, animationSelector }) {
+  if (specimen.pollinator) return <PollinatorSpecimenShape specimen={specimen} />;
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
@@ -291,6 +292,8 @@ export function SpecimenShape({ specimen, animationSelector }) {
       animationSelector={animationSelector}
       motion={foliageMotion}
       timeScaled
+      castShadow
+      receiveShadow
     />
   );
 }
@@ -341,7 +344,7 @@ function WadingWaterline({ localY, radius = 0.58, depth = 0.35 }) {
 
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
-  const groundAffordanceRef = useRef(null);
+  const highlightGroundedRef = useRef(true);
   const crabWiggleRef = useRef(null);
   const actorId = specimen.instanceId || specimen.id;
   const runtimePublishRef = useRef({ x: Infinity, y: Infinity, z: Infinity, time: -Infinity });
@@ -359,7 +362,7 @@ export function SpecimenActor({ specimen }) {
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
   // Narrow boolean: only flips when this specimen is picked up / put down, so
-  // the contact shadow can hide while the animal is held off the ground.
+  // the terrain-projected marker can hide while the animal is held aloft.
   const isCarried = useThreeGameStore(state => state.carriedObjectId === actorId);
   // While this actor is under examination the camera is framing it; hold its
   // wander/patrol in place (idle animation keeps playing) so the shot stays
@@ -387,6 +390,14 @@ export function SpecimenActor({ specimen }) {
     basePosition: position,
     paused: isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo),
   });
+  const selectSpecimenAnimation = () => {
+    if (!isUnderExamination) return faunaBehavior.animationRef?.current || null;
+    const clip = behaviorProfile?.idleClip
+      || behaviorProfile?.feedClip
+      || faunaBehavior.animationRef?.current?.clip
+      || faunaBehavior.animationRef?.current;
+    return clip ? { clip, timeScale: 0.72, fade: 0.24 } : null;
+  };
 
   useEffect(() => {
     if (isCollectedActor) return;
@@ -460,16 +471,45 @@ export function SpecimenActor({ specimen }) {
     });
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
+    highlightGroundedRef.current = !carriedHere
+      && !snareTrap
+      && !downedInfo
+      && faunaBehavior.airborneRef?.current !== true;
     if (crabWiggleRef.current) {
       const burst = Math.max(0, Math.sin(realElapsed * 2.6));
       crabWiggleRef.current.position.y = 0.01 + Math.abs(Math.sin(realElapsed * 9.0)) * 0.012 * burst;
       crabWiggleRef.current.scale.setScalar(1 + Math.sin(realElapsed * 8.2) * 0.018 * burst);
     }
-    if (groundAffordanceRef.current) {
-      groundAffordanceRef.current.visible = !carriedHere && !snareTrap
-        && (Boolean(downedInfo) || faunaBehavior.airborneRef?.current !== true);
+    if (specimen.pollinator) {
+      highlightGroundedRef.current = false;
+      const base = behaviorBaseRef.current || position;
+      const t = worldElapsed + actorId.length * 0.37;
+      if (!isUnderExamination) {
+        const radiusX = specimen.habitatRadiusX || 1.35;
+        const radiusZ = specimen.habitatRadiusZ || 1.05;
+        group.current.position.set(
+          base.x + Math.sin(t * 0.52) * radiusX + Math.sin(t * 1.7) * 0.14,
+          base.y + 0.62 + Math.sin(t * 1.23) * 0.22 + Math.sin(t * 5.1) * 0.025,
+          base.z + Math.cos(t * 0.43) * radiusZ + Math.cos(t * 1.45) * 0.12,
+        );
+        group.current.rotation.set(
+          Math.sin(t * 1.1) * 0.08,
+          Math.atan2(Math.cos(t * 0.52) * radiusX, -Math.sin(t * 0.43) * radiusZ),
+          Math.sin(t * 0.9) * 0.18,
+        );
+      }
+      publishActorRuntimePosition({
+        publisher: setSpecimenRuntimePosition,
+        ref: runtimePublishRef,
+        actorId,
+        zoneId: currentZoneId,
+        position: group.current.position,
+        now: realElapsed,
+        force: isUnderExamination,
+        debug: { motionStatus: isUnderExamination ? 'examining' : 'pollinating' },
+      });
+      return;
     }
-
     if (downedInfo) {
       // Fall from wherever it was hit (out of the sky for a flying bird),
       // tumbling on the way down, then lie on its side awaiting pickup. Runs
@@ -509,6 +549,7 @@ export function SpecimenActor({ specimen }) {
         const target = anim.spinDir * 1.42;
         anim.rotZ += (target - anim.rotZ) * Math.min(1, dt * 9);
       }
+      highlightGroundedRef.current = anim.settled;
       group.current.position.set(anim.x, anim.y, anim.z);
       group.current.rotation.set(0, group.current.rotation.y, anim.rotZ);
       publishActorRuntimePosition({
@@ -714,20 +755,15 @@ export function SpecimenActor({ specimen }) {
     [currentZoneId, position],
   );
   const hideGroundAffordances = standingWater.active;
+  const showWorldMarker = specimen.worldMarker !== false && !specimen.pollinator;
   const showWadingWaterline = standingWater.active
     && (behaviorProfile?.movementStyle === 'wade' || specimen.id === 'flamingo');
   const specimenContent = (
     <>
-      <group ref={groundAffordanceRef}>
-        {!isCarried && !hideGroundAffordances && (
-          <ContactShadow
-            radius={contactRadius}
-            strength={specimen.id === 'lavalizard' ? 0.62 : 1}
-          />
-        )}
+      <group>
         {/* Selection rings/marker are HUD affordances — they'd pollute the
             composed examine shot, so they hide while a session is open. */}
-        {!examineOpen && !hideGroundAffordances && (
+        {showWorldMarker && !examineOpen && !isCarried && !snareTrap && !hideGroundAffordances && (
           <SpecimenHighlight
             specimen={specimen}
             zoneId={currentZoneId}
@@ -735,6 +771,7 @@ export function SpecimenActor({ specimen }) {
             footprintRadius={contactRadius}
             selected={selected}
             nearby={nearby}
+            groundedRef={highlightGroundedRef}
           />
         )}
       </group>
@@ -747,7 +784,7 @@ export function SpecimenActor({ specimen }) {
       )}
       <AnimatedSpecimenShape
         specimen={specimen}
-        animationSelector={faunaBehavior.animationRef ? () => faunaBehavior.animationRef.current : null}
+        animationSelector={selectSpecimenAnimation}
         crabWiggleRef={crabWiggleRef}
       />
     </>

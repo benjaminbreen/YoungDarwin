@@ -53,8 +53,16 @@ export function specimenFrameHint(specimen) {
   // Radius approximates the subject's visual bulk for camera framing; wide
   // low creatures (tortoise) read larger than their interaction height.
   const scale = specimen?.sceneScale || 1;
-  const radius = Math.max(0.28, height * 0.85, 0.55 * scale);
-  return { height: Math.max(0.3, height), radius };
+  const authoredRadius = Number(specimen?.examineRadius);
+  const hasAuthoredRadius = Number.isFinite(authoredRadius);
+  const radius = hasAuthoredRadius
+    ? Math.max(0.025, authoredRadius * scale)
+    : Math.max(0.28, height * 0.85, 0.55 * scale);
+  return {
+    height: Math.max(hasAuthoredRadius ? 0.04 : 0.3, height),
+    radius,
+    closeup: hasAuthoredRadius && authoredRadius < 0.2,
+  };
 }
 
 export function examinableFromSpecimen(specimen) {

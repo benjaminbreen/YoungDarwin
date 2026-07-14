@@ -16,6 +16,7 @@ import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { createReptileAnimator } from './reptileGaitRuntime';
 import {
   createLavaLizardRig,
+  pickLavaLizardSize,
   pickLavaLizardVariant,
   LAVA_LIZARD_GAIT,
 } from './lavaLizardModel';
@@ -23,7 +24,7 @@ import {
 // The fauna controller floats the actor origin ~4cm above the terrain
 // (groundOffset) but samples it at one point, so a long body clips on any
 // slope if the feet sit exactly at the sample height. Keep a small positive
-// clearance and let the contact shadow sell the contact.
+// clearance so the real sun shadow can still ground the body cleanly.
 const GROUND_TRIM = -0.025;
 // The fauna controller's yaw convention travels toward +z; the rig is
 // authored head-at--z like the GLBs before their manifest flip.
@@ -39,10 +40,18 @@ const _player = new THREE.Vector3();
 export function LavaLizardShape({ specimen }) {
   const actorId = specimen.instanceId || specimen.id;
   const variant = useMemo(() => pickLavaLizardVariant(actorId), [actorId]);
+  // Per-animal adult size (base rig = smallest). Uniform scale on the wrapper
+  // group; stride length grows with the body so bigger lizards take longer,
+  // slower steps from the same observed world speed.
+  const size = useMemo(() => pickLavaLizardSize(actorId, variant), [actorId, variant]);
   const rig = useMemo(() => createLavaLizardRig(variant), [variant]);
   const animator = useMemo(
-    () => createReptileAnimator({ nodes: rig.nodes, config: LAVA_LIZARD_GAIT, seed: actorId }),
-    [actorId, rig],
+    () => createReptileAnimator({
+      nodes: rig.nodes,
+      config: { ...LAVA_LIZARD_GAIT, strideLength: LAVA_LIZARD_GAIT.strideLength * size },
+      seed: actorId,
+    }),
+    [actorId, rig, size],
   );
   const downed = useThreeGameStore(state => Boolean(state.downedSpecimenActors?.[actorId]));
   const held = useThreeGameStore(state => state.carriedObjectId === actorId);
@@ -98,7 +107,7 @@ export function LavaLizardShape({ specimen }) {
   });
 
   return (
-    <group position={[0, GROUND_TRIM, 0]} rotation={[0, FORWARD_FLIP, 0]}>
+    <group position={[0, GROUND_TRIM * size, 0]} rotation={[0, FORWARD_FLIP, 0]} scale={size}>
       <primitive object={rig.group} />
     </group>
   );

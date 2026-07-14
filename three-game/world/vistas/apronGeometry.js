@@ -6,7 +6,6 @@ import {
   terrainSurfaceNoise,
   WATER_LEVEL,
 } from '../terrain';
-import { isAuthoredRegion } from '../regions';
 import { getBorderVistas } from './index';
 import {
   CARDINAL_VISTA_EDGES,
@@ -25,6 +24,9 @@ import {
 //     blend toward the neighboring region's profile.
 // Both meshes share the seam ring's positions and normals, so the boundary is
 // watertight; the noise-driven wander keeps it from reading as a ruled line.
+// A third slice, the vista water sheet, caps any continued seabed that dips
+// below the waterline with translucent schematic water (see
+// makeVistaWaterGeometry).
 
 export const EDGE_AXES = {
   north: { along: [1, 0], outward: [0, -1] },
@@ -50,10 +52,15 @@ const SEAM_BLEND_LENGTH = 18;
 // How far the carry strip tucks below the vista mesh across the blend band,
 // so dither-discarded vista pixels reveal it without z-fighting.
 const SEAM_BLEND_DROP = 0.07;
-// The detailed water plane in Water.jsx is a fixed 150x150 square; continued
-// seabed is only safe underneath it. Beyond it the deep-ocean disc is the
-// water surface, and seabed shallower than the disc would poke through.
+// The detailed water plane in Water.jsx is a fixed 150x150 square; inside it
+// the plane is the water surface, so the vista water sheet only needs to cover
+// apron seabed beyond it (where the only other surface is the camera-following
+// deep-ocean disc, whose flat saturated blue reads as a glitch next to sand).
 const DETAILED_WATER_HALF = 73;
+// The sheet sits between the deep disc (WATER_LEVEL - 0.08) and the detailed
+// plane (WATER_LEVEL), so it occludes the disc over apron water without ever
+// poking through the animated plane.
+const VISTA_WATER_DROP = 0.045;
 
 export function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
@@ -236,12 +243,6 @@ export function edgeLandStrength(regionId, config, edge, u) {
   );
 }
 
-function triangleIsLand(a, b, c, landStrengths, minStrength = 0.18) {
-  return landStrengths[a] > minStrength
-    && landStrengths[b] > minStrength
-    && landStrengths[c] > minStrength;
-}
-
 function ensureUpwardWinding(geometry) {
   const position = geometry.getAttribute('position');
   const index = geometry.getIndex();
@@ -278,11 +279,43 @@ function ensureUpwardWinding(geometry) {
 
 const NEIGHBOR_GRID_CACHE = new Map();
 
+// Adjacent cardinal edge at each end of an edge's along axis (u=0 / u=1).
+const CORNER_ADJACENT_EDGE = {
+  north: ['west', 'east'],
+  south: ['west', 'east'],
+  east: ['north', 'south'],
+  west: ['north', 'south'],
+};
+
+function vistaRendersPreview(regionId, edge) {
+  const sibling = getBorderVistas(regionId).find(entry => entry.edge === edge);
+  return Boolean(sibling
+    && CARDINAL_VISTA_EDGES.has(sibling.edge)
+    && sibling.toRegionId
+    && sibling.render !== false
+    && getRegionTerrainConfig(sibling.toRegionId));
+}
+
+// Corner wedges past the map's diagonal have no apron of their own, and the
+// deep-ocean disc showing there reads as flat blue slabs. Each corner is
+// covered by exactly one apron sweeping around it with clamped sampling:
+// north/south aprons own their corners; east/west aprons only pick up a
+// corner when the adjoining north/south edge renders no preview.
+function cornerExtension(regionId, vista, end) {
+  const adjacentEdge = CORNER_ADJACENT_EDGE[vista.edge]?.[end];
+  if (!adjacentEdge) return false;
+  if (vista.edge === 'north' || vista.edge === 'south') return true;
+  return !vistaRendersPreview(regionId, adjacentEdge);
+}
+
+// Any neighbor with a terrain config qualifies: terrainHeight/terrainColor
+// fall back to the procedural placeholder profile for non-authored regions,
+// so previews of procedural maps sample real (if simple) terrain rather than
+// needing a hand-authored vista profile.
 function neighborGridEligible(regionId, targetRegionId, targetConfig, vista) {
   return CARDINAL_VISTA_EDGES.has(vista.edge)
     && Boolean(targetRegionId)
     && Boolean(targetConfig)
-    && isAuthoredRegion(targetRegionId)
     && vista.render !== false;
 }
 
@@ -294,7 +327,6 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   const axes = EDGE_AXES[vista.edge];
   const targetEdge = transition?.targetEdge || OPPOSITE_VISTA_EDGE[vista.edge];
   if (!axes || !targetEdge) return null;
-  const recipe = transition?.recipe || { shoreFloor: WATER_LEVEL - 0.28, landThreshold: 0.18 };
   const continuity = transition?.continuity || null;
 
   const along = normalize2(axes.along);
@@ -305,18 +337,24 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
     previewDepth + 10,
   );
-  const width = axisLength(config, vista.edge) * 1.04;
+  const axisLen = axisLength(config, vista.edge);
+  const baseWidth = axisLen * 1.04;
+  const extLow = cornerExtension(regionId, vista, 0) ? previewDepth : 0;
+  const extHigh = cornerExtension(regionId, vista, 1) ? previewDepth : 0;
+  const width = baseWidth + extLow + extHigh;
+  const alongStart = -baseWidth / 2 - extLow;
   // Fine enough that the area-averaged vertex colors interpolate as gradients;
-  // still only ~4k triangles per vista, built once and cached.
-  const cols = 64;
+  // still only ~4k triangles per vista (more when the apron sweeps corners),
+  // built once and cached. Column count scales so vertex density holds.
+  const cols = Math.min(128, Math.round(64 * (width / baseWidth)));
   const rows = 34;
   const collarRows = collarRowCount(rows);
   const positions = [];
   const nearColors = [];
   const farColors = [];
-  const landStrengths = [];
   const blends = [];
   const waterSafe = [];
+  const sheetColors = [];
 
   // Seam ring where the region-material carry strip hands off to the vista
   // mesh: nominally at continuity.carryEnd, wandering per column so the
@@ -339,7 +377,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   }
 
   const seamDistanceAt = u => {
-    const alongDistance = (u - 0.5) * width;
+    const alongDistance = alongStart + u * width;
     const wander = terrainSurfaceNoise(
       alongDistance * 0.5 + (vista.seed || 0) * 13.7,
       (vista.seed || 0) * 3.1,
@@ -375,9 +413,11 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // rather than reachable ground with odd colors.
       const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.34, 1.0);
 
-      const alongDistance = (u - 0.5) * width;
+      const alongDistance = alongStart + u * width;
       const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
-      const clampedU = THREE.MathUtils.clamp(u, 0, 1);
+      // Corner overhang columns keep sampling frozen at the edge's end, so the
+      // apron sweeps around the corner continuing the corner profile.
+      const clampedU = THREE.MathUtils.clamp(alongDistance / axisLen + 0.5, 0, 1);
       const [currentX, currentZ] = clampToRegionEdge(config, x, z);
       const currentY = terrainHeight(currentX, currentZ, regionId);
       const [edgeX, edgeZ] = edgePoint(config, vista.edge, clampedU, 0);
@@ -386,22 +426,6 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       const targetEdgeY = terrainHeight(targetEdgeX, targetEdgeZ, targetRegionId);
       const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
       const targetY = terrainHeight(targetX, targetZ, targetRegionId);
-      const currentLandHere = THREE.MathUtils.smoothstep(currentY, WATER_LEVEL - 0.26, WATER_LEVEL + 0.32);
-      const currentLand = Math.max(currentLandHere, edgeLandStrength(regionId, config, vista.edge, clampedU));
-      const targetLand = THREE.MathUtils.smoothstep(targetY, recipe.shoreFloor, WATER_LEVEL + 0.18);
-      const inlandGate = Math.max(currentLand, THREE.MathUtils.smoothstep(outsideT, 0.16, 0.36));
-      const sourceCarryLand = currentLand * (1 - THREE.MathUtils.smoothstep(
-        outsideDistance,
-        carryEnd * 0.58,
-        carryEnd,
-      ));
-      const targetGateEnd = continuity
-        ? Math.max(continuity.shorePatchStart + 6, continuity.targetColorFull * 0.72)
-        : 1;
-      const targetLandGate = continuity
-        ? THREE.MathUtils.smoothstep(outsideDistance, continuity.shorePatchStart, targetGateEnd)
-        : 1;
-      const landStrength = Math.max(sourceCarryLand, targetLand * inlandGate * targetLandGate);
       const seamOffset = edgeY - targetEdgeY;
       const sourceCarryY = currentY
         - BORDER_COLLAR_DROP
@@ -438,11 +462,21 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // walkable mesh's own vertices carry.
       nearColors.push(currentColor.r, currentColor.g, currentColor.b);
       farColors.push(color.r, color.g, color.b);
-      landStrengths.push(landStrength);
       blends.push(row <= collarRows
         ? 0
         : THREE.MathUtils.smoothstep(outsideDistance, seamDistance, seamDistance + SEAM_BLEND_LENGTH));
       waterSafe.push(Math.max(Math.abs(x), Math.abs(z)) < DETAILED_WATER_HALF ? 1 : 0);
+
+      // Water sheet vertex: tint deepens with continued-seabed depth, alpha
+      // fades to nothing at the waterline so shores never get a hard rim.
+      const depthBelow = WATER_LEVEL - y;
+      const sheetColor = SHALLOW_CONTINUATION.clone().lerp(
+        DEEP_CONTINUATION,
+        THREE.MathUtils.smoothstep(depthBelow, 0.08, 1.6),
+      );
+      sheetColor.lerp(ATMOSPHERE, farHaze * 0.55);
+      const sheetAlpha = THREE.MathUtils.smoothstep(depthBelow, 0.03, 0.46) * 0.85;
+      sheetColors.push(sheetColor.r, sheetColor.g, sheetColor.b, sheetAlpha);
     }
   }
 
@@ -470,20 +504,31 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   const woundIndices = Array.from(fullGeometry.getIndex().array);
   fullGeometry.dispose();
 
-  // Carry strip: land triangles plus seabed under the detailed water plane,
-  // out through the blend band. Vista mesh: land triangles from the seam ring
+  // Both meshes are watertight: culling "water" triangles used to leave holes
+  // that exposed the camera-following deep-ocean disc as flat saturated-blue
+  // patches (or the skybox, inside the disc's near-camera discard radius).
+  // Continued seabed renders everywhere instead, and the vista water sheet
+  // caps it wherever it dips below the waterline.
+  // Carry strip: map edge out through the blend band. Vista mesh: seam ring
   // outward; its first SEAM_BLEND_LENGTH metres dissolve in over the strip.
   const nearIndices = [];
   const farIndices = [];
+  const sheetIndices = [];
   for (let i = 0; i < woundIndices.length; i += 3) {
     const i0 = woundIndices[i];
     const i1 = woundIndices[i + 1];
     const i2 = woundIndices[i + 2];
     const minRow = Math.floor(Math.min(i0, i1, i2) / stride);
-    const landTriangle = triangleIsLand(i0, i1, i2, landStrengths, recipe.landThreshold);
+    if (minRow < overlapEndRow) nearIndices.push(i0, i1, i2);
+    if (minRow >= seamRow) farIndices.push(i0, i1, i2);
+    // Sheet triangles: any corner under water, outside the collar (the collar
+    // hugs real terrain inside the map) and not fully under the detailed
+    // water plane, which is already the water surface there.
     const underDetailedWater = waterSafe[i0] && waterSafe[i1] && waterSafe[i2];
-    if (minRow < overlapEndRow && (landTriangle || underDetailedWater)) nearIndices.push(i0, i1, i2);
-    if (minRow >= seamRow && landTriangle) farIndices.push(i0, i1, i2);
+    const anyWet = sheetColors[i0 * 4 + 3] > 0.001
+      || sheetColors[i1 * 4 + 3] > 0.001
+      || sheetColors[i2 * 4 + 3] > 0.001;
+    if (minRow > collarRows && anyWet && !underDetailedWater) sheetIndices.push(i0, i1, i2);
   }
   if (!nearIndices.length && !farIndices.length) return null;
 
@@ -496,6 +541,16 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     if (Math.floor(v / stride) > seamRow) nearPositions[v * 3 + 1] -= blends[v] * SEAM_BLEND_DROP;
   }
 
+  // Sheet vertices share the grid's x/z but sit on one flat plane just below
+  // the waterline, so the sheet meets the seabed exactly where alpha hits 0.
+  let sheetPositions = null;
+  if (sheetIndices.length) {
+    sheetPositions = positionArray.slice();
+    for (let v = 0; v < vertexCount; v += 1) {
+      sheetPositions[v * 3 + 1] = WATER_LEVEL - VISTA_WATER_DROP;
+    }
+  }
+
   const grid = {
     positions: positionArray,
     nearPositions,
@@ -505,6 +560,9 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     blends: new Float32Array(blends),
     nearIndices,
     farIndices,
+    sheetPositions,
+    sheetColors: new Float32Array(sheetColors),
+    sheetIndices,
   };
   NEIGHBOR_GRID_CACHE.set(cacheKey, grid);
   return grid;
@@ -533,6 +591,20 @@ export function makeNeighborCarryGeometry(regionId, config, targetRegionId, targ
   const grid = buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, vista, transition);
   if (!grid) return null;
   return gridSliceGeometry(grid, grid.nearPositions, grid.nearColors, grid.nearIndices, 'carry-strip');
+}
+
+// Flat translucent sheet at the waterline over any apron seabed that dips
+// below it. Occludes the deep-ocean disc there with shore-faded, depth-tinted
+// water that matches the schematic apron language instead of flat disc blue.
+export function makeVistaWaterGeometry(regionId, config, targetRegionId, targetConfig, vista, transition) {
+  const grid = buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, vista, transition);
+  if (!grid?.sheetPositions || !grid.sheetIndices.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(grid.sheetPositions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(grid.sheetColors, 4));
+  geometry.setIndex(grid.sheetIndices);
+  geometry.userData.mode = 'vista-water';
+  return geometry;
 }
 
 // Carry strips for every vista edge of a region, rendered by Terrain with the

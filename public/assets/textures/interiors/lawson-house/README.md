@@ -46,3 +46,12 @@ not used as the public-room wall finish.
 
 The generated GLBs embed their textures. These files remain in the repository
 to make later rebuilds deterministic.
+
+## Generated Official Notice
+
+- Source: OpenAI image generation.
+- Repository/runtime source file: `official-appointment-notice.png`; the
+  Lawson House build script embeds this tracked copy in the generated GLB.
+- Use: the framed Vice-Governor appointment notice in the public room.
+- Status: interpretive environmental art; it is not presented to players as a
+  verbatim archival transcription.

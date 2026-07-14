@@ -246,14 +246,14 @@ const INTERIORS = {
     lighting: {
       worldYaw: 0.62,
       fogDensity: 0.00035,
-      exposureDay: 0.86,
-      exposureNight: 0.55,
+      exposureDay: 0.9,
+      exposureNight: 0.52,
       exposureResponse: 1.85,
-      environmentDay: 0.21,
+      environmentDay: 0.25,
       environmentNight: 0.055,
-      ambientDay: 0.014,
+      ambientDay: 0.018,
       ambientNight: 0.006,
-      hemisphereDay: 0.04,
+      hemisphereDay: 0.052,
       hemisphereNight: 0.016,
       ambientColor: '#8b948b',
       hemisphereSkyColor: '#b3c0b5',
@@ -267,7 +267,7 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 2.8,
+          diffuseIntensity: 1.35,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
@@ -286,7 +286,7 @@ const INTERIORS = {
               dust: { count: 34, length: 6.2, speed: 0.06, opacity: 0.2, size: 0.08, noise: 0.2, color: '#f1d3a0', visibilityThreshold: 0.12 }
             }
           },
-          bounce: { position: [-8.2, 0.22, 5.65], direction: [0, 1, -0.08], width: 2.3, height: 1.05, intensity: 1.05, diffuseShare: 0.42 }
+          bounce: { position: [-8.2, 0.22, 5.65], direction: [0, 1, -0.08], width: 2.3, height: 1.05, intensity: 0.82, diffuseShare: 0.36 }
         },
         {
           id: 'dining-front-window-a',
@@ -294,7 +294,7 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.6,
           height: 1.32,
-          diffuseIntensity: 4.2,
+          diffuseIntensity: 2.05,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
@@ -316,7 +316,7 @@ const INTERIORS = {
               dust: { count: 46, length: 7.2, speed: 0.065, opacity: 0.24, size: 0.085, noise: 0.22, color: '#f5d39a', visibilityThreshold: 0.1 }
             }
           },
-          bounce: { position: [-0.45, 0.2, 5.35], direction: [0, 1, -0.12], width: 3.1, height: 1.15, intensity: 1.65, diffuseShare: 0.52 }
+          bounce: { position: [-0.45, 0.2, 5.35], direction: [0, 1, -0.12], width: 3.1, height: 1.15, intensity: 1.2, diffuseShare: 0.42 }
         },
         {
           id: 'dining-front-window-b',
@@ -324,7 +324,7 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 3.7,
+          diffuseIntensity: 1.65,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
@@ -343,7 +343,7 @@ const INTERIORS = {
               dust: { count: 32, length: 6.5, speed: 0.06, opacity: 0.18, size: 0.08, noise: 0.2, color: '#efd09a', visibilityThreshold: 0.12 }
             }
           },
-          bounce: { position: [1.85, 0.2, 5.3], direction: [0, 1, -0.1], width: 2.5, height: 1.1, intensity: 1.15, diffuseShare: 0.46 }
+          bounce: { position: [1.85, 0.2, 5.3], direction: [0, 1, -0.1], width: 2.5, height: 1.1, intensity: 0.9, diffuseShare: 0.36 }
         },
         {
           id: 'garden-window-a',
@@ -351,7 +351,7 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 3.25,
+          diffuseIntensity: 1.75,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
@@ -373,7 +373,7 @@ const INTERIORS = {
               dust: { count: 32, length: 5.4, speed: 0.06, opacity: 0.16, size: 0.085, noise: 0.2, color: '#e4c99a', visibilityThreshold: 0.16 }
             }
           },
-          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.7, diffuseShare: 0.48 }
+          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.24, diffuseShare: 0.42 }
         },
         {
           id: 'garden-window-b',
@@ -381,7 +381,7 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 2.9,
+          diffuseIntensity: 1.32,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
@@ -396,7 +396,7 @@ const INTERIORS = {
             diffuseCut: 0.1,
             castShadow: false
           },
-          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 1.25, diffuseShare: 0.44 }
+          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 0.86, diffuseShare: 0.36 }
         },
         {
           id: 'front-doorway',
@@ -404,26 +404,26 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.4,
           height: 2.42,
-          diffuseIntensity: 2.35,
+          diffuseIntensity: 0.92,
           color: '#c3d0c7',
           goldenColor: '#edbd72'
         }
       ],
       lamps: [
-        { id: 'dining-hanging-lamp', position: [-2.35, 3.0, 2.05], color: '#ff9c4d', dayIntensity: 0.01, nightIntensity: 7.2, distance: 5.6, decay: 2.05, castShadow: true, shadowMapSize: 512 },
-        { id: 'calling-table-lamp', position: [-9.48, 1.36, 6.32], color: '#ffae61', dayIntensity: 0.01, nightIntensity: 4.4, distance: 3.8, decay: 2.05, castShadow: false }
+        { id: 'dining-hanging-lamp', position: [-2.35, 2.81, 2.05], color: '#ff9c4d', dayIntensity: 0.005, nightIntensity: 7.2, distance: 5.6, decay: 2.05, castShadow: true, shadowMapSize: 512 },
+        { id: 'calling-table-lamp', position: [-9.48, 1.09, 6.32], color: '#ffae61', dayIntensity: 0.005, nightIntensity: 4.4, distance: 3.8, decay: 2.05, castShadow: false }
       ],
       postprocessing: {
         multisampling: 0,
         aoFullResolution: true,
-        aoRadius: 0.78,
-        aoDistanceFalloff: 0.86,
-        aoIntensity: 2.28,
+        aoRadius: 0.52,
+        aoDistanceFalloff: 0.72,
+        aoIntensity: 1.68,
         aoDenoiseRadius: 8,
         bloomNightIntensity: 0.48,
-        bloomDayIntensity: 0.32,
+        bloomDayIntensity: 0.2,
         bloomNightThreshold: 0.6,
-        bloomDayThreshold: 0.76,
+        bloomDayThreshold: 0.86,
         bloomSmoothing: 0.22,
         bloomRadius: 0.42
       }

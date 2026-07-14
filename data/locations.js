@@ -135,7 +135,7 @@ export const locations = [
     type: 'bay',
     validMoves: ['W','E','SW','S','NW','N'],
     playerStart: [12.6, 0, 13.0],
-    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull'],
+    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary'],
     specimenPlacements: [
       {
         specimenId: 'flightlesscormorant',
@@ -210,6 +210,9 @@ export const locations = [
         habitatRadiusX: 0.62,
         habitatRadiusZ: 0.46,
       },
+      { instanceId: 'post-office-carpenter-bee', specimenId: 'galapagoscarpenterbee', position: [8.5, 0, 10.8], behavior: 'pollinate', habitatRadiusX: 1.25, habitatRadiusZ: 1.0 },
+      { instanceId: 'post-office-sulphur', specimenId: 'galapagossulphur', position: [15.8, 0, 16.5], behavior: 'pollinate', habitatRadiusX: 1.7, habitatRadiusZ: 1.25 },
+      { instanceId: 'post-office-fritillary', specimenId: 'galapagosgulffritillary', position: [20.5, 0, 20.2], behavior: 'pollinate', habitatRadiusX: 1.9, habitatRadiusZ: 1.4 },
     ],
     npcs: ['lascar_joe'],
     discoveries: [
@@ -2228,7 +2231,7 @@ const finalRouteExtraLocations = [
     color: '#bdb76b',
     type: 'scrubland',
     validMoves: [],
-    specimens: ['cactus', 'lavalizard', 'medium_ground_finch', 'galapagoscotton'],
+    specimens: ['cactus', 'lavalizard', 'medium_ground_finch', 'galapagoscotton', 'galapagoscarpenterbee', 'galapagossulphur', 'galapagosgulffritillary'],
     specimenPlacements: [
       {
         instanceId: 'scrub-rise-cactus-west',
@@ -2262,6 +2265,9 @@ const finalRouteExtraLocations = [
         behavior: 'still',
         sceneScale: 1.05,
       },
+      { instanceId: 'scrub-rise-carpenter-bee', specimenId: 'galapagoscarpenterbee', position: [-13, 0, 7], behavior: 'pollinate', habitatRadiusX: 1.4, habitatRadiusZ: 1.1 },
+      { instanceId: 'scrub-rise-sulphur', specimenId: 'galapagossulphur', position: [4, 0, 16], behavior: 'pollinate', habitatRadiusX: 1.8, habitatRadiusZ: 1.4 },
+      { instanceId: 'scrub-rise-fritillary', specimenId: 'galapagosgulffritillary', position: [18, 0, 26], behavior: 'pollinate', habitatRadiusX: 2.0, habitatRadiusZ: 1.5 },
     ],
     npcs: [],
     boundaries: {},

@@ -80,9 +80,9 @@ function ensurePaddedSkinnedBounds(mesh) {
   geometry.userData.__paddedForSkinning = true;
 }
 
-function prepareImportedScene(scene, assetId, asset) {
-  const castShadow = importedAssetCastsShadow(assetId, asset);
-  const receiveShadow = asset.receiveShadow === true;
+function prepareImportedScene(scene, assetId, asset, shadowOverrides = null) {
+  const castShadow = shadowOverrides?.castShadow ?? importedAssetCastsShadow(assetId, asset);
+  const receiveShadow = shadowOverrides?.receiveShadow ?? (asset.receiveShadow === true);
   const cullStaticMeshes = asset.frustumCulled !== false;
   // Skinned fauna/specimens cull by default now (opt out per-asset if a model
   // needs to stay always-drawn). The player/companion stay uncensored: they
@@ -799,6 +799,8 @@ function GLBPrimitive({
   grounding = null,
   timeScaled = false,
   overlaySelector = null,
+  castShadow = null,
+  receiveShadow = null,
 }) {
   const group = useRef(null);
   const gl = useThree(state => state.gl);
@@ -846,8 +848,8 @@ function GLBPrimitive({
   }, [ownAnimations, sourceAnimations, sourceAsset, asset.scale]);
   const importedScene = useMemo(() => {
     const cloned = cloneSkeleton(scene);
-    return prepareImportedScene(cloned, assetId, asset);
-  }, [scene, assetId, asset]);
+    return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
+  }, [scene, assetId, asset, castShadow, receiveShadow]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   // Second mixer for the masked upper-body overlay (aiming while moving).
   // It updates after the main mixer each frame, so the bones its filtered
@@ -1175,6 +1177,8 @@ export function ModelAsset({
   grounding = null,
   timeScaled = false,
   overlaySelector = null,
+  castShadow = null,
+  receiveShadow = null,
 }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
@@ -1192,6 +1196,8 @@ export function ModelAsset({
         grounding={grounding}
         timeScaled={timeScaled}
         overlaySelector={overlaySelector}
+        castShadow={castShadow}
+        receiveShadow={receiveShadow}
       />
     </Suspense>
   );

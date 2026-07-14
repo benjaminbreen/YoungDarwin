@@ -77,6 +77,25 @@ function FooterKey({ label, children, disabled = false, onClick = null }) {
   return <span className="inline-flex items-baseline gap-2">{body}</span>;
 }
 
+function MobileAction({ children, disabled = false, primary = false, onClick }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`min-h-11 rounded-sm border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.13em] transition ${
+        disabled
+          ? 'border-expedition-brass/20 text-expedition-faded/35'
+          : primary
+            ? 'border-expedition-gold/70 bg-expedition-gold/15 text-expedition-goldbright active:bg-expedition-gold/25'
+            : 'border-expedition-brass/45 bg-black/20 text-expedition-parchment/85 active:border-expedition-gold/70'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function FactRow({ fact, onSave }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
@@ -112,8 +131,10 @@ export function ExamineView() {
   const [question, setQuestion] = useState('');
   const [note, setNote] = useState('');
   const [noteSavedFlash, setNoteSavedFlash] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState('inquiry');
   const chatScrollRef = useRef(null);
-  const noteRef = useRef(null);
+  const desktopNoteRef = useRef(null);
+  const mobileNoteRef = useRef(null);
 
   const open = Boolean(session);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
@@ -122,14 +143,19 @@ export function ExamineView() {
   // Let the camera dolly begin before the type fades in over the shot.
   useEffect(() => {
     if (!open) {
+      setTypingMode(false);
       setVisible(false);
       setQuestion('');
       setNote('');
       setNoteSavedFlash(false);
+      setMobilePanel('inquiry');
       return undefined;
     }
     const timer = window.setTimeout(() => setVisible(true), 420);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      setTypingMode(false);
+    };
   }, [open]);
 
   const chatLength = session?.chat?.length || 0;
@@ -152,7 +178,8 @@ export function ExamineView() {
       setNote('');
       setNoteSavedFlash(true);
       window.setTimeout(() => setNoteSavedFlash(false), 2600);
-      noteRef.current?.blur();
+      desktopNoteRef.current?.blur();
+      mobileNoteRef.current?.blur();
     }
   }, [note, saveExamineNote]);
 
@@ -195,7 +222,8 @@ export function ExamineView() {
 
   return (
     <div
-      className={`pointer-events-auto absolute inset-0 z-30 select-none font-expedition text-expedition-parchment transition-opacity duration-700 ${visible ? 'opacity-100' : 'opacity-0'}`}
+      data-testid="examine-view"
+      className={`pointer-events-none absolute inset-0 z-30 select-none overflow-hidden font-expedition text-expedition-parchment transition-opacity duration-700 ${visible ? 'opacity-100' : 'opacity-0'}`}
     >
       {/* Cinematic grade: the scene dims toward the edges, holding a clear
           pool of light on the subject; type sits directly on the shot. */}
@@ -208,7 +236,7 @@ export function ExamineView() {
         viewBox="0 0 100 100"
         preserveAspectRatio="xMidYMid meet"
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-[45%] h-[min(54vh,48vw)] w-[min(54vh,48vw)] -translate-x-1/2 -translate-y-1/2 text-expedition-gold/25"
+        className="pointer-events-none absolute left-1/2 top-[29%] h-[min(38dvh,78vw)] w-[min(38dvh,78vw)] -translate-x-1/2 -translate-y-1/2 text-expedition-gold/25 xl:top-[45%] xl:h-[min(54vh,48vw)] xl:w-[min(54vh,48vw)]"
       >
         <circle cx="50" cy="50" r="48.5" fill="none" stroke="currentColor" strokeWidth="0.3" />
         {[[50, 1.5], [98.5, 50], [50, 98.5], [1.5, 50]].map(([x, y]) => (
@@ -227,7 +255,7 @@ export function ExamineView() {
 
       {/* Measurement callout under the subject */}
       {session.measurementCallout && (
-        <div className="pointer-events-none absolute left-1/2 top-[73%] -translate-x-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-[45%] -translate-x-1/2 xl:top-[73%]">
           <div className="flex items-center gap-3 text-expedition-goldbright [text-shadow:0_1px_8px_rgba(0,0,0,0.9)]">
             <span className="h-px w-14 bg-expedition-gold/60" />
             <span className="text-[15px] tracking-[0.08em]">{session.measurementCallout}</span>
@@ -237,11 +265,11 @@ export function ExamineView() {
       )}
 
       {/* Header */}
-      <div className="absolute left-1/2 top-7 w-[min(60rem,94vw)] -translate-x-1/2 text-center">
-        <div className="whitespace-nowrap text-[24px] font-medium uppercase tracking-[0.24em] text-[#f3e6c8] [text-shadow:0_2px_16px_rgba(0,0,0,0.85)] md:text-[32px]">
+      <div className="absolute left-1/2 top-3 w-[calc(100vw-4.75rem)] -translate-x-1/2 text-center sm:top-5 xl:top-7 xl:w-[min(60rem,94vw)]">
+        <div className="text-[clamp(16px,4.7vw,24px)] font-medium uppercase leading-tight tracking-[0.16em] text-[#f3e6c8] [text-shadow:0_2px_16px_rgba(0,0,0,0.85)] xl:whitespace-nowrap xl:text-[32px] xl:tracking-[0.24em]">
           Examine: {session.name}
         </div>
-        <div className="mt-2 flex items-center justify-center gap-2.5 text-[14.5px] text-expedition-parchment/85 [text-shadow:0_1px_8px_rgba(0,0,0,0.9)]">
+        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] text-expedition-parchment/80 [text-shadow:0_1px_8px_rgba(0,0,0,0.9)] sm:text-[12px] xl:mt-2 xl:gap-2.5 xl:text-[14.5px]">
           {headerSubtitle.map((part, index) => (
             <React.Fragment key={part}>
               {index > 0 && <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rotate-45 bg-expedition-gold/80" />}
@@ -256,13 +284,13 @@ export function ExamineView() {
         type="button"
         onClick={closeExamine}
         aria-label="Close examination"
-        className="absolute right-6 top-6 flex h-10 w-10 items-center justify-center rounded-full border border-expedition-brass/70 bg-black/30 text-lg text-expedition-parchment/85 transition hover:border-expedition-gold hover:text-expedition-goldbright"
+        className="pointer-events-auto absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full border border-expedition-brass/70 bg-black/45 text-lg text-expedition-parchment/85 transition hover:border-expedition-gold hover:text-expedition-goldbright sm:right-5 sm:top-5 xl:right-6 xl:top-6"
       >
         ✕
       </button>
 
       {/* Left column: field inquiry */}
-      <div className="absolute left-10 top-32 hidden w-[24rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] md:block">
+      <div className="pointer-events-auto absolute left-10 top-32 hidden w-[24rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
         <SectionHeading>Field Inquiry</SectionHeading>
         <div className="mt-1.5 text-[13px] italic text-expedition-faded">Ask questions about what you observe.</div>
         <div ref={chatScrollRef} className="mt-4 max-h-[calc(100vh-30rem)] min-h-[14rem] overflow-y-auto pr-2 [scrollbar-width:thin]">
@@ -314,7 +342,7 @@ export function ExamineView() {
       </div>
 
       {/* Right column: key facts + uncertainties */}
-      <div className="absolute right-10 top-32 hidden w-[21rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] md:block">
+      <div className="pointer-events-auto absolute right-10 top-32 hidden w-[21rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
         <SectionHeading>Key Facts</SectionHeading>
         <div className="mt-4 grid gap-3.5">
           {session.facts.map(fact => (
@@ -342,7 +370,7 @@ export function ExamineView() {
       </div>
 
       {/* Bottom: field note + key hints, centered like the status view's quote */}
-      <div className="absolute bottom-6 left-1/2 w-[min(46rem,92vw)] -translate-x-1/2 [text-shadow:0_1px_4px_rgba(0,0,0,0.7)]">
+      <div className="pointer-events-auto absolute bottom-6 left-1/2 hidden w-[min(46rem,92vw)] -translate-x-1/2 [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
         <div className="flex items-baseline justify-between">
           <span className="text-[13px] uppercase tracking-[0.22em] text-expedition-gold">Field Note</span>
           <span className={`text-[11px] uppercase tracking-[0.16em] transition-opacity duration-300 ${
@@ -353,7 +381,7 @@ export function ExamineView() {
           </span>
         </div>
         <textarea
-          ref={noteRef}
+          ref={desktopNoteRef}
           value={note}
           onChange={event => setNote(event.target.value)}
           onFocus={() => setTypingMode(true)}
@@ -381,38 +409,129 @@ export function ExamineView() {
         </div>
       </div>
 
-      {/* Mobile: compact inquiry block above the note */}
-      <div className="absolute inset-x-5 bottom-[11.5rem] max-h-[38%] overflow-y-auto [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] md:hidden">
-        <SectionHeading>Field Inquiry</SectionHeading>
-        <div className="mt-2.5">
-          {session.chat.slice(-4).map(entry => (
-            <div key={entry.id} className="mb-2.5 last:mb-0">
-              <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
-                {entry.role === 'you' ? 'You' : 'Observation'}
-              </span>
-              <div className="text-[13.5px] leading-snug text-expedition-parchment/95">{entry.text}</div>
-            </div>
+      {/* Touch/compact layout: the subject keeps the upper stage while all
+          reading and writing lives in one scrollable bottom sheet. */}
+      <section
+        aria-label="Examination notebook"
+        className="pointer-events-auto absolute inset-x-0 bottom-0 z-10 flex h-[56dvh] flex-col overflow-hidden rounded-t-2xl border-t border-expedition-brass/45 bg-[linear-gradient(180deg,rgba(20,25,34,0.91),rgba(7,9,13,0.98))] shadow-[0_-18px_60px_rgba(0,0,0,0.58)] backdrop-blur-md xl:hidden"
+      >
+        <div className="mx-auto mt-2 h-1 w-12 rounded-full bg-expedition-brass/45" />
+        <div className="grid grid-cols-2 border-b border-expedition-brass/25 px-4 pt-1">
+          {[
+            ['inquiry', 'Field inquiry'],
+            ['facts', `Facts · ${session.facts.length}`],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMobilePanel(id)}
+              className={`min-h-11 border-b text-[11px] font-semibold uppercase tracking-[0.16em] transition ${
+                mobilePanel === id
+                  ? 'border-expedition-gold text-expedition-goldbright'
+                  : 'border-transparent text-expedition-faded'
+              }`}
+            >
+              {label}
+            </button>
           ))}
-          {session.pending && <div className="text-[12px] italic text-expedition-faded">You look closer…</div>}
         </div>
-        <form
-          className="mt-2.5"
-          onSubmit={event => {
-            event.preventDefault();
-            submitQuestion();
-          }}
-        >
-          <input
-            type="text"
-            value={question}
-            onChange={event => setQuestion(event.target.value)}
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 [scrollbar-width:thin] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] sm:px-6">
+          {mobilePanel === 'inquiry' ? (
+            <>
+              {session.chat.length === 0 && (
+                <div className="text-[13px] leading-relaxed text-expedition-parchment/65">
+                  Study the subject from every side, then ask what you wish to know.
+                </div>
+              )}
+              {session.chat.slice(-6).map(entry => (
+                <div key={entry.id} className="mb-3 last:mb-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
+                      {entry.role === 'you' ? 'You' : 'Observation'}
+                    </span>
+                    <span className="text-[9px] text-expedition-faded/60">{chatAge(entry.at)}</span>
+                  </div>
+                  <div className="mt-0.5 text-[13.5px] leading-snug text-expedition-parchment/95">{entry.text}</div>
+                  {entry.behavior && <div className="mt-1 text-[12px] italic text-expedition-parchment/60">{entry.behavior}</div>}
+                </div>
+              ))}
+              {session.pending && <div className="text-[12px] italic text-expedition-faded">You look closer…</div>}
+              <form
+                className="mt-3"
+                onSubmit={event => {
+                  event.preventDefault();
+                  submitQuestion();
+                }}
+              >
+                <input
+                  type="text"
+                  value={question}
+                  onChange={event => setQuestion(event.target.value)}
+                  onFocus={() => setTypingMode(true)}
+                  onBlur={() => setTypingMode(false)}
+                  placeholder="Ask about what you see…"
+                  style={QUILL_INPUT_STYLE}
+                  className="w-full text-[14px] placeholder:text-expedition-faded/60 focus:outline-none"
+                />
+                <div className="mt-2 text-[11px] italic leading-snug text-expedition-faded/65">{examples}</div>
+              </form>
+              {session.error && <div className="mt-2 text-[11px] text-[#d9a05a]">{session.error}</div>}
+            </>
+          ) : (
+            <>
+              <div className="grid gap-3">
+                {session.facts.map(fact => (
+                  <FactRow key={fact.id} fact={fact} onSave={() => saveExamineFact(fact.id)} />
+                ))}
+              </div>
+              {session.facts.length <= 1 && (
+                <div className="mt-3 text-[12px] italic text-expedition-parchment/55">
+                  Facts appear as your inquiry uncovers them.
+                </div>
+              )}
+              {session.uncertainties.length > 0 && (
+                <>
+                  <div className="mt-5 text-[12px] uppercase tracking-[0.18em] text-expedition-gold">Uncertainties</div>
+                  <div className="mt-2 grid gap-1.5 text-[12.5px] italic leading-snug text-expedition-parchment/65">
+                    {session.uncertainties.map(item => <div key={item}>{item}</div>)}
+                  </div>
+                </>
+              )}
+              {session.latin && examined && <div className="mt-4 text-[12px] italic text-expedition-faded">{session.latin}</div>}
+            </>
+          )}
+        </div>
+
+        <div className="border-t border-expedition-brass/25 bg-black/20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[10px] uppercase tracking-[0.18em] text-expedition-gold">Field note</span>
+            <span className={`text-[9px] uppercase tracking-[0.12em] ${examined ? 'text-[#9dc08b]' : 'text-expedition-faded/65'}`}>
+              {noteSavedFlash ? 'Recorded' : examined ? 'Examined ✓' : 'Required to complete'}
+            </span>
+          </div>
+          <textarea
+            ref={mobileNoteRef}
+            value={note}
+            onChange={event => setNote(event.target.value)}
             onFocus={() => setTypingMode(true)}
             onBlur={() => setTypingMode(false)}
-            placeholder="Ask about it…"
+            rows={1}
+            placeholder={examined ? 'Add another observation…' : 'What do you observe?'}
             style={QUILL_INPUT_STYLE}
-            className="w-full text-[14px] placeholder:text-expedition-faded/60 focus:outline-none"
+            className="mt-1 min-h-10 w-full resize-none text-[14px] leading-snug placeholder:text-expedition-faded/55 focus:outline-none"
           />
-        </form>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MobileAction onClick={closeExamine}>Return</MobileAction>
+            <MobileAction primary onClick={submitNote}>Save note</MobileAction>
+            <MobileAction disabled={!unsavedFacts} onClick={saveNewestFact}>Save fact</MobileAction>
+            <MobileAction disabled={!collectReady} onClick={() => collectFromExamine()}>{session.collectVerb}</MobileAction>
+          </div>
+        </div>
+      </section>
+
+      <div className="pointer-events-none absolute left-1/2 top-[43%] -translate-x-1/2 text-center text-[9px] uppercase tracking-[0.16em] text-expedition-parchment/45 xl:top-[70%] xl:text-[10px]">
+        Drag to orbit<span className="hidden sm:inline"> · scroll to zoom</span>
       </div>
     </div>
   );

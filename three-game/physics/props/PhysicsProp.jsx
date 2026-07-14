@@ -673,7 +673,7 @@ export function PhysicsProp({ prop, onBreak }) {
         renderPath: null,
       }}>
         <PropVisual visual={prop.visual} assetId={prop.visualAsset} offsetY={prop.visualOffsetY || 0} />
-        <HighlightRing visible={isPrompted || isCarried} />
+        <HighlightRing visible={(isPrompted || isCarried) && prop.interactionRing !== false} />
       </group>
     </RigidBody>
   );

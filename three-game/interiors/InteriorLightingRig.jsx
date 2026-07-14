@@ -13,6 +13,7 @@ import { weatherEnv } from '../world/weatherEnvRuntime';
 const RECT_NORMAL = new THREE.Vector3(0, 0, -1);
 const DUST_AXIS = new THREE.Vector3(0, 1, 0);
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const INTERIOR_BASE_OPACITY_KEY = '__interiorBaseOpacity';
 
 const PANE_SHAFT_VERTEX = /* glsl */ `
   varying vec3 vLocalPosition;
@@ -104,37 +105,60 @@ function InteriorExposureControl({ lighting }) {
 
 function InteriorPracticalMaterials({ groupRef, lighting }) {
   const rootRef = useRef(null);
+  const rootObjectCountRef = useRef(0);
+  const scanElapsedRef = useRef(Infinity);
   const flameMaterialsRef = useRef([]);
   const flameMeshesRef = useRef([]);
   const exteriorMistMaterialsRef = useRef([]);
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const root = groupRef.current;
     if (!root) return;
-    if (rootRef.current !== root) {
-      rootRef.current = root;
-      const flameMaterials = new Set();
-      const flameMeshes = new Set();
-      const exteriorMistMaterials = new Map();
-      root.traverse(object => {
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) {
-          const materialName = material?.name?.toLowerCase() || '';
-          if (materialName.includes('lampflame')) {
-            flameMaterials.add(material);
-            if (object.isMesh) flameMeshes.add(object);
+    scanElapsedRef.current += delta;
+    const rootChanged = rootRef.current !== root;
+    if (rootChanged || scanElapsedRef.current >= 0.25) {
+      scanElapsedRef.current = 0;
+      let objectCount = 0;
+      root.traverse(() => { objectCount += 1; });
+      if (rootChanged || rootObjectCountRef.current !== objectCount) {
+        rootRef.current = root;
+        rootObjectCountRef.current = objectCount;
+        const flameMaterials = new Set();
+        const flameMeshes = new Set();
+        const exteriorMistMaterials = new Map();
+        root.traverse(object => {
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          for (const material of materials) {
+            const materialName = material?.name?.toLowerCase() || '';
+            if (materialName.includes('lampflame')) {
+              flameMaterials.add(material);
+              if (object.isMesh) flameMeshes.add(object);
+            }
+            if (materialName.includes('highlandmist')) {
+              const storedBaseOpacity = material.userData?.[INTERIOR_BASE_OPACITY_KEY];
+              const baseOpacity = Number.isFinite(storedBaseOpacity)
+                ? storedBaseOpacity
+                : material.opacity;
+              material.userData[INTERIOR_BASE_OPACITY_KEY] = baseOpacity;
+              exteriorMistMaterials.set(material, {
+                material,
+                baseOpacity,
+                far: materialName.includes('far'),
+              });
+            }
+            if (materialName.includes('periodbrass')) {
+              material.envMapIntensity = 1.45;
+              material.needsUpdate = true;
+            }
+            if (materialName.includes('periodlampglass') || materialName.includes('windowglass')) {
+              material.envMapIntensity = 1.18;
+              material.needsUpdate = true;
+            }
           }
-          if (materialName.includes('highlandmist')) {
-            exteriorMistMaterials.set(material, {
-              material,
-              baseOpacity: material.opacity,
-              far: materialName.includes('far'),
-            });
-          }
-        }
-      });
-      flameMaterialsRef.current = [...flameMaterials];
-      flameMeshesRef.current = [...flameMeshes];
-      exteriorMistMaterialsRef.current = [...exteriorMistMaterials.values()];
+        });
+        flameMaterialsRef.current = [...flameMaterials];
+        flameMeshesRef.current = [...flameMeshes];
+        exteriorMistMaterialsRef.current = [...exteriorMistMaterials.values()];
+      }
     }
 
     const store = useThreeGameStore.getState();
@@ -158,17 +182,17 @@ function InteriorPracticalMaterials({ groupRef, lighting }) {
     // is dark enough for their practical lights to matter.
     for (const mesh of flameMeshesRef.current) mesh.visible = activation > 0.075;
 
-    // The exterior diorama has no outdoor sky renderer of its own. Treat its
-    // layered mist as a time-responsive luminous source so windows remain
-    // convincingly brighter than the room by day without glowing at night.
+    // The shared sky now remains visible beyond one restrained haze veil. Keep
+    // the veil only slightly luminous; the former HDR cards clipped windows to
+    // white and turned garden silhouettes into flat black cutouts.
     const mistDaylight = celestial.daylight * (1 - weatherEnv.lightDim * 0.18);
     for (const entry of exteriorMistMaterialsRef.current) {
       entry.material.emissiveIntensity = THREE.MathUtils.lerp(
-        entry.far ? 0.08 : 0.045,
-        entry.far ? 1.85 : 1.15,
+        entry.far ? 0.035 : 0.025,
+        entry.far ? 0.24 : 0.14,
         mistDaylight,
       );
-      entry.material.opacity = entry.baseOpacity * THREE.MathUtils.lerp(0.38, 1, mistDaylight);
+      entry.material.opacity = entry.baseOpacity * THREE.MathUtils.lerp(0.3, 0.82, mistDaylight);
     }
   });
   return null;
