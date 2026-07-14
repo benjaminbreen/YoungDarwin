@@ -5,7 +5,7 @@ route volatile facts to source files or generated docs.
 
 ## Read First
 
-- Repo quickstart and doc map: `README.md`.
+- Project overview and quickstart: `README.md`.
 - Authorship, teaching context, and design goals: `docs/design-intent.md`.
 - System map and ownership: `docs/architecture.md`.
 - Common task recipes: `docs/agent-workflows.md`.

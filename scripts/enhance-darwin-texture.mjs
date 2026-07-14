@@ -23,7 +23,7 @@ import { ALL_EXTENSIONS, EXTTextureWebP } from '@gltf-transform/extensions';
 import sharp from 'sharp';
 
 const ASSET = 'public/assets/models/darwin-final-animated.glb';
-const BACKUP_DIR = 'asset-backups';
+const BACKUP_DIR = 'assets-src/darwin/backups';
 const BACKUP = path.join(BACKUP_DIR, 'darwin-final-animated.pristine.glb');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => {

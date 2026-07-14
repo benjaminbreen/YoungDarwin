@@ -11,7 +11,7 @@ const n=(k,d)=>a[k]!==undefined?Number(a[k]):d;
 const shadowThresh=n('shadowThresh',80), sR=n('shadowR',40), sG=n('shadowG',23), sB=n('shadowB',9);
 const sat=n('saturation',1.8), warmR=n('warmR',1.13), warmB=n('warmB',0.85), gain=n('gain',1.0);
 const io=new NodeIO().registerExtensions(ALL_EXTENSIONS);
-const doc=await io.read('asset-backups/darwin-tripo-recombined.glb');
+const doc=await io.read('assets-src/darwin/backups/darwin-tripo-recombined.glb');
 const tex=doc.getRoot().listMaterials()[0].getBaseColorTexture();
 const {data,info}=await sharp(Buffer.from(tex.getImage()),{limitInputPixels:false}).removeAlpha().raw().toBuffer({resolveWithObject:true});
 const C=info.channels, clamp=v=>v<0?0:v>255?255:v;

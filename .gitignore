@@ -33,7 +33,7 @@ desktop.ini
 
 # local/raw 3D asset source dumps
 # Runtime assets required by the game live in public/assets/models and are
-# tracked intentionally, usually through Git LFS. Raw import/source material is
+# tracked intentionally as deployable files. Raw import/source material is
 # kept local unless explicitly promoted with git add -f and a manifest note.
 /assets-src/**
 !/assets-src/
@@ -96,9 +96,14 @@ next-env.d.ts
 /*.blend
 /*.obj
 /*.OBJ
-/Darwin Status Mockup.png
-/journal mockup.png
-/blank journal asset.png
+# local screenshots, mockups, and visual references
+/*[Mm]ockup*.png
+/*[Mm]ockup*.jpg
+/*[Mm]ockup*.jpeg
+/*[Ss]creenshot*.png
+/*[Ss]creenshot*.jpg
+/*[Ss]creenshot*.jpeg
+/mockups/
 /sketchbook drawings/
 __pycache__/
 *.pyc

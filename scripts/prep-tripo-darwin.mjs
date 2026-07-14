@@ -1,8 +1,8 @@
 // Prep a segmented Tripo Darwin GLB for Mixamo rigging.
 //   join (15 parts -> 1 mesh, closing the split seams) + weld + meshopt simplify
 // Outputs:
-//   asset-backups/darwin-tripo-decimated.glb  — decimated + textured (recombine source)
-//   asset-backups/darwin-tripo-for-mixamo.obj — decimated geometry (upload to Mixamo)
+//   assets-src/darwin/backups/darwin-tripo-decimated.glb  — decimated + textured (recombine source)
+//   assets-src/darwin/backups/darwin-tripo-for-mixamo.obj — decimated geometry (upload to Mixamo)
 //
 // Usage: node scripts/prep-tripo-darwin.mjs [--in=path.glb] [--tris=60000]
 import fs from 'node:fs';
@@ -17,8 +17,8 @@ const args = Object.fromEntries(process.argv.slice(2).map(a => {
 }));
 const INPUT = args.in || 'assets-src/root-raw-assets/darwin-tripo-segmented.glb';
 const TARGET_TRIS = Number(args.tris || 60000);
-const OUT_GLB = 'asset-backups/darwin-tripo-decimated.glb';
-const OUT_OBJ = 'asset-backups/darwin-tripo-for-mixamo.obj';
+const OUT_GLB = 'assets-src/darwin/backups/darwin-tripo-decimated.glb';
+const OUT_OBJ = 'assets-src/darwin/backups/darwin-tripo-for-mixamo.obj';
 
 function countTris(root) {
   let t = 0;

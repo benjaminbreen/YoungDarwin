@@ -1,4 +1,4 @@
-public/assets/models/**/*.glb filter=lfs diff=lfs merge=lfs -text
+# Runtime GLBs are stored directly so Vercel can deploy them without Git LFS.
 public/assets/models/**/*.glb -filter -diff -merge -text
 public/assets/models/**/*.fbx filter=lfs diff=lfs merge=lfs -text
 public/assets/models/**/*.FBX filter=lfs diff=lfs merge=lfs -text

@@ -4,9 +4,9 @@ the base-color texture salvaged from the Tripo GLB, and export a clean GLB
 
 Usage:
   blender --background --python scripts/blender_recombine_tripo.py -- \
-    --fbx "asset-backups/Breathing Idle.fbx" \
-    --texture asset-backups/darwin-tripo-basecolor.png \
-    --out asset-backups/darwin-tripo-recombined.glb
+    --fbx "assets-src/darwin/backups/Breathing Idle.fbx" \
+    --texture assets-src/darwin/backups/darwin-tripo-basecolor.png \
+    --out assets-src/darwin/backups/darwin-tripo-recombined.glb
 """
 import bpy
 import sys

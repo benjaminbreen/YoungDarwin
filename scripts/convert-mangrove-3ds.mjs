@@ -5,7 +5,7 @@ import { TDSLoader } from 'three/examples/jsm/loaders/TDSLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js';
 
-const sourceDir = path.resolve('teln9rm84agw-mangrovetree');
+const sourceDir = path.resolve('assets-src/nature/mangrove-tree-source');
 const sourcePath = path.join(sourceDir, 'mangrovetree.3ds');
 const outputPath = path.resolve('public/assets/models/nature/runtime-mangrove-tree.glb');
 const targetHeight = 12.65;
