@@ -105,19 +105,36 @@ function InteriorExposureControl({ lighting }) {
 function InteriorPracticalMaterials({ groupRef, lighting }) {
   const rootRef = useRef(null);
   const flameMaterialsRef = useRef([]);
+  const flameMeshesRef = useRef([]);
+  const exteriorMistMaterialsRef = useRef([]);
   useFrame(({ clock }) => {
     const root = groupRef.current;
     if (!root) return;
     if (rootRef.current !== root) {
       rootRef.current = root;
       const flameMaterials = new Set();
+      const flameMeshes = new Set();
+      const exteriorMistMaterials = new Map();
       root.traverse(object => {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         for (const material of materials) {
-          if (material?.name?.toLowerCase().includes('lampflame')) flameMaterials.add(material);
+          const materialName = material?.name?.toLowerCase() || '';
+          if (materialName.includes('lampflame')) {
+            flameMaterials.add(material);
+            if (object.isMesh) flameMeshes.add(object);
+          }
+          if (materialName.includes('highlandmist')) {
+            exteriorMistMaterials.set(material, {
+              material,
+              baseOpacity: material.opacity,
+              far: materialName.includes('far'),
+            });
+          }
         }
       });
       flameMaterialsRef.current = [...flameMaterials];
+      flameMeshesRef.current = [...flameMeshes];
+      exteriorMistMaterialsRef.current = [...exteriorMistMaterials.values()];
     }
 
     const store = useThreeGameStore.getState();
@@ -135,6 +152,23 @@ function InteriorPracticalMaterials({ groupRef, lighting }) {
     for (const material of flameMaterialsRef.current) {
       material.emissiveIntensity = strength;
       material.toneMapped = true;
+    }
+    // An orange flame-shaped mesh is conspicuous even with zero emission.
+    // Daylight Lawson lamps are extinguished; they appear only once the room
+    // is dark enough for their practical lights to matter.
+    for (const mesh of flameMeshesRef.current) mesh.visible = activation > 0.075;
+
+    // The exterior diorama has no outdoor sky renderer of its own. Treat its
+    // layered mist as a time-responsive luminous source so windows remain
+    // convincingly brighter than the room by day without glowing at night.
+    const mistDaylight = celestial.daylight * (1 - weatherEnv.lightDim * 0.18);
+    for (const entry of exteriorMistMaterialsRef.current) {
+      entry.material.emissiveIntensity = THREE.MathUtils.lerp(
+        entry.far ? 0.08 : 0.045,
+        entry.far ? 1.85 : 1.15,
+        mistDaylight,
+      );
+      entry.material.opacity = entry.baseOpacity * THREE.MathUtils.lerp(0.38, 1, mistDaylight);
     }
   });
   return null;
@@ -350,7 +384,9 @@ function PortalLight({ portal, worldYaw = 0 }) {
     }
 
     if (bounceRef.current) {
-      bounceRef.current.intensity = (portal.bounce?.intensity ?? 0) * directStrength;
+      const bounceStrength = directStrength
+        + diffuseStrength * (portal.bounce?.diffuseShare ?? 0);
+      bounceRef.current.intensity = (portal.bounce?.intensity ?? 0) * bounceStrength;
       bounceRef.current.color.copy(directColor).lerp(warm, 0.2 + celestial.golden * 0.42);
     }
   });

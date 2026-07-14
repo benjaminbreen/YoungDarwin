@@ -118,6 +118,7 @@ export function createStandardFootPathSplatTexture({
   pathPoints,
   bounds = STANDARD_FOOT_PATH_SPLAT_BOUNDS,
   size = bounds.size || STANDARD_FOOT_PATH_SPLAT_BOUNDS.size,
+  minimumWidth = 2.55,
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
     throw new Error('createStandardFootPathSplatTexture requires at least two path points.');
@@ -141,7 +142,7 @@ export function createStandardFootPathSplatTexture({
       const edgeNoise = Math.sin(along * 0.31 + frame.centerX * 0.08) * 0.46
         + Math.sin(along * 0.11 - frame.centerZ * 0.17) * 0.34
         + (fbm(along, frame.width * 6.4, 0.055, 41) - 0.5) * 1.35;
-      const width = Math.max(2.55, frame.width + edgeNoise);
+      const width = Math.max(minimumWidth, frame.width + edgeNoise);
       const distance = Math.hypot(dx, dz);
       const path = 1 - smoothstep(width * 0.58, width * 1.1, distance);
       const tread = 1 - smoothstep(width * 0.28, width * 0.76, distance);

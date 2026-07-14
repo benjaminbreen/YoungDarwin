@@ -59,6 +59,7 @@ const AUTHORED_REGION_TERRAIN = {
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
+  POST_SCRUB_RISE: { preset: 'post-office-scrub-rise', segments: 280 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 300 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },

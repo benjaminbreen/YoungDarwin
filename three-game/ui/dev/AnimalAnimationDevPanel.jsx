@@ -7,6 +7,8 @@ import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { modelAssets } from '../../modelAssets';
 import { wildlifeCatalog } from '../../wildlife/wildlifeCatalog';
+import { createReptileAnimator } from '../../wildlife/reptiles/reptileGaitRuntime';
+import { createLavaLizardRig, LAVA_LIZARD_GAIT } from '../../wildlife/reptiles/lavaLizardModel';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -35,6 +37,73 @@ const DIRECT_ANIMAL_ASSETS = {
     source: 'Ecology swimmer',
   },
 };
+
+// Hand-authored procedural rigs have no GLB or clips; their "clips" are
+// behavior modes fed straight into the reptile animator, so the lab previews
+// exactly what ships in-game (plus lab-shortened display/bask timers so you
+// never wait long for a push-up).
+const PROC_LAB_GAIT = {
+  ...LAVA_LIZARD_GAIT,
+  pushup: { minGap: 1.6, maxGap: 3.2 },
+  bask: { after: 1.6 },
+  tongueMin: 1.2,
+  tongueMax: 3.2,
+  tailFlickMin: 3,
+  tailFlickMax: 7,
+};
+
+const PROC_MODES = [
+  'idle',
+  'walk',
+  'sprint',
+  'push-up display',
+  'tongue & blinks',
+  'freeze & cock',
+  'bask',
+  'carried',
+  'downed',
+];
+
+function procModeInputs(mode, t) {
+  switch (mode) {
+    case 'walk': return { speed: 0.38, playerDist: 8 };
+    case 'sprint': return { speed: 2.5, playerDist: 8 };
+    case 'push-up display': return { speed: 0, playerDist: 2.4, observer: true };
+    case 'tongue & blinks': return { speed: 0, playerDist: 2.6, observer: true };
+    case 'freeze & cock': {
+      // Loop a short sprint into a dead stop so the head-cock retriggers.
+      const cycle = t % 3.6;
+      return cycle < 1.15
+        ? { speed: 2.5, playerDist: 5 }
+        : { speed: 0, playerDist: 3, observer: true };
+    }
+    case 'bask': return { speed: 0, playerDist: 12 };
+    case 'carried': return { speed: 0, playerDist: 0.8, held: true };
+    case 'downed': return { speed: 0, playerDist: 2, downed: true };
+    default: return { speed: 0, playerDist: 7 };
+  }
+}
+
+const PROCEDURAL_ANIMALS = [
+  {
+    id: 'lavaLizardProceduralMale',
+    kind: 'procedural',
+    label: 'New Floreana Lava Lizard ♂',
+    source: 'Hand-authored procedural rig',
+    path: 'three-game/wildlife/reptiles/lavaLizardModel.js',
+    modes: PROC_MODES,
+    createRig: () => createLavaLizardRig('male'),
+  },
+  {
+    id: 'lavaLizardProceduralFemale',
+    kind: 'procedural',
+    label: 'New Floreana Lava Lizard ♀',
+    source: 'Hand-authored procedural rig',
+    path: 'three-game/wildlife/reptiles/lavaLizardModel.js',
+    modes: PROC_MODES,
+    createRig: () => createLavaLizardRig('female'),
+  },
+];
 
 const wildlifeLabelsByAsset = Object.values(wildlifeCatalog).reduce((labels, entry) => {
   if (entry.assetId && entry.englishName && !labels[entry.assetId]) labels[entry.assetId] = entry.englishName;
@@ -118,7 +187,7 @@ function animalEntries() {
       };
     })
     .filter(Boolean);
-  return [...manifestAnimals, ...Object.values(DIRECT_ANIMAL_ASSETS)];
+  return [...PROCEDURAL_ANIMALS, ...manifestAnimals, ...Object.values(DIRECT_ANIMAL_ASSETS)];
 }
 
 const ANIMAL_ENTRIES = animalEntries();
@@ -204,6 +273,49 @@ function AnimalPreview({ animal, selectedClip, paused, timeScale, onAnimations }
   });
 
   return <primitive object={model} />;
+}
+
+// Live procedural rig preview: same rig + animator as the in-game specimen,
+// walking in place, with a synthetic "observer" standing in for Darwin so the
+// look-at, push-up, and tongue behaviors fire on demand.
+function ProceduralReptilePreview({ animal, mode, paused, timeScale }) {
+  const rig = useMemo(() => animal.createRig(), [animal]);
+  const animator = useMemo(
+    () => createReptileAnimator({ nodes: rig.nodes, config: PROC_LAB_GAIT, seed: `lab-${animal.id}` }),
+    [animal.id, rig],
+  );
+  const clockRef = useRef(0);
+  const observer = useMemo(() => new THREE.Vector3(), []);
+
+  useFrame((_, delta) => {
+    if (paused) return;
+    const dt = Math.min(delta, 0.05) * timeScale;
+    if (dt <= 0) return;
+    clockRef.current += dt;
+    const t = clockRef.current;
+    const inputs = procModeInputs(mode, t);
+    const playerLocal = inputs.observer
+      ? observer.set(Math.sin(t * 0.35) * 1.8, 1.25, -2.3)
+      : null;
+    animator.update({
+      dt,
+      time: t,
+      speed: inputs.speed || 0,
+      playerLocal,
+      playerDist: inputs.playerDist ?? 8,
+      daylight: 0.95,
+      rain: 0,
+      downed: Boolean(inputs.downed),
+      held: Boolean(inputs.held),
+    });
+  });
+
+  // Match the GLB previews' normalization (~2.35 max dimension on the grid).
+  return (
+    <group position={[0, 0.03, 0]} scale={5.2}>
+      <primitive object={rig.group} />
+    </group>
+  );
 }
 
 function AnimalButton({ animal, selected, clips, onClick }) {
@@ -297,11 +409,20 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
     });
   }, []);
 
+  // Procedural rigs have no GLB to probe; their behavior modes stand in as
+  // the clip list.
+  useEffect(() => {
+    for (const animal of PROCEDURAL_ANIMALS) onAnimations(animal.id, animal.modes);
+  }, [onAnimations]);
+
   const selectedAnimal = useMemo(
     () => ANIMAL_ENTRIES.find(animal => animal.id === selectedAnimalId) || ANIMAL_ENTRIES[0],
     [selectedAnimalId],
   );
-  const clips = animationMap[selectedAnimal?.id] || [];
+  const clips = useMemo(
+    () => animationMap[selectedAnimal?.id] || [],
+    [animationMap, selectedAnimal?.id],
+  );
 
   useEffect(() => {
     if (!clips.length) return;
@@ -313,7 +434,7 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
     setContactMotionTrail(recommendedMotionTrail(selectedAnimal, selectedClip));
     setContactIncline(recommendedIncline(selectedAnimal, selectedClip));
     setContactSheet({ status: 'idle' });
-  }, [selectedAnimal?.id, selectedClip]);
+  }, [selectedAnimal, selectedClip]);
 
   const requestContactSheet = React.useCallback(async payload => {
     if (!selectedAnimal || !selectedClip) return;
@@ -378,7 +499,7 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
         <div className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0">
           <Canvas frameloop="demand" camera={{ position: [0, 0, 1] }}>
             <Suspense fallback={null}>
-              {ANIMAL_ENTRIES.map(animal => (
+              {ANIMAL_ENTRIES.filter(animal => animal.kind !== 'procedural').map(animal => (
                 <AnimationProbe key={`probe-${animal.id}`} animal={animal} onAnimations={onAnimations} />
               ))}
             </Suspense>
@@ -389,7 +510,11 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
             <div className={GOLD_LABEL}>Animal Animation Lab</div>
             <div className="font-expedition text-lg font-semibold text-expedition-parchment">{selectedAnimal.label}</div>
             <div className="font-expedition text-xs text-expedition-faded">
-              {clips.length ? `${clips.length} embedded clip${clips.length === 1 ? '' : 's'} in ${selectedAnimal.path}` : `No embedded animation clips found in ${selectedAnimal.path}`}
+              {selectedAnimal.kind === 'procedural'
+                ? `${clips.length} live behavior modes — procedural rig, ${selectedAnimal.path}`
+                : clips.length
+                  ? `${clips.length} embedded clip${clips.length === 1 ? '' : 's'} in ${selectedAnimal.path}`
+                  : `No embedded animation clips found in ${selectedAnimal.path}`}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -496,7 +621,8 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <button
                   type="button"
                   onClick={generateContactSheet}
-                  disabled={!selectedClip || !clips.length || contactSheet.status === 'running'}
+                  disabled={!selectedClip || !clips.length || contactSheet.status === 'running' || selectedAnimal.kind === 'procedural'}
+                  title={selectedAnimal.kind === 'procedural' ? 'Procedural rig — no GLB for Blender; screenshot the viewport instead' : undefined}
                   className={`${GOLD_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   {contactSheet.status === 'running' ? 'Rendering...' : 'Generate Contact Sheet'}
@@ -504,7 +630,8 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <button
                   type="button"
                   onClick={generateOverview}
-                  disabled={!clips.length || contactSheet.status === 'running'}
+                  disabled={!clips.length || contactSheet.status === 'running' || selectedAnimal.kind === 'procedural'}
+                  title={selectedAnimal.kind === 'procedural' ? 'Procedural rig — no GLB for Blender; screenshot the viewport instead' : undefined}
                   className={`${GOLD_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   Overview
@@ -529,14 +656,24 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <directionalLight castShadow position={[4, 7, 4]} intensity={2.4} color="#ffe7bf" />
                 <directionalLight position={[-5, 2.4, -4]} intensity={0.75} color="#9fc9ec" />
                 <Suspense fallback={null}>
-                  <AnimalPreview
-                    key={selectedAnimal.id}
-                    animal={selectedAnimal}
-                    selectedClip={selectedClip}
-                    paused={paused}
-                    timeScale={timeScale}
-                    onAnimations={onAnimations}
-                  />
+                  {selectedAnimal.kind === 'procedural' ? (
+                    <ProceduralReptilePreview
+                      key={selectedAnimal.id}
+                      animal={selectedAnimal}
+                      mode={selectedClip}
+                      paused={paused}
+                      timeScale={timeScale}
+                    />
+                  ) : (
+                    <AnimalPreview
+                      key={selectedAnimal.id}
+                      animal={selectedAnimal}
+                      selectedClip={selectedClip}
+                      paused={paused}
+                      timeScale={timeScale}
+                      onAnimations={onAnimations}
+                    />
+                  )}
                 </Suspense>
                 <gridHelper args={[8, 16, '#586168', '#343c42']} />
                 <OrbitControls makeDefault enableDamping target={[0, 1.0, 0]} />

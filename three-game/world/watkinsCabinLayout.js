@@ -72,7 +72,7 @@ let cached = null;
 
 export function getWatkinsCabinPieces() {
   if (cached) return cached;
-  const { scale, halfX, halfZ, partitionX, eave, ridge, plankH, course, plankT, postR } = CABIN;
+  const { scale, halfX, halfZ, partitionX, eave, plankH, course, plankT, postR } = CABIN;
   const pieces = [];
 
   const add = (id, kind, { size, radius, halfHeight, at, rot = [0, 0, 0], supports = [], mass, dynamic = false, tone }) => {

@@ -3,6 +3,12 @@ const touchState = {
   backward: false,
   left: false,
   right: false,
+  // Analog stick vector from the on-screen joystick, each axis in [-1, 1]
+  // (x: right positive, y: backward positive — matches the input-space z
+  // axis). Zero means "no analog source"; the direction booleans above stay
+  // authoritative for anything without a stick (tests, future d-pads).
+  moveX: 0,
+  moveY: 0,
   run: false,
   jump: false,
   dodge: false,

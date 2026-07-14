@@ -156,6 +156,10 @@ export function finalizePlayerFrame({
     sprintT: stateRef.current.sprinting
       ? THREE.MathUtils.clamp(horizontalSpeed / (playerConfig.runSpeed * SPRINT.speedScale), 0, 1)
       : 0,
+    // Signed skid for the camera roll: lean the frame into hard turns.
+    skidRoll: (arcade?.skid || 0) * (Math.sign(turnRate) || 0),
+    // Ground-speed fraction driving the hero view's auto-follow strength.
+    moveSpeedT: THREE.MathUtils.clamp(horizontalSpeed / playerConfig.runSpeed, 0, 1),
     cameraProfile,
     now,
     delta: cameraDelta,

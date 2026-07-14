@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    // Configuration files opt in with // @ts-check; imported legacy JS stays
+    // outside this incremental rollout until it is annotated deliberately.
+    "checkJs": false,
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": [
+    "three-game/modelAssets.js",
+    "three-game/world/regions/index.js",
+    "three-game/world/ecology/index.js",
+    "three-game/world/obstacleRegistry.js"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

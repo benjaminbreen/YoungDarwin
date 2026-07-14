@@ -207,7 +207,7 @@ function buildCropGeometry(crop) {
 
 export function CropFieldLayer({ layer, zoneId }) {
   const crop = getCropType(layer.crop);
-  const items = layer.items || [];
+  const items = useMemo(() => layer.items || [], [layer.items]);
   const meshRef = useRef(null);
   const simRef = useRef(null);
   const timeUniform = useRef({ value: 0 });

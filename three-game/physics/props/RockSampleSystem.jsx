@@ -225,7 +225,7 @@ function RockChipScar({ chip }) {
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -1,
-  }), []);
+  }), [chip.scarColor]);
   useEffect(() => () => material.dispose(), [material]);
   const yaw = Math.atan2(chip.normal.x, chip.normal.z);
   return (
@@ -300,21 +300,21 @@ function RockChipBurst({ chip, onExpired }) {
     transparent: true,
     opacity: 0.68,
     depthWrite: false,
-  }), []);
+  }), [chip.dustColor, chip.dustSize]);
   const puffMaterial = useMemo(() => new THREE.PointsMaterial({
     color: chip.dustColor || '#5b5140',
     size: (chip.puffSize || 0.18) * 2.1,
     transparent: true,
     opacity: 0.36,
     depthWrite: false,
-  }), []);
+  }), [chip.dustColor, chip.puffSize]);
   const sparkMaterial = useMemo(() => new THREE.LineBasicMaterial({
     color: chip.sparkColor || '#ffd36a',
     transparent: true,
     opacity: 1,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-  }), []);
+  }), [chip.sparkColor]);
   const geometry = useMemo(() => {
     const positions = new Float32Array(chip.burst.length * 3);
     const buffer = new THREE.BufferGeometry();

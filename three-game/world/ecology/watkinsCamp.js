@@ -5,7 +5,6 @@ import {
   WATKINS_CABIN,
   watkinsCliffFactor,
   watkinsPathInfo,
-  watkinsRiverCenterZ,
   watkinsRiverInfo,
   watkinsYardMask,
 } from '../regions/watkinsCamp/terrain';

@@ -4,6 +4,7 @@ import { terrainBiomeAt } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
 import { ACTION_DURATION, PLAYER, SWIM } from './playerConfig';
 import { arcadeLandingMomentum } from './arcadeLocomotion';
+import { triggerHitstop } from '../../world/worldTime';
 
 const WATER_JUMP_PREDICT_SECONDS = 2.35;
 const WATER_JUMP_PREDICT_STEP = 0.08;
@@ -58,10 +59,11 @@ export function updatePlayerJumpInputAndGravity({
   grounded,
   rawRunSpeed,
   rawInputDirection,
+  jumpInputAllowed = true,
   delta,
   now,
 }) {
-  const jumpHeld = Boolean(keys.jump || touch.jump);
+  const jumpHeld = jumpInputAllowed && Boolean(keys.jump || touch.jump);
   const jumpJustPressed = jumpHeld && !lastButtons.current.jump;
   const canStartJumpInput = !stateRef.current.crouching
     && !stateRef.current.aiming
@@ -114,6 +116,13 @@ export function updatePlayerJumpInputAndGravity({
     stateRef.current.jumpPhase = 'takeoff';
     stateRef.current.jumpWasRunning = launchRunning;
     stateRef.current.jumpChargeAmount = charge;
+    // Feeds the takeoff stretch in playerFrameFeedback.
+    stateRef.current.impactTakeoffAt = now;
+    stateRef.current.impactStretch = THREE.MathUtils.clamp(
+      0.55 + charge * 0.45 + Math.hypot(velocity.current.x, velocity.current.z) / 9,
+      0.55,
+      1,
+    );
     stateRef.current.jumpWaterEntryIntent = waterEntryIntent;
     const launchGround = collisionAdapter.groundInfo(group.current.position);
     stateRef.current.jumpFromHeight = Number.isFinite(launchGround.terrainY)
@@ -330,14 +339,25 @@ export function resolvePlayerLanding({
           radiusScale: THREE.MathUtils.clamp(0.92 + landedJumpTravelDistance / 16 + landedJumpCharge * 0.16, 0.9, 1.42),
         });
       }
-      if (falling > 7.2) {
+      // Tiered landing impact: small hops whisper, big drops thump. The
+      // squash in playerFrameFeedback reads impactLandedAt/impactIntensity.
+      stateRef.current.impactLandedAt = now;
+      stateRef.current.impactIntensity = THREE.MathUtils.clamp(
+        (falling - 1.2) / 9 + landedJumpCharge * 0.14,
+        intentionalPlayerJump ? 0.22 : 0,
+        1,
+      );
+      if (falling > 3.2) {
         cameraImpulse.current = {
           startedAt: now,
-          intensity: THREE.MathUtils.clamp(falling / 26 + landingSpeed / 30, 0.18, 0.68),
-          duration: 0.34,
+          intensity: THREE.MathUtils.clamp((falling - 2.2) / 20 + landingSpeed / 34, 0.07, 0.68),
+          duration: 0.3,
           seed: cameraImpulse.current.seed + 1,
         };
       }
+      // A beat of world freeze on genuinely big drops (player/camera run on
+      // real time, so this reads as weight, not lag).
+      if (falling > 8.5) triggerHitstop(0.06);
     }
 
     // A hard fall knocks the wind out: bump run effort so the recovery idle

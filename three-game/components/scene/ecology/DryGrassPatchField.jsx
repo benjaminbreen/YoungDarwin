@@ -103,6 +103,54 @@ function applyBladeAtlasTint(material, texture, strength = 0.26) {
   return material;
 }
 
+// Darkens blades toward their root so clumps read as rooted-in-shade rather
+// than uniformly lit cards. Uses the raw geometry-space height, so per-instance
+// scaling keeps the gradient proportional on every clump.
+function applyRootShading(material, geometry, { shade = 0.72, fadeEnd = 0.5 } = {}) {
+  if (!geometry) return material;
+  geometry.computeBoundingBox();
+  const minY = geometry.boundingBox.min.y;
+  const span = geometry.boundingBox.max.y - minY;
+  if (!(span > 0)) return material;
+  const previousHook = material.onBeforeCompile;
+  const previousCacheKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (previousHook) previousHook(shader, renderer);
+    shader.uniforms.uGrassRootShade = { value: shade };
+    shader.uniforms.uGrassRootFadeEnd = { value: fadeEnd };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying float vGrassRootT;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vGrassRootT = clamp((position.y - ${minY.toFixed(4)}) / ${span.toFixed(4)}, 0.0, 1.0);`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uGrassRootShade;
+        uniform float uGrassRootFadeEnd;
+        varying float vGrassRootT;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        diffuseColor.rgb *= mix(uGrassRootShade, 1.0, smoothstep(0.0, uGrassRootFadeEnd, vGrassRootT));`,
+      );
+  };
+  material.customProgramCacheKey = () => {
+    const base = previousCacheKey ? previousCacheKey() : 'dry-grass-patch';
+    return `${base}|root-shade|${shade.toFixed(2)}|${fadeEnd.toFixed(2)}`;
+  };
+  material.needsUpdate = true;
+  return material;
+}
+
 function layerCullBounds(items, maxVisibleDistance) {
   if (!Number.isFinite(maxVisibleDistance) || maxVisibleDistance <= 0 || !items.length) return null;
   let minX = Infinity;
@@ -144,8 +192,8 @@ function buildForageGrid(items) {
 export function DryGrassPatchField({
   layer,
   zoneId = null,
-  castShadow = false,
-  receiveShadow = true,
+  castShadow = layer.castShadow === true,
+  receiveShadow = layer.receiveShadow !== false,
   inspectableType = null,
 }) {
   const groupRef = useRef(null);
@@ -179,8 +227,13 @@ export function DryGrassPatchField({
       dithering: true,
     });
     grassMaterial.forceSinglePass = true;
+    // Blades are paper-thin double-sided shells; casting shadows from both
+    // faces makes the depth pass self-occlude into acne, so only front faces
+    // render into the shadow map.
+    grassMaterial.shadowSide = THREE.FrontSide;
     const motionMaterial = applyFoliageMotion(grassMaterial, geometry, layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 });
-    return applyBladeAtlasTint(motionMaterial, bladeTexture, layer.bladeTextureStrength ?? 0.26);
+    const tintedMaterial = applyBladeAtlasTint(motionMaterial, bladeTexture, layer.bladeTextureStrength ?? 0.26);
+    return applyRootShading(tintedMaterial, geometry, layer.rootShading);
   }, [geometry, layer, bladeTexture]);
 
   useLayoutEffect(() => () => {

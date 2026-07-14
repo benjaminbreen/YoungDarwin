@@ -12,6 +12,7 @@ import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
 import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
+import { WaterDevPanel } from './ui/dev/WaterDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
@@ -114,24 +115,29 @@ const DEFAULT_PERF_SETTINGS = {
 };
 
 const QUALITY_PRESETS = {
+  // Mobile is a *slight* step down from performance, not a scorched-earth tier:
+  // dropping to 1x DPR with no AA of any kind read as pixelated/jagged, and the
+  // 'low' shadow tier's 12–24Hz refresh made shadows visibly ghost behind the
+  // player. Keep SMAA + the performance-tier DPR; save cost on reflections,
+  // shadow map size, foliage draw distance, and terrain density instead.
   mobile: {
-    dprMode: '1x',
+    dprMode: '1.25x',
     msaaSamples: 0,
-    postprocessing: false,
-    contextAntialias: false,
-    shadowQuality: 'low',
+    postprocessing: true,
+    contextAntialias: true,
+    shadowQuality: 'standard',
     ao: false,
     reflections: false,
     waterQuality: 'performance',
-    waterSplashes: false,
-    weatherFX: false,
-    splatBackdrop: false,
-    solarScreenGlare: false,
+    waterSplashes: true,
+    weatherFX: true,
+    splatBackdrop: true,
+    solarScreenGlare: true,
     solarLensGhosts: false,
-    solarSunHalo: false,
+    solarSunHalo: true,
     solarSceneFlares: false,
     cheapMaterials: true,
-    foliageDrawScale: 0.68,
+    foliageDrawScale: 0.75,
     terrainSegmentCap: 160,
   },
   performance: {
@@ -147,9 +153,11 @@ const QUALITY_PRESETS = {
     msaaSamples: 0,
     postprocessing: true,
     contextAntialias: true,
-    shadowQuality: 'standard',
+    shadowQuality: 'high',
     ao: false,
-    reflections: false,
+    // Planar reflection measured as near-free at this tier and the water
+    // reads dramatically better with it — only mobile leaves it off.
+    reflections: true,
     waterQuality: 'performance',
     waterSplashes: true,
     weatherFX: true,
@@ -191,7 +199,7 @@ const DEFERRED_CONTENT_DELAY_MS = 350;
 const OPENING_CAMERA_DURATION_MS = 6200;
 const OPENING_CAMERA_MAX_MS = 10500;
 const SCENE_COST_BUCKET_LIMIT = 40;
-const SHADOW_QUALITY_MODES = ['low', 'standard', 'high'];
+const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 
 function normalizeShadowQuality(value, fallback = 'high') {
   const mode = String(value || '').toLowerCase();
@@ -816,14 +824,14 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
       interiorFx.bloomDayIntensity ?? 0.62,
       interiorDaylight,
     )
-    : 0.36;
+    : 0.52;
   const bloomThreshold = interiorFx
     ? MathUtils.lerp(
       interiorFx.bloomNightThreshold ?? 0.58,
       interiorFx.bloomDayThreshold ?? 0.58,
       interiorDaylight,
     )
-    : 0.83;
+    : 0.76;
   return (
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
@@ -844,13 +852,14 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
       <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
       {/* Threshold sits just under the ACES shoulder so deliberate HDR
           customers — sun core, lantern flame, water glints pushed past 1.0,
-          moon glitter — glow softly, while sky/sand/foliage stay crisp. */}
+          moon glitter, ground/mote sparkles — glow softly, while sky/sand/
+          foliage stay crisp. */}
       <Bloom
         intensity={bloomIntensity * (1 - underwater * 0.58)}
         luminanceThreshold={bloomThreshold}
-        luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.15}
+        luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.18}
         mipmapBlur
-        radius={interiorFx?.bloomRadius ?? 0.34}
+        radius={interiorFx?.bloomRadius ?? 0.4}
       />
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
@@ -1220,7 +1229,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
             onClick={() => set({ shadowQuality: mode })}
             className={`rounded border px-2 py-1 ${normalizeShadowQuality(settings.shadowQuality) === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
           >
-            {mode}
+            {mode === 'ultra' ? 'very high' : mode}
           </button>
         ))}
       </div>
@@ -1647,6 +1656,7 @@ export default function ThreeDarwinGame() {
         {gameUiVisible && (
           <DarwinAnimationDevPanel open={showDarwinAnimationLab} onClose={() => setShowDarwinAnimationLab(false)} />
         )}
+        {gameUiVisible && <WaterDevPanel />}
         <PerformancePanel
           open={gameUiVisible && showPerf}
           settings={perfSettings}

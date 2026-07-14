@@ -20,6 +20,8 @@ const FAR_REEF_INTERVAL = 1 / 6;
 //   swimmers: {
 //     schools: [{ id, path, count, center: [x, z], radius, y: [lo, hi],
 //                 speed, scale: [lo, hi], baseRotation, timeScale,
+//                 motion, pathRadiusX, pathRadiusZ, verticalWander, maxPitch,
+//                 stripRootMotionNodes,
 //                 startleRadius, startlePush, startleSpeedBoost, bank }],
 //     cruisers: [{ id, path, orbit: { cx, cz, rx, rz }, y, bob, speed,
 //                  scale, baseRotation, direction, timeScale, phase,
@@ -36,6 +38,10 @@ const _ahead = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _matrix = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
+const _rollQuat = new THREE.Quaternion();
+const _lookTarget = new THREE.Vector3();
+const _localForward = new THREE.Vector3(0, 0, 1);
+const _schoolAnchor = new THREE.Vector3();
 
 function seeded(i, k) {
   const v = Math.sin((i + 1) * 12.9898 + k * 78.233) * 43758.5453;
@@ -59,24 +65,26 @@ function prepareSwimmerScene(scene, options = {}) {
   return scene;
 }
 
-// Evaluates a swimmer's position at time t. Schools orbit a slowly-drifting
-// anchor; the per-fish wander keeps neighbours from ever phase-locking.
-function schoolPosition(out, spec, fish, t, player = null, startle = 0) {
-  const drift = spec.drift || 0.35;
-  const cx = spec.center[0] + Math.sin(t * 0.07 * drift + spec.seed) * spec.radius * 0.45;
-  const cz = spec.center[1] + Math.cos(t * 0.055 * drift + spec.seed * 2.1) * spec.radius * 0.4;
-  const a = t * fish.angularSpeed + fish.phase;
-  const r = fish.orbitRadius * (1 + Math.sin(t * 0.31 + fish.phase * 3.0) * 0.18);
-  const y = THREE.MathUtils.lerp(
-    spec.y[0],
-    spec.y[1],
-    0.5 + 0.5 * Math.sin(t * 0.4 * fish.bobSpeed + fish.phase * 1.7),
+// Some downloaded fish clips key the armature container as well as the tail
+// bones. That source-level root rotation fights the authored world path and can
+// turn an otherwise level fish nose-down or backwards. The scene controller
+// owns whole-body translation/orientation, so configured container tracks are
+// removed while the actual fin/body swim tracks keep playing.
+function makeInPlaceSwimClip(sourceClip, stripRootMotionNodes = []) {
+  if (!sourceClip || stripRootMotionNodes.length === 0) return sourceClip;
+  const tracks = sourceClip.tracks.filter(track => !stripRootMotionNodes.some(nodeName => (
+    track.name === nodeName || track.name.startsWith(`${nodeName}.`)
+  )));
+  if (tracks.length === sourceClip.tracks.length) return sourceClip;
+  return new THREE.AnimationClip(
+    `${sourceClip.name || 'swim'}-in-place`,
+    sourceClip.duration,
+    tracks,
+    sourceClip.blendMode,
   );
-  out.set(
-    cx + Math.cos(a) * r + Math.sin(t * 0.9 + fish.phase * 5.0) * 0.3,
-    y,
-    cz + Math.sin(a) * r * spec.squash + Math.cos(t * 0.8 + fish.phase * 4.0) * 0.3,
-  );
+}
+
+function applySchoolStartle(out, spec, player, startle) {
   if (player && startle > 0) {
     const dx = out.x - player.x;
     const dz = out.z - player.z;
@@ -92,6 +100,77 @@ function schoolPosition(out, spec, fish, t, player = null, startle = 0) {
     }
   }
   return out;
+}
+
+function schoolAnchorPosition(out, spec, t) {
+  if (spec.motion === 'shoal') {
+    const pathRadiusX = spec.pathRadiusX ?? spec.radius * 3.2;
+    const pathRadiusZ = spec.pathRadiusZ ?? spec.radius * 0.9;
+    const pathRate = (spec.speed || 0.24) / Math.max(pathRadiusX, pathRadiusZ, 1);
+    const a = t * pathRate + spec.seed;
+    return out.set(
+      spec.center[0] + Math.cos(a) * pathRadiusX,
+      (spec.y[0] + spec.y[1]) * 0.5,
+      spec.center[1] + Math.sin(a) * pathRadiusZ,
+    );
+  }
+  const drift = spec.drift || 0.35;
+  return out.set(
+    spec.center[0] + Math.sin(t * 0.07 * drift + spec.seed) * spec.radius * 0.45,
+    (spec.y[0] + spec.y[1]) * 0.5,
+    spec.center[1] + Math.cos(t * 0.055 * drift + spec.seed * 2.1) * spec.radius * 0.4,
+  );
+}
+
+// A cohesive shoal follows one broad, shallow route. Individuals keep stable
+// offsets around the shared tangent with only a few centimetres of wander, so
+// the group reads as travelling through the reef rather than orbiting pins.
+function shoalPosition(out, spec, fish, t, player = null, startle = 0) {
+  const pathRadiusX = spec.pathRadiusX ?? spec.radius * 3.2;
+  const pathRadiusZ = spec.pathRadiusZ ?? spec.radius * 0.9;
+  const pathRate = (spec.speed || 0.24) / Math.max(pathRadiusX, pathRadiusZ, 1);
+  const a = t * pathRate + spec.seed;
+  const anchorX = spec.center[0] + Math.cos(a) * pathRadiusX;
+  const anchorZ = spec.center[1] + Math.sin(a) * pathRadiusZ;
+  let tangentX = -Math.sin(a) * pathRadiusX;
+  let tangentZ = Math.cos(a) * pathRadiusZ;
+  const tangentLength = Math.hypot(tangentX, tangentZ) || 1;
+  tangentX /= tangentLength;
+  tangentZ /= tangentLength;
+  const sideX = -tangentZ;
+  const sideZ = tangentX;
+  const forwardWander = Math.sin(t * 0.12 + fish.phase * 2.3) * 0.16;
+  const sideWander = Math.sin(t * 0.16 + fish.phase * 3.1) * 0.1;
+  const verticalWander = (spec.verticalWander ?? 0.035)
+    * Math.sin(t * 0.18 * fish.bobSpeed + fish.phase * 1.7);
+  out.set(
+    anchorX + tangentX * (fish.forwardOffset + forwardWander) + sideX * (fish.lateralOffset + sideWander),
+    fish.depth + verticalWander,
+    anchorZ + tangentZ * (fish.forwardOffset + forwardWander) + sideZ * (fish.lateralOffset + sideWander),
+  );
+  return applySchoolStartle(out, spec, player, startle);
+}
+
+// Legacy orbit motion remains available to other authored regions. Northwest
+// Reef opts into shoal motion below.
+function schoolPosition(out, spec, fish, t, player = null, startle = 0) {
+  if (spec.motion === 'shoal') return shoalPosition(out, spec, fish, t, player, startle);
+  const drift = spec.drift || 0.35;
+  const cx = spec.center[0] + Math.sin(t * 0.07 * drift + spec.seed) * spec.radius * 0.45;
+  const cz = spec.center[1] + Math.cos(t * 0.055 * drift + spec.seed * 2.1) * spec.radius * 0.4;
+  const a = t * fish.angularSpeed + fish.phase;
+  const r = fish.orbitRadius * (1 + Math.sin(t * 0.31 + fish.phase * 3.0) * 0.18);
+  const y = THREE.MathUtils.lerp(
+    spec.y[0],
+    spec.y[1],
+    0.5 + 0.5 * Math.sin(t * 0.4 * fish.bobSpeed + fish.phase * 1.7),
+  );
+  out.set(
+    cx + Math.cos(a) * r + Math.sin(t * 0.9 + fish.phase * 5.0) * 0.3,
+    y,
+    cz + Math.sin(a) * r * spec.squash + Math.cos(t * 0.8 + fish.phase * 4.0) * 0.3,
+  );
+  return applySchoolStartle(out, spec, player, startle);
 }
 
 function cruiserPosition(out, spec, t) {
@@ -121,15 +200,34 @@ function applyPlayerAvoidance(out, spec, player, avoid) {
   return out;
 }
 
-// Faces the group along its direction of travel (sampled a beat ahead), with
-// pitch following the climb/dive and an optional banked roll for cruisers.
-function aimAlongPath(group, position, aheadPosition, roll = 0) {
+// Faces the group along its direction of travel. Pitch and bank are bounded in
+// the target quaternion; adding roll to the current Euler rotation each frame
+// made fish accumulate into the head-down poses this system used to produce.
+function aimAlongPath(group, position, aheadPosition, {
+  roll = 0,
+  maxPitch = 0.12,
+  response = 0.12,
+} = {}) {
   group.position.copy(position);
   if (aheadPosition.distanceToSquared(position) < 1e-6) return;
-  _matrix.lookAt(aheadPosition, position, _up);
+  _lookTarget.copy(aheadPosition);
+  const horizontalDistance = Math.hypot(
+    aheadPosition.x - position.x,
+    aheadPosition.z - position.z,
+  );
+  const maxRise = Math.tan(Math.max(0, maxPitch)) * horizontalDistance;
+  _lookTarget.y = position.y + THREE.MathUtils.clamp(
+    aheadPosition.y - position.y,
+    -maxRise,
+    maxRise,
+  );
+  _matrix.lookAt(_lookTarget, position, _up);
   _quat.setFromRotationMatrix(_matrix);
-  group.quaternion.slerp(_quat, 0.12);
-  if (roll) group.rotation.z += roll;
+  if (roll) {
+    _rollQuat.setFromAxisAngle(_localForward, roll);
+    _quat.multiply(_rollQuat);
+  }
+  group.quaternion.slerp(_quat, response);
 }
 
 function SwimmerIndividual({ source, spec, animations, phase, timeScale, mixerStore, index }) {
@@ -137,25 +235,30 @@ function SwimmerIndividual({ source, spec, animations, phase, timeScale, mixerSt
   const sceneClone = useMemo(() => prepareSwimmerScene(cloneSkeleton(source), {
     doubleSide: spec.doubleSide,
   }), [source, spec.doubleSide]);
+  const swimClip = useMemo(() => makeInPlaceSwimClip(
+    animations[0],
+    spec.stripRootMotionNodes,
+  ), [animations, spec.stripRootMotionNodes]);
   const mixer = useMemo(() => {
     const m = new THREE.AnimationMixer(sceneClone);
-    const clip = animations[0];
+    const clip = swimClip;
     if (clip) {
       const action = m.clipAction(clip);
       action.play();
       action.time = phase * clip.duration;
     }
     return m;
-  }, [animations, phase, sceneClone]);
+  }, [phase, sceneClone, swimClip]);
 
   // The mixer is advanced by the parent's single useFrame (one per
   // school/cruiser) instead of one callback per fish, and can be gated by
   // distance there.
   useEffect(() => {
     if (!mixerStore) return undefined;
-    mixerStore.current[index] = { mixer, timeScale };
+    const mixers = mixerStore.current;
+    mixers[index] = { mixer, timeScale };
     return () => {
-      if (mixerStore.current[index]?.mixer === mixer) mixerStore.current[index] = null;
+      if (mixers[index]?.mixer === mixer) mixers[index] = null;
     };
   }, [index, mixer, mixerStore, timeScale]);
 
@@ -179,6 +282,9 @@ function FishSchool({ spec }) {
     bobSpeed: 0.6 + seeded(i, 5) * 0.9,
     scaleValue: THREE.MathUtils.lerp(spec.scale[0], spec.scale[1], seeded(i, 6)),
     timeScale: (spec.timeScale || 1) * (0.85 + seeded(i, 7) * 0.4),
+    forwardOffset: (seeded(i, 8) - 0.5) * spec.radius * 1.5,
+    lateralOffset: (seeded(i, 9) - 0.5) * spec.radius * 0.82,
+    depth: THREE.MathUtils.lerp(spec.y[0], spec.y[1], seeded(i, 10)),
   })), [spec]);
 
   const runtime = useMemo(() => ({
@@ -196,8 +302,9 @@ function FishSchool({ spec }) {
     let stepDelta = delta;
     let targetStartle = 0;
     if (player) {
-      const dx = player.x - runtime.center[0];
-      const dz = player.z - runtime.center[1];
+      schoolAnchorPosition(_schoolAnchor, runtime, t);
+      const dx = player.x - _schoolAnchor.x;
+      const dz = player.z - _schoolAnchor.z;
       const centerDistance = Math.hypot(dx, dz);
       const startleBand = (runtime.startleRadius || 7.5) + runtime.radius * 0.9;
       targetStartle = THREE.MathUtils.clamp(1 - (centerDistance - runtime.radius * 0.55) / startleBand, 0, 1);
@@ -218,12 +325,19 @@ function FishSchool({ spec }) {
       const group = groupRefs.current[i];
       if (group) {
         schoolPosition(_pos, runtime, fishes[i], t, player, startle);
-        schoolPosition(_ahead, runtime, fishes[i], t + 0.35, player, startle);
-        const turnSign = Math.sign(fishes[i].angularSpeed) || 1;
+        const lookAhead = runtime.lookAhead ?? (runtime.motion === 'shoal' ? 1.2 : 0.35);
+        schoolPosition(_ahead, runtime, fishes[i], t + lookAhead, player, startle);
+        const turnSign = runtime.motion === 'shoal'
+          ? 1
+          : Math.sign(fishes[i].angularSpeed) || 1;
         const cruiseBank = (runtime.bank ?? 0.055) * turnSign
           * (0.65 + Math.sin(t * 0.33 + fishes[i].phase) * 0.35);
         const startleBank = startle * (runtime.startleBank ?? 0.2) * turnSign;
-        aimAlongPath(group, _pos, _ahead, cruiseBank + startleBank);
+        aimAlongPath(group, _pos, _ahead, {
+          roll: cruiseBank + startleBank,
+          maxPitch: runtime.maxPitch ?? 0.1,
+          response: runtime.turnResponse ?? 0.1,
+        });
       }
       const entry = mixerStore.current[i];
       if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale * animationBoost);
@@ -236,7 +350,12 @@ function FishSchool({ spec }) {
         <group key={i} ref={el => { groupRefs.current[i] = el; }}>
           <SwimmerIndividual
             source={scene}
-            spec={{ baseRotation: spec.baseRotation, scaleValue: fish.scaleValue, doubleSide: spec.doubleSide }}
+            spec={{
+              baseRotation: spec.baseRotation,
+              scaleValue: fish.scaleValue,
+              doubleSide: spec.doubleSide,
+              stripRootMotionNodes: spec.stripRootMotionNodes,
+            }}
             animations={animations}
             phase={fish.phase / (Math.PI * 2)}
             timeScale={fish.timeScale}
@@ -295,7 +414,11 @@ function Cruiser({ spec }) {
     applyPlayerAvoidance(_ahead, runtime, player, avoid);
     // Gentle bank into the turn; orbit direction sets the sign.
     const roll = ((spec.bank ?? 0.16) + avoid * (spec.avoidBank ?? 0.22)) * runtime.direction;
-    aimAlongPath(group.current, _pos, _ahead, roll);
+    aimAlongPath(group.current, _pos, _ahead, {
+      roll,
+      maxPitch: runtime.maxPitch ?? 0.08,
+      response: runtime.turnResponse ?? 0.08,
+    });
     const entry = mixerStore.current[0];
     if (entry?.mixer) entry.mixer.update(stepDelta * entry.timeScale * (1 + avoid * (spec.avoidSpeedBoost ?? 0.35)));
   });
@@ -304,7 +427,12 @@ function Cruiser({ spec }) {
     <group ref={group} userData={{ noReflect: true }}>
       <SwimmerIndividual
         source={scene}
-        spec={{ baseRotation: spec.baseRotation, scaleValue: spec.scale, doubleSide: spec.doubleSide }}
+        spec={{
+          baseRotation: spec.baseRotation,
+          scaleValue: spec.scale,
+          doubleSide: spec.doubleSide,
+          stripRootMotionNodes: spec.stripRootMotionNodes,
+        }}
         animations={animations}
         phase={spec.phase || 0}
         timeScale={spec.timeScale || 1}

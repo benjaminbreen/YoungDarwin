@@ -11,6 +11,7 @@ export function updatePlayerFrameFeedback({
   group,
   warningRef,
   modelFeedbackRef,
+  stateRef,
   contactShadowRef,
   debugCollisionRef,
   debugMovementRef,
@@ -69,6 +70,33 @@ export function updatePlayerFrameFeedback({
     modelFeedbackRef.current.rotation.z = THREE.MathUtils.damp(modelFeedbackRef.current.rotation.z, targetRoll, 10, delta);
     modelFeedbackRef.current.position.x = feedback.normal.x * feedbackEase * feedback.intensity * 0.045;
     modelFeedbackRef.current.position.z = feedback.normal.z * feedbackEase * feedback.intensity * 0.045;
+
+    // Squash & stretch: landing compresses toward the feet (group origin is
+    // at ground level, so scaling reads as sinking into the landing), takeoff
+    // stretches tall. Impact fields are written by playerAirborneMotion.
+    let squashY = 1;
+    let squashXZ = 1;
+    const impact = stateRef?.current;
+    if (impact) {
+      const landAge = now - (impact.impactLandedAt ?? -10);
+      if (landAge >= 0 && landAge < 0.34) {
+        const p = landAge / 0.34;
+        const env = (1 - p) * (1 - p);
+        const amp = impact.impactIntensity || 0;
+        squashY -= amp * 0.16 * env;
+        squashXZ += amp * 0.1 * env;
+      }
+      const takeAge = now - (impact.impactTakeoffAt ?? -10);
+      if (takeAge >= 0 && takeAge < 0.24) {
+        const env = Math.sin((takeAge / 0.24) * Math.PI);
+        const amp = impact.impactStretch || 0;
+        squashY += amp * 0.075 * env;
+        squashXZ -= amp * 0.045 * env;
+      }
+    }
+    modelFeedbackRef.current.scale.x = THREE.MathUtils.damp(modelFeedbackRef.current.scale.x, squashXZ, 22, delta);
+    modelFeedbackRef.current.scale.y = THREE.MathUtils.damp(modelFeedbackRef.current.scale.y, squashY, 22, delta);
+    modelFeedbackRef.current.scale.z = THREE.MathUtils.damp(modelFeedbackRef.current.scale.z, squashXZ, 22, delta);
   }
 
   if (contactShadowRef.current) {

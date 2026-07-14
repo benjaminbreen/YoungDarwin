@@ -18,8 +18,18 @@ export function updatePlayerEquipmentState({
   startAction,
   playerPosition = null,
   playerFacing = null,
+  disabled = false,
 }) {
   const hasRifle = activeToolId === 'shotgun';
+  if (disabled) {
+    stateRef.current.aimToggled = false;
+    stateRef.current.aiming = false;
+    lastButtons.current.rifle = riflePressed;
+    lastButtons.current.useTool = Boolean(keys.useTool);
+    lastToolId.current = activeToolId;
+    if (aimActiveRef) aimActiveRef.current = false;
+    return { activeToolId, hasRifle: false };
+  }
   if (lastToolId.current !== null && activeToolId !== lastToolId.current
     && !stateRef.current.action && !preInputMovementLocked && !stateRef.current.swimming) {
     const transitionClip = activeToolId === 'shotgun'

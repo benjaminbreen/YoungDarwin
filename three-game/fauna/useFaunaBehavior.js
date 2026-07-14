@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
-import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useThreeGameStore } from '../store';
 import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
 import { createFaunaMotionController, habitatFor, seedFromSpecimen } from './faunaMotionController';
 import { onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
-import { worldTime } from '../world/worldTime';
 import { faunaDebugEnabled } from '../runtimeDebug';
+
+const MAX_FAUNA_SIMULATION_STEP = 0.2;
+const MAX_FAUNA_CATCHUP = 0.6;
 
 export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -27,7 +28,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       basePosition: base,
       actorScale: specimen?.sceneScale || 1,
     });
-  }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed]);
+  }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed, specimen.sceneScale]);
   const positionRef = useRef(basePosition?.clone?.() || null);
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
@@ -68,8 +69,12 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     });
   }, [basePosition, basePositionRef, controller, profile]);
 
-  useFrame(() => {
-    if (!controller || !profile) return;
+  const update = useCallback(({
+    playerPosition = null,
+    elapsedTime = 0,
+    delta = 0,
+  } = {}) => {
+    if (!controller || !profile) return statusRef.current;
     const base = basePositionRef?.current || basePosition;
     const actorId = specimen.instanceId || specimen.id;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
@@ -81,7 +86,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           specimenId: specimen.id,
           count: stimuli.length,
           last: stimuli[stimuli.length - 1],
-          at: performance.now() / 1000,
+          at: globalThis.performance?.now?.() / 1000 || 0,
         },
       };
     }
@@ -90,17 +95,35 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         controller.addContactThreat(stimulus, base);
       }
     }
-    const playerPose = getRuntimePlayerPose();
-    // Fauna live on the world clock, not the frame clock: bullet time while
-    // Darwin shoulders the shotgun (and kill-confirm hitstop) slow them down.
-    const status = controller.update({
-      basePosition: base,
-      zoneId: currentZoneId,
-      playerPosition: playerPose?.position,
-      elapsedTime: worldTime.elapsed,
-      delta: worldTime.delta,
-      paused,
-    });
+    // Scheduled medium/far actors receive accumulated world time. Step it in
+    // controller-sized slices so throttling lowers orchestration frequency
+    // without slowing integrated patrol/flee movement.
+    let remaining = Math.min(MAX_FAUNA_CATCHUP, Math.max(0, delta));
+    let status = statusRef.current;
+    if (remaining <= 0) {
+      status = controller.update({
+        basePosition: base,
+        zoneId: currentZoneId,
+        playerPosition,
+        elapsedTime,
+        delta: 0,
+        paused,
+      });
+    } else {
+      while (remaining > 0.000001) {
+        const step = Math.min(MAX_FAUNA_SIMULATION_STEP, remaining);
+        const stepElapsed = elapsedTime - remaining + step;
+        status = controller.update({
+          basePosition: base,
+          zoneId: currentZoneId,
+          playerPosition,
+          elapsedTime: stepElapsed,
+          delta: step,
+          paused,
+        });
+        remaining -= step;
+      }
+    }
     statusRef.current = status;
     positionRef.current = controller.state.position;
     yawRef.current = controller.state.yaw;
@@ -109,9 +132,20 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     airborneRef.current = controller.state.airborne === true;
     animationRef.current = controller.state.animation;
     debugRef.current = controller.state.debug;
-  });
+    return status;
+  }, [
+    basePosition,
+    basePositionRef,
+    controller,
+    currentZoneId,
+    debugEnabled,
+    paused,
+    profile,
+    specimen.id,
+    specimen.instanceId,
+  ]);
 
-  return {
+  return useMemo(() => ({
     active: Boolean(controller && profile),
     profile,
     positionRef,
@@ -122,6 +156,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     animationRef,
     debugRef,
     statusRef,
+    update,
     reset: next => controller?.reset(next),
-  };
+  }), [controller, profile, update]);
 }

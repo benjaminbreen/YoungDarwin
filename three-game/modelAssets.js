@@ -1,5 +1,27 @@
+// @ts-check
+
+/**
+ * Configuration shared by player, fauna, prop, and structure model loaders.
+ * Less-common loader options remain available through the indexed portion while
+ * the fields agents edit most often are checked explicitly.
+ *
+ * @typedef {Record<string, unknown> & {
+ *   enabled: boolean,
+ *   path: string,
+ *   preload?: boolean,
+ *   scale?: number | number[],
+ *   rotation?: number[],
+ *   yOffset?: number,
+ *   cacheKey?: string,
+ *   normalizeMaterials?: boolean,
+ *   targetTriangles?: number,
+ *   prompt?: string,
+ * }} ModelAssetConfig
+ */
+
 export const DEFAULT_PLAYER_MODEL_ASSET_ID = 'darwin5';
 
+/** @type {Record<string, ModelAssetConfig>} */
 export const modelAssets = {
   darwin: {
     enabled: true,
@@ -758,7 +780,7 @@ export const modelAssets = {
     enabled: true,
     preload: false,
     path: '/assets/models/structures/lawson-house-interior.glb',
-    cacheKey: 'lawson-house-public-suite-optimized-20260712',
+    cacheKey: 'lawson-house-material-lighting-props-20260713b',
     scale: 1,
     rotation: [0, 0, 0],
     yOffset: 0,
@@ -1033,6 +1055,10 @@ export const modelAssets = {
   },
 };
 
+/**
+ * @param {string} id
+ * @returns {ModelAssetConfig | null}
+ */
 export function getModelAsset(id) {
   return modelAssets[id] || null;
 }

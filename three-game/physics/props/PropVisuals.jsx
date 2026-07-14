@@ -296,6 +296,7 @@ function CandlestickFlame({ offsetY = 0 }) {
     const flicker = 0.96 + Math.sin(phase) * 0.026 + Math.sin(phase * 1.87) * 0.014;
     light.intensity = THREE.MathUtils.lerp(daylightHouse ? 0.005 : 0.14, 3.25, activation) * flicker;
     flame.emissiveIntensity = THREE.MathUtils.lerp(daylightHouse ? 0.035 : 2.45, 4.4, activation) * flicker;
+    flameMesh.visible = !daylightHouse || activation > 0.075;
     flameMesh.scale.set(0.74, 1.28 + Math.sin(phase * 0.83) * 0.06, 0.74);
   });
 

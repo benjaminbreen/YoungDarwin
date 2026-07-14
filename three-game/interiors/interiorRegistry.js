@@ -220,10 +220,11 @@ const INTERIORS = {
     blueprint: lawsonHouseBlueprint,
     shellAssetId: 'lawsonHouseInterior',
     scene: {
-      background: '#18201d',
+      background: '#18231f',
       outdoor: false,
       water: false,
       weather: false,
+      exteriorAtmosphere: true,
       ecology: false,
       landmarks: false,
       specimens: false,
@@ -231,8 +232,8 @@ const INTERIORS = {
     },
     camera: {
       minDistance: 3.0,
-      defaultDistance: 3.1,
-      maxDistance: 6.4,
+      defaultDistance: 3.2,
+      maxDistance: 4.45,
       defaultPitch: 0.24,
       side: 0.35,
       pivotY: 1.42,
@@ -245,19 +246,19 @@ const INTERIORS = {
     lighting: {
       worldYaw: 0.62,
       fogDensity: 0.00035,
-      exposureDay: 0.84,
-      exposureNight: 0.53,
-      exposureResponse: 1.65,
-      environmentDay: 0.34,
+      exposureDay: 0.86,
+      exposureNight: 0.55,
+      exposureResponse: 1.85,
+      environmentDay: 0.21,
       environmentNight: 0.055,
-      ambientDay: 0.052,
+      ambientDay: 0.014,
       ambientNight: 0.006,
-      hemisphereDay: 0.17,
+      hemisphereDay: 0.04,
       hemisphereNight: 0.016,
       ambientColor: '#8b948b',
       hemisphereSkyColor: '#b3c0b5',
       hemisphereGroundColor: '#24170f',
-      flameDayEmission: 0.01,
+      flameDayEmission: 0,
       flameNightEmission: 4.15,
       portals: [
         {
@@ -266,9 +267,26 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 0.92,
+          diffuseIntensity: 2.8,
           color: '#c5d1c8',
-          goldenColor: '#edc17a'
+          goldenColor: '#edc17a',
+          direct: {
+            intensity: 92,
+            warmth: 0.5,
+            sourceDistance: 1.8,
+            distance: 11.5,
+            angle: 0.48,
+            penumbraClear: 0.3,
+            penumbraOvercast: 0.68,
+            decay: 1.2,
+            diffuseCut: 0.18,
+            castShadow: false,
+            shaft: {
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.2, opacity: 0.045, visibilityThreshold: 0.12 },
+              dust: { count: 34, length: 6.2, speed: 0.06, opacity: 0.2, size: 0.08, noise: 0.2, color: '#f1d3a0', visibilityThreshold: 0.12 }
+            }
+          },
+          bounce: { position: [-8.2, 0.22, 5.65], direction: [0, 1, -0.08], width: 2.3, height: 1.05, intensity: 1.05, diffuseShare: 0.42 }
         },
         {
           id: 'dining-front-window-a',
@@ -276,9 +294,29 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.6,
           height: 1.32,
-          diffuseIntensity: 1.08,
+          diffuseIntensity: 4.2,
           color: '#c5d1c8',
-          goldenColor: '#edc17a'
+          goldenColor: '#edc17a',
+          direct: {
+            intensity: 152,
+            warmth: 0.52,
+            sourceDistance: 1.9,
+            distance: 12.5,
+            angle: 0.5,
+            penumbraClear: 0.24,
+            penumbraOvercast: 0.64,
+            decay: 1.16,
+            diffuseCut: 0.24,
+            castShadow: true,
+            shadowMapSize: 2048,
+            shadowRadiusClear: 0.48,
+            shadowRadiusOvercast: 1.9,
+            shaft: {
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.75, width: 0.54, depth: 0.8, length: 7.2, opacity: 0.064, visibilityThreshold: 0.1 },
+              dust: { count: 46, length: 7.2, speed: 0.065, opacity: 0.24, size: 0.085, noise: 0.22, color: '#f5d39a', visibilityThreshold: 0.1 }
+            }
+          },
+          bounce: { position: [-0.45, 0.2, 5.35], direction: [0, 1, -0.12], width: 3.1, height: 1.15, intensity: 1.65, diffuseShare: 0.52 }
         },
         {
           id: 'dining-front-window-b',
@@ -286,9 +324,26 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 0.98,
+          diffuseIntensity: 3.7,
           color: '#c5d1c8',
-          goldenColor: '#edc17a'
+          goldenColor: '#edc17a',
+          direct: {
+            intensity: 118,
+            warmth: 0.48,
+            sourceDistance: 1.8,
+            distance: 11.8,
+            angle: 0.48,
+            penumbraClear: 0.3,
+            penumbraOvercast: 0.68,
+            decay: 1.2,
+            diffuseCut: 0.2,
+            castShadow: false,
+            shaft: {
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.5, opacity: 0.045, visibilityThreshold: 0.12 },
+              dust: { count: 32, length: 6.5, speed: 0.06, opacity: 0.18, size: 0.08, noise: 0.2, color: '#efd09a', visibilityThreshold: 0.12 }
+            }
+          },
+          bounce: { position: [1.85, 0.2, 5.3], direction: [0, 1, -0.1], width: 2.5, height: 1.1, intensity: 1.15, diffuseShare: 0.46 }
         },
         {
           id: 'garden-window-a',
@@ -296,11 +351,11 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 2.15,
+          diffuseIntensity: 3.25,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
-            intensity: 52,
+            intensity: 124,
             warmth: 0.56,
             sourceDistance: 1.5,
             distance: 10.5,
@@ -310,17 +365,15 @@ const INTERIORS = {
             decay: 1.28,
             diffuseCut: 0.12,
             castShadow: true,
-            shadowMapSize: 1024,
+            shadowMapSize: 2048,
             shadowRadiusClear: 1.1,
             shadowRadiusOvercast: 2.5,
             shaft: {
-              opacity: 0.012,
-              radiusBottom: 1.25,
-              attenuation: 6,
-              dust: { count: 32, length: 4.8, speed: 0.06, opacity: 0.16, size: 0.085, noise: 0.2, color: '#e4c99a', visibilityThreshold: 0.22 }
+              panes: { count: 2, axis: [0, 0, 1], spacing: 0.7, width: 0.5, depth: 0.78, length: 5.4, opacity: 0.045, visibilityThreshold: 0.16 },
+              dust: { count: 32, length: 5.4, speed: 0.06, opacity: 0.16, size: 0.085, noise: 0.2, color: '#e4c99a', visibilityThreshold: 0.16 }
             }
           },
-          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.35 }
+          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.7, diffuseShare: 0.48 }
         },
         {
           id: 'garden-window-b',
@@ -328,11 +381,11 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 1.85,
+          diffuseIntensity: 2.9,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
-            intensity: 44,
+            intensity: 98,
             warmth: 0.6,
             sourceDistance: 1.5,
             distance: 9.5,
@@ -343,7 +396,7 @@ const INTERIORS = {
             diffuseCut: 0.1,
             castShadow: false
           },
-          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 0.9 }
+          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 1.25, diffuseShare: 0.44 }
         },
         {
           id: 'front-doorway',
@@ -351,7 +404,7 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.4,
           height: 2.42,
-          diffuseIntensity: 0.5,
+          diffuseIntensity: 2.35,
           color: '#c3d0c7',
           goldenColor: '#edbd72'
         }
@@ -363,16 +416,16 @@ const INTERIORS = {
       postprocessing: {
         multisampling: 0,
         aoFullResolution: true,
-        aoRadius: 0.62,
-        aoDistanceFalloff: 0.78,
-        aoIntensity: 1.35,
+        aoRadius: 0.78,
+        aoDistanceFalloff: 0.86,
+        aoIntensity: 2.28,
         aoDenoiseRadius: 8,
         bloomNightIntensity: 0.48,
-        bloomDayIntensity: 0.18,
+        bloomDayIntensity: 0.32,
         bloomNightThreshold: 0.6,
-        bloomDayThreshold: 0.82,
-        bloomSmoothing: 0.2,
-        bloomRadius: 0.34
+        bloomDayThreshold: 0.76,
+        bloomSmoothing: 0.22,
+        bloomRadius: 0.42
       }
     }
   },

@@ -94,7 +94,7 @@ export const UnderwaterPostEffect = forwardRef(function UnderwaterPostEffect({
   amount = 0,
   clarity = 34,
 }, ref) {
-  const effect = useMemo(() => new UnderwaterDepthEffectImpl({ amount, clarity }), []);
+  const effect = useMemo(() => new UnderwaterDepthEffectImpl(), []);
 
   useEffect(() => {
     effect.setAmount(amount);
@@ -108,4 +108,3 @@ export const UnderwaterPostEffect = forwardRef(function UnderwaterPostEffect({
 
   return <primitive ref={ref} object={effect} dispose={null} />;
 });
-

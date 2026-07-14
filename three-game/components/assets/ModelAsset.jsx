@@ -1110,7 +1110,11 @@ function GLBPrimitive({
     const overlayTarget = overlayRequest?.active && overlayRequest.clip ? 1 : 0;
     overlayState.weight = THREE.MathUtils.damp(overlayState.weight, overlayTarget, 12, delta);
     if (overlayState.weight > 0.02) {
-      const overlayAction = getOverlayAction(overlayRequest?.clip || overlayState.clip);
+      // Fade out the currently playing overlay before changing clips. Selectors
+      // provide an inactive fallback clip, which should not replace a carry or
+      // aim pose while its remaining weight is still being blended away.
+      const overlayClip = overlayRequest?.active ? overlayRequest.clip : overlayState.clip;
+      const overlayAction = getOverlayAction(overlayClip);
       if (overlayAction) {
         if (!overlayAction.isRunning()) overlayAction.reset().play();
         overlayAction.setEffectiveWeight(overlayState.weight);

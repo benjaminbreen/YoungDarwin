@@ -1,3 +1,8 @@
+// @ts-check
+
+/** @typedef {Record<string, unknown>} EcologyDefinition */
+/** @typedef {() => EcologyDefinition} EcologyBuilder */
+
 import { buildNorthShoreEcology } from './northShore';
 import { buildDesolateOutcropEcology } from './desolateOutcrop';
 import { buildDevilsCrownEcology } from './devilsCrown';
@@ -21,11 +26,13 @@ import { buildCormorantBayTest2Ecology } from './cormorantBayTest2';
 import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
 import { buildPuntaCormorantEcology } from './puntaCormorant';
 import { buildWatkinsCampEcology } from './watkinsCamp';
+import { buildPostScrubRiseEcology } from './postScrubRise';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
 // Definitions are memoized; layouts inside them are deterministic.
 
+/** @type {Record<string, EcologyBuilder>} */
 const builders = {
   N_SHORE: buildNorthShoreEcology,
   N_OUTCROP: buildDesolateOutcropEcology,
@@ -50,12 +57,18 @@ const builders = {
   CORMORANT_BAY_TEST_3: buildCormorantBayTest3Ecology,
   PUNTA_CORMORANT: buildPuntaCormorantEcology,
   WATKINS: buildWatkinsCampEcology,
+  POST_SCRUB_RISE: buildPostScrubRiseEcology,
 };
 
+/** @type {Map<string, EcologyDefinition>} */
 const cache = new Map();
 
+/**
+ * @param {string} zoneId
+ * @returns {EcologyDefinition | null}
+ */
 export function getEcology(zoneId) {
   if (!builders[zoneId]) return null;
   if (!cache.has(zoneId)) cache.set(zoneId, builders[zoneId]());
-  return cache.get(zoneId);
+  return cache.get(zoneId) ?? null;
 }

@@ -555,23 +555,6 @@ function TortoiseToeKnuckles({ config, materials }) {
   });
 }
 
-function TortoiseClaws({ config, material }) {
-  const direction = config.fore ? 1 : -1;
-  const offsets = config.fore ? [-0.105, -0.052, 0, 0.052, 0.105] : [-0.075, -0.025, 0.025, 0.075];
-  return offsets.map((offset, index) => (
-    <mesh
-      key={`${config.key}-claw-${index}`}
-      castShadow
-      receiveShadow
-      position={[offset, -0.012, direction * (config.fore ? 0.255 : 0.205)]}
-      rotation={[direction > 0 ? Math.PI / 2 : -Math.PI / 2, 0, 0]}
-      material={material}
-    >
-      <coneGeometry args={[config.fore ? 0.018 : 0.016, config.fore ? 0.068 : 0.058, 12]} />
-    </mesh>
-  ));
-}
-
 function TortoiseLeg({ refs, config, materials, geometries }) {
   const footZ = config.fore ? 0.12 : -0.1;
   const footGeometry = config.fore ? geometries.frontFoot : geometries.rearFoot;

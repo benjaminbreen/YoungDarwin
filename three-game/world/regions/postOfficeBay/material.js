@@ -8,7 +8,8 @@ export function createPostOfficeBayTerrainMaterial() {
   return createCoastalVolcanicTerrainMaterial({
     pathPoints: POST_OFFICE_BAY_PATH_POINTS,
     pathClearings: [POST_OFFICE_BAY_BARREL_CLEARING],
+    pathSplatBounds: { originX: -66, originZ: -60, width: 132, depth: 120, size: 1024 },
     textureSet: DRY_FLOREANA_TEXTURE_SETS.sandyCoastal,
-    cacheKey: 'post-office-bay-coastal-volcanic-with-standard-path-v2',
+    cacheKey: 'post-office-bay-coastal-volcanic-with-standard-path-v3',
   });
 }

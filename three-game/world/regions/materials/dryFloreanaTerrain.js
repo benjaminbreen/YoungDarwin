@@ -49,6 +49,7 @@ export const DRY_FLOREANA_TEXTURE_SETS = {
     paleFlecksRoughness: '/assets/textures/world/floreana-pbr/olivine-beach_roughness.png',
     paleFlecksHeight: '/assets/textures/world/floreana-pbr/olivine-beach_height.png',
     baseSand: '/assets/textures/world/floreana-pbr/galapagos-sand_albedo.png',
+    baseSandNormal: '/assets/textures/world/floreana-pbr/galapagos-sand_normal.png',
     baseSandRoughness: '/assets/textures/world/floreana-pbr/galapagos-sand_roughness.png',
     baseSandHeight: '/assets/textures/world/floreana-pbr/galapagos-sand_height.png',
     fallbacks: {
@@ -100,6 +101,7 @@ function n(value) {
 
 function dryTerrainFragmentCommon({
   pathPoints,
+  pathMinimumWidth,
   pathSplatUniform,
   pathSplatBoundsUniform,
   pathSplatFunction,
@@ -205,7 +207,7 @@ function dryTerrainFragmentCommon({
           float edgeNoise = sin(along * 0.28 + frame.x * 0.07) * 0.36
             + sin(along * 0.12 - frame.y * 0.18) * 0.26
             + (dtFbm(vec2(along * 0.055, frame.z * 0.42) + vec2(2.0, -5.0)) - 0.5) * 1.08;
-          float w = max(2.35, frame.z + edgeNoise);
+          float w = max(${n(pathMinimumWidth)}, frame.z + edgeNoise);
           float center = 1.0 - smoothstep(w * 0.16, w * 0.42, dist);
           float tread = 1.0 - smoothstep(w * 0.34, w * 0.78, dist);
           float shoulder = smoothstep(w * 0.48, w * 1.08, dist)
@@ -220,6 +222,7 @@ function dryTerrainColorFragment({
   highFadeEnd,
   pathSplatFunction,
   pathOnly = false,
+  earthFloorStrength = 0,
 }) {
   return /* glsl */`
         vec2 p = vDryTerrainWorld.xz;
@@ -262,6 +265,23 @@ function dryTerrainColorFragment({
         grassFloor = mix(grassFloor, vec3(0.34, 0.45, 0.22), greenPocket * 0.26);
         grassFloor = mix(grassFloor, vec3(0.69, 0.59, 0.31), max(strawPocket, dryLuma) * 0.28 + slopeWarmth * 0.1);
         grassFloor += (fine - 0.5) * vec3(0.04, 0.036, 0.016);
+
+        // Optional volcanic-soil floor: preserve the region's authored brown
+        // color while supplying the pebble, cinder, and erosion detail from the
+        // red-dirt albedo at two non-aligned scales.
+        vec3 earthGroundTex = dtTextureBlend(
+          uDryTerrainRedDirt,
+          p * 0.23,
+          dtRotate(p, 0.43) * 0.41 + vec2(-0.18, 0.33),
+          medium
+        );
+        float earthGroundLuma = dot(earthGroundTex, vec3(0.299, 0.587, 0.114));
+        float earthGroundDetail = mix(0.64, 1.34, smoothstep(0.12, 0.68, earthGroundLuma));
+        vec3 earthGround = diffuseColor.rgb * earthGroundDetail;
+        earthGround = mix(earthGround, earthGroundTex * vec3(0.78, 0.63, 0.48), 0.24);
+        earthGround += (fine - 0.5) * vec3(0.055, 0.042, 0.028);
+        float earthCover = clamp(${n(earthFloorStrength)} * (0.9 + medium * 0.1) * (1.0 - greenPocket * 0.12), 0.0, 1.0);
+        grassFloor = mix(grassFloor, earthGround, earthCover);
 
         vec4 pathSplat = ${pathSplatFunction}(p);
         float pathCover = clamp(max(pathMasks.y * 0.34, pathSplat.r), 0.0, 1.0);
@@ -403,7 +423,10 @@ export function createDryFloreanaTerrainMaterial({
   highFadeStart = 7,
   highFadeEnd = 9.6,
   pathSplatSize,
+  pathSplatBounds,
+  pathMinimumWidth = 2.35,
   pathOnly = false,
+  earthFloorStrength = 0,
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
     throw new Error('createDryFloreanaTerrainMaterial requires pathPoints.');
@@ -411,7 +434,9 @@ export function createDryFloreanaTerrainMaterial({
   const fallbacks = textureSet.fallbacks || {};
   const pathSplatTexture = createStandardFootPathSplatTexture({
     pathPoints,
+    ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
     ...(pathSplatSize ? { size: pathSplatSize } : {}),
+    minimumWidth: pathMinimumWidth,
   });
   const redDirt = loadRepeatingTexture(textureSet.redDirt, fallbacks.redDirt || '#a75b2e');
   const shoulderGround = loadRepeatingTexture(textureSet.shoulderGround, fallbacks.shoulderGround || '#80744d');
@@ -441,6 +466,7 @@ export function createDryFloreanaTerrainMaterial({
 
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, standardFootPathSplatUniforms(pathSplatTexture, {
+      ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
       textureUniform: pathSplatUniform,
       boundsUniform: pathSplatBoundsUniform,
     }));
@@ -468,6 +494,7 @@ export function createDryFloreanaTerrainMaterial({
         `#include <common>
 ${dryTerrainFragmentCommon({
           pathPoints,
+          pathMinimumWidth,
           pathSplatUniform,
           pathSplatBoundsUniform,
           pathSplatFunction,
@@ -478,7 +505,7 @@ ${dryTerrainFragmentCommon({
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-${dryTerrainColorFragment({ highFadeStart, highFadeEnd, pathSplatFunction, pathOnly })}`,
+${dryTerrainColorFragment({ highFadeStart, highFadeEnd, pathSplatFunction, pathOnly, earthFloorStrength })}`,
       )
       .replace(
         '#include <roughnessmap_fragment>',

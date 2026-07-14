@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
@@ -21,8 +21,6 @@ import {
   mobilityPushAnimationTarget,
 } from '../../physics/objectMobility';
 import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
-import { getZoneProps } from '../../physics/props/propRegistry';
-import { PropVisual } from '../../physics/props/PropVisuals';
 import { resolveSpecimenCollision } from '../../fauna/specimenCollision';
 import { pushSpecimenStimulus } from '../../world/specimenRuntime';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
@@ -117,8 +115,6 @@ function pickIdleFidget(pool, lastClip, count, nearSpecimen) {
   return options[options.length - 1];
 }
 
-const DEFAULT_CARRIED_OFFSET = [0.32, 1.02, 0.24];
-const DEFAULT_CARRIED_ROTATION = [0, 0, -0.18];
 const FINCH_DROPPING_SLOW_MOTION = {
   minScale: 0.34,
   attack: 0.12,
@@ -185,38 +181,6 @@ function PlayerColliderDebugMesh({ colliderConfig, material }) {
         ]}
       />
     </mesh>
-  );
-}
-
-function CarriedObjectVisual() {
-  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
-  const prop = useMemo(() => {
-    if (!carriedObjectId) return null;
-    return getZoneProps(currentZoneId).find(item => item.id === carriedObjectId) || null;
-  }, [carriedObjectId, currentZoneId]);
-
-  if (!prop) return null;
-
-  const carryable = prop.behaviors?.carryable || {};
-  const offset = carryable.holdOffset || DEFAULT_CARRIED_OFFSET;
-  const rotation = carryable.holdRotation || DEFAULT_CARRIED_ROTATION;
-  const scale = (prop.scale || 1) * (carryable.holdScale || 1);
-
-  return (
-    <group
-      position={[offset[0] || 0, offset[1] ?? 1.02, offset[2] ?? 0.24]}
-      rotation={rotation}
-      scale={scale}
-      userData={{
-        renderSource: `carried-prop:${prop.id}`,
-        renderLabel: `Carried prop: ${prop.label}`,
-        renderKind: 'carried-prop',
-        renderPath: prop.visualAsset || prop.visual || null,
-      }}
-    >
-      <PropVisual visual={prop.visual} assetId={prop.visualAsset} offsetY={prop.visualOffsetY || 0} />
-    </group>
   );
 }
 
@@ -320,6 +284,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const cactusHazardStreak = useRef({ count: 0, lastAt: -10 });
   const lastStepUpDustAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
+  const prevSprintingRef = useRef(false);
   const lastDownhillSprintCameraAt = useRef(-10);
   const lastArcadeStumbleAt = useRef(-10);
   const lastDroppingSmushAt = useRef(-10);
@@ -789,6 +754,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     stateRef.current.flightPhase = startsInFlight ? 'cruise' : null;
     stateRef.current.sitting = false;
     stateRef.current.lying = false;
+    stateRef.current.pendingCarryPickup = null;
     stateRef.current.flightPitch = 0;
     stateRef.current.flightBank = 0;
     stateRef.current.flightFlap = false;
@@ -806,10 +772,36 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     lastPosePublishAt.current = -10;
     footstepEffects.reset();
     idleFidget.current = { idleSince: 0, nextAt: 0, count: 0 };
-  }, [currentZoneId, playableMode.id, playerSpawnId, spawnFacing, spawnPoint.y, startX, startZ]);
+  }, [
+    characterController,
+    collisionAdapter,
+    currentZoneId,
+    footstepEffects,
+    frameScratch.spawnSyncPosition,
+    playableMode.assetId,
+    playableMode.id,
+    playableMode.kind,
+    playerConfig.canFly,
+    playerConfig.flight,
+    playerProfile.startFlightHeight,
+    playerProfile.startForwardSpeed,
+    playerProfile.startInFlight,
+    playerSpawnId,
+    resetCameraForSpawn,
+    setPlayerPose,
+    spawnFacing,
+    spawnPoint.y,
+    startX,
+    startZ,
+    swimConfig.bodySink,
+  ]);
 
   useFrame((_, rawDelta) => {
-    if (!group.current || health <= 0) return;
+    if (!group.current) return;
+    // Clear stale intent first. Frames that reach the character move publish
+    // the pre-collision velocity below; early-return/paused frames stay zero.
+    updateRuntimePlayerMotion({ x: 0, z: 0 });
+    if (health <= 0) return;
     collisionAdapter.beginFrame?.();
     const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
     const rawTouch = consumeTouchControls();
@@ -823,6 +815,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       group,
       warningRef,
       modelFeedbackRef,
+      stateRef,
       contactShadowRef,
       debugCollisionRef,
       debugMovementRef,
@@ -1175,6 +1168,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     const {
       input,
       moving,
+      analogSpeedScale,
       crouchPressed,
       riflePressed,
       rotateLeftPressed,
@@ -1280,7 +1274,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         }
       }
     }
-    if (playerConfig.canCrouch !== false && crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action && !swimState.current.active) {
+    if (playerConfig.canCrouch !== false && !carriedObjectId && crouchPressed && !lastButtons.current.crouch && !preInputMovementLocked && !stateRef.current.action && !swimState.current.active) {
       const slideSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       if (!stateRef.current.crouching && slideSpeed > playerConfig.walkSpeed * 1.2 && !stateRef.current.aiming) {
         // Crouch at sprint = running slide, reusing the roll mover so the
@@ -1322,6 +1316,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         startAction,
         playerPosition: group.current.position,
         playerFacing: facing.current,
+        disabled: Boolean(carriedObjectId),
       });
     } else {
       stateRef.current.aiming = false;
@@ -1390,7 +1385,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     // so committing to a straight makes the sprint tier feel earned.
     const sprintScale = stateRef.current.sprinting && !tiredRun ? SPRINT.speedScale : 1;
     const rawRunSpeed = playerConfig.runSpeed * fatigueRunScale * sprintScale;
-    const carrySpeedScale = carriedObjectId ? 0.62 : 1;
+    // Carrying already disables sprinting. Keep normal walking responsive;
+    // the old 0.62 multiplier made indoor carrying feel like a collision bug.
+    const carrySpeedScale = carriedObjectId ? 0.92 : 1;
     const braceSpeedScale = stateRef.current.bracing ? 0.16 : 1;
     // Wading drag: deeper water slows Darwin — about half speed at armpit
     // depth, slower still when he is in over his head.
@@ -1459,7 +1456,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       airborne: wasAirborne.current,
       swimming: swimState.current.active,
     });
-    const movementSpeed = rawMovementSpeed * slopeSpeedScale * arcadeSpeedScale;
+    // Flight ignores stick deflection — W/S are altitude there, not throttle.
+    const movementSpeed = rawMovementSpeed * slopeSpeedScale * arcadeSpeedScale
+      * (flightActive ? 1 : analogSpeedScale);
     terrainFeedback.current.grade = THREE.MathUtils.damp(terrainFeedback.current.grade, slope.grade, 8, delta);
     terrainFeedback.current.uphillDot = THREE.MathUtils.damp(terrainFeedback.current.uphillDot, uphillDot, 8, delta);
     terrainFeedback.current.downhillDot = THREE.MathUtils.damp(terrainFeedback.current.downhillDot, -uphillDot, 8, delta);
@@ -1485,7 +1484,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     }
     lastButtons.current.rotateLeft = rotateLeftPressed;
     lastButtons.current.rotateRight = rotateRightPressed;
-    if (playerConfig.canUseDarwinTools !== false) {
+    if (playerConfig.canUseDarwinTools !== false && !carriedObjectId) {
       triggerDirectPlayerActions({
         triggerAction,
         group,
@@ -1547,7 +1546,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         options,
       });
     };
-    if (playerConfig.canClimb !== false && climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
+    if (playerConfig.canClimb !== false && !carriedObjectId && climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
       const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
       if (target) {
         const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -1750,7 +1749,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         };
         emitPropEvent(arcade.scramble > 0.45 ? 'player-scramble' : 'player-skid', skidEvent);
         collisionDustTriggerRef.current?.({
-          intensity: THREE.MathUtils.clamp(arcade.feedbackIntensity * arcade.traction.dust, 0.18, 0.85),
+          intensity: THREE.MathUtils.clamp(arcade.feedbackIntensity * arcade.traction.dust * 1.35, 0.24, 1),
           position: frameScratch.footstepPosition.set(0, 0.06, -0.24),
           biome: surfaceBiome,
         });
@@ -2037,7 +2036,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       stateRef.current.flightPhase = flight.active ? flight.phase : null;
       lastButtons.current.jump = flyHeld;
     }
-    if (playerConfig.canDodge !== false && dodgePressed && !lastButtons.current.dodge && grounded && !movementLocked && !stateRef.current.action) {
+    if (playerConfig.canDodge !== false && !carriedObjectId && dodgePressed && !lastButtons.current.dodge && grounded && !movementLocked && !stateRef.current.action) {
       const rollInput = frameScratch.dodgeDirection.copy(moving ? input : facing.current).normalize();
       const rollDirection = rollInput.lengthSq() > 0.001 ? rollInput : frameScratch.fallbackRollDirection;
       characterController.sync(group.current.position);
@@ -2129,6 +2128,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         grounded,
         rawRunSpeed,
         rawInputDirection,
+        jumpInputAllowed: !carriedObjectId,
         delta,
         now,
       });
@@ -2253,6 +2253,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
         }
       }
     }
+    // Contact-reactive plants need the velocity Darwin is trying to carry into
+    // a collider, not the near-zero displacement left after Rapier stops him.
+    updateRuntimePlayerMotion({ x: velocity.current.x, z: velocity.current.z });
     const characterMove = characterController.move(group.current.position, desiredDelta);
     characterDebug.current.movement.copy(characterMove.movement);
     characterDebug.current.collisions = characterMove.collisions;
@@ -2601,6 +2604,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       const wadedIn = !wasAirborne.current && waterDepthHere > swimConfig.enterDepth;
       const fellIn = wasAirborne.current && p.y <= WATER_LEVEL - 0.18 && waterDepthHere > swimConfig.enterDepth;
       if (wadedIn || fellIn) {
+        if (carriedObjectId) setCarriedObject(null);
         const jumpWaterEntryIntent = jumpState.current.waterEntryIntent;
         swim.active = true;
         swim.enteredAt = now;
@@ -2885,6 +2889,18 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       groundDistance,
       tiredRun,
     });
+
+    // Sprint surge: the moment the spool completes, kick a puff of dust off
+    // the back foot so the tier change lands as a felt beat (the camera adds
+    // a matching FOV pop from the same sprintT edge).
+    if (stateRef.current.sprinting && !prevSprintingRef.current && !swimState.current.active && !airborneForControl) {
+      collisionDustTriggerRef.current?.({
+        intensity: 0.58,
+        position: frameScratch.footstepPosition.set(0, 0.05, -0.3),
+        biome: surfaceBiome,
+      });
+    }
+    prevSprintingRef.current = stateRef.current.sprinting;
   }, -1);
 
   return (
@@ -2919,7 +2935,6 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           grounding={modelGrounding}
         />
       </group>
-      <CarriedObjectVisual />
       <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <mesh>
           <ringGeometry args={[0.22, 0.34, 28]} />

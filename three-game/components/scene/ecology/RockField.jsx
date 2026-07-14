@@ -27,8 +27,11 @@ function rockFootprint(rock) {
   return rockVisualBounds(rock).footprint;
 }
 
+// Thresholds sized so boulder-scale rocks cast real shadows (Post Office Bay
+// blocks top out around 0.68 visual height) while pebble scatter stays
+// contact-shadow only.
 function rockCastsRealShadow(rock) {
-  return rock.y > -1.25 && rockHeight(rock) > 0.82 && rockFootprint(rock) > 0.58;
+  return rock.y > -1.25 && rockHeight(rock) > 0.42 && rockFootprint(rock) > 0.45;
 }
 
 function rockContactShadow(rock) {
@@ -102,7 +105,7 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
       dummy.scale.fromArray(transform.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
-      rockTint.set(item.color || '#3c3831').lerp(rockTintLift, 0.34);
+      rockTint.set(item.color || '#3c3831').lerp(rockTintLift, 0.42);
       mesh.setColorAt(index, rockTint);
     });
     mesh.instanceMatrix.needsUpdate = true;

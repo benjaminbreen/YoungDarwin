@@ -26,7 +26,7 @@ const SKY_DITHER_GLSL = /* glsl */`
 const SKY_DISTANCE = 170;
 const BODY_DISTANCE = 150;
 const STAR_RADIUS = 162;
-const STAR_COUNT = 1400;
+const STAR_COUNT = 2600;
 
 // Colour stops we lerp between, authored once. Cool, dim night → neutral-warm
 // day, with a golden-hour push layered on top at the horizon.
@@ -60,6 +60,8 @@ const C = {
   fogSunWarm: new THREE.Color('#eee5d8'), // pale sun-facing haze without turning clear sky orange
   fogMist: new THREE.Color('#ccdadd'),    // garúa: pale, desaturated mist tone
   fogStorm: new THREE.Color('#93a0aa'),   // closed sky: haze loses its blue
+  fogMistNight: new THREE.Color('#17263f'),
+  fogStormNight: new THREE.Color('#0c172c'),
   fogUnderwater: new THREE.Color('#2d9fba'),
   fogUnderwaterDeep: new THREE.Color('#083456'),
 };
@@ -146,6 +148,7 @@ const _sun = new THREE.Vector3();
 const _moon = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _color = new THREE.Color();
+const _weatherFogTarget = new THREE.Color();
 const _sunHaze = new THREE.Color();
 const _islandColor = new THREE.Color();
 const _white = new THREE.Color('#ffffff');
@@ -153,6 +156,9 @@ const _sunColor = new THREE.Color();
 const _glowColor = new THREE.Color();
 const _haloColor = new THREE.Color();
 const _flareColor = new THREE.Color();
+const _meteorForward = new THREE.Vector3();
+const _meteorRight = new THREE.Vector3();
+const _meteorUp = new THREE.Vector3();
 const _sunDay = new THREE.Color('#ffd48a');    // midday sun — warm amber
 const _sunGolden = new THREE.Color('#ff8a3c'); // low sun — deep warm orange
 const _moonHorizonWarm = new THREE.Color('#ffe2a8');
@@ -161,6 +167,9 @@ const _screenSun = new THREE.Vector3();
 const _flareWorld = new THREE.Vector3();
 const _flareNdc = new THREE.Vector3();
 const _sunWorld = new THREE.Vector3();
+const _cloudSun = new THREE.Vector3();
+const _cloudRight = new THREE.Vector3();
+const _cloudUp = new THREE.Vector3();
 const _shadowPose = new THREE.Vector3();
 const _shadowDir = new THREE.Vector3();
 const _shadowRight = new THREE.Vector3();
@@ -181,8 +190,10 @@ const SHADOW_QUALITY = {
     extentScale: 1.08,
     radiusBoost: 0,
     anchorMinTexelSize: 0.055,
-    activeRefreshInterval: 1 / 24,
-    idleRefreshInterval: 1 / 12,
+    // 1/24 active read as visible ghosting behind a moving player; 30Hz is
+    // the floor where the shadow still tracks motion acceptably.
+    activeRefreshInterval: 1 / 30,
+    idleRefreshInterval: 1 / 15,
   },
   standard: {
     mapSize: 2048,
@@ -201,6 +212,17 @@ const SHADOW_QUALITY = {
     anchorMinTexelSize: 0.012,
     activeRefreshInterval: 1 / 60,
     idleRefreshInterval: 1 / 30,
+  },
+  // "Very high" in the perf panel. An 8k map is a real memory/bandwidth spend
+  // (256MB depth target), so it stays opt-in; refresh every frame so shadow
+  // motion is never the limiting factor at this tier.
+  ultra: {
+    mapSize: 8192,
+    extentScale: 0.78,
+    radiusBoost: 0.34,
+    anchorMinTexelSize: 0.006,
+    activeRefreshInterval: 0,
+    idleRefreshInterval: 1 / 60,
   },
 };
 const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.high;
@@ -252,7 +274,7 @@ function patchMoonPhaseMaterial(material) {
       .replace(
         '#include <map_fragment>',
         /* glsl */`#include <map_fragment>
-        vec2 moonUv = vUv * 2.0 - 1.0;
+        vec2 moonUv = vMapUv * 2.0 - 1.0;
         float moonR = length(moonUv);
         float moonDisc = 1.0 - smoothstep(0.92, 1.02, moonR);
         float orientedX = moonUv.x * mix(-1.0, 1.0, step(0.5, uMoonWaxing));
@@ -270,13 +292,13 @@ function patchMoonPhaseMaterial(material) {
         float craterRelief = clamp((moonBase.r - 0.52) * 0.32 + (moonBase.b - moonBase.r) * 0.18, -0.08, 0.1);
         vec3 litColor = moonBase * (0.42 + litMask * 0.72 + craterRelief);
         diffuseColor.rgb = litColor * litMask;
-        diffuseColor.rgb += moonBase * darkMask * uMoonEarthshine * 0.34;
+        diffuseColor.rgb += moonBase * darkMask * uMoonEarthshine * 0.46;
         diffuseColor.rgb += vec3(0.8, 0.88, 1.0) * litRim * 0.16;
         diffuseColor.rgb += vec3(0.72, 0.82, 1.0) * terminatorGlow * 0.12;
-        diffuseColor.a *= moonDisc * max(litMask, uMoonEarthshine * 0.38 + 0.028);`
+        diffuseColor.a *= moonDisc * max(litMask, uMoonEarthshine * 0.52 + 0.04);`
       );
   };
-  material.customProgramCacheKey = () => `${previousKey ? previousKey.call(material) : 'sprite'}|moon-phase-v1`;
+  material.customProgramCacheKey = () => `${previousKey ? previousKey.call(material) : 'sprite'}|moon-phase-v3`;
   material.needsUpdate = true;
 }
 
@@ -286,7 +308,7 @@ function updateMoonPhaseUniforms(material, phase, overcast, rain) {
   const illumination = THREE.MathUtils.clamp(phase?.fraction ?? 1, 0, 1);
   shader.uniforms.uMoonIllumination.value = illumination;
   shader.uniforms.uMoonWaxing.value = phase?.waxing ? 1 : 0;
-  shader.uniforms.uMoonEarthshine.value = (0.1 + (1 - overcast) * 0.16) * (1 - rain * 0.65);
+  shader.uniforms.uMoonEarthshine.value = (0.16 + (1 - overcast) * 0.22) * (1 - rain * 0.65);
 }
 
 function createSunVeilMaterial({ moon = false } = {}) {
@@ -357,8 +379,12 @@ function createSunVeilMaterial({ moon = false } = {}) {
         float wisps = smoothstep(0.42, 0.78, broad + fine * 0.28 + (0.5 - r) * 0.22);
         float horizonBand = sin((centered.y + broad * 0.035) * 78.0 + uTime * 1.7);
         float horizonRipple = smoothstep(-0.18, 0.82, horizonBand + fine * 0.55);
-        float horizonDisc = (1.0 - smoothstep(0.36, 0.58, r)) * (0.56 + horizonRipple * 0.44);
-        float alpha = disc * edge * wisps * uStrength + horizonDisc * uHorizonSun * 0.34;
+        // Heat-haze bands suit the low sun, but the cooler lunar veil should
+        // stay broad and smooth so stripes never cut through its earthshine.
+        float horizonPattern = mix(0.56 + horizonRipple * 0.44, 0.92 + horizonRipple * 0.08, uMoonMode);
+        float horizonDisc = (1.0 - smoothstep(0.36, 0.58, r)) * horizonPattern;
+        float horizonVeilStrength = mix(0.34, 0.16, uMoonMode);
+        float alpha = disc * edge * wisps * uStrength + horizonDisc * uHorizonSun * horizonVeilStrength;
         if (alpha < 0.004) discard;
         vec3 cold = mix(vec3(0.86, 0.94, 1.0), vec3(0.72, 0.82, 1.0), uMoonMode);
         vec3 warm = mix(vec3(1.0, 0.76, 0.43), vec3(1.0, 0.82, 0.58), uMoonMode);
@@ -568,8 +594,9 @@ function meteorTexture() {
   const ctx = canvas.getContext('2d');
   const gradient = ctx.createLinearGradient(0, 0, 128, 0);
   gradient.addColorStop(0.0, 'rgba(255,255,255,0)');
-  gradient.addColorStop(0.72, 'rgba(214,228,255,0.35)');
-  gradient.addColorStop(0.94, 'rgba(255,255,255,0.95)');
+  gradient.addColorStop(0.5, 'rgba(170,205,255,0.08)');
+  gradient.addColorStop(0.76, 'rgba(214,228,255,0.42)');
+  gradient.addColorStop(0.94, 'rgba(255,255,255,1)');
   gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 128, 16);
@@ -584,6 +611,7 @@ function meteorTexture() {
   ctx.globalCompositeOperation = 'source-over';
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
   return texture;
 }
 
@@ -684,26 +712,53 @@ function StarField({ nightRef }) {
     const positions = new Float32Array(STAR_COUNT * 3);
     const sizes = new Float32Array(STAR_COUNT);
     const phases = new Float32Array(STAR_COUNT);
+    const brightness = new Float32Array(STAR_COUNT);
+    const temperatures = new Float32Array(STAR_COUNT);
+    const twinkleSpeeds = new Float32Array(STAR_COUNT);
+    const scintillation = new Float32Array(STAR_COUNT);
+    // Great-circle normal for a softly denser Milky Way band. The field stays
+    // stochastic rather than resolving into the old golden-angle dot grid.
+    const bandNormal = [0.36, 0.58, -0.73];
     for (let i = 0; i < STAR_COUNT; i += 1) {
-      // Even distribution over the upper hemisphere-biased sphere.
-      const u = (i * 2.399963229728653) % (Math.PI * 2); // golden-angle spiral
-      const cosT = 1 - 2 * ((i + 0.5) / STAR_COUNT);
-      const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
-      positions[i * 3] = STAR_RADIUS * sinT * Math.cos(u);
-      positions[i * 3 + 1] = STAR_RADIUS * Math.abs(cosT) * 0.85 + 8; // bias upward
-      positions[i * 3 + 2] = STAR_RADIUS * sinT * Math.sin(u);
-      sizes[i] = 0.7 + ((i * 13) % 7) / 7 * 2.0;
-      phases[i] = ((i * 7) % 101) / 101;
+      const azimuth = canvasHash(i, 1.7, 4.2) * Math.PI * 2;
+      const y = 0.035 + canvasHash(i, 5.1, 9.8) * 0.965;
+      const radial = Math.sqrt(Math.max(0, 1 - y * y));
+      const x = Math.cos(azimuth) * radial;
+      const z = Math.sin(azimuth) * radial;
+      positions[i * 3] = STAR_RADIUS * x;
+      positions[i * 3 + 1] = STAR_RADIUS * y;
+      positions[i * 3 + 2] = STAR_RADIUS * z;
+
+      const bandDistance = Math.abs(x * bandNormal[0] + y * bandNormal[1] + z * bandNormal[2]);
+      const milkyWay = Math.exp(-(bandDistance * bandDistance) / 0.016);
+      const magnitudeSeed = canvasHash(i, 8.4, 13.1);
+      const rareBright = magnitudeSeed > 0.975
+        ? 0.84 + canvasHash(i, 12.2, 2.3) * 0.16
+        : 0;
+      const faintMagnitude = 0.22 + Math.pow(magnitudeSeed, 3.8) * 0.63;
+      brightness[i] = Math.min(1, Math.max(rareBright, faintMagnitude) * (0.9 + milkyWay * 0.24));
+      sizes[i] = 0.64 + brightness[i] * 1.75 + rareBright * 0.4;
+      phases[i] = canvasHash(i, 3.3, 20.7);
+      temperatures[i] = canvasHash(i, 18.1, 6.4);
+      twinkleSpeeds[i] = 0.38 + canvasHash(i, 14.8, 17.5) * 0.82;
+      // Atmospheric scintillation is strongest near the horizon and affects
+      // bright stars a little more than the dim background field.
+      scintillation[i] = (0.08 + (1 - y) * 0.5) * (0.58 + brightness[i] * 0.42);
     }
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
     geo.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
+    geo.setAttribute('aBrightness', new THREE.BufferAttribute(brightness, 1));
+    geo.setAttribute('aTemperature', new THREE.BufferAttribute(temperatures, 1));
+    geo.setAttribute('aTwinkleSpeed', new THREE.BufferAttribute(twinkleSpeeds, 1));
+    geo.setAttribute('aScintillation', new THREE.BufferAttribute(scintillation, 1));
     return geo;
   }, []);
 
   const material = useMemo(() => new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
+    depthTest: false,
     blending: THREE.AdditiveBlending,
     uniforms: {
       uTime: { value: 0 },
@@ -713,31 +768,53 @@ function StarField({ nightRef }) {
     vertexShader: /* glsl */`
       attribute float aSize;
       attribute float aPhase;
+      attribute float aBrightness;
+      attribute float aTemperature;
+      attribute float aTwinkleSpeed;
+      attribute float aScintillation;
       uniform float uTime;
       uniform float uPixelRatio;
       varying float vTwinkle;
       varying float vTint;
+      varying float vBrightness;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
-        vTwinkle = 0.55 + 0.45 * sin(uTime * 1.6 + aPhase * 6.2831853);
-        vTint = fract(aPhase * 5.7);
-        gl_PointSize = aSize * uPixelRatio * (260.0 / max(1.0, -mv.z));
+        float wave = 0.82 + 0.18 * sin(uTime * aTwinkleSpeed + aPhase * 6.2831853);
+        vTwinkle = mix(1.0, wave, aScintillation);
+        vTint = aTemperature;
+        vBrightness = aBrightness;
+        // Stars are angular light sources: cap them in screen pixels instead
+        // of letting near-frustum directions balloon into dust-mote blobs.
+        gl_PointSize = clamp(aSize * uPixelRatio, 0.65 * uPixelRatio, 3.25 * uPixelRatio);
       }
     `,
     fragmentShader: /* glsl */`
       uniform float uOpacity;
       varying float vTwinkle;
       varying float vTint;
+      varying float vBrightness;
       void main() {
         vec2 c = gl_PointCoord - 0.5;
-        float d = dot(c, c);
-        if (d > 0.25) discard;
-        float a = smoothstep(0.25, 0.0, d) * vTwinkle * uOpacity;
-        // Real star fields aren't monochrome: a subtle spread from warm
-        // K-type amber to cool B-type blue, biased mostly white.
-        vec3 starColor = mix(vec3(1.0, 0.82, 0.6), vec3(0.72, 0.84, 1.0), vTint);
-        gl_FragColor = vec4(mix(vec3(1.0, 0.96, 0.9), starColor, 0.4), a);
+        float radius = length(c);
+        if (radius > 0.5) discard;
+        float core = exp(-26.0 * radius * radius);
+        float halo = exp(-9.0 * radius * radius) * 0.19;
+        float brightGate = smoothstep(0.76, 0.98, vBrightness);
+        float flare = (
+          exp(-120.0 * abs(c.x)) * exp(-12.0 * abs(c.y))
+          + exp(-120.0 * abs(c.y)) * exp(-12.0 * abs(c.x))
+        ) * brightGate * 0.28;
+        float shape = core + halo + flare;
+        float a = shape * (0.28 + vBrightness * 0.9) * vTwinkle * uOpacity;
+        if (a < 0.004) discard;
+        // Mostly neutral starlight with restrained amber/blue temperature
+        // variation; saturated pinpricks read as LEDs rather than stars.
+        vec3 warm = vec3(1.0, 0.84, 0.66);
+        vec3 cool = vec3(0.7, 0.84, 1.0);
+        vec3 temperature = mix(warm, cool, vTint);
+        vec3 starColor = mix(vec3(1.0, 0.96, 0.9), temperature, 0.32);
+        gl_FragColor = vec4(starColor * (0.88 + vBrightness * 0.65), a);
       }
     `,
   }), []);
@@ -750,13 +827,18 @@ function StarField({ nightRef }) {
     const night = nightRef.current;
     // Stars live above the weather: a closed cloud deck (or thick garúa)
     // has to swallow them, not let them shine through the storm.
-    const clearAir = (1 - weatherEnv.overcast * 0.92) * (1 - weatherEnv.mistAmount * 0.65);
-    const starVisibility = night * clearAir;
-    material.uniforms.uOpacity.value = starVisibility * 0.95;
+    // Local cloud opacity now covers this earlier-rendered layer, so global
+    // weather attenuation only needs to suppress the stars in genuinely
+    // closed air; broken cloud still leaves bright stars in its clear gaps.
+    const clearAir = (1 - weatherEnv.overcast * 0.58)
+      * (1 - weatherEnv.mistAmount * 0.7)
+      * (1 - weatherEnv.rainIntensity * 0.78);
+    const starVisibility = smoothstep(0.18, 0.78, night) * clearAir;
+    material.uniforms.uOpacity.value = starVisibility;
     if (pointsRef.current) pointsRef.current.visible = starVisibility > 0.01;
   });
 
-  return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} renderOrder={-6} />;
+  return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} renderOrder={-7.6} />;
 }
 
 // Sun-aware tropical sky grade layered over the drei Sky: a milky sea-haze
@@ -892,7 +974,7 @@ function TropicalBlueSkyDome({ nightRef, celestialRef }) {
   );
 }
 
-function MidnightSkyDome({ midnightRef }) {
+function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
   const meshRef = useRef(null);
 
   const material = useMemo(() => new THREE.ShaderMaterial({
@@ -900,8 +982,13 @@ function MidnightSkyDome({ midnightRef }) {
     transparent: true,
     depthWrite: false,
     uniforms: {
+      uNight: { value: 0 },
       uMidnight: { value: 0 },
       uOvercast: { value: 0 },
+      uClearAir: { value: 1 },
+      uMoonlight: { value: 0 },
+      uSunDir: { value: new THREE.Vector3(0, -1, 0) },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -913,18 +1000,101 @@ function MidnightSkyDome({ midnightRef }) {
     `,
     fragmentShader: /* glsl */`
       varying vec3 vWorldDir;
+      uniform float uNight;
       uniform float uMidnight;
       uniform float uOvercast;
+      uniform float uClearAir;
+      uniform float uMoonlight;
+      uniform vec3 uSunDir;
+      uniform vec3 uMoonDir;
+
+      float skyHash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      float skyValueNoise(vec2 p) {
+        vec2 cell = floor(p);
+        vec2 local = fract(p);
+        vec2 blend = local * local * (3.0 - 2.0 * local);
+        return mix(
+          mix(skyHash(cell), skyHash(cell + vec2(1.0, 0.0)), blend.x),
+          mix(skyHash(cell + vec2(0.0, 1.0)), skyHash(cell + vec2(1.0, 1.0)), blend.x),
+          blend.y
+        );
+      }
+
+      float skyFbm(vec2 p) {
+        float value = 0.0;
+        float amplitude = 0.56;
+        for (int octave = 0; octave < 4; octave++) {
+          value += skyValueNoise(p) * amplitude;
+          p = p * 2.03 + vec2(5.7, -3.2);
+          amplitude *= 0.48;
+        }
+        return value;
+      }
+
       void main() {
-        float up = clamp(vWorldDir.y * 0.5 + 0.5, 0.0, 1.0);
-        float dome = smoothstep(0.36, 0.92, up);
-        vec3 horizon = vec3(0.035, 0.095, 0.19);
-        vec3 zenith = vec3(0.006, 0.022, 0.075);
-        vec3 stormTint = vec3(0.055, 0.065, 0.095);
-        vec3 color = mix(horizon, zenith, dome);
-        color = mix(color, stormTint, uOvercast * 0.18);
-        float horizonHold = 1.0 - smoothstep(0.08, 0.28, up);
-        float alpha = uMidnight * mix(0.62, 0.84, dome) * (1.0 - horizonHold * 0.22);
+        vec3 dir = normalize(vWorldDir);
+        float altitude = clamp((dir.y + 0.045) / 1.045, 0.0, 1.0);
+        float dome = smoothstep(0.04, 0.84, altitude);
+
+        // At civil dusk the horizon retains cobalt/violet light while the
+        // zenith is already dark. From 10 PM to 2 AM the same gradient settles
+        // into a saturated blue-black rather than the base sky shader's grey.
+        vec3 twilightHorizon = vec3(0.055, 0.13, 0.27);
+        vec3 twilightZenith = vec3(0.01, 0.035, 0.12);
+        vec3 midnightHorizon = vec3(0.009, 0.042, 0.115);
+        vec3 midnightZenith = vec3(0.001, 0.0055, 0.034);
+        vec3 twilight = mix(twilightHorizon, twilightZenith, dome);
+        vec3 deepNight = mix(midnightHorizon, midnightZenith, dome);
+        vec3 color = mix(twilight, deepNight, uMidnight);
+
+        // Residual sunset is directional, kept low and short-lived. This gives
+        // early evening a layered indigo horizon without tinting the full dome.
+        vec2 viewAzimuth = normalize(dir.xz + vec2(0.0001, 0.0));
+        vec2 sunAzimuth = normalize(uSunDir.xz + vec2(0.0001, 0.0));
+        float sunsetSide = pow(max(dot(viewAzimuth, sunAzimuth), 0.0), 2.4);
+        float twilightBand = (1.0 - smoothstep(-0.015, 0.28, dir.y))
+          * sunsetSide * (1.0 - uMidnight);
+        color = mix(color, vec3(0.17, 0.075, 0.27), twilightBand * 0.28);
+
+        // A very low-contrast Milky Way supplies large-scale structure behind
+        // the individual star points. A split dust lane keeps it organic and
+        // photographic instead of reading as a painted luminous stripe.
+        vec3 galaxyNormal = normalize(vec3(0.36, 0.58, -0.73));
+        float galaxyDistance = abs(dot(dir, galaxyNormal));
+        float galaxyBand = 1.0 - smoothstep(0.035, 0.22, galaxyDistance);
+        vec2 galaxyUv = vec2(
+          dot(dir, normalize(vec3(0.84, -0.18, 0.51))),
+          dot(dir, normalize(vec3(-0.32, 0.75, 0.58)))
+        ) * 9.0;
+        float galaxyGrain = skyFbm(galaxyUv);
+        float dustLane = 1.0 - smoothstep(
+          0.009,
+          0.052,
+          abs(dot(dir, galaxyNormal) + (galaxyGrain - 0.52) * 0.022)
+        );
+        float starCloud = galaxyBand
+          * (0.28 + 0.72 * smoothstep(0.34, 0.82, galaxyGrain))
+          * (1.0 - dustLane * 0.62);
+        color += vec3(0.02, 0.027, 0.052) * starCloud * uMidnight * uClearAir;
+
+        // A broad, dim lunar aureole belongs in the air around the moon, not
+        // just on the moon sprite. It remains subtle enough for new-moon nights.
+        float moonAir = pow(max(dot(dir, normalize(uMoonDir)), 0.0), 7.0);
+        color += vec3(0.028, 0.052, 0.105) * moonAir * uMoonlight;
+
+        // Low clear-air glow separates terrain silhouettes from the horizon.
+        float airglow = (1.0 - smoothstep(0.015, 0.2, dir.y))
+          * uMidnight * uClearAir;
+        color += vec3(0.004, 0.014, 0.038) * airglow;
+
+        // Even a closed night stays navy/slate, never neutral grey.
+        vec3 stormTint = mix(vec3(0.025, 0.045, 0.085), vec3(0.012, 0.022, 0.052), uMidnight);
+        color = mix(color, stormTint, uOvercast * 0.24);
+        float alpha = uNight * mix(0.78, 0.98, uMidnight);
+        alpha *= 1.0 + uOvercast * 0.04;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -936,10 +1106,19 @@ function MidnightSkyDome({ midnightRef }) {
   useLayoutEffect(() => () => material.dispose(), [material]);
 
   useFrame(() => {
+    const night = nightRef.current;
     const midnight = midnightRef.current;
+    const celestial = celestialRef.current;
+    material.uniforms.uNight.value = night;
     material.uniforms.uMidnight.value = midnight;
     material.uniforms.uOvercast.value = weatherEnv.overcast;
-    if (meshRef.current) meshRef.current.visible = midnight > 0.01;
+    material.uniforms.uClearAir.value = (1 - weatherEnv.overcast * 0.88)
+      * (1 - weatherEnv.mistAmount * 0.66)
+      * (1 - weatherEnv.rainIntensity * 0.72);
+    material.uniforms.uMoonlight.value = Math.sqrt(Math.max(0, celestial.moonFraction));
+    material.uniforms.uSunDir.value.copy(celestial.sun);
+    material.uniforms.uMoonDir.value.copy(celestial.moon);
+    if (meshRef.current) meshRef.current.visible = night > 0.01;
   });
 
   return (
@@ -965,22 +1144,36 @@ function RealisticCloudLayer({ nightRef }) {
       uRain: { value: 0 },
       uSolarDrama: { value: 0 },
       uDuskDrama: { value: 0 },
+      // Fair-weather cumulus coverage (weatherEnv.cumulus) — drives how
+      // built-up each cloud is, independent of the overcast deck.
+      uCumulus: { value: 0.3 },
+      // Sun direction projected into billboard/screen space, so the lit side
+      // of every cloud actually faces the sun.
+      uSunScreen: { value: new THREE.Vector2(0.6, 0.5) },
     },
     vertexShader: /* glsl */`
       varying vec2 vUv;
+      varying float vSeed;
       void main() {
         vUv = uv;
+        // Per-cloud seed from the plane's world position: one shared material,
+        // five different clouds (unseeded, the sky shows the same cloud image
+        // stamped five times).
+        vSeed = fract(dot(vec2(modelMatrix[3].x, modelMatrix[3].z), vec2(0.1031, 0.7193)) * 43.7585);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: /* glsl */`
       varying vec2 vUv;
+      varying float vSeed;
       uniform float uTime;
       uniform float uNight;
       uniform float uOpacity;
       uniform float uRain;
       uniform float uSolarDrama;
       uniform float uDuskDrama;
+      uniform float uCumulus;
+      uniform vec2 uSunScreen;
 
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -1010,25 +1203,50 @@ function RealisticCloudLayer({ nightRef }) {
 
       void main() {
         vec2 uv = vUv;
-        vec2 centered = uv - 0.5;
-        centered.x *= 1.75;
-        float body = 1.0 - smoothstep(0.18, 0.58, length(centered));
-        float wisps = fbm(uv * vec2(5.0, 2.2) + vec2(uTime * 0.012, 0.0));
-        float detail = fbm(uv * vec2(13.0, 5.0) - vec2(uTime * 0.018, 0.0));
-        float cloud = body * smoothstep(0.38, 0.78, wisps + detail * 0.45);
-        cloud *= smoothstep(0.02, 0.18, uv.y) * smoothstep(0.02, 0.16, 1.0 - uv.y);
-        vec3 base = mix(vec3(0.72, 0.79, 0.82), vec3(1.0), smoothstep(0.35, 0.95, uv.y + detail * 0.35));
-        vec3 shade = mix(vec3(0.58, 0.65, 0.66), base, smoothstep(0.25, 0.85, wisps));
+        float seed = vSeed * 41.73;
+        // Cumulus anatomy: a flat-ish base near uv.y ~ 0.3 and an
+        // fbm-domed cauliflower top, instead of a smooth ellipse of
+        // horizontally-stretched noise (which reads as smear). The planes are
+        // ~3.3x wider than tall, so x is rescaled into height units first.
+        vec2 c = vec2((uv.x - 0.5) * 2.4, uv.y - 0.3);
+        float shape = fbm(uv * vec2(3.4, 3.0) + seed + vec2(uTime * 0.011, 0.0));
+        float detail = fbm(uv * vec2(9.5, 8.5) - seed * 1.31 - vec2(uTime * 0.016, 0.0));
+        // Two overlapping domes per plane (offset by seed) so banks read as
+        // clusters, not stamped circles. Coverage grows with cumulus weather.
+        float build = 0.06 + uCumulus * 0.14;
+        float topR = 0.3 + shape * 0.2 + build;
+        float dome = 1.0 - smoothstep(topR * 0.55, topR, length(vec2(c.x, max(c.y, 0.0) * 1.6)));
+        vec2 c2 = vec2(c.x - (vSeed - 0.5) * 1.3, c.y + 0.04);
+        float dome2 = 1.0 - smoothstep(topR * 0.4, topR * 0.78, length(vec2(c2.x, max(c2.y, 0.0) * 1.7)));
+        float body = max(dome, dome2 * 0.9);
+        // Flat base: cut with a soft, slightly noisy waterline.
+        float baseCut = smoothstep(-0.14, -0.015, c.y + (shape - 0.5) * 0.07);
+        float cloud = body * baseCut * smoothstep(0.3, 0.6, shape * 0.62 + detail * 0.5 + build);
+        // Cauliflower rim: detail noise erodes the silhouette edge.
+        cloud *= smoothstep(0.12, 0.44, body + (detail - 0.5) * 0.5);
+        cloud *= smoothstep(0.02, 0.1, uv.y) * smoothstep(0.02, 0.12, 1.0 - uv.y)
+          * smoothstep(0.0, 0.05, uv.x) * smoothstep(0.0, 0.05, 1.0 - uv.x);
+        // Sun-side shading: billboarded planes, so the sun's screen-space
+        // direction says which flank is lit — not a fixed "top is bright".
+        vec2 fromCenter = vec2(c.x, uv.y - 0.42);
+        float sunSide = dot(normalize(fromCenter + vec2(1e-4, 0.0)), normalize(uSunScreen + vec2(1e-4, 0.0)));
+        float lit = smoothstep(-0.55, 0.75, sunSide);
+        vec3 base = mix(vec3(0.68, 0.73, 0.78), vec3(1.0, 0.99, 0.96), lit * 0.72 + detail * 0.18);
+        // Base shadow: cumulus bottoms sit in their own shade.
+        base *= mix(0.8, 1.0, smoothstep(-0.06, 0.24, c.y));
+        vec3 shade = base;
         vec3 apricot = mix(vec3(1.0, 0.62, 0.36), vec3(1.0, 0.48, 0.28), uDuskDrama);
         vec3 rose = mix(vec3(1.0, 0.54, 0.74), vec3(0.95, 0.36, 0.58), uDuskDrama);
-        float litEdge = smoothstep(0.35, 0.86, uv.y + detail * 0.2);
-        shade = mix(shade, apricot, uSolarDrama * cloud * litEdge * 0.3);
-        shade = mix(shade, rose, uSolarDrama * cloud * (1.0 - litEdge) * 0.16);
+        shade = mix(shade, apricot, uSolarDrama * cloud * lit * 0.34);
+        shade = mix(shade, rose, uSolarDrama * cloud * (1.0 - lit) * 0.18);
         // Rain curtains: the distant bank goes slate-dark and drags grey
         // virga streaks below its base toward the sea.
         shade = mix(shade, vec3(0.36, 0.41, 0.47), uRain * 0.75);
+        // The remaining twilight silhouettes inherit the blue night rather
+        // than hanging on as pale daytime cutouts.
+        shade = mix(shade, vec3(0.045, 0.085, 0.17), uNight * 0.9);
         float virga = uRain * (1.0 - smoothstep(0.0, 0.42, uv.y))
-          * smoothstep(0.45, 0.75, fbm(vec2(uv.x * 7.0 + uTime * 0.01, uv.y * 1.2)));
+          * smoothstep(0.45, 0.75, fbm(vec2(uv.x * 7.0 + seed + uTime * 0.01, uv.y * 1.2)));
         float alpha = max(cloud, virga * 0.55) * uOpacity * (1.0 - uNight * 0.86);
         gl_FragColor = vec4(shade, alpha);
         #include <tonemapping_fragment>
@@ -1051,9 +1269,17 @@ function RealisticCloudLayer({ nightRef }) {
     material.uniforms.uSolarDrama.value = solarDrama;
     material.uniforms.uDuskDrama.value = (celestial.duskDrama || 0) > (celestial.dawnDrama || 0) ? 1 : 0;
     // Distant cloud bank: on clear days only a faint maritime rim on the
-    // horizon (the dome owns the sky now); thickens as the weather closes.
-    material.uniforms.uOpacity.value = 0.2 + weatherEnv.overcast * 0.55;
+    // horizon (the dome owns the sky now); builds with fair-weather cumulus
+    // and thickens as the overcast deck closes.
+    material.uniforms.uOpacity.value = 0.14 + weatherEnv.cumulus * 0.34 + weatherEnv.overcast * 0.45;
+    material.uniforms.uCumulus.value = weatherEnv.cumulus;
     material.uniforms.uRain.value = weatherEnv.rainIntensity;
+    // Sun direction in the billboards' screen space (planes copy the camera
+    // quaternion, so camera right/up are the plane axes).
+    _cloudSun.set(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
+    _cloudRight.setFromMatrixColumn(camera.matrixWorld, 0);
+    _cloudUp.setFromMatrixColumn(camera.matrixWorld, 1);
+    material.uniforms.uSunScreen.value.set(_cloudSun.dot(_cloudRight), _cloudSun.dot(_cloudUp));
     if (groupRef.current) {
       groupRef.current.children.forEach(child => child.quaternion.copy(camera.quaternion));
     }
@@ -1171,16 +1397,19 @@ function RainbowDome({ celestialRef }) {
   );
 }
 
-// Occasional meteor: a single additive streak that arcs across the dome every
-// half-minute or so on clear nights, brighter and more frequent the darker
-// the sky. One plane, hidden when idle.
+// Occasional meteor: one additive streak roughly once a minute on clear
+// nights. It spawns inside the current camera view so an event is genuinely
+// visible rather than being lost somewhere on the other side of the dome.
 function ShootingStars({ nightRef }) {
   const meshRef = useRef(null);
   const texture = useMemo(() => meteorTexture(), []);
   const state = useRef({
-    countdown: 12,
+    countdown: 18,
     t: -1,
     life: 0.8,
+    length: 18,
+    thickness: 0.55,
+    brightness: 0.9,
     origin: new THREE.Vector3(),
     velocity: new THREE.Vector3(),
     position: new THREE.Vector3(),
@@ -1193,10 +1422,12 @@ function ShootingStars({ nightRef }) {
     const mesh = meshRef.current;
     if (!mesh) return;
     const night = nightRef.current;
-    const clearSky = 1 - weatherEnv.overcast;
+    const clearSky = (1 - weatherEnv.overcast * 0.75)
+      * (1 - weatherEnv.mistAmount * 0.65)
+      * (1 - weatherEnv.rainIntensity * 0.8);
     const s = state.current;
 
-    if (night < 0.55 || clearSky < 0.3) {
+    if (night < 0.55 || clearSky < 0.18) {
       mesh.visible = false;
       s.t = -1;
       return;
@@ -1206,18 +1437,34 @@ function ShootingStars({ nightRef }) {
       mesh.visible = false;
       s.countdown -= delta;
       if (s.countdown > 0) return;
-      // Spawn: random point high on the dome, sliding mostly sideways/down.
-      const azimuth = Math.random() * Math.PI * 2;
-      const altitude = 0.5 + Math.random() * 0.6; // radians above horizon
-      s.origin.set(
-        Math.cos(azimuth) * Math.cos(altitude),
-        Math.sin(altitude),
-        Math.sin(azimuth) * Math.cos(altitude)
-      ).multiplyScalar(STAR_RADIUS - 6);
-      const heading = azimuth + Math.PI / 2 + (Math.random() - 0.5) * 0.8;
-      s.velocity.set(Math.cos(heading), -(0.25 + Math.random() * 0.5), Math.sin(heading)).normalize().multiplyScalar(95 + Math.random() * 60);
-      s.life = 0.55 + Math.random() * 0.5;
-      s.countdown = 18 + Math.random() * 38;
+      camera.getWorldDirection(_meteorForward).normalize();
+      _meteorRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+      _meteorUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+
+      // Begin in the upper portion of the visible frustum, with enough margin
+      // for the bright head to cross the frame before it fades.
+      _meteorForward
+        .addScaledVector(_meteorRight, (Math.random() - 0.5) * 0.9)
+        .addScaledVector(_meteorUp, 0.16 + Math.random() * 0.34)
+        .normalize();
+      if (_meteorForward.y < 0.12) {
+        _meteorForward.y += 0.12 - _meteorForward.y;
+        _meteorForward.normalize();
+      }
+      s.origin.copy(_meteorForward).multiplyScalar(STAR_RADIUS - 6);
+
+      const direction = Math.random() < 0.5 ? -1 : 1;
+      s.velocity.copy(_meteorRight).multiplyScalar(direction)
+        .addScaledVector(_meteorUp, -(0.22 + Math.random() * 0.34))
+        .normalize()
+        .multiplyScalar(76 + Math.random() * 38);
+      const fireball = Math.random() < 0.11;
+      s.life = fireball ? 0.95 + Math.random() * 0.3 : 0.68 + Math.random() * 0.28;
+      s.length = fireball ? 24 + Math.random() * 5 : 16 + Math.random() * 5;
+      s.thickness = fireball ? 0.72 + Math.random() * 0.16 : 0.48 + Math.random() * 0.15;
+      s.brightness = fireball ? 1 : 0.82 + Math.random() * 0.16;
+      mesh.scale.set(s.length, s.thickness, 1);
+      s.countdown = 40 + Math.random() * 40;
       s.t = 0;
     }
 
@@ -1236,12 +1483,12 @@ function ShootingStars({ nightRef }) {
     _flareNdc.copy(s.position).addScaledVector(s.velocity, 0.05).add(camera.position).project(camera);
     mesh.rotateZ(Math.atan2(_flareNdc.y - _flareWorld.y, _flareNdc.x - _flareWorld.x));
     const fade = Math.sin(Math.PI * (s.t / s.life));
-    mesh.material.opacity = fade * night * clearSky * 0.85;
+    mesh.material.opacity = fade * night * clearSky * s.brightness;
     mesh.visible = true;
   });
 
   return (
-    <mesh ref={meshRef} visible={false} renderOrder={-6} frustumCulled={false} scale={[15, 0.65, 1]}>
+    <mesh ref={meshRef} visible={false} renderOrder={-7.4} frustumCulled={false} scale={[18, 0.55, 1]}>
       <planeGeometry args={[1, 1]} />
       <meshBasicMaterial
         map={texture}
@@ -1402,6 +1649,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   // Sun vector + day factors shared with RainbowDome without re-renders.
   const celestialRef = useRef({
     sun: new THREE.Vector3(0, 1, 0),
+    moon: new THREE.Vector3(0, 1, 0),
+    moonFraction: 0,
     elevation: 0,
     daylight: 0,
     golden: 0,
@@ -1570,6 +1819,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
 
     const cel = celestialRef.current;
     cel.sun.copy(_sun);
+    cel.moon.copy(_moon);
+    cel.moonFraction = s.moon_phase.fraction;
     cel.elevation = s.elevation;
     cel.daylight = daylight;
     cel.golden = golden;
@@ -1601,28 +1852,32 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       moonRef.current.position.copy(_moon).multiplyScalar(BODY_DISTANCE);
       moonRef.current.quaternion.copy(camera.quaternion);
       const moonIllumination = THREE.MathUtils.clamp(s.moon_phase.fraction, 0, 1);
-      const moonVis = night * (0.2 + 0.8 * Math.max(0.06, moonIllumination));
+      const moonVis = night * (0.36 + 0.64 * Math.sqrt(Math.max(0.025, moonIllumination)));
       const moonHorizon = moonVis
         * smoothstep(-0.04, 0.12, _moon.y)
         * (1 - smoothstep(0.16, 0.42, _moon.y))
         * (1 - overcast * 0.62)
         * (1 - weatherEnv.rainIntensity * 0.66);
       moonRef.current.visible = celestialBodies && moonVis > 0.02;
-      const moonScale = 7.15 + moonIllumination * 0.55 + moonHorizon * 1.9;
+      const moonScale = 9.5 + moonIllumination * 1.1 + moonHorizon * 2.8;
       moonRef.current.scale.set(moonScale, moonScale * (1 - moonHorizon * 0.04), 1);
       _color.set('#dfe8f4').lerp(_moonHorizonWarm, moonHorizon * 0.46).lerp(_white, moonIllumination * 0.06);
       moonRef.current.material.color.copy(_color);
-      moonRef.current.material.opacity = Math.min(1, night * (0.58 + moonIllumination * 0.42) + moonHorizon * 0.16);
+      moonRef.current.material.opacity = Math.min(
+        1,
+        night * (0.72 + Math.sqrt(moonIllumination) * 0.28) + moonHorizon * 0.18
+      );
       updateMoonPhaseUniforms(moonRef.current.material, s.moon_phase, overcast, weatherEnv.rainIntensity);
       if (moonGlowRef.current) {
         moonGlowRef.current.position.copy(moonRef.current.position);
         moonGlowRef.current.quaternion.copy(camera.quaternion);
         moonGlowRef.current.visible = moonRef.current.visible;
         const clearSkyGlow = (1 - overcast) * (1 - weatherEnv.rainIntensity * 0.75);
-        moonGlowRef.current.scale.setScalar(21 + moonIllumination * 2.5 + moonHorizon * 9);
+        moonGlowRef.current.scale.setScalar(30 + moonIllumination * 6 + moonHorizon * 12);
         _color.set('#cdd8f0').lerp(_moonGlowWarm, moonHorizon * 0.5);
         moonGlowRef.current.material.color.copy(_color);
-        moonGlowRef.current.material.opacity = moonVis * (0.14 + moonIllumination * 0.11 + clearSkyGlow * 0.07 + moonHorizon * 0.12);
+        moonGlowRef.current.material.opacity = moonVis
+          * (0.17 + moonIllumination * 0.15 + clearSkyGlow * 0.1 + moonHorizon * 0.13);
       }
       if (moonVeilRef.current) {
         moonVeilRef.current.position.copy(moonRef.current.position);
@@ -1957,11 +2212,14 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       // patched fog chunk (fogAtmosphere.js) now carries most of this grade.
       _color.lerp(C.fogSunWarm, narrowSunFacing * daylight * (0.012 + golden * 0.06) * (1 - overcast * 0.6));
     }
-    // A closed sky greys the whole distance haze — no blue horizon band can
-    // survive an overcast day.
-    _color.lerp(C.fogStorm, overcast * 0.65 * (0.25 + daylight * 0.75));
-    // Garúa lifts and desaturates the haze toward a pale grey-white.
-    _color.lerp(C.fogMist, weatherEnv.mistAmount * 0.55 * (0.35 + daylight * 0.65));
+    // A closed day greys the distance haze; after dusk the same weather
+    // resolves into cool navy so the island never sits under a luminous grey
+    // ceiling with no daylight feeding it.
+    _weatherFogTarget.copy(C.fogStorm).lerp(C.fogStormNight, night);
+    _color.lerp(_weatherFogTarget, overcast * 0.65 * (0.25 + daylight * 0.75));
+    // Garúa similarly shifts from pale daylight mist to a dim blue night veil.
+    _weatherFogTarget.copy(C.fogMist).lerp(C.fogMistNight, night);
+    _color.lerp(_weatherFogTarget, weatherEnv.mistAmount * 0.55 * (0.35 + daylight * 0.65));
     _color.lerp(C.fogMidnight, midnight * (1 - weatherEnv.mistAmount * 0.35));
     // Mist is only as bright as the light feeding it: cap haze luminance by
     // available daylight (an overcast sky feeds it less) so dusk and storm
@@ -2007,7 +2265,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     // Border haze tracks the fog; only daylight gets the pale tropical lift.
     if (hazeWallMatRef.current) {
       // The pale lift is a sunlit-air effect; a closed sky withholds it.
-      hazeWallMatRef.current.color.copy(_color).lerp(_white, 0.04 + daylight * 0.26 * (1 - overcast * 0.6));
+      hazeWallMatRef.current.color.copy(_color).lerp(
+        _white,
+        daylight * (0.04 + 0.26 * (1 - overcast * 0.6)),
+      );
     }
     const solarExposureLift = solarSunFacingGradeEnabled
       ? narrowSunFacing * daylight * (1 - overcast * 0.75) * (0.01 + golden * 0.008)
@@ -2037,9 +2298,11 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         mist: Number(weatherEnv.mistAmount.toFixed(3)),
         rain: Number(weatherEnv.rainIntensity.toFixed(3)),
         underwater: Number(underwaterAmount.toFixed(3)),
-        shadowQuality: shadowQualityConfig.mapSize >= 4096
-          ? 'high'
-          : shadowQualityConfig.mapSize >= 2048 ? 'standard' : 'low',
+        shadowQuality: shadowQualityConfig.mapSize >= 8192
+          ? 'ultra'
+          : shadowQualityConfig.mapSize >= 4096
+            ? 'high'
+            : shadowQualityConfig.mapSize >= 2048 ? 'standard' : 'low',
         shadowMapSize: shadowQualityConfig.mapSize,
         keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
         hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),
@@ -2110,7 +2373,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
           />
         </mesh>
         <TropicalBlueSkyDome nightRef={nightRef} celestialRef={celestialRef} />
-        <MidnightSkyDome midnightRef={midnightRef} />
+        <NightSkyDome nightRef={nightRef} midnightRef={midnightRef} celestialRef={celestialRef} />
         <RealisticCloudLayer nightRef={nightRef} />
         {/* Sun: the small disc depth-tests as a physical body. The atmospheric
             glow and camera artifacts stay optical so nearby animated meshes
@@ -2182,18 +2445,18 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         <sprite ref={lensRingRef} renderOrder={-5.9} scale={[1, 1, 1]} visible={false} frustumCulled={false}>
           <spriteMaterial map={lensRingTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
         </sprite>
-        {/* Moon: cooler, smaller billboarded disc + soft halo. */}
-        <sprite ref={moonRef} renderOrder={-7} scale={[7, 7, 1]}>
+        {/* Moon: phase-lit cratered disc, earthshine, and layered atmospheric glow. */}
+        <sprite ref={moonRef} renderOrder={-7.1} scale={[9.5, 9.5, 1]}>
           <spriteMaterial map={moonDiscTexture} color="#dfe8f4" transparent opacity={0} depthWrite={false} depthTest fog={false} />
         </sprite>
-        <mesh ref={moonVeilRef} renderOrder={-6.95} scale={[18, 10, 1]} visible={false} frustumCulled={false}>
+        <mesh ref={moonVeilRef} renderOrder={-7.15} scale={[18, 10, 1]} visible={false} frustumCulled={false}>
           <planeGeometry args={[1, 1, 1, 1]} />
           <primitive object={moonVeilMaterial} attach="material" />
         </mesh>
-        <sprite ref={moonGlowRef} renderOrder={-7} scale={[22, 22, 1]}>
+        <sprite ref={moonGlowRef} renderOrder={-7.25} scale={[30, 30, 1]}>
           <spriteMaterial map={moonGlowTexture} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
-        <sprite ref={moonHaloRef} renderOrder={-7} scale={[38, 38, 1]} visible={false}>
+        <sprite ref={moonHaloRef} renderOrder={-7.3} scale={[38, 38, 1]} visible={false}>
           <spriteMaterial map={moonHaloTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <RainbowDome celestialRef={celestialRef} />

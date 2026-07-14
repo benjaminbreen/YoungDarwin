@@ -424,7 +424,7 @@ export function useTerrainChart(zone, variant = 'terrain') {
     if (!chartCache.has(key)) chartCache.set(key, bakeTerrainChart(zone, variant));
     setChartUrl(chartCache.get(key));
     return undefined;
-  }, [zone?.id, variant]);
+  }, [variant, zone]);
 
   return chartUrl;
 }

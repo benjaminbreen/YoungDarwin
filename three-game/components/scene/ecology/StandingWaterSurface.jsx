@@ -631,7 +631,15 @@ export function StandingWaterSurface({ surface }) {
       offRipple();
       offSplash();
     };
-  }, [maskFn, water]);
+  }, [
+    maskFn,
+    surface.rippleEventScale,
+    surface.splashRippleEventScale,
+    surface.stepRippleEventScale,
+    surface.stepRippleMaxIntensity,
+    surface.walkRippleEventScale,
+    water,
+  ]);
 
   useFrame(({ clock }) => {
     const time = clock.elapsedTime;

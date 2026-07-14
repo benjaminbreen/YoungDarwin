@@ -125,6 +125,14 @@ const {
   mobilityVelocityCaps,
 } = loadModule('three-game/physics/objectMobility.js');
 const {
+  carryGripForProp,
+  carryPlacementCandidates,
+  propHorizontalRadius,
+} = loadModule('three-game/components/player/carryProfiles.js');
+const {
+  PROP_TYPES,
+} = loadModule('three-game/physics/props/propTypes.js');
+const {
   getObstacleSupportHeight,
   getRuntimeObstacles,
   isWalkOverTraversalObstacle,
@@ -175,6 +183,10 @@ const {
   getRegionClimateBand,
   getRegionWeather,
 } = loadModule('three-game/world/weatherDirector.js');
+const {
+  createFaunaFrameScheduler,
+  faunaFrameTier,
+} = loadModule('three-game/fauna/faunaFrameScheduler.js');
 
 test('action suggestions prioritize safety, traps, specimens, and evidence', () => {
   const objectives = createDefaultObjectives();
@@ -225,6 +237,59 @@ test('deterministic choices are stable for prompt construction', () => {
   const items = ['university', 'beagle', 'childhood'];
   assert.equal(deterministicChoice(items, 'same prompt'), deterministicChoice(items, 'same prompt'));
   assert.equal(deterministicChoice([], 'same prompt'), null);
+});
+
+test('fauna scheduler assigns stable near, medium, and far distance tiers', () => {
+  assert.equal(faunaFrameTier(0), 'near');
+  assert.equal(faunaFrameTier(18 ** 2), 'near');
+  assert.equal(faunaFrameTier(18 ** 2 + 1), 'medium');
+  assert.equal(faunaFrameTier(48 ** 2), 'medium');
+  assert.equal(faunaFrameTier(48 ** 2 + 1), 'far');
+  assert.equal(faunaFrameTier(NaN), 'near');
+});
+
+test('fauna scheduler throttles distant actors while preserving accumulated world time', () => {
+  const scheduler = createFaunaFrameScheduler();
+  const mediumDeltas = [];
+  const farDeltas = [];
+  scheduler.register('medium', {
+    getPosition: () => ({ x: 24, z: 0 }),
+    update: frame => mediumDeltas.push(frame.delta),
+  });
+  scheduler.register('far', {
+    getPosition: () => ({ x: 64, z: 0 }),
+    update: frame => farDeltas.push(frame.delta),
+  });
+  const playerPose = { position: { x: 0, z: 0 } };
+
+  scheduler.run({ realElapsed: 0, worldElapsed: 0.02, worldDelta: 0.02, playerPose });
+  scheduler.run({ realElapsed: 0.05, worldElapsed: 0.07, worldDelta: 0.05, playerPose });
+  scheduler.run({ realElapsed: 0.09, worldElapsed: 0.11, worldDelta: 0.04, playerPose });
+  scheduler.run({ realElapsed: 0.5, worldElapsed: 0.52, worldDelta: 0.41, playerPose });
+
+  assert.equal(mediumDeltas.length, 3);
+  assert.ok(Math.abs(mediumDeltas[1] - 0.09) < 0.000001);
+  assert.ok(Math.abs(mediumDeltas[2] - 0.41) < 0.000001);
+  assert.equal(farDeltas.length, 2);
+  assert.ok(Math.abs(farDeltas[1] - 0.5) < 0.000001);
+});
+
+test('fauna scheduler keeps urgent actors frame-accurate and unregisters cleanly', () => {
+  const scheduler = createFaunaFrameScheduler();
+  let runs = 0;
+  const unregister = scheduler.register('urgent-far-actor', {
+    getPosition: () => ({ x: 120, z: 0 }),
+    shouldRunEveryFrame: () => true,
+    update: () => { runs += 1; },
+  });
+  const playerPose = { position: { x: 0, z: 0 } };
+  scheduler.run({ realElapsed: 0, worldDelta: 0.016, playerPose });
+  scheduler.run({ realElapsed: 0.016, worldDelta: 0.016, playerPose });
+  scheduler.run({ realElapsed: 0.032, worldDelta: 0.016, playerPose });
+  assert.equal(runs, 3);
+  assert.equal(scheduler.size(), 1);
+  unregister();
+  assert.equal(scheduler.size(), 0);
 });
 
 test('rock sample targeting chooses the nearest forward sampleable outcrop', () => {
@@ -293,6 +358,36 @@ test('mobility velocity caps keep strike movement distinct from walk contact', (
   const capped = capHorizontalVelocity({ x: 3, y: -1, z: 4 }, caps.horizontalMaxSpeed);
   assert.ok(Math.hypot(capped.x, capped.z) <= caps.horizontalMaxSpeed + 0.000001);
   assert.equal(capped.y, -1);
+});
+
+test('campaign stools use a responsive one-hand skeletal grip at authored scale', () => {
+  const stool = PROP_TYPES.lawsonCampaignStool;
+  const grip = carryGripForProp(stool);
+  assert.equal(grip.mode, 'rightHand');
+  assert.equal(grip.animationStyle, 'freeHand');
+  assert.deepEqual(grip.offset, [0.13, 0, 0.02]);
+  assert.equal(grip.scale, 1);
+  assert.ok(propHorizontalRadius(stool) > 0.4);
+});
+
+test('carry drop candidates start grounded beyond the player collider', () => {
+  const stool = PROP_TYPES.lawsonCampaignStool;
+  const playerRadius = 0.36;
+  const candidates = carryPlacementCandidates({
+    prop: stool,
+    player: { x: 4, y: 2, z: 7 },
+    facing: { x: 0, z: -1 },
+    playerRadius,
+    terrainHeight: (x, z) => 1.5 + x * 0.01 + z * 0.005,
+  });
+  const first = candidates[0];
+  const horizontalDistance = Math.hypot(first.position.x - 4, first.position.z - 7);
+  assert.ok(horizontalDistance >= playerRadius + propHorizontalRadius(stool) + 0.17);
+  assert.equal(first.position.x, 4);
+  assert.ok(first.position.z < 7);
+  assert.ok(Math.abs(first.position.y - (1.5 + first.position.x * 0.01 + first.position.z * 0.005 + 0.335)) < 0.000001);
+  assert.deepEqual(first.rotation, [0, Math.PI, 0]);
+  assert.equal(candidates.length, 24);
 });
 
 test('procedural rock obstacles share visual bounds and traversal support', () => {

@@ -36,8 +36,10 @@ export const PLAYER = {
 // tiring, crouching, aiming) spools back down.
 export const SPRINT = {
   spoolTime: 1.15,      // seconds of sustained near-max running before sprint engages
-  speedScale: 1.06,     // sprint ground-speed multiplier over runSpeed
-  fovBonus: 5,          // degrees of FOV widen at full sprint
+  speedScale: 1.12,     // sprint ground-speed multiplier over runSpeed
+  fovBonus: 8,          // degrees of FOV widen at full sprint
+  surgeFov: 2.6,        // extra FOV pop (degrees) the moment sprint engages
+  surgeDuration: 0.6,   // seconds for the engage pop to swell and settle
   minSpeedRatio: 0.8,   // fraction of runSpeed that counts as sprint effort
 };
 

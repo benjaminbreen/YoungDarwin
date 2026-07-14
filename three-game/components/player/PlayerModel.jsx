@@ -14,6 +14,9 @@ import { darwin5ClipDuration } from './darwin5AnimationManifest.mjs';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
 import { isInteriorZone } from '../../interiors/interiorRegistry';
+import { CarriedPropAttachment } from './CarriedPropAttachment';
+import { getZoneProps } from '../../physics/props/propRegistry';
+import { carryGripForProp } from './carryProfiles';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -704,7 +707,7 @@ function HandLamp({ scene, modelAssetId }) {
     const hour = state.timeOfDay ?? 12;
     const night = lampNightFactor(hour);
     const leftHandToolActive = HAND_TOOLS.some(tool => tool.hand === 'left' && tool.toolId === state.activeToolId);
-    if (night <= 0.02 || leftHandToolActive) {
+    if (night <= 0.02 || leftHandToolActive || state.carriedObjectId) {
       if (group.visible) group.visible = false;
       if (lightRef.current) lightRef.current.intensity = 0;
       return;
@@ -819,7 +822,9 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     const group = groupRef.current;
     if (!group) return;
     const storeState = useThreeGameStore.getState();
-    const visible = storeState.activeToolId === resolvedConfig.toolId;
+    const visible = storeState.activeToolId === resolvedConfig.toolId
+      && !storeState.carriedObjectId
+      && motionRef?.current?.action !== 'pickUp';
     if (group.visible !== visible) group.visible = visible;
     if (!visible) return;
     const bone = group.parent;
@@ -1014,11 +1019,27 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (Math.abs(next - damageFlash) > 0.025) setDamageFlash(next);
   });
 
-  // Upper-body aim layer: forward aim-walk has its own full-body clip
-  // (aimWalk), so the masked overlay only covers strafes and backpedal,
-  // holding the shouldered aimIdle pose over those leg cycles.
-  const selectAimOverlay = useCallback(() => {
+  // Upper-body overlays keep locomotion rooted in the controller-safe gait.
+  // In particular, walkCarry contains 1.745m of source root translation, so
+  // it may only contribute torso/arm tracks and must never own Darwin's hips.
+  const selectUpperBodyOverlay = useCallback(() => {
     const m = motionRef.current;
+    const gameState = useThreeGameStore.getState();
+    const carriedProp = gameState.carriedObjectId
+      ? getZoneProps(gameState.currentZoneId).find(prop => prop.id === gameState.carriedObjectId)
+      : null;
+    const fixedHandsCarry = Boolean(carriedProp)
+      && carryGripForProp(carriedProp).animationStyle === 'fixedHands';
+    const carryingWhileMoving = fixedHandsCarry
+      && (m.walking || m.running || m.movingBackward || m.strafeLeft || m.strafeRight)
+      && !m.action
+      && !m.crouching
+      && !m.airborne
+      && !m.swimming;
+    if (carryingWhileMoving) return { clip: 'walkCarry', active: true };
+
+    // Forward aim-walk has its own full-body clip (aimWalk), so the masked
+    // aim overlay only covers strafes and backpedal.
     const lateral = m.strafeLeft || m.strafeRight || m.movingBackward;
     return {
       clip: 'aimIdle',
@@ -1029,7 +1050,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
         && !m.crouching
         && !m.airborne
         && !m.swimming
-        && useThreeGameStore.getState().activeToolId === 'shotgun',
+        && gameState.activeToolId === 'shotgun',
       ),
     };
   }, [motionRef]);
@@ -1043,15 +1064,29 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     const stride = (clip, scale) => calibratedStrideTimeScale(modelAssetId, clip, scale);
     const gameState = useThreeGameStore.getState();
     const toolId = gameState.activeToolId;
-    const holdingTool = toolId === 'insect_net' || toolId === 'snare' || toolId === 'hammer';
-    const hasRifle = toolId === 'shotgun';
     const carryingObject = Boolean(gameState.carriedObjectId);
-    const lampMode = modelAssetId === 'darwin5' && !hasRifle && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
+    const carriedProp = carryingObject
+      ? getZoneProps(gameState.currentZoneId).find(prop => prop.id === gameState.carriedObjectId)
+      : null;
+    const freeHandCarry = Boolean(carriedProp)
+      && carryGripForProp(carriedProp).animationStyle === 'freeHand';
+    const holdingTool = !carryingObject && (toolId === 'insect_net' || toolId === 'snare' || toolId === 'hammer');
+    const hasRifle = !carryingObject && toolId === 'shotgun';
+    const lampMode = modelAssetId === 'darwin5'
+      && !carryingObject
+      && !hasRifle
+      && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
     const heldToolMode = modelAssetId === 'darwin5' && holdingTool;
     const torchMode = modelAssetId === 'darwin5' && !hasRifle && !heldToolMode && lampMode;
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
     if (motionRef.current.action) {
+      if (modelAssetId === 'darwin5' && motionRef.current.action === 'pickUp') {
+        // The source clip contains a long lead-in and recovery. Retiming the
+        // useful reach/lift section lets the item attach near hand contact and
+        // arrive naturally at the existing carry pose without a new animation.
+        return { clip: 'pickUp', timeScale: 2.15, fade: 0.08, maxTime: 2.95 };
+      }
       if (modelAssetId === 'darwin5' && hasRifle) {
         const rifleAction = darwin5RifleActionClip(motionRef.current.action, motionRef.current.crouching);
         if (rifleAction) return rifleAction;
@@ -1270,14 +1305,13 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
     if (motionRef.current.walking) {
       if (groundPitch > STAIR_PITCH) return { clip: 'walkUpStairs', timeScale: stride('walk', walkScale) };
       if (groundPitch < -STAIR_PITCH) return { clip: 'descendStairs', timeScale: stride('walk', walkScale) };
-      if (carryingObject) return { clip: 'walkCarry', timeScale: stride('walkCarry', Math.max(0.68, walkScale * 0.92)) };
       if (motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue) return { clip: 'tiredWalk', timeScale: stride('tiredWalk', Math.max(0.66, walkScale * 0.92)) };
       return { clip: 'walk', timeScale: stride('walk', walkScale) };
     }
     if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
     if (injured) return 'injuredIdle';
     if (hasRifle) return 'rifleIdle';
-    if (carryingObject) return 'holdIdle';
+    if (carryingObject && !freeHandCarry) return 'holdIdle';
     if (torchMode) return 'torchIdle';
     if (heldToolMode) return 'holdToolIdle';
     if (holdingTool) return 'holdIdle';
@@ -1300,7 +1334,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
         key={modelAssetId}
         id={modelAssetId}
         animationSelector={selectAnimation}
-        overlaySelector={selectAimOverlay}
+        overlaySelector={selectUpperBodyOverlay}
         damageFlash={damageFlash}
         reflect
         onSceneReady={setModelScene}
@@ -1311,6 +1345,7 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
       {modelScene && HAND_TOOLS.map(tool => (
         <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} motionRef={motionRef} />
       ))}
+      {modelScene && <CarriedPropAttachment scene={modelScene} />}
     </>
   );
 }

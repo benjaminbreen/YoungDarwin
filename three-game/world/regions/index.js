@@ -1,3 +1,13 @@
+// @ts-check
+
+/**
+ * @typedef {Record<string, unknown> & {
+ *   id: string,
+ *   aliases?: string[],
+ *   createTerrainMaterial: () => import('three').Material,
+ * }} AuthoredRegionDefinition
+ */
+
 import { postOfficeBayRegion } from './postOfficeBay/terrain';
 import { createPostOfficeBayTerrainMaterial } from './postOfficeBay/material';
 import { altPostOfficeBayRegion } from './altPostOfficeBay/terrain';
@@ -52,7 +62,10 @@ import { lawsonHouseRegion } from './lawsonHouse/terrain';
 import { createLawsonHouseTerrainMaterial } from './lawsonHouse/material';
 import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
+import { postScrubRiseRegion } from './postScrubRise/terrain';
+import { createPostScrubRiseTerrainMaterial } from './postScrubRise/material';
 
+/** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
   { ...postOfficeBayRegion, createTerrainMaterial: createPostOfficeBayTerrainMaterial },
   { ...altPostOfficeBayRegion, createTerrainMaterial: createAltPostOfficeBayTerrainMaterial },
@@ -81,8 +94,10 @@ const authoredRegions = [
   { ...beagleCabinRegion, createTerrainMaterial: createBeagleCabinTerrainMaterial },
   { ...lawsonHouseRegion, createTerrainMaterial: createLawsonHouseTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
+  { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
 ];
 
+/** @type {Map<string, AuthoredRegionDefinition>} */
 const regionById = new Map();
 
 for (const region of authoredRegions) {
@@ -92,14 +107,20 @@ for (const region of authoredRegions) {
   }
 }
 
+/**
+ * @param {string} [regionId]
+ * @returns {AuthoredRegionDefinition | null}
+ */
 export function getRegionDefinition(regionId = 'POST_OFFICE_BAY') {
   return regionById.get(regionId) || null;
 }
 
+/** @param {string} [regionId] */
 export function isAuthoredRegion(regionId = 'POST_OFFICE_BAY') {
   return Boolean(getRegionDefinition(regionId));
 }
 
+/** @param {string} regionId */
 export function getAuthoredRegionMetadata(regionId) {
   const definition = getRegionDefinition(regionId);
   if (!definition) return null;

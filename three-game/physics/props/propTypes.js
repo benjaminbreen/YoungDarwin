@@ -527,7 +527,14 @@ export const PROP_TYPES = {
     angularDamping: 3.2,
     behaviors: {
       mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.34, rotationPolicy: 'resistTipping', angularMax: 0.45 },
-      carryable: { release: 0.3, holdOffset: [0.2, 0.92, 0.16], holdRotation: [0.08, -0.08, -0.18] },
+      carryable: {
+        release: 0.3,
+        holdOffset: [0.2, 0.92, 0.16],
+        holdRotation: [0.08, -0.08, -0.18],
+        grip: 'rightHand',
+        gripOffset: [0.13, 0, 0.02],
+        animationStyle: 'freeHand',
+      },
       strikeable: { tool: 'hammer', impulse: 4.5 },
     },
   },
@@ -630,8 +637,8 @@ export const PROP_TYPES = {
   },
   lawsonDiningChair: {
     label: 'dining chair', visual: 'cabinChair', visualAsset: 'lawsonDiningChair',
-    visualOffsetY: -0.69, fixed: true,
-    collider: { shape: 'cuboid', halfExtents: [0.36, 0.68, 0.34] }, restOffset: 0.69,
+    visualOffsetY: -0.55, fixed: true,
+    collider: { shape: 'cuboid', halfExtents: [0.31, 0.54, 0.29] }, restOffset: 0.55,
     mass: 19, friction: 2.3, restitution: 0, linearDamping: 4, angularDamping: 4.2,
     behaviors: { mobility: { mode: 'push', assistSpeed: 0.17, maxSpeed: 0.28, contactMaxSpeed: 0.28, rotationPolicy: 'resistTipping', angularMax: 0.34, groundedExtraDamping: 0.82 } },
   },
@@ -640,7 +647,17 @@ export const PROP_TYPES = {
     visualOffsetY: -0.3,
     collider: { shape: 'cuboid', halfExtents: [0.32, 0.29, 0.25] }, restOffset: 0.3,
     mass: 8, friction: 1.9, restitution: 0, linearDamping: 3, angularDamping: 3,
-    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.34, rotationPolicy: 'resistTipping', angularMax: 0.45 }, carryable: { release: 0.28, holdOffset: [0.2, 0.92, 0.16], holdRotation: [0.08, -0.08, -0.18] } },
+    behaviors: {
+      mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.34, rotationPolicy: 'resistTipping', angularMax: 0.45 },
+      carryable: {
+        release: 0.28,
+        holdOffset: [0.2, 0.92, 0.16],
+        holdRotation: [0.08, -0.08, -0.18],
+        grip: 'rightHand',
+        gripOffset: [0.13, 0, 0.02],
+        animationStyle: 'freeHand',
+      },
+    },
   },
   lawsonRumBottle: {
     label: 'rum bottle', visual: 'jug', visualAsset: 'lawsonRumBottle',

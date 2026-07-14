@@ -372,7 +372,7 @@ export function SurfaceLitterField({ layer, zoneId }) {
   const bucketRefs = useRef([]);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const effectiveZoneId = layer.zoneId || zoneId;
-  const items = layer.items || [];
+  const items = useMemo(() => layer.items || [], [layer.items]);
   const resources = useMemo(() => makeVariantResources(), []);
   const buckets = useMemo(
     () => buildBuckets(items, layer.maxVisibleDistance ?? 42),

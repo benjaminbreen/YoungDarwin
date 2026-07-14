@@ -112,8 +112,18 @@ export const POST_OFFICE_BAY_TRAIL = [
   [-58, 6, 2.1],
 ];
 
+// The inland fork continues to the south transition seam so the visible route
+// actually joins Post Office Scrub Rise. The older west branch remains as a
+// secondary trail through the bay's lava shelf.
+export const POST_OFFICE_BAY_SCRUB_TRAIL = [
+  [-9, 28, 2.3],
+  [-10, 39, 2.05],
+  [-8, 49, 1.9],
+  [-7, 59, 1.78],
+];
+
 export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 3.0, z: 2.5, radius: 4.8 };
-export const POST_OFFICE_BAY_PATH_POINTS = POST_OFFICE_BAY_TRAIL;
+export const POST_OFFICE_BAY_PATH_POINTS = [POST_OFFICE_BAY_TRAIL, POST_OFFICE_BAY_SCRUB_TRAIL];
 
 function pathSegmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
   const abx = bx - ax;
@@ -137,11 +147,13 @@ function pathSegmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
 
 export function postOfficePathInfo(x, z) {
   let nearest = null;
-  for (let i = 0; i < POST_OFFICE_BAY_PATH_POINTS.length - 1; i += 1) {
-    const [ax, az, aw] = POST_OFFICE_BAY_PATH_POINTS[i];
-    const [bx, bz, bw] = POST_OFFICE_BAY_PATH_POINTS[i + 1];
-    const info = pathSegmentInfo(x, z, ax, az, aw, bx, bz, bw);
-    if (!nearest || info.distance < nearest.distance) nearest = info;
+  for (const polyline of POST_OFFICE_BAY_PATH_POINTS) {
+    for (let i = 0; i < polyline.length - 1; i += 1) {
+      const [ax, az, aw] = polyline[i];
+      const [bx, bz, bw] = polyline[i + 1];
+      const info = pathSegmentInfo(x, z, ax, az, aw, bx, bz, bw);
+      if (!nearest || info.distance < nearest.distance) nearest = info;
+    }
   }
   const edgeNoise = Math.sin(nearest.centerX * 0.23 + nearest.centerZ * 0.17) * 0.2
     + Math.sin(nearest.centerX * 0.09 - nearest.centerZ * 0.31) * 0.14
@@ -164,10 +176,12 @@ export function postOfficePathInfo(x, z) {
 
 export function postOfficeTrailInfluence(x, z, width = 3.2, feather = 7.5) {
   let nearest = Infinity;
-  for (let i = 0; i < POST_OFFICE_BAY_TRAIL.length - 1; i += 1) {
-    const a = POST_OFFICE_BAY_TRAIL[i];
-    const b = POST_OFFICE_BAY_TRAIL[i + 1];
-    nearest = Math.min(nearest, pointSegmentDistance(x, z, a[0], a[1], b[0], b[1]));
+  for (const polyline of POST_OFFICE_BAY_PATH_POINTS) {
+    for (let i = 0; i < polyline.length - 1; i += 1) {
+      const a = polyline[i];
+      const b = polyline[i + 1];
+      nearest = Math.min(nearest, pointSegmentDistance(x, z, a[0], a[1], b[0], b[1]));
+    }
   }
   return 1 - THREE.MathUtils.smoothstep(nearest, width, feather);
 }
@@ -352,5 +366,11 @@ export const postOfficeBayRegion = {
     color: postOfficeTerrainColor,
     isWalkable: isPostOfficeWalkable,
     defaultSpawn: [11.4, 0, 6.1],
+    entrySpawns: {
+      south: [-7, 0, 53],
+    },
+    entryFacings: {
+      south: [0, 0, -1],
+    },
   },
 };

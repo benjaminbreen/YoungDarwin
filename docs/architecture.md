@@ -161,6 +161,10 @@ props.
   wildlife catalog.
 - `three-game/fauna/faunaMotionController.js`: steering state.
 - `three-game/fauna/useFaunaBehavior.js`: React integration.
+- `three-game/fauna/FaunaFrameScheduler.jsx`: one shared R3F frame callback for
+  specimen behavior and actor presentation.
+- `three-game/fauna/faunaFrameScheduler.js`: distance tiers, accumulated-time
+  scheduling, and the testable task registry.
 - `three-game/fauna/specimenCollision.js`: dynamic specimen collision.
 - `three-game/world/specimenRuntime.js`: runtime specimen pose publication.
 - `three-game/playable/playableModes.js`: Darwin, finch, and tortoise playable
@@ -169,6 +173,12 @@ props.
 If an animated specimen disappears after behavior changes, first verify
 `SpecimenActor` renders the model at the authored/base pose before applying
 motion.
+
+Specimen behavior and actor transforms are scheduled by player distance: near
+actors update every rendered frame, medium actors at 12 Hz, and far actors at
+2 Hz. Carried, snared, and downed actors remain frame-accurate. GLB animation
+mixers retain their separate visual LOD path in `ModelAsset.jsx`, so throttling
+world simulation does not make nearby animation playback less smooth.
 
 ## UI, HUD, And APIs
 

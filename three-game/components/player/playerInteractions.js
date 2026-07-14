@@ -94,6 +94,8 @@ function arrivalEdgeSuppressesPrompt(block, regionId, position, promptPayload) {
 
 const GROUND_GATHER_MAX_HEIGHT = 0.82;
 const LOW_INSPECT_MAX_HEIGHT = 0.46;
+const CARRY_PICKUP_ATTACH_DELAY = 0.88;
+const CARRY_PICKUP_CANCEL_DELAY = 1.5;
 const SPECIMEN_INTERACTION_HEIGHT = {
   basalt: 0.28,
   barnacle: 0.12,
@@ -230,6 +232,22 @@ export function updatePlayerInteractions({
       }
     : null;
   const storeState = useThreeGameStore.getState();
+  const interactionNow = performance.now() / 1000;
+  const pendingCarryPickup = stateRef.current.pendingCarryPickup;
+  if (pendingCarryPickup) {
+    if (storeState.carriedObjectId === pendingCarryPickup.id) {
+      stateRef.current.pendingCarryPickup = null;
+    } else if (currentZoneId !== pendingCarryPickup.zoneId
+      || interactionNow >= pendingCarryPickup.cancelAt
+      || (stateRef.current.action && stateRef.current.action !== 'pickUp')) {
+      stateRef.current.pendingCarryPickup = null;
+    } else if (interactionNow >= pendingCarryPickup.attachAt) {
+      // Switch render/physics ownership at hand contact, not at key-down. The
+      // skeletal attachment then rides the remainder of the lift animation.
+      setCarriedObject(pendingCarryPickup.id);
+      stateRef.current.pendingCarryPickup = null;
+    }
+  }
   const nearbyNpcEncounter = getNearestNpcEncounter(currentZoneId, position);
   if ((storeState.nearbyNpcEncounter?.npcId || null) !== (nearbyNpcEncounter?.npcId || null)) {
     storeState.setNearbyNpcEncounter?.(nearbyNpcEncounter);
@@ -452,8 +470,13 @@ export function updatePlayerInteractions({
       } else if (currentState.carryPrompt.mode === 'pickup') {
         if (!stateRef.current.action) {
           startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });
+          stateRef.current.pendingCarryPickup = {
+            id: currentState.carryPrompt.id,
+            zoneId: currentZoneId,
+            attachAt: interactionNow + CARRY_PICKUP_ATTACH_DELAY,
+            cancelAt: interactionNow + CARRY_PICKUP_CANCEL_DELAY,
+          };
         }
-        setCarriedObject(currentState.carryPrompt.id);
       }
     } else if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
       setNearbySpecimen(null);

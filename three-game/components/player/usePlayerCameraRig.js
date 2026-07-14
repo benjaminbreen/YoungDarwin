@@ -54,6 +54,9 @@ export function usePlayerCameraRig() {
   const wasAimingRef = useRef(false);
   const adsBlendRef = useRef(0);
   const sprintBlendRef = useRef(0);
+  const sprintSurgeAtRef = useRef(-10);
+  const prevSprintTRef = useRef(0);
+  const skidRollRef = useRef(0);
   const baseFovRef = useRef(null);
   const firePulseRef = useRef(0);
   const dragPointerTypeRef = useRef('mouse');
@@ -274,6 +277,8 @@ export function usePlayerCameraRig() {
     flying = false,
     flightSpeedT = 0,
     sprintT = 0,
+    skidRoll = 0,
+    moveSpeedT = 0,
     cameraProfile = null,
     now,
     delta,
@@ -296,6 +301,16 @@ export function usePlayerCameraRig() {
       sprintBlendRef.current,
       THREE.MathUtils.clamp(sprintT, 0, 1),
       sprintT > sprintBlendRef.current ? 4.5 : 6,
+      delta,
+    );
+    // Surge: catch the moment the sprint tier engages for a one-shot FOV pop.
+    if (sprintT > 0.5 && prevSprintTRef.current <= 0.05) sprintSurgeAtRef.current = now;
+    prevSprintTRef.current = sprintT;
+    // Skid roll: lean the frame into hard turns, damped so it breathes.
+    skidRollRef.current = THREE.MathUtils.damp(
+      skidRollRef.current,
+      THREE.MathUtils.clamp(skidRoll, -1, 1) * 0.045,
+      8,
       delta,
     );
     const openingCameraActive = Boolean(openingCamera?.active);
@@ -556,6 +571,24 @@ export function usePlayerCameraRig() {
       camera.rotation.order = 'YXZ';
       camera.rotation.set(-Math.PI / 2, yawRef.current, 0);
     } else {
+      // Hero view auto-follow: the camera lazily swings around behind Darwin
+      // as he moves, harder the faster he goes, so steering never needs a
+      // manual orbit. A recent drag (manualOrbitUntilRef) or aiming wins, and
+      // standing still frees the camera entirely for framing shots.
+      if (viewMode === 'hero' && !flightCamera && !aiming && now >= manualOrbitUntilRef.current && facing) {
+        const followT = THREE.MathUtils.clamp(moveSpeedT, 0, 1);
+        const fx = facing.x;
+        const fz = facing.z;
+        if (followT > 0.04 && fx * fx + fz * fz > 0.0001) {
+          const targetYaw = Math.atan2(-fx, -fz);
+          const yawError = Math.atan2(Math.sin(targetYaw - yawRef.current), Math.cos(targetYaw - yawRef.current));
+          const followRate = 1.2 + followT * 2.2 + sprintBlendRef.current * 0.8;
+          yawRef.current += yawError * (1 - Math.exp(-followRate * delta));
+          // Pitch settles toward the hero default while moving, so a glance
+          // at the sky or the ground recovers on its own once he runs.
+          pitchRef.current = THREE.MathUtils.damp(pitchRef.current, 0.3, followT, delta);
+        }
+      }
       const cameraForward = scratch.cameraForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const cameraRight = scratch.cameraRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       const swimDistanceBias = SWIM_POLISH.enabled ? swimCamera * SWIM_POLISH.cameraDistanceBias : swimCamera;
@@ -587,13 +620,31 @@ export function usePlayerCameraRig() {
         ?? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.6, 1.5, zoomT), 0.72, swimSideBias);
       const pitchA = THREE.MathUtils.clamp(pitchRef.current, CAMERA.minPitch, CAMERA.maxPitch);
       const swimPitchBias = SWIM_POLISH.enabled ? SWIM_POLISH.cameraPitchBias : 0.92;
-      const effectivePitch = flightCamera?.pitch != null
+      let effectivePitch = flightCamera?.pitch != null
         ? THREE.MathUtils.lerp(flightCamera.pitch, pitchA, manualOrbitBlend)
         : THREE.MathUtils.lerp(pitchA, -0.12, swimCamera * swimPitchBias);
+      // Hero view: tight over-the-right-shoulder action framing. Narrow zoom
+      // band, chest-high pivot, shallower default pitch, snappier follow, and
+      // a slight pull-back as sprint spools so speed reads in the framing.
+      const heroMode = viewMode === 'hero' && !flightCamera;
+      let frameDistance = cameraDistance;
+      let frameSide = side;
+      if (heroMode) {
+        frameDistance = THREE.MathUtils.clamp(zoomRef.current * 0.55, 2.3, 4.4)
+          + sprintBlendRef.current * 0.55
+          + swimDistanceBias * 0.6;
+        frameSide = 0.5;
+        effectivePitch = THREE.MathUtils.lerp(
+          THREE.MathUtils.clamp(pitchA * 0.82 - 0.02, -0.36, 1.0),
+          -0.12,
+          swimCamera * swimPitchBias,
+        );
+      }
       // Smooth the pivot itself: looking straight at the raw player position
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
       const rawPivot = scratch.rawPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, flightCamera?.pivotY ?? pivotY, 0)).add(panOffsetRef.current);
+      if (heroMode) rawPivot.y += 0.2;
       if (swimCamera > 0.001) {
         rawPivot.y = THREE.MathUtils.lerp(
           rawPivot.y,
@@ -605,14 +656,15 @@ export function usePlayerCameraRig() {
         shoulderPivotRef.current = rawPivot.clone();
       }
       const pivot = shoulderPivotRef.current;
-      pivot.x = THREE.MathUtils.damp(pivot.x, rawPivot.x, 9, delta);
-      pivot.y = THREE.MathUtils.damp(pivot.y, rawPivot.y, 9, delta);
-      pivot.z = THREE.MathUtils.damp(pivot.z, rawPivot.z, 9, delta);
-      const horiz = Math.cos(effectivePitch) * cameraDistance;
-      const vert = Math.sin(effectivePitch) * cameraDistance;
+      const pivotDamp = heroMode ? 13 : 9;
+      pivot.x = THREE.MathUtils.damp(pivot.x, rawPivot.x, pivotDamp, delta);
+      pivot.y = THREE.MathUtils.damp(pivot.y, rawPivot.y, pivotDamp, delta);
+      pivot.z = THREE.MathUtils.damp(pivot.z, rawPivot.z, pivotDamp, delta);
+      const horiz = Math.cos(effectivePitch) * frameDistance;
+      const vert = Math.sin(effectivePitch) * frameDistance;
       const eye = scratch.shoulderEye.copy(pivot)
         .add(cameraForward.multiplyScalar(-horiz))
-        .add(cameraRight.multiplyScalar(side))
+        .add(cameraRight.multiplyScalar(frameSide))
         .add(scratch.panVertical.set(0, vert, 0));
       let lookTarget = pivot;
       if (flightCamera && finchDroppingCamera && now < finchDroppingCamera.until) {
@@ -640,7 +692,7 @@ export function usePlayerCameraRig() {
         }
       }
       const adsBlend = adsBlendRef.current;
-      let positionDamping = flightCamera?.positionDamping ?? 6.5;
+      let positionDamping = flightCamera?.positionDamping ?? (heroMode ? 12 : 6.5);
       if (adsBlend > 0.001) {
         // Over-the-shoulder aim framing: close, offset to the right, pitched
         // with the aim. Deterministic from yaw/pitch, so a high damping keeps
@@ -677,6 +729,7 @@ export function usePlayerCameraRig() {
       }
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-positionDamping * delta));
       camera.lookAt(lookTarget);
+      if (Math.abs(skidRollRef.current) > 0.0005) camera.rotateZ(skidRollRef.current);
     }
     if (!statusViewOpen && !focusSession && statusLookRef.current) {
       const ease = 1 - Math.exp(-3.2 * delta);
@@ -687,8 +740,12 @@ export function usePlayerCameraRig() {
     // ADS field-of-view tighten (wins over the sprint widen), plus the
     // crosshair ray for the resolver.
     if (baseFovRef.current === null) baseFovRef.current = camera.fov;
+    const surgeAge = now - sprintSurgeAtRef.current;
+    const surgePop = surgeAge >= 0 && surgeAge < SPRINT.surgeDuration
+      ? Math.sin((surgeAge / SPRINT.surgeDuration) * Math.PI) * SPRINT.surgeFov
+      : 0;
     const targetFov = THREE.MathUtils.lerp(baseFovRef.current, SHOTGUN.ads.fov, adsBlendRef.current)
-      + sprintBlendRef.current * SPRINT.fovBonus * (1 - adsBlendRef.current);
+      + (sprintBlendRef.current * SPRINT.fovBonus + surgePop) * (1 - adsBlendRef.current);
     if (Math.abs(camera.fov - targetFov) > 0.02) {
       camera.fov = targetFov;
       camera.updateProjectionMatrix();

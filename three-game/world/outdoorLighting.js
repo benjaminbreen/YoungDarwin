@@ -58,7 +58,7 @@ export function computeOutdoorLightRig({
   const hemiIntensity = Math.max(
     0.16,
     (0.32
-      + d * (0.84 + weatherSoftness * 0.58 - g * 0.25 - hardSun * 0.34 - clearVivid * 0.06)
+      + d * (0.84 + weatherSoftness * 0.58 - g * 0.25 - hardSun * 0.42 - clearVivid * 0.06)
       + cloud * 0.08)
       * (1 - dim * 0.18)
       * (1 - underwater * 0.2),
@@ -75,7 +75,7 @@ export function computeOutdoorLightRig({
   const fillIntensity = Math.max(
     0.04,
     (0.12
-      + d * (0.1 + weatherSoftness * 0.38 + g * 0.13 - hardSun * 0.17 - clearVivid * 0.04))
+      + d * (0.1 + weatherSoftness * 0.38 + g * 0.13 - hardSun * 0.21 - clearVivid * 0.04))
       * (1 - dim * 0.32)
       * (1 - underwater * 0.34),
   );
@@ -97,8 +97,8 @@ export function computeOutdoorLightRig({
   // readable fill rather than crushing to full black. Low raking sun casts
   // *stronger* shadows, not weaker — goldenSideLight adds here.
   const shadowIntensity = Math.min(
-    0.72,
-    clamp01(0.68 - weatherSoftness * 0.38 + goldenSideLight * 0.12 + hardSun * 0.08 + clearVivid * 0.03),
+    0.78,
+    clamp01(0.7 - weatherSoftness * 0.38 + goldenSideLight * 0.12 + hardSun * 0.12 + clearVivid * 0.03),
   );
   const shadowNormalBias = lerp(0.018, 0.032, clamp01(lowSun * 0.68 + weatherSoftness * 0.32));
   const shadowBias = lerp(-0.00013, -0.00006, weatherSoftness);

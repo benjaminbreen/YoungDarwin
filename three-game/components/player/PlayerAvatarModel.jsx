@@ -34,7 +34,7 @@ function pickTortoiseEatClip(avatar, motion, now) {
 
 function AnimalPlayerModel({ mode, profile, motionRef }) {
   const groupRef = useRef(null);
-  const avatar = profile.avatar || {};
+  const avatar = useMemo(() => profile.avatar || {}, [profile.avatar]);
   const proceduralTortoise = mode.id === 'tortoise' && avatar.render === 'procedural';
   const activeAssetId = proceduralTortoise ? 'proceduralTortoise' : mode.assetId;
   const tortoiseSelector = useRef({

@@ -98,7 +98,7 @@ export function computeArcadeLocomotion({
   state.skid = Math.max(skidPulse, Math.max(0, state.skid - delta * 5));
   state.pivotBurst = Math.max(pivotBurst, Math.max(0, state.pivotBurst - delta * 6));
 
-  const baseDownhillBoost = running ? 0.14 : 0.08;
+  const baseDownhillBoost = running ? 0.2 : 0.1;
   const speedScale = 1
     + downhill * baseDownhillBoost * traction.downhill
     + state.scramble * 0.06;

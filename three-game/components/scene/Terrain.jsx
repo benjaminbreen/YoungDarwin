@@ -173,7 +173,6 @@ function injectSeabedCaustics(material) {
 
 export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const regionDefinition = getRegionDefinition(currentZoneId);
   const geometryEntry = useMemo(
     () => getCachedTerrainGeometry(currentZoneId, segmentCap),
@@ -194,7 +193,7 @@ export function Terrain({ segmentCap = null }) {
       ? regionDefinition.createTerrainMaterial()
       : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
     return injectSeabedCaustics(baseMaterial);
-  }, [regionDefinition, currentZoneId, cheapMaterials]);
+  }, [regionDefinition, currentZoneId]);
 
   // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {
@@ -245,8 +244,14 @@ export function Terrain({ segmentCap = null }) {
       renderKind: 'terrain',
       renderPath: null,
     }}>
+      {/* The heightfield crosses the water plane and surrounds the camera. A
+          planar mirror camera sees its clipped underside/outer edge as a huge
+          dark silhouette, which ripple distortion turns into an animated
+          black band. Keep planar reflections for ships and authored objects;
+          the water's analytic sky/sun reflection supplies the broad terrain
+          sheen without putting this plane-intersecting mesh in the mirror. */}
       <mesh geometry={geometry} material={material} receiveShadow userData={{
-        reflect: true,
+        noReflect: true,
         renderSource: `terrain:${currentZoneId}:heightfield`,
         renderLabel: `${currentZoneId} terrain heightfield`,
         renderKind: 'terrain',

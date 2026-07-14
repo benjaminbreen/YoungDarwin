@@ -96,10 +96,10 @@
     }
   ],
   "propSpawns": [
-    { "id": "lawson-dining-chair-west", "type": "lawsonDiningChair", "x": -4.2, "y": 0.69, "z": 2.05, "rotation": [0, 1.57, 0] },
-    { "id": "lawson-dining-chair-east", "type": "lawsonDiningChair", "x": -0.5, "y": 0.69, "z": 2.05, "rotation": [0, -1.57, 0] },
-    { "id": "lawson-dining-chair-north", "type": "lawsonDiningChair", "x": -2.35, "y": 0.69, "z": 3.15, "rotation": [0, 3.14, 0] },
-    { "id": "lawson-campaign-stool", "type": "lawsonCampaignStool", "x": -7.15, "y": 0.3, "z": 5.45, "rotation": [0, -0.35, 0] },
+    { "id": "lawson-dining-chair-west", "type": "lawsonDiningChair", "x": -4.0, "y": 0.55, "z": 1.92, "rotation": [0, 1.48, 0] },
+    { "id": "lawson-dining-chair-east", "type": "lawsonDiningChair", "x": -0.7, "y": 0.55, "z": 2.14, "rotation": [0, -1.68, 0] },
+    { "id": "lawson-dining-chair-north", "type": "lawsonDiningChair", "x": -2.25, "y": 0.55, "z": 3.34, "rotation": [0, 3.02, 0] },
+    { "id": "lawson-campaign-stool", "type": "lawsonCampaignStool", "x": -7.12, "y": 0.3, "z": 5.7, "rotation": [0, -0.62, 0] },
     { "id": "lawson-rum-bottle", "type": "lawsonRumBottle", "x": -3.05, "y": 1.26, "z": 1.92, "rotation": [0, 0.25, 0] },
     { "id": "lawson-tin-mug", "type": "lawsonTinMug", "x": -1.55, "y": 0.99, "z": 1.88, "rotation": [0, -0.4, 0] },
     { "id": "lawson-serving-bowl", "type": "lawsonServingBowl", "x": -2.35, "y": 1.0, "z": 2.06, "rotation": [0, 0, 0] },

@@ -77,13 +77,13 @@ function TimberPiece({
     [piece.id, timberKind],
   );
 
-  const handleContactForce = useCallback(payload => {
+  const handleContactForce = payload => {
     if (released.current.has(piece.id)) return;
     if (isPlayerTarget(payload.other)) return;
     if (isStructureTimberTarget(payload.other, timberKind)) return;
     if ((payload.totalForceMagnitude || 0) < releaseForce) return;
     onImpactRelease(piece.id, null);
-  }, [onImpactRelease, piece.id, releaseForce, released, timberKind]);
+  };
 
   const isReleased = released.current.has(piece.id) || piece.dynamic;
 

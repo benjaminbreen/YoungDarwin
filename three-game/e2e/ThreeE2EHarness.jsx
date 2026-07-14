@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { getThreeSpecimens } from '../data';
+import { setTouchControl } from '../input/touchControls';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 
 const HARNESS_VERSION = 1;
@@ -110,6 +111,14 @@ function makeSnapshot() {
     currentZoneId: state.currentZoneId,
     playableModeId: state.playableModeId,
     activeToolId: state.activeToolId,
+    carriedObjectId: state.carriedObjectId || null,
+    carryPrompt: state.carryPrompt
+      ? {
+          id: state.carryPrompt.id || null,
+          mode: state.carryPrompt.mode || null,
+          distance: finiteNumber(state.carryPrompt.distance),
+        }
+      : null,
     toolbarOrder: Array.isArray(state.toolbarOrder) ? [...state.toolbarOrder] : [],
     statusViewOpen: Boolean(state.statusViewOpen),
     nearbySpecimenId: state.nearbySpecimenId || null,
@@ -174,8 +183,14 @@ function findNearestSpecimen() {
   }
 
   if (!nearest) return null;
-  const { distanceSq, ...result } = nearest;
-  return result;
+  return {
+    actorId: nearest.actorId,
+    specimenId: nearest.specimenId,
+    name: nearest.name,
+    latin: nearest.latin,
+    position: nearest.position,
+    distance: nearest.distance,
+  };
 }
 
 function waitForPredicate(predicate, timeoutMs = 75000, label = 'condition') {
@@ -222,6 +237,14 @@ function createHarnessApi() {
     },
     setTool: toolId => {
       useThreeGameStore.getState().setActiveTool(toolId);
+      return makeSnapshot();
+    },
+    interact: () => {
+      setTouchControl('interact', true);
+      return makeSnapshot();
+    },
+    setCarriedObject: objectId => {
+      useThreeGameStore.getState().setCarriedObject(objectId || null);
       return makeSnapshot();
     },
     openStatus: () => {

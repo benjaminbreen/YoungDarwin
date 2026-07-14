@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getReadableBook } from '../books/bookCatalog';

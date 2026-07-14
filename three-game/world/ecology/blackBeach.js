@@ -1,4 +1,4 @@
-import { blackBeachCoastX, blackBeachInlandDistance, BLACK_BEACH } from '../regions/blackBeach/terrain';
+import { blackBeachInlandDistance, BLACK_BEACH } from '../regions/blackBeach/terrain';
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { coastalBirds } from './flyingBirds';

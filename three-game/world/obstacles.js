@@ -2,21 +2,7 @@ import * as THREE from 'three';
 import { getZoneObstacles } from '../../game-core/obstacles';
 import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
-import { getNorthShoreRockObstacles } from './northShoreLayout';
-import { getDesolateOutcropRockObstacles } from './desolateOutcropLayout';
-import { getDevilsCrownRockObstacles } from './devilsCrownLayout';
-import { getNorthwestReefRockObstacles } from './nwReefLayout';
-import { getBeachWithHutObstacles } from './beachWithHutLayout';
-import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
-import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
-import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
-import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
-import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
-import { getPenalColonyObstacles } from './penalColonyLayout';
-import { getBeagleDeckObstacles } from './beagleDeckLayout';
-import { getBeagleCabinObstacles } from './beagleCabinLayout';
-import { getLawsonHouseObstacles } from './lawsonHouseLayout';
-import { getWatkinsCampObstacles } from './watkinsCampLayout';
+import { REGION_OBSTACLE_SOURCES } from './obstacleRegistry';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
@@ -34,24 +20,6 @@ const OBSTACLE_INDEX_MIN_COUNT = 8;
 const EMPTY_OBSTACLE_CANDIDATES = Object.freeze([]);
 const obstacleSpatialIndexCache = new WeakMap();
 const staticRuntimeObstacleCache = new Map();
-
-const REGION_OBSTACLE_SOURCES = {
-  POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
-  ALT_POST_OFFICE_BAY: [getAltPostOfficeBayRockObstacles],
-  POST_OFFICE_BAY_3: [getPostOfficeBay3RockObstacles],
-  N_SHORE: [getNorthShoreRockObstacles],
-  N_OUTCROP: [getDesolateOutcropRockObstacles],
-  DEVILS_CROWN: [getDevilsCrownRockObstacles],
-  NW_REEF: [getNorthwestReefRockObstacles],
-  S_HUT: [getBeachWithHutObstacles],
-  W_HIGH: [getWesternHighlandsRockObstacles],
-  E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],
-  PENAL_COLONY: [getPenalColonyObstacles],
-  BEAGLE: [getBeagleDeckObstacles],
-  BEAGLE_CABIN: [getBeagleCabinObstacles],
-  LAWSON_HOUSE: [getLawsonHouseObstacles],
-  WATKINS: [getWatkinsCampObstacles],
-};
 
 function obstacleCellCoordinate(value, cellSize = OBSTACLE_INDEX_CELL_SIZE) {
   return Math.floor((Number(value) || 0) / cellSize);

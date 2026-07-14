@@ -27,6 +27,9 @@ const _darkColor = new THREE.Color();
 const _sunTint = new THREE.Color();
 const _white = new THREE.Color('#ffffff');
 const _cumulusShade = new THREE.Color('#8ba0b5'); // cool blue-grey underside
+const _nightCloudLight = new THREE.Color('#183052');
+const _nightCloudShade = new THREE.Color('#0a1830');
+const _nightCloudDark = new THREE.Color('#030918');
 const _sunWarm = new THREE.Color('#fff2d9');
 const _sunGolden = new THREE.Color('#ff9b55');
 const _dramaDawnWarm = new THREE.Color('#ffb14f');
@@ -234,10 +237,18 @@ export function CloudDeck() {
     // Tint from the live fog color so the clouds inherit day/night and
     // golden-hour for free; rain pulls the light stop toward storm slate.
     if (scene.fog) {
-      _lightColor.copy(scene.fog.color).lerp(_white, 0.35 + celestial.daylight * 0.35);
+      const night = celestial.night;
+      // White cloud tops require daylight. At night, retain enough blue
+      // separation to show cloud structure without turning the sky silver-grey.
+      _lightColor
+        .copy(scene.fog.color)
+        .lerp(_white, (0.35 + celestial.daylight * 0.35) * (1 - night))
+        .lerp(_nightCloudLight, night * 0.82);
       _shadeColor.copy(scene.fog.color).lerp(_cumulusShade, 0.55)
-        .multiplyScalar(0.55 + celestial.daylight * 0.25);
-      _darkColor.copy(scene.fog.color).multiplyScalar(0.42);
+        .multiplyScalar(0.55 + celestial.daylight * 0.25)
+        .lerp(_nightCloudShade, night);
+      _darkColor.copy(scene.fog.color).multiplyScalar(0.42)
+        .lerp(_nightCloudDark, night);
       _sunTint.copy(_sunWarm).lerp(_sunGolden, celestial.golden)
         .multiplyScalar(celestial.daylight);
       _dramaWarm.copy(_dramaDawnWarm).lerp(_dramaDuskWarm, duskSide);

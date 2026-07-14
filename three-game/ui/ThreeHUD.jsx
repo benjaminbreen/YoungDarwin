@@ -408,7 +408,7 @@ function BeagleTravelPrompt() {
             <CompassRoseIcon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className={GOLD_LABEL}>Ship's Boat</div>
+            <div className={GOLD_LABEL}>Ship&apos;s Boat</div>
             <h2 className="mt-1 text-[21px] font-bold leading-tight text-expedition-parchment">HMS Beagle</h2>
           </div>
           <button
@@ -867,11 +867,10 @@ const SpecimenMarker = memo(function SpecimenMarker({
 // re-renders on player movement without dragging the specimen markers with it.
 function MinimapTrail({ zone, playerPose }) {
   const [trail, setTrail] = useState([]);
-  const playerPosition = { x: playerPose.x, z: playerPose.z };
 
   useEffect(() => {
     const now = Date.now();
-    const nextPoint = worldToMapPercent(playerPosition, zone, 3);
+    const nextPoint = worldToMapPercent({ x: playerPose.x, z: playerPose.z }, zone, 3);
     setTrail(previous => {
       const recent = previous.filter(point => point.zoneId === zone.id && now - point.t < MINIMAP_TRAIL_MS);
       const last = recent[recent.length - 1];
@@ -880,7 +879,7 @@ function MinimapTrail({ zone, playerPose }) {
       }
       return [...recent, { ...nextPoint, zoneId: zone.id, t: now }].slice(-MINIMAP_TRAIL_MAX_POINTS);
     });
-  }, [playerPosition.x, playerPosition.z, zone.id]);
+  }, [playerPose.x, playerPose.z, zone]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -2146,6 +2145,7 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
 
 const CAMERA_MODE_LABELS = {
   shoulder: 'Shoulder View',
+  hero: 'Hero View',
   first: 'First Person',
   top: 'Overhead Chart',
 };
@@ -2790,7 +2790,6 @@ function InteractionPrompt() {
     const actorId = specimen.instanceId || specimen.id;
     return !collectedSpecimenActorIds?.includes(actorId) && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
   });
-  const nearbyKey = nearby ? `${nearby.instanceId || nearby.id}:${nearby.id}` : null;
   const [renderedSpecimen, setRenderedSpecimen] = useState(null);
   const [specimenPromptVisible, setSpecimenPromptVisible] = useState(false);
   const [outcomeToast, setOutcomeToast] = useState(null);
@@ -2842,7 +2841,7 @@ function InteractionPrompt() {
       timer = window.setTimeout(() => setRenderedSpecimen(null), PROMPT_EXIT_MS);
     }
     return () => window.clearTimeout(timer);
-  }, [nearbyKey, Boolean(outcomeToast)]);
+  }, [nearby, outcomeToast]);
 
   if (outcomeToast) {
     return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
@@ -3034,23 +3033,30 @@ function MobileMapButton({ onOpenMap }) {
   );
 }
 
+// Deflection below the deadzone is ignored; between deadzone and the run
+// threshold Darwin walks (speed scaled by deflection via touch.moveX/moveY);
+// pushing the stick to its outer band holds run.
+const JOYSTICK_RADIUS = 38;
+const JOYSTICK_DEADZONE = 0.16;
+const JOYSTICK_RUN_THRESHOLD = 0.85;
+
 function MobileJoystick() {
   const baseRef = React.useRef(null);
   const pointerRef = React.useRef(null);
-  const lastRef = React.useRef({ forward: false, backward: false, left: false, right: false });
+  const lastRef = React.useRef({ forward: false, backward: false, left: false, right: false, run: false, moveX: 0, moveY: 0 });
   const [knob, setKnob] = useState({ x: 0, y: 0, active: false });
 
-  const publishDirections = useCallback(next => {
+  const publishControls = useCallback(next => {
     const previous = lastRef.current;
-    ['forward', 'backward', 'left', 'right'].forEach(control => {
+    ['forward', 'backward', 'left', 'right', 'run', 'moveX', 'moveY'].forEach(control => {
       if (previous[control] !== next[control]) setTouchControl(control, next[control]);
     });
     lastRef.current = next;
   }, []);
 
-  const clearDirections = useCallback(() => {
-    publishDirections({ forward: false, backward: false, left: false, right: false });
-  }, [publishDirections]);
+  const clearControls = useCallback(() => {
+    publishControls({ forward: false, backward: false, left: false, right: false, run: false, moveX: 0, moveY: 0 });
+  }, [publishControls]);
 
   const updateFromPointer = useCallback(event => {
     const rect = baseRef.current?.getBoundingClientRect();
@@ -3059,20 +3065,28 @@ function MobileJoystick() {
     const cy = rect.top + rect.height / 2;
     const rawX = event.clientX - cx;
     const rawY = event.clientY - cy;
-    const maxDistance = 38;
     const distance = Math.hypot(rawX, rawY);
-    const scale = distance > maxDistance ? maxDistance / distance : 1;
+    const scale = distance > JOYSTICK_RADIUS ? JOYSTICK_RADIUS / distance : 1;
     const x = rawX * scale;
     const y = rawY * scale;
-    const threshold = 13;
+    const nx = x / JOYSTICK_RADIUS;
+    const ny = y / JOYSTICK_RADIUS;
+    const magnitude = Math.min(1, Math.hypot(nx, ny));
+    const inDeadzone = magnitude < JOYSTICK_DEADZONE;
+    const threshold = 0.34;
     setKnob({ x, y, active: true });
-    publishDirections({
-      forward: y < -threshold,
-      backward: y > threshold,
-      left: x < -threshold,
-      right: x > threshold,
+    publishControls({
+      // Direction booleans stay published for consumers that read them
+      // directly (flight steer/climb); ground movement uses the analog pair.
+      forward: !inDeadzone && ny < -threshold,
+      backward: !inDeadzone && ny > threshold,
+      left: !inDeadzone && nx < -threshold,
+      right: !inDeadzone && nx > threshold,
+      run: magnitude >= JOYSTICK_RUN_THRESHOLD,
+      moveX: inDeadzone ? 0 : nx,
+      moveY: inDeadzone ? 0 : ny,
     });
-  }, [publishDirections]);
+  }, [publishControls]);
 
   const start = event => {
     event.preventDefault();
@@ -3093,10 +3107,10 @@ function MobileJoystick() {
     pointerRef.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     setKnob({ x: 0, y: 0, active: false });
-    clearDirections();
+    clearControls();
   };
 
-  useEffect(() => clearDirections, [clearDirections]);
+  useEffect(() => clearControls, [clearControls]);
 
   return (
     <div

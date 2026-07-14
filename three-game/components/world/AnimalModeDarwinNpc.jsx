@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
 import { terrainHeight, clampToWalkable } from '../../world/terrain';
 import { useThreeGameStore } from '../../store';
 import { getPlayableMode } from '../../playable/playableModes';

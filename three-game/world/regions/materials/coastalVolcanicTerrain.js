@@ -66,6 +66,7 @@ function coastalVolcanicCommonGLSL({
   pathFrameSegmentFunction,
   pathFrameFunction,
   hasBaseSand,
+  hasBaseSandNormal,
 }) {
   return /* glsl */`
         uniform vec3 cvRimColor;
@@ -177,6 +178,9 @@ function coastalVolcanicCommonGLSL({
         uniform sampler2D uCoastalBaseSand;
         uniform sampler2D uCoastalBaseSandRough;
         uniform sampler2D uCoastalBaseSandHeight;
+        ${hasBaseSandNormal ? /* glsl */`
+        uniform sampler2D uCoastalBaseSandNormal;
+        uniform float uCoastalSandNormalStrength;` : ''}
         float cvTextureValue(sampler2D tex, vec2 uvA, vec2 uvB, float mixNoise) {
           float a = texture2D(tex, uvA).r;
           float b = texture2D(tex, uvB).r;
@@ -261,6 +265,16 @@ function coastalBaseColorGLSL({ hasBaseSand } = {}) {
         float grit = smoothstep(0.62, 0.96, fine);
         color *= 0.92 + fine * 0.18;
         color += grit * vec3(0.035, 0.028, 0.018);
+        // Close-range grain: micro mottle and sparse bright flecks that fade
+        // out by ~25m so the detail can't shimmer at distance.
+        float grainDist = length(vViewPosition);
+        float closeGrain = 1.0 - smoothstep(9.0, 26.0, grainDist);
+        if (closeGrain > 0.003) {
+          float micro = cvFbm(p * 14.0 + vec2(-6.0, 9.0));
+          color *= 1.0 + (micro - 0.5) * 0.15 * closeGrain;
+          float fleck = smoothstep(0.8, 0.96, cvNoise(p * 27.0 + vec2(11.0, -4.0)));
+          color += fleck * vec3(0.05, 0.044, 0.03) * closeGrain;
+        }
         diffuseColor.rgb = mix(diffuseColor.rgb, color, 0.94);`;
 }
 
@@ -336,7 +350,7 @@ function coastalSandRoughnessGLSL() {
         roughnessFactor = mix(roughnessFactor, clamp(mix(0.72, 0.97, sandRoughSample), 0.6, 0.98), srCover * 0.6);`;
 }
 
-function coastalNormalGLSL({ pathSplatFunction, hasBaseSand }) {
+function coastalNormalGLSL({ pathSplatFunction, hasBaseSand, hasBaseSandNormal }) {
   return /* glsl */`
         vec2 np = vCoastalTerrainWorld.xz;
         vec4 normalMasks = cvPathMasks(np);
@@ -386,7 +400,26 @@ function coastalNormalGLSL({ pathSplatFunction, hasBaseSand }) {
         vec3 dpdy = dFdy(vCoastalTerrainWorld);
         float dhdx = dFdx(detailHeight);
         float dhdy = dFdy(detailHeight);
-        normal = normalize(normal - 0.55 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));`;
+        normal = normalize(normal - 0.55 * (cross(dpdy, normal) * dhdx + cross(normal, dpdx) * dhdy));
+        ${hasBaseSand && hasBaseSandNormal ? /* glsl */`
+        // Sampled detail normals where the sand shows through: a ripple-scale
+        // read on the shared sand UVs plus a finer grain read. Sand UVs are a
+        // planar world-xz projection, so tangent-space xy maps onto world xz —
+        // the rotated fine sample is rotated back by the same angle, and the
+        // world perturbation is taken into view space to join three's normal.
+        vec3 sandNrmRipple = texture2D(uCoastalBaseSandNormal, cvSandUvA(np)).xyz * 2.0 - 1.0;
+        vec3 sandNrmGrain = texture2D(uCoastalBaseSandNormal, cvRotate(np, -0.31) * 0.47 + vec2(7.3, 2.1)).xyz * 2.0 - 1.0;
+        vec2 sandNrmXY = sandNrmRipple.xy * 0.6 + cvRotate(sandNrmGrain.xy, 0.31) * 0.4;
+        // Ultra-fine grain pass close to the camera only — the ~0.7m tiling
+        // would alias into shimmer if it ran to the horizon.
+        float sandNrmDist = length(vViewPosition);
+        float sandNrmClose = 1.0 - smoothstep(10.0, 30.0, sandNrmDist);
+        if (sandNrmClose > 0.003) {
+          vec3 sandNrmMicro = texture2D(uCoastalBaseSandNormal, cvRotate(np, 0.83) * 1.35 + vec2(-3.7, 5.2)).xyz * 2.0 - 1.0;
+          sandNrmXY += cvRotate(sandNrmMicro.xy, -0.83) * 0.55 * sandNrmClose;
+        }
+        vec3 sandNrmView = (viewMatrix * vec4(sandNrmXY.x, 0.0, sandNrmXY.y, 0.0)).xyz;
+        normal = normalize(normal + sandNrmView * (uCoastalSandNormalStrength * sandCoverN));` : ''}`;
 }
 
 export function createCoastalVolcanicTerrainMaterial({
@@ -397,7 +430,9 @@ export function createCoastalVolcanicTerrainMaterial({
   roughness = 0.88,
   rimColor = '#f1d38a',
   rimIntensity = 0.08,
+  sandNormalStrength = 0.42,
   pathSplatSize,
+  pathSplatBounds,
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
     throw new Error('createCoastalVolcanicTerrainMaterial requires pathPoints.');
@@ -405,6 +440,7 @@ export function createCoastalVolcanicTerrainMaterial({
   const fallbacks = textureSet.fallbacks || {};
   const pathSplatTexture = createStandardFootPathSplatTexture({
     pathPoints,
+    ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
     ...(pathSplatSize ? { size: pathSplatSize } : {}),
   });
   const pathDirt = loadRepeatingTexture(textureSet.redDirt, fallbacks.redDirt || '#b47b3c');
@@ -412,8 +448,12 @@ export function createCoastalVolcanicTerrainMaterial({
   const pathGrass = loadRepeatingTexture(textureSet.dryGrassGround, fallbacks.dryGrassGround || '#8b7d50');
   const pathFlecks = loadRepeatingTexture(textureSet.paleFlecks, fallbacks.paleFlecks || '#d5c7a3');
   const hasBaseSand = Boolean(textureSet.baseSand);
+  const hasBaseSandNormal = hasBaseSand && Boolean(textureSet.baseSandNormal);
   const baseSand = hasBaseSand
     ? loadRepeatingTexture(textureSet.baseSand, fallbacks.baseSand || '#c9a878')
+    : null;
+  const baseSandNormal = hasBaseSandNormal
+    ? loadRepeatingTexture(textureSet.baseSandNormal, '#8080ff', THREE.NoColorSpace)
     : null;
   const baseSandRough = hasBaseSand
     ? loadRepeatingTexture(textureSet.baseSandRoughness, '#b0b0b0', THREE.NoColorSpace)
@@ -436,6 +476,7 @@ export function createCoastalVolcanicTerrainMaterial({
     pathGrass.dispose();
     pathFlecks.dispose();
     baseSand?.dispose();
+    baseSandNormal?.dispose();
     baseSandRough?.dispose();
     baseSandHeight?.dispose();
   });
@@ -448,6 +489,7 @@ export function createCoastalVolcanicTerrainMaterial({
 
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, standardFootPathSplatUniforms(pathSplatTexture, {
+      ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
       textureUniform: pathSplatUniform,
       boundsUniform: pathSplatBoundsUniform,
     }));
@@ -461,6 +503,10 @@ export function createCoastalVolcanicTerrainMaterial({
       shader.uniforms.uCoastalBaseSand = { value: baseSand };
       shader.uniforms.uCoastalBaseSandRough = { value: baseSandRough };
       shader.uniforms.uCoastalBaseSandHeight = { value: baseSandHeight };
+    }
+    if (hasBaseSandNormal) {
+      shader.uniforms.uCoastalBaseSandNormal = { value: baseSandNormal };
+      shader.uniforms.uCoastalSandNormalStrength = { value: sandNormalStrength };
     }
     material.userData.shader = shader;
 
@@ -489,6 +535,7 @@ ${coastalVolcanicCommonGLSL({
           pathFrameSegmentFunction,
           pathFrameFunction,
           hasBaseSand,
+          hasBaseSandNormal,
         })}`,
       )
       .replace(
@@ -505,7 +552,7 @@ ${hasBaseSand ? coastalSandRoughnessGLSL() : ''}`,
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
-${coastalNormalGLSL({ pathSplatFunction, hasBaseSand })}`,
+${coastalNormalGLSL({ pathSplatFunction, hasBaseSand, hasBaseSandNormal })}`,
       )
       .replace(
         '#include <dithering_fragment>',
@@ -515,7 +562,9 @@ ${coastalNormalGLSL({ pathSplatFunction, hasBaseSand })}`,
       );
   };
 
-  material.customProgramCacheKey = () => cacheKey + (hasBaseSand ? '-base-sand' : '');
+  material.customProgramCacheKey = () => cacheKey
+    + (hasBaseSand ? '-base-sand' : '')
+    + (hasBaseSandNormal ? `-sand-nrm-${sandNormalStrength.toFixed(2)}` : '');
   material.needsUpdate = true;
   return material;
 }

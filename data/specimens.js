@@ -266,6 +266,93 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'pricklypearpad',
+    name: 'Prickly Pear Pad',
+    latin: 'Opuntia echios',
+    ontology: 'Plant',
+    order: 'Cactus',
+    sub_order: 'Prickly Pear',
+    description: 'A fleshy, spine-studded pad broken from a Galápagos prickly pear, its waxy hide guarding stored water.',
+    details: [
+      'Flat obovate pads joined rim to rim, each sprouting from the last',
+      'Areoles dot the surface in diamond rows, every one armed with barbs',
+      'Watery pulp within sustains the plant through long droughts',
+      'Tortoises and land iguanas devour fallen pads, spines and all'
+    ],
+    habitat: 'scrubland, lavafield',
+    collected: false,
+    observations: [],
+    scientificValue: 3,
+    hybrid_ease: 6,
+    hybrid_temperature: 7,
+    danger: 2,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/cactus.jpg',
+    memoryText: '“The pads part from the plant with a green snap, and woe to the hand that catches one carelessly — the finer barbs work through cloth and linger for days.”',
+    contents: 'Slicing the pad reveals cool mucilaginous pulp, stringy fibres, and a surprising store of clear moisture.',
+    keywords: ['cactus', 'prickly pear', 'opuntia', 'pad', 'plant', 'succulent', 'spines', 'echios']
+  },
+
+  {
+    id: 'pricklypearblossom',
+    name: 'Prickly Pear Blossom',
+    latin: 'Opuntia echios',
+    ontology: 'Plant',
+    order: 'Cactus',
+    sub_order: 'Prickly Pear',
+    description: 'A broad yellow cactus flower with ranks of silken petals about a deep orange heart.',
+    details: [
+      'Blooms perch on the upper rims of the highest pads',
+      'Petals open with the morning sun and close by dusk',
+      'Finches and native bees crowd the pollen-heavy centers',
+      'Each flower ripens toward a reddish, seed-filled fruit'
+    ],
+    habitat: 'scrubland, lavafield',
+    collected: false,
+    observations: [],
+    scientificValue: 4,
+    hybrid_ease: 6,
+    hybrid_temperature: 7,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/cactus.jpg',
+    memoryText: '“So gay a flower upon so grim a plant! The blossoms are of a rich yellow, much beset by finches, and make the dry ground almost cheerful.”',
+    contents: 'Pressed flat, the blossom yields fine yellow petals, abundant pollen, and a faintly sweet vegetable scent.',
+    keywords: ['cactus', 'prickly pear', 'opuntia', 'flower', 'blossom', 'yellow', 'plant', 'echios']
+  },
+
+  {
+    id: 'lavacactusflower',
+    name: 'Lava Cactus Flower',
+    latin: 'Brachycereus nesioticus',
+    ontology: 'Plant',
+    order: 'Cactus',
+    sub_order: 'Lava Cactus',
+    description: 'A small creamy-white flower crowning a bristled lava cactus column, open only in the cool of morning.',
+    details: [
+      'Blooms on the tips of the youngest golden columns',
+      'Petals open before dawn and wilt in the midday heat',
+      'Pollinators must visit in the brief cool hours',
+      'A rare sight — the plant flowers sparingly on bare rock'
+    ],
+    habitat: 'lavafield, scrubland',
+    collected: false,
+    observations: [],
+    scientificValue: 4,
+    hybrid_ease: 6,
+    hybrid_temperature: 7,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    image: '/specimens/cactus.jpg',
+    memoryText: '“A flower of the purest cream upon the blackest rock — it had wilted by noon, and I was glad to have pressed one at first light.”',
+    contents: 'Pressed flat, the flower yields waxy pale petals and a scatter of golden pollen with a faint honeyed scent.',
+    keywords: ['cactus', 'lava cactus', 'flower', 'blossom', 'cream', 'white', 'plant', 'nesioticus']
+  },
+
+  {
     id: 'galapagoscotton',
     name: 'Galapagos Cotton',
     latin: 'Gossypium darwinii',

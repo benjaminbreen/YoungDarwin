@@ -109,14 +109,6 @@ function buildFlora() {
     y: item.y + 0.02,
     tint: item.tone > 0.5 ? '#8c7c48' : '#536437',
   }));
-  const flatCactus = scatter('rocky-clearing-flat-cactus', 5, 359, {
-    minX: -38, maxX: 38, minZ: -28, maxZ: 32, scale: [0.17, 0.26], maxGrade: 0.82,
-    accept: (biome, x, z) => notOnPathOrCave(biome, x, z)
-      && z > -4
-      && rockyClearingCentralMask(x, z) < 0.36
-      && hash2(x, z, 17) < 0.42,
-  }).map(item => ({ ...item, y: item.y + 0.02, tint: '#728f47' }));
-
   return [
     {
       id: 'rocky-clearing-shrub',
@@ -135,15 +127,6 @@ function buildFlora() {
       motion: { wind: 1.32, bend: 0.28, bendRadius: 1.14 },
       castShadow: false,
       items: smallShrubs,
-    },
-    {
-      id: 'rocky-clearing-flat-cactus',
-      path: `${NATURE}runtime-flat-cactus.glb`,
-      sink: 0.02,
-      tintStrength: 0.14,
-      motion: { wind: 0.28, bend: 0.24 },
-      castShadow: false,
-      items: flatCactus,
     },
   ];
 }

@@ -362,12 +362,6 @@ function AssetVegetationLayer() {
     maxZ: 18,
     scale: [0.08, 0.18],
   }).filter(item => item.z > -10 && item.x < 18), []);
-  const flatCactus = useMemo(() => [
-    { id: 'flat-cactus-1', x: 13.8, z: 12.4, yaw: 0.4, scale: 0.28, tint: '#769f48' },
-    { id: 'flat-cactus-2', x: 23.2, z: 17.8, yaw: -0.8, scale: 0.24, tint: '#6f9642' },
-    { id: 'flat-cactus-3', x: -18.8, z: 9.2, yaw: 1.45, scale: 0.2, tint: '#819c51' },
-    { id: 'flat-cactus-4', x: 6.8, z: 26.5, yaw: -0.25, scale: 0.22, tint: '#6d8e3e' },
-  ].map(item => ({ ...item, y: terrainHeight(item.x, item.z) })), []);
   const candelabraCactus = useMemo(() => [
     { id: 'candelabra-cactus-1', x: -24.5, z: 30.8, yaw: -0.25, scale: 3.4, tint: '#728d4d' },
     { id: 'candelabra-cactus-2', x: -4.2, z: 34.5, yaw: 0.62, scale: 3.9, tint: '#6f8848' },
@@ -385,7 +379,6 @@ function AssetVegetationLayer() {
     y: item.y + 0.02,
     tint: item.tone > 0.55 ? '#8a7a48' : '#4f6134',
   })), [smallShrubs]);
-  const flatCactusItems = useMemo(() => flatCactus.map(item => ({ ...item, y: item.y + 0.02 })), [flatCactus]);
   const candelabraCactusItems = useMemo(() => candelabraCactus.map(item => ({ ...item, y: item.y + 0.02 })), [candelabraCactus]);
 
   return (
@@ -411,17 +404,6 @@ function AssetVegetationLayer() {
         sourceLabel="Post Office Bay small shrub"
         sourceKind="world-detail-flora"
         inspectableType="shrub"
-      />
-      <InstancedGLBLayer
-        path="/assets/models/nature/runtime-flat-cactus.glb"
-        items={flatCactusItems}
-        tintStrength={0.16}
-        motion={FLAT_CACTUS_MOTION}
-        castShadow={false}
-        sourceId="post-office-bay:flat-cactus"
-        sourceLabel="Post Office Bay flat cactus"
-        sourceKind="world-detail-flora"
-        inspectableType="flat_cactus"
       />
       <InstancedGLBLayer
         path="/assets/models/nature/runtime-candelabra-cactus.glb"

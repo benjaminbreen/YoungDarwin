@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { BallCollider, CuboidCollider, CylinderCollider, RigidBody } from '@react-three/rapier';
+import { BallCollider, CuboidCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
@@ -21,6 +21,7 @@ import { catalogToInspectable } from '../../world/inspectables';
 import { PropVisual, HighlightRing } from './PropVisuals';
 import { publishPropPose, removePropPose } from './propRuntime';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { carryPlacementCandidates } from '../../components/player/carryProfiles';
 
 const PICKUP_DISTANCE = 2.15;
 const STRIKE_RANGE = 2.6;
@@ -152,6 +153,20 @@ function PropCollider({ prop, colliderRef, sensor }) {
   return <CylinderCollider {...common} args={[prop.collider.halfHeight * scale, prop.collider.radius * scale]} />;
 }
 
+function createPlacementShape(rapier, prop) {
+  const scale = prop.scale || 1;
+  const collider = prop.collider || {};
+  if (collider.shape === 'cuboid') {
+    const [halfX = 0.25, halfY = 0.25, halfZ = 0.25] = collider.halfExtents || [];
+    return new rapier.Cuboid(halfX * scale, halfY * scale, halfZ * scale);
+  }
+  if (collider.shape === 'ball') return new rapier.Ball((collider.radius || 0.2) * scale);
+  return new rapier.Cylinder(
+    (collider.halfHeight || 0.25) * scale,
+    (collider.radius || 0.2) * scale,
+  );
+}
+
 // A single dynamic physics prop. Behaviors (carryable / breakable /
 // strikeable) come from the prop's type config; see propTypes.js.
 export function PhysicsProp({ prop, onBreak }) {
@@ -163,6 +178,7 @@ export function PhysicsProp({ prop, onBreak }) {
   const lastPlayerPushContactRef = useRef(-10);
   const lastStrikeAtRef = useRef(-10);
   const clockRef = useRef(0);
+  const { world, rapier } = useRapier();
   const scratch = useRef({
     origin: new THREE.Vector3(),
     facing: new THREE.Vector3(),
@@ -204,6 +220,7 @@ export function PhysicsProp({ prop, onBreak }) {
   const propMass = prop.mass * Math.pow(propScale, 2.2);
   const fixedBody = prop.fixed || mobility.mode === 'fixed';
   const sidewaysBarrel = isSidewaysBarrel(prop, mobility);
+  const placementShape = useMemo(() => createPlacementShape(rapier, prop), [prop, rapier]);
 
   const handlePlayerContact = useCallback((payload = {}) => {
     const body = bodyRef.current;
@@ -346,7 +363,7 @@ export function PhysicsProp({ prop, onBreak }) {
   // `type` option whenever its options effect re-runs — an imperative
   // setBodyType gets silently reverted to "dynamic" on the next re-render.
   // This effect runs after RigidBody's own effects, so on drop the body is
-  // already dynamic when the release toss is applied.
+  // already dynamic when the collision-checked ground placement is applied.
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || !carryable) return;
@@ -367,11 +384,52 @@ export function PhysicsProp({ prop, onBreak }) {
       const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
       if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
       facing.normalize();
+      const player = vectorFromStore(pose?.position, scratch.current.player);
+      const candidates = carryPlacementCandidates({
+        prop,
+        player,
+        facing,
+        terrainHeight: (x, z) => movementTerrainHeight(x, z, currentZoneId),
+      });
+      // The farthest straight-ahead candidate is the least surprising
+      // emergency fallback if every overlap query reports a cramped room.
+      let placement = candidates[Math.max(0, candidates.length - 8)];
+      for (const candidate of candidates) {
+        scratch.current.carryEuler.set(
+          candidate.rotation[0] || 0,
+          candidate.rotation[1] || 0,
+          candidate.rotation[2] || 0,
+          'YXZ',
+        );
+        scratch.current.carryQuaternion.setFromEuler(scratch.current.carryEuler);
+        const overlap = world.intersectionWithShape(
+          candidate.position,
+          scratch.current.carryQuaternion,
+          placementShape,
+          undefined,
+          undefined,
+          colliderRef.current || undefined,
+          body,
+        );
+        if (!overlap) {
+          placement = candidate;
+          break;
+        }
+      }
+      scratch.current.carryEuler.set(
+        placement.rotation[0] || 0,
+        placement.rotation[1] || 0,
+        placement.rotation[2] || 0,
+        'YXZ',
+      );
+      scratch.current.carryQuaternion.setFromEuler(scratch.current.carryEuler);
       body.wakeUp();
-      body.setLinvel({ x: facing.x * carryable.release, y: 0.02, z: facing.z * carryable.release }, true);
-      body.setAngvel({ x: facing.z * -carryable.release * 1.8, y: 0, z: facing.x * carryable.release * 1.8 }, true);
+      body.setTranslation(placement.position, true);
+      body.setRotation(scratch.current.carryQuaternion, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
-  }, [carryable, isCarried]);
+  }, [carryable, currentZoneId, isCarried, placementShape, prop, world]);
 
   useFrame((_, delta) => {
     const body = bodyRef.current;

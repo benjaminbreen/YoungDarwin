@@ -12,6 +12,8 @@ import { SpecimenActor } from '../components/world/SpecimenActor';
 import { SnareTraps } from '../components/world/SnareTrapActor';
 import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
+import { PricklyPearField } from '../physics/props/pricklyPear/PricklyPearField';
+import { LavaCactusField } from '../physics/props/lavaCactus/LavaCactusField';
 import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
 import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
@@ -68,6 +70,8 @@ export function ActiveZoneContent({ settings, deferredContentReady = true }) {
       )}
       {settings.physicsObstacles !== false && <PhysicsObstacles />}
       {settings.physicsProps !== false && <PhysicsProps />}
+      {settings.physicsProps !== false && <PricklyPearField />}
+      {settings.physicsProps !== false && <LavaCactusField />}
       {settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
       {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
       {settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}

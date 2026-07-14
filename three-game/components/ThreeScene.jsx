@@ -17,6 +17,7 @@ import { ActiveZoneContent } from '../zones/ActiveZoneContent';
 import { PhysicsProvider } from '../physics/PhysicsProvider';
 import { useThreeGameStore } from '../store';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
+import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
 
 export function ThreeScene({
   perfSettings,
@@ -70,6 +71,7 @@ export function ThreeScene({
         )
       )}
       <PhysicsProvider debug={settings.physicsDebug === true}>
+        <FaunaFrameScheduler />
         <ActiveZoneContent settings={settings} deferredContentReady={deferredContentReady} />
         <PlayerController
           physicsDebug={settings.physicsDebug === true}

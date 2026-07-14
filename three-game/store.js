@@ -96,6 +96,12 @@ export const threeRuntimeState = {
     position: { ...INITIAL_PLAYER_POSE.position },
     facing: { ...INITIAL_PLAYER_POSE.facing },
   },
+  // Hot-path locomotion intent for contact-reactive world systems. This is
+  // published before the character controller clips movement against fixed
+  // colliders, so plants can still feel a sustained push after Darwin stops.
+  playerMotion: {
+    intendedPlanarVelocity: { x: 0, z: 0 },
+  },
   footContacts: {
     left: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
     right: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
@@ -241,6 +247,20 @@ function ambientThoughtPatch(state, { weather = state.weather, timeOfDay = state
 
 export function getRuntimePlayerPose() {
   return threeRuntimeState.playerPose;
+}
+
+export function getRuntimePlayerMotion() {
+  return threeRuntimeState.playerMotion;
+}
+
+export function updateRuntimePlayerMotion(motion = {}) {
+  const velocity = motion.intendedPlanarVelocity || motion.velocity || motion;
+  const x = Number(velocity?.x);
+  const z = Number(velocity?.z);
+  const target = threeRuntimeState.playerMotion.intendedPlanarVelocity;
+  target.x = Number.isFinite(x) ? x : 0;
+  target.z = Number.isFinite(z) ? z : 0;
+  return threeRuntimeState.playerMotion;
 }
 
 export function updateRuntimePlayerPose(playerPose) {
@@ -2161,7 +2181,11 @@ export const useThreeGameStore = create((set, get) => ({
   }),
 
   cycleViewMode: () => set(state => ({
-    viewMode: state.viewMode === 'shoulder' ? 'first' : state.viewMode === 'first' ? 'top' : 'shoulder',
+    viewMode: state.viewMode === 'shoulder'
+      ? 'hero'
+      : state.viewMode === 'hero'
+        ? 'first'
+        : state.viewMode === 'first' ? 'top' : 'shoulder',
   })),
 
   applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => ({

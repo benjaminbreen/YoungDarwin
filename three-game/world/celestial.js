@@ -9,6 +9,11 @@
 const TWO_PI = Math.PI * 2;
 const HALF_PI = Math.PI / 2;
 const MOON_CYCLE_DAYS = 29.53; // synodic month
+const MOON_RISE_HOUR = 20;
+// September 17, 1835 was about 24.43 days into the synodic cycle: a waning
+// crescent, not the near-new moon produced when expedition day 1 is treated as
+// day 1 of the lunar cycle. Advance from that Floreana arrival-date baseline.
+const FLOREANA_ARRIVAL_MOON_AGE_DAYS = 24.43;
 
 // Southern tilt of the celestial arc — keeps the sun off the pure vertical so
 // it sweeps a natural diagonal across the sky rather than straight overhead.
@@ -52,14 +57,22 @@ export function sunDirection(timeOfDay) {
 // The moon rides the opposite side of the arc, slightly less tilted so it does
 // not sit perfectly antipodal to the sun.
 export function moonDirection(timeOfDay) {
-  const a = (timeOfDay / 24) * TWO_PI - HALF_PI + Math.PI;
-  return normalize3(Math.cos(a), Math.sin(a), ARC_TILT * 0.8);
+  // The moon clears the eastern horizon at about 8 PM and remains above it
+  // through the playable night. This is intentionally more legible than a
+  // phase-accurate rise time, while the illuminated phase still advances by
+  // the historical expedition date below.
+  const a = ((timeOfDay - MOON_RISE_HOUR) / 24) * TWO_PI;
+  // Place the evening arc over the north-facing Floreana sea vista used by
+  // the main shore regions, so the rise is visible during ordinary play.
+  return normalize3(ARC_TILT * 0.5, Math.sin(a), -Math.cos(a));
 }
 
 // Fraction of the moon illuminated, 0 (new) .. 1 (full), plus the raw cycle
 // phase (0..1) and waxing flag for a phase-lit shader later on.
 export function moonPhase(day) {
-  const cycle = (((day % MOON_CYCLE_DAYS) + MOON_CYCLE_DAYS) % MOON_CYCLE_DAYS) / MOON_CYCLE_DAYS;
+  const expeditionDayOffset = (Number.isFinite(day) ? day : 1) - 1;
+  const moonAge = FLOREANA_ARRIVAL_MOON_AGE_DAYS + expeditionDayOffset;
+  const cycle = (((moonAge % MOON_CYCLE_DAYS) + MOON_CYCLE_DAYS) % MOON_CYCLE_DAYS) / MOON_CYCLE_DAYS;
   const fraction = 0.5 * (1 - Math.cos(cycle * TWO_PI)); // new → full → new
   return { fraction, phase: cycle, waxing: cycle < 0.5 };
 }

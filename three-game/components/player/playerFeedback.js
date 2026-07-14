@@ -44,9 +44,8 @@ export function findPushableObstacleNear(obstacles, position, horizontalVelocity
   return best?.obstacle || null;
 }
 
-export function findCactusHazardContact(position, playerRadius = 0.42) {
-  let best = null;
-  for (const cactus of getPostOfficeBayOpuntiaHazards()) {
+function scanCactusHazards(list, position, playerRadius, best) {
+  for (const cactus of list) {
     const dx = position.x - cactus.x;
     const dz = position.z - cactus.z;
     const distance = Math.hypot(dx, dz);
@@ -61,6 +60,12 @@ export function findCactusHazardContact(position, playerRadius = 0.42) {
     }
   }
   return best;
+}
+
+// Destructible prickly pears are deliberately absent here: they bend and
+// break on player contact instead of injuring (see PricklyPearField).
+export function findCactusHazardContact(position, playerRadius = 0.42) {
+  return scanCactusHazards(getPostOfficeBayOpuntiaHazards(), position, playerRadius, null);
 }
 
 export function LandingDust({ triggerRef }) {
@@ -120,7 +125,7 @@ export function LandingDust({ triggerRef }) {
     return () => {
       if (triggerRef.current) triggerRef.current = null;
     };
-  }, [triggerRef]);
+  }, [particleMaterials, ringMaterial, triggerRef]);
 
   useFrame((_, delta) => {
     const state = burst.current;
