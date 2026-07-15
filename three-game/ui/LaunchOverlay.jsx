@@ -73,7 +73,15 @@ function ProgressBar({ value }) {
   );
 }
 
-export function LaunchOverlay({ mode = 'menu', progress = 0, selectedModeId = 'darwin', onNewExpedition, onModeSelect, onBack }) {
+export function LaunchOverlay({
+  mode = 'menu',
+  progress = 0,
+  selectedModeId = 'darwin',
+  departing = false,
+  onNewExpedition,
+  onModeSelect,
+  onBack,
+}) {
   const loadingLine = useMemo(() => {
     if (selectedModeId === 'finch') {
       if (progress < 35) return 'Finding a garden finch above the Asilo de la Paz rows.';
@@ -99,7 +107,10 @@ export function LaunchOverlay({ mode = 'menu', progress = 0, selectedModeId = 'd
     <section
       data-testid="three-launch-overlay"
       data-mode={mode}
-      className="pointer-events-auto absolute inset-0 z-40 overflow-hidden bg-[#111718] font-expedition text-expedition-parchment"
+      data-departing={departing ? 'true' : 'false'}
+      className={`${departing
+        ? 'pointer-events-none scale-[1.008] opacity-0 blur-[1px]'
+        : 'pointer-events-auto scale-100 opacity-100 blur-0'} absolute inset-0 z-40 overflow-hidden bg-[#111718] font-expedition text-expedition-parchment transition-[opacity,transform,filter] duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity,transform]`}
     >
       <div
         className="absolute inset-0 bg-cover bg-center"

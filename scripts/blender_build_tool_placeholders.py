@@ -132,21 +132,42 @@ def build_snare():
 
 def build_hammer():
     clear_scene()
-    wood = make_material("hafthandle", (0.40, 0.26, 0.13), roughness=0.7)
-    metal = make_material("hammerhead", (0.20, 0.20, 0.22), roughness=0.4, metallic=0.9)
-    # Handle up along +Z (a rock hammer is held head-up), grip at origin.
-    cylinder(0.013, 0.32, location=(0, 0, 0.10), material=wood)
-    # Head across +X at the top: a flat striking face and a tapered pick.
-    box((0.05, 0.035, 0.035), location=(0.05, 0, 0.26), material=metal)
-    cone(0.028, 0.004, 0.10, location=(-0.07, 0, 0.26), rotation=(0, math.radians(-90), 0), material=metal)
+    wood = make_material("hafthandle", (0.32, 0.20, 0.10), roughness=0.55)
+    grip = make_material("haftgrip", (0.24, 0.14, 0.07), roughness=0.75)
+    metal = make_material("hammerhead", (0.52, 0.54, 0.58), roughness=0.22, metallic=1.0)
+    # Geologist's hammer. Handle up along +Z (head at the top), grip at origin.
+    head_z = 0.27
+    # Haft: slight taper toward the head, wrapped grip + flared butt below.
+    cone(0.014, 0.011, 0.33, location=(0, 0, 0.115), material=wood)
+    cylinder(0.015, 0.10, location=(0, 0, -0.01), material=grip)
+    cone(0.012, 0.018, 0.028, location=(0, 0, -0.064), material=wood)
+    # Eye collar where the haft passes through the head, haft peeking above.
+    cylinder(0.019, 0.048, location=(0, 0, head_z), material=metal)
+    cylinder(0.0115, 0.018, location=(0, 0, head_z + 0.028), material=wood)
+    # Square striking face on +X: neck flaring out to a wider face cap.
+    cone(0.024, 0.018, 0.05, location=(0.04, 0, head_z), rotation=(0, math.radians(90), 0), material=metal)
+    box((0.02, 0.04, 0.04), location=(0.073, 0, head_z), material=metal)
+    # Tapered pick on -X, drooping slightly toward the tip.
+    cone(0.019, 0.0025, 0.12, location=(-0.066, 0, head_z - 0.007),
+         rotation=(0, math.radians(-98), 0), material=metal)
     export("hammer")
 
 
+BUILDERS = {
+    "shotgun": build_shotgun,
+    "net": build_net,
+    "snare": build_snare,
+    "hammer": build_hammer,
+}
+
+
 def main():
-    build_shotgun()
-    build_net()
-    build_snare()
-    build_hammer()
+    # Blender passes script args after "--"; with none, build everything.
+    import sys
+    args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    targets = args or list(BUILDERS)
+    for name in targets:
+        BUILDERS[name]()
     print("TOOL_PLACEHOLDERS_DONE")
 
 

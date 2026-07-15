@@ -61,16 +61,26 @@ function ObstacleCollider({ obstacle }) {
 export function PhysicsObstacles() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
+  const rockDamage = useThreeGameStore(state => state.rockDamage);
   const obstacles = useMemo(
     () => getRuntimeObstacles(currentZoneId, pushableObstacleOffsets),
     [currentZoneId, pushableObstacleOffsets],
   );
+  // Rocks shattered by the geological hammer lose their fixed collider so the
+  // player can walk through the gap (the spawned fragments are dynamic bodies).
+  const brokenRockIds = useMemo(() => new Set(
+    Object.values(rockDamage)
+      .filter(damage => damage.broken && damage.rockId)
+      .map(damage => damage.rockId),
+  ), [rockDamage]);
 
   return (
     <>
-      {obstacles.filter(obstacle => !isWalkOverTraversalObstacle(obstacle)).map(obstacle => (
-        <ObstacleCollider key={obstacle.id} obstacle={obstacle} />
-      ))}
+      {obstacles
+        .filter(obstacle => !isWalkOverTraversalObstacle(obstacle) && !brokenRockIds.has(obstacle.id))
+        .map(obstacle => (
+          <ObstacleCollider key={obstacle.id} obstacle={obstacle} />
+        ))}
     </>
   );
 }

@@ -30,10 +30,12 @@ function buildFlora() {
   });
   return [
     { id: 'saltbush-1', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 0) },
-    { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 1) },
+    // One silhouette, rotated/scaled by the scatter, reads as naturally varied
+    // at play distance and avoids two extra GLB fetch/decode paths on arrival.
+    { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 1) },
     {
       id: 'saltbush-large',
-      path: `${NATURE}runtime-saltbush-3.glb`,
+      path: `${NATURE}runtime-saltbush-1.glb`,
       sink: 0.04,
       castShadow: false,
       motion: { wind: 0.85, bend: 0.24, bendRadius: 1.4 },
@@ -87,18 +89,6 @@ function buildFlora() {
       items: scatter('saltgrass', 7, 83, {
         minX: -42, maxX: 46, minZ: -10, maxZ: 4, scale: [0.12, 0.2],
         accept: (biome, x, z) => drySand(x, z) && (biome === 'ash-beach' || biome === 'sesuvium-flat'),
-      }),
-    },
-    {
-      id: 'sesuvium',
-      path: `${NATURE}runtime-sesuvium.glb`,
-      sink: 0.03,
-      castShadow: false,
-      motion: { wind: 0.7, bend: 0.22, bendRadius: 1.15 },
-      ySquash: 0.3,
-      items: scatter('sesuvium', 2, 89, {
-        minX: -20, maxX: 24, minZ: -8, maxZ: 6, scale: [2.4, 3.4],
-        accept: (biome, x, z) => drySand(x, z) && (biome === 'sesuvium-flat' || biome === 'ash-beach'),
       }),
     },
     {

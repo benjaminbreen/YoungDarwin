@@ -11,10 +11,18 @@ import { regionMaps } from '../../../../game-core/regionMaps';
 //   anchorage — ship landing or anchorage
 //   summit    — highland landmark
 //   test      — development/test map, hidden unless the test toggle is enabled
-export const ISLAND_MAP_IMAGE = '/maps/floreana-island-map-new.png';
+export const ISLAND_MAP_IMAGE = '/maps/floreana-island-map-new.webp';
 export const ISLAND_MAP_ASPECT = 1402 / 1122;
 // Approximate real width of the painted chart, used by the scale bar.
 export const ISLAND_MAP_WIDTH_KM = 14.5;
+let islandMapPreload = null;
+
+export function prefetchIslandMapImage() {
+  if (islandMapPreload || typeof window === 'undefined' || typeof window.Image !== 'function') return;
+  islandMapPreload = new window.Image();
+  islandMapPreload.decoding = 'async';
+  islandMapPreload.src = ISLAND_MAP_IMAGE;
+}
 
 // Coordinates validated against a land/water mask of the painting
 // (scripts/check-map-placements.mjs). Real map areas are all labelled and

@@ -10,7 +10,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, textureCompress, getBounds } from '@gltf-transform/functions';
+import { dedup, flatten, join, prune, textureCompress, getBounds } from '@gltf-transform/functions';
 import sharp from 'sharp';
 
 const root = process.cwd();
@@ -131,7 +131,9 @@ async function splitSegmented({ source, outputs }) {
     }
 
     await doc.transform(
+      flatten(),
       dedup(),
+      join(),
       textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [output.size, output.size] }),
       prune(),
     );

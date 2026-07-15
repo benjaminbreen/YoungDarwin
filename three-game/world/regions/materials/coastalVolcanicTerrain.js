@@ -57,9 +57,29 @@ ${lines.join('\n')}
         }`;
 }
 
+function ellipseMaskGLSL(areas = [], functionName = 'cvLocalBeach') {
+  if (!areas.length) {
+    return `float ${functionName}(vec2 p) { return 0.0; }`;
+  }
+  const lines = areas.map(area => {
+    const x = glslNumber(area.x || 0);
+    const z = glslNumber(area.z || 0);
+    const radiusX = glslNumber(area.radiusX || area.radius || 1);
+    const radiusZ = glslNumber(area.radiusZ || area.radius || 1);
+    const inner = glslNumber(area.inner ?? 0.72);
+    return `          m = max(m, 1.0 - smoothstep(${inner}, 1.0, length((p - vec2(${x}, ${z})) / vec2(${radiusX}, ${radiusZ}))));`;
+  });
+  return `float ${functionName}(vec2 p) {
+          float m = 0.0;
+${lines.join('\n')}
+          return clamp(m, 0.0, 1.0);
+        }`;
+}
+
 function coastalVolcanicCommonGLSL({
   pathPoints,
   clearings,
+  beachAreas,
   pathSplatUniform,
   pathSplatBoundsUniform,
   pathSplatFunction,
@@ -174,6 +194,7 @@ function coastalVolcanicCommonGLSL({
           color = mix(color, vec3(0.70, 0.62, 0.36), drySeed * 0.28);
           return color;
         }
+        ${ellipseMaskGLSL(beachAreas)}
         ${hasBaseSand ? /* glsl */`
         uniform sampler2D uCoastalBaseSand;
         uniform sampler2D uCoastalBaseSandRough;
@@ -199,7 +220,9 @@ function coastalVolcanicCommonGLSL({
           float lavaW = clamp(lava * 0.88 + wet * 0.45, 0.0, 1.0);
           float ridgeW = clamp(ridge * 0.78 + slope * 0.35, 0.0, 1.0);
           float scrubW = clamp(scrub * 0.62, 0.0, 1.0);
-          return (1.0 - lavaW) * (1.0 - ridgeW * 0.85) * (1.0 - scrubW * 0.75);
+          float baseCover = (1.0 - lavaW) * (1.0 - ridgeW * 0.85) * (1.0 - scrubW * 0.75);
+          float localBeach = cvLocalBeach(p) * smoothstep(-2.3, -1.25, height) * (1.0 - slope * 0.5);
+          return max(baseCover, localBeach * 0.98);
         }
         vec2 cvSandUvA(vec2 p) { return p * 0.13; }
         vec2 cvSandUvB(vec2 p) { return cvRotate(p, 0.52) * 0.083 + vec2(0.4, -0.16); }` : ''}
@@ -248,6 +271,8 @@ function coastalBaseColorGLSL({ hasBaseSand } = {}) {
         float wet = max(waterByHeight, shoreBand * 0.58);
         float beach = shoreBand * (1.0 - slope * 0.72);
         beach = max(beach, smoothstep(-13.0, -27.0, p.y) * smoothstep(-0.2, 2.2, height) * (1.0 - slope * 0.55));
+        float localBeach = cvLocalBeach(p) * smoothstep(-2.3, -1.25, height) * (1.0 - slope * 0.5);
+        beach = max(beach, localBeach);
         float ridge = max(smoothstep(15.0, 30.0, p.y), smoothstep(5.0, 7.6, height));
         float lava = max(smoothstep(0.22, 0.72, cvFbm(p * 0.12 + vec2(8.0, -3.0))), smoothstep(-7.0, -18.0, p.x));
         float scrub = smoothstep(5.0, 20.0, p.x) * smoothstep(-3.0, 13.0, p.y) * (1.0 - slope * 0.85);
@@ -425,6 +450,7 @@ function coastalNormalGLSL({ pathSplatFunction, hasBaseSand, hasBaseSandNormal }
 export function createCoastalVolcanicTerrainMaterial({
   pathPoints,
   pathClearings = [],
+  beachAreas = [],
   textureSet = DRY_FLOREANA_TEXTURE_SETS.sandyCoastal,
   cacheKey = 'coastal-volcanic-terrain-v1',
   roughness = 0.88,
@@ -529,6 +555,7 @@ export function createCoastalVolcanicTerrainMaterial({
 ${coastalVolcanicCommonGLSL({
           pathPoints,
           clearings: pathClearings,
+          beachAreas,
           pathSplatUniform,
           pathSplatBoundsUniform,
           pathSplatFunction,

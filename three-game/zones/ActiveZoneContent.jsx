@@ -27,12 +27,12 @@ import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 
-export function ActiveZoneContent({ settings, contentPhase = 6 }) {
-  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
+export function ActiveZoneContent({ settings, contentPhase = 3 }) {
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 3;
   const gameplayReady = stagedPhase >= 1;
-  const environmentReady = stagedPhase >= 2;
-  const interactablesReady = stagedPhase >= 3;
-  const actorsReady = stagedPhase >= 4;
+  const environmentReady = stagedPhase >= 1;
+  const interactablesReady = stagedPhase >= 2;
+  const actorsReady = stagedPhase >= 3;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
@@ -52,7 +52,7 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   if (interior) {
     return (
       <>
-        <PhysicsTerrain />
+        <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
         {settings.physicsObstacles !== false && <PhysicsObstacles />}
         {gameplayReady && settings.physicsProps !== false && <PhysicsProps />}
         <Suspense fallback={null}>
@@ -66,7 +66,7 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
     <>
       {settings.terrain !== false && <Terrain segmentCap={settings.terrainSegmentCap} />}
       {settings.terrain !== false && <BorderVistas />}
-      <PhysicsTerrain />
+      <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
       {settings.landmarks !== false && <Landmarks />}
       {environmentReady && settings.worldDetails !== false && (
         <Suspense fallback={null}>

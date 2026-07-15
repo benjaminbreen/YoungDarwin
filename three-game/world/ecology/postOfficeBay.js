@@ -1,4 +1,9 @@
-import { coveWaterMask, postOfficePathInfo } from '../regions/postOfficeBay/terrain';
+import {
+  coveWaterMask,
+  postOfficeBayCoastZ,
+  postOfficeLandingBeachMask,
+  postOfficePathInfo,
+} from '../regions/postOfficeBay/terrain';
 import {
   buildStandardDryGrassPatchItems,
   createStandardDryGrassPatchLayer,
@@ -47,6 +52,15 @@ function acceptPostOfficeGrass({ x, z, path, biome }) {
   return edgeClusterStrength(x, z) > 0.18;
 }
 
+function acceptLandingTransitionGrass({ x, z, path, biome }) {
+  if (biome === 'water' || coveWaterMask(x, z) > 0.1) return false;
+  if (path && path.distance < path.width * 1.7) return false;
+  const shoreDistance = z - postOfficeBayCoastZ(x);
+  return shoreDistance > 9
+    && shoreDistance < 14.5
+    && postOfficeLandingBeachMask(x, z) > 0.08;
+}
+
 export function buildPostOfficeBayDryGrassLayer() {
   const items = buildStandardDryGrassPatchItems({
     zoneId: 'POST_OFFICE_BAY',
@@ -67,9 +81,28 @@ export function buildPostOfficeBayDryGrassLayer() {
     drynessAt: postOfficeDryness,
     tintAt: standardDryGrassTint,
   });
+  const landingTransitionItems = buildStandardDryGrassPatchItems({
+    zoneId: 'POST_OFFICE_BAY',
+    idPrefix: 'post-office-bay-landing-transition-grass',
+    count: 28,
+    seed: 6217,
+    bounds: { minX: -3, maxX: 26, minZ: 8, maxZ: 18 },
+    pathInfo: postOfficePathInfo,
+    rejectBiomes: ['water'],
+    pathCenterMax: 0,
+    pathTreadMax: 0.02,
+    maxGrade: 0.82,
+    slopeStep: 0.85,
+    scale: [0.46, 0.9],
+    windYaw: -0.64,
+    attemptsPerItem: 160,
+    accept: acceptLandingTransitionGrass,
+    drynessAt: postOfficeDryness,
+    tintAt: standardDryGrassTint,
+  });
   return createStandardDryGrassPatchLayer({
     id: 'post-office-bay-path-dry-grass',
-    items,
+    items: [...items, ...landingTransitionItems],
     materialColor: '#f1edc9',
     emissive: '#262714',
     emissiveIntensity: 0.06,

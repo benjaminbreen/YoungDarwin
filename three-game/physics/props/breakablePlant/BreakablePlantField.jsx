@@ -32,7 +32,7 @@ import {
   getRuntimePlayerPose,
   useThreeGameStore,
 } from '../../../store';
-import { onPropEvent, emitPropEvent } from '../propEvents';
+import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 
 export const DEFAULT_PLANT_TUNING = {
@@ -745,6 +745,7 @@ export function BreakablePlantField({ spec }) {
         candidates.push({ piece, dist, dirX: dist > 0.2 ? dx / dist : fx, dirZ: dist > 0.2 ? dz / dist : fz });
       }
       candidates.sort((a, b) => a.dist - b.dist);
+      if (candidates.length) claimSwing(strike.swingId);
       for (const hit of candidates.slice(0, tuning.strikeMaxPieces)) {
         const punch = hit.piece.mass * 2.4;
         damagePiece(hit.piece.key, tuning.strikeDamage, {

@@ -2309,100 +2309,71 @@ function PromptCard({ title, subtitle, children }) {
   );
 }
 
-function RouteDecisionCard({ edgePrompt, fromZone, toZone, onContinue, onStay }) {
+function RouteEdgeBanner({ edgePrompt, toZone, onTravel }) {
+  const holdTimerRef = React.useRef(null);
+  const [pointerHolding, setPointerHolding] = useState(false);
   const routeDirection = directionLabel(edgePrompt.edge);
-  const routeKey = ROUTE_EDGE_ABBR[edgePrompt.edge] || routeDirection.slice(0, 2).toUpperCase();
   const copy = routePlaceCopy(toZone, edgePrompt);
-  const [visible, setVisible] = useState(false);
-  const closingRef = React.useRef(false);
-  const closeTimerRef = React.useRef(null);
-
-  const closeWith = useCallback(callback => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setVisible(false);
-    closeTimerRef.current = window.setTimeout(callback, 180);
+  const progress = Math.max(0, Math.min(1, pointerHolding ? 1 : edgePrompt.commitProgress || 0));
+  const requiresHold = edgePrompt.requiresHold === true;
+  const details = [
+    Number(edgePrompt.minutes) > 0 ? `about ${Math.round(edgePrompt.minutes)} minutes` : null,
+    Number(edgePrompt.fatigue) > 0 ? `+${edgePrompt.fatigue} fatigue` : null,
+  ].filter(Boolean);
+  const cancelPointerHold = () => {
+    if (holdTimerRef.current) window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+    setPointerHolding(false);
+  };
+  const beginPointerHold = event => {
+    if (!requiresHold) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    cancelPointerHold();
+    setPointerHolding(true);
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      setPointerHolding(false);
+      onTravel();
+    }, 650);
+  };
+  useEffect(() => () => {
+    if (holdTimerRef.current) window.clearTimeout(holdTimerRef.current);
   }, []);
-
-  const handleContinue = useCallback(() => {
-    closeWith(onContinue);
-  }, [closeWith, onContinue]);
-
-  const handleStay = useCallback(() => {
-    closeWith(onStay);
-  }, [closeWith, onStay]);
-
-  useEffect(() => {
-    setBlockingUiMode(true);
-    const frame = window.requestAnimationFrame(() => setVisible(true));
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-      setBlockingUiMode(false);
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        handleStay();
-      } else if (event.key?.toLowerCase() === 'e' || event.key === 'Enter') {
-        event.preventDefault();
-        handleContinue();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleContinue, handleStay]);
-
   return (
     <section
-      className={`pointer-events-auto absolute left-1/2 top-1/2 z-30 w-[min(40rem,calc(100vw-1.25rem))] -translate-x-1/2 rounded-[3px] border border-expedition-brass/85 bg-[linear-gradient(165deg,rgba(18,29,42,0.94),rgba(7,13,20,0.96))] p-4 font-expedition text-expedition-parchment shadow-[0_24px_70px_rgba(0,0,0,0.64),inset_0_1px_0_rgba(227,197,133,0.16)] backdrop-blur-md transition-[opacity,transform] duration-200 ease-out sm:p-5 ${visible ? '-translate-y-1/2 scale-100 opacity-100' : 'translate-y-[calc(-50%+0.5rem)] scale-[0.975] opacity-0'}`}
-      aria-label={`Route found: ${fromZone.name} to ${toZone.name}`}
+      className="pointer-events-none absolute bottom-[8.5rem] left-1/2 z-20 w-[min(30rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-hidden rounded-sm border border-expedition-brass/55 bg-[rgba(12,18,21,0.72)] px-3 py-2.5 font-expedition text-expedition-parchment shadow-[0_12px_30px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(227,197,133,0.14)] backdrop-blur-md sm:bottom-[6.2rem]"
+      aria-live="polite"
     >
-      <div className="pointer-events-none absolute inset-[4px] rounded-[2px] border border-expedition-gold/20" />
-      <div className="relative flex items-start justify-between gap-4 border-b border-expedition-brass/45 pb-3">
-        <div className="min-w-0">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/85">Route Found</div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="text-[22px] font-bold leading-none tracking-[0.02em] text-expedition-parchment sm:text-[28px]">
-              {toZone.name}
-            </h2>
-            <span className="text-[12px] uppercase tracking-[0.16em] text-expedition-faded">{routeDirection}</span>
-          </div>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-semibold tracking-[0.035em]">
+            {requiresHold ? 'Hold to return' : `Continue ${routeDirection.toLowerCase()}`} to <span className="text-expedition-goldbright">{toZone.name}</span>
+          </p>
+          <p className="mt-0.5 truncate text-[10.5px] italic text-expedition-faded">
+            {[copy, ...details].filter(Boolean).join(' · ')}
+          </p>
         </div>
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 text-[15px] font-bold text-expedition-goldbright shadow-[inset_0_0_0_4px_rgba(201,163,95,0.1)]">
-          {routeKey}
-        </div>
-      </div>
-      <div className="relative py-4 sm:py-5">
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[15px] font-semibold text-expedition-parchment sm:text-[17px]">
-          <span className="truncate">{fromZone.name}</span>
-          <span className="text-expedition-gold/80">{'->'}</span>
-          <span className="truncate text-expedition-goldbright">{toZone.name}</span>
-        </div>
-        <p className="mt-3 max-w-[34rem] text-[14px] leading-relaxed text-expedition-parchment/86 sm:text-[15px]">
-          {copy}
-        </p>
-      </div>
-      <div className="relative grid gap-2 border-t border-expedition-brass/35 pt-3 sm:grid-cols-2">
         <button
           type="button"
-          onClick={handleContinue}
-          className="flex min-h-[3.35rem] items-center justify-center gap-3 rounded-sm border border-expedition-gold bg-expedition-gold px-4 py-3 text-[14px] font-bold uppercase tracking-[0.12em] text-expedition-ink shadow-[0_8px_18px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,244,190,0.42)] transition hover:bg-expedition-goldbright focus:outline-none focus:ring-2 focus:ring-expedition-goldbright"
+          onClick={requiresHold ? undefined : onTravel}
+          onPointerDown={beginPointerHold}
+          onPointerUp={cancelPointerHold}
+          onPointerCancel={cancelPointerHold}
+          onPointerLeave={cancelPointerHold}
+          className="pointer-events-auto inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-expedition-gold/45 bg-expedition-gold/10 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-expedition-goldbright transition hover:bg-expedition-gold/20"
         >
           <PromptKey active>E</PromptKey>
-          Continue {routeDirection}
+          {requiresHold ? 'Hold return' : 'Travel'}
         </button>
-        <button
-          type="button"
-          onClick={handleStay}
-          className="flex min-h-[3.35rem] items-center justify-center gap-3 rounded-sm border border-expedition-brass/65 bg-black/24 px-4 py-3 text-[14px] font-semibold uppercase tracking-[0.12em] text-expedition-parchment transition hover:border-expedition-gold hover:bg-expedition-gold/10 hover:text-expedition-goldbright focus:outline-none focus:ring-2 focus:ring-expedition-gold/70"
-        >
-          <PromptKey>Esc</PromptKey>
-          Stay Here
-        </button>
+      </div>
+      <div className="absolute inset-x-0 bottom-0 h-[2px] bg-black/35">
+        <div
+          className="h-full bg-expedition-goldbright transition-[width] duration-75"
+          style={{
+            width: `${progress * 100}%`,
+            transitionDuration: pointerHolding ? '650ms' : '75ms',
+          }}
+        />
       </div>
     </section>
   );
@@ -2782,14 +2753,16 @@ function InteractionPrompt() {
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
   const nearbyItem = useThreeGameStore(state => state.nearbyItem);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
-  const dismissEdgePrompt = useThreeGameStore(state => state.dismissEdgePrompt);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const lastOutcome = useThreeGameStore(state => state.lastOutcome);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
-  const nearby = getThreeSpecimens(currentZoneId).find(specimen => {
-    const actorId = specimen.instanceId || specimen.id;
-    return !collectedSpecimenActorIds?.includes(actorId) && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
-  });
+  const nearby = useMemo(() => (
+    getThreeSpecimens(currentZoneId).find(specimen => {
+      const actorId = specimen.instanceId || specimen.id;
+      return !collectedSpecimenActorIds?.includes(actorId)
+        && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
+    }) || null
+  ), [collectedSpecimenActorIds, currentZoneId, nearbySpecimenId]);
   const [renderedSpecimen, setRenderedSpecimen] = useState(null);
   const [specimenPromptVisible, setSpecimenPromptVisible] = useState(false);
   const [outcomeToast, setOutcomeToast] = useState(null);
@@ -2878,6 +2851,7 @@ function InteractionPrompt() {
   }
   if (!nearby && !renderedSpecimen && !edgePrompt) return null;
   if (!nearby && !renderedSpecimen && edgePrompt) {
+    if (edgePrompt.visible === false) return null;
     const isOpen = edgePrompt.kind === 'open';
     if (isOpen && edgePrompt.toRegionId) {
       if (edgePrompt.localTransition) {
@@ -2890,6 +2864,8 @@ function InteractionPrompt() {
               onClick={() => beginZoneTransition(edgePrompt.toRegionId, {
                 entryEdge: edgePrompt.entryEdge || null,
                 note: edgePrompt.description,
+                mode: 'threshold',
+                localTransition: true,
               })}
             >
               Enter
@@ -2897,18 +2873,17 @@ function InteractionPrompt() {
           </PromptCard>
         );
       }
-      const fromZone = getZone(currentZoneId);
       const toZone = getZone(edgePrompt.toRegionId);
       return (
-        <RouteDecisionCard
+        <RouteEdgeBanner
           edgePrompt={edgePrompt}
-          fromZone={fromZone}
           toZone={toZone}
-          onContinue={() => beginZoneTransition(edgePrompt.toRegionId, {
+          onTravel={() => beginZoneTransition(edgePrompt.toRegionId, {
             entryEdge: ROUTE_ENTRY_EDGES[edgePrompt.edge] || null,
             note: routePlaceCopy(toZone, edgePrompt),
+            source: 'edge',
+            mode: 'island',
           })}
-          onStay={() => dismissEdgePrompt(edgePrompt.id)}
         />
       );
     }

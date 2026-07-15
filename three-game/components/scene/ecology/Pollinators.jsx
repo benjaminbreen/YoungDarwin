@@ -400,12 +400,14 @@ export function Pollinators({ enabled = true }) {
     flyBody.scale(0.0035, 0.0038, 0.017);
     const wingTexture = sulphurWingTexture();
     const fritTextures = fritillaryWingTextures();
+    // Matte blue-black body — the real bee's blue lives in the wings, so the
+    // body keeps only a whisper of emissive to survive distance dimming.
     const beeBodyMat = new THREE.MeshStandardMaterial({
-      color: '#17181f',
-      roughness: 0.26,
-      metalness: 0.6,
+      color: '#121219',
+      roughness: 0.38,
+      metalness: 0.35,
       emissive: '#0f2148',
-      emissiveIntensity: 0.38,
+      emissiveIntensity: 0.14,
     });
     const beeWingMat = new THREE.MeshPhysicalMaterial({
       color: '#35497d',

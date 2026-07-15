@@ -4,7 +4,7 @@ const FLOREANA_PBR_BASE = '/assets/textures/world/floreana-pbr';
 
 export const FLOREANA_PBR_TEXTURES = {
   sandyTuff: {
-    albedo: `${FLOREANA_PBR_BASE}/sandy-tuff_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/sandy-tuff_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/sandy-tuff_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/sandy-tuff_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/sandy-tuff_height.png`,
@@ -80,7 +80,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   redCinderDirt: {
-    albedo: `${FLOREANA_PBR_BASE}/red-cinder-dirt_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/red-cinder-dirt_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/red-cinder-dirt_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/red-cinder-dirt_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/red-cinder-dirt_height.png`,
@@ -95,7 +95,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   darkBasaltGravel: {
-    albedo: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_height.png`,
@@ -140,7 +140,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   dryGrassLitter: {
-    albedo: `${FLOREANA_PBR_BASE}/dry-grass-litter_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/dry-grass-litter_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/dry-grass-litter_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/dry-grass-litter_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/dry-grass-litter_height.png`,
@@ -170,7 +170,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   grass: {
-    albedo: `${FLOREANA_PBR_BASE}/grass_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/grass_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/grass_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/grass_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/grass_height.png`,
@@ -185,7 +185,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   loam: {
-    albedo: `${FLOREANA_PBR_BASE}/loam_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/loam_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/loam_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/loam_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/loam_height.png`,
@@ -200,7 +200,7 @@ export const FLOREANA_PBR_TEXTURES = {
     },
   },
   olivineBeach: {
-    albedo: `${FLOREANA_PBR_BASE}/olivine-beach_albedo.png`,
+    albedo: `${FLOREANA_PBR_BASE}/olivine-beach_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/olivine-beach_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/olivine-beach_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/olivine-beach_height.png`,
@@ -289,6 +289,13 @@ export function loadPbrTerrainSet(textureSet) {
       colorSpace: THREE.NoColorSpace,
     }),
   };
+}
+
+export function loadTerrainAlbedo(textureSet) {
+  return loadRepeatingTerrainTexture(textureSet.albedo, {
+    fallback: textureSet.fallbacks?.albedo || '#ffffff',
+    colorSpace: THREE.SRGBColorSpace,
+  });
 }
 
 export function disposePbrTerrainSet(textureSet) {

@@ -6,7 +6,8 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { movementTerrainHeight } from '../../world/terrain';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
-import { onPropEvent, emitPropEvent } from '../props/propEvents';
+import { onPropEvent, emitPropEvent, claimSwing } from '../props/propEvents';
+import { triggerHitstop } from '../../world/worldTime';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 const DEFAULT_STRIKE_RANGE = 2.9;
@@ -312,6 +313,10 @@ export function DestructibleTimberStructure({
         candidates.push({ piece, dist, dirX: dist > 0.2 ? dx / dist : fx, dirZ: dist > 0.2 ? dz / dist : fz });
       }
       candidates.sort((a, b) => a.dist - b.dist);
+      if (candidates.length) {
+        claimSwing(strike.swingId);
+        triggerHitstop(0.05);
+      }
       for (const hit of candidates.slice(0, strikeMaxPieces)) {
         const punch = hit.piece.mass * 2.6;
         releasePiece(hit.piece.id, {

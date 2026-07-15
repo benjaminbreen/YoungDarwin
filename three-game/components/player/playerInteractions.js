@@ -14,9 +14,28 @@ export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
 }
 
+export function shouldRunInPlaceAtTravelEdge(storeState, { moving = false, isDarwinMode = true } = {}) {
+  if (!isDarwinMode) return false;
+  const transition = storeState?.transition;
+  const departingFromEdge = transition?.mode === 'island'
+    && transition.phase === 'departing'
+    && (transition.source === 'edge' || transition.source === 'edge-return');
+  if (departingFromEdge) return true;
+
+  const prompt = storeState?.edgePrompt;
+  return Boolean(
+    moving
+    && prompt?.kind === 'open'
+    && prompt.toRegionId
+    && !prompt.localTransition
+    && prompt.visible !== false
+    && Number(prompt.distance) <= 3,
+  );
+}
+
 export function nearestRegionEdgePrompt(regionId, position, facing) {
   const config = getRegionTerrainConfig(regionId);
-  const threshold = 5.2;
+  const threshold = 16;
   const distEast = config.width / 2 - position.x;
   const distWest = position.x + config.width / 2;
   const distSouth = config.depth / 2 - position.z;
@@ -64,7 +83,12 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
       bestFacingWeight = facingWeight;
     }
   }
-  return bestHint ? { ...bestHint, distance: bestDistance, facingWeight: bestFacingWeight } : null;
+  return bestHint ? {
+    ...bestHint,
+    distance: bestDistance,
+    facingWeight: bestFacingWeight,
+    visible: bestDistance <= 8,
+  } : null;
 }
 
 function distanceFromEdge(regionId, edge, position) {
@@ -81,10 +105,9 @@ function distanceFromEdge(regionId, edge, position) {
 function arrivalEdgeSuppressesPrompt(block, regionId, position, promptPayload) {
   if (!block || block.zoneId !== regionId || !block.edge) return false;
   const distance = distanceFromEdge(regionId, block.edge, position);
-  // Arrival spawns are deliberately near the entry border. Suppress the prompt
-  // there, but re-enable it if the player deliberately walks back into the
-  // tight edge band instead of moving inward.
-  if (distance <= (block.returnBand || 2.35)) return false;
+  // Arrival spawns are deliberately near the entry border. Automatic travel is
+  // disarmed until the player has clearly entered the destination; this removes
+  // the one-backward-step bounce that the old tight return band still allowed.
   if (distance > (block.clearance || 10)) {
     useThreeGameStore.getState().clearArrivalEdgeBlock?.();
     return false;
@@ -260,11 +283,105 @@ export function updatePlayerInteractions({
   const currentPromptId = storeState.edgePrompt?.id || null;
   const dismissedPromptId = storeState.dismissedEdgePromptId || null;
   const arrivalSuppressed = arrivalEdgeSuppressesPrompt(storeState.arrivalEdgeBlock, currentZoneId, position, promptPayload);
-  const visiblePromptPayload = arrivalSuppressed || promptPayload?.id === dismissedPromptId ? null : promptPayload;
+  const previousSample = stateRef.current.edgeTravelSample;
+  const edgeDirection = promptPayload?.edge ? EDGE_DIRECTIONS[promptPayload.edge] : null;
+  const outwardDelta = previousSample && edgeDirection
+    ? (position.x - previousSample.x) * edgeDirection.dx + (position.z - previousSample.z) * edgeDirection.dy
+    : 0;
+  stateRef.current.edgeTravelSample = { x: position.x, z: position.z, zoneId: currentZoneId };
+  let autoTransitionStarted = false;
+  const autoCandidate = !arrivalSuppressed
+    && promptPayload?.kind === 'open'
+    && promptPayload?.toRegionId
+    && !promptPayload.localTransition
+    && promptPayload.distance <= 2.5
+    && promptPayload.facingWeight > 0.18;
+  const pushingForward = Boolean(keys.forward || touch.forward);
+  if (autoCandidate && (outwardDelta > 0.0005 || pushingForward)) {
+    const intent = stateRef.current.edgeTravelIntent;
+    if (!intent || intent.id !== promptPayload.id) {
+      stateRef.current.edgeTravelIntent = { id: promptPayload.id, startedAt: interactionNow };
+    }
+    const startedAt = stateRef.current.edgeTravelIntent.startedAt;
+    promptPayload.commitProgress = Math.min(1, (interactionNow - startedAt) / 0.45);
+    if (promptPayload.commitProgress >= 1 && !storeState.transition) {
+      autoTransitionStarted = true;
+      stateRef.current.edgeTravelIntent = null;
+      setEdgePrompt(null);
+      beginZoneTransition(promptPayload.toRegionId, {
+        entryEdge: oppositeEdge(promptPayload.edge),
+        note: promptPayload.description,
+        source: 'edge',
+        mode: 'island',
+      });
+    }
+  } else {
+    stateRef.current.edgeTravelIntent = null;
+    if (promptPayload) promptPayload.commitProgress = 0;
+  }
+  // A player who has just arrived may still intentionally go straight back,
+  // but only after turning to face the entry edge and holding the interaction
+  // control. Backpedalling one step while still facing into the new map cannot
+  // satisfy either condition, so it never bounces them into another cinematic.
+  let deliberateReturnPayload = null;
+  const deliberateReturnCandidate = arrivalSuppressed
+    && promptPayload?.kind === 'open'
+    && promptPayload?.toRegionId
+    && !promptPayload.localTransition
+    && promptPayload.distance <= 5
+    && promptPayload.facingWeight > 0.18;
+  const interactionHeld = Boolean(keys.interact || touch.interact);
+  if (deliberateReturnCandidate) {
+    deliberateReturnPayload = {
+      ...promptPayload,
+      visible: true,
+      requiresHold: true,
+      returning: true,
+      commitProgress: 0,
+    };
+    if (interactionHeld) {
+      const intent = stateRef.current.arrivalReturnIntent;
+      if (!intent || intent.id !== promptPayload.id) {
+        stateRef.current.arrivalReturnIntent = { id: promptPayload.id, startedAt: interactionNow };
+      }
+      deliberateReturnPayload.commitProgress = Math.min(
+        1,
+        (interactionNow - stateRef.current.arrivalReturnIntent.startedAt) / 0.65,
+      );
+      if (deliberateReturnPayload.commitProgress >= 1 && !storeState.transition) {
+        autoTransitionStarted = true;
+        stateRef.current.arrivalReturnIntent = null;
+        setEdgePrompt(null);
+        beginZoneTransition(promptPayload.toRegionId, {
+          entryEdge: oppositeEdge(promptPayload.edge),
+          note: promptPayload.description,
+          source: 'edge-return',
+          mode: 'island',
+        });
+      }
+    } else {
+      stateRef.current.arrivalReturnIntent = null;
+    }
+  } else {
+    stateRef.current.arrivalReturnIntent = null;
+  }
+  const visiblePromptPayload = promptPayload?.id === dismissedPromptId
+    ? null
+    : arrivalSuppressed
+      ? deliberateReturnPayload
+      : promptPayload;
   if (!promptPayload && dismissedPromptId) {
     setEdgePrompt(null);
-  } else if ((visiblePromptPayload?.id || null) !== currentPromptId) {
+  } else if ((visiblePromptPayload?.id || null) !== currentPromptId
+    || Math.abs((visiblePromptPayload?.commitProgress || 0) - (storeState.edgePrompt?.commitProgress || 0)) > 0.035
+    || Boolean(visiblePromptPayload?.visible) !== Boolean(storeState.edgePrompt?.visible)) {
     setEdgePrompt(visiblePromptPayload);
+  }
+  if (autoTransitionStarted) {
+    lastInteractRef.current = keys.interact || touch.interact;
+    lastExamineRef.current = keys.examine || touch.inspect;
+    lastCameraRef.current = keys.camera;
+    return;
   }
 
   let nearest = null;
@@ -480,10 +597,17 @@ export function updatePlayerInteractions({
       }
     } else if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
       setNearbySpecimen(null);
-    } else if (!specimen && currentState.edgePrompt?.kind === 'open' && currentState.edgePrompt.toRegionId && !stateRef.current.action) {
+    } else if (!specimen
+      && currentState.edgePrompt?.visible !== false
+      && currentState.edgePrompt?.requiresHold !== true
+      && currentState.edgePrompt?.kind === 'open'
+      && currentState.edgePrompt.toRegionId
+      && !stateRef.current.action) {
       beginZoneTransition(currentState.edgePrompt.toRegionId, {
         entryEdge: currentState.edgePrompt.entryEdge || oppositeEdge(currentState.edgePrompt.edge),
         note: currentState.edgePrompt.description,
+        mode: currentState.edgePrompt.localTransition ? 'threshold' : 'island',
+        localTransition: currentState.edgePrompt.localTransition === true,
       });
     } else if (currentState.edgePrompt?.kind === 'blocked' && !specimen) {
       setEdgePrompt({

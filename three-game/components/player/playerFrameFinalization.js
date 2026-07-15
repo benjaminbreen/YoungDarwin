@@ -125,6 +125,7 @@ export function finalizePlayerFrame({
   arcade = null,
   groundDistance = null,
   tiredRun = false,
+  runInPlace = false,
   skipFootsteps = false,
   skipSwimEconomy = false,
 }) {
@@ -135,6 +136,9 @@ export function finalizePlayerFrame({
   const yawDelta = Math.atan2(Math.sin(currentYaw - previousYaw), Math.cos(currentYaw - previousYaw));
   const turnRate = delta > 0 ? yawDelta / delta : 0;
   const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+  const locomotionSpeed = runInPlace
+    ? Math.max(horizontalSpeed, playerConfig.runSpeed * 0.86)
+    : horizontalSpeed;
   const sprintingSwim = swimState.current.active && running && horizontalSpeed > swimConfig.speed * 1.05;
   const resolvedGroundDistance = Number.isFinite(groundDistance)
     ? groundDistance
@@ -166,6 +170,8 @@ export function finalizePlayerFrame({
   });
 
   stateRef.current.speed = horizontalSpeed;
+  stateRef.current.animationSpeed = locomotionSpeed;
+  stateRef.current.travelRunInPlace = runInPlace;
   stateRef.current.turnRate = turnRate;
   stateRef.current.turnDirection = Math.sign(turnRate);
   stateRef.current.slopeGrade = terrainFeedback.current.grade;
@@ -182,15 +188,15 @@ export function finalizePlayerFrame({
   stateRef.current.groundDistance = resolvedGroundDistance;
   stateRef.current.verticalSpeed = velocity.current.y;
   stateRef.current.tiredRun = tiredRun;
-  const physicalRunning = running && (
+  const physicalRunning = runInPlace || (running && (
     horizontalSpeed > playerConfig.walkSpeed * 0.92
     || (stateRef.current.running && horizontalSpeed > playerConfig.walkSpeed * 0.66)
-  );
+  ));
   const visual = updateVisualLocomotionPhase(visualLocomotion.current, {
     now,
-    moving,
+    moving: moving || runInPlace,
     physicalRunning,
-    speed: horizontalSpeed,
+    speed: locomotionSpeed,
     action: stateRef.current.action,
     actionUntil: stateRef.current.actionUntil,
     playerConfig,
@@ -206,7 +212,10 @@ export function finalizePlayerFrame({
     ),
   });
   stateRef.current.running = visual.running;
-  stateRef.current.walking = horizontalSpeed > 0.55 && !stateRef.current.running && (visual.walking || moving);
+  stateRef.current.walking = !runInPlace
+    && horizontalSpeed > 0.55
+    && !stateRef.current.running
+    && (visual.walking || moving);
   stateRef.current.locomotionPhase = visual.phase;
   stateRef.current.locomotionVisualRunning = visual.running;
   stateRef.current.crouchRunning = stateRef.current.crouching && crouchRunIntent && horizontalSpeed > playerConfig.walkSpeed * 0.5;
@@ -234,10 +243,11 @@ export function finalizePlayerFrame({
   // with a big effort balance leaves Darwin winded (heavy-breathing idle +
   // boosted breathing layer) until it drains back down.
   const previousEffort = stateRef.current.runEffort || 0;
-  stateRef.current.runEffort = (visual.running || sprintingSwim)
+  stateRef.current.runEffort = ((visual.running && !runInPlace) || sprintingSwim)
     ? Math.min(previousEffort + delta * (stateRef.current.sprinting ? 1.35 : 1), 14)
     : Math.max(0, previousEffort - delta * (moving ? 0.55 : 1.35));
   const restingNow = !moving
+    && !runInPlace
     && !stateRef.current.airborne
     && !swimState.current.active
     && horizontalSpeed < 0.5;
@@ -298,7 +308,7 @@ export function finalizePlayerFrame({
       position: p,
       facing: facing.current,
       zoneId: currentZoneId,
-      moving,
+      moving: moving && !runInPlace,
       horizontalSpeed,
       running: stateRef.current.running,
       airborne: stateRef.current.airborne,
@@ -375,7 +385,7 @@ export function finalizePlayerFrame({
       speed: horizontalSpeed,
     };
   }
-  previousMotion.current.moving = moving;
+  previousMotion.current.moving = moving || runInPlace;
   previousMotion.current.running = stateRef.current.running;
   previousMotion.current.yaw = currentYaw;
 }

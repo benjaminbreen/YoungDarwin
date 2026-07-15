@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import {
   FLOREANA_PBR_TEXTURES,
-  disposePbrTerrainSet,
-  loadPbrTerrainSet,
+  loadTerrainAlbedo,
 } from '../materials/pbrTerrainTextures';
 import {
   PENAL_COLONY_COURTYARD,
@@ -75,11 +74,10 @@ function settlementMaskGLSL() {
 }
 
 export function createPenalColonyTerrainMaterial() {
-  const grassTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.grass);
-  const loamTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.loam);
-  const redDirtTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.redCinderDirt);
-  const shoulderTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.coastalGrassShoulder);
-  const dryGrassTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.dryGrassLitter);
+  const grassAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.grass);
+  const loamAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.loam);
+  const redDirtAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.redCinderDirt);
+  const dryGrassAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.dryGrassLitter);
   const pathSplatTexture = createStandardFootPathSplatTexture({
     pathPoints: PENAL_COLONY_PATHS,
     bounds: PENAL_COLONY_SPLAT_BOUNDS,
@@ -92,11 +90,10 @@ export function createPenalColonyTerrainMaterial() {
   });
 
   material.addEventListener('dispose', () => {
-    disposePbrTerrainSet(grassTextures);
-    disposePbrTerrainSet(loamTextures);
-    disposePbrTerrainSet(redDirtTextures);
-    disposePbrTerrainSet(shoulderTextures);
-    disposePbrTerrainSet(dryGrassTextures);
+    grassAlbedo.dispose();
+    loamAlbedo.dispose();
+    redDirtAlbedo.dispose();
+    dryGrassAlbedo.dispose();
     pathSplatTexture.dispose();
   });
 
@@ -106,14 +103,11 @@ export function createPenalColonyTerrainMaterial() {
       textureUniform: 'uPenalPathSplat',
       boundsUniform: 'uPenalPathSplatBounds',
     }));
-    shader.uniforms.uPenalGrassAlbedo = { value: grassTextures.albedo };
-    shader.uniforms.uPenalLoamAlbedo = { value: loamTextures.albedo };
-    shader.uniforms.uPenalRedDirtAlbedo = { value: redDirtTextures.albedo };
-    shader.uniforms.uPenalShoulderAlbedo = { value: shoulderTextures.albedo };
-    shader.uniforms.uPenalDryGrassAlbedo = { value: dryGrassTextures.albedo };
-    shader.uniforms.uPenalGrassRoughness = { value: grassTextures.roughness };
-    shader.uniforms.uPenalLoamRoughness = { value: loamTextures.roughness };
-    shader.uniforms.uPenalRedDirtRoughness = { value: redDirtTextures.roughness };
+    shader.uniforms.uPenalGrassAlbedo = { value: grassAlbedo };
+    shader.uniforms.uPenalLoamAlbedo = { value: loamAlbedo };
+    shader.uniforms.uPenalRedDirtAlbedo = { value: redDirtAlbedo };
+    shader.uniforms.uPenalShoulderAlbedo = { value: dryGrassAlbedo };
+    shader.uniforms.uPenalDryGrassAlbedo = { value: dryGrassAlbedo };
     shader.uniforms.uPenalGrassScale = { value: FLOREANA_PBR_TEXTURES.grass.scale };
     shader.uniforms.uPenalLoamScale = { value: FLOREANA_PBR_TEXTURES.loam.scale };
     shader.uniforms.uPenalRedDirtScale = { value: FLOREANA_PBR_TEXTURES.redCinderDirt.scale };
@@ -141,9 +135,6 @@ export function createPenalColonyTerrainMaterial() {
         uniform sampler2D uPenalRedDirtAlbedo;
         uniform sampler2D uPenalShoulderAlbedo;
         uniform sampler2D uPenalDryGrassAlbedo;
-        uniform sampler2D uPenalGrassRoughness;
-        uniform sampler2D uPenalLoamRoughness;
-        uniform sampler2D uPenalRedDirtRoughness;
         uniform float uPenalGrassScale;
         uniform float uPenalLoamScale;
         uniform float uPenalRedDirtScale;
@@ -188,10 +179,6 @@ export function createPenalColonyTerrainMaterial() {
           vec3 a = pcSrgbToLinear(texture2D(tex, uvA).rgb);
           vec3 b = pcSrgbToLinear(texture2D(tex, uvB).rgb);
           return mix(a, b, 0.2 + broad * 0.16);
-        }
-        float pcRoughness(sampler2D tex, vec2 p, float scale, float salt) {
-          vec2 uv = p * scale + vec2(0.15 + salt * 0.04, -0.19);
-          return clamp(texture2D(tex, uv).r, 0.26, 1.0);
         }
         float pcSplat(vec2 p, float scale, float softness, float threshold, vec2 stretch) {
           vec2 cell = floor(p * scale);
@@ -323,9 +310,9 @@ export function createPenalColonyTerrainMaterial() {
         vec4 pcRPathSplat = pcPathSplat(pcRp);
         float pcRPathCover = clamp(max(pcRPathMasks.y * 0.34, pcRPathSplat.r), 0.0, 1.0);
         float pcRGarden = pcGardenInfo(pcRp).x;
-        float pcRGrass = pcRoughness(uPenalGrassRoughness, pcRp, uPenalGrassScale, 0.0);
-        float pcRLoam = pcRoughness(uPenalLoamRoughness, pcRp, uPenalLoamScale, 2.0);
-        float pcRRed = pcRoughness(uPenalRedDirtRoughness, pcRp, uPenalRedDirtScale, 4.0);
+        float pcRGrass = 0.9 + pcFbm(pcRp * 0.7) * 0.07;
+        float pcRLoam = 0.76 + pcFbm(pcRp * 1.1 + vec2(3.0, -2.0)) * 0.12;
+        float pcRRed = 0.82 + pcFbm(pcRp * 1.3 + vec2(-4.0, 7.0)) * 0.13;
         float pcMappedRoughness = mix(pcRGrass, pcRLoam, clamp(pcRGarden + pcTrampledMask(pcRp) * 0.28, 0.0, 1.0));
         pcMappedRoughness = mix(pcMappedRoughness, pcRRed, pcRPathCover);
         roughnessFactor = mix(roughnessFactor, clamp(pcMappedRoughness, 0.48, 0.98), 0.62);

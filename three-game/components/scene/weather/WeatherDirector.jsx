@@ -65,6 +65,8 @@ export function WeatherDirector() {
     );
     const cumulusTarget = Math.min(1, (target.cumulus ?? 0.3) + (target.cumulusRange ?? 0.2) * cumulusWave);
     weatherEnv.cumulus = dampTowards(weatherEnv.cumulus, cumulusTarget, SLOW_LAMBDA, delta);
+    weatherEnv.cumulusClump = dampTowards(weatherEnv.cumulusClump, target.cumulusClump ?? 0.5, SLOW_LAMBDA, delta);
+    weatherEnv.cumulusScale = dampTowards(weatherEnv.cumulusScale, target.cumulusScale ?? 0.9, SLOW_LAMBDA, delta);
     weatherEnv.fogDensity = dampTowards(weatherEnv.fogDensity, target.fogDensity, SLOW_LAMBDA, delta);
     weatherEnv.mistAmount = dampTowards(weatherEnv.mistAmount, target.mist, SLOW_LAMBDA, delta);
     weatherEnv.lightDim = dampTowards(weatherEnv.lightDim, target.lightDim, SLOW_LAMBDA, delta);

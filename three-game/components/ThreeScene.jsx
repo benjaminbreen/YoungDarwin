@@ -21,13 +21,13 @@ import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
 
 export function ThreeScene({
   perfSettings,
-  contentPhase = 6,
+  contentPhase = 3,
   openingCamera = null,
   inputLocked = false,
 }) {
   const settings = perfSettings || {};
-  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
-  const environmentReady = stagedPhase >= 2;
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 3;
+  const environmentReady = stagedPhase >= 1;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const outdoors = !interior;

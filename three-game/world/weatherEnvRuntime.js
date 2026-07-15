@@ -6,6 +6,10 @@ export const weatherEnv = {
   // Fair-weather cumulus coverage (0 = empty blue, 1 = broken puffy field).
   // Independent of `overcast`, which is deck/ceiling closure.
   cumulus: 0.3,
+  // Macro grouping of the puff field (0 = even confetti, 1 = a few big
+  // masses with clean blue between) and puff size (<1 = fewer, bigger).
+  cumulusClump: 0.5,
+  cumulusScale: 0.9,
   fogDensity: 0.011,
   rainIntensity: 0,
   mistAmount: 0,

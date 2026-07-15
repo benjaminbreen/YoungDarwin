@@ -108,7 +108,7 @@ function FactRow({ fact, onSave }) {
           <button
             type="button"
             onClick={onSave}
-            className="text-[10px] font-semibold uppercase tracking-[0.16em] text-expedition-gold/85 underline decoration-expedition-gold/40 underline-offset-4 transition hover:text-expedition-goldbright"
+            className="text-[11px] font-semibold uppercase tracking-[0.16em] text-expedition-gold underline decoration-expedition-gold/40 underline-offset-4 transition hover:text-expedition-goldbright"
           >
             Save
           </button>
@@ -227,9 +227,12 @@ export function ExamineView() {
     >
       {/* Cinematic grade: the scene dims toward the edges, holding a clear
           pool of light on the subject; type sits directly on the shot. */}
-      <div className="pointer-events-none absolute inset-0 bg-[rgba(9,10,12,0.34)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_58%_54%_at_50%_46%,transparent_26%,rgba(7,8,10,0.55)_66%,rgba(4,5,6,0.88)_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[rgba(9,10,12,0.16)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_62%_58%_at_50%_46%,transparent_40%,rgba(7,8,10,0.55)_72%,rgba(4,5,6,0.88)_100%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(6,7,9,0.62)_0%,transparent_18%,transparent_72%,rgba(5,6,8,0.72)_100%)]" />
+      {/* Side scrims keep the reading columns legible over bright terrain
+          while the center pool stays light. */}
+      <div className="pointer-events-none absolute inset-0 hidden bg-[linear-gradient(90deg,rgba(5,6,8,0.66)_0%,rgba(5,6,8,0.30)_16%,transparent_32%,transparent_68%,rgba(5,6,8,0.30)_84%,rgba(5,6,8,0.66)_100%)] xl:block" />
 
       {/* Fine reticle ellipse framing the subject */}
       <svg
@@ -290,26 +293,26 @@ export function ExamineView() {
       </button>
 
       {/* Left column: field inquiry */}
-      <div className="pointer-events-auto absolute left-10 top-32 hidden w-[24rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
+      <div className="pointer-events-auto absolute left-10 top-32 hidden w-[24rem] [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
         <SectionHeading>Field Inquiry</SectionHeading>
-        <div className="mt-1.5 text-[13px] italic text-expedition-faded">Ask questions about what you observe.</div>
+        <div className="mt-1.5 text-[14px] italic text-expedition-faded">Ask questions about what you observe.</div>
         <div ref={chatScrollRef} className="mt-4 max-h-[calc(100vh-30rem)] min-h-[14rem] overflow-y-auto pr-2 [scrollbar-width:thin]">
           {session.chat.length === 0 && (
-            <div className="text-[14.5px] leading-relaxed text-expedition-parchment/60">
+            <div className="text-[16.5px] leading-relaxed text-expedition-parchment/75">
               The subject is before you. Ask what you wish to know, or attempt a procedure — measure it, describe it, test it.
             </div>
           )}
           {session.chat.map(entry => (
-            <div key={entry.id} className="mb-4 last:mb-0">
+            <div key={entry.id} className="mb-6 last:mb-0">
               <div className="flex items-baseline justify-between">
-                <span className={`text-[10.5px] font-semibold uppercase tracking-[0.2em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
+                <span className={`text-[11.5px] font-semibold uppercase tracking-[0.2em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
                   {entry.role === 'you' ? 'You' : 'Observation'}
                 </span>
-                <span className="text-[10.5px] text-expedition-faded/70">{chatAge(entry.at)}</span>
+                <span className="text-[12.5px] text-expedition-faded/90">{chatAge(entry.at)}</span>
               </div>
-              <div className="mt-1 text-[15px] leading-relaxed text-expedition-parchment/95">{entry.text}</div>
+              <div className="mt-1.5 text-[16.5px] leading-relaxed text-expedition-parchment/95">{entry.text}</div>
               {entry.behavior && (
-                <div className="mt-1 text-[13.5px] italic leading-relaxed text-expedition-parchment/65">{entry.behavior}</div>
+                <div className="mt-2 text-[14.5px] italic leading-relaxed text-expedition-parchment/75">{entry.behavior}</div>
               )}
             </div>
           ))}
@@ -331,18 +334,18 @@ export function ExamineView() {
             onFocus={() => setTypingMode(true)}
             onBlur={() => setTypingMode(false)}
             placeholder={`Ask about this ${session.kind === 'item' ? 'object' : 'specimen'}…`}
-            style={QUILL_INPUT_STYLE}
-            className="w-full text-[15px] placeholder:text-expedition-faded/60 focus:outline-none"
+            style={{ ...QUILL_INPUT_STYLE, borderBottom: '1px solid rgba(201,163,95,0.75)', padding: '0.45rem 0.05rem' }}
+            className="w-full text-[17px] placeholder:text-expedition-parchment/70 focus:outline-none"
           />
         </form>
-        <div className="mt-2.5 text-[12px] italic leading-snug text-expedition-faded/80">{examples}</div>
+        <div className="mt-3 text-[13.5px] leading-relaxed text-expedition-faded">{examples}</div>
         {session.error && (
           <div className="mt-1.5 text-[11.5px] text-[#d9a05a]">{session.error}</div>
         )}
       </div>
 
       {/* Right column: key facts + uncertainties */}
-      <div className="pointer-events-auto absolute right-10 top-32 hidden w-[21rem] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
+      <div className="pointer-events-auto absolute right-10 top-32 hidden w-[21rem] [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
         <SectionHeading>Key Facts</SectionHeading>
         <div className="mt-4 grid gap-3.5">
           {session.facts.map(fact => (
@@ -350,14 +353,14 @@ export function ExamineView() {
           ))}
         </div>
         {session.facts.length <= 1 && (
-          <div className="mt-3 text-[13px] italic leading-relaxed text-expedition-parchment/55">
+          <div className="mt-3 text-[14px] italic leading-relaxed text-expedition-parchment/60">
             Facts appear here as your inquiry uncovers them.
           </div>
         )}
         {session.uncertainties.length > 0 && (
           <>
             <SectionHeading className="mt-9">Uncertainties</SectionHeading>
-            <div className="mt-3.5 grid gap-2 text-[13.5px] italic leading-relaxed text-expedition-parchment/70">
+            <div className="mt-3.5 grid gap-2 text-[14.5px] italic leading-relaxed text-expedition-parchment/75">
               {session.uncertainties.map(item => (
                 <div key={item}>{item}</div>
               ))}
@@ -370,7 +373,7 @@ export function ExamineView() {
       </div>
 
       {/* Bottom: field note + key hints, centered like the status view's quote */}
-      <div className="pointer-events-auto absolute bottom-6 left-1/2 hidden w-[min(46rem,92vw)] -translate-x-1/2 [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] xl:block">
+      <div className="pointer-events-auto absolute bottom-6 left-1/2 hidden w-[min(46rem,92vw)] -translate-x-1/2 [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
         <div className="flex items-baseline justify-between">
           <span className="text-[13px] uppercase tracking-[0.22em] text-expedition-gold">Field Note</span>
           <span className={`text-[11px] uppercase tracking-[0.16em] transition-opacity duration-300 ${
@@ -397,7 +400,7 @@ export function ExamineView() {
             ? 'Add a further observation to the field book…'
             : 'What do you observe? Saving a note completes the examination.'}
           style={QUILL_INPUT_STYLE}
-          className="mt-2 min-h-[3.2rem] w-full resize-none text-[15.5px] leading-relaxed placeholder:text-expedition-faded/55 focus:outline-none"
+          className="mt-2 min-h-[3.2rem] w-full resize-none text-[16.5px] leading-relaxed placeholder:text-expedition-faded/65 focus:outline-none"
         />
         <div className="mt-4 flex flex-wrap items-baseline justify-center gap-x-8 gap-y-2">
           <FooterKey label="ESC" onClick={closeExamine}>Return</FooterKey>
@@ -450,7 +453,7 @@ export function ExamineView() {
                     <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
                       {entry.role === 'you' ? 'You' : 'Observation'}
                     </span>
-                    <span className="text-[9px] text-expedition-faded/60">{chatAge(entry.at)}</span>
+                    <span className="text-[11px] text-expedition-faded/80">{chatAge(entry.at)}</span>
                   </div>
                   <div className="mt-0.5 text-[13.5px] leading-snug text-expedition-parchment/95">{entry.text}</div>
                   {entry.behavior && <div className="mt-1 text-[12px] italic text-expedition-parchment/60">{entry.behavior}</div>}
@@ -474,7 +477,7 @@ export function ExamineView() {
                   style={QUILL_INPUT_STYLE}
                   className="w-full text-[14px] placeholder:text-expedition-faded/60 focus:outline-none"
                 />
-                <div className="mt-2 text-[11px] italic leading-snug text-expedition-faded/65">{examples}</div>
+                <div className="mt-2 text-[12.5px] leading-relaxed text-expedition-faded/85">{examples}</div>
               </form>
               {session.error && <div className="mt-2 text-[11px] text-[#d9a05a]">{session.error}</div>}
             </>
@@ -530,7 +533,7 @@ export function ExamineView() {
         </div>
       </section>
 
-      <div className="pointer-events-none absolute left-1/2 top-[43%] -translate-x-1/2 text-center text-[9px] uppercase tracking-[0.16em] text-expedition-parchment/45 xl:top-[70%] xl:text-[10px]">
+      <div className="pointer-events-none absolute left-1/2 top-[43%] -translate-x-1/2 text-center text-[10px] uppercase tracking-[0.2em] text-expedition-parchment/55 xl:top-[70%] xl:text-[11px]">
         Drag to orbit<span className="hidden sm:inline"> · scroll to zoom</span>
       </div>
     </div>

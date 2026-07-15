@@ -7,8 +7,8 @@ import { POST_SCRUB_RISE_PATH_POINTS } from './path';
 const POST_SCRUB_RISE_TEXTURE_SET = {
   ...DRY_FLOREANA_TEXTURE_SETS.redDirtHighland,
   shoulderGround: '/assets/textures/world/floreana-pbr/coastal-scrub_albedo.png',
-  dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.png',
-  paleFlecks: '/assets/textures/world/floreana-pbr/dark-basalt-gravel_albedo.png',
+  dryGrassGround: '/assets/textures/world/floreana-pbr/dry-grass-litter_albedo.webp',
+  paleFlecks: '/assets/textures/world/floreana-pbr/dark-basalt-gravel_albedo.webp',
   fallbacks: {
     redDirt: '#8f4828',
     shoulderGround: '#5f6338',

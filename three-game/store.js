@@ -727,6 +727,11 @@ function createSceneSlice() {
     },
     brokenPropIds: [],
     sampledRockIds: [],
+    collectedSampleIds: [],
+    // Per-rock hammer damage, keyed by rockSampleKey. Each entry tracks strike
+    // count against the rock's budget plus world-space bite records that the
+    // RockField renderer carves out of the matching boulder mesh.
+    rockDamage: {},
     harvestedCropIds: [],
     foragedObjectIds: [],
     symsLine: 'Syms waits with labels, twine, and the specimen bag ready.',
@@ -1350,7 +1355,10 @@ export const useThreeGameStore = create((set, get) => ({
     set(state => {
       const promptBelongsToSample = state.carryPrompt?.sample?.sourceRockKey === sourceRockKey
         || state.carryPrompt?.id === sample?.sampleId;
-      if (state.sampledRockIds.includes(sourceRockKey)) {
+      // Guard against double-collecting the same physical chip; the source
+      // rock itself can yield further chips until its strike budget runs out.
+      const sampleId = sample?.sampleId || sourceRockKey;
+      if (state.collectedSampleIds.includes(sampleId)) {
         collected = true;
         return promptBelongsToSample ? { carryPrompt: null } : {};
       }
@@ -1433,7 +1441,10 @@ export const useThreeGameStore = create((set, get) => ({
         collectedSpecimenIds: state.collectedSpecimenIds.includes(specimen.id)
           ? state.collectedSpecimenIds
           : [...state.collectedSpecimenIds, specimen.id],
-        sampledRockIds: [...state.sampledRockIds, sourceRockKey],
+        sampledRockIds: state.sampledRockIds.includes(sourceRockKey)
+          ? state.sampledRockIds
+          : [...state.sampledRockIds, sourceRockKey],
+        collectedSampleIds: [...state.collectedSampleIds, sampleId].slice(-64),
         questComplete: true,
         lastOutcome: { specimen, tool: HAMMER_TOOL, result, documented: false },
         message: result.reason,
@@ -1598,6 +1609,26 @@ export const useThreeGameStore = create((set, get) => ({
 
     return result;
   },
+  recordRockStrike: ({ key, rockId, zoneId, x, z, budget = 3, broken = false, bite = null } = {}) => set(state => {
+    if (!key) return {};
+    const existing = state.rockDamage[key] || { strikes: 0, bites: [] };
+    return {
+      rockDamage: {
+        ...state.rockDamage,
+        [key]: {
+          ...existing,
+          rockId: rockId ?? existing.rockId,
+          zoneId: zoneId ?? existing.zoneId,
+          x: x ?? existing.x,
+          z: z ?? existing.z,
+          budget,
+          strikes: existing.strikes + 1,
+          broken: existing.broken || broken,
+          bites: bite ? [...existing.bites, bite].slice(-8) : existing.bites,
+        },
+      },
+    };
+  }),
   recordHammerStrikeFeedback: feedback => set(state => {
     const hasNarration = Boolean(feedback?.message || feedback?.symsLine);
     return {
@@ -2086,9 +2117,18 @@ export const useThreeGameStore = create((set, get) => ({
     const optionFatigue = Number(options.fatigue);
     const minutes = Number.isFinite(optionMinutes) ? optionMinutes : travelCard?.estimatedMinutes || 0;
     const fatigue = Number.isFinite(optionFatigue) ? optionFatigue : travelCard?.fatigueDelta || 0;
+    const transitionId = `${currentZone.id}:${zone.id}:${Date.now()}`;
+    const source = options.source || 'edge';
+    const mode = options.mode || (options.localTransition ? 'threshold' : 'island');
     set({
       transition: {
+        id: transitionId,
+        fromZoneId: currentZone.id,
         zoneId: zone.id,
+        mode,
+        source,
+        phase: source === 'island-map' ? 'chart' : 'departing',
+        phaseStartedAt: Date.now(),
         entryEdge: options.entryEdge || null,
         from: currentZone.name,
         to: zone.name,
@@ -2100,7 +2140,12 @@ export const useThreeGameStore = create((set, get) => ({
         minutes,
         fatigue,
         startedAt: Date.now(),
-        progress: 0,
+        committedAt: null,
+        readyAt: null,
+        arrivingAt: null,
+        viewSnapshot: {
+          viewMode: get().viewMode,
+        },
       },
       beagleTravelPrompt: null,
       inspectedObject: null,
@@ -2110,8 +2155,24 @@ export const useThreeGameStore = create((set, get) => ({
     });
   },
 
-  completeZoneTransition: () => set(state => {
+  setZoneTransitionPhase: (phase, transitionId = null) => set(state => {
+    if (!state.transition || (transitionId && state.transition.id !== transitionId)) return {};
+    const now = Date.now();
+    return {
+      transition: {
+        ...state.transition,
+        phase,
+        phaseStartedAt: now,
+        ...(phase === 'ready' ? { readyAt: now } : {}),
+        ...(phase === 'arriving' ? { arrivingAt: state.transition.arrivingAt || now } : {}),
+      },
+    };
+  }),
+
+  commitZoneTransition: (transitionId = null) => set(state => {
     if (!state.transition) return {};
+    if (transitionId && state.transition.id !== transitionId) return {};
+    if (state.transition.committedAt) return {};
     const zone = getZone(state.transition.zoneId);
     const nextLocalCellId = zone.defaultLocalCellId || state.currentLocalCellId;
     // Advance the island weather sim through the travel time, then arrive
@@ -2137,7 +2198,12 @@ export const useThreeGameStore = create((set, get) => ({
       visitedLocalCellIds: state.visitedLocalCellIds.includes(nextLocalCellId)
         ? state.visitedLocalCellIds
         : [...state.visitedLocalCellIds, nextLocalCellId],
-      transition: null,
+      transition: {
+        ...state.transition,
+        phase: 'mounting',
+        phaseStartedAt: Date.now(),
+        committedAt: Date.now(),
+      },
       edgePrompt: null,
       beagleTravelPrompt: null,
       dismissedEdgePromptId: null,
@@ -2146,7 +2212,6 @@ export const useThreeGameStore = create((set, get) => ({
           zoneId: zone.id,
           edge: state.transition.entryEdge,
           clearance: 10,
-          returnBand: 2.35,
         }
         : null,
       pushableObstacleOffsets: state.pushableObstacleOffsets,
@@ -2179,6 +2244,21 @@ export const useThreeGameStore = create((set, get) => ({
       ...arrival,
     };
   }),
+
+  finishZoneTransition: (transitionId = null) => set(state => {
+    if (!state.transition || (transitionId && state.transition.id !== transitionId)) return {};
+    return { transition: null };
+  }),
+
+  // Automation and direct-zone launch paths need a synchronous escape hatch.
+  // Player-facing travel uses commitZoneTransition + finishZoneTransition so
+  // the cover remains mounted until the destination is actually ready.
+  completeZoneTransition: () => {
+    const transitionId = get().transition?.id;
+    if (!transitionId) return;
+    get().commitZoneTransition(transitionId);
+    get().finishZoneTransition(transitionId);
+  },
 
   cycleViewMode: () => set(state => ({
     viewMode: state.viewMode === 'shoulder'

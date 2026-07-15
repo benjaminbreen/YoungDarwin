@@ -230,6 +230,19 @@ const INTERIORS = {
       specimens: false,
       npcs: false,
     },
+    narrationTriggers: [
+      {
+        id: 'arrival',
+        mode: 'arrival',
+        text: 'Lawson’s house receives visitors in the dining room; the open office beyond it keeps the colony’s accounts, maps, and damp-stiffened reference books close at hand.',
+      },
+      {
+        id: 'office-library',
+        position: [5.4, 0, 5.0],
+        radius: 2.5,
+        text: 'The room is less a private library than a working station: shipping knowledge, colonial accounts, and a few hard-used books kept above the wet floor.',
+      },
+    ],
     camera: {
       minDistance: 3.0,
       defaultDistance: 3.2,
@@ -243,23 +256,66 @@ const INTERIORS = {
       cutawayTop: true,
     },
     restNarration: 'You settle into the narrow cot. Two hours pass beneath the tapping roof, with damp highland wind moving through the boards.',
+    exteriorApron: {
+      sourceRegionId: 'PENAL_COLONY',
+      sourceAnchor: [-26, -16],
+      worldYaw: 0.62,
+      bounds: { minX: -28, maxX: 28, minZ: -9, maxZ: 42 },
+      segmentsX: 56,
+      segmentsZ: 52,
+      houseHalfWidth: 10.5,
+      houseHalfDepth: 8.5,
+      baseY: -0.08,
+      reliefScale: 0.28,
+      reliefStart: 1.4,
+      reliefFull: 12,
+      colorLift: 1.12,
+      mistColor: '#9ba998',
+      mistStart: 17,
+      mistEnd: 43,
+      mistColorMix: 0.78,
+      dayFill: 0.5,
+      nightFill: 0.035,
+      baseMist: 0.3,
+      weatherMist: 0.58,
+    },
     lighting: {
       worldYaw: 0.62,
       fogDensity: 0.00035,
-      exposureDay: 0.9,
+      exposureDay: 0.96,
       exposureNight: 0.52,
       exposureResponse: 1.85,
-      environmentDay: 0.25,
+      environmentDay: 0.34,
       environmentNight: 0.055,
-      ambientDay: 0.018,
+      ambientDay: 0.028,
       ambientNight: 0.006,
-      hemisphereDay: 0.052,
+      hemisphereDay: 0.085,
       hemisphereNight: 0.016,
       ambientColor: '#8b948b',
       hemisphereSkyColor: '#b3c0b5',
       hemisphereGroundColor: '#24170f',
+      backgroundNight: '#18231f',
+      backgroundDay: '#a5b2a5',
+      backgroundGolden: '#cfb078',
+      backgroundGoldenStrength: 0.44,
+      backgroundMist: '#adb9ae',
+      backgroundResponse: 2.4,
+      exteriorFillDay: 0.32,
+      exteriorFillNight: 0.015,
+      replaceLegacyExteriorGround: true,
       flameDayEmission: 0,
       flameNightEmission: 4.15,
+      characterBounce: {
+        enabled: true,
+        color: '#cbd8cf',
+        goldenColor: '#e4b96f',
+        dayIntensity: 2.15,
+        nightIntensity: 0.28,
+        distance: 3.6,
+        decay: 2.15,
+        cameraOffset: 1.2,
+        height: 1.08,
+      },
       portals: [
         {
           id: 'calling-window',
@@ -267,11 +323,14 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 1.35,
+          diffuseIntensity: 1.85,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
-            intensity: 92,
+            intensity: 132,
+            diffuseShaftShare: 0.56,
+            diffuseProjectorShare: 0.45,
+            diffuseProjectorIntensity: 14,
             warmth: 0.5,
             sourceDistance: 1.8,
             distance: 11.5,
@@ -282,11 +341,11 @@ const INTERIORS = {
             diffuseCut: 0.18,
             castShadow: false,
             shaft: {
-              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.2, opacity: 0.045, visibilityThreshold: 0.12 },
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.2, opacity: 0.21, visibilityThreshold: 0.035 },
               dust: { count: 34, length: 6.2, speed: 0.06, opacity: 0.2, size: 0.08, noise: 0.2, color: '#f1d3a0', visibilityThreshold: 0.12 }
             }
           },
-          bounce: { position: [-8.2, 0.22, 5.65], direction: [0, 1, -0.08], width: 2.3, height: 1.05, intensity: 0.82, diffuseShare: 0.36 }
+          bounce: { position: [-8.2, 0.22, 5.65], direction: [0, 1, -0.08], width: 2.3, height: 1.05, intensity: 1.2, diffuseShare: 0.55 }
         },
         {
           id: 'dining-front-window-a',
@@ -294,11 +353,14 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.6,
           height: 1.32,
-          diffuseIntensity: 2.05,
+          diffuseIntensity: 2.75,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
-            intensity: 152,
+            intensity: 228,
+            diffuseShaftShare: 0.64,
+            diffuseProjectorShare: 0.5,
+            diffuseProjectorIntensity: 22,
             warmth: 0.52,
             sourceDistance: 1.9,
             distance: 12.5,
@@ -309,14 +371,14 @@ const INTERIORS = {
             diffuseCut: 0.24,
             castShadow: true,
             shadowMapSize: 2048,
-            shadowRadiusClear: 0.48,
+            shadowRadiusClear: 0.34,
             shadowRadiusOvercast: 1.9,
             shaft: {
-              panes: { count: 2, axis: [1, 0, 0], spacing: 0.75, width: 0.54, depth: 0.8, length: 7.2, opacity: 0.064, visibilityThreshold: 0.1 },
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.75, width: 0.54, depth: 0.8, length: 7.2, opacity: 0.24, visibilityThreshold: 0.035 },
               dust: { count: 46, length: 7.2, speed: 0.065, opacity: 0.24, size: 0.085, noise: 0.22, color: '#f5d39a', visibilityThreshold: 0.1 }
             }
           },
-          bounce: { position: [-0.45, 0.2, 5.35], direction: [0, 1, -0.12], width: 3.1, height: 1.15, intensity: 1.2, diffuseShare: 0.42 }
+          bounce: { position: [-0.45, 0.2, 5.35], direction: [0, 1, -0.12], width: 3.1, height: 1.15, intensity: 1.65, diffuseShare: 0.62 }
         },
         {
           id: 'dining-front-window-b',
@@ -324,11 +386,14 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 1.65,
+          diffuseIntensity: 2.2,
           color: '#c5d1c8',
           goldenColor: '#edc17a',
           direct: {
-            intensity: 118,
+            intensity: 174,
+            diffuseShaftShare: 0.52,
+            diffuseProjectorShare: 0.44,
+            diffuseProjectorIntensity: 15,
             warmth: 0.48,
             sourceDistance: 1.8,
             distance: 11.8,
@@ -339,11 +404,37 @@ const INTERIORS = {
             diffuseCut: 0.2,
             castShadow: false,
             shaft: {
-              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.5, opacity: 0.045, visibilityThreshold: 0.12 },
+              panes: { count: 2, axis: [1, 0, 0], spacing: 0.7, width: 0.5, depth: 0.78, length: 6.5, opacity: 0.21, visibilityThreshold: 0.04 },
               dust: { count: 32, length: 6.5, speed: 0.06, opacity: 0.18, size: 0.08, noise: 0.2, color: '#efd09a', visibilityThreshold: 0.12 }
             }
           },
-          bounce: { position: [1.85, 0.2, 5.3], direction: [0, 1, -0.1], width: 2.5, height: 1.1, intensity: 0.9, diffuseShare: 0.36 }
+          bounce: { position: [1.85, 0.2, 5.3], direction: [0, 1, -0.1], width: 2.5, height: 1.1, intensity: 1.3, diffuseShare: 0.56 }
+        },
+        {
+          id: 'office-front-window',
+          position: [6.7, 1.56, 8.28],
+          normal: [0, 0, 1],
+          width: 1.5,
+          height: 1.32,
+          diffuseIntensity: 2.15,
+          color: '#c5d1c8',
+          goldenColor: '#edc17a',
+          direct: {
+            intensity: 158,
+            diffuseShaftShare: 0.52,
+            diffuseProjectorShare: 0.42,
+            diffuseProjectorIntensity: 14,
+            warmth: 0.5,
+            sourceDistance: 1.8,
+            distance: 9.2,
+            angle: 0.5,
+            penumbraClear: 0.3,
+            penumbraOvercast: 0.68,
+            decay: 1.2,
+            diffuseCut: 0.2,
+            castShadow: false,
+          },
+          bounce: { position: [6.35, 0.22, 6.35], direction: [0, 1, -0.1], width: 2.4, height: 1.05, intensity: 1.3, diffuseShare: 0.56 },
         },
         {
           id: 'garden-window-a',
@@ -351,11 +442,14 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 1.75,
+          diffuseIntensity: 2.4,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
-            intensity: 124,
+            intensity: 198,
+            diffuseShaftShare: 0.58,
+            diffuseProjectorShare: 0.48,
+            diffuseProjectorIntensity: 19,
             warmth: 0.56,
             sourceDistance: 1.5,
             distance: 10.5,
@@ -366,14 +460,14 @@ const INTERIORS = {
             diffuseCut: 0.12,
             castShadow: true,
             shadowMapSize: 2048,
-            shadowRadiusClear: 1.1,
+            shadowRadiusClear: 0.68,
             shadowRadiusOvercast: 2.5,
             shaft: {
-              panes: { count: 2, axis: [0, 0, 1], spacing: 0.7, width: 0.5, depth: 0.78, length: 5.4, opacity: 0.045, visibilityThreshold: 0.16 },
+              panes: { count: 2, axis: [0, 0, 1], spacing: 0.7, width: 0.5, depth: 0.78, length: 5.4, opacity: 0.22, visibilityThreshold: 0.04 },
               dust: { count: 32, length: 5.4, speed: 0.06, opacity: 0.16, size: 0.085, noise: 0.2, color: '#e4c99a', visibilityThreshold: 0.16 }
             }
           },
-          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.24, diffuseShare: 0.42 }
+          bounce: { position: [-7.8, 0.24, 3.0], direction: [0, 1, 0], width: 3.2, height: 1.2, intensity: 1.65, diffuseShare: 0.62 }
         },
         {
           id: 'garden-window-b',
@@ -381,11 +475,13 @@ const INTERIORS = {
           normal: [-1, 0, 0],
           width: 1.5,
           height: 1.32,
-          diffuseIntensity: 1.32,
+          diffuseIntensity: 1.8,
           color: '#bbcbbf',
           goldenColor: '#efb66c',
           direct: {
             intensity: 98,
+            diffuseProjectorShare: 0.42,
+            diffuseProjectorIntensity: 12,
             warmth: 0.6,
             sourceDistance: 1.5,
             distance: 9.5,
@@ -396,7 +492,7 @@ const INTERIORS = {
             diffuseCut: 0.1,
             castShadow: false
           },
-          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 0.86, diffuseShare: 0.36 }
+          bounce: { position: [-7.7, 0.24, 6.0], direction: [0, 1, -0.08], width: 2.8, height: 1.1, intensity: 1.2, diffuseShare: 0.52 }
         },
         {
           id: 'front-doorway',
@@ -404,14 +500,15 @@ const INTERIORS = {
           normal: [0, 0, 1],
           width: 1.4,
           height: 2.42,
-          diffuseIntensity: 0.92,
+          diffuseIntensity: 1.35,
           color: '#c3d0c7',
           goldenColor: '#edbd72'
         }
       ],
       lamps: [
         { id: 'dining-hanging-lamp', position: [-2.35, 2.81, 2.05], color: '#ff9c4d', dayIntensity: 0.005, nightIntensity: 7.2, distance: 5.6, decay: 2.05, castShadow: true, shadowMapSize: 512 },
-        { id: 'calling-table-lamp', position: [-9.48, 1.09, 6.32], color: '#ffae61', dayIntensity: 0.005, nightIntensity: 4.4, distance: 3.8, decay: 2.05, castShadow: false }
+        { id: 'calling-table-lamp', position: [-9.48, 1.09, 6.32], color: '#ffae61', dayIntensity: 0.005, nightIntensity: 4.4, distance: 3.8, decay: 2.05, castShadow: false },
+        { id: 'office-table-lamp', position: [6.55, 1.1, 4.2], color: '#ffad61', dayIntensity: 0.004, nightIntensity: 4.9, distance: 4.3, decay: 2.05, castShadow: false },
       ],
       postprocessing: {
         multisampling: 0,
@@ -421,11 +518,13 @@ const INTERIORS = {
         aoIntensity: 1.68,
         aoDenoiseRadius: 8,
         bloomNightIntensity: 0.48,
-        bloomDayIntensity: 0.2,
+        bloomDayIntensity: 0.66,
+        bloomOvercastDayIntensity: 0.52,
         bloomNightThreshold: 0.6,
-        bloomDayThreshold: 0.86,
-        bloomSmoothing: 0.22,
-        bloomRadius: 0.42
+        bloomDayThreshold: 0.54,
+        bloomOvercastDayThreshold: 0.4,
+        bloomSmoothing: 0.3,
+        bloomRadius: 0.48
       }
     }
   },

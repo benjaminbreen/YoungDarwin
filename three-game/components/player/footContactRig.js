@@ -11,6 +11,10 @@ const FOOT_PLANT_MAX_UP = 0.075;
 const FOOT_PLANT_OBSTACLE_MAX_UP = 0.72;
 const FOOT_PLANT_FAST_OBSTACLE_MAX_UP = 0.42;
 const FOOT_PLANT_MAX_DOWN = -0.045;
+// On obstacle support the analytic surface can sit below where the walk cycle
+// holds the foot (dome shoulders, collider tops proud of the mesh), so allow a
+// much deeper reach down to actually plant on the rock.
+const FOOT_PLANT_OBSTACLE_MAX_DOWN = -0.22;
 const FOOT_PLANT_MAX_SPEED = 5.2;
 const VISUAL_GROUNDING_MAX_UP = 0.1;
 const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.9;
@@ -112,12 +116,13 @@ export function createFootContactRig({
       if (strength > 0) {
         bone.getWorldPosition(temps.world);
         const ground = adapter.groundInfo(temps.world, { supportRadius: 0.06 });
-        const maxUp = ground.source === 'authored-obstacle'
+        const onObstacle = ground.source === 'authored-obstacle';
+        const maxUp = onObstacle
           ? speedScaledObstacleLiftCap(motionState?.speed, FOOT_PLANT_OBSTACLE_MAX_UP, FOOT_PLANT_FAST_OBSTACLE_MAX_UP)
           : FOOT_PLANT_MAX_UP;
         targetOffset = THREE.MathUtils.clamp(
           (ground.y - temps.world.y) * strength,
-          FOOT_PLANT_MAX_DOWN,
+          onObstacle ? FOOT_PLANT_OBSTACLE_MAX_DOWN : FOOT_PLANT_MAX_DOWN,
           maxUp,
         );
       }

@@ -28,13 +28,20 @@ function southFall(x, z) {
   return THREE.MathUtils.smoothstep(z, 26, 41) * 0.85;
 }
 
-function baseHeight(x, z, { movementSurface = false } = {}) {
+function surfaceContext(x, z) {
+  return {
+    path: penalColonyPathInfo(x, z),
+    garden: penalColonyGardenInfo(x, z),
+    settle: penalColonyTrampledMask(x, z),
+  };
+}
+
+function baseHeight(x, z, { movementSurface = false } = {}, context = null) {
   const broad = elevationNoise(x * 0.026 + 4.0, z * 0.03 - 9.0) * 0.6;
   const roll = Math.sin(x * 0.05 + z * 0.037) * 0.14 + Math.sin(z * 0.045 - 2.1) * 0.15;
   const fine = terrainFineDetail(x, z) * (movementSurface ? 0.024 : 0.11);
-  const settle = penalColonyTrampledMask(x, z);
-  const path = penalColonyPathInfo(x, z);
-  const garden = penalColonyGardenInfo(x, z);
+  const sample = context || surfaceContext(x, z);
+  const { settle, path, garden } = sample;
 
   let y = 2.5
     + broad * (1 - settle * 0.72)
@@ -61,8 +68,8 @@ function getPadHeights() {
   return padHeights;
 }
 
-export function penalColonyHeight(x, z, options = {}) {
-  let y = baseHeight(x, z, options);
+export function penalColonyHeight(x, z, options = {}, context = null) {
+  let y = baseHeight(x, z, options, context);
   // Structures need level ground: blend each pad toward the height sampled at
   // its centre, hardest at the middle, feathered at the apron.
   for (const pad of getPadHeights()) {
@@ -75,19 +82,26 @@ export function penalColonyHeight(x, z, options = {}) {
 }
 
 export function penalColonyBiomeAt(x, z) {
-  const path = penalColonyPathInfo(x, z);
+  return biomeFromContext(x, z, surfaceContext(x, z));
+}
+
+function biomeFromContext(x, z, context) {
+  const { path, garden, settle } = context;
   if (path.center > 0.24 || path.tread > 0.5) return 'red-dirt-path';
-  const garden = penalColonyGardenInfo(x, z);
   if (garden.mask > 0.45) return 'garden-mud';
-  if (penalColonyTrampledMask(x, z) > 0.42) return 'trampled-court';
+  if (settle > 0.42) return 'trampled-court';
   if (path.shoulder > 0.36) return 'trampled-grass-edge';
   if (southFall(x, z) > 0.45 || rimLift(x, z) > 0.9) return 'dry-rim';
   return 'settlement-meadow';
 }
 
-export function penalColonyColor(x, z, y) {
-  const biome = penalColonyBiomeAt(x, z, y);
-  const path = penalColonyPathInfo(x, z);
+export function penalColonyColor(x, z) {
+  return colorFromContext(x, z, surfaceContext(x, z));
+}
+
+function colorFromContext(x, z, context) {
+  const biome = biomeFromContext(x, z, context);
+  const { path, garden } = context;
   const broad = terrainSurfaceNoise(x * 0.34 - 5.0, z * 0.34 + 2.0) * 0.5 + 0.5;
   const fine = terrainSurfaceNoise(x * 1.8 + 2.0, z * 1.6 - 8.0) * 0.5 + 0.5;
   const color = new THREE.Color('#3a5a34');
@@ -101,7 +115,6 @@ export function penalColonyColor(x, z, y) {
     color.lerp(new THREE.Color('#4c3d27'), (1 - fine) * 0.22);
   }
   if (biome === 'garden-mud') {
-    const garden = penalColonyGardenInfo(x, z);
     color.lerp(new THREE.Color('#241a12'), 0.66 + garden.mask * 0.16);
     color.lerp(new THREE.Color('#4a3722'), (Math.sin(garden.rowPhase) * 0.5 + 0.5) * 0.24);
   }
@@ -111,6 +124,16 @@ export function penalColonyColor(x, z, y) {
   }
   color.multiplyScalar(0.82 + fine * 0.12);
   return color;
+}
+
+export function penalColonyRenderSample(x, z) {
+  const context = surfaceContext(x, z);
+  const height = penalColonyHeight(x, z, {}, context);
+  return {
+    height,
+    biome: biomeFromContext(x, z, context),
+    color: colorFromContext(x, z, context),
+  };
 }
 
 export function isPenalColonyWalkable(x, z, config) {
@@ -125,6 +148,7 @@ export const penalColonyRegion = {
     movementHeight: (x, z) => penalColonyHeight(x, z, { movementSurface: true }),
     biomeAt: penalColonyBiomeAt,
     color: penalColonyColor,
+    sample: penalColonyRenderSample,
     isWalkable: isPenalColonyWalkable,
     defaultSpawn: [5, 0, -12],
     entrySpawns: {

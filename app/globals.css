@@ -44,6 +44,21 @@ body {
   letter-spacing: 0.01em;
 }
 
+/* Game chrome behaves like an application surface, not a document. Keep text
+   selection available inside actual editors and form fields. */
+.three-game-shell {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.three-game-shell input,
+.three-game-shell textarea,
+.three-game-shell [contenteditable='true'],
+.three-game-shell [data-allow-text-selection='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-garamond), 'Times New Roman', serif;
   font-weight: 500;
@@ -297,8 +312,8 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateZ(0);
   will-change: opacity;
   background:
-    radial-gradient(ellipse at 50% 46%, rgba(235, 247, 246, 0.24), rgba(190, 220, 225, 0.1) 38%, rgba(42, 70, 82, 0.05) 70%, transparent 100%),
-    linear-gradient(180deg, rgba(230, 244, 243, 0.64), rgba(194, 221, 225, 0.3) 48%, rgba(118, 152, 162, 0.08) 100%);
+    radial-gradient(ellipse at 50% 46%, rgba(235, 247, 246, 0.2), rgba(190, 220, 225, 0.08) 38%, rgba(42, 70, 82, 0.04) 70%, transparent 100%),
+    linear-gradient(180deg, rgba(230, 244, 243, 0.5), rgba(194, 221, 225, 0.22) 48%, rgba(118, 152, 162, 0.06) 100%);
   animation: opening-cloud-veil var(--opening-cloud-duration) cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
@@ -376,17 +391,17 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes opening-cloud-veil {
-  0% { opacity: 1; }
-  24% { opacity: 0.98; }
-  58% { opacity: 0.74; }
-  82% { opacity: 0.22; }
+  0% { opacity: 0.9; }
+  20% { opacity: 0.72; }
+  52% { opacity: 0.32; }
+  78% { opacity: 0.08; }
   100% { opacity: 0; visibility: hidden; }
 }
 
 @keyframes opening-cloud-wash {
-  0% { opacity: 1; transform: scale(1.08); }
-  42% { opacity: 0.86; transform: scale(1.18); }
-  80% { opacity: 0.28; transform: scale(1.34); }
+  0% { opacity: 0.88; transform: scale(1.08); }
+  38% { opacity: 0.68; transform: scale(1.18); }
+  76% { opacity: 0.18; transform: scale(1.34); }
   100% { opacity: 0; transform: scale(1.42); }
 }
 

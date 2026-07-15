@@ -1,19 +1,29 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BallCollider, RigidBody } from '@react-three/rapier';
+import { ConvexHullCollider, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { movementTerrainHeight, terrainBiomeAt } from '../../world/terrain';
-import { getRuntimeObstacles } from '../../world/obstacles';
-import { onPropEvent } from './propEvents';
+import { isWaterColumnAt } from '../../world/water';
+import { getRuntimeObstacles, syncDestroyedObstacles } from '../../world/obstacles';
+import {
+  FLOREANA_PBR_TEXTURES,
+  disposePbrTerrainSet,
+  loadPbrTerrainSet,
+} from '../../world/regions/materials/pbrTerrainTextures';
+import { claimSwing, onPropEvent } from './propEvents';
+import { triggerHitstop } from '../../world/worldTime';
+import { makeChipGeometry, makeFragmentGeometry, seededUnit } from './rockDebrisGeometry';
 import {
   getHammerMaterialProfile,
   groundHammerMaterial,
   inferHammerMaterial,
+  isRockBreakable,
   resolveHammerOutcome,
   rockSampleKey,
+  rockStrikeBudget,
   selectRockSampleTarget,
 } from './rockSampling';
 
@@ -23,26 +33,50 @@ const CHIP_FALL_CULL_Y = -18;
 const BURST_LIFETIME = 1.05;
 const IMPACT_FLASH_LIFETIME = 0.28;
 
-function hashString(value) {
-  let hash = 2166136261;
-  const text = String(value || '');
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function seededUnit(seed, salt = 0) {
-  const value = Math.sin((hashString(seed) + salt * 1013) * 12.9898) * 43758.5453;
-  return value - Math.floor(value);
-}
-
 function normalize2(x, z, fallback = { x: 0, z: -1 }) {
   const length = Math.hypot(x, z);
   if (length < 0.001) return fallback;
   return { x: x / length, z: z / length };
 }
+
+function configureChipTexture(texture, repeat = 1.4) {
+  if (!texture) return;
+  texture.repeat.set(repeat, repeat);
+  texture.needsUpdate = true;
+}
+
+// Two shared materials: basalt-family debris reuses the RockField PBR maps so
+// chips visually match the boulders they came off; softer materials read
+// through vertex colors alone.
+function useChipMaterials() {
+  return useMemo(() => {
+    const textures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
+    configureChipTexture(textures.albedo, 1.6);
+    configureChipTexture(textures.normal, 2.2);
+    configureChipTexture(textures.roughness, 1.6);
+    const mapped = new THREE.MeshStandardMaterial({
+      map: textures.albedo,
+      normalMap: textures.normal,
+      normalScale: new THREE.Vector2(0.5, 0.5),
+      roughnessMap: textures.roughness,
+      vertexColors: true,
+      color: '#ffffff',
+      roughness: 0.9,
+      metalness: 0,
+      flatShading: true,
+    });
+    const plain = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      color: '#ffffff',
+      roughness: 0.94,
+      metalness: 0,
+      flatShading: true,
+    });
+    return { textures, mapped, plain };
+  }, []);
+}
+
+const MAPPED_CHIP_MATERIALS = new Set(['basalt', 'olivine', 'iron_crust']);
 
 function chipScaleForShape(shape, seed) {
   if (shape === 'flake') {
@@ -85,6 +119,9 @@ function makeGroundSampleTarget(strike, zoneId, sampledRockIds = [], activeSourc
   const sourceZ = strike.position?.z || 0;
   const x = sourceX + facing.x * 1.45;
   const z = sourceZ + facing.z * 1.45;
+  // A swing over standing water splashes (HammerStrikeResolver); it never
+  // chips a sample off the seabed.
+  if (isWaterColumnAt(x, z, zoneId)) return null;
   const y = movementTerrainHeight(x, z, zoneId);
   const biome = terrainBiomeAt(x, z, y, zoneId);
   const material = groundHammerMaterial({ zoneId, biome });
@@ -134,9 +171,12 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
     : groundY + THREE.MathUtils.clamp(rockTop * 0.52, 0.35, 1.42);
   const seed = `${key}:${sequence}`;
   const side = { x: -normal.z, z: normal.x };
-  const chipRadius = (0.15 + seededUnit(seed, 1) * 0.075) * (profile.shape === 'flake' ? 0.92 : 1);
-  const outward = (1.15 + seededUnit(seed, 2) * 0.45) * (profile.impulseScale || 1);
-  const sideways = (seededUnit(seed, 3) - 0.5) * 0.55 * (profile.impulseScale || 1);
+  const chipRadius = (0.16 + seededUnit(seed, 1) * 0.08) * (profile.shape === 'flake' ? 0.92 : 1);
+  // Dense rock: chips should thud out and drop, not sail. Impulses are in
+  // velocity terms (mass-scaled on apply), kept low and paired with heavy
+  // damping on the body.
+  const outward = (0.82 + seededUnit(seed, 2) * 0.38) * (profile.impulseScale || 1);
+  const sideways = (seededUnit(seed, 3) - 0.5) * 0.4 * (profile.impulseScale || 1);
   const colors = profile.colors?.length ? profile.colors : ['#30342f'];
   const fx = profile.fx || {};
   const dustCount = fx.dustCount ?? 12;
@@ -148,6 +188,7 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
     sourceRockKey: key,
     rockId: rock.id,
     zoneId,
+    groundSample: Boolean(target.groundSample),
     material: profile.material,
     specimenId: profile.specimenId,
     sampleNoun: profile.sampleNoun,
@@ -168,6 +209,7 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
     radius: chipRadius,
     scale: chipScaleForShape(profile.shape, seed),
     color: colors[Math.floor(seededUnit(seed, 7) * colors.length) % colors.length],
+    fractureColor: profile.fractureColor || '#4d5457',
     scarColor: profile.scarColor || '#171917',
     dustColor: profile.dustColor || '#5b5140',
     sparkColor: fx.sparkColor || '#ffd36a',
@@ -175,13 +217,22 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
     dustSize: fx.dustSize || 0.045,
     impulse: {
       x: normal.x * outward + side.x * sideways,
-      y: 1.05 + seededUnit(seed, 8) * 0.35,
+      y: 0.72 + seededUnit(seed, 8) * 0.28,
       z: normal.z * outward + side.z * sideways,
     },
     torque: {
-      x: (seededUnit(seed, 9) - 0.5) * 0.8,
-      y: (seededUnit(seed, 10) - 0.5) * 0.55,
-      z: (seededUnit(seed, 11) - 0.5) * 0.8,
+      x: (seededUnit(seed, 9) - 0.5) * 0.5,
+      y: (seededUnit(seed, 10) - 0.5) * 0.35,
+      z: (seededUnit(seed, 11) - 0.5) * 0.5,
+    },
+    // Bite sphere for the persistent carve in RockField. Center sits just
+    // outside the struck face so projecting vertices onto the sphere scoops a
+    // dent instead of raising a bump.
+    bite: {
+      x: surfaceX + normal.x * chipRadius * 1.15,
+      y: hitY + 0.02,
+      z: surfaceZ + normal.z * chipRadius * 1.15,
+      r: chipRadius * 2.1,
     },
     burst: Array.from({ length: dustCount }, (_, index) => {
       const particleSeed = `${seed}:p:${index}`;
@@ -228,10 +279,17 @@ function RockChipScar({ chip }) {
   }), [chip.scarColor]);
   useEffect(() => () => material.dispose(), [material]);
   const yaw = Math.atan2(chip.normal.x, chip.normal.z);
+  // Rock scars stand on the struck face; ground samples leave a flat divot
+  // lying on the terrain instead of a plate jutting out of the soil.
+  const flat = chip.groundSample;
   return (
     <mesh
-      position={[chip.scarPosition.x, chip.scarPosition.y, chip.scarPosition.z]}
-      rotation={[0, yaw, 0]}
+      position={[
+        chip.scarPosition.x,
+        flat ? chip.scarPosition.y - 0.055 : chip.scarPosition.y,
+        chip.scarPosition.z,
+      ]}
+      rotation={flat ? [-Math.PI / 2, 0, yaw] : [0, yaw, 0]}
       scale={[chip.radius * 1.65, chip.radius * 1.05, 0.024]}
       material={material}
       renderOrder={2}
@@ -407,18 +465,24 @@ function RockChipBurst({ chip, onExpired }) {
   );
 }
 
-function HammerSampleChip({ chip, onExpired }) {
+function HammerSampleChip({ chip, materials, onExpired }) {
   const bodyRef = useRef(null);
   const ageRef = useRef(0);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: chip.color,
-    roughness: 0.95,
-    metalness: 0.01,
-    flatShading: true,
-  }), [chip.color]);
+  const geometry = useMemo(() => makeChipGeometry(chip.id, {
+    rindColor: chip.color,
+    fractureColor: chip.fractureColor,
+    liftColors: MAPPED_CHIP_MATERIALS.has(chip.material),
+    scale: [
+      chip.radius * chip.scale[0],
+      chip.radius * chip.scale[1],
+      chip.radius * chip.scale[2],
+    ],
+  }), [chip]);
+  const hullVertices = useMemo(() => Float32Array.from(geometry.attributes.position.array), [geometry]);
+  const material = MAPPED_CHIP_MATERIALS.has(chip.material) ? materials.mapped : materials.plain;
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
 
-  useEffect(() => () => material.dispose(), [material]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   useEffect(() => {
     const body = bodyRef.current;
@@ -496,37 +560,177 @@ function HammerSampleChip({ chip, onExpired }) {
       colliders={false}
       position={[chip.position.x, chip.position.y, chip.position.z]}
       rotation={[seededUnit(chip.id, 12) * Math.PI, seededUnit(chip.id, 13) * Math.PI, seededUnit(chip.id, 14) * Math.PI]}
-      friction={1.08}
-      restitution={0.18}
-      linearDamping={0.45}
-      angularDamping={0.62}
-      density={950}
+      friction={1.25}
+      restitution={0.05}
+      linearDamping={1.05}
+      angularDamping={1.7}
+      density={2600}
       ccd
       userData={{ id: chip.id, kind: 'rock-sample-chip' }}
     >
-      <BallCollider args={[chip.radius * 0.74]} />
-      <mesh castShadow receiveShadow material={material} scale={[chip.radius * chip.scale[0], chip.radius * chip.scale[1], chip.radius * chip.scale[2]]}>
-        <dodecahedronGeometry args={[1, 0]} />
-      </mesh>
+      <ConvexHullCollider args={[hullVertices]} />
+      <mesh castShadow receiveShadow material={material} geometry={geometry} />
     </RigidBody>
   );
+}
+
+const FRAGMENT_FALL_CULL_Y = -18;
+const MAX_FRAGMENT_PIECES = 24;
+
+function RockBreakFragmentPiece({ fragment, piece, materials, onExpired }) {
+  const bodyRef = useRef(null);
+  const geometry = useMemo(() => makeFragmentGeometry(piece.id, {
+    cutDir: piece.cutDir,
+    cutDistance: piece.cutDistance,
+    radii: piece.radii,
+    rindColor: fragment.rindColor,
+    fractureColor: fragment.fractureColor,
+  }), [fragment, piece]);
+  const hullVertices = useMemo(() => Float32Array.from(geometry.attributes.position.array), [geometry]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const mass = body.mass?.() || 1;
+    body.applyImpulse({
+      x: piece.impulse.x * mass,
+      y: piece.impulse.y * mass,
+      z: piece.impulse.z * mass,
+    }, true);
+    body.applyTorqueImpulse({
+      x: piece.torque.x * mass,
+      y: piece.torque.y * mass,
+      z: piece.torque.z * mass,
+    }, true);
+  }, [piece]);
+
+  useFrame(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    if (body.translation().y < FRAGMENT_FALL_CULL_Y) onExpired(piece.id);
+  });
+
+  return (
+    <RigidBody
+      ref={bodyRef}
+      type="dynamic"
+      colliders={false}
+      position={[piece.position.x, piece.position.y, piece.position.z]}
+      rotation={[0, piece.yaw, 0]}
+      friction={1.35}
+      restitution={0.03}
+      linearDamping={0.85}
+      angularDamping={1.5}
+      density={2600}
+      userData={{ id: piece.id, kind: 'rock-break-fragment' }}
+    >
+      <ConvexHullCollider args={[hullVertices]} />
+      <mesh castShadow receiveShadow material={materials.mapped} geometry={geometry} />
+    </RigidBody>
+  );
+}
+
+// Splits a broken boulder into two matching halves plus a couple of rubble
+// wedges, sized from the obstacle's collider footprint.
+function makeBreakFragments(rock, key, zoneId, profile, groundY) {
+  const seed = `${key}:break`;
+  const angle = seededUnit(seed, 1) * Math.PI * 2;
+  const dir = { x: Math.cos(angle), z: Math.sin(angle) };
+  const radius = Math.max(0.32, rock.radius || 0.5);
+  const top = Math.max(0.28, rock.colliderTop ?? rock.height ?? 0.5);
+  const rx = radius * 0.78;
+  const ry = top * 0.5;
+  const rz = radius * 0.72;
+  const pieces = [];
+  const pushPiece = (id, cutDir, radii, offset, kick) => {
+    pieces.push({
+      id: `${seed}:${id}`,
+      cutDir,
+      cutDistance: 0.06,
+      radii,
+      yaw: seededUnit(seed, 5 + pieces.length) * Math.PI * 2,
+      position: {
+        x: rock.x + offset.x,
+        y: groundY + radii[1] * 0.85,
+        z: rock.z + offset.z,
+      },
+      impulse: {
+        x: kick.x,
+        y: 0.35 + seededUnit(seed, 9 + pieces.length) * 0.2,
+        z: kick.z,
+      },
+      torque: {
+        x: (seededUnit(seed, 13 + pieces.length) - 0.5) * 0.4,
+        y: (seededUnit(seed, 14 + pieces.length) - 0.5) * 0.3,
+        z: (seededUnit(seed, 15 + pieces.length) - 0.5) * 0.4,
+      },
+    });
+  };
+
+  pushPiece('half-a', { x: dir.x, y: 0.1, z: dir.z }, [rx, ry, rz],
+    { x: -dir.x * rx * 0.4, z: -dir.z * rx * 0.4 },
+    { x: -dir.x * 0.55, z: -dir.z * 0.55 });
+  pushPiece('half-b', { x: -dir.x, y: -0.08, z: -dir.z }, [rx * 0.92, ry * 0.96, rz * 0.9],
+    { x: dir.x * rx * 0.4, z: dir.z * rx * 0.4 },
+    { x: dir.x * 0.55, z: dir.z * 0.55 });
+  const rubbleCount = 1 + Math.round(seededUnit(seed, 3));
+  for (let index = 0; index < rubbleCount; index += 1) {
+    const side = index === 0 ? { x: -dir.z, z: dir.x } : { x: dir.z, z: -dir.x };
+    pushPiece(`rubble-${index}`, { x: side.x, y: 0.4, z: side.z },
+      [rx * 0.34, ry * 0.4, rz * 0.32],
+      { x: side.x * rx * 0.7, z: side.z * rx * 0.7 },
+      { x: side.x * 0.8, z: side.z * 0.8 });
+  }
+
+  return {
+    id: `${seed}`,
+    key,
+    zoneId,
+    rindColor: profile.colors?.[0] || '#30342f',
+    fractureColor: profile.fractureColor || '#4d5457',
+    pieces,
+  };
 }
 
 export function RockSampleSystem() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
   const sampledRockIds = useThreeGameStore(state => state.sampledRockIds);
+  const collectedSampleIds = useThreeGameStore(state => state.collectedSampleIds);
+  const rockDamage = useThreeGameStore(state => state.rockDamage);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
+  const chipMaterials = useChipMaterials();
   const [chips, setChips] = useState([]);
   const [bursts, setBursts] = useState([]);
+  const [fragments, setFragments] = useState([]);
   const clockRef = useRef(0);
   const sequenceRef = useRef(0);
   const pendingStrikesRef = useRef([]);
   const chipsRef = useRef([]);
   const obstaclesRef = useRef([]);
   const sampledRockIdsRef = useRef([]);
+  const exhaustedRockKeysRef = useRef([]);
   const lastFeedbackRef = useRef(-Infinity);
   const lastShardDilemmaRef = useRef(-Infinity);
+
+  useEffect(() => () => {
+    disposePbrTerrainSet(chipMaterials.textures);
+    chipMaterials.mapped.dispose();
+    chipMaterials.plain.dispose();
+  }, [chipMaterials]);
+
+  useEffect(() => {
+    exhaustedRockKeysRef.current = Object.entries(rockDamage)
+      .filter(([, damage]) => damage.broken || damage.strikes >= (damage.budget ?? 3))
+      .map(([key]) => key);
+    // Keep the movement/camera broad-phase registry mirroring the store, so a
+    // store reset (new expedition) also restores collision.
+    syncDestroyedObstacles(Object.values(rockDamage)
+      .filter(damage => damage.broken && damage.rockId)
+      .map(damage => damage.rockId));
+  }, [rockDamage]);
 
   const obstacles = useMemo(
     () => getRuntimeObstacles(currentZoneId, pushableObstacleOffsets),
@@ -543,10 +747,13 @@ export function RockSampleSystem() {
 
   useEffect(() => {
     sampledRockIdsRef.current = sampledRockIds || [];
-    if (!sampledRockIds?.length) return;
-    const sampled = new Set(sampledRockIds);
-    setChips(current => current.filter(chip => !sampled.has(chip.sourceRockKey)));
   }, [sampledRockIds]);
+
+  useEffect(() => {
+    if (!collectedSampleIds?.length) return;
+    const collected = new Set(collectedSampleIds);
+    setChips(current => current.filter(chip => !collected.has(chip.id)));
+  }, [collectedSampleIds]);
 
   useEffect(() => onPropEvent('tool-swing', event => {
     if (event.tool !== 'hammer') return;
@@ -560,6 +767,7 @@ export function RockSampleSystem() {
     pendingStrikesRef.current = [];
     setChips([]);
     setBursts([]);
+    setFragments([]);
     const state = useThreeGameStore.getState();
     if (state.carryPrompt?.mode === 'collect-rock-sample') setCarryPrompt(null);
   }, [currentZoneId, setCarryPrompt]);
@@ -572,6 +780,15 @@ export function RockSampleSystem() {
     setBursts(current => current.filter(burst => burst.id !== id));
   };
 
+  const expireFragmentPiece = pieceId => {
+    setFragments(current => current
+      .map(fragment => ({
+        ...fragment,
+        pieces: fragment.pieces.filter(piece => piece.id !== pieceId),
+      }))
+      .filter(fragment => fragment.pieces.length));
+  };
+
   useFrame((_, delta) => {
     clockRef.current += delta;
     if (!pendingStrikesRef.current.length) return;
@@ -581,13 +798,14 @@ export function RockSampleSystem() {
 
     const activeKeys = chipsRef.current.map(chip => chip.sourceRockKey);
     const newChips = [];
+    const newFragments = [];
     for (const strike of due) {
       let target = selectRockSampleTarget({
         obstacles: obstaclesRef.current,
         zoneId: currentZoneId,
         position: strike.position,
         facing: strike.facing,
-        sampledRockIds: sampledRockIdsRef.current,
+        sampledRockIds: exhaustedRockKeysRef.current,
         activeSourceKeys: activeKeys,
       });
       if (!target) {
@@ -604,7 +822,7 @@ export function RockSampleSystem() {
         });
         if (alreadySampled) {
           const key = alreadySampled.key || rockSampleKey(currentZoneId, alreadySampled.rock.id);
-          if (sampledRockIdsRef.current.includes(key) || activeKeys.includes(key)) {
+          if (exhaustedRockKeysRef.current.includes(key) || activeKeys.includes(key)) {
             const profile = profileForTarget(alreadySampled, currentZoneId);
             useThreeGameStore.getState().recordHammerStrikeFeedback?.({
               message: activeKeys.includes(key)
@@ -619,10 +837,43 @@ export function RockSampleSystem() {
         }
       }
       if (!target) continue;
+      claimSwing(strike.swingId);
+      // Dense rock stops the swing dead; a ground sample only checks it.
+      triggerHitstop(target.groundSample ? 0.035 : 0.06);
       sequenceRef.current += 1;
       const profile = profileForTarget(target, currentZoneId);
-      const outcome = resolveHammerOutcome(profile, target.key);
+      const outcome = resolveHammerOutcome(profile, `${target.key}:${sequenceRef.current}`);
       const chip = makeChipFromTarget(target, strike, currentZoneId, sequenceRef.current, profile, outcome);
+
+      // Persist the strike: the RockField renderer carves a bite out of the
+      // matching boulder, and small rocks shatter once their budget runs out.
+      if (!target.groundSample) {
+        const rock = target.rock;
+        const store = useThreeGameStore.getState();
+        const budget = rockStrikeBudget(rock);
+        const priorStrikes = store.rockDamage[chip.sourceRockKey]?.strikes || 0;
+        const broken = isRockBreakable(rock) && priorStrikes + 1 >= budget;
+        store.recordRockStrike?.({
+          key: chip.sourceRockKey,
+          rockId: rock.id,
+          zoneId: currentZoneId,
+          x: rock.x,
+          z: rock.z,
+          budget,
+          broken,
+          bite: rock.proceduralRock ? chip.bite : null,
+        });
+        if (broken) {
+          const groundY = movementTerrainHeight(rock.x, rock.z, currentZoneId);
+          newFragments.push(makeBreakFragments(rock, chip.sourceRockKey, currentZoneId, profile, groundY));
+          store.recordHammerStrikeFeedback?.({
+            message: 'The final blow lands true, and the boulder splits apart into heavy fragments.',
+            educationalNote: profile.educationalNote,
+            symsLine: 'Syms steps back from the rubble. "Clean through, sir. The whole stone gave way."',
+            fatigueDelta: 0.6,
+          });
+        }
+      }
       const shardRisk = {
         basalt: 0.22,
         iron_crust: 0.18,
@@ -649,6 +900,17 @@ export function RockSampleSystem() {
       activeKeys.push(chip.sourceRockKey);
     }
 
+    if (newFragments.length) {
+      setFragments(current => {
+        const merged = [...current, ...newFragments];
+        let totalPieces = merged.reduce((sum, fragment) => sum + fragment.pieces.length, 0);
+        while (totalPieces > MAX_FRAGMENT_PIECES && merged.length > 1) {
+          totalPieces -= merged[0].pieces.length;
+          merged.shift();
+        }
+        return merged;
+      });
+    }
     if (!newChips.length) return;
     setChips(current => [...current, ...newChips.filter(chip => (
       !current.some(existing => existing.sourceRockKey === chip.sourceRockKey)
@@ -665,10 +927,19 @@ export function RockSampleSystem() {
     }}>
       {chips.map(chip => (
         <React.Fragment key={chip.id}>
-          <RockChipScar chip={chip} />
-          <HammerSampleChip chip={chip} onExpired={expireChip} />
+          {!rockDamage[chip.sourceRockKey]?.broken && <RockChipScar chip={chip} />}
+          <HammerSampleChip chip={chip} materials={chipMaterials} onExpired={expireChip} />
         </React.Fragment>
       ))}
+      {fragments.flatMap(fragment => fragment.pieces.map(piece => (
+        <RockBreakFragmentPiece
+          key={piece.id}
+          fragment={fragment}
+          piece={piece}
+          materials={chipMaterials}
+          onExpired={expireFragmentPiece}
+        />
+      )))}
       {bursts.map(chip => (
         <RockChipBurst key={`${chip.id}:burst`} chip={chip} onExpired={expireBurst} />
       ))}

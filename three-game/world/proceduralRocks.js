@@ -62,6 +62,9 @@ export function buildRockObstacle(rock, {
   return {
     id: `${idPrefix}-${rock.id}`,
     kind: 'rock',
+    // Marks rocks whose visual comes from the procedural RockField renderer,
+    // so hammer damage can carve/break the matching instanced mesh.
+    proceduralRock: true,
     path: null,
     x: rock.x,
     z: rock.z,

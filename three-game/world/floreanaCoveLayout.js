@@ -82,6 +82,7 @@ export function dryGrassSuitability(x, z, y = terrainHeight(x, z)) {
 const COVE_BOULDER_CLEARANCES = [
   [0.8, -4.8, 1.7],
   [-4.2, -6.4, 3.5],
+  // Keep the default spawn open after removing the former north lava boulder.
   [8.8, 8.2, 3.1],
   [-15.4, 6.8, 3.3],
   [18.6, 21.4, 3.7],

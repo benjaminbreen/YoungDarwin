@@ -64,16 +64,7 @@ function buildFlora() {
       tint: '#7f9667',
       tintStrength: 0.2,
       motion: { wind: 0.7, bend: 0.18, bendRadius: 2.5 },
-      items: rimScalesia,
-    },
-    {
-      id: 'penal-meadow-scalesia',
-      path: `${NATURE}runtime-scalesia.glb`,
-      sink: 0.08,
-      tint: '#8ba06c',
-      tintStrength: 0.16,
-      motion: { wind: 0.78, bend: 0.2, bendRadius: 2.3 },
-      items: meadowScalesia,
+      items: [...rimScalesia, ...meadowScalesia],
     },
     {
       id: 'penal-cotton',
@@ -149,7 +140,7 @@ function grassAllowedAt({ x, z, path }) {
   return false;
 }
 
-function buildGrassPatches(count = 1150) {
+function buildGrassPatches(count = 720) {
   return buildStandardDryGrassPatchItems({
     zoneId: PENAL_COLONY,
     idPrefix: 'penal-colony-grass-patch',
@@ -177,6 +168,11 @@ export function buildPenalColonyEcology() {
       createStandardDryGrassPatchLayer({
         id: 'penal-colony-grass-patches',
         items: buildGrassPatches(),
+        // Slightly broader clumps preserve the meadow's perceived coverage
+        // while cutting 430 individually transformed instances.
+        widthScale: 1.28,
+        heightScale: 1.22,
+        depthScale: 1.17,
       }),
     ],
     footprintBiomes: ['settlement-meadow', 'trampled-court', 'garden-mud', 'trampled-grass-edge', 'dry-rim'],

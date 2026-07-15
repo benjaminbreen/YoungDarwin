@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import {
   FLOREANA_PBR_TEXTURES,
-  disposePbrTerrainSet,
-  loadPbrTerrainSet,
+  loadTerrainAlbedo,
 } from '../materials/pbrTerrainTextures';
 
 // Per-pixel splat shader for the Northern Shore: black volcanic sand with
@@ -10,15 +9,14 @@ import {
 // stipple, fractured lava on the west promontory, and a crisp wet band along
 // the exact authored coast curve.
 export function createNorthShoreTerrainMaterial() {
-  const sandTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.sandyBeach);
-  const tuffTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.sandyTuff);
-  const olivineTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.olivineBeach);
-  const basaltTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
-  const wetBasaltTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.wetBasalt);
-  const grassTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.dryGrassLitter);
-  const shoulderTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.coastalGrassShoulder);
-  const cinderTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.redCinderDirt);
-  const scrubTextures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.coastalScrub);
+  // Five albedos carry the authored surface families. Wetness, shoulders and
+  // scrub variation are shader treatments, so loading 27 unused normal/height/
+  // roughness maps (plus four redundant albedos) only delayed travel.
+  const tuffAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.sandyTuff);
+  const olivineAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.olivineBeach);
+  const basaltAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
+  const grassAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.dryGrassLitter);
+  const cinderAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.redCinderDirt);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.9,
@@ -27,30 +25,26 @@ export function createNorthShoreTerrainMaterial() {
   });
 
   material.addEventListener('dispose', () => {
-    disposePbrTerrainSet(sandTextures);
-    disposePbrTerrainSet(tuffTextures);
-    disposePbrTerrainSet(olivineTextures);
-    disposePbrTerrainSet(basaltTextures);
-    disposePbrTerrainSet(wetBasaltTextures);
-    disposePbrTerrainSet(grassTextures);
-    disposePbrTerrainSet(shoulderTextures);
-    disposePbrTerrainSet(cinderTextures);
-    disposePbrTerrainSet(scrubTextures);
+    tuffAlbedo.dispose();
+    olivineAlbedo.dispose();
+    basaltAlbedo.dispose();
+    grassAlbedo.dispose();
+    cinderAlbedo.dispose();
   });
 
   material.onBeforeCompile = shader => {
     shader.uniforms.rimColor = { value: new THREE.Color('#f1d38a') };
     shader.uniforms.rimIntensity = { value: 0.07 };
     shader.uniforms.uSwashTime = { value: 0 };
-    shader.uniforms.uNsSandAlbedo = { value: sandTextures.albedo };
-    shader.uniforms.uNsTuffAlbedo = { value: tuffTextures.albedo };
-    shader.uniforms.uNsOlivineAlbedo = { value: olivineTextures.albedo };
-    shader.uniforms.uNsBasaltAlbedo = { value: basaltTextures.albedo };
-    shader.uniforms.uNsWetBasaltAlbedo = { value: wetBasaltTextures.albedo };
-    shader.uniforms.uNsGrassAlbedo = { value: grassTextures.albedo };
-    shader.uniforms.uNsShoulderAlbedo = { value: shoulderTextures.albedo };
-    shader.uniforms.uNsCinderAlbedo = { value: cinderTextures.albedo };
-    shader.uniforms.uNsScrubAlbedo = { value: scrubTextures.albedo };
+    shader.uniforms.uNsSandAlbedo = { value: tuffAlbedo };
+    shader.uniforms.uNsTuffAlbedo = { value: tuffAlbedo };
+    shader.uniforms.uNsOlivineAlbedo = { value: olivineAlbedo };
+    shader.uniforms.uNsBasaltAlbedo = { value: basaltAlbedo };
+    shader.uniforms.uNsWetBasaltAlbedo = { value: basaltAlbedo };
+    shader.uniforms.uNsGrassAlbedo = { value: grassAlbedo };
+    shader.uniforms.uNsShoulderAlbedo = { value: grassAlbedo };
+    shader.uniforms.uNsCinderAlbedo = { value: cinderAlbedo };
+    shader.uniforms.uNsScrubAlbedo = { value: grassAlbedo };
     shader.uniforms.uNsSandScale = { value: FLOREANA_PBR_TEXTURES.sandyBeach.scale };
     shader.uniforms.uNsTuffScale = { value: FLOREANA_PBR_TEXTURES.sandyTuff.scale };
     shader.uniforms.uNsOlivineScale = { value: FLOREANA_PBR_TEXTURES.olivineBeach.scale };

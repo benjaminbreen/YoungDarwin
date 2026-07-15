@@ -19,6 +19,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect basalt chip',
     shape: 'chunk',
     colors: ['#262a27', '#30342f', '#1f2422'],
+    fractureColor: '#4d5457',
     scarColor: '#151817',
     dustColor: '#5b5140',
     fx: { dustCount: 14, puffCount: 1, sparkCount: 5, sparkColor: '#ffd36a', puffSize: 0.16 },
@@ -61,6 +62,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect scoria fragment',
     shape: 'jagged',
     colors: ['#7a3b24', '#9a5430', '#5a2f22'],
+    fractureColor: '#b06a41',
     scarColor: '#9f5f39',
     dustColor: '#9a6843',
     fx: { dustCount: 22, puffCount: 2, sparkCount: 1, sparkColor: '#ffc46b', puffSize: 0.18 },
@@ -94,6 +96,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect tuff flake',
     shape: 'flake',
     colors: ['#a78658', '#c09a65', '#7d6447'],
+    fractureColor: '#d3b98a',
     scarColor: '#c2a073',
     dustColor: '#b99a70',
     fx: { dustCount: 30, puffCount: 4, sparkCount: 0, puffSize: 0.24 },
@@ -127,6 +130,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect olivine-bearing chip',
     shape: 'sliver',
     colors: ['#7d8243', '#9c9850', '#697438'],
+    fractureColor: '#b3b467',
     scarColor: '#9a995e',
     dustColor: '#a49b65',
     fx: { dustCount: 16, puffCount: 1, sparkCount: 3, sparkColor: '#d8d570', puffSize: 0.14 },
@@ -160,6 +164,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect coral limestone fragment',
     shape: 'flake',
     colors: ['#d2c7aa', '#e0d6bd', '#b8ad91'],
+    fractureColor: '#f2e8cc',
     scarColor: '#efe2c3',
     dustColor: '#d8ceb6',
     fx: { dustCount: 26, puffCount: 3, sparkCount: 0, puffSize: 0.22 },
@@ -193,6 +198,7 @@ export const HAMMER_MATERIAL_PROFILES = {
     promptText: 'Press E to collect iron-stained crust',
     shape: 'flake',
     colors: ['#8b4d2c', '#a45f31', '#5b3728'],
+    fractureColor: '#3c4144',
     scarColor: '#b06c3d',
     dustColor: '#9d6944',
     fx: { dustCount: 20, puffCount: 2, sparkCount: 7, sparkColor: '#ffbd5a', puffSize: 0.18 },
@@ -223,6 +229,27 @@ export const HAMMER_MATERIAL_PROFILES = {
 
 export function rockSampleKey(zoneId, rockId) {
   return `${zoneId || 'UNKNOWN'}:${rockId}`;
+}
+
+// How many hammer strikes a rock yields before it is exhausted (or, if
+// breakable, shatters). Scales with the boulder's bulk so pebble-scale rocks
+// give up quickly while proper formations take sustained work.
+export function rockStrikeBudget(rock) {
+  if (!rock || rock.groundSample) return 1;
+  const radius = Math.max(0.2, rock.radius || 0.5);
+  const top = Math.max(0.2, rock.colliderTop ?? rock.height ?? 0.5);
+  return Math.round(Math.min(5, Math.max(2, radius * 2.2 + top * 1.4)));
+}
+
+// Only procedural RockField boulders can shatter (their visual can actually be
+// removed); large climbable formations stay intact and merely scar.
+export function isRockBreakable(rock) {
+  if (!rock || rock.groundSample) return false;
+  if (!rock.proceduralRock) return false;
+  if (rock.pushable) return false;
+  const radius = rock.radius || 0.5;
+  const top = rock.colliderTop ?? rock.height ?? 0.5;
+  return radius <= 1.05 && top <= 1.35;
 }
 
 function normalized2(x = 0, z = -1) {

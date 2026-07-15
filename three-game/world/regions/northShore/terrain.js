@@ -66,9 +66,8 @@ export function northernShoreBiomeAt(x, z, y = northernShoreHeight(x, z)) {
   return 'dry-scrub';
 }
 
-export function northernShoreColor(x, z, y) {
+function northernShoreColorForBiome(x, z, biome) {
   const noise = terrainSurfaceNoise(x, z);
-  const biome = northernShoreBiomeAt(x, z, y);
   const color = new THREE.Color();
   if (biome === 'water') color.set('#49b9c7');
   else if (biome === 'lava-shelf') color.set('#34312b');
@@ -101,6 +100,20 @@ export function northernShoreColor(x, z, y) {
   return color;
 }
 
+export function northernShoreColor(x, z, y) {
+  return northernShoreColorForBiome(x, z, northernShoreBiomeAt(x, z, y));
+}
+
+export function northernShoreRenderSample(x, z) {
+  const height = northernShoreHeight(x, z);
+  const biome = northernShoreBiomeAt(x, z, height);
+  return {
+    height,
+    biome,
+    color: northernShoreColorForBiome(x, z, biome),
+  };
+}
+
 export { northShoreCoastZ, northShorePromontory };
 
 
@@ -121,6 +134,7 @@ export const northShoreRegion = {
     movementHeight: (x, z) => northernShoreHeight(x, z, { movementSurface: true }),
     biomeAt: northernShoreBiomeAt,
     color: northernShoreColor,
+    sample: northernShoreRenderSample,
     isWalkable: isNorthernShoreWalkable,
   },
 };

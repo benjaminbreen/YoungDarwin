@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { faunaDebugEnabled } from '../../runtimeDebug';
@@ -8,7 +8,11 @@ import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { getRegionDefinition } from '../../world/regions';
 import { WATER_LEVEL } from '../../world/water';
 import { specimenToInspectable } from '../../world/inspectables';
-import { removeSpecimenRuntimePose, setSpecimenRuntimePose } from '../../world/specimenRuntime';
+import {
+  removeSpecimenRuntimePose,
+  setSpecimenRuntimeBounds,
+  setSpecimenRuntimePose,
+} from '../../world/specimenRuntime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
@@ -17,6 +21,7 @@ import { LavaLizardShape } from '../../wildlife/reptiles/LavaLizardShape';
 import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSpecimenShape';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
+import { getModelAsset } from '../../modelAssets';
 import { SpecimenHighlight } from './SpecimenHighlight';
 
 const CARRY_PICKUP_DISTANCE = 2.15;
@@ -276,7 +281,7 @@ function ProceduralSpecimenShape({ specimen }) {
   );
 }
 
-export function SpecimenShape({ specimen, animationSelector }) {
+export function SpecimenShape({ specimen, animationSelector, onSceneReady = null }) {
   if (specimen.pollinator) return <PollinatorSpecimenShape specimen={specimen} />;
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
@@ -291,6 +296,7 @@ export function SpecimenShape({ specimen, animationSelector }) {
       fallback={<ProceduralSpecimenShape specimen={specimen} />}
       animationSelector={animationSelector}
       motion={foliageMotion}
+      onSceneReady={onSceneReady}
       timeScaled
       castShadow
       receiveShadow
@@ -302,13 +308,13 @@ function CrabWiggle({ children, groupRef }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
-function AnimatedSpecimenShape({ specimen, animationSelector, crabWiggleRef }) {
+function AnimatedSpecimenShape({ specimen, animationSelector, crabWiggleRef, onSceneReady }) {
   if (specimen.id !== 'crab') {
-    return <SpecimenShape specimen={specimen} animationSelector={animationSelector} />;
+    return <SpecimenShape specimen={specimen} animationSelector={animationSelector} onSceneReady={onSceneReady} />;
   }
   return (
     <CrabWiggle groupRef={crabWiggleRef}>
-      <SpecimenShape specimen={specimen} animationSelector={animationSelector} />
+      <SpecimenShape specimen={specimen} animationSelector={animationSelector} onSceneReady={onSceneReady} />
     </CrabWiggle>
   );
 }
@@ -398,6 +404,20 @@ export function SpecimenActor({ specimen }) {
       || faunaBehavior.animationRef?.current;
     return clip ? { clip, timeScale: 0.72, fade: 0.24 } : null;
   };
+  const captureRenderedBounds = useCallback(scene => {
+    if (!scene) return;
+    scene.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3().setFromObject(scene);
+    const size = bounds.getSize(new THREE.Vector3());
+    if (size.x <= 0 || size.y <= 0 || size.z <= 0) return;
+    const assetScale = getModelAsset(assetIdForSpecimen(specimen))?.scale || 1;
+    const sceneScale = specimen.sceneScale || 1;
+    const scale = assetScale * sceneScale;
+    setSpecimenRuntimeBounds(currentZoneId, actorId, {
+      height: size.y * scale,
+      radius: Math.max(size.x, size.z) * scale * 0.5,
+    });
+  }, [actorId, currentZoneId, specimen]);
 
   useEffect(() => {
     if (isCollectedActor) return;
@@ -786,6 +806,7 @@ export function SpecimenActor({ specimen }) {
         specimen={specimen}
         animationSelector={selectSpecimenAnimation}
         crabWiggleRef={crabWiggleRef}
+        onSceneReady={captureRenderedBounds}
       />
     </>
   );

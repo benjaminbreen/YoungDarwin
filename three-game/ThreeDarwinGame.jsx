@@ -17,7 +17,7 @@ import { LaunchOverlay } from './ui/LaunchOverlay';
 import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
-import { isOvercastWeather, weatherSkyTint } from './world/weatherStates';
+import { isOvercastWeather, weatherProfile, weatherSkyTint } from './world/weatherStates';
 import { skyState } from './world/celestial';
 import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
@@ -26,6 +26,11 @@ import './world/fogAtmosphere'; // patches the shared fog chunks; must run befor
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { getEcology } from './world/ecology';
+import { prefetchEcologyAssets } from './components/scene/ecology/EcologyRenderer';
+import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
+import { prefetchRegionTerrainTextures } from './world/terrainPrefetch';
+import { prefetchIslandMapImage } from './ui/expedition/map/islandLocations';
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -73,6 +78,11 @@ const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 // its stable enum value rather than import from a non-direct dependency.
 const SMAA_PRESET_ULTRA = 3;
 const WATER_QUALITY_MODES = ['performance', 'polished', 'cinematic'];
+const SETTLED_ASSET_PROGRESS = Object.freeze({
+  active: false,
+  progress: 100,
+  total: 0,
+});
 
 const DEFAULT_PERF_SETTINGS = {
   quality: 'performance',
@@ -192,12 +202,16 @@ const QUALITY_PRESETS = {
   },
 };
 
-const BOOT_LOADER_STABLE_MS = 250;
-const BOOT_MIN_LOADING_MS = 800;
+const BOOT_LOADER_STABLE_MS = 350;
+const BOOT_MIN_LOADING_MS = 1000;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const OPENING_CAMERA_DURATION_MS = 6200;
-const STARTUP_FULL_CONTENT_PHASE = 6;
-const POST_INTRO_PHASE_TIMINGS_MS = [120, 420, 780, 1180, 1650, 2200];
+const OPENING_AERIAL_MIN_MS = 3800;
+const OPENING_AERIAL_MAX_MS = 6500;
+const OPENING_DESCENT_DURATION_MS = 5000;
+const OPENING_CLOUD_VEIL_DURATION_MS = 4600;
+const LAUNCH_OVERLAY_FADE_MS = 900;
+const STARTUP_FULL_CONTENT_PHASE = 3;
+const INTRO_CONTENT_PHASE_TIMINGS_MS = [150, 700, 1400];
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 
@@ -209,30 +223,6 @@ function normalizeShadowQuality(value, fallback = 'high') {
 function normalizeWaterQuality(value, fallback = 'polished') {
   const mode = String(value || '').toLowerCase();
   return WATER_QUALITY_MODES.includes(mode) ? mode : fallback;
-}
-
-function startupRenderSettings(settings, contentPhase, gameStarted) {
-  if (!gameStarted || contentPhase >= 5) return settings;
-  const terrainSegmentCap = settings.terrainSegmentCap == null
-    ? 160
-    : Math.min(160, settings.terrainSegmentCap);
-  return {
-    ...settings,
-    msaaSamples: 0,
-    shadowQuality: 'standard',
-    ao: false,
-    reflections: false,
-    waterQuality: 'performance',
-    weatherFX: contentPhase >= 2 && settings.weatherFX !== false,
-    splatBackdrop: false,
-    solarScreenGlare: false,
-    solarLensGhosts: false,
-    solarSceneFlares: false,
-    solarSunFacingGrade: false,
-    cheapMaterials: true,
-    foliageDrawScale: Math.min(0.75, settings.foliageDrawScale ?? 1),
-    terrainSegmentCap,
-  };
 }
 
 function getInitialPerfSettings() {
@@ -807,15 +797,323 @@ function CriticalShaderWarmup({ enabled, sequenceId, onReady }) {
   return null;
 }
 
+function OpeningVisualReadySignal({
+  active,
+  sequenceId,
+  contentReady,
+  segmentCap,
+  onReady,
+}) {
+  const { gl, scene, camera } = useThree();
+  const activeSequenceRef = useRef(null);
+  const quietSinceRef = useRef(0);
+  const stableFramesRef = useRef(0);
+  const compilingSequenceRef = useRef(null);
+  const compiledSequenceRef = useRef(null);
+  const announcedSequenceRef = useRef(null);
+  const compileTimeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (compileTimeoutRef.current != null) window.clearTimeout(compileTimeoutRef.current);
+  }, []);
+
+  useFrame(() => {
+    if (!active || !sequenceId) {
+      activeSequenceRef.current = null;
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      return;
+    }
+    if (activeSequenceRef.current !== sequenceId) {
+      activeSequenceRef.current = sequenceId;
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      compilingSequenceRef.current = null;
+      announcedSequenceRef.current = null;
+    }
+    if (!contentReady) return;
+
+    const zoneId = useThreeGameStore.getState().currentZoneId;
+    if (!terrainResourceIsReady(zoneId, segmentCap)) {
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      return;
+    }
+
+    // Read loader state imperatively. Subscribing this R3F component lets a
+    // render-time texture request schedule a React update in another render.
+    const assetProgress = useProgress.getState();
+    const knownTotal = Number(assetProgress.total || 0);
+    const loaderBusy = assetProgress.active
+      || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
+    if (loaderBusy) {
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      return;
+    }
+
+    const now = performance.now();
+    if (!quietSinceRef.current) quietSinceRef.current = now;
+    if (now - quietSinceRef.current < 300) return;
+
+    if (compiledSequenceRef.current !== sequenceId) {
+      if (compilingSequenceRef.current !== sequenceId) {
+        const compileSequence = sequenceId;
+        compilingSequenceRef.current = compileSequence;
+        Promise.resolve()
+          .then(() => Promise.race([
+            typeof gl.compileAsync === 'function'
+              ? gl.compileAsync(scene, camera)
+              : Promise.resolve(gl.compile(scene, camera)),
+            new Promise(resolve => {
+              compileTimeoutRef.current = window.setTimeout(resolve, 3500);
+            }),
+          ]))
+          .catch(() => {})
+          .then(() => {
+            if (compileTimeoutRef.current != null) window.clearTimeout(compileTimeoutRef.current);
+            compileTimeoutRef.current = null;
+            if (activeSequenceRef.current === compileSequence) {
+              compiledSequenceRef.current = compileSequence;
+            }
+            if (compilingSequenceRef.current === compileSequence) {
+              compilingSequenceRef.current = null;
+            }
+          });
+      }
+      return;
+    }
+
+    stableFramesRef.current += 1;
+    if (stableFramesRef.current < 3 || announcedSequenceRef.current === sequenceId) return;
+    announcedSequenceRef.current = sequenceId;
+    onReady();
+  });
+
+  return null;
+}
+
+function ZoneTransitionReadySignal({ segmentCap }) {
+  const { gl, scene, camera } = useThree();
+  const compiledIdRef = useRef(null);
+  const compilingIdRef = useRef(null);
+  const quietSinceRef = useRef(0);
+  const stableFramesRef = useRef(0);
+  const resourceStableFramesRef = useRef(0);
+  const activeIdRef = useRef(null);
+  const readyTimeoutRef = useRef(null);
+  const readyQueuedIdRef = useRef(null);
+
+  useEffect(() => () => {
+    if (readyTimeoutRef.current != null) window.clearTimeout(readyTimeoutRef.current);
+  }, []);
+
+  // Zustand updates are normally safe from a frame callback, but this signal
+  // can coincide with React committing destination Suspense children. Deferring
+  // one task keeps the transition update outside another component's render.
+  const queueReady = transitionId => {
+    if (readyQueuedIdRef.current === transitionId) return;
+    readyQueuedIdRef.current = transitionId;
+    readyTimeoutRef.current = window.setTimeout(() => {
+      readyTimeoutRef.current = null;
+      readyQueuedIdRef.current = null;
+      const current = useThreeGameStore.getState();
+      if (current.transition?.id !== transitionId || current.transition.phase !== 'mounting') return;
+      current.setZoneTransitionPhase('ready', transitionId);
+    }, 0);
+  };
+
+  useFrame(() => {
+    const state = useThreeGameStore.getState();
+    const active = state.transition;
+    if (!active || active.phase !== 'mounting' || state.currentZoneId !== active.zoneId) {
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      resourceStableFramesRef.current = 0;
+      activeIdRef.current = null;
+      return;
+    }
+    if (activeIdRef.current !== active.id) {
+      activeIdRef.current = active.id;
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      resourceStableFramesRef.current = 0;
+    }
+    // Compilation is a polish step, not a gate that may permanently strand the
+    // player. This also covers a failed terrain promise or a loader that never
+    // reports its final progress event on a particular WebGL implementation.
+    if (active.committedAt && Date.now() - active.committedAt >= 6500) {
+      queueReady(active.id);
+      return;
+    }
+    if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
+      resourceStableFramesRef.current = 0;
+      return;
+    }
+    // Let Suspense commit the terrain/physics consumers after the worker's
+    // promise resolves before compiling the destination scene.
+    resourceStableFramesRef.current += 1;
+    if (resourceStableFramesRef.current < 3) return;
+    if (compiledIdRef.current !== active.id) {
+      if (compilingIdRef.current !== active.id) {
+        const transitionId = active.id;
+        compilingIdRef.current = transitionId;
+        let compileTimeoutId = null;
+        Promise.resolve()
+          .then(() => Promise.race([
+            typeof gl.compileAsync === 'function'
+              ? gl.compileAsync(scene, camera)
+              : Promise.resolve(gl.compile(scene, camera)),
+            new Promise(resolve => {
+              compileTimeoutId = window.setTimeout(resolve, 3500);
+            }),
+          ]))
+          .catch(() => {
+            // The renderer will surface shader errors. Readiness must still be
+            // able to settle onto authored fallbacks on unusual WebGL drivers.
+          })
+          .then(() => {
+            if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+            if (useThreeGameStore.getState().transition?.id === transitionId) {
+              compiledIdRef.current = transitionId;
+            }
+            if (compilingIdRef.current === transitionId) compilingIdRef.current = null;
+          });
+      }
+      return;
+    }
+    // Read the loader store without subscribing this R3F component. Texture
+    // loaders may start synchronously while destination actors render; a
+    // subscription here lets that render-time loading event try to re-render
+    // this component, which React correctly reports as a cross-component update.
+    const assetProgress = useProgress.getState();
+    const knownTotal = Number(assetProgress.total || 0);
+    const loaderBusy = assetProgress.active
+      || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
+    if (loaderBusy || compiledIdRef.current !== active.id) {
+      quietSinceRef.current = 0;
+      stableFramesRef.current = 0;
+      return;
+    }
+    const now = performance.now();
+    if (!quietSinceRef.current) quietSinceRef.current = now;
+    if (now - quietSinceRef.current < 220) return;
+    stableFramesRef.current += 1;
+    if (stableFramesRef.current < 3) return;
+    stableFramesRef.current = 0;
+    queueReady(active.id);
+  });
+
+  return null;
+}
+
+function TravelCameraRig() {
+  const { camera } = useThree();
+  const sequenceRef = useRef(null);
+  const departurePositionRef = useRef(new Vector3());
+  const departureDirectionRef = useRef(new Vector3());
+  const departureFovRef = useRef(camera.fov);
+  const arrivalPositionRef = useRef(new Vector3());
+  const arrivalQuaternionRef = useRef(camera.quaternion.clone());
+  const arrivalIdRef = useRef(null);
+  const targetPosition = useRef(new Vector3());
+  const targetQuaternion = useRef(camera.quaternion.clone());
+  const lookTarget = useRef(new Vector3());
+  const direction = useRef(new Vector3());
+
+  useFrame(() => {
+    const state = useThreeGameStore.getState();
+    const active = state.transition;
+    if (!active || active.mode === 'threshold') {
+      sequenceRef.current = null;
+      arrivalIdRef.current = null;
+      return;
+    }
+
+    if (sequenceRef.current !== active.id) {
+      sequenceRef.current = active.id;
+      departurePositionRef.current.copy(camera.position);
+      camera.getWorldDirection(departureDirectionRef.current);
+      departureFovRef.current = camera.fov;
+      arrivalIdRef.current = null;
+    }
+
+    if (active.phase === 'departing') {
+      const elapsed = Math.max(0, Date.now() - active.startedAt);
+      const t = MathUtils.smoothstep(Math.min(1, elapsed / 2250), 0, 1);
+      targetPosition.current.copy(departurePositionRef.current)
+        .addScaledVector(departureDirectionRef.current, -7 * t);
+      targetPosition.current.y += 10 * t;
+      camera.position.copy(targetPosition.current);
+      const pose = state.playerPose?.position || { x: 0, y: 0, z: 0 };
+      lookTarget.current.set(pose.x || 0, (pose.y || 0) + 1.1, pose.z || 0);
+      camera.lookAt(lookTarget.current);
+      camera.fov = departureFovRef.current + 3.2 * t;
+      camera.updateProjectionMatrix();
+      return;
+    }
+
+    if (active.phase !== 'arriving' && active.phase !== 'settling') return;
+    // PlayerController has already written the exact selected-view pose this
+    // frame. Capture it as the handoff target, then apply the cinematic override
+    // afterward so release at t=1 cannot snap between camera modes.
+    targetPosition.current.copy(camera.position);
+    targetQuaternion.current.copy(camera.quaternion);
+    if (arrivalIdRef.current !== active.id) {
+      arrivalIdRef.current = active.id;
+      const pose = state.playerPose?.position || { x: 0, y: 0, z: 0 };
+      const px = pose.x || 0;
+      const py = pose.y || 0;
+      const pz = pose.z || 0;
+      direction.current.set(targetPosition.current.x - px, 0, targetPosition.current.z - pz);
+      if (direction.current.lengthSq() < 0.01) direction.current.set(0, 0, 1);
+      direction.current.normalize();
+      arrivalPositionRef.current.set(px, Math.max(py + 18, targetPosition.current.y + 8), pz)
+        .addScaledVector(direction.current, 10);
+      const previousPosition = camera.position.clone();
+      camera.position.copy(arrivalPositionRef.current);
+      lookTarget.current.set(px, py + 1.1, pz);
+      camera.lookAt(lookTarget.current);
+      arrivalQuaternionRef.current.copy(camera.quaternion);
+      camera.position.copy(previousPosition);
+    }
+    const arrivalStartedAt = active.arrivingAt || active.readyAt || active.phaseStartedAt || Date.now();
+    const elapsed = Math.max(0, Date.now() - arrivalStartedAt);
+    const t = MathUtils.smoothstep(Math.min(1, elapsed / 1750), 0, 1);
+    camera.position.copy(arrivalPositionRef.current).lerp(targetPosition.current, t);
+    camera.quaternion.copy(arrivalQuaternionRef.current).slerp(targetQuaternion.current, t);
+  });
+
+  return null;
+}
+
+function DestinationIntentPrefetch({ segmentCap }) {
+  const edgeDestinationId = useThreeGameStore(state => state.edgePrompt?.toRegionId || null);
+  const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
+  const destinationId = transitionDestinationId || edgeDestinationId;
+  useEffect(() => {
+    if (!destinationId) return;
+    prefetchIslandMapImage();
+    prefetchRegionTerrainTextures(destinationId);
+    prepareTerrainResource(destinationId, segmentCap);
+    prefetchEcologyAssets(getEcology(destinationId));
+  }, [destinationId, segmentCap]);
+  return null;
+}
+
 function OpeningIntroCompletion({
   active,
   sequenceId,
-  durationMs,
+  visualReady,
+  minAerialMs,
+  maxAerialMs,
+  descentDurationMs,
   onComplete,
 }) {
   const state = useRef({
     sequenceId: null,
     startedAt: 0,
+    descentStartedAt: 0,
     completed: false,
   });
 
@@ -823,6 +1121,7 @@ function OpeningIntroCompletion({
     if (!active) {
       state.current.sequenceId = null;
       state.current.startedAt = 0;
+      state.current.descentStartedAt = 0;
       state.current.completed = false;
       return;
     }
@@ -831,12 +1130,19 @@ function OpeningIntroCompletion({
     if (state.current.sequenceId !== sequenceId) {
       state.current.sequenceId = sequenceId;
       state.current.startedAt = now;
+      state.current.descentStartedAt = 0;
       state.current.completed = false;
     }
 
     if (state.current.completed) return;
     const elapsed = now - state.current.startedAt;
-    if (elapsed >= durationMs) {
+    if (!state.current.descentStartedAt) {
+      const readyToDescend = visualReady && elapsed >= minAerialMs;
+      const boundedFallback = elapsed >= maxAerialMs;
+      if (readyToDescend || boundedFallback) state.current.descentStartedAt = now;
+      return;
+    }
+    if (now - state.current.descentStartedAt >= descentDurationMs) {
       state.current.completed = true;
       onComplete();
     }
@@ -854,6 +1160,7 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
   const expeditionDay = useThreeGameStore(state => state.day);
+  const weather = useThreeGameStore(state => state.weather);
   const interiorDefinition = getInteriorDefinition(currentZoneId);
   const interiorFx = interiorDefinition?.lighting?.postprocessing;
   // The grade effects are instantiated directly, NOT via the
@@ -900,17 +1207,40 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   const underwater = Math.min(1, Math.max(0, underwaterAmount));
   const composerMultisampling = interiorFx?.multisampling ?? multisampling;
   const interiorDaylight = interiorFx ? skyState(timeOfDay, expeditionDay || 1).daylight : 1;
+  const interiorWeatherProfile = interiorFx ? weatherProfile(weather) : null;
+  const interiorCloudBloom = interiorFx
+    ? MathUtils.clamp(
+      (interiorWeatherProfile?.overcast ?? 0)
+      + (interiorWeatherProfile?.mist ?? 0) * 0.18,
+      0,
+      1,
+    )
+    : 0;
+  const interiorDayBloomIntensity = interiorFx
+    ? MathUtils.lerp(
+      interiorFx.bloomDayIntensity ?? 0.62,
+      interiorFx.bloomOvercastDayIntensity ?? interiorFx.bloomDayIntensity ?? 0.62,
+      interiorCloudBloom,
+    )
+    : 0.52;
+  const interiorDayBloomThreshold = interiorFx
+    ? MathUtils.lerp(
+      interiorFx.bloomDayThreshold ?? 0.58,
+      interiorFx.bloomOvercastDayThreshold ?? interiorFx.bloomDayThreshold ?? 0.58,
+      interiorCloudBloom,
+    )
+    : 0.76;
   const bloomIntensity = interiorFx
     ? MathUtils.lerp(
       interiorFx.bloomNightIntensity ?? 0.62,
-      interiorFx.bloomDayIntensity ?? 0.62,
+      interiorDayBloomIntensity,
       interiorDaylight,
     )
     : 0.52;
   const bloomThreshold = interiorFx
     ? MathUtils.lerp(
       interiorFx.bloomNightThreshold ?? 0.58,
-      interiorFx.bloomDayThreshold ?? 0.58,
+      interiorDayBloomThreshold,
       interiorDaylight,
     )
     : 0.76;
@@ -1407,6 +1737,8 @@ export default function ThreeDarwinGame() {
   const [displayedProgress, setDisplayedProgress] = useState(0);
   const [startupContentPhase, setStartupContentPhase] = useState(0);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
+  const [openingVisualReady, setOpeningVisualReady] = useState(false);
+  const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
@@ -1419,38 +1751,49 @@ export default function ThreeDarwinGame() {
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
-  const assetProgress = useProgress();
+  // Loading progress only drives the launch overlay. Once the initial scene is
+  // ready, keep this subscriber's snapshot stable so render-time texture starts
+  // in newly mounted regions cannot schedule a parent React update.
+  const assetProgress = useProgress(state => (
+    sceneReady ? SETTLED_ASSET_PROGRESS : state
+  ));
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const weather = useThreeGameStore(state => state.weather);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
+  const transition = useThreeGameStore(state => state.transition);
   const gameStarted = launchState !== 'menu' && launchState !== 'character';
   const automationReadyMode = e2eMode || screenshotMode;
   const openingIntroActive = launchState === 'intro';
-  const scenePerfSettings = useMemo(
-    () => startupRenderSettings(perfSettings, startupContentPhase, gameStarted),
-    [gameStarted, perfSettings, startupContentPhase],
-  );
+  // Terrain, DPR, postprocessing, and water targets stay on their final
+  // configuration from the first covered frame. Swapping these after reveal
+  // can suspend the root scene and expose the canvas clear color.
+  const scenePerfSettings = perfSettings;
   const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
-  const renderDpr = useMemo(() => {
-    if (!gameStarted || startupContentPhase >= STARTUP_FULL_CONTENT_PHASE) return configuredDpr;
-    if (startupContentPhase >= 5) return [1, Math.min(1.25, configuredDpr[1])];
-    return [1, 1];
-  }, [configuredDpr, gameStarted, startupContentPhase]);
+  const renderDpr = configuredDpr;
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
-  const showLaunchOverlay = launchState === 'menu' || launchState === 'character' || !sceneReady;
+  const showLaunchOverlay = launchState === 'menu'
+    || launchState === 'character'
+    || !sceneReady
+    || !launchOverlayDismissed;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
   const openingCamera = useMemo(() => ({
     active: openingIntroActive && openingIntroStartedAt > 0,
     sequenceId: openingIntroStartedAt,
-    duration: OPENING_CAMERA_DURATION_MS / 1000,
-  }), [openingIntroActive, openingIntroStartedAt]);
+    visualReady: openingVisualReady,
+    minAerialDuration: OPENING_AERIAL_MIN_MS / 1000,
+    maxAerialDuration: OPENING_AERIAL_MAX_MS / 1000,
+    descentDuration: OPENING_DESCENT_DURATION_MS / 1000,
+  }), [openingIntroActive, openingIntroStartedAt, openingVisualReady]);
   const handleUnderwaterChange = useCallback(amount => {
     setUnderwaterAmount(amount);
   }, []);
   const markCriticalShadersReady = useCallback(() => {
     setCriticalShadersReady(true);
+  }, []);
+  const markOpeningVisualReady = useCallback(() => {
+    setOpeningVisualReady(true);
   }, []);
 
   // Mirror the material-quality knobs into the store so the scene's
@@ -1589,6 +1932,8 @@ export default function ThreeDarwinGame() {
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
+    setOpeningVisualReady(false);
+    setLaunchOverlayDismissed(false);
     setLaunchState('loading');
   };
 
@@ -1622,21 +1967,32 @@ export default function ThreeDarwinGame() {
   }, [automationReadyMode, e2eMode, gameStarted, markSceneReady, sceneReady, screenshotMode]);
 
   useEffect(() => {
-    if (launchState !== 'playing') return undefined;
-    if (automationReadyMode) {
+    if (!sceneReady) return undefined;
+    const handle = window.setTimeout(
+      () => setLaunchOverlayDismissed(true),
+      openingIntroActive ? LAUNCH_OVERLAY_FADE_MS : 500,
+    );
+    return () => window.clearTimeout(handle);
+  }, [openingIntroActive, sceneReady]);
+
+  useEffect(() => {
+    if (!gameStarted) return undefined;
+    if (automationReadyMode || launchState === 'playing') {
       setStartupContentPhase(STARTUP_FULL_CONTENT_PHASE);
       return undefined;
     }
-    const handles = POST_INTRO_PHASE_TIMINGS_MS.map((delay, index) => (
+    if (launchState !== 'intro') return undefined;
+    const handles = INTRO_CONTENT_PHASE_TIMINGS_MS.map((delay, index) => (
       window.setTimeout(() => {
         setStartupContentPhase(current => Math.max(current, index + 1));
       }, delay)
     ));
     return () => handles.forEach(handle => window.clearTimeout(handle));
-  }, [automationReadyMode, launchState]);
+  }, [automationReadyMode, gameStarted, launchState]);
 
   return (
-    <main className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
+    <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
+      {gameStarted && <DestinationIntentPrefetch segmentCap={scenePerfSettings.terrainSegmentCap} />}
       <KeyboardControls map={KEYBOARD_MAP}>
         {gameStarted && (
           <Canvas
@@ -1675,7 +2031,7 @@ export default function ThreeDarwinGame() {
                 perfSettings={scenePerfSettings}
                 contentPhase={startupContentPhase}
                 openingCamera={openingCamera}
-                inputLocked={openingIntroActive}
+                inputLocked={openingIntroActive || Boolean(transition)}
               />
               <CriticalShaderWarmup
                 enabled={loadersStable && !sceneReady}
@@ -1689,6 +2045,15 @@ export default function ThreeDarwinGame() {
                 onReady={markSceneReady}
               />
             </Suspense>
+            <OpeningVisualReadySignal
+              active={openingIntroActive}
+              sequenceId={openingIntroStartedAt}
+              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              segmentCap={scenePerfSettings.terrainSegmentCap}
+              onReady={markOpeningVisualReady}
+            />
+            <ZoneTransitionReadySignal segmentCap={scenePerfSettings.terrainSegmentCap} />
+            <TravelCameraRig />
             <PostFX
               enabled={scenePerfSettings.postprocessing}
               ao={scenePerfSettings.ao}
@@ -1702,7 +2067,10 @@ export default function ThreeDarwinGame() {
             <OpeningIntroCompletion
               active={openingIntroActive}
               sequenceId={openingIntroStartedAt}
-              durationMs={OPENING_CAMERA_DURATION_MS}
+              visualReady={openingVisualReady}
+              minAerialMs={OPENING_AERIAL_MIN_MS}
+              maxAerialMs={OPENING_AERIAL_MAX_MS}
+              descentDurationMs={OPENING_DESCENT_DURATION_MS}
               onComplete={() => setLaunchState('playing')}
             />
             <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
@@ -1749,7 +2117,7 @@ export default function ThreeDarwinGame() {
         <OpeningCloudVeil
           active={openingIntroActive}
           sequenceId={openingIntroStartedAt}
-          durationMs={OPENING_CAMERA_DURATION_MS}
+          durationMs={OPENING_CLOUD_VEIL_DURATION_MS}
         />
         {gameUiVisible && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
         {gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
@@ -1771,6 +2139,7 @@ export default function ThreeDarwinGame() {
         {showLaunchOverlay && (
           <LaunchOverlay
             mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}
+            departing={gameStarted && sceneReady}
             progress={displayedProgress}
             selectedModeId={playableModeId}
             onNewExpedition={openCharacterSelect}

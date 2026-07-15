@@ -38,24 +38,6 @@ const postOfficeBayObstacles = [
     gameplay: { jumpable: true, climbable: true, edgeRisk: true, climbLabel: 'climb onto basalt boulder' },
   },
   {
-    id: 'north-lava-boulder',
-    kind: 'boulder',
-    render: {
-      path: `${NATURE}Rock_Medium_3.glb`,
-      position: [8.8, 0, 8.2],
-      rotation: [0, -0.55, 0],
-      scale: 1.45,
-    },
-    collider: {
-      type: 'convex',
-      points: [[-1.824, 0.336], [-1.463, -0.311], [-0.867, -0.672], [-0.214, -0.859], [0.109, -0.876], [1.596, 0.14], [1.499, 0.549], [1.03, 1.942], [0.376, 2.586], [0.069, 2.365], [-1.058, 1.385], [-1.717, 0.73]],
-      height: 2.316,
-      yMin: -0.316,
-      yMax: 2.001,
-    },
-    gameplay: { jumpable: true, climbable: true, edgeRisk: true, climbLabel: 'climb onto lava boulder' },
-  },
-  {
     id: 'west-boulder',
     kind: 'boulder',
     render: {

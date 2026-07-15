@@ -1,4 +1,4 @@
-import { emitPropEvent } from '../../physics/props/propEvents';
+import { emitPropEvent, nextSwingId } from '../../physics/props/propEvents';
 import { useThreeGameStore } from '../../store';
 import { ACTION_DURATION } from './playerConfig';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
@@ -46,6 +46,7 @@ export function triggerDirectPlayerActions({
     onStart: () => {
       emitPropEvent('tool-swing', {
         tool: 'hammer',
+        swingId: nextSwingId(),
         position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
         facing: { x: facing.current.x, y: 0, z: facing.current.z },
         impactDelay: 0.55,

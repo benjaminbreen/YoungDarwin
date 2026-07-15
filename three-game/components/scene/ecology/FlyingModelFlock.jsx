@@ -4,6 +4,8 @@ import React, { Suspense, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { ModelAsset } from '../../assets/ModelAsset';
 
+const FLYING_FLAMINGO_CADENCE_SCALE = 1.9;
+
 export function FlyingModelFlock({ birds }) {
   const groupRef = useRef(null);
 
@@ -42,7 +44,12 @@ export function FlyingModelFlock({ birds }) {
               id={spec.assetId}
               animationSelector={() => ({
                 clip: spec.clip,
-                timeScale: spec.timeScale ?? 0.62,
+                // The source flamingo loop contains a long, stately beat. Its
+                // authored sub-1 time scales made the wings look almost held
+                // still at ecology distances, so retain each bird's variation
+                // while bringing the whole flight loop up to a readable pace.
+                timeScale: (spec.timeScale ?? 0.62)
+                  * (spec.assetId === 'flyingFlamingo' ? FLYING_FLAMINGO_CADENCE_SCALE : 1),
                 fade: 0.22,
               })}
             />

@@ -1,14 +1,21 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { StaticGLB } from '../../components/assets/StaticGLB';
 import { getModelAsset } from '../../modelAssets';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
+import {
+  FLOREANA_PBR_TEXTURES,
+  disposePbrTerrainSet,
+  loadPbrTerrainSet,
+} from '../../world/regions/materials/pbrTerrainTextures';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { onPropEvent } from './propEvents';
+import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -60,34 +67,90 @@ function BarrelVisual() {
 }
 
 function CrateVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.crateWood, roughness: 0.88, metalness: 0.01 }));
-  const slat = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.crateSlat, roughness: 0.9, metalness: 0.01 }));
-  const bodyGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.96, 0.84, 0.96));
-  const sideSlatGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.055, 0.92, 1.04));
-  const frontSlatGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(1.04, 0.92, 0.055));
-  const topSlatGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(1.06, 0.055, 1.06));
+  const wood = useDisposableMaterial(() => createTimberMaterial({
+    tint: '#b7aa93',
+    repeat: [1.35, 1.1],
+    normalScale: 0.72,
+    roughness: 0.96,
+  }));
+  const frame = useDisposableMaterial(() => createTimberMaterial({
+    tint: '#8f7b60',
+    repeat: [1.0, 0.42],
+    normalScale: 0.82,
+    roughness: 0.98,
+  }));
+  const bodyGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.84, 0.68, 0.84));
+  const cornerPostGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.09, 0.9, 0.09));
+  const frontRailGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.96, 0.1, 0.065));
+  const sideRailGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.065, 0.1, 0.96));
+  const frontBraceGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.72, 0.075, 0.065));
+  const sideBraceGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.065, 0.075, 0.72));
+  const topPlankGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.9, 0.055, 0.18));
 
   return (
     <group>
       <mesh castShadow receiveShadow material={wood} geometry={bodyGeometry} />
-      {[[-0.51, 0, 0], [0.51, 0, 0], [0, 0, -0.51], [0, 0, 0.51]].map(([x, y, z], index) => (
-        <mesh key={index} castShadow receiveShadow position={[x, y, z]} material={slat} geometry={x ? sideSlatGeometry : frontSlatGeometry} />
+      {[[-0.45, -0.45], [-0.45, 0.45], [0.45, -0.45], [0.45, 0.45]].map(([x, z], index) => (
+        <mesh key={`corner-${index}`} castShadow receiveShadow position={[x, 0, z]} material={frame} geometry={cornerPostGeometry} />
       ))}
-      <mesh castShadow receiveShadow position={[0, 0.47, 0]} material={slat} geometry={topSlatGeometry} />
+      {[-0.3, 0.3].flatMap(y => [
+        <mesh key={`front-${y}`} castShadow receiveShadow position={[0, y, 0.47]} material={frame} geometry={frontRailGeometry} />,
+        <mesh key={`back-${y}`} castShadow receiveShadow position={[0, y, -0.47]} material={frame} geometry={frontRailGeometry} />,
+        <mesh key={`left-${y}`} castShadow receiveShadow position={[-0.47, y, 0]} material={frame} geometry={sideRailGeometry} />,
+        <mesh key={`right-${y}`} castShadow receiveShadow position={[0.47, y, 0]} material={frame} geometry={sideRailGeometry} />,
+      ])}
+      <mesh castShadow receiveShadow position={[0, 0, 0.505]} rotation={[0, 0, 0.68]} material={frame} geometry={frontBraceGeometry} />
+      <mesh castShadow receiveShadow position={[0, 0, -0.505]} rotation={[0, 0, -0.68]} material={frame} geometry={frontBraceGeometry} />
+      <mesh castShadow receiveShadow position={[-0.505, 0, 0]} rotation={[0.68, 0, 0]} material={frame} geometry={sideBraceGeometry} />
+      <mesh castShadow receiveShadow position={[0.505, 0, 0]} rotation={[-0.68, 0, 0]} material={frame} geometry={sideBraceGeometry} />
+      {[-0.34, -0.11, 0.11, 0.34].map(z => (
+        <mesh key={`top-${z}`} castShadow receiveShadow position={[0, 0.37, z]} material={wood} geometry={topPlankGeometry} />
+      ))}
     </group>
   );
 }
 
-function StoneVisual() {
-  const material = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    color: PROP_PALETTE.stone,
-    roughness: 0.93,
-    metalness: 0.02,
-    flatShading: true,
-  }));
-  const geometry = useSingleMaterialGeometry(() => new THREE.DodecahedronGeometry(0.42, 0));
+// Loose basalt stone: same craggy fractured look and PBR maps as the hammer
+// sampling debris. Hammer strikes don't break it (it gets knocked rolling),
+// but each hit carves a visible bite so the stone shows its history.
+function StoneVisual({ propId = 'stone' }) {
+  const [strikes, setStrikes] = useState(0);
+  const material = useDisposableMaterial(() => {
+    const textures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
+    [textures.albedo, textures.normal, textures.roughness].forEach(texture => {
+      if (!texture) return;
+      texture.repeat.set(1.6, 1.6);
+      texture.needsUpdate = true;
+    });
+    const result = new THREE.MeshStandardMaterial({
+      map: textures.albedo,
+      normalMap: textures.normal,
+      normalScale: new THREE.Vector2(0.5, 0.5),
+      roughnessMap: textures.roughness,
+      vertexColors: true,
+      color: '#ffffff',
+      roughness: 0.92,
+      metalness: 0,
+      flatShading: true,
+    });
+    result.userData.pbrTextures = textures;
+    return result;
+  });
+  useEffect(() => () => disposePbrTerrainSet(material.userData.pbrTextures), [material]);
+
+  useEffect(() => onPropEvent('prop-struck', event => {
+    if (event.propId === propId) setStrikes(current => current + 1);
+  }), [propId]);
+
+  const geometry = useMemo(() => makeLooseStoneGeometry(propId, {
+    strikes,
+    rindColor: PROP_PALETTE.stone,
+    scale: [0.47, 0.33, 0.4],
+  }), [propId, strikes]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
   return (
-    <mesh castShadow receiveShadow material={material} geometry={geometry} scale={[1.12, 0.78, 0.95]} />
+    <mesh castShadow receiveShadow material={material} geometry={geometry} />
   );
 }
 
@@ -315,7 +378,7 @@ function CandlestickFlame({ offsetY = 0 }) {
   );
 }
 
-export function PropVisual({ visual, assetId, offsetY = 0 }) {
+export function PropVisual({ visual, assetId, offsetY = 0, propId }) {
   const asset = assetId ? getModelAsset(assetId) : null;
   if (asset?.enabled !== false && asset?.path) {
     return (
@@ -339,7 +402,7 @@ export function PropVisual({ visual, assetId, offsetY = 0 }) {
     );
   }
   if (visual === 'crate') return <CrateVisual />;
-  if (visual === 'stone') return <StoneVisual />;
+  if (visual === 'stone') return <StoneVisual propId={propId} />;
   if (visual === 'tooth') return <ToothVisual />;
   if (visual === 'book') return <BookVisual />;
   if (visual === 'shellFragment') return <ShellFragmentVisual />;

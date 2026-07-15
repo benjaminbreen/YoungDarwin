@@ -172,7 +172,14 @@ const {
 } = loadModule('three-game/world/localTransitions.js');
 const {
   getIslandMapLocation,
+  ISLAND_MAP_IMAGE,
 } = loadModule('three-game/ui/expedition/map/islandLocations.js');
+const {
+  getThreeSpecimens,
+} = loadModule('three-game/data.js');
+const {
+  getZone: getRuntimeZone,
+} = loadModule('three-game/world/floreanaZones.js');
 const {
   WEATHER_STATES,
   normalizeWeatherState,
@@ -514,6 +521,24 @@ test('terrain quality caps reduce mesh work without upsampling small interiors',
   assert.equal(resolveTerrainSegments(360, null), 360);
   assert.deepEqual(terrainGeometryStats(200), { segments: 200, vertices: 40401, triangles: 80000 });
   assert.deepEqual(terrainGeometryStats(300), { segments: 300, vertices: 90601, triangles: 180000 });
+});
+
+test('heavy authored regions stay within the seamless-travel terrain budget', () => {
+  assert.equal(regionMaps.N_SHORE.terrain.segments, 192);
+  assert.equal(regionMaps.PENAL_COLONY.terrain.segments, 192);
+  assert.deepEqual(terrainGeometryStats(192), { segments: 192, vertices: 37249, triangles: 73728 });
+  assert.match(ISLAND_MAP_IMAGE, /\.webp$/);
+});
+
+test('runtime zone and specimen lookups preserve stable authored identities', () => {
+  const firstZone = getRuntimeZone('POST_SCRUB_RISE');
+  const secondZone = getRuntimeZone('POST_SCRUB_RISE');
+  const firstSpecimens = getThreeSpecimens('POST_SCRUB_RISE');
+  const secondSpecimens = getThreeSpecimens('POST_SCRUB_RISE');
+
+  assert.strictEqual(firstZone, secondZone);
+  assert.strictEqual(firstSpecimens, secondSpecimens);
+  assert.strictEqual(firstSpecimens[0], secondSpecimens[0]);
 });
 
 test('large authored rocks creep only as constrained downhill-push obstacles', () => {
@@ -1012,7 +1037,8 @@ test('Lawson house blueprint preserves a spacious four-room plan at human furnit
   assert.ok(blueprint.dimensions.width >= 16);
   assert.ok(blueprint.dimensions.depth >= 14);
   assert.equal(blueprint.rooms.length, 4);
-  assert.equal(blueprint.rooms.filter(room => room.available).length, 1);
+  assert.equal(blueprint.rooms.filter(room => room.available).length, 2);
+  assert.equal(blueprint.fixedColliders.filter(item => item.id.startsWith('office-divider')).length, 2);
   assert.equal(lawsonHouseRegion.terrain.isWalkable(spawnX, spawnZ), true);
   assert.ok(blueprint.fixedColliders.length >= 14);
   assert.ok(getInteriorPropSpawns('LAWSON_HOUSE').length >= 10);

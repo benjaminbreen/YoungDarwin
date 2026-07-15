@@ -314,13 +314,21 @@ export function resolvePlayerLanding({
       );
       if (group.current.position.y < WATER_LEVEL + 0.02) {
         const splashPosition = { x: group.current.position.x, y: WATER_LEVEL, z: group.current.position.z };
+        const entryDirection = frameScratch.launchDirection.set(velocity.current.x, 0, velocity.current.z);
+        if (entryDirection.lengthSq() > 0.001) entryDirection.normalize();
+        else entryDirection.copy(facing.current);
         emitPropEvent('water-ripple', {
           position: splashPosition,
           intensity: Math.min(1, dustIntensity + 0.12),
+          direction: { x: entryDirection.x, y: 0, z: entryDirection.z },
         });
+        // Plunge entries are allowed past 1.0: the splash system scales droplet
+        // count and launch energy with intensity, so dives read bigger than
+        // any wading step ever can.
         emitPropEvent('water-splash', {
           position: splashPosition,
-          intensity: Math.min(1, dustIntensity + 0.2),
+          intensity: Math.min(1.35, dustIntensity + 0.45),
+          direction: { x: entryDirection.x, y: 0, z: entryDirection.z },
         });
       } else {
         const landingDirection = frameScratch.launchDirection.set(velocity.current.x, 0, velocity.current.z);
@@ -420,13 +428,20 @@ export function resolvePlayerLanding({
       } else if ((descent.calmFor = (descent.calmFor || 0) + delta) > 0.12) {
         // Only settle after a short calm window so one flat frame mid-descent
         // doesn't split the drop into two sub-threshold pieces.
-        if (descent.drop > 1.05) {
+        if (descent.drop > 0.55) {
           const offLandingSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+          // Feed the landing squash so the settle reads in the silhouette,
+          // not just as a clip swap.
+          stateRef.current.impactLandedAt = now;
+          stateRef.current.impactIntensity = THREE.MathUtils.clamp(0.12 + descent.drop * 0.16, 0.2, 0.62);
+          // Waist-height step-offs keep the walk/run gait — squash, lean, and
+          // dust sell the drop without a clip hijacking movement. Only
+          // genuinely tall step-offs earn a landing animation.
           if (descent.drop > 2.3) {
             startAction('jumpDown', durationFor('jumpDown'), { lockMovement: 0.24 });
-          } else if (offLandingSpeed > PLAYER.walkSpeed * 1.1) {
+          } else if (descent.drop > 1.55 && offLandingSpeed > PLAYER.walkSpeed * 1.1) {
             startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
-          } else {
+          } else if (descent.drop > 1.55) {
             startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
           }
           landingDustTriggerRef.current?.({
@@ -441,6 +456,45 @@ export function resolvePlayerLanding({
       }
     }
     descent.lastY = groundedY;
+    // Walking up a tall walk-over rock never leaves the ground — the support
+    // surface ramps the character up, so the climb clips have nothing to
+    // trigger on. Track fast grounded ascent on obstacle support and overlay
+    // a short scamper once the rise adds up to more than a walk cycle can
+    // sell. Overlay only: locomotion and the support ramp keep moving Darwin.
+    let ascent = stateRef.current.groundedAscent;
+    if (!ascent) {
+      ascent = { lastY: groundedY, rise: 0, calmFor: 0, lastScamperAt: -10 };
+      stateRef.current.groundedAscent = ascent;
+    }
+    if (wasAirborne.current || stateRef.current.action || stateRef.current.swimming) {
+      ascent.rise = 0;
+    } else {
+      const ascentDy = groundedY - ascent.lastY;
+      const ascentRate = delta > 0 ? ascentDy / delta : 0;
+      const steepAscent = ascentRate > 2.4 && terrainFeedback.current.groundSource === 'authored-obstacle';
+      if (steepAscent) {
+        ascent.rise += ascentDy;
+        ascent.calmFor = 0;
+      } else if ((ascent.calmFor = (ascent.calmFor || 0) + delta) > 0.14) {
+        ascent.rise = 0;
+      }
+      if (ascent.rise > 0.85
+        && Math.hypot(velocity.current.x, velocity.current.z) > 0.8
+        && now - ascent.lastScamperAt > 1.1
+        && !stateRef.current.action) {
+        ascent.lastScamperAt = now;
+        const scamperDuration = THREE.MathUtils.clamp(0.5 + ascent.rise * 0.15, 0.55, 0.8);
+        ascent.rise = 0;
+        startAction('climbWaistHeight', scamperDuration, { lockMovement: false });
+        cameraImpulse.current = {
+          startedAt: now,
+          intensity: 0.09,
+          duration: 0.18,
+          seed: cameraImpulse.current.seed + 1,
+        };
+      }
+    }
+    ascent.lastY = groundedY;
     if (moving || running || falling > 0.5) {
       queueMovementCost({ running, walking: moving && !running, airborne: false, falling, flush: falling > 0.5 }, delta, now);
     }

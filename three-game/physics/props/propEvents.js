@@ -16,6 +16,30 @@ export function emitPropEvent(type, payload) {
   for (const handler of [...handlers]) handler(payload);
 }
 
+// Tool-swing claim ledger. Each hammer swing carries a swingId; specialized
+// consumers (rock sampling, strikeable props, breakable plants, timber
+// structures) claim the id when the swing actually lands on their target.
+// The generic surface-impact resolver runs a beat after the shared impact
+// moment and only fires for swings nothing claimed, so a swing never produces
+// both a basalt chip and a generic dust burst.
+let swingCounter = 0;
+const claimedSwings = [];
+
+export function nextSwingId() {
+  swingCounter += 1;
+  return swingCounter;
+}
+
+export function claimSwing(swingId) {
+  if (!swingId || claimedSwings.includes(swingId)) return;
+  claimedSwings.push(swingId);
+  if (claimedSwings.length > 12) claimedSwings.shift();
+}
+
+export function isSwingClaimed(swingId) {
+  return claimedSwings.includes(swingId);
+}
+
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }

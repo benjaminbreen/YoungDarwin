@@ -243,6 +243,17 @@ export function terrainColor(x, z, y, regionId = 'POST_OFFICE_BAY') {
   return color;
 }
 
+export function terrainRenderSample(x, z, regionId = 'POST_OFFICE_BAY') {
+  const definition = authoredRegion(regionId);
+  if (definition?.terrain?.sample) return definition.terrain.sample(x, z);
+  const height = terrainHeight(x, z, regionId);
+  return {
+    height,
+    biome: terrainBiomeAt(x, z, height, regionId),
+    color: terrainColor(x, z, height, regionId),
+  };
+}
+
 export function sampleRegionMap(regionId, x, z) {
   const y = movementTerrainHeight(x, z, regionId);
   return {

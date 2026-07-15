@@ -6,6 +6,7 @@ import { getZoneProps } from './propRegistry';
 import { PhysicsProp } from './PhysicsProp';
 import { PropDebris } from './PropDebris';
 import { HammerImpactFX } from './HammerImpactFX';
+import { HammerStrikeResolver } from './HammerStrikeResolver';
 import { RockSampleSystem } from './RockSampleSystem';
 import { emitPropEvent } from './propEvents';
 import ShotgunSystem from '../../shooting/ShotgunSystem';
@@ -69,6 +70,7 @@ export function PhysicsProps() {
       renderPath: null,
     }}>
       <HammerImpactFX />
+      <HammerStrikeResolver />
       <RockSampleSystem />
       <WorldTimeTicker />
       <ShotgunSystem />

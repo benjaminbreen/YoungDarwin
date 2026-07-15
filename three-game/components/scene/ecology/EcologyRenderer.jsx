@@ -3,11 +3,9 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-import { getRegionEdgeHints } from '../../../../game-core/regionMaps';
 import { getRuntimePlayerPose } from '../../../store';
 import { getModelAsset } from '../../../modelAssets';
 import { getWildlifeAssetId } from '../../../wildlife/wildlifeCatalog';
-import { getEcology } from '../../../world/ecology';
 import { updateFoliageUniforms } from './foliageMotion';
 import { InstancedGLBLayer } from './InstancedGLBLayer';
 import { InstancedEzTreeLayer } from './InstancedEzTreeLayer';
@@ -172,7 +170,7 @@ function shouldPrefetchAsset(item, ecology) {
   return !ecology.stream || item.prefetch === true;
 }
 
-function prefetchEcologyAssets(ecology) {
+export function prefetchEcologyAssets(ecology) {
   if (!ecology) return;
   const preloadLayerPath = item => {
     if (shouldPrefetchAsset(item, ecology)) preloadGLBPath(item.path);
@@ -195,36 +193,7 @@ function prefetchEcologyAssets(ecology) {
   });
 }
 
-function neighborZoneIds(zoneId) {
-  if (!zoneId) return [];
-  const seen = new Set();
-  return getRegionEdgeHints(zoneId)
-    .filter(hint => hint.kind === 'open' && hint.toRegionId && hint.toRegionId !== zoneId)
-    .map(hint => hint.toRegionId)
-    .filter(id => {
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-}
-
-function useNeighborZonePrefetch(currentEcology) {
-  const zoneId = currentEcology?.zoneId;
-  useEffect(() => {
-    if (!zoneId) return undefined;
-    const handle = setTimeout(() => {
-      neighborZoneIds(zoneId).forEach(neighborId => {
-        const other = getEcology(neighborId);
-        if (!other) return;
-        prefetchEcologyAssets(other);
-      });
-    }, 5000); // let the current zone finish loading first
-    return () => clearTimeout(handle);
-  }, [zoneId]);
-}
-
 export function EcologyRenderer({ ecology, settings = {} }) {
-  useNeighborZonePrefetch(ecology);
   const [streamTier, setStreamTier] = useState(0);
 
   useEffect(() => {

@@ -654,6 +654,7 @@ def build_shell():
     {'center': -5.3, 'width': 1.4, 'bottom': 0, 'top': 2.42},
     {'center': -0.65, 'width': 1.6, 'bottom': window_bottom, 'top': window_top},
     {'center': 2.0, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
+    {'center': 6.7, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
   ]
   front_wall_with_openings('FrontWall', wall_z, -half_w, half_w, front_openings, public, ceiling)
   side_wall_with_openings('WestWall', -wall_x, -half_d, half_d, [
@@ -663,7 +664,9 @@ def build_shell():
   add_box('EastWall', (wall_x, ceiling / 2, 0), (0.18, ceiling, depth), public, bevel=0.012)
   add_box('RearWall', (0, ceiling / 2, -wall_z), (width, ceiling, 0.18), MATS['PrivateLimewash'], bevel=0.012)
 
-  # Four-room partitions with properly framed, closed doors.
+  # The office is a working room rather than a future locked set: its doorway
+  # is permanently open so the public dining room leads directly into Lawson's
+  # papers, reference shelf, and lamp light.
   side_wall_with_openings('OfficePartition', 2.92, 0, half_d, [
     {'center': 5.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
   ], public, ceiling, 0.16)
@@ -675,11 +678,11 @@ def build_shell():
   add_box('OfficeTintPanel', (3.015, ceiling / 2, 4.25), (0.025, ceiling - 0.12, 8.3), MATS['OfficeLimewash'])
   add_box('StoreRawPanel', (0.015, ceiling / 2, -4.25), (0.025, ceiling - 0.12, 8.3), MATS['LimewashedBoards'])
 
-  panelled_door('OfficeDoor', (2.82, 1.2, 5.1), 1.04, 2.4, 0.12, MATS['OldPine'], 'side')
+  # Leave the office threshold genuinely open; a parked leaf here read as a
+  # detached plank in top-down and blocked the study's inviting sightline.
   panelled_door('PrivateDoor', (-4.1, 1.2, -0.01), 1.04, 2.4, 0.12, MATS['OldPine'])
   panelled_door('StoreDoor', (5.1, 1.2, -0.01), 1.04, 2.4, 0.12, MATS['LimewashedBoards'])
   for door_name, knob in (
-    ('Office', (2.74, 1.18, 4.75)),
     ('Private', (-3.76, 1.18, 0.07)),
     ('Store', (4.76, 1.18, 0.07)),
   ):
@@ -696,9 +699,10 @@ def build_shell():
   simple_window('CallingWindow', -8.35, 1.56, wall_z - 0.11, 1.5, 1.32)
   simple_window('DiningWindowA', -0.65, 1.56, wall_z - 0.11, 1.6, 1.32)
   simple_window('DiningWindowB', 2.0, 1.56, wall_z - 0.11, 1.5, 1.32)
+  simple_window('OfficeWindow', 6.7, 1.56, wall_z - 0.11, 1.5, 1.32)
   simple_window('GardenWindowA', -wall_x + 0.11, 1.56, 3.0, 1.5, 1.32, 'side')
   simple_window('GardenWindowB', -wall_x + 0.11, 1.56, 6.2, 1.5, 1.32, 'side')
-  for x in (-8.35, -0.65, 2.0):
+  for x in (-8.35, -0.65, 2.0, 6.7):
     add_box(f'FrontShutterLeft_{x}', (x - 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
     add_box(f'FrontShutterRight_{x}', (x + 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
 
@@ -742,6 +746,7 @@ def build_shell():
     add_box(f'RustBloom_{x}_{z}', (x, 0.38, z), (0.03, 0.14, 0.03), MATS['Rust'])
 
   build_fixed_furniture()
+  build_office_furniture()
   build_veranda_diorama()
 
 
@@ -884,6 +889,55 @@ def build_fixed_furniture():
   # A quiet woven mat visually binds the receiving furniture without spilling
   # into the clear circulation line from the front door to the inner doors.
   add_sagged_panel('ReceivingMat', (-8.25, 0.03, 5.1), 2.35, 2.15, MATS['IndigoCloth'], sag=0.01, x_segments=16, z_segments=14, thickness=0.018)
+
+
+def build_office_furniture():
+  """A compact, damp-prone administrator's study, not a gentleman's library."""
+  # Desk faces the open threshold. The side clearance preserves a direct route
+  # from the entrance to the rear records cabinet.
+  table('OfficeWritingDesk', 6.85, 4.25, 2.85, 1.18, 0.82)
+  add_box('OfficeDeskBlotter', (6.85, 0.842, 4.25), (1.08, 0.016, 0.64), MATS['Leather'], bevel=0.018)
+  add_box('OfficeDispatchTray', (7.72, 0.89, 4.18), (0.5, 0.09, 0.34), MATS['FurnitureWood'], bevel=0.018)
+  add_box('OfficeDispatchPaper', (7.72, 0.948, 4.18), (0.42, 0.012, 0.28), MATS['Paper'], bevel=0.006)
+  add_cylinder('OfficeInkWell', (6.12, 0.91, 4.3), 0.075, 0.13, MATS['Ink'], 16)
+  beam_between('OfficeQuill', (6.15, 0.98, 4.28), (6.46, 1.02, 4.4), 0.012, MATS['Paper'], 10)
+
+  # A shallow elevated case keeps books away from the wet floor. Mixed heights,
+  # gaps, and horizontal stacks prevent it reading as a decorative book wall.
+  shelf_x = 10.02
+  add_box('OfficeBookcaseBack', (shelf_x, 1.42, 4.6), (0.18, 2.58, 5.25), MATS['OldPine'], bevel=0.024)
+  for y in (0.44, 1.14, 1.84, 2.68):
+    add_box(f'OfficeBookcaseShelf_{y}', (9.7, y, 4.6), (0.72, 0.075, 5.1), MATS['FurnitureWood'], bevel=0.016)
+  for z in (2.0, 7.2):
+    add_lathe(f'OfficeBookcasePost_{z}', (9.68, 1.45, z), ((0.042, 0), (0.06, 0.08), (0.045, 2.48), (0.065, 2.7)), MATS['CeilingTimber'], 16)
+  book_colors = (MATS['Leather'], MATS['DarkTimber'], MATS['FurnitureWood'])
+  book_index = 0
+  for row, y in enumerate((0.78, 1.48, 2.18)):
+    for z in (2.2, 2.65, 3.12, 3.72, 4.2, 4.85, 5.5, 6.0, 6.6):
+      if (row + book_index) % 5 == 0:
+        book_index += 1
+        continue
+      height = 0.32 + ((book_index * 7) % 4) * 0.075
+      add_box(f'OfficeShelfBook_{row}_{book_index}', (9.36, y + height * 0.5, z), (0.22, height, 0.22 + (book_index % 3) * 0.035), book_colors[book_index % len(book_colors)], bevel=0.012)
+      book_index += 1
+  add_box('OfficeShelfHorizontalStack', (9.38, 1.13, 3.7), (0.22, 0.17, 0.72), MATS['Leather'], bevel=0.018)
+
+  # Lockable colony records are intentionally more substantial than the books.
+  add_box('OfficeRecordsCabinet', (7.65, 0.56, 0.72), (2.7, 1.12, 0.58), MATS['FurnitureWood'], bevel=0.04)
+  for x in (6.8, 7.65, 8.5):
+    add_box(f'OfficeRecordsDrawer_{x}', (x, 0.68, 0.39), (0.68, 0.32, 0.045), MATS['OldPine'], bevel=0.015)
+    add_sphere(f'OfficeRecordsPull_{x}', (x, 0.68, 0.35), 0.032, MATS['Brass'])
+  add_box('OfficeMapTable', (5.2, 0.5, 6.65), (1.45, 0.78, 0.92), MATS['FurnitureWood'], bevel=0.03)
+  add_box('OfficeMapSheet', (5.2, 0.91, 6.65), (1.22, 0.018, 0.7), MATS['ArrowsmithMap'], bevel=0.008)
+  add_cylinder('OfficeSurveyInstrumentBase', (5.55, 0.99, 6.55), 0.1, 0.06, MATS['Brass'], 18)
+  add_torus('OfficeSurveyInstrumentRing', (5.55, 1.13, 6.55), 0.16, 0.018, MATS['Brass'], (math.pi / 2, 0, 0))
+
+  # One spare chair gives the desk social purpose without crowding its route.
+  add_box('OfficeVisitorChairSeat', (5.95, 0.48, 3.25), (0.7, 0.12, 0.68), MATS['FurnitureWood'], bevel=0.028)
+  add_sagged_panel('OfficeVisitorChairLeather', (5.95, 0.57, 3.25), 0.58, 0.54, MATS['Leather'], sag=0.018, x_segments=7, z_segments=7, thickness=0.045)
+  for x in (5.68, 6.22):
+    for z in (2.98, 3.52):
+      add_lathe(f'OfficeVisitorChairLeg_{x}_{z}', (x, 0, z), ((0.035, 0.02), (0.05, 0.09), (0.038, 0.46)), MATS['CeilingTimber'], 14)
 
 
 def build_veranda_diorama():

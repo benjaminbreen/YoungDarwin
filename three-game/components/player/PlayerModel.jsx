@@ -56,6 +56,17 @@ const DARWIN5_POLE_BODY_CARRY_EULER = [-0.18, Math.PI, Math.PI / 2];
 const DARWIN5_POLE_GRIP_OFFSET = [0.0, 0.014, -0.015];
 const DARWIN5_SNARE_COIL_GRIP_OFFSET = [0.018, 0.052, -0.016];
 const DARWIN5_SNARE_COIL_GRIP_EULER = [0, 0.32, 0];
+// Hammer GLB: haft along +Y with grip at origin, striking face +X, pick -X.
+// Bone-local axes on darwin5's hand: +Y runs toward the fingers, +Z out the
+// palm, so the grip offset seats the haft inside the curled fist rather than
+// at the wrist. Carry is body-oriented like the pole tools (darwin5's idle
+// wrist points down): head up but raked ~45° forward (body forward is +Z),
+// pick leading. The two-handed swing clip re-aims the haft dynamically — see
+// swingTwoHand in HandProp.
+const DARWIN5_HAMMER_GRIP_OFFSET = [0.0, 0.05, 0.02];
+const DARWIN5_HAMMER_BODY_CARRY_EULER = [Math.PI / 4, Math.PI / 2, 0];
+// Post-alignment roll trim for the swing so the pick faces the strike.
+const DARWIN5_HAMMER_SWING_EULER = [0, 0, 0];
 const SNARE_NOOSE_POINTS = Object.freeze([
   new THREE.Vector3(0.006, -0.018, 0),
   new THREE.Vector3(0.064, -0.13, 0.018),
@@ -519,7 +530,28 @@ const HAND_TOOLS = [
       },
     },
   },
-  { toolId: 'hammer',     path: '/assets/models/tools/hammer.glb',  scale: 1, position: [0.0, -0.012, -0.015], euler: [0, 0, -Math.PI / 2], hand: 'right', orient: 'hand' },
+  {
+    toolId: 'hammer',
+    path: '/assets/models/tools/hammer.glb',
+    scale: 1.05,
+    position: [0.0, -0.012, -0.015],
+    euler: [0, 0, -Math.PI / 2],
+    hand: 'right',
+    orient: 'hand',
+    modelOverrides: {
+      darwin5: {
+        bone: RIGHT_HAND,
+        position: DARWIN5_HAMMER_GRIP_OFFSET,
+        euler: DARWIN5_HAMMER_BODY_CARRY_EULER,
+        orient: 'body',
+        // The swing clip is two-handed: while it plays, lay the haft from the
+        // grip hand toward the off hand instead of holding the carry pose.
+        swingTwoHand: true,
+        shaftAxis: [0, 1, 0],
+        swingEuler: DARWIN5_HAMMER_SWING_EULER,
+      },
+    },
+  },
 ];
 
 const PLAYER_MODEL_CYCLE = Array.from(new Set([
@@ -757,9 +789,16 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
   const aimRight = useMemo(() => new THREE.Vector3(), []);
   const gripPos = useMemo(() => new THREE.Vector3(), []);
   const offHandPos = useMemo(() => new THREE.Vector3(), []);
-  const localShaftAxis = useMemo(() => new THREE.Vector3(0, 0, -1), []);
+  const localShaftAxis = useMemo(() => {
+    const axis = resolvedConfig.shaftAxis;
+    return axis ? new THREE.Vector3(axis[0], axis[1], axis[2]) : new THREE.Vector3(0, 0, -1);
+  }, [resolvedConfig.shaftAxis]);
   const tweakQuat = useMemo(() => new THREE.Quaternion(), []);
   const tweakEuler = useMemo(() => new THREE.Euler(), []);
+  const swingTweakQuat = useMemo(() => {
+    const e = resolvedConfig.swingEuler || [0, 0, 0];
+    return new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0], e[1], e[2]));
+  }, [resolvedConfig.swingEuler]);
 
   useEffect(() => {
     if (!scene || !source) return undefined;
@@ -795,8 +834,9 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       position: resolvedConfig.position,
     });
     if (!handle) return undefined;
-    // twoHand orientation needs the off hand to aim the shaft at.
-    if (resolvedConfig.orient === 'twoHand') {
+    // twoHand orientation (and the two-handed swing) needs the off hand to
+    // aim the shaft at.
+    if (resolvedConfig.orient === 'twoHand' || resolvedConfig.swingTwoHand) {
       const offRegex = resolvedConfig.hand === 'left' ? RIGHT_HAND : LEFT_HAND;
       let offBone = null;
       scene.traverse(node => {
@@ -841,6 +881,27 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       aimQuat.setFromUnitVectors(localShaftAxis, aimDir);
       group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
       return;
+    }
+    // Two-handed swing clips (hammer): while the swing plays, lay the haft
+    // from the gripping hand toward the off hand so the tool tracks the
+    // animated swing arc instead of freezing in the carry pose.
+    const motionAction = motionRef?.current?.action;
+    if (
+      resolvedConfig.swingTwoHand
+      && (motionAction === 'swingHammer' || motionAction === 'heavyToolSwing' || motionAction === 'swingTool')
+      && offHandBoneRef.current
+    ) {
+      const offBone = offHandBoneRef.current;
+      bone.getWorldQuaternion(boneQuat);
+      bone.getWorldPosition(gripPos);
+      offBone.getWorldPosition(offHandPos);
+      aimDir.copy(offHandPos).sub(gripPos);
+      if (aimDir.lengthSq() > 1e-6) {
+        aimDir.normalize();
+        aimQuat.setFromUnitVectors(localShaftAxis, aimDir).multiply(swingTweakQuat);
+        group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+        return;
+      }
     }
     if (resolvedConfig.orient === 'twoHand') {
       // Carry pose: lay the shaft from the gripping hand toward the off
@@ -1057,7 +1118,9 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
 
   const selectAnimation = useCallback(() => {
     const status = statusRef.current;
-    const speed = motionRef.current.speed || 0;
+    const speed = Number.isFinite(motionRef.current.animationSpeed)
+      ? motionRef.current.animationSpeed
+      : motionRef.current.speed || 0;
     const walkScale = THREE.MathUtils.clamp(speed / PLAYER.walkSpeed, 0.72, 1.24);
     const runScale = THREE.MathUtils.clamp(speed / PLAYER.runSpeed, 0.78, 1.28);
     const tiredRunScale = THREE.MathUtils.clamp(speed / Math.max(PLAYER.walkSpeed, PLAYER.runSpeed * 0.74), 0.72, 1.18);

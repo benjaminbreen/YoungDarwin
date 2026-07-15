@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { CAMERA, SPRINT, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
-import { getSpecimenRuntimePoses } from '../../world/specimenRuntime';
+import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../../world/specimenRuntime';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
@@ -47,6 +47,7 @@ export function usePlayerCameraRig() {
   const openingCameraRuntimeRef = useRef({
     sequenceId: null,
     startedAt: 0,
+    descentStartedAt: 0,
     initialized: false,
     finalPivot: new THREE.Vector3(),
     finalEye: new THREE.Vector3(),
@@ -373,6 +374,7 @@ export function usePlayerCameraRig() {
     if (!openingCameraActive) {
       openingCameraRuntimeRef.current.sequenceId = null;
       openingCameraRuntimeRef.current.startedAt = 0;
+      openingCameraRuntimeRef.current.descentStartedAt = 0;
       openingCameraRuntimeRef.current.initialized = false;
     }
     // Aim-mode transitions own the pointer: entering ADS captures the mouse
@@ -481,14 +483,43 @@ export function usePlayerCameraRig() {
       if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
         openingCameraRuntimeRef.current.sequenceId = sequenceId;
         openingCameraRuntimeRef.current.startedAt = now;
+        openingCameraRuntimeRef.current.descentStartedAt = 0;
         openingCameraRuntimeRef.current.initialized = false;
       }
-      const duration = Math.max(0.1, openingCamera.duration || 4.2);
-      const rawProgress = THREE.MathUtils.clamp((now - openingCameraRuntimeRef.current.startedAt) / duration, 0, 1);
-      const descentProgress = THREE.MathUtils.smoothstep(rawProgress, 0.12, 1);
-      const flyT = descentProgress * descentProgress * descentProgress * (descentProgress * (descentProgress * 6 - 15) + 10);
-      const orbitT = THREE.MathUtils.smoothstep(rawProgress, 0.08, 0.9);
-      const targetT = THREE.MathUtils.smoothstep(rawProgress, 0.06, 0.78);
+      const runtime = openingCameraRuntimeRef.current;
+      const minAerialDuration = Math.max(0.5, openingCamera.minAerialDuration || 3.8);
+      const maxAerialDuration = Math.max(minAerialDuration, openingCamera.maxAerialDuration || 6.5);
+      const descentDuration = Math.max(0.5, openingCamera.descentDuration || 5);
+      const aerialElapsed = Math.max(0, now - runtime.startedAt);
+      if (
+        !runtime.descentStartedAt
+        && (
+          (openingCamera.visualReady && aerialElapsed >= minAerialDuration)
+          || aerialElapsed >= maxAerialDuration
+        )
+      ) {
+        runtime.descentStartedAt = now;
+      }
+      const descentProgress = runtime.descentStartedAt
+        ? THREE.MathUtils.clamp((now - runtime.descentStartedAt) / descentDuration, 0, 1)
+        : 0;
+      const flyT = descentProgress * descentProgress * descentProgress
+        * (descentProgress * (descentProgress * 6 - 15) + 10);
+      const surveyT = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp(aerialElapsed / maxAerialDuration, 0, 1),
+        0,
+        1,
+      );
+      const orbitT = THREE.MathUtils.lerp(
+        surveyT * 0.28,
+        1,
+        THREE.MathUtils.smoothstep(descentProgress, 0.02, 0.94),
+      );
+      const targetT = THREE.MathUtils.lerp(
+        surveyT * 0.2,
+        1,
+        THREE.MathUtils.smoothstep(descentProgress, 0.04, 0.86),
+      );
       const introForward = scratch.introForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const introRight = scratch.introRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       const currentFinalPivot = scratch.introFinalPivot
@@ -510,7 +541,6 @@ export function usePlayerCameraRig() {
         .copy(currentFinalPivot)
         .addScaledVector(introForward, 9.5)
         .addScaledVector(introRight, -7.2);
-      const runtime = openingCameraRuntimeRef.current;
       if (!runtime.initialized) {
         runtime.finalPivot.copy(currentFinalPivot);
         runtime.finalEye.copy(currentFinalEye);
@@ -527,18 +557,23 @@ export function usePlayerCameraRig() {
       const finalOffsetZ = finalEye.z - finalPivot.z;
       const finalHorizontalRadius = Math.max(0.1, Math.hypot(finalOffsetX, finalOffsetZ));
       const finalAngle = Math.atan2(finalOffsetZ, finalOffsetX);
-      const orbitAngle = finalAngle - (1 - orbitT) * 1.42 + Math.sin(orbitT * Math.PI) * 0.12;
-      const orbitRadius = THREE.MathUtils.lerp(10.5, finalHorizontalRadius, flyT);
-      const orbitHeight = THREE.MathUtils.lerp(92, finalEye.y - finalPivot.y, flyT);
+      const orbitAngle = finalAngle - (1 - orbitT) * 0.82 + Math.sin(orbitT * Math.PI) * 0.08;
+      const orbitRadius = THREE.MathUtils.lerp(13.5, finalHorizontalRadius, flyT);
+      const surveyHeight = THREE.MathUtils.lerp(98, 94, surveyT);
+      const orbitHeight = THREE.MathUtils.lerp(surveyHeight, finalEye.y - finalPivot.y, flyT);
       const eye = scratch.introEye.set(
         orbitTarget.x + Math.cos(orbitAngle) * orbitRadius,
-        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 2.8,
+        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 2.4,
         orbitTarget.z + Math.sin(orbitAngle) * orbitRadius,
       );
       const lookTarget = scratch.introLookTarget
         .copy(orbitTarget);
-      lookTarget.y = THREE.MathUtils.lerp(orbitTarget.y, finalPivot.y + 0.18, THREE.MathUtils.smoothstep(rawProgress, 0.58, 1));
-      camera.position.copy(eye).addScaledVector(cameraShake, rawProgress);
+      lookTarget.y = THREE.MathUtils.lerp(
+        orbitTarget.y,
+        finalPivot.y + 0.18,
+        THREE.MathUtils.smoothstep(descentProgress, 0.58, 1),
+      );
+      camera.position.copy(eye).addScaledVector(cameraShake, descentProgress);
       camera.lookAt(lookTarget);
       if (!shoulderPivotRef.current) {
         shoulderPivotRef.current = finalPivot.clone();
@@ -558,7 +593,11 @@ export function usePlayerCameraRig() {
       // view on narrow portrait screens as well as desktop.
       const liveFocus = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(examineSession.actorId);
       const focus = liveFocus || examineSession.focus;
-      const hint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
+      const authoredHint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
+      const renderedBounds = getSpecimenRuntimeBounds(rigStoreState.currentZoneId)?.get(examineSession.actorId);
+      const hint = renderedBounds
+        ? { ...authoredHint, ...renderedBounds, closeup: false }
+        : authoredHint;
       const centerOffset = hint.closeup
         ? Math.max(0.015, hint.height * 0.5)
         : Math.max(0.12, hint.height * 0.52);
@@ -594,7 +633,7 @@ export function usePlayerCameraRig() {
       const fitDistance = Math.max(
         halfWidth / Math.max(0.08, Math.tan(horizontalFov / 2)),
         halfHeight / Math.max(0.08, Math.tan(verticalFov / 2)),
-      ) * 1.22;
+      ) * 1.55;
       const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, 0.16, 10);
       const horizontalDistance = Math.cos(orbit.pitch) * distance;
       const eye = scratch.examineEye.set(

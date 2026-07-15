@@ -18,6 +18,9 @@ import { ContactShadowField } from '../ContactShadow';
 const dummy = new THREE.Object3D();
 const rockTint = new THREE.Color();
 const rockTintLift = new THREE.Color('#d8d1c0');
+const rockFractureTint = new THREE.Color();
+const rockFractureBase = new THREE.Color('#565d61');
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 function rockHeight(rock) {
   return rockVisualBounds(rock).height;
@@ -92,6 +95,83 @@ function disposeProceduralRockMaterial(material) {
   material?.dispose();
 }
 
+// Carves hammer-strike bites out of a rock's craggy base geometry. Bites are
+// world-space spheres centered just outside the struck face; vertices inside a
+// bite get projected onto its surface (a concave scoop) and tinted with the
+// fresh-fracture color.
+function carveDamagedRockGeometry(baseGeometry, item, bites) {
+  const geo = baseGeometry.clone();
+  const position = geo.attributes.position;
+  const transform = rockRenderTransform(item);
+  const radii = new THREE.Vector3(item.radiusX || 0.4, item.radiusY || 0.32, item.radiusZ || 0.34);
+  const meanRadius = (radii.x + radii.y + radii.z) / 3;
+  const localBites = bites.map(bite => ({
+    center: new THREE.Vector3(
+      bite.x - transform.position[0],
+      bite.y - transform.position[1],
+      bite.z - transform.position[2],
+    ).applyAxisAngle(Y_AXIS, -(item.yaw || 0)).divide(radii),
+    r: bite.r / meanRadius,
+  }));
+
+  rockTint.set(item.color || '#3c3831').lerp(rockTintLift, 0.42);
+  rockFractureTint.copy(rockFractureBase).lerp(rockTintLift, 0.3);
+  const colors = new Float32Array(position.count * 3);
+  const v = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const blended = new THREE.Color();
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i);
+    const originalLength = v.length();
+    let fractureWeight = 0;
+    for (const bite of localBites) {
+      const distance = v.distanceTo(bite.center);
+      if (distance >= bite.r) continue;
+      if (distance > 0.0001) dir.copy(v).sub(bite.center).divideScalar(distance);
+      else dir.copy(v).normalize().negate();
+      v.copy(bite.center).addScaledVector(dir, bite.r);
+      // Carving only removes material: never push a vertex outside the
+      // rock's original silhouette (small rocks vs. large bites).
+      if (v.length() > originalLength) v.setLength(originalLength);
+      fractureWeight = Math.max(fractureWeight, 1 - distance / bite.r);
+    }
+    position.setXYZ(i, v.x, v.y, v.z);
+    blended.copy(rockTint).lerp(rockFractureTint, Math.min(1, fractureWeight * 1.6));
+    colors[i * 3] = blended.r;
+    colors[i * 3 + 1] = blended.g;
+    colors[i * 3 + 2] = blended.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
+  const geometry = useMemo(
+    () => carveDamagedRockGeometry(baseGeometry, item, bites),
+    [baseGeometry, item, bites],
+  );
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  const transform = rockRenderTransform(item);
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      position={transform.position}
+      rotation={transform.rotation}
+      scale={transform.scale}
+      castShadow={rockCastsRealShadow(item)}
+      receiveShadow
+      userData={sourceUserData}
+      onClick={event => {
+        event.stopPropagation();
+        setInspectedObject(catalogToInspectable('basalt_block', event.point, { sourceId: item.id || 'basalt_block' }));
+      }}
+    />
+  );
+}
+
 function InstancedRocks({ items, geometry, material, castShadow, sourceUserData }) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
@@ -129,6 +209,28 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
   );
 }
 
+// Matches hammer-damage records (which live on physics obstacle keys) to the
+// visual rock items by position — the obstacle builder copies x/z verbatim
+// from the same layout rocks this component renders.
+function matchRockDamage(rocks, rockDamage, zoneId) {
+  const entries = Object.values(rockDamage || {}).filter(damage => (
+    damage.zoneId === zoneId && (damage.broken || damage.bites?.length)
+  ));
+  const brokenIds = new Set();
+  const damagedById = new Map();
+  if (!entries.length) return { brokenIds, damagedById };
+  for (const rock of rocks) {
+    const entry = entries.find(damage => (
+      Math.abs((damage.x ?? Infinity) - rock.x) < 0.05
+      && Math.abs((damage.z ?? Infinity) - rock.z) < 0.05
+    ));
+    if (!entry) continue;
+    if (entry.broken) brokenIds.add(rock.id);
+    else damagedById.set(rock.id, entry);
+  }
+  return { brokenIds, damagedById };
+}
+
 function RockContactShadows({ rocks }) {
   const contactShadows = useMemo(() => (
     rocks
@@ -142,8 +244,22 @@ function RockContactShadows({ rocks }) {
 }
 
 export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const rockDamage = useThreeGameStore(state => state.rockDamage);
+  const { brokenIds, damagedById } = useMemo(
+    () => matchRockDamage(rocks, rockDamage, currentZoneId),
+    [rocks, rockDamage, currentZoneId],
+  );
+  const visibleRocks = useMemo(
+    () => (brokenIds.size ? rocks.filter(rock => !brokenIds.has(rock.id)) : rocks),
+    [rocks, brokenIds],
+  );
   const buckets = useMemo(() => {
-    const byVariant = [0, 1, 2].map(b => rocks.filter((_, i) => i % 3 === b));
+    // Variant assignment must key off the original array index so a rock keeps
+    // the same silhouette when damage moves it out of the instanced buckets.
+    const byVariant = [0, 1, 2].map(b => rocks.filter((_, i) => (
+      i % 3 === b && !brokenIds.has(rocks[i].id) && !damagedById.has(rocks[i].id)
+    )));
     return byVariant.flatMap((items, geometryIndex) => {
       const casters = items.filter(rockCastsRealShadow);
       const contactOnly = items.filter(rock => !rockCastsRealShadow(rock));
@@ -152,7 +268,14 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
         contactOnly.length ? { items: contactOnly, geometryIndex, castShadow: false } : null,
       ].filter(Boolean);
     });
-  }, [rocks]);
+  }, [rocks, brokenIds, damagedById]);
+  const damagedRocks = useMemo(() => (
+    damagedById.size
+      ? rocks
+        .map((rock, index) => ({ rock, variant: index % 3, damage: damagedById.get(rock.id) }))
+        .filter(entry => entry.damage)
+      : []
+  ), [rocks, damagedById]);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId,
     renderLabel: sourceLabel || sourceId,
@@ -180,7 +303,17 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
           sourceUserData={renderUserData}
         />
       ))}
-      <RockContactShadows rocks={rocks} />
+      {damagedRocks.map(({ rock, variant, damage }) => (
+        <DamagedRock
+          key={`damaged:${rock.id}`}
+          item={rock}
+          bites={damage.bites}
+          baseGeometry={geometries[variant]}
+          material={material}
+          sourceUserData={renderUserData}
+        />
+      ))}
+      <RockContactShadows rocks={visibleRocks} />
     </group>
   );
 }

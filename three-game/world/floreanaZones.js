@@ -2,7 +2,6 @@ import {
   FLOREANA_ZONE_IDS,
   floreanaZones as coreFloreanaZones,
   getTravelCard,
-  getZone as getCoreZone,
   getZoneExits,
   getZoneSpecimenIds,
   getZoneSpecimenSpawns,
@@ -108,8 +107,10 @@ export const floreanaZones = Object.fromEntries(
 );
 
 export function getZone(zoneId = currentZoneId) {
-  if (regionMaps[zoneId]) return toRuntimeRegion(getRegionMap(zoneId));
-  return toRuntimeZone(getCoreZone(zoneId));
+  // Runtime zones are immutable authored definitions. Reusing the registry
+  // object keeps React dependencies stable and avoids rebuilding all specimen,
+  // route, and terrain compatibility maps whenever the HUD renders.
+  return floreanaZones[zoneId] || floreanaZones[currentZoneId];
 }
 
 export function getTravelCardForRoute(fromZoneId, toZoneId) {

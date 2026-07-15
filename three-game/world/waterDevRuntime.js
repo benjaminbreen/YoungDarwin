@@ -10,6 +10,10 @@ export const WATER_DEV_DEFAULTS = {
   // Share of the planar (real mirrored scene) reflection vs the analytic sky
   // sheen where the mirror buffer is valid.
   planarShare: 1,
+  // Visibility floor for reflected scene objects (Darwin, ship, shore) where
+  // the mirror buffer has coverage — lets silhouettes read past the physical
+  // ~2% down-look fresnel. 0 = physical only.
+  objectMirror: 0.65,
   // Normal-driven UV distortion of the planar reflection: higher = ripple
   // structure visibly breaks up the mirrored sky/clouds.
   reflDistort: 0.015,

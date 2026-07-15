@@ -12,6 +12,7 @@ import { useThreeGameStore } from '../../store';
 const SLIDERS = [
   { group: 'Reflection' },
   { key: 'planarShare', label: 'Planar share', min: 0, max: 1, step: 0.02 },
+  { key: 'objectMirror', label: 'Object mirror', min: 0, max: 0.8, step: 0.02 },
   { key: 'reflDistort', label: 'Refl distort', min: 0, max: 0.14, step: 0.005 },
   { key: 'reflNeutralGrade', label: 'De-violet', min: 0, max: 0.7, step: 0.02 },
   { key: 'skyReflCurve', label: 'Sky gradient', min: 0.5, max: 4.5, step: 0.1 },

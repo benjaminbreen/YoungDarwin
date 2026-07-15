@@ -617,6 +617,7 @@ export const PROP_TYPES = {
     behaviors: {
       mobility: { mode: 'pickup-push', assistSpeed: 0.26, maxSpeed: 0.46, angularMax: 0.9 },
       carryable: { release: 0.2, holdOffset: [0.15, 0.95, 0.1], holdRotation: [0.04, -0.05, -0.1] },
+      strikeable: { tool: 'hammer', impulse: 0.9 },
     },
   },
   cabinCandlestick: {
@@ -633,6 +634,7 @@ export const PROP_TYPES = {
     behaviors: {
       mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.36, rotationPolicy: 'resistTipping', angularMax: 0.55 },
       carryable: { release: 0.22, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.04, -0.05, -0.08] },
+      strikeable: { tool: 'hammer', impulse: 1.4 },
     },
   },
   lawsonDiningChair: {
@@ -667,7 +669,7 @@ export const PROP_TYPES = {
     visualOffsetY: -0.4,
     collider: { shape: 'cylinder', halfHeight: 0.39, radius: 0.14 }, restOffset: 0.4,
     mass: 1.4, friction: 1.45, restitution: 0.02, linearDamping: 2.1, angularDamping: 1.8,
-    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.23, maxSpeed: 0.42, rotationPolicy: 'resistTipping', angularMax: 0.65 }, carryable: { release: 0.2, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.02, -0.05, -0.08] } },
+    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.23, maxSpeed: 0.42, rotationPolicy: 'resistTipping', angularMax: 0.65 }, carryable: { release: 0.2, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.02, -0.05, -0.08] }, strikeable: { tool: 'hammer', impulse: 1.0 } },
   },
   lawsonTinMug: {
     label: 'tin mug', visual: 'cabinMug', visualAsset: 'lawsonTinMug',
@@ -675,7 +677,7 @@ export const PROP_TYPES = {
     visualOffsetY: -0.13,
     collider: { shape: 'cylinder', halfHeight: 0.125, radius: 0.12 }, restOffset: 0.13,
     mass: 0.75, friction: 1.5, restitution: 0.01, linearDamping: 1.8, angularDamping: 1.7,
-    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.26, maxSpeed: 0.46, angularMax: 0.9 }, carryable: { release: 0.2, holdOffset: [0.15, 0.95, 0.1], holdRotation: [0.04, -0.05, -0.1] } },
+    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.26, maxSpeed: 0.46, angularMax: 0.9 }, carryable: { release: 0.2, holdOffset: [0.15, 0.95, 0.1], holdRotation: [0.04, -0.05, -0.1] }, strikeable: { tool: 'hammer', impulse: 0.9 } },
   },
   lawsonServingBowl: {
     label: 'serving bowl', visual: 'cabinMug', visualAsset: 'lawsonServingBowl',
@@ -683,7 +685,7 @@ export const PROP_TYPES = {
     visualOffsetY: -0.14,
     collider: { shape: 'cylinder', halfHeight: 0.13, radius: 0.29 }, restOffset: 0.14,
     mass: 2.8, friction: 1.8, restitution: 0, linearDamping: 2.4, angularDamping: 2.2,
-    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.18, maxSpeed: 0.32, rotationPolicy: 'resistTipping', angularMax: 0.5 }, carryable: { release: 0.22, holdOffset: [0.18, 0.92, 0.15], holdRotation: [0.04, 0, -0.08] } },
+    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.18, maxSpeed: 0.32, rotationPolicy: 'resistTipping', angularMax: 0.5 }, carryable: { release: 0.22, holdOffset: [0.18, 0.92, 0.15], holdRotation: [0.04, 0, -0.08] }, strikeable: { tool: 'hammer', impulse: 1.2 } },
   },
   lawsonFoldedChart: {
     label: 'folded chart', visual: 'rolledChart', visualAsset: 'lawsonFoldedChart',
@@ -707,6 +709,6 @@ export const PROP_TYPES = {
     visualOffsetY: -0.37,
     collider: { shape: 'cylinder', halfHeight: 0.36, radius: 0.15 }, restOffset: 0.37,
     mass: 2.2, friction: 1.75, restitution: 0, linearDamping: 2.3, angularDamping: 2.1,
-    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.35, rotationPolicy: 'resistTipping', angularMax: 0.5 }, carryable: { release: 0.22, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.04, -0.05, -0.08] } },
+    behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.35, rotationPolicy: 'resistTipping', angularMax: 0.5 }, carryable: { release: 0.22, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.04, -0.05, -0.08] }, strikeable: { tool: 'hammer', impulse: 1.4 } },
   },
 };

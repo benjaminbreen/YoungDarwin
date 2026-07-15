@@ -14,7 +14,10 @@ import { useThreeGameStore } from '../../../store';
 //  - fair-weather cumulus (weatherEnv.cumulus): detached trade-wind puffs
 //    carved by a high threshold, domain-warped into cauliflower billows and
 //    lit directionally — a cheap gradient probe toward the sun brightens the
-//    sun-facing rims (silver lining) and shades the cores/undersides.
+//    sun-facing rims (silver lining) and shades the cores/undersides. A
+//    low-frequency macro-mass field (weatherEnv.cumulusClump) clusters the
+//    puffs into a few big fused clouds with clean blue between, and
+//    weatherEnv.cumulusScale sizes individual puffs per weather state.
 //  - the overcast deck (weatherEnv.overcast): coverage closes the field into
 //    a ceiling, and near the horizon the projection degenerates into solid
 //    grey murk, guaranteeing no blue gap survives a closed sky. Rain flattens
@@ -51,6 +54,8 @@ export function CloudDeck() {
       uTime: { value: 0 },
       uCover: { value: 0 },
       uCumulus: { value: 0 },
+      uClump: { value: 0.5 },
+      uPuffScale: { value: 0.9 },
       uRain: { value: 0 },
       uDaylight: { value: 1 },
       uWind: { value: new THREE.Vector2(1, 0) },
@@ -76,6 +81,8 @@ export function CloudDeck() {
       uniform float uTime;
       uniform float uCover;
       uniform float uCumulus;
+      uniform float uClump;
+      uniform float uPuffScale;
       uniform float uRain;
       uniform float uDaylight;
       uniform vec2 uWind;
@@ -136,7 +143,10 @@ export function CloudDeck() {
         // a real cloud base receding into the distance.
         vec2 drift = uWind * uTime * 0.014;
         vec2 p = dir.xz / (max(dir.y, 0.0) + 0.18);
-        p = p * 1.35 + drift;
+        // Per-state puff sizing (fair weather only): the closed deck keeps
+        // the original frequency, so its look never changes with uPuffScale.
+        float puffFreq = mix(uPuffScale, 1.0, smoothstep(0.15, 0.45, uCover));
+        p = p * 1.35 * puffFreq + drift;
 
         // Domain warp: billowing cauliflower lobes instead of uniform noise.
         vec2 warp = vec2(fbm3(p * 0.62 + 19.1), fbm3(p * 0.62 - 7.7)) - 0.5;
@@ -146,9 +156,16 @@ export function CloudDeck() {
         float detail = fbm5(q * 3.1 - drift * 0.7);
         float field = shape + detail * 0.28;
 
+        // Macro mass: a very low-frequency field clusters the puffs. Where
+        // mass runs high the carve threshold drops and neighbouring puffs
+        // fuse into one big cloud; in the gaps it rises and the sky opens to
+        // clean blue. uClump = 0 recovers the even confetti field.
+        float mass = fbm3(p * 0.14 + vec2(31.7, -11.3));
+        float massBias = (mass - 0.44) * 2.2 * uClump;
+
         // --- Fair-weather cumulus: high threshold keeps clouds detached,
         // the short ramp gives crisp sunlit edges eroded ragged by detail.
-        float cumulusThreshold = mix(0.86, 0.52, uCumulus);
+        float cumulusThreshold = clamp(mix(0.86, 0.52, uCumulus) - massBias * 0.3, 0.2, 0.95);
         float puff = smoothstep(cumulusThreshold, cumulusThreshold + 0.16, field);
         float interior = smoothstep(cumulusThreshold + 0.06, cumulusThreshold + 0.5, field);
 
@@ -168,16 +185,33 @@ export function CloudDeck() {
         vec2 sunPlane = normalize(uSunDir.xz + vec2(0.0001, 0.0));
         float lateral = 1.0 - clamp(uSunDir.y, 0.0, 1.0);
         vec2 lightStep = sunPlane * mix(0.2, 0.5, lateral);
-        float sunFacing = clamp((fbm3(q) - fbm3(q + lightStep)) * 3.4 + 0.42, 0.0, 1.0);
+        float fieldHere = fbm3(q);
+        float sunFacing = clamp((fieldHere - fbm3(q + lightStep)) * 3.4 + 0.42, 0.0, 1.0);
 
-        float lit = clamp(0.2 + sunFacing * 0.95 * (1.0 - interior * 0.55), 0.0, 1.0);
+        // Volume modelling belongs to the puff regime; it fades out as the
+        // deck closes so the original overcast grading is untouched.
+        float fairWeather = 1.0 - smoothstep(0.3, 0.55, uCover);
+        // Stronger interior falloff models volume: cores and bellies stay in
+        // shadow so only the sun-facing tops carry the full light stop.
+        float lit = clamp(0.16 + sunFacing * 0.92 * (1.0 - interior * mix(0.55, 0.72, fairWeather)), 0.0, 1.0);
         vec3 color = mix(uShade, uLight, lit);
-        // Silver lining on the lit rim only, restrained; fades with daylight.
+        // Flat cumulus bases: probe a step toward the zenith in plane space —
+        // where the mass continues upward we are looking at the belly of a
+        // taller cloud, so pull it down toward shade.
+        vec2 zenithStep = -normalize(dir.xz + vec2(0.0001, 0.0)) * 0.3;
+        float belly = clamp((fbm3(q + zenithStep) - fieldHere) * 2.6, 0.0, 1.0) * interior;
+        color = mix(color, uShade * 0.8, belly * 0.45 * uDaylight * fairWeather);
+        // Overhead we mostly see undersides; deepen interiors looking up.
+        float overhead = smoothstep(0.35, 0.8, dir.y);
+        color = mix(color, uShade, overhead * interior * 0.28 * fairWeather);
+        // Silver lining on the lit rim only; fades with daylight. The rim is
+        // allowed past 1.0 on purpose — it is the one part of a cloud that
+        // should catch bloom.
         float rim = pow(sunFacing, 3.0) * (1.0 - interior) * uDaylight;
-        color += uSunTint * rim * 0.35;
+        color += uSunTint * rim * 0.32;
         // Forward scatter: thin cloud near the sun disc glows when backlit.
         float towardSun = pow(max(dot(dir, uSunDir), 0.0), 6.0);
-        color += uSunTint * towardSun * (1.0 - interior) * 0.25 * uDaylight;
+        color += uSunTint * towardSun * (1.0 - interior) * 0.18 * uDaylight;
         // Distance desaturation: the horizon band sinks into the sea haze.
         float hazeBand = 1.0 - smoothstep(0.02, 0.3, dir.y);
         color = mix(color, uLight, hazeBand * 0.45 * uDaylight);
@@ -196,8 +230,9 @@ export function CloudDeck() {
           * smoothstep(0.1, 0.5, uCover);
         color = mix(color, uDark, clamp(darkening, 0.0, 1.0));
 
+        // Interiors of big fused masses read denser than their lacy edges.
         float alpha = max(
-          puff * (0.66 + uCumulus * 0.26),
+          puff * min(0.66 + uCumulus * 0.26 + interior * 0.12, 1.0),
           max(deck, murk) * (0.55 + uCover * 0.45)
         ) * aboveHorizon;
         if (alpha < 0.01) discard;
@@ -227,6 +262,8 @@ export function CloudDeck() {
     u.uTime.value = clock.elapsedTime;
     u.uCover.value = weatherEnv.overcast;
     u.uCumulus.value = weatherEnv.cumulus;
+    u.uClump.value = weatherEnv.cumulusClump;
+    u.uPuffScale.value = weatherEnv.cumulusScale;
     u.uRain.value = weatherEnv.rainIntensity;
     u.uDaylight.value = celestial.daylight;
     u.uSunDir.value.set(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
@@ -238,11 +275,12 @@ export function CloudDeck() {
     // golden-hour for free; rain pulls the light stop toward storm slate.
     if (scene.fog) {
       const night = celestial.night;
-      // White cloud tops require daylight. At night, retain enough blue
-      // separation to show cloud structure without turning the sky silver-grey.
+      // White cloud tops require daylight, but hold the light stop shy of
+      // pure white: contrast against the shaded bellies does the drama, and
+      // only the additive sun rim is allowed to cross into bloom.
       _lightColor
         .copy(scene.fog.color)
-        .lerp(_white, (0.35 + celestial.daylight * 0.35) * (1 - night))
+        .lerp(_white, (0.3 + celestial.daylight * 0.28) * (1 - night))
         .lerp(_nightCloudLight, night * 0.82);
       _shadeColor.copy(scene.fog.color).lerp(_cumulusShade, 0.55)
         .multiplyScalar(0.55 + celestial.daylight * 0.25)

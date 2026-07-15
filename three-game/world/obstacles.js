@@ -6,6 +6,7 @@ import { REGION_OBSTACLE_SOURCES } from './obstacleRegistry';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
+const WALK_OVER_CROWN = 0.42;
 const AUTHORED_TRAVERSAL_MIN_HEIGHT = 1.01;
 const AUTHORED_TRAVERSAL_MAX_HEIGHT = 1.9;
 const LARGE_ROCK_DOWNHILL_PUSH = {
@@ -20,6 +21,35 @@ const OBSTACLE_INDEX_MIN_COUNT = 8;
 const EMPTY_OBSTACLE_CANDIDATES = Object.freeze([]);
 const obstacleSpatialIndexCache = new WeakMap();
 const staticRuntimeObstacleCache = new Map();
+
+// Runtime-destroyed obstacles (e.g. boulders shattered by the geological
+// hammer). Session-scoped: cleared on reload alongside the store state that
+// drives the matching visuals. Filtering happens at the broad-phase exit so
+// movement, support, camera, and climb queries all agree the rock is gone.
+const destroyedObstacleIds = new Set();
+
+export function markObstacleDestroyed(obstacleId) {
+  if (obstacleId) destroyedObstacleIds.add(obstacleId);
+}
+
+// Replaces the registry with the store's current broken set, so store resets
+// (new expedition) restore collision for previously shattered rocks.
+export function syncDestroyedObstacles(obstacleIds = []) {
+  destroyedObstacleIds.clear();
+  for (const id of obstacleIds) {
+    if (id) destroyedObstacleIds.add(id);
+  }
+}
+
+export function isObstacleDestroyed(obstacleId) {
+  return destroyedObstacleIds.size > 0 && destroyedObstacleIds.has(obstacleId);
+}
+
+function withoutDestroyedObstacles(obstacles) {
+  if (!destroyedObstacleIds.size || !Array.isArray(obstacles) || !obstacles.length) return obstacles;
+  const filtered = obstacles.filter(obstacle => !destroyedObstacleIds.has(obstacle.id));
+  return filtered.length === obstacles.length ? obstacles : filtered;
+}
 
 function obstacleCellCoordinate(value, cellSize = OBSTACLE_INDEX_CELL_SIZE) {
   return Math.floor((Number(value) || 0) / cellSize);
@@ -73,8 +103,10 @@ function obstacleSpatialIndex(obstacles) {
 // offset changes create a new obstacle array (and therefore a new index), while
 // repeated player/fauna/camera queries reuse the same cached cell result.
 export function queryObstacleBounds(obstacles, minX, minZ, maxX, maxZ) {
-  if (!Array.isArray(obstacles) || obstacles.length < OBSTACLE_INDEX_MIN_COUNT) return obstacles || EMPTY_OBSTACLE_CANDIDATES;
-  if (![minX, minZ, maxX, maxZ].every(Number.isFinite)) return obstacles;
+  if (!Array.isArray(obstacles) || obstacles.length < OBSTACLE_INDEX_MIN_COUNT) {
+    return withoutDestroyedObstacles(obstacles || EMPTY_OBSTACLE_CANDIDATES);
+  }
+  if (![minX, minZ, maxX, maxZ].every(Number.isFinite)) return withoutDestroyedObstacles(obstacles);
   const startCellX = obstacleCellCoordinate(Math.min(minX, maxX));
   const endCellX = obstacleCellCoordinate(Math.max(minX, maxX));
   const startCellZ = obstacleCellCoordinate(Math.min(minZ, maxZ));
@@ -82,12 +114,12 @@ export function queryObstacleBounds(obstacles, minX, minZ, maxX, maxZ) {
   const index = obstacleSpatialIndex(obstacles);
   const queryKey = `${startCellX}:${endCellX}:${startCellZ}:${endCellZ}`;
   const cached = index.queryCache.get(queryKey);
-  if (cached) return cached;
+  if (cached) return withoutDestroyedObstacles(cached);
 
   if (startCellX === endCellX && startCellZ === endCellZ) {
     const cell = index.cells.get(obstacleCellKey(startCellX, startCellZ)) || EMPTY_OBSTACLE_CANDIDATES;
     index.queryCache.set(queryKey, cell);
-    return cell;
+    return withoutDestroyedObstacles(cell);
   }
 
   const seen = new Set();
@@ -106,7 +138,7 @@ export function queryObstacleBounds(obstacles, minX, minZ, maxX, maxZ) {
   candidates.sort((a, b) => index.order.get(a) - index.order.get(b));
   const result = candidates.length ? candidates : EMPTY_OBSTACLE_CANDIDATES;
   index.queryCache.set(queryKey, result);
-  return result;
+  return withoutDestroyedObstacles(result);
 }
 
 export function queryObstaclesNear(obstacles, x, z, radius = 0) {
@@ -571,7 +603,11 @@ function isWalkOverTraversalTop(obstacle, top, maxHeight = WALK_OVER_TRAVERSAL_M
 }
 
 function obstacleTraversalHeight(obstacle) {
-  return (obstacle.colliderTop ?? obstacle.height ?? 0) - Math.min(0, obstacle.colliderBottom || 0);
+  // Standing height above the obstacle's base. Buried collider volume
+  // (colliderBottom < 0) must not inflate this: support sits at
+  // base + height, and overshooting the visual top leaves the player
+  // hovering above the rendered rock.
+  return obstacle.colliderTop ?? obstacle.height ?? 0;
 }
 
 export function isWalkOverTraversalObstacle(obstacle, maxHeight = WALK_OVER_TRAVERSAL_MAX_HEIGHT) {
@@ -582,11 +618,14 @@ export function isWalkOverTraversalObstacle(obstacle, maxHeight = WALK_OVER_TRAV
 
 function walkOverTraversalLift(distance, radius, height) {
   const normalized = THREE.MathUtils.clamp(distance / Math.max(0.001, radius), 0, 1);
-  // Low-poly rocks read as broad, mostly-flat stepping surfaces with a short
-  // rounded edge, not as perfect domes. Keep the middle high so feet plant on
-  // the visible top, then roll off only near the outer rim.
-  const edgeFalloff = THREE.MathUtils.smoothstep(normalized, 0.78, 1.0);
-  return height * (1 - edgeFalloff);
+  // Low-poly rocks read as convex domes with a broad flat crown, not mesas.
+  // Hold full height across the crown so feet plant on the visible top, then
+  // follow an ellipse down the shoulder so support hugs the rendered surface
+  // instead of hovering a flat plateau out to the rim — and so walking on and
+  // off ramps along the shoulder instead of popping at the rim.
+  if (normalized <= WALK_OVER_CROWN) return height;
+  const shoulder = (normalized - WALK_OVER_CROWN) / (1 - WALK_OVER_CROWN);
+  return height * Math.sqrt(Math.max(0, 1 - shoulder * shoulder));
 }
 
 function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {

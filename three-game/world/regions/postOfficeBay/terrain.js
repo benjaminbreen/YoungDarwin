@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  WATER_LEVEL,
   crackNoise,
   elevationNoise,
   ellipseDistance,
@@ -98,6 +99,45 @@ const POST_OFFICE_BAY_WATER_POLYGON = [
   [66.0, -38.0],
 ];
 
+// A deliberately local landing beach around the default Darwin spawn. The
+// wider cove coastline remains unchanged; only this short central reach is
+// eased down into the water.
+export const POST_OFFICE_BAY_LANDING_BEACH = {
+  x: 11,
+  z: 3,
+  radiusX: 18,
+  radiusZ: 12,
+  inner: 0.72,
+};
+
+const POST_OFFICE_BAY_LANDING_SHORE = [
+  [-9.0, 1.7],
+  [2.5, 2.7],
+  [12.5, 1.6],
+  [21.5, -1.4],
+  [30.5, -5.6],
+];
+
+export function postOfficeBayCoastZ(x) {
+  for (let index = 0; index < POST_OFFICE_BAY_LANDING_SHORE.length - 1; index += 1) {
+    const [ax, az] = POST_OFFICE_BAY_LANDING_SHORE[index];
+    const [bx, bz] = POST_OFFICE_BAY_LANDING_SHORE[index + 1];
+    if (x <= bx) {
+      const t = THREE.MathUtils.clamp((x - ax) / (bx - ax), 0, 1);
+      return THREE.MathUtils.lerp(az, bz, t);
+    }
+  }
+  return POST_OFFICE_BAY_LANDING_SHORE.at(-1)[1];
+}
+
+export function postOfficeLandingBeachMask(x, z) {
+  const alongshore = 1 - THREE.MathUtils.smoothstep(Math.abs(x - POST_OFFICE_BAY_LANDING_BEACH.x), 9, 16);
+  const shoreDistance = z - postOfficeBayCoastZ(x);
+  const seaward = THREE.MathUtils.smoothstep(shoreDistance, -9, -5);
+  const inland = 1 - THREE.MathUtils.smoothstep(shoreDistance, 9, 15);
+  return THREE.MathUtils.clamp(alongshore * seaward * inland, 0, 1);
+}
+
 export const POST_OFFICE_BAY_TRAIL = [
   [5.0, 1.5, 2.45],
   [3.0, 2.5, 2.85],
@@ -122,8 +162,18 @@ export const POST_OFFICE_BAY_SCRUB_TRAIL = [
   [-7, 59, 1.78],
 ];
 
-export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 3.0, z: 2.5, radius: 4.8 };
-export const POST_OFFICE_BAY_PATH_POINTS = [POST_OFFICE_BAY_TRAIL, POST_OFFICE_BAY_SCRUB_TRAIL];
+export const POST_OFFICE_BAY_BARREL_SPUR = [
+  [5.0, 1.5, 2.45],
+  [3.0, 2.5, 2.35],
+  [0.0, 8.5, 2.15],
+];
+
+export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 0.0, z: 8.5, radius: 4.8 };
+export const POST_OFFICE_BAY_PATH_POINTS = [
+  POST_OFFICE_BAY_TRAIL,
+  POST_OFFICE_BAY_SCRUB_TRAIL,
+  POST_OFFICE_BAY_BARREL_SPUR,
+];
 
 function pathSegmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
   const abx = bx - ax;
@@ -306,6 +356,13 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
 
   if (z < -24) y -= Math.abs(z + 24) * 0.18;
   if (mask > 1.08) y -= (mask - 1.08) * 18 * (1 - continuity * 0.9);
+  const landingBeach = postOfficeLandingBeachMask(x, z);
+  if (landingBeach > 0) {
+    const shoreDistance = z - postOfficeBayCoastZ(x);
+    const beachDetail = terrainFineDetail(x, z) * (movementSurface ? 0.08 : 0.2);
+    const beachHeight = WATER_LEVEL + 0.04 + shoreDistance * 0.2 + beachDetail;
+    y = THREE.MathUtils.lerp(y, beachHeight, landingBeach);
+  }
   return Math.max(-4.0, y);
 }
 

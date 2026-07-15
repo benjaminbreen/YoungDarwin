@@ -62,7 +62,19 @@ export function updatePlayerFrameFeedback({
     const slopePitch = THREE.MathUtils.clamp(slope.grade * slope.uphillDot * -0.18, -0.12, 0.09);
     const stancePitch = THREE.MathUtils.clamp(slope.stancePitch || 0, -0.09, 0.09);
     const stanceRoll = THREE.MathUtils.clamp(slope.stanceRoll || 0, -0.09, 0.09);
-    const targetPitch = -speedRatio * 0.075 + slopePitch + stancePitch - feedback.normal.z * collisionLean;
+    // Step smoothing playback: PlayerController banks sharp grounded Y snaps
+    // (obstacle step-ups/downs) into stepSmoothOffset. Ease it back to zero so
+    // the model visibly rises or settles through the step while the collider
+    // has already teleported to the new support height, and lean the gait with
+    // it — forward while climbing through an up-step, slightly back while
+    // settling off a drop — so the step reads inside the walk/run cycle.
+    const stepOffset = stateRef?.current?.stepSmoothOffset || 0;
+    const nextStepOffset = Math.abs(stepOffset) < 0.002 ? 0 : THREE.MathUtils.damp(stepOffset, 0, 11, delta);
+    if (stateRef?.current) stateRef.current.stepSmoothOffset = nextStepOffset;
+    modelFeedbackRef.current.position.y = nextStepOffset;
+    const stepLean = THREE.MathUtils.clamp(nextStepOffset * 0.22, -0.11, 0.09);
+
+    const targetPitch = -speedRatio * 0.075 + slopePitch + stancePitch + stepLean - feedback.normal.z * collisionLean;
     const targetRoll = THREE.MathUtils.clamp((localVelocity.x / PLAYER.runSpeed) * -0.08 + yawDelta * -1.4, -0.16, 0.16)
       + stanceRoll
       + feedback.normal.x * collisionLean;

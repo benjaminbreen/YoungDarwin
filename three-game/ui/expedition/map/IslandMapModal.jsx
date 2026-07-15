@@ -156,7 +156,11 @@ function SelectedLocationCard({ location, isCurrent, onRequestClose }) {
     <button
       type="button"
       onClick={() => {
-        beginZoneTransition(location.id, { entryEdge: null });
+        beginZoneTransition(location.id, {
+          entryEdge: null,
+          source: 'island-map',
+          mode: 'island',
+        });
         onRequestClose?.();
       }}
       className={`${GOLD_BUTTON_SOLID} w-full uppercase`}

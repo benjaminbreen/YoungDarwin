@@ -27,8 +27,8 @@ export const EXAMINABLE_ITEMS = [
     collectVerb: 'Take letter',
     frameHint: { height: 0.32, radius: 0.3 },
     zoneId: 'POST_OFFICE_BAY',
-    // Tucked against the base of the large post barrel near the spawn.
-    worldPlacement: { x: 4.05, z: 3.45, rotationY: 0.7 },
+    // Tucked against the inland side of the large post barrel.
+    worldPlacement: { x: 1.05, z: 9.45, rotationY: 0.7 },
   },
 ];
 

@@ -24,6 +24,10 @@ export const PLAYER = {
   jumpReleaseGravityMultiplier: 2.05,
   groundContactEpsilon: 0.11,
   groundSnapDistance: 0.62,
+  // Single-frame ground drop beyond this releases the controller to the
+  // airborne/falling systems; smaller ledges stay grounded and are sold by
+  // step smoothing + squash so the gait never breaks on waist-height rocks.
+  ledgeReleaseDrop: 1.25,
   uphillSpeedPenalty: 0.14,
   downhillSpeedBoost: 0.05,
   tiredRunFatigue: 68,

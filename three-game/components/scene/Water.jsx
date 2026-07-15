@@ -60,19 +60,23 @@ const HMIN = -6.0;
 const HSPAN = 9.0;
 
 const WATER_QUALITY = {
+  // All tiers run the cinematic reflection cadence (refresh every frame while
+  // the mirror is dynamic, every 4th when idle) — measured as near-free on the
+  // fps budget and the smooth mirror reads far better. Tiers still differ on
+  // resolution and mesh density.
   performance: {
     bakeRes: 256,
     segments: 64,
     reflectionRes: 256,
-    reflectionMinInterval: 5,
-    reflectionStaticInterval: 24,
+    reflectionMinInterval: 1,
+    reflectionStaticInterval: 4,
   },
   polished: {
     bakeRes: BAKE_RES,
     segments: WATER_SEGMENTS,
     reflectionRes: REFLECTION_RES,
-    reflectionMinInterval: REFLECTION_MIN_INTERVAL,
-    reflectionStaticInterval: REFLECTION_STATIC_INTERVAL,
+    reflectionMinInterval: 1,
+    reflectionStaticInterval: 4,
   },
   cinematic: {
     bakeRes: BAKE_RES,
@@ -484,6 +488,7 @@ function createStylizedWaterMaterial(
       // Live-tunable knobs mirrored from waterDevRuntime every frame; the
       // values here are just safe fallbacks before the first update.
       uPlanarShare: { value: 1 },
+      uObjectMirror: { value: 0.65 },
       uReflDistort: { value: 0.015 },
       uReflNeutralGrade: { value: 0.68 },
       uSkyReflCurve: { value: 2.2 },
@@ -576,6 +581,7 @@ function createStylizedWaterMaterial(
       uniform float uHazeNear;
       uniform float uHazeFar;
       uniform float uPlanarShare;
+      uniform float uObjectMirror;
       uniform float uReflDistort;
       uniform float uReflNeutralGrade;
       uniform float uSkyReflCurve;
@@ -725,10 +731,11 @@ function createStylizedWaterMaterial(
         }
         // Wading ripples: concentric rings spreading from the player, felt as
         // a gentle normal perturbation (they catch the sky sheen and glitter).
+        // No deep-water cutoff: swimming and treading water must disturb the
+        // surface anywhere in the ocean, not just where Darwin can stand.
         float oceanRippleMask = uOceanPlayerRippleEnabled
           * (1.0 - smoothstep(0.12, 0.56, standingWater))
-          * smoothstep(0.045, 0.18, depth)
-          * (1.0 - smoothstep(1.9, 3.25, depth))
+          * smoothstep(0.015, 0.07, depth)
           * playableFade;
         float playerRippleGlint = 0.0;
         if (uPlayerRipple * oceanRippleMask > 0.001) {
@@ -742,8 +749,8 @@ function createStylizedWaterMaterial(
             float ring = sin(pd * 15.5 - uTime * 7.0) * 0.58
               + sin(pd * 24.0 - uTime * 9.4) * 0.42;
             vec2 rippleDir = toPlayer / max(pd, 1e-3);
-            normal = normalize(normal + vec3(rippleDir.x, 0.0, rippleDir.y) * ring * 0.22 * rippleEnv);
-            playerRippleGlint += pow(max(ring * 0.5 + 0.5, 0.0), 3.0) * rippleEnv * 0.06;
+            normal = normalize(normal + vec3(rippleDir.x, 0.0, rippleDir.y) * ring * 0.4 * rippleEnv);
+            playerRippleGlint += pow(max(ring * 0.5 + 0.5, 0.0), 3.0) * rippleEnv * 0.11;
           }
         }
         float eventRippleGlint = 0.0;
@@ -767,10 +774,10 @@ function createStylizedWaterMaterial(
           float wave = sin(phase);
           float churn = sin(distRipple * 31.0 - age * 25.0) * localChurn;
           eventRippleSlope += dirRipple * (cos(phase) * band * 1.15 + churn * 0.3) * eventEnv;
-          eventRippleGlint += pow(max(wave * 0.5 + 0.5, 0.0), 2.35) * band * eventEnv * 0.16;
+          eventRippleGlint += pow(max(wave * 0.5 + 0.5, 0.0), 2.35) * band * eventEnv * 0.28;
         }
         if (length(eventRippleSlope) > 0.0001) {
-          normal = normalize(normal + vec3(eventRippleSlope.x, 0.0, eventRippleSlope.y) * 0.18);
+          normal = normalize(normal + vec3(eventRippleSlope.x, 0.0, eventRippleSlope.y) * 0.5);
         }
         if (eventRippleGlint + playerRippleGlint > 0.001) {
           normal = normalize(normal + vec3(eventRippleSlope.x, 0.0, eventRippleSlope.y) * 0.04);
@@ -920,12 +927,21 @@ function createStylizedWaterMaterial(
         skyRefl = mix(skyRefl, vec3(skyReflLuma), uSunPathStrength * 0.10);
         skyRefl *= 0.95 + 0.10 * noise(vWorld.xz * 0.05 + vec2(uTime * 0.013, -uTime * 0.009));
         vec3 reflColor = skyRefl;
+        vec3 planarScene = vec3(0.0);
+        float planarCover = 0.0;
         if (uHasReflection > 0.5 && vReflCoord.w > 0.0) {
           vec2 mruv = vReflCoord.xy / vReflCoord.w + normal.xz * uReflDistort;
           vec2 edge = smoothstep(0.0, 0.08, mruv) * smoothstep(1.0, 0.92, mruv);
           float valid = edge.x * edge.y;
-          vec3 planar = min(texture2D(uReflection, clamp(mruv, 0.0, 1.0)).rgb, vec3(0.92));
-          reflColor = mix(skyRefl, mix(skyRefl, planar, uPlanarShare), valid);
+          // The mirror pass clears to black at alpha 0, so alpha is scene-
+          // object coverage: composite the mirrored scene over the analytic
+          // sky only where something was actually drawn. Un-premultiply so
+          // bilinear edge texels don't fringe toward the black clear color.
+          vec4 planarSample = texture2D(uReflection, clamp(mruv, 0.0, 1.0));
+          float planarA = clamp(planarSample.a, 0.0, 1.0);
+          planarCover = planarA * valid;
+          planarScene = min(planarSample.rgb / max(planarA, 0.05), vec3(0.92));
+          reflColor = mix(skyRefl, planarScene, planarCover * uPlanarShare);
         }
         // Water-only reflection grade: keep sky sheen, but reduce the violet
         // bias that ACES/sky saturation can push into glancing highlights.
@@ -956,7 +972,16 @@ function createStylizedWaterMaterial(
         float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
         float reflectance = 0.02 + 0.98 * fres;
         float reflStrength = mix(0.85, 0.22, shallowFactor) * (1.0 - underwaterView * 0.72);
-        color = mix(color, reflColor, clamp(reflectance * reflStrength, 0.0, 0.8));
+        float mirrorMix = clamp(reflectance * reflStrength, 0.0, 0.8);
+        color = mix(color, reflColor, mirrorMix);
+        // Reflected scene objects (Darwin, ship, shore) stay visible past the
+        // physical ~2% down-look fresnel: a swimmer's real reflection reads
+        // clearly because the body occludes the bright sky, so covered texels
+        // get a stylized visibility floor on top of the fresnel mix.
+        float objectMirror = clamp(
+          planarCover * uObjectMirror * (1.0 - underwaterView * 0.72) - mirrorMix,
+          0.0, 1.0);
+        color = mix(color, planarScene, objectMirror);
 
         // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
@@ -1537,7 +1562,7 @@ function OceanContactRipples() {
         varying float vFade;
         varying float vIntensity;
         void main() {
-          float a = pow(vFade, 1.7) * (0.15 + vIntensity * 0.34);
+          float a = pow(vFade, 1.7) * (0.11 + vIntensity * 0.26);
           if (a < 0.006) discard;
           gl_FragColor = vec4(uColor, a);
         }
@@ -1707,6 +1732,13 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   const prevXrEnabled = gl.xr.enabled;
   const prevShadowAuto = gl.shadowMap.autoUpdate;
   const prevShadowNeedsUpdate = gl.shadowMap.needsUpdate;
+  // Clear to alpha 0 with no background fill: the mirror texture's alpha
+  // channel becomes object coverage, which the water shader uses to keep
+  // reflected silhouettes (Darwin, ship, shore) visible above the physical
+  // fresnel floor. Empty texels fall back to the analytic sky sheen.
+  const prevBackground = scene.background;
+  gl.getClearColor(_prevClearColor);
+  const prevClearAlpha = gl.getClearAlpha();
   try {
     // Match THREE.Reflector's offscreen-pass safeguards. In particular, a
     // prior transparent draw can leave depth writes masked; clearing in that
@@ -1718,6 +1750,8 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
     // shadow-map refresh for Darwin, do not let this offscreen pass consume it
     // while reflection-only visibility masks are active.
     gl.shadowMap.needsUpdate = false;
+    scene.background = null;
+    gl.setClearColor(0x000000, 0);
     gl.setRenderTarget(rt);
     gl.state.buffers.depth.setMask(true);
     gl.clear();
@@ -1725,6 +1759,8 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
     return true;
   } finally {
     gl.setRenderTarget(prevRT);
+    scene.background = prevBackground;
+    gl.setClearColor(_prevClearColor, prevClearAlpha);
     gl.xr.enabled = prevXrEnabled;
     gl.shadowMap.autoUpdate = prevShadowAuto;
     gl.shadowMap.needsUpdate = prevShadowNeedsUpdate || gl.shadowMap.needsUpdate;
@@ -1743,6 +1779,7 @@ const _noReflect = [];
 // Flat [object, wasVisible, object, wasVisible, ...] scratch for the meshes
 // explicitly hidden during the mirror pass.
 const _hiddenPrev = [];
+const _prevClearColor = new THREE.Color();
 const _drawSize = new THREE.Vector2();
 
 export function Water({ quality = 'performance', reflections = true, allowInterior = false, openOceanOnly = false }) {
@@ -1853,9 +1890,8 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
       const standingMask = standingWaterMaskAt(x, z, zoneId);
       if (standingMask > getStandingWaterRenderingConfig(zoneId).oceanRippleMaskCutoff) return;
       const depth = WATER_LEVEL - terrainHeight(x, z, zoneId);
-      if (depth < 0.025 || depth > 3.2) return;
-      const depthScale = THREE.MathUtils.smoothstep(depth, 0.04, 0.24)
-        * (1 - THREE.MathUtils.smoothstep(depth, 2.1, 3.2));
+      if (depth < 0.012) return;
+      const depthScale = THREE.MathUtils.smoothstep(depth, 0.018, 0.1);
       if (depthScale <= 0.01) return;
       const intensity = THREE.MathUtils.clamp((event.intensity ?? 0.38) * eventScale * depthScale, 0.14, 1.75);
       const index = oceanRippleCursor.current;
@@ -1915,20 +1951,25 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
     wu.uSun.value.copy(_sun);
     wu.uRain.value = weatherEnv.rainIntensity;
     wu.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
-    // Wading ripples: on only while the player is actually standing in water
-    // (ankle depth in, gone once they are swimming or the camera submerges).
+    // Wading ripples while standing in water, handing off to a continuous
+    // treading/swimming disturbance that persists at any ocean depth as long
+    // as the player's body is actually at the surface (not on a deck or
+    // airborne above deep water, and faded once the camera submerges).
     const pp = getRuntimePlayerPose().position;
     const wadeDepth = WATER_LEVEL - terrainHeight(pp.x, pp.z, store.currentZoneId);
     const wade = THREE.MathUtils.smoothstep(wadeDepth, 0.04, 0.22)
       * (1 - THREE.MathUtils.smoothstep(wadeDepth, 1.45, 2.3));
     const standingMask = standingWaterMaskAt(pp.x, pp.z, store.currentZoneId);
     const { oceanRippleMaskCutoff } = standingWaterRendering;
+    const surfaceProximity = 1 - THREE.MathUtils.smoothstep(Math.abs(pp.y - WATER_LEVEL), 1.3, 2.4);
     const oceanWade = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < oceanRippleMaskCutoff ? wade : 0;
     const oceanSwimSurface = ENABLE_OCEAN_PLAYER_RIPPLES && standingMask < oceanRippleMaskCutoff
-      ? THREE.MathUtils.smoothstep(wadeDepth, 0.55, 1.15)
-        * (1 - THREE.MathUtils.smoothstep(wadeDepth, 2.4, 3.4))
-        * 0.72
+      ? THREE.MathUtils.smoothstep(wadeDepth, 0.55, 1.15) * surfaceProximity * 0.9
       : 0;
+    // Swimming/wading Darwin animates in the mirror even when the camera is
+    // still, so a static camera no longer implies a static reflection: refresh
+    // at the moving-camera cadence whenever his body is at the surface.
+    const reflectorNearWater = surfaceProximity > 0.01 && wadeDepth > -0.7;
     wu.uPlayer.value.set(pp.x, pp.y, pp.z);
     wu.uPlayerRipple.value = Math.max(oceanWade, oceanSwimSurface) * (1 - wu.uUnderwaterAmount.value);
     const sky = skyState(time, store.day || 1);
@@ -1992,6 +2033,7 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
       1,
     );
     wu.uPlanarShare.value = waterDev.planarShare;
+    wu.uObjectMirror.value = waterDev.objectMirror;
     wu.uReflDistort.value = waterDev.reflDistort;
     wu.uReflNeutralGrade.value = waterDev.reflNeutralGrade;
     wu.uSkyReflCurve.value = waterDev.skyReflCurve;
@@ -2067,7 +2109,7 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
         || Math.min(timeDelta, 24 - timeDelta) > REFLECTION_TIME_DELTA;
       const cadenceReady = reflectionFrame.current >= (qualityConfig.reflectionMinInterval || REFLECTION_MIN_INTERVAL);
       const stale = rs.framesSinceUpdate >= (qualityConfig.reflectionStaticInterval || REFLECTION_STATIC_INTERVAL);
-      if (!wu.uReflection.value || stale || (cadenceReady && (cameraMoved || cameraRotated || lightingChanged))) {
+      if (!wu.uReflection.value || stale || (cadenceReady && (cameraMoved || cameraRotated || lightingChanged || reflectorNearWater))) {
         reflectionFrame.current = 0;
         rs.framesSinceUpdate = 0;
         rs.initialized = true;

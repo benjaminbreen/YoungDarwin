@@ -16,7 +16,8 @@ import {
   mobilityVelocityCaps,
   normalizeMobility,
 } from '../objectMobility';
-import { onPropEvent, emitPropEvent } from './propEvents';
+import { onPropEvent, emitPropEvent, claimSwing } from './propEvents';
+import { triggerHitstop } from '../../world/worldTime';
 import { catalogToInspectable } from '../../world/inspectables';
 import { PropVisual, HighlightRing } from './PropVisuals';
 import { publishPropPose, removePropPose } from './propRuntime';
@@ -30,6 +31,13 @@ const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
 const PLAYER_PUSH_CONTACT_COOLDOWN = 0.18;
 const PLAYER_PUSH_FACING_DOT = 0.48;
 const RECENT_STRIKE_UNCAPPED_SECONDS = 0.7;
+// Loose props near a hammer blow get rattled: small clutter hops, heavy props
+// ignore it. Radius is measured from the impact point ahead of the swing.
+const RATTLE_IMPACT_REACH = 1.1;
+const RATTLE_IMPACT_HEIGHT = 0.55;
+const RATTLE_RADIUS = 1.35;
+const RATTLE_MAX_MASS = 30;
+const RATTLE_MAX_IMPULSE = 2.4;
 const GROUNDED_PROP_EPSILON = 0.26;
 const ZERO_VECTOR = { x: 0, y: 0, z: 0 };
 const DEFAULT_FACING = { x: 0, y: 0, z: -1 };
@@ -275,15 +283,22 @@ export function PhysicsProp({ prop, onBreak }) {
   }, [currentZoneId, fixedBody, isCarried, mobility, prop, propMass]);
 
   // Queue tool swings; the hit lands impactDelay seconds into the animation.
+  // Direct responders (breakable/strikeable) take the full hit; any other
+  // loose, light prop near the impact point merely rattles.
   useEffect(() => {
-    if (!breakable && !strikeable) return undefined;
+    const canRattle = !fixedBody && propMass <= RATTLE_MAX_MASS;
+    if (!breakable && !strikeable && !canRattle) return undefined;
     return onPropEvent('tool-swing', event => {
       const responds = (breakable && event.tool === breakable.tool)
         || (strikeable && event.tool === strikeable.tool);
-      if (!responds) return;
-      pendingStrikesRef.current.push({ ...event, at: clockRef.current + (event.impactDelay ?? 0.55) });
+      if (!responds && !(canRattle && event.tool === 'hammer')) return;
+      pendingStrikesRef.current.push({
+        ...event,
+        rattleOnly: !responds,
+        at: clockRef.current + (event.impactDelay ?? 0.55),
+      });
     });
-  }, [breakable, strikeable]);
+  }, [breakable, strikeable, fixedBody, propMass]);
 
   // Shotgun pellets: the resolver has already delayed to the muzzle moment,
   // so react immediately. Each prop tests itself against the pellet ray;
@@ -451,12 +466,31 @@ export function PhysicsProp({ prop, onBreak }) {
         for (const strike of due) {
           const origin = vectorFromStore(strike.position, vectors.origin);
           const facing = vectorFromStore(strike.facing, vectors.facing, DEFAULT_FACING).setY(0).normalize();
+          if (strike.rattleOnly) {
+            if (carriedRef.current) continue;
+            const impactX = origin.x + facing.x * RATTLE_IMPACT_REACH;
+            const impactZ = origin.z + facing.z * RATTLE_IMPACT_REACH;
+            const dx = translation.x - impactX;
+            const dz = translation.z - impactZ;
+            const lateral = Math.hypot(dx, dz);
+            if (lateral > RATTLE_RADIUS) continue;
+            if (Math.abs(translation.y - (origin.y + RATTLE_IMPACT_HEIGHT)) > 1.6) continue;
+            const falloff = 1 - lateral / RATTLE_RADIUS;
+            const kick = Math.min(RATTLE_MAX_IMPULSE, propMass * 0.6) * (0.35 + 0.65 * falloff);
+            const nx = lateral > 0.05 ? dx / lateral : facing.x;
+            const nz = lateral > 0.05 ? dz / lateral : facing.z;
+            body.wakeUp();
+            body.applyImpulse({ x: nx * kick * 0.7, y: kick * 0.55, z: nz * kick * 0.7 }, true);
+            continue;
+          }
           const toProp = vectors.toProp.copy(propPosition).sub(origin).setY(0);
           const distance = toProp.length();
           if (distance > STRIKE_RANGE) continue;
           if (distance > 0.2 && toProp.normalize().dot(facing) < STRIKE_FACING_DOT) continue;
           const impactDir = distance > 0.2 ? toProp.normalize() : facing;
           if (breakable && strike.tool === breakable.tool) {
+            claimSwing(strike.swingId);
+            triggerHitstop(0.055);
             emitPropEvent('prop-struck', {
               propId: prop.id,
               position: { x: translation.x, y: translation.y, z: translation.z },
@@ -471,6 +505,8 @@ export function PhysicsProp({ prop, onBreak }) {
             return;
           }
           if (strikeable && strike.tool === strikeable.tool) {
+            claimSwing(strike.swingId);
+            triggerHitstop(0.045);
             lastStrikeAtRef.current = clockRef.current;
             body.wakeUp();
             body.applyImpulse({
@@ -672,7 +708,7 @@ export function PhysicsProp({ prop, onBreak }) {
         renderKind: 'physics-prop',
         renderPath: null,
       }}>
-        <PropVisual visual={prop.visual} assetId={prop.visualAsset} offsetY={prop.visualOffsetY || 0} />
+        <PropVisual visual={prop.visual} assetId={prop.visualAsset} offsetY={prop.visualOffsetY || 0} propId={prop.id} />
         <HighlightRing visible={(isPrompted || isCarried) && prop.interactionRing !== false} />
       </group>
     </RigidBody>

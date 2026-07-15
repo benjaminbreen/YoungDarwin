@@ -417,14 +417,19 @@ const chartCache = new Map();
 
 export function useTerrainChart(zone, variant = 'terrain') {
   const [chartUrl, setChartUrl] = useState(null);
+  const zoneId = zone?.id || null;
 
   useEffect(() => {
-    if (!zone?.id) return null;
-    const key = `${CHART_CACHE_VERSION}:${zone.id}:${variant}`;
+    if (!zoneId) {
+      setChartUrl(null);
+      return undefined;
+    }
+    const key = `${CHART_CACHE_VERSION}:${zoneId}:${variant}`;
     if (!chartCache.has(key)) chartCache.set(key, bakeTerrainChart(zone, variant));
-    setChartUrl(chartCache.get(key));
+    const nextUrl = chartCache.get(key);
+    setChartUrl(current => (current === nextUrl ? current : nextUrl));
     return undefined;
-  }, [variant, zone]);
+  }, [variant, zone, zoneId]);
 
   return chartUrl;
 }

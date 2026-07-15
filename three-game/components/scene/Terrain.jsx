@@ -5,11 +5,9 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainColor, terrainHeight } from '../../world/terrain';
 import {
-  getCachedTerrainGeometry,
-  releaseTerrainGeometry,
-  retainTerrainGeometry,
   TERRAIN_WATER_SURFACE_Y,
 } from '../../world/terrainGeometry';
+import { readTerrainResource } from '../../world/terrainResource';
 import { getRegionDefinition } from '../../world/regions';
 import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
 import { makeCarryStripGeometries } from '../../world/vistas/apronGeometry';
@@ -174,15 +172,8 @@ function injectSeabedCaustics(material) {
 export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const regionDefinition = getRegionDefinition(currentZoneId);
-  const geometryEntry = useMemo(
-    () => getCachedTerrainGeometry(currentZoneId, segmentCap),
-    [currentZoneId, segmentCap],
-  );
+  const { geometryEntry } = readTerrainResource(currentZoneId, segmentCap);
   const geometry = geometryEntry.geometry;
-  useEffect(() => {
-    retainTerrainGeometry(geometryEntry.key);
-    return () => releaseTerrainGeometry(geometryEntry.key);
-  }, [geometryEntry.key]);
 
   const material = useMemo(() => {
     // Authored regions keep their custom material. Placeholder regions use the

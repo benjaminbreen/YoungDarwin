@@ -10,6 +10,7 @@ import * as THREE from 'three';
 
 const TWO_PI = Math.PI * 2;
 const DEFAULT_ALTITUDE_LIFT = 14;
+const FLAP_CADENCE_SCALE = 1.3;
 
 const SPECIES_PROFILES = {
   frigatebird: {
@@ -73,16 +74,17 @@ function birdProfile(spec, index = 0) {
 function birdBodyGeometry(shape = 'soarer') {
   const geo = new THREE.BufferGeometry();
   const coastal = shape === 'coastal';
-  const vertices = coastal
-    ? new Float32Array([
+  const headZ = coastal ? 0.36 : 0.48;
+  const body = coastal
+    ? [
       0, 0.04, 0.36, -0.11, 0.0, 0.02, 0.11, 0.0, 0.02,
       0, 0.04, 0.36, 0.11, 0.0, 0.02, 0, -0.045, -0.02,
       0, 0.04, 0.36, 0, -0.045, -0.02, -0.11, 0.0, 0.02,
       -0.11, 0.0, 0.02, 0, -0.045, -0.02, 0, 0.005, -0.34,
       0.11, 0.0, 0.02, 0, 0.005, -0.34, 0, -0.045, -0.02,
       -0.11, 0.0, 0.02, 0, 0.005, -0.34, 0.11, 0.0, 0.02,
-    ])
-    : new Float32Array([
+    ]
+    : [
       // low tapered body, local +Z is forward
       0, 0.035, 0.48, -0.08, 0.0, 0.04, 0.08, 0.0, 0.04,
       0, 0.035, 0.48, 0.08, 0.0, 0.04, 0, -0.04, 0.0,
@@ -90,70 +92,59 @@ function birdBodyGeometry(shape = 'soarer') {
       -0.08, 0.0, 0.04, 0, -0.04, 0.0, 0, 0.005, -0.45,
       0.08, 0.0, 0.04, 0, 0.005, -0.45, 0, -0.04, 0.0,
       -0.08, 0.0, 0.04, 0, 0.005, -0.45, 0.08, 0.0, 0.04,
+    ];
+  const beakBase = headZ + 0.045;
+  const beakTip = headZ + (coastal ? 0.2 : 0.19);
+  body.push(
+    // A tiny tetrahedral bill is enough to keep the head/body silhouette
+    // directional when the bird is banked against a bright sky.
+    -0.035, 0.06, beakBase, 0.035, 0.06, beakBase, 0, 0.045, beakTip,
+    0.035, 0.06, beakBase, 0, 0.005, beakBase, 0, 0.045, beakTip,
+    0, 0.005, beakBase, -0.035, 0.06, beakBase, 0, 0.045, beakTip,
+  );
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(body), 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function birdArmGeometry(side = 1, shape = 'soarer') {
+  const geo = new THREE.BufferGeometry();
+  const s = side >= 0 ? 1 : -1;
+  const coastal = shape === 'coastal';
+  const vertices = coastal
+    ? new Float32Array([
+      s * 0.04, 0, 0.14, s * 0.24, 0.012, 0.22, s * 0.08, 0, -0.12,
+      s * 0.24, 0.012, 0.22, s * 0.22, 0, -0.17, s * 0.08, 0, -0.12,
+      s * 0.24, 0.012, 0.22, s * 0.43, 0.006, 0.1, s * 0.22, 0, -0.17,
+      s * 0.43, 0.006, 0.1, s * 0.43, 0, -0.06, s * 0.22, 0, -0.17,
+    ])
+    : new Float32Array([
+      s * 0.04, 0, 0.15, s * 0.29, 0.012, 0.24, s * 0.08, 0, -0.15,
+      s * 0.29, 0.012, 0.24, s * 0.3, 0, -0.2, s * 0.08, 0, -0.15,
+      s * 0.29, 0.012, 0.24, s * 0.55, 0.006, 0.11, s * 0.3, 0, -0.2,
+      s * 0.55, 0.006, 0.11, s * 0.55, 0, -0.05, s * 0.3, 0, -0.2,
     ]);
   geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   geo.computeVertexNormals();
   return geo;
 }
 
-function birdWingGeometry(side = 1, shape = 'soarer') {
+function birdHandGeometry(side = 1, shape = 'soarer') {
   const geo = new THREE.BufferGeometry();
   const s = side >= 0 ? 1 : -1;
   const coastal = shape === 'coastal';
   const vertices = coastal
     ? new Float32Array([
-      s * 0.05, 0, 0.15,
-      s * 0.42, 0.012, 0.22,
-      s * 0.2, 0, -0.08,
-      s * 0.42, 0.012, 0.22,
-      s * 0.84, 0, 0.02,
-      s * 0.2, 0, -0.08,
-      s * 0.2, 0, -0.08,
-      s * 0.84, 0, 0.02,
-      s * 0.58, 0, -0.24,
+      0, 0.006, 0.08, s * 0.23, 0.009, 0.055, 0, 0, -0.09,
+      s * 0.23, 0.009, 0.055, s * 0.15, 0, -0.14, 0, 0, -0.09,
+      s * 0.23, 0.009, 0.055, s * 0.43, 0, -0.025, s * 0.15, 0, -0.14,
+      s * 0.43, 0, -0.025, s * 0.34, 0, -0.18, s * 0.15, 0, -0.14,
     ])
     : new Float32Array([
-      s * 0.05, 0, 0.16,
-      s * 0.52, 0.012, 0.24,
-      s * 0.34, 0, -0.09,
-      s * 0.52, 0.012, 0.24,
-      s * 1.04, 0, -0.02,
-      s * 0.34, 0, -0.09,
-      s * 0.34, 0, -0.09,
-      s * 1.04, 0, -0.02,
-      s * 0.76, 0, -0.28,
-      s * 0.34, 0, -0.09,
-      s * 0.76, 0, -0.28,
-      s * 0.16, 0, -0.2,
-    ]);
-  geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function birdWingMarkGeometry(side = 1, shape = 'soarer') {
-  const geo = new THREE.BufferGeometry();
-  const s = side >= 0 ? 1 : -1;
-  const coastal = shape === 'coastal';
-  const vertices = coastal
-    ? new Float32Array([
-      s * 0.16, 0.008, 0.1,
-      s * 0.62, 0.008, 0.08,
-      s * 0.36, 0.008, 0.0,
-      s * 0.26, 0.009, -0.06,
-      s * 0.66, 0.009, -0.16,
-      s * 0.46, 0.009, -0.1,
-    ])
-    : new Float32Array([
-      s * 0.22, 0.008, 0.11,
-      s * 0.88, 0.008, 0.02,
-      s * 0.48, 0.008, -0.04,
-      s * 0.34, 0.009, -0.08,
-      s * 0.78, 0.009, -0.2,
-      s * 0.56, 0.009, -0.12,
-      s * 0.22, 0.01, 0.18,
-      s * 0.5, 0.01, 0.2,
-      s * 0.4, 0.01, 0.13,
+      0, 0.006, 0.08, s * 0.3, 0.009, 0.045, 0, 0, -0.09,
+      s * 0.3, 0.009, 0.045, s * 0.2, 0, -0.15, 0, 0, -0.09,
+      s * 0.3, 0.009, 0.045, s * 0.55, 0, -0.035, s * 0.2, 0, -0.15,
+      s * 0.55, 0, -0.035, s * 0.44, 0, -0.19, s * 0.2, 0, -0.15,
     ]);
   geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   geo.computeVertexNormals();
@@ -186,12 +177,11 @@ function birdHeadGeometry() {
 
 function makeMaterials(color) {
   const base = { side: THREE.DoubleSide, fog: true, depthWrite: true };
-  const detailBase = { side: THREE.DoubleSide, fog: true, transparent: true, opacity: 0.84, depthWrite: false };
-  const makeSet = ({ body, head = body, wing, detail, tail }) => ({
+  const makeSet = ({ body, head = body, wing, primary, tail }) => ({
     body: new THREE.MeshBasicMaterial({ ...base, color: body }),
     head: new THREE.MeshBasicMaterial({ ...base, color: head }),
     wing: new THREE.MeshBasicMaterial({ ...base, color: wing }),
-    detail: new THREE.MeshBasicMaterial({ ...detailBase, color: detail }),
+    primary: new THREE.MeshBasicMaterial({ ...base, color: primary }),
     tail: new THREE.MeshBasicMaterial({ ...base, color: tail }),
   });
   return {
@@ -199,21 +189,21 @@ function makeMaterials(color) {
       body: color,
       head: '#312d20',
       wing: '#30363a',
-      detail: '#66717a',
+      primary: '#20262a',
       tail: '#11100d',
     }),
     gull: makeSet({
       body: '#8a897c',
       head: '#b6ae91',
-      wing: '#4d5658',
-      detail: '#c6be9d',
+      wing: '#8e918a',
+      primary: '#4d5658',
       tail: '#272a27',
     }),
     blueGrey: makeSet({
       body: '#50666c',
       head: '#7f8e8d',
-      wing: '#344149',
-      detail: '#7f939b',
+      wing: '#53686d',
+      primary: '#344149',
       tail: '#1b2328',
     }),
   };
@@ -222,6 +212,7 @@ function makeMaterials(color) {
 function resolvePath(spec, profile, index, t) {
   const mode = spec.path || spec.motion || 'thermalCircle';
   const speed = spec.speed ?? 0.075;
+  const travelDirection = Math.sign(speed || 1);
   const phase = spec.phase ?? 0;
   const radiusX = spec.radiusX ?? spec.radius ?? 22;
   const radiusZ = spec.radiusZ ?? spec.radius ?? radiusX * 0.66;
@@ -237,8 +228,8 @@ function resolvePath(spec, profile, index, t) {
   if (mode === 'figureEight' || mode === 'lazyFigureEight') {
     const x = cx + Math.sin(a) * radiusX;
     const z = cz + Math.sin(a * 2 + phase * 0.4) * radiusZ * 0.58;
-    const dx = Math.cos(a) * radiusX;
-    const dz = Math.cos(a * 2 + phase * 0.4) * 2 * radiusZ * 0.58;
+    const dx = Math.cos(a) * radiusX * travelDirection;
+    const dz = Math.cos(a * 2 + phase * 0.4) * 2 * radiusZ * 0.58 * travelDirection;
     return {
       x,
       z,
@@ -252,8 +243,8 @@ function resolvePath(spec, profile, index, t) {
   const radiusPulse = 1 + Math.sin(t * 0.17 + phase * 0.9) * 0.045;
   const x = cx + Math.cos(a + wobble) * radiusX * radiusPulse;
   const z = cz + Math.sin(a + wobble) * radiusZ * (1 + wind * 0.035);
-  const dx = -Math.sin(a + wobble) * radiusX * radiusPulse;
-  const dz = Math.cos(a + wobble) * radiusZ * (1 + wind * 0.035);
+  const dx = -Math.sin(a + wobble) * radiusX * radiusPulse * travelDirection;
+  const dz = Math.cos(a + wobble) * radiusZ * (1 + wind * 0.035) * travelDirection;
   return {
     x,
     z,
@@ -270,6 +261,8 @@ function cacheParts(bird) {
       body: bird.getObjectByName('body'),
       leftWing: bird.getObjectByName('left-wing'),
       rightWing: bird.getObjectByName('right-wing'),
+      leftHand: bird.getObjectByName('left-hand'),
+      rightHand: bird.getObjectByName('right-hand'),
       leftTail: bird.getObjectByName('left-tail'),
       rightTail: bird.getObjectByName('right-tail'),
     };
@@ -283,10 +276,12 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
     soarer: {
       body: birdBodyGeometry('soarer'),
       head: birdHeadGeometry(),
-      leftWing: birdWingGeometry(1, 'soarer'),
-      rightWing: birdWingGeometry(-1, 'soarer'),
-      leftWingMark: birdWingMarkGeometry(1, 'soarer'),
-      rightWingMark: birdWingMarkGeometry(-1, 'soarer'),
+      leftArm: birdArmGeometry(1, 'soarer'),
+      rightArm: birdArmGeometry(-1, 'soarer'),
+      leftHand: birdHandGeometry(1, 'soarer'),
+      rightHand: birdHandGeometry(-1, 'soarer'),
+      leftHandOffset: [0.55, 0, 0.03],
+      rightHandOffset: [-0.55, 0, 0.03],
       leftTail: birdTailGeometry(1, 'soarer'),
       rightTail: birdTailGeometry(-1, 'soarer'),
       headZ: 0.48,
@@ -294,10 +289,12 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
     coastal: {
       body: birdBodyGeometry('coastal'),
       head: birdHeadGeometry(),
-      leftWing: birdWingGeometry(1, 'coastal'),
-      rightWing: birdWingGeometry(-1, 'coastal'),
-      leftWingMark: birdWingMarkGeometry(1, 'coastal'),
-      rightWingMark: birdWingMarkGeometry(-1, 'coastal'),
+      leftArm: birdArmGeometry(1, 'coastal'),
+      rightArm: birdArmGeometry(-1, 'coastal'),
+      leftHand: birdHandGeometry(1, 'coastal'),
+      rightHand: birdHandGeometry(-1, 'coastal'),
+      leftHandOffset: [0.43, 0, 0.02],
+      rightHandOffset: [-0.43, 0, 0.02],
       leftTail: birdTailGeometry(1, 'coastal'),
       rightTail: birdTailGeometry(-1, 'coastal'),
       headZ: 0.36,
@@ -320,11 +317,27 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
       const yaw = Math.atan2(tangentX, tangentZ) + (spec.yawOffset ?? 0);
       const turnSign = Math.sign((spec.speed ?? 0.075) || 1);
       const glideWave = Math.sin(t * 0.22 + (spec.phase ?? 0) * 2.4);
-      const gliding = glideWave < profile.glideBias * 2 - 1;
-      const flapRate = spec.flapRate ?? profile.flapRate;
+      const powerThreshold = profile.glideBias * 2 - 1;
+      const powerBlend = THREE.MathUtils.smoothstep(
+        glideWave,
+        powerThreshold - 0.1,
+        powerThreshold + 0.14,
+      );
+      const gliding = powerBlend < 0.14;
+      const flapRate = (spec.flapRate ?? profile.flapRate) * FLAP_CADENCE_SCALE;
       const flapPhase = t * flapRate * TWO_PI + (spec.phase ?? 0) * 2.1;
-      const flapEnvelope = gliding ? 0.16 : 1;
-      const flap = Math.sin(flapPhase) * (spec.flapAmplitude ?? profile.flapAmplitude) * flapEnvelope;
+      const flapEnvelope = 0.025 + powerBlend * 0.975;
+      // A warped sine makes the power stroke faster than the recovery. The
+      // hand trails the shoulder, then folds rearward on the upstroke; that
+      // articulated wrist is the strongest bird (rather than bat) cue here.
+      const strokeWave = phase => Math.sin(phase + 0.42 * Math.sin(phase));
+      const shoulderStroke = strokeWave(flapPhase);
+      const handStroke = strokeWave(flapPhase - 0.48);
+      const flapAmplitude = spec.flapAmplitude ?? profile.flapAmplitude;
+      const flap = shoulderStroke * flapAmplitude * flapEnvelope;
+      const handFlap = handStroke * flapAmplitude * flapEnvelope;
+      const downstroke = Math.max(0, -shoulderStroke) * powerBlend;
+      const recoveryFlex = Math.max(0, shoulderStroke) * powerBlend;
       const glideLift = gliding ? 0.08 + Math.sin(t * 0.48 + (spec.phase ?? 0)) * 0.025 : 0;
       const bank = -turnSign * (spec.bankAmount ?? profile.bank) + Math.sin(path.phase * 0.7) * 0.08;
       const pitch = Math.sin(path.phase * 0.5) * (spec.pitchAmount ?? profile.pitch) - glideLift;
@@ -336,8 +349,17 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
       if (parts.leftWing && parts.rightWing) {
         const dihedral = spec.wingDihedral ?? profile.wingDihedral;
         const sweep = spec.wingSweep ?? profile.wingSweep;
-        parts.leftWing.rotation.set(0, sweep, dihedral + flap);
-        parts.rightWing.rotation.set(0, -sweep, -dihedral - flap);
+        const strokeSweep = strokeWave(flapPhase - 0.18) * flapAmplitude * flapEnvelope * 0.18;
+        parts.leftWing.rotation.set(-downstroke * 0.06, sweep + strokeSweep, dihedral + flap);
+        parts.rightWing.rotation.set(-downstroke * 0.06, -sweep - strokeSweep, -dihedral - flap);
+        if (parts.leftHand && parts.rightHand) {
+          const glideWristBreak = gliding ? 0.1 : 0;
+          const wristFold = recoveryFlex * 0.52;
+          const relativeFlap = (handFlap - flap) * 0.9 - glideWristBreak;
+          const featherWash = (-downstroke * 0.12 + recoveryFlex * 0.04) * flapEnvelope;
+          parts.leftHand.rotation.set(featherWash, wristFold, relativeFlap);
+          parts.rightHand.rotation.set(featherWash, -wristFold, -relativeFlap);
+        }
       }
       if (parts.leftTail && parts.rightTail) {
         const fork = spec.tailFork ?? profile.tailFork;
@@ -345,7 +367,7 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
         parts.rightTail.rotation.z = -0.08 - fork * 0.12;
       }
       if (parts.body) {
-        parts.body.position.y = gliding ? 0 : Math.sin(flapPhase) * 0.015;
+        parts.body.position.y = downstroke * 0.018;
       }
     });
   });
@@ -370,12 +392,16 @@ export function BirdFlock({ birds, color = '#24231c', scale = 1.55 }) {
               />
             </group>
             <group name="left-wing">
-              <mesh geometry={geometrySet.leftWing} material={materialSet.wing} />
-              <mesh geometry={geometrySet.leftWingMark} material={materialSet.detail} renderOrder={1} />
+              <mesh geometry={geometrySet.leftArm} material={materialSet.wing} />
+              <group name="left-hand" position={geometrySet.leftHandOffset}>
+                <mesh geometry={geometrySet.leftHand} material={materialSet.primary} />
+              </group>
             </group>
             <group name="right-wing">
-              <mesh geometry={geometrySet.rightWing} material={materialSet.wing} />
-              <mesh geometry={geometrySet.rightWingMark} material={materialSet.detail} renderOrder={1} />
+              <mesh geometry={geometrySet.rightArm} material={materialSet.wing} />
+              <group name="right-hand" position={geometrySet.rightHandOffset}>
+                <mesh geometry={geometrySet.rightHand} material={materialSet.primary} />
+              </group>
             </group>
             <mesh name="left-tail" geometry={geometrySet.leftTail} material={materialSet.tail} />
             <mesh name="right-tail" geometry={geometrySet.rightTail} material={materialSet.tail} />

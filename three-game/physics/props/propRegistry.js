@@ -12,28 +12,27 @@ export const ZONE_PROPS = {
     {
       id: 'post-office-bay-large-barrel',
       type: 'postOfficeBayBarrel',
-      x: 3.0,
-      z: 2.5,
+      x: 0.0,
+      z: 8.5,
       rotation: [0.015, 0.32, -0.01],
       scale: 2.33,
       visualOffsetY: -0.86,
     },
-    // Landing-party supply drop: two crates set snug at an angle on the sandy
-    // shelf east of the spawn, with a barrel lying a little apart as if it
-    // rolled off the pile toward the water.
+    // Landing-party supplies are spread across the central beach instead of
+    // reading as one tight prop pile beside the spawn.
     {
       id: 'post-office-rollable-barrel',
       type: 'barrel',
-      x: 16.6,
-      z: 3.9,
-      rotation: [Math.PI / 2, 1.05, 0.08],
+      x: 20.0,
+      z: 2.8,
+      rotation: [Math.PI / 2, 0.72, 0.08],
     },
     {
       id: 'shore-supply-crate',
       type: 'crate',
-      x: 13.8,
-      z: 4.3,
-      rotation: [0, 0.42, 0],
+      x: 3.2,
+      z: 4.8,
+      rotation: [0, 0.18, 0],
     },
     {
       id: 'shore-supply-crate-b',
@@ -41,13 +40,6 @@ export const ZONE_PROPS = {
       x: 15.05,
       z: 4.95,
       rotation: [0.02, -0.65, -0.01],
-    },
-    {
-      id: 'shore-terracotta-pot',
-      type: 'terracottaPot',
-      x: -6.8,
-      z: 12.6,
-      rotation: [0.01, 0.38, -0.02],
     },
     {
       id: 'upper-slope-broken-crate',
@@ -260,6 +252,13 @@ export const ZONE_PROPS = {
       x: -4.4,
       z: -6.8,
       rotation: [0, 0.4, 0],
+    },
+    {
+      id: 'penal-plaza-terracotta-pot',
+      type: 'terracottaPot',
+      x: -2.9,
+      z: -6.1,
+      rotation: [0.01, -0.28, -0.02],
     },
     // Barracks stores.
     {

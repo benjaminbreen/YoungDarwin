@@ -38,6 +38,7 @@ import {
   EMPTY_KEYS,
   MOVEMENT_INTERRUPTIBLE_ACTIONS,
   MOVEMENT_FATIGUE,
+  PLAYER,
   SPAWN_DROP,
   SPRINT,
   SWIM,
@@ -46,7 +47,7 @@ import {
 import { usePlayerCameraRig } from './usePlayerCameraRig';
 import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
-import { updatePlayerInteractions } from './playerInteractions';
+import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput, sanitizeShortcutKeys } from './playerInputState';
 import { findCactusHazardContact, findPushableObstacleNear } from './playerFeedback';
 import { updatePlayerFrameFeedback } from './playerFrameFeedback';
@@ -85,6 +86,7 @@ const PUSH_FEEDBACK_DURATION = {
   pushMedium: 0.4,
   pushHeavy: 0.48,
 };
+const PUSH_FEEDBACK_ACTIONS = new Set(['pushLow', 'pushMedium', 'pushHeavy', 'pushStart', 'pushStop']);
 // Idle fidget pool: weighted-random with no immediate repeats. Deep fidgets
 // (long stretches) only surface after Darwin has already fidgeted a couple of
 // times, so a briefly parked player never sees the theatrical ones first.
@@ -283,6 +285,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
   const lastCactusHitAt = useRef(-10);
   const cactusHazardStreak = useRef({ count: 0, lastAt: -10 });
   const lastStepUpDustAt = useRef(-10);
+  const lastStepPulseAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
   const prevSprintingRef = useRef(false);
   const lastDownhillSprintCameraAt = useRef(-10);
@@ -395,6 +398,8 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     strafeLeft: false,
     strafeRight: false,
     speed: 0,
+    animationSpeed: 0,
+    travelRunInPlace: false,
     action: null,
     jumpPhase: 'grounded',
     jumpWasRunning: false,
@@ -764,6 +769,9 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     stateRef.current.flightSpeedT = startsInFlight ? 0.55 : 0;
     stateRef.current.timeScale = 1;
     stateRef.current.wadeDepth = 0;
+    stateRef.current.speed = 0;
+    stateRef.current.animationSpeed = 0;
+    stateRef.current.travelRunInPlace = false;
     lastGroundedAt.current = performance.now() / 1000;
     resetCameraForSpawn(groundY);
     jumpBufferedUntil.current = -10;
@@ -832,6 +840,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       delta,
     });
     const startOfFramePosition = frameScratch.startPosition.copy(group.current.position);
+    const wasAirborneAtFrameStart = wasAirborne.current;
     const durationFor = (clip) => actionDuration(clip, stateRef.current.modelAssetId);
     const resolveActionDuration = (clip, duration) => (
       stateRef.current.modelAssetId === 'darwin5' && duration === ACTION_DURATION[clip]
@@ -2374,7 +2383,14 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           intensity: THREE.MathUtils.clamp(impactSpeed / 3.2 + collision.penetration * 0.18, 0.15, 1),
         });
       }
-      if (!collision.specimen && impactSpeed >= PUSH_ANIMATION_MIN_SPEED && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
+      const travelEdgeContact = shouldRunInPlaceAtTravelEdge(
+        useThreeGameStore.getState(),
+        { moving, isDarwinMode },
+      );
+      if (!travelEdgeContact
+        && !collision.specimen
+        && impactSpeed >= PUSH_ANIMATION_MIN_SPEED
+        && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
         startPushFeedback(collision.obstacle || {
           kind: 'wall',
           height: 1.6,
@@ -2784,12 +2800,18 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           attempted.normalize();
           pushedBack.normalize();
           if (attempted.dot(pushedBack) < -0.35) {
-            startPushFeedback({
-              kind: 'cliff',
-              height: 1.7,
-              colliderTop: 1.7,
-              pushMass: 24,
-            });
+            const travelRunInPlace = shouldRunInPlaceAtTravelEdge(
+              useThreeGameStore.getState(),
+              { moving, isDarwinMode },
+            );
+            if (!travelRunInPlace) {
+              startPushFeedback({
+                kind: 'cliff',
+                height: 1.7,
+                colliderTop: 1.7,
+                pushMass: 24,
+              });
+            }
           }
         }
       }
@@ -2801,22 +2823,72 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     if (!swim.active && !wasAirborne.current && jumpState.current.phase !== 'takeoff') {
       const finalGroundInfo = collisionAdapter.groundInfo(p);
       const groundLift = finalGroundInfo.y - p.y;
-      p.y = finalGroundInfo.y;
-      characterController.sync(p);
-      velocity.current.y = 0;
-      if (
-        finalGroundInfo.source === 'authored-obstacle'
-        && groundLift > 0.08
-        && groundLift <= 1.0
-        && horizontalSpeed > 0.8
-        && now - lastStepUpDustAt.current > 0.28
-      ) {
-        lastStepUpDustAt.current = now;
-        footstepDustTriggerRef.current?.({
-          kind: 'step-up',
-          intensity: THREE.MathUtils.clamp(0.25 + groundLift * 0.75 + horizontalSpeed / 18, 0.28, 0.72),
-          position: frameScratch.footstepPosition.set(0, 0.06, 0.18),
-        });
+      if (groundLift < -(playerConfig.ledgeReleaseDrop ?? PLAYER.ledgeReleaseDrop)) {
+        // The ground fell away by more than a body-length in a single frame —
+        // a tall ledge, not a steppable drop. Release to the airborne/landing
+        // systems instead of gluing Darwin to the lower surface.
+        wasAirborne.current = true;
+        stateRef.current.jumpPhase = 'airborne';
+      } else {
+        p.y = finalGroundInfo.y;
+        characterController.sync(p);
+        velocity.current.y = 0;
+        if (
+          finalGroundInfo.source === 'authored-obstacle'
+          && groundLift > 0.08
+          && groundLift <= 1.0
+          && horizontalSpeed > 0.8
+          && now - lastStepUpDustAt.current > 0.28
+        ) {
+          lastStepUpDustAt.current = now;
+          footstepDustTriggerRef.current?.({
+            kind: 'step-up',
+            intensity: THREE.MathUtils.clamp(0.25 + groundLift * 0.75 + horizontalSpeed / 18, 0.28, 0.72),
+            position: frameScratch.footstepPosition.set(0, 0.06, 0.18),
+          });
+        }
+      }
+    }
+
+    // Step smoothing: obstacle support moves the collider up or down in sharp
+    // per-frame increments a walk cycle cannot follow. Bank the vertical snap
+    // as a visual model offset (eased back by playerFrameFeedback) so the body
+    // rises or settles through the step instead of teleporting, and pulse the
+    // squash/stretch fields so bigger steps read in the silhouette.
+    if (!swim.active
+      && !wasAirborneAtFrameStart
+      && !wasAirborne.current
+      && jumpState.current.phase !== 'takeoff'
+      && !stateRef.current.climbMotion
+      && !stateRef.current.rollMotion
+      && spawnDrop.current.phase === 'complete') {
+      const stepDy = p.y - startOfFramePosition.y;
+      const stepTravel = Math.hypot(p.x - startOfFramePosition.x, p.z - startOfFramePosition.z);
+      // Anything steeper than ~45° of instantaneous grade is a step, not a
+      // slope being followed; huge deltas are teleports and stay untouched.
+      const slopeAllowance = Math.max(0.085, stepTravel * 0.95);
+      if (Math.abs(stepDy) > slopeAllowance && Math.abs(stepDy) < 2.2) {
+        stateRef.current.stepSmoothOffset = THREE.MathUtils.clamp(
+          (stateRef.current.stepSmoothOffset || 0) - stepDy,
+          -0.85,
+          0.85,
+        );
+        if (stepDy > 0) {
+          // Climbing costs a little momentum so tall steps read as effort.
+          const stepMomentumKeep = 1 - Math.min(0.12, stepDy * 0.3);
+          velocity.current.x *= stepMomentumKeep;
+          velocity.current.z *= stepMomentumKeep;
+        }
+        if (Math.abs(stepDy) > 0.15 && !stateRef.current.action && now - lastStepPulseAt.current > 0.3) {
+          lastStepPulseAt.current = now;
+          if (stepDy > 0) {
+            stateRef.current.impactTakeoffAt = now;
+            stateRef.current.impactStretch = THREE.MathUtils.clamp(0.3 + stepDy * 0.8, 0.35, 0.8);
+          } else {
+            stateRef.current.impactLandedAt = now;
+            stateRef.current.impactIntensity = THREE.MathUtils.clamp(-stepDy * 0.55, 0.14, 0.5);
+          }
+        }
       }
     }
 
@@ -2885,6 +2957,17 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       allowSpecimenInteractions: playerConfig.canUseDarwinInteractions !== false,
     });
 
+    const travelRunInPlace = shouldRunInPlaceAtTravelEdge(
+      useThreeGameStore.getState(),
+      { moving, isDarwinMode },
+    );
+    if (travelRunInPlace && PUSH_FEEDBACK_ACTIONS.has(stateRef.current.action)) {
+      stateRef.current.action = null;
+      stateRef.current.actionUntil = 0;
+      stateRef.current.recoverAction = null;
+      stateRef.current.lockMovementUntil = Math.min(stateRef.current.lockMovementUntil, now);
+    }
+
     finalizeFrame({
       moving,
       running,
@@ -2892,6 +2975,7 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
       arcade,
       groundDistance,
       tiredRun,
+      runInPlace: travelRunInPlace,
     });
 
     // Sprint surge: the moment the spool completes, kick a puff of dust off

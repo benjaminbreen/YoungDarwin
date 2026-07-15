@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import {
   getRegionTerrainConfig,
-  terrainBiomeAt,
-  terrainColor,
-  terrainHeight,
+  terrainRenderSample,
   terrainSurfaceNoise,
 } from './terrain';
 
@@ -43,11 +41,12 @@ function buildTerrainGeometry(regionId, segmentCap) {
   for (let index = 0; index < position.count; index += 1) {
     const x = position.getX(index);
     const z = position.getZ(index);
-    const y = terrainHeight(x, z, regionId);
+    const sample = terrainRenderSample(x, z, regionId);
+    const y = sample.height;
     position.setY(index, y);
 
-    const color = terrainColor(x, z, y, regionId);
-    const biome = terrainBiomeAt(x, z, y, regionId);
+    const color = sample.color;
+    const biome = sample.biome;
     const grain = terrainSurfaceNoise(x * 2.7, z * 2.7);
     if (biome === 'black-lava' || biome === 'wet-basalt') color.offsetHSL(0, -0.03, grain * 0.045);
     if (biome === 'tuff-ridge' || biome === 'ash-slope') color.offsetHSL(0.015, -0.02, grain * 0.035);
