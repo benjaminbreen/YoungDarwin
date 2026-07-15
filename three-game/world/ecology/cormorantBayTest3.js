@@ -40,7 +40,7 @@ function dryGrassColor(density, dryness, tone) {
   return shade > 0.5 ? '#879a55' : '#687d43';
 }
 
-function buildDryGrassPatches(zoneId, idPrefix, count = 560) {
+function buildDryGrassPatches(zoneId, idPrefix, count = 360) {
   const items = [];
   const bounds = { minX: -46, maxX: 46, minZ: 2, maxZ: 42 };
   let attempts = 0;
@@ -66,7 +66,7 @@ function buildDryGrassPatches(zoneId, idPrefix, count = 560) {
     const direction = cormorantTest3DirectionAt(x, z);
     const directionJitter = (seededRandom(i, 29) - 0.5) * lerp(0.42, 0.82, seededRandom(i, 31));
     const occasionalTurn = seededRandom(i, 37) > 0.86 ? (seededRandom(i, 41) - 0.5) * 1.4 : 0;
-    const scale = lerp(0.28, 0.62, seededRandom(i, 43))
+    const scale = lerp(0.32, 0.7, seededRandom(i, 43))
       * lerp(0.86, 1.18, density)
       * lerp(1.08, 0.9, dryness);
 
@@ -87,9 +87,42 @@ function buildDryGrassPatches(zoneId, idPrefix, count = 560) {
   return items;
 }
 
+function partitionDryGrassPatches(items) {
+  const columns = 4;
+  const rows = 2;
+  const buckets = Array.from({ length: columns * rows }, () => []);
+  for (const item of items) {
+    const column = Math.min(columns - 1, Math.max(0, Math.floor(((item.x + 46) / 92) * columns)));
+    const row = Math.min(rows - 1, Math.max(0, Math.floor(((item.z - 2) / 40) * rows)));
+    buckets[row * columns + column].push(item);
+  }
+  return buckets.filter(bucket => bucket.length);
+}
+
 function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(zoneId, layer, count, seed, opts);
   const dryGrassPatches = buildDryGrassPatches(zoneId, idPrefix);
+  const dryGrassLayers = partitionDryGrassPatches(dryGrassPatches).map((items, index) => ({
+    id: `${idPrefix}-yellow-dry-grass-patches-${index}`,
+    loadTier: 1,
+    path: `${NATURE}runtime-animated-dry-grass.glb`,
+    items,
+    color: '#a99d58',
+    materialColor: '#ffffff',
+    emissive: '#2f3117',
+    emissiveIntensity: 0.1,
+    roughness: 0.99,
+    castShadow: false,
+    receiveShadow: true,
+    baseLift: 0.012,
+    sink: 0.025,
+    slopeSink: 0.18,
+    widthScale: 1.04,
+    heightScale: 0.96,
+    depthScale: 1.04,
+    maxVisibleDistance: 82,
+    motion: { wind: 0.95, bend: 0.2, bendRadius: 1.12 },
+  }));
   return {
     zoneId,
     stream: false,
@@ -131,29 +164,7 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         textureHeight: 512,
       },
     ],
-    dryGrassPatches: [
-      {
-        id: `${idPrefix}-yellow-dry-grass-patches`,
-        loadTier: 1,
-        path: `${NATURE}runtime-animated-dry-grass.glb`,
-        items: dryGrassPatches,
-        color: '#a99d58',
-        materialColor: '#ffffff',
-        emissive: '#2f3117',
-        emissiveIntensity: 0.1,
-        roughness: 0.99,
-        castShadow: false,
-        receiveShadow: true,
-        baseLift: 0.012,
-        sink: 0.025,
-        slopeSink: 0.18,
-        widthScale: 0.92,
-        heightScale: 0.96,
-        depthScale: 0.96,
-        maxVisibleDistance: 82,
-        motion: { wind: 0.95, bend: 0.2, bendRadius: 1.12 },
-      },
-    ],
+    dryGrassPatches: dryGrassLayers,
     flora: [
       {
         id: `${idPrefix}-lagoon-saltgrass`,

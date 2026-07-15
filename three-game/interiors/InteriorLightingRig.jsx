@@ -331,11 +331,36 @@ function applyRectDirection(light, direction) {
   light.quaternion.setFromUnitVectors(RECT_NORMAL, direction);
 }
 
-function PortalLight({ portal, worldYaw = 0 }) {
+function portalIsWithinBudget(portal, candidates, budget, viewerPosition) {
+  if (!Number.isFinite(budget)) return true;
+  if (budget <= 0) return false;
+  if (candidates.length <= budget) return true;
+  const [px, py, pz] = portal.position;
+  const ownDistance = (px - viewerPosition.x) ** 2
+    + (py - viewerPosition.y) ** 2
+    + (pz - viewerPosition.z) ** 2;
+  let nearerCount = 0;
+  for (const candidate of candidates) {
+    if (candidate === portal) continue;
+    const [cx, cy, cz] = candidate.position;
+    const distance = (cx - viewerPosition.x) ** 2
+      + (cy - viewerPosition.y) ** 2
+      + (cz - viewerPosition.z) ** 2;
+    if (distance < ownDistance - 0.0001
+      || (Math.abs(distance - ownDistance) <= 0.0001 && candidate.id < portal.id)) {
+      nearerCount += 1;
+      if (nearerCount >= budget) return false;
+    }
+  }
+  return true;
+}
+
+function PortalLight({ portal, portalGroups, portalBudgets, worldYaw = 0 }) {
   const direct = portal.direct;
   const shaft = direct?.shaft;
   const panes = shaft?.panes;
   const scene = useThree(state => state.scene);
+  const camera = useThree(state => state.camera);
   const areaRef = useRef(null);
   const bounceRef = useRef(null);
   const spotRef = useRef(null);
@@ -441,7 +466,19 @@ function PortalLight({ portal, worldYaw = 0 }) {
     const diffuseShaftStrength = diffuseStrength * (direct?.diffuseShaftShare ?? 0);
     const diffuseProjectorStrength = diffuseStrength * (direct?.diffuseProjectorShare ?? 0);
     const shaftStrength = THREE.MathUtils.clamp(directStrength + diffuseShaftStrength, 0, 1);
+    const runtimePosition = getRuntimePlayerPose()?.position;
+    const viewerPosition = runtimePosition
+      && [runtimePosition.x, runtimePosition.y, runtimePosition.z].every(Number.isFinite)
+      ? runtimePosition
+      : camera.position;
+    const diffuseVisible = portalIsWithinBudget(
+      portal,
+      portalGroups.all,
+      portalBudgets?.diffuse,
+      viewerPosition,
+    );
     if (areaRef.current) {
+      areaRef.current.visible = diffuseVisible;
       const directContrast = 1 - directStrength * (direct?.diffuseCut ?? 0);
       areaRef.current.intensity = (portal.diffuseIntensity ?? 0.7) * diffuseStrength * directContrast;
       areaRef.current.color.copy(lightColor);
@@ -459,6 +496,13 @@ function PortalLight({ portal, worldYaw = 0 }) {
       spot.color.copy(directColor);
       spot.intensity = (direct.intensity ?? 24) * directStrength
         + (direct.diffuseProjectorIntensity ?? 0) * diffuseStrength;
+      const directVisible = portalIsWithinBudget(
+        portal,
+        portalGroups.direct,
+        portalBudgets?.direct,
+        viewerPosition,
+      ) && spot.intensity > 0.02;
+      spot.visible = directVisible;
       spot.penumbra = THREE.MathUtils.lerp(
         direct.penumbraClear ?? direct.penumbra ?? 0.34,
         direct.penumbraOvercast ?? Math.max(direct.penumbra ?? 0.34, 0.58),
@@ -469,7 +513,18 @@ function PortalLight({ portal, worldYaw = 0 }) {
         direct.shadowRadiusOvercast ?? direct.shadowRadius ?? 2.2,
         rig.weatherSoftness,
       );
-      spot.shadow.needsUpdate = true;
+      const shadowVisible = directVisible
+        && direct.castShadow !== false
+        && portalIsWithinBudget(
+          portal,
+          portalGroups.shadow,
+          portalBudgets?.shadows,
+          viewerPosition,
+        );
+      if (spot.castShadow !== shadowVisible) {
+        spot.castShadow = shadowVisible;
+        if (shadowVisible) spot.shadow.needsUpdate = true;
+      }
 
       if (!volumeMaterialRef.current) {
         spot.traverse(object => {
@@ -508,6 +563,12 @@ function PortalLight({ portal, worldYaw = 0 }) {
     }
 
     if (bounceRef.current) {
+      bounceRef.current.visible = portalIsWithinBudget(
+        portal,
+        portalGroups.bounce,
+        portalBudgets?.bounce,
+        viewerPosition,
+      );
       const bounceStrength = directStrength
         + diffuseStrength * (portal.bounce?.diffuseShare ?? 0);
       bounceRef.current.intensity = (portal.bounce?.intensity ?? 0) * bounceStrength;
@@ -543,7 +604,9 @@ function PortalLight({ portal, worldYaw = 0 }) {
           penumbra={direct.penumbra ?? 0.42}
           distance={direct.distance ?? 9}
           decay={direct.decay ?? 1.45}
-          castShadow={direct.castShadow !== false}
+          castShadow={direct.castShadow !== false
+            && (!Number.isFinite(portalBudgets?.shadows)
+              || portalGroups.shadow[0]?.id === portal.id)}
           shadow-mapSize-width={direct.shadowMapSize ?? 1024}
           shadow-mapSize-height={direct.shadowMapSize ?? 1024}
           shadow-bias={direct.shadowBias ?? -0.0001}
@@ -631,6 +694,10 @@ function PracticalLamp({ lamp, index }) {
       + Math.sin(clock.elapsedTime * (7.1 + index * 0.43) + index * 1.9) * 0.025
       + Math.sin(clock.elapsedTime * 16.3 + index * 2.7) * 0.01;
     light.intensity = base * flicker;
+    // Daytime practicals in Lawson are authored at effectively zero output.
+    // Excluding those lights entirely avoids paying for four point lights that
+    // cannot visibly affect the room, while retaining their full night setup.
+    light.visible = base > 0.02;
   });
   return (
     <pointLight
@@ -651,6 +718,15 @@ function PracticalLamp({ lamp, index }) {
 
 export function InteriorLightingRig({ definition, groupRef }) {
   const lighting = definition.lighting || {};
+  const portalGroups = useMemo(() => {
+    const portals = lighting.portals || [];
+    return {
+      all: portals,
+      direct: portals.filter(portal => Boolean(portal.direct)),
+      bounce: portals.filter(portal => Boolean(portal.bounce)),
+      shadow: portals.filter(portal => portal.direct && portal.direct.castShadow !== false),
+    };
+  }, [lighting.portals]);
   return (
     <>
       <InteriorFogIsolation density={lighting.fogDensity} />
@@ -661,7 +737,13 @@ export function InteriorLightingRig({ definition, groupRef }) {
         <InteriorCharacterBounce bounce={lighting.characterBounce} />
       )}
       {(lighting.portals || []).map(portal => (
-        <PortalLight key={portal.id} portal={portal} worldYaw={lighting.worldYaw || 0} />
+        <PortalLight
+          key={portal.id}
+          portal={portal}
+          portalGroups={portalGroups}
+          portalBudgets={lighting.portalBudgets}
+          worldYaw={lighting.worldYaw || 0}
+        />
       ))}
       {(lighting.lamps || []).map((lamp, index) => (
         <PracticalLamp key={lamp.id || index} lamp={lamp} index={index} />

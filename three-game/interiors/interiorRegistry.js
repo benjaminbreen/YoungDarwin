@@ -309,6 +309,11 @@ const INTERIORS = {
       exteriorFillDay: 0.32,
       exteriorFillNight: 0.015,
       replaceLegacyExteriorGround: true,
+      // Lawson has ten window/door portals. Keep the nearest local sources in
+      // the light loop while every authored pane beam remains visible. This is
+      // enough coverage for the short interior camera without making every
+      // surface evaluate the entire house's lights.
+      portalBudgets: { diffuse: 4, direct: 4, bounce: 3, shadows: 1 },
       flameDayEmission: 0,
       flameNightEmission: 4.15,
       characterBounce: {
@@ -376,7 +381,7 @@ const INTERIORS = {
             decay: 1.16,
             diffuseCut: 0.24,
             castShadow: true,
-            shadowMapSize: 2048,
+            shadowMapSize: 1024,
             shadowRadiusClear: 0.34,
             shadowRadiusOvercast: 1.9,
             shaft: {
@@ -469,7 +474,7 @@ const INTERIORS = {
             decay: 1.26,
             diffuseCut: 0.14,
             castShadow: true,
-            shadowMapSize: 2048,
+            shadowMapSize: 1024,
             shadowRadiusClear: 0.6,
             shadowRadiusOvercast: 2.3,
             shaft: {
@@ -502,7 +507,7 @@ const INTERIORS = {
             decay: 1.28,
             diffuseCut: 0.12,
             castShadow: true,
-            shadowMapSize: 2048,
+            shadowMapSize: 1024,
             shadowRadiusClear: 0.68,
             shadowRadiusOvercast: 2.5,
             shaft: {
@@ -599,7 +604,7 @@ const INTERIORS = {
         }
       ],
       lamps: [
-        { id: 'dining-hanging-lamp', position: [-2.35, 2.81, 2.05], color: '#ff9c4d', dayIntensity: 0.005, nightIntensity: 7.2, distance: 5.6, decay: 2.05, castShadow: true, shadowMapSize: 512 },
+        { id: 'dining-hanging-lamp', position: [-2.35, 2.81, 2.05], color: '#ff9c4d', dayIntensity: 0.005, nightIntensity: 7.2, distance: 5.6, decay: 2.05, castShadow: false, shadowMapSize: 512 },
         { id: 'calling-table-lamp', position: [-9.48, 1.09, 6.32], color: '#ffae61', dayIntensity: 0.005, nightIntensity: 4.4, distance: 3.8, decay: 2.05, castShadow: false },
         { id: 'office-table-lamp', position: [7.45, 1.08, 4.15], color: '#ffad61', dayIntensity: 0.004, nightIntensity: 5.2, distance: 4.5, decay: 2.05, castShadow: false },
         { id: 'bedroom-candle', position: [-8.27, 1.05, -7.86], color: '#ff9848', dayIntensity: 0.003, nightIntensity: 3.4, distance: 3.4, decay: 2.05, castShadow: false },
