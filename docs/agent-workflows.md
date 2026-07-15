@@ -22,6 +22,18 @@ read `docs/generated/repo-inventory.md`.
    `npm run three:screenshot:fast` when the terrain/material/camera result needs
    visual confirmation.
 
+## Tune Island Geography
+
+1. Open `/three?mapDev=1` in development, or press `6` during play.
+2. Drag marker dots and labels over the painted island. Edit N/E/S/W routes and
+   ocean/cliff boundaries in the selected-map panel; reciprocal exits update
+   together.
+3. Resolve bearing conflicts and give non-coastal maps four cardinal routes.
+4. Copy the full geography JSON and apply the reviewed values to
+   `game-core/floreanaGeography.js`.
+5. Run `node scripts/check-map-placements.mjs`, `npm run check`, and a page
+   screenshot with `--query=islandMap=1` when the player-facing map changed.
+
 ## Add Or Update A Runtime Asset
 
 1. Put source/intermediate files under `assets-src/<domain>/`.

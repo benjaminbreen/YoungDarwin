@@ -332,7 +332,7 @@ export function selectRockSampleTarget({
   let best = null;
 
   for (const rock of obstacles) {
-    if (rock.kind !== 'rock') continue;
+    if (rock.kind !== 'rock' && rock.kind !== 'boulder') continue;
     if (rock.sampleable === false) continue;
     const height = rock.colliderTop ?? rock.height ?? 0;
     if (height < minHeight) continue;

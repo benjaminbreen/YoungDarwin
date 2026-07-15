@@ -52,6 +52,8 @@ Important shared data:
 
 - `data/locations.js`: location metadata, route context, authored specimen
   placements, and older map/location data.
+- `game-core/floreanaGeography.js`: normalized island-chart marker and label
+  placements, coastal boundaries, and the reciprocal cardinal travel graph.
 - `data/specimens.js`: specimen definitions.
 - `data/tools.js` and `data/inventoryItems.js`: tool, inventory, and supply
   mechanics.

@@ -22,6 +22,28 @@ const rockFractureTint = new THREE.Color();
 const rockFractureBase = new THREE.Color('#565d61');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
+const ROCK_MATERIAL_PROFILES = {
+  darkBasaltGravel: {
+    textureKey: 'darkBasaltGravel',
+    normalScale: 0.42,
+    roughness: 0.9,
+  },
+  weatheredHighlandBasalt: {
+    textureKey: 'weatheredHighlandBasalt',
+    normalScale: 0.48,
+    roughness: 0.94,
+  },
+  oxidizedScoriaceousBasalt: {
+    textureKey: 'oxidizedScoriaceousBasalt',
+    normalScale: 0.58,
+    roughness: 0.96,
+  },
+};
+
+function rockMaterialKey(rock) {
+  return ROCK_MATERIAL_PROFILES[rock.materialKey] ? rock.materialKey : 'darkBasaltGravel';
+}
+
 function rockHeight(rock) {
   return rockVisualBounds(rock).height;
 }
@@ -67,22 +89,22 @@ function makeCraggyRockGeometry(seed) {
 function configureRockTexture(texture, repeat = 2.6) {
   if (!texture) return;
   texture.repeat.set(repeat, repeat);
-  texture.needsUpdate = true;
 }
 
-function createProceduralRockMaterial() {
-  const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
+function createProceduralRockMaterial(materialKey) {
+  const profile = ROCK_MATERIAL_PROFILES[materialKey] || ROCK_MATERIAL_PROFILES.darkBasaltGravel;
+  const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES[profile.textureKey]);
   configureRockTexture(basalt.albedo, 2.2);
-  configureRockTexture(basalt.normal, 3.1);
+  configureRockTexture(basalt.normal, 2.2);
   configureRockTexture(basalt.roughness, 2.2);
   const material = new THREE.MeshStandardMaterial({
     map: basalt.albedo,
     normalMap: basalt.normal,
-    normalScale: new THREE.Vector2(0.42, 0.42),
+    normalScale: new THREE.Vector2(profile.normalScale, profile.normalScale),
     roughnessMap: basalt.roughness,
     vertexColors: true,
     color: '#ffffff',
-    roughness: 0.9,
+    roughness: profile.roughness,
     metalness: 0,
     flatShading: true,
   });
@@ -166,7 +188,9 @@ function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
       userData={sourceUserData}
       onClick={event => {
         event.stopPropagation();
-        setInspectedObject(catalogToInspectable('basalt_block', event.point, { sourceId: item.id || 'basalt_block' }));
+        setInspectedObject(catalogToInspectable(item.inspectableType || 'basalt_block', event.point, {
+          sourceId: item.id || item.inspectableType || 'basalt_block',
+        }));
       }}
     />
   );
@@ -203,7 +227,9 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
       onClick={event => {
         event.stopPropagation();
         const item = items[event.instanceId] || null;
-        setInspectedObject(catalogToInspectable('basalt_block', event.point, { sourceId: item?.id || 'basalt_block' }));
+        setInspectedObject(catalogToInspectable(item?.inspectableType || 'basalt_block', event.point, {
+          sourceId: item?.id || item?.inspectableType || 'basalt_block',
+        }));
       }}
     />
   );
@@ -255,19 +281,21 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
     [rocks, brokenIds],
   );
   const buckets = useMemo(() => {
-    // Variant assignment must key off the original array index so a rock keeps
-    // the same silhouette when damage moves it out of the instanced buckets.
-    const byVariant = [0, 1, 2].map(b => rocks.filter((_, i) => (
-      i % 3 === b && !brokenIds.has(rocks[i].id) && !damagedById.has(rocks[i].id)
-    )));
-    return byVariant.flatMap((items, geometryIndex) => {
-      const casters = items.filter(rockCastsRealShadow);
-      const contactOnly = items.filter(rock => !rockCastsRealShadow(rock));
-      return [
-        casters.length ? { items: casters, geometryIndex, castShadow: true } : null,
-        contactOnly.length ? { items: contactOnly, geometryIndex, castShadow: false } : null,
-      ].filter(Boolean);
+    // Variant assignment keys off the original array index so damage never
+    // changes a rock's silhouette. Material and shadow role are also bucketed,
+    // preserving instancing across large weathered-basalt and scoria fields.
+    const grouped = new Map();
+    rocks.forEach((rock, index) => {
+      if (brokenIds.has(rock.id) || damagedById.has(rock.id)) return;
+      const geometryIndex = index % 3;
+      const materialKey = rockMaterialKey(rock);
+      const castShadow = rockCastsRealShadow(rock);
+      const key = `${geometryIndex}:${materialKey}:${castShadow ? 'shadow' : 'contact'}`;
+      const bucket = grouped.get(key);
+      if (bucket) bucket.items.push(rock);
+      else grouped.set(key, { items: [rock], geometryIndex, materialKey, castShadow });
     });
+    return Array.from(grouped.values());
   }, [rocks, brokenIds, damagedById]);
   const damagedRocks = useMemo(() => (
     damagedById.size
@@ -286,11 +314,20 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
     () => [makeCraggyRockGeometry(1.7), makeCraggyRockGeometry(4.2), makeCraggyRockGeometry(8.9)],
     [],
   );
-  const material = useMemo(() => createProceduralRockMaterial(), []);
+  const usedMaterialKeys = useMemo(() => Array.from(new Set(
+    rocks.map(rockMaterialKey),
+  )).sort(), [rocks]);
+  const materialKeySignature = usedMaterialKeys.join('|');
+  const materials = useMemo(() => Object.fromEntries(
+    usedMaterialKeys.map(materialKey => [materialKey, createProceduralRockMaterial(materialKey)]),
+  // The signature is the stable semantic dependency; the array is recreated
+  // only when the ecology source itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [materialKeySignature]);
   useLayoutEffect(() => () => {
     geometries.forEach(g => g.dispose());
-    disposeProceduralRockMaterial(material);
-  }, [geometries, material]);
+    Object.values(materials).forEach(disposeProceduralRockMaterial);
+  }, [geometries, materials]);
   return (
     <group>
       {buckets.map((bucket, index) => (
@@ -298,7 +335,7 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
           key={`${bucket.geometryIndex}:${bucket.castShadow ? 'shadow' : 'contact'}:${index}`}
           items={bucket.items}
           geometry={geometries[bucket.geometryIndex]}
-          material={material}
+          material={materials[bucket.materialKey]}
           castShadow={bucket.castShadow}
           sourceUserData={renderUserData}
         />
@@ -309,7 +346,7 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
           item={rock}
           bites={damage.bites}
           baseGeometry={geometries[variant]}
-          material={material}
+          material={materials[rockMaterialKey(rock)]}
           sourceUserData={renderUserData}
         />
       ))}

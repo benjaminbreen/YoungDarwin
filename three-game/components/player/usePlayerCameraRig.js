@@ -274,7 +274,14 @@ export function usePlayerCameraRig() {
         return;
       }
       if (examineSession) return;
-      zoomRef.current = THREE.MathUtils.clamp(zoomRef.current + normalizedDelta * 0.9, CAMERA.minZoom, CAMERA.maxZoom);
+      const maxZoom = useThreeGameStore.getState().viewMode === 'top'
+        ? CAMERA.topMaxZoom
+        : CAMERA.maxZoom;
+      zoomRef.current = THREE.MathUtils.clamp(
+        zoomRef.current + normalizedDelta * 0.9,
+        CAMERA.minZoom,
+        maxZoom,
+      );
     };
     // Right mouse is the aim button; the browser menu would swallow it.
     const onContextMenu = event => event.preventDefault();
@@ -724,7 +731,8 @@ export function usePlayerCameraRig() {
       camera.rotation.order = 'YXZ';
       camera.rotation.set(lookPitch, yawRef.current, 0);
     } else if (viewMode === 'top') {
-      const height = cameraProfile?.topHeight ?? THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, 85);
+      const height = cameraProfile?.topHeight
+        ?? THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, CAMERA.topMaxHeight);
       const top = scratch.top.copy(cameraAnchor).add(scratch.panVertical.set(0, height, 0));
       camera.position.lerp(top.add(cameraShake), 1 - Math.exp(-8 * delta));
       // Fixed straight-down orientation: lookAt near the vertical pole made

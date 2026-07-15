@@ -100,16 +100,20 @@ function surfaceImpact(profileKey, position, impactDir, biome = '') {
 function rockFaceImpact(obstacle, position, impactDir) {
   const authored = obstacle.hammerProfile || obstacle.sampleMaterial;
   const profile = getHammerMaterialProfile(typeof authored === 'string' ? authored : authored?.material);
+  const surfaceNormal = { x: -impactDir.x, y: 0, z: -impactDir.z };
+  const largeBoulder = obstacle.kind === 'boulder';
   return {
     kind: 'rock',
+    obstacle,
     dustColor: profile.dustColor,
     sparkColor: profile.fx?.sparkColor || '#ffd36a',
-    dustCount: Math.round((profile.fx?.dustCount ?? 14) * 0.75),
-    sparkCount: Math.min(3, profile.fx?.sparkCount ?? 2),
+    dustCount: Math.round((profile.fx?.dustCount ?? 14) * (largeBoulder ? 1.15 : 0.75)),
+    sparkCount: largeBoulder ? Math.max(10, (profile.fx?.sparkCount ?? 2) * 2) : Math.min(3, profile.fx?.sparkCount ?? 2),
     hitstop: 0.055,
     groundPlume: false,
     position,
-    impactDir,
+    impactDir: surfaceNormal,
+    surfaceNormal,
     biome: '',
   };
 }

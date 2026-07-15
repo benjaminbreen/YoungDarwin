@@ -19,6 +19,8 @@ function makeRock({
   sink = 0.12,
   color = '#4b473e',
   obstacle = true,
+  materialKey = 'weatheredHighlandBasalt',
+  inspectableType = 'basalt_block',
 }) {
   return {
     id,
@@ -32,20 +34,82 @@ function makeRock({
     sink,
     color,
     obstacle,
+    materialKey,
+    inspectableType,
     scale: Math.max(radiusX, radiusY, radiusZ),
   };
 }
 
 const HERO_ROCKS = [
-  makeRock({ id: 'cave-left-buttress', x: -5.7, z: -9.7, radiusX: 2.25, radiusY: 1.55, radiusZ: 1.8, yaw: 0.18, sink: 0.26, color: '#37352f' }),
-  makeRock({ id: 'cave-right-buttress', x: 8.8, z: -9.6, radiusX: 2.05, radiusY: 1.42, radiusZ: 1.65, yaw: -0.28, sink: 0.24, color: '#3f3b33' }),
-  makeRock({ id: 'cave-west-pile-a', x: -12.6, z: -8.4, radiusX: 1.45, radiusY: 0.82, radiusZ: 1.12, yaw: -0.6, sink: 0.18, color: '#514a3f' }),
-  makeRock({ id: 'cave-west-pile-b', x: -16.5, z: -5.5, radiusX: 1.05, radiusY: 0.54, radiusZ: 0.88, yaw: 0.8, sink: 0.13, color: '#5a5244' }),
-  makeRock({ id: 'cave-east-pile-a', x: 14.2, z: -7.5, radiusX: 1.26, radiusY: 0.66, radiusZ: 1.02, yaw: 0.35, sink: 0.15, color: '#4d473c' }),
-  makeRock({ id: 'cave-east-pile-b', x: 18.4, z: -3.8, radiusX: 0.92, radiusY: 0.46, radiusZ: 0.72, yaw: -0.25, sink: 0.11, color: '#675d4a' }),
-  makeRock({ id: 'west-path-marker', x: -25.8, z: 5.2, radiusX: 0.82, radiusY: 0.42, radiusZ: 0.7, yaw: 0.4, sink: 0.09, color: '#6a5f4d' }),
-  makeRock({ id: 'east-path-marker', x: 29.2, z: -4.6, radiusX: 0.76, radiusY: 0.36, radiusZ: 0.62, yaw: -0.8, sink: 0.08, color: '#685d4b' }),
+  makeRock({ id: 'cave-west-talus-a', x: -10.7, z: -7.8, radiusX: 1.62, radiusY: 0.78, radiusZ: 1.18, yaw: -0.6, sink: 0.2, color: '#d1c9bc' }),
+  makeRock({ id: 'cave-west-scoria-a', x: -13.8, z: -6.6, radiusX: 1.18, radiusY: 0.58, radiusZ: 0.92, yaw: 0.8, sink: 0.15, color: '#d5ad99', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria' }),
+  makeRock({ id: 'cave-east-talus-a', x: 13.6, z: -7.2, radiusX: 1.46, radiusY: 0.72, radiusZ: 1.08, yaw: 0.35, sink: 0.18, color: '#cbc5ba' }),
+  makeRock({ id: 'cave-east-scoria-a', x: 17.2, z: -5.1, radiusX: 1.05, radiusY: 0.5, radiusZ: 0.8, yaw: -0.25, sink: 0.13, color: '#d2a58f', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria' }),
+  makeRock({ id: 'north-shelf-block', x: -18.6, z: -17.2, radiusX: 1.82, radiusY: 0.88, radiusZ: 1.34, yaw: 0.58, sink: 0.22, color: '#c6c3b9' }),
+  makeRock({ id: 'west-path-marker', x: -25.8, z: 5.2, radiusX: 0.82, radiusY: 0.42, radiusZ: 0.7, yaw: 0.4, sink: 0.09, color: '#c4beb2' }),
+  makeRock({ id: 'east-path-marker', x: 29.2, z: -4.6, radiusX: 0.76, radiusY: 0.36, radiusZ: 0.62, yaw: -0.8, sink: 0.08, color: '#c9c1b4' }),
 ];
+
+const CAVE_FORMATIONS = [
+  {
+    id: 'gabriels-cave-shell', label: 'Weathered basalt around Gabriel’s cave',
+    x: 1.8, z: -10.8, radii: [16.5, 6.35, 2.65], opening: [8.25, 3.75], sink: 0.72,
+    form: 'cave-shell', detail: 4,
+    materialKey: 'weatheredHighlandBasalt', obstacle: true,
+  },
+  {
+    id: 'cave-upper-west-lobe', label: 'Ropey basalt wall lobe',
+    x: -5.5, z: -16.1, radii: [4.6, 1.55, 3.0], yaw: 0.38, yOffset: 0.35, sink: 0.9,
+    form: 'shelf', irregularity: 0.12,
+    materialKey: 'weatheredHighlandBasalt', obstacle: false,
+  },
+  {
+    id: 'cave-upper-east-lobe', label: 'Ropey basalt wall lobe',
+    x: 9.0, z: -16.0, radii: [4.45, 1.45, 3.05], yaw: -0.31, yOffset: 0.3, sink: 0.86,
+    form: 'shelf', irregularity: 0.13,
+    materialKey: 'weatheredHighlandBasalt', obstacle: false,
+  },
+  {
+    id: 'cave-west-outcrop', label: 'Fractured highland basalt outcrop',
+    x: -15.2, z: -13.2, radii: [4.3, 1.65, 3.2], yaw: -0.42, sink: 1.05,
+    form: 'shelf', irregularity: 0.16,
+    materialKey: 'weatheredHighlandBasalt', obstacle: true, collisionScale: 0.76,
+  },
+  {
+    id: 'cave-east-outcrop', label: 'Fractured highland basalt outcrop',
+    x: 16.8, z: -13.2, radii: [4.15, 1.55, 3.1], yaw: 0.36, sink: 1.0,
+    form: 'shelf', irregularity: 0.17,
+    materialKey: 'weatheredHighlandBasalt', obstacle: true, collisionScale: 0.75,
+  },
+  {
+    id: 'cave-west-scoria-pocket', label: 'Oxidized scoriaceous pocket',
+    x: -11.2, z: -9.4, radii: [1.25, 0.62, 0.92], yaw: 0.5, sink: 0.2,
+    form: 'mass', irregularity: 0.22, detail: 2,
+    materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: false,
+  },
+  {
+    id: 'cave-east-scoria-pocket', label: 'Oxidized scoriaceous pocket',
+    x: 13.2, z: -9.5, radii: [1.12, 0.54, 0.84], yaw: -0.46, sink: 0.18,
+    form: 'mass', irregularity: 0.24, detail: 2,
+    materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: false,
+  },
+  {
+    id: 'northwest-lava-shelf', label: 'Weathered ropey lava shelf',
+    x: -27.0, z: -21.0, radii: [5.4, 1.45, 3.8], yaw: 0.24, sink: 0.95,
+    form: 'shelf', irregularity: 0.13,
+    materialKey: 'weatheredHighlandBasalt', obstacle: true, collisionScale: 0.74,
+  },
+  {
+    id: 'northeast-lava-shelf', label: 'Weathered ropey lava shelf',
+    x: 28.2, z: -19.0, radii: [5.15, 1.4, 3.65], yaw: -0.38, sink: 0.92,
+    form: 'shelf', irregularity: 0.14,
+    materialKey: 'weatheredHighlandBasalt', obstacle: true, collisionScale: 0.73,
+  },
+];
+
+export function getRockyClearingFormations() {
+  return CAVE_FORMATIONS;
+}
 
 let rockyClearingRocks = null;
 
@@ -53,7 +117,7 @@ export function getRockyClearingRocks() {
   if (rockyClearingRocks) return rockyClearingRocks;
   const rocks = [...HERO_ROCKS];
   let attempts = 0;
-  while (rocks.length < 46 && attempts < 2400) {
+  while (rocks.length < 78 && attempts < 4200) {
     attempts += 1;
     const i = attempts + 509;
     const x = -42 + seededRandom(i, 3) * 84;
@@ -65,7 +129,12 @@ export function getRockyClearingRocks() {
     if (!nearRubble && !nearPathShoulder && seededRandom(i, 13) < 0.72) continue;
     if (path.distance < path.width * 1.08) continue;
     const tone = seededRandom(i, 17);
-    const scale = (nearRubble ? 0.34 : 0.2) + tone * (nearRubble ? 0.72 : 0.38);
+    const scale = (nearRubble ? 0.3 : 0.18) + tone * (nearRubble ? 0.82 : 0.42);
+    const scoriaPocket = Math.max(
+      Math.exp(-Math.pow((x + 12) / 10, 2) - Math.pow((z + 8) / 6.5, 2)),
+      Math.exp(-Math.pow((x - 14) / 10.5, 2) - Math.pow((z + 7) / 6.8, 2)),
+    );
+    const scoria = nearRubble && seededRandom(i, 31) < 0.12 + scoriaPocket * 0.34;
     rocks.push(makeRock({
       id: `clearing-stone-${rocks.length}`,
       x,
@@ -75,8 +144,12 @@ export function getRockyClearingRocks() {
       radiusZ: scale * (0.76 + seededRandom(i, 25) * 0.54),
       yaw: seededRandom(i, 27) * Math.PI * 2,
       sink: scale * 0.16,
-      color: tone > 0.58 ? '#675d4b' : tone > 0.32 ? '#504a40' : '#3b3933',
-      obstacle: nearRubble && scale > 0.64,
+      color: scoria
+        ? (tone > 0.52 ? '#d8b09b' : '#cda18b')
+        : (tone > 0.58 ? '#d1cdc2' : tone > 0.32 ? '#c2c0b8' : '#b3b4ae'),
+      materialKey: scoria ? 'oxidizedScoriaceousBasalt' : 'weatheredHighlandBasalt',
+      inspectableType: scoria ? 'scoria' : 'basalt_block',
+      obstacle: nearRubble && !scoria && scale > 0.68,
     }));
   }
   rockyClearingRocks = rocks;
@@ -96,20 +169,72 @@ export function getRockyClearingRockObstacles() {
   });
 }
 
-function boxObstacle({ id, x, z, width, depth, height, yaw = 0 }) {
-  const shape = { type: 'box', size: [width, height, depth], offset: [0, height * 0.5, 0] };
+function caveShellObstacle(formation) {
+  const [outerHalfWidth, outerHeight, depth] = formation.radii;
+  const [openingWidth = 8.25, openingHeight = 3.75] = formation.opening || [];
+  const openingHalfWidth = openingWidth * 0.5;
+  const sideWidth = Math.min(3.1, Math.max(0.8, outerHalfWidth - openingHalfWidth));
+  const sideCenter = openingHalfWidth + sideWidth * 0.5;
+  const colliderHeight = Math.max(openingHeight, outerHeight * 0.76);
+  const colliderDepth = depth * 1.45;
+  const shapes = [-1, 1].map(direction => ({
+    type: 'box',
+    size: [sideWidth, colliderHeight, colliderDepth],
+    offset: [direction * sideCenter, colliderHeight * 0.5 - (formation.sink || 0), -depth * 0.44],
+  }));
   return {
-    id,
-    kind: 'structure',
+    id: `rocky-clearing-formation-${formation.id}`,
+    kind: 'ledge',
     path: null,
-    x,
-    z,
-    radius: Math.hypot(width, depth) * 0.5,
-    height,
-    colliderTop: height,
-    colliderBottom: 0,
+    x: formation.x,
+    z: formation.z,
+    radius: outerHalfWidth + 0.5,
+    height: colliderHeight,
+    colliderTop: colliderHeight - (formation.sink || 0),
+    colliderBottom: -(formation.sink || 0),
     scale: 1,
-    yaw,
+    yaw: formation.yaw || 0,
+    jumpable: false,
+    climbable: false,
+    edgeRisk: false,
+    pushable: false,
+    pushMass: 1,
+    pushFriction: 0.96,
+    traversal: null,
+    definition: { collider: { type: 'compound', shapes } },
+    zoneId: ROCKY_CLEARING,
+    shapes,
+  };
+}
+
+function formationObstacle(formation) {
+  if (formation.form === 'cave-shell') return caveShellObstacle(formation);
+  const [radiusX, radiusY, radiusZ] = formation.radii;
+  const collisionScale = formation.collisionScale || 0.76;
+  const segments = 10;
+  const points = Array.from({ length: segments }, (_, index) => {
+    const angle = (index / segments) * Math.PI * 2;
+    const variation = 0.92 + seededRandom(index + formation.id.length * 31, 47) * 0.08;
+    return [
+      Math.cos(angle) * radiusX * collisionScale * variation,
+      Math.sin(angle) * radiusZ * collisionScale * variation,
+    ];
+  });
+  const yMin = (formation.yOffset || 0) - (formation.sink || 0);
+  const yMax = yMin + radiusY * 1.82;
+  const shape = { type: 'convex', points, height: yMax - yMin, yMin, yMax };
+  return {
+    id: `rocky-clearing-formation-${formation.id}`,
+    kind: 'ledge',
+    path: null,
+    x: formation.x,
+    z: formation.z,
+    radius: Math.max(radiusX, radiusZ) * collisionScale,
+    height: yMax - yMin,
+    colliderTop: yMax,
+    colliderBottom: yMin,
+    scale: 1,
+    yaw: formation.yaw || 0,
     jumpable: false,
     climbable: false,
     edgeRisk: false,
@@ -124,36 +249,9 @@ function boxObstacle({ id, x, z, width, depth, height, yaw = 0 }) {
 }
 
 export function getRockyClearingCaveObstacles() {
-  const cave = ROCKY_CLEARING_CAVE;
-  return [
-    boxObstacle({
-      id: 'rocky-clearing-cave-left-wall',
-      x: cave.x - 5.8,
-      z: cave.z - 0.8,
-      width: 3.1,
-      depth: 7.2,
-      height: 3.2,
-      yaw: 0.05,
-    }),
-    boxObstacle({
-      id: 'rocky-clearing-cave-right-wall',
-      x: cave.x + 5.8,
-      z: cave.z - 0.7,
-      width: 3.0,
-      depth: 7.0,
-      height: 3.05,
-      yaw: -0.08,
-    }),
-    boxObstacle({
-      id: 'rocky-clearing-cave-back-shadow',
-      x: cave.x,
-      z: cave.z - 3.4,
-      width: 10.8,
-      depth: 1.8,
-      height: 3.4,
-      yaw: 0,
-    }),
-  ];
+  return getRockyClearingFormations()
+    .filter(formation => formation.obstacle === true)
+    .map(formationObstacle);
 }
 
 export function getRockyClearingCaveFeature() {

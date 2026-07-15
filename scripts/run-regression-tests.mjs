@@ -157,6 +157,31 @@ const {
   regionMaps,
 } = loadModule('game-core/regionMaps.js');
 const {
+  FLOREANA_BOUNDARIES,
+  FLOREANA_CARDINAL_DIRECTIONS,
+  FLOREANA_MAP_PLACEMENTS,
+  FLOREANA_OPPOSITE_DIRECTIONS,
+  FLOREANA_ROUTE_EDGES,
+  mapDirectionBetween,
+} = loadModule('game-core/floreanaGeography.js');
+const {
+  POST_OFFICE_NORTH_SHORE_SEAM,
+  POST_OFFICE_SCRUB_RISE_SEAM,
+} = loadModule('three-game/world/routeSeams.js');
+const {
+  coveWaterMask,
+  POST_OFFICE_BAY_NORTH_SHORE_TRAIL,
+  POST_OFFICE_BAY_SCRUB_TRAIL,
+  postOfficeTerrainBiomeAt,
+  postOfficeTerrainHeight,
+} = loadModule('three-game/world/regions/postOfficeBay/terrain.js');
+const {
+  N_SHORE_PATH_POINTS,
+} = loadModule('three-game/world/regions/northShore/terrain.js');
+const {
+  POST_SCRUB_RISE_PATH_POINTS,
+} = loadModule('three-game/world/regions/postScrubRise/path.js');
+const {
   getInteriorDefinition,
   getInteriorPropSpawns,
 } = loadModule('three-game/interiors/interiorRegistry.js');
@@ -172,6 +197,7 @@ const {
 } = loadModule('three-game/world/localTransitions.js');
 const {
   getIslandMapLocation,
+  islandMapLocations,
   ISLAND_MAP_IMAGE,
 } = loadModule('three-game/ui/expedition/map/islandLocations.js');
 const {
@@ -180,6 +206,9 @@ const {
 const {
   getZone: getRuntimeZone,
 } = loadModule('three-game/world/floreanaZones.js');
+const {
+  getBeagleSightline,
+} = loadModule('three-game/world/beagleSightlines.js');
 const {
   WEATHER_STATES,
   normalizeWeatherState,
@@ -530,6 +559,62 @@ test('heavy authored regions stay within the seamless-travel terrain budget', ()
   assert.match(ISLAND_MAP_IMAGE, /\.webp$/);
 });
 
+test('Post Office Bay routes share normalized seam coordinates with both land neighbors', () => {
+  const seams = [
+    {
+      seam: POST_OFFICE_SCRUB_RISE_SEAM,
+      sourcePath: POST_OFFICE_BAY_SCRUB_TRAIL,
+      targetPaths: POST_SCRUB_RISE_PATH_POINTS,
+    },
+    {
+      seam: POST_OFFICE_NORTH_SHORE_SEAM,
+      sourcePath: POST_OFFICE_BAY_NORTH_SHORE_TRAIL,
+      targetPaths: N_SHORE_PATH_POINTS,
+    },
+  ];
+  const hasPoint = (paths, point) => paths.flat(1).some(candidate => (
+    Math.hypot(candidate[0] - point[0], candidate[1] - point[1]) < 0.001
+  ));
+
+  for (const { seam, sourcePath, targetPaths } of seams) {
+    const source = regionMaps[seam.source.regionId];
+    const target = regionMaps[seam.target.regionId];
+    const sourceAlong = seam.source.edge === 'north' || seam.source.edge === 'south'
+      ? seam.source.point[0] / source.terrain.width
+      : seam.source.point[1] / source.terrain.depth;
+    const targetAlong = seam.target.edge === 'north' || seam.target.edge === 'south'
+      ? seam.target.point[0] / target.terrain.width
+      : seam.target.point[1] / target.terrain.depth;
+    assert.ok(Math.abs(sourceAlong - targetAlong) < 0.000001);
+    assert.equal(hasPoint([sourcePath], seam.source.point), true);
+    assert.equal(hasPoint(targetPaths, seam.target.point), true);
+  }
+
+  assert.ok(POST_OFFICE_BAY_SCRUB_TRAIL.at(-1)[1] > regionMaps.POST_OFFICE_BAY.terrain.depth * 0.5 + 20);
+  assert.ok(POST_OFFICE_BAY_NORTH_SHORE_TRAIL.at(-1)[0] > regionMaps.POST_OFFICE_BAY.terrain.width * 0.5 + 20);
+});
+
+test('Post Office Bay keeps its western inland terrain free of stray water pockets', () => {
+  const formerTidePool = [
+    [-43, -17],
+    [-44, -16],
+    [-45, -17],
+  ];
+  for (const [x, z] of formerTidePool) {
+    assert.equal(coveWaterMask(x, z), 0);
+    const height = postOfficeTerrainHeight(x, z);
+    assert.notEqual(postOfficeTerrainBiomeAt(x, z, height), 'water');
+  }
+
+  for (let x = -59; x <= -52; x += 1) {
+    for (let z = 20; z <= 59; z += 1) {
+      const height = postOfficeTerrainHeight(x, z);
+      assert.ok(height >= -0.88, `unexpected western water floor at (${x}, ${z}): ${height}`);
+      assert.notEqual(postOfficeTerrainBiomeAt(x, z, height), 'water');
+    }
+  }
+});
+
 test('runtime zone and specimen lookups preserve stable authored identities', () => {
   const firstZone = getRuntimeZone('POST_SCRUB_RISE');
   const secondZone = getRuntimeZone('POST_SCRUB_RISE');
@@ -539,6 +624,97 @@ test('runtime zone and specimen lookups preserve stable authored identities', ()
   assert.strictEqual(firstZone, secondZone);
   assert.strictEqual(firstSpecimens, secondSpecimens);
   assert.strictEqual(firstSpecimens[0], secondSpecimens[0]);
+});
+
+test('Floreana cardinal routes remain reciprocal and Northern Shore matches the painted geography', () => {
+  const northShoreOpen = regionMaps.N_SHORE.edgeHints
+    .filter(hint => hint.kind === 'open')
+    .map(hint => [hint.direction, hint.toRegionId]);
+  assert.deepEqual(northShoreOpen, [
+    ['W', 'POST_OFFICE_BAY'],
+    ['E', 'CORMORANT_BAY'],
+  ]);
+  assert.equal(
+    regionMaps.N_SHORE.edgeHints.some(hint => hint.kind === 'blocked' && hint.edge === 'north' && hint.boundaryKind === 'ocean'),
+    true,
+  );
+  assert.equal(
+    regionMaps.N_SHORE.edgeHints.some(hint => hint.kind === 'blocked' && hint.edge === 'south' && hint.boundaryKind === 'cliff'),
+    true,
+  );
+
+  const occupiedSlots = new Set();
+  const neighbors = new Map();
+  const placementsById = new Map(FLOREANA_MAP_PLACEMENTS.map(placement => [
+    placement.id,
+    { x: placement.at[0], y: placement.at[1] },
+  ]));
+  for (const [fromId, direction, toId] of FLOREANA_ROUTE_EDGES) {
+    const forwardSlot = `${fromId}:${direction}`;
+    const reverseSlot = `${toId}:${FLOREANA_OPPOSITE_DIRECTIONS[direction]}`;
+    assert.equal(occupiedSlots.has(forwardSlot), false, `duplicate cardinal route slot ${forwardSlot}`);
+    assert.equal(occupiedSlots.has(reverseSlot), false, `duplicate cardinal route slot ${reverseSlot}`);
+    occupiedSlots.add(forwardSlot);
+    occupiedSlots.add(reverseSlot);
+    neighbors.set(fromId, [...(neighbors.get(fromId) || []), toId]);
+    neighbors.set(toId, [...(neighbors.get(toId) || []), fromId]);
+    assert.equal(
+      mapDirectionBetween(placementsById.get(fromId), placementsById.get(toId)),
+      direction,
+      `${fromId} ${direction} -> ${toId} conflicts with its island-chart bearing`,
+    );
+    const reverse = regionMaps[toId]?.edgeHints.find(hint => (
+      hint.kind === 'open'
+      && hint.toRegionId === fromId
+      && hint.direction === FLOREANA_OPPOSITE_DIRECTIONS[direction]
+    ));
+    assert.ok(reverse, `missing reciprocal route for ${fromId} ${direction} -> ${toId}`);
+  }
+
+  const directionEdges = { N: 'north', E: 'east', S: 'south', W: 'west' };
+  const editorLocations = FLOREANA_MAP_PLACEMENTS.filter(placement => (
+    !placement.test
+    && placement.kind !== 'shipInterior'
+    && placement.kind !== 'houseInterior'
+  ));
+  for (const placement of editorLocations) {
+    for (const direction of FLOREANA_CARDINAL_DIRECTIONS) {
+      const routeSlot = `${placement.id}:${direction}`;
+      const boundary = FLOREANA_BOUNDARIES[placement.id]?.[directionEdges[direction]];
+      assert.equal(
+        occupiedSlots.has(routeSlot) || Boolean(boundary),
+        true,
+        `${routeSlot} needs a route or an authored geographic boundary`,
+      );
+      assert.equal(
+        occupiedSlots.has(routeSlot) && Boolean(boundary),
+        false,
+        `${routeSlot} cannot be both traversable and blocked by ${boundary}`,
+      );
+    }
+  }
+
+  const reachable = new Set(['POST_OFFICE_BAY']);
+  const frontier = ['POST_OFFICE_BAY'];
+  while (frontier.length) {
+    const fromId = frontier.shift();
+    for (const toId of neighbors.get(fromId) || []) {
+      if (reachable.has(toId)) continue;
+      reachable.add(toId);
+      frontier.push(toId);
+    }
+  }
+  assert.deepEqual(
+    editorLocations.filter(placement => !reachable.has(placement.id)).map(placement => placement.id),
+    [],
+    'every island-chart map should belong to the connected travel graph',
+  );
+});
+
+test('island chart reserves persistent labels for major landmarks', () => {
+  assert.equal(getIslandMapLocation('POST_OFFICE_BAY').labelAlways, true);
+  assert.equal(getIslandMapLocation('N_SHORE').labelAlways, false);
+  assert.ok(islandMapLocations.filter(location => location.labelAlways).length < islandMapLocations.length / 2);
 });
 
 test('large authored rocks creep only as constrained downhill-push obstacles', () => {
@@ -1025,7 +1201,21 @@ test('Beagle deck exposes a generous cabin entrance and a nearby island-chart de
   const cabinMarker = getIslandMapLocation('BEAGLE_CABIN');
   assert.equal(cabinMarker.kind, 'shipInterior');
   assert.equal(cabinMarker.status, 'available');
-  assert.ok(Math.hypot(cabinMarker.at.x - shipMarker.at.x, cabinMarker.at.y - shipMarker.at.y) < 0.04);
+  assert.ok(Math.hypot(cabinMarker.at.x - shipMarker.at.x, cabinMarker.at.y - shipMarker.at.y) < 0.05);
+});
+
+test('offshore Beagle sightlines preserve a consistent coastal landmark bearing', () => {
+  const postOffice = getBeagleSightline('POST_OFFICE_BAY');
+  const northShore = getBeagleSightline('N_SHORE');
+  const northwestReef = getBeagleSightline('NW_REEF');
+
+  assert.ok(postOffice.position[0] > 0 && postOffice.position[2] < 0);
+  assert.equal(postOffice.interactive, true);
+  assert.ok(northShore.position[0] < 0 && northShore.position[2] < 0);
+  assert.equal(northShore.interactive, false);
+  assert.ok(northwestReef.position[0] > 0 && northwestReef.position[2] < 0);
+  assert.ok(Math.hypot(northwestReef.position[0], northwestReef.position[2]) > Math.hypot(postOffice.position[0], postOffice.position[2]));
+  assert.equal(northwestReef.interactive, false);
 });
 
 test('Lawson house blueprint preserves a spacious four-room plan at human furniture scale', () => {
@@ -1037,7 +1227,7 @@ test('Lawson house blueprint preserves a spacious four-room plan at human furnit
   assert.ok(blueprint.dimensions.width >= 16);
   assert.ok(blueprint.dimensions.depth >= 14);
   assert.equal(blueprint.rooms.length, 4);
-  assert.equal(blueprint.rooms.filter(room => room.available).length, 2);
+  assert.equal(blueprint.rooms.filter(room => room.available).length, 3);
   assert.equal(blueprint.fixedColliders.filter(item => item.id.startsWith('office-divider')).length, 2);
   assert.equal(lawsonHouseRegion.terrain.isWalkable(spawnX, spawnZ), true);
   assert.ok(blueprint.fixedColliders.length >= 14);

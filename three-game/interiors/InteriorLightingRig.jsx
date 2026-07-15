@@ -547,6 +547,7 @@ function PortalLight({ portal, worldYaw = 0 }) {
           shadow-mapSize-width={direct.shadowMapSize ?? 1024}
           shadow-mapSize-height={direct.shadowMapSize ?? 1024}
           shadow-bias={direct.shadowBias ?? -0.0001}
+          shadow-normalBias={direct.shadowNormalBias ?? 0.025}
           volumetric={Boolean(shaft && !panes)}
           opacity={shaft?.opacity ?? 0}
           radiusTop={shaft?.radiusTop ?? 0.08}
@@ -643,6 +644,7 @@ function PracticalLamp({ lamp, index }) {
       shadow-mapSize-width={lamp.shadowMapSize ?? 512}
       shadow-mapSize-height={lamp.shadowMapSize ?? 512}
       shadow-bias={lamp.shadowBias ?? -0.00012}
+      shadow-normalBias={lamp.shadowNormalBias ?? 0.015}
     />
   );
 }

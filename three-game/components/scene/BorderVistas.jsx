@@ -13,7 +13,6 @@ import {
   edgeOrigin,
   makeApronGeometry,
   makeNeighborPreviewGeometry,
-  makeVistaWaterGeometry,
   normalize2,
   profileHeight,
   worldPoint,
@@ -342,22 +341,9 @@ function BorderVista({ regionId, config, vista }) {
     makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista, transition)
       || makeApronGeometry(regionId, config, vista)
   ), [regionId, config, targetConfig, vista, transition]);
-  const waterGeometry = useMemo(() => (
-    makeVistaWaterGeometry(regionId, config, vista.toRegionId, targetConfig, vista, transition)
-  ), [regionId, config, targetConfig, vista, transition]);
   const material = useMemo(() => createBorderVistaMaterial(cheapMaterials), [cheapMaterials]);
-  // Unlit + vertex alpha: the sheet is schematic distant water, so it needs no
-  // lighting response, and depthWrite off keeps it from occluding spray/foam.
-  const waterMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    vertexColors: true,
-    transparent: true,
-    depthWrite: false,
-    fog: true,
-  }), []);
   useEffect(() => () => geometry?.dispose(), [geometry]);
-  useEffect(() => () => waterGeometry?.dispose(), [waterGeometry]);
   useEffect(() => () => material.dispose(), [material]);
-  useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
   if (!geometry) return null;
   const isNeighborPreview = geometry.userData.mode === 'neighbor-preview';
   return (
@@ -368,20 +354,6 @@ function BorderVista({ regionId, config, vista }) {
       renderPath: null,
     }}>
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
-      {waterGeometry && (
-        <mesh
-          geometry={waterGeometry}
-          material={waterMaterial}
-          receiveShadow={false}
-          castShadow={false}
-          userData={{
-            renderSource: `border-vista:${vista.id}:water-sheet`,
-            renderLabel: `${vista.toRegionId || vista.id} vista water sheet`,
-            renderKind: 'border-vista-water',
-            renderPath: null,
-          }}
-        />
-      )}
       {isNeighborPreview && (
         <>
           <TransitionSeamMarkers

@@ -49,3 +49,5 @@ export function isSwingClaimed(swingId) {
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }
+// 'rock-shotgun-fracture' { obstacle, zoneId, position, normal, dir, intensity }
+// 'rock-hammer-fracture' { obstacle, zoneId, position, normal, intensity }

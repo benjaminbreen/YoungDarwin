@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { pathFrameAt } from '../../paths/standardPath';
 import { terrainSurfaceNoise } from '../../terrainShared';
+import { POST_OFFICE_SCRUB_RISE_SEAM } from '../../routeSeams';
 
 export const POST_SCRUB_RISE = 'POST_SCRUB_RISE';
 
@@ -8,7 +9,8 @@ export const POST_SCRUB_RISE = 'POST_SCRUB_RISE';
 // keeping the Post Office Bay approach as the visual spine of the map.
 export const POST_SCRUB_RISE_PATH_POINTS = [
   [
-    [-7, -54, 1.75],
+    [-6.85, -54, 1.75],
+    [...POST_OFFICE_SCRUB_RISE_SEAM.target.point, 1.74],
     [-10, -43, 1.7],
     [-6, -31, 1.65],
     [1, -19, 1.7],

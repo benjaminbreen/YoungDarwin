@@ -10,6 +10,7 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { SHOTGUN } from '../shooting/shotgunConfig';
 import { shotgunAimState } from '../shooting/aimState';
 import { getZone } from '../world/floreanaZones';
+import { getBeagleSightline } from '../world/beagleSightlines';
 import { ExamineView } from './ExamineView';
 import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
@@ -958,6 +959,34 @@ function MinimapPlayerArrow({ zone, surveyStyle, playerPose }) {
   );
 }
 
+function BeagleMinimapMarker({ zone, surveyStyle }) {
+  const sightline = getBeagleSightline(zone.id);
+  if (!sightline) return null;
+  const [x, , z] = sightline.minimapPosition || sightline.position;
+  const point = worldToMapPercent({ x, z }, zone, 7);
+  return (
+    <span
+      role="img"
+      aria-label={sightline.label}
+      title={sightline.label}
+      className={`pointer-events-none absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-lg ${
+        surveyStyle
+          ? 'border-[#6f4f24]/80 bg-[#d7b86d]/90 text-[#30200f] shadow-[0_1px_6px_rgba(63,42,18,0.42),inset_0_1px_0_rgba(255,240,178,0.58)]'
+          : 'border-expedition-goldbright/90 bg-expedition-ink/82 text-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.42)]'
+      }`}
+      style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
+    >
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 3.2 V15.2" />
+        <path d="M12 5.2 L6.6 13.2 H12" />
+        <path d="M13 7.2 L17.7 13.2 H13" />
+        <path d="M3.8 15.2 H20.2 L17.7 19.3 H7.2 Z" />
+        <path d="M5.8 17.2 H18.5" />
+      </svg>
+    </span>
+  );
+}
+
 function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = false }) {
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const [activeMarkerId, setActiveMarkerId] = useState(null);
@@ -991,6 +1020,7 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
           </button>
         );
       })}
+      <BeagleMinimapMarker zone={zone} surveyStyle={surveyStyle} />
       <MinimapTrail zone={zone} playerPose={playerPose} />
       {specimens.map((specimen, index) => (
         <SpecimenMarker
@@ -3449,7 +3479,11 @@ function CameraCycleButton({ className }) {
 
 export function ThreeHUD() {
   const [panel, setPanel] = useState(null);
-  const [mapOpen, setMapOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(() => (
+    process.env.NODE_ENV !== 'production'
+    && typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).has('islandMap')
+  ));
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [inventoryInitialTab, setInventoryInitialTab] = useState('tools');
   const [mobileNarrativeOpen, setMobileNarrativeOpen] = useState(false);

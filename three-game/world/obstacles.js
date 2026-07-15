@@ -4,6 +4,10 @@ import { currentZoneId } from '../../game-core/zones';
 import { terrainHeight } from './terrain';
 import { REGION_OBSTACLE_SOURCES } from './obstacleRegistry';
 import { canPushObject, normalizeMobility } from '../physics/objectMobility';
+import {
+  facetedBoulderSupportY,
+  usesFacetedBoulderSurface,
+} from './facetedBoulders';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
 const WALK_OVER_CROWN = 0.42;
@@ -501,7 +505,9 @@ function convexClimbLandingPoint(obstacle, shape, position, playerRadius) {
 
   const worldOffset = new THREE.Vector3(landingLocal.x, 0, landingLocal.y)
     .applyAxisAngle(new THREE.Vector3(0, 1, 0), obstacle.yaw);
-  const top = center.y + (shape.yMax ?? shape.height) * scale;
+  const top = usesFacetedBoulderSurface(obstacle)
+    ? facetedBoulderSupportY(obstacle, shape, landingLocal, obstacleBaseY(obstacle))
+    : center.y + (shape.yMax ?? shape.height) * scale;
   return new THREE.Vector3(center.x + worldOffset.x, top + 0.045, center.z + worldOffset.z);
 }
 
@@ -517,6 +523,9 @@ function shapeTopAt(obstacle, shape, x, z, playerRadius = 0, options = {}) {
   if (shape.type === 'convex') {
     const { point } = convexLocalPoint(obstacle, shape, x, z);
     if (!pointInsideStandableConvexTop(point, shape, obstacle.scale, playerRadius, options)) return null;
+    if (usesFacetedBoulderSurface(obstacle)) {
+      return facetedBoulderSupportY(obstacle, shape, point, obstacleBaseY(obstacle));
+    }
     return center.y + (shape.yMax ?? shape.height) * obstacle.scale;
   }
   if (shape.type === 'box') {
@@ -535,6 +544,14 @@ function shapeTopAt(obstacle, shape, x, z, playerRadius = 0, options = {}) {
   const strictInset = options.strictSupport ? Math.max(0.08, playerRadius * 0.5) : -playerRadius * 0.3;
   if (shape.type === 'ball') {
     if (distance > Math.max(0.05, radius - strictInset)) return null;
+    if (usesFacetedBoulderSurface(obstacle)) {
+      return facetedBoulderSupportY(
+        obstacle,
+        shape,
+        new THREE.Vector2(x - center.x, z - center.z),
+        obstacleBaseY(obstacle),
+      );
+    }
     const inner = Math.max(0, radius * radius - distance * distance);
     return center.y + Math.sqrt(inner);
   }
@@ -558,7 +575,9 @@ export function obstacleSurfaceHeightForActor(obstacle, x, z, actorRadius = 0.06
         pointInPolygon(point, shape.points, obstacle.scale)
         && polygonBoundaryDistance(point, shape.points, obstacle.scale) >= actorRadius
       ) {
-        value = center.y + (shape.yMax ?? shape.height) * obstacle.scale;
+        value = usesFacetedBoulderSurface(obstacle)
+          ? facetedBoulderSupportY(obstacle, shape, point, obstacleBaseY(obstacle))
+          : center.y + (shape.yMax ?? shape.height) * obstacle.scale;
       }
     } else if (shape.type === 'box') {
       const { point } = boxLocalPoint(obstacle, shape, x, z);
@@ -572,7 +591,14 @@ export function obstacleSurfaceHeightForActor(obstacle, x, z, actorRadius = 0.06
       const distance = Math.hypot(x - center.x, z - center.z);
       if (distance <= Math.max(0.02, radius - actorRadius)) {
         value = shape.type === 'ball'
-          ? center.y + Math.sqrt(Math.max(0, radius * radius - distance * distance))
+          ? (usesFacetedBoulderSurface(obstacle)
+            ? facetedBoulderSupportY(
+              obstacle,
+              shape,
+              new THREE.Vector2(x - center.x, z - center.z),
+              obstacleBaseY(obstacle),
+            )
+            : center.y + Math.sqrt(Math.max(0, radius * radius - distance * distance)))
           : center.y + (shape.height || 1) * obstacle.scale * 0.5;
       }
     }

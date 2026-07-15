@@ -38,6 +38,8 @@ can teach with.
 
 ## Source-Of-Truth Routing
 
+- Island chart placements, coastal boundaries, and cardinal route graph:
+  `game-core/floreanaGeography.js`.
 - 3D region map projection: `game-core/regionMaps.js`.
 - Legacy zone compatibility bridge: `three-game/world/floreanaZones.js`.
 - Authored terrain/material modules: `three-game/world/regions/<region>/`.

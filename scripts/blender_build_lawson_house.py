@@ -202,7 +202,38 @@ def init_materials():
   pbr_material('IndigoCloth', TEXTURES, 'woven-fabric-diff-2k.jpg', 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', (1.7, 1.7, 1), '#d6ded7', 0.72)
   detail_pbr_material('PaintedChair', TEXTURES, 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', '#5f685c', (1.6, 1.6, 1), 0.42, 0.58)
   image_material('ArrowsmithMap', SHARED_TEXTURES / 'maps/arrowsmith-world-map.jpg', 0.94)
+  image_material('FitzroyGalapagosChart', SHARED_TEXTURES / 'maps/fitzroy-galapagos-chart.jpg', 0.92)
   image_material('OfficialAppointmentNotice', TEXTURES / 'official-appointment-notice.png', 0.88)
+  # Framed wall art: hand-coloured Gillray caricatures and Thornton botanical
+  # plates (public-domain scans, see prints/README.md). An 1835 administrator
+  # plausibly owns twenty-year-old London prints.
+  image_material('GillrayPlumbPudding', TEXTURES / 'prints/gillray-plumb-pudding.jpg', 0.86)
+  image_material('GillraySlippyWeather', TEXTURES / 'prints/gillray-slippy-weather.jpg', 0.86)
+  image_material('ThorntonCereus', TEXTURES / 'prints/thornton-cereus.jpg', 0.86)
+  image_material('ThorntonCarnations', TEXTURES / 'prints/thornton-carnations.jpg', 0.86)
+  # 1830s bindings: tan and dark calf, vellum, morocco, marbled boards, and
+  # cloth — each with a tonal variant, and all carrying scanned microsurface
+  # grain so spines catch light instead of reading as flat painted boxes.
+  for spine_name, spine_color in (
+    ('CalfTan', '#8a5f3a'), ('CalfTanDark', '#74492b'),
+    ('CalfDark', '#5b3a24'), ('CalfDarker', '#462c1b'),
+    ('Vellum', '#cfc39e'), ('VellumWarm', '#c2b183'),
+    ('MoroccoRed', '#6e2f26'), ('MoroccoRust', '#7d3f2a'),
+    ('MoroccoGreen', '#33493b'), ('OliveCloth', '#4a5138'),
+    ('MarbledBoard', '#41556b'), ('SlateCloth', '#4e5a60'),
+  ):
+    detail_pbr_material(spine_name, TEXTURES, 'limewash-rough-2k.jpg', 'limewash-normal-2k.jpg', spine_color, (6, 6, 1), 0.5, 0.6)
+  material('PageEdge', '#d8cba4', 0.92)
+  material('BookGold', '#a8853f', 0.45, 0.35)
+  material('GiltFrame', '#9a7a33', 0.38, 0.55)
+  material('ShelfShadow', '#1d150e', 1)
+  # Warmer, redder case wood than the general furniture stock.
+  pbr_material('BookcaseWood', TEXTURES, 'fine-wood-diff-2k.jpg', 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', (1.35, 1.35, 1), '#b5804f', 0.5)
+  detail_pbr_material('BookcaseBack', TEXTURES, 'fine-wood-rough-2k.jpg', 'fine-wood-normal-2k.jpg', '#6e4c30', (1.8, 1.8, 1), 0.4, 0.66)
+  material('OrangePeel', '#cf7a1f', 0.62)
+  material('OrangeStem', '#4a5a2e', 0.9)
+  material('MirrorSilver', '#c9d2d4', 0.06, 1)
+  detail_pbr_material('WoolBlanket', TEXTURES, 'woven-fabric-rough-2k.jpg', 'woven-fabric-normal-2k.jpg', '#7d3b2d', (3.2, 3.2, 1), 0.7, 0.78)
   material('DarkTimber', '#433329', 0.84)
   material('CeilingTimber', '#76583f', 0.76)
   material('TrimPaint', '#8b927d', 0.88)
@@ -368,13 +399,19 @@ def add_sagged_panel(name, position, width, depth, mat, sag=0.025, yaw=0, x_segm
   return obj
 
 
-def add_sphere(name, position, radius, mat, scale=(1, 1, 1)):
-  bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=radius, location=game_to_blender(position))
+def add_sphere(name, position, radius, mat, scale=(1, 1, 1), segments=16, rings=8):
+  bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, radius=radius, location=game_to_blender(position))
   obj = bpy.context.object
   obj.name = name
   obj.scale = (scale[0], scale[2], scale[1])
   obj.data.materials.append(mat)
   return obj
+
+
+def rand01(seed):
+  """Deterministic hash noise so rebuilds produce identical shelves."""
+  value = math.sin(seed * 12.9898 + 4.1414) * 43758.5453
+  return value - math.floor(value)
 
 
 def add_torus(name, position, major, minor, mat, rotation=(0, 0, 0)):
@@ -420,47 +457,71 @@ def board_between(name, start, end, width, depth, mat, bevel=0.008):
 
 
 def simple_window(name, x, y, z, width, height, orientation='front'):
-  """Build a deep painted sash with four separate, slightly irregular panes."""
-  if orientation == 'front':
+  """Build a painted sash with four separate, slightly irregular panes.
+
+  Trim stays close to the wall plane: the earlier 0.4m-deep casings and 0.5m
+  sills read as protruding blocks at gameplay distance.
+  """
+  if orientation in ('front', 'rear'):
+    # 'front' trims toward -z (front wall); 'rear' mirrors toward +z.
+    inward = 1 if orientation == 'rear' else -1
     for column in (-1, 1):
       for row in (-1, 1):
         pane_index = (column + 1) + (row + 1) // 2
         add_box(
           f'{name}_Glass_{column}_{row}',
-          (x + column * width * 0.25, y + row * height * 0.25, z + (pane_index % 2) * 0.003),
+          (x + column * width * 0.25, y + row * height * 0.25, z - inward * (pane_index % 2) * 0.003),
           (width * 0.5 - 0.045, height * 0.5 - 0.045, 0.018),
           MATS['WindowGlass'],
           yaw=(pane_index - 1.5) * 0.0025,
         )
-    reveal_z = z - 0.14
+    reveal_z = z + inward * 0.05
     for side in (-1, 1):
-      add_box(f'{name}_CasingV_{side}', (x + side * (width * 0.5 + 0.07), y, reveal_z), (0.14, height + 0.32, 0.4), MATS['TrimPaint'], bevel=0.02)
-    add_box(f'{name}_CasingHead', (x, y + height * 0.5 + 0.08, reveal_z), (width + 0.42, 0.16, 0.4), MATS['TrimPaint'], bevel=0.02)
-    add_box(f'{name}_Sill', (x, y - height * 0.5 - 0.09, z - 0.16), (width + 0.42, 0.16, 0.5), MATS['FurnitureWood'], bevel=0.028)
-    add_box(f'{name}_MuntinV', (x, y, z - 0.055), (0.052, height, 0.13), MATS['TrimPaint'], bevel=0.009)
-    add_box(f'{name}_MuntinH', (x, y, z - 0.055), (width, 0.052, 0.13), MATS['TrimPaint'], bevel=0.009)
-    add_box(f'{name}_Catch', (x, y - 0.025, z - 0.135), (0.15, 0.035, 0.035), MATS['Brass'], bevel=0.007)
+      add_box(f'{name}_CasingV_{side}', (x + side * (width * 0.5 + 0.07), y, reveal_z), (0.14, height + 0.32, 0.16), MATS['TrimPaint'], bevel=0.02)
+    add_box(f'{name}_CasingHead', (x, y + height * 0.5 + 0.08, reveal_z), (width + 0.42, 0.14, 0.16), MATS['TrimPaint'], bevel=0.02)
+    add_box(f'{name}_Sill', (x, y - height * 0.5 - 0.055, z + inward * 0.1), (width + 0.36, 0.09, 0.26), MATS['FurnitureWood'], bevel=0.022)
+    add_box(f'{name}_SillApron', (x, y - height * 0.5 - 0.135, z + inward * 0.075), (width + 0.2, 0.07, 0.03), MATS['TrimPaint'], bevel=0.012)
+    add_box(f'{name}_MuntinV', (x, y, z + inward * 0.055), (0.052, height, 0.13), MATS['TrimPaint'], bevel=0.009)
+    add_box(f'{name}_MuntinH', (x, y, z + inward * 0.055), (width, 0.052, 0.13), MATS['TrimPaint'], bevel=0.009)
+    add_box(f'{name}_Catch', (x, y - 0.025, z + inward * 0.115), (0.15, 0.035, 0.035), MATS['Brass'], bevel=0.007)
     for side in (-1, 1):
-      add_box(f'{name}_Hinge_{side}', (x + side * (width * 0.5 - 0.06), y + 0.28, z - 0.13), (0.07, 0.15, 0.028), MATS['Iron'], bevel=0.005)
+      add_box(f'{name}_Hinge_{side}', (x + side * (width * 0.5 - 0.06), y + 0.28, z + inward * 0.11), (0.07, 0.15, 0.028), MATS['Iron'], bevel=0.005)
   else:
+    # 'side' trims toward +x (west wall); 'side-east' mirrors toward -x.
+    inward = -1 if orientation == 'side-east' else 1
     for column in (-1, 1):
       for row in (-1, 1):
         pane_index = (column + 1) + (row + 1) // 2
         add_box(
           f'{name}_Glass_{column}_{row}',
-          (x + (pane_index % 2) * 0.003, y + row * height * 0.25, z + column * width * 0.25),
+          (x + inward * (pane_index % 2) * 0.003, y + row * height * 0.25, z + column * width * 0.25),
           (0.018, height * 0.5 - 0.045, width * 0.5 - 0.045),
           MATS['WindowGlass'],
           yaw=(pane_index - 1.5) * 0.0025,
         )
-    reveal_x = x + 0.14
+    reveal_x = x + inward * 0.14
     for side in (-1, 1):
       add_box(f'{name}_CasingV_{side}', (reveal_x, y, z + side * (width * 0.5 + 0.07)), (0.4, height + 0.32, 0.14), MATS['TrimPaint'], bevel=0.02)
     add_box(f'{name}_CasingHead', (reveal_x, y + height * 0.5 + 0.08, z), (0.4, 0.16, width + 0.42), MATS['TrimPaint'], bevel=0.02)
-    add_box(f'{name}_Sill', (x + 0.16, y - height * 0.5 - 0.09, z), (0.5, 0.16, width + 0.42), MATS['FurnitureWood'], bevel=0.028)
-    add_box(f'{name}_MuntinV', (x + 0.055, y, z), (0.13, height, 0.052), MATS['TrimPaint'], bevel=0.009)
-    add_box(f'{name}_MuntinH', (x + 0.055, y, z), (0.13, 0.052, width), MATS['TrimPaint'], bevel=0.009)
-    add_box(f'{name}_Catch', (x + 0.135, y - 0.025, z), (0.035, 0.035, 0.15), MATS['Brass'], bevel=0.007)
+    add_box(f'{name}_Sill', (x + inward * 0.16, y - height * 0.5 - 0.09, z), (0.5, 0.16, width + 0.42), MATS['FurnitureWood'], bevel=0.028)
+    add_box(f'{name}_MuntinV', (x + inward * 0.055, y, z), (0.13, height, 0.052), MATS['TrimPaint'], bevel=0.009)
+    add_box(f'{name}_MuntinH', (x + inward * 0.055, y, z), (0.13, 0.052, width), MATS['TrimPaint'], bevel=0.009)
+    add_box(f'{name}_Catch', (x + inward * 0.135, y - 0.025, z), (0.035, 0.035, 0.15), MATS['Brass'], bevel=0.007)
+
+
+def doorway_architrave(name, orientation, wall_coord, center, width, height, mat, board_width=0.14, proud=0.055):
+  """Painted architrave posts and head on both faces of a doorway aperture."""
+  post_x_positions = (center - width * 0.5 - board_width * 0.5 + 0.02, center + width * 0.5 + board_width * 0.5 - 0.02)
+  for face in (-1, 1):
+    offset = wall_coord + face * proud
+    if orientation == 'front':
+      for side_index, post in enumerate(post_x_positions):
+        add_box(f'{name}_Post_{face}_{side_index}', (post, height * 0.5, offset), (board_width, height, 0.055), mat, bevel=0.012)
+      add_box(f'{name}_Head_{face}', (center, height + 0.07, offset), (width + board_width * 2 - 0.04, 0.16, 0.055), mat, bevel=0.012)
+    else:
+      for side_index, post in enumerate(post_x_positions):
+        add_box(f'{name}_Post_{face}_{side_index}', (offset, height * 0.5, post), (0.055, height, board_width), mat, bevel=0.012)
+      add_box(f'{name}_Head_{face}', (offset, height + 0.07, center), (0.055, 0.16, width + board_width * 2 - 0.04), mat, bevel=0.012)
 
 
 def table(name, x, z, width, depth, height=0.86):
@@ -565,14 +626,21 @@ def add_floor_surface(name, width, depth, mat):
   return obj
 
 
-def add_front_image_plane(name, position, width, height, mat, thickness=0.012):
-  """Create a front-facing wall image with one deliberate 0..1 UV island."""
+WALL_FACINGS = {
+  '+z': ((1, 0, 0), (0, 0, 1)),
+  '-z': ((-1, 0, 0), (0, 0, -1)),
+  '+x': ((0, 0, -1), (1, 0, 0)),
+  '-x': ((0, 0, 1), (-1, 0, 0)),
+}
+
+
+def add_front_image_plane(name, position, width, height, mat, thickness=0.012, facing='+z'):
+  """Create a wall image with one deliberate 0..1 UV island, facing any wall."""
+  u, _normal = WALL_FACINGS[facing]
   x, y, z = position
   vertices = [
-    game_to_blender((x - width * 0.5, y - height * 0.5, z)),
-    game_to_blender((x + width * 0.5, y - height * 0.5, z)),
-    game_to_blender((x + width * 0.5, y + height * 0.5, z)),
-    game_to_blender((x - width * 0.5, y + height * 0.5, z)),
+    game_to_blender((x + u[0] * du * width, y + dv * height, z + u[2] * du * width))
+    for du, dv in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
   ]
   mesh = bpy.data.meshes.new(name)
   mesh.from_pydata(vertices, [], [[0, 1, 2, 3]])
@@ -590,6 +658,36 @@ def add_front_image_plane(name, position, width, height, mat, thickness=0.012):
   bevel.width = 0.004
   bevel.segments = 2
   return obj
+
+
+def framed_print(name, position, width, height, image_mat, facing, frame_mat, frame_width=0.045, frame_depth=0.05, mat_border=0.032):
+  """Hang a framed period print: cream paper mat, image plane, moulded frame."""
+  u, normal = WALL_FACINGS[facing]
+  x, y, z = position
+
+  def sized(along_u, along_y):
+    return (
+      abs(u[0]) * along_u + abs(normal[0]) * frame_depth,
+      along_y,
+      abs(u[2]) * along_u + abs(normal[2]) * frame_depth,
+    )
+
+  def offset(du, dy, dn):
+    return (x + u[0] * du + normal[0] * dn, y + dy, z + u[2] * du + normal[2] * dn)
+
+  mat_w = width + mat_border * 2
+  mat_h = height + mat_border * 2
+  backing = (
+    abs(u[0]) * mat_w + abs(normal[0]) * 0.014,
+    mat_h,
+    abs(u[2]) * mat_w + abs(normal[2]) * 0.014,
+  )
+  add_box(f'{name}_MatBoard', offset(0, 0, -0.006), backing, MATS['Paper'], bevel=0.004)
+  add_front_image_plane(f'{name}_Image', offset(0, 0, 0.004), width, height, image_mat, thickness=0.008, facing=facing)
+  for side, dy in (('Top', mat_h * 0.5 + frame_width * 0.5), ('Bottom', -mat_h * 0.5 - frame_width * 0.5)):
+    add_box(f'{name}_Frame{side}', offset(0, dy, 0.006), sized(mat_w + frame_width * 2, frame_width), frame_mat, bevel=0.012)
+  for side, du in (('Left', -mat_w * 0.5 - frame_width * 0.5), ('Right', mat_w * 0.5 + frame_width * 0.5)):
+    add_box(f'{name}_Frame{side}', offset(du, 0, 0.006), sized(frame_width, mat_h), frame_mat, bevel=0.012)
 
 
 def front_wall_with_openings(name, z, x_min, x_max, openings, mat, height, thickness=0.18):
@@ -649,52 +747,67 @@ def build_shell():
 
   window_bottom = 0.9
   window_top = 2.22
+  # Doorways run wider than period practice so the player model clears them.
   front_openings = [
     {'center': -8.35, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
-    {'center': -5.3, 'width': 1.4, 'bottom': 0, 'top': 2.42},
+    {'center': -5.3, 'width': 1.56, 'bottom': 0, 'top': 2.42},
     {'center': -0.65, 'width': 1.6, 'bottom': window_bottom, 'top': window_top},
     {'center': 2.0, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
     {'center': 6.7, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
   ]
   front_wall_with_openings('FrontWall', wall_z, -half_w, half_w, front_openings, public, ceiling)
   side_wall_with_openings('WestWall', -wall_x, -half_d, half_d, [
+    {'center': -3.2, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
     {'center': 3.0, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
     {'center': 6.2, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
   ], public, ceiling)
-  add_box('EastWall', (wall_x, ceiling / 2, 0), (0.18, ceiling, depth), public, bevel=0.012)
-  add_box('RearWall', (0, ceiling / 2, -wall_z), (width, ceiling, 0.18), MATS['PrivateLimewash'], bevel=0.012)
+  # The east wall gains one window in the office so rake light reaches the
+  # bookcase wall and the map table.
+  side_wall_with_openings('EastWall', wall_x, -half_d, half_d, [
+    {'center': 5.7, 'width': 1.5, 'bottom': window_bottom, 'top': window_top},
+  ], public, ceiling)
+  # One rear window lights the private quarters over the bed.
+  front_wall_with_openings('RearWall', -wall_z, -half_w, half_w, [
+    {'center': -7.0, 'width': 1.4, 'bottom': window_bottom, 'top': window_top},
+  ], MATS['PrivateLimewash'], ceiling)
 
   # The office is a working room rather than a future locked set: its doorway
   # is permanently open so the public dining room leads directly into Lawson's
   # papers, reference shelf, and lamp light.
   side_wall_with_openings('OfficePartition', 2.92, 0, half_d, [
-    {'center': 5.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
+    {'center': 5.1, 'width': 1.5, 'bottom': 0, 'top': 2.42},
   ], public, ceiling, 0.16)
   front_wall_with_openings('RearPartition', -0.08, -half_w, half_w, [
-    {'center': -4.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
-    {'center': 5.1, 'width': 1.08, 'bottom': 0, 'top': 2.4},
+    {'center': -4.1, 'width': 1.3, 'bottom': 0, 'top': 2.42},
+    {'center': 5.1, 'width': 1.3, 'bottom': 0, 'top': 2.42},
   ], public, ceiling, 0.16)
   add_box('RearRoomsPartition', (-0.08, ceiling / 2, -4.29), (0.16, ceiling, 8.42), MATS['PrivateLimewash'], bevel=0.012)
-  add_box('OfficeTintPanel', (3.015, ceiling / 2, 4.25), (0.025, ceiling - 0.12, 8.3), MATS['OfficeLimewash'])
+  # Split around the open doorway (z 4.35-5.85) so the tint never films over
+  # the office threshold.
+  add_box('OfficeTintPanelSouth', (3.015, ceiling / 2, 2.2), (0.025, ceiling - 0.12, 4.2), MATS['OfficeLimewash'])
+  add_box('OfficeTintPanelNorth', (3.015, ceiling / 2, 7.15), (0.025, ceiling - 0.12, 2.5), MATS['OfficeLimewash'])
   add_box('StoreRawPanel', (0.015, ceiling / 2, -4.25), (0.025, ceiling - 0.12, 8.3), MATS['LimewashedBoards'])
 
-  # Leave the office threshold genuinely open; a parked leaf here read as a
-  # detached plank in top-down and blocked the study's inviting sightline.
-  panelled_door('PrivateDoor', (-4.1, 1.2, -0.01), 1.04, 2.4, 0.12, MATS['OldPine'])
-  panelled_door('StoreDoor', (5.1, 1.2, -0.01), 1.04, 2.4, 0.12, MATS['LimewashedBoards'])
-  for door_name, knob in (
-    ('Private', (-3.76, 1.18, 0.07)),
-    ('Store', (4.76, 1.18, 0.07)),
-  ):
-    add_sphere(f'{door_name}DoorKnob', knob, 0.052, MATS['Brass'])
+  # Every internal doorway carries a painted architrave so apertures read as
+  # finished carpentry instead of raw cuts in the plaster.
+  doorway_architrave('OfficeDoorArchitrave', 'side', 2.92, 5.1, 1.5, 2.42, MATS['TrimPaint'], proud=0.135)
+  doorway_architrave('PrivateDoorArchitrave', 'front', -0.08, -4.1, 1.3, 2.42, MATS['TrimPaint'])
+  doorway_architrave('StoreDoorArchitrave', 'front', -0.08, 5.1, 1.3, 2.42, MATS['TrimPaint'])
+
+  # The private door now stands open against the bedroom-side jamb, inviting
+  # the player through; the store stays shut and locked.
+  panelled_door('PrivateDoor', (-4.72, 1.2, -0.76), 1.26, 2.4, 0.12, MATS['OldPine'], 'side')
+  add_sphere('PrivateDoorKnob', (-4.65, 1.14, -1.32), 0.052, MATS['Brass'])
+  panelled_door('StoreDoor', (5.1, 1.2, -0.01), 1.26, 2.4, 0.12, MATS['LimewashedBoards'])
+  add_sphere('StoreDoorKnob', (4.68, 1.18, 0.07), 0.052, MATS['Brass'])
 
   # Open front door, complete frame, and threshold.
-  panelled_door('FrontDoor', (-5.98, 1.21, wall_z - 0.68), 1.34, 2.42, 0.12, MATS['OldPine'], 'side', -0.08)
-  add_sphere('FrontDoorLatch', (-5.89, 1.14, wall_z - 1.08), 0.055, MATS['Brass'])
-  add_box('FrontThreshold', (-5.3, 0.09, wall_z), (1.58, 0.18, 0.34), MATS['DarkTimber'], bevel=0.025)
-  for x in (-6.06, -4.54):
+  panelled_door('FrontDoor', (-6.02, 1.21, wall_z - 0.76), 1.5, 2.42, 0.12, MATS['OldPine'], 'side', -0.08)
+  add_sphere('FrontDoorLatch', (-5.93, 1.14, wall_z - 1.22), 0.055, MATS['Brass'])
+  add_box('FrontThreshold', (-5.3, 0.09, wall_z), (1.74, 0.18, 0.34), MATS['DarkTimber'], bevel=0.025)
+  for x in (-6.14, -4.46):
     add_box(f'FrontDoorJamb_{x}', (x, 1.25, wall_z - 0.03), (0.11, 2.5, 0.28), MATS['DarkTimber'], bevel=0.018)
-  add_box('FrontDoorHeader', (-5.3, 2.49, wall_z - 0.03), (1.62, 0.14, 0.28), MATS['DarkTimber'], bevel=0.018)
+  add_box('FrontDoorHeader', (-5.3, 2.49, wall_z - 0.03), (1.78, 0.14, 0.28), MATS['DarkTimber'], bevel=0.018)
 
   simple_window('CallingWindow', -8.35, 1.56, wall_z - 0.11, 1.5, 1.32)
   simple_window('DiningWindowA', -0.65, 1.56, wall_z - 0.11, 1.6, 1.32)
@@ -702,6 +815,9 @@ def build_shell():
   simple_window('OfficeWindow', 6.7, 1.56, wall_z - 0.11, 1.5, 1.32)
   simple_window('GardenWindowA', -wall_x + 0.11, 1.56, 3.0, 1.5, 1.32, 'side')
   simple_window('GardenWindowB', -wall_x + 0.11, 1.56, 6.2, 1.5, 1.32, 'side')
+  simple_window('OfficeEastWindow', wall_x - 0.11, 1.56, 5.7, 1.5, 1.32, 'side-east')
+  simple_window('BedroomWestWindow', -wall_x + 0.11, 1.56, -3.2, 1.5, 1.32, 'side')
+  simple_window('BedroomRearWindow', -7.0, 1.56, -wall_z + 0.11, 1.4, 1.32, 'rear')
   for x in (-8.35, -0.65, 2.0, 6.7):
     add_box(f'FrontShutterLeft_{x}', (x - 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
     add_box(f'FrontShutterRight_{x}', (x + 1.02, 1.56, wall_z - 0.14), (0.42, 1.42, 0.07), MATS['DadoPaint'], bevel=0.018)
@@ -719,34 +835,41 @@ def build_shell():
   # A plain grey-green painted dado gives the public suite a domestic identity
   # without implying imported wallpaper in the damp highland settlement.
   for index, (left, right) in enumerate((
-    (-10.5, -9.1), (-7.6, -6.0), (-4.6, -1.45), (0.15, 1.25), (2.75, 10.5),
+    (-10.5, -9.1), (-7.6, -6.14), (-4.46, -1.45), (0.15, 1.25), (2.75, 10.5),
   )):
     add_box(f'FrontDado_{index}', ((left + right) / 2, 0.44, wall_z - 0.105), (right - left, 0.86, 0.035), MATS['DadoPaint'])
   for index, (near, far) in enumerate(((0, 2.25), (3.75, 5.45), (6.95, 8.5))):
     add_box(f'WestDado_{index}', (-wall_x + 0.105, 0.44, (near + far) / 2), (0.035, 0.86, far - near), MATS['DadoPaint'])
-  add_box('OfficeDado', (2.805, 0.44, 2.25), (0.035, 0.86, 4.3), MATS['DadoPaint'])
-  for index, (left, right) in enumerate(((-10.5, -4.64), (-3.56, 2.92), (2.92, 4.56), (5.64, 10.5))):
+  add_box('OfficeDado', (2.805, 0.44, 2.17), (0.035, 0.86, 4.14), MATS['DadoPaint'])
+  for index, (left, right) in enumerate(((-10.5, -4.79), (-3.41, 2.92), (2.92, 4.41), (5.79, 10.5))):
     add_box(f'RearDado_{index}', ((left + right) / 2, 0.44, 0.025), (right - left, 0.86, 0.035), MATS['DadoPaint'])
 
   for index, (left, right) in enumerate((
-    (-10.3, -9.1), (-7.6, -6.0), (-4.6, -1.45), (0.15, 1.25), (2.75, 10.3),
+    (-10.3, -9.1), (-7.6, -6.14), (-4.46, -1.45), (0.15, 1.25), (2.75, 10.3),
   )):
     add_box(f'FrontChairRail_{index}', ((left + right) / 2, 0.92, wall_z - 0.13), (right - left, 0.1, 0.1), MATS['FurnitureWood'], bevel=0.018)
   for index, (near, far) in enumerate(((0, 2.25), (3.75, 5.45), (6.95, 8.3))):
     add_box(f'WestChairRail_{index}', (-wall_x + 0.13, 0.92, (near + far) / 2), (0.1, 0.1, far - near), MATS['FurnitureWood'], bevel=0.018)
-  for index, (left, right) in enumerate(((-10.3, -4.64), (-3.56, 2.8))):
+  for index, (left, right) in enumerate(((-10.3, -4.79), (-3.41, 2.8))):
     add_box(f'RearChairRail_{index}', ((left + right) / 2, 0.92, 0.04), (right - left, 0.1, 0.1), MATS['FurnitureWood'], bevel=0.018)
-  for index, (left, right) in enumerate(((-10.3, -6.0), (-4.6, 10.3))):
+  for index, (left, right) in enumerate(((-10.3, -6.14), (-4.46, 10.3))):
     add_box(f'FrontBaseboard_{index}', ((left + right) / 2, 0.12, wall_z - 0.14), (right - left, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
   add_box('WestBaseboard', (-wall_x + 0.14, 0.12, 4.15), (0.12, 0.22, 8.3), MATS['DarkTimber'], bevel=0.012)
-  for index, (left, right) in enumerate(((-10.3, -4.64), (-3.56, 4.56), (5.64, 10.3))):
+  for index, (left, right) in enumerate(((-10.3, -4.79), (-3.41, 4.41), (5.79, 10.3))):
     add_box(f'RearBaseboard_{index}', ((left + right) / 2, 0.12, 0.05), (right - left, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
+  # Private-quarters skirtings keep the sleeping room from reading unfinished.
+  add_box('BedroomWestBaseboard', (-wall_x + 0.14, 0.12, -4.2), (0.12, 0.22, 8.2), MATS['DarkTimber'], bevel=0.012)
+  add_box('BedroomRearBaseboard', (-5.25, 0.12, -wall_z + 0.13), (10.3, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
+  for index, (left, right) in enumerate(((-10.3, -4.79), (-3.41, -0.2))):
+    add_box(f'BedroomPartitionBaseboard_{index}', ((left + right) / 2, 0.12, -0.21), (right - left, 0.22, 0.12), MATS['DarkTimber'], bevel=0.012)
+  add_box('BedroomDividerBaseboard', (-0.21, 0.12, -4.25), (0.12, 0.22, 8.1), MATS['DarkTimber'], bevel=0.012)
   add_box('WestDampBand', (-wall_x + 0.025, 0.17, 1.2), (0.022, 0.24, 4.8), MATS['WetEarth'])
   for x, z in ((-8.75, 4.9), (-5.8, 6.77), (1.1, 6.77)):
     add_box(f'RustBloom_{x}_{z}', (x, 0.38, z), (0.03, 0.14, 0.03), MATS['Rust'])
 
   build_fixed_furniture()
   build_office_furniture()
+  build_private_quarters()
   build_veranda_diorama()
 
 
@@ -891,53 +1014,364 @@ def build_fixed_furniture():
   add_sagged_panel('ReceivingMat', (-8.25, 0.03, 5.1), 2.35, 2.15, MATS['IndigoCloth'], sag=0.01, x_segments=16, z_segments=14, thickness=0.018)
 
 
+BOOK_SPINE_MATERIALS = (
+  'CalfTan', 'CalfDark', 'Vellum', 'MoroccoRed', 'MoroccoGreen', 'MarbledBoard',
+  'CalfTanDark', 'CalfDarker', 'VellumWarm', 'MoroccoRust', 'OliveCloth', 'SlateCloth',
+  'CalfDark', 'CalfTan',
+)
+
+
+def book_run(prefix, x_start, x_end, shelf_top, z_front, seed):
+  """Fill one shelf bay with individually varied working books: mixed widths
+  and heights, page-block tops, gold tooling, occasional gaps, leans, and
+  horizontal stacks. Deterministic per seed."""
+  x = x_start
+  index = 0
+  lean_next = 0.0
+  while True:
+    r_width = rand01(seed + index * 3.17)
+    r_height = rand01(seed + index * 7.71)
+    r_kind = rand01(seed + index * 13.37)
+    width = 0.03 + r_width * 0.032
+    if x + width > x_end - 0.01:
+      break
+    if r_kind > 0.91:
+      # Air gap; the following book leans into it.
+      x += 0.05 + r_kind * 0.14
+      lean_next = -0.16 - rand01(seed + index * 51.7) * 0.08
+      index += 1
+      continue
+    if 0.84 < r_kind <= 0.91 and x + 0.3 < x_end:
+      # A short horizontal stack breaks the vertical rhythm.
+      stack_count = 2 + int(rand01(seed + index * 19.3) * 2.4)
+      for s in range(stack_count):
+        stack_mat = MATS[BOOK_SPINE_MATERIALS[int(rand01(seed + index * 41.3 + s) * len(BOOK_SPINE_MATERIALS)) % len(BOOK_SPINE_MATERIALS)]]
+        stack_w = 0.25 - s * 0.018
+        add_box(
+          f'{prefix}_Stack_{index}_{s}',
+          (x + 0.135, shelf_top + 0.019 + s * 0.038, z_front - 0.1),
+          (stack_w, 0.034, 0.17 - s * 0.008),
+          stack_mat,
+          yaw=(rand01(seed + index * 61.1 + s) - 0.5) * 0.14,
+          bevel=0.004,
+        )
+      x += 0.31
+      lean_next = 0.0
+      index += 1
+      continue
+    height = 0.17 + r_height * 0.14
+    depth = 0.15 + rand01(seed + index * 23.9) * 0.05
+    z_center = z_front - depth * 0.5 - rand01(seed + index * 31.7) * 0.02
+    mat_name = BOOK_SPINE_MATERIALS[int(rand01(seed + index * 41.3) * len(BOOK_SPINE_MATERIALS)) % len(BOOK_SPINE_MATERIALS)]
+    book = add_box(
+      f'{prefix}_Book_{index}',
+      (x + width * 0.5, shelf_top + height * 0.5, z_center),
+      (width - 0.004, height, depth),
+      MATS[mat_name],
+      bevel=0.004,
+    )
+    if lean_next:
+      book.rotation_euler[1] = lean_next
+      book.location.z += abs(lean_next) * height * 0.18
+    else:
+      # Page block peeks above the boards on upright books only.
+      add_box(
+        f'{prefix}_Pages_{index}',
+        (x + width * 0.5, shelf_top + height - 0.004, z_center - 0.006),
+        (width - 0.014, 0.016, depth - 0.04),
+        MATS['PageEdge'],
+      )
+      book_front = z_center + depth * 0.5
+      r_trim = rand01(seed + index * 71.9)
+      if mat_name not in ('Vellum', 'VellumWarm', 'MarbledBoard', 'SlateCloth') and r_trim < 0.55:
+        for band_index, band_frac in enumerate((0.78, 0.6)):
+          add_box(
+            f'{prefix}_Band_{index}_{band_index}',
+            (x + width * 0.5, shelf_top + height * band_frac, book_front + 0.004),
+            (width - 0.012, 0.011, 0.007),
+            MATS['BookGold'],
+          )
+      elif r_trim > 0.78:
+        # Paper title label pasted low on the spine, common on working sets.
+        add_box(
+          f'{prefix}_Label_{index}',
+          (x + width * 0.5, shelf_top + height * 0.3, book_front + 0.003),
+          (width - 0.014, 0.045, 0.005),
+          MATS['PageEdge'],
+        )
+    lean_next = 0.0
+    x += width
+    index += 1
+
+
 def build_office_furniture():
-  """A compact, damp-prone administrator's study, not a gentleman's library."""
-  # Desk faces the open threshold. The side clearance preserves a direct route
-  # from the entrance to the rear records cabinet.
-  table('OfficeWritingDesk', 6.85, 4.25, 2.85, 1.18, 0.82)
-  add_box('OfficeDeskBlotter', (6.85, 0.842, 4.25), (1.08, 0.016, 0.64), MATS['Leather'], bevel=0.018)
-  add_box('OfficeDispatchTray', (7.72, 0.89, 4.18), (0.5, 0.09, 0.34), MATS['FurnitureWood'], bevel=0.018)
-  add_box('OfficeDispatchPaper', (7.72, 0.948, 4.18), (0.42, 0.012, 0.28), MATS['Paper'], bevel=0.006)
-  add_cylinder('OfficeInkWell', (6.12, 0.91, 4.3), 0.075, 0.13, MATS['Ink'], 16)
-  beam_between('OfficeQuill', (6.15, 0.98, 4.28), (6.46, 1.02, 4.4), 0.012, MATS['Paper'], 10)
+  """Lawson's working library: a full-height cased bookcase on the rear wall
+  facing the window light, a writing desk, records, a survey table beneath the
+  new east window, framed London prints, and a table globe."""
+  # --- Cased bookcase along the rear wall, spines facing the front windows.
+  case_x0, case_x1 = 6.0, 10.15
+  case_mid = (case_x0 + case_x1) / 2
+  uprights = (case_x0, 7.385, 8.765, case_x1)
+  shelf_tops = (0.22, 0.68, 1.14, 1.62)
+  top_board = 2.08
+  books_front_z = 0.66
+  add_box('OfficeBookcasePlinth', (case_mid, 0.075, 0.49), (case_x1 - case_x0 + 0.04, 0.15, 0.46), MATS['BookcaseWood'], bevel=0.014)
+  for bay in range(3):
+    bay_x0, bay_x1 = uprights[bay], uprights[bay + 1]
+    add_box(
+      f'OfficeBookcaseBack_{bay}',
+      ((bay_x0 + bay_x1) / 2, 1.24, 0.285 + (rand01(bay * 9.7) - 0.5) * 0.014),
+      (bay_x1 - bay_x0 - 0.02, 2.24, 0.05),
+      MATS['BookcaseBack'],
+    )
+  for x in uprights:
+    add_box(f'OfficeBookcaseUpright_{x:.2f}', (x, 1.19, 0.48), (0.055, 2.34, 0.44), MATS['BookcaseWood'], bevel=0.012)
+  for shelf_top in shelf_tops + (top_board,):
+    add_box(f'OfficeBookcaseShelf_{shelf_top:.2f}', (case_mid, shelf_top - 0.035, 0.48), (case_x1 - case_x0, 0.07, 0.42), MATS['BookcaseWood'], bevel=0.014)
+  # Crown sits atop the backboards, leaving the top board free for display.
+  add_box('OfficeBookcaseCornice', (case_mid, 2.32, 0.3), (case_x1 - case_x0 + 0.16, 0.12, 0.12), MATS['BookcaseWood'], bevel=0.022)
+  add_box('OfficeBookcaseCrown', (case_mid, 2.39, 0.31), (case_x1 - case_x0 + 0.22, 0.05, 0.16), MATS['BookcaseWood'], bevel=0.014)
+  # Baked occlusion: a dark strip at the top rear of each cavity grounds the
+  # books the way real shelf shadow does, independent of runtime AO.
+  cavity_tops = shelf_tops[1:] + (top_board,)
+  for bay in range(3):
+    bay_x0, bay_x1 = uprights[bay], uprights[bay + 1]
+    for row, cavity_top in enumerate(cavity_tops):
+      add_box(
+        f'OfficeShelfShadow_{bay}_{row}',
+        ((bay_x0 + bay_x1) / 2, cavity_top - 0.07 - 0.055, 0.345),
+        (bay_x1 - bay_x0 - 0.07, 0.11, 0.016),
+        MATS['ShelfShadow'],
+      )
+  for bay in range(3):
+    for row, shelf_top in enumerate(shelf_tops):
+      book_run(
+        f'OfficeBay{bay}_Row{row}',
+        uprights[bay] + 0.045,
+        uprights[bay + 1] - 0.045,
+        shelf_top,
+        books_front_z,
+        seed=17.3 * bay + 5.1 * row + 2.7,
+      )
+  # Case top: rolled charts and a specimen crate under the cornice line.
+  beam_between('OfficeChartRollA', (6.6, 2.125, 0.44), (7.7, 2.125, 0.5), 0.042, MATS['Paper'], 14)
+  beam_between('OfficeChartRollB', (6.75, 2.198, 0.46), (7.55, 2.198, 0.48), 0.036, MATS['ArrowsmithMap'], 14)
+  add_box('OfficeSpecimenCrate', (9.5, 2.185, 0.56), (0.44, 0.2, 0.32), MATS['OldPine'], bevel=0.014)
+  add_box('OfficeSpecimenCrateLid', (9.44, 2.3, 0.54), (0.46, 0.03, 0.34), MATS['OldPine'], yaw=0.12, bevel=0.01)
 
-  # A shallow elevated case keeps books away from the wet floor. Mixed heights,
-  # gaps, and horizontal stacks prevent it reading as a decorative book wall.
-  shelf_x = 10.02
-  add_box('OfficeBookcaseBack', (shelf_x, 1.42, 4.6), (0.18, 2.58, 5.25), MATS['OldPine'], bevel=0.024)
-  for y in (0.44, 1.14, 1.84, 2.68):
-    add_box(f'OfficeBookcaseShelf_{y}', (9.7, y, 4.6), (0.72, 0.075, 5.1), MATS['FurnitureWood'], bevel=0.016)
-  for z in (2.0, 7.2):
-    add_lathe(f'OfficeBookcasePost_{z}', (9.68, 1.45, z), ((0.042, 0), (0.06, 0.08), (0.045, 2.48), (0.065, 2.7)), MATS['CeilingTimber'], 16)
-  book_colors = (MATS['Leather'], MATS['DarkTimber'], MATS['FurnitureWood'])
-  book_index = 0
-  for row, y in enumerate((0.78, 1.48, 2.18)):
-    for z in (2.2, 2.65, 3.12, 3.72, 4.2, 4.85, 5.5, 6.0, 6.6):
-      if (row + book_index) % 5 == 0:
-        book_index += 1
-        continue
-      height = 0.32 + ((book_index * 7) % 4) * 0.075
-      add_box(f'OfficeShelfBook_{row}_{book_index}', (9.36, y + height * 0.5, z), (0.22, height, 0.22 + (book_index % 3) * 0.035), book_colors[book_index % len(book_colors)], bevel=0.012)
-      book_index += 1
-  add_box('OfficeShelfHorizontalStack', (9.38, 1.13, 3.7), (0.22, 0.17, 0.72), MATS['Leather'], bevel=0.018)
+  # --- Writing desk, centered, facing the front window.
+  table('OfficeWritingDesk', 6.55, 4.35, 2.5, 1.15, 0.8)
+  add_box('OfficeDeskBlotter', (6.55, 0.812, 4.35), (1.02, 0.016, 0.6), MATS['Leather'], bevel=0.016)
+  open_ledger_left = add_box('OfficeOpenLedgerLeft', (6.41, 0.828, 4.33), (0.29, 0.022, 0.42), MATS['Paper'], bevel=0.006)
+  open_ledger_left.rotation_euler[1] = 0.05
+  open_ledger_right = add_box('OfficeOpenLedgerRight', (6.7, 0.828, 4.33), (0.29, 0.022, 0.42), MATS['Paper'], bevel=0.006)
+  open_ledger_right.rotation_euler[1] = -0.05
+  add_box('OfficeOpenLedgerCover', (6.555, 0.815, 4.33), (0.64, 0.016, 0.46), MATS['Leather'], bevel=0.01)
+  for line_index in range(4):
+    add_box(f'OfficeLedgerInkLine_{line_index}', (6.42, 0.842, 4.2 + line_index * 0.07), (0.2, 0.003, 0.012), MATS['Ink'])
+  add_cylinder('OfficeInkWell', (7.28, 0.85, 4.05), 0.052, 0.1, MATS['Ink'], 18)
+  add_torus('OfficeInkWellRim', (7.28, 0.9, 4.05), 0.05, 0.008, MATS['Pewter'])
+  beam_between('OfficeQuill', (7.3, 0.91, 4.07), (7.62, 1.04, 4.22), 0.011, MATS['Paper'], 10)
+  add_lathe('OfficeSandCaster', (7.12, 0.81, 4.55), ((0.032, 0), (0.042, 0.03), (0.03, 0.09), (0.04, 0.115), (0.036, 0.13)), MATS['Pewter'], 18)
+  for wax_index, (wx, wz, wyaw) in enumerate(((6.9, 4.62, 0.4), (6.96, 4.56, -0.2))):
+    add_box(f'OfficeSealingWax_{wax_index}', (wx, 0.818, wz), (0.11, 0.016, 0.016), MATS['MoroccoRed'], yaw=wyaw, bevel=0.004)
+  for letter_index in range(3):
+    add_box(
+      f'OfficeLetterBundle_{letter_index}',
+      (5.78, 0.816 + letter_index * 0.012, 4.6),
+      (0.3 - letter_index * 0.015, 0.012, 0.21),
+      MATS['Paper'],
+      yaw=0.28 + letter_index * 0.05,
+      bevel=0.003,
+    )
+  add_box('OfficeLetterCord', (5.78, 0.85, 4.6), (0.31, 0.01, 0.02), MATS['Leather'], yaw=0.3)
+  add_box('OfficeDispatchTray', (7.5, 0.845, 4.62), (0.44, 0.08, 0.3), MATS['FurnitureWood'], bevel=0.014)
+  add_box('OfficeDispatchPaper', (7.5, 0.895, 4.62), (0.37, 0.012, 0.24), MATS['Paper'], yaw=-0.06, bevel=0.005)
 
-  # Lockable colony records are intentionally more substantial than the books.
-  add_box('OfficeRecordsCabinet', (7.65, 0.56, 0.72), (2.7, 1.12, 0.58), MATS['FurnitureWood'], bevel=0.04)
-  for x in (6.8, 7.65, 8.5):
-    add_box(f'OfficeRecordsDrawer_{x}', (x, 0.68, 0.39), (0.68, 0.32, 0.045), MATS['OldPine'], bevel=0.015)
-    add_sphere(f'OfficeRecordsPull_{x}', (x, 0.68, 0.35), 0.032, MATS['Brass'])
-  add_box('OfficeMapTable', (5.2, 0.5, 6.65), (1.45, 0.78, 0.92), MATS['FurnitureWood'], bevel=0.03)
-  add_box('OfficeMapSheet', (5.2, 0.91, 6.65), (1.22, 0.018, 0.7), MATS['ArrowsmithMap'], bevel=0.008)
-  add_cylinder('OfficeSurveyInstrumentBase', (5.55, 0.99, 6.55), 0.1, 0.06, MATS['Brass'], 18)
-  add_torus('OfficeSurveyInstrumentRing', (5.55, 1.13, 6.55), 0.16, 0.018, MATS['Brass'], (math.pi / 2, 0, 0))
+  # --- Colony records cabinet against the partition, below the caricature.
+  add_box('OfficeRecordsCabinet', (3.42, 0.56, 2.0), (0.56, 1.12, 2.4), MATS['FurnitureWood'], bevel=0.032)
+  add_box('OfficeRecordsTop', (3.44, 1.145, 2.0), (0.62, 0.05, 2.48), MATS['OldPine'], bevel=0.016)
+  for row_y in (0.34, 0.78):
+    for drawer_z in (1.3, 2.0, 2.7):
+      add_box(f'OfficeRecordsDrawer_{row_y}_{drawer_z}', (3.705, row_y, drawer_z), (0.03, 0.32, 0.62), MATS['OldPine'], bevel=0.012)
+      add_sphere(f'OfficeRecordsPull_{row_y}_{drawer_z}', (3.73, row_y, drawer_z), 0.028, MATS['Brass'])
+  for ledger_index in range(3):
+    add_box(
+      f'OfficeRecordsLedger_{ledger_index}',
+      (3.42, 1.2 + ledger_index * 0.052, 1.5 - ledger_index * 0.02),
+      (0.44, 0.05, 0.32),
+      MATS['Leather'] if ledger_index != 1 else MATS['MoroccoGreen'],
+      yaw=(ledger_index - 1) * 0.07,
+      bevel=0.01,
+    )
+  add_box('OfficeRecordsDocuments', (3.42, 1.185, 2.62), (0.4, 0.03, 0.28), MATS['Paper'], yaw=-0.1, bevel=0.006)
 
-  # One spare chair gives the desk social purpose without crowding its route.
-  add_box('OfficeVisitorChairSeat', (5.95, 0.48, 3.25), (0.7, 0.12, 0.68), MATS['FurnitureWood'], bevel=0.028)
-  add_sagged_panel('OfficeVisitorChairLeather', (5.95, 0.57, 3.25), 0.58, 0.54, MATS['Leather'], sag=0.018, x_segments=7, z_segments=7, thickness=0.045)
-  for x in (5.68, 6.22):
-    for z in (2.98, 3.52):
-      add_lathe(f'OfficeVisitorChairLeg_{x}_{z}', (x, 0, z), ((0.035, 0.02), (0.05, 0.09), (0.038, 0.46)), MATS['CeilingTimber'], 14)
+  # --- Survey table beneath the east window, with the FitzRoy chart and a
+  # small brass theodolite (the old oversized ring bloomed like a portal).
+  table('OfficeMapTable', 9.45, 5.7, 1.5, 0.95, 0.78)
+  add_sagged_panel('OfficeMapSheet', (9.45, 0.796, 5.7), 1.26, 0.78, MATS['FitzroyGalapagosChart'], sag=0.006, yaw=0.02, x_segments=10, z_segments=8, thickness=0.01)
+  for weight_index, (wx, wz) in enumerate(((8.95, 5.42), (9.92, 5.98))):
+    add_cylinder(f'OfficeChartWeight_{weight_index}', (wx, 0.83, wz), 0.032, 0.045, MATS['Brass'], 16)
+  add_cylinder('OfficeTheodoliteBase', (9.42, 0.82, 5.66), 0.068, 0.045, MATS['Brass'], 20)
+  add_cylinder('OfficeTheodoliteColumn', (9.42, 0.9, 5.66), 0.016, 0.12, MATS['Brass'], 12)
+  add_torus('OfficeTheodoliteCircle', (9.42, 0.955, 5.66), 0.052, 0.008, MATS['Brass'])
+  beam_between('OfficeTheodoliteScope', (9.3, 0.98, 5.62), (9.55, 1.005, 5.71), 0.019, MATS['Brass'], 14)
+  beam_between('OfficeTheodoliteScopeHood', (9.53, 1.003, 5.702), (9.57, 1.007, 5.717), 0.023, MATS['Iron'], 12)
+
+  # --- Table globe on a turned stand in the southeast corner.
+  globe_x, globe_z = 9.72, 1.55
+  for leg_index in range(3):
+    angle = leg_index / 3 * math.tau + 0.5
+    beam_between(
+      f'OfficeGlobeLeg_{leg_index}',
+      (globe_x + math.cos(angle) * 0.3, 0.02, globe_z + math.sin(angle) * 0.3),
+      (globe_x, 0.52, globe_z),
+      0.032,
+      MATS['CeilingTimber'],
+      12,
+    )
+  add_lathe('OfficeGlobeColumn', (globe_x, 0, globe_z), ((0.058, 0.5), (0.075, 0.56), (0.046, 0.64), (0.062, 0.72), (0.04, 0.8)), MATS['FurnitureWood'], 20)
+  globe = add_sphere('OfficeGlobeSphere', (globe_x, 1.08, globe_z), 0.27, MATS['ArrowsmithMap'], segments=32, rings=16)
+  globe.rotation_euler[1] = 0.41
+  globe.rotation_euler[2] = 0.8
+  meridian = add_torus('OfficeGlobeMeridian', (globe_x, 1.08, globe_z), 0.298, 0.009, MATS['Brass'], (0, 0, math.pi / 2))
+  meridian.rotation_euler[1] = 0.41
+  add_lathe('OfficeGlobeFinial', (globe_x, 1.36, globe_z), ((0.02, 0), (0.027, 0.022), (0.009, 0.05)), MATS['Brass'], 12)
+
+  # --- Framed prints: Gillray caricatures on the partition wall where the new
+  # east window lights them; Thornton botanicals on the east and rear walls.
+  framed_print('GillrayPlumbPudding', (3.05, 1.74, 6.95), 0.78, 0.56, MATS['GillrayPlumbPudding'], '+x', MATS['DarkTimber'])
+  framed_print('GillraySlippyWeather', (3.05, 1.82, 2.0), 0.54, 0.7, MATS['GillraySlippyWeather'], '+x', MATS['DarkTimber'])
+  framed_print('ThorntonCereus', (10.29, 1.74, 2.6), 0.68, 0.86, MATS['ThorntonCereus'], '-x', MATS['GiltFrame'])
+  framed_print('ThorntonCarnations', (3.75, 1.76, 0.045), 0.62, 0.85, MATS['ThorntonCarnations'], '+z', MATS['GiltFrame'])
+
+
+def build_private_quarters():
+  """Lawson's spartan sleeping room: a turned-post cot bed under the rear
+  window's light, washstand by the door, chest of drawers, and small comforts.
+  Deliberately plainer than the public rooms."""
+  # --- Bed tight against the west wall, head against the rear wall.
+  bed_x, bed_z = -9.62, -6.88
+  head_z, foot_z = -7.88, -5.88
+  for px, pz, post_h in ((-10.19, head_z, 1.18), (-9.05, head_z, 1.18), (-10.19, foot_z, 0.84), (-9.05, foot_z, 0.84)):
+    add_lathe(
+      f'BedPost_{px:.2f}_{pz:.2f}',
+      (px, 0, pz),
+      ((0.045, 0.02), (0.06, 0.09), (0.048, 0.3), (0.058, 0.55), (0.042, post_h - 0.09), (0.052, post_h - 0.03), (0.03, post_h)),
+      MATS['FurnitureWood'],
+      18,
+    )
+  add_box('BedHeadboard', (bed_x, 0.86, head_z), (1.12, 0.56, 0.06), MATS['OldPine'], bevel=0.02)
+  add_box('BedFootRail', (bed_x, 0.6, foot_z), (1.12, 0.09, 0.06), MATS['FurnitureWood'], bevel=0.014)
+  for side in (-1, 1):
+    add_box(f'BedSideRail_{side}', (bed_x + side * 0.56, 0.4, bed_z), (0.07, 0.13, 1.92), MATS['FurnitureWood'], bevel=0.014)
+  add_box('BedSlats', (bed_x, 0.37, bed_z), (1.08, 0.05, 1.88), MATS['OldPine'])
+  add_sagged_panel('BedMattress', (bed_x, 0.49, bed_z), 1.08, 1.86, MATS['Canvas'], sag=0.028, x_segments=10, z_segments=14, thickness=0.13)
+  # Madder-red wool blanket: the one strong colour note in a spartan room.
+  add_sagged_panel('BedBlanket', (bed_x, 0.56, bed_z - 0.22), 1.18, 1.34, MATS['WoolBlanket'], sag=0.022, x_segments=10, z_segments=10, thickness=0.045)
+  add_sagged_panel('BedBlanketFold', (bed_x, 0.585, bed_z - 0.78), 1.18, 0.24, MATS['WoolBlanket'], sag=0.01, x_segments=8, z_segments=3, thickness=0.04)
+  add_sphere('BedPillow', (bed_x, 0.58, head_z + 0.32), 0.24, MATS['Canvas'], (1.35, 0.42, 0.75), segments=20, rings=12)
+  add_sagged_panel('BedsideRug', (-8.15, 0.028, -6.8), 1.5, 1.1, MATS['IndigoCloth'], sag=0.006, yaw=0.04, x_segments=12, z_segments=10, thickness=0.016)
+  add_lathe('ChamberPot', (-8.82, 0, -6.2), ((0.09, 0.005), (0.13, 0.045), (0.135, 0.13), (0.145, 0.16)), MATS['CreamCeramic'], 24)
+  add_torus('ChamberPotRim', (-8.82, 0.16, -6.2), 0.145, 0.012, MATS['CreamCeramic'])
+
+  # --- Bedside table with candle light (candlestick GLB via the blueprint).
+  table('BedsideTable', -8.35, -7.8, 0.62, 0.5, 0.72)
+  add_box('BedsideBook', (-8.47, 0.75, -7.72), (0.24, 0.05, 0.17), MATS['CalfDark'], yaw=0.2, bevel=0.008)
+
+  # --- Blanket chest at the bed foot.
+  add_box('BedFootChest', (-9.62, 0.28, -5.16), (1.12, 0.56, 0.62), MATS['OldPine'], bevel=0.045)
+  for x in (-9.95, -9.29):
+    add_box(f'BedFootChestStrap_{x:.2f}', (x, 0.3, -5.16), (0.05, 0.6, 0.66), MATS['Iron'], bevel=0.008)
+
+  # --- Small wall shelf and a framed silhouette keep the walls from reading
+  # unfinished without contradicting the room's plainness.
+  add_box('BedroomWallShelf', (-2.6, 1.72, -8.16), (0.9, 0.05, 0.22), MATS['FurnitureWood'], bevel=0.014)
+  for shelf_index, (bx2, mat_name2) in enumerate(((-2.85, 'CalfDark'), (-2.62, 'Vellum'), (-2.42, 'MoroccoGreen'))):
+    add_box(f'BedroomShelfBook_{shelf_index}', (bx2, 1.86, -8.2), (0.055, 0.23, 0.16), MATS[mat_name2], bevel=0.006)
+  framed_print_x, framed_print_y = -4.6, 1.7
+  add_box('BedroomSilhouetteFrame', (framed_print_x, framed_print_y, -8.24), (0.3, 0.38, 0.04), MATS['DarkTimber'], bevel=0.01)
+  add_box('BedroomSilhouettePaper', (framed_print_x, framed_print_y, -8.215), (0.24, 0.32, 0.015), MATS['Paper'])
+  add_sphere('BedroomSilhouetteBust', (framed_print_x, framed_print_y - 0.02, -8.2), 0.09, MATS['Ink'], (1, 1.25, 0.12), segments=20, rings=12)
+
+  # --- Chest of drawers against the rear wall.
+  add_box('BedroomDrawersCarcass', (-2.6, 0.62, -7.98), (1.6, 1.16, 0.55), MATS['FurnitureWood'], bevel=0.032)
+  add_box('BedroomDrawersTop', (-2.6, 1.215, -7.97), (1.7, 0.05, 0.62), MATS['OldPine'], bevel=0.016)
+  for row_y in (0.3, 0.64, 0.98):
+    add_box(f'BedroomDrawerFront_{row_y}', (-2.6, row_y, -7.68), (1.44, 0.28, 0.04), MATS['OldPine'], bevel=0.014)
+    for pull_x in (-3.1, -2.1):
+      add_sphere(f'BedroomDrawerPull_{row_y}_{pull_x}', (pull_x, row_y, -7.64), 0.028, MATS['Brass'])
+  add_sagged_panel('BedroomFoldedShirt', (-3.05, 1.25, -7.95), 0.42, 0.32, MATS['Canvas'], sag=0.01, x_segments=6, z_segments=5, thickness=0.05)
+  add_box('BedroomShavingCase', (-2.15, 1.27, -7.98), (0.26, 0.07, 0.18), MATS['Leather'], yaw=-0.12, bevel=0.012)
+
+  # --- Washstand near the door with basin, jug, and wall mirror.
+  table('BedroomWashstand', -1.6, -0.72, 0.92, 0.56, 0.78)
+  add_lathe('WashBasin', (-1.78, 0.78, -0.72), ((0.055, 0), (0.14, 0.028), (0.175, 0.09)), MATS['CreamCeramic'], 28)
+  add_torus('WashBasinRim', (-1.78, 0.868, -0.72), 0.175, 0.012, MATS['CreamCeramic'])
+  add_lathe('WashJug', (-1.32, 0.78, -0.66), ((0.05, 0), (0.09, 0.045), (0.098, 0.15), (0.05, 0.23), (0.058, 0.29)), MATS['CreamCeramic'], 24)
+  add_torus('WashJugHandle', (-1.22, 0.94, -0.66), 0.055, 0.013, MATS['CreamCeramic'], (math.pi / 2, 0, 0))
+  add_sagged_panel('WashTowel', (-1.6, 0.792, -0.5), 0.3, 0.24, MATS['Canvas'], sag=0.008, yaw=0.15, x_segments=5, z_segments=4, thickness=0.01)
+  add_box('BedroomMirrorFrame', (-1.6, 1.62, -0.19), (0.5, 0.66, 0.04), MATS['FurnitureWood'], bevel=0.012)
+  add_box('BedroomMirrorGlass', (-1.6, 1.62, -0.215), (0.4, 0.56, 0.012), MATS['MirrorSilver'])
+
+  # --- Peg rail with Lawson's straw hat by the door.
+  add_box('BedroomPegRail', (-6.0, 1.86, -0.22), (1.4, 0.14, 0.1), MATS['DarkTimber'], bevel=0.02)
+  for peg_x in (-6.5, -6.0, -5.5):
+    beam_between(f'BedroomPeg_{peg_x}', (peg_x, 1.83, -0.24), (peg_x, 1.8, -0.46), 0.03, MATS['DarkTimber'], 10)
+  hat_x, hat_y, hat_z = -6.5, 1.78, -0.34
+  add_cylinder('BedroomStrawHatBrim', (hat_x, hat_y, hat_z), 0.17, 0.014, MATS['MaizeBread'], 24, rotation=(0, 0, math.pi / 2))
+  add_sphere('BedroomStrawHatCrown', (hat_x, hat_y + 0.045, hat_z - 0.02), 0.095, MATS['MaizeBread'], (1, 1, 0.6), segments=20, rings=12)
+
+
+def scalesia_tree(prefix, x, z, scale, seed):
+  """A believable Scalesia pedunculata silhouette: leaning trunk, a couple of
+  branches, and a flattened umbrella of overlapping crown lobes — replacing
+  the earlier sphere-on-a-stick toys."""
+  lean = (rand01(seed) - 0.5) * 0.18
+  trunk = add_cylinder(f'{prefix}_Trunk', (x, 1.1 * scale, z), 0.075 * scale, 2.3 * scale, MATS['DarkTimber'], 10)
+  trunk.rotation_euler[0] = lean
+  for branch_index in range(2):
+    angle = rand01(seed + 3 + branch_index * 1.7) * math.tau
+    beam_between(
+      f'{prefix}_Branch_{branch_index}',
+      (x, 1.65 * scale, z),
+      (x + math.cos(angle) * 0.75 * scale, 2.25 * scale, z + math.sin(angle) * 0.75 * scale),
+      0.032 * scale,
+      MATS['DarkTimber'],
+      8,
+    )
+  crown_mats = ('LeafMiddle', 'LeafNear', 'LeafMiddle', 'LeafFar')
+  for crown_index in range(4):
+    angle = rand01(seed + 11 + crown_index * 2.3) * math.tau
+    reach = 0.36 * scale * (0.35 + rand01(seed + 17 + crown_index))
+    crown_y = (2.12 + rand01(seed + 23 + crown_index) * 0.45) * scale
+    radius = (0.52 + rand01(seed + 29 + crown_index) * 0.3) * scale
+    add_sphere(
+      f'{prefix}_Crown_{crown_index}',
+      (x + math.cos(angle) * reach, crown_y, z + math.sin(angle) * reach),
+      radius,
+      MATS[crown_mats[crown_index]],
+      (1.3, 0.5, 1.15),
+      segments=20,
+      rings=12,
+    )
+
+
+def shrub_mound(prefix, x, z, scale, seed):
+  """Low rounded lava-scrub masses in place of the old boxy 'garden leaves'."""
+  for lobe_index in range(3):
+    angle = rand01(seed + lobe_index * 3.3) * math.tau
+    reach = 0.34 * scale * rand01(seed + 7 + lobe_index)
+    radius = (0.5 + rand01(seed + 13 + lobe_index) * 0.3) * scale
+    add_sphere(
+      f'{prefix}_Lobe_{lobe_index}',
+      (x + math.cos(angle) * reach, 0.28 * scale, z + math.sin(angle) * reach),
+      radius,
+      MATS['LeafNear' if lobe_index != 1 else 'LeafMiddle'],
+      (1.35, 0.62, 1.1),
+      segments=18,
+      rings=10,
+    )
 
 
 def build_veranda_diorama():
@@ -954,26 +1388,38 @@ def build_veranda_diorama():
   for index, x in enumerate((-10, -7, -4, 4, 7, 10)):
     add_cylinder(f'ExteriorFencePost_{index}', (x, 0.55, 12.1), 0.07, 1.1, MATS['OldPine'], 10)
   add_box('ExteriorFenceRail', (0, 0.5, 12.1), (21, 0.1, 0.1), MATS['OldPine'])
-  for index, (x, z, scale) in enumerate(((-8, 13.5, 1.1), (-4.5, 14.3, 0.8), (4.6, 13.8, 0.9), (8.5, 14.7, 1.2))):
-    add_sphere(f'ExteriorGardenMass_{index}', (x, 0.35 * scale, z), 0.75 * scale, MATS['LeafNear'], (1.4, 0.7, 1))
-    for leaf_index, angle in enumerate((-0.75, -0.2, 0.35, 0.9)):
-      leaf_x = x + math.sin(angle) * 0.5 * scale
-      leaf_z = z + math.cos(angle) * 0.35 * scale
-      leaf = add_box(f'ExteriorGardenLeaf_{index}_{leaf_index}', (leaf_x, 0.58 * scale, leaf_z), (0.16 * scale, 0.68 * scale, 0.34 * scale), MATS['LeafNear'], yaw=angle, bevel=0.06)
-      leaf.rotation_euler[0] = angle * 0.22
+  for index, (x, z, scale) in enumerate(((-8, 13.5, 1.0), (-4.5, 14.3, 0.75), (4.6, 13.8, 0.85), (8.5, 14.7, 1.05))):
+    shrub_mound(f'ExteriorGardenShrub_{index}', x, z, scale, seed=index * 37.1 + 5.3)
   for index, (x, z, scale) in enumerate(((-8.8, 16.2, 1.0), (-2.8, 17.0, 1.25), (3.4, 16.4, 0.92), (9.2, 17.1, 1.18))):
-    add_cylinder(f'ExteriorScalesiaTrunk_{index}', (x, 1.05 * scale, z), 0.09 * scale, 2.1 * scale, MATS['DarkTimber'], 12)
-    for crown, offset in enumerate(((-0.42, 0.06), (0.12, 0.0), (0.52, -0.08))):
-      add_sphere(f'ExteriorScalesiaCrown_{index}_{crown}', (x + crown * 0.26, 2.1 * scale + offset[1], z + offset[0]), 0.62 * scale, MATS['LeafMiddle'], (1.2, 0.72, 1))
+    scalesia_tree(f'ExteriorScalesia_{index}', x, z, scale, seed=index * 53.7 + 11.9)
   for index, (x, z, scale) in enumerate(((-10.4, 16.6, 1.3), (-6.7, 17.7, 0.9), (6.3, 17, 1.2), (10.6, 17.9, 1.5))):
     add_sphere(f'ExteriorBasalt_{index}', (x, 0.4 * scale, z), 0.55 * scale, MATS['Basalt'], (1.3, 0.75, 1))
 
   # Side-window diorama: close enough to register as vegetation and wet soil,
   # but clear of the playable shell and never mistaken for an interior wall.
-  add_box('ExteriorWestGround', (-13.4, -0.16, 3.9), (5.7, 0.13, 17.5), MATS['WetGrass'])
-  add_box('ExteriorWestMistNear', (-17.0, 1.95, 3.9), (0.035, 3.9, 17.5), MATS['HighlandMistNear'])
+  # Extended south so the new bedroom west window also looks onto garden.
+  add_box('ExteriorWestGround', (-13.4, -0.16, 1.9), (5.7, 0.13, 21.5), MATS['WetGrass'])
+  add_box('ExteriorWestMistNear', (-17.0, 1.95, 1.9), (0.035, 3.9, 21.5), MATS['HighlandMistNear'])
+  add_sphere('ExteriorWestFernSouth', (-12.4, 0.26, -3.4), 0.62, MATS['LeafNear'], (1.35, 0.65, 1), segments=18, rings=10)
+
+  # South diorama behind the bedroom rear window: wet paddock, scrub, basalt.
+  add_box('ExteriorSouthGround', (-5.0, -0.16, -11.6), (14.5, 0.13, 6.2), MATS['WetGrass'])
+  add_box('ExteriorSouthMistNear', (-5.0, 1.95, -14.6), (14.5, 3.9, 0.035), MATS['HighlandMistNear'])
+  for index, (x, z, scale) in enumerate(((-8.6, -9.8, 0.85), (-5.4, -10.4, 1.0), (-2.2, -9.9, 0.7))):
+    shrub_mound(f'ExteriorSouthShrub_{index}', x, z, scale, seed=index * 41.9 + 7.7)
+  scalesia_tree('ExteriorSouthScalesia', -6.8, -12.2, 1.05, seed=133.7)
+  add_sphere('ExteriorSouthBasalt', (-1.4, 0.45, -11.4), 0.62, MATS['Basalt'], (1.3, 0.75, 1))
   for index, (x, z, scale) in enumerate(((-12.1, 1.5, 0.65), (-13.4, 2.8, 0.9), (-12.6, 4.6, 0.72), (-14.1, 6.1, 1.0), (-12.3, 7.3, 0.6))):
-    add_sphere(f'ExteriorWestFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafNear' if x > -13 else 'LeafMiddle'], (1.35, 0.65, 1))
+    add_sphere(f'ExteriorWestFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafNear' if x > -13 else 'LeafMiddle'], (1.35, 0.65, 1), segments=18, rings=10)
+
+  # East diorama behind the new office window: wet grass, tree ferns, one
+  # scalesia, and basalt so the survey table looks onto the working highlands.
+  add_box('ExteriorEastGround', (13.6, -0.16, 4.25), (6.2, 0.13, 17.2), MATS['WetGrass'])
+  add_box('ExteriorEastMistNear', (17.0, 1.95, 4.25), (0.035, 3.9, 17.2), MATS['HighlandMistNear'])
+  for index, (x, z, scale) in enumerate(((11.9, 4.4, 0.7), (12.7, 6.3, 0.95), (12.2, 7.6, 0.6), (13.2, 2.8, 0.8))):
+    add_sphere(f'ExteriorEastFern_{index}', (x, 0.32 * scale, z), 0.7 * scale, MATS['LeafNear' if index % 2 == 0 else 'LeafMiddle'], (1.35, 0.65, 1), segments=18, rings=10)
+  scalesia_tree('ExteriorEastScalesia', 14.3, 5.6, 1.05, seed=91.3)
+  add_sphere('ExteriorEastBasalt', (15.1, 0.5, 8.1), 0.68, MATS['Basalt'], (1.3, 0.75, 1))
 
 
 def join_by_material():
@@ -1108,8 +1554,14 @@ def prop_bowl():
   add_lathe('ServingBowl', (0, 0, 0), ((0.12, 0.01), (0.2, 0.035), (0.27, 0.11), (0.3, 0.19)), MATS['Earthenware'], 34)
   add_torus('ServingBowlRim', (0, 0.19, 0), 0.3, 0.022, MATS['CreamCeramic'])
   add_cylinder('ServingBowlInterior', (0, 0.17, 0), 0.255, 0.012, MATS['DarkTimber'], 34)
-  for index, (x, z) in enumerate(((-0.1, -0.03), (0.06, 0.04), (0.12, -0.08), (-0.03, 0.1))):
-    add_sphere(f'SweetPotato_{index}', (x, 0.22, z), 0.09, MATS['MaizeBread'], (1.25, 0.72, 0.82))
+  # Smooth oranges with stem nubs; the faceted low-poly spheres read as
+  # blockout fruit at dining distance.
+  orange_positions = ((-0.1, 0.185, -0.03), (0.065, 0.185, 0.05), (0.125, 0.19, -0.085), (-0.035, 0.19, 0.115), (0.0, 0.175, -0.13))
+  for index, (x, y, z) in enumerate(orange_positions):
+    add_sphere(f'Orange_{index}', (x, y, z), 0.082, MATS['OrangePeel'], (1, 0.95, 1), segments=24, rings=16)
+    add_cylinder(f'OrangeStem_{index}', (x, y + 0.079, z), 0.009, 0.014, MATS['OrangeStem'], 10)
+  add_sphere('Orange_Top', (0.0, 0.3, 0.0), 0.082, MATS['OrangePeel'], (1, 0.95, 1), segments=24, rings=16)
+  add_cylinder('OrangeStem_Top', (0.012, 0.379, 0.008), 0.009, 0.014, MATS['OrangeStem'], 10)
 
 
 def prop_chart():

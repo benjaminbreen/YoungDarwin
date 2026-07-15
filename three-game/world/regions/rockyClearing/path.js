@@ -102,8 +102,10 @@ export function rockyClearingRubbleMask(x, z) {
 
 export function rockyClearingCaveWallMask(x, z) {
   const cave = ROCKY_CLEARING_CAVE;
-  const wall = THREE.MathUtils.smoothstep(-z, 8.0, 20.0)
-    * Math.exp(-Math.pow((x - cave.x) / 21.0, 2));
-  const mouthCut = Math.exp(-Math.pow((x - cave.x) / 6.0, 2) - Math.pow((z - cave.z) / 4.2, 2));
-  return THREE.MathUtils.clamp(wall * (1 - mouthCut * 0.72), 0, 1);
+  const northFace = THREE.MathUtils.smoothstep(-z, 6.2, 20.5)
+    * Math.exp(-Math.pow((x - cave.x) / 24.0, 2));
+  const westShoulder = Math.exp(-Math.pow((x - (cave.x - 11.5)) / 10.5, 2) - Math.pow((z - (cave.z - 1.8)) / 8.5, 2)) * 0.82;
+  const eastShoulder = Math.exp(-Math.pow((x - (cave.x + 12.0)) / 11.0, 2) - Math.pow((z - (cave.z - 1.5)) / 8.8, 2)) * 0.76;
+  const mouthCut = Math.exp(-Math.pow((x - cave.x) / 5.0, 2) - Math.pow((z - cave.z) / 3.35, 2));
+  return THREE.MathUtils.clamp(Math.max(northFace, westShoulder, eastShoulder) * (1 - mouthCut * 0.94), 0, 1);
 }

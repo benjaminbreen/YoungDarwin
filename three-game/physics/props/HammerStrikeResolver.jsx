@@ -66,6 +66,15 @@ export function HammerStrikeResolver() {
         dustColor: impact.dustColor,
         sparkColor: impact.sparkColor,
       });
+      if (impact.obstacle?.kind === 'boulder') {
+        emitPropEvent('rock-hammer-fracture', {
+          obstacle: impact.obstacle,
+          zoneId: zoneRef.current,
+          position: impact.position,
+          normal: impact.surfaceNormal || impact.impactDir,
+          intensity: 1,
+        });
+      }
       if (impact.groundPlume) {
         emitPropEvent('terrain-dust', {
           position: impact.position,

@@ -4,6 +4,7 @@ import React from 'react';
 import * as THREE from 'three';
 import { StaticGLB } from '../assets/StaticGLB';
 import { getZone } from '../../world/floreanaZones';
+import { getBeagleSightline } from '../../world/beagleSightlines';
 import { useThreeGameStore } from '../../store';
 
 const sailGeometry = new THREE.BufferGeometry();
@@ -19,7 +20,8 @@ export function Beagle() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const openBeagleTravelPrompt = useThreeGameStore(state => state.openBeagleTravelPrompt);
   const zone = getZone(currentZoneId);
-  const canReturnToBeagle = currentZoneId === 'POST_OFFICE_BAY';
+  const sightline = getBeagleSightline(currentZoneId);
+  const canReturnToBeagle = sightline?.interactive === true;
   const handleClick = React.useCallback((event) => {
     if (!canReturnToBeagle) return;
     event.stopPropagation();
@@ -37,13 +39,14 @@ export function Beagle() {
     if (typeof document !== 'undefined') document.body.style.cursor = '';
   }, []);
 
-  if (!zone.beaglePosition && currentZoneId !== 'POST_OFFICE_BAY') return null;
-  const [x, y, z] = zone.beaglePosition || [13.5, -1.08, -48];
+  const position = sightline?.position || zone.beaglePosition;
+  if (!position) return null;
+  const [x, y, z] = position;
   return (
     <group
       position={[x, y, z]}
-      rotation={[0, -0.08, 0]}
-      scale={0.92}
+      rotation={sightline?.rotation || [0, -0.08, 0]}
+      scale={sightline?.scale || 0.92}
       userData={{ reflect: true }}
       onClick={handleClick}
       onPointerOver={handlePointerOver}

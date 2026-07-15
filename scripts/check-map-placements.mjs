@@ -2,44 +2,49 @@
 // Classifies each pixel as land/water, reports misplaced markers, and
 // suggests snapped coordinates. Prints an ASCII mask with markers overlaid.
 import sharp from 'sharp';
+import { FLOREANA_MAP_PLACEMENTS } from '../game-core/floreanaGeography.js';
 
 const IMG = 'public/maps/floreana-island-map-new.png';
 
-const placements = [
-  ['BEAGLE', 0.321, 0.077, 'water'],
-  ['NW_REEF', 0.284, 0.162, 'coast'],
-  ['POST_OFFICE_BAY', 0.388, 0.162, 'coast'],
-  ['N_SHORE', 0.500, 0.094, 'coast'],
-  ['N_OUTCROP', 0.585, 0.060, 'water'],
-  ['CORMORANT_BAY', 0.619, 0.145, 'coast'],
-  ['PUNTA_CORMORANT', 0.705, 0.165, 'coast'],
-  ['DEVILS_CROWN', 0.604, 0.043, 'water'],
-  ['BLACK_BEACH_SURF', 0.164, 0.385, 'water'],
-  ['BLACK_BEACH', 0.194, 0.419, 'coast'],
-  ['LAVA_FLATS', 0.325, 0.330, 'land'],
-  ['NORTHERN_HIGHLANDS', 0.500, 0.280, 'land'],
-  ['EASTERN_CLIFFS', 0.813, 0.282, 'coast'],
-  ['COASTAL_SCRUBLAND', 0.858, 0.376, 'coast'],
-  ['W_LAVA', 0.160, 0.575, 'coast'],
-  ['W_HIGH', 0.305, 0.535, 'land'],
-  ['C_HIGH', 0.445, 0.575, 'land'],
-  ['PENAL_COLONY', 0.510, 0.660, 'land'],
-  ['E_MID', 0.615, 0.475, 'land'],
-  ['EL_MIRADOR', 0.725, 0.520, 'land'],
-  ['WATKINS', 0.791, 0.521, 'coast'],
-  ['SW_BEACH', 0.230, 0.770, 'coast'],
-  ['MANGROVES', 0.395, 0.755, 'land'],
-  ['S_VOLCANIC', 0.550, 0.775, 'land'],
-  ['SE_PROMONTORY', 0.672, 0.744, 'coast'],
-  ['SE_COAST', 0.761, 0.590, 'coast'],
-  ['SE_SHALLOW_SURF', 0.799, 0.607, 'water'],
-  ['SW_CLIFFS', 0.306, 0.803, 'coast'],
-  ['S_INTERTIDAL', 0.388, 0.863, 'coast'],
-  ['S_WETLANDS', 0.582, 0.821, 'land'],
-  ['S_HUT', 0.381, 0.889, 'coast'],
-  ['PUNTA_SUR', 0.485, 0.889, 'coast'],
-  ['S_REEFS', 0.425, 0.880, 'coast'],
-];
+const desiredSurface = {
+  BEAGLE: 'water',
+  NW_REEF: 'coast',
+  POST_OFFICE_BAY: 'coast',
+  N_SHORE: 'coast',
+  N_OUTCROP: 'water',
+  CORMORANT_BAY: 'coast',
+  PUNTA_CORMORANT: 'coast',
+  DEVILS_CROWN: 'water',
+  BLACK_BEACH_SURF: 'water',
+  BLACK_BEACH: 'coast',
+  LAVA_FLATS: 'land',
+  NORTHERN_HIGHLANDS: 'land',
+  EASTERN_CLIFFS: 'coast',
+  COASTAL_SCRUBLAND: 'coast',
+  W_LAVA: 'coast',
+  W_HIGH: 'land',
+  C_HIGH: 'land',
+  PENAL_COLONY: 'land',
+  E_MID: 'land',
+  EL_MIRADOR: 'land',
+  WATKINS: 'land',
+  SW_BEACH: 'coast',
+  MANGROVES: 'land',
+  S_VOLCANIC: 'land',
+  SE_PROMONTORY: 'coast',
+  SE_COAST: 'coast',
+  SE_SHALLOW_SURF: 'water',
+  SW_CLIFFS: 'coast',
+  S_INTERTIDAL: 'coast',
+  S_WETLANDS: 'land',
+  S_HUT: 'coast',
+  PUNTA_SUR: 'coast',
+  S_REEFS: 'water',
+};
+
+const placements = FLOREANA_MAP_PLACEMENTS
+  .filter(placement => desiredSurface[placement.id])
+  .map(placement => [placement.id, placement.at[0], placement.at[1], desiredSurface[placement.id]]);
 
 const W = 134, H = 117; // downsample grid
 const { data, info } = await sharp(IMG).resize(W, H, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });

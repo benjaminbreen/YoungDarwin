@@ -1,8 +1,22 @@
 import * as THREE from 'three';
 import {
+  createStandardFootPathSplatTexture,
+  standardFootPathSplatGLSL,
+  standardFootPathSplatUniforms,
+} from '../../paths/standardPath';
+import {
   FLOREANA_PBR_TEXTURES,
   loadTerrainAlbedo,
 } from '../materials/pbrTerrainTextures';
+import { N_SHORE_PATH_POINTS } from './terrain';
+
+const N_SHORE_PATH_SPLAT_BOUNDS = {
+  originX: -54,
+  originZ: -46,
+  width: 108,
+  depth: 92,
+  size: 1024,
+};
 
 // Per-pixel splat shader for the Northern Shore: black volcanic sand with
 // mineral sparkle, rippled ash beach, rust sesuvium mottle, tawny dry-grass
@@ -17,6 +31,11 @@ export function createNorthShoreTerrainMaterial() {
   const basaltAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
   const grassAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.dryGrassLitter);
   const cinderAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.redCinderDirt);
+  const pathSplatTexture = createStandardFootPathSplatTexture({
+    pathPoints: N_SHORE_PATH_POINTS[0],
+    bounds: N_SHORE_PATH_SPLAT_BOUNDS,
+    minimumWidth: 1.76,
+  });
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.9,
@@ -30,9 +49,15 @@ export function createNorthShoreTerrainMaterial() {
     basaltAlbedo.dispose();
     grassAlbedo.dispose();
     cinderAlbedo.dispose();
+    pathSplatTexture.dispose();
   });
 
   material.onBeforeCompile = shader => {
+    Object.assign(shader.uniforms, standardFootPathSplatUniforms(pathSplatTexture, {
+      bounds: N_SHORE_PATH_SPLAT_BOUNDS,
+      textureUniform: 'uNsPathSplat',
+      boundsUniform: 'uNsPathSplatBounds',
+    }));
     shader.uniforms.rimColor = { value: new THREE.Color('#f1d38a') };
     shader.uniforms.rimIntensity = { value: 0.07 };
     shader.uniforms.uSwashTime = { value: 0 };
@@ -92,6 +117,11 @@ export function createNorthShoreTerrainMaterial() {
         uniform float uNsCinderScale;
         uniform float uNsScrubScale;
         varying vec3 vTerrainWorld;
+        ${standardFootPathSplatGLSL({
+          functionName: 'nsPathSplat',
+          textureUniform: 'uNsPathSplat',
+          boundsUniform: 'uNsPathSplatBounds',
+        })}
         float nsHash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
         }
@@ -214,6 +244,19 @@ export function createNorthShoreTerrainMaterial() {
         color = mix(color, mix(color, nsDryGrass(p * 1.4) * 0.92, 0.55), palo * (1.0 - blackSand - ash));
         color = mix(color, nsLava(p), clamp(prom * 1.2, 0.0, 1.0));
         color = mix(color, nsSeabed(p), seabed);
+        // Worn coastal footpath from the Post Office Bay seam toward the
+        // inland/southern route. The splat supplies irregular shoulders and
+        // compacted patches while reusing the shore's own cinder/tuff albedo.
+        vec4 pathSplat = nsPathSplat(p);
+        float pathCover = clamp(max(pathSplat.r, pathSplat.g * 0.56), 0.0, 1.0) * (1.0 - seabed);
+        float pathShoulder = pathSplat.a * (1.0 - seabed);
+        vec3 pathDirt = mix(
+          nsAlbedo(uNsCinderAlbedo, p, uNsCinderScale, 8.0) * vec3(1.16, 0.82, 0.58),
+          nsAlbedo(uNsTuffAlbedo, p, uNsTuffScale, 9.0) * vec3(0.78, 0.68, 0.52),
+          pathSplat.g * 0.42
+        );
+        color = mix(color, pathDirt, pathShoulder * 0.32);
+        color = mix(color, pathDirt, pathCover * 0.88);
         // High-water wrack line: a dark, broken ribbon of stranded debris.
         float wrackPath = abs(d - 5.4 - sin(p.x * 0.21) * 0.7);
         float wrack = smoothstep(0.55, 0.1, wrackPath) * smoothstep(0.38, 0.7, nsFbm(p * 2.1 + vec2(3.0, -6.0)));
@@ -255,7 +298,7 @@ export function createNorthShoreTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'north-shore-splat-v1';
+  material.customProgramCacheKey = () => 'north-shore-splat-with-route-path-v2';
   material.needsUpdate = true;
   return material;
 }

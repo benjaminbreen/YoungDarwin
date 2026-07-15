@@ -28,7 +28,20 @@ function rockyRiseMask(x, z) {
 
 function caveMouthCut(x, z) {
   const cave = ROCKY_CLEARING_CAVE;
-  return Math.exp(-Math.pow((x - cave.x) / 5.6, 2) - Math.pow((z - cave.z) / 3.6, 2));
+  return Math.exp(-Math.pow((x - cave.x) / 4.8, 2) - Math.pow((z - cave.z) / 3.15, 2));
+}
+
+function caveBedrockRise(x, z) {
+  const cave = ROCKY_CLEARING_CAVE;
+  const northBank = THREE.MathUtils.smoothstep(-z, 5.4, 22.5)
+    * Math.exp(-Math.pow((x - cave.x) / 28, 2));
+  const centralMass = Math.exp(
+    -Math.pow((x - cave.x) / 22, 2)
+    -Math.pow((z - (cave.z - 3.2)) / 12.5, 2),
+  ) * 0.82;
+  const westMass = Math.exp(-Math.pow((x - (cave.x - 17)) / 14, 2) - Math.pow((z + 15) / 13, 2)) * 0.62;
+  const eastMass = Math.exp(-Math.pow((x - (cave.x + 18)) / 15, 2) - Math.pow((z + 14) / 14, 2)) * 0.56;
+  return THREE.MathUtils.clamp(Math.max(northBank, centralMass, westMass, eastMass), 0, 1);
 }
 
 export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
@@ -39,6 +52,7 @@ export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
   const threshold = rockyClearingCaveThresholdMask(x, z);
   const rubble = rockyClearingRubbleMask(x, z);
   const rise = rockyRiseMask(x, z);
+  const bedrock = caveBedrockRise(x, z);
   const mouthCut = caveMouthCut(x, z);
   const shelf = Math.max(0, crackNoise(x * 0.13 + 4.0, z * 0.12 - 9.0));
   const fine = terrainFineDetail(x, z) * (movementSurface ? 0.08 : 0.34);
@@ -48,6 +62,7 @@ export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
     + medium * 0.46
     + edgeLift(x, z)
     + rise * 1.24
+    + bedrock * 1.72
     + rubble * shelf * (movementSurface ? 0.12 : 0.42);
 
   y -= clearing * 0.22;
@@ -58,8 +73,8 @@ export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
   // to reach without making the surrounding boulder field feel paved.
   const caveApronY = 3.38 + broad * 0.18 + medium * 0.08;
   y = THREE.MathUtils.lerp(y, caveApronY, threshold * 0.78);
-  y += rockyClearingCaveWallMask(x, z) * 1.35;
-  y -= mouthCut * 0.72;
+  y += rockyClearingCaveWallMask(x, z) * 1.48;
+  y -= mouthCut * (1.05 + bedrock * 0.82);
   y += fine * (1 - threshold * 0.55);
   return Math.max(0.6, y);
 }

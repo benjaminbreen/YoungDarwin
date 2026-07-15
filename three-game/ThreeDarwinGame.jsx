@@ -12,6 +12,7 @@ import { ThreeHUD } from './ui/ThreeHUD';
 import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
 import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
 import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
+import { MapGeographyDevPanel } from './ui/dev/MapGeographyDevPanel';
 import { WaterDevPanel } from './ui/dev/WaterDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
@@ -1743,6 +1744,7 @@ export default function ThreeDarwinGame() {
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
   const [showDarwinAnimationLab, setShowDarwinAnimationLab] = useState(false);
+  const [showMapGeographyDev, setShowMapGeographyDev] = useState(false);
   const [perfProbe, setPerfProbe] = useState(false);
   const [costProbe, setCostProbe] = useState(false);
   const [e2eMode, setE2EMode] = useState(false);
@@ -1826,6 +1828,9 @@ export default function ThreeDarwinGame() {
     setE2EMode(nextE2EMode);
     setScreenshotMode(nextScreenshotMode);
     setSkipOpeningIntro(skipOpeningIntroFromParams(params));
+    if (process.env.NODE_ENV !== 'production' && params.has('mapDev')) {
+      setShowMapGeographyDev(true);
+    }
     setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
     setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
     setCostProbe(params.has('costProbe'));
@@ -1853,6 +1858,11 @@ export default function ThreeDarwinGame() {
       if (event.code === 'Digit0') {
         event.preventDefault();
         setShowAssetBrowser(value => !value);
+        return;
+      }
+      if (event.code === 'Digit6' && process.env.NODE_ENV !== 'production') {
+        event.preventDefault();
+        setShowMapGeographyDev(value => !value);
         return;
       }
       if (event.code === 'Digit7') {
@@ -2126,6 +2136,9 @@ export default function ThreeDarwinGame() {
         )}
         {gameUiVisible && (
           <DarwinAnimationDevPanel open={showDarwinAnimationLab} onClose={() => setShowDarwinAnimationLab(false)} />
+        )}
+        {process.env.NODE_ENV !== 'production' && gameUiVisible && (
+          <MapGeographyDevPanel open={showMapGeographyDev} onClose={() => setShowMapGeographyDev(false)} />
         )}
         {gameUiVisible && <WaterDevPanel />}
         <PerformancePanel

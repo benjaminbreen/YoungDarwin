@@ -373,15 +373,26 @@ function RockImpact({ event, onExpired }) {
   const dir = useMemo(() => normalizeVec3(event.dir, { x: 0, y: 0, z: 1 }), [event.dir]);
   const normal = useMemo(() => normalizeVec3(event.normal, { x: 0, y: 1, z: 0 }), [event.normal]);
   const intensity = THREE.MathUtils.clamp(event.intensity ?? 1, 0.15, 1);
-  const chipCount = floorCount(5, intensity);
-  const sparkCount = floorCount(2, intensity, 1);
+  const hardBoulder = event.obstacleKind === 'boulder';
+  const chipCount = floorCount(hardBoulder ? 12 : 5, intensity, hardBoulder ? 5 : 1);
+  const sparkCount = floorCount(hardBoulder ? 12 : 2, intensity, hardBoulder ? 5 : 1);
   const chips = useMemo(() => makeBurstVectors(event.id, { x: -dir.x, z: -dir.z }, chipCount, {
-    spreadMin: 0.2, spreadMax: 0.56, forwardMin: 0.24, forwardMax: 0.68, upMin: 0.22, upMax: 0.78,
-  }), [chipCount, dir, event.id]);
+    spreadMin: 0.2,
+    spreadMax: hardBoulder ? 0.82 : 0.56,
+    forwardMin: hardBoulder ? 0.46 : 0.24,
+    forwardMax: hardBoulder ? 1.05 : 0.68,
+    upMin: 0.22,
+    upMax: hardBoulder ? 1.05 : 0.78,
+  }), [chipCount, dir, event.id, hardBoulder]);
   const reflected = useMemo(() => reflectVec(dir, normal), [dir, normal]);
   const sparks = useMemo(() => makeBurstVectors(`${event.id}:sparks`, { x: reflected.x, z: reflected.z }, sparkCount, {
-    spreadMin: 0.08, spreadMax: 0.2, forwardMin: 0.6, forwardMax: 1.1, upMin: 0.15, upMax: 0.5,
-  }), [event.id, reflected, sparkCount]);
+    spreadMin: 0.08,
+    spreadMax: hardBoulder ? 0.38 : 0.2,
+    forwardMin: hardBoulder ? 0.9 : 0.6,
+    forwardMax: hardBoulder ? 1.85 : 1.1,
+    upMin: 0.15,
+    upMax: hardBoulder ? 0.78 : 0.5,
+  }), [event.id, hardBoulder, reflected, sparkCount]);
 
   const chipGeometry = useMemo(() => new THREE.CircleGeometry(0.045, 6), []);
   const chipMaterials = useMemo(() => chips.map((_, index) => new THREE.MeshBasicMaterial({

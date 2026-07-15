@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { pathFrameAt } from '../../paths/standardPath';
 import { crackNoise, elevationNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { POST_OFFICE_NORTH_SHORE_SEAM } from '../../routeSeams';
 
 // ---------------------------------------------------------------------------
 // Northern Shore (N_SHORE) — authored black-volcanic-sand coast.
@@ -10,6 +12,34 @@ import { crackNoise, elevationNoise, terrainFineDetail, terrainSurfaceNoise } fr
 //   palo santo brush on the southern rise. A jagged basalt promontory juts
 //   into the surf on the west, per the field notes ("jagged volcanic rocks
 //   jut out into the surf").
+
+export const N_SHORE_PATH_POINTS = [[
+  [-54, 5.0, 1.82],
+  [...POST_OFFICE_NORTH_SHORE_SEAM.target.point, 1.82],
+  [-43, 6.5, 1.88],
+  [-31, 10, 1.94],
+  [-19, 15, 2.02],
+  [-11, 27, 2.08],
+  [-7, 46, 2.0],
+]];
+
+export function northernShorePathInfo(x, z) {
+  const frame = pathFrameAt(N_SHORE_PATH_POINTS, x, z);
+  const edgeNoise = Math.sin(frame.centerX * 0.19 + frame.centerZ * 0.14) * 0.2
+    + terrainSurfaceNoise(x * 0.84 + 6, z * 0.84 - 4) * 0.24;
+  const width = Math.max(1.76, frame.width + edgeNoise);
+  const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.34, width * 0.82);
+  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.48, width * 1.04)
+    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.92, width * 1.5));
+  const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.56, width * 1.12);
+  return {
+    ...frame,
+    width,
+    tread: THREE.MathUtils.clamp(tread, 0, 1),
+    shoulder: THREE.MathUtils.clamp(shoulder, 0, 1),
+    path: THREE.MathUtils.clamp(path, 0, 1),
+  };
+}
 
 // Kept to pure sines so the terrain fragment shader can reproduce the exact
 // curve for the per-pixel wet-sand band.
@@ -50,6 +80,8 @@ export function northernShoreHeight(x, z, { movementSurface = false } = {}) {
   const prom = northShorePromontory(x, z);
   y += prom * (1.7 + Math.abs(crackNoise(x * 0.33, z * 0.31)) * (movementSurface ? 0.5 : 1.5));
 
+  const path = northernShorePathInfo(x, z);
+  y -= path.tread * 0.09;
   y += movementSurface ? terrainFineDetail(x, z) * 0.22 : terrainFineDetail(x, z) * 0.85;
   return Math.max(-4.4, y);
 }
@@ -58,6 +90,9 @@ export function northernShoreBiomeAt(x, z, y = northernShoreHeight(x, z)) {
   const coast = northShoreCoastZ(x);
   const d = z - coast;
   if (y < -0.66 && d < 0.5) return 'water';
+  const path = northernShorePathInfo(x, z);
+  if (path.tread > 0.4 || path.path > 0.62) return 'north-shore-path';
+  if (path.shoulder > 0.34) return 'north-shore-path-shoulder';
   if (northShorePromontory(x, z) > 0.45 && d < 8) return 'lava-shelf';
   if (d < 2.4) return 'black-sand';
   if (d < 8.5) return 'ash-beach';
@@ -70,6 +105,8 @@ function northernShoreColorForBiome(x, z, biome) {
   const noise = terrainSurfaceNoise(x, z);
   const color = new THREE.Color();
   if (biome === 'water') color.set('#49b9c7');
+  else if (biome === 'north-shore-path') color.set('#a36d44');
+  else if (biome === 'north-shore-path-shoulder') color.set('#8e7654');
   else if (biome === 'lava-shelf') color.set('#34312b');
   else if (biome === 'black-sand') color.set('#4d473e');
   else if (biome === 'ash-beach') color.set('#968a74');

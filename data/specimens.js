@@ -749,12 +749,12 @@ export const baseSpecimens = [
 
   {
     id: 'basalt',
-    name: 'Basalt Formation',
+    name: 'Vesicular Basalt Exposure',
     latin: 'Lava basaltica',
     ontology: 'Mineral',
     order: 'Igneous',
     sub_order: 'Volcanic',
-    description: 'A piece of dark volcanic rock with telltale bubbles and cooling fractures.',
+    description: 'A low exposure of dark volcanic rock with telltale bubbles and cooling fractures.',
     details: [
       'Surface sometimes pitted with small cavities where gases escaped',
       'Edges can be sharp and jagged underfoot',

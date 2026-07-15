@@ -23,6 +23,7 @@ import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { getModelAsset } from '../../modelAssets';
 import { SpecimenHighlight } from './SpecimenHighlight';
+import { BasaltSpecimenShape } from './BasaltSpecimenShape';
 
 const CARRY_PICKUP_DISTANCE = 2.15;
 const CARRY_HOLD_DISTANCE = 1.12;
@@ -155,14 +156,6 @@ function ProceduralSpecimenShape({ specimen }) {
       </group>
     );
   }
-  if (specimen.id === 'basalt') {
-    return (
-      <mesh castShadow receiveShadow position={[0, 0.35, 0]} scale={[1.1, 0.7, 0.9]}>
-        <dodecahedronGeometry args={[0.7, 0]} />
-        <primitive object={material} attach="material" />
-      </mesh>
-    );
-  }
   if (specimen.id === 'mediumgroundfinch') {
     return (
       <group>
@@ -283,6 +276,7 @@ function ProceduralSpecimenShape({ specimen }) {
 
 export function SpecimenShape({ specimen, animationSelector, onSceneReady = null }) {
   if (specimen.pollinator) return <PollinatorSpecimenShape specimen={specimen} />;
+  if (specimen.id === 'basalt') return <BasaltSpecimenShape />;
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
@@ -742,7 +736,7 @@ export function SpecimenActor({ specimen }) {
   const nearby = nearbySpecimenId === actorId;
   const markerY = specimen.id === 'galapagoscotton' ? 3.45
     : specimen.id === 'cactus' ? 2.15
-    : specimen.id === 'basalt' ? 1.15
+    : specimen.id === 'basalt' ? 0.88
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'lavalizard' ? 0.72
     : specimen.id === 'crab' ? 0.78
@@ -755,7 +749,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'feralhorse' ? 2.2
     : 1.45;
   const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
-    : specimen.id === 'basalt' ? 0.85
+    : specimen.id === 'basalt' ? 0.72
     : specimen.id === 'cactus' ? 0.6
     : specimen.id === 'galapagoscotton' ? 0.9
     : specimen.id === 'barnacle' ? 0.38

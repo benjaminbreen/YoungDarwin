@@ -6,6 +6,11 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { terrainHeight } from '../../../world/terrain';
+import {
+  FLOREANA_PBR_TEXTURES,
+  disposePbrTerrainSet,
+  loadPbrTerrainSet,
+} from '../../../world/regions/materials/pbrTerrainTextures';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const dummy = new THREE.Object3D();
@@ -231,20 +236,51 @@ const VARIANT_DEFS = {
     roughness: 0.88,
     flatShading: true,
   },
+  'weathered-basalt-chip': {
+    geometry: () => makeCraggyChipGeometry(25.7, [0.078, 0.035, 0.068]),
+    color: '#b5b2a9',
+    wetColor: '#747773',
+    roughness: 0.94,
+    flatShading: true,
+    textureKey: 'weatheredHighlandBasalt',
+    normalScale: 0.42,
+  },
+  'oxidized-scoria-chip': {
+    geometry: () => makeCraggyChipGeometry(31.3, [0.082, 0.043, 0.071]),
+    color: '#b96743',
+    wetColor: '#783d2c',
+    roughness: 0.97,
+    flatShading: true,
+    textureKey: 'oxidizedScoriaceousBasalt',
+    normalScale: 0.56,
+  },
 };
 
-function makeVariantResources() {
-  return Object.fromEntries(Object.entries(VARIANT_DEFS).map(([key, def]) => {
+function makeVariantResources(variantKeys) {
+  return Object.fromEntries(variantKeys.map(key => {
+    const def = VARIANT_DEFS[key] || VARIANT_DEFS['limestone-chip'];
     const geometry = def.geometry();
     geometry.computeBoundingSphere();
+    const pbrTextures = def.textureKey
+      ? loadPbrTerrainSet(FLOREANA_PBR_TEXTURES[def.textureKey])
+      : null;
+    if (pbrTextures) {
+      for (const texture of [pbrTextures.albedo, pbrTextures.normal, pbrTextures.roughness]) {
+        texture.repeat.set(2.2, 2.2);
+      }
+    }
     const material = new THREE.MeshStandardMaterial({
+      map: pbrTextures?.albedo || null,
+      normalMap: pbrTextures?.normal || null,
+      normalScale: new THREE.Vector2(def.normalScale || 0.36, def.normalScale || 0.36),
+      roughnessMap: pbrTextures?.roughness || null,
       color: '#ffffff',
       vertexColors: true,
       roughness: def.roughness,
       metalness: 0,
       flatShading: def.flatShading,
     });
-    return [key, { ...def, geometry, material }];
+    return [key, { ...def, geometry, material, pbrTextures }];
   }));
 }
 
@@ -316,6 +352,8 @@ function applyInstanceColor(mesh, item, variantDef) {
   const tone = Number.isFinite(item.tone) ? item.tone : 0.5;
   _color.offsetHSL(0, -0.03 + tone * 0.035, -0.045 + tone * 0.09);
   if (item.variant === 'basalt-pebble') _color.offsetHSL(0.02, -0.06, 0.08);
+  if (item.variant === 'weathered-basalt-chip') _color.offsetHSL(0.01, -0.08, 0.12);
+  if (item.variant === 'oxidized-scoria-chip') _color.offsetHSL(-0.01, -0.1, 0.13);
   return _color;
 }
 
@@ -373,7 +411,11 @@ export function SurfaceLitterField({ layer, zoneId }) {
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const effectiveZoneId = layer.zoneId || zoneId;
   const items = useMemo(() => layer.items || [], [layer.items]);
-  const resources = useMemo(() => makeVariantResources(), []);
+  const variantKeys = useMemo(() => Array.from(new Set([
+    'limestone-chip',
+    ...items.map(item => (VARIANT_DEFS[item.variant] ? item.variant : 'limestone-chip')),
+  ])).sort(), [items]);
+  const resources = useMemo(() => makeVariantResources(variantKeys), [variantKeys]);
   const buckets = useMemo(
     () => buildBuckets(items, layer.maxVisibleDistance ?? 42),
     [items, layer.maxVisibleDistance],
@@ -387,9 +429,10 @@ export function SurfaceLitterField({ layer, zoneId }) {
   }), [effectiveZoneId, layer.id]);
 
   useLayoutEffect(() => () => {
-    Object.values(resources).forEach(({ geometry, material }) => {
+    Object.values(resources).forEach(({ geometry, material, pbrTextures }) => {
       geometry.dispose();
       material.dispose();
+      if (pbrTextures) disposePbrTerrainSet(pbrTextures);
     });
   }, [resources]);
 

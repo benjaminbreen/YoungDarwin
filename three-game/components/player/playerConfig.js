@@ -123,6 +123,11 @@ export const LANDING_DUST = {
 export const CAMERA = {
   minZoom: 2.8,
   maxZoom: 22,
+  // Top view has its own long zoom range. At the maximum this lifts the
+  // camera to roughly 150 m, enough to read the active map together with its
+  // transformed neighboring-region aprons.
+  topMaxZoom: 36,
+  topMaxHeight: 150,
   defaultZoom: 5.7,
   rotateSpeed: 0.0042,
   pitchSpeed: 0.005,

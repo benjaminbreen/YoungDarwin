@@ -53,8 +53,15 @@ function debrisColors({ rindColor, fractureColor, liftColors }) {
   return { rind, fracture };
 }
 
+function ensureNonIndexed(geometry) {
+  if (!geometry.index) return geometry;
+  const converted = geometry.toNonIndexed();
+  geometry.dispose();
+  return converted;
+}
+
 export function makeChipGeometry(seed, { rindColor, fractureColor, liftColors = false, scale = [1, 1, 1] }) {
-  const geo = new THREE.IcosahedronGeometry(1, 1).toNonIndexed();
+  const geo = ensureNonIndexed(new THREE.IcosahedronGeometry(1, 1));
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   const s = (hashString(seed) % 997) * 0.13;
@@ -98,7 +105,7 @@ export function makeChipGeometry(seed, { rindColor, fractureColor, liftColors = 
 }
 
 export function makeFragmentGeometry(seed, { cutDir, cutDistance = 0.05, radii, rindColor, fractureColor }) {
-  const geo = new THREE.IcosahedronGeometry(1, 2).toNonIndexed();
+  const geo = ensureNonIndexed(new THREE.IcosahedronGeometry(1, 2));
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   const s = (hashString(seed) % 997) * 0.17;
@@ -135,7 +142,7 @@ export function makeLooseStoneGeometry(seed, {
   fractureColor = '#4d5457',
   scale = [1, 1, 1],
 } = {}) {
-  const geo = new THREE.IcosahedronGeometry(1, 2).toNonIndexed();
+  const geo = ensureNonIndexed(new THREE.IcosahedronGeometry(1, 2));
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   const s = (hashString(seed) % 997) * 0.19;

@@ -8,6 +8,14 @@ import {
   terrainFineDetail,
   terrainSurfaceNoise,
 } from '../../terrainShared';
+import {
+  POST_OFFICE_NORTH_SHORE_SEAM,
+  POST_OFFICE_SCRUB_RISE_SEAM,
+} from '../../routeSeams';
+
+function pathPoint([x, z], width) {
+  return [x, z, width];
+}
 
 export function islandMask(x, z) {
   const main = ellipseDistance(x, z, 32, 38, 0, 5);
@@ -25,9 +33,7 @@ export function islandMask(x, z) {
 }
 
 export function coveWaterMask(x, z) {
-  const westTidePool = Math.max(0, 1 - ellipseDistance(x, z, 3.8, 2.2, -43, -17));
-  const landingBay = polygonWaterMask(x, z, POST_OFFICE_BAY_WATER_POLYGON, 7.5);
-  return Math.max(westTidePool * 0.8, landingBay);
+  return polygonWaterMask(x, z, POST_OFFICE_BAY_WATER_POLYGON, 7.5);
 }
 
 function postOfficeLandContinuity(x, z) {
@@ -159,7 +165,21 @@ export const POST_OFFICE_BAY_SCRUB_TRAIL = [
   [-9, 28, 2.3],
   [-10, 39, 2.05],
   [-8, 49, 1.9],
-  [-7, 59, 1.78],
+  pathPoint(POST_OFFICE_SCRUB_RISE_SEAM.source.point, 1.78),
+  [-6.6, 83, 1.72],
+];
+
+// The coastal track forks east toward Northern Shore, then continues beyond
+// the walkable edge so the same Post Office Bay splat remains visible through
+// the apron carry band before the neighbor preview takes over.
+export const POST_OFFICE_BAY_NORTH_SHORE_TRAIL = [
+  [1, 20, 2.25],
+  [14, 27, 2.15],
+  [29, 25, 2.05],
+  [44, 17, 1.94],
+  pathPoint(POST_OFFICE_NORTH_SHORE_SEAM.source.point, 1.82),
+  [70, 9, 1.76],
+  [84, 13, 1.7],
 ];
 
 export const POST_OFFICE_BAY_BARREL_SPUR = [
@@ -172,6 +192,7 @@ export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 0.0, z: 8.5, radius: 4.8 };
 export const POST_OFFICE_BAY_PATH_POINTS = [
   POST_OFFICE_BAY_TRAIL,
   POST_OFFICE_BAY_SCRUB_TRAIL,
+  POST_OFFICE_BAY_NORTH_SHORE_TRAIL,
   POST_OFFICE_BAY_BARREL_SPUR,
 ];
 
@@ -311,7 +332,7 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   const mask = islandMask(x, z);
   const cove = coveWaterMask(x, z);
   const continuity = postOfficeLandContinuity(x, z);
-  const seaFalloff = Math.max(0, mask - 0.94) * (1 - continuity * 0.92);
+  const seaFalloff = Math.max(0, mask - 0.94) * (1 - continuity);
   // Two-stage bay floor: the shore eases onto a flat sandy wading shelf, then
   // a deeper bowl toward the bay centre so the water colour grades from clear
   // sand to turquoise to blue.
@@ -355,7 +376,7 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   y += THREE.MathUtils.smoothstep(z, 20, 52) * 1.2;
 
   if (z < -24) y -= Math.abs(z + 24) * 0.18;
-  if (mask > 1.08) y -= (mask - 1.08) * 18 * (1 - continuity * 0.9);
+  if (mask > 1.08) y -= (mask - 1.08) * 18 * (1 - continuity);
   const landingBeach = postOfficeLandingBeachMask(x, z);
   if (landingBeach > 0) {
     const shoreDistance = z - postOfficeBayCoastZ(x);

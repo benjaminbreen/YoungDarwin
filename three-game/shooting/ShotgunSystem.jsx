@@ -343,6 +343,8 @@ export default function ShotgunSystem() {
       const hy = o.y + d.y * blocker.t;
       const hz = o.z + d.z * blocker.t;
       emitPropEvent('shotgun-impact', {
+        obstacleId: obstacle.id,
+        obstacleKind: obstacle.kind,
         position: { x: hx, y: hy, z: hz },
         normal: { x: -d.x, y: 0, z: -d.z },
         dir: d,
@@ -406,6 +408,16 @@ export default function ShotgunSystem() {
         biome: null,
         intensity,
       });
+      if (obstacle.kind === 'boulder') {
+        emitPropEvent('rock-shotgun-fracture', {
+          obstacle,
+          zoneId,
+          position: { x: hx, y: hy, z: hz },
+          normal: { x: nx, y: 0, z: nz },
+          dir: d,
+          intensity,
+        });
+      }
       scatter(hx, hy, hz, surface, null, SHOTGUN.scatterImpacts - 2, intensity * 0.7);
       // Trees answer with a canopy shiver: a second, softer leaf burst above
       // the trunk hit sells the whole tree reacting.

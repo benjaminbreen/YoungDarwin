@@ -16,6 +16,8 @@ import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 import { updateFoliageUniforms } from './ecology/foliageMotion';
 import { DryGrassPatchField } from './ecology/DryGrassPatchField';
 import { RockField } from './ecology/RockField';
+import { FacetedBoulderField } from './ecology/FacetedBoulderField';
+import { usesFacetedBoulderSurface } from '../../world/facetedBoulders';
 import { buildPostOfficeBayDryGrassLayer } from '../../world/ecology/postOfficeBay';
 import { onPropEvent } from '../../physics/props/propEvents';
 
@@ -204,9 +206,16 @@ function ObstacleProps() {
     () => getRuntimeObstacles(currentZoneId, pushableObstacleOffsets),
     [currentZoneId, pushableObstacleOffsets],
   );
+  const texturedBoulders = useMemo(
+    () => obstacles.filter(usesFacetedBoulderSurface),
+    [obstacles],
+  );
+  const otherObstacles = useMemo(() => obstacles.filter(obstacle => (
+    obstacle.path && !usesFacetedBoulderSurface(obstacle)
+  )), [obstacles]);
   return (
     <group>
-      {obstacles.filter(obstacle => obstacle.path).map(obstacle => (
+      {otherObstacles.map(obstacle => (
         obstacle.bendable ? (
           <BendableObstacleGLB
             key={obstacle.id}
@@ -233,6 +242,9 @@ function ObstacleProps() {
           />
         )
       ))}
+      {texturedBoulders.length ? (
+        <FacetedBoulderField obstacles={texturedBoulders} currentZoneId={currentZoneId} />
+      ) : null}
     </group>
   );
 }

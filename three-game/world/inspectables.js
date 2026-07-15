@@ -10,6 +10,7 @@ const RARITY_LABELS = {
 
 export const inspectableCatalog = {
   basalt_block: { id: 'basalt_block', kind: 'rock', englishName: 'Basalt block', latinName: 'Lava basaltica', category: 'Geology', rarity: 'common' },
+  scoria: { id: 'scoria', kind: 'rock', englishName: 'Oxidized scoria', latinName: 'Scoria basaltica vesicularis', category: 'Geology', rarity: 'common' },
   scree: { id: 'scree', kind: 'rock', englishName: 'Volcanic scree', latinName: 'Lava basaltica fragmenta', category: 'Geology', rarity: 'abundant' },
   dry_scrub: { id: 'dry_scrub', kind: 'plant', englishName: 'Dry-zone shrub', latinName: 'arid littoral scrub', category: 'Plant', rarity: 'common' },
   dry_grass: { id: 'dry_grass', kind: 'plant', englishName: 'Dry coastal grass', latinName: 'Poaceae', category: 'Plant', rarity: 'common' },

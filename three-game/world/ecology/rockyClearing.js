@@ -1,6 +1,7 @@
 import { makeZoneScatter, seededRandom } from '../scatter';
 import {
   getRockyClearingCaveFeature,
+  getRockyClearingFormations,
   getRockyClearingRocks,
 } from '../rockyClearingLayout';
 import {
@@ -131,11 +132,9 @@ function buildFlora() {
   ];
 }
 
-const LITTER_COLORS = ['#282723', '#36342e', '#4b463b', '#615846', '#7a6c51'];
-
 function buildSurfaceLitter() {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(ROCKY_CLEARING, layer, count, seed, opts);
-  const chips = scatter('rocky-clearing-basalt-chip', 130, 421, {
+  const chips = scatter('rocky-clearing-basalt-chip', 260, 421, {
     minX: -24, maxX: 25, minZ: -16, maxZ: 7, scale: [0.18, 0.54], maxGrade: 1.1,
     accept: (biome, x, z) => rockyClearingRubbleMask(x, z) > 0.22
       || (rockyClearingCentralMask(x, z) > 0.36 && hash2(x, z, 27) < 0.32)
@@ -145,8 +144,10 @@ function buildSurfaceLitter() {
     return {
       ...item,
       id: `rocky-clearing-chip-${index}`,
-      variant: seededRandom(i, 3) > 0.22 ? 'basalt-pebble' : 'limestone-chip',
-      color: LITTER_COLORS[Math.floor(seededRandom(i, 5) * LITTER_COLORS.length) % LITTER_COLORS.length],
+      variant: seededRandom(i, 3) > 0.27 ? 'weathered-basalt-chip' : 'oxidized-scoria-chip',
+      color: seededRandom(i, 3) > 0.27
+        ? (seededRandom(i, 5) > 0.5 ? '#c6c3ba' : '#aaa9a3')
+        : (seededRandom(i, 5) > 0.5 ? '#cc886b' : '#b96d50'),
       wetness: 0,
       scale: item.scale * (0.62 + seededRandom(i, 7) * 0.5),
       stretchX: 0.7 + seededRandom(i, 11) * 0.72,
@@ -196,6 +197,11 @@ export function buildRockyClearingEcology() {
     zoneId: ROCKY_CLEARING,
     stream: false,
     caveEntrances: [getRockyClearingCaveFeature()],
+    volcanicFormations: [{
+      id: 'rocky-clearing-volcanic-formations',
+      items: getRockyClearingFormations(),
+      maxVisibleDistance: 110,
+    }],
     dryGrassPatches: [buildGrass()],
     surfaceLitter: buildSurfaceLitter(),
     flora: buildFlora(),

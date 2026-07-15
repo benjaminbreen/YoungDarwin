@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConvexHullCollider, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -39,10 +39,33 @@ function normalize2(x, z, fallback = { x: 0, z: -1 }) {
   return { x: x / length, z: z / length };
 }
 
+function rockSurfaceRadius(rock, normal) {
+  const scale = typeof rock.scale === 'number' ? rock.scale : 1;
+  const yaw = rock.yaw || 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const localX = normal.x * cos - normal.z * sin;
+  const localZ = normal.x * sin + normal.z * cos;
+  let support = 0;
+  for (const shape of rock.shapes || []) {
+    const [offsetX = 0, , offsetZ = 0] = shape.offset || [0, 0, 0];
+    if (shape.type === 'convex' && shape.points?.length) {
+      support = Math.max(support, ...shape.points.map(([x, z]) => (
+        ((x + offsetX) * localX + (z + offsetZ) * localZ) * scale
+      )));
+    } else if (shape.radius) {
+      support = Math.max(
+        support,
+        ((offsetX * localX + offsetZ * localZ) + shape.radius) * scale,
+      );
+    }
+  }
+  return Math.max(0.35, support || rock.radius || 0.5);
+}
+
 function configureChipTexture(texture, repeat = 1.4) {
   if (!texture) return;
   texture.repeat.set(repeat, repeat);
-  texture.needsUpdate = true;
 }
 
 // Two shared materials: basalt-family debris reuses the RockField PBR maps so
@@ -157,11 +180,11 @@ function profileForTarget(target, zoneId) {
 function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) {
   const rock = target.rock;
   const key = target.key || rockSampleKey(zoneId, rock.id);
-  const radius = Math.max(0.38, rock.radius || 0.55);
   const playerX = strike.position?.x || 0;
   const playerZ = strike.position?.z || 0;
   const fallback = normalize2(-(strike.facing?.x || 0), -(strike.facing?.z || -1), { x: 0, z: 1 });
   const normal = normalize2(playerX - (rock.x || 0), playerZ - (rock.z || 0), fallback);
+  const radius = rockSurfaceRadius(rock, normal);
   const surfaceX = (rock.x || 0) + normal.x * radius * 0.92;
   const surfaceZ = (rock.z || 0) + normal.z * radius * 0.92;
   const groundY = movementTerrainHeight(surfaceX, surfaceZ, zoneId);
@@ -181,7 +204,9 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
   const fx = profile.fx || {};
   const dustCount = fx.dustCount ?? 12;
   const puffCount = fx.puffCount ?? 1;
-  const sparkCount = fx.sparkCount ?? 0;
+  const sparkCount = rock.kind === 'boulder'
+    ? Math.max(10, (fx.sparkCount ?? 0) * 2)
+    : (fx.sparkCount ?? 0);
 
   return {
     id: `${key}:chip:${sequence}`,
@@ -232,7 +257,8 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
       x: surfaceX + normal.x * chipRadius * 1.15,
       y: hitY + 0.02,
       z: surfaceZ + normal.z * chipRadius * 1.15,
-      r: chipRadius * 2.1,
+      r: chipRadius * (rock.kind === 'boulder' ? 3.35 : 2.1),
+      normal: { x: normal.x, y: 0, z: normal.z },
     },
     burst: Array.from({ length: dustCount }, (_, index) => {
       const particleSeed = `${seed}:p:${index}`;
@@ -579,6 +605,7 @@ const MAX_FRAGMENT_PIECES = 24;
 
 function RockBreakFragmentPiece({ fragment, piece, materials, onExpired }) {
   const bodyRef = useRef(null);
+  const ageRef = useRef(0);
   const geometry = useMemo(() => makeFragmentGeometry(piece.id, {
     cutDir: piece.cutDir,
     cutDistance: piece.cutDistance,
@@ -606,10 +633,14 @@ function RockBreakFragmentPiece({ fragment, piece, materials, onExpired }) {
     }, true);
   }, [piece]);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    ageRef.current += delta;
     const body = bodyRef.current;
     if (!body) return;
-    if (body.translation().y < FRAGMENT_FALL_CULL_Y) onExpired(piece.id);
+    if (
+      body.translation().y < FRAGMENT_FALL_CULL_Y
+      || (piece.maxAge && ageRef.current >= piece.maxAge)
+    ) onExpired(piece.id);
   });
 
   return (
@@ -694,6 +725,61 @@ function makeBreakFragments(rock, key, zoneId, profile, groundY) {
   };
 }
 
+function makeImpactChipFragments(event, sequence, profile, cause = 'shotgun') {
+  const { obstacle, position, normal, intensity = 0.7, zoneId } = event;
+  const key = rockSampleKey(zoneId, obstacle.id);
+  const seed = `${key}:${cause}:${sequence}`;
+  const side = { x: -normal.z, z: normal.x };
+  const count = cause === 'shotgun'
+    ? (intensity > 0.68 ? 5 : 4)
+    : 3;
+  const pieces = Array.from({ length: count }, (_, index) => {
+    const radiusBase = cause === 'shotgun' ? 0.105 : 0.085;
+    const radius = radiusBase + seededUnit(seed, 11 + index) * (cause === 'shotgun' ? 0.09 : 0.07);
+    const lateral = (seededUnit(seed, 31 + index) - 0.5) * 1.1;
+    const outward = (cause === 'shotgun' ? 1.25 : 0.82) + seededUnit(seed, 41 + index) * 0.8;
+    return {
+      id: `${seed}:chip-${index}`,
+      cutDir: {
+        x: normal.x,
+        y: 0.18 + seededUnit(seed, 51 + index) * 0.3,
+        z: normal.z,
+      },
+      cutDistance: radius * 0.18,
+      radii: [
+        radius * (0.75 + seededUnit(seed, 61 + index) * 0.4),
+        radius * (0.55 + seededUnit(seed, 71 + index) * 0.35),
+        radius * (0.7 + seededUnit(seed, 81 + index) * 0.42),
+      ],
+      yaw: seededUnit(seed, 91 + index) * Math.PI * 2,
+      position: {
+        x: position.x + normal.x * (0.08 + radius) + side.x * lateral * 0.06,
+        y: position.y + 0.02 + index * 0.035,
+        z: position.z + normal.z * (0.08 + radius) + side.z * lateral * 0.06,
+      },
+      impulse: {
+        x: normal.x * outward + side.x * lateral,
+        y: 0.5 + seededUnit(seed, 101 + index) * 0.55,
+        z: normal.z * outward + side.z * lateral,
+      },
+      torque: {
+        x: (seededUnit(seed, 111 + index) - 0.5) * 0.9,
+        y: (seededUnit(seed, 121 + index) - 0.5) * 0.75,
+        z: (seededUnit(seed, 131 + index) - 0.5) * 0.9,
+      },
+      maxAge: 45,
+    };
+  });
+  return {
+    id: seed,
+    key,
+    zoneId,
+    rindColor: profile.colors?.[0] || '#30342f',
+    fractureColor: profile.fractureColor || '#4d5457',
+    pieces,
+  };
+}
+
 export function RockSampleSystem() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
@@ -762,6 +848,64 @@ export function RockSampleSystem() {
       at: clockRef.current + (event.impactDelay ?? 0.55),
     });
   }), []);
+
+  const commitBoulderFracture = useCallback((event, cause) => {
+    if (!event?.obstacle || event.zoneId !== currentZoneId) return;
+    sequenceRef.current += 1;
+    const obstacle = event.obstacle;
+    const profile = getHammerMaterialProfile(inferHammerMaterial({
+      rock: obstacle,
+      zoneId: currentZoneId,
+    }));
+    const surfaceRadius = rockSurfaceRadius(obstacle, event.normal);
+    const surfaceEvent = {
+      ...event,
+      position: {
+        x: obstacle.x + event.normal.x * surfaceRadius * 0.985,
+        y: event.position.y,
+        z: obstacle.z + event.normal.z * surfaceRadius * 0.985,
+      },
+    };
+    const fracture = makeImpactChipFragments(surfaceEvent, sequenceRef.current, profile, cause);
+    const biteRadius = cause === 'shotgun'
+      ? 0.42 + (event.intensity || 0.7) * 0.18
+      : 0.52;
+    const store = useThreeGameStore.getState();
+    store.recordRockStrike?.({
+      key: fracture.key,
+      rockId: obstacle.id,
+      zoneId: currentZoneId,
+      x: obstacle.x,
+      z: obstacle.z,
+      budget: rockStrikeBudget(obstacle),
+      broken: false,
+      countStrike: false,
+      bite: {
+        x: surfaceEvent.position.x + event.normal.x * biteRadius * 0.36,
+        y: surfaceEvent.position.y + event.normal.y * biteRadius * 0.36,
+        z: surfaceEvent.position.z + event.normal.z * biteRadius * 0.36,
+        r: biteRadius,
+        normal: event.normal,
+      },
+    });
+    setFragments(current => {
+      const merged = [...current, fracture];
+      let totalPieces = merged.reduce((sum, item) => sum + item.pieces.length, 0);
+      while (totalPieces > MAX_FRAGMENT_PIECES && merged.length > 1) {
+        totalPieces -= merged[0].pieces.length;
+        merged.shift();
+      }
+      return merged;
+    });
+  }, [currentZoneId]);
+
+  useEffect(() => onPropEvent('rock-shotgun-fracture', event => {
+    commitBoulderFracture(event, 'shotgun');
+  }), [commitBoulderFracture]);
+
+  useEffect(() => onPropEvent('rock-hammer-fracture', event => {
+    commitBoulderFracture(event, 'hammer');
+  }), [commitBoulderFracture]);
 
   useEffect(() => {
     pendingStrikesRef.current = [];
@@ -861,7 +1005,7 @@ export function RockSampleSystem() {
           z: rock.z,
           budget,
           broken,
-          bite: rock.proceduralRock ? chip.bite : null,
+          bite: rock.proceduralRock || rock.kind === 'boulder' ? chip.bite : null,
         });
         if (broken) {
           const groundY = movementTerrainHeight(rock.x, rock.z, currentZoneId);

@@ -3,128 +3,24 @@
 import React, { useLayoutEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { terrainHeight } from '../../../world/terrain';
-import {
-  FLOREANA_PBR_TEXTURES,
-  disposePbrTerrainSet,
-  loadPbrTerrainSet,
-} from '../../../world/regions/materials/pbrTerrainTextures';
 
-function configureTexture(texture, repeat = 1.8) {
-  if (!texture) return;
-  texture.repeat.set(repeat, repeat);
-  texture.needsUpdate = true;
-}
-
-function makeCraggyRockGeometry(seed) {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
-  const position = geo.attributes.position;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < position.count; i += 1) {
-    v.fromBufferAttribute(position, i);
-    const chip = Math.sin(v.x * 6.1 + seed) * Math.cos(v.y * 4.7 + seed * 1.8) * Math.sin(v.z * 5.6 - seed);
-    v.normalize().multiplyScalar(1 + chip * 0.2 + Math.sin(i * 3.17 + seed) * 0.045);
-    position.setXYZ(i, v.x, v.y, v.z);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function makeArchGeometry(width = 8.2, springY = 1.9, topY = 3.85) {
+function makeIrregularCaveMouthGeometry(width = 8.2, height = 3.7, seed = 0) {
   const half = width * 0.5;
   const shape = new THREE.Shape();
   shape.moveTo(-half, 0);
-  shape.lineTo(-half, springY);
-  shape.quadraticCurveTo(0, topY, half, springY);
+  shape.lineTo(-half * 0.98, height * 0.34);
+  shape.lineTo(-half * 0.82, height * (0.66 + Math.sin(seed + 0.7) * 0.025));
+  shape.lineTo(-half * 0.5, height * 0.9);
+  shape.lineTo(-half * 0.12, height * 0.98);
+  shape.lineTo(half * 0.2, height * (0.94 + Math.sin(seed + 1.8) * 0.02));
+  shape.lineTo(half * 0.58, height * 0.82);
+  shape.lineTo(half * 0.86, height * 0.58);
+  shape.lineTo(half, height * 0.27);
   shape.lineTo(half, 0);
   shape.lineTo(-half, 0);
-  const geometry = new THREE.ShapeGeometry(shape, 32);
+  const geometry = new THREE.ShapeGeometry(shape);
   geometry.computeVertexNormals();
   return geometry;
-}
-
-function createBasaltMaterial() {
-  const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
-  configureTexture(basalt.albedo, 1.8);
-  configureTexture(basalt.normal, 2.4);
-  configureTexture(basalt.roughness, 1.8);
-  const material = new THREE.MeshStandardMaterial({
-    map: basalt.albedo,
-    normalMap: basalt.normal,
-    normalScale: new THREE.Vector2(0.46, 0.46),
-    roughnessMap: basalt.roughness,
-    color: '#6a6253',
-    roughness: 0.92,
-    metalness: 0,
-    flatShading: true,
-  });
-  material.userData.pbrTextures = basalt;
-  return material;
-}
-
-function disposeBasaltMaterial(material) {
-  disposePbrTerrainSet(material?.userData?.pbrTextures);
-  material?.dispose();
-}
-
-function archStoneLayout(feature) {
-  const stones = [];
-  const caveX = feature.x;
-  const caveZ = feature.z;
-  for (let i = 0; i < 5; i += 1) {
-    const y = 0.45 + i * 0.58;
-    const taper = i / 4;
-    stones.push({
-      id: `left-${i}`,
-      x: caveX - 4.55 - taper * 0.2,
-      y,
-      z: caveZ - 0.18 + Math.sin(i * 1.7) * 0.18,
-      scale: [1.05 - taper * 0.1, 0.72, 0.92],
-      rotation: [0.12, 0.2 + i * 0.16, -0.08],
-    });
-    stones.push({
-      id: `right-${i}`,
-      x: caveX + 4.55 + taper * 0.18,
-      y,
-      z: caveZ - 0.1 + Math.cos(i * 1.2) * 0.16,
-      scale: [1.0 - taper * 0.08, 0.68, 0.88],
-      rotation: [-0.08, -0.25 - i * 0.12, 0.1],
-    });
-  }
-  for (let i = 0; i < 7; i += 1) {
-    const t = i / 6;
-    const angle = Math.PI - t * Math.PI;
-    const x = caveX + Math.cos(angle) * 4.15;
-    const y = 1.95 + Math.sin(angle) * 1.72;
-    const z = caveZ - 0.22 + Math.sin(i * 2.1) * 0.13;
-    stones.push({
-      id: `arch-${i}`,
-      x,
-      y,
-      z,
-      scale: [0.9 + Math.sin(i) * 0.06, 0.66, 0.78],
-      rotation: [0.04, -angle + Math.PI * 0.5, (t - 0.5) * 0.35],
-    });
-  }
-  return stones;
-}
-
-function CaveStone({ stone, baseY, geometry, material, sourceId }) {
-  return (
-    <mesh
-      geometry={geometry}
-      material={material}
-      position={[stone.x, baseY + stone.y, stone.z]}
-      rotation={stone.rotation}
-      scale={stone.scale}
-      castShadow
-      receiveShadow
-      userData={{
-        renderSource: `${sourceId}:${stone.id}`,
-        renderLabel: `Cave arch basalt ${stone.id}`,
-        renderKind: 'cave-entrance-rock',
-      }}
-    />
-  );
 }
 
 function CampAsh({ feature, zoneId }) {
@@ -182,10 +78,8 @@ function CampAsh({ feature, zoneId }) {
 export function CaveEntrance({ feature, zoneId }) {
   const baseY = terrainHeight(feature.x, feature.z, zoneId);
   const thresholdY = terrainHeight(feature.promptX, feature.promptZ, zoneId);
-  const rockGeometry = useMemo(() => makeCraggyRockGeometry(6.4), []);
-  const basaltMaterial = useMemo(() => createBasaltMaterial(), []);
-  const mouthGeometry = useMemo(() => makeArchGeometry(7.35, 1.52, 3.35), []);
-  const innerMouthGeometry = useMemo(() => makeArchGeometry(5.65, 1.18, 2.72), []);
+  const mouthGeometry = useMemo(() => makeIrregularCaveMouthGeometry(8.25, 3.75, 2.4), []);
+  const innerMouthGeometry = useMemo(() => makeIrregularCaveMouthGeometry(6.7, 3.12, 5.7), []);
   const shadowGeometry = useMemo(() => new THREE.PlaneGeometry(8.8, 6.2, 1, 1), []);
   const mouthMaterial = useMemo(() => new THREE.MeshStandardMaterial({
     color: '#060708',
@@ -207,18 +101,14 @@ export function CaveEntrance({ feature, zoneId }) {
     opacity: 0.34,
     depthWrite: false,
   }), []);
-  const stones = useMemo(() => archStoneLayout(feature), [feature]);
-
   useLayoutEffect(() => () => {
-    rockGeometry.dispose();
     mouthGeometry.dispose();
     innerMouthGeometry.dispose();
     shadowGeometry.dispose();
     mouthMaterial.dispose();
     innerMouthMaterial.dispose();
     thresholdMaterial.dispose();
-    disposeBasaltMaterial(basaltMaterial);
-  }, [basaltMaterial, innerMouthGeometry, innerMouthMaterial, mouthGeometry, mouthMaterial, rockGeometry, shadowGeometry, thresholdMaterial]);
+  }, [innerMouthGeometry, innerMouthMaterial, mouthGeometry, mouthMaterial, shadowGeometry, thresholdMaterial]);
 
   const sourceId = `ecology:${zoneId}:${feature.id}`;
   return (
@@ -234,7 +124,7 @@ export function CaveEntrance({ feature, zoneId }) {
       <mesh
         geometry={mouthGeometry}
         material={mouthMaterial}
-        position={[feature.x, baseY + 0.1, feature.z - 0.55]}
+        position={[feature.x, baseY - 0.08, feature.z - 2.82]}
         castShadow={false}
         receiveShadow={false}
         userData={{ renderSource: `${sourceId}:mouth`, renderLabel: 'cave dark mouth', renderKind: 'cave-entrance' }}
@@ -242,26 +132,9 @@ export function CaveEntrance({ feature, zoneId }) {
       <mesh
         geometry={innerMouthGeometry}
         material={innerMouthMaterial}
-        position={[feature.x, baseY + 0.22, feature.z - 0.72]}
+        position={[feature.x + 0.12, baseY + 0.06, feature.z - 2.96]}
         renderOrder={1}
         userData={{ renderSource: `${sourceId}:inner-mouth`, renderLabel: 'cave inner darkness', renderKind: 'cave-entrance' }}
-      />
-      {stones.map(stone => (
-        <CaveStone
-          key={stone.id}
-          stone={stone}
-          baseY={baseY}
-          geometry={rockGeometry}
-          material={basaltMaterial}
-          sourceId={sourceId}
-        />
-      ))}
-      <pointLight
-        position={[feature.x - 1.6, baseY + 1.05, feature.z + 2.7]}
-        color="#c58d55"
-        intensity={0.36}
-        distance={8.5}
-        decay={2.2}
       />
       <CampAsh feature={feature} zoneId={zoneId} />
     </group>

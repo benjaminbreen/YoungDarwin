@@ -200,6 +200,12 @@ def add_lathe(name, position, profile, material, segments=40, cap_start=True, ca
   obj = smooth(bpy.data.objects.new(name, mesh))
   bpy.context.scene.collection.objects.link(obj)
   obj.data.materials.append(material)
+  if not (cap_start and cap_end):
+    # Open-ended shells (glass chimneys) need real wall thickness; otherwise
+    # the open rim exposes a paper-thin single wall and the hollow interior.
+    solidify = obj.modifiers.new('GlassWallThickness', 'SOLIDIFY')
+    solidify.thickness = 0.007
+    solidify.offset = -1
   bevel = obj.modifiers.new('TurnedEdgeHighlights', 'BEVEL')
   bevel.width = 0.004
   bevel.segments = 2
@@ -245,6 +251,9 @@ def build_hanging_oil_lamp():
       brass,
       10,
     )
+  # Burner plate seals the chimney throat so the reservoir interior is never
+  # visible through the open glass ends.
+  add_cylinder('LampBurnerPlate', (0, -1.015, 0), 0.104, 0.02, aged, 32)
   add_sphere('PeriodLampFlame_Main', (0, -0.91, 0), 0.045, MATS['PeriodLampFlame'], (0.66, 1.7, 0.66))
   add_lathe('LampReservoir', (0, -1.26, 0), (
     (0.08, 0), (0.16, 0.035), (0.205, 0.11), (0.22, 0.2),
@@ -286,6 +295,7 @@ def build_table_oil_lamp():
       aged,
       8,
     )
+  add_cylinder('TableLampBurnerPlate', (0, 0.415, 0), 0.082, 0.018, aged, 28)
   add_sphere('PeriodLampFlame_Table', (0, 0.49, 0), 0.034, MATS['PeriodLampFlame'], (0.66, 1.65, 0.66))
   add_lathe('TableLampGlassChimney', (0, 0.4, 0), (
     (0.085, 0), (0.105, 0.04), (0.115, 0.16), (0.09, 0.28), (0.08, 0.42), (0.105, 0.5),

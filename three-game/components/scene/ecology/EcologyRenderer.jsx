@@ -30,6 +30,7 @@ import { AmbientWildlifeLayer } from './AmbientWildlifeLayer';
 import { CropFieldLayer } from './CropFieldLayer';
 import { StandingWaterSurface } from './StandingWaterSurface';
 import { CaveEntrance } from './CaveEntrance';
+import { VolcanicFormationField } from './VolcanicFormationField';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -60,6 +61,7 @@ const EMPTY_LAYER_PLAN = {
   generatedTrees: [],
   props: [],
   rocks: [],
+  volcanicFormations: [],
   caveEntrances: [],
   canopySilhouettes: [],
   crops: [],
@@ -224,6 +226,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
       props: (ecology.props || []).filter(tierVisible),
       rocks: (ecology.rocks || []).filter(tierVisible),
+      volcanicFormations: (ecology.volcanicFormations || []).filter(tierVisible),
       caveEntrances: (ecology.caveEntrances || []).filter(tierVisible),
       canopySilhouettes: (ecology.canopySilhouettes || []).filter(tierVisible),
       crops: (ecology.crops || []).filter(tierVisible),
@@ -248,6 +251,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     lagoonSurfaces,
     generatedTrees,
     rocks,
+    volcanicFormations,
     caveEntrances,
     canopySilhouettes,
     crops,
@@ -263,6 +267,13 @@ export function EcologyRenderer({ ecology, settings = {} }) {
           sourceLabel={`${ecology.zoneId} rocks`}
         />
       )}
+      {volcanicFormations.map(layer => (
+        <VolcanicFormationField
+          key={layer.id}
+          layer={layer}
+          zoneId={layer.zoneId || ecology.zoneId}
+        />
+      ))}
       {caveEntrances.map(feature => (
         <CaveEntrance key={feature.id} feature={feature} zoneId={ecology.zoneId} />
       ))}

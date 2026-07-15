@@ -81,7 +81,7 @@ const MINIMAP_POSE_EPSILON = 0.2;
 const MINIMAP_HEADING_EPSILON = 1.5;
 const BASALT_SPECIMEN = baseSpecimens.find(specimen => specimen.id === 'basalt') || {
   id: 'basalt',
-  name: 'Basalt Formation',
+  name: 'Vesicular Basalt Exposure',
   latin: 'Lava basaltica',
   ontology: 'Mineral',
   description: 'Dark volcanic basalt from Floreana lava outcrops.',
@@ -1609,7 +1609,17 @@ export const useThreeGameStore = create((set, get) => ({
 
     return result;
   },
-  recordRockStrike: ({ key, rockId, zoneId, x, z, budget = 3, broken = false, bite = null } = {}) => set(state => {
+  recordRockStrike: ({
+    key,
+    rockId,
+    zoneId,
+    x,
+    z,
+    budget = 3,
+    broken = false,
+    bite = null,
+    countStrike = true,
+  } = {}) => set(state => {
     if (!key) return {};
     const existing = state.rockDamage[key] || { strikes: 0, bites: [] };
     return {
@@ -1622,9 +1632,9 @@ export const useThreeGameStore = create((set, get) => ({
           x: x ?? existing.x,
           z: z ?? existing.z,
           budget,
-          strikes: existing.strikes + 1,
+          strikes: existing.strikes + (countStrike ? 1 : 0),
           broken: existing.broken || broken,
-          bites: bite ? [...existing.bites, bite].slice(-8) : existing.bites,
+          bites: bite ? [...existing.bites, bite].slice(-12) : existing.bites,
         },
       },
     };

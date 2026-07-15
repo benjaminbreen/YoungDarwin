@@ -196,8 +196,11 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
   const { kind, status, name } = location;
   const live = status === 'available';
   const glyph = MARKER_GLYPHS[kind];
-  const markerSizeClass = kind === 'anchorage' ? 'h-4 w-4' : 'h-5 w-5';
-  const labelOffset = location.labelOffset || { x: 0, y: 0 };
+  const markerSizeClass = kind === 'anchorage' ? 'h-5 w-5' : 'h-6 w-6';
+  const labelOffset = location.labelOffset || { x: 0, y: 20 };
+  const labelDistance = Math.hypot(labelOffset.x, labelOffset.y);
+  const leaderLength = Math.max(0, labelDistance - 13);
+  const leaderAngle = Math.atan2(labelOffset.y, labelOffset.x) * (180 / Math.PI);
 
   let face;
   if (glyph) {
@@ -212,7 +215,7 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
     );
   } else if (live) {
     face = (
-      <span className="block h-3 w-3 rounded-full border border-expedition-ink bg-expedition-goldbright shadow-[0_0_8px_rgba(227,197,133,0.65)]" />
+      <span className="block h-4 w-4 rounded-full border-2 border-expedition-ink bg-expedition-goldbright shadow-[0_0_9px_rgba(227,197,133,0.72)]" />
     );
   } else {
     // Uncharted stub: hollow diamond, water locations fainter.
@@ -228,37 +231,58 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
   return (
     <button
       type="button"
+      aria-label={name}
       onPointerDown={event => event.stopPropagation()}
       onClick={event => { event.stopPropagation(); onSelect?.(location); }}
-      className="group absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center focus:outline-none"
+      className="group absolute z-10 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full focus:outline-none hover:z-30 focus-visible:z-30"
       style={{
         left: `${location.at.x * 100}%`,
         top: `${location.at.y * 100}%`,
         transform: `translate(-50%, -50%) scale(${1 / zoom})`,
       }}
     >
-      <span className={`relative flex items-center justify-center transition group-hover:scale-110 ${selected ? 'scale-110' : ''}`}>
+      <span className={`absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-transform duration-150 group-hover:scale-150 group-focus-visible:scale-150 ${selected ? 'scale-125' : ''}`}>
         {(selected || isCurrent) && (
-          <span className={`absolute h-7 w-7 rounded-full border ${
+          <span className={`absolute h-8 w-8 rounded-full border ${
             isCurrent
               ? 'animate-ping border-expedition-goldbright/70'
               : 'border-expedition-goldbright/80 shadow-[0_0_10px_rgba(227,197,133,0.5)]'
           }`} />
         )}
-        {isCurrent && <span className="absolute h-7 w-7 rounded-full border border-expedition-goldbright/80" />}
+        {isCurrent && <span className="absolute h-8 w-8 rounded-full border border-expedition-goldbright/80" />}
         {face}
       </span>
-      {/* engraved chart label: bare serif text with a dark halo, no box */}
+      {leaderLength > 4 && (
+        <span
+          className={`pointer-events-none absolute left-1/2 top-1/2 h-px origin-left bg-expedition-parchment/65 shadow-[0_1px_2px_rgba(10,8,5,0.9)] transition-opacity duration-150 ${
+            showLabel
+              ? 'opacity-75'
+              : 'opacity-0 group-hover:opacity-90 group-focus-visible:opacity-90'
+          }`}
+          style={{
+            width: `${leaderLength}px`,
+            transform: `rotate(${leaderAngle}deg) translateX(8px)`,
+          }}
+        />
+      )}
       <span
-        className={`pointer-events-none mt-0.5 max-w-[10rem] whitespace-nowrap font-expedition text-[11px] font-semibold italic tracking-[0.05em] transition ${
-          showLabel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        } ${selected ? 'text-expedition-goldbright' : 'text-expedition-parchment'}`}
-        style={{
-          textShadow: '0 1px 2px rgba(10,8,5,0.9), 0 0 6px rgba(10,8,5,0.85), 0 0 2px rgba(10,8,5,0.9)',
-          transform: `translate(${labelOffset.x}px, ${labelOffset.y}px)`,
-        }}
+        className={`pointer-events-none absolute left-1/2 top-1/2 ${
+          showLabel
+            ? 'opacity-100'
+            : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
+        }`}
+        style={{ transform: `translate(-50%, -50%) translate(${labelOffset.x}px, ${labelOffset.y}px)` }}
       >
-        {name}
+        <span
+          className={`block max-w-[11rem] whitespace-nowrap rounded-sm border border-transparent px-1.5 py-0.5 font-expedition text-[11px] font-semibold italic leading-none tracking-[0.05em] transition-all duration-150 group-hover:scale-125 group-hover:border-expedition-brass/70 group-hover:bg-expedition-ink/90 group-hover:text-[13px] group-hover:not-italic group-focus-visible:scale-125 group-focus-visible:border-expedition-brass/70 group-focus-visible:bg-expedition-ink/90 group-focus-visible:text-[13px] ${
+            selected
+              ? 'scale-110 border-expedition-gold/65 bg-expedition-ink/85 text-[12px] not-italic text-expedition-goldbright'
+              : 'text-expedition-parchment'
+          }`}
+          style={{ textShadow: '0 1px 2px rgba(10,8,5,0.95), 0 0 7px rgba(10,8,5,0.9)' }}
+        >
+          {name}
+        </span>
       </span>
     </button>
   );

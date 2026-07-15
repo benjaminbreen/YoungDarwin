@@ -36,11 +36,14 @@ import { onPropEvent } from '../../physics/props/propEvents';
 const WATER_SIZE = 150;       // side length of the detailed water plane
 const WATER_SEGMENTS = 128;   // vertex displacement only -> modest mesh is enough
 const BAKE_RES = 512;         // seafloor depth-texture resolution
-const REFLECTION_RES = 320;   // cadence matters more than raw resolution here
+const REFLECTION_RES = 512;   // rigging needs enough coverage to stay stable in motion
 const REFLECTION_MIN_INTERVAL = 2; // moving camera: refresh often enough to feel attached
 const REFLECTION_STATIC_INTERVAL = 8; // static camera: keep animated silhouettes current
-const REFLECTION_CAMERA_MOVE_SQ = 0.08 * 0.08;
-const REFLECTION_CAMERA_ROT_DELTA = 0.00025;
+// The mirror texture and its projection matrix must follow every meaningful
+// camera transform. The old 8cm / ~2.6deg gates made a walking camera reuse a
+// stale projection for several rendered frames, then visibly snap forward.
+const REFLECTION_CAMERA_MOVE_SQ = 0.002 * 0.002;
+const REFLECTION_CAMERA_ROT_DELTA = 0.00000001;
 const REFLECTION_TIME_DELTA = 0.035; // in-game hours
 // Toggle this off to remove all event-driven player ripple disturbance from
 // the open-ocean shader without touching standing-water/lagoon rendering.
@@ -67,7 +70,8 @@ const WATER_QUALITY = {
   performance: {
     bakeRes: 256,
     segments: 64,
-    reflectionRes: 256,
+    reflectionRes: 384,
+    reflectionSamples: 2,
     reflectionMinInterval: 1,
     reflectionStaticInterval: 4,
   },
@@ -75,13 +79,15 @@ const WATER_QUALITY = {
     bakeRes: BAKE_RES,
     segments: WATER_SEGMENTS,
     reflectionRes: REFLECTION_RES,
+    reflectionSamples: 2,
     reflectionMinInterval: 1,
     reflectionStaticInterval: 4,
   },
   cinematic: {
     bakeRes: BAKE_RES,
     segments: 160,
-    reflectionRes: 384,
+    reflectionRes: 640,
+    reflectionSamples: 4,
     reflectionMinInterval: 1,
     reflectionStaticInterval: 4,
   },
@@ -1345,9 +1351,11 @@ function createDeepOceanMaterial(rippleNormalTexture) {
     },
     vertexShader: `
       varying vec3 vWorld;
+      varying float vDiscRadius;
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
         vWorld = world.xyz;
+        vDiscRadius = length(position.xy);
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
@@ -1374,6 +1382,7 @@ function createDeepOceanMaterial(rippleNormalTexture) {
       uniform float capWindGate;
       uniform float glintWidth;
       varying vec3 vWorld;
+      varying float vDiscRadius;
 
       vec3 rippleNormalAt(vec2 wxz, float t) {
         vec2 uvA = wxz * 0.042 + vec2(t * 0.006, -t * 0.004);
@@ -1408,17 +1417,21 @@ function createDeepOceanMaterial(rippleNormalTexture) {
       }
 
       void main() {
-        float fromCentre = length(vWorld.xz);
+        // The detailed plane is fixed around the zone origin, while this disc
+        // follows the camera. Keep the shoreline handoff in zone space, but
+        // measure horizon fading from the disc's own centre so every edge lands
+        // on the haze color even after the camera moves away from world origin.
+        float fromDetailedCentre = length(vWorld.xz);
         // Keep the horizon disc out of the detailed-water area entirely: the
         // refraction grab must see the real seabed there, not helper blue.
-        if (fromCentre < 56.0) discard;
+        if (fromDetailedCentre < 56.0) discard;
         // The detailed plane fades itself out radially over ~61..73m
         // (edgeFade). The disc must fade IN across that same ring — at full
         // opacity it pops beneath the still-visible plane as a hard
         // camera-crossing navy arc. The continued seabed renders under the
         // feather, so the crossfade reads as the shelf dropping away.
-        float edgeFeather = smoothstep(58.0, 74.0, fromCentre);
-        float depthMix = smoothstep(60.0, 150.0, fromCentre);
+        float edgeFeather = smoothstep(58.0, 74.0, fromDetailedCentre);
+        float depthMix = smoothstep(60.0, 150.0, fromDetailedCentre);
         vec3 color = mix(shallow, deep, depthMix);
         float shimmer = sin(vWorld.x * 0.06 + time * 0.4) * cos(vWorld.z * 0.05 - time * 0.32);
         color += shimmer * 0.015;
@@ -1486,8 +1499,8 @@ function createDeepOceanMaterial(rippleNormalTexture) {
         // final approach to the sea/sky line — the old single ramp either
         // greyed everything (near onset) or left a hard navy edge (far).
         float hazeMid = fog * hazeStage1;
-        float horizonMelt = smoothstep(hazeBandStart, 152.0, fromCentre) * hazeStage2;
-        float rimSeal = smoothstep(142.0, 157.0, fromCentre);
+        float horizonMelt = smoothstep(hazeBandStart, 152.0, vDiscRadius) * hazeStage2;
+        float rimSeal = smoothstep(142.0, 157.0, vDiscRadius);
         color = mix(color, fogColor, max(clamp(hazeMid + horizonMelt, 0.0, 1.0), rimSeal));
         gl_FragColor = vec4(color, edgeFeather);
       }
@@ -1826,10 +1839,11 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
+      samples: qualityConfig.reflectionSamples || 0,
     });
     rt.texture.colorSpace = THREE.SRGBColorSpace;
     return rt;
-  }, [qualityConfig.reflectionRes]);
+  }, [qualityConfig.reflectionRes, qualityConfig.reflectionSamples]);
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
