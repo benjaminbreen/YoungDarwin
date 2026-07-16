@@ -29,6 +29,7 @@
     "three:contact-sheet": "node scripts/render-animation-contact-sheet.mjs",
     "asset:darwin": "node scripts/rebuild-darwin-glb.mjs",
     "asset:darwin:holds": "node scripts/create-darwin-jump-holds.mjs",
+    "asset:syms": "node scripts/optimize-syms-runtime.mjs",
     "asset:terrain-detail": "node scripts/build-terrain-sand-detail.mjs",
     "asset:travel-textures": "node scripts/build-travel-textures.mjs",
     "asset:plan": "node scripts/asset-pipeline.mjs plan",

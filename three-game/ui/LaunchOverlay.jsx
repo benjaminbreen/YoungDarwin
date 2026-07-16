@@ -3,7 +3,11 @@
 import React, { useMemo } from 'react';
 import { CompassRoseIcon, OpenBookIcon } from './expedition/icons';
 
-const SPLASH_BACKGROUND = '/assets/ui/splash-background.png';
+const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
+const SPLASH_BACKGROUND_SRCSET = [
+  '/assets/ui/splash-background-960.webp 960w',
+  `${SPLASH_BACKGROUND} 1672w`,
+].join(', ');
 
 function BrassRule({ className = '' }) {
   return (
@@ -15,11 +19,13 @@ function BrassRule({ className = '' }) {
   );
 }
 
-function MenuButton({ children, primary = false, disabled = false, onClick }) {
+function MenuButton({ children, primary = false, disabled = false, onClick, onIntent }) {
   return (
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
+      onPointerEnter={disabled ? undefined : onIntent}
+      onFocus={disabled ? undefined : onIntent}
       aria-disabled={disabled}
       className={`group relative flex h-12 w-full items-center justify-center rounded-sm border font-expedition text-[20px] tracking-[0.04em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright sm:h-[3.25rem] ${
         primary
@@ -35,11 +41,13 @@ function MenuButton({ children, primary = false, disabled = false, onClick }) {
   );
 }
 
-function CharacterChoiceButton({ title, subtitle, disabled = false, onClick }) {
+function CharacterChoiceButton({ title, subtitle, disabled = false, onClick, onIntent }) {
   return (
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
+      onPointerEnter={disabled ? undefined : onIntent}
+      onFocus={disabled ? undefined : onIntent}
       aria-disabled={disabled}
       className={`group relative min-h-[5.25rem] rounded-sm border px-4 py-3 text-left font-expedition transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
         disabled
@@ -51,6 +59,18 @@ function CharacterChoiceButton({ title, subtitle, disabled = false, onClick }) {
       <span className="mt-2 block text-[12px] leading-snug tracking-[0.07em] text-expedition-faded group-hover:text-expedition-gold/80">
         {subtitle}
       </span>
+    </button>
+  );
+}
+
+function BackButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2 h-9 w-full rounded-sm border border-transparent font-expedition text-[14px] tracking-[0.08em] text-expedition-faded transition hover:border-expedition-brass/45 hover:bg-expedition-gold/8 hover:text-expedition-gold focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+    >
+      Back
     </button>
   );
 }
@@ -81,6 +101,15 @@ export function LaunchOverlay({
   onNewExpedition,
   onModeSelect,
   onBack,
+  onContinue,
+  onLoadJournal,
+  onSettings,
+  onAbout,
+  onRuntimeIntent,
+  interactive = true,
+  hasSavedExpedition = false,
+  hasSavedJournalEntries = false,
+  lastJournalLabel = 'Floreana - September 1835',
 }) {
   const loadingLine = useMemo(() => {
     if (selectedModeId === 'finch') {
@@ -102,19 +131,28 @@ export function LaunchOverlay({
   }, [progress, selectedModeId]);
   const loading = mode === 'loading';
   const choosingCharacter = mode === 'character';
+  const showingSettings = mode === 'settings';
+  const showingAbout = mode === 'about';
+  const expandedPanel = choosingCharacter || showingSettings || showingAbout;
 
   return (
     <section
       data-testid="three-launch-overlay"
       data-mode={mode}
       data-departing={departing ? 'true' : 'false'}
-      className={`${departing
-        ? 'pointer-events-none scale-[1.008] opacity-0 blur-[1px]'
-        : 'pointer-events-auto scale-100 opacity-100 blur-0'} absolute inset-0 z-40 overflow-hidden bg-[#111718] font-expedition text-expedition-parchment transition-[opacity,transform,filter] duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity,transform]`}
+      data-interactive={interactive ? 'true' : 'false'}
+      className={`${departing ? 'scale-[1.008] opacity-0 blur-[1px]' : 'scale-100 opacity-100 blur-0'} ${departing || !interactive ? 'pointer-events-none' : 'pointer-events-auto'} absolute inset-0 z-40 overflow-hidden bg-[#111718] font-expedition text-expedition-parchment transition-[opacity,transform,filter] duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity,transform]`}
     >
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${SPLASH_BACKGROUND})` }}
+      <img
+        src={SPLASH_BACKGROUND}
+        srcSet={SPLASH_BACKGROUND_SRCSET}
+        sizes="100vw"
+        alt=""
+        aria-hidden="true"
+        loading="eager"
+        fetchPriority="high"
+        decoding="async"
+        className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-center"
       />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_37%,rgba(21,30,32,0.08),rgba(8,10,10,0.64)_82%),linear-gradient(90deg,rgba(5,7,8,0.46),rgba(5,7,8,0.12)_42%,rgba(5,7,8,0.32))]" />
       <div className="absolute inset-[14px] border border-expedition-brass/58 shadow-[inset_0_0_30px_rgba(0,0,0,0.35)] sm:inset-[22px]" />
@@ -133,7 +171,7 @@ export function LaunchOverlay({
           Galapagos, 1835
         </p>
 
-        <div className={`mt-9 ${choosingCharacter ? 'w-[min(34rem,calc(100vw-2rem))]' : 'w-[min(25rem,calc(100vw-2rem))]'} rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm`}>
+        <div className={`mt-9 ${expandedPanel ? 'w-[min(34rem,calc(100vw-2rem))]' : 'w-[min(25rem,calc(100vw-2rem))]'} rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm`}>
           <div className="pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/20" />
           {loading ? (
             <div className="relative px-3 py-5">
@@ -156,44 +194,77 @@ export function LaunchOverlay({
                   title="Darwin"
                   subtitle="Naturalist expedition"
                   onClick={() => onModeSelect?.('darwin')}
+                  onIntent={onRuntimeIntent}
                 />
                 <CharacterChoiceButton
                   title="Finch"
                   subtitle="Winged island view"
                   onClick={() => onModeSelect?.('finch')}
+                  onIntent={onRuntimeIntent}
                 />
                 <CharacterChoiceButton
                   title="Tortoise"
                   subtitle="Slow highland life"
                   onClick={() => onModeSelect?.('tortoise')}
+                  onIntent={onRuntimeIntent}
                 />
               </div>
-              <button
-                type="button"
-                onClick={onBack}
-                className="mt-1 h-9 rounded-sm border border-transparent font-expedition text-[14px] tracking-[0.08em] text-expedition-faded transition hover:border-expedition-brass/45 hover:bg-expedition-gold/8 hover:text-expedition-gold"
-              >
-                Back
-              </button>
+              <BackButton onClick={onBack} />
             </nav>
+          ) : showingSettings ? (
+            <div className="relative px-3 py-2 text-left">
+              <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Settings</h2>
+              <p className="mx-auto mt-3 max-w-md text-center text-[15px] leading-relaxed text-expedition-parchment/80">
+                A fuller settings menu is in progress. For now, the expedition selects sensible display settings automatically.
+              </p>
+              <div className="mt-4 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 px-4">
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <span className="text-[16px] text-expedition-parchment">Display &amp; performance</span>
+                  <span className="text-[13px] tracking-[0.08em] text-expedition-gold">Automatic</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <span className="text-[16px] text-expedition-parchment">Audio</span>
+                  <span className="text-[13px] tracking-[0.08em] text-expedition-faded">Coming soon</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <span className="text-[16px] text-expedition-parchment">Controls &amp; accessibility</span>
+                  <span className="text-[13px] tracking-[0.08em] text-expedition-faded">Coming soon</span>
+                </div>
+              </div>
+              <BackButton onClick={onBack} />
+            </div>
+          ) : showingAbout ? (
+            <div className="relative px-4 py-2 text-left">
+              <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">About</h2>
+              <p className="mt-4 text-center text-[17px] tracking-[0.06em] text-expedition-parchment">Work in progress</p>
+              <p className="mt-4 text-[15px] leading-relaxed text-expedition-parchment/82">
+                Darwin is a playable historical simulation set on Floreana—then called Charles Island—in September 1835. It explores observation, collection, travel, uncertainty, and ecological change, with future classroom use in the history of science in mind.
+              </p>
+              <BrassRule className="my-5" />
+              <p className="text-center text-[15px] leading-relaxed text-expedition-parchment/88">
+                Created by Benjamin Breen<br />
+                Coded by GPT 5.6 and Claude
+              </p>
+              <BackButton onClick={onBack} />
+            </div>
           ) : (
             <nav className="relative grid gap-1">
-              <MenuButton disabled>Continue Expedition</MenuButton>
-              <MenuButton primary onClick={onNewExpedition}>New Expedition</MenuButton>
+              {hasSavedExpedition && <MenuButton onClick={onContinue}>Continue Expedition</MenuButton>}
+              <MenuButton primary onClick={onNewExpedition} onIntent={onRuntimeIntent}>New Expedition</MenuButton>
               <div className="mx-4 my-1 h-px bg-gradient-to-r from-transparent via-expedition-brass/50 to-transparent" />
-              <MenuButton disabled>Load Journal</MenuButton>
-              <div className="mx-4 my-1 h-px bg-gradient-to-r from-transparent via-expedition-brass/35 to-transparent" />
-              <MenuButton disabled>Settings</MenuButton>
-              <div className="mx-4 my-1 h-px bg-gradient-to-r from-transparent via-expedition-brass/35 to-transparent" />
-              <MenuButton disabled>Quit</MenuButton>
+              {hasSavedJournalEntries && <MenuButton onClick={onLoadJournal}>Load Journal</MenuButton>}
+              <MenuButton onClick={onSettings}>Settings</MenuButton>
+              <MenuButton onClick={onAbout}>About</MenuButton>
             </nav>
           )}
         </div>
 
         <div className="mt-4 flex w-[min(25rem,calc(100vw-2rem))] items-center justify-center gap-3 rounded-sm border border-expedition-brass/60 bg-[rgba(13,18,20,0.72)] px-4 py-3 shadow-[0_12px_28px_rgba(0,0,0,0.38)] backdrop-blur-sm">
-          <OpenBookIcon className="h-6 w-6 shrink-0 text-expedition-gold" />
+          {hasSavedJournalEntries
+            ? <OpenBookIcon className="h-6 w-6 shrink-0 text-expedition-gold" />
+            : <CompassRoseIcon className="h-6 w-6 shrink-0 text-expedition-gold" />}
           <p className="min-w-0 text-[13.5px] tracking-[0.04em] text-expedition-parchment/90 sm:text-[15px]">
-            Last entry: Floreana - September 1835
+            {hasSavedJournalEntries ? `Last entry: ${lastJournalLabel}` : 'Floreana / Charles Island - September 1835'}
           </p>
         </div>
 

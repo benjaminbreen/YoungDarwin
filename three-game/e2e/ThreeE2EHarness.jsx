@@ -125,6 +125,7 @@ function makeSnapshot() {
     selectedSpecimenId: state.selectedSpecimenId || null,
     inventoryCount: Array.isArray(state.inventory) ? state.inventory.length : 0,
     journalCount: Array.isArray(state.journal) ? state.journal.length : 0,
+    health: finiteNumber(state.health),
     curiosity: finiteNumber(state.curiosity),
     fatigue: finiteNumber(state.fatigue),
     consultedBookIds: Array.isArray(state.consultedBookIds) ? [...state.consultedBookIds] : [],
@@ -147,6 +148,14 @@ function makeSnapshot() {
     documentedSpecimenIds: Array.isArray(state.documentedSpecimenIds) ? [...state.documentedSpecimenIds] : [],
     animalDroppingsCount: Array.isArray(state.animalDroppings) ? state.animalDroppings.length : 0,
     animalModeStats: state.animalModeStats || {},
+    expeditionOutcome: state.expeditionOutcome
+      ? {
+          type: state.expeditionOutcome.type || null,
+          source: state.expeditionOutcome.source || null,
+          phase: state.expeditionOutcome.phase || null,
+          cause: state.expeditionOutcome.cause || null,
+        }
+      : null,
     examineSession: summarizeExamineSession(state.examineSession),
     message: state.message || null,
     playerPose: plainPose(pose),
@@ -253,6 +262,20 @@ function createHarnessApi() {
     },
     closeStatus: () => {
       useThreeGameStore.getState().closeStatusView();
+      return makeSnapshot();
+    },
+    triggerIncrementalCollapse: () => {
+      useThreeGameStore.getState().applyCactusDamage(1000);
+      return makeSnapshot();
+    },
+    triggerFatalOutcome: (source = 'catastrophic_fall') => {
+      useThreeGameStore.getState().applyFatalInjury(source);
+      return makeSnapshot();
+    },
+    completeRecovery: () => {
+      const store = useThreeGameStore.getState();
+      store.beginIncapacitationRecovery();
+      useThreeGameStore.getState().completeZoneTransition();
       return makeSnapshot();
     },
     selectNearestSpecimen: () => {

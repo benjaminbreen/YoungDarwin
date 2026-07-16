@@ -1,7 +1,7 @@
 'use client';
 
-import ThreeDarwinGame from '../three-game/ThreeDarwinGame';
+import { ThreeLaunchShell } from '../three-game/ui/ThreeLaunchShell';
 
 export default function Home() {
-  return <ThreeDarwinGame />;
+  return <ThreeLaunchShell />;
 }

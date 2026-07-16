@@ -156,6 +156,7 @@ export const modelAssets = {
     enabled: true,
     preload: false,
     path: '/assets/models/syms-animated.glb',
+    cacheKey: 'syms-2k-webp-20260715',
     scale: 0.98,
     rotation: [0, 0, 0],
     yOffset: 0,

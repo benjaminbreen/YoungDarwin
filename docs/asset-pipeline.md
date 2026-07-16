@@ -64,6 +64,11 @@ Preferred style: stylized low-poly / hand-painted, strong silhouettes, readable
 game scale, historically grounded Darwin/Syms clothing and tools, and web-aware
 texture sizes.
 
+The committed Syms runtime asset can be reproduced from an unoptimized
+`public/assets/models/syms-animated.glb` with `npm run asset:syms`. The script
+resizes its embedded material texture to 2048px WebP and refuses to replace the
+file if the scene bounds, rig, meshes, or animation inventory change.
+
 ## Verification
 
 ```bash

@@ -443,7 +443,10 @@ async function openE2EPage(browser, baseUrl, search = {}) {
   const targetUrl = e2eUrl(baseUrl, search);
   await withFailureArtifacts(page, 'navigate', errors, async () => {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
-    await page.waitForFunction(() => window.__darwinE2EReady === true, null, { timeout: UI_STEP_TIMEOUT_MS });
+    await page.locator('[data-testid="three-launch-overlay"][data-interactive="true"]').waitFor({
+      state: 'visible',
+      timeout: UI_STEP_TIMEOUT_MS,
+    });
   });
   return { page, errors };
 }
@@ -457,6 +460,11 @@ async function launchMode(page, errors, modeName) {
   });
   await withFailureArtifacts(page, `wait for ${modeName} gameplay`, errors, async () => {
     await page.waitForSelector('canvas', { state: 'attached', timeout: GAMEPLAY_TIMEOUT_MS });
+    await page.waitForFunction(
+      () => window.__darwinE2EReady === true && typeof window.__darwinE2E?.getState === 'function',
+      null,
+      { timeout: GAMEPLAY_TIMEOUT_MS },
+    );
     await page.locator('[data-testid="three-launch-overlay"]').waitFor({ state: 'detached', timeout: GAMEPLAY_TIMEOUT_MS });
     await page.waitForTimeout(modeName.toLowerCase() === 'darwin' ? 7500 : 1200);
   });

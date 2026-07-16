@@ -810,7 +810,6 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     // Clear stale intent first. Frames that reach the character move publish
     // the pre-collision velocity below; early-return/paused frames stay zero.
     updateRuntimePlayerMotion({ x: 0, z: 0 });
-    if (health <= 0) return;
     collisionAdapter.beginFrame?.();
     const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
     const rawTouch = consumeTouchControls();
@@ -963,6 +962,27 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
     });
 
     const safeDelta = Math.min(delta, 0.05);
+    if (health <= 0) {
+      // Keep publishing a complete frame after the fatal/collapse animation
+      // starts. The former early return froze camera and visibility updates,
+      // which made Darwin appear to vanish when his health reached zero.
+      setWorldTimeTarget(0.18);
+      velocity.current.set(0, 0, 0);
+      stateRef.current.walking = false;
+      stateRef.current.running = false;
+      stateRef.current.airborne = false;
+      finalizeFrame({
+        moving: false,
+        running: false,
+        crouchRunIntent: false,
+        groundDistance: stateRef.current.groundDistance,
+        skipFootsteps: true,
+        skipSwimEconomy: true,
+        keys: EMPTY_KEYS,
+        touch: EMPTY_KEYS,
+      });
+      return;
+    }
     if (statusViewOpen || examineOpen) {
       // Examination owns the camera and freezes player/world locomotion, while
       // a low non-zero world scale keeps the subject's idle animation alive.

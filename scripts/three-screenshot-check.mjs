@@ -450,6 +450,9 @@ async function withFailureArtifacts(page, stage, consoleErrors, action) {
 
 async function clickNewExpeditionFlow(page, consoleErrors) {
   await withFailureArtifacts(page, 'open menu', consoleErrors, async () => {
+    await page.locator('[data-testid="three-launch-overlay"][data-interactive="true"]').waitFor({
+      timeout: UI_STEP_TIMEOUT_MS,
+    });
     await page.getByRole('button', { name: /^New Expedition$/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
 

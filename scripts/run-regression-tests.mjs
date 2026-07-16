@@ -223,6 +223,49 @@ const {
   createFaunaFrameScheduler,
   faunaFrameTier,
 } = loadModule('three-game/fauna/faunaFrameScheduler.js');
+const {
+  CATASTROPHIC_FALL_SPEED,
+  expeditionOutcomeCause,
+  minutesUntilRecoveryMorning,
+  resolveExpeditionDamage,
+} = loadModule('three-game/expeditionOutcomes.js');
+
+test('incremental injuries collapse Darwin while catastrophic causes are fatal', () => {
+  assert.deepEqual(
+    resolveExpeditionDamage({ health: 4, amount: 4 }),
+    { previousHealth: 4, health: 0, damage: 4, outcomeType: 'incapacitated' },
+  );
+  assert.deepEqual(
+    resolveExpeditionDamage({ health: 4, amount: 4, fatalOnZero: true }),
+    { previousHealth: 4, health: 0, damage: 4, outcomeType: 'death' },
+  );
+  assert.deepEqual(
+    resolveExpeditionDamage({ health: 100, amount: 1, fatalOnZero: true, forceZero: true }),
+    { previousHealth: 100, health: 0, damage: 1, outcomeType: 'death' },
+  );
+  assert.equal(CATASTROPHIC_FALL_SPEED, 22);
+});
+
+test('collapse recovery advances to 7 AM without erasing the current expedition day unnecessarily', () => {
+  assert.equal(minutesUntilRecoveryMorning(17), 14 * 60);
+  assert.equal(minutesUntilRecoveryMorning(6.5), 30);
+  assert.equal(minutesUntilRecoveryMorning(7), 24 * 60);
+});
+
+test('outcome causes distinguish drowning, fatal falls, and accumulated injury', () => {
+  assert.equal(
+    expeditionOutcomeCause({ type: 'death', source: 'drowning', locationName: 'Post Office Bay' }),
+    'Drowning in the waters off Post Office Bay.',
+  );
+  assert.equal(
+    expeditionOutcomeCause({ type: 'death', source: 'catastrophic_fall', locationName: 'Scrub Rise' }),
+    'A fatal fall at Scrub Rise.',
+  );
+  assert.match(
+    expeditionOutcomeCause({ type: 'incapacitated', source: 'cactus', locationName: 'Scrub Rise' }),
+    /Accumulated injuries and exposure/,
+  );
+});
 
 test('action suggestions prioritize safety, traps, specimens, and evidence', () => {
   const objectives = createDefaultObjectives();

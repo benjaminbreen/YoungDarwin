@@ -64,6 +64,16 @@ import {
   snareActorId,
   snareTargetLabel,
 } from './snareTraps';
+import {
+  CATASTROPHIC_FALL_SPEED,
+  INCAPACITATION_CURIOSITY_COST,
+  INCAPACITATION_RECOVERY_FATIGUE,
+  INCAPACITATION_RECOVERY_HEALTH,
+  INCAPACITATION_RECOVERY_ZONE_ID,
+  expeditionOutcomeCause,
+  minutesUntilRecoveryMorning,
+  resolveExpeditionDamage,
+} from './expeditionOutcomes';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -111,6 +121,76 @@ export const threeRuntimeState = {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function resetThreeRuntimeState() {
+  threeRuntimeState.playerPose.position = { ...INITIAL_PLAYER_POSE.position };
+  threeRuntimeState.playerPose.facing = { ...INITIAL_PLAYER_POSE.facing };
+  threeRuntimeState.playerMotion.intendedPlanarVelocity = { x: 0, z: 0 };
+  threeRuntimeState.footContacts.left = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
+  threeRuntimeState.footContacts.right = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
+  threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, intensity: 0, time: 0 };
+}
+
+function expeditionOutcomeStats(state) {
+  const documented = new Set([
+    ...(state.collectedSpecimenIds || []),
+    ...(state.documentedSpecimenIds || []),
+  ]);
+  return {
+    day: state.day || 1,
+    timeOfDay: state.timeOfDay || 0,
+    locationId: state.currentZoneId,
+    locationName: getThreeIslandLocation(state.currentZoneId).name || getZone(state.currentZoneId).name,
+    specimensDocumented: documented.size,
+    specimensAvailable: getThreeSpecimens(state.currentZoneId).length,
+    notesRecorded: (state.journal || []).length,
+    curiosity: state.curiosity || 0,
+  };
+}
+
+function healthDamagePatch(state, {
+  amount,
+  source = 'injury',
+  fatalOnZero = false,
+  forceZero = false,
+} = {}) {
+  if (state.expeditionOutcome) return { health: state.health };
+  const resolution = resolveExpeditionDamage({
+    health: state.health,
+    amount,
+    fatalOnZero,
+    forceZero,
+  });
+  if (!resolution.outcomeType || state.playableModeId !== 'darwin') {
+    return { health: resolution.health };
+  }
+  const stats = expeditionOutcomeStats(state);
+  return {
+    health: resolution.health,
+    expeditionOutcome: {
+      id: `expedition-outcome-${Date.now()}`,
+      type: resolution.outcomeType,
+      source,
+      cause: expeditionOutcomeCause({
+        type: resolution.outcomeType,
+        source,
+        locationName: stats.locationName,
+      }),
+      stats,
+      phase: 'presenting',
+      createdAt: Date.now(),
+    },
+    activeConstraint: null,
+    majorEvent: null,
+    statusViewOpen: false,
+    examineSession: null,
+    readableBookSession: null,
+    activeNpcEncounter: null,
+    beagleTravelPrompt: null,
+    carriedObjectId: null,
+    carryPrompt: null,
+  };
 }
 
 function specimenById(specimenId) {
@@ -683,6 +763,7 @@ function createSceneSlice() {
     animalModeDarwinNpcPose: null,
     animalModeStats: {},
     lastOutcome: null,
+    expeditionOutcome: null,
     activeConstraint: null,
     majorEvent: null,
     snareTraps: [],
@@ -741,6 +822,11 @@ function createSceneSlice() {
 export const useThreeGameStore = create((set, get) => ({
   ...createExpeditionSlice(),
   ...createSceneSlice(),
+
+  resetExpedition: () => {
+    resetThreeRuntimeState();
+    set(useThreeGameStore.getInitialState(), true);
+  },
 
   setPlayableMode: playableModeId => set(state => {
     const mode = getPlayableMode(playableModeId);
@@ -819,7 +905,7 @@ export const useThreeGameStore = create((set, get) => ({
     const message = 'The charge tears into the ground at your own boot. A stupid, searing mistake.';
     const symsLine = '"Sir! Point the muzzle at the birds, not the naturalist!"';
     return {
-      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      ...healthDamagePatch(state, { amount, source: 'shotgun_injury' }),
       message,
       symsLine,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
@@ -2199,6 +2285,9 @@ export const useThreeGameStore = create((set, get) => ({
       ? darwinThought({ zone, weather: arrivalWeather, timeOfDay: arrival.timeOfDay })
       : null;
     const zoneKey = `zone:${zone.id}`;
+    const recovering = state.transition.source === 'incapacitation-recovery';
+    const recoveryMessage = 'You wake in your berth aboard HMS Beagle, weak but alive. The expedition has been cut short for the day.';
+    const recoveryLine = '"Easy now, sir. The island will still be there when you are fit to meet it."';
     return {
       currentZoneId: zone.id,
       currentLocalCellId: nextLocalCellId,
@@ -2235,15 +2324,18 @@ export const useThreeGameStore = create((set, get) => ({
       examineSession: null,
       readableBookSession: null,
       interiorPrompt: null,
-      message: scripted?.narration || zone.loadingNote || state.message,
-      educationalNote: scripted?.educationalNote || zone.educationalNote || state.educationalNote,
+      message: recovering ? recoveryMessage : (scripted?.narration || zone.loadingNote || state.message),
+      educationalNote: recovering
+        ? 'Darwin\'s shore work depended on companions, boats, and shipboard routines that made recovery possible.'
+        : (scripted?.educationalNote || zone.educationalNote || state.educationalNote),
       weather: arrivalWeather,
       weatherOverride: null,
       sounds: Array.isArray(zone.sounds) ? zone.sounds : state.sounds,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
-        narration: scripted?.narration || zone.loadingNote,
-        darwinThought: thought,
-      }, arrivalState, 'scripted-zone', { allowThought: Boolean(thought) })),
+        narration: recovering ? recoveryMessage : (scripted?.narration || zone.loadingNote),
+        symsLine: recovering ? recoveryLine : null,
+        darwinThought: recovering ? null : thought,
+      }, arrivalState, recovering ? 'recovery' : 'scripted-zone', { allowThought: !recovering && Boolean(thought) })),
       narratorScriptedKeys: {
         ...state.narratorScriptedKeys,
         [zoneKey]: nowMinutes,
@@ -2252,6 +2344,15 @@ export const useThreeGameStore = create((set, get) => ({
       playerSpawnId: state.transition.entryEdge || 'default',
       fatigue: clamp(state.fatigue + (state.transition.fatigue || 0), 0, MAX_FATIGUE),
       ...arrival,
+      ...(recovering ? {
+        health: INCAPACITATION_RECOVERY_HEALTH,
+        fatigue: INCAPACITATION_RECOVERY_FATIGUE,
+        curiosity: clamp(state.curiosity - INCAPACITATION_CURIOSITY_COST, 0, MAX_CURIOSITY),
+        expeditionOutcome: null,
+        activeConstraint: null,
+        majorEvent: null,
+        symsLine: recoveryLine,
+      } : {}),
     };
   }),
 
@@ -2270,6 +2371,34 @@ export const useThreeGameStore = create((set, get) => ({
     get().finishZoneTransition(transitionId);
   },
 
+  beginIncapacitationRecovery: () => {
+    const state = get();
+    if (state.expeditionOutcome?.type !== 'incapacitated') return;
+    const minutes = minutesUntilRecoveryMorning(state.timeOfDay);
+    set(current => ({
+      expeditionOutcome: current.expeditionOutcome
+        ? { ...current.expeditionOutcome, phase: 'recovering' }
+        : null,
+    }));
+    get().beginZoneTransition(INCAPACITATION_RECOVERY_ZONE_ID, {
+      source: 'incapacitation-recovery',
+      mode: 'threshold',
+      minutes,
+      fatigue: 0,
+      note: 'The crew carry Darwin back aboard HMS Beagle. He wakes in the aft cabin the following morning.',
+      educationalNote: 'Shore work depended on companions, boats, and the shipboard routines that made recovery possible.',
+    });
+  },
+
+  applyFatalInjury: (source = 'fatal_injury') => set(state => ({
+    ...healthDamagePatch(state, {
+      amount: MAX_HEALTH,
+      source,
+      fatalOnZero: true,
+      forceZero: true,
+    }),
+  })),
+
   cycleViewMode: () => set(state => ({
     viewMode: state.viewMode === 'shoulder'
       ? 'hero'
@@ -2278,19 +2407,27 @@ export const useThreeGameStore = create((set, get) => ({
         : state.viewMode === 'first' ? 'top' : 'shoulder',
   })),
 
-  applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => ({
-    fatigue: clamp(state.fatigue + (fatigueDelta ?? (
-      (running ? MOVEMENT_FATIGUE.runningPerFrame60 : walking ? MOVEMENT_FATIGUE.walkingPerFrame60 : 0)
-      + (airborne ? MOVEMENT_FATIGUE.airbornePerFrame60 : 0)
-    )), 0, MAX_FATIGUE),
-    health: clamp(state.health - Math.max(0, falling - 7.5) * 1.25, 0, MAX_HEALTH),
-  })),
+  applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => {
+    const catastrophicFall = state.playableModeId === 'darwin' && falling >= CATASTROPHIC_FALL_SPEED;
+    return {
+      fatigue: clamp(state.fatigue + (fatigueDelta ?? (
+        (running ? MOVEMENT_FATIGUE.runningPerFrame60 : walking ? MOVEMENT_FATIGUE.walkingPerFrame60 : 0)
+        + (airborne ? MOVEMENT_FATIGUE.airbornePerFrame60 : 0)
+      )), 0, MAX_FATIGUE),
+      ...healthDamagePatch(state, {
+        amount: catastrophicFall ? MAX_HEALTH : Math.max(0, falling - 7.5) * 1.25,
+        source: catastrophicFall ? 'catastrophic_fall' : 'fall_injury',
+        fatalOnZero: catastrophicFall,
+        forceZero: catastrophicFall,
+      }),
+    };
+  }),
 
   applyDrowningDamage: amount => set(state => {
     const message = 'You are out of your depth — the sea is closing over you.';
     const symsLine = '"Sir! Back to the shallows — the Beagle has no second naturalist!"';
     return {
-      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
+      ...healthDamagePatch(state, { amount, source: 'drowning', fatalOnZero: true }),
       message,
       symsLine,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
@@ -2387,7 +2524,6 @@ export const useThreeGameStore = create((set, get) => ({
     const sampleLabel = details.sampleLabel || details.material || 'rock';
     const message = `A sharp ${sampleLabel} chip snaps back from the hammer strike and catches you before it falls into the dust.`;
     return {
-      health: clamp(state.health - 6, 0, MAX_HEALTH),
       activeConstraint: {
         type: 'hammer_shard',
         requiresNarratorInput: true,
@@ -2424,6 +2560,7 @@ export const useThreeGameStore = create((set, get) => ({
         narration: message,
         symsLine: '"Best look to your hand before the stone, sir."',
       }, state, 'major-event')),
+      ...healthDamagePatch(state, { amount: 6, source: 'hammer_shard' }),
     };
   }),
 
@@ -2435,7 +2572,6 @@ export const useThreeGameStore = create((set, get) => ({
     const config = FIELD_DILEMMA_CONFIG.cactus_spines;
     const eventId = `major-cactus-spines-${Date.now()}`;
     return {
-      health: clamp(state.health - Math.max(0, amount), 0, MAX_HEALTH),
       ...(embedSpines ? {
         activeConstraint: {
           type: 'cactus_spines',
@@ -2485,6 +2621,7 @@ export const useThreeGameStore = create((set, get) => ({
         narration: message,
         symsLine,
       }, state, 'hazard')),
+      ...healthDamagePatch(state, { amount, source: 'cactus' }),
     };
   }),
 
@@ -2554,7 +2691,6 @@ export const useThreeGameStore = create((set, get) => ({
           createdAt: Date.now(),
         };
     return {
-      health: clamp(state.health + healthDelta, 0, MAX_HEALTH),
       activeConstraint: nextConstraint,
       majorEvent: nextMajorEvent,
       snareTraps: escaped && constraint.trapId
@@ -2573,6 +2709,9 @@ export const useThreeGameStore = create((set, get) => ({
       }, state, escaped ? 'snare-escape' : 'snare-escape-failed', {
         allowThought: false,
       })),
+      ...(healthDelta < 0
+        ? healthDamagePatch(state, { amount: -healthDelta, source: 'snare' })
+        : { health: clamp(state.health + healthDelta, 0, MAX_HEALTH) }),
     };
   }),
 
@@ -2611,7 +2750,6 @@ export const useThreeGameStore = create((set, get) => ({
           createdAt: Date.now(),
         };
     return {
-      health: clamp(state.health + healthDelta, 0, MAX_HEALTH),
       activeConstraint: nextConstraint,
       majorEvent: nextMajorEvent,
       message: narration,
@@ -2623,6 +2761,9 @@ export const useThreeGameStore = create((set, get) => ({
       }, state, resolved ? `${constraint.type}-resolved` : `${constraint.type}-failed`, {
         allowThought: false,
       })),
+      ...(healthDelta < 0
+        ? healthDamagePatch(state, { amount: -healthDelta, source: constraint.type || 'field_injury' })
+        : { health: clamp(state.health + healthDelta, 0, MAX_HEALTH) }),
     };
   }),
 
@@ -3032,7 +3173,6 @@ export const useThreeGameStore = create((set, get) => ({
             }
           : item
       )),
-      health: isSyms ? state.health : clamp(state.health - 25, 0, MAX_HEALTH),
       activeConstraint: isSyms
         ? state.activeConstraint
         : {
@@ -3067,6 +3207,9 @@ export const useThreeGameStore = create((set, get) => ({
           ? '"That one found me before it found a lizard, sir."'
           : '"Proof of principle, sir, though perhaps not the intended specimen."',
       }, state, isSyms ? 'snare-syms-trigger' : 'major-event')),
+      ...(isSyms
+        ? { health: state.health }
+        : healthDamagePatch(state, { amount: 25, source: 'snare' })),
     };
   }),
 

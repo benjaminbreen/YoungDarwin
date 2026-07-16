@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, Bloom, N8AO, SMAA } from '@react-three/postprocessing';
@@ -1730,8 +1730,9 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
   );
 }
 
-export default function ThreeDarwinGame() {
-  const [launchState, setLaunchState] = useState('menu');
+export default function ThreeDarwinGame({ initialModeId = null }) {
+  const [launchState, setLaunchState] = useState(initialModeId ? 'loading' : 'menu');
+  const [initialModeReady, setInitialModeReady] = useState(!initialModeId);
   const [sceneReady, setSceneReady] = useState(false);
   const [loadersStable, setLoadersStable] = useState(false);
   const [criticalShadersReady, setCriticalShadersReady] = useState(false);
@@ -1761,11 +1762,12 @@ export default function ThreeDarwinGame() {
   ));
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
+  const initialModeAppliedRef = useRef(false);
   const weather = useThreeGameStore(state => state.weather);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const transition = useThreeGameStore(state => state.transition);
-  const gameStarted = launchState !== 'menu' && launchState !== 'character';
+  const gameStarted = initialModeReady && launchState !== 'menu' && launchState !== 'character';
   const automationReadyMode = e2eMode || screenshotMode;
   const openingIntroActive = launchState === 'intro';
   // Terrain, DPR, postprocessing, and water targets stay on their final
@@ -1797,6 +1799,15 @@ export default function ThreeDarwinGame() {
   const markOpeningVisualReady = useCallback(() => {
     setOpeningVisualReady(true);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!initialModeId || initialModeAppliedRef.current) return;
+    initialModeAppliedRef.current = true;
+    useThreeGameStore.getState().setPlayableMode(initialModeId);
+    bootStartedAt.current = performance.now();
+    loaderQuietSince.current = 0;
+    setInitialModeReady(true);
+  }, [initialModeId]);
 
   // Mirror the material-quality knobs into the store so the scene's
   // material-building components (terrain, flora, trees) can react to them
@@ -1932,7 +1943,8 @@ export default function ThreeDarwinGame() {
     setLaunchState('character');
   };
 
-  const beginNewExpedition = (modeId = 'darwin') => {
+  const beginNewExpedition = (modeId = 'darwin', { reset = false } = {}) => {
+    if (reset) useThreeGameStore.getState().resetExpedition();
     useThreeGameStore.getState().setPlayableMode(modeId);
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
@@ -1945,6 +1957,24 @@ export default function ThreeDarwinGame() {
     setOpeningVisualReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('loading');
+  };
+
+  const restartExpedition = () => {
+    beginNewExpedition('darwin', { reset: true });
+  };
+
+  const returnToMainMenu = () => {
+    useThreeGameStore.getState().resetExpedition();
+    loaderQuietSince.current = 0;
+    setDisplayedProgress(0);
+    setLoadersStable(false);
+    setCriticalShadersReady(false);
+    setSceneReady(false);
+    setStartupContentPhase(0);
+    setOpeningIntroStartedAt(0);
+    setOpeningVisualReady(false);
+    setLaunchOverlayDismissed(false);
+    setLaunchState('menu');
   };
 
   const markSceneReady = useCallback(() => {
@@ -2129,7 +2159,13 @@ export default function ThreeDarwinGame() {
           sequenceId={openingIntroStartedAt}
           durationMs={OPENING_CLOUD_VEIL_DURATION_MS}
         />
-        {gameUiVisible && <ThreeHUD onTogglePerf={() => setShowPerf(value => !value)} />}
+        {gameUiVisible && (
+          <ThreeHUD
+            onTogglePerf={() => setShowPerf(value => !value)}
+            onRestartExpedition={restartExpedition}
+            onReturnToMainMenu={returnToMainMenu}
+          />
+        )}
         {gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
         {gameUiVisible && (
           <AnimalAnimationDevPanel open={showAnimalAnimationLab} onClose={() => setShowAnimalAnimationLab(false)} />
@@ -2154,7 +2190,7 @@ export default function ThreeDarwinGame() {
             mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}
             departing={gameStarted && sceneReady}
             progress={displayedProgress}
-            selectedModeId={playableModeId}
+            selectedModeId={initialModeId || playableModeId}
             onNewExpedition={openCharacterSelect}
             onModeSelect={beginNewExpedition}
             onBack={() => setLaunchState('menu')}

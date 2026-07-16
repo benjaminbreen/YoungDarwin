@@ -84,6 +84,7 @@ export const FLOREANA_PBR_TEXTURES = {
     normal: `${FLOREANA_PBR_BASE}/red-cinder-dirt_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/red-cinder-dirt_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/red-cinder-dirt_height.png`,
+    nrh: `${FLOREANA_PBR_BASE}/red-cinder-dirt_nrh.png`,
     scale: 0.24,
     normalStrength: 0.38,
     roughnessMix: 0.78,
@@ -99,6 +100,7 @@ export const FLOREANA_PBR_TEXTURES = {
     normal: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_height.png`,
+    nrh: `${FLOREANA_PBR_BASE}/dark-basalt-gravel_nrh.png`,
     scale: 0.3,
     normalStrength: 0.58,
     roughnessMix: 0.84,
@@ -189,6 +191,7 @@ export const FLOREANA_PBR_TEXTURES = {
     normal: `${FLOREANA_PBR_BASE}/dry-grass-litter_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/dry-grass-litter_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/dry-grass-litter_height.png`,
+    nrh: `${FLOREANA_PBR_BASE}/dry-grass-litter_nrh.png`,
     scale: 0.19,
     normalStrength: 0.3,
     roughnessMix: 0.74,
@@ -204,6 +207,7 @@ export const FLOREANA_PBR_TEXTURES = {
     normal: `${FLOREANA_PBR_BASE}/coastal-scrub_normal.png`,
     roughness: `${FLOREANA_PBR_BASE}/coastal-scrub_roughness.png`,
     height: `${FLOREANA_PBR_BASE}/coastal-scrub_height.png`,
+    nrh: `${FLOREANA_PBR_BASE}/coastal-scrub_nrh.png`,
     scale: 0.16,
     normalStrength: 0.28,
     roughnessMix: 0.68,
@@ -336,6 +340,22 @@ export function loadPbrTerrainSet(textureSet) {
   };
 }
 
+// Compact runtime form for multi-layer terrain shaders. R/G retain the source
+// tangent normal, B stores roughness, and A stores height for authored blends.
+export function loadPackedPbrTerrainSet(textureSet) {
+  return {
+    config: textureSet,
+    albedo: loadRepeatingTerrainTexture(textureSet.albedo, {
+      fallback: textureSet.fallbacks?.albedo || '#ffffff',
+      colorSpace: THREE.SRGBColorSpace,
+    }),
+    nrh: loadRepeatingTerrainTexture(textureSet.nrh, {
+      fallback: [128, 128, 230, 128],
+      colorSpace: THREE.NoColorSpace,
+    }),
+  };
+}
+
 export function loadTerrainAlbedo(textureSet) {
   return loadRepeatingTerrainTexture(textureSet.albedo, {
     fallback: textureSet.fallbacks?.albedo || '#ffffff',
@@ -348,4 +368,9 @@ export function disposePbrTerrainSet(textureSet) {
   textureSet?.normal?.dispose?.();
   textureSet?.roughness?.dispose?.();
   textureSet?.height?.dispose?.();
+}
+
+export function disposePackedPbrTerrainSet(textureSet) {
+  textureSet?.albedo?.dispose?.();
+  textureSet?.nrh?.dispose?.();
 }

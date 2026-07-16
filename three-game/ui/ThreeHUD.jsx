@@ -16,6 +16,7 @@ import { StatusView } from './StatusView';
 import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
 import { BookReaderView } from './BookReaderView';
 import { NpcEncounterModal } from './NpcEncounterModal';
+import { ExpeditionOutcomeModal } from './ExpeditionOutcomeModal';
 import {
   ExpeditionPanel,
   PanelTabs,
@@ -3477,7 +3478,7 @@ function CameraCycleButton({ className }) {
   return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
 }
 
-export function ThreeHUD() {
+export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
   const [panel, setPanel] = useState(null);
   const [mapOpen, setMapOpen] = useState(() => (
     process.env.NODE_ENV !== 'production'
@@ -3495,7 +3496,9 @@ export function ThreeHUD() {
   const npcEncounterOpen = useThreeGameStore(state => Boolean(state.activeNpcEncounter));
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen);
+  const expeditionOutcome = useThreeGameStore(state => state.expeditionOutcome);
+  const outcomeOpen = Boolean(expeditionOutcome && expeditionOutcome.phase !== 'recovering');
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -3554,7 +3557,7 @@ export function ThreeHUD() {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
       {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
-      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || outcomeOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer />
       <TopObjective objective={objective} />
 
@@ -3641,6 +3644,12 @@ export function ThreeHUD() {
           setPanel(null);
           openMapModal();
         }}
+      />
+      <ExpeditionOutcomeModal
+        journalOpen={panel === 'journal'}
+        onOpenJournal={openJournalPanel}
+        onRestartExpedition={onRestartExpedition}
+        onReturnToMainMenu={onReturnToMainMenu}
       />
       <ZoneTransitionOverlay />
     </div>
