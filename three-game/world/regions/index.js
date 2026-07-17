@@ -64,6 +64,8 @@ import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 import { postScrubRiseRegion } from './postScrubRise/terrain';
 import { createPostScrubRiseTerrainMaterial } from './postScrubRise/material';
+import { lavaFlatsRegion } from './lavaFlats/terrain';
+import { createLavaFlatsTerrainMaterial } from './lavaFlats/material';
 
 /** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
@@ -95,6 +97,7 @@ const authoredRegions = [
   { ...lawsonHouseRegion, createTerrainMaterial: createLawsonHouseTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
   { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
+  { ...lavaFlatsRegion, createTerrainMaterial: createLavaFlatsTerrainMaterial },
 ];
 
 /** @type {Map<string, AuthoredRegionDefinition>} */

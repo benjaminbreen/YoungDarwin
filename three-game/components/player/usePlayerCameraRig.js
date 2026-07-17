@@ -17,6 +17,11 @@ function dampAngle(current, target, lambda, delta) {
   return THREE.MathUtils.damp(current, wrapped, lambda, delta);
 }
 
+function smootherStep01(value) {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
 export function usePlayerCameraRig() {
   const { camera, gl } = useThree();
   const yawRef = useRef(0);
@@ -510,22 +515,12 @@ export function usePlayerCameraRig() {
       const descentProgress = runtime.descentStartedAt
         ? THREE.MathUtils.clamp((now - runtime.descentStartedAt) / descentDuration, 0, 1)
         : 0;
-      const flyT = descentProgress * descentProgress * descentProgress
-        * (descentProgress * (descentProgress * 6 - 15) + 10);
-      const surveyT = THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp(aerialElapsed / maxAerialDuration, 0, 1),
-        0,
-        1,
-      );
-      const orbitT = THREE.MathUtils.lerp(
-        surveyT * 0.28,
-        1,
-        THREE.MathUtils.smoothstep(descentProgress, 0.02, 0.94),
-      );
+      const flyT = smootherStep01(descentProgress);
+      const surveyT = smootherStep01(aerialElapsed / maxAerialDuration);
       const targetT = THREE.MathUtils.lerp(
-        surveyT * 0.2,
+        surveyT * 0.26,
         1,
-        THREE.MathUtils.smoothstep(descentProgress, 0.04, 0.86),
+        smootherStep01(THREE.MathUtils.smoothstep(descentProgress, 0.03, 0.9)),
       );
       const introForward = scratch.introForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const introRight = scratch.introRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
@@ -560,17 +555,27 @@ export function usePlayerCameraRig() {
       const orbitTarget = scratch.introLookTarget
         .copy(startTarget)
         .lerp(finalPivot, targetT);
+      // A slow lateral drift gives the high survey real parallax without
+      // making the island hard to read. It resolves completely before the
+      // playable-camera handoff, so there is no final-frame correction.
+      orbitTarget.addScaledVector(
+        introRight,
+        Math.sin(surveyT * Math.PI * 1.15) * 0.9 * (1 - flyT),
+      );
       const finalOffsetX = finalEye.x - finalPivot.x;
       const finalOffsetZ = finalEye.z - finalPivot.z;
       const finalHorizontalRadius = Math.max(0.1, Math.hypot(finalOffsetX, finalOffsetZ));
       const finalAngle = Math.atan2(finalOffsetZ, finalOffsetX);
-      const orbitAngle = finalAngle - (1 - orbitT) * 0.82 + Math.sin(orbitT * Math.PI) * 0.08;
-      const orbitRadius = THREE.MathUtils.lerp(13.5, finalHorizontalRadius, flyT);
-      const surveyHeight = THREE.MathUtils.lerp(98, 94, surveyT);
+      const surveyAngle = finalAngle - 1.02 + surveyT * 0.38;
+      const orbitAngle = THREE.MathUtils.lerp(surveyAngle, finalAngle, flyT)
+        + Math.sin(flyT * Math.PI) * 0.045;
+      const surveyRadius = THREE.MathUtils.lerp(18.5, 15.4, surveyT);
+      const orbitRadius = THREE.MathUtils.lerp(surveyRadius, finalHorizontalRadius, flyT);
+      const surveyHeight = THREE.MathUtils.lerp(106, 92, surveyT);
       const orbitHeight = THREE.MathUtils.lerp(surveyHeight, finalEye.y - finalPivot.y, flyT);
       const eye = scratch.introEye.set(
         orbitTarget.x + Math.cos(orbitAngle) * orbitRadius,
-        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 2.4,
+        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 3.2,
         orbitTarget.z + Math.sin(orbitAngle) * orbitRadius,
       );
       const lookTarget = scratch.introLookTarget
@@ -582,6 +587,17 @@ export function usePlayerCameraRig() {
       );
       camera.position.copy(eye).addScaledVector(cameraShake, descentProgress);
       camera.lookAt(lookTarget);
+      camera.rotation.z += Math.sin(surveyT * Math.PI * 1.35) * 0.006 * (1 - flyT);
+      const finalFov = baseFovRef.current ?? 50;
+      const openingFov = THREE.MathUtils.lerp(
+        46,
+        finalFov,
+        smootherStep01(THREE.MathUtils.smoothstep(descentProgress, 0.32, 1)),
+      );
+      if (Math.abs(camera.fov - openingFov) > 0.01) {
+        camera.fov = openingFov;
+        camera.updateProjectionMatrix();
+      }
       if (!shoulderPivotRef.current) {
         shoulderPivotRef.current = finalPivot.clone();
       } else {

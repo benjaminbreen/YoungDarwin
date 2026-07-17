@@ -74,6 +74,12 @@ import {
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
 } from './expeditionOutcomes';
+import {
+  applyTranscriptEvaluation,
+  buildFinalAssessmentRecord,
+  buildLocalHenslowAssessment,
+  isEndGameNarratorCommand,
+} from './finalAssessment';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -137,13 +143,16 @@ function expeditionOutcomeStats(state) {
     ...(state.collectedSpecimenIds || []),
     ...(state.documentedSpecimenIds || []),
   ]);
+  const availableSpecimenTypes = new Set(
+    getThreeSpecimens(state.currentZoneId).map(specimen => specimen.id),
+  );
   return {
     day: state.day || 1,
     timeOfDay: state.timeOfDay || 0,
     locationId: state.currentZoneId,
     locationName: getThreeIslandLocation(state.currentZoneId).name || getZone(state.currentZoneId).name,
     specimensDocumented: documented.size,
-    specimensAvailable: getThreeSpecimens(state.currentZoneId).length,
+    specimensAvailable: availableSpecimenTypes.size,
     notesRecorded: (state.journal || []).length,
     curiosity: state.curiosity || 0,
   };
@@ -416,6 +425,7 @@ function makeJournalEntry({ specimen, tool, result, documented = false, location
     latin: specimen.latin,
     location: location.name,
     method: tool.name,
+    authorship: 'field-record',
     condition,
     content: `${specimen.name}: ${result.reason}`,
     createdAt: new Date().toISOString(),
@@ -738,6 +748,7 @@ function createSceneSlice() {
     message: initialNarration.narration,
     educationalNote: initialNarration.educationalNote,
     narratorLog: createInitialNarratorLog(initialNarration),
+    assessmentPlayerTranscript: [],
     narratorPending: false,
     narratorError: null,
     activeNpcEncounter: null,
@@ -764,6 +775,7 @@ function createSceneSlice() {
     animalModeStats: {},
     lastOutcome: null,
     expeditionOutcome: null,
+    finalAssessment: null,
     activeConstraint: null,
     majorEvent: null,
     snareTraps: [],
@@ -826,6 +838,146 @@ export const useThreeGameStore = create((set, get) => ({
   resetExpedition: () => {
     resetThreeRuntimeState();
     set(useThreeGameStore.getInitialState(), true);
+  },
+
+  beginFinalAssessment: async () => {
+    const state = get();
+    if (state.finalAssessment) return state.finalAssessment;
+
+    const location = getThreeIslandLocation(state.currentZoneId);
+    const zone = getZone(state.currentZoneId);
+    const record = buildFinalAssessmentRecord({
+      ...state,
+      currentLocationName: location.name || zone.name,
+      specimenMetadata: Object.fromEntries(baseSpecimens.map(specimen => [specimen.id, {
+        name: specimen.name,
+        scientificValue: specimen.scientificValue,
+        ontology: specimen.ontology,
+      }])),
+    });
+    const localAssessment = buildLocalHenslowAssessment(record.profile);
+    const closingEvent = createNarratorEvent({
+      kind: 'narrator',
+      text: 'The field book closes. Your specimens, notes, and omissions are sent onward to Cambridge for Professor Henslow’s judgment.',
+      day: state.day,
+      timeOfDay: state.timeOfDay,
+      source: 'local',
+    });
+
+    set(current => ({
+      finalAssessment: record,
+      narratorLog: appendNarratorEvents(current.narratorLog, closingEvent),
+      narratorPending: false,
+      narratorError: null,
+      activeConstraint: null,
+      majorEvent: null,
+      expeditionOutcome: null,
+      statusViewOpen: false,
+      specimenDetail: null,
+      examineSession: null,
+      readableBookSession: null,
+      activeNpcEncounter: null,
+      beagleTravelPrompt: null,
+      transition: null,
+      edgePrompt: null,
+      carriedObjectId: null,
+      carryPrompt: null,
+    }));
+
+    // Bad expeditions need a stable, unsparing judgment. Keeping the severe
+    // failure bands canonical prevents a language model from finding generic
+    // praise in a trivial note or inflating a nearly empty field packet.
+    if (record.profile.overall < 4 && record.request.narratorTranscript.turnCount === 0) {
+      const completed = {
+        ...record,
+        phase: 'ready',
+        source: 'canonical',
+        assessment: localAssessment,
+      };
+      set(current => (
+        current.finalAssessment?.id === record.id
+          ? { finalAssessment: completed }
+          : {}
+      ));
+      return completed;
+    }
+
+    const idempotencyKey = [
+      'final-assessment',
+      state.seed || 'three',
+      state.day || 1,
+      record.profile.stats.evidence,
+      record.profile.stats.notes,
+      record.profile.stats.locations,
+      textHash(record.request.narratorTranscript.text),
+    ].join(':');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+    try {
+      const response = await fetch('/api/end-game-assessment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-young-darwin-session': narratorSessionId(state.seed),
+          'x-idempotency-key': idempotencyKey,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          ...record.request,
+          idempotencyKey,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const assessment = String(data?.assessment || '').trim();
+      if (!response.ok || assessment.length < 40) {
+        throw new Error(data?.error || `Assessment request failed (${response.status})`);
+      }
+      const completed = {
+        ...record,
+        phase: 'ready',
+        source: 'remote',
+        assessment,
+        profile: applyTranscriptEvaluation(record.profile, data?.transcriptEvaluation || {
+          adjustment: 0,
+          classification: 'neutral',
+          summary: record.request.narratorTranscript.turnCount
+            ? 'No reliable transcript judgment was returned; no adjustment was applied.'
+            : '',
+        }),
+      };
+      set(current => (
+        current.finalAssessment?.id === record.id
+          ? { finalAssessment: completed }
+          : {}
+      ));
+      return completed;
+    } catch (error) {
+      const completed = {
+        ...record,
+        phase: 'ready',
+        source: 'local',
+        assessment: localAssessment,
+        profile: record.request.narratorTranscript.turnCount
+          ? applyTranscriptEvaluation(record.profile, {
+              adjustment: 0,
+              classification: 'neutral',
+              summary: 'The narrator-panel transcript could not be assessed; no adjustment was applied.',
+            })
+          : record.profile,
+        error: error?.name === 'AbortError'
+          ? 'Professor Henslow’s full letter took too long to arrive; a field-office assessment is shown instead.'
+          : 'Professor Henslow’s full letter is unavailable; a field-office assessment is shown instead.',
+      };
+      set(current => (
+        current.finalAssessment?.id === record.id
+          ? { finalAssessment: completed }
+          : {}
+      ));
+      return completed;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   setPlayableMode: playableModeId => set(state => {
@@ -985,6 +1137,7 @@ export const useThreeGameStore = create((set, get) => ({
           location: location.name,
           content: trimmed,
           kind: 'note',
+          authorship: 'player',
           title: 'Field Note',
           createdAt: new Date().toISOString(),
         },
@@ -1306,6 +1459,7 @@ export const useThreeGameStore = create((set, get) => ({
         location: location.name,
         method: 'reading and comparison',
         kind: 'reading',
+        authorship: 'player',
         title: `${book.shortTitle}, page ${pageNumber}`,
         content: trimmed,
         source: { type: 'book', bookId: book.id, page: pageNumber },
@@ -2050,6 +2204,7 @@ export const useThreeGameStore = create((set, get) => ({
         method: 'field examination',
         condition: 'examined in field',
         kind: 'examination',
+        authorship: 'player',
         title: `Examination: ${session.name}`,
         content: `${trimmed}${factLines}`,
         createdAt: new Date().toISOString(),
@@ -2791,9 +2946,20 @@ export const useThreeGameStore = create((set, get) => ({
     if (!trimmed) return null;
 
     const isHelp = /^(?:hotkeys?|controls?|commands?|help)$/i.test(trimmed);
+    const isEndingExpedition = isEndGameNarratorCommand(trimmed);
     let requestState = null;
     set(state => {
       requestState = state;
+      const assessmentSpecimen = !isHelp && !isEndingExpedition
+        ? findRuntimeSpecimen(state, state.nearbySpecimenId || state.selectedSpecimenId)
+        : null;
+      const assessmentZone = !isHelp && !isEndingExpedition ? getZone(state.currentZoneId) : null;
+      const assessmentLocation = !isHelp && !isEndingExpedition
+        ? getThreeIslandLocation(state.currentZoneId)
+        : null;
+      const symsNearby = state.nearbyNpcEncounter?.npcId === 'syms_covington' || (assessmentZone
+        ? nearbyPeopleContext(state, assessmentZone).some(person => person.startsWith('Syms Covington is close by'))
+        : false);
       const playerEntry = createNarratorEvent({
         kind: 'player',
         text: trimmed,
@@ -2812,12 +2978,28 @@ export const useThreeGameStore = create((set, get) => ({
         : null;
       return {
         narratorLog: appendNarratorEvents(state.narratorLog, [playerEntry, hotkeysEntry]),
-        narratorPending: isHelp ? state.narratorPending : true,
+        assessmentPlayerTranscript: !isHelp && !isEndingExpedition
+          ? [...(state.assessmentPlayerTranscript || []), {
+              id: playerEntry.id,
+              text: trimmed.slice(0, 2000),
+              day: state.day,
+              timeOfDay: state.timeOfDay,
+              zoneId: state.currentZoneId,
+              locationName: assessmentLocation?.name || assessmentZone?.name || '',
+              specimenId: assessmentSpecimen?.id || null,
+              specimenName: assessmentSpecimen?.name || null,
+              activeToolId: state.activeToolId || null,
+              symsNearby,
+              createdAt: Date.now(),
+            }].slice(-64)
+          : (state.assessmentPlayerTranscript || []),
+        narratorPending: isHelp ? state.narratorPending : !isEndingExpedition,
         narratorError: null,
       };
     });
 
     if (isHelp) return { local: true };
+    if (isEndingExpedition) return get().beginFinalAssessment();
 
     const state = requestState || get();
     const zone = getZone(state.currentZoneId);

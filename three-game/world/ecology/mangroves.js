@@ -3,6 +3,12 @@ import { terrainHeight, terrainSlopeAt } from '../terrain';
 import { generatedTreePresets } from '../generatedTreePresets';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 import {
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  DARWINIOTHAMNUS_LABEL,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
+import {
   MANGROVE_TRAIL,
   mangroveFernBenchMask,
   mangrovePoolMask,
@@ -223,12 +229,15 @@ function buildFlora() {
     itemAt('croton-spawn-front-left', -7.6, 29.8, 0.64, 0.7),
     itemAt('croton-spawn-front-right', 7.4, 31.2, 0.62, -0.48),
   ];
-  const darwiniothamnus = scatter('darwiniothamnus-understory', 24, 569, {
-    minX: -40, maxX: 40, minZ: -38, maxZ: 41, scale: [0.32, 0.58], maxGrade: 0.62,
-    accept: (biome, x, z) => (fernAccept(biome, x, z) || trailEdge(biome, x, z))
-      && mangrovePoolMask(x, z) < 0.44
-      && !playableCorridor(x, z),
-  });
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(MANGROVES, 'darwiniothamnus-understory', 45, 569, {
+    minX: -40, maxX: 40, minZ: -38, maxZ: 41, scale: [0.8, 2.45], maxGrade: 0.62,
+    patchCount: 5, patchRadius: [2.8, 5.8],
+    accept: (biome, x, z) => mangroveFernBenchMask(x, z) > 0.16
+      && mangroveFernBenchMask(x, z) < 0.58
+      && mangrovePoolMask(x, z) < 0.2
+      && notOnTrail(x, z, 4.2)
+      && !['mud-trail', 'brackish-pool'].includes(biome),
+  }, { width: [0.88, 1.14], height: [0.88, 1.12], maxLean: 0.04 });
   const croton = nearCroton.concat(scatter('croton-understory', 38, 577, {
     minX: -42, maxX: 42, minZ: -40, maxZ: 42, scale: [0.42, 0.82], maxGrade: 0.66,
     accept: (biome, x, z) => (biome === 'fern-bank' || biome === 'humid-leaf-litter' || biome === 'pool-edge')
@@ -323,7 +332,9 @@ function buildFlora() {
     },
     {
       id: 'darwiniothamnus-understory',
-      path: `${NATURE}runtime-darwiniothamnus.glb`,
+      label: DARWINIOTHAMNUS_LABEL,
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
       loadTier: 2,
       sink: 0.05,
       tint: '#63864f',

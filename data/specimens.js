@@ -268,7 +268,7 @@ export const baseSpecimens = [
   {
     id: 'pricklypearpad',
     name: 'Prickly Pear Pad',
-    latin: 'Opuntia echios',
+    latin: 'Opuntia megasperma',
     ontology: 'Plant',
     order: 'Cactus',
     sub_order: 'Prickly Pear',
@@ -291,13 +291,13 @@ export const baseSpecimens = [
     image: '/specimens/cactus.jpg',
     memoryText: '“The pads part from the plant with a green snap, and woe to the hand that catches one carelessly — the finer barbs work through cloth and linger for days.”',
     contents: 'Slicing the pad reveals cool mucilaginous pulp, stringy fibres, and a surprising store of clear moisture.',
-    keywords: ['cactus', 'prickly pear', 'opuntia', 'pad', 'plant', 'succulent', 'spines', 'echios']
+    keywords: ['cactus', 'prickly pear', 'opuntia', 'pad', 'plant', 'succulent', 'spines', 'megasperma']
   },
 
   {
     id: 'pricklypearblossom',
     name: 'Prickly Pear Blossom',
-    latin: 'Opuntia echios',
+    latin: 'Opuntia megasperma',
     ontology: 'Plant',
     order: 'Cactus',
     sub_order: 'Prickly Pear',
@@ -320,7 +320,7 @@ export const baseSpecimens = [
     image: '/specimens/cactus.jpg',
     memoryText: '“So gay a flower upon so grim a plant! The blossoms are of a rich yellow, much beset by finches, and make the dry ground almost cheerful.”',
     contents: 'Pressed flat, the blossom yields fine yellow petals, abundant pollen, and a faintly sweet vegetable scent.',
-    keywords: ['cactus', 'prickly pear', 'opuntia', 'flower', 'blossom', 'yellow', 'plant', 'echios']
+    keywords: ['cactus', 'prickly pear', 'opuntia', 'flower', 'blossom', 'yellow', 'plant', 'megasperma']
   },
 
   {

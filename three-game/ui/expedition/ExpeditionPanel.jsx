@@ -30,6 +30,12 @@ const PANEL_VARIANTS = {
     shadow: 'shadow-[0_12px_30px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(227,197,133,0.14)]',
     background: 'linear-gradient(165deg, rgba(26,40,66,0.68), rgba(19,31,54,0.72) 58%, rgba(10,18,36,0.80))',
   },
+  quiet: {
+    ornate: false,
+    border: 'border-expedition-brass/65',
+    shadow: 'shadow-[0_10px_26px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(227,197,133,0.10)]',
+    background: 'linear-gradient(165deg, rgba(26,40,66,0.84), rgba(19,31,54,0.88) 58%, rgba(10,18,36,0.92))',
+  },
   modal: {
     ornate: true,
     border: 'border-expedition-gold/85',
@@ -93,9 +99,9 @@ export function ExpeditionPanel({
   );
 }
 
-export function PanelTabs({ tabs, active, onSelect, className = '' }) {
+export function PanelTabs({ tabs, active, onSelect, className = '', quiet = false }) {
   return (
-    <div className={`flex items-stretch gap-0.5 border-b border-expedition-brass/60 ${className}`}>
+    <div className={`flex items-stretch border-b border-expedition-brass/50 ${quiet ? 'gap-0' : 'gap-0.5'} ${className}`}>
       {tabs.map(tab => {
         const isActive = tab.id === active;
         return (
@@ -103,8 +109,11 @@ export function PanelTabs({ tabs, active, onSelect, className = '' }) {
             key={tab.id}
             type="button"
             onClick={() => onSelect(tab.id)}
-            className={`flex-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none ${
-              isActive
+            className={`relative flex-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-expedition-gold/60 ${quiet
+              ? isActive
+                ? 'bg-black/10 text-expedition-goldbright after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-expedition-goldbright'
+                : 'text-expedition-faded hover:bg-expedition-gold/5 hover:text-expedition-parchment'
+              : isActive
                 ? 'rounded-sm border border-expedition-gold/80 bg-expedition-gold/18 text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.3),0_0_10px_rgba(227,197,133,0.15)]'
                 : 'text-expedition-faded hover:text-expedition-parchment'
             }`}

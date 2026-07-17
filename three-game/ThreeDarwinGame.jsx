@@ -54,7 +54,9 @@ const KEYBOARD_MAP = [
   { name: 'pray', keys: ['KeyP'] },
   { name: 'rifle', keys: ['KeyF'] },
   { name: 'fireRifle', keys: [] },
-  { name: 'hammer', keys: ['KeyH'] },
+  // H is reserved by the polished desktop HUD for hiding/showing interface
+  // chrome. Hammering remains available through slot 4 + the J tool action.
+  { name: 'hammer', keys: [] },
   { name: 'net', keys: ['KeyN'] },
   { name: 'gather', keys: ['KeyG'] },
   { name: 'write', keys: ['KeyY'] },
@@ -71,6 +73,9 @@ const KEYBOARD_MAP = [
   { name: 'tool5', keys: ['Digit5'] },
   { name: 'tool6', keys: ['Digit6'] },
 ];
+const LEGACY_KEYBOARD_MAP = KEYBOARD_MAP.map(binding => (
+  binding.name === 'hammer' ? { ...binding, keys: ['KeyH'] } : binding
+));
 
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
@@ -209,10 +214,13 @@ const SCREENSHOT_MIN_LOADING_MS = 5200;
 const OPENING_AERIAL_MIN_MS = 3800;
 const OPENING_AERIAL_MAX_MS = 6500;
 const OPENING_DESCENT_DURATION_MS = 5000;
-const OPENING_CLOUD_VEIL_DURATION_MS = 4600;
+const OPENING_CLOUD_VEIL_DURATION_MS = 5600;
 const LAUNCH_OVERLAY_FADE_MS = 900;
-const STARTUP_FULL_CONTENT_PHASE = 3;
-const INTRO_CONTENT_PHASE_TIMINGS_MS = [150, 700, 1400];
+const STARTUP_FULL_CONTENT_PHASE = 6;
+// Each phase gets its own post-paint idle window. This keeps GLB parsing,
+// ecology construction, physics props, specimens, and NPC shader compilation
+// from converging on one frame while the aerial camera is already visible.
+const INTRO_CONTENT_PHASE_TIMINGS_MS = [100, 520, 980, 1520, 2180, 2860];
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 
@@ -721,79 +729,21 @@ function InspectionAnchorProjector() {
 }
 
 function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onReady }) {
-  const readyFrames = useRef(0);
+  const announced = useRef(false);
 
   useFrame(() => {
     const waitedLongEnough = !startedAtRef || performance.now() - startedAtRef.current >= minElapsedMs;
     if (!loadingReady || !waitedLongEnough) {
-      readyFrames.current = 0;
+      announced.current = false;
       return;
     }
-    readyFrames.current += 1;
-    if (readyFrames.current === 4) onReady();
-  });
-
-  return null;
-}
-
-function CriticalShaderWarmup({ enabled, sequenceId, onReady }) {
-  const gl = useThree(state => state.gl);
-  const scene = useThree(state => state.scene);
-  const camera = useThree(state => state.camera);
-  const completedSequence = useRef(null);
-
-  useEffect(() => {
-    if (!enabled) {
-      completedSequence.current = null;
-      return undefined;
+    // This callback already runs inside a live Canvas frame. Waiting four more
+    // frames added seconds on slow GPUs without proving anything extra.
+    if (!announced.current) {
+      announced.current = true;
+      onReady();
     }
-    if (!sequenceId || completedSequence.current === sequenceId) return undefined;
-
-    let cancelled = false;
-    let compileTimeoutId = null;
-    const nextFrame = () => new Promise(resolve => window.requestAnimationFrame(resolve));
-    const warmCriticalScene = async () => {
-      // Let the final loaded model commit before asking Three to compile every
-      // material in the fixed intro scene. The launch overlay remains opaque.
-      await nextFrame();
-      await nextFrame();
-      if (typeof gl.compileAsync === 'function') {
-        try {
-          await Promise.race([
-            gl.compileAsync(scene, camera),
-            new Promise((_, reject) => {
-              compileTimeoutId = window.setTimeout(
-                () => reject(new Error('Critical shader warm-up timed out.')),
-                4000,
-              );
-            }),
-          ]);
-        } finally {
-          if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
-          compileTimeoutId = null;
-        }
-      } else {
-        gl.compile(scene, camera);
-      }
-      await nextFrame();
-      if (cancelled) return;
-      completedSequence.current = sequenceId;
-      onReady();
-    };
-
-    warmCriticalScene().catch(error => {
-      if (cancelled) return;
-      // Shader warm-up is an optimization, not a reason to strand the player
-      // on the loading screen on an unusual WebGL implementation.
-      console.warn('Critical scene shader warm-up failed; continuing launch.', error);
-      completedSequence.current = sequenceId;
-      onReady();
-    });
-    return () => {
-      cancelled = true;
-      if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
-    };
-  }, [camera, enabled, gl, onReady, scene, sequenceId]);
+  });
 
   return null;
 }
@@ -805,18 +755,10 @@ function OpeningVisualReadySignal({
   segmentCap,
   onReady,
 }) {
-  const { gl, scene, camera } = useThree();
   const activeSequenceRef = useRef(null);
   const quietSinceRef = useRef(0);
   const stableFramesRef = useRef(0);
-  const compilingSequenceRef = useRef(null);
-  const compiledSequenceRef = useRef(null);
   const announcedSequenceRef = useRef(null);
-  const compileTimeoutRef = useRef(null);
-
-  useEffect(() => () => {
-    if (compileTimeoutRef.current != null) window.clearTimeout(compileTimeoutRef.current);
-  }, []);
 
   useFrame(() => {
     if (!active || !sequenceId) {
@@ -829,7 +771,6 @@ function OpeningVisualReadySignal({
       activeSequenceRef.current = sequenceId;
       quietSinceRef.current = 0;
       stableFramesRef.current = 0;
-      compilingSequenceRef.current = null;
       announcedSequenceRef.current = null;
     }
     if (!contentReady) return;
@@ -856,34 +797,6 @@ function OpeningVisualReadySignal({
     const now = performance.now();
     if (!quietSinceRef.current) quietSinceRef.current = now;
     if (now - quietSinceRef.current < 300) return;
-
-    if (compiledSequenceRef.current !== sequenceId) {
-      if (compilingSequenceRef.current !== sequenceId) {
-        const compileSequence = sequenceId;
-        compilingSequenceRef.current = compileSequence;
-        Promise.resolve()
-          .then(() => Promise.race([
-            typeof gl.compileAsync === 'function'
-              ? gl.compileAsync(scene, camera)
-              : Promise.resolve(gl.compile(scene, camera)),
-            new Promise(resolve => {
-              compileTimeoutRef.current = window.setTimeout(resolve, 3500);
-            }),
-          ]))
-          .catch(() => {})
-          .then(() => {
-            if (compileTimeoutRef.current != null) window.clearTimeout(compileTimeoutRef.current);
-            compileTimeoutRef.current = null;
-            if (activeSequenceRef.current === compileSequence) {
-              compiledSequenceRef.current = compileSequence;
-            }
-            if (compilingSequenceRef.current === compileSequence) {
-              compilingSequenceRef.current = null;
-            }
-          });
-      }
-      return;
-    }
 
     stableFramesRef.current += 1;
     if (stableFramesRef.current < 3 || announcedSequenceRef.current === sequenceId) return;
@@ -1731,15 +1644,22 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
 }
 
 export default function ThreeDarwinGame({ initialModeId = null }) {
+  const [keyboardMap] = useState(() => {
+    if (typeof window === 'undefined') return KEYBOARD_MAP;
+    const requestedHud = new URLSearchParams(window.location.search).get('hud');
+    const legacyHud = requestedHud === 'legacy'
+      || (requestedHud !== 'polished' && process.env.NEXT_PUBLIC_THREE_HUD_LAYOUT === 'legacy');
+    return legacyHud ? LEGACY_KEYBOARD_MAP : KEYBOARD_MAP;
+  });
   const [launchState, setLaunchState] = useState(initialModeId ? 'loading' : 'menu');
   const [initialModeReady, setInitialModeReady] = useState(!initialModeId);
   const [sceneReady, setSceneReady] = useState(false);
   const [loadersStable, setLoadersStable] = useState(false);
-  const [criticalShadersReady, setCriticalShadersReady] = useState(false);
   const [displayedProgress, setDisplayedProgress] = useState(0);
   const [startupContentPhase, setStartupContentPhase] = useState(0);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [openingVisualReady, setOpeningVisualReady] = useState(false);
+  const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
@@ -1793,11 +1713,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const handleUnderwaterChange = useCallback(amount => {
     setUnderwaterAmount(amount);
   }, []);
-  const markCriticalShadersReady = useCallback(() => {
-    setCriticalShadersReady(true);
-  }, []);
   const markOpeningVisualReady = useCallback(() => {
     setOpeningVisualReady(true);
+  }, []);
+  const markPlayerAnimationBanksReady = useCallback(() => {
+    setPlayerAnimationBanksReady(true);
   }, []);
 
   useLayoutEffect(() => {
@@ -1841,6 +1761,9 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     setSkipOpeningIntro(skipOpeningIntroFromParams(params));
     if (process.env.NODE_ENV !== 'production' && params.has('mapDev')) {
       setShowMapGeographyDev(true);
+    }
+    if (params.has('assetBrowser')) {
+      setShowAssetBrowser(true);
     }
     setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
     setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
@@ -1919,7 +1842,6 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       if (loaderBusy) {
         loaderQuietSince.current = 0;
         setLoadersStable(false);
-        setCriticalShadersReady(false);
       } else {
         if (!loaderQuietSince.current) loaderQuietSince.current = now;
         const quietFor = now - loaderQuietSince.current;
@@ -1950,11 +1872,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     loaderQuietSince.current = 0;
     setDisplayedProgress(0);
     setLoadersStable(false);
-    setCriticalShadersReady(false);
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
     setOpeningVisualReady(false);
+    setPlayerAnimationBanksReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('loading');
   };
@@ -1968,11 +1890,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     loaderQuietSince.current = 0;
     setDisplayedProgress(0);
     setLoadersStable(false);
-    setCriticalShadersReady(false);
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
     setOpeningVisualReady(false);
+    setPlayerAnimationBanksReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('menu');
   };
@@ -2016,24 +1938,57 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   }, [openingIntroActive, sceneReady]);
 
   useEffect(() => {
-    if (!gameStarted) return undefined;
-    if (automationReadyMode || launchState === 'playing') {
-      setStartupContentPhase(STARTUP_FULL_CONTENT_PHASE);
-      return undefined;
-    }
-    if (launchState !== 'intro') return undefined;
-    const handles = INTRO_CONTENT_PHASE_TIMINGS_MS.map((delay, index) => (
-      window.setTimeout(() => {
-        setStartupContentPhase(current => Math.max(current, index + 1));
-      }, delay)
-    ));
-    return () => handles.forEach(handle => window.clearTimeout(handle));
-  }, [automationReadyMode, gameStarted, launchState]);
+    if (!gameStarted || !launchOverlayDismissed) return undefined;
+    if (launchState !== 'intro' && launchState !== 'playing') return undefined;
+
+    // Do not let deferred GLB parsing, texture uploads, or shader compilation
+    // starve the launch overlay's fade/removal. Once it is gone, mount exactly
+    // one content group per idle window and allow the Canvas to paint before
+    // scheduling the next one. In particular, skip-intro and automation
+    // launches must not jump directly from the base scene to every actor.
+    let cancelled = false;
+    let timeoutHandle = null;
+    let idleHandle = null;
+    let frameHandle = null;
+
+    const schedulePhase = index => {
+      if (cancelled || index >= INTRO_CONTENT_PHASE_TIMINGS_MS.length) return;
+      const previousDelay = index === 0 ? 0 : INTRO_CONTENT_PHASE_TIMINGS_MS[index - 1];
+      const delay = INTRO_CONTENT_PHASE_TIMINGS_MS[index] - previousDelay;
+      timeoutHandle = window.setTimeout(() => {
+        timeoutHandle = null;
+        const commitPhase = () => {
+          idleHandle = null;
+          if (cancelled) return;
+          setStartupContentPhase(current => Math.max(current, index + 1));
+          frameHandle = window.requestAnimationFrame(() => {
+            frameHandle = window.requestAnimationFrame(() => {
+              frameHandle = null;
+              schedulePhase(index + 1);
+            });
+          });
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 420 });
+        } else {
+          commitPhase();
+        }
+      }, delay);
+    };
+
+    schedulePhase(0);
+    return () => {
+      cancelled = true;
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [gameStarted, launchOverlayDismissed, launchState]);
 
   return (
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
       {gameStarted && <DestinationIntentPrefetch segmentCap={scenePerfSettings.terrainSegmentCap} />}
-      <KeyboardControls map={KEYBOARD_MAP}>
+      <KeyboardControls map={keyboardMap}>
         {gameStarted && (
           <Canvas
             className="absolute inset-0 h-full w-full"
@@ -2072,14 +2027,10 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
                 contentPhase={startupContentPhase}
                 openingCamera={openingCamera}
                 inputLocked={openingIntroActive || Boolean(transition)}
-              />
-              <CriticalShaderWarmup
-                enabled={loadersStable && !sceneReady}
-                sequenceId={bootStartedAt.current}
-                onReady={markCriticalShadersReady}
+                onPlayerAnimationBanksReady={markPlayerAnimationBanksReady}
               />
               <SceneReadySignal
-                loadingReady={(loadersStable && criticalShadersReady) || e2eMode}
+                loadingReady={loadersStable || e2eMode}
                 startedAtRef={bootStartedAt}
                 minElapsedMs={BOOT_MIN_LOADING_MS}
                 onReady={markSceneReady}
@@ -2088,7 +2039,8 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             <OpeningVisualReadySignal
               active={openingIntroActive}
               sequenceId={openingIntroStartedAt}
-              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE
+                && (playableModeId !== 'darwin' || playerAnimationBanksReady)}
               segmentCap={scenePerfSettings.terrainSegmentCap}
               onReady={markOpeningVisualReady}
             />

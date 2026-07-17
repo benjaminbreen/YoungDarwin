@@ -316,7 +316,9 @@ function createSunVeilMaterial({ moon = false } = {}) {
     side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    // The veil is atmospheric light around a distant body, not a screen-space
+    // lens artifact. It must disappear behind terrain with the sun/moon disc.
+    depthTest: true,
     uniforms: {
       uTime: { value: 0 },
       uStrength: { value: 0 },
@@ -758,7 +760,9 @@ function StarField({ nightRef }) {
   const material = useMemo(() => new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    // Stars are transparent, so they render after opaque terrain. Keep depth
+    // testing on or their points are composited over hills and coastlines.
+    depthTest: true,
     blending: THREE.AdditiveBlending,
     uniforms: {
       uTime: { value: 0 },
@@ -1495,7 +1499,7 @@ function ShootingStars({ nightRef }) {
         transparent
         opacity={0}
         depthWrite={false}
-        depthTest={false}
+        depthTest
         blending={THREE.AdditiveBlending}
         fog={false}
       />

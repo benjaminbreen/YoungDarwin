@@ -171,13 +171,17 @@ function packageScripts() {
 function modelAssets() {
   const source = read('three-game/modelAssets.js');
   const defaultMatch = /export const DEFAULT_PLAYER_MODEL_ASSET_ID = '([^']+)'/.exec(source);
-  const entries = topLevelObjectEntries(objectBody(source, 'modelAssets')).map(entry => ({
-    id: entry.key,
-    path: stringValue(entry.body, 'path'),
-    enabled: boolValue(entry.body, 'enabled'),
-    preload: boolValue(entry.body, 'preload'),
-    targetTriangles: numberValue(entry.body, 'targetTriangles'),
-  })).filter(asset => asset.path);
+  const entries = topLevelObjectEntries(objectBody(source, 'modelAssets')).map(entry => {
+    const paths = [...entry.body.matchAll(/\bpath:\s*'([^']+)'/g)].map(match => match[1]);
+    return {
+      id: entry.key,
+      path: paths[0] || '',
+      animationBanks: paths.slice(1),
+      enabled: boolValue(entry.body, 'enabled'),
+      preload: boolValue(entry.body, 'preload'),
+      targetTriangles: numberValue(entry.body, 'targetTriangles'),
+    };
+  }).filter(asset => asset.path);
   return {
     defaultPlayerModel: defaultMatch?.[1] || '',
     entries,
@@ -336,12 +340,13 @@ ${markdownTable(
 ## Runtime Model Assets
 
 ${markdownTable(
-  ['Asset ID', 'Enabled', 'Preload', 'Path', 'Target Tris'],
+  ['Asset ID', 'Enabled', 'Preload', 'Path', 'Animation Banks', 'Target Tris'],
   assets.entries.map(asset => [
     `\`${asset.id}\``,
     asset.enabled === null ? '' : String(asset.enabled),
     asset.preload === null ? '' : String(asset.preload),
     `\`${asset.path}\``,
+    inlineList(asset.animationBanks || []),
     asset.targetTriangles ?? '',
   ]),
 )}

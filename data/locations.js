@@ -140,7 +140,9 @@ export const locations = [
     color: 'beige',
     type: 'bay',
     validMoves: ['W','E','SW','S','NW','N'],
-    playerStart: [12.6, 0, 13.0],
+    // Inland overlook on the central trail: starts Darwin above the landing
+    // with the cove, mail barrel, sandbar, and Beagle readable in one view.
+    playerStart: [0, 0, 23.5],
     specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary'],
     specimenPlacements: [
       {
@@ -1116,6 +1118,29 @@ export const locations = [
     type: 'lavafield',
     validMoves: ['W','E','SW','S','SE','NW','NE','N'],
     specimens: ['lavaLizard','basalt'],
+    specimenPlacements: [
+      {
+        instanceId: 'lava-flats-lava-lizard-basking-slab-1',
+        specimenId: 'lavalizard',
+        position: [7.6, 0, -7.2],
+        behavior: 'bask',
+        sceneScale: 1.02,
+        habitatRadiusX: 5.2,
+        habitatRadiusZ: 3.4,
+        spawnScatter: {
+          radiusX: 2.4,
+          radiusZ: 1.5,
+          bounds: { minX: 4.2, maxX: 13.4, minZ: -11.5, maxZ: -3.6 },
+        },
+      },
+      {
+        instanceId: 'lava-flats-basalt-fracture-1',
+        specimenId: 'basalt',
+        position: [-21.6, 0, 16.4],
+        behavior: 'still',
+        sceneScale: 0.76,
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [

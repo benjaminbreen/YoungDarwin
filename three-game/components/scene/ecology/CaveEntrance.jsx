@@ -78,63 +78,61 @@ function CampAsh({ feature, zoneId }) {
 export function CaveEntrance({ feature, zoneId }) {
   const baseY = terrainHeight(feature.x, feature.z, zoneId);
   const thresholdY = terrainHeight(feature.promptX, feature.promptZ, zoneId);
-  const mouthGeometry = useMemo(() => makeIrregularCaveMouthGeometry(8.25, 3.75, 2.4), []);
-  const innerMouthGeometry = useMemo(() => makeIrregularCaveMouthGeometry(6.7, 3.12, 5.7), []);
-  const shadowGeometry = useMemo(() => new THREE.PlaneGeometry(8.8, 6.2, 1, 1), []);
-  const mouthMaterial = useMemo(() => new THREE.MeshStandardMaterial({
-    color: '#060708',
-    emissive: '#020406',
-    emissiveIntensity: 0.16,
-    roughness: 1,
-    metalness: 0,
+  const farMouthGeometry = useMemo(() => makeIrregularCaveMouthGeometry(6.65, 2.72, 2.4), []);
+  const thresholdGeometry = useMemo(() => new THREE.PlaneGeometry(9.6, 10.2, 1, 1), []);
+  const farMouthMaterial = useMemo(() => new THREE.MeshBasicMaterial({
+    color: '#010201',
     side: THREE.FrontSide,
   }), []);
-  const innerMouthMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#010101',
+  const thresholdMaterial = useMemo(() => new THREE.ShaderMaterial({
+    uniforms: {
+      uThresholdColor: { value: new THREE.Color('#15130f') },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vThresholdUv;
+      void main() {
+        vThresholdUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 uThresholdColor;
+      varying vec2 vThresholdUv;
+      void main() {
+        vec2 centeredUv = (vThresholdUv - 0.5) * 2.0;
+        float radialDistance = length(centeredUv);
+        float irregularEdge = sin(centeredUv.x * 7.0 + centeredUv.y * 5.0) * 0.035;
+        float thresholdAlpha = (1.0 - smoothstep(0.54 + irregularEdge, 1.0 + irregularEdge, radialDistance)) * 0.72;
+        gl_FragColor = vec4(uThresholdColor, thresholdAlpha);
+      }
+    `,
     transparent: true,
-    opacity: 0.96,
-    side: THREE.FrontSide,
-  }), []);
-  const thresholdMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: '#090807',
-    transparent: true,
-    opacity: 0.34,
     depthWrite: false,
   }), []);
   useLayoutEffect(() => () => {
-    mouthGeometry.dispose();
-    innerMouthGeometry.dispose();
-    shadowGeometry.dispose();
-    mouthMaterial.dispose();
-    innerMouthMaterial.dispose();
+    farMouthGeometry.dispose();
+    thresholdGeometry.dispose();
+    farMouthMaterial.dispose();
     thresholdMaterial.dispose();
-  }, [innerMouthGeometry, innerMouthMaterial, mouthGeometry, mouthMaterial, shadowGeometry, thresholdMaterial]);
+  }, [farMouthGeometry, farMouthMaterial, thresholdGeometry, thresholdMaterial]);
 
   const sourceId = `ecology:${zoneId}:${feature.id}`;
   return (
     <group>
       <mesh
-        geometry={shadowGeometry}
+        geometry={thresholdGeometry}
         material={thresholdMaterial}
-        position={[feature.x, thresholdY + 0.035, feature.z + 2.5]}
+        position={[feature.x, thresholdY + 0.038, feature.z + 0.35]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={2}
-        userData={{ renderSource: `${sourceId}:threshold-shadow`, renderLabel: 'cave threshold shadow', renderKind: 'cave-entrance' }}
+        userData={{ renderSource: `${sourceId}:threshold-soil`, renderLabel: 'dark cave threshold soil', renderKind: 'cave-entrance' }}
       />
       <mesh
-        geometry={mouthGeometry}
-        material={mouthMaterial}
-        position={[feature.x, baseY - 0.08, feature.z - 2.82]}
-        castShadow={false}
-        receiveShadow={false}
-        userData={{ renderSource: `${sourceId}:mouth`, renderLabel: 'cave dark mouth', renderKind: 'cave-entrance' }}
-      />
-      <mesh
-        geometry={innerMouthGeometry}
-        material={innerMouthMaterial}
-        position={[feature.x + 0.12, baseY + 0.06, feature.z - 2.96]}
+        geometry={farMouthGeometry}
+        material={farMouthMaterial}
+        position={[feature.x + 0.08, baseY - 0.08, feature.z - 4.08]}
         renderOrder={1}
-        userData={{ renderSource: `${sourceId}:inner-mouth`, renderLabel: 'cave inner darkness', renderKind: 'cave-entrance' }}
+        userData={{ renderSource: `${sourceId}:far-darkness`, renderLabel: 'deep cave darkness', renderKind: 'cave-entrance' }}
       />
       <CampAsh feature={feature} zoneId={zoneId} />
     </group>

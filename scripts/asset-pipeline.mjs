@@ -94,18 +94,19 @@ function topLevelObjectEntries(body) {
 
 function parseAssets(source) {
   return topLevelObjectEntries(objectBody(source, 'modelAssets')).flatMap(({ key: id, body }) => {
-    const pathMatch = body.match(/path:\s*'([^']+)'/);
+    const pathMatches = [...body.matchAll(/\bpath:\s*'([^']+)'/g)];
     const promptMatch = body.match(/prompt:\s*'([^']+)'/);
     const targetMatch = body.match(/targetTriangles:\s*(\d+)/);
     const enabledMatch = body.match(/enabled:\s*(true|false)/);
-    if (!pathMatch) return [];
-    return [{
-      id,
+    if (!pathMatches.length) return [];
+    return pathMatches.map((pathMatch, index) => ({
+      id: index === 0 ? id : `${id}:animation-bank-${index}`,
       path: pathMatch[1],
       prompt: promptMatch?.[1] || '',
       targetTriangles: Number(targetMatch?.[1] || 0),
       enabled: enabledMatch?.[1] === 'true',
-    }];
+      runtimeBank: index > 0,
+    }));
   });
 }
 
@@ -117,7 +118,7 @@ async function ensureDirs() {
 
 async function plan() {
   await ensureDirs();
-  const assets = parseAssets(await readManifestSource());
+  const assets = parseAssets(await readManifestSource()).filter(asset => !asset.runtimeBank);
   const lines = [
     '# Young Darwin 3D Asset Plan',
     '',

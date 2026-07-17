@@ -333,7 +333,7 @@ h1, h2, h3, h4, h5, h6 {
   background:
     radial-gradient(ellipse at 48% 48%, rgba(255, 255, 250, 0.68), rgba(231, 244, 242, 0.34) 28%, transparent 58%),
     radial-gradient(ellipse at 50% 18%, rgba(255, 252, 232, 0.42), transparent 48%);
-  filter: blur(16px);
+  filter: blur(9px);
   animation: opening-cloud-wash var(--opening-cloud-duration) ease-out both;
 }
 
@@ -341,7 +341,7 @@ h1, h2, h3, h4, h5, h6 {
   top: -18%;
   bottom: -18%;
   width: 68%;
-  filter: blur(10px);
+  filter: blur(6px);
   opacity: 0.96;
   background:
     radial-gradient(ellipse at 38% 24%, rgba(255, 255, 250, 0.92), transparent 34%),
@@ -367,7 +367,7 @@ h1, h2, h3, h4, h5, h6 {
   background:
     linear-gradient(110deg, transparent 0%, rgba(255, 255, 246, 0.48) 25%, rgba(210, 231, 232, 0.24) 42%, transparent 64%),
     linear-gradient(73deg, transparent 8%, rgba(255, 249, 228, 0.25) 40%, transparent 72%);
-  filter: blur(12px);
+  filter: blur(7px);
   mix-blend-mode: screen;
 }
 
@@ -385,16 +385,16 @@ h1, h2, h3, h4, h5, h6 {
   inset: -14%;
   background:
     repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.12) 0 18px, rgba(208, 228, 231, 0.08) 18px 34px, transparent 34px 76px);
-  filter: blur(7px);
+  filter: blur(4px);
   opacity: 0.34;
   animation: opening-cloud-vapour var(--opening-cloud-duration) linear both;
 }
 
 @keyframes opening-cloud-veil {
-  0% { opacity: 0.9; }
-  20% { opacity: 0.72; }
-  52% { opacity: 0.32; }
-  78% { opacity: 0.08; }
+  0% { opacity: 0.92; }
+  16% { opacity: 0.68; }
+  46% { opacity: 0.28; }
+  76% { opacity: 0.07; }
   100% { opacity: 0; visibility: hidden; }
 }
 

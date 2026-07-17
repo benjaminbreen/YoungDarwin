@@ -99,12 +99,16 @@ function acceptedForLayer(layer, x, z, y) {
   const noise = terrainSurfaceNoise(x, z);
   if (layer === 'basalt') return (biome === 'wet-basalt' || biome === 'black-lava') && noise > -0.35;
   if (layer === 'scree') return biome === 'tuff-ridge' || (z > 8 && noise > 0.05);
-  if (layer === 'scrub') return (biome === 'dry-scrub' || biome === 'palo-santo') && y > 1.1 && noise > -0.2;
+  // Post Office Bay's overlapping coastal blend intentionally resolves much
+  // of the dry shelf to wet-basalt as its strongest single biome. Vegetation
+  // placement therefore uses the authored dry/inland height bands instead of
+  // requiring dry-scrub to win that strongest-biome comparison.
+  if (layer === 'scrub') return z > -2 && y > 0.65 && noise > -0.35;
   if (layer === 'grass') return z > -8 && z < 18 && y > 0.35 && y < 5.8 && noise < 0.35;
   if (layer === 'dry-grass') return dryGrassSuitability(x, z, y) > 0.34 && noise < 0.72;
   if (layer === 'dry-grass-patch') return dryGrassSuitability(x, z, y) > 0.42 && noise < 0.68;
-  if (layer === 'opuntia') return biome === 'dry-scrub' && y > 1.4 && x > 7 && noise > -0.05;
-  if (layer === 'galapagos-cotton') return (biome === 'dry-scrub' || biome === 'palo-santo') && y > 1.2 && noise > -0.1;
+  if (layer === 'opuntia') return z > 3 && y > 1.35 && x > 7 && noise > -0.22;
+  if (layer === 'galapagos-cotton') return z > 4 && y > 1.05 && noise > -0.25;
   return false;
 }
 
@@ -142,40 +146,31 @@ export function makeFloreanaScatter(layer, count, seed, {
 let postOfficeBayBasaltBlocks = null;
 let postOfficeBayOpuntiaHazards = null;
 
-const SOUTHERN_OPUNTIA_GROVE = [
-  { id: 'south-opuntia-1', x: -27, z: 32, scale: 1.12, yaw: 0.2, tone: 0.42 },
-  { id: 'south-opuntia-2', x: -18, z: 38, scale: 1.18, yaw: -0.5, tone: 0.58 },
-  { id: 'south-opuntia-3', x: -9, z: 41, scale: 1.32, yaw: 0.35, tone: 0.66 },
-  { id: 'south-opuntia-4', x: 2, z: 38, scale: 1.05, yaw: 1.1, tone: 0.35 },
-  { id: 'south-opuntia-5', x: 23, z: 36, scale: 1.08, yaw: 0.65, tone: 0.5 },
-  { id: 'south-opuntia-6', x: 0, z: 49, scale: 1.28, yaw: -0.2, tone: 0.62 },
+// Keep the tall tree-form Opuntia as a distant ecological accent instead of
+// distributing large silhouettes throughout the landing and arrival view.
+const EASTERN_OPUNTIA_CORNER = [
+  { id: 'east-opuntia-1', x: 38, z: 38, scale: 1.0, yaw: 0.2, tone: 0.42 },
+  { id: 'east-opuntia-2', x: 45, z: 42, scale: 1.12, yaw: -0.5, tone: 0.58 },
+  { id: 'east-opuntia-3', x: 39, z: 48, scale: 1.18, yaw: 0.35, tone: 0.66 },
 ];
 
 export function getPostOfficeBayOpuntiaHazards() {
   if (postOfficeBayOpuntiaHazards) return postOfficeBayOpuntiaHazards;
-  const scattered = makeFloreanaScatter('opuntia', 5, 23, {
-    minX: 8,
-    maxX: 30,
-    minZ: 3,
-    maxZ: 30,
-    scale: [0.65, 1.15],
-  });
-  const southernGrove = SOUTHERN_OPUNTIA_GROVE
-    .filter((_, index) => index === 0 || index === 2 || index === 4)
+  postOfficeBayOpuntiaHazards = EASTERN_OPUNTIA_CORNER
     .map(item => ({
       ...item,
       y: terrainHeight(item.x, item.z),
       variant: 0,
-    }));
-  postOfficeBayOpuntiaHazards = [...scattered, ...southernGrove].map(item => {
-    const renderScale = item.scale * 1.05;
-    return {
-      ...item,
-      renderScale,
-      hazardRadius: THREE.MathUtils.clamp(renderScale * 0.58, 1.15, 2.05),
-      damage: 8,
-    };
-  });
+    }))
+    .map(item => {
+      const renderScale = item.scale * 1.05;
+      return {
+        ...item,
+        renderScale,
+        hazardRadius: THREE.MathUtils.clamp(renderScale * 0.58, 1.15, 2.05),
+        damage: 8,
+      };
+    });
   return postOfficeBayOpuntiaHazards;
 }
 

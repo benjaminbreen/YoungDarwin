@@ -1,15 +1,16 @@
 import { northShoreCoastZ } from '../regions/northShore/terrain';
-import { makeZoneScatter, nearAnyCluster } from '../scatter';
+import { makeZoneScatter, nearAnyCluster, varyScatterTransforms } from '../scatter';
 import { getNorthShoreRocks, N_SHORE } from '../northShoreLayout';
 import { generatedTreePresets } from '../generatedTreePresets';
 import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 
 // Northern Shore (N_SHORE) ecology — Floreana's arid littoral zone as Darwin
 // met it in September 1835. Flora is named for the real species mix:
 // monte salado (Cryptocarpus pyriformis), chala (Croton scouleri), Scalesia
-// villosa (Floreana endemic), palo santo (Bursera graveolens), saltgrass,
+// villosa (Floreana endemic), bitterbush (Castela galapageia), saltgrass,
 // sesuvium carpets, tree-form Opuntia megasperma, and manzanillo.
 
 const NATURE = '/assets/models/nature/';
@@ -23,7 +24,19 @@ const drySand = (x, z) => z - northShoreCoastZ(x) > 1.6;
 
 function buildFlora() {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(N_SHORE, layer, count, seed, opts);
-  const saltbush = scatter('saltbush', 26, 31, {
+  const floraScatter = (layer, count, seed, opts, variation = {}) => varyScatterTransforms(
+    scatter(layer, count, seed, opts),
+    seed,
+    { width: [0.88, 1.12], height: [0.9, 1.12], depth: [0.9, 1.1], maxLean: 0.04, ...variation },
+  );
+  const uprightScatter = (layer, count, seed, opts) => floraScatter(
+    layer,
+    count,
+    seed,
+    opts,
+    { width: [0.92, 1.08], height: [0.94, 1.08], depth: [0.92, 1.08], maxLean: 0.014 },
+  );
+  const saltbush = floraScatter('saltbush', 26, 31, {
     minX: -48, maxX: 48, minZ: -14, maxZ: 26, scale: [0.7, 1.25],
     accept: (biome, x, z) => drySand(x, z) && nearAnyCluster(scrubClumps, x, z)
       && (biome === 'sesuvium-flat' || biome === 'dry-scrub' || biome === 'ash-beach'),
@@ -39,7 +52,7 @@ function buildFlora() {
       sink: 0.04,
       castShadow: false,
       motion: { wind: 0.85, bend: 0.24, bendRadius: 1.4 },
-      items: scatter('saltbush-lg', 8, 47, {
+      items: floraScatter('saltbush-lg', 8, 47, {
         minX: -44, maxX: 44, minZ: -6, maxZ: 30, scale: [0.32, 0.55],
         accept: (biome, x, z) => drySand(x, z) && nearAnyCluster(scrubClumps, x, z, 11)
           && (biome === 'dry-scrub' || biome === 'sesuvium-flat'),
@@ -51,7 +64,7 @@ function buildFlora() {
       sink: 0.06,
       castShadow: false,
       motion: { wind: 1.35, bend: 0.32, bendRadius: 1.35 },
-      items: scatter('croton', 26, 53, {
+      items: floraScatter('croton', 26, 53, {
         minX: -48, maxX: 48, minZ: 0, maxZ: 38, scale: [0.45, 0.85],
         accept: (biome, x, z) => nearAnyCluster(scrubClumps, x, z, 12)
           && (biome === 'dry-scrub' || biome === 'palo-santo'),
@@ -62,18 +75,19 @@ function buildFlora() {
       path: `${NATURE}runtime-scalesia.glb`,
       sink: 0.08,
       motion: { wind: 1.25, bend: 0.3, bendRadius: 1.35 },
-      items: scatter('scalesia', 12, 67, {
+      items: floraScatter('scalesia', 12, 67, {
         minX: -44, maxX: 46, minZ: -4, maxZ: 30, scale: [0.5, 0.9],
         accept: (biome, x, z) => drySand(x, z) && nearAnyCluster(scrubClumps, x, z, 11)
           && (biome === 'dry-scrub' || biome === 'sesuvium-flat'),
       }),
     },
     {
-      id: 'palo-santo',
+      id: 'castela',
+      label: 'Galapagos bitterbush / Castela galapageia',
       path: `${NATURE}runtime-palo-santo.glb`,
       sink: 0.05,
-      items: scatter('palo-santo', 14, 71, {
-        minX: -44, maxX: 46, minZ: 22, maxZ: 44, scale: [0.42, 0.68],
+      items: floraScatter('castela', 14, 71, {
+        minX: -44, maxX: 46, minZ: 22, maxZ: 44, scale: [0.18, 0.32],
         accept: (biome, x, z) => {
           if (biome !== 'palo-santo' && biome !== 'dry-scrub') return false;
           return nearAnyCluster([[-22, 36], [12, 40], [34, 30]], x, z, 10);
@@ -86,7 +100,7 @@ function buildFlora() {
       sink: 0.16,
       castShadow: false,
       motion: { wind: 1.45, bend: 0.55, bendRadius: 1.25 },
-      items: scatter('saltgrass', 7, 83, {
+      items: floraScatter('saltgrass', 7, 83, {
         minX: -42, maxX: 46, minZ: -10, maxZ: 4, scale: [0.12, 0.2],
         accept: (biome, x, z) => drySand(x, z) && (biome === 'ash-beach' || biome === 'sesuvium-flat'),
       }),
@@ -109,7 +123,7 @@ function buildFlora() {
       id: 'opuntia',
       path: `${NATURE}runtime-opuntia.glb`,
       sink: 0.06,
-      items: scatter('opuntia-tree', 5, 103, {
+      items: uprightScatter('opuntia-tree', 5, 103, {
         minX: -42, maxX: 44, minZ: 2, maxZ: 30, scale: [0.9, 1.4], maxGrade: 0.4,
         accept: (biome, x, z) => z - northShoreCoastZ(x) > 6
           && (biome === 'dry-scrub' || biome === 'sesuvium-flat'),
@@ -121,7 +135,7 @@ function buildFlora() {
       sink: 0.04,
       tint: '#6f8f4f',
       tintStrength: 0.08,
-      items: scatter('candelabra-cactus', 3, 106, {
+      items: uprightScatter('candelabra-cactus', 3, 106, {
         minX: -38, maxX: 42, minZ: 10, maxZ: 36, scale: [2.7, 3.9], maxGrade: 0.34,
         accept: (biome, x, z) => z - northShoreCoastZ(x) > 11
           && nearAnyCluster(scrubClumps, x, z, 13)
@@ -134,11 +148,64 @@ function buildFlora() {
       sink: 0.08,
       tint: '#7d8a5a',
       tintStrength: 0.4,
-      items: scatter('manzanillo', 2, 109, {
+      items: floraScatter('manzanillo', 2, 109, {
         minX: -36, maxX: 38, minZ: 14, maxZ: 34, scale: [0.4, 0.5], maxGrade: 0.35,
         accept: biome => biome === 'dry-scrub' || biome === 'palo-santo',
       }),
     },
+  ];
+}
+
+function buildSurfaceLitter() {
+  return [
+    buildDryVolcanicLitterLayer({
+      zoneId: N_SHORE,
+      id: 'north-shore-black-shingle',
+      itemIdPrefix: 'north-shore-shingle',
+      count: 340,
+      seed: 151,
+      bounds: { minX: -50, maxX: 50, minZ: -31, maxZ: 13 },
+      scale: [0.46, 1.28],
+      maxVisibleDistance: 48,
+      variantOptions: [
+        { variant: 'basalt-pebble', weight: 0.86, colors: ['#242421', '#34332e', '#46413a'] },
+        { variant: 'oxidized-scoria-chip', weight: 0.14, colors: ['#6d392d', '#844a36'] },
+      ],
+      wetnessAt: (x, z) => {
+        const distance = z - northShoreCoastZ(x);
+        return Math.max(0, Math.min(1, (3.8 - distance) / 3.2));
+      },
+      accept: (biome, x, z) => {
+        const distance = z - northShoreCoastZ(x);
+        return distance > -0.4 && distance < 12
+          && (biome === 'black-sand' || biome === 'ash-beach' || biome === 'lava-shelf');
+      },
+    }),
+    buildDryVolcanicLitterLayer({
+      zoneId: N_SHORE,
+      id: 'north-shore-wrack-shells',
+      itemIdPrefix: 'north-shore-shell',
+      count: 96,
+      seed: 163,
+      bounds: { minX: -47, maxX: 48, minZ: -24, maxZ: 2 },
+      scale: [0.62, 1.34],
+      sizeVariation: [0.78, 1.08],
+      maxVisibleDistance: 40,
+      variantOptions: [
+        { variant: 'shell-shard-a', weight: 0.46, colors: ['#d6cbb3', '#bdb49f'] },
+        { variant: 'shell-shard-b', weight: 0.38, colors: ['#cbbfa5', '#e0d4bc'] },
+        { variant: 'shell-cap', weight: 0.16, colors: ['#d8ccb4', '#bfb8a8'] },
+      ],
+      wetnessAt: (x, z) => {
+        const distance = z - northShoreCoastZ(x);
+        return Math.max(0, Math.min(0.75, (3.2 - distance) / 2.8));
+      },
+      accept: (biome, x, z) => {
+        const distance = z - northShoreCoastZ(x);
+        return distance > 0.5 && distance < 6.8
+          && (biome === 'black-sand' || biome === 'ash-beach');
+      },
+    }),
   ];
 }
 
@@ -195,6 +262,7 @@ export function buildNorthShoreEcology() {
     generatedTrees: buildGeneratedTrees(),
     ambientWildlife: buildAmbientWildlife(),
     rocks,
+    surfaceLitter: buildSurfaceLitter(),
     splashes: { anchors: swashRocks.slice(0, 12), period: NORTH_SHORE_SWASH_PERIOD },
     footprintBiomes: ['black-sand', 'ash-beach', 'sesuvium-flat', 'dry-scrub'],
     flyingModels: [

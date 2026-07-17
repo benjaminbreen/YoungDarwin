@@ -78,7 +78,7 @@ export function northernShoreHeight(x, z, { movementSurface = false } = {}) {
 
   // West basalt promontory: raised, fractured, runs out into the surf.
   const prom = northShorePromontory(x, z);
-  y += prom * (1.7 + Math.abs(crackNoise(x * 0.33, z * 0.31)) * (movementSurface ? 0.5 : 1.5));
+  y += prom * (1.4 + Math.abs(crackNoise(x * 0.33, z * 0.31)) * (movementSurface ? 0.44 : 0.62));
 
   const path = northernShorePathInfo(x, z);
   y -= path.tread * 0.09;

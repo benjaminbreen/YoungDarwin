@@ -31,6 +31,14 @@ function caveMouthCut(x, z) {
   return Math.exp(-Math.pow((x - cave.x) / 4.8, 2) - Math.pow((z - cave.z) / 3.15, 2));
 }
 
+function caveThroatMask(x, z) {
+  const cave = ROCKY_CLEARING_CAVE;
+  const width = Math.exp(-Math.pow((x - cave.x) / 3.65, 4));
+  const beginsBehindLip = THREE.MathUtils.smoothstep(-z, 9.2, 11.6);
+  const sealedAtBack = 1 - THREE.MathUtils.smoothstep(-z, 17.2, 19.4);
+  return THREE.MathUtils.clamp(width * beginsBehindLip * sealedAtBack, 0, 1);
+}
+
 function caveBedrockRise(x, z) {
   const cave = ROCKY_CLEARING_CAVE;
   const northBank = THREE.MathUtils.smoothstep(-z, 5.4, 22.5)
@@ -54,6 +62,7 @@ export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
   const rise = rockyRiseMask(x, z);
   const bedrock = caveBedrockRise(x, z);
   const mouthCut = caveMouthCut(x, z);
+  const throat = caveThroatMask(x, z);
   const shelf = Math.max(0, crackNoise(x * 0.13 + 4.0, z * 0.12 - 9.0));
   const fine = terrainFineDetail(x, z) * (movementSurface ? 0.08 : 0.34);
 
@@ -75,6 +84,12 @@ export function rockyClearingHeight(x, z, { movementSurface = false } = {}) {
   y = THREE.MathUtils.lerp(y, caveApronY, threshold * 0.78);
   y += rockyClearingCaveWallMask(x, z) * 1.48;
   y -= mouthCut * (1.05 + bedrock * 0.82);
+  // Excavate a narrow floor behind the visible lip. A heightfield cannot make
+  // an overhang, but lowering the hidden ground here prevents it from rising
+  // through the dedicated cave-cliff mesh and lets the polygonal reveal read
+  // as an actual recessed chamber.
+  const caveFloorY = 2.42 + Math.max(0, -z + ROCKY_CLEARING_CAVE.z) * 0.018;
+  y = THREE.MathUtils.lerp(y, caveFloorY, throat * 0.98);
   y += fine * (1 - threshold * 0.55);
   return Math.max(0.6, y);
 }

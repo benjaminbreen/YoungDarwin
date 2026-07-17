@@ -7,6 +7,7 @@ import { getThreeSpecimens, threeTools } from '../data';
 import { setTouchControl, triggerToolUse } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { isEndGameNarratorCommand } from '../finalAssessment';
 import { SHOTGUN } from '../shooting/shotgunConfig';
 import { shotgunAimState } from '../shooting/aimState';
 import { getZone } from '../world/floreanaZones';
@@ -17,6 +18,7 @@ import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
 import { BookReaderView } from './BookReaderView';
 import { NpcEncounterModal } from './NpcEncounterModal';
 import { ExpeditionOutcomeModal } from './ExpeditionOutcomeModal';
+import { FinalAssessmentModal } from './FinalAssessmentModal';
 import {
   ExpeditionPanel,
   PanelTabs,
@@ -41,7 +43,11 @@ import { GalapagosGlobe } from './expedition/GalapagosGlobe';
 import { InventoryModal } from './expedition/InventoryModal';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
-import { ISLAND_MAP_IMAGE, getIslandMapLocation } from './expedition/map/islandLocations';
+import {
+  ISLAND_MAP_IMAGE,
+  getIslandMapLocation,
+  islandMapLocations,
+} from './expedition/map/islandLocations';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
@@ -61,12 +67,24 @@ const MINIMAP_RUNTIME_HEADING_EPSILON = 1.2;
 const SIDEBAR_DEFAULT_SIZE = { width: 240, mapHeight: 196 };
 const SIDEBAR_MIN_SIZE = { width: 214, mapHeight: 164 };
 const SIDEBAR_MAX_SIZE = { width: 386, mapHeight: 330 };
+const DEFAULT_DESKTOP_HUD_LAYOUT = process.env.NEXT_PUBLIC_THREE_HUD_LAYOUT === 'legacy'
+  ? 'legacy'
+  : 'polished';
 const BEAGLE_RETURN_TRAVEL = Object.freeze({
   minutes: 30,
   fatigue: 3,
   note: "A ship's boat puts off from the beach and carries you back across the anchorage to HMS Beagle.",
   educationalNote: "Darwin's shore work depended on small boats shuttling specimens, tools, and people between anchorages and landing places.",
 });
+
+// Regression escape hatch: `/three?hud=legacy` restores the previous desktop
+// composition without changing the production default or touching save data.
+function resolveDesktopHudLayout() {
+  if (typeof window === 'undefined') return DEFAULT_DESKTOP_HUD_LAYOUT;
+  const requested = new URLSearchParams(window.location.search).get('hud');
+  if (requested === 'legacy' || requested === 'polished') return requested;
+  return DEFAULT_DESKTOP_HUD_LAYOUT;
+}
 
 const ROUTE_ENTRY_EDGES = {
   north: 'south',
@@ -727,6 +745,79 @@ function TopObjective({ objective }) {
   );
 }
 
+function PolishedTopObjective({ objective }) {
+  const [expanded, setExpanded] = useState(false);
+  const day = useThreeGameStore(state => state.day);
+  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
+  const weather = useThreeGameStore(state => state.weather);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const zone = getZone(currentZoneId);
+  const normalizedWeather = normalizeWeatherState(weather);
+  const weatherCopy = WEATHER_COPY[normalizedWeather] || {
+    title: sentenceCase(normalizedWeather || 'weather'),
+    note: 'Local conditions recorded from the sky.',
+  };
+
+  return (
+    <div className="absolute left-1/2 top-3 hidden w-[min(32rem,calc(100vw-42rem))] min-w-[23rem] -translate-x-1/2 animate-hud-rise [animation-delay:75ms] motion-reduce:animate-none xl:block">
+      <ExpeditionPanel variant="objective" innerClassName="overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setExpanded(value => !value)}
+          aria-expanded={expanded}
+          className="grid w-full grid-cols-[2.35rem_minmax(0,1fr)_auto] items-center gap-2.5 px-3.5 py-2 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-expedition-gold/65 bg-expedition-gold/10 shadow-[inset_0_0_8px_rgba(0,0,0,0.35)]">
+            <CompassRoseIcon className="h-6 w-6 text-expedition-gold" />
+          </span>
+          <span className="min-w-0">
+            <span className="flex min-w-0 items-baseline gap-2 leading-none">
+              <span className="shrink-0 text-[9.5px] font-semibold uppercase tracking-[0.2em] text-expedition-gold">Objective</span>
+              <span className="h-1 w-1 shrink-0 rotate-45 bg-expedition-brass/85" />
+              <span className="min-w-0 truncate text-[12.5px] font-semibold tracking-[0.035em] text-expedition-parchment/95">
+                {zone.shortName || zone.name}
+              </span>
+              <span className="shrink-0 text-expedition-brass/70">·</span>
+              <span className="shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90">
+                {formatExpeditionTime(timeOfDay)}
+              </span>
+            </span>
+            <span className="mt-1 block truncate text-[15.5px] font-semibold leading-tight tracking-wide text-expedition-parchment">
+              {formatBannerObjective(objective)}
+            </span>
+          </span>
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            className={`h-4 w-4 text-expedition-gold transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          >
+            <path d="M3.5 6 L8 10.5 L12.5 6" />
+          </svg>
+        </button>
+        <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? 'grid-rows-[1fr] border-t border-expedition-brass/40 opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+          <div className="overflow-hidden">
+            <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5">
+              <p className="m-0 text-[12px] italic leading-snug text-expedition-faded">
+                Approach carefully, examine the evidence, then choose whether to document or collect.
+              </p>
+              <div className="flex items-center gap-2 whitespace-nowrap text-[10.5px] text-expedition-faded">
+                <WeatherGlyph weather={normalizedWeather} className="h-5 w-5 text-expedition-gold" />
+                <span>{weatherCopy.title}</span>
+                <span className="text-expedition-brass/70">·</span>
+                <span>{formatExpeditionDate(day)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Vitals
 
@@ -779,11 +870,129 @@ function VitalStatusPanel() {
   );
 }
 
+function PolishedStatRow({ icon: Icon, label, value, fill }) {
+  const safeValue = Math.max(0, Math.min(100, value));
+  return (
+    <div className="grid grid-cols-[1rem_4.5rem_minmax(4.5rem,1fr)_1.5rem] items-center gap-1.5">
+      <Icon className="h-4 w-4 text-expedition-gold" />
+      <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-expedition-parchment/80">{label}</span>
+      <span className="h-[5px] overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
+        <span
+          className="block h-full rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] transition-[width] duration-700 ease-out"
+          style={{ width: `${safeValue}%`, background: fill }}
+        />
+      </span>
+      <span className="text-right text-[11.5px] font-semibold tabular-nums text-expedition-parchment">{Math.round(safeValue)}</span>
+    </div>
+  );
+}
+
+function PolishedVitalStatusPanel() {
+  const health = useThreeGameStore(state => state.health);
+  const fatigue = useThreeGameStore(state => state.fatigue);
+  const curiosity = useThreeGameStore(state => state.curiosity);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
+  const openStatusView = useThreeGameStore(state => state.openStatusView);
+  const playableMode = getPlayableMode(playableModeId);
+  const animalMode = playableMode.kind === 'animal';
+  const energy = Math.max(0, Math.min(100, 100 - fatigue));
+  const displayName = animalMode ? playableMode.label : 'Charles Darwin';
+  const condition = health < 35 ? 'Injured' : fatigue > 70 ? 'Winded' : 'Steady';
+
+  return (
+    <button
+      type="button"
+      onClick={openStatusView}
+      title={`View ${displayName}'s status`}
+      aria-label={`View ${displayName}'s status`}
+      className="pointer-events-auto block text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+    >
+      <ExpeditionPanel className="w-[17.5rem]" innerClassName="px-3.5 pb-3 pt-2.5">
+        <div className="mb-2.5 flex items-center justify-between border-b border-expedition-brass/30 pb-2">
+          <span className="font-expedition text-[14px] font-semibold tracking-wide text-expedition-parchment">{displayName}</span>
+          <span className={`text-[9px] font-semibold uppercase tracking-[0.15em] ${condition === 'Injured' ? 'text-rose-300' : condition === 'Winded' ? 'text-amber-200' : 'text-emerald-200'}`}>
+            {condition}
+          </span>
+        </div>
+        <div className="grid gap-2">
+          <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
+          <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
+          <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+        </div>
+      </ExpeditionPanel>
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Minimap
 
-function IslandOverview({ zoneId, zoneName }) {
+function IslandOverview({ zoneId, zoneName, polished = false }) {
   const location = getIslandMapLocation(zoneId);
+  const visitedZoneIds = useThreeGameStore(state => state.visitedZoneIds);
+  const nextLocation = useMemo(() => {
+    if (!polished || !location) return null;
+    const visited = new Set(visitedZoneIds || []);
+    return islandMapLocations
+      .filter(candidate => !candidate.isTest && candidate.id !== zoneId && !visited.has(candidate.id))
+      .sort((a, b) => (
+        Math.hypot(a.at.x - location.at.x, a.at.y - location.at.y)
+        - Math.hypot(b.at.x - location.at.x, b.at.y - location.at.y)
+      ))[0] || null;
+  }, [location, polished, visitedZoneIds, zoneId]);
+
+  if (polished) {
+    const start = location ? { x: location.at.x * 100, y: location.at.y * 100 } : null;
+    const end = nextLocation ? { x: nextLocation.at.x * 100, y: nextLocation.at.y * 100 } : null;
+    const bendX = start && end ? (start.x + end.x) / 2 - 5 : 0;
+    const bendY = start && end ? Math.max(start.y, end.y) + 8 : 0;
+    return (
+      <div className="relative h-full w-full bg-[#17252b]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={ISLAND_MAP_IMAGE}
+          alt="Floreana island chart"
+          className="absolute inset-0 h-full w-full object-cover saturate-[0.78] brightness-[0.78] contrast-[1.06]"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_48%,rgba(5,12,17,0.58)_100%)]" />
+        {start && end && (
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+            <path
+              d={`M ${start.x} ${start.y} Q ${bendX} ${bendY} ${end.x} ${end.y}`}
+              fill="none"
+              stroke="rgba(227,197,133,0.58)"
+              strokeWidth="0.65"
+              strokeDasharray="3.2 3.6"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
+        {nextLocation && (
+          <span
+            className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-100/45 bg-rose-300/90 shadow-[0_0_12px_rgba(253,164,175,0.36)]"
+            style={{ left: percentStyle(end.x), top: percentStyle(end.y) }}
+            title={`Unvisited: ${nextLocation.name}`}
+          />
+        )}
+        {location && (
+          <span
+            className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-expedition-goldbright/80 bg-expedition-gold/10 shadow-[0_0_0_4px_rgba(227,197,133,0.10),0_0_12px_rgba(227,197,133,0.28)]"
+            style={{ left: percentStyle(start.x), top: percentStyle(start.y) }}
+            title={location.name}
+          >
+            <span className="h-2.5 w-2.5 rotate-45 border border-expedition-goldbright bg-expedition-ink" />
+          </span>
+        )}
+        <div className="absolute bottom-2 left-2 flex items-center gap-3 rounded-sm border border-expedition-brass/35 bg-expedition-ink/72 px-2 py-1 font-expedition text-[8.5px] uppercase tracking-[0.1em] text-expedition-parchment shadow-sm backdrop-blur-sm">
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-expedition-goldbright" />You</span>
+          {nextLocation && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-300" />New</span>}
+        </div>
+        <span className="absolute right-2 top-2 font-expedition text-[10px] font-semibold text-expedition-parchment/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">↑ N</span>
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-full w-full bg-[#1d2a2e]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1067,8 +1276,18 @@ function LocalMapDecoration({ surveyStyle, zoneName }) {
   );
 }
 
-function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = null }) {
-  const [view, setView] = useState('local');
+function MinimapBody({
+  onOpenMap,
+  tabsClassName = 'hidden sm:flex',
+  mapHeight = null,
+  views = ['local', 'island', 'globe'],
+  initialView = 'local',
+  showLocationHeader = true,
+  showMapStyleToggle = true,
+  quietTabs = false,
+  polishedIsland = false,
+}) {
+  const [view, setView] = useState(initialView);
   const [mapStyle, setMapStyle] = useState('terrain');
   const [showKnown, setShowKnown] = useState(true);
   const [showNew, setShowNew] = useState(true);
@@ -1083,10 +1302,12 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
   if (interior) {
     return (
       <>
-        <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
-          <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">{interior.label}</div>
-          <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-expedition-gold/75">{interior.blueprint?.map?.planLabel || 'Interior plan'}</span>
-        </div>
+        {showLocationHeader && (
+          <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
+            <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">{interior.label}</div>
+            <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-expedition-gold/75">{interior.blueprint?.map?.planLabel || 'Interior plan'}</span>
+          </div>
+        )}
         <div
           className={`relative overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#d8c89e] shadow-[inset_0_0_18px_rgba(0,0,0,0.4)] ${mapHeight ? '' : 'aspect-square'}`}
           style={mapHeight ? { height: `${mapHeight}px` } : undefined}
@@ -1101,19 +1322,19 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
     <>
       <PanelTabs
         className={tabsClassName}
-        tabs={[
-          { id: 'local', label: 'Local' },
-          { id: 'island', label: 'Island' },
-          { id: 'globe', label: 'Globe' },
-        ]}
+        tabs={views.map(id => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }))}
         active={view}
         onSelect={setView}
+        quiet={quietTabs}
       />
-      <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
-        <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">
-          {zone.shortName || zone.name}
-        </div>
-        <button
+      {(showLocationHeader || showMapStyleToggle) && (
+        <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
+          {showLocationHeader && (
+            <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">
+              {zone.shortName || zone.name}
+            </div>
+          )}
+          {showMapStyleToggle && <button
           type="button"
           onClick={event => {
             event.stopPropagation();
@@ -1129,8 +1350,9 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
           aria-pressed={surveyStyle}
         >
           <CompassRoseIcon className="h-4 w-4" />
-        </button>
-      </div>
+          </button>}
+        </div>
+      )}
       <div
         role="button"
         tabIndex={0}
@@ -1149,7 +1371,7 @@ function MinimapBody({ onOpenMap, tabsClassName = 'hidden sm:flex', mapHeight = 
         {view === 'globe' ? (
           <GalapagosGlobe />
         ) : view === 'island' ? (
-          <IslandOverview zoneId={currentZoneId} zoneName={zone.shortName || zone.name} />
+          <IslandOverview zoneId={currentZoneId} zoneName={zone.shortName || zone.name} polished={polishedIsland} />
         ) : (
           <>
             <div className="absolute left-1.5 top-1.5 z-10 flex overflow-hidden rounded-sm border border-expedition-brass/45 bg-expedition-ink/62 shadow-[0_2px_8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
@@ -1235,12 +1457,16 @@ function GameplayMinimap({ onOpenMap }) {
 // ---------------------------------------------------------------------------
 // Hotbar
 
-function ToolBelt({ onOpenJournal }) {
+function ToolBelt({ onOpenJournal, compact = false }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   return (
-    <ExpeditionPanel className="max-w-[min(35rem,calc(100vw-1.5rem))]" innerClassName="flex flex-wrap justify-center gap-2 p-2">
+    <ExpeditionPanel
+      variant={compact ? 'quiet' : 'hud'}
+      className="max-w-[min(35rem,calc(100vw-1.5rem))]"
+      innerClassName={`flex flex-wrap justify-center ${compact ? 'gap-1 p-1.5' : 'gap-2 p-2'}`}
+    >
       {toolbarOrder.map((toolId, index) => {
         const tool = getToolbarItem(toolId);
         if (!tool) return null;
@@ -1263,9 +1489,12 @@ function ToolBelt({ onOpenJournal }) {
                 if (animalAction) triggerToolUse(tool.id);
               }
             }}
-            className={`group relative flex h-14 w-14 items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
-              active
-                ? 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_18px_rgba(227,197,133,0.45),inset_0_0_0_1px_rgba(227,197,133,0.45)]'
+            className={`group relative flex items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${compact ? 'h-12 w-12' : 'h-14 w-14'} ${active
+              ? compact
+                ? 'border-expedition-gold/75 bg-expedition-gold/15 text-expedition-goldbright shadow-[inset_0_0_0_1px_rgba(227,197,133,0.12)]'
+                : 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_18px_rgba(227,197,133,0.45),inset_0_0_0_1px_rgba(227,197,133,0.45)]'
+              : compact
+                ? 'border-expedition-brass/35 bg-[rgba(8,14,27,0.28)] text-expedition-parchment/65 hover:border-expedition-gold/60 hover:bg-expedition-gold/8 hover:text-expedition-parchment'
                 : 'border-expedition-gold/55 bg-[rgba(8,14,27,0.5)] text-expedition-parchment/85 hover:border-expedition-gold hover:bg-expedition-gold/15'
             }`}
             title={`${index + 1}: ${tool.name}`}
@@ -1274,11 +1503,12 @@ function ToolBelt({ onOpenJournal }) {
               <AnimalActionIcon actionId={tool.id} />
             ) : tool.image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={tool.image} alt={tool.name} className="h-10 w-10 object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]" draggable={false} />
-            ) : Icon ? <Icon className="h-7 w-7" /> : <span className="text-base">{tool.icon}</span>}
-            <span className="pointer-events-none absolute left-1 top-0.5 font-expedition text-[10px] font-semibold text-expedition-goldbright/95 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
+              <img src={tool.image} alt={tool.name} className={`${compact ? 'h-8 w-8' : 'h-10 w-10'} object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)] transition ${compact && !active ? 'opacity-65 saturate-[0.68]' : ''}`} draggable={false} />
+            ) : Icon ? <Icon className={compact ? 'h-6 w-6' : 'h-7 w-7'} /> : <span className="text-base">{tool.icon}</span>}
+            <span className={`pointer-events-none absolute left-1 top-0.5 font-expedition font-semibold text-expedition-goldbright/95 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)] ${compact ? 'text-[9px]' : 'text-[10px]'}`}>
               {index + 1}
             </span>
+            {compact && active && <span className="pointer-events-none absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-expedition-goldbright shadow-[0_0_5px_rgba(227,197,133,0.5)]" />}
             <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[9rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-gold/60 bg-[rgba(12,20,38,0.92)] px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
               {tool.name}
             </span>
@@ -1292,7 +1522,7 @@ function ToolBelt({ onOpenJournal }) {
 // ---------------------------------------------------------------------------
 // Narration
 
-function SpeakerLine({ speaker, icon, portrait, time, italic = false, children }) {
+function SpeakerLine({ speaker, icon, portrait, time, italic = false, polished = false, children }) {
   return (
     <div className="grid grid-cols-[2.4rem_1fr] gap-2.5 border-t border-expedition-brass/30 pt-2.5 first:border-t-0 first:pt-0">
       <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-expedition-brass/70 bg-black/20 text-expedition-gold shadow-[inset_0_0_8px_rgba(0,0,0,0.6)]">
@@ -1308,7 +1538,7 @@ function SpeakerLine({ speaker, icon, portrait, time, italic = false, children }
           <span className={GOLD_LABEL}>{speaker}</span>
           {time && <span className="shrink-0 text-[10px] tracking-[0.08em] text-expedition-faded">{time}</span>}
         </div>
-        <div className={`font-expedition text-[15.5px] leading-relaxed text-expedition-parchment ${italic ? 'italic text-expedition-parchment/90' : ''}`}>{children}</div>
+        <div className={`font-expedition text-expedition-parchment ${polished ? 'text-[17px] leading-[1.5]' : 'text-[15.5px] leading-relaxed'} ${italic ? 'italic text-expedition-parchment/90' : ''}`}>{children}</div>
       </div>
     </div>
   );
@@ -1319,13 +1549,14 @@ function SpeakerLine({ speaker, icon, portrait, time, italic = false, children }
 const LOG_MIN_HEIGHT = 104;
 const LOG_DEFAULT_HEIGHT = 232;
 
-function HotkeysResponse() {
+function HotkeysResponse({ polished = false }) {
   const sections = [
     ['Movement', ['WASD / arrows: move', 'Shift: run', 'Space: jump', 'C: crouch or running slide', 'B: dodge roll', 'Q or V: climb / mantle / descend']],
     ['Camera', ['Mouse drag: rotate camera', 'Scroll: zoom', 'Z / X: rotate left / right', 'M: cycle camera mode']],
     ['Interaction', ['Enter: examine, then collect once a field note is saved', 'Tab: cycle collection method while the collection card is open', 'E: interact, carry, travel, or legacy collect', 'J: use equipped tool', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
-    ['Direct Actions', ['H: hammer', 'N: net', 'G: gather', 'Y: write', 'I: kneel inspect', 'L: look around', 'O: point', 'P: pray', 'T: trip', 'U: teeter', 'K: sit', 'R: rest / lie down']],
-    ['Narrator Commands', ['hotkeys / controls / commands: show this list', 'north / south / east / west, or go north: travel by direction', '/move <place>: travel to a known place', '/collect <specimen>: collect a named specimen', '/use <tool> on <target>: use a tool on something', 'survey site / look around: record the habitat', 'document <specimen> / sketch <specimen>: make field notes', 'check traps / abandon trap: manage traps', 'rest / sleep / make camp: rest', 'journal / field book / open journal: open the journal']],
+    ...(polished ? [['Interface', ['H: hide or show the expedition interface', '4 then J: equip and swing the geological hammer']]] : []),
+    ['Direct Actions', [polished ? null : 'H: hammer', 'N: net', 'G: gather', 'Y: write', 'I: kneel inspect', 'L: look around', 'O: point', 'P: pray', 'T: trip', 'U: teeter', 'K: sit', 'R: rest / lie down'].filter(Boolean)],
+    ['Narrator Commands', ['hotkeys / controls / commands: show this list', 'north / south / east / west, or go north: travel by direction', '/move <place>: travel to a known place', '/collect <specimen>: collect a named specimen', '/use <tool> on <target>: use a tool on something', 'survey site / look around: record the habitat', 'document <specimen> / sketch <specimen>: make field notes', 'check traps / abandon trap: manage traps', 'rest / sleep / make camp: rest', 'journal / field book / open journal: open the journal', 'end game: conclude the expedition and open Henslow’s assessment']],
     ['Dev / Debug', ['`: performance panel', '0: asset browser', '7: animal animation lab', '8: Darwin animation lab', '9: cycle Darwin model']],
   ];
 
@@ -1386,6 +1617,7 @@ const NarratorComposer = memo(function NarratorComposer({
   onDraftActiveChange,
   emphasized = false,
   placeholder = null,
+  polished = false,
 }) {
   const [draft, setDraft] = useState('');
 
@@ -1398,11 +1630,13 @@ const NarratorComposer = memo(function NarratorComposer({
   const handleSubmit = useCallback(event => {
     event.preventDefault();
     const trimmed = draft.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || (pending && !isEndGameNarratorCommand(trimmed))) return;
     setDraft('');
     onDraftActiveChange(false);
     submitNarratorCommand(trimmed);
   }, [draft, onDraftActiveChange, pending, submitNarratorCommand]);
+
+  const canEndWhilePending = pending && isEndGameNarratorCommand(draft);
 
   const handleFocus = useCallback(() => {
     setTypingMode(true);
@@ -1428,16 +1662,16 @@ const NarratorComposer = memo(function NarratorComposer({
         onFocus={handleFocus}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className={`min-w-0 flex-1 rounded-sm border bg-[rgba(232,220,192,0.92)] px-3.5 font-expedition text-[16px] leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] transition-[padding,border-color,box-shadow] duration-300 focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 ${emphasized ? 'border-expedition-goldbright shadow-[0_0_0_2px_rgba(227,197,133,0.26),0_0_18px_rgba(227,197,133,0.28)]' : 'border-expedition-gold/50'} ${expanded ? 'py-2.5' : 'py-2'}`}
+        className={`min-w-0 flex-1 rounded-sm border bg-[rgba(232,220,192,0.94)] px-3.5 font-expedition leading-snug text-[#2b2416] outline-none placeholder:italic placeholder:text-[#7a6a4d] transition-[padding,border-color,box-shadow] duration-300 focus:border-expedition-goldbright focus:ring-1 focus:ring-expedition-gold/50 ${polished ? 'text-[17px]' : 'text-[16px]'} ${emphasized ? 'border-expedition-goldbright shadow-[0_0_0_2px_rgba(227,197,133,0.26),0_0_18px_rgba(227,197,133,0.28)]' : 'border-expedition-gold/50'} ${expanded || polished ? 'py-2.5' : 'py-2'}`}
         placeholder={emphasized ? (placeholder || 'Describe Darwin’s practical remedy...') : 'Ask the narrator or describe an action...'}
       />
       <button
         type="submit"
-        disabled={pending}
-        aria-label={pending ? 'Narrator is composing' : 'Send note to narrator'}
-        className={`${GOLD_BUTTON} min-w-[4.25rem] transition-[height,padding] duration-300 disabled:cursor-wait disabled:opacity-60 ${expanded ? 'h-10' : 'h-9 px-2.5'}`}
+        disabled={pending && !canEndWhilePending}
+        aria-label={pending && !canEndWhilePending ? 'Narrator is composing' : 'Send note to narrator'}
+        className={`${GOLD_BUTTON} transition-[height,padding] duration-300 disabled:cursor-wait disabled:opacity-60 ${polished ? 'h-11 min-w-[5rem] px-3 text-[12px]' : `min-w-[4.25rem] ${expanded ? 'h-10' : 'h-9 px-2.5'}`}`}
       >
-        {pending ? (
+        {pending && !canEndWhilePending ? (
           <span className="flex items-center justify-center gap-1" aria-hidden="true">
             {[0, 1, 2].map(index => (
               <span
@@ -1453,11 +1687,13 @@ const NarratorComposer = memo(function NarratorComposer({
   );
 });
 
-function NarrativePanel({ forceExpanded = false }) {
+function NarrativePanel({ forceExpanded = false, polished = false }) {
   const [composerHasText, setComposerHasText] = useState(false);
   const [logHeight, setLogHeight] = useState(LOG_DEFAULT_HEIGHT);
   const [focused, setFocused] = useState(false);
   const [manualCollapsed, setManualCollapsed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const logRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const narratorLog = useThreeGameStore(state => state.narratorLog);
@@ -1492,8 +1728,10 @@ function NarrativePanel({ forceExpanded = false }) {
       ? 'Describe how Darwin gets free...'
       : null
   );
-  const expanded = forceExpanded || dilemmaPromptActive || !manualCollapsed || focused || composerHasText || narratorPending;
-  const visibleLogHeight = expanded ? logHeight : 88;
+  const expanded = polished
+    ? forceExpanded || dilemmaPromptActive || pinned || hovered || focused || composerHasText || narratorPending
+    : forceExpanded || dilemmaPromptActive || !manualCollapsed || focused || composerHasText || narratorPending;
+  const visibleLogHeight = expanded ? logHeight : polished ? 58 : 88;
   const previewMessage = displayEntries.at(-1)?.text || '';
 
   const onHandlePointerDown = event => {
@@ -1516,24 +1754,38 @@ function NarrativePanel({ forceExpanded = false }) {
   return (
     <div
       className="transition-transform duration-300 ease-out"
+      onMouseEnter={() => {
+        if (polished) setHovered(true);
+      }}
+      onMouseLeave={() => {
+        if (polished) setHovered(false);
+      }}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={event => {
         if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
       }}
     >
     <ExpeditionPanel
-      className={`w-[min(28rem,calc(100vw-1.5rem))] transition-[opacity,transform] duration-300 ease-out ${expanded ? 'opacity-100' : 'translate-y-1 opacity-90'}`}
+      variant={polished ? 'quiet' : 'hud'}
+      className={`${polished ? (expanded ? 'w-[min(29rem,calc(100vw-1.5rem))]' : 'w-[min(24rem,calc(100vw-1.5rem))]') : 'w-[min(28rem,calc(100vw-1.5rem))]'} transition-[width,opacity,transform] duration-300 ease-out ${expanded ? 'opacity-100' : 'translate-y-1 opacity-90'}`}
       innerClassName={`transition-[padding] duration-300 ease-out ${expanded ? 'p-4 pt-1.5' : 'px-3 py-2.5'}`}
     >
       {!forceExpanded && (
         <button
           type="button"
-          onClick={() => setManualCollapsed(value => !value)}
-          aria-label={expanded ? 'Minimize narrator panel' : 'Open narrator panel'}
-          title={expanded ? 'Minimize narrator panel' : 'Open narrator panel'}
+          onClick={() => {
+            if (polished) setPinned(value => !value);
+            else setManualCollapsed(value => !value);
+          }}
+          aria-label={polished ? (pinned ? 'Unpin narrator panel' : 'Pin narrator panel open') : (expanded ? 'Minimize narrator panel' : 'Open narrator panel')}
+          title={polished ? (pinned ? 'Unpin narrator panel' : 'Pin narrator panel open') : (expanded ? 'Minimize narrator panel' : 'Open narrator panel')}
           className={`absolute right-2.5 top-2.5 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-expedition-gold/45 bg-[rgba(8,14,27,0.55)] font-expedition text-[15px] leading-none text-expedition-gold/85 shadow-[0_2px_8px_rgba(0,0,0,0.35)] transition hover:border-expedition-gold hover:bg-expedition-gold/12 hover:text-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/70 ${expanded ? '' : 'opacity-80'}`}
         >
-          {expanded ? (
+          {polished ? (
+            <svg viewBox="0 0 16 16" aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${pinned ? 'rotate-[-35deg] fill-current' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 2.5h6l-1.1 3.2 2 2v1H8.8V14L7.2 12.4V8.7H4v-1l2.1-2L5 2.5Z" />
+            </svg>
+          ) : expanded ? (
             <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
               <path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" />
             </svg>
@@ -1551,8 +1803,9 @@ function NarrativePanel({ forceExpanded = false }) {
         onPointerUp={onHandlePointerEnd}
         onPointerCancel={onHandlePointerEnd}
         onDoubleClick={() => setLogHeight(LOG_DEFAULT_HEIGHT)}
-        className={`group flex touch-none items-center justify-center transition-all duration-300 ease-out ${expanded ? '-mx-4 mb-1.5 h-5 cursor-ns-resize' : '-mx-3 -mt-1 mb-1 h-2 cursor-default'}`}
+        className={`group relative flex touch-none items-center justify-center transition-all duration-300 ease-out ${expanded ? '-mx-4 mb-1.5 h-5 cursor-ns-resize' : '-mx-3 -mt-1 mb-1 h-2 cursor-default'}`}
       >
+        {polished && expanded && <span className="absolute left-4 text-[9px] font-semibold uppercase tracking-[0.18em] text-expedition-gold/80">Field log</span>}
         <span className={`rounded-full bg-expedition-brass/50 transition group-hover:bg-expedition-gold/80 ${expanded ? 'h-1 w-12' : 'h-0.5 w-9 opacity-60'}`} />
       </div>
       <div
@@ -1563,7 +1816,10 @@ function NarrativePanel({ forceExpanded = false }) {
         {!expanded ? (
           <button
             type="button"
-            onClick={() => setManualCollapsed(false)}
+            onClick={() => {
+              if (polished) setPinned(true);
+              else setManualCollapsed(false);
+            }}
             className="grid w-full grid-cols-[auto_1fr] items-center gap-2.5 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-full border border-expedition-gold/70 bg-expedition-gold/10 text-expedition-gold">
@@ -1571,7 +1827,7 @@ function NarrativePanel({ forceExpanded = false }) {
             </div>
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Field Log</div>
-              <div className="mt-0.5 max-h-[2.55rem] overflow-hidden font-expedition text-[13px] leading-snug text-expedition-parchment/95">
+              <div className={`mt-0.5 overflow-hidden font-expedition leading-snug text-expedition-parchment/95 ${polished ? 'max-h-[2.9rem] text-[15.5px]' : 'max-h-[2.55rem] text-[13px]'}`}>
                 {previewMessage}
               </div>
             </div>
@@ -1588,32 +1844,36 @@ function NarrativePanel({ forceExpanded = false }) {
                   icon={presentation.icon}
                   portrait={presentation.portrait}
                   italic={presentation.italic}
+                  polished={polished}
                 >
-                  {entry.kind === 'hotkeys' ? <HotkeysResponse /> : entry.text}
+                  {entry.kind === 'hotkeys' ? <HotkeysResponse polished={polished} /> : entry.text}
                 </SpeakerLine>
               );
             })}
             {narratorPending && (
-              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />}>
+              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />} polished={polished}>
                 <NarratorLoadingDots />
               </SpeakerLine>
             )}
             {narratorError && !narratorPending && (
-              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />} italic>
+              <SpeakerLine speaker="Narrator" time={fallbackTime} icon={<CompassRoseIcon className="h-5 w-5" />} italic polished={polished}>
                 {narratorError}
               </SpeakerLine>
             )}
           </>
         )}
       </div>
-      <NarratorComposer
-        expanded={expanded}
-        pending={narratorPending}
-        submitNarratorCommand={submitNarratorCommand}
-        onDraftActiveChange={setComposerHasText}
-        emphasized={dilemmaPromptActive}
-        placeholder={composerPlaceholder}
-      />
+      {(!polished || expanded) && (
+        <NarratorComposer
+          expanded={expanded}
+          pending={narratorPending}
+          submitNarratorCommand={submitNarratorCommand}
+          onDraftActiveChange={setComposerHasText}
+          emphasized={dilemmaPromptActive}
+          placeholder={composerPlaceholder}
+          polished={polished}
+        />
+      )}
       <button
         type="button"
         onClick={() => nearby && collectNearby()}
@@ -2171,6 +2431,203 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
   );
 }
 
+function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onRequestEndGame }) {
+  const [mapCollapsed, setMapCollapsed] = useState(false);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
+  const journalCount = useThreeGameStore(state => state.journal.length);
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
+  const rest = useThreeGameStore(state => state.rest);
+  const zone = getZone(currentZoneId);
+  const interior = getInteriorDefinition(currentZoneId);
+  const zoneSpecimenCount = getThreeSpecimens(currentZoneId).length;
+  const progress = zoneSpecimenCount > 0 ? Math.min(100, (collectedCount / zoneSpecimenCount) * 100) : 0;
+
+  const compactAction = 'group inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/40 bg-black/14 px-1.5 py-2 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-expedition-faded transition duration-200 hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
+  const railIconButton = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-expedition-brass/45 bg-black/12 text-expedition-gold/75 transition hover:border-expedition-gold/75 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
+
+  return (
+    <div className="hidden w-[19rem] flex-col gap-2.5 xl:flex">
+      <ExpeditionPanel variant="quiet" innerClassName="p-2.5">
+        <div className="flex items-start justify-between gap-3 px-1 pb-2">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.21em] text-expedition-gold">Local chart</div>
+            <div className="mt-0.5 truncate text-[17px] font-semibold leading-tight tracking-[0.01em] text-expedition-parchment">
+              {interior?.label || zone.shortName || zone.name}
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            <button type="button" onClick={onOpenMap} title="Open full island chart" aria-label="Open full island chart" className={railIconButton}>
+              <svg viewBox="0 0 18 18" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
+                <path d="M3 7V3h4M11 3h4v4M15 11v4h-4M7 15H3v-4" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapCollapsed(value => !value)}
+              aria-expanded={!mapCollapsed}
+              title={mapCollapsed ? 'Expand chart' : 'Collapse chart'}
+              className={railIconButton}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" className={`h-4 w-4 transition-transform duration-300 ${mapCollapsed ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+                <path d="M3.5 6 L8 10.5 L12.5 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${mapCollapsed ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'}`}>
+          <div className="overflow-hidden">
+            <MinimapBody
+              onOpenMap={onOpenMap}
+              tabsClassName="flex"
+              mapHeight={194}
+              views={['local', 'island']}
+              initialView="island"
+              showLocationHeader={false}
+              showMapStyleToggle={false}
+              quietTabs
+              polishedIsland
+            />
+          </div>
+        </div>
+      </ExpeditionPanel>
+
+      <ExpeditionPanel variant="quiet" innerClassName="px-3.5 pb-3 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-expedition-gold">Field record</span>
+          <span className="text-[15px] font-semibold text-expedition-parchment">
+            <span className="text-expedition-goldbright">{collectedCount}</span> / {zoneSpecimenCount} specimens
+          </span>
+        </div>
+        <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-2.5">
+          <div className="h-1.5 overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
+            <div className="h-full rounded-full bg-gradient-to-r from-expedition-brass to-expedition-goldbright transition-[width] duration-700" style={{ width: `${Math.max(progress, collectedCount ? 4 : 0)}%` }} />
+          </div>
+          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-expedition-faded">{journalCount} {journalCount === 1 ? 'note' : 'notes'}</span>
+        </div>
+
+        <div className="mt-2.5 flex items-center gap-2 border-t border-expedition-brass/30 pt-2.5">
+          {!interior ? (
+            <>
+              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold text-expedition-parchment">Syms Covington</div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[9px] uppercase tracking-[0.11em] text-expedition-faded">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                  Nearby
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-semibold text-expedition-parchment">{interior.label}</div>
+              <div className="mt-0.5 text-[9px] uppercase tracking-[0.11em] text-expedition-faded">Interior field station</div>
+            </div>
+          )}
+          <button type="button" onClick={onOpenInventory} className={railIconButton} title="Open specimens" aria-label="Open specimens">
+            <ButterflyIcon className="h-[1.125rem] w-[1.125rem]" />
+          </button>
+          <button type="button" onClick={onOpenJournal} className={railIconButton} title="Open field notebook" aria-label="Open field notebook">
+            <OpenBookIcon className="h-[1.125rem] w-[1.125rem]" />
+          </button>
+        </div>
+
+        <div className="mt-2 grid grid-cols-[0.72fr_1.14fr_1.14fr] gap-1.5 border-t border-expedition-brass/30 pt-2">
+          <button type="button" onClick={rest} className={compactAction}>
+            <FatigueIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
+            <span>Rest</span>
+          </button>
+          <button type="button" onClick={cycleViewMode} className={compactAction} title="Cycle camera mode">
+            <CompassRoseIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
+            <span className="truncate">{CAMERA_MODE_SHORT_LABELS[viewMode] || viewMode}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onRequestEndGame}
+            className={`${compactAction} hover:border-rose-400/80 hover:bg-rose-950/38 hover:text-rose-200 focus-visible:ring-rose-300/70`}
+            title="End the expedition"
+            data-testid="end-game-button"
+          >
+            <svg viewBox="0 0 18 18" aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-expedition-gold/75 transition group-hover:text-rose-300" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 2.5v13M4 3.5h8l-1.5 2L12 8H4" />
+            </svg>
+            <span className="truncate">End game</span>
+          </button>
+        </div>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
+function EndGameConfirmationModal({ open, onCancel, onConfirm }) {
+  const cancelRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const focusTimer = window.setTimeout(() => cancelRef.current?.focus({ preventScroll: true }), 80);
+    const onKeyDown = event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [onCancel, open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="pointer-events-auto fixed inset-0 z-[75] flex items-center justify-center bg-[#050b14]/76 p-4 backdrop-blur-[5px]"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="end-game-confirmation-title"
+      aria-describedby="end-game-confirmation-description"
+      data-testid="end-game-confirmation-modal"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <ExpeditionPanel
+        variant="quiet"
+        className="w-[min(28rem,calc(100vw-2rem))]"
+        innerClassName="p-5 sm:p-6"
+        background="linear-gradient(165deg, rgba(27,42,68,0.98), rgba(13,25,45,0.99))"
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-expedition-gold">Conclude expedition</div>
+        <h2 id="end-game-confirmation-title" className="mt-2 text-[24px] font-semibold leading-tight text-expedition-parchment">End the game?</h2>
+        <p id="end-game-confirmation-description" className="mt-2 text-[15px] leading-relaxed text-expedition-faded">
+          Your field record will be closed and sent to Professor Henslow for final assessment.
+        </p>
+        <div className="mt-5 grid grid-cols-2 gap-2 border-t border-expedition-brass/30 pt-4">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            className="rounded-sm border border-expedition-brass/50 bg-black/15 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-expedition-parchment transition hover:border-expedition-gold/75 hover:bg-expedition-gold/8 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+          >
+            Continue playing
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-sm border border-rose-400/55 bg-rose-950/28 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-200 transition hover:border-rose-300 hover:bg-rose-900/55 hover:text-rose-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-rose-300"
+          >
+            End game
+          </button>
+        </div>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Prompts + touch controls
 
@@ -2179,6 +2636,12 @@ const CAMERA_MODE_LABELS = {
   hero: 'Hero View',
   first: 'First Person',
   top: 'Overhead Chart',
+};
+const CAMERA_MODE_SHORT_LABELS = {
+  shoulder: 'Shoulder',
+  hero: 'Hero',
+  first: 'First person',
+  top: 'Overhead',
 };
 
 const MOVEMENT_HINT_STORAGE_KEY = 'young-darwin-three-movement-hint-v1';
@@ -2208,6 +2671,14 @@ function PromptKey({ children, active = false }) {
         ? 'border-expedition-goldbright bg-expedition-gold text-expedition-ink'
         : 'border-expedition-brass/60 bg-black/24 text-expedition-goldbright'
     }`}>
+      {children}
+    </span>
+  );
+}
+
+function ControlHintKey({ children }) {
+  return (
+    <span className="inline-flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-[2px] border border-expedition-brass/45 bg-black/12 px-1.5 font-expedition text-[9px] font-semibold leading-none text-expedition-parchment/75">
       {children}
     </span>
   );
@@ -2319,6 +2790,120 @@ function MovementHint() {
         <PromptKey active>Jump</PromptKey>
         <PromptKey>Run</PromptKey>
       </div>
+    </div>
+  );
+}
+
+function PolishedControlHint({ hudHidden, disabled = false }) {
+  const [phase, setPhase] = useState('hud');
+  const [visible, setVisible] = useState(false);
+  const progressRef = React.useRef({ introComplete: false, moved: false, ran: false, jumped: false, complete: false });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    let revealTimer = 0;
+    let introFadeTimer = 0;
+    let introNextTimer = 0;
+    let phaseFadeTimer = 0;
+    let idleTimer = 0;
+
+    const clearPhaseFade = () => window.clearTimeout(phaseFadeTimer);
+    const scheduleIdleHint = () => {
+      window.clearTimeout(idleTimer);
+      if (!progressRef.current.complete) return;
+      idleTimer = window.setTimeout(() => {
+        setPhase('idle');
+        setVisible(true);
+      }, 10000);
+    };
+    const finishBasics = () => {
+      if (progressRef.current.complete) {
+        scheduleIdleHint();
+        return;
+      }
+      progressRef.current.complete = true;
+      clearPhaseFade();
+      setPhase('essentials');
+      setVisible(true);
+      phaseFadeTimer = window.setTimeout(() => setVisible(false), 6500);
+      scheduleIdleHint();
+    };
+    const revealPostIntroPhase = () => {
+      const progress = progressRef.current;
+      progress.introComplete = true;
+      if (progress.moved && progress.ran && progress.jumped) {
+        finishBasics();
+        return;
+      }
+      setPhase(progress.moved ? 'advanced' : 'move');
+      setVisible(true);
+    };
+
+    revealTimer = window.setTimeout(() => setVisible(true), 500);
+    introFadeTimer = window.setTimeout(() => setVisible(false), 3800);
+    introNextTimer = window.setTimeout(revealPostIntroPhase, 4200);
+
+    const handleKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const progress = progressRef.current;
+      const movementKey = MOVEMENT_HINT_MOVE_KEYS.has(event.code);
+      if (movementKey) {
+        progress.moved = true;
+        if (progress.introComplete && !progress.complete) {
+          setPhase('advanced');
+          setVisible(true);
+        }
+        if (progress.complete) {
+          setVisible(false);
+          scheduleIdleHint();
+        }
+      }
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') progress.ran = true;
+      if (event.code === 'Space') progress.jumped = true;
+      if (progress.introComplete && progress.moved && progress.ran && progress.jumped) finishBasics();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(revealTimer);
+      window.clearTimeout(introFadeTimer);
+      window.clearTimeout(introNextTimer);
+      window.clearTimeout(phaseFadeTimer);
+      window.clearTimeout(idleTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const activePhase = hudHidden ? 'showHud' : phase;
+  const shown = !disabled && (hudHidden || visible);
+  const content = {
+    hud: (
+      <><ControlHintKey>H</ControlHintKey><span>Hide interface</span></>
+    ),
+    showHud: (
+      <><ControlHintKey>H</ControlHintKey><span>Show interface</span></>
+    ),
+    move: (
+      <><ControlHintKey>WASD</ControlHintKey><ControlHintKey>Arrows</ControlHintKey><span>Walk</span></>
+    ),
+    advanced: (
+      <><ControlHintKey>Shift</ControlHintKey><span>Run</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Space</ControlHintKey><span>Jump</span></>
+    ),
+    essentials: (
+      <><ControlHintKey>Drag</ControlHintKey><span>Look</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Scroll</ControlHintKey><span>Zoom</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Enter</ControlHintKey><span>Examine</span></>
+    ),
+    idle: (
+      <><ControlHintKey>H</ControlHintKey><span>Hide interface</span></>
+    ),
+  }[activePhase];
+
+  return (
+    <div
+      className={`pointer-events-none absolute bottom-4 right-5 z-20 hidden items-center gap-1.5 rounded-[2px] bg-[rgba(7,14,27,0.24)] px-2 py-1 font-expedition text-[9.5px] uppercase tracking-[0.1em] text-expedition-parchment/55 backdrop-blur-sm transition-all duration-500 md:flex ${shown ? 'translate-y-0 opacity-80' : 'translate-y-1 opacity-0'}`}
+      aria-live="polite"
+    >
+      {content}
     </div>
   );
 }
@@ -3479,6 +4064,10 @@ function CameraCycleButton({ className }) {
 }
 
 export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
+  const [desktopHudLayout] = useState(resolveDesktopHudLayout);
+  const [hudHidden, setHudHidden] = useState(false);
+  const [endGameConfirmationOpen, setEndGameConfirmationOpen] = useState(false);
+  const polishedDesktopHud = desktopHudLayout === 'polished';
   const [panel, setPanel] = useState(null);
   const [mapOpen, setMapOpen] = useState(() => (
     process.env.NODE_ENV !== 'production'
@@ -3498,7 +4087,15 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const expeditionOutcome = useThreeGameStore(state => state.expeditionOutcome);
   const outcomeOpen = Boolean(expeditionOutcome && expeditionOutcome.phase !== 'recovering');
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen);
+  const finalAssessment = useThreeGameStore(state => state.finalAssessment);
+  const beginFinalAssessment = useThreeGameStore(state => state.beginFinalAssessment);
+  const assessmentOpen = Boolean(finalAssessment);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || endGameConfirmationOpen);
+  const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);
+  const confirmEndGame = useCallback(() => {
+    setEndGameConfirmationOpen(false);
+    void beginFinalAssessment();
+  }, [beginFinalAssessment]);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -3522,6 +4119,19 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
   useEffect(() => {
+    if (!polishedDesktopHud) return undefined;
+    const onKeyDown = event => {
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.code !== 'KeyH') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setHudHidden(value => !value);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [polishedDesktopHud]);
+  useEffect(() => {
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
   }, [blockingUiOpen]);
@@ -3530,6 +4140,14 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
       setMobileNarrativeOpen(true);
     }
   }, [activeConstraint?.requiresNarratorInput, activeConstraint?.type]);
+  useEffect(() => {
+    if (!assessmentOpen) return;
+    setEndGameConfirmationOpen(false);
+    setMapOpen(false);
+    setInventoryOpen(false);
+    setMobileNarrativeOpen(false);
+    setPanel(current => current === 'journal' ? current : null);
+  }, [assessmentOpen]);
   const questComplete = useThreeGameStore(state => state.questComplete);
 
   const objective = useMemo(() => {
@@ -3555,36 +4173,45 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
   }, []);
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 font-expedition">
+    <div className="pointer-events-none absolute inset-0 z-10 font-expedition" data-desktop-hud={desktopHudLayout}>
       {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
-      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || outcomeOpen ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+      <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || hudHidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer />
-      <TopObjective objective={objective} />
+      {polishedDesktopHud ? <PolishedTopObjective objective={objective} /> : <TopObjective objective={objective} />}
 
       <MobileVitalsPanel />
       <MobileMapButton onOpenMap={openMapModal} />
 
       <div className="absolute left-3 top-3 hidden animate-hud-rise motion-reduce:animate-none md:block">
-        <VitalStatusPanel />
+        {polishedDesktopHud ? <PolishedVitalStatusPanel /> : <VitalStatusPanel />}
       </div>
 
       <div className="absolute right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none md:block xl:hidden">
         <GameplayMinimap onOpenMap={openMapModal} />
       </div>
 
-      <div className="absolute bottom-3 right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block">
-        <FieldSidebar
-          objective={objective}
-          onOpenInventory={() => openInventoryTab('case')}
-          onOpenMap={openMapModal}
-          onOpenJournal={openJournalPanel}
-        />
+      <div className={`absolute hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block ${polishedDesktopHud ? 'bottom-5 right-5 top-5' : 'bottom-3 right-3 top-3'}`}>
+        {polishedDesktopHud ? (
+          <PolishedFieldRail
+            onOpenInventory={() => openInventoryTab('case')}
+            onOpenMap={openMapModal}
+            onOpenJournal={openJournalPanel}
+            onRequestEndGame={() => setEndGameConfirmationOpen(true)}
+          />
+        ) : (
+          <FieldSidebar
+            objective={objective}
+            onOpenInventory={() => openInventoryTab('case')}
+            onOpenMap={openMapModal}
+            onOpenJournal={openJournalPanel}
+          />
+        )}
       </div>
 
       <InteractionPrompt />
       <MajorEventToast />
       <CameraModeToast />
-      <MovementHint />
+      {!polishedDesktopHud && <MovementHint />}
       <InspectableTooltip />
       <BeagleTravelPrompt />
 
@@ -3600,13 +4227,13 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         lockedOpen={Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized')}
       />
 
-      <div className="absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex md:w-[28rem]">
-        <NarrativePanel />
+      <div className={`absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex ${polishedDesktopHud ? 'md:w-[29rem]' : 'md:w-[28rem]'}`}>
+        <NarrativePanel polished={polishedDesktopHud} />
       </div>
 
       <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise flex-col items-center gap-1.5 [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3">
         <ShotgunStatusChip />
-        <ToolBelt onOpenJournal={openJournalPanel} />
+        <ToolBelt onOpenJournal={openJournalPanel} compact={polishedDesktopHud} />
       </div>
 
       <div className="pointer-events-auto absolute right-3 bottom-[14.25rem] hidden gap-1.5 md:flex xl:hidden">
@@ -3615,7 +4242,7 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         <CameraCycleButton className={GOLD_BUTTON} />
       </div>
 
-      <DesktopExamineButton />
+      {!polishedDesktopHud && <DesktopExamineButton />}
 
       <MobileTouchControls />
       <MobileActionCluster />
@@ -3627,6 +4254,19 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         narrativeOpen={mobileNarrativeOpen}
       />
       </div>
+
+      {polishedDesktopHud && (
+        <PolishedControlHint
+          hudHidden={hudHidden}
+          disabled={blockingUiOpen || statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen}
+        />
+      )}
+
+      <EndGameConfirmationModal
+        open={endGameConfirmationOpen}
+        onCancel={closeEndGameConfirmation}
+        onConfirm={confirmEndGame}
+      />
 
       <StatusView />
       <ExamineView />
@@ -3646,6 +4286,12 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         }}
       />
       <ExpeditionOutcomeModal
+        journalOpen={panel === 'journal'}
+        onOpenJournal={openJournalPanel}
+        onRestartExpedition={onRestartExpedition}
+        onReturnToMainMenu={onReturnToMainMenu}
+      />
+      <FinalAssessmentModal
         journalOpen={panel === 'journal'}
         onOpenJournal={openJournalPanel}
         onRestartExpedition={onRestartExpedition}

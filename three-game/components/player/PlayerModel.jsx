@@ -1024,7 +1024,15 @@ function ProceduralNaturalistModel({ motionRef }) {
   );
 }
 
-export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, grounding = null }) {
+export function NaturalistModel({
+  motionRef,
+  health,
+  fatigue,
+  inventoryCount,
+  grounding = null,
+  animationBankPhase = Number.POSITIVE_INFINITY,
+  onAnimationBanksReady = null,
+}) {
   const [modelAssetId, setModelAssetId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
   const [damageFlash, setDamageFlash] = useState(0);
   const [modelScene, setModelScene] = useState(null);
@@ -1402,6 +1410,8 @@ export function NaturalistModel({ motionRef, health, fatigue, inventoryCount, gr
         reflect
         onSceneReady={setModelScene}
         grounding={grounding}
+        animationBankPhase={animationBankPhase}
+        onAnimationBanksReady={onAnimationBanksReady}
         fallback={<ProceduralNaturalistModel motionRef={motionRef} />}
       />
       {modelScene && <HandLamp scene={modelScene} modelAssetId={modelAssetId} />}

@@ -146,6 +146,9 @@ Physics is a hybrid of Rapier bodies and custom kinematic movement logic.
   and render/collision/traversal metadata.
 - `three-game/physics/props/*`: repeated, breakable, movable, carryable, and
   hammerable props.
+- Procedural interactive-plant placement belongs to region ecology as
+  `interactiveFlora`; the specialized physics field consumes those stable sites
+  and remains the sole owner of rendering and collision.
 
 Do not place a visual obstacle in one file and approximate its collider in
 another.

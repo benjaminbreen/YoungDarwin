@@ -27,6 +27,8 @@ import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
 import { buildPuntaCormorantEcology } from './puntaCormorant';
 import { buildWatkinsCampEcology } from './watkinsCamp';
 import { buildPostScrubRiseEcology } from './postScrubRise';
+import { buildPostOfficeBayEcology } from './postOfficeBay';
+import { buildLavaFlatsEcology } from './lavaFlats';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
@@ -34,6 +36,7 @@ import { buildPostScrubRiseEcology } from './postScrubRise';
 
 /** @type {Record<string, EcologyBuilder>} */
 const builders = {
+  POST_OFFICE_BAY: buildPostOfficeBayEcology,
   N_SHORE: buildNorthShoreEcology,
   N_OUTCROP: buildDesolateOutcropEcology,
   DEVILS_CROWN: buildDevilsCrownEcology,
@@ -58,7 +61,12 @@ const builders = {
   PUNTA_CORMORANT: buildPuntaCormorantEcology,
   WATKINS: buildWatkinsCampEcology,
   POST_SCRUB_RISE: buildPostScrubRiseEcology,
+  LAVA_FLATS: buildLavaFlatsEcology,
 };
+
+// Dev tooling uses this registry-derived list instead of maintaining a second
+// zone inventory that can drift as authored ecologies are added or removed.
+export const ECOLOGY_ZONE_IDS = Object.freeze(Object.keys(builders));
 
 /** @type {Map<string, EcologyDefinition>} */
 const cache = new Map();
@@ -71,4 +79,15 @@ export function getEcology(zoneId) {
   if (!builders[zoneId]) return null;
   if (!cache.has(zoneId)) cache.set(zoneId, builders[zoneId]());
   return cache.get(zoneId) ?? null;
+}
+
+// Specialized gameplay renderers consume interactive flora sites by runtime
+// id. Returning a fresh array prevents a physics system from mutating the
+// memoized ecology definition or any authored site registry it later merges.
+export function getInteractiveFloraSites(zoneId, runtime) {
+  const ecology = getEcology(zoneId);
+  if (!ecology || !runtime) return [];
+  return (ecology.interactiveFlora || [])
+    .filter(layer => layer.runtime === runtime)
+    .flatMap(layer => layer.sites || []);
 }

@@ -437,9 +437,10 @@ function collectPageErrors(page) {
   return errors;
 }
 
-async function openE2EPage(browser, baseUrl, search = {}) {
+async function openE2EPage(browser, baseUrl, search = {}, setupPage = null) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = collectPageErrors(page);
+  if (setupPage) await setupPage(page);
   const targetUrl = e2eUrl(baseUrl, search);
   await withFailureArtifacts(page, 'navigate', errors, async () => {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
@@ -449,6 +450,101 @@ async function openE2EPage(browser, baseUrl, search = {}) {
     });
   });
   return { page, errors };
+}
+
+async function runAssessmentScenario(browser, baseUrl) {
+  let assessmentRequest = null;
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'POST_OFFICE_BAY',
+    quality: 'performance',
+  }, async assessmentPage => {
+    await assessmentPage.route('**/api/three-narrate', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        narration: 'The remark hangs in the air. Syms looks away toward the specimen case.',
+        actionDisposition: 'observed',
+        targetType: 'self',
+        source: 'e2e-fixture',
+      }),
+    }));
+    await assessmentPage.route('**/api/end-game-assessment', route => {
+      assessmentRequest = route.request().postDataJSON();
+      return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        assessment: [
+          'My dear Darwin,—',
+          'Mr. Covington reports that, when confronted with the demands of serious fieldwork, your considered contribution was “this sucks lol.” I had thought the voyage intended to enlarge your habits of mind, not reduce them to the dimensions of a sulky schoolboy.',
+          'You have submitted no adequate field observation of your own. The reference entry already present in the book is not your labour, and I shall not pretend otherwise. This is not a scientific return; it is an accusation against the use you made of your time.',
+          'After such long and strenuous efforts on the part of the ship and her officers, I must advise you to take up some other line of work—preferably one in which incuriosity is less immediately fatal to the enterprise.',
+          'J. S. Henslow',
+        ].join('\n\n'),
+        transcriptEvaluation: {
+          adjustment: -2.5,
+          classification: 'egregious',
+          conductCap: 1,
+          summary: 'Darwin answered extraordinary scientific opportunity with childish contempt.',
+          quotedEvidence: ['this sucks lol'],
+        },
+      }),
+      });
+    });
+  });
+  try {
+    console.log('[three:e2e] Assessment: type end game, inspect judgment, review journal');
+    await launchMode(page, errors, 'Darwin');
+    const composer = page.getByPlaceholder(/Ask the narrator or describe an action/i);
+    await composer.fill('this sucks lol');
+    await composer.press('Enter');
+    await waitForHarnessState(page, state => state.assessmentTranscriptCount === 1, UI_STEP_TIMEOUT_MS, 'player narrator transcript capture');
+    await composer.fill('end game');
+    await composer.press('Enter');
+
+    await page.locator('[data-testid="final-assessment-modal"]').waitFor({
+      state: 'visible',
+      timeout: UI_STEP_TIMEOUT_MS,
+    });
+    const assessed = await waitForHarnessState(page, state => (
+      state.finalAssessment?.phase === 'ready'
+      && state.finalAssessment?.source === 'remote'
+      && state.finalAssessment?.transcriptClassification === 'egregious'
+    ), UI_STEP_TIMEOUT_MS, 'final Henslow assessment');
+    assertCondition(
+      assessed.finalAssessment.overall >= 0 && assessed.finalAssessment.overall <= 10,
+      'Final assessment score was not bounded to the ten-point ledger.',
+      assessed,
+    );
+    assertCondition(assessed.finalAssessment.overall <= 1, 'Egregious narrator conduct did not impose the mocked conduct ceiling.', assessed);
+    assertCondition(assessed.finalAssessment.conductCap === 1, 'Transcript conduct ceiling was not retained.', assessed);
+    assertCondition(
+      assessmentRequest?.narratorTranscript?.text?.includes('this sucks lol'),
+      'The end-game assessment request did not include the verbatim player narrator transcript.',
+      assessmentRequest,
+    );
+    await page.getByRole('heading', { name: /Professor Henslow’s assessment/i }).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.getByAltText(/Portrait of Professor John Stevens Henslow/i).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.screenshot({ path: path.join(outDir, 'final-assessment-modal.png'), fullPage: false });
+
+    await page.getByRole('button', { name: /Review field journal/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.getByRole('heading', { name: /^Journal$/i }).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.getByRole('button', { name: /Close Journal/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.locator('[data-testid="final-assessment-modal"]').waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+
+    await page.close();
+    return {
+      name: 'assessment',
+      overall: assessed.finalAssessment.overall,
+      verdict: assessed.finalAssessment.verdict,
+      source: assessed.finalAssessment.source,
+      finalState: assessed,
+      errors,
+    };
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
+  }
 }
 
 async function launchMode(page, errors, modeName) {
@@ -709,6 +805,7 @@ async function run() {
       darwin: runDarwinScenario,
       finch: runFinchScenario,
       cabin: runCabinScenario,
+      assessment: runAssessmentScenario,
     };
     assertCondition(
       requestedScenario === 'all' || scenarios[requestedScenario],

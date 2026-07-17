@@ -1,5 +1,5 @@
 import { getPostScrubRiseRocks } from '../postScrubRiseLayout';
-import { makeZoneScatter, seededRandom } from '../scatter';
+import { makeZoneScatter, varyScatterTransforms } from '../scatter';
 import {
   POST_SCRUB_RISE,
   scrubRiseBasaltExposure,
@@ -11,6 +11,19 @@ import {
   buildStandardDryPathGrassPatchItems,
   createStandardDryGrassPatchLayer,
 } from './standardGrass';
+import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
+import {
+  DARWINIOTHAMNUS_SPECIES,
+  DARWINIOTHAMNUS_LABEL,
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
+import { OPUNTIA_MEGASPERMA_SPECIES } from './floraSpecies';
+import {
+  buildProceduralFloraLayer,
+  buildProceduralInteractiveFloraLayer,
+} from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
@@ -96,69 +109,215 @@ function buildFlora() {
     && scrubRiseThicketStrength(x, z) > minimum
     && hash2(x, z, salt) < 0.58 + scrubRiseThicketStrength(x, z) * 0.36;
 
-  const saltbush = scatter('scrub-rise-saltbush', 96, 359, {
+  const saltbush = varyScatterTransforms(scatter('scrub-rise-saltbush', 96, 359, {
     minX: -52, maxX: 52, minZ: -47, maxZ: 48, scale: [0.78, 1.38], maxGrade: 0.92,
     accept: acceptThicket(0.24, 29),
-  }).map(item => ({ ...item, tint: item.tone > 0.5 ? '#89925d' : '#66724b' }));
-  const croton = scatter('scrub-rise-croton', 58, 383, {
+  }), 359, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.045 })
+    .map(item => ({ ...item, tint: item.tone > 0.5 ? '#89925d' : '#66724b' }));
+  const croton = varyScatterTransforms(scatter('scrub-rise-croton', 58, 383, {
     minX: -50, maxX: 50, minZ: -45, maxZ: 47, scale: [0.52, 0.92], maxGrade: 0.9,
     accept: acceptThicket(0.32, 41),
-  }).map(item => ({ ...item, tint: item.tone > 0.52 ? '#839252' : '#5f713f' }));
-  const paloSanto = scatter('scrub-rise-palo-santo', 26, 401, {
-    minX: -48, maxX: 48, minZ: -43, maxZ: 48, scale: [0.44, 0.74], maxGrade: 0.78,
+  }), 383, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.04 })
+    .map(item => ({ ...item, tint: item.tone > 0.52 ? '#839252' : '#5f713f' }));
+  // The source GLB was built from ocotillo branches and is 7.8 m tall at 1x.
+  // At shrub scale its dense, thorny silhouette is a useful dry-season proxy
+  // for Floreana's endemic bitterbush, rather than a convincing palo santo.
+  const castela = varyScatterTransforms(scatter('scrub-rise-castela', 26, 401, {
+    minX: -48, maxX: 48, minZ: -43, maxZ: 48, scale: [0.18, 0.32], maxGrade: 0.78,
     accept: (biome, x, z) => offPath(biome, x, z)
       && scrubRiseThicketStrength(x, z) > 0.36
       && scrubRiseBasaltExposure(x, z) < 0.78,
-  }).map(item => ({ ...item, tint: item.tone > 0.5 ? '#777b54' : '#5a6044' }));
-  const cactus = scatter('scrub-rise-candelabra', 6, 431, {
+  }), 401, { width: [0.9, 1.1], height: [0.88, 1.14], maxLean: 0.035 })
+    .map(item => ({ ...item, tint: item.tone > 0.5 ? '#777b54' : '#5a6044' }));
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(POST_SCRUB_RISE, 'scrub-rise-darwiniothamnus', 63, 419, {
+    minX: -49, maxX: 49, minZ: -44, maxZ: 46, scale: [0.8, 2.45], maxGrade: 0.84,
+    patchCount: 7, patchRadius: [3.2, 6.6],
+    accept: (biome, x, z) => {
+      const thicket = scrubRiseThicketStrength(x, z);
+      return offPath(biome, x, z)
+        && thicket > 0.16
+        && thicket < 0.72
+        && scrubRiseWashMask(x, z) < 0.58
+        && scrubRiseBasaltExposure(x, z) < 0.82;
+    },
+  }, { width: [0.88, 1.15], height: [0.88, 1.12], maxLean: 0.045 })
+    .map(item => ({ ...item, tint: item.tone > 0.5 ? '#89955d' : '#687849' }));
+  const cactus = varyScatterTransforms(scatter('scrub-rise-candelabra', 6, 431, {
     minX: -46, maxX: 48, minZ: -34, maxZ: 46, scale: [2.5, 3.65], maxGrade: 0.52,
     accept: (biome, x, z) => offPath(biome, x, z)
       && scrubRiseBasaltExposure(x, z) > 0.48
       && scrubRiseThicketStrength(x, z) < 0.7,
-  }).map(item => ({ ...item, tint: '#6f8950' }));
+  }), 431, { width: [0.92, 1.08], height: [0.9, 1.1], maxLean: 0.015 })
+    .map(item => ({ ...item, tint: '#6f8950' }));
 
   return [
     { id: 'scrub-rise-saltbush-1', path: `${NATURE}runtime-saltbush-1.glb`, sink: 0.05, tintStrength: 0.24, castShadow: false, motion: { wind: 1.08, bend: 0.25, bendRadius: 1.3 }, items: saltbush.filter((_, index) => index % 2 === 0) },
     { id: 'scrub-rise-saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, tintStrength: 0.24, castShadow: false, motion: { wind: 1.08, bend: 0.25, bendRadius: 1.3 }, items: saltbush.filter((_, index) => index % 2 === 1) },
     { id: 'scrub-rise-croton', path: `${NATURE}runtime-croton.glb`, sink: 0.06, tintStrength: 0.22, castShadow: false, motion: { wind: 1.1, bend: 0.26, bendRadius: 1.3 }, items: croton },
-    { id: 'scrub-rise-palo-santo', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.06, tintStrength: 0.22, castShadow: true, motion: { wind: 0.54, bend: 0.1, bendRadius: 1.5 }, items: paloSanto },
+    { id: 'scrub-rise-darwiniothamnus', label: DARWINIOTHAMNUS_LABEL, path: DARWINIOTHAMNUS_PATH, variantMode: DARWINIOTHAMNUS_VARIANT_MODE, sink: 0.05, tintStrength: 0.16, castShadow: false, motion: { wind: 0.92, bend: 0.24, bendRadius: 1.6 }, items: darwiniothamnus },
+    { id: 'scrub-rise-castela', label: 'Galapagos bitterbush / Castela galapageia', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.06, tintStrength: 0.22, castShadow: true, motion: { wind: 0.54, bend: 0.1, bendRadius: 1.5 }, items: castela },
     { id: 'scrub-rise-candelabra-cactus', path: `${NATURE}runtime-candelabra-cactus.glb`, sink: 0.04, tintStrength: 0.1, castShadow: true, motion: { wind: 0.24, bend: 0.04, bendRadius: 1.45 }, items: cactus },
   ];
 }
 
-function buildSurfaceLitter() {
-  const scatter = (layer, count, seed, options) => makeZoneScatter(POST_SCRUB_RISE, layer, count, seed, options);
-  const chips = scatter('scrub-rise-basalt-chip', 180, 467, {
-    minX: -50, maxX: 50, minZ: -46, maxZ: 47, scale: [0.16, 0.5], maxGrade: 1.1,
-    accept: (biome, x, z) => scrubRiseWashMask(x, z) > 0.22
-      || scrubRiseBasaltExposure(x, z) > 0.56
-      || scrubRisePathInfo(x, z).shoulder > 0.28,
-  }).map((item, index) => {
-    const i = index + 46700;
+function distanceToNearestItem(items, x, z) {
+  let nearest = Infinity;
+  for (const item of items) {
+    nearest = Math.min(nearest, Math.hypot(x - item.x, z - item.z));
+  }
+  return nearest;
+}
+
+function buildProceduralFlora(authoredFlora) {
+  const authoredDarwiniothamnus = authoredFlora
+    .find(layer => layer.id === 'scrub-rise-darwiniothamnus')?.items || [];
+  const habitatAt = ({ biome, x, z }) => {
+    const path = scrubRisePathInfo(x, z);
+    const thicket = scrubRiseThicketStrength(x, z);
+    const wash = scrubRiseWashMask(x, z);
+    const basalt = scrubRiseBasaltExposure(x, z);
+    const inland = clamp01((z + 48) / 96);
+    const thicketEdge = clamp01(1 - Math.abs(thicket - 0.42) / 0.4);
+    const biomeSuitability = {
+      'thorn-scrub': 1,
+      'inland-grass-rise': 0.94,
+      'open-dry-grass': 0.72,
+      'basalt-scrub': 0.32,
+      'dry-wash': 0.18,
+    }[biome] || 0;
+
     return {
-      ...item,
-      id: `scrub-rise-chip-${index}`,
-      variant: 'basalt-pebble',
-      color: seededRandom(i, 5) > 0.62 ? '#514b40' : seededRandom(i, 7) > 0.38 ? '#373732' : '#262824',
-      wetness: 0,
-      scale: item.scale * (0.64 + seededRandom(i, 11) * 0.5),
-      stretchX: 0.66 + seededRandom(i, 13) * 0.82,
-      stretchZ: 0.62 + seededRandom(i, 17) * 0.76,
-      heightScale: 0.56 + seededRandom(i, 19) * 0.48,
-      lift: 0.008,
-      pitch: (seededRandom(i, 23) - 0.5) * 0.24,
-      roll: (seededRandom(i, 29) - 0.5) * 0.24,
+      moisture: clamp01(0.27 + thicket * 0.3 + wash * 0.1),
+      canopy: clamp01(0.05 + thicket * 0.65),
+      exposure: clamp01(0.84 - thicket * 0.42 + basalt * 0.08),
+      disturbance: clamp01(path.path * 0.86 + path.shoulder * 0.34),
+      salinity: (1 - inland) * 0.12,
+      biomeSuitability,
+      localSuitability: clamp01(0.34 + thicketEdge * 0.5 + inland * 0.16),
+      excluded: biomeSuitability <= 0
+        || path.distance < path.width * 1.72
+        || wash > 0.58
+        || basalt > 0.82
+        || distanceToNearestItem(authoredDarwiniothamnus, x, z) < 3.2,
     };
-  });
-  return [{ id: 'scrub-rise-basalt-litter', maxVisibleDistance: 48, items: chips }];
+  };
+
+  return [buildProceduralFloraLayer({
+    id: 'post-scrub-rise-darwiniothamnus-overlay',
+    zoneId: POST_SCRUB_RISE,
+    species: DARWINIOTHAMNUS_SPECIES,
+    asset: {
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
+      variantCount: 9,
+    },
+    seed: 907,
+    count: 36,
+    bounds: { minX: -49, maxX: 49, minZ: -44, maxZ: 46 },
+    habitatAt,
+    placement: {
+      patchCount: 4,
+      patchRadius: [3.2, 6.2],
+      minPatchSeparation: 8,
+      maxGrade: 0.72,
+    },
+    render: {
+      sink: 0.05,
+      tintStrength: 0.16,
+      castShadow: false,
+      motion: { wind: 0.92, bend: 0.24, bendRadius: 1.6 },
+    },
+  })];
+}
+
+function buildInteractiveFlora(authoredFlora) {
+  const candelabra = authoredFlora
+    .find(layer => layer.id === 'scrub-rise-candelabra-cactus')?.items || [];
+  const habitatAt = ({ biome, x, z }) => {
+    const path = scrubRisePathInfo(x, z);
+    const thicket = scrubRiseThicketStrength(x, z);
+    const wash = scrubRiseWashMask(x, z);
+    const basalt = scrubRiseBasaltExposure(x, z);
+    const inland = clamp01((z + 48) / 96);
+    const biomeSuitability = {
+      'basalt-scrub': 1,
+      'open-dry-grass': 0.9,
+      'thorn-scrub': 0.74,
+      'inland-grass-rise': 0.58,
+      'dry-wash': 0.16,
+    }[biome] || 0;
+
+    return {
+      moisture: clamp01(0.14 + thicket * 0.18 + wash * 0.12),
+      canopy: clamp01(0.04 + thicket * 0.42),
+      exposure: clamp01(0.91 - thicket * 0.32),
+      disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.34),
+      salinity: (1 - inland) * 0.16,
+      rockiness: basalt,
+      biomeSuitability,
+      localSuitability: clamp01(0.42 + basalt * 0.38 + (1 - thicket) * 0.2),
+      excluded: biomeSuitability <= 0
+        || path.distance < path.width * 1.85
+        || wash > 0.48
+        || thicket > 0.72
+        || basalt > 0.9
+        || distanceToNearestItem(candelabra, x, z) < 5
+        // Preserve the authored collectible cactus clearing west of the wash.
+        || Math.hypot(x + 31, z + 9) < 5,
+    };
+  };
+
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'post-scrub-rise-prickly-pear-overlay',
+    zoneId: POST_SCRUB_RISE,
+    species: OPUNTIA_MEGASPERMA_SPECIES,
+    runtime: 'prickly-pear',
+    seed: 941,
+    count: 6,
+    bounds: { minX: -46, maxX: 46, minZ: -40, maxZ: 43 },
+    habitatAt,
+    placement: {
+      patchCount: 2,
+      patchRadius: [7.5, 10.5],
+      minPatchSeparation: 18,
+      minItemSeparation: 4.5,
+      maxGrade: 0.62,
+    },
+    siteFromItem: item => ({
+      flowerCount: item.tone < 0.32 ? 0 : item.tone < 0.7 ? 1 : item.tone < 0.92 ? 2 : 3,
+    }),
+  })];
+}
+
+function buildSurfaceLitter() {
+  return [buildDryVolcanicLitterLayer({
+    zoneId: POST_SCRUB_RISE,
+    id: 'scrub-rise-basalt-litter',
+    itemIdPrefix: 'scrub-rise-chip',
+    count: 520,
+    seed: 467,
+    bounds: { minX: -50, maxX: 50, minZ: -46, maxZ: 47 },
+    scale: [0.55, 1.55],
+    accept: (biome, x, z) => {
+      const path = scrubRisePathInfo(x, z);
+      return path.tread < 0.18 && (
+        scrubRiseWashMask(x, z) > 0.22
+        || scrubRiseBasaltExposure(x, z) > 0.56
+        || path.shoulder > 0.28
+      );
+    },
+  })];
 }
 
 export function buildPostScrubRiseEcology() {
+  const flora = buildFlora();
   return {
     zoneId: POST_SCRUB_RISE,
     stream: false,
     dryGrassPatches: [buildGrass()],
-    flora: buildFlora(),
+    flora,
+    proceduralFlora: buildProceduralFlora(flora),
+    interactiveFlora: buildInteractiveFlora(flora),
     rocks: getPostScrubRiseRocks(),
     surfaceLitter: buildSurfaceLitter(),
     props: [],

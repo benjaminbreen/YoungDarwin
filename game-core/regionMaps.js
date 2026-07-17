@@ -56,10 +56,13 @@ const AUTHORED_REGION_TERRAIN = {
   BEAGLE: { preset: 'hms-beagle-deck', segments: 300 },
   BEAGLE_CABIN: { preset: 'hms-beagle-aft-cabins', segments: 96 },
   LAWSON_HOUSE: { preset: 'lawson-house-interior', segments: 72 },
-  POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 360 },
+  // The cove's broad analytic forms and shoreline remain stable at 288; the
+  // former 360 grid spent ~36% more terrain triangles on sub-texel detail.
+  POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 288 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   POST_SCRUB_RISE: { preset: 'post-office-scrub-rise', segments: 280 },
+  LAVA_FLATS: { preset: 'authored-lava-flats', segments: 248 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 192 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },

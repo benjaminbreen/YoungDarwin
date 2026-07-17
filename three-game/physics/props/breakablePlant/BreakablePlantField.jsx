@@ -11,7 +11,8 @@
 // A plant module supplies a spec:
 //   id             — slug used for userData/render labels.
 //   sitesByZone    — { [zoneId]: [site, ...] } authored placements.
-//   buildZonePieces(zoneId) — world-space piece descriptors. Each piece:
+//   getSites       — optional merged authored/procedural site resolver.
+//   buildZonePieces(zoneId, sites) — world-space piece descriptors. Each piece:
 //     key/parentKey/type/siteId, spawn/rotation/center/topY/width/height,
 //     mass/hits/tone, colliderArgs/colliderOffset, plus behavior flags:
 //     ccd, dustCount, releaseWithParent (drop instantly with parent, e.g.
@@ -348,11 +349,17 @@ export function BreakablePlantField({ spec }) {
     [spec.tuning],
   );
 
-  const pieces = useMemo(() => spec.buildZonePieces(currentZoneId), [currentZoneId, spec]);
+  const sites = useMemo(
+    () => spec.getSites?.(currentZoneId) || spec.sitesByZone?.[currentZoneId] || [],
+    [currentZoneId, spec],
+  );
+  const pieces = useMemo(
+    () => spec.buildZonePieces(currentZoneId, sites),
+    [currentZoneId, sites, spec],
+  );
 
   const sitePivots = useMemo(() => {
     const pivots = new Map();
-    const sites = spec.sitesByZone[currentZoneId] || [];
     for (const site of sites) {
       const sitePieces = pieces.filter(piece => piece.siteId === site.id);
       const lowestSpawnY = sitePieces.length
@@ -361,7 +368,7 @@ export function BreakablePlantField({ spec }) {
       pivots.set(site.id, new THREE.Vector3(site.x || 0, lowestSpawnY, site.z || 0));
     }
     return pivots;
-  }, [currentZoneId, pieces, spec.sitesByZone]);
+  }, [pieces, sites]);
 
   const dependents = useMemo(() => {
     const map = new Map();
@@ -770,7 +777,7 @@ export function BreakablePlantField({ spec }) {
       renderKind: `physics-${spec.id}`,
       renderPath: null,
     }}>
-      {(spec.sitesByZone[currentZoneId] || []).map(site => (
+      {sites.map(site => (
         <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
       ))}
       {pieces

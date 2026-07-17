@@ -209,13 +209,17 @@ export const vistaLibrary = {
   'lava-flats': {
     label: 'Lava Flats',
     seed: 5,
-    apronDepth: 88,
-    apronWidthScale: 1.85,
+    apronDepth: 96,
+    apronWidthScale: 1.92,
     bands: [
-      { from: 0, to: 30, nearY: -0.48, farY: 0.55, colors: ['#1a1916', '#25231f'] },
-      { from: 30, to: 72, nearY: 0.55, farY: 2.2, colors: ['#2d2a24', '#4a4435'] },
+      { from: 0, to: 24, nearY: 1.6, farY: 2.35, colors: ['#20211e', '#302f2a'] },
+      { from: 24, to: 58, nearY: 2.35, farY: 3.65, colors: ['#34322c', '#514a3d'] },
+      { from: 58, to: 92, nearY: 3.65, farY: 5.2, colors: ['#4b463b', '#68604d'] },
     ],
-    markers: [{ kind: 'rock', count: 18, at: [14, 62], color: '#151512', scale: [0.24, 0.62], seed: 5 }],
+    markers: [
+      { kind: 'rock', count: 12, at: [12, 43], color: '#24231f', scale: [0.22, 0.56], seed: 5 },
+      { kind: 'rock', count: 7, at: [38, 76], color: '#39362f', scale: [0.28, 0.72], seed: 37 },
+    ],
   },
   'north-shore': {
     label: 'North Shore',

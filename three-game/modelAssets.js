@@ -13,6 +13,7 @@
  *   rotation?: number[],
  *   yOffset?: number,
  *   cacheKey?: string,
+ *   animationBanks?: Array<{id: string, path: string, cacheKey?: string, phase?: number}>,
  *   normalizeMaterials?: boolean,
  *   targetTriangles?: number,
  *   prompt?: string,
@@ -123,7 +124,30 @@ export const modelAssets = {
     enabled: true,
     preload: true,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-inspect-idle-20260708b',
+    cacheKey: 'darwin5-runtime-split-20260715a',
+    // The boot GLB contains the skinned model plus dependable idle/locomotion
+    // fallbacks. Deferred clips stream and parse in paced aerial-sequence
+    // phases, then join the same mixer before the camera reaches the player.
+    animationBanks: [
+      {
+        id: 'motion',
+        path: '/assets/models/darwin5-motion-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 1,
+      },
+      {
+        id: 'action',
+        path: '/assets/models/darwin5-action-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 2,
+      },
+      {
+        id: 'character',
+        path: '/assets/models/darwin5-character-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 3,
+      },
+    ],
     // Darwin 5 is the current default player model: native Mixamo clips plus
     // carry/rifle/climb sets.
     // The runtime idle is the skinless 41-bone Mixamo clip from
@@ -557,6 +581,21 @@ export const modelAssets = {
     materialEmissiveIntensity: 0.06,
     targetTriangles: 5000,
     prompt: 'Stylized low-poly Galapagos cotton shrub, Gossypium darwinii, dry coastal scrub plant, broad green leaves, pale flowers or cotton bolls, hand-painted texture, cel-shaded game asset, optimized GLB.',
+  },
+  darwiniothamnusShrub: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-darwiniothamnus.glb',
+    cacheKey: 'darwiniothamnus-tenuifolius-nine-variants-20260716',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#17200f',
+    materialEmissiveIntensity: 0.045,
+    targetTriangles: 18000,
+    prompt: "Nine centered upright shrub forms adapted at runtime as Floreana's Darwiniothamnus tenuifolius; ecology layers choose one mesh variant per instanced scatter item.",
   },
   scalesiaPedunculataTree: {
     enabled: true,

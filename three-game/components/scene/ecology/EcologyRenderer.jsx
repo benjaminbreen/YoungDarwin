@@ -48,6 +48,7 @@ function FoliageMotionDriver() {
 const GLB_PATH_RE = /\.(?:glb|gltf)(?:[?#].*)?$/i;
 const EMPTY_LAYER_PLAN = {
   flora: [],
+  proceduralFlora: [],
   groundCover: [],
   denseGrass: [],
   hybridGrassTufts: [],
@@ -178,6 +179,7 @@ export function prefetchEcologyAssets(ecology) {
     if (shouldPrefetchAsset(item, ecology)) preloadGLBPath(item.path);
   };
   ecology.flora?.forEach(preloadLayerPath);
+  ecology.proceduralFlora?.forEach(preloadLayerPath);
   ecology.dryGrassPatches?.forEach(preloadLayerPath);
   ecology.props?.forEach(preloadLayerPath);
   ecology.collectibleBeachFinds?.forEach(layer => {
@@ -213,6 +215,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     const tierVisible = item => !ecology.stream || (item.loadTier ?? 1) <= streamTier;
     return {
       flora: (ecology.flora || []).filter(tierVisible),
+      proceduralFlora: (ecology.proceduralFlora || []).filter(tierVisible),
       groundCover: (ecology.groundCover || []).filter(tierVisible),
       denseGrass: (ecology.denseGrass || []).filter(tierVisible),
       hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(tierVisible),
@@ -239,6 +242,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
   if (!ecology) return null;
   const {
     flora,
+    proceduralFlora,
     groundCover,
     denseGrass,
     hybridGrassTufts,
@@ -324,7 +328,7 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       {crops.map(layer => (
         <CropFieldLayer key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
       ))}
-      {flora.map(layer => (
+      {[...flora, ...proceduralFlora].map(layer => (
         <Suspense key={layer.id} fallback={null}>
           <InstancedGLBLayer
             path={layer.path}
@@ -338,9 +342,10 @@ export function EcologyRenderer({ ecology, settings = {} }) {
             receiveShadow={layer.receiveShadow !== false}
             maxVisibleDistance={drawDistanceFor(layer)}
             sourceId={`ecology:${ecology.zoneId}:${layer.id}`}
-            sourceLabel={layer.id}
-            sourceKind="ecology-flora"
+            sourceLabel={layer.label || layer.id}
+            sourceKind={layer.procedural ? 'ecology-procedural-flora' : 'ecology-flora'}
             inspectableType={inspectableTypeForEcologyLayer(layer.id)}
+            variantMode={layer.variantMode || null}
           />
         </Suspense>
       ))}

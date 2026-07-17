@@ -1,7 +1,7 @@
 import {
-  DRY_FLOREANA_TEXTURE_SETS,
-  createDryFloreanaTerrainMaterial,
-} from '../materials/dryFloreanaTerrain';
+  createLayeredDryPbrTerrainMaterial,
+} from '../materials/layeredDryPbrTerrain';
+import { FLOREANA_PBR_TEXTURES } from '../materials/pbrTerrainTextures';
 import {
   ROCKY_CLEARING_CAVE,
   ROCKY_CLEARING_PATH_POINTS,
@@ -11,12 +11,35 @@ function n(value) {
   return Number(value).toFixed(3);
 }
 
+const ROCKY_CLEARING_PBR_LAYERS = {
+  coastal: {
+    texture: FLOREANA_PBR_TEXTURES.coastalScrub,
+    roughnessMin: 0.88,
+    roughnessMax: 0.98,
+  },
+  litter: {
+    texture: FLOREANA_PBR_TEXTURES.dryGrassLitter,
+    roughnessMin: 0.9,
+    roughnessMax: 1,
+  },
+  basalt: {
+    texture: FLOREANA_PBR_TEXTURES.darkBasaltGravel,
+    roughnessMin: 0.76,
+    roughnessMax: 0.94,
+  },
+  cinder: {
+    texture: FLOREANA_PBR_TEXTURES.redCinderDirt,
+    roughnessMin: 0.84,
+    roughnessMax: 0.96,
+  },
+};
+
 function rockyClearingOverlayGLSL() {
   const cave = ROCKY_CLEARING_CAVE;
   return /* glsl */`
-        vec2 rcP = vDryTerrainWorld.xz;
-        float rcFine = dtFbm(rcP * 1.55 + vec2(3.0, -8.0));
-        float rcBroad = dtFbm(rcP * 0.16 + vec2(-11.0, 5.0));
+        vec2 rcP = vPostScrubWorld.xz;
+        float rcFine = psrFbm(rcP * 1.55 + vec2(3.0, -8.0));
+        float rcBroad = psrFbm(rcP * 0.16 + vec2(-11.0, 5.0));
         float rcClearing = exp(-(pow(rcP.x / 20.0, 2.0) + pow((rcP.y + 1.9) / 13.5, 2.0)) * 1.55);
         float rcThreshold = max(
           exp(-(pow((rcP.x - ${n(cave.x)}) / 7.6, 2.0) + pow((rcP.y - ${n(cave.z + 3)}) / 5.2, 2.0)) * 1.8),
@@ -49,24 +72,11 @@ function rockyClearingOverlayGLSL() {
 }
 
 export function createRockyClearingTerrainMaterial() {
-  const material = createDryFloreanaTerrainMaterial({
+  return createLayeredDryPbrTerrainMaterial({
     pathPoints: ROCKY_CLEARING_PATH_POINTS,
-    textureSet: DRY_FLOREANA_TEXTURE_SETS.redDirtHighland,
-    cacheKey: 'rocky-clearing-embedded-cave-v3',
-    highFadeStart: 5.4,
-    highFadeEnd: 8.2,
+    pathMinimumWidth: 2.5,
+    layerConfig: ROCKY_CLEARING_PBR_LAYERS,
+    colorOverlayGLSL: rockyClearingOverlayGLSL(),
+    cacheKey: 'rocky-clearing-layered-dry-pbr-cave-v1',
   });
-  const previousCompile = material.onBeforeCompile;
-  const previousKey = material.customProgramCacheKey;
-  material.onBeforeCompile = shader => {
-    if (previousCompile) previousCompile(shader);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `${rockyClearingOverlayGLSL()}
-      #include <roughnessmap_fragment>`,
-    );
-  };
-  material.customProgramCacheKey = () => `${previousKey ? previousKey.call(material) : 'dry-floreana'}|rocky-clearing-overlay-v2`;
-  material.needsUpdate = true;
-  return material;
 }

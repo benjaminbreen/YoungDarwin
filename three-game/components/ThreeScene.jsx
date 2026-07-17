@@ -21,12 +21,13 @@ import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
 
 export function ThreeScene({
   perfSettings,
-  contentPhase = 3,
+  contentPhase = 6,
   openingCamera = null,
   inputLocked = false,
+  onPlayerAnimationBanksReady = null,
 }) {
   const settings = perfSettings || {};
-  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 3;
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
   const environmentReady = stagedPhase >= 1;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
@@ -79,6 +80,8 @@ export function ThreeScene({
           physicsDebug={settings.physicsDebug === true}
           openingCamera={openingCamera}
           inputLocked={inputLocked}
+          animationBankPhase={stagedPhase}
+          onAnimationBanksReady={onPlayerAnimationBanksReady}
         />
       </PhysicsProvider>
       {outdoors && <GroundedWorldFX

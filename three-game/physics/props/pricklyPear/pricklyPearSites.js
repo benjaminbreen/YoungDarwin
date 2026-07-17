@@ -3,6 +3,8 @@
 // stay off walking routes. size scales the whole plant (~0.7 small – 1.3
 // large); flowerCount is the number of yellow blossoms (0–3).
 
+import { getInteractiveFloraSites } from '../../../world/ecology';
+
 export const PRICKLY_PEAR_SITES = {
   POST_OFFICE_BAY: [
     { id: 'pob-1', x: 13.8, z: 12.4, yaw: 0.4, seed: 'pob-1', size: 1.15, flowerCount: 2 },
@@ -18,3 +20,10 @@ export const PRICKLY_PEAR_SITES = {
     { id: 'rc-5', x: 30, z: 24, yaw: 1.0, seed: 'rc-5', size: 1.25, flowerCount: 1 },
   ],
 };
+
+export function getPricklyPearSites(zoneId) {
+  return [
+    ...(PRICKLY_PEAR_SITES[zoneId] || []),
+    ...getInteractiveFloraSites(zoneId, 'prickly-pear'),
+  ];
+}

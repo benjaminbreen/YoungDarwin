@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Young Darwin — Desktop HUD Redesign</title>
+  <meta name="description" content="Interactive desktop HUD mockup for Young Darwin.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #0c1426;
+      --ink-deep: #070d18;
+      --panel: rgba(15, 25, 45, 0.86);
+      --panel-solid: rgba(12, 20, 38, 0.96);
+      --brass: #8a6d3f;
+      --gold: #c9a35f;
+      --gold-bright: #e3c585;
+      --parchment: #e8dcc0;
+      --faded: #a89878;
+      --health: #8fc491;
+      --fatigue: #e0aa4e;
+      --curiosity: #84c4d4;
+      --danger: #d77f78;
+      --shadow: 0 18px 44px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(227, 197, 133, 0.15);
+      --hairline: rgba(201, 163, 95, 0.25);
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-width: 1080px;
+      height: 100%;
+      min-height: 650px;
+      margin: 0;
+      overflow: hidden;
+      color: var(--parchment);
+      background: #111820;
+      font-family: "EB Garamond", Garamond, Georgia, "Times New Roman", serif;
+      font-synthesis: none;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .scene {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      isolation: isolate;
+      background:
+        linear-gradient(180deg, rgba(13, 22, 34, 0.01) 35%, rgba(5, 9, 15, 0.18) 100%),
+        url("../assets/ui/splash-background-1672.webp") center 48% / cover no-repeat;
+    }
+
+    .scene::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      background:
+        radial-gradient(circle at 50% 49%, transparent 0 28%, rgba(4, 9, 16, 0.07) 72%, rgba(4, 8, 14, 0.28) 100%),
+        linear-gradient(90deg, rgba(5, 10, 18, 0.17), transparent 22%, transparent 78%, rgba(5, 10, 18, 0.19));
+      pointer-events: none;
+    }
+
+    .grain {
+      position: absolute;
+      inset: 0;
+      opacity: 0.075;
+      mix-blend-mode: soft-light;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.48'/%3E%3C/svg%3E");
+    }
+
+    .hud {
+      position: absolute;
+      inset: 0;
+      padding: clamp(18px, 1.55vw, 28px);
+      pointer-events: none;
+    }
+
+    .instrument {
+      position: absolute;
+      pointer-events: auto;
+      border: 1px solid rgba(201, 163, 95, 0.72);
+      border-radius: 7px;
+      color: var(--parchment);
+      background:
+        linear-gradient(150deg, rgba(28, 42, 67, 0.89), rgba(15, 26, 48, 0.91) 56%, rgba(7, 14, 27, 0.95));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px) saturate(0.92);
+      -webkit-backdrop-filter: blur(12px) saturate(0.92);
+    }
+
+    .instrument::before {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      z-index: 0;
+      pointer-events: none;
+      border: 1px solid var(--hairline);
+      border-radius: 4px;
+    }
+
+    .instrument > * { position: relative; z-index: 1; }
+
+    .ornament {
+      position: absolute;
+      z-index: 2;
+      width: 17px;
+      height: 17px;
+      color: var(--gold-bright);
+      opacity: 0.86;
+      pointer-events: none;
+    }
+
+    .ornament.tl { top: 1px; left: 1px; }
+    .ornament.tr { top: 1px; right: 1px; transform: rotate(90deg); }
+    .ornament.br { right: 1px; bottom: 1px; transform: rotate(180deg); }
+    .ornament.bl { bottom: 1px; left: 1px; transform: rotate(270deg); }
+
+    .label {
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    }
+
+    .icon {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      color: var(--gold);
+    }
+
+    .icon svg { width: 100%; height: 100%; }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid rgba(201, 163, 95, 0.42);
+      border-radius: 4px;
+      color: var(--faded);
+      background: rgba(0, 0, 0, 0.16);
+      cursor: pointer;
+      transition: border-color 150ms ease, color 150ms ease, background 150ms ease, transform 150ms ease;
+    }
+
+    .icon-button:hover,
+    .icon-button:focus-visible {
+      outline: none;
+      border-color: var(--gold-bright);
+      color: var(--gold-bright);
+      background: rgba(201, 163, 95, 0.12);
+    }
+
+    .icon-button:active { transform: translateY(1px); }
+
+    .vitals {
+      top: clamp(18px, 1.55vw, 28px);
+      left: clamp(18px, 1.55vw, 28px);
+      width: 282px;
+      padding: 15px 17px 14px;
+      transition: width 280ms var(--ease);
+    }
+
+    .vitals-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 11px;
+    }
+
+    .vitals-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .vitals-title .portrait {
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      overflow: hidden;
+      border: 1px solid rgba(201, 163, 95, 0.68);
+      border-radius: 50%;
+      background: rgba(201, 163, 95, 0.09);
+    }
+
+    .vitals-title .portrait svg { width: 16px; height: 16px; color: var(--gold); }
+
+    .vitals-name {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0.035em;
+    }
+
+    .condition {
+      color: #9ed6a3;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .stat-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .stat {
+      display: grid;
+      grid-template-columns: 17px 72px minmax(70px, 1fr) 24px;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .stat .icon { width: 15px; height: 15px; }
+    .stat-name { color: rgba(232, 220, 192, 0.82); font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+    .stat-value { color: var(--parchment); font-size: 12px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .meter {
+      height: 5px;
+      overflow: hidden;
+      border: 1px solid rgba(201, 163, 95, 0.24);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.44);
+    }
+
+    .meter-fill {
+      height: 100%;
+      border-radius: inherit;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 0 8px currentColor;
+    }
+
+    .objective {
+      top: clamp(18px, 1.55vw, 28px);
+      left: 50%;
+      width: min(500px, calc(100vw - 760px));
+      min-width: 390px;
+      transform: translateX(-50%);
+      overflow: hidden;
+    }
+
+    .objective-button {
+      display: grid;
+      grid-template-columns: 38px 1fr 22px;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-height: 61px;
+      padding: 9px 13px;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .compass-medallion {
+      display: grid;
+      place-items: center;
+      width: 37px;
+      height: 37px;
+      border: 1px solid rgba(201, 163, 95, 0.68);
+      border-radius: 50%;
+      color: var(--gold);
+      background: rgba(201, 163, 95, 0.09);
+      box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.35);
+    }
+
+    .compass-medallion svg { width: 23px; height: 23px; }
+
+    .objective-copy { min-width: 0; }
+    .objective-meta { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .objective-meta .place { color: var(--faded); font-size: 10px; letter-spacing: 0.09em; white-space: nowrap; }
+    .objective-meta .dot { width: 3px; height: 3px; transform: rotate(45deg); background: var(--brass); }
+    .objective-text { overflow: hidden; color: var(--parchment); font-size: 16px; font-weight: 600; line-height: 1.12; letter-spacing: 0.025em; text-overflow: ellipsis; white-space: nowrap; }
+    .objective-chevron { color: var(--gold); transition: transform 250ms var(--ease); }
+    .objective-chevron svg { display: block; width: 16px; height: 16px; }
+
+    .objective-detail {
+      display: grid;
+      grid-template-rows: 0fr;
+      border-top: 1px solid transparent;
+      opacity: 0;
+      transition: grid-template-rows 280ms var(--ease), border-color 200ms ease, opacity 200ms ease;
+    }
+
+    .objective-detail > div { overflow: hidden; }
+    .objective-detail-inner { display: grid; grid-template-columns: 1fr auto; gap: 20px; padding: 0 16px; transition: padding 280ms var(--ease); }
+    .objective-detail p { margin: 0; color: var(--faded); font-size: 12px; font-style: italic; line-height: 1.4; }
+    .objective-detail .weather { display: flex; align-items: center; gap: 7px; color: var(--faded); font-size: 11px; white-space: nowrap; }
+    .objective.open .objective-detail { grid-template-rows: 1fr; border-top-color: rgba(138, 109, 63, 0.45); opacity: 1; }
+    .objective.open .objective-detail-inner { padding-top: 11px; padding-bottom: 13px; }
+    .objective.open .objective-chevron { transform: rotate(180deg); }
+
+    .right-rail {
+      position: absolute;
+      top: clamp(18px, 1.55vw, 28px);
+      right: clamp(18px, 1.55vw, 28px);
+      display: grid;
+      width: 278px;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .right-rail > * { position: relative; pointer-events: auto; }
+
+    .map-card { position: relative; overflow: hidden; transition: height 300ms var(--ease); }
+    .map-card .map-head { display: flex; align-items: center; justify-content: space-between; height: 50px; padding: 10px 12px 9px 14px; }
+    .map-heading { min-width: 0; }
+    .map-heading strong { display: block; margin-top: 4px; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1; letter-spacing: 0.025em; text-overflow: ellipsis; white-space: nowrap; }
+    .map-actions { display: flex; gap: 5px; }
+
+    .map-body {
+      display: grid;
+      grid-template-rows: 28px 155px;
+      margin: 0 9px 9px;
+      overflow: hidden;
+      border: 1px solid rgba(138, 109, 63, 0.55);
+      border-radius: 3px;
+      opacity: 1;
+      transition: grid-template-rows 300ms var(--ease), margin 300ms var(--ease), opacity 180ms ease;
+    }
+
+    .map-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid rgba(138, 109, 63, 0.46); background: rgba(4, 9, 17, 0.28); }
+    .map-tab { border: 0; border-right: 1px solid rgba(138, 109, 63, 0.4); color: var(--faded); background: transparent; font-size: 9px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer; }
+    .map-tab:last-child { border-right: 0; }
+    .map-tab.active { color: var(--gold-bright); background: rgba(201, 163, 95, 0.11); box-shadow: inset 0 -1px var(--gold); }
+
+    .chart { position: relative; overflow: hidden; background: #21343b; }
+    .chart-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: saturate(0.78) sepia(0.12) contrast(0.96) brightness(0.76); transform: scale(1.02); }
+    .chart-vignette { position: absolute; inset: 0; background: radial-gradient(circle at 48% 45%, transparent 36%, rgba(5, 9, 13, 0.5) 110%), linear-gradient(180deg, rgba(11, 29, 39, 0.08), rgba(7, 13, 19, 0.18)); }
+    .chart.local .chart-image { content: url("../banners/postofficebay.jpg"); filter: saturate(0.58) sepia(0.2) contrast(0.94) brightness(0.58); object-position: 52% 66%; }
+    .chart.island .chart-image { content: url("../maps/floreana-island-map-new.webp"); filter: saturate(0.5) sepia(0.3) contrast(0.94) brightness(0.72); object-position: center; }
+
+    .route-line { position: absolute; z-index: 2; left: 48%; top: 30%; width: 68px; height: 62px; border-right: 1px dashed rgba(227, 197, 133, 0.64); border-bottom: 1px dashed rgba(227, 197, 133, 0.64); transform: rotate(22deg); transform-origin: top left; opacity: 0.66; }
+    .map-marker { position: absolute; z-index: 3; display: grid; place-items: center; width: 19px; height: 19px; border: 1px solid var(--gold-bright); border-radius: 50%; color: var(--gold-bright); background: rgba(12, 20, 38, 0.86); box-shadow: 0 0 0 4px rgba(227, 197, 133, 0.1), 0 0 12px rgba(227, 197, 133, 0.44); }
+    .map-marker::after { content: ""; width: 5px; height: 5px; transform: rotate(45deg); background: currentColor; }
+    .map-marker.player { left: 55%; top: 57%; }
+    .map-marker.new { left: 71%; top: 37%; width: 9px; height: 9px; border: 0; background: #dc9aa0; box-shadow: 0 0 0 3px rgba(220, 154, 160, 0.14); }
+    .map-marker.new::after { display: none; }
+    .map-north { position: absolute; z-index: 3; top: 8px; right: 8px; color: rgba(232, 220, 192, 0.78); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-shadow: 0 1px 2px #000; }
+    .map-legend { position: absolute; z-index: 3; bottom: 7px; left: 7px; display: flex; gap: 9px; padding: 3px 5px; border: 1px solid rgba(201, 163, 95, 0.3); border-radius: 2px; color: rgba(232, 220, 192, 0.82); background: rgba(7, 13, 24, 0.65); font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .map-legend span { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-bright); }
+    .legend-dot.pink { background: #dc9aa0; }
+
+    .map-card.collapsed .map-body { grid-template-rows: 0 0; margin-top: 0; margin-bottom: 0; border-color: transparent; opacity: 0; }
+    .map-card.collapsed .map-head { height: 49px; }
+
+    .record-card { padding: 13px 14px 12px; }
+    .record-head { display: flex; align-items: center; justify-content: space-between; }
+    .record-count { color: var(--parchment); font-size: 13px; font-weight: 600; }
+    .record-count em { color: var(--gold); font-style: normal; }
+    .record-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-top: 9px; }
+    .record-progress .meter { height: 6px; }
+    .record-progress small { color: var(--faded); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .record-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 11px; padding-top: 10px; border-top: 1px solid rgba(138, 109, 63, 0.32); }
+    .assistant { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .assistant img { width: 28px; height: 28px; border: 1px solid rgba(201, 163, 95, 0.65); border-radius: 50%; object-fit: cover; filter: sepia(0.32); }
+    .assistant-copy { min-width: 0; }
+    .assistant-copy strong { display: block; overflow: hidden; font-size: 12px; font-weight: 600; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .assistant-copy span { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--faded); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .online { width: 5px; height: 5px; border-radius: 50%; background: #6ed4a1; box-shadow: 0 0 7px #6ed4a1; }
+    .record-actions { display: flex; gap: 4px; }
+
+    .reticle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(227, 197, 133, 0.34);
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(227, 197, 133, 0.18);
+      pointer-events: none;
+    }
+
+    .reticle::before, .reticle::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(227, 197, 133, 0.65); }
+    .reticle::before { width: 3px; height: 3px; border-radius: 50%; }
+    .reticle::after { width: 1px; height: 25px; opacity: 0.1; }
+
+    .specimen-hint {
+      position: absolute;
+      left: 52.5%;
+      top: 55.5%;
+      width: 42px;
+      height: 32px;
+      color: rgba(233, 204, 124, 0.82);
+      filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.65));
+      pointer-events: none;
+      animation: butterfly 4.5s ease-in-out infinite;
+    }
+
+    @keyframes butterfly {
+      0%, 100% { transform: translate(0, 0) rotate(-4deg); }
+      50% { transform: translate(9px, -8px) rotate(5deg); }
+    }
+
+    .interaction {
+      left: 50%;
+      bottom: 91px;
+      width: 410px;
+      transform: translateX(-50%);
+      padding: 0;
+      overflow: hidden;
+      border-color: rgba(201, 163, 95, 0.44);
+      background: linear-gradient(180deg, rgba(12, 20, 38, 0.9), rgba(7, 13, 24, 0.95));
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(227, 197, 133, 0.12);
+    }
+
+    .interaction::before { display: none; }
+    .interaction-line { height: 1px; margin: 0 18px; background: linear-gradient(90deg, transparent, rgba(201, 163, 95, 0.52), transparent); }
+    .interaction-inner { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 11px; min-height: 61px; padding: 9px 12px; }
+    .butterfly-icon { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid rgba(201, 163, 95, 0.46); border-radius: 50%; color: var(--gold); background: rgba(201, 163, 95, 0.07); }
+    .butterfly-icon svg { width: 18px; height: 18px; }
+    .interaction-copy { min-width: 0; }
+    .interaction-copy strong { display: block; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.1; letter-spacing: 0.025em; text-overflow: ellipsis; white-space: nowrap; }
+    .interaction-copy span { display: block; margin-top: 3px; color: var(--faded); font-size: 10px; font-style: italic; }
+    .action { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 4px; color: var(--parchment); background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; transition: color 150ms ease, background 150ms ease; }
+    .action:hover, .action:focus-visible { outline: none; color: var(--gold-bright); background: rgba(201, 163, 95, 0.08); }
+    .key { display: grid; min-width: 37px; height: 25px; place-items: center; padding: 0 7px; border: 1px solid var(--gold); border-radius: 3px; color: var(--ink-deep); background: linear-gradient(180deg, var(--gold-bright), var(--gold)); box-shadow: inset 0 1px rgba(255, 255, 255, 0.4), 0 2px 5px rgba(0, 0, 0, 0.35); font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
+
+    .toolbelt {
+      left: 50%;
+      bottom: 20px;
+      display: grid;
+      grid-template-columns: repeat(6, 48px);
+      gap: 5px;
+      width: auto;
+      padding: 6px;
+      transform: translateX(-50%);
+      border-color: rgba(201, 163, 95, 0.62);
+    }
+
+    .toolbelt::before { inset: 2px; }
+
+    .tool-slot {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 46px;
+      padding: 0;
+      border: 1px solid rgba(138, 109, 63, 0.38);
+      border-radius: 3px;
+      color: rgba(232, 220, 192, 0.54);
+      background: rgba(0, 0, 0, 0.16);
+      cursor: pointer;
+      transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease;
+    }
+
+    .tool-slot:hover,
+    .tool-slot:focus-visible { outline: none; color: var(--parchment); border-color: rgba(201, 163, 95, 0.7); background: rgba(201, 163, 95, 0.08); }
+    .tool-slot.active { color: var(--gold-bright); border-color: rgba(227, 197, 133, 0.85); background: rgba(201, 163, 95, 0.14); box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 0 12px rgba(201, 163, 95, 0.13); }
+    .tool-slot.active::after { content: ""; position: absolute; right: 4px; bottom: 3px; width: 4px; height: 4px; border-radius: 50%; background: var(--gold-bright); box-shadow: 0 0 6px var(--gold-bright); }
+    .tool-slot .slot-number { position: absolute; top: 3px; left: 4px; color: var(--gold); font-size: 8px; font-weight: 600; }
+    .tool-slot svg { width: 23px; height: 23px; }
+
+    .narrator {
+      left: clamp(18px, 1.55vw, 28px);
+      bottom: 20px;
+      width: 360px;
+      overflow: hidden;
+      transition: width 320ms var(--ease), box-shadow 220ms ease;
+    }
+
+    .narrator-toast {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) 30px;
+      align-items: center;
+      gap: 10px;
+      min-height: 73px;
+      padding: 10px 11px 10px 12px;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .narrator-seal { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgba(201, 163, 95, 0.62); border-radius: 50%; color: var(--gold); background: rgba(201, 163, 95, 0.07); }
+    .narrator-seal svg { width: 21px; height: 21px; }
+    .narrator-preview { min-width: 0; }
+    .narrator-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .narrator-time { color: rgba(168, 152, 120, 0.76); font-size: 9px; letter-spacing: 0.1em; }
+    .narrator-preview p { display: -webkit-box; margin: 4px 0 0; overflow: hidden; color: rgba(232, 220, 192, 0.92); font-size: 12.5px; line-height: 1.27; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+    .narrator-drawer { display: grid; grid-template-rows: 0fr; border-top: 1px solid transparent; opacity: 0; transition: grid-template-rows 320ms var(--ease), border-color 180ms ease, opacity 180ms ease; }
+    .narrator-drawer > div { overflow: hidden; }
+    .narrator-history { max-height: 205px; padding: 0 15px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--brass) transparent; transition: padding 320ms var(--ease); }
+    .message { display: grid; grid-template-columns: 22px 1fr; gap: 9px; padding: 12px 0; border-bottom: 1px solid rgba(138, 109, 63, 0.26); }
+    .message:last-child { border-bottom: 0; }
+    .message .mini-seal { display: grid; place-items: center; width: 22px; height: 22px; margin-top: 2px; border: 1px solid rgba(201, 163, 95, 0.4); border-radius: 50%; color: var(--gold); }
+    .message .mini-seal svg { width: 13px; height: 13px; }
+    .message-head { display: flex; justify-content: space-between; gap: 8px; }
+    .message p { margin: 4px 0 0; color: rgba(232, 220, 192, 0.9); font-size: 12.5px; line-height: 1.42; }
+    .composer { display: grid; grid-template-columns: 1fr auto; gap: 7px; padding: 10px 12px 12px; border-top: 1px solid rgba(138, 109, 63, 0.32); background: rgba(3, 8, 16, 0.18); }
+    .composer input { min-width: 0; height: 36px; padding: 0 11px; border: 1px solid rgba(201, 163, 95, 0.46); border-radius: 3px; outline: none; color: var(--ink-deep); background: #f2ead3; font-size: 12px; font-style: italic; }
+    .composer input:focus { border-color: var(--gold-bright); box-shadow: 0 0 0 2px rgba(227, 197, 133, 0.13); }
+    .send { min-width: 64px; border: 1px solid rgba(201, 163, 95, 0.7); border-radius: 3px; color: var(--gold-bright); background: rgba(201, 163, 95, 0.09); font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+    .send:hover, .send:focus-visible { outline: none; background: rgba(201, 163, 95, 0.18); }
+
+    .narrator.open { width: 420px; }
+    .narrator.open .narrator-drawer { grid-template-rows: 1fr; border-top-color: rgba(138, 109, 63, 0.4); opacity: 1; }
+    .narrator.open .narrator-history { padding-top: 2px; padding-bottom: 2px; }
+    .narrator.open .narrator-toast .icon-button { transform: rotate(180deg); }
+
+    .mode-hint {
+      position: absolute;
+      right: clamp(18px, 1.55vw, 28px);
+      bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: rgba(232, 220, 192, 0.62);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      text-transform: uppercase;
+    }
+
+    .mode-hint kbd { display: grid; min-width: 22px; height: 20px; place-items: center; padding: 0 5px; border: 1px solid rgba(201, 163, 95, 0.46); border-radius: 3px; color: var(--gold); background: rgba(7, 13, 24, 0.66); font-family: inherit; font-size: 9px; }
+
+    .toast {
+      position: absolute;
+      z-index: 20;
+      left: 50%;
+      top: 102px;
+      max-width: 340px;
+      padding: 8px 13px;
+      transform: translate(-50%, -8px);
+      border: 1px solid rgba(201, 163, 95, 0.48);
+      border-radius: 4px;
+      color: var(--parchment);
+      background: rgba(12, 20, 38, 0.86);
+      box-shadow: 0 10px 24px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+      font-size: 11px;
+      letter-spacing: .04em;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 220ms var(--ease);
+    }
+
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+    .ui-hidden .instrument,
+    .ui-hidden .right-rail,
+    .ui-hidden .reticle,
+    .ui-hidden .specimen-hint,
+    .ui-hidden .mode-hint { opacity: 0; pointer-events: none; transition: opacity 220ms ease; }
+
+    .ui-hidden .mode-hint.always { opacity: 1; pointer-events: auto; }
+
+    @media (max-width: 1240px) {
+      .vitals { width: 250px; }
+      .objective { width: 410px; min-width: 360px; }
+      .right-rail { width: 250px; }
+      .narrator { width: 330px; }
+      .narrator.open { width: 390px; }
+      .toolbelt { grid-template-columns: repeat(6, 44px); }
+      .tool-slot { width: 44px; }
+    }
+
+    @media (max-height: 760px) {
+      .record-card { display: none; }
+      .map-body { grid-template-rows: 26px 130px; }
+      .interaction { bottom: 80px; }
+      .toolbelt { bottom: 14px; }
+      .narrator { bottom: 14px; }
+      .mode-hint { bottom: 16px; }
+      .narrator-history { max-height: 155px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" id="scene">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="hud">
+      <section class="instrument vitals" aria-label="Darwin's condition">
+        <svg class="ornament tl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="ornament tr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="ornament br" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="ornament bl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <header class="vitals-head">
+          <div class="vitals-title">
+            <span class="portrait" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7.5 18.5c.9-3 2.4-4.5 4.5-4.5s3.6 1.5 4.5 4.5"/><circle cx="12" cy="8.5" r="3.2"/><path d="M8.5 7.4c1.6-3 5.8-3.4 7.2-.1"/></svg>
+            </span>
+            <div>
+              <div class="label">Field condition</div>
+              <div class="vitals-name">Charles Darwin</div>
+            </div>
+          </div>
+          <span class="condition">Steady</span>
+        </header>
+        <div class="stat-list">
+          <div class="stat">
+            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 8.4c0 5.2-8 10.1-8 10.1S4 13.6 4 8.4A4.2 4.2 0 0 1 12 6a4.2 4.2 0 0 1 8 2.4Z"/></svg></span>
+            <span class="stat-name">Health</span><span class="meter"><span class="meter-fill" style="display:block;width:100%;background:linear-gradient(90deg,#5f9e6a,var(--health));color:var(--health)"></span></span><span class="stat-value">100</span>
+          </div>
+          <div class="stat">
+            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3h8M8 21h8M9 3c0 4 1 5 3 7 2-2 3-3 3-7M9 21c0-4 1-5 3-7 2 2 3 3 3 7"/></svg></span>
+            <span class="stat-name">Fatigue</span><span class="meter"><span class="meter-fill" style="display:block;width:4%;min-width:4px;background:linear-gradient(90deg,#b3812f,var(--fatigue));color:var(--fatigue)"></span></span><span class="stat-value">4</span>
+          </div>
+          <div class="stat">
+            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2.8 12s3.4-5.4 9.2-5.4 9.2 5.4 9.2 5.4-3.4 5.4-9.2 5.4S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.4"/></svg></span>
+            <span class="stat-name">Curiosity</span><span class="meter"><span class="meter-fill" style="display:block;width:20%;background:linear-gradient(90deg,#4f93a8,var(--curiosity));color:var(--curiosity)"></span></span><span class="stat-value">20</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="instrument objective" id="objective">
+        <svg class="ornament tl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="ornament tr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M1.5 13V6A4.5 4.5 0 0 1 6 1.5h7"/><path d="M4.5 8.5V7A2.5 2.5 0 0 1 7 4.5h1.5" opacity=".7"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <button class="objective-button" id="objectiveToggle" type="button" aria-expanded="false">
+          <span class="compass-medallion" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45"><circle cx="12" cy="12" r="9"/><path d="m12 4 2.25 5.75L20 12l-5.75 2.25L12 20l-2.25-5.75L4 12l5.75-2.25L12 4Z"/><circle cx="12" cy="12" r="1.5"/></svg>
+          </span>
+          <span class="objective-copy">
+            <span class="objective-meta"><span class="label">Field aim</span><span class="dot"></span><span class="place">Post Office Bay</span></span>
+            <span class="objective-text">Observe one unrecorded specimen</span>
+          </span>
+          <span class="objective-chevron" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg></span>
+        </button>
+        <div class="objective-detail">
+          <div>
+            <div class="objective-detail-inner">
+              <p>Approach closely, then examine before choosing whether to document or collect.</p>
+              <div class="weather">
+                <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="3"/><path d="M9 3V1.5M9 16.5V15M3 9H1.5M16.5 9H15M4.8 4.8 3.7 3.7M14.3 14.3l-1.1-1.1"/><path d="M8.5 18h9.2a3.3 3.3 0 0 0 .1-6.6 5.3 5.3 0 0 0-9.7 2.2"/></svg></span>
+                Fair · 7:14 AM
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-rail" aria-label="Navigation and field record">
+        <section class="instrument map-card" id="mapCard">
+          <div class="map-head">
+            <div class="map-heading"><span class="label">Local chart</span><strong>Post Office Bay</strong></div>
+            <div class="map-actions">
+              <button class="icon-button" id="mapExpand" type="button" title="Open full chart" aria-label="Open full chart">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+              </button>
+              <button class="icon-button" id="mapCollapse" type="button" title="Collapse chart" aria-label="Collapse chart" aria-expanded="true">
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="map-body">
+            <div class="map-tabs" role="tablist" aria-label="Chart scale">
+              <button class="map-tab active" type="button" role="tab" aria-selected="true" data-map="local">Local</button>
+              <button class="map-tab" type="button" role="tab" aria-selected="false" data-map="island">Island</button>
+            </div>
+            <div class="chart local" id="chart">
+              <img class="chart-image" src="../banners/postofficebay.jpg" alt="Post Office Bay chart">
+              <div class="chart-vignette"></div>
+              <div class="route-line"></div>
+              <span class="map-marker player" title="Darwin's position"></span>
+              <span class="map-marker new" title="Unrecorded specimen"></span>
+              <span class="map-north">↑ N</span>
+              <div class="map-legend"><span><i class="legend-dot"></i>You</span><span><i class="legend-dot pink"></i>New</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="instrument record-card" aria-label="Field record progress">
+          <div class="record-head">
+            <span class="label">Field record</span>
+            <span class="record-count"><em>0</em> / 12 specimens</span>
+          </div>
+          <div class="record-progress">
+            <span class="meter"><span class="meter-fill" style="display:block;width:8%;background:linear-gradient(90deg,#89672f,var(--gold));color:var(--gold)"></span></span>
+            <small>1 note</small>
+          </div>
+          <div class="record-footer">
+            <div class="assistant">
+              <img src="../portraits/syms_covington.jpg" alt="Syms Covington">
+              <div class="assistant-copy"><strong>Syms Covington</strong><span><i class="online"></i>32 m nearby</span></div>
+            </div>
+            <div class="record-actions">
+              <button class="icon-button" type="button" title="Open specimens" aria-label="Open specimens">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.55"><path d="M12 12C8.5 5.5 4.5 5 3.5 8.5c-1 3.6 2.2 5.3 8.5 3.5Zm0 0c3.5-6.5 7.5-7 8.5-3.5 1 3.6-2.2 5.3-8.5 3.5ZM12 12c-3.1 1.2-5.3 4.2-3.8 6.5 1.4 2.1 3.3.2 3.8-6.5Zm0 0c3.1 1.2 5.3 4.2 3.8 6.5-1.4 2.1-3.3.2-3.8-6.5Z"/></svg>
+              </button>
+              <button class="icon-button" type="button" title="Open notebook" aria-label="Open notebook">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.55"><path d="M5 3.5h11.5A2.5 2.5 0 0 1 19 6v14.5H7.5A2.5 2.5 0 0 1 5 18V3.5Z"/><path d="M7.5 20.5A2.5 2.5 0 0 1 10 18h9M9 8h6M9 11h6"/></svg>
+              </button>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="reticle" aria-hidden="true"></div>
+      <svg class="specimen-hint" viewBox="0 0 48 34" aria-hidden="true"><path d="M24 17c-8-15-17-14-19-7-2 7 5 10 19 7Zm0 0c8-15 17-14 19-7 2 7-5 10-19 7Zm0 0c-7 2-11 9-7 13 4 4 7-1 7-13Zm0 0c7 2 11 9 7 13-4 4-7-1-7-13Z" fill="currentColor" opacity=".9"/><path d="M24 8v17" stroke="#8a6d3f" stroke-width="1.2"/></svg>
+
+      <section class="instrument interaction" aria-label="Contextual action">
+        <div class="interaction-line"></div>
+        <div class="interaction-inner">
+          <span class="butterfly-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 12C8.5 5.5 4.5 5 3.5 8.5c-1 3.6 2.2 5.3 8.5 3.5Zm0 0c3.5-6.5 7.5-7 8.5-3.5 1 3.6-2.2 5.3-8.5 3.5ZM12 12c-3.1 1.2-5.3 4.2-3.8 6.5 1.4 2.1 3.3.2 3.8-6.5Zm0 0c3.1 1.2 5.3 4.2 3.8 6.5-1.4 2.1-3.3.2-3.8-6.5Z"/></svg></span>
+          <div class="interaction-copy"><strong>Galápagos sulphur butterfly</strong><span>An unrecorded specimen is within reach</span></div>
+          <button class="action" id="examineAction" type="button"><kbd class="key">Enter</kbd><span>Examine</span></button>
+        </div>
+      </section>
+
+      <nav class="instrument toolbelt" aria-label="Field tools">
+        <button class="tool-slot" type="button" title="Fowling piece"><span class="slot-number">1</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 18.5 17.5 7l2-2 1.5 2-2.5 1.5L6 20Z"/><path d="m14.8 9.2 2.2 3.1M5.5 17.2l2 2.5"/></svg></button>
+        <button class="tool-slot" type="button" title="Butterfly net"><span class="slot-number">2</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="9" cy="8" rx="5" ry="6" transform="rotate(-28 9 8)"/><path d="m12 12 7 9M6 3l7 8M4.5 6l9.5 4"/></svg></button>
+        <button class="tool-slot" type="button" title="Twine"><span class="slot-number">3</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 17c-4-5 1-11 7-11 5 0 8 3 7 7-1 5-8 7-12 4-3-2-1-7 4-8 4-1 7 2 5 5-2 3-8 2-8-1 0-2 3-3 5-2"/></svg></button>
+        <button class="tool-slot" type="button" title="Geological hammer"><span class="slot-number">4</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m13 8-8 12M9 5l3-2 7 4-2 3-5-2Z"/></svg></button>
+        <button class="tool-slot active" type="button" title="Hands" aria-pressed="true"><span class="slot-number">5</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7.5 12V7a1.4 1.4 0 0 1 2.8 0v4-6a1.4 1.4 0 0 1 2.8 0v6-5a1.4 1.4 0 0 1 2.8 0v6-3a1.4 1.4 0 0 1 2.8 0v5c0 4-2.8 7-7.2 7-3.4 0-5.4-1.7-6.7-4.7l-1.4-3.2c-.8-1.8 1.8-3.1 3-.8l1.1 2.2"/></svg></button>
+        <button class="tool-slot" type="button" title="Field notebook"><span class="slot-number">6</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3.5h11.5V20H8.5A2.5 2.5 0 0 1 6 17.5v-14Z"/><path d="M8.5 20A2.5 2.5 0 0 1 11 17.5h6.5M9.5 7.5h5M9.5 10.5h5"/></svg></button>
+      </nav>
+
+      <section class="instrument narrator" id="narrator" aria-label="Narrator">
+        <button class="narrator-toast" id="narratorToggle" type="button" aria-expanded="false">
+          <span class="narrator-seal" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45"><circle cx="12" cy="12" r="9"/><path d="m12 4 2.25 5.75L20 12l-5.75 2.25L12 20l-2.25-5.75L4 12l5.75-2.25L12 4Z"/></svg></span>
+          <span class="narrator-preview">
+            <span class="narrator-meta"><span class="label">Narrator</span><span class="narrator-time">7:12 AM</span></span>
+            <p>A loose-flying yellow sulphur butterfly moves between flowers in the dry scrub.</p>
+          </span>
+          <span class="icon-button" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg></span>
+        </button>
+        <div class="narrator-drawer">
+          <div>
+            <div class="narrator-history">
+              <article class="message">
+                <span class="mini-seal" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="m12 5 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z"/></svg></span>
+                <div><header class="message-head"><span class="label">Narrator</span><span class="narrator-time">7:12 AM</span></header><p>The Galápagos sulphur butterfly draws you close enough for a better look. Its flight is low and unhurried.</p></div>
+              </article>
+              <article class="message">
+                <span class="mini-seal" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="m12 5 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z"/></svg></span>
+                <div><header class="message-head"><span class="label">Narrator</span><span class="narrator-time">7:10 AM</span></header><p>Beyond the landing place, dry scrub rises over dark basalt. Covington waits near the specimen cases.</p></div>
+              </article>
+            </div>
+            <form class="composer" id="composer"><input id="narratorInput" aria-label="Ask the narrator" placeholder="Ask the narrator or describe an action…"><button class="send" type="submit">Send</button></form>
+          </div>
+        </div>
+      </section>
+
+      <div class="mode-hint always"><kbd>H</kbd><span>Hide interface</span></div>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+  </main>
+
+  <script>
+    const scene = document.getElementById('scene');
+    const objective = document.getElementById('objective');
+    const objectiveToggle = document.getElementById('objectiveToggle');
+    const mapCard = document.getElementById('mapCard');
+    const mapCollapse = document.getElementById('mapCollapse');
+    const mapExpand = document.getElementById('mapExpand');
+    const chart = document.getElementById('chart');
+    const narrator = document.getElementById('narrator');
+    const narratorToggle = document.getElementById('narratorToggle');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function announce(message) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    objectiveToggle.addEventListener('click', () => {
+      const open = objective.classList.toggle('open');
+      objectiveToggle.setAttribute('aria-expanded', String(open));
+    });
+
+    mapCollapse.addEventListener('click', () => {
+      const collapsed = mapCard.classList.toggle('collapsed');
+      mapCollapse.setAttribute('aria-expanded', String(!collapsed));
+      mapCollapse.title = collapsed ? 'Expand chart' : 'Collapse chart';
+      mapCollapse.style.transform = collapsed ? 'rotate(180deg)' : '';
+    });
+
+    mapExpand.addEventListener('click', () => announce('Full chart would open as a focused modal.'));
+
+    document.querySelectorAll('.map-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.map-tab').forEach(item => {
+          item.classList.toggle('active', item === tab);
+          item.setAttribute('aria-selected', String(item === tab));
+        });
+        chart.classList.toggle('local', tab.dataset.map === 'local');
+        chart.classList.toggle('island', tab.dataset.map === 'island');
+      });
+    });
+
+    narratorToggle.addEventListener('click', event => {
+      if (event.target.closest('.composer')) return;
+      const open = narrator.classList.toggle('open');
+      narratorToggle.setAttribute('aria-expanded', String(open));
+      if (open) window.setTimeout(() => document.getElementById('narratorInput').focus(), 330);
+    });
+
+    document.getElementById('composer').addEventListener('submit', event => {
+      event.preventDefault();
+      const input = document.getElementById('narratorInput');
+      if (!input.value.trim()) return;
+      announce('Narrator prompt staged for the live game.');
+      input.value = '';
+    });
+
+    document.getElementById('examineAction').addEventListener('click', () => announce('Examine view opened — one contextual action, one key.'));
+
+    document.querySelectorAll('.tool-slot').forEach(slot => {
+      slot.addEventListener('click', () => {
+        document.querySelectorAll('.tool-slot').forEach(item => {
+          item.classList.toggle('active', item === slot);
+          item.setAttribute('aria-pressed', String(item === slot));
+        });
+        announce(slot.title + ' selected');
+      });
+    });
+
+    document.querySelectorAll('.record-actions .icon-button').forEach(button => {
+      button.addEventListener('click', () => announce(button.title + ' as a focused overlay.'));
+    });
+
+    document.addEventListener('keydown', event => {
+      const typing = event.target.matches('input, textarea, [contenteditable="true"]');
+      if (event.key.toLowerCase() === 'h' && !typing) {
+        event.preventDefault();
+        const hidden = scene.classList.toggle('ui-hidden');
+        document.querySelector('.mode-hint span').textContent = hidden ? 'Show interface' : 'Hide interface';
+      }
+      if (typing) return;
+      if (/^[1-6]$/.test(event.key)) {
+        const slot = document.querySelectorAll('.tool-slot')[Number(event.key) - 1];
+        slot?.click();
+      }
+      if (event.key === 'Enter') document.getElementById('examineAction').click();
+      if (event.key.toLowerCase() === 'n') narratorToggle.click();
+    });
+  </script>
+</body>
+</html>

@@ -25,6 +25,8 @@ export function createInitialExpeditionState(seed = 'three-darwin-v1'): Expediti
         method: 'observation',
         day: 1,
         kind: 'specimen',
+        authorship: 'reference',
+        assessmentEligible: false,
         content:
           'Observed several large black lizards frequenting the lava rocks near the shore. Their appearance at first repulsive, though they seem remarkably well adapted to this harsh country.\n\nThe nostrils are often encrusted with salt. Individuals repeatedly entered the sea in search of vegetable matter.\n\nQuestion:\nHow are these animals related to the land iguanas observed elsewhere?',
         createdAt: '1835-09-17T08:00:00.000Z',

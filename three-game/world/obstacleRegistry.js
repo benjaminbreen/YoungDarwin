@@ -16,6 +16,7 @@ import { getBeagleCabinObstacles } from './beagleCabinLayout';
 import { getLawsonHouseObstacles } from './lawsonHouseLayout';
 import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
+import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
 
 /** @typedef {Record<string, unknown>} AuthoredObstacle */
 /** @typedef {() => AuthoredObstacle[]} ObstacleSource */
@@ -43,4 +44,5 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   LAWSON_HOUSE: [getLawsonHouseObstacles],
   WATKINS: [getWatkinsCampObstacles],
   POST_SCRUB_RISE: [getPostScrubRiseRockObstacles],
+  LAVA_FLATS: [getLavaFlatsRockObstacles],
 });

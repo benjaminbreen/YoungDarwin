@@ -27,12 +27,13 @@ import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 
-export function ActiveZoneContent({ settings, contentPhase = 3 }) {
-  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 3;
-  const gameplayReady = stagedPhase >= 1;
-  const environmentReady = stagedPhase >= 1;
-  const interactablesReady = stagedPhase >= 2;
-  const actorsReady = stagedPhase >= 3;
+export function ActiveZoneContent({ settings, contentPhase = 6 }) {
+  const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
+  const detailsReady = stagedPhase >= 2;
+  const propsReady = stagedPhase >= 3;
+  const interactablesReady = stagedPhase >= 4;
+  const beagleReady = stagedPhase >= 5;
+  const actorsReady = stagedPhase >= 6;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
@@ -54,7 +55,7 @@ export function ActiveZoneContent({ settings, contentPhase = 3 }) {
       <>
         <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
         {settings.physicsObstacles !== false && <PhysicsObstacles />}
-        {gameplayReady && settings.physicsProps !== false && <PhysicsProps />}
+        {propsReady && settings.physicsProps !== false && <PhysicsProps />}
         <Suspense fallback={null}>
           <InteriorZone />
         </Suspense>
@@ -68,27 +69,27 @@ export function ActiveZoneContent({ settings, contentPhase = 3 }) {
       {settings.terrain !== false && <BorderVistas />}
       <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
       {settings.landmarks !== false && <Landmarks />}
-      {environmentReady && settings.worldDetails !== false && (
+      {detailsReady && settings.worldDetails !== false && (
         <Suspense fallback={null}>
           <WorldDetails settings={settings} />
         </Suspense>
       )}
       {settings.physicsObstacles !== false && <PhysicsObstacles />}
-      {gameplayReady && settings.physicsProps !== false && <PhysicsProps />}
-      {environmentReady && settings.physicsProps !== false && <PricklyPearField />}
-      {environmentReady && settings.physicsProps !== false && <LavaCactusField />}
-      {environmentReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
-      {environmentReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
-      {environmentReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
-      {gameplayReady && settings.waterSplashes !== false && <WaterSplashes />}
+      {propsReady && settings.physicsProps !== false && <PhysicsProps />}
+      {propsReady && settings.physicsProps !== false && <PricklyPearField />}
+      {propsReady && settings.physicsProps !== false && <LavaCactusField />}
+      {propsReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
+      {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
+      {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
+      {propsReady && settings.waterSplashes !== false && <WaterSplashes />}
       {interactablesReady && <SnareTraps />}
       {interactablesReady && <AnimalDroppings />}
-      {actorsReady && settings.beagle !== false && (
+      {beagleReady && settings.beagle !== false && (
         <Suspense fallback={null}>
           <Beagle />
         </Suspense>
       )}
-      {actorsReady && currentZoneId === 'BEAGLE' && (
+      {beagleReady && currentZoneId === 'BEAGLE' && (
         <Suspense fallback={null}>
           <HmsBeagleDeck />
         </Suspense>

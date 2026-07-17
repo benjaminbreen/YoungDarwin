@@ -11,6 +11,12 @@ import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } fro
 import { getPenalColonyFenceProps } from '../penalColonyLayout';
 import { buildPenalColonyCropFields } from '../crops/penalColonyCrops';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import {
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_SPECIES,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+} from './floraAssets';
+import { buildProceduralFloraLayer } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
@@ -88,6 +94,58 @@ function buildFlora() {
   ];
 }
 
+function penalColonyHabitatAt({ biome, x, z }) {
+  const path = penalColonyPathInfo(x, z);
+  const garden = penalColonyGardenInfo(x, z).mask;
+  const trampled = penalColonyTrampledMask(x, z);
+  const edge = Math.max(Math.abs(x) / 45, Math.abs(z) / 39);
+  const rimFit = smoothstep01(edge, 0.52, 0.84);
+  const dryRim = biome === 'dry-rim';
+  return {
+    moisture: dryRim ? 0.38 : 0.58,
+    canopy: dryRim ? 0.38 : 0.14,
+    exposure: dryRim ? 0.74 : 0.56,
+    disturbance: Math.max(trampled, garden, path.path * 0.82),
+    salinity: 0,
+    biomeSuitability: dryRim ? 1 : 0.76,
+    localSuitability: 0.18 + rimFit * 0.82,
+    excluded: !['dry-rim', 'settlement-meadow'].includes(biome)
+      || path.distance < path.width * 1.55
+      || trampled > 0.12
+      || garden > 0.08,
+  };
+}
+
+function buildProceduralFlora() {
+  return [buildProceduralFloraLayer({
+    id: 'penal-colony-darwiniothamnus-overlay',
+    zoneId: PENAL_COLONY,
+    species: DARWINIOTHAMNUS_SPECIES,
+    asset: {
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
+      variantCount: 9,
+    },
+    seed: 877,
+    count: 36,
+    bounds: { minX: -44, maxX: 44, minZ: -37, maxZ: 37 },
+    habitatAt: penalColonyHabitatAt,
+    placement: {
+      patchCount: 4,
+      patchRadius: [3, 6],
+      minPatchSeparation: 7.5,
+      maxGrade: 0.62,
+    },
+    render: {
+      sink: 0.05,
+      tint: '#789056',
+      tintStrength: 0.16,
+      castShadow: false,
+      motion: { wind: 0.8, bend: 0.2, bendRadius: 1.7 },
+    },
+  })];
+}
+
 // The colonists keep the settlement flat worked bare: tall grass survives
 // only out at the rim of the clearing and in the leftover pockets behind
 // buildings, away from the tracks, plots, and packed earth.
@@ -163,6 +221,7 @@ export function buildPenalColonyEcology() {
     zoneId: PENAL_COLONY,
     stream: false,
     flora: buildFlora(),
+    proceduralFlora: buildProceduralFlora(),
     rocks: [],
     dryGrassPatches: [
       createStandardDryGrassPatchLayer({

@@ -9,6 +9,12 @@ import {
   westernHighlandsWetHollowMask,
 } from '../regions/westernHighlands/terrain';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import {
+  DARWINIOTHAMNUS_LABEL,
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
 
 const NATURE = '/assets/models/nature/';
 
@@ -75,6 +81,18 @@ function buildFlora() {
       && nearAnyCluster(understoryClusters, x, z, 18)
       && (biome === 'humid-understory' || biome === 'scalesia-forest' || biome === 'fern-clearing'),
   });
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(W_HIGH, 'western-highlands-darwiniothamnus', 54, 249, {
+    minX: -45, maxX: 45, minZ: -40, maxZ: 42, scale: [0.8, 2.45], maxGrade: 0.62,
+    patchCount: 6, patchRadius: [3.2, 6.4],
+    accept: (biome, x, z) => {
+      const clearing = westernHighlandsClearingMask(x, z);
+      const canopy = westernHighlandsCanopyMask(x, z);
+      return westernHighlandsWetHollowMask(x, z) < 0.34
+        && notOnTrail(x, z, 4.8)
+        && (biome === 'fern-clearing' || biome === 'humid-understory' || biome === 'scalesia-forest')
+        && ((clearing > 0.1 && clearing < 0.74) || (canopy > 0.18 && canopy < 0.64));
+    },
+  }, { width: [0.88, 1.15], height: [0.88, 1.12], maxLean: 0.04 });
   const groundPlants = scatter('ground-plants', 120, 257, {
     minX: -46, maxX: 46, minZ: -42, maxZ: 44, scale: [0.045, 0.12], maxGrade: 0.78,
     accept: (biome, x, z) => notOnTrail(x, z, 3.9)
@@ -138,6 +156,18 @@ function buildFlora() {
       motion: { wind: 1.15, bend: 0.38, bendRadius: 1.45 },
       castShadow: false,
       items: tintItems(crotonUnderstory, '#718c57', '#566f45'),
+    },
+    {
+      id: 'western-highlands-darwiniothamnus',
+      label: DARWINIOTHAMNUS_LABEL,
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
+      sink: 0.05,
+      tint: '#718b55',
+      tintStrength: 0.18,
+      motion: { wind: 0.82, bend: 0.2, bendRadius: 1.7 },
+      castShadow: false,
+      items: darwiniothamnus,
     },
     {
       id: 'ground-plants',

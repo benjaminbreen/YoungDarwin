@@ -149,7 +149,9 @@ export type JournalEntry = {
   createdAt: string;
   day?: number;
   timeOfDay?: string;
-  kind?: 'specimen' | 'location' | 'note' | 'reading';
+  kind?: 'specimen' | 'location' | 'note' | 'reading' | 'examination';
+  authorship?: 'player' | 'field-record' | 'reference';
+  assessmentEligible?: boolean;
   title?: string;
   source?: {
     type: 'book';

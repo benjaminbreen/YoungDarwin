@@ -1,4 +1,5 @@
-import { makeZoneScatter, seededRandom } from '../scatter';
+import { makeZoneScatter, varyScatterTransforms } from '../scatter';
+import { terrainHeight } from '../terrain';
 import {
   getRockyClearingCaveFeature,
   getRockyClearingFormations,
@@ -12,6 +13,7 @@ import {
   rockyClearingRubbleMask,
 } from '../regions/rockyClearing/path';
 import { buildStandardDryPathGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
+import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 
 const NATURE = '/assets/models/nature/';
 
@@ -91,24 +93,38 @@ function notOnPathOrCave(biome, x, z) {
 
 function buildFlora() {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(ROCKY_CLEARING, layer, count, seed, opts);
-  const shrubs = scatter('rocky-clearing-shrub', 20, 331, {
+  const shrubs = varyScatterTransforms(scatter('rocky-clearing-shrub', 20, 331, {
     minX: -42, maxX: 42, minZ: -30, maxZ: 32, scale: [0.1, 0.24], maxGrade: 0.9,
     accept: (biome, x, z) => notOnPathOrCave(biome, x, z)
       && rockyClearingCentralMask(x, z) < 0.62
       && hash2(x, z, 7) < 0.68,
-  }).map(item => ({
+  }), 331, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.04 }).map(item => ({
     ...item,
     y: item.y + 0.02,
     tint: item.tone > 0.54 ? '#7f8749' : '#596b3b',
   }));
-  const smallShrubs = scatter('rocky-clearing-low-shrub', 24, 347, {
+  const smallShrubs = varyScatterTransforms(scatter('rocky-clearing-low-shrub', 24, 347, {
     minX: -43, maxX: 43, minZ: -32, maxZ: 35, scale: [0.07, 0.17], maxGrade: 1.0,
     accept: (biome, x, z) => notOnPathOrCave(biome, x, z)
       && (Math.abs(x) > 18 || Math.abs(z) > 16 || rockyClearingCentralMask(x, z) < 0.28),
-  }).map(item => ({
+  }), 347, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.045 }).map(item => ({
     ...item,
     y: item.y + 0.02,
     tint: item.tone > 0.5 ? '#8c7c48' : '#536437',
+  }));
+  const caveFerns = [
+    { x: -3.2, z: -9.35, scale: 0.98, yaw: 0.42, widthScale: 1.08, heightScale: 0.92 },
+    { x: 6.8, z: -9.15, scale: 0.86, yaw: 2.18, widthScale: 0.92, heightScale: 1.06 },
+    { x: -0.7, z: -11.95, scale: 0.76, yaw: 1.34, widthScale: 1.12, heightScale: 0.88 },
+    { x: 3.45, z: -12.25, scale: 0.68, yaw: 4.72, widthScale: 0.9, heightScale: 1.08 },
+    { x: -5.15, z: -8.0, scale: 0.82, yaw: 5.46, widthScale: 1.04, heightScale: 0.95 },
+    { x: 8.25, z: -7.75, scale: 0.9, yaw: 3.1, widthScale: 0.94, heightScale: 1.05 },
+  ].map((item, index) => ({
+    ...item,
+    id: `rocky-clearing-cave-fern-${index}`,
+    y: terrainHeight(item.x, item.z, ROCKY_CLEARING),
+    depthScale: 0.94 + (index % 3) * 0.05,
+    tint: index > 1 && index < 4 ? '#3f6540' : '#58774a',
   }));
   return [
     {
@@ -129,40 +145,42 @@ function buildFlora() {
       castShadow: false,
       items: smallShrubs,
     },
+    {
+      id: 'rocky-clearing-cave-ferns',
+      path: `${NATURE}runtime-galapagos-fern.glb`,
+      sink: 0.04,
+      tintStrength: 0.24,
+      motion: { wind: 0.38, bend: 0.12, bendRadius: 1.16 },
+      castShadow: false,
+      maxVisibleDistance: 54,
+      items: caveFerns,
+    },
   ];
 }
 
 function buildSurfaceLitter() {
-  const scatter = (layer, count, seed, opts) => makeZoneScatter(ROCKY_CLEARING, layer, count, seed, opts);
-  const chips = scatter('rocky-clearing-basalt-chip', 260, 421, {
-    minX: -24, maxX: 25, minZ: -16, maxZ: 7, scale: [0.18, 0.54], maxGrade: 1.1,
-    accept: (biome, x, z) => rockyClearingRubbleMask(x, z) > 0.22
-      || (rockyClearingCentralMask(x, z) > 0.36 && hash2(x, z, 27) < 0.32)
-      || biome === 'cave-threshold',
-  }).map((item, index) => {
-    const i = index + 42100;
-    return {
-      ...item,
-      id: `rocky-clearing-chip-${index}`,
-      variant: seededRandom(i, 3) > 0.27 ? 'weathered-basalt-chip' : 'oxidized-scoria-chip',
-      color: seededRandom(i, 3) > 0.27
-        ? (seededRandom(i, 5) > 0.5 ? '#c6c3ba' : '#aaa9a3')
-        : (seededRandom(i, 5) > 0.5 ? '#cc886b' : '#b96d50'),
-      wetness: 0,
-      scale: item.scale * (0.62 + seededRandom(i, 7) * 0.5),
-      stretchX: 0.7 + seededRandom(i, 11) * 0.72,
-      stretchZ: 0.62 + seededRandom(i, 13) * 0.66,
-      heightScale: 0.66 + seededRandom(i, 17) * 0.58,
-      lift: 0.008 + seededRandom(i, 19) * 0.01,
-      pitch: (seededRandom(i, 23) - 0.5) * 0.22,
-      roll: (seededRandom(i, 29) - 0.5) * 0.22,
-    };
-  });
-  return [{
+  return [buildDryVolcanicLitterLayer({
+    zoneId: ROCKY_CLEARING,
     id: 'rocky-clearing-cave-basalt-chips',
+    itemIdPrefix: 'rocky-clearing-chip',
+    count: 420,
+    seed: 421,
+    bounds: { minX: -24, maxX: 25, minZ: -16, maxZ: 7 },
+    scale: [0.5, 1.4],
     maxVisibleDistance: 42,
-    items: chips,
-  }];
+    variantOptions: [
+      { variant: 'weathered-basalt-chip', weight: 0.73, colors: ['#c6c3ba', '#aaa9a3'] },
+      { variant: 'oxidized-scoria-chip', weight: 0.27, colors: ['#cc886b', '#b96d50'] },
+    ],
+    accept: (biome, x, z) => {
+      const path = rockyClearingPathInfo(x, z);
+      return path.tread < 0.24 && (
+        rockyClearingRubbleMask(x, z) > 0.22
+        || (rockyClearingCentralMask(x, z) > 0.36 && hash2(x, z, 27) < 0.32)
+        || biome === 'cave-threshold'
+      );
+    },
+  })];
 }
 
 function buildProps() {

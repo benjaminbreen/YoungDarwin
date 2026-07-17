@@ -357,7 +357,7 @@ function applyInstanceColor(mesh, item, variantDef) {
   return _color;
 }
 
-function SurfaceLitterBucket({ bucket, resources, zoneId, sourceUserData, onInspect }) {
+function SurfaceLitterBucket({ bucket, resources, zoneId, sourceUserData, castShadow, onInspect }) {
   const ref = useRef(null);
   const resource = resources[bucket.variant] || resources['limestone-chip'];
   useLayoutEffect(() => {
@@ -395,7 +395,7 @@ function SurfaceLitterBucket({ bucket, resources, zoneId, sourceUserData, onInsp
     <instancedMesh
       ref={ref}
       args={[resource.geometry, resource.material, bucket.items.length]}
-      castShadow
+      castShadow={castShadow}
       receiveShadow={false}
       userData={sourceUserData}
       onClick={event => {
@@ -456,6 +456,7 @@ export function SurfaceLitterField({ layer, zoneId }) {
             resources={resources}
             zoneId={effectiveZoneId}
             sourceUserData={renderUserData}
+            castShadow={layer.castShadow !== false}
             onInspect={(item, point) => {
               setInspectedObject(catalogToInspectable('shore_litter', point, {
                 sourceId: item?.id || 'shore_litter',

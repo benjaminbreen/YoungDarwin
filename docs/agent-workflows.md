@@ -94,7 +94,8 @@ npm run three:contact-sheet -- --asset darwin5 --clip <clip> --preset review --v
   `darwin-final-animated.glb`; check generated inventory before using them.
 - `three-game/fauna/faunaBehaviorProfiles.js` is an adapter. Edit
   `three-game/wildlife/wildlifeCatalog.js` for new behavior profiles.
-- `WorldDetails.jsx` has legacy Post Office Bay detail. New authored-region
-  detail should usually go through ecology modules.
+- Post Office Bay detail has moved to `world/ecology/postOfficeBay.js`.
+  Keep its visual basalt field sourced from the same authored layout used by
+  the obstacle registry instead of introducing an independent rock scatter.
 - A collected species type is not the same as a collected actor instance.
   Preserve actor-level disappearance through `collectedSpecimenActorIds`.

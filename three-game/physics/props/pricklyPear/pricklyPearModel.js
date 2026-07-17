@@ -1,4 +1,4 @@
-// Procedural small prickly pear (Opuntia echios): pure geometry/material/graph
+// Procedural young Floreana prickly pear (Opuntia megasperma): pure geometry/material/graph
 // builder shared by the destructible field component. Every pad and blossom in
 // the graph becomes its own rigid body, so the plant is generated as a set of
 // pieces with parent links rather than a single mesh.

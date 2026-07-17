@@ -80,7 +80,9 @@ export function Lighting() {
       // 1/d² attenuation (~9x at this offset), so the bounce is an explicit
       // additive term in candela-scale units. groundBounce (not hardSun) so
       // the bounce also ramps through mid-morning/afternoon sun.
-      const sandBounce = lightRig.groundBounce * 2.9 * (1 - underwaterAmount);
+      // Preserve a warm player lift on bright beaches without projecting a
+      // visibly overexposed pool onto pale terrain around Darwin.
+      const sandBounce = lightRig.groundBounce * 1.45 * (1 - underwaterAmount);
       const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
       camera.getWorldDirection(_forward);
       _forward.y = 0;
@@ -93,7 +95,7 @@ export function Lighting() {
       );
       _warmColor
         .copy(WARM_FILL)
-        .lerp(SAND_FILL, lightRig.hardSun * 0.55)
+        .lerp(SAND_FILL, lightRig.hardSun * 0.34)
         .lerp(GOLDEN_FILL, sky.golden * 0.28);
       pointRef.current.color.copy(_warmColor);
       pointRef.current.intensity = lightRig.localWarmFillIntensity * playerFillScale + sandBounce;

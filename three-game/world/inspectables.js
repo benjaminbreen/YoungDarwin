@@ -1,3 +1,5 @@
+import { DARWINIOTHAMNUS_SPECIES } from './ecology/floraSpecies';
+
 const RARITY_LABELS = {
   abundant: 'Abundant',
   common: 'Common',
@@ -22,6 +24,7 @@ export const inspectableCatalog = {
   mangrove: { id: 'mangrove', kind: 'plant', englishName: 'Island mangrove seedling', latinName: 'Rhizophora sp.', category: 'Plant', rarity: 'uncommon' },
   saltbush: { id: 'saltbush', kind: 'plant', englishName: 'Monte salado', latinName: 'Cryptocarpus pyriformis', category: 'Plant', rarity: 'common' },
   croton: { id: 'croton', kind: 'plant', englishName: 'Chala', latinName: 'Croton scouleri', category: 'Plant', rarity: 'common' },
+  darwiniothamnus: { id: 'darwiniothamnus', kind: 'plant', englishName: DARWINIOTHAMNUS_SPECIES.commonName, latinName: DARWINIOTHAMNUS_SPECIES.scientificName, category: 'Plant', rarity: 'endemic' },
   scalesia: { id: 'scalesia', kind: 'plant', englishName: 'Floreana scalesia', latinName: 'Scalesia villosa', category: 'Plant', rarity: 'endemic' },
   palo_santo: { id: 'palo_santo', kind: 'plant', englishName: 'Palo santo', latinName: 'Bursera graveolens', category: 'Plant', rarity: 'uncommon' },
   highland_ground_plants: { id: 'highland_ground_plants', kind: 'plant', englishName: 'Highland ground plants', latinName: 'humid highland herbs', category: 'Plant', rarity: 'common' },
@@ -106,12 +109,14 @@ export function catalogToInspectable(catalogId, worldPosition = null, overrides 
 
 export function inspectableTypeForEcologyLayer(layerId) {
   if (!layerId) return 'shrub';
-  if (layerId.startsWith('saltbush')) return 'saltbush';
+  if (layerId.includes('saltbush')) return 'saltbush';
   if (layerId.includes('mangrove')) return 'mangrove';
   if (layerId.includes('dry-grass')) return 'dry_grass';
-  if (layerId === 'croton') return 'croton';
+  if (layerId.includes('croton')) return 'croton';
+  if (layerId.includes('darwiniothamnus')) return 'darwiniothamnus';
   if (layerId.includes('scalesia')) return 'scalesia';
-  if (layerId.startsWith('palo-santo')) return 'palo_santo';
+  if (layerId.includes('castela') || layerId.includes('bitterbush')) return 'castela';
+  if (layerId.includes('palo-santo')) return 'palo_santo';
   if (layerId === 'ground-plants' || layerId === 'wet-ground-plants') return 'highland_ground_plants';
   if (layerId === 'highland-grass') return 'highland_grass';
   if (layerId === 'ez-low-upland-trees') return 'paga_paga';
@@ -120,6 +125,7 @@ export function inspectableTypeForEcologyLayer(layerId) {
   if (layerId === 'driftwood') return 'driftwood';
   if (layerId === 'opuntia') return 'opuntia';
   if (layerId.includes('candelabra') || layerId.includes('jasminocereus')) return 'candelabra_cactus';
+  if (layerId.includes('galapagos-cotton')) return 'galapagos_cotton';
   if (layerId === 'manzanillo') return 'manzanillo';
   return 'shrub';
 }

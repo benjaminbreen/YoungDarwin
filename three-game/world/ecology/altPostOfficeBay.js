@@ -3,6 +3,12 @@ import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { getAltPostOfficeBayRocks, ALT_POST_OFFICE_BAY } from '../altPostOfficeBayLayout';
 import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
+import {
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  DARWINIOTHAMNUS_LABEL,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
 
 // Alternate Post Office Bay ecology: a clean pale beach with driftwood, sparse
 // dry-zone shrubs and cacti inland, detailed mangroves at the brackish edges,
@@ -32,14 +38,17 @@ function buildFlora() {
     { id: 'saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, castShadow: false, motion: { wind: 1.15, bend: 0.28, bendRadius: 1.35 }, items: saltbush.filter((_, i) => i % 2 === 1) },
     {
       id: 'darwiniothamnus',
-      path: `${NATURE}runtime-darwiniothamnus.glb`,
+      label: DARWINIOTHAMNUS_LABEL,
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
       sink: 0.05,
       motion: { wind: 1.05, bend: 0.24, bendRadius: 1.5 },
-      items: scatter('darwiniothamnus', 8, 63, {
-        minX: -32, maxX: 40, minZ: 4, maxZ: 38, scale: [0.35, 0.55],
+      items: makeDarwiniothamnusPatchScatter(ALT_POST_OFFICE_BAY, 'darwiniothamnus', 36, 63, {
+        minX: -32, maxX: 40, minZ: 4, maxZ: 38, scale: [0.8, 2.45],
+        patchCount: 4, patchRadius: [3, 6],
         accept: (biome, x, z) => inland(x, z) > 6 && nearAnyCluster(scrubClumps, x, z, 12)
           && (biome === 'dry-scrub' || biome === 'palo-santo'),
-      }),
+      }, { width: [0.88, 1.12], height: [0.88, 1.12], maxLean: 0.035 }),
     },
     {
       id: 'galapagos-bushes',
@@ -73,11 +82,12 @@ function buildFlora() {
       }),
     },
     {
-      id: 'palo-santo',
+      id: 'castela',
+      label: 'Galapagos bitterbush / Castela galapageia',
       path: `${NATURE}runtime-palo-santo.glb`,
       sink: 0.05,
-      items: scatter('palo-santo', 12, 119, {
-        minX: -38, maxX: 42, minZ: 26, maxZ: 52, scale: [0.42, 0.68],
+      items: scatter('castela', 12, 119, {
+        minX: -38, maxX: 42, minZ: 26, maxZ: 52, scale: [0.18, 0.32],
         accept: biome => biome === 'palo-santo' || biome === 'dry-scrub',
       }),
     },

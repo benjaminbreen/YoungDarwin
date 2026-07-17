@@ -10,7 +10,7 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
 import { BreakablePlantField } from '../breakablePlant/BreakablePlantField';
-import { PRICKLY_PEAR_SITES } from './pricklyPearSites';
+import { getPricklyPearSites, PRICKLY_PEAR_SITES } from './pricklyPearSites';
 import {
   buildPricklyPear,
   buildSiteDressing,
@@ -33,8 +33,7 @@ const WIND_FLOWER = 0.04;
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-function buildZonePieces(zoneId) {
-  const sites = PRICKLY_PEAR_SITES[zoneId] || [];
+function buildZonePieces(zoneId, sites = getPricklyPearSites(zoneId)) {
   const pieces = [];
   const scratch = new THREE.Vector3();
   for (const site of sites) {
@@ -240,6 +239,7 @@ function renderPiece(piece) {
 const PRICKLY_PEAR_SPEC = {
   id: 'prickly-pear',
   sitesByZone: PRICKLY_PEAR_SITES,
+  getSites: getPricklyPearSites,
   buildZonePieces,
   SiteDressing,
   renderPiece,

@@ -2,6 +2,12 @@ import { blackBeachInlandDistance, BLACK_BEACH } from '../regions/blackBeach/ter
 import { makeZoneScatter, nearAnyCluster } from '../scatter';
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { coastalBirds } from './flyingBirds';
+import {
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  DARWINIOTHAMNUS_LABEL,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
 
 const NATURE = '/assets/models/nature/';
 
@@ -41,12 +47,13 @@ function buildFlora() {
       && (biome === 'dune-scrub' || biome === 'dry-scrub'),
   });
 
-  const darwiniothamnus = scatter('black-beach-tall-shrub', 4, 461, {
-    minX: 20, maxX: 50, minZ: -30, maxZ: 34, scale: [0.4, 0.62], maxGrade: 0.6,
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(BLACK_BEACH, 'black-beach-tall-shrub', 36, 461, {
+    minX: 20, maxX: 50, minZ: -30, maxZ: 34, scale: [0.8, 2.45], maxGrade: 0.6,
+    patchCount: 4, patchRadius: [2.8, 5.4],
     accept: (biome, x, z) => blackBeachInlandDistance(x, z) > 24
       && nearAnyCluster(scrubClumps, x, z, 13)
       && (biome === 'dune-scrub' || biome === 'dry-scrub'),
-  });
+  }, { width: [0.9, 1.12], height: [0.88, 1.12], maxLean: 0.035 });
 
   const driftwood = scatter('black-beach-driftwood', 4, 477, {
     minX: -10, maxX: 16, minZ: -34, maxZ: 34, scale: [1.2, 2.2], maxGrade: 0.45,
@@ -87,7 +94,9 @@ function buildFlora() {
     },
     {
       id: 'black-beach-darwiniothamnus',
-      path: `${NATURE}runtime-darwiniothamnus.glb`,
+      label: DARWINIOTHAMNUS_LABEL,
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
       sink: 0.05,
       tint: '#7e834f',
       tintStrength: 0.12,

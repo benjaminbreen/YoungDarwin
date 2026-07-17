@@ -125,6 +125,7 @@ function makeSnapshot() {
     selectedSpecimenId: state.selectedSpecimenId || null,
     inventoryCount: Array.isArray(state.inventory) ? state.inventory.length : 0,
     journalCount: Array.isArray(state.journal) ? state.journal.length : 0,
+    assessmentTranscriptCount: Array.isArray(state.assessmentPlayerTranscript) ? state.assessmentPlayerTranscript.length : 0,
     health: finiteNumber(state.health),
     curiosity: finiteNumber(state.curiosity),
     fatigue: finiteNumber(state.fatigue),
@@ -154,6 +155,17 @@ function makeSnapshot() {
           source: state.expeditionOutcome.source || null,
           phase: state.expeditionOutcome.phase || null,
           cause: state.expeditionOutcome.cause || null,
+      }
+      : null,
+    finalAssessment: state.finalAssessment
+      ? {
+          phase: state.finalAssessment.phase || null,
+          source: state.finalAssessment.source || null,
+          overall: finiteNumber(state.finalAssessment.profile?.overall),
+          verdict: state.finalAssessment.profile?.verdict || null,
+          transcriptAdjustment: finiteNumber(state.finalAssessment.profile?.interactionAudit?.adjustment),
+          transcriptClassification: state.finalAssessment.profile?.interactionAudit?.classification || null,
+          conductCap: state.finalAssessment.profile?.interactionAudit?.conductCap ?? null,
         }
       : null,
     examineSession: summarizeExamineSession(state.examineSession),

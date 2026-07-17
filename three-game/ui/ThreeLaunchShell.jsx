@@ -5,8 +5,26 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { LaunchOverlay } from './LaunchOverlay';
 
 let runtimeImport = null;
+let physicsWarmup = null;
+
+function warmPhysicsRuntime() {
+  if (!physicsWarmup) {
+    // @react-three/rapier initializes the same compatibility module when its
+    // <Physics> boundary first mounts. Starting that WASM work while the menu
+    // is idle keeps it out of the post-click loading overlay.
+    physicsWarmup = import('@dimforge/rapier3d-compat')
+      .then(rapier => rapier.init())
+      .catch(error => {
+        physicsWarmup = null;
+        console.warn('Physics warm-up failed; the runtime will retry on launch.', error);
+        return null;
+      });
+  }
+  return physicsWarmup;
+}
 
 function loadThreeRuntime() {
+  void warmPhysicsRuntime();
   if (!runtimeImport) {
     runtimeImport = import('../ThreeDarwinGame').catch(error => {
       runtimeImport = null;

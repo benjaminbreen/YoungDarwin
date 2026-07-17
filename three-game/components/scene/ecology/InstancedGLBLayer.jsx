@@ -33,6 +33,7 @@ const BUCKET_TARGET_SIZE = 26;
 const BUCKET_MAX_DIM = 4;
 
 function partitionItemsSpatially(items) {
+  if (!items.length) return [];
   if (items.length < BUCKET_MIN_ITEMS) return [items];
   let minX = Infinity;
   let maxX = -Infinity;
@@ -61,6 +62,29 @@ function partitionItemsSpatially(items) {
   return Array.from(cells.values());
 }
 
+function stableVariantHash(value) {
+  const text = String(value || 'ecology-variant');
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function meshVariantIndexForItem(item, itemIndex, primitives) {
+  if (!primitives.length) return 0;
+  const explicitIndex = Number(item.variantIndex ?? item.variant);
+  if (Number.isFinite(explicitIndex)) {
+    return Math.abs(Math.floor(explicitIndex)) % primitives.length;
+  }
+  if (typeof item.variant === 'string') {
+    const namedIndex = primitives.findIndex(primitive => primitive.name === item.variant);
+    if (namedIndex >= 0) return namedIndex;
+  }
+  return stableVariantHash(item.id || `${item.x}:${item.z}:${itemIndex}`) % primitives.length;
+}
+
 function bucketCullBounds(items, maxVisibleDistance) {
   if (!Number.isFinite(maxVisibleDistance) || maxVisibleDistance <= 0 || !items.length) return null;
   let minX = Infinity;
@@ -70,7 +94,12 @@ function bucketCullBounds(items, maxVisibleDistance) {
   let minZ = Infinity;
   let maxZ = -Infinity;
   items.forEach(item => {
-    const scale = item.scale || 1;
+    const baseScale = item.scale || 1;
+    const scale = baseScale * Math.max(
+      item.widthScale || 1,
+      item.heightScale || 1,
+      item.depthScale || 1,
+    );
     minX = Math.min(minX, item.x - scale);
     maxX = Math.max(maxX, item.x + scale);
     minY = Math.min(minY, (item.y || 0) - scale);
@@ -99,8 +128,12 @@ function InstancedBucketMesh({
         item.y - sink - (item.grade || 0) * item.scale * slopeSink,
         item.z,
       );
-      dummy.rotation.set(0, item.yaw, 0);
-      dummy.scale.set(item.scale, item.scale * ySquash, item.scale);
+      dummy.rotation.set(item.pitch || 0, item.yaw, item.roll || 0);
+      dummy.scale.set(
+        item.scale * (item.widthScale || 1),
+        item.scale * ySquash * (item.heightScale || 1),
+        item.scale * (item.depthScale || 1),
+      );
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
     });
@@ -154,6 +187,7 @@ export function InstancedGLBLayer({
   sourceId = null,
   sourceLabel = null,
   sourceKind = 'ecology-glb-layer',
+  variantMode = null,
 }) {
   const groupRef = useRef(null);
   const bucketRefs = useRef([]);
@@ -185,7 +219,7 @@ export function InstancedGLBLayer({
       const shaded = cheapMaterials ? toMattePhong(material) : material;
       stabilizeFoliageMaterial(shaded, { doubleSide: true });
       if (motion) applyFoliageMotion(shaded, geometry, motion);
-      list.push({ geometry, material: shaded });
+      list.push({ geometry, material: shaded, name: object.name || object.parent?.name || `mesh-${list.length}` });
     });
     return list;
   }, [scene, tint, tintStrength, motion, hasItemTints, cheapMaterials]);
@@ -198,13 +232,26 @@ export function InstancedGLBLayer({
   }, [primitives]);
 
   // Spatial buckets (with per-bucket distance-cull bounds) for wide layers.
+  // Variant packs opt into one complete source mesh per ecology item instead
+  // of drawing every mesh in the source file at every scatter transform.
   const buckets = useMemo(() => {
     const scaledDistance = maxVisibleDistance == null ? null : maxVisibleDistance * foliageDrawScale;
-    return partitionItemsSpatially(items).map(bucketItems => ({
-      items: bucketItems,
-      cull: bucketCullBounds(bucketItems, scaledDistance),
-    }));
-  }, [items, maxVisibleDistance, foliageDrawScale]);
+    const assignments = variantMode === 'mesh'
+      ? primitives.map((_, primitiveIndex) => ({ primitiveIndices: [primitiveIndex], items: [] }))
+      : [{ primitiveIndices: primitives.map((_, primitiveIndex) => primitiveIndex), items }];
+    if (variantMode === 'mesh') {
+      items.forEach((item, itemIndex) => {
+        assignments[meshVariantIndexForItem(item, itemIndex, primitives)]?.items.push(item);
+      });
+    }
+    return assignments.flatMap(assignment => (
+      partitionItemsSpatially(assignment.items).map(bucketItems => ({
+        items: bucketItems,
+        primitiveIndices: assignment.primitiveIndices,
+        cull: bucketCullBounds(bucketItems, scaledDistance),
+      }))
+    ));
+  }, [items, maxVisibleDistance, foliageDrawScale, primitives, variantMode]);
 
   const handleInspect = useCallback((item, point) => {
     setInspectedObject(catalogToInspectable(inspectableType, point, { sourceId: item?.id || inspectableType }));
@@ -232,25 +279,28 @@ export function InstancedGLBLayer({
           key={bucketIndex}
           ref={el => { bucketRefs.current[bucketIndex] = { el, cull: bucket.cull }; }}
         >
-          {primitives.map(({ geometry, material }, index) => (
-            <InstancedBucketMesh
-              key={index}
-              geometry={geometry}
-              material={material}
-              items={bucket.items}
-              sink={sink}
-              slopeSink={slopeSink}
-              ySquash={ySquash}
-              tint={tint}
-              tintStrength={tintStrength}
-              hasItemTints={hasItemTints}
-              castShadow={castShadow}
-              receiveShadow={receiveShadow}
-              userData={meshUserData}
-              inspectableType={inspectableType}
-              onInspect={handleInspect}
-            />
-          ))}
+          {bucket.primitiveIndices.map(primitiveIndex => {
+            const { geometry, material } = primitives[primitiveIndex];
+            return (
+              <InstancedBucketMesh
+                key={primitiveIndex}
+                geometry={geometry}
+                material={material}
+                items={bucket.items}
+                sink={sink}
+                slopeSink={slopeSink}
+                ySquash={ySquash}
+                tint={tint}
+                tintStrength={tintStrength}
+                hasItemTints={hasItemTints}
+                castShadow={castShadow}
+                receiveShadow={receiveShadow}
+                userData={meshUserData}
+                inspectableType={inspectableType}
+                onInspect={handleInspect}
+              />
+            );
+          })}
         </group>
       ))}
     </group>

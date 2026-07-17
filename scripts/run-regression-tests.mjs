@@ -170,17 +170,31 @@ const {
 } = loadModule('three-game/world/routeSeams.js');
 const {
   coveWaterMask,
+  postOfficeBayCoastZ,
+  POST_OFFICE_BAY_BARREL_CLEARING,
+  postOfficeLandingBeachMask,
+  postOfficePathInfo,
   POST_OFFICE_BAY_NORTH_SHORE_TRAIL,
   POST_OFFICE_BAY_SCRUB_TRAIL,
   postOfficeTerrainBiomeAt,
   postOfficeTerrainHeight,
 } = loadModule('three-game/world/regions/postOfficeBay/terrain.js');
 const {
+  buildPostOfficeBayEcology,
+} = loadModule('three-game/world/ecology/postOfficeBay.js');
+const {
   N_SHORE_PATH_POINTS,
 } = loadModule('three-game/world/regions/northShore/terrain.js');
 const {
   POST_SCRUB_RISE_PATH_POINTS,
+  scrubRiseBasaltExposure,
+  scrubRisePathInfo,
+  scrubRiseThicketStrength,
+  scrubRiseWashMask,
 } = loadModule('three-game/world/regions/postScrubRise/path.js');
+const {
+  buildPostScrubRiseEcology,
+} = loadModule('three-game/world/ecology/postScrubRise.js');
 const {
   getInteriorDefinition,
   getInteriorPropSpawns,
@@ -210,6 +224,26 @@ const {
   getBeagleSightline,
 } = loadModule('three-game/world/beagleSightlines.js');
 const {
+  floraPreferenceSuitability,
+  scoreFloraHabitat,
+} = loadModule('three-game/world/ecology/proceduralFlora.js');
+const {
+  CROTON_SCOULERI_SPECIES,
+  DARWINIOTHAMNUS_SPECIES,
+  OPUNTIA_MEGASPERMA_SPECIES,
+} = loadModule('three-game/world/ecology/floraSpecies.js');
+const {
+  getPricklyPearSites,
+} = loadModule('three-game/physics/props/pricklyPear/pricklyPearSites.js');
+const {
+  buildPenalColonyEcology,
+} = loadModule('three-game/world/ecology/penalColony.js');
+const {
+  penalColonyGardenInfo,
+  penalColonyPathInfo,
+  penalColonyTrampledMask,
+} = loadModule('three-game/world/regions/penalColony/path.js');
+const {
   WEATHER_STATES,
   normalizeWeatherState,
   weatherProfile,
@@ -229,6 +263,200 @@ const {
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
 } = loadModule('three-game/expeditionOutcomes.js');
+const {
+  applyTranscriptEvaluation,
+  buildFinalAssessmentRecord,
+  buildLocalHenslowAssessment,
+  buildPlayerNarratorTranscript,
+  evaluateFinalAssessment,
+  isEndGameNarratorCommand,
+} = loadModule('three-game/finalAssessment.js');
+
+test('the narrator end-game command is explicit and deterministic', () => {
+  assert.equal(isEndGameNarratorCommand('end game'), true);
+  assert.equal(isEndGameNarratorCommand('  END GAME.  '), true);
+  assert.equal(isEndGameNarratorCommand('end the expedition'), true);
+  assert.equal(isEndGameNarratorCommand('when does the game end?'), false);
+  assert.equal(isEndGameNarratorCommand('end game after I collect this'), false);
+});
+
+test('player narrator turns are preserved verbatim in a bounded assessment transcript', () => {
+  const transcript = buildPlayerNarratorTranscript([
+    {
+      text: 'Which wing characters would distinguish this butterfly from the orange form?',
+      day: 2,
+      locationName: 'Scrub Rise',
+      specimenName: 'Galápagos Sulphur Butterfly',
+      symsNearby: true,
+    },
+    {
+      text: 'Could a net damage the scales, and would a field sketch be safer?',
+      day: 2,
+      locationName: 'Scrub Rise',
+      specimenName: 'Galápagos Sulphur Butterfly',
+      symsNearby: true,
+    },
+  ]);
+
+  assert.equal(transcript.turnCount, 2);
+  assert.equal(transcript.truncated, false);
+  assert.match(transcript.text, /Which wing characters would distinguish this butterfly/);
+  assert.match(transcript.text, /Could a net damage the scales/);
+  assert.match(transcript.text, /Syms nearby/);
+
+  const bounded = buildPlayerNarratorTranscript([
+    { text: 'A'.repeat(900), day: 1 },
+    { text: 'B'.repeat(900), day: 1 },
+    { text: 'C'.repeat(900), day: 1 },
+  ], 1200);
+  assert.equal(bounded.truncated, true);
+  assert.ok(bounded.text.length <= 1200);
+  assert.match(bounded.text, /middle narrator-panel turns omitted/);
+});
+
+test('structured transcript judgments adjust but do not rewrite canonical category scores', () => {
+  const base = {
+    overall: 6.2,
+    verdict: 'Promising, but incomplete',
+    recommendation: 'Retain the best evidence.',
+    categories: [
+      { id: 'observation', label: 'Observation', score: 6.5 },
+      { id: 'judgment', label: 'Field judgment', score: 5.5 },
+    ],
+    strengths: [],
+    gaps: ['Coverage remains limited.'],
+    interactionAudit: { status: 'pending', turnCount: 3, adjustment: 0, conductCap: null },
+  };
+  const positive = applyTranscriptEvaluation(base, {
+    adjustment: 1.4,
+    classification: 'exemplary',
+    summary: 'Darwin asked specific comparative and preservation questions.',
+    quotedEvidence: ['Which wing characters distinguish the forms?'],
+  });
+  assert.equal(positive.overall, 7.6);
+  assert.equal(positive.verdict, 'A sound and useful collection');
+  assert.deepEqual(positive.categories, base.categories);
+  assert.equal(positive.interactionAudit.adjustment, 1.4);
+
+  const outraged = applyTranscriptEvaluation(base, {
+    adjustment: -3.8,
+    classification: 'egregious',
+    conductCap: 1,
+    summary: 'Darwin answered extraordinary opportunity with childish contempt.',
+    quotedEvidence: ['this sucks lol'],
+  });
+  assert.equal(outraged.interactionAudit.adjustment, -3);
+  assert.equal(outraged.interactionAudit.conductCap, 1);
+  assert.equal(outraged.overall, 1);
+  assert.equal(outraged.verdict, 'A mortifying failure of fieldwork');
+  assert.match(outraged.gaps[0], /childish contempt/);
+});
+
+test('final assessment scores reflect the expedition record and remain bounded', () => {
+  const early = evaluateFinalAssessment({
+    health: 100,
+    fatigue: 0,
+    localStanding: 50,
+    currentZoneId: 'POST_OFFICE_BAY',
+    visitedZoneIds: ['POST_OFFICE_BAY'],
+    inventory: [],
+    journal: [],
+    collectedSpecimenIds: [],
+    documentedSpecimenIds: [],
+    examinedTypeIds: [],
+  });
+  const developedState = {
+    health: 82,
+    fatigue: 22,
+    curiosity: 74,
+    localStanding: 61,
+    day: 4,
+    currentZoneId: 'BLACK_BEACH',
+    currentLocationName: 'Black Beach',
+    visitedZoneIds: ['POST_OFFICE_BAY', 'POST_SCRUB_RISE', 'N_SHORE', 'BLACK_BEACH'],
+    inventory: [
+      { id: 'basalt', name: 'Vesicular Basalt', latin: 'Lava basaltica', condition: 'fresh fracture' },
+      { id: 'finch', name: 'Ground Finch', latin: 'Geospiza', condition: 'sound' },
+      { id: 'cactus', name: 'Opuntia', latin: 'Opuntia echios', condition: 'documented' },
+    ],
+    collectedSpecimenIds: ['basalt', 'finch'],
+    documentedSpecimenIds: ['cactus', 'finch', 'basalt'],
+    examinedTypeIds: ['basalt', 'finch', 'cactus'],
+    journal: [
+      { id: 'n1', authorship: 'player', location: 'Post Office Bay', method: 'Field sketch', content: 'A careful record of beak proportions, feeding movements, and the exact ground on which the bird was observed.' },
+      { id: 'n2', authorship: 'player', location: 'Scrub Rise', method: 'Bare Hands', content: 'The cactus pad was observed in place with flower, spine arrangement, substrate, and height all entered before collection.' },
+      { id: 'n3', authorship: 'player', location: 'North Shore', method: 'Geological Hammer', content: 'A fresh fracture shows vesicles and a dark fine-grained matrix; the exposed face and locality were both recorded.' },
+      { id: 'n4', authorship: 'player', location: 'Black Beach', method: 'Field sketch', content: 'The second finch was released after comparison with the retained example, with behavior and habitat differences noted.' },
+      { id: 'n5', authorship: 'player', location: 'Black Beach', method: 'Reading and comparison', content: 'The field characters were compared with the available shipboard reference while uncertainty in identification was retained.' },
+    ],
+  };
+  const developed = evaluateFinalAssessment(developedState);
+
+  assert.ok(developed.overall > early.overall + 4);
+  assert.ok(developed.categories.every(category => category.score >= 0 && category.score <= 10));
+  assert.equal(developed.stats.evidence, 3);
+  assert.equal(developed.stats.locations, 4);
+
+  const record = buildFinalAssessmentRecord(developedState, { createdAt: 123 });
+  assert.equal(record.id, 'final-assessment-123');
+  assert.equal(record.request.assessmentProfile.overall, developed.overall);
+  assert.equal(record.request.inventory.length, 3);
+  assert.match(buildLocalHenslowAssessment(record.profile), /J\. S\. Henslow$/);
+});
+
+test('seeded reference notes are excluded and a trivial butterfly note fails severely', () => {
+  const state = {
+    health: 100,
+    fatigue: 4,
+    localStanding: 50,
+    day: 1,
+    currentZoneId: 'POST_OFFICE_BAY',
+    visitedZoneIds: ['POST_OFFICE_BAY'],
+    inventory: [],
+    collectedSpecimenIds: [],
+    documentedSpecimenIds: [],
+    examinedTypeIds: ['galapagossulphur'],
+    specimenMetadata: {
+      galapagossulphur: { name: 'Galápagos Sulphur Butterfly', scientificValue: 3 },
+      marineiguana: { name: 'Marine Iguana', scientificValue: 7 },
+    },
+    journal: [
+      {
+        id: 'seed-marineiguana',
+        authorship: 'reference',
+        assessmentEligible: false,
+        specimenId: 'marineiguana',
+        specimenName: 'Marine Iguana',
+        content: 'A long and careful pre-written reference observation that the player did not author.',
+      },
+      {
+        id: '123-examination-galapagossulphur',
+        authorship: 'player',
+        specimenId: 'galapagossulphur',
+        specimenName: 'Galápagos Sulphur Butterfly',
+        location: 'Post Office Bay',
+        method: 'field examination',
+        content: 'Its a butterfly.',
+      },
+    ],
+  };
+  const profile = evaluateFinalAssessment(state);
+  const record = buildFinalAssessmentRecord(state, { createdAt: 456 });
+  const localLetter = buildLocalHenslowAssessment(profile);
+
+  assert.ok(profile.overall < 2, `Expected a severe failure score, received ${profile.overall}`);
+  assert.equal(profile.verdict, 'A mortifying failure of fieldwork');
+  assert.equal(profile.stats.notes, 1);
+  assert.equal(profile.stats.excludedReferenceNotes, 1);
+  assert.equal(profile.stats.evidence, 1);
+  assert.equal(profile.strengths.length, 0);
+  assert.equal(record.request.fieldNotes.length, 1);
+  assert.equal(record.request.fieldNotes[0].specimenName, 'Galápagos Sulphur Butterfly');
+  assert.doesNotMatch(JSON.stringify(record.request), /Marine Iguana/);
+  assert.match(localLetter, /small child's first encounter/i);
+  assert.match(localLetter, /common and unremarkable/i);
+  assert.match(localLetter, /some other line of work/i);
+});
 
 test('incremental injuries collapse Darwin while catastrophic causes are fatal', () => {
   assert.deepEqual(
@@ -580,6 +808,10 @@ test('animation actions are created on first use and cached by clip', () => {
   lazyActions.get('Walking');
   assert.equal(lazyActions.size, 2);
   assert.deepEqual(lazyActions.availableNames, ['Idle', 'Walking', 'Wave']);
+  assert.equal(lazyActions.add([{ name: 'Jump' }, { name: 'Idle' }]), 1);
+  assert.equal(lazyActions.has('jump'), true);
+  assert.equal(lazyActions.get('Idle'), idle, 'bank additions must not replace active boot clips');
+  assert.deepEqual(lazyActions.availableNames, ['Idle', 'Walking', 'Wave', 'Jump']);
   lazyActions.dispose();
   assert.equal(idle.stopped, true);
   assert.equal(uncached.length, 2);
@@ -1173,6 +1405,167 @@ test('weather aliases normalize into valid 3D states', () => {
   assert.ok(weatherProfile('rainy').rain > 0.7);
   assert.ok(weatherProfile('fog').mist > 0.5);
   assert.ok(weatherProfile('windy').windBoost > 0.4);
+});
+
+test('procedural flora habitat scoring respects preference cores and tolerances', () => {
+  const preference = { preferred: [0.3, 0.6], tolerated: [0.1, 0.8] };
+  assert.equal(floraPreferenceSuitability(0.45, preference), 1);
+  assert.equal(floraPreferenceSuitability(0.05, preference), 0);
+  assert.ok(floraPreferenceSuitability(0.2, preference) > 0);
+  assert.ok(floraPreferenceSuitability(0.2, preference) < 1);
+
+  const suitable = scoreFloraHabitat(DARWINIOTHAMNUS_SPECIES, {
+    moisture: 0.5,
+    canopy: 0.3,
+    exposure: 0.55,
+    disturbance: 0.08,
+    salinity: 0,
+  });
+  const disturbed = scoreFloraHabitat(DARWINIOTHAMNUS_SPECIES, {
+    moisture: 0.5,
+    canopy: 0.3,
+    exposure: 0.55,
+    disturbance: 0.5,
+    salinity: 0,
+  });
+  assert.ok(suitable > 0.9);
+  assert.ok(disturbed < suitable);
+  assert.equal(scoreFloraHabitat(DARWINIOTHAMNUS_SPECIES, { excluded: true }), 0);
+});
+
+test('penal colony procedural flora overlays authored flora without entering worked ground', () => {
+  const ecology = buildPenalColonyEcology();
+  assert.equal(ecology.flora.length, 3);
+  assert.equal(ecology.proceduralFlora.length, 1);
+  const layer = ecology.proceduralFlora[0];
+  assert.equal(layer.procedural, true);
+  assert.equal(layer.speciesId, DARWINIOTHAMNUS_SPECIES.id);
+  assert.equal(layer.items.length, 36);
+  assert.equal(new Set(layer.items.map(item => item.variantIndex)).size, 9);
+  for (const item of layer.items) {
+    const pathInfo = penalColonyPathInfo(item.x, item.z);
+    assert.ok(pathInfo.distance >= pathInfo.width * 1.55);
+    assert.ok(penalColonyTrampledMask(item.x, item.z) <= 0.12);
+    assert.ok(penalColonyGardenInfo(item.x, item.z).mask <= 0.08);
+  }
+});
+
+test('post scrub rise procedural flora fills suitable gaps beside authored shrubs', () => {
+  const ecology = buildPostScrubRiseEcology();
+  const authoredLayer = ecology.flora.find(layer => layer.id === 'scrub-rise-darwiniothamnus');
+  const layer = ecology.proceduralFlora[0];
+  assert.equal(authoredLayer.items.length, 63);
+  assert.equal(layer.procedural, true);
+  assert.equal(layer.speciesId, DARWINIOTHAMNUS_SPECIES.id);
+  assert.equal(layer.items.length, 36);
+  assert.equal(new Set(layer.items.map(item => item.variantIndex)).size, 9);
+  for (const item of layer.items) {
+    const pathInfo = scrubRisePathInfo(item.x, item.z);
+    const authoredDistance = Math.min(...authoredLayer.items.map(authored => (
+      Math.hypot(item.x - authored.x, item.z - authored.z)
+    )));
+    assert.ok(pathInfo.distance >= pathInfo.width * 1.72);
+    assert.ok(scrubRiseWashMask(item.x, item.z) <= 0.58);
+    assert.ok(scrubRiseBasaltExposure(item.x, item.z) <= 0.82);
+    assert.ok(authoredDistance >= 3.2);
+  }
+});
+
+test('post scrub rise interactive flora feeds stable separated prickly pear physics sites', () => {
+  const ecology = buildPostScrubRiseEcology();
+  const layer = ecology.interactiveFlora[0];
+  const candelabra = ecology.flora.find(item => item.id === 'scrub-rise-candelabra-cactus');
+  assert.equal(layer.procedural, true);
+  assert.equal(layer.runtime, 'prickly-pear');
+  assert.equal(layer.speciesId, OPUNTIA_MEGASPERMA_SPECIES.id);
+  assert.equal(layer.sites.length, 6);
+  assert.equal(layer.placementStats.generatedPatchCount, 2);
+  assert.equal(new Set(layer.sites.map(site => site.id)).size, 6);
+  assert.deepEqual(
+    getPricklyPearSites('POST_SCRUB_RISE').map(site => site.id),
+    layer.sites.map(site => site.id),
+  );
+
+  for (let index = 0; index < layer.sites.length; index += 1) {
+    const site = layer.sites[index];
+    const pathInfo = scrubRisePathInfo(site.x, site.z);
+    const candelabraDistance = Math.min(...candelabra.items.map(item => (
+      Math.hypot(site.x - item.x, site.z - item.z)
+    )));
+    assert.ok(pathInfo.distance >= pathInfo.width * 1.85);
+    assert.ok(scrubRiseWashMask(site.x, site.z) <= 0.48);
+    assert.ok(scrubRiseThicketStrength(site.x, site.z) <= 0.72);
+    assert.ok(scrubRiseBasaltExposure(site.x, site.z) <= 0.9);
+    assert.ok(candelabraDistance >= 5);
+    assert.ok(Math.hypot(site.x + 31, site.z + 9) >= 5);
+    assert.ok(site.size >= 0.75 && site.size <= 1.3);
+    assert.ok(site.flowerCount >= 0 && site.flowerCount <= 3);
+    assert.match(site.seed, /^POST_SCRUB_RISE:/);
+    for (const other of layer.sites.slice(index + 1)) {
+      assert.ok(Math.hypot(site.x - other.x, site.z - other.z) >= 4.5);
+    }
+  }
+});
+
+test('post office bay procedural ecology forms a coastal-to-inland flora gradient', () => {
+  const ecology = buildPostOfficeBayEcology();
+  const croton = ecology.proceduralFlora.find(layer => layer.speciesId === CROTON_SCOULERI_SPECIES.id);
+  const darwiniothamnus = ecology.proceduralFlora.find(layer => layer.speciesId === DARWINIOTHAMNUS_SPECIES.id);
+  const pricklyPear = ecology.interactiveFlora.find(layer => layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id);
+  const authoredCacti = ecology.flora
+    .filter(layer => layer.id === 'opuntia' || layer.id === 'post-office-bay-candelabra-cactus')
+    .flatMap(layer => layer.items);
+
+  assert.equal(ecology.flora.length, 3);
+  assert.equal(croton.items.length, 72);
+  assert.equal(croton.placementStats.generatedPatchCount, 8);
+  assert.equal(darwiniothamnus.items.length, 54);
+  assert.equal(darwiniothamnus.placementStats.generatedPatchCount, 6);
+  assert.equal(new Set(darwiniothamnus.items.map(item => item.variantIndex)).size, 9);
+  assert.equal(pricklyPear.sites.length, 6);
+  assert.equal(pricklyPear.placementStats.generatedPatchCount, 2);
+
+  const shoreDistance = item => item.z - postOfficeBayCoastZ(item.x);
+  const meanShoreDistance = items => (
+    items.reduce((total, item) => total + shoreDistance(item), 0) / items.length
+  );
+  assert.ok(croton.items.some(item => shoreDistance(item) < 40));
+  assert.ok(darwiniothamnus.items.some(item => shoreDistance(item) < 40));
+  assert.ok(meanShoreDistance(croton.items) < meanShoreDistance(darwiniothamnus.items));
+  assert.ok(darwiniothamnus.items.filter(item => shoreDistance(item) >= 40).length > 40);
+
+  for (const item of [...croton.items, ...darwiniothamnus.items]) {
+    const path = postOfficePathInfo(item.x, item.z);
+    const clearingDistance = Math.hypot(
+      item.x - POST_OFFICE_BAY_BARREL_CLEARING.x,
+      item.z - POST_OFFICE_BAY_BARREL_CLEARING.z,
+    );
+    assert.ok(shoreDistance(item) >= 10);
+    assert.ok(coveWaterMask(item.x, item.z) <= 0.1);
+    assert.ok(postOfficeLandingBeachMask(item.x, item.z) <= 0.1);
+    assert.ok(path.distance >= path.width * 1.72);
+    assert.ok(clearingDistance >= POST_OFFICE_BAY_BARREL_CLEARING.radius * 1.45);
+  }
+
+  const resolvedPricklyPearSites = getPricklyPearSites('POST_OFFICE_BAY');
+  assert.equal(resolvedPricklyPearSites.length, 10);
+  assert.deepEqual(
+    resolvedPricklyPearSites.slice(-pricklyPear.sites.length).map(site => site.id),
+    pricklyPear.sites.map(site => site.id),
+  );
+  for (let index = 0; index < pricklyPear.sites.length; index += 1) {
+    const site = pricklyPear.sites[index];
+    const path = postOfficePathInfo(site.x, site.z);
+    const authoredDistance = Math.min(...authoredCacti.map(item => (
+      Math.hypot(site.x - item.x, site.z - item.z)
+    )));
+    assert.ok(shoreDistance(site) >= 25);
+    assert.ok(path.distance >= path.width * 2.05);
+    assert.ok(authoredDistance >= 5);
+    for (const other of pricklyPear.sites.slice(index + 1)) {
+      assert.ok(Math.hypot(site.x - other.x, site.z - other.z) >= 5);
+    }
+  }
 });
 
 test('weather band weights only reference authored weather states', () => {

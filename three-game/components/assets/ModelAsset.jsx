@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -783,10 +783,19 @@ function modelBoundsDebugEnabled() {
 // frozen pose. Keeps skinning/mixer cost off distant fauna and specimens.
 const ANIM_LOD_NEAR_SQ = 20 * 20;
 const ANIM_LOD_FAR_SQ = 45 * 45;
+const NO_ANIMATION_BANKS = Object.freeze([]);
 
 // Bones the aim overlay owns: torso, arms, head — never hips or legs, so the
 // locomotion clip keeps walking underneath the shouldered pose.
 const OVERLAY_UPPER_BODY_RE = /spine|neck|head|shoulder|clavicle|arm|hand/i;
+
+function AnimationBankLoader({ bank, onLoad }) {
+  const { animations } = useGLTF(assetLoadUrl(bank));
+  useEffect(() => {
+    onLoad(bank.id, animations);
+  }, [animations, bank.id, onLoad]);
+  return null;
+}
 
 function GLBPrimitive({
   assetId,
@@ -801,6 +810,8 @@ function GLBPrimitive({
   overlaySelector = null,
   castShadow = null,
   receiveShadow = null,
+  animationBankPhase = Number.POSITIVE_INFINITY,
+  onAnimationBanksReady = null,
 }) {
   const group = useRef(null);
   const gl = useThree(state => state.gl);
@@ -809,12 +820,38 @@ function GLBPrimitive({
   const animationSelectorRef = useRef(animationSelector);
   const overlaySelectorRef = useRef(overlaySelector);
   const overlayStateRef = useRef({ action: null, clip: null, weight: 0 });
+  const additiveBreathingRef = useRef(null);
   const warnedMissing = useRef(new Set());
   const lastBoundsDebugAt = useRef(0);
   const animLodSkipParity = useRef(false);
   const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
   const assetUrl = assetLoadUrl(asset);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
+  const animationBanks = asset.animationBanks || NO_ANIMATION_BANKS;
+  const [bankAnimations, setBankAnimations] = useState(NO_ANIMATION_BANKS);
+  const [animationBanksReady, setAnimationBanksReady] = useState(animationBanks.length === 0);
+  const loadedAnimationBanksRef = useRef(new Map());
+  const handleAnimationBankLoad = useCallback((bankId, clips) => {
+    if (loadedAnimationBanksRef.current.has(bankId)) return;
+    loadedAnimationBanksRef.current.set(bankId, clips || []);
+    setBankAnimations(animationBanks.flatMap(bank => (
+      loadedAnimationBanksRef.current.get(bank.id) || []
+    )));
+    if (loadedAnimationBanksRef.current.size === animationBanks.length) {
+      setAnimationBanksReady(true);
+    }
+  }, [animationBanks]);
+  const activeAnimationBanks = useMemo(() => animationBanks.filter(bank => (
+    animationBankPhase >= (bank.phase ?? 0)
+  )), [animationBankPhase, animationBanks]);
+
+  useEffect(() => {
+    if (animationBanksReady) onAnimationBanksReady?.();
+  }, [animationBanksReady, onAnimationBanksReady]);
+
+  const nativeAnimations = useMemo(() => (
+    bankAnimations?.length ? ownAnimations.concat(bankAnimations) : ownAnimations
+  ), [bankAnimations, ownAnimations]);
   // Optional: borrow clips this rig lacks from another asset's GLB. Requires an
   // identical (same-named) skeleton — clips bind to bones by name. The source
   // load is unconditional (falls back to this asset's own path, which is cached
@@ -822,8 +859,8 @@ function GLBPrimitive({
   const sourceAsset = asset.animationSource ? getModelAsset(asset.animationSource) : null;
   const { animations: sourceAnimations } = useGLTF(assetLoadUrl(sourceAsset) || assetUrl);
   const animations = useMemo(() => {
-    if (!sourceAsset || sourceAnimations === ownAnimations) return ownAnimations;
-    const have = new Set(ownAnimations.map(clip => normalizeClipName(clip.name)));
+    if (!sourceAsset || sourceAnimations === ownAnimations) return nativeAnimations;
+    const have = new Set(nativeAnimations.map(clip => normalizeClipName(clip.name)));
     // Native rig sizes differ; group scale compensates, so the inverse ratio of
     // group scales is the native-size ratio. Rotation tracks are scale-invariant
     // — only position tracks (chiefly the Hips root bob/height) need rescaling.
@@ -844,8 +881,8 @@ function GLBPrimitive({
       }
       ported.push(copy);
     });
-    return ported.length ? ownAnimations.concat(ported) : ownAnimations;
-  }, [ownAnimations, sourceAnimations, sourceAsset, asset.scale]);
+    return ported.length ? nativeAnimations.concat(ported) : nativeAnimations;
+  }, [nativeAnimations, ownAnimations, sourceAnimations, sourceAsset, asset.scale]);
   const importedScene = useMemo(() => {
     const cloned = cloneSkeleton(scene);
     return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
@@ -860,14 +897,17 @@ function GLBPrimitive({
   const debugCenter = useMemo(() => new THREE.Vector3(), []);
   const animLodWorldPos = useMemo(() => new THREE.Vector3(), []);
   const lazyActions = useMemo(() => createLazyAnimationActions({
-    animations,
+    animations: [],
     mixer,
     root: importedScene,
     normalizeClipName,
-  }), [animations, importedScene, mixer]);
+  }), [importedScene, mixer]);
   const positionAnimatedBones = useMemo(() => {
     const result = new Set();
-    animations.forEach(clip => {
+    // Boot locomotion already identifies every position-animated foot bone.
+    // Keeping this scan on the boot set avoids walking thousands of deferred
+    // keyframe tracks when the banks commit during the aerial shot.
+    ownAnimations.forEach(clip => {
       clip.tracks.forEach(track => {
         if (!track.name.endsWith('.position')) return;
         const [targetName] = track.name.split('.');
@@ -875,27 +915,33 @@ function GLBPrimitive({
       });
     });
     return result;
-  }, [animations]);
+  }, [ownAnimations]);
   // Always-on additive breathing layer (player only, via asset.additiveBreathing).
   // The clip is filtered to torso/neck rotation tracks and converted to an
   // additive delta against its own first frame, so at low weight it reads as
   // subtle chest/shoulder motion under any full-body state.
-  const additiveBreathing = useMemo(() => {
+  const additiveBreathingSource = useMemo(() => {
     const cfg = asset.additiveBreathing;
     if (!cfg?.clip) return null;
     const normalized = normalizeClipName(cfg.clip);
-    const source = animations.find(clip => clip.name === cfg.clip || normalizeClipName(clip.name) === normalized);
-    if (!source) return null;
-    const tracks = source.tracks
+    return animations.find(clip => (
+      clip.name === cfg.clip || normalizeClipName(clip.name) === normalized
+    )) || null;
+  }, [animations, asset.additiveBreathing]);
+  const additiveBreathingClip = useMemo(() => {
+    if (!additiveBreathingSource) return null;
+    const tracks = additiveBreathingSource.tracks
       .filter(track => ADDITIVE_BREATHING_BONE_RE.test(track.name.split('.')[0]) && track.name.endsWith('.quaternion'))
       .map(track => track.clone());
     if (!tracks.length) return null;
-    const clip = new THREE.AnimationClip(`${source.name}.additive`, source.duration, tracks);
+    const clip = new THREE.AnimationClip(
+      `${additiveBreathingSource.name}.additive`,
+      additiveBreathingSource.duration,
+      tracks,
+    );
     THREE.AnimationUtils.makeClipAdditive(clip);
-    const action = mixer.clipAction(clip, importedScene);
-    action.setLoop(THREE.LoopRepeat, Infinity);
-    return { action, weight: 0 };
-  }, [animations, asset.additiveBreathing, importedScene, mixer]);
+    return clip;
+  }, [additiveBreathingSource]);
   const footContactRig = useMemo(() => createFootContactRig({
     assetId,
     asset,
@@ -1029,6 +1075,25 @@ function GLBPrimitive({
     overlaySelectorRef.current = overlaySelector;
   }, [overlaySelector]);
 
+  // Mixer mutation belongs in a committed effect. Creating an action from
+  // useMemo can leak a half-registered action when React abandons or repeats a
+  // render (notably during Fast Refresh and deferred bank commits).
+  useEffect(() => {
+    if (!additiveBreathingClip) {
+      additiveBreathingRef.current = null;
+      return undefined;
+    }
+    const action = mixer.clipAction(additiveBreathingClip, importedScene);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    const state = { action, clip: additiveBreathingClip, weight: 0 };
+    additiveBreathingRef.current = state;
+    return () => {
+      if (additiveBreathingRef.current === state) additiveBreathingRef.current = null;
+      action.stop();
+      mixer.uncacheAction(additiveBreathingClip, importedScene);
+    };
+  }, [additiveBreathingClip, importedScene, mixer]);
+
   // Lazily builds (and caches on the state ref) an upper-body-only sub-clip
   // action for the requested clip name.
   const getOverlayAction = useCallback(clipName => {
@@ -1039,7 +1104,14 @@ function GLBPrimitive({
     if (!source) return null;
     const tracks = source.tracks.filter(track => OVERLAY_UPPER_BODY_RE.test(track.name.split('.')[0]));
     if (!tracks.length) return null;
-    state.action?.stop();
+    if (state.action) {
+      const previousAction = state.action;
+      const previousClip = previousAction.getClip();
+      previousAction.stop();
+      overlayMixer.uncacheAction(previousClip, importedScene);
+      state.action = null;
+      state.clip = null;
+    }
     const subClip = new THREE.AnimationClip(`${source.name}.upperBody`, source.duration, tracks);
     const action = overlayMixer.clipAction(subClip, importedScene);
     action.setLoop(THREE.LoopRepeat, Infinity);
@@ -1049,16 +1121,39 @@ function GLBPrimitive({
   }, [animations, importedScene, overlayMixer]);
 
   useEffect(() => {
+    lazyActions.add(animations);
+    // Bank arrivals extend the registry but must not restart or invalidate the
+    // action currently playing from the boot GLB.
+    if (activeAction.current) return;
     const first = lazyActions.has('idle') ? 'idle' : animations[0]?.name;
     const selector = animationSelectorRef.current;
     const initial = selector ? selector() : first;
     playAnimation(initial || { clip: first, fade: 0.15 });
-    return () => {
-      lazyActions.dispose();
-      activeAction.current = null;
-      activeRequest.current = null;
-    };
   }, [animations, lazyActions, playAnimation]);
+
+  useEffect(() => () => {
+    const overlayState = overlayStateRef.current;
+    if (overlayState.action) {
+      const overlayClip = overlayState.action.getClip();
+      overlayState.action.stop();
+      overlayMixer.uncacheAction(overlayClip, importedScene);
+    }
+    overlayState.action = null;
+    overlayState.clip = null;
+    overlayState.weight = 0;
+    overlayMixer.stopAllAction();
+    overlayMixer.uncacheRoot(importedScene);
+  }, [importedScene, overlayMixer]);
+
+  useEffect(() => () => {
+    // The registry and mixer are torn down only with the cloned model root.
+    // Deferred banks merely add clips and never touch mixer cache ownership.
+    mixer.stopAllAction();
+    lazyActions.dispose();
+    mixer.uncacheRoot(importedScene);
+    activeAction.current = null;
+    activeRequest.current = null;
+  }, [importedScene, lazyActions, mixer]);
 
   useEffect(() => () => footContactRig.dispose(), [footContactRig]);
 
@@ -1080,6 +1175,7 @@ function GLBPrimitive({
     // Fauna and other world actors follow the world clock so bullet time
     // slows their wingbeats/gaits along with their motion.
     if (timeScaled) mixerDelta *= worldTime.scale;
+    const additiveBreathing = additiveBreathingRef.current;
     if (additiveBreathing) {
       const motionState = grounding?.motionRef?.current;
       let targetWeight = 0.55;
@@ -1154,15 +1250,22 @@ function GLBPrimitive({
   });
 
   return (
-    <group
-      ref={group}
-      scale={asset.scale || 1}
-      rotation={asset.rotation || [0, 0, 0]}
-      position={[0, asset.yOffset || 0, 0]}
-      userData={renderUserData}
-    >
-      <primitive object={importedScene} />
-    </group>
+    <>
+      {activeAnimationBanks.map(bank => (
+        <Suspense key={bank.id} fallback={null}>
+          <AnimationBankLoader bank={bank} onLoad={handleAnimationBankLoad} />
+        </Suspense>
+      ))}
+      <group
+        ref={group}
+        scale={asset.scale || 1}
+        rotation={asset.rotation || [0, 0, 0]}
+        position={[0, asset.yOffset || 0, 0]}
+        userData={renderUserData}
+      >
+        <primitive object={importedScene} />
+      </group>
+    </>
   );
 }
 
@@ -1179,6 +1282,8 @@ export function ModelAsset({
   overlaySelector = null,
   castShadow = null,
   receiveShadow = null,
+  animationBankPhase = Number.POSITIVE_INFINITY,
+  onAnimationBanksReady = null,
 }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
@@ -1186,6 +1291,7 @@ export function ModelAsset({
   return (
     <Suspense fallback={fallback}>
       <GLBPrimitive
+        key={id}
         assetId={id}
         asset={asset}
         animationSelector={animationSelector}
@@ -1198,6 +1304,8 @@ export function ModelAsset({
         overlaySelector={overlaySelector}
         castShadow={castShadow}
         receiveShadow={receiveShadow}
+        animationBankPhase={animationBankPhase}
+        onAnimationBanksReady={onAnimationBanksReady}
       />
     </Suspense>
   );

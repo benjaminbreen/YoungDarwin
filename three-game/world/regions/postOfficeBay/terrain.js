@@ -105,14 +105,14 @@ const POST_OFFICE_BAY_WATER_POLYGON = [
   [66.0, -38.0],
 ];
 
-// A deliberately local landing beach around the default Darwin spawn. The
-// wider cove coastline remains unchanged; only this short central reach is
-// eased down into the water.
+// A local but generous landing beach below Darwin's inland starting overlook.
+// The wider cove coastline remains unchanged; this central reach is eased down
+// into the water and carries the reusable white shell-sand material.
 export const POST_OFFICE_BAY_LANDING_BEACH = {
   x: 11,
   z: 3,
-  radiusX: 18,
-  radiusZ: 12,
+  radiusX: 22,
+  radiusZ: 15,
   inner: 0.72,
 };
 
@@ -137,10 +137,14 @@ export function postOfficeBayCoastZ(x) {
 }
 
 export function postOfficeLandingBeachMask(x, z) {
-  const alongshore = 1 - THREE.MathUtils.smoothstep(Math.abs(x - POST_OFFICE_BAY_LANDING_BEACH.x), 9, 16);
+  const alongshore = 1 - THREE.MathUtils.smoothstep(
+    Math.abs(x - POST_OFFICE_BAY_LANDING_BEACH.x),
+    12,
+    20,
+  );
   const shoreDistance = z - postOfficeBayCoastZ(x);
-  const seaward = THREE.MathUtils.smoothstep(shoreDistance, -9, -5);
-  const inland = 1 - THREE.MathUtils.smoothstep(shoreDistance, 9, 15);
+  const seaward = THREE.MathUtils.smoothstep(shoreDistance, -10, -5.5);
+  const inland = 1 - THREE.MathUtils.smoothstep(shoreDistance, 11, 18);
   return THREE.MathUtils.clamp(alongshore * seaward * inland, 0, 1);
 }
 
@@ -443,7 +447,7 @@ export const postOfficeBayRegion = {
     biomeAt: postOfficeTerrainBiomeAt,
     color: postOfficeTerrainColor,
     isWalkable: isPostOfficeWalkable,
-    defaultSpawn: [11.4, 0, 6.1],
+    defaultSpawn: [0, 0, 23.5],
     entrySpawns: {
       south: [-7, 0, 53],
     },

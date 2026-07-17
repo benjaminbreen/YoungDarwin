@@ -3,6 +3,13 @@ import { terrainHeight, terrainSlopeAt } from '../terrain';
 import { EL_MIRADOR, elMiradorPathInfo } from '../regions/elMirador/path';
 import { buildStandardDryPathGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
+import {
+  DARWINIOTHAMNUS_LABEL,
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -98,6 +105,56 @@ function buildElMiradorRocks() {
   return rocks;
 }
 
+function buildElMiradorLitter() {
+  return [buildDryVolcanicLitterLayer({
+    zoneId: EL_MIRADOR,
+    id: 'el-mirador-volcanic-litter',
+    itemIdPrefix: 'el-mirador-chip',
+    count: 460,
+    seed: 11921,
+    bounds: { minX: -47, maxX: 47, minZ: -42, maxZ: 42 },
+    scale: [0.48, 1.35],
+    maxVisibleDistance: 48,
+    variantOptions: [
+      { variant: 'basalt-pebble', weight: 0.72, colors: ['#554f43', '#3b3b35', '#292b27'] },
+      { variant: 'oxidized-scoria-chip', weight: 0.28, colors: ['#a65d3e', '#824733'] },
+    ],
+    accept: (biome, x, z) => {
+      const path = elMiradorPathInfo(x, z);
+      return path.tread < 0.18 && (
+        biome === 'stony-highland-slope'
+        || biome === 'mirador-cliff'
+        || path.shoulder > 0.3
+      );
+    },
+  })];
+}
+
+function buildElMiradorFlora() {
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(EL_MIRADOR, 'el-mirador-darwiniothamnus', 63, 11963, {
+    minX: -45, maxX: 45, minZ: -39, maxZ: 41, scale: [0.8, 2.45], maxGrade: 0.9,
+    patchCount: 7, patchRadius: [3.2, 6.8],
+    accept: (biome, x, z, y) => {
+      const path = elMiradorPathInfo(x, z);
+      return y > 4.1
+        && path.distance > path.width * 1.55
+        && (biome === 'dry-highland-grass' || biome === 'stony-highland-slope');
+    },
+  }, { width: [0.88, 1.15], height: [0.88, 1.12], maxLean: 0.045 });
+  return [{
+    id: 'el-mirador-darwiniothamnus',
+    label: DARWINIOTHAMNUS_LABEL,
+    path: DARWINIOTHAMNUS_PATH,
+    variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
+    sink: 0.05,
+    tint: '#83945b',
+    tintStrength: 0.14,
+    motion: { wind: 1.02, bend: 0.28, bendRadius: 1.65 },
+    castShadow: false,
+    items: darwiniothamnus,
+  }];
+}
+
 export function buildElMiradorEcology() {
   return {
     zoneId: EL_MIRADOR,
@@ -118,7 +175,8 @@ export function buildElMiradorEcology() {
       }),
     ],
     rocks: buildElMiradorRocks(),
-    flora: [],
+    surfaceLitter: buildElMiradorLitter(),
+    flora: buildElMiradorFlora(),
     props: [],
     footprintBiomes: ['red-dirt-path', 'path-shoulder', 'dry-highland-grass', 'stony-highland-slope'],
     flyingModels: [

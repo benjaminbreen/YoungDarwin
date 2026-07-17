@@ -196,7 +196,13 @@ function pushAnimationForObstacle(obstacle) {
 }
 
 
-export function PlayerController({ physicsDebug = false, openingCamera = null, inputLocked = false }) {
+export function PlayerController({
+  physicsDebug = false,
+  openingCamera = null,
+  inputLocked = false,
+  animationBankPhase = Number.POSITIVE_INFINITY,
+  onAnimationBanksReady = null,
+}) {
   const faunaDebug = useMemo(faunaDebugEnabled, []);
   const group = useRef(null);
   const warningRef = useRef(null);
@@ -3041,6 +3047,8 @@ export function PlayerController({ physicsDebug = false, openingCamera = null, i
           fatigue={fatigue}
           inventoryCount={inventoryCount}
           grounding={modelGrounding}
+          animationBankPhase={animationBankPhase}
+          onAnimationBanksReady={onAnimationBanksReady}
         />
       </group>
       <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>

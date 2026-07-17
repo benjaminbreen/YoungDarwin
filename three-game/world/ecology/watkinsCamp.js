@@ -14,6 +14,12 @@ import {
   createStandardDryGrassPatchLayer,
 } from './standardGrass';
 import { getModelAsset } from '../../modelAssets';
+import {
+  DARWINIOTHAMNUS_PATH,
+  DARWINIOTHAMNUS_VARIANT_MODE,
+  DARWINIOTHAMNUS_LABEL,
+  makeDarwiniothamnusPatchScatter,
+} from './floraAssets';
 
 const ZONE = WATKINS;
 const NATURE = '/assets/models/nature/';
@@ -172,7 +178,7 @@ function buildFlora() {
   };
 
   // Big scalesia bushes — the Western Highlands hero shrub, slightly drier
-  // here. Ids keep 'scalesia'/'croton'/'saltbush'/'palo-santo' naming so the
+  // here. Ids keep 'scalesia'/'croton'/'saltbush'/'castela' naming so the
   // shared layer->inspectable mapping picks them up.
   const scalesiaBushes = scatter('watkins-scalesia-bushes', 18, 911, {
     minX: -44, maxX: 44, minZ: -20, maxZ: 12, scale: [0.85, 1.5], maxGrade: 0.7,
@@ -186,12 +192,21 @@ function buildFlora() {
     minX: -44, maxX: 44, minZ: -18, maxZ: 10, scale: [0.6, 1.1], maxGrade: 0.75,
     accept: (biome, x, z) => inGreenBelt(x, z, 0.2) || bankSide(x, z),
   });
-  // NOTE: these two GLBs are huge natively (darwiniothamnus ~7.5 m wide,
-  // galapagos-bushes ~225 m!) — scales must stay tiny, matching other zones.
-  const darwiniothamnus = scatter('watkins-darwiniothamnus', 14, 953, {
-    minX: -46, maxX: 46, minZ: -30, maxZ: 14, scale: [0.32, 0.55], maxGrade: 0.8,
-    accept: (biome, x, z) => (inGreenBelt(x, z, 0.14) || bankSide(x, z)) && clearOfHomestead(x, z, 7),
-  });
+  // The Darwiniothamnus runtime pack contains nine centered shrub forms; each
+  // scatter item selects one. Galapagos bushes remain a large catalog sheet
+  // and therefore retain their unusually small layer scale.
+  const darwiniothamnus = makeDarwiniothamnusPatchScatter(ZONE, 'watkins-darwiniothamnus', 54, 953, {
+    minX: -46, maxX: 46, minZ: -30, maxZ: 24, scale: [0.8, 2.45], maxGrade: 0.8,
+    patchCount: 6, patchRadius: [3, 6.5],
+    accept: (biome, x, z) => {
+      const river = watkinsRiverInfo(x, z);
+      return river.water < 0.02
+        && river.valley < 0.52
+        && offTrack(x, z, 3.8)
+        && clearOfHomestead(x, z, 9)
+        && (biome === 'dry-grass' || biome === 'terrace-scrub');
+    },
+  }, { width: [0.88, 1.14], height: [0.88, 1.12], maxLean: 0.04 });
   const saltbush = scatter('saltbush-watkins', 16, 967, {
     minX: -46, maxX: 46, minZ: -4, maxZ: 20, scale: [0.5, 0.95], maxGrade: 0.85,
     accept: (biome, x, z) => bankSide(x, z),
@@ -246,7 +261,9 @@ function buildFlora() {
     },
     {
       id: 'watkins-darwiniothamnus',
-      path: `${NATURE}runtime-darwiniothamnus.glb`,
+      label: DARWINIOTHAMNUS_LABEL,
+      path: DARWINIOTHAMNUS_PATH,
+      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
       sink: 0.06,
       tintStrength: 0.16,
       castShadow: false,
@@ -272,15 +289,16 @@ function buildFlora() {
       items: tintItems(bushClumps, '#8e9c62', '#6c7c4f'),
     },
     {
-      id: 'palo-santo-watkins',
+      id: 'castela-watkins',
+      label: 'Galapagos bitterbush / Castela galapageia',
       path: `${NATURE}runtime-palo-santo.glb`,
       sink: 0.1,
       castShadow: true,
       tint: '#9aa27c',
       tintStrength: 0.14,
       motion: { wind: 0.22, bend: 0.04, bendRadius: 2.2 },
-      items: scatter('palo-santo-watkins', 8, 811, {
-        minX: -46, maxX: 46, minZ: -40, maxZ: -8, scale: [0.2, 0.36], maxGrade: 0.7,
+      items: scatter('castela-watkins', 8, 811, {
+        minX: -46, maxX: 46, minZ: -40, maxZ: -8, scale: [0.18, 0.32], maxGrade: 0.7,
         accept: (biome, x, z) => ['dry-grass', 'terrace-scrub', 'homestead-yard'].includes(biome)
           && offTrack(x, z, 5.5)
           && watkinsYardMask(x, z) < 0.3
@@ -327,14 +345,6 @@ function buildFlora() {
         minX: -46, maxX: 46, minZ: 14, maxZ: 42, scale: [0.14, 0.3], maxGrade: 0.85,
         accept: (biome, x, z) => watkinsCliffFactor(x, z) > 0.18 && watkinsRiverInfo(x, z).water < 0.05 && offTrack(x, z, 3),
       }),
-    },
-    {
-      id: 'watkins-garden-gone-wild',
-      path: `${NATURE}runtime-morning-glory.glb`,
-      sink: 0.05,
-      castShadow: false,
-      motion: { wind: 0.55, bend: 0.16, bendRadius: 1.0 },
-      items: [],
     },
   ];
 }

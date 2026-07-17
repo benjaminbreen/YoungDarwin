@@ -105,7 +105,7 @@ function requestedSearchParams() {
   }
 
   if (!params.has('screenshot')) params.set('screenshot', '1');
-  if (!PRESERVE_OPENING_INTRO && !params.has('skipIntro')) params.set('skipIntro', '1');
+  if (!params.has('skipIntro')) params.set('skipIntro', PRESERVE_OPENING_INTRO ? '0' : '1');
   params.set('preserveDrawingBuffer', '1');
   return params;
 }

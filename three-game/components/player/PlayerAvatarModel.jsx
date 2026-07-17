@@ -189,6 +189,8 @@ export function PlayerAvatarModel({
   fatigue,
   inventoryCount,
   grounding = null,
+  animationBankPhase = Number.POSITIVE_INFINITY,
+  onAnimationBanksReady = null,
 }) {
   const mode = useMemo(() => getPlayableMode(playableModeId), [playableModeId]);
   const profile = useMemo(() => getPlayableControllerProfile(mode.id), [mode.id]);
@@ -201,6 +203,8 @@ export function PlayerAvatarModel({
         fatigue={fatigue}
         inventoryCount={inventoryCount}
         grounding={grounding}
+        animationBankPhase={animationBankPhase}
+        onAnimationBanksReady={onAnimationBanksReady}
       />
     );
   }

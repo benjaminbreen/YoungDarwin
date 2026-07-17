@@ -12,12 +12,24 @@ export function createLazyAnimationActions({
   const actionCache = new Map();
   const availableNames = [];
 
-  for (const clip of animations) {
-    if (!clip?.name) continue;
-    availableNames.push(clip.name);
-    clipLookup.set(clip.name, clip);
-    clipLookup.set(normalizeClipName(clip.name), clip);
-  }
+  const add = clips => {
+    let added = 0;
+    for (const clip of clips || []) {
+      if (!clip?.name) continue;
+      const normalized = normalizeClipName(clip.name);
+      // Animation banks extend the boot registry. Never replace an existing
+      // clip/action while the mixer may still be playing it (including during
+      // React Fast Refresh or a duplicate bank notification).
+      if (clipLookup.has(clip.name) || clipLookup.has(normalized)) continue;
+      availableNames.push(clip.name);
+      clipLookup.set(clip.name, clip);
+      clipLookup.set(normalized, clip);
+      added += 1;
+    }
+    return added;
+  };
+
+  add(animations);
 
   const resolveClip = name => {
     if (!name) return null;
@@ -26,6 +38,7 @@ export function createLazyAnimationActions({
 
   return {
     availableNames,
+    add,
     has: name => Boolean(resolveClip(name)),
     get size() {
       return actionCache.size;
