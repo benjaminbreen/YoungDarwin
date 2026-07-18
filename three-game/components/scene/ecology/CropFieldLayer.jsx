@@ -1,11 +1,24 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../../store';
 import { terrainHeight } from '../../../world/terrain';
 import { getCropType } from '../../../world/crops/cropTypes';
+import { buildSweetPotatoGeometry } from '../../../world/crops/sweetPotatoGeometry';
+import {
+  findHammerCropHits,
+  findShotgunCropHits,
+} from '../../../world/crops/cropDamage';
+import { SHOTGUN } from '../../../shooting/shotgunConfig';
+import {
+  claimSwing,
+  emitPropEvent,
+  isSwingClaimed,
+  onPropEvent,
+} from '../../../physics/props/propEvents';
 
 // Instanced procedural crops (maize / sweet potato / sugar cane) with a
 // per-plant spring so Darwin visibly parts, bends, and — if he keeps walking
@@ -118,35 +131,6 @@ function buildMaizeGeometry(height) {
   return buffers;
 }
 
-function buildSweetPotatoGeometry(height) {
-  const buffers = { positions: [], colors: [] };
-  const leafBase = color('#2e6828');
-  const leafTip = color('#4d8a34');
-  for (let i = 0; i < 9; i += 1) {
-    const angle = i * 0.7 + (i % 2) * 1.9;
-    const dir = [Math.cos(angle), Math.sin(angle)];
-    const spread = 0.1 + (i % 3) * 0.07;
-    pushLeaf(
-      buffers,
-      [dir[0] * spread, 0.045 + (i % 2) * 0.05, dir[1] * spread],
-      dir,
-      0.24 + (i % 3) * 0.05,
-      0.075,
-      height * (0.55 + (i % 2) * 0.3),
-      height * 0.35,
-      leafBase,
-      leafTip,
-      2,
-    );
-  }
-  // Two ground runners with purple-tinged stems.
-  for (const angle of [0.9, 3.7]) {
-    const dir = [Math.cos(angle), Math.sin(angle)];
-    pushLeaf(buffers, [0, 0.03, 0], dir, 0.5, 0.016, 0.02, 0.01, color('#5c4468'), color('#3f7031'), 2);
-  }
-  return buffers;
-}
-
 function buildSugarCaneGeometry(height) {
   const buffers = { positions: [], colors: [] };
   const caneLow = color('#a99a4b');
@@ -201,8 +185,20 @@ function buildCropGeometry(crop) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(buffers.positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(buffers.colors, 3));
-  geometry.computeVertexNormals();
-  return geometry;
+  const vertexCount = buffers.positions.length / 3;
+  const damageThresholds = buffers.damageThresholds?.length === vertexCount
+    ? buffers.damageThresholds
+    : new Array(vertexCount).fill(2);
+  const leafAnchors = buffers.leafAnchors?.length === vertexCount * 3
+    ? buffers.leafAnchors
+    : new Array(vertexCount * 3).fill(0);
+  geometry.setAttribute('aDamageThreshold', new THREE.Float32BufferAttribute(damageThresholds, 1));
+  geometry.setAttribute('aLeafAnchor', new THREE.Float32BufferAttribute(leafAnchors, 3));
+  // Shared vertices give the cupped leaves and round stems interpolated
+  // normals, while also reducing their index/vertex cost before instancing.
+  const renderGeometry = crop.id === 'sweetPotato' ? mergeVertices(geometry, 1e-5) : geometry;
+  renderGeometry.computeVertexNormals();
+  return renderGeometry;
 }
 
 export function CropFieldLayer({ layer, zoneId }) {
@@ -213,12 +209,15 @@ export function CropFieldLayer({ layer, zoneId }) {
   const timeUniform = useRef({ value: 0 });
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const harvestedCropIds = useThreeGameStore(state => state.harvestedCropIds);
+  const cropDamageById = useThreeGameStore(state => state.cropDamageById);
+  const recordCropDamage = useThreeGameStore(state => state.recordCropDamage);
 
   const built = useMemo(() => {
     if (!crop || !items.length) return null;
     const geometry = buildCropGeometry(crop);
     const bend = new Float32Array(items.length * 2);
     const cut = new Float32Array(items.length);
+    const damage = new Float32Array(items.length);
     const phase = new Float32Array(items.length);
     const xs = new Float32Array(items.length);
     const ys = new Float32Array(items.length);
@@ -243,13 +242,16 @@ export function CropFieldLayer({ layer, zoneId }) {
     bendAttr.setUsage(THREE.DynamicDrawUsage);
     const cutAttr = new THREE.InstancedBufferAttribute(cut, 1);
     cutAttr.setUsage(THREE.DynamicDrawUsage);
+    const damageAttr = new THREE.InstancedBufferAttribute(damage, 1);
+    damageAttr.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aBend', bendAttr);
     geometry.setAttribute('aCut', cutAttr);
+    geometry.setAttribute('aDamage', damageAttr);
     geometry.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
 
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.88,
+      roughness: crop.id === 'sweetPotato' ? 0.76 : 0.88,
       metalness: 0,
       side: THREE.DoubleSide,
     });
@@ -264,18 +266,32 @@ export function CropFieldLayer({ layer, zoneId }) {
           `#include <common>
           attribute vec2 aBend;
           attribute float aCut;
+          attribute float aDamage;
           attribute float aPhase;
+          attribute float aDamageThreshold;
+          attribute vec3 aLeafAnchor;
           uniform float uCropTime;
           uniform float uCropHeight;
           uniform float uCropCutScale;
-          uniform float uCropWindAmp;`,
+          uniform float uCropWindAmp;
+          varying float vCropDamage;`,
         )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
           {
+            vCropDamage = aDamage;
             float cropT = clamp(transformed.y / uCropHeight, 0.0, 1.0);
             float cropCut = step(0.5, aCut);
+            float leafLoss = smoothstep(aDamageThreshold - 0.08, aDamageThreshold + 0.055, aDamage);
+            // Damaged leaves crumple back toward their own runner node. This
+            // creates irregular tearing without extra objects or draw calls.
+            transformed.xz = mix(
+              transformed.xz,
+              aLeafAnchor.xz + (transformed.xz - aLeafAnchor.xz) * 0.16,
+              leafLoss
+            );
+            transformed.y = mix(transformed.y, 0.024 + aLeafAnchor.y * 0.22, leafLoss * 0.94);
             // Harvested plants collapse to stubble.
             transformed.y *= mix(1.0, uCropCutScale, cropCut);
             transformed.xz *= mix(1.0, 0.72, cropCut);
@@ -289,16 +305,33 @@ export function CropFieldLayer({ layer, zoneId }) {
             transformed.x += bendOffset.x;
             transformed.z += bendOffset.y;
             transformed.y -= min(0.6, bendMag * bendMag * 0.5) * tt * uCropHeight * (1.0 - cropCut);
+            transformed.y -= aDamage * cropT * uCropHeight * 0.18 * (1.0 - cropCut);
           }`,
         );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying float vCropDamage;`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          diffuseColor.rgb = mix(
+            diffuseColor.rgb,
+            diffuseColor.rgb * vec3(0.58, 0.47, 0.29),
+            smoothstep(0.18, 1.0, vCropDamage) * 0.72
+          );`,
+        );
     };
-    material.customProgramCacheKey = () => `crop-field-${crop.id}`;
+    material.customProgramCacheKey = () => `crop-field-damage-v2-${crop.id}`;
 
     return {
       geometry,
       material,
       bendAttr,
       cutAttr,
+      damageAttr,
       sim: {
         xs,
         ys,
@@ -313,8 +346,17 @@ export function CropFieldLayer({ layer, zoneId }) {
         velZ: new Float32Array(items.length),
         crush: new Float32Array(items.length),
         crushed: new Uint8Array(items.length),
+        damage: new Float32Array(items.length),
         cut: new Uint8Array(items.length),
         energized: new Set(),
+        clock: 0,
+        pendingStrikes: [],
+        hitPlants: items.map((item, index) => ({
+          x: item.x,
+          y: ys[index] + crop.height * 0.42 * (item.scale || 1),
+          z: item.z,
+          scale: item.scale || 1,
+        })),
       },
     };
   // items/zone are static per layer instance.
@@ -367,6 +409,126 @@ export function CropFieldLayer({ layer, zoneId }) {
     if (changed) built.cutAttr.needsUpdate = true;
   }, [built, harvestedCropIds]);
 
+  // Rehydrate persistent trampling and tool damage after region travel.
+  useEffect(() => {
+    if (!built) return;
+    let damageDirty = false;
+    let bendDirty = false;
+    for (const [id, saved] of Object.entries(cropDamageById || {})) {
+      const index = built.sim.idToIndex.get(id);
+      if (index === undefined) continue;
+      const damage = Math.max(built.sim.damage[index], saved.damage || 0);
+      if (damage !== built.sim.damage[index]) built.sim.damage[index] = damage;
+      if (built.damageAttr.array[index] !== damage) {
+        built.damageAttr.array[index] = damage;
+        damageDirty = true;
+      }
+      if (saved.crushed && !built.sim.crushed[index]) {
+        built.sim.crushed[index] = 1;
+        built.sim.bendWorldX[index] = saved.bendX || 0;
+        built.sim.bendWorldZ[index] = saved.bendZ || crop.maxBend * 1.2;
+        const wx = built.sim.bendWorldX[index];
+        const wz = built.sim.bendWorldZ[index];
+        built.bendAttr.array[index * 2] = wx * built.sim.cos[index] - wz * built.sim.sin[index];
+        built.bendAttr.array[index * 2 + 1] = wx * built.sim.sin[index] + wz * built.sim.cos[index];
+        bendDirty = true;
+      }
+    }
+    if (damageDirty) built.damageAttr.needsUpdate = true;
+    if (bendDirty) built.bendAttr.needsUpdate = true;
+  }, [built, crop.maxBend, cropDamageById]);
+
+  const applyCropImpact = useCallback((index, {
+    amount,
+    direction,
+    kick = 0,
+    crush = false,
+    source,
+  }) => {
+    if (!built || crop.id !== 'sweetPotato' || built.sim.cut[index]) return false;
+    const sim = built.sim;
+    const fallbackAngle = index * 2.39996 + 0.4;
+    let dirX = Number.isFinite(direction?.x) ? direction.x : Math.cos(fallbackAngle);
+    let dirZ = Number.isFinite(direction?.z) ? direction.z : Math.sin(fallbackAngle);
+    const directionLength = Math.hypot(dirX, dirZ) || 1;
+    dirX /= directionLength;
+    dirZ /= directionLength;
+    const nextDamage = Math.min(1, sim.damage[index] + Math.max(0, amount || 0));
+    const shouldCrush = crush || nextDamage >= 0.84;
+
+    sim.damage[index] = nextDamage;
+    built.damageAttr.array[index] = nextDamage;
+    built.damageAttr.needsUpdate = true;
+    sim.energized.add(index);
+
+    if (shouldCrush) {
+      const lodgedBend = crop.maxBend * (1.17 + nextDamage * 0.3);
+      sim.crushed[index] = 1;
+      sim.bendWorldX[index] = dirX * lodgedBend;
+      sim.bendWorldZ[index] = dirZ * lodgedBend;
+      sim.velX[index] = 0;
+      sim.velZ[index] = 0;
+    } else {
+      sim.bendWorldX[index] += dirX * crop.maxBend * nextDamage * 0.24;
+      sim.bendWorldZ[index] += dirZ * crop.maxBend * nextDamage * 0.24;
+      sim.velX[index] += dirX * kick;
+      sim.velZ[index] += dirZ * kick;
+    }
+
+    recordCropDamage({
+      cropId: items[index].id,
+      damage: nextDamage,
+      bendX: sim.bendWorldX[index],
+      bendZ: sim.bendWorldZ[index],
+      crushed: shouldCrush,
+      source,
+    });
+    return true;
+  }, [built, crop.id, crop.maxBend, items, recordCropDamage]);
+
+  // Hammer contact is resolved at the animation's impact beat. The field
+  // claims a successful swing so the generic ground resolver does not also
+  // produce a second, contradictory impact.
+  useEffect(() => onPropEvent('tool-swing', event => {
+    if (!built || crop.id !== 'sweetPotato' || event.tool !== 'hammer') return;
+    built.sim.pendingStrikes.push({
+      ...event,
+      at: built.sim.clock + (event.impactDelay ?? 0.55),
+    });
+  }), [built, crop.id]);
+
+  useEffect(() => onPropEvent('shotgun-blast', event => {
+    if (!built || crop.id !== 'sweetPotato' || !event.origin || !event.dir) return;
+    const hits = findShotgunCropHits(built.sim.hitPlants, {
+      origin: event.origin,
+      dir: event.dir,
+      range: event.range ?? SHOTGUN.prop.maxRange,
+      rayRadius: SHOTGUN.prop.rayRadius,
+      plantRadius: 0.29,
+      maxHits: 8,
+    });
+    for (const hit of hits) {
+      applyCropImpact(hit.index, {
+        amount: 0.4 + hit.directness * 0.52,
+        direction: { x: event.dir.x, z: event.dir.z },
+        kick: 1.2 + hit.directness * 2.4,
+        crush: hit.directness > 0.66,
+        source: 'shotgun',
+      });
+    }
+    if (hits.length) {
+      const first = hits[0];
+      const plant = built.sim.hitPlants[first.index];
+      emitPropEvent('shotgun-impact', {
+        position: { x: plant.x, y: plant.y + 0.05, z: plant.z },
+        normal: { x: -event.dir.x, y: 0.45, z: -event.dir.z },
+        dir: event.dir,
+        surface: 'foliage',
+        intensity: 0.62 + first.directness * 0.38,
+      });
+    }
+  }), [applyCropImpact, built, crop.id]);
+
   // Clear a lingering prompt if this field unmounts (zone change).
   useEffect(() => () => {
     const state = useThreeGameStore.getState();
@@ -381,10 +543,52 @@ export function CropFieldLayer({ layer, zoneId }) {
     const delta = Math.min(rawDelta, 0.05);
     timeUniform.current.value += rawDelta;
     const sim = built2.sim;
+    sim.clock += rawDelta;
     const pose = getRuntimePlayerPose();
     const px = pose.position.x;
     const py = pose.position.y;
     const pz = pose.position.z;
+
+    if (sim.pendingStrikes.length) {
+      const due = sim.pendingStrikes.filter(strike => strike.at <= sim.clock);
+      if (due.length) {
+        sim.pendingStrikes = sim.pendingStrikes.filter(strike => strike.at > sim.clock);
+        for (const strike of due) {
+          if (strike.swingId && isSwingClaimed(strike.swingId)) continue;
+          const hits = findHammerCropHits(sim.hitPlants, {
+            position: strike.position,
+            facing: strike.facing,
+            maxDistance: 1.72,
+            swath: 0.76,
+            maxHits: 4,
+          });
+          if (!hits.length) continue;
+          claimSwing(strike.swingId);
+          const direction = {
+            x: strike.facing?.x ?? 0,
+            z: strike.facing?.z ?? 1,
+          };
+          hits.forEach((hit, hitIndex) => {
+            applyCropImpact(hit.index, {
+              amount: hitIndex === 0 ? 0.58 : 0.42,
+              direction,
+              kick: 0.45,
+              crush: true,
+              source: 'hammer',
+            });
+          });
+          const firstPlant = sim.hitPlants[hits[0].index];
+          emitPropEvent('prop-struck', {
+            propId: `crop:${items[hits[0].index].id}`,
+            position: { x: firstPlant.x, y: firstPlant.y, z: firstPlant.z },
+            impactDir: { x: direction.x, y: 0, z: direction.z },
+            dustCount: 12,
+            sparkCount: 0,
+            dustColor: '#58733d',
+          });
+        }
+      }
+    }
 
     // Gather candidates: plants near the player plus any still in motion.
     const active = new Set(sim.energized);
@@ -428,12 +632,15 @@ export function CropFieldLayer({ layer, zoneId }) {
         if (!sim.crushed[index] && overlap > crop.crushOverlap) {
           sim.crush[index] += delta;
           if (sim.crush[index] > crop.crushTime) {
-            sim.crushed[index] = 1;
-            // Freeze the flattening direction with a small deterministic twist.
+            // Lodge the runner into the soil with a small deterministic twist.
             const twist = ((index * 13) % 7) / 7 - 0.5;
             const angle = Math.atan2(dz, dx) + twist * 0.8;
-            sim.bendWorldX[index] = Math.cos(angle) * crop.maxBend * 1.35;
-            sim.bendWorldZ[index] = Math.sin(angle) * crop.maxBend * 1.35;
+            applyCropImpact(index, {
+              amount: 0.34,
+              direction: { x: Math.cos(angle), z: Math.sin(angle) },
+              crush: true,
+              source: 'trample',
+            });
           }
         }
       } else if (!sim.crushed[index]) {

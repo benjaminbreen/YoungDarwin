@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainHeight } from '../../world/terrain';
+import { getEcology } from '../../world/ecology';
 import { getBorderVistas } from '../../world/vistas';
+import { buildBorderEcologyLayers, buildBorderGrassLayers } from '../../world/vistas/borderEcology';
 import { buildBorderTransition, CARDINAL_VISTA_EDGES } from '../../world/vistas/transitions';
 import {
   EDGE_AXES,
@@ -18,6 +20,7 @@ import {
   worldPoint,
 } from '../../world/vistas/apronGeometry';
 import { useThreeGameStore } from '../../store';
+import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 
 const MARKER_DUMMY = new THREE.Object3D();
 
@@ -331,9 +334,12 @@ function TransitionSeamMarkers({ regionId, config, vista, transition, kind }) {
 
 function BorderVista({ regionId, config, vista }) {
   const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const targetConfig = useMemo(() => (
     vista.toRegionId ? getRegionTerrainConfig(vista.toRegionId) : null
   ), [vista.toRegionId]);
+  const sourceEcology = useMemo(() => getEcology(regionId), [regionId]);
+  const targetEcology = useMemo(() => getEcology(vista.toRegionId), [vista.toRegionId]);
   const transition = useMemo(() => (
     buildBorderTransition(regionId, config, vista, targetConfig)
   ), [regionId, config, targetConfig, vista]);
@@ -341,6 +347,28 @@ function BorderVista({ regionId, config, vista }) {
     makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista, transition)
       || makeApronGeometry(regionId, config, vista)
   ), [regionId, config, targetConfig, vista, transition]);
+  const borderEcologyLayers = useMemo(() => buildBorderEcologyLayers({
+    regionId,
+    config,
+    targetRegionId: vista.toRegionId,
+    targetConfig,
+    vista,
+    transition,
+    ecology: targetEcology,
+    sourceEcology,
+    foliageDrawScale,
+  }), [config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
+  const borderGrassLayers = useMemo(() => buildBorderGrassLayers({
+    regionId,
+    config,
+    targetRegionId: vista.toRegionId,
+    targetConfig,
+    vista,
+    transition,
+    ecology: targetEcology,
+    sourceEcology,
+    foliageDrawScale,
+  }), [config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
   const material = useMemo(() => createBorderVistaMaterial(cheapMaterials), [cheapMaterials]);
   useEffect(() => () => geometry?.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
@@ -356,13 +384,57 @@ function BorderVista({ regionId, config, vista }) {
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
       {isNeighborPreview && (
         <>
-          <TransitionSeamMarkers
-            regionId={regionId}
-            config={config}
-            vista={vista}
-            transition={transition}
-            kind="scrub"
-          />
+          {borderEcologyLayers.length > 0 || borderGrassLayers.length > 0 ? (
+            <Suspense fallback={null}>
+              <group userData={{
+                renderSource: `border-ecology:${vista.toRegionId}`,
+                renderLabel: `${regionId}–${vista.toRegionId} seam ecology`,
+                renderKind: 'border-vista-ecology',
+                renderPath: null,
+              }}>
+                {borderEcologyLayers.map(layer => (
+                  <InstancedGLBLayer
+                    key={layer.id}
+                    path={layer.path}
+                    items={layer.items}
+                    sink={layer.sink}
+                    ySquash={layer.ySquash}
+                    tint={layer.tint}
+                    tintStrength={layer.tintStrength}
+                    variantMode={layer.variantMode}
+                    castShadow={false}
+                    receiveShadow={false}
+                    motion={null}
+                    maxVisibleDistance={180}
+                    forceCheapMaterials
+                    sourceId={`border-ecology:${vista.toRegionId}:${layer.id}`}
+                    sourceLabel={layer.label}
+                    sourceKind="border-vista-ecology"
+                  />
+                ))}
+                {borderGrassLayers.map(layer => (
+                  <InstancedGLBLayer
+                    key={layer.id}
+                    path={layer.path}
+                    items={layer.items}
+                    sink={layer.sink}
+                    slopeSink={layer.slopeSink}
+                    ySquash={layer.ySquash}
+                    tint={layer.tint}
+                    tintStrength={layer.tintStrength}
+                    castShadow={false}
+                    receiveShadow={false}
+                    motion={null}
+                    maxVisibleDistance={180}
+                    forceCheapMaterials
+                    sourceId={`border-grass:${vista.toRegionId}:${layer.id}`}
+                    sourceLabel={layer.label}
+                    sourceKind="border-vista-grass"
+                  />
+                ))}
+              </group>
+            </Suspense>
+          ) : null}
           <TransitionSeamMarkers
             regionId={regionId}
             config={config}
@@ -372,7 +444,7 @@ function BorderVista({ regionId, config, vista }) {
           />
         </>
       )}
-      {!isNeighborPreview && vista.markers?.map((marker, index) => (
+      {!isNeighborPreview && vista.markers?.filter(marker => marker.kind !== 'scrub').map((marker, index) => (
         <VistaMarkers key={`marker-${index}`} config={config} vista={vista} marker={marker} />
       ))}
     </group>

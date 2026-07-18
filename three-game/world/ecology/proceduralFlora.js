@@ -42,6 +42,30 @@ export function scoreFloraHabitat(species, sample = {}) {
   return clamp01(environmentalFit * localFit * biomeFit);
 }
 
+// Scores the annulus around an existing cohort or companion species. This is
+// useful for mixed-age stands: new items can share a patch without occupying
+// the same physical point as an older plant. With no companions, placement is
+// left unconstrained so the helper remains additive.
+export function floraCompanionSuitability(items, x, z, {
+  minimumDistance = 2.5,
+  preferredDistance = [4, 10],
+  maximumDistance = 16,
+} = {}) {
+  if (!items?.length) return 1;
+  const nearest = items.reduce((distance, item) => (
+    Math.min(distance, Math.hypot(x - item.x, z - item.z))
+  ), Infinity);
+  const preferredMin = Math.max(minimumDistance, preferredDistance[0]);
+  const preferredMax = Math.max(preferredMin, preferredDistance[1]);
+  const maximum = Math.max(preferredMax, maximumDistance);
+  if (nearest < minimumDistance || nearest > maximum) return 0;
+  if (nearest < preferredMin) {
+    return clamp01((nearest - minimumDistance) / Math.max(1e-6, preferredMin - minimumDistance));
+  }
+  if (nearest <= preferredMax) return 1;
+  return clamp01((maximum - nearest) / Math.max(1e-6, maximum - preferredMax));
+}
+
 function buildHabitatScatter({
   id,
   zoneId,

@@ -40,13 +40,6 @@ function buildFlora() {
       && (biome === 'black-dune-sand' || biome === 'dune-scrub' || biome === 'dry-scrub'),
   });
 
-  const drybrush = scatter('black-beach-drybrush', 7, 449, {
-    minX: 14, maxX: 50, minZ: -34, maxZ: 38, scale: [0.5, 0.9], maxGrade: 0.68,
-    accept: (biome, x, z) => clearOfSwash(x, z)
-      && nearAnyCluster(scrubClumps, x, z, 12)
-      && (biome === 'dune-scrub' || biome === 'dry-scrub'),
-  });
-
   const darwiniothamnus = makeDarwiniothamnusPatchScatter(BLACK_BEACH, 'black-beach-tall-shrub', 36, 461, {
     minX: 20, maxX: 50, minZ: -30, maxZ: 34, scale: [0.8, 2.45], maxGrade: 0.6,
     patchCount: 4, patchRadius: [2.8, 5.4],
@@ -81,16 +74,6 @@ function buildFlora() {
       tintStrength: 0.16,
       motion: { wind: 1.05, bend: 0.24, bendRadius: 1.35 },
       items: saltbush,
-    },
-    {
-      id: 'black-beach-drybrush',
-      path: `${NATURE}runtime-drybrush.glb`,
-      sink: 0.06,
-      castShadow: false,
-      tint: '#7a714b',
-      tintStrength: 0.14,
-      motion: { wind: 0.95, bend: 0.2, bendRadius: 1.25 },
-      items: drybrush,
     },
     {
       id: 'black-beach-darwiniothamnus',

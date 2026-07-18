@@ -16,12 +16,12 @@ import {
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
-import { getWildlifeAssetId } from '../../wildlife/wildlifeCatalog';
+import { getWildlifeAssetId, getWildlifeRenderProfile } from '../../wildlife/wildlifeCatalog';
 import { LavaLizardShape } from '../../wildlife/reptiles/LavaLizardShape';
 import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSpecimenShape';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
-import { getModelAsset } from '../../modelAssets';
+import { ProceduralFinchPlayer } from '../player/ProceduralFinchPlayer';
 import { SpecimenHighlight } from './SpecimenHighlight';
 import { BasaltSpecimenShape } from './BasaltSpecimenShape';
 
@@ -274,9 +274,23 @@ function ProceduralSpecimenShape({ specimen }) {
   );
 }
 
-export function SpecimenShape({ specimen, animationSelector, onSceneReady = null }) {
+export function SpecimenShape({
+  specimen,
+  animationSelector,
+  onSceneReady = null,
+  proceduralMotionRef = null,
+}) {
   if (specimen.pollinator) return <PollinatorSpecimenShape specimen={specimen} />;
   if (specimen.id === 'basalt') return <BasaltSpecimenShape />;
+  const renderProfile = getWildlifeRenderProfile(specimen);
+  if (renderProfile?.type === 'proceduralFinch') {
+    return (
+      <ProceduralFinchPlayer
+        motionRef={proceduralMotionRef}
+        variant={renderProfile.variant}
+      />
+    );
+  }
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
@@ -302,13 +316,31 @@ function CrabWiggle({ children, groupRef }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
-function AnimatedSpecimenShape({ specimen, animationSelector, crabWiggleRef, onSceneReady }) {
+function AnimatedSpecimenShape({
+  specimen,
+  animationSelector,
+  crabWiggleRef,
+  onSceneReady,
+  proceduralMotionRef,
+}) {
   if (specimen.id !== 'crab') {
-    return <SpecimenShape specimen={specimen} animationSelector={animationSelector} onSceneReady={onSceneReady} />;
+    return (
+      <SpecimenShape
+        specimen={specimen}
+        animationSelector={animationSelector}
+        onSceneReady={onSceneReady}
+        proceduralMotionRef={proceduralMotionRef}
+      />
+    );
   }
   return (
     <CrabWiggle groupRef={crabWiggleRef}>
-      <SpecimenShape specimen={specimen} animationSelector={animationSelector} onSceneReady={onSceneReady} />
+      <SpecimenShape
+        specimen={specimen}
+        animationSelector={animationSelector}
+        onSceneReady={onSceneReady}
+        proceduralMotionRef={proceduralMotionRef}
+      />
     </CrabWiggle>
   );
 }
@@ -344,6 +376,14 @@ function WadingWaterline({ localY, radius = 0.58, depth = 0.35 }) {
 
 export function SpecimenActor({ specimen }) {
   const group = useRef(null);
+  const proceduralMotionRef = useRef({
+    action: null,
+    flying: false,
+    walking: false,
+    running: false,
+    speed: 0,
+    timeScale: 1,
+  });
   const highlightGroundedRef = useRef(true);
   const crabWiggleRef = useRef(null);
   const actorId = specimen.instanceId || specimen.id;
@@ -404,14 +444,18 @@ export function SpecimenActor({ specimen }) {
     const bounds = new THREE.Box3().setFromObject(scene);
     const size = bounds.getSize(new THREE.Vector3());
     if (size.x <= 0 || size.y <= 0 || size.z <= 0) return;
-    const assetScale = getModelAsset(assetIdForSpecimen(specimen))?.scale || 1;
-    const sceneScale = specimen.sceneScale || 1;
-    const scale = assetScale * sceneScale;
+    // setFromObject() reports world-space bounds here: the imported scene is
+    // already parented beneath both ModelAsset's transform and this actor's
+    // sceneScale. Multiplying either scale again made large flora report as
+    // three times its actual size and pushed the examination camera far away.
+    const center = bounds.getCenter(new THREE.Vector3());
+    const actorOrigin = group.current?.getWorldPosition(new THREE.Vector3());
     setSpecimenRuntimeBounds(currentZoneId, actorId, {
-      height: size.y * scale,
-      radius: Math.max(size.x, size.z) * scale * 0.5,
+      height: size.y,
+      radius: Math.max(size.x, size.z) * 0.5,
+      centerY: actorOrigin ? center.y - actorOrigin.y : size.y * 0.5,
     });
-  }, [actorId, currentZoneId, specimen]);
+  }, [actorId, currentZoneId]);
 
   useEffect(() => {
     if (isCollectedActor) return;
@@ -482,6 +526,28 @@ export function SpecimenActor({ specimen }) {
       playerPosition: playerPose?.position,
       elapsedTime: worldElapsed,
       delta,
+    });
+    const animationRequest = faunaBehavior.animationRef?.current;
+    const animationClip = typeof animationRequest === 'string'
+      ? animationRequest
+      : animationRequest?.clip || '';
+    const behaviorDebug = faunaBehavior.debugRef?.current || {};
+    const behaviorPaused = isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo);
+    const proceduralMoving = !behaviorPaused && behaviorDebug.moving === true;
+    const proceduralRunning = proceduralMoving && (behaviorDebug.panic || 0) > 0.18;
+    Object.assign(proceduralMotionRef.current, {
+      action: downedInfo
+        ? 'animalSleep'
+        : (!behaviorPaused && /feed|eat|peck|browse/i.test(animationClip) ? 'animalEat' : null),
+      flying: !behaviorPaused && faunaBehavior.airborneRef?.current === true,
+      walking: proceduralMoving,
+      running: proceduralRunning,
+      speed: proceduralMoving
+        ? (proceduralRunning ? behaviorProfile?.fleeSpeed : behaviorProfile?.walkSpeed) || 0.3
+        : 0,
+      timeScale: Number.isFinite(animationRequest?.timeScale) ? animationRequest.timeScale : 1,
+      flightPitch: faunaBehavior.pitchRef?.current || 0,
+      flightBank: faunaBehavior.rollRef?.current || 0,
     });
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
@@ -601,12 +667,31 @@ export function SpecimenActor({ specimen }) {
     }
 
     if (carryProfile) {
-      const pose = playerPose;
+      const dropRequest = state.carryDropRequest?.id === actorId
+        ? state.carryDropRequest
+        : null;
+      const pose = dropRequest || playerPose;
       const player = pose?.position || { x: 0, y: 0, z: 0 };
       const facing = pose?.facing || { x: 0, z: -1 };
       const facingLength = Math.hypot(facing.x, facing.z) || 1;
       const aheadX = facing.x / facingLength;
       const aheadZ = facing.z / facingLength;
+
+      if (dropRequest) {
+        const safe = clampToWalkable(
+          new THREE.Vector3(player.x + aheadX * CARRY_DROP_DISTANCE, 0, player.z + aheadZ * CARRY_DROP_DISTANCE),
+          null,
+          currentZoneId,
+        );
+        const groundY = terrainHeight(safe.x, safe.z, currentZoneId) + 0.04;
+        carriedRef.current = false;
+        behaviorBaseRef.current = new THREE.Vector3(safe.x, groundY, safe.z);
+        faunaBehavior.reset?.({ basePosition: behaviorBaseRef.current, zoneId: currentZoneId });
+        group.current.position.copy(behaviorBaseRef.current);
+        setSpecimenRuntimePosition(actorId, { x: safe.x, y: groundY, z: safe.z }, currentZoneId);
+        state.completeCarryDrop?.(actorId, dropRequest.requestId);
+        return;
+      }
 
       if (carriedHere !== carriedRef.current) {
         carriedRef.current = carriedHere;
@@ -740,6 +825,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'lavalizard' ? 0.72
     : specimen.id === 'crab' ? 0.78
+    : specimen.id === 'largegroundfinch' ? 1.08
     : specimen.id === 'mediumgroundfinch' ? 0.92
     : specimen.id === 'floreanagianttortoise' ? 1.8
     : specimen.id === 'flamingo' ? 2.35
@@ -758,6 +844,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'booby' ? 0.62
     : specimen.id === 'flamingo' ? 0.58
     : specimen.id === 'lavagull' ? 0.5
+    : specimen.id === 'largegroundfinch' ? 0.56
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
     : specimen.id === 'cat' ? 0.45
     : specimen.id === 'feralgoat' ? 0.68
@@ -801,6 +888,7 @@ export function SpecimenActor({ specimen }) {
         animationSelector={selectSpecimenAnimation}
         crabWiggleRef={crabWiggleRef}
         onSceneReady={captureRenderedBounds}
+        proceduralMotionRef={proceduralMotionRef}
       />
     </>
   );

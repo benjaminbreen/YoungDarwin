@@ -21,7 +21,12 @@ function seededUnit(seed) {
   return value - Math.floor(value);
 }
 
-function buildPlotItems(plot, index) {
+function buildPlotItems(plot, index, {
+  itemIdPrefix,
+  pathInfo,
+  excludeAt,
+  pathThreshold,
+}) {
   const crop = CROP_TYPES[plot.crop];
   if (!crop) return [];
   const spacing = PLANT_SPACING[plot.crop] || 0.7;
@@ -52,10 +57,10 @@ function buildPlotItems(plot, index) {
       // furrow crests the terrain and material carve.
       const x = plot.x + lx * cos + lz * sin;
       const z = plot.z - lx * sin + lz * cos;
-      if (penalColonyPathInfo(x, z).path > 0.16) continue;
-      if (penalColonyTrampledMask(x, z) > 0.32) continue;
+      if (pathInfo?.(x, z)?.path > pathThreshold) continue;
+      if (excludeAt?.(x, z)) continue;
       items.push({
-        id: `penal-crop-${plot.id}-${row}-${i}`,
+        id: `${itemIdPrefix}-${plot.id}-${row}-${i}`,
         x,
         z,
         yaw: seededUnit(seed + 2) * Math.PI * 2,
@@ -67,15 +72,45 @@ function buildPlotItems(plot, index) {
   return items;
 }
 
+// Shared row-planter used by authored gardens. The Penal Colony remains the
+// reference layout; other regions provide their own plot coordinates and
+// terrain masks while retaining identical spacing and furrow alignment.
+export function buildAuthoredCropFields({
+  zoneId,
+  plots,
+  layerIdPrefix,
+  itemIdPrefix,
+  pathInfo = null,
+  pathThreshold = 0.16,
+  excludeAt = null,
+} = {}) {
+  if (!zoneId || !Array.isArray(plots) || !layerIdPrefix || !itemIdPrefix) {
+    throw new Error('buildAuthoredCropFields requires zoneId, plots, and id prefixes.');
+  }
+  return plots.map((plot, index) => ({
+    id: `${layerIdPrefix}-${plot.id}`,
+    zoneId,
+    crop: plot.crop,
+    items: buildPlotItems(plot, index, {
+      itemIdPrefix,
+      pathInfo,
+      excludeAt,
+      pathThreshold,
+    }),
+  })).filter(layer => layer.items.length > 0);
+}
+
 let cache = null;
 
 export function buildPenalColonyCropFields() {
   if (cache) return cache;
-  cache = PENAL_COLONY_GARDENS.map((plot, index) => ({
-    id: `penal-crops-${plot.id}`,
+  cache = buildAuthoredCropFields({
     zoneId: PENAL_COLONY,
-    crop: plot.crop,
-    items: buildPlotItems(plot, index),
-  })).filter(layer => layer.items.length > 0);
+    plots: PENAL_COLONY_GARDENS,
+    layerIdPrefix: 'penal-crops',
+    itemIdPrefix: 'penal-crop',
+    pathInfo: penalColonyPathInfo,
+    excludeAt: (x, z) => penalColonyTrampledMask(x, z) > 0.32,
+  });
   return cache;
 }

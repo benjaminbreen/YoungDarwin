@@ -70,11 +70,40 @@ export function setSpecimenRuntimeBounds(zoneId, actorId, bounds) {
   boundsZoneMap(zoneId).set(actorId, {
     height: Math.max(0.025, bounds.height),
     radius: Math.max(0.025, bounds.radius),
+    centerY: Number.isFinite(bounds.centerY) ? bounds.centerY : null,
   });
 }
 
 export function getSpecimenRuntimeBounds(zoneId) {
   return boundsByZone.get(zoneKey(zoneId)) || null;
+}
+
+// Loaded meshes are useful evidence, but their import scale can be much larger
+// than the authored interaction profile (foliage in particular). Let rendered
+// bounds expand a portrait enough to avoid clipping without allowing a single
+// asset scale to turn an examination into a landscape establishing shot.
+export function resolveSpecimenFrameHint(authoredHint, renderedBounds) {
+  const authored = authoredHint || { height: 0.8, radius: 0.6 };
+  const authoredHeight = Math.max(0.025, Number(authored.height) || 0.8);
+  const authoredRadius = Math.max(0.025, Number(authored.radius) || 0.6);
+  if (!renderedBounds) {
+    return {
+      ...authored,
+      height: authoredHeight,
+      radius: authoredRadius,
+      centerY: null,
+    };
+  }
+
+  const maxExpansion = authored.closeup ? 1.8 : 2.4;
+  const renderedHeight = Math.max(authoredHeight, Number(renderedBounds.height) || 0);
+  const renderedRadius = Math.max(authoredRadius, Number(renderedBounds.radius) || 0);
+  return {
+    ...authored,
+    height: Math.min(renderedHeight, authoredHeight * maxExpansion),
+    radius: Math.min(renderedRadius, authoredRadius * maxExpansion),
+    centerY: Number.isFinite(renderedBounds.centerY) ? renderedBounds.centerY : null,
+  };
 }
 
 export function pushSpecimenStimulus(zoneId, actorId, stimulus) {

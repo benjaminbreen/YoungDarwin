@@ -12,6 +12,8 @@
 //   id             — slug used for userData/render labels.
 //   sitesByZone    — { [zoneId]: [site, ...] } authored placements.
 //   getSites       — optional merged authored/procedural site resolver.
+//   examinableSpecimenId — optional specimen record represented by this field.
+//   inspectableType — optional inspectableCatalog id opened by clicking a piece.
 //   buildZonePieces(zoneId, sites) — world-space piece descriptors. Each piece:
 //     key/parentKey/type/siteId, spawn/rotation/center/topY/width/height,
 //     mass/hits/tone, colliderArgs/colliderOffset, plus behavior flags:
@@ -33,8 +35,10 @@ import {
   getRuntimePlayerPose,
   useThreeGameStore,
 } from '../../../store';
+import { getThreeSpecimens } from '../../../data';
 import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
+import { catalogToInspectable } from '../../../world/inspectables';
 
 export const DEFAULT_PLANT_TUNING = {
   strikeRange: 2.7,
@@ -162,6 +166,7 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
     };
   }
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
 
   // Site flex is computed in world space around the plant's ground pivot.
   // These fixed-body transforms map that coherent motion back into each
@@ -192,7 +197,7 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
   const isReleased = runtime.released.has(piece.key);
 
   const handleContactForce = payload => {
-    if (runtime.released.has(piece.key)) return;
+    if (runtime.released.has(piece.key) || piece.unbreakable) return;
     if (isPlayerTarget(payload.other)) return;
     if ((payload.totalForceMagnitude || 0) < tuning.propBreakContactForce) return;
     onImpactRelease(piece.key, null);
@@ -333,7 +338,16 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
         position={piece.colliderOffset}
       />
       <group ref={visualRef}>
-        {spec.renderPiece(piece)}
+        <group
+          onClick={spec.inspectableType ? event => {
+            event.stopPropagation();
+            setInspectedObject(catalogToInspectable(spec.inspectableType, event.point, {
+              sourceId: piece.siteId || piece.key,
+            }));
+          } : undefined}
+        >
+          {spec.renderPiece(piece)}
+        </group>
       </group>
     </RigidBody>
   );
@@ -342,7 +356,9 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
 export function BreakablePlantField({ spec }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const sampledRockIds = useThreeGameStore(state => state.sampledRockIds);
+  const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
   const [version, bumpVersion] = useState(0);
+  const examinationSiteRef = useRef({ zoneId: null, siteId: null });
 
   const tuning = useMemo(
     () => ({ ...DEFAULT_PLANT_TUNING, ...(spec.tuning || {}) }),
@@ -369,6 +385,29 @@ export function BreakablePlantField({ spec }) {
     }
     return pivots;
   }, [pieces, sites]);
+
+  const examinableActorId = useMemo(() => {
+    if (!spec.examinableSpecimenId) return null;
+    const specimen = getThreeSpecimens(currentZoneId)
+      .find(item => item.id === spec.examinableSpecimenId);
+    return specimen?.instanceId || specimen?.id || null;
+  }, [currentZoneId, spec.examinableSpecimenId]);
+
+  // Publish a sensible first focus immediately. The frame loop below moves
+  // this single specimen record to whichever clump is nearest the player, so
+  // every procedural clump can use the normal proximity/examine/journal flow
+  // without rendering a duplicate legacy actor at an authored spawn point.
+  useEffect(() => {
+    const first = sites[0];
+    if (!examinableActorId || !first) return;
+    const pivot = sitePivots.get(first.id);
+    setSpecimenRuntimePosition(examinableActorId, {
+      x: first.x,
+      y: pivot?.y ?? first.y ?? 0,
+      z: first.z,
+    }, currentZoneId);
+    examinationSiteRef.current = { zoneId: currentZoneId, siteId: first.id };
+  }, [currentZoneId, examinableActorId, setSpecimenRuntimePosition, sitePivots, sites]);
 
   const dependents = useMemo(() => {
     const map = new Map();
@@ -500,6 +539,26 @@ export function BreakablePlantField({ spec }) {
     if (runtime.released.has(key) || runtime.culled.has(key)) return false;
     const piece = piecesByKey.get(key);
     if (!piece) return false;
+    if (piece.unbreakable) {
+      emitPropEvent('prop-struck', {
+        propId: key,
+        position: { x: piece.center.x, y: piece.center.y, z: piece.center.z },
+        impactDir: impulse
+          ? { x: Math.sign(impulse.linear.x || 0), y: 0, z: Math.sign(impulse.linear.z || 0) }
+          : { x: 0, y: 0, z: 1 },
+        dustCount: piece.dustCount ?? 8,
+        sparkCount: 0,
+      });
+      if (feedback && runtime.clock - runtime.lastAbsorbFeedbackAt > tuning.absorbFeedbackCooldown) {
+        runtime.lastAbsorbFeedbackAt = runtime.clock;
+        useThreeGameStore.getState().recordHammerStrikeFeedback?.({
+          message: feedback,
+          educationalNote: spec.absorbEducationalNote,
+          fatigueDelta: 0.3,
+        });
+      }
+      return false;
+    }
     const taken = (runtime.damage.get(key) || 0) + amount;
     if (taken >= (piece.hits || 1)) {
       runtime.damage.delete(key);
@@ -608,6 +667,27 @@ export function BreakablePlantField({ spec }) {
     // primary controller publishes intended velocity before collision so a
     // sustained push does not disappear when the fixed collider stops him.
     const playerPos = getRuntimePlayerPose()?.position;
+    if (playerPos && examinableActorId && sites.length) {
+      let nearestSite = sites[0];
+      let nearestDistance = Infinity;
+      for (const site of sites) {
+        const distance = Math.hypot(playerPos.x - site.x, playerPos.z - site.z);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestSite = site;
+        }
+      }
+      const published = examinationSiteRef.current;
+      if (published.zoneId !== currentZoneId || published.siteId !== nearestSite.id) {
+        const pivot = sitePivots.get(nearestSite.id);
+        setSpecimenRuntimePosition(examinableActorId, {
+          x: nearestSite.x,
+          y: pivot?.y ?? nearestSite.y ?? playerPos.y,
+          z: nearestSite.z,
+        }, currentZoneId);
+        examinationSiteRef.current = { zoneId: currentZoneId, siteId: nearestSite.id };
+      }
+    }
     if (playerPos && delta > 0) {
       const track = runtime.playerTrack;
       if (track.has) {

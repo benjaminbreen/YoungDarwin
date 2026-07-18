@@ -6,6 +6,23 @@ const VIEW_OPTIONS = new Set(['front', 'side', 'back', 'top', 'threeQuarter']);
 const PRESET_OPTIONS = new Set(['standard', 'quick', 'review']);
 const ROOT = process.cwd();
 const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'animation-sheets');
+const PUBLIC_MODEL_ROOT = path.join(ROOT, 'public', 'assets', 'models');
+const MODEL_FILE_EXTENSIONS = new Set(['.glb', '.gltf']);
+const MAX_ACTIVE_JOBS = 1;
+let activeJobs = 0;
+
+function isLoopbackAddress(value) {
+  const address = String(value || '').replace(/^\[|\]$/g, '').toLowerCase();
+  return address === '::1'
+    || address === '127.0.0.1'
+    || address.startsWith('127.')
+    || address.startsWith('::ffff:127.');
+}
+
+function isLocalDevelopmentRequest(req) {
+  return process.env.NODE_ENV === 'development'
+    && isLoopbackAddress(req.socket?.remoteAddress);
+}
 
 function clampNumber(value, fallback, min, max) {
   const number = Number(value);
@@ -25,6 +42,33 @@ function cleanBoolean(value, fallback = false) {
     if (normalized === 'false') return false;
   }
   return fallback;
+}
+
+function cleanAsset(value) {
+  const asset = cleanString(value);
+  if (/^[a-zA-Z0-9_-]{1,80}$/.test(asset)) return asset;
+  if (!asset.startsWith('/assets/models/')) return '';
+
+  const candidate = path.resolve(ROOT, 'public', asset.replace(/^\/+/, ''));
+  const relative = path.relative(PUBLIC_MODEL_ROOT, candidate);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
+  if (!MODEL_FILE_EXTENSIONS.has(path.extname(candidate).toLowerCase())) return '';
+  try {
+    if (!fs.statSync(candidate).isFile()) return '';
+    const realRoot = fs.realpathSync(PUBLIC_MODEL_ROOT);
+    const realCandidate = fs.realpathSync(candidate);
+    const realRelative = path.relative(realRoot, realCandidate);
+    if (!realRelative || realRelative.startsWith('..') || path.isAbsolute(realRelative)) return '';
+  } catch {
+    return '';
+  }
+  return asset;
+}
+
+function cleanClip(value) {
+  const clip = cleanString(value);
+  if (!clip || clip.length > 160 || /[\u0000-\u001f\u007f]/.test(clip)) return '';
+  return clip;
 }
 
 function cleanViews(value, fallback) {
@@ -84,13 +128,16 @@ function runContactSheet(args) {
 }
 
 export default async function handler(req, res) {
+  if (!isLocalDevelopmentRequest(req)) {
+    return res.status(404).json({ ok: false, error: 'Not found.' });
+  }
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ ok: false, error: 'Method not allowed.' });
   }
 
-  const asset = cleanString(req.body?.asset);
-  const clip = cleanString(req.body?.clip);
+  const asset = cleanAsset(req.body?.asset);
+  const clip = cleanClip(req.body?.clip);
   const outputId = safeName(req.body?.outputId || asset);
   const view = VIEW_OPTIONS.has(req.body?.view) ? req.body.view : 'threeQuarter';
   const views = cleanViews(req.body?.views, [view]);
@@ -104,9 +151,12 @@ export default async function handler(req, res) {
   const yesAll = cleanBoolean(req.body?.yesAll, clip === 'all');
   const incline = clampNumber(req.body?.incline, 0, -30, 30);
 
-  if (!asset) return res.status(400).json({ ok: false, error: 'Missing asset.' });
-  if (!clip) return res.status(400).json({ ok: false, error: 'Missing clip.' });
+  if (!asset) return res.status(400).json({ ok: false, error: 'Invalid or missing asset.' });
+  if (!clip) return res.status(400).json({ ok: false, error: 'Invalid or missing clip.' });
   if (!outputId) return res.status(400).json({ ok: false, error: 'Missing output id.' });
+  if (activeJobs >= MAX_ACTIVE_JOBS) {
+    return res.status(429).json({ ok: false, error: 'A contact-sheet job is already running.' });
+  }
 
   fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
   const reportPath = path.join(OUTPUT_ROOT, `${outputId}-${safeName(clip)}-${Date.now()}-report.json`);
@@ -132,6 +182,7 @@ export default async function handler(req, res) {
   if (incline) args.push('--incline', String(incline));
   if (yesAll) args.push('--yes-all');
 
+  activeJobs += 1;
   try {
     const result = await runContactSheet(args);
     const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
@@ -154,5 +205,7 @@ export default async function handler(req, res) {
       stdout: tail(error.stdout || ''),
       stderr: tail(error.stderr || ''),
     });
+  } finally {
+    activeJobs = Math.max(0, activeJobs - 1);
   }
 }

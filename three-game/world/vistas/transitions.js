@@ -218,6 +218,16 @@ function buildContinuityRules(recipe, sourceProfile, targetProfile, sourceStats,
     14,
     34,
   );
+  // Height continuity may need a long carry when neighboring maps differ in
+  // elevation, but holding the source albedo for that full distance creates a
+  // barren strip at otherwise dry, vegetated land routes. Let the inexpensive
+  // vertex-color surface handoff begin earlier while the height profile keeps
+  // using carryEnd/ridgeStart/ridgeFull.
+  const surfaceCarryEnd = THREE.MathUtils.clamp(
+    THREE.MathUtils.lerp(carryEnd, carryEnd * 0.58, dryContinuity),
+    8,
+    carryEnd,
+  );
   const targetColorStart = carryEnd * 0.76;
   const targetColorFull = THREE.MathUtils.clamp(
     carryEnd + 16 + colorContrast * 12 + heightContrast * 1.7,
@@ -247,6 +257,7 @@ function buildContinuityRules(recipe, sourceProfile, targetProfile, sourceStats,
     waterMix,
     carryStart,
     carryEnd,
+    surfaceCarryEnd,
     targetColorStart,
     targetColorFull,
     ridgeStart,

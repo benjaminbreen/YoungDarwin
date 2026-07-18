@@ -20,6 +20,8 @@ import {
   DARWINIOTHAMNUS_LABEL,
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
+import { PLEOPELTIS_POLYPODIOIDES_SPECIES } from './floraSpecies';
+import { buildProceduralFloraLayer } from './proceduralFlora';
 
 const ZONE = WATKINS;
 const NATURE = '/assets/models/nature/';
@@ -333,20 +335,55 @@ function buildFlora() {
         },
       }),
     },
-    {
-      id: 'watkins-terrace-scrub',
-      path: `${NATURE}runtime-drybrush.glb`,
-      sink: 0.06,
-      castShadow: false,
-      tint: '#8c8a58',
-      tintStrength: 0.2,
-      motion: { wind: 0.4, bend: 0.08, bendRadius: 1.3 },
-      items: scatter('watkins-terrace-scrub', 26, 839, {
-        minX: -46, maxX: 46, minZ: 14, maxZ: 42, scale: [0.14, 0.3], maxGrade: 0.85,
-        accept: (biome, x, z) => watkinsCliffFactor(x, z) > 0.18 && watkinsRiverInfo(x, z).water < 0.05 && offTrack(x, z, 3),
-      }),
-    },
   ];
+}
+
+function buildProceduralFlora() {
+  return [buildProceduralFloraLayer({
+    id: 'watkins-resurrection-fern',
+    zoneId: ZONE,
+    species: PLEOPELTIS_POLYPODIOIDES_SPECIES,
+    asset: { path: `${NATURE}runtime-galapagos-fern.glb` },
+    seed: 839,
+    count: 28,
+    bounds: { minX: -45, maxX: 45, minZ: -3, maxZ: 22 },
+    habitatAt: ({ biome, x, z }) => {
+      const river = watkinsRiverInfo(x, z);
+      const green = watkinsGreenBelt(x, z);
+      const pathDistance = watkinsPathInfo(x, z).d;
+      const biomeSuitability = biome === 'stream-bank'
+        ? 1
+        : (biome === 'terrace-scrub' ? 0.52 : 0);
+      return {
+        excluded: river.water > 0.08
+          || pathDistance < 3.2
+          || !clearOfHomestead(x, z, 9)
+          || watkinsCliffFactor(x, z) > 0.7
+          || biomeSuitability <= 0,
+        moisture: Math.min(1, 0.42 + river.valley * 0.38 + green * 0.28),
+        canopy: Math.min(1, 0.16 + green * 0.5),
+        exposure: Math.max(0, Math.min(1, 0.58 - green * 0.32 - river.valley * 0.16)),
+        disturbance: Math.max(0, Math.min(1, 1 - pathDistance / 8)),
+        salinity: 0,
+        rockiness: Math.min(1, 0.2 + watkinsCliffFactor(x, z) * 0.34),
+        biomeSuitability,
+      };
+    },
+    placement: {
+      patchCount: 4,
+      patchRadius: [1.5, 3.4],
+      minPatchSeparation: 5,
+      minItemSeparation: 0.55,
+      maxGrade: 0.72,
+    },
+    render: {
+      sink: 0.065,
+      tint: '#536f47',
+      tintStrength: 0.16,
+      castShadow: false,
+      motion: { wind: 0.42, bend: 0.1, bendRadius: 1.1 },
+    },
+  })];
 }
 
 export function buildWatkinsCampEcology() {
@@ -411,6 +448,7 @@ export function buildWatkinsCampEcology() {
       }),
     ],
     flora: buildFlora(),
+    proceduralFlora: buildProceduralFlora(),
     birds: [
       { species: 'coastal-small', path: 'lazyFigureEight', radiusX: 16, radiusZ: 10, height: 9, speed: 0.09, phase: 0.8, cx: -8, cz: -16, flapRate: 0.9 },
       { species: 'gull', path: 'thermalCircle', radiusX: 26, radiusZ: 15, height: 24, speed: -0.05, phase: 2.2, cx: 12, cz: 12, flapRate: 0.66 },

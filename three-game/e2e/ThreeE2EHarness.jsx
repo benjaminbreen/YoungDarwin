@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { getThreeSpecimens } from '../data';
 import { setTouchControl } from '../input/touchControls';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../world/specimenRuntime';
 
 const HARNESS_VERSION = 1;
 
@@ -63,6 +64,14 @@ function summarizeExamineSession(session) {
     typeId: session.typeId || null,
     name: session.name || null,
     latin: session.latin || null,
+    focus: session.focus ? plainVector(session.focus) : null,
+    frameHint: session.frameHint
+      ? {
+          height: finiteNumber(session.frameHint.height),
+          radius: finiteNumber(session.frameHint.radius),
+          closeup: Boolean(session.frameHint.closeup),
+        }
+      : null,
     noteSaved: Boolean(session.noteSaved),
     facts: Array.isArray(session.facts)
       ? session.facts.map(fact => ({
@@ -112,6 +121,14 @@ function makeSnapshot() {
     playableModeId: state.playableModeId,
     activeToolId: state.activeToolId,
     carriedObjectId: state.carriedObjectId || null,
+    carryDropRequest: state.carryDropRequest
+      ? {
+          id: state.carryDropRequest.id || null,
+          requestId: finiteNumber(state.carryDropRequest.requestId),
+          mode: state.carryDropRequest.mode || null,
+          reason: state.carryDropRequest.reason || null,
+        }
+      : null,
     carryPrompt: state.carryPrompt
       ? {
           id: state.carryPrompt.id || null,
@@ -120,6 +137,12 @@ function makeSnapshot() {
         }
       : null,
     toolbarOrder: Array.isArray(state.toolbarOrder) ? [...state.toolbarOrder] : [],
+    transition: state.transition
+      ? {
+          zoneId: state.transition.zoneId || null,
+          phase: state.transition.phase || null,
+        }
+      : null,
     statusViewOpen: Boolean(state.statusViewOpen),
     nearbySpecimenId: state.nearbySpecimenId || null,
     selectedSpecimenId: state.selectedSpecimenId || null,
@@ -244,6 +267,21 @@ function createHarnessApi() {
     isEnabled: () => true,
     getState: () => makeSnapshot(),
     getPlayerPose: () => makeSnapshot().playerPose,
+    getExamineSubjectDebug: () => {
+      const state = useThreeGameStore.getState();
+      const actorId = state.examineSession?.actorId;
+      if (!actorId) return null;
+      const pose = getSpecimenRuntimePoses(state.currentZoneId)?.get(actorId);
+      const bounds = getSpecimenRuntimeBounds(state.currentZoneId)?.get(actorId);
+      return {
+        actorId,
+        zoneId: state.currentZoneId,
+        pose: pose ? plainVector(pose) : null,
+        bounds: bounds
+          ? { height: finiteNumber(bounds.height), radius: finiteNumber(bounds.radius) }
+          : null,
+      };
+    },
     waitForSceneReady: (timeoutMs = 75000) => waitForPredicate(() => {
       const snapshot = makeSnapshot();
       return snapshot.canvas && !snapshot.launchOverlay ? snapshot : null;
@@ -254,6 +292,19 @@ function createHarnessApi() {
     }, timeoutMs, '3D gameplay HUD readiness'),
     setMode: modeId => {
       useThreeGameStore.getState().setPlayableMode(modeId);
+      return makeSnapshot();
+    },
+    setZone: zoneId => {
+      const store = useThreeGameStore.getState();
+      if (!zoneId) return makeSnapshot();
+      if (store.currentZoneId === zoneId) return makeSnapshot();
+      store.beginZoneTransition(zoneId, {
+        minutes: 0,
+        fatigue: 0,
+        source: 'e2e',
+        localTransition: true,
+      });
+      useThreeGameStore.getState().completeZoneTransition();
       return makeSnapshot();
     },
     setTool: toolId => {
@@ -302,6 +353,21 @@ function createHarnessApi() {
       const nearest = api.selectNearestSpecimen();
       if (!nearest) return null;
       useThreeGameStore.getState().openExamine(nearest.actorId);
+      return makeSnapshot().examineSession;
+    },
+    openExamineSpecimen: actorId => {
+      if (!actorId) return null;
+      const store = useThreeGameStore.getState();
+      const specimen = getThreeSpecimens(store.currentZoneId).find(item => (
+        actorIdFor(item) === actorId
+        || item.localInstanceId === actorId
+        || item.id === actorId
+      ));
+      const resolvedActorId = actorIdFor(specimen);
+      if (!resolvedActorId) return null;
+      store.setNearbySpecimen(resolvedActorId);
+      store.setSelectedSpecimen(resolvedActorId);
+      useThreeGameStore.getState().openExamine(resolvedActorId);
       return makeSnapshot().examineSession;
     },
     closeExamine: () => {

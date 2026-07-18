@@ -305,20 +305,6 @@ async function pageState(page) {
   });
 }
 
-async function captureGameplayCanvas(page, filename) {
-  const dataUrl = await evaluateWithTimeout(
-    page,
-    `capture ${filename}`,
-    () => document.querySelector('canvas')?.toDataURL('image/png') || null,
-    undefined,
-    10000,
-  );
-  assertCondition(dataUrl?.startsWith('data:image/png;base64,'), `Could not capture gameplay canvas for ${filename}.`);
-  const outputPath = path.join(outDir, filename);
-  await fs.writeFile(outputPath, Buffer.from(dataUrl.split(',')[1], 'base64'));
-  return outputPath;
-}
-
 async function findVisibleButtonCenter(page, kind) {
   return page.evaluate(buttonKind => {
     const visibleButtonInfo = button => {
@@ -593,7 +579,6 @@ async function runDarwinScenario(browser, baseUrl) {
         'Campaign stool did not enter skeletal carry state.',
         pickupState,
       );
-      await captureGameplayCanvas(page, 'lawson-campaign-stool-attached.png');
     });
 
     const movement = await withFailureArtifacts(page, 'Darwin keyboard movement', errors, async () => {
@@ -625,9 +610,12 @@ async function runDarwinScenario(browser, baseUrl) {
         const afterPose = await page.evaluate(() => window.__darwinE2E.getPlayerPose());
         const moved = distance2D(beforePose, afterPose);
         attempts.push({ key: attempt.label, moved, beforePose, afterPose });
-        if (moved > 0.08) return { key: attempt.label, moved, beforePose, afterPose, attempts };
+        // A carried collider used to truncate movement after roughly one
+        // 0.39m step. Require several body lengths of sustained walking so
+        // that failure cannot masquerade as successful input handling.
+        if (moved > 1.25) return { key: attempt.label, moved, beforePose, afterPose, attempts };
       }
-      assertCondition(false, 'Darwin did not move far enough after keyboard input.', { attempts });
+      assertCondition(false, 'Darwin did not sustain movement while carrying the campaign stool.', { attempts });
     });
     console.log(`[three:e2e] Darwin: moved ${movement.moved.toFixed(2)}m with ${movement.key}`);
     const carriedAfterMove = await page.evaluate(() => window.__darwinE2E.getState());
@@ -636,23 +624,22 @@ async function runDarwinScenario(browser, baseUrl) {
       'Campaign stool detached while Darwin was moving.',
       { initial, movement, carriedAfterMove },
     );
-    await page.keyboard.down('x');
-    await page.waitForTimeout(650);
-    await page.keyboard.up('x');
-    await page.waitForTimeout(300);
-    await captureGameplayCanvas(page, 'lawson-campaign-stool-walking.png');
-
     await withFailureArtifacts(page, 'Darwin drops campaign stool', errors, async () => {
-      await page.evaluate(() => window.__darwinE2E.setCarriedObject(null));
-      await page.waitForTimeout(900);
-      const state = await page.evaluate(() => window.__darwinE2E.getState());
+      await page.evaluate(() => window.__darwinE2E.interact());
+      const state = await waitForHarnessState(page, snapshot => (
+        snapshot.carriedObjectId === null
+        && snapshot.carryDropRequest === null
+        && snapshot.carryPrompt?.id === 'lawson-campaign-stool'
+        && snapshot.carryPrompt?.mode === 'pickup'
+        && snapshot.carryPrompt.distance > 0.35
+      ), GAMEPLAY_TIMEOUT_MS, 'campaign stool grounded pickup state');
       assertCondition(
         state.carriedObjectId === null,
         'Campaign stool remained attached after drop.',
         state,
       );
+      return state;
     });
-    await page.waitForTimeout(500);
     const dropped = await page.evaluate(() => window.__darwinE2E.getState());
     assertCondition(
       dropped.carryPrompt?.id === 'lawson-campaign-stool'
@@ -661,7 +648,6 @@ async function runDarwinScenario(browser, baseUrl) {
       'Campaign stool did not settle beyond Darwin in a grounded pickup state.',
       dropped,
     );
-    await captureGameplayCanvas(page, 'lawson-campaign-stool-dropped.png');
 
     await page.close();
     return {

@@ -239,7 +239,7 @@ function InteriorAmbientLights({ lighting }) {
       mist: weatherEnv.mistAmount,
       rain: weatherEnv.rainIntensity,
       lightDim: weatherEnv.lightDim,
-      moonFraction: celestial.moon_phase.fraction,
+      moonFraction: celestial.moonlight,
     });
     ambientRef.current.intensity = THREE.MathUtils.lerp(
       lighting.ambientNight ?? 0.004,
@@ -434,7 +434,7 @@ function PortalLight({ portal, portalGroups, portalBudgets, worldYaw = 0 }) {
       mist: weatherEnv.mistAmount,
       rain: weatherEnv.rainIntensity,
       lightDim: weatherEnv.lightDim,
-      moonFraction: celestial.moon_phase.fraction,
+      moonFraction: celestial.moonlight,
     });
     // Celestial vectors are expressed in world space. Interior portal normals
     // are authored in the house's local frame, so rotate the sun back through
@@ -458,7 +458,7 @@ function PortalLight({ portal, portalGroups, portalBudgets, worldYaw = 0 }) {
     const diffuseStrength = celestial.daylight
       * (0.46 + rig.weatherSoftness * 0.46)
       * (1 - weatherEnv.lightDim * 0.42)
-      + celestial.night * 0.018 * (0.25 + celestial.moon_phase.fraction * 0.75);
+      + celestial.night * 0.018 * (0.25 + celestial.moonlight * 0.75);
     // Cloud cover removes hard-edged direct sun, not the much larger luminous
     // window source. Lawson can opt into a restrained diffuse shaft so cloudy
     // windows still read as light entering the room; clear sun remains the

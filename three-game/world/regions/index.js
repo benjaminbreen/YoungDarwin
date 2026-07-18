@@ -66,6 +66,8 @@ import { postScrubRiseRegion } from './postScrubRise/terrain';
 import { createPostScrubRiseTerrainMaterial } from './postScrubRise/material';
 import { lavaFlatsRegion } from './lavaFlats/terrain';
 import { createLavaFlatsTerrainMaterial } from './lavaFlats/material';
+import { northernHighlandsRegion } from './northernHighlands/terrain';
+import { createNorthernHighlandsTerrainMaterial } from './northernHighlands/material';
 
 /** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
@@ -98,6 +100,7 @@ const authoredRegions = [
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
   { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
   { ...lavaFlatsRegion, createTerrainMaterial: createLavaFlatsTerrainMaterial },
+  { ...northernHighlandsRegion, createTerrainMaterial: createNorthernHighlandsTerrainMaterial },
 ];
 
 /** @type {Map<string, AuthoredRegionDefinition>} */

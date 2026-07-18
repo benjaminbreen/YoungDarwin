@@ -1,5 +1,6 @@
 import { canonicalSpecimenId } from '../../utils/canonicalIds';
 import { currentRegionId, getRegionMap, regionMaps } from '../../game-core/regionMaps';
+import { specimenSpawnActorId } from '../../game-core/specimens';
 import { PLAYER, SWIM } from '../components/player/playerConfig';
 
 export const DEFAULT_PLAYABLE_MODE_ID = 'darwin';
@@ -291,7 +292,7 @@ function spawnPayload(zoneId, spawn = null, index = 0, mode = null) {
   const specimenId = canonicalSpecimenId(spawn.specimenId);
   return {
     zoneId,
-    actorId: spawn.instanceId || (specimenId ? `${specimenId}-${index}` : null),
+    actorId: specimenId ? specimenSpawnActorId(zoneId, spawn, index) : null,
     // y=0 defers to terrain sampling at spawn, so the centre override lands
     // on the ground (or takes off from it) at the right height.
     point: mode?.spawnAtCenter ? { x: 0, y: 0, z: 0 } : { x, y, z },

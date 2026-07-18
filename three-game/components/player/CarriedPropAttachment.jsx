@@ -57,7 +57,8 @@ export function CarriedPropAttachment({ scene }) {
     const group = groupRef.current;
     const rightBone = bonesRef.current.right;
     const leftBone = bonesRef.current.left;
-    if (!group || !prop || !rightBone || !group.parent) {
+    const liveCarriedObjectId = useThreeGameStore.getState().carriedObjectId;
+    if (!group || !prop || liveCarriedObjectId !== prop.id || !rightBone || !group.parent) {
       if (group) group.visible = false;
       return;
     }

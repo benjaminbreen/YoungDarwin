@@ -140,12 +140,6 @@ function buildFlora() {
       && (biome === 'normal-sand' || biome === 'dry-grass-shelf')
       && clearOfGardenAndHuts(x, z),
   });
-  const drybrush = scatter('hut-drybrush', 7, 797, {
-    minX: -2, maxX: 36, minZ: -31, maxZ: -3, scale: [0.48, 0.9], maxGrade: 0.68,
-    accept: (biome, x, z) => nearAnyCluster(scrubClumps, x, z, 10.5)
-      && biome === 'dry-grass-shelf'
-      && clearOfGardenAndHuts(x, z),
-  });
   const driftwood = scatter('hut-driftwood', 5, 821, {
     minX: -28, maxX: 28, minZ: -1, maxZ: 23, scale: [1.25, 2.4], maxGrade: 0.56,
     accept: (biome, x, z) => {
@@ -179,16 +173,6 @@ function buildFlora() {
       castShadow: false,
       motion: { wind: 1.1, bend: 0.27, bendRadius: 1.35 },
       items: saltbush,
-    },
-    {
-      id: 'beach-hut-drybrush',
-      path: `${NATURE}runtime-drybrush.glb`,
-      sink: 0.06,
-      castShadow: false,
-      tint: '#897c54',
-      tintStrength: 0.12,
-      motion: { wind: 0.95, bend: 0.2, bendRadius: 1.25 },
-      items: drybrush,
     },
     {
       id: 'beach-hut-driftwood',

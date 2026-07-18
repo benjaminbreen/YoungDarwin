@@ -14,6 +14,7 @@ import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { PricklyPearField } from '../physics/props/pricklyPear/PricklyPearField';
 import { LavaCactusField } from '../physics/props/lavaCactus/LavaCactusField';
+import { PaloSantoField } from '../physics/props/paloSanto/PaloSantoField';
 import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
 import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
@@ -26,6 +27,7 @@ import { PhysicsTerrain } from '../physics/PhysicsTerrain';
 import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
+import { getLavaCactusSites } from '../physics/props/lavaCactus/lavaCactusSites';
 
 export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
@@ -38,16 +40,27 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
   const interior = getInteriorDefinition(currentZoneId);
+  const lavaCactusOwnsSpecimen = propsReady
+    && settings.physicsProps !== false
+    && getLavaCactusSites(currentZoneId).length > 0;
   const specimens = useMemo(
     () => {
       if (!interactablesReady) return [];
       const collected = new Set(collectedSpecimenActorIds || []);
       return getThreeSpecimens(currentZoneId).filter(specimen => {
         const actorId = specimen.instanceId || specimen.id;
-        return actorId !== playableHiddenActorId && !collected.has(actorId);
+        return actorId !== playableHiddenActorId
+          && !collected.has(actorId)
+          && !(lavaCactusOwnsSpecimen && specimen.id === 'cactus');
       });
     },
-    [collectedSpecimenActorIds, currentZoneId, interactablesReady, playableHiddenActorId],
+    [
+      collectedSpecimenActorIds,
+      currentZoneId,
+      interactablesReady,
+      lavaCactusOwnsSpecimen,
+      playableHiddenActorId,
+    ],
   );
 
   if (interior) {
@@ -78,6 +91,7 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
       {propsReady && settings.physicsProps !== false && <PhysicsProps />}
       {propsReady && settings.physicsProps !== false && <PricklyPearField />}
       {propsReady && settings.physicsProps !== false && <LavaCactusField />}
+      {propsReady && settings.physicsProps !== false && <PaloSantoField />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}

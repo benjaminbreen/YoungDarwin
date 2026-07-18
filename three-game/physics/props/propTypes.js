@@ -649,7 +649,7 @@ export const PROP_TYPES = {
     label: 'campaign stool', visual: 'cabinStool', visualAsset: 'lawsonCampaignStool',
     interactionRing: false,
     visualOffsetY: -0.3,
-    collider: { shape: 'cuboid', halfExtents: [0.32, 0.29, 0.25] }, restOffset: 0.3,
+    collider: { shape: 'cuboid', halfExtents: [0.345, 0.303, 0.29] }, restOffset: 0.303,
     mass: 8, friction: 1.9, restitution: 0, linearDamping: 3, angularDamping: 3,
     behaviors: {
       mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.34, rotationPolicy: 'resistTipping', angularMax: 0.45 },

@@ -7,6 +7,7 @@ import {
   DARWINIOTHAMNUS_PATH,
   DARWINIOTHAMNUS_VARIANT_MODE,
   DARWINIOTHAMNUS_LABEL,
+  MATURE_OPUNTIA_PATH,
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
 
@@ -74,10 +75,11 @@ function buildFlora() {
     },
     {
       id: 'opuntia',
-      path: `${NATURE}runtime-opuntia.glb`,
-      sink: 0.06,
+      label: 'Mature Floreana prickly pear / Opuntia megasperma',
+      path: MATURE_OPUNTIA_PATH,
+      sink: 0.04,
       items: scatter('opuntia-tree', 2, 113, {
-        minX: -30, maxX: 40, minZ: 16, maxZ: 44, scale: [0.9, 1.3], maxGrade: 0.4,
+        minX: -30, maxX: 40, minZ: 16, maxZ: 44, scale: [3.2, 4.7], maxGrade: 0.4,
         accept: (biome, x, z) => inland(x, z) > 13 && (biome === 'dry-scrub' || biome === 'ash-slope'),
       }),
     },

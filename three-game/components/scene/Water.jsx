@@ -132,7 +132,10 @@ const WATER_NIGHT = {
   scatter: new THREE.Color('#123f55'),
   deep: new THREE.Color('#081b2d'),
   openDeep: new THREE.Color('#05111f'),
-  foam: new THREE.Color('#9db6c8'),
+  // Foam reflects the night sky; it should read as cool moving water rather
+  // than a self-lit white ribbon. Moon-facing crest cores get a separate lift
+  // in the shader, so the base can remain a restrained slate blue.
+  foam: new THREE.Color('#71899d'),
 };
 
 const WATER_STORM = {
@@ -1108,8 +1111,14 @@ function createStylizedWaterMaterial(
         shoreFoam *= 1.0 + uRain * 0.16;
         surf *= 1.2 + uRain * 0.22;
         float foam = clamp(max(shoreFoam * 1.05, surf), 0.0, 1.0);
-        color = mix(color, uFoam, foam * 0.96);
-        alpha = max(alpha, foam * 0.86);
+        // Foam is reflected light, not emission. Dim the broad body at night,
+        // while retaining a narrow silver response on the strongest crests
+        // when moon glitter is actually reaching the surface.
+        float foamCore = smoothstep(0.7, 0.98, foam);
+        float foamLight = clamp(mix(0.46, 1.0, uDaylight) + uMoonGlitter * 0.28, 0.0, 1.0);
+        float foamVisibility = mix(foamLight, min(1.0, foamLight + 0.18), foamCore);
+        color = mix(color, uFoam, foam * 0.96 * foamVisibility);
+        alpha = max(alpha, foam * 0.86 * foamVisibility);
 
         if (underwaterView > 0.001) {
           float underwaterBlend = smoothstep(0.08, 0.48, underwaterView);
@@ -1163,6 +1172,7 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture, sta
       uFoam: { value: WATER_DAY.foam.clone() },
       uScatter: { value: WATER_DAY.scatter.clone() },
       uDaylight: { value: 1 },
+      uMoonGlitter: { value: 0 },
       uRain: { value: 0 },
       uUnderwaterAmount: { value: 0 },
     },
@@ -1215,6 +1225,7 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture, sta
       uniform vec3 uFoam;
       uniform vec3 uScatter;
       uniform float uDaylight;
+      uniform float uMoonGlitter;
       uniform float uRain;
       uniform float uUnderwaterAmount;
       uniform float uStandingWaterFadeStart;
@@ -1302,9 +1313,12 @@ function createSurfRibbonMaterial(seafloorTexture, standingWaterMaskTexture, sta
         foam = clamp(foam, 0.0, 1.0);
         if (foam < 0.01) discard;
 
+        float foamCore = smoothstep(0.7, 0.98, foam);
+        float foamLight = clamp(mix(0.28, 1.0, uDaylight) + uMoonGlitter * 0.22, 0.0, 1.0);
+        float foamVisibility = mix(foamLight, min(1.0, foamLight + 0.16), foamCore);
         vec3 color = mix(uScatter, uFoam, 0.84 + lace * 0.16);
         color = mix(color * vec3(0.78, 0.92, 0.96), color, uDaylight);
-        float alpha = foam * (0.34 + 0.52 * smoothstep(0.12, 0.82, foam));
+        float alpha = foam * (0.34 + 0.52 * smoothstep(0.12, 0.82, foam)) * foamVisibility;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1954,7 +1968,7 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
     const store = useThreeGameStore.getState();
     const t = clock.elapsedTime;
     const time = ((store.timeOfDay % 24) + 24) % 24;
-    const sun = sunDirection(time);
+    const sun = sunDirection(time, store.day || 1);
     _sun.set(sun[0], sun[1], sun[2]);
 
     const wu = waterMaterial.uniforms;
@@ -2063,6 +2077,7 @@ export function Water({ quality = 'performance', reflections = true, allowInteri
     su.uRain.value = weatherEnv.rainIntensity;
     su.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
     su.uDaylight.value = daylight;
+    su.uMoonGlitter.value = moonGlitter;
     su.uFoam.value.copy(wu.uFoam.value);
     su.uScatter.value.copy(wu.uScatter.value);
     if (scene.fog) {

@@ -1,19 +1,15 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
-import { EffectComposer, Bloom, N8AO, SMAA } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
-import { AssetBrowserPanel } from './ui/dev/AssetBrowserPanel';
-import { AnimalAnimationDevPanel } from './ui/dev/AnimalAnimationDevPanel';
-import { DarwinAnimationDevPanel } from './ui/dev/DarwinAnimationDevPanel';
-import { MapGeographyDevPanel } from './ui/dev/MapGeographyDevPanel';
-import { WaterDevPanel } from './ui/dev/WaterDevPanel';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
@@ -28,10 +24,38 @@ import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
 import { getEcology } from './world/ecology';
+import {
+  getSpecimenRuntimeBounds,
+  getSpecimenRuntimePoses,
+  resolveSpecimenFrameHint,
+} from './world/specimenRuntime';
+import { terrainHeight } from './world/terrain';
 import { prefetchEcologyAssets } from './components/scene/ecology/EcologyRenderer';
 import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
 import { prefetchRegionTerrainTextures } from './world/terrainPrefetch';
 import { prefetchIslandMapImage } from './ui/expedition/map/islandLocations';
+
+const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
+const AssetBrowserPanel = dynamic(
+  () => import('./ui/dev/AssetBrowserPanel').then(module => module.AssetBrowserPanel),
+  { ssr: false },
+);
+const AnimalAnimationDevPanel = dynamic(
+  () => import('./ui/dev/AnimalAnimationDevPanel').then(module => module.AnimalAnimationDevPanel),
+  { ssr: false },
+);
+const DarwinAnimationDevPanel = dynamic(
+  () => import('./ui/dev/DarwinAnimationDevPanel').then(module => module.DarwinAnimationDevPanel),
+  { ssr: false },
+);
+const MapGeographyDevPanel = dynamic(
+  () => import('./ui/dev/MapGeographyDevPanel').then(module => module.MapGeographyDevPanel),
+  { ssr: false },
+);
+const WaterDevPanel = dynamic(
+  () => import('./ui/dev/WaterDevPanel').then(module => module.WaterDevPanel),
+  { ssr: false },
+);
 
 const KEYBOARD_MAP = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -1070,6 +1094,60 @@ function OpeningIntroCompletion({
 // highlights, which is why the sun core is pushed white-hot in SkyController.
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
+function ExaminationDepthOfField() {
+  const session = useThreeGameStore(state => state.examineSession);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const effectRef = useRef(null);
+  const target = useMemo(() => new Vector3(), []);
+  const active = session?.kind === 'specimen' && Boolean(session.focus);
+  const authoredHint = session?.frameHint || { height: 0.8, radius: 0.6 };
+  const initialFocusRange = MathUtils.clamp((authoredHint.radius || 0.6) * 0.65, 0.08, 1.05);
+
+  const setFocusTarget = (focus, hint) => {
+    const groundY = terrainHeight(focus.x, focus.z, currentZoneId);
+    const focusY = Math.max(
+      Number.isFinite(focus.y) ? focus.y : groundY,
+      Number.isFinite(groundY) ? groundY + 0.04 : focus.y,
+    );
+    const centerOffset = Number.isFinite(hint.centerY)
+      ? hint.centerY
+      : hint.closeup
+        ? Math.max(0.015, hint.height * 0.5)
+        : Math.max(0.12, hint.height * 0.52);
+    target.set(focus.x, focusY + centerOffset, focus.z);
+  };
+
+  if (active) {
+    setFocusTarget(session.focus, resolveSpecimenFrameHint(authoredHint, null));
+  }
+
+  useFrame(() => {
+    if (!active) return;
+    const liveFocus = getSpecimenRuntimePoses(currentZoneId)?.get(session.actorId);
+    const focus = liveFocus || session.focus;
+    if (!focus) return;
+    const renderedBounds = getSpecimenRuntimeBounds(currentZoneId)?.get(session.actorId);
+    const hint = resolveSpecimenFrameHint(authoredHint, renderedBounds);
+    setFocusTarget(focus, hint);
+    effectRef.current?.target?.copy(target);
+    if (effectRef.current?.cocMaterial) {
+      const subjectRadius = renderedBounds?.radius || hint.radius || 0.6;
+      effectRef.current.cocMaterial.focusRange = MathUtils.clamp(subjectRadius * 0.58, 0.08, 1.05);
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <DepthOfField
+      ref={effectRef}
+      target={target}
+      focusRange={initialFocusRange}
+      bokehScale={3.8}
+      resolutionScale={0.5}
+    />
+  );
+}
+
 function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
@@ -1176,6 +1254,7 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
         />
       )}
       <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
+      <ExaminationDepthOfField />
       {/* Threshold sits just under the ACES shoulder so deliberate HDR
           customers — sun core, lantern flame, water glints pushed past 1.0,
           moon glitter, ground/mote sparkles — glow softly, while sky/sand/
@@ -1759,15 +1838,15 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     setE2EMode(nextE2EMode);
     setScreenshotMode(nextScreenshotMode);
     setSkipOpeningIntro(skipOpeningIntroFromParams(params));
-    if (process.env.NODE_ENV !== 'production' && params.has('mapDev')) {
+    if (DEV_TOOLS_ENABLED && params.has('mapDev')) {
       setShowMapGeographyDev(true);
     }
-    if (params.has('assetBrowser')) {
+    if (DEV_TOOLS_ENABLED && params.has('assetBrowser')) {
       setShowAssetBrowser(true);
     }
     setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
-    setPerfProbe(params.has('perfProbe') || params.has('costProbe'));
-    setCostProbe(params.has('costProbe'));
+    setPerfProbe(DEV_TOOLS_ENABLED && (params.has('perfProbe') || params.has('costProbe')));
+    setCostProbe(DEV_TOOLS_ENABLED && params.has('costProbe'));
     const zoneParam = params.get('zone');
     if (zoneParam) {
       const store = useThreeGameStore.getState();
@@ -1789,27 +1868,27 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
         event.preventDefault();
         return;
       }
-      if (event.code === 'Digit0') {
+      if (event.code === 'Digit0' && DEV_TOOLS_ENABLED) {
         event.preventDefault();
         setShowAssetBrowser(value => !value);
         return;
       }
-      if (event.code === 'Digit6' && process.env.NODE_ENV !== 'production') {
+      if (event.code === 'Digit6' && DEV_TOOLS_ENABLED) {
         event.preventDefault();
         setShowMapGeographyDev(value => !value);
         return;
       }
-      if (event.code === 'Digit7') {
+      if (event.code === 'Digit7' && DEV_TOOLS_ENABLED) {
         event.preventDefault();
         setShowAnimalAnimationLab(value => !value);
         return;
       }
-      if (event.code === 'Digit8') {
+      if (event.code === 'Digit8' && DEV_TOOLS_ENABLED) {
         event.preventDefault();
         setShowDarwinAnimationLab(value => !value);
         return;
       }
-      if (event.code !== 'Backquote') return;
+      if (event.code !== 'Backquote' || !DEV_TOOLS_ENABLED) return;
       event.preventDefault();
       setShowPerf(value => !value);
     };
@@ -2094,7 +2173,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
                 if (showPerf) setMetrics(sample);
               }}
             />
-            {showPerf && perfSettings.stats && <Stats />}
+            {DEV_TOOLS_ENABLED && showPerf && perfSettings.stats && <Stats />}
           </Canvas>
         )}
         {gameStarted && <CinematicScreenGrade enabled={scenePerfSettings.postprocessing} weather={weather} />}
@@ -2118,25 +2197,27 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             onReturnToMainMenu={returnToMainMenu}
           />
         )}
-        {gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
-        {gameUiVisible && (
+        {DEV_TOOLS_ENABLED && gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
+        {DEV_TOOLS_ENABLED && gameUiVisible && (
           <AnimalAnimationDevPanel open={showAnimalAnimationLab} onClose={() => setShowAnimalAnimationLab(false)} />
         )}
-        {gameUiVisible && (
+        {DEV_TOOLS_ENABLED && gameUiVisible && (
           <DarwinAnimationDevPanel open={showDarwinAnimationLab} onClose={() => setShowDarwinAnimationLab(false)} />
         )}
-        {process.env.NODE_ENV !== 'production' && gameUiVisible && (
+        {DEV_TOOLS_ENABLED && gameUiVisible && (
           <MapGeographyDevPanel open={showMapGeographyDev} onClose={() => setShowMapGeographyDev(false)} />
         )}
-        {gameUiVisible && <WaterDevPanel />}
-        <PerformancePanel
-          open={gameUiVisible && showPerf}
-          settings={perfSettings}
-          metrics={metrics}
-          physicsDebug={physicsDebug}
-          onChange={setPerfSettings}
-          onClose={() => setShowPerf(false)}
-        />
+        {DEV_TOOLS_ENABLED && gameUiVisible && <WaterDevPanel />}
+        {DEV_TOOLS_ENABLED && (
+          <PerformancePanel
+            open={gameUiVisible && showPerf}
+            settings={perfSettings}
+            metrics={metrics}
+            physicsDebug={physicsDebug}
+            onChange={setPerfSettings}
+            onClose={() => setShowPerf(false)}
+          />
+        )}
         {showLaunchOverlay && (
           <LaunchOverlay
             mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}

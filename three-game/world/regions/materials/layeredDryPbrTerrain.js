@@ -14,7 +14,12 @@ function f(value) {
   return Number(value).toFixed(3);
 }
 
-function fragmentCommon({ pathPoints, layerConfig }) {
+function fragmentCommon({
+  pathPoints,
+  layerConfig,
+  surfaceMaskGLSL = '',
+  layerWeightsOverlayGLSL = '',
+}) {
   return /* glsl */`
         uniform sampler2D uPostScrubCoastalAlbedo;
         uniform sampler2D uPostScrubCoastalNrh;
@@ -49,6 +54,7 @@ function fragmentCommon({ pathPoints, layerConfig }) {
           }
           return value;
         }
+        ${surfaceMaskGLSL}
         ${standardFootPathSplatGLSL({
           functionName: 'psrPathSplat',
           textureUniform: 'uPostScrubPathSplat',
@@ -70,6 +76,7 @@ function fragmentCommon({ pathPoints, layerConfig }) {
             * (1.0 - basalt * 0.52);
           float coastal = max(0.0, 1.0 - cinder - basalt - litter);
           vec4 weights = vec4(coastal, litter, basalt, cinder);
+          ${layerWeightsOverlayGLSL}
           return weights / max(dot(weights, vec4(1.0)), 0.0001);
         }
         vec4 psrFrameAndUvs(
@@ -231,6 +238,8 @@ export function createLayeredDryPbrTerrainMaterial({
   pathSplatBounds,
   pathMinimumWidth = 1.62,
   layerConfig,
+  surfaceMaskGLSL = '',
+  layerWeightsOverlayGLSL = '',
   colorOverlayGLSL = '',
   cacheKey = 'layered-dry-pbr-terrain-v1',
 } = {}) {
@@ -291,7 +300,7 @@ export function createLayeredDryPbrTerrainMaterial({
       .replace(
         '#include <common>',
         `#include <common>
-${fragmentCommon({ pathPoints, layerConfig })}`,
+${fragmentCommon({ pathPoints, layerConfig, surfaceMaskGLSL, layerWeightsOverlayGLSL })}`,
       )
       .replace(
         '#include <color_fragment>',

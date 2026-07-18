@@ -1,4 +1,4 @@
-import { makeZoneScatter, varyScatterTransforms } from '../scatter';
+import { makeZoneScatter } from '../scatter';
 import { terrainHeight } from '../terrain';
 import {
   getRockyClearingCaveFeature,
@@ -14,6 +14,8 @@ import {
 } from '../regions/rockyClearing/path';
 import { buildStandardDryPathGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
+import { LAVA_CACTUS_SPECIES } from './floraSpecies';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
@@ -82,36 +84,7 @@ function buildGrass() {
   });
 }
 
-function notOnPathOrCave(biome, x, z) {
-  const path = rockyClearingPathInfo(x, z);
-  return path.distance > path.width * 1.85
-    && rockyClearingCaveThresholdMask(x, z) < 0.24
-    && rockyClearingRubbleMask(x, z) < 0.62
-    && biome !== 'red-dirt-path'
-    && biome !== 'cave-threshold';
-}
-
 function buildFlora() {
-  const scatter = (layer, count, seed, opts) => makeZoneScatter(ROCKY_CLEARING, layer, count, seed, opts);
-  const shrubs = varyScatterTransforms(scatter('rocky-clearing-shrub', 20, 331, {
-    minX: -42, maxX: 42, minZ: -30, maxZ: 32, scale: [0.1, 0.24], maxGrade: 0.9,
-    accept: (biome, x, z) => notOnPathOrCave(biome, x, z)
-      && rockyClearingCentralMask(x, z) < 0.62
-      && hash2(x, z, 7) < 0.68,
-  }), 331, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.04 }).map(item => ({
-    ...item,
-    y: item.y + 0.02,
-    tint: item.tone > 0.54 ? '#7f8749' : '#596b3b',
-  }));
-  const smallShrubs = varyScatterTransforms(scatter('rocky-clearing-low-shrub', 24, 347, {
-    minX: -43, maxX: 43, minZ: -32, maxZ: 35, scale: [0.07, 0.17], maxGrade: 1.0,
-    accept: (biome, x, z) => notOnPathOrCave(biome, x, z)
-      && (Math.abs(x) > 18 || Math.abs(z) > 16 || rockyClearingCentralMask(x, z) < 0.28),
-  }), 347, { width: [0.88, 1.12], height: [0.9, 1.12], maxLean: 0.045 }).map(item => ({
-    ...item,
-    y: item.y + 0.02,
-    tint: item.tone > 0.5 ? '#8c7c48' : '#536437',
-  }));
   const caveFerns = [
     { x: -3.2, z: -9.35, scale: 0.98, yaw: 0.42, widthScale: 1.08, heightScale: 0.92 },
     { x: 6.8, z: -9.15, scale: 0.86, yaw: 2.18, widthScale: 0.92, heightScale: 1.06 },
@@ -127,24 +100,6 @@ function buildFlora() {
     tint: index > 1 && index < 4 ? '#3f6540' : '#58774a',
   }));
   return [
-    {
-      id: 'rocky-clearing-shrub',
-      path: `${NATURE}runtime-plant-shrub.glb`,
-      sink: 0.04,
-      tintStrength: 0.34,
-      motion: { wind: 1.08, bend: 0.24, bendRadius: 1.28 },
-      castShadow: false,
-      items: shrubs,
-    },
-    {
-      id: 'rocky-clearing-low-shrub',
-      path: `${NATURE}runtime-small-shrub.glb`,
-      sink: 0.04,
-      tintStrength: 0.36,
-      motion: { wind: 1.32, bend: 0.28, bendRadius: 1.14 },
-      castShadow: false,
-      items: smallShrubs,
-    },
     {
       id: 'rocky-clearing-cave-ferns',
       path: `${NATURE}runtime-galapagos-fern.glb`,
@@ -180,6 +135,54 @@ function buildSurfaceLitter() {
         || biome === 'cave-threshold'
       );
     },
+  })];
+}
+
+function buildInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'rocky-clearing-lava-cactus-rubble',
+    zoneId: ROCKY_CLEARING,
+    species: LAVA_CACTUS_SPECIES,
+    runtime: 'lava-cactus',
+    seed: 457,
+    count: 4,
+    bounds: { minX: -38, maxX: 38, minZ: -31, maxZ: 29 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = rockyClearingPathInfo(x, z);
+      const rubble = rockyClearingRubbleMask(x, z);
+      const cave = rockyClearingCaveThresholdMask(x, z);
+      const clearing = rockyClearingCentralMask(x, z);
+      const biomeSuitability = {
+        'basalt-rubble': 1,
+        'rocky-rise': 0.78,
+        'stony-highland-grass': 0.36,
+        'dusty-clearing': 0.12,
+      }[biome] || 0;
+      return {
+        moisture: clamp01(0.16 + (1 - clearing) * 0.05),
+        canopy: 0.03,
+        exposure: clamp01(0.74 + rubble * 0.22),
+        disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.34),
+        salinity: 0.01,
+        rockiness: clamp01(0.5 + rubble * 0.48),
+        biomeSuitability,
+        localSuitability: clamp01(0.3 + rubble * 0.64),
+        excluded: biomeSuitability <= 0
+          || path.distance < path.width * 1.8
+          || cave > 0.3
+          || rubble < 0.32,
+      };
+    },
+    placement: {
+      patchCount: 2,
+      patchRadius: [2.2, 4.4],
+      minPatchSeparation: 7,
+      minItemSeparation: 1.55,
+      maxGrade: 0.65,
+    },
+    siteFromItem: item => ({
+      flowerCount: item.tone < 0.66 ? 0 : 1,
+    }),
   })];
 }
 
@@ -223,6 +226,7 @@ export function buildRockyClearingEcology() {
     dryGrassPatches: [buildGrass()],
     surfaceLitter: buildSurfaceLitter(),
     flora: buildFlora(),
+    interactiveFlora: buildInteractiveFlora(),
     rocks: getRockyClearingRocks(),
     props: buildProps(),
     footprintBiomes: ['red-dirt-path', 'path-shoulder', 'dusty-clearing', 'cave-threshold'],

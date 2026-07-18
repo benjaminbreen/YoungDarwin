@@ -6,7 +6,7 @@ import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { lightingDebugEnabled } from '../../runtimeDebug';
-import { skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
+import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { fogAtmosphereUniforms } from '../../world/fogAtmosphere';
@@ -26,7 +26,16 @@ const SKY_DITHER_GLSL = /* glsl */`
 const SKY_DISTANCE = 170;
 const BODY_DISTANCE = 150;
 const STAR_RADIUS = 162;
-const STAR_COUNT = 2600;
+// A complete celestial sphere rotates around the local polar axis, so roughly
+// half of these stars are above the horizon at any one time.
+const STAR_COUNT = 6400;
+const FLOREANA_LATITUDE_RADIANS = THREE.MathUtils.degToRad(-1.28);
+const STAR_ROTATION_AXIS = new THREE.Vector3(
+  0,
+  Math.sin(FLOREANA_LATITUDE_RADIANS),
+  -Math.cos(FLOREANA_LATITUDE_RADIANS),
+).normalize();
+const STAR_ROTATION_OFFSET = THREE.MathUtils.degToRad(18);
 
 // Colour stops we lerp between, authored once. Cool, dim night → neutral-warm
 // day, with a golden-hour push layered on top at the horizon.
@@ -176,6 +185,7 @@ const _shadowRight = new THREE.Vector3();
 const _shadowUp = new THREE.Vector3();
 const _shadowSnapped = new THREE.Vector3();
 const _shadowGroundDirection = new THREE.Vector3();
+const _nightSkyLight = new THREE.Vector3(0.34, 0.72, -0.42).normalize();
 const _worldUp = new THREE.Vector3(0, 1, 0);
 const _worldForward = new THREE.Vector3(0, 0, 1);
 
@@ -290,15 +300,16 @@ function patchMoonPhaseMaterial(material) {
         float terminatorGlow = (1.0 - smoothstep(0.035, 0.18, abs(terminator))) * moonDisc * smoothstep(0.04, 0.18, uMoonIllumination);
         vec3 moonBase = diffuseColor.rgb;
         float craterRelief = clamp((moonBase.r - 0.52) * 0.32 + (moonBase.b - moonBase.r) * 0.18, -0.08, 0.1);
-        vec3 litColor = moonBase * (0.42 + litMask * 0.72 + craterRelief);
-        diffuseColor.rgb = litColor * litMask;
-        diffuseColor.rgb += moonBase * darkMask * uMoonEarthshine * 0.46;
-        diffuseColor.rgb += vec3(0.8, 0.88, 1.0) * litRim * 0.16;
-        diffuseColor.rgb += vec3(0.72, 0.82, 1.0) * terminatorGlow * 0.12;
-        diffuseColor.a *= moonDisc * max(litMask, uMoonEarthshine * 0.52 + 0.04);`
+        vec3 litColor = moonBase * (0.62 + litMask * 0.88 + craterRelief * 1.25);
+        litColor = mix(litColor, vec3(1.06, 1.12, 1.28), 0.2);
+        diffuseColor.rgb = litColor * litMask * 1.14;
+        diffuseColor.rgb += moonBase * darkMask * uMoonEarthshine * 0.24;
+        diffuseColor.rgb += vec3(0.9, 0.96, 1.18) * litRim * 0.34;
+        diffuseColor.rgb += vec3(0.78, 0.9, 1.2) * terminatorGlow * 0.22;
+        diffuseColor.a *= moonDisc * max(litMask, uMoonEarthshine * 0.28 + 0.025);`
       );
   };
-  material.customProgramCacheKey = () => `${previousKey ? previousKey.call(material) : 'sprite'}|moon-phase-v3`;
+  material.customProgramCacheKey = () => `${previousKey ? previousKey.call(material) : 'sprite'}|moon-phase-v4`;
   material.needsUpdate = true;
 }
 
@@ -343,57 +354,58 @@ function createSunVeilMaterial({ moon = false } = {}) {
       uniform float uHorizonSun;
       uniform float uMoonMode;
 
-      float hash(vec2 p) {
+      float veilHash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
       }
 
-      float noise(vec2 p) {
+      float veilNoise(vec2 p) {
         vec2 i = floor(p);
         vec2 f = fract(p);
         vec2 u = f * f * (3.0 - 2.0 * f);
         return mix(
-          mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+          mix(veilHash(i), veilHash(i + vec2(1.0, 0.0)), u.x),
+          mix(veilHash(i + vec2(0.0, 1.0)), veilHash(i + vec2(1.0, 1.0)), u.x),
           u.y
         );
       }
 
-      float fbm(vec2 p) {
+      float veilFbm(vec2 p) {
         float v = 0.0;
-        float a = 0.55;
-        for (int i = 0; i < 4; i++) {
-          v += noise(p) * a;
+        float a = 0.58;
+        for (int i = 0; i < 3; i++) {
+          v += veilNoise(p) * a;
           p = p * 2.04 + vec2(8.7, -4.2);
-          a *= 0.5;
+          a *= 0.46;
         }
         return v;
       }
 
       void main() {
         vec2 centered = vUv - 0.5;
-        centered.x *= 1.18;
-        float r = length(centered);
-        float disc = 1.0 - smoothstep(0.1, 0.53, r);
-        float edge = 1.0 - smoothstep(0.46, 0.56, r);
-        vec2 drift = vec2(uTime * 0.018, -uTime * 0.006);
-        float broad = fbm(vUv * vec2(5.4, 2.1) + drift);
-        float fine = fbm(vUv * vec2(14.0, 5.5) - drift * 1.8);
-        float wisps = smoothstep(0.42, 0.78, broad + fine * 0.28 + (0.5 - r) * 0.22);
-        float horizonBand = sin((centered.y + broad * 0.035) * 78.0 + uTime * 1.7);
-        float horizonRipple = smoothstep(-0.18, 0.82, horizonBand + fine * 0.55);
-        // Heat-haze bands suit the low sun, but the cooler lunar veil should
-        // stay broad and smooth so stripes never cut through its earthshine.
-        float horizonPattern = mix(0.56 + horizonRipple * 0.44, 0.92 + horizonRipple * 0.08, uMoonMode);
-        float horizonDisc = (1.0 - smoothstep(0.36, 0.58, r)) * horizonPattern;
-        float horizonVeilStrength = mix(0.34, 0.16, uMoonMode);
-        float alpha = disc * edge * wisps * uStrength + horizonDisc * uHorizonSun * horizonVeilStrength;
+        vec2 ellipse = centered * vec2(0.82, 1.18);
+        float radiusSquared = dot(ellipse, ellipse);
+        float innerAureole = exp(-radiusSquared * 18.0);
+        float outerAureole = exp(-radiusSquared * 5.2);
+        float horizonAureole = exp(-centered.x * centered.x * 7.0 - centered.y * centered.y * 34.0);
+        vec2 drift = vec2(uTime * 0.007, -uTime * 0.0025);
+        float vapor = veilFbm(vUv * vec2(3.8, 2.4) + drift);
+        vapor = mix(0.86, 1.08, smoothstep(0.22, 0.9, vapor));
+        float frameFade = (1.0 - smoothstep(0.38, 0.56, abs(centered.x)))
+          * (1.0 - smoothstep(0.38, 0.52, abs(centered.y)));
+        float bodyAureole = (innerAureole * 0.2 + outerAureole * 0.12)
+          * uStrength * vapor;
+        float lowAtmosphere = horizonAureole
+          * uHorizonSun
+          * mix(0.19, 0.1, uMoonMode)
+          * mix(0.92, 1.12, vapor);
+        float alpha = (bodyAureole + lowAtmosphere) * frameFade;
         if (alpha < 0.004) discard;
         vec3 cold = mix(vec3(0.86, 0.94, 1.0), vec3(0.72, 0.82, 1.0), uMoonMode);
         vec3 warm = mix(vec3(1.0, 0.76, 0.43), vec3(1.0, 0.82, 0.58), uMoonMode);
-        vec3 color = mix(cold, warm, clamp(uGolden * 0.8, 0.0, 1.0));
+        vec3 color = mix(cold, warm, clamp(uGolden * 0.74, 0.0, 1.0));
         vec3 horizonColor = mix(vec3(1.0, 0.58, 0.25), vec3(1.0, 0.78, 0.48), uMoonMode);
-        color = mix(color, horizonColor, uHorizonSun * 0.68);
-        color = mix(color, vec3(0.95, 0.98, 1.0), clamp(uMist * 0.42, 0.0, 1.0));
+        color = mix(color, horizonColor, uHorizonSun * 0.54);
+        color = mix(color, vec3(0.95, 0.98, 1.0), clamp(uMist * 0.36, 0.0, 1.0));
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -705,7 +717,7 @@ function crateredMoonTexture(size = 256) {
   return texture;
 }
 
-function StarField({ nightRef }) {
+function StarField({ celestialRef }) {
   const pointsRef = useRef(null);
   const { gl } = useThree();
 
@@ -718,12 +730,13 @@ function StarField({ nightRef }) {
     const temperatures = new Float32Array(STAR_COUNT);
     const twinkleSpeeds = new Float32Array(STAR_COUNT);
     const scintillation = new Float32Array(STAR_COUNT);
+    const milkyWayWeights = new Float32Array(STAR_COUNT);
     // Great-circle normal for a softly denser Milky Way band. The field stays
     // stochastic rather than resolving into the old golden-angle dot grid.
     const bandNormal = [0.36, 0.58, -0.73];
     for (let i = 0; i < STAR_COUNT; i += 1) {
       const azimuth = canvasHash(i, 1.7, 4.2) * Math.PI * 2;
-      const y = 0.035 + canvasHash(i, 5.1, 9.8) * 0.965;
+      const y = canvasHash(i, 5.1, 9.8) * 2 - 1;
       const radial = Math.sqrt(Math.max(0, 1 - y * y));
       const x = Math.cos(azimuth) * radial;
       const z = Math.sin(azimuth) * radial;
@@ -734,18 +747,17 @@ function StarField({ nightRef }) {
       const bandDistance = Math.abs(x * bandNormal[0] + y * bandNormal[1] + z * bandNormal[2]);
       const milkyWay = Math.exp(-(bandDistance * bandDistance) / 0.016);
       const magnitudeSeed = canvasHash(i, 8.4, 13.1);
-      const rareBright = magnitudeSeed > 0.975
-        ? 0.84 + canvasHash(i, 12.2, 2.3) * 0.16
+      const rareBright = magnitudeSeed > 0.987
+        ? 0.86 + canvasHash(i, 12.2, 2.3) * 0.14
         : 0;
-      const faintMagnitude = 0.22 + Math.pow(magnitudeSeed, 3.8) * 0.63;
-      brightness[i] = Math.min(1, Math.max(rareBright, faintMagnitude) * (0.9 + milkyWay * 0.24));
-      sizes[i] = 0.64 + brightness[i] * 1.75 + rareBright * 0.4;
+      const catalogBrightness = 0.085 + Math.pow(magnitudeSeed, 3.6) * 0.86;
+      brightness[i] = Math.min(1, Math.max(rareBright, catalogBrightness) * (0.94 + milkyWay * 0.12));
+      sizes[i] = 1.05 + Math.pow(brightness[i], 0.58) * 2.65 + rareBright * 0.75;
       phases[i] = canvasHash(i, 3.3, 20.7);
       temperatures[i] = canvasHash(i, 18.1, 6.4);
       twinkleSpeeds[i] = 0.38 + canvasHash(i, 14.8, 17.5) * 0.82;
-      // Atmospheric scintillation is strongest near the horizon and affects
-      // bright stars a little more than the dim background field.
-      scintillation[i] = (0.08 + (1 - y) * 0.5) * (0.58 + brightness[i] * 0.42);
+      scintillation[i] = 0.06 + canvasHash(i, 22.4, 3.8) * 0.1 + brightness[i] * 0.08;
+      milkyWayWeights[i] = milkyWay;
     }
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
@@ -754,6 +766,7 @@ function StarField({ nightRef }) {
     geo.setAttribute('aTemperature', new THREE.BufferAttribute(temperatures, 1));
     geo.setAttribute('aTwinkleSpeed', new THREE.BufferAttribute(twinkleSpeeds, 1));
     geo.setAttribute('aScintillation', new THREE.BufferAttribute(scintillation, 1));
+    geo.setAttribute('aMilkyWay', new THREE.BufferAttribute(milkyWayWeights, 1));
     return geo;
   }, []);
 
@@ -766,7 +779,10 @@ function StarField({ nightRef }) {
     blending: THREE.AdditiveBlending,
     uniforms: {
       uTime: { value: 0 },
-      uOpacity: { value: 0 },
+      uClearAir: { value: 1 },
+      uBrightStars: { value: 0 },
+      uFaintStars: { value: 0 },
+      uMilkyWay: { value: 0 },
       uPixelRatio: { value: 1 },
     },
     vertexShader: /* glsl */`
@@ -776,49 +792,74 @@ function StarField({ nightRef }) {
       attribute float aTemperature;
       attribute float aTwinkleSpeed;
       attribute float aScintillation;
+      attribute float aMilkyWay;
       uniform float uTime;
       uniform float uPixelRatio;
       varying float vTwinkle;
       varying float vTint;
       varying float vBrightness;
+      varying float vAltitude;
+      varying float vMilkyWay;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
-        float wave = 0.82 + 0.18 * sin(uTime * aTwinkleSpeed + aPhase * 6.2831853);
-        vTwinkle = mix(1.0, wave, aScintillation);
+        vec3 skyDir = normalize(mat3(modelMatrix) * position);
+        vAltitude = skyDir.y;
+        float wave = 0.76 + 0.24 * sin(uTime * aTwinkleSpeed + aPhase * 6.2831853);
+        float horizonScintillation = 1.0 - smoothstep(0.08, 0.62, max(0.0, skyDir.y));
+        vTwinkle = mix(1.0, wave, clamp(aScintillation + horizonScintillation * 0.4, 0.0, 0.65));
         vTint = aTemperature;
         vBrightness = aBrightness;
+        vMilkyWay = aMilkyWay;
         // Stars are angular light sources: cap them in screen pixels instead
         // of letting near-frustum directions balloon into dust-mote blobs.
-        gl_PointSize = clamp(aSize * uPixelRatio, 0.65 * uPixelRatio, 3.25 * uPixelRatio);
+        gl_PointSize = clamp(aSize * uPixelRatio, 1.05 * uPixelRatio, 4.9 * uPixelRatio);
       }
     `,
     fragmentShader: /* glsl */`
-      uniform float uOpacity;
+      uniform float uClearAir;
+      uniform float uBrightStars;
+      uniform float uFaintStars;
+      uniform float uMilkyWay;
       varying float vTwinkle;
       varying float vTint;
       varying float vBrightness;
+      varying float vAltitude;
+      varying float vMilkyWay;
       void main() {
+        float horizonGate = smoothstep(-0.012, 0.04, vAltitude);
+        if (horizonGate <= 0.001) discard;
         vec2 c = gl_PointCoord - 0.5;
         float radius = length(c);
         if (radius > 0.5) discard;
         float core = exp(-26.0 * radius * radius);
-        float halo = exp(-9.0 * radius * radius) * 0.19;
-        float brightGate = smoothstep(0.76, 0.98, vBrightness);
+        float halo = exp(-9.0 * radius * radius) * 0.32;
+        float brightGate = smoothstep(0.7, 0.94, vBrightness);
         float flare = (
           exp(-120.0 * abs(c.x)) * exp(-12.0 * abs(c.y))
           + exp(-120.0 * abs(c.y)) * exp(-12.0 * abs(c.x))
-        ) * brightGate * 0.28;
+        ) * brightGate * 0.4;
         float shape = core + halo + flare;
-        float a = shape * (0.28 + vBrightness * 0.9) * vTwinkle * uOpacity;
+        float magnitudeReveal = mix(uFaintStars, uBrightStars, smoothstep(0.58, 0.92, vBrightness));
+        magnitudeReveal = max(magnitudeReveal, uMilkyWay * vMilkyWay * (0.12 + vBrightness * 0.42));
+        float horizonExtinction = mix(0.44, 1.0, smoothstep(0.025, 0.48, vAltitude));
+        float a = shape
+          * (0.23 + vBrightness * 1.18)
+          * vTwinkle
+          * magnitudeReveal
+          * horizonGate
+          * horizonExtinction
+          * uClearAir;
         if (a < 0.004) discard;
         // Mostly neutral starlight with restrained amber/blue temperature
         // variation; saturated pinpricks read as LEDs rather than stars.
         vec3 warm = vec3(1.0, 0.84, 0.66);
         vec3 cool = vec3(0.7, 0.84, 1.0);
         vec3 temperature = mix(warm, cool, vTint);
-        vec3 starColor = mix(vec3(1.0, 0.96, 0.9), temperature, 0.32);
-        gl_FragColor = vec4(starColor * (0.88 + vBrightness * 0.65), a);
+        vec3 starColor = mix(vec3(1.0, 0.96, 0.9), temperature, 0.42);
+        float horizonWarmth = (1.0 - smoothstep(0.025, 0.22, vAltitude)) * 0.2;
+        starColor = mix(starColor, vec3(1.0, 0.78, 0.58), horizonWarmth);
+        gl_FragColor = vec4(starColor * (1.12 + vBrightness * 1.1), a);
       }
     `,
   }), []);
@@ -828,7 +869,7 @@ function StarField({ nightRef }) {
   useFrame(({ clock }) => {
     material.uniforms.uTime.value = clock.elapsedTime;
     material.uniforms.uPixelRatio.value = gl.getPixelRatio();
-    const night = nightRef.current;
+    const celestial = celestialRef.current;
     // Stars live above the weather: a closed cloud deck (or thick garúa)
     // has to swallow them, not let them shine through the storm.
     // Local cloud opacity now covers this earlier-rendered layer, so global
@@ -837,9 +878,22 @@ function StarField({ nightRef }) {
     const clearAir = (1 - weatherEnv.overcast * 0.58)
       * (1 - weatherEnv.mistAmount * 0.7)
       * (1 - weatherEnv.rainIntensity * 0.78);
-    const starVisibility = smoothstep(0.18, 0.78, night) * clearAir;
-    material.uniforms.uOpacity.value = starVisibility;
-    if (pointsRef.current) pointsRef.current.visible = starVisibility > 0.01;
+    material.uniforms.uClearAir.value = clearAir;
+    material.uniforms.uBrightStars.value = celestial.brightStars || 0;
+    material.uniforms.uFaintStars.value = celestial.faintStars || 0;
+    material.uniforms.uMilkyWay.value = celestial.milkyWay || 0;
+    const starVisibility = Math.max(
+      celestial.brightStars || 0,
+      celestial.faintStars || 0,
+      celestial.milkyWay || 0,
+    ) * clearAir;
+    if (pointsRef.current) {
+      pointsRef.current.visible = starVisibility > 0.01;
+      pointsRef.current.quaternion.setFromAxisAngle(
+        STAR_ROTATION_AXIS,
+        siderealAngle(celestial.timeOfDay || 0, celestial.day || 1) + STAR_ROTATION_OFFSET,
+      );
+    }
   });
 
   return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} renderOrder={-7.6} />;
@@ -991,6 +1045,10 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
       uOvercast: { value: 0 },
       uClearAir: { value: 1 },
       uMoonlight: { value: 0 },
+      uMilkyWay: { value: 0 },
+      uAstronomicalNight: { value: 0 },
+      uSiderealAngle: { value: 0 },
+      uCelestialAxis: { value: STAR_ROTATION_AXIS.clone() },
       uSunDir: { value: new THREE.Vector3(0, -1, 0) },
       uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     },
@@ -1009,8 +1067,20 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
       uniform float uOvercast;
       uniform float uClearAir;
       uniform float uMoonlight;
+      uniform float uMilkyWay;
+      uniform float uAstronomicalNight;
+      uniform float uSiderealAngle;
+      uniform vec3 uCelestialAxis;
       uniform vec3 uSunDir;
       uniform vec3 uMoonDir;
+
+      vec3 rotateSkyDirection(vec3 direction, vec3 axis, float angle) {
+        float cosine = cos(angle);
+        float sine = sin(angle);
+        return direction * cosine
+          + cross(axis, direction) * sine
+          + axis * dot(axis, direction) * (1.0 - cosine);
+      }
 
       float skyHash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -1052,7 +1122,11 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
         vec3 midnightZenith = vec3(0.001, 0.0055, 0.034);
         vec3 twilight = mix(twilightHorizon, twilightZenith, dome);
         vec3 deepNight = mix(midnightHorizon, midnightZenith, dome);
-        vec3 color = mix(twilight, deepNight, uMidnight);
+        // At the equator the sky reaches full darkness quickly after sunset.
+        // Solar altitude, not the clock label "midnight", supplies most of
+        // that depth; uMidnight adds the final late-night blue-black settling.
+        float darkSky = max(uMidnight, uAstronomicalNight * 0.78);
+        vec3 color = mix(twilight, deepNight, darkSky);
 
         // Residual sunset is directional, kept low and short-lived. This gives
         // early evening a layered indigo horizon without tinting the full dome.
@@ -1060,44 +1134,49 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
         vec2 sunAzimuth = normalize(uSunDir.xz + vec2(0.0001, 0.0));
         float sunsetSide = pow(max(dot(viewAzimuth, sunAzimuth), 0.0), 2.4);
         float twilightBand = (1.0 - smoothstep(-0.015, 0.28, dir.y))
-          * sunsetSide * (1.0 - uMidnight);
+          * sunsetSide * (1.0 - darkSky);
         color = mix(color, vec3(0.17, 0.075, 0.27), twilightBand * 0.28);
 
         // A very low-contrast Milky Way supplies large-scale structure behind
         // the individual star points. A split dust lane keeps it organic and
         // photographic instead of reading as a painted luminous stripe.
+        vec3 celestialDir = rotateSkyDirection(
+          dir,
+          normalize(uCelestialAxis),
+          -(uSiderealAngle + ${STAR_ROTATION_OFFSET.toFixed(8)})
+        );
         vec3 galaxyNormal = normalize(vec3(0.36, 0.58, -0.73));
-        float galaxyDistance = abs(dot(dir, galaxyNormal));
+        float galaxyDistance = abs(dot(celestialDir, galaxyNormal));
         float galaxyBand = 1.0 - smoothstep(0.035, 0.22, galaxyDistance);
         vec2 galaxyUv = vec2(
-          dot(dir, normalize(vec3(0.84, -0.18, 0.51))),
-          dot(dir, normalize(vec3(-0.32, 0.75, 0.58)))
+          dot(celestialDir, normalize(vec3(0.84, -0.18, 0.51))),
+          dot(celestialDir, normalize(vec3(-0.32, 0.75, 0.58)))
         ) * 9.0;
         float galaxyGrain = skyFbm(galaxyUv);
         float dustLane = 1.0 - smoothstep(
           0.009,
           0.052,
-          abs(dot(dir, galaxyNormal) + (galaxyGrain - 0.52) * 0.022)
+          abs(dot(celestialDir, galaxyNormal) + (galaxyGrain - 0.52) * 0.022)
         );
         float starCloud = galaxyBand
           * (0.28 + 0.72 * smoothstep(0.34, 0.82, galaxyGrain))
           * (1.0 - dustLane * 0.62);
-        color += vec3(0.02, 0.027, 0.052) * starCloud * uMidnight * uClearAir;
+        color += vec3(0.032, 0.043, 0.082) * starCloud * uMilkyWay * uClearAir;
 
         // A broad, dim lunar aureole belongs in the air around the moon, not
         // just on the moon sprite. It remains subtle enough for new-moon nights.
         float moonAir = pow(max(dot(dir, normalize(uMoonDir)), 0.0), 7.0);
-        color += vec3(0.028, 0.052, 0.105) * moonAir * uMoonlight;
+        color += vec3(0.045, 0.075, 0.14) * moonAir * uMoonlight;
 
         // Low clear-air glow separates terrain silhouettes from the horizon.
         float airglow = (1.0 - smoothstep(0.015, 0.2, dir.y))
-          * uMidnight * uClearAir;
+          * darkSky * uClearAir;
         color += vec3(0.004, 0.014, 0.038) * airglow;
 
         // Even a closed night stays navy/slate, never neutral grey.
-        vec3 stormTint = mix(vec3(0.025, 0.045, 0.085), vec3(0.012, 0.022, 0.052), uMidnight);
+        vec3 stormTint = mix(vec3(0.025, 0.045, 0.085), vec3(0.012, 0.022, 0.052), darkSky);
         color = mix(color, stormTint, uOvercast * 0.24);
-        float alpha = uNight * mix(0.78, 0.98, uMidnight);
+        float alpha = uNight * mix(0.78, 0.98, darkSky);
         alpha *= 1.0 + uOvercast * 0.04;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -1120,6 +1199,9 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
       * (1 - weatherEnv.mistAmount * 0.66)
       * (1 - weatherEnv.rainIntensity * 0.72);
     material.uniforms.uMoonlight.value = Math.sqrt(Math.max(0, celestial.moonFraction));
+    material.uniforms.uMilkyWay.value = celestial.milkyWay || 0;
+    material.uniforms.uAstronomicalNight.value = celestial.astronomicalNight || 0;
+    material.uniforms.uSiderealAngle.value = siderealAngle(celestial.timeOfDay || 0, celestial.day || 1);
     material.uniforms.uSunDir.value.copy(celestial.sun);
     material.uniforms.uMoonDir.value.copy(celestial.moon);
     if (meshRef.current) meshRef.current.visible = night > 0.01;
@@ -1404,7 +1486,7 @@ function RainbowDome({ celestialRef }) {
 // Occasional meteor: one additive streak roughly once a minute on clear
 // nights. It spawns inside the current camera view so an event is genuinely
 // visible rather than being lost somewhere on the other side of the dome.
-function ShootingStars({ nightRef }) {
+function ShootingStars({ celestialRef }) {
   const meshRef = useRef(null);
   const texture = useMemo(() => meteorTexture(), []);
   const state = useRef({
@@ -1425,13 +1507,13 @@ function ShootingStars({ nightRef }) {
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    const night = nightRef.current;
+    const starVisibility = celestialRef.current.faintStars || 0;
     const clearSky = (1 - weatherEnv.overcast * 0.75)
       * (1 - weatherEnv.mistAmount * 0.65)
       * (1 - weatherEnv.rainIntensity * 0.8);
     const s = state.current;
 
-    if (night < 0.55 || clearSky < 0.18) {
+    if (starVisibility < 0.55 || clearSky < 0.18) {
       mesh.visible = false;
       s.t = -1;
       return;
@@ -1487,7 +1569,7 @@ function ShootingStars({ nightRef }) {
     _flareNdc.copy(s.position).addScaledVector(s.velocity, 0.05).add(camera.position).project(camera);
     mesh.rotateZ(Math.atan2(_flareNdc.y - _flareWorld.y, _flareNdc.x - _flareWorld.x));
     const fade = Math.sin(Math.PI * (s.t / s.life));
-    mesh.material.opacity = fade * night * clearSky * s.brightness;
+    mesh.material.opacity = fade * starVisibility * clearSky * s.brightness;
     mesh.visible = true;
   });
 
@@ -1588,9 +1670,9 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const hazeTexture = useMemo(() => hazeGradientTexture(), []);
   const moonDiscTexture = useMemo(() => crateredMoonTexture(512), []);
   const moonGlowTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(232, 238, 255, 0.34)'],
-    [0.24, 'rgba(196, 214, 255, 0.14)'],
-    [0.52, 'rgba(150, 178, 240, 0.055)'],
+    [0.0, 'rgba(242, 247, 255, 0.58)'],
+    [0.2, 'rgba(208, 224, 255, 0.26)'],
+    [0.5, 'rgba(158, 190, 250, 0.09)'],
     [1.0, 'rgba(182, 202, 240, 0)'],
   ]), []);
   // 22°-style ice halo: a thin luminous ring that appears around the moon on
@@ -1645,7 +1727,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
 
   // Smoothed game hour so the sky visibly drifts between discrete store updates.
   const hourRef = useRef(null);
-  const nightRef = useRef(0); // shared with StarField without React re-renders
+  const nightRef = useRef(0); // shared with the sky/cloud domes without React re-renders
   const flareStrengthRef = useRef(0);
   const glareStrengthRef = useRef(0);
   const glareVisibleRef = useRef(false);
@@ -1656,11 +1738,18 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     moon: new THREE.Vector3(0, 1, 0),
     moonFraction: 0,
     elevation: 0,
+    solarAltitude: 0,
     daylight: 0,
     golden: 0,
     noonBlue: 0,
     dawnDrama: 0,
     duskDrama: 0,
+    brightStars: 0,
+    faintStars: 0,
+    milkyWay: 0,
+    astronomicalNight: 0,
+    timeOfDay: 12,
+    day: 1,
   });
   const midnightRef = useRef(0); // late-night blue pass, distinct from twilight
 
@@ -1805,7 +1894,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       mist: weatherEnv.mistAmount,
       rain: weatherEnv.rainIntensity,
       lightDim: weatherEnv.lightDim,
-      moonFraction: s.moon_phase.fraction,
+      moonFraction: s.moonlight,
       underwaterAmount,
     });
     const clearNoonBlue = (s.noonBlue || 0)
@@ -1824,13 +1913,20 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     const cel = celestialRef.current;
     cel.sun.copy(_sun);
     cel.moon.copy(_moon);
-    cel.moonFraction = s.moon_phase.fraction;
+    cel.moonFraction = s.moonlight;
     cel.elevation = s.elevation;
+    cel.solarAltitude = s.solarAltitude;
     cel.daylight = daylight;
     cel.golden = golden;
     cel.noonBlue = s.noonBlue || 0;
     cel.dawnDrama = s.dawnDrama || 0;
     cel.duskDrama = s.duskDrama || 0;
+    cel.brightStars = s.brightStars || 0;
+    cel.faintStars = s.faintStars || 0;
+    cel.milkyWay = s.milkyWay || 0;
+    cel.astronomicalNight = s.astronomicalNight || 0;
+    cel.timeOfDay = hourRef.current;
+    cel.day = store.day || 1;
 
     // Rig follows the camera so bodies feel infinitely far and never clip.
     if (groupRef.current) groupRef.current.position.copy(camera.position);
@@ -1856,20 +1952,27 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       moonRef.current.position.copy(_moon).multiplyScalar(BODY_DISTANCE);
       moonRef.current.quaternion.copy(camera.quaternion);
       const moonIllumination = THREE.MathUtils.clamp(s.moon_phase.fraction, 0, 1);
-      const moonVis = night * (0.36 + 0.64 * Math.sqrt(Math.max(0.025, moonIllumination)));
+      const moonAboveHorizon = smoothstep(-0.025, 0.035, _moon.y);
+      const moonSkyContrast = 0.28 + night * 0.72;
+      const moonPhaseReadability = 0.35 + Math.sqrt(Math.max(0.012, moonIllumination)) * 0.65;
+      const moonVis = moonAboveHorizon
+        * moonSkyContrast
+        * moonPhaseReadability
+        * (1 - overcast * 0.52)
+        * (1 - weatherEnv.rainIntensity * 0.68);
       const moonHorizon = moonVis
-        * smoothstep(-0.04, 0.12, _moon.y)
-        * (1 - smoothstep(0.16, 0.42, _moon.y))
+        * smoothstep(-0.015, 0.055, _moon.y)
+        * (1 - smoothstep(0.14, 0.34, _moon.y))
         * (1 - overcast * 0.62)
         * (1 - weatherEnv.rainIntensity * 0.66);
       moonRef.current.visible = celestialBodies && moonVis > 0.02;
-      const moonScale = 9.5 + moonIllumination * 1.1 + moonHorizon * 2.8;
-      moonRef.current.scale.set(moonScale, moonScale * (1 - moonHorizon * 0.04), 1);
-      _color.set('#dfe8f4').lerp(_moonHorizonWarm, moonHorizon * 0.46).lerp(_white, moonIllumination * 0.06);
+      const moonScale = 7.1 + moonIllumination * 0.6 + moonHorizon * 0.7;
+      moonRef.current.scale.set(moonScale, moonScale * (1 - moonHorizon * 0.12), 1);
+      _color.set('#f4f7ff').lerp(_moonHorizonWarm, moonHorizon * 0.34).lerp(_white, moonIllumination * 0.12);
       moonRef.current.material.color.copy(_color);
       moonRef.current.material.opacity = Math.min(
         1,
-        night * (0.72 + Math.sqrt(moonIllumination) * 0.28) + moonHorizon * 0.18
+        moonVis * (1.18 + Math.sqrt(moonIllumination) * 0.3) + moonHorizon * 0.12
       );
       updateMoonPhaseUniforms(moonRef.current.material, s.moon_phase, overcast, weatherEnv.rainIntensity);
       if (moonGlowRef.current) {
@@ -1877,23 +1980,23 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         moonGlowRef.current.quaternion.copy(camera.quaternion);
         moonGlowRef.current.visible = moonRef.current.visible;
         const clearSkyGlow = (1 - overcast) * (1 - weatherEnv.rainIntensity * 0.75);
-        moonGlowRef.current.scale.setScalar(30 + moonIllumination * 6 + moonHorizon * 12);
-        _color.set('#cdd8f0').lerp(_moonGlowWarm, moonHorizon * 0.5);
+        moonGlowRef.current.scale.setScalar(31 + moonIllumination * 7 + moonHorizon * 9);
+        _color.set('#dce8ff').lerp(_moonGlowWarm, moonHorizon * 0.38);
         moonGlowRef.current.material.color.copy(_color);
         moonGlowRef.current.material.opacity = moonVis
-          * (0.17 + moonIllumination * 0.15 + clearSkyGlow * 0.1 + moonHorizon * 0.13);
+          * (0.18 + moonIllumination * 0.18 + clearSkyGlow * 0.08 + moonHorizon * 0.09);
       }
       if (moonVeilRef.current) {
         moonVeilRef.current.position.copy(moonRef.current.position);
         moonVeilRef.current.quaternion.copy(camera.quaternion);
-        moonVeilRef.current.scale.set(18 + moonHorizon * 8, 10 + moonHorizon * 4, 1);
+        moonVeilRef.current.scale.set(14 + moonHorizon * 4, 8 + moonHorizon * 2.5, 1);
         moonVeilRef.current.visible = celestialBodies && moonHorizon > 0.02;
         const mu = moonVeilMaterial.uniforms;
         mu.uTime.value += delta * 0.78;
         mu.uStrength.value = 0;
         mu.uGolden.value = 0.35 + moonHorizon * 0.4;
         mu.uMist.value = weatherEnv.mistAmount;
-        mu.uHorizonSun.value = moonHorizon * 0.58;
+        mu.uHorizonSun.value = moonHorizon * 0.42;
       }
       if (moonHaloRef.current) {
         // Halo needs moonlight *and* humid air: garúa mist or thin high cover.
@@ -1901,8 +2004,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         const thinCloud = smoothstep(0.08, 0.72, overcast) * (1 - smoothstep(0.74, 1.0, overcast));
         moonHaloRef.current.position.copy(moonRef.current.position);
         moonHaloRef.current.quaternion.copy(camera.quaternion);
-        moonHaloRef.current.scale.setScalar(32 + humidity * 18 + thinCloud * 8 + moonHorizon * 10);
-        const haloOpacity = moonVis * (0.35 + moonIllumination * 0.65) * (humidity * 0.62 + thinCloud * 0.24 + moonHorizon * 0.18) * (1 - weatherEnv.rainIntensity * 0.85);
+        moonHaloRef.current.scale.setScalar(25 + humidity * 12 + thinCloud * 6 + moonHorizon * 5);
+        const haloOpacity = moonVis * (0.28 + moonIllumination * 0.5) * (humidity * 0.48 + thinCloud * 0.2 + moonHorizon * 0.12) * (1 - weatherEnv.rainIntensity * 0.85);
         moonHaloRef.current.visible = celestialBodies && haloOpacity > 0.015;
         moonHaloRef.current.material.opacity = haloOpacity;
         moonHaloRef.current.material.color.set(overcast > 0.45 ? '#d8e8ff' : (moonHorizon > 0.1 ? '#ffe0aa' : '#cdd8f0'));
@@ -1910,23 +2013,25 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     }
 
     if (sunRef.current) {
-      // Fade the disc in just above the horizon; warm and swell it at low sun.
-      const sunUp = THREE.MathUtils.clamp((s.elevation + 0.04) / 0.12, 0, 1) * (1 - overcast * 0.7);
+      // Atmospheric refraction reveals the disc just before its geometric
+      // center clears the horizon; low air warms and subtly flattens it.
+      const sunUp = smoothstep(-1.2, 0.2, s.solarAltitude) * (1 - overcast * 0.7);
       const horizonSun = sunUp
-        * (1 - smoothstep(0.12, 0.34, s.elevation))
+        * (1 - smoothstep(2, 14, s.solarAltitude))
         * (1 - overcast * 0.55)
         * (1 - weatherEnv.rainIntensity * 0.55);
       // Disc stays mostly white-hot; the warm orange lives in the corona,
       // haze, and low-horizon shimmer.
       _sunColor.set('#fff8df').lerp(_sunGolden, golden * 0.24 + horizonSun * 0.12);
       _glowColor.copy(_sunDay).lerp(_sunGolden, Math.min(1, golden * 1.15));
-      const swell = 1 + golden * 0.55 + horizonSun * 0.85; // a bigger, softer setting/rising sun
+      const swell = 1 + golden * 0.12 + horizonSun * 0.18;
       sunRef.current.position.copy(_sun).multiplyScalar(BODY_DISTANCE);
       sunRef.current.quaternion.copy(camera.quaternion);
       sunRef.current.getWorldPosition(_sunWorld);
       sunRef.current.visible = celestialBodies && sunUp > 0.01;
       const sunCanEmitOptics = celestialBodies && sunUp > 0.01;
-      sunRef.current.scale.set(4.45 * swell, 4.45 * swell * (1 - horizonSun * 0.08), 1);
+      const sunScale = 2.7 * (1 + horizonSun * 0.12);
+      sunRef.current.scale.set(sunScale, sunScale * (1 - horizonSun * 0.11), 1);
       sunRef.current.material.color.copy(_sunColor);
       const thinSunCloud = smoothstep(0.08, 0.62, overcast) * (1 - smoothstep(0.72, 1.0, overcast));
       const sunMist = weatherEnv.mistAmount;
@@ -1936,7 +2041,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunAureoleRef.current.position.copy(sunRef.current.position);
         sunAureoleRef.current.quaternion.copy(camera.quaternion);
         sunAureoleRef.current.visible = solarHaloEnabled && sunCanEmitOptics && overcast < 0.9;
-        sunAureoleRef.current.scale.setScalar((30 + golden * 10) * swell);
+        sunAureoleRef.current.scale.setScalar((22 + golden * 7) * swell);
         sunAureoleRef.current.material.color.copy(_glowColor).lerp(_white, 0.28);
         sunAureoleRef.current.material.opacity = solarHaloEnabled
           ? sunUp * (0.105 + golden * 0.09) * (1 - overcast * 0.82) * (1 - weatherEnv.rainIntensity * 0.7)
@@ -1949,7 +2054,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         const clearHalo = (1 - overcast) * (1 - sunMist) * 0.02;
         const weatherHalo = sunUp * (clearHalo + thinSunCloud * 0.22 + mistHalo + sunVeilStrength * 0.18) * (1 - weatherEnv.rainIntensity * 0.82);
         sunWeatherHaloRef.current.visible = solarHaloEnabled && sunCanEmitOptics && weatherHalo > 0.006;
-        sunWeatherHaloRef.current.scale.setScalar(44 + thinSunCloud * 18 + sunMist * 24 + golden * 12);
+        sunWeatherHaloRef.current.scale.setScalar(34 + thinSunCloud * 13 + sunMist * 17 + golden * 8);
         _haloColor.copy(_sunDay).lerp(_sunGolden, golden * 0.42).lerp(_white, thinSunCloud * 0.45 + sunMist * 0.32);
         sunWeatherHaloRef.current.material.color.copy(_haloColor);
         sunWeatherHaloRef.current.material.opacity = solarHaloEnabled ? weatherHalo : 0;
@@ -1958,14 +2063,14 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunVeilRef.current.position.copy(sunRef.current.position);
         sunVeilRef.current.quaternion.copy(camera.quaternion);
         sunVeilRef.current.scale.set(
-          17 * swell + thinSunCloud * 6 + sunMist * 8 + horizonSun * 8,
-          10.5 * swell + thinSunCloud * 4 + sunMist * 6 + horizonSun * 4,
+          13 * swell + thinSunCloud * 4 + sunMist * 5 + horizonSun * 3,
+          7.5 * swell + thinSunCloud * 2.5 + sunMist * 3 + horizonSun * 1.5,
           1
         );
         sunVeilRef.current.visible = solarHaloEnabled && sunCanEmitOptics && (sunVeilStrength > 0.01 || horizonSun > 0.02);
         const vu = sunVeilMaterial.uniforms;
         vu.uTime.value += delta;
-        vu.uStrength.value = solarHaloEnabled ? sunVeilStrength * 0.62 : 0;
+        vu.uStrength.value = solarHaloEnabled ? sunVeilStrength * 0.5 : 0;
         vu.uGolden.value = golden;
         vu.uMist.value = sunMist;
         vu.uHorizonSun.value = solarHaloEnabled ? horizonSun : 0;
@@ -1976,7 +2081,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunGlowRef.current.visible = solarHaloEnabled && sunCanEmitOptics;
         // A contained corona; bloom and the DOM glare supply the wide radiance,
         // so this remains a low-cost optical layer around the disc.
-        sunGlowRef.current.scale.set(20 * swell * (1 + sunVeilStrength * 0.24), 20 * swell * (1 + sunVeilStrength * 0.18), 1);
+        sunGlowRef.current.scale.set(13 * swell * (1 + sunVeilStrength * 0.2), 13 * swell * (1 + sunVeilStrength * 0.14), 1);
         sunGlowRef.current.material.color.copy(_glowColor);
         sunGlowRef.current.material.opacity = solarHaloEnabled
           ? sunUp * (0.18 + golden * 0.16 + sunVeilStrength * 0.06)
@@ -2125,9 +2230,12 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     let playerShadowMoved = false;
     if (keyLightRef.current) {
       const key = keyLightRef.current;
-      // Light comes *from* the higher of the two bodies (sun by day, moon by night).
-      const fromMoon = s.elevation < -0.04;
-      const shadowLightDirection = fromMoon ? _moon : _sun;
+      // A below-horizon moon cannot cast light. On moonless nights retain a
+      // soft overhead sky key instead of aiming the shadow light up through
+      // the ground from whichever celestial body is below the horizon.
+      const fromMoon = s.elevation < -0.04 && s.moonlight > 0.01;
+      const fromSun = s.elevation >= -0.04;
+      const shadowLightDirection = fromMoon ? _moon : (fromSun ? _sun : _nightSkyLight);
       const pose = getRuntimePlayerPose()?.position || store.playerPose?.position || { x: 0, y: 0, z: 0 };
       _shadowPose.set(pose.x, pose.y, pose.z);
       playerShadowMoved = lastPlayerShadowPose.current.distanceToSquared(_shadowPose) > SHADOW_PLAYER_MOVE_EPSILON_SQ;
@@ -2379,17 +2487,16 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         <TropicalBlueSkyDome nightRef={nightRef} celestialRef={celestialRef} />
         <NightSkyDome nightRef={nightRef} midnightRef={midnightRef} celestialRef={celestialRef} />
         <RealisticCloudLayer nightRef={nightRef} />
-        {/* Sun: the small disc depth-tests as a physical body. The atmospheric
-            glow and camera artifacts stay optical so nearby animated meshes
-            cannot strobe the whole sun treatment on/off. */}
+        {/* Physical disc and atmospheric aureoles depth-test against terrain;
+            only the later lens artifacts remain screen-space optical effects. */}
         <sprite ref={sunWeatherHaloRef} renderOrder={-8.2} scale={[52, 52, 1]} visible={false} frustumCulled={false}>
-          <spriteMaterial map={sunWeatherHaloTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+          <spriteMaterial map={sunWeatherHaloTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <sprite ref={sunAureoleRef} renderOrder={-8.1} scale={[36, 36, 1]} visible={false} frustumCulled={false}>
-          <spriteMaterial map={sunAureoleTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
+          <spriteMaterial map={sunAureoleTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.NormalBlending} fog={false} />
         </sprite>
         <sprite ref={sunGlowRef} renderOrder={-8} scale={[30, 30, 1]} frustumCulled={false}>
-          <spriteMaterial map={sunGlowTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.AdditiveBlending} fog={false} />
+          <spriteMaterial map={sunGlowTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <sprite ref={sunRef} renderOrder={-7} scale={[8, 8, 1]} frustumCulled={false}>
           <spriteMaterial map={sunDiscTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.NormalBlending} fog={false} />
@@ -2450,22 +2557,22 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
           <spriteMaterial map={lensRingTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
         </sprite>
         {/* Moon: phase-lit cratered disc, earthshine, and layered atmospheric glow. */}
-        <sprite ref={moonRef} renderOrder={-7.1} scale={[9.5, 9.5, 1]}>
-          <spriteMaterial map={moonDiscTexture} color="#dfe8f4" transparent opacity={0} depthWrite={false} depthTest fog={false} />
+        <sprite ref={moonRef} renderOrder={-7.1} scale={[7.3, 7.3, 1]}>
+          <spriteMaterial map={moonDiscTexture} color="#edf3ff" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} fog={false} />
         </sprite>
-        <mesh ref={moonVeilRef} renderOrder={-7.15} scale={[18, 10, 1]} visible={false} frustumCulled={false}>
+        <mesh ref={moonVeilRef} renderOrder={-7.15} scale={[10, 6, 1]} visible={false} frustumCulled={false}>
           <planeGeometry args={[1, 1, 1, 1]} />
           <primitive object={moonVeilMaterial} attach="material" />
         </mesh>
-        <sprite ref={moonGlowRef} renderOrder={-7.25} scale={[30, 30, 1]}>
-          <spriteMaterial map={moonGlowTexture} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
+        <sprite ref={moonGlowRef} renderOrder={-7.25} scale={[20, 20, 1]}>
+          <spriteMaterial map={moonGlowTexture} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
-        <sprite ref={moonHaloRef} renderOrder={-7.3} scale={[38, 38, 1]} visible={false}>
-          <spriteMaterial map={moonHaloTexture} transparent opacity={0} depthWrite={false} depthTest blending={THREE.AdditiveBlending} fog={false} />
+        <sprite ref={moonHaloRef} renderOrder={-7.3} scale={[24, 24, 1]} visible={false}>
+          <spriteMaterial map={moonHaloTexture} transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <RainbowDome celestialRef={celestialRef} />
-        {stars && <StarField nightRef={nightRef} />}
-        {stars && <ShootingStars nightRef={nightRef} />}
+        {stars && <StarField celestialRef={celestialRef} />}
+        {stars && <ShootingStars celestialRef={celestialRef} />}
       </group>
     </>
   );

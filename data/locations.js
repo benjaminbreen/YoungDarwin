@@ -993,7 +993,7 @@ export const locations = [
         description: 'Cross northeast by boat and swimming approach toward Devil\'s Crown.',
       },
     },
-    specimens: ['seaLion','marineIguana','crab','lavaLizard'],
+    specimens: ['seaLion','marineIguana','crab','lavaLizard','cactus'],
     specimenPlacements: [
       {
         specimenId: 'seaLion',
@@ -1036,6 +1036,13 @@ export const locations = [
           radiusZ: 1.2,
           bounds: { minX: -9, maxX: 3, minZ: 17, maxZ: 26 },
         },
+      },
+      {
+        instanceId: 'outcrop-lava-cactus-south-saddle',
+        specimenId: 'cactus',
+        position: [0, 0, 28],
+        behavior: 'still',
+        sceneScale: 1,
       },
     ],
     npcs: ['gabriel_puig'],
@@ -1117,7 +1124,7 @@ export const locations = [
     color: '#696969',
     type: 'lavafield',
     validMoves: ['W','E','SW','S','SE','NW','NE','N'],
-    specimens: ['lavaLizard','basalt'],
+    specimens: ['lavaLizard','basalt','cactus'],
     specimenPlacements: [
       {
         instanceId: 'lava-flats-lava-lizard-basking-slab-1',
@@ -1139,6 +1146,13 @@ export const locations = [
         position: [-21.6, 0, 16.4],
         behavior: 'still',
         sceneScale: 0.76,
+      },
+      {
+        instanceId: 'lava-flats-cactus-pioneer-patch',
+        specimenId: 'cactus',
+        position: [-24, 0, 14],
+        behavior: 'still',
+        sceneScale: 1,
       },
     ],
     npcs: [],
@@ -1164,6 +1178,42 @@ export const locations = [
     type: 'scrubland',
     validMoves: ['N','E','W','S'],
     specimens: ['cactus','large_ground_finch','medium_ground_finch','floreana_giant_tortoise'],
+    specimenPlacements: [
+      {
+        instanceId: 'northern-highlands-cactus-west-shelf',
+        specimenId: 'cactus',
+        position: [-34, 0, -22],
+        behavior: 'still',
+        sceneScale: 1.08,
+      },
+      {
+        instanceId: 'northern-highlands-large-finch-seed-clearing',
+        specimenId: 'large_ground_finch',
+        position: [-14, 0, -8],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 5,
+      },
+      {
+        instanceId: 'northern-highlands-medium-finch-garden-edge',
+        specimenId: 'medium_ground_finch',
+        position: [13, 0, 18],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'northern-highlands-tortoise-south-hollow',
+        specimenId: 'floreana_giant_tortoise',
+        position: [-13, 0, 35],
+        behavior: 'wander',
+        sceneScale: 1.08,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+    ],
     npcs: ['maria'],
     boundaries: {},
     discoveries: [
@@ -1482,7 +1532,7 @@ export const locations = [
       },
     },
     playerStart: [-5, 0, 3.2],
-    specimens: ['lavalizard','medium_ground_finch','basalt','scoria','feralgoat'],
+    specimens: ['lavalizard','medium_ground_finch','basalt','scoria','feralgoat','cactus'],
     npcs: [],
     boundaries: {},
     specimenPlacements: [
@@ -1544,6 +1594,13 @@ export const locations = [
         sceneScale: 1.6,
         habitatRadiusX: 10.5,
         habitatRadiusZ: 6.2,
+      },
+      {
+        instanceId: 'rocky-clearing-lava-cactus-rubble',
+        specimenId: 'cactus',
+        position: [15, 0, -7],
+        behavior: 'still',
+        sceneScale: 1,
       },
     ],
     discoveries: [

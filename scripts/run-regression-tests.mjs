@@ -151,6 +151,21 @@ const {
   terrainGeometryStats,
 } = loadModule('three-game/world/terrainGeometry.js');
 const {
+  getRegionTerrainConfig,
+} = loadModule('three-game/world/terrain.js');
+const {
+  getBorderVistas,
+} = loadModule('three-game/world/vistas/index.js');
+const {
+  buildBorderTransition,
+} = loadModule('three-game/world/vistas/transitions.js');
+const {
+  borderEcologyBudget,
+  borderGrassBudget,
+  buildBorderEcologyLayers,
+  buildBorderGrassLayers,
+} = loadModule('three-game/world/vistas/borderEcology.js');
+const {
   locations,
 } = loadModule('data/locations.js');
 const {
@@ -165,8 +180,12 @@ const {
   mapDirectionBetween,
 } = loadModule('game-core/floreanaGeography.js');
 const {
+  NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM,
+  NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM,
+  NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM,
   POST_OFFICE_NORTH_SHORE_SEAM,
   POST_OFFICE_SCRUB_RISE_SEAM,
+  POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM,
 } = loadModule('three-game/world/routeSeams.js');
 const {
   coveWaterMask,
@@ -183,6 +202,9 @@ const {
   buildPostOfficeBayEcology,
 } = loadModule('three-game/world/ecology/postOfficeBay.js');
 const {
+  buildNorthShoreEcology,
+} = loadModule('three-game/world/ecology/northShore.js');
+const {
   N_SHORE_PATH_POINTS,
 } = loadModule('three-game/world/regions/northShore/terrain.js');
 const {
@@ -195,6 +217,61 @@ const {
 const {
   buildPostScrubRiseEcology,
 } = loadModule('three-game/world/ecology/postScrubRise.js');
+const {
+  getEcology,
+} = loadModule('three-game/world/ecology/index.js');
+const {
+  lavaFlatsPathInfo,
+  lavaFlatsPioneerMask,
+  lavaFlatsTubeMasks,
+} = loadModule('three-game/world/regions/lavaFlats/path.js');
+const {
+  desolateOutcropDryMask,
+  desolateOutcropGuanoMask,
+  desolateOutcropTideShelfMask,
+  desolateOutcropTidepoolMask,
+} = loadModule('three-game/world/regions/desolateOutcrop/terrain.js');
+const {
+  rockyClearingCaveThresholdMask,
+  rockyClearingPathInfo,
+  rockyClearingRubbleMask,
+} = loadModule('three-game/world/regions/rockyClearing/path.js');
+const {
+  NORTHERN_HIGHLANDS_PATH_POINTS,
+  northernHighlandsCormorantEcotone,
+  northernHighlandsGardenInfo,
+  northernHighlandsPathInfo,
+} = loadModule('three-game/world/regions/northernHighlands/path.js');
+const {
+  northernHighlandsBiomeAt,
+  northernHighlandsHeight,
+} = loadModule('three-game/world/regions/northernHighlands/terrain.js');
+const {
+  buildNorthernHighlandsEcology,
+} = loadModule('three-game/world/ecology/northernHighlands.js');
+const {
+  buildCormorantBayEcology,
+} = loadModule('three-game/world/ecology/cormorantBayTest3.js');
+const {
+  cormorantLagoonField,
+  cormorantTrailDistance,
+} = loadModule('three-game/world/regions/cormorantBay/terrain.js');
+const {
+  getNorthernHighlandsRockObstacles,
+} = loadModule('three-game/world/northernHighlandsLayout.js');
+const {
+  buildWesternHighlandsEcology,
+} = loadModule('three-game/world/ecology/westernHighlands.js');
+const {
+  westernHighlandsTrailInfluence,
+} = loadModule('three-game/world/regions/westernHighlands/terrain.js');
+const {
+  buildWatkinsCampEcology,
+} = loadModule('three-game/world/ecology/watkinsCamp.js');
+const {
+  watkinsPathInfo,
+  watkinsRiverInfo,
+} = loadModule('three-game/world/regions/watkinsCamp/terrain.js');
 const {
   getInteriorDefinition,
   getInteriorPropSpawns,
@@ -218,23 +295,39 @@ const {
   getThreeSpecimens,
 } = loadModule('three-game/data.js');
 const {
+  specimenSpawnActorId,
+} = loadModule('game-core/specimens.ts');
+const {
   getZone: getRuntimeZone,
 } = loadModule('three-game/world/floreanaZones.js');
 const {
   getBeagleSightline,
 } = loadModule('three-game/world/beagleSightlines.js');
 const {
+  moonDirection,
+  moonPhase,
+  siderealAngle,
+  skyState,
+  sunDirection,
+} = loadModule('three-game/world/celestial.js');
+const {
+  floraCompanionSuitability,
   floraPreferenceSuitability,
   scoreFloraHabitat,
 } = loadModule('three-game/world/ecology/proceduralFlora.js');
 const {
   CROTON_SCOULERI_SPECIES,
   DARWINIOTHAMNUS_SPECIES,
+  LAVA_CACTUS_SPECIES,
   OPUNTIA_MEGASPERMA_SPECIES,
+  PLEOPELTIS_POLYPODIOIDES_SPECIES,
 } = loadModule('three-game/world/ecology/floraSpecies.js');
 const {
   getPricklyPearSites,
 } = loadModule('three-game/physics/props/pricklyPear/pricklyPearSites.js');
+const {
+  getLavaCactusSites,
+} = loadModule('three-game/physics/props/lavaCactus/lavaCactusSites.js');
 const {
   buildPenalColonyEcology,
 } = loadModule('three-game/world/ecology/penalColony.js');
@@ -243,6 +336,15 @@ const {
   penalColonyPathInfo,
   penalColonyTrampledMask,
 } = loadModule('three-game/world/regions/penalColony/path.js');
+const {
+  buildSweetPotatoGeometry,
+  SWEET_POTATO_HEART_LEAF_COUNT,
+} = loadModule('three-game/world/crops/sweetPotatoGeometry.js');
+const {
+  findHammerCropHits,
+  findShotgunCropHits,
+  mergeCropDamageState,
+} = loadModule('three-game/world/crops/cropDamage.js');
 const {
   WEATHER_STATES,
   normalizeWeatherState,
@@ -677,6 +779,15 @@ test('campaign stools use a responsive one-hand skeletal grip at authored scale'
   assert.ok(propHorizontalRadius(stool) > 0.4);
 });
 
+test('default skeletal carry grips stay centered on Darwin\'s hands', () => {
+  const stoneGrip = carryGripForProp(PROP_TYPES.stone);
+  const mugGrip = carryGripForProp(PROP_TYPES.cabinMug);
+  assert.equal(stoneGrip.mode, 'twoHand');
+  assert.deepEqual(stoneGrip.offset, [0, 0, 0.06]);
+  assert.equal(mugGrip.mode, 'rightHand');
+  assert.deepEqual(mugGrip.offset, [0, 0, 0.025]);
+});
+
 test('carry drop candidates start grounded beyond the player collider', () => {
   const stool = PROP_TYPES.lawsonCampaignStool;
   const playerRadius = 0.36;
@@ -692,7 +803,7 @@ test('carry drop candidates start grounded beyond the player collider', () => {
   assert.ok(horizontalDistance >= playerRadius + propHorizontalRadius(stool) + 0.17);
   assert.equal(first.position.x, 4);
   assert.ok(first.position.z < 7);
-  assert.ok(Math.abs(first.position.y - (1.5 + first.position.x * 0.01 + first.position.z * 0.005 + 0.335)) < 0.000001);
+  assert.ok(Math.abs(first.position.y - (1.5 + first.position.x * 0.01 + first.position.z * 0.005 + 0.338)) < 0.000001);
   assert.deepEqual(first.rotation, [0, Math.PI, 0]);
   assert.equal(candidates.length, 24);
 });
@@ -834,6 +945,193 @@ test('heavy authored regions stay within the seamless-travel terrain budget', ()
   assert.match(ISLAND_MAP_IMAGE, /\.webp$/);
 });
 
+test('border ecology projects a quality-budgeted mix from the neighboring region', () => {
+  assert.deepEqual(borderEcologyBudget(0.75), {
+    maxLayers: 2,
+    maxInstances: 24,
+    maxApronInstances: 18,
+    maxInnerInstances: 6,
+  });
+  assert.deepEqual(borderEcologyBudget(0.85), {
+    maxLayers: 3,
+    maxInstances: 48,
+    maxApronInstances: 36,
+    maxInnerInstances: 12,
+  });
+  assert.deepEqual(borderEcologyBudget(1), {
+    maxLayers: 4,
+    maxInstances: 72,
+    maxApronInstances: 54,
+    maxInnerInstances: 18,
+  });
+  assert.deepEqual(borderGrassBudget(0.75), {
+    maxLayers: 1,
+    maxInstances: 64,
+    maxApronInstances: 48,
+    maxInnerInstances: 16,
+  });
+  assert.deepEqual(borderGrassBudget(0.85), {
+    maxLayers: 1,
+    maxInstances: 128,
+    maxApronInstances: 96,
+    maxInnerInstances: 32,
+  });
+  assert.deepEqual(borderGrassBudget(1), {
+    maxLayers: 1,
+    maxInstances: 192,
+    maxApronInstances: 144,
+    maxInnerInstances: 48,
+  });
+
+  const regionId = 'POST_SCRUB_RISE';
+  const targetRegionId = 'NORTHERN_HIGHLANDS';
+  const config = getRegionTerrainConfig(regionId);
+  const targetConfig = getRegionTerrainConfig(targetRegionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.toRegionId === targetRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  const layers = buildBorderEcologyLayers({
+    regionId,
+    config,
+    targetRegionId,
+    targetConfig,
+    vista,
+    transition,
+    ecology: buildNorthernHighlandsEcology(),
+    sourceEcology: getEcology(regionId),
+    foliageDrawScale: 0.85,
+  });
+  const grassLayers = buildBorderGrassLayers({
+    regionId,
+    config,
+    targetRegionId,
+    targetConfig,
+    vista,
+    transition,
+    ecology: buildNorthernHighlandsEcology(),
+    sourceEcology: getEcology(regionId),
+    foliageDrawScale: 0.85,
+  });
+  const items = layers.flatMap(layer => layer.items);
+  const grassItems = grassLayers.flatMap(layer => layer.items);
+
+  assert.ok(layers.length > 0 && layers.length <= 3);
+  assert.ok(items.length > 0 && items.length <= 48);
+  assert.ok(layers.some(layer => /runtime-darwiniothamnus\.glb$/.test(layer.path)));
+  assert.equal(items.filter(item => item.borderOrigin !== 'source-infill').every(item => item.x > config.width / 2), true);
+  assert.equal(items.filter(item => item.borderOrigin === 'source-infill').every(item => item.x < config.width / 2), true);
+  assert.equal(items.every(item => Number.isFinite(item.y) && Number.isFinite(item.z)), true);
+  assert.equal(grassLayers.length, 1);
+  assert.ok(grassItems.length > 0 && grassItems.length <= 128);
+  assert.match(grassLayers[0].path, /runtime-animated-dry-grass\.glb$/);
+  assert.equal(grassItems.filter(item => item.borderOrigin !== 'source-infill').every(item => item.x > config.width / 2), true);
+  assert.equal(grassItems.filter(item => item.borderOrigin === 'source-infill').every(item => item.x < config.width / 2), true);
+  assert.equal(grassItems.every(item => item.tint && item.widthScale > 0 && item.heightScale > 0), true);
+});
+
+test('Cormorant and Northern Highlands aprons keep all projected plants in a near seam collar', () => {
+  const directions = [
+    ['NORTHERN_HIGHLANDS', 'CORMORANT_BAY'],
+    ['CORMORANT_BAY', 'NORTHERN_HIGHLANDS'],
+  ];
+
+  for (const [regionId, targetRegionId] of directions) {
+    const config = getRegionTerrainConfig(regionId);
+    const targetConfig = getRegionTerrainConfig(targetRegionId);
+    const vista = getBorderVistas(regionId).find(entry => entry.toRegionId === targetRegionId);
+    const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+    const layers = buildBorderGrassLayers({
+      regionId,
+      config,
+      targetRegionId,
+      targetConfig,
+      vista,
+      transition,
+      ecology: getEcology(targetRegionId),
+      sourceEcology: getEcology(regionId),
+      foliageDrawScale: 0.85,
+    });
+    const floraLayers = buildBorderEcologyLayers({
+      regionId,
+      config,
+      targetRegionId,
+      targetConfig,
+      vista,
+      transition,
+      ecology: getEcology(targetRegionId),
+      sourceEcology: getEcology(regionId),
+      foliageDrawScale: 0.85,
+    });
+    const items = layers.flatMap(layer => layer.items);
+    const floraItems = floraLayers.flatMap(layer => layer.items);
+    const plantCollarEnd = Math.max(10, Math.min(
+      22,
+      transition.continuity.carryEnd,
+      transition.continuity.surfaceCarryEnd + 4,
+    ));
+
+    assert.ok(transition.continuity.surfaceCarryEnd < transition.continuity.carryEnd);
+    assert.ok(items.length >= 48 && items.length <= 128);
+    assert.ok(floraItems.length > 0);
+    assert.equal(items.every(item => item.borderBand === 'near'), true);
+    assert.equal(floraItems.every(item => item.borderBand === 'near'), true);
+    assert.ok(Math.min(...items.map(item => item.borderOutsideDistance)) < transition.continuity.carryEnd * 0.5);
+    assert.ok(Math.max(...items.map(item => item.borderOutsideDistance)) <= plantCollarEnd);
+    assert.ok(Math.max(...floraItems.map(item => item.borderOutsideDistance)) <= plantCollarEnd);
+    assert.equal(items.every(item => item.widthScale > 0 && item.heightScale > 0 && item.depthScale > 0), true);
+    assert.equal(items.every(item => (
+      ['source', 'target', 'source-corner', 'source-infill'].includes(item.borderOrigin)
+    )), true);
+    assert.ok(items.some(item => item.borderOrigin === 'source-infill'));
+    assert.ok(Math.min(...items.map(item => item.borderOutsideDistance)) < 0);
+  }
+});
+
+test('apron ecology carries source grass into grassless neighbors and stitches owned corners', () => {
+  const regionId = 'CORMORANT_BAY';
+  const config = getRegionTerrainConfig(regionId);
+  const sourceEcology = getEcology(regionId);
+  const northShoreEcology = getEcology('N_SHORE');
+  assert.equal(northShoreEcology?.dryGrassPatches?.length || 0, 0);
+
+  const buildGrassFor = targetRegionId => {
+    const targetConfig = getRegionTerrainConfig(targetRegionId);
+    const vista = getBorderVistas(regionId).find(entry => entry.toRegionId === targetRegionId);
+    const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+    return buildBorderGrassLayers({
+      regionId,
+      config,
+      targetRegionId,
+      targetConfig,
+      vista,
+      transition,
+      ecology: getEcology(targetRegionId),
+      sourceEcology,
+      foliageDrawScale: 0.85,
+    }).flatMap(layer => layer.items);
+  };
+
+  const westItems = buildGrassFor('N_SHORE');
+  assert.ok(westItems.length >= 80 && westItems.length <= 128);
+  const westApronItems = westItems.filter(item => item.borderOrigin === 'source');
+  const westInnerItems = westItems.filter(item => item.borderOrigin === 'source-infill');
+  assert.equal(westApronItems.every(item => item.x < -config.width / 2), true);
+  assert.equal(westInnerItems.every(item => item.x > -config.width / 2), true);
+  assert.ok(westApronItems.length >= 48);
+  assert.ok(westInnerItems.length >= 16);
+  assert.ok(Math.min(...westApronItems.map(item => item.borderOutsideDistance)) <= 2.5);
+  assert.ok(Math.min(...westInnerItems.map(item => -item.borderOutsideDistance)) <= 1.5);
+  assert.ok(Math.max(...westInnerItems.map(item => -item.borderOutsideDistance)) >= 8);
+
+  const southItems = buildGrassFor('NORTHERN_HIGHLANDS');
+  const southwestCornerItems = southItems.filter(item => (
+    item.borderOrigin === 'source-corner'
+    && item.x < -config.width / 2
+    && item.z > config.depth / 2
+  ));
+  assert.ok(southwestCornerItems.length > 0);
+  assert.equal(southItems.every(item => item.borderBand === 'near'), true);
+});
+
 test('Post Office Bay routes share normalized seam coordinates with both land neighbors', () => {
   const seams = [
     {
@@ -869,6 +1167,51 @@ test('Post Office Bay routes share normalized seam coordinates with both land ne
   assert.ok(POST_OFFICE_BAY_NORTH_SHORE_TRAIL.at(-1)[0] > regionMaps.POST_OFFICE_BAY.terrain.width * 0.5 + 20);
 });
 
+test('Northern Highlands authored trails meet all four normalized route seams', () => {
+  const seams = [
+    POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM,
+    NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM,
+    NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM,
+    NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM,
+  ];
+  const pathHasPoint = point => NORTHERN_HIGHLANDS_PATH_POINTS.flat(1).some(candidate => (
+    Math.hypot(candidate[0] - point[0], candidate[1] - point[1]) < 0.001
+  ));
+
+  for (const seam of seams) {
+    const northernSide = seam.source.regionId === 'NORTHERN_HIGHLANDS' ? seam.source : seam.target;
+    const source = regionMaps[seam.source.regionId];
+    const target = regionMaps[seam.target.regionId];
+    const sourceAlong = seam.source.edge === 'north' || seam.source.edge === 'south'
+      ? seam.source.point[0] / source.terrain.width
+      : seam.source.point[1] / source.terrain.depth;
+    const targetAlong = seam.target.edge === 'north' || seam.target.edge === 'south'
+      ? seam.target.point[0] / target.terrain.width
+      : seam.target.point[1] / target.terrain.depth;
+    assert.ok(Math.abs(sourceAlong - targetAlong) < 0.000001);
+    assert.equal(pathHasPoint(northernSide.point), true);
+  }
+  assert.equal(regionMaps.NORTHERN_HIGHLANDS.terrain.authored, true);
+  assert.equal(regionMaps.NORTHERN_HIGHLANDS.terrain.segments, 240);
+});
+
+test('Northern Highlands terrain rises into a finite, worked transition landscape', () => {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (let z = -48; z <= 48; z += 4) {
+    for (let x = -52; x <= 52; x += 4) {
+      const height = northernHighlandsHeight(x, z);
+      assert.equal(Number.isFinite(height), true);
+      minimum = Math.min(minimum, height);
+      maximum = Math.max(maximum, height);
+    }
+  }
+  assert.ok(maximum - minimum > 4.2);
+  assert.ok(northernHighlandsHeight(-6, 46) > northernHighlandsHeight(-50, 7));
+  assert.equal(northernHighlandsBiomeAt(20.5, 20), 'highlands-garden-loam');
+  assert.ok(northernHighlandsGardenInfo(20.5, 20).mask > 0.9);
+});
+
 test('Post Office Bay keeps its western inland terrain free of stray water pockets', () => {
   const formerTidePool = [
     [-43, -17],
@@ -899,6 +1242,37 @@ test('runtime zone and specimen lookups preserve stable authored identities', ()
   assert.strictEqual(firstZone, secondZone);
   assert.strictEqual(firstSpecimens, secondSpecimens);
   assert.strictEqual(firstSpecimens[0], secondSpecimens[0]);
+});
+
+test('runtime specimen actor ids stay globally unique across playable zones', () => {
+  const ownersByActorId = new Map();
+  let actorCount = 0;
+  for (const placement of FLOREANA_MAP_PLACEMENTS.filter(item => !item.test)) {
+    for (const specimen of getThreeSpecimens(placement.id)) {
+      actorCount += 1;
+      assert.match(specimen.instanceId, new RegExp(`^${placement.id}:`));
+      assert.equal(
+        ownersByActorId.has(specimen.instanceId),
+        false,
+        `${specimen.instanceId} is shared by ${ownersByActorId.get(specimen.instanceId)} and ${placement.id}`,
+      );
+      ownersByActorId.set(specimen.instanceId, placement.id);
+    }
+  }
+  assert.ok(actorCount > 100);
+
+  const playableRegion = regionMaps.POST_SCRUB_RISE;
+  const playableSpawnIndex = playableRegion.specimens.findIndex(spawn => spawn.specimenId === 'mediumgroundfinch');
+  const playableActorId = specimenSpawnActorId(
+    playableRegion.id,
+    playableRegion.specimens[playableSpawnIndex],
+    playableSpawnIndex,
+  );
+  assert.equal(
+    getThreeSpecimens(playableRegion.id).some(specimen => specimen.instanceId === playableActorId),
+    true,
+    'playable spawn identity should match the zone specimen runtime',
+  );
 });
 
 test('Floreana cardinal routes remain reciprocal and Northern Shore matches the painted geography', () => {
@@ -1431,6 +1805,11 @@ test('procedural flora habitat scoring respects preference cores and tolerances'
   assert.ok(suitable > 0.9);
   assert.ok(disturbed < suitable);
   assert.equal(scoreFloraHabitat(DARWINIOTHAMNUS_SPECIES, { excluded: true }), 0);
+
+  const cohort = [{ x: 0, z: 0 }];
+  assert.equal(floraCompanionSuitability(cohort, 1, 0), 0);
+  assert.equal(floraCompanionSuitability(cohort, 6, 0), 1);
+  assert.equal(floraCompanionSuitability(cohort, 18, 0), 0);
 });
 
 test('penal colony procedural flora overlays authored flora without entering worked ground', () => {
@@ -1507,6 +1886,139 @@ test('post scrub rise interactive flora feeds stable separated prickly pear phys
   }
 });
 
+test('Northern Highlands ecology keeps crops and procedural detail out of its trail', () => {
+  const ecology = buildNorthernHighlandsEcology();
+  const grass = ecology.dryGrassPatches[0].items;
+  const cormorantEdgeGrass = grass.filter(item => item.id.startsWith('northern-highlands-cormorant-edge-grass'));
+  const cormorantEdgeHummocks = ecology.flora.find(layer => (
+    layer.id === 'northern-highlands-cormorant-edge-hummocks'
+  ));
+  assert.equal(grass.length, 1560);
+  assert.equal(cormorantEdgeGrass.length, 300);
+  assert.ok(Math.min(...grass.map(item => item.z)) < -51.2);
+  assert.ok(grass.filter(item => item.z < -42).length >= 280);
+  assert.equal(cormorantEdgeHummocks.items.length, 26);
+  assert.ok(northernHighlandsCormorantEcotone(0, -51) > 0.72);
+  assert.equal(northernHighlandsCormorantEcotone(0, -25), 0);
+  assert.equal(ecology.rocks.length, 64);
+  assert.equal(ecology.crops.length, 1);
+  assert.equal(ecology.crops[0].crop, 'sweetPotato');
+  assert.ok(ecology.crops[0].items.length >= 60);
+  assert.equal(ecology.proceduralFlora[0].items.length, 44);
+  assert.equal(getNorthernHighlandsRockObstacles().every(item => item.zoneId === 'NORTHERN_HIGHLANDS'), true);
+
+  for (const item of ecology.crops[0].items) {
+    assert.ok(northernHighlandsGardenInfo(item.x, item.z).mask > 0.36);
+    assert.ok(northernHighlandsPathInfo(item.x, item.z).path <= 0.16);
+  }
+  for (const item of ecology.proceduralFlora[0].items) {
+    const path = northernHighlandsPathInfo(item.x, item.z);
+    assert.ok(path.distance >= path.width * 1.72);
+    assert.ok(northernHighlandsGardenInfo(item.x, item.z).mask < 0.05);
+  }
+  for (const item of [...cormorantEdgeGrass, ...cormorantEdgeHummocks.items]) {
+    const path = northernHighlandsPathInfo(item.x, item.z);
+    assert.ok(path.distance >= path.width * 1.08);
+    assert.ok(northernHighlandsGardenInfo(item.x, item.z).mask < 0.05);
+  }
+});
+
+test('Cormorant Bay uses El Mirador-style instanced grass off its lagoon and trail', () => {
+  const ecology = buildCormorantBayEcology();
+  const dryGrass = ecology.dryGrassPatches.flatMap(layer => layer.items);
+  const saltgrass = ecology.flora.find(layer => layer.id.includes('lagoon-saltgrass'));
+  const sesuvium = ecology.flora.find(layer => layer.id.includes('sesuvium-mats'));
+  const saltbush = ecology.flora
+    .filter(layer => layer.id.includes('saltbush-cryptocarpus'))
+    .flatMap(layer => layer.items);
+
+  assert.equal('groundCover' in ecology, false);
+  assert.equal(ecology.dryGrassPatches.length, 1);
+  assert.equal(dryGrass.length, 1800);
+  assert.equal(saltgrass.items.length, 112);
+  assert.equal(sesuvium.items.length, 32);
+  assert.equal(saltbush.length, 60);
+  assert.equal(dryGrass.every(item => cormorantTrailDistance(item.x, item.z) > 4.8), true);
+  assert.equal(saltbush.every(item => (
+    cormorantTrailDistance(item.x, item.z) > 7
+      && cormorantLagoonField(item.x, item.z) > 1.6
+  )), true);
+});
+
+test('sweet potato geometry reads as a dense heart-leaf vine within one shared mesh', () => {
+  const geometry = buildSweetPotatoGeometry(0.34);
+  const vertexCount = geometry.positions.length / 3;
+  assert.equal(SWEET_POTATO_HEART_LEAF_COUNT, 13);
+  assert.equal(geometry.colors.length, geometry.positions.length);
+  assert.equal(geometry.damageThresholds.length, vertexCount);
+  assert.equal(geometry.leafAnchors.length, geometry.positions.length);
+  assert.ok(vertexCount > 1200 && vertexCount < 2400);
+  assert.equal(geometry.positions.every(Number.isFinite), true);
+
+  const xs = geometry.positions.filter((_, index) => index % 3 === 0);
+  const ys = geometry.positions.filter((_, index) => index % 3 === 1);
+  const zs = geometry.positions.filter((_, index) => index % 3 === 2);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 0.8);
+  assert.ok(Math.max(...zs) - Math.min(...zs) > 0.8);
+  assert.ok(Math.max(...ys) > 0.22);
+  const leafThresholds = new Set(
+    geometry.damageThresholds.filter(value => value < 1).map(value => value.toFixed(3)),
+  );
+  assert.equal(leafThresholds.size, SWEET_POTATO_HEART_LEAF_COUNT);
+});
+
+test('crop impacts select the forward hammer swath and downward pellet ray', () => {
+  const plants = [
+    { x: 0, y: 0.15, z: 1, scale: 1 },
+    { x: 0.42, y: 0.15, z: 1.24, scale: 1 },
+    { x: 0, y: 0.15, z: -1, scale: 1 },
+    { x: 1.8, y: 0.15, z: 1, scale: 1 },
+  ];
+  const hammerHits = findHammerCropHits(plants, {
+    position: { x: 0, y: 0, z: 0 },
+    facing: { x: 0, y: 0, z: 1 },
+  });
+  assert.deepEqual(hammerHits.map(hit => hit.index), [0, 1]);
+
+  const shotgunHits = findShotgunCropHits(plants, {
+    origin: { x: 0, y: 1, z: 0 },
+    dir: { x: 0, y: -0.85, z: 1 },
+    range: 3,
+    rayRadius: 0.2,
+    plantRadius: 0.2,
+  });
+  assert.equal(shotgunHits[0].index, 0);
+  assert.ok(shotgunHits[0].directness > 0.7);
+  assert.equal(shotgunHits.some(hit => hit.index === 2 || hit.index === 3), false);
+});
+
+test('crop damage persists its strongest bruising and permanent lodged state', () => {
+  const shot = mergeCropDamageState(null, {
+    damage: 0.64,
+    bendX: 1.2,
+    bendZ: 0,
+    source: 'shotgun',
+  });
+  const trampled = mergeCropDamageState(shot, {
+    damage: 0.78,
+    bendX: 0,
+    bendZ: -1.4,
+    crushed: true,
+    source: 'trample',
+  });
+  const weakerReload = mergeCropDamageState(trampled, {
+    damage: 0.2,
+    bendX: 0,
+    bendZ: 0,
+    source: 'reload',
+  });
+  assert.equal(trampled.damage, 0.78);
+  assert.equal(trampled.crushed, true);
+  assert.ok(trampled.bendZ < -1.3);
+  assert.equal(weakerReload.damage, 0.78);
+  assert.equal(weakerReload.crushed, true);
+});
+
 test('post office bay procedural ecology forms a coastal-to-inland flora gradient', () => {
   const ecology = buildPostOfficeBayEcology();
   const croton = ecology.proceduralFlora.find(layer => layer.speciesId === CROTON_SCOULERI_SPECIES.id);
@@ -1565,6 +2077,112 @@ test('post office bay procedural ecology forms a coastal-to-inland flora gradien
     for (const other of pricklyPear.sites.slice(index + 1)) {
       assert.ok(Math.hypot(site.x - other.x, site.z - other.z) >= 5);
     }
+  }
+});
+
+test('procedural Opuntia overlays mix mature trees with nearby breakable juveniles', () => {
+  const ecologies = [
+    buildNorthShoreEcology(),
+    buildPostScrubRiseEcology(),
+    buildPostOfficeBayEcology(),
+  ];
+  for (const ecology of ecologies) {
+    const young = ecology.interactiveFlora.find(layer => (
+      layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id
+    ));
+    const mature = ecology.proceduralFlora.find(layer => layer.id.includes('mature-opuntia'));
+    assert.ok(young, `${ecology.zoneId} has interactive juvenile Opuntia`);
+    assert.ok(mature, `${ecology.zoneId} has mature Opuntia`);
+    assert.equal(mature.speciesId, OPUNTIA_MEGASPERMA_SPECIES.id);
+    assert.equal(mature.items.length, 4);
+    assert.match(mature.path, /runtime-big-opuntia\.glb$/);
+    for (const item of mature.items) {
+      const juvenileDistance = Math.min(...young.sites.map(site => (
+        Math.hypot(item.x - site.x, item.z - site.z)
+      )));
+      assert.ok(item.scale >= 3.1 && item.scale <= 5.4);
+      assert.ok(juvenileDistance >= 4.5 && juvenileDistance <= 18);
+    }
+  }
+});
+
+test('lava cactus ecology feeds the destructible runtime across exposed volcanic maps', () => {
+  const expected = {
+    LAVA_FLATS: { procedural: 12, resolved: 12, patches: 4 },
+    POST_SCRUB_RISE: { procedural: 5, resolved: 6, patches: 2 },
+    N_OUTCROP: { procedural: 5, resolved: 5, patches: 2 },
+    E_MID: { procedural: 4, resolved: 4, patches: 2 },
+  };
+
+  for (const [zoneId, counts] of Object.entries(expected)) {
+    const ecology = getEcology(zoneId);
+    const layer = ecology.interactiveFlora.find(item => (
+      item.runtime === 'lava-cactus'
+      && item.speciesId === LAVA_CACTUS_SPECIES.id
+    ));
+    const resolved = getLavaCactusSites(zoneId);
+    assert.ok(layer, `${zoneId} has a lava-cactus interaction layer`);
+    assert.equal(layer.sites.length, counts.procedural);
+    assert.equal(layer.placementStats.generatedPatchCount, counts.patches);
+    assert.equal(resolved.length, counts.resolved);
+    assert.equal(new Set(resolved.map(site => site.id)).size, counts.resolved);
+    assert.ok(getThreeSpecimens(zoneId).some(specimen => specimen.id === 'cactus'));
+    for (const site of resolved) {
+      assert.ok(site.size >= 0.9 && site.size <= 1.65);
+      assert.ok(site.flowerCount >= 0 && site.flowerCount <= 2);
+    }
+  }
+
+  for (const site of getLavaCactusSites('LAVA_FLATS')) {
+    const path = lavaFlatsPathInfo(site.x, site.z);
+    assert.ok(path.distance >= path.width * 1.85);
+    assert.ok(lavaFlatsPioneerMask(site.x, site.z) <= 0.76);
+    assert.ok(lavaFlatsTubeMasks(site.x, site.z).bowl <= 0.5);
+  }
+  for (const site of getLavaCactusSites('POST_SCRUB_RISE').slice(1)) {
+    const path = scrubRisePathInfo(site.x, site.z);
+    assert.ok(path.distance >= path.width * 1.85);
+    assert.ok(scrubRiseWashMask(site.x, site.z) <= 0.32);
+    assert.ok(scrubRiseThicketStrength(site.x, site.z) <= 0.46);
+    assert.ok(scrubRiseBasaltExposure(site.x, site.z) >= 0.48);
+  }
+  for (const site of getLavaCactusSites('N_OUTCROP')) {
+    assert.ok(desolateOutcropDryMask(site.x, site.z) >= 0.3);
+    assert.ok(desolateOutcropGuanoMask(site.x, site.z) <= 0.18);
+    assert.ok(desolateOutcropTideShelfMask(site.x, site.z) <= 0.3);
+    assert.ok(desolateOutcropTidepoolMask(site.x, site.z) <= 0.16);
+  }
+  for (const site of getLavaCactusSites('E_MID')) {
+    const path = rockyClearingPathInfo(site.x, site.z);
+    assert.ok(path.distance >= path.width * 1.8);
+    assert.ok(rockyClearingCaveThresholdMask(site.x, site.z) <= 0.3);
+    assert.ok(rockyClearingRubbleMask(site.x, site.z) >= 0.32);
+  }
+
+  assert.equal(getLavaCactusSites('NORTHERN_HIGHLANDS').length, 16);
+  assert.equal(getLavaCactusSites('POST_OFFICE_BAY_3').length, 1);
+  assert.equal(getLavaCactusSites('COASTAL_SCRUBLAND').length, 3);
+});
+
+test('resurrection fern overlays stay in sheltered humid habitat', () => {
+  const highlands = buildWesternHighlandsEcology().proceduralFlora.find(layer => (
+    layer.speciesId === PLEOPELTIS_POLYPODIOIDES_SPECIES.id
+  ));
+  const watkins = buildWatkinsCampEcology().proceduralFlora.find(layer => (
+    layer.speciesId === PLEOPELTIS_POLYPODIOIDES_SPECIES.id
+  ));
+  assert.equal(highlands.items.length, 64);
+  assert.equal(highlands.placementStats.generatedPatchCount, 8);
+  assert.equal(watkins.items.length, 28);
+  assert.equal(watkins.placementStats.generatedPatchCount, 4);
+  for (const item of highlands.items) {
+    assert.ok(westernHighlandsTrailInfluence(item.x, item.z, 1.2, 5.4) <= 0.34);
+    assert.ok(item.scale >= 0.48 && item.scale <= 1.02);
+  }
+  for (const item of watkins.items) {
+    assert.ok(watkinsRiverInfo(item.x, item.z).water <= 0.08);
+    assert.ok(watkinsPathInfo(item.x, item.z).d >= 3.2);
+    assert.ok(item.scale >= 0.48 && item.scale <= 1.02);
   }
 });
 
@@ -1686,6 +2304,64 @@ test('Lawson house transitions connect the authored doorway without catching arr
   const houseMarker = getIslandMapLocation('LAWSON_HOUSE');
   assert.equal(houseMarker.kind, 'houseInterior');
   assert.ok(Math.hypot(houseMarker.at.x - penalMarker.at.x, houseMarker.at.y - penalMarker.at.y) < 0.04);
+});
+
+test('Floreana sun crosses an east-to-west near-equatorial arc', () => {
+  const sunrise = sunDirection(6, 1);
+  const noon = sunDirection(12, 1);
+  const sunset = sunDirection(18, 1);
+
+  assert.ok(sunrise[0] > 0.98, 'sunrise should be in the eastern sky');
+  assert.ok(Math.abs(sunrise[1]) < 0.02, 'sunrise should sit close to the horizon');
+  assert.ok(noon[1] > 0.99, 'September noon sun should pass nearly overhead at Floreana');
+  assert.ok(sunset[0] < -0.98, 'sunset should be in the western sky');
+  assert.ok(Math.abs(sunset[1]) < 0.02, 'sunset should sit close to the horizon');
+});
+
+test('twilight reveals bright stars before faint stars and the Milky Way', () => {
+  const horizon = skyState(18, 1);
+  const civilTwilight = skyState(18.25, 1);
+  const nauticalTwilight = skyState(18.5, 1);
+  const darkSky = skyState(19, 1);
+  const astronomicalDark = skyState(19.25, 1);
+
+  assert.ok(horizon.brightStars < civilTwilight.brightStars);
+  assert.equal(civilTwilight.faintStars, 0);
+  assert.ok(nauticalTwilight.brightStars > 0.95);
+  assert.ok(nauticalTwilight.faintStars > 0 && nauticalTwilight.faintStars < 0.5);
+  assert.ok(darkSky.faintStars > 0.95);
+  assert.ok(darkSky.milkyWay > 0.85);
+  assert.ok(astronomicalDark.astronomicalNight > 0.95);
+});
+
+test('gameplay moon rises around 8 PM, remains overnight, and only lights from above the horizon', () => {
+  const phase = moonPhase(1);
+  const beforeRise = skyState(19, 1);
+  const moonrise = moonDirection(20, 1);
+  const lateEvening = skyState(22.75, 1);
+  const overnight = skyState(2, 1);
+  const afterSet = skyState(9, 1);
+
+  assert.equal(phase.waxing, false);
+  assert.ok(phase.fraction > 0.32 && phase.fraction < 0.39);
+  assert.equal(phase.riseHour, 20);
+  assert.equal(phase.setHour, 8);
+  assert.ok(beforeRise.moon[1] < 0);
+  assert.equal(beforeRise.moonlight, 0);
+  assert.ok(Math.abs(moonrise[1]) < 0.08);
+  assert.ok(lateEvening.moonAltitude > 30);
+  assert.ok(lateEvening.moonlight > 0.35);
+  assert.ok(overnight.moonAltitude > 80);
+  assert.ok(afterSet.moon[1] < 0);
+  assert.equal(afterSet.moonlight, 0);
+});
+
+test('star sphere advances on a sidereal rather than solar clock', () => {
+  const sixHours = siderealAngle(6, 1) - siderealAngle(0, 1);
+  const nextSolarMidnight = siderealAngle(0, 2) - siderealAngle(0, 1);
+
+  assert.ok(sixHours > Math.PI / 2 && sixHours < Math.PI / 2 + 0.02);
+  assert.ok(nextSolarMidnight > 0.015 && nextSolarMidnight < 0.02);
 });
 
 let failed = false;

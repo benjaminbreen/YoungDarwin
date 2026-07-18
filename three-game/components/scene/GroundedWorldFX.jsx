@@ -1260,7 +1260,7 @@ function GroundSparkles({ enabled }) {
     if (pointsRef.current) pointsRef.current.visible = visible;
     if (!visible) return;
 
-    const sun = sunDirection(timeOfDay ?? 12);
+    const sun = sunDirection(timeOfDay ?? 12, day || 1);
     material.uniforms.uSun.value.copy(sunScratch.current.set(sun[0], sun[1], sun[2]));
 
     const pose = getRuntimePlayerPose();

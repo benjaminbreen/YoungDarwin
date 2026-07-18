@@ -62,3 +62,31 @@ export const POST_OFFICE_NORTH_SHORE_SEAM = createRouteSeam(
   'east',
   7,
 );
+
+export const POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM = createRouteSeam(
+  'POST_SCRUB_RISE',
+  'NORTHERN_HIGHLANDS',
+  'east',
+  7,
+);
+
+export const NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM = createRouteSeam(
+  'NORTHERN_HIGHLANDS',
+  'CORMORANT_BAY',
+  'north',
+  8,
+);
+
+export const NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM = createRouteSeam(
+  'NORTHERN_HIGHLANDS',
+  'ALT_POST_OFFICE_BAY',
+  'east',
+  -11,
+);
+
+export const NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM = createRouteSeam(
+  'NORTHERN_HIGHLANDS',
+  'WATKINS_CREEK',
+  'south',
+  -6,
+);

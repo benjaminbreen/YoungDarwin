@@ -7,6 +7,21 @@ export function getSpecimenById(specimenId: SpecimenId) {
   return baseSpecimens.find(specimen => specimen.id === specimenId) || null;
 }
 
+export function specimenActorId(zoneId: ZoneId, localActorId: string) {
+  const zone = String(zoneId || '').trim();
+  const local = String(localActorId || '').trim();
+  if (!zone || !local) return local;
+  const prefix = `${zone}:`;
+  return local.startsWith(prefix) ? local : `${prefix}${local}`;
+}
+
+export function specimenSpawnActorId(zoneId: ZoneId, spawn: ZoneSpecimenSpawn, index = 0) {
+  const localActorId = typeof spawn.instanceId === 'string' && spawn.instanceId
+    ? spawn.instanceId
+    : `${spawn.specimenId}-${index}`;
+  return specimenActorId(zoneId, localActorId);
+}
+
 export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
   const zoneSpawns = regionMaps[zoneId] ? [] : getZoneSpecimenSpawns(zoneId);
   const spawns = (zoneSpawns.length > 0 ? zoneSpawns : getRegionSpecimenSpawns(zoneId)) as ZoneSpecimenSpawn[];
@@ -14,12 +29,16 @@ export function getZoneSpecimens(zoneId: ZoneId = currentZoneId) {
     .map((spawn, index) => {
       const specimen = getSpecimenById(spawn.specimenId);
       if (!specimen) return null;
-      const instanceId = typeof spawn.instanceId === 'string' && spawn.instanceId
+      const localInstanceId = typeof spawn.instanceId === 'string' && spawn.instanceId
         ? spawn.instanceId
         : `${spawn.specimenId}-${index}`;
       return {
         ...specimen,
-        instanceId,
+        // Runtime actor state is global across zone travel, so its identity must
+        // include the zone. Preserve the authored id separately for inspection
+        // and source-data diagnostics.
+        instanceId: specimenActorId(zoneId, localInstanceId),
+        localInstanceId,
         spawnPoint: spawn.position,
         habitatRadiusX: spawn.habitatRadiusX ?? null,
         habitatRadiusZ: spawn.habitatRadiusZ ?? null,

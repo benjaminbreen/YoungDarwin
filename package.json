@@ -35,6 +35,7 @@
     "asset:darwiniothamnus": "node scripts/prepare-darwiniothamnus.mjs",
     "asset:terrain-detail": "node scripts/build-terrain-sand-detail.mjs",
     "asset:white-sand": "node scripts/build-white-sand-beach-textures.mjs",
+    "asset:terrain-pbr": "node scripts/build-floreana-nrh-textures.mjs",
     "asset:travel-textures": "node scripts/build-travel-textures.mjs",
     "asset:plan": "node scripts/asset-pipeline.mjs plan",
     "asset:audit": "node scripts/asset-pipeline.mjs audit",

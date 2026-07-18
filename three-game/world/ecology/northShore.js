@@ -6,6 +6,16 @@ import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
+import {
+  MATURE_OPUNTIA_PATH,
+  MATURE_OPUNTIA_PLACEMENT,
+} from './floraAssets';
+import { OPUNTIA_MEGASPERMA_SPECIES, PALO_SANTO_SPECIES } from './floraSpecies';
+import {
+  buildProceduralFloraLayer,
+  buildProceduralInteractiveFloraLayer,
+  floraCompanionSuitability,
+} from './proceduralFlora';
 
 // Northern Shore (N_SHORE) ecology — Floreana's arid littoral zone as Darwin
 // met it in September 1835. Flora is named for the real species mix:
@@ -120,16 +130,6 @@ function buildFlora() {
       }),
     },
     {
-      id: 'opuntia',
-      path: `${NATURE}runtime-opuntia.glb`,
-      sink: 0.06,
-      items: uprightScatter('opuntia-tree', 5, 103, {
-        minX: -42, maxX: 44, minZ: 2, maxZ: 30, scale: [0.9, 1.4], maxGrade: 0.4,
-        accept: (biome, x, z) => z - northShoreCoastZ(x) > 6
-          && (biome === 'dry-scrub' || biome === 'sesuvium-flat'),
-      }),
-    },
-    {
       id: 'candelabra-cactus',
       path: `${NATURE}runtime-candelabra-cactus.glb`,
       sink: 0.04,
@@ -154,6 +154,146 @@ function buildFlora() {
       }),
     },
   ];
+}
+
+function makeNorthShoreOpuntiaHabitatAt(rocks) {
+  return ({ biome, x, z }) => {
+    const inland = z - northShoreCoastZ(x);
+    const biomeSuitability = {
+      'dry-scrub': 1,
+      'palo-santo': 0.86,
+      'sesuvium-flat': 0.58,
+      'ash-beach': 0.32,
+    }[biome] || 0;
+    const rockClear = rocks.every(rock => (
+      Math.hypot(x - rock.x, z - rock.z) > (rock.radiusX || rock.scale || 0.45) + 1.3
+    ));
+    return {
+      moisture: Math.max(0.08, Math.min(0.34, 0.13 + inland * 0.004)),
+      canopy: biome === 'palo-santo' ? 0.2 : 0.08,
+      exposure: biome === 'palo-santo' ? 0.68 : 0.9,
+      disturbance: 0.06,
+      salinity: Math.max(0, Math.min(0.24, (18 - inland) * 0.014)),
+      rockiness: biome === 'dry-scrub' ? 0.56 : 0.38,
+      biomeSuitability,
+      localSuitability: Math.max(0, Math.min(1, 0.34 + inland / 46)),
+      excluded: biomeSuitability <= 0
+        || inland < 7
+        || !drySand(x, z)
+        || !rockClear
+        || !nearAnyCluster(scrubClumps, x, z, 16),
+    };
+  };
+}
+
+function buildInteractiveFlora(rocks) {
+  const paloSantoHabitatAt = ({ biome, x, z }) => {
+    const inland = z - northShoreCoastZ(x);
+    const biomeSuitability = biome === 'palo-santo' ? 1 : biome === 'dry-scrub' ? 0.68 : 0;
+    const rockClear = rocks.every(rock => (
+      Math.hypot(x - rock.x, z - rock.z) > (rock.radiusX || rock.scale || 0.45) + 2
+    ));
+    return {
+      moisture: Math.max(0.12, Math.min(0.38, 0.15 + inland * 0.004)),
+      canopy: biome === 'palo-santo' ? 0.16 : 0.06,
+      exposure: biome === 'palo-santo' ? 0.7 : 0.86,
+      disturbance: 0.05,
+      salinity: Math.max(0, Math.min(0.12, (22 - inland) * 0.008)),
+      rockiness: biome === 'dry-scrub' ? 0.48 : 0.32,
+      biomeSuitability,
+      localSuitability: Math.max(0, Math.min(1, 0.18 + inland / 44)),
+      excluded: biomeSuitability <= 0
+        || inland < 25
+        || !drySand(x, z)
+        || !rockClear
+        || !nearAnyCluster(uplandTreeClumps, x, z, 12),
+    };
+  };
+
+  return [
+    buildProceduralInteractiveFloraLayer({
+      id: 'north-shore-young-opuntia-overlay',
+      zoneId: N_SHORE,
+      species: OPUNTIA_MEGASPERMA_SPECIES,
+      runtime: 'prickly-pear',
+      seed: 111,
+      count: 5,
+      bounds: { minX: -44, maxX: 44, minZ: 8, maxZ: 38 },
+      habitatAt: makeNorthShoreOpuntiaHabitatAt(rocks),
+      placement: {
+        patchCount: 2,
+        patchRadius: [6.5, 10],
+        minPatchSeparation: 16,
+        minItemSeparation: 4.5,
+        maxGrade: 0.58,
+      },
+      siteFromItem: item => ({
+        flowerCount: item.tone < 0.34 ? 0 : item.tone < 0.72 ? 1 : item.tone < 0.93 ? 2 : 3,
+      }),
+    }),
+    buildProceduralInteractiveFloraLayer({
+      id: 'north-shore-palo-santo-overlay',
+      zoneId: N_SHORE,
+      species: PALO_SANTO_SPECIES,
+      runtime: 'palo-santo',
+      seed: 113,
+      count: 4,
+      bounds: { minX: -44, maxX: 44, minZ: 28, maxZ: 45 },
+      habitatAt: paloSantoHabitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [7, 10],
+        minPatchSeparation: 16,
+        minItemSeparation: 9,
+        maxGrade: 0.5,
+      },
+      siteFromItem: item => ({ leafiness: 0.1 + item.tone * 0.3 }),
+    }),
+  ];
+}
+
+function buildProceduralFlora(rocks, interactiveFlora) {
+  const youngSites = interactiveFlora
+    .filter(layer => layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id)
+    .flatMap(layer => layer.sites || []);
+  const habitatAt = makeNorthShoreOpuntiaHabitatAt(rocks);
+  return [buildProceduralFloraLayer({
+    id: 'north-shore-mature-opuntia-overlay',
+    zoneId: N_SHORE,
+    species: OPUNTIA_MEGASPERMA_SPECIES,
+    asset: { path: MATURE_OPUNTIA_PATH },
+    seed: 117,
+    count: 5,
+    bounds: { minX: -46, maxX: 46, minZ: 7, maxZ: 40 },
+    habitatAt: sample => {
+      const base = habitatAt(sample);
+      const companionSuitability = floraCompanionSuitability(youngSites, sample.x, sample.z, {
+        minimumDistance: 3.6,
+        preferredDistance: [5.5, 12],
+        maximumDistance: 19,
+      });
+      return {
+        ...base,
+        localSuitability: base.localSuitability * companionSuitability,
+        excluded: base.excluded || companionSuitability <= 0,
+      };
+    },
+    placement: {
+      ...MATURE_OPUNTIA_PLACEMENT,
+      patchCount: 2,
+      minPatchSeparation: 14,
+      minItemSeparation: 8,
+    },
+    render: {
+      sink: 0.04,
+      tint: '#698b45',
+      tintStrength: 0.08,
+      castShadow: true,
+      maxVisibleDistance: 118,
+      motion: { wind: 0.16, bend: 0.03, bendRadius: 3.4 },
+      loadTier: 2,
+    },
+  })];
 }
 
 function buildSurfaceLitter() {
@@ -252,6 +392,7 @@ function buildAmbientWildlife() {
 
 export function buildNorthShoreEcology() {
   const rocks = getNorthShoreRocks();
+  const interactiveFlora = buildInteractiveFlora(rocks);
   const swashRocks = rocks.filter(rock => {
     const d = rock.z - northShoreCoastZ(rock.x);
     return d > -2.5 && d < 1.8 && rock.radiusY > 0.25;
@@ -259,6 +400,8 @@ export function buildNorthShoreEcology() {
   return {
     zoneId: N_SHORE,
     flora: buildFlora(),
+    proceduralFlora: buildProceduralFlora(rocks, interactiveFlora),
+    interactiveFlora,
     generatedTrees: buildGeneratedTrees(),
     ambientWildlife: buildAmbientWildlife(),
     rocks,

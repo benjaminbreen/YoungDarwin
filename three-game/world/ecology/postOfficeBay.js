@@ -24,14 +24,18 @@ import {
   DARWINIOTHAMNUS_PATH,
   DARWINIOTHAMNUS_SPECIES,
   DARWINIOTHAMNUS_VARIANT_MODE,
+  MATURE_OPUNTIA_PATH,
+  MATURE_OPUNTIA_PLACEMENT,
 } from './floraAssets';
 import {
   CROTON_SCOULERI_SPECIES,
   OPUNTIA_MEGASPERMA_SPECIES,
+  PALO_SANTO_SPECIES,
 } from './floraSpecies';
 import {
   buildProceduralFloraLayer,
   buildProceduralInteractiveFloraLayer,
+  floraCompanionSuitability,
 } from './proceduralFlora';
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';
@@ -204,7 +208,8 @@ function buildFlora() {
   return [
     {
       id: 'opuntia',
-      path: `${NATURE}runtime-opuntia.glb`,
+      label: 'Mature Floreana prickly pear / Opuntia megasperma',
+      path: MATURE_OPUNTIA_PATH,
       items: opuntia,
       sink: 0.02,
       tint: '#6fa046',
@@ -290,7 +295,7 @@ function postOfficeInlandHabitat({ biome, x, z }) {
   };
 }
 
-function buildProceduralFlora(authoredFlora) {
+function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
   const authoredCacti = authoredFlora
     .filter(layer => layer.id === 'opuntia' || layer.id === 'post-office-bay-candelabra-cactus')
     .flatMap(layer => layer.items || []);
@@ -326,6 +331,33 @@ function buildProceduralFlora(authoredFlora) {
       biomeSuitability,
       localSuitability: clamp01(0.16 + smoothstep01(base.shoreDistance, 18, 48) * 0.84),
       excluded: base.excluded || distanceToNearestItem(authoredCacti, sample.x, sample.z) < 2.4,
+    };
+  };
+  const youngOpuntiaSites = interactiveFlora
+    .filter(layer => layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id)
+    .flatMap(layer => layer.sites || []);
+  const matureOpuntiaHabitatAt = sample => {
+    const base = postOfficeInlandHabitat(sample);
+    const companionSuitability = floraCompanionSuitability(youngOpuntiaSites, sample.x, sample.z, {
+      minimumDistance: 3.6,
+      preferredDistance: [5.5, 12],
+      maximumDistance: 19,
+    });
+    const biomeSuitability = {
+      'tuff-ridge': 1,
+      'black-lava': 0.94,
+      'dry-scrub': 0.88,
+      'palo-santo': 0.7,
+      'wet-basalt': 0.58,
+      'ash-slope': 0.42,
+    }[sample.biome] || 0.2;
+    return {
+      ...base,
+      biomeSuitability,
+      localSuitability: clamp01(companionSuitability * (0.42 + base.inland * 0.58)),
+      excluded: base.excluded
+        || companionSuitability <= 0
+        || distanceToNearestItem(authoredCacti, sample.x, sample.z) < 5.2,
     };
   };
 
@@ -385,6 +417,31 @@ function buildProceduralFlora(authoredFlora) {
         loadTier: 2,
       },
     }),
+    buildProceduralFloraLayer({
+      id: 'post-office-bay-mature-opuntia-overlay',
+      zoneId: POST_OFFICE_BAY,
+      species: OPUNTIA_MEGASPERMA_SPECIES,
+      asset: { path: MATURE_OPUNTIA_PATH },
+      seed: 6553,
+      count: 4,
+      bounds: { minX: -48, maxX: 48, minZ: 28, maxZ: 54 },
+      habitatAt: matureOpuntiaHabitatAt,
+      placement: {
+        ...MATURE_OPUNTIA_PLACEMENT,
+        patchCount: 2,
+        minPatchSeparation: 14,
+        minItemSeparation: 8,
+      },
+      render: {
+        sink: 0.04,
+        tint: '#668943',
+        tintStrength: 0.08,
+        castShadow: true,
+        maxVisibleDistance: 116,
+        motion: { wind: 0.18, bend: 0.035, bendRadius: 3.2 },
+        loadTier: 2,
+      },
+    }),
   ];
 }
 
@@ -417,26 +474,70 @@ function buildInteractiveFlora(authoredFlora) {
     };
   };
 
-  return [buildProceduralInteractiveFloraLayer({
-    id: 'post-office-bay-prickly-pear-overlay',
-    zoneId: POST_OFFICE_BAY,
-    species: OPUNTIA_MEGASPERMA_SPECIES,
-    runtime: 'prickly-pear',
-    seed: 6577,
-    count: 6,
-    bounds: { minX: -45, maxX: 45, minZ: 33, maxZ: 53 },
-    habitatAt,
-    placement: {
-      patchCount: 2,
-      patchRadius: [7.5, 11],
-      minPatchSeparation: 18,
-      minItemSeparation: 5,
-      maxGrade: 0.6,
-    },
-    siteFromItem: item => ({
-      flowerCount: item.tone < 0.34 ? 0 : item.tone < 0.72 ? 1 : item.tone < 0.93 ? 2 : 3,
+  const paloSantoHabitatAt = sample => {
+    const base = postOfficeInlandHabitat(sample);
+    const biomeSuitability = {
+      'palo-santo': 1,
+      'dry-scrub': 0.82,
+      'wet-basalt': 0.68,
+      'tuff-ridge': 0.54,
+      'ash-slope': 0.34,
+    }[sample.biome] || 0;
+    const obstacleClear = rocks.every(rock => (
+      Math.hypot(sample.x - rock.x, sample.z - rock.z) > (rock.radiusX || rock.scale || 0.4) + 2.1
+    ));
+    return {
+      ...base,
+      biomeSuitability,
+      localSuitability: clamp01(0.22 + base.inland * 0.78),
+      excluded: base.excluded
+        || biomeSuitability <= 0
+        || base.path.distance < base.path.width * 2.45
+        || distanceToNearestItem(authoredCacti, sample.x, sample.z) < 7
+        || !obstacleClear,
+    };
+  };
+
+  return [
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-office-bay-prickly-pear-overlay',
+      zoneId: POST_OFFICE_BAY,
+      species: OPUNTIA_MEGASPERMA_SPECIES,
+      runtime: 'prickly-pear',
+      seed: 6577,
+      count: 6,
+      bounds: { minX: -45, maxX: 45, minZ: 33, maxZ: 53 },
+      habitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [7.5, 11],
+        minPatchSeparation: 18,
+        minItemSeparation: 5,
+        maxGrade: 0.6,
+      },
+      siteFromItem: item => ({
+        flowerCount: item.tone < 0.34 ? 0 : item.tone < 0.72 ? 1 : item.tone < 0.93 ? 2 : 3,
+      }),
     }),
-  })];
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-office-bay-palo-santo-overlay',
+      zoneId: POST_OFFICE_BAY,
+      species: PALO_SANTO_SPECIES,
+      runtime: 'palo-santo',
+      seed: 6599,
+      count: 4,
+      bounds: { minX: -46, maxX: 46, minZ: 35, maxZ: 54 },
+      habitatAt: paloSantoHabitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [7, 11],
+        minPatchSeparation: 16,
+        minItemSeparation: 9,
+        maxGrade: 0.52,
+      },
+      siteFromItem: item => ({ leafiness: 0.16 + item.tone * 0.36 }),
+    }),
+  ];
 }
 
 function buildSurfaceLitter() {
@@ -502,6 +603,7 @@ function buildSurfaceLitter() {
 
 export function buildPostOfficeBayEcology() {
   const flora = buildFlora();
+  const interactiveFlora = buildInteractiveFlora(flora);
   return {
     zoneId: POST_OFFICE_BAY,
     // Stage GLB decoding after the terrain and collidable hero rocks are ready.
@@ -510,8 +612,8 @@ export function buildPostOfficeBayEcology() {
     streamSchedule: [320, 900, 1550],
     dryGrassPatches: [buildPostOfficeBayDryGrassLayer()],
     flora,
-    proceduralFlora: buildProceduralFlora(flora),
-    interactiveFlora: buildInteractiveFlora(flora),
+    proceduralFlora: buildProceduralFlora(flora, interactiveFlora),
+    interactiveFlora,
     surfaceLitter: buildSurfaceLitter(),
     // This is the same deterministic block set used to derive collision in
     // floreanaCoveLayout, so visual rocks and traversal remain aligned.

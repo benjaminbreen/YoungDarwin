@@ -17,12 +17,19 @@ import {
   DARWINIOTHAMNUS_LABEL,
   DARWINIOTHAMNUS_PATH,
   DARWINIOTHAMNUS_VARIANT_MODE,
+  MATURE_OPUNTIA_PATH,
+  MATURE_OPUNTIA_PLACEMENT,
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
-import { OPUNTIA_MEGASPERMA_SPECIES } from './floraSpecies';
+import {
+  LAVA_CACTUS_SPECIES,
+  OPUNTIA_MEGASPERMA_SPECIES,
+  PALO_SANTO_SPECIES,
+} from './floraSpecies';
 import {
   buildProceduralFloraLayer,
   buildProceduralInteractiveFloraLayer,
+  floraCompanionSuitability,
 } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
@@ -168,7 +175,45 @@ function distanceToNearestItem(items, x, z) {
   return nearest;
 }
 
-function buildProceduralFlora(authoredFlora) {
+function makeOpuntiaHabitatAt(authoredFlora) {
+  const candelabra = authoredFlora
+    .find(layer => layer.id === 'scrub-rise-candelabra-cactus')?.items || [];
+  return ({ biome, x, z }) => {
+    const path = scrubRisePathInfo(x, z);
+    const thicket = scrubRiseThicketStrength(x, z);
+    const wash = scrubRiseWashMask(x, z);
+    const basalt = scrubRiseBasaltExposure(x, z);
+    const inland = clamp01((z + 48) / 96);
+    const biomeSuitability = {
+      'basalt-scrub': 1,
+      'open-dry-grass': 0.9,
+      'thorn-scrub': 0.74,
+      'inland-grass-rise': 0.58,
+      'dry-wash': 0.16,
+    }[biome] || 0;
+
+    return {
+      moisture: clamp01(0.14 + thicket * 0.18 + wash * 0.12),
+      canopy: clamp01(0.04 + thicket * 0.42),
+      exposure: clamp01(0.91 - thicket * 0.32),
+      disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.34),
+      salinity: (1 - inland) * 0.16,
+      rockiness: basalt,
+      biomeSuitability,
+      localSuitability: clamp01(0.42 + basalt * 0.38 + (1 - thicket) * 0.2),
+      excluded: biomeSuitability <= 0
+        || path.distance < path.width * 1.85
+        || wash > 0.48
+        || thicket > 0.72
+        || basalt > 0.9
+        || distanceToNearestItem(candelabra, x, z) < 5
+        // Preserve the authored collectible cactus clearing west of the wash.
+        || Math.hypot(x + 31, z + 9) < 5,
+    };
+  };
+}
+
+function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
   const authoredDarwiniothamnus = authoredFlora
     .find(layer => layer.id === 'scrub-rise-darwiniothamnus')?.items || [];
   const habitatAt = ({ biome, x, z }) => {
@@ -202,91 +247,210 @@ function buildProceduralFlora(authoredFlora) {
     };
   };
 
-  return [buildProceduralFloraLayer({
-    id: 'post-scrub-rise-darwiniothamnus-overlay',
-    zoneId: POST_SCRUB_RISE,
-    species: DARWINIOTHAMNUS_SPECIES,
-    asset: {
-      path: DARWINIOTHAMNUS_PATH,
-      variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
-      variantCount: 9,
-    },
-    seed: 907,
-    count: 36,
-    bounds: { minX: -49, maxX: 49, minZ: -44, maxZ: 46 },
-    habitatAt,
-    placement: {
-      patchCount: 4,
-      patchRadius: [3.2, 6.2],
-      minPatchSeparation: 8,
-      maxGrade: 0.72,
-    },
-    render: {
-      sink: 0.05,
-      tintStrength: 0.16,
-      castShadow: false,
-      motion: { wind: 0.92, bend: 0.24, bendRadius: 1.6 },
-    },
-  })];
+  const youngOpuntiaSites = interactiveFlora
+    .filter(layer => layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id)
+    .flatMap(layer => layer.sites || []);
+  const opuntiaHabitatAt = makeOpuntiaHabitatAt(authoredFlora);
+  const matureOpuntiaHabitatAt = sample => {
+    const base = opuntiaHabitatAt(sample);
+    const companionSuitability = floraCompanionSuitability(youngOpuntiaSites, sample.x, sample.z, {
+      minimumDistance: 3.5,
+      preferredDistance: [5.2, 11.5],
+      maximumDistance: 18.5,
+    });
+    return {
+      ...base,
+      localSuitability: base.localSuitability * companionSuitability,
+      excluded: base.excluded || companionSuitability <= 0,
+    };
+  };
+
+  return [
+    buildProceduralFloraLayer({
+      id: 'post-scrub-rise-darwiniothamnus-overlay',
+      zoneId: POST_SCRUB_RISE,
+      species: DARWINIOTHAMNUS_SPECIES,
+      asset: {
+        path: DARWINIOTHAMNUS_PATH,
+        variantMode: DARWINIOTHAMNUS_VARIANT_MODE,
+        variantCount: 9,
+      },
+      seed: 907,
+      count: 36,
+      bounds: { minX: -49, maxX: 49, minZ: -44, maxZ: 46 },
+      habitatAt,
+      placement: {
+        patchCount: 4,
+        patchRadius: [3.2, 6.2],
+        minPatchSeparation: 8,
+        maxGrade: 0.72,
+      },
+      render: {
+        sink: 0.05,
+        tintStrength: 0.16,
+        castShadow: false,
+        motion: { wind: 0.92, bend: 0.24, bendRadius: 1.6 },
+      },
+    }),
+    buildProceduralFloraLayer({
+      id: 'post-scrub-rise-mature-opuntia-overlay',
+      zoneId: POST_SCRUB_RISE,
+      species: OPUNTIA_MEGASPERMA_SPECIES,
+      asset: { path: MATURE_OPUNTIA_PATH },
+      seed: 929,
+      count: 4,
+      bounds: { minX: -47, maxX: 47, minZ: -42, maxZ: 44 },
+      habitatAt: matureOpuntiaHabitatAt,
+      placement: {
+        ...MATURE_OPUNTIA_PLACEMENT,
+        patchCount: 2,
+        minPatchSeparation: 14,
+        minItemSeparation: 8,
+      },
+      render: {
+        sink: 0.04,
+        tint: '#698b45',
+        tintStrength: 0.08,
+        castShadow: true,
+        maxVisibleDistance: 116,
+        motion: { wind: 0.16, bend: 0.03, bendRadius: 3.4 },
+      },
+    }),
+  ];
 }
 
 function buildInteractiveFlora(authoredFlora) {
-  const candelabra = authoredFlora
-    .find(layer => layer.id === 'scrub-rise-candelabra-cactus')?.items || [];
-  const habitatAt = ({ biome, x, z }) => {
+  const habitatAt = makeOpuntiaHabitatAt(authoredFlora);
+  const authoredTreesAndCacti = authoredFlora
+    .filter(layer => layer.id.includes('candelabra') || layer.id.includes('castela'))
+    .flatMap(layer => layer.items || []);
+  const rocks = getPostScrubRiseRocks();
+
+  const lavaCactusHabitatAt = ({ biome, x, z }) => {
     const path = scrubRisePathInfo(x, z);
     const thicket = scrubRiseThicketStrength(x, z);
     const wash = scrubRiseWashMask(x, z);
     const basalt = scrubRiseBasaltExposure(x, z);
-    const inland = clamp01((z + 48) / 96);
     const biomeSuitability = {
       'basalt-scrub': 1,
-      'open-dry-grass': 0.9,
-      'thorn-scrub': 0.74,
-      'inland-grass-rise': 0.58,
-      'dry-wash': 0.16,
+      'open-dry-grass': 0.55,
+      'thorn-scrub': 0.24,
+      'inland-grass-rise': 0.18,
+      'dry-wash': 0,
     }[biome] || 0;
-
     return {
-      moisture: clamp01(0.14 + thicket * 0.18 + wash * 0.12),
-      canopy: clamp01(0.04 + thicket * 0.42),
-      exposure: clamp01(0.91 - thicket * 0.32),
-      disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.34),
-      salinity: (1 - inland) * 0.16,
+      moisture: clamp01(0.07 + thicket * 0.14 + wash * 0.08),
+      canopy: clamp01(thicket * 0.28),
+      exposure: clamp01(0.96 - thicket * 0.3),
+      disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.3),
+      salinity: 0.04,
       rockiness: basalt,
       biomeSuitability,
-      localSuitability: clamp01(0.42 + basalt * 0.38 + (1 - thicket) * 0.2),
+      localSuitability: clamp01(0.34 + basalt * 0.58 + (1 - thicket) * 0.08),
       excluded: biomeSuitability <= 0
         || path.distance < path.width * 1.85
-        || wash > 0.48
-        || thicket > 0.72
-        || basalt > 0.9
-        || distanceToNearestItem(candelabra, x, z) < 5
-        // Preserve the authored collectible cactus clearing west of the wash.
-        || Math.hypot(x + 31, z + 9) < 5,
+        || wash > 0.32
+        || thicket > 0.46
+        || basalt < 0.48
+        || Math.hypot(x + 31, z + 9) < 5.5,
     };
   };
 
-  return [buildProceduralInteractiveFloraLayer({
-    id: 'post-scrub-rise-prickly-pear-overlay',
-    zoneId: POST_SCRUB_RISE,
-    species: OPUNTIA_MEGASPERMA_SPECIES,
-    runtime: 'prickly-pear',
-    seed: 941,
-    count: 6,
-    bounds: { minX: -46, maxX: 46, minZ: -40, maxZ: 43 },
-    habitatAt,
-    placement: {
-      patchCount: 2,
-      patchRadius: [7.5, 10.5],
-      minPatchSeparation: 18,
-      minItemSeparation: 4.5,
-      maxGrade: 0.62,
-    },
-    siteFromItem: item => ({
-      flowerCount: item.tone < 0.32 ? 0 : item.tone < 0.7 ? 1 : item.tone < 0.92 ? 2 : 3,
+  const paloSantoHabitatAt = ({ biome, x, z }) => {
+    const path = scrubRisePathInfo(x, z);
+    const thicket = scrubRiseThicketStrength(x, z);
+    const wash = scrubRiseWashMask(x, z);
+    const basalt = scrubRiseBasaltExposure(x, z);
+    const biomeSuitability = {
+      'thorn-scrub': 1,
+      'inland-grass-rise': 0.9,
+      'open-dry-grass': 0.64,
+      'basalt-scrub': 0.34,
+      'dry-wash': 0.08,
+    }[biome] || 0;
+    const obstacleClear = rocks.every(rock => (
+      Math.hypot(x - rock.x, z - rock.z) > (rock.radiusX || rock.scale || 0.4) + 2
+    ));
+    return {
+      moisture: clamp01(0.16 + thicket * 0.28 + wash * 0.1),
+      canopy: clamp01(0.03 + thicket * 0.32),
+      exposure: clamp01(0.88 - thicket * 0.32 + basalt * 0.06),
+      disturbance: clamp01(path.path * 0.9 + path.shoulder * 0.34),
+      salinity: 0.03,
+      rockiness: basalt,
+      biomeSuitability,
+      localSuitability: clamp01(0.28 + thicket * 0.52 + (1 - wash) * 0.2),
+      excluded: biomeSuitability <= 0
+        || path.distance < path.width * 2.35
+        || wash > 0.48
+        || thicket < 0.2
+        || thicket > 0.82
+        || basalt > 0.84
+        || !obstacleClear
+        || distanceToNearestItem(authoredTreesAndCacti, x, z) < 5.5,
+    };
+  };
+
+  return [
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-scrub-rise-prickly-pear-overlay',
+      zoneId: POST_SCRUB_RISE,
+      species: OPUNTIA_MEGASPERMA_SPECIES,
+      runtime: 'prickly-pear',
+      seed: 941,
+      count: 6,
+      bounds: { minX: -46, maxX: 46, minZ: -40, maxZ: 43 },
+      habitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [7.5, 10.5],
+        minPatchSeparation: 18,
+        minItemSeparation: 4.5,
+        maxGrade: 0.62,
+      },
+      siteFromItem: item => ({
+        flowerCount: item.tone < 0.32 ? 0 : item.tone < 0.7 ? 1 : item.tone < 0.92 ? 2 : 3,
+      }),
     }),
-  })];
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-scrub-rise-lava-cactus-overlay',
+      zoneId: POST_SCRUB_RISE,
+      species: LAVA_CACTUS_SPECIES,
+      runtime: 'lava-cactus',
+      seed: 953,
+      count: 5,
+      bounds: { minX: -46, maxX: 46, minZ: -40, maxZ: 43 },
+      habitatAt: lavaCactusHabitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [2.8, 5.2],
+        minPatchSeparation: 11,
+        minItemSeparation: 1.8,
+        maxGrade: 0.64,
+      },
+      siteFromItem: item => ({
+        flowerCount: item.tone < 0.56 ? 0 : item.tone < 0.9 ? 1 : 2,
+      }),
+    }),
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-scrub-rise-palo-santo-overlay',
+      zoneId: POST_SCRUB_RISE,
+      species: PALO_SANTO_SPECIES,
+      runtime: 'palo-santo',
+      seed: 967,
+      count: 5,
+      bounds: { minX: -47, maxX: 47, minZ: -42, maxZ: 45 },
+      habitatAt: paloSantoHabitatAt,
+      placement: {
+        patchCount: 2,
+        patchRadius: [8, 12],
+        minPatchSeparation: 18,
+        minItemSeparation: 9,
+        maxGrade: 0.54,
+      },
+      siteFromItem: item => ({ leafiness: 0.14 + item.tone * 0.34 }),
+    }),
+  ];
 }
 
 function buildSurfaceLitter() {
@@ -311,13 +475,14 @@ function buildSurfaceLitter() {
 
 export function buildPostScrubRiseEcology() {
   const flora = buildFlora();
+  const interactiveFlora = buildInteractiveFlora(flora);
   return {
     zoneId: POST_SCRUB_RISE,
     stream: false,
     dryGrassPatches: [buildGrass()],
     flora,
-    proceduralFlora: buildProceduralFlora(flora),
-    interactiveFlora: buildInteractiveFlora(flora),
+    proceduralFlora: buildProceduralFlora(flora, interactiveFlora),
+    interactiveFlora,
     rocks: getPostScrubRiseRocks(),
     surfaceLitter: buildSurfaceLitter(),
     props: [],

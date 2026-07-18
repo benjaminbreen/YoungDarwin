@@ -1,16 +1,21 @@
 'use client';
 
 import React, { Suspense, useMemo } from 'react';
+import { specimenActorId } from '../../../../game-core/specimens';
 import { SpecimenActor } from '../../world/SpecimenActor';
 import { createAmbientWildlifeSpecimen } from '../../../wildlife/wildlifeCatalog';
 
 export function AmbientWildlifeLayer({ layer }) {
   const specimens = useMemo(() => (
     (layer?.items || [])
-      .map(item => createAmbientWildlifeSpecimen({
-        ...item,
-        instanceId: item.instanceId || `${layer.id}-${item.id || item.speciesId || item.species}`,
-      }))
+      .map(item => {
+        const localInstanceId = item.instanceId || `${layer.id}-${item.id || item.speciesId || item.species}`;
+        return createAmbientWildlifeSpecimen({
+          ...item,
+          instanceId: specimenActorId(layer.zoneId, localInstanceId),
+          localInstanceId,
+        });
+      })
       .filter(Boolean)
   ), [layer]);
 

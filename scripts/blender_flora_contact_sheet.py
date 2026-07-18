@@ -72,7 +72,9 @@ def look_at(obj, target):
 
 def setup_scene(size):
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    # The bundled macOS build exposes Eevee under its compatibility enum even
+    # though the application version is newer than Blender 4.
+    scene.render.engine = "BLENDER_EEVEE"
     scene.render.resolution_x = size
     scene.render.resolution_y = size
     scene.render.resolution_percentage = 100

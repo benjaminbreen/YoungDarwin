@@ -32,7 +32,7 @@ const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
 
 function importedAssetCastsShadow(assetId, asset) {
   if (asset.castShadow !== undefined) return Boolean(asset.castShadow);
-  return DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
+  return DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
 }
 
 function normalizeImportedMaterials(scene, asset, motion = null) {
@@ -89,7 +89,7 @@ function prepareImportedScene(scene, assetId, asset, shadowOverrides = null) {
   // sit close to camera anyway, so there's little to gain, and it keeps them
   // clear of any shadow-camera edge cases around the stabilized shadow anchor.
   const cullSkinnedMeshes = asset.frustumCulled !== false;
-  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
+  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
   scene.traverse(object => {
     if (!object.isMesh) return;
     if (object.isSkinnedMesh) ensurePaddedSkinnedBounds(object);
@@ -353,7 +353,7 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
   const albedoMap = cfg.albedoMapUrl ? getPlayerDataTexture(cfg.albedoMapUrl, true) : null;
   const normalMap = cfg.normalMapUrl ? getPlayerDataTexture(cfg.normalMapUrl) : null;
   scene.traverse(object => {
-    if (!object.isMesh || object.userData.noTint) return;
+    if (!object.isMesh || object.userData.noPlayerMaterialUpgrade) return;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material || material.userData.playerUpgradeApplied) return;
@@ -404,6 +404,142 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
           );
       };
       material.userData.playerUpgradeApplied = true;
+      material.needsUpdate = true;
+    });
+  });
+}
+
+function applyEyeGlossUpgrade(scene) {
+  scene.traverse(object => {
+    if (!object.isMesh || !object.userData.eyeGloss) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach(material => {
+      if (!material) return;
+      if ('metalness' in material) material.metalness = 0;
+      if ('roughnessMap' in material) material.roughnessMap = null;
+      if ('roughness' in material) material.roughness = 0.26;
+      if ('normalMap' in material) material.normalMap = null;
+      if ('clearcoat' in material) material.clearcoat = 0.22;
+      if ('clearcoatRoughness' in material) material.clearcoatRoughness = 0.14;
+      if ('envMapIntensity' in material) {
+        material.userData.envBaseIntensity = 0.38;
+        material.envMapIntensity = 0.38 * (ENV_BOUNCE_MIN_SCALE + lastEnvBounce * ENV_BOUNCE_GAIN);
+      }
+      material.needsUpdate = true;
+    });
+  });
+}
+
+function applyDirectSpecularGlint(material, config) {
+  if (!config || material.userData.directSpecularGlintApplied) return;
+  const uniforms = {
+    color: { value: new THREE.Color(config.color || '#fff0b0') },
+    specularBoost: { value: config.specularBoost ?? 5.0 },
+    bloomStrength: { value: config.bloomStrength ?? 1.0 },
+    threshold: { value: config.threshold ?? 0.015 },
+    thresholdEnd: { value: config.thresholdEnd ?? 0.14 },
+    focus: { value: config.focus ?? 1.8 },
+  };
+  const previousHook = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (previousHook) previousHook(shader, renderer);
+    shader.uniforms.uRegionGlintColor = uniforms.color;
+    shader.uniforms.uRegionGlintSpecularBoost = uniforms.specularBoost;
+    shader.uniforms.uRegionGlintBloomStrength = uniforms.bloomStrength;
+    shader.uniforms.uRegionGlintThreshold = uniforms.threshold;
+    shader.uniforms.uRegionGlintThresholdEnd = uniforms.thresholdEnd;
+    shader.uniforms.uRegionGlintFocus = uniforms.focus;
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        `uniform vec3 uRegionGlintColor;
+uniform float uRegionGlintSpecularBoost;
+uniform float uRegionGlintBloomStrength;
+uniform float uRegionGlintThreshold;
+uniform float uRegionGlintThresholdEnd;
+uniform float uRegionGlintFocus;
+void main() {`,
+      )
+      .replace(
+        'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
+        `vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;
+  // Preserve the standard material's real light direction, view response, and
+  // shadowing, then concentrate only its hottest direct-specular values into
+  // an HDR brass flash. The ordinary highlight gets a broad boost; the narrow
+  // core crosses the scene bloom threshold instead of making the button glow.
+  float regionDirectSpecular = dot(
+    reflectedLight.directSpecular,
+    vec3(0.2126, 0.7152, 0.0722)
+  );
+  float regionGlint = smoothstep(
+    uRegionGlintThreshold,
+    max(uRegionGlintThreshold + 0.0001, uRegionGlintThresholdEnd),
+    regionDirectSpecular
+  );
+  regionGlint = pow(clamp(regionGlint, 0.0, 1.0), uRegionGlintFocus);
+  outgoingLight += reflectedLight.directSpecular * uRegionGlintSpecularBoost;
+  outgoingLight += uRegionGlintColor * regionGlint * uRegionGlintBloomStrength;`,
+      );
+  };
+  material.userData.directSpecularGlintApplied = true;
+  material.userData.directSpecularGlintUniforms = uniforms;
+}
+
+function applyMaterialRegionUpgrade(scene, asset) {
+  const regions = asset.materialRegionUpgrade;
+  if (!regions) return;
+  scene.traverse(object => {
+    if (!object.isMesh) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach(material => {
+      if (!material || material.userData.materialRegionUpgradeApplied) return;
+      const name = String(material.name || '').toLowerCase();
+      const entry = Object.values(regions).find(region =>
+        (region.materialNames || []).some(candidate => name.startsWith(String(candidate).toLowerCase())),
+      );
+      if (!entry) return;
+      if ('metalness' in material && entry.metalness !== undefined) {
+        material.metalness = entry.metalness;
+      }
+      if ('roughnessMap' in material && entry.useRoughnessMap === false) {
+        material.roughnessMap = null;
+      }
+      if ('map' in material && entry.useAlbedoMap === false) {
+        material.map = null;
+      }
+      if ('roughness' in material && entry.roughness !== undefined) {
+        material.roughness = entry.roughness;
+      }
+      if (material.normalMap && entry.normalScale !== undefined) {
+        material.normalScale = new THREE.Vector2(entry.normalScale, entry.normalScale);
+      }
+      if ('normalMap' in material && entry.useNormalMap === false) {
+        material.normalMap = null;
+      }
+      if (material.color && entry.colorBlend) {
+        material.color.lerp(new THREE.Color(entry.colorBlend), entry.colorBlendAmount ?? 0.12);
+      }
+      if (material.color && entry.colorScale !== undefined) {
+        material.color.multiplyScalar(entry.colorScale);
+      }
+      if ('specularIntensity' in material && entry.specularIntensity !== undefined) {
+        material.specularIntensity = entry.specularIntensity;
+      }
+      if ('clearcoat' in material && entry.clearcoat !== undefined) {
+        material.clearcoat = entry.clearcoat;
+      }
+      if ('clearcoatRoughness' in material && entry.clearcoatRoughness !== undefined) {
+        material.clearcoatRoughness = entry.clearcoatRoughness;
+      }
+      if ('envMapIntensity' in material && entry.envMapIntensity !== undefined) {
+        material.userData.envBaseIntensity = entry.envMapIntensity;
+        material.envMapIntensity = entry.envMapIntensity
+          * (ENV_BOUNCE_MIN_SCALE + lastEnvBounce * ENV_BOUNCE_GAIN);
+      }
+      if (entry.directSpecularGlint) {
+        applyDirectSpecularGlint(material, entry.directSpecularGlint);
+      }
+      material.userData.materialRegionUpgradeApplied = true;
       material.needsUpdate = true;
     });
   });
@@ -738,13 +874,15 @@ const ADDITIVE_BREATHING_BONE_RE = /spine|neck|head|shoulder/i;
 
 function settingsForClip(name, assetId = null) {
   const base = CLIP_SETTINGS[name] || CLIP_SETTINGS[normalizeClipName(name)] || {};
-  if (assetId !== 'darwin5') return base;
+  const profileId = getModelAsset(assetId)?.animationProfile || assetId;
+  if (profileId !== 'darwin5') return base;
   const darwin5Settings = darwin5ClipSettings(name);
   return Object.keys(darwin5Settings).length ? { ...base, ...darwin5Settings } : base;
 }
 
 function fadeForTransition(fromName, toName, assetId = null) {
-  if (assetId === 'darwin5') {
+  const profileId = getModelAsset(assetId)?.animationProfile || assetId;
+  if (profileId === 'darwin5') {
     const darwin5Fade = darwin5TransitionFade(fromName, toName);
     if (Number.isFinite(darwin5Fade)) return darwin5Fade;
   }
@@ -824,7 +962,8 @@ function GLBPrimitive({
   const warnedMissing = useRef(new Set());
   const lastBoundsDebugAt = useRef(0);
   const animLodSkipParity = useRef(false);
-  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(assetId);
+  const animationProfileId = asset.animationProfile || assetId;
+  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
   const assetUrl = assetLoadUrl(asset);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
   const animationBanks = asset.animationBanks || NO_ANIMATION_BANKS;
@@ -888,6 +1027,25 @@ function GLBPrimitive({
     return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
   }, [scene, assetId, asset, castShadow, receiveShadow]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
+  const blinkTargets = useMemo(() => {
+    const morphName = asset.blinkMorph?.name;
+    if (!morphName) return [];
+    const result = [];
+    importedScene.traverse(object => {
+      const index = object.morphTargetDictionary?.[morphName];
+      if (!Number.isInteger(index) || !object.morphTargetInfluences) return;
+      result.push({ object, index });
+    });
+    return result;
+  }, [asset.blinkMorph, importedScene]);
+  const blinkStateRef = useRef({
+    nextAt: null,
+    startedAt: null,
+    doublePending: false,
+    durationScale: 1,
+    blinkCount: 0,
+    value: 0,
+  });
   // Second mixer for the masked upper-body overlay (aiming while moving).
   // It updates after the main mixer each frame, so the bones its filtered
   // clip animates overwrite the locomotion pose — a cheap bone mask.
@@ -943,13 +1101,13 @@ function GLBPrimitive({
     return clip;
   }, [additiveBreathingSource]);
   const footContactRig = useMemo(() => createFootContactRig({
-    assetId,
+    assetId: animationProfileId,
     asset,
     scene: importedScene,
     groupRef: group,
     grounding,
     positionAnimatedBones,
-  }), [assetId, asset, importedScene, grounding, positionAnimatedBones]);
+  }), [animationProfileId, asset, importedScene, grounding, positionAnimatedBones]);
   const renderUserData = useMemo(() => ({
     ...(reflect ? { reflect: true } : {}),
     renderSource: `model:${assetId}`,
@@ -991,7 +1149,7 @@ function GLBPrimitive({
     const fade = normalized?.fade ?? null;
     const timeScale = THREE.MathUtils.clamp(normalized?.timeScale ?? 1, 0.35, 1.8);
     const maxTime = Number.isFinite(normalized?.maxTime) ? Math.max(0, normalized.maxTime) : null;
-    const fallbackClip = assetId === 'darwin5'
+    const fallbackClip = animationProfileId === 'darwin5'
       ? (darwin5ClipFallback(requestedClip) || CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)])
       : (CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)]);
     const next = getAction(requestedClip) || getAction(fallbackClip);
@@ -1023,8 +1181,8 @@ function GLBPrimitive({
     }
     const previous = activeAction.current;
     const previousName = previous?.getClip?.()?.name || activeRequest.current;
-    const transitionFade = fade ?? fadeForTransition(previousName, resolvedClip, assetId);
-    const clipSettings = settingsForClip(resolvedClip, assetId);
+    const transitionFade = fade ?? fadeForTransition(previousName, resolvedClip, animationProfileId);
+    const clipSettings = settingsForClip(resolvedClip, animationProfileId);
     const oneShot = clipSettings.loop === true ? false : isOneShotClip(resolvedClip);
     next.enabled = true;
     next.paused = false;
@@ -1033,7 +1191,7 @@ function GLBPrimitive({
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
     if (previous && previous !== next) {
       if (!oneShot && isGaitLoopClip(resolvedClip) && isGaitLoopClip(previousName)) {
-        syncGaitPhase(previous, next, assetId, resolvedClip);
+        syncGaitPhase(previous, next, animationProfileId, resolvedClip);
       }
       previous.crossFadeTo(next, transitionFade, false);
     } else {
@@ -1044,7 +1202,7 @@ function GLBPrimitive({
     activeRequest.current = requestedClip;
     publishAnimationDebug(requestedClip, next, { fade: transitionFade, oneShot });
     return true;
-  }, [animationDebugEnabled, assetId, getAction, lazyActions, publishAnimationDebug]);
+  }, [animationDebugEnabled, animationProfileId, getAction, lazyActions, publishAnimationDebug]);
 
   useEffect(() => {
     normalizeImportedMaterials(importedScene, asset, motion);
@@ -1054,6 +1212,8 @@ function GLBPrimitive({
   // pipeline. No-op unless the asset opts in via materialUpgrade (player only).
   useEffect(() => {
     applyPlayerMaterialUpgrade(importedScene, asset, gl);
+    applyMaterialRegionUpgrade(importedScene, asset);
+    applyEyeGlossUpgrade(importedScene);
   }, [asset, importedScene, gl]);
 
   useEffect(() => {
@@ -1157,7 +1317,103 @@ function GLBPrimitive({
 
   useEffect(() => () => footContactRig.dispose(), [footContactRig]);
 
+  useEffect(() => {
+    const state = blinkStateRef.current;
+    state.nextAt = null;
+    state.startedAt = null;
+    state.doublePending = false;
+    state.durationScale = 1;
+    state.blinkCount = 0;
+    state.value = 0;
+    blinkTargets.forEach(({ object, index }) => {
+      object.morphTargetInfluences[index] = 0;
+    });
+    return () => {
+      blinkTargets.forEach(({ object, index }) => {
+        object.morphTargetInfluences[index] = 0;
+      });
+    };
+  }, [blinkTargets]);
+
   useFrame((frameState, delta) => {
+    const blinkCfg = asset.blinkMorph;
+    if (blinkCfg && blinkTargets.length) {
+      const now = frameState.clock.elapsedTime;
+      const state = blinkStateRef.current;
+      const minInterval = blinkCfg.minInterval ?? 2.8;
+      const maxInterval = Math.max(minInterval, blinkCfg.maxInterval ?? 6.4);
+      const blinkOverride = typeof window !== 'undefined' ? window.__darwinBlinkOverride : null;
+      const forceClosed = typeof window !== 'undefined' && (
+        blinkOverride === 'closed'
+        || window.__darwinBlinkHold === true
+        || new URLSearchParams(window.location.search).get('blink') === 'closed'
+      );
+      const forceOpen = blinkOverride === 'open';
+      let value = forceClosed ? 1 : 0;
+      if (!forceClosed && !forceOpen) {
+        if (state.nextAt === null) {
+          state.nextAt = now + THREE.MathUtils.lerp(minInterval, maxInterval, Math.random());
+        }
+        if (state.startedAt === null && now >= state.nextAt) {
+          const durationVariation = THREE.MathUtils.clamp(blinkCfg.durationVariation ?? 0.1, 0, 0.35);
+          state.startedAt = now;
+          state.durationScale = THREE.MathUtils.lerp(
+            1 - durationVariation,
+            1 + durationVariation,
+            Math.random(),
+          );
+          state.blinkCount += 1;
+        }
+        if (state.startedAt !== null) {
+          const closeDuration = Math.max(0.01, blinkCfg.closeDuration ?? 0.12) * state.durationScale;
+          const holdDuration = Math.max(0, blinkCfg.holdDuration ?? 0.07) * state.durationScale;
+          const openDuration = Math.max(0.01, blinkCfg.openDuration ?? 0.21) * state.durationScale;
+          const totalDuration = closeDuration + holdDuration + openDuration;
+          const elapsed = now - state.startedAt;
+          if (elapsed < closeDuration) {
+            const t = THREE.MathUtils.clamp(elapsed / closeDuration, 0, 1);
+            value = t * t * (3 - 2 * t);
+          } else if (elapsed < closeDuration + holdDuration) {
+            value = 1;
+          } else if (elapsed < totalDuration) {
+            const t = THREE.MathUtils.clamp(
+              (elapsed - closeDuration - holdDuration) / openDuration,
+              0,
+              1,
+            );
+            value = 1 - t * t * (3 - 2 * t);
+          } else {
+            state.startedAt = null;
+            value = 0;
+            if (state.doublePending) {
+              state.doublePending = false;
+              state.nextAt = now + THREE.MathUtils.lerp(minInterval, maxInterval, Math.random());
+            } else if (Math.random() < (blinkCfg.doubleBlinkChance ?? 0.12)) {
+              state.doublePending = true;
+              state.nextAt = now + (blinkCfg.doubleBlinkDelay ?? 0.19);
+            } else {
+              state.nextAt = now + THREE.MathUtils.lerp(minInterval, maxInterval, Math.random());
+            }
+          }
+        }
+      }
+      state.value = value;
+      blinkTargets.forEach(({ object, index }) => {
+        object.morphTargetInfluences[index] = value;
+      });
+      if (typeof window !== 'undefined') {
+        window.__darwinBlinkDebug = {
+          assetId,
+          targetCount: blinkTargets.length,
+          value,
+          forceClosed,
+          forceOpen,
+          nextAt: state.nextAt,
+          durationScale: state.durationScale,
+          blinkCount: state.blinkCount,
+        };
+      }
+    }
     if (!animations.length || !group.current) return;
     let mixerDelta = delta;
     if (!isCharacterAsset) {

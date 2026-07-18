@@ -24,10 +24,18 @@ const PRESERVE_OPENING_INTRO = (
   process.argv.includes('--with-intro')
   || process.env.THREE_SCREENSHOT_WITH_INTRO === '1'
 );
+const PLAYER_MODEL_STEPS = numberOption('--player-model-steps', 'THREE_SCREENSHOT_PLAYER_MODEL_STEPS', 0);
+const BLINK_OVERRIDE = argValue('--blink');
+const CAMERA_ORBIT_X = signedNumberOption('--camera-orbit-x', 'THREE_SCREENSHOT_CAMERA_ORBIT_X', 0);
+const CAMERA_ORBIT_Y = signedNumberOption('--camera-orbit-y', 'THREE_SCREENSHOT_CAMERA_ORBIT_Y', 0);
+const CAMERA_ZOOM_STEPS = numberOption('--camera-zoom-steps', 'THREE_SCREENSHOT_CAMERA_ZOOM_STEPS', 0);
+const EXAMINE_ACTOR = argValue('--examine');
+const REQUESTED_ZONE = argValue('--zone') || argValue('--region');
 
 const ALL_VIEWPORTS = {
   desktop: { name: 'desktop', width: 1440, height: 900 },
   mobile: { name: 'mobile', width: 390, height: 844 },
+  'mobile-landscape': { name: 'mobile-landscape', width: 844, height: 390 },
 };
 
 function delay(ms) {
@@ -70,6 +78,16 @@ function numberOption(argName, envName, fallback) {
   return value;
 }
 
+function signedNumberOption(argName, envName, fallback) {
+  const raw = argValue(argName) || process.env[envName];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`Invalid numeric option ${argName}=${raw}.`);
+  }
+  return value;
+}
+
 function safeFilePart(value) {
   return String(value || '')
     .trim()
@@ -106,6 +124,7 @@ function requestedSearchParams() {
 
   if (!params.has('screenshot')) params.set('screenshot', '1');
   if (!params.has('skipIntro')) params.set('skipIntro', PRESERVE_OPENING_INTRO ? '0' : '1');
+  if (EXAMINE_ACTOR) params.set('e2e', '1');
   params.set('preserveDrawingBuffer', '1');
   return params;
 }
@@ -408,7 +427,14 @@ async function saveFailureArtifacts(page, stage, error, consoleErrors) {
 
 async function saveViewportScreenshot(page, screenshot) {
   if (CAPTURE_MODE === 'page') {
-    await page.screenshot({ path: screenshot, fullPage: false, timeout: SCREENSHOT_TIMEOUT_MS });
+    await page.screenshot({
+      path: screenshot,
+      fullPage: false,
+      timeout: SCREENSHOT_TIMEOUT_MS,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'css',
+    });
     return;
   }
 
@@ -521,6 +547,79 @@ async function waitForReadyCanvas(page, consoleErrors) {
   });
 }
 
+async function adjustGameplayCamera(page) {
+  if (CAMERA_ORBIT_X === 0 && CAMERA_ORBIT_Y === 0 && CAMERA_ZOOM_STEPS === 0) return;
+
+  await page.evaluate(({ orbitX, orbitY, zoomSteps }) => {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) throw new Error('Cannot adjust screenshot camera: missing canvas.');
+    const rect = canvas.getBoundingClientRect();
+    const margin = 24;
+
+    if (orbitX !== 0 || orbitY !== 0) {
+      const startX = orbitX < 0 ? rect.right - margin : rect.left + margin;
+      const startY = orbitY < 0 ? rect.bottom - margin : rect.top + margin;
+      const endX = Math.max(rect.left + margin, Math.min(rect.right - margin, startX + orbitX));
+      const endY = Math.max(rect.top + margin, Math.min(rect.bottom - margin, startY + orbitY));
+      const pointerId = 71;
+      const originalSetPointerCapture = canvas.setPointerCapture;
+      const originalReleasePointerCapture = canvas.releasePointerCapture;
+      canvas.setPointerCapture = () => {};
+      canvas.releasePointerCapture = () => {};
+      try {
+        canvas.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: startX,
+          clientY: startY,
+          pointerId,
+          pointerType: 'mouse',
+          button: 0,
+          buttons: 1,
+        }));
+        for (let step = 1; step <= 24; step += 1) {
+          const t = step / 24;
+          canvas.dispatchEvent(new PointerEvent('pointermove', {
+            bubbles: true,
+            clientX: startX + (endX - startX) * t,
+            clientY: startY + (endY - startY) * t,
+            pointerId,
+            pointerType: 'mouse',
+            button: -1,
+            buttons: 1,
+          }));
+        }
+        canvas.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          pointerId,
+          pointerType: 'mouse',
+          button: 0,
+          buttons: 0,
+        }));
+      } finally {
+        canvas.setPointerCapture = originalSetPointerCapture;
+        canvas.releasePointerCapture = originalReleasePointerCapture;
+      }
+    }
+
+    for (let step = 0; step < zoomSteps; step += 1) {
+      canvas.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        deltaY: -120,
+      }));
+    }
+  }, {
+    orbitX: CAMERA_ORBIT_X,
+    orbitY: CAMERA_ORBIT_Y,
+    zoomSteps: CAMERA_ZOOM_STEPS,
+  });
+  await page.waitForTimeout(500);
+}
+
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const { baseUrl, stopServer } = await resolveBaseUrl();
@@ -576,6 +675,74 @@ async function run() {
     });
     await clickNewExpeditionFlow(page, errors);
     const boot = await waitForReadyCanvas(page, errors);
+    if (EXAMINE_ACTOR) {
+      await withFailureArtifacts(page, 'open examination', errors, async () => {
+        await page.waitForFunction(() => Boolean(window.__darwinE2E), null, { timeout: BOOT_TIMEOUT_MS });
+        if (REQUESTED_ZONE) {
+          await page.evaluate(zoneId => window.__darwinE2E.setZone(zoneId), REQUESTED_ZONE);
+        }
+        // The launch flow deliberately staggers world actors for several
+        // seconds. Let that schedule and any zone transition settle before
+        // opening a modal that transition commits intentionally clear.
+        await page.waitForTimeout(3400);
+        await page.waitForFunction(
+          () => (
+            !window.__darwinE2E.getState().transition
+            && !document.querySelector('[data-testid="three-launch-overlay"]')
+          ),
+          null,
+          { timeout: 20000 },
+        );
+        const opened = await page.evaluate(actorId => window.__darwinE2E.openExamineSpecimen(actorId), EXAMINE_ACTOR);
+        if (!opened) throw new Error(`Could not open examination for actor "${EXAMINE_ACTOR}".`);
+        // The launch overlay intentionally staggers specimen mounts. Wait for
+        // the actor's terrain-adjusted pose when available so visual QA does
+        // not capture an authored y=0 spawn under an elevated region mesh.
+        await page.waitForFunction(
+          () => Boolean(window.__darwinE2E.getExamineSubjectDebug?.()?.pose),
+          null,
+          { timeout: 2500 },
+        ).catch(() => {});
+        await page.waitForTimeout(500);
+        const examineState = await page.evaluate(() => {
+          const view = document.querySelector('[data-testid="examine-view"]');
+          const computed = view ? window.getComputedStyle(view) : null;
+          return {
+            session: window.__darwinE2E.getState().examineSession,
+            subject: window.__darwinE2E.getExamineSubjectDebug?.() || null,
+            view: view ? {
+              display: computed?.display,
+              opacity: computed?.opacity,
+              visibility: computed?.visibility,
+              width: view.getBoundingClientRect().width,
+              height: view.getBoundingClientRect().height,
+            } : null,
+          };
+        });
+        console.log(`[three:screenshot] examination state: ${JSON.stringify(examineState)}`);
+        if (!examineState.view || examineState.view.opacity === '0') {
+          throw new Error('Examination view did not become renderable.');
+        }
+        await page.waitForTimeout(200);
+      });
+    }
+    if (BLINK_OVERRIDE === 'open' || BLINK_OVERRIDE === 'closed') {
+      await page.evaluate(value => {
+        window.__darwinBlinkOverride = value;
+      }, BLINK_OVERRIDE);
+    }
+    for (let step = 0; step < PLAYER_MODEL_STEPS; step += 1) {
+      await page.keyboard.press('Digit9');
+    }
+    if (PLAYER_MODEL_STEPS > 0) {
+      await page.waitForFunction(
+        () => window.__darwinPlayerModel === 'darwin5BlinkPreview'
+          && window.__darwinBlinkDebug?.targetCount === 4,
+        null,
+        { timeout: BOOT_TIMEOUT_MS },
+      );
+    }
+    await adjustGameplayCamera(page);
 
     for (const viewport of viewports) {
       console.log(`[three:screenshot] ${viewport.name}: capture`);

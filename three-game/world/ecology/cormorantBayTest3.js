@@ -1,16 +1,22 @@
-import { makeZoneScatter, seededRandom } from '../scatter';
-import { terrainBiomeAt, terrainHeight, terrainSlopeAt, WATER_LEVEL } from '../terrain';
+import {
+  makeZoneScatter,
+  nearAnyCluster,
+  varyScatterTransforms,
+} from '../scatter';
+import { WATER_LEVEL } from '../terrain';
 import { cormorantLagoonField, cormorantTrailDistance } from '../regions/cormorantBayTest3/terrain';
 import {
-  cormorantTest3DirectionAt,
-  cormorantTest3DrynessAt,
-  cormorantTest3GrassDensityAt,
-} from '../regions/cormorantBayTest3/meadow';
+  buildStandardDryPathGrassPatchItems,
+  createStandardDryGrassPatchLayer,
+} from './standardGrass';
 
 const CORMORANT_BAY_ZONE = 'CORMORANT_BAY';
 const TEST_ZONE = 'CORMORANT_BAY_TEST_3';
 const NATURE = '/assets/models/nature/';
 const LAGOON_SURFACE_Y = WATER_LEVEL + 0.035;
+const SALTBUSH_CLUSTERS = [
+  [-39, 29], [-28, 18], [-17, 34], [-4, 27], [11, 34], [25, 21], [39, 31],
+];
 
 function dryGround(biome) {
   return ['green-beach', 'salt-scrub', 'tuff-rim', 'olivine-trail'].includes(biome);
@@ -29,100 +35,111 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
+function cormorantGrassPathInfo(x, z) {
+  const distance = cormorantTrailDistance(x, z);
+  const width = 2.55;
+  return {
+    distance,
+    width,
+    center: 1 - clamp01((distance - 0.8) / 0.9),
+    tread: 1 - clamp01((distance - 1.45) / 1.25),
+    shoulder: 1 - clamp01(Math.abs(distance - 3.4) / 1.7),
+  };
 }
 
-function dryGrassColor(density, dryness, tone) {
-  const shade = clamp01(tone * 0.62 + density * 0.22 + (1 - dryness) * 0.16);
-  if (dryness > 0.72) return shade > 0.62 ? '#c2b465' : '#aa9853';
-  if (dryness > 0.46) return shade > 0.54 ? '#a9a65f' : '#8d8d4e';
-  return shade > 0.5 ? '#879a55' : '#687d43';
+function cormorantGrassDryness({ x, z, tone, path }) {
+  const lagoon = cormorantLagoonField(x, z);
+  const lagoonMoisture = 1 - clamp01((lagoon - 1.3) / 1.9);
+  return clamp01(0.16 + tone * 0.2 + (1 - lagoonMoisture) * 0.18 + (path?.shoulder || 0) * 0.08);
 }
 
-function buildDryGrassPatches(zoneId, idPrefix, count = 360) {
-  const items = [];
-  const bounds = { minX: -46, maxX: 46, minZ: 2, maxZ: 42 };
-  let attempts = 0;
-  while (items.length < count && attempts < count * 95) {
-    attempts += 1;
-    const i = attempts + 9831 * 1000;
-    const x = bounds.minX + seededRandom(i, 3) * (bounds.maxX - bounds.minX);
-    const z = bounds.minZ + seededRandom(i, 9) * (bounds.maxZ - bounds.minZ);
-    const y = terrainHeight(x, z, zoneId);
-    const biome = terrainBiomeAt(x, z, y, zoneId);
-    if (!dryGround(biome)) continue;
-    if (!notTrail(x, z, 4.9)) continue;
-    if (cormorantLagoonField(x, z) < 1.12) continue;
-    const { grade } = terrainSlopeAt(x, z, zoneId, 0.75);
-    if (grade > 0.82) continue;
-
-    const tone = seededRandom(i, 17);
-    const density = cormorantTest3GrassDensityAt({ x, z, y, biome, grade, tone });
-    if (density < 0.22) continue;
-    if (seededRandom(i, 21) > clamp01(density * 0.98 + 0.08)) continue;
-
-    const dryness = cormorantTest3DrynessAt({ x, z, y, biome, grade, tone });
-    const direction = cormorantTest3DirectionAt(x, z);
-    const directionJitter = (seededRandom(i, 29) - 0.5) * lerp(0.42, 0.82, seededRandom(i, 31));
-    const occasionalTurn = seededRandom(i, 37) > 0.86 ? (seededRandom(i, 41) - 0.5) * 1.4 : 0;
-    const scale = lerp(0.32, 0.7, seededRandom(i, 43))
-      * lerp(0.86, 1.18, density)
-      * lerp(1.08, 0.9, dryness);
-
-    items.push({
-      id: `${idPrefix}-dry-grass-${items.length}`,
-      x,
-      y,
-      z,
-      grade,
-      scale,
-      yaw: direction + directionJitter + occasionalTurn,
-      tone,
-      density,
-      dryness,
-      color: dryGrassColor(density, dryness, tone),
-    });
-  }
-  return items;
+function cormorantGrassTint(tone, dryness) {
+  const warm = clamp01(dryness * 0.72 + tone * 0.16);
+  if (warm > 0.6) return tone > 0.52 ? '#98a85e' : '#7f914f';
+  if (warm > 0.38) return tone > 0.5 ? '#85a459' : '#668948';
+  return tone > 0.48 ? '#729b53' : '#547e43';
 }
 
-function partitionDryGrassPatches(items) {
-  const columns = 4;
-  const rows = 2;
-  const buckets = Array.from({ length: columns * rows }, () => []);
-  for (const item of items) {
-    const column = Math.min(columns - 1, Math.max(0, Math.floor(((item.x + 46) / 92) * columns)));
-    const row = Math.min(rows - 1, Math.max(0, Math.floor(((item.z - 2) / 40) * rows)));
-    buckets[row * columns + column].push(item);
-  }
-  return buckets.filter(bucket => bucket.length);
+function buildCormorantGrass(zoneId, idPrefix) {
+  return buildStandardDryPathGrassPatchItems({
+    zoneId,
+    idPrefix: `${idPrefix}-salt-meadow-grass`,
+    count: 1800,
+    seed: 9831,
+    bounds: { minX: -46, maxX: 46, minZ: 2, maxZ: 42 },
+    pathInfo: cormorantGrassPathInfo,
+    rejectBiomes: [
+      'deep-lagoon',
+      'shallow-white-sand',
+      'brackish-lagoon',
+      'wet-mud',
+      'wet-white-sand',
+      'white-sand',
+      'olivine-trail',
+    ],
+    pathCenterMax: 0,
+    pathTreadMax: 0,
+    maxGrade: 0.84,
+    slopeStep: 0.75,
+    scale: [0.5, 1.1],
+    windYaw: -0.66,
+    attemptsPerItem: 160,
+    pathClearance: 1.92,
+    sparseBand: 1.45,
+    baseChance: 0.24,
+    pathDistanceWeight: 0.43,
+    clumpWeight: 0.34,
+    gapWeight: 0.17,
+    clumpScale: 0.055,
+    gapScale: 0.115,
+    densityAt: ({ x, z }) => {
+      const lagoon = cormorantLagoonField(x, z);
+      return (1 - clamp01((lagoon - 1.35) / 2.2)) * 0.16;
+    },
+    accept: ({ biome, x, z }) => (
+      ['green-beach', 'salt-scrub', 'tuff-rim'].includes(biome)
+      && cormorantLagoonField(x, z) > 1.18
+    ),
+    drynessAt: cormorantGrassDryness,
+    tintAt: cormorantGrassTint,
+  });
 }
 
 function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
   const scatter = (layer, count, seed, opts) => makeZoneScatter(zoneId, layer, count, seed, opts);
-  const dryGrassPatches = buildDryGrassPatches(zoneId, idPrefix);
-  const dryGrassLayers = partitionDryGrassPatches(dryGrassPatches).map((items, index) => ({
-    id: `${idPrefix}-yellow-dry-grass-patches-${index}`,
-    loadTier: 1,
-    path: `${NATURE}runtime-animated-dry-grass.glb`,
-    items,
-    color: '#a99d58',
-    materialColor: '#ffffff',
-    emissive: '#2f3117',
-    emissiveIntensity: 0.1,
-    roughness: 0.99,
+  const dryGrassPatches = buildCormorantGrass(zoneId, idPrefix);
+  const saltbush = varyScatterTransforms(scatter(`${idPrefix}-saltbush`, 60, 417, {
+    minX: -46,
+    maxX: 46,
+    minZ: 8,
+    maxZ: 43,
+    scale: [0.46, 0.82],
+    maxGrade: 0.72,
+    accept: (biome, x, z) => (biome === 'salt-scrub' || biome === 'tuff-rim')
+      && notTrail(x, z, 7.2)
+      && cormorantLagoonField(x, z) > 1.62
+      && nearAnyCluster(SALTBUSH_CLUSTERS, x, z, 12.5),
+  }), 417, {
+    width: [0.78, 1.2],
+    height: [0.8, 1.18],
+    depth: [0.82, 1.16],
+    maxLean: 0.035,
+  });
+  const dryGrassLayer = createStandardDryGrassPatchLayer({
+    id: `${idPrefix}-salt-meadow-grass-patches`,
+    items: dryGrassPatches,
+    materialColor: '#eef0d2',
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    roughness: 1,
     castShadow: false,
-    receiveShadow: true,
-    baseLift: 0.012,
-    sink: 0.025,
-    slopeSink: 0.18,
     widthScale: 1.04,
-    heightScale: 0.96,
-    depthScale: 1.04,
-    maxVisibleDistance: 82,
-    motion: { wind: 0.95, bend: 0.2, bendRadius: 1.12 },
-  }));
+    heightScale: 1.02,
+    depthScale: 1.02,
+    maxVisibleDistance: 102,
+    bladeTextureStrength: 0.24,
+    motion: { wind: 0.94, bend: 0.2, bendRadius: 1.1 },
+  });
   return {
     zoneId,
     stream: false,
@@ -164,7 +181,7 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         textureHeight: 512,
       },
     ],
-    dryGrassPatches: dryGrassLayers,
+    dryGrassPatches: [dryGrassLayer],
     flora: [
       {
         id: `${idPrefix}-lagoon-saltgrass`,
@@ -172,10 +189,10 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         sink: 0.13,
         castShadow: false,
         motion: { wind: 0.9, bend: 0.28, bendRadius: 1.1 },
-        items: scatter(`${idPrefix}-lagoon-saltgrass`, 18, 321, {
-          minX: -42, maxX: 42, minZ: -16, maxZ: 26, scale: [0.1, 0.19], maxGrade: 0.8,
+        items: varyScatterTransforms(scatter(`${idPrefix}-lagoon-saltgrass`, 112, 321, {
+          minX: -42, maxX: 42, minZ: -16, maxZ: 28, scale: [0.08, 0.16], maxGrade: 0.8,
           accept: (biome, x, z) => lagoonEdge(biome, x, z) && notTrail(x, z, 3.3),
-        }),
+        }), 321, { width: [0.72, 1.24], height: [0.8, 1.16], depth: [0.76, 1.2], maxLean: 0.025 }),
       },
       {
         id: `${idPrefix}-sesuvium-mats`,
@@ -184,10 +201,34 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         castShadow: false,
         ySquash: 0.28,
         motion: { wind: 0.38, bend: 0.12, bendRadius: 1.0 },
-        items: scatter(`${idPrefix}-sesuvium`, 7, 333, {
-          minX: -40, maxX: 34, minZ: 5, maxZ: 34, scale: [1.6, 2.7], maxGrade: 0.7,
-          accept: (biome, x, z) => dryGround(biome) && cormorantTrailDistance(x, z) > 5.2,
-        }),
+        items: varyScatterTransforms(scatter(`${idPrefix}-sesuvium`, 32, 333, {
+          minX: -40, maxX: 38, minZ: 2, maxZ: 35, scale: [1.1, 2.1], maxGrade: 0.7,
+          accept: (biome, x, z) => dryGround(biome)
+            && cormorantTrailDistance(x, z) > 5.2
+            && cormorantLagoonField(x, z) > 1.32,
+        }), 333, { width: [0.82, 1.2], height: [0.82, 1.08], depth: [0.8, 1.18], maxLean: 0.018 }),
+      },
+      {
+        id: `${idPrefix}-saltbush-cryptocarpus-a`,
+        label: 'Monte salado / Cryptocarpus pyriformis',
+        path: `${NATURE}runtime-saltbush-1.glb`,
+        sink: 0.055,
+        castShadow: false,
+        tint: '#74805b',
+        tintStrength: 0.22,
+        motion: { wind: 0.72, bend: 0.16, bendRadius: 1.28 },
+        items: saltbush.filter((_, index) => index % 2 === 0),
+      },
+      {
+        id: `${idPrefix}-saltbush-cryptocarpus-b`,
+        label: 'Monte salado / Cryptocarpus pyriformis',
+        path: `${NATURE}runtime-saltbush-2.glb`,
+        sink: 0.055,
+        castShadow: false,
+        tint: '#687650',
+        tintStrength: 0.18,
+        motion: { wind: 0.68, bend: 0.15, bendRadius: 1.3 },
+        items: saltbush.filter((_, index) => index % 2 === 1),
       },
       {
         id: `${idPrefix}-lagoon-mangroves`,
@@ -197,7 +238,7 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         tint: '#66834f',
         tintStrength: 0.14,
         motion: { wind: 0.28, bend: 0.045, bendRadius: 2.4 },
-        items: scatter(`${idPrefix}-mangrove-fringe`, 5, 403, {
+        items: scatter(`${idPrefix}-mangrove-fringe`, 7, 403, {
           minX: -38, maxX: 36, minZ: -13, maxZ: 12, scale: [0.22, 0.36], maxGrade: 0.9,
           accept: (biome, x, z) => lagoonEdge(biome, x, z)
             && notTrail(x, z, 8.5)
@@ -211,7 +252,7 @@ function buildCormorantBayEcologyForZone(zoneId, idPrefix) {
         sink: 0.02,
         tint: '#c7b998',
         tintStrength: 0.44,
-        items: scatter(`${idPrefix}-driftwood-shell-line`, 5, 367, {
+        items: scatter(`${idPrefix}-driftwood-shell-line`, 7, 367, {
           minX: -44, maxX: 28, minZ: 8, maxZ: 29, scale: [0.18, 0.42], maxGrade: 0.72,
           accept: (biome, x, z) => dryGround(biome) && cormorantTrailDistance(x, z) > 5,
         }),

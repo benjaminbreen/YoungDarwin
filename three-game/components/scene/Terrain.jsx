@@ -204,7 +204,7 @@ export function Terrain({ segmentCap = null }) {
         mist: weatherEnv.mistAmount,
         rain: rainWetness,
         lightDim: weatherEnv.lightDim,
-        moonFraction: sky.moon_phase.fraction,
+        moonFraction: sky.moonlight,
         underwaterAmount: store.underwaterCamera?.amount || 0,
       });
       shader.uniforms.uCausticsTime.value = clock.elapsedTime;

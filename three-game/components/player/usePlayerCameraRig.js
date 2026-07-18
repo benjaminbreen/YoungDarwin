@@ -6,7 +6,11 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { CAMERA, SPRINT, SWIM_POLISH } from './playerConfig';
 import { WATER_LEVEL } from '../../world/water';
-import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../../world/specimenRuntime';
+import {
+  getSpecimenRuntimeBounds,
+  getSpecimenRuntimePoses,
+  resolveSpecimenFrameHint,
+} from '../../world/specimenRuntime';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
@@ -41,6 +45,7 @@ export function usePlayerCameraRig() {
     pitch: 0.18,
     zoom: 1,
     manualUntil: 0,
+    openingYawPending: false,
   });
   const shoulderPivotRef = useRef(null);
   const swimCameraRef = useRef(0);
@@ -114,6 +119,7 @@ export function usePlayerCameraRig() {
     examineFocus: new THREE.Vector3(),
     examineEye: new THREE.Vector3(),
     examineLook: new THREE.Vector3(),
+    examineRight: new THREE.Vector3(),
   }), []);
 
   const updatePointerNdc = useCallback(event => {
@@ -216,11 +222,12 @@ export function usePlayerCameraRig() {
         lastPointerXRef.current = event.clientX;
         lastPointerYRef.current = event.clientY;
         const speed = dragPointerTypeRef.current === 'touch' ? 0.006 : 0.0045;
+        const verticalSpeed = speed * 1.35;
         examineOrbitRef.current.yaw -= dx * speed;
         examineOrbitRef.current.pitch = THREE.MathUtils.clamp(
-          examineOrbitRef.current.pitch - dy * speed,
-          -0.12,
-          0.78,
+          examineOrbitRef.current.pitch - dy * verticalSpeed,
+          -0.85,
+          1.32,
         );
         examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
         return;
@@ -616,34 +623,45 @@ export function usePlayerCameraRig() {
       // view on narrow portrait screens as well as desktop.
       const liveFocus = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(examineSession.actorId);
       const focus = liveFocus || examineSession.focus;
+      const focusTerrainY = collisionAdapter.terrainHeight(focus.x, focus.z);
+      const focusY = Math.max(
+        Number.isFinite(focus.y) ? focus.y : focusTerrainY,
+        Number.isFinite(focusTerrainY) ? focusTerrainY + 0.04 : focus.y,
+      );
       const authoredHint = examineSession.frameHint || { height: 0.8, radius: 0.6 };
       const renderedBounds = getSpecimenRuntimeBounds(rigStoreState.currentZoneId)?.get(examineSession.actorId);
-      const hint = renderedBounds
-        ? { ...authoredHint, ...renderedBounds, closeup: false }
-        : authoredHint;
-      const centerOffset = hint.closeup
-        ? Math.max(0.015, hint.height * 0.5)
-        : Math.max(0.12, hint.height * 0.52);
+      const hint = resolveSpecimenFrameHint(authoredHint, renderedBounds);
+      const centerOffset = Number.isFinite(hint.centerY)
+        ? hint.centerY
+        : hint.closeup
+          ? Math.max(0.015, hint.height * 0.5)
+          : Math.max(0.12, hint.height * 0.52);
       const center = scratch.examineFocus.set(
         focus.x,
-        focus.y + centerOffset,
+        focusY + centerOffset,
         focus.z,
       );
       const sessionKey = `${rigStoreState.currentZoneId}:${examineSession.actorId}:${examineSession.openedAt || 0}`;
       const orbit = examineOrbitRef.current;
       if (orbit.sessionKey !== sessionKey) {
-        const cameraDx = camera.position.x - center.x;
-        const cameraDz = camera.position.z - center.z;
-        const cameraPlanarDistance = Math.hypot(cameraDx, cameraDz);
-        const fallbackDx = playerPosition.x - center.x;
-        const fallbackDz = playerPosition.z - center.z;
+        // Start from the player's side of the subject. The gameplay camera can
+        // still be easing from a zone transition when examination opens; using
+        // that stale world position can place the first orbit under terrain.
+        let openingDx = playerPosition.x - center.x;
+        let openingDz = playerPosition.z - center.z;
+        if (Math.hypot(openingDx, openingDz) <= 0.05) {
+          openingDx = camera.position.x - center.x;
+          openingDz = camera.position.z - center.z;
+        }
         orbit.sessionKey = sessionKey;
-        orbit.yaw = cameraPlanarDistance > 0.05
-          ? Math.atan2(cameraDx, cameraDz)
-          : Math.atan2(fallbackDx, fallbackDz);
-        orbit.pitch = 0.18;
+        orbit.yaw = Math.atan2(openingDx, openingDz);
+        // Begin level with the specimen. Vertical drag can then deliberately
+        // reveal its upper or lower surfaces instead of imposing a top-down
+        // field-camera angle on every subject.
+        orbit.pitch = 0.015;
         orbit.zoom = 1;
         orbit.manualUntil = now + 1.8;
+        orbit.openingYawPending = true;
       }
       if (!draggingRef.current && now >= orbit.manualUntil) {
         orbit.yaw += delta * 0.045;
@@ -653,11 +671,50 @@ export function usePlayerCameraRig() {
       const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.25, camera.aspect || 1));
       const halfWidth = Math.max(0.025, hint.radius || 0.6);
       const halfHeight = Math.max(0.025, (hint.height || 0.8) * 0.54);
+      const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
+      const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
+      const compactExamineLayout = viewportWidth < 1024;
+      const shortLandscapeLayout = compactExamineLayout
+        && viewportWidth > viewportHeight
+        && viewportHeight <= 600;
+      const sideNotebookLayout = !compactExamineLayout || shortLandscapeLayout;
+      const notebookRatio = shortLandscapeLayout
+        ? 0.52
+        : sideNotebookLayout
+          ? Math.min(472, Math.max(390, viewportWidth * 0.3)) / Math.max(1, viewportWidth)
+          : 0;
+      // Desktop reserves roughly a third of the screen for the notebook;
+      // compact portrait layouts reserve the lower half. Increase the fit
+      // distance so the complete subject remains inside the visible stage,
+      // not merely inside the full canvas behind the UI.
+      const frameMultiplier = shortLandscapeLayout ? 2.35 : sideNotebookLayout ? 1.55 : 2.65;
       const fitDistance = Math.max(
         halfWidth / Math.max(0.08, Math.tan(horizontalFov / 2)),
         halfHeight / Math.max(0.08, Math.tan(verticalFov / 2)),
-      ) * 1.55;
-      const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, 0.16, 10);
+      ) * frameMultiplier;
+      const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, 0.16, 14);
+      const groundClearance = THREE.MathUtils.clamp(halfHeight * 0.55, 0.055, 0.34);
+      if (orbit.openingYawPending) {
+        const preferredYaw = orbit.yaw;
+        const desiredEyeY = center.y + Math.sin(orbit.pitch) * distance;
+        const yawOffsets = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI];
+        let bestYaw = preferredYaw;
+        let bestScore = Number.POSITIVE_INFINITY;
+        yawOffsets.forEach(offset => {
+          const candidateYaw = preferredYaw + offset;
+          const candidateX = center.x + Math.sin(candidateYaw) * distance;
+          const candidateZ = center.z + Math.cos(candidateYaw) * distance;
+          const candidateGroundY = collisionAdapter.terrainHeight(candidateX, candidateZ);
+          const forcedLift = Math.max(0, candidateGroundY + groundClearance - desiredEyeY);
+          const score = forcedLift * 12 + Math.abs(offset) * 0.12;
+          if (score < bestScore) {
+            bestScore = score;
+            bestYaw = candidateYaw;
+          }
+        });
+        orbit.yaw = bestYaw;
+        orbit.openingYawPending = false;
+      }
       const horizontalDistance = Math.cos(orbit.pitch) * distance;
       const eye = scratch.examineEye.set(
         center.x + Math.sin(orbit.yaw) * horizontalDistance,
@@ -667,10 +724,18 @@ export function usePlayerCameraRig() {
       // Low subjects should never push the inspection camera under a beach or
       // hillside as the automatic orbit crosses the uphill side.
       const eyeGroundY = collisionAdapter.terrainHeight(eye.x, eye.z);
-      eye.y = Math.max(eye.y, eyeGroundY + 0.16);
-      const portrait = (camera.aspect || 1) < 0.8;
-      const verticalBias = distance * (portrait ? 0.16 : 0.045);
-      const look = scratch.examineLook.set(center.x, center.y - verticalBias, center.z);
+      eye.y = Math.max(eye.y, eyeGroundY + groundClearance, focusY + groundClearance);
+      const verticalBias = distance * (sideNotebookLayout ? 0 : 0.08);
+      const horizontalBias = sideNotebookLayout
+        // Place the subject at the center of the visible stage rather than
+        // the center of the full canvas hidden beneath the notebook.
+        ? distance * Math.tan(horizontalFov / 2) * notebookRatio
+        : 0;
+      const right = scratch.examineRight.set(Math.cos(orbit.yaw), 0, -Math.sin(orbit.yaw));
+      const look = scratch.examineLook
+        .copy(center)
+        .addScaledVector(right, horizontalBias);
+      look.y = center.y - verticalBias;
       if (!statusLookRef.current) {
         statusLookRef.current = camera.position.clone()
           .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));

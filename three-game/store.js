@@ -49,6 +49,7 @@ import { clampToWalkable, terrainHeight } from './world/terrain';
 import { forageableAllowsMode } from './world/forageables';
 import { getReadableBook } from './books/bookCatalog';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { mergeCropDamageState } from './world/crops/cropDamage';
 import {
   clampNpcEncounterEffects,
   encounterAmbientLine,
@@ -106,6 +107,7 @@ const BASALT_SPECIMEN = baseSpecimens.find(specimen => specimen.id === 'basalt')
 const HAMMER_TOOL = threeTools.find(tool => tool.id === 'hammer') || { id: 'hammer', name: 'Geological Hammer' };
 const HANDS_TOOL = threeTools.find(tool => tool.id === 'hands') || { id: 'hands', name: 'Bare Hands' };
 const SNARE_TOOL = threeTools.find(tool => tool.id === 'snare') || { id: 'snare', name: 'Twine Snare' };
+let carryDropRequestId = 0;
 
 export const threeRuntimeState = {
   playerPose: {
@@ -198,6 +200,7 @@ function healthDamagePatch(state, {
     activeNpcEncounter: null,
     beagleTravelPrompt: null,
     carriedObjectId: null,
+    carryDropRequest: null,
     carryPrompt: null,
   };
 }
@@ -800,6 +803,7 @@ function createSceneSlice() {
     },
     carryPrompt: null,
     carriedObjectId: null,
+    carryDropRequest: null,
     inspectedObject: null,
     inspectedScreenPosition: null,
     beagleTravelPrompt: null,
@@ -826,6 +830,10 @@ function createSceneSlice() {
     // RockField renderer carves out of the matching boulder mesh.
     rockDamage: {},
     harvestedCropIds: [],
+    // Persistent for the current expedition session. Crop renderers remount on
+    // region travel, so damaged vines need a small serializable state record
+    // rather than storing permanent trampling only inside a React component.
+    cropDamageById: {},
     foragedObjectIds: [],
     symsLine: 'Syms waits with labels, twine, and the specimen bag ready.',
   };
@@ -881,6 +889,7 @@ export const useThreeGameStore = create((set, get) => ({
       transition: null,
       edgePrompt: null,
       carriedObjectId: null,
+      carryDropRequest: null,
       carryPrompt: null,
     }));
 
@@ -994,6 +1003,7 @@ export const useThreeGameStore = create((set, get) => ({
       activeNpcEncounter: null,
       carryPrompt: null,
       carriedObjectId: null,
+      carryDropRequest: null,
       examineSession: null,
       readableBookSession: null,
       interiorPrompt: null,
@@ -1539,7 +1549,52 @@ export const useThreeGameStore = create((set, get) => ({
       },
     };
   }),
-  setCarriedObject: carriedObjectId => set({ carriedObjectId }),
+  // Picking up and releasing both invalidate the old per-frame prompt. A
+  // physics prop may complete a requested drop synchronously before React has
+  // rendered the new store value, so keep this state change atomic.
+  setCarriedObject: carriedObjectId => set(state => ({
+    carriedObjectId,
+    carryDropRequest: null,
+    ...(
+      state.carryPrompt?.id === state.carriedObjectId
+      || state.carryPrompt?.id === carriedObjectId
+        ? { carryPrompt: null }
+        : {}
+    ),
+  })),
+  dropCarriedObject: (options = {}) => set(state => {
+    if (!state.carriedObjectId || state.carryDropRequest) return state;
+    const pose = getRuntimePlayerPose();
+    return {
+      carryDropRequest: {
+        id: state.carriedObjectId,
+        requestId: ++carryDropRequestId,
+        zoneId: state.currentZoneId,
+        reason: options.reason || 'manual',
+        mode: options.mode === 'release' ? 'release' : 'place',
+        position: { ...(pose?.position || state.playerPose?.position || INITIAL_PLAYER_POSE.position) },
+        facing: { ...(pose?.facing || state.playerPose?.facing || INITIAL_PLAYER_POSE.facing) },
+      },
+      carryPrompt: null,
+    };
+  }),
+  completeCarryDrop: (objectId, requestId) => set(state => (
+    state.carriedObjectId === objectId
+      && state.carryDropRequest?.id === objectId
+      && state.carryDropRequest.requestId === requestId
+      ? { carriedObjectId: null, carryDropRequest: null, carryPrompt: null }
+      : state
+  )),
+  cancelCarryDrop: (objectId, requestId, message = null) => set(state => (
+    state.carriedObjectId === objectId
+      && state.carryDropRequest?.id === objectId
+      && state.carryDropRequest.requestId === requestId
+      ? {
+          carryDropRequest: null,
+          ...(message ? { message } : {}),
+        }
+      : state
+  )),
   setSpecimenRuntimePosition: (specimenId, position, zoneId = get().currentZoneId) => set(state => {
     const zone = zoneId || get().currentZoneId;
     const currentByZone = state.specimenRuntimePositions[zone] || {};
@@ -1876,6 +1931,25 @@ export const useThreeGameStore = create((set, get) => ({
           broken: existing.broken || broken,
           bites: bite ? [...existing.bites, bite].slice(-12) : existing.bites,
         },
+      },
+    };
+  }),
+  recordCropDamage: ({ cropId, ...impact } = {}) => set(state => {
+    if (!cropId) return {};
+    const previous = state.cropDamageById[cropId];
+    const next = mergeCropDamageState(previous, impact);
+    if (
+      previous
+      && previous.damage === next.damage
+      && previous.bendX === next.bendX
+      && previous.bendZ === next.bendZ
+      && previous.crushed === next.crushed
+      && previous.source === next.source
+    ) return {};
+    return {
+      cropDamageById: {
+        ...state.cropDamageById,
+        [cropId]: next,
       },
     };
   }),
@@ -2471,6 +2545,7 @@ export const useThreeGameStore = create((set, get) => ({
       pushableObstacleOffsets: state.pushableObstacleOffsets,
       carryPrompt: null,
       carriedObjectId: null,
+      carryDropRequest: null,
       selectedSpecimenId: null,
       nearbySpecimenId: null,
       nearbyNpcEncounter: null,

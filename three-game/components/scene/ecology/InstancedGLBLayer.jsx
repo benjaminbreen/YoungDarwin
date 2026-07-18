@@ -140,6 +140,11 @@ function InstancedBucketMesh({
     if (hasItemTints) {
       const base = mesh.material.color;
       items.forEach((item, index) => {
+        if (!item.tint && !tint) {
+          _factor.setRGB(1, 1, 1);
+          mesh.setColorAt(index, _factor);
+          return;
+        }
         _tintColor.set(item.tint || tint || '#ffffff');
         _desired.copy(base).lerp(_tintColor, tintStrength);
         _factor.setRGB(
@@ -188,13 +193,15 @@ export function InstancedGLBLayer({
   sourceLabel = null,
   sourceKind = 'ecology-glb-layer',
   variantMode = null,
+  forceCheapMaterials = false,
 }) {
   const groupRef = useRef(null);
   const bucketRefs = useRef([]);
   const cullStateRef = useRef(createCameraCullState());
   const { scene } = useGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
-  const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const qualityCheapMaterials = useThreeGameStore(state => state.cheapMaterials);
+  const cheapMaterials = forceCheapMaterials || qualityCheapMaterials;
   const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId || `ecology-glb:${path}`,

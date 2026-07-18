@@ -9,8 +9,14 @@ import {
   lavaFlatsScoriaMask,
   lavaFlatsTubeMasks,
 } from '../regions/lavaFlats/path';
+import { LAVA_CACTUS_SPECIES } from './floraSpecies';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
 
 function buildSurfaceLitter() {
   return [buildDryVolcanicLitterLayer({
@@ -108,10 +114,61 @@ function buildPioneerFlora() {
   ];
 }
 
+function buildInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'lava-flats-lava-cactus-pioneers',
+    zoneId: LAVA_FLATS,
+    species: LAVA_CACTUS_SPECIES,
+    runtime: 'lava-cactus',
+    seed: 911,
+    count: 12,
+    bounds: { minX: -46, maxX: 46, minZ: -40, maxZ: 44 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = lavaFlatsPathInfo(x, z);
+      const pioneer = lavaFlatsPioneerMask(x, z);
+      const ridge = lavaFlatsPressureRidgeMask(x, z);
+      const scoria = lavaFlatsScoriaMask(x, z);
+      const tube = lavaFlatsTubeMasks(x, z);
+      const freshRock = Math.max(ridge, scoria, tube.rim);
+      const biomeSuitability = {
+        'black-lava': 1,
+        'lava-shelf': 0.94,
+        'ash-slope': 0.76,
+        trail: 0,
+      }[biome] || 0;
+      return {
+        moisture: clamp01(0.05 + pioneer * 0.17),
+        canopy: 0,
+        exposure: 0.98,
+        disturbance: clamp01(path.path * 0.92 + path.shoulder * 0.28),
+        salinity: 0.03,
+        rockiness: clamp01(0.62 + freshRock * 0.36),
+        biomeSuitability,
+        localSuitability: clamp01(0.6 + freshRock * 0.26 - pioneer * 0.18),
+        excluded: biomeSuitability <= 0
+          || path.distance < path.width * 1.85
+          || pioneer > 0.76
+          || tube.bowl > 0.5,
+      };
+    },
+    placement: {
+      patchCount: 4,
+      patchRadius: [2.8, 5.6],
+      minPatchSeparation: 8,
+      minItemSeparation: 1.65,
+      maxGrade: 0.68,
+    },
+    siteFromItem: item => ({
+      flowerCount: item.tone < 0.5 ? 0 : item.tone < 0.86 ? 1 : 2,
+    }),
+  })];
+}
+
 export function buildLavaFlatsEcology() {
   return {
     zoneId: LAVA_FLATS,
     flora: buildPioneerFlora(),
+    interactiveFlora: buildInteractiveFlora(),
     surfaceLitter: buildSurfaceLitter(),
     rocks: getLavaFlatsRocks(),
     volcanicFormations: [{

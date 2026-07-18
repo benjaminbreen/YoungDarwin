@@ -10,12 +10,18 @@ import { makeZoneScatter, seededRandom } from '../scatter';
 import { getDesolateOutcropRocks } from '../desolateOutcropLayout';
 import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
+import { LAVA_CACTUS_SPECIES } from './floraSpecies';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
 export const DESOLATE_OUTCROP_SWASH_PERIOD = (Math.PI * 2) / 0.5984;
 
 const scatter = (layer, count, seed, opts) => makeZoneScatter(DESOLATE_OUTCROP, layer, count, seed, opts);
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
 
 function buildFlora() {
   const saltbush = scatter('outcrop-saltbush', 5, 71, {
@@ -176,6 +182,57 @@ function buildAmbientWildlife() {
   ];
 }
 
+function buildInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'outcrop-lava-cactus-pioneers',
+    zoneId: DESOLATE_OUTCROP,
+    species: LAVA_CACTUS_SPECIES,
+    runtime: 'lava-cactus',
+    seed: 167,
+    count: 5,
+    bounds: { minX: -17, maxX: 17, minZ: 18, maxZ: 39 },
+    habitatAt: ({ biome, x, z, y }) => {
+      const dry = desolateOutcropDryMask(x, z);
+      const guano = desolateOutcropGuanoMask(x, z);
+      const saddle = desolateOutcropSouthSaddleMask(x, z);
+      const tideShelf = desolateOutcropTideShelfMask(x, z);
+      const tidepool = desolateOutcropTidepoolMask(x, z);
+      const biomeSuitability = {
+        'dry-basalt': 1,
+        'red-cinder': 0.9,
+        'guano-rock': 0.08,
+        'wet-basalt': 0,
+      }[biome] || 0;
+      return {
+        moisture: clamp01(0.06 + tideShelf * 0.14),
+        canopy: 0,
+        exposure: 0.98,
+        disturbance: 0.03,
+        salinity: 0.1,
+        rockiness: clamp01(0.72 + dry * 0.25),
+        biomeSuitability,
+        localSuitability: clamp01(0.38 + dry * 0.36 + saddle * 0.26),
+        excluded: biomeSuitability <= 0
+          || y < -0.03
+          || dry < 0.3
+          || guano > 0.18
+          || tideShelf > 0.3
+          || tidepool > 0.16,
+      };
+    },
+    placement: {
+      patchCount: 2,
+      patchRadius: [2.2, 4.2],
+      minPatchSeparation: 6.5,
+      minItemSeparation: 1.5,
+      maxGrade: 0.66,
+    },
+    siteFromItem: item => ({
+      flowerCount: item.tone < 0.62 ? 0 : 1,
+    }),
+  })];
+}
+
 function buildCrabProps(rocks) {
   return rocks
     .filter(rock => rock.y > -0.65 && rock.y < 0.44 && desolateOutcropTideShelfMask(rock.x, rock.z) > 0.16)
@@ -203,6 +260,7 @@ export function buildDesolateOutcropEcology() {
   return {
     zoneId: DESOLATE_OUTCROP,
     flora: buildFlora(),
+    interactiveFlora: buildInteractiveFlora(),
     surfaceLitter: buildSurfaceLitter(),
     ambientWildlife: buildAmbientWildlife(),
     rocks,

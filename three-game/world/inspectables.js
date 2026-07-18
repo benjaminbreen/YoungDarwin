@@ -19,20 +19,23 @@ export const inspectableCatalog = {
   opuntia: { id: 'opuntia', kind: 'plant', englishName: 'Large Opuntia', latinName: 'Opuntia megasperma group', category: 'Plant', rarity: 'uncommon' },
   candelabra_cactus: { id: 'candelabra_cactus', kind: 'plant', englishName: 'Candelabra cactus', latinName: 'Jasminocereus thouarsii group', category: 'Plant', rarity: 'uncommon' },
   galapagos_cotton: { id: 'galapagos_cotton', kind: 'plant', englishName: 'Galapagos cotton', latinName: 'Gossypium darwinii', category: 'Plant', rarity: 'endemic' },
-  flat_cactus: { id: 'flat_cactus', kind: 'plant', englishName: 'Prickly pear cactus', latinName: 'Opuntia', category: 'Plant', rarity: 'uncommon' },
   shrub: { id: 'shrub', kind: 'plant', englishName: 'Coastal shrub', latinName: 'dry-zone shrub', category: 'Plant', rarity: 'common' },
-  mangrove: { id: 'mangrove', kind: 'plant', englishName: 'Island mangrove seedling', latinName: 'Rhizophora sp.', category: 'Plant', rarity: 'uncommon' },
+  mangrove: { id: 'mangrove', kind: 'plant', englishName: 'Coastal mangrove', latinName: 'mangrove spp.', category: 'Plant', rarity: 'uncommon' },
+  red_mangrove: { id: 'red_mangrove', kind: 'plant', englishName: 'Red mangrove', latinName: 'Rhizophora mangle', category: 'Plant', rarity: 'uncommon' },
   saltbush: { id: 'saltbush', kind: 'plant', englishName: 'Monte salado', latinName: 'Cryptocarpus pyriformis', category: 'Plant', rarity: 'common' },
   croton: { id: 'croton', kind: 'plant', englishName: 'Chala', latinName: 'Croton scouleri', category: 'Plant', rarity: 'common' },
   darwiniothamnus: { id: 'darwiniothamnus', kind: 'plant', englishName: DARWINIOTHAMNUS_SPECIES.commonName, latinName: DARWINIOTHAMNUS_SPECIES.scientificName, category: 'Plant', rarity: 'endemic' },
   scalesia: { id: 'scalesia', kind: 'plant', englishName: 'Floreana scalesia', latinName: 'Scalesia villosa', category: 'Plant', rarity: 'endemic' },
+  scalesia_pedunculata: { id: 'scalesia_pedunculata', kind: 'plant', englishName: 'Scalesia tree', latinName: 'Scalesia pedunculata', category: 'Plant', rarity: 'endemic' },
   palo_santo: { id: 'palo_santo', kind: 'plant', englishName: 'Palo santo', latinName: 'Bursera graveolens', category: 'Plant', rarity: 'uncommon' },
   highland_ground_plants: { id: 'highland_ground_plants', kind: 'plant', englishName: 'Highland ground plants', latinName: 'humid highland herbs', category: 'Plant', rarity: 'common' },
   highland_grass: { id: 'highland_grass', kind: 'plant', englishName: 'Highland grass', latinName: 'Poaceae', category: 'Plant', rarity: 'common' },
   castela: { id: 'castela', kind: 'plant', englishName: 'Galapagos bitterbush', latinName: 'Castela galapageia', category: 'Plant', rarity: 'endemic' },
   paga_paga: { id: 'paga_paga', kind: 'plant', englishName: 'Paga-paga', latinName: 'Pisonia floribunda', category: 'Plant', rarity: 'endemic' },
-  saltgrass: { id: 'saltgrass', kind: 'plant', englishName: 'Saltgrass', latinName: 'Distichlis spicata', category: 'Plant', rarity: 'scarce' },
-  sesuvium: { id: 'sesuvium', kind: 'plant', englishName: 'Sea purslane', latinName: 'Sesuvium portulacastrum', category: 'Plant', rarity: 'scarce' },
+  saltgrass: { id: 'saltgrass', kind: 'plant', englishName: 'Seashore dropseed', latinName: 'Sporobolus virginicus', category: 'Plant', rarity: 'common' },
+  sesuvium: { id: 'sesuvium', kind: 'plant', englishName: 'Galápagos carpetweed', latinName: 'Sesuvium spp.', category: 'Plant', rarity: 'scarce' },
+  galapagos_fern: { id: 'galapagos_fern', kind: 'plant', englishName: 'Floreana resurrection fern', latinName: 'Pleopeltis polypodioides', category: 'Plant', rarity: 'uncommon' },
+  highland_flowering_shrub: { id: 'highland_flowering_shrub', kind: 'plant', englishName: 'Floreana highland flowering shrub', latinName: 'identity unresolved', category: 'Plant', rarity: 'uncommon' },
   driftwood: { id: 'driftwood', kind: 'plant', englishName: 'Driftwood', latinName: 'weathered shore timber', category: 'Shore sign', rarity: 'uncommon' },
   shore_litter: { id: 'shore_litter', kind: 'shore-sign', englishName: 'Shell and stone strandline', latinName: 'littoral shell and coral fragments', category: 'Shore sign', rarity: 'common' },
   turret_shell: { id: 'turret_shell', kind: 'specimen', englishName: 'Turret shell', latinName: 'Turritellidae / Cerithioidea shore shell', category: 'Marine invertebrate sign', rarity: 'uncommon' },
@@ -110,22 +113,30 @@ export function catalogToInspectable(catalogId, worldPosition = null, overrides 
 export function inspectableTypeForEcologyLayer(layerId) {
   if (!layerId) return 'shrub';
   if (layerId.includes('saltbush')) return 'saltbush';
+  if (layerId.includes('mangrove-root')
+    || layerId.includes('mangrove-hero')
+    || layerId.includes('lagoon-mangroves')
+    || layerId.includes('far-mangrove')) return 'red_mangrove';
   if (layerId.includes('mangrove')) return 'mangrove';
-  if (layerId.includes('dry-grass')) return 'dry_grass';
+  if (layerId.includes('dry-grass') || layerId.includes('grass-patch') || layerId.includes('olive-grass')) return 'dry_grass';
   if (layerId.includes('croton')) return 'croton';
   if (layerId.includes('darwiniothamnus')) return 'darwiniothamnus';
+  if (layerId.includes('scalesia-pedunculata') || layerId.includes('generated-scalesia')) return 'scalesia_pedunculata';
   if (layerId.includes('scalesia')) return 'scalesia';
   if (layerId.includes('castela') || layerId.includes('bitterbush')) return 'castela';
   if (layerId.includes('palo-santo')) return 'palo_santo';
   if (layerId === 'ground-plants' || layerId === 'wet-ground-plants') return 'highland_ground_plants';
   if (layerId === 'highland-grass') return 'highland_grass';
   if (layerId === 'ez-low-upland-trees') return 'paga_paga';
-  if (layerId === 'saltgrass') return 'saltgrass';
-  if (layerId === 'sesuvium') return 'sesuvium';
-  if (layerId === 'driftwood') return 'driftwood';
-  if (layerId === 'opuntia') return 'opuntia';
+  if (layerId.includes('saltgrass')) return 'saltgrass';
+  if (layerId.includes('sesuvium')) return 'sesuvium';
+  if (layerId.includes('fern')) return 'galapagos_fern';
+  if (layerId.includes('purple-shrub')) return 'highland_flowering_shrub';
+  if (layerId.includes('driftwood')) return 'driftwood';
+  if (layerId.includes('opuntia')) return 'opuntia';
   if (layerId.includes('candelabra') || layerId.includes('jasminocereus')) return 'candelabra_cactus';
-  if (layerId.includes('galapagos-cotton')) return 'galapagos_cotton';
-  if (layerId === 'manzanillo') return 'manzanillo';
+  if (layerId.includes('galapagos-cotton') || layerId.includes('penal-cotton')) return 'galapagos_cotton';
+  if (layerId.includes('drybrush') || layerId.includes('terrace-scrub')) return 'dry_scrub';
+  if (layerId.includes('manzanillo')) return 'manzanillo';
   return 'shrub';
 }

@@ -7,6 +7,8 @@ const SPECIES_ALIASES = {
   green_turtle: 'greenturtle',
   marineIguana: 'marineiguana',
   marine_iguana: 'marineiguana',
+  largeGroundFinch: 'largegroundfinch',
+  large_ground_finch: 'largegroundfinch',
   mediumGroundFinch: 'mediumgroundfinch',
   medium_ground_finch: 'mediumgroundfinch',
   american_flamingo: 'flamingo',
@@ -39,6 +41,41 @@ export function normalizeWildlifeId(input) {
 }
 
 export const wildlifeCatalog = {
+  largegroundfinch: {
+    id: 'largegroundfinch',
+    englishName: 'Large ground finch',
+    latinName: 'Geospiza magnirostris',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    render: { type: 'proceduralFinch', variant: 'largeGround' },
+    collisionRadius: 0.32,
+    interactionHeight: 0.24,
+    behavior: {
+      controller: 'ground',
+      habitatRadiusX: 6.2,
+      habitatRadiusZ: 4.2,
+      walkSpeed: 0.27,
+      fleeSpeed: 1.85,
+      patrolRate: 0.5,
+      alertRadius: 4.8,
+      panicRadius: 1.3,
+      hammerAlertRadius: 8.5,
+      bobAmount: 0.024,
+      groundOffset: 0.04,
+      turnRate: 13,
+      idleClip: 'headTilt',
+      walkClip: 'hop',
+      runClip: 'hop',
+      feedClip: 'peck',
+      movementStyle: 'hop',
+      contactReaction: 'quick-hop-away',
+      contactAlertRadius: 3.8,
+      contactReactionDuration: 1.15,
+      startleDuration: 0.9,
+      startleSpeedMultiplier: 0.9,
+      startleCooldown: 2.9,
+    },
+  },
   mediumgroundfinch: {
     id: 'mediumgroundfinch',
     assetId: 'mediumGroundFinch',
@@ -742,6 +779,10 @@ export function getWildlifeCarryProfile(input) {
 
 export function getWildlifeAssetId(input) {
   return getWildlifeSpecies(input)?.assetId || null;
+}
+
+export function getWildlifeRenderProfile(input) {
+  return getWildlifeSpecies(input)?.render || null;
 }
 
 export function getWildlifeCollisionRadius(input) {

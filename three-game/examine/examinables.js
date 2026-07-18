@@ -78,7 +78,10 @@ export function examinableFromSpecimen(specimen) {
     subtitle: specimen.habitat ? String(specimen.habitat).split(',')[0].trim() : '',
     description: specimen.description || '',
     details: specimen.details || [],
-    uncertainties: ['Species not yet identified.', 'Further observation or collection may be required.'],
+    uncertainties: [
+      'Field identification remains provisional.',
+      'Further observation or collection may revise it.',
+    ],
     collectable: true,
     collectVerb: 'Collect sample',
     frameHint: specimenFrameHint(specimen),

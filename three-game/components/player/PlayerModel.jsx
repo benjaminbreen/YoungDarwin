@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
-import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
+import { DEFAULT_PLAYER_MODEL_ASSET_ID, getModelAsset } from '../../modelAssets';
 import { ModelAsset } from '../assets/ModelAsset';
 import { PLAYER, SPRINT, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
@@ -556,6 +556,7 @@ const HAND_TOOLS = [
 
 const PLAYER_MODEL_CYCLE = Array.from(new Set([
   DEFAULT_PLAYER_MODEL_ASSET_ID,
+  'darwin5BlinkPreview',
   'darwin4',
   'darwin',
   'darwinCandidate2',
@@ -1033,7 +1034,8 @@ export function NaturalistModel({
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
 }) {
-  const [modelAssetId, setModelAssetId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
+  const [selectedModelAssetId, setSelectedModelAssetId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
+  const modelAssetId = getModelAsset(selectedModelAssetId)?.playerProfile || selectedModelAssetId;
   const [damageFlash, setDamageFlash] = useState(0);
   const [modelScene, setModelScene] = useState(null);
   const previousHealth = useRef(health);
@@ -1054,25 +1056,26 @@ export function NaturalistModel({
   useEffect(() => {
     if (motionRef?.current) motionRef.current.modelAssetId = modelAssetId;
     if (typeof window === 'undefined') return undefined;
-    window.__darwinPlayerModel = modelAssetId;
-    // Hotkey 9 cycles the stable player models for A/B comparison. The Tripo
-    // candidate stays in the manifest for dev inspection, but is excluded here
-    // because its texture pass is not production-ready.
+    window.__darwinPlayerModel = selectedModelAssetId;
+    // Hotkey 9 cycles stable models plus explicitly scoped visual-review
+    // candidates. The selected asset may inherit a production behavior profile.
     const cycle = PLAYER_MODEL_CYCLE;
     const onKeyDown = (event) => {
       if (event.code !== 'Digit9' && event.key !== '9') return;
       if (event.repeat) return;
-      setModelAssetId(current => {
+      setSelectedModelAssetId(current => {
         const idx = cycle.indexOf(current);
         const next = cycle[(idx + 1) % cycle.length];
         window.__darwinPlayerModel = next;
-        if (motionRef?.current) motionRef.current.modelAssetId = next;
+        if (motionRef?.current) {
+          motionRef.current.modelAssetId = getModelAsset(next)?.playerProfile || next;
+        }
         return next;
       });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [modelAssetId, motionRef]);
+  }, [modelAssetId, motionRef, selectedModelAssetId]);
 
   useFrame(({ clock }) => {
     if (damageFlashRef.current.startedAt === null) {
@@ -1402,8 +1405,8 @@ export function NaturalistModel({
   return (
     <>
       <ModelAsset
-        key={modelAssetId}
-        id={modelAssetId}
+        key={selectedModelAssetId}
+        id={selectedModelAssetId}
         animationSelector={selectAnimation}
         overlaySelector={selectUpperBodyOverlay}
         damageFlash={damageFlash}

@@ -462,6 +462,7 @@ export function PlayerController({
   const setPlayerPose = useThreeGameStore(state => state.setPlayerPose);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
+  const dropCarriedObject = useThreeGameStore(state => state.dropCarriedObject);
   const viewMode = useThreeGameStore(state => state.viewMode);
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
@@ -2650,7 +2651,7 @@ export function PlayerController({
       const wadedIn = !wasAirborne.current && waterDepthHere > swimConfig.enterDepth;
       const fellIn = wasAirborne.current && p.y <= WATER_LEVEL - 0.18 && waterDepthHere > swimConfig.enterDepth;
       if (wadedIn || fellIn) {
-        if (carriedObjectId) setCarriedObject(null);
+        if (carriedObjectId) dropCarriedObject({ reason: 'swimming', mode: 'release' });
         const jumpWaterEntryIntent = jumpState.current.waterEntryIntent;
         swim.active = true;
         swim.enteredAt = now;

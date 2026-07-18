@@ -53,7 +53,8 @@ configuration is `three-game/world/regions/postScrubRise/pbrMaterial.js`.
   `pow(..., 2.2)` decode in custom GLSL.
 - Pack each layer's normal X, normal Y, roughness, and height into one lossless
   linear NRH texture: `R=normal X`, `G=normal Y`, `B=roughness`, `A=height`.
-  Generate the current packs with `node scripts/build-floreana-nrh-textures.mjs`.
+  Generate the current packs and optimized dry/highland albedos with
+  `npm run asset:terrain-pbr`.
 - Register the packed path as `nrh` in `FLOREANA_PBR_TEXTURES` and load it with
   `loadPackedPbrTerrainSet()`. Packing keeps a four-layer material comfortably
   below the WebGL sampler budget.
@@ -69,9 +70,19 @@ configuration is `three-game/world/regions/postScrubRise/pbrMaterial.js`.
 
 The shared factory accepts four roles: `coastal`, `litter`, `basalt`, and
 `cinder`, plus the region's path points, splat bounds, minimum path width, and a
-shader cache key. A region should own its texture choices and calibrated
-roughness ranges. Preserve existing analytic path and biome masks; do not move
-region-specific geography into the shared material module.
+shader cache key. Optional region-owned mask and weight hooks can redirect those
+same four packed layers without adding samplers. A region should own its texture
+choices and calibrated roughness ranges. Preserve existing analytic path and
+biome masks; do not move region-specific geography into the shared material
+module.
+
+Northern Highlands is the transition-zone example. It combines dry scrub,
+packed green grass, weathered highland basalt, and packed loam in the same eight
+terrain samplers as Scrub Rise. Its moisture mask shifts the existing weights
+toward grass, while its single sweet-potato plot redirects the soil weight to
+loam and uses authored terrain furrows. Grass and loam NRH maps are 768px because
+their small world-space repetition preserves close relief while using about 44%
+less GPU memory than separate 1K normal/roughness/height maps.
 
 Use this factory for compatible dry, path-led regions. Coastal, wetland, reef,
 or pathless materials may reuse the packed-channel loader and normal/roughness
@@ -143,6 +154,15 @@ spaced to prevent collider overlap, and consumed by `PricklyPearField` without
 changing the existing Post Office Bay or Rocky Clearing sites. Keep interactive
 site counts deliberately lower than decorative flora counts because one plant
 may own several rigid bodies and per-frame behaviors.
+
+Lava cactus uses the same ownership boundary with one extra interaction bridge:
+`LavaCactusField` owns every visible column, collider, flower, and broken sample,
+while the legacy `cactus` specimen record follows the nearest live clump for the
+normal examination and field-note UI. The old specimen mesh must therefore stay
+hidden wherever the field has sites. Lava Flats is the strongest reference
+habitat; sparse layers on Post Scrub Rise, Desolate Outcrop, and Rocky Clearing
+reuse the species profile but provide region-owned masks for exposed rock,
+paths, moisture, guano, dense cover, and cave thresholds.
 
 Post Office Bay is the reference for a coordinated multi-species gradient. One
 region-owned habitat adapter derives inland distance from the authored coastline

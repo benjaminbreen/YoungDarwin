@@ -15,6 +15,11 @@ import {
   DARWINIOTHAMNUS_VARIANT_MODE,
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
+import { PALO_SANTO_SPECIES, PLEOPELTIS_POLYPODIOIDES_SPECIES } from './floraSpecies';
+import {
+  buildProceduralFloraLayer,
+  buildProceduralInteractiveFloraLayer,
+} from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
@@ -216,17 +221,92 @@ function buildGeneratedTrees() {
         accept: (biome, x, z) => forestAccept(biome, x, z) && westernHighlandsCanopyMask(x, z) > 0.42,
       }),
     },
-    {
-      id: 'palo-santo-edge',
-      variants: generatedTreePresets.paloSanto.variants,
-      sink: 0.08,
-      motion: { wind: 0.44, bend: 0.1, bendRadius: 2.2 },
-      items: scatter('ez-edge-tree', 6, 347, {
-        minX: -48, maxX: 48, minZ: -43, maxZ: 44, scale: [0.82, 1.35], maxGrade: 0.6,
-        accept: (biome, x, z) => nearAnyCluster(edgeClusters, x, z, 14) && notOnTrail(x, z, 5.4),
-      }),
-    },
   ];
+}
+
+function buildInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'western-highlands-palo-santo-edge',
+    zoneId: W_HIGH,
+    species: PALO_SANTO_SPECIES,
+    runtime: 'palo-santo',
+    seed: 347,
+    count: 4,
+    bounds: { minX: -48, maxX: 48, minZ: -43, maxZ: 44 },
+    habitatAt: ({ biome, x, z }) => {
+      const canopy = westernHighlandsCanopyMask(x, z);
+      const wet = westernHighlandsWetHollowMask(x, z);
+      const trail = westernHighlandsTrailInfluence(x, z, 1.2, 6.4);
+      const edge = nearAnyCluster(edgeClusters, x, z, 14);
+      return {
+        moisture: Math.min(1, 0.25 + wet * 0.45 + canopy * 0.16),
+        canopy: Math.min(1, 0.08 + canopy * 0.54),
+        exposure: Math.max(0, Math.min(1, 0.78 - canopy * 0.38)),
+        disturbance: Math.min(1, trail),
+        salinity: 0,
+        rockiness: 0.26,
+        biomeSuitability: biome === 'mud-trail' ? 0 : edge ? 0.92 : 0,
+        localSuitability: edge ? Math.max(0, 1 - canopy * 0.7 - wet * 0.5) : 0,
+        excluded: !edge || !notOnTrail(x, z, 6.2) || wet > 0.42 || canopy > 0.58,
+      };
+    },
+    placement: {
+      patchCount: 2,
+      patchRadius: [7, 11],
+      minPatchSeparation: 18,
+      minItemSeparation: 9,
+      maxGrade: 0.54,
+    },
+    siteFromItem: item => ({ leafiness: 0.22 + item.tone * 0.34 }),
+  })];
+}
+
+function buildProceduralFlora() {
+  return [buildProceduralFloraLayer({
+    id: 'western-highlands-resurrection-fern',
+    zoneId: W_HIGH,
+    species: PLEOPELTIS_POLYPODIOIDES_SPECIES,
+    asset: { path: `${NATURE}runtime-galapagos-fern.glb` },
+    seed: 367,
+    count: 64,
+    bounds: { minX: -45, maxX: 45, minZ: -40, maxZ: 42 },
+    habitatAt: ({ biome, x, z }) => {
+      const wet = westernHighlandsWetHollowMask(x, z);
+      const canopy = westernHighlandsCanopyMask(x, z);
+      const clearing = westernHighlandsClearingMask(x, z);
+      const trail = westernHighlandsTrailInfluence(x, z, 1.2, 5.4);
+      const biomeSuitability = {
+        'wet-hollow': 1,
+        'fern-clearing': 0.98,
+        'humid-understory': 0.9,
+        'scalesia-forest': 0.76,
+      }[biome] || 0;
+      return {
+        excluded: biomeSuitability <= 0 || trail > 0.34,
+        moisture: Math.min(1, 0.48 + wet * 0.44 + canopy * 0.12),
+        canopy: Math.min(1, 0.18 + canopy * 0.68),
+        exposure: Math.max(0, Math.min(1, 0.58 - canopy * 0.38 - wet * 0.18 + clearing * 0.08)),
+        disturbance: Math.min(1, trail),
+        salinity: 0,
+        rockiness: Math.min(1, 0.18 + wet * 0.16 + clearing * 0.12),
+        biomeSuitability,
+      };
+    },
+    placement: {
+      patchCount: 8,
+      patchRadius: [1.8, 4.2],
+      minPatchSeparation: 5.5,
+      minItemSeparation: 0.55,
+      maxGrade: 0.72,
+    },
+    render: {
+      sink: 0.055,
+      tint: '#506b45',
+      tintStrength: 0.18,
+      castShadow: false,
+      motion: { wind: 0.48, bend: 0.12, bendRadius: 1.1 },
+    },
+  })];
 }
 
 function trailMarkerProps() {
@@ -247,9 +327,12 @@ function trailMarkerProps() {
 
 export function buildWesternHighlandsEcology() {
   const rocks = getWesternHighlandsRocks();
+  const interactiveFlora = buildInteractiveFlora();
   return {
     zoneId: W_HIGH,
     flora: buildFlora(),
+    proceduralFlora: buildProceduralFlora(),
+    interactiveFlora,
     generatedTrees: buildGeneratedTrees(),
     rocks,
     props: trailMarkerProps(),

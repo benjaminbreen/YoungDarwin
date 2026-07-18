@@ -4,30 +4,36 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
-import { inquiryExamples } from '../examine/examinables';
-import { GoldDivider } from './expedition/ExpeditionPanel';
+import styles from './ExamineView.module.css';
 
-// The diegetic examination screen: the camera has dollied in on the subject,
-// the clock is paused, and typography sits directly on the graded live shot —
-// no panels, matching the status view's language. Left column is the
-// LLM-backed field inquiry; right column collects the facts inquiry surfaces;
-// the bottom block is the player's own written field note — saving it
-// completes the examination and unlocks collecting the type.
+// A live specimen stage with one coherent notebook. The camera continues to
+// own the subject view; this layer owns inquiry, evidence, authorship, and the
+// explicit decision to collect after an observation has been recorded.
 
-const EXPEDITION_START = Date.UTC(1835, 8, 17); // day 1 = Sep 17, 1835
+const EXPEDITION_START = Date.UTC(1835, 8, 17);
 const MS_PER_DAY = 86400000;
 
-// Legacy globals.css paints all text inputs parchment with heavy padding;
-// these inline styles win the cascade and keep the fields to a single quiet
-// rule of gold under the text.
-const QUILL_INPUT_STYLE = {
-  backgroundColor: 'transparent',
-  border: 'none',
-  borderBottom: '1px solid rgba(201,163,95,0.4)',
-  borderRadius: 0,
-  boxShadow: 'none',
-  color: '#efe2c4',
-  padding: '0.3rem 0.05rem',
+const PROCEDURES = {
+  Animal: [
+    ['Estimate size', 'Estimate how large it is.'],
+    ['Observe movement', 'Describe its movement and response to my approach.'],
+    ['Inspect condition', 'Inspect its condition for signs of injury, age, or distress.'],
+  ],
+  Plant: [
+    ['Measure spread', 'Measure the width and height of the plant.'],
+    ['Inspect growth', 'Describe its leaves, stems, and seed heads.'],
+    ['Look for grazing', 'Look for signs that animals have fed on it.'],
+  ],
+  Mineral: [
+    ['Estimate size', 'Measure the specimen at its greatest extent.'],
+    ['Inspect texture', 'Describe its color, grain, and surface texture.'],
+    ['Test surface', 'Test the surface carefully and describe what happens.'],
+  ],
+  Item: [
+    ['Inspect material', 'Describe the material and its present condition.'],
+    ['Read markings', 'Read any names, dates, addresses, or other markings.'],
+    ['Estimate age', 'What suggests how old this object may be?'],
+  ],
 };
 
 function expeditionDate(day) {
@@ -39,82 +45,134 @@ function expeditionDate(day) {
   }).format(new Date(EXPEDITION_START + Math.max(0, (day || 1) - 1) * MS_PER_DAY));
 }
 
-function chatAge(at) {
-  const seconds = Math.max(0, (Date.now() - (at || Date.now())) / 1000);
-  if (seconds < 75) return 'just now';
-  return `${Math.round(seconds / 60)}m ago`;
+function factKind(fact) {
+  if (fact.id === 'category') return 'Known';
+  if (fact.measurement) return 'Measured';
+  if (fact.confidence === 'low') return 'Inferred';
+  return 'Observed';
 }
 
-function SectionHeading({ children, className = '' }) {
+function confidenceText(fact) {
+  if (fact.id === 'category') return 'Broad category';
+  const confidence = fact.confidence || 'moderate';
+  return `${fact.measurement ? 'Field estimate' : 'Field observation'} · ${confidence} confidence`;
+}
+
+function NotebookMark() {
   return (
-    <div className={className}>
-      <div className="text-[16px] uppercase tracking-[0.22em] text-expedition-gold [text-shadow:0_1px_6px_rgba(0,0,0,0.85)]">
-        {children}
+    <span aria-hidden="true" className="relative block h-[30px] w-[30px] shrink-0 rounded-full border border-expedition-brass/55">
+      <span className="absolute inset-[6px] rotate-45 border border-expedition-brass/50" />
+      <span className="absolute left-1/2 top-[4px] h-5 w-px origin-center rotate-[25deg] bg-[linear-gradient(180deg,#ead29a_0_50%,rgba(191,152,81,0.25)_50%)]" />
+    </span>
+  );
+}
+
+function BookmarkIcon({ saved = false }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
+      <path d="M6.5 4.5h11v16L12 17l-5.5 3.5z" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="m4 5 16 7-16 7 3-7z" />
+      <path d="M7 12h13" />
+    </svg>
+  );
+}
+
+function MicroLabel({ children, className = '' }) {
+  return (
+    <span className={`font-sans text-[9px] font-semibold uppercase leading-none tracking-[0.18em] text-expedition-gold ${className}`}>
+      {children}
+    </span>
+  );
+}
+
+function FactRow({ fact, onSave, compact = false }) {
+  const saved = Boolean(fact.saved);
+  return (
+    <article className={`grid grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 bg-[rgba(12,17,18,0.94)] ${compact ? 'min-h-[54px] px-2.5 py-2' : 'min-h-[62px] px-3 py-2.5'}`}>
+      <span className="font-sans text-[8px] font-semibold uppercase leading-snug tracking-[0.14em] text-expedition-gold">
+        {factKind(fact)}
+      </span>
+      <span className="min-w-0">
+        <strong className={`${compact ? 'text-[13px]' : 'text-[14px]'} block truncate font-normal leading-tight text-expedition-parchment`}>
+          {fact.label}: {fact.value}
+        </strong>
+        <span className="mt-0.5 block text-[11px] italic text-expedition-faded/75">{confidenceText(fact)}</span>
+      </span>
+      {saved ? (
+        <span className="font-sans text-[8px] font-semibold uppercase tracking-[0.1em] text-[#9db485]">Filed</span>
+      ) : (
+        <button
+          type="button"
+          onClick={onSave}
+          aria-label={`Add ${fact.label} to the field book`}
+          title="Add to field book"
+          className="grid h-8 w-8 place-items-center text-expedition-gold transition hover:-translate-y-px hover:text-expedition-goldbright focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-expedition-goldbright"
+        >
+          <BookmarkIcon />
+        </button>
+      )}
+    </article>
+  );
+}
+
+function NewFinding({ fact, onSave }) {
+  if (!fact) return null;
+  return (
+    <div className="relative mt-3 border-l border-expedition-gold bg-[linear-gradient(90deg,rgba(191,152,81,0.11),rgba(191,152,81,0.025))] py-2.5 pl-3 pr-10">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <MicroLabel>{factKind(fact)}</MicroLabel>
+        <strong className="text-[14px] font-normal text-expedition-goldbright">{fact.label}: {fact.value}</strong>
       </div>
-      <GoldDivider className="mt-2.5" />
+      <span className="mt-1 block text-[11px] italic text-expedition-faded/75">{confidenceText(fact)}</span>
+      <button
+        type="button"
+        onClick={onSave}
+        aria-label={`Add ${fact.label} to the field book`}
+        title="Add to field book"
+        className="absolute right-2 top-2 grid h-7 w-7 place-items-center text-expedition-gold transition hover:text-expedition-goldbright"
+      >
+        <BookmarkIcon />
+      </button>
     </div>
   );
 }
 
-function FooterKey({ label, children, disabled = false, onClick = null }) {
-  const body = (
-    <>
-      <span className={`text-[12px] font-semibold tracking-[0.14em] ${disabled ? 'text-expedition-faded/50' : 'text-expedition-goldbright'}`}>
-        {label}
-      </span>
-      <span className={`text-[12px] uppercase tracking-[0.18em] ${disabled ? 'text-expedition-faded/50' : 'text-expedition-parchment/80'}`}>
-        {children}
-      </span>
-    </>
-  );
-  if (onClick && !disabled) {
-    return (
-      <button type="button" onClick={onClick} className="pointer-events-auto inline-flex items-baseline gap-2 transition hover:brightness-125">
-        {body}
-      </button>
-    );
-  }
-  return <span className="inline-flex items-baseline gap-2">{body}</span>;
-}
-
-function MobileAction({ children, disabled = false, primary = false, onClick }) {
+function NotebookTab({ active, count, children, onClick, controls }) {
   return (
     <button
       type="button"
-      disabled={disabled}
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
       onClick={onClick}
-      className={`min-h-11 rounded-sm border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.13em] transition ${
-        disabled
-          ? 'border-expedition-brass/20 text-expedition-faded/35'
-          : primary
-            ? 'border-expedition-gold/70 bg-expedition-gold/15 text-expedition-goldbright active:bg-expedition-gold/25'
-            : 'border-expedition-brass/45 bg-black/20 text-expedition-parchment/85 active:border-expedition-gold/70'
+      className={`relative border-0 bg-transparent font-sans text-[10px] font-semibold uppercase tracking-[0.17em] transition focus-visible:outline focus-visible:outline-1 focus-visible:outline-expedition-goldbright ${
+        active ? 'text-expedition-goldbright after:absolute after:inset-x-[22%] after:bottom-[-1px] after:h-px after:bg-expedition-goldbright' : 'text-expedition-faded hover:text-expedition-parchment'
       }`}
     >
       {children}
+      {Number.isFinite(count) && (
+        <span className="ml-1.5 inline-grid h-[19px] min-w-[19px] place-items-center rounded-full border border-expedition-brass/40 px-1 text-[9px] tracking-normal text-expedition-goldbright/80">
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
-function FactRow({ fact, onSave }) {
+function SpinnerDots() {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-[17px] leading-snug text-expedition-parchment">{fact.label}</span>
-      <span className="flex items-baseline gap-2.5 text-right">
-        <span className={`text-[17px] ${fact.confidence === 'low' ? 'italic text-expedition-parchment/70' : 'text-expedition-goldbright'}`}>
-          {fact.value}
-        </span>
-        {!fact.saved && (
-          <button
-            type="button"
-            onClick={onSave}
-            className="text-[11px] font-semibold uppercase tracking-[0.16em] text-expedition-gold underline decoration-expedition-gold/40 underline-offset-4 transition hover:text-expedition-goldbright"
-          >
-            Save
-          </button>
-        )}
-      </span>
-    </div>
+    <span className="ml-1 inline-flex items-center gap-1" aria-hidden="true">
+      {[0, 1, 2].map(index => (
+        <span key={index} className="h-1 w-1 animate-pulse rounded-full bg-expedition-gold" style={{ animationDelay: `${index * 140}ms` }} />
+      ))}
+    </span>
   );
 }
 
@@ -127,49 +185,68 @@ export function ExamineView() {
   const collectFromExamine = useThreeGameStore(state => state.collectFromExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const [visible, setVisible] = useState(false);
+
   const [question, setQuestion] = useState('');
   const [note, setNote] = useState('');
   const [noteSavedFlash, setNoteSavedFlash] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState('inquiry');
-  const chatScrollRef = useRef(null);
-  const desktopNoteRef = useRef(null);
-  const mobileNoteRef = useRef(null);
+  const [activePanel, setActivePanel] = useState('inquiry');
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+
+  const scrollRef = useRef(null);
+  const noteRef = useRef(null);
+  const collectionCancelRef = useRef(null);
+  const noteFlashTimerRef = useRef(null);
 
   const open = Boolean(session);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
-  const collectReady = examined && session?.collectable;
+  const collectReady = Boolean(examined && session?.collectable);
 
-  // Let the camera dolly begin before the type fades in over the shot.
   useEffect(() => {
     if (!open) {
       setTypingMode(false);
-      setVisible(false);
       setQuestion('');
       setNote('');
       setNoteSavedFlash(false);
-      setMobilePanel('inquiry');
+      setActivePanel('inquiry');
+      setCollectionOpen(false);
+      setCollecting(false);
+      window.clearTimeout(noteFlashTimerRef.current);
       return undefined;
     }
-    const timer = window.setTimeout(() => setVisible(true), 420);
     return () => {
-      window.clearTimeout(timer);
       setTypingMode(false);
     };
   }, [open]);
 
   const chatLength = session?.chat?.length || 0;
+  const factsLength = session?.facts?.length || 0;
   useEffect(() => {
-    const list = chatScrollRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [chatLength]);
+    if (activePanel !== 'inquiry') return;
+    const list = scrollRef.current;
+    if (list) {
+      list.scrollTo({
+        top: chatLength > 0 ? list.scrollHeight : 0,
+        behavior: chatLength > 1 ? 'smooth' : 'auto',
+      });
+    }
+  }, [chatLength, factsLength, activePanel]);
+
+  useEffect(() => {
+    if (collectionOpen) collectionCancelRef.current?.focus();
+  }, [collectionOpen]);
 
   const submitQuestion = useCallback(() => {
     const trimmed = question.trim();
-    if (!trimmed) return;
+    if (!trimmed || session?.pending) return;
     setQuestion('');
     sendExamineMessage(trimmed);
-  }, [question, sendExamineMessage]);
+  }, [question, sendExamineMessage, session?.pending]);
+
+  const submitProcedure = useCallback(prompt => {
+    if (!prompt || session?.pending) return;
+    sendExamineMessage(prompt);
+  }, [sendExamineMessage, session?.pending]);
 
   const submitNote = useCallback(() => {
     const trimmed = note.trim();
@@ -177,365 +254,348 @@ export function ExamineView() {
     if (saveExamineNote(trimmed)) {
       setNote('');
       setNoteSavedFlash(true);
-      window.setTimeout(() => setNoteSavedFlash(false), 2600);
-      desktopNoteRef.current?.blur();
-      mobileNoteRef.current?.blur();
+      setCollectionOpen(false);
+      window.clearTimeout(noteFlashTimerRef.current);
+      noteFlashTimerRef.current = window.setTimeout(() => setNoteSavedFlash(false), 2800);
+      noteRef.current?.blur();
     }
   }, [note, saveExamineNote]);
 
-  const saveNewestFact = useCallback(() => {
-    const unsaved = [...(useThreeGameStore.getState().examineSession?.facts || [])].reverse().find(fact => !fact.saved);
-    if (unsaved) saveExamineFact(unsaved.id);
-  }, [saveExamineFact]);
+  const confirmCollection = useCallback(async () => {
+    if (!collectReady || collecting) return;
+    setCollecting(true);
+    await collectFromExamine();
+    setCollecting(false);
+  }, [collectFromExamine, collectReady, collecting]);
 
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeExamine();
-        return;
-      }
-      if (event.key === 'Tab') {
-        event.preventDefault();
-        saveNewestFact();
-        return;
-      }
       const tag = event.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA';
-      if (!typing && (event.code === 'KeyC') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (event.key === 'Escape') {
         event.preventDefault();
-        if (collectReady) collectFromExamine();
+        if (collectionOpen) setCollectionOpen(false);
+        else closeExamine();
+        return;
+      }
+      if (!typing && event.code === 'KeyC' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
+        event.preventDefault();
+        setCollectionOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, closeExamine, saveNewestFact, collectReady, collectFromExamine]);
+  }, [open, closeExamine, collectReady, collectionOpen]);
 
   const zone = useMemo(() => (open ? getZone(currentZoneId) : null), [open, currentZoneId]);
-  const examples = useMemo(() => (session ? inquiryExamples(session) : ''), [session]);
+  const procedures = useMemo(() => PROCEDURES[session?.category] || PROCEDURES.Item, [session?.category]);
+  const latestUnsavedFact = useMemo(() => (
+    [...(session?.facts || [])].reverse().find(fact => !fact.saved) || null
+  ), [session?.facts]);
 
   if (!open) return null;
 
   const headerSubtitle = [zone?.name, session.subtitle, expeditionDate(session.day)].filter(Boolean);
-  const unsavedFacts = session.facts.some(fact => !fact.saved);
+  const identityLabel = session.kind === 'item'
+    ? (examined ? 'Object recorded' : 'Object under study')
+    : (examined ? 'Recorded identification' : 'Provisional identification');
+  const noteState = noteSavedFlash
+    ? 'Recorded in field book'
+    : examined
+      ? 'Observation complete'
+      : note.trim()
+        ? 'Ready to record'
+        : 'Write in your own words';
+  const collectionDescription = session.kind === 'item'
+    ? 'Taking this object adds it to the expedition collection and removes it from this place.'
+    : session.living
+      ? 'Collecting removes this individual from the field. The active tool, case capacity, labels, and preservation supplies still govern the attempt.'
+      : 'Collecting removes this specimen from the field. Case capacity, labels, and preservation supplies still govern the attempt.';
 
   return (
     <div
       data-testid="examine-view"
-      className={`pointer-events-none absolute inset-0 z-30 select-none overflow-hidden font-expedition text-expedition-parchment transition-opacity duration-700 ${visible ? 'opacity-100' : 'opacity-0'}`}
+      className={`${styles.overlay} font-expedition`}
     >
-      {/* Cinematic grade: the scene dims toward the edges, holding a clear
-          pool of light on the subject; type sits directly on the shot. */}
-      <div className="pointer-events-none absolute inset-0 bg-[rgba(9,10,12,0.16)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_62%_58%_at_50%_46%,transparent_40%,rgba(7,8,10,0.55)_72%,rgba(4,5,6,0.88)_100%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(6,7,9,0.62)_0%,transparent_18%,transparent_72%,rgba(5,6,8,0.72)_100%)]" />
-      {/* Side scrims keep the reading columns legible over bright terrain
-          while the center pool stays light. */}
-      <div className="pointer-events-none absolute inset-0 hidden bg-[linear-gradient(90deg,rgba(5,6,8,0.66)_0%,rgba(5,6,8,0.30)_16%,transparent_32%,transparent_68%,rgba(5,6,8,0.30)_84%,rgba(5,6,8,0.66)_100%)] xl:block" />
+      <div className={styles.grade} />
+      <div className={styles.vignette} />
+      <div className={styles.topShade} />
 
-      {/* Fine reticle ellipse framing the subject */}
-      <svg
-        viewBox="0 0 100 100"
-        preserveAspectRatio="xMidYMid meet"
-        aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-[29%] h-[min(38dvh,78vw)] w-[min(38dvh,78vw)] -translate-x-1/2 -translate-y-1/2 text-expedition-gold/25 xl:top-[45%] xl:h-[min(54vh,48vw)] xl:w-[min(54vh,48vw)]"
-      >
-        <circle cx="50" cy="50" r="48.5" fill="none" stroke="currentColor" strokeWidth="0.3" />
-        {[[50, 1.5], [98.5, 50], [50, 98.5], [1.5, 50]].map(([x, y]) => (
-          <rect
-            key={`${x}-${y}`}
-            x={x - 0.9}
-            y={y - 0.9}
-            width="1.8"
-            height="1.8"
-            fill="currentColor"
-            transform={`rotate(45 ${x} ${y})`}
-            opacity="0.9"
-          />
-        ))}
-      </svg>
-
-      {/* Measurement callout under the subject */}
-      {session.measurementCallout && (
-        <div className="pointer-events-none absolute left-1/2 top-[45%] -translate-x-1/2 xl:top-[73%]">
-          <div className="flex items-center gap-3 text-expedition-goldbright [text-shadow:0_1px_8px_rgba(0,0,0,0.9)]">
-            <span className="h-px w-14 bg-expedition-gold/60" />
-            <span className="text-[15px] tracking-[0.08em]">{session.measurementCallout}</span>
-            <span className="h-px w-14 bg-expedition-gold/60" />
+      <section className={styles.stage} aria-labelledby="examine-specimen-title">
+        <header className={styles.stageHeader}>
+          <div className="mb-2.5 flex items-center gap-2.5 font-sans text-[8px] font-semibold uppercase tracking-[0.22em] text-expedition-goldbright/90 [text-shadow:0_2px_12px_#000] sm:text-[9px] lg:text-[10px]">
+            <span className="h-px w-6 bg-expedition-gold" />
+            Field examination
           </div>
-        </div>
-      )}
+          <h1 id="examine-specimen-title" className="m-0 max-w-[72%] text-[clamp(25px,6vw,38px)] font-normal leading-[1.02] tracking-[0.015em] text-[#f4e9d0] [text-shadow:0_3px_22px_rgba(0,0,0,0.88)] lg:max-w-[68%] lg:text-[clamp(34px,3.25vw,54px)]">
+            {session.name}
+          </h1>
+          <div className="mt-2 flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-expedition-parchment/78 [text-shadow:0_2px_10px_#000] sm:text-[12px] lg:mt-2.5 lg:text-[14px]">
+            {headerSubtitle.map((part, index) => (
+              <React.Fragment key={`${part}-${index}`}>
+                {index > 0 && <span aria-hidden="true" className="h-1 w-1 rotate-45 bg-expedition-gold" />}
+                <span>{part}</span>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className={`${styles.identityPill} items-center gap-2 rounded-full border border-expedition-brass/40 bg-black/40 px-3 py-2 font-sans text-[9px] font-semibold uppercase tracking-[0.12em] text-expedition-parchment/80 shadow-xl backdrop-blur-md`}>
+            <span className={`h-1.5 w-1.5 rounded-full border ${examined ? 'border-[#9db485] bg-[#9db485]/50' : 'border-expedition-goldbright shadow-[0_0_0_3px_rgba(191,152,81,0.12)]'}`} />
+            {identityLabel}
+          </div>
+        </header>
 
-      {/* Header */}
-      <div className="absolute left-1/2 top-3 w-[calc(100vw-4.75rem)] -translate-x-1/2 text-center sm:top-5 xl:top-7 xl:w-[min(60rem,94vw)]">
-        <div className="text-[clamp(16px,4.7vw,24px)] font-medium uppercase leading-tight tracking-[0.16em] text-[#f3e6c8] [text-shadow:0_2px_16px_rgba(0,0,0,0.85)] xl:whitespace-nowrap xl:text-[32px] xl:tracking-[0.24em]">
-          Examine: {session.name}
+        <div className={styles.focusFrame} aria-hidden="true">
+          {[0, 1, 2, 3].map(index => <i key={index} className={styles.focusCorner} />)}
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] text-expedition-parchment/80 [text-shadow:0_1px_8px_rgba(0,0,0,0.9)] sm:text-[12px] xl:mt-2 xl:gap-2.5 xl:text-[14.5px]">
-          {headerSubtitle.map((part, index) => (
-            <React.Fragment key={part}>
-              {index > 0 && <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rotate-45 bg-expedition-gold/80" />}
-              <span>{part}</span>
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
 
-      {/* Close */}
-      <button
-        type="button"
-        onClick={closeExamine}
-        aria-label="Close examination"
-        className="pointer-events-auto absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full border border-expedition-brass/70 bg-black/45 text-lg text-expedition-parchment/85 transition hover:border-expedition-gold hover:text-expedition-goldbright sm:right-5 sm:top-5 xl:right-6 xl:top-6"
-      >
-        ✕
-      </button>
-
-      {/* Left column: field inquiry */}
-      <div className="pointer-events-auto absolute left-10 top-32 hidden w-[24rem] [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
-        <SectionHeading>Field Inquiry</SectionHeading>
-        <div className="mt-1.5 text-[14px] italic text-expedition-faded">Ask questions about what you observe.</div>
-        <div ref={chatScrollRef} className="mt-4 max-h-[calc(100vh-30rem)] min-h-[14rem] overflow-y-auto pr-2 [scrollbar-width:thin]">
-          {session.chat.length === 0 && (
-            <div className="text-[16.5px] leading-relaxed text-expedition-parchment/75">
-              The subject is before you. Ask what you wish to know, or attempt a procedure — measure it, describe it, test it.
+        {session.measurementCallout && (
+          <div className={styles.measurement} aria-live="polite">
+            <div className={styles.measurementLine}>
+              <span className={styles.measurementValue}>{session.measurementCallout} <em className="text-[10px] text-expedition-faded">estimated</em></span>
             </div>
-          )}
-          {session.chat.map(entry => (
-            <div key={entry.id} className="mb-6 last:mb-0">
-              <div className="flex items-baseline justify-between">
-                <span className={`text-[11.5px] font-semibold uppercase tracking-[0.2em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
-                  {entry.role === 'you' ? 'You' : 'Observation'}
-                </span>
-                <span className="text-[12.5px] text-expedition-faded/90">{chatAge(entry.at)}</span>
-              </div>
-              <div className="mt-1.5 text-[16.5px] leading-relaxed text-expedition-parchment/95">{entry.text}</div>
-              {entry.behavior && (
-                <div className="mt-2 text-[14.5px] italic leading-relaxed text-expedition-parchment/75">{entry.behavior}</div>
-              )}
-            </div>
-          ))}
-          {session.pending && (
-            <div className="text-[13px] italic text-expedition-faded">You look closer…</div>
-          )}
-        </div>
-        <form
-          className="mt-4"
-          onSubmit={event => {
-            event.preventDefault();
-            submitQuestion();
-          }}
-        >
-          <input
-            type="text"
-            value={question}
-            onChange={event => setQuestion(event.target.value)}
-            onFocus={() => setTypingMode(true)}
-            onBlur={() => setTypingMode(false)}
-            placeholder={`Ask about this ${session.kind === 'item' ? 'object' : 'specimen'}…`}
-            style={{ ...QUILL_INPUT_STYLE, borderBottom: '1px solid rgba(201,163,95,0.75)', padding: '0.45rem 0.05rem' }}
-            className="w-full text-[17px] placeholder:text-expedition-parchment/70 focus:outline-none"
-          />
-        </form>
-        <div className="mt-3 text-[13.5px] leading-relaxed text-expedition-faded">{examples}</div>
-        {session.error && (
-          <div className="mt-1.5 text-[11.5px] text-[#d9a05a]">{session.error}</div>
-        )}
-      </div>
-
-      {/* Right column: key facts + uncertainties */}
-      <div className="pointer-events-auto absolute right-10 top-32 hidden w-[21rem] [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
-        <SectionHeading>Key Facts</SectionHeading>
-        <div className="mt-4 grid gap-3.5">
-          {session.facts.map(fact => (
-            <FactRow key={fact.id} fact={fact} onSave={() => saveExamineFact(fact.id)} />
-          ))}
-        </div>
-        {session.facts.length <= 1 && (
-          <div className="mt-3 text-[14px] italic leading-relaxed text-expedition-parchment/60">
-            Facts appear here as your inquiry uncovers them.
           </div>
         )}
-        {session.uncertainties.length > 0 && (
-          <>
-            <SectionHeading className="mt-9">Uncertainties</SectionHeading>
-            <div className="mt-3.5 grid gap-2 text-[14.5px] italic leading-relaxed text-expedition-parchment/75">
-              {session.uncertainties.map(item => (
-                <div key={item}>{item}</div>
-              ))}
-            </div>
-          </>
-        )}
-        {session.latin && examined && (
-          <div className="mt-6 text-[13px] italic text-expedition-faded">{session.latin}</div>
-        )}
-      </div>
 
-      {/* Bottom: field note + key hints, centered like the status view's quote */}
-      <div className="pointer-events-auto absolute bottom-6 left-1/2 hidden w-[min(46rem,92vw)] -translate-x-1/2 [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_2px_14px_rgba(0,0,0,0.6)] xl:block">
-        <div className="flex items-baseline justify-between">
-          <span className="text-[13px] uppercase tracking-[0.22em] text-expedition-gold">Field Note</span>
-          <span className={`text-[11px] uppercase tracking-[0.16em] transition-opacity duration-300 ${
-            noteSavedFlash ? 'text-[#9dc08b] opacity-100' : examined ? 'text-[#9dc08b]/80 opacity-100' : 'text-expedition-faded/70 opacity-100'
-          }`}
-          >
-            {noteSavedFlash ? 'Note recorded' : examined ? 'Examined ✓' : 'Record your observations in your own words'}
+        <div className={styles.viewHint}>
+          <span className={styles.mouseIcon} aria-hidden="true" />
+          <span>Drag in any direction to orbit · scroll to zoom</span>
+        </div>
+      </section>
+
+      <button type="button" onClick={closeExamine} aria-label="Return to exploration" className={styles.closeButton} />
+
+      <aside className={styles.notebook} aria-label="Examination field notebook">
+        <header className={styles.notebookHeader}>
+          <div className="flex items-center gap-3">
+            <NotebookMark />
+            <div>
+              <MicroLabel>Darwin&apos;s field book</MicroLabel>
+              <div className="mt-1 text-[18px] leading-none text-[#f2e6cb] lg:text-[20px]">Examination notes</div>
+            </div>
+          </div>
+          <span className="flex items-center gap-2 font-sans text-[8px] font-semibold uppercase tracking-[0.13em] text-[#9db485]">
+            <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_0_3px_rgba(157,180,133,0.1)]" />
+            {noteSavedFlash ? 'Recorded' : 'Observation active'}
           </span>
-        </div>
-        <textarea
-          ref={desktopNoteRef}
-          value={note}
-          onChange={event => setNote(event.target.value)}
-          onFocus={() => setTypingMode(true)}
-          onBlur={() => setTypingMode(false)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              submitNote();
-            }
-          }}
-          rows={2}
-          placeholder={examined
-            ? 'Add a further observation to the field book…'
-            : 'What do you observe? Saving a note completes the examination.'}
-          style={QUILL_INPUT_STYLE}
-          className="mt-2 min-h-[3.2rem] w-full resize-none text-[16.5px] leading-relaxed placeholder:text-expedition-faded/65 focus:outline-none"
-        />
-        <div className="mt-4 flex flex-wrap items-baseline justify-center gap-x-8 gap-y-2">
-          <FooterKey label="ESC" onClick={closeExamine}>Return</FooterKey>
-          <FooterKey label="ENTER" onClick={submitNote}>Save Note</FooterKey>
-          <FooterKey label="C" disabled={!collectReady} onClick={() => collectFromExamine()}>
-            {session.collectVerb}
-          </FooterKey>
-          <FooterKey label="TAB" disabled={!unsavedFacts} onClick={saveNewestFact}>Save Fact</FooterKey>
-        </div>
-      </div>
+        </header>
 
-      {/* Touch/compact layout: the subject keeps the upper stage while all
-          reading and writing lives in one scrollable bottom sheet. */}
-      <section
-        aria-label="Examination notebook"
-        className="pointer-events-auto absolute inset-x-0 bottom-0 z-10 flex h-[56dvh] flex-col overflow-hidden rounded-t-2xl border-t border-expedition-brass/45 bg-[linear-gradient(180deg,rgba(20,25,34,0.91),rgba(7,9,13,0.98))] shadow-[0_-18px_60px_rgba(0,0,0,0.58)] backdrop-blur-md xl:hidden"
-      >
-        <div className="mx-auto mt-2 h-1 w-12 rounded-full bg-expedition-brass/45" />
-        <div className="grid grid-cols-2 border-b border-expedition-brass/25 px-4 pt-1">
-          {[
-            ['inquiry', 'Field inquiry'],
-            ['facts', `Facts · ${session.facts.length}`],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setMobilePanel(id)}
-              className={`min-h-11 border-b text-[11px] font-semibold uppercase tracking-[0.16em] transition ${
-                mobilePanel === id
-                  ? 'border-expedition-gold text-expedition-goldbright'
-                  : 'border-transparent text-expedition-faded'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <nav className={styles.tabs} role="tablist" aria-label="Notebook sections">
+          <NotebookTab active={activePanel === 'inquiry'} controls="examine-inquiry-panel" onClick={() => setActivePanel('inquiry')}>
+            Inquiry
+          </NotebookTab>
+          <NotebookTab active={activePanel === 'findings'} count={session.facts.length} controls="examine-findings-panel" onClick={() => setActivePanel('findings')}>
+            Findings
+          </NotebookTab>
+        </nav>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 [scrollbar-width:thin] [text-shadow:0_1px_4px_rgba(0,0,0,0.7)] sm:px-6">
-          {mobilePanel === 'inquiry' ? (
-            <>
-              {session.chat.length === 0 && (
-                <div className="text-[13px] leading-relaxed text-expedition-parchment/65">
-                  Study the subject from every side, then ask what you wish to know.
-                </div>
-              )}
-              {session.chat.slice(-6).map(entry => (
-                <div key={entry.id} className="mb-3 last:mb-0">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${entry.role === 'you' ? 'text-expedition-parchment/60' : 'text-expedition-gold'}`}>
-                      {entry.role === 'you' ? 'You' : 'Observation'}
-                    </span>
-                    <span className="text-[11px] text-expedition-faded/80">{chatAge(entry.at)}</span>
+        <div ref={scrollRef} className={styles.scrollPanel}>
+          {activePanel === 'inquiry' ? (
+            <section id="examine-inquiry-panel" role="tabpanel" className="px-[18px] py-4 lg:px-[27px] lg:py-[22px]">
+              <p className="m-0 mb-4 text-[13px] leading-relaxed text-expedition-parchment/65 lg:text-[15px]">
+                Observe freely, or attempt a procedure. Findings remain provisional until you record them.
+              </p>
+
+              <div className="relative grid gap-[18px] pl-[19px] before:absolute before:bottom-2 before:left-1 before:top-2 before:w-px before:bg-[linear-gradient(rgba(191,152,81,0.46),rgba(191,152,81,0.06))]">
+                {session.chat.length === 0 && (
+                  <article className="relative before:absolute before:left-[-19px] before:top-1 before:h-[9px] before:w-[9px] before:-translate-x-px before:rotate-45 before:border before:border-expedition-brass/70 before:bg-[rgba(191,152,81,0.16)]">
+                    <MicroLabel>Begin with observation</MicroLabel>
+                    <p className="mt-1.5 text-[14px] leading-relaxed text-expedition-parchment/86 lg:text-[15px]">
+                      Study the subject from several angles, ask what you wish to know, or attempt a careful procedure.
+                    </p>
+                  </article>
+                )}
+
+                {session.chat.map(entry => (
+                  <article
+                    key={entry.id}
+                    className={`relative before:absolute before:left-[-19px] before:top-1 before:h-[9px] before:w-[9px] before:-translate-x-px before:border before:border-expedition-brass/70 before:bg-[#151a19] ${entry.role !== 'you' ? 'before:rotate-45 before:bg-expedition-gold/15' : 'before:rounded-full'}`}
+                  >
+                    <MicroLabel className={entry.role === 'you' ? 'text-expedition-faded' : 'text-expedition-goldbright/85'}>
+                      {entry.role === 'you' ? 'Your inquiry' : 'Direct observation'}
+                    </MicroLabel>
+                    <p className="mt-1.5 text-[14px] leading-relaxed text-expedition-parchment/92 lg:text-[15px]">{entry.text}</p>
+                    {entry.behavior && <p className="mt-1.5 text-[12px] italic leading-relaxed text-expedition-parchment/60 lg:text-[13px]">{entry.behavior}</p>}
+                  </article>
+                ))}
+
+                {session.pending && (
+                  <div className="relative text-[12px] italic text-expedition-faded before:absolute before:left-[-19px] before:top-1 before:h-[9px] before:w-[9px] before:-translate-x-px before:rounded-full before:border before:border-expedition-brass/50 before:bg-[#151a19]">
+                    You look closer <SpinnerDots />
                   </div>
-                  <div className="mt-0.5 text-[13.5px] leading-snug text-expedition-parchment/95">{entry.text}</div>
-                  {entry.behavior && <div className="mt-1 text-[12px] italic text-expedition-parchment/60">{entry.behavior}</div>}
+                )}
+              </div>
+
+              {!session.pending && latestUnsavedFact && (
+                <NewFinding fact={latestUnsavedFact} onSave={() => saveExamineFact(latestUnsavedFact.id)} />
+              )}
+
+              <div className="mt-5 border-t border-expedition-brass/25 pt-4 lg:mt-6 lg:pt-[18px]">
+                <MicroLabel>Try a procedure</MicroLabel>
+                <div className="mt-2.5 flex snap-x gap-2 overflow-x-auto pb-1 [scrollbar-width:none] lg:flex-wrap lg:overflow-visible">
+                  {procedures.map(([label, prompt]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      disabled={session.pending}
+                      onClick={() => submitProcedure(prompt)}
+                      className="min-h-8 shrink-0 snap-start rounded-sm border border-expedition-brass/35 bg-expedition-gold/[0.04] px-2.5 font-sans text-[10px] font-medium tracking-[0.035em] text-expedition-parchment/80 transition hover:border-expedition-goldbright/60 hover:bg-expedition-gold/10 hover:text-expedition-goldbright disabled:cursor-wait disabled:opacity-40"
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              ))}
-              {session.pending && <div className="text-[12px] italic text-expedition-faded">You look closer…</div>}
-              <form
-                className="mt-3"
-                onSubmit={event => {
-                  event.preventDefault();
-                  submitQuestion();
-                }}
-              >
-                <input
-                  type="text"
-                  value={question}
-                  onChange={event => setQuestion(event.target.value)}
-                  onFocus={() => setTypingMode(true)}
-                  onBlur={() => setTypingMode(false)}
-                  placeholder="Ask about what you see…"
-                  style={QUILL_INPUT_STYLE}
-                  className="w-full text-[14px] placeholder:text-expedition-faded/60 focus:outline-none"
-                />
-                <div className="mt-2 text-[12.5px] leading-relaxed text-expedition-faded/85">{examples}</div>
-              </form>
-              {session.error && <div className="mt-2 text-[11px] text-[#d9a05a]">{session.error}</div>}
-            </>
+
+                <form
+                  className="mt-3 grid grid-cols-[minmax(0,1fr)_43px] border border-expedition-brass/45 bg-black/25 transition focus-within:border-expedition-goldbright/70 focus-within:shadow-[0_0_0_3px_rgba(191,152,81,0.06)]"
+                  onSubmit={event => {
+                    event.preventDefault();
+                    submitQuestion();
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={question}
+                    onChange={event => setQuestion(event.target.value)}
+                    onFocus={() => setTypingMode(true)}
+                    onBlur={() => setTypingMode(false)}
+                    placeholder={`Ask about this ${session.kind === 'item' ? 'object' : 'specimen'}…`}
+                    className={`${styles.inquiryInput} h-11 min-w-0 border-0 bg-transparent px-3 text-[14px] text-expedition-parchment outline-none placeholder:italic placeholder:text-expedition-faded/60`}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!question.trim() || session.pending}
+                    aria-label="Submit inquiry"
+                    className="grid place-items-center border-0 border-l border-expedition-brass/25 bg-expedition-gold/[0.05] text-expedition-goldbright transition hover:bg-expedition-gold/15 disabled:cursor-not-allowed disabled:text-expedition-faded/35"
+                  >
+                    <SendIcon />
+                  </button>
+                </form>
+                {session.error && <p className="mt-2 text-[11px] text-[#d9a05a]">{session.error}</p>}
+              </div>
+            </section>
           ) : (
-            <>
-              <div className="grid gap-3">
+            <section id="examine-findings-panel" role="tabpanel" className="px-[18px] py-4 lg:px-[27px] lg:py-[22px]">
+              <div className="flex items-start justify-between gap-3 border-b border-expedition-brass/25 pb-4">
+                <div>
+                  <MicroLabel>Working description</MicroLabel>
+                  <h2 className="mb-1 mt-2 text-[20px] font-normal leading-tight text-[#f1e4c7] lg:text-[22px]">{session.name}</h2>
+                  <p className="m-0 text-[12px] leading-relaxed text-expedition-faded lg:text-[13px]">
+                    {examined ? 'Recorded from your authored field observation.' : 'Evidence remains provisional until you record an observation.'}
+                  </p>
+                </div>
+                <span className={`shrink-0 border px-2 py-1.5 font-sans text-[8px] font-semibold uppercase tracking-[0.12em] ${examined ? 'border-[#9db485]/40 text-[#9db485]' : 'border-expedition-brass/35 text-expedition-goldbright'}`}>
+                  {examined ? 'Recorded' : 'Provisional'}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-px border border-expedition-brass/25 bg-expedition-brass/25">
                 {session.facts.map(fact => (
-                  <FactRow key={fact.id} fact={fact} onSave={() => saveExamineFact(fact.id)} />
+                  <FactRow key={fact.id} fact={fact} onSave={() => saveExamineFact(fact.id)} compact />
                 ))}
               </div>
+
               {session.facts.length <= 1 && (
-                <div className="mt-3 text-[12px] italic text-expedition-parchment/55">
-                  Facts appear as your inquiry uncovers them.
+                <p className="mt-3 text-[12px] italic leading-relaxed text-expedition-parchment/55">
+                  Further findings appear here as your inquiry uncovers them.
+                </p>
+              )}
+
+              {session.uncertainties.length > 0 && (
+                <div className="mt-5 border border-expedition-brass/25 bg-[linear-gradient(135deg,rgba(191,152,81,0.055),transparent)] p-3.5">
+                  <MicroLabel>What remains uncertain</MicroLabel>
+                  <ul className="mt-2.5 grid list-none gap-2 p-0">
+                    {session.uncertainties.map(item => (
+                      <li key={item} className="relative pl-4 text-[12px] italic leading-relaxed text-expedition-parchment/65 before:absolute before:left-0 before:top-0 before:font-sans before:text-[9px] before:font-semibold before:not-italic before:text-expedition-gold before:content-['?'] lg:text-[13px]">
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
-              {session.uncertainties.length > 0 && (
-                <>
-                  <div className="mt-5 text-[12px] uppercase tracking-[0.18em] text-expedition-gold">Uncertainties</div>
-                  <div className="mt-2 grid gap-1.5 text-[12.5px] italic leading-snug text-expedition-parchment/65">
-                    {session.uncertainties.map(item => <div key={item}>{item}</div>)}
-                  </div>
-                </>
+
+              {session.latin && examined && (
+                <p className="mt-4 text-[12px] italic text-expedition-faded">Recorded identification: {session.latin}</p>
               )}
-              {session.latin && examined && <div className="mt-4 text-[12px] italic text-expedition-faded">{session.latin}</div>}
-            </>
+            </section>
           )}
         </div>
 
-        <div className="border-t border-expedition-brass/25 bg-black/20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[10px] uppercase tracking-[0.18em] text-expedition-gold">Field note</span>
-            <span className={`text-[9px] uppercase tracking-[0.12em] ${examined ? 'text-[#9dc08b]' : 'text-expedition-faded/65'}`}>
-              {noteSavedFlash ? 'Recorded' : examined ? 'Examined ✓' : 'Required to complete'}
+        <section className={styles.noteArea} aria-label="Field note">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <MicroLabel>Field note</MicroLabel>
+            <span className={`font-sans text-[8px] font-semibold uppercase tracking-[0.12em] transition ${noteSavedFlash || examined ? 'text-[#9db485]' : note.trim() ? 'text-expedition-goldbright' : 'text-expedition-faded/70'}`} aria-live="polite">
+              {noteState}
             </span>
           </div>
+
           <textarea
-            ref={mobileNoteRef}
+            ref={noteRef}
             value={note}
             onChange={event => setNote(event.target.value)}
             onFocus={() => setTypingMode(true)}
             onBlur={() => setTypingMode(false)}
-            rows={1}
-            placeholder={examined ? 'Add another observation…' : 'What do you observe?'}
-            style={QUILL_INPUT_STYLE}
-            className="mt-1 min-h-10 w-full resize-none text-[14px] leading-snug placeholder:text-expedition-faded/55 focus:outline-none"
+            rows={2}
+            placeholder={examined ? 'Add a further observation…' : 'What do you observe? Recording a note completes the examination.'}
+            className={`${styles.noteInput} block min-h-[44px] max-h-24 w-full resize-none border-0 border-b border-expedition-brass/50 bg-transparent px-px pb-2 text-[13px] leading-relaxed text-expedition-parchment outline-none placeholder:italic placeholder:text-expedition-faded/50 lg:min-h-[60px] lg:text-[14px]`}
           />
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <MobileAction onClick={closeExamine}>Return</MobileAction>
-            <MobileAction primary onClick={submitNote}>Save note</MobileAction>
-            <MobileAction disabled={!unsavedFacts} onClick={saveNewestFact}>Save fact</MobileAction>
-            <MobileAction disabled={!collectReady} onClick={() => collectFromExamine()}>{session.collectVerb}</MobileAction>
-          </div>
-        </div>
-      </section>
 
-      <div className="pointer-events-none absolute left-1/2 top-[43%] -translate-x-1/2 text-center text-[10px] uppercase tracking-[0.2em] text-expedition-parchment/55 xl:top-[70%] xl:text-[11px]">
-        Drag to orbit<span className="hidden sm:inline"> · scroll to zoom</span>
-      </div>
+          <div className="mt-2.5 grid grid-cols-2 gap-2 lg:mt-3">
+            <button
+              type="button"
+              data-testid="examine-record-note"
+              disabled={!note.trim()}
+              onClick={submitNote}
+              className="min-h-10 border border-expedition-goldbright/65 bg-[linear-gradient(135deg,rgba(191,152,81,0.24),rgba(191,152,81,0.1))] px-2 font-sans text-[9px] font-semibold uppercase tracking-[0.11em] text-[#f5e5bd] transition hover:-translate-y-px hover:border-expedition-goldbright disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35 lg:min-h-[43px] lg:text-[10px]"
+            >
+              Record note
+            </button>
+            <button
+              type="button"
+              data-testid="examine-collection-options"
+              disabled={!collectReady}
+              onClick={() => setCollectionOpen(true)}
+              className="min-h-10 border border-expedition-brass/40 bg-expedition-gold/[0.035] px-2 font-sans text-[9px] font-semibold uppercase tracking-[0.1em] text-expedition-parchment/72 transition hover:-translate-y-px hover:border-expedition-goldbright disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35 lg:min-h-[43px] lg:text-[10px]"
+            >
+              {session.kind === 'item' ? session.collectVerb : 'Collection options'}
+            </button>
+          </div>
+
+          <p className="mb-0 mt-1.5 text-right text-[10px] italic text-expedition-faded/55 lg:text-[11px]">
+            {collectReady ? 'Observation complete. Collection remains a separate decision.' : 'Record an observation before deciding whether to collect.'}
+          </p>
+
+          {collectionOpen && (
+            <div className={styles.collectionDecision} role="dialog" aria-modal="false" aria-labelledby="examine-collection-title">
+              <MicroLabel>Collection decision</MicroLabel>
+              <h3 id="examine-collection-title" className="mb-2 mt-2 text-[19px] font-normal text-[#f0e1c0] lg:text-[21px]">{session.name}</h3>
+              <p className="m-0 text-[12px] leading-relaxed text-expedition-parchment/70 lg:text-[13px]">{collectionDescription}</p>
+              <div className="my-3 grid grid-cols-2 gap-2">
+                <span className="border border-expedition-brass/25 px-2 py-2 text-center font-sans text-[8px] font-semibold uppercase tracking-[0.08em] text-expedition-parchment/65">Rules checked</span>
+                <span className="border border-expedition-brass/25 px-2 py-2 text-center font-sans text-[8px] font-semibold uppercase tracking-[0.08em] text-expedition-parchment/65">Field state changes</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  ref={collectionCancelRef}
+                  type="button"
+                  onClick={() => setCollectionOpen(false)}
+                  className="min-h-10 border border-expedition-brass/40 bg-transparent px-2 font-sans text-[9px] font-semibold uppercase tracking-[0.1em] text-expedition-parchment/70 transition hover:border-expedition-goldbright"
+                >
+                  Leave for now
+                </button>
+                <button
+                  type="button"
+                  disabled={collecting}
+                  onClick={confirmCollection}
+                  className="min-h-10 border border-expedition-goldbright/65 bg-expedition-gold/15 px-2 font-sans text-[9px] font-semibold uppercase tracking-[0.1em] text-expedition-goldbright transition hover:border-expedition-goldbright hover:bg-expedition-gold/25 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {collecting ? 'Attempting…' : session.collectVerb}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      </aside>
     </div>
   );
 }

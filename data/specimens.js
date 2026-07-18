@@ -381,6 +381,34 @@ export const baseSpecimens = [
   },
 
   {
+    id: 'palosantotwig',
+    name: 'Palo Santo Twig',
+    latin: 'Bursera graveolens',
+    ontology: 'Plant',
+    order: 'Sapindales',
+    sub_order: 'Burseraceae',
+    description: 'A pale, crooked twig from the dominant dry-zone tree, carrying a persistent balsamic fragrance beneath its mottled bark.',
+    details: [
+      'Pale bark breaks into cream, grey, and warm brown patches',
+      'Crooked branches form an open crown during the dry season',
+      'Small leaves are shed when drought intensifies and return after rain',
+      'Aromatic resin remains perceptible in freshly broken wood'
+    ],
+    habitat: 'dry scrub, transition zone, rocky slopes',
+    collected: false,
+    observations: [],
+    scientificValue: 4,
+    hybrid_ease: 5,
+    hybrid_temperature: 5,
+    danger: 1,
+    timeofday: 'Diurnal',
+    quote: '',
+    memoryText: '“The low crooked tree is nearly bare, yet a broken twig gives a surprisingly strong balsamic odour.”',
+    contents: 'A cut section shows pale fibrous wood with aromatic resin concentrated beneath the bark.',
+    keywords: ['palo santo', 'bursera', 'graveolens', 'tree', 'plant', 'resin', 'aromatic', 'dry zone']
+  },
+
+  {
     id: 'maize',
     name: 'Maize',
     latin: 'Zea mays',

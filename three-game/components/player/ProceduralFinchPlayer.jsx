@@ -4,8 +4,43 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-const FINCH_PLAYER_ROOT_SCALE = 0.45;
-const FINCH_PLAYER_MOTION_SCALE = FINCH_PLAYER_ROOT_SCALE / 0.82;
+const FINCH_VISUAL_VARIANTS = Object.freeze({
+  mediumGround: Object.freeze({
+    rootScale: 0.45,
+    bodyScale: [1, 1, 1],
+    headScale: [1, 1, 1],
+    beakScale: [1, 1, 1],
+    wingScale: [1, 1, 1],
+    tailScale: [1, 1, 1],
+    bodyTint: '#ffffff',
+    headTint: '#ffffff',
+    wingTint: '#ffffff',
+    tailTint: '#ffffff',
+    beakTint: '#ffffff',
+  }),
+  // Geospiza magnirostris is roughly a quarter longer than G. fortis, but
+  // its identifying feature is the massive seed-cracking bill: deep and
+  // broad at the base, with the culmen flowing almost directly from the
+  // crown. Keep the female brown/scaled field plumage used by specimen data
+  // while making the silhouette unmistakable at gameplay distance.
+  largeGround: Object.freeze({
+    rootScale: 0.54,
+    bodyScale: [1.1, 1.08, 1.08],
+    headScale: [1.14, 1.12, 1.12],
+    beakScale: [1.58, 1.66, 1.54],
+    wingScale: [1.06, 1.04, 1.04],
+    tailScale: [1.06, 1, 0.9],
+    bodyTint: '#d8c8ad',
+    headTint: '#cdbb9e',
+    wingTint: '#d2c0a3',
+    tailTint: '#c7b294',
+    beakTint: '#e0c090',
+  }),
+});
+
+function finchVisualVariant(id) {
+  return FINCH_VISUAL_VARIANTS[id] || FINCH_VISUAL_VARIANTS.mediumGround;
+}
 
 // ---------------------------------------------------------------------------
 // Geometry
@@ -805,9 +840,12 @@ const PRIMARY_COUNT = PRIMARY_LENGTHS.length;
 // leading-edge muscle lofts riding on them, then the primaries fanning from
 // the wrist, each staggered slightly lower than the one inside it so the
 // stack reads from behind.
-function Wing({ side, shoulderRef, handRef, featherRefs, geometries, materials }) {
+function Wing({ side, shoulderRef, handRef, featherRefs, geometries, materials, visual }) {
   return (
-    <group position={[side * 0.05, 0.372, 0.06]} scale={[side, 1, 1]}>
+    <group
+      position={[side * 0.05, 0.372, 0.06]}
+      scale={[side * visual.wingScale[0], visual.wingScale[1], visual.wingScale[2]]}
+    >
       <group ref={shoulderRef}>
         <mesh geometry={geometries.armWing} material={materials.armWing} castShadow />
         <mesh geometry={geometries.armCovert} material={materials.covert} castShadow position={[0, 0.01, 0.012]} />
@@ -842,7 +880,8 @@ function Wing({ side, shoulderRef, handRef, featherRefs, geometries, materials }
   );
 }
 
-export function ProceduralFinchPlayer({ motionRef }) {
+export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
+  const visual = finchVisualVariant(variant);
   const root = useRef(null);
   const body = useRef(null);
   const head = useRef(null);
@@ -959,24 +998,24 @@ export function ProceduralFinchPlayer({ motionRef }) {
   }, []);
 
   const materials = useMemo(() => ({
-    body: material('#ffffff', { map: textures.body, roughness: 0.95 }),
-    head: material('#ffffff', { map: textures.head, roughness: 0.94 }),
+    body: material(visual.bodyTint, { map: textures.body, roughness: 0.95 }),
+    head: material(visual.headTint, { map: textures.head, roughness: 0.94 }),
     // Wing tops get a touch less roughness than the body: flight feathers
     // have a faint sheen that down never does.
-    armWing: material('#ffffff', { map: textures.armWing, side: THREE.DoubleSide, roughness: 0.84 }),
-    handWing: material('#ffffff', { map: textures.handWing, side: THREE.DoubleSide, roughness: 0.84 }),
-    covert: material('#ffffff', { map: textures.covert, side: THREE.DoubleSide, roughness: 0.86 }),
-    primary: material('#ffffff', { map: textures.primary, side: THREE.DoubleSide, roughness: 0.86 }),
+    armWing: material(visual.wingTint, { map: textures.armWing, side: THREE.DoubleSide, roughness: 0.84 }),
+    handWing: material(visual.wingTint, { map: textures.handWing, side: THREE.DoubleSide, roughness: 0.84 }),
+    covert: material(visual.wingTint, { map: textures.covert, side: THREE.DoubleSide, roughness: 0.86 }),
+    primary: material(visual.wingTint, { map: textures.primary, side: THREE.DoubleSide, roughness: 0.86 }),
     armMass: material('#655843', { side: THREE.DoubleSide, roughness: 0.92 }),
-    tail: material('#ffffff', { map: textures.tail, side: THREE.DoubleSide, roughness: 0.85 }),
-    beak: material('#ffffff', { map: textures.beak, roughness: 0.45, envMapIntensity: 0.5 }),
+    tail: material(visual.tailTint, { map: textures.tail, side: THREE.DoubleSide, roughness: 0.85 }),
+    beak: material(visual.beakTint, { map: textures.beak, roughness: 0.45, envMapIntensity: 0.5 }),
     eye: material('#0a0705', { roughness: 0.25, emissive: '#020202', emissiveIntensity: 0.04, envMapIntensity: 0.8 }),
     eyeShine: material('#f4ede0', { roughness: 0.2, emissive: '#c9c0ae', emissiveIntensity: 0.5, envMapIntensity: 0.5 }),
     eyeRing: material('#a89a7c', { side: THREE.DoubleSide, roughness: 0.9 }),
     // Feathered thigh: flat belly-pale so it melts into the underbody.
     thigh: material('#b6a687', { roughness: 0.95 }),
     leg: material('#5a4f42', { roughness: 0.72 }),
-  }), [textures]);
+  }), [textures, visual]);
 
   const anim = useRef({
     flapPhase: 0,
@@ -1102,7 +1141,7 @@ export function ProceduralFinchPlayer({ motionRef }) {
         : Math.sin(t * 3.1) * 0.004;
 
     if (root.current) {
-      root.current.position.y = rootBob * FINCH_PLAYER_MOTION_SCALE;
+      root.current.position.y = rootBob * (visual.rootScale / 0.82);
     }
     // Grounded stance carries the body closer to horizontal (chest gently
     // lifted, weight over the feet); walking leans a touch forward. Flight
@@ -1206,7 +1245,12 @@ export function ProceduralFinchPlayer({ motionRef }) {
       const tailSpread = flying
         ? (landing ? 1.45 : 1.1 + a.climb * 0.4 - a.descend * 0.42)
         : 0.95;
-      tail.current.scale.x = THREE.MathUtils.damp(tail.current.scale.x, tailSpread, 5, delta);
+      tail.current.scale.x = THREE.MathUtils.damp(
+        tail.current.scale.x,
+        tailSpread * visual.tailScale[0],
+        5,
+        delta,
+      );
     }
     if (head.current) {
       const scan = flying ? Math.sin(t * 1.9) * 0.05 : Math.sin(t * 3.7) * 0.12;
@@ -1240,21 +1284,29 @@ export function ProceduralFinchPlayer({ motionRef }) {
   });
 
   return (
-    <group ref={root} scale={FINCH_PLAYER_ROOT_SCALE} position={[0, 0.01, 0]}>
+    <group ref={root} scale={visual.rootScale} position={[0, 0.01, 0]}>
       <group ref={body}>
-        <mesh geometry={geometries.body} material={materials.body} castShadow receiveShadow />
-        <Wing side={-1} shoulderRef={leftShoulder} handRef={leftHand} featherRefs={leftFeathers} geometries={geometries} materials={materials} />
-        <Wing side={1} shoulderRef={rightShoulder} handRef={rightHand} featherRefs={rightFeathers} geometries={geometries} materials={materials} />
-        <group ref={tail} position={[0, 0.35, -0.24]}>
+        <mesh geometry={geometries.body} material={materials.body} castShadow receiveShadow scale={visual.bodyScale} />
+        <Wing side={-1} shoulderRef={leftShoulder} handRef={leftHand} featherRefs={leftFeathers} geometries={geometries} materials={materials} visual={visual} />
+        <Wing side={1} shoulderRef={rightShoulder} handRef={rightHand} featherRefs={rightFeathers} geometries={geometries} materials={materials} visual={visual} />
+        <group ref={tail} position={[0, 0.35, -0.24]} scale={visual.tailScale}>
           <mesh geometry={geometries.tail} material={materials.tail} castShadow />
         </group>
         <group ref={head} position={[0, 0.465, 0.245]}>
-          <mesh geometry={geometries.head} material={materials.head} castShadow receiveShadow />
-          <mesh geometry={geometries.beak} material={materials.beak} castShadow position={[0, -0.008, 0.095]} />
+          <mesh geometry={geometries.head} material={materials.head} castShadow receiveShadow scale={visual.headScale} />
+          <mesh geometry={geometries.beak} material={materials.beak} castShadow position={[0, -0.008, 0.095]} scale={visual.beakScale} />
           {/* Eyes: large, dark, set high on the head sides, with a fixed
               catchlight — the catchlight is most of the life in the face. */}
           {[-1, 1].map(side => (
-            <group key={`eye-${side}`} position={[side * 0.07, 0.028, 0.048]} rotation={[0, side * 0.55, 0]}>
+            <group
+              key={`eye-${side}`}
+              position={[
+                side * 0.07 * visual.headScale[0],
+                0.028 * visual.headScale[1],
+                0.048 * visual.headScale[2],
+              ]}
+              rotation={[0, side * 0.55, 0]}
+            >
               <mesh rotation={[0, side * (Math.PI / 2), 0]} position={[side * 0.013, 0, 0]}>
                 <ringGeometry args={[0.02, 0.026, 24]} />
                 <primitive object={materials.eyeRing} attach="material" />

@@ -42,7 +42,7 @@ export function Lighting() {
       mist: weatherEnv.mistAmount,
       rain: weatherEnv.rainIntensity,
       lightDim: weatherEnv.lightDim,
-      moonFraction: sky.moon_phase.fraction,
+      moonFraction: sky.moonlight,
       underwaterAmount,
     });
 

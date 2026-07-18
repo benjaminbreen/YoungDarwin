@@ -49,6 +49,19 @@ function cormorantBeachHillocks(x, z, shoreD, movementSurface) {
   return duneBand * (rise + smallUndulation);
 }
 
+function cormorantMudShelfRelief(x, z, lagoon, lagoonInland, movementSurface) {
+  const innerEdge = THREE.MathUtils.smoothstep(lagoon, 1.02, 1.18);
+  const outerEdge = 1 - THREE.MathUtils.smoothstep(lagoon, 1.42, 1.72);
+  const shelf = innerEdge * outerEdge * lagoonInland;
+  if (shelf <= 0) return 0;
+
+  const broadShelf = 0.055 + elevationNoise(x * 0.12 + 21, z * 0.1 - 16) * 0.075;
+  const mudRills = movementSurface
+    ? 0
+    : terrainSurfaceNoise(x * 0.54 - 7, z * 0.51 + 12) * 0.032;
+  return shelf * (broadShelf + mudRills);
+}
+
 export function cormorantBayHeight(x, z, { movementSurface = false } = {}) {
   const shoreD = z - cormorantCoastZ(x); // > 0 inland, < 0 seaward.
   const lagoon = cormorantLagoonField(x, z);
@@ -70,6 +83,7 @@ export function cormorantBayHeight(x, z, { movementSurface = false } = {}) {
   let y = THREE.MathUtils.lerp(beachProfile, inlandProfile, inlandBlend);
 
   y += cormorantBeachHillocks(x, z, shoreD, movementSurface);
+  y += cormorantMudShelfRelief(x, z, lagoon, lagoonInland, movementSurface);
   y += rim * (1.05 + Math.abs(terrainSurfaceNoise(x * 0.25 + 5, z * 0.23 - 3))
     * (movementSurface ? 0.08 : 0.34));
   // Preserve the ocean-facing dune barrier before easing into the brackish

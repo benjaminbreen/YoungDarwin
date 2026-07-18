@@ -163,11 +163,13 @@ export function getPostOfficeBayOpuntiaHazards() {
       variant: 0,
     }))
     .map(item => {
-      const renderScale = item.scale * 1.05;
+      // The mature tree-cactus GLB is ~1.18 m tall at source scale. Render it
+      // around 4.2–5 m while retaining a smaller trunk-contact hazard radius.
+      const renderScale = item.scale * 3.6;
       return {
         ...item,
         renderScale,
-        hazardRadius: THREE.MathUtils.clamp(renderScale * 0.58, 1.15, 2.05),
+        hazardRadius: THREE.MathUtils.clamp(renderScale * 0.48, 1.55, 2.35),
         damage: 8,
       };
     });

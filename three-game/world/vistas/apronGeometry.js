@@ -17,7 +17,7 @@ import {
 // Geometry for the border aprons that continue each region's terrain past the
 // walkable edge. A single logical grid is built per vista and split along a
 // wandering seam ring into two meshes:
-//   - the near "carry strip" (map edge -> ~continuity.carryEnd), rendered by
+//   - the near "carry strip" (map edge -> ~continuity.surfaceCarryEnd), rendered by
 //     Terrain with the region's own splat material, so the ground at the seam
 //     is pixel-identical to the walkable terrain;
 //   - the far vista mesh, rendered by BorderVistas with vertex colors that
@@ -220,9 +220,116 @@ function targetPreviewPoint(config, targetEdge, u, inwardDistance) {
   return edgePoint(config, targetEdge, u, inwardDistance);
 }
 
+function targetPointPreviewCoordinates(config, targetEdge, x, z) {
+  const halfW = config.width / 2;
+  const halfD = config.depth / 2;
+  if (targetEdge === 'north') return { u: x / config.width + 0.5, inwardDistance: z + halfD };
+  if (targetEdge === 'south') return { u: x / config.width + 0.5, inwardDistance: halfD - z };
+  if (targetEdge === 'east') return { u: z / config.depth + 0.5, inwardDistance: halfW - x };
+  return { u: z / config.depth + 0.5, inwardDistance: x + halfW };
+}
+
+// Projects normalized edge/depth coordinates onto the same schematic terrain
+// surface used by BorderVistas. `u` may extend slightly beyond 0..1 for an
+// apron-owned corner; terrain sampling clamps to the corner while world-space
+// placement continues around it.
+export function projectApronPreviewPoint(
+  regionId,
+  config,
+  targetRegionId,
+  targetConfig,
+  vista,
+  transition,
+  u,
+  requestedOutsideDistance,
+) {
+  const axes = EDGE_AXES[vista.edge];
+  const targetEdge = transition?.targetEdge || OPPOSITE_VISTA_EDGE[vista.edge];
+  if (!axes || !targetEdge || !targetConfig) return null;
+
+  const previewDepth = Math.min(vista.apronDepth || 72, 64);
+  const targetSampleDepth = Math.min(
+    targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
+    previewDepth + 10,
+  );
+  const outsideDistance = THREE.MathUtils.clamp(requestedOutsideDistance, 0, previewDepth);
+  const outsideT = outsideDistance / Math.max(0.001, previewDepth);
+  const targetDistance = outsideT * targetSampleDepth;
+  const clampedU = THREE.MathUtils.clamp(u, 0, 1);
+  const along = normalize2(axes.along);
+  const outward = normalize2(axes.outward);
+  const origin = edgeOrigin(config, vista.edge);
+  const alongDistance = (u - 0.5) * axisLength(config, vista.edge);
+  const [x, z] = worldPoint(origin, along, outward, alongDistance, outsideDistance);
+  const [edgeX, edgeZ] = edgePoint(config, vista.edge, clampedU, 0);
+  const edgeY = terrainHeight(edgeX, edgeZ, regionId);
+  const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, 0);
+  const targetEdgeY = terrainHeight(targetEdgeX, targetEdgeZ, targetRegionId);
+  const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
+  const targetY = terrainHeight(targetX, targetZ, targetRegionId);
+  const continuity = transition?.continuity || null;
+  const heightBlend = continuity
+    ? THREE.MathUtils.smoothstep(outsideDistance, continuity.ridgeStart, continuity.ridgeFull)
+    : THREE.MathUtils.smoothstep(outsideDistance, 0, continuity?.carryEnd ?? 12);
+  const sourceCarryY = edgeY
+    - BORDER_COLLAR_DROP
+    - outsideT * 0.035
+    + apronReliefNoise(x, z, (vista.seed || 0) + 211) * 0.045 * (continuity?.seamNoiseStrength ?? 0.35);
+  const targetProfileY = targetY
+    + (edgeY - targetEdgeY) * (1 - heightBlend)
+    + apronReliefNoise(x, z, (vista.seed || 0) + 173) * 0.08 * heightBlend;
+
+  return {
+    x,
+    y: THREE.MathUtils.lerp(sourceCarryY, targetProfileY, heightBlend),
+    z,
+    u,
+    clampedU,
+    outsideDistance,
+    outsideT,
+    previewDepth,
+    targetGroundY: targetY,
+  };
+}
+
+// Projects a point from the neighboring map onto the apron. Target placements
+// remain tied to their authored habitats and route clearings; source-side
+// continuation uses projectApronPreviewPoint directly with a remapped depth.
+export function projectNeighborPreviewPoint(
+  regionId,
+  config,
+  targetRegionId,
+  targetConfig,
+  vista,
+  transition,
+  targetX,
+  targetZ,
+) {
+  const targetEdge = transition?.targetEdge || OPPOSITE_VISTA_EDGE[vista.edge];
+  if (!targetEdge || !targetConfig) return null;
+  const previewDepth = Math.min(vista.apronDepth || 72, 64);
+  const targetSampleDepth = Math.min(
+    targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
+    previewDepth + 10,
+  );
+  const { u, inwardDistance } = targetPointPreviewCoordinates(targetConfig, targetEdge, targetX, targetZ);
+  if (u < 0 || u > 1 || inwardDistance < 0 || inwardDistance > targetSampleDepth) return null;
+  return projectApronPreviewPoint(
+    regionId,
+    config,
+    targetRegionId,
+    targetConfig,
+    vista,
+    transition,
+    u,
+    inwardDistance / Math.max(0.001, targetSampleDepth) * previewDepth,
+  );
+}
+
 export function edgeLandStrength(regionId, config, edge, u) {
-  const [edgeX, edgeZ] = edgePoint(config, edge, u, 0);
-  const [innerX, innerZ] = edgePoint(config, edge, u, 5.5);
+  const clampedU = THREE.MathUtils.clamp(u, 0, 1);
+  const [edgeX, edgeZ] = edgePoint(config, edge, clampedU, 0);
+  const [innerX, innerZ] = edgePoint(config, edge, clampedU, 5.5);
   const edgeY = terrainHeight(edgeX, edgeZ, regionId);
   const innerY = terrainHeight(innerX, innerZ, regionId);
   return Math.max(
@@ -289,7 +396,7 @@ function vistaRendersPreview(regionId, edge) {
 // covered by exactly one apron sweeping around it with clamped sampling:
 // north/south aprons own their corners; east/west aprons only pick up a
 // corner when the adjoining north/south edge renders no preview.
-function cornerExtension(regionId, vista, end) {
+export function apronOwnsCorner(regionId, vista, end) {
   const adjacentEdge = CORNER_ADJACENT_EDGE[vista.edge]?.[end];
   if (!adjacentEdge) return false;
   if (vista.edge === 'north' || vista.edge === 'south') return true;
@@ -327,8 +434,8 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   );
   const axisLen = axisLength(config, vista.edge);
   const baseWidth = axisLen * 1.04;
-  const extLow = cornerExtension(regionId, vista, 0) ? previewDepth : 0;
-  const extHigh = cornerExtension(regionId, vista, 1) ? previewDepth : 0;
+  const extLow = apronOwnsCorner(regionId, vista, 0) ? previewDepth : 0;
+  const extHigh = apronOwnsCorner(regionId, vista, 1) ? previewDepth : 0;
   const width = baseWidth + extLow + extHigh;
   const alongStart = -baseWidth / 2 - extLow;
   // Fine enough that the area-averaged vertex colors interpolate as gradients;
@@ -343,9 +450,13 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   const blends = [];
 
   // Seam ring where the region-material carry strip hands off to the vista
-  // mesh: nominally at continuity.carryEnd, wandering per column so the
-  // material switch never draws a straight line.
-  const seamTarget = THREE.MathUtils.clamp(continuity?.carryEnd ?? 16, 10, previewDepth * 0.6);
+  // mesh: the surface handoff can precede the longer height-continuity carry,
+  // and wanders per column so the material switch never draws a straight line.
+  const seamTarget = THREE.MathUtils.clamp(
+    continuity?.surfaceCarryEnd ?? continuity?.carryEnd ?? 16,
+    8,
+    previewDepth * 0.6,
+  );
   let seamRow = collarRows + 1;
   for (let row = collarRows + 1; row <= rows - 2; row += 1) {
     seamRow = row;

@@ -19,7 +19,6 @@ import { StaticGLB } from '../../assets/StaticGLB';
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 import { terrainHeight } from '../../../world/terrain';
 import { CanopySilhouetteLayer } from './CanopySilhouetteLayer';
-import { GroundCoverField } from './GroundCoverField';
 import { DenseGrassField } from './DenseGrassField';
 import { HybridGrassTuftField } from './HybridGrassTuftField';
 import { StylizedMeadowField } from './StylizedMeadowField';
@@ -49,7 +48,6 @@ const GLB_PATH_RE = /\.(?:glb|gltf)(?:[?#].*)?$/i;
 const EMPTY_LAYER_PLAN = {
   flora: [],
   proceduralFlora: [],
-  groundCover: [],
   denseGrass: [],
   hybridGrassTufts: [],
   stylizedMeadows: [],
@@ -216,7 +214,6 @@ export function EcologyRenderer({ ecology, settings = {} }) {
     return {
       flora: (ecology.flora || []).filter(tierVisible),
       proceduralFlora: (ecology.proceduralFlora || []).filter(tierVisible),
-      groundCover: (ecology.groundCover || []).filter(tierVisible),
       denseGrass: (ecology.denseGrass || []).filter(tierVisible),
       hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(tierVisible),
       stylizedMeadows: (ecology.stylizedMeadows || []).filter(tierVisible),
@@ -243,7 +240,6 @@ export function EcologyRenderer({ ecology, settings = {} }) {
   const {
     flora,
     proceduralFlora,
-    groundCover,
     denseGrass,
     hybridGrassTufts,
     stylizedMeadows,
@@ -292,9 +288,6 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       <OptionalSplatBackdrop backdrop={ecology.splatBackdrop} enabled={settings.splatBackdrop !== false} />
       {lagoonSurfaces.map(surface => (
         <StandingWaterSurface key={surface.id} surface={surface} />
-      ))}
-      {groundCover.map(layer => (
-        <GroundCoverField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
       ))}
       {denseGrass.map(layer => (
         <DenseGrassField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />

@@ -13,7 +13,7 @@ import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
 import { BreakablePlantField } from '../breakablePlant/BreakablePlantField';
 import { seededUnit } from '../breakablePlant/plantGeoUtils';
 import { getFlowerGeometries } from '../pricklyPear/pricklyPearModel';
-import { LAVA_CACTUS_SITES } from './lavaCactusSites';
+import { getLavaCactusSites, LAVA_CACTUS_SITES } from './lavaCactusSites';
 import {
   buildLavaCactus,
   buildLavaCactusDressing,
@@ -34,8 +34,7 @@ const WIND_FLOWER = 0.03;
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-function buildZonePieces(zoneId) {
-  const sites = LAVA_CACTUS_SITES[zoneId] || [];
+function buildZonePieces(zoneId, sites = getLavaCactusSites(zoneId)) {
   const pieces = [];
   const scratch = new THREE.Vector3();
   for (const site of sites) {
@@ -224,6 +223,8 @@ function renderPiece(piece) {
 const LAVA_CACTUS_SPEC = {
   id: 'lava-cactus',
   sitesByZone: LAVA_CACTUS_SITES,
+  getSites: getLavaCactusSites,
+  examinableSpecimenId: 'cactus',
   buildZonePieces,
   SiteDressing,
   renderPiece,

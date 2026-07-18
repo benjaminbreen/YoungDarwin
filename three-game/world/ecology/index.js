@@ -29,6 +29,7 @@ import { buildWatkinsCampEcology } from './watkinsCamp';
 import { buildPostScrubRiseEcology } from './postScrubRise';
 import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
+import { buildNorthernHighlandsEcology } from './northernHighlands';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
@@ -62,6 +63,7 @@ const builders = {
   WATKINS: buildWatkinsCampEcology,
   POST_SCRUB_RISE: buildPostScrubRiseEcology,
   LAVA_FLATS: buildLavaFlatsEcology,
+  NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
 };
 
 // Dev tooling uses this registry-derived list instead of maintaining a second

@@ -512,7 +512,12 @@ export function updatePlayerInteractions({
     const specimen = specimenId
       ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
       : null;
-    if (currentState.nearbyNpcEncounter && !stateRef.current.action) {
+    if (currentState.carriedObjectId) {
+      // A zero-distance drop prompt must win over books, furniture, NPCs, and
+      // other ambient E targets. Otherwise the HUD can promise "drop" while E
+      // performs an unrelated nearby interaction.
+      currentState.dropCarriedObject?.({ reason: 'manual', mode: 'place' });
+    } else if (currentState.nearbyNpcEncounter && !stateRef.current.action) {
       currentState.openNpcEncounter?.(currentState.nearbyNpcEncounter.npcId);
     } else if (currentState.interiorPrompt) {
       const prompt = currentState.interiorPrompt;
@@ -525,7 +530,6 @@ export function updatePlayerInteractions({
           },
         });
       } else if (prompt.mode === 'interior-rest' && !stateRef.current.action) {
-        if (currentState.carriedObjectId) setCarriedObject(null);
         placePlayerAt?.({ position: prompt.restPose, facing: prompt.facing });
         const restFacing = prompt.facing || [0, 0, 1];
         stateRef.current.collectionFaceMotion = {
@@ -582,8 +586,6 @@ export function updatePlayerInteractions({
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
         currentState.checkSnareTrap?.(currentState.carryPrompt.id);
-      } else if (currentState.carriedObjectId) {
-        setCarriedObject(null);
       } else if (currentState.carryPrompt.mode === 'pickup') {
         if (!stateRef.current.action) {
           startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });

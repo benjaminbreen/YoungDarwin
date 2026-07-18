@@ -180,6 +180,7 @@ function createPlacementShape(rapier, prop) {
 export function PhysicsProp({ prop, onBreak }) {
   const bodyRef = useRef(null);
   const colliderRef = useRef(null);
+  const visualRef = useRef(null);
   const carriedRef = useRef(false);
   const inWaterRef = useRef(false);
   const pendingStrikesRef = useRef([]);
@@ -232,7 +233,7 @@ export function PhysicsProp({ prop, onBreak }) {
 
   const handlePlayerContact = useCallback((payload = {}) => {
     const body = bodyRef.current;
-    if (!body || isCarried || !isPlayerCollisionTarget(payload.other)) return;
+    if (!body || carriedRef.current || !isPlayerCollisionTarget(payload.other)) return;
     if (!canPushObject(mobility)) return;
     if (clockRef.current - lastPlayerPushContactRef.current <= PLAYER_PUSH_CONTACT_COOLDOWN) return;
 
@@ -280,7 +281,7 @@ export function PhysicsProp({ prop, onBreak }) {
       fixed: Boolean(fixedBody),
       direction: { x: toProp.x, y: 0, z: toProp.z },
     });
-  }, [currentZoneId, fixedBody, isCarried, mobility, prop, propMass]);
+  }, [currentZoneId, fixedBody, mobility, prop, propMass]);
 
   // Queue tool swings; the hit lands impactDelay seconds into the animation.
   // Direct responders (breakable/strikeable) take the full hit; any other
@@ -373,90 +374,155 @@ export function PhysicsProp({ prop, onBreak }) {
     if (state.carryPrompt?.id === prop.id) setCarryPrompt(null);
   }, [carryable, prop.id, setCarryPrompt]);
 
-  // Carry transitions. Body type and sensor flips are declared on the JSX
-  // below (type/sensor props) because react-three-rapier re-applies its
-  // `type` option whenever its options effect re-runs — an imperative
-  // setBodyType gets silently reverted to "dynamic" on the next re-render.
-  // This effect runs after RigidBody's own effects, so on drop the body is
-  // already dynamic when the collision-checked ground placement is applied.
-  useEffect(() => {
+  const enterCarry = useCallback(() => {
     const body = bodyRef.current;
     if (!body || !carryable) return;
-    if (isCarried) {
-      carriedRef.current = true;
-      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-      const pose = getRuntimePlayerPose();
-      const player = vectorFromStore(pose?.position, scratch.current.player);
-      const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
-      computeCarryPose(player, facing, carryable, scratch.current);
-      body.setTranslation(scratch.current.carryTarget, true);
-      body.setRotation(scratch.current.carryQuaternion, true);
-      body.wakeUp();
-    } else if (carriedRef.current) {
-      carriedRef.current = false;
-      const pose = getRuntimePlayerPose();
-      const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
-      if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
-      facing.normalize();
-      const player = vectorFromStore(pose?.position, scratch.current.player);
-      const candidates = carryPlacementCandidates({
-        prop,
-        player,
-        facing,
-        terrainHeight: (x, z) => movementTerrainHeight(x, z, currentZoneId),
-      });
-      // The farthest straight-ahead candidate is the least surprising
-      // emergency fallback if every overlap query reports a cramped room.
-      let placement = candidates[Math.max(0, candidates.length - 8)];
-      for (const candidate of candidates) {
-        scratch.current.carryEuler.set(
-          candidate.rotation[0] || 0,
-          candidate.rotation[1] || 0,
-          candidate.rotation[2] || 0,
-          'YXZ',
-        );
-        scratch.current.carryQuaternion.setFromEuler(scratch.current.carryEuler);
-        const overlap = world.intersectionWithShape(
-          candidate.position,
-          scratch.current.carryQuaternion,
-          placementShape,
-          undefined,
-          undefined,
-          colliderRef.current || undefined,
-          body,
-        );
-        if (!overlap) {
-          placement = candidate;
-          break;
-        }
-      }
+    carriedRef.current = true;
+    if (visualRef.current) visualRef.current.visible = false;
+    const collider = colliderRef.current;
+    collider?.setSensor(true);
+    collider?.setEnabled(false);
+    body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    const pose = getRuntimePlayerPose();
+    const player = vectorFromStore(pose?.position, scratch.current.player);
+    const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
+    computeCarryPose(player, facing, carryable, scratch.current);
+    body.setTranslation(scratch.current.carryTarget, true);
+    body.setRotation(scratch.current.carryQuaternion, true);
+    body.wakeUp();
+  }, [carryable, rapier.RigidBodyType.KinematicPositionBased]);
+
+  const placeCarriedBody = useCallback(pose => {
+    const body = bodyRef.current;
+    if (!body) return null;
+    const facing = vectorFromStore(pose?.facing, scratch.current.facing, DEFAULT_FACING);
+    if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
+    facing.normalize();
+    const player = vectorFromStore(pose?.position, scratch.current.player);
+    const candidates = carryPlacementCandidates({
+      prop,
+      player,
+      facing,
+      terrainHeight: (x, z) => movementTerrainHeight(x, z, currentZoneId),
+    });
+    const placement = candidates.find(candidate => {
+      if (!isWalkableTerrain(candidate.position.x, candidate.position.z, currentZoneId)) return false;
       scratch.current.carryEuler.set(
-        placement.rotation[0] || 0,
-        placement.rotation[1] || 0,
-        placement.rotation[2] || 0,
+        candidate.rotation[0] || 0,
+        candidate.rotation[1] || 0,
+        candidate.rotation[2] || 0,
         'YXZ',
       );
       scratch.current.carryQuaternion.setFromEuler(scratch.current.carryEuler);
-      body.wakeUp();
-      body.setTranslation(placement.position, true);
-      body.setRotation(scratch.current.carryQuaternion, true);
-      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    }
-  }, [carryable, currentZoneId, isCarried, placementShape, prop, world]);
+      return !world.intersectionWithShape(
+        candidate.position,
+        scratch.current.carryQuaternion,
+        placementShape,
+        rapier.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        colliderRef.current || undefined,
+        body,
+      );
+    });
+    if (!placement) return null;
+    scratch.current.carryEuler.set(
+      placement.rotation[0] || 0,
+      placement.rotation[1] || 0,
+      placement.rotation[2] || 0,
+      'YXZ',
+    );
+    scratch.current.carryQuaternion.setFromEuler(scratch.current.carryEuler);
+    body.setTranslation(placement.position, true);
+    body.setRotation(scratch.current.carryQuaternion, true);
+    return placement;
+  }, [currentZoneId, placementShape, prop, rapier.QueryFilterFlags.EXCLUDE_SENSORS, world]);
+
+  const leaveCarry = useCallback((pose, mode = 'place') => {
+    const body = bodyRef.current;
+    if (!body) return null;
+    const placement = mode === 'release' ? null : placeCarriedBody(pose);
+    if (mode !== 'release' && !placement) return null;
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    const collider = colliderRef.current;
+    collider?.setSensor(false);
+    body.setBodyType(rapier.RigidBodyType.Dynamic, true);
+    collider?.setEnabled(true);
+    body.wakeUp();
+    carriedRef.current = false;
+    if (visualRef.current) visualRef.current.visible = true;
+    return { placement };
+  }, [placeCarriedBody, rapier.RigidBodyType.Dynamic]);
+
+  // Store subscriptions run in the same call stack as the carry action. That
+  // gives physics, rendering ownership, and prompt state one atomic handoff;
+  // React's declarative type/sensor props then render the same final state.
+  // The collider itself stays disabled for the whole carry so the prop cannot
+  // block its carrier through contact or character-controller queries.
+  useEffect(() => {
+    const syncCarryState = (state, previousState = {}) => {
+      const request = state.carryDropRequest;
+      if (
+        request?.id === prop.id
+        && request.requestId !== previousState.carryDropRequest?.requestId
+      ) {
+        if (request.zoneId !== currentZoneId) {
+          state.cancelCarryDrop?.(prop.id, request.requestId);
+          return;
+        }
+        const result = leaveCarry(request, request.mode);
+        if (result) {
+          state.completeCarryDrop?.(prop.id, request.requestId);
+          if (result.placement) {
+            const distance = Math.max(0, Math.hypot(
+              result.placement.position.x - request.position.x,
+              result.placement.position.z - request.position.z,
+            ) - propPickupRadius(prop));
+            setCarryPrompt({
+              id: prop.id,
+              label: prop.label,
+              mode: 'pickup',
+              distance,
+              text: `Press E to pick up ${prop.label}`,
+            });
+          }
+        } else {
+          state.cancelCarryDrop?.(
+            prop.id,
+            request.requestId,
+            `There is not enough room to put down ${prop.label}.`,
+          );
+        }
+        return;
+      }
+
+      const carriedHere = state.carriedObjectId === prop.id;
+      if (carriedHere && !carriedRef.current) enterCarry();
+      else if (!carriedHere && carriedRef.current) {
+        // Compatibility path for teardown and older direct callers.
+        if (!leaveCarry(getRuntimePlayerPose())) leaveCarry(null, 'release');
+      }
+    };
+
+    const state = useThreeGameStore.getState();
+    syncCarryState(state);
+    return useThreeGameStore.subscribe(syncCarryState);
+  }, [currentZoneId, enterCarry, leaveCarry, prop, setCarryPrompt]);
 
   useFrame((_, delta) => {
     const body = bodyRef.current;
     if (!body) return;
     clockRef.current += delta;
+    const carriedHere = carriedRef.current;
 
     const translation = body.translation();
     const vectors = scratch.current;
     const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
-    if (isCarried) removePropPose(currentZoneId, prop.id);
+    if (carriedHere) removePropPose(currentZoneId, prop.id);
     else publishPropPose(currentZoneId, prop.id, translation);
-    if (!fixedBody && !isCarried) clampAngularVelocity(body, mobility, sidewaysBarrel);
+    if (!fixedBody && !carriedHere) clampAngularVelocity(body, mobility, sidewaysBarrel);
 
     // Resolve queued tool strikes once their impact moment arrives.
     if (pendingStrikesRef.current.length) {
@@ -529,7 +595,7 @@ export function PhysicsProp({ prop, onBreak }) {
     const playerPose = getRuntimePlayerPose();
     if (
       body.isSleeping?.()
-      && !isCarried
+      && !carriedHere
       && !buoyant
       && !inWaterRef.current
       && !pendingStrikesRef.current.length
@@ -553,9 +619,9 @@ export function PhysicsProp({ prop, onBreak }) {
     const horizontalDistance = Math.hypot(propPosition.x - player.x, propPosition.z - player.z);
 
     if (carryable) {
-      // Only steer the body once the carry effect has flipped it kinematic;
+      // Only steer the body once the synchronous carry transition made it kinematic;
       // before that, setNextKinematicTranslation would teleport a dynamic body.
-      if (isCarried && carriedRef.current) {
+      if (carriedHere) {
         // Sleeping bodies are skipped by @react-three/rapier's mesh sync and
         // setNextKinematicTranslation does not wake them, so keep it awake.
         body.wakeUp();
@@ -573,9 +639,6 @@ export function PhysicsProp({ prop, onBreak }) {
         });
         return;
       }
-      // Transition frame: carried but the effect hasn't run yet — hold off.
-      if (isCarried) return;
-
       const distance = Math.max(0, horizontalDistance - propPickupRadius(prop));
       const activePrompt = useThreeGameStore.getState().carryPrompt;
       if (!activePrompt || activePrompt.id === prop.id || distance < (activePrompt.distance ?? Infinity)) {
@@ -599,7 +662,7 @@ export function PhysicsProp({ prop, onBreak }) {
     const overWater = seabedY < WATER_LEVEL - 0.12;
     const nearWater = seabedY < WATER_LEVEL + 0.55;
     const wateryMotion = overWater && translation.y < WATER_LEVEL + 0.35;
-    if (!fixedBody && !isCarried && !wateryMotion) {
+    if (!fixedBody && !carriedHere && !wateryMotion) {
       const restY = seabedY + (prop.restOffset * propScale);
       applyMobilityVelocityLimits({
         body,
@@ -694,6 +757,7 @@ export function PhysicsProp({ prop, onBreak }) {
     >
       <PropCollider prop={prop} colliderRef={colliderRef} sensor={isCarried} />
       <group
+        ref={visualRef}
         visible={!isCarried}
         scale={propScale}
         onClick={prop.inspectable ? event => {

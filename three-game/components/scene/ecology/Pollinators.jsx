@@ -742,7 +742,7 @@ export function Pollinators({ enabled = true }) {
       assets.glintGeo.attributes.position.needsUpdate = true;
       assets.glintMat.uniforms.uTime.value = t;
       assets.glintMat.uniforms.uGate.value = beeGate.current;
-      const sun = sunDirection(timeOfDay ?? 12);
+      const sun = sunDirection(timeOfDay ?? 12, day || 1);
       assets.glintMat.uniforms.uSun.value.set(sun[0], sun[1], sun[2]);
     }
 

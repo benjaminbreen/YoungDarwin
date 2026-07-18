@@ -19,14 +19,13 @@ export function carryGripForProp(prop = {}) {
   const scale = (prop.scale || 1) * (carryable.holdScale || 1);
   const authoredMode = carryable.grip;
   const mode = authoredMode || (radius >= 0.235 ? 'twoHand' : 'rightHand');
-  const restOffset = Math.max(0.04, (prop.restOffset || 0.18) * (prop.scale || 1));
-  const defaultDown = mode === 'twoHand'
-    ? -Math.min(0.28, restOffset * 0.74)
-    : -Math.min(0.28, restOffset * 0.62);
 
   return {
     mode,
-    offset: carryable.gripOffset || [0, defaultDown, mode === 'twoHand' ? 0.06 : 0.025],
+    // The attachment origin is already the palm midpoint (or right hand).
+    // restOffset belongs to ground placement and made every default grip hang
+    // below the hands. Unusual shapes can opt into an authored gripOffset.
+    offset: carryable.gripOffset || [0, 0, mode === 'twoHand' ? 0.06 : 0.025],
     rotation: carryable.gripRotation || [0, 0, 0],
     scale,
     animationStyle: carryable.animationStyle || (mode === 'rightHand' ? 'freeHand' : 'fixedHands'),

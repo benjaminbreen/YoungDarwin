@@ -1,34 +1,226 @@
 import * as THREE from 'three';
 import {
+  disposePackedPbrTerrainSet,
   FLOREANA_PBR_TEXTURES,
-  loadRepeatingTerrainTexture,
+  loadPackedPbrTerrainSet,
 } from '../materials/pbrTerrainTextures';
 
-function loadAlbedo(textureSet) {
-  return loadRepeatingTerrainTexture(textureSet.albedo, {
-    fallback: textureSet.fallbacks?.albedo || '#ffffff',
-    colorSpace: THREE.SRGBColorSpace,
-  });
+const LAYERS = {
+  sand: FLOREANA_PBR_TEXTURES.whiteSandBeach,
+  olivine: FLOREANA_PBR_TEXTURES.olivineBeach,
+  meadow: FLOREANA_PBR_TEXTURES.coastalGrassShoulder,
+  mud: FLOREANA_PBR_TEXTURES.brackishMud,
+};
+
+function f(value) {
+  return Number(value).toFixed(3);
 }
 
-function loadDataTexture(path, fallback) {
-  return loadRepeatingTerrainTexture(path, {
-    fallback,
-    colorSpace: THREE.NoColorSpace,
-  });
+function fragmentCommon() {
+  return /* glsl */`
+        uniform float uSwashTime;
+        uniform sampler2D uCbSandAlbedo;
+        uniform sampler2D uCbSandNrh;
+        uniform sampler2D uCbOlivineAlbedo;
+        uniform sampler2D uCbOlivineNrh;
+        uniform sampler2D uCbMeadowAlbedo;
+        uniform sampler2D uCbMeadowNrh;
+        uniform sampler2D uCbMudAlbedo;
+        uniform sampler2D uCbMudNrh;
+        varying vec3 vCormorantWorld;
+
+        vec2 cbSandUv;
+        vec2 cbOlivineUv;
+        vec2 cbMeadowUv;
+        vec2 cbMudUv;
+        vec4 cbPbrWeights;
+        vec4 cbSandNrhValue;
+        vec4 cbOlivineNrhValue;
+        vec4 cbMeadowNrhValue;
+        vec4 cbMudNrhValue;
+        float cbSurfaceWetness;
+
+        float cbHash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+        float cbNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 q = fract(p);
+          vec2 u = q * q * (3.0 - 2.0 * q);
+          return mix(
+            mix(cbHash(i), cbHash(i + vec2(1.0, 0.0)), u.x),
+            mix(cbHash(i + vec2(0.0, 1.0)), cbHash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+        float cbCoastZ(float x) {
+          return -22.0 + sin(x * 0.052 + 0.6) * 3.6 + sin(x * 0.021 - 1.4) * 2.4;
+        }
+        float cbEllipseDistance(vec2 p, vec2 center, vec2 radii) {
+          vec2 localPoint = (p - center) / radii;
+          return length(localPoint);
+        }
+        float cbLagoonField(vec2 p) {
+          float northLagoon = cbEllipseDistance(p, vec2(-8.0, -1.0), vec2(28.0, 14.0));
+          float southLagoon = cbEllipseDistance(p, vec2(14.0, 7.0), vec2(20.0, 10.0));
+          return min(northLagoon, southLagoon);
+        }
+        float cbSegmentDistance(vec2 p, vec2 a, vec2 b) {
+          vec2 ab = b - a;
+          float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+          return length(p - (a + ab * t));
+        }
+        float cbTrailDistance(vec2 p) {
+          float distanceToTrail = cbSegmentDistance(p, vec2(-38.0, 25.0), vec2(-24.0, 14.0));
+          distanceToTrail = min(distanceToTrail, cbSegmentDistance(p, vec2(-24.0, 14.0), vec2(-8.0, 10.0)));
+          distanceToTrail = min(distanceToTrail, cbSegmentDistance(p, vec2(-8.0, 10.0), vec2(10.0, 15.0)));
+          distanceToTrail = min(distanceToTrail, cbSegmentDistance(p, vec2(10.0, 15.0), vec2(31.0, 27.0)));
+          return distanceToTrail + (cbNoise(p * 0.55 + vec2(4.0, -7.0)) - 0.5) * 0.64;
+        }
+        float cbRimMask(vec2 p, float shoreDistance) {
+          float northRim = smoothstep(17.0, 41.0, -p.y);
+          float eastRim = smoothstep(31.0, 51.0, p.x) * 0.75;
+          float westRim = smoothstep(42.0, 55.0, -p.x) * 0.62;
+          float brokenRim = 0.78 + (cbNoise(p * vec2(0.22, 0.24) + vec2(-9.0, 3.0)) - 0.5) * 0.44;
+          return clamp(max(northRim, max(eastRim, westRim)) * brokenRim, 0.0, 1.0)
+            * smoothstep(19.0, 34.0, shoreDistance);
+        }
+        vec4 cbLayerWeights(vec2 p) {
+          float shoreDistance = p.y - cbCoastZ(p.x);
+          float boundaryNoise = (cbNoise(p * 0.085 + vec2(8.0, -3.0)) - 0.5) * 5.0;
+          float lagoonDistance = cbLagoonField(p);
+          float lagoonInland = smoothstep(9.0, 18.0, shoreDistance);
+          float mudCore = lagoonInland * (1.0 - smoothstep(1.18, 1.5, lagoonDistance));
+          float mudApron = lagoonInland * (1.0 - smoothstep(1.42, 1.78, lagoonDistance)) * 0.32;
+          float mudWeight = clamp(max(mudCore, mudApron), 0.0, 1.0);
+
+          float trailDistance = cbTrailDistance(p);
+          float trailCore = 1.0 - smoothstep(1.35, 4.6, trailDistance);
+          float trailShoulder = (1.0 - smoothstep(3.6, 7.6, trailDistance)) * 0.34;
+          float mineralBand = smoothstep(2.5, 8.5, shoreDistance + boundaryNoise)
+            * (1.0 - smoothstep(19.0, 29.0, shoreDistance + boundaryNoise)) * 0.36;
+          float olivineWeight = max(trailCore, max(trailShoulder, mineralBand)) * (1.0 - mudWeight * 0.9);
+
+          float inland = smoothstep(15.0, 29.0, shoreDistance + boundaryNoise);
+          float meadowVariation = cbNoise(p * 0.11 + vec2(-6.0, 12.0));
+          float meadowWeight = inland * mix(0.74, 0.98, meadowVariation)
+            * (1.0 - mudWeight * 0.92)
+            * (1.0 - trailCore * 0.88);
+          float sandWeight = max(0.0, 1.0 - mudWeight - olivineWeight - meadowWeight);
+          vec4 weights = vec4(sandWeight, olivineWeight, meadowWeight, mudWeight);
+          return weights / max(dot(weights, vec4(1.0)), 0.0001);
+        }
+        vec2 cbNormalSlope(vec4 nrhValue, float strength) {
+          vec2 xy = nrhValue.rg * 2.0 - 1.0;
+          float z = sqrt(max(1.0 - min(dot(xy, xy), 0.98), 0.02));
+          return (xy / max(z, 0.18)) * strength;
+        }`;
 }
 
-// The canonical bay previously inherited three experimental material layers,
-// six complete biome texture families, procedural splats, meadow linework and
-// reconstructed normals before applying its beach. Keep the authored terrain
-// vertex colors for lagoon/scrub/rim identity, and spend fragment work only on
-// the broad sand shelf that actually needs close surface detail.
+function colorFragment() {
+  return /* glsl */`
+        vec2 cbPosition = vCormorantWorld.xz;
+        float cbShoreDistance = cbPosition.y - cbCoastZ(cbPosition.x);
+        float cbLagoonDistance = cbLagoonField(cbPosition);
+        float cbLagoonInland = smoothstep(9.0, 18.0, cbShoreDistance);
+        float cbRim = cbRimMask(cbPosition, cbShoreDistance);
+        cbSandUv = cbPosition * ${f(LAYERS.sand.scale)} + vec2(0.13, -0.21);
+        cbOlivineUv = cbPosition * ${f(LAYERS.olivine.scale)} + vec2(-0.31, 0.17);
+        cbMeadowUv = cbPosition * ${f(LAYERS.meadow.scale)} + vec2(0.23, 0.37);
+        cbMudUv = cbPosition * ${f(LAYERS.mud.scale)} + vec2(-0.19, -0.29);
+
+        cbSandNrhValue = texture2D(uCbSandNrh, cbSandUv);
+        cbOlivineNrhValue = texture2D(uCbOlivineNrh, cbOlivineUv);
+        cbMeadowNrhValue = texture2D(uCbMeadowNrh, cbMeadowUv);
+        cbMudNrhValue = texture2D(uCbMudNrh, cbMudUv);
+        cbPbrWeights = cbLayerWeights(cbPosition);
+        vec4 cbHeightBias = mix(
+          vec4(0.94),
+          vec4(1.06),
+          vec4(cbSandNrhValue.a, cbOlivineNrhValue.a, cbMeadowNrhValue.a, cbMudNrhValue.a)
+        );
+        cbPbrWeights *= cbHeightBias;
+        cbPbrWeights /= max(dot(cbPbrWeights, vec4(1.0)), 0.0001);
+
+        // Albedos are uploaded as sRGB textures. Three returns linear values,
+        // so these lookups must not be manually decoded again.
+        vec3 cbSandColor = texture2D(uCbSandAlbedo, cbSandUv).rgb * vec3(0.98, 0.98, 0.91);
+        vec3 cbOlivineColor = texture2D(uCbOlivineAlbedo, cbOlivineUv).rgb * vec3(0.92, 0.98, 0.78);
+        vec3 cbMeadowSource = texture2D(uCbMeadowAlbedo, cbMeadowUv).rgb;
+        float cbMeadowLuminance = dot(cbMeadowSource, vec3(0.2126, 0.7152, 0.0722));
+        vec3 cbMeadowColor = mix(vec3(cbMeadowLuminance), cbMeadowSource, 0.5)
+          * vec3(1.12, 1.24, 0.94);
+        cbMeadowColor = mix(cbMeadowColor, vec3(0.2, 0.29, 0.13), 0.16);
+        vec3 cbMudColor = texture2D(uCbMudAlbedo, cbMudUv).rgb * vec3(0.82, 0.85, 0.74);
+        vec3 cbColor = cbSandColor * cbPbrWeights.x
+          + cbOlivineColor * cbPbrWeights.y
+          + cbMeadowColor * cbPbrWeights.z
+          + cbMudColor * cbPbrWeights.w;
+
+        float cbMacro = cbNoise(cbPosition * 0.047 + vec2(13.0, -5.0));
+        float cbMeadowTone = cbNoise(cbPosition * 0.105 + vec2(-4.0, 11.0));
+        vec3 cbGreyGreen = mix(vec3(0.98, 0.96, 0.84), vec3(0.84, 0.97, 0.76), cbMeadowTone);
+        cbColor *= mix(vec3(1.0), cbGreyGreen, cbPbrWeights.z * 0.18);
+        cbColor *= mix(0.93, 1.07, cbMacro);
+        cbColor *= mix(vec3(1.0), vec3(0.88, 0.75, 0.63), cbRim * 0.38);
+
+        float cbSwashCycle = sin(uSwashTime * 0.5984) * 0.5 + 0.5;
+        float cbSwashDistance = 0.18 + cbSwashCycle * 1.4
+          + sin(cbPosition.x * 0.16 + uSwashTime * 0.25) * 0.18;
+        float cbFoam = (1.0 - smoothstep(0.04, 0.46, abs(cbShoreDistance - cbSwashDistance)))
+          * step(0.0, cbShoreDistance);
+        float cbWetSand = (1.0 - smoothstep(cbSwashDistance * 0.36, cbSwashDistance + 1.5, cbShoreDistance))
+          * step(0.0, cbShoreDistance);
+        float cbLagoonWet = cbLagoonInland * (1.0 - smoothstep(1.02, 1.52, cbLagoonDistance));
+        cbSurfaceWetness = max(cbWetSand * cbPbrWeights.x, cbLagoonWet * cbPbrWeights.w);
+        cbColor = mix(cbColor, cbColor * vec3(0.66, 0.72, 0.68), cbSurfaceWetness * 0.5);
+        cbColor = mix(cbColor, vec3(0.86, 0.89, 0.81), cbFoam * 0.3);
+
+        float cbSubmerged = 1.0 - smoothstep(-1.0, 0.12, cbShoreDistance);
+        float cbDepth = clamp((-0.1 - cbShoreDistance) / 2.4, 0.0, 1.0);
+        vec3 cbShallowTint = mix(vec3(0.25, 0.36, 0.31), vec3(0.35, 0.55, 0.48), cbDepth);
+        cbColor = mix(cbColor, cbShallowTint, cbSubmerged * 0.34);
+        diffuseColor.rgb = clamp(cbColor, 0.0, 1.0);`;
+}
+
+function roughnessFragment() {
+  return /* glsl */`
+        float cbSandRoughness = mix(${f(LAYERS.sand.roughnessMin)}, ${f(LAYERS.sand.roughnessMax)}, cbSandNrhValue.b);
+        float cbOlivineRoughness = mix(${f(LAYERS.olivine.roughnessMin)}, ${f(LAYERS.olivine.roughnessMax)}, cbOlivineNrhValue.b);
+        float cbMeadowRoughness = mix(0.82, 0.96, cbMeadowNrhValue.b);
+        float cbMudRoughness = mix(${f(LAYERS.mud.roughnessMin)}, ${f(LAYERS.mud.roughnessMax)}, cbMudNrhValue.b);
+        float cbMappedRoughness = dot(
+          cbPbrWeights,
+          vec4(cbSandRoughness, cbOlivineRoughness, cbMeadowRoughness, cbMudRoughness)
+        );
+        cbMappedRoughness = mix(cbMappedRoughness, max(0.42, cbMappedRoughness - 0.24), cbSurfaceWetness);
+        roughnessFactor = mix(roughnessFactor, cbMappedRoughness, 0.95);`;
+}
+
+function normalFragment() {
+  return /* glsl */`
+        vec2 cbSandSlope = cbNormalSlope(cbSandNrhValue, ${f(LAYERS.sand.normalStrength)});
+        vec2 cbOlivineSlope = cbNormalSlope(cbOlivineNrhValue, ${f(LAYERS.olivine.normalStrength)});
+        vec2 cbMeadowSlope = cbNormalSlope(cbMeadowNrhValue, ${f(LAYERS.meadow.normalStrength)});
+        vec2 cbMudSlope = cbNormalSlope(cbMudNrhValue, ${f(LAYERS.mud.normalStrength)});
+        vec2 cbMappedSlope = cbSandSlope * cbPbrWeights.x
+          + cbOlivineSlope * cbPbrWeights.y
+          + cbMeadowSlope * cbPbrWeights.z
+          + cbMudSlope * cbPbrWeights.w;
+        cbMappedSlope *= mix(1.0, 0.72, cbSurfaceWetness);
+
+        vec3 cbWorldNormal = inverseTransformDirection(normal, viewMatrix);
+        vec3 cbWorldX = normalize(vec3(1.0, 0.0, 0.0) - cbWorldNormal * cbWorldNormal.x);
+        vec3 cbWorldZ = normalize(cross(cbWorldX, cbWorldNormal));
+        vec3 cbMappedWorldNormal = normalize(
+          cbWorldNormal + cbWorldX * cbMappedSlope.x + cbWorldZ * cbMappedSlope.y
+        );
+        normal = normalize(mat3(viewMatrix) * cbMappedWorldNormal);`;
+}
+
 export function createCormorantBayTerrainMaterial() {
-  const sandSet = FLOREANA_PBR_TEXTURES.whiteSand;
-  const sandAlbedo = loadAlbedo(sandSet);
-  const sandHeight = loadDataTexture(
-    sandSet.height,
-    sandSet.fallbacks?.height || [128, 128, 128, 255],
+  const packedLayers = Object.fromEntries(
+    Object.entries(LAYERS).map(([name, layer]) => [name, loadPackedPbrTerrainSet(layer)]),
   );
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -38,15 +230,16 @@ export function createCormorantBayTerrainMaterial() {
   });
 
   material.addEventListener('dispose', () => {
-    sandAlbedo.dispose();
-    sandHeight.dispose();
+    Object.values(packedLayers).forEach(disposePackedPbrTerrainSet);
   });
 
   material.onBeforeCompile = shader => {
     shader.uniforms.uSwashTime = { value: 0 };
-    shader.uniforms.uCbSandAlbedo = { value: sandAlbedo };
-    shader.uniforms.uCbSandHeight = { value: sandHeight };
-    shader.uniforms.uCbSandScale = { value: sandSet.scale };
+    for (const [name, layer] of Object.entries(packedLayers)) {
+      const title = name[0].toUpperCase() + name.slice(1);
+      shader.uniforms[`uCb${title}Albedo`] = { value: layer.albedo };
+      shader.uniforms[`uCb${title}Nrh`] = { value: layer.nrh };
+    }
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -63,88 +256,26 @@ export function createCormorantBayTerrainMaterial() {
       .replace(
         '#include <common>',
         `#include <common>
-        uniform float uSwashTime;
-        uniform sampler2D uCbSandAlbedo;
-        uniform sampler2D uCbSandHeight;
-        uniform float uCbSandScale;
-        varying vec3 vCormorantWorld;
-
-        float cbHash(vec2 p) {
-          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-        }
-        float cbNoise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(cbHash(i), cbHash(i + vec2(1.0, 0.0)), u.x), mix(cbHash(i + vec2(0.0, 1.0)), cbHash(i + vec2(1.0, 1.0)), u.x), u.y);
-        }
-        float cbFbm(vec2 p) {
-          float value = 0.0;
-          float amp = 0.5;
-          for (int i = 0; i < 4; i++) {
-            value += cbNoise(p) * amp;
-            p = mat2(1.62, -1.04, 1.04, 1.62) * p + vec2(3.7, -2.6);
-            amp *= 0.52;
-          }
-          return value;
-        }
-        vec2 cbRotate(vec2 p, float a) {
-          float c = cos(a);
-          float s = sin(a);
-          return mat2(c, -s, s, c) * p;
-        }
-        float cbCoastZ(float x) {
-          return -22.0 + sin(x * 0.052 + 0.6) * 3.6 + sin(x * 0.021 - 1.4) * 2.4;
-        }
-        vec3 cbSand(vec2 p) {
-          vec2 uvA = p * uCbSandScale + vec2(0.13, -0.21);
-          vec2 uvB = cbRotate(p, 0.68) * (uCbSandScale * 0.57) + vec2(-0.29, 0.19);
-          vec3 textureColor = mix(
-            texture2D(uCbSandAlbedo, uvA).rgb,
-            texture2D(uCbSandAlbedo, uvB).rgb,
-            0.24
-          );
-          float heightGrain = mix(
-            texture2D(uCbSandHeight, uvA).r,
-            texture2D(uCbSandHeight, uvB).r,
-            0.34
-          ) - 0.5;
-          float broad = cbFbm(p * 0.056 + vec2(13.0, -5.0));
-          vec3 shellSand = mix(vec3(0.22, 0.205, 0.15), vec3(0.46, 0.415, 0.29), broad);
-          vec3 color = mix(shellSand, textureColor * vec3(0.62, 0.58, 0.46), 0.34);
-          color += heightGrain * vec3(0.075, 0.066, 0.045);
-          return clamp(color, vec3(0.16, 0.15, 0.11), vec3(0.50, 0.46, 0.34));
-        }`,
+${fragmentCommon()}`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        vec2 p = vCormorantWorld.xz;
-        float d = p.y - cbCoastZ(p.x);
-        vec3 authored = diffuseColor.rgb;
-        vec3 sand = cbSand(p);
-        float beach = 1.0 - smoothstep(15.0, 23.0, d);
-        vec3 color = mix(authored, sand, beach * 0.96);
-
-        float submerged = 1.0 - smoothstep(-1.0, 0.12, d);
-        float depth = clamp((-0.1 - d) / 2.4, 0.0, 1.0);
-        float dapple = cbFbm(p * 0.7 + vec2(2.0, 5.0));
-        vec3 wetStone = mix(vec3(0.18, 0.27, 0.23), vec3(0.28, 0.39, 0.31), dapple);
-        vec3 shallowTeal = mix(vec3(0.29, 0.57, 0.57), vec3(0.47, 0.70, 0.61), dapple);
-        color = mix(color, mix(wetStone, shallowTeal, smoothstep(0.1, 0.8, depth)), submerged);
-
-        float swashCycle = sin(uSwashTime * 0.5984) * 0.5 + 0.5;
-        float swashD = 0.18 + swashCycle * 1.4 + sin(p.x * 0.16 + uSwashTime * 0.25) * 0.18;
-        float foam = smoothstep(0.46, 0.04, abs(d - swashD)) * step(0.0, d);
-        float wet = smoothstep(swashD + 1.5, swashD * 0.36, d) * step(0.0, d);
-        color = mix(color, color * vec3(0.68, 0.72, 0.66), wet * 0.46);
-        color = mix(color, vec3(0.86, 0.89, 0.81), foam * 0.34);
-        color *= 0.94 + cbNoise(p * 6.8) * 0.07;
-        diffuseColor.rgb = clamp(color, 0.0, 1.0);`,
+${colorFragment()}`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+${roughnessFragment()}`,
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+${normalFragment()}`,
       );
   };
 
-  material.customProgramCacheKey = () => 'cormorant-bay-lean-calibrated-sand-v1';
+  material.customProgramCacheKey = () => 'cormorant-bay-layered-wetland-pbr-v1';
   material.needsUpdate = true;
   return material;
 }
