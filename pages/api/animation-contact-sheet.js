@@ -6,7 +6,6 @@ const VIEW_OPTIONS = new Set(['front', 'side', 'back', 'top', 'threeQuarter']);
 const PRESET_OPTIONS = new Set(['standard', 'quick', 'review']);
 const ROOT = process.cwd();
 const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'animation-sheets');
-const PUBLIC_MODEL_ROOT = path.join(ROOT, 'public', 'assets', 'models');
 const MODEL_FILE_EXTENSIONS = new Set(['.glb', '.gltf']);
 const MAX_ACTIVE_JOBS = 1;
 let activeJobs = 0;
@@ -47,22 +46,18 @@ function cleanBoolean(value, fallback = false) {
 function cleanAsset(value) {
   const asset = cleanString(value);
   if (/^[a-zA-Z0-9_-]{1,80}$/.test(asset)) return asset;
-  if (!asset.startsWith('/assets/models/')) return '';
+  if (asset.length > 240 || !asset.startsWith('/assets/models/')) return '';
 
-  const candidate = path.resolve(ROOT, 'public', asset.replace(/^\/+/, ''));
-  const relative = path.relative(PUBLIC_MODEL_ROOT, candidate);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
-  if (!MODEL_FILE_EXTENSIONS.has(path.extname(candidate).toLowerCase())) return '';
-  try {
-    if (!fs.statSync(candidate).isFile()) return '';
-    const realRoot = fs.realpathSync(PUBLIC_MODEL_ROOT);
-    const realCandidate = fs.realpathSync(candidate);
-    const realRelative = path.relative(realRoot, realCandidate);
-    if (!realRelative || realRelative.startsWith('..') || path.isAbsolute(realRelative)) return '';
-  } catch {
-    return '';
-  }
-  return asset;
+  // Validate URL paths lexically. Touching a dynamic path under `public/`
+  // makes Next's production tracer conservatively bundle the whole asset tree
+  // into this local-only API function. The renderer remains responsible for
+  // reporting a missing, but otherwise valid, model path.
+  const relative = asset.replace(/^\/+/, '');
+  const normalized = path.posix.normalize(relative);
+  if (normalized !== relative || !normalized.startsWith('assets/models/')) return '';
+  if (!/^[a-zA-Z0-9._/-]+$/.test(normalized)) return '';
+  if (!MODEL_FILE_EXTENSIONS.has(path.posix.extname(normalized).toLowerCase())) return '';
+  return `/${normalized}`;
 }
 
 function cleanClip(value) {
