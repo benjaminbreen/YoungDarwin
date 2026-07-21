@@ -23,7 +23,11 @@ export const DARWINIOTHAMNUS_SPECIES = Object.freeze({
     scale: [0.8, 2.45],
     scaleExponent: 1.85,
     patchRadius: [3, 6.4],
+    minPatchSeparation: 7.5,
+    minItemSeparation: 0.8,
     maxGrade: 0.82,
+    densityPerHectare: 34,
+    maximumPerRegion: 42,
     variation: {
       width: [0.88, 1.15],
       height: [0.88, 1.12],
@@ -59,7 +63,11 @@ export const OPUNTIA_MEGASPERMA_SPECIES = Object.freeze({
     scale: [0.75, 1.3],
     scaleExponent: 1.1,
     patchRadius: [7, 10],
+    minPatchSeparation: 15,
+    minItemSeparation: 4.5,
     maxGrade: 0.66,
+    densityPerHectare: 4,
+    maximumPerRegion: 6,
   },
 });
 
@@ -93,6 +101,45 @@ export const LAVA_CACTUS_SPECIES = Object.freeze({
   },
 });
 
+export const CANDELABRA_CACTUS_SPECIES = Object.freeze({
+  id: 'jasminocereus-thouarsii',
+  commonName: 'Candelabra cactus',
+  scientificName: 'Jasminocereus thouarsii var. thouarsii',
+  spanishName: 'Cactus candelabro',
+  label: 'Candelabra cactus / Jasminocereus thouarsii',
+  origin: 'Galápagos endemic',
+  heightMeters: [2, 5],
+  habitat: {
+    minimumSuitability: 0.28,
+    preferences: {
+      moisture: { preferred: [0.03, 0.28], tolerated: [0, 0.48], weight: 1.25 },
+      canopy: { preferred: [0, 0.16], tolerated: [0, 0.38], weight: 1.05 },
+      exposure: { preferred: [0.62, 1], tolerated: [0.38, 1], weight: 1.1 },
+      disturbance: { preferred: [0, 0.14], tolerated: [0, 0.42], weight: 1.4 },
+      salinity: { preferred: [0, 0.12], tolerated: [0, 0.3], weight: 0.75 },
+      rockiness: { preferred: [0.24, 0.9], tolerated: [0.06, 1], weight: 0.9 },
+    },
+  },
+  placement: {
+    // The prepared asset is approximately one metre high. Runtime scale makes
+    // readable 2–5 m adults while preserving sparse dry-zone spacing.
+    scale: [2.05, 5.05],
+    scaleExponent: 1.25,
+    patchRadius: [5.5, 9.5],
+    minPatchSeparation: 11,
+    minItemSeparation: 8.5,
+    maxGrade: 0.56,
+    densityPerHectare: 5,
+    maximumPerRegion: 7,
+    variation: {
+      width: [0.93, 1.08],
+      height: [0.94, 1.08],
+      depth: [0.93, 1.08],
+      maxLean: 0.018,
+    },
+  },
+});
+
 export const PLEOPELTIS_POLYPODIOIDES_SPECIES = Object.freeze({
   id: 'pleopeltis-polypodioides',
   commonName: 'Floreana resurrection fern',
@@ -115,7 +162,11 @@ export const PLEOPELTIS_POLYPODIOIDES_SPECIES = Object.freeze({
     scale: [0.48, 1.02],
     scaleExponent: 1.3,
     patchRadius: [1.4, 3.8],
+    minPatchSeparation: 5,
+    minItemSeparation: 0.55,
     maxGrade: 0.74,
+    densityPerHectare: 42,
+    maximumPerRegion: 48,
     variation: {
       width: [0.86, 1.16],
       height: [0.9, 1.1],

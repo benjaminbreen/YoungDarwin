@@ -44,6 +44,12 @@ expedition state, current zone/transition state, HUD state, weather pins,
 quality settings, selected/nearby specimen state, inventory/journal state,
 animal-mode state, and UI prompts.
 
+Region IDs such as `E_MID` and `WATKINS_CREEK` are stable save/travel keys, not
+display labels. Canonical player-facing names come from `data/locations.js`
+through `game-core/regionMaps.js`; use `getRegionDisplayName` or
+`getRegionDeveloperLabel` rather than expanding an ID. Thus `E_MID` is **Rocky
+Clearing**, while `WATKINS_CREEK` is **Highland Creek Fork**.
+
 `threeRuntimeState` in `three-game/store.js` is a mutable hot-path object for
 data that should not cause React re-renders every frame, such as player pose and
 foot contacts.

@@ -12,6 +12,7 @@ const UI_STEP_TIMEOUT_MS = Number(process.env.THREE_E2E_UI_TIMEOUT_MS || 10000);
 const SERVER_START_TIMEOUT_MS = Number(process.env.THREE_E2E_SERVER_START_TIMEOUT_MS || 60000);
 const AUTO_START_SERVER = process.env.THREE_E2E_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const REUSE_EXISTING_SERVER = process.env.THREE_E2E_REUSE_SERVER === '1';
+const CPU_PROFILE_TRANSITION = process.env.THREE_E2E_CPU_PROFILE === '1';
 const requestedScenario = process.argv.find(argument => argument.startsWith('--scenario='))?.split('=')[1] || 'all';
 
 function delay(ms) {
@@ -548,7 +549,16 @@ async function launchMode(page, errors, modeName) {
       { timeout: GAMEPLAY_TIMEOUT_MS },
     );
     await page.locator('[data-testid="three-launch-overlay"]').waitFor({ state: 'detached', timeout: GAMEPLAY_TIMEOUT_MS });
-    await page.waitForTimeout(modeName.toLowerCase() === 'darwin' ? 7500 : 1200);
+    if (modeName.toLowerCase() === 'darwin') {
+      await page.waitForFunction(
+        () => Number(window.__threeActiveContentPhase || 0) >= 6,
+        null,
+        { timeout: GAMEPLAY_TIMEOUT_MS },
+      );
+      await page.waitForTimeout(1200);
+    } else {
+      await page.waitForTimeout(1200);
+    }
   });
 }
 
@@ -700,6 +710,123 @@ async function runFinchScenario(browser, baseUrl) {
   }
 }
 
+async function runTransitionScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'POST_OFFICE_BAY',
+    quality: 'performance',
+    perfProbe: '1',
+  });
+  try {
+    console.log('[three:e2e] Transition: cold travel Post Office Bay → Post Office Scrub Rise');
+    await launchMode(page, errors, 'Darwin');
+    console.log('[three:e2e] Transition: launch settled');
+    console.log('[three:e2e] Transition: starting cold transition');
+    let cdp = null;
+    if (CPU_PROFILE_TRANSITION) {
+      cdp = await page.context().newCDPSession(page);
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+    }
+    await scheduleHarnessAction(page, 'start region transition', 'travelTo', 'POST_SCRUB_RISE');
+    console.log('[three:e2e] Transition: transition scheduled');
+    const arrived = await waitForHarnessState(
+      page,
+      state => state.currentZoneId === 'POST_SCRUB_RISE' && state.transition === null,
+      GAMEPLAY_TIMEOUT_MS,
+      'Post Office Scrub Rise transition completion',
+    );
+    if (cdp) {
+      const { profile } = await cdp.send('Profiler.stop');
+      const nodes = new Map(profile.nodes.map(node => [node.id, node]));
+      const totals = new Map();
+      for (let index = 0; index < (profile.samples?.length || 0); index += 1) {
+        const id = profile.samples[index];
+        totals.set(id, (totals.get(id) || 0) + (profile.timeDeltas?.[index] || 0));
+      }
+      const top = [...totals.entries()]
+        .map(([id, micros]) => {
+          const frame = nodes.get(id)?.callFrame || {};
+          return {
+            ms: Math.round(micros / 100) / 10,
+            functionName: frame.functionName || '(anonymous)',
+            url: frame.url || '',
+            line: Number(frame.lineNumber || 0) + 1,
+          };
+        })
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 40);
+      console.log(`[three:e2e] Transition CPU profile: ${JSON.stringify(top)}`);
+      await cdp.detach();
+    }
+    await page.waitForTimeout(150);
+    const metrics = await page.evaluate(() => {
+      const history = window.__threeTransitionPerfHistory || [];
+      return [...history].reverse().find(sample => sample.zoneId === 'POST_SCRUB_RISE') || null;
+    });
+    console.log(`[three:e2e] Transition metrics: ${JSON.stringify(metrics)}`);
+    assertCondition(metrics?.complete, 'Transition performance sample did not complete.', metrics);
+    assertCondition(
+      metrics.durationMs <= 4200,
+      `Prepared transition exceeded the 3.7s target tolerance (${metrics.durationMs.toFixed(1)}ms).`,
+      metrics,
+    );
+    assertCondition(
+      metrics.framesOver50Ms <= 1,
+      `Prepared transition had ${metrics.framesOver50Ms} visible frame gaps over 50ms.`,
+      metrics,
+    );
+    await page.screenshot({
+      path: path.join(outDir, 'post-office-to-scrub-transition-arrival.png'),
+      fullPage: false,
+    });
+    await page.close();
+    return {
+      name: 'transition',
+      durationMs: metrics.durationMs,
+      p95FrameMs: metrics.p95FrameMs,
+      worstFrameMs: metrics.worstFrameMs,
+      framesOver50Ms: metrics.framesOver50Ms,
+      finalState: arrived,
+      errors,
+    };
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function runTransitionPreparationScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'POST_OFFICE_BAY',
+    quality: 'performance',
+  });
+  try {
+    await launchMode(page, errors, 'Darwin');
+    const startedAt = Date.now();
+    const preparation = await evaluateWithTimeout(
+      page,
+      'prepare transition resources without scene',
+      () => window.__darwinE2E.prepareTravel('POST_SCRUB_RISE'),
+      undefined,
+      GAMEPLAY_TIMEOUT_MS,
+    );
+    const durationMs = Date.now() - startedAt;
+    console.log(`[three:e2e] Transition preparation: ${durationMs}ms ${JSON.stringify(preparation)}`);
+    assertCondition(
+      preparation?.ecologyPreparation?.mode === 'worker',
+      'Transition ecology preparation used the main-thread fallback.',
+      preparation,
+    );
+    await page.close();
+    return { name: 'transition-prepare', durationMs, preparation, errors };
+  } catch (error) {
+    console.error(`[three:e2e] Transition preparation browser errors: ${JSON.stringify(errors)}`);
+    await page.close().catch(() => {});
+    throw error;
+  }
+}
+
 async function runCabinScenario(browser, baseUrl) {
   const { page, errors } = await openE2EPage(browser, baseUrl, {
     zone: 'BEAGLE_CABIN',
@@ -790,6 +917,8 @@ async function run() {
     const scenarios = {
       darwin: runDarwinScenario,
       finch: runFinchScenario,
+      transition: runTransitionScenario,
+      'transition-prepare': runTransitionPreparationScenario,
       cabin: runCabinScenario,
       assessment: runAssessmentScenario,
     };

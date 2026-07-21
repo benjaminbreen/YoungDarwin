@@ -364,6 +364,52 @@ function fallbackTexture(rgba, colorSpace) {
   return texture;
 }
 
+function browserFallbackCanvas(rgba) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.fillStyle = `rgba(${rgba[0]}, ${rgba[1]}, ${rgba[2]}, ${rgba[3] / 255})`;
+    context.fillRect(0, 0, 1, 1);
+  }
+  return canvas;
+}
+
+function loadBrowserTerrainTexture(path, rgba) {
+  const texture = new THREE.Texture(browserFallbackCanvas(rgba));
+  const loader = new THREE.ImageBitmapLoader();
+  loader.setOptions({
+    imageOrientation: 'flipY',
+    premultiplyAlpha: 'none',
+    colorSpaceConversion: 'none',
+  });
+  loader.load(
+    path,
+    bitmap => {
+      texture.image?.close?.();
+      texture.image = bitmap;
+      // ImageBitmap orientation was resolved during off-main decode.
+      texture.flipY = false;
+      texture.needsUpdate = true;
+    },
+    undefined,
+    () => {
+      // Some older Safari/WebView builds expose ImageBitmapLoader but reject
+      // one of its decode options. Preserve the existing TextureLoader path as
+      // a compatibility fallback without making it the normal transition path.
+      new THREE.TextureLoader().load(path, imageTexture => {
+        texture.image = imageTexture.image;
+        texture.flipY = imageTexture.flipY;
+        texture.needsUpdate = true;
+        imageTexture.dispose();
+      });
+    },
+  );
+  texture.addEventListener('dispose', () => texture.image?.close?.());
+  return texture;
+}
+
 export function loadRepeatingTerrainTexture(path, {
   fallback = [255, 255, 255, 255],
   colorSpace = THREE.NoColorSpace,
@@ -373,7 +419,7 @@ export function loadRepeatingTerrainTexture(path, {
   const isFallback = typeof window === 'undefined' || !path;
   const texture = isFallback
     ? fallbackTexture(rgba, colorSpace)
-    : new THREE.TextureLoader().load(path);
+    : loadBrowserTerrainTexture(path, rgba);
 
   texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;

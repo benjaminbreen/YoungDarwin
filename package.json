@@ -37,6 +37,8 @@
     "asset:white-sand": "node scripts/build-white-sand-beach-textures.mjs",
     "asset:terrain-pbr": "node scripts/build-floreana-nrh-textures.mjs",
     "asset:travel-textures": "node scripts/build-travel-textures.mjs",
+    "data:border-vistas": "npx tsx scripts/build-border-vista-buffers.mjs",
+    "data:path-splats": "npx tsx scripts/build-path-splat-textures.mjs",
     "asset:plan": "node scripts/asset-pipeline.mjs plan",
     "asset:audit": "node scripts/asset-pipeline.mjs audit",
     "asset:optimize": "node scripts/asset-pipeline.mjs optimize",

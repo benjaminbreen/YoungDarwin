@@ -41,6 +41,9 @@ can teach with.
 - Island chart placements, coastal boundaries, and cardinal route graph:
   `game-core/floreanaGeography.js`.
 - 3D region map projection: `game-core/regionMaps.js`.
+- Canonical player-facing region names: `data/locations.js`, resolved at runtime
+  with `getRegionDisplayName` from `game-core/regionMaps.js`. Region IDs are
+  opaque stable keys; never expand them into labels (`E_MID` is Rocky Clearing).
 - Legacy zone compatibility bridge: `three-game/world/floreanaZones.js`.
 - Authored terrain/material modules: `three-game/world/regions/<region>/`.
 - Authored terrain registry: `three-game/world/regions/index.js`.

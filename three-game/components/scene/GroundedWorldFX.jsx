@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { terrainBiomeAt, terrainHeight } from '../../world/terrain';
 import { getSurfaceContactProfile, isWaterSurfaceContact } from '../../world/surfaceContact';
+import { resolveSurfaceContactResponse } from '../../world/surfaceContactResponse';
 import { WATER_LEVEL } from '../../world/water';
 import { isWetWeather } from '../../world/weatherStates';
 import { skyState, sunDirection } from '../../world/celestial';
@@ -31,16 +32,6 @@ const SPARKLE_RESPAWN_DISTANCE = 10;
 const SPARKLE_PLACEMENT_ATTEMPTS = 5;
 const dummy = new THREE.Object3D();
 
-function dustKindScale(kind) {
-  if (kind === 'takeoff') return 1.25;
-  if (kind === 'footstep') return 1.05;
-  if (kind === 'step-up') return 1.15;
-  if (kind === 'collision') return 1.2;
-  if (kind === 'skid' || kind === 'scramble') return 1.5;
-  if (kind === 'landing-jump' || kind === 'landing') return 1.55;
-  return 0.7;
-}
-
 function eventDirection(event) {
   const direction = event?.direction;
   const x = Number.isFinite(direction?.x) ? direction.x : 0;
@@ -55,11 +46,6 @@ function dayEdgeFactor(hour) {
   const dawn = Math.max(0, 1 - Math.abs(h - 6.15) / 1.55);
   const dusk = Math.max(0, 1 - Math.abs(h - 18.05) / 1.75);
   return Math.max(dawn, dusk);
-}
-
-function isNightHour(hour) {
-  const h = ((Number(hour || 0) % 24) + 24) % 24;
-  return h >= 18.7 || h < 5.65;
 }
 
 function insectBiomeWeight(biome) {
@@ -347,7 +333,7 @@ export function WaterStepPlops({ enabled }) {
   );
 }
 
-function TerrainDustPuffs({ enabled }) {
+function SurfaceContactFX({ enabled }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const ringRef = useRef(null);
   const pointsRef = useRef(null);
@@ -483,7 +469,7 @@ function TerrainDustPuffs({ enabled }) {
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c);
-          float soft = smoothstep(0.5, 0.06, d);
+          float soft = 1.0 - smoothstep(0.06, 0.5, d);
           float grain = 0.82 + 0.18 * sin((gl_PointCoord.x * 41.0 + gl_PointCoord.y * 29.0) + vProgress * 9.0);
           float hollow = mix(1.0, smoothstep(0.02, 0.36, d), 0.34);
           float a = soft * grain * hollow * vAlpha;
@@ -504,13 +490,9 @@ function TerrainDustPuffs({ enabled }) {
 
   useEffect(() => {
     if (!enabled) return undefined;
-    return onPropEvent('terrain-dust', event => {
+    return onPropEvent('surface-contact', event => {
       if (!event?.position) return;
       const kind = event.kind || 'dust';
-      if (kind === 'footstep') {
-        const { timeOfDay } = useThreeGameStore.getState();
-        if (isNightHour(timeOfDay)) return;
-      }
       const x = event.position.x;
       const z = event.position.z;
       if (!Number.isFinite(x) || !Number.isFinite(z)) return;
@@ -527,53 +509,54 @@ function TerrainDustPuffs({ enabled }) {
         biome,
       });
       if (isWaterSurfaceContact(profile)) return;
-      const surfaceDust = THREE.MathUtils.clamp(event.dustiness ?? Math.max(profile.dustiness, 0.42), 0, 1.5);
-      if (surfaceDust <= 0.04) return;
+      const response = resolveSurfaceContactResponse(profile, event);
+      if (response.strength <= 0.025) return;
 
       const direction = eventDirection(event);
       const fallSpeed = Math.max(0, event.fallSpeed || 0);
       const travelDistance = Math.max(0, event.travelDistance || 0);
       const horizontalSpeed = Math.max(0, event.horizontalSpeed || 0);
-      const jumpBoost = (kind === 'landing' || kind === 'landing-jump')
-        ? THREE.MathUtils.clamp(travelDistance / 9.5 + fallSpeed / 34, 0, 0.42)
-        : 0;
-      const intensity = THREE.MathUtils.clamp(
-        (event.intensity ?? 0.36) * dustKindScale(kind) * surfaceDust + jumpBoost,
-        0.22,
-        1.18,
-      );
+      const intensity = response.strength;
       const now = performance.now() / 1000;
       const y = rawY + 0.035;
-      const particleTotal = Math.round(THREE.MathUtils.clamp(
-        8 + intensity * 20 + travelDistance * 0.45 + fallSpeed * 0.25,
-        kind === 'footstep' ? 8 : 10,
-        kind === 'landing' || kind === 'landing-jump' ? 34 : 24,
-      ));
+      const particleTotal = response.particleScale > 0
+        ? Math.round(THREE.MathUtils.clamp(
+          ((kind === 'footstep' ? 10 : 3) + intensity * 22 + travelDistance * 0.5 + fallSpeed * 0.3) * response.particleScale,
+          1,
+          kind === 'landing' || kind === 'landing-jump' ? 46 : 34,
+        ))
+        : 0;
       const radiusScale = event.radiusScale || 1;
-      const ringLife = THREE.MathUtils.clamp(0.72 + intensity * 0.58 + travelDistance * 0.022, 0.7, 1.45);
+      const ringLife = THREE.MathUtils.clamp(
+        (0.72 + intensity * 0.58 + travelDistance * 0.022) * response.lifeScale,
+        0.35,
+        1.8,
+      );
       const baseRadius = (0.58 + intensity * 0.58 + Math.min(travelDistance, 8) * 0.05) * radiusScale;
-      const ringIndex = ringCursor.current;
-      ringCursor.current = (ringCursor.current + 1) % DUST_RING_COUNT;
-      dummy.position.set(x, y - 0.022, z);
-      dummy.rotation.set(0, direction.yaw, 0);
-      dummy.scale.set(baseRadius, 1, baseRadius * (kind === 'skid' || kind === 'scramble' ? 0.58 : 0.82));
-      dummy.updateMatrix();
-      ringRef.current?.setMatrixAt(ringIndex, dummy.matrix);
-      scratchColor.current.set(profile.ring);
-      ringData.colors[ringIndex * 3] = scratchColor.current.r;
-      ringData.colors[ringIndex * 3 + 1] = scratchColor.current.g;
-      ringData.colors[ringIndex * 3 + 2] = scratchColor.current.b;
-      ringData.births[ringIndex] = now;
-      ringData.intensities[ringIndex] = intensity * Math.max(profile.opacity, 0.28);
-      ringData.lifes[ringIndex] = ringLife;
-      rings.current[ringIndex] = { birth: now, life: ringLife };
-      ringData.geometry.attributes.instanceColor.needsUpdate = true;
-      ringData.geometry.attributes.aBirth.needsUpdate = true;
-      ringData.geometry.attributes.aIntensity.needsUpdate = true;
-      ringData.geometry.attributes.aLife.needsUpdate = true;
-      if (ringRef.current) {
-        ringRef.current.instanceMatrix.needsUpdate = true;
-        ringRef.current.visible = true;
+      if (response.showRing) {
+        const ringIndex = ringCursor.current;
+        ringCursor.current = (ringCursor.current + 1) % DUST_RING_COUNT;
+        dummy.position.set(x, y - 0.022, z);
+        dummy.rotation.set(0, direction.yaw, 0);
+        dummy.scale.set(baseRadius, 1, baseRadius * (kind === 'skid' || kind === 'scramble' ? 0.58 : 0.82));
+        dummy.updateMatrix();
+        ringRef.current?.setMatrixAt(ringIndex, dummy.matrix);
+        scratchColor.current.set(response.ringColor);
+        ringData.colors[ringIndex * 3] = scratchColor.current.r;
+        ringData.colors[ringIndex * 3 + 1] = scratchColor.current.g;
+        ringData.colors[ringIndex * 3 + 2] = scratchColor.current.b;
+        ringData.births[ringIndex] = now;
+        ringData.intensities[ringIndex] = intensity * response.opacity * response.ringStrength;
+        ringData.lifes[ringIndex] = ringLife;
+        rings.current[ringIndex] = { birth: now, life: ringLife };
+        ringData.geometry.attributes.instanceColor.needsUpdate = true;
+        ringData.geometry.attributes.aBirth.needsUpdate = true;
+        ringData.geometry.attributes.aIntensity.needsUpdate = true;
+        ringData.geometry.attributes.aLife.needsUpdate = true;
+        if (ringRef.current) {
+          ringRef.current.instanceMatrix.needsUpdate = true;
+          ringRef.current.visible = true;
+        }
       }
 
       const driftBase = Math.min(0.85, horizontalSpeed / 14 + travelDistance / 28);
@@ -588,31 +571,51 @@ function TerrainDustPuffs({ enabled }) {
           ? seededUnit(seed + 1.2) * Math.PI * 2
           : directionAngle + Math.PI + (seededUnit(seed + 1.2) - 0.5) * Math.PI * 1.2;
         const startRadius = (0.05 + radial * (0.18 + intensity * 0.16)) * radiusScale;
-        const speed = (0.18 + seededUnit(seed + 2.1) * 0.42 + intensity * 0.3 + driftBase * 0.18) * (landingSpread ? 0.86 : 1);
+        const speed = (0.18 + seededUnit(seed + 2.1) * 0.42 + intensity * 0.3 + driftBase * 0.18)
+          * (landingSpread ? 0.86 : 1)
+          * response.lateralScale;
         const sideDrift = seededUnit(seed + 6.8) - 0.5;
-        const color = scratchColor.current.set(profile.particles[index % profile.particles.length]);
+        const color = scratchColor.current.set(response.particles[index % response.particles.length]);
         pointData.positions[index * 3] = x + Math.cos(angle) * startRadius;
         pointData.positions[index * 3 + 1] = y + seededUnit(seed + 3.7) * 0.035;
         pointData.positions[index * 3 + 2] = z + Math.sin(angle) * startRadius;
         pointData.velocities[index * 3] = Math.cos(angle) * speed - direction.x * driftBase * 0.12 + (-direction.z) * sideDrift * 0.08;
-        pointData.velocities[index * 3 + 1] = 0.04 + seededUnit(seed + 4.8) * (0.16 + intensity * 0.12);
+        pointData.velocities[index * 3 + 1] = (0.04 + seededUnit(seed + 4.8) * (0.16 + intensity * 0.12))
+          * response.liftScale;
         pointData.velocities[index * 3 + 2] = Math.sin(angle) * speed - direction.z * driftBase * 0.12 + direction.x * sideDrift * 0.08;
         pointData.colors[index * 3] = color.r;
         pointData.colors[index * 3 + 1] = color.g;
         pointData.colors[index * 3 + 2] = color.b;
         pointData.births[index] = now;
-        pointData.lifes[index] = THREE.MathUtils.clamp(0.52 + intensity * 0.52 + seededUnit(seed + 5.2) * 0.22, 0.48, 1.34);
-        pointData.sizes[index] = (0.13 + seededUnit(seed + 7.1) * 0.12 + intensity * 0.24) * (landingSpread ? 1.28 : 1.08) * radiusScale;
-        pointData.alphas[index] = THREE.MathUtils.clamp(Math.max(profile.opacity, 0.26) * (0.82 + intensity * 0.88), 0.16, 0.72);
+        pointData.lifes[index] = THREE.MathUtils.clamp(
+          (0.52 + intensity * 0.52 + seededUnit(seed + 5.2) * 0.22) * response.lifeScale,
+          0.28,
+          1.9,
+        );
+        const motionScale = kind === 'footstep'
+          ? 1.18 + Math.min(0.24, horizontalSpeed / 28)
+          : 1;
+        pointData.sizes[index] = (0.15 + seededUnit(seed + 7.1) * 0.14 + intensity * 0.28)
+          * (landingSpread ? 1.28 : 1.08)
+          * radiusScale
+          * response.sizeScale
+          * motionScale;
+        pointData.alphas[index] = THREE.MathUtils.clamp(
+          response.opacity * response.alphaScale * (0.98 + intensity),
+          0.1,
+          0.84,
+        );
       }
-      pointData.geometry.attributes.position.needsUpdate = true;
-      pointData.geometry.attributes.aVelocity.needsUpdate = true;
-      pointData.geometry.attributes.aColor.needsUpdate = true;
-      pointData.geometry.attributes.aBirth.needsUpdate = true;
-      pointData.geometry.attributes.aLife.needsUpdate = true;
-      pointData.geometry.attributes.aSize.needsUpdate = true;
-      pointData.geometry.attributes.aAlpha.needsUpdate = true;
-      if (pointsRef.current) pointsRef.current.visible = true;
+      if (particleTotal > 0) {
+        pointData.geometry.attributes.position.needsUpdate = true;
+        pointData.geometry.attributes.aVelocity.needsUpdate = true;
+        pointData.geometry.attributes.aColor.needsUpdate = true;
+        pointData.geometry.attributes.aBirth.needsUpdate = true;
+        pointData.geometry.attributes.aLife.needsUpdate = true;
+        pointData.geometry.attributes.aSize.needsUpdate = true;
+        pointData.geometry.attributes.aAlpha.needsUpdate = true;
+        if (pointsRef.current) pointsRef.current.visible = true;
+      }
     });
   }, [currentZoneId, enabled, pointData, ringData, scratchColor]);
 
@@ -647,7 +650,7 @@ function TerrainDustPuffs({ enabled }) {
   });
 
   return (
-    <group userData={{ renderSource: 'terrain-dust-puffs', renderLabel: 'Terrain dust puffs', renderKind: 'terrain-contact-fx', noReflect: true }}>
+    <group userData={{ renderSource: 'surface-contact-fx', renderLabel: 'Surface contact effects', renderKind: 'terrain-contact-fx', noReflect: true }}>
       <instancedMesh
         ref={ringRef}
         args={[ringData.geometry, ringData.material, DUST_RING_COUNT]}
@@ -1287,7 +1290,7 @@ function GroundSparkles({ enabled }) {
 export function GroundedWorldFX({ enabled = true, terrainDust = true }) {
   return (
     <group userData={{ renderSource: 'grounded-world-fx', renderLabel: 'Grounded world FX', renderKind: 'ambient-vfx', noReflect: true }}>
-      <TerrainDustPuffs enabled={terrainDust} />
+      <SurfaceContactFX enabled={terrainDust} />
       <PlayerSkidStreaks enabled={enabled} />
       <InsectMotes enabled={enabled} />
       <SunlitMotes enabled={enabled} />

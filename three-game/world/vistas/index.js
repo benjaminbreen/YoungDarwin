@@ -32,6 +32,7 @@ const VISTA_BY_REGION_ID = {
   E_MID: 'rocky-clearing',
   MANGROVES: 'mangrove-forest',
   PUNTA_CORMORANT: 'punta-cormorant-lagoon',
+  WATKINS_CREEK: 'highland-ridge',
 };
 
 const DEFAULT_SURFACE_PROFILE_BY_TYPE = {
@@ -66,6 +67,7 @@ const SURFACE_PROFILE_BY_REGION_ID = {
   LAVA_FLATS: 'lava-flats',
   BLACK_BEACH: 'black-sand-coast',
   BLACK_BEACH_SURF: 'black-sand-coast',
+  WATKINS_CREEK: 'highland',
 };
 
 export const surfaceProfiles = {

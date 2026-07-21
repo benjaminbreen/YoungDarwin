@@ -68,6 +68,7 @@ export function buildEcologyFloraAssetCatalog(zoneIds = ECOLOGY_ZONE_IDS) {
           zoneId,
           layerId: layer.id,
           layerKey,
+          speciesId: layer.speciesId || null,
           itemCount: items.length,
           scaleRange: itemScaleRange(items),
           procedural: layer.procedural === true,

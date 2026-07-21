@@ -23,21 +23,40 @@ import './world/fogAtmosphere'; // patches the shared fog chunks; must run befor
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
-import { getEcology } from './world/ecology';
 import {
   getSpecimenRuntimeBounds,
   getSpecimenRuntimePoses,
   resolveSpecimenFrameHint,
 } from './world/specimenRuntime';
 import { terrainHeight } from './world/terrain';
-import { prefetchEcologyAssets } from './components/scene/ecology/EcologyRenderer';
+import {
+  prefetchEcologyAssets,
+  setEcologyAssetPrefetchPaused,
+} from './components/scene/ecology/EcologyRenderer';
 import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
+import {
+  prepareRegionEcologyResource,
+  regionEcologyResourceIsReady,
+} from './world/ecology/ecologyResource';
+import {
+  borderVistaResourceIsReady,
+  prepareBorderVistaResource,
+} from './world/vistas/borderVistaResource';
 import { prefetchRegionTerrainTextures } from './world/terrainPrefetch';
 import { prefetchIslandMapImage } from './ui/expedition/map/islandLocations';
+import {
+  setEcologyDebugEnabled,
+  setEcologyDebugSpecies,
+  toggleEcologyDebug,
+} from './world/ecology/ecologyDebugRuntime';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
 const AssetBrowserPanel = dynamic(
   () => import('./ui/dev/AssetBrowserPanel').then(module => module.AssetBrowserPanel),
+  { ssr: false },
+);
+const EcologyDebugHud = dynamic(
+  () => import('./ui/dev/EcologyDebugHud').then(module => module.EcologyDebugHud),
   { ssr: false },
 );
 const AnimalAnimationDevPanel = dynamic(
@@ -245,6 +264,13 @@ const STARTUP_FULL_CONTENT_PHASE = 6;
 // ecology construction, physics props, specimens, and NPC shader compilation
 // from converging on one frame while the aerial camera is already visible.
 const INTRO_CONTENT_PHASE_TIMINGS_MS = [100, 520, 980, 1520, 2180, 2860];
+// Destination resources are already preparing while the player approaches an
+// edge. Once the chart is opaque, mount one content family per painted/idle
+// window so React, Rapier, instance matrices, and shader discovery cannot all
+// consume the same animation frame.
+const TRANSITION_MOUNT_PHASE_TIMINGS_MS = [0, 180];
+const TRANSITION_ARRIVAL_PHASE_TIMINGS_MS = [80, 300, 620];
+const TRANSITION_READY_DEADLINE_MS = 1350;
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 
@@ -599,6 +625,120 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
   return null;
 }
 
+function transitionPercentile(values, percentile) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percentile))];
+}
+
+// Short averages conceal the exact failure mode this transition needs to
+// prevent: one long main-thread task freezing an otherwise GPU-composited map
+// pan. This probe records every rAF interval plus phase/content milestones and
+// exposes the latest sample to the transition smoke test and dev console.
+function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
+  const activeRef = useRef(null);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    window.__threeActiveContentPhase = contentPhase;
+    return () => {
+      delete window.__threeActiveContentPhase;
+    };
+  }, [contentPhase, enabled]);
+
+  useEffect(() => {
+    if (!enabled || !transition?.id) return undefined;
+    const startedAt = performance.now();
+    const sample = {
+      id: transition.id,
+      fromZoneId: transition.fromZoneId,
+      zoneId: transition.zoneId,
+      source: transition.source,
+      startedAt,
+      durationMs: 0,
+      events: [],
+      frameDeltas: [],
+      frameCount: 0,
+      worstFrameMs: 0,
+      p95FrameMs: 0,
+      framesOver32Ms: 0,
+      framesOver50Ms: 0,
+      longTasks: [],
+      complete: false,
+    };
+    let frameHandle = null;
+    let previousFrameAt = startedAt;
+    let observer = null;
+    const record = (name, detail = null) => {
+      const atMs = performance.now() - startedAt;
+      sample.events.push({ name, atMs, detail });
+      try {
+        performance.mark(`three-transition:${transition.id}:${name}`);
+      } catch {
+        // User agents may reject unusually long mark names; metrics still live
+        // in the exposed sample.
+      }
+    };
+    const tick = now => {
+      const delta = now - previousFrameAt;
+      previousFrameAt = now;
+      sample.frameDeltas.push(delta);
+      sample.frameCount += 1;
+      sample.worstFrameMs = Math.max(sample.worstFrameMs, delta);
+      if (delta > 32) sample.framesOver32Ms += 1;
+      if (delta > 50) sample.framesOver50Ms += 1;
+      frameHandle = window.requestAnimationFrame(tick);
+    };
+    const globalRecorder = (name, detail) => record(name, detail);
+    activeRef.current = { sample, record };
+    window.__threeTransitionPerf = sample;
+    window.__recordThreeTransitionEvent = globalRecorder;
+    record('start');
+    frameHandle = window.requestAnimationFrame(tick);
+    if (typeof PerformanceObserver === 'function') {
+      try {
+        observer = new PerformanceObserver(list => {
+          list.getEntries().forEach(entry => {
+            sample.longTasks.push({
+              atMs: entry.startTime - startedAt,
+              durationMs: entry.duration,
+            });
+          });
+        });
+        observer.observe({ type: 'longtask', buffered: false });
+      } catch {
+        observer = null;
+      }
+    }
+    return () => {
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+      observer?.disconnect?.();
+      sample.durationMs = performance.now() - startedAt;
+      sample.p95FrameMs = transitionPercentile(sample.frameDeltas, 0.95);
+      sample.complete = true;
+      record('complete');
+      const history = window.__threeTransitionPerfHistory || [];
+      window.__threeTransitionPerfHistory = [...history.slice(-19), sample];
+      if (window.__recordThreeTransitionEvent === globalRecorder) {
+        delete window.__recordThreeTransitionEvent;
+      }
+      activeRef.current = null;
+    };
+  }, [enabled, transition?.id]);
+
+  useEffect(() => {
+    if (!transition?.phase) return;
+    activeRef.current?.record(`phase:${transition.phase}`);
+  }, [transition?.phase]);
+
+  useEffect(() => {
+    if (!transition?.id) return;
+    activeRef.current?.record(`content-phase:${contentPhase}`);
+  }, [contentPhase, transition?.id]);
+
+  return null;
+}
+
 // Adaptive resolution. The configured DPR cap (1.5x on the default tier) is the
 // single biggest GPU cost — fillrate scales with pixel count, so 1.5x is 2.25x
 // the pixels of 1x. This watches the live frame rate and steps the pixel ratio
@@ -831,7 +971,7 @@ function OpeningVisualReadySignal({
   return null;
 }
 
-function ZoneTransitionReadySignal({ segmentCap }) {
+function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition }) {
   const { gl, scene, camera } = useThree();
   const compiledIdRef = useRef(null);
   const compilingIdRef = useRef(null);
@@ -845,6 +985,17 @@ function ZoneTransitionReadySignal({ segmentCap }) {
   useEffect(() => () => {
     if (readyTimeoutRef.current != null) window.clearTimeout(readyTimeoutRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!transition?.id || transition.phase !== 'mounting' || !transition.committedAt) return undefined;
+    const wait = Math.max(0, TRANSITION_READY_DEADLINE_MS - (Date.now() - transition.committedAt));
+    const timer = window.setTimeout(() => {
+      const current = useThreeGameStore.getState();
+      if (current.transition?.id !== transition.id || current.transition.phase !== 'mounting') return;
+      current.setZoneTransitionPhase('ready', transition.id);
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [transition?.committedAt, transition?.id, transition?.phase]);
 
   // Zustand updates are normally safe from a frame callback, but this signal
   // can coincide with React committing destination Suspense children. Deferring
@@ -885,6 +1036,12 @@ function ZoneTransitionReadySignal({ segmentCap }) {
       return;
     }
     if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
+      resourceStableFramesRef.current = 0;
+      return;
+    }
+    if (contentPhase < STARTUP_FULL_CONTENT_PHASE
+      || !borderVistaResourceIsReady(active.zoneId)
+      || !regionEcologyResourceIsReady(active.zoneId)) {
       resourceStableFramesRef.current = 0;
       return;
     }
@@ -978,7 +1135,7 @@ function TravelCameraRig() {
 
     if (active.phase === 'departing') {
       const elapsed = Math.max(0, Date.now() - active.startedAt);
-      const t = MathUtils.smoothstep(Math.min(1, elapsed / 2250), 0, 1);
+      const t = MathUtils.smoothstep(Math.min(1, elapsed / 1000), 0, 1);
       targetPosition.current.copy(departurePositionRef.current)
         .addScaledVector(departureDirectionRef.current, -7 * t);
       targetPosition.current.y += 10 * t;
@@ -1017,7 +1174,7 @@ function TravelCameraRig() {
     }
     const arrivalStartedAt = active.arrivingAt || active.readyAt || active.phaseStartedAt || Date.now();
     const elapsed = Math.max(0, Date.now() - arrivalStartedAt);
-    const t = MathUtils.smoothstep(Math.min(1, elapsed / 1750), 0, 1);
+    const t = MathUtils.smoothstep(Math.min(1, elapsed / 900), 0, 1);
     camera.position.copy(arrivalPositionRef.current).lerp(targetPosition.current, t);
     camera.quaternion.copy(arrivalQuaternionRef.current).slerp(targetQuaternion.current, t);
   });
@@ -1030,11 +1187,19 @@ function DestinationIntentPrefetch({ segmentCap }) {
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
   const destinationId = transitionDestinationId || edgeDestinationId;
   useEffect(() => {
+    setEcologyAssetPrefetchPaused(Boolean(transitionDestinationId));
+    return () => setEcologyAssetPrefetchPaused(false);
+  }, [transitionDestinationId]);
+  useEffect(() => {
     if (!destinationId) return;
     prefetchIslandMapImage();
     prefetchRegionTerrainTextures(destinationId);
     prepareTerrainResource(destinationId, segmentCap);
-    prefetchEcologyAssets(getEcology(destinationId));
+    prepareBorderVistaResource(destinationId);
+    prepareRegionEcologyResource(destinationId).then(resource => {
+      const destination = resource.definitions.find(definition => definition.zoneId === destinationId);
+      prefetchEcologyAssets(destination?.ecology);
+    });
   }, [destinationId, segmentCap]);
   return null;
 }
@@ -1736,6 +1901,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [loadersStable, setLoadersStable] = useState(false);
   const [displayedProgress, setDisplayedProgress] = useState(0);
   const [startupContentPhase, setStartupContentPhase] = useState(0);
+  const [transitionContentPhase, setTransitionContentPhase] = useState(STARTUP_FULL_CONTENT_PHASE);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [openingVisualReady, setOpeningVisualReady] = useState(false);
   const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
@@ -1781,6 +1947,21 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     || !sceneReady
     || !launchOverlayDismissed;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
+  const transitionMountingDestination = Boolean(
+    transition
+    && transition.phase !== 'departing'
+    && transition.phase !== 'chart'
+  );
+  const transitionCanvasPaused = Boolean(
+    transition
+    && (transition.phase === 'departing'
+      || transition.phase === 'chart'
+      || transition.phase === 'mounting'
+      || transition.phase === 'ready')
+  );
+  const activeContentPhase = transitionMountingDestination
+    ? transitionContentPhase
+    : startupContentPhase;
   const openingCamera = useMemo(() => ({
     active: openingIntroActive && openingIntroStartedAt > 0,
     sequenceId: openingIntroStartedAt,
@@ -1818,6 +1999,98 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     });
   }, [scenePerfSettings.cheapMaterials, scenePerfSettings.foliageDrawScale]);
 
+  useEffect(() => {
+    if (!transition?.id) {
+      setTransitionContentPhase(STARTUP_FULL_CONTENT_PHASE);
+      return;
+    }
+    // Reset during the departure/chart phase so the destination's first render
+    // can never accidentally inherit phase 6 from the previous region.
+    setTransitionContentPhase(1);
+  }, [transition?.id]);
+
+  useEffect(() => {
+    if (!transition?.id || !transition.committedAt) return undefined;
+    let cancelled = false;
+    let timeoutHandle = null;
+    let idleHandle = null;
+    let frameHandle = null;
+
+    const schedulePhase = index => {
+      if (cancelled || index >= TRANSITION_MOUNT_PHASE_TIMINGS_MS.length) return;
+      const previousDelay = index === 0 ? 0 : TRANSITION_MOUNT_PHASE_TIMINGS_MS[index - 1];
+      const delay = TRANSITION_MOUNT_PHASE_TIMINGS_MS[index] - previousDelay;
+      timeoutHandle = window.setTimeout(() => {
+        timeoutHandle = null;
+        const commitPhase = () => {
+          idleHandle = null;
+          if (cancelled) return;
+          setTransitionContentPhase(current => Math.max(current, index + 2));
+          frameHandle = window.requestAnimationFrame(() => {
+            frameHandle = window.requestAnimationFrame(() => {
+              frameHandle = null;
+              schedulePhase(index + 1);
+            });
+          });
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 180 });
+        } else {
+          commitPhase();
+        }
+      }, delay);
+    };
+
+    schedulePhase(0);
+    return () => {
+      cancelled = true;
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [transition?.committedAt, transition?.id]);
+
+  useEffect(() => {
+    if (!transition?.id || !transition.arrivingAt) return undefined;
+    let cancelled = false;
+    let timeoutHandle = null;
+    let idleHandle = null;
+    let frameHandle = null;
+
+    const schedulePhase = index => {
+      if (cancelled || index >= TRANSITION_ARRIVAL_PHASE_TIMINGS_MS.length) return;
+      const previousDelay = index === 0 ? 0 : TRANSITION_ARRIVAL_PHASE_TIMINGS_MS[index - 1];
+      const delay = TRANSITION_ARRIVAL_PHASE_TIMINGS_MS[index] - previousDelay;
+      timeoutHandle = window.setTimeout(() => {
+        timeoutHandle = null;
+        const commitPhase = () => {
+          idleHandle = null;
+          if (cancelled) return;
+          setTransitionContentPhase(current => Math.max(current, index + 4));
+          frameHandle = window.requestAnimationFrame(() => {
+            frameHandle = window.requestAnimationFrame(() => {
+              frameHandle = null;
+              schedulePhase(index + 1);
+            });
+          });
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 180 });
+        } else {
+          commitPhase();
+        }
+      }, delay);
+    };
+
+    schedulePhase(0);
+    return () => {
+      cancelled = true;
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [transition?.arrivingAt, transition?.id]);
+
   // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
   // the buffer it draws into: the composer target when postprocessing is on,
   // the canvas context (antialias: true) when it's off. Applies to materials
@@ -1843,6 +2116,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     }
     if (DEV_TOOLS_ENABLED && params.has('assetBrowser')) {
       setShowAssetBrowser(true);
+    }
+    if (DEV_TOOLS_ENABLED && params.has('ecologyDebug')) {
+      const requestedSpecies = params.get('ecologyDebug');
+      if (requestedSpecies && requestedSpecies !== '1') setEcologyDebugSpecies(requestedSpecies);
+      setEcologyDebugEnabled(true);
     }
     setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
     setPerfProbe(DEV_TOOLS_ENABLED && (params.has('perfProbe') || params.has('costProbe')));
@@ -1886,6 +2164,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       if (event.code === 'Digit8' && DEV_TOOLS_ENABLED) {
         event.preventDefault();
         setShowDarwinAnimationLab(value => !value);
+        return;
+      }
+      if (event.code === 'Digit9' && DEV_TOOLS_ENABLED) {
+        event.preventDefault();
+        toggleEcologyDebug();
         return;
       }
       if (event.code !== 'Backquote' || !DEV_TOOLS_ENABLED) return;
@@ -2066,11 +2349,17 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
 
   return (
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
+      <TransitionPerformanceProbe
+        enabled={DEV_TOOLS_ENABLED || perfProbe || e2eMode}
+        transition={transition}
+        contentPhase={activeContentPhase}
+      />
       {gameStarted && <DestinationIntentPrefetch segmentCap={scenePerfSettings.terrainSegmentCap} />}
       <KeyboardControls map={keyboardMap}>
         {gameStarted && (
           <Canvas
             className="absolute inset-0 h-full w-full"
+            frameloop={transitionCanvasPaused ? 'never' : 'always'}
             shadows={scenePerfSettings.shadows}
             dpr={renderDpr}
             camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
@@ -2103,7 +2392,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             <Suspense fallback={null}>
               <ThreeScene
                 perfSettings={scenePerfSettings}
-                contentPhase={startupContentPhase}
+                contentPhase={activeContentPhase}
                 openingCamera={openingCamera}
                 inputLocked={openingIntroActive || Boolean(transition)}
                 onPlayerAnimationBanksReady={markPlayerAnimationBanksReady}
@@ -2123,7 +2412,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
               segmentCap={scenePerfSettings.terrainSegmentCap}
               onReady={markOpeningVisualReady}
             />
-            <ZoneTransitionReadySignal segmentCap={scenePerfSettings.terrainSegmentCap} />
+            <ZoneTransitionReadySignal
+              segmentCap={scenePerfSettings.terrainSegmentCap}
+              contentPhase={activeContentPhase}
+              transition={transition}
+            />
             <TravelCameraRig />
             <PostFX
               enabled={scenePerfSettings.postprocessing}
@@ -2198,6 +2491,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
           />
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
+        {DEV_TOOLS_ENABLED && gameUiVisible && <EcologyDebugHud />}
         {DEV_TOOLS_ENABLED && gameUiVisible && (
           <AnimalAnimationDevPanel open={showAnimalAnimationLab} onClose={() => setShowAnimalAnimationLab(false)} />
         )}

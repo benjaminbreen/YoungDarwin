@@ -228,6 +228,7 @@ export function resolvePlayerLanding({
   jumpState,
   characterController,
   characterMove,
+  collisionAdapter,
   frameScratch,
   terrainFeedback,
   arcadeLocomotion,
@@ -297,6 +298,40 @@ export function resolvePlayerLanding({
     const landingSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     if (wasAirborne.current && (falling > 0.35 || intentionalPlayerJump)) {
       const landingBiome = terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId);
+      const supportContact = characterMove.collisionDetails?.find(contact => (contact.normal?.y || 0) > 0.45);
+      const supportTarget = supportContact?.userData || supportContact?.rigidBody?.userData || null;
+      const authoredSupport = collisionAdapter?.groundInfo?.(group.current.position);
+      const landingTarget = supportTarget || authoredSupport?.obstacle || null;
+      const supportWitness = supportContact?.witness1;
+      const interactiveSupport = Boolean(
+        supportTarget?.id
+        && !/terrain|ground|world/.test(String(supportTarget.kind || '').toLowerCase()),
+      );
+      const witnessMatchesSupport = supportWitness && (
+        interactiveSupport
+        || !authoredSupport?.obstacle
+        || Math.abs(supportWitness.y - authoredSupport.y) < 0.45
+      );
+      const landingPoint = witnessMatchesSupport ? supportWitness : {
+        x: group.current.position.x,
+        y: authoredSupport?.y ?? group.current.position.y,
+        z: group.current.position.z,
+      };
+      if (supportTarget?.id && String(supportTarget.kind || '').startsWith('physics-')) {
+        const loadDirection = landingSpeed > 0.05
+          ? { x: velocity.current.x / landingSpeed, y: 0, z: velocity.current.z / landingSpeed }
+          : { x: facing.current.x, y: 0, z: facing.current.z };
+        emitPropEvent('player-physics-prop-contact', {
+          propId: supportTarget.id,
+          contactKind: 'landing',
+          position: { x: landingPoint.x, y: landingPoint.y, z: landingPoint.z },
+          direction: loadDirection,
+          impactSpeed: landingSpeed,
+          verticalSpeed: falling,
+          delta,
+          now,
+        });
+      }
       const landingArcade = arcadeLandingMomentum({
         state: arcadeLocomotion.current,
         velocity: velocity.current,
@@ -337,8 +372,13 @@ export function resolvePlayerLanding({
         landingDustTriggerRef.current?.({
           kind: intentionalPlayerJump ? 'landing-jump' : 'landing',
           intensity: dustIntensity,
+          worldPosition: { x: landingPoint.x, y: landingPoint.y, z: landingPoint.z },
           biome: landingBiome,
           direction: { x: landingDirection.x, y: 0, z: landingDirection.z },
+          normal: supportContact?.normal
+            ? { x: supportContact.normal.x, y: supportContact.normal.y, z: supportContact.normal.z }
+            : { x: 0, y: 1, z: 0 },
+          target: landingTarget,
           fallSpeed: falling,
           horizontalSpeed: landingSpeed,
           travelDistance: landedJumpTravelDistance,

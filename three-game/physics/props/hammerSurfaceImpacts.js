@@ -5,7 +5,7 @@
 // feels like, so every strike lands somewhere visibly.
 //
 // Each profile drives the shared HammerImpactBurst renderer (dust points,
-// spark streaks, impact flash) plus an optional soft terrain-dust plume and a
+// spark streaks, impact flash) plus an optional soft surface-contact plume and a
 // hitstop beat scaled to how hard the material is.
 
 import { isInteriorZone } from '../../interiors/interiorRegistry';

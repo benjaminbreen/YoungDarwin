@@ -190,7 +190,9 @@ function SummaryTab({ specimen, entry }) {
   const condition = CONDITION_WORDS[specimen.condition] || (specimen.condition || 'Cased').replace(/_/g, ' ');
   const confidence = CONDITION_CONFIDENCE[specimen.condition] ?? 75;
   const traits = (specimen.details || []).slice(0, 5);
-  const symsComment = SYMS_COMMENTS[specimen.order] || '“Labeled and stowed, sir.”';
+  const symsComment = SYMS_COMMENTS[specimen.order]
+    || SYMS_COMMENTS[specimen.ontology]
+    || '“Labeled and stowed, sir.”';
   const hasRecord = Boolean(entry?.id);
 
   return (
@@ -272,7 +274,9 @@ function SummaryTab({ specimen, entry }) {
           {[
             ['Catalogue Number', catalogueNumber(entry?.day, entry?.caseIndex ?? 0)],
             ['Method', hasRecord && entry?.method ? `Captured with ${entry.method.toLowerCase()}` : 'Not yet collected'],
-            ['Preservation', specimen.condition === 'documented' ? 'Field record only' : PRESERVATION_BY_ORDER[specimen.order] || 'Wrapped, crated'],
+            ['Preservation', specimen.condition === 'documented'
+              ? 'Field record only'
+              : PRESERVATION_BY_ORDER[specimen.order] || PRESERVATION_BY_ORDER[specimen.ontology] || 'Wrapped, crated'],
           ].map(([label, value]) => (
             <div key={label}>
               <div className="font-expedition text-[14px] italic text-expedition-gold/90">{label}</div>

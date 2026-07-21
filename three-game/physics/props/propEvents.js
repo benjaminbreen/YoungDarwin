@@ -42,10 +42,11 @@ export function isSwingClaimed(swingId) {
 
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
+// 'player-physics-prop-contact' { propId, contactKind?, position?, direction, impactSpeed, verticalSpeed?, delta, now }
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }
 // 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }
 // 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome }
-// 'terrain-dust' { position: {x,y,z}, direction?, intensity, biome?, surfaceProfile?, kind?, fallSpeed?, horizontalSpeed?, travelDistance? }
+// 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?, fallSpeed?, horizontalSpeed?, travelDistance? }
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }

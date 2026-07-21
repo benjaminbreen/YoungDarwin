@@ -90,3 +90,27 @@ export const NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM = createRouteSeam(
   'south',
   -6,
 );
+
+export const PENAL_COLONY_WATKINS_CREEK_SEAM = createRouteSeam(
+  'PENAL_COLONY',
+  'WATKINS_CREEK',
+  'east',
+  -2,
+);
+
+// Watkins' existing western trail reaches its border at z=-14. Preserve the
+// same normalized edge position even though the two regions have different
+// depths (98 m at the creek fork, 88 m at camp).
+export const WATKINS_CREEK_WATKINS_SEAM = createRouteSeam(
+  'WATKINS_CREEK',
+  'WATKINS',
+  'east',
+  -14 * (98 / 88),
+);
+
+export const WATKINS_CREEK_SOUTHERN_WETLANDS_SEAM = createRouteSeam(
+  'WATKINS_CREEK',
+  'S_WETLANDS',
+  'south',
+  18,
+);

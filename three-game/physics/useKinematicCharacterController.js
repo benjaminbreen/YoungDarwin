@@ -19,6 +19,22 @@ function vecToThree(vector) {
   return new THREE.Vector3(vector.x, vector.y, vector.z);
 }
 
+function normalizeCollision(rawCollision) {
+  if (!rawCollision) return null;
+  const rigidBody = rawCollision.collider?.parent?.() || null;
+  return {
+    normal: vecToThree(rawCollision.normal1),
+    translationDeltaApplied: vecToThree(rawCollision.translationDeltaApplied),
+    translationDeltaRemaining: vecToThree(rawCollision.translationDeltaRemaining),
+    witness1: vecToThree(rawCollision.witness1),
+    witness2: vecToThree(rawCollision.witness2),
+    toi: rawCollision.toi,
+    collider: rawCollision.collider,
+    rigidBody,
+    userData: rigidBody?.userData || rawCollision.collider?.userData || null,
+  };
+}
+
 export function useKinematicCharacterController(rapierContext, bodyRef, colliderRef) {
   const world = rapierContext?.world;
   const state = useRef({
@@ -41,10 +57,11 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
     controller.enableSnapToGround(CHARACTER_CONTROLLER_CONFIG.snapToGround);
     controller.setMaxSlopeClimbAngle(THREE.MathUtils.degToRad(CHARACTER_CONTROLLER_CONFIG.maxSlopeClimbDegrees));
     controller.setMinSlopeSlideAngle(THREE.MathUtils.degToRad(CHARACTER_CONTROLLER_CONFIG.minSlopeSlideDegrees));
-    // Keep dynamic props pushable, but use a lower effective character mass;
-    // PhysicsProp applies the authored speed/launch caps after contact.
-    controller.setApplyImpulsesToDynamicBodies(true);
-    controller.setCharacterMass(42);
+    // Dynamic props are pushed explicitly from the controller's computed
+    // contacts. Rapier's automatic character impulse is intentionally off:
+    // one global character mass cannot make a loose bottle and a loaded
+    // barrel both feel plausible, and its impulse lands before prop caps.
+    controller.setApplyImpulsesToDynamicBodies(false);
 
     state.current = {
       ready: true,
@@ -86,6 +103,7 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
           grounded: false,
           collisions: 0,
           collision: null,
+          collisionDetails: [],
           source: 'manual-fallback',
         };
       }
@@ -97,19 +115,12 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
       body.setNextKinematicTranslation(next);
 
       const collisions = current.controller.numComputedCollisions();
-      let collision = null;
-      if (collisions > 0) {
-        const rawCollision = current.controller.computedCollision(0);
-        if (rawCollision) {
-          collision = {
-            normal: vecToThree(rawCollision.normal1),
-            translationDeltaApplied: vecToThree(rawCollision.translationDeltaApplied),
-            translationDeltaRemaining: vecToThree(rawCollision.translationDeltaRemaining),
-            toi: rawCollision.toi,
-            collider: rawCollision.collider,
-          };
-        }
+      const collisionDetails = [];
+      for (let index = 0; index < collisions; index += 1) {
+        const collision = normalizeCollision(current.controller.computedCollision(index));
+        if (collision) collisionDetails.push(collision);
       }
+      const collision = collisionDetails[0] || null;
       current.lastCollision = collision;
 
       return {
@@ -117,6 +128,7 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
         grounded: current.controller.computedGrounded(),
         collisions,
         collision,
+        collisionDetails,
         source: 'rapier-character',
       };
   }, [bodyRef, colliderRef]);

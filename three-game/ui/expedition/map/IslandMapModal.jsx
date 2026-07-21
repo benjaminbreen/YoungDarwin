@@ -1,8 +1,13 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useThreeGameStore } from '../../../store';
 import { getZone } from '../../../world/floreanaZones';
+import { prepareRegionEcologyResource } from '../../../world/ecology/ecologyResource';
+import { prepareBorderVistaResource } from '../../../world/vistas/borderVistaResource';
+import { prefetchRegionTerrainTextures } from '../../../world/terrainPrefetch';
+import { prepareTerrainResource } from '../../../world/terrainResource';
+import { prefetchEcologyAssets } from '../../../components/scene/ecology/EcologyRenderer';
 import { ExpeditionPanel, PanelTabs, GOLD_BUTTON_SOLID, GOLD_LABEL, GoldDivider } from '../ExpeditionPanel';
 import { CompassRoseIcon, NorthArrowIcon } from '../icons';
 import { useTerrainChart } from '../TerrainMinimap';
@@ -320,6 +325,17 @@ export function IslandMapModal({ open, onClose }) {
   const [tab, setTab] = useState('island');
   const [selectedId, setSelectedId] = useState(null);
   const day = useThreeGameStore(state => state.day);
+
+  useEffect(() => {
+    if (!open || !selectedId) return;
+    prefetchRegionTerrainTextures(selectedId);
+    prepareTerrainResource(selectedId, 200);
+    prepareBorderVistaResource(selectedId);
+    prepareRegionEcologyResource(selectedId).then(resource => {
+      const destination = resource.definitions.find(definition => definition.zoneId === selectedId);
+      prefetchEcologyAssets(destination?.ecology);
+    });
+  }, [open, selectedId]);
 
   if (!open) return null;
 

@@ -65,6 +65,9 @@ const AUTHORED_REGION_TERRAIN = {
   // Packed material relief carries the close detail, allowing a lighter mesh
   // than Scrub Rise without sacrificing the rolling highland silhouette.
   NORTHERN_HIGHLANDS: { preset: 'northern-highlands-transition-scrub', segments: 240 },
+  // Packed terrain relief and a masked standing-water surface carry most of
+  // the creek detail, so the authored valley does not need Watkins' 320-grid.
+  WATKINS_CREEK: { preset: 'highland-creek-fork', segments: 248 },
   LAVA_FLATS: { preset: 'authored-lava-flats', segments: 248 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 192 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
@@ -321,6 +324,20 @@ export const currentRegionId = 'POST_OFFICE_BAY';
 
 export function getRegionMap(regionId = currentRegionId) {
   return regionMaps[regionId] || regionMaps[currentRegionId];
+}
+
+// Region ids are stable persistence/travel keys, not abbreviations that should
+// be expanded for display. In particular, E_MID is the legacy key for Rocky
+// Clearing; it does not mean "Eastern Mid-Island". UI and diagnostics should
+// resolve names through this registry instead of formatting the id itself.
+export function getRegionDisplayName(regionId = currentRegionId) {
+  return regionMaps[regionId]?.name || null;
+}
+
+export function getRegionDeveloperLabel(regionId = currentRegionId) {
+  const id = String(regionId || '').trim();
+  const name = getRegionDisplayName(id);
+  return name ? `${name} [${id}]` : `Unknown region [${id || 'missing id'}]`;
 }
 
 export function getRegionEdgeHints(regionId = currentRegionId) {

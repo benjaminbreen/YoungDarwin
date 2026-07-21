@@ -124,24 +124,42 @@ subtle, normally around 10–15 percent with only a few degrees of lean. This is
 silhouette-breaking transform pass for existing assets, not a reason to add new
 models or invent elaborate ecology.
 
-### Optional procedural flora overlays
+### Procedural flora overlays
 
-Authored `flora` arrays remain the default and must not be migrated implicitly.
-Regions can opt individual species into an additive `proceduralFlora` array via
-`buildProceduralFloraLayer()` in `three-game/world/ecology/proceduralFlora.js`.
-The region supplies normalized habitat signals and hard exclusions; the shared
-species profile supplies preference curves, life-size variation, and patch
-defaults. The builder uses weighted deterministic patch scatter and returns the
-same instanced item shape as authored flora.
+Authored `flora` arrays remain intact and must not be migrated implicitly. The
+shared adapter in `universalFlora.js` evaluates every registered region map,
+including maps without a bespoke ecology module. A species policy can therefore
+be island-wide without a list of hand-picked maps: unsuitable, aquatic,
+interior, developed, or explicitly excluded regions deterministically receive
+zero instances. Current universal policies cover candelabra cactus (with
+Desolate Outcrop explicitly excluded), paired mature and breakable juvenile
+`Opuntia megasperma`, Darwiniothamnus, and resurrection fern.
 
-Keep adoption species-by-species and region-by-region. Paths, water, structures,
-cultivation, important sightlines, and other authored exclusions remain owned by
-the region. The Penal Colony Darwiniothamnus layer is the reference pilot: its
-existing authored flora is unchanged, while the overlay is restricted to quiet
-meadow/rim habitat outside paths, gardens, and trampled settlement ground. Post
-Scrub Rise is the coexistence example for a species already present in authored
-flora: its overlay favors inland thicket edges and open-rise pockets while
-maintaining clearance from the authored shrubs, trails, washes, and heavy basalt.
+The standard adapter supplies terrain bounds, map-type habitat baselines,
+walkability, water/edge/path exclusions, landmark and specimen clearance,
+authored-cohort clearance, stable seeds, species spacing, companion preference,
+life-stage pairing, and a total procedural-overlay budget. The shared species
+profile supplies preference curves, life-size variation, and density limits. It
+returns the same instanced item shape as authored flora, so both systems coexist
+in `EcologyRenderer`.
+
+Regions may still add a more precise `proceduralFlora` layer with
+`buildProceduralFloraLayer()` when their authored coastline, garden, trail,
+wash, or habitat masks are materially better than the standard adapter. The
+Penal Colony Darwiniothamnus layer is the reference local pilot; Post Scrub Rise
+is the coexistence example for a species already present in authored flora.
+These local layers supplement rather than disable the universal evaluation.
+For Opuntia, the universal interactive layer remains owned by
+`PricklyPearField`, while the mature tree-cactus layer stays decorative and
+instanced. Existing regional or legacy physics cohorts count against the shared
+budget, preventing duplicate populations.
+
+Every procedural layer exposes a sampled habitat diagnostic with suitability,
+hard-exclusion reasons, requested/generated counts, and patch centers. In a dev
+build, press `9` to show that overlay in the world; use the flora browser (`0`)
+to choose among species available on the current map. Green discs are suitable
+samples, colored discs are rejected samples, gold rings are patch centers, and
+pale markers are generated plants.
 
 Physics-driven plants use a parallel `interactiveFlora` array. Build their
 stable sites with `buildProceduralInteractiveFloraLayer()` and identify the

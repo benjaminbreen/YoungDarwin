@@ -7,18 +7,21 @@ read `docs/generated/repo-inventory.md`.
 
 1. Inspect the target location in `data/locations.js` and the existing terrain
    entry in `game-core/regionMaps.js`.
-2. Add or update `three-game/world/regions/<region>/terrain.js` with render
+2. Treat its region ID as an opaque stable key. Keep its canonical display name
+   in `data/locations.js`, and resolve that name with `getRegionDisplayName` in
+   developer UI; never create a label by expanding underscore-separated IDs.
+3. Add or update `three-game/world/regions/<region>/terrain.js` with render
    height, movement height, biome/color, and walkability.
-3. Add or update `three-game/world/regions/<region>/material.js`.
-4. Register the region in `three-game/world/regions/index.js` and the authored
+4. Add or update `three-game/world/regions/<region>/material.js`.
+5. Register the region in `three-game/world/regions/index.js` and the authored
    terrain preset in `game-core/regionMaps.js`.
-5. Add ecology in `three-game/world/ecology/<region>.js` and register it in
+6. Add ecology in `three-game/world/ecology/<region>.js` and register it in
    `three-game/world/ecology/index.js`.
-6. If visuals need collision, add shared obstacle data to
+7. If visuals need collision, add shared obstacle data to
    `three-game/world/obstacles.js`.
-7. Add or verify border vistas in `three-game/world/vistas/index.js` when
+8. Add or verify border vistas in `three-game/world/vistas/index.js` when
    neighboring topography should be visible.
-8. Run `npm run docs:generate` and `npm run check`. Add
+9. Run `npm run docs:generate` and `npm run check`. Add
    `npm run three:screenshot:fast` when the terrain/material/camera result needs
    visual confirmation.
 

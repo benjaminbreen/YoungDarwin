@@ -9,6 +9,7 @@ import {
   findClimbTarget,
   findTraversalTarget,
   getObstacleEdgeRisk,
+  getObstacleSupport,
   getObstacleSupportHeight,
   getRuntimeObstacles,
   obstacleBaseY,
@@ -164,9 +165,10 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     // only to compare collider height in the physics diagnostics panel, so do
     // not pay for several world queries per frame during normal gameplay.
     const physicsGroundY = diagnostics ? rapierGroundY(rapierContext, position) : null;
-    const obstacleGroundY = ignoreObstacles
+    const obstacleSupport = ignoreObstacles
       ? null
-      : getObstacleSupportHeight(position.x, position.z, position.y, supportRadius, obstacles);
+      : getObstacleSupport(position.x, position.z, position.y, supportRadius, obstacles);
+    const obstacleGroundY = obstacleSupport?.height ?? null;
     let result;
     if (obstacleGroundY !== null && obstacleGroundY !== undefined) {
       result = {
@@ -175,6 +177,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
         terrainY: visualTerrainY,
         movementTerrainY: terrainGroundY,
         physicsY: physicsGroundY,
+        obstacle: obstacleSupport.obstacle,
       };
     } else {
       result = {
@@ -183,6 +186,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
         terrainY: visualTerrainY,
         movementTerrainY: terrainGroundY,
         physicsY: physicsGroundY,
+        obstacle: null,
       };
     }
     frameCache.ground.set(key, result);

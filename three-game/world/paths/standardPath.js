@@ -180,6 +180,57 @@ export function createStandardFootPathSplatTexture({
   return texture;
 }
 
+function transparentPathSplatTexture() {
+  if (typeof document === 'undefined') {
+    const texture = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
+    texture.needsUpdate = true;
+    return texture;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  return new THREE.Texture(canvas);
+}
+
+// Runtime terrain materials should consume a baked splat. Generating the
+// authored 768-1024px mask performs millions of noise/path calculations and
+// previously froze the transition on the main thread. A transparent texture
+// is a safe failure mode: terrain remains playable and uses its base layer.
+export function loadStandardFootPathSplatTexture(path) {
+  const texture = transparentPathSplatTexture();
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  if (typeof window === 'undefined' || !path) return texture;
+
+  const loader = new THREE.ImageBitmapLoader();
+  loader.setOptions({
+    imageOrientation: 'flipY',
+    premultiplyAlpha: 'none',
+    colorSpaceConversion: 'none',
+  });
+  loader.load(
+    path,
+    bitmap => {
+      texture.image?.close?.();
+      texture.image = bitmap;
+      texture.flipY = false;
+      texture.needsUpdate = true;
+    },
+    undefined,
+    error => {
+      console.error(`[terrain-path-splat] ${path}: ${error?.message || error}`);
+    },
+  );
+  texture.addEventListener('dispose', () => texture.image?.close?.());
+  return texture;
+}
+
 export function standardFootPathSplatUniforms(texture, {
   bounds = STANDARD_FOOT_PATH_SPLAT_BOUNDS,
   textureUniform = 'uStandardFootPathSplat',

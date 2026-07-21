@@ -31,6 +31,33 @@ const CARRY_DROP_DISTANCE = 1.3;
 const COTTON_FOLIAGE_MOTION = { wind: 1.9, bend: 0.35, bendRadius: 1.45 };
 const DRY_GRASS_FOLIAGE_MOTION = { wind: 1.45, bend: 0.55, bendRadius: 1.25 };
 const CACTUS_FOLIAGE_MOTION = { wind: 0.35, bend: 0.35 };
+const PLANT_SPECIMEN_FOLIAGE_MOTION = Object.freeze({
+  scalesiavillosa: { wind: 1.25, bend: 0.3, bendRadius: 1.35 },
+  galapagosjusticia: { wind: 1.05, bend: 0.3, bendRadius: 1.3 },
+  crotonscouleri: { wind: 1.1, bend: 0.26, bendRadius: 1.3 },
+  resurrectionfern: { wind: 0.48, bend: 0.12, bendRadius: 1.1 },
+  sesuviumportulacastrum: { wind: 0.38, bend: 0.12, bendRadius: 1 },
+  candelabracactus: { wind: 0.24, bend: 0.04, bendRadius: 1.45 },
+  manzanillo: { wind: 0.62, bend: 0.16, bendRadius: 2.1 },
+});
+const PLANT_SPECIMEN_MARKER_Y = Object.freeze({
+  scalesiavillosa: 1.75,
+  galapagosjusticia: 1.1,
+  crotonscouleri: 2.05,
+  resurrectionfern: 0.75,
+  sesuviumportulacastrum: 0.62,
+  candelabracactus: 3.65,
+  manzanillo: 5.15,
+});
+const PLANT_SPECIMEN_CONTACT_RADIUS = Object.freeze({
+  scalesiavillosa: 0.95,
+  galapagosjusticia: 0.65,
+  crotonscouleri: 1.05,
+  resurrectionfern: 0.48,
+  sesuviumportulacastrum: 0.55,
+  candelabracactus: 0.8,
+  manzanillo: 1.25,
+});
 const STANDING_WATER_SURFACE_LIFT = 0.036;
 const NO_RAYCAST = () => null;
 
@@ -135,7 +162,7 @@ function foliageMotionForSpecimen(specimen) {
     return DRY_GRASS_FOLIAGE_MOTION;
   }
   if (id === 'cactus') return CACTUS_FOLIAGE_MOTION;
-  return null;
+  return PLANT_SPECIMEN_FOLIAGE_MOTION[id] || null;
 }
 
 function ProceduralSpecimenShape({ specimen }) {
@@ -819,7 +846,7 @@ export function SpecimenActor({ specimen }) {
 
   const selected = selectedSpecimenId === actorId;
   const nearby = nearbySpecimenId === actorId;
-  const markerY = specimen.id === 'galapagoscotton' ? 3.45
+  const markerY = PLANT_SPECIMEN_MARKER_Y[specimen.id] ?? (specimen.id === 'galapagoscotton' ? 3.45
     : specimen.id === 'cactus' ? 2.15
     : specimen.id === 'basalt' ? 0.88
     : specimen.id === 'barnacle' ? 0.85
@@ -827,14 +854,15 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'crab' ? 0.78
     : specimen.id === 'largegroundfinch' ? 1.08
     : specimen.id === 'mediumgroundfinch' ? 0.92
+    : specimen.id === 'floreanamockingbird' ? 1.02
     : specimen.id === 'floreanagianttortoise' ? 1.8
     : specimen.id === 'flamingo' ? 2.35
     : specimen.id === 'lavagull' ? 1.05
     : specimen.id === 'cat' ? 0.95
     : specimen.id === 'feralgoat' ? 1.35
     : specimen.id === 'feralhorse' ? 2.2
-    : 1.45;
-  const contactRadius = specimen.id === 'floreanagianttortoise' ? 1.15
+    : 1.45);
+  const contactRadius = PLANT_SPECIMEN_CONTACT_RADIUS[specimen.id] ?? (specimen.id === 'floreanagianttortoise' ? 1.15
     : specimen.id === 'basalt' ? 0.72
     : specimen.id === 'cactus' ? 0.6
     : specimen.id === 'galapagoscotton' ? 0.9
@@ -846,11 +874,12 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'lavagull' ? 0.5
     : specimen.id === 'largegroundfinch' ? 0.56
     : specimen.id === 'mediumgroundfinch' || specimen.id === 'crab' ? 0.5
+    : specimen.id === 'floreanamockingbird' ? 0.5
     : specimen.id === 'cat' ? 0.45
     : specimen.id === 'feralgoat' ? 0.68
     : specimen.id === 'feralhorse' ? 1.18
     : specimen.id === 'galapagospenguin' ? 0.55
-    : 0.8;
+    : 0.8);
   const standingWater = useMemo(
     () => specimenStandingWaterState(position, currentZoneId),
     [currentZoneId, position],

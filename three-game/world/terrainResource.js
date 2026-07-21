@@ -10,10 +10,10 @@ let requestCounter = 0;
 let useCounter = 0;
 
 function resolveColliderSegments(regionId, authoredSegments) {
-  // The heavy maps' analytic movement surface is intentionally smoother than
-  // their render detail; a ~0.7 m heightfield cell preserves traversal while
-  // removing 55% of their collision samples.
-  const cap = regionId === 'N_SHORE' || regionId === 'PENAL_COLONY' ? 128 : 192;
+  // Movement uses the smoother analytic surface, so a ~0.8-1 m heightfield
+  // cell remains finer than the character footprint while making Rapier body
+  // creation cheap enough to stage during arrival.
+  const cap = regionId === 'N_SHORE' || regionId === 'PENAL_COLONY' ? 96 : 128;
   return Math.min(cap, Math.max(96, Math.floor(authoredSegments || 96)));
 }
 
@@ -23,21 +23,26 @@ function resourceKey(regionId, segmentCap) {
 }
 
 function buildGeometry(payload) {
-  const geometry = new THREE.PlaneGeometry(
-    payload.width,
-    payload.depth,
-    payload.segments,
-    payload.segments,
-  );
-  geometry.rotateX(-Math.PI / 2);
-  const position = geometry.attributes.position;
-  for (let index = 0; index < position.count; index += 1) {
-    position.setY(index, payload.heights[index]);
-  }
-  position.needsUpdate = true;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(payload.positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(payload.normals, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(payload.uvs, 2));
   geometry.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
   geometry.setAttribute('roughnessMix', new THREE.BufferAttribute(payload.roughness, 1));
-  geometry.computeVertexNormals();
+  geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
+  const centerY = (payload.minimumHeight + payload.maximumHeight) * 0.5;
+  geometry.boundingBox = new THREE.Box3(
+    new THREE.Vector3(-payload.width * 0.5, payload.minimumHeight, -payload.depth * 0.5),
+    new THREE.Vector3(payload.width * 0.5, payload.maximumHeight, payload.depth * 0.5),
+  );
+  geometry.boundingSphere = new THREE.Sphere(
+    new THREE.Vector3(0, centerY, 0),
+    Math.hypot(
+      payload.width * 0.5,
+      (payload.maximumHeight - payload.minimumHeight) * 0.5,
+      payload.depth * 0.5,
+    ),
+  );
   geometry.userData.terrainSegments = payload.segments;
   geometry.userData.terrainRegionId = payload.regionId;
   return geometry;
@@ -66,13 +71,17 @@ function ensureWorker() {
     const entry = resources.get(request.key);
     if (!entry) return;
     if (error) {
-      recoverRequest(request, entry);
+      recoverRequest(request, entry, error);
       return;
     }
     const geometry = buildGeometry(payload);
     entry.status = 'ready';
     entry.value = {
       key: request.key,
+      preparation: {
+        mode: 'worker',
+        durationMs: payload.preparationDurationMs,
+      },
       geometryEntry: {
         key: request.key,
         geometry,
@@ -89,12 +98,12 @@ function ensureWorker() {
     request.resolve(entry.value);
     pruneResources(request.key);
   };
-  worker.onerror = () => {
+  worker.onerror = event => {
     for (const [requestId, request] of pending) {
       pending.delete(requestId);
       const entry = resources.get(request.key);
       if (entry) {
-        recoverRequest(request, entry);
+        recoverRequest(request, entry, event?.message || 'worker load error');
       }
     }
     worker?.terminate?.();
@@ -103,9 +112,12 @@ function ensureWorker() {
   return worker;
 }
 
-function synchronousHeightfield(regionId) {
+function synchronousHeightfield(regionId, segmentCap = null) {
   const config = getRegionTerrainConfig(regionId);
-  const colliderSegments = resolveColliderSegments(regionId, config.segments);
+  const colliderSegments = Math.min(
+    resolveColliderSegments(regionId, config.segments),
+    Number.isFinite(segmentCap) ? Math.max(32, Math.floor(segmentCap)) : Infinity,
+  );
   const side = colliderSegments + 1;
   const heights = new Float32Array(side * side);
   let index = 0;
@@ -124,17 +136,28 @@ function synchronousHeightfield(regionId) {
   };
 }
 
-function synchronousResource(regionId, segmentCap, key) {
-  return {
+function synchronousResource(regionId, segmentCap, key, { degraded = false } = {}) {
+  const startedAt = performance.now();
+  const fallbackCap = degraded
+    ? Math.min(64, Number.isFinite(segmentCap) ? segmentCap : 64)
+    : segmentCap;
+  const value = {
     key,
-    geometryEntry: getCachedTerrainGeometry(regionId, segmentCap),
-    heightfield: synchronousHeightfield(regionId),
+    geometryEntry: getCachedTerrainGeometry(regionId, fallbackCap),
+    heightfield: synchronousHeightfield(regionId, degraded ? 64 : null),
+    degraded,
   };
+  value.preparation = {
+    mode: degraded ? 'reduced-main-thread-fallback' : 'main-thread',
+    durationMs: performance.now() - startedAt,
+  };
+  return value;
 }
 
-function recoverRequest(request, entry) {
+function recoverRequest(request, entry, reason = 'unknown worker error') {
   const [regionId, segments] = request.key.split(':');
-  const value = synchronousResource(regionId, Number(segments), request.key);
+  console.error(`[terrain-resource] ${regionId}: ${reason}. Using reduced-detail terrain fallback.`);
+  const value = synchronousResource(regionId, Number(segments), request.key, { degraded: true });
   entry.status = 'ready';
   entry.error = null;
   entry.value = value;
@@ -151,7 +174,9 @@ export function prepareTerrainResource(regionId, segmentCap = null) {
   }
   const activeWorker = ensureWorker();
   if (!activeWorker) {
-    const value = synchronousResource(regionId, segmentCap, key);
+    const value = synchronousResource(regionId, segmentCap, key, {
+      degraded: typeof window !== 'undefined',
+    });
     const entry = { status: 'ready', value, promise: Promise.resolve(value), lastUsed: ++useCounter };
     resources.set(key, entry);
     pruneResources(key);

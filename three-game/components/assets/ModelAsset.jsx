@@ -525,6 +525,12 @@ function applyMaterialRegionUpgrade(scene, asset) {
       if ('specularIntensity' in material && entry.specularIntensity !== undefined) {
         material.specularIntensity = entry.specularIntensity;
       }
+      if ('anisotropy' in material && entry.anisotropy !== undefined) {
+        material.anisotropy = entry.anisotropy;
+      }
+      if ('anisotropyRotation' in material && entry.anisotropyRotation !== undefined) {
+        material.anisotropyRotation = entry.anisotropyRotation;
+      }
       if ('clearcoat' in material && entry.clearcoat !== undefined) {
         material.clearcoat = entry.clearcoat;
       }
@@ -538,6 +544,19 @@ function applyMaterialRegionUpgrade(scene, asset) {
       }
       if (entry.directSpecularGlint) {
         applyDirectSpecularGlint(material, entry.directSpecularGlint);
+      }
+      if (typeof window !== 'undefined' && entry.anisotropy !== undefined) {
+        window.__darwinHairMaterialDebug = {
+          material: material.name,
+          type: material.type,
+          isMeshPhysicalMaterial: material.isMeshPhysicalMaterial === true,
+          roughness: material.roughness,
+          normalScale: material.normalScale?.x ?? null,
+          specularIntensity: material.specularIntensity ?? null,
+          anisotropy: material.anisotropy ?? null,
+          anisotropyRotation: material.anisotropyRotation ?? null,
+          envMapIntensity: material.envMapIntensity ?? null,
+        };
       }
       material.userData.materialRegionUpgradeApplied = true;
       material.needsUpdate = true;
@@ -1038,6 +1057,30 @@ function GLBPrimitive({
     });
     return result;
   }, [asset.blinkMorph, importedScene]);
+  const hairMotionTargets = useMemo(() => {
+    const config = asset.secondaryHairMotion;
+    if (!config) return [];
+    const result = [];
+    importedScene.traverse(object => {
+      if (!object.morphTargetDictionary || !object.morphTargetInfluences) return;
+      const isHairLock = object.userData?.hairLock === true
+        || object.name.startsWith('Darwin5_HairLock_');
+      if (!isHairLock) return;
+      const indices = {
+        positive: object.morphTargetDictionary[config.positiveName || 'HairSwayPositive'],
+        negative: object.morphTargetDictionary[config.negativeName || 'HairSwayNegative'],
+        lift: object.morphTargetDictionary[config.liftName || 'HairLift'],
+        drop: object.morphTargetDictionary[config.dropName || 'HairDrop'],
+      };
+      if (!Object.values(indices).some(Number.isInteger)) return;
+      result.push({
+        object,
+        indices,
+        phase: Number(object.userData?.hairLockPhase) || result.length * 1.9,
+      });
+    });
+    return result;
+  }, [asset.secondaryHairMotion, importedScene]);
   const blinkStateRef = useRef({
     nextAt: null,
     startedAt: null,
@@ -1046,6 +1089,9 @@ function GLBPrimitive({
     blinkCount: 0,
     value: 0,
   });
+  const hairMotionStateRef = useRef({ locks: [], wasAirborne: null });
+  const hairWorldQuaternionRef = useRef(new THREE.Quaternion());
+  const hairWorldRightRef = useRef(new THREE.Vector3(1, 0, 0));
   // Second mixer for the masked upper-body overlay (aiming while moving).
   // It updates after the main mixer each frame, so the bones its filtered
   // clip animates overwrite the locomotion pose — a cheap bone mask.
@@ -1152,8 +1198,18 @@ function GLBPrimitive({
     const fallbackClip = animationProfileId === 'darwin5'
       ? (darwin5ClipFallback(requestedClip) || CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)])
       : (CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)]);
-    const next = getAction(requestedClip) || getAction(fallbackClip);
+    const requestedAction = getAction(requestedClip) || getAction(fallbackClip);
+    // A model switch remounts the boot GLB before its deferred animation banks
+    // resolve. Preserve a natural idle during that brief gap instead of
+    // reporting a known bank clip (for example `gather`) as genuinely missing.
+    // Keep the active request as the idle clip so the requested bank action can
+    // replace it on the next selector tick as soon as the bank arrives.
+    const waitingForAnimationBank = !requestedAction
+      && animationBanks.length > 0
+      && !animationBanksReady;
+    const next = requestedAction || (waitingForAnimationBank ? getAction('idle') : null);
     const resolvedClip = next?.getClip?.()?.name || requestedClip;
+    const activeRequestClip = waitingForAnimationBank ? resolvedClip : requestedClip;
     if (!next) {
       if (requestedClip && !warnedMissing.current.has(requestedClip)) {
         warnedMissing.current.add(requestedClip);
@@ -1162,7 +1218,7 @@ function GLBPrimitive({
       publishAnimationDebug(requestedClip, activeAction.current, { missing: true });
       return false;
     }
-    if (next === activeAction.current && requestedClip === activeRequest.current) {
+    if (next === activeAction.current && activeRequestClip === activeRequest.current) {
       next.setEffectiveTimeScale(timeScale);
       if (maxTime !== null && next.time >= maxTime) {
         next.time = maxTime;
@@ -1199,10 +1255,22 @@ function GLBPrimitive({
     }
     next.play();
     activeAction.current = next;
-    activeRequest.current = requestedClip;
-    publishAnimationDebug(requestedClip, next, { fade: transitionFade, oneShot });
+    activeRequest.current = activeRequestClip;
+    publishAnimationDebug(requestedClip, next, {
+      fade: transitionFade,
+      oneShot,
+      waitingForAnimationBank,
+    });
     return true;
-  }, [animationDebugEnabled, animationProfileId, getAction, lazyActions, publishAnimationDebug]);
+  }, [
+    animationBanks.length,
+    animationBanksReady,
+    animationDebugEnabled,
+    animationProfileId,
+    getAction,
+    lazyActions,
+    publishAnimationDebug,
+  ]);
 
   useEffect(() => {
     normalizeImportedMaterials(importedScene, asset, motion);
@@ -1335,6 +1403,27 @@ function GLBPrimitive({
     };
   }, [blinkTargets]);
 
+  useEffect(() => {
+    const resetInfluences = () => {
+      hairMotionTargets.forEach(({ object, indices }) => {
+        Object.values(indices).forEach(index => {
+          if (Number.isInteger(index)) object.morphTargetInfluences[index] = 0;
+        });
+      });
+    };
+    hairMotionStateRef.current = {
+      locks: hairMotionTargets.map(() => ({
+        sway: 0,
+        swayVelocity: 0,
+        lift: 0,
+        liftVelocity: 0,
+      })),
+      wasAirborne: null,
+    };
+    resetInfluences();
+    return resetInfluences;
+  }, [hairMotionTargets]);
+
   useFrame((frameState, delta) => {
     const blinkCfg = asset.blinkMorph;
     if (blinkCfg && blinkTargets.length) {
@@ -1411,6 +1500,159 @@ function GLBPrimitive({
           nextAt: state.nextAt,
           durationScale: state.durationScale,
           blinkCount: state.blinkCount,
+        };
+      }
+    }
+    const hairCfg = asset.secondaryHairMotion;
+    if (hairCfg && hairMotionTargets.length) {
+      const now = frameState.clock.elapsedTime;
+      const dt = THREE.MathUtils.clamp(delta, 0, 0.05);
+      const motionState = grounding?.motionRef?.current;
+      const airborne = Boolean(motionState?.airborne);
+      const state = hairMotionStateRef.current;
+      if (state.wasAirborne === null) state.wasAirborne = airborne;
+      const tookOff = airborne && state.wasAirborne === false;
+      const landed = !airborne && state.wasAirborne === true;
+      state.wasAirborne = airborne;
+
+      const windLength = Math.hypot(weatherEnv.windX, weatherEnv.windZ) || 1;
+      let crosswind = weatherEnv.windX / windLength;
+      if (group.current) {
+        group.current.getWorldQuaternion(hairWorldQuaternionRef.current);
+        hairWorldRightRef.current
+          .set(1, 0, 0)
+          .applyQuaternion(hairWorldQuaternionRef.current);
+        crosswind = (
+          weatherEnv.windX * hairWorldRightRef.current.x
+          + weatherEnv.windZ * hairWorldRightRef.current.z
+        ) / windLength;
+      }
+      const windStrength = THREE.MathUtils.clamp(
+        weatherEnv.windSpeed / Math.max(0.01, hairCfg.fullWindSpeed ?? 1),
+        0,
+        1,
+      );
+      const speed = Math.max(0, motionState?.speed || 0);
+      const speedStrength = THREE.MathUtils.clamp(
+        speed / Math.max(0.01, hairCfg.runSpeedReference ?? 4.8),
+        0,
+        1,
+      );
+      const running = Boolean(motionState?.running);
+      const walking = Boolean(motionState?.walking);
+      const locomotionStrength = running
+        ? (hairCfg.runAmplitude ?? 0.78) * Math.max(0.45, speedStrength)
+        : walking
+          ? (hairCfg.walkAmplitude ?? 0.42) * Math.max(0.38, speedStrength)
+          : 0;
+      const cadence = running ? 10.2 : 6.8;
+      const strideWave = Math.sin(now * cadence);
+      const verticalSpeed = motionState?.verticalSpeed || 0;
+
+      state.locks.forEach(lock => {
+        if (tookOff) lock.liftVelocity -= hairCfg.takeoffImpulse ?? 3.8;
+        if (landed) lock.liftVelocity -= hairCfg.landingImpulse ?? 5.5;
+      });
+
+      hairMotionTargets.forEach((target, targetIndex) => {
+        const lock = state.locks[targetIndex];
+        if (!lock) return;
+        const windWave = Math.sin(now * (hairCfg.windFrequency ?? 3.2) + target.phase);
+        const rustleFrequency = hairCfg.windRustleFrequency ?? 6.4;
+        const rustleWave = Math.sin(now * rustleFrequency + target.phase)
+          + Math.sin(now * rustleFrequency * 1.73 + target.phase * 1.61) * 0.42;
+        const directionalWind = crosswind
+          * windStrength
+          * (hairCfg.windAmplitude ?? 1)
+          * (0.58 + windWave * 0.42);
+        const windRustle = rustleWave
+          * windStrength
+          * (hairCfg.windRustleAmplitude ?? 1.5)
+          * (0.68 + Math.abs(crosswind) * 0.32);
+        const windTarget = directionalWind + windRustle;
+        const locomotionTarget = strideWave
+          * locomotionStrength
+          * (0.88 + Math.sin(target.phase) * 0.08);
+        const targetSway = THREE.MathUtils.clamp(
+          windTarget + locomotionTarget,
+          -(hairCfg.maxSwayInfluence ?? 0.85),
+          hairCfg.maxSwayInfluence ?? 0.85,
+        );
+        const inertialLift = airborne
+          ? THREE.MathUtils.clamp(
+            -verticalSpeed * (hairCfg.airborneLiftResponse ?? 0.075),
+            -(hairCfg.maxAirborneLift ?? 0.42),
+            hairCfg.maxAirborneLift ?? 0.42,
+          )
+          : strideWave * locomotionStrength * (hairCfg.strideLiftScale ?? 0.38);
+        const movementSweep = speedStrength * (
+          running
+            ? hairCfg.runSweepLift ?? 0.2
+            : walking
+              ? hairCfg.walkSweepLift ?? 0.08
+              : 0
+        );
+        const windLift = windStrength
+          * (hairCfg.windLiftAmplitude ?? 0.38)
+          * (0.72 + Math.sin(now * 1.7 + target.phase) * 0.28);
+        const targetLift = THREE.MathUtils.clamp(
+          inertialLift + movementSweep + windLift,
+          -(hairCfg.maxLiftInfluence ?? 0.8),
+          hairCfg.maxLiftInfluence ?? 0.8,
+        );
+
+        lock.swayVelocity += (
+          (targetSway - lock.sway) * (hairCfg.swayStiffness ?? 78)
+          - lock.swayVelocity * (hairCfg.swayDamping ?? 11.5)
+        ) * dt;
+        lock.sway += lock.swayVelocity * dt;
+        lock.sway = THREE.MathUtils.clamp(
+          lock.sway,
+          -(hairCfg.maxSwayInfluence ?? 0.85),
+          hairCfg.maxSwayInfluence ?? 0.85,
+        );
+        lock.liftVelocity += (
+          (targetLift - lock.lift) * (hairCfg.liftStiffness ?? 65)
+          - lock.liftVelocity * (hairCfg.liftDamping ?? 10.5)
+        ) * dt;
+        lock.lift += lock.liftVelocity * dt;
+        lock.lift = THREE.MathUtils.clamp(
+          lock.lift,
+          -(hairCfg.maxLiftInfluence ?? 0.8),
+          hairCfg.maxLiftInfluence ?? 0.8,
+        );
+
+        const { object, indices } = target;
+        if (Number.isInteger(indices.positive)) {
+          object.morphTargetInfluences[indices.positive] = Math.max(0, lock.sway);
+        }
+        if (Number.isInteger(indices.negative)) {
+          object.morphTargetInfluences[indices.negative] = Math.max(0, -lock.sway);
+        }
+        if (Number.isInteger(indices.lift)) {
+          object.morphTargetInfluences[indices.lift] = Math.max(0, lock.lift);
+        }
+        if (Number.isInteger(indices.drop)) {
+          object.morphTargetInfluences[indices.drop] = Math.max(0, -lock.lift);
+        }
+      });
+      if (typeof window !== 'undefined') {
+        window.__darwinHairDebug = {
+          assetId,
+          targetCount: hairMotionTargets.length,
+          airborne,
+          crosswind,
+          windStrength,
+          speedStrength,
+          walking,
+          running,
+          verticalSpeed,
+          locks: state.locks.map(lock => ({
+            sway: lock.sway,
+            swayVelocity: lock.swayVelocity,
+            lift: lock.lift,
+            liftVelocity: lock.liftVelocity,
+          })),
         };
       }
     }

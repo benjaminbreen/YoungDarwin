@@ -31,12 +31,20 @@ import { getLavaCactusSites } from '../physics/props/lavaCactus/lavaCactusSites'
 
 export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
-  const detailsReady = stagedPhase >= 2;
-  const propsReady = stagedPhase >= 3;
-  const interactablesReady = stagedPhase >= 4;
+  // Base terrain/collision stay present from phase zero so direct-zone launch
+  // and automation never expose the water/clear-color fallback while the
+  // richer destination groups are being scheduled.
+  const terrainReady = stagedPhase >= 0;
+  const bordersReady = stagedPhase >= 2;
+  const detailsReady = stagedPhase >= 3;
+  const propsReady = stagedPhase >= 4;
+  const interactablesReady = stagedPhase >= 5;
   const beagleReady = stagedPhase >= 5;
   const actorsReady = stagedPhase >= 6;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
+  const preparingDestination = transitionDestinationId === currentZoneId;
+  const physicsTerrainReady = terrainReady && (!preparingDestination || stagedPhase >= 4);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
   const interior = getInteriorDefinition(currentZoneId);
@@ -66,28 +74,34 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   if (interior) {
     return (
       <>
-        <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
-        {settings.physicsObstacles !== false && <PhysicsObstacles />}
+        {physicsTerrainReady && <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />}
+        {bordersReady && settings.physicsObstacles !== false && <PhysicsObstacles />}
         {propsReady && settings.physicsProps !== false && <PhysicsProps />}
-        <Suspense fallback={null}>
-          <InteriorZone />
-        </Suspense>
+        {bordersReady && (
+          <Suspense fallback={null}>
+            <InteriorZone />
+          </Suspense>
+        )}
       </>
     );
   }
 
   return (
     <>
-      {settings.terrain !== false && <Terrain segmentCap={settings.terrainSegmentCap} />}
-      {settings.terrain !== false && <BorderVistas />}
-      <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />
-      {settings.landmarks !== false && <Landmarks />}
-      {detailsReady && settings.worldDetails !== false && (
+      {terrainReady && settings.terrain !== false && <Terrain segmentCap={settings.terrainSegmentCap} />}
+      {bordersReady && settings.terrain !== false && (
         <Suspense fallback={null}>
-          <WorldDetails settings={settings} />
+          <BorderVistas preparationPhase={stagedPhase} />
         </Suspense>
       )}
-      {settings.physicsObstacles !== false && <PhysicsObstacles />}
+      {physicsTerrainReady && <PhysicsTerrain segmentCap={settings.terrainSegmentCap} />}
+      {bordersReady && settings.landmarks !== false && <Landmarks />}
+      {detailsReady && settings.worldDetails !== false && (
+        <Suspense fallback={null}>
+          <WorldDetails settings={settings} contentPhase={stagedPhase} />
+        </Suspense>
+      )}
+      {bordersReady && settings.physicsObstacles !== false && <PhysicsObstacles />}
       {propsReady && settings.physicsProps !== false && <PhysicsProps />}
       {propsReady && settings.physicsProps !== false && <PricklyPearField />}
       {propsReady && settings.physicsProps !== false && <LavaCactusField />}

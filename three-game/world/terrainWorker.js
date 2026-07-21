@@ -22,7 +22,7 @@ function resolveTerrainSegments(authoredSegments, segmentCap = null) {
 
 function resolveColliderSegments(regionId, authoredSegments) {
   // Keep in sync with terrainResource.js's synchronous recovery path.
-  const cap = regionId === 'N_SHORE' || regionId === 'PENAL_COLONY' ? 128 : 192;
+  const cap = regionId === 'N_SHORE' || regionId === 'PENAL_COLONY' ? 96 : 128;
   return Math.min(cap, Math.max(96, Math.floor(authoredSegments || 96)));
 }
 
@@ -31,9 +31,14 @@ function buildTerrainPayload(regionId, segmentCap) {
   const segments = resolveTerrainSegments(config.segments, segmentCap);
   const side = segments + 1;
   const count = side * side;
-  const heights = new Float32Array(count);
+  const positions = new Float32Array(count * 3);
+  const uvs = new Float32Array(count * 2);
   const colors = new Float32Array(count * 3);
   const roughness = new Float32Array(count);
+  const indexCount = segments * segments * 6;
+  const indices = count > 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+  let minimumHeight = Infinity;
+  let maximumHeight = -Infinity;
   let index = 0;
   for (let zIndex = 0; zIndex < side; zIndex += 1) {
     const z = -config.depth * 0.5 + (zIndex / segments) * config.depth;
@@ -69,10 +74,16 @@ function buildTerrainPayload(regionId, segmentCap) {
         else if (beachWet) color.lerp(WET_SAND_TINT, wet * 0.18);
         else color.lerp(WET_SCRUB_TINT, wet * 0.08);
       }
-      heights[index] = y;
+      positions[index * 3] = x;
+      positions[index * 3 + 1] = y;
+      positions[index * 3 + 2] = z;
+      uvs[index * 2] = xIndex / segments;
+      uvs[index * 2 + 1] = 1 - zIndex / segments;
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
+      minimumHeight = Math.min(minimumHeight, y);
+      maximumHeight = Math.max(maximumHeight, y);
       const wetRoughness = biome === 'wet-basalt' || biome === 'black-lava'
         ? THREE.MathUtils.lerp(0.9, 0.5, wet)
         : THREE.MathUtils.lerp(0.96, 0.72, wet);
@@ -80,6 +91,31 @@ function buildTerrainPayload(regionId, segmentCap) {
       index += 1;
     }
   }
+
+  // Match PlaneGeometry's winding after its -90deg X rotation, but do the
+  // allocation and normal calculation in the worker. The main thread can then
+  // attach transferred typed arrays without looping over every terrain vertex.
+  let indexOffset = 0;
+  for (let zIndex = 0; zIndex < segments; zIndex += 1) {
+    for (let xIndex = 0; xIndex < segments; xIndex += 1) {
+      const a = xIndex + side * zIndex;
+      const b = xIndex + side * (zIndex + 1);
+      const c = xIndex + 1 + side * (zIndex + 1);
+      const d = xIndex + 1 + side * zIndex;
+      indices[indexOffset++] = a;
+      indices[indexOffset++] = b;
+      indices[indexOffset++] = d;
+      indices[indexOffset++] = b;
+      indices[indexOffset++] = c;
+      indices[indexOffset++] = d;
+    }
+  }
+  const normalGeometry = new THREE.BufferGeometry();
+  normalGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  normalGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  normalGeometry.computeVertexNormals();
+  const normals = normalGeometry.getAttribute('normal').array;
+  normalGeometry.dispose();
 
   const colliderSegments = resolveColliderSegments(regionId, config.segments);
   const colliderSide = colliderSegments + 1;
@@ -99,9 +135,14 @@ function buildTerrainPayload(regionId, segmentCap) {
     width: config.width,
     depth: config.depth,
     segments,
-    heights,
+    positions,
+    normals,
+    uvs,
+    indices,
     colors,
     roughness,
+    minimumHeight,
+    maximumHeight,
     colliderSegments,
     colliderHeights,
   };
@@ -110,9 +151,14 @@ function buildTerrainPayload(regionId, segmentCap) {
 self.onmessage = event => {
   const { requestId, regionId, segmentCap } = event.data || {};
   try {
+    const startedAt = performance.now();
     const payload = buildTerrainPayload(regionId, segmentCap);
+    payload.preparationDurationMs = performance.now() - startedAt;
     self.postMessage({ requestId, payload }, [
-      payload.heights.buffer,
+      payload.positions.buffer,
+      payload.normals.buffer,
+      payload.uvs.buffer,
+      payload.indices.buffer,
       payload.colors.buffer,
       payload.roughness.buffer,
       payload.colliderHeights.buffer,

@@ -1,7 +1,7 @@
 import { NORTHERN_HIGHLANDS_PATH_POINTS } from './path';
 import { createNorthernHighlandsPbrMaterial } from './pbrMaterial';
 
-const NORTHERN_HIGHLANDS_SPLAT_BOUNDS = {
+export const NORTHERN_HIGHLANDS_SPLAT_BOUNDS = {
   originX: -58,
   originZ: -54,
   width: 116,
@@ -13,6 +13,7 @@ export function createNorthernHighlandsTerrainMaterial() {
   return createNorthernHighlandsPbrMaterial({
     pathPoints: NORTHERN_HIGHLANDS_PATH_POINTS,
     pathSplatBounds: NORTHERN_HIGHLANDS_SPLAT_BOUNDS,
+    pathSplatPath: '/assets/textures/world/floreana-generated/northern-highlands-path-splat.png',
     pathMinimumWidth: 1.58,
   });
 }

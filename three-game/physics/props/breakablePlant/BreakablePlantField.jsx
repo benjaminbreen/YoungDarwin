@@ -27,7 +27,7 @@
 //   tuning         — optional overrides of DEFAULT_PLANT_TUNING.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CuboidCollider, RigidBody } from '@react-three/rapier';
+import { CuboidCollider, interactionGroups, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
@@ -39,10 +39,20 @@ import { getThreeSpecimens } from '../../../data';
 import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 import { catalogToInspectable } from '../../../world/inspectables';
+import {
+  createRestrainedReleaseImpulse,
+  damageLeanAngle,
+  selectHammerImpactTargets,
+} from './breakablePhysics';
+
+// Released pieces still collide with terrain, Darwin, and ordinary props, but
+// not with other breakable pieces. Adjacent pads/branches begin in contact;
+// asking Rapier to solve those contacts the instant a subtree detaches makes
+// the solver separate them like an explosion.
+const BREAKABLE_PIECE_COLLISION_GROUPS = interactionGroups(1, 0);
 
 export const DEFAULT_PLANT_TUNING = {
   strikeRange: 2.7,
-  strikeFacingDot: 0.25,
   // One piece per swing; tougher pieces (piece.hits) absorb hits before
   // snapping, so felling a whole plant takes deliberate work.
   strikeMaxPieces: 1,
@@ -81,6 +91,15 @@ export const DEFAULT_PLANT_TUNING = {
   windSway: 0.018,
   contactBendBase: 0.14,
   contactBendSpeed: 0.02,
+  // Sublethal hammer damage uses each piece's attachment origin as a visual
+  // hinge. A little lean remains after the recoil, so damage reads before the
+  // final blow without introducing a fragile runtime joint graph.
+  damageMaxLean: 0.14,
+  damageKick: 1.45,
+  damageStiffness: 32,
+  damageDamping: 7.2,
+  hammerReleaseSpeed: 0.58,
+  hammerReleaseLiftSpeed: 0.04,
   // Descendants detach together with mass-scaled momentum. This is not a
   // jointed branch simulation, but it keeps a branch moving as one beat until
   // ground contact instead of visibly crumbling in a random cascade.
@@ -143,7 +162,15 @@ function isPlayerTarget(target) {
 
 // releasedVersion is passed only to re-render pieces when the released set
 // changes; the value itself is unused.
-function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, registerBody }) {
+function BreakablePlantPiece({
+  spec,
+  tuning,
+  piece,
+  runtime,
+  damageKeys,
+  onImpactRelease,
+  registerBody,
+}) {
   const bodyRef = useRef(null);
   const impulseApplied = useRef(false);
   const releaseAgeRef = useRef(0);
@@ -157,6 +184,9 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
       worldFlexQuat: new THREE.Quaternion(),
       bendQuat: new THREE.Quaternion(),
       siteWindQuat: new THREE.Quaternion(),
+      damageQuat: new THREE.Quaternion(),
+      damageAxis: new THREE.Vector3(),
+      damagePivot: new THREE.Vector3(),
       localFlexQuat: new THREE.Quaternion(),
       windEuler: new THREE.Euler(),
       windQuat: new THREE.Quaternion(),
@@ -214,6 +244,8 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
       if (visual) {
         const siteFlex = runtime.siteFlexes.get(piece.siteId);
         const t = state.clock.elapsedTime;
+        visualState.worldFlexQuat.identity();
+        visualState.flexedPosition.copy(visualState.basePosition);
         if (siteFlex) {
           visualState.bendQuat.setFromAxisAngle(siteFlex.axisWorld, siteFlex.angle);
           visualState.siteWindQuat.setFromAxisAngle(
@@ -225,18 +257,39 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
             .sub(siteFlex.pivot)
             .applyQuaternion(visualState.worldFlexQuat)
             .add(siteFlex.pivot);
-          visual.position.copy(visualState.localPosition
-            .copy(visualState.flexedPosition)
-            .sub(visualState.basePosition)
-            .applyQuaternion(invQuat));
-          visualState.localFlexQuat.copy(invQuat)
-            .multiply(visualState.worldFlexQuat)
-            .multiply(baseQuat);
-          visual.quaternion.copy(visualState.localFlexQuat);
-        } else {
-          visual.position.set(0, 0, 0);
-          visual.quaternion.identity();
         }
+
+        let damageFlex = null;
+        for (const key of damageKeys || []) {
+          damageFlex = runtime.damageFlexes.get(key);
+          if (damageFlex) break;
+        }
+        if (damageFlex) {
+          visualState.damagePivot.copy(damageFlex.pivot);
+          visualState.damageAxis.copy(damageFlex.axisWorld);
+          if (siteFlex) {
+            visualState.damagePivot
+              .sub(siteFlex.pivot)
+              .applyQuaternion(visualState.worldFlexQuat)
+              .add(siteFlex.pivot);
+            visualState.damageAxis.applyQuaternion(visualState.worldFlexQuat).normalize();
+          }
+          visualState.damageQuat.setFromAxisAngle(visualState.damageAxis, damageFlex.angle);
+          visualState.flexedPosition
+            .sub(visualState.damagePivot)
+            .applyQuaternion(visualState.damageQuat)
+            .add(visualState.damagePivot);
+          visualState.worldFlexQuat.premultiply(visualState.damageQuat);
+        }
+
+        visual.position.copy(visualState.localPosition
+          .copy(visualState.flexedPosition)
+          .sub(visualState.basePosition)
+          .applyQuaternion(invQuat));
+        visualState.localFlexQuat.copy(invQuat)
+          .multiply(visualState.worldFlexQuat)
+          .multiply(baseQuat);
+        visual.quaternion.copy(visualState.localFlexQuat);
         visualState.windEuler.set(
           Math.sin(t * 1.7 + windPhase) * windAmp,
           0,
@@ -325,9 +378,9 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
       rotation={piece.rotation}
       mass={piece.mass}
       friction={0.95}
-      restitution={0.12}
-      linearDamping={0.6}
-      angularDamping={0.85}
+      restitution={0.02}
+      linearDamping={2.1}
+      angularDamping={2.5}
       canSleep
       ccd={!!piece.ccd}
       userData={userData}
@@ -336,6 +389,7 @@ function BreakablePlantPiece({ spec, tuning, piece, runtime, onImpactRelease, re
       <CuboidCollider
         args={piece.colliderArgs.map(v => Math.max(0.015, v))}
         position={piece.colliderOffset}
+        collisionGroups={BREAKABLE_PIECE_COLLISION_GROUPS}
       />
       <group ref={visualRef}>
         <group
@@ -421,6 +475,20 @@ export function BreakablePlantField({ spec }) {
 
   const piecesByKey = useMemo(() => new Map(pieces.map(piece => [piece.key, piece])), [pieces]);
 
+  const damageKeysByPiece = useMemo(() => {
+    const map = new Map();
+    for (const piece of pieces) {
+      const keys = [piece.key];
+      let parentKey = piece.parentKey;
+      while (parentKey) {
+        keys.push(parentKey);
+        parentKey = piecesByKey.get(parentKey)?.parentKey || null;
+      }
+      map.set(piece.key, keys);
+    }
+    return map;
+  }, [pieces, piecesByKey]);
+
   const runtimeRef = useRef(null);
   if (!runtimeRef.current) {
     runtimeRef.current = {
@@ -428,6 +496,7 @@ export function BreakablePlantField({ spec }) {
       released: new Set(),
       culled: new Set(),
       damage: new Map(),
+      damageFlexes: new Map(),
       pendingImpulses: new Map(),
       pendingCascades: [],
       pendingStrikes: [],
@@ -450,6 +519,7 @@ export function BreakablePlantField({ spec }) {
     runtime.released = new Set();
     runtime.culled = new Set();
     runtime.damage = new Map();
+    runtime.damageFlexes = new Map();
     runtime.pendingImpulses = new Map();
     runtime.pendingCascades = [];
     runtime.pendingStrikes = [];
@@ -533,6 +603,34 @@ export function BreakablePlantField({ spec }) {
     return true;
   }, [dependents, piecesByKey, runtime, tuning]);
 
+  const kickDamageFlex = useCallback((piece, taken, impulse, permanent = true) => {
+    const linear = impulse?.linear || {};
+    const length = Math.hypot(linear.x || 0, linear.z || 0);
+    const phase = sitePhase(piece.key);
+    const dirX = length > 0.001 ? (linear.x || 0) / length : Math.cos(phase);
+    const dirZ = length > 0.001 ? (linear.z || 0) / length : Math.sin(phase);
+    let flex = runtime.damageFlexes.get(piece.key);
+    if (!flex) {
+      flex = {
+        pivot: new THREE.Vector3(...piece.spawn),
+        axisWorld: new THREE.Vector3(dirZ, 0, -dirX).normalize(),
+        angle: 0,
+        angularVelocity: 0,
+        restAngle: 0,
+      };
+      runtime.damageFlexes.set(piece.key, flex);
+    } else {
+      flex.axisWorld.set(dirZ, 0, -dirX).normalize();
+    }
+    flex.restAngle = permanent
+      ? damageLeanAngle(taken, piece.hits || 1, tuning.damageMaxLean)
+      : 0;
+    flex.angularVelocity = Math.min(
+      tuning.damageKick * 1.8,
+      flex.angularVelocity + tuning.damageKick,
+    );
+  }, [runtime, tuning]);
+
   // Route every hit through hit points: tough pieces shrug off early blows
   // (with dust + a narrator beat for hammer work) before finally snapping.
   const damagePiece = useCallback((key, amount, impulse, { feedback = null } = {}) => {
@@ -540,6 +638,7 @@ export function BreakablePlantField({ spec }) {
     const piece = piecesByKey.get(key);
     if (!piece) return false;
     if (piece.unbreakable) {
+      kickDamageFlex(piece, 0, impulse, false);
       emitPropEvent('prop-struck', {
         propId: key,
         position: { x: piece.center.x, y: piece.center.y, z: piece.center.z },
@@ -565,6 +664,7 @@ export function BreakablePlantField({ spec }) {
       return releasePiece(key, impulse);
     }
     runtime.damage.set(key, taken);
+    kickDamageFlex(piece, taken, impulse);
     emitPropEvent('prop-struck', {
       propId: key,
       position: { x: piece.center.x, y: piece.center.y, z: piece.center.z },
@@ -583,7 +683,7 @@ export function BreakablePlantField({ spec }) {
       });
     }
     return false;
-  }, [piecesByKey, releasePiece, runtime, spec, tuning]);
+  }, [kickDamageFlex, piecesByKey, releasePiece, runtime, spec, tuning]);
 
   const onImpactRelease = useCallback((key, impulse) => {
     return damagePiece(key, tuning.contactBreakDamage, impulse);
@@ -631,8 +731,8 @@ export function BreakablePlantField({ spec }) {
 
   // Player landing on the plant snaps pieces under the impact. The kinematic
   // character never produces contact-force events against fixed bodies, so
-  // this listens to the landing dust event instead.
-  useEffect(() => onPropEvent('terrain-dust', event => {
+  // this listens to the shared landing contact instead.
+  useEffect(() => onPropEvent('surface-contact', event => {
     if (event.source !== 'darwin') return;
     if (event.kind !== 'landing' && event.kind !== 'landing-jump') return;
     if ((event.fallSpeed || 0) < tuning.jumpBreakFallSpeed) return;
@@ -652,11 +752,12 @@ export function BreakablePlantField({ spec }) {
       const dx = hit.piece.center.x - at.x;
       const dz = hit.piece.center.z - at.z;
       const length = Math.hypot(dx, dz) || 1;
-      const punch = hit.piece.mass * (1.6 + (event.fallSpeed || 0) * 0.18);
-      damagePiece(hit.piece.key, tuning.jumpBreakDamage, {
-        linear: { x: (dx / length) * punch, y: punch * 0.12, z: (dz / length) * punch },
-        torque: { x: (dz / length) * punch * 0.08, y: 0, z: -(dx / length) * punch * 0.08 },
-      });
+      damagePiece(hit.piece.key, tuning.jumpBreakDamage, createRestrainedReleaseImpulse({
+        mass: hit.piece.mass,
+        direction: { x: dx / length, z: dz / length },
+        speed: Math.min(0.78, 0.46 + (event.fallSpeed || 0) * 0.035),
+        liftSpeed: 0.025,
+      }));
     }
   }), [damagePiece, pieces, runtime, tuning]);
 
@@ -735,6 +836,21 @@ export function BreakablePlantField({ spec }) {
     const velocityX = Number.isFinite(intendedVelocity?.x) ? intendedVelocity.x : runtime.playerVel.x;
     const velocityZ = Number.isFinite(intendedVelocity?.z) ? intendedVelocity.z : runtime.playerVel.z;
     const dt = Math.min(delta, 0.05);
+
+    for (const [key, flex] of runtime.damageFlexes) {
+      flex.angularVelocity += (
+        (flex.restAngle - flex.angle) * tuning.damageStiffness
+        - flex.angularVelocity * tuning.damageDamping
+      ) * dt;
+      flex.angle += flex.angularVelocity * dt;
+      flex.angle = THREE.MathUtils.clamp(flex.angle, -0.04, tuning.damageMaxLean * 1.45);
+      if (
+        flex.restAngle === 0
+        && Math.abs(flex.angle) < 0.001
+        && Math.abs(flex.angularVelocity) < 0.002
+      ) runtime.damageFlexes.delete(key);
+    }
+
     for (const [siteId, flex] of runtime.siteFlexes) {
       const candidate = candidatesBySite.get(siteId);
       let targetBend = 0;
@@ -761,14 +877,15 @@ export function BreakablePlantField({ spec }) {
           && runtime.clock - flex.lastDamageAt > tuning.pushDamageCooldown
         ) {
           flex.lastDamageAt = runtime.clock;
-          const punch = piece.mass * (1.1 + approach * 0.16);
           flex.pendingBreak = {
             key: piece.key,
             age: 0,
-            impulse: {
-              linear: { x: dirX * punch, y: punch * 0.14, z: dirZ * punch },
-              torque: { x: dirZ * punch * 0.045, y: 0, z: -dirX * punch * 0.045 },
-            },
+            impulse: createRestrainedReleaseImpulse({
+              mass: piece.mass,
+              direction: { x: dirX, z: dirZ },
+              speed: Math.min(0.72, 0.42 + approach * 0.035),
+              liftSpeed: 0.02,
+            }),
           };
           flex.angularVelocity = Math.max(flex.angularVelocity, tuning.pushBreakKick);
           targetBend = Math.min(tuning.pushMaxBend, tuning.pushBreakAngle);
@@ -816,29 +933,23 @@ export function BreakablePlantField({ spec }) {
       const o = strike.position;
       const f = strike.facing;
       if (!o || !f) continue;
-      const fl = Math.hypot(f.x, f.z) || 1;
-      const fx = f.x / fl;
-      const fz = f.z / fl;
-      const candidates = [];
-      for (const piece of pieces) {
-        if (runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
-        const at = runtime.bodies.get(piece.key)?.current?.translation() || piece.center;
-        const dx = at.x - o.x;
-        const dz = at.z - o.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist > tuning.strikeRange) continue;
-        if (at.y - (o.y || 0) > 2.4) continue;
-        if (dist > 0.2 && (dx / dist) * fx + (dz / dist) * fz < tuning.strikeFacingDot) continue;
-        candidates.push({ piece, dist, dirX: dist > 0.2 ? dx / dist : fx, dirZ: dist > 0.2 ? dz / dist : fz });
-      }
-      candidates.sort((a, b) => a.dist - b.dist);
+      const candidates = selectHammerImpactTargets(
+        pieces.filter(piece => !runtime.released.has(piece.key) && !runtime.culled.has(piece.key)),
+        {
+          origin: o,
+          facing: f,
+          maxHits: tuning.strikeMaxPieces,
+          swing: { endDistance: tuning.strikeRange },
+        },
+      );
       if (candidates.length) claimSwing(strike.swingId);
-      for (const hit of candidates.slice(0, tuning.strikeMaxPieces)) {
-        const punch = hit.piece.mass * 2.4;
-        damagePiece(hit.piece.key, tuning.strikeDamage, {
-          linear: { x: hit.dirX * punch, y: punch * 0.3, z: hit.dirZ * punch },
-          torque: { x: hit.dirZ * punch * 0.07, y: 0, z: -hit.dirX * punch * 0.07 },
-        }, {
+      for (const hit of candidates) {
+        damagePiece(hit.piece.key, tuning.strikeDamage, createRestrainedReleaseImpulse({
+          mass: hit.piece.mass,
+          direction: { x: hit.dirX, z: hit.dirZ },
+          speed: tuning.hammerReleaseSpeed,
+          liftSpeed: tuning.hammerReleaseLiftSpeed,
+        }), {
           feedback: spec.strikeAbsorbMessage(hit.piece),
         });
       }
@@ -869,6 +980,7 @@ export function BreakablePlantField({ spec }) {
             tuning={tuning}
             piece={piece}
             runtime={runtime}
+            damageKeys={damageKeysByPiece.get(piece.key)}
             releasedVersion={version}
             onImpactRelease={onImpactRelease}
             registerBody={registerBody}

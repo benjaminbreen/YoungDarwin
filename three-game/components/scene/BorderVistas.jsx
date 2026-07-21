@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainHeight } from '../../world/terrain';
 import { getEcology } from '../../world/ecology';
+import { readRegionEcologyResource } from '../../world/ecology/ecologyResource';
 import { getBorderVistas } from '../../world/vistas';
 import { buildBorderEcologyLayers, buildBorderGrassLayers } from '../../world/vistas/borderEcology';
 import { buildBorderTransition, CARDINAL_VISTA_EDGES } from '../../world/vistas/transitions';
@@ -13,12 +14,11 @@ import {
   clampToRegionEdge,
   edgeLandStrength,
   edgeOrigin,
-  makeApronGeometry,
-  makeNeighborPreviewGeometry,
   normalize2,
   profileHeight,
   worldPoint,
 } from '../../world/vistas/apronGeometry';
+import { readBorderVistaResource } from '../../world/vistas/borderVistaResource';
 import { useThreeGameStore } from '../../store';
 import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 
@@ -332,7 +332,7 @@ function TransitionSeamMarkers({ regionId, config, vista, transition, kind }) {
   );
 }
 
-function BorderVista({ regionId, config, vista }) {
+function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = true }) {
   const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const targetConfig = useMemo(() => (
@@ -343,34 +343,38 @@ function BorderVista({ regionId, config, vista }) {
   const transition = useMemo(() => (
     buildBorderTransition(regionId, config, vista, targetConfig)
   ), [regionId, config, targetConfig, vista]);
-  const geometry = useMemo(() => (
-    makeNeighborPreviewGeometry(regionId, config, vista.toRegionId, targetConfig, vista, transition)
-      || makeApronGeometry(regionId, config, vista)
-  ), [regionId, config, targetConfig, vista, transition]);
-  const borderEcologyLayers = useMemo(() => buildBorderEcologyLayers({
-    regionId,
-    config,
-    targetRegionId: vista.toRegionId,
-    targetConfig,
-    vista,
-    transition,
-    ecology: targetEcology,
-    sourceEcology,
-    foliageDrawScale,
-  }), [config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
-  const borderGrassLayers = useMemo(() => buildBorderGrassLayers({
-    regionId,
-    config,
-    targetRegionId: vista.toRegionId,
-    targetConfig,
-    vista,
-    transition,
-    ecology: targetEcology,
-    sourceEcology,
-    foliageDrawScale,
-  }), [config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
+  const geometry = prepared?.preview || null;
+  const borderEcologyLayers = useMemo(() => (
+    borderEcologyReady
+      ? buildBorderEcologyLayers({
+        regionId,
+        config,
+        targetRegionId: vista.toRegionId,
+        targetConfig,
+        vista,
+        transition,
+        ecology: targetEcology,
+        sourceEcology,
+        foliageDrawScale,
+      })
+      : []
+  ), [borderEcologyReady, config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
+  const borderGrassLayers = useMemo(() => (
+    borderEcologyReady
+      ? buildBorderGrassLayers({
+        regionId,
+        config,
+        targetRegionId: vista.toRegionId,
+        targetConfig,
+        vista,
+        transition,
+        ecology: targetEcology,
+        sourceEcology,
+        foliageDrawScale,
+      })
+      : []
+  ), [borderEcologyReady, config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
   const material = useMemo(() => createBorderVistaMaterial(cheapMaterials), [cheapMaterials]);
-  useEffect(() => () => geometry?.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
   if (!geometry) return null;
   const isNeighborPreview = geometry.userData.mode === 'neighbor-preview';
@@ -382,7 +386,7 @@ function BorderVista({ regionId, config, vista }) {
       renderPath: null,
     }}>
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
-      {isNeighborPreview && (
+      {isNeighborPreview && borderEcologyReady && (
         <>
           {borderEcologyLayers.length > 0 || borderGrassLayers.length > 0 ? (
             <Suspense fallback={null}>
@@ -451,14 +455,21 @@ function BorderVista({ regionId, config, vista }) {
   );
 }
 
-export function BorderVistas() {
+export function BorderVistas({ preparationPhase = 6 }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
+  if (transitionDestinationId === currentZoneId) readRegionEcologyResource(currentZoneId);
+  const preparedResource = readBorderVistaResource(currentZoneId);
   const { config, vistas } = useMemo(() => ({
     config: getRegionTerrainConfig(currentZoneId),
     vistas: getBorderVistas(currentZoneId),
   }), [currentZoneId]);
 
   if (!vistas.length) return null;
+  const stagedPreparationPhase = transitionDestinationId === currentZoneId
+    ? preparationPhase
+    : 6;
+  const earlyVistaCount = Math.ceil(vistas.length * 0.5);
   return (
     <group name="border-terrain-aprons" userData={{
       renderSource: `border-vistas:${currentZoneId}`,
@@ -466,8 +477,15 @@ export function BorderVistas() {
       renderKind: 'border-vistas',
       renderPath: null,
     }}>
-      {vistas.map(vista => (
-        <BorderVista key={vista.id} regionId={currentZoneId} config={config} vista={vista} />
+      {vistas.map((vista, index) => (
+        <BorderVista
+          key={vista.id}
+          regionId={currentZoneId}
+          config={config}
+          vista={vista}
+          prepared={preparedResource.entries.find(entry => entry.vistaId === vista.id)}
+          borderEcologyReady={stagedPreparationPhase >= (index < earlyVistaCount ? 5 : 6)}
+        />
       ))}
     </group>
   );

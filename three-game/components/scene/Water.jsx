@@ -6,7 +6,11 @@ import * as THREE from 'three';
 import { useThreeGameStore, getRuntimePlayerPose } from '../../store';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainHeight } from '../../world/terrain';
-import { getStandingWaterRenderingConfig, standingWaterMaskAt } from '../../world/standingWaterRendering';
+import {
+  getStandingWaterRenderingConfig,
+  standingWaterMaskAt,
+  standingWaterSuppressionMaskAt,
+} from '../../world/standingWaterRendering';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -308,7 +312,7 @@ function bakeStandingWaterMaskTexture(zoneId, bakeRes = BAKE_RES) {
     for (let i = 0; i < bakeRes; i += 1) {
       const x = (i / (bakeRes - 1) - 0.5) * WATER_SIZE;
       const z = (j / (bakeRes - 1) - 0.5) * WATER_SIZE;
-      const mask = standingWaterMaskAt(x, z, zoneId);
+      const mask = standingWaterSuppressionMaskAt(x, z, zoneId);
       const idx = (j * bakeRes + i) * 4;
       data[idx] = Math.round(mask * 255);
       data[idx + 1] = 0;

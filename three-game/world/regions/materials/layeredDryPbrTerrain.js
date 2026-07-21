@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   createStandardFootPathSplatTexture,
+  loadStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
@@ -131,7 +132,7 @@ function colorFragment() {
         diffuseColor.rgb = clamp(psrColor, 0.0, 1.0);`;
 }
 
-function roughnessFragment(layerConfig) {
+function roughnessFragment(layerConfig, roughnessOverlayGLSL = '') {
   return /* glsl */`
         vec2 psrRoughPosition = vPostScrubWorld.xz;
         vec2 psrRoughCoastalUv;
@@ -172,7 +173,8 @@ function roughnessFragment(layerConfig) {
           psrRoughWeights,
           vec4(psrCoastalRoughness, psrLitterRoughness, psrBasaltRoughness, psrCinderRoughness)
         );
-        roughnessFactor = mix(roughnessFactor, psrMappedRoughness, 0.94);`;
+        roughnessFactor = mix(roughnessFactor, psrMappedRoughness, 0.94);
+        ${roughnessOverlayGLSL}`;
 }
 
 function normalFragment(layerConfig) {
@@ -236,11 +238,13 @@ function normalFragment(layerConfig) {
 export function createLayeredDryPbrTerrainMaterial({
   pathPoints,
   pathSplatBounds,
+  pathSplatPath = null,
   pathMinimumWidth = 1.62,
   layerConfig,
   surfaceMaskGLSL = '',
   layerWeightsOverlayGLSL = '',
   colorOverlayGLSL = '',
+  roughnessOverlayGLSL = '',
   cacheKey = 'layered-dry-pbr-terrain-v1',
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
@@ -251,12 +255,14 @@ export function createLayeredDryPbrTerrainMaterial({
     throw new Error(`createLayeredDryPbrTerrainMaterial requires ${requiredLayers.join(', ')} layers.`);
   }
 
-  const pathSplat = createStandardFootPathSplatTexture({
-    pathPoints,
-    bounds: pathSplatBounds,
-    size: pathSplatBounds?.size,
-    minimumWidth: pathMinimumWidth,
-  });
+  const pathSplat = pathSplatPath
+    ? loadStandardFootPathSplatTexture(pathSplatPath)
+    : createStandardFootPathSplatTexture({
+      pathPoints,
+      bounds: pathSplatBounds,
+      size: pathSplatBounds?.size,
+      minimumWidth: pathMinimumWidth,
+    });
   const layers = Object.fromEntries(
     Object.entries(layerConfig).map(([name, layer]) => [name, loadPackedPbrTerrainSet(layer.texture)]),
   );
@@ -311,7 +317,7 @@ ${colorOverlayGLSL}`,
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-${roughnessFragment(layerConfig)}`,
+${roughnessFragment(layerConfig, roughnessOverlayGLSL)}`,
       )
       .replace(
         '#include <normal_fragment_begin>',

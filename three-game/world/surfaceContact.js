@@ -417,9 +417,43 @@ function cloneProfile(profile, biome) {
   };
 }
 
+function inferredProfileForBiome(biome) {
+  if (!biome) return null;
+  if (/mud|bog|stream.bank|creek.bank|damp.*bank|pool.edge|wet.hollow|garden.mud/.test(biome)) {
+    return PROFILE_BY_BIOME['wet-mud'];
+  }
+  if (/sand|beach|dune/.test(biome)) {
+    const base = /black/.test(biome)
+      ? PROFILE_BY_BIOME['black-sand']
+      : /shell/.test(biome)
+        ? PROFILE_BY_BIOME['shell-sand']
+        : PROFILE_BY_BIOME.sand;
+    if (/wet|shallow|pool.edge/.test(biome)) {
+      return {
+        ...base,
+        dustiness: Math.min(base.dustiness, 0.24),
+        wetness: Math.max(base.wetness, 0.7),
+        opacity: Math.min(base.opacity, 0.12),
+        particleLift: Math.min(base.particleLift, 0.18),
+      };
+    }
+    return base;
+  }
+  if (/ash|tuff|cinder/.test(biome)) return PROFILE_BY_BIOME['ash-slope'];
+  if (/basalt|lava|boulder|rock|cliff|guano|cave/.test(biome)) {
+    return /wet/.test(biome) ? PROFILE_BY_BIOME['wet-basalt'] : PROFILE_BY_BIOME.basalt;
+  }
+  if (/path|trail|clearing|dry.wash|yard|court|threshold/.test(biome)) return PROFILE_BY_BIOME.trail;
+  if (/grass|scrub|underbrush|meadow|palo.santo|fern|hollow/.test(biome)) return PROFILE_BY_BIOME.grass;
+  return null;
+}
+
 export function surfaceContactProfileForBiome(biome) {
   const key = typeof biome === 'string' ? biome : '';
-  return cloneProfile(PROFILE_BY_BIOME[key] || DEFAULT_LAND_PROFILE, key || 'unknown');
+  return cloneProfile(
+    PROFILE_BY_BIOME[key] || inferredProfileForBiome(key) || DEFAULT_LAND_PROFILE,
+    key || 'unknown',
+  );
 }
 
 export function getSurfaceContactProfile({ x, z, y, zoneId, biome } = {}) {

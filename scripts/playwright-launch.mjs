@@ -16,9 +16,14 @@ function withSandboxGuidance(error) {
 
 export async function launchChromium() {
   try {
+    const useHardwareGpu = process.env.THREE_PLAYWRIGHT_GPU === '1';
+    const headful = process.env.THREE_PLAYWRIGHT_HEADFUL === '1';
     return await chromium.launch({
-      headless: true,
-      args: ['--disable-gpu', '--disable-dev-shm-usage'],
+      headless: !headful,
+      args: [
+        ...(!useHardwareGpu ? ['--disable-gpu'] : []),
+        '--disable-dev-shm-usage',
+      ],
     });
   } catch (error) {
     throw withSandboxGuidance(error);

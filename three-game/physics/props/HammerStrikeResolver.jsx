@@ -76,7 +76,7 @@ export function HammerStrikeResolver() {
         });
       }
       if (impact.groundPlume) {
-        emitPropEvent('terrain-dust', {
+        emitPropEvent('surface-contact', {
           position: impact.position,
           intensity: 1.15,
           biome: impact.biome,

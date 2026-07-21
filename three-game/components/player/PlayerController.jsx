@@ -53,6 +53,7 @@ import { findCactusHazardContact, findPushableObstacleNear } from './playerFeedb
 import { updatePlayerFrameFeedback } from './playerFrameFeedback';
 import { finalizePlayerFrame } from './playerFrameFinalization';
 import { updatePlayerActionMotion } from './playerActionMotion';
+import { classifyRapierCharacterContacts } from './playerCollisionContacts';
 import { updatePlayerEquipmentState } from './playerEquipmentState';
 import { shotgunAimState, resetShotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
@@ -267,7 +268,7 @@ export function PlayerController({
   const lastExamine = useRef(false);
   const lastCamera = useRef(false);
   const lastButtons = useRef({});
-  const footstepEffects = useFootstepEffects({ playerGroupRef: group, footstepDustTriggerRef });
+  const footstepEffects = useFootstepEffects({ footstepDustTriggerRef });
   // How deep the player's feet are below the sea surface (0 on dry land).
   const wadeDepth = useRef(0);
   const swimState = useRef({ active: false, enteredAt: 0 });
@@ -620,7 +621,7 @@ export function PlayerController({
       biome: event.biome,
     });
     const biome = surfaceProfile.biome || event.biome || terrainBiomeAt(worldPosition.x, worldPosition.z, worldPosition.y, currentZoneId);
-    emitPropEvent('terrain-dust', {
+    emitPropEvent('surface-contact', {
       ...event,
       kind: event.kind || defaultKind,
       position: { x: worldPosition.x, y: worldPosition.y, z: worldPosition.z },
@@ -2303,7 +2304,49 @@ export function PlayerController({
     characterDebug.current.source = characterMove.source;
     characterDebug.current.normal.set(0, 0, 0);
     group.current.position.add(characterMove.movement);
-    let collision = null;
+
+    // Rapier's character controller stops at dynamic bodies but does not push
+    // them automatically. Forward those exact contacts to the owning prop so
+    // its mass/mobility profile can apply one bounded horizontal response
+    // before the next physics step.
+    if (characterMove.collisionDetails?.length) {
+      const pushSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+      if (pushSpeed > 0.05) {
+        const dirX = velocity.current.x / pushSpeed;
+        const dirZ = velocity.current.z / pushSpeed;
+        const contactedPropIds = new Set();
+        for (const contact of characterMove.collisionDetails) {
+          const target = contact.userData || contact.rigidBody?.userData;
+          if (!target?.id || !String(target.kind || '').startsWith('physics-')) continue;
+          if (contactedPropIds.has(target.id)) continue;
+          contactedPropIds.add(target.id);
+          emitPropEvent('player-physics-prop-contact', {
+            propId: target.id,
+            direction: { x: dirX, y: 0, z: dirZ },
+            impactSpeed: pushSpeed,
+            delta,
+            now,
+          });
+        }
+      }
+    }
+
+    const {
+      sideContact: rapierSideContact,
+      sideTarget: rapierTarget,
+      groundTarget: rapierGroundTarget,
+    } = classifyRapierCharacterContacts(characterMove.collisionDetails);
+    let collision = rapierSideContact ? {
+      normal: rapierSideContact.normal,
+      penetration: rapierSideContact.translationDeltaRemaining?.length?.() || 0,
+      contactPoint: rapierSideContact.witness1 || null,
+      target: rapierTarget,
+      obstacle: rapierTarget ? {
+        id: rapierTarget.id,
+        kind: rapierTarget.kind,
+        pushable: false,
+      } : null,
+    } : null;
     const fallbackCollision = collisionAdapter.resolveCollision(group.current.position, startOfFramePosition);
     if (fallbackCollision) {
       group.current.position.copy(fallbackCollision.position).addScaledVector(fallbackCollision.normal, 0.035);
@@ -2398,6 +2441,7 @@ export function PlayerController({
       }
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
+      const physicsPropCollision = String(collision.target?.kind || '').startsWith('physics-');
       if (collision.obstacle?.bendable && impactSpeed > 0.32 && intoSurface > 0.2) {
         const bendDirection = horizontalVelocity.lengthSq() > 0.001
           ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
@@ -2416,17 +2460,17 @@ export function PlayerController({
       );
       if (!travelEdgeContact
         && !collision.specimen
+        && !physicsPropCollision
+        && collision.obstacle
+        && collision.obstacle.kind !== 'terrain'
         && impactSpeed >= PUSH_ANIMATION_MIN_SPEED
         && intoSurface >= PUSH_ANIMATION_MIN_FORWARD) {
-        startPushFeedback(collision.obstacle || {
-          kind: 'wall',
-          height: 1.6,
-          colliderTop: 1.6,
-          pushMass: 20,
-        });
+        startPushFeedback(collision.obstacle);
       }
       const canReact = now - bounceFeedback.current.lastImpactAt >= BUMP_FEEDBACK.cooldown;
-      const pushable = collision.obstacle?.pushable
+      const pushable = physicsPropCollision
+        ? null
+        : collision.obstacle?.pushable
         ? collision.obstacle
         : findPushableObstacleNear(collisionAdapter.obstacles, group.current.position, horizontalVelocity, normal);
       if (pushable && impactSpeed > 0.55 && intoSurface >= 0.42) {
@@ -2480,11 +2524,29 @@ export function PlayerController({
           0.26,
           0.86,
         );
-        const localNormal = frameScratch.localNormal.copy(normal).applyAxisAngle(frameScratch.up, -group.current.rotation.y);
+        const contactPoint = collision.contactPoint;
+        const fallbackContactHeight = Math.min(
+          1.05,
+          Math.max(0.42, (collision.obstacle?.height || collision.obstacle?.colliderTop || 1.4) * 0.55),
+        );
         collisionDustTriggerRef.current?.({
           kind: 'collision',
           intensity: Math.min(1, intensity * 0.9),
-          position: frameScratch.footstepPosition.set(-localNormal.x * 0.46, 0.08, -localNormal.z * 0.46),
+          worldPosition: contactPoint
+            ? { x: contactPoint.x, y: contactPoint.y, z: contactPoint.z }
+            : {
+              x: group.current.position.x - normal.x * colliderConfig.radius,
+              y: group.current.position.y + fallbackContactHeight,
+              z: group.current.position.z - normal.z * colliderConfig.radius,
+            },
+          normal: { x: normal.x, y: normal.y, z: normal.z },
+          direction: {
+            x: horizontalVelocity.x / Math.max(impactSpeed, 0.001),
+            y: 0,
+            z: horizontalVelocity.z / Math.max(impactSpeed, 0.001),
+          },
+          horizontalSpeed: impactSpeed,
+          target: collision.target || collision.obstacle || null,
         });
         velocity.current.x += normal.x * intensity * 0.38;
         velocity.current.z += normal.z * intensity * 0.38;
@@ -2549,6 +2611,21 @@ export function PlayerController({
 
     let nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
     let stanceGroundInfo = collisionAdapter.stanceGroundInfo?.(group.current.position, facing.current);
+    if (
+      characterMove.grounded
+      && String(rapierGroundTarget?.kind || '').startsWith('physics-')
+    ) {
+      // Dynamic props are outside the analytic terrain/obstacle adapter. The
+      // KCC has already stopped at their top, so its resolved player position
+      // is the support height for this frame.
+      nextGroundInfo = {
+        ...nextGroundInfo,
+        y: group.current.position.y,
+        source: 'physics-prop',
+        physicsTarget: rapierGroundTarget,
+      };
+      stanceGroundInfo = null;
+    }
     if (
       nextGroundInfo.source === 'authored-obstacle'
       && stanceGroundInfo
@@ -2820,28 +2897,6 @@ export function PlayerController({
       p.copy(clamped);
       characterController.sync(p);
       const correctionDistance = Math.hypot(correction.x, correction.z);
-      if (moving && desiredDelta.lengthSq() > 0.0001 && correctionDistance > 0.055) {
-        const attempted = frameScratch.pushDirection.copy(desiredDelta).setY(0);
-        const pushedBack = frameScratch.collisionNormal.copy(correction).setY(0);
-        if (attempted.lengthSq() > 0.0001 && pushedBack.lengthSq() > 0.0001) {
-          attempted.normalize();
-          pushedBack.normalize();
-          if (attempted.dot(pushedBack) < -0.35) {
-            const travelRunInPlace = shouldRunInPlaceAtTravelEdge(
-              useThreeGameStore.getState(),
-              { moving, isDarwinMode },
-            );
-            if (!travelRunInPlace) {
-              startPushFeedback({
-                kind: 'cliff',
-                height: 1.7,
-                colliderTop: 1.7,
-                pushMass: 24,
-              });
-            }
-          }
-        }
-      }
       const velocityKeep = correctionDistance < 0.65 ? 0.72 : 0.35;
       velocity.current.x *= velocityKeep;
       velocity.current.z *= velocityKeep;

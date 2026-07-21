@@ -9,6 +9,7 @@ import { modelAssets } from '../../modelAssets';
 import { wildlifeCatalog } from '../../wildlife/wildlifeCatalog';
 import { createReptileAnimator } from '../../wildlife/reptiles/reptileGaitRuntime';
 import { createLavaLizardRig, LAVA_LIZARD_GAIT } from '../../wildlife/reptiles/lavaLizardModel';
+import { ProceduralFinchPlayer } from '../../components/player/ProceduralFinchPlayer';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -64,6 +65,14 @@ const PROC_MODES = [
   'downed',
 ];
 
+const PROCEDURAL_BIRD_MODES = [
+  'idle display',
+  'forage',
+  'walk',
+  'run',
+  'flight',
+];
+
 function procModeInputs(mode, t) {
   switch (mode) {
     case 'walk': return { speed: 0.38, playerDist: 8 };
@@ -85,6 +94,26 @@ function procModeInputs(mode, t) {
 }
 
 const PROCEDURAL_ANIMALS = [
+  {
+    id: 'mediumGroundFinchProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'mediumGround',
+    label: 'New Medium Ground Finch',
+    source: 'Hand-authored procedural bird rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_BIRD_MODES,
+  },
+  {
+    id: 'floreanaMockingbirdProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'floreanaMockingbird',
+    label: 'New Floreana Mockingbird',
+    source: 'Hand-authored procedural bird rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_BIRD_MODES,
+  },
   {
     id: 'lavaLizardProceduralMale',
     kind: 'procedural',
@@ -314,6 +343,28 @@ function ProceduralReptilePreview({ animal, mode, paused, timeScale }) {
   return (
     <group position={[0, 0.03, 0]} scale={5.2}>
       <primitive object={rig.group} />
+    </group>
+  );
+}
+
+function ProceduralBirdPreview({ animal, mode, paused, timeScale }) {
+  const motionRef = useRef({});
+  useFrame(({ clock }) => {
+    const flight = mode === 'flight';
+    const speed = mode === 'walk' ? 0.34 : mode === 'run' ? 1.65 : flight ? 3 : 0;
+    motionRef.current = {
+      speed,
+      flying: flight,
+      flightPhase: flight ? 'cruise' : null,
+      flightFlap: flight && Math.sin(clock.elapsedTime * 0.75) > -0.2,
+      action: mode === 'forage' ? 'animalEat' : null,
+      timeScale: paused ? 0 : timeScale,
+    };
+  });
+
+  return (
+    <group position={[0, 0.5, 0]} scale={5.2}>
+      <ProceduralFinchPlayer motionRef={motionRef} variant={animal.variant} />
     </group>
   );
 }
@@ -657,13 +708,23 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                 <directionalLight position={[-5, 2.4, -4]} intensity={0.75} color="#9fc9ec" />
                 <Suspense fallback={null}>
                   {selectedAnimal.kind === 'procedural' ? (
-                    <ProceduralReptilePreview
-                      key={selectedAnimal.id}
-                      animal={selectedAnimal}
-                      mode={selectedClip}
-                      paused={paused}
-                      timeScale={timeScale}
-                    />
+                    selectedAnimal.proceduralType === 'bird' ? (
+                      <ProceduralBirdPreview
+                        key={selectedAnimal.id}
+                        animal={selectedAnimal}
+                        mode={selectedClip}
+                        paused={paused}
+                        timeScale={timeScale}
+                      />
+                    ) : (
+                      <ProceduralReptilePreview
+                        key={selectedAnimal.id}
+                        animal={selectedAnimal}
+                        mode={selectedClip}
+                        paused={paused}
+                        timeScale={timeScale}
+                      />
+                    )
                   ) : (
                     <AnimalPreview
                       key={selectedAnimal.id}

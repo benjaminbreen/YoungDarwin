@@ -653,9 +653,11 @@ async function run() {
   try {
     const page = await browser.newPage({ viewport: viewports[0] });
     const errors = [];
+    const warnings = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
       if (message.type() === 'error') errors.push(message.text());
+      if (message.type() === 'warning') warnings.push(message.text());
     });
 
     const targetUrl = screenshotUrl(baseUrl);
@@ -686,10 +688,7 @@ async function run() {
         // opening a modal that transition commits intentionally clear.
         await page.waitForTimeout(3400);
         await page.waitForFunction(
-          () => (
-            !window.__darwinE2E.getState().transition
-            && !document.querySelector('[data-testid="three-launch-overlay"]')
-          ),
+          () => !document.querySelector('[data-testid="three-launch-overlay"]'),
           null,
           { timeout: 20000 },
         );
@@ -731,16 +730,49 @@ async function run() {
         window.__darwinBlinkOverride = value;
       }, BLINK_OVERRIDE);
     }
-    for (let step = 0; step < PLAYER_MODEL_STEPS; step += 1) {
-      await page.keyboard.press('Digit9');
-    }
     if (PLAYER_MODEL_STEPS > 0) {
+      await page.waitForFunction(
+        () => typeof window.__darwinPlayerModel === 'string',
+        null,
+        { timeout: BOOT_TIMEOUT_MS },
+      );
+      for (let step = 0; step < PLAYER_MODEL_STEPS; step += 1) {
+        await page.keyboard.press('Shift+Digit9');
+      }
+      await page.waitForTimeout(1200);
+      const modelDiscovery = await page.evaluate(() => ({
+        model: window.__darwinPlayerModel || null,
+        blink: window.__darwinBlinkDebug || null,
+        hair: window.__darwinHairDebug || null,
+        hairMaterial: window.__darwinHairMaterialDebug || null,
+      }));
+      console.log(`[three:screenshot] Darwin model discovery: ${JSON.stringify(modelDiscovery)}`);
       await page.waitForFunction(
         () => window.__darwinPlayerModel === 'darwin5BlinkPreview'
           && window.__darwinBlinkDebug?.targetCount === 4,
         null,
         { timeout: BOOT_TIMEOUT_MS },
       );
+      const discoveryDebug = await page.evaluate(() => window.__darwinHairDebug || null);
+      console.log(`[three:screenshot] Darwin hair discovery: ${JSON.stringify(discoveryDebug)}`);
+      await page.waitForFunction(
+        () => window.__darwinHairDebug?.targetCount === 3
+          && window.__darwinHairDebug.locks?.some(lock => (
+            Math.abs(lock.sway) > 0.01 || Math.abs(lock.lift) > 0.01
+          )),
+        null,
+        { timeout: BOOT_TIMEOUT_MS },
+      );
+      await page.waitForFunction(
+        () => window.__darwinHairMaterialDebug?.isMeshPhysicalMaterial === true
+          && window.__darwinHairMaterialDebug.anisotropy > 0.5,
+        null,
+        { timeout: BOOT_TIMEOUT_MS },
+      );
+      const hairDebug = await page.evaluate(() => window.__darwinHairDebug || null);
+      console.log(`[three:screenshot] Darwin hair motion: ${JSON.stringify(hairDebug)}`);
+      const hairMaterialDebug = await page.evaluate(() => window.__darwinHairMaterialDebug || null);
+      console.log(`[three:screenshot] Darwin hair material: ${JSON.stringify(hairMaterialDebug)}`);
     }
     await adjustGameplayCamera(page);
 
@@ -761,6 +793,7 @@ async function run() {
         health,
         boot,
         errors: [...errors],
+        warnings: [...warnings],
       });
       console.log(`[three:screenshot] ${viewport.name}: ${health.ok && errors.length === 0 ? 'ok' : 'failed'}`);
     }

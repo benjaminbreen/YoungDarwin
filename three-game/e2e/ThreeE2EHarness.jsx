@@ -5,6 +5,10 @@ import { getThreeSpecimens } from '../data';
 import { setTouchControl } from '../input/touchControls';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../world/specimenRuntime';
+import { prepareTerrainResource } from '../world/terrainResource';
+import { prepareBorderVistaResource } from '../world/vistas/borderVistaResource';
+import { prepareRegionEcologyResource } from '../world/ecology/ecologyResource';
+import { prefetchRegionTerrainTextures } from '../world/terrainPrefetch';
 
 const HARNESS_VERSION = 1;
 
@@ -305,6 +309,46 @@ function createHarnessApi() {
         localTransition: true,
       });
       useThreeGameStore.getState().completeZoneTransition();
+      return makeSnapshot();
+    },
+    prepareTravel: async zoneId => {
+      if (!zoneId) return null;
+      const startedAt = performance.now();
+      prefetchRegionTerrainTextures(zoneId);
+      const completionMs = {};
+      const [terrainResource, borderResource, ecologyResource] = await Promise.all([
+        prepareTerrainResource(zoneId, 200).then(value => {
+          completionMs.terrain = performance.now() - startedAt;
+          return value;
+        }),
+        prepareBorderVistaResource(zoneId).then(value => {
+          completionMs.border = performance.now() - startedAt;
+          return value;
+        }),
+        prepareRegionEcologyResource(zoneId).then(value => {
+          completionMs.ecology = performance.now() - startedAt;
+          return value;
+        }),
+      ]);
+      return {
+        zoneId,
+        ready: true,
+        durationMs: performance.now() - startedAt,
+        completionMs,
+        terrainPreparation: terrainResource.preparation || null,
+        borderPreparation: borderResource.preparation || null,
+        ecologyPreparation: ecologyResource.preparation || null,
+      };
+    },
+    travelTo: zoneId => {
+      const store = useThreeGameStore.getState();
+      if (!zoneId || store.currentZoneId === zoneId || store.transition) return makeSnapshot();
+      store.beginZoneTransition(zoneId, {
+        source: 'edge',
+        mode: 'island',
+        minutes: 0,
+        fatigue: 0,
+      });
       return makeSnapshot();
     },
     setTool: toolId => {

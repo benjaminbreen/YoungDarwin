@@ -7,7 +7,9 @@ import * as THREE from 'three';
 //
 // Displacement is weighted by each vertex's height above the plant base
 // (geometry is ground-origin after the ground-pivot pass), so roots stay
-// planted while tips move.
+// planted while tips move. Player contact is evaluated once from the plant
+// root rather than independently from every vertex; otherwise broad shrubs
+// expand into a radial ring when the player walks through their canopy.
 
 export const foliageUniforms = {
   uFoliageTime: { value: 0 },
@@ -30,10 +32,21 @@ export function updateFoliageUniforms(elapsedTime, playerPosition, delta) {
   }
 }
 
-export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, bendRadius = 2.25 } = {}) {
+export function applyFoliageMotion(material, geometry, {
+  wind = 0.5,
+  bend = 1,
+  bendRadius = 2.25,
+  bendDown = 0.08,
+  maxBendHeightRatio = 0.28,
+} = {}) {
   geometry.computeBoundingBox();
   const baseY = geometry.boundingBox.min.y;
   const refHeight = Math.max(0.2, geometry.boundingBox.max.y - geometry.boundingBox.min.y);
+  const rootCenter = new THREE.Vector3(
+    (geometry.boundingBox.min.x + geometry.boundingBox.max.x) * 0.5,
+    baseY,
+    (geometry.boundingBox.min.z + geometry.boundingBox.max.z) * 0.5,
+  );
   material.onBeforeCompile = shader => {
     shader.uniforms.uFoliageTime = foliageUniforms.uFoliageTime;
     shader.uniforms.uFoliagePlayer = foliageUniforms.uFoliagePlayer;
@@ -43,6 +56,9 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, b
     shader.uniforms.uBendRadius = { value: bendRadius };
     shader.uniforms.uBaseY = { value: baseY };
     shader.uniforms.uRefHeight = { value: refHeight };
+    shader.uniforms.uRootCenter = { value: rootCenter };
+    shader.uniforms.uBendDown = { value: bendDown };
+    shader.uniforms.uMaxBendHeightRatio = { value: maxBendHeightRatio };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -54,7 +70,10 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, b
         uniform float uBendAmp;
         uniform float uBendRadius;
         uniform float uBaseY;
-        uniform float uRefHeight;`,
+        uniform float uRefHeight;
+        uniform vec3 uRootCenter;
+        uniform float uBendDown;
+        uniform float uMaxBendHeightRatio;`,
       )
       .replace(
         '#include <project_vertex>',
@@ -63,6 +82,14 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, b
           fmPosition = instanceMatrix * fmPosition;
         #endif
         vec4 fmWorld = modelMatrix * fmPosition;
+        vec4 fmRootPosition = vec4(uRootCenter, 1.0);
+        vec3 fmWorldUp = modelMatrix[1].xyz;
+        #ifdef USE_INSTANCING
+          fmRootPosition = instanceMatrix * fmRootPosition;
+          fmWorldUp = mat3(modelMatrix) * instanceMatrix[1].xyz;
+        #endif
+        vec3 fmRootWorld = (modelMatrix * fmRootPosition).xyz;
+        float fmWorldHeight = max(0.2, uRefHeight * length(fmWorldUp));
         // Height weight: roots planted, tips free. Use geometry bounds so
         // centered GLBs and ground-origin GLBs both move correctly.
         float fmW = clamp((transformed.y - uBaseY) / uRefHeight, 0.0, 1.0);
@@ -77,21 +104,23 @@ export function applyFoliageMotion(material, geometry, { wind = 0.5, bend = 1, b
         vec2 fmCrossWind = vec2(-uWindDir.y, uWindDir.x);
         fmWorld.xz += uWindDir * fmSway * uWindAmp * (0.7 + fmGust) * fmW;
         fmWorld.xz += fmCrossWind * sin(uFoliageTime * 2.15 + fmPhase * 1.3) * uWindAmp * 0.32 * fmTipW;
-        // --- Player bend: push tips radially away, slight crouch ------------
-        vec2 fmAway = fmWorld.xz - uFoliagePlayer.xz;
+        // --- Player bend: hinge the whole plant away from its root ----------
+        // Every vertex shares this direction and distance. Height weighting
+        // below supplies the bend without pulling opposite canopy edges apart.
+        vec2 fmAway = fmRootWorld.xz - uFoliagePlayer.xz;
         float fmDist = length(fmAway);
-        float fmPush = smoothstep(uBendRadius, 0.12, fmDist) * uBendAmp * fmW;
-        fmPush = min(fmPush, uBendRadius * 0.42);
+        float fmPush = (1.0 - smoothstep(0.12, uBendRadius, fmDist)) * uBendAmp * fmW;
+        fmPush = min(fmPush, min(uBendRadius * 0.42, fmWorldHeight * uMaxBendHeightRatio));
         if (fmPush > 0.0001 && fmDist > 0.0001) {
           fmWorld.xz += (fmAway / fmDist) * fmPush;
-          fmWorld.y -= fmPush * 0.35;
+          fmWorld.y -= fmPush * uBendDown;
         }
         vec4 mvPosition = viewMatrix * fmWorld;
         gl_Position = projectionMatrix * mvPosition;`,
       );
   };
   // Distinct programs per (wind, bend, refHeight) bucket.
-  material.customProgramCacheKey = () => `foliage-motion|${wind}|${bend}|${bendRadius}|${baseY.toFixed(2)}|${refHeight.toFixed(2)}`;
+  material.customProgramCacheKey = () => `foliage-motion|${wind}|${bend}|${bendRadius}|${bendDown}|${maxBendHeightRatio}|${baseY.toFixed(2)}|${refHeight.toFixed(2)}`;
   material.needsUpdate = true;
   return material;
 }

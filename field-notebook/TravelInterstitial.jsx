@@ -9,19 +9,20 @@ import {
   ISLAND_MAP_ASPECT,
 } from '../three-game/ui/expedition/map/islandLocations';
 
-// Edge travel gives the live scene a full establishing pull-back before the
-// chart begins its crossfade. Commit only once that crossfade is opaque.
-const ISLAND_COVER_START_MS = 1200;
-const ISLAND_COMMIT_MS = 2150;
-const ISLAND_MIN_REVEAL_MS = 4500;
-const ISLAND_MAP_MIN_REVEAL_MS = 3200;
+// Destination preparation starts at travel intent, so the chart can keep the
+// same visual sequence at a brisker tempo. The commit timer is only a fallback;
+// the normal path commits from the cover's opacity transitionend event.
+const ISLAND_COVER_START_MS = 0;
+const ISLAND_COMMIT_MS = 1080;
+const ISLAND_MIN_REVEAL_MS = 2600;
+const ISLAND_MAP_MIN_REVEAL_MS = 2600;
 const THRESHOLD_COMMIT_MS = 250;
-const CHART_FADE_IN_MS = 820;
-const CHART_FADE_OUT_MS = 800;
-const CAMERA_SETTLE_MS = 1100;
+const CHART_FADE_IN_MS = 450;
+const CHART_FADE_OUT_MS = 450;
+const CAMERA_SETTLE_MS = 650;
 const CHART_ROUTE_START_MS = 180;
-const CHART_CAMERA_MOVE_MS = 2400;
-const CHART_ROUTE_MOVE_MS = 2050;
+const CHART_CAMERA_MOVE_MS = 1650;
+const CHART_ROUTE_MOVE_MS = 1500;
 const MAP_LAYER_WIDTH_PERCENT = 116;
 
 function clamp(value, min, max) {
@@ -410,11 +411,14 @@ export function TravelInterstitial() {
     setRevealing(false);
     const immediateCover = reducedMotion || transitionSource === 'island-map';
     const coverTimer = window.setTimeout(
-      () => setCovered(true),
+      () => {
+        window.__recordThreeTransitionEvent?.('cover-start');
+        setCovered(true);
+      },
       immediateCover ? 0 : transitionMode === 'threshold' ? 0 : ISLAND_COVER_START_MS,
     );
     const commitDelay = transitionSource === 'island-map'
-      ? (reducedMotion ? 80 : 180)
+      ? (reducedMotion ? 80 : 520)
       : transitionMode === 'threshold'
         ? (reducedMotion ? 120 : THRESHOLD_COMMIT_MS)
         : (reducedMotion ? 220 : ISLAND_COMMIT_MS);
@@ -434,6 +438,7 @@ export function TravelInterstitial() {
         : ISLAND_MIN_REVEAL_MS;
     const wait = Math.max(0, minimum - (Date.now() - transitionStartedAt));
     const timer = window.setTimeout(() => {
+      window.__recordThreeTransitionEvent?.('reveal-start');
       setRevealing(true);
       setZoneTransitionPhase('arriving', transitionId);
     }, wait);
@@ -475,12 +480,18 @@ export function TravelInterstitial() {
           ? 200
           : revealing
             ? CHART_FADE_OUT_MS
-            : transitionSource === 'island-map'
-              ? 480
-              : CHART_FADE_IN_MS}ms`,
+            : CHART_FADE_IN_MS}ms`,
         transitionTimingFunction: revealing
           ? 'cubic-bezier(0.4, 0, 0.2, 1)'
           : 'cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
+      onTransitionEnd={event => {
+        if (event.target !== event.currentTarget
+          || event.propertyName !== 'opacity'
+          || revealing
+          || !covered) return;
+        window.__recordThreeTransitionEvent?.('chart-opaque');
+        commitZoneTransition(transitionId);
       }}
       aria-live="polite"
     >

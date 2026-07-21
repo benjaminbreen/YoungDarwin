@@ -5,7 +5,7 @@
 //   node scripts/prepare-reef-assets.mjs
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { prune, dedup, weld, simplify, resample, textureCompress, getBounds } from '@gltf-transform/functions';
+import { prune, dedup, weld, simplify, resample, textureCompress, getBounds, metalRough } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 import { statSync } from 'node:fs';
@@ -29,7 +29,10 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 for (const job of JOBS) {
   const document = await io.read(job.in);
-  const transforms = [dedup(), resample()];
+  // three.js no longer supports the legacy specular-glossiness extension used
+  // by several source assets. Convert it before texture compression so rebuilt
+  // runtime GLBs retain their authored color/specular information.
+  const transforms = [metalRough(), dedup(), resample()];
   if (job.kind === 'static' && job.ratio) {
     transforms.push(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: job.ratio, error: 0.001 }));
   }

@@ -121,14 +121,30 @@ const {
 } = loadModule('three-game/physics/props/rockSampling.js');
 const {
   capHorizontalVelocity,
-  computeAssistedPushVelocity,
+  computeControlledPushVelocity,
+  computeLandingSettleMotion,
   mobilityVelocityCaps,
 } = loadModule('three-game/physics/objectMobility.js');
+const {
+  resolveFootprintResponse,
+  resolveSurfaceContactResponse,
+} = loadModule('three-game/world/surfaceContactResponse.js');
+const {
+  surfaceContactProfileForBiome,
+} = loadModule('three-game/world/surfaceContact.js');
+const {
+  createRestrainedReleaseImpulse,
+  damageLeanAngle,
+  selectHammerImpactTargets,
+} = loadModule('three-game/physics/props/breakablePlant/breakablePhysics.js');
 const {
   carryGripForProp,
   carryPlacementCandidates,
   propHorizontalRadius,
 } = loadModule('three-game/components/player/carryProfiles.js');
+const {
+  classifyRapierCharacterContacts,
+} = loadModule('three-game/components/player/playerCollisionContacts.js');
 const {
   PROP_TYPES,
 } = loadModule('three-game/physics/props/propTypes.js');
@@ -169,6 +185,8 @@ const {
   locations,
 } = loadModule('data/locations.js');
 const {
+  getRegionDeveloperLabel,
+  getRegionDisplayName,
   regionMaps,
 } = loadModule('game-core/regionMaps.js');
 const {
@@ -183,9 +201,12 @@ const {
   NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM,
   NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM,
   NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM,
+  PENAL_COLONY_WATKINS_CREEK_SEAM,
   POST_OFFICE_NORTH_SHORE_SEAM,
   POST_OFFICE_SCRUB_RISE_SEAM,
   POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM,
+  WATKINS_CREEK_SOUTHERN_WETLANDS_SEAM,
+  WATKINS_CREEK_WATKINS_SEAM,
 } = loadModule('three-game/world/routeSeams.js');
 const {
   coveWaterMask,
@@ -218,6 +239,7 @@ const {
   buildPostScrubRiseEcology,
 } = loadModule('three-game/world/ecology/postScrubRise.js');
 const {
+  ECOLOGY_ZONE_IDS,
   getEcology,
 } = loadModule('three-game/world/ecology/index.js');
 const {
@@ -249,6 +271,25 @@ const {
 const {
   buildNorthernHighlandsEcology,
 } = loadModule('three-game/world/ecology/northernHighlands.js');
+const {
+  WATKINS_CREEK_PATH_POINTS,
+  watkinsCreekChannelInfo,
+  watkinsCreekFlowAt,
+  watkinsCreekPathInfo,
+  watkinsCreekStandingWaterMask,
+  watkinsCreekStandingWaterSuppressionMask,
+} = loadModule('three-game/world/regions/watkinsCreek/path.js');
+const {
+  watkinsCreekBiomeAt,
+  watkinsCreekHeight,
+} = loadModule('three-game/world/regions/watkinsCreek/terrain.js');
+const {
+  buildWatkinsCreekEcology,
+} = loadModule('three-game/world/ecology/watkinsCreek.js');
+const {
+  getWatkinsCreekFordStones,
+  getWatkinsCreekRockObstacles,
+} = loadModule('three-game/world/watkinsCreekLayout.js');
 const {
   buildCormorantBayEcology,
 } = loadModule('three-game/world/ecology/cormorantBayTest3.js');
@@ -295,6 +336,12 @@ const {
   getThreeSpecimens,
 } = loadModule('three-game/data.js');
 const {
+  baseSpecimens,
+} = loadModule('data/specimens.js');
+const {
+  modelAssets,
+} = loadModule('three-game/modelAssets.js');
+const {
   specimenSpawnActorId,
 } = loadModule('game-core/specimens.ts');
 const {
@@ -316,6 +363,7 @@ const {
   scoreFloraHabitat,
 } = loadModule('three-game/world/ecology/proceduralFlora.js');
 const {
+  CANDELABRA_CACTUS_SPECIES,
   CROTON_SCOULERI_SPECIES,
   DARWINIOTHAMNUS_SPECIES,
   LAVA_CACTUS_SPECIES,
@@ -734,22 +782,6 @@ test('rock sample targeting skips sampled and currently active source rocks', ()
   assert.equal(target.key, rockSampleKey('TEST_ZONE', 'third-rock'));
 });
 
-test('mobility push assistance caps vector speed for heavy props', () => {
-  const next = computeAssistedPushVelocity({
-    velocity: { x: 5, y: 0.25, z: 5 },
-    direction: { x: 1, z: 1 },
-    mobility: {
-      mode: 'pickup-push',
-      assistSpeed: 0.22,
-      contactMaxSpeed: 0.42,
-      blend: 0.1,
-    },
-  });
-
-  assert.ok(Math.hypot(next.x, next.z) <= 0.420001);
-  assert.equal(next.y, 0.25);
-});
-
 test('mobility velocity caps keep strike movement distinct from walk contact', () => {
   const caps = mobilityVelocityCaps({
     mode: 'pickup-push',
@@ -767,6 +799,244 @@ test('mobility velocity caps keep strike movement distinct from walk contact', (
   const capped = capHorizontalVelocity({ x: 3, y: -1, z: 4 }, caps.horizontalMaxSpeed);
   assert.ok(Math.hypot(capped.x, capped.z) <= caps.horizontalMaxSpeed + 0.000001);
   assert.equal(capped.y, -1);
+});
+
+test('controlled prop pushes make light clutter respond before heavy barrels without adding lift', () => {
+  const mobility = {
+    mode: 'push',
+    assistSpeed: 0.22,
+    contactMaxSpeed: 0.36,
+  };
+  const light = computeControlledPushVelocity({
+    velocity: { x: 0, y: 0.5, z: 0 },
+    direction: { x: 0, z: -1 },
+    mobility,
+    mass: 2,
+    impactSpeed: 4.45,
+    sustainedTime: 0.05,
+    delta: 1 / 60,
+  });
+  const heavy = computeControlledPushVelocity({
+    velocity: { x: 0, y: 0.5, z: 0 },
+    direction: { x: 0, z: -1 },
+    mobility,
+    mass: 78,
+    impactSpeed: 4.45,
+    sustainedTime: 0.05,
+    delta: 1 / 60,
+  });
+
+  assert.ok(light.z < -0.01);
+  assert.equal(heavy.z, 0);
+  assert.equal(light.y, 0.02);
+  assert.equal(heavy.y, 0.02);
+
+  let velocity = { x: 0, y: 0, z: 0 };
+  for (let frame = 0; frame < 120; frame += 1) {
+    velocity = computeControlledPushVelocity({
+      velocity,
+      direction: { x: 0, z: -1 },
+      mobility,
+      mass: 56,
+      impactSpeed: 4.45,
+      sustainedTime: frame / 60,
+      delta: 1 / 60,
+    });
+  }
+  assert.ok(Math.hypot(velocity.x, velocity.z) <= 0.220001);
+  assert.ok(velocity.z < -0.2);
+  assert.ok(velocity.y <= 0.02);
+});
+
+test('Rapier terrain contacts stay ground-only while identified walls remain push contacts', () => {
+  const terrainSlope = {
+    normal: { x: -0.72, y: 0.69, z: 0 },
+    userData: { id: 'terrain', kind: 'terrain' },
+  };
+  const terrainCliff = {
+    normal: { x: -0.99, y: 0.1, z: 0 },
+    userData: { id: 'terrain', kind: 'terrain' },
+  };
+  const slopedObstacleTop = {
+    normal: { x: -0.78, y: 0.62, z: 0 },
+    userData: { id: 'crate-top', kind: 'physics-prop' },
+  };
+  const authoredWall = {
+    normal: { x: -1, y: 0, z: 0 },
+    userData: { id: 'barracks-wall', kind: 'wall' },
+  };
+
+  const terrainOnly = classifyRapierCharacterContacts([terrainSlope, terrainCliff]);
+  assert.equal(terrainOnly.groundContact, terrainSlope);
+  assert.equal(terrainOnly.sideContact, null);
+
+  const mixed = classifyRapierCharacterContacts([
+    terrainSlope,
+    terrainCliff,
+    slopedObstacleTop,
+    { normal: { x: -1, y: 0, z: 0 }, userData: null },
+    authoredWall,
+  ]);
+  assert.equal(mixed.groundContact, terrainSlope);
+  assert.equal(mixed.sideContact, authoredWall);
+  assert.equal(mixed.sideTarget.id, 'barracks-wall');
+});
+
+test('surface contacts preserve material differences instead of applying a universal dust floor', () => {
+  const drySand = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('white-sand'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
+  const wetMud = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('wet-mud'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
+  const grass = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('grass'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
+  const dryScrub = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('dry-scrub'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
+
+  assert.equal(drySand.responseKind, 'sand');
+  assert.equal(wetMud.responseKind, 'mud');
+  assert.equal(grass.responseKind, 'litter');
+  assert.equal(dryScrub.responseKind, 'dust');
+  assert.ok(dryScrub.particleScale >= 1.2);
+  assert.ok(dryScrub.sizeScale >= 1.2);
+  assert.equal(drySand.showRing, false);
+  assert.equal(wetMud.showRing, false);
+  assert.ok(drySand.lateralScale > drySand.liftScale);
+  assert.ok(wetMud.strength < drySand.strength);
+});
+
+test('region-specific surface names inherit the correct response family', () => {
+  const wetWhiteSand = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('wet-white-sand'),
+    { kind: 'footstep', intensity: 0.5 },
+  );
+  const mudTrail = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('mud-trail'),
+    { kind: 'footstep', intensity: 0.5 },
+  );
+  const dryBasalt = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('dry-basalt'),
+    { kind: 'landing', intensity: 0.7 },
+  );
+  const barrelHit = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('dry-scrub'),
+    { kind: 'collision', intensity: 0.7, target: { id: 'barrel', kind: 'physics-barrel' } },
+  );
+  const bottleHit = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('dry-scrub'),
+    { kind: 'collision', intensity: 0.7, target: { id: 'rum-bottle', kind: 'physics-lawsonRumBottle' } },
+  );
+
+  assert.equal(wetWhiteSand.responseKind, 'sand');
+  assert.ok(surfaceContactProfileForBiome('wet-white-sand').wetness >= 0.7);
+  assert.ok(surfaceContactProfileForBiome('wet-white-sand').dustiness <= 0.24);
+  assert.equal(mudTrail.responseKind, 'mud');
+  assert.equal(dryBasalt.responseKind, 'grit');
+  assert.equal(barrelHit.responseKind, 'wood');
+  assert.equal(barrelHit.showRing, false);
+  assert.equal(bottleHit.responseKind, 'solid');
+  assert.equal(bottleHit.particleScale, 0);
+  assert.notDeepEqual(wetWhiteSand.particles, surfaceContactProfileForBiome('unknown').particles);
+});
+
+test('soft ground keeps stronger, longer tracks than grit', () => {
+  const mud = resolveFootprintResponse(surfaceContactProfileForBiome('wet-mud'), 0.8);
+  const creekBank = resolveFootprintResponse(surfaceContactProfileForBiome('damp-creek-bank'), 0.8);
+  const sand = resolveFootprintResponse(surfaceContactProfileForBiome('white-sand'), 0.8);
+  const grit = resolveFootprintResponse(surfaceContactProfileForBiome('basalt'), 0.8);
+  const water = resolveFootprintResponse(surfaceContactProfileForBiome('water'), 0.8);
+
+  assert.equal(mud.visible, true);
+  assert.equal(surfaceContactProfileForBiome('damp-creek-bank').kind, 'mud');
+  assert.equal(creekBank.visible, true);
+  assert.ok(creekBank.opacity > 0.5);
+  assert.equal(sand.visible, true);
+  assert.ok(sand.opacity > 0.75);
+  assert.ok(resolveFootprintResponse(surfaceContactProfileForBiome('dry-scrub'), 0.5).opacity > 0.45);
+  assert.ok(mud.opacity > sand.opacity);
+  assert.ok(sand.lifetime > grit.lifetime);
+  assert.equal(grit.visible, false);
+  assert.equal(water.visible, false);
+});
+
+test('landing on loose props creates a mass-sensitive downward settle without launch', () => {
+  const light = computeLandingSettleMotion({
+    linearVelocity: { x: 1, y: 0.5, z: 0 },
+    angularVelocity: { x: 0, y: 0, z: 0 },
+    direction: { x: 1, z: 0 },
+    mass: 2,
+    fallSpeed: 9,
+  });
+  const heavy = computeLandingSettleMotion({
+    linearVelocity: { x: 1, y: 0.5, z: 0 },
+    angularVelocity: { x: 0, y: 0, z: 0 },
+    direction: { x: 1, z: 0 },
+    mass: 72,
+    fallSpeed: 9,
+  });
+
+  assert.ok(light.linear.y < 0);
+  assert.ok(heavy.linear.y < 0);
+  assert.ok(Math.abs(light.linear.y) > Math.abs(heavy.linear.y));
+  assert.ok(Math.abs(light.angular.z) > Math.abs(heavy.angular.z));
+  assert.ok(light.linear.x < 1 && light.linear.x > 0);
+});
+
+test('hammer targeting follows a descending 3D swing instead of an XZ proximity cone', () => {
+  const reachable = {
+    key: 'reachable-pad',
+    center: { x: 0, y: 1.05, z: -1.55 },
+    colliderArgs: [0.28, 0.52, 0.12],
+    rotation: [0, 0, 0],
+  };
+  const lowBasalPad = {
+    key: 'low-basal-pad',
+    center: { x: 0, y: 0.42, z: -1.25 },
+    colliderArgs: [0.26, 0.36, 0.12],
+    rotation: [0, 0, 0],
+  };
+  const overhead = {
+    key: 'overhead-branch',
+    center: { x: 0, y: 4.2, z: -1.1 },
+    colliderArgs: [0.3, 0.3, 0.3],
+    rotation: [0, 0, 0],
+  };
+  const hits = selectHammerImpactTargets([overhead, reachable], {
+    origin: { x: 0, y: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+    maxHits: 1,
+  });
+
+  assert.deepEqual(hits.map(hit => hit.piece.key), ['reachable-pad']);
+  assert.deepEqual(selectHammerImpactTargets([lowBasalPad], {
+    origin: { x: 0, y: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+    maxHits: 1,
+  }).map(hit => hit.piece.key), ['low-basal-pad']);
+});
+
+test('vegetation release momentum is restrained and sublethal damage leaves a bounded lean', () => {
+  const light = createRestrainedReleaseImpulse({
+    mass: 2,
+    direction: { x: 1, z: 0 },
+  });
+  const heavy = createRestrainedReleaseImpulse({
+    mass: 20,
+    direction: { x: 1, z: 0 },
+  });
+
+  assert.ok(Math.abs(light.linear.x / 2 - 0.58) < 0.000001);
+  assert.ok(Math.abs(heavy.linear.x / 20 - 0.58) < 0.000001);
+  assert.ok(Math.abs(heavy.linear.y / 20 - 0.04) < 0.000001);
+  assert.equal(damageLeanAngle(1, 4, 0.16), 0.04);
+  assert.equal(damageLeanAngle(8, 4, 0.16), 0.16);
 });
 
 test('campaign stools use a responsive one-hand skeletal grip at authored scale', () => {
@@ -1212,6 +1482,95 @@ test('Northern Highlands terrain rises into a finite, worked transition landscap
   assert.ok(northernHighlandsGardenInfo(20.5, 20).mask > 0.9);
 });
 
+test('Watkins Creek authored trails meet its four normalized route seams', () => {
+  const seams = [
+    NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM,
+    PENAL_COLONY_WATKINS_CREEK_SEAM,
+    WATKINS_CREEK_WATKINS_SEAM,
+    WATKINS_CREEK_SOUTHERN_WETLANDS_SEAM,
+  ];
+  const pathHasPoint = point => WATKINS_CREEK_PATH_POINTS.flat(1).some(candidate => (
+    Math.hypot(candidate[0] - point[0], candidate[1] - point[1]) < 0.001
+  ));
+
+  for (const seam of seams) {
+    const creekSide = seam.source.regionId === 'WATKINS_CREEK' ? seam.source : seam.target;
+    const source = regionMaps[seam.source.regionId];
+    const target = regionMaps[seam.target.regionId];
+    const sourceAlong = seam.source.edge === 'north' || seam.source.edge === 'south'
+      ? seam.source.point[0] / source.terrain.width
+      : seam.source.point[1] / source.terrain.depth;
+    const targetAlong = seam.target.edge === 'north' || seam.target.edge === 'south'
+      ? seam.target.point[0] / target.terrain.width
+      : seam.target.point[1] / target.terrain.depth;
+    assert.ok(Math.abs(sourceAlong - targetAlong) < 0.000001);
+    assert.equal(pathHasPoint(creekSide.point), true);
+  }
+  assert.equal(regionMaps.WATKINS_CREEK.terrain.authored, true);
+  assert.equal(regionMaps.WATKINS_CREEK.terrain.segments, 248);
+});
+
+test('Watkins Creek carves a finite fordable stream with shared rock collision', () => {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (let z = -49; z <= 49; z += 4) {
+    for (let x = -56; x <= 56; x += 4) {
+      const height = watkinsCreekHeight(x, z);
+      assert.equal(Number.isFinite(height), true);
+      minimum = Math.min(minimum, height);
+      maximum = Math.max(maximum, height);
+    }
+  }
+  assert.ok(maximum - minimum > 7);
+  const fordChannel = watkinsCreekChannelInfo(-5, 3.2);
+  assert.ok(fordChannel.ford > 0.98);
+  assert.ok(fordChannel.water > 0.98);
+  assert.equal(watkinsCreekBiomeAt(-5, 3.2), 'creek-water');
+  assert.equal(watkinsCreekBiomeAt(27, -4), 'creek-pool');
+  const shorelineBands = Array.from({ length: 29 }, (_, index) => (
+    watkinsCreekChannelInfo(18, -9 + index * 0.75)
+  ));
+  assert.ok(shorelineBands.some(sample => sample.mud > 0.5));
+  assert.ok(shorelineBands.some(sample => sample.gravel > 0.5));
+  assert.ok(shorelineBands.some(sample => sample.riparian > 0.5));
+  const flow = watkinsCreekFlowAt(20, -2);
+  assert.ok(Math.abs(Math.hypot(flow.x, flow.z) - 1) < 0.001);
+  assert.ok(flow.speed > 0.2 && flow.speed <= 1);
+  const suppressionBand = Array.from({ length: 81 }, (_, index) => {
+    const z = -12 + index * 0.3;
+    return {
+      visible: watkinsCreekStandingWaterMask(18, z),
+      suppression: watkinsCreekStandingWaterSuppressionMask(18, z),
+    };
+  });
+  assert.ok(suppressionBand.some(sample => sample.visible < 0.14 && sample.suppression > 0.7));
+  assert.equal(suppressionBand.every(sample => sample.suppression + 0.000001 >= sample.visible), true);
+
+  const ecology = buildWatkinsCreekEcology();
+  const ford = getWatkinsCreekFordStones();
+  const obstacles = getWatkinsCreekRockObstacles();
+  assert.ok(ecology.rocks.length >= 90);
+  assert.equal(ecology.dryGrassPatches[0].items.length, 1180);
+  assert.equal(ecology.surfaceLitter.find(layer => layer.id === 'watkins-creek-bank-cobbles')?.items.length, 720);
+  assert.equal(ford.length, 5);
+  assert.equal(ford.every(stone => stone.collide === true), true);
+  assert.equal(obstacles.every(obstacle => obstacle.zoneId === 'WATKINS_CREEK'), true);
+  assert.equal(obstacles.filter(obstacle => obstacle.id.includes('ford-stone')).length, 5);
+  for (const layer of ecology.flora) {
+    for (const item of layer.items) {
+      const path = watkinsCreekPathInfo(item.x, item.z);
+      const creek = watkinsCreekChannelInfo(item.x, item.z);
+      if (layer.id === 'watkins-creek-riparian-sedges') {
+        assert.ok(path.tread < 0.22);
+        assert.ok(creek.shoreDistance > -0.08 && creek.shoreDistance < 5.8);
+      } else {
+        assert.ok(path.distance >= path.width * 1.5);
+        assert.ok(creek.water < 0.08);
+      }
+    }
+  }
+});
+
 test('Post Office Bay keeps its western inland terrain free of stray water pockets', () => {
   const formerTidePool = [
     [-43, -17],
@@ -1273,6 +1632,52 @@ test('runtime specimen actor ids stay globally unique across playable zones', ()
     true,
     'playable spawn identity should match the zone specimen runtime',
   );
+});
+
+test('promoted Floreana flora resolve as authored specimen actors with runtime models', () => {
+  const promotedFlora = [
+    ['N_SHORE', 'scalesiavillosa', 'north-shore-scalesia-villosa-scrub-edge'],
+    ['N_SHORE', 'candelabracactus', 'north-shore-candelabra-inland-rise'],
+    ['N_SHORE', 'manzanillo', 'north-shore-manzanillo-back-scrub'],
+    ['CORMORANT_BAY', 'sesuviumportulacastrum', 'cormorant-bay-sesuvium-lagoon-margin'],
+    ['W_HIGH', 'resurrectionfern', 'western-highlands-resurrection-fern-trail-edge'],
+    ['MANGROVES', 'galapagosjusticia', 'southern-forest-galapagos-justicia-trail-edge'],
+    ['POST_SCRUB_RISE', 'crotonscouleri', 'scrub-rise-croton-west-thicket'],
+  ];
+
+  for (const [zoneId, specimenId, localInstanceId] of promotedFlora) {
+    const record = baseSpecimens.find(specimen => specimen.id === specimenId);
+    assert.ok(record, `${specimenId} should have a specimen record`);
+    assert.equal(record.ontology, 'Plant');
+    assert.ok(record.latin, `${specimenId} should have a scientific name`);
+    assert.ok(record.contents, `${specimenId} should have collection and preservation guidance`);
+    assert.ok(record.details?.length >= 4, `${specimenId} should expose field-identification characters`);
+
+    const asset = modelAssets[specimenId];
+    assert.equal(asset?.enabled, true, `${specimenId} should have an enabled runtime model`);
+    assert.match(asset.path, /^\/assets\/models\//);
+    assert.equal(fs.existsSync(path.join(process.cwd(), 'public', asset.path)), true);
+
+    const actor = getThreeSpecimens(zoneId).find(specimen => specimen.localInstanceId === localInstanceId);
+    assert.ok(actor, `${specimenId} should have an authored actor in ${zoneId}`);
+    assert.equal(actor.id, specimenId);
+    assert.equal(actor.instanceId, `${zoneId}:${localInstanceId}`);
+    assert.equal(actor.behavior, 'still');
+  }
+});
+
+test('stable region ids resolve canonical map names instead of inferred labels', () => {
+  assert.equal(getRegionDisplayName('E_MID'), 'Rocky Clearing');
+  assert.equal(getRegionDisplayName('WATKINS_CREEK'), 'Highland Creek Fork');
+  assert.equal(getRegionDeveloperLabel('E_MID'), 'Rocky Clearing [E_MID]');
+  assert.equal(getRegionDisplayName('NOT_A_REGION'), null);
+
+  for (const placement of FLOREANA_MAP_PLACEMENTS) {
+    assert.ok(
+      getRegionDisplayName(placement.id),
+      `${placement.id} must have a canonical display name for the island chart and developer tools`,
+    );
+  }
 });
 
 test('Floreana cardinal routes remain reciprocal and Northern Shore matches the painted geography', () => {
@@ -1810,6 +2215,134 @@ test('procedural flora habitat scoring respects preference cores and tolerances'
   assert.equal(floraCompanionSuitability(cohort, 1, 0), 0);
   assert.equal(floraCompanionSuitability(cohort, 6, 0), 1);
   assert.equal(floraCompanionSuitability(cohort, 18, 0), 0);
+});
+
+test('universal flora adapter evaluates every region without replacing authored ecology', () => {
+  assert.deepEqual(
+    [...ECOLOGY_ZONE_IDS].sort(),
+    Object.keys(regionMaps).sort(),
+  );
+
+  let generatedCandelabra = 0;
+  let inhabitedMaps = 0;
+  for (const zoneId of ECOLOGY_ZONE_IDS) {
+    const ecology = getEcology(zoneId);
+    const diagnostic = ecology.proceduralFloraDiagnostics.find(item => (
+      item.speciesId === CANDELABRA_CACTUS_SPECIES.id
+    ));
+    const layer = ecology.proceduralFlora.find(item => (
+      item.universal === true && item.speciesId === CANDELABRA_CACTUS_SPECIES.id
+    ));
+
+    assert.equal(ecology.universalFloraVersion, 2, `${zoneId} has the standard habitat adapter`);
+    assert.ok(diagnostic, `${zoneId} exposes candelabra habitat diagnostics`);
+    assert.equal(diagnostic.zoneName, regionMaps[zoneId].name, `${zoneId} diagnostics use its canonical display name`);
+    for (const species of [
+      OPUNTIA_MEGASPERMA_SPECIES,
+      DARWINIOTHAMNUS_SPECIES,
+      PLEOPELTIS_POLYPODIOIDES_SPECIES,
+    ]) {
+      assert.ok(
+        ecology.proceduralFloraDiagnostics.some(item => item.speciesId === species.id),
+        `${zoneId} evaluates ${species.id}`,
+      );
+    }
+    assert.equal(diagnostic.samples.length, diagnostic.sampleCount);
+    assert.equal(
+      diagnostic.suitableCount + Object.values(diagnostic.rejectionCounts).reduce((sum, count) => sum + count, 0),
+      diagnostic.sampleCount,
+    );
+    assert.ok(ecology.universalFloraBudget.allocatedCount <= ecology.universalFloraBudget.maximumOverlayCount);
+
+    if (!layer) continue;
+    inhabitedMaps += 1;
+    generatedCandelabra += layer.items.length;
+    assert.ok(layer.items.length <= diagnostic.densityBudget.proceduralCount);
+    for (let index = 0; index < layer.items.length; index += 1) {
+      for (const other of layer.items.slice(index + 1)) {
+        assert.ok(
+          Math.hypot(layer.items[index].x - other.x, layer.items[index].z - other.z)
+            >= CANDELABRA_CACTUS_SPECIES.placement.minItemSeparation,
+          `${zoneId} candelabra respect species spacing`,
+        );
+      }
+    }
+  }
+
+  assert.ok(inhabitedMaps >= 10, 'candelabra reaches a broad but selective set of island maps');
+  assert.ok(generatedCandelabra >= 30, 'the universal layer is visibly represented island-wide');
+});
+
+test('universal Opuntia populations pair decorative adults with physics juveniles', () => {
+  let matureMaps = 0;
+  let juvenileMaps = 0;
+  for (const zoneId of ECOLOGY_ZONE_IDS) {
+    const ecology = getEcology(zoneId);
+    const mature = ecology.proceduralFlora
+      .filter(layer => layer.universal && layer.lifeStage === 'mature tree cactus')
+      .flatMap(layer => layer.items || []);
+    const juveniles = ecology.interactiveFlora
+      .filter(layer => layer.universal && layer.runtime === 'prickly-pear')
+      .flatMap(layer => layer.sites || []);
+    if (mature.length) matureMaps += 1;
+    if (juveniles.length) juvenileMaps += 1;
+    if (juveniles.length) {
+      assert.deepEqual(
+        getPricklyPearSites(zoneId).slice(-juveniles.length).map(site => site.id),
+        juveniles.map(site => site.id),
+      );
+    }
+    if (!mature.length || !juveniles.length) continue;
+    for (const adult of mature) {
+      const distance = Math.min(...juveniles.map(young => (
+        Math.hypot(adult.x - young.x, adult.z - young.z)
+      )));
+      assert.ok(distance >= 4.2 && distance <= 24, `${zoneId} keeps adult and juvenile life stages in a plausible cohort`);
+    }
+  }
+  assert.ok(matureMaps >= 8, 'mature Opuntia is evaluated into a broad dry-zone range');
+  assert.ok(juvenileMaps >= 8, 'breakable juvenile Opuntia is evaluated into a broad dry-zone range');
+  assert.equal(
+    getEcology('POST_OFFICE_BAY').interactiveFlora.some(layer => layer.id.startsWith('universal-young-opuntia')),
+    false,
+    'the universal system does not duplicate the detailed Post Office Bay cohort',
+  );
+});
+
+test('universal shrubs and ferns fill suitable gaps but defer to detailed regional layers', () => {
+  const universalDarwiniothamnusMaps = [];
+  const universalFernMaps = [];
+  for (const zoneId of ECOLOGY_ZONE_IDS) {
+    const ecology = getEcology(zoneId);
+    if (ecology.proceduralFlora.some(layer => (
+      layer.universal && layer.speciesId === DARWINIOTHAMNUS_SPECIES.id
+    ))) universalDarwiniothamnusMaps.push(zoneId);
+    if (ecology.proceduralFlora.some(layer => (
+      layer.universal && layer.speciesId === PLEOPELTIS_POLYPODIOIDES_SPECIES.id
+    ))) universalFernMaps.push(zoneId);
+  }
+  assert.ok(universalDarwiniothamnusMaps.length >= 4);
+  assert.ok(universalFernMaps.length >= 4);
+  assert.equal(universalDarwiniothamnusMaps.includes('POST_SCRUB_RISE'), false);
+  assert.equal(universalDarwiniothamnusMaps.includes('POST_OFFICE_BAY'), false);
+  assert.equal(universalFernMaps.includes('WATKINS'), false);
+  assert.equal(universalFernMaps.includes('W_HIGH'), false);
+  assert.equal(universalFernMaps.includes('N_OUTCROP'), false);
+});
+
+test('Desolate Outcrop is an explicit candelabra exclusion', () => {
+  const ecology = getEcology('N_OUTCROP');
+  const diagnostic = ecology.proceduralFloraDiagnostics.find(item => (
+    item.speciesId === CANDELABRA_CACTUS_SPECIES.id
+  ));
+  assert.equal(
+    ecology.proceduralFlora.some(item => (
+      item.universal === true && item.speciesId === CANDELABRA_CACTUS_SPECIES.id
+    )),
+    false,
+  );
+  assert.equal(diagnostic.suitableCount, 0);
+  assert.ok(diagnostic.samples.every(sample => sample.exclusionReasons.includes('region exclusion')));
 });
 
 test('penal colony procedural flora overlays authored flora without entering worked ground', () => {

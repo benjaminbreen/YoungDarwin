@@ -314,6 +314,10 @@ ${markdownTable(
 
 ## Authored Terrain Presets
 
+Region IDs are opaque persistence keys; do not expand them into prose. Resolve
+canonical display names through \`game-core/regionMaps.js\`. For example,
+\`E_MID\` is **Rocky Clearing** and \`WATKINS_CREEK\` is **Highland Creek Fork**.
+
 ${markdownTable(
   ['Region ID', 'Preset', 'Segments'],
   authored.map(region => [`\`${region.id}\``, `\`${region.preset}\``, region.segments]),

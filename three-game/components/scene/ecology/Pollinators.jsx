@@ -443,7 +443,7 @@ export function Pollinators({ enabled = true }) {
       metalness: 0,
       // The silver spangles live on the emissive map, so they gleam from any
       // angle and cross the bloom threshold in strong light.
-      emissiveMap: fritTextures.emissiveMap || undefined,
+      emissiveMap: fritTextures.emissiveMap || null,
       emissive: '#b8c6d6',
       emissiveIntensity: 0.85,
       side: THREE.DoubleSide,

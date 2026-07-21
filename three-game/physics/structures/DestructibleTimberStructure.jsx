@@ -1,7 +1,12 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CuboidCollider, CylinderCollider, RigidBody } from '@react-three/rapier';
+import {
+  CuboidCollider,
+  CylinderCollider,
+  interactionGroups,
+  RigidBody,
+} from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { movementTerrainHeight } from '../../world/terrain';
@@ -9,14 +14,18 @@ import { createTimberMaterial } from '../../world/regions/materials/timberMateri
 import { onPropEvent, emitPropEvent, claimSwing } from '../props/propEvents';
 import { triggerHitstop } from '../../world/worldTime';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import {
+  createRestrainedReleaseImpulse,
+  selectHammerImpactTargets,
+} from '../props/breakablePlant/breakablePhysics';
 
 const DEFAULT_STRIKE_RANGE = 2.9;
-const DEFAULT_STRIKE_FACING_DOT = 0.25;
 const DEFAULT_STRIKE_MAX_PIECES = 2;
 const DEFAULT_SHOTGUN_MAX_PIECES = 3;
 const DEFAULT_RELEASE_FORCE = 1150;
 const CASCADE_MIN_DELAY = 0.12;
 const CASCADE_MAX_DELAY = 0.5;
+const BREAKABLE_PIECE_COLLISION_GROUPS = interactionGroups(1, 0);
 
 const DEFAULT_TIMBER_TONES = ['#a99e8d', '#948a7b', '#b5a893', '#867d6f'];
 
@@ -112,16 +121,26 @@ function TimberPiece({
       position={[spawn.x, spawn.y, spawn.z]}
       rotation={piece.rotation}
       mass={piece.mass}
-      linearDamping={1.05}
-      angularDamping={1.35}
+      linearDamping={1.8}
+      angularDamping={2.2}
       canSleep
       userData={userData}
       onContactForce={handleContactForce}
     >
       {piece.shape === 'cylinder' ? (
-        <CylinderCollider args={[piece.halfHeight, piece.radius]} friction={piece.friction} restitution={piece.restitution} />
+        <CylinderCollider
+          args={[piece.halfHeight, piece.radius]}
+          friction={piece.friction}
+          restitution={Math.min(piece.restitution ?? 0.02, 0.04)}
+          collisionGroups={BREAKABLE_PIECE_COLLISION_GROUPS}
+        />
       ) : (
-        <CuboidCollider args={[piece.size[0] / 2, piece.size[1] / 2, piece.size[2] / 2]} friction={piece.friction} restitution={piece.restitution} />
+        <CuboidCollider
+          args={[piece.size[0] / 2, piece.size[1] / 2, piece.size[2] / 2]}
+          friction={piece.friction}
+          restitution={Math.min(piece.restitution ?? 0.02, 0.04)}
+          collisionGroups={BREAKABLE_PIECE_COLLISION_GROUPS}
+        />
       )}
       {piece.shape === 'cylinder' ? (
         <mesh
@@ -155,7 +174,6 @@ export function DestructibleTimberStructure({
   timberTones = DEFAULT_TIMBER_TONES,
   releaseForce = DEFAULT_RELEASE_FORCE,
   strikeRange = DEFAULT_STRIKE_RANGE,
-  strikeFacingDot = DEFAULT_STRIKE_FACING_DOT,
   strikeMaxPieces = DEFAULT_STRIKE_MAX_PIECES,
   shotgunMaxPieces = DEFAULT_SHOTGUN_MAX_PIECES,
   spawnLift = 0.02,
@@ -191,6 +209,15 @@ export function DestructibleTimberStructure({
     }
     return map;
   }, [origin.x, origin.z, padY, pieces, spawnLift]);
+
+  const impactPieces = useMemo(() => pieces.map(piece => ({
+    ...piece,
+    impactCenter: spawns.get(piece.id),
+    impactHalfExtents: piece.shape === 'cylinder'
+      ? [piece.radius, piece.halfHeight, piece.radius]
+      : [piece.size[0] / 2, piece.size[1] / 2, piece.size[2] / 2],
+    impactRotation: piece.rotation,
+  })), [pieces, spawns]);
 
   const registerBody = useCallback((id, ref) => {
     if (ref) runtime.current.bodies.set(id, ref);
@@ -296,33 +323,26 @@ export function DestructibleTimberStructure({
       const o = strike.position;
       const f = strike.facing;
       if (!o || !f) continue;
-      const fl = Math.hypot(f.x, f.z) || 1;
-      const fx = f.x / fl;
-      const fz = f.z / fl;
-      const candidates = [];
-      for (const piece of pieces) {
-        if (rt.released.has(piece.id) || piece.dynamic) continue;
-        const at = rt.bodies.get(piece.id)?.current?.translation() || spawns.get(piece.id);
-        if (!at) continue;
-        const dx = at.x - o.x;
-        const dz = at.z - o.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist > strikeRange) continue;
-        if (at.y - (o.y || 0) > 2.6) continue;
-        if (dist > 0.2 && (dx / dist) * fx + (dz / dist) * fz < strikeFacingDot) continue;
-        candidates.push({ piece, dist, dirX: dist > 0.2 ? dx / dist : fx, dirZ: dist > 0.2 ? dz / dist : fz });
-      }
-      candidates.sort((a, b) => a.dist - b.dist);
+      const candidates = selectHammerImpactTargets(
+        impactPieces.filter(piece => !rt.released.has(piece.id) && !piece.dynamic),
+        {
+          origin: o,
+          facing: f,
+          maxHits: strikeMaxPieces,
+          swing: { endDistance: strikeRange },
+        },
+      );
       if (candidates.length) {
         claimSwing(strike.swingId);
         triggerHitstop(0.05);
       }
-      for (const hit of candidates.slice(0, strikeMaxPieces)) {
-        const punch = hit.piece.mass * 2.6;
-        releasePiece(hit.piece.id, {
-          linear: { x: hit.dirX * punch, y: punch * 0.24, z: hit.dirZ * punch },
-          torque: { x: hit.dirZ * punch * 0.06, y: 0, z: -hit.dirX * punch * 0.06 },
-        });
+      for (const hit of candidates) {
+        releasePiece(hit.piece.id, createRestrainedReleaseImpulse({
+          mass: hit.piece.mass,
+          direction: { x: hit.dirX, z: hit.dirZ },
+          speed: 0.68,
+          liftSpeed: 0.03,
+        }));
       }
     }
   });

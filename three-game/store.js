@@ -123,7 +123,7 @@ export const threeRuntimeState = {
   footContacts: {
     left: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
     right: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
-    lastStep: { side: null, id: 0, x: 0, y: 0, z: 0, intensity: 0, time: 0 },
+    lastStep: { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, intensity: 0, time: 0 },
   },
 };
 
@@ -137,7 +137,7 @@ function resetThreeRuntimeState() {
   threeRuntimeState.playerMotion.intendedPlanarVelocity = { x: 0, z: 0 };
   threeRuntimeState.footContacts.left = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
   threeRuntimeState.footContacts.right = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
-  threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, intensity: 0, time: 0 };
+  threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, intensity: 0, time: 0 };
 }
 
 function expeditionOutcomeStats(state) {
@@ -410,10 +410,26 @@ export function updateRuntimeFootContacts(next = {}) {
       target.lastStep.x = Number.isFinite(Number(source.x)) ? Number(source.x) : target.lastStep.x;
       target.lastStep.y = Number.isFinite(Number(source.y)) ? Number(source.y) : target.lastStep.y;
       target.lastStep.z = Number.isFinite(Number(source.z)) ? Number(source.z) : target.lastStep.z;
+      target.lastStep.groundSource = typeof source.groundSource === 'string' ? source.groundSource : null;
       target.lastStep.intensity = clamp(Number(source.intensity) || 0, 0, 1);
       target.lastStep.time = Number.isFinite(Number(source.time)) ? Number(source.time) : target.lastStep.time;
     }
   }
+  return target;
+}
+
+// Skeletal contacts and the controller's cadence fallback both publish here.
+// Assigning the id at the shared boundary keeps the stream monotonic when one
+// source temporarily takes over from the other (clip blends, missing profiles,
+// or a model whose foot probes do not quite reach the movement surface).
+export function publishRuntimeFootStep(step = {}) {
+  const target = threeRuntimeState.footContacts.lastStep;
+  updateRuntimeFootContacts({
+    lastStep: {
+      ...step,
+      id: target.id + 1,
+    },
+  });
   return target;
 }
 

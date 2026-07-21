@@ -45,6 +45,47 @@ VEST_BUTTON_SPECS = (
     {"center": (0.0530, 1.2835), "radius": (0.019, 0.018), "min_z": 0.116},
 )
 
+# Three genuinely separate foreground locks in the generated Darwin5 hair.
+# They are extracted without changing their geometry or skin weights, then get
+# visible but bounded morph targets so runtime motion stays cheap and
+# reversible at normal third-person camera distance.
+HAIR_LOCK_SPECS = (
+    {
+        "root": 103891,
+        "name": "Darwin5_HairLock_Left",
+        "sourceCenter": (-0.0456, 1.9091, 0.0867),
+        "sway": 0.0140,
+        "lift": 0.0110,
+        "phase": 0.35,
+    },
+    {
+        "root": 103159,
+        "name": "Darwin5_HairLock_Center",
+        "sourceCenter": (0.0006, 1.9176, 0.0895),
+        "sway": 0.0130,
+        "lift": 0.0100,
+        "phase": 2.25,
+    },
+    {
+        "root": 102563,
+        "name": "Darwin5_HairLock_Right",
+        "sourceCenter": (0.0435, 1.9100, 0.0901),
+        "sway": 0.0135,
+        "lift": 0.0105,
+        "phase": 4.15,
+    },
+)
+
+# A recessed segment of an ellipsoidal forehead beneath the animated locks.
+# The generated source head is open behind these loose islands, so moving them
+# can otherwise expose the sky. Keep this closure strictly in the front
+# hairline band: a full scalp cap can show as a bald spot from overhead.
+FOREHEAD_UNDERLAY_CENTER = (0.008, 1.800, -0.027)
+FOREHEAD_UNDERLAY_RADII = (0.094, 0.168, 0.105)
+FOREHEAD_UNDERLAY_MIN_Y = 1.850
+FOREHEAD_UNDERLAY_MAX_Y = 1.940
+FOREHEAD_UNDERLAY_HALF_ANGLE = math.radians(102.0)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -60,8 +101,14 @@ def parse_args():
     parser.add_argument("--preview-material-regions", action="store_true")
     parser.add_argument("--preview-button-candidates", action="store_true")
     parser.add_argument("--preview-brass-buttons", action="store_true")
+    parser.add_argument("--preview-hair-roots", default="")
+    parser.add_argument(
+        "--preview-hair-motion",
+        choices=("positive", "negative", "lift", "drop"),
+    )
     parser.add_argument("--inspect-material-components", action="store_true")
     parser.add_argument("--inspect-button-components", action="store_true")
+    parser.add_argument("--inspect-hair-components", action="store_true")
     parser.add_argument("--author", action="store_true")
     parser.add_argument("--output-glb")
     parser.add_argument("--output-blend")
@@ -568,9 +615,17 @@ def assign_character_material_regions(mesh, debug=False):
     hair = make_region_material(
         source_material,
         "Darwin5 hair",
-        0.84,
+        0.68,
         debug_color=(1.0, 0.03, 0.32) if debug else None,
     )
+    hair_principled = hair.node_tree.nodes.get("Principled BSDF") if hair.use_nodes else None
+    if hair_principled and not debug:
+        # Match Blender QA to the intended strand response. The runtime repeats
+        # these values explicitly because glTF exporters may omit anisotropy.
+        if "Anisotropic IOR Level" in hair_principled.inputs:
+            hair_principled.inputs["Anisotropic IOR Level"].default_value = 0.58
+        if "Anisotropic Rotation" in hair_principled.inputs:
+            hair_principled.inputs["Anisotropic Rotation"].default_value = 0.0
     mesh.data.materials.append(skin)
     skin_index = len(mesh.data.materials) - 1
     mesh.data.materials.append(hair)
@@ -701,6 +756,323 @@ def selected_vest_button_roots(candidates):
             if dx * dx + dy * dy <= 1.0 and z >= spec["min_z"]:
                 selected.add(item["root"])
     return selected
+
+
+def hair_component_candidates(mesh, hair_roots):
+    roots, component_sizes = vertex_components(mesh)
+    components = component_bounds(mesh, roots)
+    results = []
+    for root in hair_roots:
+        item = components.get(root)
+        if item is None:
+            continue
+        minimum = item["min"]
+        maximum = item["max"]
+        center = [(minimum[axis] + maximum[axis]) * 0.5 for axis in range(3)]
+        extents = [maximum[axis] - minimum[axis] for axis in range(3)]
+        # Keep the useful top/front silhouette band broad at inspection time;
+        # selection is finalized only after isolated diagnostic renders.
+        if maximum[1] < 1.84 or maximum[2] < 0.015:
+            continue
+        results.append({
+            "root": root,
+            "vertices": component_sizes.get(root, len(item["indices"])),
+            "min": minimum,
+            "max": maximum,
+            "center": center,
+            "extents": extents,
+        })
+    results.sort(key=lambda item: (-item["max"][1], -item["max"][2], item["center"][0]))
+    return results
+
+
+def apply_component_root_preview(mesh, selected_roots, name="Component root preview"):
+    preview = bpy.data.materials.new(name)
+    preview.diffuse_color = (1.0, 0.004, 0.012, 1.0)
+    preview.metallic = 0.0
+    preview.roughness = 0.28
+    preview.use_nodes = True
+    principled = preview.node_tree.nodes.get("Principled BSDF")
+    if principled:
+        principled.inputs["Base Color"].default_value = preview.diffuse_color
+        principled.inputs["Emission Color"].default_value = preview.diffuse_color
+        principled.inputs["Emission Strength"].default_value = 0.55
+    mesh.data.materials.append(preview)
+    material_index = len(mesh.data.materials) - 1
+    roots, _ = vertex_components(mesh)
+    polygons = 0
+    for polygon in mesh.data.polygons:
+        if roots[polygon.vertices[0]] not in selected_roots:
+            continue
+        polygon.material_index = material_index
+        polygons += 1
+    return {
+        "roots": sorted(selected_roots),
+        "components": len(selected_roots),
+        "polygons": polygons,
+    }
+
+
+def object_local_bounds(obj):
+    coordinates = [vertex.co for vertex in obj.data.vertices]
+    minimum = [min(coordinate[axis] for coordinate in coordinates) for axis in range(3)]
+    maximum = [max(coordinate[axis] for coordinate in coordinates) for axis in range(3)]
+    center = [(minimum[axis] + maximum[axis]) * 0.5 for axis in range(3)]
+    return minimum, maximum, center
+
+
+def smoothstep_value(edge0, edge1, value):
+    t = max(0.0, min(1.0, (value - edge0) / max(edge1 - edge0, 1e-6)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def extract_hair_lock_objects(mesh):
+    roots, _ = vertex_components(mesh)
+    selected_roots = {spec["root"] for spec in HAIR_LOCK_SPECS}
+    selected_indices = {
+        vertex.index for vertex in mesh.data.vertices
+        if roots[vertex.index] in selected_roots
+    }
+    if not selected_indices:
+        raise RuntimeError("Darwin5 hair-lock selection found no vertices.")
+
+    before_separate = set(bpy.data.objects)
+    bpy.ops.object.select_all(action="DESELECT")
+    mesh.select_set(True)
+    bpy.context.view_layer.objects.active = mesh
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_mode(type="VERT")
+    bpy.ops.mesh.select_all(action="DESELECT")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for vertex in mesh.data.vertices:
+        vertex.select = vertex.index in selected_indices
+    mesh.data.update()
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.separate(type="SELECTED")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    extracted = [
+        obj for obj in bpy.data.objects
+        if obj not in before_separate and obj.type == "MESH"
+    ]
+    if len(extracted) != 1:
+        raise RuntimeError(f"Expected one combined extracted hair object; found {len(extracted)}.")
+
+    combined = extracted[0]
+    before_loose = set(bpy.data.objects)
+    bpy.ops.object.select_all(action="DESELECT")
+    combined.select_set(True)
+    bpy.context.view_layer.objects.active = combined
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.separate(type="LOOSE")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    locks = [combined] + [
+        obj for obj in bpy.data.objects
+        if obj not in before_loose and obj.type == "MESH"
+    ]
+    if len(locks) != len(HAIR_LOCK_SPECS):
+        raise RuntimeError(f"Expected three extracted hair locks; found {len(locks)}.")
+
+    remaining_specs = list(HAIR_LOCK_SPECS)
+    matched = []
+    for obj in locks:
+        _, _, center = object_local_bounds(obj)
+        spec = min(
+            remaining_specs,
+            key=lambda candidate: sum(
+                (center[axis] - candidate["sourceCenter"][axis]) ** 2
+                for axis in range(3)
+            ),
+        )
+        remaining_specs.remove(spec)
+        obj.name = spec["name"]
+        obj.data.name = spec["name"] + "Mesh"
+        obj["hairLock"] = True
+        obj["hairLockPhase"] = spec["phase"]
+        obj["hairLockSourceRoot"] = spec["root"]
+        matched.append((obj, spec))
+    return matched
+
+
+def add_hair_lock_morphs(obj, spec, preview_pose=None):
+    minimum, maximum, center = object_local_bounds(obj)
+    basis = obj.shape_key_add(name="Basis", from_mix=False)
+    positive = obj.shape_key_add(name="HairSwayPositive", from_mix=False)
+    negative = obj.shape_key_add(name="HairSwayNegative", from_mix=False)
+    lift = obj.shape_key_add(name="HairLift", from_mix=False)
+    drop = obj.shape_key_add(name="HairDrop", from_mix=False)
+
+    y_span = max(maximum[1] - minimum[1], 1e-5)
+    z_span = max(maximum[2] - minimum[2], 1e-5)
+    scores = []
+    for base_point in basis.data:
+        coordinate = base_point.co
+        down = (maximum[1] - coordinate.y) / y_span
+        forward = (coordinate.z - minimum[2]) / z_span
+        scores.append(down * 0.64 + forward * 0.36)
+    tip_threshold = max(0.62, max(scores) * 0.96)
+
+    maximum_weight = 0.0
+    weighted_vertices = 0
+    for index, base_point in enumerate(basis.data):
+        coordinate = base_point.co
+        weight = smoothstep_value(0.30, tip_threshold, scores[index])
+        weight = weight ** 1.45
+        if weight > 0.05:
+            weighted_vertices += 1
+        maximum_weight = max(maximum_weight, weight)
+        lateral = spec["sway"] * weight
+        positive.data[index].co = coordinate + Vector((lateral, 0.0006 * weight, 0.0012 * weight))
+        negative.data[index].co = coordinate + Vector((-lateral, 0.0003 * weight, -0.0005 * weight))
+        lift.data[index].co = coordinate + Vector((0.0, spec["lift"] * weight, -spec["lift"] * 0.72 * weight))
+        drop.data[index].co = coordinate + Vector((0.0, -spec["lift"] * 0.58 * weight, spec["lift"] * 0.48 * weight))
+
+    for key in (positive, negative, lift, drop):
+        key.slider_min = 0.0
+        key.slider_max = 1.0
+        key.value = 0.0
+    preview_keys = {
+        "positive": positive,
+        "negative": negative,
+        "lift": lift,
+        "drop": drop,
+    }
+    if preview_pose:
+        preview_keys[preview_pose].value = 1.0
+    return {
+        "object": obj.name,
+        "sourceRoot": spec["root"],
+        "vertices": len(obj.data.vertices),
+        "polygons": len(obj.data.polygons),
+        "bounds": {"min": minimum, "max": maximum, "center": center},
+        "swayTipMeters": spec["sway"],
+        "liftTipMeters": spec["lift"],
+        "weightedVertices": weighted_vertices,
+        "maximumWeight": maximum_weight,
+        "phase": spec["phase"],
+        "shapeKeys": [key.name for key in obj.data.shape_keys.key_blocks],
+        "previewPose": preview_pose,
+        "armatureModifiers": [
+            modifier.object.name for modifier in obj.modifiers
+            if modifier.type == "ARMATURE" and modifier.object is not None
+        ],
+    }
+
+
+def author_hair_lock_motion(mesh, preview_pose=None):
+    locks = extract_hair_lock_objects(mesh)
+    reports = [
+        add_hair_lock_morphs(obj, spec, preview_pose=preview_pose)
+        for obj, spec in locks
+    ]
+    return [obj for obj, _ in locks], reports
+
+
+def make_forehead_underlay_material(mesh):
+    """Reuse a real forehead texel for the tiny scalp closure."""
+    roots, component_sizes = vertex_components(mesh)
+    face_roots = eye_face_components(mesh, roots, component_sizes)
+    original_uvs = source_uvs(mesh)
+    image = source_atlas_image(mesh)
+    samples = []
+    sample_xs = (-0.052, -0.034, -0.016, 0.002, 0.020, 0.038, 0.056)
+    for x in sample_xs:
+        face_root = face_roots[0] if x < 0.010 else face_roots[1]
+        vertex = nearest_component_vertex(mesh, roots, face_root, x, 1.866)
+        uv = original_uvs.get(vertex.index)
+        color = sample_image_pixel(image, uv) if uv is not None else None
+        if color is None:
+            continue
+        luminance = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722
+        red = max(color[0], 1e-5)
+        if 0.24 < luminance < 0.94 and color[2] / red >= 0.40:
+            samples.append((color, uv.copy(), luminance))
+    if samples:
+        # A lighter real forehead texel blends better than the median here:
+        # dark candidates along this generated mesh's hairline include brow and
+        # sideburn atlas pixels even though their geometry belongs to the face.
+        sampled, sampled_uv, _ = max(samples, key=lambda item: item[2])
+    else:
+        sampled = (0.56, 0.34, 0.23)
+        sampled_uv = Vector((0.5, 0.5))
+
+    source_material = mesh.data.materials[0] if mesh.data.materials else None
+    if source_material is None:
+        raise RuntimeError("Darwin5 primary mesh has no source material for forehead closure.")
+    material = source_material.copy()
+    material.name = "Darwin5 forehead underlay"
+    material.diffuse_color = (1.0, 1.0, 1.0, 1.0)
+    material.metallic = 0.0
+    material.roughness = 0.62
+    principled = material.node_tree.nodes.get("Principled BSDF") if material.use_nodes else None
+    if principled:
+        principled.inputs["Metallic"].default_value = 0.0
+        principled.inputs["Roughness"].default_value = 0.62
+    return material, sampled, sampled_uv
+
+
+def add_forehead_underlay(mesh, armature):
+    """Close the open forehead behind the three moving foreground locks."""
+    segments = 19
+    rings = 7
+    center_x, center_y, center_z = FOREHEAD_UNDERLAY_CENTER
+    radius_x, radius_y, radius_z = FOREHEAD_UNDERLAY_RADII
+    minimum_v = (FOREHEAD_UNDERLAY_MIN_Y - center_y) / radius_y
+    maximum_v = (FOREHEAD_UNDERLAY_MAX_Y - center_y) / radius_y
+    coordinates = []
+    for ring in range(rings):
+        v = minimum_v + (maximum_v - minimum_v) * ring / (rings - 1)
+        cross_section = math.sqrt(max(0.0, 1.0 - v * v))
+        for segment in range(segments):
+            theta = (
+                -FOREHEAD_UNDERLAY_HALF_ANGLE
+                + FOREHEAD_UNDERLAY_HALF_ANGLE * 2.0 * segment / (segments - 1)
+            )
+            coordinates.append((
+                center_x + radius_x * cross_section * math.sin(theta),
+                center_y + radius_y * v,
+                center_z + radius_z * cross_section * math.cos(theta),
+            ))
+    faces = []
+    for ring in range(rings - 1):
+        for segment in range(segments - 1):
+            next_segment = segment + 1
+            lower = ring * segments + segment
+            lower_next = ring * segments + next_segment
+            upper = (ring + 1) * segments + segment
+            upper_next = (ring + 1) * segments + next_segment
+            faces.append((lower, lower_next, upper_next, upper))
+
+    data = bpy.data.meshes.new("Darwin5_ForeheadUnderlayMesh")
+    data.from_pydata(coordinates, [], faces)
+    data.update()
+    for polygon in data.polygons:
+        polygon.use_smooth = True
+    obj = bpy.data.objects.new("Darwin5_ForeheadUnderlay", data)
+    bpy.context.collection.objects.link(obj)
+    material, sampled_skin, sampled_uv = make_forehead_underlay_material(mesh)
+    data.materials.append(material)
+    uv_layer = data.uv_layers.new(name="UVMap")
+    for polygon in data.polygons:
+        for loop_index in polygon.loop_indices:
+            uv_layer.data[loop_index].uv = sampled_uv
+    head_group = obj.vertex_groups.new(name=HEAD_BONE)
+    head_group.add(list(range(len(coordinates))), 1.0, "REPLACE")
+    obj["foreheadUnderlay"] = True
+    finish_skinned_object(obj, mesh, armature)
+    return obj, {
+        "object": obj.name,
+        "vertices": len(coordinates),
+        "polygons": len(faces),
+        "sampledSkin": sampled_skin,
+        "sampledSkinUv": list(sampled_uv),
+        "center": list(FOREHEAD_UNDERLAY_CENTER),
+        "radii": list(FOREHEAD_UNDERLAY_RADII),
+        "minimumY": FOREHEAD_UNDERLAY_MIN_Y,
+        "maximumY": FOREHEAD_UNDERLAY_MAX_Y,
+        "halfAngleDegrees": math.degrees(FOREHEAD_UNDERLAY_HALF_ANGLE),
+        "headBone": HEAD_BONE,
+    }
 
 
 def make_brass_button_material(source_material, debug=False):
@@ -1198,9 +1570,12 @@ def render_face(camera, target, review_dir, label, view):
         camera.location = target + Vector((0.38, -0.67, 0.035))
     elif view == "profile":
         camera.location = target + Vector((0.72, -0.03, 0.025))
+    elif view == "top":
+        camera.location = target + Vector((0.0, -0.40, 0.58))
     else:
         raise RuntimeError(f"Unknown review view: {view}")
-    look_at(camera, target + Vector((0.0, 0.0, -0.015)))
+    aim_offset = Vector((0.0, 0.0, 0.055)) if view == "top" else Vector((0.0, 0.0, -0.015))
+    look_at(camera, target + aim_offset)
     bpy.context.scene.render.filepath = os.path.join(review_dir, f"{label}-{view}.png")
     bpy.ops.render.render(write_still=True)
 
@@ -1412,7 +1787,23 @@ def main():
     material_regions = None
     button_candidates = None
     button_regions = None
-    if args.preview_material_regions or args.author:
+    hair_candidates = None
+    hair_preview = None
+    hair_locks = None
+    hair_motion = None
+    forehead_underlay = None
+    preview_hair_roots = {
+        int(value.strip())
+        for value in args.preview_hair_roots.split(",")
+        if value.strip()
+    }
+    if (
+        args.preview_material_regions
+        or args.inspect_hair_components
+        or preview_hair_roots
+        or args.preview_hair_motion
+        or args.author
+    ):
         material_regions = assign_character_material_regions(
             mesh, debug=args.preview_material_regions
         )
@@ -1434,6 +1825,23 @@ def main():
             candidates=button_candidates,
             debug=args.preview_button_candidates,
         )
+    if args.inspect_hair_components or preview_hair_roots:
+        hair_candidates = hair_component_candidates(
+            mesh,
+            material_regions["assignedRoots"]["hair"],
+        )
+    if preview_hair_roots:
+        hair_preview = apply_component_root_preview(
+            mesh,
+            preview_hair_roots,
+            name="Hair lock root preview",
+        )
+    if args.preview_hair_motion or args.author:
+        hair_locks, hair_motion = author_hair_lock_motion(
+            mesh,
+            preview_pose=args.preview_hair_motion,
+        )
+        _, forehead_underlay = add_forehead_underlay(mesh, armature)
     if not args.skip_render:
         camera = setup_render(os.path.abspath(args.review_dir))
         if args.preview_overlay_blink:
@@ -1448,6 +1856,10 @@ def main():
             label = "button-candidates"
         elif args.preview_brass_buttons:
             label = "brass-buttons"
+        elif preview_hair_roots:
+            label = "hair-roots-" + "-".join(str(root) for root in sorted(preview_hair_roots))
+        elif args.preview_hair_motion:
+            label = "hair-motion-" + args.preview_hair_motion
         elif args.preview_blink:
             label = "blink"
         elif args.preview_selection:
@@ -1460,6 +1872,8 @@ def main():
         render(camera, render_target, args.review_dir, label, "front")
         render(camera, render_target, args.review_dir, label, "three-quarter")
         render(camera, render_target, args.review_dir, label, "profile")
+        if args.preview_hair_motion:
+            render(camera, render_target, args.review_dir, label, "top")
 
     export_report = None
     if args.author:
@@ -1475,6 +1889,10 @@ def main():
     report["materialRegions"] = material_regions
     report["buttonCandidates"] = button_candidates
     report["buttonRegions"] = button_regions
+    report["hairCandidates"] = hair_candidates
+    report["hairRootPreview"] = hair_preview
+    report["hairMotion"] = hair_motion
+    report["foreheadUnderlay"] = forehead_underlay
     report["materialComponentCandidates"] = (
         material_component_candidates(mesh) if args.inspect_material_components else None
     )

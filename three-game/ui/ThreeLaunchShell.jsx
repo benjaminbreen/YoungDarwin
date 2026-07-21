@@ -6,6 +6,26 @@ import { LaunchOverlay } from './LaunchOverlay';
 
 let runtimeImport = null;
 let physicsWarmup = null;
+const RAPIER_LEGACY_INIT_WARNING = 'using deprecated parameters for the initialization function; pass a single object instead';
+
+async function initializePhysicsRuntime(rapier) {
+  // Rapier 0.19.x's public compat wrapper still passes its embedded WASM bytes
+  // to wasm-bindgen's initializer with the old positional signature. The
+  // initializer accepts it, but emits a deprecation warning from inside the
+  // dependency. Filter only that exact upstream warning during the warm-up;
+  // every other warning still reaches the console.
+  const previousWarn = console.warn;
+  const filteredWarn = (...args) => {
+    if (args[0] === RAPIER_LEGACY_INIT_WARNING) return;
+    previousWarn.apply(console, args);
+  };
+  console.warn = filteredWarn;
+  try {
+    await rapier.init();
+  } finally {
+    if (console.warn === filteredWarn) console.warn = previousWarn;
+  }
+}
 
 function warmPhysicsRuntime() {
   if (!physicsWarmup) {
@@ -13,7 +33,7 @@ function warmPhysicsRuntime() {
     // <Physics> boundary first mounts. Starting that WASM work while the menu
     // is idle keeps it out of the post-click loading overlay.
     physicsWarmup = import('@dimforge/rapier3d-compat')
-      .then(rapier => rapier.init())
+      .then(initializePhysicsRuntime)
       .catch(error => {
         physicsWarmup = null;
         console.warn('Physics warm-up failed; the runtime will retry on launch.', error);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainColor, terrainHeight } from '../../world/terrain';
@@ -10,7 +10,7 @@ import {
 import { readTerrainResource } from '../../world/terrainResource';
 import { getRegionDefinition } from '../../world/regions';
 import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
-import { makeCarryStripGeometries } from '../../world/vistas/apronGeometry';
+import { readBorderVistaResource } from '../../world/vistas/borderVistaResource';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
@@ -248,7 +248,9 @@ export function Terrain({ segmentCap = null }) {
         renderKind: 'terrain',
         renderPath: null,
       }} />
-      <NeighborCarryStrips regionId={currentZoneId} material={material} />
+      <Suspense fallback={<ContinuationTerrainSkirts regionId={currentZoneId} material={material} />}>
+        <NeighborCarryStrips regionId={currentZoneId} material={material} />
+      </Suspense>
     </group>
   );
 }
@@ -260,9 +262,11 @@ export function Terrain({ segmentCap = null }) {
 // far side of each strip is the vista mesh in BorderVistas, which shares the
 // strip's seam-ring vertices.
 function NeighborCarryStrips({ regionId, material }) {
-  const carryStrips = useMemo(() => makeCarryStripGeometries(regionId), [regionId]);
+  const borderResource = readBorderVistaResource(regionId);
+  const carryStrips = useMemo(() => borderResource.entries
+    .filter(entry => entry.carry)
+    .map(entry => ({ id: entry.vistaId, edge: entry.edge, geometry: entry.carry })), [borderResource]);
   const carryEdges = useMemo(() => carryStrips.map(strip => strip.edge), [carryStrips]);
-  useEffect(() => () => carryStrips.forEach(strip => strip.geometry.dispose()), [carryStrips]);
   return (
     <>
       {carryStrips.map(strip => (

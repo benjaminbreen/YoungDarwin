@@ -1057,11 +1057,12 @@ export function NaturalistModel({
     if (motionRef?.current) motionRef.current.modelAssetId = modelAssetId;
     if (typeof window === 'undefined') return undefined;
     window.__darwinPlayerModel = selectedModelAssetId;
-    // Hotkey 9 cycles stable models plus explicitly scoped visual-review
-    // candidates. The selected asset may inherit a production behavior profile.
+    // Shift+9 cycles stable models plus explicitly scoped visual-review
+    // candidates. Plain 9 is reserved for the ecology suitability overlay.
     const cycle = PLAYER_MODEL_CYCLE;
     const onKeyDown = (event) => {
       if (event.code !== 'Digit9' && event.key !== '9') return;
+      if (!event.shiftKey) return;
       if (event.repeat) return;
       setSelectedModelAssetId(current => {
         const idx = cycle.indexOf(current);

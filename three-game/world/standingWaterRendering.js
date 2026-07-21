@@ -19,6 +19,12 @@ export function standingWaterMaskAt(x, z, zoneId) {
   return maskFn ? clamp(maskFn(x, z)) : 0;
 }
 
+export function standingWaterSuppressionMaskAt(x, z, zoneId) {
+  const terrain = getRegionDefinition(zoneId)?.terrain;
+  const maskFn = terrain?.standingWaterSuppressionMask || terrain?.standingWaterMask;
+  return maskFn ? clamp(maskFn(x, z)) : 0;
+}
+
 export function getStandingWaterRenderingConfig(zoneId) {
   const terrain = getRegionDefinition(zoneId)?.terrain || {};
   const rendering = terrain.standingWaterRendering || {};

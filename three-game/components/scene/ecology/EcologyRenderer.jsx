@@ -3,6 +3,8 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
+import { GLTFLoader } from 'three-stdlib';
+import { peek } from 'suspend-react';
 import { getRuntimePlayerPose } from '../../../store';
 import { getModelAsset } from '../../../modelAssets';
 import { getWildlifeAssetId } from '../../../wildlife/wildlifeCatalog';
@@ -30,6 +32,7 @@ import { CropFieldLayer } from './CropFieldLayer';
 import { StandingWaterSurface } from './StandingWaterSurface';
 import { CaveEntrance } from './CaveEntrance';
 import { VolcanicFormationField } from './VolcanicFormationField';
+import { EcologyHabitatDebugLayer } from './EcologyHabitatDebugLayer';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -45,6 +48,11 @@ function FoliageMotionDriver() {
 }
 
 const GLB_PATH_RE = /\.(?:glb|gltf)(?:[?#].*)?$/i;
+const ecologyPreloadQueue = [];
+const queuedEcologyPreloads = new Set();
+let ecologyPreloadHandle = null;
+let ecologyPrefetchPaused = false;
+let ecologyPreloadInFlightPath = null;
 const EMPTY_LAYER_PLAN = {
   flora: [],
   proceduralFlora: [],
@@ -156,14 +164,55 @@ function assetPreloadPath(asset) {
   return asset.cacheKey ? `${asset.path}?v=${encodeURIComponent(asset.cacheKey)}` : asset.path;
 }
 
+function scheduleEcologyPreloadPump() {
+  if (ecologyPreloadHandle != null
+    || ecologyPreloadInFlightPath
+    || ecologyPrefetchPaused
+    || !ecologyPreloadQueue.length) return;
+  const run = () => {
+    ecologyPreloadHandle = null;
+    if (ecologyPrefetchPaused) return;
+    const path = ecologyPreloadQueue.shift();
+    if (!path) return;
+    ecologyPreloadInFlightPath = path;
+    useGLTF.preload(path);
+    const startedAt = performance.now();
+    const waitForParsedAsset = () => {
+      // useGLTF/useLoader cache entries are keyed by the loader class and URL.
+      // Do not begin the next parse until this one is actually available; a
+      // fixed launch interval still lets several network requests complete and
+      // converge on the main thread in the same frame.
+      const parsed = peek([GLTFLoader, path]);
+      if (parsed || performance.now() - startedAt >= 12000) {
+        ecologyPreloadInFlightPath = null;
+        ecologyPreloadHandle = window.setTimeout(() => {
+          ecologyPreloadHandle = null;
+          scheduleEcologyPreloadPump();
+        }, 120);
+        return;
+      }
+      ecologyPreloadHandle = window.setTimeout(waitForParsedAsset, 80);
+    };
+    ecologyPreloadHandle = window.setTimeout(waitForParsedAsset, 80);
+  };
+  if (typeof window.requestIdleCallback === 'function') {
+    ecologyPreloadHandle = window.requestIdleCallback(run, { timeout: 500 });
+  } else {
+    ecologyPreloadHandle = window.setTimeout(run, 0);
+  }
+}
+
 function preloadGLBPath(path) {
-  if (typeof path !== 'string' || !GLB_PATH_RE.test(path)) return;
-  useGLTF.preload(path);
+  if (typeof window === 'undefined' || typeof path !== 'string' || !GLB_PATH_RE.test(path)) return;
+  if (queuedEcologyPreloads.has(path)) return;
+  queuedEcologyPreloads.add(path);
+  ecologyPreloadQueue.push(path);
+  scheduleEcologyPreloadPump();
 }
 
 function preloadModelAsset(assetId) {
   const path = assetPreloadPath(getModelAsset(assetId));
-  if (path) useGLTF.preload(path);
+  if (path) preloadGLBPath(path);
 }
 
 function shouldPrefetchAsset(item, ecology) {
@@ -195,7 +244,12 @@ export function prefetchEcologyAssets(ecology) {
   });
 }
 
-export function EcologyRenderer({ ecology, settings = {} }) {
+export function setEcologyAssetPrefetchPaused(paused) {
+  ecologyPrefetchPaused = paused === true;
+  if (!ecologyPrefetchPaused) scheduleEcologyPreloadPump();
+}
+
+export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }) {
   const [streamTier, setStreamTier] = useState(0);
 
   useEffect(() => {
@@ -211,27 +265,32 @@ export function EcologyRenderer({ ecology, settings = {} }) {
   const visibleLayers = useMemo(() => {
     if (!ecology) return EMPTY_LAYER_PLAN;
     const tierVisible = item => !ecology.stream || (item.loadTier ?? 1) <= streamTier;
+    const preparationVisible = phase => preparationPhase >= phase;
+    const floraLayers = ecology.flora || [];
+    const earlyFloraCount = Math.ceil(floraLayers.length * 0.5);
     return {
-      flora: (ecology.flora || []).filter(tierVisible),
-      proceduralFlora: (ecology.proceduralFlora || []).filter(tierVisible),
-      denseGrass: (ecology.denseGrass || []).filter(tierVisible),
-      hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(tierVisible),
-      stylizedMeadows: (ecology.stylizedMeadows || []).filter(tierVisible),
-      dryGrassPatches: (ecology.dryGrassPatches || []).filter(tierVisible),
-      surfaceLitter: (ecology.surfaceLitter || []).filter(tierVisible),
-      collectibleBeachFinds: (ecology.collectibleBeachFinds || []).filter(tierVisible),
-      ambientWildlife: (ecology.ambientWildlife || ecology.wildlife || []).filter(tierVisible),
-      flyingModels: (ecology.flyingModels || []).filter(tierVisible),
-      lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(tierVisible),
-      generatedTrees: (ecology.generatedTrees || []).filter(tierVisible),
-      props: (ecology.props || []).filter(tierVisible),
-      rocks: (ecology.rocks || []).filter(tierVisible),
-      volcanicFormations: (ecology.volcanicFormations || []).filter(tierVisible),
-      caveEntrances: (ecology.caveEntrances || []).filter(tierVisible),
-      canopySilhouettes: (ecology.canopySilhouettes || []).filter(tierVisible),
-      crops: (ecology.crops || []).filter(tierVisible),
+      flora: floraLayers.filter((item, index) => (
+        tierVisible(item) && preparationVisible(index < earlyFloraCount ? 5 : 6)
+      )),
+      proceduralFlora: (ecology.proceduralFlora || []).filter(item => tierVisible(item) && preparationVisible(6)),
+      denseGrass: (ecology.denseGrass || []).filter(item => tierVisible(item) && preparationVisible(4)),
+      hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(item => tierVisible(item) && preparationVisible(4)),
+      stylizedMeadows: (ecology.stylizedMeadows || []).filter(item => tierVisible(item) && preparationVisible(4)),
+      dryGrassPatches: (ecology.dryGrassPatches || []).filter(item => tierVisible(item) && preparationVisible(4)),
+      surfaceLitter: (ecology.surfaceLitter || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      collectibleBeachFinds: (ecology.collectibleBeachFinds || []).filter(item => tierVisible(item) && preparationVisible(6)),
+      ambientWildlife: (ecology.ambientWildlife || ecology.wildlife || []).filter(item => tierVisible(item) && preparationVisible(6)),
+      flyingModels: (ecology.flyingModels || []).filter(item => tierVisible(item) && preparationVisible(6)),
+      lagoonSurfaces: (ecology.lagoonSurfaces || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      generatedTrees: (ecology.generatedTrees || []).filter(item => tierVisible(item) && preparationVisible(5)),
+      props: (ecology.props || []).filter(item => tierVisible(item) && preparationVisible(5)),
+      rocks: (ecology.rocks || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      volcanicFormations: (ecology.volcanicFormations || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      caveEntrances: (ecology.caveEntrances || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      canopySilhouettes: (ecology.canopySilhouettes || []).filter(item => tierVisible(item) && preparationVisible(3)),
+      crops: (ecology.crops || []).filter(item => tierVisible(item) && preparationVisible(5)),
     };
-  }, [ecology, streamTier]);
+  }, [ecology, preparationPhase, streamTier]);
   const propPlan = useMemo(() => (
     ecology ? planProps(visibleLayers.props, ecology.zoneId) : EMPTY_PROP_PLAN
   ), [ecology, visibleLayers.props]);
@@ -405,8 +464,9 @@ export function EcologyRenderer({ ecology, settings = {} }) {
       ))}
       {ecology.swimmers && <ReefSwimmers swimmers={ecology.swimmers} />}
       {ecology.footprintBiomes?.length > 0 && (
-        <Footprints zoneId={ecology.zoneId} biomes={ecology.footprintBiomes} />
+        <Footprints zoneId={ecology.zoneId} />
       )}
+      <EcologyHabitatDebugLayer ecology={ecology} />
     </group>
   );
 }

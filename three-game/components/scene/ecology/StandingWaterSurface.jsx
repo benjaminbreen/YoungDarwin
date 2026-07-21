@@ -109,6 +109,41 @@ function normalizeBounds(bounds, position, scale) {
   return [x - sx, x + sx, z - sz, z + sz];
 }
 
+function createStandingWaterFlowTexture(surface, flowFn, bounds) {
+  if (!flowFn || !bounds) return null;
+  const [minX, maxX, minZ, maxZ] = bounds;
+  const [width = 192, height = 96] = surface.flowMapResolution || [];
+  const textureWidth = Math.max(16, Math.floor(width));
+  const textureHeight = Math.max(16, Math.floor(height));
+  const data = new Uint8Array(textureWidth * textureHeight * 4);
+  for (let iz = 0; iz < textureHeight; iz += 1) {
+    const z = THREE.MathUtils.lerp(minZ, maxZ, (iz + 0.5) / textureHeight);
+    for (let ix = 0; ix < textureWidth; ix += 1) {
+      const x = THREE.MathUtils.lerp(minX, maxX, (ix + 0.5) / textureWidth);
+      const flow = flowFn(x, z) || {};
+      const rawX = Number(flow.x) || 0;
+      const rawZ = Number(flow.z) || 0;
+      const length = Math.hypot(rawX, rawZ) || 1;
+      const speed = THREE.MathUtils.clamp(Number(flow.speed) || 0.65, 0, 1);
+      const offset = (iz * textureWidth + ix) * 4;
+      data[offset] = clampByte(128 + (rawX / length) * speed * 127);
+      data[offset + 1] = clampByte(128 + (rawZ / length) * speed * 127);
+      data[offset + 2] = 128;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, textureWidth, textureHeight, THREE.RGBAFormat);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function makeGeometry(positions, uvs, indices, attributes = {}) {
   const geometry = new THREE.BufferGeometry();
   const normals = [];
@@ -248,6 +283,8 @@ function createStandingWaterOverlayMaterial(surface) {
     uniforms: {
       uTime: { value: 0 },
       uRain: { value: 0 },
+      uWindDir: { value: new THREE.Vector2(weatherEnv.windX, weatherEnv.windZ).normalize() },
+      uWindStrength: { value: 0.5 },
       uDeepColor: { value: new THREE.Color(surface.colorA || surface.deepColor || '#31584a') },
       uShallowColor: { value: new THREE.Color(surface.colorB || surface.shallowColor || '#85a16d') },
       uMudColor: { value: new THREE.Color(surface.mudColor || '#5c5540') },
@@ -256,6 +293,7 @@ function createStandingWaterOverlayMaterial(surface) {
       uPlayerWorld: { value: new THREE.Vector2(9999, 9999) },
       uPlayerRipple: { value: 0 },
       uRippleStrength: { value: surface.rippleStrength ?? 1 },
+      uShoreFade: { value: surface.shoreFade ?? 0 },
     },
     vertexShader: /* glsl */`
       attribute float lagoonShore;
@@ -274,6 +312,8 @@ function createStandingWaterOverlayMaterial(surface) {
     fragmentShader: /* glsl */`
       uniform float uTime;
       uniform float uRain;
+      uniform vec2 uWindDir;
+      uniform float uWindStrength;
       uniform vec3 uDeepColor;
       uniform vec3 uShallowColor;
       uniform vec3 uMudColor;
@@ -282,6 +322,7 @@ function createStandingWaterOverlayMaterial(surface) {
       uniform vec2 uPlayerWorld;
       uniform float uPlayerRipple;
       uniform float uRippleStrength;
+      uniform float uShoreFade;
       varying vec2 vUv;
       varying vec3 vWorld;
       varying float vLagoonShore;
@@ -318,9 +359,11 @@ function createStandingWaterOverlayMaterial(surface) {
         float meniscus = smoothstep(0.36, 0.92, shore);
         float shoreBreak = smoothstep(0.68, 0.98, shore)
           * (0.62 + 0.38 * noise(w * 1.35 + vec2(7.0, -3.0)));
-        float slow = sin(dot(w, vec2(1.55, 0.42)) + uTime * 0.45) * 0.5 + 0.5;
-        float cross = sin(dot(w, vec2(-0.72, 1.18)) - uTime * 0.34) * 0.5 + 0.5;
-        float ripple = (slow * 0.62 + cross * 0.38 - 0.5) * 0.45;
+        vec2 windDir = uWindDir / max(length(uWindDir), 0.001);
+        vec2 windSide = vec2(-windDir.y, windDir.x);
+        float slow = sin(dot(w, windDir * 1.55) - uTime * (0.28 + uWindStrength * 0.48)) * 0.5 + 0.5;
+        float crossRipple = sin(dot(w, (windDir * 0.34 + windSide) * 1.18) - uTime * (0.2 + uWindStrength * 0.32)) * 0.5 + 0.5;
+        float ripple = (slow * 0.68 + crossRipple * 0.32 - 0.5) * (0.18 + uWindStrength * 0.38);
         float algae = smoothstep(0.55, 0.88, fbm(w * 0.16 + vec2(uTime * 0.006, -uTime * 0.004)));
         float mud = smoothstep(0.68, 0.95, fbm(w * 0.11 + vec2(4.2, -2.8)));
 
@@ -347,6 +390,9 @@ function createStandingWaterOverlayMaterial(surface) {
         float alpha = uOpacity * (0.76 + algae * 0.16 + mud * 0.08);
         alpha += meniscus * 0.045 + shoreBreak * 0.055;
         alpha += rainPock * 0.032 + abs(playerShimmer) * 0.006;
+        float shoreVisibility = mix(1.0, 1.0 - smoothstep(0.38, 0.98, shore), uShoreFade);
+        alpha *= shoreVisibility;
+        if (alpha <= 0.001) discard;
         gl_FragColor = vec4(clamp(color, 0.0, 1.0), clamp(alpha, 0.0, 0.34));
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -408,6 +454,10 @@ function tuneWater2Shader(material, surface) {
   material.uniforms.uStepRippleDisplacement = { value: surface.stepRippleDisplacement ?? 0.028 };
   material.uniforms.uPlayerWaterWorld = { value: new THREE.Vector2(9999, 9999) };
   material.uniforms.uPlayerWaterRipple = { value: 0 };
+  material.uniforms.uStandingTime = { value: 0 };
+  material.uniforms.uStandingWindDir = { value: new THREE.Vector2(weatherEnv.windX, weatherEnv.windZ).normalize() };
+  material.uniforms.uStandingWindStrength = { value: 0.5 };
+  material.uniforms.uStandingWindRipple = { value: surface.windRippleStrength ?? 1 };
   material.uniforms.uStepRipples = {
     value: Array.from({ length: STEP_RIPPLE_COUNT }, () => new THREE.Vector4(9999, 9999, -1000, 0)),
   };
@@ -416,6 +466,10 @@ function tuneWater2Shader(material, surface) {
       '#include <common>',
       `#include <common>
       uniform float uStepRippleTime;
+      uniform float uStandingTime;
+      uniform vec2 uStandingWindDir;
+      uniform float uStandingWindStrength;
+      uniform float uStandingWindRipple;
       uniform float uStepRippleDisplacement;
       uniform vec2 uPlayerWaterWorld;
       uniform float uPlayerWaterRipple;
@@ -468,6 +522,10 @@ function tuneWater2Shader(material, surface) {
       `#include <common>
       uniform float uStepRippleTime;
       uniform float uStepRippleStrength;
+      uniform float uStandingTime;
+      uniform vec2 uStandingWindDir;
+      uniform float uStandingWindStrength;
+      uniform float uStandingWindRipple;
       uniform vec2 uPlayerWaterWorld;
       uniform float uPlayerWaterRipple;
       uniform vec4 uStepRipples[${STEP_RIPPLE_COUNT}];
@@ -481,6 +539,25 @@ function tuneWater2Shader(material, surface) {
     .replace(
       'vec3 normal = normalize( vec3( normalColor.r * 2.0 - 1.0, normalColor.b,  normalColor.g * 2.0 - 1.0 ) );',
       `vec3 normal = normalize( vec3( normalColor.r * 2.0 - 1.0, normalColor.b,  normalColor.g * 2.0 - 1.0 ) );
+      vec2 standingWindDir = uStandingWindDir / max(length(uStandingWindDir), 0.001);
+      vec2 standingWindSide = vec2(-standingWindDir.y, standingWindDir.x);
+      float standingWindT = clamp(uStandingWindStrength, 0.0, 1.35);
+      normal = normalize(mix(vec3(0.0, 1.0, 0.0), normal, 0.36 + standingWindT * 0.34));
+      float standingWindPhaseA = dot(vWaterWorld.xz, standingWindDir) * (7.2 + standingWindT * 2.2)
+        - uStandingTime * (0.72 + standingWindT * 1.55);
+      vec2 standingWindDirB = normalize(standingWindDir * 0.78 + standingWindSide * 0.31);
+      float standingWindPhaseB = dot(vWaterWorld.xz, standingWindDirB) * (13.4 + standingWindT * 3.8)
+        - uStandingTime * (1.15 + standingWindT * 2.2);
+      float standingWindSlopeA = cos(standingWindPhaseA) * (0.018 + standingWindT * 0.075);
+      float standingWindSlopeB = cos(standingWindPhaseB) * (0.008 + standingWindT * 0.032);
+      vec2 standingWindSlope = (
+        standingWindDir * standingWindSlopeA + standingWindDirB * standingWindSlopeB
+      ) * uStandingWindRipple;
+      normal = normalize(vec3(
+        normal.x + standingWindSlope.x,
+        max(normal.y, 0.2),
+        normal.z + standingWindSlope.y
+      ));
       vec2 stepSlope = vec2(0.0);
       float stepRippleBright = 0.0;
       for (int i = 0; i < ${STEP_RIPPLE_COUNT}; i++) {
@@ -533,6 +610,17 @@ function tuneWater2Shader(material, surface) {
 
 export function StandingWaterSurface({ surface }) {
   const layout = useMemo(() => createLagoonLayout(surface), [surface]);
+  const regionTerrain = useMemo(
+    () => (surface.zoneId ? getRegionDefinition(surface.zoneId)?.terrain : null),
+    [surface.zoneId],
+  );
+  const maskFn = regionTerrain?.standingWaterMask || null;
+  const flowFn = regionTerrain?.standingWaterFlowAt || null;
+  const flowMap = useMemo(() => createStandingWaterFlowTexture(
+    surface,
+    flowFn,
+    normalizeBounds(surface.bounds, surface.position, surface.scale),
+  ), [flowFn, surface]);
   const playerVeilRef = useRef(null);
   const stepRippleCursor = useRef(0);
   const normalMap0 = useMemo(
@@ -549,6 +637,7 @@ export function StandingWaterSurface({ surface }) {
       textureHeight: surface.textureHeight || 512,
       clipBias: surface.clipBias ?? 0.02,
       color: surface.waterColor || surface.reflectColor || '#8fb5ad',
+      flowMap: flowMap || undefined,
       flowDirection: new THREE.Vector2(surface.flowDirection?.[0] ?? 0.35, surface.flowDirection?.[1] ?? 0.08),
       flowSpeed: surface.flowSpeed ?? 0.006,
       reflectivity: surface.reflectivity ?? 0.08,
@@ -570,13 +659,9 @@ export function StandingWaterSurface({ surface }) {
       renderKind: 'standing-water',
     };
     return object;
-  }, [layout, normalMap0, normalMap1, surface]);
+  }, [flowMap, layout, normalMap0, normalMap1, surface]);
   const overlayMaterial = useMemo(() => createStandingWaterOverlayMaterial(surface), [surface]);
   const playerVeilMaterial = useMemo(() => createPlayerWaterVeilMaterial(surface), [surface]);
-  const maskFn = useMemo(
-    () => (surface.zoneId ? getRegionDefinition(surface.zoneId)?.terrain?.standingWaterMask : null),
-    [surface.zoneId],
-  );
 
   useEffect(() => {
     const addRipple = (event, eventScale = 1) => {
@@ -647,8 +732,20 @@ export function StandingWaterSurface({ surface }) {
     if (water.material?.uniforms?.uStepRippleTime) {
       water.material.uniforms.uStepRippleTime.value = performance.now() / 1000;
     }
+    const windLength = Math.hypot(weatherEnv.windX, weatherEnv.windZ) || 1;
+    const windX = weatherEnv.windX / windLength;
+    const windZ = weatherEnv.windZ / windLength;
+    const windStrength = THREE.MathUtils.clamp((weatherEnv.windSpeed - 0.22) / 1.08, 0, 1.35);
+    const waterUniforms = water.material?.uniforms;
+    if (waterUniforms?.uStandingTime) {
+      waterUniforms.uStandingTime.value = time;
+      waterUniforms.uStandingWindDir.value.set(windX, windZ);
+      waterUniforms.uStandingWindStrength.value = windStrength;
+    }
     overlayMaterial.uniforms.uTime.value = time;
     overlayMaterial.uniforms.uRain.value = rain;
+    overlayMaterial.uniforms.uWindDir.value.set(windX, windZ);
+    overlayMaterial.uniforms.uWindStrength.value = windStrength;
     playerVeilMaterial.uniforms.uTime.value = time;
 
     const pose = getRuntimePlayerPose()?.position;
@@ -681,9 +778,10 @@ export function StandingWaterSurface({ surface }) {
     playerVeilMaterial.dispose();
     water.material?.dispose?.();
     layout.geometry.dispose();
+    flowMap?.dispose();
     normalMap0.dispose();
     normalMap1.dispose();
-  }, [layout.geometry, normalMap0, normalMap1, overlayMaterial, playerVeilMaterial, water]);
+  }, [flowMap, layout.geometry, normalMap0, normalMap1, overlayMaterial, playerVeilMaterial, water]);
 
   return (
     <group userData={{ noReflect: true, renderKind: 'standing-water' }}>

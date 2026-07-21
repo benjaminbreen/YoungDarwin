@@ -4,12 +4,17 @@ import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { getRegionDeveloperLabel, getRegionDisplayName } from '../../../game-core/regionMaps';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 import { generatedTreeBrowserAssets } from '../../world/generatedTreePresets';
-import { ECOLOGY_ZONE_IDS } from '../../world/ecology';
+import { ECOLOGY_ZONE_IDS, getEcology } from '../../world/ecology';
 import { buildEcologyFloraAssetCatalog } from '../../world/ecology/floraAssetCatalog';
 import { DARWINIOTHAMNUS_SPECIES } from '../../world/ecology/floraSpecies';
-import { getThreeIslandLocation } from '../../data';
+import {
+  setEcologyDebugEnabled,
+  setEcologyDebugSpecies,
+  useEcologyDebugState,
+} from '../../world/ecology/ecologyDebugRuntime';
 import { useThreeGameStore } from '../../store';
 
 // Dev-only asset browser (toggle with the 0 key): inspect active ecology GLBs,
@@ -20,7 +25,7 @@ const CANDIDATE_GLB_ASSETS = [
   { id: 'grass-2', label: 'Grass Patch 2 (new)', path: '/assets/models/nature/runtime-grass-patch-2.glb' },
   { id: 'grass-3', label: 'Grass Patch 3 (new)', path: '/assets/models/nature/runtime-grass-patch-3.glb' },
   { id: 'opuntia', label: 'Opuntia study sheet — split before use', path: '/assets/models/nature/runtime-opuntia.glb' },
-  { id: 'candelabra-cactus', label: 'Candelabra Cactus (new)', path: '/assets/models/nature/runtime-candelabra-cactus.glb' },
+  { id: 'candelabra-cactus', label: 'Candelabra Cactus / Jasminocereus thouarsii', path: '/assets/models/nature/runtime-candelabra-cactus.glb' },
   { id: 'ground-plants', label: 'Ground Plants (new)', path: '/assets/models/nature/runtime-ground-plants.glb' },
   // Northern Shore flora set — named for the species Darwin would have met on
   // Floreana's arid coastal zone in 1835.
@@ -55,7 +60,7 @@ const RUNTIME_FLORA_LABELS = {
   'runtime-big-opuntia.glb': 'Mature Floreana prickly pear / Opuntia megasperma',
   'runtime-opuntia.glb': 'Opuntia study sheet — split before use',
   'runtime-palo-santo.glb': 'Galapagos bitterbush / Castela galapageia',
-  'runtime-purple-shrub.glb': 'Floreana highland flowering shrub — identity unresolved',
+  'runtime-purple-shrub.glb': 'Galápagos justicia / Justicia galapagana',
   'runtime-saltbush-1.glb': 'Monte salado / saltbush 1',
   'runtime-saltbush-2.glb': 'Monte salado / saltbush 2',
   'runtime-saltbush-3.glb': 'Monte salado / saltbush 3',
@@ -83,8 +88,10 @@ function runtimeAssetLabel(path) {
   return RUNTIME_FLORA_LABELS[pathFilename(path)] || fallbackAssetLabel(path);
 }
 
-function zoneLabel(zoneId) {
-  return getThreeIslandLocation(zoneId)?.name || zoneId.replaceAll('_', ' ');
+function zoneLabel(zoneId, includeId = false) {
+  return includeId
+    ? getRegionDeveloperLabel(zoneId)
+    : getRegionDisplayName(zoneId) || 'Unknown region';
 }
 
 function formatScaleRange(range) {
@@ -260,6 +267,7 @@ function PreviewEzTree({ variants }) {
 
 function AssetBrowserContent({ onClose }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const ecologyDebug = useEcologyDebugState();
   const initialZoneIds = ECOLOGY_ZONE_IDS.includes(currentZoneId) ? [currentZoneId] : [];
   const [catalog, setCatalog] = useState(() => buildEcologyFloraAssetCatalog(initialZoneIds));
   const [indexing, setIndexing] = useState(initialZoneIds.length < ECOLOGY_ZONE_IDS.length);
@@ -269,6 +277,17 @@ function AssetBrowserContent({ onClose }) {
     return new URLSearchParams(window.location.search).get('assetSearch') || '';
   });
   const [selectedId, setSelectedId] = useState(null);
+  const diagnosticOptions = useMemo(() => {
+    const diagnostics = getEcology(currentZoneId)?.proceduralFloraDiagnostics || [];
+    const bySpecies = new Map();
+    diagnostics.forEach(diagnostic => {
+      if (diagnostic?.speciesId && !bySpecies.has(diagnostic.speciesId)) {
+        bySpecies.set(diagnostic.speciesId, diagnostic);
+      }
+    });
+    return Array.from(bySpecies.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [currentZoneId]);
+  const selectedDiagnostic = diagnosticOptions.find(item => item.speciesId === ecologyDebug.speciesId) || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -380,11 +399,38 @@ function AssetBrowserContent({ onClose }) {
           >
             <option value="all">All regions + candidates</option>
             {zoneOptions.map(zoneId => (
-              <option key={zoneId} value={zoneId}>{zoneLabel(zoneId)}</option>
+              <option key={zoneId} value={zoneId}>{zoneLabel(zoneId, true)}</option>
             ))}
           </select>
           <div className="self-center whitespace-nowrap text-right font-mono text-[10px] text-expedition-faded">
             {filteredAssets.length} assets{indexing ? ' · indexing…' : ''}
+          </div>
+        </div>
+        <div className="mb-3 flex items-center gap-2 rounded-sm border border-expedition-brass/35 bg-black/20 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => setEcologyDebugEnabled(!ecologyDebug.enabled)}
+            className={ecologyDebug.enabled ? GOLD_BUTTON : `${GOLD_BUTTON} opacity-70`}
+          >
+            Habitat debug {ecologyDebug.enabled ? 'on' : 'off'} (9)
+          </button>
+          <select
+            value={selectedDiagnostic ? ecologyDebug.speciesId : ''}
+            onChange={event => {
+              setEcologyDebugSpecies(event.target.value);
+              setEcologyDebugEnabled(true);
+            }}
+            className="min-w-0 flex-1 rounded-sm border border-expedition-brass/50 bg-[#171d24] px-2.5 py-1.5 font-expedition text-xs text-expedition-parchment outline-none focus:border-expedition-gold"
+          >
+            {!selectedDiagnostic && <option value="">Choose a species available on this map</option>}
+            {diagnosticOptions.map(diagnostic => (
+              <option key={diagnostic.speciesId} value={diagnostic.speciesId}>{diagnostic.label}</option>
+            ))}
+          </select>
+          <div className="whitespace-nowrap font-mono text-[9px] text-expedition-faded">
+            {selectedDiagnostic
+              ? `${selectedDiagnostic.suitableCount}/${selectedDiagnostic.sampleCount} cells suitable`
+              : 'no selected diagnostic'}
           </div>
         </div>
         <div className="grid grid-cols-[19rem_1fr] gap-3">

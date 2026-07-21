@@ -9,7 +9,8 @@ import { movementTerrainHeight, isWalkableTerrain } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
 import {
   capHorizontalVelocity,
-  computeAssistedPushVelocity,
+  computeControlledPushVelocity,
+  computeLandingSettleMotion,
   canPickupObject,
   canPushObject,
   isDownhillMoveAllowed,
@@ -28,8 +29,8 @@ const PICKUP_DISTANCE = 2.15;
 const STRIKE_RANGE = 2.6;
 const STRIKE_FACING_DOT = 0.3;
 const IDLE_PROP_ACTIVE_DISTANCE_SQ = 8 * 8;
-const PLAYER_PUSH_CONTACT_COOLDOWN = 0.18;
-const PLAYER_PUSH_FACING_DOT = 0.48;
+const PLAYER_PUSH_FEEDBACK_COOLDOWN = 0.18;
+const PLAYER_PUSH_CONTACT_RESET = 0.14;
 const RECENT_STRIKE_UNCAPPED_SECONDS = 0.7;
 // Loose props near a hammer blow get rattled: small clutter hops, heavy props
 // ignore it. Radius is measured from the impact point ahead of the swing.
@@ -66,12 +67,6 @@ function propInteractionHeight(prop) {
   if (collider.shape === 'cuboid') return (collider.halfExtents?.[1] || 0.45) * 2 * scale;
   if (collider.shape === 'ball') return (collider.radius || 0.34) * 2 * scale;
   return (collider.halfHeight || 0.45) * 2 * scale;
-}
-
-function isPlayerCollisionTarget(target) {
-  return target?.rigidBodyObject?.userData?.kind === 'player'
-    || target?.colliderObject?.userData?.kind === 'player'
-    || target?.colliderObject?.parent?.userData?.kind === 'player';
 }
 
 function mobilityFor(prop) {
@@ -184,7 +179,7 @@ export function PhysicsProp({ prop, onBreak }) {
   const carriedRef = useRef(false);
   const inWaterRef = useRef(false);
   const pendingStrikesRef = useRef([]);
-  const lastPlayerPushContactRef = useRef(-10);
+  const playerPushContactRef = useRef({ startedAt: -10, lastAt: -10, lastFeedbackAt: -10 });
   const lastStrikeAtRef = useRef(-10);
   const clockRef = useRef(0);
   const { world, rapier } = useRapier();
@@ -223,7 +218,7 @@ export function PhysicsProp({ prop, onBreak }) {
   const isCarried = carriedObjectId === prop.id;
   const breakable = prop.behaviors?.breakable;
   const strikeable = prop.behaviors?.strikeable;
-  const mobility = mobilityFor(prop);
+  const mobility = useMemo(() => mobilityFor(prop), [prop]);
   const carryable = canPickupObject(mobility, prop.behaviors?.carryable) ? prop.behaviors.carryable : null;
   const buoyant = prop.behaviors?.buoyant;
   const propMass = prop.mass * Math.pow(propScale, 2.2);
@@ -231,57 +226,69 @@ export function PhysicsProp({ prop, onBreak }) {
   const sidewaysBarrel = isSidewaysBarrel(prop, mobility);
   const placementShape = useMemo(() => createPlacementShape(rapier, prop), [prop, rapier]);
 
-  const handlePlayerContact = useCallback((payload = {}) => {
+  useEffect(() => onPropEvent('player-physics-prop-contact', event => {
+    if (event.propId !== prop.id || carriedRef.current) return;
     const body = bodyRef.current;
-    if (!body || carriedRef.current || !isPlayerCollisionTarget(payload.other)) return;
+    if (!body) return;
+    if (event.contactKind === 'landing') {
+      if (!fixedBody) {
+        const settle = computeLandingSettleMotion({
+          linearVelocity: body.linvel(),
+          angularVelocity: body.angvel(),
+          direction: event.direction,
+          mass: propMass,
+          fallSpeed: event.verticalSpeed,
+        });
+        body.wakeUp();
+        body.setLinvel(settle.linear, true);
+        body.setAngvel(settle.angular, true);
+      }
+      return;
+    }
     if (!canPushObject(mobility)) return;
-    if (clockRef.current - lastPlayerPushContactRef.current <= PLAYER_PUSH_CONTACT_COOLDOWN) return;
+    const now = Number.isFinite(event.now) ? event.now : clockRef.current;
+    const contact = playerPushContactRef.current;
+    if (now - contact.lastAt > PLAYER_PUSH_CONTACT_RESET) contact.startedAt = now;
+    contact.lastAt = now;
 
-    const vectors = scratch.current;
-    const pose = getRuntimePlayerPose();
+    const direction = event.direction || DEFAULT_FACING;
     const translation = body.translation();
-    const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
-    const player = vectorFromStore(pose?.position, vectors.player);
-    const facing = vectorFromStore(pose?.facing, vectors.facing, DEFAULT_FACING).setY(0);
-    if (facing.lengthSq() < 0.001) facing.set(0, 0, -1);
-    facing.normalize();
+    const propPosition = scratch.current.propPosition.set(translation.x, translation.y, translation.z);
+    if (!isDownhillMoveAllowed({
+      position: propPosition,
+      direction,
+      zoneId: currentZoneId,
+      mobility,
+    })) return;
 
-    const toProp = vectors.toProp.copy(propPosition).sub(player).setY(0);
-    const distance = toProp.length();
-    if (distance > 0.001) toProp.divideScalar(distance);
-    else toProp.copy(facing);
-    const facingDot = toProp.dot(facing);
-    if (facingDot < PLAYER_PUSH_FACING_DOT) return;
-    if (!isDownhillMoveAllowed({ position: propPosition, direction: toProp, zoneId: currentZoneId, mobility })) return;
-
-    lastPlayerPushContactRef.current = clockRef.current;
-
-    if (!fixedBody) {
+    if (!fixedBody && clockRef.current - lastStrikeAtRef.current > RECENT_STRIKE_UNCAPPED_SECONDS) {
       const velocity = body.linvel();
-      const assistedVelocity = computeAssistedPushVelocity({
+      const pushedVelocity = computeControlledPushVelocity({
         velocity,
-        direction: toProp,
+        direction,
         mobility,
+        mass: propMass,
+        impactSpeed: event.impactSpeed,
+        sustainedTime: now - contact.startedAt,
+        delta: event.delta,
       });
-      const caps = mobilityVelocityCaps(mobility);
       body.wakeUp();
-      body.setLinvel({
-        x: assistedVelocity.x,
-        y: velocity.y > 0 ? Math.min(velocity.y, caps.verticalLaunchMax) : velocity.y,
-        z: assistedVelocity.z,
-      }, true);
+      body.setLinvel(pushedVelocity, true);
     }
 
-    emitPropEvent('player-push-contact', {
-      propId: prop.id,
-      kind: prop.type,
-      label: prop.label,
-      height: propInteractionHeight(prop),
-      mass: propMass,
-      fixed: Boolean(fixedBody),
-      direction: { x: toProp.x, y: 0, z: toProp.z },
-    });
-  }, [currentZoneId, fixedBody, mobility, prop, propMass]);
+    if (now - contact.lastFeedbackAt >= PLAYER_PUSH_FEEDBACK_COOLDOWN) {
+      contact.lastFeedbackAt = now;
+      emitPropEvent('player-push-contact', {
+        propId: prop.id,
+        kind: prop.type,
+        label: prop.label,
+        height: propInteractionHeight(prop),
+        mass: propMass,
+        fixed: Boolean(fixedBody),
+        direction: { x: direction.x || 0, y: 0, z: direction.z || 0 },
+      });
+    }
+  }), [currentZoneId, fixedBody, mobility, prop, propMass]);
 
   // Queue tool swings; the hit lands impactDelay seconds into the animation.
   // Direct responders (breakable/strikeable) take the full hit; any other
@@ -752,8 +759,6 @@ export function PhysicsProp({ prop, onBreak }) {
       ccd
       additionalSolverIterations={4}
       userData={userData}
-      onCollisionEnter={handlePlayerContact}
-      onContactForce={handlePlayerContact}
     >
       <PropCollider prop={prop} colliderRef={colliderRef} sensor={isCarried} />
       <group

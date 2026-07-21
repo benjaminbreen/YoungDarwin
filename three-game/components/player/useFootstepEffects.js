@@ -1,8 +1,8 @@
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { getRuntimeFootContacts } from '../../store';
+import { getRuntimeFootContacts, publishRuntimeFootStep } from '../../store';
 import { emitPropEvent } from '../../physics/props/propEvents';
-import { terrainBiomeAt } from '../../world/terrain';
+import { terrainBiomeAt, terrainHeight } from '../../world/terrain';
 import { getRegionDefinition } from '../../world/regions';
 import { getSurfaceContactProfile, isWaterSurfaceContact } from '../../world/surfaceContact';
 import { WATER_LEVEL } from '../../world/water';
@@ -45,14 +45,12 @@ function emitWaterStep({ position, facing, horizontalSpeed, running, wadeDepth, 
   }
 }
 
-export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
+export function useFootstepEffects({ footstepDustTriggerRef }) {
   const cadence = useRef({ phase: 0, side: -1, lastStepId: 0 });
-  const localDustPosition = useRef(new THREE.Vector3());
 
   return useMemo(() => {
     function emitDustStep({
       worldPosition,
-      localPosition,
       biome,
       zoneId,
       facing,
@@ -74,15 +72,14 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
         0.28,
         0.95,
       );
-      let position = localPosition;
-      if (!position && worldPosition && playerGroupRef.current) {
-        position = localDustPosition.current.set(worldPosition.x, worldPosition.y + 0.045, worldPosition.z);
-        playerGroupRef.current.worldToLocal(position);
-      }
       footstepDustTriggerRef.current?.({
         kind: 'footstep',
         intensity: stepIntensity,
-        position,
+        worldPosition: {
+          x: worldPosition.x,
+          y: worldPosition.y + 0.045,
+          z: worldPosition.z,
+        },
         biome: profile.biome,
         surfaceProfile: profile,
         horizontalSpeed,
@@ -135,14 +132,27 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
       if (cadence.current.phase < 1) return;
       cadence.current.phase -= 1;
       cadence.current.side *= -1;
+      const side = cadence.current.side < 0 ? 'left' : 'right';
+      const sideOffset = cadence.current.side * 0.16;
+      const stepX = position.x - facing.z * sideOffset + facing.x * 0.16;
+      const stepZ = position.z + facing.x * sideOffset + facing.z * 0.16;
+      const stepGroundY = terrainHeight(stepX, stepZ, zoneId);
+      const step = publishRuntimeFootStep({
+        side,
+        x: stepX,
+        y: stepGroundY + 0.018,
+        z: stepZ,
+        groundSource: 'terrain-function',
+        intensity: clamp(0.32 + horizontalSpeed / 7.5, 0.22, 1),
+        time: typeof performance !== 'undefined' ? performance.now() / 1000 : 0,
+      });
+      cadence.current.lastStepId = step.id;
       if (waterContact) {
-        const sideX = -facing.z * cadence.current.side * 0.18;
-        const sideZ = facing.x * cadence.current.side * 0.18;
         emitWaterStep({
           position: {
-            x: position.x + sideX + facing.x * 0.22,
+            x: stepX,
             y: WATER_LEVEL,
-            z: position.z + sideZ + facing.z * 0.22,
+            z: stepZ,
           },
           facing,
           horizontalSpeed,
@@ -152,9 +162,10 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
         });
         return;
       }
+      const stepBiome = terrainBiomeAt(step.x, step.z, step.y, zoneId);
       emitDustStep({
-        localPosition: localDustPosition.current.set(cadence.current.side * 0.18, 0.055, 0.18),
-        biome,
+        worldPosition: step,
+        biome: stepBiome || biome,
         zoneId,
         facing,
         horizontalSpeed,
@@ -177,5 +188,5 @@ export function useFootstepEffects({ playerGroupRef, footstepDustTriggerRef }) {
         }
       },
     };
-  }, [footstepDustTriggerRef, playerGroupRef]);
+  }, [footstepDustTriggerRef]);
 }

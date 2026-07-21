@@ -7,6 +7,7 @@ import { getRuntimeObstacles, obstacleRenderPosition } from '../../world/obstacl
 import { useThreeGameStore } from '../../store';
 import { StaticGLB } from '../assets/StaticGLB';
 import { getEcology } from '../../world/ecology';
+import { readRegionEcologyResource } from '../../world/ecology/ecologyResource';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
 import { FacetedBoulderField } from './ecology/FacetedBoulderField';
 import { usesFacetedBoulderSurface } from '../../world/facetedBoulders';
@@ -160,14 +161,21 @@ function ObstacleProps() {
   );
 }
 
-export function WorldDetails({ settings = {} }) {
+export function WorldDetails({ settings = {}, contentPhase = 6 }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
+  const preparingDestination = transitionDestinationId === currentZoneId;
+  if (preparingDestination) readRegionEcologyResource(currentZoneId);
   const ecology = getEcology(currentZoneId);
   if (!ecology) return null;
   return (
     <group>
-      <ObstacleProps />
-      <EcologyRenderer ecology={ecology} settings={settings} />
+      {(!preparingDestination || contentPhase >= 5) && <ObstacleProps />}
+      <EcologyRenderer
+        ecology={ecology}
+        settings={settings}
+        preparationPhase={preparingDestination ? contentPhase : 6}
+      />
     </group>
   );
 }

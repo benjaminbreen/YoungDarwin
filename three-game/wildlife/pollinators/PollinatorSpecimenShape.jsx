@@ -395,7 +395,7 @@ function useButterflySpecimenAssets(species) {
       color: '#ffffff',
       roughness: 0.82,
       metalness: 0,
-      emissiveMap: textures.hindEmissive || undefined,
+      emissiveMap: textures.hindEmissive || null,
       emissive: textures.hindEmissive ? '#b8c6d6' : (species === 'fritillary' ? '#5c2c08' : '#57470f'),
       emissiveIntensity: textures.hindEmissive ? 0.85 : 0.22,
       side: THREE.DoubleSide,

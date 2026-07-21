@@ -23,6 +23,14 @@ const LAYERS = [
 ];
 
 const TARGET_SIZE = {
+  // These packed maps tile every ~3-6 world metres. At 512px they still
+  // deliver far more texel density than the camera can resolve, while cutting
+  // PNG decode and GPU upload cost to one quarter of the former 1K maps.
+  'red-cinder-dirt': 512,
+  'coastal-scrub': 512,
+  'coastal-grass-shoulder': 512,
+  'dry-grass-litter': 512,
+  'dark-basalt-gravel': 512,
   grass: 768,
   loam: 768,
   'olivine-beach': 768,

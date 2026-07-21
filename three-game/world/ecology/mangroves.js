@@ -245,7 +245,7 @@ function buildFlora() {
       && mangrovePoolMask(x, z) < 0.58
       && nearAnyCluster([...fernClusters, ...rootClusters], x, z, 17),
   }));
-  const purpleShrubs = scatter('purple-shrub-understory', 16, 587, {
+  const justiciaShrubs = scatter('galapagos-justicia-understory', 16, 587, {
     minX: -39, maxX: 39, minZ: -36, maxZ: 40, scale: [0.78, 1.25], maxGrade: 0.6,
     accept: (biome, x, z) => trailEdge(biome, x, z)
       && mangrovePoolMask(x, z) < 0.36
@@ -344,7 +344,8 @@ function buildFlora() {
       items: darwiniothamnus,
     },
     {
-      id: 'purple-shrub-understory',
+      id: 'galapagos-justicia-understory',
+      label: 'Galápagos justicia / Justicia galapagana',
       path: `${NATURE}runtime-purple-shrub.glb`,
       loadTier: 2,
       sink: 0.04,
@@ -352,7 +353,7 @@ function buildFlora() {
       tintStrength: 0.16,
       motion: { wind: 1.05, bend: 0.3, bendRadius: 1.3 },
       castShadow: false,
-      items: purpleShrubs,
+      items: justiciaShrubs,
     },
     {
       id: 'galapagos-bushes',

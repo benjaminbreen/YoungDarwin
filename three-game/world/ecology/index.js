@@ -3,6 +3,7 @@
 /** @typedef {Record<string, unknown>} EcologyDefinition */
 /** @typedef {() => EcologyDefinition} EcologyBuilder */
 
+import { regionMaps } from '../../../game-core/regionMaps';
 import { buildNorthShoreEcology } from './northShore';
 import { buildDesolateOutcropEcology } from './desolateOutcrop';
 import { buildDevilsCrownEcology } from './devilsCrown';
@@ -30,6 +31,8 @@ import { buildPostScrubRiseEcology } from './postScrubRise';
 import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
+import { buildWatkinsCreekEcology } from './watkinsCreek';
+import { applyUniversalProceduralFlora } from './universalFlora';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
@@ -64,11 +67,14 @@ const builders = {
   POST_SCRUB_RISE: buildPostScrubRiseEcology,
   LAVA_FLATS: buildLavaFlatsEcology,
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
+  WATKINS_CREEK: buildWatkinsCreekEcology,
 };
 
-// Dev tooling uses this registry-derived list instead of maintaining a second
-// zone inventory that can drift as authored ecologies are added or removed.
-export const ECOLOGY_ZONE_IDS = Object.freeze(Object.keys(builders));
+// Every regional map now has an ecology definition. Regions without a bespoke
+// builder receive a sparse definition plus the universal habitat pass, so a
+// shared species policy can evaluate the whole island without adding another
+// region-specific module. Interior and aquatic maps simply score unsuitable.
+export const ECOLOGY_ZONE_IDS = Object.freeze(Object.keys(regionMaps));
 
 /** @type {Map<string, EcologyDefinition>} */
 const cache = new Map();
@@ -78,9 +84,26 @@ const cache = new Map();
  * @returns {EcologyDefinition | null}
  */
 export function getEcology(zoneId) {
-  if (!builders[zoneId]) return null;
-  if (!cache.has(zoneId)) cache.set(zoneId, builders[zoneId]());
+  if (!regionMaps[zoneId]) return null;
+  if (!cache.has(zoneId)) {
+    const authored = builders[zoneId]?.() || { zoneId };
+    cache.set(zoneId, applyUniversalProceduralFlora(zoneId, authored));
+  }
   return cache.get(zoneId) ?? null;
+}
+
+// Destination preparation builds deterministic layouts in a worker, then
+// hydrates this same runtime cache before React mounts the new region. Keeping
+// the public synchronous getter means ecology consumers do not need a second
+// data path once preparation has completed.
+export function cacheEcology(zoneId, ecology) {
+  if (!regionMaps[zoneId] || !ecology) return null;
+  if (!cache.has(zoneId)) cache.set(zoneId, ecology);
+  return cache.get(zoneId) ?? null;
+}
+
+export function ecologyIsCached(zoneId) {
+  return !regionMaps[zoneId] || cache.has(zoneId);
 }
 
 // Specialized gameplay renderers consume interactive flora sites by runtime

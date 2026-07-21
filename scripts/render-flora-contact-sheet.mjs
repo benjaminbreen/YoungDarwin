@@ -32,7 +32,7 @@ const LABELS = {
   'runtime-manzanillo.glb': 'Manzanillo',
   'runtime-opuntia.glb': 'Opuntia / prickly pear',
   'runtime-palo-santo.glb': 'Bitterbush proxy / Castela galapageia',
-  'runtime-purple-shrub.glb': 'Floreana flowering shrub (unidentified)',
+  'runtime-purple-shrub.glb': 'Galápagos justicia / Justicia galapagana',
   'runtime-saltbush-1.glb': 'Monte salado study 1',
   'runtime-saltbush-2.glb': 'Monte salado study 2',
   'runtime-saltbush-3.glb': 'Monte salado study 3',

@@ -720,24 +720,26 @@ function obstacleSurfaceDistance(obstacle, position, playerRadius = 0.42) {
   return best;
 }
 
-export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
+export function getObstacleSupport(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
   let supported = null;
   const candidates = queryObstaclesNear(obstacles, x, z, playerRadius);
   for (const obstacle of candidates) {
     if (!obstacle.jumpable && !obstacle.traversal) continue;
     const traversalTop = traversalSupportHeightAt(obstacle, x, z, playerRadius);
     if (traversalTop !== null && traversalTop !== undefined && playerY >= obstacleBaseY(obstacle) - 0.18) {
-      supported = Math.max(supported ?? -Infinity, traversalTop);
+      if (!supported || traversalTop > supported.height) supported = { height: traversalTop, obstacle };
       continue;
     }
     const top = obstacleTopAt(obstacle, x, z, playerRadius, { strictSupport: true });
     if (top === null) continue;
     const standable = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && playerY >= top - 0.42;
-    if (standable) {
-      supported = Math.max(supported ?? -Infinity, top);
-    }
+    if (standable && (!supported || top > supported.height)) supported = { height: top, obstacle };
   }
   return supported;
+}
+
+export function getObstacleSupportHeight(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {
+  return getObstacleSupport(x, z, playerY, playerRadius, obstacles)?.height ?? null;
 }
 
 export function getSupportedObstacle(x, z, playerY, playerRadius = 0.42, obstacles = FLOREANA_OBSTACLES) {

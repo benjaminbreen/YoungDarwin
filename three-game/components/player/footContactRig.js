@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { updateRuntimeFootContacts } from '../../store';
+import { publishRuntimeFootStep, updateRuntimeFootContacts } from '../../store';
 import {
   footPhasePulse,
   getFootContactProfile,
@@ -211,13 +211,12 @@ export function createFootContactRig({
         entry.pulse = Math.max(0, entry.pulse - delta * 5.6);
         if (down && !entry.wasDown) {
           entry.pulse = 1;
-          footGrounding.stepId += 1;
           lastStep = {
             side,
-            id: footGrounding.stepId,
             x: probeWorld.x,
             y: ground.y + 0.018,
             z: probeWorld.z,
+            groundSource: ground.source || 'terrain-function',
             intensity: THREE.MathUtils.clamp(0.32 + (motionState?.speed || 0) / 7.5, 0.22, 1),
             time: typeof performance !== 'undefined' ? performance.now() / 1000 : 0,
           };
@@ -235,7 +234,10 @@ export function createFootContactRig({
           active: canGround,
         };
       });
-      updateRuntimeFootContacts(lastStep ? { ...contacts, lastStep } : contacts);
+      updateRuntimeFootContacts(contacts);
+      if (lastStep) {
+        footGrounding.stepId = publishRuntimeFootStep(lastStep).id;
+      }
     }
 
     if (footDebugEnabled() && isDarwin) {
