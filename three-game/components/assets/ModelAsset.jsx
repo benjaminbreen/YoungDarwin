@@ -1106,20 +1106,6 @@ function GLBPrimitive({
     root: importedScene,
     normalizeClipName,
   }), [importedScene, mixer]);
-  const positionAnimatedBones = useMemo(() => {
-    const result = new Set();
-    // Boot locomotion already identifies every position-animated foot bone.
-    // Keeping this scan on the boot set avoids walking thousands of deferred
-    // keyframe tracks when the banks commit during the aerial shot.
-    ownAnimations.forEach(clip => {
-      clip.tracks.forEach(track => {
-        if (!track.name.endsWith('.position')) return;
-        const [targetName] = track.name.split('.');
-        if (targetName) result.add(normalizeClipName(targetName));
-      });
-    });
-    return result;
-  }, [ownAnimations]);
   // Always-on additive breathing layer (player only, via asset.additiveBreathing).
   // The clip is filtered to torso/neck rotation tracks and converted to an
   // additive delta against its own first frame, so at low weight it reads as
@@ -1152,8 +1138,7 @@ function GLBPrimitive({
     scene: importedScene,
     groupRef: group,
     grounding,
-    positionAnimatedBones,
-  }), [animationProfileId, asset, importedScene, grounding, positionAnimatedBones]);
+  }), [animationProfileId, asset, importedScene, grounding]);
   const renderUserData = useMemo(() => ({
     ...(reflect ? { reflect: true } : {}),
     renderSource: `model:${assetId}`,

@@ -278,7 +278,10 @@ function postOfficeTerrainBlend(x, z, y = postOfficeTerrainHeight(x, z)) {
   );
   const wetBasalt = Math.max(
     THREE.MathUtils.smoothstep(cove, 0.08, 0.48),
-    THREE.MathUtils.smoothstep(z - wetLine, -4, 7),
+    // Wet basalt belongs on the low southern shoreline. The former sign was
+    // reversed, classifying the dry northern ridge and default spawn as wet
+    // rock and suppressing almost all of their dust response.
+    THREE.MathUtils.smoothstep(wetLine - z, -4, 7),
   ) * (1 - water);
   const tuffRidge = Math.max(
     THREE.MathUtils.smoothstep(z - ridgeLine, -6, 8),

@@ -1,4 +1,4 @@
-import { buildRockObstacles } from './proceduralRocks';
+import { buildRockObstacles, rockVisualBounds } from './proceduralRocks';
 import { seededRandom } from './scatter';
 import {
   LAVA_FLATS,
@@ -89,6 +89,15 @@ const FLOW_SHELVES = [
 ];
 
 let lavaFlatsRocks = null;
+
+const COLLISION_ROCK_MIN_FOOTPRINT = 0.9;
+const COLLISION_ROCK_MIN_HEIGHT = 0.3;
+
+function isCollisionScaleRock(rock) {
+  const bounds = rockVisualBounds(rock);
+  return bounds.footprint >= COLLISION_ROCK_MIN_FOOTPRINT
+    && bounds.height >= COLLISION_ROCK_MIN_HEIGHT;
+}
 
 export function getLavaFlatsRocks() {
   if (lavaFlatsRocks) return lavaFlatsRocks;
@@ -192,7 +201,10 @@ export function getLavaFlatsRockObstacles() {
     traversalLabel: 'scramble over fractured lava',
     climbLabel: 'weathered lava block',
     pushFriction: 0.95,
-    filter: rock => rock.obstacle === true && rock.radiusY > 0.46,
+    // Derive collision from the same bounds the rock renderer uses. Low,
+    // broad slabs should support a step-up even when they are not tall enough
+    // to have been manually tagged as boulders; small fragments stay visual.
+    filter: isCollisionScaleRock,
   });
   return [...rocks, ...FLOW_SHELVES.filter(formation => formation.obstacle).map(flowShelfObstacle)];
 }

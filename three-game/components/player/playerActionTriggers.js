@@ -53,6 +53,20 @@ export function triggerDirectPlayerActions({
       });
     },
   });
+  const knifeBlocked = toolBlocked('knife', 'pocket_knife');
+  triggerAction('knife', 'swingTool', ACTION_DURATION.swingTool, {
+    ...actionOptions,
+    movementLocked: movementLocked || knifeBlocked,
+    onStart: () => {
+      emitPropEvent('tool-swing', {
+        tool: 'pocket_knife',
+        swingId: nextSwingId(),
+        position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+        facing: { x: facing.current.x, y: 0, z: facing.current.z },
+        impactDelay: 0.34,
+      });
+    },
+  });
   const netBlocked = toolBlocked('net', 'insect_net');
   triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, {
     ...actionOptions,

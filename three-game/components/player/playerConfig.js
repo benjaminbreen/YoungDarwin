@@ -113,6 +113,8 @@ export const CACTUS_HAZARD = {
   cooldown: 1.15,
   shove: 3.8,
   minSpeed: 0.35,
+  walkInjuryChance: 0.04,
+  runInjuryChance: 0.25,
 };
 
 export const LANDING_DUST = {
@@ -143,6 +145,7 @@ export const ACTION_DURATION = {
   pray: 2.8,
   fireRifle: 1.25,
   swingHammer: 1.65,
+  swingTool: 1.63,
   swingNet: 1.85,
   gather: 3.2,
   gatherGround: 3.8,
@@ -187,9 +190,10 @@ export const ACTION_DURATION = {
   runningTurnRight: 0.8,
   walkingTurn180: 0.62,
   teeter: 1.45,
-  startWalking: 0.42,
-  stopWalking: 0.38,
-  runToStop: 0.83,
+  startWalking: 0.68,
+  startRunning: 0.83,
+  stopWalking: 0.8,
+  runToStop: 0.9,
   standingJump: 1.1,
   runningJump: 0.82,
   turnLeft90: 0.48,
@@ -238,13 +242,13 @@ export function actionLockDuration(clip, modelAssetId = null, fallbackDuration =
 }
 
 export const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([
-  'startWalking',
   'lookAroundShort',
   'lookAround',
   'fidgetStand',
   'neckStretch',
   'armStretch',
   'neutralIdle',
+  'calmIdle',
   'happyIdle',
   'inspectNearbyIdle',
   'stopWalking',
@@ -259,6 +263,7 @@ export const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([
 export const CONTROL_INTERRUPTIBLE_ACTIONS = new Set([
   ...MOVEMENT_INTERRUPTIBLE_ACTIONS,
   'startWalking',
+  'startRunning',
   'stumble',
   'runningTurn180',
   'walkingTurn180',

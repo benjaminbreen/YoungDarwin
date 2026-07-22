@@ -52,23 +52,6 @@ function fbm(x, z, scale = 1, salt = 0) {
   return value;
 }
 
-function segmentFrame(px, pz, ax, az, aw, bx, bz, bw) {
-  const abx = bx - ax;
-  const abz = bz - az;
-  const lengthSq = abx * abx + abz * abz || 1;
-  const t = THREE.MathUtils.clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
-  const centerX = ax + abx * t;
-  const centerZ = az + abz * t;
-  const length = Math.sqrt(lengthSq);
-  return {
-    centerX,
-    centerZ,
-    distance: Math.hypot(px - centerX, pz - centerZ),
-    width: THREE.MathUtils.lerp(aw, bw, t),
-    yaw: Math.atan2(abz / length, abx / length),
-  };
-}
-
 // pathPoints may be a single polyline ([[x, z, w], ...]) or a list of
 // polylines (a branching network); consecutive points only connect within a
 // polyline, so branches never grow phantom joining segments.
@@ -76,16 +59,64 @@ function asPolylines(pathPoints) {
   return Array.isArray(pathPoints[0][0]) ? pathPoints : [pathPoints];
 }
 
-export function pathFrameAt(pathPoints, x, z) {
-  let nearest = null;
+const compiledPathSegments = new WeakMap();
+
+function pathSegments(pathPoints) {
+  const cached = compiledPathSegments.get(pathPoints);
+  if (cached) return cached;
+  const segments = [];
   for (const polyline of asPolylines(pathPoints)) {
-    for (let i = 0; i < polyline.length - 1; i += 1) {
-      const [ax, az, aw] = polyline[i];
-      const [bx, bz, bw] = polyline[i + 1];
-      const frame = segmentFrame(x, z, ax, az, aw, bx, bz, bw);
-      if (!nearest || frame.distance < nearest.distance) nearest = frame;
+    for (let index = 0; index < polyline.length - 1; index += 1) {
+      const [ax, az, aw] = polyline[index];
+      const [bx, bz, bw] = polyline[index + 1];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const lengthSq = dx * dx + dz * dz || 1;
+      segments.push({
+        ax,
+        az,
+        aw,
+        dw: bw - aw,
+        dx,
+        dz,
+        inverseLengthSq: 1 / lengthSq,
+        yaw: Math.atan2(dz, dx),
+      });
     }
   }
+  compiledPathSegments.set(pathPoints, segments);
+  return segments;
+}
+
+export function pathFrameAt(pathPoints, x, z) {
+  let nearest = null;
+  let nearestDistanceSq = Infinity;
+  for (const segment of pathSegments(pathPoints)) {
+    const rawT = ((x - segment.ax) * segment.dx + (z - segment.az) * segment.dz)
+      * segment.inverseLengthSq;
+    const t = Math.max(0, Math.min(1, rawT));
+    const centerX = segment.ax + segment.dx * t;
+    const centerZ = segment.az + segment.dz * t;
+    const offsetX = x - centerX;
+    const offsetZ = z - centerZ;
+    const distanceSq = offsetX * offsetX + offsetZ * offsetZ;
+    // Keep the original strict comparison so equal-distance junctions select
+    // the first authored segment exactly as before.
+    const tieTolerance = nearest
+      ? Number.EPSILON * Math.max(1, nearestDistanceSq, distanceSq) * 2
+      : 0;
+    if (!nearest || distanceSq < nearestDistanceSq - tieTolerance) {
+      nearestDistanceSq = distanceSq;
+      nearest = {
+        centerX,
+        centerZ,
+        width: segment.aw + segment.dw * t,
+        yaw: segment.yaw,
+      };
+    }
+  }
+  if (!nearest) return null;
+  nearest.distance = Math.sqrt(nearestDistanceSq);
   return nearest;
 }
 

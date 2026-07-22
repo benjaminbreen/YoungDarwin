@@ -7,27 +7,11 @@ import {
   getVisualSoleOffset,
 } from './gaitProfiles';
 
-const FOOT_PLANT_MAX_UP = 0.075;
-const FOOT_PLANT_OBSTACLE_MAX_UP = 0.72;
-const FOOT_PLANT_FAST_OBSTACLE_MAX_UP = 0.42;
-const FOOT_PLANT_MAX_DOWN = -0.045;
-// On obstacle support the analytic surface can sit below where the walk cycle
-// holds the foot (dome shoulders, collider tops proud of the mesh), so allow a
-// much deeper reach down to actually plant on the rock.
-const FOOT_PLANT_OBSTACLE_MAX_DOWN = -0.22;
-const FOOT_PLANT_MAX_SPEED = 5.2;
 const VISUAL_GROUNDING_MAX_UP = 0.1;
 const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.9;
 const VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP = 0.58;
+const VISUAL_GROUNDING_SPEED_REFERENCE = 8.6;
 const VISUAL_GROUNDING_PROBE_RANGE = 0.36;
-const FOOT_PLANT_BONE = {
-  left: /leftfoot$/i,
-  right: /rightfoot$/i,
-};
-
-function normalizeClipName(name = '') {
-  return String(name).replace(/\s+/g, '').replace(/[^a-z0-9_]/gi, '').toLowerCase();
-}
 
 function footDebugEnabled() {
   if (typeof window === 'undefined') return false;
@@ -43,8 +27,17 @@ function actionPhase(action) {
 }
 
 function speedScaledObstacleLiftCap(speed, slowCap, fastCap) {
-  const speedRatio = THREE.MathUtils.clamp((speed || 0) / FOOT_PLANT_MAX_SPEED, 0, 1);
+  const speedRatio = THREE.MathUtils.clamp((speed || 0) / VISUAL_GROUNDING_SPEED_REFERENCE, 0, 1);
   return THREE.MathUtils.lerp(slowCap, fastCap, speedRatio);
+}
+
+function visibleGroundY(ground, fallback = 0) {
+  if (!ground) return fallback;
+  if (ground.source === 'authored-obstacle' || ground.source === 'physics-prop') {
+    return Number.isFinite(ground.y) ? ground.y : fallback;
+  }
+  if (Number.isFinite(ground.terrainY)) return ground.terrainY;
+  return Number.isFinite(ground.y) ? ground.y : fallback;
 }
 
 export function createFootContactRig({
@@ -53,90 +46,24 @@ export function createFootContactRig({
   scene,
   groupRef,
   grounding,
-  positionAnimatedBones,
 }) {
   const isDarwin = String(assetId).startsWith('darwin');
-  const footPlant = {
-    left: { bone: null, offset: 0, correction: new THREE.Vector3() },
-    right: { bone: null, offset: 0, correction: new THREE.Vector3() },
-  };
   const footGrounding = {
     left: { bone: null, contact: 0, pulse: 0, wasDown: false },
     right: { bone: null, contact: 0, pulse: 0, wasDown: false },
     stepId: 0,
   };
-  const temps = {
-    world: new THREE.Vector3(),
-    targetWorld: new THREE.Vector3(),
-    local: new THREE.Vector3(),
-    targetLocal: new THREE.Vector3(),
-    localDelta: new THREE.Vector3(),
-  };
   const probeWorld = new THREE.Vector3();
   const probePatterns = getFootProbePatterns(assetId);
-  const animatedPositionBones = positionAnimatedBones || new Set();
   let visualGroundOffset = 0;
 
   scene.traverse(object => {
     if (!object.isBone) return;
-    if (FOOT_PLANT_BONE.left.test(object.name)) footPlant.left.bone = object;
-    if (FOOT_PLANT_BONE.right.test(object.name)) footPlant.right.bone = object;
     Object.entries(probePatterns).forEach(([side, patterns]) => {
       if (footGrounding[side]?.bone) return;
       if (patterns.some(pattern => pattern.test(object.name))) footGrounding[side].bone = object;
     });
   });
-
-  function applyFootPlanting(delta) {
-    const motionState = grounding?.motionRef?.current;
-    const adapter = grounding?.collisionAdapter;
-    const enabled = asset.footPlanting === true;
-    const canPlant = Boolean(
-      enabled && adapter
-      && motionState
-      && !motionState.airborne
-      && !motionState.swimming
-      && !motionState.crouching
-      && !motionState.action
-      && !motionState.jumpCharging
-      && Math.abs(motionState.groundDistance ?? 0) <= 0.2
-      && (motionState.speed || 0) <= FOOT_PLANT_MAX_SPEED,
-    );
-    const speedStrength = 1 - THREE.MathUtils.clamp((motionState?.speed || 0) / FOOT_PLANT_MAX_SPEED, 0, 1);
-    const strength = canPlant ? speedStrength : 0;
-    Object.values(footPlant).forEach(entry => {
-      const bone = entry.bone;
-      if (!bone?.parent) return;
-      const boneHasPositionTrack = animatedPositionBones.has(normalizeClipName(bone.name));
-      if (!boneHasPositionTrack && entry.correction.lengthSq() > 0) {
-        bone.position.sub(entry.correction);
-        entry.correction.set(0, 0, 0);
-      }
-      let targetOffset = 0;
-      if (strength > 0) {
-        bone.getWorldPosition(temps.world);
-        const ground = adapter.groundInfo(temps.world, { supportRadius: 0.06 });
-        const onObstacle = ground.source === 'authored-obstacle';
-        const maxUp = onObstacle
-          ? speedScaledObstacleLiftCap(motionState?.speed, FOOT_PLANT_OBSTACLE_MAX_UP, FOOT_PLANT_FAST_OBSTACLE_MAX_UP)
-          : FOOT_PLANT_MAX_UP;
-        targetOffset = THREE.MathUtils.clamp(
-          (ground.y - temps.world.y) * strength,
-          onObstacle ? FOOT_PLANT_OBSTACLE_MAX_DOWN : FOOT_PLANT_MAX_DOWN,
-          maxUp,
-        );
-      }
-      entry.offset = THREE.MathUtils.damp(entry.offset, targetOffset, 14, delta);
-      if (Math.abs(entry.offset) < 0.0005) return;
-      bone.getWorldPosition(temps.world);
-      temps.targetWorld.copy(temps.world).y += entry.offset;
-      bone.parent.worldToLocal(temps.local.copy(temps.world));
-      bone.parent.worldToLocal(temps.targetLocal.copy(temps.targetWorld));
-      temps.localDelta.copy(temps.targetLocal).sub(temps.local);
-      bone.position.add(temps.localDelta);
-      entry.correction.copy(temps.localDelta);
-    });
-  }
 
   function applyVisualGrounding(delta, action, requestedClip) {
     const motionState = grounding?.motionRef?.current;
@@ -166,26 +93,35 @@ export function createFootContactRig({
         entry.bone.getWorldPosition(probeWorld);
         const ground = adapter.groundInfo(probeWorld, { supportRadius: 0.07 });
         if (ground.source === 'authored-obstacle') obstacleProbeCount += 1;
-        const footGap = probeWorld.y - ground.y;
+        const contactY = visibleGroundY(ground, probeWorld.y);
+        const footGap = probeWorld.y - contactY;
         const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width) : 0.5;
         const proximity = THREE.MathUtils.clamp(1 - Math.abs(footGap) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
         sampled[side] = {
-          groundY: ground.y,
+          groundY: contactY,
           groundSource: ground.source,
           phaseContact,
           contact: proximity * (0.34 + phaseContact * 0.66),
         };
-        if (Math.abs(footGap) <= VISUAL_GROUNDING_PROBE_RANGE || phaseContact > 0.55) {
-          deltas.push((ground.y - getVisualSoleOffset(assetId, side)) - probeWorld.y);
+        const plantedWeight = profile
+          ? phaseContact
+          : ((motionState?.speed || 0) < 0.6 ? 1 : 0);
+        if (plantedWeight > 0.08) {
+          deltas.push({
+            value: (contactY - getVisualSoleOffset(assetId, side)) - probeWorld.y,
+            weight: plantedWeight,
+          });
         }
       });
       if (deltas.length) {
-        const averageDelta = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+        const totalWeight = deltas.reduce((sum, item) => sum + item.weight, 0);
+        const averageDelta = deltas.reduce((sum, item) => sum + item.value * item.weight, 0)
+          / Math.max(0.001, totalWeight);
         const maxUp = obstacleProbeCount > 0
           ? speedScaledObstacleLiftCap(motionState?.speed, VISUAL_GROUNDING_OBSTACLE_MAX_UP, VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP)
           : VISUAL_GROUNDING_MAX_UP;
         targetOffset = THREE.MathUtils.clamp(
-          Math.max(0, averageDelta),
+          visualGroundOffset + averageDelta,
           0,
           maxUp,
         );
@@ -203,18 +139,28 @@ export function createFootContactRig({
         entry.bone.getWorldPosition(probeWorld);
         const ground = adapter?.groundInfo?.(probeWorld, { supportRadius: 0.07 }) || { y: probeWorld.y };
         const sample = sampled[side] || {};
-        const proximity = THREE.MathUtils.clamp(1 - Math.abs(probeWorld.y - ground.y) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
+        const contactY = Number.isFinite(sample.groundY)
+          ? sample.groundY
+          : visibleGroundY(ground, probeWorld.y);
+        const proximity = THREE.MathUtils.clamp(1 - Math.abs(probeWorld.y - contactY) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
         const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width) : (sample.phaseContact ?? 0.5);
         const rawContact = canGround ? proximity * (0.34 + phaseContact * 0.66) : 0;
         entry.contact = THREE.MathUtils.damp(entry.contact, rawContact, 20, delta);
-        const down = entry.contact > 0.68 && phaseContact > 0.45 && (motionState?.speed || 0) > 0.45;
+        // Locomotion phase owns timing; ground projection owns placement. A
+        // proximity requirement here made missing IK suppress real footfalls.
+        const down = Boolean(
+          canGround
+          && profile
+          && phaseContact > 0.52
+          && (motionState?.speed || 0) > 0.45,
+        );
         entry.pulse = Math.max(0, entry.pulse - delta * 5.6);
         if (down && !entry.wasDown) {
           entry.pulse = 1;
           lastStep = {
             side,
             x: probeWorld.x,
-            y: ground.y + 0.018,
+            y: contactY + 0.018,
             z: probeWorld.z,
             groundSource: ground.source || 'terrain-function',
             intensity: THREE.MathUtils.clamp(0.32 + (motionState?.speed || 0) / 7.5, 0.22, 1),
@@ -226,7 +172,7 @@ export function createFootContactRig({
           x: probeWorld.x,
           y: probeWorld.y,
           z: probeWorld.z,
-          groundY: ground.y,
+          groundY: contactY,
           groundSource: ground.source,
           contact: entry.contact,
           pulse: entry.pulse,
@@ -258,7 +204,6 @@ export function createFootContactRig({
 
   return {
     update(delta, activeAction, activeRequest) {
-      applyFootPlanting(delta);
       applyVisualGrounding(delta, activeAction, activeRequest);
     },
     dispose() {},

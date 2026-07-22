@@ -1265,16 +1265,42 @@ export const locations = [
     type: 'cliff',
     validMoves: ['N','W','SW','S'],
     specimens: ['frigatebird','floreana_mockingbird'],
+    specimenPlacements: [
+      {
+        instanceId: 'eastern-cliffs-frigatebird-rim',
+        specimenId: 'frigatebird',
+        position: [21, 0, -13],
+        behavior: 'wary',
+        sceneScale: 1,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 5,
+      },
+      {
+        instanceId: 'eastern-cliffs-mockingbird-shelter',
+        specimenId: 'floreana_mockingbird',
+        position: [-21, 0, 20],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+    ],
     npcs: ['gabriel_puig'],
     boundaries: {},
     discoveries: [
       'A path, evidently human-made, leads uphill to the west. The tracks appear fresh.'
     ],
     notableFeatures: [
-      'Vertical rock faces loom over crashing waves far below.',
-      'Nesting birds circle overhead, calling sharply into the wind.',
-      'Jagged edges carved by centuries of ocean gusts.'
-    ]
+      'Dark basalt beds fall sharply into open water along the north and east margins.',
+      'White guano marks sheltered nesting shelves below a wind-scoured rim.',
+      'A narrow cinder traverse crosses the headland, with a short lookout spur toward the colony.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['trade wind hammering the cliff rim', 'frigatebirds calling over the drop', 'surf striking basalt far below'],
+      loadingNote: 'The path climbs onto a bare eastern headland where dark ledges fall into open sea.',
+      educationalNote: 'A seabird colony joins geology and ecology: cliff shape governs nesting shelter, while guano visibly transfers marine nutrients onto volcanic land.',
+    },
   },
 
   // 13) COASTAL SCRUBLAND
@@ -1288,16 +1314,49 @@ export const locations = [
     type: 'scrubland',
     validMoves: ['N','W','S'],
     specimens: ['floreana_mockingbird','cactus','gray_warbler_finch'],
+    specimenPlacements: [
+      {
+        instanceId: 'coastal-scrub-mockingbird-seep',
+        specimenId: 'floreana_mockingbird',
+        position: [17, 0, -3],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+      {
+        instanceId: 'coastal-scrub-lava-cactus',
+        specimenId: 'cactus',
+        position: [-18, 0, 8],
+        behavior: 'still',
+        sceneScale: 1,
+      },
+      {
+        instanceId: 'coastal-scrub-warbler-finch',
+        specimenId: 'gray_warbler_finch',
+        position: [-23, 0, 28],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 5,
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
       'An area known among whalers for occasional fresh water seeps, though they may be dried up at this season.'
     ],
     notableFeatures: [
-      'Sparse, open ground. Not much of visual interest.',
-      'Mockingbirds dart between cacti, eager for seeds.',
-      'Gritty wind stings your eyes, carrying faint salt from the sea.'
-    ]
+      'A narrow red-cinder trail bends between the basalt shoulder and the exposed coast.',
+      'Wind-pruned saltbush and croton gather in long sheltered bands rather than a continuous thicket.',
+      'A pale, dry seep basin holds greener scrub and mockingbird tracks despite the season.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['trade wind combing the scrub', 'mockingbirds calling between cactus clumps', 'distant surf below the eastern shelf'],
+      loadingNote: 'The cliff path descends into open coastal scrub, where low vegetation bends away from the salt wind.',
+      educationalNote: 'Sparse vegetation can still record fine environmental differences: exposure, volcanic substrate, and a little retained moisture arrange this scrub into distinct bands.',
+    },
   },
 
   // 14) PUNTA_CORMORANT
@@ -1652,12 +1711,12 @@ export const locations = [
   {
     id: 'EL_MIRADOR',
     name: 'El Mirador',
-    description: 'A grassy highland lookout where a red dirt footpath climbs toward steep drops and panoramic views.',
+    description: 'A wind-scoured highland summit where an old red-cinder switchback reaches a basalt overlook above the southeastern sea.',
     x: 4,
     y: 2,
     color: '#bdb76b',
     type: 'highland',
-    validMoves: ['W','S'],
+    validMoves: ['N','W','S'],
     specimens: ['floreana_giant_tortoise','large_ground_finch','feralgoat'],
     npcs: [],
     boundaries: {},
@@ -1665,9 +1724,9 @@ export const locations = [
       {
         instanceId: 'el-mirador-feral-goat-path-shoulder-1',
         specimenId: 'feralgoat',
-        position: [-18.2, 0, -23.4],
+        position: [-4.5, 0, -30.5],
         behavior: 'graze',
-        sceneScale: 1.18,
+        sceneScale: 1.12,
         habitatRadiusX: 10.0,
         habitatRadiusZ: 5.6,
       },
@@ -1680,20 +1739,38 @@ export const locations = [
         habitatRadiusX: 11.0,
         habitatRadiusZ: 6.4,
       },
+      {
+        instanceId: 'el-mirador-tortoise-west-hollow-1',
+        specimenId: 'floreana_giant_tortoise',
+        position: [-36.5, 0, 18.5],
+        behavior: 'wander',
+        sceneScale: 1.08,
+        habitatRadiusX: 8.5,
+        habitatRadiusZ: 6.5,
+      },
+      {
+        instanceId: 'el-mirador-large-finch-summit-grass-1',
+        specimenId: 'large_ground_finch',
+        position: [17.5, 0, 20.5],
+        behavior: 'curious',
+        sceneScale: 0.96,
+        habitatRadiusX: 7.5,
+        habitatRadiusZ: 5.0,
+      },
     ],
     discoveries: [
-      'From this cliff edge, a red dirt track winds through dry grass before the slope falls toward hidden southeastern coves.'
+      'At the final bend, the path divides: one branch crosses the saddle while another ends at a bare basalt lookout above the sea.'
     ],
     notableFeatures: [
-      'A compacted red dirt path cuts across the hillside and stays readable through grass-litter shoulders.',
-      'Dry highland grass thickens away from the tread, with stones and pale shell flecks breaking up the ground.',
-      'The ridge reveals both ocean and highland in a single sweep.'
+      'Four red-cinder switchbacks climb from dry coastal scrub to the summit saddle.',
+      'Wind-flattened grass and Darwiniothamnus gather in sheltered folds while exposed gullies reveal weathered basalt.',
+      'A short lookout spur stops inside a fractured rim above the southeastern sea.'
     ],
     narration: {
       weather: 'sunny',
-      sounds: ['wind through dry highland grass', 'loose gravel underfoot', 'distant surf below the ridge'],
-      loadingNote: 'A red dirt highland path climbs through dry grass toward El Mirador.',
-      educationalNote: 'El Mirador tests the transition from coastal dry grass to steeper highland terrain, where slope and wind shape vegetation density.',
+      sounds: ['trade wind combing the summit grass', 'cinder slipping underfoot at each bend', 'surf sounding faintly below the eastern rim'],
+      loadingNote: 'The old foot route begins to double back across the slope, its red bends climbing toward El Mirador.',
+      educationalNote: 'El Mirador makes an ecological gradient visible through movement: exposure, elevation, erosion, and shelter alter the vegetation over the course of one climb.',
     },
   },
 

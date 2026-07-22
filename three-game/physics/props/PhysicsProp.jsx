@@ -1,7 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { BallCollider, CuboidCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
+import {
+  BallCollider,
+  CoefficientCombineRule,
+  CuboidCollider,
+  CylinderCollider,
+  RigidBody,
+  useRapier,
+} from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
@@ -9,8 +16,10 @@ import { movementTerrainHeight, isWalkableTerrain } from '../../world/terrain';
 import { WATER_LEVEL } from '../../world/water';
 import {
   capHorizontalVelocity,
+  computeContactPushImpulse,
   computeControlledPushVelocity,
   computeLandingSettleMotion,
+  computeSustainedPushTorque,
   canPickupObject,
   canPushObject,
   isDownhillMoveAllowed,
@@ -21,7 +30,12 @@ import { onPropEvent, emitPropEvent, claimSwing } from './propEvents';
 import { triggerHitstop } from '../../world/worldTime';
 import { catalogToInspectable } from '../../world/inspectables';
 import { PropVisual, HighlightRing } from './PropVisuals';
-import { publishPropPose, removePropPose } from './propRuntime';
+import {
+  publishPropPose,
+  publishPropWaterInfluence,
+  removePropPose,
+  removePropWaterInfluence,
+} from './propRuntime';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { carryPlacementCandidates } from '../../components/player/carryProfiles';
 
@@ -40,6 +54,10 @@ const RATTLE_RADIUS = 1.35;
 const RATTLE_MAX_MASS = 30;
 const RATTLE_MAX_IMPULSE = 2.4;
 const GROUNDED_PROP_EPSILON = 0.26;
+// Polished water consumes these as occasional instanced rings. Distance and
+// time gates prevent a physics-rate event stream when several props drift.
+const WATER_OBJECT_RIPPLE_MIN_SPEED = 0.14;
+const WATER_OBJECT_RIPPLE_INTERVAL = 0.42;
 const ZERO_VECTOR = { x: 0, y: 0, z: 0 };
 const DEFAULT_FACING = { x: 0, y: 0, z: -1 };
 const DEFAULT_HOLD_OFFSET = [0.32, 1.02, 0.24];
@@ -76,10 +94,32 @@ function mobilityFor(prop) {
   return normalizeMobility();
 }
 
-function isSidewaysBarrel(prop, mobility) {
+function isSidewaysBarrel(body, mobility, scratch) {
   if (mobility.rotationPolicy !== 'autoBarrel') return false;
-  const [rx = 0, , rz = 0] = prop.rotation || [];
-  return Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
+  const rotation = body.rotation();
+  scratch.bodyQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+  scratch.bodyUp.set(0, 1, 0).applyQuaternion(scratch.bodyQuaternion);
+  return Math.abs(scratch.bodyUp.y) < 0.68;
+}
+
+function bodyUprightness(body, scratch) {
+  const rotation = body.rotation();
+  scratch.bodyQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+  scratch.bodyUp.set(0, 1, 0).applyQuaternion(scratch.bodyQuaternion);
+  return scratch.bodyUp.y;
+}
+
+function bodyFaceAlignment(body) {
+  const rotation = body.rotation();
+  const { x, y, z, w } = rotation;
+  // World-space Y components of the body's three local basis axes. Computing
+  // these from the quaternion avoids adding scratch-ref fields that may be
+  // absent on a component instance preserved by React Fast Refresh.
+  return Math.max(
+    Math.abs(2 * (x * y + w * z)),
+    Math.abs(1 - 2 * (x * x + z * z)),
+    Math.abs(2 * (y * z - w * x)),
+  );
 }
 
 function clampAngularVelocity(body, mobility, sidewaysBarrel) {
@@ -93,13 +133,13 @@ function clampAngularVelocity(body, mobility, sidewaysBarrel) {
   const y = THREE.MathUtils.clamp(spin.y, -yawMax, yawMax);
   const z = THREE.MathUtils.clamp(spin.z, -angularMax, angularMax);
   if (x !== spin.x || y !== spin.y || z !== spin.z) {
-    body.setAngvel({ x, y, z }, true);
+    body.setAngvel({ x, y, z }, false);
   }
 }
 
-function applyMobilityVelocityLimits({ body, mobility, grounded, recentlyStruck, delta }) {
+function applyMobilityVelocityLimits({ body, mobility, grounded, recentlyStruck, rolling, delta }) {
   const velocity = body.linvel();
-  const caps = mobilityVelocityCaps(mobility);
+  const caps = mobilityVelocityCaps(mobility, { rolling });
   const horizontalMax = recentlyStruck ? caps.struckHorizontalMaxSpeed : caps.horizontalMaxSpeed;
   let next = capHorizontalVelocity(velocity, horizontalMax);
   let changed = next.x !== velocity.x || next.z !== velocity.z;
@@ -150,7 +190,15 @@ function computeCarryPose(player, facing, carryable, scratch) {
 function PropCollider({ prop, colliderRef, sensor }) {
   const { shape } = prop.collider;
   const scale = prop.scale || 1;
-  const common = { ref: colliderRef, friction: prop.friction, restitution: prop.restitution, sensor };
+  const mass = Math.max(0.001, prop.mass * Math.pow(scale, 2.2));
+  const common = {
+    ref: colliderRef,
+    friction: prop.friction,
+    frictionCombineRule: CoefficientCombineRule.Min,
+    restitution: prop.restitution,
+    mass,
+    sensor,
+  };
   if (shape === 'cuboid') return <CuboidCollider {...common} args={prop.collider.halfExtents.map(value => value * scale)} />;
   if (shape === 'ball') return <BallCollider {...common} args={[prop.collider.radius * scale]} />;
   return <CylinderCollider {...common} args={[prop.collider.halfHeight * scale, prop.collider.radius * scale]} />;
@@ -179,7 +227,18 @@ export function PhysicsProp({ prop, onBreak }) {
   const carriedRef = useRef(false);
   const inWaterRef = useRef(false);
   const pendingStrikesRef = useRef([]);
-  const playerPushContactRef = useRef({ startedAt: -10, lastAt: -10, lastFeedbackAt: -10 });
+  const playerPushContactRef = useRef({
+    startedAt: -10,
+    lastAt: -10,
+    lastFeedbackAt: -10,
+    tipCommitted: false,
+    tipCommittedFor: 0,
+    tipRotationsLocked: false,
+    tipSettledFor: 0,
+  });
+  const playerPushActiveForRef = useRef(0);
+  const waterDampingRef = useRef(false);
+  const waterRippleRef = useRef({ initialized: false, lastAt: -10, x: 0, z: 0 });
   const lastStrikeAtRef = useRef(-10);
   const clockRef = useRef(0);
   const { world, rapier } = useRapier();
@@ -194,6 +253,8 @@ export function PhysicsProp({ prop, onBreak }) {
     carryForward: new THREE.Vector3(),
     carryRight: new THREE.Vector3(),
     carryEuler: new THREE.Euler(),
+    bodyUp: new THREE.Vector3(0, 1, 0),
+    bodyQuaternion: new THREE.Quaternion(),
   });
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const carriedObjectId = useThreeGameStore(state => state.carriedObjectId);
@@ -223,7 +284,6 @@ export function PhysicsProp({ prop, onBreak }) {
   const buoyant = prop.behaviors?.buoyant;
   const propMass = prop.mass * Math.pow(propScale, 2.2);
   const fixedBody = prop.fixed || mobility.mode === 'fixed';
-  const sidewaysBarrel = isSidewaysBarrel(prop, mobility);
   const placementShape = useMemo(() => createPlacementShape(rapier, prop), [prop, rapier]);
 
   useEffect(() => onPropEvent('player-physics-prop-contact', event => {
@@ -250,6 +310,10 @@ export function PhysicsProp({ prop, onBreak }) {
     const contact = playerPushContactRef.current;
     if (now - contact.lastAt > PLAYER_PUSH_CONTACT_RESET) contact.startedAt = now;
     contact.lastAt = now;
+    playerPushActiveForRef.current = Math.max(
+      playerPushActiveForRef.current,
+      PLAYER_PUSH_CONTACT_RESET + 0.04,
+    );
 
     const direction = event.direction || DEFAULT_FACING;
     const translation = body.translation();
@@ -263,17 +327,65 @@ export function PhysicsProp({ prop, onBreak }) {
 
     if (!fixedBody && clockRef.current - lastStrikeAtRef.current > RECENT_STRIKE_UNCAPPED_SECONDS) {
       const velocity = body.linvel();
+      const seabedY = movementTerrainHeight(translation.x, translation.z, currentZoneId);
+      const floating = Boolean(
+        buoyant
+        && seabedY < WATER_LEVEL - 0.12
+        && translation.y < WATER_LEVEL + buoyant.rideHeight + 0.35
+      );
+      const rolling = isSidewaysBarrel(body, mobility, scratch.current);
+      const sustainedTime = now - contact.startedAt;
+      const hasTipAssist = Number(mobility.tipAssistTorque) > 0;
+      const uprightness = bodyUprightness(body, scratch.current);
+      if (hasTipAssist && !contact.tipCommitted && Math.abs(uprightness) <= 0.62) {
+        contact.tipCommitted = true;
+        contact.tipCommittedFor = 0;
+        contact.tipRotationsLocked = false;
+        contact.tipSettledFor = 0;
+        const settleVerticalMax = Math.max(0.18, mobility.verticalLaunchMax ?? 0.1);
+        if (velocity.y > settleVerticalMax) {
+          body.setLinvel({ x: velocity.x, y: settleVerticalMax, z: velocity.z }, true);
+        }
+      }
       const pushedVelocity = computeControlledPushVelocity({
         velocity,
         direction,
         mobility,
         mass: propMass,
         impactSpeed: event.impactSpeed,
-        sustainedTime: now - contact.startedAt,
+        sustainedTime,
         delta: event.delta,
+        rolling,
+        floating,
       });
+      const impulse = computeContactPushImpulse({
+        velocity,
+        targetVelocity: pushedVelocity,
+        direction,
+        mass: body.mass(),
+      });
+      const witness = event.contactPoint;
+      // Once this shove has carried the crate over its balance point, keep any
+      // further pressure linear. Reusing an upper-edge witness after each half
+      // turn would inject a fresh overturning moment forever.
+      const contactPoint = !contact.tipCommitted
+        && witness
+        && Number.isFinite(witness.x)
+        && Number.isFinite(witness.y)
+        && Number.isFinite(witness.z)
+        ? witness
+        : translation;
       body.wakeUp();
-      body.setLinvel(pushedVelocity, true);
+      body.applyImpulseAtPoint(impulse, contactPoint, true);
+      if (!floating && hasTipAssist && !contact.tipCommitted && Math.abs(uprightness) > 0.62) {
+        const torque = computeSustainedPushTorque({
+          direction,
+          mobility,
+          sustainedTime,
+          impactSpeed: event.impactSpeed,
+        });
+        if (torque.x || torque.z) body.addTorque(torque, true);
+      }
     }
 
     if (now - contact.lastFeedbackAt >= PLAYER_PUSH_FEEDBACK_COOLDOWN) {
@@ -288,7 +400,7 @@ export function PhysicsProp({ prop, onBreak }) {
         direction: { x: direction.x || 0, y: 0, z: direction.z || 0 },
       });
     }
-  }), [currentZoneId, fixedBody, mobility, prop, propMass]);
+  }), [buoyant, currentZoneId, fixedBody, mobility, prop, propMass]);
 
   // Queue tool swings; the hit lands impactDelay seconds into the animation.
   // Direct responders (breakable/strikeable) take the full hit; any other
@@ -373,6 +485,7 @@ export function PhysicsProp({ prop, onBreak }) {
     const state = useThreeGameStore.getState();
     if (state.carryPrompt?.id === prop.id) setCarryPrompt(null);
     removePropPose(currentZoneId, prop.id);
+    removePropWaterInfluence(currentZoneId, prop.id);
   }, [currentZoneId, prop.id, setCarryPrompt]);
 
   useEffect(() => {
@@ -522,6 +635,7 @@ export function PhysicsProp({ prop, onBreak }) {
     const body = bodyRef.current;
     if (!body) return;
     clockRef.current += delta;
+    playerPushActiveForRef.current = Math.max(0, playerPushActiveForRef.current - delta);
     const carriedHere = carriedRef.current;
 
     const translation = body.translation();
@@ -529,7 +643,51 @@ export function PhysicsProp({ prop, onBreak }) {
     const propPosition = vectors.propPosition.set(translation.x, translation.y, translation.z);
     if (carriedHere) removePropPose(currentZoneId, prop.id);
     else publishPropPose(currentZoneId, prop.id, translation);
+    const sidewaysBarrel = !fixedBody
+      && !carriedHere
+      && isSidewaysBarrel(body, mobility, vectors);
     if (!fixedBody && !carriedHere) clampAngularVelocity(body, mobility, sidewaysBarrel);
+
+    // Rearm the one-shot tipping leverage only after the crate has actually
+    // come to rest and Darwin has stopped pressing it. A momentary loss of
+    // contact during a flip must not start a new torque cycle.
+    const pushContact = playerPushContactRef.current;
+    if (pushContact.tipCommitted) {
+      pushContact.tipCommittedFor += delta;
+      if (!pushContact.tipRotationsLocked) {
+        const linear = body.linvel();
+        const settleVerticalMax = Math.max(0.18, mobility.verticalLaunchMax ?? 0.1);
+        if (linear.y > settleVerticalMax) {
+          body.setLinvel({ x: linear.x, y: settleVerticalMax, z: linear.z }, false);
+        }
+        if (
+          pushContact.tipCommittedFor >= 0.35
+          && bodyFaceAlignment(body) >= 0.97
+        ) {
+          body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+          body.lockRotations(true, false);
+          pushContact.tipRotationsLocked = true;
+        }
+      }
+    }
+    if (pushContact.tipCommitted && playerPushActiveForRef.current <= 0) {
+      const linear = body.linvel();
+      const angular = body.angvel();
+      const settled = Math.hypot(linear.x, linear.z) < 0.12
+        && Math.abs(linear.y) < 0.12
+        && Math.hypot(angular.x, angular.y, angular.z) < 0.16;
+      pushContact.tipSettledFor = settled ? pushContact.tipSettledFor + delta : 0;
+      if (pushContact.tipSettledFor >= 0.65) {
+        body.sleep();
+        if (pushContact.tipRotationsLocked) body.lockRotations(false, false);
+        pushContact.tipCommitted = false;
+        pushContact.tipCommittedFor = 0;
+        pushContact.tipRotationsLocked = false;
+        pushContact.tipSettledFor = 0;
+      }
+    } else if (!pushContact.tipCommitted || playerPushActiveForRef.current > 0) {
+      pushContact.tipSettledFor = 0;
+    }
 
     // Resolve queued tool strikes once their impact moment arrives.
     if (pendingStrikesRef.current.length) {
@@ -669,6 +827,16 @@ export function PhysicsProp({ prop, onBreak }) {
     const overWater = seabedY < WATER_LEVEL - 0.12;
     const nearWater = seabedY < WATER_LEVEL + 0.55;
     const wateryMotion = overWater && translation.y < WATER_LEVEL + 0.35;
+    const useWaterDamping = Boolean(!fixedBody && !carriedHere && buoyant && wateryMotion);
+    if (waterDampingRef.current !== useWaterDamping) {
+      waterDampingRef.current = useWaterDamping;
+      body.setLinearDamping(useWaterDamping
+        ? (buoyant.linearDamping ?? Math.min(prop.linearDamping ?? 0, 0.65))
+        : (prop.linearDamping ?? 0));
+      body.setAngularDamping(useWaterDamping
+        ? (buoyant.rigidBodyAngularDamping ?? Math.min(prop.angularDamping ?? 0, 0.8))
+        : (prop.angularDamping ?? 0));
+    }
     if (!fixedBody && !carriedHere && !wateryMotion) {
       const restY = seabedY + (prop.restOffset * propScale);
       applyMobilityVelocityLimits({
@@ -676,6 +844,7 @@ export function PhysicsProp({ prop, onBreak }) {
         mobility,
         grounded: translation.y <= restY + GROUNDED_PROP_EPSILON,
         recentlyStruck: clockRef.current - lastStrikeAtRef.current <= RECENT_STRIKE_UNCAPPED_SECONDS,
+        rolling: sidewaysBarrel,
         delta,
       });
     }
@@ -690,6 +859,59 @@ export function PhysicsProp({ prop, onBreak }) {
       });
     }
     inWaterRef.current = inWater;
+
+    // Feed the cinematic water path directly from the rigid body's current
+    // pose. Surface intersection (rather than merely being over the seabed)
+    // keeps sunk props from generating wakes several metres above them.
+    const halfHeight = propInteractionHeight(prop) * 0.5;
+    const touchesSurface = !carriedHere
+      && nearWater
+      && translation.y - halfHeight < WATER_LEVEL + 0.12
+      && translation.y + halfHeight > WATER_LEVEL - 0.42;
+    if (touchesSurface) {
+      const velocity = body.linvel();
+      const horizontalSpeed = Math.hypot(velocity.x, velocity.z);
+      const rippleState = waterRippleRef.current;
+      const rippleRadius = propPickupRadius(prop);
+      if (!rippleState.initialized) {
+        rippleState.initialized = true;
+        rippleState.lastAt = clockRef.current;
+        rippleState.x = translation.x;
+        rippleState.z = translation.z;
+      } else {
+        const moved = Math.hypot(translation.x - rippleState.x, translation.z - rippleState.z);
+        const rippleDistance = Math.max(0.16, rippleRadius * 0.32);
+        if (
+          horizontalSpeed >= WATER_OBJECT_RIPPLE_MIN_SPEED
+          && clockRef.current - rippleState.lastAt >= WATER_OBJECT_RIPPLE_INTERVAL
+          && moved >= rippleDistance
+        ) {
+          const invSpeed = 1 / Math.max(horizontalSpeed, 0.001);
+          emitPropEvent('water-object-ripple', {
+            propId: prop.id,
+            position: { x: translation.x, y: WATER_LEVEL, z: translation.z },
+            direction: { x: velocity.x * invSpeed, y: 0, z: velocity.z * invSpeed },
+            yaw: Math.atan2(velocity.x, velocity.z),
+            radius: rippleRadius,
+            intensity: THREE.MathUtils.clamp(0.1 + horizontalSpeed * 0.24, 0.12, 0.48),
+          });
+          rippleState.lastAt = clockRef.current;
+          rippleState.x = translation.x;
+          rippleState.z = translation.z;
+        }
+      }
+      publishPropWaterInfluence(currentZoneId, prop.id, {
+        x: translation.x,
+        z: translation.z,
+        vx: velocity.x,
+        vz: velocity.z,
+        radius: rippleRadius,
+        strength: buoyant ? 1 : 0.62,
+      });
+    } else {
+      waterRippleRef.current.initialized = false;
+      removePropWaterInfluence(currentZoneId, prop.id);
+    }
 
     if (buoyant && overWater && translation.y < WATER_LEVEL + buoyant.rideHeight + 0.35) {
       body.wakeUp();
@@ -714,7 +936,8 @@ export function PhysicsProp({ prop, onBreak }) {
       const targetVx = (flowX - flowZ * swirl) * buoyant.currentSpeed;
       const targetVz = (flowZ + flowX * swirl) * buoyant.currentSpeed;
       const dt = Math.min(delta, 0.05);
-      const blendXZ = 1 - Math.exp(-buoyant.drag * dt);
+      const activePush = playerPushActiveForRef.current > 0;
+      const blendXZ = (1 - Math.exp(-buoyant.drag * dt)) * (activePush ? 0.12 : 1);
       const blendY = 1 - Math.exp(-buoyant.strength * 0.2 * dt);
       body.setLinvel({
         x: velocity.x + (targetVx - velocity.x) * blendXZ,
@@ -723,7 +946,8 @@ export function PhysicsProp({ prop, onBreak }) {
       }, true);
       // Damp spin and add a gentle roll so it reads as bobbing, not gliding.
       const spin = body.angvel();
-      const angularKeep = Math.max(0, 1 - buoyant.angularDrag * delta);
+      const angularDrag = buoyant.angularDrag * (activePush ? 0.25 : 1);
+      const angularKeep = Math.max(0, 1 - angularDrag * delta);
       body.setAngvel({
         x: spin.x * angularKeep + Math.sin(clockRef.current * 1.1 + prop.x) * 0.04 * delta * 60 * 0.02,
         y: spin.y * angularKeep,
@@ -742,6 +966,7 @@ export function PhysicsProp({ prop, onBreak }) {
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       inWaterRef.current = false;
+      removePropWaterInfluence(currentZoneId, prop.id);
     }
   });
 
@@ -754,7 +979,6 @@ export function PhysicsProp({ prop, onBreak }) {
       rotation={prop.rotation}
       linearDamping={prop.linearDamping}
       angularDamping={prop.angularDamping}
-      mass={prop.mass * Math.pow(propScale, 2.2)}
       canSleep
       ccd
       additionalSolverIterations={4}

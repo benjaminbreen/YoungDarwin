@@ -14,10 +14,11 @@ function withSandboxGuidance(error) {
   );
 }
 
-export async function launchChromium() {
+export async function launchChromium({ useHardwareGpu = process.env.THREE_PLAYWRIGHT_GPU === '1' } = {}) {
   try {
-    const useHardwareGpu = process.env.THREE_PLAYWRIGHT_GPU === '1';
-    const headful = process.env.THREE_PLAYWRIGHT_HEADFUL === '1';
+    const headfulPreference = process.env.THREE_PLAYWRIGHT_HEADFUL;
+    const headful = headfulPreference === '1'
+      || (headfulPreference !== '0' && useHardwareGpu && process.platform === 'darwin');
     return await chromium.launch({
       headless: !headful,
       args: [

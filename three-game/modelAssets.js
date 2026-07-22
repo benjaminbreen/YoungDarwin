@@ -124,7 +124,7 @@ export const modelAssets = {
     enabled: true,
     preload: true,
     path: '/assets/models/darwin5.glb',
-    cacheKey: 'darwin5-runtime-split-20260715a',
+    cacheKey: 'darwin5-blink-hair-default-20260720a',
     // The boot GLB contains the skinned model plus dependable idle/locomotion
     // fallbacks. Deferred clips stream and parse in paced aerial-sequence
     // phases, then join the same mixer before the camera reaches the player.
@@ -173,49 +173,6 @@ export const modelAssets = {
     // roughness adds material separation, normal adds cloth/leather relief, and
     // albedo keeps detail crisp without rebaking the GLB.
     materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
-    targetTriangles: 60000,
-    prompt: 'Darwin candidate 5, Mixamo-rigged test model with supplied idle, walking, and running animation clips.',
-  },
-  // Separate in-game A/B candidate. Its Blender source and GLB are isolated
-  // from the default Darwin5 asset, but it deliberately shares the verified
-  // deferred animation banks and player behavior profile.
-  darwin5BlinkPreview: {
-    enabled: true,
-    preload: false,
-    path: '/assets/models/darwin5-blink-preview.glb',
-    cacheKey: 'darwin5-blink-preview-20260720h',
-    animationBanks: [
-      {
-        id: 'motion',
-        path: '/assets/models/darwin5-motion-bank.glb',
-        cacheKey: 'darwin5-runtime-split-20260715a',
-        phase: 1,
-      },
-      {
-        id: 'action',
-        path: '/assets/models/darwin5-action-bank.glb',
-        cacheKey: 'darwin5-runtime-split-20260715a',
-        phase: 2,
-      },
-      {
-        id: 'character',
-        path: '/assets/models/darwin5-character-bank.glb',
-        cacheKey: 'darwin5-runtime-split-20260715a',
-        phase: 3,
-      },
-    ],
-    animationProfile: 'darwin5',
-    playerProfile: 'darwin5',
-    scale: 1.0,
-    rotation: [0, 0, 0],
-    yOffset: -0.025,
-    receiveShadow: true,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    materialLift: 0.05,
-    materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.035,
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
     materialRegionUpgrade: {
       skin: {
         materialNames: ['Darwin5 skin', 'Darwin5 eyelid skin', 'Darwin5 forehead underlay'],
@@ -238,7 +195,10 @@ export const modelAssets = {
         colorBlendAmount: 0.1,
         colorScale: 0.83,
         specularIntensity: 0.38,
-        anisotropy: 0.58,
+        // Non-zero MeshPhysicalMaterial anisotropy caused the post-processing
+        // framebuffer to wash out on the target macOS/WebGL renderer. The
+        // roughness, normal, color, and specular separation remain enabled.
+        anisotropy: 0,
         anisotropyRotation: 0,
         envMapIntensity: 0.2,
       },
@@ -302,7 +262,135 @@ export const modelAssets = {
       runSpeedReference: 4.8,
     },
     targetTriangles: 60500,
-    prompt: 'Darwin5 in-game blink and secondary-hair preview with Blender-authored morph surfaces; not the production default.',
+    prompt: 'Production Darwin5 with Blender-authored blinking, secondary hair motion, recessed forehead coverage, separated skin/hair response, and reflective brass clothing buttons.',
+  },
+  // Manifest-driven archive of the candidate promoted into `darwin5` on
+  // 2026-07-20. It stays loadable from developer tooling as an exact rollback
+  // reference, but is no longer part of the Shift+9 player-model cycle.
+  darwin5BlinkPreview: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/darwin5-blink-preview.glb',
+    cacheKey: 'darwin5-blink-preview-20260720h',
+    animationBanks: [
+      {
+        id: 'motion',
+        path: '/assets/models/darwin5-motion-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 1,
+      },
+      {
+        id: 'action',
+        path: '/assets/models/darwin5-action-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 2,
+      },
+      {
+        id: 'character',
+        path: '/assets/models/darwin5-character-bank.glb',
+        cacheKey: 'darwin5-runtime-split-20260715a',
+        phase: 3,
+      },
+    ],
+    animationProfile: 'darwin5',
+    playerProfile: 'darwin5',
+    scale: 1.0,
+    rotation: [0, 0, 0],
+    yOffset: -0.025,
+    receiveShadow: true,
+    visualGrounding: true,
+    normalizeMaterials: true,
+    materialLift: 0.05,
+    materialEmissive: '#20170f',
+    materialEmissiveIntensity: 0.035,
+    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
+    materialRegionUpgrade: {
+      skin: {
+        materialNames: ['Darwin5 skin', 'Darwin5 eyelid skin', 'Darwin5 forehead underlay'],
+        metalness: 0,
+        useRoughnessMap: false,
+        roughness: 0.62,
+        normalScale: 0.2,
+        specularIntensity: 0.32,
+        clearcoat: 0.025,
+        clearcoatRoughness: 0.5,
+        envMapIntensity: 0.2,
+      },
+      hair: {
+        materialNames: ['Darwin5 hair'],
+        metalness: 0,
+        useRoughnessMap: false,
+        roughness: 0.68,
+        normalScale: 0.42,
+        colorBlend: '#c2cad2',
+        colorBlendAmount: 0.1,
+        colorScale: 0.83,
+        specularIntensity: 0.38,
+        anisotropy: 0,
+        anisotropyRotation: 0,
+        envMapIntensity: 0.2,
+      },
+      brassButtons: {
+        materialNames: ['Darwin5 brass buttons'],
+        metalness: 1,
+        useAlbedoMap: false,
+        useRoughnessMap: false,
+        roughness: 0.045,
+        useNormalMap: false,
+        colorBlend: '#f0b43d',
+        colorBlendAmount: 0.18,
+        envMapIntensity: 1.5,
+        directSpecularGlint: {
+          color: '#fff0b5',
+          specularBoost: 6.5,
+          bloomStrength: 1.35,
+          threshold: 0.012,
+          thresholdEnd: 0.14,
+          focus: 1.9,
+        },
+      },
+    },
+    blinkMorph: {
+      name: 'Blink',
+      minInterval: 2.8,
+      maxInterval: 6.4,
+      closeDuration: 0.12,
+      holdDuration: 0.07,
+      openDuration: 0.21,
+      durationVariation: 0.1,
+      doubleBlinkChance: 0.12,
+      doubleBlinkDelay: 0.19,
+    },
+    secondaryHairMotion: {
+      positiveName: 'HairSwayPositive',
+      negativeName: 'HairSwayNegative',
+      liftName: 'HairLift',
+      dropName: 'HairDrop',
+      walkAmplitude: 0.42,
+      runAmplitude: 0.78,
+      windAmplitude: 1,
+      windRustleAmplitude: 1.5,
+      windLiftAmplitude: 0.38,
+      windFrequency: 3.2,
+      windRustleFrequency: 6.4,
+      strideLiftScale: 0.38,
+      airborneLiftResponse: 0.075,
+      maxAirborneLift: 0.42,
+      runSweepLift: 0.2,
+      walkSweepLift: 0.08,
+      maxSwayInfluence: 0.85,
+      maxLiftInfluence: 0.8,
+      swayStiffness: 78,
+      swayDamping: 11.5,
+      liftStiffness: 65,
+      liftDamping: 10.5,
+      takeoffImpulse: 3.8,
+      landingImpulse: 5.5,
+      fullWindSpeed: 1,
+      runSpeedReference: 4.8,
+    },
+    targetTriangles: 60500,
+    prompt: 'Archived manifest-driven copy of the Darwin5 blink and secondary-hair candidate promoted to the production default.',
   },
   syms: {
     enabled: true,
@@ -1334,6 +1422,30 @@ export const modelAssets = {
     targetTriangles: 1600,
     prompt: 'Small stave wooden bucket (split from stable vignette).',
   },
+  pocketKnifeTool: {
+    enabled: true,
+    preload: true,
+    path: '/assets/models/tools/pocket-knife.glb',
+    scale: 1,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    preserveMaterials: true,
+    targetTriangles: 1200,
+    prompt: 'Open horn-handled folding field knife with aged brass bolsters and a narrow honed steel blade.',
+  },
+};
+
+// Review-only locomotion candidate. Spread the production entry so the
+// accepted mesh, materials, blinking, hair motion, and deferred banks remain
+// identical; only the boot GLB and cache identity differ. Shift+9 selects it.
+modelAssets.darwin5LocomotionPreview = {
+  ...modelAssets.darwin5,
+  preload: false,
+  path: '/assets/models/darwin5-locomotion-preview.glb',
+  cacheKey: 'darwin5-locomotion-preview-20260720c',
+  animationProfile: 'darwin5',
+  playerProfile: 'darwin5',
+  prompt: 'Darwin5 locomotion review candidate with calm idle and retargeted walking/running start-stop transitions.',
 };
 
 /**

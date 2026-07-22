@@ -68,9 +68,9 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
       if (isWaterSurfaceContact(profile)) return;
       const wetScale = THREE.MathUtils.lerp(1, 0.55, THREE.MathUtils.clamp(profile.wetness || 0, 0, 1));
       const stepIntensity = clamp(
-        (((running ? 0.58 : 0.38) + intensity * 0.2) + horizontalSpeed / PLAYER.runSpeed * 0.2) * wetScale,
-        0.28,
-        0.95,
+        (((running ? 0.46 : 0.36) + intensity * 0.16) + horizontalSpeed / PLAYER.runSpeed * 0.14) * wetScale,
+        0.24,
+        0.78,
       );
       footstepDustTriggerRef.current?.({
         kind: 'footstep',
@@ -92,6 +92,10 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
       if (!step || step.id <= cadence.current.lastStepId) return false;
       cadence.current.lastStepId = step.id;
       if (Math.hypot(step.x - position.x, step.z - position.z) > 2.6) return false;
+      // A real animation-phase contact re-anchors the fallback instead of
+      // letting its independent clock emit a second, visibly mistimed step.
+      cadence.current.phase = 0;
+      cadence.current.side = step.side === 'left' ? -1 : 1;
       const biome = terrainBiomeAt(step.x, step.z, step.y, zoneId);
       const profile = getSurfaceContactProfile({ x: step.x, z: step.z, y: step.y, zoneId, biome });
       const standingMask = standingWaterMaskAt(step.x, step.z, zoneId);

@@ -1,6 +1,7 @@
 // @ts-check
 
-/** @typedef {Record<string, unknown>} EcologyDefinition */
+/** @typedef {{ runtime?: string, sites?: unknown[] }} InteractiveFloraLayer */
+/** @typedef {Record<string, unknown> & { interactiveFlora?: InteractiveFloraLayer[] }} EcologyDefinition */
 /** @typedef {() => EcologyDefinition} EcologyBuilder */
 
 import { regionMaps } from '../../../game-core/regionMaps';
@@ -28,6 +29,8 @@ import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
 import { buildPuntaCormorantEcology } from './puntaCormorant';
 import { buildWatkinsCampEcology } from './watkinsCamp';
 import { buildPostScrubRiseEcology } from './postScrubRise';
+import { buildCoastalScrublandEcology } from './coastalScrubland';
+import { buildEasternCliffsEcology } from './easternCliffs';
 import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
@@ -65,6 +68,8 @@ const builders = {
   PUNTA_CORMORANT: buildPuntaCormorantEcology,
   WATKINS: buildWatkinsCampEcology,
   POST_SCRUB_RISE: buildPostScrubRiseEcology,
+  COASTAL_SCRUBLAND: buildCoastalScrublandEcology,
+  EASTERN_CLIFFS: buildEasternCliffsEcology,
   LAVA_FLATS: buildLavaFlatsEcology,
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
   WATKINS_CREEK: buildWatkinsCreekEcology,
@@ -96,12 +101,18 @@ export function getEcology(zoneId) {
 // hydrates this same runtime cache before React mounts the new region. Keeping
 // the public synchronous getter means ecology consumers do not need a second
 // data path once preparation has completed.
+/**
+ * @param {string} zoneId
+ * @param {EcologyDefinition} ecology
+ * @returns {EcologyDefinition | null}
+ */
 export function cacheEcology(zoneId, ecology) {
   if (!regionMaps[zoneId] || !ecology) return null;
   if (!cache.has(zoneId)) cache.set(zoneId, ecology);
   return cache.get(zoneId) ?? null;
 }
 
+/** @param {string} zoneId */
 export function ecologyIsCached(zoneId) {
   return !regionMaps[zoneId] || cache.has(zoneId);
 }
@@ -109,6 +120,11 @@ export function ecologyIsCached(zoneId) {
 // Specialized gameplay renderers consume interactive flora sites by runtime
 // id. Returning a fresh array prevents a physics system from mutating the
 // memoized ecology definition or any authored site registry it later merges.
+/**
+ * @param {string} zoneId
+ * @param {string} runtime
+ * @returns {unknown[]}
+ */
 export function getInteractiveFloraSites(zoneId, runtime) {
   const ecology = getEcology(zoneId);
   if (!ecology || !runtime) return [];

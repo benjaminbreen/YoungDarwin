@@ -74,27 +74,29 @@ const postOfficeBayObstacles = [
     gameplay: { jumpable: true, climbable: true, edgeRisk: true, climbLabel: 'climb onto ridge boulder' },
   },
   {
-    id: 'dead-tree-landing',
+    id: 'galapagos-bitterbush-landing',
     kind: 'tree',
     render: {
       path: `${NATURE}runtime-palo-santo.glb`,
       position: [-10.8, 0, 1.2],
       rotation: [0, -0.35, 0],
-      scale: 1.35,
+      // Legacy filename: this asset is the Castela bitterbush proxy. Its raw
+      // mesh is nearly eight metres tall, so shrub-scale use must stay small.
+      scale: 0.26,
     },
-    collider: { type: 'cylinder', radius: 0.78, height: 3.35 },
+    collider: { type: 'cylinder', radius: 2.55, height: 7.5 },
     gameplay: { jumpable: false, climbable: false },
   },
   {
-    id: 'dead-tree-ridge',
+    id: 'galapagos-bitterbush-ridge',
     kind: 'tree',
     render: {
       path: `${NATURE}runtime-palo-santo.glb`,
       position: [5.5, 0, 25.5],
       rotation: [0, 0.62, 0],
-      scale: 1.2,
+      scale: 0.24,
     },
-    collider: { type: 'cylinder', radius: 0.76, height: 3.2 },
+    collider: { type: 'cylinder', radius: 2.55, height: 7.5 },
     gameplay: { jumpable: false, climbable: false },
   },
   {

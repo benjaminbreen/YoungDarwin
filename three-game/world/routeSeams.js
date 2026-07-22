@@ -70,6 +70,43 @@ export const POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM = createRouteSeam(
   7,
 );
 
+export const EASTERN_CLIFFS_COASTAL_SCRUBLAND_SEAM = createRouteSeam(
+  'EASTERN_CLIFFS',
+  'COASTAL_SCRUBLAND',
+  'south',
+  -9,
+);
+
+export const ALT_POST_OFFICE_BAY_EASTERN_CLIFFS_SEAM = createRouteSeam(
+  'ALT_POST_OFFICE_BAY',
+  'EASTERN_CLIFFS',
+  'east',
+  18,
+);
+
+// El Mirador's existing northern trail approaches the map around x=-34.
+// Project that alignment back onto Coastal Scrubland's wider southern edge.
+export const COASTAL_SCRUBLAND_EL_MIRADOR_SEAM = createRouteSeam(
+  'COASTAL_SCRUBLAND',
+  'EL_MIRADOR',
+  'south',
+  -36.6,
+);
+
+export const ROCKY_CLEARING_EL_MIRADOR_SEAM = createRouteSeam(
+  'E_MID',
+  'EL_MIRADOR',
+  'east',
+  5,
+);
+
+export const EL_MIRADOR_SOUTHEASTERN_COAST_SEAM = createRouteSeam(
+  'EL_MIRADOR',
+  'SE_COAST',
+  'south',
+  24,
+);
+
 export const NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM = createRouteSeam(
   'NORTHERN_HIGHLANDS',
   'CORMORANT_BAY',

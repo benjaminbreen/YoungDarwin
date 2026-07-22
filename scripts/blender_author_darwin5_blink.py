@@ -623,7 +623,9 @@ def assign_character_material_regions(mesh, debug=False):
         # Match Blender QA to the intended strand response. The runtime repeats
         # these values explicitly because glTF exporters may omit anisotropy.
         if "Anisotropic IOR Level" in hair_principled.inputs:
-            hair_principled.inputs["Anisotropic IOR Level"].default_value = 0.58
+            # Keep this at zero: the matching Three.js physical-material path
+            # washed out the post-processing framebuffer on target macOS/WebGL.
+            hair_principled.inputs["Anisotropic IOR Level"].default_value = 0.0
         if "Anisotropic Rotation" in hair_principled.inputs:
             hair_principled.inputs["Anisotropic Rotation"].default_value = 0.0
     mesh.data.materials.append(skin)

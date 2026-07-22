@@ -435,6 +435,11 @@ function createUniversalVegetationBudget(config, ecology) {
   };
 }
 
+/**
+ * @param {string} zoneId
+ * @param {Record<string, any> | null} [ecology]
+ * @returns {Record<string, any>}
+ */
 export function applyUniversalProceduralFlora(zoneId, ecology = null) {
   if (ecology?.universalFloraVersion === UNIVERSAL_FLORA_VERSION) return ecology;
   const base = {

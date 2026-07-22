@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainColor, terrainHeight } from '../../world/terrain';
@@ -169,22 +169,34 @@ function injectSeabedCaustics(material) {
   return material;
 }
 
+const terrainMaterialCache = new Map();
+
+// A destination shader is prepared before travel and then mounted here using
+// this exact material object. Keeping one material per visited/prepared region
+// lets Three reuse the linked GPU program instead of rebuilding the region's
+// large authored shader while the island chart is on screen.
+export function getTerrainRenderMaterial(regionId) {
+  const cached = terrainMaterialCache.get(regionId);
+  if (cached) return cached;
+  const regionDefinition = getRegionDefinition(regionId);
+  const config = getRegionTerrainConfig(regionId);
+  const baseMaterial = regionDefinition?.createTerrainMaterial
+    ? regionDefinition.createTerrainMaterial()
+    : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
+  const material = injectSeabedCaustics(baseMaterial);
+  terrainMaterialCache.set(regionId, material);
+  return material;
+}
+
 export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const regionDefinition = getRegionDefinition(currentZoneId);
   const { geometryEntry } = readTerrainResource(currentZoneId, segmentCap);
   const geometry = geometryEntry.geometry;
 
-  const material = useMemo(() => {
-    // Authored regions keep their custom material. Placeholder regions use the
-    // shared PBR terrain fallback so unfinished maps still read as Floreana
-    // terrain instead of broad vertex-color planes.
-    const config = getRegionTerrainConfig(currentZoneId);
-    const baseMaterial = regionDefinition?.createTerrainMaterial
-      ? regionDefinition.createTerrainMaterial()
-      : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
-    return injectSeabedCaustics(baseMaterial);
-  }, [regionDefinition, currentZoneId]);
+  const material = useMemo(
+    () => getTerrainRenderMaterial(currentZoneId),
+    [currentZoneId],
+  );
 
   // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {

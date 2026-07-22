@@ -3,11 +3,12 @@
 import React, { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useThreeGameStore } from '../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { lightingDebugEnabled } from '../../runtimeDebug';
 import { skyState } from '../../world/celestial';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { terrainColor } from '../../world/terrain';
 import { setPlayerEnvBounce } from '../assets/ModelAsset';
 
 const CLEAR_FILL = new THREE.Color('#8fcfff');
@@ -18,22 +19,59 @@ const SAND_FILL = new THREE.Color('#ffd9ae');
 const _fillColor = new THREE.Color();
 const _warmColor = new THREE.Color();
 const _forward = new THREE.Vector3();
+const _terrainBounceHsl = { h: 0, s: 0, l: 0 };
+const TERRAIN_BOUNCE_SAMPLE_SECONDS = 0.1;
+const TERRAIN_BOUNCE_RESPONSE = 3.5;
 
 export function Lighting() {
   const fillRef = useRef(null);
   const pointRef = useRef(null);
   const { camera } = useThree();
   const debugEnabled = useRef(lightingDebugEnabled());
+  const terrainBounceColor = useRef(new THREE.Color(SAND_FILL));
+  const terrainBounceTarget = useRef(new THREE.Color(SAND_FILL));
+  const terrainBounceStrength = useRef(1);
+  const terrainBounceStrengthTarget = useRef(1);
+  const terrainSampleClock = useRef(TERRAIN_BOUNCE_SAMPLE_SECONDS);
 
   // Ambient, hemisphere and the sun-tracking key light are owned by
   // <SkyController>, which drives them from the time of day. This component
   // keeps only the local fill: a soft sky-bounce directional and the warm
   // point light near the player, using the same outdoor lighting model so
   // shadows remain readable without flattening the whole scene.
-  useFrame(() => {
+  useFrame((_, delta) => {
     const store = useThreeGameStore.getState();
     const sky = skyState(store.timeOfDay, store.day || 1);
     const underwaterAmount = THREE.MathUtils.clamp(store.underwaterCamera?.amount || 0, 0, 1);
+    const pose = getRuntimePlayerPose()?.position || store.playerPose?.position || { x: 0, y: 0, z: 0 };
+    terrainSampleClock.current += delta;
+    if (terrainSampleClock.current >= TERRAIN_BOUNCE_SAMPLE_SECONDS) {
+      const sampledGround = terrainColor(pose.x, pose.z, pose.y, store.currentZoneId);
+      sampledGround.getHSL(_terrainBounceHsl);
+      // Preserve the local ground hue while compressing saturation and
+      // separating reflected-light brightness from raw albedo. Dark basalt
+      // therefore casts a cooler, weaker lift without turning the player black;
+      // pale sand stays warm and comparatively strong.
+      terrainBounceTarget.current.setHSL(
+        _terrainBounceHsl.h,
+        THREE.MathUtils.clamp(_terrainBounceHsl.s * 0.78, 0.08, 0.42),
+        THREE.MathUtils.clamp(0.67 + (_terrainBounceHsl.l - 0.4) * 0.2, 0.61, 0.76),
+      );
+      terrainBounceStrengthTarget.current = THREE.MathUtils.clamp(
+        0.55 + _terrainBounceHsl.l * 0.9,
+        0.62,
+        1.05,
+      );
+      terrainSampleClock.current = 0;
+    }
+    const bounceBlend = 1 - Math.exp(-TERRAIN_BOUNCE_RESPONSE * Math.min(delta, 0.1));
+    terrainBounceColor.current.lerp(terrainBounceTarget.current, bounceBlend);
+    terrainBounceStrength.current = THREE.MathUtils.damp(
+      terrainBounceStrength.current,
+      terrainBounceStrengthTarget.current,
+      TERRAIN_BOUNCE_RESPONSE,
+      delta,
+    );
     const lightRig = computeOutdoorLightRig({
       daylight: sky.daylight,
       golden: sky.golden,
@@ -82,8 +120,10 @@ export function Lighting() {
       // the bounce also ramps through mid-morning/afternoon sun.
       // Preserve a warm player lift on bright beaches without projecting a
       // visibly overexposed pool onto pale terrain around Darwin.
-      const sandBounce = lightRig.groundBounce * 1.45 * (1 - underwaterAmount);
-      const pose = store.playerPose?.position || { x: 0, y: 0, z: 0 };
+      const sandBounce = lightRig.groundBounce
+        * 1.45
+        * terrainBounceStrength.current
+        * (1 - underwaterAmount);
       camera.getWorldDirection(_forward);
       _forward.y = 0;
       if (_forward.lengthSq() > 0.0001) _forward.normalize();
@@ -95,7 +135,7 @@ export function Lighting() {
       );
       _warmColor
         .copy(WARM_FILL)
-        .lerp(SAND_FILL, lightRig.hardSun * 0.34)
+        .lerp(terrainBounceColor.current, 0.5 + lightRig.hardSun * 0.24)
         .lerp(GOLDEN_FILL, sky.golden * 0.28);
       pointRef.current.color.copy(_warmColor);
       pointRef.current.intensity = lightRig.localWarmFillIntensity * playerFillScale + sandBounce;
@@ -104,13 +144,17 @@ export function Lighting() {
 
     // The character IBL sheen/ambient tracks the same sand-bounce physics: more
     // clear sun on bright ground, more ambient light on shadow sides.
-    setPlayerEnvBounce(lightRig.groundBounce * (1 - underwaterAmount));
+    setPlayerEnvBounce(
+      lightRig.groundBounce * terrainBounceStrength.current * (1 - underwaterAmount),
+    );
 
     if (debugEnabled.current && typeof window !== 'undefined') {
       window.__darwinLightingDebug = {
         ...(window.__darwinLightingDebug || {}),
         fillIntensity: Number((fillRef.current?.intensity || 0).toFixed(3)),
         localWarmFillIntensity: Number((pointRef.current?.intensity || 0).toFixed(3)),
+        terrainBounceColor: `#${terrainBounceColor.current.getHexString()}`,
+        terrainBounceStrength: Number(terrainBounceStrength.current.toFixed(3)),
       };
     }
   });

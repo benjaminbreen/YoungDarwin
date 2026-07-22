@@ -128,7 +128,10 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   // Broken crater rim: low south approach, higher jagged northern crown.
   const northBias = THREE.MathUtils.smoothstep(-z, 7, 32);
   const ridgeNoise = Math.abs(crackNoise(x * 0.3 + 3, z * 0.34 - 2));
-  const rimTop = -0.18 + rim * (0.92 + northBias * 1.2 + ridgeNoise * (movementSurface ? 0.22 : 0.54));
+  // Ridge relief is several metres wide, so it belongs to both the rendered
+  // and movement surfaces. Keeping it render-only lets Darwin walk through
+  // the silhouette of the crater wall.
+  const rimTop = -0.18 + rim * (0.92 + northBias * 1.2 + ridgeNoise * 0.54);
   y = THREE.MathUtils.lerp(y, rimTop, rim);
 
   // Needle-like but still low-poly readable rocks on the exposed rim.
@@ -138,7 +141,9 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
     gaussian(x, z, 14, -24, 4.2, 5.2),
     gaussian(x, z, 31, -9, 3.2, 7.6),
   );
-  y += pinnacles * (movementSurface ? 0.34 : 1.0);
+  // These are broad landforms rather than surface noise; movement must rise
+  // with them instead of passing through their lower half.
+  y += pinnacles;
 
   // Coral heads stay submerged and mostly visual; movement surface is smoother.
   const coralKnob = Math.pow(Math.abs(crackNoise(x * 0.5 - 5, z * 0.48 + 11)), 1.55);
@@ -152,8 +157,10 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   y -= Math.max(deepN, deepE, deepW) * (1 - land * 0.88) * 1.75;
 
   const dry = THREE.MathUtils.smoothstep(y, WATER_LEVEL + 0.02, WATER_LEVEL + 0.55);
-  y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.08 : 0.28);
-  y += elevationNoise(x * 0.045 + 14, z * 0.052 - 7) * Math.max(land, shelf) * (movementSurface ? 0.04 : 0.12);
+  // Reserve only a shallow layer of high-frequency relief for rendering. The
+  // low-frequency elevation still defines real ground and is shared exactly.
+  y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.08 : 0.16);
+  y += elevationNoise(x * 0.045 + 14, z * 0.052 - 7) * Math.max(land, shelf) * 0.12;
 
   return Math.max(-4.8, y);
 }

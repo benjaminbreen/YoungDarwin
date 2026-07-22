@@ -10,7 +10,6 @@ import { useThreeGameStore } from '../../store';
 import {
   ExpeditionPanel,
   PanelTabs,
-  GOLD_BUTTON,
   GOLD_BUTTON_SOLID,
   GOLD_LABEL,
   GoldDivider,
@@ -162,60 +161,82 @@ function ToolDetail({ item }) {
   );
 }
 
-function ToolbarPreview() {
+const TOOL_DRAG_TYPE = 'application/x-young-darwin-tool';
+const TOOLBAR_SLOT_DRAG_TYPE = 'application/x-young-darwin-toolbar-slot';
+
+function beginToolDrag(event, toolId, slotIndex = null) {
+  event.dataTransfer.effectAllowed = slotIndex === null ? 'copy' : 'move';
+  event.dataTransfer.setData(TOOL_DRAG_TYPE, toolId);
+  event.dataTransfer.setData('text/plain', toolId);
+  if (slotIndex !== null) event.dataTransfer.setData(TOOLBAR_SLOT_DRAG_TYPE, String(slotIndex));
+}
+
+function ToolbarPreview({ selectedToolId }) {
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
+  const setToolbarSlot = useThreeGameStore(state => state.setToolbarSlot);
   const moveToolbarSlot = useThreeGameStore(state => state.moveToolbarSlot);
-  const [reordering, setReordering] = useState(false);
-  const [dragIndex, setDragIndex] = useState(null);
+  const [dropIndex, setDropIndex] = useState(null);
+  const selectedItem = getInventoryItem(selectedToolId);
 
   return (
     <div className="mt-3 border-t border-expedition-brass/40 pt-2.5">
-      <div className={`${GOLD_LABEL} mb-2`}>Quick Bar Preview</div>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className={GOLD_LABEL}>Quick Bar</div>
+        <p className="font-expedition text-[11px] italic text-expedition-faded">
+          Drag a field-kit tool onto a slot, or click a slot to place <span className="text-expedition-parchment">{selectedItem?.name || 'the selected tool'}</span>.
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {toolbarOrder.map((toolId, index) => {
           const item = getInventoryItem(toolId);
           if (!item) return null;
           return (
-            <div
+            <button
               key={toolId}
-              draggable={reordering}
-              onDragStart={() => setDragIndex(index)}
-              onDragOver={event => event.preventDefault()}
-              onDrop={() => {
-                if (dragIndex !== null) moveToolbarSlot(dragIndex, index);
-                setDragIndex(null);
+              type="button"
+              draggable
+              data-testid={`inventory-toolbar-slot-${index + 1}`}
+              data-tool-id={toolId}
+              onClick={() => {
+                if (selectedToolId) setToolbarSlot(index, selectedToolId);
               }}
-              onDragEnd={() => setDragIndex(null)}
-              title={item.name}
-              className={`relative flex h-14 w-14 items-center justify-center rounded-sm border bg-black/30 p-1.5 transition ${
-                reordering
-                  ? `cursor-grab border-expedition-gold/80 shadow-[0_0_10px_rgba(227,197,133,0.25)] ${dragIndex === index ? 'opacity-40' : ''}`
-                  : 'border-expedition-brass/50'
+              onDragStart={event => beginToolDrag(event, toolId, index)}
+              onDragEnter={() => setDropIndex(index)}
+              onDragOver={event => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = event.dataTransfer.types.includes(TOOLBAR_SLOT_DRAG_TYPE) ? 'move' : 'copy';
+                setDropIndex(index);
+              }}
+              onDragLeave={() => setDropIndex(current => current === index ? null : current)}
+              onDrop={event => {
+                event.preventDefault();
+                const sourceIndexValue = event.dataTransfer.getData(TOOLBAR_SLOT_DRAG_TYPE);
+                const sourceIndex = sourceIndexValue === '' ? null : Number(sourceIndexValue);
+                const draggedToolId = event.dataTransfer.getData(TOOL_DRAG_TYPE) || event.dataTransfer.getData('text/plain');
+                if (Number.isInteger(sourceIndex) && sourceIndex >= 0) moveToolbarSlot(sourceIndex, index);
+                else if (draggedToolId) setToolbarSlot(index, draggedToolId);
+                setDropIndex(null);
+              }}
+              onDragEnd={() => setDropIndex(null)}
+              title={`Slot ${index + 1}: ${item.name}`}
+              aria-label={`Quick bar slot ${index + 1}: ${item.name}. Replace with ${selectedItem?.name || 'selected tool'}.`}
+              className={`relative flex h-14 w-14 cursor-grab items-center justify-center rounded-sm border bg-black/30 p-1.5 transition active:cursor-grabbing ${
+                dropIndex === index
+                  ? 'scale-105 border-expedition-goldbright bg-expedition-gold/20 shadow-[0_0_16px_rgba(227,197,133,0.48)]'
+                  : selectedToolId === toolId
+                    ? 'border-expedition-gold/80 shadow-[0_0_10px_rgba(227,197,133,0.22)]'
+                    : 'border-expedition-brass/50 hover:border-expedition-gold/75'
               }`}
             >
               <ItemThumb item={item} className="h-full w-full" iconClassName="h-7 w-7" />
               <span className="pointer-events-none absolute left-1 top-0.5 font-expedition text-[10px] font-semibold text-expedition-gold/90">{index + 1}</span>
-            </div>
+            </button>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setReordering(value => !value)}
-          className={`${reordering ? GOLD_BUTTON_SOLID : GOLD_BUTTON} ml-1`}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-3.5 w-3.5">
-              <path d="M8 5 L8 19 M8 5 L5.5 7.5 M8 5 L10.5 7.5 M16 19 L16 5 M16 19 L13.5 16.5 M16 19 L18.5 16.5" />
-            </svg>
-            {reordering ? 'Done Reordering' : 'Reorder Toolbar'}
-          </span>
-        </button>
       </div>
-      {reordering && (
-        <p className="mt-1.5 font-expedition text-[11px] italic text-expedition-faded">
-          Drag a slot onto another to reorder. Keys 1–{toolbarOrder.length} follow this order.
-        </p>
-      )}
+      <p className="mt-1.5 font-expedition text-[11px] italic text-expedition-faded">
+        Dropping a new tool replaces that slot; dragging between slots reorders them. Keys 1–{toolbarOrder.length} follow this order.
+      </p>
     </div>
   );
 }
@@ -223,6 +244,7 @@ function ToolbarPreview() {
 function ToolsTab() {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
+  const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   const [selectedId, setSelectedId] = useState(inventoryItems[0]?.id);
   const selected = getInventoryItem(selectedId) || inventoryItems[0];
 
@@ -230,18 +252,25 @@ function ToolsTab() {
     <div>
       <div className="grid gap-4 lg:grid-cols-[12.5rem_1fr_14.5rem]">
         <div>
-          <div className={`${GOLD_LABEL} mb-1.5 text-center`}>Equipped Tools</div>
+          <div className={`${GOLD_LABEL} mb-1.5 text-center`}>Field Kit</div>
           <div className="grid max-h-[24rem] gap-1 overflow-y-auto pr-0.5 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)]">
             {inventoryItems.map(item => {
               const isSelected = item.id === selectedId;
               const isActive = item.id === activeToolId;
+              const toolbarIndex = toolbarOrder.indexOf(item.id);
               return (
                 <button
                   key={item.id}
                   type="button"
+                  draggable
+                  data-testid={`inventory-tool-${item.id}`}
+                  data-tool-id={item.id}
+                  onDragStart={event => beginToolDrag(event, item.id)}
                   onClick={() => setSelectedId(item.id)}
-                  onDoubleClick={() => setActiveTool(item.id)}
-                  className={`flex items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition ${
+                  onDoubleClick={() => {
+                    if (toolbarIndex >= 0) setActiveTool(item.id);
+                  }}
+                  className={`flex cursor-grab items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition active:cursor-grabbing ${
                     isSelected
                       ? 'border-expedition-gold bg-expedition-gold/15 shadow-[inset_0_1px_0_rgba(227,197,133,0.2)]'
                       : 'border-expedition-brass/40 bg-black/20 hover:border-expedition-gold/70 hover:bg-expedition-gold/8'
@@ -249,6 +278,13 @@ function ToolsTab() {
                 >
                   <ItemThumb item={item} className="h-8 w-8" iconClassName="h-5 w-5" />
                   <span className="min-w-0 flex-1 truncate font-expedition text-[12.5px] font-medium text-expedition-parchment">{item.name}</span>
+                  <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] ${
+                    toolbarIndex >= 0
+                      ? 'border-expedition-gold/55 bg-expedition-gold/12 text-expedition-goldbright'
+                      : 'border-expedition-brass/30 text-expedition-faded/75'
+                  }`}>
+                    {toolbarIndex >= 0 ? `Slot ${toolbarIndex + 1}` : 'Drag'}
+                  </span>
                   {isActive && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-expedition-goldbright shadow-[0_0_6px_rgba(227,197,133,0.8)]" title="In hand" />}
                 </button>
               );
@@ -266,7 +302,7 @@ function ToolsTab() {
           <SymsCard />
         </div>
       </div>
-      <ToolbarPreview />
+      <ToolbarPreview selectedToolId={selectedId} />
     </div>
   );
 }

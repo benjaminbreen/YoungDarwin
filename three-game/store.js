@@ -5,6 +5,7 @@ import {
   CASE_CAPACITY,
   INITIAL_SUPPLIES,
   SYMS_BONUS_JARS,
+  inventoryItems,
   specimenIsInsect,
   specimenNeedsJar,
 } from '../data/inventoryItems';
@@ -81,6 +82,11 @@ import {
   buildLocalHenslowAssessment,
   isEndGameNarratorCommand,
 } from './finalAssessment';
+import {
+  DEFAULT_DARWIN_TOOLBAR,
+  assignToolbarSlot,
+  moveToolbarSlot as reorderToolbarSlot,
+} from './toolbar';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
@@ -119,6 +125,7 @@ export const threeRuntimeState = {
   // colliders, so plants can still feel a sustained push after Darwin stops.
   playerMotion: {
     intendedPlanarVelocity: { x: 0, z: 0 },
+    visualActive: false,
   },
   footContacts: {
     left: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
@@ -135,6 +142,7 @@ function resetThreeRuntimeState() {
   threeRuntimeState.playerPose.position = { ...INITIAL_PLAYER_POSE.position };
   threeRuntimeState.playerPose.facing = { ...INITIAL_PLAYER_POSE.facing };
   threeRuntimeState.playerMotion.intendedPlanarVelocity = { x: 0, z: 0 };
+  threeRuntimeState.playerMotion.visualActive = false;
   threeRuntimeState.footContacts.left = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
   threeRuntimeState.footContacts.right = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
   threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, intensity: 0, time: 0 };
@@ -352,6 +360,9 @@ export function updateRuntimePlayerMotion(motion = {}) {
   const target = threeRuntimeState.playerMotion.intendedPlanarVelocity;
   target.x = Number.isFinite(x) ? x : 0;
   target.z = Number.isFinite(z) ? z : 0;
+  if (motion.visualActive !== undefined) {
+    threeRuntimeState.playerMotion.visualActive = Boolean(motion.visualActive);
+  }
   return threeRuntimeState.playerMotion;
 }
 
@@ -607,7 +618,7 @@ const FIELD_DILEMMA_CONFIG = {
     objective: 'Treat embedded cactus spines with field tools before continuing.',
     title: 'Cactus spines are embedded.',
     retryTitle: 'The spines still hurt.',
-    body: 'Several Opuntia spines have gone in deeply enough to make careless movement costly.',
+    body: 'Several cactus spines have gone in deeply enough to make careless movement costly.',
     retryBody: 'The spines remain in place and every movement reminds you of them.',
     helper: 'Describe a concrete treatment: knife point, lens, water, cloth, or Syms helping.',
     placeholder: 'Describe how Darwin treats the spines...',
@@ -713,7 +724,8 @@ function createExpeditionSlice() {
     playableSpawnPoint: null,
     playableHiddenActorId: null,
     activeToolId: 'hands',
-    toolbarOrder: ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'],
+    toolbarOrder: [...DEFAULT_DARWIN_TOOLBAR],
+    darwinToolbarOrder: [...DEFAULT_DARWIN_TOOLBAR],
     supplies: { ...INITIAL_SUPPLIES, spareJars: (INITIAL_SUPPLIES.spareJars || 0) + SYMS_BONUS_JARS },
     caseCapacity: CASE_CAPACITY,
     favoriteSpecimenIds: [],
@@ -1007,12 +1019,18 @@ export const useThreeGameStore = create((set, get) => ({
 
   setPlayableMode: playableModeId => set(state => {
     const mode = getPlayableMode(playableModeId);
-    const toolbarOrder = getPlayableToolbarIds(mode.id);
+    const darwinToolbarOrder = state.playableModeId === 'darwin'
+      ? state.toolbarOrder
+      : (state.darwinToolbarOrder || DEFAULT_DARWIN_TOOLBAR);
+    const toolbarOrder = mode.id === 'darwin'
+      ? [...darwinToolbarOrder]
+      : getPlayableToolbarIds(mode.id);
     const nextActiveToolId = toolbarOrder.includes(state.activeToolId) ? state.activeToolId : toolbarOrder[0];
     const patch = {
       playableModeId: mode.id,
       activeToolId: nextActiveToolId,
       toolbarOrder,
+      darwinToolbarOrder: [...darwinToolbarOrder],
       selectedSpecimenId: null,
       nearbySpecimenId: null,
       nearbyNpcEncounter: null,
@@ -1127,12 +1145,27 @@ export const useThreeGameStore = create((set, get) => ({
     }
     return patch;
   }),
+  setToolbarSlot: (slotIndex, toolId) => set(state => {
+    if (state.playableModeId !== 'darwin') return {};
+    const availableToolIds = inventoryItems.map(item => item.id);
+    const toolbarOrder = assignToolbarSlot(state.toolbarOrder, slotIndex, toolId, availableToolIds);
+    if (toolbarOrder === state.toolbarOrder) return {};
+    const displacedToolId = state.toolbarOrder[slotIndex];
+    return {
+      toolbarOrder,
+      darwinToolbarOrder: [...toolbarOrder],
+      activeToolId: state.activeToolId === displacedToolId && !toolbarOrder.includes(displacedToolId)
+        ? toolId
+        : state.activeToolId,
+    };
+  }),
   moveToolbarSlot: (from, to) => set(state => {
-    if (from === to || from < 0 || to < 0 || from >= state.toolbarOrder.length || to >= state.toolbarOrder.length) return {};
-    const toolbarOrder = [...state.toolbarOrder];
-    const [moved] = toolbarOrder.splice(from, 1);
-    toolbarOrder.splice(to, 0, moved);
-    return { toolbarOrder };
+    const toolbarOrder = reorderToolbarSlot(state.toolbarOrder, from, to);
+    if (toolbarOrder === state.toolbarOrder) return {};
+    return {
+      toolbarOrder,
+      ...(state.playableModeId === 'darwin' ? { darwinToolbarOrder: [...toolbarOrder] } : {}),
+    };
   }),
   specimenDetail: null,
   openSpecimenDetail: (specimens, index = 0) => set({ specimenDetail: { specimens, index } }),
@@ -2811,8 +2844,10 @@ export const useThreeGameStore = create((set, get) => ({
   }),
 
   applyCactusDamage: (amount = 8, options = {}) => set(state => {
-    const message = 'You stagger back from the Opuntia spines.';
-    const educationalNote = 'Large prickly pear cactus can dominate dry Galapagos scrub; its spines make careless movement costly.';
+    const hazardLabel = options.hazardLabel || 'cactus';
+    const message = `You recoil from the ${hazardLabel}'s spines.`;
+    const educationalNote = options.educationalNote
+      || 'Cactus spines make hurried movement through dry Galápagos scrub costly.';
     const symsLine = '"Mind the cactus, sir. Those spines will write their own field note."';
     const embedSpines = Boolean(options.embedSpines && !state.activeConstraint);
     const config = FIELD_DILEMMA_CONFIG.cactus_spines;
@@ -2829,7 +2864,10 @@ export const useThreeGameStore = create((set, get) => ({
           attempts: 0,
           details: {
             cactusId: options.cactusId || 'cactus',
+            cactusKind: options.cactusKind || null,
+            hazardLabel,
             impactSpeed: Number.isFinite(Number(options.impactSpeed)) ? Number(options.impactSpeed) : null,
+            injuryChance: Number.isFinite(Number(options.injuryChance)) ? Number(options.injuryChance) : null,
             severeFall: Boolean(options.severeFall),
           },
           composerPlaceholder: config.placeholder,

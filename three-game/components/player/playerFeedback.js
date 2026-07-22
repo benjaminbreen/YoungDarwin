@@ -3,8 +3,13 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getPostOfficeBayOpuntiaHazards } from '../../world/floreanaCoveLayout';
+import { getRuntimeObstacles } from '../../world/obstacles';
+import { cactusSpineInjuryChance } from '../../world/ecology/matureCactusInteractions';
 import { LANDING_DUST } from './playerConfig';
+
+export { cactusSpineInjuryChance };
+
+const cactusObstacleCache = new WeakMap();
 
 export function dustPaletteForBiome(biome) {
   if (biome === 'black-lava' || biome === 'wet-basalt' || biome === 'lava-shelf' || biome === 'black-sand') {
@@ -49,7 +54,8 @@ function scanCactusHazards(list, position, playerRadius, best) {
     const dx = position.x - cactus.x;
     const dz = position.z - cactus.z;
     const distance = Math.hypot(dx, dz);
-    const radius = cactus.hazardRadius + playerRadius;
+    const hazardRadius = cactus.spineHazard?.radius ?? cactus.hazardRadius ?? cactus.radius ?? 0;
+    const radius = hazardRadius + playerRadius;
     if (distance > radius) continue;
     const normal = distance > 0.001
       ? new THREE.Vector3(dx / distance, 0, dz / distance)
@@ -62,10 +68,20 @@ function scanCactusHazards(list, position, playerRadius, best) {
   return best;
 }
 
-// Destructible prickly pears are deliberately absent here: they bend and
-// break on player contact instead of injuring (see PricklyPearField).
-export function findCactusHazardContact(position, playerRadius = 0.42) {
-  return scanCactusHazards(getPostOfficeBayOpuntiaHazards(), position, playerRadius, null);
+function matureCactusHazards(zoneId) {
+  const obstacles = getRuntimeObstacles(zoneId);
+  let hazards = cactusObstacleCache.get(obstacles);
+  if (!hazards) {
+    // Destructible juvenile prickly pears remain absent: they bend and break
+    // on player contact. Only the solid mature ecology plants expose this flag.
+    hazards = obstacles.filter(obstacle => obstacle.kind === 'cactus' && obstacle.spineHazard);
+    cactusObstacleCache.set(obstacles, hazards);
+  }
+  return hazards;
+}
+
+export function findCactusHazardContact(position, playerRadius = 0.42, zoneId = undefined) {
+  return scanCactusHazards(matureCactusHazards(zoneId), position, playerRadius, null);
 }
 
 export function LandingDust({ triggerRef }) {

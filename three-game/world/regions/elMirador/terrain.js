@@ -1,52 +1,81 @@
 import * as THREE from 'three';
-import { crackNoise, elevationNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
-import { EL_MIRADOR, elMiradorPathInfo } from './path';
-
-function ridgeMask(x, z) {
-  const westRidge = Math.exp(-Math.pow((x + 31) / 14, 2)) * (0.72 + Math.sin(z * 0.08) * 0.18);
-  const summit = Math.exp(-Math.pow((x - 21) / 18, 2) - Math.pow((z - 28) / 26, 2)) * 0.86;
-  const upperSlope = THREE.MathUtils.smoothstep(z, 10, 44) * 0.58;
-  return THREE.MathUtils.clamp(Math.max(westRidge, summit, upperSlope), 0, 1);
-}
-
-function cliffDropMask(x, z) {
-  const east = THREE.MathUtils.smoothstep(x, 31, 49);
-  const middle = THREE.MathUtils.smoothstep(z, -30, 2) * (1 - THREE.MathUtils.smoothstep(z, 34, 48));
-  return THREE.MathUtils.clamp(east * middle, 0, 1);
-}
+import {
+  WATER_LEVEL,
+  crackNoise,
+  elevationNoise,
+  terrainFineDetail,
+  terrainSurfaceNoise,
+} from '../../terrainShared';
+import {
+  EL_MIRADOR,
+  elMiradorBasaltExposure,
+  elMiradorCliffFaceMask,
+  elMiradorCoastDistance,
+  elMiradorGullyMask,
+  elMiradorPathInfo,
+  elMiradorRimMask,
+  elMiradorShelterMask,
+  elMiradorSummitMask,
+  elMiradorWindExposure,
+} from './path';
 
 export function elMiradorHeight(x, z, { movementSurface = false } = {}) {
-  const climb = THREE.MathUtils.smoothstep(z, -44, 44);
-  const broad = elevationNoise(x * 0.032 + 10.0, z * 0.034 - 6.0);
-  const medium = elevationNoise(x * 0.078 - 13.0, z * 0.072 + 9.0);
-  const ridge = ridgeMask(x, z);
-  const cliff = cliffDropMask(x, z);
+  const coastDistance = elMiradorCoastDistance(x, z);
+  if (coastDistance < 0) {
+    const deepWater = Math.max(0, -coastDistance - 3.5);
+    return Math.max(-5.2, -1.18 + coastDistance * 0.34 - deepWater * 0.14);
+  }
+
+  const climb = THREE.MathUtils.smoothstep(z, -44, 34);
+  const eastwardRise = THREE.MathUtils.smoothstep(x, -44, 28);
+  const summit = elMiradorSummitMask(x, z);
+  const gully = elMiradorGullyMask(x, z);
+  const cliff = elMiradorCliffFaceMask(x, z);
   const path = elMiradorPathInfo(x, z);
-  const shelf = Math.max(0, crackNoise(x * 0.14 + 2.0, z * 0.12 - 11.0));
-  const fine = terrainFineDetail(x, z) * (movementSurface ? 0.1 : 0.34);
+  const broad = elevationNoise(x * 0.03 + 10, z * 0.032 - 6);
+  const medium = elevationNoise(x * 0.074 - 13, z * 0.068 + 9);
+  const fractured = Math.max(0, crackNoise(x * 0.15 + 2, z * 0.13 - 11));
+  const southDescent = THREE.MathUtils.smoothstep(z, 35, 48);
+  const cliffDrop = 11.6 * Math.exp(-coastDistance * 0.58);
+  const faceStrata = (
+    Math.sin(coastDistance * 2.3 + z * 0.18)
+    + Math.sin(coastDistance * 4.7 - z * 0.1) * 0.42
+  ) * cliff;
+  const smallRelief = movementSurface
+    ? elevationNoise(x * 0.16 - 3, z * 0.15 + 8) * 0.06 + terrainFineDetail(x, z) * 0.06
+    : elevationNoise(x * 0.16 - 3, z * 0.15 + 8) * 0.17 + terrainFineDetail(x, z) * 0.4;
 
-  let y = 2.15
-    + climb * 4.8
-    + broad * 1.45
-    + medium * 0.72
-    + ridge * 1.22
-    + shelf * ridge * (movementSurface ? 0.12 : 0.48)
-    - cliff * 2.1;
+  let y = 3.0
+    + climb * 3.45
+    + eastwardRise * 1.15
+    + summit * 2.55
+    + broad * 0.88
+    + medium * 0.46
+    - southDescent * 2.05
+    - gully * (0.58 + fractured * (movementSurface ? 0.08 : 0.32))
+    - cliffDrop
+    + faceStrata * (movementSurface ? 0.05 : 0.24)
+    + fractured * elMiradorBasaltExposure(x, z) * (movementSurface ? 0.07 : 0.26)
+    + smallRelief;
 
-  // Cut a walkable bench into the hillside without making the route look paved.
-  y -= path.tread * 0.24 + path.center * 0.08;
-  y += fine;
-  return Math.max(0.35, y);
+  // The old foot route is a worn bench following the land, not a floating
+  // shelf. Movement samples omit the higher-frequency erosion and grit.
+  y -= path.tread * 0.2 + path.center * 0.06;
+  return Math.max(-5.2, y);
 }
 
 export function elMiradorBiomeAt(x, z, y = elMiradorHeight(x, z)) {
+  if (y < WATER_LEVEL - 0.12) return 'open-water-bed';
   const path = elMiradorPathInfo(x, z);
   if (path.tread > 0.48 || path.center > 0.28) return 'red-dirt-path';
   if (path.shoulder > 0.36) return 'path-shoulder';
-  if (cliffDropMask(x, z) > 0.58) return 'mirador-cliff';
-  if (ridgeMask(x, z) > 0.62 && y > 5.2) return 'dry-ridge-grass';
+  if (elMiradorCliffFaceMask(x, z) > 0.48) return 'mirador-basalt-cliff';
+  if (elMiradorRimMask(x, z) > 0.42) return 'wind-scoured-overlook-rim';
+  if (elMiradorSummitMask(x, z) > 0.64 && y > 7.2) return 'mirador-summit-grass';
+  if (elMiradorGullyMask(x, z) > 0.46) return 'eroded-highland-gully';
+  if (elMiradorShelterMask(x, z) > 0.38) return 'sheltered-highland-grass';
   const exposed = terrainSurfaceNoise(x * 0.46 + 4.0, z * 0.46 - 8.0);
-  if (exposed > 0.26) return 'stony-highland-slope';
+  if (elMiradorBasaltExposure(x, z) > 0.6 || exposed > 0.3) return 'stony-highland-slope';
   return 'dry-highland-grass';
 }
 
@@ -54,12 +83,16 @@ export function elMiradorColor(x, z, y) {
   const biome = elMiradorBiomeAt(x, z, y);
   const path = elMiradorPathInfo(x, z);
   const noise = terrainSurfaceNoise(x * 0.52 + 3.0, z * 0.52 - 2.0) * 0.5 + 0.5;
-  const color = new THREE.Color('#6f7449');
-  color.lerp(new THREE.Color('#9a8a50'), noise * 0.28);
-  color.lerp(new THREE.Color('#4b6037'), (1 - noise) * 0.18);
-  if (biome === 'dry-ridge-grass') color.lerp(new THREE.Color('#a09a5a'), 0.28);
+  const color = new THREE.Color('#6b7048');
+  color.lerp(new THREE.Color('#9b8c50'), noise * 0.26);
+  color.lerp(new THREE.Color('#4c613b'), (1 - noise) * 0.2);
+  if (biome === 'open-water-bed') color.set('#243b3c');
+  if (biome === 'mirador-summit-grass') color.lerp(new THREE.Color('#aa9e59'), 0.42);
   if (biome === 'stony-highland-slope') color.lerp(new THREE.Color('#887a5c'), 0.26);
-  if (biome === 'mirador-cliff') color.lerp(new THREE.Color('#7a6750'), 0.52);
+  if (biome === 'mirador-basalt-cliff') color.lerp(new THREE.Color('#303832'), 0.72);
+  if (biome === 'wind-scoured-overlook-rim') color.lerp(new THREE.Color('#5b5d49'), 0.48);
+  if (biome === 'eroded-highland-gully') color.lerp(new THREE.Color('#765b43'), 0.46);
+  if (biome === 'sheltered-highland-grass') color.lerp(new THREE.Color('#536a3f'), 0.34);
   if (biome === 'path-shoulder') color.lerp(new THREE.Color('#7e7351'), 0.48 + path.shoulder * 0.18);
   if (biome === 'red-dirt-path') {
     color.lerp(new THREE.Color('#a7582b'), 0.68 + path.center * 0.12);
@@ -72,7 +105,7 @@ export function elMiradorColor(x, z, y) {
 export function isElMiradorWalkable(x, z, config) {
   const margin = 1.6;
   if (Math.abs(x) > config.width * 0.5 - margin || Math.abs(z) > config.depth * 0.5 - margin) return false;
-  if (cliffDropMask(x, z) > 0.72) return false;
+  if (elMiradorCoastDistance(x, z) < 6.2) return false;
   const path = elMiradorPathInfo(x, z);
   const step = 0.85;
   const left = elMiradorHeight(x - step, z, { movementSurface: true });
@@ -80,7 +113,7 @@ export function isElMiradorWalkable(x, z, config) {
   const back = elMiradorHeight(x, z - step, { movementSurface: true });
   const forward = elMiradorHeight(x, z + step, { movementSurface: true });
   const slope = Math.hypot((right - left) / (step * 2), (forward - back) / (step * 2));
-  return slope < 1.08 || path.path > 0.22;
+  return slope < 0.96 || path.path > 0.2;
 }
 
 export const elMiradorRegion = {
@@ -92,6 +125,17 @@ export const elMiradorRegion = {
     biomeAt: elMiradorBiomeAt,
     color: elMiradorColor,
     isWalkable: isElMiradorWalkable,
-    defaultSpawn: [-3, 0, -7],
+    defaultSpawn: [21, 0, 24],
+    defaultFacing: [0.77, 0, -0.64],
+    entrySpawns: {
+      north: [-34, 0, -45.5],
+      west: [-49.5, 0, 5.58],
+      south: [24, 0, 45.5],
+    },
+    entryFacings: {
+      north: [0.2, 0, 0.98],
+      west: [0.98, 0, -0.12],
+      south: [0.12, 0, -1],
+    },
   },
 };

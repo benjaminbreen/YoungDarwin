@@ -4,7 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useSt
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
-import { setTouchControl, triggerToolUse } from '../input/touchControls';
+import { TOGGLE_COMPASS_EVENT, setTouchControl, triggerToolUse } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { isEndGameNarratorCommand } from '../finalAssessment';
@@ -14,7 +14,6 @@ import { getZone } from '../world/floreanaZones';
 import { getBeagleSightline } from '../world/beagleSightlines';
 import { ExamineView } from './ExamineView';
 import { StatusView } from './StatusView';
-import { ZoneTransitionOverlay } from './ZoneTransitionOverlay';
 import { BookReaderView } from './BookReaderView';
 import { NpcEncounterModal } from './NpcEncounterModal';
 import { ExpeditionOutcomeModal } from './ExpeditionOutcomeModal';
@@ -43,6 +42,7 @@ import { GalapagosGlobe } from './expedition/GalapagosGlobe';
 import { InventoryModal } from './expedition/InventoryModal';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
+import { CompassDial } from './expedition/CompassDial';
 import {
   ISLAND_MAP_IMAGE,
   getIslandMapLocation,
@@ -84,6 +84,12 @@ function resolveDesktopHudLayout() {
   const requested = new URLSearchParams(window.location.search).get('hud');
   if (requested === 'legacy' || requested === 'polished') return requested;
   return DEFAULT_DESKTOP_HUD_LAYOUT;
+}
+
+function hasDevelopmentQueryFlag(flag) {
+  return process.env.NODE_ENV !== 'production'
+    && typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).has(flag);
 }
 
 const ROUTE_ENTRY_EDGES = {
@@ -1478,6 +1484,11 @@ function ToolBelt({ onOpenJournal, compact = false }) {
             key={tool.id}
             type="button"
             onClick={() => {
+              if (tool.id === 'compass') {
+                setActiveTool(tool.id);
+                triggerToolUse(tool.id);
+                return;
+              }
               if (tool.id === 'sketch') {
                 onOpenJournal();
                 return;
@@ -2227,6 +2238,11 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
               key={tool.id}
               type="button"
               onClick={() => {
+                if (tool.id === 'compass') {
+                  setActiveTool(tool.id);
+                  triggerToolUse(tool.id);
+                  return;
+                }
                 if (tool.id === 'sketch') {
                   onOpenJournal();
                   return;
@@ -2431,7 +2447,24 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
   );
 }
 
-function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onRequestEndGame }) {
+function GameplayCompass({ onClose, className = '' }) {
+  return (
+    <div className={`pointer-events-none relative ${className}`}>
+      <CompassDial className="w-full" />
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Put pocket compass away"
+        title="Put compass away"
+        className="pointer-events-auto absolute right-[3%] top-[3%] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-[#e5c77f]/75 bg-[rgba(25,17,8,0.9)] font-expedition text-[12px] text-[#e4c477] shadow-[0_3px_8px_rgba(0,0,0,0.55)] transition hover:scale-105 hover:border-[#ffe2a0] hover:text-[#ffe2a0] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#ffe2a0]"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onRequestEndGame, compassOpen = false, onCloseCompass }) {
   const [mapCollapsed, setMapCollapsed] = useState(false);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
@@ -2559,6 +2592,12 @@ function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onReques
           </button>
         </div>
       </ExpeditionPanel>
+
+      {compassOpen && (
+        <div className="flex justify-center pb-1 pt-0.5">
+          <GameplayCompass onClose={onCloseCompass} className="w-[10.5rem]" />
+        </div>
+      )}
     </div>
   );
 }
@@ -4069,11 +4108,8 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
   const [endGameConfirmationOpen, setEndGameConfirmationOpen] = useState(false);
   const polishedDesktopHud = desktopHudLayout === 'polished';
   const [panel, setPanel] = useState(null);
-  const [mapOpen, setMapOpen] = useState(() => (
-    process.env.NODE_ENV !== 'production'
-    && typeof window !== 'undefined'
-    && new URLSearchParams(window.location.search).has('islandMap')
-  ));
+  const [mapOpen, setMapOpen] = useState(() => hasDevelopmentQueryFlag('islandMap'));
+  const [compassOpen, setCompassOpen] = useState(() => hasDevelopmentQueryFlag('compass'));
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [inventoryInitialTab, setInventoryInitialTab] = useState('tools');
   const [mobileNarrativeOpen, setMobileNarrativeOpen] = useState(false);
@@ -4096,6 +4132,12 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
     setEndGameConfirmationOpen(false);
     void beginFinalAssessment();
   }, [beginFinalAssessment]);
+
+  useEffect(() => {
+    const toggleCompass = () => setCompassOpen(value => !value);
+    window.addEventListener(TOGGLE_COMPASS_EVENT, toggleCompass);
+    return () => window.removeEventListener(TOGGLE_COMPASS_EVENT, toggleCompass);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -4197,6 +4239,8 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
             onRequestEndGame={() => setEndGameConfirmationOpen(true)}
+            compassOpen={compassOpen}
+            onCloseCompass={() => setCompassOpen(false)}
           />
         ) : (
           <FieldSidebar
@@ -4207,6 +4251,14 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
           />
         )}
       </div>
+
+      {compassOpen && (
+        <div className="absolute inset-0 z-20 xl:hidden">
+          <div className="absolute left-1/2 top-[45%] w-[min(58vw,14rem)] -translate-x-1/2 -translate-y-1/2 md:left-auto md:right-7 md:top-[22.5rem] md:w-[9.5rem] md:translate-x-0 md:translate-y-0">
+            <GameplayCompass onClose={() => setCompassOpen(false)} className="w-full" />
+          </div>
+        </div>
+      )}
 
       <InteractionPrompt />
       <MajorEventToast />
@@ -4297,7 +4349,6 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         onRestartExpedition={onRestartExpedition}
         onReturnToMainMenu={onReturnToMainMenu}
       />
-      <ZoneTransitionOverlay />
     </div>
   );
 }

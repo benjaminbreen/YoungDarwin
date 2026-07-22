@@ -49,7 +49,11 @@ import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput, sanitizeShortcutKeys } from './playerInputState';
-import { findCactusHazardContact, findPushableObstacleNear } from './playerFeedback';
+import {
+  cactusSpineInjuryChance,
+  findCactusHazardContact,
+  findPushableObstacleNear,
+} from './playerFeedback';
 import { updatePlayerFrameFeedback } from './playerFrameFeedback';
 import { finalizePlayerFrame } from './playerFrameFinalization';
 import { updatePlayerActionMotion } from './playerActionMotion';
@@ -102,6 +106,11 @@ const DARWIN5_IDLE_FIDGETS = [
   { clip: 'lookAround', weight: 1, minCount: 1 },
   { clip: 'armStretch', weight: 1, minCount: 2 },
 ];
+const DARWIN5_LOCOMOTION_PREVIEW_IDLE_FIDGETS = [
+  { clip: 'calmIdle', weight: 4 },
+  ...DARWIN5_IDLE_FIDGETS,
+];
+const LOCOMOTION_START_ACTIONS = new Set(['startWalking', 'startRunning']);
 const LEGACY_IDLE_FIDGETS = [{ clip: 'lookAroundShort', weight: 1 }];
 
 function pickIdleFidget(pool, lastClip, count, nearSpecimen) {
@@ -196,6 +205,18 @@ function pushAnimationForObstacle(obstacle) {
   return 'pushLow';
 }
 
+function shadowAnimationActive(state) {
+  return Boolean(
+    state?.action
+    || state?.walking
+    || state?.running
+    || state?.airborne
+    || state?.swimming
+    || state?.crouching
+    || state?.aiming
+    || state?.firing,
+  );
+}
 
 export function PlayerController({
   physicsDebug = false,
@@ -203,31 +224,11 @@ export function PlayerController({
   inputLocked = false,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
+  onVisualReady = null,
 }) {
   const faunaDebug = useMemo(faunaDebugEnabled, []);
   const group = useRef(null);
   const warningRef = useRef(null);
-  const contactShadowRef = useRef(null);
-  // Soft radial alpha falloff so the contact shadow grounds as ambient occlusion
-  // rather than a hard sticker disc. White centre → black edge; the material's
-  // alphaMap samples this and multiplies the per-frame opacity.
-  const contactShadowAlpha = useMemo(() => {
-    if (typeof document === 'undefined') return null;
-    const size = 128;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    g.addColorStop(0.0, '#ffffff');
-    g.addColorStop(0.42, '#bdbdbd');
-    g.addColorStop(0.74, '#3a3a3a');
-    g.addColorStop(1.0, '#000000');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.NoColorSpace;
-    return tex;
-  }, []);
   const waterlineRef = useRef(null);
   const landingDustTriggerRef = useRef(null);
   const footstepDustTriggerRef = useRef(null);
@@ -295,6 +296,7 @@ export function PlayerController({
   const lastStepPulseAt = useRef(-10);
   const lastSkidDustAt = useRef(-10);
   const prevSprintingRef = useRef(false);
+  const prevRunningIntentRef = useRef(false);
   const lastDownhillSprintCameraAt = useRef(-10);
   const lastArcadeStumbleAt = useRef(-10);
   const lastDroppingSmushAt = useRef(-10);
@@ -380,6 +382,7 @@ export function PlayerController({
   }), []);
   const stateRef = useRef({
     modelAssetId: DEFAULT_PLAYER_MODEL_ASSET_ID,
+    modelVariantId: DEFAULT_PLAYER_MODEL_ASSET_ID,
     playableModeId: 'darwin',
     playableKind: 'human',
     running: false,
@@ -817,7 +820,11 @@ export function PlayerController({
     if (!group.current) return;
     // Clear stale intent first. Frames that reach the character move publish
     // the pre-collision velocity below; early-return/paused frames stay zero.
-    updateRuntimePlayerMotion({ x: 0, z: 0 });
+    updateRuntimePlayerMotion({
+      x: 0,
+      z: 0,
+      visualActive: shadowAnimationActive(stateRef.current),
+    });
     collisionAdapter.beginFrame?.();
     const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
     const rawTouch = consumeTouchControls();
@@ -832,14 +839,12 @@ export function PlayerController({
       warningRef,
       modelFeedbackRef,
       stateRef,
-      contactShadowRef,
       debugCollisionRef,
       debugMovementRef,
       bounceFeedback,
       velocity,
       terrainFeedback,
       lastModelYaw,
-      collisionAdapter,
       characterDebug,
       viewMode,
       physicsDebug,
@@ -1407,6 +1412,7 @@ export function PlayerController({
     }
     const flightActive = Boolean(flightState.current.active && playerConfig.flight);
     const steeringMoving = moving || flightActive;
+    const locomotionPreview = stateRef.current.modelVariantId === 'darwin5LocomotionPreview';
     const runIntent = Boolean((keys.run || touch.run) && steeringMoving && !stateRef.current.crouching);
     const crouchRunIntent = Boolean((keys.run || touch.run) && moving && stateRef.current.crouching);
     const constraintSpeedScale = isDarwinMode && Number.isFinite(Number(activeConstraint?.movementSpeedScale))
@@ -1498,12 +1504,41 @@ export function PlayerController({
       swimming: swimState.current.active,
     });
     // Flight ignores stick deflection — W/S are altitude there, not throttle.
+    const transitionSpan = Math.max(0.001, (stateRef.current.actionUntil || now) - (stateRef.current.actionStartedAt || now));
+    const transitionProgress = THREE.MathUtils.clamp(
+      (now - (stateRef.current.actionStartedAt || now)) / transitionSpan,
+      0,
+      1,
+    );
+    const easedTransitionProgress = transitionProgress * transitionProgress * (3 - 2 * transitionProgress);
+    const locomotionStartSpeedScale = locomotionPreview && stateRef.current.action === 'startWalking'
+      ? THREE.MathUtils.lerp(0.3, 1, easedTransitionProgress)
+      : locomotionPreview && stateRef.current.action === 'startRunning'
+        ? THREE.MathUtils.lerp(0.36, 1, easedTransitionProgress)
+        : 1;
     const movementSpeed = rawMovementSpeed * slopeSpeedScale * arcadeSpeedScale
-      * (flightActive ? 1 : analogSpeedScale);
+      * (flightActive ? 1 : analogSpeedScale) * locomotionStartSpeedScale;
     terrainFeedback.current.grade = THREE.MathUtils.damp(terrainFeedback.current.grade, slope.grade, 8, delta);
     terrainFeedback.current.uphillDot = THREE.MathUtils.damp(terrainFeedback.current.uphillDot, uphillDot, 8, delta);
     terrainFeedback.current.downhillDot = THREE.MathUtils.damp(terrainFeedback.current.downhillDot, -uphillDot, 8, delta);
     const movementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
+    const bareHandedLocomotion = useThreeGameStore.getState().activeToolId === 'hands'
+      && !carriedObjectId
+      && !stateRef.current.aiming
+      && !stateRef.current.crouching;
+    if (locomotionPreview
+      && isDarwinMode
+      && moving
+      && !previousMotion.current.moving
+      && !wasAirborne.current
+      && !swimState.current.active
+      && !flightActive
+      && !movementLocked
+      && !stateRef.current.action
+      && bareHandedLocomotion) {
+      const startClip = running ? 'startRunning' : 'startWalking';
+      startAction(startClip, durationFor(startClip), { lockMovement: false });
+    }
     const canTurnInPlace = isDarwinMode && !moving && !movementLocked && !stateRef.current.action && !stateRef.current.crouching && !stateRef.current.aiming;
     if (rotateLeftPressed && !lastButtons.current.rotateLeft && canTurnInPlace) {
       const targetYaw = group.current.rotation.y + Math.PI / 2;
@@ -1558,7 +1593,11 @@ export function PlayerController({
         idleFidget.current.idleSince = now;
         idleFidget.current.nextAt = now + 12;
       } else if (now >= idleFidget.current.nextAt) {
-        const pool = stateRef.current.modelAssetId === 'darwin5' ? DARWIN5_IDLE_FIDGETS : LEGACY_IDLE_FIDGETS;
+        const pool = locomotionPreview
+          ? DARWIN5_LOCOMOTION_PREVIEW_IDLE_FIDGETS
+          : stateRef.current.modelAssetId === 'darwin5'
+            ? DARWIN5_IDLE_FIDGETS
+            : LEGACY_IDLE_FIDGETS;
         const nearSpecimen = Boolean(useThreeGameStore.getState().nearbySpecimenId);
         const picked = pickIdleFidget(pool, idleFidget.current.lastClip, idleFidget.current.count, nearSpecimen);
         startAction(picked.clip, durationFor(picked.clip), { lockMovement: false });
@@ -1650,6 +1689,9 @@ export function PlayerController({
       }
     }
     lastButtons.current.climb = climbPressed;
+    if (!moving && LOCOMOTION_START_ACTIONS.has(stateRef.current.action)) {
+      interruptAction(LOCOMOTION_START_ACTIONS);
+    }
     const canPlayLocomotionFlourish = isDarwinMode && !moving && !stateRef.current.action && !movementLocked;
     if (isDarwinMode && !moving && previousMotion.current.moving && previousMotion.current.running && !stateRef.current.action && !movementLocked) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
@@ -1658,11 +1700,21 @@ export function PlayerController({
           ? durationFor('runToStop')
           : Math.min(0.55, ACTION_DURATION.runToStop);
         startAction('runToStop', runStopDuration, { lockMovement: false });
+        emitPropEvent('player-skid', {
+          position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+          direction: { x: velocity.current.x, y: 0, z: velocity.current.z },
+          intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.68, 0.38, 0.72),
+          biome: surfaceBiome,
+          source: 'darwin',
+        });
         if (now - lastSkidDustAt.current > 0.22) {
           lastSkidDustAt.current = now;
           collisionDustTriggerRef.current?.({
-            intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed, 0.45, 0.95),
+            intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.84, 0.5, 0.88),
             position: frameScratch.footstepPosition.set(0, 0.06, -0.34),
+            kind: 'skid',
+            radiusScale: 1.08,
+            horizontalSpeed: previousSpeed,
           });
           cameraImpulse.current = {
             startedAt: now,
@@ -1675,7 +1727,17 @@ export function PlayerController({
     } else if (canPlayLocomotionFlourish && previousMotion.current.moving && !previousMotion.current.running && !wasAirborne.current) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       if (previousSpeed > 1.15) {
-        startAction('stopWalking', Math.min(0.22, ACTION_DURATION.stopWalking), { lockMovement: false });
+        const walkStopDuration = locomotionPreview
+          ? durationFor('stopWalking')
+          : Math.min(0.22, ACTION_DURATION.stopWalking);
+        startAction('stopWalking', walkStopDuration, { lockMovement: false });
+        collisionDustTriggerRef.current?.({
+          intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.walkSpeed * 0.24, 0.2, 0.34),
+          position: frameScratch.footstepPosition.set(0, 0.05, -0.24),
+          biome: surfaceBiome,
+          kind: 'footstep',
+          horizontalSpeed: previousSpeed,
+        });
       }
     }
 
@@ -1710,9 +1772,18 @@ export function PlayerController({
         velocity.current.z = input.z * skidSpeed;
         if (now - lastSkidDustAt.current > 0.18) {
           lastSkidDustAt.current = now;
+          const runningPivot = turnClip === 'runningTurn180';
           collisionDustTriggerRef.current?.({
-            intensity: THREE.MathUtils.clamp(currentSpeed / playerConfig.runSpeed, 0.5, 1),
+            intensity: THREE.MathUtils.clamp(
+              currentSpeed / playerConfig.runSpeed * (runningPivot ? 1.2 : 0.72),
+              runningPivot ? 0.72 : 0.38,
+              runningPivot ? 1.18 : 0.7,
+            ),
             position: frameScratch.footstepPosition.set(0, 0.06, -0.28),
+            biome: surfaceBiome,
+            kind: 'skid',
+            radiusScale: runningPivot ? 1.38 : 1.05,
+            horizontalSpeed: currentSpeed,
           });
           cameraImpulse.current = {
             startedAt: now,
@@ -1753,8 +1824,12 @@ export function PlayerController({
         if (now - lastSkidDustAt.current > 0.18) {
           lastSkidDustAt.current = now;
           collisionDustTriggerRef.current?.({
-            intensity: THREE.MathUtils.clamp(currentSpeed / playerConfig.runSpeed * 0.75, 0.35, 0.78),
+            intensity: THREE.MathUtils.clamp(currentSpeed / playerConfig.runSpeed * 1.08, 0.64, 1.08),
             position: frameScratch.footstepPosition.set(crossY >= 0 ? -0.22 : 0.22, 0.06, -0.2),
+            biome: surfaceBiome,
+            kind: 'skid',
+            radiusScale: 1.3,
+            horizontalSpeed: currentSpeed,
           });
         }
       }
@@ -1787,12 +1862,16 @@ export function PlayerController({
           direction: { x: velocity.current.x, y: 0, z: velocity.current.z },
           intensity: THREE.MathUtils.clamp(arcade.feedbackIntensity, 0.12, 1),
           biome: surfaceBiome,
+          source: isDarwinMode ? 'darwin' : 'animal',
         };
         emitPropEvent(arcade.scramble > 0.45 ? 'player-scramble' : 'player-skid', skidEvent);
         collisionDustTriggerRef.current?.({
-          intensity: THREE.MathUtils.clamp(arcade.feedbackIntensity * arcade.traction.dust * 1.35, 0.24, 1),
+          intensity: THREE.MathUtils.clamp(arcade.feedbackIntensity * arcade.traction.dust * 2.05, 0.48, 1.18),
           position: frameScratch.footstepPosition.set(0, 0.06, -0.24),
           biome: surfaceBiome,
+          kind: arcade.scramble > 0.45 ? 'scramble' : 'skid',
+          radiusScale: 1.34,
+          horizontalSpeed: currentSpeed,
         });
         if (arcade.pivotBurst > 0.12 || arcade.scramble > 0.45) {
           cameraImpulse.current = {
@@ -1854,7 +1933,14 @@ export function PlayerController({
       );
       group.current.rotation.y = dampAngle(group.current.rotation.y, targetYaw, playerConfig.turnDamping * turnAssist * (1 - arcade.skid * 0.16), delta);
     } else {
-      const decel = (airborneForControl ? playerConfig.airDeceleration : playerConfig.groundDeceleration) * arcade.decelScale;
+      const stopEnvelopeScale = locomotionPreview && stateRef.current.action === 'runToStop'
+        ? 0.2
+        : locomotionPreview && stateRef.current.action === 'stopWalking'
+          ? 0.25
+          : 1;
+      const decel = (airborneForControl ? playerConfig.airDeceleration : playerConfig.groundDeceleration)
+        * arcade.decelScale
+        * stopEnvelopeScale;
       velocity.current.x = THREE.MathUtils.damp(velocity.current.x, 0, decel, delta);
       velocity.current.z = THREE.MathUtils.damp(velocity.current.z, 0, decel, delta);
     }
@@ -2296,7 +2382,11 @@ export function PlayerController({
     }
     // Contact-reactive plants need the velocity Darwin is trying to carry into
     // a collider, not the near-zero displacement left after Rapier stops him.
-    updateRuntimePlayerMotion({ x: velocity.current.x, z: velocity.current.z });
+    updateRuntimePlayerMotion({
+      x: velocity.current.x,
+      z: velocity.current.z,
+      visualActive: shadowAnimationActive(stateRef.current),
+    });
     const characterMove = characterController.move(group.current.position, desiredDelta);
     characterDebug.current.movement.copy(characterMove.movement);
     characterDebug.current.collisions = characterMove.collisions;
@@ -2323,6 +2413,11 @@ export function PlayerController({
           emitPropEvent('player-physics-prop-contact', {
             propId: target.id,
             direction: { x: dirX, y: 0, z: dirZ },
+            contactPoint: contact.witness1 ? {
+              x: contact.witness1.x,
+              y: contact.witness1.y,
+              z: contact.witness1.z,
+            } : null,
             impactSpeed: pushSpeed,
             delta,
             now,
@@ -2342,8 +2437,7 @@ export function PlayerController({
       contactPoint: rapierSideContact.witness1 || null,
       target: rapierTarget,
       obstacle: rapierTarget ? {
-        id: rapierTarget.id,
-        kind: rapierTarget.kind,
+        ...rapierTarget,
         pushable: false,
       } : null,
     } : null;
@@ -2401,6 +2495,7 @@ export function PlayerController({
     }
     characterController.sync(group.current.position);
 
+    let cactusCollisionImpact = null;
     if (collision) {
       const normal = frameScratch.collisionNormal.copy(collision.normal).normalize();
       characterDebug.current.normal.copy(normal);
@@ -2409,6 +2504,16 @@ export function PlayerController({
       const intoSurface = impactSpeed > 0.001
         ? Math.max(0, -frameScratch.pushDirection.copy(horizontalVelocity).normalize().dot(normal))
         : 0;
+      if (collision.obstacle?.kind === 'cactus' && collision.obstacle.spineHazard) {
+        cactusCollisionImpact = {
+          cactus: collision.obstacle,
+          normal: normal.clone(),
+          penetration: Math.max(0, collision.penetration || 0),
+          distance: 0,
+          impactSpeed,
+          movingIntoCactus: intoSurface > 0.05,
+        };
+      }
       const normalVelocity = horizontalVelocity.dot(normal);
       const tangentVelocity = frameScratch.tangentVelocity.copy(horizontalVelocity).addScaledVector(normal, -normalVelocity);
 
@@ -2568,14 +2673,17 @@ export function PlayerController({
       }
     }
 
-    const cactusContact = findCactusHazardContact(group.current.position);
+    const cactusContact = cactusCollisionImpact
+      || findCactusHazardContact(group.current.position, colliderConfig.radius, currentZoneId);
     if (cactusContact) {
       const horizontalVelocity = frameScratch.cactusHorizontalVelocity.set(velocity.current.x, 0, velocity.current.z);
-      const impactSpeed = horizontalVelocity.length();
-      const movingIntoCactus = impactSpeed > CACTUS_HAZARD.minSpeed
+      const impactSpeed = cactusContact.impactSpeed ?? horizontalVelocity.length();
+      const movingIntoCactus = cactusContact.movingIntoCactus ?? (impactSpeed > CACTUS_HAZARD.minSpeed
         ? frameScratch.pushDirection.copy(horizontalVelocity).normalize().dot(cactusContact.normal) < 0.25
-        : true;
-      const canCactusHit = movingIntoCactus && now - lastCactusHitAt.current >= CACTUS_HAZARD.cooldown;
+        : false);
+      const canCactusHit = impactSpeed >= CACTUS_HAZARD.minSpeed
+        && movingIntoCactus
+        && now - lastCactusHitAt.current >= CACTUS_HAZARD.cooldown;
       group.current.position.addScaledVector(cactusContact.normal, Math.min(0.34, cactusContact.penetration + 0.08));
       if (canCactusHit) {
         lastCactusHitAt.current = now;
@@ -2583,19 +2691,35 @@ export function PlayerController({
         velocity.current.x = cactusContact.normal.x * shove;
         velocity.current.z = cactusContact.normal.z * shove;
         velocity.current.y = Math.max(velocity.current.y, 0.72);
-        const streak = cactusHazardStreak.current;
-        streak.count = now - streak.lastAt <= 8 ? streak.count + 1 : 1;
-        streak.lastAt = now;
-        const severeFall = isDarwinMode && impactSpeed >= playerConfig.runSpeed * 0.86;
-        const embedSpines = isDarwinMode && (streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62);
-        if (embedSpines) streak.count = 0;
-        applyCactusDamage(cactusContact.cactus.damage || 8, {
-          embedSpines,
-          severeFall,
+        const hazard = cactusContact.cactus.spineHazard || {};
+        const injuryChance = cactusSpineInjuryChance({
+          running,
           impactSpeed,
-          cactusId: cactusContact.cactus.id,
+          walkSpeed: playerConfig.walkSpeed,
+          runSpeed: playerConfig.runSpeed,
+          walkChance: CACTUS_HAZARD.walkInjuryChance,
+          runChance: CACTUS_HAZARD.runInjuryChance,
         });
-        startAction('stumble', durationFor('stumble'), { lockMovement: false });
+        const spineInjury = isDarwinMode && Math.random() < injuryChance;
+        if (spineInjury) {
+          const streak = cactusHazardStreak.current;
+          streak.count = now - streak.lastAt <= 8 ? streak.count + 1 : 1;
+          streak.lastAt = now;
+          const severeFall = impactSpeed >= playerConfig.runSpeed * 0.86;
+          const embedSpines = streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62;
+          if (embedSpines) streak.count = 0;
+          applyCactusDamage(hazard.damage || cactusContact.cactus.damage || 8, {
+            embedSpines,
+            severeFall,
+            impactSpeed,
+            injuryChance,
+            cactusId: cactusContact.cactus.id,
+            cactusKind: hazard.kind,
+            hazardLabel: hazard.label,
+            educationalNote: hazard.educationalNote,
+          });
+          startAction('stumble', durationFor('stumble'), { lockMovement: false });
+        }
         bounceFeedback.current.startedAt = now;
         bounceFeedback.current.lastImpactAt = now;
         bounceFeedback.current.intensity = 0.72;
@@ -3068,9 +3192,31 @@ export function PlayerController({
         intensity: 0.58,
         position: frameScratch.footstepPosition.set(0, 0.05, -0.3),
         biome: surfaceBiome,
+        kind: 'footstep',
+        radiusScale: 1,
+        horizontalSpeed: Math.hypot(velocity.current.x, velocity.current.z),
       });
     }
     prevSprintingRef.current = stateRef.current.sprinting;
+    const runningBurstActive = Boolean(
+      isDarwinMode
+      && running
+      && moving
+      && !swimState.current.active
+      && !airborneForControl
+      && !stateRef.current.crouching
+      && !stateRef.current.aiming
+    );
+    if (runningBurstActive && !prevRunningIntentRef.current) {
+      collisionDustTriggerRef.current?.({
+        intensity: 0.46,
+        position: frameScratch.footstepPosition.set(0, 0.05, -0.24),
+        biome: surfaceBiome,
+        kind: 'footstep',
+        radiusScale: 0.94,
+      });
+    }
+    prevRunningIntentRef.current = runningBurstActive;
   }, -1);
 
   return (
@@ -3091,10 +3237,6 @@ export function PlayerController({
       >
         <PlayerPhysicsCollider colliderConfig={colliderConfig} colliderRef={characterColliderRef} />
       </RigidBody>
-      <mesh ref={contactShadowRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
-        <circleGeometry args={[playerProfile.contactShadowRadius || 0.82, 48]} />
-        <meshBasicMaterial color="#17130d" transparent opacity={0.32} depthWrite={false} alphaMap={contactShadowAlpha || undefined} />
-      </mesh>
       <group ref={modelFeedbackRef}>
         <PlayerAvatarModel
           playableModeId={playableMode.id}
@@ -3105,6 +3247,7 @@ export function PlayerController({
           grounding={modelGrounding}
           animationBankPhase={animationBankPhase}
           onAnimationBanksReady={onAnimationBanksReady}
+          onVisualReady={onVisualReady}
         />
       </group>
       <group ref={warningRef} visible={false} position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>

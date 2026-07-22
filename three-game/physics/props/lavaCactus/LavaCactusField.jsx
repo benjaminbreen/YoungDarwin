@@ -2,7 +2,7 @@
 
 // Destructible procedural lava cactus clumps, built on the shared
 // BreakablePlantField runtime (hammer/shotgun/landing/run-in breaks, wind
-// sway, push-bend, collection). Columns are stiffer and more brittle than
+// sway, push-bend, selective knife cuts, collection). Columns are stiffer and more brittle than
 // opuntia pads: they barely sway, bend less under a shoulder, and snap at a
 // lower run speed. Broken columns collect as the existing `cactus` specimen;
 // flowers as `lavacactusflower`.
@@ -71,9 +71,13 @@ function buildZonePieces(zoneId, sites = getLavaCactusSites(zoneId)) {
         colliderOffset: collider.offset,
         ccd: false,
         dustCount: 8,
+        cutDustCount: 2,
         releaseWithParent: false,
         breakOnLanding: true,
         pushable: true,
+        // Young golden tissue parts cleanly; old grey stems are fibrous and
+        // remain immune to the small folding knife.
+        knifeCuttable: !old,
         windAmp: old ? WIND_COLUMN_OLD : WIND_COLUMN_YOUNG,
         specimenId: 'cactus',
         sampleLabel: 'lava cactus column',

@@ -14,6 +14,7 @@ import { InstancedEzTreeLayer } from './InstancedEzTreeLayer';
 import { RockField } from './RockField';
 import { Footprints } from './Footprints';
 import { RockSplashes } from './RockSplashes';
+import { CliffSurf } from './CliffSurf';
 import { BirdFlock } from './BirdFlock';
 import { FlyingModelFlock } from './FlyingModelFlock';
 import { ReefSwimmers } from './ReefSwimmers';
@@ -33,6 +34,8 @@ import { StandingWaterSurface } from './StandingWaterSurface';
 import { CaveEntrance } from './CaveEntrance';
 import { VolcanicFormationField } from './VolcanicFormationField';
 import { EcologyHabitatDebugLayer } from './EcologyHabitatDebugLayer';
+import { MatureCactusImpactLayer } from './MatureCactusImpactLayer';
+import { matureCactusProfileForPath } from '../../../world/ecology/matureCactusInteractions';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
@@ -294,6 +297,10 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
   const propPlan = useMemo(() => (
     ecology ? planProps(visibleLayers.props, ecology.zoneId) : EMPTY_PROP_PLAN
   ), [ecology, visibleLayers.props]);
+  const matureCactusLayers = useMemo(() => (
+    [...visibleLayers.flora, ...visibleLayers.proceduralFlora]
+      .filter(layer => matureCactusProfileForPath(layer.path))
+  ), [visibleLayers.flora, visibleLayers.proceduralFlora]);
 
   if (!ecology) return null;
   const {
@@ -319,6 +326,11 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
   return (
     <group>
       <FoliageMotionDriver />
+      <MatureCactusImpactLayer
+        layers={matureCactusLayers}
+        zoneId={ecology.zoneId}
+        enabled={settings.physicsProps !== false}
+      />
       {rocks.length > 0 && (
         <RockField
           rocks={rocks}
@@ -398,6 +410,8 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
             sourceKind={layer.procedural ? 'ecology-procedural-flora' : 'ecology-flora'}
             inspectableType={inspectableTypeForEcologyLayer(layer.id)}
             variantMode={layer.variantMode || null}
+            impactReaction={settings.physicsProps !== false
+              && !!matureCactusProfileForPath(layer.path)}
           />
         </Suspense>
       ))}
@@ -457,6 +471,9 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       ))}
       {ecology.splashes?.anchors?.length > 0 && (
         <RockSplashes anchors={ecology.splashes.anchors} period={ecology.splashes.period} />
+      )}
+      {ecology.cliffSurf?.anchors?.length > 0 && (
+        <CliffSurf profile={ecology.cliffSurf} />
       )}
       {ecology.birds?.length > 0 && <BirdFlock birds={ecology.birds} />}
       {flyingModels.map(layer => (

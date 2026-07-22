@@ -17,12 +17,29 @@ export const ISLAND_MAP_ASPECT = 1402 / 1122;
 // Approximate real width of the painted chart, used by the scale bar.
 export const ISLAND_MAP_WIDTH_KM = 14.5;
 let islandMapPreload = null;
+let islandMapPreloadPromise = null;
 
 export function prefetchIslandMapImage() {
-  if (islandMapPreload || typeof window === 'undefined' || typeof window.Image !== 'function') return;
+  if (islandMapPreloadPromise) return islandMapPreloadPromise;
+  if (typeof window === 'undefined' || typeof window.Image !== 'function') {
+    return Promise.resolve({ ready: false, mode: 'unavailable' });
+  }
   islandMapPreload = new window.Image();
   islandMapPreload.decoding = 'async';
   islandMapPreload.src = ISLAND_MAP_IMAGE;
+  islandMapPreloadPromise = (typeof islandMapPreload.decode === 'function'
+    ? islandMapPreload.decode()
+    : new Promise((resolve, reject) => {
+      islandMapPreload.addEventListener('load', resolve, { once: true });
+      islandMapPreload.addEventListener('error', reject, { once: true });
+    }))
+    .then(() => ({ ready: true, mode: 'decoded-image' }))
+    .catch(error => ({
+      ready: false,
+      mode: 'decode-failed',
+      error: error?.message || String(error),
+    }));
+  return islandMapPreloadPromise;
 }
 
 // Coordinates validated against a land/water mask of the painting

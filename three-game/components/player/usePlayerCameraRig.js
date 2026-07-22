@@ -57,11 +57,9 @@ export function usePlayerCameraRig() {
   const openingCameraRuntimeRef = useRef({
     sequenceId: null,
     startedAt: 0,
-    descentStartedAt: 0,
     initialized: false,
     finalPivot: new THREE.Vector3(),
     finalEye: new THREE.Vector3(),
-    startTarget: new THREE.Vector3(),
   });
   // Aim (ADS) mode: the mouse drives camera yaw AND pitch under pointer lock
   // (touch drags do the same without lock), Darwin's facing chases the
@@ -393,7 +391,6 @@ export function usePlayerCameraRig() {
     if (!openingCameraActive) {
       openingCameraRuntimeRef.current.sequenceId = null;
       openingCameraRuntimeRef.current.startedAt = 0;
-      openingCameraRuntimeRef.current.descentStartedAt = 0;
       openingCameraRuntimeRef.current.initialized = false;
     }
     // Aim-mode transitions own the pointer: entering ADS captures the mouse
@@ -502,38 +499,19 @@ export function usePlayerCameraRig() {
       if (openingCameraRuntimeRef.current.sequenceId !== sequenceId) {
         openingCameraRuntimeRef.current.sequenceId = sequenceId;
         openingCameraRuntimeRef.current.startedAt = now;
-        openingCameraRuntimeRef.current.descentStartedAt = 0;
         openingCameraRuntimeRef.current.initialized = false;
       }
       const runtime = openingCameraRuntimeRef.current;
-      const minAerialDuration = Math.max(0.5, openingCamera.minAerialDuration || 3.8);
-      const maxAerialDuration = Math.max(minAerialDuration, openingCamera.maxAerialDuration || 6.5);
-      const descentDuration = Math.max(0.5, openingCamera.descentDuration || 5);
-      const aerialElapsed = Math.max(0, now - runtime.startedAt);
-      if (
-        !runtime.descentStartedAt
-        && (
-          (openingCamera.visualReady && aerialElapsed >= minAerialDuration)
-          || aerialElapsed >= maxAerialDuration
-        )
-      ) {
-        runtime.descentStartedAt = now;
-      }
-      const descentProgress = runtime.descentStartedAt
-        ? THREE.MathUtils.clamp((now - runtime.descentStartedAt) / descentDuration, 0, 1)
-        : 0;
-      const flyT = smootherStep01(descentProgress);
-      const surveyT = smootherStep01(aerialElapsed / maxAerialDuration);
-      const targetT = THREE.MathUtils.lerp(
-        surveyT * 0.26,
-        1,
-        smootherStep01(THREE.MathUtils.smoothstep(descentProgress, 0.03, 0.9)),
-      );
+      const duration = Math.max(1, openingCamera.duration || 5);
+      const progress = THREE.MathUtils.clamp((now - runtime.startedAt) / duration, 0, 1);
+      // Hold the overhead portrait long enough to register, then make one
+      // restrained descending arc before easing into the shoulder camera.
+      const swoopT = smootherStep01(THREE.MathUtils.smoothstep(progress, 0.16, 0.84));
+      const gameplayHandoffT = smootherStep01(THREE.MathUtils.smoothstep(progress, 0.72, 1));
       const introForward = scratch.introForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const introRight = scratch.introRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       const currentFinalPivot = scratch.introFinalPivot
-        .copy(cameraAnchor)
-        .add(scratch.panVertical.set(0, 1.22, 0))
+        .set(playerPosition.x, terrainCameraY + 1.22, playerPosition.z)
         .add(panOffsetRef.current);
       const cameraDistance = THREE.MathUtils.clamp(zoomRef.current, CAMERA.minZoom, CAMERA.maxZoom);
       const zoomT = THREE.MathUtils.smoothstep(cameraDistance, CAMERA.minZoom, CAMERA.maxZoom);
@@ -546,60 +524,41 @@ export function usePlayerCameraRig() {
         .addScaledVector(introForward, -horiz)
         .addScaledVector(introRight, side)
         .add(scratch.panVertical.set(0, vert, 0));
-      const currentStartTarget = scratch.introStartTarget
-        .copy(currentFinalPivot)
-        .addScaledVector(introForward, 9.5)
-        .addScaledVector(introRight, -7.2);
       if (!runtime.initialized) {
         runtime.finalPivot.copy(currentFinalPivot);
         runtime.finalEye.copy(currentFinalEye);
-        runtime.startTarget.copy(currentStartTarget);
         runtime.initialized = true;
       }
       const finalPivot = runtime.finalPivot;
       const finalEye = runtime.finalEye;
-      const startTarget = runtime.startTarget;
-      const orbitTarget = scratch.introLookTarget
-        .copy(startTarget)
-        .lerp(finalPivot, targetT);
-      // A slow lateral drift gives the high survey real parallax without
-      // making the island hard to read. It resolves completely before the
-      // playable-camera handoff, so there is no final-frame correction.
-      orbitTarget.addScaledVector(
-        introRight,
-        Math.sin(surveyT * Math.PI * 1.15) * 0.9 * (1 - flyT),
-      );
       const finalOffsetX = finalEye.x - finalPivot.x;
       const finalOffsetZ = finalEye.z - finalPivot.z;
-      const finalHorizontalRadius = Math.max(0.1, Math.hypot(finalOffsetX, finalOffsetZ));
       const finalAngle = Math.atan2(finalOffsetZ, finalOffsetX);
-      const surveyAngle = finalAngle - 1.02 + surveyT * 0.38;
-      const orbitAngle = THREE.MathUtils.lerp(surveyAngle, finalAngle, flyT)
-        + Math.sin(flyT * Math.PI) * 0.045;
-      const surveyRadius = THREE.MathUtils.lerp(18.5, 15.4, surveyT);
-      const orbitRadius = THREE.MathUtils.lerp(surveyRadius, finalHorizontalRadius, flyT);
-      const surveyHeight = THREE.MathUtils.lerp(106, 92, surveyT);
-      const orbitHeight = THREE.MathUtils.lerp(surveyHeight, finalEye.y - finalPivot.y, flyT);
-      const eye = scratch.introEye.set(
-        orbitTarget.x + Math.cos(orbitAngle) * orbitRadius,
-        orbitTarget.y + orbitHeight + Math.sin(flyT * Math.PI) * 3.2,
-        orbitTarget.z + Math.sin(orbitAngle) * orbitRadius,
+      const stageTarget = scratch.introStartTarget
+        .copy(playerPosition)
+        .add(scratch.panVertical.set(0, 1.05, 0));
+      // Begin with a genuine island-establishing view, then descend through a
+      // broad orbit before folding into the playable shoulder composition.
+      const orbitAngle = THREE.MathUtils.lerp(finalAngle - 1.4, finalAngle + 0.18, swoopT);
+      const orbitRadius = THREE.MathUtils.lerp(32, 10.2, swoopT);
+      const orbitHeight = THREE.MathUtils.lerp(27, 7.8, swoopT);
+      const stageEye = scratch.introStartEye.set(
+        stageTarget.x + Math.cos(orbitAngle) * orbitRadius,
+        stageTarget.y + orbitHeight + Math.sin(swoopT * Math.PI) * 1.4,
+        stageTarget.z + Math.sin(orbitAngle) * orbitRadius,
       );
+      const eye = scratch.introEye.copy(stageEye).lerp(finalEye, gameplayHandoffT);
       const lookTarget = scratch.introLookTarget
-        .copy(orbitTarget);
-      lookTarget.y = THREE.MathUtils.lerp(
-        orbitTarget.y,
-        finalPivot.y + 0.18,
-        THREE.MathUtils.smoothstep(descentProgress, 0.58, 1),
-      );
-      camera.position.copy(eye).addScaledVector(cameraShake, descentProgress);
+        .copy(stageTarget)
+        .lerp(finalPivot, gameplayHandoffT);
+      camera.position.copy(eye).addScaledVector(cameraShake, gameplayHandoffT);
       camera.lookAt(lookTarget);
-      camera.rotation.z += Math.sin(surveyT * Math.PI * 1.35) * 0.006 * (1 - flyT);
+      camera.rotation.z += Math.sin(progress * Math.PI) * 0.006 * (1 - gameplayHandoffT);
       const finalFov = baseFovRef.current ?? 50;
       const openingFov = THREE.MathUtils.lerp(
-        46,
+        44,
         finalFov,
-        smootherStep01(THREE.MathUtils.smoothstep(descentProgress, 0.32, 1)),
+        smootherStep01(THREE.MathUtils.smoothstep(progress, 0.48, 1)),
       );
       if (Math.abs(camera.fov - openingFov) > 0.01) {
         camera.fov = openingFov;

@@ -343,9 +343,15 @@ export function resolvePlayerLanding({
         biome: landingBiome,
       });
       const dustIntensity = THREE.MathUtils.clamp(
-        0.44 + falling / 12 + landingSpeed / 11 + landedJumpTravelDistance / 13 + landedJumpCharge * 0.18 + landingArcade.dustBonus,
+        0.44
+          + falling / 12
+          + landingSpeed / 11
+          + landedJumpTravelDistance / 13
+          + landedJumpCharge * 0.18
+          + landingArcade.dustBonus
+          + (landedJumpWasRunning ? 0.3 + Math.min(0.18, landingSpeed / 30) : 0),
         0.48,
-        0.95,
+        landedJumpWasRunning ? 1.18 : 0.95,
       );
       if (group.current.position.y < WATER_LEVEL + 0.02) {
         const splashPosition = { x: group.current.position.x, y: WATER_LEVEL, z: group.current.position.z };
@@ -384,7 +390,12 @@ export function resolvePlayerLanding({
           travelDistance: landedJumpTravelDistance,
           airTime: landedAirTime,
           charge: landedJumpCharge,
-          radiusScale: THREE.MathUtils.clamp(0.92 + landedJumpTravelDistance / 16 + landedJumpCharge * 0.16, 0.9, 1.42),
+          runningJump: intentionalPlayerJump && landedJumpWasRunning,
+          radiusScale: THREE.MathUtils.clamp(
+            (0.92 + landedJumpTravelDistance / 16 + landedJumpCharge * 0.16) * (landedJumpWasRunning ? 1.26 : 1),
+            0.9,
+            landedJumpWasRunning ? 1.72 : 1.42,
+          ),
         });
       }
       // Tiered landing impact: small hops whisper, big drops thump. The

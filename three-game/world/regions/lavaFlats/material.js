@@ -84,7 +84,8 @@ const LF_COMMON = /* glsl */`
           float west = exp(-(pow((p.x + 26.0) / 22.0, 2.0) + pow((p.y - 2.0) / 48.0, 2.0)));
           float east = exp(-(pow((p.x - 25.0) / 18.0, 2.0) + pow((p.y + 1.0) / 47.0, 2.0)));
           float broad = lfFbm(p * 0.075 + vec2(-4.0, 9.0));
-          return clamp(0.27 + max(west, east) * 0.55 + broad * 0.22 + smoothstep(6.0, 48.0, p.y) * 0.12, 0.0, 1.0);
+          float oldFlow = smoothstep(0.42, 0.76, lfFbm(lfRotate(p, 0.31) * 0.052 + vec2(8.0, -6.0)));
+          return clamp(0.08 + max(west, east) * 0.34 + broad * 0.14 + oldFlow * 0.12 + smoothstep(6.0, 48.0, p.y) * 0.07, 0.0, 0.68);
         }
         float lfTubeBowl(vec2 p) {
           float d = length((p - vec2(14.5, 6.5)) / vec2(10.6, 6.2));
@@ -100,16 +101,23 @@ const LF_COMMON = /* glsl */`
           vec4 path = lfPathSplat(p);
           float scoria = lfScoriaMask(p) * 0.42;
           float weathered = lfFlowAge(p) * (1.0 - scoria * 0.44);
-          weathered = clamp(weathered + path.r * 0.12 + path.a * 0.08, 0.0, 0.84);
+          weathered = clamp(weathered + path.r * 0.08 + path.a * 0.05, 0.0, 0.68);
           scoria = clamp(scoria + path.g * 0.06, 0.0, 0.48);
           float dark = max(0.0, 1.0 - weathered - scoria);
           vec3 weights = vec3(dark, weathered, scoria);
           return weights / max(dot(weights, vec3(1.0)), 0.0001);
         }
         vec3 lfAlbedoPair(sampler2D textureMap, vec2 uv, float angle, float secondaryScale) {
-          vec3 a = texture2D(textureMap, uv).rgb;
-          vec3 b = texture2D(textureMap, lfRotate(uv, angle) * secondaryScale + vec2(0.31, -0.19)).rgb;
-          return mix(a, b, 0.18);
+          vec2 warp = vec2(
+            lfNoise(uv * 0.12 + vec2(6.0, -4.0)),
+            lfNoise(uv * 0.12 + vec2(-3.0, 8.0))
+          ) - 0.5;
+          vec2 primaryUv = uv + warp * 0.28;
+          vec2 secondaryUv = lfRotate(uv + warp * 0.17, angle) * secondaryScale + vec2(0.31, -0.19);
+          float broadMix = lfNoise(uv * 0.34 + vec2(angle * 1.7, secondaryScale * 2.3));
+          vec3 a = texture2D(textureMap, primaryUv).rgb;
+          vec3 b = texture2D(textureMap, secondaryUv).rgb;
+          return mix(a, b, 0.16 + broadMix * 0.28);
         }
         vec2 lfPackedNormalSlope(vec4 nrh, float strength) {
           vec2 xy = nrh.rg * 2.0 - 1.0;
@@ -186,26 +194,28 @@ ${LF_COMMON}`,
         vec4 lfDarkSurface = texture2D(uLfDarkNrh, lfDarkUv);
         vec4 lfWeatheredSurface = texture2D(uLfWeatheredNrh, lfWeatheredUv);
         vec4 lfScoriaSurface = texture2D(uLfScoriaNrh, lfScoriaUv);
-        vec3 lfDark = lfAlbedoPair(uLfDarkAlbedo, lfDarkUv, 0.73, 0.63) * vec3(0.82, 0.83, 0.79);
-        vec3 lfWeathered = lfAlbedoPair(uLfWeatheredAlbedo, lfWeatheredUv, -0.61, 0.68) * vec3(0.78, 0.77, 0.72);
-        vec3 lfScoriaRaw = lfAlbedoPair(uLfScoriaAlbedo, lfScoriaUv, 0.52, 0.66) * vec3(0.59, 0.54, 0.49);
-        vec3 lfScoria = mix(lfDark * 1.06, lfScoriaRaw, 0.48);
+        vec3 lfDark = lfAlbedoPair(uLfDarkAlbedo, lfDarkUv, 0.73, 0.55) * vec3(0.51, 0.52, 0.47);
+        vec3 lfWeathered = lfAlbedoPair(uLfWeatheredAlbedo, lfWeatheredUv, -0.61, 0.57) * vec3(0.58, 0.54, 0.47);
+        vec3 lfScoriaRaw = lfAlbedoPair(uLfScoriaAlbedo, lfScoriaUv, 0.52, 0.56) * vec3(0.5, 0.4, 0.33);
+        vec3 lfScoria = mix(lfDark * 0.98, lfScoriaRaw, 0.62);
         vec3 lfColor = lfDark * lfWeights.x + lfWeathered * lfWeights.y + lfScoria * lfWeights.z;
         float lfRelief = dot(lfWeights, vec3(lfDarkSurface.a, lfWeatheredSurface.a, lfScoriaSurface.a));
         float lfCavity = 1.0 - smoothstep(0.12, 0.5, lfRelief);
         lfColor *= mix(0.93, 1.055, smoothstep(0.08, 0.9, lfRelief));
         lfColor *= 1.0 - lfCavity * 0.045;
         vec4 lfPath = lfPathSplat(lfP);
-        vec3 lfTrailDust = mix(vec3(0.27, 0.22, 0.17), vec3(0.39, 0.3, 0.21), lfFbm(lfP * 0.46 + vec2(9.0, -4.0)));
-        lfColor = mix(lfColor, lfTrailDust, clamp(lfPath.r * 0.32 + lfPath.g * 0.18, 0.0, 0.42));
+        vec3 lfTrailDust = mix(vec3(0.2, 0.15, 0.11), vec3(0.31, 0.23, 0.16), lfFbm(lfP * 0.46 + vec2(9.0, -4.0)));
+        lfColor = mix(lfColor, lfTrailDust, clamp(lfPath.r * 0.25 + lfPath.g * 0.14, 0.0, 0.34));
         float lfMacro = lfFbm(lfP * 0.042 + vec2(7.0, -5.0));
+        float lfFlowTone = lfFbm(lfRotate(lfP, 0.47) * 0.083 + vec2(-8.0, 3.0));
         float lfFine = lfFbm(lfP * 0.7 + vec2(-3.0, 11.0));
         float lfCracks = lfCrackMask(lfP);
         float lfBowl = lfTubeBowl(lfP);
-        lfColor *= mix(0.88, 1.075, lfMacro);
+        lfColor *= mix(0.72, 1.055, lfMacro);
+        lfColor = mix(lfColor, lfColor * vec3(0.78, 0.68, 0.61), smoothstep(0.5, 0.78, lfFlowTone) * 0.22);
         lfColor *= mix(0.965, 1.025, lfFine);
-        lfColor *= 1.0 - lfCracks * (0.055 + lfScoriaMask(lfP) * 0.035);
-        lfColor = mix(lfColor, lfColor * vec3(0.72, 0.76, 0.73), lfBowl * 0.12);
+        lfColor *= 1.0 - lfCracks * (0.1 + lfScoriaMask(lfP) * 0.045);
+        lfColor = mix(lfColor, lfColor * vec3(0.58, 0.62, 0.59), lfBowl * 0.26);
         vec3 lfVertexGuide = clamp(diffuseColor.rgb * 1.2, vec3(0.74), vec3(1.12));
         lfColor *= mix(vec3(1.0), lfVertexGuide, 0.1);
         diffuseColor.rgb = clamp(lfColor, 0.0, 1.0);`,
@@ -247,7 +257,7 @@ ${LF_COMMON}`,
       );
   };
 
-  material.customProgramCacheKey = () => 'lava-flats-authored-pbr-v2';
+  material.customProgramCacheKey = () => 'lava-flats-authored-pbr-v3';
   material.needsUpdate = true;
   return material;
 }

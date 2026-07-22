@@ -9,6 +9,15 @@ const DEFAULT_SWING = {
   samples: 12,
 };
 
+const DEFAULT_KNIFE_SWING = {
+  startDistance: 0.34,
+  endDistance: 1.72,
+  startHeight: 1.18,
+  endHeight: 0.42,
+  radius: 0.27,
+  samples: 10,
+};
+
 function distanceToBox(point, center, halfExtents, inverseRotation) {
   const local = point.clone().sub(center).applyQuaternion(inverseRotation);
   const dx = Math.max(Math.abs(local.x) - halfExtents.x, 0);
@@ -93,12 +102,31 @@ export function selectHammerImpactTargets(pieces, {
   return hits.slice(0, maxHits);
 }
 
+// A knife is intentionally not a generic melee weapon. Only pieces authored
+// as knife-cuttable enter the short, narrow hand arc, so rocks, woody trunks,
+// ordinary props, and decorative vegetation cannot react by accident.
+export function selectKnifeCutTargets(pieces, {
+  origin,
+  facing,
+  maxHits = 1,
+  swing = null,
+} = {}) {
+  const cuttable = pieces?.filter(piece => piece.knifeCuttable === true) || [];
+  return selectHammerImpactTargets(cuttable, {
+    origin,
+    facing,
+    maxHits,
+    swing: { ...DEFAULT_KNIFE_SWING, ...(swing || {}) },
+  });
+}
+
 export function createRestrainedReleaseImpulse({
   mass,
   direction,
   speed = 0.58,
   liftSpeed = 0.04,
   torqueScale = 0.035,
+  maxLinearSpeed = null,
 }) {
   const safeMass = Math.max(0.01, Number.isFinite(mass) ? mass : 0.01);
   const length = Math.hypot(direction?.x || 0, direction?.z || 0) || 1;
@@ -116,6 +144,23 @@ export function createRestrainedReleaseImpulse({
       y: 0,
       z: -dx * momentum * torqueScale,
     },
+    maxLinearSpeed,
+  };
+}
+
+// Release impulses are authored against biological mass, but a collider or
+// future asset regression must never turn that into an unbounded launch. This
+// cap is applied immediately after the one-time impulse, before the next
+// physics step; gravity remains free to accelerate a falling piece afterward.
+export function clampReleaseLinearVelocity(velocity, maxSpeed) {
+  if (!velocity || !Number.isFinite(maxSpeed) || maxSpeed <= 0) return velocity;
+  const speed = Math.hypot(velocity.x || 0, velocity.y || 0, velocity.z || 0);
+  if (speed <= maxSpeed || speed <= 0.000001) return velocity;
+  const scale = maxSpeed / speed;
+  return {
+    x: (velocity.x || 0) * scale,
+    y: (velocity.y || 0) * scale,
+    z: (velocity.z || 0) * scale,
   };
 }
 

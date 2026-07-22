@@ -52,7 +52,6 @@ const basePlayerController = {
   canUseDarwinTools: true,
   canUseDarwinInteractions: true,
   canAutoTraverse: true,
-  contactShadowRadius: 0.82,
   camera: { pivotY: 1.22, minDistance: 2.8, maxDistance: 22 },
   swim: SWIM,
 };
@@ -84,7 +83,6 @@ export const playerControllerProfiles = {
     // cylinder catches on authored heightfields and makes the tortoise feel
     // blocked by the ground itself.
     collider: { shape: 'capsule', radius: 0.72, halfHeight: 0.14, centerY: 0.86 },
-    contactShadowRadius: 1.34,
     camera: {
       pivotY: 0.62,
       minDistance: 3.2,
@@ -149,7 +147,6 @@ export const playerControllerProfiles = {
     canUseDarwinInteractions: false,
     canAutoTraverse: false,
     collider: { radius: 0.08, halfHeight: 0.05, centerY: 0.12 },
-    contactShadowRadius: 0.18,
     camera: {
       pivotY: 0.18,
       minDistance: 1.1,

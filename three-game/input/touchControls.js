@@ -18,6 +18,7 @@ const touchState = {
   net: false,
   snare: false,
   hammer: false,
+  knife: false,
   gather: false,
   fireRifle: false,
   write: false,
@@ -33,13 +34,20 @@ const TOOL_USE_CONTROLS = {
   insect_net: 'net',
   shotgun: 'fireRifle',
   snare: 'snare',
+  pocket_knife: 'knife',
   sketch: 'write',
   eat: 'animalEat',
   sleep: 'animalSleep',
   defecate: 'animalDefecate',
 };
 
+export const TOGGLE_COMPASS_EVENT = 'young-darwin:toggle-compass';
+
 export function triggerToolUse(toolId) {
+  if (toolId === 'compass') {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(TOGGLE_COMPASS_EVENT));
+    return;
+  }
   setTouchControl(TOOL_USE_CONTROLS[toolId] || 'gather', true);
 }
 
@@ -58,6 +66,7 @@ export function consumeTouchControls() {
   touchState.net = false;
   touchState.snare = false;
   touchState.hammer = false;
+  touchState.knife = false;
   touchState.gather = false;
   touchState.fireRifle = false;
   touchState.write = false;

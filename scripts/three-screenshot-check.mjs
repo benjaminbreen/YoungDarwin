@@ -9,14 +9,18 @@ const DEFAULT_BASE_URL = 'http://localhost:3000/three';
 const BOOT_TIMEOUT_MS = numberOption('--timeout', 'THREE_SCREENSHOT_TIMEOUT_MS', 75000);
 const NAVIGATION_TIMEOUT_MS = numberOption('--nav-timeout', 'THREE_SCREENSHOT_NAV_TIMEOUT_MS', 20000);
 const SCREENSHOT_TIMEOUT_MS = numberOption('--write-timeout', 'THREE_SCREENSHOT_WRITE_TIMEOUT_MS', 15000);
-const SETTLE_MS = numberOption('--settle', 'THREE_SCREENSHOT_SETTLE_MS', 700);
+const SETTLE_MS = numberOption('--settle', 'THREE_SCREENSHOT_SETTLE_MS', 0);
 const UI_STEP_TIMEOUT_MS = numberOption('--ui-timeout', 'THREE_SCREENSHOT_UI_TIMEOUT_MS', 8000);
 const FAILURE_SCREENSHOT_TIMEOUT_MS = numberOption('--failure-timeout', 'THREE_SCREENSHOT_FAILURE_TIMEOUT_MS', 5000);
 const SERVER_START_TIMEOUT_MS = numberOption('--server-timeout', 'THREE_SCREENSHOT_SERVER_START_TIMEOUT_MS', 60000);
-const LOADING_STALL_TIMEOUT_MS = numberOption('--stall-timeout', 'THREE_SCREENSHOT_STALL_TIMEOUT_MS', 30000);
+const VISUAL_RUN_TIMEOUT_MS = numberOption(
+  '--run-timeout',
+  'THREE_SCREENSHOT_RUN_TIMEOUT_MS',
+  BOOT_TIMEOUT_MS + 30000,
+);
 const AUTO_START_SERVER = process.env.THREE_SCREENSHOT_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const CAPTURE_MODE = screenshotCaptureMode();
-const ALLOW_LOADING_CANVAS = (
+const REQUESTED_LOADING_CANVAS_FALLBACK = (
   process.argv.includes('--allow-loading-canvas')
   || process.env.THREE_SCREENSHOT_ALLOW_LOADING_CANVAS === '1'
 );
@@ -25,12 +29,14 @@ const PRESERVE_OPENING_INTRO = (
   || process.env.THREE_SCREENSHOT_WITH_INTRO === '1'
 );
 const PLAYER_MODEL_STEPS = numberOption('--player-model-steps', 'THREE_SCREENSHOT_PLAYER_MODEL_STEPS', 0);
+const VERIFY_DARWIN5_UPGRADE = process.argv.includes('--verify-darwin5-upgrade');
 const BLINK_OVERRIDE = argValue('--blink');
 const CAMERA_ORBIT_X = signedNumberOption('--camera-orbit-x', 'THREE_SCREENSHOT_CAMERA_ORBIT_X', 0);
 const CAMERA_ORBIT_Y = signedNumberOption('--camera-orbit-y', 'THREE_SCREENSHOT_CAMERA_ORBIT_Y', 0);
 const CAMERA_ZOOM_STEPS = numberOption('--camera-zoom-steps', 'THREE_SCREENSHOT_CAMERA_ZOOM_STEPS', 0);
 const EXAMINE_ACTOR = argValue('--examine');
 const REQUESTED_ZONE = argValue('--zone') || argValue('--region');
+const REQUESTED_TOOL = argValue('--tool');
 
 const ALL_VIEWPORTS = {
   desktop: { name: 'desktop', width: 1440, height: 900 },
@@ -124,7 +130,7 @@ function requestedSearchParams() {
 
   if (!params.has('screenshot')) params.set('screenshot', '1');
   if (!params.has('skipIntro')) params.set('skipIntro', PRESERVE_OPENING_INTRO ? '0' : '1');
-  if (EXAMINE_ACTOR) params.set('e2e', '1');
+  if (EXAMINE_ACTOR || REQUESTED_TOOL) params.set('e2e', '1');
   params.set('preserveDrawingBuffer', '1');
   return params;
 }
@@ -224,6 +230,32 @@ function trimServerOutput(lines) {
   return lines.slice(-24).join('\n');
 }
 
+async function stopChildProcess(child) {
+  if (!child || child.exitCode !== null) return;
+  const signal = name => {
+    if (process.platform !== 'win32' && child.pid) {
+      try {
+        process.kill(-child.pid, name);
+        return;
+      } catch {
+        // Fall back to the direct child when the process group has already exited.
+      }
+    }
+    child.kill(name);
+  };
+  signal('SIGTERM');
+  const exited = await Promise.race([
+    new Promise(resolve => child.once('exit', () => resolve(true))),
+    delay(4000).then(() => false),
+  ]);
+  if (exited || child.exitCode !== null) return;
+  signal('SIGKILL');
+  await Promise.race([
+    new Promise(resolve => child.once('exit', resolve)),
+    delay(1500),
+  ]);
+}
+
 async function startDevServer() {
   const port = await chooseDevServerPort();
   const baseUrl = `http://127.0.0.1:${port}/three`;
@@ -232,6 +264,7 @@ async function startDevServer() {
   const child = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
     cwd: process.cwd(),
     env: { ...process.env, BROWSER: 'none' },
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -256,22 +289,13 @@ async function startDevServer() {
     if (await canReach(baseUrl, 2000)) {
       return {
         baseUrl,
-        stop: async () => {
-          if (child.exitCode !== null) return;
-          child.kill('SIGTERM');
-          await Promise.race([
-            new Promise(resolve => child.once('exit', resolve)),
-            delay(4000).then(() => {
-              if (child.exitCode === null) child.kill('SIGKILL');
-            }),
-          ]);
-        },
+        stop: () => stopChildProcess(child),
       };
     }
     await delay(750);
   }
 
-  child.kill('SIGTERM');
+  await stopChildProcess(child);
   throw new Error(
     `Timed out after ${SERVER_START_TIMEOUT_MS}ms waiting for Next dev server at ${baseUrl}.\n`
     + trimServerOutput(output)
@@ -310,8 +334,8 @@ async function canvasPixelHealth(page) {
     const rect = canvas.getBoundingClientRect();
     const full = rect.width >= window.innerWidth * 0.95 && rect.height >= window.innerHeight * 0.95;
     const source = document.createElement('canvas');
-    source.width = 12;
-    source.height = 12;
+    source.width = 24;
+    source.height = 16;
     const context = source.getContext('2d');
     try {
       context.drawImage(canvas, 0, 0, source.width, source.height);
@@ -338,15 +362,56 @@ async function canvasPixelHealth(page) {
         viewport: { width: window.innerWidth, height: window.innerHeight },
       };
     }
-    let varied = 0;
+    const luminances = [];
+    const buckets = new Map();
+    let opaque = 0;
     for (let i = 0; i < data.length; i += 4) {
-      const brightness = data[i] + data[i + 1] + data[i + 2];
-      if (brightness > 24 && brightness < 740) varied += 1;
+      const luminance = data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722;
+      luminances.push(luminance);
+      if (data[i + 3] > 240) opaque += 1;
+      const bucket = `${data[i] >> 5}:${data[i + 1] >> 5}:${data[i + 2] >> 5}`;
+      buckets.set(bucket, (buckets.get(bucket) || 0) + 1);
     }
+    const mean = luminances.reduce((sum, value) => sum + value, 0) / luminances.length;
+    const variance = luminances.reduce((sum, value) => sum + (value - mean) ** 2, 0) / luminances.length;
+    const lower = luminances.slice(source.width * Math.floor(source.height * 0.6));
+    const lowerMean = lower.reduce((sum, value) => sum + value, 0) / lower.length;
+    const lowerVariance = lower.reduce((sum, value) => sum + (value - lowerMean) ** 2, 0) / lower.length;
+    let comparedEdges = 0;
+    let strongEdges = 0;
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const index = y * source.width + x;
+        if (x + 1 < source.width) {
+          comparedEdges += 1;
+          if (Math.abs(luminances[index] - luminances[index + 1]) >= 12) strongEdges += 1;
+        }
+        if (y + 1 < source.height) {
+          comparedEdges += 1;
+          if (Math.abs(luminances[index] - luminances[index + source.width]) >= 12) strongEdges += 1;
+        }
+      }
+    }
+    const dominantBucket = Math.max(...buckets.values());
+    const edgeDensity = strongEdges / Math.max(1, comparedEdges);
+    const dominantShare = dominantBucket / luminances.length;
+    const varied = luminances.filter(value => value > 8 && value < 247).length;
+    const imageDetailed = variance >= 55
+      && lowerVariance >= 25
+      && buckets.size >= 10
+      && edgeDensity >= 0.018
+      && dominantShare < 0.82;
     return {
-      ok: full && varied > 24,
+      ok: full && opaque === luminances.length && imageDetailed,
       full,
       varied,
+      opaque,
+      samples: luminances.length,
+      variance,
+      lowerVariance,
+      colorBuckets: buckets.size,
+      edgeDensity,
+      dominantShare,
       rect: { width: rect.width, height: rect.height },
       viewport: { width: window.innerWidth, height: window.innerHeight },
     };
@@ -365,6 +430,7 @@ async function pageLaunchState(page) {
       .slice(0, 12);
     return {
       url: window.location.href,
+      readiness: window.__darwinE2E?.getReadiness?.() || null,
       overlay: overlay
         ? {
             mode: overlay.getAttribute('data-mode'),
@@ -465,9 +531,12 @@ async function withFailureArtifacts(page, stage, consoleErrors, action) {
       ? `overlay=${artifact.state.overlay.mode || 'unknown'} progress=${artifact.state.overlay.progress || 'n/a'}`
       : 'overlay=detached';
     const buttons = artifact.state?.buttons?.length ? ` buttons=${artifact.state.buttons.join(' | ')}` : '';
+    const blockers = artifact.state?.readiness?.blockers?.length
+      ? ` blockers=${artifact.state.readiness.blockers.join(',')}`
+      : '';
     throw new Error(
       `[three:screenshot] ${stage} failed: ${error?.message || error}\n`
-      + `[three:screenshot] last state: ${overlay}; canvas=${artifact.state?.canvas ? 'present' : 'missing'};${buttons}\n`
+      + `[three:screenshot] last state: ${overlay}; canvas=${artifact.state?.canvas ? 'present' : 'missing'};${blockers}${buttons}\n`
       + `[three:screenshot] diagnostics: ${artifactPath}${artifact.screenshot ? ` and ${artifact.screenshot}` : ''}`,
       { cause: error },
     );
@@ -496,55 +565,45 @@ async function waitForReadyCanvas(page, consoleErrors) {
     await page.waitForSelector('canvas', { timeout: BOOT_TIMEOUT_MS });
   });
 
-  return withFailureArtifacts(page, 'wait for scene ready', consoleErrors, async () => {
-    const deadline = Date.now() + BOOT_TIMEOUT_MS;
-    let lastStateKey = '';
-    let lastProgressKey = '';
-    let lastProgressAt = Date.now();
-    let lastState = null;
-
-    const allowCanvasFallback = reason => {
-      if (!ALLOW_LOADING_CANVAS || !lastState?.canvas) return null;
-      console.warn(`[three:screenshot] warning: ${reason}; continuing with canvas capture because --allow-loading-canvas is enabled.`);
-      return {
-        ready: false,
-        warning: reason,
-        state: lastState,
-      };
-    };
-
-    while (Date.now() < deadline) {
-      const state = await pageLaunchState(page);
-      lastState = state;
-      const overlay = state.overlay
-        ? `${state.overlay.mode || 'unknown'} ${state.overlay.progress || ''}`.trim()
-        : 'detached';
-      const stateKey = `overlay=${overlay}; canvas=${state.canvas ? 'present' : 'missing'}`;
-      if (stateKey !== lastStateKey) {
-        lastStateKey = stateKey;
-        console.log(`[three:screenshot] boot state: ${stateKey}`);
-      }
-      if (!state.overlay) return { ready: true, warning: null, state };
-
-      const progressKey = `${state.overlay.mode || 'unknown'}:${state.overlay.progress || ''}:${state.overlay.text || ''}`;
-      if (progressKey !== lastProgressKey) {
-        lastProgressKey = progressKey;
-        lastProgressAt = Date.now();
-      } else if (Date.now() - lastProgressAt > LOADING_STALL_TIMEOUT_MS) {
-        const message = `Loading overlay stalled for ${LOADING_STALL_TIMEOUT_MS}ms at ${overlay}.`;
-        const fallback = allowCanvasFallback(message);
-        if (fallback) return fallback;
-        throw new Error(message);
-      }
-
-      await delay(1000);
-    }
-
-    const message = `Scene did not become ready before ${BOOT_TIMEOUT_MS}ms timeout.`;
-    const fallback = allowCanvasFallback(message);
-    if (fallback) return fallback;
-    throw new Error(message);
+  return withFailureArtifacts(page, 'wait for visual readiness', consoleErrors, async () => {
+    await page.waitForFunction(
+      () => window.__darwinE2EReady === true
+        && typeof window.__darwinE2E?.waitForReadiness === 'function',
+      null,
+      { timeout: BOOT_TIMEOUT_MS },
+    );
+    const initial = await page.evaluate(() => window.__darwinE2E.getReadiness());
+    console.log(`[three:screenshot] initial readiness: ${JSON.stringify(initial)}`);
+    return Promise.race([
+      page.evaluate(timeout => {
+        const afterFrame = window.__darwinE2E.getReadiness().frameRevision;
+        return window.__darwinE2E.waitForReadiness({
+          visualReady: true,
+          afterFrame,
+          framesAfter: 2,
+        }, timeout);
+      }, BOOT_TIMEOUT_MS),
+      delay(BOOT_TIMEOUT_MS + 2000).then(() => {
+        throw new Error(`Scene did not reach visual readiness before ${BOOT_TIMEOUT_MS}ms timeout.`);
+      }),
+    ]);
   });
+}
+
+async function waitForFreshVisualFrames(page, timeoutMs = BOOT_TIMEOUT_MS) {
+  return Promise.race([
+    page.evaluate(timeout => {
+      const afterFrame = window.__darwinE2E.getReadiness().frameRevision;
+      return window.__darwinE2E.waitForReadiness({
+        visualReady: true,
+        afterFrame,
+        framesAfter: 2,
+      }, timeout);
+    }, timeoutMs),
+    delay(timeoutMs + 2000).then(() => {
+      throw new Error(`Canvas did not present two fresh visual-ready frames within ${timeoutMs}ms.`);
+    }),
+  ]);
 }
 
 async function adjustGameplayCamera(page) {
@@ -628,11 +687,15 @@ async function run() {
   console.log(`[three:screenshot] viewports: ${viewports.map(viewport => viewport.name).join(', ')}`);
   console.log(`[three:screenshot] capture mode: ${CAPTURE_MODE}`);
   console.log(`[three:screenshot] boot timeout: ${BOOT_TIMEOUT_MS}ms`);
+  console.log(`[three:screenshot] visual run timeout: ${VISUAL_RUN_TIMEOUT_MS}ms`);
   console.log(`[three:screenshot] UI step timeout: ${UI_STEP_TIMEOUT_MS}ms`);
-  console.log(`[three:screenshot] stall timeout: ${LOADING_STALL_TIMEOUT_MS}ms`);
+  if (REQUESTED_LOADING_CANVAS_FALLBACK) {
+    console.warn('[three:screenshot] --allow-loading-canvas is deprecated and ignored; captures now require harness visual readiness.');
+  }
 
-  let browser = await launchChromium();
+  let browser = await launchChromium({ useHardwareGpu: true });
   const results = [];
+  let runWatchdog = null;
   const closeBrowser = async () => {
     if (!browser) return;
     const openBrowser = browser;
@@ -652,12 +715,22 @@ async function run() {
 
   try {
     const page = await browser.newPage({ viewport: viewports[0] });
+    runWatchdog = setTimeout(() => {
+      console.error(
+        `[three:screenshot] visual run exceeded its ${VISUAL_RUN_TIMEOUT_MS}ms wall-clock budget; closing Chromium.`
+      );
+      void closeBrowser();
+    }, VISUAL_RUN_TIMEOUT_MS);
     const errors = [];
     const warnings = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
-      if (message.type() === 'error') errors.push(message.text());
-      if (message.type() === 'warning') warnings.push(message.text());
+      const location = message.location();
+      const source = location.url
+        ? ` (${location.url}:${Number(location.lineNumber || 0) + 1}:${Number(location.columnNumber || 0) + 1})`
+        : '';
+      if (message.type() === 'error') errors.push(`${message.text()}${source}`);
+      if (message.type() === 'warning') warnings.push(`${message.text()}${source}`);
     });
 
     const targetUrl = screenshotUrl(baseUrl);
@@ -677,21 +750,23 @@ async function run() {
     });
     await clickNewExpeditionFlow(page, errors);
     const boot = await waitForReadyCanvas(page, errors);
+    if (REQUESTED_TOOL) {
+      await withFailureArtifacts(page, 'equip requested tool', errors, async () => {
+        await page.waitForFunction(() => Boolean(window.__darwinE2E), null, { timeout: BOOT_TIMEOUT_MS });
+        if (REQUESTED_ZONE) {
+          await page.evaluate(zoneId => window.__darwinE2E.setZone(zoneId), REQUESTED_ZONE);
+        }
+        await page.evaluate(toolId => window.__darwinE2E.setTool(toolId), REQUESTED_TOOL);
+        await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
+      });
+    }
     if (EXAMINE_ACTOR) {
       await withFailureArtifacts(page, 'open examination', errors, async () => {
         await page.waitForFunction(() => Boolean(window.__darwinE2E), null, { timeout: BOOT_TIMEOUT_MS });
         if (REQUESTED_ZONE) {
           await page.evaluate(zoneId => window.__darwinE2E.setZone(zoneId), REQUESTED_ZONE);
         }
-        // The launch flow deliberately staggers world actors for several
-        // seconds. Let that schedule and any zone transition settle before
-        // opening a modal that transition commits intentionally clear.
-        await page.waitForTimeout(3400);
-        await page.waitForFunction(
-          () => !document.querySelector('[data-testid="three-launch-overlay"]'),
-          null,
-          { timeout: 20000 },
-        );
+        await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
         const opened = await page.evaluate(actorId => window.__darwinE2E.openExamineSpecimen(actorId), EXAMINE_ACTOR);
         if (!opened) throw new Error(`Could not open examination for actor "${EXAMINE_ACTOR}".`);
         // The launch overlay intentionally staggers specimen mounts. Wait for
@@ -730,7 +805,7 @@ async function run() {
         window.__darwinBlinkOverride = value;
       }, BLINK_OVERRIDE);
     }
-    if (PLAYER_MODEL_STEPS > 0) {
+    if (PLAYER_MODEL_STEPS > 0 || VERIFY_DARWIN5_UPGRADE) {
       await page.waitForFunction(
         () => typeof window.__darwinPlayerModel === 'string',
         null,
@@ -745,10 +820,13 @@ async function run() {
         blink: window.__darwinBlinkDebug || null,
         hair: window.__darwinHairDebug || null,
         hairMaterial: window.__darwinHairMaterialDebug || null,
+        ecologyDebug: window.__darwinEcologyHabitatDebug || null,
       }));
       console.log(`[three:screenshot] Darwin model discovery: ${JSON.stringify(modelDiscovery)}`);
+    }
+    if (VERIFY_DARWIN5_UPGRADE) {
       await page.waitForFunction(
-        () => window.__darwinPlayerModel === 'darwin5BlinkPreview'
+        () => window.__darwinPlayerModel === 'darwin5'
           && window.__darwinBlinkDebug?.targetCount === 4,
         null,
         { timeout: BOOT_TIMEOUT_MS },
@@ -765,7 +843,8 @@ async function run() {
       );
       await page.waitForFunction(
         () => window.__darwinHairMaterialDebug?.isMeshPhysicalMaterial === true
-          && window.__darwinHairMaterialDebug.anisotropy > 0.5,
+          && window.__darwinHairMaterialDebug.roughness === 0.68
+          && window.__darwinHairMaterialDebug.specularIntensity > 0.3,
         null,
         { timeout: BOOT_TIMEOUT_MS },
       );
@@ -779,7 +858,8 @@ async function run() {
     for (const viewport of viewports) {
       console.log(`[three:screenshot] ${viewport.name}: capture`);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await page.waitForTimeout(SETTLE_MS);
+      if (SETTLE_MS > 0) await page.waitForTimeout(SETTLE_MS);
+      await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
       const health = await canvasPixelHealth(page);
       const screenshot = path.join(outDir, screenshotName(viewport.name));
       const captureStartedAt = Date.now();
@@ -799,6 +879,7 @@ async function run() {
     }
     await page.close();
   } finally {
+    if (runWatchdog) clearTimeout(runWatchdog);
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
     await closeBrowser();

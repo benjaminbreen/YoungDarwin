@@ -51,7 +51,12 @@ function ObstacleCollider({ obstacle }) {
       colliders={false}
       position={[obstacle.x, baseY, obstacle.z]}
       rotation={[0, obstacle.yaw, 0]}
-      userData={{ id: obstacle.id, kind: obstacle.kind }}
+      userData={{
+        id: obstacle.id,
+        kind: obstacle.kind,
+        zoneId: obstacle.zoneId,
+        spineHazard: obstacle.spineHazard || null,
+      }}
     >
       <PhysicsColliderDefinition collider={collider} scale={obstacle.scale} />
     </RigidBody>

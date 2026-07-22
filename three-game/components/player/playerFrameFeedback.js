@@ -1,25 +1,26 @@
 import * as THREE from 'three';
-import { getRuntimeFootContacts, useThreeGameStore } from '../../store';
+import { useThreeGameStore } from '../../store';
 import { BUMP_FEEDBACK, PLAYER } from './playerConfig';
 import { orientDebugVector } from './playerUtils';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const horizontalVelocity = new THREE.Vector3();
 const localVelocity = new THREE.Vector3();
+const IDLE_STANCE_ALIGNMENT_BOOST = 2.5;
+const IDLE_STANCE_ALIGNMENT_SPEED = 0.8;
+const IDLE_STANCE_MAX_TILT = 0.17;
 
 export function updatePlayerFrameFeedback({
   group,
   warningRef,
   modelFeedbackRef,
   stateRef,
-  contactShadowRef,
   debugCollisionRef,
   debugMovementRef,
   bounceFeedback,
   velocity,
   terrainFeedback,
   lastModelYaw,
-  collisionAdapter,
   characterDebug,
   viewMode,
   physicsDebug,
@@ -60,8 +61,26 @@ export function updatePlayerFrameFeedback({
     const slope = terrainFeedback.current;
     const collisionLean = feedbackEase * feedback.intensity * 0.105;
     const slopePitch = THREE.MathUtils.clamp(slope.grade * slope.uphillDot * -0.18, -0.12, 0.09);
-    const stancePitch = THREE.MathUtils.clamp(slope.stancePitch || 0, -0.09, 0.09);
-    const stanceRoll = THREE.MathUtils.clamp(slope.stanceRoll || 0, -0.09, 0.09);
+    // The controller's stance plane is deliberately subtle in motion. At rest
+    // it can align much more closely to the ground beneath both boots, which
+    // removes the persistent uphill-foot/downhill-foot gap without touching
+    // or stretching either leg bone.
+    const idleStanceBlend = 1 - THREE.MathUtils.clamp(
+      horizontalVelocity.length() / IDLE_STANCE_ALIGNMENT_SPEED,
+      0,
+      1,
+    );
+    const stanceAlignment = THREE.MathUtils.lerp(1, IDLE_STANCE_ALIGNMENT_BOOST, idleStanceBlend);
+    const stancePitch = THREE.MathUtils.clamp(
+      (slope.stancePitch || 0) * stanceAlignment,
+      -IDLE_STANCE_MAX_TILT,
+      IDLE_STANCE_MAX_TILT,
+    );
+    const stanceRoll = THREE.MathUtils.clamp(
+      (slope.stanceRoll || 0) * stanceAlignment,
+      -IDLE_STANCE_MAX_TILT,
+      IDLE_STANCE_MAX_TILT,
+    );
     // Step smoothing playback: PlayerController banks sharp grounded Y snaps
     // (obstacle step-ups/downs) into stepSmoothOffset. Ease it back to zero so
     // the model visibly rises or settles through the step while the collider
@@ -109,37 +128,6 @@ export function updatePlayerFrameFeedback({
     modelFeedbackRef.current.scale.x = THREE.MathUtils.damp(modelFeedbackRef.current.scale.x, squashXZ, 22, delta);
     modelFeedbackRef.current.scale.y = THREE.MathUtils.damp(modelFeedbackRef.current.scale.y, squashY, 22, delta);
     modelFeedbackRef.current.scale.z = THREE.MathUtils.damp(modelFeedbackRef.current.scale.z, squashXZ, 22, delta);
-  }
-
-  if (contactShadowRef.current) {
-    const shadowGround = collisionAdapter.groundInfo(group.current.position);
-    // The character stands on a smoothed movement surface, but the rendered
-    // terrain keeps sharper visual relief. Place the decal on the visual
-    // surface so it does not disappear under bumps or coral/sand detail.
-    const visualGroundY = Number.isFinite(shadowGround.terrainY)
-      ? Math.max(shadowGround.y, shadowGround.terrainY)
-      : shadowGround.y;
-    const groundOffset = visualGroundY - group.current.position.y + 0.026;
-    const airGap = Math.max(0, group.current.position.y - shadowGround.y);
-    const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
-    const airborneFade = THREE.MathUtils.clamp(1 - airGap / 3.2, 0, 1);
-    const speedScale = THREE.MathUtils.clamp(horizontalSpeed / PLAYER.runSpeed, 0, 1);
-    contactShadowRef.current.position.y = groundOffset;
-    contactShadowRef.current.scale.set(
-      0.72 + speedScale * 0.18 + airGap * 0.045,
-      0.5 + speedScale * 0.08 + airGap * 0.025,
-      1,
-    );
-    // Fake contact-AO, so a touch fainter at night (no hard sun to cast it).
-    const hour = storeState.timeOfDay ?? 12;
-    const dayFactor = (hour >= 8 && hour <= 17) ? 1 : (hour < 5 || hour > 20) ? 0.7 : 0.85;
-    const feet = getRuntimeFootContacts();
-    const plantedFeet = Math.max(feet.left.contact || 0, feet.right.contact || 0);
-    const bothPlanted = Math.min(feet.left?.contact || 0, feet.right?.contact || 0);
-    contactShadowRef.current.scale.x *= 1 - bothPlanted * 0.08;
-    contactShadowRef.current.scale.y *= 1 - bothPlanted * 0.06;
-    contactShadowRef.current.material.opacity = (0.22 + plantedFeet * 0.04 + bothPlanted * 0.04) * airborneFade * dayFactor;
-    contactShadowRef.current.visible = airborneFade > 0.02;
   }
 
   if (physicsDebug) {

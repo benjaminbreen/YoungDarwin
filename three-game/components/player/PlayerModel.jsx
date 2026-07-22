@@ -17,6 +17,7 @@ import { isInteriorZone } from '../../interiors/interiorRegistry';
 import { CarriedPropAttachment } from './CarriedPropAttachment';
 import { getZoneProps } from '../../physics/props/propRegistry';
 import { carryGripForProp } from './carryProfiles';
+import { WetBoots } from './WetBoots';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -67,6 +68,8 @@ const DARWIN5_HAMMER_GRIP_OFFSET = [0.0, 0.05, 0.02];
 const DARWIN5_HAMMER_BODY_CARRY_EULER = [Math.PI / 4, Math.PI / 2, 0];
 // Post-alignment roll trim for the swing so the pick faces the strike.
 const DARWIN5_HAMMER_SWING_EULER = [0, 0, 0];
+const POCKET_KNIFE_MODEL_PATH = getModelAsset('pocketKnifeTool')?.path
+  || '/assets/models/tools/pocket-knife.glb';
 const SNARE_NOOSE_POINTS = Object.freeze([
   new THREE.Vector3(0.006, -0.018, 0),
   new THREE.Vector3(0.064, -0.13, 0.018),
@@ -552,15 +555,31 @@ const HAND_TOOLS = [
       },
     },
   },
+  {
+    toolId: 'pocket_knife',
+    path: POCKET_KNIFE_MODEL_PATH,
+    scale: 1,
+    position: [0, 0.036, 0.018],
+    euler: [0, 0, 0],
+    hand: 'right',
+    orient: 'hand',
+    modelOverrides: {
+      darwin5: {
+        bone: RIGHT_HAND,
+        position: [0, 0.036, 0.018],
+        euler: [0, 0, 0],
+        orient: 'hand',
+      },
+    },
+  },
 ];
 
 const PLAYER_MODEL_CYCLE = Array.from(new Set([
   DEFAULT_PLAYER_MODEL_ASSET_ID,
-  'darwin5BlinkPreview',
+  'darwin5LocomotionPreview',
   'darwin4',
   'darwin',
   'darwinCandidate2',
-  'darwin5',
 ]));
 
 function darwin5StandingJumpRequest(charge, jumpPhase) {
@@ -613,7 +632,8 @@ function darwin5TorchActionClip(action, crouching) {
 
 function darwin5HeldToolActionClip(action) {
   if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
-  if (action === 'swingHammer' || action === 'swingTool' || action === 'heavyToolSwing') return 'heavyToolSwing';
+  if (action === 'swingTool') return 'swingTool';
+  if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
   return null;
 }
 
@@ -1033,6 +1053,7 @@ export function NaturalistModel({
   grounding = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
+  onVisualReady = null,
 }) {
   const [selectedModelAssetId, setSelectedModelAssetId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
   const modelAssetId = getModelAsset(selectedModelAssetId)?.playerProfile || selectedModelAssetId;
@@ -1041,6 +1062,10 @@ export function NaturalistModel({
   const previousHealth = useRef(health);
   const damageFlashRef = useRef({ startedAt: -10, duration: 0.58 });
   const statusRef = useRef({ health, fatigue, inventoryCount });
+  const handleSceneReady = useCallback(scene => {
+    setModelScene(scene);
+    if (scene) onVisualReady?.();
+  }, [onVisualReady]);
 
   useEffect(() => {
     if (health < previousHealth.current - 0.01) {
@@ -1054,7 +1079,10 @@ export function NaturalistModel({
   }, [health, fatigue, inventoryCount]);
 
   useEffect(() => {
-    if (motionRef?.current) motionRef.current.modelAssetId = modelAssetId;
+    if (motionRef?.current) {
+      motionRef.current.modelAssetId = modelAssetId;
+      motionRef.current.modelVariantId = selectedModelAssetId;
+    }
     if (typeof window === 'undefined') return undefined;
     window.__darwinPlayerModel = selectedModelAssetId;
     // Shift+9 cycles stable models plus explicitly scoped visual-review
@@ -1070,6 +1098,7 @@ export function NaturalistModel({
         window.__darwinPlayerModel = next;
         if (motionRef?.current) {
           motionRef.current.modelAssetId = getModelAsset(next)?.playerProfile || next;
+          motionRef.current.modelVariantId = next;
         }
         return next;
       });
@@ -1145,7 +1174,12 @@ export function NaturalistModel({
       : null;
     const freeHandCarry = Boolean(carriedProp)
       && carryGripForProp(carriedProp).animationStyle === 'freeHand';
-    const holdingTool = !carryingObject && (toolId === 'insect_net' || toolId === 'snare' || toolId === 'hammer');
+    const holdingTool = !carryingObject && (
+      toolId === 'insect_net'
+      || toolId === 'snare'
+      || toolId === 'hammer'
+      || toolId === 'pocket_knife'
+    );
     const hasRifle = !carryingObject && toolId === 'shotgun';
     const lampMode = modelAssetId === 'darwin5'
       && !carryingObject
@@ -1156,6 +1190,14 @@ export function NaturalistModel({
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
     if (motionRef.current.action) {
+      if (motionRef.current.modelVariantId === 'darwin5LocomotionPreview') {
+        if (motionRef.current.action === 'startWalking') {
+          return { clip: 'startWalking', timeScale: 1.25, fade: 0.08 };
+        }
+        if (motionRef.current.action === 'stopWalking') {
+          return { clip: 'stopWalking', timeScale: 1.5, fade: 0.1 };
+        }
+      }
       if (modelAssetId === 'darwin5' && motionRef.current.action === 'pickUp') {
         // The source clip contains a long lead-in and recovery. Retiming the
         // useful reach/lift section lets the item attach near hand contact and
@@ -1356,7 +1398,7 @@ export function NaturalistModel({
       if (motionRef.current.running) return { clip: 'torchRun', timeScale: stride('run', runScale) };
       if (motionRef.current.walking) return { clip: 'torchWalk', timeScale: stride('torchWalk', walkScale) };
     }
-    // Carrying a handheld tool (net/snare/hammer): held walk, paralleling the rifle set.
+    // Carrying a handheld tool (net/snare/hammer/knife): held walk, paralleling the rifle set.
     if (holdingTool && (motionRef.current.walking || motionRef.current.running)) {
       return { clip: 'holdWalk', timeScale: stride('holdWalk', Math.max(0.7, walkScale)) };
     }
@@ -1412,7 +1454,7 @@ export function NaturalistModel({
         overlaySelector={selectUpperBodyOverlay}
         damageFlash={damageFlash}
         reflect
-        onSceneReady={setModelScene}
+        onSceneReady={handleSceneReady}
         grounding={grounding}
         animationBankPhase={animationBankPhase}
         onAnimationBanksReady={onAnimationBanksReady}
@@ -1423,6 +1465,7 @@ export function NaturalistModel({
         <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} motionRef={motionRef} />
       ))}
       {modelScene && <CarriedPropAttachment scene={modelScene} />}
+      {modelScene && <WetBoots scene={modelScene} motionRef={motionRef} />}
     </>
   );
 }

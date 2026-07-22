@@ -82,13 +82,23 @@ export function capHorizontalVelocity(velocity = {}, maxSpeed = DEFAULT_MOBILITY
   };
 }
 
-export function mobilityMaxSpeed(mobility) {
+export function mobilityMaxSpeed(mobility, { rolling = false, floating = false } = {}) {
   const config = normalizeMobility(mobility);
   const assistSpeed = config.assistSpeed ?? config.strength ?? DEFAULT_MOBILITY.strength;
-  return Math.max(
+  const baseMax = Math.max(
     0.05,
     config.contactMaxSpeed ?? config.maxSpeed ?? Math.max(DEFAULT_MOBILITY.maxSpeed, assistSpeed),
   );
+  if (floating) return Math.max(0.05, config.floatingMaxSpeed ?? baseMax);
+  if (rolling) return Math.max(0.05, config.rollingMaxSpeed ?? baseMax);
+  return baseMax;
+}
+
+function mobilityAssistSpeed(config, { rolling = false, floating = false } = {}) {
+  const base = config.assistSpeed ?? config.strength ?? DEFAULT_MOBILITY.strength;
+  if (floating) return Math.max(0, config.floatingAssistSpeed ?? base);
+  if (rolling) return Math.max(0, config.rollingAssistSpeed ?? base);
+  return Math.max(0, base);
 }
 
 function movePlanarVelocityToward(velocity, targetX, targetZ, maxChange) {
@@ -116,15 +126,21 @@ export function computeControlledPushVelocity({
   impactSpeed = 0,
   sustainedTime = 0,
   delta = 1 / 60,
+  rolling = false,
+  floating = false,
 }) {
   const config = normalizeMobility(mobility);
   if (!canPushObject(config) || config.mode === 'fixed') return { ...velocity };
 
   const safeMass = Math.max(0.1, Number.isFinite(mass) ? mass : 1);
-  const onset = Number.isFinite(config.contactDelay)
+  const baseOnset = Number.isFinite(config.contactDelay)
     ? Math.max(0, config.contactDelay)
     : THREE.MathUtils.clamp((safeMass - 12) / 240, 0, 0.28);
-  const maxSpeed = mobilityMaxSpeed(config);
+  // A round barrel starts rolling sooner than an equally heavy crate starts
+  // sliding. Water removes the ground-friction threshold almost entirely.
+  const onset = baseOnset * (floating ? 0.25 : rolling ? 0.55 : 1);
+  const context = { rolling, floating };
+  const maxSpeed = mobilityMaxSpeed(config, context);
   const current = capHorizontalVelocity(velocity, maxSpeed);
   if (sustainedTime < onset) {
     return {
@@ -138,13 +154,23 @@ export function computeControlledPushVelocity({
   const length = Math.hypot(direction.x || 0, direction.z || 0) || 1;
   const dx = (direction.x || 0) / length;
   const dz = (direction.z || 0) / length;
-  const effort = THREE.MathUtils.clamp((sustainedTime - onset) / 0.36, 0, 1);
-  const contactEnergy = THREE.MathUtils.clamp(impactSpeed / 4.45, 0.55, 1);
-  const authoredSpeed = Math.max(0, config.assistSpeed ?? config.strength ?? DEFAULT_MOBILITY.strength);
-  const targetSpeed = Math.min(maxSpeed, authoredSpeed * (0.35 + effort * 0.65) * contactEnergy);
-  const acceleration = Number.isFinite(config.pushAcceleration)
+  const effortSeconds = Math.max(
+    0.05,
+    floating
+      ? (config.floatingEffortRampSeconds ?? 0.2)
+      : rolling
+        ? (config.rollingEffortRampSeconds ?? 0.28)
+        : (config.effortRampSeconds ?? 0.36),
+  );
+  const effort = THREE.MathUtils.clamp((sustainedTime - onset) / effortSeconds, 0, 1);
+  const contactEnergy = THREE.MathUtils.clamp(impactSpeed / 4.45, 0.45, 1);
+  const authoredSpeed = mobilityAssistSpeed(config, context);
+  const entrySpeed = Math.min(maxSpeed * contactEnergy, authoredSpeed * (0.65 + contactEnergy * 0.35));
+  const targetSpeed = THREE.MathUtils.lerp(entrySpeed, maxSpeed * contactEnergy, effort);
+  const baseAcceleration = Number.isFinite(config.pushAcceleration)
     ? Math.max(0, config.pushAcceleration)
     : THREE.MathUtils.clamp(11 / Math.sqrt(safeMass), 0.8, 3.2);
+  const acceleration = baseAcceleration * (floating ? 1.75 : rolling ? 1.35 : 1);
   const next = movePlanarVelocityToward(
     current,
     dx * targetSpeed,
@@ -157,6 +183,51 @@ export function computeControlledPushVelocity({
     y: Math.min(current.y || 0, 0.02),
     z: next.z,
   }, maxSpeed);
+}
+
+// Turn the authored target-velocity step into a real Rapier impulse. Applying
+// this at the collision witness preserves the bounded linear response while
+// allowing the body's mass properties and contact point to generate roll.
+export function computeContactPushImpulse({
+  velocity = {},
+  targetVelocity = {},
+  direction = {},
+  mass = 1,
+} = {}) {
+  const length = Math.hypot(direction.x || 0, direction.z || 0) || 1;
+  const dx = (direction.x || 0) / length;
+  const dz = (direction.z || 0) / length;
+  const deltaAlong = (
+    ((targetVelocity.x || 0) - (velocity.x || 0)) * dx
+    + ((targetVelocity.z || 0) - (velocity.z || 0)) * dz
+  );
+  const impulse = Math.max(0, deltaAlong) * Math.max(0.001, Number(mass) || 1);
+  return { x: dx * impulse, y: 0, z: dz * impulse };
+}
+
+// Heavy box props get a modest shoulder-leverage assist only after the player
+// has kept pressure on them. This supplies the missing overturning moment once
+// Rapier's ground contact has absorbed the initial shove, without increasing
+// the crate's linear speed or faking a lighter mass.
+export function computeSustainedPushTorque({
+  direction = {},
+  mobility,
+  sustainedTime = 0,
+  impactSpeed = 0,
+} = {}) {
+  const config = normalizeMobility(mobility);
+  const maxTorque = Math.max(0, Number(config.tipAssistTorque) || 0);
+  const delay = Math.max(0, Number(config.tipAssistDelay) || 0);
+  if (maxTorque <= 0 || sustainedTime <= delay) return { x: 0, y: 0, z: 0 };
+
+  const rampSeconds = Math.max(0.05, Number(config.tipAssistRampSeconds) || 1);
+  const effort = THREE.MathUtils.clamp((sustainedTime - delay) / rampSeconds, 0, 1);
+  const contactEnergy = THREE.MathUtils.clamp(impactSpeed / 4.45, 0.45, 1);
+  const length = Math.hypot(direction.x || 0, direction.z || 0) || 1;
+  const dx = (direction.x || 0) / length;
+  const dz = (direction.z || 0) / length;
+  const torque = maxTorque * effort * contactEnergy;
+  return { x: dz * torque, y: 0, z: -dx * torque };
 }
 
 // A landing should make a loose prop settle and wobble, never launch it. The
@@ -191,9 +262,9 @@ export function computeLandingSettleMotion({
   };
 }
 
-export function mobilityVelocityCaps(mobility) {
+export function mobilityVelocityCaps(mobility, context = {}) {
   const config = normalizeMobility(mobility);
-  const maxSpeed = mobilityMaxSpeed(config);
+  const maxSpeed = mobilityMaxSpeed(config, context);
   return {
     horizontalMaxSpeed: maxSpeed,
     struckHorizontalMaxSpeed: config.struckMaxSpeed ?? Math.max(maxSpeed * 2.8, 1.8),

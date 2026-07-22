@@ -62,6 +62,8 @@ const AUTHORED_REGION_TERRAIN = {
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   POST_SCRUB_RISE: { preset: 'post-office-scrub-rise', segments: 280 },
+  COASTAL_SCRUBLAND: { preset: 'eastern-coastal-scrubland', segments: 248 },
+  EASTERN_CLIFFS: { preset: 'eastern-frigatebird-cliffs', segments: 288 },
   // Packed material relief carries the close detail, allowing a lighter mesh
   // than Scrub Rise without sacrificing the rolling highland silhouette.
   NORTHERN_HIGHLANDS: { preset: 'northern-highlands-transition-scrub', segments: 240 },

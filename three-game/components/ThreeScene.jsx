@@ -25,6 +25,7 @@ export function ThreeScene({
   openingCamera = null,
   inputLocked = false,
   onPlayerAnimationBanksReady = null,
+  onPlayerVisualReady = null,
 }) {
   const settings = perfSettings || {};
   const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
@@ -75,14 +76,22 @@ export function ThreeScene({
       )}
       <PhysicsProvider debug={settings.physicsDebug === true}>
         <FaunaFrameScheduler />
-        <ActiveZoneContent settings={settings} contentPhase={stagedPhase} />
-        <PlayerController
-          physicsDebug={settings.physicsDebug === true}
-          openingCamera={openingCamera}
-          inputLocked={inputLocked}
-          animationBankPhase={stagedPhase}
-          onAnimationBanksReady={onPlayerAnimationBanksReady}
-        />
+        {/* World and player stream independently. A late prop/specimen GLB can
+            no longer blank Darwin, and a deferred animation bank can no
+            longer blank the island. */}
+        <Suspense fallback={null}>
+          <ActiveZoneContent settings={settings} contentPhase={stagedPhase} />
+        </Suspense>
+        <Suspense fallback={null}>
+          <PlayerController
+            physicsDebug={settings.physicsDebug === true}
+            openingCamera={openingCamera}
+            inputLocked={inputLocked}
+            animationBankPhase={stagedPhase}
+            onAnimationBanksReady={onPlayerAnimationBanksReady}
+            onVisualReady={onPlayerVisualReady}
+          />
+        </Suspense>
       </PhysicsProvider>
       {outdoors && <GroundedWorldFX
         enabled={environmentReady && settings.worldDetails !== false}

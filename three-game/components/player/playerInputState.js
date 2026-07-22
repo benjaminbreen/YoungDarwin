@@ -6,6 +6,7 @@ const SHORTCUT_SENSITIVE_BUTTONS = [
   'pray',
   'fireRifle',
   'hammer',
+  'knife',
   'net',
   'snare',
   'gather',
@@ -66,9 +67,9 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   const dodgePressed = Boolean(keys.dodge || touch.dodge);
   const jumpPressed = Boolean(keys.jump || touch.jump);
   const anyDirectActionPressed = Boolean(
-    keys.pray || keys.fireRifle || keys.hammer || keys.net || keys.gather || keys.write || keys.inspect
+    keys.pray || keys.fireRifle || keys.hammer || keys.knife || keys.net || keys.gather || keys.write || keys.inspect
     || keys.lookAround || keys.point || keys.trip || keys.teeter || keys.sit || keys.rest
-    || touch.net || touch.snare || touch.hammer || touch.gather || touch.fireRifle || touch.write || touch.inspect
+    || touch.net || touch.snare || touch.hammer || touch.knife || touch.gather || touch.fireRifle || touch.write || touch.inspect
     || touch.animalEat || touch.animalSleep || touch.animalDefecate
   );
 

@@ -381,6 +381,7 @@ function fatigueLabel(value) {
 
 export function TravelInterstitial() {
   const transition = useThreeGameStore(state => state.transition);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const commitZoneTransition = useThreeGameStore(state => state.commitZoneTransition);
   const setZoneTransitionPhase = useThreeGameStore(state => state.setZoneTransitionPhase);
   const finishZoneTransition = useThreeGameStore(state => state.finishZoneTransition);
@@ -393,6 +394,17 @@ export function TravelInterstitial() {
   const transitionPhase = transition?.phase || null;
   const transitionStartedAt = transition?.startedAt || 0;
   const transitionArrivingAt = transition?.arrivingAt || 0;
+  const standbyTransition = useMemo(() => {
+    const location = getIslandMapLocation(currentZoneId);
+    return {
+      id: `standby:${currentZoneId}`,
+      fromZoneId: currentZoneId,
+      zoneId: currentZoneId,
+      mode: 'island',
+      to: location?.name || '',
+    };
+  }, [currentZoneId]);
+  const displayedTransition = transition || standbyTransition;
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -465,14 +477,16 @@ export function TravelInterstitial() {
     return () => window.clearTimeout(finishTimer);
   }, [finishZoneTransition, reducedMotion, transitionArrivingAt, transitionId, transitionMode, transitionPhase]);
 
-  if (!transition) return null;
-  const isIsland = transition.mode !== 'threshold';
-  const minutes = Number(transition.minutes) > 0 ? `about ${Math.round(transition.minutes)} minutes` : null;
-  const fatigue = fatigueLabel(Number(transition.fatigue));
+  const active = Boolean(transition);
+  const isIsland = displayedTransition.mode !== 'threshold';
+  const minutes = Number(displayedTransition.minutes) > 0
+    ? `about ${Math.round(displayedTransition.minutes)} minutes`
+    : null;
+  const fatigue = fatigueLabel(Number(displayedTransition.fatigue));
 
   return (
     <div
-      className={`pointer-events-auto fixed inset-0 z-40 select-none overflow-hidden bg-[#11100d] font-expedition text-expedition-parchment transition-opacity ${
+      className={`${active ? 'pointer-events-auto' : 'pointer-events-none'} fixed inset-0 z-40 select-none overflow-hidden bg-[#11100d] font-expedition text-expedition-parchment transition-opacity ${
         revealing ? 'opacity-0' : covered ? 'opacity-100' : 'opacity-0'
       }`}
       style={{
@@ -493,10 +507,11 @@ export function TravelInterstitial() {
         window.__recordThreeTransitionEvent?.('chart-opaque');
         commitZoneTransition(transitionId);
       }}
-      aria-live="polite"
+      aria-hidden={!active}
+      aria-live={active ? 'polite' : 'off'}
     >
       {isIsland ? (
-        <IslandChart transition={transition} reducedMotion={reducedMotion} active={covered} />
+        <IslandChart transition={displayedTransition} reducedMotion={reducedMotion} active={covered} />
       ) : (
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(67,58,38,0.5),rgba(12,11,9,0.98)_72%)]" />
       )}
@@ -506,11 +521,11 @@ export function TravelInterstitial() {
             {isIsland ? 'Across Charles Island' : 'Crossing the threshold'}
           </p>
           <h2 className="mt-2 text-2xl font-semibold tracking-[0.035em] text-expedition-parchment sm:text-3xl">
-            {transition.to}
+            {displayedTransition.to}
           </h2>
-          {transition.note && (
+          {displayedTransition.note && (
             <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-expedition-parchment/82">
-              {transition.note}
+              {displayedTransition.note}
             </p>
           )}
           {(minutes || fatigue) && (

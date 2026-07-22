@@ -1,21 +1,71 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useFrame } from '@react-three/fiber';
 import { getThreeSpecimens } from '../data';
 import { setTouchControl } from '../input/touchControls';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../world/specimenRuntime';
-import { prepareTerrainResource } from '../world/terrainResource';
-import { prepareBorderVistaResource } from '../world/vistas/borderVistaResource';
-import { prepareRegionEcologyResource } from '../world/ecology/ecologyResource';
+import { getRegionMap } from '../../game-core/regionMaps';
+import { getInteriorDefinition } from '../interiors/interiorRegistry';
+import { prepareTerrainResource, terrainResourceIsReady } from '../world/terrainResource';
+import {
+  borderVistaResourceIsReady,
+  prepareBorderVistaResource,
+} from '../world/vistas/borderVistaResource';
+import {
+  prepareRegionEcologyResource,
+  regionEcologyResourceIsReady,
+} from '../world/ecology/ecologyResource';
 import { prefetchRegionTerrainTextures } from '../world/terrainPrefetch';
+import {
+  prepareWaterTextureResource,
+  waterTextureResourceIsReady,
+} from '../world/waterTextureResource';
+import {
+  regionTypeRendersDetailedWater,
+  waterBakeResolutionForQuality,
+  waterContactResolutionForQuality,
+} from '../world/waterTextureManifest';
+import { ecologyIsCached } from '../world/ecology';
+import { prefetchIslandMapImage } from '../ui/expedition/map/islandLocations';
 
-const HARNESS_VERSION = 1;
+const HARNESS_VERSION = 3;
+const FULL_CONTENT_PHASE = 6;
+
+let renderRuntime = {
+  activeContentPhase: 0,
+  contentTarget: FULL_CONTENT_PHASE,
+  renderer: null,
+  gameStarted: false,
+  sceneReady: false,
+  launchOverlayDismissed: false,
+  playerVisualReady: false,
+  playerAnimationBanksReady: false,
+  loadersStable: false,
+  terrainSegmentCap: null,
+  waterEnabled: true,
+  waterQuality: 'polished',
+  worldDetailsEnabled: true,
+};
+
+let frameRuntime = {
+  candidateKey: null,
+  frameRevision: 0,
+  stableFrames: 0,
+  lastFrameAt: 0,
+};
+
+let progressRuntime = {
+  key: '',
+  revision: 0,
+  lastProgressAt: 0,
+};
 
 function isE2EEnabled() {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
-  return params.has('e2e') || params.get('testMode') === 'e2e';
+  return params.has('e2e') || params.has('screenshot') || params.get('testMode') === 'e2e';
 }
 
 function finiteNumber(value, fallback = 0) {
@@ -117,6 +167,145 @@ function gameplayHudReady() {
   return Boolean(document.querySelector('button[aria-label^="View "]'));
 }
 
+function waterResourceDescriptor(zoneId) {
+  const interior = getInteriorDefinition(zoneId);
+  const openOceanOnly = Boolean(interior);
+  const detailedSurface = regionTypeRendersDetailedWater(getRegionMap(zoneId).type);
+  return {
+    skip: renderRuntime.waterEnabled === false
+      || interior?.scene?.water === false
+      || (!openOceanOnly && !detailedSurface),
+    bakeRes: waterBakeResolutionForQuality(renderRuntime.waterQuality),
+    options: {
+      contactRes: waterContactResolutionForQuality(renderRuntime.waterQuality),
+      openOceanOnly,
+    },
+  };
+}
+
+function makeReadiness({ trackProgress = true } = {}) {
+  const state = useThreeGameStore.getState();
+  const zoneId = state.currentZoneId;
+  const phase = finiteNumber(renderRuntime.activeContentPhase);
+  const phaseTarget = state.transition ? FULL_CONTENT_PHASE : finiteNumber(renderRuntime.contentTarget, FULL_CONTENT_PHASE);
+  const canvas = visibleCanvasInfo();
+  const launchOverlay = launchOverlayInfo();
+  const interior = getInteriorDefinition(zoneId);
+  const waterResource = waterResourceDescriptor(zoneId);
+  const resources = {
+    terrain: terrainResourceIsReady(zoneId, renderRuntime.terrainSegmentCap),
+    border: Boolean(interior) || phaseTarget < 2 || borderVistaResourceIsReady(zoneId),
+    ecology: Boolean(interior)
+      || renderRuntime.worldDetailsEnabled === false
+      || phaseTarget < 3
+      || (state.transition
+        ? regionEcologyResourceIsReady(zoneId)
+        : ecologyIsCached(zoneId)),
+    water: waterResource.skip || waterTextureResourceIsReady(
+      zoneId,
+      waterResource.bakeRes,
+      waterResource.options,
+    ),
+    playerVisual: Boolean(renderRuntime.playerVisualReady),
+    playerAnimationBanks: state.playableModeId !== 'darwin'
+      || Boolean(renderRuntime.playerAnimationBanksReady),
+  };
+  const blockers = [];
+  if (!renderRuntime.gameStarted) blockers.push('game-not-started');
+  if (!canvas) blockers.push('canvas-missing');
+  if (!renderRuntime.sceneReady) blockers.push('scene-not-committed');
+  if (!renderRuntime.launchOverlayDismissed || launchOverlay) blockers.push('launch-overlay-visible');
+  if (phase < phaseTarget) blockers.push(`content-phase-${phase}-of-${phaseTarget}`);
+  for (const [name, ready] of Object.entries(resources)) {
+    if (!ready) blockers.push(`resource-${name}`);
+  }
+
+  const visualCandidate = blockers.length === 0;
+  const candidateKey = visualCandidate
+    ? `${zoneId}:${state.transition?.id || 'settled'}:${phaseTarget}`
+    : null;
+  const stableFrames = frameRuntime.candidateKey === candidateKey ? frameRuntime.stableFrames : 0;
+  const sceneCommitted = Boolean(renderRuntime.sceneReady && canvas && frameRuntime.frameRevision > 0);
+  const visualReady = visualCandidate && sceneCommitted && stableFrames >= 2;
+  const readiness = {
+    version: HARNESS_VERSION,
+    revision: progressRuntime.revision,
+    lastProgressAt: progressRuntime.lastProgressAt || null,
+    shellReady: Boolean(renderRuntime.gameStarted && canvas),
+    sceneCommitted,
+    overlayDismissed: Boolean(renderRuntime.launchOverlayDismissed && !launchOverlay),
+    criticalResourcesReady: Object.values(resources).every(Boolean),
+    renderPassReady: visualReady,
+    visualReady,
+    gameplayReady: visualReady && gameplayHudReady(),
+    zoneId,
+    transitionPhase: state.transition?.phase || null,
+    contentPhase: phase,
+    contentTarget: phaseTarget,
+    frameRevision: frameRuntime.frameRevision,
+    stableFrames,
+    lastFrameAt: frameRuntime.lastFrameAt || null,
+    resources,
+    blockers,
+    renderer: renderRuntime.renderer,
+    backgroundLoadingStable: Boolean(renderRuntime.loadersStable),
+  };
+
+  if (trackProgress) {
+    const progressKey = JSON.stringify({
+      zoneId,
+      transitionPhase: readiness.transitionPhase,
+      contentPhase: phase,
+      blockers,
+      frameCandidate: frameRuntime.candidateKey,
+      stableFrames,
+    });
+    if (progressRuntime.key !== progressKey) {
+      progressRuntime = {
+        key: progressKey,
+        revision: progressRuntime.revision + 1,
+        lastProgressAt: performance.now(),
+      };
+      readiness.revision = progressRuntime.revision;
+      readiness.lastProgressAt = progressRuntime.lastProgressAt;
+    }
+  }
+
+  return readiness;
+}
+
+function recordPresentedFrame() {
+  const readiness = makeReadiness({ trackProgress: false });
+  const candidateKey = readiness.blockers.length === 0
+    ? `${readiness.zoneId}:${useThreeGameStore.getState().transition?.id || 'settled'}:${readiness.contentTarget}`
+    : null;
+  const sameCandidate = candidateKey && frameRuntime.candidateKey === candidateKey;
+  frameRuntime = {
+    candidateKey,
+    frameRevision: frameRuntime.frameRevision + 1,
+    stableFrames: candidateKey ? (sameCandidate ? frameRuntime.stableFrames + 1 : 1) : 0,
+    lastFrameAt: performance.now(),
+  };
+}
+
+function readinessRequirementsMet(readiness, requirements = {}) {
+  if (requirements.shellReady === true && !readiness.shellReady) return false;
+  if (requirements.sceneCommitted === true && !readiness.sceneCommitted) return false;
+  if (requirements.visualReady === true && !readiness.visualReady) return false;
+  if (requirements.gameplayReady === true && !readiness.gameplayReady) return false;
+  if (requirements.criticalResourcesReady === true && !readiness.criticalResourcesReady) return false;
+  if (Number.isFinite(requirements.contentPhaseAtLeast)
+    && readiness.contentPhase < requirements.contentPhaseAtLeast) return false;
+  if (requirements.zoneId && readiness.zoneId !== requirements.zoneId) return false;
+  if (requirements.transitionPhase !== undefined
+    && readiness.transitionPhase !== requirements.transitionPhase) return false;
+  if (Number.isFinite(requirements.afterFrame)) {
+    const framesAfter = Math.max(1, finiteNumber(requirements.framesAfter, 1));
+    if (readiness.frameRevision < requirements.afterFrame + framesAfter) return false;
+  }
+  return true;
+}
+
 function makeSnapshot() {
   const state = useThreeGameStore.getState();
   const pose = getRuntimePlayerPose() || state.playerPose;
@@ -201,6 +390,10 @@ function makeSnapshot() {
     canvas: visibleCanvasInfo(),
     launchOverlay: launchOverlayInfo(),
     gameplayHudReady: gameplayHudReady(),
+    activeContentPhase: finiteNumber(renderRuntime.activeContentPhase),
+    contentSettled: finiteNumber(renderRuntime.activeContentPhase) >= 6,
+    renderer: renderRuntime.renderer,
+    readiness: makeReadiness(),
   };
 }
 
@@ -265,11 +458,25 @@ function waitForPredicate(predicate, timeoutMs = 75000, label = 'condition') {
   });
 }
 
+function waitForReadiness(requirements = {}, timeoutMs = 75000) {
+  return waitForPredicate(() => {
+    const readiness = makeReadiness();
+    return readinessRequirementsMet(readiness, requirements)
+      ? { readiness, state: makeSnapshot() }
+      : null;
+  }, timeoutMs, `readiness ${JSON.stringify(requirements)}`).catch(error => {
+    const readiness = makeReadiness();
+    throw new Error(`${error.message} Last readiness: ${JSON.stringify(readiness)}`);
+  });
+}
+
 function createHarnessApi() {
   const api = {
     version: HARNESS_VERSION,
     isEnabled: () => true,
     getState: () => makeSnapshot(),
+    getReadiness: () => makeReadiness(),
+    waitForReadiness,
     getPlayerPose: () => makeSnapshot().playerPose,
     getExamineSubjectDebug: () => {
       const state = useThreeGameStore.getState();
@@ -286,14 +493,8 @@ function createHarnessApi() {
           : null,
       };
     },
-    waitForSceneReady: (timeoutMs = 75000) => waitForPredicate(() => {
-      const snapshot = makeSnapshot();
-      return snapshot.canvas && !snapshot.launchOverlay ? snapshot : null;
-    }, timeoutMs, '3D scene readiness'),
-    waitForGameplayReady: (timeoutMs = 75000) => waitForPredicate(() => {
-      const snapshot = makeSnapshot();
-      return snapshot.canvas && !snapshot.launchOverlay && snapshot.gameplayHudReady ? snapshot : null;
-    }, timeoutMs, '3D gameplay HUD readiness'),
+    waitForSceneReady: (timeoutMs = 75000) => waitForReadiness({ visualReady: true }, timeoutMs),
+    waitForGameplayReady: (timeoutMs = 75000) => waitForReadiness({ gameplayReady: true }, timeoutMs),
     setMode: modeId => {
       useThreeGameStore.getState().setPlayableMode(modeId);
       return makeSnapshot();
@@ -316,7 +517,7 @@ function createHarnessApi() {
       const startedAt = performance.now();
       prefetchRegionTerrainTextures(zoneId);
       const completionMs = {};
-      const [terrainResource, borderResource, ecologyResource] = await Promise.all([
+      const [terrainResource, borderResource, ecologyResource, waterResource, mapPreparation] = await Promise.all([
         prepareTerrainResource(zoneId, 200).then(value => {
           completionMs.terrain = performance.now() - startedAt;
           return value;
@@ -329,6 +530,14 @@ function createHarnessApi() {
           completionMs.ecology = performance.now() - startedAt;
           return value;
         }),
+        prepareWaterTextureResource(zoneId, 256).then(value => {
+          completionMs.water = performance.now() - startedAt;
+          return value;
+        }),
+        prefetchIslandMapImage().then(value => {
+          completionMs.map = performance.now() - startedAt;
+          return value;
+        }),
       ]);
       return {
         zoneId,
@@ -338,6 +547,8 @@ function createHarnessApi() {
         terrainPreparation: terrainResource.preparation || null,
         borderPreparation: borderResource.preparation || null,
         ecologyPreparation: ecologyResource.preparation || null,
+        waterPreparation: waterResource ? { mode: 'generated-texture' } : null,
+        mapPreparation,
       };
     },
     travelTo: zoneId => {
@@ -463,7 +674,77 @@ function createHarnessApi() {
   return api;
 }
 
-export function ThreeE2EHarness() {
+export function ThreeE2EFrameSignal({ enabled = false }) {
+  useFrame(() => {
+    if (enabled) recordPresentedFrame();
+  });
+  return null;
+}
+
+export function ThreeE2EHarness({
+  activeContentPhase = 0,
+  contentTarget = FULL_CONTENT_PHASE,
+  renderer = null,
+  gameStarted = false,
+  sceneReady = false,
+  launchOverlayDismissed = false,
+  playerVisualReady = false,
+  playerAnimationBanksReady = false,
+  loadersStable = false,
+  terrainSegmentCap = null,
+  waterEnabled = true,
+  waterQuality = 'polished',
+  worldDetailsEnabled = true,
+}) {
+  useEffect(() => {
+    renderRuntime = {
+      activeContentPhase,
+      contentTarget,
+      renderer,
+      gameStarted,
+      sceneReady,
+      launchOverlayDismissed,
+      playerVisualReady,
+      playerAnimationBanksReady,
+      loadersStable,
+      terrainSegmentCap,
+      waterEnabled,
+      waterQuality,
+      worldDetailsEnabled,
+    };
+    return () => {
+      renderRuntime = {
+        activeContentPhase: 0,
+        contentTarget: FULL_CONTENT_PHASE,
+        renderer: null,
+        gameStarted: false,
+        sceneReady: false,
+        launchOverlayDismissed: false,
+        playerVisualReady: false,
+        playerAnimationBanksReady: false,
+        loadersStable: false,
+        terrainSegmentCap: null,
+        waterEnabled: true,
+        waterQuality: 'polished',
+        worldDetailsEnabled: true,
+      };
+    };
+  }, [
+    activeContentPhase,
+    contentTarget,
+    gameStarted,
+    launchOverlayDismissed,
+    loadersStable,
+    playerAnimationBanksReady,
+    playerVisualReady,
+    renderer,
+    sceneReady,
+    terrainSegmentCap,
+    waterEnabled,
+    waterQuality,
+    worldDetailsEnabled,
+  ]);
+
   useEffect(() => {
     if (!isE2EEnabled()) return undefined;
     const api = createHarnessApi();
@@ -473,6 +754,13 @@ export function ThreeE2EHarness() {
       if (window.__darwinE2E === api) {
         delete window.__darwinE2E;
         delete window.__darwinE2EReady;
+        frameRuntime = {
+          candidateKey: null,
+          frameRevision: 0,
+          stableFrames: 0,
+          lastFrameAt: 0,
+        };
+        progressRuntime = { key: '', revision: 0, lastProgressAt: 0 };
       }
     };
   }, []);

@@ -229,6 +229,55 @@ h1, h2, h3, h4, h5, h6 {
   animation: journal-page-turn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+@keyframes expedition-compass-arrive {
+  0% {
+    opacity: 0;
+    translate: -8px 9px;
+    rotate: -2.5deg;
+    scale: 0.86;
+  }
+  64% {
+    opacity: 1;
+    translate: 1px -1px;
+    rotate: 0.5deg;
+    scale: 1.025;
+  }
+  100% {
+    opacity: 1;
+    translate: 0 0;
+    rotate: 0deg;
+    scale: 1;
+  }
+}
+
+@keyframes expedition-compass-rose-settle {
+  0% { transform: rotate(calc(var(--compass-rose-angle) - 38deg)); }
+  48% { transform: rotate(calc(var(--compass-rose-angle) + 8deg)); }
+  72% { transform: rotate(calc(var(--compass-rose-angle) - 3deg)); }
+  100% { transform: rotate(var(--compass-rose-angle)); }
+}
+
+@keyframes expedition-compass-glint {
+  0%, 68% { translate: -65% 0; opacity: 0; }
+  76% { opacity: 0.55; }
+  91% { opacity: 0.12; }
+  100% { translate: 65% 0; opacity: 0; }
+}
+
+.expedition-compass-overlay {
+  animation: expedition-compass-arrive 520ms cubic-bezier(0.2, 0.9, 0.25, 1.18) both;
+  transform-origin: 18% 18%;
+}
+
+.expedition-compass-rose {
+  animation: expedition-compass-rose-settle 1150ms cubic-bezier(0.16, 0.82, 0.23, 1) 120ms backwards;
+  transition: transform 620ms cubic-bezier(0.16, 0.82, 0.23, 1);
+}
+
+.expedition-compass-glint {
+  animation: expedition-compass-glint 4.8s ease-in-out 1.1s infinite;
+}
+
 /* CSS-built parchment page for the field notebook. Built from gradients (not
    a bitmap) so the page can flex between portrait and landscape aspects and
    the writable area is plain padding rather than magic insets. */
@@ -300,156 +349,39 @@ h1, h2, h3, h4, h5, h6 {
   background-attachment: local;
 }
 
-.opening-cloud-veil {
-  --opening-cloud-duration: 6800ms;
+.opening-black-fade {
   position: absolute;
   inset: 0;
   z-index: 35;
-  overflow: hidden;
   pointer-events: none;
   contain: strict;
-  isolation: isolate;
   transform: translateZ(0);
   will-change: opacity;
-  background:
-    radial-gradient(ellipse at 50% 46%, rgba(235, 247, 246, 0.2), rgba(190, 220, 225, 0.08) 38%, rgba(42, 70, 82, 0.04) 70%, transparent 100%),
-    linear-gradient(180deg, rgba(230, 244, 243, 0.5), rgba(194, 221, 225, 0.22) 48%, rgba(118, 152, 162, 0.06) 100%);
-  animation: opening-cloud-veil var(--opening-cloud-duration) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  background: #000;
+  opacity: 1;
 }
 
-.opening-cloud-wash,
-.opening-cloud-bank,
-.opening-cloud-stream,
-.opening-cloud-vapour {
-  position: absolute;
-  pointer-events: none;
-  backface-visibility: hidden;
-  transform: translateZ(0);
-  will-change: opacity, transform;
+.opening-black-fade-reveal {
+  animation: opening-black-fade 1450ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.opening-cloud-wash {
-  inset: -8%;
-  background:
-    radial-gradient(ellipse at 48% 48%, rgba(255, 255, 250, 0.68), rgba(231, 244, 242, 0.34) 28%, transparent 58%),
-    radial-gradient(ellipse at 50% 18%, rgba(255, 252, 232, 0.42), transparent 48%);
-  filter: blur(9px);
-  animation: opening-cloud-wash var(--opening-cloud-duration) ease-out both;
-}
-
-.opening-cloud-bank {
-  top: -18%;
-  bottom: -18%;
-  width: 68%;
-  filter: blur(6px);
-  opacity: 0.96;
-  background:
-    radial-gradient(ellipse at 38% 24%, rgba(255, 255, 250, 0.92), transparent 34%),
-    radial-gradient(ellipse at 62% 46%, rgba(226, 240, 238, 0.86), transparent 36%),
-    radial-gradient(ellipse at 34% 72%, rgba(247, 249, 238, 0.74), transparent 35%),
-    linear-gradient(180deg, rgba(206, 230, 231, 0.54), rgba(243, 246, 232, 0.3));
-}
-
-.opening-cloud-bank-left {
-  left: -20%;
-  transform-origin: 38% 48%;
-  animation: opening-cloud-left var(--opening-cloud-duration) cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.opening-cloud-bank-right {
-  right: -20%;
-  transform-origin: 62% 46%;
-  animation: opening-cloud-right var(--opening-cloud-duration) cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.opening-cloud-stream {
-  inset: -26%;
-  background:
-    linear-gradient(110deg, transparent 0%, rgba(255, 255, 246, 0.48) 25%, rgba(210, 231, 232, 0.24) 42%, transparent 64%),
-    linear-gradient(73deg, transparent 8%, rgba(255, 249, 228, 0.25) 40%, transparent 72%);
-  filter: blur(7px);
-  mix-blend-mode: screen;
-}
-
-.opening-cloud-stream-a {
-  animation: opening-cloud-stream-a var(--opening-cloud-duration) linear both;
-}
-
-.opening-cloud-stream-b {
-  opacity: 0.72;
-  transform: rotate(12deg) scale(1.16);
-  animation: opening-cloud-stream-b var(--opening-cloud-duration) linear both;
-}
-
-.opening-cloud-vapour {
-  inset: -14%;
-  background:
-    repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.12) 0 18px, rgba(208, 228, 231, 0.08) 18px 34px, transparent 34px 76px);
-  filter: blur(4px);
-  opacity: 0.34;
-  animation: opening-cloud-vapour var(--opening-cloud-duration) linear both;
-}
-
-@keyframes opening-cloud-veil {
-  0% { opacity: 0.92; }
-  16% { opacity: 0.68; }
-  46% { opacity: 0.28; }
-  76% { opacity: 0.07; }
+@keyframes opening-black-fade {
+  0%, 12% { opacity: 1; }
   100% { opacity: 0; visibility: hidden; }
-}
-
-@keyframes opening-cloud-wash {
-  0% { opacity: 0.88; transform: scale(1.08); }
-  38% { opacity: 0.68; transform: scale(1.18); }
-  76% { opacity: 0.18; transform: scale(1.34); }
-  100% { opacity: 0; transform: scale(1.42); }
-}
-
-@keyframes opening-cloud-left {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(-2deg) scale(1.1); }
-  34% { opacity: 0.98; transform: translate3d(-5%, -1%, 0) rotate(-3deg) scale(1.15); }
-  74% { opacity: 0.54; transform: translate3d(-24%, -5%, 0) rotate(-7deg) scale(1.24); }
-  100% { opacity: 0; transform: translate3d(-42%, -9%, 0) rotate(-10deg) scale(1.32); }
-}
-
-@keyframes opening-cloud-right {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(2deg) scale(1.1); }
-  34% { opacity: 0.98; transform: translate3d(5%, 1%, 0) rotate(3deg) scale(1.15); }
-  74% { opacity: 0.54; transform: translate3d(24%, 5%, 0) rotate(7deg) scale(1.24); }
-  100% { opacity: 0; transform: translate3d(42%, 9%, 0) rotate(10deg) scale(1.32); }
-}
-
-@keyframes opening-cloud-stream-a {
-  0% { opacity: 0.78; transform: translate3d(-9%, 7%, 0) scale(1.05); }
-  62% { opacity: 0.42; transform: translate3d(7%, -5%, 0) scale(1.18); }
-  100% { opacity: 0; transform: translate3d(18%, -12%, 0) scale(1.28); }
-}
-
-@keyframes opening-cloud-stream-b {
-  0% { opacity: 0.58; transform: translate3d(9%, -8%, 0) rotate(12deg) scale(1.16); }
-  68% { opacity: 0.32; transform: translate3d(-8%, 4%, 0) rotate(9deg) scale(1.26); }
-  100% { opacity: 0; transform: translate3d(-19%, 12%, 0) rotate(6deg) scale(1.34); }
-}
-
-@keyframes opening-cloud-vapour {
-  0% { opacity: 0.34; transform: translate3d(-4%, 0, 0); }
-  66% { opacity: 0.18; transform: translate3d(5%, -3%, 0); }
-  100% { opacity: 0; transform: translate3d(9%, -5%, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .expedition-modal-scrim,
   .expedition-modal-panel,
+  .expedition-compass-overlay,
+  .expedition-compass-rose,
+  .expedition-compass-glint,
   .journal-page-turn,
-  .opening-cloud-veil,
-  .opening-cloud-wash,
-  .opening-cloud-bank,
-  .opening-cloud-stream,
-  .opening-cloud-vapour {
+  .opening-black-fade-reveal {
     animation: none;
   }
 
-  .opening-cloud-veil {
+  .opening-black-fade-reveal {
     opacity: 0;
   }
 }

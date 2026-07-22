@@ -9,9 +9,11 @@ import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'p
 import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
+import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
+import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
 import { LaunchOverlay } from './ui/LaunchOverlay';
-import { ThreeE2EHarness } from './e2e/ThreeE2EHarness';
+import { ThreeE2EFrameSignal, ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
 import { isOvercastWeather, weatherProfile, weatherSkyTint } from './world/weatherStates';
@@ -23,6 +25,7 @@ import './world/fogAtmosphere'; // patches the shared fog chunks; must run befor
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { getRegionMap } from '../game-core/regionMaps';
 import {
   getSpecimenRuntimeBounds,
   getSpecimenRuntimePoses,
@@ -43,6 +46,15 @@ import {
   prepareBorderVistaResource,
 } from './world/vistas/borderVistaResource';
 import { prefetchRegionTerrainTextures } from './world/terrainPrefetch';
+import {
+  prepareWaterTextureResource,
+  waterTextureResourceIsReady,
+} from './world/waterTextureResource';
+import {
+  waterBakeResolutionForQuality,
+  waterContactResolutionForQuality,
+  regionTypeRendersDetailedWater,
+} from './world/waterTextureManifest';
 import { prefetchIslandMapImage } from './ui/expedition/map/islandLocations';
 import {
   setEcologyDebugEnabled,
@@ -254,16 +266,14 @@ const QUALITY_PRESETS = {
 const BOOT_LOADER_STABLE_MS = 350;
 const BOOT_MIN_LOADING_MS = 1000;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const OPENING_AERIAL_MIN_MS = 3800;
-const OPENING_AERIAL_MAX_MS = 6500;
-const OPENING_DESCENT_DURATION_MS = 5000;
-const OPENING_CLOUD_VEIL_DURATION_MS = 5600;
-const LAUNCH_OVERLAY_FADE_MS = 900;
+const OPENING_DURATION_MS = 5200;
+const LAUNCH_OVERLAY_FADE_MS = 600;
 const STARTUP_FULL_CONTENT_PHASE = 6;
-// Each phase gets its own post-paint idle window. This keeps GLB parsing,
-// ecology construction, physics props, specimens, and NPC shader compilation
-// from converging on one frame while the aerial camera is already visible.
-const INTRO_CONTENT_PHASE_TIMINGS_MS = [100, 520, 980, 1520, 2180, 2860];
+const STARTUP_OPENING_CONTENT_PHASE = 3;
+// Load terrain/detail and every Darwin animation bank behind the opaque launch
+// overlay. Heavier props, specimens, and NPCs join under the black crossfade.
+const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420, 570, 940, 1370];
+const INTRO_REVEAL_PHASE_TIMINGS_MS = [150, 520, 950];
 // Destination resources are already preparing while the player approaches an
 // edge. Once the chart is opaque, mount one content family per painted/idle
 // window so React, Rapier, instance matrices, and shader discovery cannot all
@@ -667,7 +677,7 @@ function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
       complete: false,
     };
     let frameHandle = null;
-    let previousFrameAt = startedAt;
+    let previousFrameAt = null;
     let observer = null;
     const record = (name, detail = null) => {
       const atMs = performance.now() - startedAt;
@@ -680,6 +690,11 @@ function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
       }
     };
     const tick = now => {
+      if (previousFrameAt == null) {
+        previousFrameAt = now;
+        frameHandle = window.requestAnimationFrame(tick);
+        return;
+      }
       const delta = now - previousFrameAt;
       previousFrameAt = now;
       sample.frameDeltas.push(delta);
@@ -724,7 +739,13 @@ function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
       }
       activeRef.current = null;
     };
-  }, [enabled, transition?.id]);
+  }, [
+    enabled,
+    transition?.fromZoneId,
+    transition?.id,
+    transition?.source,
+    transition?.zoneId,
+  ]);
 
   useEffect(() => {
     if (!transition?.phase) return;
@@ -892,26 +913,6 @@ function InspectionAnchorProjector() {
   return null;
 }
 
-function SceneReadySignal({ loadingReady, startedAtRef, minElapsedMs = 0, onReady }) {
-  const announced = useRef(false);
-
-  useFrame(() => {
-    const waitedLongEnough = !startedAtRef || performance.now() - startedAtRef.current >= minElapsedMs;
-    if (!loadingReady || !waitedLongEnough) {
-      announced.current = false;
-      return;
-    }
-    // This callback already runs inside a live Canvas frame. Waiting four more
-    // frames added seconds on slow GPUs without proving anything extra.
-    if (!announced.current) {
-      announced.current = true;
-      onReady();
-    }
-  });
-
-  return null;
-}
-
 function OpeningVisualReadySignal({
   active,
   sequenceId,
@@ -971,7 +972,7 @@ function OpeningVisualReadySignal({
   return null;
 }
 
-function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition }) {
+function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, waterQuality }) {
   const { gl, scene, camera } = useThree();
   const compiledIdRef = useRef(null);
   const compilingIdRef = useRef(null);
@@ -1039,9 +1040,15 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition }) {
       resourceStableFramesRef.current = 0;
       return;
     }
+    const waterResource = waterResourceDescriptor(active.zoneId, waterQuality);
     if (contentPhase < STARTUP_FULL_CONTENT_PHASE
       || !borderVistaResourceIsReady(active.zoneId)
-      || !regionEcologyResourceIsReady(active.zoneId)) {
+      || !regionEcologyResourceIsReady(active.zoneId)
+      || (!waterResource.skip && !waterTextureResourceIsReady(
+        active.zoneId,
+        waterResource.bakeRes,
+        waterResource.options,
+      ))) {
       resourceStableFramesRef.current = 0;
       return;
     }
@@ -1182,7 +1189,20 @@ function TravelCameraRig() {
   return null;
 }
 
-function DestinationIntentPrefetch({ segmentCap }) {
+function waterResourceDescriptor(zoneId, quality) {
+  const openOceanOnly = Boolean(getInteriorDefinition(zoneId));
+  const detailedSurface = regionTypeRendersDetailedWater(getRegionMap(zoneId).type);
+  return {
+    skip: !openOceanOnly && !detailedSurface,
+    bakeRes: waterBakeResolutionForQuality(quality),
+    options: {
+      contactRes: waterContactResolutionForQuality(quality),
+      openOceanOnly,
+    },
+  };
+}
+
+function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
   const edgeDestinationId = useThreeGameStore(state => state.edgePrompt?.toRegionId || null);
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
   const destinationId = transitionDestinationId || edgeDestinationId;
@@ -1194,29 +1214,47 @@ function DestinationIntentPrefetch({ segmentCap }) {
     if (!destinationId) return;
     prefetchIslandMapImage();
     prefetchRegionTerrainTextures(destinationId);
+    const waterResource = waterResourceDescriptor(destinationId, waterQuality);
+    if (!waterResource.skip) {
+      prepareWaterTextureResource(destinationId, waterResource.bakeRes, waterResource.options);
+    }
     prepareTerrainResource(destinationId, segmentCap);
     prepareBorderVistaResource(destinationId);
     prepareRegionEcologyResource(destinationId).then(resource => {
       const destination = resource.definitions.find(definition => definition.zoneId === destinationId);
       prefetchEcologyAssets(destination?.ecology);
     });
-  }, [destinationId, segmentCap]);
+  }, [destinationId, segmentCap, waterQuality]);
   return null;
+}
+
+function describeWebGLRenderer(renderer) {
+  const context = renderer.getContext();
+  const debugInfo = context.getExtension('WEBGL_debug_renderer_info');
+  const vendor = debugInfo
+    ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+    : context.getParameter(context.VENDOR);
+  const name = debugInfo
+    ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+    : context.getParameter(context.RENDERER);
+  const software = /swiftshader|llvmpipe|software rasterizer/i.test(`${vendor} ${name}`);
+  return {
+    vendor: vendor || null,
+    name: name || null,
+    webgl2: renderer.capabilities.isWebGL2,
+    software,
+  };
 }
 
 function OpeningIntroCompletion({
   active,
   sequenceId,
-  visualReady,
-  minAerialMs,
-  maxAerialMs,
-  descentDurationMs,
+  durationMs,
   onComplete,
 }) {
   const state = useRef({
     sequenceId: null,
     startedAt: 0,
-    descentStartedAt: 0,
     completed: false,
   });
 
@@ -1224,7 +1262,6 @@ function OpeningIntroCompletion({
     if (!active) {
       state.current.sequenceId = null;
       state.current.startedAt = 0;
-      state.current.descentStartedAt = 0;
       state.current.completed = false;
       return;
     }
@@ -1233,19 +1270,11 @@ function OpeningIntroCompletion({
     if (state.current.sequenceId !== sequenceId) {
       state.current.sequenceId = sequenceId;
       state.current.startedAt = now;
-      state.current.descentStartedAt = 0;
       state.current.completed = false;
     }
 
     if (state.current.completed) return;
-    const elapsed = now - state.current.startedAt;
-    if (!state.current.descentStartedAt) {
-      const readyToDescend = visualReady && elapsed >= minAerialMs;
-      const boundedFallback = elapsed >= maxAerialMs;
-      if (readyToDescend || boundedFallback) state.current.descentStartedAt = now;
-      return;
-    }
-    if (now - state.current.descentStartedAt >= descentDurationMs) {
+    if (now - state.current.startedAt >= durationMs) {
       state.current.completed = true;
       onComplete();
     }
@@ -1418,6 +1447,7 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
           denoiseRadius={interiorFx?.aoDenoiseRadius ?? 12}
         />
       )}
+      <HeatHazePostEffect enabled={!interiorDefinition} underwaterAmount={underwater} />
       <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
       <ExaminationDepthOfField />
       {/* Threshold sits just under the ACES shoulder so deliberate HDR
@@ -1501,22 +1531,15 @@ function CinematicScreenGrade({ enabled, weather }) {
   );
 }
 
-function OpeningCloudVeil({ active, sequenceId, durationMs }) {
+function OpeningBlackFade({ active, sequenceId }) {
   if (!active) return null;
+  const revealing = Boolean(sequenceId);
   return (
     <div
-      key={sequenceId || 'opening-cloud-veil'}
-      className="opening-cloud-veil"
-      style={{ '--opening-cloud-duration': `${durationMs}ms` }}
+      key={revealing ? sequenceId : 'opening-black-hold'}
+      className={`opening-black-fade${revealing ? ' opening-black-fade-reveal' : ''}`}
       aria-hidden="true"
-    >
-      <div className="opening-cloud-wash" />
-      <div className="opening-cloud-bank opening-cloud-bank-left" />
-      <div className="opening-cloud-bank opening-cloud-bank-right" />
-      <div className="opening-cloud-stream opening-cloud-stream-a" />
-      <div className="opening-cloud-stream opening-cloud-stream-b" />
-      <div className="opening-cloud-vapour" />
-    </div>
+    />
   );
 }
 
@@ -1903,8 +1926,8 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [startupContentPhase, setStartupContentPhase] = useState(0);
   const [transitionContentPhase, setTransitionContentPhase] = useState(STARTUP_FULL_CONTENT_PHASE);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
-  const [openingVisualReady, setOpeningVisualReady] = useState(false);
   const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
+  const [playerVisualReady, setPlayerVisualReady] = useState(false);
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
@@ -1919,6 +1942,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
+  const [rendererInfo, setRendererInfo] = useState(null);
   // Loading progress only drives the launch overlay. Once the initial scene is
   // ready, keep this subscriber's snapshot stable so render-time texture starts
   // in newly mounted regions cannot schedule a parent React update.
@@ -1962,24 +1986,24 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
+  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human' && !skipOpeningIntro;
+  const loadingContentTarget = openingIntroEligible
+    ? STARTUP_OPENING_CONTENT_PHASE
+    : STARTUP_FULL_CONTENT_PHASE;
   const openingCamera = useMemo(() => ({
     active: openingIntroActive && openingIntroStartedAt > 0,
     sequenceId: openingIntroStartedAt,
-    visualReady: openingVisualReady,
-    minAerialDuration: OPENING_AERIAL_MIN_MS / 1000,
-    maxAerialDuration: OPENING_AERIAL_MAX_MS / 1000,
-    descentDuration: OPENING_DESCENT_DURATION_MS / 1000,
-  }), [openingIntroActive, openingIntroStartedAt, openingVisualReady]);
+    duration: OPENING_DURATION_MS / 1000,
+  }), [openingIntroActive, openingIntroStartedAt]);
   const handleUnderwaterChange = useCallback(amount => {
     setUnderwaterAmount(amount);
-  }, []);
-  const markOpeningVisualReady = useCallback(() => {
-    setOpeningVisualReady(true);
   }, []);
   const markPlayerAnimationBanksReady = useCallback(() => {
     setPlayerAnimationBanksReady(true);
   }, []);
-
+  const markPlayerVisualReady = useCallback(() => {
+    setPlayerVisualReady(true);
+  }, []);
   useLayoutEffect(() => {
     if (!initialModeId || initialModeAppliedRef.current) return;
     initialModeAppliedRef.current = true;
@@ -2166,7 +2190,14 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
         setShowDarwinAnimationLab(value => !value);
         return;
       }
-      if (event.code === 'Digit9' && DEV_TOOLS_ENABLED) {
+      if (
+        event.code === 'Digit9'
+        && DEV_TOOLS_ENABLED
+        && !event.shiftKey
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.altKey
+      ) {
         event.preventDefault();
         toggleEcologyDebug();
         return;
@@ -2237,8 +2268,10 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
-    setOpeningVisualReady(false);
     setPlayerAnimationBanksReady(false);
+    // A restart keeps the already-committed Darwin instance mounted; a fresh
+    // launch must wait for its first real model-scene commit.
+    if (!gameStarted) setPlayerVisualReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('loading');
   };
@@ -2255,14 +2288,13 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
-    setOpeningVisualReady(false);
     setPlayerAnimationBanksReady(false);
+    setPlayerVisualReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('menu');
   };
 
   const markSceneReady = useCallback(() => {
-    const now = performance.now();
     const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
     const params = new URLSearchParams(window.location.search);
     const skipIntro = skipOpeningIntro || skipOpeningIntroFromParams(params);
@@ -2272,7 +2304,9 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       setOpeningIntroStartedAt(0);
       setLaunchState('playing');
     } else {
-      setOpeningIntroStartedAt(now);
+      // The sequence begins only after the launch overlay is gone. Starting it
+      // beneath that fade would discard part of the composed camera shot.
+      setOpeningIntroStartedAt(0);
       setLaunchState('intro');
     }
   }, [skipOpeningIntro]);
@@ -2281,42 +2315,56 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     if (!automationReadyMode || !gameStarted || sceneReady) return undefined;
     const handle = window.setInterval(() => {
       const startedAt = bootStartedAt.current || performance.now();
-      const minimumWait = screenshotMode && !e2eMode
-        ? SCREENSHOT_MIN_LOADING_MS
-        : Math.max(BOOT_MIN_LOADING_MS, 2500);
+      const minimumWait = e2eMode
+        ? 20000
+        : screenshotMode
+          ? SCREENSHOT_MIN_LOADING_MS
+          : Math.max(BOOT_MIN_LOADING_MS, 2500);
       const waitedLongEnough = performance.now() - startedAt >= minimumWait;
-      if (waitedLongEnough && document.querySelector('canvas')) markSceneReady();
+      const stagedContentReady = startupContentPhase >= loadingContentTarget
+        && (playableModeId !== 'darwin' || playerVisualReady)
+        && (playableModeId !== 'darwin' || playerAnimationBanksReady);
+      if (waitedLongEnough && stagedContentReady && document.querySelector('canvas')) markSceneReady();
     }, 250);
     return () => window.clearInterval(handle);
-  }, [automationReadyMode, e2eMode, gameStarted, markSceneReady, sceneReady, screenshotMode]);
+  }, [
+    automationReadyMode,
+    e2eMode,
+    gameStarted,
+    loadingContentTarget,
+    markSceneReady,
+    playableModeId,
+    playerAnimationBanksReady,
+    playerVisualReady,
+    sceneReady,
+    screenshotMode,
+    startupContentPhase,
+  ]);
 
   useEffect(() => {
-    if (!sceneReady) return undefined;
-    const handle = window.setTimeout(
-      () => setLaunchOverlayDismissed(true),
-      openingIntroActive ? LAUNCH_OVERLAY_FADE_MS : 500,
-    );
+    if (!sceneReady || launchOverlayDismissed) return undefined;
+    const handle = window.setTimeout(() => {
+      if (openingIntroActive) setOpeningIntroStartedAt(performance.now());
+      setLaunchOverlayDismissed(true);
+    }, openingIntroActive ? LAUNCH_OVERLAY_FADE_MS : 500);
     return () => window.clearTimeout(handle);
-  }, [openingIntroActive, sceneReady]);
+  }, [launchOverlayDismissed, openingIntroActive, sceneReady]);
 
   useEffect(() => {
-    if (!gameStarted || !launchOverlayDismissed) return undefined;
-    if (launchState !== 'intro' && launchState !== 'playing') return undefined;
+    if (!gameStarted || launchState !== 'loading') return undefined;
 
-    // Do not let deferred GLB parsing, texture uploads, or shader compilation
-    // starve the launch overlay's fade/removal. Once it is gone, mount exactly
-    // one content group per idle window and allow the Canvas to paint before
-    // scheduling the next one. In particular, skip-intro and automation
-    // launches must not jump directly from the base scene to every actor.
+    // Mount exactly one content group per idle window while the loading overlay
+    // is still opaque. This lets GLB parsing, texture uploads, Rapier setup, and
+    // shader discovery settle before the curtain/camera sequence begins.
     let cancelled = false;
     let timeoutHandle = null;
     let idleHandle = null;
     let frameHandle = null;
 
     const schedulePhase = index => {
-      if (cancelled || index >= INTRO_CONTENT_PHASE_TIMINGS_MS.length) return;
-      const previousDelay = index === 0 ? 0 : INTRO_CONTENT_PHASE_TIMINGS_MS[index - 1];
-      const delay = INTRO_CONTENT_PHASE_TIMINGS_MS[index] - previousDelay;
+      if (cancelled || index >= loadingContentTarget) return;
+      const previousDelay = index === 0 ? 0 : INTRO_LOADING_PHASE_TIMINGS_MS[index - 1];
+      const delay = INTRO_LOADING_PHASE_TIMINGS_MS[index] - previousDelay;
       timeoutHandle = window.setTimeout(() => {
         timeoutHandle = null;
         const commitPhase = () => {
@@ -2345,7 +2393,52 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
       if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
     };
-  }, [gameStarted, launchOverlayDismissed, launchState]);
+  }, [gameStarted, launchState, loadingContentTarget]);
+
+  useEffect(() => {
+    if (!gameStarted || !launchOverlayDismissed) return undefined;
+    if (loadingContentTarget >= STARTUP_FULL_CONTENT_PHASE) return undefined;
+    if (launchState !== 'intro' && launchState !== 'playing') return undefined;
+
+    let cancelled = false;
+    let timeoutHandle = null;
+    let idleHandle = null;
+    let frameHandle = null;
+
+    const schedulePhase = index => {
+      if (cancelled || index >= STARTUP_FULL_CONTENT_PHASE) return;
+      const timingIndex = index - STARTUP_OPENING_CONTENT_PHASE;
+      const previousDelay = timingIndex === 0 ? 0 : INTRO_REVEAL_PHASE_TIMINGS_MS[timingIndex - 1];
+      const delay = INTRO_REVEAL_PHASE_TIMINGS_MS[timingIndex] - previousDelay;
+      timeoutHandle = window.setTimeout(() => {
+        timeoutHandle = null;
+        const commitPhase = () => {
+          idleHandle = null;
+          if (cancelled) return;
+          setStartupContentPhase(current => Math.max(current, index + 1));
+          frameHandle = window.requestAnimationFrame(() => {
+            frameHandle = window.requestAnimationFrame(() => {
+              frameHandle = null;
+              schedulePhase(index + 1);
+            });
+          });
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 420 });
+        } else {
+          commitPhase();
+        }
+      }, delay);
+    };
+
+    schedulePhase(STARTUP_OPENING_CONTENT_PHASE);
+    return () => {
+      cancelled = true;
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [gameStarted, launchOverlayDismissed, launchState, loadingContentTarget]);
 
   return (
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
@@ -2354,7 +2447,12 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
         transition={transition}
         contentPhase={activeContentPhase}
       />
-      {gameStarted && <DestinationIntentPrefetch segmentCap={scenePerfSettings.terrainSegmentCap} />}
+      {gameStarted && (
+        <DestinationIntentPrefetch
+          segmentCap={scenePerfSettings.terrainSegmentCap}
+          waterQuality={scenePerfSettings.waterQuality || 'polished'}
+        />
+      )}
       <KeyboardControls map={keyboardMap}>
         {gameStarted && (
           <Canvas
@@ -2381,6 +2479,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
               // texture picks it up.
               Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
               gl.shadowMap.type = PCFSoftShadowMap;
+              setRendererInfo(describeWebGLRenderer(gl));
             }}
           >
             <color attach="background" args={[sky]} />
@@ -2396,27 +2495,26 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
                 openingCamera={openingCamera}
                 inputLocked={openingIntroActive || Boolean(transition)}
                 onPlayerAnimationBanksReady={markPlayerAnimationBanksReady}
-              />
-              <SceneReadySignal
-                loadingReady={loadersStable || e2eMode}
-                startedAtRef={bootStartedAt}
-                minElapsedMs={BOOT_MIN_LOADING_MS}
-                onReady={markSceneReady}
+                onPlayerVisualReady={markPlayerVisualReady}
               />
             </Suspense>
             <OpeningVisualReadySignal
-              active={openingIntroActive}
-              sequenceId={openingIntroStartedAt}
-              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE
+              active={gameStarted && launchState === 'loading'}
+              sequenceId={bootStartedAt.current || 'opening-load'}
+              contentReady={loadersStable
+                && startupContentPhase >= loadingContentTarget
+                && (playableModeId !== 'darwin' || playerVisualReady)
                 && (playableModeId !== 'darwin' || playerAnimationBanksReady)}
               segmentCap={scenePerfSettings.terrainSegmentCap}
-              onReady={markOpeningVisualReady}
+              onReady={markSceneReady}
             />
             <ZoneTransitionReadySignal
               segmentCap={scenePerfSettings.terrainSegmentCap}
               contentPhase={activeContentPhase}
               transition={transition}
+              waterQuality={scenePerfSettings.waterQuality || 'polished'}
             />
+            <ThreeE2EFrameSignal enabled={automationReadyMode} />
             <TravelCameraRig />
             <PostFX
               enabled={scenePerfSettings.postprocessing}
@@ -2431,10 +2529,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             <OpeningIntroCompletion
               active={openingIntroActive}
               sequenceId={openingIntroStartedAt}
-              visualReady={openingVisualReady}
-              minAerialMs={OPENING_AERIAL_MIN_MS}
-              maxAerialMs={OPENING_AERIAL_MAX_MS}
-              descentDurationMs={OPENING_DESCENT_DURATION_MS}
+              durationMs={OPENING_DURATION_MS}
               onComplete={() => setLaunchState('playing')}
             />
             <UnderwaterCameraTracker onChange={handleUnderwaterChange} />
@@ -2475,14 +2570,14 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             enabled={scenePerfSettings.solarScreenGlare !== false || scenePerfSettings.solarLensGhosts !== false}
             wash={scenePerfSettings.solarScreenGlare !== false}
             lensGhostsEnabled={scenePerfSettings.solarLensGhosts !== false}
-            suppression={underwaterAmount}
+            suppression={openingIntroActive ? 1 : underwaterAmount}
           />
         )}
-        <OpeningCloudVeil
+        <OpeningBlackFade
           active={openingIntroActive}
           sequenceId={openingIntroStartedAt}
-          durationMs={OPENING_CLOUD_VEIL_DURATION_MS}
         />
+        {gameStarted && <ZoneTransitionOverlay />}
         {gameUiVisible && (
           <ThreeHUD
             onTogglePerf={() => setShowPerf(value => !value)}
@@ -2516,6 +2611,10 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
           <LaunchOverlay
             mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}
             departing={gameStarted && sceneReady}
+            blackout={openingIntroEligible && (
+              (launchState === 'loading' && displayedProgress >= 60)
+              || sceneReady
+            )}
             progress={displayedProgress}
             selectedModeId={initialModeId || playableModeId}
             onNewExpedition={openCharacterSelect}
@@ -2523,7 +2622,21 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             onBack={() => setLaunchState('menu')}
           />
         )}
-        <ThreeE2EHarness />
+        <ThreeE2EHarness
+          activeContentPhase={activeContentPhase}
+          contentTarget={transition ? STARTUP_FULL_CONTENT_PHASE : loadingContentTarget}
+          renderer={rendererInfo}
+          gameStarted={gameStarted}
+          sceneReady={sceneReady}
+          launchOverlayDismissed={launchOverlayDismissed}
+          playerVisualReady={playerVisualReady}
+          playerAnimationBanksReady={playerAnimationBanksReady}
+          loadersStable={loadersStable}
+          terrainSegmentCap={scenePerfSettings.terrainSegmentCap}
+          waterEnabled={scenePerfSettings.water !== false}
+          waterQuality={scenePerfSettings.waterQuality || 'polished'}
+          worldDetailsEnabled={scenePerfSettings.worldDetails !== false}
+        />
       </KeyboardControls>
     </main>
   );

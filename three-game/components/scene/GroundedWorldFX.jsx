@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
-import { terrainBiomeAt, terrainHeight } from '../../world/terrain';
+import { terrainBiomeAt, terrainColor, terrainHeight } from '../../world/terrain';
 import { getSurfaceContactProfile, isWaterSurfaceContact } from '../../world/surfaceContact';
 import { resolveSurfaceContactResponse } from '../../world/surfaceContactResponse';
 import { WATER_LEVEL } from '../../world/water';
@@ -26,11 +26,36 @@ const INSECT_PLACEMENT_ATTEMPTS = 6;
 const MOTE_COUNT = 130;
 const MOTE_RADIUS = 11;
 const MOTE_RESPAWN_DISTANCE = 8;
-const SPARKLE_COUNT = 240;
-const SPARKLE_RADIUS = 24;
+const SPARKLE_COUNT = 380;
+const SPARKLE_RADIUS = 20;
 const SPARKLE_RESPAWN_DISTANCE = 10;
 const SPARKLE_PLACEMENT_ATTEMPTS = 5;
+const SALTATION_COUNT = 150;
+const SALTATION_RADIUS = 15;
+const SALTATION_RESPAWN_DISTANCE = 7;
+const SALTATION_PLACEMENT_ATTEMPTS = 5;
 const dummy = new THREE.Object3D();
+const VOLCANIC_DUST_TINT = new THREE.Color('#75472f');
+const NIGHT_DUST_TINT = new THREE.Color('#536071');
+
+function litTerrainDustColor(target, source, groundColor, biome, sky) {
+  const biomeName = String(biome || '').toLowerCase();
+  const warmVolcanicGround = /red|cinder|ash|tuff|mirador/.test(biomeName);
+  target.set(source).lerp(groundColor, warmVolcanicGround ? 0.56 : 0.4);
+  if (warmVolcanicGround) target.lerp(VOLCANIC_DUST_TINT, 0.44);
+  // The dust shader is intentionally unlit, so apply the world's celestial
+  // illumination here. A low floor preserves a moonlit silhouette without
+  // allowing pale particles to look emissive after sunset.
+  const night = THREE.MathUtils.clamp(sky.night || 0, 0, 1);
+  const illumination = THREE.MathUtils.clamp(
+    0.2 + (sky.daylight || 0) * 0.8 + (sky.moonlight || 0) * 0.14,
+    0.2,
+    1,
+  );
+  target.lerp(NIGHT_DUST_TINT, night * 0.08);
+  target.multiplyScalar(illumination);
+  return target;
+}
 
 function eventDirection(event) {
   const direction = event?.direction;
@@ -60,14 +85,28 @@ function insectBiomeWeight(biome) {
 // the green beaches, glassy flecks in fresh lava. Zero on mud — wet ground
 // gets its sparkle from the waterline band below instead.
 function sparkleBiomeWeight(biome) {
-  if (biome === 'white-sand' || biome === 'sand') return 1;
-  if (biome === 'green-beach' || biome === 'olivine-trail') return 1;
-  if (biome === 'black-lava' || biome === 'lava-shelf' || biome === 'black-sand') return 0.5;
-  if (biome === 'wet-basalt') return 0.42;
-  if (biome === 'dry-scrub' || biome === 'salt-scrub' || biome === 'trail') return 0.34;
-  if (biome === 'tuff-ridge' || biome === 'ash-slope' || biome === 'tuff-rim') return 0.26;
+  if (biome === 'white-sand' || biome === 'sand') return 1.05;
+  if (biome === 'green-beach' || biome === 'olivine-trail') return 1.12;
+  if (biome === 'black-sand') return 1.32;
+  if (biome === 'black-lava' || biome === 'lava-shelf') return 1.25;
+  if (biome === 'wet-basalt') return 1.15;
+  if (biome === 'dry-scrub' || biome === 'salt-scrub' || biome === 'trail') return 0.24;
+  if (biome === 'tuff-ridge' || biome === 'ash-slope' || biome === 'tuff-rim') return 0.2;
   if (biome === 'wet-mud' || biome === 'sesuvium-flat') return 0;
   return 0.12;
+}
+
+function saltationBiomeProfile(biome) {
+  const name = String(biome || '').toLowerCase();
+  if (/wet|mud|water|pool|lagoon|swim|grass|meadow|scrub/.test(name)) return null;
+  if (/black.sand|black.dune|ash.beach/.test(name)) return { weight: 1, color: '#66594d' };
+  if (/sand|dune|beach/.test(name)) {
+    return { weight: 1, color: '#c7b88c' };
+  }
+  if (/red.cinder|scoria/.test(name)) return { weight: 0.92, color: '#7b4b35' };
+  if (/ash|tuff/.test(name)) return { weight: 0.86, color: '#806f5a' };
+  if (/trail|path|dry.wash|dusty|clearing/.test(name)) return { weight: 0.3, color: '#948064' };
+  return null;
 }
 
 function seededUnit(seed) {
@@ -499,31 +538,44 @@ function SurfaceContactFX({ enabled }) {
       const rawY = Number.isFinite(event.position.y)
         ? event.position.y
         : terrainHeight(x, z, currentZoneId) + 0.04;
-      if (rawY < WATER_LEVEL - 0.02) return;
-      const biome = event.biome || terrainBiomeAt(x, z, rawY, currentZoneId);
+      // Terrain contacts arrive at the smoothed movement height. Raise their
+      // visual response to the rendered height so relief cannot bury marks or
+      // an entire dust burst; higher obstacle/prop impacts remain untouched.
+      const contactY = Math.max(rawY, terrainHeight(x, z, currentZoneId));
+      if (contactY < WATER_LEVEL - 0.02) return;
+      const biome = event.biome || terrainBiomeAt(x, z, contactY, currentZoneId);
       const profile = event.surfaceProfile || getSurfaceContactProfile({
         x,
         z,
-        y: rawY,
+        y: contactY,
         zoneId: currentZoneId,
         biome,
       });
       if (isWaterSurfaceContact(profile)) return;
       const response = resolveSurfaceContactResponse(profile, event);
       if (response.strength <= 0.025) return;
+      const { timeOfDay, day } = useThreeGameStore.getState();
+      const contactSky = skyState(timeOfDay ?? 12, day || 1);
+      const contactGroundColor = terrainColor(x, z, contactY, currentZoneId);
 
       const direction = eventDirection(event);
       const fallSpeed = Math.max(0, event.fallSpeed || 0);
       const travelDistance = Math.max(0, event.travelDistance || 0);
       const horizontalSpeed = Math.max(0, event.horizontalSpeed || 0);
+      const skidContact = kind === 'skid' || kind === 'scramble';
+      const runningJump = kind === 'landing-jump' && event.runningJump === true;
       const intensity = response.strength;
       const now = performance.now() / 1000;
-      const y = rawY + 0.035;
+      const y = contactY + 0.055;
       const particleTotal = response.particleScale > 0
         ? Math.round(THREE.MathUtils.clamp(
-          ((kind === 'footstep' ? 10 : 3) + intensity * 22 + travelDistance * 0.5 + fallSpeed * 0.3) * response.particleScale,
+          ((kind === 'footstep' ? 8 : skidContact ? 11 : 3)
+            + intensity * (skidContact ? 34 : 22)
+            + travelDistance * (runningJump ? 1.4 : 0.5)
+            + fallSpeed * (runningJump ? 0.62 : 0.3)
+            + (runningJump ? 16 : 0)) * response.particleScale,
           1,
-          kind === 'landing' || kind === 'landing-jump' ? 46 : 34,
+          runningJump ? 74 : kind === 'landing' || kind === 'landing-jump' ? 48 : skidContact ? 58 : 32,
         ))
         : 0;
       const radiusScale = event.radiusScale || 1;
@@ -541,7 +593,13 @@ function SurfaceContactFX({ enabled }) {
         dummy.scale.set(baseRadius, 1, baseRadius * (kind === 'skid' || kind === 'scramble' ? 0.58 : 0.82));
         dummy.updateMatrix();
         ringRef.current?.setMatrixAt(ringIndex, dummy.matrix);
-        scratchColor.current.set(response.ringColor);
+        litTerrainDustColor(
+          scratchColor.current,
+          response.ringColor,
+          contactGroundColor,
+          biome,
+          contactSky,
+        );
         ringData.colors[ringIndex * 3] = scratchColor.current.r;
         ringData.colors[ringIndex * 3 + 1] = scratchColor.current.g;
         ringData.colors[ringIndex * 3 + 2] = scratchColor.current.b;
@@ -567,15 +625,21 @@ function SurfaceContactFX({ enabled }) {
         const seed = now * 97.3 + index * 17.17 + i * 11.7;
         const radial = seededUnit(seed + 0.4);
         const landingSpread = kind === 'landing' || kind === 'landing-jump';
-        const angle = landingSpread
+        const angle = landingSpread && !runningJump
           ? seededUnit(seed + 1.2) * Math.PI * 2
-          : directionAngle + Math.PI + (seededUnit(seed + 1.2) - 0.5) * Math.PI * 1.2;
+          : directionAngle + Math.PI + (seededUnit(seed + 1.2) - 0.5) * Math.PI * (runningJump ? 1.55 : 1.2);
         const startRadius = (0.05 + radial * (0.18 + intensity * 0.16)) * radiusScale;
         const speed = (0.18 + seededUnit(seed + 2.1) * 0.42 + intensity * 0.3 + driftBase * 0.18)
           * (landingSpread ? 0.86 : 1)
           * response.lateralScale;
         const sideDrift = seededUnit(seed + 6.8) - 0.5;
-        const color = scratchColor.current.set(response.particles[index % response.particles.length]);
+        const color = litTerrainDustColor(
+          scratchColor.current,
+          response.particles[index % response.particles.length],
+          contactGroundColor,
+          biome,
+          contactSky,
+        );
         pointData.positions[index * 3] = x + Math.cos(angle) * startRadius;
         pointData.positions[index * 3 + 1] = y + seededUnit(seed + 3.7) * 0.035;
         pointData.positions[index * 3 + 2] = z + Math.sin(angle) * startRadius;
@@ -594,7 +658,7 @@ function SurfaceContactFX({ enabled }) {
         );
         const motionScale = kind === 'footstep'
           ? 1.18 + Math.min(0.24, horizontalSpeed / 28)
-          : 1;
+          : runningJump ? 1.22 : skidContact ? 1.12 : 1;
         pointData.sizes[index] = (0.15 + seededUnit(seed + 7.1) * 0.14 + intensity * 0.28)
           * (landingSpread ? 1.28 : 1.08)
           * radiusScale
@@ -1118,6 +1182,189 @@ function SunlitMotes({ enabled }) {
   );
 }
 
+// Trade-wind saltation: tiny sand/ash grains travel in low ballistic hops and
+// vanish at either end of their path. Placement and color come from the live
+// terrain biome, while wind and rain come from the shared weather director.
+// The low particle count and shader-only motion keep this cheaper than a CPU
+// particle system while avoiding a decorative loop on wet/vegetated ground.
+function WindborneSaltation({ enabled }) {
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const pointsRef = useRef(null);
+  const spawnCenter = useRef(new THREE.Vector3(Infinity, 0, Infinity));
+  const centerScratch = useRef(new THREE.Vector3());
+  const windScratch = useRef(new THREE.Vector2(-0.55, -0.83));
+  const grainColor = useRef(new THREE.Color());
+  const profileColor = useRef(new THREE.Color());
+  const seeds = useRef(Array.from({ length: SALTATION_COUNT }, (_, index) => index * 53.71 + 5.3));
+
+  const { geometry, material, positions, weights, colors } = useMemo(() => {
+    const positionArray = new Float32Array(SALTATION_COUNT * 3);
+    const seedArray = new Float32Array(SALTATION_COUNT);
+    const weightArray = new Float32Array(SALTATION_COUNT);
+    const colorArray = new Float32Array(SALTATION_COUNT * 3);
+    for (let index = 0; index < SALTATION_COUNT; index += 1) {
+      positionArray[index * 3 + 1] = -100;
+      seedArray[index] = index * 53.71 + 5.3;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seedArray, 1));
+    geo.setAttribute('aWeight', new THREE.BufferAttribute(weightArray, 1));
+    geo.setAttribute('aColor', new THREE.BufferAttribute(colorArray, 3));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uGate: { value: 0 },
+        uLight: { value: 1 },
+        uWind: { value: new THREE.Vector2(-0.55, -0.83).normalize() },
+        uPixelRatio: { value: typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2) },
+      },
+      vertexShader: /* glsl */`
+        attribute float aSeed;
+        attribute float aWeight;
+        attribute vec3 aColor;
+        uniform float uTime;
+        uniform float uGate;
+        uniform float uLight;
+        uniform vec2 uWind;
+        uniform float uPixelRatio;
+        varying float vAlpha;
+        varying vec3 vColor;
+        void main() {
+          float variation = fract(aSeed * 0.371);
+          float phase = fract(uTime * (0.24 + variation * 0.2) + fract(aSeed * 0.113));
+          float envelope = sin(phase * 3.14159265);
+          float travel = (phase - 0.5) * (1.25 + variation * 1.65);
+          vec2 crossWind = vec2(-uWind.y, uWind.x);
+          vec3 moved = position;
+          moved.xz += uWind * travel;
+          moved.xz += crossWind * sin(phase * 6.2831853 + aSeed) * 0.045;
+          moved.y += pow(max(envelope, 0.0), 1.6) * (0.025 + aWeight * 0.072);
+          vec4 mvPosition = modelViewMatrix * vec4(moved, 1.0);
+          float perspective = clamp(170.0 / max(1.0, -mvPosition.z), 8.0, 80.0);
+          gl_PointSize = clamp((0.035 + variation * 0.018) * perspective * uPixelRatio, 0.8, 3.8);
+          gl_Position = projectionMatrix * mvPosition;
+          vAlpha = pow(max(envelope, 0.0), 0.7) * uGate * (0.25 + aWeight * 0.38);
+          vColor = aColor * uLight;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        varying float vAlpha;
+        varying vec3 vColor;
+        void main() {
+          vec2 grain = (gl_PointCoord - 0.5) * vec2(0.82, 1.35);
+          float alpha = smoothstep(0.48, 0.08, length(grain)) * vAlpha;
+          if (alpha < 0.008) discard;
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+    });
+    return {
+      geometry: geo,
+      material: mat,
+      positions: positionArray,
+      weights: weightArray,
+      colors: colorArray,
+    };
+  }, []);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+
+  useEffect(() => {
+    spawnCenter.current.set(Infinity, 0, Infinity);
+  }, [currentZoneId]);
+
+  function respawn(center) {
+    spawnCenter.current.copy(center);
+    for (let index = 0; index < SALTATION_COUNT; index += 1) {
+      let placed = false;
+      weights[index] = 0;
+      for (let attempt = 0; attempt < SALTATION_PLACEMENT_ATTEMPTS; attempt += 1) {
+        const seed = seeds.current[index] + attempt * 73.9;
+        const angle = seededUnit(seed) * Math.PI * 2;
+        const radius = Math.sqrt(seededUnit(seed + 3.4)) * SALTATION_RADIUS;
+        const x = center.x + Math.cos(angle) * radius;
+        const z = center.z + Math.sin(angle) * radius;
+        const y = terrainHeight(x, z, currentZoneId);
+        if (y < WATER_LEVEL - 0.02) continue;
+        const biome = terrainBiomeAt(x, z, y, currentZoneId);
+        const profile = saltationBiomeProfile(biome);
+        if (!profile) continue;
+        if (attempt < SALTATION_PLACEMENT_ATTEMPTS - 1 && seededUnit(seed + 8.7) > profile.weight) continue;
+        positions[index * 3] = x;
+        positions[index * 3 + 1] = y + 0.028;
+        positions[index * 3 + 2] = z;
+        weights[index] = profile.weight;
+        grainColor.current
+          .copy(terrainColor(x, z, y, currentZoneId))
+          .lerp(profileColor.current.set(profile.color), 0.72);
+        colors[index * 3] = grainColor.current.r;
+        colors[index * 3 + 1] = grainColor.current.g;
+        colors[index * 3 + 2] = grainColor.current.b;
+        placed = true;
+        break;
+      }
+      if (!placed) positions[index * 3 + 1] = -100;
+    }
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.aWeight.needsUpdate = true;
+    geometry.attributes.aColor.needsUpdate = true;
+  }
+
+  useFrame(({ clock, camera }, delta) => {
+    const { timeOfDay, day } = useThreeGameStore.getState();
+    const sky = skyState(timeOfDay ?? 12, day || 1);
+    const windGate = THREE.MathUtils.smoothstep(weatherEnv.windSpeed, 0.62, 1.42);
+    const dryGate = Math.max(0, 1 - weatherEnv.rainIntensity * 1.25)
+      * Math.max(0, 1 - weatherEnv.mistAmount * 0.7);
+    const gust = THREE.MathUtils.clamp(
+      0.62 + Math.sin(clock.elapsedTime * 0.37) * 0.24 + Math.sin(clock.elapsedTime * 0.91 + 1.7) * 0.14,
+      0.18,
+      1,
+    );
+    const targetGate = enabled ? windGate * dryGate * (0.48 + gust * 0.52) : 0;
+    material.uniforms.uGate.value = THREE.MathUtils.damp(material.uniforms.uGate.value, targetGate, 2.7, delta);
+    material.uniforms.uLight.value = THREE.MathUtils.damp(
+      material.uniforms.uLight.value,
+      0.16 + sky.daylight * 0.84 + sky.moonlight * 0.08,
+      2.4,
+      delta,
+    );
+    material.uniforms.uTime.value = clock.elapsedTime;
+    windScratch.current.set(weatherEnv.windX, weatherEnv.windZ);
+    if (windScratch.current.lengthSq() < 0.001) windScratch.current.set(-0.55, -0.83);
+    material.uniforms.uWind.value.copy(windScratch.current.normalize());
+    const visible = material.uniforms.uGate.value > 0.015;
+    if (pointsRef.current) pointsRef.current.visible = visible;
+    if (!visible) return;
+
+    const pose = getRuntimePlayerPose();
+    const player = pose.position || { x: camera.position.x, y: 0, z: camera.position.z };
+    const center = centerScratch.current.set(player.x, player.y || 0, player.z);
+    if (!Number.isFinite(spawnCenter.current.x)
+      || spawnCenter.current.distanceToSquared(center) > SALTATION_RESPAWN_DISTANCE * SALTATION_RESPAWN_DISTANCE) {
+      respawn(center);
+    }
+  });
+
+  return (
+    <points
+      ref={pointsRef}
+      geometry={geometry}
+      material={material}
+      frustumCulled={false}
+      visible={false}
+      renderOrder={2}
+      userData={{ renderSource: 'windborne-saltation', renderLabel: 'Windborne sand and ash', renderKind: 'ambient-vfx', noReflect: true }}
+    />
+  );
+}
+
 // Ground glitter: each point is a micro-facet (a quartz grain, an olivine
 // crystal, a fleck of volcanic glass) with its own randomly tilted normal.
 // The vertex shader runs a real half-vector specular against the live sun, so
@@ -1133,10 +1380,11 @@ function GroundSparkles({ enabled }) {
   const sunScratch = useRef(new THREE.Vector3());
   const seeds = useRef(Array.from({ length: SPARKLE_COUNT }, (_, index) => index * 41.37 + 3.1));
 
-  const { geometry, material, positions, facets } = useMemo(() => {
+  const { geometry, material, positions, facets, strengths } = useMemo(() => {
     const positionArray = new Float32Array(SPARKLE_COUNT * 3);
     const facetArray = new Float32Array(SPARKLE_COUNT * 3);
     const seedArray = new Float32Array(SPARKLE_COUNT);
+    const strengthArray = new Float32Array(SPARKLE_COUNT);
     for (let i = 0; i < SPARKLE_COUNT; i += 1) {
       positionArray[i * 3 + 1] = -100;
       facetArray[i * 3 + 1] = 1;
@@ -1146,6 +1394,7 @@ function GroundSparkles({ enabled }) {
     geo.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
     geo.setAttribute('aFacet', new THREE.BufferAttribute(facetArray, 3));
     geo.setAttribute('aSeed', new THREE.BufferAttribute(seedArray, 1));
+    geo.setAttribute('aStrength', new THREE.BufferAttribute(strengthArray, 1));
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -1159,6 +1408,7 @@ function GroundSparkles({ enabled }) {
       vertexShader: /* glsl */`
         attribute vec3 aFacet;
         attribute float aSeed;
+        attribute float aStrength;
         uniform float uTime;
         uniform vec3 uSun;
         uniform float uGate;
@@ -1168,16 +1418,24 @@ function GroundSparkles({ enabled }) {
         void main() {
           vec3 viewDir = normalize(cameraPosition - position);
           vec3 hv = normalize(normalize(uSun) + viewDir);
-          float glint = pow(max(dot(aFacet, hv), 0.0), 60.0);
+          float alignment = max(dot(aFacet, hv), 0.0);
+          float directionalGlint = pow(alignment, 34.0);
+          // A very sparse micro-flash floor keeps volcanic glass legible when
+          // no random facet happens to hit the exact half-vector. Directional
+          // glint still dominates as soon as the camera crosses the sun path.
+          float flashPhase = 0.5 + 0.5 * sin(uTime * (0.55 + fract(aSeed * 0.41) * 0.9) + aSeed * 2.13);
+          float surfaceFlash = clamp((aStrength - 0.58) * 1.45, 0.0, 1.0);
+          float glint = max(directionalGlint, pow(flashPhase, 20.0) * (0.035 + surfaceFlash * 0.09));
           // Slow shimmer keeps grains alive while standing still (heat haze,
           // micro-movement) without turning into a blink pattern.
-          float shimmer = 0.6 + 0.4 * sin(uTime * (1.1 + fract(aSeed * 0.29) * 1.6) + aSeed);
-          float intensity = glint * shimmer * uGate;
-          vAlpha = clamp(intensity * 1.6, 0.0, 1.0);
-          vBright = 1.0 + intensity * 1.5;
+          float shimmer = 0.72 + 0.28 * sin(uTime * (1.1 + fract(aSeed * 0.29) * 1.6) + aSeed);
+          float surfaceStrength = 0.32 + clamp(aStrength, 0.0, 1.35) * 0.78;
+          float intensity = glint * shimmer * uGate * surfaceStrength;
+          vAlpha = clamp(intensity * 1.55, 0.0, 0.82);
+          vBright = 1.0 + min(intensity, 1.0) * 0.9;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           float perspective = clamp(160.0 / max(1.0, -mvPosition.z), 10.0, 110.0);
-          float size = 0.03 + glint * 0.05;
+          float size = (0.032 + glint * 0.052) * mix(0.88, 1.08, clamp(aStrength, 0.0, 1.0));
           gl_PointSize = size * perspective * uPixelRatio;
           gl_Position = projectionMatrix * mvPosition;
         }
@@ -1193,14 +1451,20 @@ function GroundSparkles({ enabled }) {
           float star = max(
             smoothstep(0.5, 0.0, abs(c.x)) * smoothstep(0.1, 0.0, abs(c.y)),
             smoothstep(0.5, 0.0, abs(c.y)) * smoothstep(0.1, 0.0, abs(c.x))
-          ) * 0.55;
+          ) * 0.3;
           float a = (core + star) * vAlpha;
           if (a < 0.006) discard;
-          gl_FragColor = vec4(vec3(1.3, 1.24, 1.02) * vBright, a);
+          gl_FragColor = vec4(vec3(1.16, 1.12, 0.98) * vBright, a);
         }
       `,
     });
-    return { geometry: geo, material: mat, positions: positionArray, facets: facetArray };
+    return {
+      geometry: geo,
+      material: mat,
+      positions: positionArray,
+      facets: facetArray,
+      strengths: strengthArray,
+    };
   }, []);
 
   useEffect(() => () => {
@@ -1216,6 +1480,7 @@ function GroundSparkles({ enabled }) {
     spawnCenter.current.copy(center);
     for (let index = 0; index < SPARKLE_COUNT; index += 1) {
       let placed = false;
+      strengths[index] = 0;
       for (let attempt = 0; attempt < SPARKLE_PLACEMENT_ATTEMPTS; attempt += 1) {
         const seed = seeds.current[index] + attempt * 89.3;
         const angle = seededUnit(seed) * Math.PI * 2;
@@ -1225,13 +1490,14 @@ function GroundSparkles({ enabled }) {
         const y = terrainHeight(x, z, currentZoneId);
         if (y < WATER_LEVEL - 0.06) continue;
         const biome = terrainBiomeAt(x, z, y, currentZoneId);
-        const wetBand = y < WATER_LEVEL + 0.55 ? 1.2 : 0;
+        const wetBand = y < WATER_LEVEL + 0.55 ? 1.25 : 0;
         const weight = Math.max(sparkleBiomeWeight(biome), wetBand);
         if (attempt < SPARKLE_PLACEMENT_ATTEMPTS - 1 && seededUnit(seed + 8.2) > weight) continue;
         if (weight <= 0.01) continue;
         positions[index * 3] = x;
-        positions[index * 3 + 1] = y + 0.025;
+        positions[index * 3 + 1] = y + 0.05;
         positions[index * 3 + 2] = z;
+        strengths[index] = weight;
         // Mostly-up facet with a random tilt: low sun lights grains between
         // the camera and the sun path; high sun favours near-flat grains.
         const tiltAngle = seededUnit(seed + 11.7) * Math.PI * 2;
@@ -1249,13 +1515,14 @@ function GroundSparkles({ enabled }) {
     }
     geometry.attributes.position.needsUpdate = true;
     geometry.attributes.aFacet.needsUpdate = true;
+    geometry.attributes.aStrength.needsUpdate = true;
   }
 
   useFrame(({ clock, camera }, delta) => {
     const { timeOfDay, day } = useThreeGameStore.getState();
     const sky = skyState(timeOfDay ?? 12, day || 1);
-    const airGate = Math.max(0, 1 - weatherEnv.overcast * 0.85)
-      * Math.max(0, 1 - weatherEnv.rainIntensity * 0.9);
+    const airGate = Math.max(0, 1 - weatherEnv.overcast * 0.45)
+      * Math.max(0, 1 - weatherEnv.rainIntensity * 0.98);
     const targetGate = enabled ? sky.daylight * airGate : 0;
     material.uniforms.uGate.value = THREE.MathUtils.damp(material.uniforms.uGate.value, targetGate, 3.2, delta);
     material.uniforms.uTime.value = clock.elapsedTime;
@@ -1294,6 +1561,7 @@ export function GroundedWorldFX({ enabled = true, terrainDust = true }) {
       <PlayerSkidStreaks enabled={enabled} />
       <InsectMotes enabled={enabled} />
       <SunlitMotes enabled={enabled} />
+      <WindborneSaltation enabled={enabled} />
       <GroundSparkles enabled={enabled} />
       <Pollinators enabled={enabled} />
     </group>

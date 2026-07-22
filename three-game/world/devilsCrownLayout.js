@@ -69,7 +69,9 @@ export function getDevilsCrownRockObstacles() {
   return buildRockObstacles(getDevilsCrownRocks(), {
     zoneId: DEVILS_CROWN,
     idPrefix: 'devcrown',
-    filter: rock => rockVisualBounds(rock).height > 0.42 && rock.y > -0.8,
+    // Anything taller than the controller's auto-step belongs in collision;
+    // smaller awash stones remain harmless surface detail.
+    filter: rock => rockVisualBounds(rock).height > 0.32 && rock.y > -0.8,
     extra: rock => ({
       edgeRisk: devilsCrownRimMask(rock.x, rock.z) > 0.28,
       traversalLabel: 'scramble over crater basalt',

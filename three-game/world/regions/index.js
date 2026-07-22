@@ -64,6 +64,10 @@ import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 import { postScrubRiseRegion } from './postScrubRise/terrain';
 import { createPostScrubRiseTerrainMaterial } from './postScrubRise/material';
+import { coastalScrublandRegion } from './coastalScrubland/terrain';
+import { createCoastalScrublandTerrainMaterial } from './coastalScrubland/material';
+import { easternCliffsRegion } from './easternCliffs/terrain';
+import { createEasternCliffsTerrainMaterial } from './easternCliffs/material';
 import { lavaFlatsRegion } from './lavaFlats/terrain';
 import { createLavaFlatsTerrainMaterial } from './lavaFlats/material';
 import { northernHighlandsRegion } from './northernHighlands/terrain';
@@ -101,6 +105,8 @@ const authoredRegions = [
   { ...lawsonHouseRegion, createTerrainMaterial: createLawsonHouseTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
   { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
+  { ...coastalScrublandRegion, createTerrainMaterial: createCoastalScrublandTerrainMaterial },
+  { ...easternCliffsRegion, createTerrainMaterial: createEasternCliffsTerrainMaterial },
   { ...lavaFlatsRegion, createTerrainMaterial: createLavaFlatsTerrainMaterial },
   { ...northernHighlandsRegion, createTerrainMaterial: createNorthernHighlandsTerrainMaterial },
   { ...watkinsCreekRegion, createTerrainMaterial: createWatkinsCreekTerrainMaterial },

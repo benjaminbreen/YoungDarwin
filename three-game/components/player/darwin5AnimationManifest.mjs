@@ -11,6 +11,10 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   neckStretch: { category: 'idleAction', duration: 4.63, lockDuration: 0, fade: 0.3, exitEarly: 0.35, fallback: 'lookAroundShort' },
   armStretch: { category: 'idleAction', duration: 10.77, lockDuration: 0, fade: 0.3, exitEarly: 0.4, fallback: 'neckStretch' },
   neutralIdle: { category: 'idleAction', duration: 7.2, lockDuration: 0, fade: 0.32, exitEarly: 0.4, fallback: 'idle' },
+  // Mixamo "Unarmed Idle 01" from the 2026-07-20 Darwin re-rig. This is a
+  // quiet one-cycle alternate in the locomotion preview, not a replacement
+  // for the dependable base idle.
+  calmIdle: { category: 'idleAction', duration: 6.4, lockDuration: 0, fade: 0.3, exitEarly: 0.3, fallback: 'idle' },
   happyIdle: { category: 'idleAction', duration: 2.03, lockDuration: 0, fade: 0.24, exitEarly: 0.2, fallback: 'lookAroundShort' },
   // Mixamo "Sad Idle" (head down, fidgety foot kick) repurposed as a
   // studying-something-on-the-ground fidget — only offered near a specimen.
@@ -48,9 +52,17 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   crouchWalk: { category: 'locomotion', loop: true, fade: 0.16, fallback: 'torchCrouchWalk' },
   crouchRun: { category: 'locomotion', loop: true, fade: 0.14, fallback: 'crouchWalk' },
   crouchIdle: { category: 'idle', loop: true, fade: 0.18 },
-  startWalking: { category: 'locomotionTransition', duration: 0.42, lockDuration: 0, fade: 0.1 },
-  stopWalking: { category: 'locomotionTransition', duration: 0.38, lockDuration: 0, fade: 0.1 },
-  runToStop: { category: 'locomotionTransition', duration: 0.83, lockDuration: 0, fade: 0.08 },
+  // Preview timing deliberately uses the useful anticipation/settle portion
+  // of the longer source clips; the remaining repeated gait frames stay in
+  // the GLB so timing can be tuned without another asset export.
+  startWalking: { category: 'locomotionTransition', duration: 0.68, lockDuration: 0, fade: 0.08 },
+  startRunning: { category: 'locomotionTransition', duration: 0.83, lockDuration: 0, fade: 0.08, fallback: 'run' },
+  stopWalking: { category: 'locomotionTransition', duration: 0.8, lockDuration: 0, fade: 0.1 },
+  runToStop: { category: 'locomotionTransition', duration: 0.9, lockDuration: 0, fade: 0.1 },
+  // Archived candidates from the same batch. They are present in the preview
+  // GLB for review but are not selected by normal gameplay yet.
+  sprintForwardRoll: { category: 'impact', duration: 1.2, lockDuration: 0.42, fade: 0.05, fallback: 'fallingToRoll' },
+  teeterTransition: { category: 'impact', duration: 0.83, lockDuration: 0, fade: 0.06, fallback: 'teeter' },
   runningTurn180: { category: 'locomotionTransition', duration: 0.38, lockDuration: 0, fade: 0.04 },
   runningTurnLeft: { category: 'locomotionTransition', duration: 0.42, lockDuration: 0, fade: 0.04, fallback: 'runningTurn180' },
   runningTurnRight: { category: 'locomotionTransition', duration: 0.42, lockDuration: 0, fade: 0.04, fallback: 'runningTurn180' },

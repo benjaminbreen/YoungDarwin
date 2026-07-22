@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { WATER_LEVEL, crackNoise, elevationNoise, ellipseDistance, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 
+const MAX_RENDER_ONLY_OUTCROP_DETAIL = 0.075;
+
 // ---------------------------------------------------------------------------
 // Northwest Reef (NW_REEF) — authored white-sand beach and walkable turquoise
 // shallows.
@@ -95,14 +97,22 @@ export function northwestReefHeight(x, z, { movementSurface = false } = {}) {
   if (lift > 0) {
     const core = 1 - THREE.MathUtils.smoothstep(di, 0.2, 0.75);
     const hummock = elevationNoise(x * 0.22 + 11, z * 0.21 - 4) * 0.22;
+    const isletFracture = Math.abs(crackNoise(x * 0.4, z * 0.38));
+    const renderOnlyIsletDetail = core * isletFracture * MAX_RENDER_ONLY_OUTCROP_DETAIL;
     const isletY = -1.18 + lift * (1.42 + hummock)
-      + core * (0.12 + Math.abs(crackNoise(x * 0.4, z * 0.38)) * (movementSurface ? 0.12 : 0.34));
+      + core * (0.12 + isletFracture * 0.34)
+      - (movementSurface ? renderOnlyIsletDetail : 0);
     y = Math.max(y, isletY);
   }
 
-  // Beach basalt outcrops.
+  // Beach basalt outcrops. Their broad fracture relief is collision-scale, so
+  // it belongs to both surfaces. Keep only a boot-sole-sized finish in the
+  // render mesh; subtracting it from the shared relief preserves the existing
+  // visual silhouette exactly while the movement surface follows the rock.
   const out = nwReefOutcrop(x, z);
-  y += out * (1.0 + Math.abs(crackNoise(x * 0.36 + 7, z * 0.33)) * (movementSurface ? 0.35 : 1.0));
+  const outcropFracture = Math.abs(crackNoise(x * 0.36 + 7, z * 0.33));
+  const renderOnlyOutcropDetail = out * outcropFracture * MAX_RENDER_ONLY_OUTCROP_DETAIL;
+  y += out * (1.0 + outcropFracture) - (movementSurface ? renderOnlyOutcropDetail : 0);
 
   // Deep ocean falloff toward the blocked north/west edges; the coral ring
   // shelters its own lagoon from the drop.

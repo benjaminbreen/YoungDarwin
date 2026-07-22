@@ -2,7 +2,7 @@
 
 // Shared runtime for destructible procedural plants (prickly pear, lava
 // cactus). Every piece of a plant is a fixed rigid body released to dynamic
-// by hammer strikes, shotgun blasts, player landings, or running into it
+// by hammer strikes, deliberate knife cuts, shotgun blasts, player landings, or running into it
 // hard; released pieces settle and become collectible specimens through the
 // existing rock-sample carry prompt flow. Standing pieces sway faintly in
 // the wind and bend away from the player when brushed (visual group only —
@@ -18,7 +18,7 @@
 //     key/parentKey/type/siteId, spawn/rotation/center/topY/width/height,
 //     mass/hits/tone, colliderArgs/colliderOffset, plus behavior flags:
 //     ccd, dustCount, releaseWithParent (drop instantly with parent, e.g.
-//     blossoms), breakOnLanding, pushable, windAmp; and collect metadata:
+//     blossoms), breakOnLanding, pushable, knifeCuttable, windAmp; and collect metadata:
 //     specimenId, sampleLabel, promptText, sampleOutcome, educationalNote.
 //   SiteDressing   — static non-physics component ({ site, zoneId }).
 //   renderPiece(piece) — meshes rendered inside the piece's sway group.
@@ -40,9 +40,11 @@ import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 import { catalogToInspectable } from '../../../world/inspectables';
 import {
+  clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
   damageLeanAngle,
   selectHammerImpactTargets,
+  selectKnifeCutTargets,
 } from './breakablePhysics';
 
 // Released pieces still collide with terrain, Darwin, and ordinary props, but
@@ -59,6 +61,13 @@ export const DEFAULT_PLANT_TUNING = {
   strikeDamage: 1,
   shotgunDamage: 2,
   shotgunMaxPieces: 3,
+  // A direct blast sends a detached piece beyond hammer range. Near misses
+  // still carry a substantial shove so shotgun cuts never read like gravity-
+  // only drops.
+  shotgunReleaseMinSpeed: 9.5,
+  shotgunReleaseMaxSpeed: 13,
+  shotgunReleaseLiftSpeed: 4.2,
+  shotgunReleaseVelocityCap: 14.5,
   jumpBreakDamage: 2,
   contactBreakDamage: 2,
   absorbFeedbackCooldown: 2.2,
@@ -86,6 +95,7 @@ export const DEFAULT_PLANT_TUNING = {
   pushBreakAngle: 0.24,
   pushBreakKick: 2.2, // rad/s initial flex velocity on a breaking impact
   pushDamageCooldown: 0.9,
+  pushReleaseVelocityCap: 0.9,
   bendStiffness: 26,
   bendDamping: 8,
   windSway: 0.018,
@@ -98,8 +108,18 @@ export const DEFAULT_PLANT_TUNING = {
   damageKick: 1.45,
   damageStiffness: 32,
   damageDamping: 7.2,
-  hammerReleaseSpeed: 0.58,
-  hammerReleaseLiftSpeed: 0.04,
+  // With released-piece drag below, this produces a roughly 5–10 yard arc
+  // from ordinary pad heights rather than a dead drop at Darwin's boots.
+  hammerReleaseSpeed: 8.5,
+  hammerReleaseLiftSpeed: 3.5,
+  hammerReleaseVelocityCap: 9.5,
+  knifeStrikeRange: 1.72,
+  // A cutting stroke tosses a light pad about a yard: clearly responsive, but
+  // still far below either impact tool.
+  knifeReleaseSpeed: 2.4,
+  knifeReleaseLiftSpeed: 1.0,
+  knifeReleaseVelocityCap: 2.8,
+  landingReleaseVelocityCap: 1.0,
   // Descendants detach together with mass-scaled momentum. This is not a
   // jointed branch simulation, but it keeps a branch moving as one beat until
   // ground contact instead of visibly crumbling in a random cascade.
@@ -124,6 +144,7 @@ function inheritReleaseImpulse(impulse, parentMass, childMass, tuning) {
       y: (impulse.torque.y || 0) * torqueScale,
       z: (impulse.torque.z || 0) * torqueScale,
     } : null,
+    maxLinearSpeed: impulse.maxLinearSpeed,
   };
 }
 
@@ -327,6 +348,12 @@ function BreakablePlantPiece({
         body.wakeUp();
         body.applyImpulse(pending.linear, true);
         if (pending.torque) body.applyTorqueImpulse(pending.torque, true);
+        const currentVelocity = body.linvel();
+        const cappedVelocity = clampReleaseLinearVelocity(
+          currentVelocity,
+          pending.maxLinearSpeed,
+        );
+        if (cappedVelocity !== currentVelocity) body.setLinvel(cappedVelocity, true);
       }
     }
 
@@ -376,19 +403,24 @@ function BreakablePlantPiece({
       colliders={false}
       position={piece.spawn}
       rotation={piece.rotation}
-      mass={piece.mass}
       friction={0.95}
       restitution={0.02}
-      linearDamping={2.1}
-      angularDamping={2.5}
+      // Airborne succulent pieces should carry a readable arc. High ground
+      // friction and near-zero restitution still make them settle promptly.
+      linearDamping={0.45}
+      angularDamping={1.15}
       canSleep
       ccd={!!piece.ccd}
       userData={userData}
       onContactForce={handleContactForce}
     >
+      {/* With manual colliders react-three-rapier strips `mass` from the
+          RigidBody options. The collider must own the authored biological
+          mass or even a modest tool impulse produces extreme velocity. */}
       <CuboidCollider
         args={piece.colliderArgs.map(v => Math.max(0.015, v))}
         position={piece.colliderOffset}
+        mass={piece.mass}
         collisionGroups={BREAKABLE_PIECE_COLLISION_GROUPS}
       />
       <group ref={visualRef}>
@@ -547,7 +579,11 @@ export function BreakablePlantField({ spec }) {
     else runtime.bodies.delete(key);
   }, [runtime]);
 
-  const releasePiece = useCallback((key, impulse, { cascade = true, fx = true } = {}) => {
+  const releasePiece = useCallback((key, impulse, {
+    cascade = true,
+    fx = true,
+    dustCount = null,
+  } = {}) => {
     if (runtime.released.has(key)) return false;
     const piece = piecesByKey.get(key);
     if (!piece) return false;
@@ -562,7 +598,7 @@ export function BreakablePlantField({ spec }) {
         impactDir: impulse
           ? { x: Math.sign(impulse.linear.x || 0), y: 0, z: Math.sign(impulse.linear.z || 0) }
           : { x: 0, y: 0, z: 1 },
-        dustCount: piece.dustCount ?? 10,
+        dustCount: dustCount ?? piece.dustCount ?? 10,
         sparkCount: 0,
       });
     }
@@ -633,7 +669,10 @@ export function BreakablePlantField({ spec }) {
 
   // Route every hit through hit points: tough pieces shrug off early blows
   // (with dust + a narrator beat for hammer work) before finally snapping.
-  const damagePiece = useCallback((key, amount, impulse, { feedback = null } = {}) => {
+  const damagePiece = useCallback((key, amount, impulse, {
+    feedback = null,
+    releaseOptions = undefined,
+  } = {}) => {
     if (runtime.released.has(key) || runtime.culled.has(key)) return false;
     const piece = piecesByKey.get(key);
     if (!piece) return false;
@@ -661,7 +700,7 @@ export function BreakablePlantField({ spec }) {
     const taken = (runtime.damage.get(key) || 0) + amount;
     if (taken >= (piece.hits || 1)) {
       runtime.damage.delete(key);
-      return releasePiece(key, impulse);
+      return releasePiece(key, impulse, releaseOptions);
     }
     runtime.damage.set(key, taken);
     kickDamageFlex(piece, taken, impulse);
@@ -689,9 +728,10 @@ export function BreakablePlantField({ spec }) {
     return damagePiece(key, tuning.contactBreakDamage, impulse);
   }, [damagePiece, tuning]);
 
-  // Hammer swings: queue delayed strikes, resolved in useFrame.
+  // Melee tool swings: queue delayed strikes, resolved against tool-specific
+  // arcs in useFrame. Knife events are ignored by every other prop system.
   useEffect(() => onPropEvent('tool-swing', event => {
-    if (event.tool !== 'hammer') return;
+    if (event.tool !== 'hammer' && event.tool !== 'pocket_knife') return;
     runtime.pendingStrikes.push({
       ...event,
       at: runtime.clock + (event.impactDelay ?? 0.55),
@@ -721,10 +761,21 @@ export function BreakablePlantField({ spec }) {
     for (const hit of hits.slice(0, tuning.shotgunMaxPieces)) {
       const falloff = Math.max(0.3, 1 - hit.along / Math.max(1, event.range ?? 24));
       const directness = 1 - hit.lateral / hit.reach;
-      const kick = hit.piece.mass * SHOTGUN.prop.impulse * 1.2 * falloff * (0.5 + directness * 0.5);
+      const shotStrength = THREE.MathUtils.clamp(falloff * 0.45 + directness * 0.55, 0, 1);
+      const releaseSpeed = THREE.MathUtils.lerp(
+        tuning.shotgunReleaseMinSpeed,
+        tuning.shotgunReleaseMaxSpeed,
+        shotStrength,
+      );
+      const planarLength = Math.hypot(d.x || 0, d.z || 0) || 1;
+      const dirX = (d.x || 0) / planarLength;
+      const dirZ = (d.z || 0) / planarLength;
+      const kick = hit.piece.mass * releaseSpeed;
+      const lift = hit.piece.mass * tuning.shotgunReleaseLiftSpeed * (0.85 + directness * 0.15);
       damagePiece(hit.piece.key, tuning.shotgunDamage, {
-        linear: { x: d.x * kick, y: kick * 0.25, z: d.z * kick },
-        torque: { x: d.z * kick * 0.06, y: 0, z: -d.x * kick * 0.06 },
+        linear: { x: dirX * kick, y: lift, z: dirZ * kick },
+        torque: { x: dirZ * kick * 0.045, y: 0, z: -dirX * kick * 0.045 },
+        maxLinearSpeed: tuning.shotgunReleaseVelocityCap,
       });
     }
   }), [damagePiece, pieces, runtime, tuning]);
@@ -757,6 +808,7 @@ export function BreakablePlantField({ spec }) {
         direction: { x: dx / length, z: dz / length },
         speed: Math.min(0.78, 0.46 + (event.fallSpeed || 0) * 0.035),
         liftSpeed: 0.025,
+        maxLinearSpeed: tuning.landingReleaseVelocityCap,
       }));
     }
   }), [damagePiece, pieces, runtime, tuning]);
@@ -885,6 +937,7 @@ export function BreakablePlantField({ spec }) {
               direction: { x: dirX, z: dirZ },
               speed: Math.min(0.72, 0.42 + approach * 0.035),
               liftSpeed: 0.02,
+              maxLinearSpeed: tuning.pushReleaseVelocityCap,
             }),
           };
           flex.angularVelocity = Math.max(flex.angularVelocity, tuning.pushBreakKick);
@@ -933,25 +986,42 @@ export function BreakablePlantField({ spec }) {
       const o = strike.position;
       const f = strike.facing;
       if (!o || !f) continue;
-      const candidates = selectHammerImpactTargets(
-        pieces.filter(piece => !runtime.released.has(piece.key) && !runtime.culled.has(piece.key)),
-        {
+      const intactPieces = pieces.filter(piece => (
+        !runtime.released.has(piece.key) && !runtime.culled.has(piece.key)
+      ));
+      const knifeCut = strike.tool === 'pocket_knife';
+      const candidates = knifeCut
+        ? selectKnifeCutTargets(intactPieces, {
+          origin: o,
+          facing: f,
+          maxHits: 1,
+          swing: { endDistance: tuning.knifeStrikeRange },
+        })
+        : selectHammerImpactTargets(intactPieces, {
           origin: o,
           facing: f,
           maxHits: tuning.strikeMaxPieces,
           swing: { endDistance: tuning.strikeRange },
-        },
-      );
+        });
       if (candidates.length) claimSwing(strike.swingId);
       for (const hit of candidates) {
-        damagePiece(hit.piece.key, tuning.strikeDamage, createRestrainedReleaseImpulse({
-          mass: hit.piece.mass,
-          direction: { x: hit.dirX, z: hit.dirZ },
-          speed: tuning.hammerReleaseSpeed,
-          liftSpeed: tuning.hammerReleaseLiftSpeed,
-        }), {
-          feedback: spec.strikeAbsorbMessage(hit.piece),
-        });
+        damagePiece(
+          hit.piece.key,
+          knifeCut ? Math.max(1, hit.piece.hits || 1) : tuning.strikeDamage,
+          createRestrainedReleaseImpulse({
+            mass: hit.piece.mass,
+            direction: { x: hit.dirX, z: hit.dirZ },
+            speed: knifeCut ? tuning.knifeReleaseSpeed : tuning.hammerReleaseSpeed,
+            liftSpeed: knifeCut ? tuning.knifeReleaseLiftSpeed : tuning.hammerReleaseLiftSpeed,
+            torqueScale: knifeCut ? 0.006 : 0.035,
+            maxLinearSpeed: knifeCut
+              ? tuning.knifeReleaseVelocityCap
+              : tuning.hammerReleaseVelocityCap,
+          }), {
+            feedback: knifeCut ? null : spec.strikeAbsorbMessage(hit.piece),
+            releaseOptions: knifeCut ? { dustCount: hit.piece.cutDustCount ?? 2 } : undefined,
+          },
+        );
       }
     }
   });

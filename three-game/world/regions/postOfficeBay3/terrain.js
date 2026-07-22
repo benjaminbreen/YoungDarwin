@@ -183,16 +183,24 @@ export function postOfficeBay3TerrainHeight(x, z, { movementSurface = false } = 
   const inland = smoothstep(d, 7.0, 24.0);
   y += inland * (elevationNoise(x * 0.04 + 4.0, z * 0.044 - 5.0) * 0.9 + 0.45);
   y += smoothstep(z, 28.0, 56.0) * 2.1;
-  y += headland * (3.1 + Math.abs(crackNoise(x * 0.18, z * 0.17)) * (movementSurface ? 0.25 : 0.85)) * smoothstep(d, -1.0, 5.0);
+  // The fractured headland is broad, collision-scale relief. Keep it in the
+  // shared surface so its visible ridges cannot be walked through.
+  y += headland * (3.1 + Math.abs(crackNoise(x * 0.18, z * 0.17)) * 0.85) * smoothstep(d, -1.0, 5.0);
   y += eastPoint * 1.25 * smoothstep(d, -1.0, 3.0);
 
   // The compacted track is smoother and slightly worn into the ash/sand.
   y -= trail * 0.085 * smoothstep(d, 0.8, 6.0);
   y = lerp(y, 0.44 + terrainFineDetail(x, z) * 0.035, landing * 0.86);
 
-  const fineScale = movementSurface ? 0.16 : 0.62;
-  y += terrainFineDetail(x, z) * fineScale * (1.0 - trail * 0.65 - landing * 0.7);
-  y += crackNoise(x * 0.34, z * 0.28) * (movementSurface ? 0.025 : 0.08) * smoothstep(d, 9.0, 20.0);
+  const detailMask = 1.0 - trail * 0.65 - landing * 0.7;
+  const fineDetail = terrainFineDetail(x, z) * detailMask;
+  const inlandCracks = crackNoise(x * 0.34, z * 0.28) * smoothstep(d, 9.0, 20.0);
+  y += fineDetail * 0.16 + inlandCracks * 0.025;
+  if (!movementSurface) {
+    // Retain close surface breakup without separating the rendered ground from
+    // its collider by more than a boot-scale amount.
+    y += clamp(fineDetail * (0.62 - 0.16) + inlandCracks * (0.08 - 0.025), -0.065, 0.065);
+  }
 
   return Math.max(-4.9, y);
 }

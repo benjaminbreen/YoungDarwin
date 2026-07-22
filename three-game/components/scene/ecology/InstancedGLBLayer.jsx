@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -9,6 +15,7 @@ import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
+import { onPropEvent } from '../../../physics/props/propEvents';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
 // per source primitive, so 30 bushes cost 1-2 draw calls instead of 30+.
@@ -113,29 +120,48 @@ function bucketCullBounds(items, maxVisibleDistance) {
   return { center, visibleDistanceSq: visibleDistance * visibleDistance };
 }
 
+function setItemMatrix(mesh, index, item, {
+  sink,
+  slopeSink,
+  ySquash,
+  reaction = null,
+}) {
+  const angle = reaction?.angle || 0;
+  const dirX = reaction?.direction?.x || 0;
+  const dirZ = reaction?.direction?.z || 0;
+  dummy.position.set(
+    item.x,
+    item.y - sink - (item.grade || 0) * item.scale * slopeSink,
+    item.z,
+  );
+  dummy.rotation.set(
+    (item.pitch || 0) + dirZ * angle,
+    item.yaw,
+    (item.roll || 0) - dirX * angle,
+  );
+  dummy.scale.set(
+    item.scale * (item.widthScale || 1),
+    item.scale * ySquash * (item.heightScale || 1),
+    item.scale * (item.depthScale || 1),
+  );
+  dummy.updateMatrix();
+  mesh.setMatrixAt(index, dummy.matrix);
+}
+
 // One InstancedMesh for one (bucket × source primitive). Sets its own matrices
 // (and optional per-instance tint) once, then leaves three.js to frustum-cull
 // it by the bucket's bounding sphere.
 function InstancedBucketMesh({
   geometry, material, items, sink, slopeSink, ySquash, tint, tintStrength,
   hasItemTints, castShadow, receiveShadow, userData, inspectableType, onInspect,
+  reactionStateRef,
 }) {
+  const meshRef = useRef(null);
   const setMatrices = useCallback(mesh => {
+    meshRef.current = mesh;
     if (!mesh) return;
     items.forEach((item, index) => {
-      dummy.position.set(
-        item.x,
-        item.y - sink - (item.grade || 0) * item.scale * slopeSink,
-        item.z,
-      );
-      dummy.rotation.set(item.pitch || 0, item.yaw, item.roll || 0);
-      dummy.scale.set(
-        item.scale * (item.widthScale || 1),
-        item.scale * ySquash * (item.heightScale || 1),
-        item.scale * (item.depthScale || 1),
-      );
-      dummy.updateMatrix();
-      mesh.setMatrixAt(index, dummy.matrix);
+      setItemMatrix(mesh, index, item, { sink, slopeSink, ySquash });
     });
     if (hasItemTints) {
       const base = mesh.material.color;
@@ -160,6 +186,25 @@ function InstancedBucketMesh({
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
   }, [items, sink, slopeSink, ySquash, hasItemTints, tint, tintStrength]);
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    const reactions = reactionStateRef?.current;
+    if (!mesh || !reactions?.size) return;
+    let dirty = false;
+    items.forEach((item, index) => {
+      const reaction = reactions.get(item.id);
+      if (!reaction) return;
+      setItemMatrix(mesh, index, item, {
+        sink,
+        slopeSink,
+        ySquash,
+        reaction,
+      });
+      dirty = true;
+    });
+    if (dirty) mesh.instanceMatrix.needsUpdate = true;
+  });
 
   return (
     <instancedMesh
@@ -194,10 +239,12 @@ export function InstancedGLBLayer({
   sourceKind = 'ecology-glb-layer',
   variantMode = null,
   forceCheapMaterials = false,
+  impactReaction = false,
 }) {
   const groupRef = useRef(null);
   const bucketRefs = useRef([]);
   const cullStateRef = useRef(createCameraCullState());
+  const reactionStateRef = useRef(new Map());
   const { scene } = useGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const qualityCheapMaterials = useThreeGameStore(state => state.cheapMaterials);
@@ -213,6 +260,7 @@ export function InstancedGLBLayer({
   // Per-item tints ride on instanceColor so one species stays one instanced
   // mesh per primitive instead of one layer per tint.
   const hasItemTints = items.some(item => item.tint);
+  const itemIds = useMemo(() => new Set(items.map(item => item.id)), [items]);
 
   const primitives = useMemo(() => {
     scene.updateMatrixWorld(true);
@@ -264,9 +312,50 @@ export function InstancedGLBLayer({
     setInspectedObject(catalogToInspectable(inspectableType, point, { sourceId: item?.id || inspectableType }));
   }, [inspectableType, setInspectedObject]);
 
+  useEffect(() => {
+    reactionStateRef.current.clear();
+    if (!impactReaction) return undefined;
+    return onPropEvent('mature-cactus-impact', event => {
+      if (event.sourceId !== sourceId || !itemIds.has(event.itemId)) return;
+      const directionLength = Math.hypot(event.direction?.x || 0, event.direction?.z || 0) || 1;
+      reactionStateRef.current.set(event.itemId, {
+        age: 0,
+        amplitude: Math.max(0, event.amplitude || 0),
+        duration: Math.max(0.1, event.duration || 0.8),
+        frequency: Math.max(1, event.frequency || 12),
+        angle: 0,
+        direction: {
+          x: (event.direction?.x || 0) / directionLength,
+          z: (event.direction?.z || 0) / directionLength,
+        },
+        done: false,
+        resetRendered: false,
+      });
+    });
+  }, [impactReaction, itemIds, sourceId]);
+
   // Coarse per-bucket distance cull (three.js handles frustum culling for free
   // via each bucket's bounding sphere). Far buckets switch off entirely.
-  useFrame(({ camera }) => {
+  useFrame(({ camera }, delta) => {
+    if (impactReaction && reactionStateRef.current.size) {
+      for (const [itemId, reaction] of reactionStateRef.current) {
+        if (reaction.done) {
+          if (reaction.resetRendered) reactionStateRef.current.delete(itemId);
+          else reaction.resetRendered = true;
+          continue;
+        }
+        reaction.age += Math.min(delta, 0.05);
+        if (reaction.age >= reaction.duration) {
+          reaction.angle = 0;
+          reaction.done = true;
+          continue;
+        }
+        const envelope = Math.exp(-3.4 * reaction.age / reaction.duration);
+        reaction.angle = reaction.amplitude
+          * Math.sin(reaction.age * reaction.frequency + 0.34)
+          * envelope;
+      }
+    }
     const refs = bucketRefs.current;
     if (!refs.length) return;
     if (!shouldRunCameraCull(camera, cullStateRef.current)) return;
@@ -305,6 +394,7 @@ export function InstancedGLBLayer({
                 userData={meshUserData}
                 inspectableType={inspectableType}
                 onInspect={handleInspect}
+                reactionStateRef={impactReaction ? reactionStateRef : null}
               />
             );
           })}

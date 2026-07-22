@@ -631,7 +631,10 @@ export function updatePlayerInteractions({
     const toolId = toolbarOrder[index];
     const pressed = Boolean(keys[button]);
     if (pressed && !lastToolHotkeys[button] && toolId) {
-      if (useThreeGameStore.getState().activeToolId === toolId) {
+      if (toolId === 'compass') {
+        setActiveTool(toolId);
+        triggerToolUse(toolId);
+      } else if (useThreeGameStore.getState().activeToolId === toolId) {
         triggerToolUse(toolId);
       } else {
         setActiveTool(toolId);

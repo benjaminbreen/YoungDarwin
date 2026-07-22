@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 
 const projectRequire = createRequire(import.meta.url);
+const { Vector3 } = projectRequire('three');
 const moduleCache = new Map();
 const EXTENSIONS = ['', '.js', '.jsx', '.ts', '.tsx', '.json', '/index.js', '/index.jsx'];
 
@@ -121,8 +122,10 @@ const {
 } = loadModule('three-game/physics/props/rockSampling.js');
 const {
   capHorizontalVelocity,
+  computeContactPushImpulse,
   computeControlledPushVelocity,
   computeLandingSettleMotion,
+  computeSustainedPushTorque,
   mobilityVelocityCaps,
 } = loadModule('three-game/physics/objectMobility.js');
 const {
@@ -133,10 +136,20 @@ const {
   surfaceContactProfileForBiome,
 } = loadModule('three-game/world/surfaceContact.js');
 const {
+  clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
   damageLeanAngle,
   selectHammerImpactTargets,
+  selectKnifeCutTargets,
 } = loadModule('three-game/physics/props/breakablePlant/breakablePhysics.js');
+const {
+  buildMatureCactusObstacles,
+  buildMatureCactusTargets,
+  cactusSpineInjuryChance,
+  matureCactusProfileForPath,
+  selectMatureCactusMeleeTarget,
+  selectMatureCactusShotgunHits,
+} = loadModule('three-game/world/ecology/matureCactusInteractions.js');
 const {
   carryGripForProp,
   carryPlacementCandidates,
@@ -155,6 +168,7 @@ const {
   obstacleBaseY,
   queryObstacleBounds,
   queryObstaclesNear,
+  resolveObstacleCollision,
 } = loadModule('three-game/world/obstacles.js');
 const {
   createCollisionAdapter,
@@ -168,6 +182,9 @@ const {
 } = loadModule('three-game/world/terrainGeometry.js');
 const {
   getRegionTerrainConfig,
+  isWalkableTerrain,
+  movementTerrainHeight,
+  terrainHeight,
 } = loadModule('three-game/world/terrain.js');
 const {
   getBorderVistas,
@@ -247,6 +264,19 @@ const {
   lavaFlatsPioneerMask,
   lavaFlatsTubeMasks,
 } = loadModule('three-game/world/regions/lavaFlats/path.js');
+const {
+  isLavaFlatsWalkable,
+  lavaFlatsHeight,
+} = loadModule('three-game/world/regions/lavaFlats/terrain.js');
+const {
+  getLavaFlatsRocks,
+} = loadModule('three-game/world/lavaFlatsLayout.js');
+const {
+  getDevilsCrownRocks,
+} = loadModule('three-game/world/devilsCrownLayout.js');
+const {
+  rockVisualBounds,
+} = loadModule('three-game/world/proceduralRocks.js');
 const {
   desolateOutcropDryMask,
   desolateOutcropGuanoMask,
@@ -421,6 +451,45 @@ const {
   evaluateFinalAssessment,
   isEndGameNarratorCommand,
 } = loadModule('three-game/finalAssessment.js');
+const {
+  assignToolbarSlot,
+  moveToolbarSlot,
+} = loadModule('three-game/toolbar.js');
+const {
+  consumeTouchControls,
+  triggerToolUse,
+} = loadModule('three-game/input/touchControls.js');
+
+test('quick-bar assignment replaces new tools and swaps tools already on the bar', () => {
+  const initial = ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'];
+  const available = [...initial, 'compass', 'pocket_knife'];
+  const withKnife = assignToolbarSlot(initial, 0, 'pocket_knife', available);
+  assert.deepEqual(withKnife, ['pocket_knife', 'insect_net', 'snare', 'hammer', 'hands', 'sketch']);
+  assert.deepEqual(initial, ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch']);
+
+  const swapped = assignToolbarSlot(withKnife, 4, 'pocket_knife', available);
+  assert.deepEqual(swapped, ['hands', 'insect_net', 'snare', 'hammer', 'pocket_knife', 'sketch']);
+  assert.equal(new Set(swapped).size, swapped.length);
+  assert.equal(assignToolbarSlot(initial, 1, 'not-in-kit', available), initial);
+});
+
+test('quick-bar slot dragging preserves six ordered action bindings', () => {
+  const initial = ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'];
+  assert.deepEqual(
+    moveToolbarSlot(initial, 0, 3),
+    ['insect_net', 'snare', 'hammer', 'shotgun', 'hands', 'sketch'],
+  );
+  assert.equal(moveToolbarSlot(initial, -1, 2), initial);
+});
+
+test('pocket knife toolbar use pulses a dedicated one-shot action', () => {
+  triggerToolUse('pocket_knife');
+  const pressed = consumeTouchControls();
+  const released = consumeTouchControls();
+  assert.equal(pressed.knife, true);
+  assert.equal(pressed.gather, false);
+  assert.equal(released.knife, false);
+});
 
 test('the narrator end-game command is explicit and deterministic', () => {
   assert.equal(isEndGameNarratorCommand('end game'), true);
@@ -843,9 +912,83 @@ test('controlled prop pushes make light clutter respond before heavy barrels wit
       delta: 1 / 60,
     });
   }
-  assert.ok(Math.hypot(velocity.x, velocity.z) <= 0.220001);
-  assert.ok(velocity.z < -0.2);
+  assert.ok(Math.hypot(velocity.x, velocity.z) <= 0.360001);
+  assert.ok(velocity.z < -0.34);
   assert.ok(velocity.y <= 0.02);
+});
+
+test('rollable and floating barrels respond faster while contact impulses remain horizontal', () => {
+  const barrelMobility = PROP_TYPES.barrel.behaviors.mobility;
+  const simulate = context => {
+    let velocity = { x: 0, y: 0, z: 0 };
+    for (let frame = 0; frame < 120; frame += 1) {
+      velocity = computeControlledPushVelocity({
+        velocity,
+        direction: { x: 1, z: 0 },
+        mobility: barrelMobility,
+        mass: PROP_TYPES.barrel.mass,
+        impactSpeed: 4.45,
+        sustainedTime: frame / 60,
+        delta: 1 / 60,
+        ...context,
+      });
+    }
+    return velocity;
+  };
+
+  const upright = simulate({});
+  const rolling = simulate({ rolling: true });
+  const floating = simulate({ floating: true });
+  assert.ok(rolling.x > upright.x + 0.2);
+  assert.ok(floating.x > upright.x + 0.08);
+  assert.ok(rolling.x <= barrelMobility.rollingMaxSpeed + 0.000001);
+  assert.ok(floating.x <= barrelMobility.floatingMaxSpeed + 0.000001);
+
+  const impulse = computeContactPushImpulse({
+    velocity: { x: 0.1, y: 2, z: 0 },
+    targetVelocity: { x: 0.4, y: 0, z: 0 },
+    direction: { x: 1, z: 0 },
+    mass: 56,
+  });
+  assert.ok(Math.abs(impulse.x - 16.8) < 0.000001);
+  assert.equal(impulse.y, 0);
+  assert.equal(impulse.z, 0);
+});
+
+test('sustained crate pressure adds delayed overturning torque without vertical force', () => {
+  const mobility = PROP_TYPES.crate.behaviors.mobility;
+  const early = computeSustainedPushTorque({
+    direction: { x: 1, z: 0 },
+    mobility,
+    sustainedTime: mobility.tipAssistDelay * 0.9,
+    impactSpeed: 4.45,
+  });
+  const sustained = computeSustainedPushTorque({
+    direction: { x: 1, z: 0 },
+    mobility,
+    sustainedTime: mobility.tipAssistDelay + mobility.tipAssistRampSeconds,
+    impactSpeed: 4.45,
+  });
+
+  assert.deepEqual(early, { x: 0, y: 0, z: 0 });
+  assert.equal(sustained.x, 0);
+  assert.equal(sustained.y, 0);
+  assert.equal(sustained.z, -mobility.tipAssistTorque);
+});
+
+test('manual physics-prop colliders own configured mass instead of leaving it on the rigid body', () => {
+  const source = fs.readFileSync(path.resolve('three-game/physics/props/PhysicsProp.jsx'), 'utf8');
+  const colliderSource = source.slice(source.indexOf('function PropCollider'), source.indexOf('function createPlacementShape'));
+  const rigidBodySource = source.slice(source.indexOf('<RigidBody'), source.indexOf('<PropCollider'));
+  assert.match(colliderSource, /mass,/);
+  assert.match(colliderSource, /frictionCombineRule:\s*CoefficientCombineRule\.Min/);
+  assert.doesNotMatch(rigidBodySource, /\bmass=/);
+  assert.match(source, /applyImpulseAtPoint\(impulse, contactPoint, true\)/);
+  assert.match(source, /contact\.tipCommitted\s*=\s*true/);
+  assert.match(source, /const contactPoint = !contact\.tipCommitted/);
+  assert.match(source, /body\.lockRotations\(true, false\)/);
+  assert.match(source, /body\.sleep\(\)/);
+  assert.match(source, /pushContact\.tipSettledFor >= 0\.65/);
 });
 
 test('Rapier terrain contacts stay ground-only while identified walls remain push contacts', () => {
@@ -966,6 +1109,18 @@ test('soft ground keeps stronger, longer tracks than grit', () => {
   assert.equal(water.visible, false);
 });
 
+test('foot-contact probes never translate skeleton bones', () => {
+  const source = fs.readFileSync(
+    path.resolve('three-game/components/player/footContactRig.js'),
+    'utf8',
+  );
+
+  assert.equal(modelAssets.darwin5.footPlanting, undefined);
+  assert.doesNotMatch(source, /bone\.position\.(?:add|sub)\s*\(/);
+  assert.doesNotMatch(source, /applyFootPlanting/);
+  assert.doesNotMatch(source, /VISUAL_GROUNDING_MIN\s*=\s*-/);
+});
+
 test('landing on loose props creates a mass-sensitive downward settle without launch', () => {
   const light = computeLandingSettleMotion({
     linearVelocity: { x: 1, y: 0.5, z: 0 },
@@ -1022,6 +1177,37 @@ test('hammer targeting follows a descending 3D swing instead of an XZ proximity 
   }).map(hit => hit.piece.key), ['low-basal-pad']);
 });
 
+test('knife targeting is a short selective arc that ignores woody plant pieces', () => {
+  const youngPad = {
+    key: 'young-pad',
+    center: { x: 0.04, y: 0.78, z: -1.16 },
+    colliderArgs: [0.24, 0.42, 0.1],
+    rotation: [0, 0, 0],
+    knifeCuttable: true,
+  };
+  const woodyBase = {
+    key: 'woody-base',
+    center: { x: 0, y: 0.58, z: -0.92 },
+    colliderArgs: [0.28, 0.48, 0.14],
+    rotation: [0, 0, 0],
+    knifeCuttable: false,
+  };
+  const distantPad = {
+    key: 'distant-pad',
+    center: { x: 0, y: 0.55, z: -2.35 },
+    colliderArgs: [0.24, 0.4, 0.1],
+    rotation: [0, 0, 0],
+    knifeCuttable: true,
+  };
+
+  const hits = selectKnifeCutTargets([woodyBase, distantPad, youngPad], {
+    origin: { x: 0, y: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+  });
+
+  assert.deepEqual(hits.map(hit => hit.piece.key), ['young-pad']);
+});
+
 test('vegetation release momentum is restrained and sublethal damage leaves a bounded lean', () => {
   const light = createRestrainedReleaseImpulse({
     mass: 2,
@@ -1037,6 +1223,134 @@ test('vegetation release momentum is restrained and sublethal damage leaves a bo
   assert.ok(Math.abs(heavy.linear.y / 20 - 0.04) < 0.000001);
   assert.equal(damageLeanAngle(1, 4, 0.16), 0.04);
   assert.equal(damageLeanAngle(8, 4, 0.16), 0.16);
+});
+
+test('plant release velocity has a hard safety cap independent of collider regressions', () => {
+  const ordinary = { x: 0.04, y: 0, z: 0.02 };
+  assert.equal(clampReleaseLinearVelocity(ordinary, 0.16), ordinary);
+
+  const launched = clampReleaseLinearVelocity({ x: 18, y: 4, z: -7 }, 0.16);
+  assert.ok(Math.abs(Math.hypot(launched.x, launched.y, launched.z) - 0.16) < 0.000001);
+  assert.ok(launched.x > 0 && launched.y > 0 && launched.z < 0);
+});
+
+test('manual breakable-plant colliders own authored mass instead of the rigid body', () => {
+  const source = fs.readFileSync(
+    path.resolve('three-game/physics/props/breakablePlant/BreakablePlantField.jsx'),
+    'utf8',
+  );
+  const rigidBodyOpen = source.slice(source.indexOf('<RigidBody'), source.indexOf('<CuboidCollider'));
+  const colliderOpen = source.slice(source.indexOf('<CuboidCollider'), source.indexOf('/>', source.indexOf('<CuboidCollider')));
+  assert.doesNotMatch(rigidBodyOpen, /mass=\{piece\.mass\}/);
+  assert.match(colliderOpen, /mass=\{piece\.mass\}/);
+  assert.match(source, /clampReleaseLinearVelocity/);
+});
+
+test('mature cactus GLBs stay instanced while exposing stable lightweight impact targets', () => {
+  assert.equal(
+    matureCactusProfileForPath('/assets/models/nature/runtime-big-opuntia.glb').kind,
+    'opuntia',
+  );
+  assert.equal(
+    matureCactusProfileForPath('/assets/models/nature/runtime-candelabra-cactus.glb').kind,
+    'candelabra',
+  );
+  assert.equal(matureCactusProfileForPath('/assets/models/nature/runtime-palo-santo.glb'), null);
+
+  const layers = [
+    {
+      id: 'mature-opuntia',
+      path: '/assets/models/nature/runtime-big-opuntia.glb',
+      sink: 0.04,
+      items: [
+        { id: 'near-pad-tree', x: 0, y: 0.5, z: -2, scale: 3.4, yaw: 0 },
+      ],
+    },
+    {
+      id: 'candelabra',
+      path: '/assets/models/nature/runtime-candelabra-cactus.glb',
+      items: [
+        { id: 'far-column', x: 0.15, y: 0.4, z: -7, scale: 3.7, yaw: 0 },
+      ],
+    },
+    {
+      id: 'ordinary-shrub',
+      path: '/assets/models/nature/runtime-croton.glb',
+      items: [{ id: 'ignored', x: 0, y: 0, z: -1, scale: 2 }],
+    },
+  ];
+  const targets = buildMatureCactusTargets(layers, 'POST_OFFICE_BAY');
+
+  assert.equal(targets.length, 2);
+  assert.equal(targets[0].sourceId, 'ecology:POST_OFFICE_BAY:mature-opuntia');
+  assert.ok(targets[0].radius > 1);
+  assert.ok(targets[0].height > 3.5);
+
+  const melee = selectMatureCactusMeleeTarget(targets, {
+    position: { x: 0, y: 0, z: 0 },
+    facing: { x: 0, z: -1 },
+    tool: 'hammer',
+  });
+  assert.equal(melee.target.itemId, 'near-pad-tree');
+  assert.ok(melee.directness > 0.8);
+
+  const shotHits = selectMatureCactusShotgunHits(targets, {
+    origin: { x: 0, y: 1.3, z: 0 },
+    dir: { x: 0, y: 0, z: -1 },
+    range: 12,
+    rayRadius: 0.62,
+    maxHits: 3,
+  });
+  assert.deepEqual(shotHits.map(hit => hit.target.itemId), ['near-pad-tree', 'far-column']);
+  assert.ok(shotHits[0].along < shotHits[1].along);
+
+  const obstacles = buildMatureCactusObstacles({
+    zoneId: 'POST_OFFICE_BAY',
+    flora: layers,
+    proceduralFlora: [],
+  });
+  assert.equal(obstacles.length, 2);
+  assert.ok(obstacles.every(obstacle => obstacle.kind === 'cactus'));
+  assert.ok(obstacles.every(obstacle => obstacle.path === null));
+  assert.ok(obstacles.every(obstacle => obstacle.shapes[0].type === 'cylinder'));
+  assert.equal(obstacles[0].spineHazard.kind, 'opuntia');
+  assert.equal(obstacles[1].spineHazard.kind, 'candelabra');
+  assert.ok(obstacles[0].radius < targets[0].radius);
+});
+
+test('mature cactus spine risk stays low while walking and reaches 25 percent while running', () => {
+  const walking = cactusSpineInjuryChance({
+    running: false,
+    impactSpeed: 4.45,
+    walkSpeed: 4.45,
+    runSpeed: 7.45,
+  });
+  const running = cactusSpineInjuryChance({
+    running: true,
+    impactSpeed: 7.45,
+    walkSpeed: 4.45,
+    runSpeed: 7.45,
+  });
+  assert.equal(walking, 0.04);
+  assert.equal(running, 0.25);
+  assert.ok(cactusSpineInjuryChance({ running: false, impactSpeed: 1 }) < walking);
+});
+
+test('Coastal Scrubland mature cacti participate in shared movement collision', () => {
+  const obstacles = getRuntimeObstacles('COASTAL_SCRUBLAND');
+  const cacti = obstacles.filter(obstacle => obstacle.kind === 'cactus' && obstacle.spineHazard);
+  assert.ok(cacti.some(obstacle => obstacle.spineHazard.kind === 'candelabra'));
+  assert.ok(cacti.some(obstacle => obstacle.spineHazard.kind === 'opuntia'));
+
+  const cactus = cacti.find(obstacle => obstacle.spineHazard.kind === 'candelabra');
+  const current = new Vector3(cactus.x - cactus.radius * 0.35, obstacleBaseY(cactus), cactus.z);
+  const previous = new Vector3(cactus.x - cactus.radius - 1.2, current.y, cactus.z);
+  const collision = resolveObstacleCollision(current, previous, { obstacles, playerRadius: 0.42 });
+  assert.equal(collision.obstacle.id, cactus.id);
+  assert.ok(Math.hypot(
+    collision.position.x - cactus.x,
+    collision.position.z - cactus.z,
+  ) >= cactus.radius + 0.42 - 0.000001);
 });
 
 test('campaign stools use a responsive one-hand skeletal grip at authored scale', () => {
@@ -1098,6 +1412,99 @@ test('procedural rock obstacles share visual bounds and traversal support', () =
         `${zoneId}:${obstacle.id} walk-over support should stay near visual top`,
       );
     }
+  }
+});
+
+test('Lava Flats movement terrain contains all collision-scale relief', () => {
+  const config = getRegionTerrainConfig('LAVA_FLATS');
+  let samples = 0;
+  let maxDelta = 0;
+  for (let z = -48; z <= 48; z += 0.5) {
+    for (let x = -52; x <= 52; x += 0.5) {
+      if (!isLavaFlatsWalkable(x, z, config)) continue;
+      const renderHeight = lavaFlatsHeight(x, z);
+      const movementHeight = lavaFlatsHeight(x, z, { movementSurface: true });
+      maxDelta = Math.max(maxDelta, Math.abs(renderHeight - movementHeight));
+      samples += 1;
+    }
+  }
+
+  assert.ok(samples > 40000, 'expected to cover the Lava Flats walkable field');
+  assert.ok(
+    maxDelta <= 0.075001,
+    `render-only relief must stay below 7.5 cm; received ${maxDelta.toFixed(4)} m`,
+  );
+});
+
+test('Lava Flats promotes collision-scale rocks to walk-over support', () => {
+  const rocks = getLavaFlatsRocks();
+  const obstacles = getRuntimeObstacles('LAVA_FLATS');
+  const rockObstacles = obstacles.filter(obstacle => (
+    obstacle.kind === 'rock' && obstacle.id.startsWith('lava-flats-')
+  ));
+  const collisionScaleRocks = rocks.filter(rock => {
+    const bounds = rockVisualBounds(rock);
+    return bounds.footprint >= 0.9 && bounds.height >= 0.3;
+  });
+
+  assert.ok(collisionScaleRocks.length >= 12, 'expected authored slabs and large generated rocks');
+  assert.ok(rockObstacles.length < rocks.length / 2, 'small lava fragments should remain visual-only');
+  for (const rock of collisionScaleRocks) {
+    const obstacle = rockObstacles.find(candidate => candidate.id === `lava-flats-${rock.id}`);
+    assert.ok(obstacle, `${rock.id} should have collision from its shared visual bounds`);
+    assert.equal(obstacle.traversal, 'step-up');
+    assert.ok(isWalkOverTraversalObstacle(obstacle));
+    const baseY = obstacleBaseY(obstacle);
+    const supportY = getObstacleSupportHeight(obstacle.x, obstacle.z, baseY, 0.28, obstacles);
+    assert.ok(supportY !== null && supportY !== undefined, `${rock.id} should provide support`);
+    assert.ok(
+      supportY - baseY >= obstacle.visualBounds.top * 0.99,
+      `${rock.id} support should reach the visible slab top`,
+    );
+  }
+});
+
+test('collision-scale relief stays inside the authored movement surface', () => {
+  const regions = [
+    'DEVILS_CROWN',
+    'ALT_POST_OFFICE_BAY',
+    'POST_OFFICE_BAY_3',
+    'NW_REEF',
+  ];
+
+  for (const regionId of regions) {
+    const config = getRegionTerrainConfig(regionId);
+    let samples = 0;
+    let maxDelta = 0;
+    for (let z = -config.depth * 0.5; z <= config.depth * 0.5; z += 0.75) {
+      for (let x = -config.width * 0.5; x <= config.width * 0.5; x += 0.75) {
+        if (!isWalkableTerrain(x, z, regionId)) continue;
+        const delta = Math.abs(
+          terrainHeight(x, z, regionId) - movementTerrainHeight(x, z, regionId),
+        );
+        assert.ok(Number.isFinite(delta), `${regionId} terrain delta must be finite`);
+        maxDelta = Math.max(maxDelta, delta);
+        samples += 1;
+      }
+    }
+    assert.ok(samples > 1000, `${regionId} should expose a meaningful walkable sample`);
+    assert.ok(
+      maxDelta <= 0.100001,
+      `${regionId} render-only relief must stay below 10 cm; received ${maxDelta.toFixed(4)} m`,
+    );
+  }
+});
+
+test('Devil’s Crown gives every above-water step-height rock collision support', () => {
+  const obstacles = getRuntimeObstacles('DEVILS_CROWN');
+  const rockObstacles = new Set(obstacles.map(obstacle => obstacle.id));
+  const collisionScaleRocks = getDevilsCrownRocks().filter(rock => (
+    rock.y > -0.8 && rockVisualBounds(rock).height > 0.32
+  ));
+
+  assert.ok(collisionScaleRocks.length >= 40);
+  for (const rock of collisionScaleRocks) {
+    assert.ok(rockObstacles.has(`devcrown-${rock.id}`), `${rock.id} should have collision support`);
   }
 });
 

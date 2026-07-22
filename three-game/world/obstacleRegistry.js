@@ -19,6 +19,7 @@ import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
 import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
 import { getNorthernHighlandsRockObstacles } from './northernHighlandsLayout';
 import { getWatkinsCreekRockObstacles } from './watkinsCreekLayout';
+import { getEasternCliffsRockObstacles } from './easternCliffsLayout';
 
 /** @typedef {Record<string, unknown>} AuthoredObstacle */
 /** @typedef {() => AuthoredObstacle[]} ObstacleSource */
@@ -49,4 +50,5 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   LAVA_FLATS: [getLavaFlatsRockObstacles],
   NORTHERN_HIGHLANDS: [getNorthernHighlandsRockObstacles],
   WATKINS_CREEK: [getWatkinsCreekRockObstacles],
+  EASTERN_CLIFFS: [getEasternCliffsRockObstacles],
 });

@@ -26,7 +26,7 @@ export function maybeTriggerNetSnagFromSwing({ position, facing, now = performan
         .set(Number(position.x) || 0, Number(position.y) || 0, Number(position.z) || 0)
         .addScaledVector(scratchForward, reach)
         .addScaledVector(scratchRight, side);
-      const contact = findCactusHazardContact(scratchProbe, 0.48);
+      const contact = findCactusHazardContact(scratchProbe, 0.48, state.currentZoneId);
       if (!contact) continue;
       useThreeGameStore.getState().triggerNetSnagDilemma?.({
         position: { x: scratchProbe.x, y: scratchProbe.y, z: scratchProbe.z },

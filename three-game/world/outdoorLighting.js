@@ -100,7 +100,11 @@ export function computeOutdoorLightRig({
     0.78,
     clamp01(0.7 - weatherSoftness * 0.38 + goldenSideLight * 0.12 + hardSun * 0.12 + clearVivid * 0.03),
   );
-  const shadowNormalBias = lerp(0.018, 0.032, clamp01(lowSun * 0.68 + weatherSoftness * 0.32));
+  // Normal bias creates a visible receiver/caster gap at raking sun angles.
+  // Ease it down as shadows lengthen, while retaining a small weather lift to
+  // suppress acne when broad soft shadows cover more terrain relief.
+  const lowSunBiasRelief = clamp01(lowSun * 0.8 + g * 0.35);
+  const shadowNormalBias = lerp(0.014, 0.008, lowSunBiasRelief) + weatherSoftness * 0.002;
   const shadowBias = lerp(-0.00013, -0.00006, weatherSoftness);
   // Bright sand is a reflector: the harder and higher the clear sun, the more
   // bounce lands on *vertical* shadow sides (people, trunks, rock faces). The

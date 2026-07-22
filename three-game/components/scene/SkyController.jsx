@@ -4,7 +4,7 @@ import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
-import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
+import { getRuntimePlayerMotion, getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { lightingDebugEnabled } from '../../runtimeDebug';
 import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -2228,6 +2228,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     let effectiveShadowExtent = lightRig.shadowExtent;
     let shadowTargetMoved = false;
     let playerShadowMoved = false;
+    let playerShadowAnimationActive = false;
     if (keyLightRef.current) {
       const key = keyLightRef.current;
       // A below-horizon moon cannot cast light. On moonless nights retain a
@@ -2237,6 +2238,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       const fromSun = s.elevation >= -0.04;
       const shadowLightDirection = fromMoon ? _moon : (fromSun ? _sun : _nightSkyLight);
       const pose = getRuntimePlayerPose()?.position || store.playerPose?.position || { x: 0, y: 0, z: 0 };
+      playerShadowAnimationActive = getRuntimePlayerMotion()?.visualActive === true;
       _shadowPose.set(pose.x, pose.y, pose.z);
       playerShadowMoved = lastPlayerShadowPose.current.distanceToSquared(_shadowPose) > SHADOW_PLAYER_MOVE_EPSILON_SQ;
       lastPlayerShadowPose.current.copy(_shadowPose);
@@ -2392,7 +2394,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     // direction/position above still updates every frame; only the (expensive)
     // shadow-caster render pass is throttled.
     shadowClock.current += delta;
-    const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved)
+    const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved || playerShadowAnimationActive)
       ? shadowQualityConfig.activeRefreshInterval
       : shadowQualityConfig.idleRefreshInterval;
     if (shadowProjectionChanged || shadowClock.current >= shadowRefreshInterval) {

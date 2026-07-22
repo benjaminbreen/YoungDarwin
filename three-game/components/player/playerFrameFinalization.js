@@ -43,6 +43,13 @@ function updateVisualLocomotionPhase(visual, {
     visual.walking = true;
     return visual;
   }
+  if (action === 'startRunning') {
+    visual.phase = 'startRun';
+    visual.running = true;
+    visual.walking = false;
+    visual.lastRunAt = now;
+    return visual;
+  }
   if (action === 'stopWalking') {
     visual.phase = 'walkStop';
     visual.running = false;

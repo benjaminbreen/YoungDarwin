@@ -8,6 +8,8 @@ import {
   facetedBoulderSupportY,
   usesFacetedBoulderSurface,
 } from './facetedBoulders';
+import { getEcology } from './ecology';
+import { buildMatureCactusObstacles } from './ecology/matureCactusInteractions';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
 const WALK_OVER_CROWN = 0.42;
@@ -347,7 +349,11 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const regional = (REGION_OBSTACLE_SOURCES[zoneId] || [])
     .flatMap(source => source())
     .map(obstacle => applyRuntimeObstacleOffset(obstacle, zoneId, offsets));
-  const runtimeObstacles = withMobility([...mapped, ...regional]);
+  // Mature cactus GLBs render through ecology instancing, but their collision
+  // bounds must enter this shared source so Rapier, analytic movement,
+  // wildlife avoidance, camera queries, and spine hazards all agree.
+  const matureCacti = buildMatureCactusObstacles(getEcology(zoneId), zoneId);
+  const runtimeObstacles = withMobility([...mapped, ...regional, ...matureCacti]);
   if (!hasRuntimeOffsets) staticRuntimeObstacleCache.set(zoneId, runtimeObstacles);
   return runtimeObstacles;
 }

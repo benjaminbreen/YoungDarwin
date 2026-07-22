@@ -15,25 +15,22 @@ import {
   lavaFlatsWeatheredMask,
 } from './path';
 
-function clamp01(value) {
-  return Math.max(0, Math.min(1, value));
-}
+const MAX_RENDER_SURFACE_DETAIL = 0.075;
 
-function flowPlateRelief(x, z, movementSurface) {
+function flowPlateRelief(x, z) {
   const flow = lavaFlatsFlowMask(x, z);
   const directional = Math.sin((x * 0.13 - z * 0.045) + Math.sin(z * 0.038) * 1.2);
   const secondary = Math.sin(x * 0.055 + z * 0.086 - 1.4);
   const broadPlate = elevationNoise(x * 0.048 + 17, z * 0.036 - 8);
   const amount = directional * 0.11 + secondary * 0.055 + broadPlate * 0.13;
-  return flow * amount * (movementSurface ? 0.5 : 1);
+  return flow * amount;
 }
 
-function fracturedRelief(x, z, movementSurface) {
+function fracturedRelief(x, z) {
   const scoria = lavaFlatsScoriaMask(x, z);
   const ridge = lavaFlatsPressureRidgeMask(x, z);
   const chips = Math.pow(Math.abs(crackNoise(x * 0.34 + 7, z * 0.31 - 5)), 4.2);
   const broken = terrainSurfaceNoise(x * 0.82 - 11, z * 0.76 + 3);
-  if (movementSurface) return scoria * chips * 0.04 + ridge * broken * 0.028;
   return scoria * (chips * 0.17 + broken * 0.075) + ridge * chips * 0.08;
 }
 
@@ -55,30 +52,35 @@ export function lavaFlatsHeight(x, z, { movementSurface = false } = {}) {
     + cross * 0.19
     + longRoll
     + flow * 0.28
-    + flowPlateRelief(x, z, movementSurface)
-    + ridge * (movementSurface ? 0.42 : 0.78)
-    + scoria * terrainSurfaceNoise(x * 0.17 + 2, z * 0.16 - 3) * (movementSurface ? 0.05 : 0.13)
-    + tube.rim * (movementSurface ? 0.28 : 0.56)
-    - tube.bowl * (movementSurface ? 0.52 : 0.74)
-    + fracturedRelief(x, z, movementSurface);
+    + flowPlateRelief(x, z)
+    + ridge * 0.78
+    + scoria * terrainSurfaceNoise(x * 0.17 + 2, z * 0.16 - 3) * 0.13
+    + tube.rim * 0.56
+    - tube.bowl * 0.74
+    + fracturedRelief(x, z);
 
   // The route is only a compacted trace. It follows the lava rather than
   // becoming an implausibly level road through the field.
-  y -= path.tread * (movementSurface ? 0.045 : 0.075);
+  y -= path.tread * 0.075;
   y -= path.center * 0.025;
 
-  if (movementSurface) {
-    y += elevationNoise(x * 0.12 + 7, z * 0.11 - 11) * 0.035;
-  } else {
-    const seam = 1 - THREE.MathUtils.smoothstep(
-      Math.abs(crackNoise(x * 0.23 - 3, z * 0.21 + 8)),
-      0.018,
-      0.095,
-    );
-    y -= seam * (0.035 + scoria * 0.035);
-    y += terrainFineDetail(x * 0.82, z * 0.82) * (0.52 + scoria * 0.38);
-  }
-  return y;
+  if (movementSurface) return y;
+
+  // Ridges, tube rims, bowls, and fractured plates affect traversal, so they
+  // belong to the shared structural surface above. Only the close volcanic
+  // texture remains render-only, with a hard cap below a boot sole's depth.
+  const seam = 1 - THREE.MathUtils.smoothstep(
+    Math.abs(crackNoise(x * 0.23 - 3, z * 0.21 + 8)),
+    0.018,
+    0.095,
+  );
+  const surfaceDetail = terrainFineDetail(x * 0.82, z * 0.82) * (0.52 + scoria * 0.38)
+    - seam * (0.035 + scoria * 0.035);
+  return y + THREE.MathUtils.clamp(
+    surfaceDetail,
+    -MAX_RENDER_SURFACE_DETAIL,
+    MAX_RENDER_SURFACE_DETAIL,
+  );
 }
 
 export function lavaFlatsBiomeAt(x, z) {

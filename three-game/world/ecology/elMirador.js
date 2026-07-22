@@ -1,6 +1,15 @@
-import { seededRandom } from '../scatter';
-import { terrainHeight, terrainSlopeAt } from '../terrain';
-import { EL_MIRADOR, elMiradorPathInfo } from '../regions/elMirador/path';
+import {
+  EL_MIRADOR,
+  elMiradorBasaltExposure,
+  elMiradorCoastDistance,
+  elMiradorGullyMask,
+  elMiradorPathInfo,
+  elMiradorRimMask,
+  elMiradorShelterMask,
+  elMiradorSummitMask,
+  elMiradorWindExposure,
+} from '../regions/elMirador/path';
+import { getCliffSurfProfile } from '../cliffSurfProfiles';
 import { buildStandardDryPathGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
@@ -20,24 +29,18 @@ function hash2(x, z, salt = 0) {
   return value - Math.floor(value);
 }
 
-function valueNoise(x, z, scale = 1, salt = 0) {
-  const gx = x * scale;
-  const gz = z * scale;
-  const ix = Math.floor(gx);
-  const iz = Math.floor(gz);
-  const fx = gx - ix;
-  const fz = gz - iz;
-  const ux = fx * fx * (3 - 2 * fx);
-  const uz = fz * fz * (3 - 2 * fz);
-  const a = hash2(ix, iz, salt) * (1 - ux) + hash2(ix + 1, iz, salt) * ux;
-  const b = hash2(ix, iz + 1, salt) * (1 - ux) + hash2(ix + 1, iz + 1, salt) * ux;
-  return a * (1 - uz) + b * uz;
-}
-
 function elMiradorDryness({ x, z, y, tone, path }) {
   const elevationBurn = clamp01((y - 4.2) / 4.4);
   const windLine = Math.sin(x * 0.07 - z * 0.11) * 0.08 + Math.sin(x * 0.17 + z * 0.04) * 0.04;
-  return clamp01(0.32 + tone * 0.22 + elevationBurn * 0.24 + (path?.shoulder || 0) * 0.12 + windLine);
+  return clamp01(
+    0.28
+    + tone * 0.18
+    + elevationBurn * 0.18
+    + elMiradorWindExposure(x, z) * 0.28
+    + (path?.shoulder || 0) * 0.1
+    + windLine
+    - elMiradorShelterMask(x, z) * 0.2,
+  );
 }
 
 function elMiradorTint(tone, dryness, pathShoulder = 0) {
@@ -48,61 +51,54 @@ function elMiradorTint(tone, dryness, pathShoulder = 0) {
 }
 
 function buildElMiradorGrass() {
-  return buildStandardDryPathGrassPatchItems({
+  const items = buildStandardDryPathGrassPatchItems({
     zoneId: EL_MIRADOR,
-    idPrefix: 'el-mirador-dry-grass',
-    count: 2200,
+    idPrefix: 'el-mirador-wind-grass',
+    count: 1480,
     seed: 10417,
     bounds: { minX: -47, maxX: 47, minZ: -43, maxZ: 43 },
     pathInfo: elMiradorPathInfo,
-    rejectBiomes: ['red-dirt-path', 'path-shoulder', 'mirador-cliff'],
+    rejectBiomes: [
+      'open-water-bed',
+      'red-dirt-path',
+      'path-shoulder',
+      'mirador-basalt-cliff',
+      'wind-scoured-overlook-rim',
+      'eroded-highland-gully',
+    ],
     pathCenterMax: 0,
     pathTreadMax: 0,
-    maxGrade: 1.16,
+    maxGrade: 0.9,
     slopeStep: 0.8,
-    scale: [0.58, 1.28],
+    scale: [0.46, 1.04],
     windYaw: -0.62,
     attemptsPerItem: 180,
-    pathClearance: 1.9,
+    pathClearance: 1.7,
     sparseBand: 1.55,
-    baseChance: 0.18,
-    densityAt: ({ y }) => clamp01((y - 3.8) / 4.8) * 0.18,
+    baseChance: 0.12,
+    densityAt: ({ x, z, y }) => clamp01(
+      0.04
+      + elMiradorShelterMask(x, z) * 0.26
+      + elMiradorSummitMask(x, z) * 0.12
+      + clamp01((y - 4.2) / 5.2) * 0.1
+      - elMiradorBasaltExposure(x, z) * 0.16,
+    ),
+    accept: ({ x, z }) => elMiradorCoastDistance(x, z) > 12
+      && elMiradorGullyMask(x, z) < 0.38
+      && hash2(x, z, 41) > elMiradorRimMask(x, z) * 0.62,
     drynessAt: elMiradorDryness,
     tintAt: elMiradorTint,
   });
-}
-
-function buildElMiradorRocks() {
-  const rocks = [];
-  let attempts = 0;
-  while (rocks.length < 26 && attempts < 2200) {
-    attempts += 1;
-    const i = attempts + 11831;
-    const x = -48 + seededRandom(i, 3) * 96;
-    const z = -42 + seededRandom(i, 9) * 84;
-    const path = elMiradorPathInfo(x, z);
-    if (path.distance < path.width * 1.65) continue;
-    const y = terrainHeight(x, z, EL_MIRADOR);
-    const { grade } = terrainSlopeAt(x, z, EL_MIRADOR, 0.9);
-    if (grade > 1.2) continue;
-    const cliffSide = x > 24 || z > 18;
-    const clump = valueNoise(x, z, 0.08, 89);
-    if (!cliffSide && clump < 0.46) continue;
-    const scale = 0.45 + seededRandom(i, 21) * (cliffSide ? 0.72 : 0.42);
-    rocks.push({
-      id: `el-mirador-rock-${rocks.length}`,
-      x,
-      y,
-      z,
-      radiusX: scale * (1.05 + seededRandom(i, 25) * 0.5),
-      radiusY: scale * (0.36 + seededRandom(i, 27) * 0.32),
-      radiusZ: scale * (0.82 + seededRandom(i, 29) * 0.55),
-      yaw: seededRandom(i, 31) * Math.PI * 2,
-      sink: scale * 0.22,
-      color: seededRandom(i, 33) > 0.5 ? '#7d7158' : '#5f5647',
-    });
-  }
-  return rocks;
+  return items.map(item => {
+    const exposure = elMiradorWindExposure(item.x, item.z);
+    const shelter = elMiradorShelterMask(item.x, item.z);
+    return {
+      ...item,
+      widthScale: (item.widthScale || 1) * (1.02 + exposure * 0.18),
+      heightScale: (item.heightScale || 1) * (0.9 - exposure * 0.2 + shelter * 0.12),
+      depthScale: (item.depthScale || 1) * (1 + exposure * 0.1),
+    };
+  });
 }
 
 function buildElMiradorLitter() {
@@ -110,7 +106,7 @@ function buildElMiradorLitter() {
     zoneId: EL_MIRADOR,
     id: 'el-mirador-volcanic-litter',
     itemIdPrefix: 'el-mirador-chip',
-    count: 460,
+    count: 540,
     seed: 11921,
     bounds: { minX: -47, maxX: 47, minZ: -42, maxZ: 42 },
     scale: [0.48, 1.35],
@@ -122,10 +118,13 @@ function buildElMiradorLitter() {
     accept: (biome, x, z) => {
       const path = elMiradorPathInfo(x, z);
       return path.tread < 0.18 && (
-        biome === 'stony-highland-slope'
-        || biome === 'mirador-cliff'
-        || path.shoulder > 0.3
-      );
+          biome === 'stony-highland-slope'
+          || biome === 'mirador-basalt-cliff'
+          || biome === 'wind-scoured-overlook-rim'
+          || biome === 'eroded-highland-gully'
+          || path.shoulder > 0.3
+        )
+        && elMiradorCoastDistance(x, z) > 6.8;
     },
   })];
 }
@@ -138,7 +137,13 @@ function buildElMiradorFlora() {
       const path = elMiradorPathInfo(x, z);
       return y > 4.1
         && path.distance > path.width * 1.55
-        && (biome === 'dry-highland-grass' || biome === 'stony-highland-slope');
+        && elMiradorRimMask(x, z) < 0.22
+        && elMiradorGullyMask(x, z) < 0.42
+        && (
+          biome === 'dry-highland-grass'
+          || biome === 'sheltered-highland-grass'
+          || biome === 'stony-highland-slope'
+        );
     },
   }, { width: [0.88, 1.15], height: [0.88, 1.12], maxLean: 0.045 });
   return [{
@@ -161,24 +166,34 @@ export function buildElMiradorEcology() {
     stream: false,
     dryGrassPatches: [
       createStandardDryGrassPatchLayer({
-        id: 'el-mirador-dry-grass-patches',
+        id: 'el-mirador-wind-grass-patches',
         items: buildElMiradorGrass(),
         materialColor: '#f0edcf',
         emissive: '#282b16',
         emissiveIntensity: 0.055,
         roughness: 1,
-        widthScale: 1.06,
-        heightScale: 1.1,
-        depthScale: 1.02,
+        widthScale: 1.1,
+        heightScale: 0.92,
+        depthScale: 1.08,
         maxVisibleDistance: 108,
-        motion: { wind: 1.12, bend: 0.22, bendRadius: 1.16 },
+        motion: { wind: 1.38, bend: 0.34, bendRadius: 1.12 },
       }),
     ],
-    rocks: buildElMiradorRocks(),
+    // Cliff-scale relief belongs to the shared movement heightfield. Avoid a
+    // separate visual rock field whose silhouettes would lack collision.
+    rocks: [],
     surfaceLitter: buildElMiradorLitter(),
+    cliffSurf: getCliffSurfProfile(EL_MIRADOR),
     flora: buildElMiradorFlora(),
     props: [],
-    footprintBiomes: ['red-dirt-path', 'path-shoulder', 'dry-highland-grass', 'stony-highland-slope'],
+    footprintBiomes: [
+      'red-dirt-path',
+      'path-shoulder',
+      'dry-highland-grass',
+      'sheltered-highland-grass',
+      'mirador-summit-grass',
+      'stony-highland-slope',
+    ],
     flyingModels: [
       flamingoFlyoverLayer('el-mirador-distant-flamingos', [
         { cx: -22, cz: -26, radiusX: 46, radiusZ: 14, height: 50, speed: 0.017, phase: 1.6, scale: 0.66, timeScale: 0.54 },

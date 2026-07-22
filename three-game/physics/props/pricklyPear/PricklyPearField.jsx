@@ -2,7 +2,7 @@
 
 // Destructible procedural prickly pears, built on the shared
 // BreakablePlantField runtime (see that file for the interaction model:
-// hammer/shotgun/landing/run-in breaks, wind sway, push-bend, collection).
+// hammer/knife/shotgun/landing/run-in breaks, wind sway, push-bend, collection).
 // This module only supplies the opuntia-specific plant spec: piece graph,
 // geometry/materials, site dressing, and narrator copy.
 
@@ -69,9 +69,13 @@ function buildZonePieces(zoneId, sites = getPricklyPearSites(zoneId)) {
         colliderOffset: collider.offset,
         ccd: false,
         dustCount: 10,
+        cutDustCount: 2,
         releaseWithParent: false,
         breakOnLanding: true,
         pushable: true,
+        // Outer green pads make useful cuttings; the generation-zero pad is
+        // the woody plant base and deliberately resists the pocket knife.
+        knifeCuttable: pad.generation > 0,
         windAmp: WIND_PAD_BASE + pad.generation * WIND_PER_GENERATION,
         specimenId: 'pricklypearpad',
         sampleLabel: 'prickly pear pad',

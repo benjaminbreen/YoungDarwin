@@ -16,7 +16,7 @@ export function emitPropEvent(type, payload) {
   for (const handler of [...handlers]) handler(payload);
 }
 
-// Tool-swing claim ledger. Each hammer swing carries a swingId; specialized
+// Tool-swing claim ledger. Each melee-tool swing carries a swingId; specialized
 // consumers (rock sampling, strikeable props, breakable plants, timber
 // structures) claim the id when the swing actually lands on their target.
 // The generic surface-impact resolver runs a beat after the shared impact
@@ -45,10 +45,12 @@ export function isSwingClaimed(swingId) {
 // 'player-physics-prop-contact' { propId, contactKind?, position?, direction, impactSpeed, verticalSpeed?, delta, now }
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }
 // 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }
-// 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome }
-// 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?, fallSpeed?, horizontalSpeed?, travelDistance? }
+// 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome, source? }
+// 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?, fallSpeed?, horizontalSpeed?, travelDistance?, runningJump? }
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }
+// 'water-object-ripple' { position: {x,y,z}, direction?, yaw?, intensity, radius?, propId? }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }
+// 'mature-cactus-impact' { sourceId, itemId, position, direction, amplitude, duration, frequency, tool }
 // 'rock-shotgun-fracture' { obstacle, zoneId, position, normal, dir, intensity }
 // 'rock-hammer-fracture' { obstacle, zoneId, position, normal, intensity }

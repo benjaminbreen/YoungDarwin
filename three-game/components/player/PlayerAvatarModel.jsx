@@ -191,6 +191,7 @@ export function PlayerAvatarModel({
   grounding = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
+  onVisualReady = null,
 }) {
   const mode = useMemo(() => getPlayableMode(playableModeId), [playableModeId]);
   const profile = useMemo(() => getPlayableControllerProfile(mode.id), [mode.id]);
@@ -205,6 +206,7 @@ export function PlayerAvatarModel({
         grounding={grounding}
         animationBankPhase={animationBankPhase}
         onAnimationBanksReady={onAnimationBanksReady}
+        onVisualReady={onVisualReady}
       />
     );
   }

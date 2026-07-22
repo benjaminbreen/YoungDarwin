@@ -107,8 +107,9 @@ export function altPostOfficeTerrainHeight(x, z, { movementSurface = false } = {
   // Interior rises away to the south (toward the highlands).
   y += smoothstep(z, 26, 54) * 2.7;
 
-  // Western headland: raised, rounded, green.
-  y += headland * (3.9 + Math.abs(crackNoise(x * 0.21, z * 0.19)) * (movementSurface ? 0.4 : 1.0)) * smoothstep(d, -1, 5);
+  // Western headland: its broad fractured relief changes the visible silhouette,
+  // so movement must follow it rather than passing through it.
+  y += headland * (3.9 + Math.abs(crackNoise(x * 0.21, z * 0.19))) * smoothstep(d, -1, 5);
   // Eastern basalt point: low dark shelf.
   y += eastPoint * 1.5 * smoothstep(d, -1, 3);
 
@@ -121,9 +122,15 @@ export function altPostOfficeTerrainHeight(x, z, { movementSurface = false } = {
 
   // Fine surface detail. Keep the larger beach contours intact, but reduce
   // high-frequency displacement near the waterline where triangulation is most visible.
+  // Only the capped boot-scale remainder is render-only; the shared base keeps
+  // the movement surface smooth without letting visible rises become hollow.
   const inlandDetail = smoothstep(d, 8, 22);
   const renderDetailScale = lerp(0.38, 0.8, inlandDetail);
-  y += terrainFineDetail(x, z) * (movementSurface ? 0.2 : renderDetailScale);
+  const fineDetail = terrainFineDetail(x, z);
+  y += fineDetail * 0.2;
+  if (!movementSurface) {
+    y += clamp(fineDetail * (renderDetailScale - 0.2), -0.06, 0.06);
+  }
 
   return Math.max(-4.8, y);
 }
