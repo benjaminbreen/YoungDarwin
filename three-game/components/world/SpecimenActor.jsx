@@ -22,6 +22,7 @@ import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSp
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { ProceduralFinchPlayer } from '../player/ProceduralFinchPlayer';
+import { ProceduralRacerSnake } from '../player/ProceduralRacerSnake';
 import { SpecimenHighlight } from './SpecimenHighlight';
 import { BasaltSpecimenShape } from './BasaltSpecimenShape';
 
@@ -67,6 +68,7 @@ function publishActorRuntimePosition({
   actorId,
   zoneId,
   position,
+  specimenId = null,
   now = 0,
   force = false,
   debug = null,
@@ -81,6 +83,7 @@ function publishActorRuntimePosition({
     y: position.y,
     z: position.z,
     yaw: position.yaw || 0,
+    specimenId,
   });
   const previous = ref.current;
   const dx = position.x - previous.x;
@@ -318,6 +321,9 @@ export function SpecimenShape({
       />
     );
   }
+  if (renderProfile?.type === 'proceduralSnake') {
+    return <ProceduralRacerSnake motionRef={proceduralMotionRef} />;
+  }
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
@@ -335,6 +341,9 @@ export function SpecimenShape({
       timeScaled
       castShadow
       receiveShadow
+      instanceSeed={specimen.instanceId || specimen.id}
+      animationPhase={specimen.animationPhase}
+      animationRate={specimen.animationRate}
     />
   );
 }
@@ -410,6 +419,7 @@ export function SpecimenActor({ specimen }) {
     running: false,
     speed: 0,
     timeScale: 1,
+    flightPhase: null,
   });
   const highlightGroundedRef = useRef(true);
   const crabWiggleRef = useRef(null);
@@ -492,9 +502,10 @@ export function SpecimenActor({ specimen }) {
       actorId,
       zoneId: currentZoneId,
       position,
+      specimenId: specimen.id,
       force: true,
     });
-  }, [actorId, currentZoneId, isCollectedActor, position, setSpecimenRuntimePosition]);
+  }, [actorId, currentZoneId, isCollectedActor, position, setSpecimenRuntimePosition, specimen.id]);
 
   // Reset any relocated home when the zone (and therefore spawn) changes.
   useEffect(() => {
@@ -559,22 +570,59 @@ export function SpecimenActor({ specimen }) {
       ? animationRequest
       : animationRequest?.clip || '';
     const behaviorDebug = faunaBehavior.debugRef?.current || {};
+    const behaviorMode = behaviorDebug.mode || '';
     const behaviorPaused = isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo);
     const proceduralMoving = !behaviorPaused && behaviorDebug.moving === true;
     const proceduralRunning = proceduralMoving && (behaviorDebug.panic || 0) > 0.18;
+    const proceduralFlying = !behaviorPaused && faunaBehavior.airborneRef?.current === true;
+    const owlBehavior = behaviorProfile?.controller === 'owl';
+    const racerBehavior = behaviorProfile?.controller === 'racer';
+    const racerActions = {
+      bask: 'baskCoil',
+      taste: 'tongueTaste',
+      slither: 'groundSlither',
+      hunt: 'groundSlither',
+      alert: 'alertS',
+      strike: 'preyStrike',
+      retreat: 'creviceRetreat',
+      shelter: 'shelterStill',
+    };
+    const owlBeatWindow = ((worldElapsed + actorId.length * 0.17) % (behaviorProfile?.wingbeatCycle || 3.4))
+      < (behaviorProfile?.wingbeatBurst || 1.25);
     Object.assign(proceduralMotionRef.current, {
       action: downedInfo
-        ? 'animalSleep'
-        : (!behaviorPaused && /feed|eat|peck|browse/i.test(animationClip) ? 'animalEat' : null),
-      flying: !behaviorPaused && faunaBehavior.airborneRef?.current === true,
+        ? (racerBehavior ? 'downed' : 'animalSleep')
+        : (racerBehavior
+          ? (isCarried
+            ? 'carried'
+            : (isUnderExamination ? 'tongueTaste' : racerActions[behaviorMode] || animationClip || 'baskCoil'))
+          : (!behaviorPaused && /doze|sleep/i.test(animationClip)
+            ? 'animalSleep'
+            : (!behaviorPaused && /feed|eat|peck|browse/i.test(animationClip) ? 'animalEat' : null))),
+      flying: proceduralFlying,
       walking: proceduralMoving,
       running: proceduralRunning,
-      speed: proceduralMoving
+      speed: proceduralFlying
+        ? behaviorProfile?.flightVisualSpeed || 2.4
+        : proceduralMoving
         ? (proceduralRunning ? behaviorProfile?.fleeSpeed : behaviorProfile?.walkSpeed) || 0.3
         : 0,
       timeScale: Number.isFinite(animationRequest?.timeScale) ? animationRequest.timeScale : 1,
+      flightPhase: behaviorMode === 'takeoff' || behaviorMode === 'landing'
+        ? behaviorMode
+        : (proceduralFlying ? 'cruise' : null),
       flightPitch: faunaBehavior.pitchRef?.current || 0,
       flightBank: faunaBehavior.rollRef?.current || 0,
+      flightFlap: owlBehavior && (
+        behaviorMode === 'takeoff'
+        || behaviorMode === 'hover'
+        || behaviorMode === 'rebound'
+        || (behaviorMode === 'quarter' && owlBeatWindow)
+      ),
+      flightDive: owlBehavior && behaviorMode === 'pounce',
+      flightDescend: owlBehavior && behaviorMode === 'pounce',
+      owlHover: owlBehavior && behaviorMode === 'hover',
+      owlPounce: owlBehavior && behaviorMode === 'pounce',
     });
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
@@ -851,6 +899,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'basalt' ? 0.88
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'lavalizard' ? 0.72
+    : specimen.id === 'galapagosracer' ? 0.42
     : specimen.id === 'crab' ? 0.78
     : specimen.id === 'largegroundfinch' ? 1.08
     : specimen.id === 'mediumgroundfinch' ? 0.92
@@ -868,6 +917,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'galapagoscotton' ? 0.9
     : specimen.id === 'barnacle' ? 0.38
     : specimen.id === 'lavalizard' ? 0.27
+    : specimen.id === 'galapagosracer' ? 0.48
     : specimen.id === 'frigatebird' ? 0.7
     : specimen.id === 'booby' ? 0.62
     : specimen.id === 'flamingo' ? 0.58

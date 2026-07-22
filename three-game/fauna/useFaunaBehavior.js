@@ -27,8 +27,9 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       zoneId: currentZoneId,
       basePosition: base,
       actorScale: specimen?.sceneScale || 1,
+      actorId: specimen?.instanceId || specimen?.id,
     });
-  }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed, specimen.sceneScale]);
+  }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed, specimen.id, specimen.instanceId, specimen.sceneScale]);
   const positionRef = useRef(basePosition?.clone?.() || null);
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
@@ -75,6 +76,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     delta = 0,
   } = {}) => {
     if (!controller || !profile) return statusRef.current;
+    const timeOfDay = useThreeGameStore.getState().timeOfDay;
     const base = basePositionRef?.current || basePosition;
     const actorId = specimen.instanceId || specimen.id;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
@@ -107,6 +109,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         playerPosition,
         elapsedTime,
         delta: 0,
+        timeOfDay,
         paused,
       });
     } else {
@@ -119,6 +122,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           playerPosition,
           elapsedTime: stepElapsed,
           delta: step,
+          timeOfDay,
           paused,
         });
         remaining -= step;

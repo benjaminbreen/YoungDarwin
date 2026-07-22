@@ -536,11 +536,11 @@ function updateMaterialLook(material, time, daylight, storm) {
 
 export function CliffSurf({ profile }) {
   const sprayGeometry = useMemo(
-    () => createSprayGeometry(profile.anchors, 76, 3.1),
+    () => createSprayGeometry(profile.anchors, profile.sprayCount || 76, 3.1),
     [profile],
   );
   const mistGeometry = useMemo(
-    () => createSprayGeometry(profile.anchors, 22, 8.4),
+    () => createSprayGeometry(profile.anchors, profile.mistCount || 22, 8.4),
     [profile],
   );
   const sprayMaterial = useMemo(() => createSprayMaterial(profile, false), [profile]);

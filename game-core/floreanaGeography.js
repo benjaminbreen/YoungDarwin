@@ -41,7 +41,7 @@ export const FLOREANA_BOUNDARIES = Object.freeze({
   WATKINS: {},
   E_MID: {},
   EL_MIRADOR: { east: 'cliff' },
-  SE_COAST: { south: 'cliff' },
+  SE_COAST: { south: 'ocean' },
   SE_SHALLOW_SURF: { north: 'ocean', south: 'ocean', east: 'ocean' },
   SE_PROMONTORY: { east: 'cliff', south: 'ocean' },
   S_HUT: { west: 'ocean' },

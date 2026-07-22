@@ -154,6 +154,7 @@ export function inferContactResponseKind(profile = {}, target = null) {
   // table. Infer their material family rather than silently treating every
   // unlisted beach, mud trail, or basalt shelf as generic dust.
   if (/mud|bog|stream.bank|creek.bank|damp.*bank|pool.edge|wet.hollow|garden.mud/.test(biome)) return 'mud';
+  if (/ship.deck|ship.interior|house.interior|wood.floor|plank|timber.floor/.test(biome)) return 'wood';
   if (/sand|beach|dune/.test(biome)) return 'sand';
   if (/ash|tuff|cinder/.test(biome)) return 'ash';
   if (/basalt|lava|boulder|rock|cliff|guano/.test(biome)) return 'grit';

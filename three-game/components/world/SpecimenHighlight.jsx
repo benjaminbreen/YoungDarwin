@@ -32,6 +32,7 @@ const VISUAL_TIER_BY_RARITY = Object.freeze({
   rare: 'rare',
   endemic: 'rare',
   historical: 'rare',
+  ultra_rare: 'ultraRare',
 });
 
 // Three deliberately simple visual tiers. The source rarity remains available
@@ -60,6 +61,14 @@ const TIER_STYLES = Object.freeze({
     diamondGlow: 1.24,
     shellOpacity: 0.93,
     auraOpacity: 0.095,
+  },
+  ultraRare: {
+    color: '#66e6d4',
+    shell: '#d9fff8',
+    ringGain: 1.48,
+    diamondGlow: 1.56,
+    shellOpacity: 0.96,
+    auraOpacity: 0.13,
   },
 });
 

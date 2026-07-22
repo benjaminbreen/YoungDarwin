@@ -78,6 +78,12 @@ import { watkinsCreekRegion } from './watkinsCreek/terrain';
 import { createWatkinsCreekTerrainMaterial } from './watkinsCreek/material';
 import { puntaSurRegion } from './puntaSur/terrain';
 import { createPuntaSurTerrainMaterial } from './puntaSur/material';
+import { marineIguanaColonyRegion } from './marineIguanaColony/terrain';
+import { createMarineIguanaColonyTerrainMaterial } from './marineIguanaColony/material';
+import { southeasternCoastRegion } from './southeasternCoast/terrain';
+import { createSoutheasternCoastTerrainMaterial } from './southeasternCoast/material';
+import { shallowSurfRegion } from './shallowSurf/terrain';
+import { createShallowSurfTerrainMaterial } from './shallowSurf/material';
 
 /** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
@@ -116,6 +122,9 @@ const authoredRegions = [
   { ...northernHighlandsRegion, createTerrainMaterial: createNorthernHighlandsTerrainMaterial },
   { ...watkinsCreekRegion, createTerrainMaterial: createWatkinsCreekTerrainMaterial },
   { ...puntaSurRegion, createTerrainMaterial: createPuntaSurTerrainMaterial },
+  { ...marineIguanaColonyRegion, createTerrainMaterial: createMarineIguanaColonyTerrainMaterial },
+  { ...southeasternCoastRegion, createTerrainMaterial: createSoutheasternCoastTerrainMaterial },
+  { ...shallowSurfRegion, createTerrainMaterial: createShallowSurfTerrainMaterial },
 ];
 
 /** @type {Map<string, AuthoredRegionDefinition>} */

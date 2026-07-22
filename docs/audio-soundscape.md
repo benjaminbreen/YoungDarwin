@@ -6,9 +6,14 @@ the same sand, loose-ground, rock, and shallow-water contact data used by the
 movement and visual-effects systems. It uses genuine field recordings, not
 generated or synthetic nature audio.
 
+The Local Chart header carries a persistent speaker control immediately left
+of the full-island-chart button. It changes the same saved audio preference as
+the launch settings screen, so it is a true global mute rather than a second
+mix state; restoring audio resumes the live environment targets smoothly.
+
 ## Source and license record
 
-All five sources are Creative Commons 0 recordings downloaded from the official
+The original bay set uses five Creative Commons 0 recordings downloaded from the official
 Freesound high-quality preview endpoint on 2026-07-21. The runtime files are
 edited derivatives. CC0 does not require attribution, but the sources are kept
 here so the recordings remain auditable.
@@ -35,7 +40,10 @@ npm run asset:audio:post-office-bay
 
 The build script trims isolated contacts, removes unusable sub/bass and extreme
 high-frequency noise, loudness-matches the variants, adds tiny contact fades,
-and constructs loop seams with equal-power crossfades. Runtime code supplies
+and constructs loop seams with equal-power crossfades. Continuous beds use MP3
+rather than Vorbis because some embedded Chromium/WebAudio builds can request an
+OGG successfully but reject it during `decodeAudioData`; contact sprites remain
+48 kHz PCM WAV. Runtime code supplies
 the larger aesthetic decisions: low default gains, shoreline falloff, weather
 response, variation without immediate repeats, and a strict voice limit.
 
@@ -48,13 +56,56 @@ gain curve compensates for the field recording's naturally quiet rolling body
 without compressing away the larger crests. A region one route inland from a
 coastal region keeps a much lower distant-surf floor. Post Office Bay still uses
 its more precise authored curved shoreline. The runtime also resumes a browser-
-suspended audio context on visibility return or the next player input.
+suspended audio context on visibility return or the next player input. Ambient
+readiness is tracked per loop rather than inferred from the shared audio context:
+if surf or another bed misses its first fetch/decode during a development rebuild,
+the live mixer retries that missing track and applies the current target as soon
+as it recovers.
+
+## Live sound diagnostics
+
+Press `Shift+0` during play to open the sound debug panel. It reads the live
+WebAudio nodes and exposes context state, master gain, decoded/loading assets,
+active voices, request/decode errors, and both requested and actual gain for
+continuous tracks. Every environmental, spatial, contact, wildlife, interaction,
+and Darwin-body family can be selected. Continuous tracks can be isolated at a
+known diagnostic level; one-shot families can be isolated and played directly.
+Tracks can also be muted or force-reloaded, and the complete snapshot can be
+copied for comparison. Closing the panel clears every diagnostic override and
+restores normal environment logic while preserving authored mix trims. Its live
+context strip reports the current region, habitat, coast relationship, insect
+eligibility, rain intensity, and time of day so a zero mixer target can be
+distinguished from bad map metadata.
+
+The panel also exposes a master trim and a persistent trim for every track,
+measured in decibels. These trims affect normal gameplay immediately, survive
+panel close and page reload through browser-local storage, and are visually
+marked beside every adjusted track. `Copy mix settings` writes a compact
+`darwin-sound-mix-v1` JSON payload containing the master value, changed track
+keys, and their labels; paste that payload into an issue or agent conversation
+to turn a listening pass into reproducible authored defaults. Solo and mute are
+still temporary and are intentionally excluded from the copied mix. Resetting
+all trims requires confirmation.
 
 Wind, rain, and insects read the same smoothed runtime weather values used by
-foliage, clouds, and rain particles. Wind rises with physical wind speed; rain
-rises with precipitation intensity; the insect bed is limited to dry scrub,
-lava, grass, and similar habitats and is suppressed by rain, strong wind, wet
-regions, highlands, and interiors. All ambient changes use slow gain ramps.
+foliage, clouds, and rain particles. Wind rises with physical wind speed; visible
+drizzle has an audible rain floor and strengthens naturally into a downpour. The
+insect bed is limited to dry scrub, lava, grass, and similar habitats, rises
+clearly after dusk, and is suppressed by rain, strong wind, wet regions,
+highlands, and interiors. All ambient changes use slow gain ramps.
+
+The controller is mounted once for the complete expedition rather than per
+region. Coast detection reads authored ocean boundaries, coastal biome metadata,
+and a small set of irregular authored shores; direct coasts receive the full
+bed and their immediate graph neighbors retain distant surf. Interior routing
+uses exact biome/preset categories, never loose name substrings, so names such
+as Post Scrub Rise cannot accidentally silence outdoor ambience. Regression
+coverage checks every non-test placement on the canonical Floreana chart.
+The Beagle cabin and Lawson house retain small exterior traces instead of hard
+silence. Those traces pass through per-bed low-pass filters: water and wind are
+heavily muffled, while rain remains somewhat brighter as it reaches timber,
+roof, and windows. The Beagle cabin keeps a low stern-water presence; Lawson's
+highland house keeps wind, rain, and a nearly subliminal nocturnal insect trace.
 
 | Runtime material | Freesound source | Recordist | Source notes |
 | --- | --- | --- | --- |
@@ -72,13 +123,43 @@ npm run asset:audio:island-ambience
 Takeoff and landing are one-shot contacts rather than a separate generic body
 thump. Sand and loose ground reuse the corresponding boot recordings above;
 authored boulders and hard basalt use a performed mountain-boot jump recording.
-The runtime scales landing strength from fall velocity while keeping ordinary
-hops quiet.
+Wooden decks and interiors, wet mud, and vegetated leaf litter now have their
+own recordings as well. The same material resolver drives footsteps, step-ups,
+takeoffs, and landings, so crossing a threshold or leaving a wet bank changes
+the sound without a region-specific trigger. The runtime scales landing strength
+from fall velocity while keeping ordinary hops quiet.
+
+The playable finch has animation-timed takeoff and climbing wingbeats plus tiny
+surface contacts for grounded hops and touchdown. Gliding remains silent. The
+playable tortoise has a close padded dirt press at each gait contact, with a much
+quieter terrain layer underneath and restrained shell-height plant rustle. These
+animal sounds use the existing controller contacts rather than free-running
+loops, so stopping movement stops the sound immediately.
+
+Darwin's collecting shotgun uses six real black-powder reports with slight
+non-repeating variation. The second barrel starts a compressed muzzle-loading
+handling sequence built from lock and ramrod Foley; it deliberately contains no
+modern pump, magazine, or ejecting-cartridge sound. The report is a priority
+voice so a busy cluster of footsteps and wildlife cannot make a shot silent.
 
 Wildlife is also actor-bound rather than a looping ambience: a call can only be
 scheduled when a matching, currently rendered animal is within range, and its
 gain and stereo position come from that live actor pose. Calls stop at night and
-have long randomized gaps.
+during visible rain, and have long randomized gaps.
+
+Doves, mockingbirds, and hawks follow the same rule, each with its own range and
+substantially longer randomized interval. A short-eared owl call is the one
+intentional nocturnal exception: it requires a live owl actor, nighttime, and
+dry weather. Diurnal calls remain silent at night and every bird family is
+suppressed in visible rain. These recordings are acoustic proxies rather than
+claims of species-exact Galápagos recordings.
+
+Visible storm lightning publishes one timing event at the first flash. Thunder
+arrives after distance divided by the speed of sound, with distance-based gain
+and low-pass filtering; an indoor strike is additionally muffled. Direct coasts
+also receive a close breaker one-shot only when the player is genuinely near
+the authored shoreline. Its 17–39 second gaps leave the continuous surf in
+charge of the overall coast and prevent a repetitive wave cadence.
 
 Syms uses the same authored surface-contact profiles as Darwin. His live travel
 speed supplies a walking, jogging, or running cadence; each bootfall resolves to
@@ -95,15 +176,35 @@ there can be no disembodied bee layer after the insects stand down.
 | Runtime material | Freesound source | Recordist | Source notes |
 | --- | --- | --- | --- |
 | Boots on hard rock | [Footsteps Mountain Boots Rock Sequence](https://freesound.org/people/Nox_Sound/sounds/558812/) | Nox_Sound | Rode NTG4+ recording; the final six performed jumps supply separate push-off and landing contacts |
+| Boots on wood | [Footsteps Boots - Hardwood, walk](https://freesound.org/people/Vrymaa/sounds/734600/) | Vrymaa | Clean heavy leather boots on a hardwood floor |
+| Boots in mud | [Footsteps-Mud&Grass](https://freesound.org/people/jonccox/sounds/231317/) | jonccox | Isolated boot contacts in wet grass and mud, recorded with NTG2 / Zoom R05 |
+| Boots on leaf litter | [walking on crunchy ground.wav](https://freesound.org/people/soundofsong/sounds/679956/) | soundofsong | Real sticks and dead leaves underfoot |
+| Black-powder report | [44_black_powder.wav](https://freesound.org/people/Jon285/sounds/34708/) | Jon285 | Six real black-powder shots; derivatives retain the muzzle report and attenuate the later target impact |
+| Ramrod handling | [1801 Pattern sea service pistol - flintlock](https://freesound.org/people/jriches1/packs/44008/) | jriches1 | Separate ramrod-out and ramrod-in Foley used only as period loading gestures |
+| Percussion lock | [Diablo 12g pistol, cocking back and dry fire](https://freesound.org/people/FOSSarts/sounds/741054/) | FOSSarts | Raw black-powder firearm mechanism recording; short lock movements only |
+| Small-bird wings | [Bird Wings](https://freesound.org/people/IENBA/sounds/832945/) | IENBA | Purpose-recorded small-bird quick-movement Foley |
+| Tortoise ground press | [Drawing in sand 1](https://freesound.org/people/_stubb/sounds/389611/) | _stubb | Finger dragged through loose dirt; edited into low, padded scrape contacts |
 | Gull calls | [Seagull](https://freesound.org/people/henner1964/sounds/699979/) | henner1964 | A flying gull recorded in Neuharlingersiel harbour |
 | Small passerine calls | [White-crowned Sparrow Chirp](https://freesound.org/people/Zott820/sounds/695297/) | Zott820 | Short field-recorded song used as a restrained acoustic proxy near ground finches |
 | Nearby bee buzz | [Bee buzzing.wav](https://freesound.org/people/DrDufus/sounds/462875/) | DrDufus | Close mono 48 kHz field recording of a large bee moving among low leaves and forest-floor material |
+| Dove call proxy | [Dove cooing](https://freesound.org/people/haulaway/sounds/735366/) | haulaway | Isolated natural dove phrases, used only near a rendered Galápagos dove |
+| Hawk call proxy | [Red-tailed hawk calls](https://freesound.org/people/1888software/sounds/575524/) | 1888software | Sparse outdoor raptor calls, used only near a rendered Galápagos hawk |
+| Mockingbird call proxy | [Mockingbird](https://freesound.org/people/Osiruswaltz/sounds/509053/) | Osiruswaltz | Outdoor phrases trimmed into short, widely separated actor calls |
+| Owl call proxy | [Owl call](https://freesound.org/people/ivolipa/sounds/353173/) | ivolipa | Isolated nocturnal calls, enabled only near a live short-eared owl at night |
+| Thunder | [Clean thunder](https://freesound.org/people/damsur/sounds/443238/) | damsur | Clean natural rolls split into three distance-filtered variants |
 
-All four are Creative Commons 0. Rebuild their derivatives with:
+All sources in this table are Creative Commons 0. Rebuild their derivatives with:
 
 ```bash
 npm run asset:audio:movement-wildlife
+npm run asset:audio:wildlife-fieldwork
 ```
+
+The original rock/call/bee previews remain under
+`assets-src/audio/movement-wildlife/raw/`; the later surface, firearm, and
+playable-animal sources live under `assets-src/audio/expanded-movement/raw/`.
+Both source directories are intentionally ignored, while their optimized WAV
+and MP3 derivatives are committed under `public/assets/audio/movement-wildlife/`.
 
 The gull and passerine recordings are acoustic proxies, not claimed recordings
 of *Leucophaeus fuliginosus* or a Galápagos *Geospiza*. Species-exact archives
@@ -111,6 +212,65 @@ were reviewed, but the available noncommercial/share-alike terms were a poor
 match for this MIT-distributed project. The proxy layer is deliberately sparse
 and documented so it can be replaced cleanly if redistributable exact calls
 become available.
+
+## Contextual world detail
+
+Animal movement now follows the live displacement of rendered actors. Crabs
+produce brief scuttle clusters, marine iguanas make faint claw contacts on
+basalt, and goats and horses use differently scaled hoof cadences. Stopping,
+despawning, changing maps, or moving out of earshot stops the contacts; marine
+iguanas add one restrained water contact only when their live pose crosses the
+waterline. A soft goat call remains actor-bound and uses the same dry daytime
+rules as other diurnal wildlife.
+
+The Penal Colony has isolated, distance-filtered work impacts during dry
+daylight, separated by 24–56 second gaps. Wet microclimates receive individual
+foliage drops during light rain and for a short period after rain, while dry
+scrub can produce branch movement only in a real gust. These are localized
+one-shots, not hidden loops. Equipment Foley similarly confirms actual tool,
+field-case, and carry-state transitions. Physics-accepted prop placement,
+existing skid/scramble events, and rare leaf-litter contacts supply the small
+world-contact accents.
+
+| Runtime material | Freesound source | Recordist | Source notes |
+| --- | --- | --- | --- |
+| Crab and iguana contacts | [Crab walking](https://freesound.org/people/stuniverso/sounds/761559/) | stuniverso | Close natural crab movement; a lower filtered derivative is used as a subtle claw-contact proxy |
+| Goat and horse hooves | [Horse Hooves Foley](https://freesound.org/people/BorzSounds/sounds/843303/) | BorzSounds | Clean performed hoof cadence; shorter, lighter cuts are reserved for goats |
+| Goat call | [Soft Goat Bleat](https://freesound.org/people/TheKingOfGeeks360/sounds/825613/) | TheKingOfGeeks360 | Quiet phrase used only near a live goat actor |
+| Settlement work | [Axe Chopping Wood](https://freesound.org/people/xkeril/sounds/753925/) | xkeril | Outdoor isolated strikes, strongly distance-filtered at runtime |
+| Foliage droplets | [Water Droplets](https://freesound.org/people/Legnalegna55/sounds/543649/) | Legnalegna55 | Individual drops rather than a continuous water bed |
+| Equipment handling | [Soft Leather](https://freesound.org/people/Vrymaa/sounds/734598/) | Vrymaa | Quiet case, strap, and carried-equipment movements |
+| Loose stones | [Tumbling Rocks](https://freesound.org/people/Fission9/sounds/488660/) | Fission9 | Short real stone cascades used only by skid and scramble events |
+| Dry branches | [Dry Branches Rustling](https://freesound.org/people/Fran%20Freesound/sounds/648170/) | Fran Freesound | Sparse dry branch movement for gusts and rare litter contact |
+
+All sources in this table are Creative Commons 0. Source previews are ignored
+under `assets-src/audio/contextual-world/raw/`; committed 48 kHz PCM derivatives
+are rebuilt with `npm run asset:audio:contextual-world`.
+
+## Fieldwork Foley
+
+Successful field actions carry restrained physical detail. Documentation mixes
+a page movement with a brief pencil phrase; physical collection closes a glass
+or hard-case container; placing a snare uses short rope-and-pulley movements;
+crossing into or out of an authored interior uses a single quiet wooden creak.
+Blocked attempts remain silent, so the Foley confirms real state changes rather
+than button presses. All are one-shot sprites in the normal voice limit and
+appear separately in the `Shift+0` mix panel.
+
+| Runtime material | Freesound source | Recordist | Source notes |
+| --- | --- | --- | --- |
+| Pencil writing | [Pencil Writing](https://freesound.org/people/Joao_Janz/sounds/485312/) | Joao_Janz | Short close writing texture mixed beneath a page movement |
+| Page movement | [Page turn](https://freesound.org/people/OwlStorm/sounds/151220/) | OwlStorm | Single paper movement used at the start of each note phrase |
+| Specimen container | [Glass jar sounds](https://freesound.org/people/Vrymaa/sounds/734624/) | Vrymaa | Small isolated glass and lid contacts |
+| Snare rope | [Rope and pulley](https://freesound.org/people/Sassaby/sounds/170614/) | Sassaby | Short tension and handling fragments, kept very quiet |
+| Interior threshold | [Door creak](https://freesound.org/people/soundofsong/sounds/647646/) | soundofsong | One short wooden creak for entering or leaving an interior |
+
+All new wildlife, thunder, and fieldwork sources are Creative Commons 0. Their
+source previews are intentionally ignored under
+`assets-src/audio/wildlife-fieldwork/raw/`; rebuild the committed 48 kHz PCM
+derivatives with `npm run asset:audio:wildlife-fieldwork`. Close wave breaks are
+derived from the already documented CC0 shore-surf source and are rebuilt by
+`npm run asset:audio:post-office-bay`.
 
 ## Exertion and injury
 

@@ -414,6 +414,7 @@ export function buildBorderEcologyLayers({
             });
           for (const { projection, corner, kind = origin } of projectionEntries) {
             const isInnerInfill = kind === 'source-infill';
+            if (kind === 'target' && projection?.topologyHold > 0.55) continue;
             if (!isInnerInfill && !projectionFitsEcologyCollar(
               config,
               vista,
@@ -634,6 +635,7 @@ export function buildBorderGrassLayers({
 
         for (const { projection, corner, kind = origin } of projectionEntries) {
           const isInnerInfill = kind === 'source-infill';
+          if (kind === 'target' && projection?.topologyHold > 0.55) continue;
           if (!isInnerInfill && !projectionFitsEcologyCollar(
             config,
             vista,

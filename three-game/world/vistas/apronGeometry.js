@@ -1,6 +1,8 @@
 import * as THREE from 'three';
+import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import {
   getRegionTerrainConfig,
+  regionSpawnPoint,
   terrainColor,
   terrainHeight,
   terrainSurfaceNoise,
@@ -13,6 +15,15 @@ import {
   buildBorderTransition,
   transitionVistaColor,
 } from './transitions';
+
+function apronPreviewDepth(regionId, vista) {
+  // Black Beach's west-facing cove is unusually deep: at the generic 64 m
+  // cutoff its back shore first rises on the final grid row, leaving a thin
+  // crescent that looks like a floating arch from the surf map. Carry this
+  // one connected coast far enough inland to show terrain behind the beach.
+  const maximum = regionId === 'BLACK_BEACH_SURF' ? 90 : 64;
+  return Math.min(vista.apronDepth || 72, maximum);
+}
 
 // Geometry for the border aprons that continue each region's terrain past the
 // walkable edge. A single logical grid is built per vista and split along a
@@ -247,7 +258,7 @@ export function projectApronPreviewPoint(
   const targetEdge = transition?.targetEdge || OPPOSITE_VISTA_EDGE[vista.edge];
   if (!axes || !targetEdge || !targetConfig) return null;
 
-  const previewDepth = Math.min(vista.apronDepth || 72, 64);
+  const previewDepth = apronPreviewDepth(regionId, vista);
   const targetSampleDepth = Math.min(
     targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
     previewDepth + 10,
@@ -271,17 +282,28 @@ export function projectApronPreviewPoint(
   const heightBlend = continuity
     ? THREE.MathUtils.smoothstep(outsideDistance, continuity.ridgeStart, continuity.ridgeFull)
     : THREE.MathUtils.smoothstep(outsideDistance, 0, continuity?.carryEnd ?? 12);
+  const topologyHold = apronTopologyHold(
+    regionId,
+    config,
+    targetConfig,
+    vista,
+    transition,
+    clampedU,
+    edgeY,
+    targetY,
+  );
+  const effectiveHeightBlend = heightBlend * (1 - topologyHold);
   const sourceCarryY = edgeY
     - BORDER_COLLAR_DROP
     - outsideT * 0.035
     + apronReliefNoise(x, z, (vista.seed || 0) + 211) * 0.045 * (continuity?.seamNoiseStrength ?? 0.35);
   const targetProfileY = targetY
-    + (edgeY - targetEdgeY) * (1 - heightBlend)
-    + apronReliefNoise(x, z, (vista.seed || 0) + 173) * 0.08 * heightBlend;
+    + (edgeY - targetEdgeY) * (1 - effectiveHeightBlend)
+    + apronReliefNoise(x, z, (vista.seed || 0) + 173) * 0.08 * effectiveHeightBlend;
 
   return {
     x,
-    y: THREE.MathUtils.lerp(sourceCarryY, targetProfileY, heightBlend),
+    y: THREE.MathUtils.lerp(sourceCarryY, targetProfileY, effectiveHeightBlend),
     z,
     u,
     clampedU,
@@ -289,6 +311,7 @@ export function projectApronPreviewPoint(
     outsideT,
     previewDepth,
     targetGroundY: targetY,
+    topologyHold,
   };
 }
 
@@ -307,7 +330,7 @@ export function projectNeighborPreviewPoint(
 ) {
   const targetEdge = transition?.targetEdge || OPPOSITE_VISTA_EDGE[vista.edge];
   if (!targetEdge || !targetConfig) return null;
-  const previewDepth = Math.min(vista.apronDepth || 72, 64);
+  const previewDepth = apronPreviewDepth(regionId, vista);
   const targetSampleDepth = Math.min(
     targetEdge === 'north' || targetEdge === 'south' ? targetConfig.depth : targetConfig.width,
     previewDepth + 10,
@@ -338,7 +361,55 @@ export function edgeLandStrength(regionId, config, edge, u) {
   );
 }
 
-function ensureUpwardWinding(geometry) {
+const ROUTE_EDGE_U_CACHE = new Map();
+
+function routeEdgeU(regionId, config, edge) {
+  const key = `${regionId}:${edge}`;
+  if (ROUTE_EDGE_U_CACHE.has(key)) return ROUTE_EDGE_U_CACHE.get(key);
+  const spawn = regionSpawnPoint(regionId, edge);
+  const along = edge === 'north' || edge === 'south' ? spawn.x : spawn.z;
+  const u = THREE.MathUtils.clamp(along / axisLength(config, edge) + 0.5, 0, 1);
+  ROUTE_EDGE_U_CACHE.set(key, u);
+  return u;
+}
+
+// Coastal maps rarely have shoreline intersections at identical normalized
+// positions on both sides of a route. Preserve the source coast away from the
+// authored gateway, while allowing the real neighbor to take over in a broad
+// corridor around that gateway. This prevents a target beach or reef shelf
+// from becoming a full rectangular land/water patch on the source map.
+export function apronTopologyHold(
+  regionId,
+  config,
+  targetConfig,
+  vista,
+  transition,
+  u,
+  sourceY,
+  targetY,
+) {
+  const sourceStats = transition?.sourceStats;
+  const targetStats = transition?.targetStats;
+  const coastal = Math.max(sourceStats?.waterRatio || 0, targetStats?.waterRatio || 0) > 0.08
+    || Math.max(sourceStats?.shoreRatio || 0, targetStats?.shoreRatio || 0) > 0.16;
+  // Placeholder regions describe a destination category, not authored edge
+  // composition. Let one route corridor preview them, but do not repaint the
+  // source map's full edge with a provisional terrain profile.
+  const placeholderTarget = String(targetConfig?.preset || '').startsWith('placeholder-');
+  if (!coastal && !placeholderTarget) return 0;
+
+  const routeU = routeEdgeU(regionId, config, vista.edge);
+  const routeDistance = Math.abs(u - routeU) * axisLength(config, vista.edge);
+  const routeInfluence = 1 - THREE.MathUtils.smoothstep(routeDistance, 9, 27);
+  const sourceLand = sourceY > WATER_LEVEL + 0.04;
+  const targetLand = targetY > WATER_LEVEL + 0.04;
+  const mismatchStrength = sourceLand === targetLand
+    ? (placeholderTarget ? 0.78 : 0.68)
+    : 1;
+  return THREE.MathUtils.clamp((1 - routeInfluence) * mismatchStrength, 0, 1);
+}
+
+export function ensureUpwardWinding(geometry) {
   const position = geometry.getAttribute('position');
   const index = geometry.getIndex();
   if (!position || !index) return geometry;
@@ -391,16 +462,35 @@ function vistaRendersPreview(regionId, edge) {
     && getRegionTerrainConfig(sibling.toRegionId));
 }
 
-// Corner wedges past the map's diagonal have no apron of their own, and the
-// deep-ocean disc showing there reads as flat blue slabs. Each corner is
-// covered by exactly one apron sweeping around it with clamped sampling:
-// north/south aprons own their corners; east/west aprons only pick up a
-// corner when the adjoining north/south edge renders no preview.
-export function apronOwnsCorner(regionId, vista, end) {
+function edgeIsExplicitBoundary(regionId, edge) {
+  return getRegionEdgeHints(regionId).some(hint => hint.edge === edge && hint.kind === 'blocked');
+}
+
+// Corner topology is boundary-aware:
+// - two open edges share the corner along a diagonal, so neither produces a
+//   full rectangular roof;
+// - an authored ocean/cliff edge leaves negative space for water or the cliff
+//   silhouette;
+// - a lone open edge receives a tapered wedge rather than a full-width slab.
+export function apronCornerMode(regionId, vista, end) {
   const adjacentEdge = CORNER_ADJACENT_EDGE[vista.edge]?.[end];
-  if (!adjacentEdge) return false;
-  if (vista.edge === 'north' || vista.edge === 'south') return true;
-  return !vistaRendersPreview(regionId, adjacentEdge);
+  if (!adjacentEdge || edgeIsExplicitBoundary(regionId, adjacentEdge)) return 'none';
+  return vistaRendersPreview(regionId, adjacentEdge) ? 'shared' : 'owned';
+}
+
+export function apronCornerReach(regionId, vista, end, outsideDistance, previewDepth) {
+  if (apronCornerMode(regionId, vista, end) === 'none') return 0;
+  return THREE.MathUtils.clamp(outsideDistance, 0, previewDepth);
+}
+
+// Ecology still needs one deterministic owner for a shared corner to avoid
+// rendering duplicate plants on both sides of the diagonal. Geometry itself
+// uses apronCornerMode/apronCornerReach and is shared by both open aprons.
+export function apronOwnsCorner(regionId, vista, end) {
+  const mode = apronCornerMode(regionId, vista, end);
+  if (mode === 'none') return false;
+  if (mode === 'owned') return true;
+  return vista.edge === 'north' || vista.edge === 'south';
 }
 
 // Any neighbor with a terrain config qualifies: terrainHeight/terrainColor
@@ -434,15 +524,17 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   );
   const axisLen = axisLength(config, vista.edge);
   const baseWidth = axisLen * 1.04;
-  const extLow = apronOwnsCorner(regionId, vista, 0) ? previewDepth : 0;
-  const extHigh = apronOwnsCorner(regionId, vista, 1) ? previewDepth : 0;
-  const width = baseWidth + extLow + extHigh;
-  const alongStart = -baseWidth / 2 - extLow;
+  const maxExtLow = apronCornerMode(regionId, vista, 0) === 'none' ? 0 : previewDepth;
+  const maxExtHigh = apronCornerMode(regionId, vista, 1) === 'none' ? 0 : previewDepth;
+  const maximumWidth = baseWidth + maxExtLow + maxExtHigh;
   // Fine enough that the area-averaged vertex colors interpolate as gradients;
   // still only ~4k triangles per vista (more when the apron sweeps corners),
   // built once and cached. Column count scales so vertex density holds.
-  const cols = Math.min(128, Math.round(64 * (width / baseWidth)));
-  const rows = 34;
+  const blackBeachApproach = regionId === 'BLACK_BEACH_SURF'
+    && targetRegionId === 'BLACK_BEACH';
+  const baseColumns = blackBeachApproach ? 96 : 64;
+  const cols = Math.min(160, Math.round(baseColumns * (maximumWidth / baseWidth)));
+  const rows = blackBeachApproach ? 52 : 34;
   const collarRows = collarRowCount(rows);
   const positions = [];
   const nearColors = [];
@@ -474,7 +566,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   }
 
   const seamDistanceAt = u => {
-    const alongDistance = alongStart + u * width;
+    const alongDistance = -baseWidth / 2 + u * baseWidth;
     const wander = terrainSurfaceNoise(
       alongDistance * 0.5 + (vista.seed || 0) * 13.7,
       (vista.seed || 0) * 3.1,
@@ -504,13 +596,27 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       const heightBlend = continuity
         ? THREE.MathUtils.smoothstep(outsideDistance, continuity.ridgeStart, continuity.ridgeFull)
         : seamBlend;
-      const seamHold = 1 - heightBlend;
-      // Aerial perspective starts about a third of the way out — the vista is
-      // schematic terrain, and hazing it early is what sells it as "distance"
-      // rather than reachable ground with odd colors.
+      // Keep only a faint baked distance wash. Scene fog already supplies
+      // aerial perspective; a strong baked wash turns the whole outer grid
+      // into a gray plate when the camera looks straight down.
       const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.34, 1.0);
 
-      const alongDistance = alongStart + u * width;
+      const extLow = apronCornerReach(
+        regionId,
+        vista,
+        0,
+        Math.max(0, signedDistance),
+        previewDepth,
+      );
+      const extHigh = apronCornerReach(
+        regionId,
+        vista,
+        1,
+        Math.max(0, signedDistance),
+        previewDepth,
+      );
+      const rowWidth = baseWidth + extLow + extHigh;
+      const alongDistance = -baseWidth / 2 - extLow + u * rowWidth;
       const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
       // Corner overhang columns keep sampling frozen at the edge's end, so the
       // apron sweeps around the corner continuing the corner profile.
@@ -524,14 +630,25 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
       const targetY = terrainHeight(targetX, targetZ, targetRegionId);
       const seamOffset = edgeY - targetEdgeY;
+      const topologyHold = apronTopologyHold(
+        regionId,
+        config,
+        targetConfig,
+        vista,
+        transition,
+        clampedU,
+        edgeY,
+        targetY,
+      );
+      const effectiveHeightBlend = heightBlend * (1 - topologyHold);
       const sourceCarryY = currentY
         - BORDER_COLLAR_DROP
         - outsideT * 0.035
         + apronReliefNoise(x, z, (vista.seed || 0) + 211) * 0.045 * (continuity?.seamNoiseStrength ?? 0.35);
       const targetProfileY = targetY
-        + seamOffset * seamHold
-        + apronReliefNoise(x, z, (vista.seed || 0) + 173) * 0.08 * heightBlend;
-      const previewY = THREE.MathUtils.lerp(sourceCarryY, targetProfileY, heightBlend);
+        + seamOffset * (1 - effectiveHeightBlend)
+        + apronReliefNoise(x, z, (vista.seed || 0) + 173) * 0.08 * effectiveHeightBlend;
+      const previewY = THREE.MathUtils.lerp(sourceCarryY, targetProfileY, effectiveHeightBlend);
       const y = THREE.MathUtils.lerp(currentY - BORDER_COLLAR_DROP, previewY, collarBlend);
 
       // Blur radius tracks distance: near the seam stay close to the real
@@ -546,12 +663,13 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
         Math.min(7.5, 1.6 + targetDistance * 0.14),
       );
       const color = transitionVistaColor(transition, currentColor, targetColor, outsideDistance, outsideT, targetY);
+      color.lerp(currentColor, topologyHold);
       const mottleT = THREE.MathUtils.smoothstep(outsideDistance, 2.0, 18.0);
       applyApronVertexMottle(color, x, z, {
         seed: (vista.seed || 0) + 31,
         strength: 0.16 + mottleT * (continuity?.seamNoiseStrength ?? 0.65),
       });
-      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.6);
+      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.14);
 
       positions.push(x, y, z);
       // Carry-strip vertex colors barely show (the region splat materials

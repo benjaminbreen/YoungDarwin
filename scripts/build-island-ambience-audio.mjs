@@ -25,7 +25,7 @@ function runFfmpeg(args) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-function buildLoop({ source, output, start, duration, overlap, filters, quality = '4' }) {
+function buildLoop({ source, output, start, duration, overlap, filters, bitrate = '160k' }) {
   const bodyEnd = duration - overlap;
   const filterGraph = [
     `[0:a]atrim=start=${start}:duration=${duration},asetpts=PTS-STARTPTS,${filters},asplit=3[whole][headSource][tailSource]`,
@@ -40,8 +40,8 @@ function buildLoop({ source, output, start, duration, overlap, filters, quality 
     '-filter_complex', filterGraph,
     '-map', '[out]',
     '-ar', '48000',
-    '-c:a', 'libvorbis',
-    '-q:a', quality,
+    '-c:a', 'libmp3lame',
+    '-b:a', bitrate,
     path.join(outputDir, output),
   ]);
 }
@@ -50,24 +50,24 @@ function buildLoop({ source, output, start, duration, overlap, filters, quality 
 // without the architectural signature of a roof, window, or gutter.
 buildLoop({
   source: sources.rain,
-  output: 'rain-on-foliage.ogg',
+  output: 'rain-on-foliage.mp3',
   start: 34,
   duration: 58,
   overlap: 6,
   filters: 'highpass=f=130,lowpass=f=14500,loudnorm=I=-25:LRA=7:TP=-5,alimiter=limit=0.72',
-  quality: '5',
+  bitrate: '192k',
 });
 
 // The runtime keeps this recording extremely low. Filtering removes distant
 // low-frequency handling/traffic-like energy and leaves a diffuse insect bed.
 buildLoop({
   source: sources.insects,
-  output: 'dry-insects.ogg',
+  output: 'dry-insects.mp3',
   start: 28,
   duration: 64,
   overlap: 7,
   filters: 'highpass=f=720,lowpass=f=10800,loudnorm=I=-25:LRA=6:TP=-6,alimiter=limit=0.62',
-  quality: '5',
+  bitrate: '160k',
 });
 
 console.log(`Built island ambience audio in ${path.relative(repoRoot, outputDir)}`);

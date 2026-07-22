@@ -8,6 +8,10 @@ import {
 import { getZoneProps } from '../physics/props/propRegistry';
 import { getZonePropCollisionProps } from '../physics/props/propRuntime';
 import { resolveActorPropCollision } from '../physics/props/propCollision';
+import { getTreePerches } from '../wildlife/treePerches';
+import { getOwlRoosts } from '../wildlife/owlRoosts';
+import { getRacerShelters } from '../wildlife/racerShelters';
+import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../world/specimenRuntime';
 
 export function seedFromSpecimen(specimen) {
   const spawn = specimen?.spawnPoint || specimen?.position;
@@ -58,7 +62,7 @@ function moveTowardOffset(current, target, maxDistance, out) {
   return out.multiplyScalar(maxDistance / distance).add(current);
 }
 
-export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition, actorScale = 1 }) {
+export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition, actorScale = 1, actorId = null }) {
   const placementScale = Number.isFinite(Number(actorScale)) ? Math.max(0.1, Number(actorScale)) : 1;
   const state = {
     position: new THREE.Vector3(),
@@ -100,7 +104,60 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     landingStart: new THREE.Vector3(),
     landingTargetOffset: new THREE.Vector2(),
     flightPhase: seed * Math.PI * 2,
+    groundMode: 'feed',
+    groundUntil: 0,
+    groundCycle: 0,
+    groundTargetOffset: new THREE.Vector2(),
+    nextFlightAt: Infinity,
   };
+  const raptor = {
+    mode: 'perched',
+    zoneId: null,
+    perches: [],
+    currentPerch: null,
+    targetPerch: null,
+    startedAt: 0,
+    until: 0,
+    flightEndAt: 0,
+    flightPhase: seed * Math.PI * 2,
+    stoopDone: false,
+    start: new THREE.Vector3(),
+    end: new THREE.Vector3(),
+  };
+  const owl = {
+    mode: 'roost',
+    zoneId: null,
+    roosts: [],
+    currentRoost: null,
+    targetRoost: null,
+    startedAt: 0,
+    until: 0,
+    flightEndAt: 0,
+    nextHoverAt: 0,
+    flightPhase: seed * Math.PI * 2,
+    huntCount: 0,
+    startledFlight: false,
+    start: new THREE.Vector3(),
+    end: new THREE.Vector3(),
+    prey: new THREE.Vector3(),
+  };
+  const racer = {
+    mode: 'bask',
+    zoneId: null,
+    shelters: [],
+    shelter: null,
+    targetOffset: new THREE.Vector2(),
+    until: 0,
+    cycle: 0,
+    lastBlockedAt: -Infinity,
+    preyActorId: null,
+    preyPosition: new THREE.Vector3(),
+    preyDistance: Infinity,
+    chaseUntil: -Infinity,
+    huntCooldownUntil: -Infinity,
+    strikeWasHunt: false,
+  };
+  const racerPreySpecies = new Set(profile?.preySpecies || []);
   const deckMonkey = {
     targetIndex: 0,
     waitUntil: 0,
@@ -209,6 +266,54 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     shorebird.landingStart.copy(state.position);
     shorebird.landingTargetOffset.set(0, 0);
     shorebird.flightPhase = seed * Math.PI * 2;
+    shorebird.groundMode = 'feed';
+    shorebird.groundUntil = clock + 1.2 + seed * 1.8;
+    shorebird.groundCycle = 0;
+    shorebird.groundTargetOffset.set(0, 0);
+    shorebird.nextFlightAt = profile?.routineFlightInterval
+      ? clock + profile.routineFlightInterval * (0.72 + seed * 0.56)
+      : Infinity;
+    raptor.mode = 'perched';
+    raptor.zoneId = null;
+    raptor.perches = [];
+    raptor.currentPerch = null;
+    raptor.targetPerch = null;
+    raptor.startedAt = clock;
+    raptor.until = clock;
+    raptor.flightEndAt = clock;
+    raptor.flightPhase = seed * Math.PI * 2;
+    raptor.stoopDone = false;
+    raptor.start.copy(state.position);
+    raptor.end.copy(state.position);
+    owl.mode = 'roost';
+    owl.zoneId = null;
+    owl.roosts = [];
+    owl.currentRoost = null;
+    owl.targetRoost = null;
+    owl.startedAt = clock;
+    owl.until = clock;
+    owl.flightEndAt = clock;
+    owl.nextHoverAt = clock;
+    owl.flightPhase = seed * Math.PI * 2;
+    owl.huntCount = 0;
+    owl.startledFlight = false;
+    owl.start.copy(state.position);
+    owl.end.copy(state.position);
+    owl.prey.copy(state.position);
+    racer.mode = 'bask';
+    racer.zoneId = null;
+    racer.shelters = [];
+    racer.shelter = null;
+    racer.targetOffset.set(0, 0);
+    racer.until = clock + 1.2 + seed * 2.4;
+    racer.cycle = 0;
+    racer.lastBlockedAt = -Infinity;
+    racer.preyActorId = null;
+    racer.preyPosition.set(0, 0, 0);
+    racer.preyDistance = Infinity;
+    racer.chaseUntil = -Infinity;
+    racer.huntCooldownUntil = clock + seed * 2.5;
+    racer.strikeWasHunt = false;
     deckMonkey.targetIndex = profile?.strictSurfaceRoute
       ? 0
       : Math.floor(seed * Math.max(1, profile?.deckWaypoints?.length || 1));
@@ -1442,6 +1547,43 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     }
   }
 
+  function chooseShorebirdGroundActivity(t, base, currentZoneId) {
+    shorebird.groundCycle += 1;
+    const cycleSeed = seed * 613 + shorebird.groundCycle * 37;
+    const choice = seededUnit(cycleSeed);
+    const pauseMin = profile.foragePauseMin || 1.1;
+    const pauseMax = Math.max(pauseMin, profile.foragePauseMax || 3.2);
+    if (choice < 0.38) {
+      shorebird.groundMode = 'feed';
+      shorebird.groundUntil = t + THREE.MathUtils.lerp(pauseMin, pauseMax, seededUnit(cycleSeed + 9));
+      return;
+    }
+    if (choice < 0.54) {
+      shorebird.groundMode = 'idle';
+      shorebird.groundUntil = t + THREE.MathUtils.lerp(0.8, 2.4, seededUnit(cycleSeed + 15));
+      return;
+    }
+
+    const radiusX = Math.max(1.2, habitat.radiusX || profile.habitatRadiusX || 6);
+    const radiusZ = Math.max(0.8, habitat.radiusZ || profile.habitatRadiusZ || 3);
+    for (let i = 0; i < 8; i += 1) {
+      const angle = seededUnit(cycleSeed + i * 19) * Math.PI * 2;
+      const spread = 0.24 + seededUnit(cycleSeed + i * 29 + 3) * 0.58;
+      const candidate = vectors.shorebirdCandidate.set(
+        Math.cos(angle) * radiusX * spread,
+        Math.sin(angle) * radiusZ * spread,
+      );
+      const clamped = clampShorebirdOffset(candidate, 0.94, vectors.clamped);
+      if (!isWalkableTerrain(base.x + clamped.x, base.z + clamped.y, currentZoneId)) continue;
+      shorebird.groundTargetOffset.copy(clamped);
+      shorebird.groundMode = 'walk';
+      shorebird.groundUntil = t + 8;
+      return;
+    }
+    shorebird.groundMode = 'feed';
+    shorebird.groundUntil = t + pauseMin;
+  }
+
   function updateShorebird({
     base,
     currentZoneId,
@@ -1458,9 +1600,15 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     const takeoffRadius = profile.takeoffRadius || Math.max(3.2, (profile.panicRadius || 1.4) * 2.2);
     const forcedTakeoff = contactPanic > 0.03 || hammerPanic > 0.08;
     const closeTakeoff = distanceToPlayer < takeoffRadius && panic > 0.18;
-    if (shorebird.mode === 'ground' && (forcedTakeoff || closeTakeoff)) {
+    const routineTakeoff = profile.routineFlightInterval
+      && t >= shorebird.nextFlightAt
+      && distanceToPlayer > (profile.landClearRadius || 4.2);
+    if (shorebird.mode === 'ground' && (forcedTakeoff || closeTakeoff || routineTakeoff)) {
       beginShorebirdTakeoff(t, player);
     }
+
+    let groundMoving = false;
+    let groundActivity = shorebird.groundMode;
 
     if (shorebird.mode === 'takeoff') {
       const u = easeInOut((t - shorebird.startedAt) / Math.max(0.1, shorebird.until - shorebird.startedAt));
@@ -1477,7 +1625,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       state.pitch = -Math.sin(u * Math.PI) * (profile.pitchAmount || 0.08);
       state.roll = Math.sin(u * Math.PI) * (profile.rollAmount || 0.16);
       state.airborne = true;
-      state.animation = animationRequest(profile.flyClip || profile.runClip || profile.walkClip, 0.82, 0.14);
+      state.animation = animationRequest(profile.takeoffClip || profile.flyClip || profile.runClip || profile.walkClip, 0.82, 0.14);
       if (t >= shorebird.until) {
         shorebird.mode = 'circle';
         shorebird.startedAt = t;
@@ -1524,7 +1672,13 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       state.pitch = -Math.sin((1 - u) * Math.PI) * (profile.pitchAmount || 0.08);
       state.roll = Math.sin((1 - u) * Math.PI) * (profile.rollAmount || 0.16) * 0.5;
       state.airborne = u < 0.94;
-      state.animation = animationRequest(u < 0.72 ? (profile.glideClip || profile.flyClip) : (profile.flyClip || profile.walkClip), 0.68, 0.18);
+      state.animation = animationRequest(
+        u < 0.72
+          ? (profile.glideClip || profile.flyClip)
+          : (profile.landingClip || profile.flyClip || profile.walkClip),
+        0.68,
+        0.18,
+      );
       if (t >= shorebird.until) {
         shorebird.mode = 'ground';
         shorebird.startedAt = t;
@@ -1534,8 +1688,68 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         state.pitch = 0;
         state.roll = 0;
         state.airborne = false;
+        shorebird.groundMode = 'feed';
+        shorebird.groundUntil = t + 1.1 + seed * 1.4;
+        shorebird.nextFlightAt = profile.routineFlightInterval
+          ? t + profile.routineFlightInterval * (0.78 + seededUnit(seed * 991 + shorebird.groundCycle) * 0.5)
+          : Infinity;
         state.animation = shorebirdIdleAnimation(t);
       }
+    } else if (profile.groundForage) {
+      if (t >= shorebird.groundUntil) chooseShorebirdGroundActivity(t, base, currentZoneId);
+      groundActivity = shorebird.groundMode;
+
+      if (shorebird.groundMode === 'walk') {
+        moveTowardOffset(
+          offset,
+          shorebird.groundTargetOffset,
+          Math.max(profile.walkSpeed || 0.24, 0.08) * dt,
+          vectors.stepTarget,
+        );
+        let movementTarget = clampShorebirdOffset(vectors.stepTarget, 0.98, vectors.clamped);
+        let x = base.x + movementTarget.x;
+        let z = base.z + movementTarget.y;
+        if (!isWalkableTerrain(x, z, currentZoneId)) {
+          movementTarget = vectors.clamped.copy(offset);
+          x = base.x + movementTarget.x;
+          z = base.z + movementTarget.y;
+          shorebird.groundUntil = t;
+        }
+        const previousX = state.position.x;
+        const previousZ = state.position.z;
+        offset.copy(movementTarget);
+        const movedDistance = Math.hypot(x - previousX, z - previousZ);
+        groundMoving = movedDistance > 0.002;
+        const groundY = terrainHeight(x, z, currentZoneId) + groundOffset;
+        const bob = Math.abs(Math.sin(t * 5.4 + seed)) * (profile.bobAmount || 0) * (groundMoving ? 1 : 0.2);
+        state.position.set(x, groundY + bob, z);
+        if (groundMoving) {
+          const yawDirection = vectors.yawDirection.set(x - previousX, z - previousZ);
+          if (yawDirection.lengthSq() > 0.000001) {
+            state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(yawDirection), profile.turnRate || 10, dt);
+          }
+        }
+        if (offset.distanceTo(shorebird.groundTargetOffset) < 0.07) {
+          shorebird.groundMode = 'feed';
+          shorebird.groundUntil = t + THREE.MathUtils.lerp(
+            profile.foragePauseMin || 1.1,
+            profile.foragePauseMax || 3.2,
+            seededUnit(seed * 877 + shorebird.groundCycle * 13),
+          );
+          groundActivity = 'feed';
+        }
+        state.animation = animationRequest(profile.walkClip || profile.idleClip, 0.76, 0.16);
+      } else {
+        const x = base.x + offset.x;
+        const z = base.z + offset.y;
+        state.position.set(x, terrainHeight(x, z, currentZoneId) + groundOffset, z);
+        state.animation = shorebird.groundMode === 'feed'
+          ? animationRequest(profile.feedClip || profile.idleClip, 0.78, 0.2)
+          : shorebirdIdleAnimation(t);
+      }
+      state.pitch = 0;
+      state.roll = 0;
+      state.airborne = false;
     } else {
       const orbitSpeed = profile.orbitSpeed || Math.max(0.22, profile.patrolRate || 0.35);
       const orbitPhase = seed * Math.PI * 2 + t * orbitSpeed;
@@ -1577,6 +1791,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       state.animation = moving
         ? animationRequest(profile.walkClip || profile.idleClip, 0.68, 0.18)
         : shorebirdIdleAnimation(t);
+      groundMoving = moving;
     }
 
     state.debug = {
@@ -1585,10 +1800,908 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       z: state.position.z,
       zoneId: currentZoneId,
       updatedAt: t,
-      moving: shorebird.mode === 'ground' ? false : true,
+      moving: shorebird.mode === 'ground' ? groundMoving : true,
       panic,
       airborne: state.airborne,
       mode: shorebird.mode,
+      groundActivity,
+    };
+    return { ok: true, reason: 'updated', state };
+  }
+
+  function owlIsActiveHour(timeOfDay) {
+    const hour = ((Number(timeOfDay) % 24) + 24) % 24;
+    return hour >= (profile.activeFromHour ?? 17.25) || hour <= (profile.activeUntilHour ?? 6.25);
+  }
+
+  function refreshOwlRoosts(base, currentZoneId) {
+    if (owl.zoneId === currentZoneId && owl.roosts.length) return;
+    owl.zoneId = currentZoneId;
+    owl.roosts = getOwlRoosts(currentZoneId, {
+      origin: base,
+      radius: profile.roostSearchRadius || Math.max(habitat.radiusX || 0, habitat.radiusZ || 0, 44),
+      actorRadius: profile.roostActorRadius || 0.12,
+    });
+    owl.currentRoost = null;
+    owl.targetRoost = null;
+  }
+
+  function setOwlRoosted(t, roost, active) {
+    owl.mode = 'roost';
+    owl.currentRoost = roost;
+    owl.targetRoost = null;
+    owl.startedAt = t;
+    owl.until = active
+      ? t + THREE.MathUtils.lerp(
+        profile.roostMin || 5,
+        profile.roostMax || 11,
+        seededUnit(seed * 997 + owl.huntCount * 17 + Math.floor(t * 0.25)),
+      )
+      : t + (profile.dayRoostCheckInterval || 6);
+    state.position.set(roost.x, roost.y + (profile.roostFootOffset || 0.045), roost.z);
+    state.yaw = roost.yaw || 0;
+    state.pitch = 0;
+    state.roll = 0;
+    state.airborne = false;
+    state.animation = animationRequest(
+      active ? profile.roostClip || profile.idleClip : profile.dayRoostClip || profile.roostClip || profile.idleClip,
+      active ? 0.58 : 0.42,
+      0.28,
+    );
+  }
+
+  function beginOwlTakeoff(t, player, startled = false) {
+    owl.mode = 'takeoff';
+    owl.startedAt = t;
+    owl.until = t + (profile.takeoffDuration || 1.05);
+    owl.start.copy(state.position);
+    const away = vectors.shorebirdDirection.set(
+      state.position.x - (player?.x ?? state.position.x - 1),
+      state.position.z - (player?.z ?? state.position.z),
+    );
+    if (away.lengthSq() < 0.0001) away.set(Math.cos(seed * Math.PI * 2), Math.sin(seed * Math.PI * 2));
+    else away.normalize();
+    owl.end.set(
+      state.position.x + away.x * (profile.takeoffDistance || 2.5),
+      state.position.y + (profile.takeoffLift || 2.4),
+      state.position.z + away.y * (profile.takeoffDistance || 2.5),
+    );
+    owl.flightEndAt = owl.until + (startled ? profile.startledFlightDuration || 7 : profile.flightDuration || 22);
+    owl.nextHoverAt = owl.until + (profile.firstHoverDelay || 5.2);
+    owl.startledFlight = startled;
+    owl.huntCount = 0;
+  }
+
+  function owlQuarterPosition(base, currentZoneId, t) {
+    const elapsed = t - owl.startedAt;
+    const phase = owl.flightPhase + elapsed * (profile.quarterSpeed || 0.31);
+    const radiusX = profile.flightRadiusX || Math.max(11, (habitat.radiusX || 22) * 0.72);
+    const radiusZ = profile.flightRadiusZ || Math.max(8, (habitat.radiusZ || 16) * 0.72);
+    const sweep = Math.sin(phase * 2.35 + seed * 5.7);
+    const x = base.x + Math.cos(phase) * radiusX + sweep * (profile.quarterSweep || 3.2);
+    const z = base.z + Math.sin(phase * 0.91) * radiusZ;
+    const groundY = terrainHeight(x, z, currentZoneId);
+    const y = groundY + (profile.flightHeight || 3.4)
+      + Math.sin(t * 0.9 + seed * 4) * (profile.flightBob || 0.32);
+    return { x, y, z, phase, radiusX, radiusZ };
+  }
+
+  function chooseOwlPrey(base, currentZoneId, t) {
+    const angle = seededUnit(seed * 1223 + owl.huntCount * 31 + Math.floor(t * 0.2)) * Math.PI * 2;
+    const distance = THREE.MathUtils.lerp(
+      profile.pounceRadiusMin || 3.2,
+      profile.pounceRadiusMax || 7.5,
+      seededUnit(seed * 881 + owl.huntCount * 47),
+    );
+    let x = state.position.x + Math.cos(angle) * distance;
+    let z = state.position.z + Math.sin(angle) * distance;
+    const candidateOffset = vectors.shorebirdCandidate.set(x - base.x, z - base.z);
+    clampOffset(candidateOffset, habitat, candidateOffset);
+    x = base.x + candidateOffset.x;
+    z = base.z + candidateOffset.y;
+    if (!isWalkableTerrain(x, z, currentZoneId)) {
+      x = base.x;
+      z = base.z;
+    }
+    owl.prey.set(x, terrainHeight(x, z, currentZoneId) + (profile.pounceClearance || 0.24), z);
+  }
+
+  function beginOwlHover(t, base, currentZoneId) {
+    owl.mode = 'hover';
+    owl.startedAt = t;
+    owl.until = t + (profile.hoverDuration || 2.1);
+    owl.start.copy(state.position);
+    chooseOwlPrey(base, currentZoneId, t);
+  }
+
+  function beginOwlPounce(t) {
+    owl.mode = 'pounce';
+    owl.startedAt = t;
+    owl.until = t + (profile.pounceDuration || 1.18);
+    owl.start.copy(state.position);
+    owl.end.copy(owl.prey);
+  }
+
+  function beginOwlRebound(t, currentZoneId) {
+    owl.mode = 'rebound';
+    owl.startedAt = t;
+    owl.until = t + (profile.reboundDuration || 1.15);
+    owl.start.copy(state.position);
+    owl.end.set(
+      state.position.x + Math.cos(owl.flightPhase + owl.huntCount) * 1.8,
+      terrainHeight(state.position.x, state.position.z, currentZoneId) + (profile.flightHeight || 3.4),
+      state.position.z + Math.sin(owl.flightPhase + owl.huntCount) * 1.8,
+    );
+    owl.huntCount += 1;
+  }
+
+  function chooseOwlRoost(player) {
+    const clearRadius = profile.landClearRadius || 5.5;
+    const candidates = owl.roosts.filter(roost => (
+      roost.id !== owl.currentRoost?.id
+      && (!Number.isFinite(player?.x) || Math.hypot(roost.x - player.x, roost.z - player.z) >= clearRadius)
+    ));
+    const pool = candidates.length ? candidates : owl.roosts;
+    if (!pool.length) return null;
+    return pool.reduce((best, roost) => {
+      if (!best) return roost;
+      const bestDistance = Number.isFinite(player?.x) ? Math.hypot(best.x - player.x, best.z - player.z) : best.distance;
+      const nextDistance = Number.isFinite(player?.x) ? Math.hypot(roost.x - player.x, roost.z - player.z) : roost.distance;
+      return nextDistance > bestDistance ? roost : best;
+    }, null);
+  }
+
+  function beginOwlApproach(t, player) {
+    const roost = chooseOwlRoost(player);
+    if (!roost) return;
+    owl.mode = 'approach';
+    owl.targetRoost = roost;
+    owl.startedAt = t;
+    owl.until = t + (profile.approachDuration || 2.2);
+    owl.start.copy(state.position);
+    owl.end.set(roost.x, roost.y + (profile.approachHeight || 1.8), roost.z);
+  }
+
+  function beginOwlLanding(t) {
+    if (!owl.targetRoost) return;
+    owl.mode = 'landing';
+    owl.startedAt = t;
+    owl.until = t + (profile.landingDuration || 1.25);
+    owl.start.copy(state.position);
+    owl.end.set(
+      owl.targetRoost.x,
+      owl.targetRoost.y + (profile.roostFootOffset || 0.045),
+      owl.targetRoost.z,
+    );
+  }
+
+  function updateOwl({ base, currentZoneId, player, elapsedTime: t, dt, timeOfDay, panic, contactPanic, hammerPanic, distanceToPlayer }) {
+    refreshOwlRoosts(base, currentZoneId);
+    const active = owlIsActiveHour(timeOfDay);
+    if (!owl.currentRoost && owl.roosts.length) setOwlRoosted(t, owl.roosts[0], active);
+    const proximityThreat = distanceToPlayer < (profile.takeoffRadius || 4.8) && panic > 0.1;
+    // A sleeping owl is an unusually approachable field encounter: Darwin can
+    // get close enough to examine or pick it up before it reacts. Physical
+    // contact and tool impacts still wake it, and an active dusk owl remains
+    // wary of an ordinary approach.
+    const threatened = contactPanic > 0.02
+      || hammerPanic > 0.04
+      || (proximityThreat && (active || profile.dayProximityStartle !== false));
+    if (owl.mode === 'roost' && (threatened || (active && t >= owl.until))) {
+      beginOwlTakeoff(t, player, !active);
+    }
+
+    if (owl.mode === 'takeoff') {
+      const u = easeInOut((t - owl.startedAt) / Math.max(0.1, owl.until - owl.startedAt));
+      state.position.lerpVectors(owl.start, owl.end, u);
+      const direction = vectors.yawDirection.set(owl.end.x - owl.start.x, owl.end.z - owl.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(direction), profile.turnRate || 7, dt);
+      state.pitch = -Math.sin(u * Math.PI) * 0.18;
+      state.roll = Math.sin(u * Math.PI) * 0.12;
+      state.airborne = true;
+      state.animation = animationRequest(profile.takeoffClip || profile.flyClip, 0.68, 0.14);
+      if (t >= owl.until) {
+        owl.mode = 'quarter';
+        owl.startedAt = t;
+        owl.flightPhase = Math.atan2(state.position.z - base.z, state.position.x - base.x);
+      }
+    } else if (owl.mode === 'quarter') {
+      const q = owlQuarterPosition(base, currentZoneId, t);
+      state.position.set(q.x, q.y, q.z);
+      const tangent = vectors.yawDirection.set(
+        -Math.sin(q.phase) * q.radiusX + Math.cos(q.phase * 2.35) * (profile.quarterSweep || 3.2),
+        Math.cos(q.phase * 0.91) * q.radiusZ * 0.91,
+      );
+      if (tangent.lengthSq() > 0.0001) state.yaw = yawFromXZ(tangent);
+      state.pitch = Math.sin(t * 0.7 + seed) * 0.045;
+      state.roll = -Math.cos(q.phase) * (profile.rollAmount || 0.16);
+      state.airborne = true;
+      const beatWindow = ((t + seed * 3) % (profile.wingbeatCycle || 3.4)) < (profile.wingbeatBurst || 1.25);
+      state.animation = animationRequest(
+        beatWindow ? profile.flyClip : profile.glideClip || profile.flyClip,
+        beatWindow ? 0.68 : 0.48,
+        0.26,
+      );
+      if (!active || t >= owl.flightEndAt) beginOwlApproach(t, player);
+      else if (!owl.startledFlight && t >= owl.nextHoverAt) beginOwlHover(t, base, currentZoneId);
+    } else if (owl.mode === 'hover') {
+      const bob = Math.sin((t - owl.startedAt) * 8.2) * 0.055;
+      state.position.set(owl.start.x, owl.start.y + bob, owl.start.z);
+      const preyDirection = vectors.yawDirection.set(owl.prey.x - state.position.x, owl.prey.z - state.position.z);
+      if (preyDirection.lengthSq() > 0.0001) state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(preyDirection), profile.turnRate || 7, dt);
+      state.pitch = 0.09;
+      state.roll = Math.sin(t * 3.1) * 0.05;
+      state.airborne = true;
+      state.animation = animationRequest(profile.hoverClip || profile.flyClip, 0.76, 0.16);
+      if (t >= owl.until) beginOwlPounce(t);
+    } else if (owl.mode === 'pounce') {
+      const raw = THREE.MathUtils.clamp((t - owl.startedAt) / Math.max(0.1, owl.until - owl.startedAt), 0, 1);
+      const u = raw * raw * (3 - 2 * raw);
+      state.position.lerpVectors(owl.start, owl.end, u);
+      state.position.y += Math.sin(u * Math.PI) * 0.18;
+      const direction = vectors.yawDirection.set(owl.end.x - owl.start.x, owl.end.z - owl.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = yawFromXZ(direction);
+      state.pitch = 0.48 * Math.sin(raw * Math.PI * 0.9);
+      state.roll = 0;
+      state.airborne = raw < 0.96;
+      state.animation = animationRequest(profile.pounceClip || profile.flyClip, 0.82, 0.1);
+      if (t >= owl.until) beginOwlRebound(t, currentZoneId);
+    } else if (owl.mode === 'rebound') {
+      const u = easeInOut((t - owl.startedAt) / Math.max(0.1, owl.until - owl.startedAt));
+      state.position.lerpVectors(owl.start, owl.end, u);
+      const direction = vectors.yawDirection.set(owl.end.x - owl.start.x, owl.end.z - owl.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = yawFromXZ(direction);
+      state.pitch = -Math.sin(u * Math.PI) * 0.2;
+      state.roll = Math.sin(u * Math.PI) * 0.08;
+      state.airborne = true;
+      state.animation = animationRequest(profile.flyClip, 0.72, 0.14);
+      if (t >= owl.until) {
+        if (active && t < owl.flightEndAt) {
+          owl.mode = 'quarter';
+          owl.startedAt = t;
+          owl.flightPhase += 0.72 + seed * 0.4;
+          owl.nextHoverAt = t + (profile.hoverInterval || 6.5);
+        } else beginOwlApproach(t, player);
+      }
+    } else if (owl.mode === 'approach') {
+      const u = easeInOut((t - owl.startedAt) / Math.max(0.1, owl.until - owl.startedAt));
+      state.position.lerpVectors(owl.start, owl.end, u);
+      const direction = vectors.yawDirection.set(owl.end.x - owl.start.x, owl.end.z - owl.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(direction), profile.turnRate || 7, dt);
+      state.pitch = -0.03;
+      state.roll = Math.sin(u * Math.PI) * 0.08;
+      state.airborne = true;
+      state.animation = animationRequest(profile.glideClip || profile.flyClip, 0.48, 0.22);
+      if (t >= owl.until) beginOwlLanding(t);
+    } else if (owl.mode === 'landing' && owl.targetRoost) {
+      const u = easeInOut((t - owl.startedAt) / Math.max(0.1, owl.until - owl.startedAt));
+      state.position.lerpVectors(owl.start, owl.end, u);
+      state.yaw = THREE.MathUtils.damp(state.yaw, owl.targetRoost.yaw || state.yaw, profile.turnRate || 7, dt);
+      state.pitch = -Math.sin((1 - u) * Math.PI) * 0.13;
+      state.roll = 0;
+      state.airborne = u < 0.96;
+      state.animation = animationRequest(profile.landingClip || profile.flyClip, 0.54, 0.18);
+      if (t >= owl.until) setOwlRoosted(t, owl.targetRoost, active);
+    } else if (owl.mode === 'roost' && owl.currentRoost) {
+      state.position.set(
+        owl.currentRoost.x,
+        owl.currentRoost.y + (profile.roostFootOffset || 0.045),
+        owl.currentRoost.z,
+      );
+      state.yaw = owl.currentRoost.yaw || 0;
+      state.pitch = 0;
+      state.roll = 0;
+      state.airborne = false;
+      state.animation = animationRequest(
+        active ? profile.roostClip || profile.idleClip : profile.dayRoostClip || profile.roostClip || profile.idleClip,
+        active ? 0.58 : 0.42,
+        0.28,
+      );
+    }
+
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving: owl.mode !== 'roost',
+      panic,
+      airborne: state.airborne,
+      mode: owl.mode,
+      active,
+      timeOfDay,
+      roostId: owl.currentRoost?.id || null,
+      roostSurface: owl.currentRoost?.surface || null,
+      landingRoostId: owl.targetRoost?.id || null,
+      landingSurface: owl.targetRoost?.surface || null,
+      availableRoosts: owl.roosts.length,
+      hunting: ['hover', 'pounce', 'rebound'].includes(owl.mode),
+    };
+    return { ok: true, reason: 'updated', state };
+  }
+
+  function refreshRaptorPerches(base, currentZoneId) {
+    if (raptor.zoneId === currentZoneId && raptor.perches.length) return;
+    raptor.zoneId = currentZoneId;
+    raptor.perches = getTreePerches(currentZoneId, {
+      origin: base,
+      radius: profile.perchSearchRadius || Math.max(habitat.radiusX || 0, habitat.radiusZ || 0, 48),
+    });
+    raptor.currentPerch = null;
+    raptor.targetPerch = null;
+  }
+
+  function setRaptorPerched(t, perch) {
+    raptor.mode = 'perched';
+    raptor.currentPerch = perch;
+    raptor.targetPerch = null;
+    raptor.startedAt = t;
+    raptor.until = t + THREE.MathUtils.lerp(
+      profile.perchMin || 12,
+      profile.perchMax || 24,
+      seededUnit(seed * 719 + Math.floor(t * 0.2)),
+    );
+    state.position.set(perch.x, perch.y + (profile.perchFootOffset || 0.04), perch.z);
+    state.yaw = perch.yaw || 0;
+    state.pitch = 0;
+    state.roll = 0;
+    state.airborne = false;
+    state.animation = animationRequest(profile.perchClip || profile.idleClip, 0.62, 0.24);
+  }
+
+  function beginRaptorTakeoff(t, player) {
+    raptor.mode = 'takeoff';
+    raptor.startedAt = t;
+    raptor.until = t + (profile.takeoffDuration || 1.25);
+    raptor.start.copy(state.position);
+    const away = vectors.shorebirdDirection.set(
+      state.position.x - (player?.x ?? state.position.x - 1),
+      state.position.z - (player?.z ?? state.position.z),
+    );
+    if (away.lengthSq() < 0.0001) away.set(Math.cos(seed * Math.PI * 2), Math.sin(seed * Math.PI * 2));
+    else away.normalize();
+    raptor.end.set(
+      state.position.x + away.x * (profile.takeoffDistance || 3.4),
+      state.position.y + (profile.takeoffLift || 3.1),
+      state.position.z + away.y * (profile.takeoffDistance || 3.4),
+    );
+    raptor.flightEndAt = raptor.until + (profile.flightDuration || 15);
+    raptor.stoopDone = false;
+  }
+
+  function chooseRaptorLandingPerch(player) {
+    const clearRadius = profile.landClearRadius || 7;
+    const candidates = raptor.perches.filter(perch => (
+      perch.id !== raptor.currentPerch?.id
+      && (!Number.isFinite(player?.x) || Math.hypot(perch.x - player.x, perch.z - player.z) >= clearRadius)
+    ));
+    const pool = candidates.length ? candidates : raptor.perches;
+    if (!pool.length) return null;
+    return pool.reduce((best, perch) => {
+      if (!best) return perch;
+      const bestPlayerDistance = Number.isFinite(player?.x)
+        ? Math.hypot(best.x - player.x, best.z - player.z)
+        : 0;
+      const playerDistance = Number.isFinite(player?.x)
+        ? Math.hypot(perch.x - player.x, perch.z - player.z)
+        : 0;
+      return playerDistance > bestPlayerDistance ? perch : best;
+    }, null);
+  }
+
+  function beginRaptorApproach(t, player) {
+    const perch = chooseRaptorLandingPerch(player);
+    if (!perch) {
+      raptor.flightEndAt = t + 4;
+      return;
+    }
+    raptor.mode = 'approach';
+    raptor.targetPerch = perch;
+    raptor.startedAt = t;
+    raptor.until = t + (profile.approachDuration || 2.4);
+    raptor.start.copy(state.position);
+    raptor.end.set(perch.x, perch.y + (profile.approachHeight || 2.2), perch.z);
+  }
+
+  function beginRaptorLanding(t) {
+    raptor.mode = 'landing';
+    raptor.startedAt = t;
+    raptor.until = t + (profile.landingDuration || 1.45);
+    raptor.start.copy(state.position);
+    raptor.end.set(
+      raptor.targetPerch.x,
+      raptor.targetPerch.y + (profile.perchFootOffset || 0.04),
+      raptor.targetPerch.z,
+    );
+  }
+
+  function updateRaptor({ base, currentZoneId, player, elapsedTime: t, dt, panic, contactPanic, hammerPanic, distanceToPlayer }) {
+    refreshRaptorPerches(base, currentZoneId);
+    if (!raptor.currentPerch && raptor.perches.length) {
+      setRaptorPerched(t, raptor.perches[0]);
+    }
+
+    const threatened = contactPanic > 0.02
+      || hammerPanic > 0.05
+      || (distanceToPlayer < (profile.takeoffRadius || 6.5) && panic > 0.12);
+    if (raptor.mode === 'perched' && (threatened || t >= raptor.until)) beginRaptorTakeoff(t, player);
+
+    if (raptor.mode === 'takeoff') {
+      const u = easeInOut((t - raptor.startedAt) / Math.max(0.1, raptor.until - raptor.startedAt));
+      state.position.lerpVectors(raptor.start, raptor.end, u);
+      const direction = vectors.yawDirection.set(raptor.end.x - raptor.start.x, raptor.end.z - raptor.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(direction), profile.turnRate || 8, dt);
+      state.pitch = -Math.sin(u * Math.PI) * (profile.pitchAmount || 0.16);
+      state.roll = Math.sin(u * Math.PI) * (profile.rollAmount || 0.22);
+      state.airborne = true;
+      state.animation = animationRequest(profile.takeoffClip || profile.flyClip, 0.72, 0.14);
+      if (t >= raptor.until) {
+        raptor.mode = 'soar';
+        raptor.startedAt = t;
+        raptor.flightPhase = Math.atan2(state.position.z - base.z, state.position.x - base.x);
+      }
+    } else if (raptor.mode === 'soar') {
+      const phase = raptor.flightPhase + (t - raptor.startedAt) * (profile.orbitSpeed || 0.24);
+      const radiusX = profile.flightRadiusX || Math.max(12, (habitat.radiusX || 24) * 0.72);
+      const radiusZ = profile.flightRadiusZ || Math.max(9, (habitat.radiusZ || 18) * 0.72);
+      const x = base.x + Math.cos(phase) * radiusX;
+      const z = base.z + Math.sin(phase) * radiusZ;
+      const y = terrainHeight(x, z, currentZoneId) + (profile.flightHeight || 9) + Math.sin(t * 0.72 + seed) * 0.5;
+      state.position.set(x, y, z);
+      const tangent = vectors.yawDirection.set(-Math.sin(phase) * radiusX, Math.cos(phase) * radiusZ);
+      if (tangent.lengthSq() > 0.0001) state.yaw = yawFromXZ(tangent);
+      state.pitch = Math.sin(phase * 0.45) * (profile.pitchAmount || 0.11);
+      state.roll = -Math.cos(phase) * (profile.rollAmount || 0.22);
+      state.airborne = true;
+      state.animation = animationRequest(profile.glideClip || profile.flyClip, 0.46, 0.26);
+      const flightDuration = profile.flightDuration || 15;
+      if (!raptor.stoopDone && t >= raptor.flightEndAt - flightDuration * 0.48) {
+        raptor.mode = 'stoop';
+        raptor.startedAt = t;
+        raptor.until = t + (profile.stoopDuration || 2.2);
+        raptor.start.copy(state.position);
+        raptor.stoopDone = true;
+      } else if (t >= raptor.flightEndAt) {
+        beginRaptorApproach(t, player);
+      }
+    } else if (raptor.mode === 'stoop') {
+      const raw = THREE.MathUtils.clamp((t - raptor.startedAt) / Math.max(0.1, raptor.until - raptor.startedAt), 0, 1);
+      const phase = raptor.flightPhase + (t - raptor.startedAt) * (profile.orbitSpeed || 0.24) * 2.4;
+      const radiusX = profile.flightRadiusX || 18;
+      const radiusZ = profile.flightRadiusZ || 13;
+      const x = base.x + Math.cos(phase) * radiusX;
+      const z = base.z + Math.sin(phase) * radiusZ;
+      const groundY = terrainHeight(x, z, currentZoneId);
+      const cruiseY = groundY + (profile.flightHeight || 9);
+      const y = cruiseY - Math.sin(raw * Math.PI) * Math.max(2, (profile.flightHeight || 9) - (profile.stoopClearance || 3));
+      state.position.set(x, y, z);
+      const tangent = vectors.yawDirection.set(-Math.sin(phase) * radiusX, Math.cos(phase) * radiusZ);
+      if (tangent.lengthSq() > 0.0001) state.yaw = yawFromXZ(tangent);
+      state.pitch = raw < 0.5 ? 0.34 : -0.26;
+      state.roll = -Math.cos(phase) * (profile.rollAmount || 0.22) * 0.65;
+      state.airborne = true;
+      state.animation = animationRequest(profile.glideClip || profile.flyClip, 0.6, 0.18);
+      if (t >= raptor.until) {
+        raptor.mode = 'soar';
+        raptor.startedAt = t;
+        raptor.flightPhase = phase;
+      }
+    } else if (raptor.mode === 'approach') {
+      const u = easeInOut((t - raptor.startedAt) / Math.max(0.1, raptor.until - raptor.startedAt));
+      state.position.lerpVectors(raptor.start, raptor.end, u);
+      const direction = vectors.yawDirection.set(raptor.end.x - raptor.start.x, raptor.end.z - raptor.start.z);
+      if (direction.lengthSq() > 0.0001) state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(direction), profile.turnRate || 8, dt);
+      state.pitch = -0.04;
+      state.roll = Math.sin(u * Math.PI) * (profile.rollAmount || 0.22) * 0.3;
+      state.airborne = true;
+      state.animation = animationRequest(profile.glideClip || profile.flyClip, 0.5, 0.22);
+      if (t >= raptor.until) beginRaptorLanding(t);
+    } else if (raptor.mode === 'landing') {
+      const u = easeInOut((t - raptor.startedAt) / Math.max(0.1, raptor.until - raptor.startedAt));
+      state.position.lerpVectors(raptor.start, raptor.end, u);
+      state.yaw = THREE.MathUtils.damp(state.yaw, raptor.targetPerch.yaw || state.yaw, profile.turnRate || 8, dt);
+      state.pitch = -Math.sin((1 - u) * Math.PI) * (profile.pitchAmount || 0.16);
+      state.roll = 0;
+      state.airborne = u < 0.96;
+      state.animation = animationRequest(profile.landingClip || profile.flyClip, 0.58, 0.18);
+      if (t >= raptor.until) setRaptorPerched(t, raptor.targetPerch);
+    } else if (raptor.mode === 'perched' && raptor.currentPerch) {
+      state.position.set(
+        raptor.currentPerch.x,
+        raptor.currentPerch.y + (profile.perchFootOffset || 0.04),
+        raptor.currentPerch.z,
+      );
+      state.yaw = raptor.currentPerch.yaw || 0;
+      state.pitch = 0;
+      state.roll = 0;
+      state.airborne = false;
+      state.animation = animationRequest(profile.perchClip || profile.idleClip, 0.62, 0.24);
+    } else {
+      // No tree target is safer than inventing a ground landing. Stay aloft
+      // until the authored ecology for this region exposes a suitable tree.
+      raptor.mode = 'soar';
+      raptor.startedAt = t;
+      raptor.flightEndAt = t + 4;
+      state.position.set(base.x, base.y + (profile.flightHeight || 9), base.z);
+      state.airborne = true;
+      state.animation = animationRequest(profile.glideClip || profile.flyClip, 0.46, 0.2);
+    }
+
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving: raptor.mode !== 'perched',
+      panic,
+      airborne: state.airborne,
+      mode: raptor.mode,
+      perchId: raptor.currentPerch?.id || null,
+      perchTreeId: raptor.currentPerch?.treeId || null,
+      landingPerchId: raptor.targetPerch?.id || null,
+      landingSurface: raptor.targetPerch ? 'tree' : null,
+      availableTreePerches: raptor.perches.length,
+    };
+    return { ok: true, reason: 'updated', state };
+  }
+
+  // --- Floreana racer controller -------------------------------------------
+  // Racers spend long stretches absorbing heat, punctuated by tongue tasting
+  // and quick hunting movements. Disturbance produces a readable warning pose
+  // before they slip toward the edge of a real collision-scale lava rock.
+
+  function racerIsActiveHour(timeOfDay) {
+    const hour = ((Number(timeOfDay) % 24) + 24) % 24;
+    return hour >= (profile.activeFromHour ?? 7) && hour < (profile.activeUntilHour ?? 18.25);
+  }
+
+  function racerRange(min, max, salt) {
+    return min + seededUnit(seed * 6151 + salt + racer.cycle * 37) * Math.max(0, max - min);
+  }
+
+  function refreshRacerShelters(base, currentZoneId) {
+    if (racer.zoneId === currentZoneId && racer.shelters.length) return;
+    racer.zoneId = currentZoneId;
+    racer.shelters = getRacerShelters(currentZoneId, {
+      origin: base,
+      radius: profile.shelterSearchRadius || 18,
+    });
+    racer.shelter = null;
+  }
+
+  function chooseRacerGroundTarget(base, currentZoneId, t) {
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const salt = Math.floor(t * 2.1) * 61 + attempt * 97 + racer.cycle * 149;
+      const angle = seededUnit(seed * 7187 + salt) * Math.PI * 2;
+      const radius = 0.24 + seededUnit(seed * 7211 + salt) * 0.63;
+      vectors.grazerCandidate.set(
+        Math.cos(angle) * (habitat.radiusX || profile.habitatRadiusX || 4) * radius,
+        Math.sin(angle) * (habitat.radiusZ || profile.habitatRadiusZ || 3) * radius,
+      );
+      if (!isGrazerOffsetUsable(base, vectors.grazerCandidate, currentZoneId)) continue;
+      racer.targetOffset.copy(vectors.grazerCandidate);
+      return true;
+    }
+    racer.targetOffset.copy(offset);
+    return false;
+  }
+
+  function racerPreyCandidate(currentZoneId, preyId, pose, base, maximumDistance) {
+    if (!preyId || preyId === actorId || !racerPreySpecies.has(pose?.specimenId)) return null;
+    if (!Number.isFinite(pose.x) || !Number.isFinite(pose.y) || !Number.isFinite(pose.z)) return null;
+    const groundY = terrainHeight(pose.x, pose.z, currentZoneId);
+    if (pose.y > groundY + (profile.preyMaxGroundClearance || 0.82)) return null;
+    if (Math.hypot(pose.x - base.x, pose.z - base.z) > (profile.preyLeashRadius || 15)) return null;
+    const distance = Math.hypot(pose.x - state.position.x, pose.z - state.position.z);
+    if (distance > maximumDistance) return null;
+    return { actorId: preyId, pose, distance };
+  }
+
+  function findRacerPrey(currentZoneId, base, maximumDistance = profile.preyDetectRadius || 8.5) {
+    const poses = getSpecimenRuntimePoses(currentZoneId);
+    if (!poses) return null;
+    const currentPose = racer.preyActorId ? poses.get(racer.preyActorId) : null;
+    const current = racerPreyCandidate(
+      currentZoneId,
+      racer.preyActorId,
+      currentPose,
+      base,
+      maximumDistance,
+    );
+    if (current) return current;
+    let nearest = null;
+    for (const [preyId, pose] of poses) {
+      const candidate = racerPreyCandidate(currentZoneId, preyId, pose, base, maximumDistance);
+      if (candidate && (!nearest || candidate.distance < nearest.distance)) nearest = candidate;
+    }
+    return nearest;
+  }
+
+  function clearRacerPrey(t, cooldown = profile.preyRetryDelay || 5.5) {
+    racer.preyActorId = null;
+    racer.preyDistance = Infinity;
+    racer.chaseUntil = -Infinity;
+    racer.huntCooldownUntil = t + cooldown;
+  }
+
+  function beginRacerHunt(prey, t) {
+    racer.preyActorId = prey.actorId;
+    racer.preyPosition.set(prey.pose.x, prey.pose.y, prey.pose.z);
+    racer.preyDistance = prey.distance;
+    racer.chaseUntil = t + (profile.preyChaseDuration || 7.5);
+    racer.mode = 'hunt';
+  }
+
+  function beginRacerPreyStrike(t, currentZoneId) {
+    racer.mode = 'strike';
+    racer.until = t + (profile.strikeDuration || 0.58);
+    racer.strikeWasHunt = true;
+    if (racer.preyActorId) {
+      pushSpecimenStimulus(currentZoneId, racer.preyActorId, {
+        kind: 'contact',
+        sourceActorId: actorId,
+        position: { x: state.position.x, y: state.position.y, z: state.position.z },
+        radius: profile.preyStartleRadius || 3.2,
+        intensity: 1.25,
+        duration: 1.15,
+      });
+    }
+  }
+
+  function chooseRacerShelter(player) {
+    if (!racer.shelters.length) return null;
+    return racer.shelters.reduce((best, shelter) => {
+      if (!best) return shelter;
+      const bestPlayerDistance = Number.isFinite(player?.x)
+        ? Math.hypot(best.x - player.x, best.z - player.z)
+        : -best.distance;
+      const playerDistance = Number.isFinite(player?.x)
+        ? Math.hypot(shelter.x - player.x, shelter.z - player.z)
+        : -shelter.distance;
+      return playerDistance > bestPlayerDistance ? shelter : best;
+    }, null);
+  }
+
+  function beginRacerRetreat(t, player) {
+    racer.mode = 'retreat';
+    clearRacerPrey(t, 2.5);
+    racer.shelter = chooseRacerShelter(player);
+    racer.until = t + 12;
+  }
+
+  function settleRacerInShelter(t, base) {
+    racer.mode = 'shelter';
+    racer.until = t + racerRange(profile.shelterMin || 3.2, profile.shelterMax || 7.5, 911);
+    if (racer.shelter) {
+      state.position.set(
+        racer.shelter.x,
+        racer.shelter.y + (profile.groundOffset || 0.035) * placementScale,
+        racer.shelter.z,
+      );
+      offset.set(state.position.x - base.x, state.position.z - base.z);
+      state.yaw = racer.shelter.yaw || state.yaw;
+    }
+  }
+
+  function stepRacerOnGround(base, currentZoneId, targetX, targetZ, speed, dt) {
+    const previousX = state.position.x;
+    const previousZ = state.position.z;
+    const dx = targetX - previousX;
+    const dz = targetZ - previousZ;
+    const distance = Math.hypot(dx, dz);
+    if (distance <= 0.0001) return false;
+    const step = Math.min(distance, Math.max(0.001, speed * dt));
+    const x = previousX + (dx / distance) * step;
+    const z = previousZ + (dz / distance) * step;
+    if (!isWalkableTerrain(x, z, currentZoneId)) return false;
+    vectors.grazerPrevious.copy(state.position);
+    state.position.set(x, terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.035) * placementScale, z);
+    const sources = grazerCollisionSources(currentZoneId);
+    const radius = grazerObstacleRadius();
+    const obstacleHit = resolveObstacleCollision(state.position, vectors.grazerPrevious, {
+      playerRadius: radius,
+      stepTolerance: profile.obstacleStepTolerance || 0.14,
+      obstacles: sources.obstacles,
+    });
+    if (obstacleHit) state.position.copy(obstacleHit.position);
+    const propHit = resolveActorPropCollision(
+      state.position,
+      vectors.grazerPrevious,
+      sources.props,
+      currentZoneId,
+      radius,
+    );
+    if (propHit) state.position.copy(propHit.position);
+    state.position.y = terrainHeight(state.position.x, state.position.z, currentZoneId)
+      + (profile.groundOffset || 0.035) * placementScale;
+    offset.set(state.position.x - base.x, state.position.z - base.z);
+    const moved = Math.hypot(state.position.x - previousX, state.position.z - previousZ);
+    if (moved > 0.0005) {
+      const direction = vectors.yawDirection.set(state.position.x - previousX, state.position.z - previousZ);
+      state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(direction), profile.turnRate || 11, dt);
+      return true;
+    }
+    return false;
+  }
+
+  function updateRacer({
+    base,
+    currentZoneId,
+    player,
+    elapsedTime: t,
+    dt,
+    timeOfDay,
+    panic,
+    contactPanic,
+    hammerPanic,
+  }) {
+    refreshRacerShelters(base, currentZoneId);
+    const active = racerIsActiveHour(timeOfDay);
+    const threatened = panic > 0.035 || contactPanic > 0.02 || hammerPanic > 0.04;
+    const groundOffset = (profile.groundOffset || 0.035) * placementScale;
+
+    if (!active && racer.mode !== 'retreat' && racer.mode !== 'shelter') {
+      beginRacerRetreat(t, player);
+    } else if (active && threatened && !['alert', 'retreat', 'shelter'].includes(racer.mode)) {
+      racer.mode = 'alert';
+      clearRacerPrey(t, 2.5);
+      racer.until = t + (profile.alertDuration || 0.72);
+      racer.shelter = chooseRacerShelter(player);
+    }
+
+    if (racer.mode === 'alert' && t >= racer.until) beginRacerRetreat(t, player);
+
+    if (active && !threatened && racer.mode === 'hunt') {
+      const prey = findRacerPrey(currentZoneId, base, profile.preyLeashRadius || 15);
+      if (!prey || t >= racer.chaseUntil) {
+        clearRacerPrey(t);
+        racer.mode = 'bask';
+        racer.until = t + 2.2;
+      } else {
+        racer.preyPosition.set(prey.pose.x, prey.pose.y, prey.pose.z);
+        racer.preyDistance = prey.distance;
+      }
+    } else if (
+      active
+      && !threatened
+      && t >= racer.huntCooldownUntil
+      && ['bask', 'taste', 'slither'].includes(racer.mode)
+    ) {
+      const prey = findRacerPrey(currentZoneId, base);
+      if (prey) beginRacerHunt(prey, t);
+    }
+
+    let moving = false;
+    if (racer.mode === 'retreat') {
+      if (!racer.shelter) racer.shelter = chooseRacerShelter(player);
+      const targetX = racer.shelter?.x ?? base.x;
+      const targetZ = racer.shelter?.z ?? base.z;
+      const distance = Math.hypot(targetX - state.position.x, targetZ - state.position.z);
+      if (distance <= Math.max(profile.reach || 0.16, 0.24) || t >= racer.until) {
+        settleRacerInShelter(t, base);
+      } else {
+        moving = stepRacerOnGround(base, currentZoneId, targetX, targetZ, profile.fleeSpeed || 1.38, dt);
+        if (!moving && t - racer.lastBlockedAt > 0.45) {
+          racer.lastBlockedAt = t;
+          if (distance < 0.55) settleRacerInShelter(t, base);
+          else racer.shelter = chooseRacerShelter(player);
+        }
+      }
+    } else if (racer.mode === 'hunt') {
+      const strikeDistance = profile.preyStrikeRadius || 0.62;
+      if (racer.preyDistance <= strikeDistance) {
+        beginRacerPreyStrike(t, currentZoneId);
+      } else {
+        moving = stepRacerOnGround(
+          base,
+          currentZoneId,
+          racer.preyPosition.x,
+          racer.preyPosition.z,
+          profile.huntSpeed || 0.72,
+          dt,
+        );
+        racer.preyDistance = Math.hypot(
+          racer.preyPosition.x - state.position.x,
+          racer.preyPosition.z - state.position.z,
+        );
+        if (!moving && t - racer.lastBlockedAt > 0.7) {
+          racer.lastBlockedAt = t;
+          clearRacerPrey(t);
+          racer.mode = 'bask';
+          racer.until = t + 2.2;
+        }
+      }
+    } else if (racer.mode === 'slither') {
+      const targetX = base.x + racer.targetOffset.x;
+      const targetZ = base.z + racer.targetOffset.y;
+      if (racer.targetOffset.distanceTo(offset) <= (profile.reach || 0.16)) {
+        racer.mode = 'bask';
+        racer.until = t + racerRange(profile.baskMin || 4.5, profile.baskMax || 9.5, 1201);
+      } else {
+        moving = stepRacerOnGround(base, currentZoneId, targetX, targetZ, profile.walkSpeed || 0.42, dt);
+        if (!moving && t - racer.lastBlockedAt > 0.6) {
+          racer.lastBlockedAt = t;
+          chooseRacerGroundTarget(base, currentZoneId, t + 0.73);
+        }
+      }
+    } else {
+      const x = base.x + offset.x;
+      const z = base.z + offset.y;
+      state.position.set(x, terrainHeight(x, z, currentZoneId) + groundOffset, z);
+    }
+
+    if (active && !threatened) {
+      if (racer.mode === 'shelter' && t >= racer.until) {
+        racer.mode = 'bask';
+        racer.shelter = null;
+        offset.set(state.position.x - base.x, state.position.z - base.z);
+        racer.until = t + racerRange(profile.baskMin || 4.5, profile.baskMax || 9.5, 1301);
+      } else if (racer.mode === 'bask' && t >= racer.until) {
+        racer.mode = 'taste';
+        racer.until = t + (profile.tasteDuration || 1.8);
+      } else if (racer.mode === 'taste' && t >= racer.until) {
+        if (racer.cycle % 2 === 0) {
+          racer.mode = 'strike';
+          racer.strikeWasHunt = false;
+          racer.until = t + (profile.strikeDuration || 0.58);
+        } else if (chooseRacerGroundTarget(base, currentZoneId, t)) {
+          racer.mode = 'slither';
+        } else {
+          racer.mode = 'bask';
+          racer.until = t + 2;
+        }
+        racer.cycle += 1;
+      } else if (racer.mode === 'strike' && t >= racer.until) {
+        if (racer.strikeWasHunt) {
+          racer.strikeWasHunt = false;
+          clearRacerPrey(t);
+          racer.mode = 'bask';
+          racer.until = t + 2.8;
+        } else if (chooseRacerGroundTarget(base, currentZoneId, t)) {
+          racer.mode = 'slither';
+        } else {
+          racer.mode = 'bask';
+          racer.until = t + 2;
+        }
+      }
+    }
+
+    state.pitch = 0;
+    state.roll = 0;
+    state.airborne = false;
+    const clipByMode = {
+      bask: profile.idleClip,
+      taste: profile.tasteClip,
+      slither: profile.walkClip,
+      hunt: profile.walkClip,
+      alert: profile.alertClip,
+      strike: profile.strikeClip,
+      retreat: profile.runClip,
+      shelter: profile.shelterClip,
+    };
+    state.animation = animationRequest(clipByMode[racer.mode] || profile.idleClip, moving ? 1 : 0.72, 0.16);
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      baseX: base.x,
+      baseZ: base.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving,
+      panic,
+      airborne: false,
+      mode: racer.mode,
+      active,
+      hunting: racer.mode === 'taste' || racer.mode === 'hunt' || racer.mode === 'strike',
+      preyActorId: racer.preyActorId,
+      preyDistance: Number.isFinite(racer.preyDistance) ? racer.preyDistance : null,
+      shelterId: racer.shelter?.id || null,
+      shelterSurface: racer.shelter?.surface || null,
+      availableShelters: racer.shelters.length,
+      timeOfDay,
     };
     return { ok: true, reason: 'updated', state };
   }
@@ -1630,7 +2743,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         contactThreat.dirZ = awayZ / length;
       }
     },
-    update({ basePosition: base, zoneId: currentZoneId, playerPosition, elapsedTime, delta, paused = false }) {
+    update({ basePosition: base, zoneId: currentZoneId, playerPosition, elapsedTime, delta, timeOfDay = 12, paused = false }) {
       if (!profile || !habitat) return { ok: false, reason: 'inactive' };
       if (paused) return { ok: true, reason: 'paused', state };
       if (
@@ -1699,6 +2812,50 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         ? THREE.MathUtils.clamp((contactThreat.radius - contactDistance) / Math.max(0.01, contactThreat.radius * 0.65), 0, 1) * contactFade * Math.max(0.35, contactThreat.intensity || 1)
         : 0;
       const panic = Math.max(playerPanic, hammerPanic, contactPanic, startleFade);
+
+      if (profile.controller === 'racer') {
+        return updateRacer({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          timeOfDay,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
+
+      if (profile.controller === 'owl') {
+        return updateOwl({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          timeOfDay,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
+
+      if (profile.controller === 'raptor') {
+        return updateRaptor({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
 
       if (profile.controller === 'shorebird') {
         return updateShorebird({

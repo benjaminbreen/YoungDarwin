@@ -20,6 +20,8 @@ import {
   buildStandardDryGrassPatchItems,
   createStandardDryGrassPatchLayer,
 } from './standardGrass';
+import { SICYOS_VILLOSUS_SPECIES } from './floraSpecies';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
 
 const NATURE = '/assets/models/nature/';
 
@@ -242,6 +244,54 @@ function buildSurfaceLitter() {
   ];
 }
 
+function buildSicyosInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'watkins-creek-sicyos-villosus-reconstruction',
+    zoneId: WATKINS_CREEK,
+    species: SICYOS_VILLOSUS_SPECIES,
+    runtime: 'sicyos-villosus',
+    seed: 797,
+    count: 1,
+    bounds: { minX: -46, maxX: 46, minZ: -16, maxZ: 31 },
+    habitatAt: ({ biome, x, z }) => {
+      const creek = watkinsCreekChannelInfo(x, z);
+      const path = watkinsCreekPathInfo(x, z);
+      const moisture = watkinsCreekMoisture(x, z);
+      const basalt = watkinsCreekBasaltExposure(x, z);
+      const suitableBiome = biome === 'green-creek-meadow'
+        || biome === 'riparian-creek-bank'
+        || biome === 'dry-highland-grass';
+      const pathEdge = path.distance > path.width * 1.18 && path.distance < path.width * 8.2;
+      return {
+        moisture,
+        canopy: clamp01(0.2 + creek.riparian * 0.5),
+        exposure: clamp01(0.68 - creek.valley * 0.3 - moisture * 0.15),
+        disturbance: clamp01(path.shoulder * 0.26),
+        salinity: 0,
+        rockiness: basalt,
+        biomeSuitability: suitableBiome ? 1 : 0,
+        localSuitability: pathEdge ? clamp01(0.48 + moisture * 0.34 + creek.riparian * 0.18) : 0,
+        excluded: !suitableBiome
+          || !pathEdge
+          || creek.water > 0.04
+          || creek.shoreDistance < 2.6
+          || creek.shoreDistance > 9.5
+          || moisture < 0.3
+          || moisture > 0.86
+          || basalt > 0.7
+          || !clearFordSightline(x, z, 8),
+      };
+    },
+    placement: {
+      patchCount: 1,
+      patchRadius: [3.2, 4.6],
+      minItemSeparation: 7,
+      maxGrade: 0.56,
+    },
+    siteFromItem: item => ({ flowering: 0.5 + item.tone * 0.34 }),
+  })];
+}
+
 export function buildWatkinsCreekEcology() {
   return {
     zoneId: WATKINS_CREEK,
@@ -286,6 +336,7 @@ export function buildWatkinsCreekEcology() {
     dryGrassPatches: [buildGrass()],
     flora: buildFlora(),
     proceduralFlora: [],
+    interactiveFlora: buildSicyosInteractiveFlora(),
     rocks: getWatkinsCreekRocks(),
     surfaceLitter: buildSurfaceLitter(),
     props: [],

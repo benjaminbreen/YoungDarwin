@@ -12,6 +12,7 @@ import { modelAssetProp } from './ecologyAssetTransforms';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
 import { LAVA_CACTUS_SPECIES } from './floraSpecies';
 import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
+import { getCliffSurfProfile } from '../cliffSurfProfiles';
 
 const NATURE = '/assets/models/nature/';
 
@@ -259,6 +260,7 @@ export function buildDesolateOutcropEcology() {
 
   return {
     zoneId: DESOLATE_OUTCROP,
+    cliffSurf: getCliffSurfProfile(DESOLATE_OUTCROP),
     flora: buildFlora(),
     interactiveFlora: buildInteractiveFlora(),
     surfaceLitter: buildSurfaceLitter(),

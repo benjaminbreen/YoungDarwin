@@ -11,6 +11,8 @@ import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
+import { findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
+import { getRuntimeObstacles } from '../../world/obstacles';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -381,7 +383,7 @@ export function updatePlayerInteractions({
   }
   if (autoTransitionStarted) {
     lastInteractRef.current = keys.interact || touch.interact;
-    lastExamineRef.current = keys.examine || touch.inspect;
+    lastExamineRef.current = keys.examine || touch.fieldAction;
     lastCameraRef.current = keys.camera;
     return;
   }
@@ -392,6 +394,7 @@ export function updatePlayerInteractions({
   const collectedSpecimenActorIds = new Set(storeState.collectedSpecimenActorIds || []);
   if (allowSpecimenInteractions) {
     for (const specimen of zoneSpecimens) {
+      if (!specimen?.id) continue;
       const actorId = specimen.instanceId || specimen.id;
       if (collectedSpecimenActorIds.has(actorId)) continue;
       const runtime = specimenRuntimePositions[actorId];
@@ -410,6 +413,68 @@ export function updatePlayerInteractions({
   }
   if (storeState.nearbySpecimenId !== nearest) {
     setNearbySpecimen(nearest);
+  }
+
+  const fieldActionProbe = stateRef.current.fieldActionProbe || { lastAt: -10 };
+  stateRef.current.fieldActionProbe = fieldActionProbe;
+  if (interactionNow - fieldActionProbe.lastAt >= 0.14) {
+    fieldActionProbe.lastAt = interactionNow;
+    const currentState = useThreeGameStore.getState();
+    const nearbySpecimen = nearest
+      ? zoneSpecimens.find(item => item && ((item.instanceId || item.id) === nearest || item.id === nearest))
+      : null;
+    let fieldTarget = nearbySpecimen ? {
+      id: `specimen:${nearbySpecimen.instanceId || nearbySpecimen.id}`,
+      actorId: nearbySpecimen.instanceId || nearbySpecimen.id,
+      typeId: nearbySpecimen.id,
+      kind: 'specimen',
+      category: nearbySpecimen.ontology || 'Specimen',
+      name: nearbySpecimen.name,
+      radius: nearbySpecimen.examineRadius || 0.5,
+      focus: runtimeSpecimenPosition(nearbySpecimen, specimenRuntimePositions, position.y),
+    } : null;
+    if (!fieldTarget && currentState.nearbyItem) {
+      fieldTarget = {
+        id: `item:${currentState.nearbyItem.actorId || currentState.nearbyItem.typeId}`,
+        actorId: currentState.nearbyItem.actorId,
+        typeId: currentState.nearbyItem.typeId,
+        itemTypeId: currentState.nearbyItem.typeId,
+        kind: 'item',
+        category: 'Item',
+        name: currentState.nearbyItem.name || 'field object',
+        radius: 0.3,
+        focus: currentState.nearbyItem.focus,
+      };
+    }
+    if (!fieldTarget && currentState.carryPrompt && currentState.carryPrompt.mode !== 'drop') {
+      const reach = Math.max(0.7, Number(currentState.carryPrompt?.distance) || 0.8);
+      fieldTarget = {
+        id: `prop:${currentState.carryPrompt.id}`,
+        actorId: currentState.carryPrompt.id,
+        typeId: `ambient-prop:${currentState.carryPrompt.id}`,
+        kind: 'prop',
+        category: 'Object',
+        name: currentState.carryPrompt.label || 'field object',
+        radius: 0.45,
+        focus: {
+          x: position.x + facing.x * reach,
+          y: position.y + 0.55,
+          z: position.z + facing.z * reach,
+        },
+      };
+    }
+    if (!fieldTarget) {
+      fieldTarget = findAmbientFieldTarget({
+        zoneId: currentZoneId,
+        position,
+        facing,
+        obstacles: getRuntimeObstacles(currentZoneId, currentState.pushableObstacleOffsets),
+      });
+    }
+    const examined = Boolean(fieldTarget?.typeId && currentState.examinedTypeIds?.includes(fieldTarget.typeId));
+    currentState.setFieldAction?.(allowSpecimenInteractions
+      ? resolveFieldAction({ toolId: currentState.activeToolId, target: fieldTarget, examined })
+      : null);
   }
 
   const startSpecimenCollection = (currentState, specimen) => {
@@ -474,30 +539,41 @@ export function updatePlayerInteractions({
     return true;
   };
 
-  // Enter (or the mobile/desktop Examine button, which pulses touch.inspect)
-  // examines first, then becomes the collection command once that type has a
-  // saved field note.
-  const examinePressed = keys.examine || touch.inspect;
+  // Enter is the contextual field-action command. Hands observe or collect;
+  // equipped tools act on the attended subject. With no nearby subject it
+  // enters the opt-in observation lens, where the player may click/tap any
+  // semantically tagged piece of scenery.
+  const examinePressed = keys.examine || touch.fieldAction;
   if (constraintLocksInteractions && examinePressed && !lastExamineRef.current) {
     useThreeGameStore.getState().reportConstraintBlockedAction?.();
   } else if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
     const currentState = useThreeGameStore.getState();
-    const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
-    const specimen = specimenId
-      ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
+    if (currentState.contextPrompt?.keyLabel === '⏎' || currentState.contextPrompt?.keyLabel === 'Enter') {
+      currentState.acknowledgeContextPrompt?.(currentState.contextPrompt.source);
+    }
+    const fieldAction = currentState.fieldAction;
+    const target = fieldAction?.target;
+    const specimen = target?.kind === 'specimen'
+      ? zoneSpecimens.find(item => item && ((item.instanceId || item.id) === target.actorId || item.id === target.typeId))
       : null;
-    if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
-      setNearbySpecimen(null);
-    } else if (specimen && currentState.examinedTypeIds?.includes(specimen.id)) {
+    if (!fieldAction) {
+      currentState.toggleObservationMode?.();
+    } else if (fieldAction.kind === 'collect' && specimen) {
       startSpecimenCollection(currentState, specimen);
-    } else if (specimenId && !currentState.examineSession) {
-      openExamine(specimenId);
-    } else if (currentState.nearbyItem && !currentState.examineSession) {
-      openExamine({
-        itemTypeId: currentState.nearbyItem.typeId,
-        actorId: currentState.nearbyItem.actorId,
-        focus: currentState.nearbyItem.focus,
+    } else if (fieldAction.kind === 'observe' && !currentState.examineSession) {
+      if (target.kind === 'specimen') openExamine(target.actorId);
+      else if (target.itemTypeId) {
+        openExamine({ itemTypeId: target.itemTypeId, actorId: target.actorId, focus: target.focus });
+      } else openExamine({ fieldTarget: target });
+    } else if (fieldAction.kind === 'tool') {
+      emitPropEvent('field-action-attempt', {
+        actionId: fieldAction.id,
+        tool: fieldAction.toolId,
+        target,
+        position: { x: position.x, y: position.y, z: position.z },
+        facing: { x: facing.x, y: 0, z: facing.z },
       });
+      triggerToolUse(fieldAction.toolId);
     }
   }
   lastExamineRef.current = examinePressed;
@@ -510,9 +586,12 @@ export function updatePlayerInteractions({
       lastCameraRef.current = keys.camera;
       return;
     }
+    if (currentState.contextPrompt?.keyLabel === 'E') {
+      currentState.acknowledgeContextPrompt?.(currentState.contextPrompt.source);
+    }
     const specimenId = currentState.nearbySpecimenId || currentState.selectedSpecimenId;
     const specimen = specimenId
-      ? zoneSpecimens.find(item => (item.instanceId || item.id) === specimenId || item.id === specimenId)
+      ? zoneSpecimens.find(item => item && ((item.instanceId || item.id) === specimenId || item.id === specimenId))
       : null;
     if (currentState.carriedObjectId) {
       // A zero-distance drop prompt must win over books, furniture, NPCs, and

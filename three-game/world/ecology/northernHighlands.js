@@ -21,6 +21,12 @@ import {
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
 import { buildProceduralFloraLayer } from './proceduralFlora';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
+import {
+  DELILIA_INELEGANS_SPECIES,
+  LECOCARPUS_PINNATIFIDUS_SPECIES,
+  SICYOS_VILLOSUS_SPECIES,
+} from './floraSpecies';
 import {
   buildStandardDryPathGrassPatchItems,
   createStandardDryGrassPatchLayer,
@@ -311,6 +317,142 @@ function buildSurfaceLitter() {
   })];
 }
 
+function buildLostPlantInteractiveFlora() {
+  const sicyos = buildProceduralInteractiveFloraLayer({
+    id: 'northern-highlands-sicyos-villosus-reconstruction',
+    zoneId: NORTHERN_HIGHLANDS,
+    species: SICYOS_VILLOSUS_SPECIES,
+    runtime: 'sicyos-villosus',
+    seed: 661,
+    count: 1,
+    bounds: { minX: -45, maxX: 45, minZ: -38, maxZ: 43 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = northernHighlandsPathInfo(x, z);
+      const moisture = northernHighlandsMoisture(x, z);
+      const scrub = northernHighlandsScrubStrength(x, z);
+      const basalt = northernHighlandsBasaltExposure(x, z);
+      const suitableBiome = biome === 'green-transition-grass'
+        || biome === 'highlands-thorn-scrub'
+        || biome === 'transition-moist-hollow';
+      return {
+        moisture,
+        canopy: clamp01(0.1 + scrub * 0.58),
+        exposure: clamp01(0.78 - scrub * 0.36 - moisture * 0.2),
+        disturbance: clamp01(path.path * 0.44 + path.shoulder * 0.2),
+        salinity: 0,
+        rockiness: basalt,
+        biomeSuitability: suitableBiome ? 1 : 0,
+        localSuitability: clamp01(0.42 + moisture * 0.36 + scrub * 0.18),
+        excluded: !suitableBiome
+          || !offWorkedGround(biome, x, z, 1.35)
+          || moisture < 0.42
+          || moisture > 0.82
+          || basalt > 0.68
+          || northernHighlandsGardenInfo(x, z).mask > 0.03
+          || cactusClearance(x, z) < 2.8,
+      };
+    },
+    placement: {
+      patchCount: 1,
+      patchRadius: [3.4, 4.8],
+      minItemSeparation: 7,
+      maxGrade: 0.58,
+    },
+    siteFromItem: item => ({ flowering: 0.54 + item.tone * 0.32 }),
+  });
+  const delilia = buildProceduralInteractiveFloraLayer({
+    id: 'northern-highlands-delilia-inelegans-reconstruction',
+    zoneId: NORTHERN_HIGHLANDS,
+    species: DELILIA_INELEGANS_SPECIES,
+    runtime: 'delilia-inelegans',
+    seed: 673,
+    count: 1,
+    bounds: { minX: -44, maxX: 44, minZ: -37, maxZ: 42 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = northernHighlandsPathInfo(x, z);
+      const moisture = northernHighlandsMoisture(x, z);
+      const scrub = northernHighlandsScrubStrength(x, z);
+      const basalt = northernHighlandsBasaltExposure(x, z);
+      const suitableBiome = biome === 'green-transition-grass'
+        || biome === 'open-seed-grass'
+        || biome === 'transition-moist-hollow';
+      const nearestSicyos = sicyos.sites.reduce((nearest, site) => (
+        Math.min(nearest, Math.hypot(x - site.x, z - site.z))
+      ), Infinity);
+      return {
+        moisture,
+        canopy: clamp01(0.04 + scrub * 0.5),
+        exposure: clamp01(0.86 - scrub * 0.34 - moisture * 0.18),
+        disturbance: clamp01(path.path * 0.48 + path.shoulder * 0.22),
+        salinity: 0,
+        rockiness: basalt,
+        biomeSuitability: suitableBiome ? 1 : 0,
+        localSuitability: clamp01(0.5 + moisture * 0.22 + path.shoulder * 0.18),
+        excluded: !suitableBiome
+          || !offWorkedGround(biome, x, z, 1.28)
+          || moisture < 0.28
+          || moisture > 0.72
+          || scrub > 0.68
+          || basalt > 0.66
+          || northernHighlandsGardenInfo(x, z).mask > 0.03
+          || cactusClearance(x, z) < 2.5
+          || nearestSicyos < 5,
+      };
+    },
+    placement: {
+      patchCount: 1,
+      patchRadius: [1.5, 2.4],
+      minItemSeparation: 5,
+      maxGrade: 0.58,
+    },
+    siteFromItem: item => ({ flowering: 0.76 + item.tone * 0.2 }),
+  });
+  const lecocarpus = buildProceduralInteractiveFloraLayer({
+    id: 'northern-highlands-lecocarpus-pinnatifidus',
+    zoneId: NORTHERN_HIGHLANDS,
+    species: LECOCARPUS_PINNATIFIDUS_SPECIES,
+    runtime: 'lecocarpus-pinnatifidus',
+    seed: 683,
+    count: 1,
+    bounds: { minX: -45, maxX: 45, minZ: -39, maxZ: 43 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = northernHighlandsPathInfo(x, z);
+      const moisture = northernHighlandsMoisture(x, z);
+      const scrub = northernHighlandsScrubStrength(x, z);
+      const basalt = northernHighlandsBasaltExposure(x, z);
+      const suitableBiome = biome === 'open-seed-grass'
+        || biome === 'green-transition-grass'
+        || biome === 'highlands-thorn-scrub';
+      const lostPlantSites = [...sicyos.sites, ...delilia.sites];
+      const nearestLostPlant = lostPlantSites.reduce((nearest, site) => (
+        Math.min(nearest, Math.hypot(x - site.x, z - site.z))
+      ), Infinity);
+      return {
+        moisture,
+        canopy: clamp01(0.04 + scrub * 0.44),
+        exposure: clamp01(0.9 - scrub * 0.34 - moisture * 0.14),
+        disturbance: clamp01(path.path * 0.6 + path.shoulder * 0.24),
+        salinity: 0,
+        rockiness: basalt,
+        biomeSuitability: suitableBiome ? 1 : 0,
+        localSuitability: clamp01(0.52 + scrub * 0.18 + basalt * 0.12),
+        excluded: !suitableBiome
+          || !offWorkedGround(biome, x, z, 1.3)
+          || moisture < 0.16
+          || moisture > 0.58
+          || scrub > 0.7
+          || basalt > 0.76
+          || northernHighlandsGardenInfo(x, z).mask > 0.03
+          || cactusClearance(x, z) < 2.6
+          || nearestLostPlant < 5.5,
+      };
+    },
+    placement: { patchCount: 1, patchRadius: [2.4, 4], minItemSeparation: 7, maxGrade: 0.62 },
+    siteFromItem: item => ({ flowering: 0.7 + item.tone * 0.24 }),
+  });
+  return [sicyos, delilia, lecocarpus];
+}
+
 export function buildNorthernHighlandsEcology() {
   const flora = buildFlora();
   return {
@@ -319,6 +461,7 @@ export function buildNorthernHighlandsEcology() {
     dryGrassPatches: [buildGrass()],
     flora,
     proceduralFlora: buildProceduralFlora(flora),
+    interactiveFlora: buildLostPlantInteractiveFlora(),
     rocks: getNorthernHighlandsRocks(),
     surfaceLitter: buildSurfaceLitter(),
     crops: buildNorthernHighlandsCropFields(),

@@ -34,6 +34,8 @@ const BLINK_OVERRIDE = argValue('--blink');
 const CAMERA_ORBIT_X = signedNumberOption('--camera-orbit-x', 'THREE_SCREENSHOT_CAMERA_ORBIT_X', 0);
 const CAMERA_ORBIT_Y = signedNumberOption('--camera-orbit-y', 'THREE_SCREENSHOT_CAMERA_ORBIT_Y', 0);
 const CAMERA_ZOOM_STEPS = numberOption('--camera-zoom-steps', 'THREE_SCREENSHOT_CAMERA_ZOOM_STEPS', 0);
+const CAMERA_ZOOM_OUT_STEPS = numberOption('--camera-zoom-out-steps', 'THREE_SCREENSHOT_CAMERA_ZOOM_OUT_STEPS', 0);
+const REQUESTED_CAMERA_MODE = argValue('--camera-mode');
 const EXAMINE_ACTOR = argValue('--examine');
 const OPEN_SYMS_FIELD_CASE = process.argv.includes('--open-syms-field-case');
 const REQUESTED_ZONE = argValue('--zone') || argValue('--region');
@@ -146,7 +148,8 @@ function screenshotName(viewportName) {
   const explicit = safeFilePart(argValue('--name'));
   const zone = safeFilePart(argValue('--zone') || argValue('--region'));
   const quality = safeFilePart(argValue('--quality'));
-  const prefix = explicit || [zone, quality].filter(Boolean).join('-');
+  const cameraMode = safeFilePart(REQUESTED_CAMERA_MODE);
+  const prefix = explicit || [zone, quality, cameraMode].filter(Boolean).join('-');
   return prefix ? `${prefix}-${viewportName}.png` : `${viewportName}.png`;
 }
 
@@ -608,9 +611,12 @@ async function waitForFreshVisualFrames(page, timeoutMs = BOOT_TIMEOUT_MS) {
 }
 
 async function adjustGameplayCamera(page) {
-  if (CAMERA_ORBIT_X === 0 && CAMERA_ORBIT_Y === 0 && CAMERA_ZOOM_STEPS === 0) return;
+  if (CAMERA_ORBIT_X === 0
+    && CAMERA_ORBIT_Y === 0
+    && CAMERA_ZOOM_STEPS === 0
+    && CAMERA_ZOOM_OUT_STEPS === 0) return;
 
-  await page.evaluate(({ orbitX, orbitY, zoomSteps }) => {
+  await page.evaluate(({ orbitX, orbitY, zoomSteps, zoomOutSteps }) => {
     const canvas = document.querySelector('canvas');
     if (!canvas) throw new Error('Cannot adjust screenshot camera: missing canvas.');
     const rect = canvas.getBoundingClientRect();
@@ -672,10 +678,20 @@ async function adjustGameplayCamera(page) {
         deltaY: -120,
       }));
     }
+    for (let step = 0; step < zoomOutSteps; step += 1) {
+      canvas.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        deltaY: 120,
+      }));
+    }
   }, {
     orbitX: CAMERA_ORBIT_X,
     orbitY: CAMERA_ORBIT_Y,
     zoomSteps: CAMERA_ZOOM_STEPS,
+    zoomOutSteps: CAMERA_ZOOM_OUT_STEPS,
   });
   await page.waitForTimeout(500);
 }
@@ -751,6 +767,22 @@ async function run() {
     });
     await clickNewExpeditionFlow(page, errors);
     const boot = await waitForReadyCanvas(page, errors);
+    if (REQUESTED_CAMERA_MODE) {
+      await withFailureArtifacts(page, 'set requested camera mode', errors, async () => {
+        await page.waitForFunction(
+          () => typeof window.__darwinE2E?.setViewMode === 'function',
+          null,
+          { timeout: BOOT_TIMEOUT_MS },
+        );
+        const state = await page.evaluate(viewMode => (
+          window.__darwinE2E.setViewMode(viewMode)
+        ), REQUESTED_CAMERA_MODE);
+        if (state.viewMode !== REQUESTED_CAMERA_MODE) {
+          throw new Error(`Unsupported camera mode "${REQUESTED_CAMERA_MODE}".`);
+        }
+        await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
+      });
+    }
     if (REQUESTED_TOOL) {
       await withFailureArtifacts(page, 'equip requested tool', errors, async () => {
         await page.waitForFunction(() => Boolean(window.__darwinE2E), null, { timeout: BOOT_TIMEOUT_MS });

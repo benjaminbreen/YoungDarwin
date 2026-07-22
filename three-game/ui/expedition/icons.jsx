@@ -116,6 +116,21 @@ export function MapIcon({ className = '' }) {
   );
 }
 
+export function SoundIcon({ className = '', muted = false }) {
+  return (
+    <Svg className={className} strokeWidth={1.5}>
+      <path d="M4 10 H7.2 L11.5 6.2 V17.8 L7.2 14 H4 Z" />
+      {!muted && (
+        <>
+          <path d="M14.2 9 C15.1 9.8 15.1 14.2 14.2 15" opacity="0.72" />
+          <path d="M17 6.7 C19.4 9.4 19.4 14.6 17 17.3" />
+        </>
+      )}
+      {muted && <path d="M14.3 9.2 L19.1 14 M19.1 9.2 L14.3 14" />}
+    </Svg>
+  );
+}
+
 export function NorthArrowIcon({ className = '' }) {
   return (
     <Svg className={className} strokeWidth={1.3}>

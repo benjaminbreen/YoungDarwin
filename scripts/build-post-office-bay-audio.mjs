@@ -29,7 +29,7 @@ function runFfmpeg(args) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-function buildLoop({ source, output, start, duration, overlap, filters, quality = '4' }) {
+function buildLoop({ source, output, start, duration, overlap, filters, bitrate = '160k' }) {
   const bodyEnd = duration - overlap;
   const filterGraph = [
     `[0:a]atrim=start=${start}:duration=${duration},asetpts=PTS-STARTPTS,${filters},asplit=3[whole][headSource][tailSource]`,
@@ -44,8 +44,8 @@ function buildLoop({ source, output, start, duration, overlap, filters, quality 
     '-filter_complex', filterGraph,
     '-map', '[out]',
     '-ar', '48000',
-    '-c:a', 'libvorbis',
-    '-q:a', quality,
+    '-c:a', 'libmp3lame',
+    '-b:a', bitrate,
     path.join(outputDir, output),
   ]);
 }
@@ -89,22 +89,34 @@ function buildOneShots({ source, prefix, onsets, preRoll, duration, filters, lou
 // waveform discontinuity or a conspicuously recurring wave crest.
 buildLoop({
   source: sources.surf,
-  output: 'shore-surf.ogg',
+  output: 'shore-surf.mp3',
   start: 22,
   duration: 84,
   overlap: 7,
   filters: 'highpass=f=48,lowpass=f=15000,volume=-5.5dB,alimiter=limit=0.86',
-  quality: '5',
+  bitrate: '192k',
+});
+
+// Occasional close breakers add a readable foreground crest near a directly
+// visible shore; the continuous bed still carries the broader coast.
+buildOneShots({
+  source: sources.surf,
+  prefix: 'wave-break',
+  onsets: [24.4, 34.8, 47.2, 63.7, 79.1, 96.4],
+  preRoll: 0.38,
+  duration: 3.2,
+  filters: 'highpass=f=42,lowpass=f=14500',
+  loudness: -24,
 });
 
 buildLoop({
   source: sources.wind,
-  output: 'shore-wind.ogg',
+  output: 'shore-wind.mp3',
   start: 0.6,
   duration: 28,
   overlap: 3,
   filters: 'highpass=f=90,lowpass=f=11000,volume=5dB,alimiter=limit=0.82',
-  quality: '4',
+  bitrate: '160k',
 });
 
 for (const family of ['grit', 'sand', 'water']) {

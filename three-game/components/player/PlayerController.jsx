@@ -31,6 +31,7 @@ import { pushSpecimenStimulus } from '../../world/specimenRuntime';
 import { resolvePlayerNpcCollision } from '../../npcs/npcCollision';
 import { emitNpcContact } from '../../world/npcRuntime';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
+import { cliffWaterMotionAt } from '../../world/cliffSurfProfiles';
 import {
   CHARACTER_CONTROLLER_CONFIG,
   useKinematicCharacterController,
@@ -69,7 +70,11 @@ import { updatePlayerEquipmentState } from './playerEquipmentState';
 import { shotgunAimState, resetShotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { setWorldTimeTarget } from '../../world/worldTime';
-import { beginClimbMotion as beginClimbMotionState, boulderTraversalProfile } from './playerTraversalMotion';
+import {
+  beginClimbMotion as beginClimbMotionState,
+  boulderTraversalProfile,
+  findClimbOpportunity,
+} from './playerTraversalMotion';
 import { resolvePlayerLanding, updatePlayerJumpInputAndGravity } from './playerAirborneMotion';
 import { PlayerAvatarModel } from './PlayerAvatarModel';
 import { useFootstepEffects } from './useFootstepEffects';
@@ -282,6 +287,7 @@ export function PlayerController({
   const swimState = useRef({ active: false, enteredAt: 0 });
   const swimSink = useRef(SWIM.bodySink);
   const swimFatigue = useRef(0);
+  const lastCliffWaveBuffetAt = useRef(-Infinity);
   const flightState = useRef({ active: false, phase: 'grounded', phaseUntil: 0, lastFlapAt: -10, bankYaw: null });
   // Accumulates drowning damage so the store isn't hit every frame.
   const drownDamage = useRef(0);
@@ -429,6 +435,7 @@ export function PlayerController({
     lockMovementUntil: 0,
     recoverAction: null,
     climbMotion: null,
+    climbPromptProbe: { lastAt: -10, published: false },
     traverseMotion: null,
     rollMotion: null,
     turnMotion: null,
@@ -463,6 +470,9 @@ export function PlayerController({
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const setPhysicsDebug = useThreeGameStore(state => state.setPhysicsDebug);
   const setEdgePrompt = useThreeGameStore(state => state.setEdgePrompt);
+  const publishContextPrompt = useThreeGameStore(state => state.publishContextPrompt);
+  const clearContextPrompt = useThreeGameStore(state => state.clearContextPrompt);
+  const acknowledgeContextPrompt = useThreeGameStore(state => state.acknowledgeContextPrompt);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const movePushableObstacle = useThreeGameStore(state => state.movePushableObstacle);
   const pushableObstacleOffsets = useThreeGameStore(state => state.pushableObstacleOffsets);
@@ -643,9 +653,10 @@ export function PlayerController({
       direction: { x: direction.x || 0, y: direction.y || 0, z: direction.z || 0 },
       biome,
       surfaceProfile,
-      source: 'darwin',
+      source: playableMode.kind === 'human' ? 'darwin' : playableMode.id,
+      playableModeId: playableMode.id,
     });
-  }, [currentZoneId, frameScratch.footstepPosition]);
+  }, [currentZoneId, frameScratch.footstepPosition, playableMode.id, playableMode.kind]);
 
   useEffect(() => {
     const landingHandler = event => emitPlayerDustEvent(event, 'landing');
@@ -829,7 +840,7 @@ export function PlayerController({
     swimConfig.bodySink,
   ]);
 
-  useFrame((_, rawDelta) => {
+  useFrame((frame, rawDelta) => {
     if (!group.current) return;
     // Clear stale intent first. Frames that reach the character move publish
     // the pre-collision velocity below; early-return/paused frames stay zero.
@@ -1623,6 +1634,8 @@ export function PlayerController({
       idleFidget.current.nextAt = 0;
     }
     const beginClimbMotion = (clip, end, heightDelta, targetYaw, durationScale = 1, options = {}) => {
+      stateRef.current.climbPromptProbe.published = false;
+      acknowledgeContextPrompt('traversal');
       beginClimbMotionState({
         group,
         stateRef,
@@ -1639,9 +1652,67 @@ export function PlayerController({
         options,
       });
     };
-    if (playerConfig.canClimb !== false && !carriedObjectId && climbPressed && !lastButtons.current.climb && !stateRef.current.crouching && !movementLocked && !swimState.current.active) {
-      const target = collisionAdapter.findClimbTarget(group.current.position, facing.current);
-      if (target) {
+    const climbOpportunityEligible = Boolean(
+      isDarwinMode
+      && playerConfig.canClimb !== false
+      && !carriedObjectId
+      && !stateRef.current.crouching
+      && !movementLocked
+      && !swimState.current.active,
+    );
+    let climbOpportunity = null;
+    let climbOpportunitySampled = false;
+    const sampleClimbOpportunity = () => {
+      if (!climbOpportunitySampled && climbOpportunityEligible) {
+        climbOpportunitySampled = true;
+        climbOpportunity = findClimbOpportunity({
+          position: group.current.position,
+          facing: facing.current,
+          collisionAdapter,
+          terrainProfile: collisionAdapter.terrainClimbProfile,
+        });
+      }
+      return climbOpportunity;
+    };
+    const climbPromptProbe = stateRef.current.climbPromptProbe;
+    if (!climbOpportunityEligible) {
+      if (climbPromptProbe.published) {
+        climbPromptProbe.published = false;
+        clearContextPrompt('traversal');
+      }
+    } else if (now - climbPromptProbe.lastAt >= 0.14) {
+      climbPromptProbe.lastAt = now;
+      const opportunity = sampleClimbOpportunity();
+      if (opportunity) {
+        const obstacleKind = opportunity.target?.obstacle?.kind;
+        const label = opportunity.kind === 'terrain'
+          ? (opportunity.heightDelta > 2.4 ? 'Climb cliff' : 'Climb ledge')
+          : obstacleKind === 'rock' || obstacleKind === 'boulder'
+            ? 'Climb boulder'
+            : obstacleKind === 'tree'
+              ? 'Climb tree'
+            : 'Climb obstacle';
+        publishContextPrompt('traversal', {
+          id: `climb:${currentZoneId}:${opportunity.kind}`,
+          kind: opportunity.kind,
+          label,
+          keyLabel: 'V',
+          priority: 40,
+          dwellMs: 280,
+          repeatCooldownMs: 1250,
+          heightDelta: opportunity.heightDelta,
+          distance: opportunity.distance,
+        });
+        climbPromptProbe.published = true;
+      } else if (climbPromptProbe.published) {
+        climbPromptProbe.published = false;
+        clearContextPrompt('traversal');
+      }
+    }
+    if (climbOpportunityEligible && climbPressed && !lastButtons.current.climb) {
+      const opportunity = sampleClimbOpportunity();
+      if (opportunity?.kind === 'obstacle') {
+        const target = opportunity.target;
         const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
         const heroic = running || approachSpeed > playerConfig.walkSpeed * 1.1;
         const smallWallProfile = stateRef.current.modelAssetId === 'darwin5'
@@ -1669,6 +1740,8 @@ export function PlayerController({
       } else {
         // No climbable obstacle: scale terrain. A steep rise ahead becomes a
         // wall climb; a drop just past the toes becomes a controlled descent.
+        // Upward climbs target a stable rim rather than an arbitrary sample on
+        // the cliff face, so the same traversal works across authored regions.
         const forward = frameScratch.forwardFacing.copy(facing.current).setY(0).normalize();
         const here = group.current.position;
         const sample = (distance) => collisionAdapter.groundInfo(
@@ -1676,15 +1749,18 @@ export function PlayerController({
         );
         const climbYaw = Math.atan2(forward.x, forward.z);
         let handled = false;
-        for (const distance of [1.1, 1.7, 2.4, 3.1]) {
-          const ahead = sample(distance);
-          const rise = ahead.y - here.y;
-          if (rise >= 0.85 && rise <= 4.8) {
-            const end = frameScratch.climbEnd.clone().set(here.x + forward.x * distance, ahead.y + 0.04, here.z + forward.z * distance);
-            beginClimbMotion(rise > 2.2 ? 'climb' : 'climbingUpWall', end, rise, climbYaw, rise > 3.4 ? 1.3 : 1);
-            handled = true;
-            break;
-          }
+        const terrainClimbTarget = opportunity?.kind === 'terrain' ? opportunity.target : null;
+        if (terrainClimbTarget) {
+          const rise = terrainClimbTarget.heightDelta;
+          const durationScale = THREE.MathUtils.clamp(0.9 + rise * 0.14, 1, 2.15);
+          beginClimbMotion(
+            rise > 2.2 ? 'climb' : 'climbingUpWall',
+            terrainClimbTarget.end,
+            rise,
+            climbYaw,
+            durationScale,
+          );
+          handled = true;
         }
         if (!handled) {
           for (const distance of [0.8, 1.3, 1.9]) {
@@ -2061,6 +2137,11 @@ export function PlayerController({
         flight.bankYaw = null;
         if (grounded) {
           velocity.current.y = Math.max(velocity.current.y, flightConfig.takeoffImpulse);
+          emitPropEvent('finch-wingbeat', {
+            phase: 'takeoff',
+            intensity: 0.9,
+            position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+          });
         }
         wasAirborne.current = true;
         jumpState.current.phase = 'airborne';
@@ -2075,6 +2156,11 @@ export function PlayerController({
           // nothing; there is nowhere to land.
           flight.phase = 'landing';
           flight.phaseUntil = now + (flightConfig.landingDuration ?? 0.55);
+          emitPropEvent('finch-wingbeat', {
+            phase: 'landing',
+            intensity: 0.62,
+            position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+          });
         }
         const diveHeld = Boolean(keys.run || touch.run) && !flyHeld && flight.phase === 'cruise';
         if (flight.phase === 'landing') {
@@ -2137,6 +2223,16 @@ export function PlayerController({
             0,
             1.4,
           );
+          const activeWingbeat = flight.phase === 'takeoff' || climbHeld;
+          const wingbeatCadence = flight.phase === 'takeoff' ? 0.2 : 0.38;
+          if (activeWingbeat && now - flight.lastFlapAt >= wingbeatCadence) {
+            flight.lastFlapAt = now;
+            emitPropEvent('finch-wingbeat', {
+              phase: flight.phase === 'takeoff' ? 'takeoff' : 'climb',
+              intensity: flight.phase === 'takeoff' ? 0.84 : 0.65,
+              position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+            });
+          }
           const pitchTarget = flight.phase === 'landing'
             ? -(flightConfig.pitchAmount ?? 0.28) * 0.9
             : THREE.MathUtils.clamp(-velocity.current.y * 0.055, -flightConfig.pitchAmount, flightConfig.pitchAmount);
@@ -2278,6 +2374,50 @@ export function PlayerController({
       pendingStandingJump.current.active = false;
       stateRef.current.jumpCharging = false;
       stateRef.current.jumpChargeAmount = 0;
+    }
+
+    const cliffWaterMotion = cliffWaterMotionAt(
+      currentZoneId,
+      group.current.position.x,
+      group.current.position.z,
+      frame.clock.elapsedTime,
+    );
+    const cliffWaterImmersion = swimState.current.active
+      ? 1
+      : THREE.MathUtils.smoothstep(wadeDepth.current, 0.16, 1.05);
+    if (cliffWaterMotion && cliffWaterImmersion > 0.001 && !flightActive) {
+      // Treat the wave result as acceleration so the player retains steering
+      // authority while a crest can still carry him several feet shoreward.
+      // Collision resolution below remains authoritative near the cliff.
+      velocity.current.x += cliffWaterMotion.x * cliffWaterImmersion * delta;
+      velocity.current.z += cliffWaterMotion.z * cliffWaterImmersion * delta;
+      const roughWaterSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+      const roughWaterCap = swimState.current.active
+        ? swimConfig.sprintSpeed + 1.35
+        : playerConfig.runSpeed + 0.65;
+      if (roughWaterSpeed > roughWaterCap) {
+        const keep = roughWaterCap / roughWaterSpeed;
+        velocity.current.x *= keep;
+        velocity.current.z *= keep;
+      }
+      if (cliffWaterMotion.intensity > 0.72 && now - lastCliffWaveBuffetAt.current > 1.45) {
+        lastCliffWaveBuffetAt.current = now;
+        emitPropEvent('water-splash', {
+          position: {
+            x: group.current.position.x,
+            y: WATER_LEVEL,
+            z: group.current.position.z,
+          },
+          intensity: 0.38 + cliffWaterMotion.intensity * 0.42,
+          yaw: Math.atan2(cliffWaterMotion.x, cliffWaterMotion.z),
+        });
+        cameraImpulse.current = {
+          startedAt: now,
+          intensity: 0.06 + cliffWaterMotion.intensity * 0.08,
+          duration: 0.24,
+          seed: cameraImpulse.current.seed + 1,
+        };
+      }
     }
     const desiredDelta = frameScratch.desiredDelta.copy(velocity.current).multiplyScalar(delta);
     const canAutoTraverse = playerConfig.canAutoTraverse !== false
@@ -3009,7 +3149,7 @@ export function PlayerController({
       } else {
         swimSink.current = swimConfig.bodySink;
       }
-      const floatY = WATER_LEVEL - swimSink.current;
+      const floatY = WATER_LEVEL + (cliffWaterMotion?.heave || 0) - swimSink.current;
       const snapDistance = SWIM_POLISH.enabled ? SWIM_POLISH.snapDistance : 2.4;
       const heightDamping = SWIM_POLISH.enabled ? SWIM_POLISH.heightDamping : 5;
       p.y = Math.abs(p.y - floatY) > snapDistance ? floatY : THREE.MathUtils.damp(p.y, floatY, heightDamping, delta);

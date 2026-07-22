@@ -80,6 +80,9 @@ export function tryFireShotgun({ position, facing }) {
     position: muzzle,
     dir: { x: dirX, y: dirY, z: dirZ },
     barrel: SHOTGUN.barrels - shellsLeft,
+    shellsLeft,
+    reloadStarted: shellsLeft <= 0,
+    reloadDuration: shellsLeft <= 0 ? SHOTGUN.reloadDuration : 0,
   });
   return 'fired';
 }

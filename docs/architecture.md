@@ -8,6 +8,10 @@ provide source material and shared game-state ideas.
 Use this file as the high-level map. Use `AGENTS.md` for agent operating rules
 and `docs/generated/repo-inventory.md` for volatile inventories.
 
+The proposed capped-room multiplayer architecture, including human/AI actor
+control, interaction sessions, animal observation, and staged implementation,
+is documented in `docs/multiplayer-architecture-plan.md`.
+
 ## Runtime Entry Points
 
 - `app/three/page.js` dynamically imports the 3D game with SSR disabled.

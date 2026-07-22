@@ -13,7 +13,7 @@ import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
 import { LaunchOverlay } from './ui/LaunchOverlay';
-import { PostOfficeBaySoundscape } from './audio/PostOfficeBaySoundscape';
+import { IslandSoundscape } from './audio/IslandSoundscape';
 import { activatePostOfficeBayAudio } from './audio/audioRuntime';
 import { ThreeE2EFrameSignal, ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
@@ -87,6 +87,10 @@ const MapGeographyDevPanel = dynamic(
 );
 const WaterDevPanel = dynamic(
   () => import('./ui/dev/WaterDevPanel').then(module => module.WaterDevPanel),
+  { ssr: false },
+);
+const AudioDebugPanel = dynamic(
+  () => import('./ui/dev/AudioDebugPanel').then(module => module.AudioDebugPanel),
   { ssr: false },
 );
 
@@ -299,7 +303,14 @@ function normalizeWaterQuality(value, fallback = 'polished') {
 }
 
 function getInitialPerfSettings() {
-  return { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[DEFAULT_PERF_SETTINGS.quality] };
+  return {
+    ...DEFAULT_PERF_SETTINGS,
+    ...QUALITY_PRESETS[DEFAULT_PERF_SETTINGS.quality],
+    // Desktop's automatic launch uses the performance scene preset but the
+    // polished water tier. Explicit quality selections still own their water
+    // choice below, and constrained mobile devices retain performance water.
+    waterQuality: DEFAULT_PERF_SETTINGS.waterQuality,
+  };
 }
 
 function recommendedQualityFromDevice() {
@@ -327,6 +338,11 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
       ? requestedQuality
       : automaticQuality;
   const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
+  const defaultWaterQuality = requestedQuality
+    ? base.waterQuality
+    : quality === 'mobile'
+      ? QUALITY_PRESETS.mobile.waterQuality
+      : DEFAULT_PERF_SETTINGS.waterQuality;
   const postprocessing = params.has('post')
     || params.has('postprocessing')
     || (
@@ -354,7 +370,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
       : base.terrainSegmentCap;
   return {
     quality,
-    waterQuality: normalizeWaterQuality(params.get('waterQuality'), base.waterQuality),
+    waterQuality: normalizeWaterQuality(params.get('waterQuality'), defaultWaterQuality),
     shadowQuality: normalizeShadowQuality(params.get('shadowQuality'), base.shadowQuality),
     dprMode: params.get('dpr') || base.dprMode,
     msaaSamples,
@@ -1938,6 +1954,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
   const [showDarwinAnimationLab, setShowDarwinAnimationLab] = useState(false);
   const [showMapGeographyDev, setShowMapGeographyDev] = useState(false);
+  const [showAudioDebug, setShowAudioDebug] = useState(false);
   const [perfProbe, setPerfProbe] = useState(false);
   const [costProbe, setCostProbe] = useState(false);
   const [e2eMode, setE2EMode] = useState(false);
@@ -1948,6 +1965,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const [rendererInfo, setRendererInfo] = useState(null);
+  const closeAudioDebug = useCallback(() => setShowAudioDebug(false), []);
   // Loading progress only drives the launch overlay. Once the initial scene is
   // ready, keep this subscriber's snapshot stable so render-time texture starts
   // in newly mounted regions cannot schedule a parent React update.
@@ -2159,6 +2177,9 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     if (DEV_TOOLS_ENABLED && params.has('assetBrowser')) {
       setShowAssetBrowser(true);
     }
+    if (DEV_TOOLS_ENABLED && params.has('animalAnimationLab')) {
+      setShowAnimalAnimationLab(true);
+    }
     if (DEV_TOOLS_ENABLED && params.has('ecologyDebug')) {
       const requestedSpecies = params.get('ecologyDebug');
       if (requestedSpecies && requestedSpecies !== '1') setEcologyDebugSpecies(requestedSpecies);
@@ -2186,6 +2207,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       setShortcutModifierActive(event.metaKey || event.ctrlKey);
       if (event.code === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
+        return;
+      }
+      if (event.code === 'Digit0' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        if (!event.repeat) setShowAudioDebug(value => !value);
         return;
       }
       if (event.code === 'Digit0' && DEV_TOOLS_ENABLED) {
@@ -2485,7 +2511,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       )}
       <KeyboardControls map={keyboardMap}>
         {gameStarted && (
-          <PostOfficeBaySoundscape
+          <IslandSoundscape
             active={launchOverlayDismissed}
             enabled={runtimeAudioEnabled}
           />
@@ -2619,6 +2645,8 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             onTogglePerf={() => setShowPerf(value => !value)}
             onRestartExpedition={restartExpedition}
             onReturnToMainMenu={returnToMainMenu}
+            audioEnabled={audioEnabled}
+            onAudioEnabledChange={handleAudioEnabledChange}
           />
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
@@ -2633,6 +2661,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
           <MapGeographyDevPanel open={showMapGeographyDev} onClose={() => setShowMapGeographyDev(false)} />
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <WaterDevPanel />}
+        {gameUiVisible && <AudioDebugPanel open={showAudioDebug} onClose={closeAudioDebug} />}
         {DEV_TOOLS_ENABLED && (
           <PerformancePanel
             open={gameUiVisible && showPerf}

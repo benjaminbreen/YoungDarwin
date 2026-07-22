@@ -138,8 +138,13 @@ const {
 } = loadModule('three-game/world/surfaceContact.js');
 const {
   computeEnvironmentalAudioTargets,
+  diurnalBirdCallsAllowed,
   distanceToOceanBoundary,
+  dryInsectHabitat,
+  isInteriorAmbienceZone,
+  nocturnalOwlCallsAllowed,
   surfPresenceForZone,
+  zoneHasDirectCoast,
 } = loadModule('three-game/audio/environmentMix.js');
 const {
   clampReleaseLinearVelocity,
@@ -190,6 +195,19 @@ const {
   createCollisionAdapter,
 } = loadModule('three-game/physics/collisionAdapter.js');
 const {
+  findClimbOpportunity,
+  findTerrainClimbTarget,
+} = loadModule('three-game/components/player/playerTraversalMotion.js');
+const {
+  acknowledgeContextPromptState,
+  clearContextPromptState,
+  publishContextPromptState,
+} = loadModule('three-game/ui/contextPromptService.js');
+const {
+  resolveFieldAction,
+  sameFieldAction,
+} = loadModule('three-game/fieldActions.js');
+const {
   createLazyAnimationActions,
 } = loadModule('three-game/components/assets/lazyAnimationActions.js');
 const {
@@ -207,6 +225,20 @@ const {
 const {
   getBorderVistas,
 } = loadModule('three-game/world/vistas/index.js');
+const {
+  puntaSurSouthCoastZ,
+} = loadModule('three-game/world/regions/puntaSur/path.js');
+const {
+  apronCornerMode,
+  apronCornerReach,
+  apronOwnsCorner,
+  apronTopologyHold,
+  makeNeighborPreviewGeometry,
+} = loadModule('three-game/world/vistas/apronGeometry.js');
+const {
+  distantLandformRoute,
+  makeDistantLandformGeometry,
+} = loadModule('three-game/world/vistas/distantLandforms.js');
 const {
   buildBorderTransition,
 } = loadModule('three-game/world/vistas/transitions.js');
@@ -232,6 +264,19 @@ const {
   FLOREANA_ROUTE_EDGES,
   mapDirectionBetween,
 } = loadModule('game-core/floreanaGeography.js');
+const {
+  CONTEXTUAL_WORLD_AUDIO,
+  MOVEMENT_WILDLIFE_AUDIO,
+  POST_OFFICE_BAY_AUDIO,
+  WILDLIFE_FIELDWORK_AUDIO,
+} = loadModule('three-game/audio/audioAssets.js');
+const {
+  getSoundscapeAudioMixSettings,
+  resetSoundscapeAudioMix,
+  resetSoundscapeAudioTrackTrim,
+  setSoundscapeAudioMasterTrimDb,
+  setSoundscapeAudioTrackTrimDb,
+} = loadModule('three-game/audio/audioRuntime.js');
 const {
   NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM,
   NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM,
@@ -387,6 +432,30 @@ const {
   baseSpecimens,
 } = loadModule('data/specimens.js');
 const {
+  getWildlifeBehaviorProfile,
+  getWildlifeRenderProfile,
+} = loadModule('three-game/wildlife/wildlifeCatalog.js');
+const {
+  createFaunaMotionController,
+} = loadModule('three-game/fauna/faunaMotionController.js');
+const {
+  getTreePerches,
+  isAuthoredTreePerch,
+} = loadModule('three-game/wildlife/treePerches.js');
+const {
+  getOwlRoosts,
+  isOwlRoost,
+} = loadModule('three-game/wildlife/owlRoosts.js');
+const {
+  getRacerShelters,
+  isRacerShelter,
+} = loadModule('three-game/wildlife/racerShelters.js');
+const {
+  consumeSpecimenStimuli,
+  removeSpecimenRuntimePose,
+  setSpecimenRuntimePose,
+} = loadModule('three-game/world/specimenRuntime.js');
+const {
   DEFAULT_PLAYER_MODEL_ASSET_ID,
   modelAssets,
 } = loadModule('three-game/modelAssets.js');
@@ -415,7 +484,9 @@ const {
   CANDELABRA_CACTUS_SPECIES,
   CROTON_SCOULERI_SPECIES,
   DARWINIOTHAMNUS_SPECIES,
+  DELILIA_INELEGANS_SPECIES,
   LAVA_CACTUS_SPECIES,
+  LECOCARPUS_PINNATIFIDUS_SPECIES,
   OPUNTIA_MEGASPERMA_SPECIES,
   PLEOPELTIS_POLYPODIOIDES_SPECIES,
 } = loadModule('three-game/world/ecology/floraSpecies.js');
@@ -425,6 +496,12 @@ const {
 const {
   getLavaCactusSites,
 } = loadModule('three-game/physics/props/lavaCactus/lavaCactusSites.js');
+const {
+  getDeliliaSites,
+} = loadModule('three-game/physics/props/delilia/deliliaSites.js');
+const {
+  getLecocarpusSites,
+} = loadModule('three-game/physics/props/lecocarpus/lecocarpusSites.js');
 const {
   buildPenalColonyEcology,
 } = loadModule('three-game/world/ecology/penalColony.js');
@@ -1404,6 +1481,13 @@ test('environmental audio follows weather and suppresses dry insects in rain and
     weather: { windSpeed: 1.4, rainIntensity: 0.8 },
     timeOfDay: 18.5,
   });
+  const drizzle = computeEnvironmentalAudioTargets({
+    zone: scrub,
+    position: { x: 0, z: 0 },
+    resolveZone: () => null,
+    weather: { windSpeed: 1.1, rainIntensity: 0.3 },
+    timeOfDay: 18.5,
+  });
   const interior = computeEnvironmentalAudioTargets({
     zone: { id: 'CABIN', biome: 'shipInterior', name: 'Cabin' },
     weather: { windSpeed: 2, rainIntensity: 1 },
@@ -1411,9 +1495,69 @@ test('environmental audio follows weather and suppresses dry insects in rain and
   assert.ok(dry.surf > 0);
   assert.ok(dry.wind > 0.08);
   assert.ok(dry.insects > 0);
-  assert.ok(wet.rain > 0.15);
+  const daytimeInsects = computeEnvironmentalAudioTargets({
+    zone: scrub,
+    weather: { windSpeed: 0.8, rainIntensity: 0 },
+    timeOfDay: 12,
+  }).insects;
+  const nighttimeInsects = computeEnvironmentalAudioTargets({
+    zone: scrub,
+    weather: { windSpeed: 0.8, rainIntensity: 0 },
+    timeOfDay: 23,
+  }).insects;
+  assert.ok(nighttimeInsects >= daytimeInsects * 1.7, 'dry-country insects should rise clearly after dusk');
+  assert.ok(drizzle.rain >= 0.2, 'visible drizzle should retain a clearly audible foliage bed');
+  assert.ok(wet.rain >= 0.3, 'steady rain should approach the proven diagnostic listening level');
   assert.equal(wet.insects, 0);
-  assert.deepEqual(interior, { surf: 0, wind: 0, rain: 0, insects: 0 });
+  assert.equal(diurnalBirdCallsAllowed({ timeOfDay: 12, rainIntensity: 0 }), true);
+  assert.equal(diurnalBirdCallsAllowed({ timeOfDay: 23, rainIntensity: 0 }), false);
+  assert.equal(diurnalBirdCallsAllowed({ timeOfDay: 12, rainIntensity: 0.08 }), false);
+  assert.equal(nocturnalOwlCallsAllowed({ timeOfDay: 23, rainIntensity: 0 }), true);
+  assert.equal(nocturnalOwlCallsAllowed({ timeOfDay: 12, rainIntensity: 0 }), false);
+  assert.equal(nocturnalOwlCallsAllowed({ timeOfDay: 23, rainIntensity: 0.08 }), false);
+  assert.deepEqual(interior, { surf: 0, wind: 0, rain: 0, insects: 0, occlusion: 0.75 });
+});
+
+test('every playable Floreana map receives deliberate island ambience routing', () => {
+  const playablePlacements = FLOREANA_MAP_PLACEMENTS.filter(placement => !placement.test);
+  for (const placement of playablePlacements) {
+    const zone = getRuntimeZone(placement.id);
+    assert.equal(zone.id, placement.id, `${placement.id} resolves to its own runtime zone`);
+    const interior = isInteriorAmbienceZone(zone);
+    const targets = computeEnvironmentalAudioTargets({
+      zone,
+      position: { x: 0, z: 0 },
+      resolveZone: getRuntimeZone,
+      weather: { windSpeed: 1, rainIntensity: 0.3 },
+      timeOfDay: 23,
+    });
+    if (/interior/i.test(placement.kind)) {
+      assert.equal(interior, true, `${placement.id} is explicitly routed as an interior`);
+      assert.ok(targets.occlusion >= 0.7, `${placement.id} filters exterior sound through its structure`);
+      assert.ok(targets.wind > 0, `${placement.id} keeps a muffled exterior wind trace`);
+      assert.ok(targets.rain > 0, `${placement.id} keeps rain audible through its structure`);
+      if (placement.id === 'BEAGLE_CABIN') assert.ok(targets.surf > 0, 'the Beagle cabin retains muffled water and surf');
+    } else {
+      assert.equal(interior, false, `${placement.id} remains an outdoor ambience zone`);
+      assert.equal(targets.occlusion, 0, `${placement.id} does not low-pass outdoor ambience`);
+      assert.ok(targets.wind > 0, `${placement.id} receives the island wind bed`);
+      assert.ok(targets.rain >= 0.2, `${placement.id} receives audible rain when precipitation is visible`);
+    }
+  }
+
+  for (const [zoneId, boundaries] of Object.entries(FLOREANA_BOUNDARIES)) {
+    if (!Object.values(boundaries).includes('ocean')) continue;
+    assert.equal(zoneHasDirectCoast(getRuntimeZone(zoneId)), true, `${zoneId} ocean boundary receives direct surf`);
+  }
+  for (const zoneId of ['POST_OFFICE_BAY', 'CORMORANT_BAY', 'BLACK_BEACH', 'PUNTA_SUR', 'SE_COAST']) {
+    assert.equal(zoneHasDirectCoast(getRuntimeZone(zoneId)), true, `${zoneId} authored coast receives direct surf`);
+  }
+
+  const scrubRise = getRuntimeZone('POST_SCRUB_RISE');
+  assert.equal(isInteriorAmbienceZone(scrubRise), false, 'Post Scrub Rise must not inherit "office" from its preset name');
+  assert.equal(dryInsectHabitat(scrubRise), true);
+  assert.ok(surfPresenceForZone({ zone: scrubRise, position: { x: 0, z: 0 }, resolveZone: getRuntimeZone }) > 0);
+  assert.equal(dryInsectHabitat(getRuntimeZone('NORTHERN_HIGHLANDS')), true, 'authored scrub remains dry habitat despite its route id');
 });
 
 test('surface contacts preserve material differences instead of applying a universal dust floor', () => {
@@ -1433,17 +1577,128 @@ test('surface contacts preserve material differences instead of applying a unive
     surfaceContactProfileForBiome('dry-scrub'),
     { kind: 'footstep', intensity: 0.6 },
   );
+  const shipDeck = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('ship-deck'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
+  const houseFloor = resolveSurfaceContactResponse(
+    surfaceContactProfileForBiome('house-interior'),
+    { kind: 'footstep', intensity: 0.6 },
+  );
 
   assert.equal(drySand.responseKind, 'sand');
   assert.equal(wetMud.responseKind, 'mud');
   assert.equal(grass.responseKind, 'litter');
   assert.equal(dryScrub.responseKind, 'dust');
+  assert.equal(shipDeck.responseKind, 'wood');
+  assert.equal(houseFloor.responseKind, 'wood');
+  assert.equal(shipDeck.showRing, false);
   assert.ok(dryScrub.particleScale >= 1.2);
   assert.ok(dryScrub.sizeScale >= 1.2);
   assert.equal(drySand.showRing, false);
   assert.equal(wetMud.showRing, false);
   assert.ok(drySand.lateralScale > drySand.liftScale);
   assert.ok(wetMud.strength < drySand.strength);
+});
+
+test('expanded movement audio sprites are committed PCM assets with stable slot metadata', () => {
+  const expected = {
+    woodStep: [10, 0.5],
+    mudStep: [10, 0.62],
+    litterStep: [10, 0.56],
+    shotgunReport: [6, 0.82],
+    shotgunReload: [1, 2.03],
+    finchWing: [6, 0.72],
+    tortoiseStep: [8, 0.7],
+  };
+  for (const [key, [variants, slotDuration]] of Object.entries(expected)) {
+    const sprite = MOVEMENT_WILDLIFE_AUDIO[key];
+    assert.ok(sprite, `${key} is registered`);
+    assert.equal(sprite.variants, variants);
+    assert.equal(sprite.slotDuration, slotDuration);
+    const filePath = path.join(process.cwd(), 'public', sprite.url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    const header = fs.readFileSync(filePath).subarray(0, 4).toString('ascii');
+    assert.equal(header, 'RIFF', `${key} is a browser-decodable PCM WAV`);
+  }
+});
+
+test('wildlife, weather, fieldwork, and shoreline sprites are committed PCM assets', () => {
+  const expected = {
+    dove: [WILDLIFE_FIELDWORK_AUDIO.dove, 5, 2],
+    hawk: [WILDLIFE_FIELDWORK_AUDIO.hawk, 4, 1.3],
+    mockingbird: [WILDLIFE_FIELDWORK_AUDIO.mockingbird, 8, 1.25],
+    owl: [WILDLIFE_FIELDWORK_AUDIO.owl, 8, 0.72],
+    thunder: [WILDLIFE_FIELDWORK_AUDIO.thunder, 3, 5.5],
+    fieldNote: [WILDLIFE_FIELDWORK_AUDIO.fieldNote, 4, 1.44],
+    specimenContainer: [WILDLIFE_FIELDWORK_AUDIO.specimenContainer, 8, 0.9],
+    snareRope: [WILDLIFE_FIELDWORK_AUDIO.snareRope, 5, 1.1],
+    door: [WILDLIFE_FIELDWORK_AUDIO.door, 1, 1.2],
+    waveBreak: [POST_OFFICE_BAY_AUDIO.waveBreak, 6, 3.2],
+  };
+  for (const [key, [sprite, variants, slotDuration]] of Object.entries(expected)) {
+    assert.equal(sprite.variants, variants, `${key} has stable variant metadata`);
+    assert.equal(sprite.slotDuration, slotDuration, `${key} has stable slot timing`);
+    const filePath = path.join(process.cwd(), 'public', sprite.url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    assert.equal(fs.readFileSync(filePath).subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
+  }
+});
+
+test('contextual animal, settlement, equipment, and terrain sprites are committed PCM assets', () => {
+  const expected = {
+    crabScuttle: [4, 0.62],
+    iguanaClaws: [4, 0.54],
+    goatHoof: [8, 0.38],
+    horseHoof: [10, 0.48],
+    goatBleat: [3, 1.5],
+    settlementWork: [10, 0.8],
+    leatherHandling: [8, 0.75],
+    waterDrop: [8, 0.55],
+    rockTumble: [4, 1.25],
+    dryBranch: [6, 1.2],
+  };
+  for (const [key, [variants, slotDuration]] of Object.entries(expected)) {
+    const sprite = CONTEXTUAL_WORLD_AUDIO[key];
+    assert.ok(sprite, `${key} is registered`);
+    assert.equal(sprite.variants, variants);
+    assert.equal(sprite.slotDuration, slotDuration);
+    const filePath = path.join(process.cwd(), 'public', sprite.url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    assert.equal(fs.readFileSync(filePath).subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
+  }
+  for (const key of Object.keys(expected)) setSoundscapeAudioTrackTrimDb(key, 0.5);
+  const trackLabels = getSoundscapeAudioMixSettings().trackLabels;
+  assert.equal(trackLabels.crabScuttle, 'Crab scuttle');
+  assert.equal(trackLabels.iguanaClaws, 'Marine iguana claws');
+  assert.equal(trackLabels.goatHoof, 'Goat hooves');
+  assert.equal(trackLabels.horseHoof, 'Horse hooves');
+  assert.equal(trackLabels.goatBleat, 'Goat bleat');
+  assert.equal(trackLabels.settlementWork, 'Distant settlement work');
+  assert.equal(trackLabels.leatherHandling, 'Leather and equipment');
+  assert.equal(trackLabels.waterDrop, 'Foliage water drops');
+  assert.equal(trackLabels.rockTumble, 'Loose rock tumble');
+  assert.equal(trackLabels.dryBranch, 'Dry branch movement');
+  resetSoundscapeAudioMix();
+});
+
+test('sound debug mix trims clamp, serialize, and reset with stable track keys', () => {
+  resetSoundscapeAudioMix();
+  assert.equal(setSoundscapeAudioMasterTrimDb(99), 6);
+  assert.equal(setSoundscapeAudioTrackTrimDb('surf', -99), -24);
+  assert.equal(setSoundscapeAudioTrackTrimDb('not-a-track', 4), null);
+
+  const tuned = getSoundscapeAudioMixSettings();
+  assert.equal(tuned.schema, 'darwin-sound-mix-v1');
+  assert.equal(tuned.masterDb, 6);
+  assert.equal(tuned.tracks.surf, -24);
+  assert.equal(tuned.trackLabels.surf, 'Ocean surf');
+
+  resetSoundscapeAudioTrackTrim('surf');
+  assert.equal(Object.hasOwn(getSoundscapeAudioMixSettings().tracks, 'surf'), false);
+  resetSoundscapeAudioMix();
+  assert.deepEqual(getSoundscapeAudioMixSettings().tracks, {});
+  assert.equal(getSoundscapeAudioMixSettings().masterDb, 0);
 });
 
 test('region-specific surface names inherit the correct response family', () => {
@@ -1828,6 +2083,149 @@ test('procedural rock obstacles share visual bounds and traversal support', () =
       );
     }
   }
+});
+
+test('terrain climbing finds the stable Punta Sur rim instead of the middle of its face', () => {
+  const zoneId = 'PUNTA_SUR';
+  const x = -15;
+  const z = puntaSurSouthCoastZ(x) + 1.2;
+  const start = new Vector3(x, movementTerrainHeight(x, z, zoneId) + 0.015, z);
+  const opportunity = findClimbOpportunity({
+    position: start,
+    facing: new Vector3(0, 0, -1),
+    collisionAdapter: createCollisionAdapter(zoneId),
+  });
+  const target = opportunity?.target;
+
+  assert.equal(opportunity?.kind, 'terrain');
+  assert.ok(target, 'the central Punta Sur face should expose a mantle target');
+  assert.ok(target.distance > 5.5, 'the mantle should clear the steep middle of the face');
+  assert.ok(target.heightDelta > 7.5, 'the mantle should reach the high rim in one authored climb');
+  assert.equal(isWalkableTerrain(target.end.x, target.end.z, zoneId), true);
+});
+
+test('terrain climbing stays bounded and does not jump distant gaps', () => {
+  const start = new Vector3(0, 0, 0);
+  const facing = new Vector3(0, 0, 1);
+  const tooTallAdapter = {
+    groundInfo: position => ({ y: position.z >= 1.7 ? 10 : 0 }),
+    isWalkableTerrain: (_x, z) => z >= 1.7,
+  };
+  const distantGapAdapter = {
+    groundInfo: position => ({ y: position.z >= 3.2 ? 5 : 0 }),
+    isWalkableTerrain: (_x, z) => z >= 3.2,
+  };
+
+  assert.equal(findTerrainClimbTarget({ position: start, facing, collisionAdapter: tooTallAdapter }), null);
+  assert.equal(findTerrainClimbTarget({ position: start, facing, collisionAdapter: distantGapAdapter }), null);
+  assert.equal(findTerrainClimbTarget({
+    position: start,
+    facing,
+    collisionAdapter: tooTallAdapter,
+    profile: { enabled: false },
+  }), null);
+});
+
+test('climb prompts ignore walkable hillocks and low step-over obstacles', () => {
+  const start = new Vector3(0, 0, 0);
+  const facing = new Vector3(0, 0, 1);
+  const walkableHillAdapter = {
+    findClimbTarget: () => null,
+    groundInfo: position => ({ y: Math.max(0, position.z) * 0.2 }),
+    isWalkableTerrain: () => true,
+  };
+  const lowObstacleAdapter = {
+    findClimbTarget: () => ({
+      obstacle: { id: 'low-rock', kind: 'rock' },
+      end: new Vector3(0, 0.74, 0.8),
+      heightDelta: 0.7,
+    }),
+    groundInfo: () => ({ y: 0 }),
+    isWalkableTerrain: () => true,
+  };
+
+  assert.equal(findClimbOpportunity({
+    position: start,
+    facing,
+    collisionAdapter: walkableHillAdapter,
+  }), null);
+  assert.equal(findClimbOpportunity({
+    position: start,
+    facing,
+    collisionAdapter: lowObstacleAdapter,
+  }), null);
+});
+
+test('context prompts respect dwell, priority, fallback, and repeat cooldown', () => {
+  let state = {
+    contextPrompt: null,
+    contextPromptCandidates: {},
+    contextPromptHistory: {},
+  };
+  const traversal = {
+    id: 'climb:test-cliff',
+    label: 'Climb cliff',
+    keyLabel: 'V',
+    priority: 40,
+    dwellMs: 280,
+    repeatCooldownMs: 1000,
+  };
+  const carry = {
+    id: 'carry:test-crate',
+    label: 'Pick up crate',
+    keyLabel: 'E',
+    priority: 90,
+    dwellMs: 120,
+  };
+
+  state = publishContextPromptState(state, 'traversal', traversal, 1000);
+  assert.equal(state.contextPrompt, null, 'traversal should wait through its dwell');
+  state = publishContextPromptState(state, 'traversal', traversal, 1280);
+  assert.equal(state.contextPrompt?.source, 'traversal');
+  state = publishContextPromptState(state, 'carry', carry, 1280);
+  assert.equal(state.contextPrompt?.source, 'traversal', 'new higher-priority prompts still respect dwell');
+  state = publishContextPromptState(state, 'carry', carry, 1400);
+  assert.equal(state.contextPrompt?.source, 'carry');
+  state = clearContextPromptState(state, 'carry', 1420);
+  assert.equal(state.contextPrompt?.source, 'traversal', 'lower prompt should return when the winner clears');
+  state = acknowledgeContextPromptState(state, 'traversal', 1450);
+  assert.equal(state.contextPrompt, null);
+  state = publishContextPromptState(state, 'traversal', traversal, 1500);
+  state = publishContextPromptState(state, 'traversal', traversal, 1800);
+  assert.equal(state.contextPrompt, null, 'acknowledged prompt should remain suppressed during cooldown');
+  state = publishContextPromptState(state, 'traversal', traversal, 2450);
+  assert.equal(state.contextPrompt?.source, 'traversal');
+});
+
+test('field actions use the equipped modality while hands remain the observation fallback', () => {
+  const plant = {
+    id: 'ecology:test:cotton:1',
+    typeId: 'galapagos_cotton',
+    kind: 'ecology',
+    category: 'Plant',
+    name: 'Galapagos cotton',
+  };
+  const bottle = {
+    id: 'prop:test-bottle',
+    typeId: 'ambient-prop:test-bottle',
+    kind: 'prop',
+    category: 'Object',
+    name: 'glass bottle',
+  };
+  const observe = resolveFieldAction({ toolId: 'hands', target: plant });
+  const hammerPlant = resolveFieldAction({ toolId: 'hammer', target: plant });
+  const hammerBottle = resolveFieldAction({ toolId: 'hammer', target: bottle });
+  const collect = resolveFieldAction({ toolId: 'hammer', target: { ...plant, kind: 'specimen' }, examined: true });
+
+  assert.equal(observe.kind, 'observe');
+  assert.equal(observe.label, 'Examine Galapagos cotton');
+  assert.equal(hammerPlant.kind, 'tool');
+  assert.equal(hammerPlant.label, 'Strike Galapagos cotton');
+  assert.equal(hammerBottle.label, 'Strike glass bottle');
+  assert.equal(collect.kind, 'collect');
+  assert.equal(collect.label, 'Collect Galapagos cotton with hammer');
+  assert.equal(sameFieldAction(hammerPlant, { ...hammerPlant }), true);
+  assert.equal(sameFieldAction(hammerPlant, hammerBottle), false);
 });
 
 test('Lava Flats movement terrain contains all collision-scale relief', () => {
@@ -2224,6 +2622,111 @@ test('apron ecology carries source grass into grassless neighbors and stitches o
   assert.equal(southItems.every(item => item.borderBand === 'near'), true);
 });
 
+test('Punta Sur side aprons do not sweep across its authored southern cliff boundary', () => {
+  const config = getRegionTerrainConfig('PUNTA_SUR');
+  const vistas = getBorderVistas('PUNTA_SUR');
+  const west = vistas.find(vista => vista.edge === 'west');
+  const east = vistas.find(vista => vista.edge === 'east');
+  assert.ok(west && east);
+  // East/west along-axis end 1 is the south corner.
+  assert.equal(apronCornerMode('PUNTA_SUR', west, 1), 'none');
+  assert.equal(apronCornerMode('PUNTA_SUR', east, 1), 'none');
+  assert.equal(apronOwnsCorner('PUNTA_SUR', west, 1), false);
+  assert.equal(apronOwnsCorner('PUNTA_SUR', east, 1), false);
+
+  for (const vista of [west, east]) {
+    const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+    const transition = buildBorderTransition('PUNTA_SUR', config, vista, targetConfig);
+    const geometry = makeNeighborPreviewGeometry(
+      'PUNTA_SUR',
+      config,
+      vista.toRegionId,
+      targetConfig,
+      vista,
+      transition,
+    );
+    geometry.computeBoundingBox();
+    assert.ok(
+      geometry.boundingBox.max.z <= config.depth / 2 + 2,
+      `${vista.edge} apron crossed Punta Sur's southern cliff boundary`,
+    );
+    geometry.dispose();
+  }
+});
+
+test('adjacent open aprons share tapered corner wedges', () => {
+  const vistas = getBorderVistas('CORMORANT_BAY');
+  const west = vistas.find(vista => vista.edge === 'west');
+  const south = vistas.find(vista => vista.edge === 'south');
+  assert.ok(west && south);
+  // West end 1 and south end 0 meet at the southwest corner.
+  assert.equal(apronCornerMode('CORMORANT_BAY', west, 1), 'shared');
+  assert.equal(apronCornerMode('CORMORANT_BAY', south, 0), 'shared');
+  assert.equal(apronCornerReach('CORMORANT_BAY', west, 1, 0, 64), 0);
+  assert.equal(apronCornerReach('CORMORANT_BAY', south, 0, 0, 64), 0);
+  assert.equal(apronCornerReach('CORMORANT_BAY', west, 1, 28, 64), 28);
+  assert.equal(apronCornerReach('CORMORANT_BAY', south, 0, 28, 64), 28);
+});
+
+test('mixed coastal aprons preserve source shoreline away from the route corridor', () => {
+  const regionId = 'PUNTA_SUR';
+  const config = getRegionTerrainConfig(regionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'west');
+  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 0, 2, 2) >= 0.65);
+  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 1, -2, 2) >= 0.95);
+});
+
+test('placeholder neighbors only influence their authored travel corridor', () => {
+  const regionId = 'PUNTA_SUR';
+  const config = getRegionTerrainConfig(regionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'north');
+  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  assert.match(targetConfig.preset, /^placeholder-/);
+  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 0, 2, 2) >= 0.75);
+});
+
+test('Punta Sur northern horizon follows the island route to Cerro Pajas', () => {
+  const regionId = 'PUNTA_SUR';
+  const config = getRegionTerrainConfig(regionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'north');
+  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  const route = distantLandformRoute(regionId, vista.edge, vista.toRegionId);
+  assert.deepEqual(route.map(entry => entry.regionId), ['S_VOLCANIC', 'PENAL_COLONY', 'C_HIGH']);
+
+  const geometry = makeDistantLandformGeometry(
+    regionId,
+    config,
+    vista,
+    targetConfig,
+    transition,
+  );
+  assert.ok(geometry);
+  geometry.computeBoundingBox();
+  assert.ok(geometry.boundingBox.min.z < -250, 'the horizon should continue well beyond the first apron');
+  assert.ok(geometry.boundingBox.max.y > 22, 'Cerro Pajas should form a real far silhouette');
+  geometry.dispose();
+});
+
+test('ocean and reef routes do not receive distant land horizons', () => {
+  const regionId = 'PUNTA_SUR';
+  const config = getRegionTerrainConfig(regionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'east');
+  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  assert.deepEqual(distantLandformRoute(regionId, vista.edge, vista.toRegionId), []);
+  assert.equal(makeDistantLandformGeometry(
+    regionId,
+    config,
+    vista,
+    targetConfig,
+    transition,
+  ), null);
+});
+
 test('Post Office Bay routes share normalized seam coordinates with both land neighbors', () => {
   const seams = [
     {
@@ -2454,6 +2957,466 @@ test('runtime specimen actor ids stay globally unique across playable zones', ()
     true,
     'playable spawn identity should match the zone specimen runtime',
   );
+});
+
+test('Galapagos doves forage, take off, fly, land, and retain authored field identity', () => {
+  const record = baseSpecimens.find(specimen => specimen.id === 'galapagosdove');
+  assert.ok(record);
+  assert.equal(record.latin, 'Zenaida galapagoensis');
+  assert.ok(record.details.some(detail => /blue orbital|blue eye/i.test(detail)));
+  assert.ok(record.details.some(detail => /wing/i.test(detail)));
+
+  const render = getWildlifeRenderProfile({ id: 'galapagos_dove' });
+  const profile = getWildlifeBehaviorProfile({ id: 'galapagos_dove' });
+  assert.deepEqual(render, { type: 'proceduralFinch', variant: 'galapagosDove' });
+  assert.equal(profile.controller, 'shorebird');
+  assert.equal(profile.groundForage, true);
+  assert.ok(profile.routineFlightInterval > 0);
+
+  const actors = getThreeSpecimens('ASILO_SPRING').filter(specimen => specimen.id === 'galapagosdove');
+  assert.equal(actors.length, 2);
+  assert.equal(actors.every(actor => actor.instanceId.startsWith('ASILO_SPRING:asilo-spring-galapagos-dove-')), true);
+
+  const actor = actors[0];
+  const base = new Vector3(actor.spawnPoint[0], actor.spawnPoint[1], actor.spawnPoint[2]);
+  const controller = createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.37,
+    zoneId: 'ASILO_SPRING',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+  const modes = new Set();
+  const groundActivities = new Set();
+  const clips = new Set();
+  for (let t = 0; t <= 42; t += 0.1) {
+    const result = controller.update({
+      basePosition: base,
+      zoneId: 'ASILO_SPRING',
+      playerPosition: { x: base.x + 80, z: base.z + 80 },
+      elapsedTime: t,
+      delta: 0.1,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(Number.isFinite(result.state.position.x), true);
+    assert.equal(Number.isFinite(result.state.position.y), true);
+    assert.equal(Number.isFinite(result.state.position.z), true);
+    modes.add(result.state.debug.mode);
+    if (result.state.debug.groundActivity) groundActivities.add(result.state.debug.groundActivity);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+  }
+  for (const mode of ['ground', 'takeoff', 'circle', 'landing']) {
+    assert.equal(modes.has(mode), true, `dove should enter ${mode}`);
+  }
+  assert.equal(groundActivities.has('feed'), true);
+  assert.equal(groundActivities.has('walk'), true);
+  for (const clip of ['peck', 'walk', 'takeoff', 'fly', 'landing']) {
+    assert.equal(clips.has(clip), true, `dove should request ${clip}`);
+  }
+});
+
+test('Galapagos hawks soar and return only to real authored tree perches', () => {
+  const record = baseSpecimens.find(specimen => specimen.id === 'galapagoshawk');
+  assert.ok(record);
+  assert.equal(record.latin, 'Buteo galapagoensis');
+  assert.ok(record.details.some(detail => /hooked bill/i.test(detail)));
+
+  const render = getWildlifeRenderProfile({ id: 'galapagos_hawk' });
+  const profile = getWildlifeBehaviorProfile({ id: 'galapagos_hawk' });
+  assert.deepEqual(render, { type: 'proceduralFinch', variant: 'galapagosHawk' });
+  assert.equal(profile.controller, 'raptor');
+
+  const actors = getThreeSpecimens('W_HIGH').filter(specimen => specimen.id === 'galapagoshawk');
+  assert.equal(actors.length, 1);
+  const actor = actors[0];
+  const base = new Vector3(actor.spawnPoint[0], actor.spawnPoint[1], actor.spawnPoint[2]);
+  const perches = getTreePerches('W_HIGH', { origin: base, radius: profile.perchSearchRadius });
+  assert.ok(perches.length >= 8);
+  assert.equal(perches.every(isAuthoredTreePerch), true);
+  assert.equal(perches.every(perch => ['scalesia', 'manzanillo', 'palo-santo'].includes(perch.species)), true);
+  assert.equal(perches.every(perch => perch.y > terrainHeight(perch.x, perch.z, 'W_HIGH') + 2), true);
+
+  const controller = createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.41,
+    zoneId: 'W_HIGH',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+  const modes = new Set();
+  const clips = new Set();
+  const authoredPerchIds = new Set(perches.map(perch => perch.id));
+  let treeLandingFrames = 0;
+  for (let t = 0; t <= 82; t += 0.1) {
+    const result = controller.update({
+      basePosition: base,
+      zoneId: 'W_HIGH',
+      playerPosition: { x: base.x + 90, z: base.z + 90 },
+      elapsedTime: t,
+      delta: 0.1,
+    });
+    assert.equal(result.ok, true);
+    modes.add(result.state.debug.mode);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+    if (result.state.debug.mode === 'perched') {
+      assert.equal(authoredPerchIds.has(result.state.debug.perchId), true);
+      assert.ok(result.state.position.y > terrainHeight(result.state.position.x, result.state.position.z, 'W_HIGH') + 2);
+    }
+    if (result.state.debug.mode === 'landing') {
+      treeLandingFrames += 1;
+      assert.equal(result.state.debug.landingSurface, 'tree');
+      assert.equal(authoredPerchIds.has(result.state.debug.landingPerchId), true);
+    }
+  }
+  for (const mode of ['perched', 'takeoff', 'soar', 'stoop', 'approach', 'landing']) {
+    assert.equal(modes.has(mode), true, `hawk should enter ${mode}`);
+  }
+  assert.ok(treeLandingFrames > 4);
+  for (const clip of ['perchLook', 'raptorTakeoff', 'soar', 'treeLanding']) {
+    assert.equal(clips.has(clip), true, `hawk should request ${clip}`);
+  }
+});
+
+test('Galapagos short-eared owls wake at dusk, hunt low, and return to authored lava roosts', () => {
+  const record = baseSpecimens.find(specimen => specimen.id === 'shortearedowl');
+  assert.ok(record);
+  assert.equal(record.latin, 'Asio flammeus galapagoensis');
+  assert.ok(record.details.some(detail => /facial disc/i.test(detail)));
+  assert.ok(record.details.some(detail => /moth-like/i.test(detail)));
+
+  const render = getWildlifeRenderProfile({ id: 'galapagos_short_eared_owl' });
+  const profile = getWildlifeBehaviorProfile({ id: 'galapagos_short_eared_owl' });
+  assert.deepEqual(render, { type: 'proceduralFinch', variant: 'galapagosShortEaredOwl' });
+  assert.equal(profile.controller, 'owl');
+  assert.ok(profile.activeFromHour > 17 && profile.activeUntilHour < 7);
+
+  const wildEncounters = [
+    ['LAVA_FLATS', 'lava-flats-short-eared-owl-scoria-roost-1', null],
+    ['N_OUTCROP', 'outcrop-short-eared-owl-basalt-spine-1', 'noutcrop-spine-rock-14'],
+    ['E_MID', 'rocky-clearing-short-eared-owl-north-shelf-1', 'rocky-clearing-north-shelf-block'],
+  ];
+  for (const [zoneId, localInstanceId, expectedHomeObstacleId] of wildEncounters) {
+    const zoneActors = getThreeSpecimens(zoneId).filter(specimen => specimen.id === 'shortearedowl');
+    assert.equal(zoneActors.length, 1, `${zoneId} should contain one rare owl encounter`);
+    assert.equal(zoneActors[0].instanceId, `${zoneId}:${localInstanceId}`);
+    assert.equal(zoneActors[0].behavior, 'dusk-hunt');
+    const zoneBase = new Vector3(...zoneActors[0].spawnPoint);
+    const zoneRoosts = getOwlRoosts(zoneId, { origin: zoneBase, radius: profile.roostSearchRadius });
+    assert.ok(zoneRoosts.length > 0, `${zoneId} should expose an elevated owl roost`);
+    assert.equal(zoneRoosts.every(isOwlRoost), true);
+    assert.equal(zoneRoosts.every(roost => roost.surface === 'lava'), true);
+    assert.equal(
+      zoneRoosts.every(roost => roost.y > terrainHeight(roost.x, roost.z, zoneId) + 0.17),
+      true,
+    );
+    if (expectedHomeObstacleId) assert.equal(zoneRoosts[0].obstacleId, expectedHomeObstacleId);
+  }
+
+  const actors = getThreeSpecimens('LAVA_FLATS').filter(specimen => specimen.id === 'shortearedowl');
+  assert.equal(actors.length, 1);
+  const actor = actors[0];
+  const base = new Vector3(actor.spawnPoint[0], actor.spawnPoint[1], actor.spawnPoint[2]);
+  const roosts = getOwlRoosts('LAVA_FLATS', { origin: base, radius: profile.roostSearchRadius });
+  assert.ok(roosts.length >= 4);
+  assert.equal(roosts.every(isOwlRoost), true);
+  assert.equal(roosts.every(roost => roost.surface === 'lava'), true);
+  assert.equal(roosts.every(roost => roost.y > terrainHeight(roost.x, roost.z, 'LAVA_FLATS') + 0.17), true);
+
+  const controller = createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.53,
+    zoneId: 'LAVA_FLATS',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+  const authoredRoostIds = new Set(roosts.map(roost => roost.id));
+  const dayModes = new Set();
+  const clips = new Set();
+  for (let t = 0; t <= 12; t += 0.1) {
+    const result = controller.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 80, z: base.z + 80 },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 12,
+    });
+    assert.equal(result.ok, true);
+    dayModes.add(result.state.debug.mode);
+    assert.equal(result.state.debug.active, false);
+    assert.equal(result.state.airborne, false);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+  }
+  assert.deepEqual([...dayModes], ['roost']);
+  assert.equal(clips.has('owlDoze'), true);
+
+  const approachController = createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.31,
+    zoneId: 'LAVA_FLATS',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+  let quietApproachPanic = 0;
+  for (let t = 0; t <= 4; t += 0.1) {
+    const result = approachController.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: roosts[0].x, z: roosts[0].z },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 12,
+    });
+    quietApproachPanic = Math.max(quietApproachPanic, result.state.debug.panic || 0);
+    assert.equal(result.state.debug.mode, 'roost');
+    assert.equal(result.state.airborne, false);
+  }
+  assert.ok(quietApproachPanic > 0.8, 'the daytime approach should be close enough to trigger normal proximity panic');
+
+  const nightModes = new Set();
+  let lavaLandingFrames = 0;
+  for (let t = 12.1; t <= 62; t += 0.1) {
+    const result = controller.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 80, z: base.z + 80 },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 18.5,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(Number.isFinite(result.state.position.x), true);
+    assert.equal(Number.isFinite(result.state.position.y), true);
+    assert.equal(Number.isFinite(result.state.position.z), true);
+    assert.equal(result.state.debug.active, true);
+    nightModes.add(result.state.debug.mode);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+    if (result.state.debug.mode === 'roost') {
+      assert.equal(authoredRoostIds.has(result.state.debug.roostId), true);
+      assert.equal(result.state.debug.roostSurface, 'lava');
+    }
+    if (result.state.debug.mode === 'landing') {
+      lavaLandingFrames += 1;
+      assert.equal(result.state.debug.landingSurface, 'lava');
+      assert.equal(authoredRoostIds.has(result.state.debug.landingRoostId), true);
+    }
+  }
+  for (const mode of ['takeoff', 'quarter', 'hover', 'pounce', 'rebound', 'approach', 'landing', 'roost']) {
+    assert.equal(nightModes.has(mode), true, `owl should enter ${mode}`);
+  }
+  assert.ok(lavaLandingFrames > 4);
+  for (const clip of ['listenSwivel', 'softLaunch', 'buoyantFlight', 'silentQuarter', 'hoverListen', 'preyPounce', 'lavaLanding']) {
+    assert.equal(clips.has(clip), true, `owl should request ${clip}`);
+  }
+});
+
+test('Floreana racers bask, hunt, and retreat into real lava crevices', () => {
+  const record = baseSpecimens.find(specimen => specimen.id === 'galapagosracer');
+  assert.ok(record);
+  assert.equal(record.name, 'Floreana Racer Snake');
+  assert.equal(record.latin, 'Pseudalsophis biserialis biserialis');
+  assert.ok(record.details.some(detail => /Charles Island/i.test(detail)));
+  assert.equal(/[“”]/.test(record.memoryText), false, 'field memory should not masquerade as a Darwin quotation');
+
+  const render = getWildlifeRenderProfile({ id: 'galapagos_racer' });
+  const profile = getWildlifeBehaviorProfile({ id: 'floreana_racer' });
+  assert.deepEqual(render, { type: 'proceduralSnake', variant: 'floreanaRacer' });
+  assert.equal(profile.controller, 'racer');
+
+  const actors = getThreeSpecimens('LAVA_FLATS').filter(specimen => specimen.id === 'galapagosracer');
+  assert.equal(actors.length, 3);
+  const actor = actors.find(specimen => specimen.localInstanceId === 'lava-flats-floreana-racer-tube-rim-1');
+  assert.ok(actor);
+  assert.equal(actor.instanceId, 'LAVA_FLATS:lava-flats-floreana-racer-tube-rim-1');
+  const base = new Vector3(...actor.spawnPoint);
+  const shelters = getRacerShelters('LAVA_FLATS', { origin: base, radius: profile.shelterSearchRadius });
+  assert.ok(shelters.length >= 3);
+  assert.equal(shelters.every(isRacerShelter), true);
+  assert.equal(shelters.every(shelter => shelter.surface === 'crevice' && shelter.obstacleId), true);
+
+  const createController = () => createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.47,
+    zoneId: 'LAVA_FLATS',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+
+  const daylight = createController();
+  const daylightModes = new Set();
+  const clips = new Set();
+  for (let t = 0; t <= 60; t += 0.1) {
+    const result = daylight.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 80, z: base.z + 80 },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 12,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.debug.active, true);
+    assert.equal(result.state.airborne, false);
+    daylightModes.add(result.state.debug.mode);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+  }
+  for (const mode of ['bask', 'taste', 'strike', 'slither']) {
+    assert.equal(daylightModes.has(mode), true, `racer should enter ${mode}`);
+  }
+
+  const approached = createController();
+  const threatModes = new Set();
+  let shelteredAtRealRock = false;
+  for (let t = 0; t <= 20; t += 0.1) {
+    const result = approached.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 0.5, z: base.z + 0.5 },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 12,
+    });
+    threatModes.add(result.state.debug.mode);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+    if (result.state.debug.mode === 'shelter') {
+      shelteredAtRealRock ||= result.state.debug.shelterSurface === 'crevice'
+        && Boolean(result.state.debug.shelterId);
+    }
+  }
+  for (const mode of ['alert', 'retreat', 'shelter']) {
+    assert.equal(threatModes.has(mode), true, `approached racer should enter ${mode}`);
+  }
+  assert.equal(shelteredAtRealRock, true);
+
+  const nocturnal = createController();
+  const nightModes = new Set();
+  for (let t = 0; t <= 30; t += 0.1) {
+    const result = nocturnal.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 80, z: base.z + 80 },
+      elapsedTime: t,
+      delta: 0.1,
+      timeOfDay: 22,
+    });
+    nightModes.add(result.state.debug.mode);
+    if (result.state.animation?.clip) clips.add(result.state.animation.clip);
+    assert.equal(result.state.debug.active, false);
+  }
+  assert.equal(nightModes.has('retreat'), true);
+  assert.equal(nightModes.has('shelter'), true);
+  for (const clip of ['baskCoil', 'tongueTaste', 'groundSlither', 'alertS', 'preyStrike', 'creviceRetreat', 'shelterStill']) {
+    assert.equal(clips.has(clip), true, `racer should request ${clip}`);
+  }
+});
+
+test('Floreana racers form frequent dry-land populations and pursue grounded birds', () => {
+  const populations = {
+    LAVA_FLATS: 3,
+    COASTAL_SCRUBLAND: 3,
+    POST_SCRUB_RISE: 3,
+    E_MID: 2,
+    NORTHERN_HIGHLANDS: 2,
+  };
+  for (const [zoneId, expectedCount] of Object.entries(populations)) {
+    const racers = getThreeSpecimens(zoneId).filter(specimen => specimen.id === 'galapagosracer');
+    assert.equal(racers.length, expectedCount, `${zoneId} should contain its authored racer population`);
+    assert.equal(racers.every(specimen => specimen.instanceId.startsWith(`${zoneId}:`)), true);
+    for (const racer of racers) {
+      const [x, , z] = racer.spawnPoint;
+      assert.equal(isWalkableTerrain(x, z, zoneId), true);
+      const shelters = getRacerShelters(zoneId, {
+        origin: { x, z },
+        radius: getWildlifeBehaviorProfile(racer).shelterSearchRadius,
+      });
+      assert.ok(shelters.length > 0);
+      assert.equal(shelters.every(isRacerShelter), true);
+      assert.equal(shelters.some(shelter => shelter.surface === 'crevice' || shelter.surface === 'scrub'), true);
+    }
+  }
+
+  const zoneId = 'COASTAL_SCRUBLAND';
+  const racerActor = getThreeSpecimens(zoneId).find(specimen => (
+    specimen.localInstanceId === 'coastal-scrub-floreana-racer-saltbush-1'
+  ));
+  const profile = getWildlifeBehaviorProfile(racerActor);
+  const base = new Vector3(...racerActor.spawnPoint);
+  const preyActorId = `${zoneId}:test-ground-finch-prey`;
+  setSpecimenRuntimePose(zoneId, preyActorId, {
+    x: base.x + 5,
+    y: terrainHeight(base.x + 5, base.z, zoneId) + 0.05,
+    z: base.z,
+    specimenId: 'mediumgroundfinch',
+  });
+  try {
+    const controller = createFaunaMotionController({
+      profile,
+      habitat: { radiusX: racerActor.habitatRadiusX, radiusZ: racerActor.habitatRadiusZ },
+      seed: 0.47,
+      zoneId,
+      basePosition: base,
+      actorScale: racerActor.sceneScale,
+      actorId: `${zoneId}:test-racer-predator`,
+    });
+    const modes = new Set();
+    let trackedPrey = false;
+    for (let t = 0; t <= 14; t += 0.1) {
+      const result = controller.update({
+        basePosition: base,
+        zoneId,
+        playerPosition: { x: base.x + 80, z: base.z + 80 },
+        elapsedTime: t,
+        delta: 0.1,
+        timeOfDay: 12,
+      });
+      modes.add(result.state.debug.mode);
+      trackedPrey ||= result.state.debug.preyActorId === preyActorId;
+    }
+    assert.equal(modes.has('hunt'), true);
+    assert.equal(modes.has('strike'), true);
+    assert.equal(trackedPrey, true);
+    const preyStimuli = consumeSpecimenStimuli(zoneId, preyActorId);
+    assert.ok(preyStimuli.some(stimulus => (
+      stimulus.kind === 'contact'
+      && stimulus.sourceActorId === `${zoneId}:test-racer-predator`
+    )), 'a close racer strike should startle the targeted bird into its escape behavior');
+  } finally {
+    removeSpecimenRuntimePose(zoneId, preyActorId);
+  }
+});
+
+test('animal animation lab exposes every procedural animal and its specialist behavior modes', () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), 'three-game/ui/dev/AnimalAnimationDevPanel.jsx'),
+    'utf8',
+  );
+  for (const [id, variant] of [
+    ['mediumGroundFinchProcedural', 'mediumGround'],
+    ['largeGroundFinchProcedural', 'largeGround'],
+    ['floreanaMockingbirdProcedural', 'floreanaMockingbird'],
+    ['galapagosDoveProcedural', 'galapagosDove'],
+    ['galapagosHawkProcedural', 'galapagosHawk'],
+    ['galapagosShortEaredOwlProcedural', 'galapagosShortEaredOwl'],
+    ['galapagosRacerProcedural', 'floreanaRacer'],
+  ]) {
+    assert.match(source, new RegExp(`id: '${id}'[\\s\\S]{0,260}variant: '${variant}'`));
+  }
+  for (const mode of ['ground forage', 'glide', 'tree perch', 'soar', 'stoop', 'tree landing', 'listening swivel', 'silent quartering', 'hover listen', 'prey pounce', 'lava landing', 'basking coil', 'tongue tasting', 'alert S-curve', 'prey strike', 'crevice retreat', 'shelter still']) {
+    assert.match(source, new RegExp(`'${mode}'`), `animation lab should expose ${mode}`);
+  }
+  assert.match(source, /galapagosHawkProcedural[\s\S]{0,420}perchPreview: true/);
+  assert.match(source, /get\('animalAnimationLab'\)/);
+
+  const shellSource = fs.readFileSync(
+    path.join(process.cwd(), 'three-game/ThreeDarwinGame.jsx'),
+    'utf8',
+  );
+  assert.match(shellSource, /params\.has\('animalAnimationLab'\)[\s\S]{0,100}setShowAnimalAnimationLab\(true\)/);
 });
 
 test('promoted Floreana flora resolve as authored specimen actors with runtime models', () => {
@@ -3238,6 +4201,43 @@ test('post scrub rise interactive flora feeds stable separated prickly pear phys
     for (const other of layer.sites.slice(index + 1)) {
       assert.ok(Math.hypot(site.x - other.x, site.z - other.z) >= 4.5);
     }
+  }
+});
+
+test('Darwin’s lost herb forms one habitat-scored highland reconstruction per region', () => {
+  for (const zoneId of ['W_HIGH', 'NORTHERN_HIGHLANDS']) {
+    const ecology = getEcology(zoneId);
+    const layer = ecology.interactiveFlora.find(item => item.runtime === 'delilia-inelegans');
+    const sicyos = ecology.interactiveFlora.find(item => item.runtime === 'sicyos-villosus');
+    assert.equal(layer.procedural, true);
+    assert.equal(layer.speciesId, DELILIA_INELEGANS_SPECIES.id);
+    assert.equal(layer.sites.length, 1);
+    assert.equal(layer.placementStats.generatedCount, 1);
+    assert.equal(layer.placementStats.shortfallCount, 0);
+    assert.deepEqual(getDeliliaSites(zoneId).map(site => site.id), layer.sites.map(site => site.id));
+    const [site] = layer.sites;
+    assert.ok(site.size >= 0.9 && site.size <= 1.16);
+    assert.match(site.seed, new RegExp(`^${zoneId}:`));
+    assert.ok(Math.min(...sicyos.sites.map(other => (
+      Math.hypot(site.x - other.x, site.z - other.z)
+    ))) >= 5);
+  }
+});
+
+test('wing-fruited Floreana daisies remain single, deterministic dry-transition shrubs', () => {
+  for (const zoneId of ['COASTAL_SCRUBLAND', 'POST_SCRUB_RISE', 'NORTHERN_HIGHLANDS']) {
+    const ecology = getEcology(zoneId);
+    const layer = ecology.interactiveFlora.find(item => item.runtime === 'lecocarpus-pinnatifidus');
+    assert.equal(layer.procedural, true);
+    assert.equal(layer.speciesId, LECOCARPUS_PINNATIFIDUS_SPECIES.id);
+    assert.equal(layer.sites.length, 1);
+    assert.equal(layer.placementStats.generatedCount, 1);
+    assert.equal(layer.placementStats.shortfallCount, 0);
+    assert.deepEqual(getLecocarpusSites(zoneId).map(site => site.id), layer.sites.map(site => site.id));
+    const [site] = layer.sites;
+    assert.ok(site.size >= 0.84 && site.size <= 1.16);
+    assert.ok(site.flowering >= 0.7 && site.flowering <= 0.96);
+    assert.match(site.seed, new RegExp(`^${zoneId}:`));
   }
 });
 

@@ -1,7 +1,9 @@
 import {
   clampToWalkable,
   getTerrainEdgeRisk,
+  isWalkableTerrain,
   movementTerrainHeight,
+  terrainClimbProfile,
   terrainHeight,
   terrainSlopeAt,
 } from '../world/terrain';
@@ -127,6 +129,7 @@ function cameraDistanceLimit(origin, target, obstacles, options = {}) {
 
 export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOffsets = {}, options = {}) {
   const obstacles = getRuntimeObstacles(zoneId, obstacleOffsets);
+  const climbProfile = terrainClimbProfile(zoneId);
   const diagnostics = options.diagnostics === true;
   const frameCache = {
     terrain: new Map(),
@@ -256,6 +259,8 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     obstacles,
     terrainHeight: (x, z) => getTerrainSample(x, z).movementY - 0.04,
     terrainSlopeAt: (x, z) => terrainSlopeAt(x, z, zoneId),
+    terrainClimbProfile: climbProfile,
+    isWalkableTerrain: (x, z) => isWalkableTerrain(x, z, zoneId),
     spawnY: (x, z) => getTerrainSample(x, z).movementY,
     groundInfo: getGroundInfo,
     stanceGroundInfo: getStanceGroundInfo,

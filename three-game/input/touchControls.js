@@ -23,6 +23,7 @@ const touchState = {
   fireRifle: false,
   write: false,
   inspect: false,
+  fieldAction: false,
   animalEat: false,
   animalSleep: false,
   animalDefecate: false,
@@ -71,6 +72,7 @@ export function consumeTouchControls() {
   touchState.fireRifle = false;
   touchState.write = false;
   touchState.inspect = false;
+  touchState.fieldAction = false;
   touchState.animalEat = false;
   touchState.animalSleep = false;
   touchState.animalDefecate = false;

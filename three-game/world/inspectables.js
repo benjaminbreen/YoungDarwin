@@ -8,6 +8,7 @@ const RARITY_LABELS = {
   rare: 'Rare',
   endemic: 'Endemic',
   historical: 'Historically present',
+  ultra_rare: 'Ultra-rare',
 };
 
 export const inspectableCatalog = {
@@ -52,7 +53,7 @@ export const inspectableCatalog = {
 
 function normalizeRarity(rarity) {
   if (!rarity) return 'uncommon';
-  const key = String(rarity).toLowerCase().replace(/\s+/g, '_');
+  const key = String(rarity).toLowerCase().replace(/[\s-]+/g, '_');
   return RARITY_LABELS[key] ? key : 'uncommon';
 }
 

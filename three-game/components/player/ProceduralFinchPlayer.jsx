@@ -94,6 +94,116 @@ const FINCH_VISUAL_VARIANTS = Object.freeze({
     legTint: '#373a3b',
     eyeRingTint: '#c3b89f',
   }),
+  // Zenaida galapagoensis is appreciably larger and fuller-bodied than the
+  // ground finches, with a small dark bill, long tail, cinnamon breast,
+  // blue orbital skin, and black-and-white spots across the folded wing.
+  // Reusing the articulated bird rig keeps its flight mechanically identical
+  // to Finch Mode while changing the silhouette and diagnostic field marks.
+  galapagosDove: Object.freeze({
+    plumage: 'galapagosDove',
+    beakShape: 'decurved',
+    rootScale: 0.67,
+    bodyScale: [1.14, 1.12, 1.24],
+    headScale: [1.03, 1.04, 1.02],
+    beakScale: [0.72, 0.82, 0.82],
+    wingScale: [1.08, 1.06, 1.18],
+    tailScale: [1.08, 1, 1.42],
+    legScale: [1.08, 1.14, 1.08],
+    tailPosition: [0, 0.35, -0.29],
+    headPosition: [0, 0.47, 0.275],
+    beakPosition: [0, -0.012, 0.09],
+    legPosition: [0, 0.012, 0.045],
+    groundPitch: -0.08,
+    scanAmount: 0.16,
+    tailFlickAmount: 0.28,
+    stepRateMultiplier: 0.82,
+    strideAmount: 0.34,
+    bodyTint: '#f1d2bf',
+    headTint: '#d7cbc5',
+    wingTint: '#ead0bf',
+    tailTint: '#d7c0b2',
+    beakTint: '#85858b',
+    armMassTint: '#8a6257',
+    thighTint: '#d6aa99',
+    legTint: '#ad5f61',
+    eyeRingTint: '#42a9d2',
+    eyeRingInner: 0.019,
+    eyeRingOuter: 0.034,
+  }),
+  // Buteo galapagoensis is a broad-winged, heavy island raptor. A hooked
+  // bill, deep chest, powerful yellow feet, barred flight feathers and a
+  // much larger wingspan keep it from reading as an enlarged songbird.
+  galapagosHawk: Object.freeze({
+    plumage: 'galapagosHawk',
+    beakShape: 'raptor',
+    flightStyle: 'soar',
+    rootScale: 0.98,
+    bodyScale: [1.2, 1.18, 1.2],
+    headScale: [1.16, 1.08, 1.02],
+    beakScale: [1.12, 1.12, 1.12],
+    wingScale: [1.34, 1.08, 1.28],
+    tailScale: [1.32, 1, 1.18],
+    legScale: [1.22, 1.2, 1.22],
+    tailPosition: [0, 0.35, -0.29],
+    headPosition: [0, 0.47, 0.275],
+    beakPosition: [0, -0.012, 0.09],
+    legPosition: [0, 0.01, 0.04],
+    groundPitch: -0.02,
+    scanAmount: 0.2,
+    tailFlickAmount: 0.12,
+    stepRateMultiplier: 0.7,
+    strideAmount: 0.28,
+    bodyTint: '#d0b69b',
+    headTint: '#bda38c',
+    wingTint: '#c5aa8f',
+    tailTint: '#baa087',
+    beakTint: '#55585a',
+    cereTint: '#d5aa32',
+    armMassTint: '#4d392e',
+    thighTint: '#b88e68',
+    legTint: '#d1a52b',
+    eyeRingTint: '#d7ad35',
+    eyeRingInner: 0.015,
+    eyeRingOuter: 0.025,
+  }),
+  // Asio flammeus galapagoensis is an owl of open lava and scrub, not a
+  // miniature hawk. Its compact upright body, broad rounded wings, short
+  // tail, tiny ear tufts and forward-facing facial disc make the silhouette
+  // readable even before the mottled buff plumage resolves.
+  galapagosShortEaredOwl: Object.freeze({
+    plumage: 'galapagosShortEaredOwl',
+    beakShape: 'raptor',
+    flightStyle: 'owl',
+    owlFace: true,
+    rootScale: 0.82,
+    bodyScale: [1.28, 1.32, 1.02],
+    headScale: [1.46, 1.42, 0.92],
+    beakScale: [0.32, 0.4, 0.36],
+    wingScale: [1.42, 1.12, 1.18],
+    tailScale: [1.08, 1, 0.78],
+    legScale: [1.18, 0.9, 1.18],
+    tailPosition: [0, 0.355, -0.255],
+    headPosition: [0, 0.47, 0.245],
+    beakPosition: [0, -0.058, 0.108],
+    legPosition: [0, 0.008, 0.035],
+    groundPitch: 0.035,
+    scanAmount: 1.18,
+    tailFlickAmount: 0.08,
+    stepRateMultiplier: 0.62,
+    strideAmount: 0.24,
+    bodyTint: '#d7bd91',
+    headTint: '#c9a978',
+    wingTint: '#cbb083',
+    tailTint: '#b79769',
+    beakTint: '#393630',
+    armMassTint: '#796246',
+    thighTint: '#89673f',
+    legTint: '#aa8d5c',
+    eyeRingTint: '#17130f',
+    irisTint: '#e3a51f',
+    faceDiscTint: '#b89a69',
+    faceRuffTint: '#4b3a2c',
+  }),
 });
 
 function finchVisualVariant(id) {
@@ -516,12 +626,15 @@ function paintArmWingTexture(rng, profile = 'groundFinch') {
   const ctx = canvas.getContext('2d');
   const feathers = 7;
   const mockingbird = profile === 'floreanaMockingbird';
+  const dove = profile === 'galapagosDove';
+  const hawk = profile === 'galapagosHawk';
+  const owl = profile === 'galapagosShortEaredOwl';
 
   // --- Top surface ---
   const top = ctx.createLinearGradient(0, 0, 0, mid);
-  top.addColorStop(0, mockingbird ? '#5e5147' : '#6b5e49');
-  top.addColorStop(0.35, mockingbird ? '#4d4037' : '#584c3a');
-  top.addColorStop(1, mockingbird ? '#392f2a' : '#463c2e');
+  top.addColorStop(0, owl ? '#8a704c' : hawk ? '#4b392d' : dove ? '#9a6859' : mockingbird ? '#5e5147' : '#6b5e49');
+  top.addColorStop(0.35, owl ? '#6d563d' : hawk ? '#392b24' : dove ? '#7f5149' : mockingbird ? '#4d4037' : '#584c3a');
+  top.addColorStop(1, owl ? '#44382d' : hawk ? '#261f1c' : dove ? '#5b3f3c' : mockingbird ? '#392f2a' : '#463c2e');
   ctx.fillStyle = top;
   ctx.fillRect(0, 0, w, mid);
 
@@ -561,9 +674,42 @@ function paintArmWingTexture(rng, profile = 'groundFinch') {
     ctx.fillStyle = tips;
     ctx.fillRect(0, mid - 58, w, 34);
   }
+  if (dove) {
+    // Alternating black and ivory covert spots are the dove's clearest
+    // field mark at gameplay distance. Keep them broad enough to survive
+    // mipmapping, and stagger the rows like overlapping feathers.
+    const spots = [
+      [70, 84, 22, 13], [150, 112, 25, 14], [236, 78, 23, 13],
+      [320, 122, 26, 15], [410, 88, 24, 14], [470, 148, 19, 12],
+      [104, 170, 19, 11], [206, 190, 24, 13], [354, 180, 21, 12],
+    ];
+    for (let i = 0; i < spots.length; i += 1) {
+      const [x, y, rx, ry] = spots[i];
+      ctx.fillStyle = '#292426';
+      ctx.beginPath();
+      ctx.ellipse(x, y, rx, ry, -0.18, 0, Math.PI * 2);
+      ctx.fill();
+      if (i % 2 === 0) {
+        ctx.fillStyle = '#eee3d2';
+        ctx.beginPath();
+        ctx.ellipse(x + 2, y - 1, rx * 0.48, ry * 0.48, -0.18, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  if (owl) {
+    ctx.fillStyle = 'rgba(53, 42, 31, 0.68)';
+    for (const y of [78, 132, 190]) ctx.fillRect(0, y, w, 13);
+    ctx.fillStyle = 'rgba(218, 194, 151, 0.5)';
+    for (let x = 34; x < w; x += 62) {
+      ctx.beginPath();
+      ctx.ellipse(x, 48 + (x % 3) * 24, 15, 7, -0.18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   // Dark trailing band, its inner edge scalloped at feather centres so it
   // tracks the mesh scallops.
-  ctx.fillStyle = mockingbird ? '#302724' : '#362a20';
+  ctx.fillStyle = owl ? '#3a3027' : hawk ? '#1f1b19' : dove ? '#382b2d' : mockingbird ? '#302724' : '#362a20';
   ctx.fillRect(0, mid - 20, w, 20);
   for (let i = 0; i < feathers; i += 1) {
     const x = ((i + 0.5) / feathers) * w + 5;
@@ -581,11 +727,19 @@ function paintArmWingTexture(rng, profile = 'groundFinch') {
 
   // --- Underside: pale buff, dark trailing band, soft covert shadow. ---
   const under = ctx.createLinearGradient(0, mid, 0, h);
-  under.addColorStop(0, mockingbird ? '#8c8579' : '#a99878');
-  under.addColorStop(0.25, mockingbird ? '#aaa294' : '#c4b696');
-  under.addColorStop(1, mockingbird ? '#c4bbab' : '#d4c8a9');
+  under.addColorStop(0, owl ? '#9f8764' : hawk ? '#786451' : dove ? '#9c7d75' : mockingbird ? '#8c8579' : '#a99878');
+  under.addColorStop(0.25, owl ? '#c5aa7d' : hawk ? '#aa8c6a' : dove ? '#bea298' : mockingbird ? '#aaa294' : '#c4b696');
+  under.addColorStop(1, owl ? '#e0c999' : hawk ? '#d0b58a' : dove ? '#d9c0b1' : mockingbird ? '#c4bbab' : '#d4c8a9');
   ctx.fillStyle = under;
   ctx.fillRect(0, mid, w, mid);
+  if (hawk) {
+    ctx.fillStyle = 'rgba(54, 42, 34, 0.62)';
+    for (const y of [mid + 54, mid + 114, mid + 178]) ctx.fillRect(0, y, w, 18);
+  }
+  if (owl) {
+    ctx.fillStyle = 'rgba(73, 56, 39, 0.58)';
+    for (const y of [mid + 48, mid + 104, mid + 162, mid + 216]) ctx.fillRect(0, y, w, 12);
+  }
   ctx.fillStyle = '#453729';
   ctx.fillRect(0, mid, w, 18);
   for (let i = 0; i < feathers; i += 1) {
@@ -624,11 +778,14 @@ function paintHandWingTexture(rng, profile = 'groundFinch') {
   const ctx = canvas.getContext('2d');
   const feathers = 5;
   const mockingbird = profile === 'floreanaMockingbird';
+  const dove = profile === 'galapagosDove';
+  const hawk = profile === 'galapagosHawk';
+  const owl = profile === 'galapagosShortEaredOwl';
 
   const top = ctx.createLinearGradient(0, 0, 0, mid);
-  top.addColorStop(0, mockingbird ? '#4f443c' : '#584c3a');
-  top.addColorStop(0.3, mockingbird ? '#3e342f' : '#453b2d');
-  top.addColorStop(1, mockingbird ? '#292321' : '#352d23');
+  top.addColorStop(0, owl ? '#765e43' : hawk ? '#403229' : dove ? '#76504a' : mockingbird ? '#4f443c' : '#584c3a');
+  top.addColorStop(0.3, owl ? '#5e4937' : hawk ? '#302723' : dove ? '#563d3b' : mockingbird ? '#3e342f' : '#453b2d');
+  top.addColorStop(1, owl ? '#3d332b' : hawk ? '#211d1b' : dove ? '#30282a' : mockingbird ? '#292321' : '#352d23');
   ctx.fillStyle = top;
   ctx.fillRect(0, 0, w, mid);
 
@@ -657,7 +814,19 @@ function paintHandWingTexture(rng, profile = 'groundFinch') {
     ctx.fillStyle = patch;
     ctx.fillRect(0, 76, w * 0.62, 42);
   }
-  ctx.fillStyle = mockingbird ? '#26201f' : '#2b2219';
+  if (dove) {
+    for (const [x, y, pale] of [[82, 92, true], [176, 142, false], [280, 88, true], [382, 154, false]]) {
+      ctx.fillStyle = pale ? '#e9ddca' : '#252225';
+      ctx.beginPath();
+      ctx.ellipse(x, y, 22, 12, -0.22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (owl) {
+    ctx.fillStyle = 'rgba(47, 38, 30, 0.72)';
+    for (const y of [66, 124, 186]) ctx.fillRect(0, y, w, 13);
+  }
+  ctx.fillStyle = owl ? '#342c25' : hawk ? '#1c1918' : dove ? '#292326' : mockingbird ? '#26201f' : '#2b2219';
   ctx.fillRect(0, mid - 18, w, 18);
   for (let i = 0; i < feathers; i += 1) {
     const x = ((i + 0.5) / feathers) * w + 7;
@@ -673,11 +842,19 @@ function paintHandWingTexture(rng, profile = 'groundFinch') {
   ctx.fillRect(0, 0, w, mid);
 
   const under = ctx.createLinearGradient(0, mid, 0, h);
-  under.addColorStop(0, mockingbird ? '#817b72' : '#94856a');
-  under.addColorStop(0.3, mockingbird ? '#a39b8d' : '#b7a888');
-  under.addColorStop(1, mockingbird ? '#bbb2a3' : '#c8bb9c');
+  under.addColorStop(0, owl ? '#917a5d' : hawk ? '#6e5b4b' : dove ? '#8d7470' : mockingbird ? '#817b72' : '#94856a');
+  under.addColorStop(0.3, owl ? '#bba076' : hawk ? '#9d8061' : dove ? '#b2978f' : mockingbird ? '#a39b8d' : '#b7a888');
+  under.addColorStop(1, owl ? '#dbc18e' : hawk ? '#c2a77e' : dove ? '#ccb2a7' : mockingbird ? '#bbb2a3' : '#c8bb9c');
   ctx.fillStyle = under;
   ctx.fillRect(0, mid, w, mid);
+  if (hawk) {
+    ctx.fillStyle = 'rgba(48, 38, 32, 0.7)';
+    for (const y of [mid + 46, mid + 108, mid + 172]) ctx.fillRect(0, y, w, 19);
+  }
+  if (owl) {
+    ctx.fillStyle = 'rgba(65, 50, 37, 0.64)';
+    for (const y of [mid + 42, mid + 96, mid + 150, mid + 206]) ctx.fillRect(0, y, w, 12);
+  }
   ctx.fillStyle = '#382d22';
   ctx.fillRect(0, mid, w, 16);
   for (let i = 0; i < feathers; i += 1) {
@@ -714,10 +891,13 @@ function paintCovertTexture(rng, profile = 'groundFinch') {
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
   const mockingbird = profile === 'floreanaMockingbird';
+  const dove = profile === 'galapagosDove';
+  const hawk = profile === 'galapagosHawk';
+  const owl = profile === 'galapagosShortEaredOwl';
   const g = ctx.createLinearGradient(0, 0, 0, s);
-  g.addColorStop(0, mockingbird ? '#62554a' : '#7b6c52');
-  g.addColorStop(0.5, mockingbird ? '#51443b' : '#6d5f47');
-  g.addColorStop(1, mockingbird ? '#423630' : '#61533e');
+  g.addColorStop(0, owl ? '#92764f' : hawk ? '#4d392d' : dove ? '#a56f5d' : mockingbird ? '#62554a' : '#7b6c52');
+  g.addColorStop(0.5, owl ? '#72583f' : hawk ? '#3c2d26' : dove ? '#87584f' : mockingbird ? '#51443b' : '#6d5f47');
+  g.addColorStop(1, owl ? '#4b3d31' : hawk ? '#2a231f' : dove ? '#67443f' : mockingbird ? '#423630' : '#61533e');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, s, s);
   // Lesser/median covert scallop rows, staggered.
@@ -748,17 +928,42 @@ function paintCovertTexture(rng, profile = 'groundFinch') {
       ctx.fill();
     }
   }
-  // Cream bar with a scalloped top seam, one bump per mesh scallop.
-  ctx.fillStyle = mockingbird ? '#e5dbc4' : '#e9dcba';
-  ctx.fillRect(0, s - 30, s, 30);
-  for (let i = 0; i < 8; i += 1) {
-    const x = (i + 0.5) * (s / 8);
-    ctx.beginPath();
-    ctx.arc(x, s - 30, 14, Math.PI, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(58, 44, 28, 0.35)';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
+  if (owl) {
+    ctx.fillStyle = '#44352a';
+    for (const y of [58, 112, 168, 218]) ctx.fillRect(0, y, s, 10);
+    ctx.fillStyle = '#b99a68';
+    for (let x = 18; x < s; x += 38) {
+      ctx.beginPath();
+      ctx.ellipse(x, 34 + (x % 4) * 21, 9, 5, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (hawk) {
+    ctx.fillStyle = '#211d1a';
+    for (const y of [72, 132, 190]) ctx.fillRect(0, y, s, 14);
+    ctx.fillStyle = '#6f543d';
+    ctx.fillRect(0, s - 28, s, 28);
+  } else if (dove) {
+    for (const [x, y, pale] of [[38, 68, false], [92, 108, true], [148, 65, false], [204, 119, true], [226, 172, false], [64, 176, true]]) {
+      ctx.fillStyle = pale ? '#eee1ce' : '#282326';
+      ctx.beginPath();
+      ctx.ellipse(x, y, 15, 9, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#3a2c2f';
+    ctx.fillRect(0, s - 28, s, 28);
+  } else {
+    // Cream bar with a scalloped top seam, one bump per mesh scallop.
+    ctx.fillStyle = mockingbird ? '#e5dbc4' : '#e9dcba';
+    ctx.fillRect(0, s - 30, s, 30);
+    for (let i = 0; i < 8; i += 1) {
+      const x = (i + 0.5) * (s / 8);
+      ctx.beginPath();
+      ctx.arc(x, s - 30, 14, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(58, 44, 28, 0.35)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
   }
   const shade = ctx.createLinearGradient(0, 0, 0, s);
   shade.addColorStop(0, 'rgba(238, 214, 170, 0.1)');
@@ -778,11 +983,14 @@ function paintPrimaryFeatherTexture(profile = 'groundFinch') {
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
   const mockingbird = profile === 'floreanaMockingbird';
+  const dove = profile === 'galapagosDove';
+  const hawk = profile === 'galapagosHawk';
+  const owl = profile === 'galapagosShortEaredOwl';
   const g = ctx.createLinearGradient(0, 0, w, 0);
-  g.addColorStop(0, mockingbird ? '#51463e' : '#564a37');
-  g.addColorStop(0.6, mockingbird ? '#3d332e' : '#463c2d');
-  g.addColorStop(0.82, mockingbird ? '#2e2826' : '#372f24');
-  g.addColorStop(1, mockingbird ? '#211d1c' : '#262019');
+  g.addColorStop(0, owl ? '#806746' : hawk ? '#49382e' : dove ? '#59403e' : mockingbird ? '#51463e' : '#564a37');
+  g.addColorStop(0.6, owl ? '#5e4b39' : hawk ? '#352a24' : dove ? '#3e3031' : mockingbird ? '#3d332e' : '#463c2d');
+  g.addColorStop(0.82, owl ? '#44372e' : hawk ? '#28221f' : dove ? '#2e282b' : mockingbird ? '#2e2826' : '#372f24');
+  g.addColorStop(1, owl ? '#2d2824' : hawk ? '#1b1918' : dove ? '#211f22' : mockingbird ? '#211d1c' : '#262019');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
   // Pale outer-vane edge along the leading side.
@@ -821,13 +1029,24 @@ function paintTailTexture(rng, profile = 'groundFinch') {
   const ctx = canvas.getContext('2d');
   const feathers = 6;
   const mockingbird = profile === 'floreanaMockingbird';
+  const dove = profile === 'galapagosDove';
+  const hawk = profile === 'galapagosHawk';
+  const owl = profile === 'galapagosShortEaredOwl';
 
   const zones = ctx.createLinearGradient(0, 0, 0, h);
-  zones.addColorStop(0, mockingbird ? '#50453d' : '#584c3a');
-  zones.addColorStop(0.25, mockingbird ? '#413832' : '#484033');
-  zones.addColorStop(1, mockingbird ? '#2f2a28' : '#3a3229');
+  zones.addColorStop(0, owl ? '#8b704d' : hawk ? '#5b493d' : dove ? '#63504d' : mockingbird ? '#50453d' : '#584c3a');
+  zones.addColorStop(0.25, owl ? '#6a543e' : hawk ? '#46392f' : dove ? '#493d3d' : mockingbird ? '#413832' : '#484033');
+  zones.addColorStop(1, owl ? '#41362e' : hawk ? '#2b2521' : dove ? '#302b2e' : mockingbird ? '#2f2a28' : '#3a3229');
   ctx.fillStyle = zones;
   ctx.fillRect(0, 0, w, h);
+  if (hawk) {
+    ctx.fillStyle = 'rgba(29, 25, 23, 0.7)';
+    for (const y of [58, 112, 168, 222]) ctx.fillRect(0, y, w, 15);
+  }
+  if (owl) {
+    ctx.fillStyle = 'rgba(55, 43, 32, 0.7)';
+    for (const y of [48, 96, 144, 192, 232]) ctx.fillRect(0, y, w, 11);
+  }
 
   // Pale outer tail-feather edges.
   for (const [x0, x1] of [[26, 0], [w - 26, w]]) {
@@ -868,7 +1087,7 @@ function paintTailTexture(rng, profile = 'groundFinch') {
   }
 
   // Dark tip band, scalloped at feather centres to match the mesh.
-  ctx.fillStyle = mockingbird ? '#292423' : '#332920';
+  ctx.fillStyle = owl ? '#322b26' : hawk ? '#1c1a19' : dove ? '#242225' : mockingbird ? '#292423' : '#332920';
   ctx.fillRect(0, h - 15, w, 15);
   for (let i = 0; i < feathers; i += 1) {
     const x = ((i + 0.5) / feathers) * w;
@@ -904,18 +1123,19 @@ function paintBeakTexture(profile = 'groundFinch') {
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
   const mockingbird = profile === 'floreanaMockingbird';
+  const darkBill = mockingbird || profile === 'galapagosDove' || profile === 'galapagosHawk' || profile === 'galapagosShortEaredOwl';
   const g = ctx.createLinearGradient(0, 0, 64, 0);
-  g.addColorStop(0, mockingbird ? '#34383a' : '#b97b3e');
-  g.addColorStop(0.34, mockingbird ? '#4d5253' : '#cf9450');
-  g.addColorStop(0.5, mockingbird ? '#666b6b' : '#e2b273');
-  g.addColorStop(0.66, mockingbird ? '#4d5253' : '#cf9450');
-  g.addColorStop(1, mockingbird ? '#34383a' : '#b97b3e');
+  g.addColorStop(0, darkBill ? '#34383a' : '#b97b3e');
+  g.addColorStop(0.34, darkBill ? '#4d5253' : '#cf9450');
+  g.addColorStop(0.5, darkBill ? '#666b6b' : '#e2b273');
+  g.addColorStop(0.66, darkBill ? '#4d5253' : '#cf9450');
+  g.addColorStop(1, darkBill ? '#34383a' : '#b97b3e');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 8);
   // Dusky tip.
   const tip = ctx.createLinearGradient(0, 0, 0, 4);
-  tip.addColorStop(0, mockingbird ? 'rgba(16, 18, 19, 0.62)' : 'rgba(90, 56, 26, 0.4)');
-  tip.addColorStop(1, mockingbird ? 'rgba(16, 18, 19, 0)' : 'rgba(90, 56, 26, 0)');
+  tip.addColorStop(0, darkBill ? 'rgba(16, 18, 19, 0.62)' : 'rgba(90, 56, 26, 0.4)');
+  tip.addColorStop(1, darkBill ? 'rgba(16, 18, 19, 0)' : 'rgba(90, 56, 26, 0)');
   ctx.fillStyle = tip;
   ctx.fillRect(0, 0, 64, 4);
   return canvasTexture(canvas);
@@ -1012,6 +1232,10 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
   const legs = useRef(null);
   const leftLeg = useRef(null);
   const rightLeg = useRef(null);
+  const leftEarTuft = useRef(null);
+  const rightEarTuft = useRef(null);
+  const leftOwlEyelid = useRef(null);
+  const rightOwlEyelid = useRef(null);
 
   const geometries = useMemo(() => ({
     // Torso: one continuous loft — plump and compact, shallow-bellied. The
@@ -1040,7 +1264,13 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     ], { radialSegments: 24, lengthSegments: 30 }),
     // Finch: a deep seed-cracking wedge. Mockingbird: a long, narrow bill
     // whose centreline and lower mandible curve gently down toward the tip.
-    beak: makeLoftGeometry(visual.beakShape === 'decurved' ? [
+    beak: makeLoftGeometry(visual.beakShape === 'raptor' ? [
+      { z: 0, y: 0.002, hw: 0.038, up: 0.034, down: 0.032 },
+      { z: 0.042, y: 0.002, hw: 0.03, up: 0.026, down: 0.03 },
+      { z: 0.078, y: -0.008, hw: 0.021, up: 0.02, down: 0.026 },
+      { z: 0.102, y: -0.029, hw: 0.012, up: 0.012, down: 0.019 },
+      { z: 0.108, y: -0.057, hw: 0.004, up: 0.005, down: 0.007 },
+    ] : visual.beakShape === 'decurved' ? [
       { z: 0, y: -0.003, hw: 0.023, up: 0.024, down: 0.027 },
       { z: 0.046, y: -0.006, hw: 0.018, up: 0.019, down: 0.021 },
       { z: 0.09, y: -0.013, hw: 0.012, up: 0.013, down: 0.015 },
@@ -1099,19 +1329,43 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
 
   const textures = useMemo(() => {
     const mockingbird = visual.plumage === 'floreanaMockingbird';
-    const rng = mulberry32(mockingbird ? 1835 : 1859);
+    const dove = visual.plumage === 'galapagosDove';
+    const hawk = visual.plumage === 'galapagosHawk';
+    const owl = visual.plumage === 'galapagosShortEaredOwl';
+    const rng = mulberry32(owl ? 18351002 : hawk ? 18351001 : dove ? 18350924 : mockingbird ? 1835 : 1859);
     return {
       // Dusty gray-brown, heavily mottled — the streaky female medium ground
       // finch. Wider value spread than reads right up close: Floreana's fog
       // compresses values hard, so the zones need room to survive it.
-      body: paintBodyTexture(mockingbird ? {
+      body: paintBodyTexture(owl ? {
+        back: '#6a5138', backWarm: '#8b6c48', flank: '#b38e5d', belly: '#dbc596',
+        rng, streakStrength: 0.54, scallopStrength: 0.22, mottleStrength: 0.92,
+      } : hawk ? {
+        back: '#322820', backWarm: '#4b382b', flank: '#72523b', belly: '#aa805e',
+        rng, streakStrength: 0.42, scallopStrength: 0.13, mottleStrength: 0.72,
+      } : dove ? {
+        back: '#765249', backWarm: '#986757', flank: '#bd7d6a', belly: '#dec0a8',
+        rng, streakStrength: 0.035, scallopStrength: 0.075, mottleStrength: 0.18,
+      } : mockingbird ? {
         back: '#43362f', backWarm: '#5c4a3e', flank: '#9b886d', belly: '#e0d5bd',
         rng, streakStrength: 0.12, scallopStrength: 0.12, mottleStrength: 0.86,
       } : {
         back: '#655741', backWarm: '#786a52', flank: '#9e8d6f', belly: '#ded2b6',
         rng, streakStrength: 0.3, scallopStrength: 0.1, mottleStrength: 1,
       }),
-      head: paintBodyTexture(mockingbird ? {
+      head: paintBodyTexture(owl ? {
+        back: '#5f4935', backWarm: '#846441', flank: '#b28d5e', belly: '#d7c294',
+        rng, streakStrength: 0.34, scallopStrength: 0.18, mottleStrength: 0.72,
+        size: 256, eyeBands: true,
+      } : hawk ? {
+        back: '#2d241e', backWarm: '#44342a', flank: '#674b38', belly: '#90694d',
+        rng, streakStrength: 0.22, scallopStrength: 0.1, mottleStrength: 0.5,
+        size: 256, eyeBands: true,
+      } : dove ? {
+        back: '#6d6261', backWarm: '#8c7770', flank: '#a58a7e', belly: '#d6b4a4',
+        rng, streakStrength: 0.02, scallopStrength: 0.04, mottleStrength: 0.04,
+        size: 256,
+      } : mockingbird ? {
         back: '#3e322d', backWarm: '#514138', flank: '#756250', belly: '#c7b89d',
         rng, streakStrength: 0.05, scallopStrength: 0.08, mottleStrength: 0.42,
         size: 256, eyeBands: true, faceProfile: 'mockingbird',
@@ -1141,9 +1395,13 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     armMass: material(visual.armMassTint || '#655843', { side: THREE.DoubleSide, roughness: 0.92 }),
     tail: material(visual.tailTint, { map: textures.tail, side: THREE.DoubleSide, roughness: 0.85 }),
     beak: material(visual.beakTint, { map: textures.beak, roughness: 0.45, envMapIntensity: 0.5 }),
+    cere: material(visual.cereTint || '#b7892b', { roughness: 0.72 }),
     eye: material('#0a0705', { roughness: 0.25, emissive: '#020202', emissiveIntensity: 0.04, envMapIntensity: 0.8 }),
     eyeShine: material('#f4ede0', { roughness: 0.2, emissive: '#c9c0ae', emissiveIntensity: 0.5, envMapIntensity: 0.5 }),
     eyeRing: material(visual.eyeRingTint || '#a89a7c', { side: THREE.DoubleSide, roughness: 0.9 }),
+    iris: material(visual.irisTint || '#b99134', { roughness: 0.38, emissive: visual.irisTint || '#b99134', emissiveIntensity: 0.1 }),
+    faceDisc: material(visual.faceDiscTint || '#d8c29a', { map: visual.owlFace ? textures.head : null, roughness: 0.98 }),
+    faceRuff: material(visual.faceRuffTint || '#5d4935', { roughness: 0.98 }),
     // Feathered thigh: flat belly-pale so it melts into the underbody.
     thigh: material(visual.thighTint || '#b6a687', { roughness: 0.95 }),
     leg: material(visual.legTint || '#5a4f42', { roughness: 0.72 }),
@@ -1170,6 +1428,8 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
       ? a.visualTime + delta
       : clock.elapsedTime;
     const flying = Boolean(motion.flying);
+    const soaring = visual.flightStyle === 'soar';
+    const owlFlight = visual.flightStyle === 'owl';
     const phase = motion.flightPhase || (flying ? 'cruise' : null);
     const takeoff = phase === 'takeoff';
     const landing = phase === 'landing';
@@ -1193,7 +1453,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     // flightPitch tracks vertical speed, so this also catches steep sink
     // without the descend key held.
     const sinkingHard = (motion.flightPitch || 0) > 0.09;
-    const cruising = flying && !takeoff && !landing && !flapHeld && !banking
+    const cruising = !soaring && flying && !takeoff && !landing && !flapHeld && !banking
       && !descendHeld && !dive && !sinkingHard && speedT > 0.5;
     const burst = cruising && ((t % 2.5) / 2.5) < 0.4;
 
@@ -1219,20 +1479,20 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     // wings-set glide, repeating — a bird works its way up, it doesn't buzz.
     const climbBurst = flying && flapHeld && !takeoff && !landing
       && ((t % 1.7) / 1.7) < 0.55;
-    const flapRate = takeoff ? 6.2
-      : landing ? 3.4
-      : flying && flapHeld ? 3.2
+    const flapRate = takeoff ? (owlFlight ? 3.8 : soaring ? 4.1 : 6.2)
+      : landing ? (owlFlight ? 2.35 : soaring ? 2.7 : 3.4)
+      : flying && flapHeld ? (owlFlight ? 2.45 : 3.2)
       : burst ? 4.2
-      : flying ? 1
+      : flying ? (owlFlight ? 0.72 : soaring ? 0.55 : 1)
       : 2.2;
     a.flapPhase += delta * flapRate * Math.PI * 2;
     // Descending stills the wings completely — set, not slow-flapping.
-    const ampTarget = takeoff ? 1.15
-      : landing ? 0.5
+    const ampTarget = takeoff ? (owlFlight ? 1.02 : soaring ? 0.92 : 1.15)
+      : landing ? (owlFlight ? 0.48 : soaring ? 0.36 : 0.5)
       : descending ? 0
-      : flying && flapHeld ? (climbBurst ? 1.12 : 0.06)
+      : flying && flapHeld ? (owlFlight ? 0.82 : climbBurst ? 1.12 : 0.06)
       : burst ? 0.85
-      : flying ? 0.03
+      : flying ? (owlFlight ? 0.012 : soaring ? 0.008 : 0.03)
       : 0;
     a.flapAmp = THREE.MathUtils.damp(a.flapAmp, ampTarget, 6.5, delta);
     // Asymmetric stroke: the phase warp makes the downstroke snap through
@@ -1318,15 +1578,15 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     // up and down on a hinge.
     const strokeSweep = strokeWave(a.flapPhase - 0.2) * 0.09 * a.flapAmp;
     // Descending sweeps the whole wing back into a swift-like delta.
-    const flySweepBack = (landing ? -0.12 : takeoff ? 0.02 : 0.12) + strokeSweep + a.descend * 0.48;
-    const baseLift = landing ? 0.3 : (flapHeld || burst || takeoff) ? 0.2 : 0.08;
+    const flySweepBack = (landing ? -0.12 : takeoff ? 0.02 : owlFlight ? -0.03 : soaring ? 0.06 : 0.12) + strokeSweep + a.descend * 0.48;
+    const baseLift = landing ? 0.3 : (flapHeld || burst || takeoff) ? (owlFlight ? 0.25 : 0.2) : owlFlight ? 0.18 : soaring ? 0.14 : 0.08;
     // The glide breathes: a slow, barely-there rise and settle of the
     // dihedral, like the bird is constantly trimming against the air.
     const soar = Math.sin(t * 1.1) * 0.02 * glideBlend;
     const flyLift = baseLift + flap * 0.6 + soar - a.descend * 0.09;
     const shoulderX = THREE.MathUtils.lerp(flyIncidence, 0.24, fold);
-    const shoulderY = THREE.MathUtils.lerp(flySweepBack, 1.3, fold);
-    const shoulderZ = THREE.MathUtils.lerp(flyLift, 0.18, fold);
+    const shoulderY = THREE.MathUtils.lerp(flySweepBack, owlFlight ? 1.08 : soaring ? 1.14 : 1.3, fold);
+    const shoulderZ = THREE.MathUtils.lerp(flyLift, owlFlight ? 0.12 : soaring ? 0.1 : 0.18, fold);
     // The hand twists through the stroke (leading edge dips on the
     // downstroke) — feathered wings wash, they don't stay flat.
     const handX = (-0.02 + flapOuter * 0.14) * spread;
@@ -1334,7 +1594,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     // primaries along the flank with the tips just crossing over the rump.
     // In the air the wrist flexes on every upstroke, and folds nearly
     // halfway in a descent tuck.
-    const handY = THREE.MathUtils.lerp(-0.04 + upstrokeFlex * 0.4 + a.descend * 0.44, 0.95, fold);
+    const handY = THREE.MathUtils.lerp(-0.04 + upstrokeFlex * (owlFlight ? 0.25 : 0.4) + a.descend * 0.44, owlFlight ? 0.66 : soaring ? 0.7 : 0.95, fold);
     // Gull-wing glide: arm slightly up (baseLift), wrist broken slightly
     // down — from behind the wing is a shallow arched M, not a bat V.
     const handZ = THREE.MathUtils.lerp(flapOuter * 0.55 - glideBlend * 0.14 - a.descend * 0.1, 0.06, fold);
@@ -1391,25 +1651,53 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
       );
     }
     if (head.current) {
-      const scan = flying ? Math.sin(t * 1.9) * 0.05 : Math.sin(t * 3.7) * visual.scanAmount;
+      const owlListen = visual.owlFace && !flying
+        ? Math.sin(t * 0.42) * visual.scanAmount + Math.sin(t * 1.37) * 0.16
+        : 0;
+      const scan = visual.owlFace
+        ? (flying ? Math.sin(t * 0.72) * 0.12 : owlListen)
+        : (flying ? Math.sin(t * 1.9) * 0.05 : Math.sin(t * 3.7) * visual.scanAmount);
       // Head-bob with the steps — one nod per footfall, pigeon-style.
       const stepNod = Math.max(0, Math.sin(a.stepPhase * 2)) * 0.08 * a.walkAmp;
       // The head counter-rotates part of the grounded body pitch so the bird
       // looks ahead, not at the sky, when perched upright. Airborne it lifts
       // into a climb and tucks flat into a descent, leading the movement.
       const headLevel = flying ? -0.04 - a.climb * 0.09 + a.descend * 0.1 : -groundPitch * 0.55;
-      head.current.rotation.x = THREE.MathUtils.damp(head.current.rotation.x, -peck * 0.95 + sleep * 0.72 + stepNod + headLevel, 10, delta);
-      head.current.rotation.y = THREE.MathUtils.damp(head.current.rotation.y, scan + sleep * 0.45, 8, delta);
-      head.current.position.y = THREE.MathUtils.damp(head.current.position.y, visual.headPosition[1] - sleep * 0.12 - peck * 0.05, 10, delta);
-      head.current.position.z = THREE.MathUtils.damp(head.current.position.z, visual.headPosition[2] - sleep * 0.14 + peck * 0.05 + stepNod * 0.2, 10, delta);
+      const owlPounceLook = motion.owlPounce ? 0.74 : motion.owlHover ? 0.3 : 0;
+      const sleepPitch = sleep * (visual.owlFace ? 0.18 : 0.72);
+      const sleepYaw = sleep * (visual.owlFace ? 0.08 : 0.45);
+      head.current.rotation.x = THREE.MathUtils.damp(head.current.rotation.x, -peck * 0.95 + sleepPitch + stepNod + headLevel + owlPounceLook, visual.owlFace ? 6 : 10, delta);
+      head.current.rotation.y = THREE.MathUtils.damp(head.current.rotation.y, scan + sleepYaw, visual.owlFace ? 4.2 : 8, delta);
+      head.current.position.y = THREE.MathUtils.damp(head.current.position.y, visual.headPosition[1] - sleep * (visual.owlFace ? 0.035 : 0.12) - peck * 0.05, 10, delta);
+      head.current.position.z = THREE.MathUtils.damp(head.current.position.z, visual.headPosition[2] - sleep * (visual.owlFace ? 0.025 : 0.14) + peck * 0.05 + stepNod * 0.2, 10, delta);
+    }
+    if (visual.owlFace) {
+      const tuftTwitch = Math.pow(Math.max(0, Math.sin(t * 0.83 + 0.4)), 18) * 0.24;
+      if (leftEarTuft.current) leftEarTuft.current.rotation.z = -0.18 - tuftTwitch;
+      if (rightEarTuft.current) rightEarTuft.current.rotation.z = 0.18 + tuftTwitch;
+      const blinkWave = Math.pow(Math.max(0, Math.sin(t * 0.67 + 1.8)), 34);
+      const leftBlink = THREE.MathUtils.clamp(blinkWave * 1.25, 0, 1);
+      const rightBlink = THREE.MathUtils.clamp(blinkWave * 1.08 + Math.pow(Math.max(0, Math.sin(t * 0.31)), 70) * 0.9, 0, 1);
+      // Owl lids travel down from the brow. Scaling a centered lid from zero
+      // makes its open pose read as a horizontal spike across the eye, so keep
+      // the feathered lid full-sized and tuck it into the facial disc instead.
+      const leftClosure = Math.max(leftBlink, sleep * 0.76);
+      const rightClosure = Math.max(rightBlink, sleep * 0.7);
+      if (leftOwlEyelid.current) {
+        leftOwlEyelid.current.position.y = THREE.MathUtils.lerp(0.038, -0.008, leftClosure);
+      }
+      if (rightOwlEyelid.current) {
+        rightOwlEyelid.current.position.y = THREE.MathUtils.lerp(0.038, -0.008, rightClosure);
+      }
     }
     if (legs.current) {
       // Tucked fully out of sight while cruising, reaching for the ground
       // through the landing flare. Grounded, the legs counter-rotate the
       // body's upright pitch so the tarsi stay vertical under the bird.
-      const legPosY = flying ? (landing ? 0.06 : 0.26) : visual.legPosition[1];
-      const legRotX = flying ? (landing ? -0.4 : -1.4) : -groundPitch;
-      const legScaleY = flying ? (landing ? 0.85 : 0.3) : 1;
+      const huntingReach = motion.owlPounce || motion.owlHover;
+      const legPosY = flying ? (landing || huntingReach ? 0.06 : 0.26) : visual.legPosition[1];
+      const legRotX = flying ? (motion.owlPounce ? 0.18 : landing || motion.owlHover ? -0.4 : -1.4) : -groundPitch;
+      const legScaleY = flying ? (landing || huntingReach ? 0.9 : 0.3) : 1;
       legs.current.position.y = THREE.MathUtils.damp(legs.current.position.y, legPosY, 7, delta);
       legs.current.rotation.x = THREE.MathUtils.damp(legs.current.rotation.x, legRotX, 8, delta);
       legs.current.scale.y = THREE.MathUtils.damp(legs.current.scale.y, legScaleY * visual.legScale[1], 8, delta);
@@ -1432,10 +1720,77 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
         </group>
         <group ref={head} position={visual.headPosition}>
           <mesh geometry={geometries.head} material={materials.head} castShadow receiveShadow scale={visual.headScale} />
+          {visual.owlFace ? (
+            <group>
+              {/* A dark ruff encircles two overlapping pale cheek discs. The
+                  overlap produces the heart-shaped facial plane that gathers
+                  sound toward an owl's forward-facing eyes. */}
+              <mesh castShadow position={[0, -0.002, 0.074]} scale={[0.142, 0.116, 0.028]}>
+                <sphereGeometry args={[1, 24, 18]} />
+                <primitive object={materials.faceRuff} attach="material" />
+              </mesh>
+              <mesh position={[0, -0.007, 0.094]} scale={[0.122, 0.108, 0.024]}>
+                <sphereGeometry args={[1, 26, 18]} />
+                <primitive object={materials.faceDisc} attach="material" />
+              </mesh>
+              <mesh position={[0, -0.063, 0.101]} scale={[0.062, 0.044, 0.018]}>
+                <sphereGeometry args={[1, 18, 12]} />
+                <primitive object={materials.faceDisc} attach="material" />
+              </mesh>
+              {[-1, 1].map(side => (
+                <group key={`owl-eye-${side}`} position={[side * 0.043, 0.018, 0.117]}>
+                  <mesh position={[0, 0, -0.002]} scale={[0.034, 0.039, 0.012]}>
+                    <sphereGeometry args={[1, 18, 14]} />
+                    <primitive object={materials.faceRuff} attach="material" />
+                  </mesh>
+                  <mesh scale={[0.021, 0.021, 0.014]}>
+                    <sphereGeometry args={[1, 20, 16]} />
+                    <primitive object={materials.iris} attach="material" />
+                  </mesh>
+                  <mesh position={[0, 0, 0.01]} scale={[0.011, 0.015, 0.01]}>
+                    <sphereGeometry args={[1, 16, 12]} />
+                    <primitive object={materials.eye} attach="material" />
+                  </mesh>
+                  <mesh position={[side * -0.004, 0.006, 0.018]} scale={[0.0035, 0.0035, 0.0025]}>
+                    <sphereGeometry args={[1, 8, 6]} />
+                    <primitive object={materials.eyeShine} attach="material" />
+                  </mesh>
+                  <group
+                    ref={side < 0 ? leftOwlEyelid : rightOwlEyelid}
+                    position={[0, 0.038, 0.025]}
+                  >
+                    <mesh scale={[0.027, 0.029, 1]}>
+                      <circleGeometry args={[1, 20, 0, Math.PI]} />
+                      <primitive object={materials.faceDisc} attach="material" />
+                    </mesh>
+                  </group>
+                </group>
+              ))}
+              {[-1, 1].map(side => (
+                <group
+                  key={`owl-ear-${side}`}
+                  ref={side < 0 ? leftEarTuft : rightEarTuft}
+                  position={[side * 0.086, 0.086, -0.006]}
+                  rotation={[0.08, 0, side * 0.18]}
+                >
+                  <mesh castShadow scale={[0.022, 0.058, 0.021]}>
+                    <coneGeometry args={[1, 1, 7]} />
+                    <primitive object={materials.faceRuff} attach="material" />
+                  </mesh>
+                </group>
+              ))}
+            </group>
+          ) : null}
           <mesh geometry={geometries.beak} material={materials.beak} castShadow position={visual.beakPosition} scale={visual.beakScale} />
+          {visual.cereTint ? (
+            <mesh castShadow position={[0, 0.002, 0.09]} scale={[0.055, 0.026, 0.026]}>
+              <sphereGeometry args={[1, 14, 10]} />
+              <primitive object={materials.cere} attach="material" />
+            </mesh>
+          ) : null}
           {/* Eyes: large, dark, set high on the head sides, with a fixed
               catchlight — the catchlight is most of the life in the face. */}
-          {[-1, 1].map(side => (
+          {!visual.owlFace ? [-1, 1].map(side => (
             <group
               key={`eye-${side}`}
               position={[
@@ -1446,7 +1801,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
               rotation={[0, side * 0.55, 0]}
             >
               <mesh rotation={[0, side * (Math.PI / 2), 0]} position={[side * 0.013, 0, 0]}>
-                <ringGeometry args={[0.02, 0.026, 24]} />
+                <ringGeometry args={[visual.eyeRingInner || 0.02, visual.eyeRingOuter || 0.026, 24]} />
                 <primitive object={materials.eyeRing} attach="material" />
               </mesh>
               <mesh scale={[0.021, 0.021, 0.017]} position={[side * 0.004, 0, 0]}>
@@ -1458,7 +1813,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
                 <primitive object={materials.eyeShine} attach="material" />
               </mesh>
             </group>
-          ))}
+          )) : null}
         </group>
         <group ref={legs} position={visual.legPosition} scale={visual.legScale}>
           {[-1, 1].map(side => (
@@ -1469,7 +1824,11 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
               {/* Feathered thigh: embedded into the belly, reaching down to
                   meet the bare tarsus. Painted belly-pale so it fades into
                   the underbody instead of reading as a separate dark egg. */}
-              <mesh castShadow position={[0, 0.03, 0.004]} scale={[0.038, 0.062, 0.046]}>
+              <mesh
+                castShadow
+                position={[0, visual.owlFace ? 0.045 : 0.03, 0.004]}
+                scale={visual.owlFace ? [0.048, 0.09, 0.055] : [0.038, 0.062, 0.046]}
+              >
                 <sphereGeometry args={[1, 14, 10]} />
                 <primitive object={materials.thigh} attach="material" />
               </mesh>

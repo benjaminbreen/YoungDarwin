@@ -11,6 +11,21 @@ import { ECOLOGY_ZONE_IDS, getEcology } from '../../world/ecology';
 import { buildEcologyFloraAssetCatalog } from '../../world/ecology/floraAssetCatalog';
 import { DARWINIOTHAMNUS_SPECIES } from '../../world/ecology/floraSpecies';
 import {
+  buildSicyos,
+  buildSicyosSegmentGeometry,
+  getSicyosMaterials,
+} from '../../physics/props/sicyos/sicyosModel';
+import {
+  buildDelilia,
+  buildDeliliaSegmentGeometry,
+  getDeliliaMaterials,
+} from '../../physics/props/delilia/deliliaModel';
+import {
+  buildLecocarpus,
+  buildLecocarpusSegmentGeometry,
+  getLecocarpusMaterials,
+} from '../../physics/props/lecocarpus/lecocarpusModel';
+import {
   setEcologyDebugEnabled,
   setEcologyDebugSpecies,
   useEcologyDebugState,
@@ -42,6 +57,36 @@ const CANDIDATE_GLB_ASSETS = [
   { id: 'lava-scree', label: 'Lava Scree Field', path: '/assets/models/nature/runtime-lava-scree.glb' },
   { id: 'mangrove-tree', label: 'Red Mangrove (Rhizophora mangle)', path: '/assets/models/nature/runtime-mangrove-tree.glb' },
   { id: 'cur-dry-grass', label: 'Current: Dry Grass', path: '/assets/models/nature/runtime-animated-dry-grass.glb' },
+];
+
+const PROCEDURAL_PLANT_ASSETS = [
+  {
+    id: 'procedural-sicyos-villosus',
+    kind: 'procedural-sicyos',
+    label: "Darwin's lost vine / Sicyos villosus",
+    note: 'Evidence-led 1835 reconstruction · deterministic runner graph · contact bend and knife-cut physics',
+    source: 'runtime',
+    zones: ['W_HIGH', 'NORTHERN_HIGHLANDS', 'WATKINS_CREEK'],
+    runtime: 'sicyos-villosus',
+  },
+  {
+    id: 'procedural-delilia-inelegans',
+    kind: 'procedural-delilia',
+    label: "Darwin's lost herb / Delilia inelegans",
+    note: 'Evidence-led 1835 reconstruction · trichotomous annual herb · contact bend and knife-cut physics',
+    source: 'runtime',
+    zones: ['W_HIGH', 'NORTHERN_HIGHLANDS'],
+    runtime: 'delilia-inelegans',
+  },
+  {
+    id: 'procedural-lecocarpus-pinnatifidus',
+    kind: 'procedural-lecocarpus',
+    label: 'Wing-fruited Floreana daisy / Lecocarpus pinnatifidus',
+    note: 'Darwin-collected Floreana endemic · pinnatifid leaf variation · yellow heads and winged fruit · branch physics',
+    source: 'runtime',
+    zones: ['COASTAL_SCRUBLAND', 'POST_SCRUB_RISE', 'NORTHERN_HIGHLANDS'],
+    runtime: 'lecocarpus-pinnatifidus',
+  },
 ];
 
 const RUNTIME_FLORA_LABELS = {
@@ -149,6 +194,103 @@ function PreviewModel({ path, variantMode = null }) {
     return group;
   }, [scene, variantMode]);
   return <primitive object={cloned} />;
+}
+
+function PreviewSicyos() {
+  const group = useMemo(() => {
+    const root = new THREE.Group();
+    const plant = buildSicyos({ seed: 'flora-lab-sicyos', size: 1.06, flowering: 0.92 });
+    const materials = getSicyosMaterials();
+    const materialFor = {
+      stems: materials.stem,
+      leaves: materials.leaf,
+      veins: materials.vein,
+      tendrils: materials.tendril,
+      hairs: materials.hair,
+      petals: materials.petal,
+      centers: materials.flowerCenter,
+      fruits: materials.fruit,
+      fruitBristles: materials.fruitBristle,
+    };
+    plant.segments.forEach(segment => {
+      const segmentGroup = new THREE.Group();
+      segmentGroup.position.copy(segment.position);
+      segmentGroup.quaternion.copy(segment.quaternion);
+      const geometries = buildSicyosSegmentGeometry(segment);
+      Object.entries(geometries).forEach(([role, geometry]) => {
+        if (!geometry) return;
+        const mesh = new THREE.Mesh(geometry, materialFor[role]);
+        mesh.castShadow = role === 'stems' || role === 'leaves' || role === 'fruits';
+        segmentGroup.add(mesh);
+      });
+      root.add(segmentGroup);
+    });
+    return normalizeObject(root);
+  }, []);
+  return <primitive object={group} />;
+}
+
+function PreviewDelilia() {
+  const group = useMemo(() => {
+    const root = new THREE.Group();
+    const plant = buildDelilia({ seed: 'flora-lab-delilia', size: 1.08, flowering: 0.94 });
+    const materials = getDeliliaMaterials();
+    const materialFor = {
+      stems: materials.stem,
+      leaves: materials.leaf,
+      veins: materials.vein,
+      hairs: materials.hair,
+      flowerHeads: materials.flowerHead,
+      flowerTips: materials.flowerTip,
+    };
+    plant.segments.forEach(segment => {
+      const segmentGroup = new THREE.Group();
+      segmentGroup.position.copy(segment.position);
+      segmentGroup.quaternion.copy(segment.quaternion);
+      const geometries = buildDeliliaSegmentGeometry(segment);
+      Object.entries(geometries).forEach(([role, geometry]) => {
+        if (!geometry) return;
+        const mesh = new THREE.Mesh(geometry, materialFor[role]);
+        mesh.castShadow = role === 'stems' || role === 'leaves' || role === 'flowerHeads';
+        segmentGroup.add(mesh);
+      });
+      root.add(segmentGroup);
+    });
+    return normalizeObject(root);
+  }, []);
+  return <primitive object={group} />;
+}
+
+function PreviewLecocarpus() {
+  const group = useMemo(() => {
+    const root = new THREE.Group();
+    const plant = buildLecocarpus({ seed: 'flora-lab-lecocarpus', size: 1.03, flowering: 0.96 });
+    const materials = getLecocarpusMaterials();
+    const materialFor = {
+      stems: materials.stem,
+      leaves: materials.leaf,
+      veins: materials.vein,
+      petals: materials.petal,
+      disks: materials.disk,
+      fruits: materials.fruit,
+      wings: materials.wing,
+    };
+    plant.segments.forEach(segment => {
+      const segmentGroup = new THREE.Group();
+      segmentGroup.position.copy(segment.position);
+      segmentGroup.quaternion.copy(segment.quaternion);
+      const geometries = buildLecocarpusSegmentGeometry(segment);
+      Object.entries(geometries).forEach(([role, geometry]) => {
+        if (!geometry) return;
+        const mesh = new THREE.Mesh(geometry, materialFor[role]);
+        mesh.castShadow = role === 'stems' || role === 'leaves' || role === 'disks' || role === 'fruits';
+        segmentGroup.add(mesh);
+      });
+      root.add(segmentGroup);
+    });
+    return normalizeObject(root);
+  }, []);
+  return <primitive object={group} />;
 }
 
 function applyTreeOptions(tree, variant, index) {
@@ -329,7 +471,21 @@ function AssetBrowserContent({ onClose }) {
         usages,
       };
     });
-    return [...runtimeAssets, ...treeAssets, ...candidateAssets].sort((a, b) => {
+    const proceduralAssets = PROCEDURAL_PLANT_ASSETS.map(proceduralAsset => {
+      const usages = proceduralAsset.zones.flatMap(zoneId => (
+        (getEcology(zoneId)?.interactiveFlora || [])
+          .filter(layer => layer.runtime === proceduralAsset.runtime)
+          .map(layer => ({
+            zoneId,
+            layerId: layer.id,
+            itemCount: layer.sites?.length || 0,
+            procedural: true,
+            placementStats: layer.placementStats || null,
+          }))
+      ));
+      return { ...proceduralAsset, usages };
+    });
+    return [...runtimeAssets, ...proceduralAssets, ...treeAssets, ...candidateAssets].sort((a, b) => {
       const rankA = a.source === 'runtime' ? 0 : 1;
       const rankB = b.source === 'runtime' ? 0 : 1;
       return rankA - rankB || a.label.localeCompare(b.label);
@@ -466,14 +622,24 @@ function AssetBrowserContent({ onClose }) {
                   <Suspense fallback={null}>
                     {asset.kind === 'ez-tree'
                       ? <PreviewEzTree key={asset.id} variants={asset.variants} />
-                      : <PreviewModel key={asset.id} path={asset.path} variantMode={asset.variantMode} />}
+                      : asset.kind === 'procedural-sicyos'
+                        ? <PreviewSicyos key={asset.id} />
+                        : asset.kind === 'procedural-delilia'
+                          ? <PreviewDelilia key={asset.id} />
+                          : asset.kind === 'procedural-lecocarpus'
+                            ? <PreviewLecocarpus key={asset.id} />
+                        : <PreviewModel key={asset.id} path={asset.path} variantMode={asset.variantMode} />}
                   </Suspense>
                   <gridHelper args={[10, 20, '#4a5258', '#2c3338']} />
                   <OrbitControls makeDefault enableDamping />
                 </Canvas>
               ) : null}
               <div className="pointer-events-none absolute bottom-2 left-0 right-0 text-center font-expedition text-[10.5px] italic text-expedition-faded">
-                {asset?.variantMode === 'mesh'
+                {asset?.kind === 'procedural-sicyos'
+                  || asset?.kind === 'procedural-delilia'
+                  || asset?.kind === 'procedural-lecocarpus'
+                  ? 'drag to orbit · reconstructed living form · world colonies use different deterministic seeds'
+                  : asset?.variantMode === 'mesh'
                   ? '9 source variants · comparison grid only · world placement is procedural'
                   : 'drag to orbit · scroll to zoom · preview normalized to compare form'}
               </div>

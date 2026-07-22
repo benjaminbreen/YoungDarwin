@@ -107,6 +107,20 @@ export const EL_MIRADOR_SOUTHEASTERN_COAST_SEAM = createRouteSeam(
   24,
 );
 
+export const WATKINS_SOUTHEASTERN_COAST_SEAM = createRouteSeam(
+  'WATKINS',
+  'SE_COAST',
+  'east',
+  -6,
+);
+
+export const SOUTHEASTERN_COAST_SHALLOW_SURF_SEAM = createRouteSeam(
+  'SE_COAST',
+  'SE_SHALLOW_SURF',
+  'east',
+  8,
+);
+
 export const NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM = createRouteSeam(
   'NORTHERN_HIGHLANDS',
   'CORMORANT_BAY',
@@ -157,6 +171,27 @@ export const MANGROVES_SOUTHERN_INTERTIDAL_SEAM = createRouteSeam(
   'S_INTERTIDAL',
   'south',
   2,
+);
+
+export const MARINE_IGUANA_COLONY_BEACH_HUT_SEAM = createRouteSeam(
+  'SW_BEACH',
+  'S_HUT',
+  'north',
+  10,
+);
+
+export const MARINE_IGUANA_COLONY_MANGROVES_SEAM = createRouteSeam(
+  'SW_BEACH',
+  'MANGROVES',
+  'east',
+  -12,
+);
+
+export const MARINE_IGUANA_COLONY_SOUTHWESTERN_CLIFFS_SEAM = createRouteSeam(
+  'SW_BEACH',
+  'SW_CLIFFS',
+  'south',
+  18,
 );
 
 export const SOUTHWESTERN_CLIFFS_SOUTHERN_INTERTIDAL_SEAM = createRouteSeam(

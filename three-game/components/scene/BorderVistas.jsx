@@ -112,11 +112,10 @@ function createBorderVistaMaterial(cheapMaterials) {
         '#include <fog_vertex>',
         `#include <fog_vertex>
         #ifdef USE_FOG
-        // Aerial perspective boost: the apron reads as ~35% farther to the fog
-        // than real terrain at the same distance, so the schematic ground past
-        // the seam sits in noticeably thicker haze. Ramps in with the seam
-        // blend, so the walkable side of the boundary is untouched.
-        vFogDepth *= 1.0 + aBorderBlend * 0.35;
+        // Scene fog is sufficient in third person. Keep only a slight boost;
+        // the former 35% increase made every apron a gray rectangle from the
+        // overhead chart camera.
+        vFogDepth *= 1.0 + aBorderBlend * 0.08;
         #endif`,
       );
     shader.fragmentShader = shader.fragmentShader
@@ -335,6 +334,7 @@ function TransitionSeamMarkers({ regionId, config, vista, transition, kind }) {
 function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = true }) {
   const cheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
+  const viewMode = useThreeGameStore(state => state.viewMode);
   const targetConfig = useMemo(() => (
     vista.toRegionId ? getRegionTerrainConfig(vista.toRegionId) : null
   ), [vista.toRegionId]);
@@ -344,6 +344,7 @@ function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = t
     buildBorderTransition(regionId, config, vista, targetConfig)
   ), [regionId, config, targetConfig, vista]);
   const geometry = prepared?.preview || null;
+  const horizonGeometry = prepared?.horizon || null;
   const borderEcologyLayers = useMemo(() => (
     borderEcologyReady
       ? buildBorderEcologyLayers({
@@ -385,6 +386,20 @@ function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = t
       renderKind: 'border-vista',
       renderPath: null,
     }}>
+      {horizonGeometry && viewMode !== 'top' && (
+        <mesh
+          geometry={horizonGeometry}
+          material={material}
+          receiveShadow={false}
+          castShadow={false}
+          userData={{
+            renderSource: `border-landform:${vista.id}`,
+            renderLabel: `${vista.toRegionId || vista.id} distant landform`,
+            renderKind: 'border-vista-landform',
+            renderPath: null,
+          }}
+        />
+      )}
       <mesh geometry={geometry} material={material} receiveShadow={false} castShadow={false} />
       {isNeighborPreview && borderEcologyReady && (
         <>

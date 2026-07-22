@@ -3,6 +3,8 @@
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { emitPropEvent } from '../../../physics/props/propEvents';
+import { useThreeGameStore } from '../../../store';
 
 // Storm lightning: an ambient cool-white flash with the classic double-strike
 // envelope (sharp leader, softer return stroke). Pure light intensity — no
@@ -28,6 +30,12 @@ export function LightningFX() {
       if (s.countdown <= 0) {
         s.flashTime = 0;
         s.countdown = 6 + Math.random() * 16;
+        emitPropEvent('lightning-flash', {
+          zoneId: useThreeGameStore.getState().currentZoneId,
+          distance: 120 + Math.pow(Math.random(), 1.6) * 920,
+          pan: (Math.random() - 0.5) * 0.75,
+          storm,
+        });
       }
       light.intensity = 0;
       return;

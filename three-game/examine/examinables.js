@@ -102,6 +102,34 @@ export function examinableFromItem(item, actorId = null) {
   };
 }
 
+export function examinableFromFieldTarget(target) {
+  if (!target) return null;
+  const category = target.category || (target.kind === 'ecology' ? 'Plant' : 'Object');
+  const geology = category === 'Geology' || /rock|boulder|basalt|scoria/i.test(target.name || '');
+  const plant = category === 'Plant';
+  return {
+    typeId: target.typeId || `ambient:${target.id}`,
+    actorId: target.actorId || target.id,
+    kind: 'ambient',
+    living: plant,
+    name: target.name || 'Unidentified object',
+    latin: target.latin || target.inspectable?.latinName || '',
+    category,
+    subtitle: plant ? 'encountered in the surrounding vegetation' : geology ? 'part of the local formation' : 'encountered in the field',
+    description: plant
+      ? 'An unmarked individual in the surrounding vegetation. Its identity and condition can still be studied even though it was not selected as an expedition specimen.'
+      : geology
+        ? 'An unmarked piece of the local terrain. Its texture, fracture, weathering, and relation to nearby formations are available for observation.'
+        : 'An ordinary object in the expedition environment. Its material, wear, placement, and possible use may still reward attention.',
+    details: [],
+    uncertainties: ['This is a field observation rather than a curated specimen identification.'],
+    collectable: false,
+    collectVerb: 'Collect sample',
+    frameHint: { height: 0.75, radius: Math.max(0.28, target.radius || 0.5) },
+    fieldTarget: target,
+  };
+}
+
 const INQUIRY_EXAMPLES = {
   Animal: 'Examples: how large is it, describe its movement, does it fear me, what is it eating?',
   Plant: 'Examples: measure the width, describe the seed heads, what is its condition, any signs of grazing?',

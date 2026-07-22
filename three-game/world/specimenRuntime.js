@@ -34,11 +34,14 @@ function boundsZoneMap(zoneId) {
 
 export function setSpecimenRuntimePose(zoneId, actorId, pose) {
   if (!actorId || !Number.isFinite(pose?.x) || !Number.isFinite(pose?.y) || !Number.isFinite(pose?.z)) return;
-  runtimeZoneMap(zoneId).set(actorId, {
+  const zone = runtimeZoneMap(zoneId);
+  const previous = zone.get(actorId);
+  zone.set(actorId, {
     x: pose.x,
     y: pose.y,
     z: pose.z,
     yaw: Number.isFinite(pose.yaw) ? pose.yaw : 0,
+    specimenId: pose.specimenId || previous?.specimenId || null,
     updatedAt: nowSeconds(),
   });
 }

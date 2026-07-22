@@ -9,6 +9,7 @@ import { isGameplayInputBlocked, setBlockingUiMode, setTypingMode } from '../inp
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { isEndGameNarratorCommand } from '../finalAssessment';
 import { SHOTGUN } from '../shooting/shotgunConfig';
+import { emitPropEvent } from '../physics/props/propEvents';
 import { shotgunAimState } from '../shooting/aimState';
 import { getZone } from '../world/floreanaZones';
 import { getBeagleSightline } from '../world/beagleSightlines';
@@ -18,6 +19,7 @@ import { BookReaderView } from './BookReaderView';
 import { NpcEncounterModal } from './NpcEncounterModal';
 import { ExpeditionOutcomeModal } from './ExpeditionOutcomeModal';
 import { FinalAssessmentModal } from './FinalAssessmentModal';
+import { CONTEXT_PROMPT_PRIORITY } from './contextPromptService';
 import {
   ExpeditionPanel,
   PanelTabs,
@@ -33,6 +35,7 @@ import {
   NoteIcon,
   OpenBookIcon,
   MapIcon,
+  SoundIcon,
   LensIcon,
   NorthArrowIcon,
   TOOL_ICONS,
@@ -1564,7 +1567,7 @@ function HotkeysResponse({ polished = false }) {
   const sections = [
     ['Movement', ['WASD / arrows: move', 'Shift: run', 'Space: jump', 'C: crouch or running slide', 'B: dodge roll', 'Q or V: climb / mantle / descend']],
     ['Camera', ['Mouse drag: rotate camera', 'Scroll: zoom', 'Z / X: rotate left / right', 'M: cycle camera mode']],
-    ['Interaction', ['Enter: examine, then collect once a field note is saved', 'Tab: cycle collection method while the collection card is open', 'E: interact, carry, travel, or legacy collect', 'J: use equipped tool', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
+    ['Interaction', ['Enter: use the equipped field tool on the attended subject; with no subject, enter observation mode', 'Tab: cycle collection method while the collection card is open', 'E: speak, carry, open, or travel', 'J: use the equipped tool without a selected subject', '1-6: equip toolbar slot', 'F: rifle aim when shotgun is equipped', 'Left click while aiming: fire rifle']],
     ...(polished ? [['Interface', ['H: hide or show the expedition interface', '4 then J: equip and swing the geological hammer']]] : []),
     ['Direct Actions', [polished ? null : 'H: hammer', 'N: net', 'G: gather', 'Y: write', 'I: kneel inspect', 'L: look around', 'O: point', 'P: pray', 'T: trip', 'U: teeter', 'K: sit', 'R: rest / lie down'].filter(Boolean)],
     ['Narrator Commands', ['hotkeys / controls / commands: show this list', 'north / south / east / west, or go north: travel by direction', '/move <place>: travel to a known place', '/collect <specimen>: collect a named specimen', '/use <tool> on <target>: use a tool on something', 'survey site / look around: record the habitat', 'document <specimen> / sketch <specimen>: make field notes', 'check traps / abandon trap: manage traps', 'rest / sleep / make camp: rest', 'journal / field book / open journal: open the journal', 'end game: conclude the expedition and open Henslow’s assessment']],
@@ -2464,7 +2467,16 @@ function GameplayCompass({ onClose, className = '' }) {
   );
 }
 
-function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onRequestEndGame, compassOpen = false, onCloseCompass }) {
+function PolishedFieldRail({
+  onOpenInventory,
+  onOpenMap,
+  onOpenJournal,
+  onRequestEndGame,
+  audioEnabled = true,
+  onAudioEnabledChange,
+  compassOpen = false,
+  onCloseCompass,
+}) {
   const [mapCollapsed, setMapCollapsed] = useState(false);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
@@ -2491,6 +2503,16 @@ function PolishedFieldRail({ onOpenInventory, onOpenMap, onOpenJournal, onReques
             </div>
           </div>
           <div className="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              onClick={() => onAudioEnabledChange?.(!audioEnabled)}
+              title={audioEnabled ? 'Mute game audio' : 'Restore game audio'}
+              aria-label={audioEnabled ? 'Mute game audio' : 'Restore game audio'}
+              aria-pressed={!audioEnabled}
+              className={`${railIconButton} ${audioEnabled ? '' : 'border-expedition-gold/75 bg-expedition-gold/10 text-expedition-goldbright'}`}
+            >
+              <SoundIcon muted={!audioEnabled} className="h-4 w-4" />
+            </button>
             <button type="button" onClick={onOpenMap} title="Open full island chart" aria-label="Open full island chart" className={railIconButton}>
               <svg viewBox="0 0 18 18" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
                 <path d="M3 7V3h4M11 3h4v4M15 11v4h-4M7 15H3v-4" />
@@ -2930,7 +2952,7 @@ function PolishedControlHint({ hudHidden, disabled = false }) {
       <><ControlHintKey>Shift</ControlHintKey><span>Run</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Space</ControlHintKey><span>Jump</span></>
     ),
     essentials: (
-      <><ControlHintKey>Drag</ControlHintKey><span>Look</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Scroll</ControlHintKey><span>Zoom</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Enter</ControlHintKey><span>Examine</span></>
+      <><ControlHintKey>Drag</ControlHintKey><span>Look</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Scroll</ControlHintKey><span>Zoom</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Enter</ControlHintKey><span>Field action</span></>
     ),
     idle: (
       <><ControlHintKey>H</ControlHintKey><span>Hide interface</span></>
@@ -3034,11 +3056,51 @@ function RouteEdgeBanner({ edgePrompt, toZone, onTravel }) {
   );
 }
 
-function CompactPrompt({ children }) {
+function CompactPrompt({ children, visible = true, testId = null }) {
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-[52%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+7rem)] sm:top-[64%]">
+    <div
+      data-testid={testId || undefined}
+      aria-live="polite"
+      className={`absolute left-1/2 top-[52%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition transition-[opacity,filter] duration-[220ms] ease-out sm:left-[calc(50%+7rem)] sm:top-[64%] ${
+        visible
+          ? 'pointer-events-auto opacity-100 blur-0'
+          : 'pointer-events-none opacity-0 blur-[1px]'
+      }`}
+    >
       <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/30 bg-[rgba(14,18,18,0.42)] px-1.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.24)] backdrop-blur-[2px]">
         {children}
+      </div>
+    </div>
+  );
+}
+
+function ObservationModeGuide() {
+  const active = useThreeGameStore(state => state.observationMode);
+  const setObservationMode = useThreeGameStore(state => state.setObservationMode);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const onKeyDown = event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setObservationMode(false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [active, setObservationMode]);
+
+  if (!active) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20 font-expedition" aria-live="polite" data-testid="observation-mode-guide">
+      <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-gold/55 shadow-[0_0_22px_rgba(227,197,133,0.2)]">
+        <span className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-expedition-goldbright/80" />
+        <span className="absolute bottom-0 left-1/2 h-2 w-px -translate-x-1/2 bg-expedition-goldbright/80" />
+        <span className="absolute left-0 top-1/2 h-px w-2 -translate-y-1/2 bg-expedition-goldbright/80" />
+        <span className="absolute right-0 top-1/2 h-px w-2 -translate-y-1/2 bg-expedition-goldbright/80" />
+      </div>
+      <div className="absolute left-1/2 top-[calc(50%+3.25rem)] -translate-x-1/2 rounded-sm border border-expedition-brass/45 bg-[rgba(12,20,28,0.68)] px-3 py-1.5 text-center text-[10.5px] uppercase tracking-[0.12em] text-expedition-parchment/85 shadow-lg backdrop-blur-md">
+        <span className="md:hidden">Tap a subject to examine</span>
+        <span className="hidden md:inline">Click a subject to examine · Esc cancels</span>
       </div>
     </div>
   );
@@ -3079,6 +3141,27 @@ function CompactAction({ keyLabel, children, primary = false, locked = false, on
 function promptActionText(value) {
   const stripped = String(value || '').replace(/^press\s+e\s+(?:to\s+)?/i, '').trim();
   return stripped ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : 'Interact';
+}
+
+function useContextPromptCandidate(source, candidate) {
+  const publishContextPrompt = useThreeGameStore(state => state.publishContextPrompt);
+  const clearContextPrompt = useThreeGameStore(state => state.clearContextPrompt);
+
+  useEffect(() => {
+    if (!candidate) {
+      clearContextPrompt(source);
+      return undefined;
+    }
+    publishContextPrompt(source, candidate);
+    const timer = window.setTimeout(
+      () => publishContextPrompt(source, candidate),
+      Math.max(0, candidate.dwellMs || 0) + 24,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      clearContextPrompt(source);
+    };
+  }, [candidate, clearContextPrompt, publishContextPrompt, source]);
 }
 
 function currentCollectionMethodId(activeToolId) {
@@ -3276,6 +3359,7 @@ function MajorEventToast() {
 function SpecimenInteractionCard({
   specimen,
   examined,
+  fieldAction,
   activeToolId,
   setActiveTool,
   collectNearby,
@@ -3347,11 +3431,15 @@ function SpecimenInteractionCard({
             ) : (
               <button
                 type="button"
-                onClick={() => openExamine(specimen.instanceId || specimen.id)}
+                onClick={() => fieldAction?.kind === 'observe'
+                  ? openExamine(specimen.instanceId || specimen.id)
+                  : pulseTouchControl('fieldAction')}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
               >
                 <PromptKey active>Enter</PromptKey>
-                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">Examine</span>
+                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">
+                  {fieldAction?.shortLabel || 'Examine'}
+                </span>
               </button>
             )}
           </div>
@@ -3399,6 +3487,8 @@ function InteractionPrompt() {
   const nearbyNpcEncounter = useThreeGameStore(state => state.nearbyNpcEncounter);
   const openNpcEncounter = useThreeGameStore(state => state.openNpcEncounter);
   const edgePrompt = useThreeGameStore(state => state.edgePrompt);
+  const contextPrompt = useThreeGameStore(state => state.contextPrompt);
+  const acknowledgeContextPrompt = useThreeGameStore(state => state.acknowledgeContextPrompt);
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const interiorPrompt = useThreeGameStore(state => state.interiorPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
@@ -3406,7 +3496,8 @@ function InteractionPrompt() {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const openExamine = useThreeGameStore(state => state.openExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
-  const nearbyItem = useThreeGameStore(state => state.nearbyItem);
+  const fieldAction = useThreeGameStore(state => state.fieldAction);
+  const observationMode = useThreeGameStore(state => state.observationMode);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const lastOutcome = useThreeGameStore(state => state.lastOutcome);
@@ -3418,8 +3509,53 @@ function InteractionPrompt() {
         && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
     }) || null
   ), [collectedSpecimenActorIds, currentZoneId, nearbySpecimenId]);
+  const npcContextCandidate = useMemo(() => nearbyNpcEncounter ? ({
+    id: `npc:${nearbyNpcEncounter.npcId}`,
+    label: `Speak with ${nearbyNpcEncounter.name}`,
+    keyLabel: 'E',
+    priority: CONTEXT_PROMPT_PRIORITY.npc,
+    dwellMs: 140,
+    repeatCooldownMs: 650,
+  }) : null, [nearbyNpcEncounter]);
+  const interiorContextCandidate = useMemo(() => interiorPrompt ? ({
+    id: `interior:${interiorPrompt.id || interiorPrompt.mode || interiorPrompt.text}`,
+    label: promptActionText(interiorPrompt.text),
+    keyLabel: 'E',
+    priority: CONTEXT_PROMPT_PRIORITY.interior,
+    dwellMs: 140,
+    repeatCooldownMs: 650,
+  }) : null, [interiorPrompt]);
+  const carryContextCandidate = useMemo(() => carryPrompt ? ({
+    id: `carry:${carryPrompt.id || carryPrompt.mode || carryPrompt.text}`,
+    label: promptActionText(carryPrompt.text),
+    keyLabel: 'E',
+    priority: CONTEXT_PROMPT_PRIORITY.carry,
+    dwellMs: 120,
+    repeatCooldownMs: 500,
+  }) : null, [carryPrompt]);
+  const fieldContextCandidate = useMemo(() => (
+    !observationMode
+    && !nearby
+    && fieldAction
+    && !(fieldAction.kind === 'observe' && ['ecology', 'obstacle', 'prop'].includes(fieldAction.target?.kind)) ? ({
+      id: fieldAction.id,
+      label: fieldAction.label,
+      keyLabel: 'Enter',
+      priority: fieldAction.kind === 'observe'
+        ? CONTEXT_PROMPT_PRIORITY.fieldObserve
+        : CONTEXT_PROMPT_PRIORITY.fieldTool,
+      dwellMs: fieldAction.kind === 'observe' ? 210 : 130,
+      repeatCooldownMs: 650,
+    }) : null
+  ), [fieldAction, nearby, observationMode]);
+  useContextPromptCandidate('npc', npcContextCandidate);
+  useContextPromptCandidate('interior', interiorContextCandidate);
+  useContextPromptCandidate('carry', carryContextCandidate);
+  useContextPromptCandidate('field', fieldContextCandidate);
   const [renderedSpecimen, setRenderedSpecimen] = useState(null);
   const [specimenPromptVisible, setSpecimenPromptVisible] = useState(false);
+  const [renderedContextPrompt, setRenderedContextPrompt] = useState(null);
+  const [contextPromptVisible, setContextPromptVisible] = useState(false);
   const [outcomeToast, setOutcomeToast] = useState(null);
   const seenOutcomeRef = React.useRef(lastOutcome);
   const outcomeTimersRef = React.useRef([]);
@@ -3471,40 +3607,40 @@ function InteractionPrompt() {
     return () => window.clearTimeout(timer);
   }, [nearby, outcomeToast]);
 
+  useEffect(() => {
+    let timer = 0;
+    if (contextPrompt) {
+      setRenderedContextPrompt(contextPrompt);
+      setContextPromptVisible(false);
+      timer = window.setTimeout(() => setContextPromptVisible(true), 20);
+    } else {
+      setContextPromptVisible(false);
+      timer = window.setTimeout(() => setRenderedContextPrompt(null), PROMPT_EXIT_MS);
+    }
+    return () => window.clearTimeout(timer);
+  }, [contextPrompt]);
+
   if (outcomeToast) {
     return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
   }
 
-  if (nearbyNpcEncounter) {
+  if (renderedContextPrompt && renderedContextPrompt.source !== 'traversal') {
+    const onClick = renderedContextPrompt.source === 'npc'
+      ? () => {
+          acknowledgeContextPrompt('npc');
+          openNpcEncounter?.(nearbyNpcEncounter?.npcId);
+        }
+      : renderedContextPrompt.source === 'field'
+        ? () => pulseTouchControl('fieldAction')
+        : null;
     return (
-      <CompactPrompt>
-        <CompactAction keyLabel="E" primary onClick={() => openNpcEncounter?.(nearbyNpcEncounter.npcId)}>{`Speak with ${nearbyNpcEncounter.name}`}</CompactAction>
+      <CompactPrompt visible={contextPromptVisible} testId="context-action-prompt">
+        <CompactAction keyLabel={renderedContextPrompt.keyLabel} primary onClick={onClick}>
+          {renderedContextPrompt.label}
+        </CompactAction>
       </CompactPrompt>
     );
   }
-
-  if (interiorPrompt) {
-    return (
-      <CompactPrompt>
-        <CompactAction keyLabel="E" primary>{promptActionText(interiorPrompt.text)}</CompactAction>
-      </CompactPrompt>
-    );
-  }
-  if (carryPrompt) {
-    return (
-      <CompactPrompt>
-        <CompactAction keyLabel="E" primary>{promptActionText(carryPrompt.text)}</CompactAction>
-      </CompactPrompt>
-    );
-  }
-  if (!nearby && !renderedSpecimen && nearbyItem) {
-    return (
-      <CompactPrompt>
-        <CompactAction keyLabel="⏎" primary onClick={() => openExamine(null)}>{`Examine ${nearbyItem.name}`}</CompactAction>
-      </CompactPrompt>
-    );
-  }
-  if (!nearby && !renderedSpecimen && !edgePrompt) return null;
   if (!nearby && !renderedSpecimen && edgePrompt) {
     if (edgePrompt.visible === false) return null;
     const isOpen = edgePrompt.kind === 'open';
@@ -3556,6 +3692,16 @@ function InteractionPrompt() {
       </PromptCard>
     );
   }
+  if (!nearby && !renderedSpecimen && renderedContextPrompt?.source === 'traversal') {
+    return (
+      <CompactPrompt visible={contextPromptVisible} testId="context-action-prompt">
+        <CompactAction keyLabel={renderedContextPrompt.keyLabel || 'V'} primary>
+          {renderedContextPrompt.label || 'Climb'}
+        </CompactAction>
+      </CompactPrompt>
+    );
+  }
+  if (!nearby && !renderedSpecimen) return null;
 
   const displayedSpecimen = renderedSpecimen || nearby;
   if (!displayedSpecimen) return null;
@@ -3564,6 +3710,7 @@ function InteractionPrompt() {
     <SpecimenInteractionCard
       specimen={displayedSpecimen}
       examined={examined}
+      fieldAction={fieldAction?.target?.kind === 'specimen' ? fieldAction : null}
       activeToolId={activeToolId}
       setActiveTool={setActiveTool}
       collectNearby={collectNearby}
@@ -3833,6 +3980,9 @@ function MobileActionCluster() {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const fieldAction = useThreeGameStore(state => state.fieldAction);
+  const observationMode = useThreeGameStore(state => state.observationMode);
+  const toggleObservationMode = useThreeGameStore(state => state.toggleObservationMode);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableMode = getPlayableMode(playableModeId);
@@ -3880,18 +4030,6 @@ function MobileActionCluster() {
       </div>
     );
   }
-
-  const collect = () => {
-    if (activeToolId === 'snare') {
-      triggerToolUse(activeToolId);
-      return;
-    }
-    if (nearby) {
-      collectNearby();
-      return;
-    }
-    triggerToolUse(activeToolId);
-  };
 
   // Shotgun cluster: Aim toggles ADS (drag on the screen pans the camera
   // while aiming), Fire pulls the trigger, Collect gathers a downed specimen.
@@ -3950,6 +4088,21 @@ function MobileActionCluster() {
     );
   }
 
+  const activeTool = getToolbarItem(activeToolId);
+  const ActiveToolIcon = TOOL_ICONS[activeToolId];
+  const primaryLabel = observationMode ? 'Cancel' : (fieldAction?.shortLabel || 'Observe');
+  const primaryIcon = fieldAction && fieldAction.kind !== 'observe'
+    ? activeTool?.image
+      ? <img src={activeTool.image} alt="" className="h-full w-full object-contain" draggable={false} />
+      : ActiveToolIcon
+        ? <ActiveToolIcon className="h-full w-full" />
+        : <LensIcon className="h-full w-full" />
+    : <LensIcon className="h-full w-full" />;
+  const performPrimaryAction = () => {
+    if (observationMode) toggleObservationMode();
+    else pulseTouchControl('fieldAction');
+  };
+
   return (
     <div
       className="pointer-events-none absolute z-20 h-[10.2rem] w-[10.4rem] md:hidden"
@@ -3971,53 +4124,20 @@ function MobileActionCluster() {
         )}
       />
       <MobileActionButton
-        label={animalAction ? animalAction.name : 'Collect'}
-        onPress={collect}
+        label={primaryLabel}
+        onPress={performPrimaryAction}
         className="bottom-8 left-0"
-        icon={animalAction ? <AnimalActionIcon actionId={animalAction.id} className="h-full w-full" /> : <ButterflyIcon className="h-full w-full" />}
+        icon={primaryIcon}
       />
-      <MobileActionButton
-        label="Examine"
-        size="small"
-        onPress={() => pulseTouchControl('inspect')}
-        className="bottom-0 right-0"
-        icon={<LensIcon className="h-full w-full" />}
-      />
-    </div>
-  );
-}
-
-// Desktop twin of the mobile Examine button: appears in the lower-right when
-// Darwin is near something examinable, mirroring the round brass action style.
-function DesktopExamineButton() {
-  const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
-  const nearbyItem = useThreeGameStore(state => state.nearbyItem);
-  const openExamine = useThreeGameStore(state => state.openExamine);
-  const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
-  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
-  const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
-    !collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
-    && ((specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId)
-  ));
-  const needsExamine = nearby ? !examinedTypeIds.includes(nearby.id) : false;
-  const visible = Boolean(nearbyItem || needsExamine);
-  return (
-    <div
-      className={`absolute bottom-[5.25rem] right-3 z-20 hidden transition-all duration-300 md:block lg:bottom-16 xl:right-[17rem] ${
-        visible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'
-      }`}
-    >
-      <button
-        type="button"
-        aria-label="Examine"
-        onClick={() => openExamine(null)}
-        className="pointer-events-auto flex h-[5.2rem] w-[5.2rem] flex-col items-center justify-center rounded-full border border-expedition-gold/80 bg-[radial-gradient(circle_at_42%_30%,rgba(30,43,50,0.92),rgba(5,10,15,0.96))] font-expedition text-expedition-gold shadow-[0_10px_24px_rgba(0,0,0,0.38),inset_0_0_0_3px_rgba(201,163,95,0.12),inset_0_0_0_7px_rgba(0,0,0,0.18)] backdrop-blur-md transition active:scale-95 active:border-expedition-goldbright active:text-expedition-goldbright"
-      >
-        <LensIcon className="mb-1 h-7 w-7" />
-        <span className="text-[11px] font-semibold uppercase leading-none tracking-[0.08em]">Examine</span>
-        <span className="mt-1 text-[9px] uppercase tracking-[0.12em] text-expedition-faded">Enter</span>
-      </button>
+      {fieldAction && fieldAction.kind !== 'observe' && !observationMode && (
+        <MobileActionButton
+          label="Observe"
+          size="small"
+          onPress={toggleObservationMode}
+          className="bottom-0 right-0"
+          icon={<LensIcon className="h-full w-full" />}
+        />
+      )}
     </div>
   );
 }
@@ -4102,7 +4222,12 @@ function CameraCycleButton({ className }) {
   return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
 }
 
-export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
+export function ThreeHUD({
+  onRestartExpedition,
+  onReturnToMainMenu,
+  audioEnabled = true,
+  onAudioEnabledChange,
+}) {
   const [desktopHudLayout] = useState(resolveDesktopHudLayout);
   const [hudHidden, setHudHidden] = useState(false);
   const [endGameConfirmationOpen, setEndGameConfirmationOpen] = useState(false);
@@ -4155,11 +4280,15 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
       }
       if (event.code !== 'KeyI' || !(event.metaKey || event.ctrlKey) || event.repeat) return;
       event.preventDefault();
-      setInventoryOpen(value => !value);
+      emitPropEvent('equipment-foley', {
+        kind: inventoryOpen ? 'case-close' : 'case-open',
+        position: getRuntimePlayerPose()?.position,
+      });
+      setInventoryOpen(!inventoryOpen);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [inventoryOpen]);
   useEffect(() => {
     if (!polishedDesktopHud) return undefined;
     const onKeyDown = event => {
@@ -4203,8 +4332,23 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
   const openInventoryTab = useCallback(tab => {
     setMobileNarrativeOpen(false);
     setInventoryInitialTab(tab);
+    if (!inventoryOpen) {
+      emitPropEvent('equipment-foley', {
+        kind: 'case-open',
+        position: getRuntimePlayerPose()?.position,
+      });
+    }
     setInventoryOpen(true);
-  }, []);
+  }, [inventoryOpen]);
+  const closeInventory = useCallback(() => {
+    if (inventoryOpen) {
+      emitPropEvent('equipment-foley', {
+        kind: 'case-close',
+        position: getRuntimePlayerPose()?.position,
+      });
+    }
+    setInventoryOpen(false);
+  }, [inventoryOpen]);
   const openJournalPanel = useCallback(() => {
     setMobileNarrativeOpen(false);
     setPanel('journal');
@@ -4239,6 +4383,8 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
             onRequestEndGame={() => setEndGameConfirmationOpen(true)}
+            audioEnabled={audioEnabled}
+            onAudioEnabledChange={onAudioEnabledChange}
             compassOpen={compassOpen}
             onCloseCompass={() => setCompassOpen(false)}
           />
@@ -4261,6 +4407,7 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
       )}
 
       <InteractionPrompt />
+      <ObservationModeGuide />
       <MajorEventToast />
       <CameraModeToast />
       {!polishedDesktopHud && <MovementHint />}
@@ -4294,8 +4441,6 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
         <CameraCycleButton className={GOLD_BUTTON} />
       </div>
 
-      {!polishedDesktopHud && <DesktopExamineButton />}
-
       <MobileTouchControls />
       <MobileActionCluster />
       <MobileBottomNav
@@ -4325,7 +4470,7 @@ export function ThreeHUD({ onRestartExpedition, onReturnToMainMenu }) {
       <BookReaderView />
 
       <IslandMapModal open={mapOpen} onClose={() => setMapOpen(false)} />
-      <InventoryModal open={inventoryOpen} onClose={() => setInventoryOpen(false)} initialTab={inventoryInitialTab} />
+      <InventoryModal open={inventoryOpen} onClose={closeInventory} initialTab={inventoryInitialTab} />
       <SpecimenDetailModal />
       <NpcEncounterModal />
 

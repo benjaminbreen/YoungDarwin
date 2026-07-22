@@ -1,6 +1,7 @@
 import { BLACK_BEACH_SURF, blackBeachSurfSandbarMask } from '../regions/blackBeachSurf/terrain';
 import { makeZoneScatter } from '../scatter';
 import { coastalBirds } from './flyingBirds';
+import { getCliffSurfProfile } from '../cliffSurfProfiles';
 
 const NATURE = '/assets/models/nature/';
 const scatter = (layer, count, seed, opts) => makeZoneScatter(BLACK_BEACH_SURF, layer, count, seed, opts);
@@ -27,6 +28,7 @@ function buildFloatingWrack() {
 export function buildBlackBeachSurfEcology() {
   return {
     zoneId: BLACK_BEACH_SURF,
+    cliffSurf: getCliffSurfProfile(BLACK_BEACH_SURF),
     flora: buildFloatingWrack(),
     footprintBiomes: ['wet-black-sand'],
     birds: coastalBirds([

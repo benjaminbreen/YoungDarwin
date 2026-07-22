@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rawDir = path.join(repoRoot, 'assets-src/audio/movement-wildlife/raw');
+const expandedRawDir = path.join(repoRoot, 'assets-src/audio/expanded-movement/raw');
 const outputDir = path.join(repoRoot, 'public/assets/audio/movement-wildlife');
 
 const sources = {
@@ -15,6 +16,15 @@ const sources = {
   gull: path.join(rawDir, 'freesound-699979-seagull-hq-preview.mp3'),
   passerine: path.join(rawDir, 'freesound-695297-passerine-chirp-proxy-hq-preview.mp3'),
   bee: path.join(rawDir, 'freesound-462875-large-bee-buzz-hq-preview.mp3'),
+  woodSteps: path.join(expandedRawDir, 'freesound-734600-boots-hardwood-hq-preview.mp3'),
+  mudSteps: path.join(expandedRawDir, 'freesound-231317-mud-grass-boots-hq-preview.mp3'),
+  litterSteps: path.join(expandedRawDir, 'freesound-679956-leaf-litter-boots-hq-preview.mp3'),
+  blackPowder: path.join(expandedRawDir, 'freesound-34708-black-powder-hq-preview.mp3'),
+  blackPowderLock: path.join(expandedRawDir, 'freesound-741054-black-powder-lock-hq-preview.mp3'),
+  ramrodOut: path.join(expandedRawDir, 'freesound-817931-ramrod-out-hq-preview.mp3'),
+  ramrodIn: path.join(expandedRawDir, 'freesound-817930-ramrod-in-hq-preview.mp3'),
+  birdWings: path.join(expandedRawDir, 'freesound-832945-small-bird-wings-hq-preview.mp3'),
+  dirtScrape: path.join(expandedRawDir, 'freesound-389611-dirt-finger-scrape-hq-preview.mp3'),
 };
 
 mkdirSync(outputDir, { recursive: true });
@@ -73,9 +83,34 @@ function buildSeamlessLoop({ source, output, start, end, overlap, filters, loudn
     '-map', '[out]',
     '-ac', '1',
     '-ar', '48000',
-    '-c:a', 'libvorbis',
-    '-q:a', '5',
+    '-c:a', 'libmp3lame',
+    '-b:a', '128k',
     path.join(outputDir, output),
+  ]);
+}
+
+function buildReloadSequence() {
+  // A muzzle-loader has no magazine, pump, or ejecting case. Compress the
+  // period handling into the gameplay's short automatic-reload window: lock
+  // handling, ramrod withdrawal, two muted loading strokes, rod return, cock.
+  runFfmpeg([
+    '-i', sources.blackPowderLock,
+    '-i', sources.ramrodOut,
+    '-i', sources.ramrodIn,
+    '-filter_complex', [
+      '[0:a]atrim=start=0.37:end=0.64,asetpts=PTS-STARTPTS,highpass=f=180,lowpass=f=10500,loudnorm=I=-28:LRA=4:TP=-7[lock0]',
+      '[1:a]atrim=start=0.35:end=0.73,asetpts=PTS-STARTPTS,highpass=f=130,lowpass=f=9500,loudnorm=I=-27:LRA=4:TP=-7,adelay=230[rodout0]',
+      '[2:a]atrim=start=0.32:end=0.75,asetpts=PTS-STARTPTS,highpass=f=120,lowpass=f=9000,loudnorm=I=-27:LRA=4:TP=-7,adelay=650[rodin0]',
+      '[1:a]atrim=start=0.36:end=0.73,asetpts=PTS-STARTPTS,highpass=f=130,lowpass=f=9500,loudnorm=I=-28:LRA=4:TP=-8,adelay=1040[rodout1]',
+      '[2:a]atrim=start=0.32:end=0.75,asetpts=PTS-STARTPTS,highpass=f=120,lowpass=f=9000,loudnorm=I=-28:LRA=4:TP=-8,adelay=1350[rodin1]',
+      '[0:a]atrim=start=2.72:end=3.04,asetpts=PTS-STARTPTS,highpass=f=180,lowpass=f=10500,loudnorm=I=-27:LRA=4:TP=-6,adelay=1710[lock1]',
+      '[lock0][rodout0][rodin0][rodout1][rodin1][lock1]amix=inputs=6:normalize=0:duration=longest,atrim=end=2.1,afade=t=in:st=0:d=0.008,afade=t=out:st=2.0:d=0.1,loudnorm=I=-23:LRA=6:TP=-4[out]',
+    ].join(';'),
+    '-map', '[out]',
+    '-ac', '1',
+    '-ar', '48000',
+    '-c:a', 'pcm_s16le',
+    path.join(outputDir, 'shotgun-reload.wav'),
   ]);
 }
 
@@ -87,6 +122,76 @@ buildSprite({
   filters: 'highpass=f=70,lowpass=f=12500',
   loudness: -23,
   truePeak: -4.5,
+});
+
+// Material-specific boot contacts retain the original recordings' heel/toe
+// shape. Runtime variation is deliberately slight so wood stays wood and mud
+// never turns into a cartoon squelch.
+buildSprite({
+  source: sources.woodSteps,
+  output: 'step-wood.wav',
+  starts: [1.05, 1.73, 2.41, 3.05, 3.66, 4.25, 4.96, 5.7, 6.4, 7.17],
+  duration: 0.5,
+  filters: 'highpass=f=65,lowpass=f=12500',
+  loudness: -24,
+  truePeak: -4.5,
+});
+
+buildSprite({
+  source: sources.mudSteps,
+  output: 'step-mud.wav',
+  starts: [0.14, 0.88, 1.58, 2.3, 3.02, 3.82, 4.53, 5.24, 5.96, 6.68],
+  duration: 0.62,
+  filters: 'highpass=f=55,lowpass=f=9000',
+  loudness: -24,
+  truePeak: -4.5,
+});
+
+buildSprite({
+  source: sources.litterSteps,
+  output: 'step-litter.wav',
+  starts: [0.41, 1.0, 1.66, 2.48, 3.4, 4.22, 4.75, 5.71, 6.54, 7.87],
+  duration: 0.56,
+  filters: 'highpass=f=85,lowpass=f=13000',
+  loudness: -25,
+  truePeak: -5,
+});
+
+// Six real black-powder reports. A short fade preserves the muzzle crack and
+// outdoor body while de-emphasizing the recordist's later target impacts.
+buildSprite({
+  source: sources.blackPowder,
+  output: 'shotgun-report.wav',
+  starts: [4.08, 7.99, 11.4, 14.71, 17.58, 20.11],
+  duration: 0.82,
+  filters: 'highpass=f=38,lowpass=f=13500',
+  loudness: -17,
+  truePeak: -1.5,
+  postFilters: ',afade=t=out:st=0.54:d=0.28',
+});
+
+buildReloadSequence();
+
+buildSprite({
+  source: sources.birdWings,
+  output: 'finch-wingbeat.wav',
+  starts: [0.13, 2.38, 4.9, 7.91, 11.34, 16.65],
+  duration: 0.72,
+  filters: 'highpass=f=420,lowpass=f=15000',
+  loudness: -28,
+  truePeak: -6,
+});
+
+// Close finger-on-dirt Foley gives the giant tortoise a padded press and
+// granular drag without borrowing a recognizably human heel strike.
+buildSprite({
+  source: sources.dirtScrape,
+  output: 'tortoise-step.wav',
+  starts: [1.7, 2.56, 3.35, 4.34, 5.13, 5.9, 7.55, 9.04],
+  duration: 0.7,
+  filters: 'highpass=f=65,lowpass=f=5200',
+  loudness: -29,
+  truePeak: -7,
 });
 
 // The final section of the Nox recording contains six performed jumps. Each
@@ -139,7 +244,7 @@ buildSprite({
 // middle so a long hover never exposes a hard loop boundary.
 buildSeamlessLoop({
   source: sources.bee,
-  output: 'buzz-bee.ogg',
+  output: 'buzz-bee.mp3',
   start: 0.42,
   end: 20.1,
   overlap: 1.6,

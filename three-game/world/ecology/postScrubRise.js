@@ -23,6 +23,7 @@ import {
 } from './floraAssets';
 import {
   LAVA_CACTUS_SPECIES,
+  LECOCARPUS_PINNATIFIDUS_SPECIES,
   OPUNTIA_MEGASPERMA_SPECIES,
   PALO_SANTO_SPECIES,
 } from './floraSpecies';
@@ -391,6 +392,37 @@ function buildInteractiveFlora(authoredFlora) {
     };
   };
 
+  const lecocarpusHabitatAt = ({ biome, x, z }) => {
+    const path = scrubRisePathInfo(x, z);
+    const thicket = scrubRiseThicketStrength(x, z);
+    const wash = scrubRiseWashMask(x, z);
+    const basalt = scrubRiseBasaltExposure(x, z);
+    const biomeSuitability = {
+      'open-dry-grass': 1,
+      'thorn-scrub': 0.88,
+      'inland-grass-rise': 0.84,
+      'basalt-scrub': 0.56,
+      'dry-wash': 0.16,
+    }[biome] || 0;
+    return {
+      moisture: clamp01(0.14 + thicket * 0.24 + wash * 0.12),
+      canopy: clamp01(0.03 + thicket * 0.38),
+      exposure: clamp01(0.92 - thicket * 0.34 + basalt * 0.05),
+      disturbance: clamp01(path.path * 0.78 + path.shoulder * 0.28),
+      salinity: 0.03,
+      rockiness: basalt,
+      biomeSuitability,
+      localSuitability: clamp01(0.5 + thicket * 0.22 + (1 - wash) * 0.16),
+      excluded: biomeSuitability <= 0
+        || path.distance < path.width * 1.48
+        || wash > 0.52
+        || thicket < 0.1
+        || thicket > 0.7
+        || basalt > 0.82
+        || distanceToNearestItem(authoredTreesAndCacti, x, z) < 4.5,
+    };
+  };
+
   return [
     buildProceduralInteractiveFloraLayer({
       id: 'post-scrub-rise-prickly-pear-overlay',
@@ -449,6 +481,18 @@ function buildInteractiveFlora(authoredFlora) {
         maxGrade: 0.54,
       },
       siteFromItem: item => ({ leafiness: 0.14 + item.tone * 0.34 }),
+    }),
+    buildProceduralInteractiveFloraLayer({
+      id: 'post-scrub-rise-lecocarpus-pinnatifidus',
+      zoneId: POST_SCRUB_RISE,
+      species: LECOCARPUS_PINNATIFIDUS_SPECIES,
+      runtime: 'lecocarpus-pinnatifidus',
+      seed: 977,
+      count: 1,
+      bounds: { minX: -45, maxX: 45, minZ: -39, maxZ: 43 },
+      habitatAt: lecocarpusHabitatAt,
+      placement: { patchCount: 1, patchRadius: [2.4, 4], minItemSeparation: 7, maxGrade: 0.62 },
+      siteFromItem: item => ({ flowering: 0.72 + item.tone * 0.22 }),
     }),
   ];
 }

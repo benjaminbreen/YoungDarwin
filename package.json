@@ -46,6 +46,8 @@
     "asset:audio:movement-wildlife": "node scripts/build-movement-wildlife-audio.mjs",
     "asset:audio:darwin-body": "node scripts/build-darwin-body-audio.mjs",
     "asset:audio:island-ambience": "node scripts/build-island-ambience-audio.mjs",
+    "asset:audio:wildlife-fieldwork": "node scripts/build-wildlife-fieldwork-audio.mjs",
+    "asset:audio:contextual-world": "node scripts/build-contextual-world-audio.mjs",
     "asset:water-bakes": "npx tsx scripts/build-water-bakes.mjs",
     "data:border-vistas": "npx tsx scripts/build-border-vista-buffers.mjs",
     "data:path-splats": "npx tsx scripts/build-path-splat-textures.mjs",

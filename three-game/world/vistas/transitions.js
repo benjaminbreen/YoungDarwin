@@ -172,6 +172,20 @@ const TRANSITION_RECIPES = {
     shoreFloor: WATER_LEVEL - 0.62,
     landThreshold: 0.08,
   },
+  'water-to-black-beach': {
+    id: 'water-to-black-beach',
+    targetStart: 8,
+    targetFull: 58,
+    midStart: 8,
+    midFull: 42,
+    sourceBias: 0.24,
+    midStrength: 0.62,
+    farBias: 0.28,
+    literalTarget: 0.62,
+    shoreBlend: 0.7,
+    shoreFloor: WATER_LEVEL - 0.48,
+    landThreshold: 0.08,
+  },
 };
 
 function chooseTransitionRecipe(sourceProfile, targetProfile, sourceStats, targetStats) {
@@ -280,9 +294,19 @@ export function buildBorderTransition(regionId, config, vista, targetConfig) {
   const targetProfile = surfaceProfileForRegion(vista.toRegionId);
   const sourceStats = sampleEdgeStats(regionId, config, vista.edge);
   const targetStats = sampleEdgeStats(vista.toRegionId, targetConfig, targetEdge);
-  const recipe = chooseTransitionRecipe(sourceProfile, targetProfile, sourceStats, targetStats);
+  const blackBeachApproach = regionId === 'BLACK_BEACH_SURF'
+    && vista.toRegionId === 'BLACK_BEACH';
+  const recipe = blackBeachApproach
+    ? TRANSITION_RECIPES['water-to-black-beach']
+    : chooseTransitionRecipe(sourceProfile, targetProfile, sourceStats, targetStats);
   const continuity = buildContinuityRules(recipe, sourceProfile, targetProfile, sourceStats, targetStats);
-  return {
+  // Mixed coastal edges should hand the source material off promptly. Region
+  // PBR masks are authored inside the playable bounds; carrying them far into
+  // an apron produces conspicuous off-map bands in overhead views.
+  if (sourceStats.waterRatio > 0.08 || sourceStats.shoreRatio > 0.16) {
+    continuity.surfaceCarryEnd = Math.min(continuity.surfaceCarryEnd, 12);
+  }
+  const transition = {
     targetEdge,
     sourceProfile,
     targetProfile,
@@ -296,6 +320,13 @@ export function buildBorderTransition(regionId, config, vista, targetConfig) {
     shoreColor: profileColorValue(sourceProfile, 'shoreColor').lerp(profileColorValue(targetProfile, 'shoreColor'), 0.58),
     wetColor: profileColorValue(sourceProfile, 'wetColor').lerp(profileColorValue(targetProfile, 'wetColor'), 0.45),
   };
+  if (blackBeachApproach) {
+    transition.midColor.set('#30352f');
+    transition.farColor.set('#4c4435');
+    transition.shoreColor.set('#252620');
+    transition.wetColor.set('#17465d');
+  }
+  return transition;
 }
 
 export function transitionVistaColor(transition, currentColor, targetColor, outsideDistance, outsideT, targetY) {

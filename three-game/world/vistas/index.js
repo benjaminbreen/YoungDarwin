@@ -74,6 +74,7 @@ const SURFACE_PROFILE_BY_REGION_ID = {
   BLACK_BEACH_SURF: 'black-sand-coast',
   WATKINS_CREEK: 'highland',
   S_INTERTIDAL: 'intertidal-flat',
+  PUNTA_SUR: 'windward-headland',
 };
 
 export const surfaceProfiles = {
@@ -186,6 +187,17 @@ export const surfaceProfiles = {
     wetColor: '#173b39',
     shoreColor: '#aca88a',
     targetLiteralWeight: 0.38,
+  },
+  'windward-headland': {
+    id: 'windward-headland',
+    families: ['volcanic', 'basalt', 'dry-scrub', 'coast', 'headland'],
+    coastalStyle: 'spray-wet-basalt-headland',
+    nearColor: '#6f5d43',
+    midColor: '#776248',
+    farColor: '#84745a',
+    wetColor: '#303936',
+    shoreColor: '#665d49',
+    targetLiteralWeight: 0.32,
   },
   'open-water': {
     id: 'open-water',
@@ -379,9 +391,9 @@ export const vistaLibrary = {
     apronDepth: 96,
     apronWidthScale: 1.92,
     bands: [
-      { from: 0, to: 25, nearY: -0.42, farY: 2.8, colors: ['#31382d', '#55643d'] },
-      { from: 25, to: 62, nearY: 2.8, farY: 10.6, colors: ['#52633d', '#708456'] },
-      { from: 62, to: 90, nearY: 10.6, farY: 16.8, colors: ['#4e5644', '#78816c'] },
+      { from: 0, to: 25, nearY: -0.42, farY: 2.8, colors: ['#4d4538', '#6b5840'] },
+      { from: 25, to: 62, nearY: 2.8, farY: 10.6, colors: ['#67543e', '#7b6447'] },
+      { from: 62, to: 90, nearY: 10.6, farY: 16.8, colors: ['#685d4b', '#83755d'] },
     ],
     markers: [
       { kind: 'scrub', count: 28, at: [20, 62], color: '#405637', scale: [0.25, 0.64], seed: 101 },
@@ -429,11 +441,17 @@ const NON_SCENIC_SOURCE_TYPES = new Set([
   'office',
 ]);
 
+// Black Beach Surf is mechanically an ocean map, but unlike offshore ocean
+// destinations it is a shallow shelf with an authored east route directly
+// into Black Beach. It therefore needs the same neighbor terrain continuation
+// as a coastal land map; its other three sides remain explicit ocean bounds.
+const WATER_APRON_SOURCE_IDS = new Set(['BLACK_BEACH_SURF']);
+
 function isApronSourceRegion(regionId) {
   const region = getRegionMap(regionId);
   return region?.id === regionId
     && Boolean(region?.terrain)
-    && !NON_SCENIC_SOURCE_TYPES.has(region.type);
+    && (!NON_SCENIC_SOURCE_TYPES.has(region.type) || WATER_APRON_SOURCE_IDS.has(regionId));
 }
 
 export function getBorderVistas(regionId) {

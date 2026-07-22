@@ -334,10 +334,36 @@ export function InstancedGLBLayer({
     });
   }, [impactReaction, itemIds, sourceId]);
 
+  useEffect(() => onPropEvent('field-action-attempt', event => {
+    const target = event.target;
+    if (!target || target.sourceId !== sourceId || !itemIds.has(target.itemId)) return;
+    const directionLength = Math.hypot(event.facing?.x || 0, event.facing?.z || 0) || 1;
+    const amplitude = event.tool === 'hammer'
+      ? 0.24
+      : event.tool === 'insect_net'
+        ? 0.13
+        : event.tool === 'pocket_knife'
+          ? 0.1
+          : 0.065;
+    reactionStateRef.current.set(target.itemId, {
+      age: 0,
+      amplitude,
+      duration: event.tool === 'hammer' ? 1.1 : 0.72,
+      frequency: event.tool === 'hammer' ? 13 : 9,
+      angle: 0,
+      direction: {
+        x: (event.facing?.x || 0) / directionLength,
+        z: (event.facing?.z || -1) / directionLength,
+      },
+      done: false,
+      resetRendered: false,
+    });
+  }), [itemIds, sourceId]);
+
   // Coarse per-bucket distance cull (three.js handles frustum culling for free
   // via each bucket's bounding sphere). Far buckets switch off entirely.
   useFrame(({ camera }, delta) => {
-    if (impactReaction && reactionStateRef.current.size) {
+    if (reactionStateRef.current.size) {
       for (const [itemId, reaction] of reactionStateRef.current) {
         if (reaction.done) {
           if (reaction.resetRendered) reactionStateRef.current.delete(itemId);
@@ -394,7 +420,7 @@ export function InstancedGLBLayer({
                 userData={meshUserData}
                 inspectableType={inspectableType}
                 onInspect={handleInspect}
-                reactionStateRef={impactReaction ? reactionStateRef : null}
+                reactionStateRef={reactionStateRef}
               />
             );
           })}

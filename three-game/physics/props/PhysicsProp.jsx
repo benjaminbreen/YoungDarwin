@@ -595,6 +595,12 @@ export function PhysicsProp({ prop, onBreak }) {
         const result = leaveCarry(request, request.mode);
         if (result) {
           state.completeCarryDrop?.(prop.id, request.requestId);
+          emitPropEvent('carried-prop-settle', {
+            propId: prop.id,
+            zoneId: currentZoneId,
+            mode: request.mode,
+            position: result.placement?.position || request.position,
+          });
           if (result.placement) {
             const distance = Math.max(0, Math.hypot(
               result.placement.position.x - request.position.x,

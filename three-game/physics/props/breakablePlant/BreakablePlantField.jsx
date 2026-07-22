@@ -39,6 +39,7 @@ import { getThreeSpecimens } from '../../../data';
 import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { SpecimenHighlight } from '../../../components/world/SpecimenHighlight';
 import {
   clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
@@ -472,12 +473,12 @@ export function BreakablePlantField({ spec }) {
     return pivots;
   }, [pieces, sites]);
 
-  const examinableActorId = useMemo(() => {
+  const examinableSpecimen = useMemo(() => {
     if (!spec.examinableSpecimenId) return null;
-    const specimen = getThreeSpecimens(currentZoneId)
-      .find(item => item.id === spec.examinableSpecimenId);
-    return specimen?.instanceId || specimen?.id || null;
+    return getThreeSpecimens(currentZoneId)
+      .find(item => item.id === spec.examinableSpecimenId) || null;
   }, [currentZoneId, spec.examinableSpecimenId]);
+  const examinableActorId = examinableSpecimen?.instanceId || examinableSpecimen?.id || null;
 
   // Publish a sensible first focus immediately. The frame loop below moves
   // this single specimen record to whichever clump is nearest the player, so
@@ -1041,6 +1042,27 @@ export function BreakablePlantField({ spec }) {
       {sites.map(site => (
         <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
       ))}
+      {spec.highlight && examinableSpecimen && sites.map(site => {
+        const pivot = sitePivots.get(site.id);
+        return (
+          <group
+            key={`highlight-${site.id}`}
+            position={[site.x || 0, pivot?.y || site.y || 0, site.z || 0]}
+          >
+            <SpecimenHighlight
+              specimen={{
+                ...examinableSpecimen,
+                instanceId: `${examinableActorId}:${site.id}`,
+              }}
+              zoneId={currentZoneId}
+              markerY={spec.highlight.markerY ?? 1}
+              footprintRadius={spec.highlight.footprintRadius ?? 0.9}
+              nearby={false}
+              selected={false}
+            />
+          </group>
+        );
+      })}
       {pieces
         .filter(piece => !collected.has(piece.key) && !runtime.culled.has(piece.key))
         .map(piece => (

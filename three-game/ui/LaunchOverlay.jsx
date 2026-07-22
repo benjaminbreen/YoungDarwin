@@ -4,10 +4,6 @@ import React, { useMemo } from 'react';
 import { CompassRoseIcon, OpenBookIcon } from './expedition/icons';
 
 const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
-const SPLASH_BACKGROUND_SRCSET = [
-  '/assets/ui/splash-background-960.webp 960w',
-  `${SPLASH_BACKGROUND} 1672w`,
-].join(', ');
 
 function BrassRule({ className = '' }) {
   return (
@@ -153,11 +149,8 @@ export function LaunchOverlay({
       >
         <img
           src={SPLASH_BACKGROUND}
-          srcSet={SPLASH_BACKGROUND_SRCSET}
-          sizes="100vw"
           alt=""
           loading="eager"
-          fetchPriority="high"
           decoding="async"
           className="absolute inset-0 h-full w-full select-none object-cover object-center"
         />

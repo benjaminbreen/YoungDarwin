@@ -315,6 +315,7 @@ function makeSnapshot() {
   return {
     currentZoneId: state.currentZoneId,
     playableModeId: state.playableModeId,
+    viewMode: state.viewMode,
     activeToolId: state.activeToolId,
     carriedObjectId: state.carriedObjectId || null,
     carryDropRequest: state.carryDropRequest
@@ -332,6 +333,25 @@ function makeSnapshot() {
           distance: finiteNumber(state.carryPrompt.distance),
         }
       : null,
+    contextPrompt: state.contextPrompt
+      ? {
+          id: state.contextPrompt.id || null,
+          source: state.contextPrompt.source || null,
+          keyLabel: state.contextPrompt.keyLabel || null,
+          label: state.contextPrompt.label || null,
+        }
+      : null,
+    fieldAction: state.fieldAction
+      ? {
+          id: state.fieldAction.id,
+          kind: state.fieldAction.kind,
+          toolId: state.fieldAction.toolId,
+          label: state.fieldAction.label,
+          targetId: state.fieldAction.target?.id || null,
+          targetKind: state.fieldAction.target?.kind || null,
+        }
+      : null,
+    observationMode: Boolean(state.observationMode),
     toolbarOrder: Array.isArray(state.toolbarOrder) ? [...state.toolbarOrder] : [],
     transition: state.transition
       ? {
@@ -574,6 +594,11 @@ function createHarnessApi() {
     },
     setTool: toolId => {
       useThreeGameStore.getState().setActiveTool(toolId);
+      return makeSnapshot();
+    },
+    setViewMode: viewMode => {
+      if (!['shoulder', 'hero', 'first', 'top'].includes(viewMode)) return makeSnapshot();
+      useThreeGameStore.setState({ viewMode });
       return makeSnapshot();
     },
     openNpcEncounter: (npcId = 'syms_covington') => {

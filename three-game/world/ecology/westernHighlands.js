@@ -15,7 +15,12 @@ import {
   DARWINIOTHAMNUS_VARIANT_MODE,
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
-import { PALO_SANTO_SPECIES, PLEOPELTIS_POLYPODIOIDES_SPECIES } from './floraSpecies';
+import {
+  DELILIA_INELEGANS_SPECIES,
+  PALO_SANTO_SPECIES,
+  PLEOPELTIS_POLYPODIOIDES_SPECIES,
+  SICYOS_VILLOSUS_SPECIES,
+} from './floraSpecies';
 import {
   buildProceduralFloraLayer,
   buildProceduralInteractiveFloraLayer,
@@ -225,7 +230,7 @@ function buildGeneratedTrees() {
 }
 
 function buildInteractiveFlora() {
-  return [buildProceduralInteractiveFloraLayer({
+  const paloSanto = buildProceduralInteractiveFloraLayer({
     id: 'western-highlands-palo-santo-edge',
     zoneId: W_HIGH,
     species: PALO_SANTO_SPECIES,
@@ -258,7 +263,101 @@ function buildInteractiveFlora() {
       maxGrade: 0.54,
     },
     siteFromItem: item => ({ leafiness: 0.22 + item.tone * 0.34 }),
-  })];
+  });
+  const sicyos = buildProceduralInteractiveFloraLayer({
+    id: 'western-highlands-sicyos-villosus-reconstruction',
+    zoneId: W_HIGH,
+    species: SICYOS_VILLOSUS_SPECIES,
+    runtime: 'sicyos-villosus',
+    seed: 359,
+    count: 4,
+    bounds: { minX: -43, maxX: 43, minZ: -39, maxZ: 40 },
+    habitatAt: ({ biome, x, z }) => {
+      const canopy = westernHighlandsCanopyMask(x, z);
+      const wet = westernHighlandsWetHollowMask(x, z);
+      const clearing = westernHighlandsClearingMask(x, z);
+      const trail = westernHighlandsTrailInfluence(x, z, 1.2, 7.2);
+      const biomeSuitability = {
+        'humid-understory': 1,
+        'fern-clearing': 0.92,
+        'scalesia-forest': 0.82,
+      }[biome] || 0;
+      const accessibleEdge = trail > 0.16 && trail < 0.62;
+      return {
+        moisture: Math.min(1, 0.42 + wet * 0.42 + canopy * 0.16),
+        canopy: Math.min(1, 0.12 + canopy * 0.78),
+        exposure: Math.max(0, Math.min(1, 0.68 - canopy * 0.46 + clearing * 0.12)),
+        disturbance: Math.min(1, trail * 0.36),
+        salinity: 0,
+        rockiness: Math.min(1, 0.12 + clearing * 0.16),
+        biomeSuitability,
+        localSuitability: accessibleEdge ? Math.min(1, 0.48 + canopy * 0.28 + clearing * 0.18) : 0,
+        excluded: biomeSuitability <= 0
+          || !accessibleEdge
+          || wet > 0.72
+          || canopy < 0.16
+          || canopy > 0.82,
+      };
+    },
+    placement: {
+      patchCount: 2,
+      patchRadius: [3.2, 5.4],
+      minPatchSeparation: 9,
+      minItemSeparation: 6.5,
+      maxGrade: 0.58,
+    },
+    siteFromItem: item => ({
+      flowering: 0.48 + item.tone * 0.46,
+    }),
+  });
+  const delilia = buildProceduralInteractiveFloraLayer({
+    id: 'western-highlands-delilia-inelegans-reconstruction',
+    zoneId: W_HIGH,
+    species: DELILIA_INELEGANS_SPECIES,
+    runtime: 'delilia-inelegans',
+    seed: 373,
+    count: 1,
+    bounds: { minX: -42, maxX: 42, minZ: -38, maxZ: 39 },
+    habitatAt: ({ biome, x, z }) => {
+      const canopy = westernHighlandsCanopyMask(x, z);
+      const wet = westernHighlandsWetHollowMask(x, z);
+      const clearing = westernHighlandsClearingMask(x, z);
+      const trail = westernHighlandsTrailInfluence(x, z, 1.2, 7.2);
+      const biomeSuitability = {
+        'fern-clearing': 1,
+        'humid-understory': 0.88,
+        'scalesia-forest': 0.58,
+      }[biome] || 0;
+      const accessibleEdge = trail > 0.13 && trail < 0.58;
+      const nearestSicyos = sicyos.sites.reduce((nearest, site) => (
+        Math.min(nearest, Math.hypot(x - site.x, z - site.z))
+      ), Infinity);
+      return {
+        moisture: Math.min(1, 0.3 + wet * 0.36 + canopy * 0.2),
+        canopy: Math.min(1, 0.06 + canopy * 0.7),
+        exposure: Math.max(0, Math.min(1, 0.74 - canopy * 0.42 + clearing * 0.16)),
+        disturbance: Math.min(1, trail * 0.44),
+        salinity: 0,
+        rockiness: Math.min(1, 0.1 + clearing * 0.22),
+        biomeSuitability,
+        localSuitability: accessibleEdge ? Math.min(1, 0.52 + clearing * 0.32) : 0,
+        excluded: biomeSuitability <= 0
+          || !accessibleEdge
+          || wet > 0.64
+          || canopy < 0.1
+          || canopy > 0.7
+          || nearestSicyos < 5.5,
+      };
+    },
+    placement: {
+      patchCount: 1,
+      patchRadius: [1.5, 2.4],
+      minItemSeparation: 5,
+      maxGrade: 0.58,
+    },
+    siteFromItem: item => ({ flowering: 0.78 + item.tone * 0.18 }),
+  });
+  return [paloSanto, sicyos, delilia];
 }
 
 function buildProceduralFlora() {

@@ -10,6 +10,7 @@ import { wildlifeCatalog } from '../../wildlife/wildlifeCatalog';
 import { createReptileAnimator } from '../../wildlife/reptiles/reptileGaitRuntime';
 import { createLavaLizardRig, LAVA_LIZARD_GAIT } from '../../wildlife/reptiles/lavaLizardModel';
 import { ProceduralFinchPlayer } from '../../components/player/ProceduralFinchPlayer';
+import { ProceduralRacerSnake } from '../../components/player/ProceduralRacerSnake';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -73,6 +74,50 @@ const PROCEDURAL_BIRD_MODES = [
   'flight',
 ];
 
+const PROCEDURAL_DOVE_MODES = [
+  'head tilt',
+  'ground forage',
+  'walk',
+  'run',
+  'takeoff',
+  'powered flight',
+  'glide',
+  'landing',
+];
+
+const PROCEDURAL_HAWK_MODES = [
+  'tree perch',
+  'takeoff',
+  'powered flight',
+  'soar',
+  'stoop',
+  'approach',
+  'tree landing',
+];
+
+const PROCEDURAL_OWL_MODES = [
+  'day roost',
+  'listening swivel',
+  'soft launch',
+  'buoyant wingbeats',
+  'silent quartering',
+  'hover listen',
+  'prey pounce',
+  'low glide',
+  'lava landing',
+];
+
+const PROCEDURAL_RACER_MODES = [
+  'basking coil',
+  'tongue tasting',
+  'ground slither',
+  'alert S-curve',
+  'prey strike',
+  'crevice retreat',
+  'shelter still',
+  'carried coil',
+];
+
 function procModeInputs(mode, t) {
   switch (mode) {
     case 'walk': return { speed: 0.38, playerDist: 8 };
@@ -105,6 +150,16 @@ const PROCEDURAL_ANIMALS = [
     modes: PROCEDURAL_BIRD_MODES,
   },
   {
+    id: 'largeGroundFinchProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'largeGround',
+    label: 'New Large Ground Finch',
+    source: 'Hand-authored procedural bird rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_BIRD_MODES,
+  },
+  {
     id: 'floreanaMockingbirdProcedural',
     kind: 'procedural',
     proceduralType: 'bird',
@@ -113,6 +168,51 @@ const PROCEDURAL_ANIMALS = [
     source: 'Hand-authored procedural bird rig',
     path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
     modes: PROCEDURAL_BIRD_MODES,
+  },
+  {
+    id: 'galapagosDoveProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'galapagosDove',
+    label: 'New Galapagos Dove',
+    source: 'Hand-authored procedural bird rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_DOVE_MODES,
+  },
+  {
+    id: 'galapagosHawkProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'galapagosHawk',
+    label: 'New Galapagos Hawk',
+    source: 'Hand-authored procedural raptor rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_HAWK_MODES,
+    perchPreview: true,
+    previewScale: 3.2,
+  },
+  {
+    id: 'galapagosShortEaredOwlProcedural',
+    kind: 'procedural',
+    proceduralType: 'bird',
+    variant: 'galapagosShortEaredOwl',
+    label: 'New Galapagos Short-eared Owl',
+    source: 'Hand-authored procedural owl rig',
+    path: 'three-game/components/player/ProceduralFinchPlayer.jsx',
+    modes: PROCEDURAL_OWL_MODES,
+    lavaRoostPreview: true,
+    previewScale: 3.65,
+  },
+  {
+    id: 'galapagosRacerProcedural',
+    kind: 'procedural',
+    proceduralType: 'snake',
+    variant: 'floreanaRacer',
+    label: 'New Floreana Racer Snake',
+    source: 'Hand-authored articulated snake rig',
+    path: 'three-game/components/player/ProceduralRacerSnake.jsx',
+    modes: PROCEDURAL_RACER_MODES,
+    previewScale: 1.72,
   },
   {
     id: 'lavaLizardProceduralMale',
@@ -220,6 +320,21 @@ function animalEntries() {
 }
 
 const ANIMAL_ENTRIES = animalEntries();
+
+function initialAnimalAnimationLabAnimalId() {
+  if (typeof window !== 'undefined') {
+    const requested = new URLSearchParams(window.location.search).get('animalAnimationLab');
+    if (ANIMAL_ENTRIES.some(animal => animal.id === requested)) return requested;
+  }
+  if (modelAssets.tripoTortoiseRigged?.enabled) return 'tripoTortoiseRigged';
+  if (modelAssets.flightlessCormorant?.enabled) return 'flightlessCormorant';
+  return ANIMAL_ENTRIES[0]?.id;
+}
+
+function initialAnimalAnimationLabMode() {
+  if (typeof window === 'undefined') return 'walk';
+  return new URLSearchParams(window.location.search).get('animalAnimationMode') || 'walk';
+}
 
 function normalizePreviewObject(object) {
   object.updateMatrixWorld(true);
@@ -350,21 +465,93 @@ function ProceduralReptilePreview({ animal, mode, paused, timeScale }) {
 function ProceduralBirdPreview({ animal, mode, paused, timeScale }) {
   const motionRef = useRef({});
   useFrame(({ clock }) => {
-    const flight = mode === 'flight';
-    const speed = mode === 'walk' ? 0.34 : mode === 'run' ? 1.65 : flight ? 3 : 0;
+    const takeoff = mode === 'takeoff' || mode === 'soft launch';
+    const landing = mode === 'landing' || mode === 'tree landing' || mode === 'lava landing';
+    const poweredFlight = mode === 'flight' || mode === 'powered flight' || mode === 'buoyant wingbeats';
+    const glide = mode === 'glide' || mode === 'soar' || mode === 'approach' || mode === 'silent quartering' || mode === 'low glide';
+    const stoop = mode === 'stoop' || mode === 'prey pounce';
+    const hover = mode === 'hover listen';
+    const flight = takeoff || landing || poweredFlight || glide || stoop || hover;
+    const speed = mode === 'walk' ? 0.34
+      : mode === 'run' ? 1.65
+      : stoop ? 4.4
+      : mode === 'approach' ? 1.15
+      : hover ? 0.18
+      : landing ? 0.72
+      : takeoff ? 2.5
+      : poweredFlight ? 3
+      : glide ? 1.15
+      : 0;
     motionRef.current = {
       speed,
       flying: flight,
-      flightPhase: flight ? 'cruise' : null,
-      flightFlap: flight && Math.sin(clock.elapsedTime * 0.75) > -0.2,
-      action: mode === 'forage' ? 'animalEat' : null,
+      flightPhase: takeoff ? 'takeoff' : landing ? 'landing' : flight ? 'cruise' : null,
+      flightFlap: takeoff || poweredFlight || hover,
+      flightDive: stoop,
+      flightDescend: stoop,
+      flightPitch: stoop ? 0.42 : mode === 'approach' ? 0.07 : 0,
+      flightBank: mode === 'soar' ? Math.sin(clock.elapsedTime * 0.7) * 0.18 : 0,
+      owlHover: hover,
+      owlPounce: mode === 'prey pounce',
+      action: mode === 'day roost'
+        ? 'animalSleep'
+        : mode === 'forage' || mode === 'ground forage' ? 'animalEat' : null,
       timeScale: paused ? 0 : timeScale,
     };
   });
 
   return (
-    <group position={[0, 0.5, 0]} scale={5.2}>
+    <group position={[0, 0.5, 0]} scale={animal.previewScale || 5.2}>
+      {animal.perchPreview ? (
+        <mesh castShadow receiveShadow position={[0, -0.018, 0.035]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.026, 0.04, 0.58, 10]} />
+          <meshStandardMaterial color="#6f5136" roughness={0.96} />
+        </mesh>
+      ) : null}
+      {animal.lavaRoostPreview ? (
+        <mesh castShadow receiveShadow position={[0, -0.055, 0.035]} rotation={[0.08, 0.32, -0.04]} scale={[0.34, 0.11, 0.24]}>
+          <dodecahedronGeometry args={[1, 1]} />
+          <meshStandardMaterial color="#4b4841" roughness={0.98} />
+        </mesh>
+      ) : null}
       <ProceduralFinchPlayer motionRef={motionRef} variant={animal.variant} />
+    </group>
+  );
+}
+
+function ProceduralSnakePreview({ animal, mode, paused, timeScale }) {
+  const motionRef = useRef({ action: 'baskCoil', speed: 0, timeScale: 1 });
+  useFrame(({ clock }) => {
+    const actionByMode = {
+      'basking coil': 'baskCoil',
+      'tongue tasting': 'tongueTaste',
+      'ground slither': 'groundSlither',
+      'alert S-curve': 'alertS',
+      'prey strike': 'preyStrike',
+      'crevice retreat': 'creviceRetreat',
+      'shelter still': 'shelterStill',
+      'carried coil': 'carried',
+    };
+    let action = actionByMode[mode] || 'baskCoil';
+    // Reset through the alert pose so the brief strike remains readable on a
+    // looping lab preview instead of playing only once after mode selection.
+    if (mode === 'prey strike' && clock.elapsedTime % 2.2 < 1.25) action = 'alertS';
+    motionRef.current = {
+      action,
+      speed: mode === 'ground slither' ? 0.42 : mode === 'crevice retreat' ? 1.38 : 0,
+      timeScale: paused ? 0 : timeScale,
+    };
+  });
+
+  return (
+    <group position={[0, 0.035, 0]} scale={animal.previewScale || 1.72}>
+      {(mode === 'crevice retreat' || mode === 'shelter still') && (
+        <mesh castShadow receiveShadow position={[-0.58, 0.04, 0.16]} rotation={[0.04, 0.5, -0.05]} scale={[0.42, 0.14, 0.31]}>
+          <dodecahedronGeometry args={[1, 1]} />
+          <meshStandardMaterial color="#494841" roughness={0.98} />
+        </mesh>
+      )}
+      <ProceduralRacerSnake motionRef={motionRef} />
     </group>
   );
 }
@@ -440,10 +627,8 @@ function recommendedIncline(animal, clip) {
 }
 
 export function AnimalAnimationDevPanel({ open, onClose }) {
-  const [selectedAnimalId, setSelectedAnimalId] = useState(
-    modelAssets.tripoTortoiseRigged?.enabled ? 'tripoTortoiseRigged' : (modelAssets.flightlessCormorant?.enabled ? 'flightlessCormorant' : ANIMAL_ENTRIES[0]?.id),
-  );
-  const [selectedClip, setSelectedClip] = useState('walk');
+  const [selectedAnimalId, setSelectedAnimalId] = useState(initialAnimalAnimationLabAnimalId);
+  const [selectedClip, setSelectedClip] = useState(initialAnimalAnimationLabMode);
   const [paused, setPaused] = useState(false);
   const [timeScale, setTimeScale] = useState(1);
   const [animationMap, setAnimationMap] = useState({});
@@ -710,6 +895,14 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                   {selectedAnimal.kind === 'procedural' ? (
                     selectedAnimal.proceduralType === 'bird' ? (
                       <ProceduralBirdPreview
+                        key={selectedAnimal.id}
+                        animal={selectedAnimal}
+                        mode={selectedClip}
+                        paused={paused}
+                        timeScale={timeScale}
+                      />
+                    ) : selectedAnimal.proceduralType === 'snake' ? (
+                      <ProceduralSnakePreview
                         key={selectedAnimal.id}
                         animal={selectedAnimal}
                         mode={selectedClip}

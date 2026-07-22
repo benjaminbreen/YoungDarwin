@@ -3,6 +3,7 @@ import { getBorderVistas } from './index';
 
 const RESOURCE_CACHE_LIMIT = 4;
 const GENERATED_BASE = '/assets/generated/border-vistas';
+const GENERATED_GEOMETRY_VERSION = 3;
 const resources = new Map();
 let useCounter = 0;
 
@@ -14,7 +15,7 @@ const ARRAY_TYPES = {
 
 function generatedPath(regionId) {
   const stem = regionId.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-  return `${GENERATED_BASE}/${stem}.bin`;
+  return `${GENERATED_BASE}/${stem}.bin?v=${GENERATED_GEOMETRY_VERSION}`;
 }
 
 function decodeAttribute(record, arrayBuffer, payloadStart) {
@@ -51,6 +52,13 @@ function decodeGeneratedPayload(arrayBuffer) {
           [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
         ))),
         index: decodeAttribute(entry.carry.index, arrayBuffer, payloadStart),
+      } : null,
+      horizon: entry.horizon ? {
+        ...entry.horizon,
+        attributes: Object.fromEntries(Object.entries(entry.horizon.attributes || {}).map(([name, attribute]) => (
+          [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
+        ))),
+        index: decodeAttribute(entry.horizon.index, arrayBuffer, payloadStart),
       } : null,
     })),
   };
@@ -100,6 +108,7 @@ function hydratePayload(payload, backingBuffer = null) {
       edge: entry.edge,
       preview: buildGeometry(entry.preview),
       carry: buildGeometry(entry.carry),
+      horizon: buildGeometry(entry.horizon),
     })),
   };
 }
@@ -108,6 +117,7 @@ function disposeResource(value) {
   for (const entry of value?.entries || []) {
     entry.preview?.dispose?.();
     entry.carry?.dispose?.();
+    entry.horizon?.dispose?.();
   }
 }
 

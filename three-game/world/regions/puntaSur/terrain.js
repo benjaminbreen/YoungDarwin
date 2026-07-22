@@ -112,20 +112,23 @@ export function puntaSurColor(x, z, y) {
   const path = puntaSurPathInfo(x, z);
   const broad = terrainSurfaceNoise(x * 0.36 + 4, z * 0.34 - 7) * 0.5 + 0.5;
   const fine = terrainSurfaceNoise(x * 1.34 - 12, z * 1.29 + 4) * 0.5 + 0.5;
-  const color = new THREE.Color('#56604d');
-  color.lerp(new THREE.Color('#73715b'), broad * 0.24);
-  color.lerp(new THREE.Color('#363c38'), puntaSurBasaltExposure(x, z) * 0.38);
+  // This CPU palette is baked into border-vista vertex colors, so it needs to
+  // track the authored PBR terrain's ochre/red-earth base rather than the old
+  // green-gray prototype palette.
+  const color = new THREE.Color('#6f5d43');
+  color.lerp(new THREE.Color('#876d4c'), broad * 0.28);
+  color.lerp(new THREE.Color('#4b4439'), puntaSurBasaltExposure(x, z) * 0.32);
   if (biome === 'punta-sur-seabed') color.set('#18363a');
   if (biome === 'spray-darkened-sea-cliff') color.lerp(new THREE.Color('#202a2a'), 0.72);
-  if (biome === 'fractured-southern-rim') color.lerp(new THREE.Color('#424943'), 0.5);
-  if (biome === 'rain-cut-basalt-gully') color.lerp(new THREE.Color('#394a3e'), 0.48);
+  if (biome === 'fractured-southern-rim') color.lerp(new THREE.Color('#514a3e'), 0.46);
+  if (biome === 'rain-cut-basalt-gully') color.lerp(new THREE.Color('#4a4e3f'), 0.44);
   if (biome === 'weathered-basalt-rib') color.lerp(new THREE.Color('#4b4038'), 0.56);
   if (biome === 'rust-red-eroded-earth') color.lerp(new THREE.Color('#aa603d'), 0.7);
-  if (biome === 'wind-combed-cape-grass') color.lerp(new THREE.Color('#6f8253'), 0.44);
-  if (biome === 'sheltered-southern-scrub') color.lerp(new THREE.Color('#4e704d'), 0.38);
+  if (biome === 'wind-combed-cape-grass') color.lerp(new THREE.Color('#788052'), 0.4);
+  if (biome === 'sheltered-southern-scrub') color.lerp(new THREE.Color('#5e7049'), 0.34);
   if (biome === 'rainbow-cape-trail') color.lerp(new THREE.Color('#9b5939'), 0.66 + path.center * 0.12);
   if (biome === 'cape-trail-shoulder') color.lerp(new THREE.Color('#79664d'), 0.42);
-  color.multiplyScalar(0.86 + broad * 0.1 + fine * 0.04);
+  color.multiplyScalar(0.94 + broad * 0.08 + fine * 0.035);
   return color;
 }
 

@@ -46,7 +46,109 @@ function importedAssetCastsShadow(assetId, asset) {
   return DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
 }
 
-function normalizeImportedMaterials(scene, asset, motion = null) {
+function stableUnitFromSeed(seed, salt = '') {
+  const text = `${seed || 'model'}:${salt}`;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967295;
+}
+
+function cloneImportedMaterials(scene) {
+  scene.traverse(object => {
+    if (!object.isMesh || !object.material) return;
+    object.material = Array.isArray(object.material)
+      ? object.material.map(material => material?.clone?.() || material)
+      : object.material.clone?.() || object.material;
+  });
+}
+
+// Texture-preserving animal color grade. Unlike a flat material.color wash,
+// this runs after the base-color map has been sampled, so scales, wrinkles,
+// and painted value changes remain legible while an over-saturated source can
+// be brought into the scene's palette. It is opt-in and each instance owns its
+// cloned materials, allowing a colony to carry restrained natural variation.
+function applyImportedMaterialColorGrade(material, config, instanceSeed) {
+  if (!config || material.userData.importedColorGradeApplied) return;
+  const palette = Array.isArray(config.palette) && config.palette.length
+    ? config.palette
+    : [config.tint || '#777777'];
+  const paletteUnit = stableUnitFromSeed(instanceSeed, `${material.name}:palette`);
+  const tint = new THREE.Color(palette[Math.min(
+    palette.length - 1,
+    Math.floor(paletteUnit * palette.length),
+  )]);
+  const brightnessVariation = config.brightnessVariation || 0;
+  const brightness = (config.brightness ?? 1) + (
+    stableUnitFromSeed(instanceSeed, `${material.name}:brightness`) * 2 - 1
+  ) * brightnessVariation;
+  const uniforms = {
+    tint: { value: tint },
+    tintStrength: { value: THREE.MathUtils.clamp(config.tintStrength ?? 0.4, 0, 1) },
+    saturation: { value: THREE.MathUtils.clamp(config.saturation ?? 1, 0, 2) },
+    contrast: { value: Math.max(0, config.contrast ?? 1) },
+    brightness: { value: Math.max(0, brightness) },
+  };
+  const previousHook = material.onBeforeCompile;
+  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  material.onBeforeCompile = (shader, renderer) => {
+    if (previousHook) previousHook(shader, renderer);
+    shader.uniforms.uImportedGradeTint = uniforms.tint;
+    shader.uniforms.uImportedGradeTintStrength = uniforms.tintStrength;
+    shader.uniforms.uImportedGradeSaturation = uniforms.saturation;
+    shader.uniforms.uImportedGradeContrast = uniforms.contrast;
+    shader.uniforms.uImportedGradeBrightness = uniforms.brightness;
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        `uniform vec3 uImportedGradeTint;
+uniform float uImportedGradeTintStrength;
+uniform float uImportedGradeSaturation;
+uniform float uImportedGradeContrast;
+uniform float uImportedGradeBrightness;
+void main() {`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+  {
+    const vec3 importedGradeLumaWeights = vec3( 0.2126, 0.7152, 0.0722 );
+    float importedGradeLuma = dot( diffuseColor.rgb, importedGradeLumaWeights );
+    vec3 importedGradeColor = mix(
+      vec3( importedGradeLuma ),
+      diffuseColor.rgb,
+      uImportedGradeSaturation
+    );
+    importedGradeColor = max(
+      ( importedGradeColor - vec3( 0.18 ) ) * uImportedGradeContrast + vec3( 0.18 ),
+      vec3( 0.0 )
+    ) * uImportedGradeBrightness;
+    float importedGradeValue = max(
+      dot( importedGradeColor, importedGradeLumaWeights ),
+      0.012
+    );
+    float importedGradeTintValue = max(
+      dot( uImportedGradeTint, importedGradeLumaWeights ),
+      0.012
+    );
+    vec3 importedGradeTinted = uImportedGradeTint
+      * ( importedGradeValue / importedGradeTintValue );
+    diffuseColor.rgb = mix(
+      importedGradeColor,
+      importedGradeTinted,
+      uImportedGradeTintStrength
+    );
+  }`,
+      );
+  };
+  material.customProgramCacheKey = () => `${previousCacheKey?.() || ''}:imported-grade-v1`;
+  material.userData.importedColorGradeApplied = true;
+  material.userData.importedColorGradeUniforms = uniforms;
+}
+
+function normalizeImportedMaterials(scene, asset, motion = null, instanceSeed = null) {
   if (!asset.normalizeMaterials) return;
   scene.traverse(object => {
     if (!object.isMesh) return;
@@ -66,12 +168,19 @@ function normalizeImportedMaterials(scene, asset, motion = null) {
       if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.02);
       if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.72);
       if (material.color) {
+        if (asset.materialTint) {
+          material.color.lerp(
+            new THREE.Color(asset.materialTint),
+            THREE.MathUtils.clamp(asset.materialTintStrength ?? 0.18, 0, 1),
+          );
+        }
         material.color.lerp(new THREE.Color('#f1dfbd'), asset.materialLift || 0.18);
       }
       if (material.emissive) {
         material.emissive.set(asset.materialEmissive || '#241c12');
         material.emissiveIntensity = asset.materialEmissiveIntensity ?? 0.22;
       }
+      applyImportedMaterialColorGrade(material, asset.materialColorGrade, instanceSeed);
       if (motion) applyFoliageMotion(material, object.geometry, motion);
       material.needsUpdate = true;
     });
@@ -92,6 +201,7 @@ function ensurePaddedSkinnedBounds(mesh) {
 }
 
 function prepareImportedScene(scene, assetId, asset, shadowOverrides = null) {
+  if (asset.cloneMaterials || asset.materialColorGrade) cloneImportedMaterials(scene);
   const castShadow = shadowOverrides?.castShadow ?? importedAssetCastsShadow(assetId, asset);
   const receiveShadow = shadowOverrides?.receiveShadow ?? (asset.receiveShadow === true);
   const cullStaticMeshes = asset.frustumCulled !== false;
@@ -978,6 +1088,9 @@ function GLBPrimitive({
   overlaySelector = null,
   castShadow = null,
   receiveShadow = null,
+  instanceSeed = null,
+  animationPhase = null,
+  animationRate = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
 }) {
@@ -995,6 +1108,24 @@ function GLBPrimitive({
   const animationProfileId = asset.animationProfile || assetId;
   const bypassAnimationLod = ALWAYS_ANIMATED_CHARACTER_ASSETS.has(asset.playerProfile || assetId);
   const assetUrl = assetLoadUrl(asset);
+  const animationVariation = useMemo(() => {
+    const config = asset.animationVariation || {};
+    const phase = Number.isFinite(animationPhase)
+      ? THREE.MathUtils.euclideanModulo(animationPhase, 1)
+      : config.randomizePhase
+        ? stableUnitFromSeed(instanceSeed, 'animation-phase')
+        : 0;
+    const rateUnit = stableUnitFromSeed(instanceSeed, 'animation-rate');
+    const minRate = config.minRate ?? 1;
+    const maxRate = config.maxRate ?? minRate;
+    return {
+      phase,
+      rate: Number.isFinite(animationRate)
+        ? Math.max(0, animationRate)
+        : THREE.MathUtils.lerp(minRate, maxRate, rateUnit),
+      motionPhase: stableUnitFromSeed(instanceSeed, 'creature-motion') * Math.PI * 2,
+    };
+  }, [animationPhase, animationRate, asset.animationVariation, instanceSeed]);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
   const animationBanks = asset.animationBanks || NO_ANIMATION_BANKS;
   const [bankAnimations, setBankAnimations] = useState(NO_ANIMATION_BANKS);
@@ -1057,6 +1188,17 @@ function GLBPrimitive({
     return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
   }, [scene, assetId, asset, castShadow, receiveShadow]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
+  const creatureMotionTargets = useMemo(() => {
+    const config = asset.proceduralCreatureMotion;
+    if (!config) return null;
+    return {
+      head: importedScene.getObjectByName(config.headBone || 'Head'),
+      neck: importedScene.getObjectByName(config.neckBone || 'Neck'),
+      config,
+    };
+  }, [asset.proceduralCreatureMotion, importedScene]);
+  const creatureMotionQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const creatureMotionEuler = useMemo(() => new THREE.Euler(), []);
   const blinkTargets = useMemo(() => {
     const morphName = asset.blinkMorph?.name;
     if (!morphName) return [];
@@ -1189,7 +1331,12 @@ function GLBPrimitive({
     const normalized = normalizeAnimationRequest(request);
     const requestedClip = normalized?.clip;
     const fade = normalized?.fade ?? null;
-    const timeScale = THREE.MathUtils.clamp(normalized?.timeScale ?? 1, 0.35, 1.8);
+    const requestedTimeScale = THREE.MathUtils.clamp(normalized?.timeScale ?? 1, 0.35, 1.8);
+    const timeScale = THREE.MathUtils.clamp(
+      requestedTimeScale * animationVariation.rate,
+      0.05,
+      1.8,
+    );
     const maxTime = Number.isFinite(normalized?.maxTime) ? Math.max(0, normalized.maxTime) : null;
     const fallbackClip = animationProfileId === 'darwin5'
       ? (darwin5ClipFallback(requestedClip) || CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)])
@@ -1241,6 +1388,9 @@ function GLBPrimitive({
     next.clampWhenFinished = oneShot;
     next.setLoop(oneShot ? THREE.LoopOnce : THREE.LoopRepeat, oneShot ? 1 : Infinity);
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
+    if (!previous && next.getClip()?.duration > 0) {
+      next.time = animationVariation.phase * next.getClip().duration;
+    }
     if (previous && previous !== next) {
       if (!oneShot && isGaitLoopClip(resolvedClip) && isGaitLoopClip(previousName)) {
         syncGaitPhase(previous, next, animationProfileId, resolvedClip);
@@ -1263,14 +1413,15 @@ function GLBPrimitive({
     animationBanksReady,
     animationDebugEnabled,
     animationProfileId,
+    animationVariation,
     getAction,
     lazyActions,
     publishAnimationDebug,
   ]);
 
   useEffect(() => {
-    normalizeImportedMaterials(importedScene, asset, motion);
-  }, [asset, importedScene, motion]);
+    normalizeImportedMaterials(importedScene, asset, motion, instanceSeed);
+  }, [asset, importedScene, instanceSeed, motion]);
 
   // Runs after normalize so the rim/roughness override sits on top of the cel
   // pipeline. No-op unless the asset opts in via materialUpgrade (player only).
@@ -1696,6 +1847,27 @@ function GLBPrimitive({
       }
     }
     mixer.update(mixerDelta);
+    if (creatureMotionTargets) {
+      const { head, neck, config } = creatureMotionTargets;
+      const time = frameState.clock.elapsedTime * (config.frequency ?? 0.42)
+        + animationVariation.motionPhase;
+      const slowTurn = Math.sin(time) * (config.headYaw ?? 0.035);
+      const attentiveLift = Math.sin(time * 0.63 + 1.7) * (config.headPitch ?? 0.018);
+      if (neck) {
+        creatureMotionEuler.set(
+          attentiveLift * 0.38,
+          slowTurn * (config.neckShare ?? 0.42),
+          0,
+        );
+        creatureMotionQuaternion.setFromEuler(creatureMotionEuler);
+        neck.quaternion.multiply(creatureMotionQuaternion);
+      }
+      if (head) {
+        creatureMotionEuler.set(attentiveLift, slowTurn, 0);
+        creatureMotionQuaternion.setFromEuler(creatureMotionEuler);
+        head.quaternion.multiply(creatureMotionQuaternion);
+      }
+    }
     // Masked overlay (e.g. shouldered-aim upper body over walk cycles).
     const overlayRequest = overlaySelectorRef.current ? overlaySelectorRef.current() : null;
     const overlayState = overlayStateRef.current;
@@ -1776,6 +1948,9 @@ export function ModelAsset({
   overlaySelector = null,
   castShadow = null,
   receiveShadow = null,
+  instanceSeed = null,
+  animationPhase = null,
+  animationRate = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
 }) {
@@ -1798,6 +1973,9 @@ export function ModelAsset({
         overlaySelector={overlaySelector}
         castShadow={castShadow}
         receiveShadow={receiveShadow}
+        instanceSeed={instanceSeed}
+        animationPhase={animationPhase}
+        animationRate={animationRate}
         animationBankPhase={animationBankPhase}
         onAnimationBanksReady={onAnimationBanksReady}
       />

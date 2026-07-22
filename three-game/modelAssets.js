@@ -507,12 +507,48 @@ export const modelAssets = {
     path: '/assets/models/animals/runtime/marine-iguana.glb',
     scale: 0.04,
     rotation: [0, Math.PI, 0],
-    yOffset: 0.08,
+    // Ground clearance belongs to the fauna controller. A positive offset here
+    // was scaled again by large colony placements and left the animals visibly
+    // floating above their shadows.
+    yOffset: 0,
     normalizeMaterials: true,
-    materialLift: 0.04,
-    materialEmissive: '#0f120e',
-    materialEmissiveIntensity: 0.08,
-    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
+    cloneMaterials: true,
+    // Preserve the source's painted scales, but grade its tropical green into
+    // the ash-charcoal range of Floreana animals. The compact palette gives a
+    // colony individual variation without turning any animal brightly colored.
+    materialTint: '#777873',
+    materialTintStrength: 0.12,
+    materialLift: 0,
+    materialEmissive: '#090b0a',
+    materialEmissiveIntensity: 0.012,
+    materialColorGrade: {
+      palette: ['#333632', '#3b3a34', '#292e2d', '#44423a', '#30322d'],
+      saturation: 0.16,
+      contrast: 1.14,
+      brightness: 0.78,
+      brightnessVariation: 0.07,
+      tintStrength: 0.58,
+    },
+    materialUpgrade: {
+      rimIntensity: 0.008,
+      rimPower: 5.5,
+      envMapIntensity: 0.08,
+      roughness: 0.94,
+      toneMapped: true,
+    },
+    animationVariation: {
+      randomizePhase: true,
+      minRate: 0.88,
+      maxRate: 1.08,
+    },
+    proceduralCreatureMotion: {
+      headBone: 'Head',
+      neckBone: 'Neck.2',
+      frequency: 0.36,
+      headYaw: 0.032,
+      headPitch: 0.014,
+      neckShare: 0.38,
+    },
     targetTriangles: 5000,
     prompt: 'Stylized low-poly Galapagos marine iguana, black volcanic scales, blunt snout, dorsal spines, basking pose, readable silhouette, hand-painted texture, cel-shaded game asset, clean topology, GLB.',
   },

@@ -397,6 +397,33 @@ const PROFILE_BY_BIOME = {
     ring: '#5f5842',
     particles: ['#6c634b', '#494536', '#7d7358'],
   },
+  'ship-deck': {
+    kind: 'wood',
+    dustiness: 0.04,
+    wetness: 0.12,
+    opacity: 0.05,
+    particleLift: 0.08,
+    ring: '#76573a',
+    particles: ['#76573a', '#a47b50', '#4e3929'],
+  },
+  'ship-interior': {
+    kind: 'wood',
+    dustiness: 0.02,
+    wetness: 0,
+    opacity: 0.03,
+    particleLift: 0.05,
+    ring: '#65472f',
+    particles: ['#65472f', '#8c6642', '#443020'],
+  },
+  'house-interior': {
+    kind: 'wood',
+    dustiness: 0.03,
+    wetness: 0,
+    opacity: 0.04,
+    particleLift: 0.05,
+    ring: '#76573a',
+    particles: ['#76573a', '#a47b50', '#4e3929'],
+  },
   'mirador-cliff': {
     kind: 'grit',
     dustiness: 0.34,
@@ -419,6 +446,9 @@ function cloneProfile(profile, biome) {
 
 function inferredProfileForBiome(biome) {
   if (!biome) return null;
+  if (/ship.deck|ship.interior|house.interior|wood.floor|plank|timber.floor/.test(biome)) {
+    return PROFILE_BY_BIOME['ship-deck'];
+  }
   if (/mud|bog|stream.bank|creek.bank|damp.*bank|pool.edge|wet.hollow|garden.mud/.test(biome)) {
     return PROFILE_BY_BIOME['wet-mud'];
   }

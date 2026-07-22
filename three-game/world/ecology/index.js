@@ -37,6 +37,9 @@ import { buildLavaFlatsEcology } from './lavaFlats';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
 import { buildWatkinsCreekEcology } from './watkinsCreek';
 import { buildPuntaSurEcology } from './puntaSur';
+import { buildMarineIguanaColonyEcology } from './marineIguanaColony';
+import { buildSoutheasternCoastEcology } from './southeasternCoast';
+import { buildShallowSurfEcology } from './shallowSurf';
 import { applyUniversalProceduralFlora } from './universalFlora';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
@@ -77,6 +80,9 @@ const builders = {
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
   WATKINS_CREEK: buildWatkinsCreekEcology,
   PUNTA_SUR: buildPuntaSurEcology,
+  SW_BEACH: buildMarineIguanaColonyEcology,
+  SE_COAST: buildSoutheasternCoastEcology,
+  SE_SHALLOW_SURF: buildShallowSurfEcology,
 };
 
 // Every regional map now has an ecology definition. Regions without a bespoke

@@ -96,6 +96,10 @@ export function movementTerrainHeight(x, z, regionId = 'POST_OFFICE_BAY') {
   return placeholderTerrainHeight(x, z, regionId);
 }
 
+export function terrainClimbProfile(regionId = 'POST_OFFICE_BAY') {
+  return authoredRegion(regionId)?.terrain?.climbProfile || null;
+}
+
 export function terrainSlopeAt(x, z, regionId = 'POST_OFFICE_BAY', step = 0.85) {
   const left = movementTerrainHeight(x - step, z, regionId);
   const right = movementTerrainHeight(x + step, z, regionId);

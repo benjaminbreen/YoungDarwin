@@ -52,6 +52,10 @@ export function isSwingClaimed(swingId) {
 // 'foliage-contact' { sourceId, zoneId, kind: 'grass'|'shrub', position: {x,y,z}, intensity }
 // 'npc-footstep' { npcId, zoneId, position: {x,y,z}, side, speed, movementMode }
 // 'bee-audio-proximity' { zoneId, active, position?: {x,y,z}, phase?: 'hover'|'dart'|'descend', gate? }
+// 'lightning-flash' { zoneId, distance, pan, storm }
+// 'fieldwork-foley' { kind: 'note'|'container'|'snare'|'door', position?, specimenId?, trapId? }
+// 'equipment-foley' { kind: 'case-open'|'case-close'|'tool-change'|'carry-pickup', position?, fromToolId?, toToolId?, propId? }
+// 'carried-prop-settle' { propId, zoneId, mode: 'place'|'release', position: {x,y,z} }
 // 'player-winded' { active, effort, fatigue }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }

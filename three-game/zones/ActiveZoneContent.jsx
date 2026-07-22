@@ -15,6 +15,9 @@ import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { PricklyPearField } from '../physics/props/pricklyPear/PricklyPearField';
 import { LavaCactusField } from '../physics/props/lavaCactus/LavaCactusField';
 import { PaloSantoField } from '../physics/props/paloSanto/PaloSantoField';
+import { SicyosField } from '../physics/props/sicyos/SicyosField';
+import { DeliliaField } from '../physics/props/delilia/DeliliaField';
+import { LecocarpusField } from '../physics/props/lecocarpus/LecocarpusField';
 import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
 import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
@@ -28,6 +31,9 @@ import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { getLavaCactusSites } from '../physics/props/lavaCactus/lavaCactusSites';
+import { getSicyosSites } from '../physics/props/sicyos/sicyosSites';
+import { getDeliliaSites } from '../physics/props/delilia/deliliaSites';
+import { getLecocarpusSites } from '../physics/props/lecocarpus/lecocarpusSites';
 
 export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
@@ -51,6 +57,15 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const lavaCactusOwnsSpecimen = propsReady
     && settings.physicsProps !== false
     && getLavaCactusSites(currentZoneId).length > 0;
+  const sicyosOwnsSpecimen = propsReady
+    && settings.physicsProps !== false
+    && getSicyosSites(currentZoneId).length > 0;
+  const deliliaOwnsSpecimen = propsReady
+    && settings.physicsProps !== false
+    && getDeliliaSites(currentZoneId).length > 0;
+  const lecocarpusOwnsSpecimen = propsReady
+    && settings.physicsProps !== false
+    && getLecocarpusSites(currentZoneId).length > 0;
   const specimens = useMemo(
     () => {
       if (!interactablesReady) return [];
@@ -59,15 +74,21 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
         const actorId = specimen.instanceId || specimen.id;
         return actorId !== playableHiddenActorId
           && !collected.has(actorId)
-          && !(lavaCactusOwnsSpecimen && specimen.id === 'cactus');
+          && !(lavaCactusOwnsSpecimen && specimen.id === 'cactus')
+          && !(sicyosOwnsSpecimen && specimen.id === 'sicyosvillosus')
+          && !(deliliaOwnsSpecimen && specimen.id === 'deliliainelegans')
+          && !(lecocarpusOwnsSpecimen && specimen.id === 'lecocarpuspinnatifidus');
       });
     },
     [
       collectedSpecimenActorIds,
       currentZoneId,
+      deliliaOwnsSpecimen,
       interactablesReady,
       lavaCactusOwnsSpecimen,
+      lecocarpusOwnsSpecimen,
       playableHiddenActorId,
+      sicyosOwnsSpecimen,
     ],
   );
 
@@ -106,6 +127,9 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
       {propsReady && settings.physicsProps !== false && <PricklyPearField />}
       {propsReady && settings.physicsProps !== false && <LavaCactusField />}
       {propsReady && settings.physicsProps !== false && <PaloSantoField />}
+      {propsReady && settings.physicsProps !== false && <SicyosField />}
+      {propsReady && settings.physicsProps !== false && <DeliliaField />}
+      {propsReady && settings.physicsProps !== false && <LecocarpusField />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
       {propsReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}

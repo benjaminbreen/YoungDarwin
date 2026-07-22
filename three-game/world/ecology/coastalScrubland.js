@@ -9,6 +9,8 @@ import {
 } from '../regions/coastalScrubland/path';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 import { coastalBirds } from './flyingBirds';
+import { LECOCARPUS_PINNATIFIDUS_SPECIES } from './floraSpecies';
+import { buildProceduralInteractiveFloraLayer } from './proceduralFlora';
 import {
   buildStandardDryPathGrassPatchItems,
   createStandardDryGrassPatchLayer,
@@ -151,12 +153,53 @@ function buildSurfaceLitter() {
   })];
 }
 
+function buildInteractiveFlora() {
+  return [buildProceduralInteractiveFloraLayer({
+    id: 'coastal-scrub-lecocarpus-pinnatifidus',
+    zoneId: COASTAL_SCRUBLAND,
+    species: LECOCARPUS_PINNATIFIDUS_SPECIES,
+    runtime: 'lecocarpus-pinnatifidus',
+    seed: 17489,
+    count: 1,
+    bounds: { minX: -44, maxX: 44, minZ: -41, maxZ: 43 },
+    habitatAt: ({ biome, x, z }) => {
+      const path = coastalScrubPathInfo(x, z);
+      const seep = coastalScrubSeepMask(x, z);
+      const thicket = coastalScrubThicketStrength(x, z);
+      const salt = coastalScrubSaltExposure(x, z);
+      const basalt = coastalScrubBasaltExposure(x, z);
+      const suitableBiome = biome === 'open-coastal-scrub'
+        || biome === 'dry-seep-basin'
+        || biome === 'salt-scoured-scrub';
+      return {
+        moisture: clamp01(0.11 + seep * 0.34 + thicket * 0.12),
+        canopy: clamp01(0.03 + thicket * 0.42),
+        exposure: clamp01(0.94 - thicket * 0.28 - seep * 0.08),
+        disturbance: clamp01(path.path * 0.82 + path.shoulder * 0.3),
+        salinity: salt * 0.22,
+        rockiness: basalt,
+        biomeSuitability: suitableBiome ? 1 : 0,
+        localSuitability: clamp01(0.5 + thicket * 0.26 + seep * 0.16),
+        excluded: !suitableBiome
+          || !clearsTrailAndCactus(biome, x, z, 1.45)
+          || salt > 0.8
+          || seep > 0.72
+          || thicket > 0.68
+          || basalt > 0.82,
+      };
+    },
+    placement: { patchCount: 1, patchRadius: [2.4, 3.8], minItemSeparation: 7, maxGrade: 0.62 },
+    siteFromItem: item => ({ flowering: 0.7 + item.tone * 0.24 }),
+  })];
+}
+
 export function buildCoastalScrublandEcology() {
   return {
     zoneId: COASTAL_SCRUBLAND,
     stream: false,
     dryGrassPatches: [buildGrass()],
     flora: buildFlora(),
+    interactiveFlora: buildInteractiveFlora(),
     rocks: [],
     surfaceLitter: buildSurfaceLitter(),
     props: [],

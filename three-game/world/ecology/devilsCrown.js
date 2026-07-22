@@ -10,6 +10,7 @@ import { makeZoneScatter, seededRandom } from '../scatter';
 import { getDevilsCrownRocks } from '../devilsCrownLayout';
 import { getModelAsset } from '../../modelAssets';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import { getCliffSurfProfile } from '../cliffSurfProfiles';
 
 const NATURE = '/assets/models/nature/';
 const ANIMALS = '/assets/models/animals/runtime/';
@@ -203,6 +204,7 @@ export function buildDevilsCrownEcology() {
   const splashAnchors = rocks.filter(rock => rock.y > -1.2 && rock.y < 0.24);
   return {
     zoneId: DEVILS_CROWN,
+    cliffSurf: getCliffSurfProfile(DEVILS_CROWN),
     flora: buildCoral(),
     surfaceLitter: buildSurfaceLitter(),
     rocks,

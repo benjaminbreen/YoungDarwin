@@ -94,6 +94,9 @@ const AUTHORED_REGION_TERRAIN = {
   WATKINS: { preset: 'watkins-camp-stream-hollow', segments: 320 },
   PUNTA_SUR: { preset: 'punta-sur-rainbow-headland', segments: 288 },
   S_INTERTIDAL: { preset: 'southern-intertidal-low-tide', segments: 288 },
+  SW_BEACH: { preset: 'marine-iguana-colony', segments: 288 },
+  SE_COAST: { preset: 'southeastern-rocky-coast', segments: 288 },
+  SE_SHALLOW_SURF: { preset: 'southeastern-shallow-surf', segments: 300 },
 };
 
 function humanDirection(edge) {
@@ -237,6 +240,8 @@ function normalizeSpawn(seedSpawn, zoneId = '') {
     sceneScale: Number(seedSpawn.sceneScale) || 1,
     habitatRadiusX: Number.isFinite(radiusX) && radiusX > 0 ? radiusX : null,
     habitatRadiusZ: Number.isFinite(radiusZ) && radiusZ > 0 ? radiusZ : null,
+    animationPhase: Number.isFinite(seedSpawn.animationPhase) ? seedSpawn.animationPhase : null,
+    animationRate: Number.isFinite(seedSpawn.animationRate) ? seedSpawn.animationRate : null,
   };
 }
 

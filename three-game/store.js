@@ -32,10 +32,12 @@ import {
 } from './narrator/narratorEvents';
 import {
   createExamineSession,
+  examinableFromFieldTarget,
   examinableFromItem,
   examinableFromSpecimen,
   getExaminableItem,
 } from './examine/examinables';
+import { sameFieldAction } from './fieldActions';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 import { normalizeWeatherState } from './world/weatherStates';
@@ -50,7 +52,8 @@ import { clampToWalkable, terrainHeight } from './world/terrain';
 import { getNpcPoses } from './world/npcRuntime';
 import { forageableAllowsMode } from './world/forageables';
 import { getReadableBook } from './books/bookCatalog';
-import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { getInteriorDefinition, isInteriorZone } from './interiors/interiorRegistry';
+import { emitPropEvent } from './physics/props/propEvents';
 import { mergeCropDamageState } from './world/crops/cropDamage';
 import {
   clampNpcEncounterEffects,
@@ -77,6 +80,11 @@ import {
   snareActorId,
   snareTargetLabel,
 } from './snareTraps';
+import {
+  acknowledgeContextPromptState,
+  clearContextPromptState,
+  publishContextPromptState,
+} from './ui/contextPromptService';
 import {
   CATASTROPHIC_FALL_SPEED,
   INCAPACITATION_CURIOSITY_COST,
@@ -813,6 +821,8 @@ function createSceneSlice() {
     nearbySpecimenId: null,
     nearbyNpcEncounter: null,
     nearbyItem: null,
+    fieldAction: null,
+    observationMode: false,
     examineSession: null,
     readableBookSession: null,
     interiorPrompt: null,
@@ -841,6 +851,9 @@ function createSceneSlice() {
     viewMode: 'shoulder',
     transition: null,
     edgePrompt: null,
+    contextPrompt: null,
+    contextPromptCandidates: {},
+    contextPromptHistory: {},
     dismissedEdgePromptId: null,
     arrivalEdgeBlock: null,
     animalModeNpcEncounter: null,
@@ -959,6 +972,10 @@ export const useThreeGameStore = create((set, get) => ({
       beagleTravelPrompt: null,
       transition: null,
       edgePrompt: null,
+      fieldAction: null,
+      observationMode: false,
+      contextPrompt: null,
+      contextPromptCandidates: {},
       carriedObjectId: null,
       carryDropRequest: null,
       carryPrompt: null,
@@ -1079,6 +1096,10 @@ export const useThreeGameStore = create((set, get) => ({
       nearbyNpcEncounter: null,
       activeNpcEncounter: null,
       carryPrompt: null,
+      fieldAction: null,
+      observationMode: false,
+      contextPrompt: null,
+      contextPromptCandidates: {},
       carriedObjectId: null,
       carryDropRequest: null,
       examineSession: null,
@@ -1111,7 +1132,17 @@ export const useThreeGameStore = create((set, get) => ({
 
     return patch;
   }),
-  setActiveTool: activeToolId => set({ activeToolId }),
+  setActiveTool: activeToolId => {
+    const previousToolId = get().activeToolId;
+    if (previousToolId === activeToolId) return;
+    set({ activeToolId });
+    emitPropEvent('equipment-foley', {
+      kind: 'tool-change',
+      fromToolId: previousToolId,
+      toToolId: activeToolId,
+      position: getRuntimePlayerPose()?.position,
+    });
+  },
   // Double-barreled shotgun ammo. Timestamps are performance.now()-seconds so
   // the aim/HUD layers can share the clock without a store tick per frame.
   shotgunShells: 2,
@@ -1488,6 +1519,19 @@ export const useThreeGameStore = create((set, get) => ({
   setNearbyItem: nearbyItem => set(state => (
     (state.nearbyItem?.actorId || null) === (nearbyItem?.actorId || null) ? state : { nearbyItem }
   )),
+  setFieldAction: fieldAction => set(state => (
+    sameFieldAction(state.fieldAction, fieldAction) ? state : { fieldAction }
+  )),
+  setObservationMode: observationMode => set({
+    observationMode: Boolean(observationMode),
+    inspectedObject: null,
+    inspectedScreenPosition: null,
+  }),
+  toggleObservationMode: () => set(state => ({
+    observationMode: !state.observationMode,
+    inspectedObject: null,
+    inspectedScreenPosition: null,
+  })),
   setPhysicsDebug: physicsDebug => set({ physicsDebug }),
   setGraphicsQuality: ({ cheapMaterials, foliageDrawScale }) => set(state => ({
     cheapMaterials: cheapMaterials ?? state.cheapMaterials,
@@ -1519,6 +1563,9 @@ export const useThreeGameStore = create((set, get) => ({
     edgePrompt: state.edgePrompt?.id === edgePromptId ? null : state.edgePrompt,
     dismissedEdgePromptId: edgePromptId || state.edgePrompt?.id || null,
   })),
+  publishContextPrompt: (source, prompt) => set(state => publishContextPromptState(state, source, prompt)),
+  clearContextPrompt: source => set(state => clearContextPromptState(state, source)),
+  acknowledgeContextPrompt: source => set(state => acknowledgeContextPromptState(state, source)),
   clearArrivalEdgeBlock: () => set({ arrivalEdgeBlock: null }),
   setPlayerPose: playerPose => {
     updateRuntimePlayerPose(playerPose);
@@ -1632,7 +1679,32 @@ export const useThreeGameStore = create((set, get) => ({
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({ narration }, state, 'interior')),
     };
   }),
-  setInspectedObject: inspectedObject => set({ inspectedObject, inspectedScreenPosition: null }),
+  setInspectedObject: inspectedObject => set(state => {
+    if (state.observationMode && inspectedObject) {
+      const examinable = examinableFromFieldTarget({
+        id: inspectedObject.sourceId || inspectedObject.id,
+        actorId: inspectedObject.sourceId || inspectedObject.id,
+        typeId: inspectedObject.id,
+        kind: inspectedObject.kind,
+        category: inspectedObject.category,
+        name: inspectedObject.englishName,
+        latin: inspectedObject.latinName,
+        focus: inspectedObject.worldPosition,
+        inspectable: inspectedObject,
+      });
+      return examinable ? {
+        observationMode: false,
+        inspectedObject: null,
+        inspectedScreenPosition: null,
+        examineSession: createExamineSession(examinable, {
+          focus: inspectedObject.worldPosition || null,
+          day: state.day,
+          timeOfDay: state.timeOfDay,
+        }),
+      } : {};
+    }
+    return { inspectedObject, inspectedScreenPosition: null };
+  }),
   setInspectedScreenPosition: inspectedScreenPosition => set({ inspectedScreenPosition }),
   clearInspectedObject: () => set({ inspectedObject: null, inspectedScreenPosition: null }),
   openBeagleTravelPrompt: (beagleTravelPrompt = {}) => set({
@@ -1684,16 +1756,27 @@ export const useThreeGameStore = create((set, get) => ({
   // Picking up and releasing both invalidate the old per-frame prompt. A
   // physics prop may complete a requested drop synchronously before React has
   // rendered the new store value, so keep this state change atomic.
-  setCarriedObject: carriedObjectId => set(state => ({
-    carriedObjectId,
-    carryDropRequest: null,
-    ...(
-      state.carryPrompt?.id === state.carriedObjectId
-      || state.carryPrompt?.id === carriedObjectId
-        ? { carryPrompt: null }
-        : {}
-    ),
-  })),
+  setCarriedObject: carriedObjectId => {
+    const previousObjectId = get().carriedObjectId;
+    if (previousObjectId === carriedObjectId) return;
+    set(state => ({
+      carriedObjectId,
+      carryDropRequest: null,
+      ...(
+        state.carryPrompt?.id === state.carriedObjectId
+        || state.carryPrompt?.id === carriedObjectId
+          ? { carryPrompt: null }
+          : {}
+      ),
+    }));
+    if (carriedObjectId) {
+      emitPropEvent('equipment-foley', {
+        kind: 'carry-pickup',
+        propId: carriedObjectId,
+        position: getRuntimePlayerPose()?.position,
+      });
+    }
+  },
   dropCarriedObject: (options = {}) => set(state => {
     if (!state.carriedObjectId || state.carryDropRequest) return state;
     const pose = getRuntimePlayerPose();
@@ -2348,7 +2431,10 @@ export const useThreeGameStore = create((set, get) => ({
     if (state.examineSession) return {};
     let examinable = null;
     let focus = target?.focus || null;
-    if (target?.itemTypeId) {
+    if (target?.fieldTarget) {
+      examinable = examinableFromFieldTarget(target.fieldTarget);
+      focus = target.fieldTarget.focus || focus;
+    } else if (target?.itemTypeId) {
       examinable = examinableFromItem(getExaminableItem(target.itemTypeId), target.actorId);
     } else if (!target && !state.nearbySpecimenId && !state.selectedSpecimenId && state.nearbyItem) {
       examinable = examinableFromItem(getExaminableItem(state.nearbyItem.typeId), state.nearbyItem.actorId);
@@ -2369,6 +2455,7 @@ export const useThreeGameStore = create((set, get) => ({
     }
     if (!examinable) return {};
     return {
+      observationMode: false,
       examineSession: createExamineSession(examinable, {
         focus,
         day: state.day,
@@ -2610,6 +2697,14 @@ export const useThreeGameStore = create((set, get) => ({
       readableBookSession: null,
       interiorPrompt: null,
     });
+    if (isInteriorZone(currentZone.id) || isInteriorZone(zone.id)) {
+      emitPropEvent('fieldwork-foley', {
+        kind: 'door',
+        fromZoneId: currentZone.id,
+        toZoneId: zone.id,
+        position: get().playerPose?.position || threeRuntimeState.playerPose.position,
+      });
+    }
   },
 
   setZoneTransitionPhase: (phase, transitionId = null) => set(state => {
@@ -2671,6 +2766,10 @@ export const useThreeGameStore = create((set, get) => ({
         committedAt: Date.now(),
       },
       edgePrompt: null,
+      fieldAction: null,
+      observationMode: false,
+      contextPrompt: null,
+      contextPromptCandidates: {},
       beagleTravelPrompt: null,
       dismissedEdgePromptId: null,
       arrivalEdgeBlock: state.transition.entryEdge
@@ -3520,6 +3619,7 @@ export const useThreeGameStore = create((set, get) => ({
         symsLine: '"We mark the spot and give it time, sir."',
       }, current, 'snare-set')),
     }));
+    emitPropEvent('fieldwork-foley', { kind: 'snare', position: trap.position, trapId: trap.id });
     return trap;
   },
 
@@ -3946,6 +4046,21 @@ export const useThreeGameStore = create((set, get) => ({
         ]),
       };
     });
+
+    if (documented) {
+      emitPropEvent('fieldwork-foley', {
+        kind: 'note',
+        specimenId: specimen.id,
+        position: state.playerPose?.position || threeRuntimeState.playerPose.position,
+      });
+    } else if (collected) {
+      emitPropEvent('fieldwork-foley', {
+        kind: 'container',
+        specimenId: specimen.id,
+        needsJar: specimenNeedsJar(specimen, tool.id),
+        position: state.playerPose?.position || threeRuntimeState.playerPose.position,
+      });
+    }
 
     return result;
   },

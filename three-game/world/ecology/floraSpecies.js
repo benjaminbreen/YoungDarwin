@@ -37,6 +37,120 @@ export const DARWINIOTHAMNUS_SPECIES = Object.freeze({
   },
 });
 
+export const SICYOS_VILLOSUS_SPECIES = Object.freeze({
+  id: 'sicyos-villosus',
+  commonName: "Darwin's lost vine",
+  scientificName: 'Sicyos villosus',
+  label: "Darwin's lost vine / Sicyos villosus (1835 reconstruction)",
+  origin: 'Floreana endemic; now extinct',
+  heightMeters: [0.12, 0.8],
+  modeledLifeStages: ['flowering and fruiting vine colony'],
+  reconstruction: {
+    documented: ['cordate leaves', 'glandular hairs', 'divided tendrils', 'yellow male flowers', 'bristly elliptic fruit'],
+    inferred: ['living colour', 'stem posture', 'colony architecture'],
+    unknown: ['Darwin’s exact collection locality on Charles Island'],
+  },
+  habitat: {
+    minimumSuitability: 0.28,
+    preferences: {
+      moisture: { preferred: [0.48, 0.78], tolerated: [0.3, 0.94], weight: 1.3 },
+      canopy: { preferred: [0.25, 0.68], tolerated: [0.08, 0.86], weight: 1.1 },
+      exposure: { preferred: [0.18, 0.58], tolerated: [0.06, 0.78], weight: 0.8 },
+      disturbance: { preferred: [0, 0.22], tolerated: [0, 0.52], weight: 0.75 },
+      salinity: { preferred: [0, 0.03], tolerated: [0, 0.1], weight: 1.6 },
+      rockiness: { preferred: [0.08, 0.42], tolerated: [0, 0.68], weight: 0.65 },
+    },
+  },
+  placement: {
+    // A site is a procedurally generated colony of several connected runners,
+    // so interactive counts stay deliberately low.
+    scale: [0.82, 1.18],
+    scaleExponent: 1.05,
+    patchRadius: [3.2, 5.4],
+    minPatchSeparation: 8,
+    minItemSeparation: 6.5,
+    maxGrade: 0.58,
+    densityPerHectare: 3,
+    maximumPerRegion: 4,
+  },
+});
+
+export const DELILIA_INELEGANS_SPECIES = Object.freeze({
+  id: 'delilia-inelegans',
+  commonName: "Darwin's lost herb",
+  scientificName: 'Delilia inelegans',
+  label: "Darwin's lost herb / Delilia inelegans (1835 reconstruction)",
+  origin: 'Floreana endemic; now extinct',
+  heightMeters: [0.25, 0.38],
+  modeledLifeStages: ['flowering annual herb'],
+  reconstruction: {
+    documented: ['annual root', 'trichotomous ascending branches', 'opposite doubly-serrate leaves', 'pubescence', 'crowded flattened axillary flower-heads'],
+    inferred: ['living colour', 'fresh leaf posture', 'colony spacing'],
+    unknown: ['Darwin’s exact collection locality on Charles Island'],
+  },
+  habitat: {
+    minimumSuitability: 0.27,
+    preferences: {
+      moisture: { preferred: [0.34, 0.68], tolerated: [0.2, 0.84], weight: 1.2 },
+      canopy: { preferred: [0.12, 0.48], tolerated: [0.02, 0.72], weight: 0.9 },
+      exposure: { preferred: [0.4, 0.76], tolerated: [0.2, 0.92], weight: 0.85 },
+      disturbance: { preferred: [0.04, 0.24], tolerated: [0, 0.5], weight: 0.7 },
+      salinity: { preferred: [0, 0.03], tolerated: [0, 0.1], weight: 1.5 },
+      rockiness: { preferred: [0.08, 0.42], tolerated: [0, 0.68], weight: 0.65 },
+    },
+  },
+  placement: {
+    // One item is one complete annual. Counts remain tiny because Darwin's
+    // specimen lacks a precise collection locality and no living population
+    // survives to justify a broad distribution claim.
+    scale: [0.9, 1.16],
+    scaleExponent: 1.05,
+    patchRadius: [1.5, 2.5],
+    minPatchSeparation: 9,
+    minItemSeparation: 5,
+    maxGrade: 0.58,
+    densityPerHectare: 1,
+    maximumPerRegion: 1,
+  },
+});
+
+export const LECOCARPUS_PINNATIFIDUS_SPECIES = Object.freeze({
+  id: 'lecocarpus-pinnatifidus',
+  commonName: 'Wing-fruited Floreana daisy',
+  scientificName: 'Lecocarpus pinnatifidus',
+  spanishName: 'Margarita pequeña',
+  label: 'Wing-fruited Floreana daisy / Lecocarpus pinnatifidus',
+  origin: 'Floreana endemic; critically endangered',
+  heightMeters: [0.2, 2],
+  modeledLifeStages: ['flowering and fruiting young shrub'],
+  reconstruction: {
+    documented: ['variable deeply pinnatifid leaves', 'yellow composite flower-heads', 'long peduncles', 'winged fruit'],
+    inferred: ['1835 branch architecture', 'individual flower-to-fruit balance'],
+    unknown: ['Darwin’s exact collection locality on Charles Island'],
+  },
+  habitat: {
+    minimumSuitability: 0.27,
+    preferences: {
+      moisture: { preferred: [0.16, 0.46], tolerated: [0.06, 0.66], weight: 1.05 },
+      canopy: { preferred: [0.04, 0.28], tolerated: [0, 0.54], weight: 0.85 },
+      exposure: { preferred: [0.58, 0.92], tolerated: [0.36, 1], weight: 1.05 },
+      disturbance: { preferred: [0, 0.2], tolerated: [0, 0.48], weight: 1.15 },
+      salinity: { preferred: [0, 0.1], tolerated: [0, 0.24], weight: 0.65 },
+      rockiness: { preferred: [0.18, 0.62], tolerated: [0.04, 0.86], weight: 0.8 },
+    },
+  },
+  placement: {
+    scale: [0.84, 1.16],
+    scaleExponent: 1.05,
+    patchRadius: [2.4, 4.2],
+    minPatchSeparation: 10,
+    minItemSeparation: 7,
+    maxGrade: 0.62,
+    densityPerHectare: 1,
+    maximumPerRegion: 1,
+  },
+});
+
 export const OPUNTIA_MEGASPERMA_SPECIES = Object.freeze({
   id: 'opuntia-megasperma',
   commonName: 'Floreana prickly pear cactus',
