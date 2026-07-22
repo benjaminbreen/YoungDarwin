@@ -316,11 +316,19 @@ export function usePlayerCameraRig() {
     };
   }, [gl, scratch, updatePointerNdc]);
 
-  const resetCameraForSpawn = useCallback(groundY => {
+  const resetCameraForSpawn = useCallback((groundY, cameraFacing = null) => {
     cameraFollowYRef.current = groundY;
     statusLookRef.current = null;
     shoulderPivotRef.current = null;
-  }, []);
+    if (cameraFacing) {
+      const forward = scratch.recenterForward.set(cameraFacing.x || 0, 0, cameraFacing.z || -1);
+      if (forward.lengthSq() > 0.0001) {
+        forward.normalize();
+        yawRef.current = Math.atan2(-forward.x, -forward.z);
+      }
+      panOffsetRef.current.set(0, 0, 0);
+    }
+  }, [scratch]);
 
   const recenterCamera = useCallback((facing, options = {}) => {
     const forward = scratch.recenterForward.set(facing?.x || 0, 0, facing?.z || -1);

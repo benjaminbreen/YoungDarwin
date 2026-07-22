@@ -12,6 +12,8 @@ const DEFAULT_VISTA_BY_TYPE = {
   reef: 'reef-shallows',
   ocean: 'open-water',
   promontory: 'dry-scrub-uplands',
+  wetland: 'mangrove-forest',
+  cliff: 'southwestern-cliffs',
   settlement: 'dry-scrub-uplands',
   camp: 'dry-scrub-uplands',
 };
@@ -28,6 +30,9 @@ const VISTA_BY_REGION_ID = {
   NW_REEF: 'reef-shallows',
   S_HUT: 'reef-shallows',
   S_REEFS: 'reef-shallows',
+  S_INTERTIDAL: 'intertidal-shallows',
+  PUNTA_SUR: 'punta-sur-headland',
+  SW_CLIFFS: 'southwestern-cliffs',
   W_HIGH: 'cloud-forest',
   E_MID: 'rocky-clearing',
   MANGROVES: 'mangrove-forest',
@@ -68,6 +73,7 @@ const SURFACE_PROFILE_BY_REGION_ID = {
   BLACK_BEACH: 'black-sand-coast',
   BLACK_BEACH_SURF: 'black-sand-coast',
   WATKINS_CREEK: 'highland',
+  S_INTERTIDAL: 'intertidal-flat',
 };
 
 export const surfaceProfiles = {
@@ -169,6 +175,17 @@ export const surfaceProfiles = {
     wetColor: '#243c35',
     shoreColor: '#7d7b52',
     targetLiteralWeight: 0.34,
+  },
+  'intertidal-flat': {
+    id: 'intertidal-flat',
+    families: ['shell-sand', 'wet-basalt', 'tidepool', 'mudflat', 'salt-scrub', 'coast'],
+    coastalStyle: 'low-tide-basalt-flat',
+    nearColor: '#343d36',
+    midColor: '#66705c',
+    farColor: '#9a9678',
+    wetColor: '#173b39',
+    shoreColor: '#aca88a',
+    targetLiteralWeight: 0.38,
   },
   'open-water': {
     id: 'open-water',
@@ -340,6 +357,51 @@ export const vistaLibrary = {
     ],
     ridges: [],
     markers: [{ kind: 'rock', count: 8, at: [12, 46], color: '#6f6247', scale: [0.22, 0.46], seed: 13 }],
+  },
+  'intertidal-shallows': {
+    label: 'Intertidal Flats',
+    seed: 83,
+    apronDepth: 88,
+    apronWidthScale: 1.88,
+    bands: [
+      { from: 0, to: 18, nearY: -0.96, farY: -0.76, colors: ['#1e5653', '#47958e'] },
+      { from: 18, to: 45, nearY: -0.76, farY: -0.22, colors: ['#736f5c', '#aaa386'] },
+      { from: 45, to: 78, nearY: -0.22, farY: 2.6, colors: ['#394a35', '#65734b'] },
+    ],
+    markers: [
+      { kind: 'rock', count: 20, at: [7, 44], color: '#202c29', scale: [0.18, 0.54], seed: 83 },
+      { kind: 'scrub', count: 22, at: [47, 72], color: '#3d5d35', scale: [0.28, 0.62], seed: 97 },
+    ],
+  },
+  'punta-sur-headland': {
+    label: 'Punta Sur Headland',
+    seed: 101,
+    apronDepth: 96,
+    apronWidthScale: 1.92,
+    bands: [
+      { from: 0, to: 25, nearY: -0.42, farY: 2.8, colors: ['#31382d', '#55643d'] },
+      { from: 25, to: 62, nearY: 2.8, farY: 10.6, colors: ['#52633d', '#708456'] },
+      { from: 62, to: 90, nearY: 10.6, farY: 16.8, colors: ['#4e5644', '#78816c'] },
+    ],
+    markers: [
+      { kind: 'scrub', count: 28, at: [20, 62], color: '#405637', scale: [0.25, 0.64], seed: 101 },
+      { kind: 'rock', count: 12, at: [-12, 52], color: '#2b302b', scale: [0.28, 0.78], seed: 113 },
+    ],
+  },
+  'southwestern-cliffs': {
+    label: 'Southwestern Cliffs',
+    seed: 127,
+    apronDepth: 94,
+    apronWidthScale: 1.9,
+    bands: [
+      { from: 0, to: 20, nearY: -0.68, farY: 2.4, colors: ['#242925', '#41463b'] },
+      { from: 20, to: 54, nearY: 2.4, farY: 11.8, colors: ['#46463a', '#685c44'] },
+      { from: 54, to: 86, nearY: 11.8, farY: 18.5, colors: ['#5f5948', '#81755d'] },
+    ],
+    markers: [
+      { kind: 'rock', count: 22, at: [10, 60], color: '#292c28', scale: [0.3, 0.92], seed: 127 },
+      { kind: 'scrub', count: 12, at: [-18, 72], color: '#485339', scale: [0.22, 0.5], seed: 139 },
+    ],
   },
   'open-water': {
     label: 'Open Water',

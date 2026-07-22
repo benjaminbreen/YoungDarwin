@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { updateRuntimePlayerPose } from '../../store';
+import { emitPropEvent } from '../../physics/props/propEvents';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
 import { EMPTY_KEYS, IDLE_BEHAVIOR, PLAYER, SPRINT, SWIM } from './playerConfig';
 import { playerControllerDebugEnabled } from './playerUtils';
@@ -258,6 +259,7 @@ export function finalizePlayerFrame({
     && !stateRef.current.airborne
     && !swimState.current.active
     && horizontalSpeed < 0.5;
+  const wasWinded = Boolean(stateRef.current.winded);
   if (restingNow && !stateRef.current.winded
     && stateRef.current.runEffort > (fatigue >= 50 ? IDLE_BEHAVIOR.windedEffortFatigued : IDLE_BEHAVIOR.windedEffort)) {
     stateRef.current.winded = true;
@@ -265,10 +267,13 @@ export function finalizePlayerFrame({
   if (stateRef.current.winded && (moving || stateRef.current.runEffort < IDLE_BEHAVIOR.windedRecover)) {
     stateRef.current.winded = false;
   }
-  stateRef.current.idleFor = (restingNow && !stateRef.current.aiming && !stateRef.current.crouching)
-    ? (stateRef.current.idleFor || 0) + delta
-    : 0;
-  stateRef.current.longIdle = !stateRef.current.winded && stateRef.current.idleFor >= IDLE_BEHAVIOR.longIdleAfter;
+  if (wasWinded !== Boolean(stateRef.current.winded)) {
+    emitPropEvent('player-winded', {
+      active: Boolean(stateRef.current.winded),
+      effort: stateRef.current.runEffort,
+      fatigue,
+    });
+  }
   wadeDepth.current = stateRef.current.airborne ? 0 : Math.max(0, WATER_LEVEL - p.y);
   stateRef.current.wadeDepth = wadeDepth.current;
 

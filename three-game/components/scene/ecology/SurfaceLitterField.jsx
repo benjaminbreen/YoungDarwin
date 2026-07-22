@@ -364,13 +364,19 @@ function SurfaceLitterBucket({ bucket, resources, zoneId, sourceUserData, castSh
     const mesh = ref.current;
     if (!mesh) return;
     bucket.items.forEach((item, index) => {
-      const normal = terrainNormalAt(item.x, item.z, zoneId);
+      const preparedNormal = item.surfaceNormal;
+      const normal = Array.isArray(preparedNormal)
+        && preparedNormal.length === 3
+        && preparedNormal.every(Number.isFinite)
+        ? _normal.fromArray(preparedNormal)
+        : terrainNormalAt(item.x, item.z, zoneId);
       _slopeQuat.setFromUnitVectors(UP, normal);
       _yawQuat.setFromAxisAngle(UP, item.yaw || 0);
       _tiltQuat.setFromEuler(new THREE.Euler(item.pitch || 0, 0, item.roll || 0, 'XYZ'));
       dummy.position.set(
         item.x,
-        terrainHeight(item.x, item.z, zoneId) + (item.lift ?? 0.018),
+        (Number.isFinite(item.y) ? item.y : terrainHeight(item.x, item.z, zoneId))
+          + (item.lift ?? 0.018),
         item.z,
       );
       dummy.quaternion.copy(_slopeQuat).multiply(_yawQuat).multiply(_tiltQuat);

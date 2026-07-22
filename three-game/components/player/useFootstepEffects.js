@@ -57,6 +57,8 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
       horizontalSpeed,
       running,
       intensity = 0,
+      target = null,
+      side = null,
     }) {
       const profile = getSurfaceContactProfile({
         x: worldPosition?.x,
@@ -83,6 +85,8 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
         biome: profile.biome,
         surfaceProfile: profile,
         horizontalSpeed,
+        target,
+        side,
         direction: facing ? { x: facing.x, y: 0, z: facing.z } : undefined,
       });
     }
@@ -119,6 +123,8 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
         horizontalSpeed,
         running,
         intensity: step.intensity || 0,
+        target: step.target || null,
+        side: step.side || null,
       });
       return true;
     }
@@ -174,6 +180,7 @@ export function useFootstepEffects({ footstepDustTriggerRef }) {
         facing,
         horizontalSpeed,
         running,
+        side,
       });
     }
 

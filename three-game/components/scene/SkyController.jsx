@@ -1407,6 +1407,7 @@ function RainbowDome({ celestialRef }) {
     uniforms: {
       uAntisun: { value: new THREE.Vector3(0, -1, 0) },
       uStrength: { value: 0 },
+      uMajestic: { value: 0 },
     },
     vertexShader: /* glsl */`
       varying vec3 vWorldDir;
@@ -1420,6 +1421,7 @@ function RainbowDome({ celestialRef }) {
       varying vec3 vWorldDir;
       uniform vec3 uAntisun;
       uniform float uStrength;
+      uniform float uMajestic;
 
       vec3 spectral(float t) {
         // t=0 violet -> t=1 red, eyeballed against a real bow.
@@ -1434,18 +1436,22 @@ function RainbowDome({ celestialRef }) {
         vec3 dir = normalize(vWorldDir);
         float ang = degrees(acos(clamp(dot(dir, uAntisun), -1.0, 1.0)));
         // Primary bow: 40.6° (violet) to 42.4° (red).
-        float t1 = (ang - 40.6) / 1.8;
+        float primaryStart = mix(40.6, 39.6, uMajestic);
+        float primaryWidth = mix(1.8, 3.0, uMajestic);
+        float t1 = (ang - primaryStart) / primaryWidth;
         float band1 = smoothstep(0.0, 0.18, t1) * (1.0 - smoothstep(0.82, 1.0, t1));
         // Secondary: reversed colors, broader and fainter, ~50.4–53.0°.
-        float t2 = (ang - 50.4) / 2.6;
+        float t2 = (ang - mix(50.4, 49.8, uMajestic)) / mix(2.6, 3.5, uMajestic);
         float band2 = smoothstep(0.0, 0.22, t2) * (1.0 - smoothstep(0.78, 1.0, t2));
         // Brightened sky inside the primary (Alexander's band stays dark
         // between the bows simply by not being brightened).
         float inner = 1.0 - smoothstep(34.0, 40.6, ang);
-        vec3 color = spectral(clamp(t1, 0.0, 1.0)) * band1 * 0.55
-          + spectral(1.0 - clamp(t2, 0.0, 1.0)) * band2 * 0.16
-          + vec3(0.9, 0.95, 1.0) * inner * 0.05;
-        float alpha = (band1 * 0.5 + band2 * 0.16 + inner * 0.07) * uStrength;
+        vec3 color = spectral(clamp(t1, 0.0, 1.0)) * band1 * mix(0.55, 0.78, uMajestic)
+          + spectral(1.0 - clamp(t2, 0.0, 1.0)) * band2 * mix(0.16, 0.24, uMajestic)
+          + vec3(0.9, 0.95, 1.0) * inner * mix(0.05, 0.018, uMajestic);
+        float alpha = (band1 * mix(0.5, 0.42, uMajestic)
+          + band2 * mix(0.16, 0.18, uMajestic)
+          + inner * mix(0.07, 0.025, uMajestic)) * uStrength;
         // The bow lives against sky and distant rain, not the ground.
         alpha *= smoothstep(-0.06, 0.14, dir.y);
         if (alpha < 0.003) discard;
@@ -1461,16 +1467,36 @@ function RainbowDome({ celestialRef }) {
   useFrame(() => {
     const c = celestialRef.current;
     const rain = weatherEnv.rainIntensity;
+    const puntaSur = useThreeGameStore.getState().currentZoneId === 'PUNTA_SUR';
+    material.uniforms.uMajestic.value = puntaSur ? 1 : 0;
+    const desiredBlending = puntaSur ? THREE.NormalBlending : THREE.AdditiveBlending;
+    if (material.blending !== desiredBlending) {
+      material.blending = desiredBlending;
+      material.needsUpdate = true;
+    }
     // Sun-shower window: light rain or a clearing downpour.
     const rainWindow = smoothstep(0.02, 0.1, rain) * (1 - smoothstep(0.28, 0.5, rain));
     const sunUp = smoothstep(0.04, 0.14, c.elevation);
     // Bow center is antisolar: the higher the sun, the more of the bow is
     // below the horizon. Fade it out entirely once the sun is high.
     const sunLow = 1 - smoothstep(0.42, 0.66, c.elevation);
-    const strength = rainWindow * c.daylight * sunUp * sunLow * (1 - weatherEnv.overcast * 0.75);
-    material.uniforms.uStrength.value = strength;
+    // Punta Sur's exposed southern wall throws a nearly continuous veil of
+    // spray into the sunlight. It sustains a bow through most daylight even
+    // between showers, while every other region keeps the strict rain window.
+    const sprayWindow = puntaSur ? 1.0 + rainWindow * 0.2 : rainWindow;
+    const elevationWindow = puntaSur ? 1 - smoothstep(0.9, 0.99, c.elevation) : sunLow;
+    const strength = sprayWindow * c.daylight * sunUp * elevationWindow
+      * (1 - weatherEnv.overcast * (puntaSur ? 0.2 : 0.75));
+    material.uniforms.uStrength.value = puntaSur ? strength * 0.92 : strength;
     if (strength > 0.01) {
-      material.uniforms.uAntisun.value.copy(c.sun).multiplyScalar(-1).normalize();
+      if (puntaSur) {
+        // Punta Sur's prevailing spray wall faces the open southern ocean.
+        // Keep its low bow over that horizon while letting the sun move the
+        // centre subtly east/west during the day.
+        material.uniforms.uAntisun.value
+          .set(0, -0.58, 0.815)
+          .normalize();
+      } else material.uniforms.uAntisun.value.copy(c.sun).multiplyScalar(-1).normalize();
     }
     if (meshRef.current) meshRef.current.visible = strength > 0.01;
   });

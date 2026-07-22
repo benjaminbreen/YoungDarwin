@@ -3,7 +3,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getNpcEncounter } from '../encounters/npcEncounters';
 import { setTypingMode } from '../input/typingMode';
+import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { useThreeGameStore } from '../store';
+
+const SYMS_FIELD_ORDERS = Object.freeze([
+  { directive: SYMS_DIRECTIVES.FOLLOW, label: 'Come with me' },
+  { directive: SYMS_DIRECTIVES.RANGE, label: 'Range about' },
+  { directive: SYMS_DIRECTIVES.WAIT, label: 'Wait here' },
+]);
 
 function EncounterTurn({ turn, featured = false }) {
   const isPlayer = turn.role === 'player';
@@ -24,6 +31,8 @@ export function NpcEncounterModal() {
   const error = useThreeGameStore(state => state.npcEncounterError);
   const close = useThreeGameStore(state => state.closeNpcEncounter);
   const submit = useThreeGameStore(state => state.submitNpcEncounter);
+  const symsDirective = useThreeGameStore(state => state.symsDirective);
+  const setSymsDirective = useThreeGameStore(state => state.setSymsDirective);
   const [draft, setDraft] = useState('');
   const inputRef = useRef(null);
   const transcriptRef = useRef(null);
@@ -101,6 +110,30 @@ export function NpcEncounterModal() {
           </div>
 
           <div className="max-w-[50rem] shrink-0 border-t border-expedition-brass/30 pt-2">
+            {active.npcId === 'syms_covington' && (
+              <div className="mb-3 border-b border-expedition-brass/20 pb-3">
+                <div className="mb-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Field orders</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {SYMS_FIELD_ORDERS.map(order => {
+                    const selected = symsDirective === order.directive;
+                    return (
+                      <button
+                        key={order.directive}
+                        type="button"
+                        disabled={pending || selected}
+                        aria-pressed={selected}
+                        onClick={() => setSymsDirective?.(order.directive)}
+                        className={`min-h-9 border px-2 text-center font-expedition text-[0.82rem] transition sm:text-[0.9rem] ${selected
+                          ? 'border-[#6d9e91] bg-[#527b77]/30 text-expedition-parchment'
+                          : 'border-expedition-brass/30 text-expedition-faded hover:border-expedition-brass/60 hover:bg-[#527b77]/15 hover:text-expedition-parchment'} disabled:cursor-default disabled:opacity-60`}
+                      >
+                        {order.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="grid gap-px">
               {(active.suggestedReplies || []).slice(0, 2).map((reply, index) => (
                 <button

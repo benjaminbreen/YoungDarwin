@@ -245,6 +245,41 @@ export const PROP_TYPES = {
       strikeable: { tool: 'hammer', impulse: 10 },
     },
   },
+  // Arrival-view basalt is still a physical object, but it is too large and
+  // embedded to behave like a carryable round stone. A broad cuboid footprint,
+  // high friction, and locked pitch/roll keep it settled until Darwin applies
+  // a meaningful push or tool impact.
+  settledBasaltBoulder: {
+    label: 'basalt boulder',
+    visual: 'stone',
+    collider: { shape: 'cuboid', halfExtents: [0.43, 0.3, 0.37] },
+    restOffset: 0.3,
+    enabledRotations: [false, true, false],
+    mass: 42,
+    friction: 1.8,
+    restitution: 0.01,
+    linearDamping: 2.25,
+    angularDamping: 2.6,
+    behaviors: {
+      mobility: {
+        mode: 'push',
+        assistSpeed: 0.14,
+        maxSpeed: 0.28,
+        contactMaxSpeed: 0.26,
+        pushAcceleration: 1.45,
+        contactDelay: 0.18,
+        effortRampSeconds: 0.9,
+        rotationPolicy: 'resistTipping',
+        angularMax: 0.24,
+        verticalLaunchMax: 0.08,
+        struckMaxSpeed: 1.35,
+        struckVerticalLaunchMax: 0.42,
+        groundedExtraDamping: 0.86,
+      },
+      // The boulder moves under a deliberate blow but does not break apart.
+      strikeable: { tool: 'hammer', impulse: 5.5 },
+    },
+  },
   // --- Penal colony settlement props. Collider dims are world meters and
   // match the modelAssets scales; the GLBs sit foot-at-origin, so each
   // visualOffsetY drops the mesh from the collider centre to the ground.
@@ -301,6 +336,37 @@ export const PROP_TYPES = {
     visualOffsetY: -0.78,
     behaviors: {
       mobility: { mode: 'fixed' },
+    },
+  },
+  symsCollectingCase: {
+    label: 'Covington’s collecting case',
+    visual: 'symsFieldCase',
+    interactionRing: false,
+    visualOffsetY: -0.34,
+    collider: { shape: 'cuboid', halfExtents: [0.6, 0.29, 0.32] },
+    restOffset: 0.29,
+    mass: 24,
+    friction: 0.92,
+    restitution: 0.025,
+    linearDamping: 1.25,
+    angularDamping: 1.45,
+    behaviors: {
+      mobility: {
+        mode: 'push',
+        assistSpeed: 0.24,
+        maxSpeed: 0.48,
+        contactMaxSpeed: 0.45,
+        pushAcceleration: 2.2,
+        contactDelay: 0.08,
+        effortRampSeconds: 0.5,
+        rotationPolicy: 'resistTipping',
+        angularMax: 0.58,
+        verticalLaunchMax: 0.14,
+        struckMaxSpeed: 2.1,
+        struckVerticalLaunchMax: 0.62,
+        groundedExtraDamping: 0.38,
+      },
+      strikeable: { tool: 'hammer', impulse: 4.6 },
     },
   },
   settlementWheelbarrow: {
@@ -697,6 +763,43 @@ export const PROP_TYPES = {
     collider: { shape: 'cylinder', halfHeight: 0.39, radius: 0.14 }, restOffset: 0.4,
     mass: 1.4, friction: 1.45, restitution: 0.02, linearDamping: 2.1, angularDamping: 1.8,
     behaviors: { mobility: { mode: 'pickup-push', assistSpeed: 0.23, maxSpeed: 0.42, rotationPolicy: 'resistTipping', angularMax: 0.65 }, carryable: { release: 0.2, holdOffset: [0.14, 0.94, 0.1], holdRotation: [0.02, -0.05, -0.08] }, strikeable: { tool: 'hammer', impulse: 1.0 } },
+  },
+  symsFieldBottle: {
+    label: 'stoppered field bottle', visual: 'symsFieldBottle',
+    interactionRing: false,
+    visualOffsetY: -0.055,
+    collider: { shape: 'cylinder', halfHeight: 0.27, radius: 0.095 },
+    restOffset: 0.28,
+    mass: 0.72,
+    friction: 0.38,
+    restitution: 0.16,
+    linearDamping: 0.44,
+    angularDamping: 0.28,
+    behaviors: {
+      mobility: {
+        mode: 'push',
+        assistSpeed: 0.34,
+        maxSpeed: 0.92,
+        contactMaxSpeed: 0.78,
+        rollingAssistSpeed: 0.56,
+        rollingMaxSpeed: 1.35,
+        pushAcceleration: 7.5,
+        rotationPolicy: 'autoBarrel',
+        angularMax: 4.2,
+        uprightAngularMax: 1.6,
+        verticalLaunchMax: 0.24,
+        struckMaxSpeed: 3.4,
+        struckVerticalLaunchMax: 1.15,
+      },
+      breakable: {
+        tool: 'hammer',
+        debris: 'glass',
+        loot: {
+          message: 'The field bottle shatters, scattering green glass and the sharp smell of preserving spirit across the sand.',
+          syms: '“That was one of our sound bottles, sir.”',
+        },
+      },
+    },
   },
   lawsonTinMug: {
     label: 'tin mug', visual: 'cabinMug', visualAsset: 'lawsonTinMug',

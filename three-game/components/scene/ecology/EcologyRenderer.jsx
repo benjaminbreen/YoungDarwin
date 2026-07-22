@@ -36,16 +36,56 @@ import { VolcanicFormationField } from './VolcanicFormationField';
 import { EcologyHabitatDebugLayer } from './EcologyHabitatDebugLayer';
 import { MatureCactusImpactLayer } from './MatureCactusImpactLayer';
 import { matureCactusProfileForPath } from '../../../world/ecology/matureCactusInteractions';
+import { emitPropEvent } from '../../../physics/props/propEvents';
+import {
+  buildFoliageContactIndex,
+  findFoliageContact,
+} from '../../../world/ecology/foliageContact';
 
 // Generic renderer for a zone ecology definition (see
 // three-game/world/ecology/). Everything repeated is instanced; one-off props
 // fall back to StaticGLB.
 
 // Drives the shared wind/bend uniforms for every foliage material at once.
-function FoliageMotionDriver() {
+function FoliageMotionDriver({ contactIndex, zoneId }) {
+  const previousPosition = React.useRef(null);
+  const activeContactId = React.useRef(null);
+  const lastRustleAt = React.useRef(-Infinity);
   useFrame(({ clock }, delta) => {
     const pose = getRuntimePlayerPose();
     updateFoliageUniforms(clock.elapsedTime, pose?.position, delta);
+    const position = pose?.position;
+    if (!position) return;
+    const previous = previousPosition.current;
+    const speed = previous
+      ? Math.hypot(position.x - previous.x, position.z - previous.z) / Math.max(0.001, delta)
+      : 0;
+    if (previous) {
+      previous.x = position.x;
+      previous.y = position.y;
+      previous.z = position.z;
+    } else {
+      previousPosition.current = { x: position.x, y: position.y, z: position.z };
+    }
+    if (speed < 0.65) return;
+    const contact = findFoliageContact(contactIndex, position);
+    if (!contact) {
+      activeContactId.current = null;
+      return;
+    }
+    const isNewPlant = activeContactId.current !== contact.id;
+    const recovered = clock.elapsedTime - lastRustleAt.current > 0.85;
+    if (!isNewPlant && !recovered) return;
+    if (clock.elapsedTime - lastRustleAt.current < 0.28) return;
+    activeContactId.current = contact.id;
+    lastRustleAt.current = clock.elapsedTime;
+    emitPropEvent('foliage-contact', {
+      sourceId: contact.id,
+      zoneId,
+      kind: contact.kind,
+      position: { x: contact.x, y: position.y, z: contact.z },
+      intensity: Math.min(1, 0.28 + speed / 6 * 0.46 + contact.proximity * 0.26),
+    });
   });
   return null;
 }
@@ -301,6 +341,17 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
     [...visibleLayers.flora, ...visibleLayers.proceduralFlora]
       .filter(layer => matureCactusProfileForPath(layer.path))
   ), [visibleLayers.flora, visibleLayers.proceduralFlora]);
+  const foliageContactIndex = useMemo(() => buildFoliageContactIndex({
+    flora: visibleLayers.flora,
+    proceduralFlora: visibleLayers.proceduralFlora,
+    dryGrassPatches: visibleLayers.dryGrassPatches,
+    hybridGrassTufts: visibleLayers.hybridGrassTufts,
+  }), [
+    visibleLayers.dryGrassPatches,
+    visibleLayers.flora,
+    visibleLayers.hybridGrassTufts,
+    visibleLayers.proceduralFlora,
+  ]);
 
   if (!ecology) return null;
   const {
@@ -325,7 +376,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
   const { instancedGroups: instancedProps, staticProps } = propPlan;
   return (
     <group>
-      <FoliageMotionDriver />
+      <FoliageMotionDriver contactIndex={foliageContactIndex} zoneId={ecology.zoneId} />
       <MatureCactusImpactLayer
         layers={matureCactusLayers}
         zoneId={ecology.zoneId}

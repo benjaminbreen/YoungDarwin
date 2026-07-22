@@ -47,10 +47,9 @@ export const SPRINT = {
   minSpeedRatio: 0.8,   // fraction of runSpeed that counts as sprint effort
 };
 
-// Idle-life behavior: winded recovery after sustained running, and the
-// long-wait idle for a player who parks Darwin.
+// Idle-life behavior: winded recovery after sustained running. Ordinary idle
+// variety is scheduled by PlayerController's weighted one-shot fidget pool.
 export const IDLE_BEHAVIOR = {
-  longIdleAfter: 42,        // seconds of standing still before waitingIdle
   windedEffort: 5.5,        // run-effort seconds that leave Darwin winded
   windedEffortFatigued: 3.6, // lower bar when already fatigued
   windedRecover: 1.1,       // effort level at which breathing settles

@@ -46,11 +46,16 @@ export function isSwingClaimed(swingId) {
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }
 // 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }
 // 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome, source? }
-// 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?, fallSpeed?, horizontalSpeed?, travelDistance?, runningJump? }
+// 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?: 'footstep'|'takeoff'|'step-up'|'landing'|'landing-jump', fallSpeed?, horizontalSpeed?, travelDistance?, runningJump? }
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }
 // 'water-object-ripple' { position: {x,y,z}, direction?, yaw?, intensity, radius?, propId? }
+// 'foliage-contact' { sourceId, zoneId, kind: 'grass'|'shrub', position: {x,y,z}, intensity }
+// 'npc-footstep' { npcId, zoneId, position: {x,y,z}, side, speed, movementMode }
+// 'bee-audio-proximity' { zoneId, active, position?: {x,y,z}, phase?: 'hover'|'dart'|'descend', gate? }
+// 'player-winded' { active, effort, fatigue }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }
+// 'toggle-syms-field-case' { id }
 // 'mature-cactus-impact' { sourceId, itemId, position, direction, amplitude, duration, frequency, tool }
 // 'rock-shotgun-fracture' { obstacle, zoneId, position, normal, dir, intensity }
 // 'rock-hammer-fracture' { obstacle, zoneId, position, normal, intensity }

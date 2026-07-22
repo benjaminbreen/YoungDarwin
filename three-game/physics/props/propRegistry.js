@@ -4,6 +4,7 @@
 
 import { PROP_TYPES } from './propTypes';
 import { BEAGLE_CABIN_ZONE_ID, LAWSON_HOUSE_ZONE_ID, getInteriorPropSpawns } from '../../interiors/interiorRegistry';
+import { SYMS_FIELD_CASE_ID, SYMS_FIELD_CASE_PLACEMENT } from '../../npcs/symsActivityPlan';
 
 export const ZONE_PROPS = {
   [BEAGLE_CABIN_ZONE_ID]: getInteriorPropSpawns(BEAGLE_CABIN_ZONE_ID),
@@ -23,9 +24,11 @@ export const ZONE_PROPS = {
     {
       id: 'post-office-rollable-barrel',
       type: 'barrel',
-      x: 20.0,
-      z: 2.8,
-      rotation: [Math.PI / 2, 0.72, 0.08],
+      // Start upright on the flatter eastern supply shelf. It remains fully
+      // pushable/breakable, but no longer rolls into the cove during arrival.
+      x: 27.0,
+      z: 3.0,
+      rotation: [0, 0.72, 0],
     },
     {
       id: 'shore-supply-crate',
@@ -40,6 +43,32 @@ export const ZONE_PROPS = {
       x: 15.05,
       z: 4.95,
       rotation: [0.02, -0.65, -0.01],
+    },
+    // Covington's field base. The collecting case and bottle are ordinary
+    // shared physics props: they collide, move under pressure or weapon impact,
+    // and the bottle can shatter without a bespoke world-interaction path.
+    {
+      id: 'syms-field-kit',
+      type: 'cratesAndBags',
+      x: 6.9,
+      z: 5.7,
+      rotation: [0, -0.38, 0],
+      scale: 0.62,
+    },
+    {
+      id: SYMS_FIELD_CASE_ID,
+      type: 'symsCollectingCase',
+      x: SYMS_FIELD_CASE_PLACEMENT.x,
+      z: SYMS_FIELD_CASE_PLACEMENT.z,
+      rotation: [0.015, SYMS_FIELD_CASE_PLACEMENT.yaw, SYMS_FIELD_CASE_PLACEMENT.lean],
+      scale: SYMS_FIELD_CASE_PLACEMENT.scale,
+    },
+    {
+      id: 'syms-field-bottle',
+      type: 'symsFieldBottle',
+      x: 4.35,
+      z: 6.15,
+      rotation: [0.02, 0.74, -0.015],
     },
     {
       id: 'upper-slope-broken-crate',
@@ -57,24 +86,26 @@ export const ZONE_PROPS = {
     },
     {
       id: 'bay-path-stone-a',
-      type: 'stone',
+      type: 'settledBasaltBoulder',
       x: 18.8,
       z: 8.2,
-      rotation: [0.15, 0.85, -0.08],
+      rotation: [0, 0.85, 0],
     },
     {
       id: 'bay-path-stone-b',
-      type: 'stone',
+      type: 'settledBasaltBoulder',
       x: 6.2,
       z: 9.8,
-      rotation: [-0.08, -0.25, 0.18],
+      rotation: [0, -0.25, 0],
     },
     {
       id: 'bay-path-stone-c',
-      type: 'stone',
-      x: 1.8,
-      z: 18.2,
-      rotation: [0.22, 0.3, -0.12],
+      type: 'settledBasaltBoulder',
+      // Move off the steep centreline to the naturally level shoulder east of
+      // Darwin's approach, outside the immediate launch silhouette.
+      x: 9.0,
+      z: 18.0,
+      rotation: [0, 0.3, 0],
     },
     {
       id: 'south-trail-stone',

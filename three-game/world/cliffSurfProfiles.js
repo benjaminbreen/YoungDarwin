@@ -3,6 +3,8 @@ import {
   easternCliffsNorthCoastZ,
 } from './regions/easternCliffs/path';
 import { elMiradorEastCoastX } from './regions/elMirador/path';
+import { puntaSurSouthCoastZ } from './regions/puntaSur/path';
+import { southernIntertidalSouthCoastZ } from './regions/southernIntertidal/path';
 
 // Region-owned open-coast surf. The shared ocean stays calm unless a zone is
 // present here. Impact anchors sit just seaward of the analytic cliff face;
@@ -84,6 +86,39 @@ function northFaceAnchors({ idPrefix, xMin, xMax, spacing, coastZ, phaseOffset, 
   return anchors;
 }
 
+function southFaceAnchors({ idPrefix, xMin, xMax, spacing, coastZ, phaseOffset, salt, height }) {
+  const anchors = [];
+  let index = 0;
+  for (let x = xMin; x <= xMax + 0.001; x += spacing) {
+    const tone = anchorTone(index, salt);
+    const nextX = Math.min(xMax, x + 0.35);
+    const prevX = Math.max(xMin, x - 0.35);
+    const dzDx = (coastZ(nextX) - coastZ(prevX)) / Math.max(0.01, nextX - prevX);
+    const tangentLength = Math.hypot(1, dzDx);
+    const tangentX = 1 / tangentLength;
+    const tangentZ = dzDx / tangentLength;
+    const normalX = -tangentZ;
+    const normalZ = tangentX;
+    const coast = coastZ(x);
+    anchors.push({
+      id: `${idPrefix}-${index}`,
+      x: x + normalX * 0.5,
+      z: coast + normalZ * 0.5,
+      tangentX,
+      tangentZ,
+      normalX,
+      normalZ,
+      width: spacing * (1.18 + tone * 0.22),
+      height: height * (0.84 + tone * 0.38),
+      strength: 0.9 + tone * 0.28,
+      phase: (phaseOffset + index * 0.025 + tone * 0.018) % 1,
+      tone,
+    });
+    index += 1;
+  }
+  return anchors;
+}
+
 const EASTERN_CLIFFS_PROFILE = Object.freeze({
   id: 'eastern-cliffs-heavy-surf',
   swell: 1,
@@ -133,9 +168,49 @@ const EL_MIRADOR_PROFILE = Object.freeze({
   })),
 });
 
+const PUNTA_SUR_PROFILE = Object.freeze({
+  id: 'punta-sur-majestic-surf',
+  swell: 1,
+  period: 11.7647058824,
+  approachDistance: 10.2,
+  sprayMultiplier: 1.42,
+  anchors: Object.freeze(southFaceAnchors({
+    idPrefix: 'punta-sur-impact',
+    xMin: -43,
+    xMax: 43,
+    spacing: 5.2,
+    coastZ: puntaSurSouthCoastZ,
+    phaseOffset: 0.18,
+    salt: 17.7,
+    height: 5.8,
+  })),
+});
+
+const SOUTHERN_INTERTIDAL_PROFILE = Object.freeze({
+  id: 'southern-intertidal-breaking-surf',
+  // Energetic enough to resolve the open-Pacific edge, but lower than Punta
+  // Sur's cliff swell so the flats still read as a protected low-tide shelf.
+  swell: 0.78,
+  period: 11.7647058824,
+  approachDistance: 9.4,
+  sprayMultiplier: 0.88,
+  anchors: Object.freeze(southFaceAnchors({
+    idPrefix: 'southern-intertidal-breaker',
+    xMin: -49,
+    xMax: 49,
+    spacing: 4.9,
+    coastZ: southernIntertidalSouthCoastZ,
+    phaseOffset: 0.07,
+    salt: 23.4,
+    height: 2.55,
+  })),
+});
+
 const PROFILES = Object.freeze({
   EASTERN_CLIFFS: EASTERN_CLIFFS_PROFILE,
   EL_MIRADOR: EL_MIRADOR_PROFILE,
+  PUNTA_SUR: PUNTA_SUR_PROFILE,
+  S_INTERTIDAL: SOUTHERN_INTERTIDAL_PROFILE,
 });
 
 export function getCliffSurfProfile(zoneId) {

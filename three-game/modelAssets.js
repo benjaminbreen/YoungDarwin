@@ -408,7 +408,7 @@ export const modelAssets = {
     // black when backlit on a clear day, without a player-only glow.
     materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
     targetTriangles: 10000,
-    prompt: 'Stylized low-poly Syms Covington, young 1830s ship assistant and naturalist helper, practical sailor clothing, small specimen bag, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral pose, clean topology, GLB.',
+    prompt: 'Stylized low-poly Syms Covington, young 1830s ship assistant and naturalist helper, practical sailor clothing, small leather utility pouch, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral pose, clean topology, GLB.',
   },
   crab: {
     enabled: true,

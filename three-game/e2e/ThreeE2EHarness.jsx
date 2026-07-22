@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { getThreeSpecimens } from '../data';
 import { setTouchControl } from '../input/touchControls';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { getNpcPoses } from '../world/npcRuntime';
 import { getSpecimenRuntimeBounds, getSpecimenRuntimePoses } from '../world/specimenRuntime';
 import { getRegionMap } from '../../game-core/regionMaps';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
@@ -29,6 +30,8 @@ import {
 } from '../world/waterTextureManifest';
 import { ecologyIsCached } from '../world/ecology';
 import { prefetchIslandMapImage } from '../ui/expedition/map/islandLocations';
+import { emitPropEvent } from '../physics/props/propEvents';
+import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
 
 const HARNESS_VERSION = 3;
 const FULL_CONTENT_PHASE = 6;
@@ -337,6 +340,13 @@ function makeSnapshot() {
         }
       : null,
     statusViewOpen: Boolean(state.statusViewOpen),
+    symsDirective: state.symsDirective || null,
+    symsZoneId: state.symsZoneId || null,
+    symsPose: (() => {
+      const pose = getNpcPoses(state.currentZoneId)?.get('syms');
+      return pose ? plainVector(pose) : null;
+    })(),
+    activeNpcEncounterId: state.activeNpcEncounter?.npcId || null,
     nearbySpecimenId: state.nearbySpecimenId || null,
     selectedSpecimenId: state.selectedSpecimenId || null,
     inventoryCount: Array.isArray(state.inventory) ? state.inventory.length : 0,
@@ -565,6 +575,18 @@ function createHarnessApi() {
     setTool: toolId => {
       useThreeGameStore.getState().setActiveTool(toolId);
       return makeSnapshot();
+    },
+    openNpcEncounter: (npcId = 'syms_covington') => {
+      useThreeGameStore.getState().openNpcEncounter(npcId);
+      return makeSnapshot();
+    },
+    setSymsDirective: directive => {
+      useThreeGameStore.getState().setSymsDirective(directive);
+      return makeSnapshot();
+    },
+    toggleSymsFieldCase: () => {
+      emitPropEvent('toggle-syms-field-case', { id: SYMS_FIELD_CASE_ID });
+      return true;
     },
     interact: () => {
       setTouchControl('interact', true);

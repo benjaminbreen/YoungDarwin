@@ -9,6 +9,8 @@ import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
 import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
+import { emitPropEvent } from '../../physics/props/propEvents';
+import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -586,6 +588,8 @@ export function updatePlayerInteractions({
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
         currentState.checkSnareTrap?.(currentState.carryPrompt.id);
+      } else if (currentState.carryPrompt.mode === SYMS_FIELD_CASE_PROMPT_MODE) {
+        emitPropEvent('toggle-syms-field-case', { id: currentState.carryPrompt.id });
       } else if (currentState.carryPrompt.mode === 'pickup') {
         if (!stateRef.current.action) {
           startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });

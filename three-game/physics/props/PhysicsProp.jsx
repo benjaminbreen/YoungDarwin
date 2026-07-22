@@ -977,6 +977,7 @@ export function PhysicsProp({ prop, onBreak }) {
       colliders={false}
       position={[prop.x, spawnY, prop.z]}
       rotation={prop.rotation}
+      {...(prop.enabledRotations ? { enabledRotations: prop.enabledRotations } : {})}
       linearDamping={prop.linearDamping}
       angularDamping={prop.angularDamping}
       canSleep

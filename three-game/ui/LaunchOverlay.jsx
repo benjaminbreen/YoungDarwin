@@ -106,6 +106,8 @@ export function LaunchOverlay({
   onLoadJournal,
   onSettings,
   onAbout,
+  audioEnabled = true,
+  onAudioEnabledChange,
   onRuntimeIntent,
   interactive = true,
   hasSavedExpedition = false,
@@ -223,7 +225,7 @@ export function LaunchOverlay({
             <div className="relative px-3 py-2 text-left">
               <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Settings</h2>
               <p className="mx-auto mt-3 max-w-md text-center text-[15px] leading-relaxed text-expedition-parchment/80">
-                A fuller settings menu is in progress. For now, the expedition selects sensible display settings automatically.
+                The expedition selects sensible display settings automatically. Natural field-recorded sound is kept deliberately quiet.
               </p>
               <div className="mt-4 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 px-4">
                 <div className="flex items-center justify-between gap-4 py-3">
@@ -232,7 +234,19 @@ export function LaunchOverlay({
                 </div>
                 <div className="flex items-center justify-between gap-4 py-3">
                   <span className="text-[16px] text-expedition-parchment">Audio</span>
-                  <span className="text-[13px] tracking-[0.08em] text-expedition-faded">Coming soon</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={audioEnabled}
+                    onClick={() => onAudioEnabledChange?.(!audioEnabled)}
+                    className={`min-w-16 rounded-sm border px-3 py-1 text-[13px] tracking-[0.08em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+                      audioEnabled
+                        ? 'border-expedition-gold/70 bg-expedition-gold/12 text-expedition-goldbright'
+                        : 'border-expedition-brass/40 bg-black/20 text-expedition-faded'
+                    }`}
+                  >
+                    {audioEnabled ? 'On' : 'Off'}
+                  </button>
                 </div>
                 <div className="flex items-center justify-between gap-4 py-3">
                   <span className="text-[16px] text-expedition-parchment">Controls &amp; accessibility</span>

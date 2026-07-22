@@ -16,6 +16,7 @@ import { createTimberMaterial } from '../../world/regions/materials/timberMateri
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { onPropEvent } from './propEvents';
 import { makeLooseStoneGeometry } from './rockDebrisGeometry';
+import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -216,6 +217,58 @@ function JugVisual() {
   );
 }
 
+function SymsFieldBottleVisual() {
+  const glass = useDisposableMaterial(() => new THREE.MeshPhysicalMaterial({
+    color: '#477768',
+    roughness: 0.12,
+    metalness: 0,
+    transmission: 0.16,
+    thickness: 0.18,
+    ior: 1.48,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    envMapIntensity: 2.2,
+  }));
+  const liquid = useDisposableMaterial(() => new THREE.MeshPhysicalMaterial({
+    color: '#6e3d1f',
+    roughness: 0.26,
+    metalness: 0,
+    transmission: 0.05,
+    thickness: 0.12,
+    clearcoat: 0.45,
+    clearcoatRoughness: 0.1,
+  }));
+  const cork = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    color: '#8b6841',
+    roughness: 0.96,
+    metalness: 0,
+  }));
+  const paper = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    color: '#c7b98d',
+    roughness: 0.94,
+    metalness: 0,
+  }));
+  const body = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.084, 0.092, 0.3, 16));
+  const shoulder = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.098, 16, 10));
+  const neck = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.035, 0.052, 0.14, 12));
+  const lip = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.037, 0.009, 6, 14));
+  const fluid = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.073, 0.079, 0.22, 14));
+  const stopper = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.031, 0.034, 0.065, 10));
+  const label = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.112, 0.105, 0.009));
+
+  return (
+    <group>
+      <mesh castShadow receiveShadow geometry={body} material={glass} position={[0, -0.055, 0]} />
+      <mesh castShadow receiveShadow geometry={shoulder} material={glass} position={[0, 0.095, 0]} scale={[1, 0.48, 1]} />
+      <mesh castShadow receiveShadow geometry={neck} material={glass} position={[0, 0.19, 0]} />
+      <mesh castShadow geometry={lip} material={glass} position={[0, 0.265, 0]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh geometry={fluid} material={liquid} position={[0, -0.08, 0]} />
+      <mesh castShadow geometry={stopper} material={cork} position={[0, 0.292, 0]} />
+      <mesh castShadow geometry={label} material={paper} position={[0, -0.035, 0.089]} rotation={[0.04, 0, 0]} />
+    </group>
+  );
+}
+
 function LooseBoardVisual() {
   const wood = useDisposableMaterial(() => createTimberMaterial({
     tint: '#9b9080',
@@ -407,6 +460,8 @@ export function PropVisual({ visual, assetId, offsetY = 0, propId }) {
   if (visual === 'book') return <BookVisual />;
   if (visual === 'shellFragment') return <ShellFragmentVisual />;
   if (visual === 'jug') return <JugVisual />;
+  if (visual === 'symsFieldBottle') return <SymsFieldBottleVisual />;
+  if (visual === 'symsFieldCase') return <SymsFieldCaseVisual propId={propId} />;
   if (visual === 'looseBoard') return <LooseBoardVisual />;
   if (visual === 'cabinChair') return <CabinChairVisual />;
   if (visual === 'cabinStool') return <CabinStoolVisual />;

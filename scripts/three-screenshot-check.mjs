@@ -35,6 +35,7 @@ const CAMERA_ORBIT_X = signedNumberOption('--camera-orbit-x', 'THREE_SCREENSHOT_
 const CAMERA_ORBIT_Y = signedNumberOption('--camera-orbit-y', 'THREE_SCREENSHOT_CAMERA_ORBIT_Y', 0);
 const CAMERA_ZOOM_STEPS = numberOption('--camera-zoom-steps', 'THREE_SCREENSHOT_CAMERA_ZOOM_STEPS', 0);
 const EXAMINE_ACTOR = argValue('--examine');
+const OPEN_SYMS_FIELD_CASE = process.argv.includes('--open-syms-field-case');
 const REQUESTED_ZONE = argValue('--zone') || argValue('--region');
 const REQUESTED_TOOL = argValue('--tool');
 
@@ -130,7 +131,7 @@ function requestedSearchParams() {
 
   if (!params.has('screenshot')) params.set('screenshot', '1');
   if (!params.has('skipIntro')) params.set('skipIntro', PRESERVE_OPENING_INTRO ? '0' : '1');
-  if (EXAMINE_ACTOR || REQUESTED_TOOL) params.set('e2e', '1');
+  if (EXAMINE_ACTOR || REQUESTED_TOOL || OPEN_SYMS_FIELD_CASE) params.set('e2e', '1');
   params.set('preserveDrawingBuffer', '1');
   return params;
 }
@@ -804,6 +805,18 @@ async function run() {
       await page.evaluate(value => {
         window.__darwinBlinkOverride = value;
       }, BLINK_OVERRIDE);
+    }
+    if (OPEN_SYMS_FIELD_CASE) {
+      await withFailureArtifacts(page, 'open Syms field case', errors, async () => {
+        await page.waitForFunction(
+          () => typeof window.__darwinE2E?.toggleSymsFieldCase === 'function',
+          null,
+          { timeout: BOOT_TIMEOUT_MS },
+        );
+        await page.evaluate(() => window.__darwinE2E.toggleSymsFieldCase());
+        await page.waitForTimeout(900);
+        await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
+      });
     }
     if (PLAYER_MODEL_STEPS > 0 || VERIFY_DARWIN5_UPGRADE) {
       await page.waitForFunction(

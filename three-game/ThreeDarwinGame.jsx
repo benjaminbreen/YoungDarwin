@@ -13,6 +13,8 @@ import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
 import { LaunchOverlay } from './ui/LaunchOverlay';
+import { PostOfficeBaySoundscape } from './audio/PostOfficeBaySoundscape';
+import { activatePostOfficeBayAudio } from './audio/audioRuntime';
 import { ThreeE2EFrameSignal, ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
@@ -144,6 +146,8 @@ const SETTLED_ASSET_PROGRESS = Object.freeze({
   progress: 100,
   total: 0,
 });
+const AUDIO_PREFERENCE_KEY = 'darwin-soundscape-enabled';
+const LAUNCH_MENU_STATES = new Set(['menu', 'character', 'settings', 'about']);
 
 const DEFAULT_PERF_SETTINGS = {
   quality: 'performance',
@@ -1939,6 +1943,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const [e2eMode, setE2EMode] = useState(false);
   const [screenshotMode, setScreenshotMode] = useState(false);
   const [skipOpeningIntro, setSkipOpeningIntro] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
@@ -1956,7 +1961,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const transition = useThreeGameStore(state => state.transition);
-  const gameStarted = initialModeReady && launchState !== 'menu' && launchState !== 'character';
+  const gameStarted = initialModeReady && !LAUNCH_MENU_STATES.has(launchState);
   const automationReadyMode = e2eMode || screenshotMode;
   const openingIntroActive = launchState === 'intro';
   // Terrain, DPR, postprocessing, and water targets stay on their final
@@ -1966,10 +1971,10 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const renderDpr = configuredDpr;
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
-  const showLaunchOverlay = launchState === 'menu'
-    || launchState === 'character'
+  const showLaunchOverlay = LAUNCH_MENU_STATES.has(launchState)
     || !sceneReady
     || !launchOverlayDismissed;
+  const runtimeAudioEnabled = audioEnabled && !e2eMode && !screenshotMode;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
   const transitionMountingDestination = Boolean(
     transition
@@ -2012,6 +2017,19 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     loaderQuietSince.current = 0;
     setInitialModeReady(true);
   }, [initialModeId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const explicitlyMuted = params.get('audio') === '0' || params.has('muteAudio');
+    let storedPreference = null;
+    try {
+      storedPreference = window.localStorage?.getItem(AUDIO_PREFERENCE_KEY);
+    } catch {
+      // Storage may be unavailable in a private context; audio still works for
+      // this session and remains under the visible launch-menu control.
+    }
+    setAudioEnabled(!explicitlyMuted && storedPreference !== 'off');
+  }, []);
 
   // Mirror the material-quality knobs into the store so the scene's
   // material-building components (terrain, flora, trees) can react to them
@@ -2259,6 +2277,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   };
 
   const beginNewExpedition = (modeId = 'darwin', { reset = false } = {}) => {
+    if (runtimeAudioEnabled) void activatePostOfficeBayAudio();
     if (reset) useThreeGameStore.getState().resetExpedition();
     useThreeGameStore.getState().setPlayableMode(modeId);
     bootStartedAt.current = performance.now();
@@ -2274,6 +2293,17 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     if (!gameStarted) setPlayerVisualReady(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('loading');
+  };
+
+  const handleAudioEnabledChange = enabled => {
+    const next = Boolean(enabled);
+    setAudioEnabled(next);
+    try {
+      window.localStorage?.setItem(AUDIO_PREFERENCE_KEY, next ? 'on' : 'off');
+    } catch {
+      // A blocked preference store should not block the audio control itself.
+    }
+    if (next && !e2eMode && !screenshotMode) void activatePostOfficeBayAudio();
   };
 
   const restartExpedition = () => {
@@ -2455,6 +2485,12 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       )}
       <KeyboardControls map={keyboardMap}>
         {gameStarted && (
+          <PostOfficeBaySoundscape
+            active={launchOverlayDismissed}
+            enabled={runtimeAudioEnabled}
+          />
+        )}
+        {gameStarted && (
           <Canvas
             className="absolute inset-0 h-full w-full"
             frameloop={transitionCanvasPaused ? 'never' : 'always'}
@@ -2609,7 +2645,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
         )}
         {showLaunchOverlay && (
           <LaunchOverlay
-            mode={launchState === 'menu' ? 'menu' : launchState === 'character' ? 'character' : 'loading'}
+            mode={LAUNCH_MENU_STATES.has(launchState) ? launchState : 'loading'}
             departing={gameStarted && sceneReady}
             blackout={openingIntroEligible && (
               (launchState === 'loading' && displayedProgress >= 60)
@@ -2620,6 +2656,10 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             onNewExpedition={openCharacterSelect}
             onModeSelect={beginNewExpedition}
             onBack={() => setLaunchState('menu')}
+            onSettings={() => setLaunchState('settings')}
+            onAbout={() => setLaunchState('about')}
+            audioEnabled={audioEnabled}
+            onAudioEnabledChange={handleAudioEnabledChange}
           />
         )}
         <ThreeE2EHarness

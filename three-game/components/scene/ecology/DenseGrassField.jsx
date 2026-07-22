@@ -9,6 +9,7 @@ import { getRuntimePlayerPose } from '../../../store';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
 import { grassTestPathInfo } from '../../../world/regions/grassTest/path';
 import { hybridGrassPathInfo } from '../../../world/regions/grassHybridTest/path';
+import { emitPropEvent } from '../../../physics/props/propEvents';
 
 const TRAIL_COUNT = 24;
 const OFFSCREEN_Y = -999;
@@ -341,6 +342,8 @@ function makeDenseGrassGeometry(layer) {
     sides: new Float32Array(targetCount * 5),
     indices: new Uint32Array(targetCount * 9),
   };
+  const contactCellSize = 1.15;
+  const contactCells = new Set();
 
   let blade = 0;
   for (let row = 0; row < rows && blade < targetCount; row += 1) {
@@ -432,6 +435,7 @@ function makeDenseGrassGeometry(layer) {
         data,
         { x: fieldX, y: fieldZ },
       );
+      contactCells.add(`${Math.floor(x / contactCellSize)}:${Math.floor(z / contactCellSize)}`);
       blade += 1;
     }
   }
@@ -455,6 +459,8 @@ function makeDenseGrassGeometry(layer) {
     Math.hypot(width, depth) * 0.6,
   );
   geometry.userData.bladeCount = blade;
+  geometry.userData.contactCellSize = contactCellSize;
+  geometry.userData.contactCells = contactCells;
   return geometry;
 }
 
@@ -506,6 +512,7 @@ export function DenseGrassField({ layer, zoneId }) {
   const smoothedSpeed = useRef(0);
   const trailIndex = useRef(0);
   const trailTimer = useRef(0);
+  const lastRustleAt = useRef(-Infinity);
   const effectiveLayer = useMemo(() => ({
     ...layer,
     zoneId: layer.zoneId || zoneId,
@@ -533,11 +540,13 @@ export function DenseGrassField({ layer, zoneId }) {
       const y = Number(position.y) || 0;
       const z = Number(position.z) || 0;
       const previous = lastFramePoint.current;
+      let rawSpeed = 0;
       if (previous.y !== OFFSCREEN_Y) {
         const dx = x - previous.x;
         const dz = z - previous.z;
         const distance = Math.hypot(dx, dz);
         const speed = distance / Math.max(delta, 0.001);
+        rawSpeed = speed;
         if (distance > 0.002) {
           const targetDir = new THREE.Vector2(dx / distance, dz / distance);
           smoothedMove.current.lerp(targetDir, Math.min(1, delta * 9));
@@ -556,6 +565,31 @@ export function DenseGrassField({ layer, zoneId }) {
         smoothedSpeed.current,
         0,
       );
+      const cellSize = geometry.userData.contactCellSize;
+      const cells = geometry.userData.contactCells;
+      if (rawSpeed > 0.65 && cells?.size && clock.elapsedTime - lastRustleAt.current > 0.78) {
+        const cx = Math.floor(x / cellSize);
+        const cz = Math.floor(z / cellSize);
+        let grassNearby = false;
+        for (let dz = -1; dz <= 1 && !grassNearby; dz += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (cells.has(`${cx + dx}:${cz + dz}`)) {
+              grassNearby = true;
+              break;
+            }
+          }
+        }
+        if (grassNearby) {
+          lastRustleAt.current = clock.elapsedTime;
+          emitPropEvent('foliage-contact', {
+            sourceId: effectiveLayer.id || 'dense-grass',
+            zoneId: effectiveLayer.zoneId,
+            kind: 'grass',
+            position: { x, y, z },
+            intensity: Math.min(1, 0.3 + rawSpeed / 6 * 0.7),
+          });
+        }
+      }
       const movedFarEnough = lastTrailPoint.current.y === OFFSCREEN_Y
         || lastTrailPoint.current.distanceToSquared({ x, y, z }) > 0.12;
       if (trailTimer.current > 0.055 && movedFarEnough) {

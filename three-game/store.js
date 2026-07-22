@@ -47,6 +47,7 @@ import {
   getPlayableToolbarIds,
 } from './playable/playableModes';
 import { clampToWalkable, terrainHeight } from './world/terrain';
+import { getNpcPoses } from './world/npcRuntime';
 import { forageableAllowsMode } from './world/forageables';
 import { getReadableBook } from './books/bookCatalog';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
@@ -57,6 +58,16 @@ import {
   getNpcEncounter,
   getNpcEncounterPresentation,
 } from './encounters/npcEncounters';
+import {
+  DEFAULT_SYMS_DIRECTIVE,
+  SYMS_DIRECTIVES,
+  normalizeSymsDirective,
+} from './npcs/symsActivityPlan';
+import {
+  SYMS_HOME_ZONE_ID,
+  symsZoneAfterDirective,
+  symsZoneAfterTransition,
+} from './npcs/symsCompanion';
 import {
   MAX_ACTIVE_SNARES,
   SNARE_CHECK_AFTER_MINUTES,
@@ -130,7 +141,7 @@ export const threeRuntimeState = {
   footContacts: {
     left: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
     right: { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false },
-    lastStep: { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, intensity: 0, time: 0 },
+    lastStep: { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, target: null, intensity: 0, time: 0 },
   },
 };
 
@@ -145,7 +156,7 @@ function resetThreeRuntimeState() {
   threeRuntimeState.playerMotion.visualActive = false;
   threeRuntimeState.footContacts.left = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
   threeRuntimeState.footContacts.right = { x: 0, y: 0, z: 0, groundY: 0, contact: 0, pulse: 0, phase: 0, active: false };
-  threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, intensity: 0, time: 0 };
+  threeRuntimeState.footContacts.lastStep = { side: null, id: 0, x: 0, y: 0, z: 0, groundSource: null, target: null, intensity: 0, time: 0 };
 }
 
 function expeditionOutcomeStats(state) {
@@ -181,14 +192,29 @@ function healthDamagePatch(state, {
     fatalOnZero,
     forceZero,
   });
+  const damage = Math.max(0, state.health - resolution.health);
+  const now = Date.now();
+  const damagePatch = {
+    health: resolution.health,
+    ...(damage > 0 ? {
+      lastHealthDamage: {
+        id: (state.lastHealthDamage?.id || 0) + 1,
+        amount: damage,
+        source,
+        remainingHealth: resolution.health,
+        outcomeType: resolution.outcomeType || null,
+        at: now,
+      },
+    } : {}),
+  };
   if (!resolution.outcomeType || state.playableModeId !== 'darwin') {
-    return { health: resolution.health };
+    return damagePatch;
   }
   const stats = expeditionOutcomeStats(state);
   return {
-    health: resolution.health,
+    ...damagePatch,
     expeditionOutcome: {
-      id: `expedition-outcome-${Date.now()}`,
+      id: `expedition-outcome-${now}`,
       type: resolution.outcomeType,
       source,
       cause: expeditionOutcomeCause({
@@ -198,7 +224,7 @@ function healthDamagePatch(state, {
       }),
       stats,
       phase: 'presenting',
-      createdAt: Date.now(),
+      createdAt: now,
     },
     activeConstraint: null,
     majorEvent: null,
@@ -298,9 +324,22 @@ function nearbyPeopleContext(state, zone) {
   const player = state.playerPose?.position || threeRuntimeState.playerPose.position || {};
   const px = Number(player.x);
   const pz = Number(player.z);
-  if ((state.currentZoneId === 'POST_OFFICE_BAY' || state.currentZoneId === 'BEAGLE') && Number.isFinite(px) && Number.isFinite(pz)) {
-    const distance = Math.hypot(px - 4.0, pz - 7.0);
-    people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`}; he is carrying labels, twine, and the specimen bag.`);
+  if (state.symsZoneId === state.currentZoneId && Number.isFinite(px) && Number.isFinite(pz)) {
+    const fallback = state.currentZoneId === SYMS_HOME_ZONE_ID
+      ? { x: 4, z: 7.4 }
+      : { x: px + 1.5, z: pz + 0.7 };
+    const pose = getNpcPoses(state.currentZoneId)?.get('syms') || fallback;
+    const distance = Math.hypot(px - pose.x, pz - pose.z);
+    const directive = normalizeSymsDirective(state.symsDirective);
+    const activity = directive === SYMS_DIRECTIVES.FOLLOW
+      ? 'following Darwin'
+      : directive === SYMS_DIRECTIVES.WAIT
+        ? 'waiting where Darwin left him'
+        : 'ranging between fieldwork sites';
+    const caseContext = state.currentZoneId === 'POST_OFFICE_BAY'
+      ? 'the large collecting case remains at his shore base'
+      : 'the large collecting case remains with the expedition stores';
+    people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`} and ${activity}; he keeps labels and twine on his person, while ${caseContext}.`);
   }
   for (const npcId of zone?.npcs || []) {
     if (npcId !== 'syms_covington') people.push(`regional NPC present: ${npcId}`);
@@ -422,6 +461,7 @@ export function updateRuntimeFootContacts(next = {}) {
       target.lastStep.y = Number.isFinite(Number(source.y)) ? Number(source.y) : target.lastStep.y;
       target.lastStep.z = Number.isFinite(Number(source.z)) ? Number(source.z) : target.lastStep.z;
       target.lastStep.groundSource = typeof source.groundSource === 'string' ? source.groundSource : null;
+      target.lastStep.target = source.target || null;
       target.lastStep.intensity = clamp(Number(source.intensity) || 0, 0, 1);
       target.lastStep.time = Number.isFinite(Number(source.time)) ? Number(source.time) : target.lastStep.time;
     }
@@ -528,7 +568,7 @@ function collectionBlockForSpecimen(state, specimen, tool) {
   if (specimenNeedsJar(specimen, tool.id) && state.supplies.spareJars <= 0) {
     return {
       message: 'No spirit jars remain for a wet specimen. The snare is holding, but the collection must wait.',
-      syms: 'Syms shakes the empty satchel. "Glass is all spoken for, sir."',
+      syms: 'Syms checks the bottle slots in the collecting case. "Glass is all spoken for, sir."',
     };
   }
   return null;
@@ -788,6 +828,8 @@ function createSceneSlice() {
     // The current /three runtime has no save/load bridge. Keep encounter
     // consequences stable for this play session without implying persistence.
     npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
+    symsDirective: DEFAULT_SYMS_DIRECTIVE,
+    symsZoneId: SYMS_HOME_ZONE_ID,
     narratorScriptedKeys: {
       [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
     },
@@ -805,6 +847,7 @@ function createSceneSlice() {
     animalModeDarwinNpcPose: null,
     animalModeStats: {},
     lastOutcome: null,
+    lastHealthDamage: null,
     expeditionOutcome: null,
     finalAssessment: null,
     activeConstraint: null,
@@ -863,7 +906,7 @@ function createSceneSlice() {
     // rather than storing permanent trampling only inside a React component.
     cropDamageById: {},
     foragedObjectIds: [],
-    symsLine: 'Syms waits with labels, twine, and the specimen bag ready.',
+    symsLine: 'Syms waits with labels and twine ready; the collecting case rests at his shore base.',
   };
 }
 
@@ -1262,6 +1305,46 @@ export const useThreeGameStore = create((set, get) => ({
         meta: { npcId, event },
       })),
       narratorScriptedKeys: { ...state.narratorScriptedKeys, [key]: nowMinutes },
+    };
+  }),
+  setSymsDirective: value => set(state => {
+    const next = normalizeSymsDirective(value);
+    const copy = next === SYMS_DIRECTIVES.FOLLOW
+      ? {
+          order: 'Come with me, Covington.',
+          reply: '“At your shoulder, sir. I shall keep clear of your heels.”',
+          line: 'Syms closes the label book and falls in behind Darwin.',
+        }
+      : next === SYMS_DIRECTIVES.WAIT
+        ? {
+            order: 'Wait here for me.',
+            reply: '“Very good, sir. I shall remain here.”',
+            line: 'Syms settles in place and slips the label book into his coat.',
+          }
+        : {
+            order: 'Range about on your own again.',
+            reply: '“I shall work the landing and the north track, sir.”',
+            line: 'Syms returns to his circuit between the landing, lookout, and field base.',
+          };
+    const active = state.activeNpcEncounter?.npcId === 'syms_covington'
+      ? state.activeNpcEncounter
+      : null;
+    const turns = active
+      ? [
+          ...(active.turns || []),
+          { role: 'player', text: copy.order },
+          { role: 'npc', text: copy.reply },
+        ].slice(-8)
+      : null;
+    return {
+      symsDirective: next,
+      symsZoneId: symsZoneAfterDirective({
+        directive: next,
+        currentZoneId: state.currentZoneId,
+        symsZoneId: state.symsZoneId,
+      }),
+      symsLine: copy.line,
+      ...(active ? { activeNpcEncounter: { ...active, turns } } : {}),
     };
   }),
   openNpcEncounter: npcId => set(state => {
@@ -2568,6 +2651,12 @@ export const useThreeGameStore = create((set, get) => ({
     const recoveryLine = '"Easy now, sir. The island will still be there when you are fit to meet it."';
     return {
       currentZoneId: zone.id,
+      symsZoneId: symsZoneAfterTransition({
+        directive: state.symsDirective,
+        playableModeId: state.playableModeId,
+        destinationZoneId: zone.id,
+        symsZoneId: state.symsZoneId,
+      }),
       currentLocalCellId: nextLocalCellId,
       visitedZoneIds: state.visitedZoneIds.includes(zone.id)
         ? state.visitedZoneIds
@@ -2918,7 +3007,7 @@ export const useThreeGameStore = create((set, get) => ({
   rest: () => set(state => {
     const provisioned = state.supplies.food > 0 && state.supplies.water > 0;
     const message = provisioned
-      ? 'You rest for two hours in a strip of shade, sharing biscuit and water while Syms reorders the collecting bag.'
+      ? 'You rest for two hours in a strip of shade, sharing biscuit and water while Syms reorders the collecting case.'
       : 'You rest for two hours in a strip of shade, but the provisions are gone — the rest does little good.';
     const educationalNote = 'Fieldwork depended on pacing: heat, daylight, and fatigue changed what a naturalist could safely collect.';
     return {
@@ -3732,7 +3821,7 @@ export const useThreeGameStore = create((set, get) => ({
     // documenting one. The gate is on types, not individuals.
     if (!state.examinedTypeIds.includes(specimen.id)) {
       const message = `You cannot yet say what this ${specimen.name.toLowerCase()} truly is. Examine it first — observation before acquisition.`;
-      const symsLine = 'Syms holds the case shut. "Have a proper look before it goes in the bag, sir."';
+      const symsLine = 'Syms holds the case shut. "Have a proper look before it goes in the case, sir."';
       set(current => ({
         message,
         symsLine,
@@ -3757,7 +3846,7 @@ export const useThreeGameStore = create((set, get) => ({
         : state.supplies.labels <= 0
           ? { message: 'No labels remain. An unlabeled specimen is a scientific orphan — better to document it instead.', syms: 'Syms turns out his pockets. "Last label went on the finch, sir."' }
           : needsJar && state.supplies.spareJars <= 0
-            ? { message: 'No spirit jars remain for a wet specimen. Document it, or come back provisioned.', syms: 'Syms shakes the empty satchel. "Glass is all spoken for, sir."' }
+            ? { message: 'No spirit jars remain for a wet specimen. Document it, or come back provisioned.', syms: 'Syms checks the bottle slots in the collecting case. "Glass is all spoken for, sir."' }
             : tool.id === 'snare' && state.supplies.twine <= 0
               ? { message: 'No twine left to set a snare. The lizards remain at liberty.', syms: '"Used the last of the twine on the case lashings, sir."' }
 	              : null;

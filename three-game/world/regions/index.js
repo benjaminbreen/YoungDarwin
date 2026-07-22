@@ -30,6 +30,8 @@ import { beachWithHutRegion } from './beachWithHut/terrain';
 import { createBeachWithHutTerrainMaterial } from './beachWithHut/material';
 import { southernReefsRegion } from './southernReefs/terrain';
 import { createSouthernReefsTerrainMaterial } from './southernReefs/material';
+import { southernIntertidalRegion } from './southernIntertidal/terrain';
+import { createSouthernIntertidalTerrainMaterial } from './southernIntertidal/material';
 import { westernHighlandsRegion } from './westernHighlands/terrain';
 import { createWesternHighlandsTerrainMaterial } from './westernHighlands/material';
 import { elMiradorRegion } from './elMirador/terrain';
@@ -74,6 +76,8 @@ import { northernHighlandsRegion } from './northernHighlands/terrain';
 import { createNorthernHighlandsTerrainMaterial } from './northernHighlands/material';
 import { watkinsCreekRegion } from './watkinsCreek/terrain';
 import { createWatkinsCreekTerrainMaterial } from './watkinsCreek/material';
+import { puntaSurRegion } from './puntaSur/terrain';
+import { createPuntaSurTerrainMaterial } from './puntaSur/material';
 
 /** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
@@ -88,6 +92,7 @@ const authoredRegions = [
   { ...blackBeachSurfRegion, createTerrainMaterial: createBlackBeachSurfTerrainMaterial },
   { ...beachWithHutRegion, createTerrainMaterial: createBeachWithHutTerrainMaterial },
   { ...southernReefsRegion, createTerrainMaterial: createSouthernReefsTerrainMaterial },
+  { ...southernIntertidalRegion, createTerrainMaterial: createSouthernIntertidalTerrainMaterial },
   { ...westernHighlandsRegion, createTerrainMaterial: createWesternHighlandsTerrainMaterial },
   { ...elMiradorRegion, createTerrainMaterial: createElMiradorTerrainMaterial },
   { ...rockyClearingRegion, createTerrainMaterial: createRockyClearingTerrainMaterial },
@@ -110,6 +115,7 @@ const authoredRegions = [
   { ...lavaFlatsRegion, createTerrainMaterial: createLavaFlatsTerrainMaterial },
   { ...northernHighlandsRegion, createTerrainMaterial: createNorthernHighlandsTerrainMaterial },
   { ...watkinsCreekRegion, createTerrainMaterial: createWatkinsCreekTerrainMaterial },
+  { ...puntaSurRegion, createTerrainMaterial: createPuntaSurTerrainMaterial },
 ];
 
 /** @type {Map<string, AuthoredRegionDefinition>} */

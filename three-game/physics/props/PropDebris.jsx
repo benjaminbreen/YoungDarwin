@@ -35,11 +35,20 @@ const DEBRIS_PIECES = {
     { size: [0.92, 0.8, 0.05], color: PROP_PALETTE.crateWood, offset: [0, 0, -0.46], rotation: [-0.1, 0, 0] },
     { size: [0.3, 0.22, 0.3], color: '#c9b98a', offset: [0, 0, 0], rotation: [0.3, 0.5, 0] },
   ],
+  glass: [
+    { size: [0.09, 0.25, 0.025], color: '#6d9b8a', offset: [0.04, 0.05, 0], rotation: [0.35, 0.2, 0.6], glass: true },
+    { size: [0.075, 0.19, 0.022], color: '#82ad9c', offset: [-0.05, 0.02, 0.03], rotation: [-0.45, 0.8, -0.3], glass: true },
+    { size: [0.12, 0.1, 0.02], color: '#5f8f80', offset: [0.02, -0.08, 0.04], rotation: [0.2, -0.6, 0.8], glass: true },
+    { size: [0.06, 0.15, 0.018], color: '#9bc0b1', offset: [-0.08, 0.08, -0.02], rotation: [0.9, 0.35, -0.5], glass: true },
+    { size: [0.085, 0.08, 0.018], color: '#729f90', offset: [0.08, -0.06, -0.04], rotation: [-0.6, -0.25, 0.4], glass: true },
+    { size: [0.05, 0.12, 0.016], color: '#afd0c3', offset: [0, 0.11, 0.05], rotation: [0.4, 1.0, -0.7], glass: true },
+    { size: [0.07, 0.07, 0.016], color: '#628f80', offset: [-0.02, -0.12, -0.05], rotation: [0.7, -0.8, 0.25], glass: true },
+  ],
 };
 
 function BreakDust({ origin, impactDir, kind }) {
   const ageRef = useRef(0);
-  const color = kind === 'barrel' ? '#b58a55' : '#c2a174';
+  const color = kind === 'barrel' ? '#b58a55' : kind === 'glass' ? '#a7d8c7' : '#c2a174';
   const material = useMemo(() => new THREE.PointsMaterial({
     color,
     size: 0.055,
@@ -91,12 +100,25 @@ function BreakDust({ origin, impactDir, kind }) {
 
 function DebrisPiece({ piece, origin, impactDir, seed }) {
   const bodyRef = useRef(null);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: piece.color,
-    roughness: 0.9,
-    metalness: 0.01,
-    transparent: true,
-  }), [piece.color]);
+  const material = useMemo(() => (piece.glass
+    ? new THREE.MeshPhysicalMaterial({
+        color: piece.color,
+        roughness: 0.12,
+        metalness: 0,
+        transmission: 0.16,
+        thickness: 0.04,
+        clearcoat: 1,
+        clearcoatRoughness: 0.06,
+        envMapIntensity: 1.8,
+        transparent: true,
+        opacity: 0.78,
+      })
+    : new THREE.MeshStandardMaterial({
+        color: piece.color,
+        roughness: 0.9,
+        metalness: 0.01,
+        transparent: true,
+      })), [piece.color, piece.glass]);
   useEffect(() => () => material.dispose(), [material]);
 
   useEffect(() => {

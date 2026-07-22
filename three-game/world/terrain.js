@@ -324,3 +324,13 @@ export function regionSpawnFacing(regionId, entryId = null) {
   if (facing.lengthSq() < 0.0001) facing.set(0, 0, -1);
   return facing.normalize();
 }
+
+export function regionSpawnCameraFacing(regionId, entryId = null) {
+  const definition = authoredRegion(regionId);
+  const authored = entryId ? definition?.terrain?.entryCameraFacings?.[entryId] : null;
+  const source = Array.isArray(authored) ? authored : definition?.terrain?.defaultCameraFacing;
+  if (!Array.isArray(source)) return null;
+  const facing = new THREE.Vector3(source[0] || 0, 0, source[2] ?? -1);
+  if (facing.lengthSq() < 0.0001) return null;
+  return facing.normalize();
+}

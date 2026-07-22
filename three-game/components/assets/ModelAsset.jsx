@@ -30,6 +30,17 @@ const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'syms',
 ]);
 
+// Only player variants must keep their mixers frame-accurate at every camera
+// distance. Companions such as Syms can retain character shadows and generous
+// culling while still benefiting from the world-actor animation LOD.
+const ALWAYS_ANIMATED_CHARACTER_ASSETS = new Set([
+  'darwin',
+  'darwinCandidate2',
+  'darwinTripo',
+  'darwin4',
+  'darwin5',
+]);
+
 function importedAssetCastsShadow(assetId, asset) {
   if (asset.castShadow !== undefined) return Boolean(asset.castShadow);
   return DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
@@ -982,7 +993,7 @@ function GLBPrimitive({
   const lastBoundsDebugAt = useRef(0);
   const animLodSkipParity = useRef(false);
   const animationProfileId = asset.animationProfile || assetId;
-  const isCharacterAsset = DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
+  const bypassAnimationLod = ALWAYS_ANIMATED_CHARACTER_ASSETS.has(asset.playerProfile || assetId);
   const assetUrl = assetLoadUrl(asset);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
   const animationBanks = asset.animationBanks || NO_ANIMATION_BANKS;
@@ -1643,7 +1654,7 @@ function GLBPrimitive({
     }
     if (!animations.length || !group.current) return;
     let mixerDelta = delta;
-    if (!isCharacterAsset) {
+    if (!bypassAnimationLod) {
       group.current.getWorldPosition(animLodWorldPos);
       const distanceSq = frameState.camera.position.distanceToSquared(animLodWorldPos);
       if (distanceSq > ANIM_LOD_FAR_SQ) {

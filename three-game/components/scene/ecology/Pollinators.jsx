@@ -22,6 +22,7 @@ import { terrainBiomeAt, terrainHeight } from '../../../world/terrain';
 import { WATER_LEVEL } from '../../../world/water';
 import { skyState, sunDirection } from '../../../world/celestial';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { emitPropEvent } from '../../../physics/props/propEvents';
 
 const BEE_COUNT = 4;
 const SULPHUR_COUNT = 5;
@@ -391,6 +392,7 @@ export function Pollinators({ enabled = true }) {
   const centerScratch = useRef(new THREE.Vector3());
   const lastPlayerPos = useRef(new THREE.Vector3(Infinity, 0, Infinity));
   const playerStillTime = useRef(0);
+  const beeAudioPublish = useRef({ at: -Infinity, active: false });
 
   const assets = useMemo(() => {
     const bee = beeGeometries();
@@ -538,6 +540,12 @@ export function Pollinators({ enabled = true }) {
   useEffect(() => {
     bees.current.forEach(bee => { bee.placed = false; });
     flies.current.forEach(fly => { fly.placed = false; });
+    beeAudioPublish.current = { at: -Infinity, active: false };
+    emitPropEvent('bee-audio-proximity', { zoneId: currentZoneId, active: false });
+  }, [currentZoneId]);
+
+  useEffect(() => () => {
+    emitPropEvent('bee-audio-proximity', { zoneId: currentZoneId, active: false });
   }, [currentZoneId]);
 
   function writeInsect({ bodyMesh, wingMesh, index, pos, yaw, pitch, bank, scale, flapAngle, sweepYaw, wingLift, wingForward }) {
@@ -587,7 +595,13 @@ export function Pollinators({ enabled = true }) {
     if (flyWingRef.current) flyWingRef.current.visible = flyVisible;
     if (fritBodyRef.current) fritBodyRef.current.visible = fritVisible;
     if (fritWingRef.current) fritWingRef.current.visible = fritVisible;
-    if (!beeVisible && !flyVisible && !fritVisible) return;
+    if (!beeVisible && !flyVisible && !fritVisible) {
+      if (beeAudioPublish.current.active || clock.elapsedTime - beeAudioPublish.current.at >= 0.25) {
+        beeAudioPublish.current = { at: clock.elapsedTime, active: false };
+        emitPropEvent('bee-audio-proximity', { zoneId: currentZoneId, active: false });
+      }
+      return;
+    }
 
     const pose = getRuntimePlayerPose();
     const player = pose.position || { x: camera.position.x, y: 0, z: camera.position.z };
@@ -744,6 +758,27 @@ export function Pollinators({ enabled = true }) {
       assets.glintMat.uniforms.uGate.value = beeGate.current;
       const sun = sunDirection(timeOfDay ?? 12, day || 1);
       assets.glintMat.uniforms.uSun.value.set(sun[0], sun[1], sun[2]);
+
+      if (t - beeAudioPublish.current.at >= 0.08) {
+        let nearest = null;
+        for (const bee of bees.current) {
+          if (!bee.placed || bee.phase === 'perch') continue;
+          const distance = bee.pos.distanceTo(center);
+          if (!nearest || distance < nearest.distance) nearest = { bee, distance };
+        }
+        beeAudioPublish.current = { at: t, active: Boolean(nearest) };
+        emitPropEvent('bee-audio-proximity', nearest ? {
+          zoneId: currentZoneId,
+          active: true,
+          position: {
+            x: nearest.bee.pos.x,
+            y: nearest.bee.pos.y,
+            z: nearest.bee.pos.z,
+          },
+          phase: nearest.bee.phase,
+          gate: beeGate.current,
+        } : { zoneId: currentZoneId, active: false });
+      }
     }
 
     if ((flyVisible || fritVisible) && flyBodyRef.current && flyWingRef.current && fritBodyRef.current && fritWingRef.current) {

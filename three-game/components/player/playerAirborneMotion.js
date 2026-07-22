@@ -140,6 +140,7 @@ export function updatePlayerJumpInputAndGravity({
       direction: { x: takeoffDirection.x, y: 0, z: takeoffDirection.z },
       horizontalSpeed: launchHorizontalSpeed,
       radiusScale: launchRunning ? 1.05 : 0.82,
+      target: launchGround?.obstacle || null,
     });
   };
 

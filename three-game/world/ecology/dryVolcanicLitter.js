@@ -1,4 +1,14 @@
 import { makeZoneScatter, seededRandom } from '../scatter';
+import { terrainHeight } from '../terrain';
+
+function renderSurfaceNormalAt(x, z, zoneId) {
+  const step = 0.32;
+  const nx = terrainHeight(x - step, z, zoneId) - terrainHeight(x + step, z, zoneId);
+  const ny = step * 2;
+  const nz = terrainHeight(x, z - step, zoneId) - terrainHeight(x, z + step, zoneId);
+  const length = Math.hypot(nx, ny, nz);
+  return length > 1e-6 ? [nx / length, ny / length, nz / length] : [0, 1, 0];
+}
 
 function rangeValue(range, random) {
   return range[0] + random * (range[1] - range[0]);
@@ -45,6 +55,11 @@ export function buildDryVolcanicLitterLayer({
       variant: selected.variant,
       color: palette[colorIndex],
       wetness: wetnessAt ? wetnessAt(item.x, item.z) : 0,
+      // SurfaceLitterField consumes these exact render-surface values. They
+      // are intentionally prepared with the ecology resource so mounting a
+      // destination never repeats thousands of terrain/path/noise samples on
+      // the main thread.
+      surfaceNormal: renderSurfaceNormalAt(item.x, item.z, zoneId),
       scale: item.scale * rangeValue(sizeVariation, seededRandom(i, 11)),
       stretchX: rangeValue([0.68, 1.42], seededRandom(i, 13)),
       stretchZ: rangeValue([0.66, 1.36], seededRandom(i, 17)),

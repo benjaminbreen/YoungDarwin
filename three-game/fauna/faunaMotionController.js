@@ -7,6 +7,7 @@ import {
 } from '../world/obstacles';
 import { getZoneProps } from '../physics/props/propRegistry';
 import { getZonePropCollisionProps } from '../physics/props/propRuntime';
+import { resolveActorPropCollision } from '../physics/props/propCollision';
 
 export function seedFromSpecimen(specimen) {
   const spawn = specimen?.spawnPoint || specimen?.position;
@@ -55,86 +56,6 @@ function moveTowardOffset(current, target, maxDistance, out) {
   const distance = out.length();
   if (distance <= maxDistance || distance <= 0.0001) return out.copy(target);
   return out.multiplyScalar(maxDistance / distance).add(current);
-}
-
-function propHorizontalRadius(prop) {
-  const scale = prop?.scale || 1;
-  const collider = prop?.collider || {};
-  if (collider.shape === 'cuboid') {
-    const [hx = 0.42, , hz = 0.42] = collider.halfExtents || [];
-    return Math.hypot(hx * scale, hz * scale);
-  }
-  if (collider.shape === 'ball') return (collider.radius || 0.34) * scale;
-  if (collider.shape === 'cylinder') {
-    const [rx = 0, , rz = 0] = prop.rotation || [];
-    const sideways = Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
-    const radius = collider.radius || 0.4;
-    const halfHeight = collider.halfHeight || radius;
-    return (sideways ? Math.max(radius, halfHeight) : radius) * scale;
-  }
-  return ((collider.radius || 0.42) * scale);
-}
-
-function propColliderHeight(prop) {
-  const scale = prop?.scale || 1;
-  const collider = prop?.collider || {};
-  if (collider.shape === 'cuboid') return (collider.halfExtents?.[1] || 0.42) * 2 * scale;
-  if (collider.shape === 'ball') return (collider.radius || 0.34) * 2 * scale;
-  if (collider.shape === 'cylinder') {
-    const [rx = 0, , rz = 0] = prop.rotation || [];
-    const sideways = Math.abs(Math.sin(rx)) > 0.55 || Math.abs(Math.sin(rz)) > 0.55;
-    return (sideways ? (collider.radius || 0.4) * 2 : (collider.halfHeight || 0.45) * 2) * scale;
-  }
-  return 0.85 * scale;
-}
-
-function resolvePropCollision(position, previousPosition, props, zoneId, actorRadius = 0.42) {
-  const p = position.clone();
-  let collided = null;
-  for (const prop of props || []) {
-    if (!prop?.collider || !Number.isFinite(prop.x) || !Number.isFinite(prop.z)) continue;
-    const propRadius = propHorizontalRadius(prop);
-    const combinedRadius = Math.max(0.05, propRadius + actorRadius);
-    const dx = p.x - prop.x;
-    const dz = p.z - prop.z;
-    const distanceSq = dx * dx + dz * dz;
-    if (distanceSq >= combinedRadius * combinedRadius) continue;
-
-    const propTop = terrainHeight(prop.x, prop.z, zoneId) + propColliderHeight(prop);
-    if (p.y > propTop + 0.35) continue;
-
-    const distance = Math.sqrt(distanceSq);
-    let normalX = 1;
-    let normalZ = 0;
-    if (distance > 0.0001) {
-      normalX = dx / distance;
-      normalZ = dz / distance;
-    } else if (previousPosition) {
-      const previousDx = previousPosition.x - prop.x;
-      const previousDz = previousPosition.z - prop.z;
-      const previousDistance = Math.hypot(previousDx, previousDz);
-      if (previousDistance > 0.0001) {
-        normalX = previousDx / previousDistance;
-        normalZ = previousDz / previousDistance;
-      }
-    }
-
-    const penetration = combinedRadius - distance;
-    p.x += normalX * penetration;
-    p.z += normalZ * penetration;
-    const previousDistance = previousPosition
-      ? Math.hypot(previousPosition.x - prop.x, previousPosition.z - prop.z)
-      : Infinity;
-    const currentDistance = Math.hypot(position.x - prop.x, position.z - prop.z);
-    collided = {
-      prop,
-      impact: Math.max(0, previousDistance - currentDistance),
-      normal: { x: normalX, y: 0, z: normalZ },
-      penetration,
-      position: p,
-    };
-  }
-  return collided ? { ...collided, position: p } : null;
 }
 
 export function createFaunaMotionController({ profile, habitat, seed, zoneId, basePosition, actorScale = 1 }) {
@@ -431,7 +352,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       obstacles: collisionSources.obstacles,
     });
     if (obstacleHit) return false;
-    const propHit = resolvePropCollision(
+    const propHit = resolveActorPropCollision(
       new THREE.Vector3(x, y, z),
       null,
       collisionSources.props,
@@ -623,7 +544,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         }
         moving = false;
       }
-      const propHit = resolvePropCollision(
+      const propHit = resolveActorPropCollision(
         state.position,
         vectors.grazerPrevious,
         collisionSources.props,
@@ -907,7 +828,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       state.position.y = terrainHeight(state.position.x, state.position.z, currentZoneId) + clearance;
       blocked = true;
     }
-    const propHit = resolvePropCollision(
+    const propHit = resolveActorPropCollision(
       state.position,
       vectors.grazerPrevious,
       collisionSources.props,
@@ -1392,7 +1313,7 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
           state.position.copy(obstacleHit.position);
           blockedBy = obstacleHit.obstacle?.id || 'deck-obstacle';
         }
-        const propHit = resolvePropCollision(
+        const propHit = resolveActorPropCollision(
           state.position,
           vectors.deckMonkeyPrevious,
           collisionSources.props,

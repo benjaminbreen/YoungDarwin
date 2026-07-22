@@ -151,3 +151,38 @@ export const WATKINS_CREEK_SOUTHERN_WETLANDS_SEAM = createRouteSeam(
   'south',
   18,
 );
+
+export const MANGROVES_SOUTHERN_INTERTIDAL_SEAM = createRouteSeam(
+  'MANGROVES',
+  'S_INTERTIDAL',
+  'south',
+  2,
+);
+
+export const SOUTHWESTERN_CLIFFS_SOUTHERN_INTERTIDAL_SEAM = createRouteSeam(
+  'SW_CLIFFS',
+  'S_INTERTIDAL',
+  'east',
+  8,
+);
+
+export const SOUTHERN_VOLCANIC_PUNTA_SUR_SEAM = createRouteSeam(
+  'S_VOLCANIC',
+  'PUNTA_SUR',
+  'south',
+  -10,
+);
+
+export const SOUTHERN_INTERTIDAL_PUNTA_SUR_SEAM = createRouteSeam(
+  'S_INTERTIDAL',
+  'PUNTA_SUR',
+  'east',
+  -8,
+);
+
+export const PUNTA_SUR_SOUTHERN_REEFS_SEAM = createRouteSeam(
+  'PUNTA_SUR',
+  'S_REEFS',
+  'east',
+  18,
+);

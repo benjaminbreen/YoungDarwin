@@ -325,9 +325,23 @@ const WAVE_GLSL = /* glsl */`
     #endif
     // A broad resolved crest on cliff maps. This displaces the actual ocean
     // mesh, rather than drawing a translucent sheet above it.
-    float cliffLip = smoothstep(0.3, 0.025, f);
-    float cliffShoulder = smoothstep(0.5, 0.12, f) * (1.0 - cliffLip);
-    float cliffLift = env * s * (cliffLip * 1.38 + cliffShoulder * 0.38);
+    // Signed periodic distance from the crest. With raw fract(f), f jumped
+    // from 0.999 to 0.0 while the height jumped from zero to full lift,
+    // producing a vertical wall made of visible triangle teeth. This profile
+    // is continuous across the wrap and intentionally asymmetric: a compact
+    // face before impact and a longer shoulder after it.
+    float crestPhase = mod(f + 0.5, 1.0) - 0.5;
+    float crestDistance = abs(crestPhase);
+    float lipWidth = crestPhase < 0.0 ? 0.16 : 0.3;
+    float shoulderWidth = crestPhase < 0.0 ? 0.3 : 0.5;
+    float cliffLip = 1.0 - smoothstep(0.018, lipWidth, crestDistance);
+    float cliffShoulder = (1.0 - smoothstep(lipWidth * 0.62, shoulderWidth, crestDistance))
+      * (1.0 - cliffLip);
+    float alongCrest = dot(wxz, vec2(-SWELL_DIR.y, SWELL_DIR.x));
+    float scallop = 0.88
+      + 0.08 * sin(alongCrest * 0.34 + t * 0.18)
+      + 0.04 * sin(alongCrest * 0.79 - t * 0.11);
+    float cliffLift = env * s * scallop * (cliffLip * 1.38 + cliffShoulder * 0.38);
     return mix(lift, cliffLift, uCliffSwell);
   }
 
@@ -346,8 +360,13 @@ const WAVE_GLSL = /* glsl */`
     if (uCliffSwell < 0.001) return vec2(0.0);
     float f, s;
     float env = breakerField(wxz, t, sd, depth, exposure, f, s);
-    float cliffLip = smoothstep(0.3, 0.025, f);
-    float cliffShoulder = smoothstep(0.5, 0.12, f) * (1.0 - cliffLip);
+    float crestPhase = mod(f + 0.5, 1.0) - 0.5;
+    float crestDistance = abs(crestPhase);
+    float lipWidth = crestPhase < 0.0 ? 0.16 : 0.3;
+    float shoulderWidth = crestPhase < 0.0 ? 0.3 : 0.5;
+    float cliffLip = 1.0 - smoothstep(0.018, lipWidth, crestDistance);
+    float cliffShoulder = (1.0 - smoothstep(lipWidth * 0.62, shoulderWidth, crestDistance))
+      * (1.0 - cliffLip);
     float e = 1.25;
     float gx = texture2D(seafloor, (wxz + vec2(e, 0.0)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
     float gz = texture2D(seafloor, (wxz + vec2(0.0, e)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
@@ -355,7 +374,7 @@ const WAVE_GLSL = /* glsl */`
     float gradientLength = length(seaward);
     if (gradientLength < 1e-3) return vec2(0.0);
     seaward /= gradientLength;
-    float fold = env * s * (cliffLip * 0.86 + cliffShoulder * 0.22) * uCliffSwell;
+    float fold = env * s * (cliffLip * 0.72 + cliffShoulder * 0.18) * uCliffSwell;
     return -seaward * fold;
   }
 `;
@@ -613,9 +632,14 @@ function createStylizedWaterMaterial(
         float coreWidth = mix(0.035, 0.095, uCliffSwell);
         float lipWidth = mix(0.075, 0.19, uCliffSwell);
         float trailWidth = mix(0.34, 0.62, uCliffSwell);
-        float core = smoothstep(coreWidth, 0.008, f);
-        float lip = smoothstep(lipWidth, 0.015, f);
-        float trail = smoothstep(trailWidth, lipWidth * 0.72, f) * (1.0 - lip);
+        float foamPhase = mod(f + 0.5, 1.0) - 0.5;
+        float foamDistance = uCliffSwell > 0.001 ? abs(foamPhase) : f;
+        float preFoamScale = foamPhase < 0.0 ? 0.72 : 1.0;
+        float core = 1.0 - smoothstep(0.008, coreWidth * preFoamScale, foamDistance);
+        float lip = 1.0 - smoothstep(0.015, lipWidth * preFoamScale, foamDistance);
+        float trail = step(0.0, foamPhase)
+          * (1.0 - smoothstep(lipWidth * 0.72, trailWidth, foamDistance))
+          * (1.0 - lip);
         float foam = core * 0.35 + lip * (0.7 + 0.3 * lace) + trail * lace * 0.45;
         #ifdef ENHANCED_WATER
           // Let a crest progress through a compact white curl, boiling
@@ -1563,8 +1587,13 @@ function createSurfRibbonMaterial(
         // two layers reinforce one line instead of splitting into a pair.
         float lipWidth = mix(0.075, 0.19, uCliffSwell);
         float trailWidth = mix(0.34, 0.62, uCliffSwell);
-        float breakerLip = smoothstep(lipWidth, 0.015, f);
-        float breakerTrail = smoothstep(trailWidth, lipWidth * 0.72, f) * (1.0 - breakerLip);
+        float foamPhase = mod(f + 0.5, 1.0) - 0.5;
+        float foamDistance = uCliffSwell > 0.001 ? abs(foamPhase) : f;
+        float preFoamScale = foamPhase < 0.0 ? 0.72 : 1.0;
+        float breakerLip = 1.0 - smoothstep(0.015, lipWidth * preFoamScale, foamDistance);
+        float breakerTrail = step(0.0, foamPhase)
+          * (1.0 - smoothstep(lipWidth * 0.72, trailWidth, foamDistance))
+          * (1.0 - breakerLip);
         float breaker = breakerEnv * s * (breakerLip * (0.85 + 0.15 * lace) + breakerTrail * lace * 0.45);
         #ifdef ENHANCED_WATER
           float breakerCollapse = smoothstep(0.045, 0.1, f) * (1.0 - smoothstep(0.24, 0.4, f));

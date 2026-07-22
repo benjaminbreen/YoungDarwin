@@ -163,6 +163,7 @@ export function createFootContactRig({
             y: contactY + 0.018,
             z: probeWorld.z,
             groundSource: ground.source || 'terrain-function',
+            target: ground.obstacle || null,
             intensity: THREE.MathUtils.clamp(0.32 + (motionState?.speed || 0) / 7.5, 0.22, 1),
             time: typeof performance !== 'undefined' ? performance.now() / 1000 : 0,
           };

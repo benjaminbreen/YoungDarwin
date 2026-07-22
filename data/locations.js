@@ -2029,23 +2029,51 @@ export const locations = [
   {
     id: 'PUNTA_SUR',
     name: 'Punta Sur',
-    description: 'A dramatic headland with steep cliffs and frequent rainbows.',
+    description: 'A broad southern headland where rust-red erosion fields, green wind-combed scrub, broken basalt scarps, and surf lie beneath an almost perpetual rainbow.',
     x: 2,
     y: 4,
     color: '#8b4513',
     type: 'promontory',
-    validMoves: ['N','S','W'],
+    validMoves: ['N','E','W'],
     specimens: ['frigatebird','booby'],
+    specimenPlacements: [
+      {
+        instanceId: 'punta-sur-frigatebird-crown-1',
+        specimenId: 'frigatebird',
+        position: [-12, 0, 16],
+        behavior: 'wary',
+        sceneScale: 1.08,
+        habitatRadiusX: 9,
+        habitatRadiusZ: 6,
+      },
+      {
+        instanceId: 'punta-sur-booby-east-rim-1',
+        specimenId: 'booby',
+        position: [18, 0, 12],
+        behavior: 'wary',
+        sceneScale: 1,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+    ],
     npcs: [],
-    boundaries: { east: 'cliff' },
+    boundaries: { south: 'cliff' },
     discoveries: [
-      'At certain hours, the crashing spray refracts the light, creating rainbow arcs in mid-air.'
+      'Beyond the last bend, surf bursts through the broken southern coves and sunlight gathers the blown spray into a luminous bow over the open Pacific.'
     ],
     notableFeatures: [
-      'Rocky precipices battered by incoming swells.',
-      'A vantage for miles of open ocean to the south.',
-      'Spray and sun combine in ephemeral arcs of color.'
-    ]
+      'Three old foot routes converge across a low, wind-shaped crown above the southern ocean.',
+      'Broad rust-red erosion fields break into islands of gray-green scrub and exposed basalt ribs.',
+      'Sheltered coves offer short jumps into deep water, while the central scarps still fall onto dangerous wave-cut rock.',
+      'A narrow lookout spur ends inside a fractured rim above sea stacks and heavy surf.',
+      'Spray and sun sustain a bright primary bow, often with a faint secondary arc beyond it.'
+    ],
+    narration: {
+      weather: 'sunshower',
+      sounds: ['Pacific swell detonating through the coves', 'wind flattening wet grass across red earth', 'boobies and frigatebirds calling across the spray'],
+      loadingNote: 'Rust-red earth and green scrub descend toward Punta Sur, where a rainbow hangs in blown spray above the broken shore.',
+      educationalNote: 'A rainbow appears opposite the sun when droplets return light at a characteristic angle; at an exposed headland, sea spray can supply those droplets even between rain showers.',
+    },
   },
 
   // 30) S_WETLANDS
@@ -2075,23 +2103,68 @@ export const locations = [
   {
     id: 'S_INTERTIDAL',
     name: 'Intertidal Flats',
-    description: 'Mangroves and rocky tide pools teeming with marine life.',
+    description: 'A broad low-tide mosaic of shell sand, turquoise pools, tide-dark basalt fingers, and salt-pruned scrub at the island’s southern edge.',
     x: 1,
     y: 4,
     color: '#5f9ea0',
     type: 'wetland',
     validMoves: ['N','E','W'],
-    specimens: ['crab','mangrove','sallyLightfoot','greenTurtle'],
+    specimens: ['crab','mangrove','marineIguana','barnacle','greenTurtle'],
+    specimenPlacements: [
+      {
+        instanceId: 'intertidal-marine-iguana-western-slab',
+        specimenId: 'marineIguana',
+        position: [-35, 0, 7],
+        behavior: 'bask',
+        sceneScale: 1.08,
+        habitatRadiusX: 6.5,
+        habitatRadiusZ: 4.2,
+      },
+      {
+        instanceId: 'intertidal-sally-lightfoot-pool-a',
+        specimenId: 'crab',
+        position: [-21, 0, -2],
+        behavior: 'skitter',
+        sceneScale: 1.25,
+        habitatRadiusX: 5.4,
+        habitatRadiusZ: 3.8,
+      },
+      {
+        instanceId: 'intertidal-mangrove-north-fringe',
+        specimenId: 'mangrove',
+        position: [-16, 0, -35],
+        behavior: 'still',
+        sceneScale: 0.88,
+        habitatRadiusX: 4.2,
+        habitatRadiusZ: 3.4,
+      },
+      {
+        instanceId: 'intertidal-barnacle-ledge-specimen',
+        specimenId: 'barnacle',
+        position: [-18, 0, 25],
+        behavior: 'still',
+        sceneScale: 1.2,
+        habitatRadiusX: 1.2,
+        habitatRadiusZ: 1.0,
+      },
+    ],
     npcs: [],
     boundaries: { south: 'ocean' },
     discoveries: [
-      'You glimpse many small creatures scuttling among the shallows at low tide.'
+      'As the water withdraws, branching channels reveal an entire temporary landscape of pools, shell fans, and glistening black stone.'
     ],
     notableFeatures: [
-      'Rocky pools reveal starfish, crabs, and sea urchins on close inspection.',
-      'Overhanging mangrove branches create pockets of shade along the waterline.',
-      'Soft mud thick with decaying vegetation releases a sulfuric odor.'
-    ]
+      'Three clear tidepools hold trapped seawater above the falling tide, each edged by green algae and barnacled basalt.',
+      'Raised sand-and-rock causeways divide around the pools, keeping every neighboring route readable while inviting a wetter exploratory loop.',
+      'Dense saltbush and mangrove fringe frame the landward edge; wrack, driftwood, shell fragments, and crab tracks mark the reach of earlier tides.',
+      'Marine iguanas bask on the western slabs while Sally Lightfoot crabs patrol the wet rock below.'
+    ],
+    narration: {
+      weather: 'clearing-after-rain',
+      sounds: ['small waves combing the outer basalt', 'water ticking through barnacles and shell grit', 'crabs scraping beneath the wrack line'],
+      loadingNote: 'The southern shore opens into a shining low-tide plain, crossed by black lava fingers and pools the color of oxidized copper.',
+      educationalNote: 'An intertidal flat is organized by time as much as terrain: exposure, immersion, salinity, heat, and wave force change over a single tidal cycle, producing sharp neighboring habitats.',
+    },
   },
 
   // 32) S_HUT

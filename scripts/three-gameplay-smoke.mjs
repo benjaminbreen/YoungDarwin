@@ -1022,6 +1022,18 @@ async function runTransitionScenario(browser, baseUrl) {
       );
     }
     console.log('[three:e2e] Transition: launch settled');
+    const following = await evaluateWithTimeout(
+      page,
+      'ask Syms to follow before transition',
+      () => window.__darwinE2E.setSymsDirective('follow'),
+      undefined,
+      UI_STEP_TIMEOUT_MS,
+    );
+    assertCondition(
+      following.symsDirective === 'follow' && following.symsZoneId === 'POST_OFFICE_BAY',
+      'Syms did not enter follow mode at Post Office Bay.',
+      following,
+    );
     const preparation = await evaluateWithTimeout(
       page,
       'prepare measured transition resources',
@@ -1056,6 +1068,23 @@ async function runTransitionScenario(browser, baseUrl) {
       profileLogged = true;
     }
     await page.waitForTimeout(150);
+    const companionArrival = await waitForHarnessState(
+      page,
+      state => state.currentZoneId === 'POST_SCRUB_RISE'
+        && state.symsZoneId === 'POST_SCRUB_RISE'
+        && state.symsPose,
+      GAMEPLAY_TIMEOUT_MS,
+      'Syms companion arrival at Post Office Scrub Rise',
+    );
+    const companionDistance = Math.hypot(
+      companionArrival.symsPose.x - companionArrival.playerPose.position.x,
+      companionArrival.symsPose.z - companionArrival.playerPose.position.z,
+    );
+    assertCondition(
+      companionDistance >= 0.7 && companionDistance <= 8,
+      `Syms companion arrival was not a usable distance from Darwin (${companionDistance.toFixed(2)}m).`,
+      companionArrival,
+    );
     const metrics = await page.evaluate(() => {
       const history = window.__threeTransitionPerfHistory || [];
       return [...history].reverse().find(sample => sample.zoneId === 'POST_SCRUB_RISE') || null;
@@ -1109,8 +1138,9 @@ async function runTransitionScenario(browser, baseUrl) {
       framesOver50Ms: metrics.framesOver50Ms,
       renderer: arrived.renderer,
       preparation,
+      symsCompanionDistance: companionDistance,
       performanceAssertions: hardwarePerformanceRun ? 'strict' : 'functional-only',
-      finalState: arrived,
+      finalState: companionArrival,
       errors,
     };
   } finally {

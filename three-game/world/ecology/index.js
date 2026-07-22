@@ -13,6 +13,7 @@ import { buildBlackBeachEcology } from './blackBeach';
 import { buildBlackBeachSurfEcology } from './blackBeachSurf';
 import { buildBeachWithHutEcology } from './beachWithHut';
 import { buildSouthernReefsEcology } from './southernReefs';
+import { buildSouthernIntertidalEcology } from './southernIntertidal';
 import { buildWesternHighlandsEcology } from './westernHighlands';
 import { buildElMiradorEcology } from './elMirador';
 import { buildRockyClearingEcology } from './rockyClearing';
@@ -35,6 +36,7 @@ import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
 import { buildWatkinsCreekEcology } from './watkinsCreek';
+import { buildPuntaSurEcology } from './puntaSur';
 import { applyUniversalProceduralFlora } from './universalFlora';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
@@ -52,6 +54,7 @@ const builders = {
   BLACK_BEACH_SURF: buildBlackBeachSurfEcology,
   S_HUT: buildBeachWithHutEcology,
   S_REEFS: buildSouthernReefsEcology,
+  S_INTERTIDAL: buildSouthernIntertidalEcology,
   W_HIGH: buildWesternHighlandsEcology,
   EL_MIRADOR: buildElMiradorEcology,
   E_MID: buildRockyClearingEcology,
@@ -73,6 +76,7 @@ const builders = {
   LAVA_FLATS: buildLavaFlatsEcology,
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
   WATKINS_CREEK: buildWatkinsCreekEcology,
+  PUNTA_SUR: buildPuntaSurEcology,
 };
 
 // Every regional map now has an ecology definition. Regions without a bespoke

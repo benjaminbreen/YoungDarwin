@@ -92,6 +92,8 @@ const AUTHORED_REGION_TERRAIN = {
   CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },
   PUNTA_CORMORANT: { preset: 'punta-cormorant-lagoon', segments: 320 },
   WATKINS: { preset: 'watkins-camp-stream-hollow', segments: 320 },
+  PUNTA_SUR: { preset: 'punta-sur-rainbow-headland', segments: 288 },
+  S_INTERTIDAL: { preset: 'southern-intertidal-low-tide', segments: 288 },
 };
 
 function humanDirection(edge) {

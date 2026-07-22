@@ -6,16 +6,17 @@ export const NPC_ENCOUNTERS = {
     name: 'Syms Covington',
     runtimeNpcId: 'syms',
     zones: ['POST_OFFICE_BAY', 'BEAGLE'],
+    travelsWithPlayer: true,
     radius: 2.45,
     portrait: '/portraits/syms_covington.jpg',
-    opener: '“I have the labels and the bag ready, sir. What is wanted?”',
+    opener: '“I have the labels and twine ready, sir. What is wanted?”',
     suggestedReplies: [
       'What have you noticed here?',
       'Let us review the specimens we have gathered.',
     ],
     ambient: {
-      nearby: 'Syms keeps the label book open in one hand and watches the shore for work that needs doing.',
-      collected: 'Syms crouches over the specimen bag, arranging the new acquisition with labels and twine.',
+      nearby: 'Syms keeps the label book open in one hand and watches the ground for work that needs doing.',
+      collected: 'Syms checks the locality note, wraps the new acquisition, and marks it for the collecting case.',
       startled: 'Syms steps aside from the commotion, keeping one hand over the specimen case.',
     },
     allowedFlags: [
@@ -75,7 +76,7 @@ export function getNearestNpcEncounter(zoneId, position) {
   if (!poses) return null;
   let nearest = null;
   for (const encounter of Object.values(NPC_ENCOUNTERS)) {
-    if (!encounter.zones.includes(zoneId)) continue;
+    if (!encounter.zones.includes(zoneId) && !encounter.travelsWithPlayer) continue;
     const pose = poses.get(encounter.runtimeNpcId);
     if (!pose) continue;
     const distance = Math.hypot((position.x || 0) - pose.x, (position.z || 0) - pose.z);
@@ -88,7 +89,7 @@ export function getNearestNpcEncounter(zoneId, position) {
 export function encounterAmbientLine(npcId, event = 'nearby', relation = {}) {
   const encounter = getNpcEncounter(npcId);
   if (npcId === 'syms_covington' && event === 'nearby' && (relation.flags || []).includes('offered_practical_help')) {
-    return 'Syms has already laid out twine and labels near the specimen bag, anticipating the next task.';
+    return 'Syms has already laid out twine and labels beside the collecting case, anticipating the next task.';
   }
   return encounter?.ambient?.[event] || null;
 }

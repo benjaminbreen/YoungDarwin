@@ -11,7 +11,12 @@ import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
-import { regionSpawnFacing, regionSpawnPoint, terrainBiomeAt } from '../../world/terrain';
+import {
+  regionSpawnCameraFacing,
+  regionSpawnFacing,
+  regionSpawnPoint,
+  terrainBiomeAt,
+} from '../../world/terrain';
 import { getSurfaceContactProfile } from '../../world/surfaceContact';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
 import {
@@ -23,6 +28,8 @@ import {
 import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
 import { resolveSpecimenCollision } from '../../fauna/specimenCollision';
 import { pushSpecimenStimulus } from '../../world/specimenRuntime';
+import { resolvePlayerNpcCollision } from '../../npcs/npcCollision';
+import { emitNpcContact } from '../../world/npcRuntime';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
 import {
   CHARACTER_CONTROLLER_CONFIG,
@@ -301,6 +308,7 @@ export function PlayerController({
   const lastArcadeStumbleAt = useRef(-10);
   const lastDroppingSmushAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
+  const lastNpcContact = useRef({ npcId: null, at: -10 });
   const lastModelYaw = useRef(Math.PI);
   const idleFidget = useRef({ idleSince: 0, nextAt: 0, count: 0 });
   const terrainFeedback = useRef({
@@ -522,6 +530,10 @@ export function PlayerController({
   }, [currentZoneId, playableMode.kind, playableSpawnPoint, playerSpawnId]);
   const spawnFacing = useMemo(
     () => regionSpawnFacing(currentZoneId, playerSpawnId),
+    [currentZoneId, playerSpawnId],
+  );
+  const spawnCameraFacing = useMemo(
+    () => regionSpawnCameraFacing(currentZoneId, playerSpawnId),
     [currentZoneId, playerSpawnId],
   );
   const startX = spawnPoint.x;
@@ -784,7 +796,7 @@ export function PlayerController({
     stateRef.current.animationSpeed = 0;
     stateRef.current.travelRunInPlace = false;
     lastGroundedAt.current = performance.now() / 1000;
-    resetCameraForSpawn(groundY);
+    resetCameraForSpawn(groundY, spawnCameraFacing);
     jumpBufferedUntil.current = -10;
     touchJumpHoldUntil.current = -10;
     lastModelYaw.current = Math.PI;
@@ -809,6 +821,7 @@ export function PlayerController({
     playerSpawnId,
     resetCameraForSpawn,
     setPlayerPose,
+    spawnCameraFacing,
     spawnFacing,
     spawnPoint.y,
     startX,
@@ -1583,10 +1596,10 @@ export function PlayerController({
       && !rotateLeftPressed
       && !rotateRightPressed
       && !anyDirectActionPressed
-      // Winded/waiting base idles carry their own body language; layering a
-      // fidget over them reads as twitchy.
+      // The winded base idle carries its own body language. Ordinary extended
+      // waits keep using this fidget pool so Darwin continues rotating through
+      // the authored idle performances instead of getting stuck in one loop.
       && !stateRef.current.winded
-      && !stateRef.current.longIdle
       && useThreeGameStore.getState().activeToolId === 'hands';
     if (isDarwinMode && idleEligible) {
       if (!idleFidget.current.idleSince) {
@@ -2309,6 +2322,16 @@ export function PlayerController({
           earlyExitAt: smallWallProfile?.earlyExitAt,
           cancelAt: smallWallProfile?.cancelAt,
         };
+        footstepDustTriggerRef.current?.({
+          kind: 'step-up',
+          intensity: THREE.MathUtils.clamp(0.38 + traversalTarget.heightDelta * 0.18 + approachSpeed / 22, 0.42, 0.82),
+          worldPosition: {
+            x: group.current.position.x,
+            y: group.current.position.y + 0.05,
+            z: group.current.position.z,
+          },
+          target: traversalTarget.obstacle || null,
+        });
         velocity.current.set(0, 0, 0);
         stateRef.current.running = false;
         stateRef.current.walking = false;
@@ -2493,6 +2516,41 @@ export function PlayerController({
         },
       };
     }
+    const npcCollision = isDarwinMode
+      ? resolvePlayerNpcCollision(group.current.position, startOfFramePosition, {
+          zoneId: currentZoneId,
+          playerRadius: colliderConfig.radius,
+          playerHeight: Math.max(
+            0.8,
+            (colliderConfig.centerY || 0)
+              + (colliderConfig.halfHeight || 0)
+              + (colliderConfig.radius || 0),
+          ),
+        })
+      : null;
+    if (npcCollision) {
+      group.current.position.copy(npcCollision.position).addScaledVector(npcCollision.normal, 0.018);
+      characterMove.collisions = Math.max(characterMove.collisions || 0, 1);
+      characterMove.collision = npcCollision;
+      characterDebug.current.collisions = Math.max(characterDebug.current.collisions || 0, 1);
+      collision = {
+        ...npcCollision,
+        npc: npcCollision.npcPose,
+        target: {
+          id: npcCollision.npcId,
+          npcId: npcCollision.npcId,
+          kind: 'npc',
+        },
+        obstacle: {
+          id: npcCollision.npcId,
+          kind: 'npc',
+          height: npcCollision.height,
+          colliderTop: npcCollision.height,
+          pushMass: 70,
+          pushable: false,
+        },
+      };
+    }
     characterController.sync(group.current.position);
 
     let cactusCollisionImpact = null;
@@ -2531,6 +2589,7 @@ export function PlayerController({
       if (airborneRunningJump
         && intoSurface > 0.5
         && impactSpeed > 2.4
+        && collision.obstacle?.kind !== 'npc'
         && now - lastWallRunAt.current > 0.9
         && !stateRef.current.action) {
         lastWallRunAt.current = now;
@@ -2547,6 +2606,52 @@ export function PlayerController({
 
       const directImpact = impactSpeed >= BUMP_FEEDBACK.minSpeed && intoSurface >= BUMP_FEEDBACK.minHeadOn;
       const physicsPropCollision = String(collision.target?.kind || '').startsWith('physics-');
+      const npcContact = collision.target?.kind === 'npc' && collision.npcId;
+      if (npcContact && impactSpeed >= 0.3 && intoSurface >= 0.12) {
+        const lastContact = lastNpcContact.current;
+        if (lastContact.npcId !== collision.npcId || now - lastContact.at >= 0.48) {
+          const intensity = THREE.MathUtils.clamp(
+            0.3 + impactSpeed / Math.max(3.2, playerConfig.runSpeed),
+            0.34,
+            0.78,
+          );
+          emitNpcContact({
+            npcId: collision.npcId,
+            zoneId: currentZoneId,
+            playerPosition: {
+              x: group.current.position.x,
+              y: group.current.position.y,
+              z: group.current.position.z,
+            },
+            direction: {
+              x: horizontalVelocity.x / Math.max(impactSpeed, 0.001),
+              y: 0,
+              z: horizontalVelocity.z / Math.max(impactSpeed, 0.001),
+            },
+            normal: { x: normal.x, y: 0, z: normal.z },
+            impactSpeed,
+            penetration: collision.penetration,
+            now,
+          });
+          velocity.current.x += normal.x * intensity * 0.42;
+          velocity.current.z += normal.z * intensity * 0.42;
+          bounceFeedback.current.startedAt = now;
+          bounceFeedback.current.lastImpactAt = now;
+          bounceFeedback.current.intensity = intensity;
+          bounceFeedback.current.normal.copy(normal);
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: Math.min(0.3, intensity * 0.34),
+            duration: 0.18,
+            seed: cameraImpulse.current.seed + 1,
+          };
+          if (!stateRef.current.action && impactSpeed > playerConfig.walkSpeed * 1.05) {
+            startAction('stumble', ACTION_DURATION.stumble, { lockMovement: false });
+          }
+          lastContact.npcId = collision.npcId;
+          lastContact.at = now;
+        }
+      }
       if (collision.obstacle?.bendable && impactSpeed > 0.32 && intoSurface > 0.2) {
         const bendDirection = horizontalVelocity.lengthSq() > 0.001
           ? frameScratch.pushDirection.copy(horizontalVelocity).normalize()
@@ -2565,6 +2670,7 @@ export function PlayerController({
       );
       if (!travelEdgeContact
         && !collision.specimen
+        && !collision.npc
         && !physicsPropCollision
         && collision.obstacle
         && collision.obstacle.kind !== 'terrain'
@@ -2573,7 +2679,7 @@ export function PlayerController({
         startPushFeedback(collision.obstacle);
       }
       const canReact = now - bounceFeedback.current.lastImpactAt >= BUMP_FEEDBACK.cooldown;
-      const pushable = physicsPropCollision
+      const pushable = physicsPropCollision || npcContact
         ? null
         : collision.obstacle?.pushable
         ? collision.obstacle
@@ -3051,6 +3157,7 @@ export function PlayerController({
             kind: 'step-up',
             intensity: THREE.MathUtils.clamp(0.25 + groundLift * 0.75 + horizontalSpeed / 18, 0.28, 0.72),
             position: frameScratch.footstepPosition.set(0, 0.06, 0.18),
+            target: finalGroundInfo.obstacle || null,
           });
         }
       }

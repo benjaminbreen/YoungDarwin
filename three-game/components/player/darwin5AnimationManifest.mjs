@@ -19,9 +19,9 @@ export const DARWIN5_ANIMATION_MANIFEST = {
   // Mixamo "Sad Idle" (head down, fidgety foot kick) repurposed as a
   // studying-something-on-the-ground fidget — only offered near a specimen.
   inspectNearbyIdle: { category: 'idleAction', duration: 2.83, lockDuration: 0, fade: 0.28, exitEarly: 0.2, fallback: 'lookAroundShort' },
-  // Conditional base idles: looped, selected by the animation selector while
-  // the condition holds (winded after a sprint, bored after a long idle,
-  // exhausted at high fatigue). boredIdle is a GLB alias of fidgetStand.
+  // Conditional base idles: looped while the condition holds (winded after a
+  // sprint or exhausted at high fatigue). boredIdle is a legacy GLB alias of
+  // fidgetStand kept for preview/debug; ordinary waits use one-shot variety.
   windedIdle: { category: 'idle', loop: true, fade: 0.28, fallback: 'idle' },
   boredIdle: { category: 'idle', loop: true, fade: 0.34, fallback: 'idle' },
   tiredIdle: { category: 'idle', loop: true, fade: 0.3, fallback: 'windedIdle' },

@@ -85,6 +85,7 @@ const {
 const {
   clampNpcEncounterEffects,
   getNpcEncounterPresentation,
+  getNearestNpcEncounter,
 } = loadModule('three-game/encounters/npcEncounters.js');
 const {
   assignHybridLocation,
@@ -136,6 +137,11 @@ const {
   surfaceContactProfileForBiome,
 } = loadModule('three-game/world/surfaceContact.js');
 const {
+  computeEnvironmentalAudioTargets,
+  distanceToOceanBoundary,
+  surfPresenceForZone,
+} = loadModule('three-game/audio/environmentMix.js');
+const {
   clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
   damageLeanAngle,
@@ -158,6 +164,16 @@ const {
 const {
   classifyRapierCharacterContacts,
 } = loadModule('three-game/components/player/playerCollisionContacts.js');
+const {
+  emitNpcContact,
+  onNpcContact,
+  publishNpcPose,
+  removeNpcPose,
+} = loadModule('three-game/world/npcRuntime.js');
+const {
+  resolveNpcPlayerCollision,
+  resolvePlayerNpcCollision,
+} = loadModule('three-game/npcs/npcCollision.js');
 const {
   PROP_TYPES,
 } = loadModule('three-game/physics/props/propTypes.js');
@@ -184,6 +200,8 @@ const {
   getRegionTerrainConfig,
   isWalkableTerrain,
   movementTerrainHeight,
+  regionSpawnPoint,
+  terrainSlopeAt,
   terrainHeight,
 } = loadModule('three-game/world/terrain.js');
 const {
@@ -369,6 +387,7 @@ const {
   baseSpecimens,
 } = loadModule('data/specimens.js');
 const {
+  DEFAULT_PLAYER_MODEL_ASSET_ID,
   modelAssets,
 } = loadModule('three-game/modelAssets.js');
 const {
@@ -438,6 +457,33 @@ const {
   faunaFrameTier,
 } = loadModule('three-game/fauna/faunaFrameScheduler.js');
 const {
+  DEFAULT_SYMS_DIRECTIVE,
+  SYMS_DIRECTIVES,
+  SYMS_FIELD_CASE_ID,
+  SYMS_FIELD_CASE_PLACEMENT,
+  SYMS_FIELD_CASE_PROMPT_MODE,
+  buildSymsPostOfficeBayPlan,
+  findSymsRoute,
+  nextSymsActivity,
+  normalizeSymsDirective,
+} = loadModule('three-game/npcs/symsActivityPlan.js');
+const {
+  SYMS_HOME_ZONE_ID,
+  canSymsAccompanyZone,
+  findSymsCompanionArrival,
+  symsZoneAfterDirective,
+  symsZoneAfterTransition,
+} = loadModule('three-game/npcs/symsCompanion.js');
+const { getZoneProps } = loadModule('three-game/physics/props/propRegistry.js');
+const {
+  resolveActorPropCollision,
+} = loadModule('three-game/physics/props/propCollision.js');
+const {
+  getZonePropCollisionProps,
+  publishPropPose,
+  removePropPose,
+} = loadModule('three-game/physics/props/propRuntime.js');
+const {
   CATASTROPHIC_FALL_SPEED,
   expeditionOutcomeCause,
   minutesUntilRecoveryMorning,
@@ -459,6 +505,257 @@ const {
   consumeTouchControls,
   triggerToolUse,
 } = loadModule('three-game/input/touchControls.js');
+
+test('Syms builds a connected north-bay fieldwork circuit with calculated activity sites', () => {
+  const plan = buildSymsPostOfficeBayPlan();
+  assert.equal(plan.zoneId, 'POST_OFFICE_BAY');
+  assert.ok(plan.nodes.size >= 15);
+  assert.equal(plan.interestSites.length, 3);
+  assert.notEqual(plan.restSite.id, plan.lookoutSite.id);
+  assert.ok(plan.activitySites.includes(plan.baseSite));
+  assert.ok(plan.activitySites.includes(plan.restSite));
+  assert.ok(plan.activitySites.includes(plan.lookoutSite));
+
+  for (const site of plan.activitySites) {
+    const route = findSymsRoute(plan, plan.baseSite, site);
+    assert.ok(route.length > 0, `expected a route from base to ${site.id}`);
+    const end = route.at(-1);
+    assert.ok(Math.hypot(end.x - site.x, end.z - site.z) < 0.01);
+  }
+  assert.equal(nextSymsActivity(plan, plan.activitySites.length), plan.activitySites[0]);
+});
+
+test('Syms field orders normalize safely and his base uses shared prop definitions', () => {
+  assert.equal(normalizeSymsDirective(SYMS_DIRECTIVES.FOLLOW), 'follow');
+  assert.equal(normalizeSymsDirective(SYMS_DIRECTIVES.WAIT), 'wait');
+  assert.equal(normalizeSymsDirective('invent-a-command'), DEFAULT_SYMS_DIRECTIVE);
+
+  const props = getZoneProps('POST_OFFICE_BAY');
+  const fieldKit = props.find(prop => prop.id === 'syms-field-kit');
+  const fieldCase = props.find(prop => prop.id === SYMS_FIELD_CASE_ID);
+  const bottle = props.find(prop => prop.id === 'syms-field-bottle');
+  assert.equal(fieldKit.visualAsset, 'cratesAndBags');
+  assert.equal(fieldKit.fixed, true);
+  assert.equal(fieldCase.visual, 'symsFieldCase');
+  assert.equal(fieldCase.behaviors.mobility.mode, 'push');
+  assert.equal(fieldCase.behaviors.strikeable.tool, 'hammer');
+  assert.equal(fieldCase.x, SYMS_FIELD_CASE_PLACEMENT.x);
+  assert.equal(fieldCase.z, SYMS_FIELD_CASE_PLACEMENT.z);
+  assert.equal(bottle.visual, 'symsFieldBottle');
+  assert.equal(bottle.behaviors.mobility.mode, 'push');
+  assert.equal(bottle.behaviors.breakable.debris, 'glass');
+
+  assert.equal(SYMS_FIELD_CASE_ID, 'syms-field-case');
+  assert.equal(SYMS_FIELD_CASE_PROMPT_MODE, 'toggle-syms-field-case');
+  const base = buildSymsPostOfficeBayPlan().baseSite;
+  assert.ok(Math.hypot(
+    SYMS_FIELD_CASE_PLACEMENT.x - base.x,
+    SYMS_FIELD_CASE_PLACEMENT.z - base.z,
+  ) < 4, 'collecting case should remain at Syms’s authored shore base');
+});
+
+test('Syms follow state crosses exterior maps while wait and interiors preserve his location', () => {
+  assert.equal(SYMS_HOME_ZONE_ID, 'POST_OFFICE_BAY');
+  assert.equal(canSymsAccompanyZone('POST_SCRUB_RISE'), true);
+  assert.equal(canSymsAccompanyZone('LAWSON_HOUSE'), false);
+  assert.equal(symsZoneAfterDirective({
+    directive: SYMS_DIRECTIVES.FOLLOW,
+    currentZoneId: 'POST_SCRUB_RISE',
+    symsZoneId: SYMS_HOME_ZONE_ID,
+  }), 'POST_SCRUB_RISE');
+  assert.equal(symsZoneAfterDirective({
+    directive: SYMS_DIRECTIVES.WAIT,
+    currentZoneId: 'N_SHORE',
+    symsZoneId: 'POST_SCRUB_RISE',
+  }), 'POST_SCRUB_RISE');
+  assert.equal(symsZoneAfterDirective({
+    directive: SYMS_DIRECTIVES.RANGE,
+    currentZoneId: 'N_SHORE',
+    symsZoneId: 'N_SHORE',
+  }), SYMS_HOME_ZONE_ID);
+  assert.equal(symsZoneAfterTransition({
+    directive: SYMS_DIRECTIVES.FOLLOW,
+    playableModeId: 'darwin',
+    destinationZoneId: 'N_SHORE',
+    symsZoneId: SYMS_HOME_ZONE_ID,
+  }), 'N_SHORE');
+  assert.equal(symsZoneAfterTransition({
+    directive: SYMS_DIRECTIVES.FOLLOW,
+    playableModeId: 'darwin',
+    destinationZoneId: 'LAWSON_HOUSE',
+    symsZoneId: 'PENAL_COLONY',
+  }), 'PENAL_COLONY');
+  assert.equal(symsZoneAfterTransition({
+    directive: SYMS_DIRECTIVES.WAIT,
+    playableModeId: 'darwin',
+    destinationZoneId: 'N_SHORE',
+    symsZoneId: SYMS_HOME_ZONE_ID,
+  }), SYMS_HOME_ZONE_ID);
+});
+
+test('Syms companion arrival is walkable, separated, and encounter-enabled off the home map', () => {
+  const exteriorZoneIds = Object.keys(regionMaps).filter(canSymsAccompanyZone);
+  assert.ok(exteriorZoneIds.length >= 40);
+  for (const exteriorZoneId of exteriorZoneIds) {
+    const spawn = regionSpawnPoint(exteriorZoneId);
+    const companion = findSymsCompanionArrival({ zoneId: exteriorZoneId });
+    assert.equal(
+      isWalkableTerrain(companion.x, companion.z, exteriorZoneId),
+      true,
+      `${exteriorZoneId} companion arrival should be walkable`,
+    );
+    assert.ok(
+      Math.hypot(companion.x - spawn.x, companion.z - spawn.z) >= 1.05,
+      `${exteriorZoneId} companion arrival should clear Darwin`,
+    );
+  }
+
+  const zoneId = 'POST_SCRUB_RISE';
+  const entryEdge = 'north';
+  const playerSpawn = regionSpawnPoint(zoneId, entryEdge);
+  const arrival = findSymsCompanionArrival({
+    zoneId,
+    entryEdge,
+    obstacles: getRuntimeObstacles(zoneId),
+  });
+  assert.equal(isWalkableTerrain(arrival.x, arrival.z, zoneId), true);
+  assert.ok(Math.hypot(arrival.x - playerSpawn.x, arrival.z - playerSpawn.z) >= 1.05);
+
+  publishNpcPose(zoneId, 'syms', arrival);
+  try {
+    const encounter = getNearestNpcEncounter(zoneId, {
+      x: arrival.x + 0.5,
+      z: arrival.z,
+    });
+    assert.equal(encounter?.npcId, 'syms_covington');
+  } finally {
+    removeNpcPose(zoneId, 'syms');
+  }
+});
+
+test('Post Office Bay arrival props begin in settled configurations', () => {
+  const props = getZoneProps('POST_OFFICE_BAY');
+  const barrel = props.find(prop => prop.id === 'post-office-rollable-barrel');
+  const arrivalBoulders = ['bay-path-stone-a', 'bay-path-stone-b', 'bay-path-stone-c']
+    .map(id => props.find(prop => prop.id === id));
+
+  assert.deepEqual(barrel.rotation, [0, 0.72, 0]);
+  assert.ok(
+    terrainSlopeAt(barrel.x, barrel.z, 'POST_OFFICE_BAY', 0.5).grade < 0.15,
+    'loose barrel should start upright on the flatter eastern supply shelf',
+  );
+  assert.ok(arrivalBoulders.every(Boolean));
+  for (const boulder of arrivalBoulders) {
+    assert.equal(boulder.type, 'settledBasaltBoulder');
+    assert.equal(boulder.collider.shape, 'cuboid');
+    assert.deepEqual(boulder.enabledRotations, [false, true, false]);
+    assert.equal(boulder.behaviors.mobility.mode, 'push');
+    assert.equal(boulder.behaviors.carryable, undefined);
+    assert.deepEqual([boulder.rotation[0], boulder.rotation[2]], [0, 0]);
+  }
+  const shoulderBoulder = arrivalBoulders.find(prop => prop.id === 'bay-path-stone-c');
+  assert.ok(
+    terrainSlopeAt(shoulderBoulder.x, shoulderBoulder.z, 'POST_OFFICE_BAY', 0.5).grade < 0.08,
+    'nearest launch boulder should start on the level trail shoulder',
+  );
+});
+
+test('published NPC capsules separate Darwin and emit reusable contact events', () => {
+  const zoneId = 'NPC_COLLISION_TEST';
+  const contacts = [];
+  const unsubscribe = onNpcContact(event => contacts.push(event));
+
+  try {
+    publishNpcPose(zoneId, 'test-naturalist', {
+      x: 0,
+      y: 0,
+      z: 0,
+      collisionRadius: 0.4,
+      collisionHeight: 1.8,
+    });
+    const playerCollision = resolvePlayerNpcCollision(
+      new Vector3(0.5, 0, 0),
+      new Vector3(0.8, 0, 0),
+      { zoneId, playerRadius: 0.36, playerHeight: 1.8 },
+    );
+    assert.equal(playerCollision.npcId, 'test-naturalist');
+    assert.ok(playerCollision.position.x >= 0.77);
+    assert.deepEqual(playerCollision.normal.toArray(), [1, 0, 0]);
+
+    const npcCollision = resolveNpcPlayerCollision(
+      new Vector3(-0.5, 0, 0),
+      new Vector3(-0.8, 0, 0),
+      { x: 0, y: 0, z: 0 },
+      { npcRadius: 0.4, playerRadius: 0.36 },
+    );
+    assert.ok(npcCollision.position.x <= -0.77);
+    assert.equal(resolveNpcPlayerCollision(
+      new Vector3(-0.5, 3, 0),
+      new Vector3(-0.8, 3, 0),
+      { x: 0, y: 0, z: 0 },
+      { npcRadius: 0.4, playerRadius: 0.36, npcHeight: 1.8, playerHeight: 1.8 },
+    ), null);
+
+    const upperFloor = resolvePlayerNpcCollision(
+      new Vector3(0.2, 3, 0),
+      new Vector3(0.4, 3, 0),
+      { zoneId, playerRadius: 0.36, playerHeight: 1.8 },
+    );
+    assert.equal(upperFloor, null);
+
+    emitNpcContact({ npcId: 'test-naturalist', zoneId, impactSpeed: 2 });
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].npcId, 'test-naturalist');
+  } finally {
+    unsubscribe();
+    removeNpcPose(zoneId, 'test-naturalist');
+  }
+});
+
+test('autonomous actors stay outside physics props at their live positions', () => {
+  const zoneId = 'POST_OFFICE_BAY';
+  const groundY = terrainHeight(0, 0, zoneId);
+  const props = [{
+    id: 'moving-test-crate',
+    x: 0,
+    z: 0,
+    collider: { shape: 'cuboid', halfExtents: [0.5, 0.5, 0.5] },
+  }];
+
+  const staticHit = resolveActorPropCollision(
+    new Vector3(-0.25, groundY, 0),
+    new Vector3(-1.4, groundY, 0),
+    props,
+    zoneId,
+    0.4,
+  );
+  assert.equal(staticHit.prop.id, 'moving-test-crate');
+  assert.ok(staticHit.position.x <= -(Math.hypot(0.5, 0.5) + 0.4) + 0.001);
+
+  publishPropPose(zoneId, 'moving-test-crate', { x: 2, y: groundY + 0.5, z: 0 });
+  try {
+    const liveProps = getZonePropCollisionProps(zoneId, props);
+    assert.equal(liveProps[0].x, 2);
+    assert.equal(resolveActorPropCollision(
+      new Vector3(-0.25, groundY, 0),
+      new Vector3(-1.4, groundY, 0),
+      liveProps,
+      zoneId,
+      0.4,
+    ), null);
+    const liveHit = resolveActorPropCollision(
+      new Vector3(1.75, groundY, 0),
+      new Vector3(0.6, groundY, 0),
+      liveProps,
+      zoneId,
+      0.4,
+    );
+    assert.equal(liveHit.prop.id, 'moving-test-crate');
+    assert.ok(liveHit.position.x <= 2 - (Math.hypot(0.5, 0.5) + 0.4) + 0.001);
+  } finally {
+    removePropPose(zoneId, 'moving-test-crate');
+  }
+});
 
 test('quick-bar assignment replaces new tools and swaps tools already on the bar', () => {
   const initial = ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'];
@@ -1025,6 +1322,100 @@ test('Rapier terrain contacts stay ground-only while identified walls remain pus
   assert.equal(mixed.sideTarget.id, 'barracks-wall');
 });
 
+test('environmental audio keeps coastal surf audible across region topology', () => {
+  const coast = {
+    id: 'TEST_COAST',
+    name: 'Dry Coast',
+    biome: 'scrubland',
+    terrainWidth: 100,
+    terrainDepth: 80,
+    edgeHints: [{ kind: 'blocked', boundaryKind: 'ocean', edge: 'north' }],
+    neighbors: [],
+  };
+  const adjacent = {
+    id: 'TEST_ADJACENT',
+    name: 'Scrub Rise',
+    biome: 'scrubland',
+    terrainWidth: 100,
+    terrainDepth: 80,
+    edgeHints: [],
+    neighbors: [{ zoneId: coast.id }],
+  };
+  const zones = new Map([[coast.id, coast], [adjacent.id, adjacent]]);
+  const resolveZone = id => zones.get(id);
+
+  assert.equal(distanceToOceanBoundary({ x: 0, z: -36 }, coast), 4);
+  const shore = surfPresenceForZone({ zone: coast, position: { x: 0, z: -36 }, resolveZone });
+  const inlandEdge = surfPresenceForZone({ zone: coast, position: { x: 0, z: 34 }, resolveZone });
+  const neighboringMap = surfPresenceForZone({ zone: adjacent, position: { x: 0, z: 0 }, resolveZone });
+  assert.ok(shore > inlandEdge);
+  assert.ok(inlandEdge >= 0.14);
+  assert.equal(neighboringMap, 0.035);
+  assert.ok(surfPresenceForZone({
+    zone: {
+      id: 'POST_OFFICE_BAY',
+      name: 'Post Office Bay',
+      biome: 'bay',
+      terrainPreset: 'floreana-cove',
+      edgeHints: [],
+      neighbors: [],
+    },
+    position: { x: 0, z: 0 },
+    shorelineDistance: 30,
+  }) > 0.14);
+
+  const atShore = computeEnvironmentalAudioTargets({
+    zone: coast,
+    position: { x: 0, z: -36 },
+    resolveZone,
+    weather: { windSpeed: 0.8, rainIntensity: 0 },
+  });
+  const oneMapInland = computeEnvironmentalAudioTargets({
+    zone: adjacent,
+    position: { x: 0, z: 0 },
+    resolveZone,
+    weather: { windSpeed: 0.8, rainIntensity: 0 },
+  });
+  assert.ok(atShore.surf >= 0.4, 'the rolling body of near-shore surf should remain clearly audible');
+  assert.ok(oneMapInland.surf >= 0.1, 'an adjacent map should retain a light but audible surf bed');
+});
+
+test('environmental audio follows weather and suppresses dry insects in rain and interiors', () => {
+  const scrub = {
+    id: 'TEST_SCRUB',
+    name: 'Coastal Scrubland',
+    biome: 'scrubland',
+    terrainWidth: 100,
+    terrainDepth: 80,
+    edgeHints: [{ kind: 'blocked', boundaryKind: 'ocean', edge: 'east' }],
+    neighbors: [],
+  };
+  const dry = computeEnvironmentalAudioTargets({
+    zone: scrub,
+    position: { x: 0, z: 0 },
+    resolveZone: () => null,
+    weather: { windSpeed: 1.4, rainIntensity: 0 },
+    timeOfDay: 18.5,
+  });
+  const wet = computeEnvironmentalAudioTargets({
+    zone: scrub,
+    position: { x: 0, z: 0 },
+    resolveZone: () => null,
+    weather: { windSpeed: 1.4, rainIntensity: 0.8 },
+    timeOfDay: 18.5,
+  });
+  const interior = computeEnvironmentalAudioTargets({
+    zone: { id: 'CABIN', biome: 'shipInterior', name: 'Cabin' },
+    weather: { windSpeed: 2, rainIntensity: 1 },
+  });
+  assert.ok(dry.surf > 0);
+  assert.ok(dry.wind > 0.08);
+  assert.ok(dry.insects > 0);
+  assert.ok(wet.rain > 0.15);
+  assert.equal(wet.insects, 0);
+  assert.deepEqual(interior, { surf: 0, wind: 0, rain: 0, insects: 0 });
+});
+
 test('surface contacts preserve material differences instead of applying a universal dust floor', () => {
   const drySand = resolveSurfaceContactResponse(
     surfaceContactProfileForBiome('white-sand'),
@@ -1119,6 +1510,30 @@ test('foot-contact probes never translate skeleton bones', () => {
   assert.doesNotMatch(source, /bone\.position\.(?:add|sub)\s*\(/);
   assert.doesNotMatch(source, /applyFootPlanting/);
   assert.doesNotMatch(source, /VISUAL_GROUNDING_MIN\s*=\s*-/);
+});
+
+test('Darwin5 stays the default while extended waits retain the varied idle pool', () => {
+  const controllerSource = fs.readFileSync(
+    path.resolve('three-game/components/player/PlayerController.jsx'),
+    'utf8',
+  );
+  const modelSource = fs.readFileSync(
+    path.resolve('three-game/components/player/PlayerModel.jsx'),
+    'utf8',
+  );
+  const playableModesSource = fs.readFileSync(
+    path.resolve('three-game/playable/playableModes.js'),
+    'utf8',
+  );
+
+  assert.equal(DEFAULT_PLAYER_MODEL_ASSET_ID, 'darwin5');
+  assert.match(playableModesSource, /darwin:\s*\{[^}]*assetId:\s*'darwin5'/s);
+  assert.equal(modelAssets[DEFAULT_PLAYER_MODEL_ASSET_ID].path, '/assets/models/darwin5.glb');
+  assert.doesNotMatch(controllerSource, /!stateRef\.current\.longIdle/);
+  assert.doesNotMatch(modelSource, /motionRef\.current\.longIdle[^\n]*boredIdle/);
+  for (const clip of ['lookAroundShort', 'fidgetStand', 'neckStretch', 'neutralIdle', 'armStretch']) {
+    assert.match(controllerSource, new RegExp(`clip: '${clip}'`));
+  }
 });
 
 test('landing on loose props creates a mass-sensitive downward settle without launch', () => {

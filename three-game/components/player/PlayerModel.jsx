@@ -1433,12 +1433,12 @@ export function NaturalistModel({
     if (heldToolMode) return 'holdToolIdle';
     if (holdingTool) return 'holdIdle';
     if (modelAssetId === 'darwin5') {
-      // Conditional base idles, most urgent first: exhausted, catching his
-      // breath after a sprint, then the bored long-wait idle. The ready-stance
-      // idle stays the default.
+      // Conditional base idles, most urgent first: exhausted, then catching
+      // his breath after a sprint. Extended waits stay on the ready stance
+      // between one-shot fidgets; a looping boredIdle would permanently mask
+      // the rest of Darwin5's authored idle pool.
       if (status.fatigue >= 82) return 'tiredIdle';
       if (motionRef.current.winded) return 'windedIdle';
-      if (motionRef.current.longIdle) return 'boredIdle';
       return 'idle';
     }
     if (status.fatigue >= 82) return 'exhaustedIdle';
