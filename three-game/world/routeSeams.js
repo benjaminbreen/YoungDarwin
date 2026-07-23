@@ -180,6 +180,27 @@ export const MARINE_IGUANA_COLONY_BEACH_HUT_SEAM = createRouteSeam(
   10,
 );
 
+export const BLACK_BEACH_WESTERN_LOWLANDS_SEAM = createRouteSeam(
+  'BLACK_BEACH',
+  'W_LAVA',
+  'south',
+  22,
+);
+
+export const WESTERN_LOWLANDS_WESTERN_HIGHLANDS_SEAM = createRouteSeam(
+  'W_LAVA',
+  'W_HIGH',
+  'east',
+  -12,
+);
+
+export const WESTERN_LOWLANDS_BEACH_HUT_SEAM = createRouteSeam(
+  'W_LAVA',
+  'S_HUT',
+  'south',
+  39,
+);
+
 export const MARINE_IGUANA_COLONY_MANGROVES_SEAM = createRouteSeam(
   'SW_BEACH',
   'MANGROVES',

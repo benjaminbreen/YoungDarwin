@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import React, { useCallback, useEffect, useState } from 'react';
 import { LaunchOverlay } from './LaunchOverlay';
+import { MultiplayerLobby } from './multiplayer/MultiplayerLobby';
 
 let runtimeImport = null;
 let physicsWarmup = null;
@@ -66,6 +67,7 @@ const ThreeDarwinGame = dynamic(loadThreeRuntime, {
 export function ThreeLaunchShell() {
   const [launchState, setLaunchState] = useState('menu');
   const [runtimeModeId, setRuntimeModeId] = useState(null);
+  const [multiplayerSession, setMultiplayerSession] = useState(null);
   const [interactiveReady, setInteractiveReady] = useState(false);
 
   const preloadRuntime = useCallback(() => {
@@ -74,9 +76,10 @@ export function ThreeLaunchShell() {
 
   useEffect(() => {
     setInteractiveReady(true);
-    // Paint and hydrate the small launch menu first. Warm the large Three.js
-    // runtime once the browser is idle so deliberating at the menu overlaps the
-    // engine download without putting it back on the first-paint critical path.
+    // Paint and hydrate the small launch menu first, then overlap the large
+    // Three.js bundle and physics WASM with the player's time at the menu.
+    // Pointer/focus intent remains as an immediate fallback for browsers that
+    // postpone idle work.
     if (typeof window.requestIdleCallback === 'function') {
       const handle = window.requestIdleCallback(preloadRuntime, { timeout: 2500 });
       return () => window.cancelIdleCallback?.(handle);
@@ -86,7 +89,13 @@ export function ThreeLaunchShell() {
   }, [preloadRuntime]);
 
   if (runtimeModeId) {
-    return <ThreeDarwinGame key={runtimeModeId} initialModeId={runtimeModeId} />;
+    return (
+      <ThreeDarwinGame
+        key={`${multiplayerSession?.roomCode || 'solo'}:${runtimeModeId}`}
+        initialModeId={runtimeModeId}
+        multiplayerSession={multiplayerSession}
+      />
+    );
   }
 
   return (
@@ -95,11 +104,21 @@ export function ThreeLaunchShell() {
         mode={launchState}
         interactive={interactiveReady}
         onNewExpedition={() => setLaunchState('character')}
+        onMultiplayer={() => setLaunchState('multiplayer')}
         onModeSelect={setRuntimeModeId}
         onBack={() => setLaunchState('menu')}
         onSettings={() => setLaunchState('settings')}
         onAbout={() => setLaunchState('about')}
         onRuntimeIntent={preloadRuntime}
+        multiplayerPanel={(
+          <MultiplayerLobby
+            onCancel={() => setLaunchState('menu')}
+            onAdmitted={session => {
+              setMultiplayerSession(session);
+              setRuntimeModeId(session.roleId);
+            }}
+          />
+        )}
       />
     </main>
   );

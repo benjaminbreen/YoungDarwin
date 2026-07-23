@@ -11,7 +11,9 @@
 // puffs (<1 = fewer, bigger). Both only shape the fair-weather regime — the
 // closed deck ignores them.
 export const WEATHER_STATES = {
-  sunny:      { overcast: 0.0,  fogDensity: 0.008, rain: 0.0,  mist: 0.0,  lightDim: 0.0,  cumulus: 0.05, cumulusRange: 0.9,  cumulusClump: 0.85, cumulusScale: 0.72, windBoost: 0.0,  frontBias: 0.0,  skyTint: '#70bef4' },
+  // Sunny keeps a floor of a few trade-wind puffs (never a fully empty dome);
+  // the director's slow wave still carries it up to a broken field.
+  sunny:      { overcast: 0.0,  fogDensity: 0.008, rain: 0.0,  mist: 0.0,  lightDim: 0.0,  cumulus: 0.16, cumulusRange: 0.8,  cumulusClump: 0.85, cumulusScale: 0.72, windBoost: 0.0,  frontBias: 0.0,  skyTint: '#70bef4' },
   tradeWind:  { overcast: 0.18, fogDensity: 0.009, rain: 0.0,  mist: 0.02, lightDim: 0.04, cumulus: 0.38, cumulusRange: 0.45, cumulusClump: 0.5,  cumulusScale: 0.95, windBoost: 0.55, frontBias: 0.04, skyTint: '#78c6f4' },
   marineHaze: { overcast: 0.24, fogDensity: 0.014, rain: 0.0,  mist: 0.10, lightDim: 0.12, cumulus: 0.24, cumulusRange: 0.25, cumulusClump: 0.35, cumulusScale: 1.0,  windBoost: 0.12, frontBias: 0.06, skyTint: '#9fc7d5' },
   cloudy:     { overcast: 0.46, fogDensity: 0.012, rain: 0.0,  mist: 0.05, lightDim: 0.2,  cumulus: 0.5,  cumulusRange: 0.4,  cumulusClump: 0.55, cumulusScale: 0.9,  windBoost: 0.0,  frontBias: 0.0,  skyTint: '#a5c8d9' },

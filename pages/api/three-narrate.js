@@ -2,6 +2,12 @@ import { baseSpecimens } from '../../data/specimens';
 import { npcs } from '../../data/npcs';
 import { generateLLMText } from '../../utils/server/llmProvider';
 import { getRequestIdentity } from '../../utils/server/llmSafety';
+import {
+  animalDirectQuestionGuidance,
+  buildAnimalNarratorPrompt,
+  buildAnimalNarratorSystemPrompt,
+  getPlayableNarratorProfile,
+} from '../../three-game/narrator/playableNarratorProfiles';
 
 const SYSTEM_PROMPT = `You are the narrator for a compact 3D educational game about Charles Darwin exploring Floreana, then called Charles Island, in September 1835.
 
@@ -148,7 +154,10 @@ function isPlaceQuestion(input) {
     || /^describe (this place|where i am|where we are)$/.test(text);
 }
 
-function directQuestionGuidance(input) {
+function directQuestionGuidance(input, narratorProfile) {
+  if (narratorProfile?.kind === 'animal') {
+    return animalDirectQuestionGuidance(input, narratorProfile);
+  }
   const text = String(input || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (/^(?:am i|are we|who am i|what am i)(?: charles)?(?: darwin)?$/.test(text) || /^am i darwin$/.test(text)) {
     return 'This is a direct role question. Answer plainly in the first sentence: the player is Charles Darwin, twenty-six, newly landed on Charles Island in the Galapagos. Use only role facts and one practical next step. Leave darwinThought empty.';
@@ -308,10 +317,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let narratorProfile = getPlayableNarratorProfile();
   try {
     const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
     const {
       eventType = 'player_action',
+      playableModeId = 'darwin',
       playerInput = '',
       objective = '',
       location = 'Post Office Bay',
@@ -330,14 +341,16 @@ export default async function handler(req, res) {
       playerPose = {},
       constraint = null,
     } = body;
+    narratorProfile = getPlayableNarratorProfile(playableModeId);
+    const animalNarrator = narratorProfile.kind === 'animal';
 
-    if (isNarratorIdentityQuestion(playerInput)) {
+    if (!animalNarrator && isNarratorIdentityQuestion(playerInput)) {
       return res.status(200).json(narratorIdentityPayload({
         recentNarration,
       }));
     }
 
-    if (isPlaceQuestion(playerInput)) {
+    if (!animalNarrator && isPlaceQuestion(playerInput)) {
       return res.status(200).json(placePayload({ location, locationContext }));
     }
 
@@ -482,9 +495,22 @@ Return JSON only with:
       });
     }
 
-    const responseGuidance = directQuestionGuidance(playerInput);
+    const responseGuidance = directQuestionGuidance(playerInput, narratorProfile);
     const directInfoQuestion = Boolean(responseGuidance);
-    const prompt = `Event: ${eventType}
+    const prompt = animalNarrator
+      ? buildAnimalNarratorPrompt(narratorProfile, {
+          eventType,
+          playerInput,
+          responseGuidance,
+          location,
+          locationContext,
+          nearbySpecimen: specimenContext(specimenId),
+          weather,
+          timeOfDay,
+          stats,
+          recentNarration,
+        })
+      : `Event: ${eventType}
 Player typed action: ${safeString(playerInput, '(empty)')}
 ${responseGuidance ? `Response guidance: ${responseGuidance}\n` : ''}Player role: Charles Darwin, age 26, newly landed in the Galapagos during the Beagle voyage in September 1835.
 Current objective: ${safeString(objective, 'Collect or document one animal, plant, or mineral sample.')}
@@ -515,6 +541,9 @@ Return JSON only with:
   "weather": "optional weather state from: sunny, cloudy, sunshower, overcast, misty, drizzle, rain, storm, or empty string",
   "sounds": ["optional short sound cue 1", "optional short sound cue 2"]
 }`;
+    const systemPrompt = animalNarrator
+      ? buildAnimalNarratorSystemPrompt(narratorProfile)
+      : SYSTEM_PROMPT;
 
     const { sessionId, idempotencyKey } = getRequestIdentity({
       req,
@@ -528,16 +557,21 @@ Return JSON only with:
       sessionId,
       idempotencyKey,
       model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt: prompt,
-      temperature: 0.24,
-      maxTokens: 200,
+      temperature: animalNarrator ? 0.38 : 0.24,
+      maxTokens: animalNarrator ? 120 : 200,
     });
 
     const text = result.text || '';
     const parsed = parseNarratorJSON(text);
+    const normalized = normalizeNarratorPayload(
+      parsed,
+      text || (animalNarrator ? narratorProfile.fallbackNarration : ''),
+    );
     return res.status(200).json({
-      ...normalizeNarratorPayload(parsed, text),
+      ...normalized,
+      ...(animalNarrator ? { darwinThought: '', weather: '' } : {}),
       provider: result.provider,
       model: result.model,
       fallbackFrom: result.fallbackFrom || null,
@@ -545,7 +579,9 @@ Return JSON only with:
   } catch (error) {
     console.error('three-narrate error:', error);
     return res.status(200).json({
-      narration: 'The narrator is momentarily unavailable; you are left with the more severe but reliable prose of the island itself.',
+      narration: narratorProfile.kind === 'animal'
+        ? narratorProfile.fallbackNarration
+        : 'The narrator is momentarily unavailable; you are left with the more severe but reliable prose of the island itself.',
       darwinThought: '',
       actionDisposition: 'unavailable',
       targetType: 'none',

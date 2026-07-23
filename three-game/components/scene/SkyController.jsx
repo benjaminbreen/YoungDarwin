@@ -9,7 +9,8 @@ import { lightingDebugEnabled } from '../../runtimeDebug';
 import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
-import { fogAtmosphereUniforms } from '../../world/fogAtmosphere';
+import { fogAtmosphereUniforms, driveCloudShadeUniforms } from '../../world/fogAtmosphere';
+import { solarLookTuning } from '../../world/solarLook';
 
 // Dependency-free ordered dither (interleaved gradient noise) appended after
 // colorspace conversion: breaks 8-bit banding on the big smooth sky gradients.
@@ -1215,8 +1216,34 @@ function NightSkyDome({ nightRef, midnightRef, celestialRef }) {
   );
 }
 
+// Billboard cloud roster in wind-aligned coordinates: `perp` is the fixed
+// across-wind offset, `along0` the starting phase along the wind; drift cycles
+// `along` so every cloud actually crosses the sky and wraps behind the player
+// (JS fades opacity near the wrap so the teleport is invisible). Distinct
+// seeds keep each cloud's shape stable while it moves. `minCumulus` lets the
+// towers and the low horizon bank stay built-up even on clear days.
+const CLOUD_BILLBOARD_SPECS = [
+  { perp: -120, along0: -150, y: 38, w: 38, h: 12, seed: 0.13 },
+  { perp: -60,  along0: -95,  y: 45, w: 54, h: 15, seed: 0.31 },
+  { perp: 10,   along0: -40,  y: 42, w: 46, h: 13, seed: 0.47 },
+  { perp: 70,   along0: 12,   y: 35, w: 34, h: 10, seed: 0.61 },
+  { perp: 130,  along0: 64,   y: 31, w: 30, h: 9,  seed: 0.79 },
+  // Towers: taller aspect reads as built-up congestus drifting past.
+  { perp: -95,  along0: 110,  y: 33, w: 40, h: 22, seed: 0.23, minCumulus: 0.5 },
+  { perp: 45,   along0: -132, y: 30, w: 34, h: 19, seed: 0.53, minCumulus: 0.5 },
+  // Low bank: hugs the skyline for depth.
+  { perp: -18,  along0: 40,   y: 24, w: 58, h: 10, seed: 0.71, minCumulus: 0.35 },
+  { perp: 105,  along0: 150,  y: 22, w: 48, h: 9,  seed: 0.89, minCumulus: 0.35 },
+];
+const CLOUD_WRAP_HALF = 175;
+const CLOUD_FADE_BAND = 32;
+// World m/s along the wind at cloudDriftSpeed*windSpeed = 1 (~5 m/s at the
+// default 0.32) — fast enough to read wind direction within a few seconds.
+const CLOUD_BILLBOARD_DRIFT_RATE = 16;
+
 function RealisticCloudLayer({ nightRef }) {
   const groupRef = useRef(null);
+  const driftRef = useRef(0);
   const { camera } = useThree();
 
   const material = useMemo(() => new THREE.ShaderMaterial({
@@ -1224,6 +1251,7 @@ function RealisticCloudLayer({ nightRef }) {
     depthWrite: false,
     depthTest: true,
     uniforms: {
+      uSeed: { value: 0.5 },
       uTime: { value: 0 },
       uNight: { value: 0 },
       uOpacity: { value: 0.72 },
@@ -1239,19 +1267,16 @@ function RealisticCloudLayer({ nightRef }) {
     },
     vertexShader: /* glsl */`
       varying vec2 vUv;
-      varying float vSeed;
       void main() {
         vUv = uv;
-        // Per-cloud seed from the plane's world position: one shared material,
-        // five different clouds (unseeded, the sky shows the same cloud image
-        // stamped five times).
-        vSeed = fract(dot(vec2(modelMatrix[3].x, modelMatrix[3].z), vec2(0.1031, 0.7193)) * 43.7585);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: /* glsl */`
       varying vec2 vUv;
-      varying float vSeed;
+      // Per-cloud material uniform: stable while the cloud drifts (the old
+      // world-position hash would morph a moving cloud every frame).
+      uniform float uSeed;
       uniform float uTime;
       uniform float uNight;
       uniform float uOpacity;
@@ -1289,7 +1314,7 @@ function RealisticCloudLayer({ nightRef }) {
 
       void main() {
         vec2 uv = vUv;
-        float seed = vSeed * 41.73;
+        float seed = uSeed * 41.73;
         // Cumulus anatomy: a flat-ish base near uv.y ~ 0.3 and an
         // fbm-domed cauliflower top, instead of a smooth ellipse of
         // horizontally-stretched noise (which reads as smear). The planes are
@@ -1302,7 +1327,7 @@ function RealisticCloudLayer({ nightRef }) {
         float build = 0.06 + uCumulus * 0.14;
         float topR = 0.3 + shape * 0.2 + build;
         float dome = 1.0 - smoothstep(topR * 0.55, topR, length(vec2(c.x, max(c.y, 0.0) * 1.6)));
-        vec2 c2 = vec2(c.x - (vSeed - 0.5) * 1.3, c.y + 0.04);
+        vec2 c2 = vec2(c.x - (uSeed - 0.5) * 1.3, c.y + 0.04);
         float dome2 = 1.0 - smoothstep(topR * 0.4, topR * 0.78, length(vec2(c2.x, max(c2.y, 0.0) * 1.7)));
         float body = max(dome, dome2 * 0.9);
         // Flat base: cut with a soft, slightly noisy waterline.
@@ -1341,50 +1366,86 @@ function RealisticCloudLayer({ nightRef }) {
     `,
   }), []);
 
-  useLayoutEffect(() => () => material.dispose(), [material]);
+  // One clone per cloud (same program, per-material uSeed/uOpacity/uCumulus)
+  // so each drifting cloud keeps a stable identity and its own edge fade.
+  const materials = useMemo(
+    () => CLOUD_BILLBOARD_SPECS.map(spec => {
+      const clone = material.clone();
+      clone.uniforms.uSeed.value = spec.seed;
+      return clone;
+    }),
+    [material],
+  );
 
-  useFrame(({ clock }) => {
-    material.uniforms.uTime.value = clock.elapsedTime;
-    material.uniforms.uNight.value = nightRef.current;
+  useLayoutEffect(() => () => {
+    material.dispose();
+    materials.forEach(clone => clone.dispose());
+  }, [material, materials]);
+
+  useFrame(({ clock }, delta) => {
     const store = useThreeGameStore.getState();
     const celestial = skyState(store.timeOfDay, store.day || 1);
     const solarDrama = Math.max(celestial.dawnDrama || 0, celestial.duskDrama || 0)
       * (1 - weatherEnv.overcast * 0.86)
       * (1 - weatherEnv.mistAmount * 0.45)
       * (1 - weatherEnv.rainIntensity * 0.62);
-    material.uniforms.uSolarDrama.value = solarDrama;
-    material.uniforms.uDuskDrama.value = (celestial.duskDrama || 0) > (celestial.dawnDrama || 0) ? 1 : 0;
+    const duskDrama = (celestial.duskDrama || 0) > (celestial.dawnDrama || 0) ? 1 : 0;
     // Distant cloud bank: on clear days only a faint maritime rim on the
     // horizon (the dome owns the sky now); builds with fair-weather cumulus
     // and thickens as the overcast deck closes.
-    material.uniforms.uOpacity.value = 0.14 + weatherEnv.cumulus * 0.34 + weatherEnv.overcast * 0.45;
-    material.uniforms.uCumulus.value = weatherEnv.cumulus;
-    material.uniforms.uRain.value = weatherEnv.rainIntensity;
+    const baseOpacity = 0.14 + weatherEnv.cumulus * 0.34 + weatherEnv.overcast * 0.45;
     // Sun direction in the billboards' screen space (planes copy the camera
     // quaternion, so camera right/up are the plane axes).
     _cloudSun.set(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
     _cloudRight.setFromMatrixColumn(camera.matrixWorld, 0);
     _cloudUp.setFromMatrixColumn(camera.matrixWorld, 1);
-    material.uniforms.uSunScreen.value.set(_cloudSun.dot(_cloudRight), _cloudSun.dot(_cloudUp));
+    const sunScreenX = _cloudSun.dot(_cloudRight);
+    const sunScreenY = _cloudSun.dot(_cloudUp);
+
+    // Advance the shared along-wind drift and lay the roster out around it.
+    driftRef.current += CLOUD_BILLBOARD_DRIFT_RATE
+      * weatherEnv.cloudDriftSpeed * weatherEnv.windSpeed * delta;
+    const windLen = Math.hypot(weatherEnv.windX, weatherEnv.windZ) || 1;
+    const dirX = weatherEnv.windX / windLen;
+    const dirZ = weatherEnv.windZ / windLen;
+    const perpX = -dirZ;
+    const perpZ = dirX;
+    const span = CLOUD_WRAP_HALF * 2;
+
     if (groupRef.current) {
-      groupRef.current.children.forEach(child => child.quaternion.copy(camera.quaternion));
+      groupRef.current.children.forEach((child, index) => {
+        const spec = CLOUD_BILLBOARD_SPECS[index];
+        const clone = materials[index];
+        if (!spec || !clone) return;
+        let along = (spec.along0 + driftRef.current + CLOUD_WRAP_HALF) % span;
+        if (along < 0) along += span;
+        along -= CLOUD_WRAP_HALF;
+        child.position.set(
+          dirX * along + perpX * spec.perp,
+          spec.y,
+          dirZ * along + perpZ * spec.perp,
+        );
+        child.quaternion.copy(camera.quaternion);
+        const edgeFade = 1 - smoothstep(CLOUD_WRAP_HALF - CLOUD_FADE_BAND, CLOUD_WRAP_HALF, Math.abs(along));
+        const u = clone.uniforms;
+        u.uTime.value = clock.elapsedTime;
+        u.uNight.value = nightRef.current;
+        u.uSolarDrama.value = solarDrama;
+        u.uDuskDrama.value = duskDrama;
+        u.uOpacity.value = baseOpacity * edgeFade;
+        u.uCumulus.value = Math.max(weatherEnv.cumulus, spec.minCumulus ?? 0);
+        u.uRain.value = weatherEnv.rainIntensity;
+        u.uSunScreen.value.set(sunScreenX, sunScreenY);
+      });
     }
   });
 
-  const clouds = [
-    [-78, 38, -118, 38, 12, -0.08],
-    [-30, 45, -134, 54, 15, 0.05],
-    [36, 42, -126, 46, 13, -0.03],
-    [88, 35, -110, 34, 10, 0.08],
-    [-96, 31, -76, 30, 9, 0.02],
-  ];
-
   return (
     <group ref={groupRef} renderOrder={-8}>
-      {clouds.map((c, i) => (
-        <mesh key={i} position={[c[0], c[1], c[2]]} rotation={[0, 0, c[5]]} frustumCulled={false}>
-          <planeGeometry args={[c[3], c[4], 1, 1]} />
-          <primitive object={material} attach="material" />
+      {CLOUD_BILLBOARD_SPECS.map((spec, i) => (
+        <mesh key={i} position={[spec.perp, spec.y, -120]} frustumCulled={false}>
+          <planeGeometry args={[spec.w, spec.h, 1, 1]} />
+          <primitive object={materials[i]} attach="material" />
         </mesh>
       ))}
     </group>
@@ -1911,7 +1972,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     const s = skyState(hourRef.current, store.day || 1);
     nightRef.current = s.night;
     midnightRef.current = midnightFactor(hourRef.current) * s.night;
-    const { daylight, golden, night } = s;
+    const { daylight, night } = s;
+    // Dev knob: widen/strengthen (or mute) the golden-hour shoulders. Clamped
+    // so color lerps downstream never extrapolate past their endpoints.
+    const golden = THREE.MathUtils.clamp(s.golden * solarLookTuning.goldenBoost, 0, 1);
     const lightRig = computeOutdoorLightRig({
       daylight,
       golden,
@@ -2056,6 +2120,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       sunRef.current.getWorldPosition(_sunWorld);
       sunRef.current.visible = celestialBodies && sunUp > 0.01;
       const sunCanEmitOptics = celestialBodies && sunUp > 0.01;
+      const opticsGain = solarLookTuning.opticsIntensity;
       const sunScale = 2.7 * (1 + horizonSun * 0.12);
       sunRef.current.scale.set(sunScale, sunScale * (1 - horizonSun * 0.11), 1);
       sunRef.current.material.color.copy(_sunColor);
@@ -2070,7 +2135,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunAureoleRef.current.scale.setScalar((22 + golden * 7) * swell);
         sunAureoleRef.current.material.color.copy(_glowColor).lerp(_white, 0.28);
         sunAureoleRef.current.material.opacity = solarHaloEnabled
-          ? sunUp * (0.105 + golden * 0.09) * (1 - overcast * 0.82) * (1 - weatherEnv.rainIntensity * 0.7)
+          ? sunUp * (0.105 + golden * 0.09) * (1 - overcast * 0.82) * (1 - weatherEnv.rainIntensity * 0.7) * opticsGain
           : 0;
       }
       if (sunWeatherHaloRef.current) {
@@ -2078,7 +2143,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunWeatherHaloRef.current.quaternion.copy(camera.quaternion);
         const mistHalo = sunMist * 0.34;
         const clearHalo = (1 - overcast) * (1 - sunMist) * 0.02;
-        const weatherHalo = sunUp * (clearHalo + thinSunCloud * 0.22 + mistHalo + sunVeilStrength * 0.18) * (1 - weatherEnv.rainIntensity * 0.82);
+        const weatherHalo = sunUp * (clearHalo + thinSunCloud * 0.22 + mistHalo + sunVeilStrength * 0.18) * (1 - weatherEnv.rainIntensity * 0.82) * opticsGain;
         sunWeatherHaloRef.current.visible = solarHaloEnabled && sunCanEmitOptics && weatherHalo > 0.006;
         sunWeatherHaloRef.current.scale.setScalar(34 + thinSunCloud * 13 + sunMist * 17 + golden * 8);
         _haloColor.copy(_sunDay).lerp(_sunGolden, golden * 0.42).lerp(_white, thinSunCloud * 0.45 + sunMist * 0.32);
@@ -2096,10 +2161,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunVeilRef.current.visible = solarHaloEnabled && sunCanEmitOptics && (sunVeilStrength > 0.01 || horizonSun > 0.02);
         const vu = sunVeilMaterial.uniforms;
         vu.uTime.value += delta;
-        vu.uStrength.value = solarHaloEnabled ? sunVeilStrength * 0.5 : 0;
+        vu.uStrength.value = solarHaloEnabled ? sunVeilStrength * 0.5 * opticsGain : 0;
         vu.uGolden.value = golden;
         vu.uMist.value = sunMist;
-        vu.uHorizonSun.value = solarHaloEnabled ? horizonSun : 0;
+        vu.uHorizonSun.value = solarHaloEnabled ? horizonSun * opticsGain : 0;
       }
       if (sunGlowRef.current) {
         sunGlowRef.current.position.copy(sunRef.current.position);
@@ -2110,7 +2175,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunGlowRef.current.scale.set(13 * swell * (1 + sunVeilStrength * 0.2), 13 * swell * (1 + sunVeilStrength * 0.14), 1);
         sunGlowRef.current.material.color.copy(_glowColor);
         sunGlowRef.current.material.opacity = solarHaloEnabled
-          ? sunUp * (0.18 + golden * 0.16 + sunVeilStrength * 0.06)
+          ? sunUp * (0.18 + golden * 0.16 + sunVeilStrength * 0.06) * opticsGain
           : 0;
       }
       _screenSun.copy(_sunWorld).project(camera);
@@ -2133,6 +2198,9 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         delta
       );
       flareStrengthRef.current = flareStrength;
+      // Gain applies after the damp so the smoothing time constant is
+      // unaffected; every flare-family sprite reads this display value.
+      const flareDisplay = flareStrength * opticsGain;
       camera.getWorldDirection(_fwd);
       const directness = Math.max(0, _fwd.dot(_sun));
       const headOn = smoothstep(0.9, 0.999, directness);
@@ -2161,7 +2229,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         flare.quaternion.copy(camera.quaternion);
         const ghostStretch = spec[0] < 0 ? flareStretch * 1.28 : flareStretch * 1.16;
         flare.scale.set(spec[1] * swell * ghostStretch, spec[1] * swell * flareSquash * 0.82, 1);
-        flare.material.opacity = spec[2] * flareStrength * (0.46 + offAxisFlare * 0.34);
+        flare.material.opacity = spec[2] * flareDisplay * (0.46 + offAxisFlare * 0.34);
         _flareColor.set(spec[3]).lerp(_sunGolden, golden * 0.32);
         flare.material.color.copy(_flareColor);
       });
@@ -2173,7 +2241,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         const ringScale = (5.8 + centerResponse * 2.6) * swell;
         sunRingRef.current.scale.set(ringScale, ringScale, 1);
         sunRingRef.current.visible = solarSceneFlaresEnabled && sunCanEmitOptics;
-        sunRingRef.current.material.opacity = solarSceneFlaresEnabled ? flareStrength * (0.045 + centerResponse * 0.045) : 0;
+        sunRingRef.current.material.opacity = solarSceneFlaresEnabled ? flareDisplay * (0.045 + centerResponse * 0.045) : 0;
         sunRingRef.current.material.color.copy(_sunColor).lerp(_white, 0.25 + centerResponse * 0.25);
       }
       if (sunStreakRef.current) {
@@ -2184,7 +2252,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunStreakRef.current.scale.set(20 + centerResponse * 12, 1.8 + centerResponse * 0.9, 1);
         sunStreakRef.current.visible = solarSceneFlaresEnabled && sunCanEmitOptics;
         sunStreakRef.current.material.opacity = solarSceneFlaresEnabled
-          ? flareStrength * (0.028 + centerResponse * 0.045 + headOn * 0.04)
+          ? flareDisplay * (0.028 + centerResponse * 0.045 + headOn * 0.04)
           : 0;
         sunStreakRef.current.material.color.copy(_sunColor).lerp(_white, 0.34 + centerResponse * 0.32);
       }
@@ -2197,7 +2265,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         sunStarburstRef.current.scale.set(starScale, starScale, 1);
         sunStarburstRef.current.visible = solarSceneFlaresEnabled && sunCanEmitOptics;
         sunStarburstRef.current.material.opacity = solarSceneFlaresEnabled
-          ? flareStrength * (0.016 + centerResponse * 0.032 + headOn * 0.038) * (1 - overcast * 0.7)
+          ? flareDisplay * (0.016 + centerResponse * 0.032 + headOn * 0.038) * (1 - overcast * 0.7)
           : 0;
         sunStarburstRef.current.material.color.copy(_white).lerp(_sunDay, 0.18 + golden * 0.22);
       }
@@ -2208,7 +2276,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         lensRingRef.current.quaternion.copy(camera.quaternion);
         lensRingRef.current.scale.set(5.2 * swell, 5.2 * swell, 1);
         lensRingRef.current.visible = solarSceneFlaresEnabled && sunCanEmitOptics;
-        lensRingRef.current.material.opacity = solarSceneFlaresEnabled ? flareStrength * 0.035 : 0;
+        lensRingRef.current.material.opacity = solarSceneFlaresEnabled ? flareDisplay * 0.035 : 0;
         lensRingRef.current.material.color.copy(_sunGolden).lerp(_white, 0.18);
       }
       const rawGlareStrength = THREE.MathUtils.clamp(
@@ -2217,7 +2285,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
           * (0.028 + centerResponse * 0.2 + headOn * 0.34)
           * (1 - overcast * 0.72)
           * (1 - weatherEnv.rainIntensity * 0.55)
-          * (1 - underwaterAmount),
+          * (1 - underwaterAmount)
+          * solarLookTuning.glareIntensity,
         0,
         1
       );
@@ -2395,6 +2464,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       atmo.uFogSunColor.value.r = _sunHaze.r;
       atmo.uFogSunColor.value.g = _sunHaze.g;
       atmo.uFogSunColor.value.b = _sunHaze.b;
+      driveCloudShadeUniforms({ delta, daylight, elevation: s.elevation, air });
     }
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
     // Distant islands sit barely darker than the haze that swallows them.
@@ -2414,7 +2484,8 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       ? narrowSunFacing * daylight * (1 - overcast * 0.75) * (0.01 + golden * 0.008)
       : 0;
     const airExposure = expBase + daylight * expGain + golden * 0.025 + solarExposureLift;
-    gl.toneMappingExposure = THREE.MathUtils.lerp(airExposure, airExposure * 0.82, underwaterAmount);
+    gl.toneMappingExposure = THREE.MathUtils.lerp(airExposure, airExposure * 0.82, underwaterAmount)
+      * solarLookTuning.exposureScale;
 
     // Refresh the shadow map on a cadence rather than every frame. The light
     // direction/position above still updates every frame; only the (expensive)
@@ -2459,6 +2530,7 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         hardSun: Number(lightRig.hardSun.toFixed(3)),
         groundBounce: Number(lightRig.groundBounce.toFixed(3)),
         weatherSoftness: Number(lightRig.weatherSoftness.toFixed(3)),
+        cloudShade: Number(fogAtmosphereUniforms.uCloudShade.value.x.toFixed(3)),
         noonBlue: Number((s.noonBlue || 0).toFixed(3)),
         dawnDrama: Number((s.dawnDrama || 0).toFixed(3)),
         duskDrama: Number((s.duskDrama || 0).toFixed(3)),

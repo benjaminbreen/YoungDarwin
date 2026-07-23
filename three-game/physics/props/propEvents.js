@@ -43,7 +43,7 @@ export function isSwingClaimed(swingId) {
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
 // 'player-physics-prop-contact' { propId, contactKind?, position?, direction, impactSpeed, verticalSpeed?, delta, now }
-// 'player-push-contact' { propId, kind, label, height, mass, fixed, direction }
+// 'player-push-contact' { propId, kind, label, height, mass, fixed, position, speed, direction }
 // 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }
 // 'player-skid' / 'player-scramble' { position: {x,y,z}, direction: {x,y,z}, intensity, biome, source? }
 // 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?: 'footstep'|'takeoff'|'step-up'|'landing'|'landing-jump', fallSpeed?, horizontalSpeed?, travelDistance?, runningJump? }
@@ -56,6 +56,7 @@ export function isSwingClaimed(swingId) {
 // 'fieldwork-foley' { kind: 'note'|'container'|'snare'|'door', position?, specimenId?, trapId? }
 // 'equipment-foley' { kind: 'case-open'|'case-close'|'tool-change'|'carry-pickup', position?, fromToolId?, toToolId?, propId? }
 // 'carried-prop-settle' { propId, zoneId, mode: 'place'|'release', position: {x,y,z} }
+// 'container-foley' { kind: 'chest-open'|'chest-close', propId, position }
 // 'player-winded' { active, effort, fatigue }
 // 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }

@@ -27,6 +27,10 @@ const touchState = {
   animalEat: false,
   animalSleep: false,
   animalDefecate: false,
+  animalSignalCurious: false,
+  animalSignalWithdraw: false,
+  animalSignalGraze: false,
+  animalSignalRest: false,
 };
 
 // Which one-shot action control each equipped tool fires when "used".
@@ -40,6 +44,10 @@ const TOOL_USE_CONTROLS = {
   eat: 'animalEat',
   sleep: 'animalSleep',
   defecate: 'animalDefecate',
+  signalCurious: 'animalSignalCurious',
+  signalWithdraw: 'animalSignalWithdraw',
+  signalGraze: 'animalSignalGraze',
+  signalRest: 'animalSignalRest',
 };
 
 export const TOGGLE_COMPASS_EVENT = 'young-darwin:toggle-compass';
@@ -76,5 +84,9 @@ export function consumeTouchControls() {
   touchState.animalEat = false;
   touchState.animalSleep = false;
   touchState.animalDefecate = false;
+  touchState.animalSignalCurious = false;
+  touchState.animalSignalWithdraw = false;
+  touchState.animalSignalGraze = false;
+  touchState.animalSignalRest = false;
   return snapshot;
 }

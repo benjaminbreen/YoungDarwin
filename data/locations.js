@@ -143,7 +143,7 @@ export const locations = [
     // Inland overlook on the central trail: starts Darwin above the landing
     // with the cove, mail barrel, sandbar, and Beagle readable in one view.
     playerStart: [0, 0, 23.5],
-    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary'],
+    specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
     specimenPlacements: [
       {
         specimenId: 'flightlesscormorant',
@@ -221,6 +221,8 @@ export const locations = [
       { instanceId: 'post-office-carpenter-bee', specimenId: 'galapagoscarpenterbee', position: [8.5, 0, 10.8], behavior: 'pollinate', habitatRadiusX: 1.25, habitatRadiusZ: 1.0 },
       { instanceId: 'post-office-sulphur', specimenId: 'galapagossulphur', position: [15.8, 0, 16.5], behavior: 'pollinate', habitatRadiusX: 1.7, habitatRadiusZ: 1.25 },
       { instanceId: 'post-office-fritillary', specimenId: 'galapagosgulffritillary', position: [20.5, 0, 20.2], behavior: 'pollinate', habitatRadiusX: 1.9, habitatRadiusZ: 1.4 },
+      { instanceId: 'post-office-painted-locust-cotton-1', specimenId: 'galapagospaintedlocust', position: [17.2, 0, 18.8], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.4, habitatRadiusZ: 3.3 },
+      { instanceId: 'post-office-painted-locust-basalt-2', specimenId: 'galapagospaintedlocust', position: [-22.8, 0, 16.2], behavior: 'hop-and-perch', sceneScale: 0.18, habitatRadiusX: 4.1, habitatRadiusZ: 3.1 },
     ],
     npcs: ['lascar_joe'],
     discoveries: [
@@ -1161,7 +1163,7 @@ export const locations = [
     color: '#696969',
     type: 'lavafield',
     validMoves: ['W','E','SW','S','SE','NW','NE','N'],
-    specimens: ['lavaLizard','basalt','cactus','short_eared_owl','galapagos_racer'],
+    specimens: ['lavaLizard','basalt','cactus','short_eared_owl','galapagos_racer','galapagospaintedlocust'],
     specimenPlacements: [
       {
         instanceId: 'lava-flats-lava-lizard-basking-slab-1',
@@ -1227,6 +1229,9 @@ export const locations = [
         habitatRadiusX: 12,
         habitatRadiusZ: 8,
       },
+      { instanceId: 'lava-flats-painted-locust-pioneer-1', specimenId: 'galapagospaintedlocust', position: [23.8, 0, -22.1], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.8, habitatRadiusZ: 3.5 },
+      { instanceId: 'lava-flats-painted-locust-scoria-2', specimenId: 'galapagospaintedlocust', position: [-30.1, 0, -9.1], behavior: 'hop-and-perch', sceneScale: 0.21, habitatRadiusX: 4.6, habitatRadiusZ: 3.4 },
+      { instanceId: 'lava-flats-painted-locust-saltbush-3', specimenId: 'galapagospaintedlocust', position: [-15.4, 0, 22.7], behavior: 'hop-and-perch', sceneScale: 0.18, habitatRadiusX: 4.2, habitatRadiusZ: 3.2 },
     ],
     npcs: [],
     boundaries: {},
@@ -1250,7 +1255,7 @@ export const locations = [
     color: '#bdb76b',
     type: 'scrubland',
     validMoves: ['N','E','W','S'],
-    specimens: ['cactus','large_ground_finch','medium_ground_finch','floreana_giant_tortoise','galapagos_racer','sicyosvillosus','deliliainelegans','lecocarpuspinnatifidus'],
+    specimens: ['cactus','large_ground_finch','medium_ground_finch','floreana_giant_tortoise','galapagos_racer','sicyosvillosus','deliliainelegans','lecocarpuspinnatifidus','galapagospaintedlocust'],
     specimenPlacements: [
       {
         instanceId: 'northern-highlands-cactus-west-shelf',
@@ -1325,6 +1330,8 @@ export const locations = [
         habitatRadiusX: 10,
         habitatRadiusZ: 7,
       },
+      { instanceId: 'northern-highlands-painted-locust-seed-grass-1', specimenId: 'galapagospaintedlocust', position: [-24.7, 0, -18.1], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.6, habitatRadiusZ: 3.5 },
+      { instanceId: 'northern-highlands-painted-locust-thorn-scrub-2', specimenId: 'galapagospaintedlocust', position: [31.2, 0, -40.2], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.3, habitatRadiusZ: 3.3 },
     ],
     npcs: ['maria'],
     boundaries: {},
@@ -1397,7 +1404,7 @@ export const locations = [
     color: '#bdb76b',
     type: 'scrubland',
     validMoves: ['N','W','S'],
-    specimens: ['floreana_mockingbird','cactus','gray_warbler_finch','galapagos_racer','lecocarpuspinnatifidus'],
+    specimens: ['floreana_mockingbird','cactus','gray_warbler_finch','galapagos_racer','lecocarpuspinnatifidus','galapagospaintedlocust'],
     specimenPlacements: [
       {
         instanceId: 'coastal-scrub-mockingbird-seep',
@@ -1458,6 +1465,9 @@ export const locations = [
         habitatRadiusX: 10,
         habitatRadiusZ: 7,
       },
+      { instanceId: 'coastal-scrub-painted-locust-saltbush-1', specimenId: 'galapagospaintedlocust', position: [-12.1, 0, -4.2], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.6, habitatRadiusZ: 3.5 },
+      { instanceId: 'coastal-scrub-painted-locust-croton-2', specimenId: 'galapagospaintedlocust', position: [16.6, 0, -25.1], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.5, habitatRadiusZ: 3.4 },
+      { instanceId: 'coastal-scrub-painted-locust-seep-3', specimenId: 'galapagospaintedlocust', position: [-26.6, 0, -1.1], behavior: 'hop-and-perch', sceneScale: 0.18, habitatRadiusX: 4.1, habitatRadiusZ: 3.2 },
     ],
     npcs: [],
     boundaries: {},
@@ -1563,23 +1573,57 @@ export const locations = [
   {
     id: 'W_LAVA',
     name: 'Western Lowlands',
-    description: 'A half-flooded tidal lagoon with a few dilapidated whaler huts.',
+    description: 'A black-basalt coast encloses a shallow tidal lagoon and the weathered remains of a small provisioning camp.',
     x: -1,
     y: 2,
     color: '#bdb76b',
     type: 'coastalTrail',
     validMoves: ['N','E','NE','SE'],
-    specimens: ['floreana_giant_tortoise'],
+    // Starts on the southern approach, facing north toward the camp bench and
+    // lagoon instead of outward toward the map edge.
+    playerStart: [23, 0, 25],
+    specimens: ['floreana_giant_tortoise','crab','barnacle','basalt'],
+    specimenPlacements: [
+      {
+        instanceId: 'western-lowlands-tortoise-near-pen',
+        specimenId: 'floreana_giant_tortoise',
+        position: [35.5, 0, 7.5],
+        behavior: 'grazing',
+        sceneScale: 1.08,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+      {
+        instanceId: 'western-lowlands-crab-tidal-throat',
+        specimenId: 'crab',
+        position: [-33.5, 0, 9.5],
+        behavior: 'skittering',
+        sceneScale: 0.85,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4,
+      },
+      { instanceId: 'western-lowlands-barnacle-basalt-rib', specimenId: 'barnacle', position: [-34.5, 0, -22.5], behavior: 'still', sceneScale: 0.9 },
+      { instanceId: 'western-lowlands-basalt-lagoon-rib', specimenId: 'basalt', position: [-7.2, 0, -8], behavior: 'still', sceneScale: 1.0 },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
-      'The remnants of an old whaler’s camp are here, complete with a drying rack and some crude furniture.'
+      'A roofless stone-and-timber shelter, hearth, drying rack, and midden mark a short-lived shore camp.',
+      'The low enclosure may have held tortoises gathered for ships, though little here identifies its builders with certainty.',
+      'A worn boat-haul joins the tidal throat to the camp bench above the lagoon.'
     ],
     notableFeatures: [
-      'Patches of wet, black volcanic rock gleam in the sun.',
-      'A makeshift shelter stands abandoned, used by whalers or stranded sailors in prior years.',
-      'Signs that giant tortoises once foraged near the water’s edge.'
-    ]
+      'An irregular ocean boundary feeds a broad, mostly wadeable tidal lagoon.',
+      'Wet basalt ribs divide mudflats, shallow pools, and black shingle.',
+      'Three clear trails lead toward Black Beach, the western highlands, and the beach hut.',
+      'The camp remains are plausible evidence of whaling-era provisioning, not a definitive reconstruction of a named site.'
+    ],
+    narration: {
+      weather: 'sunny',
+      sounds: ['tidal water over basalt', 'gulls above the lagoon', 'wind through an empty drying rack'],
+      loadingNote: 'A shallow western lagoon surrounds basalt ribs and the ambiguous remains of a nineteenth-century shore camp.',
+      educationalNote: 'Whaling vessels visited Charles Island for water and tortoises. These remains invite observation and inference without claiming a documented camp at this exact site.',
+    },
   },
 
   // 16) W_HIGH
@@ -1592,7 +1636,7 @@ export const locations = [
     color: 'green',
     type: 'forest',
     validMoves: ['N','SE','E','SW','S','W'],
-    specimens: ['floreana_giant_tortoise','floreana_mockingbird','galapagos_hawk','resurrectionfern','sicyosvillosus','deliliainelegans'],
+    specimens: ['floreana_giant_tortoise','floreana_mockingbird','galapagos_hawk','resurrectionfern','sicyosvillosus','deliliainelegans','galapagospaintedlocust'],
     specimenPlacements: [
       { specimenId: 'floreana_giant_tortoise', position: [-6.5, 0, 13.5], behavior: 'grazing', sceneScale: 1.1, habitatRadiusX: 8, habitatRadiusZ: 6 },
       { specimenId: 'floreana_mockingbird', position: [8.8, 0, -15.5], behavior: 'curious', sceneScale: 1.0, habitatRadiusX: 10, habitatRadiusZ: 8 },
@@ -1620,6 +1664,7 @@ export const locations = [
         behavior: 'still',
         sceneScale: 1,
       },
+      { instanceId: 'western-highlands-painted-locust-fern-edge-1', specimenId: 'galapagospaintedlocust', position: [16.2, 0, 19.2], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.2, habitatRadiusZ: 3.2 },
     ],
     npcs: [],
     boundaries: {},
@@ -1770,7 +1815,7 @@ export const locations = [
       },
     },
     playerStart: [-5, 0, 3.2],
-    specimens: ['lavalizard','medium_ground_finch','basalt','scoria','feralgoat','cactus','short_eared_owl','galapagos_racer'],
+    specimens: ['lavalizard','medium_ground_finch','basalt','scoria','feralgoat','cactus','short_eared_owl','galapagos_racer','galapagospaintedlocust'],
     npcs: [],
     boundaries: {},
     specimenPlacements: [
@@ -1867,6 +1912,8 @@ export const locations = [
         habitatRadiusX: 11,
         habitatRadiusZ: 7,
       },
+      { instanceId: 'rocky-clearing-painted-locust-grass-1', specimenId: 'galapagospaintedlocust', position: [38.2, 0, -30.5], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.5, habitatRadiusZ: 3.4 },
+      { instanceId: 'rocky-clearing-painted-locust-rubble-2', specimenId: 'galapagospaintedlocust', position: [-29.5, 0, 33.3], behavior: 'hop-and-perch', sceneScale: 0.18, habitatRadiusX: 4.1, habitatRadiusZ: 3.1 },
     ],
     discoveries: [
       'You find ash from a recent campfire near the largest cave. Someone has been living here.'
@@ -2790,7 +2837,7 @@ const finalRouteExtraLocations = [
     color: '#bdb76b',
     type: 'scrubland',
     validMoves: [],
-    specimens: ['cactus', 'lavalizard', 'medium_ground_finch', 'galapagos_racer', 'galapagoscotton', 'crotonscouleri', 'galapagoscarpenterbee', 'galapagossulphur', 'galapagosgulffritillary', 'lecocarpuspinnatifidus'],
+    specimens: ['cactus', 'lavalizard', 'medium_ground_finch', 'galapagos_racer', 'galapagoscotton', 'crotonscouleri', 'galapagoscarpenterbee', 'galapagossulphur', 'galapagosgulffritillary', 'lecocarpuspinnatifidus', 'galapagospaintedlocust'],
     specimenPlacements: [
       {
         instanceId: 'scrub-rise-cactus-west',
@@ -2868,6 +2915,9 @@ const finalRouteExtraLocations = [
         habitatRadiusX: 11,
         habitatRadiusZ: 7,
       },
+      { instanceId: 'scrub-rise-painted-locust-wash-1', specimenId: 'galapagospaintedlocust', position: [3.7, 0, -38.2], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.6, habitatRadiusZ: 3.5 },
+      { instanceId: 'scrub-rise-painted-locust-croton-2', specimenId: 'galapagospaintedlocust', position: [-31.5, 0, -14.7], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.3, habitatRadiusZ: 3.2 },
+      { instanceId: 'scrub-rise-painted-locust-boulder-3', specimenId: 'galapagospaintedlocust', position: [38.4, 0, -0.6], behavior: 'hop-and-perch', sceneScale: 0.18, habitatRadiusX: 4.2, habitatRadiusZ: 3.2 },
     ],
     npcs: [],
     boundaries: {},
@@ -2942,7 +2992,7 @@ const finalRouteExtraLocations = [
     color: '#7cc9bd',
     type: 'wetland',
     validMoves: [],
-    specimens: ['floreana_giant_tortoise', 'medium_ground_finch', 'feralgoat', 'sicyosvillosus'],
+    specimens: ['floreana_giant_tortoise', 'medium_ground_finch', 'feralgoat', 'sicyosvillosus', 'galapagospaintedlocust'],
     specimenPlacements: [
       {
         instanceId: 'watkins-creek-tortoise-west-mud-tracks',
@@ -2978,6 +3028,8 @@ const finalRouteExtraLocations = [
         habitatRadiusX: 10,
         habitatRadiusZ: 6,
       },
+      { instanceId: 'watkins-creek-painted-locust-dry-bank-1', specimenId: 'galapagospaintedlocust', position: [-5.1, 0, 11.7], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.3, habitatRadiusZ: 3.2 },
+      { instanceId: 'watkins-creek-painted-locust-meadow-2', specimenId: 'galapagospaintedlocust', position: [24.8, 0, -14.2], behavior: 'hop-and-perch', sceneScale: 0.19, habitatRadiusX: 4.1, habitatRadiusZ: 3.1 },
     ],
     npcs: [],
     boundaries: {},

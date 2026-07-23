@@ -370,6 +370,53 @@ h1, h2, h3, h4, h5, h6 {
   100% { opacity: 0; visibility: hidden; }
 }
 
+.opening-cinematic-veil {
+  --opening-cinematic-duration: 7200ms;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  transform: translateZ(0);
+  will-change: opacity;
+  animation: opening-cinematic-veil var(--opening-cinematic-duration) linear both;
+  background:
+    linear-gradient(180deg, rgba(4, 8, 10, 0.22), transparent 24%, transparent 69%, rgba(3, 6, 7, 0.35)),
+    radial-gradient(ellipse 72% 67% at 50% 48%, transparent 36%, rgba(5, 9, 10, 0.08) 60%, rgba(3, 6, 7, 0.42) 82%, rgba(2, 4, 5, 0.78) 100%);
+}
+
+.opening-cinematic-veil::before,
+.opening-cinematic-veil::after {
+  content: '';
+  position: absolute;
+  inset: -8%;
+  pointer-events: none;
+}
+
+/* Soft, out-of-focus highlights echo the examination view without adding a
+   second post-processing pass during the performance-sensitive fly-in. */
+.opening-cinematic-veil::before {
+  opacity: 0.34;
+  filter: blur(8px);
+  background:
+    radial-gradient(circle at 7% 24%, rgba(225, 240, 220, 0.34) 0 1.4%, transparent 4.6%),
+    radial-gradient(circle at 93% 17%, rgba(245, 218, 148, 0.28) 0 1.1%, transparent 4.2%),
+    radial-gradient(circle at 88% 78%, rgba(196, 224, 210, 0.25) 0 1.7%, transparent 5.4%),
+    radial-gradient(circle at 12% 82%, rgba(241, 224, 170, 0.22) 0 1.2%, transparent 4.8%);
+}
+
+.opening-cinematic-veil::after {
+  background:
+    radial-gradient(ellipse 66% 61% at 50% 47%, transparent 55%, rgba(4, 7, 8, 0.12) 78%, rgba(1, 3, 4, 0.38) 100%);
+}
+
+@keyframes opening-cinematic-veil {
+  0%, 54% { opacity: 1; }
+  82% { opacity: 0.7; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .expedition-modal-scrim,
   .expedition-modal-panel,
@@ -382,6 +429,11 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   .opening-black-fade-reveal {
+    opacity: 0;
+  }
+
+  .opening-cinematic-veil {
+    animation: none;
     opacity: 0;
   }
 }

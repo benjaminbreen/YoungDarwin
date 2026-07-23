@@ -4,7 +4,10 @@ import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainHeight } from '../../world/terrain';
 import { getEcology } from '../../world/ecology';
-import { readRegionEcologyResource } from '../../world/ecology/ecologyResource';
+import {
+  readRegionEcologyResource,
+  readRegionNeighborEcologyResource,
+} from '../../world/ecology/ecologyResource';
 import { getBorderVistas } from '../../world/vistas';
 import { buildBorderEcologyLayers, buildBorderGrassLayers } from '../../world/vistas/borderEcology';
 import { buildBorderTransition, CARDINAL_VISTA_EDGES } from '../../world/vistas/transitions';
@@ -47,13 +50,9 @@ const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
 `;
 
 const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
-  // Dithered dissolve across the seam band: the carry strip (real region
-  // material) keeps rendering beneath, and this mesh fades in over it. Stays
-  // in the opaque pass, so no transparency sorting against the water.
-  if (vBorderBlend < 0.999) {
-    float bvDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    if (vBorderBlend < bvDither) discard;
-  }
+  // Seam and outer-edge handoffs are now geometric overlaps/tapers. Keep the
+  // terrain fully opaque here so distant ground never resolves into visible
+  // screen-door pixels or exposes the water layer through dry land.
   float bvDist = length(vBorderWorldPosition.xz);
   float bvNear = 1.0 - smoothstep(84.0, 142.0, bvDist);
   float bvCoarse = bvNoise(vBorderWorldPosition.xz * 0.045 + vec2(2.0, -7.0));
@@ -68,8 +67,24 @@ const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
   diffuseColor.rgb *= clamp(1.0 + bvMottle * bvNear - bvSlope * 0.055, 0.82, 1.16);
 `;
 
-function createBorderVistaMaterial(cheapMaterials) {
-  const material = cheapMaterials
+// Horizon colors and relief are already baked at island scale. Reapplying the
+// close apron grain makes the pattern too legible over the silhouette, so
+// distant landforms intentionally use vertex color and scene fog only.
+const BORDER_LANDFORM_APPLY = /* glsl */`
+  diffuseColor.rgb *= 0.995;
+  // Side relief and color already taper into the atmospheric palette in the
+  // geometry. Keep the surface opaque: a translucent, depth-writing edge can
+  // mask the neighboring landform and leave a sky-colored crack between the
+  // two, while a non-depth-writing edge exposes the water as a blue strip.
+`;
+
+function createBorderVistaMaterial(cheapMaterials, distantLandform = false) {
+  const material = distantLandform
+    ? new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      fog: true,
+    })
+    : cheapMaterials
     ? new THREE.MeshPhongMaterial({
       vertexColors: true,
       shininess: 0,
@@ -82,11 +97,20 @@ function createBorderVistaMaterial(cheapMaterials) {
       metalness: 0,
       fog: true,
     });
-  // Both tiers get the shader patch: it carries the seam dither (without it the
-  // cheap tier's vista mesh pops fully-opaque over the carry strip), the
-  // per-pixel grain, and the extra fog reach. The patched chunks exist
-  // identically in Phong and Standard, and the added cost is two noise reads on
-  // apron pixels only.
+  if (distantLandform) {
+    // Keep the schematic ridge matte and two-sided. Scene lights can otherwise
+    // turn individual low-poly slope rows into pale bands at grazing angles.
+    // It joins the transparent queue after the water layers, but remains
+    // visually opaque and depth-writing; foreground opaque terrain therefore
+    // still masks it while water cannot stripe across the inland backdrop.
+    material.side = THREE.DoubleSide;
+    material.transparent = true;
+    material.depthWrite = true;
+  }
+  // Both tiers get the shader patch for per-pixel grain, horizon stabilization,
+  // and the slight additional fog reach. The patched chunks exist identically
+  // in Phong and Standard, and the added cost is two noise reads on apron
+  // pixels only.
   material.onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -127,10 +151,12 @@ function createBorderVistaMaterial(cheapMaterials) {
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        ${BORDER_VISTA_GRAIN_APPLY}`,
+        ${distantLandform ? BORDER_LANDFORM_APPLY : BORDER_VISTA_GRAIN_APPLY}`,
       );
   };
-  material.customProgramCacheKey = () => (cheapMaterials ? 'border-vista-grain-phong-v3' : 'border-vista-grain-standard-v4');
+  material.customProgramCacheKey = () => (
+    `${distantLandform ? 'border-landform-basic-v9' : cheapMaterials ? 'border-vista-grain-phong-v7' : 'border-vista-grain-standard-v8'}-${distantLandform ? 'opaque-hazed-horizon' : 'fixed'}`
+  );
   material.needsUpdate = true;
   return material;
 }
@@ -338,8 +364,14 @@ function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = t
   const targetConfig = useMemo(() => (
     vista.toRegionId ? getRegionTerrainConfig(vista.toRegionId) : null
   ), [vista.toRegionId]);
-  const sourceEcology = useMemo(() => getEcology(regionId), [regionId]);
-  const targetEcology = useMemo(() => getEcology(vista.toRegionId), [vista.toRegionId]);
+  const sourceEcology = useMemo(
+    () => (borderEcologyReady ? getEcology(regionId) : null),
+    [borderEcologyReady, regionId],
+  );
+  const targetEcology = useMemo(
+    () => (borderEcologyReady ? getEcology(vista.toRegionId) : null),
+    [borderEcologyReady, vista.toRegionId],
+  );
   const transition = useMemo(() => (
     buildBorderTransition(regionId, config, vista, targetConfig)
   ), [regionId, config, targetConfig, vista]);
@@ -376,7 +408,11 @@ function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = t
       : []
   ), [borderEcologyReady, config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
   const material = useMemo(() => createBorderVistaMaterial(cheapMaterials), [cheapMaterials]);
-  useEffect(() => () => material.dispose(), [material]);
+  const horizonMaterial = useMemo(() => createBorderVistaMaterial(cheapMaterials, true), [cheapMaterials]);
+  useEffect(() => () => {
+    material.dispose();
+    horizonMaterial.dispose();
+  }, [horizonMaterial, material]);
   if (!geometry) return null;
   const isNeighborPreview = geometry.userData.mode === 'neighbor-preview';
   return (
@@ -389,9 +425,10 @@ function BorderVista({ regionId, config, vista, prepared, borderEcologyReady = t
       {horizonGeometry && viewMode !== 'top' && (
         <mesh
           geometry={horizonGeometry}
-          material={material}
+          material={horizonMaterial}
           receiveShadow={false}
           castShadow={false}
+          frustumCulled={false}
           userData={{
             renderSource: `border-landform:${vista.id}`,
             renderLabel: `${vista.toRegionId || vista.id} distant landform`,
@@ -484,6 +521,13 @@ export function BorderVistas({ preparationPhase = 6 }) {
   const stagedPreparationPhase = transitionDestinationId === currentZoneId
     ? preparationPhase
     : 6;
+  // The destination ecology is sufficient for its terrain and local details.
+  // Neighbor definitions are prepared in the same worker only after that
+  // critical result has been delivered, and are consumed when border foliage
+  // enters at phase five. Suspense keeps this work behind the travel chart.
+  if (stagedPreparationPhase >= 5) {
+    readRegionNeighborEcologyResource(currentZoneId);
+  }
   const earlyVistaCount = Math.ceil(vistas.length * 0.5);
   return (
     <group name="border-terrain-aprons" userData={{

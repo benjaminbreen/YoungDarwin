@@ -76,6 +76,7 @@ const AUTHORED_REGION_TERRAIN = {
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },
   NW_REEF: { preset: 'floreana-nw-reef', segments: 300 },
   BLACK_BEACH: { preset: 'black-beach-west-coast', segments: 320 },
+  W_LAVA: { preset: 'western-lowlands-tidal-lagoon', segments: 288 },
   BLACK_BEACH_SURF: { preset: 'black-beach-surf-shelf', segments: 300 },
   S_HUT: { preset: 'beach-with-hut-southwest', segments: 300 },
   S_REEFS: { preset: 'southern-white-reef', segments: 300 },

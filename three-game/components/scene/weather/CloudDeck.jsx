@@ -23,6 +23,16 @@ import { useThreeGameStore } from '../../../store';
 //    grey murk, guaranteeing no blue gap survives a closed sky. Rain flattens
 //    it dark. This regime's look is unchanged from the original deck.
 const DOME_RADIUS = 164;
+// Plane-space drift per second at cloudDriftSpeed*windSpeed = 1. Fair weather
+// multiplies this up (puffs visibly scud); a closing deck slows back toward
+// the original stately overcast drift.
+const DECK_DRIFT_RATE = 0.014;
+const FAIR_DRIFT_BOOST = 1.8;
+
+function smoothstep01(edge0, edge1, value) {
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 const _lightColor = new THREE.Color();
 const _shadeColor = new THREE.Color();
@@ -51,14 +61,15 @@ export function CloudDeck() {
     transparent: true,
     depthWrite: false,
     uniforms: {
-      uTime: { value: 0 },
+      // Accumulated plane-space drift (JS integrates wind each frame so drift
+      // speed can change without the pattern jumping).
+      uDrift: { value: new THREE.Vector2(0, 0) },
       uCover: { value: 0 },
       uCumulus: { value: 0 },
       uClump: { value: 0.5 },
       uPuffScale: { value: 0.9 },
       uRain: { value: 0 },
       uDaylight: { value: 1 },
-      uWind: { value: new THREE.Vector2(1, 0) },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uLight: { value: new THREE.Color('#f3f6f7') },
       uShade: { value: new THREE.Color('#93a5b5') },
@@ -78,14 +89,13 @@ export function CloudDeck() {
     `,
     fragmentShader: /* glsl */`
       varying vec3 vWorldDir;
-      uniform float uTime;
+      uniform vec2 uDrift;
       uniform float uCover;
       uniform float uCumulus;
       uniform float uClump;
       uniform float uPuffScale;
       uniform float uRain;
       uniform float uDaylight;
-      uniform vec2 uWind;
       uniform vec3 uSunDir;
       uniform vec3 uLight;
       uniform vec3 uShade;
@@ -141,7 +151,7 @@ export function CloudDeck() {
         // Project the cloud field onto a virtual ceiling plane: overhead the
         // pattern is broad; toward the horizon it compresses naturally, like
         // a real cloud base receding into the distance.
-        vec2 drift = uWind * uTime * 0.014;
+        vec2 drift = uDrift;
         vec2 p = dir.xz / (max(dir.y, 0.0) + 0.18);
         // Per-state puff sizing (fair weather only): the closed deck keeps
         // the original frequency, so its look never changes with uPuffScale.
@@ -165,9 +175,28 @@ export function CloudDeck() {
 
         // --- Fair-weather cumulus: high threshold keeps clouds detached,
         // the short ramp gives crisp sunlit edges eroded ragged by detail.
-        float cumulusThreshold = clamp(mix(0.86, 0.52, uCumulus) - massBias * 0.3, 0.2, 0.95);
+        // The carve relaxes toward the horizon so puffs mass into a distant
+        // bank there — the trade-wind look, and a depth cue for the skyline.
+        float horizonBank = (1.0 - smoothstep(0.05, 0.32, dir.y)) * smoothstep(0.08, 0.45, uCumulus);
+        float cumulusThreshold = clamp(mix(0.86, 0.52, uCumulus) - massBias * 0.3 - horizonBank * 0.15, 0.2, 0.95);
         float puff = smoothstep(cumulusThreshold, cumulusThreshold + 0.16, field);
         float interior = smoothstep(cumulusThreshold + 0.06, cumulusThreshold + 0.5, field);
+        float fairWeather = 1.0 - smoothstep(0.3, 0.55, uCover);
+
+        // --- Near scud layer: the same field projected onto a lower, closer
+        // ceiling, drifting ~2.3x faster. The parallax between the two layers
+        // is what makes puffs read as passing overhead rather than painted on
+        // the dome. Fair-weather only, and kept off the horizon band where the
+        // main layer's bank owns the look.
+        vec2 p2 = dir.xz / (max(dir.y, 0.0) + 0.34) * 2.1 * puffFreq + drift * 2.3 + vec2(47.3, -13.1);
+        vec2 warp2 = vec2(fbm3(p2 * 0.7 + 3.7), fbm3(p2 * 0.7 - 15.2)) - 0.5;
+        float shape2 = fbm5(p2 + warp2 * 0.9);
+        float scudThreshold = clamp(mix(0.94, 0.7, uCumulus), 0.3, 0.97);
+        float scud = smoothstep(scudThreshold, scudThreshold + 0.16, shape2)
+          * fairWeather * smoothstep(0.1, 0.36, dir.y);
+        // Thick wisp cores shade like bellies; without this a big overhead
+        // wisp reads as flat glowing fog and bloom eats the layers below.
+        float scudInterior = smoothstep(scudThreshold + 0.05, scudThreshold + 0.34, shape2);
 
         // --- Overcast deck: coverage moves the carve threshold; horizon murk
         // reads as solid distance haze so a closed sky has zero blue gap.
@@ -175,7 +204,7 @@ export function CloudDeck() {
         float deck = smoothstep(deckThreshold, deckThreshold + 0.3, field) * smoothstep(0.04, 0.3, uCover);
         float murk = (1.0 - smoothstep(0.04, 0.38, dir.y)) * smoothstep(0.18, 0.6, uCover);
 
-        float coverage = max(max(puff, deck), murk);
+        float coverage = max(max(max(puff, deck), murk), scud * 0.85);
         if (coverage < 0.01) discard;
 
         // --- Directional sun light: probe the field a step toward the sun in
@@ -190,7 +219,6 @@ export function CloudDeck() {
 
         // Volume modelling belongs to the puff regime; it fades out as the
         // deck closes so the original overcast grading is untouched.
-        float fairWeather = 1.0 - smoothstep(0.3, 0.55, uCover);
         // Stronger interior falloff models volume: cores and bellies stay in
         // shadow so only the sun-facing tops carry the full light stop.
         float lit = clamp(0.16 + sunFacing * 0.92 * (1.0 - interior * mix(0.55, 0.72, fairWeather)), 0.0, 1.0);
@@ -201,14 +229,15 @@ export function CloudDeck() {
         vec2 zenithStep = -normalize(dir.xz + vec2(0.0001, 0.0)) * 0.3;
         float belly = clamp((fbm3(q + zenithStep) - fieldHere) * 2.6, 0.0, 1.0) * interior;
         color = mix(color, uShade * 0.8, belly * 0.45 * uDaylight * fairWeather);
-        // Overhead we mostly see undersides; deepen interiors looking up.
+        // Overhead we mostly see undersides; deepen interiors looking up so
+        // near clouds keep sculpted form instead of washing toward white.
         float overhead = smoothstep(0.35, 0.8, dir.y);
-        color = mix(color, uShade, overhead * interior * 0.28 * fairWeather);
+        color = mix(color, uShade, overhead * interior * 0.36 * fairWeather);
         // Silver lining on the lit rim only; fades with daylight. The rim is
         // allowed past 1.0 on purpose — it is the one part of a cloud that
         // should catch bloom.
         float rim = pow(sunFacing, 3.0) * (1.0 - interior) * uDaylight;
-        color += uSunTint * rim * 0.32;
+        color += uSunTint * rim * 0.24;
         // Forward scatter: thin cloud near the sun disc glows when backlit.
         float towardSun = pow(max(dot(dir, uSunDir), 0.0), 6.0);
         color += uSunTint * towardSun * (1.0 - interior) * 0.18 * uDaylight;
@@ -230,9 +259,19 @@ export function CloudDeck() {
           * smoothstep(0.1, 0.5, uCover);
         color = mix(color, uDark, clamp(darkening, 0.0, 1.0));
 
+        // Scud composites over everything: it is the nearest layer. A tint,
+        // not a paint-over — shaded cores, held below the bloom threshold so
+        // only the main layer's sun rims are allowed to blow out.
+        vec3 scudColor = mix(uShade, uLight, 0.66 - scudInterior * 0.28);
+        scudColor += uSunTint * towardSun * (1.0 - scudInterior) * 0.1;
+        color = mix(color, scudColor, clamp(scud * 0.62, 0.0, 1.0));
+
         // Interiors of big fused masses read denser than their lacy edges.
         float alpha = max(
-          puff * min(0.66 + uCumulus * 0.26 + interior * 0.12, 1.0),
+          max(
+            puff * min(0.66 + uCumulus * 0.26 + interior * 0.12, 1.0),
+            scud * (0.28 + scudInterior * 0.14)
+          ),
           max(deck, murk) * (0.55 + uCover * 0.45)
         ) * aboveHorizon;
         if (alpha < 0.01) discard;
@@ -245,7 +284,7 @@ export function CloudDeck() {
 
   useLayoutEffect(() => () => material.dispose(), [material]);
 
-  useFrame(({ clock }) => {
+  useFrame((state, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
     mesh.visible = weatherEnv.overcast > 0.02 || weatherEnv.cumulus > 0.02;
@@ -253,13 +292,19 @@ export function CloudDeck() {
     mesh.position.copy(camera.position);
     const store = useThreeGameStore.getState();
     const celestial = skyState(store.timeOfDay, store.day || 1);
+    // Integrate drift so speed changes never jump the pattern. Fair weather
+    // scuds; a closing deck settles back to the original stately drift.
+    const fairness = 1 - smoothstep01(0.3, 0.55, weatherEnv.overcast);
+    const driftRate = DECK_DRIFT_RATE * weatherEnv.cloudDriftSpeed * weatherEnv.windSpeed
+      * (1 + FAIR_DRIFT_BOOST * fairness) * delta;
+    material.uniforms.uDrift.value.x += weatherEnv.windX * driftRate;
+    material.uniforms.uDrift.value.y += weatherEnv.windZ * driftRate;
     const solarDrama = Math.max(celestial.dawnDrama || 0, celestial.duskDrama || 0)
       * (1 - weatherEnv.overcast * 0.86)
       * (1 - weatherEnv.mistAmount * 0.45)
       * (1 - weatherEnv.rainIntensity * 0.62);
     const duskSide = (celestial.duskDrama || 0) > (celestial.dawnDrama || 0) ? 1 : 0;
     const u = material.uniforms;
-    u.uTime.value = clock.elapsedTime;
     u.uCover.value = weatherEnv.overcast;
     u.uCumulus.value = weatherEnv.cumulus;
     u.uClump.value = weatherEnv.cumulusClump;
@@ -267,10 +312,6 @@ export function CloudDeck() {
     u.uRain.value = weatherEnv.rainIntensity;
     u.uDaylight.value = celestial.daylight;
     u.uSunDir.value.set(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
-    u.uWind.value.set(
-      weatherEnv.windX * weatherEnv.cloudDriftSpeed,
-      weatherEnv.windZ * weatherEnv.cloudDriftSpeed
-    );
     // Tint from the live fog color so the clouds inherit day/night and
     // golden-hour for free; rain pulls the light stop toward storm slate.
     if (scene.fog) {
@@ -280,7 +321,7 @@ export function CloudDeck() {
       // only the additive sun rim is allowed to cross into bloom.
       _lightColor
         .copy(scene.fog.color)
-        .lerp(_white, (0.3 + celestial.daylight * 0.28) * (1 - night))
+        .lerp(_white, (0.26 + celestial.daylight * 0.22) * (1 - night))
         .lerp(_nightCloudLight, night * 0.82);
       _shadeColor.copy(scene.fog.color).lerp(_cumulusShade, 0.55)
         .multiplyScalar(0.55 + celestial.daylight * 0.25)

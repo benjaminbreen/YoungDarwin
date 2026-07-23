@@ -102,13 +102,18 @@ function EntryThumb({ entry }) {
   );
 }
 
-function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, onNew, className = '' }) {
-  const tabs = [
-    { id: 'all', label: 'All', count: counts.all },
-    { id: 'specimen', label: 'Specimens', count: counts.specimen },
-    { id: 'location', label: 'Locations', count: counts.location },
-    { id: 'note', label: 'Notes', count: counts.note },
-  ];
+function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, onNew, devCatalogue = false, className = '' }) {
+  const tabs = devCatalogue
+    ? [
+        { id: 'all', label: 'All', count: counts.all },
+        { id: 'specimen', label: 'Specimens', count: counts.specimen },
+      ]
+    : [
+        { id: 'all', label: 'All', count: counts.all },
+        { id: 'specimen', label: 'Specimens', count: counts.specimen },
+        { id: 'location', label: 'Locations', count: counts.location },
+        { id: 'note', label: 'Notes', count: counts.note },
+      ];
   const visible = entries.filter(entry => filter === 'all' || entry.type === filter);
   const emptyCopy = entries.length === 0
     ? 'The pages await your observations.'
@@ -123,14 +128,21 @@ function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, o
       }}
     >
       <div className="p-2.5 pb-0">
-        <button
-          type="button"
-          onClick={onNew}
-          className="flex w-full items-center justify-center gap-2 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2 text-[15px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
-        >
-          <span className="text-[18px] leading-none">+</span>
-          New Journal Entry
-        </button>
+        {devCatalogue ? (
+          <div className="flex w-full items-center justify-between gap-3 rounded-[2px] border border-[#9b7040] bg-[#382614]/80 px-3 py-2 text-[#edcf99]">
+            <span className="text-[12px] font-semibold uppercase tracking-[0.18em]">Dev Catalogue</span>
+            <span className="text-[11px] text-[#c9aa76]">All {entries.length} specimens</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onNew}
+            className="flex w-full items-center justify-center gap-2 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2 text-[15px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
+          >
+            <span className="text-[18px] leading-none">+</span>
+            New Journal Entry
+          </button>
+        )}
       </div>
       <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="mx-2.5 mt-2" />
       <div className="relative min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5 [scrollbar-width:thin] [scrollbar-color:#7a5d35_rgba(0,0,0,0.22)]">
@@ -275,28 +287,15 @@ function JournalPage({ entry, draft, onDraftChange }) {
           </div>
         ) : null}
 
-        <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-[4%]">
-          <div className="min-w-0 self-end rotate-[-0.4deg] border-b border-[#3c2f1e]/40 pb-1.5">
-            <div className="font-handwriting text-[clamp(17px,3.4cqh,26px)] leading-tight">
+        <div className="shrink-0">
+          <div className="inline-block max-w-full rotate-[-0.4deg] border-b border-[#3c2f1e]/40 pb-1.5 pr-[clamp(1.5rem,7cqw,5rem)]">
+            <div className="whitespace-nowrap font-handwriting text-[clamp(17px,3.4cqh,26px)] leading-tight">
               <OrnateDate day={entry.day || 1} />
             </div>
             <div className="mt-1 truncate font-handwriting text-[clamp(13px,2.6cqh,19px)] leading-tight text-[#4a3a24]">
               {location}
             </div>
           </div>
-          {specimen && (
-            <figure
-              className="flex h-[clamp(5.5rem,24cqh,11rem)] rotate-[0.7deg] flex-col items-center justify-self-end mix-blend-multiply"
-              style={{ filter: 'sepia(0.5) contrast(1.04)' }}
-            >
-              <SketchPortrait specimen={specimen} className="min-h-0 flex-1 object-contain" />
-              {specimen.latin && (
-                <figcaption className="mt-1 font-handwriting text-[clamp(10px,1.8cqh,13px)] text-[#5c4a2e]">
-                  {specimen.latin}
-                </figcaption>
-              )}
-            </figure>
-          )}
         </div>
 
         <div className="relative mt-[2.5cqh] min-h-0 flex-1">
@@ -308,7 +307,7 @@ function JournalPage({ entry, draft, onDraftChange }) {
               onBlur={() => setTypingMode(false)}
               aria-label="Write journal entry"
               placeholder="Write observations here..."
-              className="journal-ruled block h-full w-full resize-none bg-transparent font-handwriting text-[clamp(14px,2.6cqh,18px)] leading-[1.85] text-[#3c2f1e] outline-none placeholder:text-[#6f604b]/45"
+              className="journal-ruled block h-full w-full resize-none bg-transparent font-journal text-[clamp(19px,3cqh,24px)] font-medium leading-[1.55] tracking-[0.008em] text-[#302616] outline-none placeholder:italic placeholder:text-[#6f604b]/45"
               spellCheck
             />
           ) : (
@@ -317,7 +316,20 @@ function JournalPage({ entry, draft, onDraftChange }) {
                 ref={bodyRef}
                 className="h-full overflow-y-auto overflow-x-hidden pr-2 [scrollbar-width:thin] [scrollbar-color:#8a7351_transparent]"
               >
-                <div className="max-w-[68ch] whitespace-pre-wrap break-words pb-3 font-handwriting text-[clamp(14px,2.6cqh,18px)] leading-[1.85] [overflow-wrap:anywhere]">
+                <div className="w-full whitespace-pre-wrap break-words pb-3 font-journal text-[clamp(19px,3cqh,24px)] font-medium leading-[1.55] tracking-[0.008em] text-[#302616] [overflow-wrap:anywhere]">
+                  {specimen && (
+                    <figure
+                      className="float-right mb-[2.5cqh] ml-[clamp(1.5rem,4cqw,3rem)] flex h-[clamp(11rem,38cqh,18rem)] w-[clamp(18rem,44cqw,34rem)] max-w-[55%] rotate-[0.7deg] flex-col items-center mix-blend-multiply"
+                      style={{ filter: 'sepia(0.5) contrast(1.04)' }}
+                    >
+                      <SketchPortrait specimen={specimen} className="min-h-0 w-full flex-1 object-contain object-right" />
+                      {specimen.latin && (
+                        <figcaption className="mt-1 whitespace-normal text-center font-handwriting text-[clamp(10px,1.8cqh,13px)] leading-snug text-[#5c4a2e]">
+                          {specimen.latin}
+                        </figcaption>
+                      )}
+                    </figure>
+                  )}
                   {entry.content}
                 </div>
               </div>
@@ -334,6 +346,73 @@ function JournalPage({ entry, draft, onDraftChange }) {
   );
 }
 
+function DevSpecimenCataloguePage({ entry }) {
+  const specimen = entry.specimen;
+  const taxonomy = [specimen.ontology, specimen.order, specimen.sub_order].filter(Boolean);
+
+  return (
+    <section
+      key={entry.key}
+      className="journal-page-turn journal-parchment text-[#3c2f1e]"
+      style={{ width: 'min(98cqw, 136cqh)', height: 'min(96cqh, 140cqw)' }}
+    >
+      <div className="relative flex h-full min-h-0 flex-col px-[clamp(1.8rem,6cqw,4rem)] py-[clamp(1.25rem,4.5cqh,2.8rem)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#59462c]/35 pb-[1.5cqh] font-expedition text-[clamp(9px,1.5cqh,12px)] font-semibold uppercase tracking-[0.2em] text-[#765e3b]">
+          <span>Development specimen catalogue</span>
+          <span>{entry.page} / {entry.totalPages}</span>
+        </div>
+
+        <header className="shrink-0 pt-[2.5cqh] text-center">
+          <h2 className="font-handwriting text-[clamp(24px,5.2cqh,42px)] leading-tight text-[#302416]">
+            {specimen.name}
+          </h2>
+          {specimen.latin && (
+            <div className="mt-[0.7cqh] font-expedition text-[clamp(12px,2.2cqh,17px)] italic tracking-wide text-[#655036]">
+              {specimen.latin}
+            </div>
+          )}
+        </header>
+
+        <figure className="my-[2cqh] flex min-h-0 flex-1 items-center justify-center overflow-hidden mix-blend-multiply">
+          <SketchPortrait
+            specimen={specimen}
+            alt={`Development catalogue sketch of ${specimen.name}`}
+            className="h-full w-full object-contain"
+          />
+        </figure>
+
+        <footer className="grid shrink-0 gap-1 border-t border-[#59462c]/35 pt-[1.5cqh] text-center text-[#655036]">
+          {taxonomy.length > 0 && (
+            <div className="font-expedition text-[clamp(10px,1.7cqh,13px)] tracking-[0.08em]">
+              {taxonomy.join('  ·  ')}
+            </div>
+          )}
+          <div className="font-mono text-[clamp(8px,1.35cqh,10px)] uppercase tracking-[0.14em] text-[#806b4c]">
+            {specimen.id}
+          </div>
+        </footer>
+      </div>
+    </section>
+  );
+}
+
+const JOURNAL_DEV_CATALOGUE_AVAILABLE = process.env.NODE_ENV !== 'production';
+
+function makeDevCatalogueEntries() {
+  const specimens = [...baseSpecimens].sort((a, b) => a.name.localeCompare(b.name));
+  return specimens.map((specimen, index) => ({
+    key: `dev-catalogue-${specimen.id}`,
+    type: 'specimen',
+    title: specimen.name,
+    subtitle: specimen.latin || specimen.ontology || 'Specimen',
+    date: `${index + 1} of ${specimens.length}`,
+    specimen,
+    page: index + 1,
+    totalPages: specimens.length,
+    devCatalogue: true,
+  }));
+}
+
 function JournalPanel({ onClose, onOpenMap }) {
   const journal = useThreeGameStore(state => state.journal);
   const day = useThreeGameStore(state => state.day);
@@ -344,10 +423,14 @@ function JournalPanel({ onClose, onOpenMap }) {
   const setJournalDraft = useThreeGameStore(state => state.setJournalDraft);
   const [filter, setFilter] = useState('all');
   const [selectedKey, setSelectedKey] = useState(() => journal.at(-1)?.id || 'draft');
+  const [devCatalogue, setDevCatalogue] = useState(false);
+  const regularSelectionRef = useRef(selectedKey);
   // Below lg the list and page trade places (drill-in) instead of stacking.
   const [mobileView, setMobileView] = useState('list');
 
-  const entries = useMemo(() => journal.map(normalizeEntry).reverse(), [journal]);
+  const journalEntries = useMemo(() => journal.map(normalizeEntry).reverse(), [journal]);
+  const devCatalogueEntries = useMemo(makeDevCatalogueEntries, []);
+  const entries = devCatalogue ? devCatalogueEntries : journalEntries;
   const counts = useMemo(
     () => entries.reduce(
       (acc, entry) => {
@@ -360,8 +443,10 @@ function JournalPanel({ onClose, onOpenMap }) {
     [entries],
   );
   const currentLocation = getThreeIslandLocation(currentZoneId);
-  const selectedEntry = selectedKey === 'draft'
-    ? {
+  const selectedEntry = devCatalogue
+    ? entries.find(entry => entry.key === selectedKey) || entries[0] || null
+    : selectedKey === 'draft'
+      ? {
         key: 'draft',
         type: 'draft',
         title: 'New Journal Entry',
@@ -371,13 +456,15 @@ function JournalPanel({ onClose, onOpenMap }) {
         page: journal.length + 1,
         content: '',
       }
-    : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
+      : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
   const isDraft = selectedEntry?.type === 'draft';
 
   // Book order: oldest entry first, the blank draft as the final page.
   const pageKeys = useMemo(
-    () => entries.map(entry => entry.key).reverse().concat('draft'),
-    [entries],
+    () => devCatalogue
+      ? devCatalogueEntries.map(entry => entry.key)
+      : journalEntries.map(entry => entry.key).reverse().concat('draft'),
+    [devCatalogue, devCatalogueEntries, journalEntries],
   );
   const pageIndex = Math.max(0, pageKeys.indexOf(selectedKey));
 
@@ -389,13 +476,43 @@ function JournalPanel({ onClose, onOpenMap }) {
   };
 
   useEffect(() => {
+    if (devCatalogue) {
+      if (!devCatalogueEntries.some(entry => entry.key === selectedKey)) {
+        setSelectedKey(devCatalogueEntries[0]?.key || 'draft');
+      }
+      return;
+    }
     if (selectedKey !== 'draft' && !entries.some(entry => entry.key === selectedKey)) {
       setSelectedKey(entries[0]?.key || 'draft');
     }
-  }, [entries, selectedKey]);
+  }, [devCatalogue, devCatalogueEntries, entries, selectedKey]);
+
+  const toggleDevCatalogue = () => {
+    if (!JOURNAL_DEV_CATALOGUE_AVAILABLE) return;
+    if (devCatalogue) {
+      setDevCatalogue(false);
+      setSelectedKey(regularSelectionRef.current || journalEntries[0]?.key || 'draft');
+    } else {
+      regularSelectionRef.current = selectedKey;
+      setDevCatalogue(true);
+      setFilter('all');
+      setSelectedKey(devCatalogueEntries[0]?.key || 'draft');
+      setMobileView('page');
+    }
+  };
 
   useEffect(() => {
     const onKeyDown = event => {
+      if (
+        JOURNAL_DEV_CATALOGUE_AVAILABLE &&
+        event.altKey &&
+        event.shiftKey &&
+        event.code === 'KeyJ'
+      ) {
+        event.preventDefault();
+        toggleDevCatalogue();
+        return;
+      }
       if (event.defaultPrevented) return;
       const tag = event.target?.tagName;
       if (tag === 'TEXTAREA' || tag === 'INPUT' || event.target?.isContentEditable) return;
@@ -441,11 +558,14 @@ function JournalPanel({ onClose, onOpenMap }) {
             setSelectedKey('draft');
             setMobileView('page');
           }}
+          devCatalogue={devCatalogue}
         />
         <div className={`relative min-h-0 flex-col ${mobileView === 'list' ? 'hidden lg:flex' : 'flex'}`}>
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden [container-type:size]">
             {selectedEntry && (
-              <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
+              selectedEntry.devCatalogue
+                ? <DevSpecimenCataloguePage entry={selectedEntry} />
+                : <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
             )}
           </div>
           <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2.5">
@@ -459,8 +579,22 @@ function JournalPanel({ onClose, onOpenMap }) {
               </svg>
               Entries
             </button>
-            {/* invisible mirror of the pager so the action cluster stays centered */}
-            <div aria-hidden="true" className="hidden lg:block lg:w-36" />
+            <div className="hidden w-40 items-center lg:flex">
+              {JOURNAL_DEV_CATALOGUE_AVAILABLE && (
+                <button
+                  type="button"
+                  onClick={toggleDevCatalogue}
+                  className={`rounded-[3px] border px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] transition ${
+                    devCatalogue
+                      ? 'border-[#a97d45] bg-[#4a3219] text-[#f0ce94]'
+                      : 'border-[#4f3d25] bg-black/15 text-[#8f7856] hover:border-[#755b35] hover:text-[#c3a474]'
+                  }`}
+                  title="Toggle the development specimen catalogue (Alt/Option + Shift + J)"
+                >
+                  {devCatalogue ? 'Exit dev catalogue' : 'Dev: Alt + Shift + J'}
+                </button>
+              )}
+            </div>
             <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-2.5">
               {isDraft && (
                 <button
@@ -475,7 +609,7 @@ function JournalPanel({ onClose, onOpenMap }) {
               <PageButton icon="eye" onClick={handleViewSpecimen} disabled={!selectedEntry?.specimen}>
                 View Specimen
               </PageButton>
-              <PageButton icon="pin" onClick={onOpenMap}>View Location</PageButton>
+              <PageButton icon="pin" onClick={onOpenMap} disabled={devCatalogue}>View Location</PageButton>
             </div>
             <div className="flex w-36 items-center justify-end gap-1.5">
               <PagerButton direction="prev" onClick={() => goToPage(pageIndex - 1)} disabled={pageIndex === 0} />

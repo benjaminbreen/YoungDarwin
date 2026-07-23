@@ -27,6 +27,7 @@ module.exports = {
       fontFamily: {
         expedition: ['var(--font-garamond)', 'Georgia', 'Times New Roman', 'serif'],
         handwriting: ['var(--font-meddon)', 'Snell Roundhand', 'Apple Chancery', 'Bradley Hand', 'Segoe Script', 'cursive'],
+        journal: ['var(--font-caveat)', 'Segoe Print', 'Bradley Hand', 'cursive'],
       },
       keyframes: {
         // Animate the standalone `translate` property, not `transform`, so the

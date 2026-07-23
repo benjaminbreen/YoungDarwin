@@ -19,6 +19,8 @@ const VISUAL_RUN_TIMEOUT_MS = numberOption(
   BOOT_TIMEOUT_MS + 30000,
 );
 const AUTO_START_SERVER = process.env.THREE_SCREENSHOT_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
+const OPEN_JOURNAL_DEV_CATALOGUE = process.argv.includes('--open-journal-dev-catalogue');
+const OPEN_JOURNAL = OPEN_JOURNAL_DEV_CATALOGUE || process.argv.includes('--open-journal');
 const CAPTURE_MODE = screenshotCaptureMode();
 const REQUESTED_LOADING_CANVAS_FALLBACK = (
   process.argv.includes('--allow-loading-canvas')
@@ -40,6 +42,7 @@ const EXAMINE_ACTOR = argValue('--examine');
 const OPEN_SYMS_FIELD_CASE = process.argv.includes('--open-syms-field-case');
 const REQUESTED_ZONE = argValue('--zone') || argValue('--region');
 const REQUESTED_TOOL = argValue('--tool');
+const REQUESTED_PLAYABLE_MODE = argValue('--mode') || 'darwin';
 
 const ALL_VIEWPORTS = {
   desktop: { name: 'desktop', width: 1440, height: 900 },
@@ -154,6 +157,7 @@ function screenshotName(viewportName) {
 }
 
 function screenshotCaptureMode() {
+  if (OPEN_JOURNAL) return 'page';
   const raw = process.env.THREE_SCREENSHOT_CAPTURE || argValue('--capture') || 'canvas';
   const mode = raw.trim().toLowerCase();
   if (!['page', 'canvas'].includes(mode)) {
@@ -555,8 +559,9 @@ async function clickNewExpeditionFlow(page, consoleErrors) {
     await page.getByRole('button', { name: /^New Expedition$/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
 
-  await withFailureArtifacts(page, 'choose Darwin mode', consoleErrors, async () => {
-    await page.getByRole('button', { name: /^Darwin\b/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
+  const modeLabel = REQUESTED_PLAYABLE_MODE.charAt(0).toUpperCase() + REQUESTED_PLAYABLE_MODE.slice(1);
+  await withFailureArtifacts(page, `choose ${modeLabel} mode`, consoleErrors, async () => {
+    await page.getByRole('button', { name: new RegExp(`^${modeLabel}\\b`, 'i') }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
 
   await withFailureArtifacts(page, 'enter loading state', consoleErrors, async () => {
@@ -848,6 +853,18 @@ async function run() {
         await page.evaluate(() => window.__darwinE2E.toggleSymsFieldCase());
         await page.waitForTimeout(900);
         await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
+      });
+    }
+    if (OPEN_JOURNAL) {
+      await withFailureArtifacts(page, OPEN_JOURNAL_DEV_CATALOGUE ? 'open journal development catalogue' : 'open journal', errors, async () => {
+        await page.getByRole('button', { name: 'Open field notebook' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+        await page.getByText('My observations and notes', { exact: true }).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+        if (OPEN_JOURNAL_DEV_CATALOGUE) {
+          await page.keyboard.press('Alt+Shift+J');
+          await page.getByText('Development specimen catalogue').waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+          await page.getByAltText(/Development catalogue sketch of/i).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+        }
+        await page.waitForTimeout(500);
       });
     }
     if (PLAYER_MODEL_STEPS > 0 || VERIFY_DARWIN5_UPGRADE) {

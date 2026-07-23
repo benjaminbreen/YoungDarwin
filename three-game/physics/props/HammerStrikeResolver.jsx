@@ -59,6 +59,11 @@ export function HammerStrikeResolver() {
       }
       emitPropEvent('prop-struck', {
         propId: `hammer-surface:${impact.kind}`,
+        material: impact.kind === 'rock' || impact.kind === 'volcanic-ground'
+          ? 'stone'
+          : impact.kind === 'wood' || impact.kind === 'plant'
+            ? 'wood'
+            : impact.kind,
         position: impact.position,
         impactDir: { x: impact.impactDir.x, y: 0, z: impact.impactDir.z },
         dustCount: impact.dustCount,
@@ -77,6 +82,7 @@ export function HammerStrikeResolver() {
       }
       if (impact.groundPlume) {
         emitPropEvent('surface-contact', {
+          kind: 'hammer-ground',
           position: impact.position,
           intensity: 1.15,
           biome: impact.biome,

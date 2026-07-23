@@ -32,10 +32,11 @@ function pickTortoiseEatClip(avatar, motion, now) {
   return pickFromList(options, avatar.eatClip || avatar.idleClip, now * 10 + (motion.speed || 0) * 29);
 }
 
-function AnimalPlayerModel({ mode, profile, motionRef }) {
+function AnimalPlayerModel({ mode, profile, motionRef, onVisualReady = null }) {
   const groupRef = useRef(null);
   const avatar = useMemo(() => profile.avatar || {}, [profile.avatar]);
   const proceduralTortoise = mode.id === 'tortoise' && avatar.render === 'procedural';
+  const proceduralAvatar = proceduralTortoise || mode.id === 'finch';
   const activeAssetId = proceduralTortoise ? 'proceduralTortoise' : mode.assetId;
   const tortoiseSelector = useRef({
     action: null,
@@ -61,6 +62,10 @@ function AnimalPlayerModel({ mode, profile, motionRef }) {
     }
     return undefined;
   }, [activeAssetId, mode.id, motionRef, proceduralTortoise]);
+
+  useEffect(() => {
+    if (proceduralAvatar) onVisualReady?.();
+  }, [onVisualReady, proceduralAvatar]);
 
   useFrame(({ clock }, delta) => {
     const group = groupRef.current;
@@ -112,6 +117,8 @@ function AnimalPlayerModel({ mode, profile, motionRef }) {
       if (motion.action === 'animalSleep') return clipRequest(avatar.sleepClip || avatar.idleClip, avatar.sleepTimeScale || 0.45, 0.28);
       if (motion.lying) return clipRequest(avatar.sleepClip || avatar.idleClip, avatar.sleepTimeScale || 0.45, 0.28, avatar.sleepHoldTime ?? null);
       if (motion.action === 'animalDefecate') return clipRequest(avatar.defecateClip || avatar.idleClip, avatar.defecateTimeScale || 0.58, 0.22);
+      if (motion.action === 'animalSignalCurious') return clipRequest(avatar.alertClip || avatar.peekClip || avatar.idleClip, avatar.idleTimeScale || 0.72, 0.16);
+      if (motion.action === 'animalSignalWithdraw') return clipRequest(avatar.withdrawClip || avatar.hideClip || avatar.braceClip || avatar.idleClip, avatar.braceTimeScale || 0.72, 0.12);
 
       if (state.transitionClip && now >= state.transitionUntil) state.transitionClip = null;
       if (moving && !state.moving && avatar.startWalkClip) {
@@ -176,6 +183,7 @@ function AnimalPlayerModel({ mode, profile, motionRef }) {
           key={activeAssetId}
           id={activeAssetId}
           animationSelector={selectAnimation}
+          onSceneReady={onVisualReady}
         />
       )}
     </group>
@@ -211,5 +219,12 @@ export function PlayerAvatarModel({
     );
   }
 
-  return <AnimalPlayerModel mode={mode} profile={profile} motionRef={motionRef} />;
+  return (
+    <AnimalPlayerModel
+      mode={mode}
+      profile={profile}
+      motionRef={motionRef}
+      onVisualReady={onVisualReady}
+    />
+  );
 }

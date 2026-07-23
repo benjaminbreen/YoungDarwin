@@ -6,6 +6,7 @@ import {
 } from '../../../game-core/floreanaGeography';
 import { getRegionMap } from '../../../game-core/regionMaps';
 import { terrainSurfaceNoise } from '../terrain';
+import { WATER_LEVEL } from '../terrainShared';
 import {
   EDGE_AXES,
   axisLength,
@@ -163,6 +164,12 @@ export function makeDistantLandformGeometry(
   if (!axes || vista.render === false || !targetConfig) return null;
   const route = distantLandformRoute(regionId, vista.edge, vista.toRegionId);
   if (!route.length) return null;
+  // Short aprons already describe low coastal chains. Promoting those routes
+  // into mountain-scale backdrops makes neighboring cardinal sectors overlap
+  // at corners (and can put a false ridge over an otherwise open sea view).
+  // Reserve this layer for routes that genuinely climb toward the island's
+  // forest/highland mass or summit.
+  if (!route.some(entry => entry.macroHeight >= 14)) return null;
 
   const previewDepth = Math.min(vista.apronDepth || 72, 64);
   const nearDistance = Math.max(42, previewDepth - 11);
@@ -182,6 +189,7 @@ export function makeDistantLandformGeometry(
   const colors = [];
   const indices = [];
   const blends = [];
+  const previousRowHeights = new Array(cols + 1).fill(null);
   const firstMacroHeight = route[0].macroHeight;
   const includesSummit = route.some(entry => entry.regionId === 'C_HIGH');
   const summit = includesSummit ? summitProjection(regionId, vista.edge, farDistance) : null;
@@ -193,7 +201,9 @@ export function makeDistantLandformGeometry(
     const width = THREE.MathUtils.lerp(nearWidth, farWidth, Math.pow(distanceT, 0.82));
     const routeT = THREE.MathUtils.smoothstep(t, 0.08, 0.96);
     const regionalRise = routeValue(route, routeT, entry => entry.macroHeight) - firstMacroHeight;
-    const horizonShoulder = THREE.MathUtils.smoothstep(t, 0.18, 1) * 4.8;
+    // Keep the island mass legible without letting the schematic backdrop
+    // compete with the authored near terrain or crowd the top of the frame.
+    const horizonShoulder = THREE.MathUtils.smoothstep(t, 0.18, 1) * 2.1;
 
     for (let col = 0; col <= cols; col += 1) {
       const u = col / cols;
@@ -222,37 +232,50 @@ export function makeDistantLandformGeometry(
         z * 0.048 + (vista.seed || 0) * 0.6,
       );
       const nearRidge = Math.exp(-Math.pow((outsideDistance - 112) / 31, 2))
-        * (2.2 + Math.max(-0.5, broad) * 2.4);
+        * (1.45 + Math.max(-0.5, broad) * 1.6);
       const farRidge = Math.exp(-Math.pow((outsideDistance - 176) / 48, 2))
-        * (2.8 + Math.max(-0.45, middle) * 3.1);
-      const sideShoulder = THREE.MathUtils.smoothstep(side, 0.66, 1)
+        * (1.9 + Math.max(-0.45, middle) * 2.0);
+      const sideEnvelope = 1 - THREE.MathUtils.smoothstep(side, 0.62, 1);
+      const sideSink = THREE.MathUtils.smoothstep(side, 0.76, 1)
         * THREE.MathUtils.smoothstep(t, 0.12, 0.68)
-        * 1.8;
+        * 2.8;
       let summitLift = 0;
       if (summit) {
         const alongDelta = (alongDistance - summit.along) / 50;
         const distanceDelta = (outsideDistance - summit.distance) / 60;
-        summitLift = Math.exp(-(alongDelta * alongDelta + distanceDelta * distanceDelta) * 0.5) * 15.5;
+        summitLift = Math.exp(-(alongDelta * alongDelta + distanceDelta * distanceDelta) * 0.5) * 7.5;
       }
-      const relief = (broad * 2.3 + middle * 1.15) * THREE.MathUtils.smoothstep(t, 0.08, 0.7);
-      const targetY = overlap.y
-        + regionalRise * 0.9
+      const relief = (broad * 1.6 + middle * 0.8) * THREE.MathUtils.smoothstep(t, 0.08, 0.7);
+      const distantRelief = regionalRise * 0.56
         + horizonShoulder
         + nearRidge
         + farRidge
         + summitLift
-        + relief
-        - sideShoulder;
-      const y = THREE.MathUtils.lerp(overlap.y - 0.08, targetY, THREE.MathUtils.smoothstep(t, 0.02, 0.3));
+        + relief;
+      const targetY = overlap.y + distantRelief * sideEnvelope - sideSink;
+      const rawY = THREE.MathUtils.lerp(overlap.y - 0.08, targetY, THREE.MathUtils.smoothstep(t, 0.02, 0.3));
+      // A distant backdrop should read as one receding mass. Descending rows
+      // can expose the sky/water pass between a nearer and farther ridge at a
+      // grazing camera angle, producing the false blue or white strips seen in
+      // play. Permit only a negligible falloff as distance increases.
+      const previousY = previousRowHeights[col];
+      const y = previousY == null ? rawY : Math.max(rawY, previousY - 0.025);
+      previousRowHeights[col] = y;
 
       const color = routeColor(route, routeT);
-      const shade = THREE.MathUtils.clamp(1 + broad * 0.075 + middle * 0.035 - sideShoulder * 0.012, 0.84, 1.12);
+      const shade = THREE.MathUtils.clamp(1 + broad * 0.075 + middle * 0.035 - sideSink * 0.012, 0.84, 1.12);
       color.multiplyScalar(shade);
-      color.lerp(ATMOSPHERE, THREE.MathUtils.smoothstep(t, 0.34, 1) * 0.46);
+      color.lerp(ATMOSPHERE, THREE.MathUtils.smoothstep(t, 0.34, 1) * 0.55);
+      color.lerp(ATMOSPHERE, (1 - sideEnvelope) * 0.34);
+
+      // Relief sinks and its color approaches the atmospheric palette at the
+      // side boundaries, avoiding an exposed ruled triangle while the
+      // world-anchored material remains opaque for correct water occlusion.
+      const sideFade = THREE.MathUtils.smoothstep(side, 0.56, 1);
 
       positions.push(x, y, z);
       colors.push(color.r, color.g, color.b);
-      blends.push(1);
+      blends.push(1 - sideFade);
     }
   }
 
@@ -262,6 +285,37 @@ export function makeDistantLandformGeometry(
       const a = row * stride + col;
       indices.push(a, a + stride, a + 1, a + 1, a + stride, a + stride + 1);
     }
+  }
+
+  // The ridge is a terrain sheet, not a closed volume. At very low inland
+  // viewing angles, valleys in that sheet can otherwise reveal narrow bands
+  // of sky or the ocean behind it. Close only the far rim with an atmospheric
+  // curtain; the authored apron still owns the near join and side taper.
+  const farRowStart = rows * stride;
+  const curtainStart = positions.length / 3;
+  for (let col = 0; col <= cols; col += 1) {
+    const sourceIndex = farRowStart + col;
+    const positionIndex = sourceIndex * 3;
+    positions.push(
+      positions[positionIndex],
+      WATER_LEVEL - 6,
+      positions[positionIndex + 2],
+    );
+    const colorIndex = sourceIndex * 3;
+    const curtainColor = new THREE.Color(
+      colors[colorIndex],
+      colors[colorIndex + 1],
+      colors[colorIndex + 2],
+    ).lerp(ATMOSPHERE, 0.12);
+    colors.push(curtainColor.r, curtainColor.g, curtainColor.b);
+    blends.push(blends[sourceIndex]);
+  }
+  for (let col = 0; col < cols; col += 1) {
+    const topA = farRowStart + col;
+    const topB = topA + 1;
+    const bottomA = curtainStart + col;
+    const bottomB = bottomA + 1;
+    indices.push(topA, bottomA, topB, topB, bottomA, bottomB);
   }
 
   const geometry = new THREE.BufferGeometry();

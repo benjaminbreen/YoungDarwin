@@ -1,3 +1,5 @@
+import { getPlayableNarratorProfile } from './playableNarratorProfiles';
+
 const GENERIC_SPECIMEN_NOTE = 'Careful observation before collection often preserves the most useful evidence: behavior, habitat, and locality.';
 
 const SPECIMEN_LINES = {
@@ -210,7 +212,20 @@ export function darwinThought(context = {}) {
   return null;
 }
 
-export function localNarratorFallback({ input, nearbySpecimen } = {}) {
+export function localNarratorFallback({ input, nearbySpecimen, playableModeId = 'darwin' } = {}) {
+  const narratorProfile = getPlayableNarratorProfile(playableModeId);
+  if (narratorProfile.kind === 'animal') {
+    return {
+      narration: narratorProfile.fallbackNarration,
+      educationalNote: '',
+      fieldNote: '',
+      darwinThought: '',
+      actionDisposition: 'unavailable',
+      targetType: 'self',
+      fallback: true,
+      echo: String(input || '').trim(),
+    };
+  }
   const target = nearbySpecimen?.name ? ` The ${nearbySpecimen.name.toLowerCase()} supplies no evidence of being impressed.` : '';
   return {
     narration: `You enter the command in the field log, but the world remains stubbornly material.${target}`,

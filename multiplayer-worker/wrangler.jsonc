@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "young-darwin-multiplayer",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-22",
+  "durable_objects": {
+    "bindings": [
+      { "name": "ADMISSION", "class_name": "AdmissionCoordinator" },
+      { "name": "EXPEDITION_ROOMS", "class_name": "ExpeditionRoom" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AdmissionCoordinator", "ExpeditionRoom"]
+    }
+  ],
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -11,6 +11,7 @@ import { createReptileAnimator } from '../../wildlife/reptiles/reptileGaitRuntim
 import { createLavaLizardRig, LAVA_LIZARD_GAIT } from '../../wildlife/reptiles/lavaLizardModel';
 import { ProceduralFinchPlayer } from '../../components/player/ProceduralFinchPlayer';
 import { ProceduralRacerSnake } from '../../components/player/ProceduralRacerSnake';
+import { PaintedLocustShape } from '../../wildlife/insects/PaintedLocustShape';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -118,6 +119,14 @@ const PROCEDURAL_RACER_MODES = [
   'carried coil',
 ];
 
+const PROCEDURAL_LOCUST_MODES = [
+  'antenna watch',
+  'ground hop',
+  'plant perch',
+  'rock perch',
+  'escape leap',
+];
+
 function procModeInputs(mode, t) {
   switch (mode) {
     case 'walk': return { speed: 0.38, playerDist: 8 };
@@ -213,6 +222,17 @@ const PROCEDURAL_ANIMALS = [
     path: 'three-game/components/player/ProceduralRacerSnake.jsx',
     modes: PROCEDURAL_RACER_MODES,
     previewScale: 1.72,
+  },
+  {
+    id: 'galapagosPaintedLocustProcedural',
+    kind: 'procedural',
+    proceduralType: 'locust',
+    variant: 'largePaintedLocust',
+    label: 'New Galápagos Painted Locust',
+    source: 'Hand-authored procedural insect rig',
+    path: 'three-game/wildlife/insects/PaintedLocustShape.jsx',
+    modes: PROCEDURAL_LOCUST_MODES,
+    previewScale: 1.78,
   },
   {
     id: 'lavaLizardProceduralMale',
@@ -552,6 +572,47 @@ function ProceduralSnakePreview({ animal, mode, paused, timeScale }) {
         </mesh>
       )}
       <ProceduralRacerSnake motionRef={motionRef} />
+    </group>
+  );
+}
+
+function ProceduralLocustPreview({ animal, mode, paused, timeScale }) {
+  const motionRef = useRef({ action: 'locustRest', hopProgress: 0, speed: 0 });
+  useFrame(({ clock }) => {
+    const leap = mode === 'ground hop' || mode === 'escape leap';
+    const cycleDuration = mode === 'escape leap' ? 1.15 : 1.8;
+    const cycle = (clock.elapsedTime * (paused ? 0 : timeScale)) % cycleDuration;
+    const progress = THREE.MathUtils.clamp(cycle / (mode === 'escape leap' ? 0.58 : 0.74), 0, 1);
+    motionRef.current = {
+      action: leap && progress < 1 ? 'locustHop' : 'locustRest',
+      flying: leap && progress > 0.08 && progress < 0.92,
+      hopProgress: progress,
+      speed: leap ? (mode === 'escape leap' ? 1.8 : 0.9) : 0,
+      timeScale: paused ? 0 : timeScale,
+    };
+  });
+
+  return (
+    <group position={[0, 0.08, 0]} scale={animal.previewScale || 1.78}>
+      {mode === 'rock perch' ? (
+        <mesh castShadow receiveShadow position={[0, -0.12, -0.06]} rotation={[0.04, 0.5, -0.05]} scale={[0.48, 0.16, 0.36]}>
+          <dodecahedronGeometry args={[1, 1]} />
+          <meshStandardMaterial color="#4b4840" roughness={0.98} />
+        </mesh>
+      ) : null}
+      {mode === 'plant perch' ? (
+        <group position={[0, -0.25, -0.05]}>
+          <mesh castShadow rotation={[0, 0, -0.08]}>
+            <cylinderGeometry args={[0.025, 0.045, 0.56, 8]} />
+            <meshStandardMaterial color="#60713d" roughness={0.9} />
+          </mesh>
+          <mesh castShadow position={[0.14, 0.08, 0]} rotation={[0, 0, -0.72]} scale={[0.22, 0.055, 0.11]}>
+            <sphereGeometry args={[1, 16, 8]} />
+            <meshStandardMaterial color="#83954d" roughness={0.82} />
+          </mesh>
+        </group>
+      ) : null}
+      <PaintedLocustShape motionRef={motionRef} />
     </group>
   );
 }
@@ -903,6 +964,14 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                       />
                     ) : selectedAnimal.proceduralType === 'snake' ? (
                       <ProceduralSnakePreview
+                        key={selectedAnimal.id}
+                        animal={selectedAnimal}
+                        mode={selectedClip}
+                        paused={paused}
+                        timeScale={timeScale}
+                      />
+                    ) : selectedAnimal.proceduralType === 'locust' ? (
+                      <ProceduralLocustPreview
                         key={selectedAnimal.id}
                         animal={selectedAnimal}
                         mode={selectedClip}

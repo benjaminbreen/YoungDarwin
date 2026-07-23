@@ -12,17 +12,20 @@ import {
 // Destination preparation starts at travel intent, so the chart can keep the
 // same visual sequence at a brisker tempo. The commit timer is only a fallback;
 // the normal path commits from the cover's opacity transitionend event.
-const ISLAND_COVER_START_MS = 0;
-const ISLAND_COMMIT_MS = 1080;
-const ISLAND_MIN_REVEAL_MS = 2600;
-const ISLAND_MAP_MIN_REVEAL_MS = 2600;
+const DEPARTURE_CRANE_MS = 900;
+const BLACK_FADE_IN_MS = 300;
+const ISLAND_COMMIT_MS = DEPARTURE_CRANE_MS + BLACK_FADE_IN_MS + 80;
+const ISLAND_CHART_REVEAL_MS = 2450;
+const ISLAND_CHART_HOLD_MS = 1000;
+const ISLAND_MAP_CHART_HOLD_MS = 900;
 const THRESHOLD_COMMIT_MS = 250;
-const CHART_FADE_IN_MS = 450;
-const CHART_FADE_OUT_MS = 450;
+const CHART_FADE_IN_MS = 320;
+const CHART_FADE_OUT_MS = 280;
+const WORLD_FADE_IN_MS = 420;
 const CAMERA_SETTLE_MS = 650;
-const CHART_ROUTE_START_MS = 180;
-const CHART_CAMERA_MOVE_MS = 1650;
-const CHART_ROUTE_MOVE_MS = 1500;
+const CHART_ROUTE_START_MS = 80;
+const CHART_CAMERA_MOVE_MS = 850;
+const CHART_ROUTE_MOVE_MS = 780;
 const MAP_LAYER_WIDTH_PERCENT = 116;
 
 function clamp(value, min, max) {
@@ -386,6 +389,8 @@ export function TravelInterstitial() {
   const setZoneTransitionPhase = useThreeGameStore(state => state.setZoneTransitionPhase);
   const finishZoneTransition = useThreeGameStore(state => state.finishZoneTransition);
   const [covered, setCovered] = useState(false);
+  const [chartVisible, setChartVisible] = useState(false);
+  const [chartBeatComplete, setChartBeatComplete] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const transitionId = transition?.id || null;
@@ -417,49 +422,85 @@ export function TravelInterstitial() {
   useEffect(() => {
     if (!transitionId) {
       setCovered(false);
+      setChartVisible(false);
+      setChartBeatComplete(false);
       setRevealing(false);
       return undefined;
     }
+    setCovered(false);
+    setChartVisible(false);
+    setChartBeatComplete(false);
     setRevealing(false);
     const immediateCover = reducedMotion || transitionSource === 'island-map';
+    const departureDelay = immediateCover || transitionMode === 'threshold'
+      ? 0
+      : DEPARTURE_CRANE_MS;
     const coverTimer = window.setTimeout(
       () => {
         window.__recordThreeTransitionEvent?.('cover-start');
         setCovered(true);
       },
-      immediateCover ? 0 : transitionMode === 'threshold' ? 0 : ISLAND_COVER_START_MS,
+      departureDelay,
     );
+    const chartRevealDelay = transitionSource === 'island-map'
+      ? 0
+      : reducedMotion || transitionMode === 'threshold'
+        ? 0
+        : ISLAND_CHART_REVEAL_MS;
+    let chartFadeTimer = null;
+    let chartCompleteTimer = null;
+    const chartTimer = transitionMode === 'threshold'
+      ? null
+      : window.setTimeout(() => {
+        setChartVisible(true);
+        chartFadeTimer = window.setTimeout(() => {
+          setChartVisible(false);
+          chartCompleteTimer = window.setTimeout(
+            () => setChartBeatComplete(true),
+            reducedMotion ? 120 : CHART_FADE_OUT_MS,
+          );
+        }, transitionSource === 'island-map' ? ISLAND_MAP_CHART_HOLD_MS : ISLAND_CHART_HOLD_MS);
+      }, chartRevealDelay);
     const commitDelay = transitionSource === 'island-map'
-      ? (reducedMotion ? 80 : 520)
+      ? (reducedMotion ? 80 : BLACK_FADE_IN_MS + 80)
       : transitionMode === 'threshold'
         ? (reducedMotion ? 120 : THRESHOLD_COMMIT_MS)
         : (reducedMotion ? 220 : ISLAND_COMMIT_MS);
     const commitTimer = window.setTimeout(() => commitZoneTransition(transitionId), commitDelay);
     return () => {
       window.clearTimeout(coverTimer);
+      if (chartTimer != null) window.clearTimeout(chartTimer);
+      if (chartFadeTimer != null) window.clearTimeout(chartFadeTimer);
+      if (chartCompleteTimer != null) window.clearTimeout(chartCompleteTimer);
       window.clearTimeout(commitTimer);
     };
   }, [commitZoneTransition, reducedMotion, transitionId, transitionMode, transitionSource]);
 
   useEffect(() => {
     if (!transitionId || transitionPhase !== 'ready') return undefined;
-    const minimum = transitionMode === 'threshold' || reducedMotion
-      ? 300
-      : transitionSource === 'island-map'
-        ? ISLAND_MAP_MIN_REVEAL_MS
-        : ISLAND_MIN_REVEAL_MS;
+    if (transitionMode !== 'threshold' && !reducedMotion && !chartBeatComplete) return undefined;
+    const minimum = transitionMode === 'threshold' || reducedMotion ? 300 : 0;
     const wait = Math.max(0, minimum - (Date.now() - transitionStartedAt));
+    let handoffTimer = null;
     const timer = window.setTimeout(() => {
-      window.__recordThreeTransitionEvent?.('reveal-start');
-      setRevealing(true);
-      setZoneTransitionPhase('arriving', transitionId);
+      setChartVisible(false);
+      handoffTimer = window.setTimeout(() => {
+        window.__recordThreeTransitionEvent?.('reveal-start');
+        setZoneTransitionPhase('arriving', transitionId);
+        // Give TravelCameraRig one painted frame to establish its elevated
+        // arrival pose while the screen is fully black.
+        window.requestAnimationFrame(() => setRevealing(true));
+      }, reducedMotion || transitionMode === 'threshold' ? 0 : CHART_FADE_OUT_MS);
     }, wait);
-    return () => window.clearTimeout(timer);
-  }, [reducedMotion, setZoneTransitionPhase, transitionId, transitionMode, transitionPhase, transitionSource, transitionStartedAt]);
+    return () => {
+      window.clearTimeout(timer);
+      if (handoffTimer != null) window.clearTimeout(handoffTimer);
+    };
+  }, [chartBeatComplete, reducedMotion, setZoneTransitionPhase, transitionId, transitionMode, transitionPhase, transitionStartedAt]);
 
   useEffect(() => {
     if (!transitionId || transitionPhase !== 'arriving') return undefined;
-    const fadeDuration = reducedMotion ? 200 : transitionMode === 'threshold' ? 300 : CHART_FADE_OUT_MS;
+    const fadeDuration = reducedMotion ? 200 : transitionMode === 'threshold' ? 300 : WORLD_FADE_IN_MS;
     const settleTimer = window.setTimeout(() => setZoneTransitionPhase('settling', transitionId), fadeDuration);
     return () => window.clearTimeout(settleTimer);
   }, [reducedMotion, setZoneTransitionPhase, transitionId, transitionMode, transitionPhase]);
@@ -467,7 +508,7 @@ export function TravelInterstitial() {
   useEffect(() => {
     if (!transitionId || !transitionArrivingAt
       || (transitionPhase !== 'arriving' && transitionPhase !== 'settling')) return undefined;
-    const fadeDuration = reducedMotion ? 200 : transitionMode === 'threshold' ? 300 : CHART_FADE_OUT_MS;
+    const fadeDuration = reducedMotion ? 200 : transitionMode === 'threshold' ? 300 : WORLD_FADE_IN_MS;
     const settleDuration = reducedMotion || transitionMode === 'threshold' ? 200 : CAMERA_SETTLE_MS;
     const remaining = Math.max(
       0,
@@ -486,15 +527,15 @@ export function TravelInterstitial() {
 
   return (
     <div
-      className={`${active ? 'pointer-events-auto' : 'pointer-events-none'} fixed inset-0 z-40 select-none overflow-hidden bg-[#11100d] font-expedition text-expedition-parchment transition-opacity ${
+      className={`${active ? 'pointer-events-auto' : 'pointer-events-none'} fixed inset-0 z-40 select-none overflow-hidden bg-black font-expedition text-expedition-parchment transition-opacity ${
         revealing ? 'opacity-0' : covered ? 'opacity-100' : 'opacity-0'
       }`}
       style={{
         transitionDuration: `${reducedMotion
           ? 200
           : revealing
-            ? CHART_FADE_OUT_MS
-            : CHART_FADE_IN_MS}ms`,
+            ? WORLD_FADE_IN_MS
+            : BLACK_FADE_IN_MS}ms`,
         transitionTimingFunction: revealing
           ? 'cubic-bezier(0.4, 0, 0.2, 1)'
           : 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -510,30 +551,40 @@ export function TravelInterstitial() {
       aria-hidden={!active}
       aria-live={active ? 'polite' : 'off'}
     >
-      {isIsland ? (
-        <IslandChart transition={displayedTransition} reducedMotion={reducedMotion} active={covered} />
-      ) : (
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(67,58,38,0.5),rgba(12,11,9,0.98)_72%)]" />
-      )}
-      <div className="absolute inset-x-0 bottom-[max(2rem,6vh)] flex justify-center px-5">
-        <section className="max-w-xl text-center text-shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-expedition-gold/85">
-            {isIsland ? 'Across Charles Island' : 'Crossing the threshold'}
-          </p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[0.035em] text-expedition-parchment sm:text-3xl">
-            {displayedTransition.to}
-          </h2>
-          {displayedTransition.note && (
-            <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-expedition-parchment/82">
-              {displayedTransition.note}
+      <div
+        className={`absolute inset-0 transition-opacity ${
+          transitionMode === 'threshold' || chartVisible ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          transitionDuration: `${reducedMotion ? 120 : chartVisible ? CHART_FADE_IN_MS : CHART_FADE_OUT_MS}ms`,
+          transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        {isIsland ? (
+          <IslandChart transition={displayedTransition} reducedMotion={reducedMotion} active={chartVisible} />
+        ) : (
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(67,58,38,0.5),rgba(12,11,9,0.98)_72%)]" />
+        )}
+        <div className="absolute inset-x-0 bottom-[max(2rem,6vh)] flex justify-center px-5">
+          <section className="max-w-xl text-center text-shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-expedition-gold/85">
+              {isIsland ? 'Across Charles Island' : 'Crossing the threshold'}
             </p>
-          )}
-          {(minutes || fatigue) && (
-            <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-expedition-gold/75">
-              {[minutes, fatigue].filter(Boolean).join(' · ')}
-            </p>
-          )}
-        </section>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[0.035em] text-expedition-parchment sm:text-3xl">
+              {displayedTransition.to}
+            </h2>
+            {displayedTransition.note && (
+              <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-expedition-parchment/82">
+                {displayedTransition.note}
+              </p>
+            )}
+            {(minutes || fatigue) && (
+              <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-expedition-gold/75">
+                {[minutes, fatigue].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

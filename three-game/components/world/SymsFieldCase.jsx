@@ -9,7 +9,7 @@ import {
   SYMS_FIELD_CASE_PROMPT_MODE,
 } from '../../npcs/symsActivityPlan';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
-import { onPropEvent } from '../../physics/props/propEvents';
+import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
 
 const INTERACTION_DISTANCE = 2.35;
 const PROMPT_POLL_SECONDS = 0.12;
@@ -229,8 +229,17 @@ export function SymsFieldCaseVisual({ propId = SYMS_FIELD_CASE_ID }) {
   const toggle = useCallback(event => {
     if (event?.id && event.id !== propId) return;
     event?.stopPropagation?.();
-    setOpen(current => !current);
-  }, [propId]);
+    const next = !open;
+    setOpen(next);
+    const worldPosition = worldRootRef.current
+      ? worldRootRef.current.getWorldPosition(worldPositionRef.current)
+      : null;
+    emitPropEvent('container-foley', {
+      kind: next ? 'chest-open' : 'chest-close',
+      propId,
+      position: worldPosition ? { x: worldPosition.x, y: worldPosition.y, z: worldPosition.z } : null,
+    });
+  }, [open, propId]);
 
   useEffect(() => onPropEvent('toggle-syms-field-case', toggle), [toggle]);
 

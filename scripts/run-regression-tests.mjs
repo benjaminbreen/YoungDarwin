@@ -67,6 +67,26 @@ function test(name, fn) {
 }
 
 const {
+  examinationDepthOfFieldActive,
+  postprocessingComposerActive,
+} = loadModule('three-game/examine/examinationPostFx.js');
+
+test('examination depth of field covers every focused examinable kind', () => {
+  for (const kind of ['specimen', 'ambient', 'item']) {
+    assert.equal(examinationDepthOfFieldActive({ kind, focus: { x: 1, y: 2, z: 3 } }), true);
+  }
+  assert.equal(examinationDepthOfFieldActive({ kind: 'specimen', focus: null }), false);
+  assert.equal(examinationDepthOfFieldActive(null), false);
+});
+
+test('examination keeps a minimal postprocessing composer alive when general effects are off', () => {
+  const focusedSession = { kind: 'ambient', focus: { x: 0, y: 0, z: 0 } };
+  assert.equal(postprocessingComposerActive(false, focusedSession), true);
+  assert.equal(postprocessingComposerActive(false, null), false);
+  assert.equal(postprocessingComposerActive(true, null), true);
+});
+
+const {
   buildActionSuggestions,
   mergeActionSuggestions,
 } = loadModule('utils/actionSuggestions.js');
@@ -287,6 +307,9 @@ const {
   POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM,
   WATKINS_CREEK_SOUTHERN_WETLANDS_SEAM,
   WATKINS_CREEK_WATKINS_SEAM,
+  BLACK_BEACH_WESTERN_LOWLANDS_SEAM,
+  WESTERN_LOWLANDS_BEACH_HUT_SEAM,
+  WESTERN_LOWLANDS_WESTERN_HIGHLANDS_SEAM,
 } = loadModule('three-game/world/routeSeams.js');
 const {
   coveWaterMask,
@@ -393,6 +416,30 @@ const {
 const {
   getNorthernHighlandsRockObstacles,
 } = loadModule('three-game/world/northernHighlandsLayout.js');
+const {
+  WESTERN_LOWLANDS_PATHS,
+  westernLowlandsPathInfo,
+} = loadModule('three-game/world/regions/westernLowlands/path.js');
+const {
+  westernLowlandsBiomeAt,
+  westernLowlandsHeight,
+  westernLowlandsLagoonMask,
+  westernLowlandsStandingWaterMask,
+} = loadModule('three-game/world/regions/westernLowlands/terrain.js');
+const {
+  buildWesternLowlandsEcology,
+} = loadModule('three-game/world/ecology/westernLowlands.js');
+const {
+  getWesternLowlandsCabinDependents,
+  getWesternLowlandsCabinPieces,
+  getWesternLowlandsDryingRackDependents,
+  getWesternLowlandsDryingRackPieces,
+  getWesternLowlandsObstacles,
+} = loadModule('three-game/world/westernLowlandsLayout.js');
+const {
+  WATER_LEVEL,
+  WADE_DEPTH,
+} = loadModule('three-game/world/terrainShared.js');
 const {
   buildWesternHighlandsEcology,
 } = loadModule('three-game/world/ecology/westernHighlands.js');
@@ -574,6 +621,12 @@ const {
   evaluateFinalAssessment,
   isEndGameNarratorCommand,
 } = loadModule('three-game/finalAssessment.js');
+const {
+  animalDirectQuestionGuidance,
+  buildAnimalNarratorPrompt,
+  buildAnimalNarratorSystemPrompt,
+  getPlayableNarratorProfile,
+} = loadModule('three-game/narrator/playableNarratorProfiles.js');
 const {
   assignToolbarSlot,
   moveToolbarSlot,
@@ -871,6 +924,44 @@ test('the narrator end-game command is explicit and deterministic', () => {
   assert.equal(isEndGameNarratorCommand('end the expedition'), true);
   assert.equal(isEndGameNarratorCommand('when does the game end?'), false);
   assert.equal(isEndGameNarratorCommand('end game after I collect this'), false);
+});
+
+test('playable animal narrator profiles stay embodied, brief, and mode-specific', () => {
+  const tortoise = getPlayableNarratorProfile('tortoise');
+  const finch = getPlayableNarratorProfile('finch');
+  const unknown = getPlayableNarratorProfile('future-unconfigured-animal');
+
+  assert.equal(tortoise.kind, 'animal');
+  assert.equal(finch.kind, 'animal');
+  assert.equal(unknown.id, 'darwin');
+  assert.notEqual(tortoise.identityAnswer, finch.identityAnswer);
+  assert.equal(getPlayableNarratorProfile('darwin').kind, 'human');
+  assert.equal(tortoise.id, 'tortoise');
+  assert.equal(finch.id, 'finch');
+  assert.match(
+    animalDirectQuestionGuidance('What am I?', tortoise),
+    /You are tortoise\. You walk\. You sleep\. You rest\. Tortoise\./,
+  );
+
+  const systemPrompt = buildAnimalNarratorSystemPrompt(tortoise);
+  assert.match(systemPrompt, /immediate subjectivity of a Floreana giant tortoise/);
+  assert.match(systemPrompt, /Never become a factual helper, zoology guide, quest assistant/);
+  assert.match(systemPrompt, /never more than two short sentences/);
+  assert.doesNotMatch(systemPrompt, /Address the player in second person as Darwin/);
+
+  const userPrompt = buildAnimalNarratorPrompt(tortoise, {
+    playerInput: 'What am I?',
+    responseGuidance: animalDirectQuestionGuidance('What am I?', tortoise),
+    location: 'Post Office Bay',
+    locationContext: { biome: 'dry coastal scrub' },
+    nearbySpecimen: 'A low prickly pear stands nearby.',
+    weather: 'sunny',
+    timeOfDay: '7:42',
+    stats: { health: 100, fatigue: 12, curiosity: 68 },
+  });
+  assert.match(userPrompt, /Embodied role: a Floreana giant tortoise/);
+  assert.match(userPrompt, /vitality 100, energy 88, composure 68/);
+  assert.doesNotMatch(userPrompt, /Charles Darwin|Current objective|Equipped tool|Nearby NPC|Journal context/);
 });
 
 test('player narrator turns are preserved verbatim in a bounded assessment transcript', () => {
@@ -2708,6 +2799,25 @@ test('Punta Sur northern horizon follows the island route to Cerro Pajas', () =>
   geometry.computeBoundingBox();
   assert.ok(geometry.boundingBox.min.z < -250, 'the horizon should continue well beyond the first apron');
   assert.ok(geometry.boundingBox.max.y > 22, 'Cerro Pajas should form a real far silhouette');
+  const blend = geometry.getAttribute('aBorderBlend');
+  assert.equal(
+    geometry.getAttribute('aHorizonFollow'),
+    undefined,
+    'the horizon remains world-anchored instead of folding under camera translation',
+  );
+  const positions = geometry.getAttribute('position');
+  const horizonRows = 20;
+  const horizonColumns = 44;
+  const stride = horizonColumns + 1;
+  for (let col = 0; col <= horizonColumns; col += 1) {
+    for (let row = 1; row <= horizonRows; row += 1) {
+      const previousY = positions.getY((row - 1) * stride + col);
+      const currentY = positions.getY(row * stride + col);
+      assert.ok(currentY >= previousY - 0.026, 'the backdrop does not reopen into stacked ridge bands');
+    }
+  }
+  assert.ok(Math.min(...blend.array) <= 0.01, 'far side edges carry an atmospheric color handoff');
+  assert.ok(Math.max(...blend.array) >= 0.99, 'the central landform retains its full terrain color');
   geometry.dispose();
 });
 
@@ -2725,6 +2835,22 @@ test('ocean and reef routes do not receive distant land horizons', () => {
     targetConfig,
     transition,
   ), null);
+});
+
+test('low coastal route chains stay in the apron layer instead of becoming false mountains', () => {
+  const regionId = 'POST_OFFICE_BAY';
+  const config = getRegionTerrainConfig(regionId);
+  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'east');
+  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
+  assert.deepEqual(
+    distantLandformRoute(regionId, 'east', vista.toRegionId).map(entry => entry.regionId),
+    ['N_SHORE', 'CORMORANT_BAY', 'PUNTA_CORMORANT'],
+  );
+  assert.equal(
+    makeDistantLandformGeometry(regionId, config, vista, targetConfig, transition),
+    null,
+  );
 });
 
 test('Post Office Bay routes share normalized seam coordinates with both land neighbors', () => {
@@ -2760,6 +2886,79 @@ test('Post Office Bay routes share normalized seam coordinates with both land ne
 
   assert.ok(POST_OFFICE_BAY_SCRUB_TRAIL.at(-1)[1] > regionMaps.POST_OFFICE_BAY.terrain.depth * 0.5 + 20);
   assert.ok(POST_OFFICE_BAY_NORTH_SHORE_TRAIL.at(-1)[0] > regionMaps.POST_OFFICE_BAY.terrain.width * 0.5 + 20);
+});
+
+test('Western Lowlands authored trails meet all three normalized route seams', () => {
+  const seams = [
+    BLACK_BEACH_WESTERN_LOWLANDS_SEAM,
+    WESTERN_LOWLANDS_WESTERN_HIGHLANDS_SEAM,
+    WESTERN_LOWLANDS_BEACH_HUT_SEAM,
+  ];
+  const pathHasPoint = point => WESTERN_LOWLANDS_PATHS.some(path => path.points.some(candidate => (
+    Math.hypot(candidate[0] - point[0], candidate[1] - point[1]) < 0.001
+  )));
+
+  for (const seam of seams) {
+    const lowlandsSide = seam.source.regionId === 'W_LAVA' ? seam.source : seam.target;
+    const source = regionMaps[seam.source.regionId];
+    const target = regionMaps[seam.target.regionId];
+    const sourceAlong = seam.source.edge === 'north' || seam.source.edge === 'south'
+      ? seam.source.point[0] / source.terrain.width
+      : seam.source.point[1] / source.terrain.depth;
+    const targetAlong = seam.target.edge === 'north' || seam.target.edge === 'south'
+      ? seam.target.point[0] / target.terrain.width
+      : seam.target.point[1] / target.terrain.depth;
+    assert.ok(Math.abs(sourceAlong - targetAlong) < 0.000001);
+    assert.equal(pathHasPoint(lowlandsSide.point), true);
+    assert.ok(westernLowlandsPathInfo(...lowlandsSide.point).tread > 0.99);
+  }
+  assert.equal(regionMaps.W_LAVA.terrain.authored, true);
+  assert.equal(regionMaps.W_LAVA.terrain.segments, 288);
+});
+
+test('Western Lowlands keeps its lagoon wadeable, its ocean deep, and its camp dry', () => {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (let z = -48; z <= 48; z += 4) {
+    for (let x = -54; x <= 54; x += 4) {
+      const height = westernLowlandsHeight(x, z);
+      assert.equal(Number.isFinite(height), true);
+      minimum = Math.min(minimum, height);
+      maximum = Math.max(maximum, height);
+    }
+  }
+  assert.ok(maximum - minimum > 4.2);
+  assert.ok(westernLowlandsHeight(-53, 0) < WATER_LEVEL - WADE_DEPTH);
+  assert.ok(westernLowlandsLagoonMask(-23, 3) > 0.95);
+  assert.ok(westernLowlandsStandingWaterMask(-23, 3) > 0.95);
+  assert.ok(westernLowlandsHeight(-23, 3) > WATER_LEVEL - WADE_DEPTH);
+  assert.equal(westernLowlandsBiomeAt(-23, 3), 'tidal-lagoon');
+  assert.ok(westernLowlandsHeight(17, 5) > WATER_LEVEL + 1.5);
+  assert.equal(westernLowlandsBiomeAt(17, 5), 'whaler-camp-bench');
+});
+
+test('Western Lowlands camp uses textured destructible timber, shared stone collision, and physics props', () => {
+  const cabinPieces = getWesternLowlandsCabinPieces();
+  const rackPieces = getWesternLowlandsDryingRackPieces();
+  const cabinDependents = getWesternLowlandsCabinDependents();
+  const rackDependents = getWesternLowlandsDryingRackDependents();
+  const obstacles = getWesternLowlandsObstacles();
+  const ecology = buildWesternLowlandsEcology();
+  const props = getZoneProps('W_LAVA');
+  assert.ok(cabinPieces.length >= 45);
+  assert.ok(rackPieces.length >= 10);
+  assert.ok(cabinPieces.some(piece => piece.dynamic));
+  assert.ok(rackPieces.some(piece => piece.dynamic));
+  assert.ok(cabinDependents.size >= 5);
+  assert.ok(rackDependents.size >= 4);
+  assert.ok(obstacles.every(obstacle => obstacle.zoneId === 'W_LAVA' && obstacle.definition?.collider));
+  assert.ok(obstacles.length >= 45);
+  assert.equal(ecology.lagoonSurfaces.length, 1);
+  assert.ok(ecology.rocks.length >= obstacles.length);
+  assert.ok(props.length >= 10);
+  assert.ok(props.some(prop => prop.type === 'settlementBarrel'));
+  assert.ok(props.some(prop => prop.type === 'woodenBucket'));
+  assert.ok(props.some(prop => prop.type === 'looseFloorBoard'));
 });
 
 test('Northern Highlands authored trails meet all four normalized route seams', () => {
@@ -3390,6 +3589,117 @@ test('Floreana racers form frequent dry-land populations and pursue grounded bir
   }
 });
 
+test('grazing tortoises and goats walk to authored vegetation before feeding', () => {
+  const tortoiseRender = getWildlifeRenderProfile({ id: 'floreana_giant_tortoise' });
+  const tortoiseProfile = getWildlifeBehaviorProfile({ id: 'floreana_giant_tortoise' });
+  const goatProfile = getWildlifeBehaviorProfile({ id: 'feral_goat' });
+  assert.deepEqual(tortoiseRender, { type: 'proceduralTortoise' });
+  assert.equal(tortoiseProfile.controller, 'grazer');
+  assert.equal(goatProfile.controller, 'grazer');
+  assert.ok(tortoiseProfile.browseTargetChance > 0.8);
+  assert.ok(goatProfile.browseTargetChance > 0.8);
+
+  for (const [zoneId, specimenId, profile] of [
+    ['NORTHERN_HIGHLANDS', 'floreanagianttortoise', tortoiseProfile],
+    ['WATKINS_CREEK', 'feralgoat', goatProfile],
+  ]) {
+    const actor = getThreeSpecimens(zoneId).find(specimen => specimen.id === specimenId);
+    assert.ok(actor, `${zoneId} should contain ${specimenId}`);
+    const base = new Vector3(...actor.spawnPoint);
+    const controller = createFaunaMotionController({
+      profile,
+      habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+      seed: specimenId === 'feralgoat' ? 0.37 : 0.21,
+      zoneId,
+      basePosition: base,
+      actorScale: actor.sceneScale,
+    });
+    let sawPlantTarget = false;
+    let sawBrowseAtPlant = false;
+    let moved = false;
+    for (let t = 0; t <= 150; t += 0.1) {
+      const result = controller.update({
+        basePosition: base,
+        zoneId,
+        playerPosition: { x: base.x + 80, z: base.z + 80 },
+        elapsedTime: t,
+        delta: 0.1,
+      });
+      assert.equal(result.ok, true);
+      sawPlantTarget ||= Boolean(result.state.debug.browseTargetId);
+      sawBrowseAtPlant ||= result.state.debug.mode === 'grazer:browse'
+        && Boolean(result.state.debug.browseTargetId);
+      moved ||= result.state.debug.moving;
+    }
+    assert.equal(moved, true, `${specimenId} should move between feeding sites`);
+    assert.equal(sawPlantTarget, true, `${specimenId} should select an authored plant target`);
+    assert.equal(sawBrowseAtPlant, true, `${specimenId} should stop and browse at that plant`);
+  }
+});
+
+test('Galapagos painted locusts hop among plants and rocks and spring away from Darwin', () => {
+  const record = baseSpecimens.find(specimen => specimen.id === 'galapagospaintedlocust');
+  assert.ok(record);
+  assert.equal(record.latin, 'Schistocerca melanocera');
+  assert.equal(record.order, 'Insect');
+  assert.ok(record.details.some(detail => /coral-red/i.test(detail)));
+
+  const render = getWildlifeRenderProfile({ id: 'painted_locust' });
+  const profile = getWildlifeBehaviorProfile({ id: 'galapagos_painted_locust' });
+  assert.deepEqual(render, { type: 'proceduralLocust' });
+  assert.equal(profile.controller, 'hopper');
+
+  const habitatZones = ['POST_OFFICE_BAY', 'LAVA_FLATS', 'NORTHERN_HIGHLANDS', 'COASTAL_SCRUBLAND', 'E_MID', 'POST_SCRUB_RISE', 'WATKINS_CREEK'];
+  let totalActors = 0;
+  for (const zoneId of habitatZones) {
+    const actors = getThreeSpecimens(zoneId).filter(specimen => specimen.id === 'galapagospaintedlocust');
+    assert.ok(actors.length >= 2, `${zoneId} should contain a small painted-locust population`);
+    totalActors += actors.length;
+  }
+  assert.ok(totalActors >= 16);
+
+  const actor = getThreeSpecimens('LAVA_FLATS').find(specimen => specimen.id === 'galapagospaintedlocust');
+  const base = new Vector3(...actor.spawnPoint);
+  const controller = createFaunaMotionController({
+    profile,
+    habitat: { radiusX: actor.habitatRadiusX, radiusZ: actor.habitatRadiusZ },
+    seed: 0.43,
+    zoneId: 'LAVA_FLATS',
+    basePosition: base,
+    actorScale: actor.sceneScale,
+  });
+  const modes = new Set();
+  const perchTypes = new Set();
+  let airborneFrames = 0;
+  for (let t = 0; t <= 38; t += 0.05) {
+    const result = controller.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: base.x + 40, z: base.z + 40 },
+      elapsedTime: t,
+      delta: 0.05,
+    });
+    modes.add(result.state.debug.mode);
+    perchTypes.add(result.state.debug.perchType);
+    if (result.state.airborne) airborneFrames += 1;
+  }
+  assert.equal(modes.has('hopper:hop'), true);
+  assert.ok(airborneFrames > 10);
+  assert.ok(perchTypes.has('plant') || perchTypes.has('rock'));
+
+  const beforeThreat = controller.state.position.clone();
+  for (let t = 38.05; t <= 40; t += 0.05) {
+    controller.update({
+      basePosition: base,
+      zoneId: 'LAVA_FLATS',
+      playerPosition: { x: beforeThreat.x - 0.25, z: beforeThreat.z },
+      elapsedTime: t,
+      delta: 0.05,
+    });
+  }
+  assert.ok(controller.state.position.x > beforeThreat.x, 'close approach should launch the locust away from Darwin');
+});
+
 test('animal animation lab exposes every procedural animal and its specialist behavior modes', () => {
   const source = fs.readFileSync(
     path.join(process.cwd(), 'three-game/ui/dev/AnimalAnimationDevPanel.jsx'),
@@ -3403,10 +3713,11 @@ test('animal animation lab exposes every procedural animal and its specialist be
     ['galapagosHawkProcedural', 'galapagosHawk'],
     ['galapagosShortEaredOwlProcedural', 'galapagosShortEaredOwl'],
     ['galapagosRacerProcedural', 'floreanaRacer'],
+    ['galapagosPaintedLocustProcedural', 'largePaintedLocust'],
   ]) {
     assert.match(source, new RegExp(`id: '${id}'[\\s\\S]{0,260}variant: '${variant}'`));
   }
-  for (const mode of ['ground forage', 'glide', 'tree perch', 'soar', 'stoop', 'tree landing', 'listening swivel', 'silent quartering', 'hover listen', 'prey pounce', 'lava landing', 'basking coil', 'tongue tasting', 'alert S-curve', 'prey strike', 'crevice retreat', 'shelter still']) {
+  for (const mode of ['ground forage', 'glide', 'tree perch', 'soar', 'stoop', 'tree landing', 'listening swivel', 'silent quartering', 'hover listen', 'prey pounce', 'lava landing', 'basking coil', 'tongue tasting', 'alert S-curve', 'prey strike', 'crevice retreat', 'shelter still', 'antenna watch', 'ground hop', 'plant perch', 'rock perch', 'escape leap']) {
     assert.match(source, new RegExp(`'${mode}'`), `animation lab should expose ${mode}`);
   }
   assert.match(source, /galapagosHawkProcedural[\s\S]{0,420}perchPreview: true/);

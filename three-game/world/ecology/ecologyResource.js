@@ -48,37 +48,63 @@ function recoverRequest(request, entry, reason = 'unknown worker error') {
   // and can freeze both the chart and the main thread for seconds. Preserve a
   // playable terrain-only failure mode and surface the worker error instead.
   console.error(`[ecology-resource] ${request.regionId}: ${reason}. Using sparse ecology fallback.`);
+  const existingDefinitions = entry.value?.definitions || [];
+  const existingZoneIds = new Set(existingDefinitions.map(definition => definition.zoneId));
   const value = {
     regionId: request.regionId,
-    definitions: regionIds(request.regionId).map(zoneId => ({
-      zoneId,
-      ecology: cacheEcology(zoneId, degradedEcology(zoneId)),
-    })),
+    definitions: [
+      ...existingDefinitions,
+      ...regionIds(request.regionId)
+        .filter(zoneId => !existingZoneIds.has(zoneId))
+        .map(zoneId => ({
+          zoneId,
+          ecology: cacheEcology(zoneId, degradedEcology(zoneId)),
+        })),
+    ],
     preparation: { mode: 'sparse-worker-fallback', durationMs: 0, reason },
   };
   entry.status = 'ready';
   entry.value = value;
-  request.resolve(value);
+  request.resolveDestination(value);
+  request.resolveComplete(value);
 }
 
 function ensureWorker() {
   if (worker || typeof window === 'undefined' || typeof Worker === 'undefined') return worker;
   worker = new Worker(new URL('./ecologyWorker.js', import.meta.url), { type: 'module' });
   worker.onmessage = event => {
-    const { requestId, payload, error } = event.data || {};
+    const { requestId, stage, payload, error } = event.data || {};
     const request = pending.get(requestId);
     if (!request) return;
-    pending.delete(requestId);
     const entry = resources.get(request.regionId);
     if (!entry) return;
     if (error) {
+      pending.delete(requestId);
       recoverRequest(request, entry, error);
       return;
     }
-    const value = hydrate(payload);
+    const hydrated = hydrate(payload);
+    if (stage === 'destination') {
+      entry.status = 'destination-ready';
+      entry.value = hydrated;
+      request.resolveDestination(hydrated);
+      return;
+    }
+    const definitions = [
+      ...(entry.value?.definitions || []),
+      ...hydrated.definitions,
+    ];
+    const value = {
+      regionId: request.regionId,
+      definitions,
+      preparation: entry.value?.preparation || hydrated.preparation,
+      neighborPreparation: hydrated.preparation,
+    };
+    pending.delete(requestId);
     entry.status = 'ready';
     entry.value = value;
-    request.resolve(value);
+    request.resolveDestination(value);
+    request.resolveComplete(value);
   };
   worker.onerror = event => {
     for (const [requestId, request] of pending) {
@@ -109,17 +135,35 @@ export function prepareRegionEcologyResource(regionId) {
         reason: 'Web Workers are unavailable',
       },
     };
-    const entry = { status: 'ready', value, promise: Promise.resolve(value) };
+    const entry = {
+      status: 'ready',
+      value,
+      promise: Promise.resolve(value),
+      completePromise: Promise.resolve(value),
+    };
     resources.set(regionId, entry);
     return entry.promise;
   }
   const requestId = ++requestCounter;
-  let resolve;
+  let resolveDestination;
+  let resolveComplete;
   const promise = new Promise(resolvePromise => {
-    resolve = resolvePromise;
+    resolveDestination = resolvePromise;
   });
-  resources.set(regionId, { status: 'pending', value: null, promise });
-  pending.set(requestId, { regionId, resolve });
+  const completePromise = new Promise(resolvePromise => {
+    resolveComplete = resolvePromise;
+  });
+  resources.set(regionId, {
+    status: 'pending',
+    value: null,
+    promise,
+    completePromise,
+  });
+  pending.set(requestId, {
+    regionId,
+    resolveDestination,
+    resolveComplete,
+  });
   activeWorker.postMessage({ requestId, regionId });
   return promise;
 }
@@ -132,8 +176,20 @@ export function readRegionEcologyResource(regionId) {
     if (created?.status === 'ready') return created.value;
     throw promise;
   }
-  if (entry.status === 'ready') return entry.value;
+  if (entry.status === 'destination-ready' || entry.status === 'ready') return entry.value;
   throw entry.promise;
+}
+
+export function readRegionNeighborEcologyResource(regionId) {
+  const entry = resources.get(regionId);
+  if (!entry) {
+    prepareRegionEcologyResource(regionId);
+    const created = resources.get(regionId);
+    if (created?.status === 'ready') return created.value;
+    throw created.completePromise;
+  }
+  if (entry.status === 'ready') return entry.value;
+  throw entry.completePromise;
 }
 
 export function regionEcologyResourceIsReady(regionId) {

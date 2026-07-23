@@ -23,6 +23,7 @@ import { getEasternCliffsRockObstacles } from './easternCliffsLayout';
 import { getPuntaSurRockObstacles } from './puntaSurLayout';
 import { getSouthernIntertidalRockObstacles } from './southernIntertidalLayout';
 import { getMarineIguanaColonyRockObstacles } from './marineIguanaColonyLayout';
+import { getWesternLowlandsObstacles } from './westernLowlandsLayout';
 
 /** @typedef {Record<string, unknown>} AuthoredObstacle */
 /** @typedef {() => AuthoredObstacle[]} ObstacleSource */
@@ -41,6 +42,7 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   N_OUTCROP: [getDesolateOutcropRockObstacles],
   DEVILS_CROWN: [getDevilsCrownRockObstacles],
   NW_REEF: [getNorthwestReefRockObstacles],
+  W_LAVA: [getWesternLowlandsObstacles],
   S_HUT: [getBeachWithHutObstacles],
   W_HIGH: [getWesternHighlandsRockObstacles],
   E_MID: [getRockyClearingRockObstacles, getRockyClearingCaveObstacles],

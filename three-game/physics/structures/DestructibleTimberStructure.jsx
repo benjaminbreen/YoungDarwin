@@ -9,7 +9,8 @@ import {
 } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { movementTerrainHeight } from '../../world/terrain';
+import { movementTerrainHeight, WATER_LEVEL } from '../../world/terrain';
+import { cliffWaterMotionAt } from '../../world/cliffSurfProfiles';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 import { onPropEvent, emitPropEvent, claimSwing } from '../props/propEvents';
 import { triggerHitstop } from '../../world/worldTime';
@@ -70,12 +71,17 @@ function TimberPiece({
   spawn,
   onImpactRelease,
   registerBody,
+  zoneId,
   timberKind,
   releaseForce,
   timberTones,
+  materialOverrides,
+  waterPhysics,
 }) {
   const bodyRef = useRef(null);
   const impulseApplied = useRef(false);
+  const inWater = useRef(false);
+  const waterDamping = useRef(false);
 
   useEffect(() => {
     registerBody(piece.id, bodyRef);
@@ -97,21 +103,94 @@ function TimberPiece({
 
   const isReleased = released.current.has(piece.id) || piece.dynamic;
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const body = bodyRef.current;
-    if (!body || impulseApplied.current) return;
-    const pending = released.pendingImpulses.get(piece.id);
-    if (!pending) return;
-    if (body.bodyType() !== 0) return;
-    impulseApplied.current = true;
-    released.pendingImpulses.delete(piece.id);
+    if (!body) return;
+
+    if (!impulseApplied.current) {
+      const pending = released.pendingImpulses.get(piece.id);
+      if (pending && body.bodyType() === 0) {
+        impulseApplied.current = true;
+        released.pendingImpulses.delete(piece.id);
+        body.wakeUp();
+        body.applyImpulse(pending.linear, true);
+        if (pending.torque) body.applyTorqueImpulse(pending.torque, true);
+      }
+    }
+
+    const pieceWater = piece.buoyancy === false
+      ? null
+      : (waterPhysics ? { ...waterPhysics, ...(piece.buoyancy || {}) } : null);
+    if (!pieceWater || body.bodyType() !== 0) return;
+
+    const translation = body.translation();
+    const seabedY = movementTerrainHeight(translation.x, translation.z, zoneId);
+    const overWater = seabedY < WATER_LEVEL - 0.12;
+    const touchingWater = overWater && translation.y < WATER_LEVEL + 0.14;
+
+    if (touchingWater && !inWater.current) {
+      const velocity = body.linvel();
+      emitPropEvent('water-splash', {
+        position: { x: translation.x, y: WATER_LEVEL, z: translation.z },
+        intensity: THREE.MathUtils.clamp(Math.abs(velocity.y) * 0.18 + 0.3, 0.3, 0.82),
+      });
+    }
+    inWater.current = touchingWater;
+
+    if (waterDamping.current !== touchingWater) {
+      waterDamping.current = touchingWater;
+      body.setLinearDamping(touchingWater ? (pieceWater.linearDamping ?? 0.34) : 1.8);
+      body.setAngularDamping(touchingWater ? (pieceWater.rigidBodyAngularDamping ?? 0.62) : 2.2);
+    }
+    if (!touchingWater) return;
+
     body.wakeUp();
-    body.applyImpulse(pending.linear, true);
-    if (pending.torque) body.applyTorqueImpulse(pending.torque, true);
+    const dt = Math.min(delta, 0.05);
+    const velocity = body.linvel();
+    const rideHeight = pieceWater.rideHeight ?? 0.015;
+    const bob = pieceWater.bob ?? 0.035;
+    const bobY = Math.sin(released.clock * 1.18 + spawn.x * 0.57 + spawn.z * 0.81) * bob;
+    const targetY = WATER_LEVEL + rideHeight + bobY;
+    const targetVy = THREE.MathUtils.clamp((targetY - translation.y) * 2.8, -1.15, 1.35);
+
+    // Drift follows the descending seabed, matching the main buoyant-prop
+    // solver. The local cliff-surf mirror then adds visible crest impulses.
+    const step = 1.35;
+    let flowX = movementTerrainHeight(translation.x - step, translation.z, zoneId)
+      - movementTerrainHeight(translation.x + step, translation.z, zoneId);
+    let flowZ = movementTerrainHeight(translation.x, translation.z - step, zoneId)
+      - movementTerrainHeight(translation.x, translation.z + step, zoneId);
+    const flowLength = Math.hypot(flowX, flowZ) || 1;
+    flowX /= flowLength;
+    flowZ /= flowLength;
+    const currentSpeed = pieceWater.currentSpeed ?? 0.18;
+    const swirl = Math.sin(released.clock * 0.4 + translation.z * 0.32) * 0.2;
+    const targetVx = (flowX - flowZ * swirl) * currentSpeed;
+    const targetVz = (flowZ + flowX * swirl) * currentSpeed;
+    const drag = pieceWater.drag ?? 1.15;
+    const blendXZ = 1 - Math.exp(-drag * dt);
+    const strength = pieceWater.strength ?? 26;
+    const blendY = 1 - Math.exp(-strength * 0.2 * dt);
+    const wave = cliffWaterMotionAt(zoneId, translation.x, translation.z, released.clock);
+    const waveStrength = pieceWater.waveStrength ?? 0.52;
+    body.setLinvel({
+      x: velocity.x + (targetVx - velocity.x) * blendXZ + (wave?.x || 0) * waveStrength * dt,
+      y: velocity.y + (targetVy - velocity.y) * blendY,
+      z: velocity.z + (targetVz - velocity.z) * blendXZ + (wave?.z || 0) * waveStrength * dt,
+    }, true);
+
+    const spin = body.angvel();
+    const angularKeep = Math.max(0, 1 - (pieceWater.angularDrag ?? 2.2) * dt);
+    body.setAngvel({
+      x: spin.x * angularKeep + Math.sin(released.clock * 0.9 + spawn.x) * 0.0016,
+      y: spin.y * angularKeep,
+      z: spin.z * angularKeep + Math.cos(released.clock * 0.82 + spawn.z) * 0.0016,
+    }, true);
   });
 
   const materials = getTimberMaterials(timberTones);
-  const material = materials[Math.floor(piece.tone * materials.length) % materials.length];
+  const timberMaterial = materials[Math.floor(piece.tone * materials.length) % materials.length];
+  const material = materialOverrides?.[piece.materialKey] || timberMaterial;
 
   return (
     <RigidBody
@@ -172,11 +251,13 @@ export function DestructibleTimberStructure({
   renderLabel,
   timberKind = `${structureId}-timber`,
   timberTones = DEFAULT_TIMBER_TONES,
+  materialOverrides = null,
   releaseForce = DEFAULT_RELEASE_FORCE,
   strikeRange = DEFAULT_STRIKE_RANGE,
   strikeMaxPieces = DEFAULT_STRIKE_MAX_PIECES,
   shotgunMaxPieces = DEFAULT_SHOTGUN_MAX_PIECES,
   spawnLift = 0.02,
+  waterPhysics = null,
 }) {
   const [, bumpVersion] = useState(0);
 
@@ -191,6 +272,9 @@ export function DestructibleTimberStructure({
   const releasedHandle = useRef({
     current: runtime.current.released,
     pendingImpulses: runtime.current.pendingImpulses,
+    get clock() {
+      return runtime.current.clock;
+    },
   });
 
   const padY = useMemo(
@@ -362,9 +446,12 @@ export function DestructibleTimberStructure({
           spawn={spawns.get(piece.id)}
           onImpactRelease={onImpactRelease}
           registerBody={registerBody}
+          zoneId={zoneId}
           timberKind={timberKind}
           releaseForce={releaseForce}
           timberTones={timberTones}
+          materialOverrides={materialOverrides}
+          waterPhysics={waterPhysics}
         />
       ))}
     </group>

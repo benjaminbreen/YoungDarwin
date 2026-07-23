@@ -103,6 +103,19 @@ function profileLooksLikeHardRock(profile) {
   return /basalt|lava|boulder|rock|cliff/.test(String(profile?.biome || '').toLowerCase());
 }
 
+function materialFromInteractionEvent(event, prop = null) {
+  const direct = String(event?.material || '').toLowerCase();
+  if (['wood', 'stone', 'metal', 'ceramic'].includes(direct)) return direct;
+  const registered = interactionMaterialForProp(prop);
+  if (registered) return registered;
+  const text = `${event?.propId || ''} ${event?.kind || ''} ${event?.label || ''} ${direct}`.toLowerCase();
+  if (/rock|stone|basalt|lava|volcan|boulder/.test(text)) return 'stone';
+  if (/iron|metal|brass|tin|candlestick|mug/.test(text)) return 'metal';
+  if (/ceramic|glass|bottle|jug|pot|bowl|earthen/.test(text)) return 'ceramic';
+  if (/wood|timber|crate|barrel|chest|case|stool|chair|fence|gate|post|cactus|plant|crop/.test(text)) return 'wood';
+  return null;
+}
+
 function nearestAudibleWildlife(zoneId, family) {
   const player = getRuntimePlayerPose()?.position;
   const poses = getSpecimenRuntimePoses(zoneId);
@@ -212,6 +225,7 @@ export function IslandSoundscape({ active, enabled }) {
   const handledDamageIdRef = useRef(lastHealthDamage?.id || 0);
   const windedRef = useRef({ active: false, intensity: 0, nextAt: 0 });
   const propContactsRef = useRef(new Map());
+  const pushAudioRef = useRef(new Map());
   const scheduledAudioRef = useRef(new Set());
   const wildlifeScheduleRef = useRef({ zoneId: null });
   const waveBreakScheduleRef = useRef({ zoneId: null, nextAt: 0 });
@@ -221,6 +235,7 @@ export function IslandSoundscape({ active, enabled }) {
 
   useEffect(() => {
     propContactsRef.current.clear();
+    pushAudioRef.current.clear();
     animalMotionRef.current.clear();
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
     wildlifeScheduleRef.current = { zoneId: currentZoneId };
@@ -363,7 +378,9 @@ export function IslandSoundscape({ active, enabled }) {
   useEffect(() => {
     if (!runtimeEnabled) return undefined;
     const ensureRunning = () => {
-      if (!soundscapeAmbientIsReady()) void activatePostOfficeBayAudio();
+      if (!soundscapeAmbientIsReady()) {
+        void activatePostOfficeBayAudio({ preloadEffects: false });
+      }
     };
     const resumeWhenVisible = () => {
       if (!document.hidden) ensureRunning();
@@ -639,6 +656,7 @@ export function IslandSoundscape({ active, enabled }) {
       pan = (Math.random() - 0.5) * 0.12,
       playbackJitter = 0.05,
       playbackRateCenter = 1,
+      filterHz = null,
     } = {}) => {
       const previous = variantsRef.current[family];
       const index = chooseVariant(previous, sprite.variants);
@@ -650,6 +668,7 @@ export function IslandSoundscape({ active, enabled }) {
         gain: baseGain * strength,
         playbackRate: playbackRateCenter - playbackJitter * 0.5 + Math.random() * playbackJitter,
         pan,
+        filterHz,
       });
     };
 
@@ -985,7 +1004,7 @@ export function IslandSoundscape({ active, enabled }) {
         || current.playableModeId !== 'darwin'
         || event?.zoneId !== current.currentZoneId) return;
       const prop = getZoneProps(current.currentZoneId).find(item => item.id === event?.propId);
-      const material = interactionMaterialForProp(prop);
+      const material = materialFromInteractionEvent(event, prop);
       const sprite = material ? INTERACTION_AUDIO[material] : null;
       if (!sprite) return;
       playContact(material, sprite, {
@@ -993,6 +1012,28 @@ export function IslandSoundscape({ active, enabled }) {
         baseGain: { wood: 0.085, stone: 0.09, metal: 0.052, ceramic: 0.048 }[material],
         pan: panFromWorldPosition(event?.position),
         playbackJitter: material === 'metal' || material === 'ceramic' ? 0.03 : 0.055,
+      });
+    });
+    const offPropPush = onPropEvent('player-push-contact', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const prop = getZoneProps(current.currentZoneId).find(item => item.id === event?.propId);
+      const material = materialFromInteractionEvent(event, prop);
+      const sprite = material ? INTERACTION_AUDIO[material] : null;
+      if (!sprite) return;
+      const now = performance.now();
+      const previousAt = pushAudioRef.current.get(event.propId) || 0;
+      const moving = Number(event?.speed) >= 0.035;
+      const interval = moving ? (material === 'wood' ? 620 : 760) : 1450;
+      if (now - previousAt < interval) return;
+      pushAudioRef.current.set(event.propId, now);
+      playContact(material, sprite, {
+        intensity: moving ? clamp01(Number(event.speed) / 0.7) : 0.22,
+        baseGain: { wood: 0.055, stone: 0.06, metal: 0.038, ceramic: 0.032 }[material],
+        pan: panFromWorldPosition(event?.position),
+        playbackJitter: 0.055,
+        playbackRateCenter: material === 'stone' ? 0.89 : 0.93,
+        filterHz: material === 'metal' ? 5600 : 4200,
       });
     });
     const offFoliage = onPropEvent('foliage-contact', event => {
@@ -1049,7 +1090,7 @@ export function IslandSoundscape({ active, enabled }) {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
       const prop = getZoneProps(current.currentZoneId).find(item => item.id === event?.propId);
-      const material = interactionMaterialForProp(prop);
+      const material = materialFromInteractionEvent(event, prop);
       const sprite = material ? INTERACTION_AUDIO[material] : null;
       if (!sprite) return;
       const baseGain = {
@@ -1095,6 +1136,40 @@ export function IslandSoundscape({ active, enabled }) {
         gain,
         playbackRate: randomBetween(0.965, 1.035),
         pan: panFromWorldPosition(event?.position) * 0.35,
+      });
+      if (event?.kind === 'carry-pickup' && event?.propId) {
+        const prop = getZoneProps(current.currentZoneId).find(item => item.id === event.propId);
+        const material = materialFromInteractionEvent(event, prop);
+        const sprite = material ? INTERACTION_AUDIO[material] : null;
+        if (sprite) {
+          playContact(material, sprite, {
+            intensity: 0.34,
+            baseGain: { wood: 0.06, stone: 0.065, metal: 0.038, ceramic: 0.034 }[material],
+            pan: panFromWorldPosition(event?.position) * 0.45,
+            playbackRateCenter: 0.94,
+            playbackJitter: 0.05,
+            filterHz: 6500,
+          });
+        }
+      }
+    });
+    const offContainer = onPropEvent('container-foley', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const closing = event?.kind === 'chest-close';
+      playRandomVariant(variantsRef, 'door', WILDLIFE_FIELDWORK_AUDIO.door, {
+        gain: closing ? 0.075 : 0.105,
+        playbackRate: closing ? randomBetween(1.02, 1.08) : randomBetween(0.92, 0.99),
+        pan: panFromWorldPosition(event?.position) * 0.7,
+        filterHz: 7200,
+      });
+      playContact(closing ? 'metal' : 'wood', closing ? INTERACTION_AUDIO.metal : INTERACTION_AUDIO.wood, {
+        intensity: closing ? 0.58 : 0.28,
+        baseGain: closing ? 0.046 : 0.042,
+        pan: panFromWorldPosition(event?.position),
+        playbackRateCenter: closing ? 1.04 : 0.95,
+        playbackJitter: 0.035,
+        filterHz: 7000,
       });
     });
     const playLooseTerrainDetail = (event, scramble = false) => {
@@ -1148,12 +1223,14 @@ export function IslandSoundscape({ active, enabled }) {
       offWaterSplash();
       offPropContact();
       offPropSettled();
+      offPropPush();
       offFoliage();
       offFinchWing();
       offShotgun();
       offPropStruck();
       offFieldwork();
       offEquipment();
+      offContainer();
       offSkid();
       offScramble();
       offLightning();

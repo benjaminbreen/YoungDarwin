@@ -78,6 +78,23 @@ npm run three:contact-sheet -- --asset darwin5 --clip <clip> --preset review --v
 5. Save review outputs under `test-results/animation-sheets/`.
 6. Run `npm run check` after code/manifest changes.
 
+## Add A Playable Animal
+
+1. Read `docs/playable-animal-modes-plan.md` and treat
+   `three-game/wildlife/wildlifeCatalog.js` as the species/render/behavior
+   source of truth.
+2. Prefer an existing locomotion family, renderer adapter, and semantic action
+   effect. Add a new extension point only when the mechanic is reusable.
+3. Keep the animal definition data-driven: species reference, controller
+   tuning, camera, drives, senses, actions, narrator profile, vision treatment,
+   and multiplayer metadata.
+4. Make desktop/mobile toolbars and status UI consume the profile. Do not add a
+   new mode-ID branch or another fixed action list.
+5. Verify every declared action resolves to art, an effect handler, and an
+   animation intent supported by the renderer.
+6. Run `npm run check` and `npm run three:e2e:smoke`. Use a mode-specific
+   screenshot when camera, scale, HUD, renderer, or vision treatment changed.
+
 ## Choose Verification
 
 - General code: `npm run check`.

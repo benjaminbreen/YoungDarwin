@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { EB_Garamond, Geist, Geist_Mono, Lora, Meddon } from "next/font/google";
+import { Caveat, EB_Garamond, Geist, Geist_Mono, Lora, Meddon } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,6 +26,12 @@ const lora = Lora({
   style: ["normal", "italic"],
 });
 
+const caveat = Caveat({
+  variable: "--font-caveat",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
+
 const meddon = Meddon({
   variable: "--font-meddon",
   subsets: ["latin"],
@@ -45,7 +51,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${ebGaramond.variable} ${lora.variable} ${meddon.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${ebGaramond.variable} ${lora.variable} ${caveat.variable} ${meddon.variable} antialiased`}
       >
         {children}
       </body>

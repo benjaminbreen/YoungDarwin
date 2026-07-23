@@ -23,6 +23,8 @@ import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
 import { ProceduralFinchPlayer } from '../player/ProceduralFinchPlayer';
 import { ProceduralRacerSnake } from '../player/ProceduralRacerSnake';
+import { ProceduralTortoisePlayer } from '../player/ProceduralTortoisePlayer';
+import { PaintedLocustShape } from '../../wildlife/insects/PaintedLocustShape';
 import { SpecimenHighlight } from './SpecimenHighlight';
 import { BasaltSpecimenShape } from './BasaltSpecimenShape';
 
@@ -304,31 +306,78 @@ function ProceduralSpecimenShape({ specimen }) {
   );
 }
 
+function MeasuredProceduralShape({ children, onSceneReady }) {
+  const measuredGroup = useRef(null);
+
+  useEffect(() => {
+    if (!measuredGroup.current || !onSceneReady) return;
+    onSceneReady(measuredGroup.current);
+  }, [onSceneReady]);
+
+  return <group ref={measuredGroup}>{children}</group>;
+}
+
 export function SpecimenShape({
   specimen,
   animationSelector,
   onSceneReady = null,
   proceduralMotionRef = null,
 }) {
-  if (specimen.pollinator) return <PollinatorSpecimenShape specimen={specimen} />;
-  if (specimen.id === 'basalt') return <BasaltSpecimenShape />;
+  if (specimen.pollinator) {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <PollinatorSpecimenShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (specimen.id === 'basalt') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <BasaltSpecimenShape />
+      </MeasuredProceduralShape>
+    );
+  }
   const renderProfile = getWildlifeRenderProfile(specimen);
   if (renderProfile?.type === 'proceduralFinch') {
     return (
-      <ProceduralFinchPlayer
-        motionRef={proceduralMotionRef}
-        variant={renderProfile.variant}
-      />
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <ProceduralFinchPlayer
+          motionRef={proceduralMotionRef}
+          variant={renderProfile.variant}
+        />
+      </MeasuredProceduralShape>
     );
   }
   if (renderProfile?.type === 'proceduralSnake') {
-    return <ProceduralRacerSnake motionRef={proceduralMotionRef} />;
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <ProceduralRacerSnake motionRef={proceduralMotionRef} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (renderProfile?.type === 'proceduralTortoise') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <ProceduralTortoisePlayer motionRef={proceduralMotionRef} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (renderProfile?.type === 'proceduralLocust') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <PaintedLocustShape motionRef={proceduralMotionRef} />
+      </MeasuredProceduralShape>
+    );
   }
   const assetId = assetIdForSpecimen(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
   if (assetId === 'lavalizard') {
-    return <LavaLizardShape specimen={specimen} />;
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <LavaLizardShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
   }
   const foliageMotion = foliageMotionForSpecimen(specimen);
   return (
@@ -577,6 +626,7 @@ export function SpecimenActor({ specimen }) {
     const proceduralFlying = !behaviorPaused && faunaBehavior.airborneRef?.current === true;
     const owlBehavior = behaviorProfile?.controller === 'owl';
     const racerBehavior = behaviorProfile?.controller === 'racer';
+    const hopperBehavior = behaviorProfile?.controller === 'hopper';
     const racerActions = {
       bask: 'baskCoil',
       taste: 'tongueTaste',
@@ -591,8 +641,10 @@ export function SpecimenActor({ specimen }) {
       < (behaviorProfile?.wingbeatBurst || 1.25);
     Object.assign(proceduralMotionRef.current, {
       action: downedInfo
-        ? (racerBehavior ? 'downed' : 'animalSleep')
-        : (racerBehavior
+        ? (racerBehavior ? 'downed' : hopperBehavior ? 'locustRest' : 'animalSleep')
+        : (hopperBehavior
+          ? (behaviorPaused ? 'locustRest' : (behaviorMode === 'hopper:hop' ? 'locustHop' : 'locustRest'))
+          : racerBehavior
           ? (isCarried
             ? 'carried'
             : (isUnderExamination ? 'tongueTaste' : racerActions[behaviorMode] || animationClip || 'baskCoil'))
@@ -623,6 +675,8 @@ export function SpecimenActor({ specimen }) {
       flightDescend: owlBehavior && behaviorMode === 'pounce',
       owlHover: owlBehavior && behaviorMode === 'hover',
       owlPounce: owlBehavior && behaviorMode === 'pounce',
+      hopProgress: hopperBehavior ? behaviorDebug.hopProgress : null,
+      perchType: hopperBehavior ? behaviorDebug.perchType : null,
     });
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
@@ -900,6 +954,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'barnacle' ? 0.85
     : specimen.id === 'lavalizard' ? 0.72
     : specimen.id === 'galapagosracer' ? 0.42
+    : specimen.id === 'galapagospaintedlocust' ? 0.38
     : specimen.id === 'crab' ? 0.78
     : specimen.id === 'largegroundfinch' ? 1.08
     : specimen.id === 'mediumgroundfinch' ? 0.92
@@ -918,6 +973,7 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'barnacle' ? 0.38
     : specimen.id === 'lavalizard' ? 0.27
     : specimen.id === 'galapagosracer' ? 0.48
+    : specimen.id === 'galapagospaintedlocust' ? 0.2
     : specimen.id === 'frigatebird' ? 0.7
     : specimen.id === 'booby' ? 0.62
     : specimen.id === 'flamingo' ? 0.58

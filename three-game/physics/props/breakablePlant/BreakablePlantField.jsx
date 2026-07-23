@@ -176,6 +176,220 @@ function createSiteFlexes(sitePivots) {
   return flexes;
 }
 
+const PLANT_PIECE_INDEX_CELL_SIZE = 4;
+
+function plantPieceCellKey(x, z) {
+  return `${Math.floor(x / PLANT_PIECE_INDEX_CELL_SIZE)}:${Math.floor(z / PLANT_PIECE_INDEX_CELL_SIZE)}`;
+}
+
+function createPlantPieceSpatialIndex(pieces) {
+  const cells = new Map();
+  let maxHalfWidth = 0;
+  for (const piece of pieces) {
+    const key = plantPieceCellKey(piece.center.x, piece.center.z);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(piece);
+    maxHalfWidth = Math.max(maxHalfWidth, (piece.width || 0) * 0.5);
+  }
+  return { cells, maxHalfWidth };
+}
+
+function queryPlantPieceSpatialIndex(index, x, z, radius) {
+  if (!index?.cells?.size) return [];
+  const results = [];
+  const minCellX = Math.floor((x - radius) / PLANT_PIECE_INDEX_CELL_SIZE);
+  const maxCellX = Math.floor((x + radius) / PLANT_PIECE_INDEX_CELL_SIZE);
+  const minCellZ = Math.floor((z - radius) / PLANT_PIECE_INDEX_CELL_SIZE);
+  const maxCellZ = Math.floor((z + radius) / PLANT_PIECE_INDEX_CELL_SIZE);
+  for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+      const cell = index.cells.get(`${cellX}:${cellZ}`);
+      if (cell) results.push(...cell);
+    }
+  }
+  return results;
+}
+
+function updateIntactPlantVisuals(runtime, tuning, elapsedTime) {
+  for (const [siteId, siteFlex] of runtime.siteFlexes) {
+    let pose = runtime.siteVisualPoses.get(siteId);
+    if (!pose) {
+      pose = {
+        bendQuat: new THREE.Quaternion(),
+        windQuat: new THREE.Quaternion(),
+        worldFlexQuat: new THREE.Quaternion(),
+      };
+      runtime.siteVisualPoses.set(siteId, pose);
+    }
+    pose.bendQuat.setFromAxisAngle(siteFlex.axisWorld, siteFlex.angle);
+    pose.windQuat.setFromAxisAngle(
+      siteFlex.windAxis,
+      Math.sin(elapsedTime * 0.82 + siteFlex.phase) * tuning.windSway,
+    );
+    pose.worldFlexQuat.copy(pose.windQuat).multiply(pose.bendQuat);
+  }
+
+  // Intact pieces used to register one useFrame callback each. Updating their
+  // unchanged visuals from this single field callback preserves the exact
+  // transforms while avoiding hundreds of React/R3F frame subscribers.
+  for (const [key, record] of runtime.intactVisuals) {
+    if (runtime.released.has(key) || runtime.culled.has(key)) continue;
+    const visual = record.visualRef.current;
+    if (!visual) continue;
+    const {
+      piece,
+      damageKeys,
+      state,
+      baseQuat,
+      invQuat,
+      windAmp,
+      windPhase,
+    } = record;
+    const siteFlex = runtime.siteFlexes.get(piece.siteId);
+    const sitePose = runtime.siteVisualPoses.get(piece.siteId);
+    state.cleared = false;
+    state.worldFlexQuat.identity();
+    state.flexedPosition.copy(state.basePosition);
+    if (siteFlex && sitePose) {
+      state.worldFlexQuat.copy(sitePose.worldFlexQuat);
+      state.flexedPosition
+        .sub(siteFlex.pivot)
+        .applyQuaternion(state.worldFlexQuat)
+        .add(siteFlex.pivot);
+    }
+
+    let damageFlex = null;
+    for (const damageKey of damageKeys || []) {
+      damageFlex = runtime.damageFlexes.get(damageKey);
+      if (damageFlex) break;
+    }
+    if (damageFlex) {
+      state.damagePivot.copy(damageFlex.pivot);
+      state.damageAxis.copy(damageFlex.axisWorld);
+      if (siteFlex) {
+        state.damagePivot
+          .sub(siteFlex.pivot)
+          .applyQuaternion(state.worldFlexQuat)
+          .add(siteFlex.pivot);
+        state.damageAxis.applyQuaternion(state.worldFlexQuat).normalize();
+      }
+      state.damageQuat.setFromAxisAngle(state.damageAxis, damageFlex.angle);
+      state.flexedPosition
+        .sub(state.damagePivot)
+        .applyQuaternion(state.damageQuat)
+        .add(state.damagePivot);
+      state.worldFlexQuat.premultiply(state.damageQuat);
+    }
+
+    visual.position.copy(
+      state.localPosition
+        .copy(state.flexedPosition)
+        .sub(state.basePosition)
+        .applyQuaternion(invQuat),
+    );
+    state.localFlexQuat.copy(invQuat)
+      .multiply(state.worldFlexQuat)
+      .multiply(baseQuat);
+    visual.quaternion.copy(state.localFlexQuat);
+    state.windEuler.set(
+      Math.sin(elapsedTime * 1.7 + windPhase) * windAmp,
+      0,
+      Math.sin(elapsedTime * 2.9 + windPhase * 1.7) * windAmp * 0.6,
+    );
+    visual.quaternion.multiply(state.windQuat.setFromEuler(state.windEuler));
+  }
+}
+
+function updateReleasedPlantPieces(runtime, tuning, delta) {
+  const store = useThreeGameStore.getState();
+  for (const key of runtime.released) {
+    if (runtime.culled.has(key)) continue;
+    const body = runtime.bodies.get(key)?.current;
+    const record = runtime.intactVisuals.get(key);
+    if (!body || !record) continue;
+    const {
+      piece,
+      state,
+      visualRef,
+      baseQuat,
+    } = record;
+
+    // Transfer the last coherent flex pose to the rigid body before clearing
+    // the visual offset. Fixed-to-dynamic therefore has no upright pop.
+    if (!state.cleared) {
+      state.cleared = true;
+      const visual = visualRef.current;
+      if (visual) {
+        const translation = body.translation();
+        state.worldPosition.copy(visual.position).applyQuaternion(baseQuat);
+        state.worldPosition.x += translation.x;
+        state.worldPosition.y += translation.y;
+        state.worldPosition.z += translation.z;
+        state.worldQuat.copy(baseQuat).multiply(visual.quaternion);
+        body.setTranslation(state.worldPosition, true);
+        body.setRotation(state.worldQuat, true);
+        visual.position.set(0, 0, 0);
+        visual.quaternion.identity();
+      }
+    }
+
+    if (!runtime.impulseApplied.has(key)) {
+      const pending = runtime.pendingImpulses.get(key);
+      if (pending && body.bodyType() === 0) {
+        runtime.impulseApplied.add(key);
+        runtime.pendingImpulses.delete(key);
+        body.wakeUp();
+        body.applyImpulse(pending.linear, true);
+        if (pending.torque) body.applyTorqueImpulse(pending.torque, true);
+        const currentVelocity = body.linvel();
+        const cappedVelocity = clampReleaseLinearVelocity(
+          currentVelocity,
+          pending.maxLinearSpeed,
+        );
+        if (cappedVelocity !== currentVelocity) body.setLinvel(cappedVelocity, true);
+      }
+    }
+
+    const releaseAge = (runtime.releaseAges.get(key) || 0) + delta;
+    runtime.releaseAges.set(key, releaseAge);
+    if (releaseAge < tuning.collectSettleDelay) continue;
+    const translation = body.translation();
+    if (translation.y < tuning.fallCullY) {
+      if (store.carryPrompt?.id === key) store.setCarryPrompt(null);
+      runtime.culled.add(key);
+      runtime.bump();
+      continue;
+    }
+    const pose = getRuntimePlayerPose();
+    const player = pose?.position || { x: 0, z: 0 };
+    const distance = Math.hypot(translation.x - player.x, translation.z - player.z);
+    const activePrompt = useThreeGameStore.getState().carryPrompt;
+    if (distance <= tuning.collectDistance) {
+      if (!activePrompt || activePrompt.id === key || distance < (activePrompt.distance ?? Infinity)) {
+        store.setCarryPrompt({
+          id: key,
+          label: piece.sampleLabel,
+          mode: 'collect-rock-sample',
+          distance,
+          text: piece.promptText,
+          sample: {
+            sampleId: key,
+            sourceRockKey: key,
+            zoneId: runtime.zoneId,
+            specimenId: piece.specimenId,
+            sampleLabel: piece.sampleLabel,
+            outcome: piece.sampleOutcome,
+            educationalNote: piece.educationalNote,
+            position: { x: translation.x, y: translation.y, z: translation.z },
+          },
+        });
+      }
+    } else if (activePrompt?.id === key) {
+      store.setCarryPrompt(null);
+    }
+  }
+}
+
 function isPlayerTarget(target) {
   return target?.rigidBodyObject?.userData?.kind === 'player'
     || target?.colliderObject?.userData?.kind === 'player'
@@ -192,10 +406,9 @@ function BreakablePlantPiece({
   damageKeys,
   onImpactRelease,
   registerBody,
+  registerIntactVisual,
 }) {
   const bodyRef = useRef(null);
-  const impulseApplied = useRef(false);
-  const releaseAgeRef = useRef(0);
   const visualRef = useRef(null);
   const visualStateRef = useRef(null);
   if (!visualStateRef.current) {
@@ -204,8 +417,6 @@ function BreakablePlantPiece({
       flexedPosition: new THREE.Vector3(),
       localPosition: new THREE.Vector3(),
       worldFlexQuat: new THREE.Quaternion(),
-      bendQuat: new THREE.Quaternion(),
-      siteWindQuat: new THREE.Quaternion(),
       damageQuat: new THREE.Quaternion(),
       damageAxis: new THREE.Vector3(),
       damagePivot: new THREE.Vector3(),
@@ -236,6 +447,28 @@ function BreakablePlantPiece({
     return () => registerBody(piece.key, null);
   }, [piece.key, registerBody]);
 
+  useEffect(() => {
+    registerIntactVisual(piece.key, {
+      visualRef,
+      state: visualStateRef.current,
+      piece,
+      damageKeys,
+      baseQuat,
+      invQuat,
+      windAmp,
+      windPhase,
+    });
+    return () => registerIntactVisual(piece.key, null);
+  }, [
+    baseQuat,
+    damageKeys,
+    invQuat,
+    piece,
+    registerIntactVisual,
+    windAmp,
+    windPhase,
+  ]);
+
   useEffect(() => () => {
     const state = useThreeGameStore.getState();
     if (state.carryPrompt?.id === piece.key) setCarryPrompt(null);
@@ -254,148 +487,6 @@ function BreakablePlantPiece({
     if ((payload.totalForceMagnitude || 0) < tuning.propBreakContactForce) return;
     onImpactRelease(piece.key, null);
   };
-
-  useFrame((state, delta) => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const released = runtime.released.has(piece.key);
-    if (!released) {
-      const visualState = visualStateRef.current;
-      visualState.cleared = false;
-      const visual = visualRef.current;
-      if (visual) {
-        const siteFlex = runtime.siteFlexes.get(piece.siteId);
-        const t = state.clock.elapsedTime;
-        visualState.worldFlexQuat.identity();
-        visualState.flexedPosition.copy(visualState.basePosition);
-        if (siteFlex) {
-          visualState.bendQuat.setFromAxisAngle(siteFlex.axisWorld, siteFlex.angle);
-          visualState.siteWindQuat.setFromAxisAngle(
-            siteFlex.windAxis,
-            Math.sin(t * 0.82 + siteFlex.phase) * tuning.windSway,
-          );
-          visualState.worldFlexQuat.copy(visualState.siteWindQuat).multiply(visualState.bendQuat);
-          visualState.flexedPosition.copy(visualState.basePosition)
-            .sub(siteFlex.pivot)
-            .applyQuaternion(visualState.worldFlexQuat)
-            .add(siteFlex.pivot);
-        }
-
-        let damageFlex = null;
-        for (const key of damageKeys || []) {
-          damageFlex = runtime.damageFlexes.get(key);
-          if (damageFlex) break;
-        }
-        if (damageFlex) {
-          visualState.damagePivot.copy(damageFlex.pivot);
-          visualState.damageAxis.copy(damageFlex.axisWorld);
-          if (siteFlex) {
-            visualState.damagePivot
-              .sub(siteFlex.pivot)
-              .applyQuaternion(visualState.worldFlexQuat)
-              .add(siteFlex.pivot);
-            visualState.damageAxis.applyQuaternion(visualState.worldFlexQuat).normalize();
-          }
-          visualState.damageQuat.setFromAxisAngle(visualState.damageAxis, damageFlex.angle);
-          visualState.flexedPosition
-            .sub(visualState.damagePivot)
-            .applyQuaternion(visualState.damageQuat)
-            .add(visualState.damagePivot);
-          visualState.worldFlexQuat.premultiply(visualState.damageQuat);
-        }
-
-        visual.position.copy(visualState.localPosition
-          .copy(visualState.flexedPosition)
-          .sub(visualState.basePosition)
-          .applyQuaternion(invQuat));
-        visualState.localFlexQuat.copy(invQuat)
-          .multiply(visualState.worldFlexQuat)
-          .multiply(baseQuat);
-        visual.quaternion.copy(visualState.localFlexQuat);
-        visualState.windEuler.set(
-          Math.sin(t * 1.7 + windPhase) * windAmp,
-          0,
-          Math.sin(t * 2.9 + windPhase * 1.7) * windAmp * 0.6,
-        );
-        visual.quaternion.multiply(visualState.windQuat.setFromEuler(visualState.windEuler));
-      }
-      return;
-    }
-
-    // Transfer the last coherent flex pose to the rigid body before clearing
-    // the visual offset. Fixed-to-dynamic therefore has no upright pop.
-    const visualState = visualStateRef.current;
-    if (!visualState.cleared) {
-      visualState.cleared = true;
-      const visual = visualRef.current;
-      if (visual) {
-        const translation = body.translation();
-        visualState.worldPosition.copy(visual.position)
-          .applyQuaternion(baseQuat)
-          .add(new THREE.Vector3(translation.x, translation.y, translation.z));
-        visualState.worldQuat.copy(baseQuat).multiply(visual.quaternion);
-        body.setTranslation(visualState.worldPosition, true);
-        body.setRotation(visualState.worldQuat, true);
-        visual.position.set(0, 0, 0);
-        visual.quaternion.identity();
-      }
-    }
-
-    if (!impulseApplied.current) {
-      const pending = runtime.pendingImpulses.get(piece.key);
-      if (pending && body.bodyType() === 0) {
-        impulseApplied.current = true;
-        runtime.pendingImpulses.delete(piece.key);
-        body.wakeUp();
-        body.applyImpulse(pending.linear, true);
-        if (pending.torque) body.applyTorqueImpulse(pending.torque, true);
-        const currentVelocity = body.linvel();
-        const cappedVelocity = clampReleaseLinearVelocity(
-          currentVelocity,
-          pending.maxLinearSpeed,
-        );
-        if (cappedVelocity !== currentVelocity) body.setLinvel(cappedVelocity, true);
-      }
-    }
-
-    releaseAgeRef.current += delta;
-    if (releaseAgeRef.current < tuning.collectSettleDelay) return;
-    const translation = body.translation();
-    if (translation.y < tuning.fallCullY) {
-      const storeState = useThreeGameStore.getState();
-      if (storeState.carryPrompt?.id === piece.key) setCarryPrompt(null);
-      runtime.culled.add(piece.key);
-      runtime.bump();
-      return;
-    }
-    const pose = getRuntimePlayerPose();
-    const player = pose?.position || { x: 0, z: 0 };
-    const distance = Math.hypot(translation.x - player.x, translation.z - player.z);
-    const activePrompt = useThreeGameStore.getState().carryPrompt;
-    if (distance <= tuning.collectDistance) {
-      if (!activePrompt || activePrompt.id === piece.key || distance < (activePrompt.distance ?? Infinity)) {
-        setCarryPrompt({
-          id: piece.key,
-          label: piece.sampleLabel,
-          mode: 'collect-rock-sample',
-          distance,
-          text: piece.promptText,
-          sample: {
-            sampleId: piece.key,
-            sourceRockKey: piece.key,
-            zoneId: runtime.zoneId,
-            specimenId: piece.specimenId,
-            sampleLabel: piece.sampleLabel,
-            outcome: piece.sampleOutcome,
-            educationalNote: piece.educationalNote,
-            position: { x: translation.x, y: translation.y, z: translation.z },
-          },
-        });
-      }
-    } else if (activePrompt?.id === piece.key) {
-      setCarryPrompt(null);
-    }
-  });
 
   return (
     <RigidBody
@@ -459,6 +550,10 @@ export function BreakablePlantField({ spec }) {
   const pieces = useMemo(
     () => spec.buildZonePieces(currentZoneId, sites),
     [currentZoneId, sites, spec],
+  );
+  const pieceSpatialIndex = useMemo(
+    () => createPlantPieceSpatialIndex(pieces),
+    [pieces],
   );
 
   const sitePivots = useMemo(() => {
@@ -531,6 +626,8 @@ export function BreakablePlantField({ spec }) {
       damage: new Map(),
       damageFlexes: new Map(),
       pendingImpulses: new Map(),
+      impulseApplied: new Set(),
+      releaseAges: new Map(),
       pendingCascades: [],
       pendingStrikes: [],
       playerVel: { x: 0, z: 0 },
@@ -539,6 +636,8 @@ export function BreakablePlantField({ spec }) {
       clock: 0,
       lastAbsorbFeedbackAt: -Infinity,
       bodies: new Map(),
+      intactVisuals: new Map(),
+      siteVisualPoses: new Map(),
       bump: () => bumpVersion(v => v + 1),
     };
   }
@@ -554,11 +653,14 @@ export function BreakablePlantField({ spec }) {
     runtime.damage = new Map();
     runtime.damageFlexes = new Map();
     runtime.pendingImpulses = new Map();
+    runtime.impulseApplied = new Set();
+    runtime.releaseAges = new Map();
     runtime.pendingCascades = [];
     runtime.pendingStrikes = [];
     runtime.playerVel = { x: 0, z: 0 };
     runtime.playerTrack = { has: false, x: 0, z: 0 };
     runtime.siteFlexes = createSiteFlexes(sitePivots);
+    runtime.siteVisualPoses.clear();
     runtime.clock = 0;
     runtime.lastAbsorbFeedbackAt = -Infinity;
     const collected = new Set((useThreeGameStore.getState().sampledRockIds || []).filter(key => piecesByKey.has(key)));
@@ -578,6 +680,11 @@ export function BreakablePlantField({ spec }) {
   const registerBody = useCallback((key, ref) => {
     if (ref) runtime.bodies.set(key, ref);
     else runtime.bodies.delete(key);
+  }, [runtime]);
+
+  const registerIntactVisual = useCallback((key, record) => {
+    if (record) runtime.intactVisuals.set(key, record);
+    else runtime.intactVisuals.delete(key);
   }, [runtime]);
 
   const releasePiece = useCallback((key, impulse, {
@@ -791,7 +898,13 @@ export function BreakablePlantField({ spec }) {
     const at = event.position;
     if (!at) return;
     const hits = [];
-    for (const piece of pieces) {
+    const nearbyPieces = queryPlantPieceSpatialIndex(
+      pieceSpatialIndex,
+      at.x,
+      at.z,
+      tuning.jumpBreakRadius + pieceSpatialIndex.maxHalfWidth,
+    );
+    for (const piece of nearbyPieces) {
       if (!piece.breakOnLanding) continue;
       if (runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
       const horizontal = Math.hypot(piece.center.x - at.x, piece.center.z - at.z);
@@ -812,9 +925,9 @@ export function BreakablePlantField({ spec }) {
         maxLinearSpeed: tuning.landingReleaseVelocityCap,
       }));
     }
-  }), [damagePiece, pieces, runtime, tuning]);
+  }), [damagePiece, pieceSpatialIndex, runtime, tuning]);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     runtime.clock += delta;
 
     // Pose-delta fallback for callers that do not publish player motion. The
@@ -862,7 +975,13 @@ export function BreakablePlantField({ spec }) {
     // the same ground pivot so the response reads through Darwin's silhouette.
     const candidatesBySite = new Map();
     if (playerPos) {
-      for (const piece of pieces) {
+      const nearbyPieces = queryPlantPieceSpatialIndex(
+        pieceSpatialIndex,
+        playerPos.x,
+        playerPos.z,
+        tuning.pushReach + pieceSpatialIndex.maxHalfWidth,
+      );
+      for (const piece of nearbyPieces) {
         if (!piece.pushable || runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
         if (playerPos.y <= piece.spawn[1] - 1.6 || playerPos.y >= piece.topY + 0.4) continue;
         const dx = piece.center.x - playerPos.x;
@@ -971,6 +1090,9 @@ export function BreakablePlantField({ spec }) {
       }
     }
 
+    updateIntactPlantVisuals(runtime, tuning, state.clock.elapsedTime);
+    updateReleasedPlantPieces(runtime, tuning, delta);
+
     if (runtime.pendingCascades.length) {
       const due = runtime.pendingCascades.filter(item => item.at <= runtime.clock);
       if (due.length) {
@@ -987,7 +1109,15 @@ export function BreakablePlantField({ spec }) {
       const o = strike.position;
       const f = strike.facing;
       if (!o || !f) continue;
-      const intactPieces = pieces.filter(piece => (
+      const strikeRange = strike.tool === 'pocket_knife'
+        ? tuning.knifeStrikeRange
+        : tuning.strikeRange;
+      const intactPieces = queryPlantPieceSpatialIndex(
+        pieceSpatialIndex,
+        o.x,
+        o.z,
+        strikeRange + pieceSpatialIndex.maxHalfWidth,
+      ).filter(piece => (
         !runtime.released.has(piece.key) && !runtime.culled.has(piece.key)
       ));
       const knifeCut = strike.tool === 'pocket_knife';
@@ -1076,6 +1206,7 @@ export function BreakablePlantField({ spec }) {
             releasedVersion={version}
             onImpactRelease={onImpactRelease}
             registerBody={registerBody}
+            registerIntactVisual={registerIntactVisual}
           />
         ))}
     </group>

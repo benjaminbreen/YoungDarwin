@@ -4,17 +4,21 @@ import dynamic from 'next/dynamic';
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
-import { EffectComposer, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
+import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
+import { AnimalVisionPostEffect } from './components/scene/AnimalVisionPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
 import { LaunchOverlay } from './ui/LaunchOverlay';
 import { IslandSoundscape } from './audio/IslandSoundscape';
-import { activatePostOfficeBayAudio } from './audio/audioRuntime';
+import {
+  activatePostOfficeBayAudio,
+  preloadSoundscapeEffects,
+} from './audio/audioRuntime';
 import { ThreeE2EFrameSignal, ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
 import { getPlayableMode } from './playable/playableModes';
@@ -23,7 +27,8 @@ import { skyState } from './world/celestial';
 import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
 import { WATER_LEVEL } from './world/water';
-import './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
+import { cloudShadeTuning, fogAtmosphereUniforms } from './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
+import { solarLookTuning } from './world/solarLook';
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
@@ -33,6 +38,10 @@ import {
   getSpecimenRuntimePoses,
   resolveSpecimenFrameHint,
 } from './world/specimenRuntime';
+import {
+  examinationDepthOfFieldActive,
+  postprocessingComposerActive,
+} from './examine/examinationPostFx';
 import { terrainHeight } from './world/terrain';
 import {
   prefetchEcologyAssets,
@@ -63,6 +72,8 @@ import {
   setEcologyDebugSpecies,
   toggleEcologyDebug,
 } from './world/ecology/ecologyDebugRuntime';
+import { MultiplayerProvider } from './multiplayer/MultiplayerContext';
+import { MultiplayerHud } from './multiplayer/MultiplayerHud';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
 const AssetBrowserPanel = dynamic(
@@ -179,7 +190,9 @@ const DEFAULT_PERF_SETTINGS = {
   solarScreenGlare: true,
   solarLensGhosts: true,
   solarSunHalo: true,
-  solarSceneFlares: true,
+  // Ghost-flare sprites read as overdone against the boosted sun optics
+  // (2026-07 screenshot pass); the halo/corona family carries the look now.
+  solarSceneFlares: false,
   solarSunFacingGrade: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
@@ -233,7 +246,9 @@ const QUALITY_PRESETS = {
     postprocessing: true,
     contextAntialias: true,
     shadowQuality: 'high',
-    ao: false,
+    // N8AO grounds props and vegetation enough to be worth its cost even on
+    // the default tier (2026-07 screenshot pass); only mobile leaves it off.
+    ao: true,
     // Planar reflection measured as near-free at this tier and the water
     // reads dramatically better with it — only mobile leaves it off.
     reflections: true,
@@ -244,7 +259,7 @@ const QUALITY_PRESETS = {
     solarScreenGlare: true,
     solarLensGhosts: true,
     solarSunHalo: true,
-    solarSceneFlares: true,
+    solarSceneFlares: false,
     cheapMaterials: true,
     foliageDrawScale: 0.85,
     terrainSegmentCap: 200,
@@ -264,7 +279,7 @@ const QUALITY_PRESETS = {
     solarScreenGlare: true,
     solarLensGhosts: true,
     solarSunHalo: true,
-    solarSceneFlares: true,
+    solarSceneFlares: false,
     cheapMaterials: false,
     foliageDrawScale: 1,
     terrainSegmentCap: null,
@@ -274,23 +289,45 @@ const QUALITY_PRESETS = {
 const BOOT_LOADER_STABLE_MS = 350;
 const BOOT_MIN_LOADING_MS = 1000;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const OPENING_DURATION_MS = 5200;
+const OPENING_DURATION_MS = 7200;
 const LAUNCH_OVERLAY_FADE_MS = 600;
 const STARTUP_FULL_CONTENT_PHASE = 6;
+const TRANSITION_REVEAL_CONTENT_PHASE = 5;
+// Terrain, vistas, authored ecology, and Darwin establish the opening shot.
+// Asset-heavy props, specimens, and NPCs must not gate launch: a slow or
+// unresolved optional GLB otherwise strands the progress display at 97–98%.
 const STARTUP_OPENING_CONTENT_PHASE = 3;
-// Load terrain/detail and every Darwin animation bank behind the opaque launch
-// overlay. Heavier props, specimens, and NPCs join under the black crossfade.
 const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420, 570, 940, 1370];
-const INTRO_REVEAL_PHASE_TIMINGS_MS = [150, 520, 950];
+// Once the cinematic has handed off, fill in optional content during separated
+// idle windows rather than asking React/Rapier/GLTF to mount it during the shot.
+const INTRO_REVEAL_PHASE_TIMINGS_MS = [250, 1100, 2400];
 // Destination resources are already preparing while the player approaches an
 // edge. Once the chart is opaque, mount one content family per painted/idle
 // window so React, Rapier, instance matrices, and shader discovery cannot all
 // consume the same animation frame.
-const TRANSITION_MOUNT_PHASE_TIMINGS_MS = [0, 180];
-const TRANSITION_ARRIVAL_PHASE_TIMINGS_MS = [80, 300, 620];
-const TRANSITION_READY_DEADLINE_MS = 1350;
+const TRANSITION_MOUNT_STEPS = Object.freeze([
+  2,
+  3,
+  3.2,
+  3.4,
+  3.6,
+  3.8,
+  4,
+  4.25,
+  4.5,
+  5,
+  5.2,
+  5.4,
+  5.6,
+  6,
+]);
+// The deadline is a degraded fallback, not the normal transition clock. Full
+// destination content now mounts and compiles beneath the opaque chart first.
+const TRANSITION_READY_DEADLINE_MS = 6500;
+const TRANSITION_COMPILE_TIMEOUT_MS = 1200;
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
+const OPENING_RENDER_DPR = [1, 1];
 
 function normalizeShadowQuality(value, fallback = 'high') {
   const mode = String(value || '').toLowerCase();
@@ -1033,98 +1070,119 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
     }, 0);
   };
 
-  useFrame(() => {
-    const state = useThreeGameStore.getState();
-    const active = state.transition;
-    if (!active || active.phase !== 'mounting' || state.currentZoneId !== active.zoneId) {
-      quietSinceRef.current = 0;
-      stableFramesRef.current = 0;
-      resourceStableFramesRef.current = 0;
-      activeIdRef.current = null;
-      return;
-    }
-    if (activeIdRef.current !== active.id) {
-      activeIdRef.current = active.id;
-      quietSinceRef.current = 0;
-      stableFramesRef.current = 0;
-      resourceStableFramesRef.current = 0;
-    }
-    // Compilation is a polish step, not a gate that may permanently strand the
-    // player. This also covers a failed terrain promise or a loader that never
-    // reports its final progress event on a particular WebGL implementation.
-    if (active.committedAt && Date.now() - active.committedAt >= 6500) {
-      queueReady(active.id);
-      return;
-    }
-    if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
-      resourceStableFramesRef.current = 0;
-      return;
-    }
-    const waterResource = waterResourceDescriptor(active.zoneId, waterQuality);
-    if (contentPhase < STARTUP_FULL_CONTENT_PHASE
-      || !borderVistaResourceIsReady(active.zoneId)
-      || !regionEcologyResourceIsReady(active.zoneId)
-      || (!waterResource.skip && !waterTextureResourceIsReady(
-        active.zoneId,
-        waterResource.bakeRes,
-        waterResource.options,
-      ))) {
-      resourceStableFramesRef.current = 0;
-      return;
-    }
-    // Let Suspense commit the terrain/physics consumers after the worker's
-    // promise resolves before compiling the destination scene.
-    resourceStableFramesRef.current += 1;
-    if (resourceStableFramesRef.current < 3) return;
-    if (compiledIdRef.current !== active.id) {
-      if (compilingIdRef.current !== active.id) {
-        const transitionId = active.id;
-        compilingIdRef.current = transitionId;
-        let compileTimeoutId = null;
-        Promise.resolve()
-          .then(() => Promise.race([
-            typeof gl.compileAsync === 'function'
-              ? gl.compileAsync(scene, camera)
-              : Promise.resolve(gl.compile(scene, camera)),
-            new Promise(resolve => {
-              compileTimeoutId = window.setTimeout(resolve, 3500);
-            }),
-          ]))
-          .catch(() => {
-            // The renderer will surface shader errors. Readiness must still be
-            // able to settle onto authored fallbacks on unusual WebGL drivers.
-          })
-          .then(() => {
-            if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
-            if (useThreeGameStore.getState().transition?.id === transitionId) {
-              compiledIdRef.current = transitionId;
-            }
-            if (compilingIdRef.current === transitionId) compilingIdRef.current = null;
-          });
+  useEffect(() => {
+    let frameHandle = null;
+    let cancelled = false;
+    const tick = () => {
+      try {
+        const state = useThreeGameStore.getState();
+        const active = state.transition;
+        if (!active || active.phase !== 'mounting' || state.currentZoneId !== active.zoneId) {
+          quietSinceRef.current = 0;
+          stableFramesRef.current = 0;
+          resourceStableFramesRef.current = 0;
+          activeIdRef.current = null;
+          return;
+        }
+        if (activeIdRef.current !== active.id) {
+          activeIdRef.current = active.id;
+          quietSinceRef.current = 0;
+          stableFramesRef.current = 0;
+          resourceStableFramesRef.current = 0;
+        }
+        // Compilation is a polish step, not a gate that may permanently strand
+        // the player. This also covers a failed terrain promise or a loader that
+        // never reports its final progress event on a particular WebGL driver.
+        if (active.committedAt && Date.now() - active.committedAt >= TRANSITION_READY_DEADLINE_MS) {
+          queueReady(active.id);
+          return;
+        }
+        if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
+          resourceStableFramesRef.current = 0;
+          return;
+        }
+        const waterResource = waterResourceDescriptor(active.zoneId, waterQuality);
+        if (contentPhase < TRANSITION_REVEAL_CONTENT_PHASE
+          || !borderVistaResourceIsReady(active.zoneId)
+          || !regionEcologyResourceIsReady(active.zoneId)
+          || (!waterResource.skip && !waterTextureResourceIsReady(
+            active.zoneId,
+            waterResource.bakeRes,
+            waterResource.options,
+          ))) {
+          resourceStableFramesRef.current = 0;
+          return;
+        }
+        // Let Suspense commit the terrain/physics consumers after the worker's
+        // promise resolves before compiling the destination scene.
+        resourceStableFramesRef.current += 1;
+        if (resourceStableFramesRef.current < 3) return;
+        if (compiledIdRef.current !== active.id) {
+          if (compilingIdRef.current !== active.id) {
+            const transitionId = active.id;
+            compilingIdRef.current = transitionId;
+            let compileTimeoutId = null;
+            Promise.resolve()
+              .then(() => Promise.race([
+                typeof gl.compileAsync === 'function'
+                  ? gl.compileAsync(scene, camera)
+                  : Promise.resolve(gl.compile(scene, camera)),
+                new Promise(resolve => {
+                  compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
+                }),
+              ]))
+              .catch(() => {
+                // The renderer will surface shader errors. Readiness must still
+                // settle onto authored fallbacks on unusual WebGL drivers.
+              })
+              .then(() => {
+                if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+                if (useThreeGameStore.getState().transition?.id === transitionId) {
+                  compiledIdRef.current = transitionId;
+                }
+                if (compilingIdRef.current === transitionId) compilingIdRef.current = null;
+              });
+          }
+          return;
+        }
+        // Read the loader store without subscribing this component. Texture
+        // loaders may start synchronously while destination actors render; a
+        // subscription here can cause a cross-component React update.
+        const assetProgress = useProgress.getState();
+        const knownTotal = Number(assetProgress.total || 0);
+        const loaderBusy = assetProgress.active
+          || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
+        if (loaderBusy || compiledIdRef.current !== active.id) {
+          quietSinceRef.current = 0;
+          stableFramesRef.current = 0;
+          return;
+        }
+        const now = performance.now();
+        if (!quietSinceRef.current) quietSinceRef.current = now;
+        if (now - quietSinceRef.current < 220) return;
+        stableFramesRef.current += 1;
+        if (stableFramesRef.current < 3) return;
+        stableFramesRef.current = 0;
+        queueReady(active.id);
+      } finally {
+        if (!cancelled) frameHandle = window.requestAnimationFrame(tick);
       }
-      return;
-    }
-    // Read the loader store without subscribing this R3F component. Texture
-    // loaders may start synchronously while destination actors render; a
-    // subscription here lets that render-time loading event try to re-render
-    // this component, which React correctly reports as a cross-component update.
-    const assetProgress = useProgress.getState();
-    const knownTotal = Number(assetProgress.total || 0);
-    const loaderBusy = assetProgress.active
-      || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
-    if (loaderBusy || compiledIdRef.current !== active.id) {
-      quietSinceRef.current = 0;
-      stableFramesRef.current = 0;
-      return;
-    }
-    const now = performance.now();
-    if (!quietSinceRef.current) quietSinceRef.current = now;
-    if (now - quietSinceRef.current < 220) return;
-    stableFramesRef.current += 1;
-    if (stableFramesRef.current < 3) return;
-    stableFramesRef.current = 0;
-    queueReady(active.id);
-  });
+    };
+    frameHandle = window.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [
+    camera,
+    contentPhase,
+    gl,
+    scene,
+    segmentCap,
+    transition?.id,
+    transition?.phase,
+    waterQuality,
+  ]);
 
   return null;
 }
@@ -1190,8 +1248,8 @@ function TravelCameraRig() {
       direction.current.set(targetPosition.current.x - px, 0, targetPosition.current.z - pz);
       if (direction.current.lengthSq() < 0.01) direction.current.set(0, 0, 1);
       direction.current.normalize();
-      arrivalPositionRef.current.set(px, Math.max(py + 18, targetPosition.current.y + 8), pz)
-        .addScaledVector(direction.current, 10);
+      arrivalPositionRef.current.set(px, Math.max(py + 20, targetPosition.current.y + 9), pz)
+        .addScaledVector(direction.current, 12);
       const previousPosition = camera.position.clone();
       camera.position.copy(arrivalPositionRef.current);
       lookTarget.current.set(px, py + 1.1, pz);
@@ -1201,7 +1259,7 @@ function TravelCameraRig() {
     }
     const arrivalStartedAt = active.arrivingAt || active.readyAt || active.phaseStartedAt || Date.now();
     const elapsed = Math.max(0, Date.now() - arrivalStartedAt);
-    const t = MathUtils.smoothstep(Math.min(1, elapsed / 900), 0, 1);
+    const t = MathUtils.smoothstep(Math.min(1, elapsed / 1050), 0, 1);
     camera.position.copy(arrivalPositionRef.current).lerp(targetPosition.current, t);
     camera.quaternion.copy(arrivalQuaternionRef.current).slerp(targetQuaternion.current, t);
   });
@@ -1313,7 +1371,7 @@ function ExaminationDepthOfField() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const effectRef = useRef(null);
   const target = useMemo(() => new Vector3(), []);
-  const active = session?.kind === 'specimen' && Boolean(session.focus);
+  const active = examinationDepthOfFieldActive(session);
   const authoredHint = session?.frameHint || { height: 0.8, radius: 0.6 };
   const initialFocusRange = MathUtils.clamp((authoredHint.radius || 0.6) * 0.65, 0.08, 1.05);
 
@@ -1362,13 +1420,32 @@ function ExaminationDepthOfField() {
   );
 }
 
+// @react-three/postprocessing 3.x only re-runs its composer.setSize effect on
+// CSS-size changes; AdaptiveResolution's setDpr changes the drawing-buffer
+// size without it, so half-res passes (N8AO) keep stale depth targets and the
+// AO term drifts off the geometry (ghost silhouettes beside the player).
+// Re-issue setSize whenever the effective DPR changes — postprocessing reads
+// the live drawing-buffer size inside setSize, so this re-syncs every pass.
+function ComposerDprSync() {
+  const { composer } = React.useContext(EffectComposerContext);
+  const size = useThree(state => state.size);
+  const dpr = useThree(state => state.viewport.dpr);
+  useEffect(() => {
+    composer?.setSize(size.width, size.height);
+  }, [composer, size, dpr]);
+  return null;
+}
+
 function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
+  const examineSession = useThreeGameStore(state => state.examineSession);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
   const expeditionDay = useThreeGameStore(state => state.day);
   const weather = useThreeGameStore(state => state.weather);
   const interiorDefinition = getInteriorDefinition(currentZoneId);
   const interiorFx = interiorDefinition?.lighting?.postprocessing;
+  const visionProfile = getPlayableMode(playableModeId).vision || null;
   // The grade effects are instantiated directly, NOT via the
   // @react-three/postprocessing wrappers: those wrappers JSON.stringify their
   // props as a memo key, so anything non-serializable (a ref prop — React 19
@@ -1409,9 +1486,12 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
     gradeFx.contrast.contrast = grade.contrast;
     gradeFx.vignette.darkness = grade.vignetteDarkness;
   });
-  if (!enabled) return null;
+  if (!postprocessingComposerActive(enabled, examineSession)) return null;
   const underwater = Math.min(1, Math.max(0, underwaterAmount));
-  const composerMultisampling = interiorFx?.multisampling ?? multisampling;
+  // The examination focus treatment is part of the field-work interface, not
+  // the general scene-effects preset. When general Post FX is disabled, mount
+  // the lightest possible composer containing only depth of field.
+  const composerMultisampling = enabled ? (interiorFx?.multisampling ?? multisampling) : 0;
   const interiorDaylight = interiorFx ? skyState(timeOfDay, expeditionDay || 1).daylight : 1;
   const interiorWeatherProfile = interiorFx ? weatherProfile(weather) : null;
   const interiorCloudBloom = interiorFx
@@ -1454,8 +1534,9 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
     <EffectComposer multisampling={composerMultisampling}>
-      <SMAA preset={SMAA_PRESET_ULTRA} />
-      {ao && (
+      <ComposerDprSync />
+      {enabled && <SMAA preset={SMAA_PRESET_ULTRA} />}
+      {enabled && ao && (
         <N8AO
           halfRes={!interiorFx?.aoFullResolution}
           depthAwareUpsampling
@@ -1467,26 +1548,47 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
           denoiseRadius={interiorFx?.aoDenoiseRadius ?? 12}
         />
       )}
-      <HeatHazePostEffect enabled={!interiorDefinition} underwaterAmount={underwater} />
-      <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />
+      {enabled && <HeatHazePostEffect enabled={!interiorDefinition} underwaterAmount={underwater} />}
+      {enabled && <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />}
       <ExaminationDepthOfField />
       {/* Threshold sits just under the ACES shoulder so deliberate HDR
           customers — sun core, lantern flame, water glints pushed past 1.0,
           moon glitter, ground/mote sparkles — glow softly, while sky/sand/
           foliage stay crisp. */}
-      <Bloom
-        intensity={bloomIntensity * (1 - underwater * 0.58)}
-        luminanceThreshold={bloomThreshold}
-        luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.18}
-        mipmapBlur
-        radius={interiorFx?.bloomRadius ?? 0.4}
-      />
+      {enabled && (
+        <Bloom
+          intensity={bloomIntensity * (1 - underwater * 0.58)}
+          luminanceThreshold={bloomThreshold}
+          luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.18}
+          mipmapBlur
+          radius={interiorFx?.bloomRadius ?? 0.4}
+        />
+      )}
       {/* Gentle grade: ACES leaves the midtones a touch flat — a small
           saturation/contrast lift makes the turquoise and sand read without
           touching any material. Merges into the existing effect pass. */}
-      <primitive object={gradeFx.hueSat} />
-      <primitive object={gradeFx.contrast} />
-      <primitive object={gradeFx.vignette} />
+      {enabled && <primitive object={gradeFx.hueSat} />}
+      {enabled && <primitive object={gradeFx.contrast} />}
+      {enabled && visionProfile?.effect && (
+        <AnimalVisionPostEffect
+          profile={visionProfile}
+          suppression={underwater * 0.85}
+        />
+      )}
+      {/* Some animal profiles perceive bright ecological signals as a soft
+          field around the source. This second bloom intentionally runs after
+          the spectral transform; the ordinary world bloom above remains
+          unchanged for Darwin and finch. */}
+      {enabled && visionProfile?.perceptualBloom && (
+        <Bloom
+          intensity={visionProfile.perceptualBloom.intensity ?? 0.6}
+          luminanceThreshold={visionProfile.perceptualBloom.threshold ?? 0.5}
+          luminanceSmoothing={visionProfile.perceptualBloom.smoothing ?? 0.5}
+          mipmapBlur
+          radius={visionProfile.perceptualBloom.radius ?? 0.7}
+        />
+      )}
+      {enabled && <primitive object={gradeFx.vignette} />}
     </EffectComposer>
   );
 }
@@ -1558,6 +1660,18 @@ function OpeningBlackFade({ active, sequenceId }) {
     <div
       key={revealing ? sequenceId : 'opening-black-hold'}
       className={`opening-black-fade${revealing ? ' opening-black-fade-reveal' : ''}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+function OpeningCinematicVeil({ active, sequenceId, durationMs }) {
+  if (!active || !sequenceId) return null;
+  return (
+    <div
+      key={sequenceId}
+      className="opening-cinematic-veil"
+      style={{ '--opening-cinematic-duration': `${durationMs}ms` }}
       aria-hidden="true"
     />
   );
@@ -1728,6 +1842,13 @@ function Toggle({ label, checked, onChange }) {
 
 function SolarDiagnostics({ settings, set }) {
   const solarGlare = useThreeGameStore(state => state.solarGlare);
+  // Sliders mutate the shared solar tuning directly (SkyController reads it
+  // every frame); local state only re-renders the panel.
+  const [, setRevision] = useState(0);
+  const setLook = patch => {
+    Object.assign(solarLookTuning, patch);
+    setRevision(value => value + 1);
+  };
   return (
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1744,12 +1865,83 @@ function SolarDiagnostics({ settings, set }) {
         <Metric label="Center" value={solarGlare?.centerResponse !== undefined ? solarGlare.centerResponse.toFixed(2) : '--'} />
         <Metric label="Sun XY" value={solarGlare?.x !== undefined ? `${solarGlare.x.toFixed(2)},${solarGlare.y.toFixed(2)}` : '--'} />
       </div>
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className="mb-2 grid grid-cols-2 gap-1.5">
         <Toggle label="Sun Screen Wash" checked={settings.solarScreenGlare !== false} onChange={value => set({ solarScreenGlare: value })} />
         <Toggle label="DOM Lens Ghosts" checked={settings.solarLensGhosts !== false} onChange={value => set({ solarLensGhosts: value })} />
         <Toggle label="Sun Halo/Veil" checked={settings.solarSunHalo !== false} onChange={value => set({ solarSunHalo: value })} />
         <Toggle label="Scene Sun Flares" checked={settings.solarSceneFlares !== false} onChange={value => set({ solarSceneFlares: value })} />
         <Toggle label="Sun Fog/Exposure" checked={settings.solarSunFacingGrade !== false} onChange={value => set({ solarSunFacingGrade: value })} />
+      </div>
+      {/* These affect sun-on-screen optics; face the sun to judge them. */}
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Golden hour" value={solarLookTuning.goldenBoost} min={0} max={1.8} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ goldenBoost: value })} />
+        <DevSlider label="Sun optics" value={solarLookTuning.opticsIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ opticsIntensity: value })} />
+        <DevSlider label="Screen glare" value={solarLookTuning.glareIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ glareIntensity: value })} />
+        <DevSlider label="Exposure" value={solarLookTuning.exposureScale} min={0.7} max={1.3} step={0.01} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ exposureScale: value })} />
+      </div>
+    </div>
+  );
+}
+
+function DevSlider({ label, value, min, max, step, format, onChange }) {
+  return (
+    <label className="block rounded border border-white/10 bg-black/15 px-2 py-1.5 text-xs">
+      <span className="flex items-center justify-between gap-2">
+        <span>{label}</span>
+        <span className="font-mono text-amber-100/80">{format ? format(value) : value}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={event => onChange(Number(event.target.value))}
+        className="mt-1 w-full accent-amber-200"
+      />
+    </label>
+  );
+}
+
+function CloudShadeDiagnostics() {
+  // Sliders mutate the shared tuning object directly (the sky drive reads it
+  // every frame); local state only exists to re-render the panel.
+  const [, setRevision] = useState(0);
+  const [applied, setApplied] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setApplied(fogAtmosphereUniforms.uCloudShade.value.x), 400);
+    return () => clearInterval(id);
+  }, []);
+  const set = patch => {
+    Object.assign(cloudShadeTuning, patch);
+    setRevision(value => value + 1);
+  };
+  return (
+    <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Cloud Shadows</h3>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] ${applied > 0.005 ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
+          {applied > 0.005 ? `applied ${applied.toFixed(2)}` : 'quiet'}
+        </span>
+      </div>
+      <div className="mb-2 grid grid-cols-3 gap-1.5">
+        <Metric label="Cumulus" value={weatherEnv.cumulus.toFixed(2)} />
+        <Metric label="Overcast" value={weatherEnv.overcast.toFixed(2)} />
+        <Metric label="Mist" value={weatherEnv.mistAmount.toFixed(2)} />
+      </div>
+      <div className="mb-1.5">
+        <Toggle
+          label="Force visible (ignore weather)"
+          checked={cloudShadeTuning.forceOn}
+          onChange={value => set({ forceOn: value })}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Strength" value={cloudShadeTuning.maxStrength} min={0} max={0.6} step={0.01} format={v => v.toFixed(2)} onChange={value => set({ maxStrength: value })} />
+        <DevSlider label="Feature size" value={cloudShadeTuning.featureMeters} min={24} max={220} step={2} format={v => `${v}m`} onChange={value => set({ featureMeters: value })} />
+        <DevSlider label="Coverage bias" value={cloudShadeTuning.coverageBias} min={-0.2} max={0.3} step={0.01} format={v => v.toFixed(2)} onChange={value => set({ coverageBias: value })} />
+        <DevSlider label="Edge softness" value={cloudShadeTuning.softness} min={0.04} max={0.4} step={0.01} format={v => v.toFixed(2)} onChange={value => set({ softness: value })} />
+        <DevSlider label="Drift speed" value={cloudShadeTuning.driftMps} min={0} max={30} step={0.5} format={v => `${v} m/s`} onChange={value => set({ driftMps: value })} />
       </div>
     </div>
   );
@@ -1847,6 +2039,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         ))}
       </div>
       <SolarDiagnostics settings={settings} set={set} />
+      <CloudShadeDiagnostics />
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
         <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
@@ -1930,7 +2123,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
   );
 }
 
-export default function ThreeDarwinGame({ initialModeId = null }) {
+export default function ThreeDarwinGame({ initialModeId = null, multiplayerSession = null }) {
   const [keyboardMap] = useState(() => {
     if (typeof window === 'undefined') return KEYBOARD_MAP;
     const requestedHud = new URLSearchParams(window.location.search).get('hud');
@@ -1985,9 +2178,19 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   // Terrain, DPR, postprocessing, and water targets stay on their final
   // configuration from the first covered frame. Swapping these after reveal
   // can suspend the root scene and expose the canvas clear color.
-  const scenePerfSettings = perfSettings;
+  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human' && !skipOpeningIntro;
+  // Aerial framing exposes much more water and terrain than ordinary play.
+  // Keep the fly-in at native DPR and skip its otherwise scene-doubling planar
+  // reflection pass; normal quality returns once the camera is stationary.
+  const openingRenderBudgetActive = openingIntroEligible && launchState !== 'playing';
+  const scenePerfSettings = useMemo(
+    () => openingRenderBudgetActive
+      ? { ...perfSettings, reflections: false }
+      : perfSettings,
+    [openingRenderBudgetActive, perfSettings],
+  );
   const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
-  const renderDpr = configuredDpr;
+  const renderDpr = openingRenderBudgetActive ? OPENING_RENDER_DPR : configuredDpr;
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const showLaunchOverlay = LAUNCH_MENU_STATES.has(launchState)
     || !sceneReady
@@ -2001,18 +2204,50 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   );
   const transitionCanvasPaused = Boolean(
     transition
-    && (transition.phase === 'departing'
-      || transition.phase === 'chart'
-      || transition.phase === 'mounting'
-      || transition.phase === 'ready')
+    && (transition.phase === 'chart'
+      || transition.phase === 'mounting')
   );
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
-  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human' && !skipOpeningIntro;
-  const loadingContentTarget = openingIntroEligible
-    ? STARTUP_OPENING_CONTENT_PHASE
-    : STARTUP_FULL_CONTENT_PHASE;
+  const loadingContentTarget = STARTUP_OPENING_CONTENT_PHASE;
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED) return undefined;
+    window.__threeLaunchDebug = {
+      launchState,
+      sceneReady,
+      loadersStable,
+      playerVisualReady,
+      playerAnimationBanksReady,
+      startupContentPhase,
+      loadingContentTarget,
+      displayedProgress,
+      assets: {
+        active: Boolean(assetProgress.active),
+        progress: Number(assetProgress.progress || 0),
+        loaded: Number(assetProgress.loaded || 0),
+        total: Number(assetProgress.total || 0),
+        item: assetProgress.item || null,
+        errors: assetProgress.errors || [],
+      },
+    };
+    return undefined;
+  }, [
+    assetProgress.active,
+    assetProgress.errors,
+    assetProgress.item,
+    assetProgress.loaded,
+    assetProgress.progress,
+    assetProgress.total,
+    displayedProgress,
+    launchState,
+    loadersStable,
+    loadingContentTarget,
+    playerAnimationBanksReady,
+    playerVisualReady,
+    sceneReady,
+    startupContentPhase,
+  ]);
   const openingCamera = useMemo(() => ({
     active: openingIntroActive && openingIntroStartedAt > 0,
     sequenceId: openingIntroStartedAt,
@@ -2031,10 +2266,27 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     if (!initialModeId || initialModeAppliedRef.current) return;
     initialModeAppliedRef.current = true;
     useThreeGameStore.getState().setPlayableMode(initialModeId);
+    if (multiplayerSession) {
+      useThreeGameStore.setState(state => ({
+        currentZoneId: 'POST_OFFICE_BAY',
+        playerSpawnId: null,
+        ...(initialModeId === 'tortoise' ? {
+          // The authored single-player tortoise begins far across the bay.
+          // Multiplayer starts both roles within readable interaction range
+          // while retaining the authored actor ID that all clients hide.
+          playableSpawnPoint: { x: 4.5, y: 0, z: 7.5 },
+          minimapPlayerPose: { x: 4.5, z: 7.5, heading: 180, zoneId: 'POST_OFFICE_BAY' },
+        } : {
+          playableSpawnPoint: { x: 0, y: 0, z: 7.5 },
+          playableHiddenActorId: null,
+          minimapPlayerPose: { x: 0, z: 7.5, heading: 0, zoneId: 'POST_OFFICE_BAY' },
+        }),
+      }));
+    }
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
     setInitialModeReady(true);
-  }, [initialModeId]);
+  }, [initialModeId, multiplayerSession]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2077,15 +2329,15 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     let frameHandle = null;
 
     const schedulePhase = index => {
-      if (cancelled || index >= TRANSITION_MOUNT_PHASE_TIMINGS_MS.length) return;
-      const previousDelay = index === 0 ? 0 : TRANSITION_MOUNT_PHASE_TIMINGS_MS[index - 1];
-      const delay = TRANSITION_MOUNT_PHASE_TIMINGS_MS[index] - previousDelay;
+      if (cancelled || index >= TRANSITION_MOUNT_STEPS.length) return;
+      const phase = TRANSITION_MOUNT_STEPS[index];
+      const delay = 0;
       timeoutHandle = window.setTimeout(() => {
         timeoutHandle = null;
         const commitPhase = () => {
           idleHandle = null;
           if (cancelled) return;
-          setTransitionContentPhase(current => Math.max(current, index + 2));
+          setTransitionContentPhase(current => Math.max(current, phase));
           frameHandle = window.requestAnimationFrame(() => {
             frameHandle = window.requestAnimationFrame(() => {
               frameHandle = null;
@@ -2109,47 +2361,6 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
     };
   }, [transition?.committedAt, transition?.id]);
-
-  useEffect(() => {
-    if (!transition?.id || !transition.arrivingAt) return undefined;
-    let cancelled = false;
-    let timeoutHandle = null;
-    let idleHandle = null;
-    let frameHandle = null;
-
-    const schedulePhase = index => {
-      if (cancelled || index >= TRANSITION_ARRIVAL_PHASE_TIMINGS_MS.length) return;
-      const previousDelay = index === 0 ? 0 : TRANSITION_ARRIVAL_PHASE_TIMINGS_MS[index - 1];
-      const delay = TRANSITION_ARRIVAL_PHASE_TIMINGS_MS[index] - previousDelay;
-      timeoutHandle = window.setTimeout(() => {
-        timeoutHandle = null;
-        const commitPhase = () => {
-          idleHandle = null;
-          if (cancelled) return;
-          setTransitionContentPhase(current => Math.max(current, index + 4));
-          frameHandle = window.requestAnimationFrame(() => {
-            frameHandle = window.requestAnimationFrame(() => {
-              frameHandle = null;
-              schedulePhase(index + 1);
-            });
-          });
-        };
-        if (typeof window.requestIdleCallback === 'function') {
-          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 180 });
-        } else {
-          commitPhase();
-        }
-      }, delay);
-    };
-
-    schedulePhase(0);
-    return () => {
-      cancelled = true;
-      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
-      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
-      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
-    };
-  }, [transition?.arrivingAt, transition?.id]);
 
   // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
   // the buffer it draws into: the composer target when postprocessing is on,
@@ -2303,7 +2514,9 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   };
 
   const beginNewExpedition = (modeId = 'darwin', { reset = false } = {}) => {
-    if (runtimeAudioEnabled) void activatePostOfficeBayAudio();
+    if (runtimeAudioEnabled) {
+      void activatePostOfficeBayAudio({ preloadEffects: false });
+    }
     if (reset) useThreeGameStore.getState().resetExpedition();
     useThreeGameStore.getState().setPlayableMode(modeId);
     bootStartedAt.current = performance.now();
@@ -2329,7 +2542,9 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     } catch {
       // A blocked preference store should not block the audio control itself.
     }
-    if (next && !e2eMode && !screenshotMode) void activatePostOfficeBayAudio();
+    if (next && !e2eMode && !screenshotMode) {
+      void activatePostOfficeBayAudio({ preloadEffects: false });
+    }
   };
 
   const restartExpedition = () => {
@@ -2454,7 +2669,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
   useEffect(() => {
     if (!gameStarted || !launchOverlayDismissed) return undefined;
     if (loadingContentTarget >= STARTUP_FULL_CONTENT_PHASE) return undefined;
-    if (launchState !== 'intro' && launchState !== 'playing') return undefined;
+    if (launchState !== 'playing') return undefined;
 
     let cancelled = false;
     let timeoutHandle = null;
@@ -2496,7 +2711,32 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
     };
   }, [gameStarted, launchOverlayDismissed, launchState, loadingContentTarget]);
 
+  useEffect(() => {
+    if (!runtimeAudioEnabled || launchState !== 'playing') return undefined;
+    let cancelled = false;
+    let idleHandle = null;
+    let timeoutHandle = null;
+    const beginPreload = () => {
+      idleHandle = null;
+      timeoutHandle = null;
+      if (!cancelled) void preloadSoundscapeEffects();
+    };
+    // Give the camera handoff and first HUD paint a quiet window before
+    // warming effect banks that are not needed for the opening ambience.
+    if (typeof window.requestIdleCallback === 'function') {
+      idleHandle = window.requestIdleCallback(beginPreload, { timeout: 2200 });
+    } else {
+      timeoutHandle = window.setTimeout(beginPreload, 900);
+    }
+    return () => {
+      cancelled = true;
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+    };
+  }, [launchState, runtimeAudioEnabled]);
+
   return (
+    <MultiplayerProvider session={multiplayerSession}>
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
       <TransitionPerformanceProbe
         enabled={DEV_TOOLS_ENABLED || perfProbe || e2eMode}
@@ -2512,17 +2752,23 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
       <KeyboardControls map={keyboardMap}>
         {gameStarted && (
           <IslandSoundscape
-            active={launchOverlayDismissed}
+            // Bring the island in by ear as the painted splash begins to
+            // dissolve. The ambient mixer already uses a slow gain ramp, so
+            // this leads the first visible world frame without an audio pop.
+            active={sceneReady}
             enabled={runtimeAudioEnabled}
           />
         )}
         {gameStarted && (
+          /* Distant landform sectors flare beyond 400 m at their corners. A
+             shorter far plane intersects them as the camera turns and changes
+             the apparent mountain silhouette. */
           <Canvas
             className="absolute inset-0 h-full w-full"
             frameloop={transitionCanvasPaused ? 'never' : 'always'}
             shadows={scenePerfSettings.shadows}
             dpr={renderDpr}
-            camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 180 }}
+            camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 560 }}
             gl={{
               // With postprocessing on, the scene renders into the
               // EffectComposer's buffer, so a multisampled default framebuffer
@@ -2639,6 +2885,11 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
           active={openingIntroActive}
           sequenceId={openingIntroStartedAt}
         />
+        <OpeningCinematicVeil
+          active={openingIntroActive}
+          sequenceId={openingIntroStartedAt}
+          durationMs={OPENING_DURATION_MS}
+        />
         {gameStarted && <ZoneTransitionOverlay />}
         {gameUiVisible && (
           <ThreeHUD
@@ -2649,6 +2900,7 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
             onAudioEnabledChange={handleAudioEnabledChange}
           />
         )}
+        {gameUiVisible && multiplayerSession && <MultiplayerHud />}
         {DEV_TOOLS_ENABLED && gameUiVisible && <AssetBrowserPanel open={showAssetBrowser} onClose={() => setShowAssetBrowser(false)} />}
         {DEV_TOOLS_ENABLED && gameUiVisible && <EcologyDebugHud />}
         {DEV_TOOLS_ENABLED && gameUiVisible && (
@@ -2708,5 +2960,6 @@ export default function ThreeDarwinGame({ initialModeId = null }) {
         />
       </KeyboardControls>
     </main>
+    </MultiplayerProvider>
   );
 }

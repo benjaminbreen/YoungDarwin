@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/multiplayer-worker/.wrangler/
 /.pnp
 .pnp.*
 .yarn/*

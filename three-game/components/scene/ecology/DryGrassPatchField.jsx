@@ -15,6 +15,7 @@ import {
   forageableAllowsMode,
   mergeForageConfig,
 } from '../../../world/forageables';
+import { getPlayableMode } from '../../../playable/playableModes';
 
 const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
 const FORAGE_CELL_SIZE = 4.5;
@@ -151,6 +152,105 @@ function applyRootShading(material, geometry, { shade = 0.72, fadeEnd = 0.5 } = 
   return material;
 }
 
+// Edible vegetation can carry mode-authored perceptual salience without
+// changing its ordinary Darwin/finch material. The blades keep their base
+// albedo; restrained HDR accents cross the shared bloom threshold and spread
+// into a soft magenta-gold aura instead of painting the plants fluorescent.
+function applyForageVision(material, geometry) {
+  if (!geometry) return material;
+  geometry.computeBoundingBox();
+  const minY = geometry.boundingBox.min.y;
+  const span = geometry.boundingBox.max.y - minY;
+  if (!(span > 0)) return material;
+
+  const uniforms = {
+    uForageVisionAmount: { value: 0 },
+    uForageVisionPlayer: { value: new THREE.Vector3(0, -999, 0) },
+    uForageVisionPulse: { value: 0 },
+  };
+  material.userData.forageVisionUniforms = uniforms;
+  const previousHook = material.onBeforeCompile;
+  const previousCacheKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (previousHook) previousHook(shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        attribute float forageFresh;
+        varying float vForageVisionTip;
+        varying float vForageVisionFresh;
+        varying vec3 vForageVisionWorld;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vForageVisionTip = clamp((position.y - ${minY.toFixed(4)}) / ${span.toFixed(4)}, 0.0, 1.0);
+        vForageVisionFresh = forageFresh;
+        vec4 forageVisionPosition = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          forageVisionPosition = instanceMatrix * forageVisionPosition;
+        #endif
+        vForageVisionWorld = (modelMatrix * forageVisionPosition).xyz;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uForageVisionAmount;
+        uniform vec3 uForageVisionPlayer;
+        uniform float uForageVisionPulse;
+        varying float vForageVisionTip;
+        varying float vForageVisionFresh;
+        varying vec3 vForageVisionWorld;`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        float forageVisionDistance = distance(vForageVisionWorld.xz, uForageVisionPlayer.xz);
+        float forageVisionNear = 1.0 - smoothstep(5.0, 18.0, forageVisionDistance);
+        float forageVisionTip = smoothstep(0.12, 0.96, vForageVisionTip);
+        float forageVisionBand = 0.5 + 0.5 * sin(
+          vForageVisionTip * 15.0
+          + vForageVisionWorld.x * 1.17
+          + vForageVisionWorld.z * 0.83
+          + uForageVisionPulse
+        );
+        vec3 forageVisionGold = vec3(1.0, 0.72, 0.24);
+        vec3 forageVisionMagenta = vec3(1.0, 0.24, 0.58);
+        float forageVisionMagentaMix = smoothstep(
+          0.28,
+          0.92,
+          forageVisionTip + forageVisionBand * 0.22
+        );
+        vec3 forageVisionColor = mix(
+          forageVisionGold,
+          forageVisionMagenta,
+          forageVisionMagentaMix
+        );
+        float forageVisionStrength = uForageVisionAmount
+          * vForageVisionFresh
+          * (0.28 + forageVisionNear * 0.72)
+          * (0.38 + forageVisionTip * 0.62);
+        diffuseColor.rgb = mix(
+          diffuseColor.rgb,
+          forageVisionColor,
+          forageVisionStrength * 0.015
+        );
+        totalEmissiveRadiance += forageVisionColor
+          * forageVisionStrength
+          * (1.02 + forageVisionBand * 0.62);`,
+      );
+  };
+  material.customProgramCacheKey = () => {
+    const base = previousCacheKey ? previousCacheKey() : 'dry-grass-patch';
+    return `${base}|forage-vision-v2`;
+  };
+  material.needsUpdate = true;
+  return material;
+}
+
 function layerCullBounds(items, maxVisibleDistance) {
   if (!Number.isFinite(maxVisibleDistance) || maxVisibleDistance <= 0 || !items.length) return null;
   let minX = Infinity;
@@ -212,7 +312,16 @@ export function DryGrassPatchField({
   const foragedSet = useMemo(() => new Set(foragedObjectIds || []), [foragedObjectIds]);
   const forageGrid = useMemo(() => buildForageGrid(layer.items || []), [layer.items]);
 
-  const geometry = useMemo(() => cloneWithNeutralVertexColors(firstMeshGeometry(scene)), [scene]);
+  const geometry = useMemo(() => {
+    const clone = cloneWithNeutralVertexColors(firstMeshGeometry(scene));
+    if (clone) {
+      clone.setAttribute(
+        'forageFresh',
+        new THREE.InstancedBufferAttribute(new Float32Array(layer.items?.length || 0), 1),
+      );
+    }
+    return clone;
+  }, [scene, layer.items?.length]);
   const bladeTexture = useMemo(() => loadBladeTexture(layer.bladeTexturePath), [layer.bladeTexturePath]);
   const material = useMemo(() => {
     if (!geometry) return null;
@@ -233,7 +342,8 @@ export function DryGrassPatchField({
     grassMaterial.shadowSide = THREE.FrontSide;
     const motionMaterial = applyFoliageMotion(grassMaterial, geometry, layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 });
     const tintedMaterial = applyBladeAtlasTint(motionMaterial, bladeTexture, layer.bladeTextureStrength ?? 0.26);
-    return applyRootShading(tintedMaterial, geometry, layer.rootShading);
+    const rootedMaterial = applyRootShading(tintedMaterial, geometry, layer.rootShading);
+    return applyForageVision(rootedMaterial, geometry);
   }, [geometry, layer, bladeTexture]);
 
   useLayoutEffect(() => () => {
@@ -255,6 +365,7 @@ export function DryGrassPatchField({
     } = layer;
 
     const eatenVisual = forageConfig?.eatenVisual || {};
+    const forageFresh = geometry?.getAttribute('forageFresh');
     layer.items.forEach((item, index) => {
       const tone = item.tone ?? 0.5;
       const scale = item.scale || 1;
@@ -274,12 +385,14 @@ export function DryGrassPatchField({
       mesh.setMatrixAt(index, dummy.matrix);
       color.set(eaten ? (eatenVisual.color || '#7f7547') : (item.color || layer.color || '#a99d58'));
       mesh.setColorAt(index, color);
+      forageFresh?.setX(index, eaten ? 0 : 1);
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (forageFresh) forageFresh.needsUpdate = true;
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
-  }, [layer, forageConfig, foragedSet, resolvedZoneId]);
+  }, [layer, forageConfig, foragedSet, resolvedZoneId, geometry]);
 
   const cullBounds = useMemo(
     () => layerCullBounds(layer.items || [], layer.maxVisibleDistance ?? layer.drawDistance),
@@ -287,13 +400,35 @@ export function DryGrassPatchField({
   );
   const cullStateRef = useRef(createCameraCullState());
 
-  useFrame(({ camera }) => {
+  useFrame(({ camera, clock }, delta) => {
     const group = groupRef.current;
     if (group && cullBounds && shouldRunCameraCull(camera, cullStateRef.current)) {
       group.visible = camera.position.distanceToSquared(cullBounds.center) <= cullBounds.visibleDistanceSq;
     }
 
     const state = useThreeGameStore.getState();
+    const pose = getRuntimePlayerPose();
+    const visionUniforms = material?.userData?.forageVisionUniforms;
+    if (visionUniforms) {
+      const mode = getPlayableMode(playableModeId);
+      const modeAllowsForage = forageableAllowsMode(forageConfig, mode);
+      const targetAmount = modeAllowsForage
+        ? Math.max(0, Number(mode?.vision?.forageSalience) || 0)
+        : 0;
+      visionUniforms.uForageVisionAmount.value = THREE.MathUtils.damp(
+        visionUniforms.uForageVisionAmount.value,
+        targetAmount,
+        targetAmount > 0 ? 3.8 : 7,
+        delta,
+      );
+      visionUniforms.uForageVisionPlayer.value.set(
+        pose.position.x,
+        pose.position.y,
+        pose.position.z,
+      );
+      visionUniforms.uForageVisionPulse.value = clock.elapsedTime * 1.35;
+    }
+
     const activePrompt = state.carryPrompt;
     const promptIsOurs = activePrompt?.mode === FORAGE_PROMPT_MODE
       && activePrompt?.forageable?.layerId === layer.id
@@ -306,7 +441,6 @@ export function DryGrassPatchField({
       return;
     }
 
-    const pose = getRuntimePlayerPose();
     const px = pose.position.x;
     const py = pose.position.y;
     const pz = pose.position.z;

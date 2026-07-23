@@ -6,6 +6,7 @@ import { terrainHeight, clampToWalkable } from '../../world/terrain';
 import { useThreeGameStore } from '../../store';
 import { getPlayableMode } from '../../playable/playableModes';
 import { ModelAsset } from '../assets/ModelAsset';
+import { useMultiplayerRolePresent } from '../../multiplayer/MultiplayerContext';
 
 function ProceduralDarwinNpc() {
   return (
@@ -121,7 +122,8 @@ export function AnimalModeDarwinNpc() {
   const setNpcPose = useThreeGameStore(state => state.setAnimalModeDarwinNpcPose);
   const droppings = useThreeGameStore(state => state.animalDroppings);
   const mode = getPlayableMode(playableModeId);
-  const visible = mode.kind === 'animal' && Boolean(playableSpawnPoint);
+  const humanDarwinPresent = useMultiplayerRolePresent('darwin');
+  const visible = mode.kind === 'animal' && Boolean(playableSpawnPoint) && !humanDarwinPresent;
   const stuckDroppings = useMemo(() => (
     (droppings || []).filter(dropping => (
       dropping.zoneId === currentZoneId

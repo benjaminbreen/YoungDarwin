@@ -18,6 +18,7 @@ import { PhysicsProvider } from '../physics/PhysicsProvider';
 import { useThreeGameStore } from '../store';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
+import { RemotePlayerActors } from '../multiplayer/RemotePlayerActors';
 
 export function ThreeScene({
   perfSettings,
@@ -91,6 +92,9 @@ export function ThreeScene({
             onAnimationBanksReady={onPlayerAnimationBanksReady}
             onVisualReady={onPlayerVisualReady}
           />
+        </Suspense>
+        <Suspense fallback={null}>
+          <RemotePlayerActors />
         </Suspense>
       </PhysicsProvider>
       {outdoors && <GroundedWorldFX

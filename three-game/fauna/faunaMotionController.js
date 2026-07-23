@@ -12,6 +12,59 @@ import { getTreePerches } from '../wildlife/treePerches';
 import { getOwlRoosts } from '../wildlife/owlRoosts';
 import { getRacerShelters } from '../wildlife/racerShelters';
 import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../world/specimenRuntime';
+import { getEcology } from '../world/ecology';
+
+const ecologyForageTargetCache = new Map();
+const FORAGE_EXCLUDED_PATTERN = /cactus|opuntia|manzanillo|mangrove|palo-santo|scalesia|sicyos|delilia|lecocarpus|resurrection|fern/i;
+
+function forageTargetHeight(layerLabel, item) {
+  const scale = Number(item?.scale ?? item?.size) || 1;
+  if (/grass/i.test(layerLabel)) return 0.12 + scale * 0.16;
+  if (/sesuvium|carpet|ground/i.test(layerLabel)) return 0.1 + scale * 0.12;
+  if (/cotton/i.test(layerLabel)) return 0.32 + scale * 0.34;
+  if (/croton|saltbush|shrub|castela|darwiniothamnus/i.test(layerLabel)) return 0.24 + scale * 0.32;
+  if (/crop|garden/i.test(layerLabel)) return 0.18 + scale * 0.24;
+  return 0.18 + scale * 0.25;
+}
+
+function ecologyForageTargets(zoneId) {
+  if (ecologyForageTargetCache.has(zoneId)) return ecologyForageTargetCache.get(zoneId);
+  const ecology = getEcology(zoneId);
+  const targets = [];
+  const collections = [
+    ['flora', ecology?.flora || []],
+    ['proceduralFlora', ecology?.proceduralFlora || []],
+    ['interactiveFlora', ecology?.interactiveFlora || []],
+    ['dryGrassPatches', ecology?.dryGrassPatches || []],
+    ['crops', ecology?.crops || []],
+  ];
+  for (const [collectionName, layers] of collections) {
+    for (const layer of layers) {
+      const layerLabel = `${collectionName}:${layer?.id || ''}:${layer?.label || ''}:${layer?.speciesId || ''}:${layer?.path || ''}`;
+      if (FORAGE_EXCLUDED_PATTERN.test(layerLabel)) continue;
+      const items = layer?.items || layer?.sites || [];
+      // Grass fields can contain thousands of blades. A stable sample is dense
+      // enough for browsing while keeping target selection cheap for herds.
+      const stride = collectionName === 'dryGrassPatches' ? Math.max(1, Math.floor(items.length / 260)) : 1;
+      for (let index = 0; index < items.length; index += stride) {
+        const item = items[index];
+        if (!Number.isFinite(item?.x) || !Number.isFinite(item?.z)) continue;
+        const groundY = Number.isFinite(item.y) ? item.y : terrainHeight(item.x, item.z, zoneId);
+        targets.push({
+          id: item.id || `${layer?.id || collectionName}-${index}`,
+          layerId: layer?.id || collectionName,
+          kind: collectionName === 'dryGrassPatches' ? 'grass' : 'plant',
+          x: item.x,
+          y: groundY,
+          z: item.z,
+          perchY: groundY + forageTargetHeight(layerLabel, item),
+        });
+      }
+    }
+  }
+  ecologyForageTargetCache.set(zoneId, targets);
+  return targets;
+}
 
 export function seedFromSpecimen(specimen) {
   const spawn = specimen?.spawnPoint || specimen?.position;
@@ -94,6 +147,8 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     grazerDirection: new THREE.Vector2(),
     grazerLateral: new THREE.Vector2(),
     grazerPrevious: new THREE.Vector3(),
+    hopperAway: new THREE.Vector2(),
+    hopperCandidate: new THREE.Vector3(),
   };
   const shorebird = {
     mode: 'ground',
@@ -177,6 +232,8 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
   };
   const grazer = {
     targetOffset: new THREE.Vector2(),
+    browseTarget: null,
+    browseLayer: null,
     waitUntil: 0,
     mode: 'browse',
     settled: false,
@@ -212,6 +269,21 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     fleeing: false,
   };
   const baskerRockCache = { zoneId: null, rocks: [] };
+  const hopper = {
+    mode: 'rest',
+    waitUntil: 0,
+    cycle: 0,
+    hopFrom: new THREE.Vector3(),
+    hopTo: new THREE.Vector3(),
+    hopStartedAt: 0,
+    hopDuration: 0.42,
+    hopLift: 0.42,
+    perchType: 'ground',
+    perchId: null,
+    routeTarget: null,
+    lastThreatHopAt: -Infinity,
+  };
+  const hopperRockCache = { zoneId: null, rocks: [] };
   let clock = 0;
   const hammerThreat = {
     x: 0,
@@ -335,6 +407,8 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     basker.lastBlockingRock = null;
     basker.fleeing = false;
     grazer.targetOffset.set(0, 0);
+    grazer.browseTarget = null;
+    grazer.browseLayer = null;
     grazer.waitUntil = clock + 0.4 + seed * 1.2;
     grazer.mode = 'browse';
     grazer.settled = false;
@@ -342,6 +416,18 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     grazer.reactionUntil = -Infinity;
     grazer.reactionMode = null;
     grazer.lastReactionAt = -Infinity;
+    hopper.mode = 'rest';
+    hopper.waitUntil = clock + 0.7 + seed * 1.8;
+    hopper.cycle = 0;
+    hopper.hopFrom.copy(state.position);
+    hopper.hopTo.copy(state.position);
+    hopper.hopStartedAt = clock;
+    hopper.hopDuration = profile?.hopDuration || 0.42;
+    hopper.hopLift = profile?.hopLift || 0.42;
+    hopper.perchType = 'ground';
+    hopper.perchId = null;
+    hopper.routeTarget = null;
+    hopper.lastThreatHopAt = -Infinity;
     hammerThreat.x = 0;
     hammerThreat.z = 0;
     hammerThreat.radius = 0;
@@ -467,10 +553,57 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     return !propHit;
   }
 
+  function chooseEcologyBrowseTarget(base, currentZoneId, t) {
+    const radiusX = Math.max(1.4, habitat.radiusX || profile.habitatRadiusX || 4);
+    const radiusZ = Math.max(1.0, habitat.radiusZ || profile.habitatRadiusZ || 2.5);
+    const targets = ecologyForageTargets(currentZoneId);
+    if (!targets.length) return false;
+    const candidates = [];
+    for (const target of targets) {
+      const dx = target.x - base.x;
+      const dz = target.z - base.z;
+      const normalized = (dx * dx) / (radiusX * radiusX) + (dz * dz) / (radiusZ * radiusZ);
+      if (normalized > 0.92 || normalized < 0.008) continue;
+      const actorDistance = Math.hypot(target.x - state.position.x, target.z - state.position.z);
+      if (actorDistance < (profile.browseStopDistance || 0.72) * 0.72) continue;
+      candidates.push({ target, actorDistance });
+    }
+    if (!candidates.length) return false;
+    candidates.sort((a, b) => a.actorDistance - b.actorDistance);
+    const nearCount = Math.min(14, candidates.length);
+    const pick = Math.min(
+      nearCount - 1,
+      Math.floor(seededUnit(seed * 1321 + Math.floor(t * 0.29) * 43) * nearCount),
+    );
+    const selected = candidates[pick].target;
+    const stopDistance = (profile.browseStopDistance || 0.72) * placementScale;
+    const fromActorX = selected.x - state.position.x;
+    const fromActorZ = selected.z - state.position.z;
+    const length = Math.hypot(fromActorX, fromActorZ) || 1;
+    vectors.grazerTarget.set(
+      selected.x - base.x - (fromActorX / length) * stopDistance,
+      selected.z - base.z - (fromActorZ / length) * stopDistance,
+    );
+    if (!isGrazerOffsetUsable(base, vectors.grazerTarget, currentZoneId)) return false;
+    grazer.targetOffset.copy(vectors.grazerTarget);
+    grazer.browseTarget = selected;
+    grazer.browseLayer = selected.layerId;
+    grazer.settled = false;
+    return true;
+  }
+
   function chooseGrazerTarget(base, currentZoneId, t, fleeDirection = null) {
     const radiusX = Math.max(1.4, habitat.radiusX || profile.habitatRadiusX || 4);
     const radiusZ = Math.max(1.0, habitat.radiusZ || profile.habitatRadiusZ || 2.5);
     const fleeScale = profile.fleeHabitatScale || 1.32;
+    grazer.browseTarget = null;
+    grazer.browseLayer = null;
+    if (
+      !fleeDirection
+      && (profile.feedClip || profile.feedClips?.length)
+      && seededUnit(seed * 1277 + Math.floor(t * 0.31) * 31) < (profile.browseTargetChance || 0.72)
+      && chooseEcologyBrowseTarget(base, currentZoneId, t)
+    ) return true;
     for (let i = 0; i < 14; i += 1) {
       if (fleeDirection && fleeDirection.lengthSq() > 0.0001) {
         const side = seededUnit(seed * 733 + i * 17 + Math.floor(t * 3.0)) > 0.5 ? 1 : -1;
@@ -507,6 +640,15 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
   }
 
   function beginGrazerPause(t) {
+    if (grazer.browseTarget && (profile.feedClip || profile.feedClips?.length)) {
+      grazer.mode = 'browse';
+      const browseMin = profile.browseMin || 4.8;
+      const browseMax = Math.max(browseMin, profile.browseMax || 8.2);
+      grazer.waitUntil = t + browseMin
+        + seededUnit(seed * 1667 + Math.floor(t * 0.71)) * (browseMax - browseMin);
+      grazer.settled = true;
+      return;
+    }
     const roll = seededUnit(seed * 1601 + Math.floor(t * 0.37) * 47 + grazer.targetOffset.x * 0.13);
     if ((profile.sleepClip || profile.sleepClips?.length) && roll > 0.92) {
       grazer.mode = 'sleep';
@@ -683,6 +825,16 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       }
       const stepBob = Math.abs(Math.sin(t * (fleeing ? 10.5 : 5.7) + seed)) * (profile.bobAmount || 0.006);
       state.position.y += stepBob;
+    } else if (grazer.mode === 'browse' && grazer.browseTarget) {
+      vectors.yawDirection.set(
+        grazer.browseTarget.x - state.position.x,
+        grazer.browseTarget.z - state.position.z,
+      );
+      if (vectors.yawDirection.lengthSq() > 0.000001) {
+        let targetYaw = yawFromXZ(vectors.yawDirection);
+        if (Number.isFinite(profile.facingYawOffset)) targetYaw += profile.facingYawOffset;
+        state.yaw = THREE.MathUtils.damp(state.yaw, targetYaw, profile.turnRate || 8, dt);
+      }
     }
 
     state.pitch = 0;
@@ -711,7 +863,204 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
       moving: isActuallyMoving,
       panic,
       mode: `grazer:${grazer.mode}`,
+      browseTargetId: grazer.browseTarget?.id || null,
+      browseLayer: grazer.browseLayer,
       reaction: t < grazer.reactionUntil ? grazer.reactionMode : null,
+    };
+    return { ok: true, reason: 'updated', state };
+  }
+
+  // --- Hopper controller ----------------------------------------------------
+  // Painted locusts alternate long, readable pauses with explosive leaps.
+  // Their landing choices come from the same authored ecology and obstacle
+  // surfaces the player sees, so they visibly move between undergrowth, bare
+  // ground, and real basalt rather than following a decorative orbit.
+  function hopperRocks(currentZoneId) {
+    if (hopperRockCache.zoneId !== currentZoneId) {
+      hopperRockCache.zoneId = currentZoneId;
+      hopperRockCache.rocks = getRuntimeObstacles(currentZoneId).filter(obstacle => (
+        (obstacle.kind === 'rock' || obstacle.kind === 'boulder')
+        && (obstacle.colliderTop || obstacle.height || 0) <= (profile.maxPerchHeight || 1.65)
+      ));
+    }
+    return hopperRockCache.rocks;
+  }
+
+  function beginHopperLeap(target, t, { perchType = 'ground', perchId = null, threatened = false } = {}) {
+    hopper.mode = 'hop';
+    hopper.hopFrom.copy(state.position);
+    hopper.hopTo.copy(target);
+    hopper.hopStartedAt = t;
+    const distance = Math.hypot(target.x - state.position.x, target.z - state.position.z);
+    hopper.hopDuration = (profile.hopDuration || 0.42) * THREE.MathUtils.clamp(0.78 + distance * 0.34, 0.82, 1.42);
+    hopper.hopLift = (profile.hopLift || 0.42) * (threatened ? 1.45 : 1) + distance * 0.12;
+    hopper.perchType = perchType;
+    hopper.perchId = perchId;
+    hopper.cycle += 1;
+  }
+
+  function chooseHopperDestination(base, currentZoneId, player, t, threatened = false, routeDepth = 0) {
+    const radiusX = Math.max(1.2, habitat.radiusX || profile.habitatRadiusX || 3.2);
+    const radiusZ = Math.max(1.0, habitat.radiusZ || profile.habitatRadiusZ || 2.6);
+    const hopMin = profile.hopMinDistance || 0.55;
+    const hopMax = (profile.hopMaxDistance || 1.45) * (threatened ? (profile.escapeHopMultiplier || 1.55) : 1);
+    const away = vectors.hopperAway.set(state.position.x - player.x, state.position.z - player.z);
+    if (away.lengthSq() < 0.0001) away.set(Math.cos(seed * 19.1), Math.sin(seed * 23.7));
+    away.normalize();
+
+    if (threatened) hopper.routeTarget = null;
+    if (!threatened && hopper.routeTarget) {
+      const route = hopper.routeTarget;
+      const dx = route.x - state.position.x;
+      const dz = route.z - state.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance <= hopMax * 1.05) {
+        vectors.hopperCandidate.set(route.x, route.y, route.z);
+        hopper.routeTarget = null;
+        beginHopperLeap(vectors.hopperCandidate, t, { perchType: route.perchType, perchId: route.perchId });
+        return;
+      }
+      vectors.grazerCandidate.set(
+        state.position.x - base.x + (dx / distance) * hopMax * 0.88,
+        state.position.z - base.z + (dz / distance) * hopMax * 0.88,
+      );
+      clampOffset(vectors.grazerCandidate, { radiusX, radiusZ }, vectors.clamped);
+      if (isGrazerOffsetUsable(base, vectors.clamped, currentZoneId)) {
+        const x = base.x + vectors.clamped.x;
+        const z = base.z + vectors.clamped.y;
+        vectors.hopperCandidate.set(x, terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.025), z);
+        beginHopperLeap(vectors.hopperCandidate, t);
+        return;
+      }
+      hopper.routeTarget = null;
+    }
+
+    const roll = seededUnit(seed * 2203 + hopper.cycle * 61 + Math.floor(t * 2.1));
+    const seekEnvironmentalPerch = hopper.cycle % 3 === 0 || roll < (profile.plantPerchChance || 0.72);
+    if (!threatened && seekEnvironmentalPerch && roll < (profile.rockPerchChance || 0.28)) {
+      const rocks = hopperRocks(currentZoneId).filter(rock => {
+        const distance = Math.hypot(rock.x - state.position.x, rock.z - state.position.z);
+        const dx = rock.x - base.x;
+        const dz = rock.z - base.z;
+        return distance >= hopMin * 0.6
+          && distance <= Math.max(hopMax, Math.hypot(radiusX, radiusZ) * 0.72)
+          && (dx * dx) / (radiusX * radiusX) + (dz * dz) / (radiusZ * radiusZ) < 0.94;
+      });
+      if (rocks.length) {
+        const rock = rocks[Math.floor(seededUnit(seed * 2237 + hopper.cycle * 43) * rocks.length)];
+        const top = obstacleSurfaceHeightForActor(rock, rock.x, rock.z, profile.actorPerchRadius || 0.025);
+        if (Number.isFinite(top)) {
+          vectors.hopperCandidate.set(rock.x, top + (profile.groundOffset || 0.025), rock.z);
+          const distance = Math.hypot(rock.x - state.position.x, rock.z - state.position.z);
+          if (distance > hopMax * 1.05) {
+            hopper.routeTarget = { x: vectors.hopperCandidate.x, y: vectors.hopperCandidate.y, z: vectors.hopperCandidate.z, perchType: 'rock', perchId: rock.id };
+            if (routeDepth < 1) chooseHopperDestination(base, currentZoneId, player, t, false, routeDepth + 1);
+            else hopper.waitUntil = t + 0.35;
+          } else {
+            beginHopperLeap(vectors.hopperCandidate, t, { perchType: 'rock', perchId: rock.id });
+          }
+          return;
+        }
+      }
+    }
+
+    if (!threatened && seekEnvironmentalPerch) {
+      const plantTargets = ecologyForageTargets(currentZoneId).filter(target => {
+        const distance = Math.hypot(target.x - state.position.x, target.z - state.position.z);
+        const dx = target.x - base.x;
+        const dz = target.z - base.z;
+        return distance >= hopMin * 0.55
+          && distance <= Math.max(hopMax, Math.hypot(radiusX, radiusZ) * 0.78)
+          && target.perchY - target.y <= (profile.maxPlantPerchHeight || 0.78)
+          && (dx * dx) / (radiusX * radiusX) + (dz * dz) / (radiusZ * radiusZ) < 0.94;
+      });
+      if (plantTargets.length) {
+        const plant = plantTargets[Math.floor(seededUnit(seed * 2269 + hopper.cycle * 47) * plantTargets.length)];
+        vectors.hopperCandidate.set(plant.x, plant.perchY + (profile.groundOffset || 0.025), plant.z);
+        const distance = Math.hypot(plant.x - state.position.x, plant.z - state.position.z);
+        if (distance > hopMax * 1.05) {
+          hopper.routeTarget = { x: vectors.hopperCandidate.x, y: vectors.hopperCandidate.y, z: vectors.hopperCandidate.z, perchType: 'plant', perchId: plant.id };
+          if (routeDepth < 1) chooseHopperDestination(base, currentZoneId, player, t, false, routeDepth + 1);
+          else hopper.waitUntil = t + 0.35;
+        } else {
+          beginHopperLeap(vectors.hopperCandidate, t, { perchType: 'plant', perchId: plant.id });
+        }
+        return;
+      }
+    }
+
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const angle = threatened
+        ? Math.atan2(away.y, away.x) + (seededUnit(seed * 2293 + hopper.cycle * 37 + attempt) - 0.5) * 0.68
+        : seed * Math.PI * 2 + hopper.cycle * 1.71 + attempt * 0.89;
+      const distance = hopMin + seededUnit(seed * 2311 + hopper.cycle * 53 + attempt * 11) * (hopMax - hopMin);
+      vectors.grazerCandidate.set(
+        state.position.x - base.x + Math.cos(angle) * distance,
+        state.position.z - base.z + Math.sin(angle) * distance,
+      );
+      clampOffset(vectors.grazerCandidate, { radiusX, radiusZ }, vectors.clamped);
+      if (!isGrazerOffsetUsable(base, vectors.clamped, currentZoneId)) continue;
+      const x = base.x + vectors.clamped.x;
+      const z = base.z + vectors.clamped.y;
+      vectors.hopperCandidate.set(x, terrainHeight(x, z, currentZoneId) + (profile.groundOffset || 0.025), z);
+      beginHopperLeap(vectors.hopperCandidate, t, { threatened });
+      return;
+    }
+    hopper.waitUntil = t + 0.35;
+  }
+
+  function updateHopper({ base, currentZoneId, player, elapsedTime: t, dt, panic, contactPanic, hammerPanic }) {
+    const threatened = panic > 0.035 || contactPanic > 0.01 || hammerPanic > 0.02;
+    if (hopper.mode !== 'hop' && threatened && t - hopper.lastThreatHopAt > 0.24) {
+      chooseHopperDestination(base, currentZoneId, player, t, true);
+      hopper.lastThreatHopAt = t;
+    } else if (hopper.mode !== 'hop' && t >= hopper.waitUntil) {
+      chooseHopperDestination(base, currentZoneId, player, t, false);
+    }
+
+    let hopProgress = 0;
+    if (hopper.mode === 'hop') {
+      hopProgress = THREE.MathUtils.clamp((t - hopper.hopStartedAt) / Math.max(0.1, hopper.hopDuration), 0, 1);
+      const eased = easeInOut(hopProgress);
+      state.position.lerpVectors(hopper.hopFrom, hopper.hopTo, eased);
+      state.position.y += Math.sin(hopProgress * Math.PI) * hopper.hopLift;
+      vectors.yawDirection.set(hopper.hopTo.x - hopper.hopFrom.x, hopper.hopTo.z - hopper.hopFrom.z);
+      if (vectors.yawDirection.lengthSq() > 0.000001) {
+        state.yaw = THREE.MathUtils.damp(state.yaw, yawFromXZ(vectors.yawDirection), profile.turnRate || 18, dt);
+      }
+      state.pitch = Math.sin(hopProgress * Math.PI * 2) * -0.16;
+      state.roll = Math.sin(hopProgress * Math.PI) * (seed > 0.5 ? 0.08 : -0.08);
+      state.airborne = hopProgress < 0.98;
+      if (hopProgress >= 1) {
+        state.position.copy(hopper.hopTo);
+        state.pitch = 0;
+        state.roll = 0;
+        state.airborne = false;
+        hopper.mode = hopper.perchType === 'ground' ? 'rest' : 'perch';
+        hopper.waitUntil = t + (threatened
+          ? 0.08
+          : (profile.restMin || 1.35) + seededUnit(seed * 2347 + hopper.cycle * 59) * ((profile.restMax || 4.2) - (profile.restMin || 1.35)));
+      }
+    }
+
+    state.animation = animationRequest(
+      hopper.mode === 'hop' ? (profile.hopClip || 'locustHop') : (profile.idleClip || 'locustRest'),
+      hopper.mode === 'hop' ? 1 : 0.72,
+      0.08,
+    );
+    state.debug = {
+      x: state.position.x,
+      y: state.position.y,
+      z: state.position.z,
+      zoneId: currentZoneId,
+      updatedAt: t,
+      moving: hopper.mode === 'hop',
+      panic,
+      airborne: state.airborne,
+      mode: `hopper:${hopper.mode}`,
+      hopProgress,
+      perchType: hopper.perchType,
+      perchId: hopper.perchId,
     };
     return { ok: true, reason: 'updated', state };
   }
@@ -2887,6 +3236,20 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
 
       if (profile.controller === 'basker') {
         return updateBasker({
+          base,
+          currentZoneId,
+          player,
+          elapsedTime: t,
+          dt,
+          panic,
+          contactPanic,
+          hammerPanic,
+          distanceToPlayer,
+        });
+      }
+
+      if (profile.controller === 'hopper') {
+        return updateHopper({
           base,
           currentZoneId,
           player,

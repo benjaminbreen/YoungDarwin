@@ -1,11 +1,7 @@
 import { getEcology } from './index';
 import { getBorderVistas } from '../vistas';
 
-function regionEcologies(regionId) {
-  const ids = [...new Set([
-    regionId,
-    ...getBorderVistas(regionId).map(vista => vista.toRegionId),
-  ].filter(Boolean))];
+function buildEcologies(ids) {
   const timings = [];
   const definitions = ids.map(zoneId => {
     const startedAt = performance.now();
@@ -19,17 +15,38 @@ function regionEcologies(regionId) {
 self.onmessage = event => {
   const { requestId, regionId } = event.data || {};
   try {
-    const startedAt = performance.now();
-    const result = regionEcologies(regionId);
+    const destinationStartedAt = performance.now();
+    const destination = buildEcologies([regionId]);
     self.postMessage({
       requestId,
+      stage: 'destination',
       payload: {
         regionId,
-        definitions: result.definitions,
+        definitions: destination.definitions,
         preparation: {
           mode: 'worker',
-          durationMs: performance.now() - startedAt,
-          timings: result.timings,
+          durationMs: performance.now() - destinationStartedAt,
+          timings: destination.timings,
+        },
+      },
+    });
+    const neighborIds = [...new Set(
+      getBorderVistas(regionId)
+        .map(vista => vista.toRegionId)
+        .filter(zoneId => zoneId && zoneId !== regionId),
+    )];
+    const neighborsStartedAt = performance.now();
+    const neighbors = buildEcologies(neighborIds);
+    self.postMessage({
+      requestId,
+      stage: 'neighbors',
+      payload: {
+        regionId,
+        definitions: neighbors.definitions,
+        preparation: {
+          mode: 'worker-neighbors',
+          durationMs: performance.now() - neighborsStartedAt,
+          timings: neighbors.timings,
         },
       },
     });

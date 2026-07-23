@@ -12,6 +12,7 @@ function probeUrl() {
   url.searchParams.set('preserveDrawingBuffer', '1');
   url.searchParams.set('perfProbe', '1');
   url.searchParams.set('costProbe', '1');
+  url.searchParams.set('skipIntro', '1');
   url.searchParams.set('quality', scenario === 'cinematic' ? 'cinematic' : 'performance');
   if (zone) url.searchParams.set('zone', zone);
   return url.toString();
@@ -32,6 +33,7 @@ async function run() {
     console.log(`[three:cost] opening ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.getByRole('button', { name: 'New Expedition' }).click({ timeout: 15000 });
+    await page.getByRole('button', { name: /^Darwin\b/i }).click({ timeout: 15000 });
     await page.waitForSelector('canvas', { timeout: 60000 });
     await page.waitForSelector('[data-testid="three-launch-overlay"]', { state: 'detached', timeout: 60000 });
     await page.waitForFunction(

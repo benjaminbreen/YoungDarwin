@@ -2,6 +2,7 @@ import { canonicalSpecimenId } from '../../utils/canonicalIds';
 import { currentRegionId, getRegionMap, regionMaps } from '../../game-core/regionMaps';
 import { specimenSpawnActorId } from '../../game-core/specimens';
 import { PLAYER, SWIM } from '../components/player/playerConfig';
+import { PLAYABLE_NARRATOR_PROFILES } from '../narrator/playableNarratorProfiles';
 
 export const DEFAULT_PLAYABLE_MODE_ID = 'darwin';
 
@@ -11,6 +12,10 @@ export const ANIMAL_ACTIONS = {
     name: 'Eat',
     description: 'Feed from the nearby ground or vegetation.',
     icon: 'eat',
+    images: {
+      tortoise: '/inventory/tortoise_eat.png',
+      finch: '/inventory/finch_eat.png',
+    },
     control: 'animalEat',
     clip: 'animalEat',
     duration: 1.55,
@@ -21,6 +26,10 @@ export const ANIMAL_ACTIONS = {
     name: 'Sleep',
     description: 'Settle into a still resting pose.',
     icon: 'sleep',
+    images: {
+      tortoise: '/inventory/tortoise_sleep.png',
+      finch: '/inventory/finch_sleep.png',
+    },
     control: 'animalSleep',
     clip: 'animalSleep',
     duration: 2.4,
@@ -31,10 +40,54 @@ export const ANIMAL_ACTIONS = {
     name: 'Defecate',
     description: 'Pause briefly and leave a future ecology trace.',
     icon: 'defecate',
+    images: {
+      tortoise: '/inventory/tortoise_defecate.png',
+      finch: '/inventory/finch_defecate.png',
+    },
     control: 'animalDefecate',
     clip: 'animalDefecate',
     duration: 1.65,
     lockMovement: 1.15,
+  },
+  signalCurious: {
+    id: 'signalCurious',
+    name: 'Look curiously',
+    description: 'Turn an alert, curious look toward Darwin.',
+    control: 'animalSignalCurious',
+    clip: 'animalSignalCurious',
+    duration: 2.4,
+    lockMovement: 1.4,
+    communicationOnly: true,
+  },
+  signalWithdraw: {
+    id: 'signalWithdraw',
+    name: 'Withdraw cautiously',
+    description: 'Pull cautiously into the shell.',
+    control: 'animalSignalWithdraw',
+    clip: 'animalSignalWithdraw',
+    duration: 2.8,
+    lockMovement: 2.1,
+    communicationOnly: true,
+  },
+  signalGraze: {
+    id: 'signalGraze',
+    name: 'Continue grazing',
+    description: 'Lower the head and return to grazing.',
+    control: 'animalSignalGraze',
+    clip: 'animalEat',
+    duration: 3.2,
+    lockMovement: 1.6,
+    communicationOnly: true,
+  },
+  signalRest: {
+    id: 'signalRest',
+    name: 'Settle to rest',
+    description: 'Settle into a patient resting pose.',
+    control: 'animalSignalRest',
+    clip: 'animalSleep',
+    duration: 3.6,
+    lockMovement: 2.2,
+    communicationOnly: true,
   },
 };
 
@@ -84,9 +137,15 @@ export const playerControllerProfiles = {
     // blocked by the ground itself.
     collider: { shape: 'capsule', radius: 0.72, halfHeight: 0.14, centerY: 0.86 },
     camera: {
-      pivotY: 0.62,
-      minDistance: 3.2,
-      maxDistance: 5.8,
+      // Low, close, and deliberately wide: the shell remains in frame, but
+      // the landscape spreads laterally and nearby forage dominates.
+      pivotY: 0.6,
+      minDistance: 3.1,
+      maxDistance: 5.2,
+      defaultDistance: 4.05,
+      defaultPitch: 0.28,
+      side: 0.18,
+      fov: 60,
       status: {
         lookY: 0.72,
         distance: 2.35,
@@ -222,6 +281,7 @@ export const playableModes = {
     kind: 'human',
     assetId: 'darwin5',
     controllerProfile: 'darwin',
+    narrator: PLAYABLE_NARRATOR_PROFILES.darwin,
     toolbar: DARWIN_TOOLBAR,
     abilities: [],
   },
@@ -232,8 +292,33 @@ export const playableModes = {
     specimenId: 'floreanagianttortoise',
     assetId: 'tripoTortoiseRigged',
     controllerProfile: 'tortoise',
+    narrator: PLAYABLE_NARRATOR_PROFILES.tortoise,
     toolbar: ANIMAL_TOOLBAR,
     abilities: [],
+    // Deliberately heightened, interpretive RGB approximation of chelonian
+    // spectral discrimination. The screen and source textures contain no
+    // ultraviolet reflectance, so violet remains a legible short-wave proxy
+    // rather than a claim to reconstruct UV vision.
+    vision: {
+      effect: 'expanded-chelonian-color',
+      amount: 0.72,
+      chromaExpansion: 0.06,
+      warmSeparation: 0.065,
+      leafSeparation: 0.035,
+      shortwaveProxy: 0.05,
+      peripheralShift: 0.035,
+      forageAura: 0.9,
+      adaptationDuration: 2.8,
+      adaptationBoost: 0.38,
+      stillnessBoost: 0.08,
+      forageSalience: 0.52,
+      perceptualBloom: {
+        intensity: 0.92,
+        threshold: 0.34,
+        smoothing: 0.68,
+        radius: 0.85,
+      },
+    },
   },
   finch: {
     id: 'finch',
@@ -242,6 +327,7 @@ export const playableModes = {
     specimenId: 'mediumgroundfinch',
     assetId: 'mediumGroundFinch',
     controllerProfile: 'finch',
+    narrator: PLAYABLE_NARRATOR_PROFILES.finch,
     toolbar: ANIMAL_TOOLBAR,
     abilities: ['fly'],
     // A flier shouldn't start pinned to whichever map edge the specimen
@@ -273,6 +359,10 @@ export function getPlayableToolbarIds(modeId = DEFAULT_PLAYABLE_MODE_ID) {
 
 export function getAnimalAction(id) {
   return ANIMAL_ACTIONS[id] || null;
+}
+
+export function getAnimalActionImage(id, modeId) {
+  return getAnimalAction(id)?.images?.[modeId] || null;
 }
 
 export function getPlayableActionItem(id) {

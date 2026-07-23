@@ -21,10 +21,20 @@ function dampAngle(current, target, lambda, delta) {
   return THREE.MathUtils.damp(current, wrapped, lambda, delta);
 }
 
-function smootherStep01(value) {
+function smoothStep01(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
-  return t * t * t * (t * (t * 6 - 15) + 10);
+  return t * t * (3 - 2 * t);
 }
+
+const OPENING_SHOT = Object.freeze({
+  startHeight: 82,
+  startRadius: 48,
+  rotation: Math.PI * 0.68,
+  surveyForward: 7,
+  surveySide: -4,
+  aerialFov: 52,
+  motionDelay: 0.035,
+});
 
 export function usePlayerCameraRig() {
   const { camera, gl } = useThree();
@@ -58,6 +68,7 @@ export function usePlayerCameraRig() {
     sequenceId: null,
     startedAt: 0,
     initialized: false,
+    startPivot: new THREE.Vector3(),
     finalPivot: new THREE.Vector3(),
     finalEye: new THREE.Vector3(),
   });
@@ -101,10 +112,9 @@ export function usePlayerCameraRig() {
     droppingLook: new THREE.Vector3(),
     droppingForward: new THREE.Vector3(),
     droppingRight: new THREE.Vector3(),
-    introStartTarget: new THREE.Vector3(),
-    introStartEye: new THREE.Vector3(),
     introFinalPivot: new THREE.Vector3(),
     introFinalEye: new THREE.Vector3(),
+    introOrbitCenter: new THREE.Vector3(),
     introEye: new THREE.Vector3(),
     introLookTarget: new THREE.Vector3(),
     introForward: new THREE.Vector3(),
@@ -366,6 +376,12 @@ export function usePlayerCameraRig() {
   }) => {
     if (cameraProfileRef.current !== cameraProfile) {
       cameraProfileRef.current = cameraProfile;
+      // FOV is part of the embodied camera profile, not a permanent mutation
+      // of the shared Three camera. Resetting it here also restores Darwin's
+      // ordinary lens after leaving an animal mode.
+      baseFovRef.current = Number.isFinite(cameraProfile?.fov)
+        ? cameraProfile.fov
+        : 50;
       if (Number.isFinite(cameraProfile?.defaultDistance)) {
         zoomRef.current = THREE.MathUtils.clamp(
           cameraProfile.defaultDistance,
@@ -512,10 +528,6 @@ export function usePlayerCameraRig() {
       const runtime = openingCameraRuntimeRef.current;
       const duration = Math.max(1, openingCamera.duration || 5);
       const progress = THREE.MathUtils.clamp((now - runtime.startedAt) / duration, 0, 1);
-      // Hold the overhead portrait long enough to register, then make one
-      // restrained descending arc before easing into the shoulder camera.
-      const swoopT = smootherStep01(THREE.MathUtils.smoothstep(progress, 0.16, 0.84));
-      const gameplayHandoffT = smootherStep01(THREE.MathUtils.smoothstep(progress, 0.72, 1));
       const introForward = scratch.introForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
       const introRight = scratch.introRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       const currentFinalPivot = scratch.introFinalPivot
@@ -533,6 +545,9 @@ export function usePlayerCameraRig() {
         .addScaledVector(introRight, side)
         .add(scratch.panVertical.set(0, vert, 0));
       if (!runtime.initialized) {
+        runtime.startPivot
+          .copy(playerPosition)
+          .add(scratch.panVertical.set(0, 1.05, 0));
         runtime.finalPivot.copy(currentFinalPivot);
         runtime.finalEye.copy(currentFinalEye);
         runtime.initialized = true;
@@ -542,31 +557,44 @@ export function usePlayerCameraRig() {
       const finalOffsetX = finalEye.x - finalPivot.x;
       const finalOffsetZ = finalEye.z - finalPivot.z;
       const finalAngle = Math.atan2(finalOffsetZ, finalOffsetX);
-      const stageTarget = scratch.introStartTarget
-        .copy(playerPosition)
-        .add(scratch.panVertical.set(0, 1.05, 0));
-      // Begin with a genuine island-establishing view, then descend through a
-      // broad orbit before folding into the playable shoulder composition.
-      const orbitAngle = THREE.MathUtils.lerp(finalAngle - 1.4, finalAngle + 0.18, swoopT);
-      const orbitRadius = THREE.MathUtils.lerp(32, 10.2, swoopT);
-      const orbitHeight = THREE.MathUtils.lerp(27, 7.8, swoopT);
-      const stageEye = scratch.introStartEye.set(
-        stageTarget.x + Math.cos(orbitAngle) * orbitRadius,
-        stageTarget.y + orbitHeight + Math.sin(swoopT * Math.PI) * 1.4,
-        stageTarget.z + Math.sin(orbitAngle) * orbitRadius,
+      const motionProgress = THREE.MathUtils.clamp(
+        (progress - OPENING_SHOT.motionDelay) / (1 - OPENING_SHOT.motionDelay),
+        0,
+        1,
       );
-      const eye = scratch.introEye.copy(stageEye).lerp(finalEye, gameplayHandoffT);
-      const lookTarget = scratch.introLookTarget
-        .copy(stageTarget)
-        .lerp(finalPivot, gameplayHandoffT);
-      camera.position.copy(eye).addScaledVector(cameraShake, gameplayHandoffT);
+      // One continuous eased spiral owns the complete shot. The old path
+      // stopped at a low intermediate orbit and used a second, late blend for
+      // the shoulder handoff; compressing that distance into the final second
+      // was the visible end lurch.
+      const pathT = smoothStep01(motionProgress);
+      const orbitAngle = THREE.MathUtils.lerp(
+        finalAngle - OPENING_SHOT.rotation,
+        finalAngle,
+        pathT,
+      );
+      const finalRadius = Math.max(0.01, Math.hypot(finalOffsetX, finalOffsetZ));
+      const orbitRadius = THREE.MathUtils.lerp(OPENING_SHOT.startRadius, finalRadius, pathT);
+      const finalHeight = finalEye.y - finalPivot.y;
+      const orbitHeight = THREE.MathUtils.lerp(OPENING_SHOT.startHeight, finalHeight, pathT);
+      const orbitCenter = scratch.introOrbitCenter
+        .copy(runtime.startPivot)
+        .addScaledVector(introForward, OPENING_SHOT.surveyForward * (1 - pathT))
+        .addScaledVector(introRight, OPENING_SHOT.surveySide * (1 - pathT))
+        .lerp(finalPivot, pathT);
+      const eye = scratch.introEye.set(
+        orbitCenter.x + Math.cos(orbitAngle) * orbitRadius,
+        orbitCenter.y + orbitHeight,
+        orbitCenter.z + Math.sin(orbitAngle) * orbitRadius,
+      );
+      const lookTarget = scratch.introLookTarget.copy(orbitCenter);
+      camera.position.copy(eye).addScaledVector(cameraShake, pathT);
       camera.lookAt(lookTarget);
-      camera.rotation.z += Math.sin(progress * Math.PI) * 0.006 * (1 - gameplayHandoffT);
+      camera.rotation.z += Math.sin(pathT * Math.PI) * 0.007;
       const finalFov = baseFovRef.current ?? 50;
       const openingFov = THREE.MathUtils.lerp(
-        44,
+        OPENING_SHOT.aerialFov,
         finalFov,
-        smootherStep01(THREE.MathUtils.smoothstep(progress, 0.48, 1)),
+        pathT,
       );
       if (Math.abs(camera.fov - openingFov) > 0.01) {
         camera.fov = openingFov;

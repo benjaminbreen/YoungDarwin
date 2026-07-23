@@ -96,6 +96,7 @@ export function LaunchOverlay({
   departing = false,
   blackout = false,
   onNewExpedition,
+  onMultiplayer,
   onModeSelect,
   onBack,
   onContinue,
@@ -105,6 +106,7 @@ export function LaunchOverlay({
   audioEnabled = true,
   onAudioEnabledChange,
   onRuntimeIntent,
+  multiplayerPanel = null,
   interactive = true,
   hasSavedExpedition = false,
   hasSavedJournalEntries = false,
@@ -132,7 +134,8 @@ export function LaunchOverlay({
   const choosingCharacter = mode === 'character';
   const showingSettings = mode === 'settings';
   const showingAbout = mode === 'about';
-  const expandedPanel = choosingCharacter || showingSettings || showingAbout;
+  const showingMultiplayer = mode === 'multiplayer';
+  const expandedPanel = choosingCharacter || showingSettings || showingAbout || showingMultiplayer;
 
   return (
     <section
@@ -187,6 +190,8 @@ export function LaunchOverlay({
               </p>
               <ProgressBar value={progress} />
             </div>
+          ) : showingMultiplayer ? (
+            multiplayerPanel
           ) : choosingCharacter ? (
             <nav className="relative grid gap-2 p-1">
               <div className="px-2 pb-1 pt-1 text-center">
@@ -266,6 +271,7 @@ export function LaunchOverlay({
             <nav className="relative grid gap-1">
               {hasSavedExpedition && <MenuButton onClick={onContinue}>Continue Expedition</MenuButton>}
               <MenuButton primary onClick={onNewExpedition} onIntent={onRuntimeIntent}>New Expedition</MenuButton>
+              <MenuButton onClick={onMultiplayer}>Multiplayer Expedition</MenuButton>
               <div className="mx-4 my-1 h-px bg-gradient-to-r from-transparent via-expedition-brass/50 to-transparent" />
               {hasSavedJournalEntries && <MenuButton onClick={onLoadJournal}>Load Journal</MenuButton>}
               <MenuButton onClick={onSettings}>Settings</MenuButton>

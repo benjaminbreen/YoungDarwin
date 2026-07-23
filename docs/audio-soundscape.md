@@ -232,6 +232,18 @@ field-case, and carry-state transitions. Physics-accepted prop placement,
 existing skid/scramble events, and rare leaf-litter contacts supply the small
 world-contact accents.
 
+Object interaction is material-aware throughout the same event graph. Hammer
+strikes select non-repeating wood, stone, metal, or ceramic banks; generic
+timber and volcanic surfaces now publish their resolved material instead of
+falling silent outside the loose-prop registry. Carry pickup combines quiet
+clothing/strap movement with the lifted object's own contact material, while a
+physics-accepted set-down retains its smaller material contact. Sustained push
+events read the rigid body's real position and speed and produce deliberately
+sparse, filtered movement contacts—moving objects shift more often, while an
+immovable object only gives an occasional strain. Syms's collecting case emits
+its actual lid state and layers a hinge/lid movement with a restrained latch on
+closing. Decorative chests without an authored open state remain silent.
+
 | Runtime material | Freesound source | Recordist | Source notes |
 | --- | --- | --- | --- |
 | Crab and iguana contacts | [Crab walking](https://freesound.org/people/stuniverso/sounds/761559/) | stuniverso | Close natural crab movement; a lower filtered derivative is used as a subtle claw-contact proxy |

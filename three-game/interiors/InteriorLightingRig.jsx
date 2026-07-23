@@ -55,6 +55,7 @@ function InteriorFogIsolation({ density = 0.00025 }) {
     atmosphere.x = 0;
     atmosphere.z = 0;
     atmosphere.w = 0;
+    fogAtmosphereUniforms.uCloudShade.value.x = 0;
   });
   return null;
 }

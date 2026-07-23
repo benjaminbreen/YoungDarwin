@@ -24,6 +24,8 @@ import { northwestReefRegion } from './northwestReef/terrain';
 import { createNorthwestReefTerrainMaterial } from './northwestReef/material';
 import { blackBeachRegion } from './blackBeach/terrain';
 import { createBlackBeachTerrainMaterial } from './blackBeach/material';
+import { westernLowlandsRegion } from './westernLowlands/terrain';
+import { createWesternLowlandsTerrainMaterial } from './westernLowlands/material';
 import { blackBeachSurfRegion } from './blackBeachSurf/terrain';
 import { createBlackBeachSurfTerrainMaterial } from './blackBeachSurf/material';
 import { beachWithHutRegion } from './beachWithHut/terrain';
@@ -95,6 +97,7 @@ const authoredRegions = [
   { ...devilsCrownRegion, createTerrainMaterial: createDevilsCrownTerrainMaterial },
   { ...northwestReefRegion, createTerrainMaterial: createNorthwestReefTerrainMaterial },
   { ...blackBeachRegion, createTerrainMaterial: createBlackBeachTerrainMaterial },
+  { ...westernLowlandsRegion, createTerrainMaterial: createWesternLowlandsTerrainMaterial },
   { ...blackBeachSurfRegion, createTerrainMaterial: createBlackBeachSurfTerrainMaterial },
   { ...beachWithHutRegion, createTerrainMaterial: createBeachWithHutTerrainMaterial },
   { ...southernReefsRegion, createTerrainMaterial: createSouthernReefsTerrainMaterial },

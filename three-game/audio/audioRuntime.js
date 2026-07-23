@@ -79,6 +79,15 @@ const MASTER_TRIM_MIN_DB = -18;
 const MASTER_TRIM_MAX_DB = 6;
 const TRACK_TRIM_MIN_DB = -24;
 const TRACK_TRIM_MAX_DB = 12;
+const DEFERRED_AUDIO_BANKS = Object.freeze([
+  POST_OFFICE_BAY_AUDIO_URLS.slice(2),
+  MOVEMENT_WILDLIFE_AUDIO_URLS,
+  INTERACTION_AUDIO_URLS,
+  DARWIN_BODY_AUDIO_URLS,
+  WILDLIFE_FIELDWORK_AUDIO_URLS,
+  CONTEXTUAL_WORLD_AUDIO_URLS,
+]);
+let deferredAudioPreload = null;
 
 const audioState = {
   context: null,
@@ -404,7 +413,36 @@ async function ensureSpatialTrack(key, url) {
   return track;
 }
 
-export async function activatePostOfficeBayAudio() {
+function waitForAudioPreloadWindow() {
+  if (typeof window === 'undefined') return Promise.resolve();
+  return new Promise(resolve => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(resolve, { timeout: 1200 });
+    } else {
+      window.setTimeout(resolve, 80);
+    }
+  });
+}
+
+export function preloadSoundscapeEffects() {
+  if (deferredAudioPreload) return deferredAudioPreload;
+  deferredAudioPreload = (async () => {
+    // Decode one related bank per idle window. Fetch/decode for every effect
+    // at once previously competed with GLTF parsing and shader setup during
+    // the launch overlay even though none of these sounds were needed yet.
+    for (const urls of DEFERRED_AUDIO_BANKS) {
+      await waitForAudioPreloadWindow();
+      await Promise.all(urls.map(loadAudioBuffer));
+    }
+    await waitForAudioPreloadWindow();
+    await ensureSpatialTrack('bee', MOVEMENT_WILDLIFE_AUDIO.bee);
+    exposeDebugState();
+    return true;
+  })();
+  return deferredAudioPreload;
+}
+
+export async function activatePostOfficeBayAudio({ preloadEffects = false } = {}) {
   const context = ensureAudioGraph();
   if (!context) return false;
   if (context.state !== 'running') {
@@ -415,16 +453,10 @@ export async function activatePostOfficeBayAudio() {
       return false;
     }
   }
-  await Promise.all([
-    ...Object.entries(ISLAND_AMBIENCE_AUDIO).map(([key, url]) => ensureAmbientTrack(key, url)),
-    ...POST_OFFICE_BAY_AUDIO_URLS.slice(2).map(loadAudioBuffer),
-    ...INTERACTION_AUDIO_URLS.map(loadAudioBuffer),
-    ...MOVEMENT_WILDLIFE_AUDIO_URLS.map(loadAudioBuffer),
-    ...WILDLIFE_FIELDWORK_AUDIO_URLS.map(loadAudioBuffer),
-    ...DARWIN_BODY_AUDIO_URLS.map(loadAudioBuffer),
-    ...CONTEXTUAL_WORLD_AUDIO_URLS.map(loadAudioBuffer),
-    ensureSpatialTrack('bee', MOVEMENT_WILDLIFE_AUDIO.bee),
-  ]);
+  await Promise.all(
+    Object.entries(ISLAND_AMBIENCE_AUDIO).map(([key, url]) => ensureAmbientTrack(key, url)),
+  );
+  if (preloadEffects) await preloadSoundscapeEffects();
   exposeDebugState();
   return context.state === 'running';
 }
@@ -688,7 +720,7 @@ export function resetSoundscapeAudioMix() {
 }
 
 export async function activateSoundscapeAudioFromDebug() {
-  const running = await activatePostOfficeBayAudio();
+  const running = await activatePostOfficeBayAudio({ preloadEffects: true });
   reapplyDebugControl(0.04);
   return running;
 }
@@ -726,7 +758,7 @@ export async function auditionSoundscapeAudioTrack(key) {
   audioState.debugControl.mutedKeys.delete(key);
   audioState.debugControl.soloKey = key;
   audioState.debugControl.forceEnabled = true;
-  const running = await activatePostOfficeBayAudio();
+  const running = await activatePostOfficeBayAudio({ preloadEffects: false });
   if (!running) {
     reapplyDebugControl();
     return false;

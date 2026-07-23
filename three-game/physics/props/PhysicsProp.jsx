@@ -397,6 +397,8 @@ export function PhysicsProp({ prop, onBreak }) {
         height: propInteractionHeight(prop),
         mass: propMass,
         fixed: Boolean(fixedBody),
+        position: { x: translation.x, y: translation.y, z: translation.z },
+        speed: Math.hypot(body.linvel().x, body.linvel().z),
         direction: { x: direction.x || 0, y: 0, z: direction.z || 0 },
       });
     }

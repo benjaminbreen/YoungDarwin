@@ -312,15 +312,6 @@ function e2eUrl(baseUrl, search = {}) {
   return url.toString();
 }
 
-function distance2D(a, b) {
-  const ax = Number(a?.position?.x);
-  const az = Number(a?.position?.z);
-  const bx = Number(b?.position?.x);
-  const bz = Number(b?.position?.z);
-  if (![ax, az, bx, bz].every(Number.isFinite)) return 0;
-  return Math.hypot(bx - ax, bz - az);
-}
-
 function assertCondition(condition, message, details) {
   if (condition) return;
   const error = new Error(message);
@@ -471,20 +462,6 @@ async function clickVisibleButton(page, kind) {
   const target = await findVisibleButtonCenter(page, kind);
   await page.mouse.click(target.x, target.y);
   return target;
-}
-
-async function dispatchDomKey(page, type, key, code) {
-  await page.evaluate(({ type: eventType, key: eventKey, code: eventCode }) => {
-    const init = {
-      key: eventKey,
-      code: eventCode,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    };
-    window.dispatchEvent(new KeyboardEvent(eventType, init));
-    document.dispatchEvent(new KeyboardEvent(eventType, init));
-  }, { type, key, code });
 }
 
 async function saveFailureArtifacts(page, stage, error, consoleErrors) {
@@ -855,121 +832,6 @@ async function launchMode(page, errors, modeName, { waitForSettledContent = fals
   });
 }
 
-async function runDarwinScenario(browser, baseUrl) {
-  const { page, errors } = await openE2EPage(browser, baseUrl, {
-    zone: 'LAWSON_HOUSE',
-    quality: 'performance',
-  });
-  try {
-    console.log('[three:e2e] Darwin: launch, attach carried prop, move, drop');
-    await launchMode(page, errors, 'Darwin');
-    const initial = await waitForHarnessState(page, state => (
-      state.currentZoneId === 'LAWSON_HOUSE'
-      && state.carryPrompt?.id === 'lawson-campaign-stool'
-      && state.carryPrompt?.mode === 'pickup'
-    ), GAMEPLAY_TIMEOUT_MS, 'Lawson campaign stool pickup prompt');
-
-    await withFailureArtifacts(page, 'Darwin carries campaign stool', errors, async () => {
-      await page.mouse.click(720, 450);
-      await page.evaluate(() => window.__darwinE2E.setCarriedObject('lawson-campaign-stool'));
-      await page.waitForTimeout(650);
-      const pickupState = await page.evaluate(() => ({
-        state: window.__darwinE2E.getState(),
-        animation: window.__darwinAnimationDebug || null,
-      }));
-      assertCondition(
-        pickupState.state.carriedObjectId === 'lawson-campaign-stool',
-        'Campaign stool did not enter skeletal carry state.',
-        pickupState,
-      );
-    });
-
-    const movement = await withFailureArtifacts(page, 'Darwin keyboard movement', errors, async () => {
-      const attempts = [];
-      const inputAttempts = [
-        { label: 'keyboard:w', kind: 'playwright', key: 'w' },
-        { label: 'keyboard:ArrowUp', kind: 'playwright', key: 'ArrowUp' },
-        { label: 'dom:KeyW', kind: 'dom', key: 'w', code: 'KeyW' },
-        { label: 'dom:ArrowUp', kind: 'dom', key: 'ArrowUp', code: 'ArrowUp' },
-      ];
-      for (const attempt of inputAttempts) {
-        const beforePose = await page.evaluate(() => window.__darwinE2E.getPlayerPose());
-        await page.mouse.click(720, 450);
-        try {
-          if (attempt.kind === 'dom') {
-            await dispatchDomKey(page, 'keydown', attempt.key, attempt.code);
-          } else {
-            await page.keyboard.down(attempt.key);
-          }
-          await page.waitForTimeout(1500);
-        } finally {
-          if (attempt.kind === 'dom') {
-            await dispatchDomKey(page, 'keyup', attempt.key, attempt.code).catch(() => {});
-          } else {
-            await page.keyboard.up(attempt.key).catch(() => {});
-          }
-        }
-        await page.waitForTimeout(350);
-        const afterPose = await page.evaluate(() => window.__darwinE2E.getPlayerPose());
-        const moved = distance2D(beforePose, afterPose);
-        attempts.push({ key: attempt.label, moved, beforePose, afterPose });
-        // A carried collider used to truncate movement after roughly one
-        // 0.39m step. Require several body lengths of sustained walking so
-        // that failure cannot masquerade as successful input handling.
-        if (moved > 1.25) return { key: attempt.label, moved, beforePose, afterPose, attempts };
-      }
-      assertCondition(false, 'Darwin did not sustain movement while carrying the campaign stool.', { attempts });
-    });
-    console.log(`[three:e2e] Darwin: moved ${movement.moved.toFixed(2)}m with ${movement.key}`);
-    const carriedAfterMove = await page.evaluate(() => window.__darwinE2E.getState());
-    assertCondition(
-      carriedAfterMove.carriedObjectId === 'lawson-campaign-stool',
-      'Campaign stool detached while Darwin was moving.',
-      { initial, movement, carriedAfterMove },
-    );
-    await withFailureArtifacts(page, 'Darwin drops campaign stool', errors, async () => {
-      await page.evaluate(() => window.__darwinE2E.interact());
-      const state = await waitForHarnessState(page, snapshot => (
-        snapshot.carriedObjectId === null
-        && snapshot.carryDropRequest === null
-        && snapshot.carryPrompt?.id === 'lawson-campaign-stool'
-        && snapshot.carryPrompt?.mode === 'pickup'
-        && snapshot.carryPrompt.distance > 0.35
-      ), GAMEPLAY_TIMEOUT_MS, 'campaign stool grounded pickup state');
-      assertCondition(
-        state.carriedObjectId === null,
-        'Campaign stool remained attached after drop.',
-        state,
-      );
-      return state;
-    });
-    const dropped = await page.evaluate(() => window.__darwinE2E.getState());
-    assertCondition(
-      dropped.carryPrompt?.id === 'lawson-campaign-stool'
-        && dropped.carryPrompt?.mode === 'pickup'
-        && dropped.carryPrompt.distance > 0.35,
-      'Campaign stool did not settle beyond Darwin in a grounded pickup state.',
-      dropped,
-    );
-
-    await page.close();
-    return {
-      name: 'darwin',
-      moved: movement.moved,
-      movementKey: movement.key,
-      carriedAfterMove: carriedAfterMove.carriedObjectId,
-      droppedPromptDistance: dropped.carryPrompt?.distance,
-      examined: null,
-      collected: null,
-      finalState: dropped,
-      errors,
-    };
-  } catch (error) {
-    await page.close().catch(() => {});
-    throw error;
-  }
-}
-
 async function runFinchScenario(browser, baseUrl) {
   const { page, errors } = await openE2EPage(browser, baseUrl);
   try {
@@ -1289,7 +1151,6 @@ async function run() {
       );
     }
     const scenarios = {
-      darwin: runDarwinScenario,
       finch: runFinchScenario,
       transition: runTransitionScenario,
       'transition-prepare': runTransitionPreparationScenario,

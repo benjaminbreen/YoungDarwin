@@ -533,11 +533,14 @@ export function PlayerController({
   }), [collisionAdapter]);
   const characterController = useKinematicCharacterController(rapierContext, characterBodyRef, characterColliderRef);
   const spawnPoint = useMemo(() => {
-    if (playableMode.kind === 'animal' && playableSpawnPoint) {
+    // Runtime-owned starts (animal possession and multiplayer role spawns)
+    // override the authored region entry point. Single-player Darwin normally
+    // has no playableSpawnPoint and continues to use the region spawn graph.
+    if (playableSpawnPoint) {
       return playableSpawnPoint;
     }
     return regionSpawnPoint(currentZoneId, playerSpawnId);
-  }, [currentZoneId, playableMode.kind, playableSpawnPoint, playerSpawnId]);
+  }, [currentZoneId, playableSpawnPoint, playerSpawnId]);
   const spawnFacing = useMemo(
     () => regionSpawnFacing(currentZoneId, playerSpawnId),
     [currentZoneId, playerSpawnId],
@@ -1307,6 +1310,10 @@ export function PlayerController({
         getAnimalAction('eat'),
         getAnimalAction('sleep'),
         getAnimalAction('defecate'),
+        getAnimalAction('signalCurious'),
+        getAnimalAction('signalWithdraw'),
+        getAnimalAction('signalGraze'),
+        getAnimalAction('signalRest'),
       ].find(action => action && touch[action.control]);
       if (requestedAnimalAction) {
         const requiresGround = requestedAnimalAction.id === 'eat' || requestedAnimalAction.id === 'sleep';

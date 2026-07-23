@@ -1079,6 +1079,7 @@ export const useThreeGameStore = create((set, get) => ({
 
   setPlayableMode: playableModeId => set(state => {
     const mode = getPlayableMode(playableModeId);
+    const narratorIsPristine = (state.narratorLog || []).every(entry => entry?.source === 'initial');
     const darwinToolbarOrder = state.playableModeId === 'darwin'
       ? state.toolbarOrder
       : (state.darwinToolbarOrder || DEFAULT_DARWIN_TOOLBAR);
@@ -1106,6 +1107,18 @@ export const useThreeGameStore = create((set, get) => ({
       readableBookSession: null,
       interiorPrompt: null,
     };
+    if (narratorIsPristine && mode.kind === 'animal' && mode.narrator?.initialNarration) {
+      const animalInitialNarration = {
+        narration: mode.narrator.initialNarration,
+        educationalNote: '',
+      };
+      patch.message = animalInitialNarration.narration;
+      patch.educationalNote = '';
+      patch.narratorLog = createInitialNarratorLog(animalInitialNarration, {
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+      });
+    }
 
     if (mode.kind === 'animal') {
       const spawn = findPlayableSpawn(mode.id, state.currentZoneId);
@@ -3328,6 +3341,7 @@ export const useThreeGameStore = create((set, get) => ({
     const recentNarration = recentNarrationContext(state.narratorLog);
     const idempotencyKey = [
       state.seed || 'three',
+      state.playableModeId || DEFAULT_PLAYABLE_MODE_ID,
       state.currentZoneId,
       state.day,
       Math.round((state.timeOfDay || 0) * 60),
@@ -3346,6 +3360,7 @@ export const useThreeGameStore = create((set, get) => ({
           },
           body: JSON.stringify({
             eventType: 'snare_escape_attempt',
+            playableModeId: state.playableModeId,
             playerInput: trimmed,
             objective: 'Escape the snare before resuming fieldwork.',
             location: islandLocation.name || zone.name,
@@ -3400,6 +3415,7 @@ export const useThreeGameStore = create((set, get) => ({
           },
           body: JSON.stringify({
             eventType: config.eventType,
+            playableModeId: state.playableModeId,
             playerInput: trimmed,
             objective: config.objective,
             location: islandLocation.name || zone.name,
@@ -3454,6 +3470,7 @@ export const useThreeGameStore = create((set, get) => ({
         },
         body: JSON.stringify({
           eventType: 'player_action',
+          playableModeId: state.playableModeId,
           playerInput: trimmed,
           objective: state.questComplete
             ? 'Quest complete: return to Syms with specimen evidence.'
@@ -3491,7 +3508,9 @@ export const useThreeGameStore = create((set, get) => ({
           idempotencyKey,
         }),
       });
-      const data = response.ok ? await response.json() : localNarratorFallback({ input: trimmed, nearbySpecimen });
+      const data = response.ok
+        ? await response.json()
+        : localNarratorFallback({ input: trimmed, nearbySpecimen, playableModeId: state.playableModeId });
       set({
         narratorPending: false,
         narratorError: data?.fallback ? 'Narration fell back to a local response.' : null,
@@ -3499,7 +3518,11 @@ export const useThreeGameStore = create((set, get) => ({
       get().applyNarration(data, { playerInput: trimmed });
       return data;
     } catch (error) {
-      const fallback = localNarratorFallback({ input: trimmed, nearbySpecimen });
+      const fallback = localNarratorFallback({
+        input: trimmed,
+        nearbySpecimen,
+        playableModeId: state.playableModeId,
+      });
       set({
         narratorPending: false,
         narratorError: String(error?.message || error || 'Narration unavailable.'),

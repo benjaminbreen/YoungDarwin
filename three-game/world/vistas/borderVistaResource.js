@@ -3,7 +3,7 @@ import { getBorderVistas } from './index';
 
 const RESOURCE_CACHE_LIMIT = 4;
 const GENERATED_BASE = '/assets/generated/border-vistas';
-const GENERATED_GEOMETRY_VERSION = 3;
+const GENERATED_GEOMETRY_VERSION = 14;
 const resources = new Map();
 let useCounter = 0;
 

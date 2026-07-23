@@ -57,6 +57,7 @@ import { rarityLabel } from '../world/inspectables';
 import { WEATHER_STATES, normalizeWeatherState } from '../world/weatherStates';
 import {
   getAnimalAction,
+  getAnimalActionImage,
   getPlayableActionItem,
   getPlayableMode,
 } from '../playable/playableModes';
@@ -121,7 +122,20 @@ function getToolbarItem(id) {
   return getInventoryItem(id) || getPlayableActionItem(id);
 }
 
-function AnimalActionIcon({ actionId, className = 'h-7 w-7' }) {
+function AnimalActionIcon({ actionId, playableModeId, className = 'h-7 w-7' }) {
+  const image = getAnimalActionImage(actionId, playableModeId);
+  if (image) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={image}
+        alt=""
+        className={`${className} object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]`}
+        draggable={false}
+        aria-hidden="true"
+      />
+    );
+  }
   if (actionId === 'eat') {
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1470,11 +1484,17 @@ function ToolBelt({ onOpenJournal, compact = false }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
+  const animalMode = getPlayableMode(playableModeId).kind === 'animal';
   return (
     <ExpeditionPanel
       variant={compact ? 'quiet' : 'hud'}
       className="max-w-[min(35rem,calc(100vw-1.5rem))]"
-      innerClassName={`flex flex-wrap justify-center ${compact ? 'gap-1 p-1.5' : 'gap-2 p-2'}`}
+      innerClassName={`flex flex-wrap justify-center ${
+        animalMode
+          ? compact ? 'gap-2 p-2.5' : 'gap-3 p-3'
+          : compact ? 'gap-1 p-1.5' : 'gap-2 p-2'
+      }`}
     >
       {toolbarOrder.map((toolId, index) => {
         const tool = getToolbarItem(toolId);
@@ -1503,7 +1523,11 @@ function ToolBelt({ onOpenJournal, compact = false }) {
                 if (animalAction) triggerToolUse(tool.id);
               }
             }}
-            className={`group relative flex items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${compact ? 'h-12 w-12' : 'h-14 w-14'} ${active
+            className={`group relative flex items-center justify-center rounded-sm border transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${
+              animalMode
+                ? compact ? 'h-16 w-16' : 'h-20 w-20'
+                : compact ? 'h-12 w-12' : 'h-14 w-14'
+            } ${active
               ? compact
                 ? 'border-expedition-gold/75 bg-expedition-gold/15 text-expedition-goldbright shadow-[inset_0_0_0_1px_rgba(227,197,133,0.12)]'
                 : 'border-expedition-goldbright bg-expedition-gold/30 text-expedition-goldbright shadow-[0_0_18px_rgba(227,197,133,0.45),inset_0_0_0_1px_rgba(227,197,133,0.45)]'
@@ -1514,7 +1538,11 @@ function ToolBelt({ onOpenJournal, compact = false }) {
             title={`${index + 1}: ${tool.name}`}
           >
             {animalAction ? (
-              <AnimalActionIcon actionId={tool.id} />
+              <AnimalActionIcon
+                actionId={tool.id}
+                playableModeId={playableModeId}
+                className={compact ? 'h-14 w-14' : 'h-[4.5rem] w-[4.5rem]'}
+              />
             ) : tool.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={tool.image} alt={tool.name} className={`${compact ? 'h-8 w-8' : 'h-10 w-10'} object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)] transition ${compact && !active ? 'opacity-65 saturate-[0.68]' : ''}`} draggable={false} />
@@ -2225,6 +2253,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
   const activeToolId = useThreeGameStore(state => state.activeToolId);
   const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
   const tools = toolbarOrder.map(getToolbarItem).filter(Boolean);
   const shown = condensed ? tools.slice(0, 3) : tools;
 
@@ -2269,7 +2298,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
                   : 'border-expedition-brass/35 bg-black/20 text-expedition-gold'
               }`}>
                 {animalAction ? (
-                  <AnimalActionIcon actionId={tool.id} className="h-5 w-5" />
+                  <AnimalActionIcon actionId={tool.id} playableModeId={playableModeId} className="h-7 w-7" />
                 ) : tool.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={tool.image} alt={tool.name} className="h-7 w-7 object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.65)]" draggable={false} />
@@ -3986,7 +4015,6 @@ function MobileActionCluster() {
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableMode = getPlayableMode(playableModeId);
-  const animalAction = getAnimalAction(activeToolId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (
     !collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)
     && ((specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId)
@@ -4024,7 +4052,7 @@ function MobileActionCluster() {
             size="small"
             onPress={() => triggerToolUse(action.id)}
             className={index === 0 ? 'bottom-3 left-0' : index === 1 ? 'bottom-7 left-[4.65rem]' : 'bottom-3 right-0'}
-            icon={<AnimalActionIcon actionId={action.id} className="h-full w-full" />}
+            icon={<AnimalActionIcon actionId={action.id} playableModeId={playableModeId} className="h-full w-full" />}
           />
         ))}
       </div>

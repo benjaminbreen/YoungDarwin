@@ -8,9 +8,12 @@ provide source material and shared game-state ideas.
 Use this file as the high-level map. Use `AGENTS.md` for agent operating rules
 and `docs/generated/repo-inventory.md` for volatile inventories.
 
-The proposed capped-room multiplayer architecture, including human/AI actor
-control, interaction sessions, animal observation, and staged implementation,
-is documented in `docs/multiplayer-architecture-plan.md`.
+The proposed capped-room multiplayer architecture, including Vercel plus
+Cloudflare Durable Objects/R2 deployment, human/AI actor control, interaction
+sessions, animal observation, viral-load/cost guardrails, and staged
+implementation, is documented in `docs/multiplayer-architecture-plan.md`.
+The implemented Darwin/tortoise vertical slice and its local/production
+operations are documented in `docs/multiplayer-runbook.md`.
 
 ## Runtime Entry Points
 
@@ -184,6 +187,9 @@ props.
 - `three-game/world/specimenRuntime.js`: runtime specimen pose publication.
 - `three-game/playable/playableModes.js`: Darwin, finch, and tortoise playable
   mode definitions and controller profiles.
+- `docs/playable-animal-modes-plan.md`: planned profile-driven architecture for
+  adding racer, lava lizard, crab, and later animal perspectives without
+  species-specific rewrites.
 
 If an animated specimen disappears after behavior changes, first verify
 `SpecimenActor` renders the model at the authored/base pose before applying
