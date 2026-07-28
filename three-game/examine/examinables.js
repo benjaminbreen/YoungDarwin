@@ -40,6 +40,16 @@ export function getExaminableItem(typeId) {
   return EXAMINABLE_ITEMS.find(item => item.typeId === typeId) || null;
 }
 
+// Any examinable anchored in the world is handled by the inspection orbit —
+// curated specimens, ambient field targets (rocks, unmarked vegetation) and
+// standalone items alike. Drag/zoom used to be gated on `kind === 'specimen'`,
+// which left ambient examinations on the fixed diegetic dolly while the on-
+// screen hint still promised an orbit. Sessions with no world focus (readable
+// books) keep the fixed shot.
+export function examineOrbitActive(session) {
+  return Boolean(session?.focus);
+}
+
 function specimenCategory(specimen) {
   const ontology = String(specimen?.ontology || '').toLowerCase();
   if (ontology === 'animal') return 'Animal';

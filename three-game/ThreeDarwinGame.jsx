@@ -61,7 +61,6 @@ import {
   prefetchEcologyAssets,
   setEcologyAssetPrefetchPaused,
 } from './components/scene/ecology/EcologyRenderer';
-import { prefetchStartupContentAssets } from './world/startupPrefetch';
 import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
 import {
   prepareRegionEcologyResource,
@@ -214,7 +213,7 @@ const DEFAULT_PERF_SETTINGS = {
   contextAntialias: true,
   stats: false,
   shadows: true,
-  shadowQuality: 'high',
+  shadowQuality: 'ultra',
   water: true,
   terrain: true,
   landmarks: false,
@@ -294,7 +293,7 @@ const QUALITY_PRESETS = {
     msaaSamples: 0,
     postprocessing: true,
     contextAntialias: true,
-    shadowQuality: 'high',
+    shadowQuality: 'ultra',
     // N8AO grounds props and vegetation nicely, but the 2026-07 Safari perf
     // pass measured it as the most expensive composer pass by far. Default off
     // on every tier; re-enable live from the perf panel.
@@ -320,7 +319,7 @@ const QUALITY_PRESETS = {
     msaaSamples: 2,
     postprocessing: true,
     contextAntialias: true,
-    shadowQuality: 'high',
+    shadowQuality: 'ultra',
     ao: false,
     // Cinematic keeps HDR (half-float) composer buffers so bloom/grade banding
     // stays clean on the tier that promises the richest image.
@@ -343,17 +342,19 @@ const QUALITY_PRESETS = {
 const BOOT_LOADER_STABLE_MS = 350;
 const BOOT_MIN_LOADING_MS = 1000;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const OPENING_DURATION_MS = 5500;
-const LAUNCH_OVERLAY_FADE_MS = 600;
-const LAUNCH_COMPLETION_HOLD_MS = 600;
+const OPENING_DURATION_MS = 6200;
+const LAUNCH_OVERLAY_FADE_MS = 720;
+const LAUNCH_COMPLETION_HOLD_MS = 420;
+const HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 3000;
+const HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550;
+const HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS = 80;
+const HISTORICAL_PROLOGUE_EXIT_MS = 2300;
 const STARTUP_FULL_CONTENT_PHASE = 6;
-const TRANSITION_REVEAL_CONTENT_PHASE = 5;
-// Terrain, vistas, authored ecology, and Darwin establish the opening shot.
-// Asset-heavy props, specimens, and NPCs must not gate launch: a slow or
-// unresolved optional GLB otherwise strands the progress display at 97–98%.
-const STARTUP_OPENING_CONTENT_PHASE = 3;
-const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420];
-const INTRO_LOADING_STEPS = Object.freeze([1, 2, 3]);
+const TRANSITION_REVEAL_CONTENT_PHASE = STARTUP_FULL_CONTENT_PHASE;
+// A moving cinematic is a protected render window. Everything the player can
+// see or collide with mounts while the launch chart is still opaque; the
+// opening camera begins only after the complete scene has compiled and settled.
+const STARTUP_OPENING_CONTENT_PHASE = STARTUP_FULL_CONTENT_PHASE;
 // The ladder both launch paths climb. Mounting one content family per
 // painted/idle window keeps React commits, Rapier collider construction,
 // instance matrix fills, and shader discovery off the same animation frame.
@@ -380,26 +381,15 @@ const CONTENT_MOUNT_STEPS = Object.freeze([
   5.6,
   6,
 ]);
-// Props, plant fields, structures, and specimens mount beneath the aerial shot.
-// Their GLBs are prefetched from the moment the scene reports ready, so each
-// mount is a cheap scene-graph attach rather than a parse; keeping them here
-// leaves the first seconds of player control free of GLTF decode, Rapier
-// collider construction, and first-draw shader compiles.
-const INTRO_MOUNT_CONTENT_PHASE = 5.6;
-// Measured from the start of the cinematic. The first step waits for the black
-// fade to finish revealing the shot, and the last leaves roughly a second of
-// clear air before the camera hands off.
-const INTRO_MOUNT_WINDOW_MS = Object.freeze({ start: 520, end: 4300 });
-const INTRO_MOUNT_IDLE_TIMEOUT_MS = 120;
-// Whatever is still outstanding at handoff (normally only the NPC actors, or
-// every remaining family when the cinematic is skipped) fills in across
-// separated idle windows after the player has control.
-const INTRO_REVEAL_STEP_MS = 320;
-const INTRO_REVEAL_FIRST_STEP_MS = 250;
+const INTRO_LOADING_STEPS = Object.freeze([1, ...CONTENT_MOUNT_STEPS]);
+const INTRO_LOADING_PHASE_TIMINGS_MS = Object.freeze(
+  INTRO_LOADING_STEPS.map((_, index) => Math.round(index * 155)),
+);
 // The deadline is a degraded fallback, not the normal transition clock. Full
 // destination content now mounts and compiles beneath the opaque chart first.
-const TRANSITION_READY_DEADLINE_MS = 6500;
-const TRANSITION_COMPILE_TIMEOUT_MS = 1200;
+const TRANSITION_READY_DEADLINE_MS = 8000;
+const TRANSITION_COMPILE_TIMEOUT_MS = 1500;
+const TRANSITION_OPTIONAL_LOADER_GRACE_MS = 900;
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 const OPENING_RENDER_DPR = [1, 1];
@@ -773,6 +763,106 @@ function transitionPercentile(values, percentile) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percentile))];
+}
+
+function loadingManagerIsBusy(progressState) {
+  const total = Number(progressState?.total || 0);
+  const loaded = Number(progressState?.loaded || 0);
+  const progress = Number(progressState?.progress);
+  // Three's LoadingManager can retain `active: true` after an optional asset
+  // errors, and may briefly report loaded > total with progress = NaN. At that
+  // point every tracked request has reached a terminal state; authored
+  // fallbacks should render instead of trapping the launch overlay forever.
+  if (total > 0 && loaded >= total) return false;
+  return Boolean(progressState?.active)
+    || (total > 0 && (!Number.isFinite(progress) || progress < 100));
+}
+
+// The opening used to have no repeatable performance evidence, so a smooth
+// average after landing could hide multi-second stalls inside the fly-in. This
+// records only the visible shot and separately reports the covered load time.
+function OpeningPerformanceProbe({
+  enabled,
+  active,
+  sequenceId,
+  loadStartedAt,
+  contentPhase,
+}) {
+  const activeRef = useRef(null);
+
+  useEffect(() => {
+    if (!enabled || !active || !sequenceId) return undefined;
+    const startedAt = performance.now();
+    const sample = {
+      id: sequenceId,
+      loadDurationMs: loadStartedAt ? Math.max(0, startedAt - loadStartedAt) : 0,
+      startedAt,
+      durationMs: 0,
+      events: [{ name: 'visible-start', atMs: 0, detail: null }],
+      frameDeltas: [],
+      frameCount: 0,
+      worstFrameMs: 0,
+      p95FrameMs: 0,
+      framesOver32Ms: 0,
+      framesOver50Ms: 0,
+      longTasks: [],
+      complete: false,
+    };
+    let frameHandle = null;
+    let previousFrameAt = null;
+    let observer = null;
+    const record = (name, detail = null) => {
+      sample.events.push({ name, atMs: performance.now() - startedAt, detail });
+    };
+    const tick = now => {
+      if (previousFrameAt != null) {
+        const delta = now - previousFrameAt;
+        sample.frameDeltas.push(delta);
+        sample.frameCount += 1;
+        sample.worstFrameMs = Math.max(sample.worstFrameMs, delta);
+        if (delta > 32) sample.framesOver32Ms += 1;
+        if (delta > 50) sample.framesOver50Ms += 1;
+      }
+      previousFrameAt = now;
+      frameHandle = window.requestAnimationFrame(tick);
+    };
+    activeRef.current = { sample, record };
+    window.__threeOpeningPerf = sample;
+    frameHandle = window.requestAnimationFrame(tick);
+    if (typeof PerformanceObserver === 'function') {
+      try {
+        observer = new PerformanceObserver(list => {
+          list.getEntries().forEach(entry => {
+            sample.longTasks.push({
+              atMs: entry.startTime - startedAt,
+              durationMs: entry.duration,
+            });
+          });
+        });
+        observer.observe({ type: 'longtask', buffered: false });
+      } catch {
+        observer = null;
+      }
+    }
+    return () => {
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+      observer?.disconnect?.();
+      sample.durationMs = performance.now() - startedAt;
+      sample.p95FrameMs = transitionPercentile(sample.frameDeltas, 0.95);
+      sample.complete = true;
+      record('complete');
+      const history = window.__threeOpeningPerfHistory || [];
+      window.__threeOpeningPerfHistory = [...history.slice(-19), sample];
+      activeRef.current = null;
+    };
+  }, [active, enabled, loadStartedAt, sequenceId]);
+
+  useEffect(() => {
+    if (!active) return;
+    activeRef.current?.record(`content:${contentPhase}`);
+  }, [active, contentPhase]);
+
+  return null;
 }
 
 // Short averages conceal the exact failure mode this transition needs to
@@ -1179,9 +1269,7 @@ function OpeningVisualReadySignal({
     // Read loader state imperatively. Subscribing this R3F component lets a
     // render-time texture request schedule a React update in another render.
     const assetProgress = useProgress.getState();
-    const knownTotal = Number(assetProgress.total || 0);
-    const loaderBusy = assetProgress.active
-      || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
+    const loaderBusy = loadingManagerIsBusy(assetProgress);
     if (loaderBusy) {
       quietSinceRef.current = 0;
       stableFramesRef.current = 0;
@@ -1235,6 +1323,7 @@ function OpeningVisualReadySignal({
 function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, waterQuality }) {
   const { gl, scene, camera } = useThree();
   const compiledIdRef = useRef(null);
+  const compiledAtRef = useRef(0);
   const compilingIdRef = useRef(null);
   const quietSinceRef = useRef(0);
   const stableFramesRef = useRef(0);
@@ -1242,6 +1331,7 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
   const activeIdRef = useRef(null);
   const readyTimeoutRef = useRef(null);
   const readyQueuedIdRef = useRef(null);
+  const blockerRef = useRef(null);
 
   useEffect(() => () => {
     if (readyTimeoutRef.current != null) window.clearTimeout(readyTimeoutRef.current);
@@ -1285,6 +1375,8 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           stableFramesRef.current = 0;
           resourceStableFramesRef.current = 0;
           activeIdRef.current = null;
+          blockerRef.current = null;
+          compiledAtRef.current = 0;
           return;
         }
         if (activeIdRef.current !== active.id) {
@@ -1292,6 +1384,7 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           quietSinceRef.current = 0;
           stableFramesRef.current = 0;
           resourceStableFramesRef.current = 0;
+          compiledAtRef.current = 0;
         }
         // Compilation is a polish step, not a gate that may permanently strand
         // the player. This also covers a failed terrain promise or a loader that
@@ -1301,18 +1394,36 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           return;
         }
         if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
+          if (blockerRef.current !== 'terrain') {
+            blockerRef.current = 'terrain';
+            window.__recordThreeTransitionEvent?.('ready-wait:terrain');
+          }
           resourceStableFramesRef.current = 0;
           return;
         }
         const waterResource = waterResourceDescriptor(active.zoneId, waterQuality);
-        if (contentPhase < TRANSITION_REVEAL_CONTENT_PHASE
-          || !borderVistaResourceIsReady(active.zoneId)
-          || !regionEcologyResourceIsReady(active.zoneId)
-          || (!waterResource.skip && !waterTextureResourceIsReady(
+        const borderReady = borderVistaResourceIsReady(active.zoneId);
+        const ecologyReady = regionEcologyResourceIsReady(active.zoneId);
+        const waterReady = waterResource.skip || waterTextureResourceIsReady(
             active.zoneId,
             waterResource.bakeRes,
             waterResource.options,
-          ))) {
+          );
+        if (contentPhase < TRANSITION_REVEAL_CONTENT_PHASE
+          || !borderReady
+          || !ecologyReady
+          || !waterReady) {
+          const blocker = contentPhase < TRANSITION_REVEAL_CONTENT_PHASE
+            ? `content:${contentPhase}`
+            : !borderReady
+              ? 'border'
+              : !ecologyReady
+                ? 'ecology'
+                : 'water';
+          if (blockerRef.current !== blocker) {
+            blockerRef.current = blocker;
+            window.__recordThreeTransitionEvent?.(`ready-wait:${blocker}`);
+          }
           resourceStableFramesRef.current = 0;
           return;
         }
@@ -1321,6 +1432,10 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
         resourceStableFramesRef.current += 1;
         if (resourceStableFramesRef.current < 3) return;
         if (compiledIdRef.current !== active.id) {
+          if (blockerRef.current !== 'compile') {
+            blockerRef.current = 'compile';
+            window.__recordThreeTransitionEvent?.('ready-wait:compile');
+          }
           if (compilingIdRef.current !== active.id) {
             const transitionId = active.id;
             compilingIdRef.current = transitionId;
@@ -1342,6 +1457,7 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
                 if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
                 if (useThreeGameStore.getState().transition?.id === transitionId) {
                   compiledIdRef.current = transitionId;
+                  compiledAtRef.current = performance.now();
                 }
                 if (compilingIdRef.current === transitionId) compilingIdRef.current = null;
               });
@@ -1352,13 +1468,21 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
         // loaders may start synchronously while destination actors render; a
         // subscription here can cause a cross-component React update.
         const assetProgress = useProgress.getState();
-        const knownTotal = Number(assetProgress.total || 0);
-        const loaderBusy = assetProgress.active
-          || (knownTotal > 0 && Number(assetProgress.progress || 0) < 100);
-        if (loaderBusy || compiledIdRef.current !== active.id) {
+        const loaderBusy = loadingManagerIsBusy(assetProgress);
+        const optionalLoaderGraceElapsed = compiledAtRef.current > 0
+          && performance.now() - compiledAtRef.current >= TRANSITION_OPTIONAL_LOADER_GRACE_MS;
+        if ((loaderBusy && !optionalLoaderGraceElapsed) || compiledIdRef.current !== active.id) {
+          if (blockerRef.current !== 'loader') {
+            blockerRef.current = 'loader';
+            window.__recordThreeTransitionEvent?.('ready-wait:loader');
+          }
           quietSinceRef.current = 0;
           stableFramesRef.current = 0;
           return;
+        }
+        if (blockerRef.current !== 'settle') {
+          blockerRef.current = 'settle';
+          window.__recordThreeTransitionEvent?.('ready-wait:settle');
         }
         const now = performance.now();
         if (!quietSinceRef.current) quietSinceRef.current = now;
@@ -1423,15 +1547,15 @@ function TravelCameraRig() {
 
     if (active.phase === 'departing') {
       const elapsed = Math.max(0, Date.now() - active.startedAt);
-      const t = MathUtils.smoothstep(Math.min(1, elapsed / 1000), 0, 1);
+      const t = MathUtils.smootherstep(Math.min(1, elapsed / 950), 0, 1);
       targetPosition.current.copy(departurePositionRef.current)
-        .addScaledVector(departureDirectionRef.current, -7 * t);
-      targetPosition.current.y += 10 * t;
+        .addScaledVector(departureDirectionRef.current, -8.5 * t);
+      targetPosition.current.y += 12 * t;
       camera.position.copy(targetPosition.current);
       const pose = state.playerPose?.position || { x: 0, y: 0, z: 0 };
       lookTarget.current.set(pose.x || 0, (pose.y || 0) + 1.1, pose.z || 0);
       camera.lookAt(lookTarget.current);
-      camera.fov = departureFovRef.current + 3.2 * t;
+      camera.fov = departureFovRef.current + 3.8 * t;
       camera.updateProjectionMatrix();
       return;
     }
@@ -1451,8 +1575,8 @@ function TravelCameraRig() {
       direction.current.set(targetPosition.current.x - px, 0, targetPosition.current.z - pz);
       if (direction.current.lengthSq() < 0.01) direction.current.set(0, 0, 1);
       direction.current.normalize();
-      arrivalPositionRef.current.set(px, Math.max(py + 20, targetPosition.current.y + 9), pz)
-        .addScaledVector(direction.current, 12);
+      arrivalPositionRef.current.set(px, Math.max(py + 24, targetPosition.current.y + 12), pz)
+        .addScaledVector(direction.current, 14);
       const previousPosition = camera.position.clone();
       camera.position.copy(arrivalPositionRef.current);
       lookTarget.current.set(px, py + 1.1, pz);
@@ -1462,7 +1586,7 @@ function TravelCameraRig() {
     }
     const arrivalStartedAt = active.arrivingAt || active.readyAt || active.phaseStartedAt || Date.now();
     const elapsed = Math.max(0, Date.now() - arrivalStartedAt);
-    const t = MathUtils.smoothstep(Math.min(1, elapsed / 1050), 0, 1);
+    const t = MathUtils.smootherstep(Math.min(1, elapsed / 1200), 0, 1);
     camera.position.copy(arrivalPositionRef.current).lerp(targetPosition.current, t);
     camera.quaternion.copy(arrivalQuaternionRef.current).slerp(targetQuaternion.current, t);
   });
@@ -1622,32 +1746,35 @@ function scheduleStagedContentPhases({ steps, timings, commitPhase, idleTimeoutM
   };
 }
 
-// Cumulative offsets that spread `count` mounts evenly across a window.
-function evenlySpacedTimings(count, startMs, endMs) {
-  if (count <= 0) return [];
-  if (count === 1) return [startMs];
-  const span = Math.max(0, endMs - startMs);
-  return Array.from(
-    { length: count },
-    (_, index) => Math.round(startMs + (span * index) / (count - 1)),
-  );
-}
-
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
 // N8AO grounds rocks/characters with contact shading; runs half-res to stay
 // cheap and can be disabled independently of the rest of the stack.
+
+// How far in front of the subject's centre the plane of focus sits, as a
+// fraction of its radius: roughly the front third of the bulk.
+const NEAR_SURFACE_FOCUS_BIAS = 0.55;
+
+// The sharp band has to be at least as deep as the subject, or its own far
+// side falls out of focus. Shared by the initial prop and the frame loop so a
+// re-memo of the effect cannot snap focusRange back to a stale authored value.
+function subjectFocusRange(radius) {
+  return MathUtils.clamp((Number(radius) || 0.6) * 1.05, 0.22, 1.8);
+}
+
 function ExaminationDepthOfField() {
   const session = useThreeGameStore(state => state.examineSession);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const effectRef = useRef(null);
   const target = useMemo(() => new Vector3(), []);
+  const center = useMemo(() => new Vector3(), []);
+  const cameraWorld = useMemo(() => new Vector3(), []);
   const active = examinationDepthOfFieldActive(session);
   const authoredHint = session?.frameHint || { height: 0.8, radius: 0.6 };
-  const initialFocusRange = MathUtils.clamp((authoredHint.radius || 0.6) * 0.65, 0.08, 1.05);
+  const initialFocusRange = subjectFocusRange(authoredHint.radius);
 
-  const setFocusTarget = (focus, hint) => {
+  const setFocusCenter = (focus, hint) => {
     const groundY = terrainHeight(focus.x, focus.z, currentZoneId);
     const focusY = Math.max(
       Number.isFinite(focus.y) ? focus.y : groundY,
@@ -1658,25 +1785,38 @@ function ExaminationDepthOfField() {
       : hint.closeup
         ? Math.max(0.015, hint.height * 0.5)
         : Math.max(0.12, hint.height * 0.52);
-    target.set(focus.x, focusY + centerOffset, focus.z);
+    center.set(focus.x, focusY + centerOffset, focus.z);
   };
 
   if (active) {
-    setFocusTarget(session.focus, resolveSpecimenFrameHint(authoredHint, null));
+    setFocusCenter(session.focus, resolveSpecimenFrameHint(authoredHint, null));
+    target.copy(center);
   }
 
-  useFrame(() => {
+  useFrame(state => {
     if (!active) return;
     const liveFocus = getSpecimenRuntimePoses(currentZoneId)?.get(session.actorId);
     const focus = liveFocus || session.focus;
     if (!focus) return;
     const renderedBounds = getSpecimenRuntimeBounds(currentZoneId)?.get(session.actorId);
     const hint = resolveSpecimenFrameHint(authoredHint, renderedBounds);
-    setFocusTarget(focus, hint);
+    setFocusCenter(focus, hint);
+    // The circle-of-confusion pass measures RADIAL view distance, so the sharp
+    // band is a shell centred on the focus point. Aiming it at the subject's
+    // axis therefore puts the surface the player actually looks at a full
+    // radius inside the near-blur field and lands the sharp shell on the
+    // ground behind the subject. Pull the focus point forward along the live
+    // camera ray instead — derived from the camera rather than from either
+    // camera branch's own framing math, so specimen orbits and the ambient
+    // dolly both stay in focus.
+    const subjectRadius = MathUtils.clamp(hint.radius || 0.6, 0.05, 2.5);
+    state.camera.getWorldPosition(cameraWorld);
+    const centerDistance = cameraWorld.distanceTo(center);
+    const focusDistance = Math.max(0.12, centerDistance - subjectRadius * NEAR_SURFACE_FOCUS_BIAS);
+    target.copy(cameraWorld).lerp(center, focusDistance / Math.max(1e-4, centerDistance));
     effectRef.current?.target?.copy(target);
     if (effectRef.current?.cocMaterial) {
-      const subjectRadius = renderedBounds?.radius || hint.radius || 0.6;
-      effectRef.current.cocMaterial.focusRange = MathUtils.clamp(subjectRadius * 0.58, 0.08, 1.05);
+      effectRef.current.cocMaterial.focusRange = subjectFocusRange(subjectRadius);
     }
   });
 
@@ -2710,13 +2850,15 @@ export default function ThreeDarwinGame({
     initialModeId ? INITIAL_LAUNCH_PROGRESS : 0,
   );
   const [startupContentPhase, setStartupContentPhase] = useState(0);
-  const startupContentPhaseRef = useRef(0);
   const [transitionContentPhase, setTransitionContentPhase] = useState(STARTUP_FULL_CONTENT_PHASE);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
   const [playerVisualReady, setPlayerVisualReady] = useState(false);
   const [launchOverlayDeparting, setLaunchOverlayDeparting] = useState(false);
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
+  const [historicalPrologueVisible, setHistoricalPrologueVisible] = useState(false);
+  const [historicalPrologueAccepted, setHistoricalPrologueAccepted] = useState(false);
+  const [historicalPrologueSkipRequested, setHistoricalPrologueSkipRequested] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
@@ -2761,18 +2903,31 @@ export default function ThreeDarwinGame({
   // Terrain, DPR, postprocessing, and water targets stay on their final
   // configuration from the first covered frame. Swapping these after reveal
   // can suspend the root scene and expose the canvas clear color.
-  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human'
-    && !skipOpeningIntro
-    && !resumedFromSave;
+  const launchPrologueEligible = !skipOpeningIntro
+    && !resumedFromSave
+    && ['darwin', 'finch', 'tortoise'].includes(playableModeId);
   // Aerial framing exposes much more water and terrain than ordinary play.
-  // Keep the fly-in at native DPR and skip its otherwise scene-doubling planar
-  // reflection pass; normal quality returns once the camera is stationary.
-  const openingRenderBudgetActive = openingIntroEligible && launchState !== 'playing';
+  // Skip the scene-doubling reflection pass through the opening, and hold
+  // shadow/reflection refreshes while a transition is covered. The settled
+  // gameplay frame restores the selected quality without remounting scenery.
+  const openingRenderBudgetActive = launchPrologueEligible && launchState !== 'playing';
+  const transitionRenderBudgetActive = Boolean(transition);
+  const transitionReflectionPaused = Boolean(
+    transition && transition.phase !== 'settling',
+  );
   const scenePerfSettings = useMemo(
-    () => openingRenderBudgetActive
-      ? { ...perfSettings, reflections: false }
-      : perfSettings,
-    [openingRenderBudgetActive, perfSettings],
+    () => ({
+      ...perfSettings,
+      ...(openingRenderBudgetActive ? { reflections: false } : null),
+      shadowUpdatesPaused: openingRenderBudgetActive || transitionRenderBudgetActive,
+      reflectionUpdatesPaused: openingRenderBudgetActive || transitionReflectionPaused,
+    }),
+    [
+      openingRenderBudgetActive,
+      perfSettings,
+      transitionReflectionPaused,
+      transitionRenderBudgetActive,
+    ],
   );
   const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
   const renderDpr = openingRenderBudgetActive ? OPENING_RENDER_DPR : configuredDpr;
@@ -2791,7 +2946,10 @@ export default function ThreeDarwinGame({
   );
   const transitionCanvasPaused = Boolean(
     transition
-    && transition.phase === 'chart'
+    && (
+      transition.phase === 'chart'
+      || (transition.phase === 'mounting' && transitionContentPhase < STARTUP_FULL_CONTENT_PHASE)
+    )
   );
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
@@ -2806,6 +2964,8 @@ export default function ThreeDarwinGame({
       playerVisualReady,
       playerAnimationBanksReady,
       startupContentPhase,
+      historicalPrologueVisible,
+      historicalPrologueAccepted,
       loadingContentTarget,
       displayedProgress,
       assets: {
@@ -2826,6 +2986,8 @@ export default function ThreeDarwinGame({
     assetProgress.progress,
     assetProgress.total,
     displayedProgress,
+    historicalPrologueAccepted,
+    historicalPrologueVisible,
     launchState,
     loadersStable,
     loadingContentTarget,
@@ -3103,8 +3265,7 @@ export default function ThreeDarwinGame({
       const now = performance.now();
       const elapsed = now - bootStartedAt.current;
       const rawProgress = Math.max(0, Math.min(100, assetProgress.progress || 0));
-      const knownAssetTotal = Number(assetProgress.total || 0);
-      const loaderBusy = assetProgress.active || (knownAssetTotal > 0 && rawProgress < 100);
+      const loaderBusy = loadingManagerIsBusy(assetProgress);
 
       if (loaderBusy) {
         loaderQuietSince.current = 0;
@@ -3115,18 +3276,36 @@ export default function ThreeDarwinGame({
         setLoadersStable(quietFor >= BOOT_LOADER_STABLE_MS && elapsed >= BOOT_MIN_LOADING_MS);
       }
 
-      const elapsedEase = Math.min(1, elapsed / 9000);
+      const progressTime = Math.min(1, elapsed / 2200);
+      const elapsedEase = progressTime * progressTime * (3 - 2 * progressTime);
       const assetTarget = loaderBusy
         ? 14 + rawProgress * 0.62
         : 88 + Math.min(8, ((loaderQuietSince.current ? now - loaderQuietSince.current : 0) / BOOT_LOADER_STABLE_MS) * 8);
-      const target = Math.min(sceneReady ? 100 : 98, Math.max(14 + elapsedEase * 28, assetTarget));
-      setDisplayedProgress(current => Math.max(current, current + (target - current) * 0.12));
+      // The splash owns a short, legible presentation beat even though the
+      // historical prologue continues covering real scene work. Its bar should
+      // therefore complete deliberately instead of freezing in the seventies
+      // when the prologue arrives.
+      const presentationTarget = INITIAL_LAUNCH_PROGRESS
+        + (100 - INITIAL_LAUNCH_PROGRESS) * elapsedEase;
+      const target = Math.min(100, Math.max(presentationTarget, assetTarget));
+      setDisplayedProgress(current => {
+        const smoothing = target >= 99.99 ? 0.38 : 0.18;
+        const next = Math.max(current, current + (target - current) * smoothing);
+        return target >= 99.99 && 100 - next < 0.12 ? 100 : next;
+      });
     };
 
     const handle = window.setInterval(tick, 80);
     tick();
     return () => window.clearInterval(handle);
-  }, [assetProgress.active, assetProgress.progress, assetProgress.total, gameStarted, sceneReady]);
+  }, [
+    assetProgress.active,
+    assetProgress.loaded,
+    assetProgress.progress,
+    assetProgress.total,
+    gameStarted,
+    sceneReady,
+  ]);
 
   useEffect(() => {
     if (
@@ -3175,6 +3354,9 @@ export default function ThreeDarwinGame({
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
+    setHistoricalPrologueVisible(false);
+    setHistoricalPrologueAccepted(false);
+    setHistoricalPrologueSkipRequested(false);
     setPlayerAnimationBanksReady(false);
     // A restart keeps the already-committed Darwin instance mounted; a fresh
     // launch must wait for its first real model-scene commit.
@@ -3233,6 +3415,9 @@ export default function ThreeDarwinGame({
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
+    setHistoricalPrologueVisible(false);
+    setHistoricalPrologueAccepted(false);
+    setHistoricalPrologueSkipRequested(false);
     setPlayerAnimationBanksReady(false);
     setPlayerVisualReady(false);
     setLaunchOverlayDeparting(false);
@@ -3241,23 +3426,32 @@ export default function ThreeDarwinGame({
   };
 
   const markSceneReady = useCallback(() => {
-    const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
     const params = new URLSearchParams(window.location.search);
     // A resumed session is not a first landing, so the arrival cinematic is
     // skipped along with the usual automation/query-flag skips.
     const skipIntro = skipOpeningIntro || resumedFromSave || skipOpeningIntroFromParams(params);
     setSceneReady(true);
     setDisplayedProgress(100);
-    if (mode.kind === 'animal' || skipIntro) {
+    if (skipIntro) {
       setOpeningIntroStartedAt(0);
       setLaunchState('playing');
     } else {
-      // The sequence begins only after the launch overlay is gone. Starting it
-      // beneath that fade would discard part of the composed camera shot.
+      // Hold on the composed gameplay camera while the mode-specific prologue
+      // appears over it. Accepting the prologue lifts the veil into play.
       setOpeningIntroStartedAt(0);
       setLaunchState('intro');
     }
   }, [resumedFromSave, skipOpeningIntro]);
+
+  const acceptHistoricalPrologue = useCallback(() => {
+    if (!sceneReady) return;
+    setHistoricalPrologueAccepted(true);
+  }, [sceneReady]);
+
+  const skipHistoricalPrologue = useCallback(() => {
+    setHistoricalPrologueSkipRequested(true);
+    if (sceneReady) setHistoricalPrologueAccepted(true);
+  }, [sceneReady]);
 
   useEffect(() => {
     if (!automationReadyMode || !gameStarted || sceneReady) return undefined;
@@ -3289,32 +3483,67 @@ export default function ThreeDarwinGame({
     startupContentPhase,
   ]);
 
-  // The scene is composed and the overlay is about to leave, so the network and
-  // the GLTF worker are idle for the whole hold/fade/cinematic window. Warm the
-  // assets the later content phases will mount so those mounts cost a
-  // scene-graph attach instead of a fetch and parse.
+  // The splash remains fully visible through a real 100% bar and a short
+  // completion hold. The prologue then becomes useful cover for the expensive
+  // tail of scene preparation without making the opening bar look abandoned.
   useEffect(() => {
-    if (!gameStarted || !sceneReady) return undefined;
-    // Read the zone imperatively: this is a one-shot startup warm-up, and a
-    // subscription here would re-render the whole shell on every zone change.
-    prefetchStartupContentAssets(useThreeGameStore.getState().currentZoneId);
-    return undefined;
-  }, [gameStarted, sceneReady]);
+    if (!gameStarted || !launchPrologueEligible || historicalPrologueVisible) return undefined;
+    if (displayedProgress < 100) return undefined;
+    const elapsed = performance.now() - (bootStartedAt.current || performance.now());
+    const timer = window.setTimeout(() => setHistoricalPrologueVisible(true),
+      Math.max(0, HISTORICAL_PROLOGUE_SPLASH_MIN_MS - elapsed)
+        + HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    displayedProgress,
+    gameStarted,
+    historicalPrologueVisible,
+    launchPrologueEligible,
+  ]);
 
   useEffect(() => {
-    if (!sceneReady || launchOverlayDismissed) return undefined;
+    if (!sceneReady || !historicalPrologueSkipRequested) return;
+    setHistoricalPrologueAccepted(true);
+  }, [historicalPrologueSkipRequested, sceneReady]);
+
+  useEffect(() => {
+    if (
+      !sceneReady
+      || launchOverlayDismissed
+      || (launchPrologueEligible && !historicalPrologueAccepted)
+    ) return undefined;
+    const completionHold = historicalPrologueAccepted
+      ? HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS
+      : LAUNCH_COMPLETION_HOLD_MS;
     const departHandle = window.setTimeout(() => {
       setLaunchOverlayDeparting(true);
-    }, LAUNCH_COMPLETION_HOLD_MS);
+    }, completionHold);
+    const exitDuration = historicalPrologueAccepted
+      ? HISTORICAL_PROLOGUE_EXIT_MS
+      : LAUNCH_OVERLAY_FADE_MS;
     const dismissHandle = window.setTimeout(() => {
-      if (openingIntroActive) setOpeningIntroStartedAt(performance.now());
+      if (openingIntroActive && historicalPrologueAccepted) {
+        // The historical page now lifts directly onto the composed gameplay
+        // camera. Keeping that view still makes the translucent reveal feel
+        // continuous and avoids following it with a redundant aerial fly-in.
+        setLaunchState('playing');
+      } else if (openingIntroActive) {
+        setOpeningIntroStartedAt(performance.now());
+      }
       setLaunchOverlayDismissed(true);
-    }, LAUNCH_COMPLETION_HOLD_MS + LAUNCH_OVERLAY_FADE_MS);
+    }, completionHold + exitDuration);
     return () => {
       window.clearTimeout(departHandle);
       window.clearTimeout(dismissHandle);
     };
-  }, [launchOverlayDismissed, openingIntroActive, sceneReady]);
+  }, [
+    historicalPrologueAccepted,
+    launchOverlayDismissed,
+    openingIntroActive,
+    launchPrologueEligible,
+    sceneReady,
+  ]);
 
   useEffect(() => {
     if (!gameStarted || launchState !== 'loading') return undefined;
@@ -3325,57 +3554,10 @@ export default function ThreeDarwinGame({
     return scheduleStagedContentPhases({
       steps: INTRO_LOADING_STEPS.filter(phase => phase <= loadingContentTarget),
       timings: INTRO_LOADING_PHASE_TIMINGS_MS,
+      idleTimeoutMs: 140,
       commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
     });
   }, [gameStarted, launchState, loadingContentTarget]);
-
-  // Content families four and five mount beneath the cinematic rather than on
-  // top of the player's first seconds of control. Their assets are already warm
-  // from the startup prefetch below, so each step is a scene-graph attach.
-  useEffect(() => {
-    if (!gameStarted || launchState !== 'intro' || !openingIntroStartedAt) return undefined;
-    const steps = CONTENT_MOUNT_STEPS.filter(
-      phase => phase > loadingContentTarget && phase <= INTRO_MOUNT_CONTENT_PHASE,
-    );
-    if (!steps.length) return undefined;
-    return scheduleStagedContentPhases({
-      steps,
-      timings: evenlySpacedTimings(
-        steps.length,
-        INTRO_MOUNT_WINDOW_MS.start,
-        INTRO_MOUNT_WINDOW_MS.end,
-      ),
-      // A saturated main thread never produces a real idle window, so a long
-      // deadline here is just latency added to every stage. The ladder has to
-      // finish inside the shot; a short deadline keeps it honest.
-      idleTimeoutMs: INTRO_MOUNT_IDLE_TIMEOUT_MS,
-      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
-    });
-  }, [gameStarted, launchState, loadingContentTarget, openingIntroStartedAt]);
-
-  useEffect(() => {
-    startupContentPhaseRef.current = startupContentPhase;
-  }, [startupContentPhase]);
-
-  useEffect(() => {
-    if (!gameStarted || !launchOverlayDismissed) return undefined;
-    if (launchState !== 'playing') return undefined;
-    // Normally only the NPC actors are still outstanding here. A skipped or
-    // resumed launch never ran the cinematic staging, so this also covers
-    // walking the whole remainder up from the loading target.
-    const startPhase = Math.max(loadingContentTarget, startupContentPhaseRef.current);
-    const steps = CONTENT_MOUNT_STEPS.filter(phase => phase > startPhase);
-    if (!steps.length) return undefined;
-    return scheduleStagedContentPhases({
-      steps,
-      timings: evenlySpacedTimings(
-        steps.length,
-        INTRO_REVEAL_FIRST_STEP_MS,
-        INTRO_REVEAL_FIRST_STEP_MS + INTRO_REVEAL_STEP_MS * (steps.length - 1),
-      ),
-      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
-    });
-  }, [gameStarted, launchOverlayDismissed, launchState, loadingContentTarget]);
 
   useEffect(() => {
     if (!runtimeAudioEnabled || launchState !== 'playing') return undefined;
@@ -3404,6 +3586,13 @@ export default function ThreeDarwinGame({
   return (
     <MultiplayerProvider session={multiplayerSession}>
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
+      <OpeningPerformanceProbe
+        enabled={DEV_TOOLS_ENABLED || perfProbe}
+        active={openingIntroActive && openingIntroStartedAt > 0}
+        sequenceId={openingIntroStartedAt}
+        loadStartedAt={bootStartedAt.current}
+        contentPhase={startupContentPhase}
+      />
       <TransitionPerformanceProbe
         enabled={DEV_TOOLS_ENABLED || perfProbe || e2eMode}
         transition={transition}
@@ -3549,7 +3738,7 @@ export default function ThreeDarwinGame({
           />
         )}
         <OpeningBlackFade
-          active={openingIntroActive}
+          active={openingIntroActive && !historicalPrologueVisible}
           sequenceId={openingIntroStartedAt}
         />
         <OpeningCinematicVeil
@@ -3601,10 +3790,16 @@ export default function ThreeDarwinGame({
           <LaunchOverlay
             mode={LAUNCH_MENU_STATES.has(launchState) ? launchState : 'loading'}
             departing={gameStarted && launchOverlayDeparting}
-            blackout={openingIntroEligible && (
-              (launchState === 'loading' && displayedProgress >= 60)
-              || sceneReady
-            )}
+            blackout={launchPrologueEligible && historicalPrologueVisible}
+            historicalPrologue={{
+              active: launchPrologueEligible && historicalPrologueVisible,
+              modeId: playableModeId,
+              sceneReady,
+              departing: gameStarted && launchOverlayDeparting,
+              skipRequested: historicalPrologueSkipRequested,
+              onBeginExploring: acceptHistoricalPrologue,
+              onSkip: skipHistoricalPrologue,
+            }}
             progress={displayedProgress}
             selectedModeId={initialModeId || playableModeId}
             onNewExpedition={openCharacterSelect}

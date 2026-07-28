@@ -43,7 +43,8 @@ export function ThreeScene({
       {outdoors && (
         <SkyController
           stars={settings.atmosphere !== false}
-          shadowQuality={settings.shadowQuality || 'high'}
+          shadowQuality={settings.shadowQuality || 'ultra'}
+          shadowUpdatesPaused={settings.shadowUpdatesPaused === true}
           solarEffects={{
             halo: settings.solarSunHalo !== false,
             sceneFlares: settings.solarSceneFlares !== false,
@@ -72,6 +73,7 @@ export function ThreeScene({
           <Water
             quality={settings.waterQuality || 'polished'}
             reflections={settings.reflections !== false}
+            reflectionUpdatesPaused={settings.reflectionUpdatesPaused === true}
           />
         )
       )}

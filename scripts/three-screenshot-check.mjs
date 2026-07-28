@@ -771,6 +771,13 @@ async function run() {
       }
     });
     await clickNewExpeditionFlow(page, errors);
+    if (PRESERVE_OPENING_INTRO && REQUESTED_PLAYABLE_MODE === 'darwin') {
+      await withFailureArtifacts(page, 'begin historical prologue', errors, async () => {
+        const beginButton = page.getByRole('button', { name: /^Begin exploring$/i });
+        await beginButton.waitFor({ state: 'visible', timeout: BOOT_TIMEOUT_MS });
+        await beginButton.click({ timeout: UI_STEP_TIMEOUT_MS });
+      });
+    }
     const boot = await waitForReadyCanvas(page, errors);
     if (REQUESTED_CAMERA_MODE) {
       await withFailureArtifacts(page, 'set requested camera mode', errors, async () => {

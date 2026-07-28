@@ -11,6 +11,7 @@ import {
   getSpecimenRuntimePoses,
   resolveSpecimenFrameHint,
 } from '../../world/specimenRuntime';
+import { examineOrbitActive } from '../../examine/examinables';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
@@ -28,21 +29,22 @@ function dampAngle(current, target, lambda, delta) {
   return THREE.MathUtils.damp(current, wrapped, lambda, delta);
 }
 
-function smoothStep01(value) {
+function smootherStep01(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 const OPENING_SHOT = Object.freeze({
-  // Aerial start sits ~20% tighter than the original establishing shot so the
-  // landing reads at legible scale from the first frame of the fly-in.
-  startHeight: 66,
-  startRadius: 38,
-  rotation: Math.PI * 0.68,
-  surveyForward: 7,
-  surveySide: -4,
-  aerialFov: 52,
-  motionDelay: 0.035,
+  // Start close enough to read the landing place, then follow a single long
+  // descending arc whose quintic ease gives both the reveal and shoulder
+  // handoff room to breathe.
+  startHeight: 62,
+  startRadius: 36,
+  rotation: Math.PI * 0.6,
+  surveyForward: 6.5,
+  surveySide: -3.5,
+  aerialFov: 51,
+  motionDelay: 0.055,
 });
 
 export function usePlayerCameraRig() {
@@ -185,7 +187,7 @@ export function usePlayerCameraRig() {
         return;
       }
       const examineSession = useThreeGameStore.getState().examineSession;
-      if (examineSession?.kind === 'specimen') {
+      if (examineOrbitActive(examineSession)) {
         if (event.button !== 0) return;
         draggingRef.current = true;
         panningRef.current = false;
@@ -234,7 +236,7 @@ export function usePlayerCameraRig() {
       updatePointerNdc(event);
       if (openingCameraActiveRef.current) return;
       const examineSession = useThreeGameStore.getState().examineSession;
-      if (examineSession?.kind === 'specimen') {
+      if (examineOrbitActive(examineSession)) {
         if (!draggingRef.current) return;
         const dx = event.clientX - lastPointerXRef.current;
         const dy = event.clientY - lastPointerYRef.current;
@@ -295,7 +297,7 @@ export function usePlayerCameraRig() {
       if (openingCameraActiveRef.current) return;
       const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
       const examineSession = useThreeGameStore.getState().examineSession;
-      if (examineSession?.kind === 'specimen') {
+      if (examineOrbitActive(examineSession)) {
         examineOrbitRef.current.zoom = THREE.MathUtils.clamp(
           examineOrbitRef.current.zoom + normalizedDelta * 0.1,
           0.72,
@@ -577,7 +579,7 @@ export function usePlayerCameraRig() {
       // stopped at a low intermediate orbit and used a second, late blend for
       // the shoulder handoff; compressing that distance into the final second
       // was the visible end lurch.
-      const pathT = smoothStep01(motionProgress);
+      const pathT = smootherStep01(motionProgress);
       const orbitAngle = THREE.MathUtils.lerp(
         finalAngle - OPENING_SHOT.rotation,
         finalAngle,
@@ -621,12 +623,15 @@ export function usePlayerCameraRig() {
     }
     const pivotY = cameraProfile?.pivotY ?? 1.22;
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, pivotY, 0)).add(panOffsetRef.current);
-    if (examineSession?.kind === 'specimen') {
+    if (examineOrbitActive(examineSession)) {
       // A live, subject-owned inspection orbit. Runtime pose data is kept out
       // of React so the camera can follow a moving/falling actor without a
       // stale one-time focus snapshot. The framing distance is derived from
       // both vertical and horizontal FOV, which keeps the whole specimen in
-      // view on narrow portrait screens as well as desktop.
+      // view on narrow portrait screens as well as desktop. Ambient field
+      // targets and items have no runtime pose or rendered bounds; they fall
+      // back to their session focus and authored frame hint and orbit the
+      // same way.
       const liveFocus = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(examineSession.actorId);
       const focus = liveFocus || examineSession.focus;
       const focusTerrainY = collisionAdapter.terrainHeight(focus.x, focus.z);

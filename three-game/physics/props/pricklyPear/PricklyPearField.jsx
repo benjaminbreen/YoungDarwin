@@ -9,7 +9,10 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
-import { BreakablePlantField } from '../breakablePlant/BreakablePlantField';
+import {
+  BreakablePlantField,
+  composePlantPartMatrix,
+} from '../breakablePlant/BreakablePlantField';
 import { getPricklyPearSites, PRICKLY_PEAR_SITES } from './pricklyPearSites';
 import {
   buildPricklyPear,
@@ -240,6 +243,36 @@ function renderPiece(piece) {
   );
 }
 
+function dormantVisualParts(piece) {
+  const materials = getPricklyPearMaterials();
+  if (piece.type === 'pad') {
+    const padTintIndex = Math.floor((piece.tone ?? 0) * PAD_TINTS.length) % PAD_TINTS.length;
+    return [{
+      geometry: getPadGeometry(piece.variant),
+      material: materials.pads[padTintIndex],
+      matrix: composePlantPartMatrix(piece, {
+        scale: [piece.width, piece.height, piece.width],
+      }),
+      castShadow: true,
+    }];
+  }
+  const flower = getFlowerGeometries();
+  return [
+    {
+      geometry: flower.petals,
+      material: materials.petal,
+      matrix: composePlantPartMatrix(piece, { scale: piece.scale }),
+      castShadow: true,
+    },
+    {
+      geometry: flower.center,
+      material: materials.center,
+      matrix: composePlantPartMatrix(piece, { scale: piece.scale }),
+      castShadow: true,
+    },
+  ];
+}
+
 const PRICKLY_PEAR_SPEC = {
   id: 'prickly-pear',
   sitesByZone: PRICKLY_PEAR_SITES,
@@ -247,6 +280,9 @@ const PRICKLY_PEAR_SPEC = {
   buildZonePieces,
   SiteDressing,
   renderPiece,
+  // Beyond interaction range, keep the authored plant silhouette in a handful
+  // of instanced draws. Tiny studs and buds return with the near-field bodies.
+  dormantVisualParts,
   strikeAbsorbMessage: piece => (piece.type === 'pad' && piece.hits > 2
     ? 'The hammer thuds into the woody basal pad. It shudders, sheds spines, and holds.'
     : 'The pad splits partway; another blow should part it from the plant.'),

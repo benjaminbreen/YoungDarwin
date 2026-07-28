@@ -199,37 +199,27 @@ const GLARE_ADAPT_OUT_LAMBDA = 2.2;
 
 const SHADOW_QUALITY = {
   low: {
-    mapSize: 1024,
+    mapSize: 2048,
     extentScale: 1.08,
     radiusBoost: 0,
-    anchorMinTexelSize: 0.055,
+    anchorMinTexelSize: 0.035,
     // 1/24 active read as visible ghosting behind a moving player; 30Hz is
     // the floor where the shadow still tracks motion acceptably.
     activeRefreshInterval: 1 / 30,
     idleRefreshInterval: 1 / 15,
   },
   standard: {
-    mapSize: 2048,
+    mapSize: 4096,
     extentScale: 1,
     radiusBoost: 0,
-    anchorMinTexelSize: 0.035,
+    anchorMinTexelSize: 0.012,
     activeRefreshInterval: 1 / 40,
     idleRefreshInterval: 1 / 20,
   },
   high: {
-    mapSize: 4096,
-    // Keep the player and nearby tree/rock casters in range while spending
-    // more texels on the close-up character instead of the whole local zone.
-    extentScale: 0.82,
-    radiusBoost: 0.28,
-    anchorMinTexelSize: 0.012,
-    activeRefreshInterval: 1 / 60,
-    idleRefreshInterval: 1 / 30,
-  },
-  // "Very high" in the perf panel. An 8k map is a real memory/bandwidth spend
-  // (256MB depth target), so it stays opt-in; refresh every frame so shadow
-  // motion is never the limiting factor at this tier.
-  ultra: {
+    // This is the former "Very high" tier. Keep the player and nearby
+    // tree/rock casters in range while spending most texels on the close-up
+    // character instead of the whole local zone.
     mapSize: 8192,
     extentScale: 0.78,
     radiusBoost: 0.34,
@@ -237,8 +227,19 @@ const SHADOW_QUALITY = {
     activeRefreshInterval: 0,
     idleRefreshInterval: 1 / 60,
   },
+  // "Very high" in the perf panel. 12k is visibly denser than the former 8k
+  // ceiling without jumping all the way to a roughly 1GB 16k depth target.
+  // resolveShadowQuality still clamps this to the GPU's texture-size limit.
+  ultra: {
+    mapSize: 12288,
+    extentScale: 0.7,
+    radiusBoost: 0.38,
+    anchorMinTexelSize: 0.0035,
+    activeRefreshInterval: 0,
+    idleRefreshInterval: 1 / 60,
+  },
 };
-const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.high;
+const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.ultra;
 
 function resolveShadowQuality(mode, gl) {
   const requested = SHADOW_QUALITY[String(mode || '').toLowerCase()] || DEFAULT_SHADOW_QUALITY;
@@ -1714,7 +1715,15 @@ function computeDarwinShadowCoverage(lightDirection, daylight, golden) {
   };
 }
 
-export function SkyController({ stars = true, tuning = null, solarEffects = null, shadowQuality = 'high', lighting = true, celestialBodies = true }) {
+export function SkyController({
+  stars = true,
+  tuning = null,
+  solarEffects = null,
+  shadowQuality = 'ultra',
+  shadowUpdatesPaused = false,
+  lighting = true,
+  celestialBodies = true,
+}) {
   const { scene, gl, camera } = useThree();
   const shadowQualityConfig = useMemo(() => resolveShadowQuality(shadowQuality, gl), [shadowQuality, gl]);
   // Defaults tuned for NeutralToneMapping. Drei/Three Sky is HDR, so it still
@@ -2504,7 +2513,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved || playerShadowAnimationActive)
       ? shadowQualityConfig.activeRefreshInterval
       : shadowQualityConfig.idleRefreshInterval;
-    if (shadowProjectionChanged || shadowClock.current >= shadowRefreshInterval) {
+    if (
+      !shadowUpdatesPaused
+      && (shadowProjectionChanged || shadowClock.current >= shadowRefreshInterval)
+    ) {
       shadowClock.current = 0;
       gl.shadowMap.needsUpdate = true;
     }
@@ -2519,11 +2531,11 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         mist: Number(weatherEnv.mistAmount.toFixed(3)),
         rain: Number(weatherEnv.rainIntensity.toFixed(3)),
         underwater: Number(underwaterAmount.toFixed(3)),
-        shadowQuality: shadowQualityConfig.mapSize >= 8192
+        shadowQuality: shadowQualityConfig.mapSize >= 12288
           ? 'ultra'
-          : shadowQualityConfig.mapSize >= 4096
+          : shadowQualityConfig.mapSize >= 8192
             ? 'high'
-            : shadowQualityConfig.mapSize >= 2048 ? 'standard' : 'low',
+            : shadowQualityConfig.mapSize >= 4096 ? 'standard' : 'low',
         shadowMapSize: shadowQualityConfig.mapSize,
         keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
         hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),

@@ -13,18 +13,18 @@ import {
 // same visual sequence at a brisker tempo. The commit timer is only a fallback;
 // the normal path commits from the cover's opacity transitionend event.
 const DEPARTURE_CRANE_MS = 900;
-const BLACK_FADE_IN_MS = 300;
-const ISLAND_CHART_HOLD_MS = 1000;
-const ISLAND_MAP_CHART_HOLD_MS = 900;
+const BLACK_FADE_IN_MS = 320;
+const ISLAND_CHART_HOLD_MS = 1100;
+const ISLAND_MAP_CHART_HOLD_MS = 1000;
 const THRESHOLD_COMMIT_MS = 250;
 const COVER_CONFIRM_GRACE_MS = 120;
-const CHART_FADE_IN_MS = 320;
-const CHART_FADE_OUT_MS = 280;
-const WORLD_FADE_IN_MS = 420;
-const CAMERA_SETTLE_MS = 650;
-const CHART_ROUTE_START_MS = 80;
-const CHART_CAMERA_MOVE_MS = 850;
-const CHART_ROUTE_MOVE_MS = 780;
+const CHART_FADE_IN_MS = 340;
+const CHART_FADE_OUT_MS = 300;
+const WORLD_FADE_IN_MS = 520;
+const CAMERA_SETTLE_MS = 700;
+const CHART_ROUTE_START_MS = 100;
+const CHART_CAMERA_MOVE_MS = 900;
+const CHART_ROUTE_MOVE_MS = 840;
 const MAP_LAYER_WIDTH_PERCENT = 116;
 
 function clamp(value, min, max) {
@@ -480,9 +480,6 @@ export function TravelInterstitial() {
     preparedTransitionIdRef.current = transitionId;
     setZoneTransitionPhase('chart', transitionId);
     setChartVisible(true);
-    const commitFrame = window.requestAnimationFrame(() => {
-      commitZoneTransition(transitionId);
-    });
     const holdTimer = window.setTimeout(
       () => setChartBeatComplete(true),
       reducedMotion
@@ -492,17 +489,36 @@ export function TravelInterstitial() {
           : ISLAND_CHART_HOLD_MS,
     );
     return () => {
-      window.cancelAnimationFrame(commitFrame);
       window.clearTimeout(holdTimer);
     };
   }, [
-    commitZoneTransition,
     coverConfirmed,
     reducedMotion,
     setZoneTransitionPhase,
     transitionId,
     transitionMode,
     transitionSource,
+  ]);
+
+  // Let the chart pan and route drawing finish against the already-settled
+  // source scene. Destination teardown/mounting starts only once the chart has
+  // reached its final, static composition, so main-thread work cannot corrupt
+  // the visible cartographic motion.
+  useEffect(() => {
+    if (!transitionId
+      || transitionMode === 'threshold'
+      || transitionPhase !== 'chart'
+      || !chartBeatComplete) return undefined;
+    const commitFrame = window.requestAnimationFrame(() => {
+      commitZoneTransition(transitionId);
+    });
+    return () => window.cancelAnimationFrame(commitFrame);
+  }, [
+    chartBeatComplete,
+    commitZoneTransition,
+    transitionId,
+    transitionMode,
+    transitionPhase,
   ]);
 
   useEffect(() => {

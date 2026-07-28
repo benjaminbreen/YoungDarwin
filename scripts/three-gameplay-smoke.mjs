@@ -811,6 +811,18 @@ async function launchMode(page, errors, modeName, { waitForSettledContent = fals
   await withFailureArtifacts(page, `choose ${modeName} mode`, errors, async () => {
     await page.getByRole('button', { name: new RegExp(`^${modeName}\\b`, 'i') }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
+  const introExplicitlyEnabled = new URL(page.url()).searchParams.get('skipIntro') === '0';
+  if (modeName === 'Darwin' && introExplicitlyEnabled) {
+    await withFailureArtifacts(page, 'begin Darwin historical prologue', errors, async () => {
+      await page.locator('[data-testid="three-historical-prologue"]').waitFor({
+        state: 'visible',
+        timeout: GAMEPLAY_TIMEOUT_MS,
+      });
+      const beginButton = page.getByRole('button', { name: /^Begin exploring$/i });
+      await beginButton.waitFor({ state: 'visible', timeout: GAMEPLAY_TIMEOUT_MS });
+      await beginButton.click({ timeout: UI_STEP_TIMEOUT_MS });
+    });
+  }
   return withFailureArtifacts(page, `wait for ${modeName} gameplay`, errors, async () => {
     await page.waitForSelector('canvas', { state: 'attached', timeout: GAMEPLAY_TIMEOUT_MS });
     await page.waitForFunction(

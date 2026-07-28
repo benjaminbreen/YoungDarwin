@@ -2335,6 +2335,7 @@ function WaterSurface({
   currentZoneId,
   quality = 'polished',
   reflections = true,
+  reflectionUpdatesPaused = false,
   openOceanOnly = false,
   textures,
 }) {
@@ -2780,7 +2781,7 @@ function WaterSurface({
     // mirror is a garnish on top of the refracted body now. Refresh it at the
     // current moving-camera cadence, but do not keep re-rendering it while the
     // camera and lighting are effectively unchanged.
-    if (reflections && waterMesh) {
+    if (reflections && !reflectionUpdatesPaused && waterMesh) {
       reflectionFrame.current += 1;
       const rs = reflectionState.current;
       rs.framesSinceUpdate += 1;

@@ -26,7 +26,14 @@
 //   absorbEducationalNote — note attached to that narrator beat.
 //   tuning         — optional overrides of DEFAULT_PLANT_TUNING.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { CuboidCollider, interactionGroups, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -53,6 +60,116 @@ import {
 // asking Rapier to solve those contacts the instant a subtree detaches makes
 // the solver separate them like an explosion.
 const BREAKABLE_PIECE_COLLISION_GROUPS = interactionGroups(1, 0);
+const PLANT_INTERACTION_ACTIVATE_RADIUS = 30;
+const PLANT_INTERACTION_DEACTIVATE_RADIUS = 38;
+const PLANT_INTERACTION_REFRESH_SECONDS = 0.24;
+const HIDDEN_INSTANCE_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
+
+function vector3FromScale(scale = 1) {
+  return Array.isArray(scale)
+    ? new THREE.Vector3(scale[0], scale[1], scale[2])
+    : new THREE.Vector3(scale, scale, scale);
+}
+
+// Plant model modules describe their ordinary near-field meshes with local
+// transforms. The dormant renderer uses the same geometry/material sources,
+// composing those transforms with the authored piece pose so the far LOD is
+// visually identical at silhouette distance.
+export function composePlantPartMatrix(piece, {
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = 1,
+} = {}) {
+  const world = new THREE.Matrix4().compose(
+    new THREE.Vector3(...piece.spawn),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...piece.rotation)),
+    new THREE.Vector3(1, 1, 1),
+  );
+  const local = new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+    vector3FromScale(scale),
+  );
+  return world.multiply(local);
+}
+
+function DormantPlantBatch({ batch, activeSiteIds }) {
+  const meshRef = useRef(null);
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    for (let index = 0; index < batch.parts.length; index += 1) {
+      const part = batch.parts[index];
+      mesh.setMatrixAt(
+        index,
+        activeSiteIds.has(part.siteId) ? HIDDEN_INSTANCE_MATRIX : part.matrix,
+      );
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [activeSiteIds, batch]);
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[batch.geometry, batch.material, batch.parts.length]}
+      castShadow={batch.castShadow}
+      receiveShadow={batch.receiveShadow}
+      frustumCulled={false}
+    />
+  );
+}
+
+function DormantPlantField({ spec, pieces, activeSiteIds }) {
+  const batches = useMemo(() => {
+    if (typeof spec.dormantVisualParts !== 'function') return [];
+    const grouped = new Map();
+    for (const piece of pieces) {
+      for (const part of spec.dormantVisualParts(piece) || []) {
+        if (!part?.geometry || !part?.material || !part?.matrix) continue;
+        const castShadow = part.castShadow === true;
+        const receiveShadow = part.receiveShadow === true;
+        const key = [
+          part.geometry.uuid,
+          part.material.uuid,
+          castShadow ? 1 : 0,
+          receiveShadow ? 1 : 0,
+        ].join(':');
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            key,
+            geometry: part.geometry,
+            material: part.material,
+            castShadow,
+            receiveShadow,
+            parts: [],
+          });
+        }
+        grouped.get(key).parts.push({
+          matrix: part.matrix,
+          siteId: piece.siteId,
+        });
+      }
+    }
+    return [...grouped.values()];
+  }, [pieces, spec]);
+
+  if (!batches.length) return null;
+  return (
+    <group userData={{
+      renderSource: `${spec.id}:dormant-lod`,
+      renderLabel: `${spec.id} dormant instanced LOD`,
+      renderKind: 'instanced-breakable-lod',
+      renderPath: null,
+    }}>
+      {batches.map(batch => (
+        <DormantPlantBatch
+          key={batch.key}
+          batch={batch}
+          activeSiteIds={activeSiteIds}
+        />
+      ))}
+    </group>
+  );
+}
 
 export const DEFAULT_PLANT_TUNING = {
   strikeRange: 2.7,
@@ -561,6 +678,18 @@ export function BreakablePlantField({ spec }) {
     () => spec.buildZonePieces(currentZoneId, sites),
     [currentZoneId, sites, spec],
   );
+  const usesDormantPlantLod = typeof spec.dormantVisualParts === 'function';
+  const [activeSiteIds, setActiveSiteIds] = useState(() => {
+    if (!usesDormantPlantLod) return new Set(sites.map(site => site.id));
+    const player = getRuntimePlayerPose()?.position;
+    if (!player) return new Set();
+    return new Set(
+      sites
+        .filter(site => Math.hypot(player.x - site.x, player.z - site.z) <= PLANT_INTERACTION_ACTIVATE_RADIUS)
+        .map(site => site.id),
+    );
+  });
+  const interactionRefreshRef = useRef(0);
   const pieceSpatialIndex = useMemo(
     () => createPlantPieceSpatialIndex(pieces),
     [pieces],
@@ -688,7 +817,28 @@ export function BreakablePlantField({ spec }) {
       }
     }
     runtime.bump();
-  }, [currentZoneId, pieces, piecesByKey, runtime, sitePivots]);
+    interactionRefreshRef.current = 0;
+    if (!usesDormantPlantLod) {
+      setActiveSiteIds(new Set(sites.map(site => site.id)));
+      return;
+    }
+    const player = getRuntimePlayerPose()?.position;
+    setActiveSiteIds(new Set(
+      player
+        ? sites
+          .filter(site => Math.hypot(player.x - site.x, player.z - site.z) <= PLANT_INTERACTION_ACTIVATE_RADIUS)
+          .map(site => site.id)
+        : [],
+    ));
+  }, [
+    currentZoneId,
+    pieces,
+    piecesByKey,
+    runtime,
+    sitePivots,
+    sites,
+    usesDormantPlantLod,
+  ]);
 
   const registerBody = useCallback((key, ref) => {
     if (ref) runtime.bodies.set(key, ref);
@@ -947,6 +1097,39 @@ export function BreakablePlantField({ spec }) {
     // primary controller publishes intended velocity before collision so a
     // sustained push does not disappear when the fixed collider stops him.
     const playerPos = getRuntimePlayerPose()?.position;
+    if (usesDormantPlantLod && playerPos) {
+      interactionRefreshRef.current -= delta;
+      if (interactionRefreshRef.current <= 0) {
+        interactionRefreshRef.current = PLANT_INTERACTION_REFRESH_SECONDS;
+        const collectedKeys = new Set(sampledRockIds || []);
+        const changedSiteIds = new Set();
+        for (const piece of pieces) {
+          if (
+            runtime.released.has(piece.key)
+            || runtime.culled.has(piece.key)
+            || runtime.damage.has(piece.key)
+            || collectedKeys.has(piece.key)
+          ) {
+            changedSiteIds.add(piece.siteId);
+          }
+        }
+        setActiveSiteIds(previous => {
+          const next = new Set(changedSiteIds);
+          for (const site of sites) {
+            const distance = Math.hypot(playerPos.x - site.x, playerPos.z - site.z);
+            const radius = previous.has(site.id)
+              ? PLANT_INTERACTION_DEACTIVATE_RADIUS
+              : PLANT_INTERACTION_ACTIVATE_RADIUS;
+            if (distance <= radius) next.add(site.id);
+          }
+          if (
+            next.size === previous.size
+            && [...next].every(siteId => previous.has(siteId))
+          ) return previous;
+          return next;
+        });
+      }
+    }
     if (playerPos && examinableActorId && sites.length) {
       let nearestSite = sites[0];
       let nearestDistance = Infinity;
@@ -1183,6 +1366,9 @@ export function BreakablePlantField({ spec }) {
 
   const collected = new Set(sampledRockIds || []);
   const SiteDressing = spec.SiteDressing;
+  const visiblePieces = pieces.filter(
+    piece => !collected.has(piece.key) && !runtime.culled.has(piece.key),
+  );
 
   return (
     <group userData={{
@@ -1194,6 +1380,13 @@ export function BreakablePlantField({ spec }) {
       {sites.map(site => (
         <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
       ))}
+      {usesDormantPlantLod && (
+        <DormantPlantField
+          spec={spec}
+          pieces={visiblePieces}
+          activeSiteIds={activeSiteIds}
+        />
+      )}
       {spec.highlight && examinableSpecimen && sites.map(site => {
         const pivot = sitePivots.get(site.id);
         return (
@@ -1215,8 +1408,8 @@ export function BreakablePlantField({ spec }) {
           </group>
         );
       })}
-      {pieces
-        .filter(piece => !collected.has(piece.key) && !runtime.culled.has(piece.key))
+      {visiblePieces
+        .filter(piece => !usesDormantPlantLod || activeSiteIds.has(piece.siteId))
         .map(piece => (
           <BreakablePlantPiece
             key={piece.key}

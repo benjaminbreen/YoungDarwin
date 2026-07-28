@@ -7,6 +7,46 @@ import { QUALITY_CHOICES } from '../qualityPreference';
 
 const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
 export const INITIAL_LAUNCH_PROGRESS = 8;
+const PROLOGUE_REVEAL_MS = 7900;
+const ANIMAL_PROLOGUE_REVEAL_MS = 4400;
+const PROLOGUE_AUTO_BEGIN_MS = 15000;
+const PROLOGUE_BLOCK_DELAYS_MS = Object.freeze({
+  header: 1050,
+  introduction: 2200,
+  quotation: 3350,
+  // The quotation gets a full breath after it settles. Without this pause the
+  // explanatory copy reads as a continuation of Darwin's sentence rather than
+  // a return to the present-day framing.
+  reflection: 5250,
+  invitation: 6600,
+});
+const ANIMAL_PROLOGUE_LINE_DELAYS_MS = Object.freeze([1250, 1850, 2450, 3050]);
+const ANIMAL_PROLOGUES = Object.freeze({
+  finch: {
+    eyebrow: 'Floreana · Galápagos Archipelago',
+    title: 'A Finch',
+    lines: [
+      'You are a finch.',
+      'You have always been a finch.',
+      'Your parents were finches, as were their parents.',
+      'Today you will continue to be a finch.',
+    ],
+    action: 'Be a finch.',
+    waiting: 'Preparing the air…',
+  },
+  tortoise: {
+    eyebrow: 'Floreana · Galápagos Archipelago',
+    title: 'A Tortoise',
+    lines: [
+      'You are a tortoise.',
+      'Your ancestors were tortoises long before anyone thought to take notes.',
+      'The island is warm. The vegetation is edible.',
+      'There is no need to hurry.',
+    ],
+    action: 'Be a tortoise.',
+    waiting: 'Preparing the highlands…',
+  },
+});
 
 function BrassRule({ className = '' }) {
   return (
@@ -133,69 +173,10 @@ function LoadingPhaseLine({ children }) {
 
 function ProgressBar({ value }) {
   const numericValue = Number(value);
-  const target = Number.isFinite(numericValue)
+  const displayed = Number.isFinite(numericValue)
     ? Math.max(0, Math.min(100, numericValue))
     : 0;
-  const displayedRef = useRef(target);
-  const [displayed, setDisplayed] = useState(target);
-
-  useEffect(() => {
-    if (
-      !Number.isFinite(displayedRef.current)
-      || displayedRef.current < 0
-      || displayedRef.current > 100
-    ) {
-      displayedRef.current = target;
-      setDisplayed(target);
-      return undefined;
-    }
-    if (target <= displayedRef.current) return undefined;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      displayedRef.current = target;
-      setDisplayed(target);
-      return undefined;
-    }
-
-    let frameHandle = null;
-    let previousFrameTime = null;
-    const animate = now => {
-      // Only compare requestAnimationFrame timestamps with each other. Some
-      // browsers do not expose performance.now() on precisely the same clock,
-      // which can otherwise make the first elapsed value deeply negative.
-      const elapsed = previousFrameTime == null
-        ? 1000 / 60
-        : Math.max(0, Math.min(64, now - previousFrameTime));
-      previousFrameTime = now;
-      const current = displayedRef.current;
-      const remaining = target - current;
-
-      if (remaining <= 0.04) {
-        displayedRef.current = target;
-        setDisplayed(target);
-        return;
-      }
-
-      // A short exponential settle removes loader-event stepping while still
-      // letting real progress changes read immediately.
-      const candidate = current + remaining * (1 - Math.exp(-elapsed / 220));
-      const next = Number.isFinite(candidate)
-        ? Math.max(current, Math.min(target, candidate))
-        : target;
-      displayedRef.current = next;
-      setDisplayed(next);
-      frameHandle = window.requestAnimationFrame(animate);
-    };
-
-    frameHandle = window.requestAnimationFrame(animate);
-    return () => {
-      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
-    };
-  }, [target]);
-
-  const safeDisplayed = Number.isFinite(displayed)
-    ? Math.max(0, Math.min(100, displayed))
-    : target;
-  const rounded = Math.round(safeDisplayed);
+  const rounded = Math.round(displayed);
   return (
     <div className="mt-5">
       <div className="mb-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded">
@@ -210,12 +191,271 @@ function ProgressBar({ value }) {
         className="relative h-2 overflow-hidden rounded-sm border border-expedition-brass/60 bg-black/45 shadow-[inset_0_1px_6px_rgba(0,0,0,0.65)]"
       >
         <div
-          className="absolute inset-0 origin-left bg-gradient-to-r from-expedition-brass/90 via-expedition-gold to-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.24)] will-change-transform"
-          style={{ transform: `scaleX(${safeDisplayed / 100})` }}
+          className="absolute inset-0 origin-left bg-gradient-to-r from-expedition-brass/90 via-expedition-gold to-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.24)] transition-transform duration-200 ease-linear will-change-transform motion-reduce:transition-none"
+          style={{ transform: `scaleX(${displayed / 100})` }}
         >
           <span className="absolute inset-y-0 right-0 w-px bg-expedition-parchment/75 shadow-[0_0_6px_rgba(244,231,198,0.55)]" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function usePrologueSequence({
+  revealMs,
+  sceneReady,
+  departing,
+  onBeginExploring,
+  onSkip,
+}) {
+  const [narrativeComplete, setNarrativeComplete] = useState(false);
+  const [mountedAt] = useState(() => performance.now());
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const timer = window.setTimeout(
+      () => setNarrativeComplete(true),
+      reducedMotion ? 80 : revealMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [revealMs]);
+
+  useEffect(() => {
+    if (departing) return undefined;
+    const remaining = Math.max(0, mountedAt + PROLOGUE_AUTO_BEGIN_MS - performance.now());
+    const timer = window.setTimeout(() => {
+      if (sceneReady) onBeginExploring();
+      else onSkip();
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [departing, mountedAt, onBeginExploring, onSkip, sceneReady]);
+
+  return narrativeComplete;
+}
+
+function AnimalPrologue({
+  modeId,
+  sceneReady,
+  skipRequested,
+  departing,
+  onBeginExploring,
+  onSkip,
+}) {
+  const content = ANIMAL_PROLOGUES[modeId];
+  const narrativeComplete = usePrologueSequence({
+    revealMs: ANIMAL_PROLOGUE_REVEAL_MS,
+    sceneReady,
+    departing,
+    onBeginExploring,
+    onSkip,
+  });
+  const lineStyle = delay => ({ '--prologue-delay': `${delay}ms` });
+  const canBegin = sceneReady && narrativeComplete && !skipRequested;
+
+  return (
+    <div
+      data-testid="three-animal-prologue"
+      data-mode={modeId}
+      data-departing={departing ? 'true' : 'false'}
+      className="launch-historical-prologue absolute inset-0 z-30 overflow-x-hidden overflow-y-auto text-left"
+    >
+      <div
+        aria-hidden="true"
+        className="launch-prologue-veil pointer-events-none fixed inset-0"
+      />
+
+      <button
+        type="button"
+        onClick={onSkip}
+        disabled={skipRequested}
+        className="launch-prologue-block launch-prologue-foreground fixed right-7 top-6 z-20 rounded-sm border border-transparent px-3 py-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded/80 transition hover:border-expedition-brass/35 hover:text-expedition-parchment focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright disabled:cursor-default disabled:opacity-45 sm:right-10 sm:top-9"
+        style={lineStyle(500)}
+      >
+        {skipRequested ? 'Preparing the island…' : 'Skip introduction'}
+      </button>
+
+      <article
+        data-allow-text-selection="true"
+        className={`launch-prologue-foreground relative z-10 mx-auto flex min-h-full w-[min(64rem,calc(100vw-3rem))] flex-col items-center justify-center py-[clamp(5rem,9vh,7rem)] text-center transition-opacity duration-700 ${
+          skipRequested ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
+        <header className="launch-prologue-block" style={lineStyle(500)}>
+          <p className="font-expedition text-[10px] font-semibold uppercase tracking-[0.3em] text-expedition-gold/80 sm:text-[12px]">
+            {content.eyebrow}
+          </p>
+          <div className="mt-3 font-handwriting text-[clamp(1.8rem,4.6vw,3.35rem)] leading-relaxed text-expedition-goldbright/90">
+            {content.title}
+          </div>
+        </header>
+
+        <div className="mt-[clamp(2rem,5vh,3.5rem)] w-full">
+          {content.lines.map((line, index) => (
+            <p
+              key={line}
+              className="launch-prologue-block font-expedition text-[clamp(1.2rem,2.4vw,1.75rem)] leading-[1.62] tracking-[0.012em] text-[#eee2c8]"
+              style={lineStyle(ANIMAL_PROLOGUE_LINE_DELAYS_MS[index])}
+            >
+              {line}
+            </p>
+          ))}
+        </div>
+
+        <footer className="mt-[clamp(2rem,5vh,3.6rem)] flex min-h-[4.5rem] justify-center">
+          {canBegin ? (
+            <button
+              type="button"
+              onClick={onBeginExploring}
+              className="launch-prologue-action group inline-flex min-h-12 items-center gap-4 rounded-sm border border-expedition-gold/70 bg-expedition-gold/8 px-6 py-3 font-expedition text-[clamp(1rem,2vw,1.2rem)] tracking-[0.065em] text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.2),0_0_24px_rgba(201,163,95,0.08)] transition hover:border-expedition-goldbright hover:bg-expedition-gold/14 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+            >
+              <span>{content.action}</span>
+              <span aria-hidden="true" className="text-expedition-gold transition-transform group-hover:translate-x-1">→</span>
+            </button>
+          ) : narrativeComplete && !skipRequested ? (
+            <p
+              aria-live="polite"
+              className="launch-prologue-wait font-expedition text-[11px] uppercase tracking-[0.22em] text-expedition-faded/70"
+            >
+              {content.waiting}
+            </p>
+          ) : null}
+        </footer>
+      </article>
+    </div>
+  );
+}
+
+function HistoricalPrologue({
+  sceneReady,
+  skipRequested,
+  departing,
+  onBeginExploring,
+  onSkip,
+}) {
+  const narrativeComplete = usePrologueSequence({
+    revealMs: PROLOGUE_REVEAL_MS,
+    sceneReady,
+    departing,
+    onBeginExploring,
+    onSkip,
+  });
+  const lineStyle = delay => ({ '--prologue-delay': `${delay}ms` });
+  const canBegin = sceneReady && narrativeComplete && !skipRequested;
+
+  return (
+    <div
+      data-testid="three-historical-prologue"
+      data-departing={departing ? 'true' : 'false'}
+      className="launch-historical-prologue absolute inset-0 z-30 overflow-x-hidden overflow-y-auto text-left"
+    >
+      <div
+        aria-hidden="true"
+        className="launch-prologue-veil pointer-events-none fixed inset-0"
+      />
+
+      <button
+        type="button"
+        onClick={onSkip}
+        disabled={skipRequested}
+        className="launch-prologue-block launch-prologue-foreground fixed right-7 top-6 z-20 rounded-sm border border-transparent px-3 py-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded/80 transition hover:border-expedition-brass/35 hover:text-expedition-parchment focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright disabled:cursor-default disabled:opacity-45 sm:right-10 sm:top-9"
+        style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.header)}
+      >
+        {skipRequested ? 'Preparing the island…' : 'Skip introduction'}
+      </button>
+
+      <article
+        data-allow-text-selection="true"
+        className={`launch-prologue-foreground relative z-10 mx-auto flex min-h-full w-[min(86rem,calc(100vw-3rem))] flex-col items-center justify-center py-[clamp(5rem,9vh,7rem)] text-center transition-opacity duration-700 ${
+          skipRequested ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
+        <header
+          className="launch-prologue-block"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.header)}
+        >
+          <p className="font-expedition text-[10px] font-semibold uppercase tracking-[0.3em] text-expedition-gold/80 sm:text-[12px]">
+            24 September 1835
+          </p>
+          <div className="mt-3 font-handwriting text-[clamp(1.25rem,3vw,2rem)] leading-relaxed text-expedition-goldbright/90">
+            Charles Island · Galápagos Archipelago
+          </div>
+        </header>
+
+        <div
+          className="launch-prologue-block mt-[clamp(1.5rem,4vh,3rem)] w-full max-w-[64rem] text-left"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.introduction)}
+        >
+          <p className="font-expedition text-[clamp(1rem,2.1vw,1.35rem)] leading-[1.62] tracking-[0.012em] text-expedition-parchment/88">
+            On September 24, 1835, the real Charles Darwin—then a 26-year-old
+            naturalist aboard HMS <em>Beagle</em>—reached Isla Floreana
+            (Charles Island) in the Galapagos Archipelago. He wrote the
+            following entry in his diary:
+          </p>
+        </div>
+
+        <div
+          className="launch-prologue-block my-[clamp(1.6rem,4.5vh,3.2rem)] w-full max-w-[64rem] text-center"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.quotation)}
+        >
+          <span className="mx-auto mb-[clamp(1.1rem,2.6vh,1.8rem)] block h-px w-24 bg-gradient-to-r from-transparent via-expedition-gold/65 to-transparent" />
+          <blockquote className="font-expedition text-[clamp(1.08rem,1.75vw,1.58rem)] italic leading-[1.58] tracking-[0.006em] text-[#eee2c8]">
+            <span className="block">
+              “The dry Volcanic soil affording a congenial habitation only to the Lizard tribe.
+            </span>
+            <span className="block">
+              The wood gradually becomes greener during the ascent.
+            </span>
+            <span className="block">
+              Passing round the side of the highest hill,
+            </span>
+            <span className="block">
+              the body is cooled by the fine Southerly trade wind…”
+            </span>
+          </blockquote>
+          <span className="mx-auto mt-[clamp(1.1rem,2.6vh,1.8rem)] block h-px w-24 bg-gradient-to-r from-transparent via-expedition-gold/65 to-transparent" />
+        </div>
+
+        <div
+          className="launch-prologue-block w-full max-w-[64rem] text-left"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.reflection)}
+        >
+          <p className="font-expedition text-[clamp(0.98rem,1.9vw,1.25rem)] leading-[1.58] text-expedition-parchment/78">
+            Darwin&apos;s notes of walking amid finches, tortoises, and other
+            species known only in the Galápagos became foundational to his later
+            work on natural selection.
+          </p>
+        </div>
+
+        <div
+          className="launch-prologue-block mt-3 w-full max-w-[64rem] text-left"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.invitation)}
+        >
+          <p className="font-expedition text-[clamp(1.05rem,2vw,1.34rem)] italic leading-[1.55] text-expedition-goldbright/90">
+            This game lets you re-experience that quietly momentous encounter
+            with the island—and perhaps do things differently.
+          </p>
+        </div>
+
+        <footer className="mt-[clamp(1.7rem,4.5vh,3.4rem)] flex min-h-[4.5rem] justify-center">
+          {canBegin ? (
+            <button
+              type="button"
+              onClick={onBeginExploring}
+              className="launch-prologue-action group inline-flex min-h-12 items-center gap-4 rounded-sm border border-expedition-gold/70 bg-expedition-gold/8 px-6 py-3 font-expedition text-[clamp(1rem,2vw,1.2rem)] tracking-[0.065em] text-expedition-goldbright shadow-[inset_0_1px_0_rgba(227,197,133,0.2),0_0_24px_rgba(201,163,95,0.08)] transition hover:border-expedition-goldbright hover:bg-expedition-gold/14 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+            >
+              <span>Begin exploring</span>
+              <span aria-hidden="true" className="text-expedition-gold transition-transform group-hover:translate-x-1">→</span>
+            </button>
+          ) : narrativeComplete && !skipRequested ? (
+            <p
+              aria-live="polite"
+              className="launch-prologue-wait font-expedition text-[11px] uppercase tracking-[0.22em] text-expedition-faded/70"
+            >
+              Preparing Charles Island…
+            </p>
+          ) : null}
+        </footer>
+      </article>
     </div>
   );
 }
@@ -226,6 +466,7 @@ export function LaunchOverlay({
   selectedModeId = 'darwin',
   departing = false,
   blackout = false,
+  historicalPrologue = null,
   onNewExpedition,
   onMultiplayer,
   onModeSelect,
@@ -295,6 +536,8 @@ export function LaunchOverlay({
   // scanner only matches complete class strings in the source, so building them
   // from a shared constant silently produces no CSS at all.
   const yieldsWhenShort = expandedPanel && !tallPanel;
+  const prologueActive = historicalPrologue?.active === true;
+  const prologueDeparting = prologueActive && departing;
 
   return (
     <section
@@ -302,8 +545,9 @@ export function LaunchOverlay({
       data-mode={mode}
       data-departing={departing ? 'true' : 'false'}
       data-blackout={blackout ? 'true' : 'false'}
+      data-prologue={historicalPrologue?.active ? 'true' : 'false'}
       data-interactive={interactive ? 'true' : 'false'}
-      className={`${departing ? 'opacity-0' : 'opacity-100'} ${departing || !interactive ? 'pointer-events-none' : 'pointer-events-auto'} absolute inset-0 z-40 overflow-hidden bg-black font-expedition text-expedition-parchment transition-opacity duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity]`}
+      className={`${departing && !prologueDeparting ? 'opacity-0' : 'opacity-100'} ${departing || !interactive ? 'pointer-events-none' : 'pointer-events-auto'} ${prologueActive ? 'bg-transparent' : 'bg-black'} absolute inset-0 z-40 overflow-hidden font-expedition text-expedition-parchment transition-opacity duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity]`}
     >
       <div
         aria-hidden="true"
@@ -324,7 +568,9 @@ export function LaunchOverlay({
         <div className="absolute bottom-4 right-4 h-5 w-5 border-b border-r border-expedition-gold/80 sm:bottom-6 sm:right-6" />
       </div>
 
-      <div className="relative flex min-h-full flex-col items-center px-4 py-8 text-center sm:py-10">
+      <div
+        className={`${blackout ? 'opacity-0' : 'opacity-100'} relative flex min-h-full flex-col items-center px-4 py-8 text-center transition-opacity duration-[850ms] ease-[cubic-bezier(0.4,0,1,1)] will-change-[opacity] sm:py-10`}
+      >
         {/* The title recedes only for the tall panels. Settings and Controls at
             the full hero size pushed their own Back button off the bottom of the
             viewport; giving them this space back is what lets them fit. */}
@@ -585,6 +831,26 @@ export function LaunchOverlay({
           <span className="h-px flex-1 bg-gradient-to-l from-transparent to-expedition-brass/80" />
         </div>
       </div>
+      {historicalPrologue?.active && (
+        ANIMAL_PROLOGUES[historicalPrologue.modeId] ? (
+          <AnimalPrologue
+            modeId={historicalPrologue.modeId}
+            sceneReady={historicalPrologue.sceneReady === true}
+            skipRequested={historicalPrologue.skipRequested === true}
+            departing={historicalPrologue.departing === true}
+            onBeginExploring={historicalPrologue.onBeginExploring}
+            onSkip={historicalPrologue.onSkip}
+          />
+        ) : (
+          <HistoricalPrologue
+            sceneReady={historicalPrologue.sceneReady === true}
+            skipRequested={historicalPrologue.skipRequested === true}
+            departing={historicalPrologue.departing === true}
+            onBeginExploring={historicalPrologue.onBeginExploring}
+            onSkip={historicalPrologue.onSkip}
+          />
+        )
+      )}
     </section>
   );
 }

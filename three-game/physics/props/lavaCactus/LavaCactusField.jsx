@@ -10,7 +10,10 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
-import { BreakablePlantField } from '../breakablePlant/BreakablePlantField';
+import {
+  BreakablePlantField,
+  composePlantPartMatrix,
+} from '../breakablePlant/BreakablePlantField';
 import { seededUnit } from '../breakablePlant/plantGeoUtils';
 import { getFlowerGeometries } from '../pricklyPear/pricklyPearModel';
 import { getLavaCactusSites, LAVA_CACTUS_SITES } from './lavaCactusSites';
@@ -224,6 +227,37 @@ function renderPiece(piece) {
   );
 }
 
+function dormantVisualParts(piece) {
+  const materials = getLavaCactusMaterials();
+  if (piece.type === 'column') {
+    const tints = piece.old ? materials.columnsOld : materials.columnsYoung;
+    const tintIndex = Math.floor((piece.tone ?? 0) * COLUMN_TINTS_YOUNG.length) % COLUMN_TINTS_YOUNG.length;
+    return [{
+      geometry: getColumnGeometry(piece.variant),
+      material: tints[tintIndex],
+      matrix: composePlantPartMatrix(piece, {
+        scale: [piece.width, piece.height, piece.width],
+      }),
+      castShadow: true,
+    }];
+  }
+  const flower = getFlowerGeometries();
+  return [
+    {
+      geometry: flower.petals,
+      material: materials.petal,
+      matrix: composePlantPartMatrix(piece, { scale: piece.scale }),
+      castShadow: true,
+    },
+    {
+      geometry: flower.center,
+      material: materials.center,
+      matrix: composePlantPartMatrix(piece, { scale: piece.scale }),
+      castShadow: true,
+    },
+  ];
+}
+
 const LAVA_CACTUS_SPEC = {
   id: 'lava-cactus',
   sitesByZone: LAVA_CACTUS_SITES,
@@ -232,6 +266,9 @@ const LAVA_CACTUS_SPEC = {
   buildZonePieces,
   SiteDressing,
   renderPiece,
+  // Spine meshes are sub-pixel outside the 30 m interaction bubble. Restore
+  // them with the live breakable pieces as Darwin approaches.
+  dormantVisualParts,
   strikeAbsorbMessage: piece => (piece.hits > 1
     ? 'The hammer mashes into the grey column; the woody fibres crush but hold.'
     : 'The column splits at the base; one more blow will part it.'),

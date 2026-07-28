@@ -1505,6 +1505,44 @@ test('launch shell leaves Rapier WASM initialization to the Physics boundary', (
   assert.doesNotMatch(source, /\brapier\.init\s*\(/i);
 });
 
+test('Darwin launch uses its historical prologue as scene-loading cover', () => {
+  const overlaySource = fs.readFileSync(path.resolve('three-game/ui/LaunchOverlay.jsx'), 'utf8');
+  const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  const cssSource = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
+  assert.match(overlaySource, /data-testid="three-historical-prologue"/);
+  assert.match(overlaySource, /24 September 1835/);
+  assert.match(overlaySource, /The dry Volcanic soil affording a congenial habitation/);
+  assert.match(overlaySource, /reached Isla Floreana\s*\(Charles Island\) in the Galapagos Archipelago/);
+  assert.match(overlaySource, /sceneReady && narrativeComplete/);
+  assert.match(overlaySource, /Begin exploring/);
+  assert.match(overlaySource, /Skip introduction/);
+  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 3000/);
+  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550/);
+  assert.match(gameSource, /displayedProgress < 100/);
+  assert.match(overlaySource, /PROLOGUE_AUTO_BEGIN_MS = 15000/);
+  assert.match(cssSource, /launch-prologue-veil/);
+  assert.doesNotMatch(cssSource, /launch-prologue-part-left/);
+  assert.match(
+    gameSource,
+    /launchPrologueEligible && !historicalPrologueAccepted/,
+    'the live gameplay camera remains covered until the player accepts a ready prologue',
+  );
+});
+
+test('finch and tortoise launches use succinct embodied prologues', () => {
+  const overlaySource = fs.readFileSync(path.resolve('three-game/ui/LaunchOverlay.jsx'), 'utf8');
+  const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  assert.match(overlaySource, /You are a finch\./);
+  assert.match(overlaySource, /You have always been a finch\./);
+  assert.match(overlaySource, /Today you will continue to be a finch\./);
+  assert.match(overlaySource, /Be a finch\./);
+  assert.match(overlaySource, /You are a tortoise\./);
+  assert.match(overlaySource, /There is no need to hurry\./);
+  assert.match(overlaySource, /Be a tortoise\./);
+  assert.match(overlaySource, /ANIMAL_PROLOGUE_REVEAL_MS = 4400/);
+  assert.match(gameSource, /\['darwin', 'finch', 'tortoise'\]\.includes\(playableModeId\)/);
+});
+
 test('region travel replaces the complete Rapier world instead of recycling collider handles', () => {
   const source = fs.readFileSync(path.resolve('three-game/components/ThreeScene.jsx'), 'utf8');
   assert.match(
@@ -2086,6 +2124,34 @@ test('manual breakable-plant colliders own authored mass instead of the rigid bo
   assert.doesNotMatch(rigidBodyOpen, /mass=\{piece\.mass\}/);
   assert.match(colliderOpen, /mass=\{piece\.mass\}/);
   assert.match(source, /clampReleaseLinearVelocity/);
+});
+
+test('distant breakable plants stay instanced until Darwin enters interaction range', () => {
+  const source = fs.readFileSync(
+    path.resolve('three-game/physics/props/breakablePlant/BreakablePlantField.jsx'),
+    'utf8',
+  );
+  assert.match(source, /const PLANT_INTERACTION_ACTIVATE_RADIUS = 30/);
+  assert.match(source, /function DormantPlantField/);
+  assert.match(source, /<instancedMesh/);
+  assert.match(
+    source,
+    /\.filter\(piece => !usesDormantPlantLod \|\| activeSiteIds\.has\(piece\.siteId\)\)/,
+    'individual rigid bodies only mount inside the live interaction bubble',
+  );
+
+  for (const field of [
+    'pricklyPear/PricklyPearField.jsx',
+    'paloSanto/PaloSantoField.jsx',
+    'lavaCactus/LavaCactusField.jsx',
+  ]) {
+    const fieldSource = fs.readFileSync(
+      path.resolve('three-game/physics/props', field),
+      'utf8',
+    );
+    assert.match(fieldSource, /dormantVisualParts/);
+    assert.match(fieldSource, /composePlantPartMatrix/);
+  }
 });
 
 test('mature cactus GLBs stay instanced while exposing stable lightweight impact targets', () => {
@@ -4248,14 +4314,29 @@ test('island travel covers the source before commit and renders the hidden desti
     interstitialSource.indexOf('useEffect(() => {', coveredEffectStart + 20),
   );
   assert.ok(coveredEffectStart >= 0, 'island commit is gated by confirmed visual cover');
-  assert.ok(
-    coveredEffect.indexOf("setZoneTransitionPhase('chart'") < coveredEffect.indexOf('commitZoneTransition('),
-    'the chart phase is established before the destination zone commits',
-  );
   assert.match(
     coveredEffect,
+    /setZoneTransitionPhase\('chart'/,
+    'confirmed cover establishes the chart phase',
+  );
+  assert.doesNotMatch(
+    coveredEffect,
+    /commitZoneTransition/,
+    'destination mounting waits while the visible chart route animates',
+  );
+
+  const chartCommitStart = interstitialSource.indexOf(
+    "transitionPhase !== 'chart'\n      || !chartBeatComplete",
+  );
+  const chartCommitEffect = interstitialSource.slice(
+    chartCommitStart,
+    interstitialSource.indexOf('useEffect(() => {', chartCommitStart + 20),
+  );
+  assert.ok(chartCommitStart >= 0, 'destination commit is gated by the completed chart beat');
+  assert.match(
+    chartCommitEffect,
     /requestAnimationFrame\(\(\) => \{\s*commitZoneTransition\(transitionId\)/,
-    'the renderer receives the chart phase before destination mounting begins',
+    'destination mounting begins on a fresh frame after the map motion completes',
   );
 
   const transitionEnd = interstitialSource.slice(
@@ -4272,8 +4353,13 @@ test('island travel covers the source before commit and renders the hidden desti
   const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
   assert.match(
     gameSource,
-    /const transitionCanvasPaused = Boolean\(\s*transition\s*&& transition\.phase === 'chart'\s*\);/,
-    'destination mounting keeps receiving render frames behind the opaque chart',
+    /transition\.phase === 'chart'[\s\S]*transition\.phase === 'mounting' && transitionContentPhase < STARTUP_FULL_CONTENT_PHASE/,
+    'the canvas pauses through the visible chart and staged scene construction',
+  );
+  assert.doesNotMatch(
+    gameSource,
+    /transition\.phase === 'mounting'\s*\|\|\s*transition\.phase === 'ready'/,
+    'the complete mounted destination and ready phase must paint behind black so shaders do not compile during arrival',
   );
 });
 
@@ -4745,6 +4831,16 @@ test('graphics quality preference falls back to device detection only when autom
   assert.equal(normalizeQualityPreference('CINEMATIC'), 'cinematic');
   assert.equal(resolveQualityPreference('auto', 'mobile'), 'mobile');
   assert.equal(resolveQualityPreference('cinematic', 'mobile'), 'cinematic');
+});
+
+test('shadow quality tiers preserve a genuinely high-resolution polished default', () => {
+  const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  const skySource = fs.readFileSync(path.resolve('three-game/components/scene/SkyController.jsx'), 'utf8');
+  assert.match(gameSource, /performance:\s*\{[\s\S]*?shadowQuality:\s*'ultra'/);
+  assert.match(skySource, /low:\s*\{\s*mapSize:\s*2048/);
+  assert.match(skySource, /standard:\s*\{\s*mapSize:\s*4096/);
+  assert.match(skySource, /high:\s*\{[\s\S]*?mapSize:\s*8192/);
+  assert.match(skySource, /ultra:\s*\{\s*mapSize:\s*12288/);
 });
 
 test('frame deltas clamp so a backgrounded tab cannot advance the expedition clock', () => {

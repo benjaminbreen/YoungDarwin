@@ -7,7 +7,10 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
-import { BreakablePlantField } from '../breakablePlant/BreakablePlantField';
+import {
+  BreakablePlantField,
+  composePlantPartMatrix,
+} from '../breakablePlant/BreakablePlantField';
 import { getPaloSantoSites, PALO_SANTO_SITES } from './paloSantoSites';
 import {
   branchColliderSpec,
@@ -183,6 +186,47 @@ function renderPiece(piece) {
   );
 }
 
+function dormantVisualParts(piece) {
+  const materials = getPaloSantoMaterials();
+  const matrix = composePlantPartMatrix(piece);
+  const parts = [{
+    geometry: piece.visualGeometry,
+    material: materials.bark[(piece.barkIndex || 0) % materials.bark.length],
+    matrix,
+    castShadow: true,
+    receiveShadow: true,
+  }];
+  if (piece.foliageGeometry?.stems) {
+    parts.push({
+      geometry: piece.foliageGeometry.stems,
+      material: materials.leafStems,
+      matrix,
+    });
+  }
+  if (piece.foliageGeometry?.greenLeaves) {
+    parts.push({
+      geometry: piece.foliageGeometry.greenLeaves,
+      material: materials.leaves,
+      matrix,
+    });
+  }
+  if (piece.foliageGeometry?.oliveLeaves) {
+    parts.push({
+      geometry: piece.foliageGeometry.oliveLeaves,
+      material: materials.oliveLeaves,
+      matrix,
+    });
+  }
+  if (piece.foliageGeometry?.dryLeaves) {
+    parts.push({
+      geometry: piece.foliageGeometry.dryLeaves,
+      material: materials.dryLeaves,
+      matrix,
+    });
+  }
+  return parts;
+}
+
 const PALO_SANTO_SPEC = {
   id: 'palo-santo',
   sitesByZone: PALO_SANTO_SITES,
@@ -191,6 +235,7 @@ const PALO_SANTO_SPEC = {
   buildZonePieces,
   SiteDressing,
   renderPiece,
+  dormantVisualParts,
   strikeAbsorbMessage: piece => (piece.unbreakable
     ? 'The hammer rebounds from the living trunk. Pale bark flakes away, but the tree stands firm.'
     : piece.hits > 2
