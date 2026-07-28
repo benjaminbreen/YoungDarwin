@@ -25,6 +25,10 @@ import {
   getDistanceSceneryRevision,
   subscribeDistanceScenery,
 } from '../../world/vistas/distanceSceneryRuntime';
+import {
+  TERRAIN_TEXTURE_CARRY_GLSL,
+  terrainSeamUniforms,
+} from '../../world/vistas/terrainSeamDevRuntime';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
@@ -142,9 +146,20 @@ const CAUSTICS_APPLY = /* glsl */`
   }
 `;
 
-// Layers caustics onto any terrain material, composing with whatever
-// onBeforeCompile the material already has.
-function injectSeabedCaustics(material) {
+const TERRAIN_TEXTURE_CARRY_APPLY = /* glsl */`
+  if (vTerrainCarryDepth >= 0.0) {
+    float terrainTextureCarryProgress = tsCarryProgress(
+      vTerrainCarryDepth,
+      vCausticsW.xz
+    );
+    float terrainTextureCarryNoise = tsCarryNoise(vCausticsW.xz);
+    if (terrainTextureCarryNoise < terrainTextureCarryProgress) discard;
+  }
+`;
+
+// Composes shared lighting and apron-handoff behavior with each authored
+// region material's existing onBeforeCompile hook.
+function injectTerrainRenderingExtensions(material) {
   const previousCompile = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
   material.onBeforeCompile = shader => {
@@ -161,29 +176,59 @@ function injectSeabedCaustics(material) {
     shader.uniforms.uTerrainSunWarmth = { value: 0 };
     shader.uniforms.uTerrainCoolShade = { value: 0 };
     shader.uniforms.uTerrainWetShine = { value: 0 };
+    shader.uniforms.uLocalApronTexture = terrainSeamUniforms.uLocalApronTexture;
+    shader.uniforms.uTextureCarrySeam = terrainSeamUniforms.uTextureCarrySeam;
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
+        attribute float aApronDepth;
+        varying float vTerrainCarryDepth;
         varying vec3 vCausticsW;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
+        vTerrainCarryDepth = aApronDepth;
         vCausticsW = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${CAUSTICS_GLSL}`)
-      .replace('#include <opaque_fragment>', `${CAUSTICS_APPLY}\n#include <opaque_fragment>`);
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec4 uLocalApronTexture;
+        uniform vec4 uTextureCarrySeam;
+        varying float vTerrainCarryDepth;
+        ${TERRAIN_TEXTURE_CARRY_GLSL}
+        ${CAUSTICS_GLSL}`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `${TERRAIN_TEXTURE_CARRY_APPLY}
+        ${CAUSTICS_APPLY}
+        #include <opaque_fragment>`,
+      );
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v2`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry`;
   material.needsUpdate = true;
   return material;
 }
 
 const terrainMaterialCache = new Map();
+
+function ensureTerrainApronDepthAttribute(geometry, value = -1) {
+  if (!geometry || geometry.getAttribute('aApronDepth')) return geometry;
+  geometry.setAttribute(
+    'aApronDepth',
+    new THREE.BufferAttribute(
+      new Float32Array(geometry.getAttribute('position').count).fill(value),
+      1,
+    ),
+  );
+  return geometry;
+}
 
 // A destination shader is prepared before travel and then mounted here using
 // this exact material object. Keeping one material per visited/prepared region
@@ -197,7 +242,7 @@ export function getTerrainRenderMaterial(regionId) {
   const baseMaterial = regionDefinition?.createTerrainMaterial
     ? regionDefinition.createTerrainMaterial()
     : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
-  const material = injectSeabedCaustics(baseMaterial);
+  const material = injectTerrainRenderingExtensions(baseMaterial);
   terrainMaterialCache.set(regionId, material);
   return material;
 }
@@ -205,7 +250,7 @@ export function getTerrainRenderMaterial(regionId) {
 export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const { geometryEntry } = readTerrainResource(currentZoneId, segmentCap);
-  const geometry = geometryEntry.geometry;
+  const geometry = ensureTerrainApronDepthAttribute(geometryEntry.geometry);
 
   const material = useMemo(
     () => getTerrainRenderMaterial(currentZoneId),
@@ -407,6 +452,10 @@ function buildSkirtGeometry(regionId, excludeEdges = []) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute(
+    'aApronDepth',
+    new THREE.Float32BufferAttribute(new Float32Array(positions.length / 3).fill(-1), 1),
+  );
   geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;

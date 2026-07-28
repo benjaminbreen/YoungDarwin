@@ -1,17 +1,16 @@
 import * as THREE from 'three';
 
-// Shared aerial perspective for every distant-scenery layer: the neighbour
-// apron, the far-terrain belt, the layered rings, and the diagonal quadrants.
+// Shared aerial perspective for the neighbour apron and the camera-relative
+// central-island backdrop.
 //
 // WHY THIS EXISTS — two failures that no amount of per-layer tuning could fix.
 //
-// 1. Each layer normalised haze against its OWN depth parameter. The apron ran
-//    0..1 over ~90 m, the far belt over 32-142 m, the diagonal quadrants over
-//    250 m. Two surfaces at the same real distance therefore received
-//    different haze, and the boundaries BETWEEN layers became visible steps —
-//    the banded, stacked-cards horizon. Aerial perspective is a property of
-//    the air between camera and surface, so it has to be one curve driven by
-//    world distance, evaluated identically everywhere. That is `vistaAir`.
+// 1. Earlier scenery layers normalised haze against their OWN depth
+//    parameters. Two surfaces at the same real distance therefore received
+//    different haze, and their boundaries became visible steps. Aerial
+//    perspective is a property of the air between camera and surface, so it
+//    has to be one curve driven by world distance, evaluated identically
+//    everywhere. That is `vistaAir`.
 //
 // 2. Distant geometry ends up mixed all the way to scene.fog.color. But
 //    fogColor is graded for local mist and then luminance-clamped
@@ -72,8 +71,8 @@ export const vistaAtmosphereUniforms = {
 
 // Per-family debug colours, used only when uVistaGrade.z > 0. Isolating which
 // layer a seam or see-through belongs to by eye is otherwise guesswork: the
-// apron, the rings and the quadrants all resolve to nearly the same haze
-// colour at range, which is exactly when the artefacts appear.
+// apron and shell converge on nearly the same haze colour at range, which is
+// exactly when handoff artefacts are hardest to identify.
 export const VISTA_LAYER_DEBUG_TINT = {
   apron: [0.95, 0.35, 0.30],
 };

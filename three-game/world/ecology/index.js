@@ -41,6 +41,7 @@ import { buildPuntaSurEcology } from './puntaSur';
 import { buildMarineIguanaColonyEcology } from './marineIguanaColony';
 import { buildSoutheasternCoastEcology } from './southeasternCoast';
 import { buildShallowSurfEcology } from './shallowSurf';
+import { buildSouthernWetlandsEcology } from './southernWetlands';
 import { applyUniversalProceduralFlora } from './universalFlora';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
@@ -85,6 +86,7 @@ const builders = {
   SW_BEACH: buildMarineIguanaColonyEcology,
   SE_COAST: buildSoutheasternCoastEcology,
   SE_SHALLOW_SURF: buildShallowSurfEcology,
+  S_WETLANDS: buildSouthernWetlandsEcology,
 };
 
 // Every regional map now has an ecology definition. Regions without a bespoke

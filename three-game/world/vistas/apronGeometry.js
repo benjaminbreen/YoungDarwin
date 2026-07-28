@@ -33,16 +33,14 @@ export function apronPreviewDepth(regionId, vista) {
   return Math.min(vista.apronDepth || 72, maximum);
 }
 
-// Geometry for the border aprons that continue each region's terrain past the
-// walkable edge. A single logical grid is built per vista and split along a
-// wandering seam ring into two meshes:
-//   - the near "carry strip" (map edge -> ~continuity.surfaceCarryEnd), rendered by
-//     Terrain with the region's own splat material, so the ground at the seam
-//     is pixel-identical to the walkable terrain;
-//   - the far vista mesh, rendered by BorderVistas with vertex colors that
-//     blend toward the neighboring region's profile.
-// Both meshes share the seam ring's positions and normals, so the boundary is
-// watertight; the noise-driven wander keeps it from reading as a ruled line.
+// Geometry for border aprons that continue each region's terrain past the
+// walkable edge. One logical grid supplies two coincident material candidates:
+// the active region's full PBR material and the low-detail neighbor material.
+// Their shaders use complementary, noise-warped coverage masks so texture and
+// palette hand off without alpha transparency or a ruled boundary. The
+// low-detail candidate begins beyond the inner overlap, while the PBR candidate
+// remains available through the full apron so the dev panel can widen or move
+// the handoff without opening geometry holes.
 // Water is rendered by the shared Water scene component. Aprons continue the
 // seabed only; keeping a second, flat water cap here creates a visible polygon
 // wherever its fixed colors overlap the animated deep-ocean shader.
@@ -62,39 +60,8 @@ const BORDER_COLLAR_DEPTH = 3.8;
 const BORDER_COLLAR_DROP = 0.035;
 const BORDER_COLLAR_ROWS = 4;
 const SEAM_WANDER_AMPLITUDE = 4.5;
-// Width of the opaque overlap past the seam ring, where the carry strip stays
-// beneath the neighboring vista before its tail is buried.
+// Width used to locate the far start of the coincident PBR/apron handoff.
 const SEAM_BLEND_LENGTH = 18;
-// How far the carry strip tucks below the fully opaque vista mesh after their
-// shared seam, preventing z-fighting through the overlap.
-const SEAM_BLEND_DROP = 0.07;
-// Once the vista is fully opaque, bury the remaining carry-strip tail deeply
-// enough that its finite outer row cannot silhouette as a rectangular shelf
-// when viewed almost edge-on.
-const CARRY_OUTER_TUCK_DEPTH = 4.8;
-// Metres of vertical clearance distant geometry must keep from the water plane.
-//
-// Both distant layers used to park their sub-sea areas a few centimetres ABOVE
-// the ocean (rings clamped to WATER_LEVEL + 0.1, quadrants flattened onto a
-// WATER_LEVEL + 0.15 datum) on the theory that dipping under would let the
-// ocean render through them. At 200-400 m that margin is smaller than the depth
-// buffer's precision AND smaller than the ocean's own wave displacement, so the
-// two surfaces interleave per pixel and the sea draws in hard straight
-// horizontal slices THROUGH the distant headlands. Hugging the surface is what
-// causes the artefact, not what prevents it.
-//
-// The fix is to never sit inside that band: real land stands clearly above it,
-// and genuine seabed goes clearly below, where the ocean occludes it cleanly
-// and correctly. A metre and a half is invisible at ring range and far outside
-// anything that can fight.
-export const VISTA_SEA_CLEARANCE = 1.5;
-
-export function clearWaterPlane(y, clearance = VISTA_SEA_CLEARANCE) {
-  const above = WATER_LEVEL + clearance;
-  const below = WATER_LEVEL - clearance;
-  if (y >= above || y <= below) return y;
-  return y > WATER_LEVEL ? above : below;
-}
 
 export function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
@@ -719,7 +686,6 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   const positions = [];
   const nearColors = [];
   const farColors = [];
-  const blends = [];
   const depths = [];
 
   // Seam ring where the region-material carry strip hands off to the vista
@@ -736,9 +702,9 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     if (borderDistanceForRow(row, rows, previewDepth).outsideDistance >= seamTarget) break;
   }
   const seamNominal = borderDistanceForRow(seamRow, rows, previewDepth).outsideDistance;
-  // Last row of the carry strip: covers the whole overlap (with margin for the
-  // seam wander shrinking the warped row spacing) so the vista mesh always has
-  // terrain beneath it while the strip tail descends out of view.
+  // Locate a conservative outer boundary for the inner overlap. The
+  // low-detail candidate begins beyond this row; the PBR candidate now remains
+  // available through the full apron and yields in the shader instead.
   let overlapEndRow = seamRow + 1;
   for (let row = seamRow + 1; row <= rows; row += 1) {
     overlapEndRow = row;
@@ -788,7 +754,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // never true for a shared corner. That cost those views up to two full
       // previewDepths of lateral coverage and opened sea gaps beside the
       // neighbouring land. Keep the geometry and settle it just under the
-      // owner instead, the same way the far belt buries its non-owner corners.
+      // owner instead, keeping the shared corner filled without z-fighting.
       const extLow = apronCornerReach(
         regionId,
         vista,
@@ -898,7 +864,6 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // walkable mesh's own vertices carry.
       nearColors.push(currentColor.r, currentColor.g, currentColor.b);
       farColors.push(color.r, color.g, color.b);
-      blends.push(1);
       depths.push(outsideT);
     }
   }
@@ -938,44 +903,58 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   // Both terrain meshes are watertight. Continued seabed renders everywhere
   // beneath the shared detailed/deep water surfaces, avoiding terrain holes
   // without introducing a second water material.
-  // Carry strip: map edge out through the overlap. Vista mesh: one row past
-  // the seam outward, with the strip tucked beneath it.
+  // Carry strip: map edge out through the near field. The low-detail mesh used
+  // to start inside the player's elevated-camera footprint, where individual
+  // neighbor-color islands read as gray/salmon puddles laid over normal ground.
+  // Keep the active region's world-space PBR material in charge beyond the old
+  // overlap, then give the vista a short two-row underlap at the far handoff.
   const nearIndices = [];
   const farIndices = [];
+  const vistaStartRow = Math.min(
+    rows - 1,
+    Math.max(seamRow + 1, overlapEndRow + 1),
+  );
+  // Keep a coincident PBR candidate through the whole visible apron. It is
+  // normally discarded well before the outer edge, but retaining the geometry
+  // lets the dev lab expose a genuinely wide feather range without opening
+  // holes when the texture handoff is pushed late.
+  const carryEndRow = rows;
   for (let i = 0; i < woundIndices.length; i += 3) {
     const i0 = woundIndices[i];
     const i1 = woundIndices[i + 1];
     const i2 = woundIndices[i + 2];
     const minRow = Math.floor(Math.min(i0, i1, i2) / stride);
-    if (minRow < overlapEndRow) nearIndices.push(i0, i1, i2);
-    // Let the carry strip own the first row after the seam. The opaque vista
-    // begins one row later, already tucked above it, so no coincident surface
-    // or pixel dissolve is needed.
-    if (minRow > seamRow) farIndices.push(i0, i1, i2);
+    if (minRow < carryEndRow) nearIndices.push(i0, i1, i2);
+    if (minRow >= vistaStartRow) farIndices.push(i0, i1, i2);
   }
   if (!nearIndices.length && !farIndices.length) return null;
 
-  // The strip tucks below the vista mesh after their shared seam. Both remain
-  // opaque; the overlap and progressively buried tail replace the old dither.
-  const nearPositions = positionArray.slice();
-  const vertexCount = positionArray.length / 3;
-  for (let v = 0; v < vertexCount; v += 1) {
-    const row = Math.floor(v / stride);
-    if (row <= seamRow) continue;
-    const seamTuck = THREE.MathUtils.smoothstep(row, seamRow, seamRow + 2);
-    const overlapTail = THREE.MathUtils.smoothstep(row, seamRow + 1, overlapEndRow);
-    nearPositions[v * 3 + 1] -= seamTuck * SEAM_BLEND_DROP
-      + overlapTail * overlapTail * CARRY_OUTER_TUCK_DEPTH;
+  // Both materials occupy the same surface through the overlap. Their shaders
+  // use complementary world-noise coverage, so exactly one material owns each
+  // fragment while real PBR texture breaks into the low-detail apron.
+  // Shader tuning is expressed across the part of the apron that is actually
+  // visible. Keeping the original map-edge depth after moving the ownership
+  // boundary outward compressed every feather slider into the last few
+  // percent of its range and made the controls appear ineffective.
+  const farDepths = new Float32Array(depths.length);
+  for (let row = 0; row <= rows; row += 1) {
+    for (let col = 0; col <= cols; col += 1) {
+      const index = row * stride + col;
+      const startDepth = depths[vistaStartRow * stride + col];
+      farDepths[index] = THREE.MathUtils.clamp(
+        (depths[index] - startDepth) / Math.max(0.001, 1 - startDepth),
+        0,
+        1,
+      );
+    }
   }
 
   const grid = {
     positions: positionArray,
-    nearPositions,
     normals: normalArray,
     nearColors: new Float32Array(nearColors),
     farColors: new Float32Array(farColors),
-    blends: new Float32Array(blends),
-    depths: new Float32Array(depths),
+    depths: farDepths,
     nearIndices,
     farIndices,
   };
@@ -999,7 +978,6 @@ export function makeNeighborPreviewGeometry(regionId, config, targetRegionId, ta
   if (!grid) return null;
   const geometry = gridSliceGeometry(grid, grid.positions, grid.farColors, grid.farIndices, 'neighbor-preview');
   if (geometry) {
-    geometry.setAttribute('aBorderBlend', new THREE.BufferAttribute(grid.blends, 1));
     geometry.setAttribute('aApronDepth', new THREE.BufferAttribute(grid.depths, 1));
   }
   return geometry;
@@ -1008,7 +986,17 @@ export function makeNeighborPreviewGeometry(regionId, config, targetRegionId, ta
 export function makeNeighborCarryGeometry(regionId, config, targetRegionId, targetConfig, vista, transition) {
   const grid = buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, vista, transition);
   if (!grid) return null;
-  return gridSliceGeometry(grid, grid.nearPositions, grid.nearColors, grid.nearIndices, 'carry-strip');
+  const geometry = gridSliceGeometry(
+    grid,
+    grid.positions,
+    grid.nearColors,
+    grid.nearIndices,
+    'carry-strip',
+  );
+  if (geometry) {
+    geometry.setAttribute('aApronDepth', new THREE.BufferAttribute(grid.depths, 1));
+  }
+  return geometry;
 }
 
 // Carry strips for every vista edge of a region, rendered by Terrain with the
@@ -1112,11 +1100,6 @@ export function makeApronGeometry(regionId, config, vista) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  // Fallback aprons have no carry strip beneath them and render fully opaque.
-  geometry.setAttribute('aBorderBlend', new THREE.BufferAttribute(
-    new Float32Array(positions.length / 3).fill(1),
-    1,
-  ));
   geometry.setAttribute('aApronDepth', new THREE.BufferAttribute(
     Float32Array.from({ length: positions.length / 3 }, (_, index) => (
       Math.floor(index / (cols + 1)) / rows

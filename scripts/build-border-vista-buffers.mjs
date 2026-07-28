@@ -127,14 +127,10 @@ function buildRegionRecord(regionId) {
       edge: vista.edge,
       preview: preview.value,
       carry: carry.value,
-      rings: [],
-      // Retain the nullable legacy field so older clients can read newly
-      // generated resources during development.
-      horizon: null,
     };
   });
   return {
-    header: { version: 1, regionId, entries, diagonals: [] },
+    header: { version: 1, regionId, entries },
     binaryChunks,
     payloadByteLength: cursor,
   };

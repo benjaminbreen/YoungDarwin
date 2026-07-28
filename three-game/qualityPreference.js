@@ -23,7 +23,7 @@ export const QUALITY_CHOICES = Object.freeze([
   {
     id: 'mobile',
     label: 'Lightest',
-    note: 'Best frame rate. Softer shadows, no ambient occlusion or water reflections.',
+    note: 'Best frame rate. Softer shadows, no water reflections.',
   },
   {
     id: 'performance',

@@ -305,6 +305,24 @@ export function PhysicsWatchdog() {
         snapshot: runtime.current.snapshot,
       }),
       scanNow: () => collectSuspects(world),
+      // Does a handle still resolve? This is the check the character controller
+      // uses before calling into Rapier, so being able to read it from the
+      // console is how you confirm a body went stale rather than went bad.
+      handles: () => {
+        const entries = [];
+        world.forEachRigidBody(body => {
+          entries.push({ handle: body.handle, id: body.userData?.id || null, kind: body.userData?.kind || null });
+        });
+        return entries.map(entry => {
+          const body = world.getRigidBody(entry.handle);
+          const colliders = [];
+          for (let index = 0; index < (body?.numColliders() || 0); index += 1) {
+            const collider = body.collider(index);
+            colliders.push({ handle: collider?.handle ?? null, live: !!(collider && world.getCollider(collider.handle)) });
+          }
+          return { ...entry, live: !!body, colliders };
+        });
+      },
       resume: () => { runtime.current.stopped = false; },
     };
     return () => {

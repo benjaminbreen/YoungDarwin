@@ -29,6 +29,12 @@ const LAND_ROUTE_KINDS = new Set(['land', 'creek']);
 const WATER_ROUTE_KINDS = new Set(['water']);
 const SHELL_SEA_COLOR = new THREE.Color('#315f68');
 const SHELL_SHORE_COLOR = new THREE.Color('#69684f');
+const OPPOSITE_EDGE = Object.freeze({
+  north: 'south',
+  south: 'north',
+  east: 'west',
+  west: 'east',
+});
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -225,6 +231,76 @@ function edgeSample(config, xDirection, zDirection, radius) {
   };
 }
 
+function edgeU(config, edge, point) {
+  if (edge === 'north' || edge === 'south') {
+    return clamp01(point.x / Math.max(0.001, config.width) + 0.5);
+  }
+  return clamp01(point.z / Math.max(0.001, config.depth) + 0.5);
+}
+
+function targetEdgePoint(config, edge, u, inwardDistance) {
+  const halfW = config.width * 0.5;
+  const halfD = config.depth * 0.5;
+  if (edge === 'north') return [-halfW + u * config.width, -halfD + inwardDistance];
+  if (edge === 'south') return [-halfW + u * config.width, halfD - inwardDistance];
+  if (edge === 'east') return [halfW - inwardDistance, -halfD + u * config.depth];
+  return [-halfW + inwardDistance, -halfD + u * config.depth];
+}
+
+function neighborEdgeColor(regionId, config, edge, localPoint, localColor) {
+  const hint = getRegionEdgeHints(regionId).find(entry => entry.edge === edge);
+  if (!hint) return localColor.clone();
+  if (
+    hint.kind === 'blocked'
+    && hint.boundaryKind === 'ocean'
+  ) {
+    return SHELL_SHORE_COLOR.clone().lerp(SHELL_SEA_COLOR, 0.42);
+  }
+  if (!hint.toRegionId || !LAND_ROUTE_KINDS.has(hint.routeKind)) {
+    return localColor.clone();
+  }
+  const targetConfig = getRegionTerrainConfig(hint.toRegionId);
+  const targetEdge = OPPOSITE_EDGE[edge];
+  if (!targetConfig || !targetEdge) return localColor.clone();
+  const u = edgeU(config, edge, localPoint);
+  const targetSpan = targetEdge === 'north' || targetEdge === 'south'
+    ? targetConfig.depth
+    : targetConfig.width;
+  const inwardDistance = Math.min(34, targetSpan * 0.34);
+  const [targetX, targetZ] = targetEdgePoint(
+    targetConfig,
+    targetEdge,
+    u,
+    inwardDistance,
+  );
+  const targetY = terrainHeight(targetX, targetZ, hint.toRegionId);
+  const literal = terrainColor(targetX, targetZ, targetY, hint.toRegionId);
+  const profile = surfaceProfileForRegion(hint.toRegionId);
+  return literal.lerp(new THREE.Color(profile.midColor), 0.36);
+}
+
+// The shell's near palette used to come from the active map edge even though
+// the apron in front of it was already showing the connected map. Blend the
+// two cardinal neighbor palettes by bearing so the shell rises behind the
+// apron in the same color family instead of as a separate gray plate.
+function neighborApronHandoffColor(
+  regionId,
+  config,
+  xDirection,
+  zDirection,
+  localPoint,
+  localColor,
+) {
+  const xWeight = Math.abs(xDirection);
+  const zWeight = Math.abs(zDirection);
+  const xEdge = xDirection >= 0 ? 'east' : 'west';
+  const zEdge = zDirection >= 0 ? 'south' : 'north';
+  const xColor = neighborEdgeColor(regionId, config, xEdge, localPoint, localColor);
+  const zColor = neighborEdgeColor(regionId, config, zEdge, localPoint, localColor);
+  const total = xWeight + zWeight || 1;
+  return xColor.lerp(zColor, zWeight / total);
+}
+
 export function buildChartIslandShellGeometry(
   regionId,
   variant = CHART_SHELL_VARIANTS.full,
@@ -236,7 +312,9 @@ export function buildChartIslandShellGeometry(
 
   const positions = [];
   const colors = [];
+  const seamColors = [];
   const depths = [];
+  const handoffBlends = [];
   const landOccupancy = [];
   const indices = [];
   const stride = CHART_SHELL_ANGULAR_SEGMENTS + 1;
@@ -307,18 +385,36 @@ export function buildChartIslandShellGeometry(
         y = THREE.MathUtils.lerp(localContinuationY, y, seamBlend);
       }
 
-      let color = shellColor(eastKm, southKm, landPresence, radialT);
-      if (radialT < handoffT + 0.28) {
-        const localColor = terrainColor(edge.x, edge.z, localY, regionId);
-        const colorBlend = smoothstep(handoffT, handoffT + 0.28, radialT);
-        color = localColor.clone().lerp(color, colorBlend);
-      }
+      const color = shellColor(eastKm, southKm, landPresence, radialT);
+      const localColor = terrainColor(edge.x, edge.z, localY, regionId);
+      const seamColor = horizonOnly
+        ? neighborApronHandoffColor(
+          regionId,
+          config,
+          xDirection,
+          zDirection,
+          edge,
+          localColor,
+        )
+        : localColor.clone();
+      const colorBlendStart = horizonOnly
+        ? Math.max(0.1, handoffT)
+        : Math.max(0.035, handoffT * 0.48);
+      const colorBlendEnd = horizonOnly
+        ? Math.min(0.92, handoffT + 0.28)
+        : Math.min(0.72, handoffT + 0.28);
+      const handoffBlend = clamp01(
+        (radialT - colorBlendStart) / Math.max(0.001, colorBlendEnd - colorBlendStart),
+      );
       const distanceWash = 1 - radialT * 0.12;
       color.multiplyScalar(distanceWash);
+      seamColor.multiplyScalar(distanceWash);
 
       positions.push(xDirection * radius, y, zDirection * radius);
       colors.push(color.r, color.g, color.b);
+      seamColors.push(seamColor.r, seamColor.g, seamColor.b);
       depths.push(radialT);
+      handoffBlends.push(handoffBlend);
       landOccupancy.push(landPresence);
     }
   }
@@ -336,7 +432,9 @@ export function buildChartIslandShellGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('aShellSeamColor', new THREE.Float32BufferAttribute(seamColors, 3));
   geometry.setAttribute('aShellDepth', new THREE.Float32BufferAttribute(depths, 1));
+  geometry.setAttribute('aShellHandoff', new THREE.Float32BufferAttribute(handoffBlends, 1));
   geometry.setAttribute('aShellLand', new THREE.Float32BufferAttribute(landOccupancy, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();

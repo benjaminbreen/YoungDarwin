@@ -132,6 +132,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `SW_BEACH` | `marine-iguana-colony` | 288 |
 | `SE_COAST` | `southeastern-rocky-coast` | 288 |
 | `SE_SHALLOW_SURF` | `southeastern-shallow-surf` | 300 |
+| `S_WETLANDS` | `southern-wetlands-forest` | 264 |
 
 ## Registered Region Modules
 
@@ -176,6 +177,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `marineIguanaColony` | `SW_BEACH` | `marine-iguana-colony`, `marine-iguana-rocks` |
 | `southeasternCoast` | `SE_COAST` | `southeastern-coast`, `floreana-southeast-coast` |
 | `shallowSurf` | `SE_SHALLOW_SURF` | `shallow-surf`, `southeastern-shallow-surf` |
+| `southernWetlands` | `S_WETLANDS` | `southern-wetlands`, `wetlands-forest` |
 
 ## Registered Ecology Builders
 
@@ -217,6 +219,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `SW_BEACH` | `buildMarineIguanaColonyEcology` |
 | `SE_COAST` | `buildSoutheasternCoastEcology` |
 | `SE_SHALLOW_SURF` | `buildShallowSurfEcology` |
+| `S_WETLANDS` | `buildSouthernWetlandsEcology` |
 
 ## Runtime Model Assets
 

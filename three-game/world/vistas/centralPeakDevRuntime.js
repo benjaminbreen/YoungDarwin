@@ -1,7 +1,7 @@
 // Live global tuning for the direct neighbor apron, the camera-relative Cerro
 // Pajas silhouette, and their shared aerial perspective.
 
-const STORAGE_KEY = 'darwin.distanceScenery.tuning.v3';
+const STORAGE_KEY = 'darwin.distanceScenery.tuning.v4';
 
 export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // Aerial perspective for distant vista layers. 0 keeps the scene's fogExp2
@@ -85,12 +85,12 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
 
   // --- neighbour apron -----------------------------------------------------
   neighborApronVisible: true,
-  neighborApronRelief: 0.7,
-  neighborApronVertical: -0.9,
+  neighborApronRelief: 0.8,
+  neighborApronVertical: -2.6,
   neighborApronHazeStart: 0.58,
-  neighborApronNearHaze: 0.1,
+  neighborApronNearHaze: 0,
   neighborApronFarHaze: 0.55,
-  neighborApronSoftFocus: 0.1,
+  neighborApronSoftFocus: 0,
 
 });
 

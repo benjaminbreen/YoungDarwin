@@ -42,27 +42,32 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
   const preparingDestination = transitionDestinationId === currentZoneId;
-  const reaches = (regularPhase, transitionPhase = regularPhase) => (
-    stagedPhase >= (preparingDestination ? transitionPhase : regularPhase)
+  // Both launch paths now climb the same fine-grained ladder: what used to be
+  // two monolithic integer commits during startup (all of family four, then all
+  // of family five) is the same sequence of small decimal stages travel already
+  // used. `startupPhase` is only for the families whose launch order genuinely
+  // differs from travel.
+  const reaches = (phase, startupPhase = phase) => (
+    stagedPhase >= (preparingDestination ? phase : startupPhase)
   );
   // Base terrain stays present from phase zero so direct-zone launch and
-  // automation never expose the water/clear-color fallback. During travel,
-  // formerly monolithic phase four is divided into small decimal stages. The
-  // normal startup still uses its original integer phase contract.
+  // automation never expose the water/clear-color fallback.
   const terrainReady = reaches(0);
   const bordersReady = reaches(2);
   const detailsReady = reaches(3);
-  const physicsTerrainReady = reaches(0, 3.2);
-  const ordinaryPropsReady = reaches(4, 3.4);
-  const pricklyPearReady = reaches(4, 3.6);
-  const lavaCactusReady = reaches(4, 3.6);
-  const paloSantoReady = reaches(4, 3.8);
-  const latePlantFieldsReady = reaches(4, 4);
-  const structuresReady = reaches(4, 4.25);
-  const waterSplashesReady = reaches(4, 4.5);
-  const interactablesReady = reaches(5, 5.2);
-  const beagleReady = reaches(5, 5.4);
-  const specimensReady = reaches(5, 5.6);
+  // Startup grounds the player before the opening shot begins, so its collider
+  // cannot wait for the staged mounts the way a travel arrival can.
+  const physicsTerrainReady = reaches(3.2, 0);
+  const ordinaryPropsReady = reaches(3.4);
+  const pricklyPearReady = reaches(3.6);
+  const lavaCactusReady = reaches(3.6);
+  const paloSantoReady = reaches(3.8);
+  const latePlantFieldsReady = reaches(4);
+  const structuresReady = reaches(4.25);
+  const waterSplashesReady = reaches(4.5);
+  const interactablesReady = reaches(5.2);
+  const beagleReady = reaches(5.4);
+  const specimensReady = reaches(5.6);
   const actorsReady = reaches(6);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);

@@ -86,6 +86,8 @@ import { southeasternCoastRegion } from './southeasternCoast/terrain';
 import { createSoutheasternCoastTerrainMaterial } from './southeasternCoast/material';
 import { shallowSurfRegion } from './shallowSurf/terrain';
 import { createShallowSurfTerrainMaterial } from './shallowSurf/material';
+import { southernWetlandsRegion } from './southernWetlands/terrain';
+import { createSouthernWetlandsTerrainMaterial } from './southernWetlands/material';
 
 /** @type {AuthoredRegionDefinition[]} */
 const authoredRegions = [
@@ -128,6 +130,7 @@ const authoredRegions = [
   { ...marineIguanaColonyRegion, createTerrainMaterial: createMarineIguanaColonyTerrainMaterial },
   { ...southeasternCoastRegion, createTerrainMaterial: createSoutheasternCoastTerrainMaterial },
   { ...shallowSurfRegion, createTerrainMaterial: createShallowSurfTerrainMaterial },
+  { ...southernWetlandsRegion, createTerrainMaterial: createSouthernWetlandsTerrainMaterial },
 ];
 
 /** @type {Map<string, AuthoredRegionDefinition>} */

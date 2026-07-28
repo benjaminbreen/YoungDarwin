@@ -238,21 +238,9 @@ one interchangeable suitability curve for every plant.
   an opaque overlap with the local terrain, and give each diagonal corner one
   deterministic mesh owner so coarse surfaces cannot cross into edge-on
   polygon spikes.
-  A second, much lower-resolution far-terrain belt continues each rendered
-  apron through the back of that neighbor and into the next cardinally
-  connected region. It is baked into the border-vista resource and remains
-  attached to the world, rather than becoming another camera-facing horizon
-  sheet.
-- Far-terrain belts are render-only opaque meshes: no collision, ecology,
-  lighting normals, shadows, PBR textures, or runtime height sampling. Their
-  near rows overlap beneath the detailed apron, and their atmospheric outer
-  rows stop before the island-scale peak plane. Build-time low-pass and slope
-  limiting preserve broad ridges without allowing isolated regional samples to
-  pull long triangles through the horizon. Adjacent belts give each shared
-  corner one deterministic owner; non-owner side edges bury below the
-  water/horizon instead of intersecting as edge-on polygon sheets.
-  Their unlit shader still receives the shared daylight and moonlight factors,
-  preventing baked daytime vertex colors from glowing after dark.
+  The chart-derived perimeter shell owns terrain beyond that direct neighbor;
+  the retired onward-ring, diagonal-patch, and far-belt experiments are no
+  longer part of the runtime or generated border-vista payload.
 - Cerro Pajas is the shared island-scale landmark. `centralPeak.js` derives its
   bearing and approximate distance from `FLOREANA_MAP_PLACEMENTS`, while
   `CentralPeakBackdrop.jsx` renders one camera-relative atmospheric silhouette
@@ -264,12 +252,32 @@ one interchangeable suitability curve for every plant.
   a camera-following transparent haze cylinder, because its finite faces can
   intersect distant terrain as rectangular bands.
 - In development, press backtick and use **Island Distance Scenery** to tune the
-  shared peak, the directly connected **Neighbor Terrain Apron**, and the
-  **Far Terrain Belt** separately. Both terrain layers expose visibility,
-  relief, vertical placement, haze onset, separate near/far haze, and distance
-  softness (the far belt also exposes width). The haze ranges deliberately
-  extend past full wash so visual tuning can push outer terrain completely into
-  the weather-colored air. These are global controls, not per-region overrides.
+  shared peak and directly connected **Neighbor Terrain Apron**. The apron
+  exposes visibility, relief, vertical placement, haze onset, separate near/far
+  haze, and distance softness. The haze ranges deliberately extend past full
+  wash so visual tuning can push outer terrain completely into the
+  weather-colored air. These are global controls, not per-region overrides.
+- Press `Shift` + backtick to open the standalone **Terrain Seam Lab**. It owns
+  the visual-only handoffs from playable PBR terrain to the neighbor apron and
+  from that apron to the chart-derived perimeter shell: feather start/end,
+  feather curve, world-space boundary wander, texture scale/strength, color
+  cohesion, brightness, saturation, warmth, and debug seam bands. Its isolation
+  controls can hide the apron or shell independently and show the shell in
+  wireframe. The **Actual map texture → neighbor apron** section controls a
+  complementary world-noise coverage blend across coincident terrain: the
+  active region's real PBR material yields only where the apron draws, so the
+  texture breaks into broad patches instead of ending at a straight material
+  line. Its start/end, curve, boundary wander, patch scale, and breakup detail
+  are independent of the apron color grade. In the shipped hybrid mode,
+  **Remove near shell through** clips the
+  shell's formerly submerged underlap out of the foreground before its far
+  handoff begins; that underlap otherwise reads as disconnected gray puddles
+  from elevated cameras. Values persist locally and can be copied as defaults.
+  The active-region carry strip owns the closest off-map ground, then remains
+  coincident with the low-detail apron while their complementary shader masks
+  exchange ownership. An elevated camera therefore sees a texture handoff
+  instead of redundant flat polygons. These controls never alter movement
+  height or collision.
 
 ## Region Look Targets
 

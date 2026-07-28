@@ -99,6 +99,9 @@ const AUTHORED_REGION_TERRAIN = {
   SW_BEACH: { preset: 'marine-iguana-colony', segments: 288 },
   SE_COAST: { preset: 'southeastern-rocky-coast', segments: 288 },
   SE_SHALLOW_SURF: { preset: 'southeastern-shallow-surf', segments: 300 },
+  // Analytic masks + packed material relief carry the close detail; the
+  // wetland basin itself is broad, so it does not need a 300+ grid.
+  S_WETLANDS: { preset: 'southern-wetlands-forest', segments: 264 },
 };
 
 function humanDirection(edge) {

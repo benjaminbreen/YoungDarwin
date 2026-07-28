@@ -49,6 +49,10 @@ import {
   vistaAirApplyGlsl,
   vistaAtmosphereUniforms,
 } from '../../world/vistas/vistaAtmosphere';
+import {
+  TERRAIN_TEXTURE_CARRY_GLSL,
+  terrainSeamUniforms,
+} from '../../world/vistas/terrainSeamDevRuntime';
 import { useThreeGameStore } from '../../store';
 import { InstancedGLBLayer } from './ecology/InstancedGLBLayer';
 import { ChartIslandShell } from './ChartIslandShell';
@@ -65,10 +69,9 @@ const MARKER_DUMMY = new THREE.Object3D();
 // writes per frame across at most a dozen materials.
 const LIVE_VISTA_MATERIALS = new Set();
 
-// The current layered mode now has one terrain family: the direct neighbor
-// apron. Experimental onward rings and diagonal patches were removed from the
-// render path after cross-map review showed that both created false land and
-// exposed mesh edges.
+// The apron-only mode has one terrain family: the direct neighbor apron.
+// Experimental onward geometry was removed after cross-map review showed that
+// it created false land and exposed mesh edges.
 const VISTA_FAMILY_KEYS = {
   apron: {
     relief: 'neighborApronRelief',
@@ -81,9 +84,14 @@ const VISTA_FAMILY_KEYS = {
 };
 
 const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
+  uniform vec3 uLocalApronSourceColor;
+  uniform vec4 uLocalApronSeam;
+  uniform vec4 uLocalApronTexture;
+  uniform vec4 uLocalApronGrade;
+  uniform vec4 uTextureCarrySeam;
+  uniform vec4 uApronShellTexture;
   varying vec3 vBorderWorldPosition;
   varying vec3 vBorderWorldNormal;
-  varying float vBorderBlend;
 
   float bvHash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -100,17 +108,30 @@ const BORDER_VISTA_GRAIN_GLSL = /* glsl */`
     );
   }
 
+  ${TERRAIN_TEXTURE_CARRY_GLSL}
 `;
 
 const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
-  // Seam and outer-edge handoffs are now geometric overlaps/tapers. Keep the
-  // terrain fully opaque here so distant ground never resolves into visible
-  // screen-door pixels or exposes the water layer through dry land.
+  // Complementary to the active-region PBR carry shader: the apron draws only
+  // where that material has yielded. Broad world-noise patches make the real
+  // texture dissolve into this surface without transparency or a ruled seam.
+  float bvTextureCarryProgress = tsCarryProgress(
+    vApronDepth,
+    vBorderWorldPosition.xz
+  );
+  float bvTextureCarryNoise = tsCarryNoise(vBorderWorldPosition.xz);
+  if (bvTextureCarryNoise >= bvTextureCarryProgress) discard;
+
+  // This material stays non-transparent: the complementary world-noise discard
+  // above selects one opaque owner at the local handoff without exposing the
+  // water layer through dry land.
   float bvDist = length(vBorderWorldPosition.xz);
   float bvNear = 1.0 - smoothstep(108.0, 178.0, bvDist);
-  float bvCoarse = bvNoise(vBorderWorldPosition.xz * 0.035 + vec2(2.0, -7.0));
-  float bvFine = bvNoise(vBorderWorldPosition.xz * 0.28 + vec2(11.0, 3.0));
-  float bvMottle = (bvCoarse - 0.5) * 0.085 + (bvFine - 0.5) * 0.02;
+  float bvTextureScale = max(0.001, uLocalApronTexture.x);
+  float bvTextureStrength = max(0.0, uLocalApronTexture.y);
+  float bvCoarse = bvNoise(vBorderWorldPosition.xz * bvTextureScale + vec2(2.0, -7.0));
+  float bvFine = bvNoise(vBorderWorldPosition.xz * bvTextureScale * 6.7 + vec2(11.0, 3.0));
+  float bvMottle = (bvCoarse - 0.5) * 0.14 + (bvFine - 0.5) * 0.045;
   float bvSlope = clamp(1.0 - abs(vBorderWorldNormal.y), 0.0, 1.0);
 
   vec3 bvWarmDust = vec3(1.045, 1.018, 0.95);
@@ -118,12 +139,67 @@ const BORDER_VISTA_GRAIN_APPLY = /* glsl */`
   float bvWarmth = smoothstep(0.34, 0.76, bvCoarse);
   vec3 bvTerrainTint = mix(bvCoolAsh, bvWarmDust, bvWarmth);
   float bvGrain = max(0.0, uVistaGrade.w);
-  diffuseColor.rgb *= mix(vec3(1.0), bvTerrainTint, 0.14 * bvNear * bvGrain);
+  diffuseColor.rgb *= mix(
+    vec3(1.0),
+    bvTerrainTint,
+    0.14 * bvNear * bvGrain * bvTextureStrength
+  );
   diffuseColor.rgb *= clamp(
-    1.0 + bvMottle * bvNear * bvGrain - bvSlope * 0.055,
+    1.0 + bvMottle * bvNear * bvGrain * bvTextureStrength - bvSlope * 0.055,
     0.82,
     1.16
   );
+
+  // The carry strip below this mesh still uses the active region's full PBR
+  // shader. Keep its average palette present across the start of the apron,
+  // then release it through a broad, world-noise-warped band. This is an
+  // color feather with no alpha transparency or water leakage.
+  float bvSeamCoarse = bvNoise(
+    vBorderWorldPosition.xz * bvTextureScale + vec2(-13.0, 5.0)
+  );
+  float bvSeamBroad = bvNoise(
+    vBorderWorldPosition.xz * bvTextureScale * 0.37 + vec2(4.0, 19.0)
+  );
+  float bvSeamNoise = bvSeamCoarse * 0.42 + bvSeamBroad * 0.58;
+  float bvSeamDepth = vApronDepth
+    + (bvSeamNoise - 0.5) * 2.0 * max(0.0, uLocalApronSeam.z);
+  float bvFeatherStart = min(uLocalApronSeam.x, uLocalApronSeam.y - 0.01);
+  float bvFeatherEnd = max(uLocalApronSeam.x + 0.01, uLocalApronSeam.y);
+  float bvApronProgress = smoothstep(bvFeatherStart, bvFeatherEnd, bvSeamDepth);
+  bvApronProgress = pow(
+    max(0.0001, bvApronProgress),
+    clamp(uLocalApronGrade.w, 0.2, 5.0)
+  );
+  float bvSourceHold = (1.0 - bvApronProgress)
+    * clamp(uLocalApronSeam.w, 0.0, 1.0);
+  vec3 bvSourceSurface = uLocalApronSourceColor
+    * (1.0 + (bvSeamNoise - 0.5) * 0.11 * bvTextureStrength);
+  diffuseColor.rgb = mix(diffuseColor.rgb, bvSourceSurface, bvSourceHold);
+
+  float bvGradeLuma = dot(
+    diffuseColor.rgb,
+    vec3(0.2126, 0.7152, 0.0722)
+  );
+  diffuseColor.rgb = mix(
+    vec3(bvGradeLuma),
+    diffuseColor.rgb,
+    clamp(uLocalApronGrade.y, 0.0, 2.5)
+  );
+  vec3 bvCoolGrade = vec3(0.78, 0.91, 1.22);
+  vec3 bvWarmGrade = vec3(1.24, 1.035, 0.76);
+  vec3 bvTemperature = uLocalApronGrade.z < 0.0
+    ? bvCoolGrade
+    : bvWarmGrade;
+  diffuseColor.rgb *= mix(
+    vec3(1.0),
+    bvTemperature,
+    min(1.0, abs(uLocalApronGrade.z)) * 0.5
+  );
+  diffuseColor.rgb *= max(0.0, uLocalApronGrade.x);
+
+  if (uApronShellTexture.z > 0.5) {
+    diffuseColor.rgb = vec3(0.96, 0.15, 0.34);
+  }
 `;
 
 // Maps the aerialPerspective dial (0 = scene fog verbatim, 1 = maximum reach)
@@ -134,7 +210,7 @@ function vistaFogScale(aerialPerspective) {
   return THREE.MathUtils.lerp(1, 0.3, THREE.MathUtils.clamp(aerialPerspective ?? 0, 0, 1));
 }
 
-function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
+function createBorderVistaMaterial(cheapMaterials, family = 'apron', sourceColor = null) {
   const keys = VISTA_FAMILY_KEYS[family];
   const material = cheapMaterials
     ? new THREE.MeshPhongMaterial({
@@ -169,20 +245,27 @@ function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
     shader.uniforms.uVistaLayerTint = {
       value: new THREE.Color(...(VISTA_LAYER_DEBUG_TINT[family] || [1, 1, 1])),
     };
+    shader.uniforms.uLocalApronSourceColor = {
+      value: sourceColor?.clone?.() || new THREE.Color('#74684a'),
+    };
+    shader.uniforms.uLocalApronSeam = terrainSeamUniforms.uLocalApronSeam;
+    shader.uniforms.uLocalApronTexture = terrainSeamUniforms.uLocalApronTexture;
+    shader.uniforms.uLocalApronGrade = terrainSeamUniforms.uLocalApronGrade;
+    shader.uniforms.uTextureCarrySeam = terrainSeamUniforms.uTextureCarrySeam;
+    shader.uniforms.uApronShellTexture = terrainSeamUniforms.uApronShellTexture;
     material.userData.neighborApronUniforms = shader.uniforms;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
-        attribute float aBorderBlend;
         attribute float aApronDepth;
         uniform float uNeighborApronRelief;
         uniform float uNeighborApronVertical;
         uniform float uNeighborApronSoftFocus;
         uniform float uVistaFogScale;
+        uniform vec4 uTextureCarrySeam;
         varying vec3 vBorderWorldPosition;
         varying vec3 vBorderWorldNormal;
-        varying float vBorderBlend;
         varying float vApronDepth;
         ${VISTA_AIR_VERTEX_PARS_GLSL}`,
       )
@@ -195,7 +278,16 @@ function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vApronDepth = aApronDepth;
-        float neighborApronShape = smoothstep(0.06, 0.52, aApronDepth);
+        float textureShapeStart = clamp(
+          uTextureCarrySeam.y + 0.02,
+          0.06,
+          0.86
+        );
+        float neighborApronShape = smoothstep(
+          textureShapeStart,
+          min(0.99, textureShapeStart + 0.32),
+          aApronDepth
+        );
         float neighborApronDatum = -0.9;
         float neighborApronDistanceFlatten = 1.0
           - clamp(uNeighborApronSoftFocus, 0.0, 1.5)
@@ -208,7 +300,6 @@ function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
           + uNeighborApronVertical;
         transformed.y = mix(transformed.y, neighborApronY, neighborApronShape);
         vBorderWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vBorderBlend = aBorderBlend;
         ${VISTA_AIR_VERTEX_APPLY_GLSL}`,
       )
       .replace(
@@ -218,7 +309,7 @@ function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
         // Scene fog is sufficient in third person. Keep only a slight boost;
         // the former 35% increase made every apron a gray rectangle from the
         // overhead chart camera.
-        vFogDepth *= 1.0 + aBorderBlend * 0.08;
+        vFogDepth *= 1.08;
         // Aerial perspective. The scene uses fogExp2 at density 0.012, which is
         // tuned for local terrain and reaches 88% opacity by 123 m and 94% by
         // 142 m — so every distant layer was erased into a flat band before its
@@ -300,7 +391,7 @@ function createBorderVistaMaterial(cheapMaterials, family = 'apron') {
       );
   };
   material.customProgramCacheKey = () => (
-    `${cheapMaterials ? 'border-vista-grain-phong-v13' : 'border-vista-grain-standard-v14'}-${family}`
+    `${cheapMaterials ? 'border-vista-grain-phong-v16' : 'border-vista-grain-standard-v17'}-${family}`
   );
   material.needsUpdate = true;
   LIVE_VISTA_MATERIALS.add(material);
@@ -611,8 +702,12 @@ function BorderVista({
       : []
   ), [borderEcologyReady, config, foliageDrawScale, regionId, sourceEcology, targetConfig, targetEcology, transition, vista]);
   const material = useMemo(
-    () => createBorderVistaMaterial(cheapMaterials, 'apron'),
-    [cheapMaterials],
+    () => createBorderVistaMaterial(
+      cheapMaterials,
+      'apron',
+      transition?.sourceStats?.landColor || transition?.sourceColor,
+    ),
+    [cheapMaterials, transition],
   );
   useEffect(() => () => disposeVistaMaterial(material), [material]);
   if (!geometry) return null;

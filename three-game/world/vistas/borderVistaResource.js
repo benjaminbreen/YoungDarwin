@@ -5,7 +5,7 @@ const RESOURCE_CACHE_LIMIT = 4;
 const GENERATED_BASE = '/assets/generated/border-vistas';
 // Bump whenever the baked border-vista buffers are regenerated, or clients
 // keep serving the previous payload from cache at the unchanged URL.
-const GENERATED_GEOMETRY_VERSION = 35;
+const GENERATED_GEOMETRY_VERSION = 40;
 const resources = new Map();
 let useCounter = 0;
 
@@ -39,17 +39,6 @@ function decodeGeneratedPayload(arrayBuffer) {
   const payloadStart = 4 + Math.ceil(headerLength / 4) * 4;
   return {
     regionId: header.regionId,
-    diagonals: (header.diagonals || []).map(patch => ({
-      corner: patch.corner,
-      targetRegionId: patch.targetRegionId,
-      geometry: {
-        ...patch.geometry,
-        attributes: Object.fromEntries(Object.entries(patch.geometry.attributes || {}).map(([name, attribute]) => (
-          [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
-        ))),
-        index: decodeAttribute(patch.geometry.index, arrayBuffer, payloadStart),
-      },
-    })),
     entries: header.entries.map(entry => ({
       ...entry,
       preview: entry.preview ? {
@@ -65,20 +54,6 @@ function decodeGeneratedPayload(arrayBuffer) {
           [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
         ))),
         index: decodeAttribute(entry.carry.index, arrayBuffer, payloadStart),
-      } : null,
-      rings: (entry.rings || []).map(ring => ({
-        ...ring,
-        attributes: Object.fromEntries(Object.entries(ring.attributes || {}).map(([name, attribute]) => (
-          [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
-        ))),
-        index: decodeAttribute(ring.index, arrayBuffer, payloadStart),
-      })),
-      horizon: entry.horizon ? {
-        ...entry.horizon,
-        attributes: Object.fromEntries(Object.entries(entry.horizon.attributes || {}).map(([name, attribute]) => (
-          [name, decodeAttribute(attribute, arrayBuffer, payloadStart)]
-        ))),
-        index: decodeAttribute(entry.horizon.index, arrayBuffer, payloadStart),
       } : null,
     })),
   };
@@ -120,11 +95,6 @@ function buildGeometry(payload) {
 function hydratePayload(payload, backingBuffer = null) {
   return {
     regionId: payload.regionId,
-    diagonals: (payload.diagonals || []).map(patch => ({
-      corner: patch.corner,
-      targetRegionId: patch.targetRegionId,
-      geometry: buildGeometry(patch.geometry),
-    })).filter(patch => patch.geometry),
     // Keep the fetched ArrayBuffer alive for the typed-array views owned by the
     // geometries. This costs no duplicate allocation.
     backingBuffer,
@@ -133,19 +103,14 @@ function hydratePayload(payload, backingBuffer = null) {
       edge: entry.edge,
       preview: buildGeometry(entry.preview),
       carry: buildGeometry(entry.carry),
-      rings: (entry.rings || []).map(buildGeometry).filter(Boolean),
-      horizon: buildGeometry(entry.horizon),
     })),
   };
 }
 
 function disposeResource(value) {
-  for (const patch of value?.diagonals || []) patch.geometry?.dispose?.();
   for (const entry of value?.entries || []) {
     entry.preview?.dispose?.();
     entry.carry?.dispose?.();
-    for (const ring of entry.rings || []) ring?.dispose?.();
-    entry.horizon?.dispose?.();
   }
 }
 

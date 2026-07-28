@@ -6,7 +6,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
-import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
+import { ACESFilmicToneMapping, HalfFloatType, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
 import { clampFrameDelta } from './frameTiming';
 import {
   readQualityPreference,
@@ -137,6 +137,10 @@ const WaterDevPanel = dynamic(
   () => import('./ui/dev/WaterDevPanel').then(module => module.WaterDevPanel),
   { ssr: false },
 );
+const TerrainSeamDevPanel = dynamic(
+  () => import('./ui/dev/TerrainSeamDevPanel').then(module => module.TerrainSeamDevPanel),
+  { ssr: false },
+);
 const AudioDebugPanel = dynamic(
   () => import('./ui/dev/AudioDebugPanel').then(module => module.AudioDebugPanel),
   { ssr: false },
@@ -233,7 +237,14 @@ const DEFAULT_PERF_SETTINGS = {
   solarSunFacingGrade: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
-  ao: true,
+  // N8AO measured as the single most expensive composer pass (2026-07 Safari
+  // pass: enabling it cost ~5-10 fps there). Off by default on every tier; the
+  // perf panel toggle re-enables it live.
+  ao: false,
+  // Composer render targets default to 8-bit (UnsignedByteType). Half-float
+  // targets double post-chain bandwidth, which WebKit/Metal pays for far more
+  // dearly than Chrome; only the cinematic tier keeps HDR buffers.
+  postHalfFloat: false,
   reflections: true,
   // Swap world vegetation/terrain from MeshStandard (PBR) to matte MeshPhong —
   // same matte look, far cheaper per fragment. foliageDrawScale trims vegetation
@@ -256,6 +267,7 @@ const QUALITY_PRESETS = {
     contextAntialias: true,
     shadowQuality: 'standard',
     ao: false,
+    postHalfFloat: false,
     reflections: false,
     waterQuality: 'performance',
     waterSplashes: true,
@@ -283,9 +295,11 @@ const QUALITY_PRESETS = {
     postprocessing: true,
     contextAntialias: true,
     shadowQuality: 'high',
-    // N8AO grounds props and vegetation enough to be worth its cost even on
-    // the default tier (2026-07 screenshot pass); only mobile leaves it off.
-    ao: true,
+    // N8AO grounds props and vegetation nicely, but the 2026-07 Safari perf
+    // pass measured it as the most expensive composer pass by far. Default off
+    // on every tier; re-enable live from the perf panel.
+    ao: false,
+    postHalfFloat: false,
     // Planar reflection measured as near-free at this tier and the water
     // reads dramatically better with it — only mobile leaves it off.
     reflections: true,
@@ -307,7 +321,10 @@ const QUALITY_PRESETS = {
     postprocessing: true,
     contextAntialias: true,
     shadowQuality: 'high',
-    ao: true,
+    ao: false,
+    // Cinematic keeps HDR (half-float) composer buffers so bloom/grade banding
+    // stays clean on the tier that promises the richest image.
+    postHalfFloat: true,
     reflections: true,
     waterQuality: 'cinematic',
     waterSplashes: true,
@@ -335,24 +352,19 @@ const TRANSITION_REVEAL_CONTENT_PHASE = 5;
 // Asset-heavy props, specimens, and NPCs must not gate launch: a slow or
 // unresolved optional GLB otherwise strands the progress display at 97–98%.
 const STARTUP_OPENING_CONTENT_PHASE = 3;
-const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420, 570, 940, 1370];
-// Props, plant fields, structures, and specimens now mount beneath the aerial
-// shot. Their GLBs are prefetched from the moment the scene reports ready, so
-// each mount is a cheap scene-graph attach rather than a parse; keeping them
-// here leaves the first seconds of player control free of GLTF decode, Rapier
-// collider construction, and first-draw shader compiles. Offsets are measured
-// from the start of the cinematic.
-const INTRO_MOUNT_PHASE_TIMINGS_MS = [700, 2000];
-const INTRO_MOUNT_CONTENT_PHASE = 5;
-// Whatever is still outstanding at handoff (normally only the NPC actors, or
-// every remaining family when the cinematic is skipped) fills in across
-// separated idle windows after the player has control.
-const INTRO_REVEAL_PHASE_TIMINGS_MS = [250, 1100, 2400];
-// Destination resources are already preparing while the player approaches an
-// edge. Once the chart is opaque, mount one content family per painted/idle
-// window so React, Rapier, instance matrices, and shader discovery cannot all
-// consume the same animation frame.
-const TRANSITION_MOUNT_STEPS = Object.freeze([
+const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420];
+const INTRO_LOADING_STEPS = Object.freeze([1, 2, 3]);
+// The ladder both launch paths climb. Mounting one content family per
+// painted/idle window keeps React commits, Rapier collider construction,
+// instance matrix fills, and shader discovery off the same animation frame.
+//
+// Travel walks it as fast as idle windows allow once the chart is opaque;
+// startup spreads the tail of it across the opening cinematic. The decimal
+// stages exist because families four and five are the expensive ones — props,
+// plant fields, structures, the Beagle, and every specimen actor — and landing
+// them as two integer commits cost roughly 700 ms and 600 ms of frozen frames
+// in the middle of the shot.
+const CONTENT_MOUNT_STEPS = Object.freeze([
   2,
   3,
   3.2,
@@ -368,6 +380,22 @@ const TRANSITION_MOUNT_STEPS = Object.freeze([
   5.6,
   6,
 ]);
+// Props, plant fields, structures, and specimens mount beneath the aerial shot.
+// Their GLBs are prefetched from the moment the scene reports ready, so each
+// mount is a cheap scene-graph attach rather than a parse; keeping them here
+// leaves the first seconds of player control free of GLTF decode, Rapier
+// collider construction, and first-draw shader compiles.
+const INTRO_MOUNT_CONTENT_PHASE = 5.6;
+// Measured from the start of the cinematic. The first step waits for the black
+// fade to finish revealing the shot, and the last leaves roughly a second of
+// clear air before the camera hands off.
+const INTRO_MOUNT_WINDOW_MS = Object.freeze({ start: 520, end: 4300 });
+const INTRO_MOUNT_IDLE_TIMEOUT_MS = 120;
+// Whatever is still outstanding at handoff (normally only the NPC actors, or
+// every remaining family when the cinematic is skipped) fills in across
+// separated idle windows after the player has control.
+const INTRO_REVEAL_STEP_MS = 320;
+const INTRO_REVEAL_FIRST_STEP_MS = 250;
 // The deadline is a degraded fallback, not the normal transition clock. Full
 // destination content now mounts and compiles beneath the opaque chart first.
 const TRANSITION_READY_DEADLINE_MS = 6500;
@@ -442,6 +470,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
   const ao = (params.has('ao') || params.has('AO')) && !params.has('noAO')
     ? true
     : base.ao && !params.has('noAO');
+  const postHalfFloat = settingEnabled(params, base.postHalfFloat, ['hdrPost'], ['noHdrPost']);
   const reflections = (params.has('reflections') || params.has('reflection')) && !params.has('noReflections')
     ? true
     : base.reflections && !params.has('noReflections');
@@ -460,6 +489,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
     msaaSamples,
     postprocessing,
     ao,
+    postHalfFloat,
     stats: false,
     contextAntialias: base.contextAntialias !== false,
     shadows: settingEnabled(params, base.shadows, ['shadows'], ['noShadows']),
@@ -1534,50 +1564,73 @@ function OpeningIntroCompletion({
   return null;
 }
 
-// Mounts one content family per separated idle window, walking startPhase up to
-// endPhase. React commit, Rapier collider construction, instance matrix fills,
-// and shader discovery each get their own frame instead of converging on one.
-// `timings` are cumulative offsets from the first scheduled phase.
-function scheduleStagedContentPhases({ startPhase, endPhase, timings, commitPhase }) {
+// Mounts one content family per separated idle window, committing each value in
+// `steps` in order. React commit, Rapier collider construction, instance matrix
+// fills, and shader discovery each get their own frame instead of converging on
+// one. `timings` are cumulative offsets from the start of the sequence; a
+// shorter array repeats its final interval.
+function scheduleStagedContentPhases({ steps, timings, commitPhase, idleTimeoutMs = 420 }) {
   let cancelled = false;
   let timeoutHandle = null;
   let idleHandle = null;
   let frameHandle = null;
+  const startedAt = performance.now();
 
-  const schedule = phase => {
-    if (cancelled || phase >= endPhase) return;
-    const step = phase - startPhase;
-    const lastTiming = timings[timings.length - 1] ?? 0;
-    const previousDelay = step === 0 ? 0 : (timings[step - 1] ?? lastTiming);
-    const delay = Math.max(0, (timings[step] ?? lastTiming) - previousDelay);
+  const targetForStep = index => {
+    if (!timings.length) return 0;
+    if (index < timings.length) return timings[index];
+    // Repeat the final interval for any step the caller did not time.
+    const last = timings[timings.length - 1];
+    const stride = timings.length > 1 ? last - timings[timings.length - 2] : 0;
+    return last + stride * (index - timings.length + 1);
+  };
+
+  const schedule = index => {
+    if (cancelled || index >= steps.length) return;
+    // Anchored to the start of the sequence, not to the previous commit. A step
+    // that overruns its window then eats into the next delay instead of pushing
+    // the whole tail of the ladder past the end of the cinematic — which is how
+    // eleven 380 ms stages turned into fourteen seconds of mounting.
+    const delay = Math.max(0, targetForStep(index) - (performance.now() - startedAt));
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = null;
       const commit = () => {
         idleHandle = null;
         if (cancelled) return;
-        commitPhase(phase + 1);
+        commitPhase(steps[index]);
         frameHandle = window.requestAnimationFrame(() => {
           frameHandle = window.requestAnimationFrame(() => {
             frameHandle = null;
-            schedule(phase + 1);
+            schedule(index + 1);
           });
         });
       };
       if (typeof window.requestIdleCallback === 'function') {
-        idleHandle = window.requestIdleCallback(commit, { timeout: 420 });
+        idleHandle = window.requestIdleCallback(commit, { timeout: idleTimeoutMs });
       } else {
         commit();
       }
     }, delay);
   };
 
-  schedule(startPhase);
+  schedule(0);
   return () => {
     cancelled = true;
     if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
     if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
     if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
   };
+}
+
+// Cumulative offsets that spread `count` mounts evenly across a window.
+function evenlySpacedTimings(count, startMs, endMs) {
+  if (count <= 0) return [];
+  if (count === 1) return [startMs];
+  const span = Math.max(0, endMs - startMs);
+  return Array.from(
+    { length: count },
+    (_, index) => Math.round(startMs + (span * index) / (count - 1)),
+  );
 }
 
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
@@ -1707,7 +1760,7 @@ function ComposerDprSync() {
   return null;
 }
 
-function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
+function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterAmount = 0 }) {
   const examineSession = useThreeGameStore(state => state.examineSession);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
@@ -1804,7 +1857,14 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
   return (
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
-    <EffectComposer multisampling={composerMultisampling}>
+    // frameBufferType: the library defaults to HalfFloatType (RGBA16F), which
+    // doubles the bandwidth of every full-screen pass — Safari/Metal pays that
+    // far more dearly than Chrome. 8-bit is the default; cinematic opts back
+    // into HDR buffers via postHalfFloat.
+    <EffectComposer
+      multisampling={composerMultisampling}
+      frameBufferType={halfFloat ? HalfFloatType : UnsignedByteType}
+    >
       <ComposerDprSync />
       {enabled && <SMAA preset={SMAA_PRESET_ULTRA} />}
       {enabled && ao && (
@@ -2236,7 +2296,7 @@ function CentralPeakDiagnostics() {
       </div>
       <div className="mb-2 grid grid-cols-3 gap-1 rounded border border-amber-100/15 bg-black/20 p-1">
         {[
-          ['layered', 'Current layered'],
+          ['layered', 'Apron only'],
           ['shell', 'Chart shell'],
           ['hybrid', 'Combined'],
         ].map(([mode, label]) => {
@@ -2258,7 +2318,7 @@ function CentralPeakDiagnostics() {
         })}
       </div>
       <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
-        Switches instantly without moving the player or camera. Current layered uses the tuned
+        Switches instantly without moving the player or camera. Apron only uses the tuned
         direct-neighbor apron and Cerro Pajas backdrop. Chart shell isolates a full chart-derived
         continuation. Combined keeps the apron close and uses only the shell&apos;s far horizon.
         The URL records the choice for repeatable screenshots.
@@ -2546,6 +2606,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
       <CloudShadeDiagnostics />
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
+        <Toggle label="16-bit Post" checked={settings.postHalfFloat === true} onChange={value => set({ postHalfFloat: value })} />
         <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
         <Toggle label="Fast Shading" checked={settings.cheapMaterials !== false} onChange={value => set({ cheapMaterials: value, foliageDrawScale: value ? 0.85 : 1 })} />
         <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
@@ -2661,6 +2722,7 @@ export default function ThreeDarwinGame({
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
   const [showDarwinAnimationLab, setShowDarwinAnimationLab] = useState(false);
   const [showMapGeographyDev, setShowMapGeographyDev] = useState(false);
+  const [showTerrainSeamLab, setShowTerrainSeamLab] = useState(false);
   const [showAudioDebug, setShowAudioDebug] = useState(false);
   const [perfProbe, setPerfProbe] = useState(false);
   const [costProbe, setCostProbe] = useState(false);
@@ -2861,8 +2923,8 @@ export default function ThreeDarwinGame({
     let frameHandle = null;
 
     const schedulePhase = index => {
-      if (cancelled || index >= TRANSITION_MOUNT_STEPS.length) return;
-      const phase = TRANSITION_MOUNT_STEPS[index];
+      if (cancelled || index >= CONTENT_MOUNT_STEPS.length) return;
+      const phase = CONTENT_MOUNT_STEPS[index];
       const delay = 0;
       timeoutHandle = window.setTimeout(() => {
         timeoutHandle = null;
@@ -2922,6 +2984,9 @@ export default function ThreeDarwinGame({
     }
     if (DEV_TOOLS_ENABLED && params.has('animalAnimationLab')) {
       setShowAnimalAnimationLab(true);
+    }
+    if (DEV_TOOLS_ENABLED && params.has('terrainSeams')) {
+      setShowTerrainSeamLab(true);
     }
     if (DEV_TOOLS_ENABLED && params.has('ecologyDebug')) {
       const requestedSpecies = params.get('ecologyDebug');
@@ -3008,7 +3073,12 @@ export default function ThreeDarwinGame({
       }
       if (event.code !== 'Backquote' || !DEV_TOOLS_ENABLED) return;
       event.preventDefault();
-      setShowPerf(value => !value);
+      if (event.repeat) return;
+      if (event.shiftKey) {
+        setShowTerrainSeamLab(value => !value);
+      } else {
+        setShowPerf(value => !value);
+      }
     };
     const onKeyUp = event => {
       setShortcutModifierActive(event.metaKey || event.ctrlKey);
@@ -3253,8 +3323,7 @@ export default function ThreeDarwinGame({
     // is still opaque. This lets GLB parsing, texture uploads, Rapier setup, and
     // shader discovery settle before the curtain/camera sequence begins.
     return scheduleStagedContentPhases({
-      startPhase: 0,
-      endPhase: loadingContentTarget,
+      steps: INTRO_LOADING_STEPS.filter(phase => phase <= loadingContentTarget),
       timings: INTRO_LOADING_PHASE_TIMINGS_MS,
       commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
     });
@@ -3265,11 +3334,21 @@ export default function ThreeDarwinGame({
   // from the startup prefetch below, so each step is a scene-graph attach.
   useEffect(() => {
     if (!gameStarted || launchState !== 'intro' || !openingIntroStartedAt) return undefined;
-    if (loadingContentTarget >= INTRO_MOUNT_CONTENT_PHASE) return undefined;
+    const steps = CONTENT_MOUNT_STEPS.filter(
+      phase => phase > loadingContentTarget && phase <= INTRO_MOUNT_CONTENT_PHASE,
+    );
+    if (!steps.length) return undefined;
     return scheduleStagedContentPhases({
-      startPhase: loadingContentTarget,
-      endPhase: INTRO_MOUNT_CONTENT_PHASE,
-      timings: INTRO_MOUNT_PHASE_TIMINGS_MS,
+      steps,
+      timings: evenlySpacedTimings(
+        steps.length,
+        INTRO_MOUNT_WINDOW_MS.start,
+        INTRO_MOUNT_WINDOW_MS.end,
+      ),
+      // A saturated main thread never produces a real idle window, so a long
+      // deadline here is just latency added to every stage. The ladder has to
+      // finish inside the shot; a short deadline keeps it honest.
+      idleTimeoutMs: INTRO_MOUNT_IDLE_TIMEOUT_MS,
       commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
     });
   }, [gameStarted, launchState, loadingContentTarget, openingIntroStartedAt]);
@@ -3285,11 +3364,15 @@ export default function ThreeDarwinGame({
     // resumed launch never ran the cinematic staging, so this also covers
     // walking the whole remainder up from the loading target.
     const startPhase = Math.max(loadingContentTarget, startupContentPhaseRef.current);
-    if (startPhase >= STARTUP_FULL_CONTENT_PHASE) return undefined;
+    const steps = CONTENT_MOUNT_STEPS.filter(phase => phase > startPhase);
+    if (!steps.length) return undefined;
     return scheduleStagedContentPhases({
-      startPhase,
-      endPhase: STARTUP_FULL_CONTENT_PHASE,
-      timings: INTRO_REVEAL_PHASE_TIMINGS_MS,
+      steps,
+      timings: evenlySpacedTimings(
+        steps.length,
+        INTRO_REVEAL_FIRST_STEP_MS,
+        INTRO_REVEAL_FIRST_STEP_MS + INTRO_REVEAL_STEP_MS * (steps.length - 1),
+      ),
       commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
     });
   }, [gameStarted, launchOverlayDismissed, launchState, loadingContentTarget]);
@@ -3410,6 +3493,7 @@ export default function ThreeDarwinGame({
             <PostFX
               enabled={scenePerfSettings.postprocessing}
               ao={scenePerfSettings.ao}
+              halfFloat={scenePerfSettings.postHalfFloat === true}
               multisampling={scenePerfSettings.msaaSamples ?? DEFAULT_PERF_SETTINGS.msaaSamples}
               underwaterAmount={underwaterAmount}
             />
@@ -3497,6 +3581,9 @@ export default function ThreeDarwinGame({
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && (
           <MapGeographyDevPanel open={showMapGeographyDev} onClose={() => setShowMapGeographyDev(false)} />
+        )}
+        {DEV_TOOLS_ENABLED && gameUiVisible && (
+          <TerrainSeamDevPanel open={showTerrainSeamLab} onClose={() => setShowTerrainSeamLab(false)} />
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <WaterDevPanel />}
         {gameUiVisible && <AudioDebugPanel open={showAudioDebug} onClose={closeAudioDebug} />}

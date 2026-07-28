@@ -275,17 +275,7 @@ const {
   mapApronSourceUToTargetU,
   mapApronTargetUToSourceU,
   makeNeighborPreviewGeometry,
-  VISTA_SEA_CLEARANCE,
 } = loadModule('three-game/world/vistas/apronGeometry.js');
-const {
-  diagonalNeighbor,
-  makeDiagonalApronPatches,
-} = loadModule('three-game/world/vistas/diagonalApronPatches.js');
-const {
-  LAYERED_APRON_MAX_RINGS,
-  layeredApronChain,
-  makeLayeredApronRings,
-} = loadModule('three-game/world/vistas/layeredApronRings.js');
 const {
   getCentralPeakView,
   resolveCentralPeakAppearance,
@@ -303,6 +293,10 @@ const {
   DISTANCE_SCENERY_SHELL_DEFAULTS,
   distanceSceneryRuntime,
 } = loadModule('three-game/world/vistas/distanceSceneryRuntime.js');
+const {
+  TERRAIN_SEAM_DEV_DEFAULTS,
+  terrainSeamUniforms,
+} = loadModule('three-game/world/vistas/terrainSeamDevRuntime.js');
 const {
   buildBorderTransition,
 } = loadModule('three-game/world/vistas/transitions.js');
@@ -2998,7 +2992,7 @@ test('neighbor apron sampling aligns authored route gateways and remains reversi
   }
 });
 
-test('distant layered scenery never composes land through a water crossing', () => {
+test('border vistas never compose land through a water crossing', () => {
   for (const [fromId, direction, toId, routeKind] of FLOREANA_ROUTE_EDGES) {
     assert.equal(getFloreanaRouteKind(fromId, toId), routeKind);
     assert.equal(getFloreanaRouteKind(toId, fromId), routeKind);
@@ -3015,32 +3009,6 @@ test('distant layered scenery never composes land through a water crossing', () 
     [['west', 'POST_OFFICE_BAY'], ['east', 'CORMORANT_BAY']],
     'the immediate west land apron remains available',
   );
-  assert.deepEqual(
-    layeredApronChain('POST_OFFICE_BAY', 'west'),
-    [],
-    'Post Office Bay does not turn its water route to Northwest Reef into a land ring',
-  );
-  assert.equal(
-    diagonalNeighbor('N_SHORE', 'northwest'),
-    null,
-    'Northern Shore cannot compose a northwest land quadrant through the Beagle water route',
-  );
-
-  for (const regionId of Object.keys(regionMaps)) {
-    for (const edge of ['north', 'east', 'south', 'west']) {
-      for (const hop of layeredApronChain(regionId, edge)) {
-        const hint = regionMaps[hop.sourceRegionId].edgeHints.find(entry => (
-          entry.kind === 'open'
-          && entry.edge === edge
-          && entry.toRegionId === hop.targetRegionId
-        ));
-        assert.ok(
-          hint?.routeKind === 'land' || hint?.routeKind === 'creek',
-          `${hop.sourceRegionId} ${edge} onward ring must use land or creek`,
-        );
-      }
-    }
-  }
 });
 
 test('chart shell is one continuous front-sided surface with sea below water', () => {
@@ -3056,6 +3024,12 @@ test('chart shell is one continuous front-sided surface with sea below water', (
       assert.ok(stats.bounds.min[1] < WATER_LEVEL - 3, `${regionId} sea clears the water plane`);
       assert.ok(stats.bounds.max[1] > WATER_LEVEL + 4, `${regionId} retains island relief`);
       const normal = geometry.getAttribute('normal');
+      const seamColor = geometry.getAttribute('aShellSeamColor');
+      const handoff = geometry.getAttribute('aShellHandoff');
+      assert.equal(seamColor.count, geometry.getAttribute('position').count);
+      assert.equal(handoff.count, geometry.getAttribute('position').count);
+      assert.ok(handoff.array.some(value => value <= 0.001), `${regionId} has an apron-owned handoff`);
+      assert.ok(handoff.array.some(value => value >= 0.999), `${regionId} reaches chart-shell color`);
       let averageY = 0;
       for (let index = 0; index < normal.count; index += 1) averageY += normal.getY(index);
       averageY /= normal.count;
@@ -3081,6 +3055,14 @@ test('distance scenery controls bind to the apron and shell without retired far 
     path.resolve('three-game/ThreeDarwinGame.jsx'),
     'utf8',
   );
+  const seamPanelSource = fs.readFileSync(
+    path.resolve('three-game/ui/dev/TerrainSeamDevPanel.jsx'),
+    'utf8',
+  );
+  const apronGeometrySource = fs.readFileSync(
+    path.resolve('three-game/world/vistas/apronGeometry.js'),
+    'utf8',
+  );
   assert.deepEqual(DISTANCE_SCENERY_MODES, {
     layered: 'layered',
     shell: 'shell',
@@ -3101,12 +3083,34 @@ test('distance scenery controls bind to the apron and shell without retired far 
   assert.match(shellSource, /side:\s*THREE\.FrontSide/);
   assert.match(shellSource, /mode === 'hybrid'/);
   assert.match(shellSource, /mode === 'layered'/);
+  assert.match(shellSource, /uShellHorizonOnly[\s\S]*shellClipWander[\s\S]*discard/);
   assert.doesNotMatch(shellSource, /THREE\.DoubleSide/);
+  assert.match(gameSource, /event\.shiftKey[\s\S]*setShowTerrainSeamLab/);
+  assert.match(apronGeometrySource, /overlapEndRow \+ 1/);
+  assert.match(apronGeometrySource, /const carryEndRow = rows/);
+  assert.match(apronGeometrySource, /const farDepths = new Float32Array\(depths\.length\)/);
+  assert.match(apronGeometrySource, /geometry\.setAttribute\('aApronDepth'/);
+  assert.match(borderSource, /tsCarryProgress[\s\S]*bvTextureCarryNoise[\s\S]*discard/);
+  assert.match(terrainSource, /terrainTextureCarryProgress[\s\S]*terrainTextureCarryNoise[\s\S]*discard/);
+  assert.match(seamPanelSource, /centralPeakDev\.neighborApronVisible/);
+  assert.match(seamPanelSource, /distanceSceneryRuntime\.shellVisible/);
+  assert.match(seamPanelSource, /distanceSceneryRuntime\.shellWireframe/);
+  for (const key of Object.keys(TERRAIN_SEAM_DEV_DEFAULTS)) {
+    assert.match(seamPanelSource, new RegExp(`terrainSeamDev\\.${key}`), `${key} reaches the seam lab`);
+  }
+  assert.equal(
+    terrainSeamUniforms.uLocalApronSeam.value.x,
+    TERRAIN_SEAM_DEV_DEFAULTS.localApronFeatherStart,
+  );
+  assert.equal(
+    terrainSeamUniforms.uApronShellSeam.value.y,
+    TERRAIN_SEAM_DEV_DEFAULTS.apronShellFeatherEnd,
+  );
   const bakeSource = fs.readFileSync(
     path.resolve('scripts/build-border-vista-buffers.mjs'),
     'utf8',
   );
-  assert.doesNotMatch(bakeSource, /makeLayeredApronRings|makeDiagonalApronPatches/);
+  assert.doesNotMatch(bakeSource, /rings:\s*\[\]|horizon:\s*null|diagonals:\s*\[\]/);
 });
 
 test('distant scenery shares one aerial-perspective block and no haze wall', () => {
@@ -3137,123 +3141,8 @@ test('distant scenery shares one aerial-perspective block and no haze wall', () 
   // fog colour and silhouettes against a differently coloured sky.
   assert.match(skySource, /uVistaHorizonColor/);
   assert.doesNotMatch(skySource, /HAZE_WALL|hazeWallMatRef|hazeGradientTexture/);
-  // The far-terrain belt is gone; nothing should reference it.
+  // The retired belt renderer must not return.
   assert.doesNotMatch(vistaSource, /FarTerrain|farTerrain/);
-});
-
-test('every distant layer splays wider than the one in front of it', () => {
-  // The general cause of "a further layer / the sea is poking through the
-  // distant hills" is that nothing forced the layers to stack. Each is built
-  // from its own map's heightfield, so a layer behind could be narrower or
-  // lower than the one in front, and wherever it was the viewer looked over the
-  // near crest straight past the far one. Both invariants are now enforced by
-  // construction; this locks the width half across every region and edge, not
-  // just the one that happened to be broken.
-  let pairs = 0;
-  for (const regionId of Object.keys(regionMaps)) {
-    const config = getRegionTerrainConfig(regionId);
-    if (!config) continue;
-    for (const vista of getBorderVistas(regionId)) {
-      const rings = makeLayeredApronRings(regionId, config, vista);
-      if (!rings.length) continue;
-      const lateralAxis = vista.edge === 'north' || vista.edge === 'south' ? 'x' : 'z';
-      const widthOf = geometry => {
-        const position = geometry.getAttribute('position');
-        let min = Infinity;
-        let max = -Infinity;
-        for (let i = 0; i < position.count; i += 1) {
-          const value = lateralAxis === 'x' ? position.getX(i) : position.getZ(i);
-          min = Math.min(min, value);
-          max = Math.max(max, value);
-        }
-        return max - min;
-      };
-      let previous = widthOf(makeNeighborPreviewGeometry(
-        regionId,
-        config,
-        vista.toRegionId,
-        getRegionTerrainConfig(vista.toRegionId),
-        vista,
-        buildBorderTransition(regionId, config, vista, getRegionTerrainConfig(vista.toRegionId)),
-      ));
-      for (const [index, ring] of rings.entries()) {
-        const width = widthOf(ring);
-        assert.ok(
-          width > previous,
-          `${regionId} ${vista.edge} ring ${index} (${width.toFixed(0)} m) splays past the layer in front (${previous.toFixed(0)} m)`,
-        );
-        previous = width;
-        pairs += 1;
-        ring.dispose();
-      }
-    }
-  }
-  assert.ok(pairs > 100, `checked a meaningful number of layer pairs (${pairs})`);
-});
-
-test('distant layers never sit in the water plane\'s fighting band', () => {
-  // Geometry parked within ~a metre of the sea surface at ring range is inside
-  // both the depth buffer's precision AND the ocean's wave displacement, so the
-  // water renders in hard straight horizontal slices THROUGH the distant land.
-  // Rings and quadrants must therefore be clearly above or clearly below it.
-  // The apron is exempt: it carries the real shoreline and has to cross.
-  for (const regionId of ['EASTERN_CLIFFS', 'POST_OFFICE_BAY', 'PUNTA_SUR']) {
-    const config = getRegionTerrainConfig(regionId);
-    const band = VISTA_SEA_CLEARANCE - 0.1;
-    const offenders = geometry => {
-      const position = geometry.getAttribute('position');
-      let count = 0;
-      for (let i = 0; i < position.count; i += 1) {
-        if (Math.abs(position.getY(i) - WATER_LEVEL) < band) count += 1;
-      }
-      return count;
-    };
-    for (const vista of getBorderVistas(regionId)) {
-      for (const ring of makeLayeredApronRings(regionId, config, vista)) {
-        assert.equal(offenders(ring), 0, `${regionId} ${vista.edge} ring clears the water plane`);
-        ring.dispose();
-      }
-    }
-    for (const patch of makeDiagonalApronPatches(regionId, config)) {
-      assert.equal(offenders(patch), 0, `${regionId} quadrant clears the water plane`);
-      patch.dispose();
-    }
-  }
-});
-
-test('layered apron rings follow the real onward route and stay watertight', () => {
-  const cases = [
-    ['POST_OFFICE_BAY', 'south', 'POST_SCRUB_RISE', 'C_HIGH'],
-    ['PUNTA_SUR', 'north', 'S_VOLCANIC', 'PENAL_COLONY'],
-  ];
-  for (const [regionId, edge, targetRegionId, farRegionId] of cases) {
-    const config = getRegionTerrainConfig(regionId);
-    const vista = getBorderVistas(regionId).find(entry => entry.edge === edge);
-    assert.equal(vista.toRegionId, targetRegionId);
-    // Ring 1 is the neighbour's own continuation, so the chain starts there.
-    const chain = layeredApronChain(targetRegionId, edge, LAYERED_APRON_MAX_RINGS);
-    assert.ok(chain.length >= 1, `${regionId} has an onward hop past ${targetRegionId}`);
-    assert.equal(chain[0].sourceRegionId, targetRegionId);
-    assert.equal(chain[0].targetRegionId, farRegionId);
-
-    const rings = makeLayeredApronRings(regionId, config, vista);
-    assert.equal(rings.length, chain.length, `${regionId} builds one mesh per hop`);
-    for (const [index, ring] of rings.entries()) {
-      assert.equal(ring.userData.mode, 'layered-apron-ring');
-      assert.equal(ring.userData.ringIndex, index);
-      const position = ring.getAttribute('position');
-      assert.equal(ring.getAttribute('aApronDepth').count, position.count);
-      assert.equal(ring.getAttribute('aBorderBlend').count, position.count);
-      // All four rims must be skirted. An unskirted rim is an open sheet edge,
-      // and the camera looking at one sees straight through to the sky.
-      ring.computeBoundingBox();
-      assert.ok(
-        ring.boundingBox.min.y < WATER_LEVEL - 10,
-        `${regionId} ring ${index} extrudes its rims below the sea`,
-      );
-      ring.dispose();
-    }
-  }
 });
 
 test('central peak bearing follows the chart from every side of Floreana', () => {

@@ -43,7 +43,7 @@ import {
 //      analytically per fragment plus scrolling detail ripples, so the
 //      surface is glassy at any tessellation (no faceted diamonds).
 // Caustics live in the terrain shader (light belongs on the sand, not on the
-// surface) — see injectSeabedCaustics in Terrain.jsx.
+// surface) — see injectTerrainRenderingExtensions in Terrain.jsx.
 // ---------------------------------------------------------------------------
 
 // Tunables

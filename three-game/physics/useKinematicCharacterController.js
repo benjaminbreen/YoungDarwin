@@ -85,18 +85,40 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
 
   const ready = useCallback(() => state.current.ready, []);
 
+  // The player's RigidBody is keyed on the playable mode, so a possession swap
+  // remounts it — as does a hot reload, and as does any re-render that replaces
+  // the collider. React detaches these refs in the layout phase but Rapier drops
+  // the handles in a passive effect, and the frame loop runs in between. Calling
+  // `computeColliderMovement` or `setTranslation` with a handle Rapier has
+  // already dropped panics inside wasm, and a Rust panic never releases the
+  // wasm-bindgen borrow guard — the whole world is dead for the rest of the page
+  // after that, which surfaces as a flood of "recursive use of an object" on the
+  // next zone arrival. Both lookups are plain JS map reads (rapier unmaps a
+  // body's colliders when the body goes), so this costs nothing per frame.
+  const liveBody = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body || !world) return null;
+    return world.getRigidBody(body.handle) ? body : null;
+  }, [bodyRef, world]);
+
+  const liveCollider = useCallback(() => {
+    const collider = colliderRef.current;
+    if (!collider || !world) return null;
+    return world.getCollider(collider.handle) ? collider : null;
+  }, [colliderRef, world]);
+
   const sync = useCallback(position => {
       const current = state.current;
-      const body = bodyRef.current;
+      const body = liveBody();
       if (!current.ready || !body) return;
       body.setTranslation(position, true);
       body.setNextKinematicTranslation(position);
-  }, [bodyRef]);
+  }, [liveBody]);
 
   const move = useCallback((position, desiredDelta) => {
       const current = state.current;
-      const body = bodyRef.current;
-      const collider = colliderRef.current;
+      const body = liveBody();
+      const collider = liveCollider();
       if (!current.ready || !body || !collider) {
         return {
           movement: desiredDelta.clone(),
@@ -131,7 +153,7 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
         collisionDetails,
         source: 'rapier-character',
       };
-  }, [bodyRef, colliderRef]);
+  }, [liveBody, liveCollider]);
 
   return useMemo(() => ({
     ready,
