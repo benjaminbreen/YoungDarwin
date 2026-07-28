@@ -338,6 +338,9 @@ const {
   setSoundscapeAudioTrackTrimDb,
 } = loadModule('three-game/audio/audioRuntime.js');
 const {
+  interactionMaterialForProp,
+} = loadModule('three-game/audio/interactionMaterials.js');
+const {
   NORTHERN_HIGHLANDS_ALT_POST_OFFICE_BAY_SEAM,
   NORTHERN_HIGHLANDS_CORMORANT_BAY_SEAM,
   NORTHERN_HIGHLANDS_WATKINS_CREEK_SEAM,
@@ -1502,6 +1505,14 @@ test('launch shell leaves Rapier WASM initialization to the Physics boundary', (
   assert.doesNotMatch(source, /\brapier\.init\s*\(/i);
 });
 
+test('region travel replaces the complete Rapier world instead of recycling collider handles', () => {
+  const source = fs.readFileSync(path.resolve('three-game/components/ThreeScene.jsx'), 'utf8');
+  assert.match(
+    source,
+    /<PhysicsProvider\s+key=\{`region-physics:\$\{currentZoneId\}`\}/,
+  );
+});
+
 test('Rapier terrain contacts stay ground-only while identified walls remain push contacts', () => {
   const terrainSlope = {
     normal: { x: -0.72, y: 0.69, z: 0 },
@@ -1834,6 +1845,13 @@ test('contextual animal, settlement, equipment, and terrain sprites are committe
   assert.equal(trackLabels.rockTumble, 'Loose rock tumble');
   assert.equal(trackLabels.dryBranch, 'Dry branch movement');
   resetSoundscapeAudioMix();
+});
+
+test('prop interaction audio tolerates a prop removed during region travel', () => {
+  assert.equal(interactionMaterialForProp(null), null);
+  assert.equal(interactionMaterialForProp(undefined), null);
+  assert.equal(interactionMaterialForProp({ type: 'barrel' }), 'wood');
+  assert.equal(interactionMaterialForProp({ visualAsset: 'basalt-stone' }), 'stone');
 });
 
 test('sound debug mix trims clamp, serialize, and reset with stable track keys', () => {

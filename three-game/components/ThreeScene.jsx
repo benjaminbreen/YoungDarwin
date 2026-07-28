@@ -75,7 +75,13 @@ export function ThreeScene({
           />
         )
       )}
-      <PhysicsProvider debug={settings.physicsDebug === true}>
+      {/* A region owns one complete Rapier world. Reusing the same world while
+          React removes and recreates a whole region's heightfield, obstacles,
+          and props eventually recycles handles still referenced by Rapier's
+          broad phase/character queries and poisons the WASM borrow state.
+          Travel is already covered by the chart, so rebuild the small physics
+          container with the destination while renderer/assets stay cached. */}
+      <PhysicsProvider key={`region-physics:${currentZoneId}`} debug={settings.physicsDebug === true}>
         <FaunaFrameScheduler />
         {/* World and player stream independently. A late prop/specimen GLB can
             no longer blank Darwin, and a deferred animation bank can no

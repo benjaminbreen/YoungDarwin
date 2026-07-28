@@ -1,5 +1,5 @@
-function normalizedPropText(prop = {}) {
-  return [prop.type, prop.visual, prop.label, prop.visualAsset]
+function normalizedPropText(prop = null) {
+  return [prop?.type, prop?.visual, prop?.label, prop?.visualAsset]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
