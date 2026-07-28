@@ -106,11 +106,39 @@ import {
   assignToolbarSlot,
   moveToolbarSlot as reorderToolbarSlot,
 } from './toolbar';
+import {
+  buildSessionSnapshot,
+  isUsableSessionSnapshot,
+  writeSessionSnapshot,
+} from './sessionSave';
 
 const MAX_HEALTH = 100;
 const MAX_FATIGUE = 100;
 const MAX_CURIOSITY = 100;
 const HOURS_PER_DAY = 24;
+
+// Narration/examine/encounter requests had no timeout, so a stalled connection
+// left `narratorPending` true forever and the composer stuck on its loading
+// dots with no way out. Every LLM route already answers with local fallback
+// prose on error, so aborting simply routes into that existing path.
+const LLM_REQUEST_TIMEOUT_MS = 20000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = LLM_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// An aborted request reports browser-internal text ("signal is aborted without
+// reason"); say something a player can act on instead.
+function describeNarratorError(error, fallbackMessage = 'Narration unavailable.') {
+  if (error?.name === 'AbortError') return 'The narrator did not answer in time; a local note was written instead.';
+  return String(error?.message || error || fallbackMessage);
+}
 const INITIAL_PLAYER_POSE = Object.freeze({
   position: Object.freeze({ x: 0, y: 0, z: 0 }),
   facing: Object.freeze({ x: 0, y: 0, z: -1 }),
@@ -932,6 +960,94 @@ export const useThreeGameStore = create((set, get) => ({
     set(useThreeGameStore.getInitialState(), true);
   },
 
+  // Resume support. `saveSession` is called on meaningful progress (see
+  // useSessionAutosave); `restoreSession` replays a snapshot over a fresh
+  // initial state so any field the snapshot does not carry keeps its default.
+  saveSession: () => {
+    const snapshot = buildSessionSnapshot(get());
+    return writeSessionSnapshot(snapshot) ? snapshot : null;
+  },
+
+  restoreSession: snapshot => {
+    if (!isUsableSessionSnapshot(snapshot)) return false;
+    resetThreeRuntimeState();
+    const initial = useThreeGameStore.getInitialState();
+    // getZone falls back to the default region for unknown ids rather than
+    // returning null, so compare the resolved id: a renamed or removed region in
+    // an older save must not silently drop the player somewhere else.
+    const zone = getZone(snapshot.currentZoneId);
+    if (!zone || zone.id !== snapshot.currentZoneId) return false;
+
+    const patch = { ...initial };
+    const assign = (key, value, fallback) => {
+      patch[key] = value === null || value === undefined ? fallback : value;
+    };
+
+    assign('seed', snapshot.seed, initial.seed);
+    assign('playableModeId', snapshot.playableModeId, initial.playableModeId);
+    patch.currentZoneId = snapshot.currentZoneId;
+    assign('currentLocalCellId', snapshot.currentLocalCellId, initial.currentLocalCellId);
+    assign('playerSpawnId', snapshot.playerSpawnId, initial.playerSpawnId);
+    assign('health', snapshot.health, initial.health);
+    assign('fatigue', snapshot.fatigue, initial.fatigue);
+    assign('curiosity', snapshot.curiosity, initial.curiosity);
+    assign('timeOfDay', snapshot.timeOfDay, initial.timeOfDay);
+    assign('day', snapshot.day, initial.day);
+    assign('localStanding', snapshot.localStanding, initial.localStanding);
+    patch.questComplete = Boolean(snapshot.questComplete);
+    assign('activeToolId', snapshot.activeToolId, initial.activeToolId);
+    assign('supplies', snapshot.supplies, initial.supplies);
+    assign('symsDirective', snapshot.symsDirective, initial.symsDirective);
+    assign('symsZoneId', snapshot.symsZoneId, initial.symsZoneId);
+    patch.weather = normalizeWeatherState(snapshot.weather, initial.weather);
+    patch.inventory = Array.isArray(snapshot.inventory) ? snapshot.inventory : initial.inventory;
+    patch.items = Array.isArray(snapshot.items) ? snapshot.items : initial.items;
+    patch.journal = Array.isArray(snapshot.journal) && snapshot.journal.length > 0
+      ? snapshot.journal
+      : initial.journal;
+    patch.bookLastPages = snapshot.bookLastPages || initial.bookLastPages;
+    for (const key of [
+      'collectedSpecimenIds',
+      'collectedSpecimenActorIds',
+      'documentedSpecimenIds',
+      'examinedTypeIds',
+      'consultedBookIds',
+      'visitedZoneIds',
+      'visitedLocalCellIds',
+      'favoriteSpecimenIds',
+      'toolbarOrder',
+      'darwinToolbarOrder',
+    ]) {
+      if (Array.isArray(snapshot[key]) && snapshot[key].length > 0) patch[key] = snapshot[key];
+    }
+    // Visited regions must always include where the player actually is.
+    if (!patch.visitedZoneIds.includes(patch.currentZoneId)) {
+      patch.visitedZoneIds = [...patch.visitedZoneIds, patch.currentZoneId];
+    }
+
+    // Re-narrate arrival for the restored region so the log is not empty and the
+    // player is told where they have resumed.
+    const narration = {
+      ...getThreeInitialNarration(patch.currentZoneId),
+      ...(zoneNarration(zone, {
+        day: patch.day,
+        timeOfDay: patch.timeOfDay,
+        source: 'initial',
+      }) || {}),
+    };
+    const resumeText = String(narration.narration || zone.description || '').trim();
+    if (resumeText) {
+      patch.message = resumeText;
+      patch.narratorLog = createInitialNarratorLog(
+        { narration: resumeText, educationalNote: narration.educationalNote || '' },
+        { day: patch.day, timeOfDay: patch.timeOfDay },
+      );
+    }
+
+    set(patch, true);
+    return true;
+  },
+
   beginFinalAssessment: async () => {
     const state = get();
     if (state.finalAssessment) return state.finalAssessment;
@@ -1435,7 +1551,7 @@ export const useThreeGameStore = create((set, get) => ({
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     const idempotencyKey = [requestState.seed || 'three', npcId, 'encounter-turn', turnId].join(':');
     try {
-      const response = await fetch('/api/three-encounter', {
+      const response = await fetchWithTimeout('/api/three-encounter', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2622,7 +2738,7 @@ export const useThreeGameStore = create((set, get) => ({
     });
 
     try {
-      const response = await fetch('/api/three-examine', {
+      const response = await fetchWithTimeout('/api/three-examine', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3351,7 +3467,7 @@ export const useThreeGameStore = create((set, get) => ({
 
     if (state.activeConstraint?.type === 'snare_immobilized') {
       try {
-        const response = await fetch('/api/three-narrate', {
+        const response = await fetchWithTimeout('/api/three-narrate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -3406,7 +3522,7 @@ export const useThreeGameStore = create((set, get) => ({
     if (FIELD_DILEMMA_TYPES.has(state.activeConstraint?.type)) {
       const config = FIELD_DILEMMA_CONFIG[state.activeConstraint.type];
       try {
-        const response = await fetch('/api/three-narrate', {
+        const response = await fetchWithTimeout('/api/three-narrate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -3461,7 +3577,7 @@ export const useThreeGameStore = create((set, get) => ({
     }
 
     try {
-      const response = await fetch('/api/three-narrate', {
+      const response = await fetchWithTimeout('/api/three-narrate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3525,7 +3641,7 @@ export const useThreeGameStore = create((set, get) => ({
       });
       set({
         narratorPending: false,
-        narratorError: String(error?.message || error || 'Narration unavailable.'),
+        narratorError: describeNarratorError(error),
       });
       get().applyNarration(fallback, { playerInput: trimmed, allowThought: false });
       return fallback;

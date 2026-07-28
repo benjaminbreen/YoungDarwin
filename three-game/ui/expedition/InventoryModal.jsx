@@ -15,6 +15,7 @@ import {
   GoldDivider,
 } from './ExpeditionPanel';
 import { TOOL_ICONS } from './icons';
+import { useDismissableOverlay } from '../useDismissableOverlay';
 
 // ---------------------------------------------------------------------------
 // Small line icons for the supplies ledger (mockup uses fine glyphs, not art).
@@ -413,6 +414,7 @@ function SpecimenCaseTab() {
 
 export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
   const [tab, setTab] = useState(initialTab);
+  const panelRef = useDismissableOverlay(open, onClose);
 
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -427,7 +429,15 @@ export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
       onKeyDown={event => event.stopPropagation()}
     >
       <ExpeditionPanel variant="modal" className="max-h-full w-[min(58rem,100%)] overflow-y-auto" innerClassName="p-3 sm:p-5">
-        <div onClick={event => event.stopPropagation()}>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Inventory and tools"
+          tabIndex={-1}
+          className="focus:outline-none"
+          onClick={event => event.stopPropagation()}
+        >
           <div className="relative text-center">
             <h2 className="font-expedition text-[22px] font-semibold uppercase tracking-[0.18em] text-expedition-parchment">
               Inventory <span className="text-expedition-gold">&amp;</span> Tools

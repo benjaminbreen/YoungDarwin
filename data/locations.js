@@ -140,9 +140,10 @@ export const locations = [
     color: 'beige',
     type: 'bay',
     validMoves: ['W','E','SW','S','NW','N'],
-    // Inland overlook on the central trail: starts Darwin above the landing
-    // with the cove, mail barrel, sandbar, and Beagle readable in one view.
-    playerStart: [0, 0, 23.5],
+    // Upper shoulder of the central rise: starts Darwin above the landing
+    // looking east-southeast along the slope, with the cove, sandbar, and
+    // Beagle off his left shoulder.
+    playerStart: [-3.5, 0, 22],
     specimens: ['crab','basalt','barnacle','galapagoscotton','flightlesscormorant','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
     specimenPlacements: [
       {

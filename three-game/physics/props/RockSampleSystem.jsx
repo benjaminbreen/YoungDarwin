@@ -13,7 +13,7 @@ import {
   disposePbrTerrainSet,
   loadPbrTerrainSet,
 } from '../../world/regions/materials/pbrTerrainTextures';
-import { claimSwing, onPropEvent } from './propEvents';
+import { claimSwing, emitPropEvent, onPropEvent } from './propEvents';
 import { triggerHitstop } from '../../world/worldTime';
 import { makeChipGeometry, makeFragmentGeometry, seededUnit } from './rockDebrisGeometry';
 import {
@@ -988,6 +988,14 @@ export function RockSampleSystem() {
       const profile = profileForTarget(target, currentZoneId);
       const outcome = resolveHammerOutcome(profile, `${target.key}:${sequenceRef.current}`);
       const chip = makeChipFromTarget(target, strike, currentZoneId, sequenceRef.current, profile, outcome);
+      emitPropEvent('prop-struck', {
+        propId: target.rock?.id || `hammer-sample:${target.key}`,
+        material: 'stone',
+        position: chip.scarPosition,
+        impactDir: { x: chip.normal.x, y: 0, z: chip.normal.z },
+        dustCount: 0,
+        sparkCount: 0,
+      });
 
       // Persist the strike: the RockField renderer carves a bite out of the
       // matching boulder, and small rocks shatter once their budget runs out.

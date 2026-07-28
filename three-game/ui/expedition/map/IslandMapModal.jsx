@@ -9,6 +9,7 @@ import { prefetchRegionTerrainTextures } from '../../../world/terrainPrefetch';
 import { prepareTerrainResource } from '../../../world/terrainResource';
 import { prefetchEcologyAssets } from '../../../components/scene/ecology/EcologyRenderer';
 import { ExpeditionPanel, PanelTabs, GOLD_BUTTON_SOLID, GOLD_LABEL, GoldDivider } from '../ExpeditionPanel';
+import { useDismissableOverlay } from '../../useDismissableOverlay';
 import { CompassRoseIcon, NorthArrowIcon } from '../icons';
 import { useTerrainChart } from '../TerrainMinimap';
 import {
@@ -325,6 +326,7 @@ export function IslandMapModal({ open, onClose }) {
   const [tab, setTab] = useState('island');
   const [selectedId, setSelectedId] = useState(null);
   const day = useThreeGameStore(state => state.day);
+  const panelRef = useDismissableOverlay(open, onClose);
 
   useEffect(() => {
     if (!open || !selectedId) return;
@@ -349,7 +351,15 @@ export function IslandMapModal({ open, onClose }) {
         className="max-h-full w-[min(64rem,100%)] overflow-y-auto"
         innerClassName="p-3 sm:p-4"
       >
-        <div onClick={event => event.stopPropagation()}>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Island chart"
+          tabIndex={-1}
+          className="focus:outline-none"
+          onClick={event => event.stopPropagation()}
+        >
           <div className="relative">
             <PanelTabs
               className="mx-auto w-56"

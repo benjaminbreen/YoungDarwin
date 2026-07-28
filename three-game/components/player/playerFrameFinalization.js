@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { updateRuntimePlayerPose } from '../../store';
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { WATER_LEVEL, WADE_DEPTH } from '../../world/water';
+import { clampFrameDelta } from '../../frameTiming';
 import { EMPTY_KEYS, IDLE_BEHAVIOR, PLAYER, SPRINT, SWIM } from './playerConfig';
 import { playerControllerDebugEnabled } from './playerUtils';
 
@@ -287,14 +288,18 @@ export function finalizePlayerFrame({
   }
 
   if (!skipSwimEconomy) {
+    // Swim fatigue and drowning are damage over time, so they must integrate a
+    // clamped delta. An unclamped frame (returning to a backgrounded tab while
+    // in the water) would otherwise drown Darwin instantly.
+    const economyDelta = clampFrameDelta(delta);
     if (swimState.current.active && health > 0) {
-      swimFatigue.current += delta * (sprintingSwim ? swimConfig.sprintFatiguePerSecond : swimConfig.fatiguePerSecond);
+      swimFatigue.current += economyDelta * (sprintingSwim ? swimConfig.sprintFatiguePerSecond : swimConfig.fatiguePerSecond);
       if (swimFatigue.current >= 1.2) {
         applyMovementCost({ fatigueDelta: swimFatigue.current });
         swimFatigue.current = 0;
       }
       if (fatigue >= swimConfig.exhaustedFatigue) {
-        drownDamage.current += delta * 7;
+        drownDamage.current += economyDelta * 7;
         if (drownDamage.current >= 4) {
           applyDrowningDamage(drownDamage.current);
           drownDamage.current = 0;
@@ -303,7 +308,7 @@ export function finalizePlayerFrame({
         drownDamage.current = 0;
       }
     } else if (wadeDepth.current > WADE_DEPTH && health > 0) {
-      drownDamage.current += delta * 9;
+      drownDamage.current += economyDelta * 9;
       if (drownDamage.current >= 4) {
         applyDrowningDamage(drownDamage.current);
         drownDamage.current = 0;

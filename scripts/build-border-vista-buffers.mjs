@@ -9,7 +9,6 @@ import {
   makeNeighborCarryGeometry,
   makeNeighborPreviewGeometry,
 } from '../three-game/world/vistas/apronGeometry.js';
-import { makeDistantLandformGeometry } from '../three-game/world/vistas/distantLandforms.js';
 
 const outputDirectory = path.join(
   process.cwd(),
@@ -119,29 +118,23 @@ function buildRegionRecord(regionId) {
       vista,
       transition,
     );
-    const horizonGeometry = makeDistantLandformGeometry(
-      regionId,
-      config,
-      vista,
-      targetConfig,
-      transition,
-    );
     const preview = geometryRecord(previewGeometry, binaryChunks, cursor, sharedArrays);
     cursor = preview.cursor;
     const carry = geometryRecord(carryGeometry, binaryChunks, cursor, sharedArrays);
     cursor = carry.cursor;
-    const horizon = geometryRecord(horizonGeometry, binaryChunks, cursor, sharedArrays);
-    cursor = horizon.cursor;
     return {
       vistaId: vista.id,
       edge: vista.edge,
       preview: preview.value,
       carry: carry.value,
-      horizon: horizon.value,
+      rings: [],
+      // Retain the nullable legacy field so older clients can read newly
+      // generated resources during development.
+      horizon: null,
     };
   });
   return {
-    header: { version: 1, regionId, entries },
+    header: { version: 1, regionId, entries, diagonals: [] },
     binaryChunks,
     payloadByteLength: cursor,
   };

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { terrainBiomeAt, terrainColor, terrainHeight, WATER_LEVEL } from '../terrain';
 import { surfaceProfileForRegion } from './index';
+import { bakeDistanceWash } from './vistaHaze';
 
 export const CARDINAL_VISTA_EDGES = new Set(['north', 'south', 'east', 'west']);
 
@@ -11,7 +12,6 @@ export const OPPOSITE_VISTA_EDGE = {
   west: 'east',
 };
 
-const ATMOSPHERE_HAZE_COLOR = new THREE.Color('#b9d7de');
 
 function colorDistance(a, b) {
   const dr = a.r - b.r;
@@ -357,7 +357,7 @@ export function transitionVistaColor(transition, currentColor, targetColor, outs
     const wetT = THREE.MathUtils.smoothstep(WATER_LEVEL - targetY, 0.04, 0.7) * recipe.shoreBlend;
     profileColor.lerp(transition.wetColor, wetT);
   }
-  profileColor.lerp(ATMOSPHERE_HAZE_COLOR, Math.max(0, outsideT - 0.7) * 0.22);
+  bakeDistanceWash(profileColor, Math.max(0, outsideT - 0.7) * 0.22);
   const seamT = THREE.MathUtils.smoothstep(
     outsideDistance,
     continuity?.carryStart ?? 3.5,

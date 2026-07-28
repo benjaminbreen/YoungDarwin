@@ -258,6 +258,12 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     beginFrame,
     obstacles,
     terrainHeight: (x, z) => getTerrainSample(x, z).movementY - 0.04,
+    // The drawn mesh, not the smoothed movement surface. Only visual consumers
+    // should use this: the two surfaces differ by roughly a quarter metre, so
+    // anything that feeds movement or physics must stay on terrainHeight above.
+    // The camera clamp needs this one — it has to stay above what the player
+    // can actually see, not above where the character walks.
+    visualTerrainHeight: (x, z) => getTerrainSample(x, z).visualY - PLAYER_GROUND_CLEARANCE,
     terrainSlopeAt: (x, z) => terrainSlopeAt(x, z, zoneId),
     terrainClimbProfile: climbProfile,
     isWalkableTerrain: (x, z) => isWalkableTerrain(x, z, zoneId),

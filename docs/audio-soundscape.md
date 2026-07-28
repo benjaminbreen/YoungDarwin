@@ -11,6 +11,12 @@ of the full-island-chart button. It changes the same saved audio preference as
 the launch settings screen, so it is a true global mute rather than a second
 mix state; restoring audio resumes the live environment targets smoothly.
 
+After the player chooses Darwin, the already-preloaded ambient graph introduces
+the island quietly during the covered launch: dry insects rise first, then the
+continuous shore surf. These are native WebAudio gain schedules on the existing
+loops, not additional media or loading work. The normal location-aware mix
+takes over at scene readiness without delaying the visual launch.
+
 ## Source and license record
 
 The original bay set uses five Creative Commons 0 recordings downloaded from the official
@@ -327,6 +333,9 @@ prevent a sustained collision from becoming a machine-gun loop.
 | Glass / ceramic | [Glass Clink](https://freesound.org/people/Nightflame/sounds/397597/) | Nightflame | A cup set against a hard surface |
 | Grass | [Rustling Grass](https://freesound.org/people/alegemaate/sounds/364712/) | alegemaate | Grass physically rustled through |
 | Shrub | [Bush Rustle](https://freesound.org/people/RoyalRose/sounds/560261/) | RoyalRose | Raw physical bush rustle |
+| Hammer swing | [Stick - Whoosh 2](https://freesound.org/people/Sadiquecat/sounds/802460/) and [Whoosh 4](https://freesound.org/people/Sadiquecat/sounds/802462/) | Sadiquecat | Real stick passes, darkened slightly for the short-handled geological hammer |
+| Insect-net swing | [Stick - Whoosh 7](https://freesound.org/people/Sadiquecat/sounds/802465/) and [Whoosh 9](https://freesound.org/people/Sadiquecat/sounds/802467/) | Sadiquecat | Softer, airier real passes reserved for the wider net arc |
+| Insect-net contact | [Body Hit Coat Against Wall](https://freesound.org/people/jcdecha/sounds/235451/) | jcdecha | Short filtered fabric contacts for mesh/hoop capture and snag beats |
 
 All are Creative Commons 0. Rebuild these derivatives with:
 

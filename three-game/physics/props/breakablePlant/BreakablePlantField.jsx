@@ -404,7 +404,6 @@ function BreakablePlantPiece({
   piece,
   runtime,
   damageKeys,
-  onImpactRelease,
   registerBody,
   registerIntactVisual,
 }) {
@@ -485,7 +484,18 @@ function BreakablePlantPiece({
     if (runtime.released.has(piece.key) || piece.unbreakable) return;
     if (isPlayerTarget(payload.other)) return;
     if ((payload.totalForceMagnitude || 0) < tuning.propBreakContactForce) return;
-    onImpactRelease(piece.key, null);
+    // Rapier invokes this from inside `eventQueue.drainContactForceEvents`,
+    // which holds a Rust borrow of the world for the duration of the callback.
+    // Releasing inline reaches `runtime.bump()`, a React setState; because the
+    // physics step runs from useFrame rather than a React event, that update
+    // flushes synchronously and can add/remove rigid bodies and colliders while
+    // the borrow is still live. wasm-bindgen rejects that ("recursive use of an
+    // object detected...") and the Rust borrow is left poisoned, so every later
+    // world.step throws "Unreachable code should not be executed" — typically
+    // surfacing much later, on an unrelated zone transition.
+    // Queue it and let the frame loop resolve it outside the borrow.
+    if (runtime.pendingContactBreaks.some(entry => entry.key === piece.key)) return;
+    runtime.pendingContactBreaks.push({ key: piece.key });
   };
 
   return (
@@ -630,6 +640,9 @@ export function BreakablePlantField({ spec }) {
       releaseAges: new Map(),
       pendingCascades: [],
       pendingStrikes: [],
+      // Breaks requested from Rapier contact-force events. These must never be
+      // resolved inline — see handleContactForce.
+      pendingContactBreaks: [],
       playerVel: { x: 0, z: 0 },
       playerTrack: { has: false, x: 0, z: 0 },
       siteFlexes: createSiteFlexes(sitePivots),
@@ -1093,6 +1106,15 @@ export function BreakablePlantField({ spec }) {
     updateIntactPlantVisuals(runtime, tuning, state.clock.elapsedTime);
     updateReleasedPlantPieces(runtime, tuning, delta);
 
+    // Contact-force breaks queued from Rapier's event drain. Resolving them
+    // here runs outside the world borrow, so the fixed -> dynamic RigidBody
+    // swap is a safe, ordinary React update.
+    if (runtime.pendingContactBreaks.length) {
+      const queued = runtime.pendingContactBreaks;
+      runtime.pendingContactBreaks = [];
+      for (const item of queued) onImpactRelease(item.key, null);
+    }
+
     if (runtime.pendingCascades.length) {
       const due = runtime.pendingCascades.filter(item => item.at <= runtime.clock);
       if (due.length) {
@@ -1204,7 +1226,6 @@ export function BreakablePlantField({ spec }) {
             runtime={runtime}
             damageKeys={damageKeysByPiece.get(piece.key)}
             releasedVersion={version}
-            onImpactRelease={onImpactRelease}
             registerBody={registerBody}
             registerIntactVisual={registerIntactVisual}
           />

@@ -9,7 +9,7 @@ import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
 import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
-import { emitPropEvent } from '../../physics/props/propEvents';
+import { emitPropEvent, nextSwingId } from '../../physics/props/propEvents';
 import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
 import { findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
 import { getRuntimeObstacles } from '../../world/obstacles';
@@ -532,8 +532,25 @@ export function updatePlayerInteractions({
       lockMovement: animation.lockMovement,
       ...(celebrate ? { recoverAction: 'happyIdle' } : {}),
     });
-    if (currentState.activeToolId === 'insect_net' && maybeTriggerNetSnagFromSwing({ position, facing })) {
-      return true;
+    if (currentState.activeToolId === 'insect_net') {
+      emitPropEvent('tool-swing', {
+        tool: 'insect_net',
+        swingId: nextSwingId(),
+        position: { x: position.x, y: position.y, z: position.z },
+        facing: { x: facing.x, y: 0, z: facing.z },
+        impactDelay: 1.05,
+      });
+      if (maybeTriggerNetSnagFromSwing({ position, facing })) return true;
+      emitPropEvent('net-contact', {
+        kind: 'capture',
+        position: target || {
+          x: position.x + facing.x * 1.6,
+          y: position.y + 1,
+          z: position.z + facing.z * 1.6,
+        },
+        delay: 1.05,
+        specimenId: specimen.id,
+      });
     }
     collectNearby();
     return true;

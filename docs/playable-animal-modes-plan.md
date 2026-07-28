@@ -261,6 +261,10 @@ show ultraviolet itself. The experiment instead:
 
 - Uses a low, close, wide camera so nearby plants and the tortoise's bodily
   scale dominate the view.
+- Translates lateral eye placement into a curved panoramic view with broad
+  left/right monocular zones and a smaller shared central field. This is an
+  intentionally visible artistic model: measured visual-field geometry varies
+  among chelonian genera and is not known for the extinct Floreana population.
 - Strongly separates red, yellow, leafy-green, and short-wave detail while
   preserving enough scene luminance for terrain and weather to remain legible.
 - Uses violet as an acknowledged visual proxy for short-wave sensitivity.
@@ -289,3 +293,37 @@ Relevant starting literature:
 - Spiezio et al., “Assessing colour preference in Aldabra giant tortoises,”
   *Behavioural Processes* 145 (2017),
   https://doi.org/10.1016/j.beproc.2017.10.006
+
+## Finch Vision Treatment
+
+Finch mode uses a deliberately visible but inexpensive avian translation. It
+does not attempt split-eye rendering, alternate left/right views, simulated
+ultraviolet reflectance, or generic motion blur. Those would either misstate
+the evidence, require source data the game does not have, or add substantial
+rendering cost.
+
+The implemented profile instead combines:
+
+- A close ground camera and a wider flight camera, with speed-dependent field
+  of view and a forward point of attention. Landing therefore changes the
+  composition as well as the movement state.
+- A single-pass RGB transform that separates short-wave-rich cyan/violet from
+  warm reds and yellows, with colored highlights responding more strongly than
+  neutral terrain. This interprets avian tetrachromacy and cone oil-droplet
+  filtering; it is not presented as literal ultraviolet vision.
+- A crisp view with no added blur, depth pass, mask, render target, or second
+  bloom. The finch profile skips the tortoise forage-aura samples and lateral
+  field geometry.
+
+The camera and color values remain profile data. Future flying animals can tune
+or omit them without adding a new species branch to the camera or post-effect
+components.
+
+Relevant starting literature:
+
+- Hart et al., “Visual pigments, oil droplets, ocular media and cone
+  photoreceptor distribution in two species of passerine bird,” *Journal of
+  Comparative Physiology A* 186 (2000),
+  https://pubmed.ncbi.nlm.nih.gov/11016784/
+- A zebra finch visual-field study covering field geometry, fixation, and
+  movement detection, https://noah.nrw/ubbihs/download/pdf/5105658

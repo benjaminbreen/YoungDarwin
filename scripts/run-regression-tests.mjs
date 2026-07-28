@@ -7,7 +7,7 @@ import ts from 'typescript';
 const projectRequire = createRequire(import.meta.url);
 const { Vector3 } = projectRequire('three');
 const moduleCache = new Map();
-const EXTENSIONS = ['', '.js', '.jsx', '.ts', '.tsx', '.json', '/index.js', '/index.jsx'];
+const EXTENSIONS = ['', '.js', '.jsx', '.mjs', '.ts', '.tsx', '.json', '/index.js', '/index.jsx'];
 
 function resolveLocalModule(specifier, fromFile) {
   const base = path.resolve(path.dirname(fromFile), specifier);
@@ -34,8 +34,14 @@ function loadModule(filePath) {
   const jsx = extension === '.tsx' || extension === '.jsx'
     ? ts.JsxEmit.ReactJSX
     : ts.JsxEmit.Preserve;
+  // TypeScript honours the forced module format of a .mjs filename and emits
+  // ESM no matter what `module` says, which left `export` in the output and
+  // blew up in `new Function` below. Everything here is evaluated as CommonJS,
+  // so present .mjs sources under a .js name to get the CJS emit we need.
+  // Without this any module transitively importing darwin5AnimationManifest.mjs
+  // — which includes playerConfig and so every playable profile — is unloadable.
   const transpiled = ts.transpileModule(source, {
-    fileName: absolutePath,
+    fileName: extension === '.mjs' ? absolutePath.replace(/\.mjs$/, '.js') : absolutePath,
     compilerOptions: {
       allowJs: true,
       esModuleInterop: true,
@@ -116,6 +122,16 @@ const {
   buildSaveSnapshot,
   summarizeExpeditionSave,
 } = loadModule('utils/localSave.js');
+const {
+  buildSessionSnapshot,
+  isUsableSessionSnapshot,
+  summarizeSessionSnapshot,
+} = loadModule('three-game/sessionSave.js');
+const {
+  normalizeQualityPreference,
+  resolveQualityPreference,
+} = loadModule('three-game/qualityPreference.js');
+const { clampFrameDelta } = loadModule('three-game/frameTiming.js');
 const {
   buildSpecimenDocumentationNote,
   buildSurveyNote,
@@ -215,6 +231,9 @@ const {
   createCollisionAdapter,
 } = loadModule('three-game/physics/collisionAdapter.js');
 const {
+  playerControllerProfiles,
+} = loadModule('three-game/playable/playableModes.js');
+const {
   findClimbOpportunity,
   findTerrainClimbTarget,
 } = loadModule('three-game/components/player/playerTraversalMotion.js');
@@ -253,12 +272,37 @@ const {
   apronCornerReach,
   apronOwnsCorner,
   apronTopologyHold,
+  mapApronSourceUToTargetU,
+  mapApronTargetUToSourceU,
   makeNeighborPreviewGeometry,
+  VISTA_SEA_CLEARANCE,
 } = loadModule('three-game/world/vistas/apronGeometry.js');
 const {
-  distantLandformRoute,
-  makeDistantLandformGeometry,
-} = loadModule('three-game/world/vistas/distantLandforms.js');
+  diagonalNeighbor,
+  makeDiagonalApronPatches,
+} = loadModule('three-game/world/vistas/diagonalApronPatches.js');
+const {
+  LAYERED_APRON_MAX_RINGS,
+  layeredApronChain,
+  makeLayeredApronRings,
+} = loadModule('three-game/world/vistas/layeredApronRings.js');
+const {
+  getCentralPeakView,
+  resolveCentralPeakAppearance,
+} = loadModule('three-game/world/vistas/centralPeak.js');
+const {
+  CENTRAL_PEAK_DEV_DEFAULTS,
+} = loadModule('three-game/world/vistas/centralPeakDevRuntime.js');
+const {
+  CHART_SHELL_VARIANTS,
+  chartIslandShellStats,
+  getChartIslandShellGeometry,
+} = loadModule('three-game/world/vistas/chartIslandShell.js');
+const {
+  DISTANCE_SCENERY_MODES,
+  DISTANCE_SCENERY_SHELL_DEFAULTS,
+  distanceSceneryRuntime,
+} = loadModule('three-game/world/vistas/distanceSceneryRuntime.js');
 const {
   buildBorderTransition,
 } = loadModule('three-game/world/vistas/transitions.js');
@@ -282,12 +326,14 @@ const {
   FLOREANA_MAP_PLACEMENTS,
   FLOREANA_OPPOSITE_DIRECTIONS,
   FLOREANA_ROUTE_EDGES,
+  getFloreanaRouteKind,
   mapDirectionBetween,
 } = loadModule('game-core/floreanaGeography.js');
 const {
   CONTEXTUAL_WORLD_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
+  TOOL_FOLEY_AUDIO,
   WILDLIFE_FIELDWORK_AUDIO,
 } = loadModule('three-game/audio/audioAssets.js');
 const {
@@ -1456,6 +1502,12 @@ test('manual physics-prop colliders own configured mass instead of leaving it on
   assert.match(source, /pushContact\.tipSettledFor >= 0\.65/);
 });
 
+test('launch shell leaves Rapier WASM initialization to the Physics boundary', () => {
+  const source = fs.readFileSync(path.resolve('three-game/ui/ThreeLaunchShell.jsx'), 'utf8');
+  assert.doesNotMatch(source, /@dimforge\/rapier3d-compat/);
+  assert.doesNotMatch(source, /\brapier\.init\s*\(/i);
+});
+
 test('Rapier terrain contacts stay ground-only while identified walls remain push contacts', () => {
   const terrainSlope = {
     normal: { x: -0.72, y: 0.69, z: 0 },
@@ -1711,6 +1763,23 @@ test('expanded movement audio sprites are committed PCM assets with stable slot 
     assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
     const header = fs.readFileSync(filePath).subarray(0, 4).toString('ascii');
     assert.equal(header, 'RIFF', `${key} is a browser-decodable PCM WAV`);
+  }
+});
+
+test('hammer and insect-net Foley sprites are committed PCM assets with stable slot metadata', () => {
+  const expected = {
+    hammerSwing: [4, 0.72],
+    netSwing: [4, 0.72],
+    netContact: [6, 0.54],
+  };
+  for (const [key, [variants, slotDuration]] of Object.entries(expected)) {
+    const sprite = TOOL_FOLEY_AUDIO[key];
+    assert.ok(sprite, `${key} is registered`);
+    assert.equal(sprite.variants, variants);
+    assert.equal(sprite.slotDuration, slotDuration);
+    const filePath = path.join(process.cwd(), 'public', sprite.url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    assert.equal(fs.readFileSync(filePath).subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
   }
 });
 
@@ -2399,6 +2468,52 @@ test('collision-scale relief stays inside the authored movement surface', () => 
   }
 });
 
+test('collision adapter exposes the drawn terrain surface for visual consumers', () => {
+  // The camera clamp has to sit above what the player can see, not above the
+  // smoothed surface the character walks on, so the adapter has to offer both.
+  for (const zoneId of ['NORTHERN_HIGHLANDS', 'POST_OFFICE_BAY', 'LAVA_FLATS']) {
+    const adapter = createCollisionAdapter(zoneId);
+    adapter.beginFrame();
+    let checked = 0;
+    for (let x = -60; x <= 60; x += 7) {
+      for (let z = -60; z <= 60; z += 7) {
+        const visual = adapter.visualTerrainHeight(x, z);
+        assert.ok(Number.isFinite(visual), `${zoneId} visual terrain height must be finite`);
+        // Must track the drawn mesh exactly, not the movement surface.
+        assert.ok(
+          Math.abs(visual - terrainHeight(x, z, zoneId)) < 1e-6,
+          `${zoneId} visualTerrainHeight must equal the drawn mesh at ${x},${z}`,
+        );
+        checked += 1;
+      }
+    }
+    assert.ok(checked > 200, `${zoneId} should expose a meaningful sample`);
+  }
+});
+
+test('every playable camera profile clamps against terrain and obstacles', () => {
+  // Camera collision used to be declared only by the two interior profiles, so
+  // outdoors the chase camera passed through hillsides and cabin walls alike.
+  const profiles = Object.entries(playerControllerProfiles);
+  assert.ok(profiles.length >= 3, 'expected darwin plus the animal profiles');
+  for (const [id, profile] of profiles) {
+    const collision = profile.camera?.collision;
+    assert.ok(collision?.enabled === true, `${id} camera must enable collision`);
+    assert.ok(
+      collision.minimumDistance > 0 && collision.minimumDistance < profile.camera.maxDistance,
+      `${id} camera minimumDistance must be positive and inside the zoom band`,
+    );
+    // groundClearance is optional — the rig supplies a Darwin-scaled default —
+    // but an animal profile that overrides it must stay above the near plane.
+    if (collision.groundClearance !== undefined) {
+      assert.ok(
+        collision.groundClearance >= 0.1 && collision.groundClearance <= 0.6,
+        `${id} camera groundClearance ${collision.groundClearance} is outside the sane band`,
+      );
+    }
+  }
+});
+
 test('Devil’s Crown gives every above-water step-height rock collision support', () => {
   const obstacles = getRuntimeObstacles('DEVILS_CROWN');
   const rockObstacles = new Set(obstacles.map(obstacle => obstacle.id));
@@ -2759,98 +2874,429 @@ test('adjacent open aprons share tapered corner wedges', () => {
   assert.equal(apronCornerReach('CORMORANT_BAY', south, 0, 28, 64), 28);
 });
 
-test('mixed coastal aprons preserve source shoreline away from the route corridor', () => {
-  const regionId = 'PUNTA_SUR';
+test('Beach with Hut uses real neighbor aprons and gives shared corners one mesh owner', () => {
+  const regionId = 'S_HUT';
   const config = getRegionTerrainConfig(regionId);
-  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'west');
-  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
-  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
-  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 0, 2, 2) >= 0.65);
-  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 1, -2, 2) >= 0.95);
-});
-
-test('placeholder neighbors only influence their authored travel corridor', () => {
-  const regionId = 'PUNTA_SUR';
-  const config = getRegionTerrainConfig(regionId);
-  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'north');
-  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
-  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
-  assert.match(targetConfig.preset, /^placeholder-/);
-  assert.ok(apronTopologyHold(regionId, config, targetConfig, vista, transition, 0, 2, 2) >= 0.75);
-});
-
-test('Punta Sur northern horizon follows the island route to Cerro Pajas', () => {
-  const regionId = 'PUNTA_SUR';
-  const config = getRegionTerrainConfig(regionId);
-  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'north');
-  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
-  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
-  const route = distantLandformRoute(regionId, vista.edge, vista.toRegionId);
-  assert.deepEqual(route.map(entry => entry.regionId), ['S_VOLCANIC', 'PENAL_COLONY', 'C_HIGH']);
-
-  const geometry = makeDistantLandformGeometry(
-    regionId,
-    config,
-    vista,
-    targetConfig,
-    transition,
+  const vistas = getBorderVistas(regionId);
+  assert.deepEqual(
+    vistas.map(vista => [vista.edge, vista.toRegionId]),
+    [
+      ['north', 'W_LAVA'],
+      ['east', 'ASILO_SPRING'],
+      ['south', 'SW_BEACH'],
+    ],
   );
-  assert.ok(geometry);
-  geometry.computeBoundingBox();
-  assert.ok(geometry.boundingBox.min.z < -250, 'the horizon should continue well beyond the first apron');
-  assert.ok(geometry.boundingBox.max.y > 22, 'Cerro Pajas should form a real far silhouette');
-  const blend = geometry.getAttribute('aBorderBlend');
+
+  const north = vistas.find(vista => vista.edge === 'north');
+  const east = vistas.find(vista => vista.edge === 'east');
+  const makePreview = vista => {
+    const targetConfig = getRegionTerrainConfig(vista.toRegionId);
+    return makeNeighborPreviewGeometry(
+      regionId,
+      config,
+      vista.toRegionId,
+      targetConfig,
+      vista,
+      buildBorderTransition(regionId, config, vista, targetConfig),
+    );
+  };
+  const northPreview = makePreview(north);
+  const eastPreview = makePreview(east);
+  northPreview.computeBoundingBox();
+  eastPreview.computeBoundingBox();
+
+  assert.equal(northPreview.userData.mode, 'neighbor-preview');
   assert.equal(
-    geometry.getAttribute('aHorizonFollow'),
-    undefined,
-    'the horizon remains world-anchored instead of folding under camera translation',
+    northPreview.getAttribute('aApronDepth').count,
+    northPreview.getAttribute('position').count,
   );
-  const positions = geometry.getAttribute('position');
-  const horizonRows = 20;
-  const horizonColumns = 44;
-  const stride = horizonColumns + 1;
-  for (let col = 0; col <= horizonColumns; col += 1) {
-    for (let row = 1; row <= horizonRows; row += 1) {
-      const previousY = positions.getY((row - 1) * stride + col);
-      const currentY = positions.getY(row * stride + col);
-      assert.ok(currentY >= previousY - 0.026, 'the backdrop does not reopen into stacked ridge bands');
+  assert.ok(
+    northPreview.boundingBox.max.x > config.width / 2 + 40,
+    'north apron owns and fills the northeast diagonal corner',
+  );
+  // Both aprons sweep the shared corner so neither view shows a sea gap beside
+  // the neighbouring land. Ownership is resolved by depth instead: the
+  // non-owner sits strictly below the owner across the overlap, so the owner
+  // still wins every pixel and the two never fight over coplanar triangles.
+  const cornerMeanY = geometry => {
+    const position = geometry.getAttribute('position');
+    let total = 0;
+    let count = 0;
+    for (let index = 0; index < position.count; index += 1) {
+      if (position.getX(index) <= config.width / 2) continue;
+      if (position.getZ(index) >= -config.depth / 2) continue;
+      total += position.getY(index);
+      count += 1;
+    }
+    return count ? { mean: total / count, count } : null;
+  };
+  const northCorner = cornerMeanY(northPreview);
+  const eastCorner = cornerMeanY(eastPreview);
+  assert.ok(northCorner && northCorner.count > 0, 'north apron fills the shared corner');
+  assert.ok(eastCorner && eastCorner.count > 0, 'east apron also covers the shared corner');
+  assert.ok(
+    eastCorner.mean < northCorner.mean,
+    'the non-owning east apron sits below the north-owned corner surface',
+  );
+  northPreview.dispose();
+  eastPreview.dispose();
+});
+
+test('Beach with Hut south land route stays above water and walkable', () => {
+  const spawn = regionSpawnPoint('S_HUT', 'south');
+  assert.ok(
+    terrainHeight(spawn.x, spawn.z, 'S_HUT') > WATER_LEVEL + 0.4,
+    'the Southwest Beach gateway is a dry sand spit rather than deep ocean',
+  );
+  assert.equal(isWalkableTerrain(spawn.x, spawn.z, 'S_HUT'), true);
+});
+
+test('Southeastern Shallow Surf previews its real coastal neighbor only', () => {
+  assert.deepEqual(
+    getBorderVistas('SE_SHALLOW_SURF').map(vista => [vista.edge, vista.toRegionId]),
+    [['west', 'SE_COAST']],
+  );
+});
+
+test('neighbor apron sampling aligns authored route gateways and remains reversible', () => {
+  const cases = [
+    ['SW_BEACH', 'east', 'MANGROVES', 'west'],
+    ['MANGROVES', 'east', 'S_VOLCANIC', 'west'],
+    ['W_HIGH', 'west', 'W_LAVA', 'east'],
+  ];
+  const edgeU = (regionId, config, edge) => {
+    const spawn = regionSpawnPoint(regionId, edge);
+    const along = edge === 'north' || edge === 'south' ? spawn.x : spawn.z;
+    const length = edge === 'north' || edge === 'south' ? config.width : config.depth;
+    return along / length + 0.5;
+  };
+  for (const [sourceId, sourceEdge, targetId, targetEdge] of cases) {
+    const sourceConfig = getRegionTerrainConfig(sourceId);
+    const targetConfig = getRegionTerrainConfig(targetId);
+    const sourceGateway = edgeU(sourceId, sourceConfig, sourceEdge);
+    const targetGateway = edgeU(targetId, targetConfig, targetEdge);
+    const mapped = mapApronSourceUToTargetU(
+      sourceId,
+      sourceConfig,
+      targetId,
+      targetConfig,
+      sourceEdge,
+      targetEdge,
+      sourceGateway,
+    );
+    assert.ok(Math.abs(mapped - targetGateway) < 1e-6, `${sourceId} gateway maps to ${targetId}`);
+    const reversed = mapApronTargetUToSourceU(
+      sourceId,
+      sourceConfig,
+      targetId,
+      targetConfig,
+      sourceEdge,
+      targetEdge,
+      mapped,
+    );
+    assert.ok(Math.abs(reversed - sourceGateway) < 1e-6, `${sourceId} gateway warp is reversible`);
+  }
+});
+
+test('distant layered scenery never composes land through a water crossing', () => {
+  for (const [fromId, direction, toId, routeKind] of FLOREANA_ROUTE_EDGES) {
+    assert.equal(getFloreanaRouteKind(fromId, toId), routeKind);
+    assert.equal(getFloreanaRouteKind(toId, fromId), routeKind);
+    const forward = regionMaps[fromId].edgeHints.find(hint => (
+      hint.kind === 'open'
+      && hint.direction === direction
+      && hint.toRegionId === toId
+    ));
+    assert.equal(forward?.routeKind, routeKind, `${fromId} -> ${toId} preserves ${routeKind}`);
+  }
+
+  assert.deepEqual(
+    getBorderVistas('N_SHORE').map(vista => [vista.edge, vista.toRegionId]),
+    [['west', 'POST_OFFICE_BAY'], ['east', 'CORMORANT_BAY']],
+    'the immediate west land apron remains available',
+  );
+  assert.deepEqual(
+    layeredApronChain('POST_OFFICE_BAY', 'west'),
+    [],
+    'Post Office Bay does not turn its water route to Northwest Reef into a land ring',
+  );
+  assert.equal(
+    diagonalNeighbor('N_SHORE', 'northwest'),
+    null,
+    'Northern Shore cannot compose a northwest land quadrant through the Beagle water route',
+  );
+
+  for (const regionId of Object.keys(regionMaps)) {
+    for (const edge of ['north', 'east', 'south', 'west']) {
+      for (const hop of layeredApronChain(regionId, edge)) {
+        const hint = regionMaps[hop.sourceRegionId].edgeHints.find(entry => (
+          entry.kind === 'open'
+          && entry.edge === edge
+          && entry.toRegionId === hop.targetRegionId
+        ));
+        assert.ok(
+          hint?.routeKind === 'land' || hint?.routeKind === 'creek',
+          `${hop.sourceRegionId} ${edge} onward ring must use land or creek`,
+        );
+      }
     }
   }
-  assert.ok(Math.min(...blend.array) <= 0.01, 'far side edges carry an atmospheric color handoff');
-  assert.ok(Math.max(...blend.array) >= 0.99, 'the central landform retains its full terrain color');
-  geometry.dispose();
 });
 
-test('ocean and reef routes do not receive distant land horizons', () => {
-  const regionId = 'PUNTA_SUR';
-  const config = getRegionTerrainConfig(regionId);
-  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'east');
-  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
-  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
-  assert.deepEqual(distantLandformRoute(regionId, vista.edge, vista.toRegionId), []);
-  assert.equal(makeDistantLandformGeometry(
-    regionId,
-    config,
-    vista,
-    targetConfig,
-    transition,
-  ), null);
+test('chart shell is one continuous front-sided surface with sea below water', () => {
+  for (const variant of Object.values(CHART_SHELL_VARIANTS)) {
+    for (const regionId of ['N_SHORE', 'POST_OFFICE_BAY', 'PUNTA_SUR', 'W_HIGH']) {
+      const geometry = getChartIslandShellGeometry(regionId, variant);
+      const stats = chartIslandShellStats(regionId, variant);
+      assert.equal(stats.mode, 'chart-island-shell');
+      assert.equal(stats.variant, variant);
+      assert.equal(stats.frontSideOnly, true);
+      assert.equal(stats.vertices, 10229);
+      assert.equal(stats.triangles, 19968);
+      assert.ok(stats.bounds.min[1] < WATER_LEVEL - 3, `${regionId} sea clears the water plane`);
+      assert.ok(stats.bounds.max[1] > WATER_LEVEL + 4, `${regionId} retains island relief`);
+      const normal = geometry.getAttribute('normal');
+      let averageY = 0;
+      for (let index = 0; index < normal.count; index += 1) averageY += normal.getY(index);
+      averageY /= normal.count;
+      assert.ok(averageY > 0.9, `${regionId} ${variant} shell faces upward`);
+    }
+  }
 });
 
-test('low coastal route chains stay in the apron layer instead of becoming false mountains', () => {
-  const regionId = 'POST_OFFICE_BAY';
-  const config = getRegionTerrainConfig(regionId);
-  const vista = getBorderVistas(regionId).find(entry => entry.edge === 'east');
-  const targetConfig = getRegionTerrainConfig(vista.toRegionId);
-  const transition = buildBorderTransition(regionId, config, vista, targetConfig);
-  assert.deepEqual(
-    distantLandformRoute(regionId, 'east', vista.toRegionId).map(entry => entry.regionId),
-    ['N_SHORE', 'CORMORANT_BAY', 'PUNTA_CORMORANT'],
+test('distance scenery controls bind to the apron and shell without retired far layers', () => {
+  const borderSource = fs.readFileSync(
+    path.resolve('three-game/components/scene/BorderVistas.jsx'),
+    'utf8',
   );
-  assert.equal(
-    makeDistantLandformGeometry(regionId, config, vista, targetConfig, transition),
-    null,
+  const terrainSource = fs.readFileSync(
+    path.resolve('three-game/components/scene/Terrain.jsx'),
+    'utf8',
   );
+  const shellSource = fs.readFileSync(
+    path.resolve('three-game/components/scene/ChartIslandShell.jsx'),
+    'utf8',
+  );
+  const gameSource = fs.readFileSync(
+    path.resolve('three-game/ThreeDarwinGame.jsx'),
+    'utf8',
+  );
+  assert.deepEqual(DISTANCE_SCENERY_MODES, {
+    layered: 'layered',
+    shell: 'shell',
+    hybrid: 'hybrid',
+  });
+  assert.equal(distanceSceneryRuntime.mode, 'hybrid', 'Combined is the shipped default');
+  for (const mode of Object.values(DISTANCE_SCENERY_MODES)) {
+    assert.match(gameSource, new RegExp(`\\['${mode}',`), `${mode} has an A/B/C control`);
+  }
+  for (const suffix of ['Relief', 'Vertical', 'HazeStart', 'NearHaze', 'FarHaze', 'SoftFocus']) {
+    assert.match(borderSource, new RegExp(`neighborApron${suffix}`));
+  }
+  assert.doesNotMatch(borderSource, /ringVisible|diagonalVisible|DiagonalApronPatches/);
+  assert.match(terrainSource, /centralPeakDev\.neighborApronVisible/);
+  for (const key of Object.keys(DISTANCE_SCENERY_SHELL_DEFAULTS)) {
+    assert.match(shellSource, new RegExp(`distanceSceneryRuntime\\.${key}`), `${key} reaches the live shell`);
+  }
+  assert.match(shellSource, /side:\s*THREE\.FrontSide/);
+  assert.match(shellSource, /mode === 'hybrid'/);
+  assert.match(shellSource, /mode === 'layered'/);
+  assert.doesNotMatch(shellSource, /THREE\.DoubleSide/);
+  const bakeSource = fs.readFileSync(
+    path.resolve('scripts/build-border-vista-buffers.mjs'),
+    'utf8',
+  );
+  assert.doesNotMatch(bakeSource, /makeLayeredApronRings|makeDiagonalApronPatches/);
+});
+
+test('distant scenery shares one aerial-perspective block and no haze wall', () => {
+  const vistaSource = fs.readFileSync(
+    path.resolve('three-game/components/scene/BorderVistas.jsx'),
+    'utf8',
+  );
+  const skySource = fs.readFileSync(
+    path.resolve('three-game/components/scene/SkyController.jsx'),
+    'utf8',
+  );
+  // Every vista layer must read the shared uniforms rather than normalising
+  // haze against its own depth parameter; that divergence is what made the
+  // boundaries between layers show as steps.
+  assert.match(vistaSource, /vistaAtmosphereUniforms/);
+  assert.match(vistaSource, /vistaAirApplyGlsl\('neighborApronAir'\)/);
+  assert.match(vistaSource, /VISTA_SKY_APPLY_GLSL/);
+  // A layer's own haze must be COMPOSED with the shared curve, not mixed
+  // separately before it: two sequential mixes let the shared term overwrite
+  // the per-layer one, which presents as dead sliders in the dev panel.
+  const atmosphereSource = fs.readFileSync(
+    path.resolve('three-game/world/vistas/vistaAtmosphere.js'),
+    'utf8',
+  );
+  assert.match(atmosphereSource, /1\.0 - \(1\.0 - vistaLayerAir\) \* \(1\.0 - vistaAirAmount/);
+  assert.doesNotMatch(vistaSource, /diffuseColor\.rgb = mix\(\s*diffuseColor\.rgb,\s*fogColor,/);
+  // The sky must drive the horizon colour, or fully hazed land settles on the
+  // fog colour and silhouettes against a differently coloured sky.
+  assert.match(skySource, /uVistaHorizonColor/);
+  assert.doesNotMatch(skySource, /HAZE_WALL|hazeWallMatRef|hazeGradientTexture/);
+  // The far-terrain belt is gone; nothing should reference it.
+  assert.doesNotMatch(vistaSource, /FarTerrain|farTerrain/);
+});
+
+test('every distant layer splays wider than the one in front of it', () => {
+  // The general cause of "a further layer / the sea is poking through the
+  // distant hills" is that nothing forced the layers to stack. Each is built
+  // from its own map's heightfield, so a layer behind could be narrower or
+  // lower than the one in front, and wherever it was the viewer looked over the
+  // near crest straight past the far one. Both invariants are now enforced by
+  // construction; this locks the width half across every region and edge, not
+  // just the one that happened to be broken.
+  let pairs = 0;
+  for (const regionId of Object.keys(regionMaps)) {
+    const config = getRegionTerrainConfig(regionId);
+    if (!config) continue;
+    for (const vista of getBorderVistas(regionId)) {
+      const rings = makeLayeredApronRings(regionId, config, vista);
+      if (!rings.length) continue;
+      const lateralAxis = vista.edge === 'north' || vista.edge === 'south' ? 'x' : 'z';
+      const widthOf = geometry => {
+        const position = geometry.getAttribute('position');
+        let min = Infinity;
+        let max = -Infinity;
+        for (let i = 0; i < position.count; i += 1) {
+          const value = lateralAxis === 'x' ? position.getX(i) : position.getZ(i);
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+        }
+        return max - min;
+      };
+      let previous = widthOf(makeNeighborPreviewGeometry(
+        regionId,
+        config,
+        vista.toRegionId,
+        getRegionTerrainConfig(vista.toRegionId),
+        vista,
+        buildBorderTransition(regionId, config, vista, getRegionTerrainConfig(vista.toRegionId)),
+      ));
+      for (const [index, ring] of rings.entries()) {
+        const width = widthOf(ring);
+        assert.ok(
+          width > previous,
+          `${regionId} ${vista.edge} ring ${index} (${width.toFixed(0)} m) splays past the layer in front (${previous.toFixed(0)} m)`,
+        );
+        previous = width;
+        pairs += 1;
+        ring.dispose();
+      }
+    }
+  }
+  assert.ok(pairs > 100, `checked a meaningful number of layer pairs (${pairs})`);
+});
+
+test('distant layers never sit in the water plane\'s fighting band', () => {
+  // Geometry parked within ~a metre of the sea surface at ring range is inside
+  // both the depth buffer's precision AND the ocean's wave displacement, so the
+  // water renders in hard straight horizontal slices THROUGH the distant land.
+  // Rings and quadrants must therefore be clearly above or clearly below it.
+  // The apron is exempt: it carries the real shoreline and has to cross.
+  for (const regionId of ['EASTERN_CLIFFS', 'POST_OFFICE_BAY', 'PUNTA_SUR']) {
+    const config = getRegionTerrainConfig(regionId);
+    const band = VISTA_SEA_CLEARANCE - 0.1;
+    const offenders = geometry => {
+      const position = geometry.getAttribute('position');
+      let count = 0;
+      for (let i = 0; i < position.count; i += 1) {
+        if (Math.abs(position.getY(i) - WATER_LEVEL) < band) count += 1;
+      }
+      return count;
+    };
+    for (const vista of getBorderVistas(regionId)) {
+      for (const ring of makeLayeredApronRings(regionId, config, vista)) {
+        assert.equal(offenders(ring), 0, `${regionId} ${vista.edge} ring clears the water plane`);
+        ring.dispose();
+      }
+    }
+    for (const patch of makeDiagonalApronPatches(regionId, config)) {
+      assert.equal(offenders(patch), 0, `${regionId} quadrant clears the water plane`);
+      patch.dispose();
+    }
+  }
+});
+
+test('layered apron rings follow the real onward route and stay watertight', () => {
+  const cases = [
+    ['POST_OFFICE_BAY', 'south', 'POST_SCRUB_RISE', 'C_HIGH'],
+    ['PUNTA_SUR', 'north', 'S_VOLCANIC', 'PENAL_COLONY'],
+  ];
+  for (const [regionId, edge, targetRegionId, farRegionId] of cases) {
+    const config = getRegionTerrainConfig(regionId);
+    const vista = getBorderVistas(regionId).find(entry => entry.edge === edge);
+    assert.equal(vista.toRegionId, targetRegionId);
+    // Ring 1 is the neighbour's own continuation, so the chain starts there.
+    const chain = layeredApronChain(targetRegionId, edge, LAYERED_APRON_MAX_RINGS);
+    assert.ok(chain.length >= 1, `${regionId} has an onward hop past ${targetRegionId}`);
+    assert.equal(chain[0].sourceRegionId, targetRegionId);
+    assert.equal(chain[0].targetRegionId, farRegionId);
+
+    const rings = makeLayeredApronRings(regionId, config, vista);
+    assert.equal(rings.length, chain.length, `${regionId} builds one mesh per hop`);
+    for (const [index, ring] of rings.entries()) {
+      assert.equal(ring.userData.mode, 'layered-apron-ring');
+      assert.equal(ring.userData.ringIndex, index);
+      const position = ring.getAttribute('position');
+      assert.equal(ring.getAttribute('aApronDepth').count, position.count);
+      assert.equal(ring.getAttribute('aBorderBlend').count, position.count);
+      // All four rims must be skirted. An unskirted rim is an open sheet edge,
+      // and the camera looking at one sees straight through to the sky.
+      ring.computeBoundingBox();
+      assert.ok(
+        ring.boundingBox.min.y < WATER_LEVEL - 10,
+        `${regionId} ring ${index} extrudes its rims below the sea`,
+      );
+      ring.dispose();
+    }
+  }
+});
+
+test('central peak bearing follows the chart from every side of Floreana', () => {
+  const north = getCentralPeakView('POST_OFFICE_BAY');
+  const south = getCentralPeakView('PUNTA_SUR');
+  const east = getCentralPeakView('EASTERN_CLIFFS');
+  assert.ok(north && south && east);
+  assert.ok(Math.abs(Math.abs(north.bearingDegrees) - 180) < 5, 'Post Office Bay sees Cerro Pajas almost due south');
+  assert.ok(Math.abs(south.bearingDegrees) < 20, 'Punta Sur sees Cerro Pajas generally north');
+  assert.ok(east.bearingDegrees < -90 && east.bearingDegrees > -150, 'Eastern Cliffs sees Cerro Pajas to the southwest');
+});
+
+test('central peak gets larger and clearer as regional chart distance closes', () => {
+  const near = getCentralPeakView('PENAL_COLONY');
+  const middle = getCentralPeakView('POST_OFFICE_BAY');
+  const far = getCentralPeakView('EASTERN_CLIFFS');
+  assert.ok(near.distanceKm < middle.distanceKm && middle.distanceKm < far.distanceKm);
+  const nearAppearance = resolveCentralPeakAppearance(near, CENTRAL_PEAK_DEV_DEFAULTS);
+  const farAppearance = resolveCentralPeakAppearance(far, CENTRAL_PEAK_DEV_DEFAULTS);
+  assert.ok(nearAppearance.width > farAppearance.width);
+  assert.ok(nearAppearance.height > farAppearance.height);
+  assert.ok(nearAppearance.contrast > farAppearance.contrast);
+  assert.ok(nearAppearance.geographicHaze < farAppearance.geographicHaze);
+});
+
+test('central peak is omitted only where an island-scale backdrop is invalid', () => {
+  assert.equal(getCentralPeakView('C_HIGH'), null);
+  assert.equal(getCentralPeakView('BEAGLE_CABIN'), null);
+  assert.equal(getCentralPeakView('POST_OFFICE_BAY_3'), null);
+  assert.ok(getCentralPeakView('BEAGLE'), 'offshore exterior maps retain the island landmark');
+  assert.ok(getCentralPeakView('NW_REEF'), 'reef maps retain the island landmark');
+  const expectedExteriorPlacements = FLOREANA_MAP_PLACEMENTS.filter(placement => (
+    !placement.test
+    && placement.id !== 'C_HIGH'
+    && placement.kind !== 'houseInterior'
+    && placement.kind !== 'shipInterior'
+  ));
+  for (const placement of expectedExteriorPlacements) {
+    assert.ok(
+      getCentralPeakView(placement.id),
+      `${placement.id} receives the shared island-scale landmark`,
+    );
+  }
 });
 
 test('Post Office Bay routes share normalized seam coordinates with both land neighbors', () => {
@@ -3819,6 +4265,27 @@ test('Floreana cardinal routes remain reciprocal and Northern Shore matches the 
       && hint.direction === FLOREANA_OPPOSITE_DIRECTIONS[direction]
     ));
     assert.ok(reverse, `missing reciprocal route for ${fromId} ${direction} -> ${toId}`);
+    const forward = regionMaps[fromId]?.edgeHints.find(hint => (
+      hint.kind === 'open'
+      && hint.toRegionId === toId
+      && hint.direction === direction
+    ));
+    assert.ok(forward, `missing route card for ${fromId} ${direction} -> ${toId}`);
+    for (const route of [forward, reverse]) {
+      assert.ok(
+        route.minutes >= 2 && route.minutes <= 60,
+        `${route.toRegionId} direct neighboring travel should take 2–60 minutes, not ${route.minutes}`,
+      );
+      assert.ok(
+        route.fatigue >= 0 && route.fatigue <= 6,
+        `${route.toRegionId} direct neighboring travel fatigue should stay bounded, not ${route.fatigue}`,
+      );
+      assert.equal(
+        route.routeLabel.includes('->'),
+        false,
+        `${route.toRegionId} direct neighboring travel must not expose a legacy multi-cell route`,
+      );
+    }
   }
 
   const directionEdges = { N: 'north', E: 'east', S: 'south', W: 'west' };
@@ -3858,6 +4325,48 @@ test('Floreana cardinal routes remain reciprocal and Northern Shore matches the 
     editorLocations.filter(placement => !reachable.has(placement.id)).map(placement => placement.id),
     [],
     'every island-chart map should belong to the connected travel graph',
+  );
+});
+
+test('island travel covers the source before commit and renders the hidden destination mount', () => {
+  const interstitialSource = fs.readFileSync(
+    path.resolve('field-notebook/TravelInterstitial.jsx'),
+    'utf8',
+  );
+  const coveredEffectStart = interstitialSource.indexOf(
+    "transitionMode === 'threshold'\n      || !coverConfirmed",
+  );
+  const coveredEffect = interstitialSource.slice(
+    coveredEffectStart,
+    interstitialSource.indexOf('useEffect(() => {', coveredEffectStart + 20),
+  );
+  assert.ok(coveredEffectStart >= 0, 'island commit is gated by confirmed visual cover');
+  assert.ok(
+    coveredEffect.indexOf("setZoneTransitionPhase('chart'") < coveredEffect.indexOf('commitZoneTransition('),
+    'the chart phase is established before the destination zone commits',
+  );
+  assert.match(
+    coveredEffect,
+    /requestAnimationFrame\(\(\) => \{\s*commitZoneTransition\(transitionId\)/,
+    'the renderer receives the chart phase before destination mounting begins',
+  );
+
+  const transitionEnd = interstitialSource.slice(
+    interstitialSource.indexOf('onTransitionEnd={event =>'),
+    interstitialSource.indexOf('aria-hidden=', interstitialSource.indexOf('onTransitionEnd={event =>')),
+  );
+  assert.match(transitionEnd, /setCoverConfirmed\(true\)/);
+  assert.doesNotMatch(
+    transitionEnd,
+    /commitZoneTransition/,
+    'opacity transition completion confirms cover instead of mutating the world inline',
+  );
+
+  const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  assert.match(
+    gameSource,
+    /const transitionCanvasPaused = Boolean\(\s*transition\s*&& transition\.phase === 'chart'\s*\);/,
+    'destination mounting keeps receiving render frames behind the opaque chart',
   );
 });
 
@@ -4268,6 +4777,77 @@ test('save snapshots expose resume summary without requiring localStorage', () =
   assert.equal(summary.objectivesComplete, 1);
   assert.equal(summary.objectivesTotal, 2);
   assert.equal(summary.fatigue, 42);
+});
+
+test('session snapshots carry resumable expedition progress only', () => {
+  const snapshot = buildSessionSnapshot({
+    seed: 'seed-1',
+    playableModeId: 'darwin',
+    currentZoneId: 'E_MID',
+    currentLocalCellId: 'E_MID',
+    playerSpawnId: 'default',
+    day: 2,
+    timeOfDay: 14.25,
+    health: 88,
+    fatigue: 31,
+    curiosity: 26,
+    questComplete: true,
+    weather: 'garua',
+    collectedSpecimenIds: ['basalt', 'marineiguana'],
+    documentedSpecimenIds: ['finch'],
+    visitedZoneIds: ['POST_OFFICE_BAY', 'E_MID'],
+    journal: [{ content: 'a note' }, { content: 'another' }],
+    supplies: { twine: 4 },
+    // Must not be persisted: transient/world state rebuilt on mount.
+    examineSession: { id: 'x' },
+    animalDroppings: [{ id: 'd1' }],
+    transition: { id: 't1' },
+  });
+
+  assert.ok(isUsableSessionSnapshot(snapshot));
+  assert.equal(snapshot.currentZoneId, 'E_MID');
+  assert.equal(snapshot.day, 2);
+  assert.equal(snapshot.questComplete, true);
+  assert.deepEqual(snapshot.collectedSpecimenIds, ['basalt', 'marineiguana']);
+  assert.equal(snapshot.journal.length, 2);
+  assert.equal(snapshot.examineSession, undefined);
+  assert.equal(snapshot.animalDroppings, undefined);
+  assert.equal(snapshot.transition, undefined);
+
+  const summary = summarizeSessionSnapshot(snapshot, { regionName: 'Rocky Clearing' });
+  assert.equal(summary.day, 2);
+  assert.equal(summary.time, '2:15 PM');
+  assert.equal(summary.specimens, 2);
+  assert.equal(summary.notes, 2);
+  assert.match(summary.label, /Day 2/);
+  assert.match(summary.label, /Rocky Clearing/);
+});
+
+test('session snapshots from an unknown schema are rejected rather than half-applied', () => {
+  assert.equal(isUsableSessionSnapshot(null), false);
+  assert.equal(isUsableSessionSnapshot({ currentZoneId: 'E_MID' }), false);
+  assert.equal(isUsableSessionSnapshot({ version: 999, currentZoneId: 'E_MID' }), false);
+  assert.equal(isUsableSessionSnapshot({ version: 1, currentZoneId: '' }), false);
+  assert.equal(summarizeSessionSnapshot({ version: 999 }), null);
+});
+
+test('graphics quality preference falls back to device detection only when automatic', () => {
+  assert.equal(normalizeQualityPreference(undefined), 'auto');
+  assert.equal(normalizeQualityPreference('nonsense'), 'auto');
+  assert.equal(normalizeQualityPreference('low'), 'mobile');
+  assert.equal(normalizeQualityPreference('CINEMATIC'), 'cinematic');
+  assert.equal(resolveQualityPreference('auto', 'mobile'), 'mobile');
+  assert.equal(resolveQualityPreference('cinematic', 'mobile'), 'cinematic');
+});
+
+test('frame deltas clamp so a backgrounded tab cannot advance the expedition clock', () => {
+  assert.equal(clampFrameDelta(0.016), 0.016);
+  assert.equal(clampFrameDelta(0.05), 0.05);
+  // A tab hidden for five minutes arrives as one enormous delta.
+  assert.equal(clampFrameDelta(300), 0.05);
+  assert.equal(clampFrameDelta(-1), 0);
+  assert.equal(clampFrameDelta(Number.NaN), 0);
+  assert.equal(clampFrameDelta(undefined), 0);
 });
 
 test('weather aliases normalize into valid 3D states', () => {

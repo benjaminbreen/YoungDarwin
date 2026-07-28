@@ -228,6 +228,49 @@ one interchangeable suitability curve for every plant.
 - Underwater reef/seagrass features can be heightfield plus shader first. Add GLB
   props only when close-up relief is needed.
 
+## Island-Scale Central Peak
+
+- Connected neighbor aprons own middle-ground terrain beyond each regional map.
+  Every authored outdoor terrain map participates, including Beach with Hut and
+  authored shallow-surf approaches; indoor/non-terrain maps still skip the
+  system. Cardinal aprons sample the actual adjacent region, align the two
+  authored travel gateways with an endpoint-preserving coordinate warp, share
+  an opaque overlap with the local terrain, and give each diagonal corner one
+  deterministic mesh owner so coarse surfaces cannot cross into edge-on
+  polygon spikes.
+  A second, much lower-resolution far-terrain belt continues each rendered
+  apron through the back of that neighbor and into the next cardinally
+  connected region. It is baked into the border-vista resource and remains
+  attached to the world, rather than becoming another camera-facing horizon
+  sheet.
+- Far-terrain belts are render-only opaque meshes: no collision, ecology,
+  lighting normals, shadows, PBR textures, or runtime height sampling. Their
+  near rows overlap beneath the detailed apron, and their atmospheric outer
+  rows stop before the island-scale peak plane. Build-time low-pass and slope
+  limiting preserve broad ridges without allowing isolated regional samples to
+  pull long triangles through the horizon. Adjacent belts give each shared
+  corner one deterministic owner; non-owner side edges bury below the
+  water/horizon instead of intersecting as edge-on polygon sheets.
+  Their unlit shader still receives the shared daylight and moonlight factors,
+  preventing baked daytime vertex colors from glowing after dark.
+- Cerro Pajas is the shared island-scale landmark. `centralPeak.js` derives its
+  bearing and approximate distance from `FLOREANA_MAP_PLACEMENTS`, while
+  `CentralPeakBackdrop.jsx` renders one camera-relative atmospheric silhouette
+  inside the sky rig.
+- Approximate chart distance controls apparent size and clear-air contrast;
+  live weather supplies additional haze. The backdrop depth-tests behind
+  terrain, renders before water, writes no depth, and dissolves at its base.
+  Scene fog and the two terrain-layer haze shaders own horizon air; do not add
+  a camera-following transparent haze cylinder, because its finite faces can
+  intersect distant terrain as rectangular bands.
+- In development, press backtick and use **Island Distance Scenery** to tune the
+  shared peak, the directly connected **Neighbor Terrain Apron**, and the
+  **Far Terrain Belt** separately. Both terrain layers expose visibility,
+  relief, vertical placement, haze onset, separate near/far haze, and distance
+  softness (the far belt also exposes width). The haze ranges deliberately
+  extend past full wash so visual tuning can push outer terrain completely into
+  the weather-colored air. These are global controls, not per-region overrides.
+
 ## Region Look Targets
 
 - Post Office Bay / northern Floreana: black basalt landing shelf, sheltered blue

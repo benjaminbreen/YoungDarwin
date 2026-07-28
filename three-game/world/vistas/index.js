@@ -435,17 +435,16 @@ const NON_SCENIC_SOURCE_TYPES = new Set([
   'cave',
   'governorshouse',
   'governorslibrary',
-  'hut',
   'interior',
   'ocean',
   'office',
 ]);
 
-// Black Beach Surf is mechanically an ocean map, but unlike offshore ocean
-// destinations it is a shallow shelf with an authored east route directly
-// into Black Beach. It therefore needs the same neighbor terrain continuation
-// as a coastal land map; its other three sides remain explicit ocean bounds.
-const WATER_APRON_SOURCE_IDS = new Set(['BLACK_BEACH_SURF']);
+// These are mechanically ocean maps, but each is an authored shallow shelf
+// with one direct route into a coastal land map. They therefore need the same
+// connected terrain continuation as a coast; their remaining sides stay
+// explicit ocean bounds.
+const WATER_APRON_SOURCE_IDS = new Set(['BLACK_BEACH_SURF', 'SE_SHALLOW_SURF']);
 
 function isApronSourceRegion(regionId) {
   const region = getRegionMap(regionId);

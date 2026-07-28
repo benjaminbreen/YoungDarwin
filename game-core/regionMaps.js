@@ -1,6 +1,7 @@
 import { locations } from '../data/locations';
 import { canonicalizeSpecimenIds } from '../utils/canonicalIds';
-import { estimateRouteTravel, getCellByCoordinates, getCellById } from '../utils/locationSystem';
+import { estimateTravelStep, getCellByCoordinates, getCellById } from '../utils/locationSystem';
+import { getFloreanaRouteKind } from './floreanaGeography';
 
 export const EDGE_DIRECTIONS = {
   north: { abbr: 'N', dx: 0, dy: -1, opposite: 'south' },
@@ -120,17 +121,25 @@ function makeOpenHint(cell, abbr) {
     ? getCellById(overrideId)
     : getCellByCoordinates(cell.x + dir.dx, cell.y + dir.dy);
   if (!neighbor) return null;
-  const travel = estimateRouteTravel(cell, neighbor);
+  // An authored cardinal exit is one direct journey even when its destination
+  // uses a legacy-grid route override. Running the old multi-cell pathfinder
+  // here made neighboring maps inherit every intermediate cell's time and
+  // fatigue, producing several-hour "one edge" trips.
+  const travel = estimateTravelStep(cell, neighbor, abbr);
   return {
     edge,
     direction: abbr,
     kind: 'open',
+    // Keep the physical meaning of the chart route after it becomes a runtime
+    // edge hint. Immediate neighboring scenery may represent any route, but
+    // distant land continuation must not walk through a water crossing.
+    routeKind: getFloreanaRouteKind(cell.id, neighbor.id) || 'land',
     toRegionId: neighbor.id,
     label: `Near ${neighbor.name}`,
     description: overrideTravel?.description || `Travel ${edge} to ${neighbor.name}.`,
-    minutes: overrideTravel?.minutes || travel?.travelMinutes || 35,
-    fatigue: overrideTravel?.fatigue || travel?.fatigueIncrease || 2,
-    routeLabel: overrideTravel?.routeLabel || travel?.routeLabel || abbr,
+    minutes: overrideTravel?.minutes ?? travel?.minutes ?? 35,
+    fatigue: overrideTravel?.fatigue ?? travel?.fatigue ?? 2,
+    routeLabel: overrideTravel?.routeLabel || travel?.direction || abbr,
   };
 }
 

@@ -1150,12 +1150,16 @@ async function run() {
         rendererProbe,
       );
     }
+    // Darwin scenarios lead. Finch is the slowest to reach gameplay readiness
+    // and the least representative of what testers play, so running it first
+    // meant a single finch timeout took the entire lane down with it and left
+    // Darwin mode uncertified. Order here is "most important first".
     const scenarios = {
-      finch: runFinchScenario,
       transition: runTransitionScenario,
       'transition-prepare': runTransitionPreparationScenario,
       cabin: runCabinScenario,
       assessment: runAssessmentScenario,
+      finch: runFinchScenario,
     };
     assertCondition(
       requestedScenario === 'all' || scenarios[requestedScenario],
@@ -1169,13 +1173,28 @@ async function run() {
       ? Object.entries(scenarios)
       : [[requestedScenario, scenarios[requestedScenario]]];
     results = [];
+    // Each scenario is isolated. Previously the first failure threw straight out
+    // of this loop, so everything after it silently never ran and summary.json
+    // recorded only the scenarios that happened to precede the break — a red
+    // lane looked like a single broken test when in fact most of the suite had
+    // not executed at all. Failures are recorded and re-raised after the loop.
     for (const [scenarioName, scenario] of selected) {
       console.log(`[three:e2e] ${scenarioName}: wall-clock budget ${SCENARIO_TIMEOUT_MS}ms`);
-      results.push(await promiseWithTimeout(
-        scenario(browser, baseUrl),
-        SCENARIO_TIMEOUT_MS,
-        `${scenarioName} scenario wall-clock budget`,
-      ));
+      try {
+        const result = await promiseWithTimeout(
+          scenario(browser, baseUrl),
+          SCENARIO_TIMEOUT_MS,
+          `${scenarioName} scenario wall-clock budget`,
+        );
+        results.push({ ...result, name: result.name || scenarioName, status: 'passed' });
+      } catch (error) {
+        console.error(`[three:e2e] ${scenarioName}: FAILED — ${error.message}`);
+        results.push({
+          name: scenarioName,
+          status: 'failed',
+          failure: error.message,
+        });
+      }
     }
   } finally {
     process.removeListener('SIGINT', stop);
@@ -1186,6 +1205,18 @@ async function run() {
 
   const summaryPath = path.join(outDir, 'summary.json');
   await fs.writeFile(summaryPath, JSON.stringify(results, null, 2));
+
+  // One line per scenario, so a red lane says which parts still passed.
+  const failed = results.filter(result => result.status === 'failed');
+  console.log('[three:e2e] scenario results:');
+  results.forEach(result => {
+    console.log(`  ${result.status === 'failed' ? 'FAIL' : 'pass'}  ${result.name}${result.failure ? ` — ${result.failure}` : ''}`);
+  });
+  console.log(`[three:e2e] summary: ${summaryPath}`);
+  if (failed.length) {
+    throw new Error(`Gameplay smoke: ${failed.length}/${results.length} scenarios failed (${failed.map(result => result.name).join(', ')}).`);
+  }
+
   const consoleFailures = results.flatMap(result => result.errors || []);
   if (consoleFailures.length) {
     console.error(JSON.stringify(results, null, 2));
@@ -1202,7 +1233,6 @@ async function run() {
     curiosityGained: result.curiosityGained,
     journalEntriesAdded: result.journalEntriesAdded,
   })), null, 2));
-  console.log(`[three:e2e] summary: ${summaryPath}`);
 }
 
 run().catch(error => {

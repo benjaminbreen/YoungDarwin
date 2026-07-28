@@ -16,6 +16,13 @@ import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+// How far above the drawn terrain the chase camera is allowed to sit. Tuned for
+// Darwin's scale; the animal profiles override it via `camera.collision
+// .groundClearance` because a clearance sized for a man reads as a crane shot
+// from a finch. Large enough to cover the near clip plane plus the gap between
+// the drawn mesh and the smoothed movement surface.
+const CAMERA_GROUND_CLEARANCE = 0.38;
+
 function dampAngle(current, target, lambda, delta) {
   const wrapped = current + Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return THREE.MathUtils.damp(current, wrapped, lambda, delta);
@@ -27,8 +34,10 @@ function smoothStep01(value) {
 }
 
 const OPENING_SHOT = Object.freeze({
-  startHeight: 82,
-  startRadius: 48,
+  // Aerial start sits ~20% tighter than the original establishing shot so the
+  // landing reads at legible scale from the first frame of the fly-in.
+  startHeight: 66,
+  startRadius: 38,
   rotation: Math.PI * 0.68,
   surveyForward: 7,
   surveySide: -4,
@@ -112,6 +121,8 @@ export function usePlayerCameraRig() {
     droppingLook: new THREE.Vector3(),
     droppingForward: new THREE.Vector3(),
     droppingRight: new THREE.Vector3(),
+    flightLook: new THREE.Vector3(),
+    flightLookForward: new THREE.Vector3(),
     introFinalPivot: new THREE.Vector3(),
     introFinalEye: new THREE.Vector3(),
     introOrbitCenter: new THREE.Vector3(),
@@ -912,6 +923,24 @@ export function usePlayerCameraRig() {
         .add(cameraRight.multiplyScalar(frameSide))
         .add(scratch.panVertical.set(0, vert, 0));
       let lookTarget = pivot;
+      if (flightCamera?.lookAhead && facing) {
+        const flightLookForward = scratch.flightLookForward.set(
+          facing.x || 0,
+          0,
+          facing.z || -1,
+        );
+        if (flightLookForward.lengthSq() > 0.0001) {
+          flightLookForward.normalize();
+          const lookAhead = flightCamera.lookAhead
+            + (flightCamera.speedLookAhead ?? 0) * THREE.MathUtils.clamp(flightSpeedT, 0, 1);
+          // Keep the bird in the lower part of the composition and expose
+          // upcoming perches/terrain. The eye stays attached to the bird; only
+          // its point of attention travels forward.
+          lookTarget = scratch.flightLook
+            .copy(pivot)
+            .addScaledVector(flightLookForward, lookAhead);
+        }
+      }
       if (flightCamera && finchDroppingCamera && now < finchDroppingCamera.until) {
         const sinceDrop = Math.max(0, now - (finchDroppingCamera.startedAt || now));
         const remaining = Math.max(0, finchDroppingCamera.until - now);
@@ -964,6 +993,22 @@ export function usePlayerCameraRig() {
         positionDamping = THREE.MathUtils.lerp(positionDamping, 20, adsBlend);
       }
       const cameraCollision = cameraProfile?.collision;
+      // Terrain clamp, run before the obstacle test below so the ray is cast at
+      // the eye's final height. cameraDistanceLimit only ray-tests box
+      // obstacles — it never consults the heightfield — so on open ground the
+      // chase camera sank through hillsides whenever the player walked downslope
+      // or pitched the view down. Lifting the eye is enough: lookTarget stays on
+      // the pivot, so the framing rises instead of swinging around the player.
+      const groundClearance = cameraCollision?.groundClearance ?? CAMERA_GROUND_CLEARANCE;
+      if (groundClearance > 0 && collisionAdapter.visualTerrainHeight) {
+        const eyeGroundY = collisionAdapter.visualTerrainHeight(eye.x, eye.z) + groundClearance;
+        if (eye.y < eyeGroundY) {
+          eye.y = eyeGroundY;
+          // Match the obstacle path: a clamped eye must chase its target
+          // quickly or the camera lags visibly behind a downhill sprint.
+          positionDamping = Math.max(positionDamping, 12);
+        }
+      }
       if (cameraCollision?.enabled && collisionAdapter.cameraDistanceLimit) {
         const limitedDistance = collisionAdapter.cameraDistanceLimit(pivot, eye, cameraCollision);
         const requestedDistance = eye.distanceTo(pivot);
@@ -989,7 +1034,11 @@ export function usePlayerCameraRig() {
     const surgePop = surgeAge >= 0 && surgeAge < SPRINT.surgeDuration
       ? Math.sin((surgeAge / SPRINT.surgeDuration) * Math.PI) * SPRINT.surgeFov
       : 0;
-    const targetFov = THREE.MathUtils.lerp(baseFovRef.current, SHOTGUN.ads.fov, adsBlendRef.current)
+    const embodiedFov = flightCamera
+      ? (flightCamera.fov ?? baseFovRef.current)
+        + (flightCamera.speedFovBonus ?? 0) * THREE.MathUtils.clamp(flightSpeedT, 0, 1)
+      : baseFovRef.current;
+    const targetFov = THREE.MathUtils.lerp(embodiedFov, SHOTGUN.ads.fov, adsBlendRef.current)
       + (sprintBlendRef.current * SPRINT.fovBonus + surgePop) * (1 - adsBlendRef.current);
     if (Math.abs(camera.fov - targetFov) > 0.02) {
       camera.fov = targetFov;

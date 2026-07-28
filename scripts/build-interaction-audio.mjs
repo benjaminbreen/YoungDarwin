@@ -17,6 +17,19 @@ const sources = {
   ceramic: path.join(rawDir, 'freesound-397597-glass-ceramic-clinks-hq-preview.mp3'),
   grass: path.join(rawDir, 'freesound-364712-grass-rustle-hq-preview.mp3'),
   shrub: path.join(rawDir, 'freesound-560261-bush-rustle-hq-preview.mp3'),
+  hammerWhoosh: [
+    path.join(rawDir, 'freesound-802462-stick-whoosh-4-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802460-stick-whoosh-2-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802462-stick-whoosh-4-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802460-stick-whoosh-2-hq-preview.mp3'),
+  ],
+  netWhoosh: [
+    path.join(rawDir, 'freesound-802465-stick-whoosh-7-soft-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802467-stick-whoosh-9-airy-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802465-stick-whoosh-7-soft-hq-preview.mp3'),
+    path.join(rawDir, 'freesound-802467-stick-whoosh-9-airy-hq-preview.mp3'),
+  ],
+  netContact: path.join(rawDir, 'freesound-235451-cloth-impact-hq-preview.mp3'),
 };
 
 mkdirSync(outputDir, { recursive: true });
@@ -55,6 +68,45 @@ function buildSprite({
       '-c:a', 'pcm_s16le',
       clipPath,
     ]);
+  });
+  const concatInputs = clips.map((_, index) => `[${index}:a]`).join('');
+  runFfmpeg([
+    ...clips.flatMap(clip => ['-i', clip]),
+    '-filter_complex', `${concatInputs}concat=n=${clips.length}:v=0:a=1[out]`,
+    '-map', '[out]',
+    '-ar', '48000',
+    '-c:a', 'pcm_s16le',
+    path.join(outputDir, output),
+  ]);
+  rmSync(temporaryDir, { recursive: true, force: true });
+}
+
+function buildOneShotSprite({
+  inputs,
+  output,
+  duration,
+  filters,
+  loudness,
+  truePeak,
+}) {
+  const temporaryDir = path.join(tmpdir(), `darwin-${output.replace(/\W/g, '-')}-${process.pid}`);
+  mkdirSync(temporaryDir, { recursive: true });
+  const clips = inputs.map(({ source, start = 0, rate = 1 }, index) => {
+    const clipPath = path.join(temporaryDir, `${String(index + 1).padStart(2, '0')}.wav`);
+    const rateFilter = Math.abs(rate - 1) > 0.001
+      ? `asetrate=48000*${rate.toFixed(3)},aresample=48000,`
+      : '';
+    runFfmpeg([
+      '-ss', Math.max(0, start).toFixed(3),
+      '-i', source,
+      '-af', `${rateFilter}${filters},loudnorm=I=${loudness}:LRA=5:TP=${truePeak},afade=t=in:st=0:d=0.008,afade=t=out:st=${Math.max(0.08, duration - 0.18).toFixed(3)}:d=0.16,apad=pad_dur=${duration.toFixed(3)},atrim=duration=${duration.toFixed(3)}`,
+      '-ac', '1',
+      '-ar', '48000',
+      '-c:a', 'pcm_s16le',
+      '-t', duration.toFixed(3),
+      clipPath,
+    ]);
+    return clipPath;
   });
   const concatInputs = clips.map((_, index) => `[${index}:a]`).join('');
   runFfmpeg([
@@ -130,6 +182,49 @@ buildSprite({
   filters: 'highpass=f=120,lowpass=f=12000',
   loudness: -28,
   truePeak: -6,
+});
+
+// The heavy hammer pass is darker and closer than the net's broad, airy pass.
+// Both are real stick swings; the net's separate cloth contact is only played
+// when the hoop or mesh actually meets a specimen or snag.
+buildOneShotSprite({
+  inputs: sources.hammerWhoosh.map((source, index) => ({
+    source,
+    rate: [0.9, 0.94, 0.97, 1][index],
+  })),
+  output: 'swing-hammer.wav',
+  duration: 0.72,
+  filters: 'highpass=f=65,lowpass=f=9200,equalizer=f=420:t=q:w=1:g=2',
+  loudness: -27,
+  truePeak: -6,
+});
+
+buildOneShotSprite({
+  inputs: sources.netWhoosh.map((source, index) => ({
+    source,
+    rate: [1, 1.04, 1.08, 1.12][index],
+  })),
+  output: 'swing-net.wav',
+  duration: 0.72,
+  filters: 'highpass=f=150,lowpass=f=13500,equalizer=f=6200:t=q:w=1:g=2',
+  loudness: -29,
+  truePeak: -7,
+});
+
+buildOneShotSprite({
+  inputs: [
+    { source: sources.netContact, start: 0.075, rate: 1.08 },
+    { source: sources.netContact, start: 2.3, rate: 1.12 },
+    { source: sources.netContact, start: 4.62, rate: 1.16 },
+    { source: sources.netContact, start: 0.075, rate: 1.18 },
+    { source: sources.netContact, start: 0.075, rate: 1.14 },
+    { source: sources.netContact, start: 4.62, rate: 1.22 },
+  ],
+  output: 'contact-net.wav',
+  duration: 0.54,
+  filters: 'highpass=f=170,lowpass=f=7200,equalizer=f=240:t=q:w=1:g=-4',
+  loudness: -31,
+  truePeak: -8,
 });
 
 console.log(`Built interaction audio in ${path.relative(repoRoot, outputDir)}`);

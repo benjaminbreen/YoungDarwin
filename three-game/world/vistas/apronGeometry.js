@@ -9,6 +9,7 @@ import {
   WATER_LEVEL,
 } from '../terrain';
 import { getBorderVistas } from './index';
+import { bakeDistanceWash } from './vistaHaze';
 import {
   CARDINAL_VISTA_EDGES,
   OPPOSITE_VISTA_EDGE,
@@ -16,7 +17,14 @@ import {
   transitionVistaColor,
 } from './transitions';
 
-function apronPreviewDepth(regionId, vista) {
+// Shared-corner handling. Both aprons sweep the corner at full reach so the
+// silhouette stays filled from every camera angle; the non-owner sits a few
+// centimetres lower, which is what resolves the overlap. Separating them by
+// depth rather than by deleting one side's geometry keeps the coverage.
+const APRON_SHARED_CORNER_REACH = 1;
+const APRON_SHARED_CORNER_DROP = 0.28;
+
+export function apronPreviewDepth(regionId, vista) {
   // Black Beach's west-facing cove is unusually deep: at the generic 64 m
   // cutoff its back shore first rises on the final grid row, leaving a thin
   // crescent that looks like a floating arch from the surf map. Carry this
@@ -50,7 +58,6 @@ export const EDGE_AXES = {
   southwest: { along: [1, 1], outward: [-1, 1] },
 };
 
-const ATMOSPHERE = new THREE.Color('#b9d7de');
 const BORDER_COLLAR_DEPTH = 3.8;
 const BORDER_COLLAR_DROP = 0.035;
 const BORDER_COLLAR_ROWS = 4;
@@ -65,6 +72,30 @@ const SEAM_BLEND_DROP = 0.07;
 // enough that its finite outer row cannot silhouette as a rectangular shelf
 // when viewed almost edge-on.
 const CARRY_OUTER_TUCK_DEPTH = 4.8;
+// Metres of vertical clearance distant geometry must keep from the water plane.
+//
+// Both distant layers used to park their sub-sea areas a few centimetres ABOVE
+// the ocean (rings clamped to WATER_LEVEL + 0.1, quadrants flattened onto a
+// WATER_LEVEL + 0.15 datum) on the theory that dipping under would let the
+// ocean render through them. At 200-400 m that margin is smaller than the depth
+// buffer's precision AND smaller than the ocean's own wave displacement, so the
+// two surfaces interleave per pixel and the sea draws in hard straight
+// horizontal slices THROUGH the distant headlands. Hugging the surface is what
+// causes the artefact, not what prevents it.
+//
+// The fix is to never sit inside that band: real land stands clearly above it,
+// and genuine seabed goes clearly below, where the ocean occludes it cleanly
+// and correctly. A metre and a half is invisible at ring range and far outside
+// anything that can fight.
+export const VISTA_SEA_CLEARANCE = 1.5;
+
+export function clearWaterPlane(y, clearance = VISTA_SEA_CLEARANCE) {
+  const above = WATER_LEVEL + clearance;
+  const below = WATER_LEVEL - clearance;
+  if (y >= above || y <= below) return y;
+  return y > WATER_LEVEL ? above : below;
+}
+
 export function normalize2([x, z]) {
   const length = Math.hypot(x, z) || 1;
   return [x / length, z / length];
@@ -176,6 +207,88 @@ function applyApronVertexMottle(color, x, z, options = {}) {
   return color;
 }
 
+function smoothNeighborApronGrid(positions, depths, rows, columns, preserveThroughRow) {
+  const stride = columns + 1;
+  const vertexCount = (rows + 1) * stride;
+  let heights = new Float64Array(vertexCount);
+  for (let index = 0; index < vertexCount; index += 1) {
+    heights[index] = positions[index * 3 + 1];
+  }
+
+  // Preserve the authored map edge and material handoff exactly. Beyond it,
+  // two light build-time passes remove one-cell notches from the low-detail
+  // neighbor silhouette while retaining broad hills and coastal shelves.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = heights.slice();
+    for (let row = preserveThroughRow + 1; row <= rows; row += 1) {
+      for (let col = 0; col <= columns; col += 1) {
+        const index = row * stride + col;
+        const depth = depths[index];
+        const outerBlend = THREE.MathUtils.smoothstep(depth, 0.34, 1);
+        if (outerBlend <= 0) continue;
+        let sum = heights[index] * 5;
+        let weight = 5;
+        if (col > 0) {
+          sum += heights[index - 1] * 3;
+          weight += 3;
+        }
+        if (col < columns) {
+          sum += heights[index + 1] * 3;
+          weight += 3;
+        }
+        if (row > preserveThroughRow + 1) {
+          sum += heights[index - stride] * 0.7;
+          weight += 0.7;
+        }
+        if (row < rows) {
+          sum += heights[index + stride] * 0.7;
+          weight += 0.7;
+        }
+        next[index] = THREE.MathUtils.lerp(
+          heights[index],
+          sum / weight,
+          THREE.MathUtils.lerp(0.16, 0.42, outerBlend),
+        );
+      }
+    }
+    heights = next;
+  }
+
+  // Limit only isolated along-ridge jumps in the far half. The clamp is loose
+  // enough to preserve real regional relief but prevents a coarse sample from
+  // becoming a visible tooth against the sky.
+  for (let row = preserveThroughRow + 1; row <= rows; row += 1) {
+    for (let col = 1; col <= columns; col += 1) {
+      const index = row * stride + col;
+      const depth = depths[index];
+      if (depth < 0.48) continue;
+      const previous = index - 1;
+      const maxStep = THREE.MathUtils.lerp(1.8, 0.9, depth);
+      heights[index] = THREE.MathUtils.clamp(
+        heights[index],
+        heights[previous] - maxStep,
+        heights[previous] + maxStep,
+      );
+    }
+    for (let col = columns - 1; col >= 0; col -= 1) {
+      const index = row * stride + col;
+      const depth = depths[index];
+      if (depth < 0.48) continue;
+      const nextIndex = index + 1;
+      const maxStep = THREE.MathUtils.lerp(1.8, 0.9, depth);
+      heights[index] = THREE.MathUtils.clamp(
+        heights[index],
+        heights[nextIndex] - maxStep,
+        heights[nextIndex] + maxStep,
+      );
+    }
+  }
+
+  for (let index = 0; index < vertexCount; index += 1) {
+    positions[index * 3 + 1] = heights[index];
+  }
+}
+
 function bandAt(vista, distance) {
   return vista.bands?.find(band => distance >= band.from && distance <= band.to)
     || vista.bands?.[vista.bands.length - 1]
@@ -194,10 +307,10 @@ export function profileHeight(vista, x, z, distance, t) {
 
 function profileColor(vista, distance, t, sideFade) {
   const band = bandAt(vista, distance);
-  if (!band) return ATMOSPHERE.clone();
+  if (!band) return new THREE.Color('#8f9490');
   const bandT = THREE.MathUtils.clamp((distance - band.from) / Math.max(0.001, band.to - band.from), 0, 1);
   const color = new THREE.Color(band.colors[0]).lerp(new THREE.Color(band.colors[1] || band.colors[0]), bandT);
-  color.lerp(ATMOSPHERE, t * 0.42 + sideFade * 0.24);
+  bakeDistanceWash(color, t * 0.42 + sideFade * 0.24);
   return color;
 }
 
@@ -271,6 +384,15 @@ export function projectApronPreviewPoint(
   const outsideT = outsideDistance / Math.max(0.001, previewDepth);
   const targetDistance = outsideT * targetSampleDepth;
   const clampedU = THREE.MathUtils.clamp(u, 0, 1);
+  const targetU = mapApronSourceUToTargetU(
+    regionId,
+    config,
+    targetRegionId,
+    targetConfig,
+    vista.edge,
+    targetEdge,
+    clampedU,
+  );
   const along = normalize2(axes.along);
   const outward = normalize2(axes.outward);
   const origin = edgeOrigin(config, vista.edge);
@@ -278,9 +400,9 @@ export function projectApronPreviewPoint(
   const [x, z] = worldPoint(origin, along, outward, alongDistance, outsideDistance);
   const [edgeX, edgeZ] = edgePoint(config, vista.edge, clampedU, 0);
   const edgeY = terrainHeight(edgeX, edgeZ, regionId);
-  const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, 0);
+  const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, targetU, 0);
   const targetEdgeY = terrainHeight(targetEdgeX, targetEdgeZ, targetRegionId);
-  const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
+  const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, targetU, targetDistance);
   const targetY = terrainHeight(targetX, targetZ, targetRegionId);
   const continuity = transition?.continuity || null;
   const heightBlend = continuity
@@ -311,6 +433,7 @@ export function projectApronPreviewPoint(
     z,
     u,
     clampedU,
+    targetU,
     outsideDistance,
     outsideT,
     previewDepth,
@@ -341,6 +464,15 @@ export function projectNeighborPreviewPoint(
   );
   const { u, inwardDistance } = targetPointPreviewCoordinates(targetConfig, targetEdge, targetX, targetZ);
   if (u < 0 || u > 1 || inwardDistance < 0 || inwardDistance > targetSampleDepth) return null;
+  const sourceU = mapApronTargetUToSourceU(
+    regionId,
+    config,
+    targetRegionId,
+    targetConfig,
+    vista.edge,
+    targetEdge,
+    u,
+  );
   return projectApronPreviewPoint(
     regionId,
     config,
@@ -348,7 +480,7 @@ export function projectNeighborPreviewPoint(
     targetConfig,
     vista,
     transition,
-    u,
+    sourceU,
     inwardDistance / Math.max(0.001, targetSampleDepth) * previewDepth,
   );
 }
@@ -375,6 +507,50 @@ function routeEdgeU(regionId, config, edge) {
   const u = THREE.MathUtils.clamp(along / axisLength(config, edge) + 0.5, 0, 1);
   ROUTE_EDGE_U_CACHE.set(key, u);
   return u;
+}
+
+function warpGatewayCoordinate(value, fromGateway, toGateway) {
+  const u = THREE.MathUtils.clamp(value, 0, 1);
+  const from = THREE.MathUtils.clamp(fromGateway, 0.001, 0.999);
+  const to = THREE.MathUtils.clamp(toGateway, 0.001, 0.999);
+  if (u <= from) return u / from * to;
+  return to + (u - from) / (1 - from) * (1 - to);
+}
+
+// Region edges often place their authored trail/landing gateways at different
+// normalized positions. A monotonic, endpoint-preserving warp aligns those
+// gateways while still sampling the full neighboring edge, avoiding the
+// unrelated bay/cliff slice that a raw same-u projection can select.
+export function mapApronSourceUToTargetU(
+  regionId,
+  config,
+  targetRegionId,
+  targetConfig,
+  sourceEdge,
+  targetEdge,
+  sourceU,
+) {
+  return warpGatewayCoordinate(
+    sourceU,
+    routeEdgeU(regionId, config, sourceEdge),
+    routeEdgeU(targetRegionId, targetConfig, targetEdge),
+  );
+}
+
+export function mapApronTargetUToSourceU(
+  regionId,
+  config,
+  targetRegionId,
+  targetConfig,
+  sourceEdge,
+  targetEdge,
+  targetU,
+) {
+  return warpGatewayCoordinate(
+    targetU,
+    routeEdgeU(targetRegionId, targetConfig, targetEdge),
+    routeEdgeU(regionId, config, sourceEdge),
+  );
 }
 
 // Coastal maps rarely have shoreline intersections at identical normalized
@@ -487,9 +663,9 @@ export function apronCornerReach(regionId, vista, end, outsideDistance, previewD
   return THREE.MathUtils.clamp(outsideDistance, 0, previewDepth);
 }
 
-// Ecology still needs one deterministic owner for a shared corner to avoid
-// rendering duplicate plants on both sides of the diagonal. Geometry itself
-// uses apronCornerMode/apronCornerReach and is shared by both open aprons.
+// One deterministic owner fills a shared diagonal corner. Keeping the
+// non-owner apron inside its own edge prevents two coarse surfaces from
+// intersecting into long edge-on triangles as the camera turns.
 export function apronOwnsCorner(regionId, vista, end) {
   const mode = apronCornerMode(regionId, vista, end);
   if (mode === 'none') return false;
@@ -528,8 +704,8 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   );
   const axisLen = axisLength(config, vista.edge);
   const baseWidth = axisLen * 1.04;
-  const maxExtLow = apronCornerMode(regionId, vista, 0) === 'none' ? 0 : previewDepth;
-  const maxExtHigh = apronCornerMode(regionId, vista, 1) === 'none' ? 0 : previewDepth;
+  const maxExtLow = apronOwnsCorner(regionId, vista, 0) ? previewDepth : 0;
+  const maxExtHigh = apronOwnsCorner(regionId, vista, 1) ? previewDepth : 0;
   const maximumWidth = baseWidth + maxExtLow + maxExtHigh;
   // Fine enough that the area-averaged vertex colors interpolate as gradients;
   // still only ~4k triangles per vista (more when the apron sweeps corners),
@@ -544,6 +720,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
   const nearColors = [];
   const farColors = [];
   const blends = [];
+  const depths = [];
 
   // Seam ring where the region-material carry strip hands off to the vista
   // mesh: the surface handoff can precede the longer height-continuity carry,
@@ -605,20 +782,27 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // into a gray plate when the camera looks straight down.
       const farHaze = THREE.MathUtils.smoothstep(outsideT, 0.34, 1.0);
 
+      // A shared corner needs one visual owner so two aprons do not z-fight
+      // where they overlap — but zeroing the non-owner's reach outright removes
+      // its corner sweep entirely, and on east/west vistas apronOwnsCorner is
+      // never true for a shared corner. That cost those views up to two full
+      // previewDepths of lateral coverage and opened sea gaps beside the
+      // neighbouring land. Keep the geometry and settle it just under the
+      // owner instead, the same way the far belt buries its non-owner corners.
       const extLow = apronCornerReach(
         regionId,
         vista,
         0,
         Math.max(0, signedDistance),
         previewDepth,
-      );
+      ) * (apronOwnsCorner(regionId, vista, 0) ? 1 : APRON_SHARED_CORNER_REACH);
       const extHigh = apronCornerReach(
         regionId,
         vista,
         1,
         Math.max(0, signedDistance),
         previewDepth,
-      );
+      ) * (apronOwnsCorner(regionId, vista, 1) ? 1 : APRON_SHARED_CORNER_REACH);
       const rowWidth = baseWidth + extLow + extHigh;
       const alongDistance = -baseWidth / 2 - extLow + u * rowWidth;
       const [x, z] = worldPoint(origin, along, outward, alongDistance, signedDistance);
@@ -629,9 +813,18 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       const currentY = terrainHeight(currentX, currentZ, regionId);
       const [edgeX, edgeZ] = edgePoint(config, vista.edge, clampedU, 0);
       const edgeY = terrainHeight(edgeX, edgeZ, regionId);
-      const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, 0);
+      const targetU = mapApronSourceUToTargetU(
+        regionId,
+        config,
+        targetRegionId,
+        targetConfig,
+        vista.edge,
+        targetEdge,
+        clampedU,
+      );
+      const [targetEdgeX, targetEdgeZ] = targetPreviewPoint(targetConfig, targetEdge, targetU, 0);
       const targetEdgeY = terrainHeight(targetEdgeX, targetEdgeZ, targetRegionId);
-      const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, clampedU, targetDistance);
+      const [targetX, targetZ] = targetPreviewPoint(targetConfig, targetEdge, targetU, targetDistance);
       const targetY = terrainHeight(targetX, targetZ, targetRegionId);
       const seamOffset = edgeY - targetEdgeY;
       const topologyHold = apronTopologyHold(
@@ -667,7 +860,17 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       // Keep the preview's outer rows at terrain height beneath the overlapping
       // landform. Dropping them below the water plane exposes a blue hairline
       // between near and middle distance at grazing camera angles.
-      const y = cornerY;
+      // Where two aprons share a corner, the non-owner keeps its geometry but
+      // settles just beneath the owner so the owner's surface wins the depth
+      // test cleanly rather than the two fighting over coplanar triangles.
+      const overhang = Math.max(0, Math.abs(alongDistance) - baseWidth / 2);
+      const overhangEnd = alongDistance < 0 ? 0 : 1;
+      const sharedNonOwner = overhang > 0
+        && apronCornerMode(regionId, vista, overhangEnd) === 'shared'
+        && !apronOwnsCorner(regionId, vista, overhangEnd);
+      const y = cornerY - (sharedNonOwner
+        ? APRON_SHARED_CORNER_DROP * THREE.MathUtils.smoothstep(overhang, 0, 9)
+        : 0);
 
       // Blur radius tracks distance: near the seam stay close to the real
       // ground color, far out average whole zones together so the neighbor's
@@ -687,7 +890,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
         seed: (vista.seed || 0) + 31,
         strength: 0.16 + mottleT * (continuity?.seamNoiseStrength ?? 0.65),
       });
-      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.14);
+      if (farHaze > 0) bakeDistanceWash(color, farHaze * 0.14);
 
       positions.push(x, y, z);
       // Carry-strip vertex colors barely show (the region splat materials
@@ -696,8 +899,17 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
       nearColors.push(currentColor.r, currentColor.g, currentColor.b);
       farColors.push(color.r, color.g, color.b);
       blends.push(1);
+      depths.push(outsideT);
     }
   }
+
+  smoothNeighborApronGrid(
+    positions,
+    depths,
+    rows,
+    cols,
+    seamRow + 1,
+  );
 
   const stride = cols + 1;
   const allIndices = [];
@@ -763,6 +975,7 @@ function buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, 
     nearColors: new Float32Array(nearColors),
     farColors: new Float32Array(farColors),
     blends: new Float32Array(blends),
+    depths: new Float32Array(depths),
     nearIndices,
     farIndices,
   };
@@ -785,7 +998,10 @@ export function makeNeighborPreviewGeometry(regionId, config, targetRegionId, ta
   const grid = buildNeighborApronGrid(regionId, config, targetRegionId, targetConfig, vista, transition);
   if (!grid) return null;
   const geometry = gridSliceGeometry(grid, grid.positions, grid.farColors, grid.farIndices, 'neighbor-preview');
-  if (geometry) geometry.setAttribute('aBorderBlend', new THREE.BufferAttribute(grid.blends, 1));
+  if (geometry) {
+    geometry.setAttribute('aBorderBlend', new THREE.BufferAttribute(grid.blends, 1));
+    geometry.setAttribute('aApronDepth', new THREE.BufferAttribute(grid.depths, 1));
+  }
   return geometry;
 }
 
@@ -878,7 +1094,7 @@ export function makeApronGeometry(regionId, config, vista) {
         seed: vista.seed || 0,
         strength: 0.22 + seamBlend * 0.7,
       });
-      if (farHaze > 0) color.lerp(ATMOSPHERE, farHaze * 0.6);
+      if (farHaze > 0) bakeDistanceWash(color, farHaze * 0.6);
 
       positions.push(x, y, z);
       colors.push(color.r, color.g, color.b);
@@ -899,6 +1115,12 @@ export function makeApronGeometry(regionId, config, vista) {
   // Fallback aprons have no carry strip beneath them and render fully opaque.
   geometry.setAttribute('aBorderBlend', new THREE.BufferAttribute(
     new Float32Array(positions.length / 3).fill(1),
+    1,
+  ));
+  geometry.setAttribute('aApronDepth', new THREE.BufferAttribute(
+    Float32Array.from({ length: positions.length / 3 }, (_, index) => (
+      Math.floor(index / (cols + 1)) / rows
+    )),
     1,
   ));
   geometry.setIndex(indices);

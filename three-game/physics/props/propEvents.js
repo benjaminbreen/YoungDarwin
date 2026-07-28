@@ -42,6 +42,7 @@ export function isSwingClaimed(swingId) {
 
 // Event types currently in use:
 // 'tool-swing'  { tool, position: {x,y,z}, facing: {x,y,z}, impactDelay }
+// 'net-contact' { kind: 'capture'|'snag', material?, position: {x,y,z}, delay?, specimenId? }
 // 'player-physics-prop-contact' { propId, contactKind?, position?, direction, impactSpeed, verticalSpeed?, delta, now }
 // 'player-push-contact' { propId, kind, label, height, mass, fixed, position, speed, direction }
 // 'snare-player-trigger' { trapId, position: {x,y,z}, culprit }

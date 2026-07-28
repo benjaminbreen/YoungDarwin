@@ -72,6 +72,13 @@ export function triggerDirectPlayerActions({
     ...actionOptions,
     movementLocked: movementLocked || netBlocked,
     onStart: () => {
+      emitPropEvent('tool-swing', {
+        tool: 'insect_net',
+        swingId: nextSwingId(),
+        position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+        facing: { x: facing.current.x, y: 0, z: facing.current.z },
+        impactDelay: 1.05,
+      });
       maybeTriggerNetSnagFromSwing({
         position: group.current?.position,
         facing: facing.current,

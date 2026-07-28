@@ -1,14 +1,9 @@
-'use client';
-
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { devRoutesEnabled } from '../devRoutes';
 
 // Shortcut for testing the alternate Post Office Bay map:
-// localhost:3004/altpostoffice -> /three?zone=ALT_POST_OFFICE_BAY
+// /altpostoffice -> /three?zone=ALT_POST_OFFICE_BAY
 export default function AltPostOfficePage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace('/three?zone=ALT_POST_OFFICE_BAY');
-  }, [router]);
-  return null;
+  if (!devRoutesEnabled()) notFound();
+  redirect('/three?zone=ALT_POST_OFFICE_BAY');
 }

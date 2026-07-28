@@ -19,6 +19,7 @@ import {
   INTERACTION_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
+  TOOL_FOLEY_AUDIO,
   WILDLIFE_FIELDWORK_AUDIO,
 } from './audioAssets';
 import { interactionMaterialForProp } from './interactionMaterials';
@@ -34,6 +35,7 @@ import {
 import {
   activatePostOfficeBayAudio,
   playAudioSprite,
+  preloadSoundscapeToolEffects,
   setAmbientAudioTargets,
   setSpatialAudioTarget,
   setSoundscapeAudioEnabled,
@@ -170,6 +172,9 @@ export function IslandSoundscape({ active, enabled }) {
     ceramic: -1,
     grass: -1,
     shrub: -1,
+    hammerSwing: -1,
+    netSwing: -1,
+    netContact: -1,
     rockStep: -1,
     woodStep: -1,
     mudStep: -1,
@@ -650,6 +655,7 @@ export function IslandSoundscape({ active, enabled }) {
   }, [runtimeEnabled]);
 
   useEffect(() => {
+    let disposed = false;
     const playContact = (family, sprite, {
       intensity = 0.55,
       baseGain = 0.18,
@@ -662,13 +668,26 @@ export function IslandSoundscape({ active, enabled }) {
       const index = chooseVariant(previous, sprite.variants);
       variantsRef.current[family] = index;
       const strength = 0.76 + clamp01(Number(intensity) || 0.55) * 0.24;
-      playAudioSprite(sprite, {
+      return playAudioSprite(sprite, {
         family,
         index,
         gain: baseGain * strength,
         playbackRate: playbackRateCenter - playbackJitter * 0.5 + Math.random() * playbackJitter,
         pan,
         filterHz,
+      });
+    };
+
+    const scheduleToolFoley = (delayMs, callback) => {
+      const requestedAt = performance.now();
+      void preloadSoundscapeToolEffects().then(() => {
+        if (disposed || !latestRef.current.runtimeEnabled) return;
+        const remaining = Math.max(0, delayMs - (performance.now() - requestedAt));
+        const timer = window.setTimeout(() => {
+          scheduledAudioRef.current.delete(timer);
+          if (!disposed && latestRef.current.runtimeEnabled) callback();
+        }, remaining);
+        scheduledAudioRef.current.add(timer);
       });
     };
 
@@ -1086,6 +1105,56 @@ export function IslandSoundscape({ active, enabled }) {
       }, 280);
       scheduledAudioRef.current.add(timer);
     });
+    const offToolSwing = onPropEvent('tool-swing', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const profile = {
+        hammer: {
+          family: 'hammerSwing',
+          sprite: TOOL_FOLEY_AUDIO.hammerSwing,
+          delay: 235,
+          gain: 0.115,
+          rate: [0.965, 1.015],
+        },
+        insect_net: {
+          family: 'netSwing',
+          sprite: TOOL_FOLEY_AUDIO.netSwing,
+          delay: 610,
+          gain: 0.105,
+          rate: [0.99, 1.045],
+        },
+      }[event?.tool];
+      if (!profile) return;
+      scheduleToolFoley(profile.delay, () => {
+        playRandomVariant(variantsRef, profile.family, profile.sprite, {
+          gain: profile.gain,
+          playbackRate: randomBetween(...profile.rate),
+          pan: panFromWorldPosition(event?.position) * 0.35,
+          priority: true,
+        });
+      });
+    });
+    const offNetContact = onPropEvent('net-contact', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      scheduleToolFoley(Math.max(0, Number(event?.delay) || 0) * 1000, () => {
+        playRandomVariant(variantsRef, 'netContact', TOOL_FOLEY_AUDIO.netContact, {
+          gain: event?.kind === 'snag' ? 0.115 : 0.09,
+          playbackRate: randomBetween(0.985, 1.045),
+          pan: panFromWorldPosition(event?.position),
+          priority: true,
+        });
+        if (event?.material === 'shrub') {
+          playContact('shrub', INTERACTION_AUDIO.shrub, {
+            intensity: 0.48,
+            baseGain: 0.065,
+            pan: panFromWorldPosition(event?.position),
+            playbackRateCenter: 1.035,
+            playbackJitter: 0.05,
+          });
+        }
+      });
+    });
     const offPropStruck = onPropEvent('prop-struck', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
@@ -1217,6 +1286,7 @@ export function IslandSoundscape({ active, enabled }) {
       scheduledAudioRef.current.add(timer);
     });
     return () => {
+      disposed = true;
       offSurface();
       offNpcFootstep();
       offWater();
@@ -1227,6 +1297,8 @@ export function IslandSoundscape({ active, enabled }) {
       offFoliage();
       offFinchWing();
       offShotgun();
+      offToolSwing();
+      offNetContact();
       offPropStruck();
       offFieldwork();
       offEquipment();

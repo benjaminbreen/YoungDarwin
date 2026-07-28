@@ -349,6 +349,7 @@ export {
   getLocationSpecimens,
   getLocationNPCs,
   calculateNewPosition,
+  estimateTravelStep,
   estimateRouteTravel,
   formatTravelTime,
   processTravelToLocation,

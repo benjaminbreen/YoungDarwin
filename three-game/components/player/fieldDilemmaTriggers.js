@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { findCactusHazardContact } from './playerFeedback';
+import { emitPropEvent } from '../../physics/props/propEvents';
 
 const NET_SWING_REACHES = [1.25, 1.8, 2.35];
 const NET_SWING_SIDE_OFFSETS = [0, 0.42, -0.42];
@@ -33,6 +34,12 @@ export function maybeTriggerNetSnagFromSwing({ position, facing, now = performan
         hazardId: contact.cactus?.id || 'cactus',
         hazardLabel: contact.cactus?.label || 'Opuntia cactus',
         startedAtSeconds: now,
+      });
+      emitPropEvent('net-contact', {
+        kind: 'snag',
+        material: 'shrub',
+        position: { x: scratchProbe.x, y: scratchProbe.y, z: scratchProbe.z },
+        delay: 1.05,
       });
       return true;
     }

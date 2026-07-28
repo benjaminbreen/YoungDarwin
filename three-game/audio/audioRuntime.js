@@ -10,6 +10,8 @@ import {
   MOVEMENT_WILDLIFE_AUDIO_URLS,
   POST_OFFICE_BAY_AUDIO,
   POST_OFFICE_BAY_AUDIO_URLS,
+  TOOL_FOLEY_AUDIO,
+  TOOL_FOLEY_AUDIO_URLS,
   WILDLIFE_FIELDWORK_AUDIO,
   WILDLIFE_FIELDWORK_AUDIO_URLS,
 } from './audioAssets';
@@ -43,6 +45,9 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'ceramic', label: 'Ceramic impact', group: 'Interactions', kind: 'sprite', sprite: INTERACTION_AUDIO.ceramic, diagnosticGain: 0.18 },
   { key: 'grass', label: 'Grass rustle', group: 'Interactions', kind: 'sprite', sprite: INTERACTION_AUDIO.grass, diagnosticGain: 0.2 },
   { key: 'shrub', label: 'Shrub rustle', group: 'Interactions', kind: 'sprite', sprite: INTERACTION_AUDIO.shrub, diagnosticGain: 0.2 },
+  { key: 'hammerSwing', label: 'Hammer swing', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.hammerSwing, diagnosticGain: 0.18 },
+  { key: 'netSwing', label: 'Insect-net swing', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.netSwing, diagnosticGain: 0.18 },
+  { key: 'netContact', label: 'Insect-net contact', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.netContact, diagnosticGain: 0.18 },
   { key: 'gull', label: 'Gull call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.gull, diagnosticGain: 0.2 },
   { key: 'finch', label: 'Finch call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finch, diagnosticGain: 0.18 },
   { key: 'dove', label: 'Dove call', group: 'Wildlife calls', kind: 'sprite', sprite: WILDLIFE_FIELDWORK_AUDIO.dove, diagnosticGain: 0.18 },
@@ -79,15 +84,22 @@ const MASTER_TRIM_MIN_DB = -18;
 const MASTER_TRIM_MAX_DB = 6;
 const TRACK_TRIM_MIN_DB = -24;
 const TRACK_TRIM_MAX_DB = 12;
+const LAUNCH_AMBIENCE_TARGETS = Object.freeze({
+  insects: 0.035,
+  surf: 0.105,
+});
+const LAUNCH_SURF_DELAY_SECONDS = 1.4;
 const DEFERRED_AUDIO_BANKS = Object.freeze([
+  TOOL_FOLEY_AUDIO_URLS,
+  INTERACTION_AUDIO_URLS,
   POST_OFFICE_BAY_AUDIO_URLS.slice(2),
   MOVEMENT_WILDLIFE_AUDIO_URLS,
-  INTERACTION_AUDIO_URLS,
   DARWIN_BODY_AUDIO_URLS,
   WILDLIFE_FIELDWORK_AUDIO_URLS,
   CONTEXTUAL_WORLD_AUDIO_URLS,
 ]);
 let deferredAudioPreload = null;
+let toolFoleyPreload = null;
 
 const audioState = {
   context: null,
@@ -131,6 +143,9 @@ const audioState = {
       ceramic: 0,
       grass: 0,
       shrub: 0,
+      hammerSwing: 0,
+      netSwing: 0,
+      netContact: 0,
       rockStep: 0,
       woodStep: 0,
       mudStep: 0,
@@ -304,6 +319,25 @@ function rampGain(parameter, value, timeConstant = 0.35) {
   parameter.setTargetAtTime(safeValue, context.currentTime, Math.max(0.02, timeConstant));
 }
 
+function scheduleGain(parameter, value, delaySeconds, timeConstant) {
+  const context = audioState.context;
+  if (!context || !parameter) return;
+  const now = context.currentTime;
+  const safeValue = Math.max(0, Number(value) || 0);
+  if (typeof parameter.cancelAndHoldAtTime === 'function') {
+    parameter.cancelAndHoldAtTime(now);
+  } else {
+    const currentValue = parameter.value;
+    parameter.cancelScheduledValues(now);
+    parameter.setValueAtTime(currentValue, now);
+  }
+  parameter.setTargetAtTime(
+    safeValue,
+    now + Math.max(0, Number(delaySeconds) || 0),
+    Math.max(0.02, Number(timeConstant) || 0.35),
+  );
+}
+
 function rampValue(parameter, value, timeConstant = 0.12) {
   const context = audioState.context;
   if (!context || !parameter || !Number.isFinite(value)) return;
@@ -442,6 +476,18 @@ export function preloadSoundscapeEffects() {
   return deferredAudioPreload;
 }
 
+export function preloadSoundscapeToolEffects() {
+  if (toolFoleyPreload) return toolFoleyPreload;
+  toolFoleyPreload = Promise.all(
+    [...TOOL_FOLEY_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
+  ).then(buffers => {
+    const ready = buffers.every(Boolean);
+    if (!ready) toolFoleyPreload = null;
+    return ready;
+  });
+  return toolFoleyPreload;
+}
+
 export async function activatePostOfficeBayAudio({ preloadEffects = false } = {}) {
   const context = ensureAudioGraph();
   if (!context) return false;
@@ -459,6 +505,35 @@ export async function activatePostOfficeBayAudio({ preloadEffects = false } = {}
   if (preloadEffects) await preloadSoundscapeEffects();
   exposeDebugState();
   return context.state === 'running';
+}
+
+export function startLaunchAmbientPrelude() {
+  const context = audioState.context;
+  if (!context || context.state !== 'running') return false;
+  const insects = audioState.ambient.get('insects');
+  const surf = audioState.ambient.get('surf');
+  if (!insects || !surf) return false;
+
+  audioState.targets.wind = 0;
+  audioState.targets.rain = 0;
+  audioState.targets.insects = LAUNCH_AMBIENCE_TARGETS.insects;
+  audioState.targets.surf = LAUNCH_AMBIENCE_TARGETS.surf;
+  audioState.targets.occlusion = 0;
+
+  scheduleGain(
+    insects.gain.gain,
+    effectiveContinuousGain('insects', LAUNCH_AMBIENCE_TARGETS.insects),
+    0,
+    1.1,
+  );
+  scheduleGain(
+    surf.gain.gain,
+    effectiveContinuousGain('surf', LAUNCH_AMBIENCE_TARGETS.surf),
+    LAUNCH_SURF_DELAY_SECONDS,
+    1.35,
+  );
+  exposeDebugState();
+  return true;
 }
 
 export function setSoundscapeAudioEnabled(enabled) {

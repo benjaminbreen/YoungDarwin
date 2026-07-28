@@ -105,7 +105,17 @@ const basePlayerController = {
   canUseDarwinTools: true,
   canUseDarwinInteractions: true,
   canAutoTraverse: true,
-  camera: { pivotY: 1.22, minDistance: 2.8, maxDistance: 22 },
+  // Outdoor camera collision. The interiors registry has always supplied its
+  // own block; open ground had none, so the chase camera passed straight
+  // through cabins, boulders, and mature cactus. This uses the same curated
+  // obstacle set as movement, so nothing the player can walk through will pull
+  // the camera in.
+  camera: {
+    pivotY: 1.22,
+    minDistance: 2.8,
+    maxDistance: 22,
+    collision: { enabled: true, padding: 0.26, minimumDistance: 1.15 },
+  },
   swim: SWIM,
 };
 
@@ -137,15 +147,18 @@ export const playerControllerProfiles = {
     // blocked by the ground itself.
     collider: { shape: 'capsule', radius: 0.72, halfHeight: 0.14, centerY: 0.86 },
     camera: {
-      // Low, close, and deliberately wide: the shell remains in frame, but
-      // the landscape spreads laterally and nearby forage dominates.
-      pivotY: 0.6,
-      minDistance: 3.1,
-      maxDistance: 5.2,
-      defaultDistance: 4.05,
-      defaultPitch: 0.28,
-      side: 0.18,
-      fov: 60,
+      // An embodied over-shell view rather than a miniature Darwin chase
+      // camera. The wide lens feeds the profile's lateral-field treatment.
+      pivotY: 0.64,
+      minDistance: 1.42,
+      maxDistance: 3.2,
+      defaultDistance: 1.75,
+      defaultPitch: 0.52,
+      side: 0.08,
+      fov: 88,
+      // Scaled to the shell, not to Darwin: the shared default would hold the
+      // camera high enough to read as a crane shot at this size.
+      collision: { enabled: true, padding: 0.16, minimumDistance: 0.72, groundClearance: 0.2 },
       status: {
         lookY: 0.72,
         distance: 2.35,
@@ -207,9 +220,19 @@ export const playerControllerProfiles = {
     canAutoTraverse: false,
     collider: { radius: 0.08, halfHeight: 0.05, centerY: 0.12 },
     camera: {
-      pivotY: 0.18,
-      minDistance: 1.1,
-      maxDistance: 3.1,
+      // On the ground the camera stays close to the bird's scale. In flight
+      // the profile below widens and looks farther ahead, so landing produces
+      // a real perceptual change rather than merely stopping vertical motion.
+      pivotY: 0.2,
+      minDistance: 0.92,
+      maxDistance: 2.7,
+      defaultDistance: 1.38,
+      defaultPitch: 0.34,
+      side: 0.04,
+      fov: 70,
+      // Smallest of the three. The clearance still has to clear the near plane,
+      // so it does not scale all the way down with the bird.
+      collision: { enabled: true, padding: 0.12, minimumDistance: 0.5, groundClearance: 0.14 },
       status: {
         lookY: 0.15,
         distance: 0.64,
@@ -219,16 +242,18 @@ export const playerControllerProfiles = {
       flight: {
         autoAlign: true,
         alignDamping: 4.2,
-        // Flight-sim chase framing: behind and slightly above the bird.
-        // Scaled to the finch's small body — it should fill a sensible slice
-        // of the frame, not read as a distant speck or a giant.
-        distance: 2.25,
-        // Camera pulls back with airspeed so velocity reads as framing, not blur.
-        speedDistance: 0.65,
-        side: 0.06,
+        // A wide, forward-reading chase view: the bird remains legible while
+        // the landscape ahead, not a blur effect, communicates flight.
+        distance: 1.78,
+        speedDistance: 0.28,
+        fov: 76,
+        speedFovBonus: 9,
+        lookAhead: 0.58,
+        speedLookAhead: 0.66,
+        side: 0.04,
         pivotY: 0.18,
-        pitch: 0.22,
-        positionDamping: 8.5,
+        pitch: 0.24,
+        positionDamping: 10.5,
       },
     },
     startInFlight: true,
@@ -308,9 +333,13 @@ export const playableModes = {
       shortwaveProxy: 0.05,
       peripheralShift: 0.035,
       forageAura: 0.9,
+      panoramicWarp: 0.18,
+      lateralField: 0.82,
+      overlapCue: 0.72,
       adaptationDuration: 2.8,
       adaptationBoost: 0.38,
       stillnessBoost: 0.08,
+      stillnessBreathing: 0.035,
       forageSalience: 0.52,
       perceptualBloom: {
         intensity: 0.92,
@@ -333,6 +362,25 @@ export const playableModes = {
     // A flier shouldn't start pinned to whichever map edge the specimen
     // actor happens to perch on — spawn at the region's centre instead.
     spawnAtCenter: true,
+    // An expressive RGB translation of avian tetrachromacy: short-wave-rich
+    // sky and water move toward cyan-violet while warm seeds, flowers, and
+    // plumage highlights separate cleanly. It is not a literal UV simulation;
+    // the source art contains no ultraviolet reflectance data.
+    vision: {
+      effect: 'avian-spectral-air',
+      amount: 0.68,
+      chromaExpansion: 0.095,
+      warmSeparation: 0.052,
+      leafSeparation: 0.018,
+      shortwaveProxy: 0.11,
+      peripheralShift: 0.012,
+      avianSky: 0.16,
+      highlightSpectra: 0.2,
+      adaptationDuration: 1.15,
+      adaptationBoost: 0.16,
+      stillnessBoost: 0,
+      stillnessBreathing: 0,
+    },
   },
 };
 

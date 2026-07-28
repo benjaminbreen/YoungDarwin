@@ -185,6 +185,15 @@ function InstancedBucketMesh({
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
+    // A scattered species layer never moves as an object — only its per-instance
+    // matrices change, and those are uploaded separately. Resolve the world
+    // matrix once, then take this node out of the scene-wide updateMatrixWorld
+    // recursion, which profiled as the single most expensive function on the
+    // main thread (updateMatrixWorld + multiplyMatrices ≈ 10% of frame time
+    // across a scene this node-heavy).
+    mesh.updateMatrixWorld(true);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrixWorldAutoUpdate = false;
   }, [items, sink, slopeSink, ySquash, hasItemTints, tint, tintStrength]);
 
   useFrame(() => {

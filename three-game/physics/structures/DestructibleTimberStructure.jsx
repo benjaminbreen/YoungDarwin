@@ -82,6 +82,7 @@ function TimberPiece({
   const impulseApplied = useRef(false);
   const inWater = useRef(false);
   const waterDamping = useRef(false);
+  const pendingContactBreak = useRef(false);
 
   useEffect(() => {
     registerBody(piece.id, bodyRef);
@@ -98,12 +99,26 @@ function TimberPiece({
     if (isPlayerTarget(payload.other)) return;
     if (isStructureTimberTarget(payload.other, timberKind)) return;
     if ((payload.totalForceMagnitude || 0) < releaseForce) return;
-    onImpactRelease(piece.id, null);
+    // Deferred deliberately: Rapier runs this from inside its contact-force
+    // event drain, which holds a Rust borrow of the world. Releasing inline
+    // reaches a React setState that flushes synchronously (the physics step
+    // runs from useFrame, not a React event), so bodies and colliders can be
+    // added or removed while the borrow is live. wasm-bindgen rejects that
+    // ("recursive use of an object detected...") and leaves the borrow
+    // poisoned, after which every world.step throws "Unreachable code should
+    // not be executed".
+    pendingContactBreak.current = true;
   };
 
   const isReleased = released.current.has(piece.id) || piece.dynamic;
 
   useFrame((_, delta) => {
+    // Resolve outside Rapier's event borrow.
+    if (pendingContactBreak.current) {
+      pendingContactBreak.current = false;
+      if (!released.current.has(piece.id)) onImpactRelease(piece.id, null);
+    }
+
     const body = bodyRef.current;
     if (!body) return;
 

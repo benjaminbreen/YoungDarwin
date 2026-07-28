@@ -12,6 +12,14 @@ export const FLOREANA_OPPOSITE_DIRECTIONS = Object.freeze({
   W: 'E',
 });
 
+// Physical scale for calculations that project the painted chart back into
+// island-relative bearings and approximate distances. Keep these beside the
+// placement source of truth so world scenery and the player-facing chart use
+// the same geometry.
+export const FLOREANA_CHART_ASPECT = 1402 / 1122;
+export const FLOREANA_CHART_WIDTH_KM = 14.5;
+export const FLOREANA_CENTRAL_PEAK_ID = 'C_HIGH';
+
 // Cardinal sides that terminate at ocean or cliff rather than another map.
 // Empty objects are intentional: they let the editor distinguish an authored
 // interior/open side from inherited legacy boundary data.
@@ -171,6 +179,25 @@ export const FLOREANA_ROUTE_EDGES = Object.freeze([
   ['S_WETLANDS', 'E', 'SE_PROMONTORY', 'land'],
   ['SE_COAST', 'E', 'SE_SHALLOW_SURF', 'water'],
 ]);
+
+export function getFloreanaRouteConnection(fromRegionId, toRegionId) {
+  for (const [fromId, direction, toId, routeKind] of FLOREANA_ROUTE_EDGES) {
+    if (fromId === fromRegionId && toId === toRegionId) {
+      return { direction, routeKind };
+    }
+    if (toId === fromRegionId && fromId === toRegionId) {
+      return {
+        direction: FLOREANA_OPPOSITE_DIRECTIONS[direction],
+        routeKind,
+      };
+    }
+  }
+  return null;
+}
+
+export function getFloreanaRouteKind(fromRegionId, toRegionId) {
+  return getFloreanaRouteConnection(fromRegionId, toRegionId)?.routeKind || null;
+}
 
 export function mapDirectionBetween(from, to) {
   if (!from || !to) return null;

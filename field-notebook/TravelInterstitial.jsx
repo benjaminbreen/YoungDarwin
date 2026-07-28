@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useThreeGameStore } from '../three-game/store';
 import {
@@ -14,11 +14,10 @@ import {
 // the normal path commits from the cover's opacity transitionend event.
 const DEPARTURE_CRANE_MS = 900;
 const BLACK_FADE_IN_MS = 300;
-const ISLAND_COMMIT_MS = DEPARTURE_CRANE_MS + BLACK_FADE_IN_MS + 80;
-const ISLAND_CHART_REVEAL_MS = 2450;
 const ISLAND_CHART_HOLD_MS = 1000;
 const ISLAND_MAP_CHART_HOLD_MS = 900;
 const THRESHOLD_COMMIT_MS = 250;
+const COVER_CONFIRM_GRACE_MS = 120;
 const CHART_FADE_IN_MS = 320;
 const CHART_FADE_OUT_MS = 280;
 const WORLD_FADE_IN_MS = 420;
@@ -389,10 +388,13 @@ export function TravelInterstitial() {
   const setZoneTransitionPhase = useThreeGameStore(state => state.setZoneTransitionPhase);
   const finishZoneTransition = useThreeGameStore(state => state.finishZoneTransition);
   const [covered, setCovered] = useState(false);
+  const [coverConfirmed, setCoverConfirmed] = useState(false);
   const [chartVisible, setChartVisible] = useState(false);
   const [chartBeatComplete, setChartBeatComplete] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const coverConfirmedRef = useRef(false);
+  const preparedTransitionIdRef = useRef(null);
   const transitionId = transition?.id || null;
   const transitionMode = transition?.mode || null;
   const transitionSource = transition?.source || null;
@@ -422,15 +424,21 @@ export function TravelInterstitial() {
   useEffect(() => {
     if (!transitionId) {
       setCovered(false);
+      setCoverConfirmed(false);
       setChartVisible(false);
       setChartBeatComplete(false);
       setRevealing(false);
+      coverConfirmedRef.current = false;
+      preparedTransitionIdRef.current = null;
       return undefined;
     }
     setCovered(false);
+    setCoverConfirmed(false);
     setChartVisible(false);
     setChartBeatComplete(false);
     setRevealing(false);
+    coverConfirmedRef.current = false;
+    preparedTransitionIdRef.current = null;
     const immediateCover = reducedMotion || transitionSource === 'island-map';
     const departureDelay = immediateCover || transitionMode === 'threshold'
       ? 0
@@ -442,39 +450,60 @@ export function TravelInterstitial() {
       },
       departureDelay,
     );
-    const chartRevealDelay = transitionSource === 'island-map'
-      ? 0
-      : reducedMotion || transitionMode === 'threshold'
-        ? 0
-        : ISLAND_CHART_REVEAL_MS;
-    let chartFadeTimer = null;
-    let chartCompleteTimer = null;
-    const chartTimer = transitionMode === 'threshold'
+    const coverDuration = reducedMotion ? 200 : BLACK_FADE_IN_MS;
+    const coverConfirmTimer = transitionMode === 'threshold'
       ? null
       : window.setTimeout(() => {
-        setChartVisible(true);
-        chartFadeTimer = window.setTimeout(() => {
-          setChartVisible(false);
-          chartCompleteTimer = window.setTimeout(
-            () => setChartBeatComplete(true),
-            reducedMotion ? 120 : CHART_FADE_OUT_MS,
-          );
-        }, transitionSource === 'island-map' ? ISLAND_MAP_CHART_HOLD_MS : ISLAND_CHART_HOLD_MS);
-      }, chartRevealDelay);
-    const commitDelay = transitionSource === 'island-map'
-      ? (reducedMotion ? 80 : BLACK_FADE_IN_MS + 80)
-      : transitionMode === 'threshold'
-        ? (reducedMotion ? 120 : THRESHOLD_COMMIT_MS)
-        : (reducedMotion ? 220 : ISLAND_COMMIT_MS);
-    const commitTimer = window.setTimeout(() => commitZoneTransition(transitionId), commitDelay);
+        if (coverConfirmedRef.current) return;
+        coverConfirmedRef.current = true;
+        window.__recordThreeTransitionEvent?.('chart-opaque-fallback');
+        setCoverConfirmed(true);
+      }, departureDelay + coverDuration + COVER_CONFIRM_GRACE_MS);
+    const thresholdCommitTimer = transitionMode === 'threshold'
+      ? window.setTimeout(
+        () => commitZoneTransition(transitionId),
+        reducedMotion ? 120 : THRESHOLD_COMMIT_MS,
+      )
+      : null;
     return () => {
       window.clearTimeout(coverTimer);
-      if (chartTimer != null) window.clearTimeout(chartTimer);
-      if (chartFadeTimer != null) window.clearTimeout(chartFadeTimer);
-      if (chartCompleteTimer != null) window.clearTimeout(chartCompleteTimer);
-      window.clearTimeout(commitTimer);
+      if (coverConfirmTimer != null) window.clearTimeout(coverConfirmTimer);
+      if (thresholdCommitTimer != null) window.clearTimeout(thresholdCommitTimer);
     };
   }, [commitZoneTransition, reducedMotion, transitionId, transitionMode, transitionSource]);
+
+  useEffect(() => {
+    if (!transitionId
+      || transitionMode === 'threshold'
+      || !coverConfirmed
+      || preparedTransitionIdRef.current === transitionId) return undefined;
+    preparedTransitionIdRef.current = transitionId;
+    setZoneTransitionPhase('chart', transitionId);
+    setChartVisible(true);
+    const commitFrame = window.requestAnimationFrame(() => {
+      commitZoneTransition(transitionId);
+    });
+    const holdTimer = window.setTimeout(
+      () => setChartBeatComplete(true),
+      reducedMotion
+        ? 120
+        : transitionSource === 'island-map'
+          ? ISLAND_MAP_CHART_HOLD_MS
+          : ISLAND_CHART_HOLD_MS,
+    );
+    return () => {
+      window.cancelAnimationFrame(commitFrame);
+      window.clearTimeout(holdTimer);
+    };
+  }, [
+    commitZoneTransition,
+    coverConfirmed,
+    reducedMotion,
+    setZoneTransitionPhase,
+    transitionId,
+    transitionMode,
+    transitionSource,
+  ]);
 
   useEffect(() => {
     if (!transitionId || transitionPhase !== 'ready') return undefined;
@@ -545,8 +574,9 @@ export function TravelInterstitial() {
           || event.propertyName !== 'opacity'
           || revealing
           || !covered) return;
+        coverConfirmedRef.current = true;
         window.__recordThreeTransitionEvent?.('chart-opaque');
-        commitZoneTransition(transitionId);
+        setCoverConfirmed(true);
       }}
       aria-hidden={!active}
       aria-live={active ? 'polite' : 'off'}

@@ -450,7 +450,12 @@ export const postOfficeBayRegion = {
     biomeAt: postOfficeTerrainBiomeAt,
     color: postOfficeTerrainColor,
     isWalkable: isPostOfficeWalkable,
-    defaultSpawn: [0, 0, 23.5],
+    // Opening shot: Darwin stands on the crest of the central rise looking east
+    // along the ridge, with the cove and the Beagle off his left shoulder,
+    // rather than down on the landing facing the beach and Syms.
+    defaultSpawn: [-3.5, 0, 22],
+    defaultFacing: [0.92, 0, 0.39],
+    defaultCameraFacing: [0.92, 0, 0.39],
     entrySpawns: {
       south: [-7, 0, 53],
     },

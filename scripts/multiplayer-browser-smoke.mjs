@@ -131,7 +131,7 @@ try {
   // smoke test needlessly flaky under software-rendered CI Chromium.
   await darwinPage.bringToFront();
   await darwinPage.goto(baseUrl);
-  await darwinPage.getByRole('button', { name: 'Multiplayer Expedition' }).click();
+  await darwinPage.getByRole('button', { name: 'Multiplayer' }).click();
 
   await darwinPage.getByLabel('Display name').fill('Charles');
   const createResponse = darwinPage.waitForResponse(response => (
@@ -154,7 +154,7 @@ try {
   // frames as background work.
   await tortoisePage.bringToFront();
   await tortoisePage.goto(baseUrl);
-  await tortoisePage.getByRole('button', { name: 'Multiplayer Expedition' }).click();
+  await tortoisePage.getByRole('button', { name: 'Multiplayer' }).click();
 
   await tortoisePage.getByRole('button', { name: 'join' }).click();
   await tortoisePage.getByRole('button', { name: 'Tortoise' }).click();

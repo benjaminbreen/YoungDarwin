@@ -1,5 +1,9 @@
 import { regionMaps } from '../../../../game-core/regionMaps';
-import { FLOREANA_MAP_PLACEMENTS } from '../../../../game-core/floreanaGeography';
+import {
+  FLOREANA_CHART_ASPECT,
+  FLOREANA_CHART_WIDTH_KM,
+  FLOREANA_MAP_PLACEMENTS,
+} from '../../../../game-core/floreanaGeography';
 
 // Registry of every playable destination on the Floreana island chart,
 // including shipboard spaces shown beside their anchorage.
@@ -13,9 +17,9 @@ import { FLOREANA_MAP_PLACEMENTS } from '../../../../game-core/floreanaGeography
 //   summit    — highland landmark
 //   test      — development/test map, hidden unless the test toggle is enabled
 export const ISLAND_MAP_IMAGE = '/maps/floreana-island-map-new.webp';
-export const ISLAND_MAP_ASPECT = 1402 / 1122;
+export const ISLAND_MAP_ASPECT = FLOREANA_CHART_ASPECT;
 // Approximate real width of the painted chart, used by the scale bar.
-export const ISLAND_MAP_WIDTH_KM = 14.5;
+export const ISLAND_MAP_WIDTH_KM = FLOREANA_CHART_WIDTH_KM;
 let islandMapPreload = null;
 let islandMapPreloadPromise = null;
 

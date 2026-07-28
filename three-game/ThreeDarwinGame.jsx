@@ -1,23 +1,32 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, Vector3 } from 'three';
+import { clampFrameDelta } from './frameTiming';
+import {
+  readQualityPreference,
+  resolveQualityPreference,
+  writeQualityPreference,
+} from './qualityPreference';
+import { clearSessionSnapshot } from './sessionSave';
+import { isExpeditionPaused, isGameplayInputBlocked } from './input/typingMode';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
 import { AnimalVisionPostEffect } from './components/scene/AnimalVisionPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
-import { LaunchOverlay } from './ui/LaunchOverlay';
+import { INITIAL_LAUNCH_PROGRESS, LaunchOverlay } from './ui/LaunchOverlay';
 import { IslandSoundscape } from './audio/IslandSoundscape';
 import {
   activatePostOfficeBayAudio,
   preloadSoundscapeEffects,
+  startLaunchAmbientPrelude,
 } from './audio/audioRuntime';
 import { ThreeE2EFrameSignal, ThreeE2EHarness } from './e2e/ThreeE2EHarness';
 import { useThreeGameStore } from './store';
@@ -28,7 +37,12 @@ import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
 import { WATER_LEVEL } from './world/water';
 import { cloudShadeTuning, fogAtmosphereUniforms } from './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
-import { solarLookTuning } from './world/solarLook';
+import {
+  getSolarLookRevision,
+  setSolarLookTuning,
+  solarLookTuning,
+  subscribeSolarLook,
+} from './world/solarLook';
 import { setCoverageAASupport } from './components/assets/materialStability';
 import { SceneEnvironment } from './components/assets/ModelAsset';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
@@ -47,6 +61,7 @@ import {
   prefetchEcologyAssets,
   setEcologyAssetPrefetchPaused,
 } from './components/scene/ecology/EcologyRenderer';
+import { prefetchStartupContentAssets } from './world/startupPrefetch';
 import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
 import {
   prepareRegionEcologyResource,
@@ -74,6 +89,28 @@ import {
 } from './world/ecology/ecologyDebugRuntime';
 import { MultiplayerProvider } from './multiplayer/MultiplayerContext';
 import { MultiplayerHud } from './multiplayer/MultiplayerHud';
+import {
+  CENTRAL_PEAK_DEV_DEFAULTS,
+  centralPeakDev,
+  centralPeakDevDiffSource,
+  getCentralPeakDevRevision,
+  resetCentralPeakDev,
+  setCentralPeakDev,
+  subscribeCentralPeakDev,
+} from './world/vistas/centralPeakDevRuntime';
+import {
+  getCentralPeakView,
+  resolveCentralPeakAppearance,
+} from './world/vistas/centralPeak';
+import {
+  DISTANCE_SCENERY_SHELL_DEFAULTS,
+  distanceSceneryRuntime,
+  getDistanceSceneryRevision,
+  resetDistanceSceneryShellTuning,
+  setDistanceSceneryMode,
+  setDistanceSceneryShellTuning,
+  subscribeDistanceScenery,
+} from './world/vistas/distanceSceneryRuntime';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
 const AssetBrowserPanel = dynamic(
@@ -162,7 +199,7 @@ const SETTLED_ASSET_PROGRESS = Object.freeze({
   total: 0,
 });
 const AUDIO_PREFERENCE_KEY = 'darwin-soundscape-enabled';
-const LAUNCH_MENU_STATES = new Set(['menu', 'character', 'settings', 'about']);
+const LAUNCH_MENU_STATES = new Set(['menu', 'character', 'settings', 'controls', 'about', 'load']);
 
 const DEFAULT_PERF_SETTINGS = {
   quality: 'performance',
@@ -190,9 +227,9 @@ const DEFAULT_PERF_SETTINGS = {
   solarScreenGlare: true,
   solarLensGhosts: true,
   solarSunHalo: true,
-  // Ghost-flare sprites read as overdone against the boosted sun optics
-  // (2026-07 screenshot pass); the halo/corona family carries the look now.
-  solarSceneFlares: false,
+  // Keep scene flare sprites available; their shipped intensity is now
+  // restrained by solarLookTuning rather than disabling the system.
+  solarSceneFlares: true,
   solarSunFacingGrade: true,
   physicsDebug: false,
   preserveDrawingBuffer: false,
@@ -227,7 +264,7 @@ const QUALITY_PRESETS = {
     solarScreenGlare: true,
     solarLensGhosts: false,
     solarSunHalo: true,
-    solarSceneFlares: false,
+    solarSceneFlares: true,
     cheapMaterials: true,
     foliageDrawScale: 0.75,
     terrainSegmentCap: 160,
@@ -259,7 +296,7 @@ const QUALITY_PRESETS = {
     solarScreenGlare: true,
     solarLensGhosts: true,
     solarSunHalo: true,
-    solarSceneFlares: false,
+    solarSceneFlares: true,
     cheapMaterials: true,
     foliageDrawScale: 0.85,
     terrainSegmentCap: 200,
@@ -279,7 +316,7 @@ const QUALITY_PRESETS = {
     solarScreenGlare: true,
     solarLensGhosts: true,
     solarSunHalo: true,
-    solarSceneFlares: false,
+    solarSceneFlares: true,
     cheapMaterials: false,
     foliageDrawScale: 1,
     terrainSegmentCap: null,
@@ -289,8 +326,9 @@ const QUALITY_PRESETS = {
 const BOOT_LOADER_STABLE_MS = 350;
 const BOOT_MIN_LOADING_MS = 1000;
 const SCREENSHOT_MIN_LOADING_MS = 5200;
-const OPENING_DURATION_MS = 7200;
+const OPENING_DURATION_MS = 5500;
 const LAUNCH_OVERLAY_FADE_MS = 600;
+const LAUNCH_COMPLETION_HOLD_MS = 600;
 const STARTUP_FULL_CONTENT_PHASE = 6;
 const TRANSITION_REVEAL_CONTENT_PHASE = 5;
 // Terrain, vistas, authored ecology, and Darwin establish the opening shot.
@@ -298,8 +336,17 @@ const TRANSITION_REVEAL_CONTENT_PHASE = 5;
 // unresolved optional GLB otherwise strands the progress display at 97–98%.
 const STARTUP_OPENING_CONTENT_PHASE = 3;
 const INTRO_LOADING_PHASE_TIMINGS_MS = [0, 180, 420, 570, 940, 1370];
-// Once the cinematic has handed off, fill in optional content during separated
-// idle windows rather than asking React/Rapier/GLTF to mount it during the shot.
+// Props, plant fields, structures, and specimens now mount beneath the aerial
+// shot. Their GLBs are prefetched from the moment the scene reports ready, so
+// each mount is a cheap scene-graph attach rather than a parse; keeping them
+// here leaves the first seconds of player control free of GLTF decode, Rapier
+// collider construction, and first-draw shader compiles. Offsets are measured
+// from the start of the cinematic.
+const INTRO_MOUNT_PHASE_TIMINGS_MS = [700, 2000];
+const INTRO_MOUNT_CONTENT_PHASE = 5;
+// Whatever is still outstanding at handoff (normally only the NPC actors, or
+// every remaining family when the cinematic is skipped) fills in across
+// separated idle windows after the player has control.
 const INTRO_REVEAL_PHASE_TIMINGS_MS = [250, 1100, 2400];
 // Destination resources are already preparing while the player approaches an
 // edge. Once the chart is opaque, mount one content family per painted/idle
@@ -824,15 +871,28 @@ function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
 // back up once there's headroom again. setDpr (not gl.setPixelRatio) is used so
 // the post-processing composer resizes its targets too. Runs every frame
 // independent of the perf panel.
-const ADAPTIVE_DPR_FLOOR_FPS = 25;      // sustained fps below this -> drop a rung
-const ADAPTIVE_DPR_CEIL_FPS = 50;       // sustained fps above this -> restore a rung
+// The target band is a playable 25-35 fps, not 60: dropping resolution to chase
+// a number the scene cannot reach just makes it blurry for nothing. The old 25
+// fps floor sat at the very bottom of that band, so a session hovering at 26
+// never got help; 30 keeps the middle of the band defended.
+const ADAPTIVE_DPR_FLOOR_FPS = 30;      // sustained fps below this -> drop a rung
+const ADAPTIVE_DPR_CEIL_FPS = 42;       // sustained fps above this -> restore a rung
 const ADAPTIVE_DPR_WINDOW_S = 1.0;      // averaging window per decision
-const ADAPTIVE_DPR_UPSCALE_WINDOWS = 2; // consecutive good windows before restoring
+const ADAPTIVE_DPR_UPSCALE_WINDOWS = 3; // consecutive good windows before restoring
 const ADAPTIVE_DPR_COOLDOWN_S = 2.0;    // settle time after a change / scene ready
+// A rung must earn its blur. When the scene is draw-call or CPU bound, shrinking
+// the framebuffer changes nothing, and the old controller would happily walk all
+// the way to the bottom of the ladder for zero fps while making the image soft.
+// Require a measurable gain from the previous drop or give the pixels back and
+// stop adapting for this scene.
+const ADAPTIVE_DPR_MIN_GAIN_FPS = 2.5;
 
 function buildDprLadder(maxDpr) {
   const rungs = [];
-  for (const candidate of [2, 1.5, 1.25, 1]) {
+  // Sub-1x rungs matter most on the tiers that already cap at 1.25x: without
+  // them the ladder held only two steps and the controller ran out of room
+  // before it could recover a frame budget.
+  for (const candidate of [2, 1.5, 1.25, 1, 0.85, 0.75]) {
     if (candidate <= maxDpr + 1e-3) rungs.push(candidate);
   }
   if (!rungs.length || rungs[0] < maxDpr - 1e-3) rungs.unshift(maxDpr);
@@ -850,6 +910,8 @@ function AdaptiveResolution({ enabled, maxDpr }) {
     cooldown: ADAPTIVE_DPR_COOLDOWN_S,
     goodWindows: 0,
     deviceDpr: 1,
+    fpsBeforeDrop: 0,
+    fillBound: true,
   });
 
   // Rebuild the ladder and snap back to the top rung whenever the configured cap
@@ -864,6 +926,8 @@ function AdaptiveResolution({ enabled, maxDpr }) {
     s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
     s.goodWindows = 0;
     s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    s.fpsBeforeDrop = 0;
+    s.fillBound = true;
   }, [maxDpr]);
 
   useFrame((_, delta) => {
@@ -891,9 +955,26 @@ function AdaptiveResolution({ enabled, maxDpr }) {
     s.frames = 0;
     s.elapsed = 0;
 
-    if (fps < ADAPTIVE_DPR_FLOOR_FPS && s.level < s.ladder.length - 1) {
+    // Judge the previous drop before considering another one. No gain means the
+    // frame cost lives on the CPU or in draw-call count, where framebuffer size
+    // is irrelevant — hand the resolution back and leave it alone.
+    if (s.fpsBeforeDrop) {
+      const gained = fps - s.fpsBeforeDrop;
+      s.fpsBeforeDrop = 0;
+      if (gained < ADAPTIVE_DPR_MIN_GAIN_FPS) {
+        s.fillBound = false;
+        if (s.level > 0) {
+          s.level -= 1;
+          applyAdaptiveDpr(s, setDpr, gl);
+        }
+        return;
+      }
+    }
+
+    if (fps < ADAPTIVE_DPR_FLOOR_FPS && s.level < s.ladder.length - 1 && s.fillBound) {
       s.level += 1;
       s.goodWindows = 0;
+      s.fpsBeforeDrop = fps;
       applyAdaptiveDpr(s, setDpr, gl);
     } else if (fps > ADAPTIVE_DPR_CEIL_FPS && s.level > 0) {
       s.goodWindows += 1;
@@ -918,6 +999,51 @@ function applyAdaptiveDpr(s, setDpr, gl) {
   setDpr(applied);
 }
 
+// Writes a resume snapshot when meaningful progress changes rather than on a
+// timer, so a reload or crash costs at most the current walk between events. The
+// snapshot itself is cheap (ids, counters, journal text — no world state).
+function useSessionAutosave(active) {
+  const day = useThreeGameStore(state => state.day);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
+  const documentedCount = useThreeGameStore(state => state.documentedSpecimenIds.length);
+  const journalCount = useThreeGameStore(state => state.journal.length);
+  const questComplete = useThreeGameStore(state => state.questComplete);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
+
+  useEffect(() => {
+    if (!active) return;
+    useThreeGameStore.getState().saveSession();
+  }, [
+    active,
+    collectedCount,
+    currentZoneId,
+    day,
+    documentedCount,
+    journalCount,
+    playableModeId,
+    questComplete,
+  ]);
+
+  // Also capture the clock/fatigue drift when the player leaves the page, so
+  // "Continue" resumes near where they actually stopped.
+  //
+  // Deliberately no save in the effect cleanup: teardown also runs right after
+  // resetExpedition (returning to the main menu, starting a new expedition),
+  // which would overwrite a good save with freshly-reset state.
+  useEffect(() => {
+    if (!active) return undefined;
+    const save = () => useThreeGameStore.getState().saveSession();
+    const onVisibilityChange = () => { if (document.hidden) save(); };
+    window.addEventListener('pagehide', save);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', save);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [active]);
+}
+
 function ExpeditionClock() {
   const elapsed = useRef(0);
   const advanceTime = useThreeGameStore(state => state.advanceTime);
@@ -925,14 +1051,25 @@ function ExpeditionClock() {
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const readableBookOpen = useThreeGameStore(state => Boolean(state.readableBookSession));
 
+  // Hidden tabs stop painting, so the frame that arrives when the player comes
+  // back carries the whole absence as one delta. Drop the accumulator on
+  // hide/show rather than letting the clock swallow it — otherwise stepping away
+  // for half an hour advanced the expedition by roughly five in-game hours.
+  useEffect(() => {
+    const onVisibilityChange = () => { elapsed.current = 0; };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
   useFrame((_, delta) => {
-    if (statusViewOpen || examineOpen || readableBookOpen) {
-      // Status/examine views freeze expedition time; drop accumulated real
-      // time so the clock doesn't lurch forward on close.
+    if (statusViewOpen || examineOpen || readableBookOpen || isExpeditionPaused() || document.hidden) {
+      // Status/examine views and the pause menu freeze expedition time; drop
+      // accumulated real time so the clock doesn't lurch forward on close.
       elapsed.current = 0;
       return;
     }
-    elapsed.current += delta;
+    // Clamped: a long stall must cost at most one frame of expedition time.
+    elapsed.current += clampFrameDelta(delta);
     if (elapsed.current < 1) return;
     const wholeSeconds = Math.floor(elapsed.current);
     elapsed.current -= wholeSeconds;
@@ -977,10 +1114,13 @@ function OpeningVisualReadySignal({
   segmentCap,
   onReady,
 }) {
+  const { gl, scene, camera } = useThree();
   const activeSequenceRef = useRef(null);
   const quietSinceRef = useRef(0);
   const stableFramesRef = useRef(0);
   const announcedSequenceRef = useRef(null);
+  const compiledSequenceRef = useRef(null);
+  const compilingSequenceRef = useRef(null);
 
   useFrame(() => {
     if (!active || !sequenceId) {
@@ -994,6 +1134,8 @@ function OpeningVisualReadySignal({
       quietSinceRef.current = 0;
       stableFramesRef.current = 0;
       announcedSequenceRef.current = null;
+      compiledSequenceRef.current = null;
+      compilingSequenceRef.current = null;
     }
     if (!contentReady) return;
 
@@ -1019,6 +1161,37 @@ function OpeningVisualReadySignal({
     const now = performance.now();
     if (!quietSinceRef.current) quietSinceRef.current = now;
     if (now - quietSinceRef.current < 300) return;
+
+    // Compile the opening scene while the overlay is still opaque. The travel
+    // path has always done this before a reveal; without it every material in
+    // the landing shot compiled on its first draw, which put the stall inside
+    // the cinematic instead of behind the curtain. Bounded like the transition
+    // compile so an unusual WebGL driver cannot strand the launch.
+    if (compiledSequenceRef.current !== sequenceId) {
+      if (compilingSequenceRef.current !== sequenceId) {
+        compilingSequenceRef.current = sequenceId;
+        let compileTimeoutId = null;
+        Promise.resolve()
+          .then(() => Promise.race([
+            typeof gl.compileAsync === 'function'
+              ? gl.compileAsync(scene, camera)
+              : Promise.resolve(gl.compile(scene, camera)),
+            new Promise(resolve => {
+              compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
+            }),
+          ]))
+          .catch(() => {
+            // The renderer surfaces shader errors itself. Launch must still
+            // settle onto authored fallbacks on unusual drivers.
+          })
+          .then(() => {
+            if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+            compiledSequenceRef.current = sequenceId;
+            if (compilingSequenceRef.current === sequenceId) compilingSequenceRef.current = null;
+          });
+      }
+      return;
+    }
 
     stableFramesRef.current += 1;
     if (stableFramesRef.current < 3 || announcedSequenceRef.current === sequenceId) return;
@@ -1361,6 +1534,52 @@ function OpeningIntroCompletion({
   return null;
 }
 
+// Mounts one content family per separated idle window, walking startPhase up to
+// endPhase. React commit, Rapier collider construction, instance matrix fills,
+// and shader discovery each get their own frame instead of converging on one.
+// `timings` are cumulative offsets from the first scheduled phase.
+function scheduleStagedContentPhases({ startPhase, endPhase, timings, commitPhase }) {
+  let cancelled = false;
+  let timeoutHandle = null;
+  let idleHandle = null;
+  let frameHandle = null;
+
+  const schedule = phase => {
+    if (cancelled || phase >= endPhase) return;
+    const step = phase - startPhase;
+    const lastTiming = timings[timings.length - 1] ?? 0;
+    const previousDelay = step === 0 ? 0 : (timings[step - 1] ?? lastTiming);
+    const delay = Math.max(0, (timings[step] ?? lastTiming) - previousDelay);
+    timeoutHandle = window.setTimeout(() => {
+      timeoutHandle = null;
+      const commit = () => {
+        idleHandle = null;
+        if (cancelled) return;
+        commitPhase(phase + 1);
+        frameHandle = window.requestAnimationFrame(() => {
+          frameHandle = window.requestAnimationFrame(() => {
+            frameHandle = null;
+            schedule(phase + 1);
+          });
+        });
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(commit, { timeout: 420 });
+      } else {
+        commit();
+      }
+    }, delay);
+  };
+
+  schedule(startPhase);
+  return () => {
+    cancelled = true;
+    if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+    if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+    if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+  };
+}
+
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
@@ -1416,6 +1635,58 @@ function ExaminationDepthOfField() {
       focusRange={initialFocusRange}
       bokehScale={3.8}
       resolutionScale={0.5}
+    />
+  );
+}
+
+// Far-field softening: a lens's-eye treatment of distance.
+//
+// Distant landform is low-frequency by nature, but it is DRAWN with hard
+// polygon silhouettes, per-vertex colour steps and layer seams — high-frequency
+// edges on low-frequency content, which is exactly the combination that reads
+// as "glitchy" at range. Building geometry fine enough to survive being sharp
+// at 300 m is not affordable; resolving it softly, the way a real lens does, is
+// nearly free and is what the eye expects from distance anyway.
+//
+// Deliberately NOT a portrait-mode look: focus sits a few metres from the
+// camera with a very long range, so the circle of confusion is ~0 across the
+// whole playable area and only climbs past ~150 m. The foreground never
+// softens. Bokeh passes run at a third resolution — the content being blurred
+// has no detail to lose, so the downsample IS most of the blur, which is what
+// makes this cheap rather than a luxury.
+function DistanceSoftening({ enabled }) {
+  useSyncExternalStore(
+    subscribeCentralPeakDev,
+    getCentralPeakDevRevision,
+    getCentralPeakDevRevision,
+  );
+  useSyncExternalStore(
+    subscribeDistanceScenery,
+    getDistanceSceneryRevision,
+    getDistanceSceneryRevision,
+  );
+  const effectRef = useRef(null);
+  useFrame(() => {
+    const material = effectRef.current?.cocMaterial;
+    if (!material) return;
+    material.focusDistance = centralPeakDev.softeningFocus;
+    material.focusRange = centralPeakDev.softeningRange;
+    if (effectRef.current.bokehScale !== centralPeakDev.softeningBokeh) {
+      effectRef.current.bokehScale = centralPeakDev.softeningBokeh;
+    }
+  });
+  if (
+    !enabled
+    || !centralPeakDev.distanceSoftening
+    || distanceSceneryRuntime.mode === 'shell'
+  ) return null;
+  return (
+    <DepthOfField
+      ref={effectRef}
+      worldFocusDistance={centralPeakDev.softeningFocus}
+      worldFocusRange={centralPeakDev.softeningRange}
+      bokehScale={centralPeakDev.softeningBokeh}
+      resolutionScale={centralPeakDev.softeningResolution}
     />
   );
 }
@@ -1551,6 +1822,10 @@ function PostFX({ enabled, ao, multisampling = 2, underwaterAmount = 0 }) {
       {enabled && <HeatHazePostEffect enabled={!interiorDefinition} underwaterAmount={underwater} />}
       {enabled && <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />}
       <ExaminationDepthOfField />
+      {/* Only when nothing is being examined — two DoF passes would fight over
+          the same circle-of-confusion buffer and double the cost. */}
+      {!examinationDepthOfFieldActive(examineSession)
+        && <DistanceSoftening enabled={enabled && !interiorDefinition} />}
       {/* Threshold sits just under the ACES shoulder so deliberate HDR
           customers — sun core, lantern flame, water glints pushed past 1.0,
           moon glitter, ground/mote sparkles — glow softly, while sky/sand/
@@ -1678,6 +1953,11 @@ function OpeningCinematicVeil({ active, sequenceId, durationMs }) {
 }
 
 function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, suppression = 0 }) {
+  useSyncExternalStore(
+    subscribeSolarLook,
+    getSolarLookRevision,
+    getSolarLookRevision,
+  );
   const glare = useThreeGameStore(state => state.solarGlare);
   if (!enabled || (!wash && !lensGhostsEnabled)) return null;
   const strength = Math.min(1, Math.max(0, glare?.strength || 0)) * (1 - Math.min(1, Math.max(0, suppression)));
@@ -1842,13 +2122,11 @@ function Toggle({ label, checked, onChange }) {
 
 function SolarDiagnostics({ settings, set }) {
   const solarGlare = useThreeGameStore(state => state.solarGlare);
-  // Sliders mutate the shared solar tuning directly (SkyController reads it
-  // every frame); local state only re-renders the panel.
-  const [, setRevision] = useState(0);
-  const setLook = patch => {
-    Object.assign(solarLookTuning, patch);
-    setRevision(value => value + 1);
-  };
+  useSyncExternalStore(
+    subscribeSolarLook,
+    getSolarLookRevision,
+    getSolarLookRevision,
+  );
   return (
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1874,10 +2152,10 @@ function SolarDiagnostics({ settings, set }) {
       </div>
       {/* These affect sun-on-screen optics; face the sun to judge them. */}
       <div className="grid grid-cols-1 gap-1.5">
-        <DevSlider label="Golden hour" value={solarLookTuning.goldenBoost} min={0} max={1.8} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ goldenBoost: value })} />
-        <DevSlider label="Sun optics" value={solarLookTuning.opticsIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ opticsIntensity: value })} />
-        <DevSlider label="Screen glare" value={solarLookTuning.glareIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ glareIntensity: value })} />
-        <DevSlider label="Exposure" value={solarLookTuning.exposureScale} min={0.7} max={1.3} step={0.01} format={v => `${v.toFixed(2)}x`} onChange={value => setLook({ exposureScale: value })} />
+        <DevSlider label="Golden hour" value={solarLookTuning.goldenBoost} min={0} max={1.8} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ goldenBoost: value })} />
+        <DevSlider label="Sun optics" value={solarLookTuning.opticsIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ opticsIntensity: value })} />
+        <DevSlider label="Screen glare" value={solarLookTuning.glareIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ glareIntensity: value })} />
+        <DevSlider label="Exposure" value={solarLookTuning.exposureScale} min={0.7} max={1.3} step={0.01} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ exposureScale: value })} />
       </div>
     </div>
   );
@@ -1900,6 +2178,231 @@ function DevSlider({ label, value, min, max, step, format, onChange }) {
         className="mt-1 w-full accent-amber-200"
       />
     </label>
+  );
+}
+
+function CentralPeakDiagnostics() {
+  const [, setRevision] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  useEffect(() => subscribeCentralPeakDev(() => setRevision(value => value + 1)), []);
+  useEffect(() => subscribeDistanceScenery(() => setRevision(value => value + 1)), []);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const id = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const set = patch => {
+    setCopied(false);
+    setCentralPeakDev(patch);
+  };
+  const view = getCentralPeakView(currentZoneId);
+  const appearance = resolveCentralPeakAppearance(view, centralPeakDev);
+  const dirty = Object.keys(CENTRAL_PEAK_DEV_DEFAULTS)
+    .some(key => centralPeakDev[key] !== CENTRAL_PEAK_DEV_DEFAULTS[key]);
+  const shellDirty = Object.keys(DISTANCE_SCENERY_SHELL_DEFAULTS)
+    .some(key => (
+      distanceSceneryRuntime[key] !== DISTANCE_SCENERY_SHELL_DEFAULTS[key]
+    ));
+  const shellSet = patch => setDistanceSceneryShellTuning(patch);
+  return (
+    <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Island Distance Scenery</h3>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              const source = centralPeakDevDiffSource();
+              navigator.clipboard?.writeText(source);
+              setCopied(true);
+            }}
+            disabled={!dirty}
+            className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15 disabled:opacity-35"
+          >
+            {copied ? 'copied' : 'copy values'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (distanceSceneryRuntime.mode !== 'layered') resetDistanceSceneryShellTuning();
+              else resetCentralPeakDev();
+            }}
+            className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
+          >
+            {(distanceSceneryRuntime.mode !== 'layered' ? shellDirty : dirty) ? 'reset' : 'defaults'}
+          </button>
+        </div>
+      </div>
+      <div className="mb-2 grid grid-cols-3 gap-1 rounded border border-amber-100/15 bg-black/20 p-1">
+        {[
+          ['layered', 'Current layered'],
+          ['shell', 'Chart shell'],
+          ['hybrid', 'Combined'],
+        ].map(([mode, label]) => {
+          const active = distanceSceneryRuntime.mode === mode;
+          return (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setDistanceSceneryMode(mode)}
+              className={`rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                active
+                  ? 'bg-amber-200/25 text-amber-50 ring-1 ring-amber-100/35'
+                  : 'text-amber-100/50 hover:bg-white/10'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
+        Switches instantly without moving the player or camera. Current layered uses the tuned
+        direct-neighbor apron and Cerro Pajas backdrop. Chart shell isolates a full chart-derived
+        continuation. Combined keeps the apron close and uses only the shell&apos;s far horizon.
+        The URL records the choice for repeatable screenshots.
+      </p>
+      {distanceSceneryRuntime.mode !== 'layered' && (
+        <div className="mb-2 rounded border border-emerald-200/20 bg-emerald-300/5 p-1.5">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100/75">
+            {distanceSceneryRuntime.mode === 'hybrid'
+              ? 'Combined · active'
+              : 'Chart shell · active'}
+          </div>
+          <p className="mb-1.5 text-[10px] leading-snug text-amber-100/45">
+            {distanceSceneryRuntime.mode === 'hybrid'
+              ? 'The tuned apron owns the near transition; a sunken underlap brings the chart shell up only for the far horizon.'
+              : 'A single 360° surface owns the full off-map continuation. Sea is geometry below the shared water plane; land/creek/water exits follow the route graph.'}
+          </p>
+          <div className="mb-1.5">
+            <Toggle label="Shell visible" checked={distanceSceneryRuntime.shellVisible} onChange={value => shellSet({ shellVisible: value })} />
+          </div>
+          <div className="grid grid-cols-1 gap-1.5">
+            <DevSlider label="Relief" value={distanceSceneryRuntime.shellRelief} min={0.35} max={1.8} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => shellSet({ shellRelief: value })} />
+            <DevSlider label="Vertical" value={distanceSceneryRuntime.shellVertical} min={-6} max={8} step={0.25} format={value => `${value.toFixed(2)} m`} onChange={value => shellSet({ shellVertical: value })} />
+            <DevSlider label="Radial scale" value={distanceSceneryRuntime.shellRadiusScale} min={0.7} max={1.4} step={0.02} format={value => `${value.toFixed(2)}×`} onChange={value => shellSet({ shellRadiusScale: value })} />
+            <DevSlider label="Haze starts" value={distanceSceneryRuntime.shellHazeStart} min={50} max={300} step={5} format={value => `${value.toFixed(0)} m`} onChange={value => shellSet({ shellHazeStart: value })} />
+            <DevSlider label="Haze full" value={distanceSceneryRuntime.shellHazeEnd} min={180} max={700} step={10} format={value => `${value.toFixed(0)} m`} onChange={value => shellSet({ shellHazeEnd: value })} />
+            <DevSlider label="Haze strength" value={distanceSceneryRuntime.shellHazeStrength} min={0} max={1} step={0.02} format={value => value.toFixed(2)} onChange={value => shellSet({ shellHazeStrength: value })} />
+            <DevSlider label="Saturation" value={distanceSceneryRuntime.shellSaturation} min={0} max={1.4} step={0.02} format={value => value.toFixed(2)} onChange={value => shellSet({ shellSaturation: value })} />
+            <DevSlider label="Contrast" value={distanceSceneryRuntime.shellContrast} min={0.5} max={1.5} step={0.02} format={value => value.toFixed(2)} onChange={value => shellSet({ shellContrast: value })} />
+          </div>
+          <div className="mt-1.5">
+            <Toggle label="Debug wireframe" checked={distanceSceneryRuntime.shellWireframe} onChange={value => shellSet({ shellWireframe: value })} />
+          </div>
+        </div>
+      )}
+      <div className="mb-2 rounded border border-sky-200/25 bg-sky-300/5 p-1.5">
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-sky-100/75">Aerial perspective (all layers)</div>
+        <p className="mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          One haze curve by true camera distance shared by the direct apron and central backdrop.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider
+            label="Scene fog reach"
+            value={centralPeakDev.aerialPerspective}
+            min={0}
+            max={1}
+            step={0.02}
+            format={value => (value <= 0.001 ? 'scene fog' : `${Math.round(value * 100)}%`)}
+            onChange={value => set({ aerialPerspective: value })}
+          />
+          <DevSlider label="Air clear to" value={centralPeakDev.vistaAirStart} min={0} max={160} step={5} format={value => `${value.toFixed(0)} m`} onChange={value => set({ vistaAirStart: value })} />
+          <DevSlider label="Air scale" value={centralPeakDev.vistaAirScale} min={40} max={600} step={5} format={value => `${value.toFixed(0)} m`} onChange={value => set({ vistaAirScale: value })} />
+          <DevSlider label="Air curve" value={centralPeakDev.vistaAirCurve} min={0.6} max={3} step={0.05} format={value => value.toFixed(2)} onChange={value => set({ vistaAirCurve: value })} />
+          <DevSlider label="Air max" value={centralPeakDev.vistaAirMax} min={0} max={1} step={0.02} format={value => (value <= 0.001 ? 'off' : value.toFixed(2))} onChange={value => set({ vistaAirMax: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          Sky match runs <em>after</em> scene fog. Fog colour is graded and luminance-clamped for
+          local mist, while the sky dome paints a brighter horizon band — so fully hazed land lands
+          on a different colour from the sky right behind it, and that edge is what reads as a
+          cut-out plate. Set to 0 for the old behaviour.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Sky match" value={centralPeakDev.vistaSkyMatch} min={0} max={1} step={0.02} format={value => (value <= 0.001 ? 'off' : value.toFixed(2))} onChange={value => set({ vistaSkyMatch: value })} />
+          <DevSlider label="Sky match full at" value={centralPeakDev.vistaSkyFull} min={60} max={600} step={10} format={value => `${value.toFixed(0)} m`} onChange={value => set({ vistaSkyFull: value })} />
+          <DevSlider label="Horizon vs fog" value={centralPeakDev.vistaSkyBlend} min={0} max={1} step={0.02} format={value => value.toFixed(2)} onChange={value => set({ vistaSkyBlend: value })} />
+          <DevSlider label="Horizon lift" value={centralPeakDev.vistaSkyLift} min={0.6} max={1.6} step={0.02} format={value => `${value.toFixed(2)}×`} onChange={value => set({ vistaSkyLift: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          What distance does to the surface before haze is mixed over it. Haze alone can only make a
+          ridge more or less visible; saturation and contrast are what make it read as a hard
+          silhouette or a soft wash.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Saturation kept" value={centralPeakDev.vistaSaturation} min={0} max={1} step={0.02} format={value => value.toFixed(2)} onChange={value => set({ vistaSaturation: value })} />
+          <DevSlider label="Contrast" value={centralPeakDev.vistaContrast} min={0.5} max={1.5} step={0.02} format={value => `${value.toFixed(2)}×`} onChange={value => set({ vistaContrast: value })} />
+          <DevSlider label="Surface grain" value={centralPeakDev.vistaGrain} min={0} max={2} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => set({ vistaGrain: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          Valley haze pools low and thins toward ridgelines. It feathers the hard line where a
+          distant layer meets the ground in front of it — the starkest edge in the frame, since
+          detail, value and colour all change at once across it.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Valley haze" value={centralPeakDev.vistaValleyHaze} min={0} max={1} step={0.02} format={value => (value <= 0.001 ? 'off' : value.toFixed(2))} onChange={value => set({ vistaValleyHaze: value })} />
+          <DevSlider label="Valley depth" value={centralPeakDev.vistaValleyHeight} min={4} max={80} step={2} format={value => `${value.toFixed(0)} m`} onChange={value => set({ vistaValleyHeight: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          Distance softening resolves the far field the way a lens does, dissolving aliased
+          ridgelines and layer seams into organic shapes. Focus sits metres from the camera with a
+          very long range, so the playable area never softens. Bokeh runs at a third resolution —
+          distant content has no detail to lose, so the downsample is most of the blur.
+        </p>
+        <div className="mb-1.5">
+          <Toggle label="Distance softening" checked={centralPeakDev.distanceSoftening} onChange={value => set({ distanceSoftening: value })} />
+        </div>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Sharp out to" value={centralPeakDev.softeningRange} min={80} max={900} step={10} format={value => `${value.toFixed(0)} m`} onChange={value => set({ softeningRange: value })} />
+          <DevSlider label="Softness" value={centralPeakDev.softeningBokeh} min={0.4} max={6} step={0.1} format={value => value.toFixed(1)} onChange={value => set({ softeningBokeh: value })} />
+          <DevSlider label="Blur resolution" value={centralPeakDev.softeningResolution} min={0.2} max={1} step={0.05} format={value => `${Math.round(value * 100)}%`} onChange={value => set({ softeningResolution: value })} />
+        </div>
+        <div className="mt-1.5">
+          <Toggle label="Debug: tint layers" checked={centralPeakDev.debugLayerTint} onChange={value => set({ debugLayerTint: value })} />
+          <p className="mt-1 text-[10px] leading-snug text-amber-100/45">
+            Tints the direct apron red so its handoff to local terrain can be inspected.
+          </p>
+        </div>
+      </div>
+      <div className="mb-2 grid grid-cols-3 gap-1.5">
+        <Metric label="Map distance" value={view ? `${view.distanceKm.toFixed(2)} km` : '--'} />
+        <Metric label="Bearing" value={view ? `${view.bearingDegrees.toFixed(1)}°` : '--'} />
+        <Metric label="Geo haze" value={appearance ? appearance.geographicHaze.toFixed(2) : '--'} />
+      </div>
+      <div className="mb-2">
+        <Toggle label="Visible" checked={centralPeakDev.visible} onChange={value => set({ visible: value })} />
+      </div>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Width" value={centralPeakDev.widthScale} min={0.5} max={2} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => set({ widthScale: value })} />
+        <DevSlider label="Height" value={centralPeakDev.heightScale} min={0.35} max={2} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => set({ heightScale: value })} />
+        <DevSlider label="Vertical" value={centralPeakDev.verticalOffset} min={-12} max={14} step={0.5} format={value => `${value.toFixed(1)} m`} onChange={value => set({ verticalOffset: value })} />
+        <DevSlider label="Near contrast" value={centralPeakDev.nearContrast} min={0.05} max={0.6} step={0.01} format={value => value.toFixed(2)} onChange={value => set({ nearContrast: value })} />
+        <DevSlider label="Far contrast" value={centralPeakDev.farContrast} min={0} max={0.35} step={0.01} format={value => value.toFixed(2)} onChange={value => set({ farContrast: value })} />
+        <DevSlider label="Clear through" value={centralPeakDev.hazeNearKm} min={0} max={3} step={0.1} format={value => `${value.toFixed(1)} km`} onChange={value => set({ hazeNearKm: value })} />
+        <DevSlider label="Hazy by" value={centralPeakDev.hazeFarKm} min={3} max={9} step={0.1} format={value => `${value.toFixed(1)} km`} onChange={value => set({ hazeFarKm: value })} />
+        <DevSlider label="Weather haze" value={centralPeakDev.weatherHaze} min={0} max={1.2} step={0.02} format={value => value.toFixed(2)} onChange={value => set({ weatherHaze: value })} />
+        <DevSlider label="Base dissolve" value={centralPeakDev.baseDissolve} min={0.2} max={0.9} step={0.02} format={value => value.toFixed(2)} onChange={value => set({ baseDissolve: value })} />
+        <DevSlider label="Ridge softness" value={centralPeakDev.ridgeSoftness} min={0} max={4} step={0.25} format={value => `${value.toFixed(2)} px`} onChange={value => set({ ridgeSoftness: value })} />
+      </div>
+      <div className="my-2 border-t border-amber-100/10 pt-2">
+        <h4 className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-100/65">Neighbor Terrain Apron</h4>
+        <p className="mb-2 text-[10px] leading-snug text-amber-100/45">
+          The connected, low-detail continuation of each directly adjacent map. It shares the local terrain edge but has no collision or shadows.
+        </p>
+        <div className="mb-1.5">
+          <Toggle label="Visible" checked={centralPeakDev.neighborApronVisible} onChange={value => set({ neighborApronVisible: value })} />
+        </div>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Relief" value={centralPeakDev.neighborApronRelief} min={0.35} max={1.8} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => set({ neighborApronRelief: value })} />
+          <DevSlider label="Vertical" value={centralPeakDev.neighborApronVertical} min={-3} max={4} step={0.1} format={value => `${value.toFixed(1)} m`} onChange={value => set({ neighborApronVertical: value })} />
+          <DevSlider label="Haze onset" value={centralPeakDev.neighborApronHazeStart} min={0} max={0.9} step={0.02} format={value => `${Math.round(value * 100)}%`} onChange={value => set({ neighborApronHazeStart: value })} />
+          <DevSlider label="Near haze" value={centralPeakDev.neighborApronNearHaze} min={0} max={1} step={0.02} format={value => value.toFixed(2)} onChange={value => set({ neighborApronNearHaze: value })} />
+          <DevSlider label="Far haze" value={centralPeakDev.neighborApronFarHaze} min={0} max={2} step={0.05} format={value => value.toFixed(2)} onChange={value => set({ neighborApronFarHaze: value })} />
+          <DevSlider label="Distance softness" value={centralPeakDev.neighborApronSoftFocus} min={0} max={1.5} step={0.05} format={value => value.toFixed(2)} onChange={value => set({ neighborApronSoftFocus: value })} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2039,6 +2542,7 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
         ))}
       </div>
       <SolarDiagnostics settings={settings} set={set} />
+      <CentralPeakDiagnostics />
       <CloudShadeDiagnostics />
       <div className="grid grid-cols-2 gap-1.5">
         <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
@@ -2123,7 +2627,13 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
   );
 }
 
-export default function ThreeDarwinGame({ initialModeId = null, multiplayerSession = null }) {
+export default function ThreeDarwinGame({
+  initialModeId = null,
+  multiplayerSession = null,
+  resumeSnapshot = null,
+  openJournalOnLaunch = false,
+  onExitToMenu = null,
+}) {
   const [keyboardMap] = useState(() => {
     if (typeof window === 'undefined') return KEYBOARD_MAP;
     const requestedHud = new URLSearchParams(window.location.search).get('hud');
@@ -2135,12 +2645,16 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   const [initialModeReady, setInitialModeReady] = useState(!initialModeId);
   const [sceneReady, setSceneReady] = useState(false);
   const [loadersStable, setLoadersStable] = useState(false);
-  const [displayedProgress, setDisplayedProgress] = useState(0);
+  const [displayedProgress, setDisplayedProgress] = useState(
+    initialModeId ? INITIAL_LAUNCH_PROGRESS : 0,
+  );
   const [startupContentPhase, setStartupContentPhase] = useState(0);
+  const startupContentPhaseRef = useRef(0);
   const [transitionContentPhase, setTransitionContentPhase] = useState(STARTUP_FULL_CONTENT_PHASE);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
   const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
   const [playerVisualReady, setPlayerVisualReady] = useState(false);
+  const [launchOverlayDeparting, setLaunchOverlayDeparting] = useState(false);
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
@@ -2154,6 +2668,13 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   const [screenshotMode, setScreenshotMode] = useState(false);
   const [skipOpeningIntro, setSkipOpeningIntro] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  // Player-facing quality choice ('auto' plus the three preset tiers). Read from
+  // storage in the URL/settings effect below so server and first client render
+  // agree. Owned here so the pause menu and the launch menu stay in sync.
+  const [qualityPreference, setQualityPreference] = useState('auto');
+  // A resumed session skips the arrival cinematic — the player has already seen
+  // it, and the opening shot is written as a first landing.
+  const [resumedFromSave, setResumedFromSave] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
@@ -2178,7 +2699,9 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   // Terrain, DPR, postprocessing, and water targets stay on their final
   // configuration from the first covered frame. Swapping these after reveal
   // can suspend the root scene and expose the canvas clear color.
-  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human' && !skipOpeningIntro;
+  const openingIntroEligible = getPlayableMode(playableModeId).kind === 'human'
+    && !skipOpeningIntro
+    && !resumedFromSave;
   // Aerial framing exposes much more water and terrain than ordinary play.
   // Keep the fly-in at native DPR and skip its otherwise scene-doubling planar
   // reflection pass; normal quality returns once the camera is stationary.
@@ -2197,6 +2720,8 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     || !launchOverlayDismissed;
   const runtimeAudioEnabled = audioEnabled && !e2eMode && !screenshotMode;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
+  // Automation lanes must not leave a save behind that changes the next run.
+  useSessionAutosave(gameStarted && sceneReady && !e2eMode && !screenshotMode);
   const transitionMountingDestination = Boolean(
     transition
     && transition.phase !== 'departing'
@@ -2204,8 +2729,7 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   );
   const transitionCanvasPaused = Boolean(
     transition
-    && (transition.phase === 'chart'
-      || transition.phase === 'mounting')
+    && transition.phase === 'chart'
   );
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
@@ -2265,6 +2789,13 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   useLayoutEffect(() => {
     if (!initialModeId || initialModeAppliedRef.current) return;
     initialModeAppliedRef.current = true;
+    // Restore before setPlayableMode: restoreSession replaces the whole state
+    // object, and setPlayableMode then resolves the toolbar/spawn for the
+    // restored region. A snapshot that fails validation falls through to a
+    // normal fresh start rather than half-applying.
+    const restored = resumeSnapshot
+      ? useThreeGameStore.getState().restoreSession(resumeSnapshot)
+      : false;
     useThreeGameStore.getState().setPlayableMode(initialModeId);
     if (multiplayerSession) {
       useThreeGameStore.setState(state => ({
@@ -2286,7 +2817,8 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
     setInitialModeReady(true);
-  }, [initialModeId, multiplayerSession]);
+    if (restored) setResumedFromSave(true);
+  }, [initialModeId, multiplayerSession, resumeSnapshot]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2396,7 +2928,14 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
       if (requestedSpecies && requestedSpecies !== '1') setEcologyDebugSpecies(requestedSpecies);
       setEcologyDebugEnabled(true);
     }
-    setPerfSettings(settingsFromUrlSearch(window.location.search, recommendedQualityFromDevice()));
+    // A stored player choice stands in for device detection. An explicit
+    // `?quality=` in the URL still wins inside settingsFromUrlSearch.
+    const storedQuality = readQualityPreference();
+    setQualityPreference(storedQuality);
+    setPerfSettings(settingsFromUrlSearch(
+      window.location.search,
+      resolveQualityPreference(storedQuality, recommendedQualityFromDevice()),
+    ));
     setPerfProbe(DEV_TOOLS_ENABLED && (params.has('perfProbe') || params.has('costProbe')));
     setCostProbe(DEV_TOOLS_ENABLED && params.has('costProbe'));
     const zoneParam = params.get('zone');
@@ -2416,8 +2955,18 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       setShortcutModifierActive(event.metaKey || event.ctrlKey);
+      // Tab recenters the camera during play, so swallow the browser's focus
+      // move — but only while gameplay actually owns the keyboard and focus is
+      // still on the page body/canvas. Once a modal is open or the player has
+      // focused a HUD control, Tab must traverse the interface normally;
+      // blanket-preventing it made the whole game unreachable by keyboard.
       if (event.code === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault();
+        const focusedInterface = event.target instanceof Element
+          && event.target !== document.body
+          && event.target.closest('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])');
+        if (!isGameplayInputBlocked() && !focusedInterface) {
+          event.preventDefault();
+        }
         return;
       }
       if (event.code === 'Digit0' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -2509,6 +3058,30 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     return () => window.clearInterval(handle);
   }, [assetProgress.active, assetProgress.progress, assetProgress.total, gameStarted, sceneReady]);
 
+  useEffect(() => {
+    if (
+      !gameStarted
+      || launchState !== 'loading'
+      || sceneReady
+      || playableModeId !== 'darwin'
+      || !runtimeAudioEnabled
+    ) return undefined;
+
+    let cancelled = false;
+    void activatePostOfficeBayAudio({ preloadEffects: false }).then(running => {
+      if (!cancelled && running) startLaunchAmbientPrelude();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    gameStarted,
+    launchState,
+    playableModeId,
+    runtimeAudioEnabled,
+    sceneReady,
+  ]);
+
   const openCharacterSelect = () => {
     setLaunchState('character');
   };
@@ -2517,11 +3090,17 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     if (runtimeAudioEnabled) {
       void activatePostOfficeBayAudio({ preloadEffects: false });
     }
-    if (reset) useThreeGameStore.getState().resetExpedition();
+    if (reset) {
+      // A deliberate new expedition supersedes the old resume point; leaving it
+      // in storage would let a reload drop the player back into the old run.
+      clearSessionSnapshot();
+      setResumedFromSave(false);
+      useThreeGameStore.getState().resetExpedition();
+    }
     useThreeGameStore.getState().setPlayableMode(modeId);
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
-    setDisplayedProgress(0);
+    setDisplayedProgress(INITIAL_LAUNCH_PROGRESS);
     setLoadersStable(false);
     setSceneReady(false);
     setStartupContentPhase(0);
@@ -2530,6 +3109,7 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     // A restart keeps the already-committed Darwin instance mounted; a fresh
     // launch must wait for its first real model-scene commit.
     if (!gameStarted) setPlayerVisualReady(false);
+    setLaunchOverlayDeparting(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('loading');
   };
@@ -2547,11 +3127,35 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     }
   };
 
+  // Applies a player-chosen quality tier live. Rebuilt through
+  // settingsFromUrlSearch with `quality` overridden so every other URL toggle
+  // (?noWater, ?shadowQuality=…) is preserved, and so an explicit choice wins
+  // over a `?quality=` left in the address bar.
+  const handleQualityPreferenceChange = useCallback(choice => {
+    const preference = writeQualityPreference(choice);
+    setQualityPreference(preference);
+    const resolved = resolveQualityPreference(preference, recommendedQualityFromDevice());
+    const params = new URLSearchParams(window.location.search);
+    params.set('quality', resolved);
+    setPerfSettings(settingsFromUrlSearch(`?${params.toString()}`, resolved));
+  }, []);
+
   const restartExpedition = () => {
     beginNewExpedition('darwin', { reset: true });
   };
 
   const returnToMainMenu = () => {
+    // Capture the resume point before the reset wipes it, so leaving to the menu
+    // does not throw the session away.
+    useThreeGameStore.getState().saveSession();
+    if (onExitToMenu) {
+      // Hand back to the launch shell so the player gets the real menu, which
+      // re-reads the save and can offer Continue. The in-runtime menu below is
+      // the fallback for hosts that do not provide an exit path.
+      useThreeGameStore.getState().resetExpedition();
+      onExitToMenu();
+      return;
+    }
     useThreeGameStore.getState().resetExpedition();
     loaderQuietSince.current = 0;
     setDisplayedProgress(0);
@@ -2561,6 +3165,7 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     setOpeningIntroStartedAt(0);
     setPlayerAnimationBanksReady(false);
     setPlayerVisualReady(false);
+    setLaunchOverlayDeparting(false);
     setLaunchOverlayDismissed(false);
     setLaunchState('menu');
   };
@@ -2568,7 +3173,9 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
   const markSceneReady = useCallback(() => {
     const mode = getPlayableMode(useThreeGameStore.getState().playableModeId);
     const params = new URLSearchParams(window.location.search);
-    const skipIntro = skipOpeningIntro || skipOpeningIntroFromParams(params);
+    // A resumed session is not a first landing, so the arrival cinematic is
+    // skipped along with the usual automation/query-flag skips.
+    const skipIntro = skipOpeningIntro || resumedFromSave || skipOpeningIntroFromParams(params);
     setSceneReady(true);
     setDisplayedProgress(100);
     if (mode.kind === 'animal' || skipIntro) {
@@ -2580,7 +3187,7 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
       setOpeningIntroStartedAt(0);
       setLaunchState('intro');
     }
-  }, [skipOpeningIntro]);
+  }, [resumedFromSave, skipOpeningIntro]);
 
   useEffect(() => {
     if (!automationReadyMode || !gameStarted || sceneReady) return undefined;
@@ -2612,13 +3219,31 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     startupContentPhase,
   ]);
 
+  // The scene is composed and the overlay is about to leave, so the network and
+  // the GLTF worker are idle for the whole hold/fade/cinematic window. Warm the
+  // assets the later content phases will mount so those mounts cost a
+  // scene-graph attach instead of a fetch and parse.
+  useEffect(() => {
+    if (!gameStarted || !sceneReady) return undefined;
+    // Read the zone imperatively: this is a one-shot startup warm-up, and a
+    // subscription here would re-render the whole shell on every zone change.
+    prefetchStartupContentAssets(useThreeGameStore.getState().currentZoneId);
+    return undefined;
+  }, [gameStarted, sceneReady]);
+
   useEffect(() => {
     if (!sceneReady || launchOverlayDismissed) return undefined;
-    const handle = window.setTimeout(() => {
+    const departHandle = window.setTimeout(() => {
+      setLaunchOverlayDeparting(true);
+    }, LAUNCH_COMPLETION_HOLD_MS);
+    const dismissHandle = window.setTimeout(() => {
       if (openingIntroActive) setOpeningIntroStartedAt(performance.now());
       setLaunchOverlayDismissed(true);
-    }, openingIntroActive ? LAUNCH_OVERLAY_FADE_MS : 500);
-    return () => window.clearTimeout(handle);
+    }, LAUNCH_COMPLETION_HOLD_MS + LAUNCH_OVERLAY_FADE_MS);
+    return () => {
+      window.clearTimeout(departHandle);
+      window.clearTimeout(dismissHandle);
+    };
   }, [launchOverlayDismissed, openingIntroActive, sceneReady]);
 
   useEffect(() => {
@@ -2627,88 +3252,46 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
     // Mount exactly one content group per idle window while the loading overlay
     // is still opaque. This lets GLB parsing, texture uploads, Rapier setup, and
     // shader discovery settle before the curtain/camera sequence begins.
-    let cancelled = false;
-    let timeoutHandle = null;
-    let idleHandle = null;
-    let frameHandle = null;
-
-    const schedulePhase = index => {
-      if (cancelled || index >= loadingContentTarget) return;
-      const previousDelay = index === 0 ? 0 : INTRO_LOADING_PHASE_TIMINGS_MS[index - 1];
-      const delay = INTRO_LOADING_PHASE_TIMINGS_MS[index] - previousDelay;
-      timeoutHandle = window.setTimeout(() => {
-        timeoutHandle = null;
-        const commitPhase = () => {
-          idleHandle = null;
-          if (cancelled) return;
-          setStartupContentPhase(current => Math.max(current, index + 1));
-          frameHandle = window.requestAnimationFrame(() => {
-            frameHandle = window.requestAnimationFrame(() => {
-              frameHandle = null;
-              schedulePhase(index + 1);
-            });
-          });
-        };
-        if (typeof window.requestIdleCallback === 'function') {
-          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 420 });
-        } else {
-          commitPhase();
-        }
-      }, delay);
-    };
-
-    schedulePhase(0);
-    return () => {
-      cancelled = true;
-      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
-      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
-      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
-    };
+    return scheduleStagedContentPhases({
+      startPhase: 0,
+      endPhase: loadingContentTarget,
+      timings: INTRO_LOADING_PHASE_TIMINGS_MS,
+      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
+    });
   }, [gameStarted, launchState, loadingContentTarget]);
+
+  // Content families four and five mount beneath the cinematic rather than on
+  // top of the player's first seconds of control. Their assets are already warm
+  // from the startup prefetch below, so each step is a scene-graph attach.
+  useEffect(() => {
+    if (!gameStarted || launchState !== 'intro' || !openingIntroStartedAt) return undefined;
+    if (loadingContentTarget >= INTRO_MOUNT_CONTENT_PHASE) return undefined;
+    return scheduleStagedContentPhases({
+      startPhase: loadingContentTarget,
+      endPhase: INTRO_MOUNT_CONTENT_PHASE,
+      timings: INTRO_MOUNT_PHASE_TIMINGS_MS,
+      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
+    });
+  }, [gameStarted, launchState, loadingContentTarget, openingIntroStartedAt]);
+
+  useEffect(() => {
+    startupContentPhaseRef.current = startupContentPhase;
+  }, [startupContentPhase]);
 
   useEffect(() => {
     if (!gameStarted || !launchOverlayDismissed) return undefined;
-    if (loadingContentTarget >= STARTUP_FULL_CONTENT_PHASE) return undefined;
     if (launchState !== 'playing') return undefined;
-
-    let cancelled = false;
-    let timeoutHandle = null;
-    let idleHandle = null;
-    let frameHandle = null;
-
-    const schedulePhase = index => {
-      if (cancelled || index >= STARTUP_FULL_CONTENT_PHASE) return;
-      const timingIndex = index - STARTUP_OPENING_CONTENT_PHASE;
-      const previousDelay = timingIndex === 0 ? 0 : INTRO_REVEAL_PHASE_TIMINGS_MS[timingIndex - 1];
-      const delay = INTRO_REVEAL_PHASE_TIMINGS_MS[timingIndex] - previousDelay;
-      timeoutHandle = window.setTimeout(() => {
-        timeoutHandle = null;
-        const commitPhase = () => {
-          idleHandle = null;
-          if (cancelled) return;
-          setStartupContentPhase(current => Math.max(current, index + 1));
-          frameHandle = window.requestAnimationFrame(() => {
-            frameHandle = window.requestAnimationFrame(() => {
-              frameHandle = null;
-              schedulePhase(index + 1);
-            });
-          });
-        };
-        if (typeof window.requestIdleCallback === 'function') {
-          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 420 });
-        } else {
-          commitPhase();
-        }
-      }, delay);
-    };
-
-    schedulePhase(STARTUP_OPENING_CONTENT_PHASE);
-    return () => {
-      cancelled = true;
-      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
-      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
-      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
-    };
+    // Normally only the NPC actors are still outstanding here. A skipped or
+    // resumed launch never ran the cinematic staging, so this also covers
+    // walking the whole remainder up from the loading target.
+    const startPhase = Math.max(loadingContentTarget, startupContentPhaseRef.current);
+    if (startPhase >= STARTUP_FULL_CONTENT_PHASE) return undefined;
+    return scheduleStagedContentPhases({
+      startPhase,
+      endPhase: STARTUP_FULL_CONTENT_PHASE,
+      timings: INTRO_REVEAL_PHASE_TIMINGS_MS,
+      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
+    });
   }, [gameStarted, launchOverlayDismissed, launchState, loadingContentTarget]);
 
   useEffect(() => {
@@ -2898,6 +3481,9 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
             onReturnToMainMenu={returnToMainMenu}
             audioEnabled={audioEnabled}
             onAudioEnabledChange={handleAudioEnabledChange}
+            quality={qualityPreference}
+            onQualityChange={handleQualityPreferenceChange}
+            openJournalOnLaunch={openJournalOnLaunch}
           />
         )}
         {gameUiVisible && multiplayerSession && <MultiplayerHud />}
@@ -2927,7 +3513,7 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
         {showLaunchOverlay && (
           <LaunchOverlay
             mode={LAUNCH_MENU_STATES.has(launchState) ? launchState : 'loading'}
-            departing={gameStarted && sceneReady}
+            departing={gameStarted && launchOverlayDeparting}
             blackout={openingIntroEligible && (
               (launchState === 'loading' && displayedProgress >= 60)
               || sceneReady
@@ -2938,9 +3524,12 @@ export default function ThreeDarwinGame({ initialModeId = null, multiplayerSessi
             onModeSelect={beginNewExpedition}
             onBack={() => setLaunchState('menu')}
             onSettings={() => setLaunchState('settings')}
+            onControls={() => setLaunchState('controls')}
             onAbout={() => setLaunchState('about')}
             audioEnabled={audioEnabled}
             onAudioEnabledChange={handleAudioEnabledChange}
+            quality={qualityPreference}
+            onQualityChange={handleQualityPreferenceChange}
           />
         )}
         <ThreeE2EHarness

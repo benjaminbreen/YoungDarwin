@@ -84,15 +84,65 @@ export function terrainBiomeAt(x, z, y = terrainHeight(x, z), regionId = 'POST_O
   return placeholderProfile(regionId).biome;
 }
 
+// An authored region height costs ~3.8us per call (layered noise, polygon
+// distance loops, a dozen exp/pow terms), and nothing memoized it: static props,
+// litter, plant fields, and structures all re-derived the identical value every
+// frame, and terrainSlopeAt pays it four times per query. These caches key on
+// the exact coordinate pair, so a hit returns the same float the analytic
+// function would have — no interpolation, which the movement/rendered surface
+// contract does not tolerate. Region height functions are pure in (x, z), so
+// entries never go stale.
+const TERRAIN_SAMPLE_CACHE_LIMIT = 24000;
+const heightSampleCaches = new Map();
+
+function sampleCache(kind, regionId) {
+  const key = `${kind}:${regionId}`;
+  let cache = heightSampleCaches.get(key);
+  if (!cache) {
+    cache = { size: 0, byX: new Map() };
+    heightSampleCaches.set(key, cache);
+  }
+  return cache;
+}
+
+function cachedHeight(kind, regionId, x, z, compute) {
+  const cache = sampleCache(kind, regionId);
+  let byZ = cache.byX.get(x);
+  if (byZ !== undefined) {
+    const hit = byZ.get(z);
+    if (hit !== undefined) return hit;
+  }
+  const value = compute();
+  // Moving actors never repeat a coordinate, so the cache would grow without
+  // bound. Drop everything on overflow rather than paying for LRU bookkeeping
+  // on a path this hot; the static probes repopulate within a frame or two.
+  if (cache.size >= TERRAIN_SAMPLE_CACHE_LIMIT) {
+    cache.byX.clear();
+    cache.size = 0;
+    byZ = undefined;
+  }
+  if (byZ === undefined) {
+    byZ = new Map();
+    cache.byX.set(x, byZ);
+  }
+  byZ.set(z, value);
+  cache.size += 1;
+  return value;
+}
+
 export function terrainHeight(x, z, regionId = 'POST_OFFICE_BAY') {
   const definition = authoredRegion(regionId);
-  if (definition?.terrain?.height) return definition.terrain.height(x, z);
+  if (definition?.terrain?.height) {
+    return cachedHeight('height', regionId, x, z, () => definition.terrain.height(x, z));
+  }
   return placeholderTerrainHeight(x, z, regionId);
 }
 
 export function movementTerrainHeight(x, z, regionId = 'POST_OFFICE_BAY') {
   const definition = authoredRegion(regionId);
-  if (definition?.terrain?.movementHeight) return definition.terrain.movementHeight(x, z);
+  if (definition?.terrain?.movementHeight) {
+    return cachedHeight('movement', regionId, x, z, () => definition.terrain.movementHeight(x, z));
+  }
   return placeholderTerrainHeight(x, z, regionId);
 }
 

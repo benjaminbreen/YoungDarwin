@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useDismissableOverlay } from '../useDismissableOverlay';
 
 // Full-screen modal chrome for the expedition UI: dimmed scrim, near-black
 // panel framed by a single gold border, and an ornate centered header
@@ -38,13 +39,19 @@ export function ExpeditionModalHeader({ title, subtitle, onClose }) {
 }
 
 export function ExpeditionModal({ title, subtitle, onClose, children, className = '', width = 'min(120rem, 98vw)' }) {
+  const panelRef = useDismissableOverlay(true, onClose);
   return (
     <div
       className="expedition-modal-scrim pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-[#080705]/92 p-2 font-expedition text-[#ead3ae] backdrop-blur-sm sm:p-4"
       onClick={onClose}
     >
       <div
-        className={`expedition-modal-panel relative grid h-[min(67rem,96vh)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82)] ${className}`}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={`expedition-modal-panel relative grid h-[min(67rem,96vh)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[3px] border border-[#5d482d] bg-[#0d0c0a] shadow-[0_30px_90px_rgba(0,0,0,0.82)] focus:outline-none ${className}`}
         style={{
           width,
           backgroundImage:

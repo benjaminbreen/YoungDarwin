@@ -22,19 +22,19 @@ import { weatherEnv } from './weatherEnvRuntime';
 // --- Cloud shadow tuning -----------------------------------------------------
 // Mutable so the dev Performance panel can drag values live; the drive below
 // reads it every frame. These are the shipping defaults.
-// Defaults from the 2026-07-23 screenshot pass at Post Office Bay.
+// Defaults from the cloud-shadow tuning reference at Post Office Bay.
 export const cloudShadeTuning = {
   // Peak darkening under an ideal broken-cumulus sky.
-  maxStrength: 0.52,
+  maxStrength: 0.24,
   // Feature size of the shadow pattern: base blobs ~this many meters across.
-  featureMeters: 66,
+  featureMeters: 30,
   // Ground-track speed of the pattern in m/s at windSpeed 1, before the
   // cloudDriftSpeed channel scales it (~7.4 m/s with the default 0.32).
-  driftMps: 23,
+  driftMps: 14,
   // Added coverage: positive shadows more ground at a given cumulus level.
-  coverageBias: 0.2,
+  coverageBias: -0.05,
   // fbm-value width of the shadow edge (bigger = softer penumbra).
-  softness: 0.12,
+  softness: 0.07,
   // Dev override: apply maxStrength directly, ignoring weather/sun gating, so
   // the pattern is visible under any sky while tuning.
   forceOn: false,

@@ -245,7 +245,10 @@ function scheduleEcologyPreloadPump() {
   }
 }
 
-function preloadGLBPath(path) {
+// Exported so non-ecology content families (physics props, specimens, the
+// Beagle, Syms) can queue onto the same serialized pump instead of racing it
+// with a second parallel decode loop.
+export function preloadGLBPath(path) {
   if (typeof window === 'undefined' || typeof path !== 'string' || !GLB_PATH_RE.test(path)) return;
   if (queuedEcologyPreloads.has(path)) return;
   queuedEcologyPreloads.add(path);
@@ -253,7 +256,7 @@ function preloadGLBPath(path) {
   scheduleEcologyPreloadPump();
 }
 
-function preloadModelAsset(assetId) {
+export function preloadModelAsset(assetId) {
   const path = assetPreloadPath(getModelAsset(assetId));
   if (path) preloadGLBPath(path);
 }
@@ -285,6 +288,12 @@ export function prefetchEcologyAssets(ecology) {
     if (!shouldPrefetchAsset(layer, ecology)) return;
     layer.items?.forEach(item => preloadModelAsset(getWildlifeAssetId(item.speciesId || item.species || item.specimenId || item.id)));
   });
+  // Generated trees are not GLB paths, so they need the module warmed rather
+  // than a path preloaded. ez-tree inlines its bark and leaf maps as base64 —
+  // ~2.9 MB gzipped — and InstancedEzTreeLayer only imports it on mount, so
+  // North Shore, Mangroves, Western Highlands, and Post Office Bay used to pull
+  // the whole payload down after the interstitial had already finished.
+  if (ecology.generatedTrees?.length) import('@dgreenheck/ez-tree');
 }
 
 export function setEcologyAssetPrefetchPaused(paused) {

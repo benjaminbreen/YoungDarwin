@@ -1,6 +1,10 @@
 'use client';
 
-import React, { Suspense, useMemo } from 'react';
+import React, {
+  Suspense,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRegionTerrainConfig, terrainColor, terrainHeight } from '../../world/terrain';
@@ -11,6 +15,16 @@ import { readTerrainResource } from '../../world/terrainResource';
 import { getRegionDefinition } from '../../world/regions';
 import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
 import { readBorderVistaResource } from '../../world/vistas/borderVistaResource';
+import {
+  centralPeakDev,
+  getCentralPeakDevRevision,
+  subscribeCentralPeakDev,
+} from '../../world/vistas/centralPeakDevRuntime';
+import {
+  distanceSceneryRuntime,
+  getDistanceSceneryRevision,
+  subscribeDistanceScenery,
+} from '../../world/vistas/distanceSceneryRuntime';
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
@@ -274,11 +288,27 @@ export function Terrain({ segmentCap = null }) {
 // far side of each strip is the vista mesh in BorderVistas, which shares the
 // strip's seam-ring vertices.
 function NeighborCarryStrips({ regionId, material }) {
+  useSyncExternalStore(
+    subscribeCentralPeakDev,
+    getCentralPeakDevRevision,
+    getCentralPeakDevRevision,
+  );
+  useSyncExternalStore(
+    subscribeDistanceScenery,
+    getDistanceSceneryRevision,
+    getDistanceSceneryRevision,
+  );
   const borderResource = readBorderVistaResource(regionId);
   const carryStrips = useMemo(() => borderResource.entries
     .filter(entry => entry.carry)
     .map(entry => ({ id: entry.vistaId, edge: entry.edge, geometry: entry.carry })), [borderResource]);
   const carryEdges = useMemo(() => carryStrips.map(strip => strip.edge), [carryStrips]);
+  if (
+    !centralPeakDev.neighborApronVisible
+    || distanceSceneryRuntime.mode === 'shell'
+  ) {
+    return <ContinuationTerrainSkirts regionId={regionId} material={material} />;
+  }
   return (
     <>
       {carryStrips.map(strip => (

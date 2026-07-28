@@ -1,51 +1,29 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import React, { useCallback, useEffect, useState } from 'react';
-import { LaunchOverlay } from './LaunchOverlay';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { INITIAL_LAUNCH_PROGRESS, LaunchOverlay } from './LaunchOverlay';
 import { MultiplayerLobby } from './multiplayer/MultiplayerLobby';
+import { readQualityPreference, writeQualityPreference } from '../qualityPreference';
+import { readSessionSnapshot, summarizeSessionSnapshot } from '../sessionSave';
+import { getRegionDisplayName } from '../../game-core/regionMaps';
+
+// Mirrors AUDIO_PREFERENCE_KEY in ThreeDarwinGame so the launch menu and the
+// runtime read and write the same stored choice.
+const AUDIO_PREFERENCE_KEY = 'darwin-soundscape-enabled';
+
+// The saved-session read has to happen after mount (localStorage is unavailable
+// during the server render, and reading it in a state initializer would desync
+// hydration) but before the browser paints, or the menu visibly reflows as the
+// Load entry appears. A layout effect satisfies both; it simply does not run on
+// the server, so the plain effect is the fallback there.
+const useBeforePaintEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 let runtimeImport = null;
-let physicsWarmup = null;
-const RAPIER_LEGACY_INIT_WARNING = 'using deprecated parameters for the initialization function; pass a single object instead';
-
-async function initializePhysicsRuntime(rapier) {
-  // Rapier 0.19.x's public compat wrapper still passes its embedded WASM bytes
-  // to wasm-bindgen's initializer with the old positional signature. The
-  // initializer accepts it, but emits a deprecation warning from inside the
-  // dependency. Filter only that exact upstream warning during the warm-up;
-  // every other warning still reaches the console.
-  const previousWarn = console.warn;
-  const filteredWarn = (...args) => {
-    if (args[0] === RAPIER_LEGACY_INIT_WARNING) return;
-    previousWarn.apply(console, args);
-  };
-  console.warn = filteredWarn;
-  try {
-    await rapier.init();
-  } finally {
-    if (console.warn === filteredWarn) console.warn = previousWarn;
-  }
-}
-
-function warmPhysicsRuntime() {
-  if (!physicsWarmup) {
-    // @react-three/rapier initializes the same compatibility module when its
-    // <Physics> boundary first mounts. Starting that WASM work while the menu
-    // is idle keeps it out of the post-click loading overlay.
-    physicsWarmup = import('@dimforge/rapier3d-compat')
-      .then(initializePhysicsRuntime)
-      .catch(error => {
-        physicsWarmup = null;
-        console.warn('Physics warm-up failed; the runtime will retry on launch.', error);
-        return null;
-      });
-  }
-  return physicsWarmup;
-}
 
 function loadThreeRuntime() {
-  void warmPhysicsRuntime();
+  // Preload the JS runtime only. <Physics> must remain the sole owner of
+  // Rapier initialization; overlapping initializers invalidate live WASM handles.
   if (!runtimeImport) {
     runtimeImport = import('../ThreeDarwinGame').catch(error => {
       runtimeImport = null;
@@ -59,7 +37,7 @@ const ThreeDarwinGame = dynamic(loadThreeRuntime, {
   ssr: false,
   loading: () => (
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950">
-      <LaunchOverlay mode="loading" progress={8} />
+      <LaunchOverlay mode="loading" progress={INITIAL_LAUNCH_PROGRESS} />
     </main>
   ),
 });
@@ -69,13 +47,68 @@ export function ThreeLaunchShell() {
   const [runtimeModeId, setRuntimeModeId] = useState(null);
   const [multiplayerSession, setMultiplayerSession] = useState(null);
   const [interactiveReady, setInteractiveReady] = useState(false);
+  // Read lazily on mount rather than during render so the server-rendered shell
+  // and the first client render agree.
+  const [quality, setQuality] = useState('auto');
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [savedSession, setSavedSession] = useState(null);
+  // Distinguishes "no save" from "not looked yet" so the menu can withhold
+  // save-dependent chrome rather than guessing and correcting itself.
+  const [saveStateKnown, setSaveStateKnown] = useState(false);
+  // Set when the player picks Continue, so the runtime restores the snapshot
+  // instead of starting a fresh expedition.
+  const [resumeSnapshot, setResumeSnapshot] = useState(null);
+  const [openJournalOnLaunch, setOpenJournalOnLaunch] = useState(false);
 
   const preloadRuntime = useCallback(() => {
     void loadThreeRuntime();
   }, []);
 
+  const exitToMenu = useCallback(() => {
+    setRuntimeModeId(null);
+    setMultiplayerSession(null);
+    setResumeSnapshot(null);
+    setOpenJournalOnLaunch(false);
+    // Re-read so the menu reflects the save the runtime just wrote.
+    setSavedSession(readSessionSnapshot());
+    setLaunchState('menu');
+  }, []);
+
+  const resumeSavedSession = useCallback(({ openJournal = false } = {}) => {
+    if (!savedSession) return;
+    setResumeSnapshot(savedSession);
+    setOpenJournalOnLaunch(openJournal);
+    setRuntimeModeId(savedSession.playableModeId || 'darwin');
+  }, [savedSession]);
+
+  const changeQuality = useCallback(choice => {
+    setQuality(writeQualityPreference(choice));
+  }, []);
+
+  const changeAudioEnabled = useCallback(next => {
+    const enabled = Boolean(next);
+    setAudioEnabled(enabled);
+    try {
+      window.localStorage?.setItem(AUDIO_PREFERENCE_KEY, enabled ? 'on' : 'off');
+    } catch {
+      // A blocked preference store should not block the control itself.
+    }
+  }, []);
+
+  useBeforePaintEffect(() => {
+    setSavedSession(readSessionSnapshot());
+    setSaveStateKnown(true);
+  }, []);
+
   useEffect(() => {
     setInteractiveReady(true);
+    setQuality(readQualityPreference());
+    try {
+      const stored = window.localStorage?.getItem(AUDIO_PREFERENCE_KEY);
+      if (stored === 'off') setAudioEnabled(false);
+    } catch {
+      // Ignore storage failures; audio stays on for this session.
+    }
     // Paint and hydrate the small launch menu first, then overlap the large
     // Three.js bundle and physics WASM with the player's time at the menu.
     // Pointer/focus intent remains as an immediate fallback for browsers that
@@ -94,9 +127,16 @@ export function ThreeLaunchShell() {
         key={`${multiplayerSession?.roomCode || 'solo'}:${runtimeModeId}`}
         initialModeId={runtimeModeId}
         multiplayerSession={multiplayerSession}
+        resumeSnapshot={resumeSnapshot}
+        openJournalOnLaunch={openJournalOnLaunch}
+        onExitToMenu={exitToMenu}
       />
     );
   }
+
+  const resumeSummary = summarizeSessionSnapshot(savedSession, {
+    regionName: savedSession ? getRegionDisplayName(savedSession.currentZoneId) : null,
+  });
 
   return (
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950">
@@ -105,10 +145,27 @@ export function ThreeLaunchShell() {
         interactive={interactiveReady}
         onNewExpedition={() => setLaunchState('character')}
         onMultiplayer={() => setLaunchState('multiplayer')}
-        onModeSelect={setRuntimeModeId}
+        onModeSelect={modeId => {
+          // A fresh expedition must not inherit the resume snapshot.
+          setResumeSnapshot(null);
+          setOpenJournalOnLaunch(false);
+          setRuntimeModeId(modeId);
+        }}
+        saveStateKnown={saveStateKnown}
+        hasSavedExpedition={Boolean(savedSession)}
+        hasSavedJournalEntries={Boolean(resumeSummary?.notes)}
+        lastJournalLabel={resumeSummary?.label || 'Floreana - September 1835'}
+        onLoad={() => setLaunchState('load')}
+        onContinue={() => resumeSavedSession()}
+        onLoadJournal={() => resumeSavedSession({ openJournal: true })}
         onBack={() => setLaunchState('menu')}
         onSettings={() => setLaunchState('settings')}
+        onControls={() => setLaunchState('controls')}
         onAbout={() => setLaunchState('about')}
+        audioEnabled={audioEnabled}
+        onAudioEnabledChange={changeAudioEnabled}
+        quality={quality}
+        onQualityChange={changeQuality}
         onRuntimeIntent={preloadRuntime}
         multiplayerPanel={(
           <MultiplayerLobby

@@ -58,6 +58,16 @@ export const INTERACTION_AUDIO_URLS = Object.freeze(
   Object.values(INTERACTION_AUDIO).map(sprite => sprite.url),
 );
 
+export const TOOL_FOLEY_AUDIO = Object.freeze({
+  hammerSwing: Object.freeze({ url: `${INTERACTION_ROOT}/swing-hammer.wav`, variants: 4, slotDuration: 0.72 }),
+  netSwing: Object.freeze({ url: `${INTERACTION_ROOT}/swing-net.wav`, variants: 4, slotDuration: 0.72 }),
+  netContact: Object.freeze({ url: `${INTERACTION_ROOT}/contact-net.wav`, variants: 6, slotDuration: 0.54 }),
+});
+
+export const TOOL_FOLEY_AUDIO_URLS = Object.freeze(
+  Object.values(TOOL_FOLEY_AUDIO).map(sprite => sprite.url),
+);
+
 const MOVEMENT_WILDLIFE_ROOT = '/assets/audio/movement-wildlife';
 
 export const MOVEMENT_WILDLIFE_AUDIO = Object.freeze({

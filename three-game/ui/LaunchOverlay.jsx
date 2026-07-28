@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { CompassRoseIcon, OpenBookIcon } from './expedition/icons';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CompassRoseIcon } from './expedition/icons';
+import { controlsSections } from './controlsReference';
+import { QUALITY_CHOICES } from '../qualityPreference';
 
 const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
+export const INITIAL_LAUNCH_PROGRESS = 8;
 
 function BrassRule({ className = '' }) {
   return (
@@ -59,6 +62,28 @@ function CharacterChoiceButton({ title, subtitle, disabled = false, onClick, onI
   );
 }
 
+// Rows inside the Load panel. Both entries resume the same saved expedition —
+// one lands in the field, the other opens the notebook on arrival — so they read
+// as two ways into one save rather than two unrelated menu commands.
+function LoadChoiceButton({ title, subtitle, onClick, onIntent }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onPointerEnter={onIntent}
+      onFocus={onIntent}
+      className="group w-full rounded-sm border border-transparent px-3 py-2.5 text-left font-expedition transition hover:border-expedition-brass/55 hover:bg-expedition-gold/8 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+    >
+      <span className="block text-[19px] tracking-[0.04em] text-expedition-parchment group-hover:text-expedition-goldbright">
+        {title}
+      </span>
+      <span className="mt-1 block text-[12px] leading-snug tracking-[0.04em] text-expedition-faded group-hover:text-expedition-gold/80">
+        {subtitle}
+      </span>
+    </button>
+  );
+}
+
 function BackButton({ onClick }) {
   return (
     <button
@@ -71,19 +96,125 @@ function BackButton({ onClick }) {
   );
 }
 
+function LoadingPhaseLine({ children }) {
+  const [displayedLine, setDisplayedLine] = useState(children);
+  const [visible, setVisible] = useState(true);
+  const displayedLineRef = useRef(children);
+
+  useEffect(() => {
+    if (children === displayedLineRef.current) return undefined;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      displayedLineRef.current = children;
+      setDisplayedLine(children);
+      setVisible(true);
+      return undefined;
+    }
+
+    setVisible(false);
+    const swapHandle = window.setTimeout(() => {
+      displayedLineRef.current = children;
+      setDisplayedLine(children);
+      setVisible(true);
+    }, 180);
+    return () => window.clearTimeout(swapHandle);
+  }, [children]);
+
+  return (
+    <p
+      aria-live="polite"
+      className={`mt-3 min-h-[2.5rem] text-[15px] leading-relaxed text-expedition-parchment/82 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+        visible ? 'translate-y-0 opacity-100' : 'translate-y-0.5 opacity-0'
+      }`}
+    >
+      {displayedLine}
+    </p>
+  );
+}
+
 function ProgressBar({ value }) {
-  const safe = Math.max(0, Math.min(100, value || 0));
+  const numericValue = Number(value);
+  const target = Number.isFinite(numericValue)
+    ? Math.max(0, Math.min(100, numericValue))
+    : 0;
+  const displayedRef = useRef(target);
+  const [displayed, setDisplayed] = useState(target);
+
+  useEffect(() => {
+    if (
+      !Number.isFinite(displayedRef.current)
+      || displayedRef.current < 0
+      || displayedRef.current > 100
+    ) {
+      displayedRef.current = target;
+      setDisplayed(target);
+      return undefined;
+    }
+    if (target <= displayedRef.current) return undefined;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      displayedRef.current = target;
+      setDisplayed(target);
+      return undefined;
+    }
+
+    let frameHandle = null;
+    let previousFrameTime = null;
+    const animate = now => {
+      // Only compare requestAnimationFrame timestamps with each other. Some
+      // browsers do not expose performance.now() on precisely the same clock,
+      // which can otherwise make the first elapsed value deeply negative.
+      const elapsed = previousFrameTime == null
+        ? 1000 / 60
+        : Math.max(0, Math.min(64, now - previousFrameTime));
+      previousFrameTime = now;
+      const current = displayedRef.current;
+      const remaining = target - current;
+
+      if (remaining <= 0.04) {
+        displayedRef.current = target;
+        setDisplayed(target);
+        return;
+      }
+
+      // A short exponential settle removes loader-event stepping while still
+      // letting real progress changes read immediately.
+      const candidate = current + remaining * (1 - Math.exp(-elapsed / 220));
+      const next = Number.isFinite(candidate)
+        ? Math.max(current, Math.min(target, candidate))
+        : target;
+      displayedRef.current = next;
+      setDisplayed(next);
+      frameHandle = window.requestAnimationFrame(animate);
+    };
+
+    frameHandle = window.requestAnimationFrame(animate);
+    return () => {
+      if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
+    };
+  }, [target]);
+
+  const safeDisplayed = Number.isFinite(displayed)
+    ? Math.max(0, Math.min(100, displayed))
+    : target;
+  const rounded = Math.round(safeDisplayed);
   return (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded">
+      <div className="mb-2 font-expedition text-[11px] uppercase tracking-[0.18em] text-expedition-faded">
         <span>Charting landing party</span>
-        <span className="tabular-nums text-expedition-goldbright">{Math.round(safe)}%</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-sm border border-expedition-brass/70 bg-black/45 shadow-[inset_0_1px_6px_rgba(0,0,0,0.65)]">
+      <div
+        role="progressbar"
+        aria-label="Preparing expedition"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={rounded}
+        className="relative h-2 overflow-hidden rounded-sm border border-expedition-brass/60 bg-black/45 shadow-[inset_0_1px_6px_rgba(0,0,0,0.65)]"
+      >
         <div
-          className="h-full bg-gradient-to-r from-expedition-brass via-expedition-gold to-expedition-goldbright transition-[width] duration-300"
-          style={{ width: `${safe}%` }}
-        />
+          className="absolute inset-0 origin-left bg-gradient-to-r from-expedition-brass/90 via-expedition-gold to-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.24)] will-change-transform"
+          style={{ transform: `scaleX(${safeDisplayed / 100})` }}
+        >
+          <span className="absolute inset-y-0 right-0 w-px bg-expedition-parchment/75 shadow-[0_0_6px_rgba(244,231,198,0.55)]" />
+        </div>
       </div>
     </div>
   );
@@ -101,13 +232,22 @@ export function LaunchOverlay({
   onBack,
   onContinue,
   onLoadJournal,
+  onLoad,
   onSettings,
+  onControls,
   onAbout,
   audioEnabled = true,
   onAudioEnabledChange,
+  quality = 'auto',
+  onQualityChange,
   onRuntimeIntent,
   multiplayerPanel = null,
   interactive = true,
+  // False until the shell has read localStorage. The snapshot can only be read
+  // on the client, after mount, so the first paint genuinely does not yet know
+  // whether a save exists — and guessing "no" made a whole panel appear and then
+  // vanish a frame later. Save-dependent chrome waits for this instead.
+  saveStateKnown = true,
   hasSavedExpedition = false,
   hasSavedJournalEntries = false,
   lastJournalLabel = 'Floreana - September 1835',
@@ -133,9 +273,28 @@ export function LaunchOverlay({
   const loading = mode === 'loading';
   const choosingCharacter = mode === 'character';
   const showingSettings = mode === 'settings';
+  const showingControls = mode === 'controls';
   const showingAbout = mode === 'about';
+  // Deliberately not part of `expandedPanel` below: two rows read better at the
+  // menu's own width than in the wide panel the character and controls screens use.
+  const showingLoad = mode === 'load';
   const showingMultiplayer = mode === 'multiplayer';
-  const expandedPanel = choosingCharacter || showingSettings || showingAbout || showingMultiplayer;
+  const expandedPanel = choosingCharacter || showingSettings || showingControls
+    || showingAbout || showingMultiplayer;
+  // Settings and Controls are long at every viewport size, so they always buy
+  // back the title's vertical space. The short panels — character select above
+  // all — must keep the menu's own framing, or stepping into them visibly
+  // displaces the wordmark for no reason.
+  const tallPanel = showingSettings || showingControls;
+  // Everything else in between (the multiplayer lobby especially) fits beside a
+  // full-size title on a roomy screen but not on a short one, so the wordmark
+  // yields on height rather than on which panel is open. Pure CSS: a matchMedia
+  // hook would have to guess during SSR and correct itself after hydration.
+  //
+  // The max-height variants below are spelled out in full on purpose. Tailwind's
+  // scanner only matches complete class strings in the source, so building them
+  // from a shared constant silently produces no CSS at all.
+  const yieldsWhenShort = expandedPanel && !tallPanel;
 
   return (
     <section
@@ -166,18 +325,44 @@ export function LaunchOverlay({
       </div>
 
       <div className="relative flex min-h-full flex-col items-center px-4 py-8 text-center sm:py-10">
+        {/* The title recedes only for the tall panels. Settings and Controls at
+            the full hero size pushed their own Back button off the bottom of the
+            viewport; giving them this space back is what lets them fit. */}
         <div className={`${blackout ? 'opacity-0' : 'opacity-100'} flex flex-col items-center transition-opacity duration-[1100ms] ease-out will-change-[opacity]`}>
-          <CompassRoseIcon className="mt-4 h-10 w-10 text-expedition-brass/75 sm:mt-8" />
-          <h1 className="mt-5 text-[clamp(3rem,14vw,7.9rem)] font-normal leading-none tracking-[0.14em] text-expedition-parchment [text-shadow:0_3px_18px_rgba(0,0,0,0.65)] sm:tracking-[0.32em]">
+          {!tallPanel && (
+            <CompassRoseIcon
+              className={`mt-4 h-10 w-10 text-expedition-brass/75 sm:mt-8 ${yieldsWhenShort ? '[@media(max-height:820px)]:hidden' : ''}`}
+            />
+          )}
+          <h1
+            className={`font-normal leading-none tracking-[0.14em] text-expedition-parchment transition-[font-size,margin] duration-500 ease-out [text-shadow:0_3px_18px_rgba(0,0,0,0.65)] sm:tracking-[0.32em] ${
+              tallPanel
+                ? 'mt-1 text-[clamp(1.75rem,5vw,3rem)]'
+                : `mt-5 text-[clamp(3rem,14vw,7.9rem)] ${
+                  yieldsWhenShort
+                    ? '[@media(max-height:820px)]:mt-1 [@media(max-height:820px)]:text-[clamp(1.75rem,5vw,3rem)]'
+                    : ''
+                }`
+            }`}
+          >
             DARWIN
           </h1>
-          <BrassRule className="mt-4" />
-          <p className="mt-4 text-[clamp(1.35rem,2.6vw,2.25rem)] tracking-[0.16em] text-expedition-gold/90 [text-shadow:0_2px_10px_rgba(0,0,0,0.65)]">
-            Galapagos, 1835
-          </p>
+          {!tallPanel && (
+            <div className={`flex flex-col items-center ${yieldsWhenShort ? '[@media(max-height:820px)]:hidden' : ''}`}>
+              <BrassRule className="mt-4" />
+              <p className="mt-4 text-[clamp(1.35rem,2.6vw,2.25rem)] tracking-[0.16em] text-expedition-gold/90 [text-shadow:0_2px_10px_rgba(0,0,0,0.65)]">
+                Galapagos, 1835
+              </p>
+            </div>
+          )}
         </div>
 
-        <div className={`mt-9 ${expandedPanel ? 'w-[min(34rem,calc(100vw-2rem))]' : 'w-[min(25rem,calc(100vw-2rem))]'} rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm`}>
+        {/* `relative` is load-bearing: the inset gold hairline below positions
+            against this panel. Without it the hairline resolves against the
+            full-screen <section> and draws a second frame around the viewport. */}
+        {/* The root menu sits well below the title so the sea horizon behind it
+            stays readable. Panels come up closer, since they need the height. */}
+        <div className={`relative ${tallPanel ? 'mt-5' : `mt-[clamp(2.5rem,9vh,6rem)] ${yieldsWhenShort ? '[@media(max-height:820px)]:mt-5' : ''}`} ${expandedPanel ? 'w-[min(34rem,calc(100vw-2rem))]' : 'w-[min(25rem,calc(100vw-2rem))]'} rounded-md border border-expedition-brass/70 bg-[rgba(13,18,20,0.86)] p-3 shadow-[0_22px_42px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(227,197,133,0.15)] backdrop-blur-sm`}>
           <div className="pointer-events-none absolute inset-[3px] rounded-[3px] border border-expedition-gold/20" />
           {loading ? (
             <div className="relative px-3 py-5">
@@ -185,9 +370,7 @@ export function LaunchOverlay({
               <h2 className="mt-4 text-[22px] tracking-[0.08em] text-expedition-goldbright">
                 New Expedition
               </h2>
-              <p className="mt-3 min-h-[2.5rem] text-[15px] leading-relaxed text-expedition-parchment/82">
-                {loadingLine}
-              </p>
+              <LoadingPhaseLine>{loadingLine}</LoadingPhaseLine>
               <ProgressBar value={progress} />
             </div>
           ) : showingMultiplayer ? (
@@ -222,14 +405,34 @@ export function LaunchOverlay({
           ) : showingSettings ? (
             <div className="relative px-3 py-2 text-left">
               <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Settings</h2>
-              <p className="mx-auto mt-3 max-w-md text-center text-[15px] leading-relaxed text-expedition-parchment/80">
-                The expedition selects sensible display settings automatically. Natural field-recorded sound is kept deliberately quiet.
-              </p>
-              <div className="mt-4 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 px-4">
-                <div className="flex items-center justify-between gap-4 py-3">
-                  <span className="text-[16px] text-expedition-parchment">Display &amp; performance</span>
-                  <span className="text-[13px] tracking-[0.08em] text-expedition-gold">Automatic</span>
+              {/* Body scrolls, heading and Back do not, so the way out is always
+                  on screen no matter how short the viewport is. */}
+              <div className="mt-4 max-h-[min(58vh,30rem)] overflow-y-auto pr-1">
+              <div className="rounded-sm border border-expedition-brass/40 bg-black/20 px-4 pb-3 pt-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-expedition-gold">Graphics quality</div>
+                <div className="mt-2 grid gap-1">
+                  {QUALITY_CHOICES.map(choice => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={choice.id === quality}
+                      onClick={() => onQualityChange?.(choice.id)}
+                      className={`rounded-sm border px-2.5 py-2 text-left transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+                        choice.id === quality
+                          ? 'border-expedition-gold/70 bg-expedition-gold/12'
+                          : 'border-transparent hover:border-expedition-brass/50 hover:bg-expedition-gold/8'
+                      }`}
+                    >
+                      <span className={`block text-[15px] tracking-[0.04em] ${choice.id === quality ? 'text-expedition-goldbright' : 'text-expedition-parchment'}`}>
+                        {choice.label}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] leading-snug text-expedition-faded">{choice.note}</span>
+                    </button>
+                  ))}
                 </div>
+              </div>
+              <div className="mt-2 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 px-4">
                 <div className="flex items-center justify-between gap-4 py-3">
                   <span className="text-[16px] text-expedition-parchment">Audio</span>
                   <button
@@ -246,9 +449,45 @@ export function LaunchOverlay({
                     {audioEnabled ? 'On' : 'Off'}
                   </button>
                 </div>
-                <div className="flex items-center justify-between gap-4 py-3">
-                  <span className="text-[16px] text-expedition-parchment">Controls &amp; accessibility</span>
-                  <span className="text-[13px] tracking-[0.08em] text-expedition-faded">Coming soon</span>
+                <button
+                  type="button"
+                  onClick={onControls}
+                  className="flex w-full items-center justify-between gap-4 py-3 text-left transition hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+                >
+                  <span className="text-[16px] text-expedition-parchment">Controls</span>
+                  <span className="text-[13px] tracking-[0.08em] text-expedition-gold">View list</span>
+                </button>
+              </div>
+              </div>
+              <BackButton onClick={onBack} />
+            </div>
+          ) : showingControls ? (
+            <div className="relative px-3 py-2 text-left">
+              <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Controls</h2>
+              <p className="mx-auto mt-2 max-w-md text-center text-[13px] italic leading-relaxed text-expedition-parchment/72">
+                Press <span className="not-italic text-expedition-gold">?</span> in the field to bring this back.
+              </p>
+              <div className="mt-4 max-h-[46vh] overflow-y-auto pr-1">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {controlsSections({ polished: true, includeNarratorCommands: false }).map(([title, lines]) => (
+                    <section key={title} className="min-w-0">
+                      <h3 className="text-[11px] uppercase tracking-[0.16em] text-expedition-gold">{title}</h3>
+                      <div className="mt-1.5 grid gap-1">
+                        {lines.map(line => {
+                          const separator = line.indexOf(': ');
+                          if (separator < 0) {
+                            return <div key={line} className="text-[13px] leading-snug text-expedition-parchment/88">{line}</div>;
+                          }
+                          return (
+                            <div key={line} className="grid grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)] items-baseline gap-x-3">
+                              <span className="text-[12px] tracking-[0.04em] text-expedition-goldbright">{line.slice(0, separator)}</span>
+                              <span className="text-[13px] leading-snug text-expedition-parchment/85">{line.slice(separator + 2)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               </div>
               <BackButton onClick={onBack} />
@@ -261,33 +500,84 @@ export function LaunchOverlay({
                 Darwin is a playable historical simulation set on Floreana—then called Charles Island—in September 1835. It explores observation, collection, travel, uncertainty, and ecological change, with future classroom use in the history of science in mind.
               </p>
               <BrassRule className="my-5" />
-              <p className="text-center text-[15px] leading-relaxed text-expedition-parchment/88">
+              {/* Opens in a new tab rather than navigating: the launch shell may
+                  already have the Three.js runtime and physics WASM warmed, and
+                  leaving the route throws that away. */}
+              <a
+                href="/sources"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-between gap-4 rounded-sm border border-expedition-brass/55 px-4 py-3 text-left transition-colors hover:border-expedition-gold/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[16px] text-expedition-parchment">Sources &amp; Further Reading</span>
+                  <span className="mt-0.5 block text-[13px] leading-snug text-expedition-faded">
+                    Bibliography, what is documented versus invented, and a note on the generated text.
+                  </span>
+                </span>
+                <span className="shrink-0 text-[13px] tracking-[0.08em] text-expedition-gold">Open</span>
+              </a>
+              <p className="mt-5 text-center text-[15px] leading-relaxed text-expedition-parchment/88">
                 Created by Benjamin Breen<br />
                 Coded by GPT 5.6 and Claude
               </p>
               <BackButton onClick={onBack} />
             </div>
+          ) : showingLoad ? (
+            <div className="relative px-3 py-2 text-left">
+              <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Load</h2>
+              <div className="mt-4 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 p-1">
+                <LoadChoiceButton
+                  title="Resume expedition"
+                  subtitle={lastJournalLabel}
+                  onClick={onContinue}
+                  onIntent={onRuntimeIntent}
+                />
+                {/* Same save, opened on the notebook. Offered only once there is
+                    something written to read. */}
+                {hasSavedJournalEntries && (
+                  <LoadChoiceButton
+                    title="Read journal"
+                    subtitle="Resumes this expedition with the notebook open."
+                    onClick={onLoadJournal}
+                    onIntent={onRuntimeIntent}
+                  />
+                )}
+              </div>
+              <BackButton onClick={onBack} />
+            </div>
           ) : (
             <nav className="relative grid gap-1">
-              {hasSavedExpedition && <MenuButton onClick={onContinue}>Continue Expedition</MenuButton>}
               <MenuButton primary onClick={onNewExpedition} onIntent={onRuntimeIntent}>New Expedition</MenuButton>
-              <MenuButton onClick={onMultiplayer}>Multiplayer Expedition</MenuButton>
+              {/* One door to the save. Resuming and opening the journal are the
+                  same action underneath, so they sit together behind Load rather
+                  than as two near-identical lines in the top-level menu. */}
+              {hasSavedExpedition && <MenuButton onClick={onLoad}>Load</MenuButton>}
+              {/* Only offered where a handler exists. The in-runtime menu shown
+                  after returning from a session does not host the lobby, and a
+                  button that silently did nothing read as a broken feature. */}
+              {onMultiplayer && <MenuButton onClick={onMultiplayer}>Multiplayer</MenuButton>}
               <div className="mx-4 my-1 h-px bg-gradient-to-r from-transparent via-expedition-brass/50 to-transparent" />
-              {hasSavedJournalEntries && <MenuButton onClick={onLoadJournal}>Load Journal</MenuButton>}
+              {/* Controls is reached from inside Settings; a second route to the
+                  same list only lengthened the menu. */}
               <MenuButton onClick={onSettings}>Settings</MenuButton>
               <MenuButton onClick={onAbout}>About</MenuButton>
             </nav>
           )}
         </div>
 
-        <div className="mt-4 flex w-[min(25rem,calc(100vw-2rem))] items-center justify-center gap-3 rounded-sm border border-expedition-brass/60 bg-[rgba(13,18,20,0.72)] px-4 py-3 shadow-[0_12px_28px_rgba(0,0,0,0.38)] backdrop-blur-sm">
-          {hasSavedJournalEntries
-            ? <OpenBookIcon className="h-6 w-6 shrink-0 text-expedition-gold" />
-            : <CompassRoseIcon className="h-6 w-6 shrink-0 text-expedition-gold" />}
-          <p className="min-w-0 text-[13.5px] tracking-[0.04em] text-expedition-parchment/90 sm:text-[15px]">
-            {hasSavedJournalEntries ? `Last entry: ${lastJournalLabel}` : 'Floreana / Charles Island - September 1835'}
-          </p>
-        </div>
+        {/* Only for a first landing. Once a save exists its details live in the
+            Load panel, and repeating them here was the duplication that made the
+            menu feel crowded — so returning players, who carry the longest menu,
+            lose this card entirely. */}
+        {saveStateKnown && !hasSavedExpedition && (
+          <div className="mt-4 flex w-[min(25rem,calc(100vw-2rem))] items-center justify-center gap-3 rounded-sm border border-expedition-brass/60 bg-[rgba(13,18,20,0.72)] px-4 py-3 shadow-[0_12px_28px_rgba(0,0,0,0.38)] backdrop-blur-sm">
+            <CompassRoseIcon className="h-6 w-6 shrink-0 text-expedition-gold" />
+            <p className="min-w-0 text-[13.5px] tracking-[0.04em] text-expedition-parchment/90 sm:text-[15px]">
+              Floreana / Charles Island - September 1835
+            </p>
+          </div>
+        )}
 
         <div className={`${blackout ? 'opacity-0' : 'opacity-100'} mt-auto flex w-[min(28rem,70vw)] items-center justify-center gap-2 pb-2 pt-8 text-expedition-brass/80 transition-opacity duration-[1100ms] ease-out will-change-[opacity]`}>
           <span className="h-px flex-1 bg-gradient-to-r from-transparent to-expedition-brass/80" />

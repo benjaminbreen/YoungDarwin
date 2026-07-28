@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
@@ -10,7 +10,10 @@ import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../wo
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { fogAtmosphereUniforms, driveCloudShadeUniforms } from '../../world/fogAtmosphere';
+import { vistaAtmosphereUniforms } from '../../world/vistas/vistaAtmosphere';
+import { centralPeakDev } from '../../world/vistas/centralPeakDevRuntime';
 import { solarLookTuning } from '../../world/solarLook';
+import { CentralPeakBackdrop } from './CentralPeakBackdrop';
 
 // Dependency-free ordered dither (interleaved gradient noise) appended after
 // colorspace conversion: breaks 8-bit banding on the big smooth sky gradients.
@@ -67,6 +70,17 @@ const C = {
   fogGolden: new THREE.Color('#cf9f73'),
   fogDramaRose: new THREE.Color('#ef8fa7'),
   fogDramaViolet: new THREE.Color('#8a83d0'),
+  // The sky dome's own horizon band, mirroring `horizonMilk` in the sky shader
+  // below. Distant vista layers are pulled toward this instead of stopping at
+  // the fog colour: the fog grade is luminance-clamped for local mist and lands
+  // darker than the sky directly above the horizon line, so a fully hazed
+  // backdrop otherwise reads as a flat cut-out plate. See vistaAtmosphere.js.
+  skyHorizonMilk: new THREE.Color(0.48, 0.70, 0.86),
+  // High sun WASHES the horizon toward white — the long scattering path
+  // desaturates it. This used to lerp toward the zenith blue (0.22, 0.62, 0.88)
+  // instead, so between 9 and 5 every distant layer resolved to a flat
+  // saturated cobalt that exists nowhere in a real landscape.
+  skyHorizonWash: new THREE.Color(0.82, 0.87, 0.92),
   fogSunWarm: new THREE.Color('#eee5d8'), // pale sun-facing haze without turning clear sky orange
   fogMist: new THREE.Color('#ccdadd'),    // garúa: pale, desaturated mist tone
   fogStorm: new THREE.Color('#93a0aa'),   // closed sky: haze loses its blue
@@ -76,9 +90,10 @@ const C = {
   fogUnderwaterDeep: new THREE.Color('#083456'),
 };
 
-// Distant island silhouette: a smooth volcanic profile drawn once to a canvas.
-// White fill so the per-frame haze color tints it; alpha-only shape.
-function islandSilhouetteTexture() {
+// Distant island silhouettes: smooth volcanic profiles drawn once to canvases.
+// White fill lets the per-frame haze color tint them. Keep the two profiles
+// distinct so simultaneous clear-air views do not read as duplicated cards.
+function islandSilhouetteTexture(profile = 'shield') {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 128;
@@ -93,9 +108,18 @@ function islandSilhouetteTexture() {
   for (let i = 0; i <= 512; i += 1) {
     const t = i / 512;
     const taper = Math.sin(Math.PI * t); // ends slide into the sea
-    const ridge = 0.9 * Math.exp(-(((t - 0.42) / 0.17) ** 2)) // shield volcano
-      + 0.45 * Math.exp(-(((t - 0.68) / 0.09) ** 2))          // secondary cone
-      + 0.06 * Math.sin(t * 34.0);                            // ridge texture
+    const ridge = profile === 'low-cones'
+      ? (
+        0.48 * Math.exp(-(((t - 0.31) / 0.13) ** 2))
+        + 0.72 * Math.exp(-(((t - 0.58) / 0.16) ** 2))
+        + 0.25 * Math.exp(-(((t - 0.78) / 0.08) ** 2))
+        + 0.035 * Math.sin(t * 27.0 + 0.8)
+      )
+      : (
+        0.9 * Math.exp(-(((t - 0.42) / 0.17) ** 2)) // broad shield volcano
+        + 0.45 * Math.exp(-(((t - 0.68) / 0.09) ** 2))
+        + 0.06 * Math.sin(t * 34.0)
+      );
     const h = Math.max(0, ridge) * taper;
     ctx.lineTo(i, 128 - (8 + h * 100));
   }
@@ -103,55 +127,32 @@ function islandSilhouetteTexture() {
   ctx.closePath();
   ctx.fill();
   ctx.filter = 'none';
-  // Dissolve the base into the sea haze: real horizon islands float on a
-  // band of fog, crisp at the ridge and gone at the waterline.
+  // Dissolve only the submerged foot of the card. A half-height dissolve made
+  // the first readable land pixels begin above the optical horizon once the
+  // old global haze wall was removed.
   ctx.globalCompositeOperation = 'destination-out';
-  const baseFade = ctx.createLinearGradient(0, 128, 0, 62);
-  baseFade.addColorStop(0, 'rgba(0,0,0,0.9)');
-  baseFade.addColorStop(0.5, 'rgba(0,0,0,0.45)');
+  const baseFade = ctx.createLinearGradient(0, 128, 0, 92);
+  baseFade.addColorStop(0, 'rgba(0,0,0,0.94)');
+  baseFade.addColorStop(0.58, 'rgba(0,0,0,0.34)');
   baseFade.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = baseFade;
-  ctx.fillRect(0, 0, 512, 128);
+  ctx.fillRect(0, 92, 512, 36);
   ctx.globalCompositeOperation = 'source-over';
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
-// Border haze: a world-fixed gradient cylinder around the playable area.
-// Dense at the horizon line, fading to nothing with height — it swallows the
-// terrain/water seams at the map edge and reads as thick distance air.
-function hazeGradientTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 4;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createLinearGradient(0, 0, 0, 128);
-  // Long, gentle falloff: the top half is effectively invisible so the
-  // cylinder rim can never read as an edge, even from close by.
-  gradient.addColorStop(0.0, 'rgba(255,255,255,0)');
-  gradient.addColorStop(0.4, 'rgba(255,255,255,0.015)');
-  gradient.addColorStop(0.7, 'rgba(255,255,255,0.16)');
-  gradient.addColorStop(0.9, 'rgba(255,255,255,0.38)');
-  gradient.addColorStop(1.0, 'rgba(255,255,255,0.5)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 4, 128);
-  const texture = new THREE.CanvasTexture(canvas);
-  return texture;
-}
-// The wall follows the camera (inside the sky rig), so it is always exactly
-// this far away: it can never loom overhead at the map border and never
-// clips at the far plane. The islands (150m out) sit behind it, permanently
-// wrapped in its haze.
-const HAZE_WALL_RADIUS = 130;
-const HAZE_WALL_HEIGHT = 26;
-
 // Bearing (radians from north), distance, width, height, base-below-horizon.
 const DISTANT_ISLANDS = [
-  { bearing: -0.62, width: 105, height: 11, mirror: false }, // big shield profile, NNW
-  { bearing: 0.74, width: 58, height: 6.5, mirror: true },   // low cone, NNE
+  { bearing: -0.62, width: 105, height: 11, profile: 'shield' },    // Isabela, NNW
+  { bearing: 0.74, width: 58, height: 6.5, profile: 'low-cones' },  // Santa Cruz, NNE
 ];
 const ISLAND_DISTANCE = 150;
+// The sky rig follows the camera, so this is an eye-relative angular
+// placement. Sink the translucent card far enough below eye level that its
+// texture-owned base haze meets the sea instead of ending above the horizon.
+const DISTANT_ISLAND_BASE_Y = -6.4;
 
 // Reusable scratch objects — no per-frame allocation in the render loop.
 const _sun = new THREE.Vector3();
@@ -161,6 +162,7 @@ const _color = new THREE.Color();
 const _weatherFogTarget = new THREE.Color();
 const _sunHaze = new THREE.Color();
 const _islandColor = new THREE.Color();
+const _vistaHorizon = new THREE.Color();
 const _white = new THREE.Color('#ffffff');
 const _sunColor = new THREE.Color();
 const _glowColor = new THREE.Color();
@@ -946,12 +948,12 @@ function TropicalBlueSkyDome({ nightRef, celestialRef }) {
         float y = dir.y;
         float horizon = smoothstep(-0.1, 0.06, y);
 
-        // The milky sea haze is a thin band hugging the horizon (~12 degrees,
-        // climbing in humid air); vivid blue owns the sky from there up,
+        // The milky sea haze is a narrow band hugging the horizon, climbing
+        // modestly in humid air; vivid blue owns the sky from there up,
         // deepening toward the zenith.
-        float milk = 1.0 - smoothstep(0.03, 0.2 + uHaze * 0.3, y);
+        float milk = 1.0 - smoothstep(0.015, 0.105 + uHaze * 0.16, y);
         float deep = smoothstep(0.08, 0.55, y);
-        vec3 horizonMilk = mix(vec3(0.74, 0.85, 0.93), vec3(0.34, 0.76, 0.98), uNoonBlue);
+        vec3 horizonMilk = mix(vec3(0.48, 0.70, 0.86), vec3(0.22, 0.62, 0.88), uNoonBlue);
         vec3 midBlue = mix(vec3(0.10, 0.42, 0.94), vec3(0.02, 0.52, 0.98), uNoonBlue);
         vec3 zenithBlue = mix(vec3(0.012, 0.24, 0.87), vec3(0.0, 0.36, 0.9), uNoonBlue);
         vec3 color = mix(midBlue, zenithBlue, deep);
@@ -987,9 +989,9 @@ function TropicalBlueSkyDome({ nightRef, celestialRef }) {
         color = mix(color, rose, uSolarDrama * roseShelf * 0.3);
         color = mix(color, vec3(0.48, 0.42, 0.86), uSolarDrama * upperViolet * 0.12);
 
-        // The milk band stays translucent (the drei Sky horizon reads
-        // through it); the blue above is opaque enough to actually cover.
-        float alpha = mix(0.42, 0.84, deep) * mix(1.0, 0.6, milk) * horizon;
+        // Keep enough blue-grey opacity at sea level to prevent the bright
+        // base Sky from resolving as a blown-out white stripe.
+        float alpha = mix(0.9, 0.88, deep) * mix(1.0, 0.96, milk) * horizon;
         alpha *= 1.0 + uNoonBlue * (0.08 + deep * 0.1);
         alpha *= (1.0 - uNight) * (1.0 - uOvercast * 0.96);
         gl_FragColor = vec4(color, alpha);
@@ -1732,6 +1734,15 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const solarSunFacingGradeEnabled = solarEffects?.sunFacingGrade !== false;
   const solarScreenGlareEnabled = solarEffects?.screenGlare !== false;
   const debugEnabled = useRef(lightingDebugEnabled());
+  // Dev-only scene handle. Attributing a suspect pixel to a mesh is otherwise
+  // guesswork — the vista layers, the carry strip and the terrain all resolve
+  // to similar colours exactly where their seams misbehave. With this, a
+  // console raycast reports the offending mesh's `userData.renderSource`.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production' || typeof window === 'undefined') return undefined;
+    window.__darwinScene = { scene, camera, gl, THREE };
+    return () => { delete window.__darwinScene; };
+  }, [scene, camera, gl]);
   const groupRef = useRef(null);
   const skyRef = useRef(null);
   const keyLightRef = useRef(null);
@@ -1752,9 +1763,10 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
   const lensFlareRefs = useRef([]);
   const lensRingRef = useRef(null);
   const islandMatRefs = useRef([]);
-  const hazeWallMatRef = useRef(null);
-  const islandTexture = useMemo(() => islandSilhouetteTexture(), []);
-  const hazeTexture = useMemo(() => hazeGradientTexture(), []);
+  const islandTextures = useMemo(() => ({
+    shield: islandSilhouetteTexture('shield'),
+    'low-cones': islandSilhouetteTexture('low-cones'),
+  }), []);
   const moonDiscTexture = useMemo(() => crateredMoonTexture(512), []);
   const moonGlowTexture = useMemo(() => radialTexture([
     [0.0, 'rgba(242, 247, 255, 0.58)'],
@@ -1864,12 +1876,11 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
     lensRingTexture.dispose();
     sunStreakTexture.dispose();
     sunStarburstTexture.dispose();
-    islandTexture.dispose();
-    hazeTexture.dispose();
+    Object.values(islandTextures).forEach(texture => texture.dispose());
     moonHaloTexture.dispose();
     sunVeilMaterial.dispose();
     moonVeilMaterial.dispose();
-  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunAureoleTexture, sunGlowTexture, sunWeatherHaloTexture, lensFlareTexture, lensRingTexture, sunStreakTexture, sunStarburstTexture, islandTexture, hazeTexture, moonHaloTexture, sunVeilMaterial, moonVeilMaterial]);
+  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunAureoleTexture, sunGlowTexture, sunWeatherHaloTexture, lensFlareTexture, lensRingTexture, sunStreakTexture, sunStarburstTexture, islandTextures, moonHaloTexture, sunVeilMaterial, moonVeilMaterial]);
 
   useLayoutEffect(() => {
     patchMoonPhaseMaterial(moonRef.current?.material);
@@ -2467,19 +2478,18 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
       driveCloudShadeUniforms({ delta, daylight, elevation: s.elevation, air });
     }
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
+    // Horizon colour for the distant-scenery layers. Anchored to the fog grade
+    // (so night, storm and garua carry through) and pulled toward the sky's own
+    // horizon band by however much daylight is actually feeding it.
+    _vistaHorizon.copy(C.skyHorizonMilk).lerp(C.skyHorizonWash, clearNoonBlue * 0.78);
+    _vistaHorizon.lerp(_color, 1 - daylight * (1 - overcast * 0.7));
+    _vistaHorizon.lerp(_color, 1 - THREE.MathUtils.clamp(centralPeakDev.vistaSkyBlend, 0, 1));
+    vistaAtmosphereUniforms.uVistaHorizonColor.value.copy(_vistaHorizon);
     // Distant islands sit barely darker than the haze that swallows them.
     _islandColor.copy(_color).multiplyScalar(0.95);
     islandMatRefs.current.forEach(mat => {
       if (mat) mat.color.copy(_islandColor);
     });
-    // Border haze tracks the fog; only daylight gets the pale tropical lift.
-    if (hazeWallMatRef.current) {
-      // The pale lift is a sunlit-air effect; a closed sky withholds it.
-      hazeWallMatRef.current.color.copy(_color).lerp(
-        _white,
-        daylight * (0.04 + 0.26 * (1 - overcast * 0.6)),
-      );
-    }
     const solarExposureLift = solarSunFacingGradeEnabled
       ? narrowSunFacing * daylight * (1 - overcast * 0.75) * (0.01 + golden * 0.008)
       : 0;
@@ -2569,24 +2579,13 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
         renderPath: null,
       }}>
         <Sky ref={skyRef} distance={SKY_DISTANCE} />
-        {/* Camera-following horizon haze ring: a constant band of thick
-            distance air that swallows map-edge seams and the island bases.
-            Renders late so it veils far water too. */}
-        <mesh position={[0, HAZE_WALL_HEIGHT / 2 - 5, 0]} renderOrder={5}>
-          <cylinderGeometry args={[HAZE_WALL_RADIUS, HAZE_WALL_RADIUS, HAZE_WALL_HEIGHT, 64, 1, true]} />
-          <meshBasicMaterial
-            ref={hazeWallMatRef}
-            map={hazeTexture}
-            transparent
-            side={THREE.BackSide}
-            depthWrite={false}
-            fog={false}
-            dithering
-          />
-        </mesh>
         <TropicalBlueSkyDome nightRef={nightRef} celestialRef={celestialRef} />
         <NightSkyDome nightRef={nightRef} midnightRef={midnightRef} celestialRef={celestialRef} />
         <RealisticCloudLayer nightRef={nightRef} />
+        {/* One island-scale landmark shared by every outdoor map. It inherits
+            this rig's camera position but keeps a chart-derived world bearing,
+            so local camera translation cannot create false parallax. */}
+        <CentralPeakBackdrop />
         {/* Physical disc and atmospheric aureoles depth-test against terrain;
             only the later lens artifacts remain screen-space optical effects. */}
         <sprite ref={sunWeatherHaloRef} renderOrder={-8.2} scale={[52, 52, 1]} visible={false} frustumCulled={false}>
@@ -2624,15 +2623,15 @@ export function SkyController({ stars = true, tuning = null, solarEffects = null
           return (
             <mesh
               key={index}
-              position={[x, island.height * 0.5 - 1.5, z]}
+              position={[x, DISTANT_ISLAND_BASE_Y + island.height * 0.5, z]}
               rotation={[0, Math.atan2(-x, -z), 0]}
-              scale={[island.mirror ? -island.width : island.width, island.height, 1]}
+              scale={[island.width, island.height, 1]}
               renderOrder={-6}
             >
               <planeGeometry args={[1, 1]} />
               <meshBasicMaterial
                 ref={mat => { islandMatRefs.current[index] = mat; }}
-                map={islandTexture}
+                map={islandTextures[island.profile]}
                 transparent
                 opacity={0.65}
                 depthWrite={false}

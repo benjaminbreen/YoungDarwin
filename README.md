@@ -24,6 +24,13 @@ npm run dev
 
 Open `http://localhost:3000/three`.
 
+## Sources
+
+The bibliography behind the game, an account of what is documented versus
+reconstructed versus invented, and a disclosure of how the generated text is
+produced all live at `/sources` (reachable in-game from the About menu). Content
+is authored in `three-game/sources/sourcesCatalog.js`.
+
 ## License
 
 Young Darwin's original code and project materials are available under the

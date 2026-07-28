@@ -3,135 +3,143 @@
   "regions": {
     "ALT_POST_OFFICE_BAY": {
       "file": "alt_post_office_bay.bin",
-      "bytes": 1607232
+      "bytes": 1193488
     },
     "ASILO_SPRING": {
       "file": "asilo_spring.bin",
-      "bytes": 1644304
+      "bytes": 1158828
     },
     "BLACK_BEACH": {
       "file": "black_beach.bin",
-      "bytes": 963924
+      "bytes": 776832
     },
     "BLACK_BEACH_SURF": {
       "file": "black_beach_surf.bin",
-      "bytes": 405616
+      "bytes": 426340
     },
     "COASTAL_SCRUBLAND": {
       "file": "coastal_scrubland.bin",
-      "bytes": 410544
+      "bytes": 377552
     },
     "CORMORANT_BAY": {
       "file": "cormorant_bay.bin",
-      "bytes": 1169820
+      "bytes": 999060
     },
     "C_HIGH": {
       "file": "c_high.bin",
-      "bytes": 1688176
+      "bytes": 1193400
     },
     "DEVILS_CROWN": {
       "file": "devils_crown.bin",
-      "bytes": 156
+      "bytes": 180
     },
     "EASTERN_CLIFFS": {
       "file": "eastern_cliffs.bin",
-      "bytes": 635588
+      "bytes": 490028
     },
     "EL_MIRADOR": {
       "file": "el_mirador.bin",
-      "bytes": 1023652
+      "bytes": 785492
     },
     "E_MID": {
       "file": "e_mid.bin",
-      "bytes": 1776028
+      "bytes": 1228004
     },
     "LAVA_FLATS": {
       "file": "lava_flats.bin",
-      "bytes": 1570856
+      "bytes": 1158816
     },
     "MANGROVES": {
       "file": "mangroves.bin",
-      "bytes": 1636700
+      "bytes": 1193432
     },
     "NORTHERN_HIGHLANDS": {
       "file": "northern_highlands.bin",
-      "bytes": 1519404
+      "bytes": 1158868
     },
     "NW_REEF": {
       "file": "nw_reef.bin",
-      "bytes": 627396
+      "bytes": 481432
     },
     "N_SHORE": {
       "file": "n_shore.bin",
-      "bytes": 359060
+      "bytes": 377528
     },
     "PENAL_COLONY": {
       "file": "penal_colony.bin",
-      "bytes": 1757456
+      "bytes": 1239580
     },
     "POST_OFFICE_BAY": {
       "file": "post_office_bay.bin",
-      "bytes": 1141772
+      "bytes": 950012
     },
     "POST_SCRUB_RISE": {
       "file": "post_scrub_rise.bin",
-      "bytes": 1570912
+      "bytes": 1158852
     },
     "PUNTA_CORMORANT": {
       "file": "punta_cormorant.bin",
-      "bytes": 566112
+      "bytes": 479744
     },
     "PUNTA_SUR": {
       "file": "punta_sur.bin",
-      "bytes": 1056632
+      "bytes": 802836
     },
     "SE_COAST": {
       "file": "se_coast.bin",
-      "bytes": 723508
+      "bytes": 588204
     },
     "SE_PROMONTORY": {
       "file": "se_promontory.bin",
-      "bytes": 643844
+      "bytes": 495844
+    },
+    "SE_SHALLOW_SURF": {
+      "file": "se_shallow_surf.bin",
+      "bytes": 188816
     },
     "SW_BEACH": {
       "file": "sw_beach.bin",
-      "bytes": 1012716
+      "bytes": 773996
     },
     "SW_CLIFFS": {
       "file": "sw_cliffs.bin",
-      "bytes": 584028
+      "bytes": 490000
+    },
+    "S_HUT": {
+      "file": "s_hut.bin",
+      "bytes": 848908
     },
     "S_INTERTIDAL": {
       "file": "s_intertidal.bin",
-      "bytes": 1001716
+      "bytes": 768196
     },
     "S_REEFS": {
       "file": "s_reefs.bin",
-      "bytes": 575916
+      "bytes": 481444
     },
     "S_VOLCANIC": {
       "file": "s_volcanic.bin",
-      "bytes": 1622356
+      "bytes": 1158820
     },
     "S_WETLANDS": {
       "file": "s_wetlands.bin",
-      "bytes": 1592804
+      "bytes": 1158824
     },
     "WATKINS": {
       "file": "watkins.bin",
-      "bytes": 1645452
+      "bytes": 1210588
     },
     "WATKINS_CREEK": {
       "file": "watkins_creek.bin",
-      "bytes": 1541340
+      "bytes": 1158836
     },
     "W_HIGH": {
       "file": "w_high.bin",
-      "bytes": 1688184
+      "bytes": 1193400
     },
     "W_LAVA": {
       "file": "w_lava.bin",
-      "bytes": 1012708
+      "bytes": 773988
     }
   }
 }

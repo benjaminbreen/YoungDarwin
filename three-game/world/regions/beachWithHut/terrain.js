@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { elevationNoise, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { MARINE_IGUANA_COLONY_BEACH_HUT_SEAM } from '../../routeSeams';
 
 // ---------------------------------------------------------------------------
 // Beach with Hut (S_HUT) — a small southwest Floreana beach.
@@ -10,6 +11,13 @@ import { elevationNoise, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } 
 //   grass and a lean-to.
 
 export const BEACH_WITH_HUT = 'S_HUT';
+
+const BEACH_HUT_SOUTH_ROUTE = [
+  [-4, 12, 2.7],
+  [-1, 19, 2.8],
+  [3, 27, 2.7],
+  [MARINE_IGUANA_COLONY_BEACH_HUT_SEAM.target.point[0], 35, 2.5],
+];
 
 export const BEACH_HUT_PATHS = [
   [
@@ -29,6 +37,7 @@ export const BEACH_HUT_PATHS = [
     [7, -14, 2.2],
     [2, -9, 2.0],
   ],
+  BEACH_HUT_SOUTH_ROUTE,
 ];
 
 export const BEACH_HUT_PADS = [
@@ -105,6 +114,23 @@ function segmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
   };
 }
 
+export function beachHutSouthRouteMask(x, z) {
+  let nearest = null;
+  for (let i = 0; i < BEACH_HUT_SOUTH_ROUTE.length - 1; i += 1) {
+    const [ax, az, aw] = BEACH_HUT_SOUTH_ROUTE[i];
+    const [bx, bz, bw] = BEACH_HUT_SOUTH_ROUTE[i + 1];
+    const info = segmentInfo(x, z, ax, az, aw, bx, bz, bw);
+    if (!nearest || info.distance < nearest.distance) nearest = info;
+  }
+  if (!nearest) return 0;
+  const southGate = smoothstep01(z, 9.5, 16);
+  return southGate * (1 - smoothstep01(
+    nearest.distance,
+    nearest.width * 0.52,
+    nearest.width * 1.75,
+  ));
+}
+
 export function beachHutPathInfo(x, z) {
   let nearest = null;
   for (const polyline of BEACH_HUT_PATHS) {
@@ -177,6 +203,19 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
   const deepSouth = smoothstep01(z, 28, 35);
   y -= Math.max(deepWest, deepSouth) * seaward * 2.4;
 
+  // The canonical south route joins the marine-iguana beach across a narrow
+  // shell-sand spit. Keep the surrounding cove submerged, but lift this broad
+  // route corridor above the wading limit so travel, collision, and the
+  // neighboring terrain preview all describe the same geography.
+  const southRoute = beachHutSouthRouteMask(x, z);
+  if (southRoute > 0) {
+    const southT = smoothstep01(z, 12, 35);
+    const causewayY = THREE.MathUtils.lerp(0.14, -0.02, southT)
+      + surfaceNoise(x * 0.12 + 17, z * 0.12 - 9) * 0.035
+      - path.tread * 0.025;
+    y = Math.max(y, THREE.MathUtils.lerp(y, causewayY, southRoute));
+  }
+
   const dry = smoothstep01(y, -0.4, 0.1);
   const detailSuppression = clamp01(path.path * 0.42 + pad * 0.72 + rock * 0.88);
   y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.18 : 0.5) * (1 - detailSuppression);
@@ -237,5 +276,18 @@ export const beachWithHutRegion = {
     biomeAt: beachWithHutBiomeAt,
     color: beachWithHutColor,
     isWalkable: isBeachWithHutWalkable,
+    entrySpawns: {
+      south: [
+        MARINE_IGUANA_COLONY_BEACH_HUT_SEAM.target.point[0],
+        0,
+        29.5,
+      ],
+    },
+    entryFacings: {
+      south: [0, 0, -1],
+    },
+    entryCameraFacings: {
+      south: [-0.2, 0, -0.98],
+    },
   },
 };
