@@ -207,8 +207,10 @@ const LAUNCH_MENU_STATES = new Set(['menu', 'character', 'settings', 'controls',
 const DEFAULT_PERF_SETTINGS = {
   quality: 'performance',
   waterQuality: 'polished',
-  dprMode: 'default',
-  msaaSamples: 0,
+  // Mirrors QUALITY_PRESETS.performance (the default tier) so any fallback path
+  // that reads these base values lands on the same image as the shipped preset.
+  dprMode: '1.5x',
+  msaaSamples: 2,
   postprocessing: true,
   contextAntialias: true,
   stats: false,
@@ -284,13 +286,13 @@ const QUALITY_PRESETS = {
     // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
     // every full-screen pass (post chain, water, terrain, sky) pays for all of
     // them. On integrated/laptop GPUs that's the dominant cost, so the
-    // performance tier uses a modest 1.25x cap: SMAA cleans polygon edges, but
-    // Darwin's face/buttons and thin vegetation need a little real sample
-    // coverage to avoid crunchy subpixel breakup.
-    dprMode: '1.25x',
-    // SMAA handles the direct polygon edges without paying for a multisampled
-    // full-resolution composer target on integrated GPUs.
-    msaaSamples: 0,
+    // performance tier caps at 1.5x: Darwin's face/buttons and thin vegetation
+    // need real sample coverage to avoid crunchy subpixel breakup, and SMAA
+    // alone did not carry it.
+    dprMode: '1.5x',
+    // 2x MSAA on top of SMAA — the multisampled composer target is what gives
+    // cutout foliage alpha-to-coverage real samples to work with.
+    msaaSamples: 2,
     postprocessing: true,
     contextAntialias: true,
     shadowQuality: 'ultra',

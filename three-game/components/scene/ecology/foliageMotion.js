@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { weatherEnv } from '../../../world/weatherEnvRuntime';
 
 // Vertex-shader foliage motion: steady wind sway plus dynamic bend away from
 // the player, with spring-back. All foliage materials share ONE uniforms
@@ -16,13 +17,21 @@ export const foliageUniforms = {
   // Smoothed player position; the lag is what makes plants ease back upright
   // after Darwin passes instead of snapping.
   uFoliagePlayer: { value: new THREE.Vector3(0, -999, 0) },
-  uWindDir: { value: new THREE.Vector2(0.82, 0.57) },
+  // Live wind, shared with rain, clouds, grass, and Darwin's hair. This used
+  // to be a hardcoded constant pointing roughly opposite the prevailing
+  // trades, so every shrub on the island swayed against the weather.
+  uWindDir: { value: new THREE.Vector2(weatherEnv.windX, weatherEnv.windZ) },
+  // Global "how hard is it blowing" multiplier, including the shared gust
+  // surge. Per-material `uWindAmp` stays the authored per-species amplitude.
+  uWindGain: { value: 1 },
 };
 
 const _target = new THREE.Vector3();
 
 export function updateFoliageUniforms(elapsedTime, playerPosition, delta) {
   foliageUniforms.uFoliageTime.value = elapsedTime;
+  foliageUniforms.uWindDir.value.set(weatherEnv.windX, weatherEnv.windZ);
+  foliageUniforms.uWindGain.value = weatherEnv.foliageWindGain;
   if (playerPosition) {
     _target.set(playerPosition.x || 0, playerPosition.y || 0, playerPosition.z || 0);
     // Critically-damped-ish ease: fast enough to track walking, slow enough
@@ -51,6 +60,7 @@ export function applyFoliageMotion(material, geometry, {
     shader.uniforms.uFoliageTime = foliageUniforms.uFoliageTime;
     shader.uniforms.uFoliagePlayer = foliageUniforms.uFoliagePlayer;
     shader.uniforms.uWindDir = foliageUniforms.uWindDir;
+    shader.uniforms.uWindGain = foliageUniforms.uWindGain;
     shader.uniforms.uWindAmp = { value: 0.14 * wind };
     shader.uniforms.uBendAmp = { value: 1.15 * bend };
     shader.uniforms.uBendRadius = { value: bendRadius };
@@ -66,6 +76,7 @@ export function applyFoliageMotion(material, geometry, {
         uniform float uFoliageTime;
         uniform vec3 uFoliagePlayer;
         uniform vec2 uWindDir;
+        uniform float uWindGain;
         uniform float uWindAmp;
         uniform float uBendAmp;
         uniform float uBendRadius;
@@ -101,9 +112,16 @@ export function applyFoliageMotion(material, geometry, {
         float fmSway = sin(uFoliageTime * 1.6 + fmPhase) * 0.6
           + sin(uFoliageTime * 2.7 + fmPhase * 1.7) * 0.28
           + sin(uFoliageTime * 4.3 + fmWorld.x * 0.91) * 0.14;
-        vec2 fmCrossWind = vec2(-uWindDir.y, uWindDir.x);
-        fmWorld.xz += uWindDir * fmSway * uWindAmp * (0.7 + fmGust) * fmW;
-        fmWorld.xz += fmCrossWind * sin(uFoliageTime * 2.15 + fmPhase * 1.3) * uWindAmp * 0.32 * fmTipW;
+        vec2 fmWind = normalize(uWindDir + vec2(0.0001));
+        vec2 fmCrossWind = vec2(-fmWind.y, fmWind.x);
+        // Steady downwind lean: real wind holds foliage bent over rather than
+        // only oscillating about upright. Referenced off the calm baseline
+        // (gain 1) so a still day looks exactly as authored, and it grows with
+        // the shared gust so surges push the canopy over as one.
+        float fmLean = max(0.0, uWindGain - 1.0);
+        fmWorld.xz += fmWind * fmLean * uWindAmp * 1.1 * (0.65 + fmGust * 0.35) * fmW;
+        fmWorld.xz += fmWind * fmSway * uWindAmp * (0.7 + fmGust) * uWindGain * fmW;
+        fmWorld.xz += fmCrossWind * sin(uFoliageTime * 2.15 + fmPhase * 1.3) * uWindAmp * 0.32 * uWindGain * fmTipW;
         // --- Player bend: hinge the whole plant away from its root ----------
         // Every vertex shares this direction and distance. Height weighting
         // below supplies the bend without pulling opposite canopy edges apart.

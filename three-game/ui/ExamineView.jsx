@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
+import { useDismissableOverlay } from './useDismissableOverlay';
 import styles from './ExamineView.module.css';
 
 // A live specimen stage with one coherent notebook. The camera continues to
@@ -268,17 +269,22 @@ export function ExamineView() {
     setCollecting(false);
   }, [collectFromExamine, collectReady, collecting]);
 
+  // Escape closes the collection decision first and the examination second, so
+  // the shared overlay hook is handed whichever dismissal is currently on top.
+  const dismiss = useCallback(() => {
+    if (collectionOpen) setCollectionOpen(false);
+    else closeExamine();
+  }, [closeExamine, collectionOpen]);
+  // Focus starts on the notebook rather than being yanked to the close button:
+  // the inquiry field is the point of the screen, and stealing focus from it
+  // would fight the player mid-sentence.
+  const overlayRef = useDismissableOverlay(open, dismiss, { autoFocus: false });
+
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA';
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (collectionOpen) setCollectionOpen(false);
-        else closeExamine();
-        return;
-      }
       if (!typing && event.code === 'KeyC' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
         event.preventDefault();
         setCollectionOpen(true);
@@ -286,7 +292,7 @@ export function ExamineView() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, closeExamine, collectReady, collectionOpen]);
+  }, [open, collectReady]);
 
   const zone = useMemo(() => (open ? getZone(currentZoneId) : null), [open, currentZoneId]);
   const procedures = useMemo(() => PROCEDURES[session?.category] || PROCEDURES.Item, [session?.category]);
@@ -315,8 +321,10 @@ export function ExamineView() {
 
   return (
     <div
+      ref={overlayRef}
       data-testid="examine-view"
-      className={`${styles.overlay} font-expedition`}
+      tabIndex={-1}
+      className={`${styles.overlay} font-expedition focus:outline-none`}
     >
       <div className={styles.grade} />
       <div className={styles.vignette} />

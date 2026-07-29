@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { weatherEnv, dampTowards } from '../../../world/weatherEnvRuntime';
 import { normalizeWeatherState, weatherProfile } from '../../../world/weatherStates';
@@ -20,6 +21,7 @@ const FRONT_LAMBDA = 0.18;
 export function WeatherDirector() {
   const lastTickMinutes = useRef(null);
   const windAngle = useRef(Math.atan2(weatherEnv.windZ, weatherEnv.windX));
+  const gustPhase = useRef(0);
 
   // Dev console hook: window.__darwinWeather('rain') pins a state on the
   // current zone for a few game hours so each look can be eyeballed.
@@ -88,6 +90,21 @@ export function WeatherDirector() {
     weatherEnv.mistDriftSpeed = 0.08 + surfaceWind * 0.16 + mist * 0.04;
     weatherEnv.rainShearSpeed = 0.35 + surfaceWind * 0.5 + rain * 0.75;
     weatherEnv.foliageWindSpeed = 0.62 + surfaceWind * 0.42 + rain * 0.16;
+
+    // Shared gust envelope. Two incommensurate real-time waves (~13s and ~33s)
+    // give irregular surges that never repeat on a countable beat, and the
+    // depth scales with the surface wind: calm air breathes, a trade wind
+    // punches. Everything that moves in the wind multiplies by this, so a gust
+    // is one island-wide event rather than each system's private sine.
+    gustPhase.current += delta;
+    const gustWave = Math.sin(gustPhase.current * 0.47) * 0.62
+      + Math.sin(gustPhase.current * 0.19 + 1.7) * 0.38;
+    const gustDepth = 0.18 + 0.82 * THREE.MathUtils.smoothstep(surfaceWind, 0.5, 1.5);
+    weatherEnv.windGust = 0.5 + (gustWave * 0.5) * gustDepth;
+    // Calm sunny air sits near the authored baseline; a storm roughly doubles
+    // it, and the gust term supplies the surge on top.
+    weatherEnv.foliageWindGain = (0.72 + surfaceWind * 0.52 + rain * 0.18)
+      * (0.72 + weatherEnv.windGust * 0.56);
     const wetFrontTarget = Math.max(
       target.rain * 0.95,
       target.mist * 0.45,

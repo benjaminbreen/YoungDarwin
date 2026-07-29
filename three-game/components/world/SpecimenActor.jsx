@@ -602,6 +602,18 @@ export function SpecimenActor({ specimen }) {
   // cadence with accumulated world time.
   useFaunaFrameTask(`specimen:${currentZoneId}:${actorId}`, {
     getPosition: () => group.current?.position || behaviorBaseRef.current || position,
+    // How much this animal is worth a glance. Motion and alarm outrank mere
+    // proximity, which is what keeps Darwin looking at the finch that just
+    // took off rather than the tortoise that has not moved in a minute.
+    getGazeInterest: () => {
+      if (isCollectedActor || isCarried || isUnderExamination) return 0;
+      const debug = faunaBehavior.debugRef?.current || {};
+      if (faunaBehavior.airborneRef?.current === true) return 3;
+      if ((debug.panic || 0) > 0.18) return 3.5;
+      if (debug.moving === true) return 2.2;
+      if (downedInfo) return 1.6;
+      return 1;
+    },
     shouldRunEveryFrame: () => {
       const state = useThreeGameStore.getState();
       return Boolean(downedInfo || snareTrap || state.carriedObjectId === actorId);

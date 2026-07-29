@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { setTypingMode } from '../input/typingMode';
 import { getReadableBook } from '../books/bookCatalog';
 import { useThreeGameStore } from '../store';
+import { useDismissableOverlay } from './useDismissableOverlay';
 
 function PdfPage({ pdf, pageNumber, zoom, singlePage }) {
   const canvasRef = useRef(null);
@@ -125,11 +126,15 @@ export function BookReaderView() {
     return () => window.removeEventListener('resize', update);
   }, []);
 
+  // Page turning and zoom stay local; dismissal and focus containment are the
+  // shared overlay contract. autoFocus is off so opening a book does not pull
+  // focus onto the zoom buttons.
+  const readerRef = useDismissableOverlay(Boolean(book), closeReadableBook, { autoFocus: false });
+
   useEffect(() => {
     if (!book) return undefined;
     const onKeyDown = event => {
       if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'INPUT') return;
-      if (event.key === 'Escape') closeReadableBook();
       if (event.key === 'ArrowLeft') setPage(value => Math.max(1, value - (singlePage ? 1 : 2)));
       if (event.key === 'ArrowRight') setPage(value => Math.min(pdf?.numPages || value, value + (singlePage ? 1 : 2)));
       if (event.key === '+' || event.key === '=') setZoom(value => Math.min(1.75, value + 0.15));
@@ -158,7 +163,9 @@ export function BookReaderView() {
 
   return (
     <section
-      className={`pointer-events-auto absolute inset-0 z-[80] flex flex-col overflow-hidden bg-[#16130f] font-expedition text-[#eadcb8] transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0'}`}
+      ref={readerRef}
+      tabIndex={-1}
+      className={`pointer-events-auto absolute inset-0 z-[80] flex flex-col overflow-hidden bg-[#16130f] font-expedition text-[#eadcb8] transition-opacity duration-300 focus:outline-none ${visible ? 'opacity-100' : 'opacity-0'}`}
       aria-label={`Reading ${book.title}`}
     >
       <header className="flex min-h-14 items-center justify-between gap-3 border-b border-[#b89353]/45 bg-[#201b14] px-3 py-2 sm:px-5">

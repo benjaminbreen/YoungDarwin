@@ -106,7 +106,9 @@ next-env.d.ts
 /*[Ss]creenshot*.png
 /*[Ss]creenshot*.jpg
 /*[Ss]creenshot*.jpeg
-/mockups/
+/mockups/*
+!/mockups/library-reader-first.html
+!/mockups/library-scan-first.html
 /sketchbook drawings/
 __pycache__/
 *.pyc

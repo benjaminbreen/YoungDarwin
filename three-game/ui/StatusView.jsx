@@ -6,6 +6,8 @@ import { getPlayableMode } from '../playable/playableModes';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
 import { GoldDivider } from './expedition/ExpeditionPanel';
+import { useDismissableOverlay } from './useDismissableOverlay';
+import { VITALS, vitalsGradient } from './theme';
 import {
   ButterflyIcon,
   CompassRoseIcon,
@@ -307,17 +309,9 @@ export function StatusView() {
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKeyDown = event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, close]);
+  // Read-only status columns: nothing here wants focus on open, but Tab must
+  // still stay inside rather than reaching the HUD behind the scrim.
+  const overlayRef = useDismissableOverlay(open, close, { autoFocus: false });
 
   const totals = useMemo(() => {
     const species = baseSpecimens.filter(s => s.ontology === 'Animal' || s.ontology === 'Plant');
@@ -361,7 +355,9 @@ export function StatusView() {
 
   return (
     <div
-      className={`pointer-events-auto absolute inset-0 z-30 select-none font-expedition text-expedition-parchment transition-opacity duration-700 ${visible ? 'opacity-100' : 'opacity-0'}`}
+      ref={overlayRef}
+      tabIndex={-1}
+      className={`pointer-events-auto absolute inset-0 z-30 select-none font-expedition text-expedition-parchment transition-opacity duration-700 focus:outline-none ${visible ? 'opacity-100' : 'opacity-0'}`}
     >
       {/* Cinematic grade + edge vignette so the columns read over the live scene */}
       <div className="pointer-events-none absolute inset-0 bg-[rgba(10,9,6,0.26)]" />
@@ -400,18 +396,18 @@ export function StatusView() {
             <div>
               <SectionHeading>Condition</SectionHeading>
               <div className="mt-5 grid gap-5">
-                <ConditionRow icon={HeartIcon} label="Vitality" value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-                <ConditionRow icon={FatigueIcon} label="Energy" value={animalEnergy} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-                <ConditionRow icon={CuriosityIcon} label={playableMode.id === 'tortoise' ? 'Composure' : 'Alertness'} value={animalAwareness} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+                <ConditionRow icon={HeartIcon} label="Vitality" value={health} fill={vitalsGradient('health')} />
+                <ConditionRow icon={FatigueIcon} label="Energy" value={animalEnergy} fill={vitalsGradient('fatigue')} />
+                <ConditionRow icon={CuriosityIcon} label={playableMode.id === 'tortoise' ? 'Composure' : 'Alertness'} value={animalAwareness} fill={vitalsGradient('curiosity')} />
               </div>
             </div>
 
             <div>
               <SectionHeading>Activity</SectionHeading>
               <div className="mt-5 grid gap-5">
-                <JournalRow icon={ButterflyIcon} label="Feedings" count={eatCount} total={12} color="#8fc491" />
-                <JournalRow icon={FatigueIcon} label="Rests Taken" count={restCount} total={4} color="#e0aa4e" />
-                <JournalRow icon={NoteIcon} label="Fresh Traces" count={traceCount} total={8} color="#84c4d4" />
+                <JournalRow icon={ButterflyIcon} label="Feedings" count={eatCount} total={12} color={VITALS.health.bright} />
+                <JournalRow icon={FatigueIcon} label="Rests Taken" count={restCount} total={4} color={VITALS.fatigue.bright} />
+                <JournalRow icon={NoteIcon} label="Fresh Traces" count={traceCount} total={8} color={VITALS.curiosity.bright} />
               </div>
             </div>
 
@@ -432,18 +428,18 @@ export function StatusView() {
             <div>
               <SectionHeading>Condition</SectionHeading>
               <div className="mt-5 grid gap-5">
-                <ConditionRow icon={HeartIcon} label="Health" value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-                <ConditionRow icon={FatigueIcon} label="Fatigue" value={fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-                <ConditionRow icon={CuriosityIcon} label="Curiosity" value={curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+                <ConditionRow icon={HeartIcon} label="Health" value={health} fill={vitalsGradient('health')} />
+                <ConditionRow icon={FatigueIcon} label="Fatigue" value={fatigue} fill={vitalsGradient('fatigue')} />
+                <ConditionRow icon={CuriosityIcon} label="Curiosity" value={curiosity} fill={vitalsGradient('curiosity')} />
               </div>
             </div>
 
             <div>
               <SectionHeading>Journal Progress</SectionHeading>
               <div className="mt-5 grid gap-5">
-                <JournalRow icon={ButterflyIcon} label="Species Observed" count={speciesObserved} total={totals.speciesTotal} color="#8fc491" />
-                <JournalRow icon={VialIcon} label="Geological Samples" count={geologicalSamples} total={totals.mineralTotal} color="#84c4d4" />
-                <JournalRow icon={NoteIcon} label="Notes Written" count={journal.length} total={NOTES_GOAL} color="#e0aa4e" />
+                <JournalRow icon={ButterflyIcon} label="Species Observed" count={speciesObserved} total={totals.speciesTotal} color={VITALS.health.bright} />
+                <JournalRow icon={VialIcon} label="Geological Samples" count={geologicalSamples} total={totals.mineralTotal} color={VITALS.curiosity.bright} />
+                <JournalRow icon={NoteIcon} label="Notes Written" count={journal.length} total={NOTES_GOAL} color={VITALS.fatigue.bright} />
               </div>
             </div>
 

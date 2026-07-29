@@ -5613,6 +5613,55 @@ test('star sphere advances on a sidereal rather than solar clock', () => {
   assert.ok(nextSolarMidnight > 0.015 && nextSolarMidnight < 0.02);
 });
 
+// --- UI palette mirrors --------------------------------------------------
+// PALETTE in three-game/ui/theme.js is the source of truth. Tailwind class
+// names and CSS-module custom properties are hand-maintained copies of it
+// because neither mechanism can read a JS module. These tests are what keep
+// the copies honest: change a colour in theme.js and the mirror you forgot is
+// named here rather than discovered in a screenshot weeks later.
+const { PALETTE, CSS_VARIABLES, VITALS, vitalsGradient, alpha } = loadModule('three-game/ui/theme.js');
+
+function tailwindColorKey(name) {
+  return `expedition-${name.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`;
+}
+
+test('tailwind expedition colours mirror the UI palette', () => {
+  const config = fs.readFileSync(path.resolve('tailwind.config.ts'), 'utf8');
+  for (const [name, hex] of Object.entries(PALETTE)) {
+    const key = tailwindColorKey(name);
+    assert.ok(
+      config.includes(`'${key}': '${hex}'`),
+      `tailwind.config.ts is missing or stale for '${key}': expected '${hex}'`,
+    );
+  }
+});
+
+test('globals.css expedition variables mirror the UI palette', () => {
+  const css = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
+  for (const [variable, triplet] of Object.entries(CSS_VARIABLES)) {
+    assert.ok(
+      css.includes(`${variable}: ${triplet};`),
+      `app/globals.css is missing or stale for ${variable}: expected ${triplet}`,
+    );
+  }
+});
+
+test('vitals gauges resolve to the exact gradient strings the HUD renders', () => {
+  assert.equal(vitalsGradient('health'), 'linear-gradient(90deg,#5f9e6a,#8fc491)');
+  assert.equal(vitalsGradient('fatigue'), 'linear-gradient(90deg,#b3812f,#e0aa4e)');
+  assert.equal(vitalsGradient('curiosity'), 'linear-gradient(90deg,#4f93a8,#84c4d4)');
+  assert.throws(() => vitalsGradient('stamina'));
+  // The curiosity gauge and the chart accent are the same blue; keeping both
+  // names is deliberate, but they must not drift apart silently.
+  assert.equal(VITALS.curiosity.deep, PALETTE.chartBright);
+});
+
+test('alpha() reproduces the rgba spellings already used in gradients and shadows', () => {
+  assert.equal(alpha('goldbright', 0.12), 'rgba(227,197,133,0.12)');
+  assert.equal(alpha('gold', 0.65), 'rgba(201,163,95,0.65)');
+  assert.equal(alpha('#e8dcc0', 0.85), 'rgba(232,220,192,0.85)');
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {

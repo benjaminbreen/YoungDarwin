@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { normalizeRoomCode } from '../../../game-core/multiplayer/protocol';
 import { createMultiplayerRoom, joinMultiplayerRoom, multiplayerServiceUrl } from '../../multiplayer/roomApi';
+import { useDismissableOverlay } from '../useDismissableOverlay';
 
 const ERROR_COPY = {
   'multiplayer-not-configured': 'Multiplayer has not been configured for this deployment yet.',
@@ -39,6 +40,10 @@ export function MultiplayerLobby({ onCancel, onAdmitted }) {
   const [error, setError] = useState(null);
   const configured = Boolean(multiplayerServiceUrl());
   const submitLabel = mode === 'create' ? 'Create room' : 'Join room';
+  // A panel inside the launch menu rather than a modal over the world: Escape
+  // backs out the way the Back button does, but focus is deliberately NOT
+  // trapped — the menu around it is still the page.
+  const lobbyRef = useDismissableOverlay(true, onCancel, { trapFocus: false, autoFocus: false });
   const explanation = useMemo(() => (
     mode === 'create'
       ? 'Create an expedition, then copy its code from the in-game room panel.'
@@ -63,7 +68,7 @@ export function MultiplayerLobby({ onCancel, onAdmitted }) {
   };
 
   return (
-    <form onSubmit={submit} className="relative px-3 py-2 text-left">
+    <form ref={lobbyRef} onSubmit={submit} className="relative px-3 py-2 text-left">
       <h2 className="text-center text-[24px] tracking-[0.08em] text-expedition-goldbright">Multiplayer Expedition</h2>
       <p className="mx-auto mt-2 max-w-md text-center text-[13px] leading-relaxed text-expedition-parchment/75">{explanation}</p>
       <div className="mt-3 grid grid-cols-2 gap-1 rounded-sm border border-expedition-brass/45 bg-black/20 p-1">

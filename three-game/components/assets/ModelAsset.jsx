@@ -20,6 +20,8 @@ import {
 import { createFootContactRig } from '../player/footContactRig';
 import { getFootContactProfile } from '../player/gaitProfiles';
 import { createLazyAnimationActions } from './lazyAnimationActions';
+import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
+import { shotgunAimState } from '../../shooting/aimState';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin',
@@ -44,6 +46,183 @@ const ALWAYS_ANIMATED_CHARACTER_ASSETS = new Set([
 function importedAssetCastsShadow(assetId, asset) {
   if (asset.castShadow !== undefined) return Boolean(asset.castShadow);
   return DEFAULT_IMPORTED_SHADOW_CASTERS.has(asset.playerProfile || assetId);
+}
+
+// Resolve a bone from its authored rig name, tolerating the reserved
+// characters GLTFLoader strips (':' most importantly) and case differences.
+function findGazeBone(scene, authoredName) {
+  const exact = scene.getObjectByName(authoredName);
+  if (exact) return exact;
+  const wanted = authoredName.replace(/[[\].:/\s]/g, '').toLowerCase();
+  let found = null;
+  scene.traverse(object => {
+    if (found) return;
+    const name = (object.name || '').replace(/[[\].:/\s]/g, '').toLowerCase();
+    if (name === wanted) found = object;
+  });
+  return found;
+}
+
+// Rotate a bone about a WORLD axis, given its parent's world orientation.
+// Bone-local axes on a Mixamo rig do not line up with the model's up/right, so
+// setting a local Euler directly makes the head tilt rather than turn. The
+// conjugation below expresses a world-space delta in the bone's parent space:
+//   localNew = parentWorld⁻¹ · deltaWorld · parentWorld · localOld
+function applyWorldSpaceBoneDelta(bone, deltaWorld, parentScratch, localScratch) {
+  if (!bone) return;
+  if (bone.parent) {
+    bone.parent.getWorldQuaternion(parentScratch);
+    localScratch.copy(parentScratch).invert().multiply(deltaWorld).multiply(parentScratch);
+  } else {
+    localScratch.copy(deltaWorld);
+  }
+  bone.quaternion.premultiply(localScratch);
+}
+
+// Head/neck glance toward the nearest interesting animal. Layered on top of
+// whatever clip the mixer just evaluated, so it composes with locomotion
+// instead of replacing it. Returns nothing; mutates `state` and the bones.
+function applyGazeMotion({ targets, state, enabled, delta, group, motionState, scratch }) {
+  const { head, neck, config } = targets;
+  const dt = THREE.MathUtils.clamp(delta, 0, 0.05);
+
+  const suppressed = !enabled
+    || (config.suppressWhileAiming !== false && shotgunAimState.active)
+    || (config.suppressWhileRunning !== false && Boolean(motionState?.running))
+    || (config.suppressWhileAirborne !== false && Boolean(motionState?.airborne));
+
+  const maxYaw = config.maxYaw ?? 0.61;
+  const maxPitch = config.maxPitch ?? 0.3;
+  const coneHalfAngle = config.coneHalfAngle ?? 1.15;
+  const coneFalloff = Math.max(0.0001, config.coneFalloff ?? 0.35);
+
+  // --- Resolve the desired angles for the current candidate ----------------
+  let desiredYaw = 0;
+  let desiredPitch = 0;
+  let coneWeight = 0;
+  let candidateId = null;
+  // Captured unconditionally: the spring keeps unwinding for a moment after a
+  // target is dropped, and those frames still need a current body orientation.
+  if (group) group.getWorldQuaternion(scratch.worldQuaternion);
+  const target = suppressed ? null : getGazeTarget();
+  if (target && group) {
+    group.getWorldPosition(scratch.worldPosition);
+    scratch.forward.set(0, 0, 1).applyQuaternion(scratch.worldQuaternion);
+    scratch.forward.y = 0;
+    scratch.right.set(1, 0, 0).applyQuaternion(scratch.worldQuaternion);
+    scratch.right.y = 0;
+    if (scratch.forward.lengthSq() > 0.0001 && scratch.right.lengthSq() > 0.0001) {
+      scratch.forward.normalize();
+      scratch.right.normalize();
+      const dx = target.x - scratch.worldPosition.x;
+      const dz = target.z - scratch.worldPosition.z;
+      const horizontal = Math.hypot(dx, dz);
+      // Too close and the angle is dominated by noise; he would jitter.
+      if (horizontal > 0.6) {
+        scratch.toTarget.set(dx / horizontal, 0, dz / horizontal);
+        const yawAngle = Math.atan2(
+          scratch.toTarget.dot(scratch.right),
+          scratch.toTarget.dot(scratch.forward),
+        );
+        const absYaw = Math.abs(yawAngle);
+        if (absYaw <= coneHalfAngle) {
+          // Ease off near the cone edge so a target leaving his field of view
+          // fades out instead of snapping to centre.
+          coneWeight = 1 - THREE.MathUtils.smoothstep(
+            absYaw,
+            coneHalfAngle - coneFalloff,
+            coneHalfAngle,
+          );
+          const eyeHeight = config.eyeHeight ?? 1.6;
+          const dy = target.y - (scratch.worldPosition.y + eyeHeight);
+          // Positive rotation about the right axis pitches the face down, so
+          // a target above him needs a negative angle.
+          desiredPitch = THREE.MathUtils.clamp(-Math.atan2(dy, horizontal), -maxPitch, maxPitch);
+          desiredYaw = THREE.MathUtils.clamp(yawAngle, -maxYaw, maxYaw);
+          candidateId = target.id;
+        }
+      }
+    }
+  }
+
+  // --- Attention state machine --------------------------------------------
+  // idle -> acquiring (after a beat) -> holding (bounded) -> releasing -> idle.
+  // The bounded hold is what stops him staring; the acquire delay is what stops
+  // him snapping onto everything that wanders past.
+  const hasCandidate = candidateId !== null && coneWeight > 0.001;
+  state.timer += dt;
+  if (!hasCandidate) {
+    if (state.phase === 'acquiring' || state.phase === 'holding') {
+      state.phase = 'releasing';
+      state.timer = 0;
+    }
+  } else if (state.phase === 'idle') {
+    state.phase = 'acquiring';
+    state.targetId = candidateId;
+    state.timer = 0;
+  } else if (candidateId !== state.targetId) {
+    // Never snap between targets — always pass back through neutral.
+    state.phase = 'releasing';
+    state.timer = 0;
+  } else if (state.phase === 'acquiring' && state.timer >= (config.acquireDelay ?? 0.32)) {
+    state.phase = 'holding';
+    state.timer = 0;
+  } else if (state.phase === 'holding' && state.timer >= (config.holdDuration ?? 2.6)) {
+    state.phase = 'releasing';
+    state.timer = 0;
+  }
+  if (state.phase === 'releasing' && state.timer >= (config.releaseDuration ?? 1.4)) {
+    state.phase = 'idle';
+    state.targetId = null;
+    state.timer = 0;
+  }
+
+  const engaged = state.phase === 'holding';
+  const targetWeight = engaged ? coneWeight : 0;
+  state.weight = THREE.MathUtils.damp(state.weight, targetWeight, engaged ? 3.2 : 2.4, dt);
+
+  // Angular deadzone: small offsets are not worth moving for, and tracking
+  // them turns target jitter into head jitter.
+  const deadzone = config.deadzone ?? 0.06;
+  const shrink = value => {
+    const magnitude = Math.abs(value);
+    if (magnitude <= deadzone) return 0;
+    return Math.sign(value) * (magnitude - deadzone);
+  };
+
+  const goalYaw = shrink(desiredYaw) * state.weight;
+  const goalPitch = shrink(desiredPitch) * state.weight;
+
+  // Soft spring so he eases in and out rather than tracking rigidly.
+  const stiffness = config.stiffness ?? 42;
+  const damping = config.damping ?? 9.5;
+  state.yawVelocity += ((goalYaw - state.yaw) * stiffness - state.yawVelocity * damping) * dt;
+  state.yaw += state.yawVelocity * dt;
+  state.pitchVelocity += ((goalPitch - state.pitch) * stiffness - state.pitchVelocity * damping) * dt;
+  state.pitch += state.pitchVelocity * dt;
+  state.yaw = THREE.MathUtils.clamp(state.yaw, -maxYaw, maxYaw);
+  state.pitch = THREE.MathUtils.clamp(state.pitch, -maxPitch, maxPitch);
+
+  if (Math.abs(state.yaw) < 0.0008 && Math.abs(state.pitch) < 0.0008) return;
+
+  // Split the budget so the whole upper spine participates; head-only reads as
+  // an owl swivel.
+  const neckShare = THREE.MathUtils.clamp(config.neckShare ?? 0.6, 0, 1);
+  const applyTo = (bone, share) => {
+    if (!bone || share <= 0) return;
+    scratch.delta.setFromAxisAngle(scratch.up, state.yaw * share);
+    if (Math.abs(state.pitch) > 0.0008) {
+      scratch.right.set(1, 0, 0).applyQuaternion(scratch.worldQuaternion);
+      scratch.right.y = 0;
+      if (scratch.right.lengthSq() > 0.0001) {
+        scratch.pitch.setFromAxisAngle(scratch.right.normalize(), state.pitch * share);
+        scratch.delta.multiply(scratch.pitch);
+      }
+    }
+    applyWorldSpaceBoneDelta(bone, scratch.delta, scratch.parent, scratch.localDelta);
+  };
+  applyTo(neck, neckShare);
+  applyTo(head, 1 - neckShare);
 }
 
 function stableUnitFromSeed(seed, salt = '') {
@@ -1199,6 +1378,51 @@ function GLBPrimitive({
   }, [asset.proceduralCreatureMotion, importedScene]);
   const creatureMotionQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const creatureMotionEuler = useMemo(() => new THREE.Euler(), []);
+  const gazeTargets = useMemo(() => {
+    const config = asset.proceduralGazeMotion;
+    if (!config || config.enabled === false) return null;
+    // GLTFLoader runs every node name through PropertyBinding.sanitizeNodeName,
+    // which strips ':' — so the rig's `mixamorig:Head` arrives as
+    // `mixamorigHead` and an exact lookup silently finds nothing. Match the
+    // authored name loosely, the same way handAttachment.js resolves hands.
+    const head = findGazeBone(importedScene, config.headBone || 'mixamorig:Head');
+    const neck = findGazeBone(importedScene, config.neckBone || 'mixamorig:Neck');
+    if (!head && !neck) return null;
+    return { head, neck, config };
+  }, [asset.proceduralGazeMotion, importedScene]);
+  // phase: 'idle' | 'acquiring' | 'holding' | 'releasing'
+  const gazeStateRef = useRef({
+    phase: 'idle',
+    targetId: null,
+    timer: 0,
+    yaw: 0,
+    pitch: 0,
+    yawVelocity: 0,
+    pitchVelocity: 0,
+    weight: 0,
+  });
+  const gazeWorldPosition = useMemo(() => new THREE.Vector3(), []);
+  const gazeWorldQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const gazeForward = useMemo(() => new THREE.Vector3(), []);
+  const gazeRight = useMemo(() => new THREE.Vector3(), []);
+  const gazeToTarget = useMemo(() => new THREE.Vector3(), []);
+  const gazeDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const gazeParentQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const gazeLocalDelta = useMemo(() => new THREE.Quaternion(), []);
+  const gazePitchQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const gazeUpAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+
+  // Live kill switch: window.__darwinGaze(false) stops the behaviour without a
+  // reload or a code edit. Deleting the manifest block removes it permanently.
+  const gazeEnabledRef = useRef(true);
+  useEffect(() => {
+    if (!gazeTargets) return undefined;
+    window.__darwinGaze = (enabled = true) => {
+      gazeEnabledRef.current = Boolean(enabled);
+      return gazeEnabledRef.current;
+    };
+    return () => { delete window.__darwinGaze; };
+  }, [gazeTargets]);
   const blinkTargets = useMemo(() => {
     const morphName = asset.blinkMorph?.name;
     if (!morphName) return [];
@@ -1245,6 +1469,7 @@ function GLBPrimitive({
   const hairMotionStateRef = useRef({ locks: [], wasAirborne: null });
   const hairWorldQuaternionRef = useRef(new THREE.Quaternion());
   const hairWorldRightRef = useRef(new THREE.Vector3(1, 0, 0));
+  const hairWorldForwardRef = useRef(new THREE.Vector3(0, 0, 1));
   // Second mixer for the masked upper-body overlay (aiming while moving).
   // It updates after the main mixer each frame, so the bones its filtered
   // clip animates overwrite the locomotion pose — a cheap bone mask.
@@ -1662,8 +1887,13 @@ function GLBPrimitive({
       const landed = !airborne && state.wasAirborne === true;
       state.wasAirborne = airborne;
 
+      // Wind is resolved into Darwin's own frame: the lateral component drives
+      // the sway morphs, the head-on component drives lift/drop. Without the
+      // second term the hair went still whenever he faced into or away from
+      // the wind, since only the crosswind was ever read.
       const windLength = Math.hypot(weatherEnv.windX, weatherEnv.windZ) || 1;
       let crosswind = weatherEnv.windX / windLength;
+      let headwind = 0;
       if (group.current) {
         group.current.getWorldQuaternion(hairWorldQuaternionRef.current);
         hairWorldRightRef.current
@@ -1673,12 +1903,30 @@ function GLBPrimitive({
           weatherEnv.windX * hairWorldRightRef.current.x
           + weatherEnv.windZ * hairWorldRightRef.current.z
         ) / windLength;
+        // Local +Z is forward (PlayerController sets rotation.y from
+        // atan2(forward.x, forward.z)). Negated so a wind blowing into his
+        // face reads positive and lifts the hair back off the brow.
+        hairWorldForwardRef.current
+          .set(0, 0, 1)
+          .applyQuaternion(hairWorldQuaternionRef.current);
+        headwind = -(
+          weatherEnv.windX * hairWorldForwardRef.current.x
+          + weatherEnv.windZ * hairWorldForwardRef.current.z
+        ) / windLength;
       }
+      // `fullWindSpeed` used to sit at 1, which the trade winds already exceed
+      // — a storm and a breezy afternoon produced identical hair while the
+      // foliage kept escalating. The reference now sits above the strongest
+      // state so the whole range is usable.
       const windStrength = THREE.MathUtils.clamp(
-        weatherEnv.windSpeed / Math.max(0.01, hairCfg.fullWindSpeed ?? 1),
+        weatherEnv.windSpeed / Math.max(0.01, hairCfg.fullWindSpeed ?? 1.8),
         0,
         1,
       );
+      // Shared island gust envelope, the same one the foliage rides, so hair
+      // and plants surge together instead of on private sines.
+      const gustPulse = 1 + (weatherEnv.windGust - 0.5) * 2
+        * (hairCfg.windGustResponse ?? 0.85);
       const speed = Math.max(0, motionState?.speed || 0);
       const speedStrength = THREE.MathUtils.clamp(
         speed / Math.max(0.01, hairCfg.runSpeedReference ?? 4.8),
@@ -1710,10 +1958,12 @@ function GLBPrimitive({
           + Math.sin(now * rustleFrequency * 1.73 + target.phase * 1.61) * 0.42;
         const directionalWind = crosswind
           * windStrength
+          * gustPulse
           * (hairCfg.windAmplitude ?? 1)
           * (0.58 + windWave * 0.42);
         const windRustle = rustleWave
           * windStrength
+          * gustPulse
           * (hairCfg.windRustleAmplitude ?? 1.5)
           * (0.68 + Math.abs(crosswind) * 0.32);
         const windTarget = directionalWind + windRustle;
@@ -1739,9 +1989,18 @@ function GLBPrimitive({
               ? hairCfg.walkSweepLift ?? 0.08
               : 0
         );
+        // Head-on wind lifts the hair back off the brow; a following wind
+        // presses it down. This is what makes the hair read as reacting to a
+        // direction rather than just shivering.
+        const headwindLift = headwind
+          * windStrength
+          * gustPulse
+          * (hairCfg.headwindLiftAmplitude ?? 0.55);
         const windLift = windStrength
+          * gustPulse
           * (hairCfg.windLiftAmplitude ?? 0.38)
-          * (0.72 + Math.sin(now * 1.7 + target.phase) * 0.28);
+          * (0.72 + Math.sin(now * 1.7 + target.phase) * 0.28)
+          + headwindLift;
         const targetLift = THREE.MathUtils.clamp(
           inertialLift + movementSweep + windLift,
           -(hairCfg.maxLiftInfluence ?? 0.8),
@@ -1789,7 +2048,10 @@ function GLBPrimitive({
           targetCount: hairMotionTargets.length,
           airborne,
           crosswind,
+          headwind,
           windStrength,
+          gustPulse,
+          windGust: weatherEnv.windGust,
           speedStrength,
           walking,
           running,
@@ -1867,6 +2129,28 @@ function GLBPrimitive({
         creatureMotionQuaternion.setFromEuler(creatureMotionEuler);
         head.quaternion.multiply(creatureMotionQuaternion);
       }
+    }
+    if (gazeTargets) {
+      applyGazeMotion({
+        targets: gazeTargets,
+        state: gazeStateRef.current,
+        enabled: gazeEnabledRef.current,
+        delta,
+        group: group.current,
+        motionState: grounding?.motionRef?.current,
+        scratch: {
+          worldPosition: gazeWorldPosition,
+          worldQuaternion: gazeWorldQuaternion,
+          forward: gazeForward,
+          right: gazeRight,
+          toTarget: gazeToTarget,
+          delta: gazeDeltaQuaternion,
+          pitch: gazePitchQuaternion,
+          parent: gazeParentQuaternion,
+          localDelta: gazeLocalDelta,
+          up: gazeUpAxis,
+        },
+      });
     }
     // Masked overlay (e.g. shouldered-aim upper body over walk cycles).
     const overlayRequest = overlaySelectorRef.current ? overlaySelectorRef.current() : null;

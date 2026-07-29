@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { formatExpeditionDate } from '../expeditionOutcomes';
 import { useThreeGameStore } from '../store';
 import { ExpeditionPanel } from './expedition/ExpeditionPanel';
+import { useDismissableOverlay } from './useDismissableOverlay';
 import {
   ButterflyIcon,
   CompassRoseIcon,
@@ -196,6 +197,15 @@ export function FinalAssessmentModal({
   const assessment = useThreeGameStore(state => state.finalAssessment);
   const primaryActionRef = useRef(null);
   const assessmentId = assessment?.id;
+  // Deliberately no dismissal: the expedition is over and the player must
+  // choose restart, journal, or main menu. Passing no onClose gives the focus
+  // trap and focus restore without wiring Escape to a close that doesn't
+  // exist. The primary action takes focus on its own delay below.
+  const panelRef = useDismissableOverlay(
+    Boolean(assessmentId) && !journalOpen,
+    null,
+    { autoFocus: false },
+  );
 
   useEffect(() => {
     if (!assessmentId || journalOpen) return;
@@ -211,10 +221,12 @@ export function FinalAssessmentModal({
 
   return (
     <div
-      className="pointer-events-auto fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-[#050b14]/88 p-2 backdrop-blur-[7px] sm:p-4"
+      ref={panelRef}
+      className="pointer-events-auto fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-[#050b14]/88 p-2 backdrop-blur-[7px] focus:outline-none sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="final-assessment-title"
+      tabIndex={-1}
       data-testid="final-assessment-modal"
     >
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(32,53,82,0.28),transparent_55%),linear-gradient(180deg,rgba(3,8,15,0.08),rgba(3,8,15,0.5))]" />

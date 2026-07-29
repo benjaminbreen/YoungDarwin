@@ -47,6 +47,7 @@ import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { SpecimenHighlight } from '../../../components/world/SpecimenHighlight';
+import { weatherEnv } from '../../../world/weatherEnvRuntime';
 import {
   clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
@@ -284,7 +285,6 @@ function createSiteFlexes(sitePivots) {
       angle: 0,
       angularVelocity: 0,
       axisWorld: new THREE.Vector3(Math.sin(phase), 0, Math.cos(phase)).normalize(),
-      windAxis: new THREE.Vector3(Math.cos(phase), 0, -Math.sin(phase)).normalize(),
       phase,
       pendingBreak: null,
       lastDamageAt: -Infinity,
@@ -292,6 +292,10 @@ function createSiteFlexes(sitePivots) {
   }
   return flexes;
 }
+
+// Shared scratch for the per-frame wind tilt axis; one vector for the whole
+// field rather than one per plant.
+const plantWindAxis = new THREE.Vector3(0, 0, 1);
 
 const PLANT_PIECE_INDEX_CELL_SIZE = 4;
 
@@ -328,6 +332,15 @@ function queryPlantPieceSpatialIndex(index, x, z, radius) {
 }
 
 function updateIntactPlantVisuals(runtime, tuning, elapsedTime) {
+  // Wind tilts every plant downwind about a single axis perpendicular to the
+  // live wind — the same axis convention the player push uses for `axisWorld`.
+  // This used to be a per-site random axis, so a patch of pears each swayed on
+  // its own bearing. Per-site `phase` still offsets the timing, so a gust
+  // travels across the patch rather than striking it flat.
+  plantWindAxis.set(weatherEnv.windZ, 0, -weatherEnv.windX).normalize();
+  const windGain = weatherEnv.foliageWindGain;
+  const windLean = tuning.windSway * Math.max(0, windGain - 1) * 2.2;
+  const windSwayAmp = tuning.windSway * windGain;
   for (const [siteId, siteFlex] of runtime.siteFlexes) {
     let pose = runtime.siteVisualPoses.get(siteId);
     if (!pose) {
@@ -340,8 +353,8 @@ function updateIntactPlantVisuals(runtime, tuning, elapsedTime) {
     }
     pose.bendQuat.setFromAxisAngle(siteFlex.axisWorld, siteFlex.angle);
     pose.windQuat.setFromAxisAngle(
-      siteFlex.windAxis,
-      Math.sin(elapsedTime * 0.82 + siteFlex.phase) * tuning.windSway,
+      plantWindAxis,
+      windLean + Math.sin(elapsedTime * 0.82 + siteFlex.phase) * windSwayAmp,
     );
     pose.worldFlexQuat.copy(pose.windQuat).multiply(pose.bendQuat);
   }
@@ -408,10 +421,12 @@ function updateIntactPlantVisuals(runtime, tuning, elapsedTime) {
       .multiply(state.worldFlexQuat)
       .multiply(baseQuat);
     visual.quaternion.copy(state.localFlexQuat);
+    // Per-piece flutter rides the same global gain as the site tilt.
+    const pieceWindAmp = windAmp * windGain;
     state.windEuler.set(
-      Math.sin(elapsedTime * 1.7 + windPhase) * windAmp,
+      Math.sin(elapsedTime * 1.7 + windPhase) * pieceWindAmp,
       0,
-      Math.sin(elapsedTime * 2.9 + windPhase * 1.7) * windAmp * 0.6,
+      Math.sin(elapsedTime * 2.9 + windPhase * 1.7) * pieceWindAmp * 0.6,
     );
     visual.quaternion.multiply(state.windQuat.setFromEuler(state.windEuler));
   }

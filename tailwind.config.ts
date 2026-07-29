@@ -15,7 +15,9 @@ module.exports = {
         'darwin-accent': '#A0522D',
         'darwin-light': '#F5F5DC',
         'darwin-dark': '#4A3728',
-        // Victorian expedition HUD palette
+        // Victorian expedition HUD palette. MIRROR ONLY — the source of truth
+        // is PALETTE in three-game/ui/theme.js, which inline styles and CSS
+        // modules also read. A regression test fails if the two drift.
         'expedition-ink': '#14110c',
         'expedition-panel': '#191511',
         'expedition-brass': '#8a6d3f',
@@ -23,6 +25,16 @@ module.exports = {
         'expedition-goldbright': '#e3c585',
         'expedition-parchment': '#e8dcc0',
         'expedition-faded': '#a89878',
+        'expedition-parchment-dim': '#d8cdb4',
+        'expedition-book-gold': '#b89353',
+        'expedition-night': '#050b14',
+        'expedition-night-deep': '#07101d',
+        'expedition-night-panel': '#0b1729',
+        'expedition-conversation': '#101a27',
+        'expedition-conversation-raised': '#1d3038',
+        'expedition-chart': '#27505d',
+        'expedition-chart-bright': '#4f93a8',
+        'expedition-conversation-accent': '#527b77',
       },
       fontFamily: {
         expedition: ['var(--font-garamond)', 'Georgia', 'Times New Roman', 'serif'],

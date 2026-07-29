@@ -233,6 +233,42 @@ export const modelAssets = {
       doubleBlinkChance: 0.12,
       doubleBlinkDelay: 0.19,
     },
+    // Head/neck glance toward nearby wildlife. ROLLBACK: delete this block (or
+    // set `enabled: false`) and the behaviour is gone with no other edits —
+    // nothing else in the runtime references it. `window.__darwinGaze(false)`
+    // kills it live without a reload.
+    proceduralGazeMotion: {
+      enabled: true,
+      headBone: 'mixamorig:Head',
+      neckBone: 'mixamorig:Neck',
+      // Total yaw budget, split between neck and head so it reads as a turn
+      // rather than an owl swivel. Past the cap he gives up instead of straining.
+      maxYaw: 0.61,
+      maxPitch: 0.3,
+      neckShare: 0.6,
+      // Targets outside this half-angle from where he already faces are
+      // ignored; he does not track things behind him.
+      coneHalfAngle: 1.15,
+      // Ease off as the target nears the cone edge so exits are not a snap.
+      coneFalloff: 0.35,
+      // Angular deadzone: below this the head stays put, so tiny target
+      // jitter does not become head jitter.
+      deadzone: 0.06,
+      // Delay before acquiring, then how long he will hold before politely
+      // looking away even if the target is still there. Real people do not
+      // stare, and this single pair does most of the believability work.
+      acquireDelay: 0.32,
+      holdDuration: 2.6,
+      releaseDuration: 1.4,
+      // Spring toward the target angle; deliberately soft.
+      stiffness: 42,
+      damping: 9.5,
+      // Suppressed while these are true — the authored clips already own the
+      // head there and layering on top reads as a wobble.
+      suppressWhileAiming: true,
+      suppressWhileRunning: true,
+      suppressWhileAirborne: true,
+    },
     secondaryHairMotion: {
       positiveName: 'HairSwayPositive',
       negativeName: 'HairSwayNegative',
@@ -240,9 +276,17 @@ export const modelAssets = {
       dropName: 'HairDrop',
       walkAmplitude: 0.42,
       runAmplitude: 0.78,
-      windAmplitude: 1,
-      windRustleAmplitude: 1.5,
-      windLiftAmplitude: 0.38,
+      // Wind amplitudes are scaled up together with the raised `fullWindSpeed`
+      // reference below: a calm sunny day lands roughly where it always did,
+      // while trade winds and storms now have somewhere to go.
+      windAmplitude: 1.9,
+      windRustleAmplitude: 2.3,
+      windLiftAmplitude: 0.42,
+      // Lift from wind hitting him head-on (see `headwind` in ModelAsset).
+      headwindLiftAmplitude: 0.55,
+      // How hard the shared island gust envelope modulates hair, 0 = ignore
+      // gusts. This is the knob that ties hair surges to the foliage surges.
+      windGustResponse: 0.55,
       windFrequency: 3.2,
       windRustleFrequency: 6.4,
       strideLiftScale: 0.38,
@@ -250,15 +294,24 @@ export const modelAssets = {
       maxAirborneLift: 0.42,
       runSweepLift: 0.2,
       walkSweepLift: 0.08,
-      maxSwayInfluence: 0.85,
-      maxLiftInfluence: 0.8,
+      // Morph influence above 1 extrapolates the shape key past its authored
+      // displacement. The Blender locks are only ~1.4cm of sway and ~1.1cm of
+      // lift, which is the real ceiling on how wind-blown the hair can look;
+      // overdriving the influence buys headroom without a GLB rebake. Push
+      // these much further and the locks start to separate from the scalp.
+      maxSwayInfluence: 1.35,
+      maxLiftInfluence: 1.2,
       swayStiffness: 78,
       swayDamping: 11.5,
       liftStiffness: 65,
       liftDamping: 10.5,
       takeoffImpulse: 3.8,
       landingImpulse: 5.5,
-      fullWindSpeed: 1,
+      // Surface wind speed that saturates the hair response. Sits above the
+      // strongest weather state (storm peaks near 1.73) so trade wind, rain,
+      // and storm are all distinguishable instead of clamping to the same
+      // value the way they did at 1.
+      fullWindSpeed: 1.8,
       runSpeedReference: 4.8,
     },
     targetTriangles: 60500,
@@ -361,6 +414,42 @@ export const modelAssets = {
       doubleBlinkChance: 0.12,
       doubleBlinkDelay: 0.19,
     },
+    // Head/neck glance toward nearby wildlife. ROLLBACK: delete this block (or
+    // set `enabled: false`) and the behaviour is gone with no other edits —
+    // nothing else in the runtime references it. `window.__darwinGaze(false)`
+    // kills it live without a reload.
+    proceduralGazeMotion: {
+      enabled: true,
+      headBone: 'mixamorig:Head',
+      neckBone: 'mixamorig:Neck',
+      // Total yaw budget, split between neck and head so it reads as a turn
+      // rather than an owl swivel. Past the cap he gives up instead of straining.
+      maxYaw: 0.61,
+      maxPitch: 0.3,
+      neckShare: 0.6,
+      // Targets outside this half-angle from where he already faces are
+      // ignored; he does not track things behind him.
+      coneHalfAngle: 1.15,
+      // Ease off as the target nears the cone edge so exits are not a snap.
+      coneFalloff: 0.35,
+      // Angular deadzone: below this the head stays put, so tiny target
+      // jitter does not become head jitter.
+      deadzone: 0.06,
+      // Delay before acquiring, then how long he will hold before politely
+      // looking away even if the target is still there. Real people do not
+      // stare, and this single pair does most of the believability work.
+      acquireDelay: 0.32,
+      holdDuration: 2.6,
+      releaseDuration: 1.4,
+      // Spring toward the target angle; deliberately soft.
+      stiffness: 42,
+      damping: 9.5,
+      // Suppressed while these are true — the authored clips already own the
+      // head there and layering on top reads as a wobble.
+      suppressWhileAiming: true,
+      suppressWhileRunning: true,
+      suppressWhileAirborne: true,
+    },
     secondaryHairMotion: {
       positiveName: 'HairSwayPositive',
       negativeName: 'HairSwayNegative',
@@ -368,9 +457,17 @@ export const modelAssets = {
       dropName: 'HairDrop',
       walkAmplitude: 0.42,
       runAmplitude: 0.78,
-      windAmplitude: 1,
-      windRustleAmplitude: 1.5,
-      windLiftAmplitude: 0.38,
+      // Wind amplitudes are scaled up together with the raised `fullWindSpeed`
+      // reference below: a calm sunny day lands roughly where it always did,
+      // while trade winds and storms now have somewhere to go.
+      windAmplitude: 1.9,
+      windRustleAmplitude: 2.3,
+      windLiftAmplitude: 0.42,
+      // Lift from wind hitting him head-on (see `headwind` in ModelAsset).
+      headwindLiftAmplitude: 0.55,
+      // How hard the shared island gust envelope modulates hair, 0 = ignore
+      // gusts. This is the knob that ties hair surges to the foliage surges.
+      windGustResponse: 0.55,
       windFrequency: 3.2,
       windRustleFrequency: 6.4,
       strideLiftScale: 0.38,
@@ -378,15 +475,24 @@ export const modelAssets = {
       maxAirborneLift: 0.42,
       runSweepLift: 0.2,
       walkSweepLift: 0.08,
-      maxSwayInfluence: 0.85,
-      maxLiftInfluence: 0.8,
+      // Morph influence above 1 extrapolates the shape key past its authored
+      // displacement. The Blender locks are only ~1.4cm of sway and ~1.1cm of
+      // lift, which is the real ceiling on how wind-blown the hair can look;
+      // overdriving the influence buys headroom without a GLB rebake. Push
+      // these much further and the locks start to separate from the scalp.
+      maxSwayInfluence: 1.35,
+      maxLiftInfluence: 1.2,
       swayStiffness: 78,
       swayDamping: 11.5,
       liftStiffness: 65,
       liftDamping: 10.5,
       takeoffImpulse: 3.8,
       landingImpulse: 5.5,
-      fullWindSpeed: 1,
+      // Surface wind speed that saturates the hair response. Sits above the
+      // strongest weather state (storm peaks near 1.73) so trade wind, rain,
+      // and storm are all distinguishable instead of clamping to the same
+      // value the way they did at 1.
+      fullWindSpeed: 1.8,
       runSpeedReference: 4.8,
     },
     targetTriangles: 60500,

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { formatExpeditionDate } from '../expeditionOutcomes';
 import { useThreeGameStore } from '../store';
 import { ExpeditionPanel } from './expedition/ExpeditionPanel';
+import { useDismissableOverlay } from './useDismissableOverlay';
 import {
   ButterflyIcon,
   CompassRoseIcon,
@@ -253,15 +254,24 @@ export function ExpeditionOutcomeModal({
   const accessibleTitle = useMemo(() => (
     outcome?.type === 'death' ? 'Darwin has died' : 'Darwin has collapsed'
   ), [outcome?.type]);
+  // Like the final assessment, this outcome has no dismissal — only the
+  // choices inside it. No onClose is passed, so the hook contributes the focus
+  // trap and focus restore alone.
+  const panelRef = useDismissableOverlay(
+    Boolean(outcomeId) && outcomePhase !== 'recovering' && !journalOpen,
+    null,
+  );
 
   if (!outcome || outcome.phase === 'recovering' || journalOpen) return null;
 
   return (
     <div
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(3,7,12,0.60)] p-1 font-expedition backdrop-blur-[1px] sm:p-2"
+      ref={panelRef}
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(3,7,12,0.60)] p-1 font-expedition backdrop-blur-[1px] focus:outline-none sm:p-2"
       role="dialog"
       aria-modal="true"
       aria-label={accessibleTitle}
+      tabIndex={-1}
       data-testid={`expedition-outcome-${outcome.type}`}
     >
       <div className={`pointer-events-none absolute inset-0 bg-black transition-opacity duration-1000 ${revealed ? 'opacity-0' : 'opacity-35'}`} />

@@ -6,11 +6,11 @@ export const SOLAR_LOOK_DEFAULTS = Object.freeze({
   // sky shader, sun sprites, fog color, and exposure (clamped to 1 after
   // scaling, so >1 widens/strengthens the golden shoulders rather than
   // overdriving color lerps).
-  goldenBoost: 0.75,
+  goldenBoost: 0.55,
   // Scales the sun's sprite optics: aureole, corona glow, weather halo, veil
   // shimmer, lens flares, ring, streak, starburst. High because the ghost
   // flares are off by default (perf presets) — the halo family carries it.
-  opticsIntensity: 0.65,
+  opticsIntensity: 0.25,
   // Scales the DOM screen-glare wash strength (the camera-facing bloom).
   glareIntensity: 1.1,
   // Multiplies outdoor tone-mapping exposure.

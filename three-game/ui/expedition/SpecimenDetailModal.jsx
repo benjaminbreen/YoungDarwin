@@ -5,6 +5,7 @@ import { Canvas } from '@react-three/fiber';
 import { useThreeGameStore } from '../../store';
 import { SpecimenShape } from '../../components/world/SpecimenActor';
 import { SketchPortrait } from './SketchPortrait';
+import { useDismissableOverlay } from '../useDismissableOverlay';
 
 // ---------------------------------------------------------------------------
 // Derivations — the mockup shows fields the data doesn't store directly.
@@ -383,11 +384,12 @@ export function SpecimenDetailModal() {
   const index = detail?.index ?? 0;
   const specimen = specimens[index];
 
+  const panelRef = useDismissableOverlay(Boolean(detail), onClose);
+
   useEffect(() => {
     if (!detail) return undefined;
     const onKeyDown = event => {
       event.stopPropagation();
-      if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         navigate(index - 1);
@@ -414,8 +416,13 @@ export function SpecimenDetailModal() {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${specimen.name} specimen record`}
+        tabIndex={-1}
         onClick={event => event.stopPropagation()}
-        className="relative grid h-[min(58rem,94vh)] w-[min(96rem,97vw)] overflow-hidden rounded-[4px] border border-expedition-brass/70 font-expedition text-expedition-parchment shadow-[0_30px_90px_rgba(0,0,0,0.8)] lg:grid-cols-[minmax(0,46%)_1fr]"
+        className="focus:outline-none relative grid h-[min(58rem,94vh)] w-[min(96rem,97vw)] overflow-hidden rounded-[4px] border border-expedition-brass/70 font-expedition text-expedition-parchment shadow-[0_30px_90px_rgba(0,0,0,0.8)] lg:grid-cols-[minmax(0,46%)_1fr]"
         style={{ background: 'linear-gradient(150deg, #11100e, #0a0908 55%, #060505)' }}
       >
         <div className="pointer-events-none absolute inset-[5px] z-30 rounded-[2px] border border-expedition-gold/18" />

@@ -533,6 +533,9 @@ export function DenseGrassField({ layer, zoneId }) {
     uniforms.uTime.value = clock.elapsedTime;
     uniforms.uWindDir.value.set(weatherEnv.windX, weatherEnv.windZ);
     uniforms.uWindSpeed.value = weatherEnv.foliageWindSpeed;
+    // Shared gust gain on top of the shader's own spatial gust noise, so a
+    // surge crosses grass, shrubs, and hair as one event.
+    uniforms.uWindAmp.value = (effectiveLayer.windAmp ?? 0.18) * weatherEnv.foliageWindGain;
     if (position) {
       uniforms.uPlayerPosition.value.set(position.x || 0, position.y || 0, position.z || 0);
       trailTimer.current += delta;

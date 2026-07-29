@@ -29,6 +29,7 @@ import {
 } from './expedition/ExpeditionPanel';
 import { controlsSections } from './controlsReference';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { vitalsGradient } from './theme';
 import { QUALITY_CHOICES } from '../qualityPreference';
 import {
   CompassRoseIcon,
@@ -60,6 +61,7 @@ import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
 import { WEATHER_STATES, normalizeWeatherState } from '../world/weatherStates';
+import { fieldConditionFor } from '../world/fieldConditions';
 import {
   getAnimalAction,
   getAnimalActionImage,
@@ -773,6 +775,21 @@ function TopObjective({ objective }) {
   );
 }
 
+// Notable-condition badge for the objective banner. Absent on an ordinary
+// day, which is the point — it only earns attention by being rare.
+function FieldConditionBadge({ condition }) {
+  if (!condition) return null;
+  return (
+    <span
+      key={condition.id}
+      title={condition.note}
+      className="shrink-0 animate-hud-fade rounded-[3px] border border-expedition-gold/60 bg-expedition-gold/10 px-1.5 py-[2px] text-[9px] font-semibold uppercase leading-none tracking-[0.16em] text-expedition-goldbright motion-reduce:animate-none"
+    >
+      {condition.label}
+    </span>
+  );
+}
+
 function PolishedTopObjective({ objective, className = '' }) {
   const [expanded, setExpanded] = useState(false);
   const day = useThreeGameStore(state => state.day);
@@ -785,6 +802,7 @@ function PolishedTopObjective({ objective, className = '' }) {
     title: sentenceCase(normalizedWeather || 'weather'),
     note: 'Local conditions recorded from the sky.',
   };
+  const condition = fieldConditionFor({ weather: normalizedWeather, timeOfDay, zone });
 
   return (
     <div className={`absolute left-1/2 top-3 hidden w-[min(32rem,calc(100vw-42rem))] min-w-[23rem] -translate-x-1/2 animate-hud-rise [animation-delay:75ms] motion-reduce:animate-none xl:block ${className}`}>
@@ -809,6 +827,11 @@ function PolishedTopObjective({ objective, className = '' }) {
               <span className="shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90">
                 {formatExpeditionTime(timeOfDay)}
               </span>
+              {/* Pushed to the right edge of the meta line, just inside the
+                  chevron. The zone name truncates before this does. */}
+              <span className="ml-auto flex shrink-0 items-center pl-2">
+                <FieldConditionBadge condition={condition} />
+              </span>
             </span>
             <span className="mt-1 block truncate text-[15.5px] font-semibold leading-tight tracking-wide text-expedition-parchment">
               {formatBannerObjective(objective)}
@@ -829,9 +852,19 @@ function PolishedTopObjective({ objective, className = '' }) {
         <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? 'grid-rows-[1fr] border-t border-expedition-brass/40 opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
           <div className="overflow-hidden">
             <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5">
-              <p className="m-0 text-[12px] italic leading-snug text-expedition-faded">
-                Approach carefully, examine the evidence, then choose whether to document or collect.
-              </p>
+              <div>
+                <p className="m-0 text-[12px] italic leading-snug text-expedition-faded">
+                  Approach carefully, examine the evidence, then choose whether to document or collect.
+                </p>
+                {/* The badge is a glance; this is where it explains itself. */}
+                {condition && (
+                  <p className="m-0 mt-1 text-[11.5px] leading-snug text-expedition-goldbright/85">
+                    <span className="font-semibold uppercase tracking-[0.14em]">{condition.label}</span>
+                    <span className="text-expedition-brass/70"> · </span>
+                    <span className="italic text-expedition-faded">{condition.note}</span>
+                  </p>
+                )}
+              </div>
               <div className="flex items-center gap-2 whitespace-nowrap text-[10.5px] text-expedition-faded">
                 <WeatherGlyph weather={normalizedWeather} className="h-5 w-5 text-expedition-gold" />
                 <span>{weatherCopy.title}</span>
@@ -890,9 +923,9 @@ function VitalStatusPanel() {
       className="pointer-events-auto block text-left transition hover:brightness-125 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
     >
       <ExpeditionPanel className="w-[13rem] sm:w-[17.5rem]" innerClassName="grid gap-2.5 px-3.5 py-3">
-        <StatBar icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-        <StatBar icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-        <StatBar icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+        <StatBar icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
+        <StatBar icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
+        <StatBar icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill={vitalsGradient('curiosity')} />
       </ExpeditionPanel>
     </button>
   );
@@ -943,9 +976,9 @@ function PolishedVitalStatusPanel() {
           </span>
         </div>
         <div className="grid gap-2">
-          <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#8fc491)" />
-          <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#b3812f,#e0aa4e)" />
-          <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill="linear-gradient(90deg,#4f93a8,#84c4d4)" />
+          <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
+          <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
+          <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={animalMode ? 68 : curiosity} fill={vitalsGradient('curiosity')} />
         </div>
       </ExpeditionPanel>
     </button>
@@ -4102,6 +4135,10 @@ function MobileVitalsPanel() {
       }}
     >
       <div className="pointer-events-none absolute inset-[3px] rounded-[4px] border border-expedition-gold/20" />
+      {/* NOT vitalsGradient(): this variant's bright stops (#98c98f, #e7b457)
+          are a shade off the shared gauge colours. Left verbatim rather than
+          silently unified — if the difference is unintentional, switch these
+          two to vitalsGradient('health') / vitalsGradient('fatigue'). */}
       <div className="relative grid gap-2">
         <StatBar icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill="linear-gradient(90deg,#5f9e6a,#98c98f)" />
         <StatBar icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill="linear-gradient(90deg,#c28b35,#e7b457)" />

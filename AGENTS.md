@@ -3,6 +3,19 @@
 This file is the short operating contract for coding agents. Keep it concise and
 route volatile facts to source files or generated docs.
 
+## Current Top Goal
+
+- The next major product goal is the source-backed Library and Darwin memory-link
+  system described in `docs/library-memory-system-plan.md`. Read that plan before
+  changing readable books, narrator prose, NPC/examination dialogue, historical
+  hyperlinks, OCR/search data, or production model endpoints.
+- Preserve its central constraints: players read authored prose or verbatim
+  historical sources, every surfaced passage opens its original scanned page,
+  and the complete shipped library stays at or below 120 MiB.
+- Do not add new player-visible generative prose or production generative-model
+  calls. Embeddings may retrieve passages but may not write, summarize, translate,
+  or interpret them.
+
 ## Read First
 
 - Project overview and quickstart: `README.md`.

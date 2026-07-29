@@ -15,6 +15,28 @@
   --parchment-light: 255, 252, 235;
   --parchment-dark: 243, 230, 196;
   --specimen-card: 252, 250, 235;
+
+  /* Expedition chrome. MIRROR ONLY — source of truth is PALETTE in
+     three-game/ui/theme.js; a regression test fails if these drift. Kept as
+     RGB triplets so CSS modules can take an alpha:
+     `rgb(var(--expedition-gold-rgb) / 0.4)`. */
+  --expedition-ink-rgb: 20, 17, 12;
+  --expedition-panel-rgb: 25, 21, 17;
+  --expedition-brass-rgb: 138, 109, 63;
+  --expedition-gold-rgb: 201, 163, 95;
+  --expedition-goldbright-rgb: 227, 197, 133;
+  --expedition-parchment-rgb: 232, 220, 192;
+  --expedition-faded-rgb: 168, 152, 120;
+  --expedition-parchment-dim-rgb: 216, 205, 180;
+  --expedition-book-gold-rgb: 184, 147, 83;
+  --expedition-night-rgb: 5, 11, 20;
+  --expedition-night-deep-rgb: 7, 16, 29;
+  --expedition-night-panel-rgb: 11, 23, 41;
+  --expedition-conversation-rgb: 16, 26, 39;
+  --expedition-conversation-raised-rgb: 29, 48, 56;
+  --expedition-chart-rgb: 39, 80, 93;
+  --expedition-chart-bright-rgb: 79, 147, 168;
+  --expedition-conversation-accent-rgb: 82, 123, 119;
 }
 
 @keyframes encounter-rise {

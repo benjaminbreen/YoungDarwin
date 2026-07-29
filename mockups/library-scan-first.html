@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Young Darwin — Library Option B: Scan First</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #070b10;
+      --navy: #101925;
+      --navy-2: #182535;
+      --paper: #e7dcc0;
+      --paper-light: #f4ecd8;
+      --ink: #3b3022;
+      --gold: #c6a45f;
+      --gold-light: #e7ca85;
+      --line: rgba(198, 164, 95, .3);
+      --line-strong: rgba(198, 164, 95, .58);
+      --muted: rgba(231, 220, 192, .62);
+      --sea: #5d8580;
+      --serif: Georgia, "Times New Roman", Times, serif;
+      --ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-width: 320px;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--night);
+    }
+
+    body {
+      color: var(--paper);
+      font-family: var(--serif);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:focus-visible, input:focus-visible {
+      outline: 1px solid var(--gold-light);
+      outline-offset: 2px;
+    }
+
+    .mockup-label {
+      position: fixed;
+      z-index: 80;
+      top: 12px;
+      right: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid rgba(231, 202, 133, .34);
+      background: rgba(7, 11, 16, .84);
+      color: rgba(244, 236, 216, .78);
+      font: 650 9px/1 var(--ui);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+
+    .mockup-label::before {
+      content: "B";
+      display: grid;
+      width: 18px;
+      height: 18px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--gold);
+      color: #1b160e;
+      font-size: 10px;
+    }
+
+    .library {
+      display: grid;
+      grid-template-columns: 78px 378px minmax(0, 1fr);
+      width: 100vw;
+      height: 100dvh;
+      background:
+        radial-gradient(circle at 62% 30%, rgba(131, 114, 79, .13), transparent 35%),
+        #0a1017;
+      transition: grid-template-columns 220ms ease;
+    }
+
+    .library.drawer-closed { grid-template-columns: 78px 0 minmax(0, 1fr); }
+
+    /* A narrow, persistent shelf. */
+
+    .book-rail {
+      position: relative;
+      z-index: 12;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 0;
+      border-right: 1px solid var(--line-strong);
+      background:
+        linear-gradient(180deg, rgba(23, 35, 51, .99), rgba(8, 14, 21, .99)),
+        var(--navy);
+      box-shadow: 9px 0 28px rgba(0, 0, 0, .3);
+    }
+
+    .rail-mark {
+      display: grid;
+      width: 100%;
+      height: 76px;
+      place-items: center;
+      border-bottom: 1px solid var(--line);
+      color: var(--gold-light);
+      font-size: 30px;
+    }
+
+    .rail-books {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 11px;
+      min-height: 0;
+      padding: 16px 0;
+    }
+
+    .rail-book {
+      position: relative;
+      display: grid;
+      width: 42px;
+      height: 58px;
+      place-items: center;
+      border: 1px solid rgba(231, 220, 192, .2);
+      border-radius: 2px 5px 5px 2px;
+      background: var(--cover, #574536);
+      box-shadow:
+        inset 4px 0 0 rgba(0, 0, 0, .24),
+        inset 5px 0 0 rgba(255, 255, 255, .08),
+        0 5px 12px rgba(0, 0, 0, .26);
+      color: rgba(255, 246, 219, .9);
+      font: 700 10px/1 var(--ui);
+      letter-spacing: .06em;
+      transition: transform 150ms ease, border-color 150ms ease;
+    }
+
+    .rail-book:hover { transform: translateX(2px); }
+    .rail-book.active {
+      border-color: var(--gold-light);
+      box-shadow:
+        inset 4px 0 0 rgba(0, 0, 0, .24),
+        inset 5px 0 0 rgba(255, 255, 255, .08),
+        0 0 0 2px rgba(198, 164, 95, .16),
+        0 5px 12px rgba(0, 0, 0, .26);
+    }
+
+    .rail-book.active::after {
+      content: "";
+      position: absolute;
+      top: 22px;
+      right: -20px;
+      border: 6px solid transparent;
+      border-left-color: var(--gold);
+    }
+
+    .rail-help {
+      width: 44px;
+      height: 44px;
+      margin: 0 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: transparent;
+      color: var(--gold);
+      font: 17px/1 var(--serif);
+    }
+
+    /* Search/results drawer. */
+
+    .drawer {
+      position: relative;
+      z-index: 10;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid var(--line-strong);
+      background:
+        linear-gradient(180deg, rgba(25, 38, 54, .99), rgba(11, 18, 27, .99)),
+        var(--navy);
+      box-shadow: 14px 0 34px rgba(0, 0, 0, .32);
+      opacity: 1;
+      transition: opacity 150ms ease;
+    }
+
+    .drawer-closed .drawer {
+      border-right-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .drawer-head {
+      padding: 23px 22px 17px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font: 700 9px/1 var(--ui);
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+
+    .drawer h1 {
+      margin: 0;
+      color: var(--paper-light);
+      font-size: 29px;
+      font-weight: 400;
+      line-height: 1;
+    }
+
+    .drawer-head p {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font: 12px/1.45 var(--ui);
+    }
+
+    .search {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 43px;
+      margin: 15px 17px 10px;
+      border: 1px solid rgba(198, 164, 95, .5);
+      background: rgba(231, 220, 192, .97);
+    }
+
+    .search input {
+      min-width: 0;
+      height: 44px;
+      border: 0;
+      background: transparent;
+      padding: 0 13px;
+      color: #2d281f;
+      outline: none;
+      font-size: 14px;
+    }
+
+    .search input::placeholder { color: #7b715e; font-style: italic; }
+
+    .search button {
+      border: 0;
+      border-left: 1px solid rgba(93, 69, 31, .28);
+      background: transparent;
+      color: #674f27;
+      font: 17px/1 var(--ui);
+    }
+
+    .results {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 8px 17px 22px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(198,164,95,.5) rgba(0,0,0,.1);
+    }
+
+    .query-label {
+      display: flex;
+      justify-content: space-between;
+      margin: 2px 1px 12px;
+      color: rgba(231, 220, 192, .58);
+      font: 700 9px/1 var(--ui);
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    .query-label strong {
+      color: var(--gold-light);
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: none;
+    }
+
+    .result {
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 12px;
+      border: 1px solid rgba(198,164,95,.18);
+      background: rgba(4, 9, 15, .25);
+      text-align: left;
+      transition: border-color 150ms ease, background 150ms ease;
+    }
+
+    .result:hover { border-color: rgba(198,164,95,.48); }
+    .result.active {
+      border-color: var(--gold);
+      background: linear-gradient(90deg, rgba(198,164,95,.16), rgba(198,164,95,.03));
+      box-shadow: inset 3px 0 0 var(--gold);
+    }
+
+    .result-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: rgba(231, 220, 192, .55);
+      font: 700 8px/1 var(--ui);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .result:first-of-type .result-meta::before {
+      content: "Best match";
+      color: var(--gold-light);
+    }
+
+    .result:not(:first-of-type) .result-meta::before { content: "Related"; }
+
+    .result-title {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--paper-light);
+      font-size: 14px;
+      line-height: 1.25;
+    }
+
+    .result-quote {
+      display: -webkit-box;
+      overflow: hidden;
+      color: rgba(231, 220, 192, .69);
+      font-size: 12px;
+      font-style: italic;
+      line-height: 1.42;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    .drawer-foot {
+      padding: 12px 17px 14px;
+      border-top: 1px solid var(--line);
+      color: rgba(231, 220, 192, .48);
+      font: 10px/1.4 var(--ui);
+    }
+
+    /* The scan remains the visual center. */
+
+    .reader {
+      position: relative;
+      display: grid;
+      grid-template-rows: 75px minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .reader-head {
+      position: relative;
+      z-index: 3;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(10, 16, 23, .93);
+      backdrop-filter: blur(12px);
+    }
+
+    .drawer-toggle {
+      display: grid;
+      grid-template-columns: 17px auto;
+      align-items: center;
+      gap: 9px;
+      height: 37px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      background: rgba(198,164,95,.07);
+      color: var(--gold-light);
+      font: 700 9px/1 var(--ui);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .drawer-toggle span:first-child { font-size: 18px; font-weight: 400; }
+
+    .title {
+      min-width: 0;
+      text-align: center;
+    }
+
+    .title strong {
+      display: block;
+      overflow: hidden;
+      color: var(--paper-light);
+      font-size: 17px;
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font: 9px/1 var(--ui);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .provenance {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: rgba(231, 220, 192, .68);
+      font: 9px/1 var(--ui);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .provenance::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sea);
+      box-shadow: 0 0 0 3px rgba(93, 133, 128, .13);
+    }
+
+    .scan-stage {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      place-items: center;
+      overflow: hidden;
+      padding: 24px clamp(24px, 5vw, 78px);
+      background:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.014) 1px, transparent 1px);
+      background-size: 34px 34px;
+    }
+
+    .scan-stage::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle, transparent 38%, rgba(2, 5, 8, .38) 100%);
+      pointer-events: none;
+    }
+
+    .scan {
+      position: relative;
+      z-index: 1;
+      width: min(100%, 780px);
+      height: min(100%, 920px);
+      min-height: 370px;
+      overflow: hidden;
+      border: 1px solid #9e8e68;
+      background:
+        radial-gradient(circle at 12% 16%, rgba(119, 91, 49, .08) 0 2px, transparent 3px),
+        radial-gradient(circle at 85% 72%, rgba(119, 91, 49, .07) 0 2px, transparent 3px),
+        linear-gradient(90deg, rgba(85, 63, 34, .09), transparent 5%, transparent 94%, rgba(85, 63, 34, .12)),
+        #e6d9b8;
+      color: var(--ink);
+      box-shadow:
+        0 26px 70px rgba(0, 0, 0, .55),
+        0 2px 0 rgba(255, 255, 255, .18) inset;
+      transform: rotate(-.16deg);
+    }
+
+    .scan::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      opacity: .28;
+      background-image: repeating-linear-gradient(0deg, rgba(63,49,32,.08) 0 1px, transparent 1px 3px);
+      mix-blend-mode: multiply;
+      pointer-events: none;
+    }
+
+    .page-content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      height: 100%;
+      flex-direction: column;
+      padding: clamp(36px, 6vh, 74px) clamp(42px, 7vw, 92px) 32px;
+      text-align: justify;
+      text-shadow: 0 0 .25px rgba(37, 27, 18, .8);
+    }
+
+    .running-head {
+      margin-bottom: clamp(18px, 3vh, 34px);
+      text-align: center;
+      font-size: 11px;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .chapter {
+      margin: 0 0 clamp(18px, 3vh, 32px);
+      text-align: center;
+      font-size: clamp(18px, 2.2vw, 27px);
+      font-weight: 400;
+      line-height: 1.23;
+    }
+
+    .passage {
+      margin: 0;
+      font-size: clamp(15px, 1.35vw, 19px);
+      line-height: 1.72;
+    }
+
+    .passage::first-letter {
+      float: left;
+      margin: 5px 8px 0 0;
+      font-size: 52px;
+      line-height: .72;
+    }
+
+    .matched {
+      background: linear-gradient(transparent 66%, rgba(179, 136, 50, .24) 66%);
+    }
+
+    .page-number {
+      margin-top: auto;
+      padding-top: 20px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .turn-page {
+      position: absolute;
+      z-index: 5;
+      top: 50%;
+      display: grid;
+      width: 42px;
+      height: 58px;
+      place-items: center;
+      border: 1px solid var(--line);
+      background: rgba(7, 11, 16, .68);
+      color: var(--gold-light);
+      font-size: 24px;
+      transform: translateY(-50%);
+      backdrop-filter: blur(8px);
+    }
+
+    .turn-page:hover { border-color: var(--gold); background: rgba(198,164,95,.11); }
+    .turn-page.previous { left: 16px; }
+    .turn-page.next { right: 16px; }
+
+    .reader-bottom {
+      position: relative;
+      z-index: 4;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      align-items: stretch;
+      border-top: 1px solid var(--line-strong);
+      background: rgba(12, 19, 28, .98);
+    }
+
+    .memory {
+      position: relative;
+      min-width: 0;
+      padding: 16px 22px 17px 25px;
+      border-left: 3px solid var(--sea);
+    }
+
+    .memory::before {
+      content: "DARWIN REMEMBERS";
+      display: block;
+      margin-bottom: 7px;
+      color: var(--sea);
+      font: 750 8px/1 var(--ui);
+      letter-spacing: .18em;
+    }
+
+    .memory p {
+      max-width: 850px;
+      margin: 0;
+      color: rgba(244, 236, 216, .82);
+      font-size: clamp(13px, 1.05vw, 16px);
+      font-style: italic;
+      line-height: 1.45;
+    }
+
+    .memory-link {
+      padding: 0 1px 2px;
+      border: 0;
+      border-bottom: 1px solid var(--gold);
+      background: transparent;
+      color: var(--gold-light);
+      font: inherit;
+      font-style: inherit;
+    }
+
+    .memory-link:hover { background: rgba(198,164,95,.11); }
+
+    .page-tools {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 245px;
+      padding: 0 24px;
+      border-left: 1px solid var(--line);
+      color: rgba(231, 220, 192, .57);
+      font: 9px/1 var(--ui);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .page-tools input {
+      width: 112px;
+      accent-color: var(--gold);
+    }
+
+    @media (max-width: 1040px) {
+      .library,
+      .library.drawer-closed {
+        grid-template-columns: 66px minmax(0, 1fr);
+      }
+
+      .book-rail { grid-column: 1; grid-row: 1; }
+      .reader { grid-column: 2; grid-row: 1; }
+
+      .drawer {
+        position: fixed;
+        z-index: 40;
+        top: 0;
+        bottom: 0;
+        left: 66px;
+        width: min(390px, calc(100vw - 66px));
+        transform: translateX(0);
+        transition: transform 200ms ease, opacity 150ms ease;
+      }
+
+      .drawer-closed .drawer { transform: translateX(-105%); }
+      .rail-book.active::after { display: none; }
+      .provenance { display: none; }
+      .reader-bottom { grid-template-columns: 1fr; }
+      .page-tools { display: none; }
+    }
+
+    @media (max-width: 680px) {
+      .mockup-label { top: 8px; right: 8px; }
+      .library,
+      .library.drawer-closed { grid-template-columns: 56px minmax(0, 1fr); }
+      .drawer { left: 56px; width: calc(100vw - 56px); }
+      .rail-mark { height: 62px; font-size: 24px; }
+      .rail-book { width: 36px; height: 48px; }
+      .rail-books { gap: 8px; padding: 12px 0; }
+      .reader { grid-template-rows: 62px minmax(0, 1fr) auto; }
+      .reader-head { gap: 9px; padding: 0 10px; }
+      .drawer-toggle { width: 38px; padding: 0; place-content: center; }
+      .drawer-toggle span:last-child { display: none; }
+      .title strong { font-size: 14px; }
+      .scan-stage { padding: 14px 18px; }
+      .scan { min-height: 330px; }
+      .page-content { padding: 36px 34px 24px; }
+      .passage { font-size: 13px; line-height: 1.55; }
+      .turn-page { width: 32px; height: 48px; }
+      .turn-page.previous { left: 2px; }
+      .turn-page.next { right: 2px; }
+      .memory { padding: 13px 14px 14px 16px; }
+      .memory p { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mockup-label">Option B · scan first</div>
+
+  <main class="library" id="library">
+    <aside class="book-rail" aria-label="Books in the library">
+      <div class="rail-mark" aria-hidden="true">⌘</div>
+      <div class="rail-books">
+        <button class="rail-book" data-book="humboldt" style="--cover:#4e624f" title="Humboldt — Personal Narrative">AH</button>
+        <button class="rail-book" data-book="lyell" style="--cover:#554b3a" title="Lyell — Principles of Geology">CL</button>
+        <button class="rail-book" data-book="herschel" style="--cover:#586276" title="Herschel — Preliminary Discourse">JH</button>
+        <button class="rail-book active" data-book="grant" style="--cover:#6e493e" title="Grant — Lectures on Comparative Anatomy">RG</button>
+        <button class="rail-book" data-book="juan" style="--cover:#4c6570" title="Juan and Ulloa — Voyage to South America">JU</button>
+      </div>
+      <button class="rail-help" title="About this library">?</button>
+    </aside>
+
+    <aside class="drawer" id="drawer" aria-label="Search and related passages">
+      <header class="drawer-head">
+        <p class="eyebrow">Aboard H.M.S. Beagle · 1835</p>
+        <h1>Darwin’s Library</h1>
+        <p>Search the words on these pages. Results are passages from the books themselves.</p>
+      </header>
+
+      <form class="search" id="searchForm">
+        <input id="searchInput" value="fossils and former inhabitants" aria-label="Search the library">
+        <button aria-label="Search" title="Search">⌕</button>
+      </form>
+
+      <div class="results">
+        <div class="query-label">
+          <span>Six passages</span>
+          <strong id="queryText">fossils and former inhabitants</strong>
+        </div>
+
+        <button class="result active" data-passage="grant">
+          <span class="result-meta"><span>Grant · p. 10</span></span>
+          <span class="result-title">Lectures on Comparative Anatomy</span>
+          <span class="result-quote">“The fossil remains of the extinct races of animals present us with the former inhabitants of our globe...”</span>
+        </button>
+        <button class="result" data-passage="lyell">
+          <span class="result-meta"><span>Lyell · p. 100</span></span>
+          <span class="result-title">Principles of Geology</span>
+          <span class="result-quote">“By degrees, many of the enigmas of the moral and physical world are explained...”</span>
+        </button>
+        <button class="result" data-passage="herschel">
+          <span class="result-meta"><span>Herschel · p. 144</span></span>
+          <span class="result-title">Preliminary Discourse</span>
+          <span class="result-quote">“Experience once recognized as the fountain of all our knowledge of nature...”</span>
+        </button>
+        <button class="result" data-passage="humboldt">
+          <span class="result-meta"><span>Humboldt · p. 40</span></span>
+          <span class="result-title">Personal Narrative</span>
+          <span class="result-quote">“The physiognomy of vegetation is determined by forms which make an individual impression...”</span>
+        </button>
+        <button class="result" data-passage="juan">
+          <span class="result-meta"><span>Juan &amp; Ulloa · p. 182</span></span>
+          <span class="result-title">A Voyage to South America</span>
+          <span class="result-quote">“De los volcanes que se encuentran en aquellas cordilleras...”</span>
+        </button>
+        <button class="result" data-passage="lyell2">
+          <span class="result-meta"><span>Lyell · p. 117</span></span>
+          <span class="result-title">Changes of the Organic World</span>
+          <span class="result-quote">“The remains of plants and animals imbedded in the earth...”</span>
+        </button>
+      </div>
+
+      <footer class="drawer-foot">Every result opens the original scanned page. Underlining marks the matched passage; it is not a modern annotation.</footer>
+    </aside>
+
+    <section class="reader" aria-label="Scanned book page">
+      <header class="reader-head">
+        <button class="drawer-toggle" id="drawerToggle" aria-expanded="true">
+          <span>☰</span><span>Search &amp; passages</span>
+        </button>
+        <div class="title">
+          <strong id="bookTitle">Lectures on Comparative Anatomy</strong>
+          <span id="bookByline">Robert Edmond Grant · London · 1833–1834</span>
+        </div>
+        <span class="provenance">Original scan · p. <b id="pageBadge">10</b></span>
+      </header>
+
+      <div class="scan-stage">
+        <button class="turn-page previous" aria-label="Previous scanned page">‹</button>
+        <article class="scan">
+          <div class="page-content">
+            <div class="running-head" id="runningHead">Lectures on Comparative Anatomy</div>
+            <h2 class="chapter" id="chapter">On the Forms and Structure of Animals</h2>
+            <p class="passage" id="passageText">The fossil remains of the extinct races of animals present us with the former inhabitants of our globe, and enable us to trace the succession of organic forms through periods of time far beyond the records of human history. <span class="matched">Their comparison with living structures enlarges the field of anatomy</span>, and supplies important evidence of the changes which the surface of the earth has undergone.</p>
+            <div class="page-number" id="pageNumber">10</div>
+          </div>
+        </article>
+        <button class="turn-page next" aria-label="Next scanned page">›</button>
+      </div>
+
+      <footer class="reader-bottom">
+        <div class="memory">
+          <p>The rocky plains to the north slope upward here to rolling green foothills that put you in mind of Scotland. Perhaps there are some of the <button class="memory-link" id="memoryLink">fossils Professor Grant showed you</button>.</p>
+        </div>
+        <div class="page-tools">
+          <span>Page</span>
+          <input type="range" min="1" max="240" value="10" id="pageSlider" aria-label="Scanned page">
+          <b id="pageToolNumber">10</b>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <script>
+    const passages = {
+      grant: {
+        book: "grant",
+        title: "Lectures on Comparative Anatomy",
+        byline: "Robert Edmond Grant · London · 1833–1834",
+        page: "10",
+        chapter: "On the Forms and Structure of Animals",
+        text: 'The fossil remains of the extinct races of animals present us with the former inhabitants of our globe, and enable us to trace the succession of organic forms through periods of time far beyond the records of human history. <span class="matched">Their comparison with living structures enlarges the field of anatomy</span>, and supplies important evidence of the changes which the surface of the earth has undergone.'
+      },
+      lyell: {
+        book: "lyell",
+        title: "Principles of Geology",
+        byline: "Charles Lyell · London · 1830–1833",
+        page: "100",
+        chapter: "Theoretical Errors Which Retarded Geology",
+        text: 'By degrees, many of the enigmas of the moral and physical world are explained, and, instead of being due to extrinsic and irregular causes, they are found to depend on fixed and invariable laws. <span class="matched">The philosopher at last becomes convinced of the undeviating uniformity of secondary causes</span>, and guided by his faith in this principle, he determines the probability of accounts transmitted to him of former ages.'
+      },
+      lyell2: {
+        book: "lyell",
+        title: "Principles of Geology",
+        byline: "Charles Lyell · London · 1830–1833",
+        page: "117",
+        chapter: "Changes of the Organic World",
+        text: 'The remains of plants and animals imbedded in the earth afford memorials of former conditions of the globe. <span class="matched">Each stratum preserves some portion of the history of the organic world</span>, while the succession of deposits marks changes slowly accomplished through an immeasurable lapse of ages.'
+      },
+      herschel: {
+        book: "herschel",
+        title: "A Preliminary Discourse on Natural Philosophy",
+        byline: "John F. W. Herschel · London · 1831",
+        page: "144",
+        chapter: "Of the Observation of Facts",
+        text: 'Experience once recognized as the fountain of all our knowledge of nature, it follows that, in the study of nature and its laws, we ought at once to make up our minds to dismiss as idle prejudices, or at least to suspend as premature, <span class="matched">any preconceived notion of what might or what ought to be the order of nature</span> in any proposed case.'
+      },
+      humboldt: {
+        book: "humboldt",
+        title: "Personal Narrative of Travels",
+        byline: "Alexander von Humboldt · London · 1818–1829",
+        page: "40",
+        chapter: "On the Physiognomy of Vegetation",
+        text: 'The physiognomy of vegetation is determined by forms which make an individual impression, and which present striking contrasts when brought together. <span class="matched">The aspect of nature depends less on the separate characters of plants than on the associations in which they occur</span>, their masses, their outlines, and the manner in which they clothe the earth.'
+      },
+      juan: {
+        book: "juan",
+        title: "Relación histórica del viaje a la América Meridional",
+        byline: "Jorge Juan & Antonio de Ulloa · Madrid · 1748",
+        page: "182",
+        chapter: "De los volcanes de aquellas cordilleras",
+        text: 'De los volcanes que se encuentran en aquellas cordilleras, y de las señales que en sus faldas han quedado de antiguos incendios, puede colegirse la fuerza con que obran los fuegos subterráneos. <span class="matched">Las piedras calcinadas y las materias arrojadas cubren grandes extensiones</span>, aun donde la memoria de sus erupciones se ha perdido.'
+      }
+    };
+
+    const library = document.querySelector("#library");
+    const drawerToggle = document.querySelector("#drawerToggle");
+    const searchForm = document.querySelector("#searchForm");
+    const searchInput = document.querySelector("#searchInput");
+    const queryText = document.querySelector("#queryText");
+    const slider = document.querySelector("#pageSlider");
+
+    function setDrawer(open) {
+      library.classList.toggle("drawer-closed", !open);
+      drawerToggle.setAttribute("aria-expanded", String(open));
+    }
+
+    function selectPassage(id) {
+      const passage = passages[id] || passages.grant;
+      document.querySelector("#bookTitle").textContent = passage.title;
+      document.querySelector("#bookByline").textContent = passage.byline;
+      document.querySelector("#runningHead").textContent = passage.title;
+      document.querySelector("#chapter").textContent = passage.chapter;
+      document.querySelector("#passageText").innerHTML = passage.text;
+      document.querySelector("#pageBadge").textContent = passage.page;
+      document.querySelector("#pageNumber").textContent = passage.page;
+      document.querySelector("#pageToolNumber").textContent = passage.page;
+      slider.value = Math.min(Number(passage.page), Number(slider.max));
+
+      document.querySelectorAll(".result").forEach((button) => {
+        button.classList.toggle("active", button.dataset.passage === id);
+      });
+      document.querySelectorAll(".rail-book").forEach((button) => {
+        button.classList.toggle("active", button.dataset.book === passage.book);
+      });
+    }
+
+    drawerToggle.addEventListener("click", () => {
+      setDrawer(library.classList.contains("drawer-closed"));
+    });
+
+    document.querySelectorAll(".result").forEach((button) => {
+      button.addEventListener("click", () => selectPassage(button.dataset.passage));
+    });
+
+    document.querySelectorAll(".rail-book").forEach((button) => {
+      button.addEventListener("click", () => {
+        const match = Object.entries(passages).find(([, passage]) => passage.book === button.dataset.book);
+        if (match) selectPassage(match[0]);
+      });
+    });
+
+    document.querySelector("#memoryLink").addEventListener("click", () => {
+      searchInput.value = "fossils and former inhabitants";
+      queryText.textContent = searchInput.value;
+      setDrawer(true);
+      selectPassage("grant");
+    });
+
+    searchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const query = searchInput.value.trim() || "all passages";
+      queryText.textContent = query;
+      const lower = query.toLowerCase();
+      if (lower.includes("volcan")) selectPassage("juan");
+      else if (lower.includes("veget") || lower.includes("plant")) selectPassage("humboldt");
+      else if (lower.includes("law") || lower.includes("cause") || lower.includes("geolog")) selectPassage("lyell");
+      else if (lower.includes("experience") || lower.includes("observation")) selectPassage("herschel");
+      else selectPassage("grant");
+    });
+
+    slider.addEventListener("input", () => {
+      document.querySelector("#pageToolNumber").textContent = slider.value;
+    });
+
+    document.querySelectorAll(".turn-page").forEach((button) => {
+      button.addEventListener("click", () => {
+        const direction = button.classList.contains("next") ? 1 : -1;
+        const page = Math.max(1, Number(document.querySelector("#pageNumber").textContent) + direction);
+        document.querySelector("#pageNumber").textContent = page;
+        document.querySelector("#pageBadge").textContent = page;
+        document.querySelector("#pageToolNumber").textContent = page;
+        slider.value = Math.min(page, Number(slider.max));
+      });
+    });
+  </script>
+</body>
+</html>

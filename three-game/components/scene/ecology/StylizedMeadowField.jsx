@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { getRuntimePlayerPose } from '../../../store';
 import { getRegionTerrainConfig, terrainHeight, terrainSlopeAt } from '../../../world/terrain';
 import { seededRandom } from '../../../world/scatter';
-import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { weatherEnv, resolveLayerWindDir } from '../../../world/weatherEnvRuntime';
 
 const OFFSCREEN_Y = -999;
 const TWO_PI = Math.PI * 2;
@@ -135,7 +135,10 @@ function makeStylizedMeadowMaterial(layer) {
       uTime: { value: 0 },
       uPlayerPosition: { value: new THREE.Vector3(0, OFFSCREEN_Y, 0) },
       uPlayerMove: { value: new THREE.Vector3(0, 0, 0) },
-      uWindDir: { value: new THREE.Vector2(Math.sin(layer.windYaw ?? -0.8), -Math.cos(layer.windYaw ?? -0.8)) },
+      // Authored `windYaw` is kept as a local deviation from the prevailing
+      // trades and re-resolved against the live wind every frame, so the
+      // meadow veers with the sky instead of holding a fixed bearing.
+      uWindDir: { value: resolveLayerWindDir(new THREE.Vector2(), layer.windYaw) },
       uWindSpeed: { value: weatherEnv.foliageWindSpeed },
       uWindAmp: { value: layer.windAmp ?? 0.16 },
       uFadeNearStart: { value: layer.fadeNearStart ?? 0 },
@@ -259,6 +262,8 @@ export function StylizedMeadowField({ layer, zoneId }) {
     const uniforms = material.uniforms;
     uniforms.uTime.value = clock.elapsedTime;
     uniforms.uWindSpeed.value = weatherEnv.foliageWindSpeed;
+    resolveLayerWindDir(uniforms.uWindDir.value, effectiveLayer.windYaw);
+    uniforms.uWindAmp.value = (effectiveLayer.windAmp ?? 0.16) * weatherEnv.foliageWindGain;
     const pose = getRuntimePlayerPose();
     const position = pose?.position;
     if (!position) return;

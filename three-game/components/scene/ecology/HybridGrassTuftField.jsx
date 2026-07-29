@@ -7,6 +7,7 @@ import { getRuntimePlayerPose } from '../../../store';
 import { getRegionTerrainConfig, terrainBiomeAt, terrainHeight, terrainSlopeAt } from '../../../world/terrain';
 import { seededRandom } from '../../../world/scatter';
 import { hybridGrassPathInfo } from '../../../world/regions/grassHybridTest/path';
+import { weatherEnv, resolveLayerWindDir } from '../../../world/weatherEnvRuntime';
 
 const TWO_PI = Math.PI * 2;
 
@@ -217,7 +218,10 @@ function makeHybridTuftMaterial(layer, texture) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uWindDir: { value: new THREE.Vector2(Math.sin(layer.windYaw ?? -0.8), -Math.cos(layer.windYaw ?? -0.8)) },
+      // Authored `windYaw` becomes a local deviation from the prevailing
+      // trades, re-resolved against the live wind each frame (see
+      // StylizedMeadowField for the same treatment).
+      uWindDir: { value: resolveLayerWindDir(new THREE.Vector2(), layer.windYaw) },
       uWindAmp: { value: layer.windAmp ?? 0.16 },
       uFadeNear: { value: layer.fadeNear ?? 10 },
       uFadeFar: { value: layer.fadeFar ?? 46 },
@@ -295,6 +299,8 @@ export function HybridGrassTuftField({ layer, zoneId }) {
     const uniforms = materialRef.current?.uniforms;
     if (!uniforms) return;
     uniforms.uTime.value = clock.elapsedTime;
+    resolveLayerWindDir(uniforms.uWindDir.value, effectiveLayer.windYaw);
+    uniforms.uWindAmp.value = (effectiveLayer.windAmp ?? 0.16) * weatherEnv.foliageWindGain;
     const pose = getRuntimePlayerPose();
     const position = pose?.position;
     if (position) uniforms.uPlayerPosition.value.set(position.x || 0, position.y || 0, position.z || 0);

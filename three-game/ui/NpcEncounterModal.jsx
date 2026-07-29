@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getNpcEncounter } from '../encounters/npcEncounters';
 import { setTypingMode } from '../input/typingMode';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { useThreeGameStore } from '../store';
+import { useDismissableOverlay } from './useDismissableOverlay';
 
 const SYMS_FIELD_ORDERS = Object.freeze([
   { directive: SYMS_DIRECTIVES.FOLLOW, label: 'Come with me' },
@@ -38,22 +39,23 @@ export function NpcEncounterModal() {
   const transcriptRef = useRef(null);
   const encounter = getNpcEncounter(active?.npcId);
 
+  // A reply in flight holds the conversation open: Escape must not abandon a
+  // turn the NPC is already answering.
+  const dismiss = useCallback(() => {
+    if (!pending) close();
+  }, [close, pending]);
+  // The reply field takes focus on its own short delay (after the panel's
+  // entrance), so the hook's immediate autoFocus would only fight it.
+  const panelRef = useDismissableOverlay(Boolean(active), dismiss, { autoFocus: false });
+
   useEffect(() => {
     if (!active) return undefined;
-    const onKeyDown = event => {
-      if (event.key === 'Escape' && !pending) {
-        event.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
     const timer = window.setTimeout(() => inputRef.current?.focus(), 170);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
       window.clearTimeout(timer);
       setTypingMode(false);
     };
-  }, [active, close, pending]);
+  }, [active]);
 
   useEffect(() => {
     if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
@@ -72,8 +74,12 @@ export function NpcEncounterModal() {
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-end bg-black/45 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-16 backdrop-blur-[2px] sm:px-6 sm:pb-8">
       <section
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
         aria-label={`Conversation with ${encounter.name || 'NPC'}`}
-        className="npc-encounter-panel relative mx-auto grid w-full max-w-[72.5rem] grid-rows-[auto_minmax(0,1fr)] overflow-visible border border-expedition-brass/55 border-t-[3px] border-t-[#527b77] bg-[#101a27] shadow-[0_28px_76px_rgba(0,0,0,0.66)] sm:grid-cols-[13.25rem_minmax(0,1fr)] sm:grid-rows-1"
+        tabIndex={-1}
+        className="npc-encounter-panel focus:outline-none relative mx-auto grid w-full max-w-[72.5rem] grid-rows-[auto_minmax(0,1fr)] overflow-visible border border-expedition-brass/55 border-t-[3px] border-t-[#527b77] bg-[#101a27] shadow-[0_28px_76px_rgba(0,0,0,0.66)] sm:grid-cols-[13.25rem_minmax(0,1fr)] sm:grid-rows-1"
       >
         <aside className="relative flex min-h-[5.1rem] items-center border-b border-expedition-brass/25 bg-[#1d3038] px-4 py-3 sm:min-h-[25.5rem] sm:items-end sm:border-b-0 sm:border-r sm:px-5 sm:pb-6">
           <div className="absolute -top-7 left-4 h-[3.8rem] w-[3.8rem] overflow-hidden rounded-full border-[3px] border-[#e7ddc9] bg-[#d9cfb9] shadow-[0_14px_29px_rgba(0,0,0,0.43)] sm:-top-12 sm:left-1/2 sm:h-[11.3rem] sm:w-[8.4rem] sm:-translate-x-1/2 sm:rounded-b-[4.2rem] sm:rounded-t-sm sm:border-[5px]">
