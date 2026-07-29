@@ -190,8 +190,6 @@
     }
   ],
   "books": [
-    { "id": "lawson-bowditch-navigator", "position": [5.95, 0.86, 4.1], "rotation": [0, -0.2, 0], "radius": 2.2 },
-    { "id": "lawson-dampier-voyage", "position": [6.95, 0.86, 4.18], "rotation": [0, 0.3, 0], "radius": 2.2 },
     { "id": "lawson-juan-ulloa", "position": [8.45, 1.16, 0.78], "rotation": [0, 0, 0], "radius": 2.1 }
   ],
   "propSpawns": [

@@ -8,6 +8,8 @@ import { TOGGLE_COMPASS_EVENT, setTouchControl, triggerToolUse } from '../input/
 import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { isEndGameNarratorCommand } from '../finalAssessment';
+import { MemoryLinkedText } from '../library/MemoryLinkedText';
+import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { SHOTGUN } from '../shooting/shotgunConfig';
 import { emitPropEvent } from '../physics/props/propEvents';
 import { shotgunAimState } from '../shooting/aimState';
@@ -1846,6 +1848,7 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
   const narratorError = useThreeGameStore(state => state.narratorError);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const submitNarratorCommand = useThreeGameStore(state => state.submitNarratorCommand);
+  const openLibrary = useThreeGameStore(state => state.openLibrary);
   // Minute-resolution clock shown on un-stamped lines. Subscribing to the
   // formatted string instead of raw timeOfDay re-renders this heavy panel only
   // when the displayed minute changes, not on every ~1s clock tick.
@@ -1873,6 +1876,9 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
       ? 'Describe how Darwin gets free...'
       : null
   );
+  const authoredDilemmaChoices = activeConstraint?.type === 'snare_immobilized'
+    ? ['Loosen the loop before moving.', 'Cut the cord with a field knife.', 'Call Covington for help.']
+    : ['Proceed slowly and protect the specimen.', 'Withdraw and try a safer method.'];
   const expanded = polished
     ? forceExpanded || dilemmaPromptActive || pinned || hovered || focused || composerHasText || narratorPending
     : forceExpanded || dilemmaPromptActive || !manualCollapsed || focused || composerHasText || narratorPending;
@@ -1991,7 +1997,11 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
                   italic={presentation.italic}
                   polished={polished}
                 >
-                  {entry.kind === 'hotkeys' ? <HotkeysResponse polished={polished} /> : entry.text}
+                  {entry.kind === 'hotkeys'
+                    ? <HotkeysResponse polished={polished} />
+                    : entry.kind === 'player'
+                      ? entry.text
+                      : <MemoryLinkedText>{entry.text}</MemoryLinkedText>}
                 </SpeakerLine>
               );
             })}
@@ -2008,7 +2018,7 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
           </>
         )}
       </div>
-      {(!polished || expanded) && (
+      {(!polished || expanded) && (PLAYER_VISIBLE_GENERATIVE_ENABLED ? (
         <NarratorComposer
           expanded={expanded}
           pending={narratorPending}
@@ -2018,7 +2028,19 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
           placeholder={composerPlaceholder}
           polished={polished}
         />
-      )}
+      ) : dilemmaPromptActive ? (
+        <div className="mt-3 grid gap-1.5 border-t border-expedition-brass/30 pt-3">
+          {authoredDilemmaChoices.map(choice => (
+            <button key={choice} type="button" onClick={() => submitNarratorCommand(choice)} className={`${GOLD_BUTTON} min-h-9 text-left normal-case tracking-normal`}>
+              {choice}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <button type="button" onClick={() => openLibrary?.({ drawerOpen: true })} className="mt-3 flex w-full items-center justify-between border-t border-expedition-brass/30 pt-3 text-left text-[12px] uppercase tracking-[0.11em] text-expedition-gold hover:text-expedition-goldbright">
+          <span>Search Darwin’s library</span><span aria-hidden="true">→</span>
+        </button>
+      ))}
       <button
         type="button"
         onClick={() => nearby && collectNearby()}
@@ -2496,7 +2518,7 @@ function InventoryTab({ onOpenInventory, onOpenJournal, condensed = false }) {
 // panel on top, the field-operations panel below it. The ops panel defaults
 // to a condensed summary; the chevron slides it down to fill the remaining
 // vertical space and reveal the full tab content + action buttons.
-function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) {
+function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal, onOpenLibrary }) {
   const [tab, setTab] = useState('objectives');
   const [expanded, setExpanded] = useState(false);
   const [folded, setFolded] = useState(false);
@@ -2609,6 +2631,9 @@ function FieldSidebar({ objective, onOpenInventory, onOpenMap, onOpenJournal }) 
             <button type="button" onClick={onOpenJournal} className={GOLD_BUTTON}>
               <span className="inline-flex items-center justify-center gap-1.5"><OpenBookIcon className="h-4 w-4" />Journal</span>
             </button>
+            <button type="button" onClick={onOpenLibrary} className={`${GOLD_BUTTON} col-span-2`}>
+              <span className="inline-flex items-center justify-center gap-1.5"><OpenBookIcon className="h-4 w-4" />Library</span>
+            </button>
             <button type="button" onClick={rest} className={`${GOLD_BUTTON} col-span-2`}>Rest</button>
           </div>
         )}
@@ -2659,6 +2684,7 @@ function PolishedFieldRail({
   onOpenInventory,
   onOpenMap,
   onOpenJournal,
+  onOpenLibrary,
   onRequestEndGame,
   onOpenPause,
   audioEnabled = true,
@@ -2788,6 +2814,9 @@ function PolishedFieldRail({
           </button>
           <button type="button" onClick={onOpenJournal} className={railIconButton} title="Open field notebook" aria-label="Open field notebook">
             <OpenBookIcon className="h-[1.125rem] w-[1.125rem]" />
+          </button>
+          <button type="button" onClick={onOpenLibrary} className={railIconButton} title="Open Darwin's library" aria-label="Open Darwin's library">
+            <span className="text-[11px] font-semibold">LIB</span>
           </button>
         </div>
 
@@ -4513,9 +4542,10 @@ function PauseIcon({ className = '' }) {
   );
 }
 
-function MobileBottomNav({ onOpenJournal, onToggleNarrative, onOpenCasebook, onOpenInventory, onOpenPause, narrativeOpen }) {
+function MobileBottomNav({ onOpenJournal, onOpenLibrary, onToggleNarrative, onOpenCasebook, onOpenInventory, onOpenPause, narrativeOpen }) {
   const items = [
     { id: 'journal', label: 'Journal', icon: <OpenBookIcon className="h-6 w-6" />, onClick: onOpenJournal },
+    { id: 'library', label: 'Library', icon: <span className="grid h-6 w-6 place-items-center text-[11px] font-semibold">LIB</span>, onClick: onOpenLibrary },
     { id: 'narrative', label: 'Narrative', icon: <NoteIcon className="h-6 w-6" />, onClick: onToggleNarrative, active: narrativeOpen },
     { id: 'casebook', label: 'Casebook', icon: <ButterflyIcon className="h-6 w-6" />, onClick: onOpenCasebook },
     { id: 'inventory', label: 'Inventory', icon: <KitIcon className="h-6 w-6" />, onClick: onOpenInventory },
@@ -4533,7 +4563,7 @@ function MobileBottomNav({ onOpenJournal, onToggleNarrative, onOpenCasebook, onO
         bottom: 'calc(env(safe-area-inset-bottom) + 0.8rem)',
       }}
     >
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-6">
         {items.map((item, index) => (
           <button
             key={item.id}
@@ -4613,6 +4643,7 @@ export function ThreeHUD({
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   const readableBookOpen = useThreeGameStore(state => Boolean(state.readableBookSession));
+  const openLibrary = useThreeGameStore(state => state.openLibrary);
   const beagleTravelPromptOpen = useThreeGameStore(state => Boolean(state.beagleTravelPrompt));
   const npcEncounterOpen = useThreeGameStore(state => Boolean(state.activeNpcEncounter));
   const playableModeId = useThreeGameStore(state => state.playableModeId);
@@ -4828,6 +4859,7 @@ export function ThreeHUD({
             onOpenInventory={() => openInventoryTab('case')}
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
+            onOpenLibrary={() => openLibrary?.({ drawerOpen: true })}
             onRequestEndGame={() => setEndGameConfirmationOpen(true)}
             onOpenPause={() => setPauseOpen(true)}
             audioEnabled={audioEnabled}
@@ -4841,6 +4873,7 @@ export function ThreeHUD({
             onOpenInventory={() => openInventoryTab('case')}
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
+            onOpenLibrary={() => openLibrary?.({ drawerOpen: true })}
           />
         )}
       </div>
@@ -4883,6 +4916,7 @@ export function ThreeHUD({
       </div>
 
       <div className="pointer-events-auto absolute right-3 bottom-[14.25rem] hidden gap-1.5 md:flex xl:hidden">
+        <button type="button" onClick={() => openLibrary?.({ drawerOpen: true })} className={GOLD_BUTTON}>Library</button>
         <button type="button" onClick={openJournalPanel} className={GOLD_BUTTON}>Journal</button>
         <button type="button" onClick={() => openInventoryTab('case')} className={GOLD_BUTTON}>Case</button>
         <CameraCycleButton className={GOLD_BUTTON} />
@@ -4893,6 +4927,7 @@ export function ThreeHUD({
       <MobileActionCluster />
       <MobileBottomNav
         onOpenJournal={openJournalPanel}
+        onOpenLibrary={() => openLibrary?.({ drawerOpen: true })}
         onToggleNarrative={() => setMobileNarrativeOpen(value => !value)}
         onOpenCasebook={() => openInventoryTab('case')}
         onOpenInventory={() => openInventoryTab('tools')}

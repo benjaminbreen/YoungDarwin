@@ -15,7 +15,7 @@ export const SOURCES_PAGE = {
   title: 'Sources & Further Reading',
   subtitle: 'Young Darwin — Floreana / Charles Island, September 1835',
   standfirst:
-    'This game is an argument made out of evidence, and the evidence is listed here. What follows is the reading behind the island, an account of what is documented and what is reconstructed, a disclosure of how the generated text is produced, and a note for instructors.',
+    'This game is an argument made out of evidence, and the evidence is listed here. What follows is the reading behind the island, an account of what is documented and what is reconstructed, an explanation of its authored prose and source retrieval, and a note for instructors.',
 };
 
 // ---------------------------------------------------------------------------
@@ -24,8 +24,7 @@ export const SOURCES_PAGE = {
 
 export const IN_GAME_LIBRARY = {
   heading: 'Books You Can Read in the Game',
-  blurb:
-    'Five volumes in the game are not props. They are page-for-page scans of the printed editions, opened in a reader inside the world, and they can be read cover to cover. Provenance lines distinguish the two volumes Darwin demonstrably carried from those placed on Lawson\'s shelf as plausible reconstruction.',
+  blurb: 'Four scanned historical books can be read and searched in the Library.',
   // Derived so the cited shelf and the playable shelf stay identical.
   entries: getReadableBooks().map(book => ({
     id: book.id,
@@ -318,7 +317,7 @@ export const HISTORICAL_RECORD = {
       caption: 'Built from evidence, but not directly attested.',
       items: [
         'The island\'s traversable geography. Real place names — Post Office Bay, Punta Cormorant, Devil\'s Crown, Black Beach, Cerro Pajas, Asilo de la Paz, Watkins — sit in a landscape compressed and simplified for play. Distances are not survey-accurate.',
-        'Lawson\'s library. Bowditch, Dampier, and Juan and Ulloa are plausible holdings for a man in his position; none is a documented personal possession, and each says so when opened.',
+        'Lawson\'s copy of Juan and Ulloa is a plausible holding for a man in his position, not a documented personal possession, and says so when opened.',
         'The interiors of the Lawson house, the penal settlement, and the <i>Beagle</i>\'s cabin and deck, built from period plans and conventions rather than from surviving drawings of these specific rooms.',
         'Weather, tides, light, and the movement of sun, moon, and stars, modelled for the correct latitude and date but not drawn from a log.',
         'Species distributions and animal behavior, drawn from modern Galápagos ecology and back-dated to a pre-collapse baseline.',
@@ -340,20 +339,20 @@ export const HISTORICAL_RECORD = {
 };
 
 // ---------------------------------------------------------------------------
-// Generated text
+// Authored text and source retrieval
 // ---------------------------------------------------------------------------
 
 export const METHODS_NOTE = {
-  heading: 'A Note on the Generated Text',
+  heading: 'A Note on Authored Text and Source Retrieval',
   paragraphs: [
-    'Much of the prose in this game is produced at run time by large language models. Narration of your actions, the results of examining a specimen, conversation with the people on the island, the assessment at the end of an expedition, and the historian\'s critique of your journal are all generated rather than written in advance.',
-    'These are not one model but several distinct endpoints, each with its own instructions, its own supplied context, and its own constraints — a narrator, an examiner, an encounter handler, a collection adjudicator, an assessor, and a critic. Each is given structured context about where you are, what time it is, what you are carrying, and what you have already seen, along with excerpts from the primary sources listed on this page. The default model is a small, fast one; the system falls back automatically across a roster of Google and OpenAI models when one is unavailable.',
-    'Generation is capped. There are per-minute and per-session call limits, a separate lower ceiling on background generation, an estimated token budget per session, and request deduplication. When a limit is reached or a call fails, the game falls back to written text rather than stalling. This keeps the simulation running and its costs bounded; it also means you may occasionally notice the prose change register.',
+    'The public game does not ask a language model to write historical narration, character dialogue, specimen observations, or the expedition assessment. Those surfaces use authored prose, authored choices, and deterministic game rules.',
+    'The Library searches OCR transcriptions of four historical books associated with Darwin\'s intellectual world in 1835. Search results are verbatim passages from those transcriptions. Selecting one opens the corresponding original scanned page and draws a temporary navigation overlay over the OCR lines; the overlay is not part of the historical page.',
+    'The first release uses local lexical retrieval and makes no model request. A later optional semantic search may use an embedding model to rank passages, but embeddings may retrieve only: they may not answer, summarize, translate, or interpret a source. Private development experiments with generated prose require explicit flags and are not the public runtime.',
   ],
   caution: {
-    heading: 'How to read it',
+    heading: 'How to read the Library',
     body:
-      'Generated text is fluent by construction and accurate only by accident. It will produce confident detail that has no source behind it. Nothing a character says in this game is evidence, and no generated sentence should be cited. Treat the model\'s output the way you would treat a well-read undergraduate improvising: worth arguing with, occasionally illuminating, never authoritative. Checking it against the archives listed above is not a workaround for a limitation of the game. It is the exercise.',
+      'A retrieved passage is a primary-source artifact, not an answer supplied by the game. The link between a scene and a passage is an editorial invitation to compare them, not a claim that the source explains the scene. OCR is imperfect, especially around damaged type and line endings; verify important wording against the displayed scan and cite the source edition rather than the game interface.',
   },
 };
 

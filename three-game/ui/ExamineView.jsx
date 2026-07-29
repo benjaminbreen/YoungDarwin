@@ -6,6 +6,8 @@ import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
 import { useDismissableOverlay } from './useDismissableOverlay';
 import styles from './ExamineView.module.css';
+import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
+import { MemoryLinkedText } from '../library/MemoryLinkedText';
 
 // A live specimen stage with one coherent notebook. The camera continues to
 // own the subject view; this layer owns inquiry, evidence, authorship, and the
@@ -409,7 +411,9 @@ export function ExamineView() {
                   <article className="relative before:absolute before:left-[-19px] before:top-1 before:h-[9px] before:w-[9px] before:-translate-x-px before:rotate-45 before:border before:border-expedition-brass/70 before:bg-[rgba(191,152,81,0.16)]">
                     <MicroLabel>Begin with observation</MicroLabel>
                     <p className="mt-1.5 text-[14px] leading-relaxed text-expedition-parchment/86 lg:text-[15px]">
-                      Study the subject from several angles, ask what you wish to know, or attempt a careful procedure.
+                      {PLAYER_VISIBLE_GENERATIVE_ENABLED
+                        ? 'Study the subject from several angles, ask what you wish to know, or attempt a careful procedure.'
+                        : 'Study the subject from several angles, then choose a careful field procedure.'}
                     </p>
                   </article>
                 )}
@@ -422,7 +426,9 @@ export function ExamineView() {
                     <MicroLabel className={entry.role === 'you' ? 'text-expedition-faded' : 'text-expedition-goldbright/85'}>
                       {entry.role === 'you' ? 'Your inquiry' : 'Direct observation'}
                     </MicroLabel>
-                    <p className="mt-1.5 text-[14px] leading-relaxed text-expedition-parchment/92 lg:text-[15px]">{entry.text}</p>
+                    <p className="mt-1.5 text-[14px] leading-relaxed text-expedition-parchment/92 lg:text-[15px]">
+                      {entry.role === 'you' ? entry.text : <MemoryLinkedText>{entry.text}</MemoryLinkedText>}
+                    </p>
                     {entry.behavior && <p className="mt-1.5 text-[12px] italic leading-relaxed text-expedition-parchment/60 lg:text-[13px]">{entry.behavior}</p>}
                   </article>
                 ))}
@@ -454,7 +460,7 @@ export function ExamineView() {
                   ))}
                 </div>
 
-                <form
+                {PLAYER_VISIBLE_GENERATIVE_ENABLED && <form
                   className="mt-3 grid grid-cols-[minmax(0,1fr)_43px] border border-expedition-brass/45 bg-black/25 transition focus-within:border-expedition-goldbright/70 focus-within:shadow-[0_0_0_3px_rgba(191,152,81,0.06)]"
                   onSubmit={event => {
                     event.preventDefault();
@@ -478,7 +484,7 @@ export function ExamineView() {
                   >
                     <SendIcon />
                   </button>
-                </form>
+                </form>}
                 {session.error && <p className="mt-2 text-[11px] text-[#d9a05a]">{session.error}</p>}
               </div>
             </section>

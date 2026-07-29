@@ -683,6 +683,10 @@ function createHarnessApi() {
       useThreeGameStore.getState().openReadableBook(bookId);
       return makeSnapshot();
     },
+    openLibrary: (options = {}) => {
+      useThreeGameStore.getState().openLibrary(options);
+      return makeSnapshot();
+    },
     setBookPage: page => {
       const store = useThreeGameStore.getState();
       store.setReadableBookPage(store.readableBookSession?.bookId, page);

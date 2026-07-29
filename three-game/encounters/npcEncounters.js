@@ -93,3 +93,30 @@ export function encounterAmbientLine(npcId, event = 'nearby', relation = {}) {
   }
   return encounter?.ambient?.[event] || null;
 }
+
+export function getAuthoredNpcReply(npcId, playerInput, context = {}) {
+  if (npcId !== 'syms_covington') return null;
+  const input = String(playerInput || '').toLowerCase();
+  if (input.includes('specimen') || input.includes('gather')) {
+    const count = Math.max(0, Number(context.specimenCount) || 0);
+    return {
+      dialogue: count
+        ? `“There are ${count} entries in order, sir. The locality and date matter nearly as much as the object itself.”`
+        : '“The case is empty yet, sir. Better one sound specimen with its place and date than a dozen without them.”',
+      trustDelta: 1,
+      flags: ['discussed_specimens'],
+    };
+  }
+  if (input.includes('work') || input.includes('next')) {
+    return {
+      dialogue: '“The labels and collecting paper are ready. I should take the higher ground slowly and mark the place of anything unfamiliar before disturbing it.”',
+      trustDelta: 1,
+      flags: ['offered_practical_help'],
+    };
+  }
+  return {
+    dialogue: '“The ground changes quickly here, sir—bare lava below, greener country above. The creatures seem to keep to their own parts of it.”',
+    trustDelta: 1,
+    flags: ['discussed_island_conditions'],
+  };
+}

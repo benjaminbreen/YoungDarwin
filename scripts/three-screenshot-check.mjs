@@ -21,6 +21,8 @@ const VISUAL_RUN_TIMEOUT_MS = numberOption(
 const AUTO_START_SERVER = process.env.THREE_SCREENSHOT_AUTO_START !== '0' && !process.argv.includes('--no-start-server');
 const OPEN_JOURNAL_DEV_CATALOGUE = process.argv.includes('--open-journal-dev-catalogue');
 const OPEN_JOURNAL = OPEN_JOURNAL_DEV_CATALOGUE || process.argv.includes('--open-journal');
+const LIBRARY_QUERY = argValue('--library-query');
+const OPEN_LIBRARY = process.argv.includes('--open-library') || Boolean(LIBRARY_QUERY);
 const CAPTURE_MODE = screenshotCaptureMode();
 const REQUESTED_LOADING_CANVAS_FALLBACK = (
   process.argv.includes('--allow-loading-canvas')
@@ -136,7 +138,7 @@ function requestedSearchParams() {
 
   if (!params.has('screenshot')) params.set('screenshot', '1');
   if (!params.has('skipIntro')) params.set('skipIntro', PRESERVE_OPENING_INTRO ? '0' : '1');
-  if (EXAMINE_ACTOR || REQUESTED_TOOL || OPEN_SYMS_FIELD_CASE) params.set('e2e', '1');
+  if (EXAMINE_ACTOR || REQUESTED_TOOL || OPEN_SYMS_FIELD_CASE || OPEN_LIBRARY) params.set('e2e', '1');
   params.set('preserveDrawingBuffer', '1');
   return params;
 }
@@ -157,7 +159,7 @@ function screenshotName(viewportName) {
 }
 
 function screenshotCaptureMode() {
-  if (OPEN_JOURNAL) return 'page';
+  if (OPEN_JOURNAL || OPEN_LIBRARY) return 'page';
   const raw = process.env.THREE_SCREENSHOT_CAPTURE || argValue('--capture') || 'canvas';
   const mode = raw.trim().toLowerCase();
   if (!['page', 'canvas'].includes(mode)) {
@@ -860,6 +862,32 @@ async function run() {
         await page.evaluate(() => window.__darwinE2E.toggleSymsFieldCase());
         await page.waitForTimeout(900);
         await waitForFreshVisualFrames(page, BOOT_TIMEOUT_MS);
+      });
+    }
+    if (OPEN_LIBRARY) {
+      await withFailureArtifacts(page, 'open searchable library', errors, async () => {
+        await page.waitForFunction(
+          () => typeof window.__darwinE2E?.openLibrary === 'function',
+          null,
+          { timeout: BOOT_TIMEOUT_MS },
+        );
+        await page.evaluate(() => window.__darwinE2E.openLibrary({ drawerOpen: true }));
+        await page.getByTestId('library-view').waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+        if (LIBRARY_QUERY) {
+          const search = page.getByRole('searchbox', { name: /Search Darwin's library/i });
+          await search.fill(LIBRARY_QUERY);
+          const findButton = page.getByRole('button', { name: 'Find', exact: true });
+          await findButton.waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+          await page.waitForFunction(
+            () => !document.querySelector('input[type="search"]')?.form?.querySelector('button[type="submit"]')?.disabled,
+            null,
+            { timeout: UI_STEP_TIMEOUT_MS * 4 },
+          );
+          await findButton.click();
+          await page.getByText('Matched passage:', { exact: false }).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+          await page.getByTestId('library-highlight').first().waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+        }
+        await page.waitForTimeout(900);
       });
     }
     if (OPEN_JOURNAL) {

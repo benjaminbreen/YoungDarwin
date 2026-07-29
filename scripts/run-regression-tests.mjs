@@ -5613,6 +5613,73 @@ test('star sphere advances on a sidereal rather than solar clock', () => {
   assert.ok(nextSolarMidnight > 0.015 && nextSolarMidnight < 0.02);
 });
 
+// --- Source-backed library -----------------------------------------------
+const { BOOK_CATALOG } = loadModule('three-game/books/bookCatalog.js');
+const { LIBRARY_MEMORY_TERMS } = loadModule('three-game/library/memoryTerms.js');
+const { findMemoryLinks } = loadModule('three-game/library/memoryLinking.js');
+const { searchLibraryCorpus } = loadModule('three-game/library/searchCore.js');
+const libraryPassages = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/passages.json'), 'utf8')).passages;
+const libraryIndex = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/lexical-index.json'), 'utf8'));
+const generatedMemoryTerms = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/memory-terms.json'), 'utf8')).terms;
+
+test('runtime library keeps four source scans and retires the two oversized marginal books', () => {
+  assert.equal(Object.keys(BOOK_CATALOG).length, 4);
+  assert.ok(BOOK_CATALOG['herschel-preliminary-discourse']);
+  assert.equal(BOOK_CATALOG['bowditch-practical-navigator'], undefined);
+  assert.equal(BOOK_CATALOG['dampier-new-voyage'], undefined);
+});
+
+test('memory-link vocabulary contains exactly 150 deterministic terms with six source destinations', () => {
+  assert.equal(LIBRARY_MEMORY_TERMS.length, 150);
+  assert.equal(generatedMemoryTerms.length, 150);
+  assert.equal(new Set(generatedMemoryTerms.map(term => term.id)).size, 150);
+  for (const term of generatedMemoryTerms) {
+    assert.ok(term.primaryPassageId, `${term.id} lacks a primary passage`);
+    assert.equal(term.relatedPassageIds.length, 5, `${term.id} lacks five related passages`);
+  }
+});
+
+test('memory links prefer long aliases, respect word boundaries, deduplicate, and stop at two', () => {
+  const links = findMemoryLinks('Charles Lyell considered coral reefs, fossils, and Humboldt.', 2);
+  assert.deepEqual(links.map(link => link.term.id), ['lyell', 'coral-reef']);
+  assert.equal('Charles Lyell', 'Charles Lyell considered'.slice(links[0].start, links[0].end));
+
+  const repeated = findMemoryLinks('Basaltic ground gives way to basalt fragments.', 2);
+  assert.deepEqual(repeated.map(link => link.term.id), ['basalt']);
+  assert.equal(findMemoryLinks('The word xbasaltx is not a geological observation.', 2).some(link => link.term.id === 'basalt'), false);
+});
+
+test('lexical library search returns anchored scan passages without generated prose', () => {
+  const results = searchLibraryCorpus({
+    passages: libraryPassages,
+    index: libraryIndex,
+    query: 'coral reef',
+    limit: 6,
+  });
+  assert.equal(results.length, 6);
+  assert.ok(results[0].searchText.includes('coral'));
+  for (const passage of results) {
+    assert.ok(passage.rawText);
+    assert.ok(passage.displayText);
+    assert.ok(passage.anchor?.highlightRects?.length);
+    assert.equal(passage.anchor.pdfPage, passage.pdfPage);
+  }
+});
+
+test('library package remains below its 120 MiB hard budget', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/manifest.json'), 'utf8'));
+  const artifactPaths = [
+    'public/assets/library/passages.json',
+    'public/assets/library/lexical-index.json',
+    'public/assets/library/memory-terms.json',
+    'public/assets/library/manifest.json',
+    ...manifest.books.map(book => path.join('public', book.pdfPath)),
+    ...(manifest.artifacts.pdfDecoderRuntime || []).map(assetPath => path.join('public', assetPath)),
+  ];
+  const bytes = artifactPaths.reduce((sum, filePath) => sum + fs.statSync(path.resolve(filePath)).size, 0);
+  assert.ok(bytes <= 120 * 1024 * 1024, `Library package is ${(bytes / 1024 / 1024).toFixed(2)} MiB`);
+});
+
 // --- UI palette mirrors --------------------------------------------------
 // PALETTE in three-game/ui/theme.js is the source of truth. Tailwind class
 // names and CSS-module custom properties are hand-maintained copies of it

@@ -6,6 +6,8 @@ import { setTypingMode } from '../input/typingMode';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { useThreeGameStore } from '../store';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
+import { MemoryLinkedText } from '../library/MemoryLinkedText';
 
 const SYMS_FIELD_ORDERS = Object.freeze([
   { directive: SYMS_DIRECTIVES.FOLLOW, label: 'Come with me' },
@@ -21,7 +23,7 @@ function EncounterTurn({ turn, featured = false }) {
       : featured
         ? 'font-expedition text-[1.2rem] font-medium leading-[1.37] text-expedition-parchment sm:text-[1.32rem]'
         : 'text-expedition-parchment'}>
-      {isPlayer ? `You: ${turn.text}` : turn.text}
+      {isPlayer ? `You: ${turn.text}` : <MemoryLinkedText>{turn.text}</MemoryLinkedText>}
     </p>
   );
 }
@@ -50,9 +52,11 @@ export function NpcEncounterModal() {
 
   useEffect(() => {
     if (!active) return undefined;
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 170);
+    const timer = PLAYER_VISIBLE_GENERATIVE_ENABLED
+      ? window.setTimeout(() => inputRef.current?.focus(), 170)
+      : null;
     return () => {
-      window.clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
       setTypingMode(false);
     };
   }, [active]);
@@ -154,7 +158,7 @@ export function NpcEncounterModal() {
                 </button>
               ))}
             </div>
-            <form
+            {PLAYER_VISIBLE_GENERATIVE_ENABLED && <form
               className="relative mt-3"
               onSubmit={event => {
                 event.preventDefault();
@@ -175,7 +179,7 @@ export function NpcEncounterModal() {
                 className="h-12 w-full border border-expedition-gold/50 bg-[rgba(231,221,201,0.98)] px-3 pr-12 font-expedition text-[1.05rem] text-[#2d291f] outline-none placeholder:italic placeholder:text-[#867a65] focus:border-expedition-goldbright focus:ring-2 focus:ring-expedition-gold/20 disabled:opacity-65"
               />
               <button type="submit" disabled={pending || !draft.trim()} aria-label="Speak" className="absolute right-1 top-1 grid h-10 w-10 place-items-center border-l border-[#7a6848]/35 font-serif text-[1.05rem] text-[#665638] transition hover:bg-[#a96f54]/10 hover:text-[#2e2618] disabled:opacity-30">↵</button>
-            </form>
+            </form>}
           </div>
         </div>
       </section>

@@ -758,7 +758,7 @@ export function LaunchOverlay({
                 <span className="min-w-0">
                   <span className="block text-[16px] text-expedition-parchment">Sources &amp; Further Reading</span>
                   <span className="mt-0.5 block text-[13px] leading-snug text-expedition-faded">
-                    Bibliography, what is documented versus invented, and a note on the generated text.
+                    Bibliography, what is documented versus invented, and how the source-backed Library works.
                   </span>
                 </span>
                 <span className="shrink-0 text-[13px] tracking-[0.08em] text-expedition-gold">Open</span>

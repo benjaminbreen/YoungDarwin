@@ -312,6 +312,9 @@ function fieldDilemmaFallback(eventType, input = '') {
 }
 
 export default async function handler(req, res) {
+  if (process.env.YOUNG_DARWIN_ENABLE_GENERATIVE !== '1') {
+    return res.status(404).json({ error: 'Player-visible generative narration is not enabled.' });
+  }
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ error: 'Method not allowed' });

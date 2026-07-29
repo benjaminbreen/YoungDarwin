@@ -5,13 +5,18 @@ route volatile facts to source files or generated docs.
 
 ## Current Top Goal
 
-- The next major product goal is the source-backed Library and Darwin memory-link
-  system described in `docs/library-memory-system-plan.md`. Read that plan before
-  changing readable books, narrator prose, NPC/examination dialogue, historical
-  hyperlinks, OCR/search data, or production model endpoints.
+- The source-backed Library and Darwin memory-link foundation described in
+  `docs/library-memory-system-plan.md` is implemented. Its most pressing
+  follow-up is Ben's editorial review of the 150 machine-ranked primary
+  passages, followed by beta feedback and retrieval tuning. Read that plan
+  before changing readable books, narrator prose, NPC/examination dialogue,
+  historical hyperlinks, OCR/search data, or production model endpoints.
 - Preserve its central constraints: players read authored prose or verbatim
   historical sources, every surfaced passage opens its original scanned page,
   and the complete shipped library stays at or below 120 MiB.
+- Follow the scan-first Option B direction. Start with the four-book,
+  lexical-search milestone and store passage highlight geometry from the first
+  corpus build; Grant and semantic retrieval must not block the foundation.
 - Do not add new player-visible generative prose or production generative-model
   calls. Embeddings may retrieve passages but may not write, summarize, translate,
   or interpret them.

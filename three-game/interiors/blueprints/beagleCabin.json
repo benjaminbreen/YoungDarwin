@@ -90,6 +90,12 @@
       "position": [0.25, 0.99, 5.62],
       "rotation": [0, -0.12, 0],
       "radius": 2.7
+    },
+    {
+      "id": "herschel-preliminary-discourse",
+      "position": [1.88, 0.99, 5.4],
+      "rotation": [0, 0.16, 0],
+      "radius": 2.7
     }
   ],
   "rests": [

@@ -5,7 +5,7 @@ import { SourcesView } from '../../three-game/ui/SourcesView';
 export const metadata = {
   title: 'Sources & Further Reading — Young Darwin',
   description:
-    'The bibliography, provenance, and methods behind Young Darwin: what is documented, what is reconstructed, what is invented, and how the generated text is produced.',
+    'The bibliography, provenance, and methods behind Young Darwin: what is documented, reconstructed, invented, and retrieved from historical sources.',
 };
 
 export default function SourcesPage() {

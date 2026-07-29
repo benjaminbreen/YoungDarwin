@@ -51,16 +51,18 @@ import {
 import { clampToWalkable, terrainHeight } from './world/terrain';
 import { getNpcPoses } from './world/npcRuntime';
 import { forageableAllowsMode } from './world/forageables';
-import { getReadableBook } from './books/bookCatalog';
+import { getReadableBook, getReadableBooks } from './books/bookCatalog';
 import { getInteriorDefinition, isInteriorZone } from './interiors/interiorRegistry';
 import { emitPropEvent } from './physics/props/propEvents';
 import { mergeCropDamageState } from './world/crops/cropDamage';
 import {
   clampNpcEncounterEffects,
   encounterAmbientLine,
+  getAuthoredNpcReply,
   getNpcEncounter,
   getNpcEncounterPresentation,
 } from './encounters/npcEncounters';
+import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from './ai/generativePolicy';
 import {
   DEFAULT_SYMS_DIRECTIVE,
   SYMS_DIRECTIVES,
@@ -1115,6 +1117,21 @@ export const useThreeGameStore = create((set, get) => ({
       return completed;
     }
 
+    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+      const completed = {
+        ...record,
+        phase: 'ready',
+        source: 'canonical',
+        assessment: localAssessment,
+      };
+      set(current => (
+        current.finalAssessment?.id === record.id
+          ? { finalAssessment: completed }
+          : {}
+      ));
+      return completed;
+    }
+
     const idempotencyKey = [
       'final-assessment',
       state.seed || 'three',
@@ -1550,6 +1567,40 @@ export const useThreeGameStore = create((set, get) => ({
     // reply text: repeated questions are valid new turns with new trust effects.
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     const idempotencyKey = [requestState.seed || 'three', npcId, 'encounter-turn', turnId].join(':');
+    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+      const data = getAuthoredNpcReply(npcId, playerInput, {
+        specimenCount: new Set([
+          ...(requestState.collectedSpecimenIds || []),
+          ...(requestState.documentedSpecimenIds || []),
+        ]).size,
+      });
+      if (!data) {
+        set({ npcEncounterPending: false, npcEncounterError: null });
+        return null;
+      }
+      const { trustDelta, flags } = clampNpcEncounterEffects(npcId, data);
+      set(current => {
+        if (current.activeNpcEncounter?.npcId !== npcId) return { npcEncounterPending: false };
+        const previous = current.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+        const nextTrust = Math.max(0, Math.min(100, previous.trust + trustDelta));
+        const nextFlags = [...new Set([...(previous.flags || []), ...flags])];
+        return {
+          activeNpcEncounter: {
+            ...current.activeNpcEncounter,
+            turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: data.dialogue }].slice(-8),
+            trust: nextTrust,
+            flags: nextFlags,
+          },
+          npcEncounterState: {
+            ...current.npcEncounterState,
+            [npcId]: { trust: nextTrust, flags: nextFlags },
+          },
+          npcEncounterPending: false,
+          npcEncounterError: null,
+        };
+      });
+      return { ...data, source: 'authored' };
+    }
     try {
       const response = await fetchWithTimeout('/api/three-encounter', {
         method: 'POST',
@@ -1737,13 +1788,20 @@ export const useThreeGameStore = create((set, get) => ({
       ? state
       : { interiorPrompt }
   )),
-  openReadableBook: (bookId, options = {}) => set(state => {
-    const book = getReadableBook(bookId);
+  openLibrary: (options = {}) => set(state => {
+    const requestedBookId = options.bookId || state.readableBookSession?.bookId;
+    const book = getReadableBook(requestedBookId) || getReadableBooks()[0];
     if (!book) return {};
     const firstConsultation = !state.consultedBookIds.includes(book.id);
     return {
       readableBookSession: {
         bookId: book.id,
+        pdfPage: Number.isFinite(Number(options.pdfPage)) ? Math.max(1, Math.round(Number(options.pdfPage))) : null,
+        passageId: options.passageId || null,
+        termId: options.termId || null,
+        query: options.query || '',
+        resultIds: Array.isArray(options.resultIds) ? options.resultIds : [],
+        drawerOpen: options.drawerOpen !== false,
         focus: options.focus || null,
         openedAt: Date.now(),
       },
@@ -1755,6 +1813,14 @@ export const useThreeGameStore = create((set, get) => ({
       inspectedScreenPosition: null,
     };
   }),
+  openReadableBook: (bookId, options = {}) => {
+    get().openLibrary({ ...options, bookId, drawerOpen: options.drawerOpen ?? false });
+  },
+  updateLibrarySession: updates => set(state => (
+    state.readableBookSession
+      ? { readableBookSession: { ...state.readableBookSession, ...(updates || {}) } }
+      : {}
+  )),
   closeReadableBook: () => set({ readableBookSession: null }),
   setReadableBookPage: (bookId, page) => set(state => ({
     bookLastPages: {
@@ -2737,6 +2803,12 @@ export const useThreeGameStore = create((set, get) => ({
       };
     });
 
+    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+      const payload = localExamineFallback(trimmed, session);
+      applyReply({ ...payload, fallback: false, source: 'authored' });
+      return payload;
+    }
+
     try {
       const response = await fetchWithTimeout('/api/three-examine', {
         method: 'POST',
@@ -3464,6 +3536,30 @@ export const useThreeGameStore = create((set, get) => ({
       state.activeConstraint?.type || 'free',
       textHash(trimmed),
     ].join(':');
+
+    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+      if (state.activeConstraint?.type === 'snare_immobilized') {
+        const resolved = localSnareEscapeResolution(trimmed);
+        get().applySnareEscapeResolution(resolved, { playerInput: trimmed });
+        return resolved;
+      }
+      if (FIELD_DILEMMA_TYPES.has(state.activeConstraint?.type)) {
+        const resolved = localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
+        get().applyFieldDilemmaResolution(resolved, { playerInput: trimmed });
+        return resolved;
+      }
+      const data = localNarratorFallback({
+        input: trimmed,
+        nearbySpecimen,
+        playableModeId: state.playableModeId,
+      });
+      set({ narratorPending: false, narratorError: null });
+      get().applyNarration({ ...data, source: 'authored' }, {
+        playerInput: trimmed,
+        allowThought: false,
+      });
+      return data;
+    }
 
     if (state.activeConstraint?.type === 'snare_immobilized') {
       try {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Young Darwin — Library Option B: Scan First</title>
+  <title>Young Darwin — Selected Library Direction: Scan First</title>
   <style>
     :root {
       color-scheme: dark;
@@ -15,8 +15,9 @@
       --ink: #3b3022;
       --gold: #c6a45f;
       --gold-light: #e7ca85;
-      --line: rgba(198, 164, 95, .3);
-      --line-strong: rgba(198, 164, 95, .58);
+      --line: rgba(231, 220, 192, .13);
+      --line-strong: rgba(231, 220, 192, .22);
+      --gold-frame: rgba(198, 164, 95, .58);
       --muted: rgba(231, 220, 192, .62);
       --sea: #5d8580;
       --serif: Georgia, "Times New Roman", Times, serif;
@@ -59,7 +60,7 @@
       border: 1px solid rgba(231, 202, 133, .34);
       background: rgba(7, 11, 16, .84);
       color: rgba(244, 236, 216, .78);
-      font: 650 9px/1 var(--ui);
+      font: 650 10px/1 var(--ui);
       letter-spacing: .16em;
       text-transform: uppercase;
       backdrop-filter: blur(10px);
@@ -100,7 +101,7 @@
       flex-direction: column;
       align-items: center;
       min-height: 0;
-      border-right: 1px solid var(--line-strong);
+      border-right: 1px solid var(--line);
       background:
         linear-gradient(180deg, rgba(23, 35, 51, .99), rgba(8, 14, 21, .99)),
         var(--navy);
@@ -140,12 +141,15 @@
         inset 5px 0 0 rgba(255, 255, 255, .08),
         0 5px 12px rgba(0, 0, 0, .26);
       color: rgba(255, 246, 219, .9);
-      font: 700 10px/1 var(--ui);
+      font: 700 11px/1 var(--ui);
       letter-spacing: .06em;
-      transition: transform 150ms ease, border-color 150ms ease;
+      transition: border-color 150ms ease, background 150ms ease;
     }
 
-    .rail-book:hover { transform: translateX(2px); }
+    .rail-book:hover {
+      border-color: rgba(231, 220, 192, .42);
+      background: color-mix(in srgb, var(--cover, #574536) 84%, white);
+    }
     .rail-book.active {
       border-color: var(--gold-light);
       box-shadow:
@@ -184,7 +188,7 @@
       grid-template-rows: auto auto minmax(0, 1fr) auto;
       min-width: 0;
       overflow: hidden;
-      border-right: 1px solid var(--line-strong);
+      border-right: 1px solid var(--gold-frame);
       background:
         linear-gradient(180deg, rgba(25, 38, 54, .99), rgba(11, 18, 27, .99)),
         var(--navy);
@@ -207,8 +211,8 @@
     .eyebrow {
       margin: 0 0 8px;
       color: var(--gold);
-      font: 700 9px/1 var(--ui);
-      letter-spacing: .2em;
+      font: 700 11px/1 var(--ui);
+      letter-spacing: .16em;
       text-transform: uppercase;
     }
 
@@ -268,8 +272,8 @@
       justify-content: space-between;
       margin: 2px 1px 12px;
       color: rgba(231, 220, 192, .58);
-      font: 700 9px/1 var(--ui);
-      letter-spacing: .15em;
+      font: 700 11px/1 var(--ui);
+      letter-spacing: .12em;
       text-transform: uppercase;
     }
 
@@ -304,8 +308,8 @@
       gap: 8px;
       margin-bottom: 7px;
       color: rgba(231, 220, 192, .55);
-      font: 700 8px/1 var(--ui);
-      letter-spacing: .13em;
+      font: 700 11px/1 var(--ui);
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
 
@@ -339,7 +343,7 @@
       padding: 12px 17px 14px;
       border-top: 1px solid var(--line);
       color: rgba(231, 220, 192, .48);
-      font: 10px/1.4 var(--ui);
+      font: 11px/1.45 var(--ui);
     }
 
     /* The scan remains the visual center. */
@@ -377,8 +381,8 @@
       border: 1px solid var(--line-strong);
       background: rgba(198,164,95,.07);
       color: var(--gold-light);
-      font: 700 9px/1 var(--ui);
-      letter-spacing: .13em;
+      font: 700 11px/1 var(--ui);
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
 
@@ -403,8 +407,8 @@
       display: block;
       margin-top: 5px;
       color: var(--muted);
-      font: 9px/1 var(--ui);
-      letter-spacing: .12em;
+      font: 11px/1 var(--ui);
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
 
@@ -413,8 +417,8 @@
       align-items: center;
       gap: 8px;
       color: rgba(231, 220, 192, .68);
-      font: 9px/1 var(--ui);
-      letter-spacing: .1em;
+      font: 11px/1 var(--ui);
+      letter-spacing: .08em;
       text-transform: uppercase;
     }
 
@@ -521,7 +525,10 @@
     }
 
     .matched {
-      background: linear-gradient(transparent 66%, rgba(179, 136, 50, .24) 66%);
+      padding: 0 1px;
+      background: rgba(179, 136, 50, .2);
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
     }
 
     .page-number {
@@ -557,7 +564,7 @@
       display: grid;
       grid-template-columns: minmax(260px, 1fr) auto;
       align-items: stretch;
-      border-top: 1px solid var(--line-strong);
+      border-top: 1px solid var(--line);
       background: rgba(12, 19, 28, .98);
     }
 
@@ -573,8 +580,8 @@
       display: block;
       margin-bottom: 7px;
       color: var(--sea);
-      font: 750 8px/1 var(--ui);
-      letter-spacing: .18em;
+      font: 750 11px/1 var(--ui);
+      letter-spacing: .14em;
     }
 
     .memory p {
@@ -606,8 +613,8 @@
       padding: 0 24px;
       border-left: 1px solid var(--line);
       color: rgba(231, 220, 192, .57);
-      font: 9px/1 var(--ui);
-      letter-spacing: .12em;
+      font: 11px/1 var(--ui);
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
 
@@ -669,7 +676,7 @@
   </style>
 </head>
 <body>
-  <div class="mockup-label">Option B · scan first</div>
+  <div class="mockup-label">Selected direction · scan first</div>
 
   <main class="library" id="library">
     <aside class="book-rail" aria-label="Books in the library">
@@ -734,7 +741,7 @@
         </button>
       </div>
 
-      <footer class="drawer-foot">Every result opens the original scanned page. Underlining marks the matched passage; it is not a modern annotation.</footer>
+      <footer class="drawer-foot" id="anchorNote" aria-live="polite">This memory link shades its editor-approved excerpt. The shading is a navigation overlay, not part of the historical scan.</footer>
     </aside>
 
     <section class="reader" aria-label="Scanned book page">
@@ -746,7 +753,7 @@
           <strong id="bookTitle">Lectures on Comparative Anatomy</strong>
           <span id="bookByline">Robert Edmond Grant · London · 1833–1834</span>
         </div>
-        <span class="provenance">Original scan · p. <b id="pageBadge">10</b></span>
+        <span class="provenance">Source-aligned · scan p. <b id="pageBadge">10</b></span>
       </header>
 
       <div class="scan-stage">
@@ -833,22 +840,34 @@
     const searchInput = document.querySelector("#searchInput");
     const queryText = document.querySelector("#queryText");
     const slider = document.querySelector("#pageSlider");
+    const anchorNote = document.querySelector("#anchorNote");
+    let anchorMode = "curated";
 
     function setDrawer(open) {
       library.classList.toggle("drawer-closed", !open);
       drawerToggle.setAttribute("aria-expanded", String(open));
     }
 
-    function selectPassage(id) {
+    function passageMarkup(text, mode) {
+      if (mode === "curated") return text;
+      const unmarked = text.replace(/<span class="matched">([\s\S]*?)<\/span>/, "$1");
+      return `<span class="matched">${unmarked}</span>`;
+    }
+
+    function selectPassage(id, mode = anchorMode) {
       const passage = passages[id] || passages.grant;
+      anchorMode = mode;
       document.querySelector("#bookTitle").textContent = passage.title;
       document.querySelector("#bookByline").textContent = passage.byline;
       document.querySelector("#runningHead").textContent = passage.title;
       document.querySelector("#chapter").textContent = passage.chapter;
-      document.querySelector("#passageText").innerHTML = passage.text;
+      document.querySelector("#passageText").innerHTML = passageMarkup(passage.text, mode);
       document.querySelector("#pageBadge").textContent = passage.page;
       document.querySelector("#pageNumber").textContent = passage.page;
       document.querySelector("#pageToolNumber").textContent = passage.page;
+      anchorNote.textContent = mode === "curated"
+        ? "This memory link shades its editor-approved excerpt. The shading is a navigation overlay, not part of the historical scan."
+        : "Free search shades the full retrieved passage because a semantic result may not contain one literal matching phrase.";
       slider.value = Math.min(Number(passage.page), Number(slider.max));
 
       document.querySelectorAll(".result").forEach((button) => {
@@ -878,7 +897,7 @@
       searchInput.value = "fossils and former inhabitants";
       queryText.textContent = searchInput.value;
       setDrawer(true);
-      selectPassage("grant");
+      selectPassage("grant", "curated");
     });
 
     searchForm.addEventListener("submit", (event) => {
@@ -886,11 +905,11 @@
       const query = searchInput.value.trim() || "all passages";
       queryText.textContent = query;
       const lower = query.toLowerCase();
-      if (lower.includes("volcan")) selectPassage("juan");
-      else if (lower.includes("veget") || lower.includes("plant")) selectPassage("humboldt");
-      else if (lower.includes("law") || lower.includes("cause") || lower.includes("geolog")) selectPassage("lyell");
-      else if (lower.includes("experience") || lower.includes("observation")) selectPassage("herschel");
-      else selectPassage("grant");
+      if (lower.includes("volcan")) selectPassage("juan", "passage");
+      else if (lower.includes("veget") || lower.includes("plant")) selectPassage("humboldt", "passage");
+      else if (lower.includes("law") || lower.includes("cause") || lower.includes("geolog")) selectPassage("lyell", "passage");
+      else if (lower.includes("experience") || lower.includes("observation")) selectPassage("herschel", "passage");
+      else selectPassage("grant", "passage");
     });
 
     slider.addEventListener("input", () => {

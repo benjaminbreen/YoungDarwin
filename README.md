@@ -27,9 +27,9 @@ Open `http://localhost:3000/three`.
 ## Sources
 
 The bibliography behind the game, an account of what is documented versus
-reconstructed versus invented, and a disclosure of how the generated text is
-produced all live at `/sources` (reachable in-game from the About menu). Content
-is authored in `three-game/sources/sourcesCatalog.js`.
+reconstructed versus invented, and an explanation of the game’s authored prose
+and source-retrieval system all live at `/sources` (reachable in-game from the
+About menu). Content is authored in `three-game/sources/sourcesCatalog.js`.
 
 ## License
 
