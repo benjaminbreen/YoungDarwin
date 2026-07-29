@@ -42,6 +42,7 @@
     "asset:terrain-detail": "node scripts/build-terrain-sand-detail.mjs",
     "asset:white-sand": "node scripts/build-white-sand-beach-textures.mjs",
     "asset:terrain-pbr": "node scripts/build-floreana-nrh-textures.mjs",
+    "asset:terrain-post-office-bay": "node scripts/build-post-office-bay-terrain-textures.mjs",
     "asset:travel-textures": "node scripts/build-travel-textures.mjs",
     "asset:audio:post-office-bay": "node scripts/build-post-office-bay-audio.mjs",
     "asset:audio:interactions": "node scripts/build-interaction-audio.mjs",

@@ -24,102 +24,6 @@ export const DEFAULT_PLAYER_MODEL_ASSET_ID = 'darwin5';
 
 /** @type {Record<string, ModelAssetConfig>} */
 export const modelAssets = {
-  darwin: {
-    enabled: true,
-    preload: false,
-    path: '/assets/models/darwin-final-animated.glb',
-    // Legacy primary Darwin kept for Shift+9 A/B testing. Runtime traversal
-    // clips are consolidated into this smaller GLB for quick fallback loading.
-    // Keep candidate2 below for Shift+9 visual A/B testing.
-    scale: 1.56,
-    rotation: [0, 0, 0],
-    yOffset: 0,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    materialLift: 0.1,
-    materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.16,
-    // Player-only material polish layered on top of the cel pipeline: a subtle
-    // fresnel rim for silhouette readability plus world tone mapping so Darwin
-    // sits in the scene instead of reading as separately lit.
-    // Tunables — ask for a screenshot to dial in. Remove to revert.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.2, rimIntensity: 0.11, roughness: 0.74, toneMapped: true },
-    targetTriangles: 12000,
-    prompt: 'Stylized low-poly young Charles Darwin naturalist, 1835 Galapagos expedition, wide-brim straw hat, brown frock coat, waistcoat, specimen satchel, field notebook, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral A-pose, clean topology, GLB.',
-  },
-  darwinCandidate2: {
-    enabled: true,
-    preload: false,
-    path: '/assets/models/darwin-candidate-2-animated.glb',
-    scale: 1,
-    rotation: [0, 0, 0],
-    yOffset: 0,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    materialLift: 0.08,
-    materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.14,
-    // Same player rim/sheen as V1 so the hotkey-9 A/B isolates mesh+texture,
-    // not a separate player-lighting treatment.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.2, rimIntensity: 0.11, roughness: 0.74, toneMapped: true },
-    targetTriangles: 50000,
-    prompt: 'Mixamo-rigged Young Darwin candidate 2 with expanded locomotion, traversal, injured, water, and naturalist action animation set.',
-  },
-  darwinTripo: {
-    enabled: true,
-    preload: false,
-    // ?v bust: the GLB was rebuilt in place (UV fix); bump this if you rebuild
-    // it again so the browser refetches instead of serving a stale cached copy.
-    path: '/assets/models/darwin-tripo.glb',
-    // Tripo v3.1 mesh, Mixamo-rigged (mixamorig:), decimated 1.96M -> 60k,
-    // re-textured + regraded (scripts/regrade-tripo-texture.mjs) + WebP,
-    // normalized to 1.75m. No baked clips — borrows V2's full set via
-    // animationSource (identical skeleton; both ~1.75m so no track rescale).
-    animationSource: 'darwinCandidate2',
-    scale: 1.0,
-    rotation: [0, 0, 0],
-    yOffset: 0,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    // Tripo albedo is already warm/graded; no cream lift, softer emissive, and
-    // a higher roughness + gentler rim so the (lighter) skin doesn't blow out.
-    materialLift: 0,
-    materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.09,
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.3, rimIntensity: 0.1, roughness: 0.88, toneMapped: true },
-    targetTriangles: 60000,
-    prompt: 'Tripo v3.1 Young Darwin, segmented + Mixamo-rigged, game-decimated.',
-  },
-  darwin4: {
-    enabled: true,
-    preload: false,
-    path: '/assets/models/darwin4.glb',
-    // Darwin 4: Mixamo-rigged FBX with embedded texture, rebuilt with native
-    // baked clips retargeted onto its own 41-bone armature. Do not borrow V2
-    // clips at runtime; that rig mismatch distorts proportions during gait.
-    // Source mesh is ~2.26m tall; 0.83 brings it in line with Syms and the
-    // primary Darwin runtime height (~1.87m).
-    scale: 0.83,
-    rotation: [0, 0, 0],
-    yOffset: 0,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    materialLift: 0.025,
-    materialEmissive: '#20170f',
-    // Match darwin5: drop the self-lit emissive glow at night, lower roughness +
-    // add envMap sheen so cloth/leather read as material, not flat "velvet".
-    materialEmissiveIntensity: 0.035,
-    // toneMapped:true — test running the player through ACES like the world. Flip
-    // to false (or remove) to revert to the cel-pipeline un-tonemapped look.
-    // Sidecar maps (scripts/build-darwin-roughness.mjs + build-darwin-detail.mjs):
-    //  roughnessMapUrl — leather glossier + waistcoat semi-gloss, cloth/skin at 0.6.
-    //  normalMapUrl    — gentle derived micro-detail relief (normalScale tunes it).
-    //  albedoMapUrl    — crisper albedo + tamed hot cream trousers.
-    // ?v bump busts the browser cache when a map is regenerated.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 4.4, rimIntensity: 0.12, roughness: 0.64, envMapIntensity: 0.24, toneMapped: true, roughnessMapUrl: '/assets/models/darwin4-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin4-normal.webp?v=1', normalScale: 0.8, albedoMapUrl: '/assets/models/darwin4-albedo-enh.webp?v=1' },
-    targetTriangles: 60000,
-    prompt: 'Darwin candidate 4, Mixamo-rigged textured FBX, game-decimated.',
-  },
   darwin5: {
     enabled: true,
     preload: true,
@@ -317,14 +221,14 @@ export const modelAssets = {
     targetTriangles: 60500,
     prompt: 'Production Darwin5 with Blender-authored blinking, secondary hair motion, recessed forehead coverage, separated skin/hair response, and reflective brass clothing buttons.',
   },
-  // Manifest-driven archive of the candidate promoted into `darwin5` on
-  // 2026-07-20. It stays loadable from developer tooling as an exact rollback
-  // reference, but is no longer part of the Shift+9 player-model cycle.
-  darwin5BlinkPreview: {
+  // Review-only locomotion candidate. The object is completed from Darwin5
+  // below the registry so its accepted mesh/material/blink/hair configuration
+  // stays identical while asset inventory tools can still see and audit it.
+  darwin5LocomotionPreview: {
     enabled: true,
     preload: false,
-    path: '/assets/models/darwin5-blink-preview.glb',
-    cacheKey: 'darwin5-blink-preview-20260720h',
+    path: '/assets/models/darwin5-locomotion-preview.glb',
+    cacheKey: 'darwin5-locomotion-preview-20260720c',
     animationBanks: [
       {
         id: 'motion',
@@ -347,156 +251,8 @@ export const modelAssets = {
     ],
     animationProfile: 'darwin5',
     playerProfile: 'darwin5',
-    scale: 1.0,
-    rotation: [0, 0, 0],
-    yOffset: -0.025,
-    receiveShadow: true,
-    visualGrounding: true,
-    normalizeMaterials: true,
-    materialLift: 0.05,
-    materialEmissive: '#20170f',
-    materialEmissiveIntensity: 0.035,
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
-    materialRegionUpgrade: {
-      skin: {
-        materialNames: ['Darwin5 skin', 'Darwin5 eyelid skin', 'Darwin5 forehead underlay'],
-        metalness: 0,
-        useRoughnessMap: false,
-        roughness: 0.62,
-        normalScale: 0.2,
-        specularIntensity: 0.32,
-        clearcoat: 0.025,
-        clearcoatRoughness: 0.5,
-        envMapIntensity: 0.2,
-      },
-      hair: {
-        materialNames: ['Darwin5 hair'],
-        metalness: 0,
-        useRoughnessMap: false,
-        roughness: 0.68,
-        normalScale: 0.42,
-        colorBlend: '#c2cad2',
-        colorBlendAmount: 0.1,
-        colorScale: 0.83,
-        specularIntensity: 0.38,
-        anisotropy: 0,
-        anisotropyRotation: 0,
-        envMapIntensity: 0.2,
-      },
-      brassButtons: {
-        materialNames: ['Darwin5 brass buttons'],
-        metalness: 1,
-        useAlbedoMap: false,
-        useRoughnessMap: false,
-        roughness: 0.045,
-        useNormalMap: false,
-        colorBlend: '#f0b43d',
-        colorBlendAmount: 0.18,
-        envMapIntensity: 1.5,
-        directSpecularGlint: {
-          color: '#fff0b5',
-          specularBoost: 6.5,
-          bloomStrength: 1.35,
-          threshold: 0.012,
-          thresholdEnd: 0.14,
-          focus: 1.9,
-        },
-      },
-    },
-    blinkMorph: {
-      name: 'Blink',
-      minInterval: 2.8,
-      maxInterval: 6.4,
-      closeDuration: 0.12,
-      holdDuration: 0.07,
-      openDuration: 0.21,
-      durationVariation: 0.1,
-      doubleBlinkChance: 0.12,
-      doubleBlinkDelay: 0.19,
-    },
-    // Head/neck glance toward nearby wildlife. ROLLBACK: delete this block (or
-    // set `enabled: false`) and the behaviour is gone with no other edits —
-    // nothing else in the runtime references it. `window.__darwinGaze(false)`
-    // kills it live without a reload.
-    proceduralGazeMotion: {
-      enabled: true,
-      headBone: 'mixamorig:Head',
-      neckBone: 'mixamorig:Neck',
-      // Total yaw budget, split between neck and head so it reads as a turn
-      // rather than an owl swivel. Past the cap he gives up instead of straining.
-      maxYaw: 0.61,
-      maxPitch: 0.3,
-      neckShare: 0.6,
-      // Targets outside this half-angle from where he already faces are
-      // ignored; he does not track things behind him.
-      coneHalfAngle: 1.15,
-      // Ease off as the target nears the cone edge so exits are not a snap.
-      coneFalloff: 0.35,
-      // Angular deadzone: below this the head stays put, so tiny target
-      // jitter does not become head jitter.
-      deadzone: 0.06,
-      // Delay before acquiring, then how long he will hold before politely
-      // looking away even if the target is still there. Real people do not
-      // stare, and this single pair does most of the believability work.
-      acquireDelay: 0.32,
-      holdDuration: 2.6,
-      releaseDuration: 1.4,
-      // Spring toward the target angle; deliberately soft.
-      stiffness: 42,
-      damping: 9.5,
-      // Suppressed while these are true — the authored clips already own the
-      // head there and layering on top reads as a wobble.
-      suppressWhileAiming: true,
-      suppressWhileRunning: true,
-      suppressWhileAirborne: true,
-    },
-    secondaryHairMotion: {
-      positiveName: 'HairSwayPositive',
-      negativeName: 'HairSwayNegative',
-      liftName: 'HairLift',
-      dropName: 'HairDrop',
-      walkAmplitude: 0.42,
-      runAmplitude: 0.78,
-      // Wind amplitudes are scaled up together with the raised `fullWindSpeed`
-      // reference below: a calm sunny day lands roughly where it always did,
-      // while trade winds and storms now have somewhere to go.
-      windAmplitude: 1.9,
-      windRustleAmplitude: 2.3,
-      windLiftAmplitude: 0.42,
-      // Lift from wind hitting him head-on (see `headwind` in ModelAsset).
-      headwindLiftAmplitude: 0.55,
-      // How hard the shared island gust envelope modulates hair, 0 = ignore
-      // gusts. This is the knob that ties hair surges to the foliage surges.
-      windGustResponse: 0.55,
-      windFrequency: 3.2,
-      windRustleFrequency: 6.4,
-      strideLiftScale: 0.38,
-      airborneLiftResponse: 0.075,
-      maxAirborneLift: 0.42,
-      runSweepLift: 0.2,
-      walkSweepLift: 0.08,
-      // Morph influence above 1 extrapolates the shape key past its authored
-      // displacement. The Blender locks are only ~1.4cm of sway and ~1.1cm of
-      // lift, which is the real ceiling on how wind-blown the hair can look;
-      // overdriving the influence buys headroom without a GLB rebake. Push
-      // these much further and the locks start to separate from the scalp.
-      maxSwayInfluence: 1.35,
-      maxLiftInfluence: 1.2,
-      swayStiffness: 78,
-      swayDamping: 11.5,
-      liftStiffness: 65,
-      liftDamping: 10.5,
-      takeoffImpulse: 3.8,
-      landingImpulse: 5.5,
-      // Surface wind speed that saturates the hair response. Sits above the
-      // strongest weather state (storm peaks near 1.73) so trade wind, rain,
-      // and storm are all distinguishable instead of clamping to the same
-      // value the way they did at 1.
-      fullWindSpeed: 1.8,
-      runSpeedReference: 4.8,
-    },
     targetTriangles: 60500,
-    prompt: 'Archived manifest-driven copy of the Darwin5 blink and secondary-hair candidate promoted to the production default.',
+    prompt: 'Darwin5 locomotion review candidate with calm idle and retargeted walking/running start-stop transitions.',
   },
   syms: {
     enabled: true,
@@ -1577,17 +1333,11 @@ export const modelAssets = {
   },
 };
 
-// Review-only locomotion candidate. Spread the production entry so the
-// accepted mesh, materials, blinking, hair motion, and deferred banks remain
-// identical; only the boot GLB and cache identity differ. Shift+9 selects it.
+// Complete the review entry from production Darwin5. Its explicitly declared
+// path and banks above keep generated inventories and asset audits accurate.
 modelAssets.darwin5LocomotionPreview = {
   ...modelAssets.darwin5,
-  preload: false,
-  path: '/assets/models/darwin5-locomotion-preview.glb',
-  cacheKey: 'darwin5-locomotion-preview-20260720c',
-  animationProfile: 'darwin5',
-  playerProfile: 'darwin5',
-  prompt: 'Darwin5 locomotion review candidate with calm idle and retargeted walking/running start-stop transitions.',
+  ...modelAssets.darwin5LocomotionPreview,
 };
 
 /**

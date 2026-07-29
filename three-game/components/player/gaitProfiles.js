@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 
 const STRIDE_TIME_SCALE = {
-  darwin: { walk: 1.03, run: 1.02, jog: 1.03 },
-  darwinCandidate2: { walk: 1.04, run: 1.02, jog: 1.03 },
-  darwin4: { walk: 1.04, run: 1.02, jog: 1.03 },
   darwin5: {
     walk: 1.1,
     run: 1.05,

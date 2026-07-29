@@ -9,11 +9,8 @@ import { DEFAULT_PLAYER_MODEL_ASSET_ID, modelAssets } from '../../modelAssets';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DARWIN_LABELS = {
-  darwin: 'Darwin 1',
-  darwinCandidate2: 'Candidate 2',
-  darwinTripo: 'Tripo',
-  darwin4: 'Darwin 4',
   darwin5: 'Darwin 5 (default)',
+  darwin5LocomotionPreview: 'Darwin 5 (locomotion preview)',
 };
 
 const DARWIN_MODELS = Object.entries(modelAssets)
@@ -368,7 +365,7 @@ export function DarwinAnimationDevPanel({ open, onClose }) {
   const [paused, setPaused] = useState(false);
   const [timeScale, setTimeScale] = useState(1);
   const [leftModelId, setLeftModelId] = useState(DEFAULT_PLAYER_MODEL_ASSET_ID);
-  const [rightModelId, setRightModelId] = useState(modelAssets.darwin4?.enabled ? 'darwin4' : 'darwinCandidate2');
+  const [rightModelId, setRightModelId] = useState('darwin5LocomotionPreview');
   const [animationMap, setAnimationMap] = useState({});
 
   const onAnimations = React.useCallback((modelId, names) => {

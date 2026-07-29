@@ -1520,6 +1520,27 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550/);
   assert.match(gameSource, /displayedProgress < 100/);
   assert.match(overlaySource, /PROLOGUE_AUTO_BEGIN_MS = 15000/);
+  assert.match(
+    gameSource,
+    /STARTUP_OPENING_CONTENT_PHASE = 3/,
+    'optional props, specimens, ships, and NPCs must not gate launch readiness',
+  );
+  assert.match(gameSource, /BOOT_DEGRADED_READY_TIMEOUT_MS = 10000/);
+  assert.match(
+    gameSource,
+    /loadingContentTarget = screenshotMode\s*\?\s*STARTUP_FULL_CONTENT_PHASE\s*:\s*STARTUP_OPENING_CONTENT_PHASE/,
+    'functional smoke should exercise the same essential readiness boundary as players',
+  );
+  assert.match(
+    gameSource,
+    /CONTENT_MOUNT_STEPS\.filter\(phase => phase > loadingContentTarget\)/,
+    'late startup content should stream after the essential scene is ready',
+  );
+  assert.match(
+    gameSource,
+    /!gameStarted \|\| !sceneReady \|\| !launchOverlayDismissed/,
+    'late asset mounts must not compete with the launch veil exit',
+  );
   assert.match(cssSource, /launch-prologue-veil/);
   assert.doesNotMatch(cssSource, /launch-prologue-part-left/);
   assert.match(
@@ -1994,11 +2015,69 @@ test('Darwin5 stays the default while extended waits retain the varied idle pool
   assert.equal(DEFAULT_PLAYER_MODEL_ASSET_ID, 'darwin5');
   assert.match(playableModesSource, /darwin:\s*\{[^}]*assetId:\s*'darwin5'/s);
   assert.equal(modelAssets[DEFAULT_PLAYER_MODEL_ASSET_ID].path, '/assets/models/darwin5.glb');
+  assert.deepEqual(
+    Object.entries(modelAssets)
+      .filter(([id, asset]) => id === 'darwin5' || asset.playerProfile === 'darwin5')
+      .map(([id]) => id),
+    ['darwin5', 'darwin5LocomotionPreview'],
+  );
+  assert.equal(
+    modelAssets.darwin5LocomotionPreview.path,
+    '/assets/models/darwin5-locomotion-preview.glb',
+  );
+  assert.match(
+    modelSource,
+    /const PLAYER_MODEL_CYCLE = Array\.from\(new Set\(\[\s*DEFAULT_PLAYER_MODEL_ASSET_ID,\s*'darwin5LocomotionPreview',\s*\]\)\);/s,
+  );
+  for (const retiredAsset of [
+    'darwin-final-animated.glb',
+    'darwin-candidate-2-animated.glb',
+    'darwin-tripo.glb',
+    'darwin4.glb',
+    'darwin5-blink-preview.glb',
+  ]) {
+    assert.equal(fs.existsSync(path.resolve('public/assets/models', retiredAsset)), false);
+  }
   assert.doesNotMatch(controllerSource, /!stateRef\.current\.longIdle/);
   assert.doesNotMatch(modelSource, /motionRef\.current\.longIdle[^\n]*boredIdle/);
   for (const clip of ['lookAroundShort', 'fidgetStand', 'neckStretch', 'neutralIdle', 'armStretch']) {
     assert.match(controllerSource, new RegExp(`clip: '${clip}'`));
   }
+});
+
+test('Post Office Bay uses compact verified terrain textures for its two hero ground layers', () => {
+  const materialSource = fs.readFileSync(
+    path.resolve('three-game/world/regions/postOfficeBay/material.js'),
+    'utf8',
+  );
+  const outputDirectory = path.resolve(
+    'public/assets/textures/world/floreana-pbr/post-office-bay',
+  );
+  const optimizedFiles = [
+    'sandy-tuff_nrh-512-lossless-v1.webp',
+    'galapagos-sand_albedo-lossless-v1.webp',
+    'galapagos-sand_nrh-512-lossless-v1.webp',
+  ];
+  const sourceFiles = [
+    'sandy-tuff_nrh.png',
+    'galapagos-sand_albedo.png',
+    'galapagos-sand_nrh.png',
+  ];
+  for (const filename of optimizedFiles) {
+    assert.match(materialSource, new RegExp(filename.replaceAll('.', '\\.')));
+    assert.equal(fs.existsSync(path.join(outputDirectory, filename)), true);
+  }
+  const optimizedBytes = optimizedFiles.reduce(
+    (sum, filename) => sum + fs.statSync(path.join(outputDirectory, filename)).size,
+    0,
+  );
+  const sourceBytes = sourceFiles.reduce(
+    (sum, filename) => sum + fs.statSync(
+      path.resolve('public/assets/textures/world/floreana-pbr', filename),
+    ).size,
+    0,
+  );
+  assert.ok(optimizedBytes < sourceBytes * 0.4);
 });
 
 test('landing on loose props creates a mass-sensitive downward settle without launch', () => {

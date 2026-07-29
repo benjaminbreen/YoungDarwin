@@ -82,7 +82,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       '0: asset browser',
       '7: animal animation lab',
       '8: Darwin animation lab',
-      '9: cycle Darwin model',
+      'Shift+9: toggle Darwin5 locomotion preview',
     ]]);
   }
 

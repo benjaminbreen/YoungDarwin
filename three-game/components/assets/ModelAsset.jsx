@@ -24,10 +24,6 @@ import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
 import { shotgunAimState } from '../../shooting/aimState';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
-  'darwin',
-  'darwinCandidate2',
-  'darwinTripo',
-  'darwin4',
   'darwin5',
   'syms',
 ]);
@@ -36,10 +32,6 @@ const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
 // distance. Companions such as Syms can retain character shadows and generous
 // culling while still benefiting from the world-actor animation LOD.
 const ALWAYS_ANIMATED_CHARACTER_ASSETS = new Set([
-  'darwin',
-  'darwinCandidate2',
-  'darwinTripo',
-  'darwin4',
   'darwin5',
 ]);
 

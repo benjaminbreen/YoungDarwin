@@ -351,22 +351,22 @@ const HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 3000;
 const HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550;
 const HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS = 80;
 const HISTORICAL_PROLOGUE_EXIT_MS = 2300;
+const BOOT_DEGRADED_READY_TIMEOUT_MS = 10000;
 const STARTUP_FULL_CONTENT_PHASE = 6;
 const TRANSITION_REVEAL_CONTENT_PHASE = STARTUP_FULL_CONTENT_PHASE;
-// A moving cinematic is a protected render window. Everything the player can
-// see or collide with mounts while the launch chart is still opaque; the
-// opening camera begins only after the complete scene has compiled and settled.
-const STARTUP_OPENING_CONTENT_PHASE = STARTUP_FULL_CONTENT_PHASE;
+// Terrain, vistas, authored ecology, movement collision, and Darwin establish a
+// playable opening. Asset-heavy props, specimens, the Beagle, and NPCs stream
+// after this boundary so one slow optional GLB cannot strand the launch veil.
+const STARTUP_OPENING_CONTENT_PHASE = 3;
 // The ladder both launch paths climb. Mounting one content family per
 // painted/idle window keeps React commits, Rapier collider construction,
 // instance matrix fills, and shader discovery off the same animation frame.
 //
 // Travel walks it as fast as idle windows allow once the chart is opaque;
-// startup spreads the tail of it across the opening cinematic. The decimal
+// startup spreads the tail across idle frames after the veil exits. The decimal
 // stages exist because families four and five are the expensive ones — props,
 // plant fields, structures, the Beagle, and every specimen actor — and landing
-// them as two integer commits cost roughly 700 ms and 600 ms of frozen frames
-// in the middle of the shot.
+// them as two integer commits cost roughly 700 ms and 600 ms of frozen frames.
 const CONTENT_MOUNT_STEPS = Object.freeze([
   2,
   3,
@@ -387,6 +387,8 @@ const INTRO_LOADING_STEPS = Object.freeze([1, ...CONTENT_MOUNT_STEPS]);
 const INTRO_LOADING_PHASE_TIMINGS_MS = Object.freeze(
   INTRO_LOADING_STEPS.map((_, index) => Math.round(index * 155)),
 );
+const STARTUP_STREAM_FIRST_STEP_MS = 1200;
+const STARTUP_STREAM_STEP_MS = 260;
 // The deadline is a degraded fallback, not the normal transition clock. Full
 // destination content now mounts and compiles beneath the opaque chart first.
 const TRANSITION_READY_DEADLINE_MS = 8000;
@@ -2956,7 +2958,12 @@ export default function ThreeDarwinGame({
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
-  const loadingContentTarget = STARTUP_OPENING_CONTENT_PHASE;
+  // Captures intentionally wait for the fully settled scene. Real players and
+  // functional smoke unlock at the essential phase-three boundary; smoke tests
+  // that need late actors can request phase six explicitly after gameplay starts.
+  const loadingContentTarget = screenshotMode
+    ? STARTUP_FULL_CONTENT_PHASE
+    : STARTUP_OPENING_CONTENT_PHASE;
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return undefined;
     window.__threeLaunchDebug = {
@@ -3485,6 +3492,39 @@ export default function ThreeDarwinGame({
     startupContentPhase,
   ]);
 
+  // Normal readiness still waits for the critical loader set to become quiet,
+  // the player GLB/banks to commit, terrain to settle, and the opening shaders
+  // to compile. This deadline is the failure path: procedural/player fallbacks
+  // and the phase-three scene are already playable, so an optional request that
+  // is slow or never resolves must not leave the prologue veil up forever.
+  useEffect(() => {
+    if (
+      automationReadyMode
+      || !gameStarted
+      || sceneReady
+      || launchState !== 'loading'
+    ) return undefined;
+    const startedAt = bootStartedAt.current || performance.now();
+    const wait = Math.max(
+      0,
+      BOOT_DEGRADED_READY_TIMEOUT_MS - (performance.now() - startedAt),
+    );
+    const handle = window.setTimeout(() => {
+      if (startupContentPhase < loadingContentTarget) return;
+      if (!document.querySelector('canvas')) return;
+      markSceneReady();
+    }, wait);
+    return () => window.clearTimeout(handle);
+  }, [
+    automationReadyMode,
+    gameStarted,
+    launchState,
+    loadingContentTarget,
+    markSceneReady,
+    sceneReady,
+    startupContentPhase,
+  ]);
+
   // The splash remains fully visible through a real 100% bar and a short
   // completion hold. The prologue then becomes useful cover for the expensive
   // tail of scene preparation without making the opening bar look abandoned.
@@ -3560,6 +3600,25 @@ export default function ThreeDarwinGame({
       commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
     });
   }, [gameStarted, launchState, loadingContentTarget]);
+
+  // Once the essential phase-three scene is visible and has had a short quiet
+  // window, mount the remaining props, plant fields, structures, specimens,
+  // ship, and NPC actors in small idle-window steps. Deferring the first heavy
+  // mount until after overlay dismissal guarantees that loader/parser work
+  // cannot delay the veil's own exit or the first interactive frames.
+  useEffect(() => {
+    if (!gameStarted || !sceneReady || !launchOverlayDismissed) return undefined;
+    const steps = CONTENT_MOUNT_STEPS.filter(phase => phase > loadingContentTarget);
+    if (!steps.length) return undefined;
+    return scheduleStagedContentPhases({
+      steps,
+      timings: steps.map(
+        (_, index) => STARTUP_STREAM_FIRST_STEP_MS + STARTUP_STREAM_STEP_MS * index,
+      ),
+      idleTimeoutMs: 140,
+      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
+    });
+  }, [gameStarted, launchOverlayDismissed, loadingContentTarget, sceneReady]);
 
   useEffect(() => {
     if (!runtimeAudioEnabled || launchState !== 'playing') return undefined;

@@ -27,9 +27,17 @@ const POST_OFFICE_PATH_SPLAT_BOUNDS = {
   size: 512,
 };
 
+const POST_OFFICE_TEXTURE_BASE = '/assets/textures/world/floreana-pbr/post-office-bay';
 const POST_OFFICE_LAYERS = {
-  ground: FLOREANA_PBR_TEXTURES.sandyTuff,
-  sand: FLOREANA_PBR_TEXTURES.galapagosSand,
+  ground: {
+    ...FLOREANA_PBR_TEXTURES.sandyTuff,
+    nrh: `${POST_OFFICE_TEXTURE_BASE}/sandy-tuff_nrh-512-lossless-v1.webp`,
+  },
+  sand: {
+    ...FLOREANA_PBR_TEXTURES.galapagosSand,
+    albedo: `${POST_OFFICE_TEXTURE_BASE}/galapagos-sand_albedo-lossless-v1.webp`,
+    nrh: `${POST_OFFICE_TEXTURE_BASE}/galapagos-sand_nrh-512-lossless-v1.webp`,
+  },
   basalt: FLOREANA_PBR_TEXTURES.darkBasaltGravel,
   cinder: FLOREANA_PBR_TEXTURES.redCinderDirt,
 };

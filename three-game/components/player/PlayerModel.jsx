@@ -21,7 +21,6 @@ import { WetBoots } from './WetBoots';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
-const LEFT_INDEX_FINGER = /lefthandindex2$/i;
 
 const LAMP_MODEL_PATH = '/assets/models/oil-lamp.glb';
 // Tunables — the lamp mesh's grip pose may need adjusting in-game.
@@ -33,12 +32,6 @@ const LAMP_LIGHT_DISTANCE = 8.0;
 const LAMP_ATTACHMENT = {
   default: {
     position: LAMP_LOCAL_OFFSET,
-  },
-  // Darwin4's idle hand hangs naturally open; put the lantern's bail just below
-  // the fingers instead of clipping the wrist/cuff.
-  darwin4: {
-    bone: LEFT_INDEX_FINGER,
-    position: [0.0, -0.018, 0.0],
   },
 };
 
@@ -577,9 +570,6 @@ const HAND_TOOLS = [
 const PLAYER_MODEL_CYCLE = Array.from(new Set([
   DEFAULT_PLAYER_MODEL_ASSET_ID,
   'darwin5LocomotionPreview',
-  'darwin4',
-  'darwin',
-  'darwinCandidate2',
 ]));
 
 function darwin5StandingJumpRequest(charge, jumpPhase) {
