@@ -37,6 +37,7 @@ import React, {
 import { CuboidCollider, interactionGroups, RigidBody } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   getRuntimePlayerMotion,
   getRuntimePlayerPose,
@@ -116,6 +117,100 @@ function DormantPlantBatch({ batch, activeSiteIds }) {
       receiveShadow={batch.receiveShadow}
       frustumCulled={false}
     />
+  );
+}
+
+// For specs whose per-piece geometry is procedurally unique (palo santo limbs:
+// every branch has its own point set), the instanced path above degenerates to
+// one InstancedMesh per part — measured at 227 uncullable draw calls in Post
+// Office Bay. This path instead bakes each site's parts into one static merged
+// geometry per material: a handful of frustum-cullable draws per site, with the
+// whole site's LOD toggled off while the player is close enough to see the
+// physics pieces. Opt in via spec.dormantLodStrategy = 'merged-per-site'.
+function DormantMergedPlantField({ spec, pieces, activeSiteIds }) {
+  const groups = useMemo(() => {
+    if (typeof spec.dormantVisualParts !== 'function') return [];
+    // Pieces collected in an earlier visit must not reappear at distance. Live
+    // releases/collections need no reactivity here: the interaction refresh
+    // folds any touched site into activeSiteIds, which hides its whole merged
+    // LOD — the same whole-site contract the instanced path relies on.
+    const collectedKeys = new Set(useThreeGameStore.getState().sampledRockIds || []);
+    const grouped = new Map();
+    for (const piece of pieces) {
+      if (collectedKeys.has(piece.key)) continue;
+      for (const part of spec.dormantVisualParts(piece) || []) {
+        if (!part?.geometry || !part?.material || !part?.matrix) continue;
+        const castShadow = part.castShadow === true;
+        const receiveShadow = part.receiveShadow === true;
+        const key = [
+          piece.siteId,
+          part.material.uuid,
+          castShadow ? 1 : 0,
+          receiveShadow ? 1 : 0,
+        ].join(':');
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            key,
+            siteId: piece.siteId,
+            material: part.material,
+            castShadow,
+            receiveShadow,
+            parts: [],
+          });
+        }
+        grouped.get(key).parts.push(part);
+      }
+    }
+    const merged = [];
+    for (const group of grouped.values()) {
+      const transformed = group.parts.map(part => {
+        const geometry = part.geometry.clone();
+        geometry.applyMatrix4(part.matrix);
+        return geometry;
+      });
+      const geometry = transformed.length === 1
+        ? transformed[0]
+        : mergeGeometries(transformed, false);
+      if (transformed.length > 1) {
+        for (const source of transformed) source.dispose();
+      }
+      if (!geometry) continue;
+      geometry.computeBoundingSphere();
+      merged.push({
+        key: group.key,
+        siteId: group.siteId,
+        material: group.material,
+        castShadow: group.castShadow,
+        receiveShadow: group.receiveShadow,
+        geometry,
+      });
+    }
+    return merged;
+  }, [pieces, spec]);
+
+  useEffect(() => () => {
+    for (const group of groups) group.geometry.dispose();
+  }, [groups]);
+
+  if (!groups.length) return null;
+  return (
+    <group userData={{
+      renderSource: `${spec.id}:dormant-lod`,
+      renderLabel: `${spec.id} dormant merged LOD`,
+      renderKind: 'merged-breakable-lod',
+      renderPath: null,
+    }}>
+      {groups.map(group => (
+        <mesh
+          key={group.key}
+          geometry={group.geometry}
+          material={group.material}
+          castShadow={group.castShadow}
+          receiveShadow={group.receiveShadow}
+          visible={!activeSiteIds.has(group.siteId)}
+        />
+      ))}
+    </group>
   );
 }
 
@@ -1396,11 +1491,22 @@ export function BreakablePlantField({ spec }) {
         <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
       ))}
       {usesDormantPlantLod && (
-        <DormantPlantField
-          spec={spec}
-          pieces={visiblePieces}
-          activeSiteIds={activeSiteIds}
-        />
+        spec.dormantLodStrategy === 'merged-per-site' ? (
+          // The stable zone `pieces` array keeps the merge memo from re-running
+          // on every release/collect version bump; stale-piece hiding is
+          // handled inside via the collected snapshot + whole-site activation.
+          <DormantMergedPlantField
+            spec={spec}
+            pieces={pieces}
+            activeSiteIds={activeSiteIds}
+          />
+        ) : (
+          <DormantPlantField
+            spec={spec}
+            pieces={visiblePieces}
+            activeSiteIds={activeSiteIds}
+          />
+        )
       )}
       {spec.highlight && examinableSpecimen && sites.map(site => {
         const pivot = sitePivots.get(site.id);

@@ -7,6 +7,7 @@ import { getRegionTerrainConfig, terrainHeight, terrainSlopeAt } from '../../../
 import { seededRandom } from '../../../world/scatter';
 import { getRuntimePlayerPose } from '../../../store';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { groundCoverFogUniforms } from '../../../world/groundCoverLight';
 import { grassTestPathInfo } from '../../../world/regions/grassTest/path';
 import { hybridGrassPathInfo } from '../../../world/regions/grassHybridTest/path';
 import { emitPropEvent } from '../../../physics/props/propEvents';
@@ -47,6 +48,8 @@ const VERTEX_SHADER = /* glsl */`
   varying float vShade;
   varying float vFade;
   varying float vSeed;
+
+  #include <fog_pars_vertex>
 
   float hash21(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -145,7 +148,12 @@ const VERTEX_SHADER = /* glsl */`
     vDry = dryMix;
     vShade = shade * (0.94 + aSide * 0.04);
     vSeed = phase;
-    gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
+    // The fog_vertex chunk (patched in fogAtmosphere.js) reads a local
+    // mvPosition, exactly like the built-in material shaders it was written
+    // for.
+    vec4 mvPosition = viewMatrix * vec4(worldPosition, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
@@ -157,6 +165,9 @@ const FRAGMENT_SHADER = /* glsl */`
   uniform vec3 uDryColor;
   uniform vec3 uDryTipColor;
   uniform float uColorVariance;
+  uniform vec3 uGroundCoverTint;
+
+  #include <fog_pars_fragment>
 
   varying vec2 vField;
   varying vec3 vWorld;
@@ -213,9 +224,16 @@ const FRAGMENT_SHADER = /* glsl */`
     color = mix(color, color * vec3(0.78, 0.9, 0.72), smoothstep(0.0, 0.12, vTip) * 0.18);
     color = mix(color * vec3(0.68, 0.78, 0.6), color, smoothstep(0.2, 0.82, vFade));
 
-    gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+    // Shared day/weather tint (see world/groundCoverLight.js): the authored
+    // ramps above are painted for clear noon; this is what lets the meadow
+    // go dark at dusk and dim under overcast with the terrain around it.
+    color *= uGroundCoverTint;
+
+    gl_FragColor = vec4(clamp(color, 0.0, 1.4), 1.0);
+    #include <cloud_shade_fragment>
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    #include <fog_fragment>
   }
 `;
 
@@ -491,6 +509,7 @@ function makeDenseGrassMaterial(layer, trailUniforms) {
       uColorVariance: { value: layer.colorVariance ?? 0.18 },
       uTrail: { value: trailUniforms },
       uTrailDir: { value: layer.trailDirUniforms },
+      ...groundCoverFogUniforms(),
     },
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
@@ -498,6 +517,9 @@ function makeDenseGrassMaterial(layer, trailUniforms) {
     depthWrite: true,
     depthTest: true,
     dithering: true,
+    // Joins the scene's shared fog/atmosphere (and with it the cloud-shadow
+    // and distance-haze systems every lit material already participates in).
+    fog: true,
   });
   material.forceSinglePass = true;
   return material;

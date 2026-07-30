@@ -23,22 +23,25 @@ import { weatherEnv } from './weatherEnvRuntime';
 // Mutable so the dev Performance panel can drag values live; the drive below
 // reads it every frame. These are the shipping defaults.
 // Defaults from the cloud-shadow tuning reference at Post Office Bay.
-export const cloudShadeTuning = {
-  // Peak darkening under an ideal broken-cumulus sky.
-  maxStrength: 0.24,
+export const CLOUD_SHADE_DEFAULTS = Object.freeze({
+  // Peak darkening under an ideal broken-cumulus sky. The multiply happens in
+  // linear light, pre-tone-map (see cloud_shade_fragment below). 0.41 is the
+  // 2026-07-30 screenshot bake — a touch stronger than the earlier 0.34.
+  maxStrength: 0.41,
   // Feature size of the shadow pattern: base blobs ~this many meters across.
   featureMeters: 30,
   // Ground-track speed of the pattern in m/s at windSpeed 1, before the
   // cloudDriftSpeed channel scales it (~7.4 m/s with the default 0.32).
   driftMps: 14,
   // Added coverage: positive shadows more ground at a given cumulus level.
-  coverageBias: -0.05,
+  coverageBias: 0.12,
   // fbm-value width of the shadow edge (bigger = softer penumbra).
-  softness: 0.07,
+  softness: 0.08,
   // Dev override: apply maxStrength directly, ignoring weather/sun gating, so
   // the pattern is visible under any sky while tuning.
   forceOn: false,
-};
+});
+export const cloudShadeTuning = { ...CLOUD_SHADE_DEFAULTS };
 const CLOUD_SHADE_FREQUENCY = 1 / cloudShadeTuning.featureMeters;
 // The sin-based GLSL hash degrades at large coordinates, so the drift offset
 // wraps here (one visible pattern jump per ~10 h of continuous play).
@@ -113,19 +116,44 @@ THREE.ShaderChunk.fog_pars_fragment = /* glsl */`
 #endif
 `;
 
-// Height term: exponential density falloff with altitude, integrated
-// analytically along the view ray (Quilez height fog). Mist pools low and
-// thins toward ridgelines instead of whitewashing everything equally.
-THREE.ShaderChunk.fog_fragment = /* glsl */`
+// Cloud shadows, applied to scene-referred (pre-tone-map, linear) light.
+// They used to live inside fog_fragment, which three includes *after* tone
+// mapping and sRGB encode — a display-space multiply that darkened about
+// twice as hard as authored, bypassed the ACES shoulder (a shadow crossing a
+// bright beach read as a flat grey wash), and could not shift the shadowed
+// ground toward skylight. In linear the multiply behaves like light removal,
+// and the channel weights leave the cooler skylight component behind — the
+// real "sun went behind a cloud" read (shadowed ground goes dim AND cool).
+// Included by opaque_fragment for every built-in material, and manually by
+// custom ground shaders (the grass fields) right before their tone mapping.
+THREE.ShaderChunk.cloud_shade_fragment = /* glsl */`
 #ifdef USE_FOG
-	// Cloud shadows multiply lit color before fog mixes over it, so distant
-	// shadow patches sink into the haze like everything else. Projection is
-	// planar from above; at this feature scale that reads fine on relief.
 	if ( uCloudShade.x > 0.0 ) {
 		vec2 cloudShadeP = ( cameraPosition.xz + vFogWorldDelta.xz ) * uCloudShade.y + uCloudShade.zw;
 		float cloudShadeCover = smoothstep( uCloudShade2.x, uCloudShade2.x + uCloudShade2.y, cloudShadeField( cloudShadeP ) );
-		gl_FragColor.rgb *= 1.0 - uCloudShade.x * cloudShadeCover;
+		gl_FragColor.rgb *= max( vec3( 0.0 ), vec3( 1.0 ) - uCloudShade.x * cloudShadeCover * vec3( 1.12, 1.0, 0.72 ) );
 	}
+#endif
+`;
+
+// Splice the cloud shade in right after every built-in fragment shader
+// composes its final lit color — linear light, before tone mapping. String
+// replacement (rather than restating the chunk) keeps this resilient to
+// upstream changes in opaque_fragment.
+THREE.ShaderChunk.opaque_fragment = THREE.ShaderChunk.opaque_fragment.replace(
+  'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+  `gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+#include <cloud_shade_fragment>`,
+);
+
+// Height term: exponential density falloff with altitude, integrated
+// analytically along the view ray (Quilez height fog). Mist pools low and
+// thins toward ridgelines instead of whitewashing everything equally.
+// (Cloud shadows moved out of this chunk — see cloud_shade_fragment above —
+// so distant shadow patches still sink into the haze: fog mixes over the
+// already-shaded color exactly as before.)
+THREE.ShaderChunk.fog_fragment = /* glsl */`
+#ifdef USE_FOG
 	float fogHeightTerm = 1.0;
 	if ( uFogAtmo.x > 0.0 ) {
 		float fogCamH = max( 0.0, cameraPosition.y - uFogAtmo.y );

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
+import { notePerfEvent } from '../../perfCapture';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
 import { getRegionDefinition } from '../../world/regions';
@@ -484,6 +485,11 @@ export function SpecimenActor({ specimen }) {
   const highlightGroundedRef = useRef(true);
   const crabWiggleRef = useRef(null);
   const actorId = specimen.instanceId || specimen.id;
+  // Spawn timestamps on the perf-capture timeline: a cluster of these next to
+  // a frame spike attributes the hitch to actor streaming.
+  useEffect(() => {
+    notePerfEvent('specimen-spawn', { id: actorId });
+  }, [actorId]);
   const runtimePublishRef = useRef({ x: Infinity, y: Infinity, z: Infinity, time: -Infinity });
   const isCollectedActor = useThreeGameStore(state => state.collectedSpecimenActorIds?.includes(actorId) || false);
   const selectedSpecimenId = useThreeGameStore(state => state.selectedSpecimenId);

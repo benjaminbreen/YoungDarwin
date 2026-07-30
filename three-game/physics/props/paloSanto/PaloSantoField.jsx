@@ -236,6 +236,10 @@ const PALO_SANTO_SPEC = {
   SiteDressing,
   renderPiece,
   dormantVisualParts,
+  // Every limb's geometry is procedurally unique, so instanced batching
+  // degenerates to one draw per part (227 uncullable calls in Post Office
+  // Bay). Merge each site's parts per material instead.
+  dormantLodStrategy: 'merged-per-site',
   strikeAbsorbMessage: piece => (piece.unbreakable
     ? 'The hammer rebounds from the living trunk. Pale bark flakes away, but the tree stands firm.'
     : piece.hits > 2

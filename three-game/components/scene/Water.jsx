@@ -16,6 +16,11 @@ import {
   waterTextureResourceIsReady,
 } from '../../world/waterTextureResource';
 import { regionTypeRendersDetailedWater } from '../../world/waterTextureManifest';
+import {
+  REFLECTION_LAYER,
+  markReflectionSceneDirty,
+  syncReflectionLayers,
+} from '../../world/waterReflectionRuntime';
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
@@ -55,9 +60,14 @@ const REFLECTION_MIN_INTERVAL = 2; // moving camera: refresh often enough to fee
 const REFLECTION_STATIC_INTERVAL = 8; // static camera: keep animated silhouettes current
 // The mirror texture and its projection matrix must follow every meaningful
 // camera transform. The old 8cm / ~2.6deg gates made a walking camera reuse a
-// stale projection for several rendered frames, then visibly snap forward.
-const REFLECTION_CAMERA_MOVE_SQ = 0.002 * 0.002;
-const REFLECTION_CAMERA_ROT_DELTA = 0.00000001;
+// stale projection for several rendered frames, then visibly snap forward —
+// but the replacement 2mm / 1e-8 gates sat below camera float noise, so an
+// "idle" camera still counted as moving and refreshed the mirror every frame.
+// 2cm / ~0.3deg (1-|q.q'| ~ theta^2/8) is 4x/9x finer than the thresholds
+// that snapped, while letting a genuinely settled camera coast on the
+// static-interval cadence.
+const REFLECTION_CAMERA_MOVE_SQ = 0.02 * 0.02;
+const REFLECTION_CAMERA_ROT_DELTA = 3e-6;
 const REFLECTION_TIME_DELTA = 0.035; // in-game hours
 // Toggle this off to remove all event-driven player ripple disturbance from
 // the open-ocean shader without touching standing-water/lagoon rendering.
@@ -82,16 +92,21 @@ const HMIN = -6.0;
 const HSPAN = 9.0;
 
 const WATER_QUALITY = {
-  // All tiers run the cinematic reflection cadence (refresh every frame while
-  // the mirror is dynamic, every 4th when idle) — measured as near-free on the
-  // fps budget and the smooth mirror reads far better. Tiers still differ on
-  // resolution and mesh density.
+  // Polished/cinematic refresh the mirror every frame while it is dynamic and
+  // every 4th when idle. The "near-free" measurement behind that cadence
+  // predates the layer-mask mirror pass; it is affordable now because each
+  // refresh no longer sweeps the scene graph, not because a full-rate mirror
+  // was ever free. Performance (mobile) halves the moving cadence — under
+  // ripple distortion a 2-frame-old mirror is not readable as lag.
   performance: {
     bakeRes: 256,
     segments: 64,
-    reflectionRes: 384,
+    // 512 matches polished: the mirror mostly holds Darwin and the ship, and
+    // 384 visibly softened their silhouettes for a texel saving the clear/
+    // draw of this tiny pass never needed.
+    reflectionRes: 512,
     reflectionSamples: 2,
-    reflectionMinInterval: 1,
+    reflectionMinInterval: 2,
     reflectionStaticInterval: 4,
     detailTier: 0,
     contactRes: 1,
@@ -189,8 +204,16 @@ const SHORE_DIST_RANGE = 60;
 const WAVE_GLSL = /* glsl */`
   uniform float uCliffSwell;
   uniform vec4 uCliffCalmEllipse;
+  uniform float uChopWind;
   const float STEEPNESS = 0.52;
-  const float WAVE_COUNT = 3.0;
+  // The q normalization divides by WAVE_COUNT so the summed horizontal pinch
+  // stays at STEEPNESS with no crest self-intersection; cinematic adds three
+  // chop waves in gerstner() below, so its divisor must match.
+  #ifdef CINEMATIC_WATER
+    const float WAVE_COUNT = 6.0;
+  #else
+    const float WAVE_COUNT = 3.0;
+  #endif
 
   float cliffSwellAt(vec2 pos) {
     if (uCliffCalmEllipse.z < 0.001) return uCliffSwell;
@@ -223,6 +246,19 @@ const WAVE_GLSL = /* glsl */`
     addWave(pos, t, vec2( 0.86,  0.51), 0.07, 13.0, disp, n);
     addWave(pos, t, vec2(-0.62,  0.78), 0.045, 8.5, disp, n);
     addWave(pos, t, vec2( 0.34, -0.94), 0.028, 5.0, disp, n);
+    #ifdef CINEMATIC_WATER
+      // Wind sea: three short chop waves spread around the swell heading.
+      // Amplitude rides the shared weather wind (uChopWind, from weatherEnv)
+      // so calm mornings stay glassy and trade-wind afternoons gain genuine
+      // choppy texture. Total extra crest height stays under ~4.5cm so the
+      // deep-disc seam crossfade and the surf/ring overlay meshes (which ride
+      // this same bank at fixed attenuation) remain inside their existing
+      // height tolerance.
+      float chop = 0.5 + 0.5 * clamp(uChopWind, 0.0, 1.0);
+      addWave(pos, t, vec2( 0.97,  0.26), 0.022 * chop, 6.3, disp, n);
+      addWave(pos, t, vec2( 0.60,  0.80), 0.013 * chop, 4.1, disp, n);
+      addWave(pos, t, vec2( 0.92, -0.40), 0.008 * chop, 2.7, disp, n);
+    #endif
     // Windward cliff maps add a long Pacific swell beneath the shared calm
     // surface. Zero everywhere else, so beaches and coves retain their
     // existing silhouette and timing.
@@ -482,6 +518,10 @@ function createStylizedWaterMaterial(
       uCapWindGate: { value: 0.2 },
       uGlintElongation: { value: 4 },
       uGlintWidth: { value: 1 },
+      // Cinematic wind-sea chop amplitude, driven from weatherEnv each frame
+      // (shared wind bus). Inactive on lower tiers (the chop waves compile
+      // out without CINEMATIC_WATER).
+      uChopWind: { value: 0.2 },
     },
     side: THREE.DoubleSide,
     vertexShader: /* glsl */`
@@ -796,6 +836,13 @@ function createStylizedWaterMaterial(
         float deepChop = smoothstep(26.0, 48.0, shoreDist);
         float glassBy = 1.0 - 0.55 * smoothstep(18.0, 65.0, length(vWorld.xz - cameraPosition.xz))
           * (1.0 - deepChop * 0.72);
+        #ifdef CINEMATIC_WATER
+          // The distance flattening above is why mid/far cinematic water read
+          // identical to polished: it relaxed the very detail the tier pays
+          // for. Keep more ripple texture alive offshore and in wind — the
+          // footprint-based LODs below still stop it from aliasing.
+          glassBy = mix(glassBy, 1.0, 0.34 * deepChop + 0.22 * clamp(uChopWind, 0.0, 1.0));
+        #endif
         vec2 rippleSlope = rippleNormalSlope(vWorld.xz, uTime, rippleLod, microLod);
         normal = normalize(normal + vec3(-rippleSlope.x, 0.0, -rippleSlope.y) * 2.15 * glassBy);
         if (uRain > 0.001) {
@@ -877,17 +924,28 @@ function createStylizedWaterMaterial(
           float contactReach = (1.0 - smoothstep(0.1, ${WATER_CONTACT_DISTANCE_RANGE.toFixed(1)}, max(roughContact, 0.0)))
             * contactWaterSide * contactField.a * interactionSurfaceMask;
           if (contactReach > 0.002) {
-            float wrappedWave = sin(max(roughContact, 0.0) * 7.2 - uTime * 2.35
+            // Water laps against rock; it does not radiate a persistent
+            // concentric sine field. Three restraints keep the read physical:
+            // the slope is less than half its first-pass strength, the arc is
+            // torn by slow noise so no ring survives as a complete circle,
+            // and the whole disturbance surges with the actual passing swell
+            // (crestHeight) instead of ringing at constant amplitude.
+            float wrappedWave = sin(max(roughContact, 0.0) * 5.4 - uTime * 1.7
               + noise(vWorld.xz * 0.21) * 1.4);
+            float arcBreakup = 0.42 + 0.58 * smoothstep(0.28, 0.72,
+              noise(vWorld.xz * 0.66 + vec2(uTime * 0.045, -uTime * 0.035)));
+            float swellSurge = 0.45 + 0.55 * smoothstep(-0.035, 0.055, crestHeight);
+            float contactEnv = contactReach * arcBreakup * swellSurge;
             normal = normalize(normal + vec3(contactDir.x, 0.0, contactDir.y)
-              * wrappedWave * contactReach * 0.21);
+              * wrappedWave * contactEnv * 0.085);
             float contactCore = exp(-pow(roughContact * 4.6, 2.0)) * contactWaterSide;
             float contactTear = 0.48 + 0.52 * smoothstep(0.34, 0.78,
               noise(vWorld.xz * 1.8 + vec2(uTime * 0.055, -uTime * 0.04)));
             interactionFoam = max(interactionFoam,
-              contactCore * contactTear * contactField.a * interactionSurfaceMask * 0.58);
+              contactCore * contactTear * contactField.a * interactionSurfaceMask
+                * (0.24 + swellSurge * 0.12));
             interactionGlint += pow(max(wrappedWave * 0.5 + 0.5, 0.0), 3.0)
-              * contactReach * 0.16;
+              * contactEnv * 0.07;
           }
 
           // Live rigid bodies produce a bow ring and, once moving, a widening
@@ -906,16 +964,22 @@ function createStylizedWaterMaterial(
             float waterSide = smoothstep(-0.08, 0.12, boundaryDistance);
             float bodyReach = (1.0 - smoothstep(0.0, bodyRadius * 1.8 + 1.15, max(boundaryDistance, 0.0)))
               * waterSide * bodyStrength;
-            float bodyRing = sin(boundaryDistance * 12.5 - uTime * 3.3 + motionInfo.w);
+            // Same restraint as the rock contact rings: lower slope, slower
+            // phase, and a torn arc so a bobbing floater reads as lapping
+            // water rather than a target reticle.
+            float bodyArcBreakup = 0.45 + 0.55 * smoothstep(0.3, 0.72,
+              noise(vWorld.xz * 0.72 + vec2(motionInfo.w * 0.4, uTime * 0.04)));
+            float bodyRing = sin(boundaryDistance * 8.5 - uTime * 2.3 + motionInfo.w);
             normal = normalize(normal + vec3(bodyRadial.x, 0.0, bodyRadial.y)
-              * bodyRing * bodyReach * 0.18);
+              * bodyRing * bodyReach * bodyArcBreakup * 0.09);
 
             float contactRing = exp(-pow(boundaryDistance * 5.2, 2.0)) * waterSide;
             float bodyTear = 0.42 + 0.58 * smoothstep(0.36, 0.76,
               noise(vWorld.xz * 2.15 + vec2(motionInfo.w, -uTime * 0.06)));
             interactionFoam = max(interactionFoam,
-              contactRing * bodyTear * bodyStrength * (0.22 + min(motionInfo.z, 1.2) * 0.3));
-            interactionGlint += pow(max(bodyRing * 0.5 + 0.5, 0.0), 3.0) * bodyReach * 0.09;
+              contactRing * bodyTear * bodyStrength * (0.13 + min(motionInfo.z, 1.2) * 0.22));
+            interactionGlint += pow(max(bodyRing * 0.5 + 0.5, 0.0), 3.0)
+              * bodyReach * bodyArcBreakup * 0.05;
 
             float moving = smoothstep(0.045, 0.28, motionInfo.z) * bodyStrength;
             vec2 moveDir = motionInfo.xy / max(motionInfo.z, 0.001);
@@ -939,11 +1003,11 @@ function createStylizedWaterMaterial(
             vec2 wakeSlopeDir = wakeSlopeVector / max(length(wakeSlopeVector), 0.001);
             float wakeEnvelope = wakeArm * wakeWindow * moving;
             normal = normalize(normal + vec3(wakeSlopeDir.x, 0.0, wakeSlopeDir.y)
-              * wakePulse * wakeEnvelope * 0.26);
+              * wakePulse * wakeEnvelope * 0.2);
             float bowGate = smoothstep(bodyRadius * 0.05, bodyRadius * 0.82, alongMotion);
             float bowWave = exp(-pow(boundaryDistance * 3.8, 2.0)) * bowGate * moving;
             normal = normalize(normal + vec3(bodyRadial.x, 0.0, bodyRadial.y)
-              * bowWave * 0.24);
+              * bowWave * 0.18);
             float wakeBreakup = 0.5 + 0.5 * smoothstep(0.4, 0.78,
               noise(vec2(behind * 0.7 + motionInfo.w, sideMotion * 1.6 - uTime * 0.08)));
             interactionFoam = max(interactionFoam,
@@ -1160,6 +1224,15 @@ function createStylizedWaterMaterial(
           // sky only where something was actually drawn. Un-premultiply so
           // bilinear edge texels don't fringe toward the black clear color.
           vec4 planarSample = texture2D(uReflection, clamp(mruv, 0.0, 1.0));
+          #ifdef CINEMATIC_WATER
+            // A razor-sharp mirror reads as glass; real sea softens reflected
+            // silhouettes vertically as ripple facets scatter them. Two extra
+            // taps stretched along the mirror's v axis approximate that
+            // roughness for the cost of two texture reads.
+            vec4 planarSoftA = texture2D(uReflection, clamp(mruv + vec2(0.0, 0.0034), 0.0, 1.0));
+            vec4 planarSoftB = texture2D(uReflection, clamp(mruv - vec2(0.0012, 0.0028), 0.0, 1.0));
+            planarSample = planarSample * 0.5 + planarSoftA * 0.27 + planarSoftB * 0.23;
+          #endif
           float planarA = clamp(planarSample.a, 0.0, 1.0);
           planarCover = planarA * valid;
           planarScene = min(planarSample.rgb / max(planarA, 0.05), vec3(0.92));
@@ -1204,6 +1277,21 @@ function createStylizedWaterMaterial(
           planarCover * uObjectMirror * (1.0 - underwaterView * 0.72) - mirrorMix,
           0.0, 1.0);
         color = mix(color, planarScene, objectMirror);
+
+        #ifdef CINEMATIC_WATER
+          // Subsurface crest glow: sunlight transmitted through the thin top
+          // of a wave, so crests between the viewer and the sun light up
+          // turquoise from within. This is the single strongest "real
+          // tropical water" cue a raster shader can buy. Deliberately subtle
+          // at high noon; it opens up as the sun drops (uSunPathStrength)
+          // and as wind builds actual crests to shine through.
+          float sssTowardSun = pow(max(dot(-viewDir, sunDirN), 0.0) * 0.75 + 0.25, 3.0);
+          float sssCrest = smoothstep(0.018, 0.085, crestHeight);
+          float sssGate = smoothstep(0.35, 1.3, depth) * uDaylight
+            * (1.0 - uRain * 0.7) * (1.0 - underwaterView);
+          color += uScatter * 1.3 * sssTowardSun * sssCrest * sssGate
+            * (0.08 + uSunPathStrength * 0.15 + clamp(uChopWind, 0.0, 1.0) * 0.05);
+        #endif
 
         // --- sun glitter: tight sparkle, clamped below blowout ----------------
         vec3 hv = normalize(uSun + viewDir);
@@ -1466,6 +1554,9 @@ function createSurfRibbonMaterial(
       uMoonGlitter: { value: 0 },
       uRain: { value: 0 },
       uUnderwaterAmount: { value: 0 },
+      // Must track the main plane's value: the ribbons ride the same Gerstner
+      // bank, and on cinematic that bank includes the wind-scaled chop waves.
+      uChopWind: { value: 0.2 },
     },
     vertexShader: /* glsl */`
       ${WAVE_GLSL}
@@ -1969,6 +2060,9 @@ const _reflPlane = new THREE.Plane();
 const _clipPlane = new THREE.Vector4();
 const _qv = new THREE.Vector4();
 const _virtualCam = new THREE.PerspectiveCamera();
+// The mirror camera renders only the reflection whitelist (plus lights) —
+// membership is maintained on this layer by waterReflectionRuntime.js.
+_virtualCam.layers.set(REFLECTION_LAYER);
 
 // Crisp expanding wading rings on the ocean surface — the standing-water
 // ripple look, ported. Flat rings at WATER_LEVEL get swallowed by the ±15cm
@@ -2013,7 +2107,11 @@ function OceanContactRipples() {
           vec3 transformed = position * vec3(grow, 1.0, grow);
           vec4 wp = instanceMatrix * vec4(transformed, 1.0);
           vec3 waveNormal;
-          wp.y += gerstner(wp.xz, uWaveTime, 0.8, waveNormal).y;
+          // 0.86 (was 0.8): cinematic's chop waves raise the plane's crests
+          // by up to ~4cm, so the rings need a little more overshoot headroom
+          // to stay above the surface (this material compiles without the
+          // chop, so it cannot follow those crests exactly).
+          wp.y += gerstner(wp.xz, uWaveTime, 0.86, waveNormal).y;
           gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
@@ -2098,29 +2196,7 @@ function OceanContactRipples() {
   );
 }
 
-function hasReflectionFlag(object, flag) {
-  let current = object;
-  while (current) {
-    if (current.userData?.[flag]) return true;
-    current = current.parent;
-  }
-  return false;
-}
-
-// Flags only — visibility is handled at apply time so the cached list stays
-// valid when objects toggle on and off.
-function shouldRenderInReflection(object) {
-  if (hasReflectionFlag(object, 'noReflect')) return false;
-  return hasReflectionFlag(object, 'reflect');
-}
-
-// The reflect/noReflect flags are static per object, so the full scene-graph
-// walk only needs to rerun occasionally (newly spawned objects) or on zone
-// change — not on every reflection refresh.
-const _noReflectCache = { objects: [], refreshIn: 0 };
-const NO_REFLECT_REFRESH = 30; // reflection updates between rebuilds
-
-function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
+function renderReflection(gl, scene, camera, rt, outMatrix) {
   _camWorldPos.setFromMatrixPosition(camera.matrixWorld);
   _viewVec.subVectors(_reflWorldPos, _camWorldPos);
   if (_viewVec.dot(_reflNormal) > 0) return false; // camera below the surface
@@ -2161,35 +2237,15 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
   p.elements[10] = _clipPlane.z + 1.0 - REFLECT_CLIP_BIAS;
   p.elements[14] = _clipPlane.w;
 
-  // Only two sets of objects are hidden for the mirror pass (the water meshes
-  // in `hidden`, and the no-reflect list below); track and restore exactly
-  // those instead of snapshotting the whole scene graph every refresh.
-  _hiddenPrev.length = 0;
-  for (let i = 0; i < hidden.length; i += 1) {
-    if (!hidden[i]) continue;
-    _hiddenPrev.push(hidden[i], hidden[i].visible);
-    hidden[i].visible = false;
-  }
-  // Reflection is an explicit whitelist: the rippled water needs the terrain,
-  // ship, and nearby characters/large silhouettes, not every shrub, fish, and
-  // inspectable prop. This keeps reflections on without rendering the full
-  // scene a second time.
-  if (_noReflectCache.refreshIn <= 0) {
-    _noReflectCache.objects.length = 0;
-    scene.traverse(object => {
-      const renderable = object.isMesh || object.isSkinnedMesh || object.isSprite || object.isLine || object.isPoints;
-      if (renderable && !shouldRenderInReflection(object)) _noReflectCache.objects.push(object);
-    });
-    _noReflectCache.refreshIn = NO_REFLECT_REFRESH;
-  }
-  _noReflectCache.refreshIn -= 1;
-  _noReflect.length = 0;
-  for (let i = 0; i < _noReflectCache.objects.length; i += 1) {
-    const object = _noReflectCache.objects[i];
-    if (!object.parent || !object.visible) continue; // unmounted or already hidden
-    _noReflect.push(object);
-    object.visible = false;
-  }
+  // Reflection is an explicit whitelist: the rippled water needs the ship and
+  // nearby characters/large silhouettes, not every shrub, fish, and
+  // inspectable prop. Membership lives on REFLECTION_LAYER (see
+  // waterReflectionRuntime.js) and the virtual camera renders only that
+  // layer, so nothing in the scene graph is mutated for the mirror pass —
+  // the old per-refresh hide/restore sweeps over every renderable are gone.
+  // The water meshes themselves carry no reflect flag, so the layer excludes
+  // them without the explicit hidden-mesh list the sweeps needed.
+  syncReflectionLayers(scene);
   const prevRT = gl.getRenderTarget();
   const prevXrEnabled = gl.xr.enabled;
   const prevShadowAuto = gl.shadowMap.autoUpdate;
@@ -2226,21 +2282,9 @@ function renderReflection(gl, scene, camera, rt, hidden, outMatrix) {
     gl.xr.enabled = prevXrEnabled;
     gl.shadowMap.autoUpdate = prevShadowAuto;
     gl.shadowMap.needsUpdate = prevShadowNeedsUpdate || gl.shadowMap.needsUpdate;
-    // The no-reflect list only ever contains objects that were visible when
-    // hidden (invisible ones are skipped above), so restoring to true is safe.
-    for (let i = 0; i < _noReflect.length; i += 1) {
-      _noReflect[i].visible = true;
-    }
-    for (let i = 0; i < _hiddenPrev.length; i += 2) {
-      _hiddenPrev[i].visible = _hiddenPrev[i + 1];
-    }
   }
 }
 
-const _noReflect = [];
-// Flat [object, wasVisible, object, wasVisible, ...] scratch for the meshes
-// explicitly hidden during the mirror pass.
-const _hiddenPrev = [];
 const _prevClearColor = new THREE.Color();
 const _drawSize = new THREE.Vector2();
 
@@ -2346,10 +2390,27 @@ function WaterSurface({
   const cliffSwell = cliffSwellForZone(currentZoneId);
   const cliffCalmEllipse = cliffCalmEllipseForZone(currentZoneId);
 
-  // Zone change replaces most of the scene graph: rebuild the reflection
-  // hide-list immediately rather than waiting out the refresh counter.
+  // Zone change replaces most of the scene graph: re-sync reflection layer
+  // membership immediately rather than waiting out the refresh counter.
   useEffect(() => {
-    _noReflectCache.refreshIn = 0;
+    markReflectionSceneDirty();
+  }, [currentZoneId]);
+
+  // In zones whose terrain sits entirely above sea level across the detailed
+  // plane's footprint, the ocean plane is fully buried under the terrain mesh
+  // and its mirror texture can never reach a visible pixel — skip the whole
+  // reflection pass there. Sampled against the continuous height function
+  // once per zone; the 2m margin keeps Gerstner swell and swash-covered
+  // shorelines safely on the reflective side.
+  const oceanPlaneCanBeVisible = useMemo(() => {
+    const half = WATER_SIZE / 2 + 20;
+    const step = 10;
+    for (let x = -half; x <= half; x += step) {
+      for (let z = -half; z <= half; z += step) {
+        if (terrainHeight(x, z, currentZoneId) < WATER_LEVEL + 2) return true;
+      }
+    }
+    return false;
   }, [currentZoneId]);
 
   const { seafloor, standingWaterMask, waterContact, rippleNormal } = textures;
@@ -2724,6 +2785,14 @@ function WaterSurface({
     wu.uCapDensity.value = waterDev.capDensity;
     wu.uCapCrest.value = waterDev.capCrest;
     wu.uCapWindGate.value = capWindGate;
+    // Cinematic chop rides the same shared wind signal as the whitecap gate,
+    // on a gentler curve: some texture survives a calm, and it saturates
+    // before the whitecap population does.
+    wu.uChopWind.value = THREE.MathUtils.clamp(
+      0.22 + Math.max(0, weatherEnv.windSpeed - 0.8) * 0.6,
+      0,
+      1,
+    );
     wu.uGlintElongation.value = waterDev.glintElongation;
     wu.uGlintWidth.value = waterDev.glintWidth;
     const su = surfMaterial.uniforms;
@@ -2734,6 +2803,7 @@ function WaterSurface({
     su.uMoonGlitter.value = moonGlitter;
     su.uFoam.value.copy(wu.uFoam.value);
     su.uScatter.value.copy(wu.uScatter.value);
+    su.uChopWind.value = wu.uChopWind.value;
     if (scene.fog) {
       // The toward-white lift is sunlit haze; under a closed sky the sea
       // horizon must stay no brighter than the cloud deck feeding it.
@@ -2781,7 +2851,7 @@ function WaterSurface({
     // mirror is a garnish on top of the refracted body now. Refresh it at the
     // current moving-camera cadence, but do not keep re-rendering it while the
     // camera and lighting are effectively unchanged.
-    if (reflections && !reflectionUpdatesPaused && waterMesh) {
+    if (reflections && !reflectionUpdatesPaused && waterMesh && oceanPlaneCanBeVisible) {
       reflectionFrame.current += 1;
       const rs = reflectionState.current;
       rs.framesSinceUpdate += 1;
@@ -2799,7 +2869,7 @@ function WaterSurface({
         rs.position.copy(camera.position);
         rs.quaternion.copy(camera.quaternion);
         rs.timeOfDay = time;
-        const ok = renderReflection(gl, scene, camera, reflectionRT, [waterMesh, surfRef.current, disc], wu.uReflMatrix.value);
+        const ok = renderReflection(gl, scene, camera, reflectionRT, wu.uReflMatrix.value);
         wu.uReflection.value = ok ? reflectionRT.texture : null;
         wu.uHasReflection.value = ok ? 1 : 0;
       }

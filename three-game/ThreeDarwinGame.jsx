@@ -6,8 +6,15 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
-import { ACESFilmicToneMapping, HalfFloatType, MathUtils, PCFSoftShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
+import { ACESFilmicToneMapping, HalfFloatType, MathUtils, PCFShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
 import { clampFrameDelta } from './frameTiming';
+import {
+  isPerfCaptureRecording,
+  notePerfAdaptiveDprState,
+  notePerfEvent,
+  notePerfSample,
+  subscribePerfRuntime,
+} from './perfCapture';
 import {
   readQualityPreference,
   resolveQualityPreference,
@@ -36,14 +43,22 @@ import { skyState } from './world/celestial';
 import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
 import { WATER_LEVEL } from './world/water';
-import { cloudShadeTuning, fogAtmosphereUniforms } from './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
+import { CLOUD_SHADE_DEFAULTS, cloudShadeTuning, fogAtmosphereUniforms } from './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
 import {
   getSolarLookRevision,
   setSolarLookTuning,
+  SOLAR_LOOK_DEFAULTS,
   solarLookTuning,
   subscribeSolarLook,
 } from './world/solarLook';
 import { setCoverageAASupport } from './components/assets/materialStability';
+import {
+  getPostGradeRevision,
+  POST_GRADE_DEFAULTS,
+  postGradeTuning,
+  setPostGradeTuning,
+  subscribePostGrade,
+} from './world/postGrade';
 import {
   preloadModelAssets,
   SceneEnvironment,
@@ -66,6 +81,7 @@ import {
   prefetchEcologyAssets,
   setEcologyAssetPrefetchPaused,
 } from './components/scene/ecology/EcologyRenderer';
+import { prefetchStartupContentAssets } from './world/startupPrefetch';
 import { prepareTerrainResource, terrainResourceIsReady } from './world/terrainResource';
 import {
   prepareRegionEcologyResource,
@@ -123,6 +139,10 @@ const AssetBrowserPanel = dynamic(
 );
 const EcologyDebugHud = dynamic(
   () => import('./ui/dev/EcologyDebugHud').then(module => module.EcologyDebugHud),
+  { ssr: false },
+);
+const PerfMonitorSection = dynamic(
+  () => import('./ui/dev/PerfMonitorSection').then(module => module.PerfMonitorSection),
   { ssr: false },
 );
 const AnimalAnimationDevPanel = dynamic(
@@ -214,13 +234,19 @@ const DEFAULT_PERF_SETTINGS = {
   waterQuality: 'polished',
   // Mirrors QUALITY_PRESETS.performance (the default tier) so any fallback path
   // that reads these base values lands on the same image as the shipped preset.
-  dprMode: '1.5x',
+  // Native-resolution default since the 2026-07-30 capture proved the scene
+  // draw-call bound (resolution near-free), with the adaptive ladder as the
+  // safety net on fillrate-bound machines.
+  dprMode: '2x',
+  // The adaptive-DPR controller stays on for players; the perf panel toggle
+  // exists so measurements can pin resolution while isolating another cost.
+  adaptiveDpr: true,
   msaaSamples: 2,
   postprocessing: true,
   contextAntialias: true,
   stats: false,
   shadows: true,
-  shadowQuality: 'ultra',
+  shadowQuality: 'standard',
   water: true,
   terrain: true,
   landmarks: false,
@@ -252,9 +278,11 @@ const DEFAULT_PERF_SETTINGS = {
   // dearly than Chrome; only the cinematic tier keeps HDR buffers.
   postHalfFloat: false,
   reflections: true,
-  // Swap world vegetation/terrain from MeshStandard (PBR) to matte MeshPhong —
-  // same matte look, far cheaper per fragment. foliageDrawScale trims vegetation
-  // draw distance to cut overdraw. Both default to the 'performance' tier.
+  // Swap instanced vegetation (GLB layers, ez-trees, border vistas) from
+  // MeshStandard (PBR) to matte MeshPhong — same matte look, far cheaper per
+  // fragment. Terrain does NOT participate (its material cache is keyed by
+  // region only). foliageDrawScale trims vegetation draw distance to cut
+  // overdraw. Both default to the 'performance' tier.
   cheapMaterials: true,
   foliageDrawScale: 0.85,
   terrainSegmentCap: 200,
@@ -288,19 +316,24 @@ const QUALITY_PRESETS = {
     terrainSegmentCap: 160,
   },
   performance: {
-    // DPR is the master fillrate lever: 1.5x renders 2.25x the pixels of 1x, and
-    // every full-screen pass (post chain, water, terrain, sky) pays for all of
-    // them. On integrated/laptop GPUs that's the dominant cost, so the
-    // performance tier caps at 1.5x: Darwin's face/buttons and thin vegetation
-    // need real sample coverage to avoid crunchy subpixel breakup, and SMAA
-    // alone did not carry it.
-    dprMode: '1.5x',
+    // Full native resolution. The 2026-07-30 Post Office Bay capture proved
+    // this scene CPU/draw-call bound, not fillrate bound: the adaptive-DPR
+    // controller measured a resolution drop to 0.75x gaining zero fps (its
+    // fillBound=false verdict), and 2x was screenshot-confirmed near-free on
+    // the reference Mac. Machines that ARE fillrate-bound are protected by
+    // the adaptive ladder, which steps down only when a drop actually helps.
+    dprMode: '2x',
     // 2x MSAA on top of SMAA — the multisampled composer target is what gives
     // cutout foliage alpha-to-coverage real samples to work with.
     msaaSamples: 2,
     postprocessing: true,
     contextAntialias: true,
-    shadowQuality: 'ultra',
+    // The shadow pass is a second draw of every caster, so map size and
+    // refresh cadence are the biggest draw-call lever after the main pass.
+    // 'ultra' (formerly 12k, every-frame refresh) roughly doubled per-frame
+    // draw calls; 'standard' (4096, throttled) plus real PCF filtering reads
+    // nearly as well and leaves 'ultra' as the cinematic/opt-in tier.
+    shadowQuality: 'standard',
     // N8AO grounds props and vegetation nicely, but the 2026-07 Safari perf
     // pass measured it as the most expensive composer pass by far. Default off
     // on every tier; re-enable live from the perf panel.
@@ -322,7 +355,9 @@ const QUALITY_PRESETS = {
     terrainSegmentCap: 200,
   },
   cinematic: {
-    dprMode: 'default',
+    // Must not sit below the performance tier's native-res default ('default'
+    // mode caps at 1.25x); the richest tier gets full resolution too.
+    dprMode: '2x',
     msaaSamples: 2,
     postprocessing: true,
     contextAntialias: true,
@@ -406,6 +441,11 @@ const TRANSITION_OPTIONAL_LOADER_GRACE_MS = 900;
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
 const OPENING_RENDER_DPR = [1, 1];
+// three r182 dropped PCFSoftShadowMap from the shader define table, so
+// requesting it silently compiles unfiltered BASIC (1-tap) shadows.
+// PCFShadowMap is the filtered path and the only mode honoring shadow.radius.
+// Stable object identity so R3F's per-render configure stays idempotent.
+const SHADOW_MAP_CONFIG = Object.freeze({ enabled: true, type: PCFShadowMap });
 
 function normalizeShadowQuality(value, fallback = 'high') {
   const mode = String(value || '').toLowerCase();
@@ -524,6 +564,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
       ? Number(params.get('foliageDrawScale'))
       : base.foliageDrawScale,
     terrainSegmentCap,
+    adaptiveDpr: !params.has('noAdaptiveDpr'),
   };
 }
 
@@ -729,6 +770,10 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     sceneStats: null,
     sceneStatsIncludeCosts: null,
     fps: 0,
+    worstFrameMs: 0,
+    worstFrameRawMs: 0,
+    framesOver32Ms: 0,
+    framesOver50Ms: 0,
   });
 
   useFrame((_, delta) => {
@@ -738,6 +783,14 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     state.elapsed += delta;
     state.lastPublish += delta;
     state.sceneElapsed += delta;
+    // Per-window spike tracking: the published average conceals exactly the
+    // single-frame stalls the perf capture exists to expose. Clamp one frame at
+    // 250ms so a tab-restore mega-delta cannot dominate a whole capture.
+    const frameMs = Math.min(delta * 1000, 250);
+    state.worstFrameMs = Math.max(state.worstFrameMs, frameMs);
+    state.worstFrameRawMs = Math.max(state.worstFrameRawMs, delta * 1000);
+    if (frameMs > 32) state.framesOver32Ms += 1;
+    if (frameMs > 50) state.framesOver50Ms += 1;
     if (state.lastPublish < 0.25) return;
 
     state.fps = state.frames / Math.max(0.001, state.elapsed);
@@ -755,6 +808,10 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     onSample({
       fps: state.fps,
       frameMs: 1000 / Math.max(1, state.fps),
+      worstFrameMs: state.worstFrameMs,
+      worstFrameRawMs: state.worstFrameRawMs,
+      framesOver32Ms: state.framesOver32Ms,
+      framesOver50Ms: state.framesOver50Ms,
       rawCalls: info.render.calls,
       rawTriangles: info.render.triangles,
       points: info.render.points,
@@ -767,6 +824,10 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     state.frames = 0;
     state.elapsed = 0;
     state.lastPublish = 0;
+    state.worstFrameMs = 0;
+    state.worstFrameRawMs = 0;
+    state.framesOver32Ms = 0;
+    state.framesOver50Ms = 0;
   });
 
   return null;
@@ -1032,7 +1093,7 @@ function buildDprLadder(maxDpr) {
   return rungs.filter((value, i) => i === 0 || value < rungs[i - 1] - 1e-3);
 }
 
-function AdaptiveResolution({ enabled, maxDpr }) {
+function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
   const setDpr = useThree(state => state.setDpr);
   const gl = useThree(state => state.gl);
   const state = useRef({
@@ -1061,7 +1122,12 @@ function AdaptiveResolution({ enabled, maxDpr }) {
     s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
     s.fpsBeforeDrop = 0;
     s.fillBound = true;
-  }, [maxDpr]);
+    onApplied?.(null);
+  }, [maxDpr, onApplied]);
+
+  useEffect(() => {
+    if (!enabled) onApplied?.(null);
+  }, [enabled, onApplied]);
 
   useFrame((_, delta) => {
     const s = state.current;
@@ -1087,6 +1153,15 @@ function AdaptiveResolution({ enabled, maxDpr }) {
     const fps = s.frames / s.elapsed;
     s.frames = 0;
     s.elapsed = 0;
+    // Published (not notified) every window so captures and the Monitor tab can
+    // report why the ladder is or isn't moving.
+    notePerfAdaptiveDprState({
+      dpr: Math.min(s.deviceDpr, s.ladder[s.level]),
+      level: s.level,
+      ladder: s.ladder,
+      fillBound: s.fillBound,
+      windowFps: Math.round(fps * 10) / 10,
+    });
 
     // Judge the previous drop before considering another one. No gain means the
     // frame cost lives on the CPU or in draw-call count, where framebuffer size
@@ -1096,9 +1171,13 @@ function AdaptiveResolution({ enabled, maxDpr }) {
       s.fpsBeforeDrop = 0;
       if (gained < ADAPTIVE_DPR_MIN_GAIN_FPS) {
         s.fillBound = false;
+        notePerfEvent('adaptive-dpr-verdict', {
+          fillBound: false,
+          gainedFps: Math.round(gained * 10) / 10,
+        });
         if (s.level > 0) {
           s.level -= 1;
-          applyAdaptiveDpr(s, setDpr, gl);
+          applyAdaptiveDpr(s, setDpr, gl, onApplied);
         }
         return;
       }
@@ -1108,13 +1187,13 @@ function AdaptiveResolution({ enabled, maxDpr }) {
       s.level += 1;
       s.goodWindows = 0;
       s.fpsBeforeDrop = fps;
-      applyAdaptiveDpr(s, setDpr, gl);
+      applyAdaptiveDpr(s, setDpr, gl, onApplied);
     } else if (fps > ADAPTIVE_DPR_CEIL_FPS && s.level > 0) {
       s.goodWindows += 1;
       if (s.goodWindows >= ADAPTIVE_DPR_UPSCALE_WINDOWS) {
         s.level -= 1;
         s.goodWindows = 0;
-        applyAdaptiveDpr(s, setDpr, gl);
+        applyAdaptiveDpr(s, setDpr, gl, onApplied);
       }
     } else {
       s.goodWindows = 0;
@@ -1124,11 +1203,18 @@ function AdaptiveResolution({ enabled, maxDpr }) {
   return null;
 }
 
-function applyAdaptiveDpr(s, setDpr, gl) {
+function applyAdaptiveDpr(s, setDpr, gl, onApplied = null) {
   const applied = Math.min(s.deviceDpr, s.ladder[s.level]);
   s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
   if (typeof window !== 'undefined') window.__adaptiveDpr = applied;
+  // Lift the applied value into the parent's Canvas dpr prop. Without this,
+  // R3F's per-render configure() compares the live pixel ratio against the
+  // configured cap and snaps every adaptive step back on the next parent
+  // re-render — with the perf panel open (4Hz metrics renders) the controller
+  // could never hold a reduced resolution at all.
+  onApplied?.(applied);
   if (Math.abs(gl.getPixelRatio() - applied) < 1e-3) return; // already there
+  notePerfEvent('adaptive-dpr', { dpr: applied });
   setDpr(applied);
 }
 
@@ -1696,11 +1782,19 @@ function waterResourceDescriptor(zoneId, quality) {
 function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
   const edgeDestinationId = useThreeGameStore(state => state.edgePrompt?.toRegionId || null);
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const destinationId = transitionDestinationId || edgeDestinationId;
   useEffect(() => {
     setEcologyAssetPrefetchPaused(Boolean(transitionDestinationId));
     return () => setEcologyAssetPrefetchPaused(false);
   }, [transitionDestinationId]);
+  // Warm the current zone's late-mounting content families (physics props,
+  // specimens, the Beagle hull, Syms) on the serialized pump. At launch this
+  // runs during the aerial cinematic — the job startupPrefetch.js was written
+  // for; after travel it is a cheap no-op safety net (the pump dedupes).
+  useEffect(() => {
+    if (currentZoneId) prefetchStartupContentAssets(currentZoneId);
+  }, [currentZoneId]);
   useEffect(() => {
     if (!destinationId) return;
     prefetchIslandMapImage();
@@ -1711,6 +1805,10 @@ function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
     }
     prepareTerrainResource(destinationId, segmentCap);
     prepareBorderVistaResource(destinationId);
+    // Queue the destination's props/specimens/ship/NPC GLBs alongside its
+    // ecology, so arrival mounts read from a warm cache instead of parsing
+    // mid-transition.
+    prefetchStartupContentAssets(destinationId);
     prepareRegionEcologyResource(destinationId).then(resource => {
       const destination = resource.definitions.find(definition => definition.zoneId === destinationId);
       prefetchEcologyAssets(destination?.ecology);
@@ -2009,6 +2107,9 @@ function ComposerDprSync() {
 }
 
 function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterAmount = 0 }) {
+  // Re-render when the dev panel drags a bloom/vignette knob, so the Bloom
+  // element picks up the new values (the vignette reads them per frame).
+  useSyncExternalStore(subscribePostGrade, getPostGradeRevision, getPostGradeRevision);
   const examineSession = useThreeGameStore(state => state.examineSession);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
@@ -2056,7 +2157,8 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
     grade.vignetteDarkness = MathUtils.damp(grade.vignetteDarkness, target.vignetteDarkness, 2.5, delta);
     gradeFx.hueSat.saturation = grade.saturation;
     gradeFx.contrast.contrast = grade.contrast;
-    gradeFx.vignette.darkness = grade.vignetteDarkness;
+    gradeFx.vignette.darkness = grade.vignetteDarkness * postGradeTuning.vignetteStrength;
+    gradeFx.vignette.offset = postGradeTuning.vignetteOffset;
   });
   if (!postprocessingComposerActive(enabled, examineSession)) return null;
   const underwater = Math.min(1, Math.max(0, underwaterAmount));
@@ -2095,13 +2197,18 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
       interiorDaylight,
     )
     : 0.52;
+  // 0.76 was authored against 8-bit composer buffers, where the library tags
+  // the input sRGB — an effective linear threshold of ~0.53. Half-float
+  // buffers are linear, so the same number reserved bloom for values so hot
+  // that the HDR tier (the one promising the richest image) barely bloomed
+  // at all. 0.55 linear matches the 8-bit tier's effective cut.
   const bloomThreshold = interiorFx
     ? MathUtils.lerp(
       interiorFx.bloomNightThreshold ?? 0.58,
       interiorDayBloomThreshold,
       interiorDaylight,
     )
-    : 0.76;
+    : (halfFloat ? 0.55 : 0.76);
   return (
     // SMAA cleans polygon edges, but vegetation shimmer needs actual sample
     // coverage before post-processing. Keep this configurable in the perf UI.
@@ -2140,8 +2247,8 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
           foliage stay crisp. */}
       {enabled && (
         <Bloom
-          intensity={bloomIntensity * (1 - underwater * 0.58)}
-          luminanceThreshold={bloomThreshold}
+          intensity={bloomIntensity * postGradeTuning.bloomIntensityScale * (1 - underwater * 0.58)}
+          luminanceThreshold={MathUtils.clamp(bloomThreshold + postGradeTuning.bloomThresholdShift, 0, 1)}
           luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.18}
           mipmapBlur
           radius={interiorFx?.bloomRadius ?? 0.4}
@@ -2218,15 +2325,10 @@ function CinematicScreenGrade({ enabled, weather }) {
           mixBlendMode: 'soft-light',
         }}
       />
-      <div
-        className="absolute inset-0"
-        style={{
-          background: dampenedSun
-            ? 'radial-gradient(circle at 50% 42%, transparent 55%, rgba(16, 24, 21, 0.09) 100%)'
-            : 'radial-gradient(circle at 50% 42%, transparent 52%, rgba(18, 24, 20, 0.13) 100%)',
-          mixBlendMode: 'multiply',
-        }}
-      />
+      {/* The DOM radial vignette that used to sit here stacked a second
+          multiply on top of the composer's VignetteEffect. One vignette, one
+          owner: the composer effect (dev-tunable via the Vignette sliders in
+          the perf panel) is the only one now. */}
       <div
         className="absolute inset-0 opacity-[0.02]"
         style={{
@@ -2436,6 +2538,41 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
+// One line per knob that differs from its baked default, in paste-into-chat
+// form. Sections share it so any tuned section can hand Claude exact values.
+function tuningDiffSource(tuning, defaults) {
+  return Object.keys(defaults)
+    .filter(key => tuning[key] !== defaults[key])
+    .map(key => `  ${key}: ${typeof tuning[key] === 'number' ? Number(tuning[key].toFixed(4)) : tuning[key]},`)
+    .join('\n');
+}
+
+function CopyTuningButton({ pairs }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const id = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const source = pairs
+    .map(([tuning, defaults]) => tuningDiffSource(tuning, defaults))
+    .filter(Boolean)
+    .join('\n');
+  return (
+    <button
+      type="button"
+      disabled={!source}
+      onClick={() => {
+        navigator.clipboard?.writeText(source);
+        setCopied(true);
+      }}
+      className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15 disabled:opacity-35"
+    >
+      {copied ? 'copied' : 'copy values'}
+    </button>
+  );
+}
+
 function SolarDiagnostics({ settings, set }) {
   const solarGlare = useThreeGameStore(state => state.solarGlare);
   useSyncExternalStore(
@@ -2443,13 +2580,17 @@ function SolarDiagnostics({ settings, set }) {
     getSolarLookRevision,
     getSolarLookRevision,
   );
+  useSyncExternalStore(subscribePostGrade, getPostGradeRevision, getPostGradeRevision);
   return (
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Solar Diagnostics</h3>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] ${solarGlare?.visible ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
-          {solarGlare?.visible ? 'active' : 'quiet'}
-        </span>
+        <div className="flex items-center gap-1">
+          <CopyTuningButton pairs={[[solarLookTuning, SOLAR_LOOK_DEFAULTS], [postGradeTuning, POST_GRADE_DEFAULTS]]} />
+          <span className={`rounded px-1.5 py-0.5 text-[10px] ${solarGlare?.visible ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
+            {solarGlare?.visible ? 'active' : 'quiet'}
+          </span>
+        </div>
       </div>
       <div className="mb-2 grid grid-cols-3 gap-1.5">
         <Metric label="Glare" value={solarGlare?.strength !== undefined ? solarGlare.strength.toFixed(2) : '--'} />
@@ -2472,6 +2613,15 @@ function SolarDiagnostics({ settings, set }) {
         <DevSlider label="Sun optics" value={solarLookTuning.opticsIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ opticsIntensity: value })} />
         <DevSlider label="Screen glare" value={solarLookTuning.glareIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ glareIntensity: value })} />
         <DevSlider label="Exposure" value={solarLookTuning.exposureScale} min={0.7} max={1.3} step={0.01} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ exposureScale: value })} />
+      </div>
+      {/* Composer grade: bloom + the (single) vignette. Threshold shift is
+          additive on the computed per-context threshold; strength scales the
+          live time-of-day vignette darkness (0 = off). */}
+      <div className="mt-1.5 grid grid-cols-1 gap-1.5">
+        <DevSlider label="Bloom strength" value={postGradeTuning.bloomIntensityScale} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setPostGradeTuning({ bloomIntensityScale: value })} />
+        <DevSlider label="Bloom threshold" value={postGradeTuning.bloomThresholdShift} min={-0.3} max={0.3} step={0.01} format={v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`} onChange={value => setPostGradeTuning({ bloomThresholdShift: value })} />
+        <DevSlider label="Vignette" value={postGradeTuning.vignetteStrength} min={0} max={2} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setPostGradeTuning({ vignetteStrength: value })} />
+        <DevSlider label="Vignette reach" value={postGradeTuning.vignetteOffset} min={0} max={0.8} step={0.02} format={v => v.toFixed(2)} onChange={value => setPostGradeTuning({ vignetteOffset: value })} />
       </div>
     </div>
   );
@@ -2739,9 +2889,12 @@ function CloudShadeDiagnostics() {
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Cloud Shadows</h3>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] ${applied > 0.005 ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
-          {applied > 0.005 ? `applied ${applied.toFixed(2)}` : 'quiet'}
-        </span>
+        <div className="flex items-center gap-1">
+          <CopyTuningButton pairs={[[cloudShadeTuning, CLOUD_SHADE_DEFAULTS]]} />
+          <span className={`rounded px-1.5 py-0.5 text-[10px] ${applied > 0.005 ? 'bg-amber-200/20 text-amber-100' : 'bg-white/10 text-amber-100/60'}`}>
+            {applied > 0.005 ? `applied ${applied.toFixed(2)}` : 'quiet'}
+          </span>
+        </div>
       </div>
       <div className="mb-2 grid grid-cols-3 gap-1.5">
         <Metric label="Cumulus" value={weatherEnv.cumulus.toFixed(2)} />
@@ -2766,124 +2919,270 @@ function CloudShadeDiagnostics() {
   );
 }
 
-function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onClose }) {
-  if (!open) return null;
-  const set = patch => onChange(current => ({ ...current, ...patch }));
-  const setQuality = quality => onChange(current => ({
-    ...current,
-    ...(QUALITY_PRESETS[quality] || QUALITY_PRESETS.performance),
-    quality,
-  }));
+const PERF_PANEL_TABS = [
+  ['monitor', 'Monitor'],
+  ['quality', 'Quality'],
+  ['systems', 'Systems'],
+  ['visuals', 'Visuals'],
+  ['physics', 'Physics'],
+];
+
+function PerfOptionRow({ label, options, value, format, onSelect }) {
   return (
-    <section className="pointer-events-auto fixed right-3 top-3 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-md border border-amber-100/25 bg-stone-950/88 p-3 text-amber-50 shadow-2xl backdrop-blur-md">
+    <div className="mb-3 flex items-center gap-2 text-xs">
+      <span className="w-16 shrink-0 text-amber-100/70">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(option => (
+          <button
+            key={String(option)}
+            type="button"
+            onClick={() => onSelect(option)}
+            className={`rounded border px-2 py-1 ${value === option ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+          >
+            {format ? format(option) : String(option)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Live per-source cost attribution (the ?costProbe data, now toggleable from
+// the panel). Collection walks the whole scene graph every ~1.25s, so it stays
+// an explicit opt-in rather than part of the always-on sampler.
+function SceneCostBreakdown({ enabled, onEnabledChange, metrics }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const id = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const byDrawCalls = metrics.sceneCostDrawCallBuckets || [];
+  const byTriangles = metrics.sceneCostBuckets || [];
+  return (
+    <div className="mt-3 rounded border border-amber-100/15 bg-black/15 p-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Scene Cost Breakdown</h3>
+        {enabled && byDrawCalls.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard?.writeText(JSON.stringify({ byDrawCalls, byTriangles }, null, 2));
+              setCopied(true);
+            }}
+            className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
+          >
+            {copied ? 'copied' : 'copy JSON'}
+          </button>
+        )}
+      </div>
+      <Toggle label="Collect per-source costs (slower)" checked={enabled} onChange={onEnabledChange} />
+      {enabled && byDrawCalls.length > 0 && (
+        <div className="mt-2 grid grid-cols-1 gap-2">
+          {[
+            ['Top draw calls', byDrawCalls, bucket => bucket.drawCalls],
+            ['Top triangles', byTriangles, bucket => `${Math.round(bucket.triangles / 1000)}k`],
+          ].map(([title, buckets, valueFor]) => (
+            <div key={title}>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-100/60">{title}</div>
+              <div className="grid grid-cols-1 gap-0.5">
+                {buckets.slice(0, 8).map(bucket => (
+                  <div key={bucket.key} className="flex items-center justify-between gap-2 rounded bg-black/20 px-1.5 py-0.5 text-[10px]">
+                    <span className="truncate text-amber-100/80">{bucket.label}</span>
+                    <span className="shrink-0 font-mono text-amber-100/70">{valueFor(bucket)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {enabled && !byDrawCalls.length && (
+        <p className="mt-1.5 text-[10px] leading-snug text-amber-100/45">Collecting… the next sample lands within ~1.5s.</p>
+      )}
+    </div>
+  );
+}
+
+function PerformancePanel({
+  open,
+  settings,
+  metrics,
+  physicsDebug,
+  costProbe,
+  onCostProbeChange,
+  onChange,
+  onClose,
+}) {
+  const [tab, setTab] = useState('monitor');
+  if (!open) return null;
+  // Every change is also dropped on the perf-capture timeline, so an exported
+  // JSON can attribute a frame-time step to the exact knob that moved.
+  const set = patch => {
+    notePerfEvent('setting', patch);
+    onChange(current => ({ ...current, ...patch }));
+  };
+  const setQuality = quality => {
+    notePerfEvent('quality-preset', { quality });
+    onChange(current => ({
+      ...current,
+      ...(QUALITY_PRESETS[quality] || QUALITY_PRESETS.performance),
+      quality,
+    }));
+  };
+  return (
+    <section className="pointer-events-auto fixed right-3 top-3 z-50 max-h-[calc(100dvh-1.5rem)] w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-md border border-amber-100/25 bg-stone-950/88 p-3 text-amber-50 shadow-2xl backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-sm font-bold uppercase tracking-wide">Performance</h2>
         <button type="button" onClick={onClose} className="rounded border border-white/10 px-2 py-1 text-xs hover:bg-white/10">Close</button>
       </div>
-      <div className="mb-3 grid grid-cols-3 gap-1.5">
-        <Metric label="FPS" value={metrics.fps ? Math.round(metrics.fps) : '--'} />
-        <Metric label="Frame" value={metrics.frameMs ? `${metrics.frameMs.toFixed(1)}ms` : '--'} />
-        <Metric label="DPR" value={metrics.pixelRatio ? metrics.pixelRatio.toFixed(2) : '--'} />
-        <Metric label="Calls" value={metrics.sceneDrawCalls ?? '--'} />
-        <Metric label="Tris" value={metrics.sceneTriangles ? `${Math.round(metrics.sceneTriangles / 1000)}k` : '0'} />
-        <Metric label="Textures" value={metrics.textures ?? '--'} />
-        <Metric label="Geoms" value={metrics.geometries ?? '--'} />
-        <Metric label="Meshes" value={metrics.sceneMeshes ?? '--'} />
-        <Metric label="Instances" value={metrics.sceneInstances ? `${Math.round(metrics.sceneInstances / 1000)}k` : '0'} />
-        <Metric label="Raw calls" value={metrics.rawCalls ?? '--'} />
-      </div>
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span className="text-amber-100/70">Quality</span>
-        {['mobile', 'performance', 'cinematic'].map(mode => (
+      <div className="mb-3 grid grid-cols-5 gap-1 rounded border border-amber-100/15 bg-black/20 p-1">
+        {PERF_PANEL_TABS.map(([id, label]) => (
           <button
-            key={mode}
+            key={id}
             type="button"
-            onClick={() => setQuality(mode)}
-            className={`rounded border px-2 py-1 ${settings.quality === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
+            onClick={() => setTab(id)}
+            className={`rounded px-1 py-1 text-[10px] font-bold uppercase tracking-wide ${tab === id ? 'bg-amber-200/25 text-amber-50 ring-1 ring-amber-100/35' : 'text-amber-100/50 hover:bg-white/10'}`}
           >
-            {mode}
+            {label}
           </button>
         ))}
       </div>
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span className="text-amber-100/70">DPR</span>
-        {['default', '1x', '1.25x', '1.5x', '2x'].map(mode => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => set({ dprMode: mode })}
-            className={`rounded border px-2 py-1 ${settings.dprMode === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
-          >
-            {mode}
-          </button>
-        ))}
-      </div>
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span className="text-amber-100/70">MSAA</span>
-        {[0, 2, 4].map(samples => (
-          <button
-            key={samples}
-            type="button"
-            onClick={() => set({ msaaSamples: samples })}
-            className={`rounded border px-2 py-1 ${settings.msaaSamples === samples ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
-          >
-            {samples}x
-          </button>
-        ))}
-      </div>
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span className="text-amber-100/70">Water</span>
-        {WATER_QUALITY_MODES.map(mode => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => set({ waterQuality: mode })}
-            className={`rounded border px-2 py-1 ${settings.waterQuality === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
-          >
-            {mode}
-          </button>
-        ))}
-      </div>
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span className="text-amber-100/70">Shadows</span>
-        {SHADOW_QUALITY_MODES.map(mode => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => set({ shadowQuality: mode })}
-            className={`rounded border px-2 py-1 ${normalizeShadowQuality(settings.shadowQuality) === mode ? 'border-amber-200 bg-amber-200 text-stone-950' : 'border-white/10 bg-black/15 hover:bg-white/10'}`}
-          >
-            {mode === 'ultra' ? 'very high' : mode}
-          </button>
-        ))}
-      </div>
-      <SolarDiagnostics settings={settings} set={set} />
-      <CentralPeakDiagnostics />
-      <CloudShadeDiagnostics />
-      <div className="grid grid-cols-2 gap-1.5">
-        <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
-        <Toggle label="16-bit Post" checked={settings.postHalfFloat === true} onChange={value => set({ postHalfFloat: value })} />
-        <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
-        <Toggle label="Fast Shading" checked={settings.cheapMaterials !== false} onChange={value => set({ cheapMaterials: value, foliageDrawScale: value ? 0.85 : 1 })} />
-        <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
-        <Toggle label="Shadows" checked={settings.shadows} onChange={value => set({ shadows: value })} />
-        <Toggle label="Water" checked={settings.water} onChange={value => set({ water: value })} />
-        <Toggle label="Reflections" checked={settings.reflections} onChange={value => set({ reflections: value })} />
-        <Toggle label="Terrain" checked={settings.terrain} onChange={value => set({ terrain: value })} />
-        <Toggle label="Landmarks" checked={settings.landmarks} onChange={value => set({ landmarks: value })} />
-        <Toggle label="Atmosphere" checked={settings.atmosphere} onChange={value => set({ atmosphere: value })} />
-        <Toggle label="World Details" checked={settings.worldDetails} onChange={value => set({ worldDetails: value })} />
-        <Toggle label="Beagle" checked={settings.beagle} onChange={value => set({ beagle: value })} />
-        <Toggle label="Specimens" checked={settings.specimens} onChange={value => set({ specimens: value })} />
-        <Toggle label="Syms" checked={settings.syms} onChange={value => set({ syms: value })} />
-        <Toggle label="Phys Obstacles" checked={settings.physicsObstacles} onChange={value => set({ physicsObstacles: value })} />
-        <Toggle label="Phys Props" checked={settings.physicsProps} onChange={value => set({ physicsProps: value })} />
-        <Toggle label="Water Splashes" checked={settings.waterSplashes} onChange={value => set({ waterSplashes: value })} />
-        <Toggle label="Weather FX" checked={settings.weatherFX} onChange={value => set({ weatherFX: value })} />
-        <Toggle label="Splat Backdrop" checked={settings.splatBackdrop} onChange={value => set({ splatBackdrop: value })} />
-        <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
-      </div>
-      {physicsDebug && (
+      {tab === 'monitor' && (
+        <>
+          <div className="mb-3 grid grid-cols-3 gap-1.5">
+            <Metric label="FPS" value={metrics.fps ? Math.round(metrics.fps) : '--'} />
+            <Metric label="Frame" value={metrics.frameMs ? `${metrics.frameMs.toFixed(1)}ms` : '--'} />
+            <Metric label="Worst" value={metrics.worstFrameMs ? `${metrics.worstFrameMs.toFixed(0)}ms` : '--'} />
+            <Metric label="DPR" value={metrics.pixelRatio ? metrics.pixelRatio.toFixed(2) : '--'} />
+            <Metric label="Calls" value={metrics.sceneDrawCalls ?? '--'} />
+            <Metric label="Tris" value={metrics.sceneTriangles ? `${Math.round(metrics.sceneTriangles / 1000)}k` : '0'} />
+            <Metric label="Textures" value={metrics.textures ?? '--'} />
+            <Metric label="Geoms" value={metrics.geometries ?? '--'} />
+            <Metric label="Meshes" value={metrics.sceneMeshes ?? '--'} />
+            <Metric label="Instances" value={metrics.sceneInstances ? `${Math.round(metrics.sceneInstances / 1000)}k` : '0'} />
+            <Metric label="Raw calls" value={metrics.rawCalls ?? '--'} />
+            <Metric label="Skinned" value={metrics.sceneSkinnedMeshes ?? '--'} />
+          </div>
+          <PerfMonitorSection settings={settings} />
+        </>
+      )}
+      {tab === 'quality' && (
+        <>
+          <PerfOptionRow
+            label="Quality"
+            options={['mobile', 'performance', 'cinematic']}
+            value={settings.quality}
+            onSelect={setQuality}
+          />
+          <PerfOptionRow
+            label="DPR"
+            options={['default', '1x', '1.25x', '1.5x', '2x']}
+            value={settings.dprMode}
+            onSelect={mode => set({ dprMode: mode })}
+          />
+          <PerfOptionRow
+            label="MSAA"
+            options={[0, 2, 4]}
+            value={settings.msaaSamples}
+            format={samples => `${samples}x`}
+            onSelect={samples => set({ msaaSamples: samples })}
+          />
+          <PerfOptionRow
+            label="Water"
+            options={WATER_QUALITY_MODES}
+            value={settings.waterQuality}
+            onSelect={mode => set({ waterQuality: mode })}
+          />
+          <PerfOptionRow
+            label="Shadows"
+            options={SHADOW_QUALITY_MODES}
+            value={normalizeShadowQuality(settings.shadowQuality)}
+            format={mode => (mode === 'ultra' ? 'very high' : mode)}
+            onSelect={mode => set({ shadowQuality: mode })}
+          />
+          <div className="mb-3 grid grid-cols-2 gap-1.5">
+            <Toggle label="Post FX" checked={settings.postprocessing} onChange={value => set({ postprocessing: value })} />
+            <Toggle label="16-bit Post" checked={settings.postHalfFloat === true} onChange={value => set({ postHalfFloat: value })} />
+            <Toggle label="Ambient Occl." checked={settings.ao} onChange={value => set({ ao: value })} />
+            <Toggle label="Fast Shading" checked={settings.cheapMaterials !== false} onChange={value => set({ cheapMaterials: value, foliageDrawScale: value ? 0.85 : 1 })} />
+            <Toggle label="Shadows" checked={settings.shadows} onChange={value => set({ shadows: value })} />
+            <Toggle label="Reflections" checked={settings.reflections} onChange={value => set({ reflections: value })} />
+            <Toggle label="Adaptive DPR" checked={settings.adaptiveDpr !== false} onChange={value => set({ adaptiveDpr: value })} />
+            <Toggle label="Stats" checked={settings.stats} onChange={value => set({ stats: value })} />
+          </div>
+          <div className="grid grid-cols-1 gap-1.5">
+            <DevSlider
+              label="Foliage draw distance"
+              value={settings.foliageDrawScale ?? 1}
+              min={0.5}
+              max={1.15}
+              step={0.05}
+              format={value => `${Math.round(value * 100)}%`}
+              onChange={value => set({ foliageDrawScale: value })}
+            />
+            {/* Authored terrain is 188 segments globally, so only caps BELOW
+                188 change the resource key (the presets' 200 was a no-op). */}
+            <Toggle label="Cap terrain density" checked={settings.terrainSegmentCap != null && settings.terrainSegmentCap < 188} onChange={value => set({ terrainSegmentCap: value ? 160 : null })} />
+            {settings.terrainSegmentCap != null && settings.terrainSegmentCap < 188 && (
+              <DevSlider
+                label="Terrain segments"
+                value={settings.terrainSegmentCap}
+                min={64}
+                max={184}
+                step={8}
+                format={value => `${value} (authored 188)`}
+                onChange={value => set({ terrainSegmentCap: value })}
+              />
+            )}
+          </div>
+          <p className="mt-2 text-[10px] leading-snug text-amber-100/45">
+            Adaptive DPR steps resolution down under sustained low fps and back up with headroom.
+            Turn it off to pin resolution while measuring another cost, or the ladder will mask the
+            change you are testing.
+          </p>
+        </>
+      )}
+      {tab === 'visuals' && (
+        <>
+          <SolarDiagnostics settings={settings} set={set} />
+          <CentralPeakDiagnostics />
+          <CloudShadeDiagnostics />
+        </>
+      )}
+      {tab === 'systems' && (
+        <>
+          <p className="mb-2 text-[10px] leading-snug text-amber-100/45">
+            Isolation toggles: bisect a frame-time problem by switching whole systems off while
+            watching the Monitor chart respond.
+          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Toggle label="Water" checked={settings.water} onChange={value => set({ water: value })} />
+            <Toggle label="Terrain" checked={settings.terrain} onChange={value => set({ terrain: value })} />
+            <Toggle label="Landmarks (POB only)" checked={settings.landmarks} onChange={value => set({ landmarks: value })} />
+            <Toggle label="Atmosphere" checked={settings.atmosphere} onChange={value => set({ atmosphere: value })} />
+            <Toggle label="World Details" checked={settings.worldDetails} onChange={value => set({ worldDetails: value })} />
+            <Toggle label="Beagle" checked={settings.beagle} onChange={value => set({ beagle: value })} />
+            <Toggle label="Specimens" checked={settings.specimens} onChange={value => set({ specimens: value })} />
+            <Toggle label="Syms" checked={settings.syms} onChange={value => set({ syms: value })} />
+            <Toggle label="Phys Obstacles" checked={settings.physicsObstacles} onChange={value => set({ physicsObstacles: value })} />
+            <Toggle label="Phys Props" checked={settings.physicsProps} onChange={value => set({ physicsProps: value })} />
+            <Toggle label="Water Splashes" checked={settings.waterSplashes} onChange={value => set({ waterSplashes: value })} />
+            <Toggle label="Weather FX" checked={settings.weatherFX} onChange={value => set({ weatherFX: value })} />
+            {/* splatBackdrop deliberately has no toggle: its only consumer is
+                an unimplemented stub (OptionalSplatBackdrop returns null), so
+                a switch here would be a lie. Re-add when the splat renderer
+                lands. */}
+          </div>
+          <SceneCostBreakdown enabled={costProbe} onEnabledChange={onCostProbeChange} metrics={metrics} />
+        </>
+      )}
+      {tab === 'physics' && (
+        <>
+          <div className="mb-2">
+            <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
+          </div>
+          {physicsDebug && (
         <div className="mt-3 grid grid-cols-2 gap-1.5 rounded border border-white/10 bg-black/15 p-2 text-xs">
           <span className="text-amber-100/70">Ground</span>
           <span className="font-mono">{physicsDebug.groundSource}</span>
@@ -2938,6 +3237,13 @@ function PerformancePanel({ open, settings, metrics, physicsDebug, onChange, onC
           <span className="text-amber-100/70">Move</span>
           <span className="font-mono">{physicsDebug.computedMove || '--'}</span>
         </div>
+      )}
+          {!physicsDebug && (
+            <p className="text-[10px] leading-snug text-amber-100/45">
+              Enable Physics Debug to stream the live controller readout here.
+            </p>
+          )}
+        </>
       )}
       <p className="mt-3 text-[11px] text-amber-100/65">Press ` to toggle this panel.</p>
     </section>
@@ -3000,6 +3306,17 @@ export default function ThreeDarwinGame({
   const [resumedFromSave, setResumedFromSave] = useState(false);
   const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
   const [metrics, setMetrics] = useState({});
+  // Keeps the sampler running while a perf capture is recording even if the
+  // panel itself is closed, so a capture can cover uninterrupted gameplay. The
+  // snapshot is a boolean, so 4Hz sample notifications cause no re-renders.
+  const perfCaptureRecording = useSyncExternalStore(
+    subscribePerfRuntime,
+    isPerfCaptureRecording,
+    () => false,
+  );
+  // Non-null while AdaptiveResolution holds a reduced (or restored) rung; the
+  // Canvas dpr prop pins to it so parent re-renders can't undo the step.
+  const [adaptiveDprApplied, setAdaptiveDprApplied] = useState(null);
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const [rendererInfo, setRendererInfo] = useState(null);
   const closeAudioDebug = useCallback(() => setShowAudioDebug(false), []);
@@ -3018,6 +3335,11 @@ export default function ThreeDarwinGame({
   const hudEntranceReportedRef = useRef(false);
   const weather = useThreeGameStore(state => state.weather);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  // Zone arrivals are the single most useful annotation on a perf capture:
+  // most frame-time cliffs correlate with what just streamed in.
+  useEffect(() => {
+    if (currentZoneId) notePerfEvent('zone', { zoneId: currentZoneId });
+  }, [currentZoneId]);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const transition = useThreeGameStore(state => state.transition);
@@ -3055,7 +3377,14 @@ export default function ThreeDarwinGame({
     ],
   );
   const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
-  const renderDpr = openingRenderBudgetActive ? OPENING_RENDER_DPR : configuredDpr;
+  // When the adaptive controller has stepped resolution, pin the Canvas dpr
+  // prop to exactly that value so R3F's per-render configure() re-asserts the
+  // adaptive choice instead of reverting to the configured cap.
+  const renderDpr = useMemo(() => {
+    if (openingRenderBudgetActive) return OPENING_RENDER_DPR;
+    if (adaptiveDprApplied != null) return [adaptiveDprApplied, adaptiveDprApplied];
+    return configuredDpr;
+  }, [adaptiveDprApplied, configuredDpr, openingRenderBudgetActive]);
   const sky = useMemo(() => weatherSkyTint(weather), [weather]);
   const showLaunchOverlay = LAUNCH_MENU_STATES.has(launchState)
     || !sceneReady
@@ -3978,7 +4307,13 @@ export default function ThreeDarwinGame({
           <Canvas
             className="absolute inset-0 h-full w-full"
             frameloop={canvasPaused ? 'never' : 'always'}
-            shadows={scenePerfSettings.shadows}
+            /* Always-on object form, for two reasons: (a) a boolean makes R3F
+               re-assert PCFSoftShadowMap on every parent re-render, clobbering
+               the PCFShadowMap set in onCreated (see comment there); (b) the
+               perf-panel Shadows toggle works by un-setting castShadow on the
+               sun light, which triggers the material recompile that flipping
+               shadowMap.enabled never does. */
+            shadows={SHADOW_MAP_CONFIG}
             dpr={renderDpr}
             camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 560 }}
             gl={{
@@ -3998,7 +4333,13 @@ export default function ThreeDarwinGame({
               // GPU this game targets. Set before the GLBs stream in so every
               // texture picks it up.
               Texture.DEFAULT_ANISOTROPY = Math.min(8, gl.capabilities.getMaxAnisotropy());
-              gl.shadowMap.type = PCFSoftShadowMap;
+              // three r182 dropped PCFSoftShadowMap from the shader define
+              // table, so requesting it silently compiles unfiltered BASIC
+              // (1-tap) shadows. PCFShadowMap is the filtered path (Vogel-disk
+              // 5-sample hardware PCF) and the only mode that honors
+              // shadow.radius, which the weather-driven softness in
+              // outdoorLighting.js depends on.
+              gl.shadowMap.type = PCFShadowMap;
               setRendererInfo(describeWebGLRenderer(gl));
             }}
           >
@@ -4058,8 +4399,10 @@ export default function ThreeDarwinGame({
               enabled={sceneReady
                 && launchRevealSettled
                 && !openingIntroActive
-                && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+                && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE
+                && perfSettings.adaptiveDpr !== false}
               maxDpr={configuredDpr[1]}
+              onApplied={setAdaptiveDprApplied}
             />
             <OpeningIntroCompletion
               active={openingIntroActive}
@@ -4071,9 +4414,10 @@ export default function ThreeDarwinGame({
             <ExpeditionClock />
             <InspectionAnchorProjector />
             <PerformanceSampler
-              enabled={showPerf || perfProbe}
+              enabled={showPerf || perfProbe || perfCaptureRecording}
               includeCosts={costProbe}
               onSample={sample => {
+                notePerfSample(sample);
                 if (typeof window !== 'undefined') {
                   window.__threePerfSample = sample;
                   if (costProbe) {
@@ -4156,6 +4500,8 @@ export default function ThreeDarwinGame({
             settings={perfSettings}
             metrics={metrics}
             physicsDebug={physicsDebug}
+            costProbe={costProbe}
+            onCostProbeChange={setCostProbe}
             onChange={setPerfSettings}
             onClose={() => setShowPerf(false)}
           />

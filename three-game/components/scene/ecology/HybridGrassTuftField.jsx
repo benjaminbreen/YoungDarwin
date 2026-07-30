@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { getRuntimePlayerPose } from '../../../store';
 import { getRegionTerrainConfig, terrainBiomeAt, terrainHeight, terrainSlopeAt } from '../../../world/terrain';
 import { seededRandom } from '../../../world/scatter';
+import { groundCoverFogUniforms } from '../../../world/groundCoverLight';
 import { hybridGrassPathInfo } from '../../../world/regions/grassHybridTest/path';
 import { weatherEnv, resolveLayerWindDir } from '../../../world/weatherEnvRuntime';
 
@@ -228,6 +229,7 @@ function makeHybridTuftMaterial(layer, texture) {
       uPlayerPosition: { value: new THREE.Vector3(0, -999, 0) },
       uGrassMap: { value: texture },
       uAlphaTest: { value: layer.alphaTest ?? 0.34 },
+      ...groundCoverFogUniforms(),
     },
     vertexShader: /* glsl */`
       uniform float uTime;
@@ -241,6 +243,7 @@ function makeHybridTuftMaterial(layer, texture) {
       varying vec2 vUv;
       varying vec3 vColor;
       varying float vFade;
+      #include <fog_pars_vertex>
       void main() {
         vec3 worldPosition = position;
         float tip = aSeed.w;
@@ -252,23 +255,30 @@ function makeHybridTuftMaterial(layer, texture) {
         vFade = clamp(nearFade * farFade, 0.0, 1.0);
         vUv = uv;
         vColor = color;
-        gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
+        vec4 mvPosition = viewMatrix * vec4(worldPosition, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
       }
     `,
     fragmentShader: /* glsl */`
       uniform sampler2D uGrassMap;
       uniform float uAlphaTest;
+      uniform vec3 uGroundCoverTint;
       varying vec2 vUv;
       varying vec3 vColor;
       varying float vFade;
+      #include <fog_pars_fragment>
       void main() {
         vec4 texel = texture2D(uGrassMap, vUv);
         float alpha = texel.a * vFade;
         if (alpha < uAlphaTest) discard;
         vec3 color = texel.rgb * vColor * mix(0.78, 1.1, vUv.y);
+        color *= uGroundCoverTint;
         gl_FragColor = vec4(color, 1.0);
+        #include <cloud_shade_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
+        #include <fog_fragment>
       }
     `,
     vertexColors: true,
@@ -278,6 +288,7 @@ function makeHybridTuftMaterial(layer, texture) {
     depthWrite: true,
     depthTest: true,
     dithering: true,
+    fog: true,
   });
 }
 

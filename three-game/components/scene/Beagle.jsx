@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { StaticGLB } from '../assets/StaticGLB';
 import { getZone } from '../../world/floreanaZones';
 import { getBeagleSightline } from '../../world/beagleSightlines';
+import { markReflectionSceneDirty } from '../../world/waterReflectionRuntime';
 import { useThreeGameStore } from '../../store';
 
 const sailGeometry = new THREE.BufferGeometry();
@@ -38,6 +39,12 @@ export function Beagle() {
   React.useEffect(() => () => {
     if (typeof document !== 'undefined') document.body.style.cursor = '';
   }, []);
+  // The ship is on the water-reflection whitelist; make sure the mirror's
+  // layer assignments pick its meshes up as soon as they mount rather than
+  // waiting out the periodic re-sync.
+  React.useEffect(() => {
+    markReflectionSceneDirty();
+  }, [currentZoneId]);
 
   const position = sightline?.position || zone.beaglePosition;
   if (!position) return null;

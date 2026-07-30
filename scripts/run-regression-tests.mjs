@@ -5157,14 +5157,52 @@ test('graphics quality preference falls back to device detection only when autom
   assert.equal(resolveQualityPreference('cinematic', 'mobile'), 'cinematic');
 });
 
-test('shadow quality tiers preserve a genuinely high-resolution polished default', () => {
+test('shadow quality tiers stay filtered, throttled, and sanely sized', () => {
   const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
   const skySource = fs.readFileSync(path.resolve('three-game/components/scene/SkyController.jsx'), 'utf8');
-  assert.match(gameSource, /performance:\s*\{[\s\S]*?shadowQuality:\s*'ultra'/);
-  assert.match(skySource, /low:\s*\{\s*mapSize:\s*2048/);
-  assert.match(skySource, /standard:\s*\{\s*mapSize:\s*4096/);
+  // The shadow pass re-draws every caster, so the default tier stays at
+  // 'standard' (4096 + throttled refresh); 'ultra' is the opt-in/cinematic
+  // tier. 2026-07 perf audit: 'ultra'-by-default roughly doubled draw calls.
+  assert.match(gameSource, /performance:\s*\{[\s\S]*?shadowQuality:\s*'standard'/);
+  assert.match(gameSource, /cinematic:\s*\{[\s\S]*?shadowQuality:\s*'ultra'/);
+  // three r182 removed PCFSoftShadowMap from the shader define table —
+  // requesting it silently compiles unfiltered 1-tap BASIC shadows and turns
+  // shadow.radius (weather-driven softness) into a dead knob. Only
+  // PCFShadowMap gives the filtered path.
+  assert.match(gameSource, /gl\.shadowMap\.type\s*=\s*PCFShadowMap/);
+  assert.doesNotMatch(gameSource, /\{[^}]*PCFSoftShadowMap[^}]*\}\s*from\s*'three'/);
+  assert.match(skySource, /low:\s*\{[\s\S]*?mapSize:\s*2048/);
+  assert.match(skySource, /standard:\s*\{[\s\S]*?mapSize:\s*4096/);
   assert.match(skySource, /high:\s*\{[\s\S]*?mapSize:\s*8192/);
-  assert.match(skySource, /ultra:\s*\{\s*mapSize:\s*12288/);
+  // 12288 (~600MB depth target) bought ~3mm texels that PCF filtering blurs
+  // away; ultra now spends an 8k map on a tighter frustum instead.
+  assert.match(skySource, /ultra:\s*\{[\s\S]*?mapSize:\s*8192/);
+  // Refresh cadence must stay frame-counted: seconds-based intervals were a
+  // dead knob at sub-60fps (every slow frame satisfied them), which re-ran
+  // the shadow pass every frame exactly when the budget was already blown.
+  assert.match(skySource, /activeRefreshEveryNFrames/);
+  assert.doesNotMatch(skySource, /RefreshInterval/);
+});
+
+test('the physics world always steps and the player clamps frame deltas (fatal-fall regression)', () => {
+  const sceneSource = fs.readFileSync(path.resolve('three-game/components/ThreeScene.jsx'), 'utf8');
+  const playerSource = fs.readFileSync(path.resolve('three-game/components/player/PlayerController.jsx'), 'utf8');
+  const providerSource = fs.readFileSync(path.resolve('three-game/physics/PhysicsProvider.jsx'), 'utf8');
+  // A fresh Rapier world serves NO character-controller queries until its
+  // first step (grounded:false, zero collisions against existing colliders).
+  // The player becomes walkable before content phase 6, so gating the
+  // region's PhysicsProvider on staging made players fall fatally through
+  // solid ground. The provider keeps a `paused` capability, but nothing may
+  // wire it to content staging.
+  assert.doesNotMatch(sceneSource, /<PhysicsProvider[\s\S]{0,400}?paused=/);
+  // A single unclamped long frame integrates gravity past the catastrophic-
+  // fall speed (22 m/s) in one bite; the player controller must clamp before
+  // integrating.
+  assert.match(playerSource, /const delta = clampFrameDelta\(rawDelta\)/);
+  // The substep cap is the arrival-frame protection that replaced the
+  // staging pause — the manual driver must keep clamping what it feeds the
+  // accumulator.
+  assert.match(providerSource, /MAX_PHYSICS_FRAME_DELTA/);
 });
 
 test('frame deltas clamp so a backgrounded tab cannot advance the expedition clock', () => {

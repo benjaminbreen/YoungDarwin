@@ -13,17 +13,20 @@ function truthyFlagValue(value) {
   return value !== 'off' && value !== '0' && value !== 'false';
 }
 
-// Unlike the other debug helpers this one defaults ON outside production. It
-// exists to name the rigid body that traps Rapier's wasm step, and a crash you
-// have to reproduce a second time to observe is a crash you never catch.
-// Disable with ?physicsWatchdog=off or window.__enablePhysicsWatchdog = false.
+// Opt-in, like the other debug helpers. It used to default ON outside
+// production so the wasm-poisoning crash could be caught first try — but its
+// per-substep full-body sweeps (6-8 wasm boundary crossings per body, for 8s
+// after every zone arrival) are heavy enough to distort every dev-mode frame
+// measurement, which polluted the 2026-07 perf work. Enable deliberately with
+// ?physicsWatchdog or window.__enablePhysicsWatchdog = true when hunting the
+// poisoning bug; disable an enabled run with ?physicsWatchdog=off.
 export function physicsWatchdogEnabled() {
   if (typeof window === 'undefined') return false;
   if (window.__enablePhysicsWatchdog === true) return true;
   if (window.__enablePhysicsWatchdog === false) return false;
   const flag = urlDebugFlagValue('physicsWatchdog');
   if (flag !== null) return truthyFlagValue(flag);
-  return process.env.NODE_ENV !== 'production';
+  return false;
 }
 
 // Quarantine offending bodies instead of only reporting them. Off by default:

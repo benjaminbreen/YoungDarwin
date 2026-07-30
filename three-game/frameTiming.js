@@ -17,3 +17,22 @@ export function clampFrameDelta(delta, max = MAX_FRAME_DELTA) {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.min(value, max);
 }
+
+// Rolling frame-time pressure signal, fed once per frame by WorldTimeTicker.
+// Background work that competes with the render loop (the serialized GLB
+// preload pump) consults it to defer main-thread parses while frames are
+// already over budget. The EMA spans roughly the last 25-30 frames; a single
+// note is clamped at 250ms so one tab-restore mega-delta cannot poison the
+// average for seconds afterwards.
+let frameMsEma = 16.7;
+
+export function noteFrameDelta(delta) {
+  const value = Number(delta);
+  if (!Number.isFinite(value) || value <= 0) return;
+  const ms = Math.min(value * 1000, 250);
+  frameMsEma += (ms - frameMsEma) * 0.08;
+}
+
+export function recentFrameMs() {
+  return frameMsEma;
+}

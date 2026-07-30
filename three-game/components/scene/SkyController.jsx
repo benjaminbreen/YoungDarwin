@@ -10,6 +10,7 @@ import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../wo
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { fogAtmosphereUniforms, driveCloudShadeUniforms } from '../../world/fogAtmosphere';
+import { driveGroundCoverLight } from '../../world/groundCoverLight';
 import { vistaAtmosphereUniforms } from '../../world/vistas/vistaAtmosphere';
 import { centralPeakDev } from '../../world/vistas/centralPeakDevRuntime';
 import { solarLookTuning } from '../../world/solarLook';
@@ -197,49 +198,64 @@ const SUN_FACING_RESPONSE_LAMBDA = 7.0;
 const GLARE_ADAPT_IN_LAMBDA = 3.4;
 const GLARE_ADAPT_OUT_LAMBDA = 2.2;
 
+// Refresh cadence is counted in *frames*, not wall-clock time. The old
+// seconds-based intervals (e.g. idle 1/60) were a dead knob below 60fps: any
+// frame slower than the interval satisfied it, so the "throttled" idle path
+// still re-rendered the shadow pass every frame. Frame counting keeps the
+// idle throttle honest at any framerate.
+//
+// Active (player moving/animating) stays at every frame on all but the low
+// tier: the character mesh updates per frame, so a shadow refreshing at half
+// rate visibly stutters behind it (tried at every-2nd-frame 2026-07, read as
+// choppy at 20-40fps). The saving on these tiers comes from map size and the
+// idle throttle, not from skipping active refreshes.
 const SHADOW_QUALITY = {
   low: {
+    name: 'low',
     mapSize: 2048,
     extentScale: 1.08,
     radiusBoost: 0,
     anchorMinTexelSize: 0.035,
-    // 1/24 active read as visible ghosting behind a moving player; 30Hz is
-    // the floor where the shadow still tracks motion acceptably.
-    activeRefreshInterval: 1 / 30,
-    idleRefreshInterval: 1 / 15,
+    // Every 2nd frame while moving (30Hz at 60fps — the floor where the
+    // shadow still tracks motion acceptably), every 4th at rest.
+    activeRefreshEveryNFrames: 2,
+    idleRefreshEveryNFrames: 4,
   },
   standard: {
+    name: 'standard',
     mapSize: 4096,
     extentScale: 1,
     radiusBoost: 0,
     anchorMinTexelSize: 0.012,
-    activeRefreshInterval: 1 / 40,
-    idleRefreshInterval: 1 / 20,
+    activeRefreshEveryNFrames: 1,
+    idleRefreshEveryNFrames: 3,
   },
   high: {
-    // This is the former "Very high" tier. Keep the player and nearby
-    // tree/rock casters in range while spending most texels on the close-up
-    // character instead of the whole local zone.
+    // Keep the player and nearby tree/rock casters in range while spending
+    // most texels on the close-up character instead of the whole local zone.
+    name: 'high',
     mapSize: 8192,
     extentScale: 0.78,
     radiusBoost: 0.34,
     anchorMinTexelSize: 0.006,
-    activeRefreshInterval: 0,
-    idleRefreshInterval: 1 / 60,
+    activeRefreshEveryNFrames: 1,
+    idleRefreshEveryNFrames: 3,
   },
-  // "Very high" in the perf panel. 12k is visibly denser than the former 8k
-  // ceiling without jumping all the way to a roughly 1GB 16k depth target.
+  // "Very high" in the perf panel. Same 8k map as 'high' — the former 12288
+  // (~600MB depth target) bought ~3mm texels that PCF filtering blurs away —
+  // but a tighter frustum spends those texels on a denser close-up result.
   // resolveShadowQuality still clamps this to the GPU's texture-size limit.
   ultra: {
-    mapSize: 12288,
+    name: 'ultra',
+    mapSize: 8192,
     extentScale: 0.7,
     radiusBoost: 0.38,
     anchorMinTexelSize: 0.0035,
-    activeRefreshInterval: 0,
-    idleRefreshInterval: 1 / 60,
+    activeRefreshEveryNFrames: 1,
+    idleRefreshEveryNFrames: 3,
   },
 };
-const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.ultra;
+const DEFAULT_SHADOW_QUALITY = SHADOW_QUALITY.standard;
 
 function resolveShadowQuality(mode, gl) {
   const requested = SHADOW_QUALITY[String(mode || '').toLowerCase()] || DEFAULT_SHADOW_QUALITY;
@@ -1683,10 +1699,6 @@ function ShootingStars({ celestialRef }) {
 // frustum. The frustum anchor is snapped to the shadow-map texel grid so static
 // shadows do not shimmer when the player/camera shifts by tiny sub-texel amounts.
 const SHADOW_MAP_SIZE = DEFAULT_SHADOW_QUALITY.mapSize;
-// Re-rendering every shadow caster on every frame is wasteful, but Darwin's
-// animated silhouette looks choppy at the old fixed 24 Hz cadence. Refresh
-// faster only while the player/shadow anchor is moving, then settle back.
-const SHADOW_ACTIVE_REFRESH_INTERVAL = DEFAULT_SHADOW_QUALITY.activeRefreshInterval;
 const SHADOW_EXTENT_UPDATE_EPSILON = 0.25;
 const SHADOW_TARGET_MOVE_EPSILON_SQ = 0.00025;
 const SHADOW_PLAYER_MOVE_EPSILON_SQ = 0.0009;
@@ -1719,7 +1731,8 @@ export function SkyController({
   stars = true,
   tuning = null,
   solarEffects = null,
-  shadowQuality = 'ultra',
+  shadowQuality = 'standard',
+  shadowsEnabled = true,
   shadowUpdatesPaused = false,
   lighting = true,
   celestialBodies = true,
@@ -1865,9 +1878,9 @@ export function SkyController({
   // character keeps shadow texels small (crisp edges) no matter where they
   // roam, instead of one blurry map stretched over the whole zone.
   const shadowTarget = useMemo(() => new THREE.Object3D(), []);
-  // Accumulates frame delta to gate shadow-map refreshes. Starts "due" so the
-  // very first frame renders shadows.
-  const shadowClock = useRef(SHADOW_ACTIVE_REFRESH_INTERVAL);
+  // Counts frames between shadow-map refreshes. Starts "due" so the very
+  // first frame renders shadows.
+  const shadowFrameCounter = useRef(Number.MAX_SAFE_INTEGER);
   const lastShadowTarget = useRef(new THREE.Vector3(Infinity, Infinity, Infinity));
   const lastPlayerShadowPose = useRef(new THREE.Vector3(Infinity, Infinity, Infinity));
 
@@ -2386,7 +2399,13 @@ export function SkyController({
       key.intensity = lightRig.keyIntensity;
       const shadowCamera = key.shadow?.camera;
       if (key.shadow) {
-        key.shadow.radius = Math.min(4.2, lightRig.shadowRadius + shadowQualityConfig.radiusBoost);
+        // shadow.radius is measured in shadow-map texels (r182 PCF samples a
+        // Vogel disk of radius * texelSize), so the same value covers 2x the
+        // world-space penumbra at half the map size. Normalize against the
+        // standard 4096 map so every tier lands the same softness on screen.
+        const shadowRadiusScale = (key.shadow.mapSize?.x || shadowQualityConfig.mapSize) / 4096;
+        key.shadow.radius = Math.min(4.2, lightRig.shadowRadius + shadowQualityConfig.radiusBoost)
+          * shadowRadiusScale;
         key.shadow.intensity = lightRig.shadowIntensity;
         key.shadow.bias = lightRig.shadowBias;
         key.shadow.normalBias = lightRig.shadowNormalBias;
@@ -2485,6 +2504,15 @@ export function SkyController({
       atmo.uFogSunColor.value.g = _sunHaze.g;
       atmo.uFogSunColor.value.b = _sunHaze.b;
       driveCloudShadeUniforms({ delta, daylight, elevation: s.elevation, air });
+      // Same cadence as the fog/cloud drive: the unlit ground-cover shaders
+      // (grass fields) read this shared tint so they darken at dusk and dim
+      // under overcast alongside the lit terrain they grow from.
+      driveGroundCoverLight({
+        daylight,
+        golden,
+        overcast,
+        rain: weatherEnv.rainIntensity,
+      });
     }
     if (scene.background && scene.background.isColor) scene.background.copy(_color);
     // Horizon colour for the distant-scenery layers. Anchored to the fog grade
@@ -2506,18 +2534,20 @@ export function SkyController({
     gl.toneMappingExposure = THREE.MathUtils.lerp(airExposure, airExposure * 0.82, underwaterAmount)
       * solarLookTuning.exposureScale;
 
-    // Refresh the shadow map on a cadence rather than every frame. The light
-    // direction/position above still updates every frame; only the (expensive)
-    // shadow-caster render pass is throttled.
-    shadowClock.current += delta;
-    const shadowRefreshInterval = (playerShadowMoved || shadowTargetMoved || playerShadowAnimationActive)
-      ? shadowQualityConfig.activeRefreshInterval
-      : shadowQualityConfig.idleRefreshInterval;
+    // Refresh the shadow map on a frame-counted cadence rather than every
+    // frame. The light direction/position above still updates every frame;
+    // only the (expensive) shadow-caster render pass is throttled. Counting
+    // frames instead of wall-clock time keeps the throttle working when
+    // frames run slower than the old seconds-based interval.
+    shadowFrameCounter.current += 1;
+    const shadowRefreshFrames = (playerShadowMoved || shadowTargetMoved || playerShadowAnimationActive)
+      ? shadowQualityConfig.activeRefreshEveryNFrames
+      : shadowQualityConfig.idleRefreshEveryNFrames;
     if (
       !shadowUpdatesPaused
-      && (shadowProjectionChanged || shadowClock.current >= shadowRefreshInterval)
+      && (shadowProjectionChanged || shadowFrameCounter.current >= shadowRefreshFrames)
     ) {
-      shadowClock.current = 0;
+      shadowFrameCounter.current = 0;
       gl.shadowMap.needsUpdate = true;
     }
     if (debugEnabled.current && typeof window !== 'undefined') {
@@ -2531,11 +2561,7 @@ export function SkyController({
         mist: Number(weatherEnv.mistAmount.toFixed(3)),
         rain: Number(weatherEnv.rainIntensity.toFixed(3)),
         underwater: Number(underwaterAmount.toFixed(3)),
-        shadowQuality: shadowQualityConfig.mapSize >= 12288
-          ? 'ultra'
-          : shadowQualityConfig.mapSize >= 8192
-            ? 'high'
-            : shadowQualityConfig.mapSize >= 4096 ? 'standard' : 'low',
+        shadowQuality: shadowQualityConfig.name,
         shadowMapSize: shadowQualityConfig.mapSize,
         keyIntensity: Number(lightRig.keyIntensity.toFixed(3)),
         hemiIntensity: Number(lightRig.hemiIntensity.toFixed(3)),
@@ -2566,11 +2592,15 @@ export function SkyController({
         <>
           <hemisphereLight ref={hemiRef} args={['#bfe3ff', '#9a7a52', 1.0]} />
           <ambientLight ref={ambientRef} intensity={0.4} />
+          {/* castShadow drives the perf-panel Shadows toggle: flipping it bumps
+              the renderer's lights-state version, which forces the material
+              recompile that flipping gl.shadowMap.enabled alone never does —
+              that path just froze the last-rendered shadow map in place. */}
           <directionalLight
             ref={keyLightRef}
             position={[0, 100, 0]}
             intensity={1.4}
-            castShadow
+            castShadow={shadowsEnabled}
             shadow-mapSize={[shadowQualityConfig.mapSize, shadowQualityConfig.mapSize]}
             shadow-bias={-0.00012}
             shadow-normalBias={0.02}

@@ -394,9 +394,15 @@ export function DryGrassPatchField({
     mesh.computeBoundingBox?.();
   }, [layer, forageConfig, foragedSet, resolvedZoneId, geometry]);
 
+  // The perf panel's foliage draw-distance slider reaches this layer too, not
+  // just the instanced GLB ecology.
+  const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const cullBounds = useMemo(
-    () => layerCullBounds(layer.items || [], layer.maxVisibleDistance ?? layer.drawDistance),
-    [layer],
+    () => layerCullBounds(
+      layer.items || [],
+      (layer.maxVisibleDistance ?? layer.drawDistance) * (foliageDrawScale || 1),
+    ),
+    [foliageDrawScale, layer],
   );
   const cullStateRef = useRef(createCameraCullState());
 

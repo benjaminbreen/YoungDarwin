@@ -8,6 +8,7 @@ import { prepareBorderVistaResource } from '../../../world/vistas/borderVistaRes
 import { prefetchRegionTerrainTextures } from '../../../world/terrainPrefetch';
 import { prepareTerrainResource } from '../../../world/terrainResource';
 import { prefetchEcologyAssets } from '../../../components/scene/ecology/EcologyRenderer';
+import { prefetchStartupContentAssets } from '../../../world/startupPrefetch';
 import { ExpeditionPanel, PanelTabs, GOLD_BUTTON_SOLID, GOLD_LABEL, GoldDivider } from '../ExpeditionPanel';
 import { useDismissableOverlay } from '../../useDismissableOverlay';
 import { CompassRoseIcon, NorthArrowIcon } from '../icons';
@@ -333,6 +334,9 @@ export function IslandMapModal({ open, onClose }) {
     prefetchRegionTerrainTextures(selectedId);
     prepareTerrainResource(selectedId, 200);
     prepareBorderVistaResource(selectedId);
+    // Selecting a chart destination is strong travel intent: also warm its
+    // props/specimens/ship/NPC GLBs, not just terrain and ecology.
+    prefetchStartupContentAssets(selectedId);
     prepareRegionEcologyResource(selectedId).then(resource => {
       const destination = resource.definitions.find(definition => definition.zoneId === selectedId);
       prefetchEcologyAssets(destination?.ecology);

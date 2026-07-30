@@ -13,36 +13,36 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // fog is a local-terrain curve borrowed by the backdrop; vistaAir is the
   // backdrop's own. Lowering this and raising vistaAirMax moves ownership of
   // the distance falloff from the former to the latter.
-  aerialPerspective: 0.12,
+  aerialPerspective: 0.54,
 
   // --- shared aerial perspective (vistaAtmosphere.js) -----------------------
   // One curve by true camera distance for the apron and central backdrop.
-  vistaAirStart: 85,
+  vistaAirStart: 115,
   vistaAirScale: 320,
-  vistaAirCurve: 2.6,
+  vistaAirCurve: 2.5,
   vistaAirMax: 0.98,
   // Post-fog dissolve toward the sky's own horizon colour. This is what stops
   // a fully hazed ridge from reading as a flat plate of fog colour cut out
   // against a differently coloured sky. 0 restores the old behaviour.
-  vistaSkyMatch: 0.24,
+  vistaSkyMatch: 0.2,
   vistaSkyLift: 1.42,
   vistaSkyFull: 220,
   // Horizon colour construction, driven by SkyController. 0 uses the graded
   // fog colour verbatim; 1 uses the sky dome's horizon band. The fog colour is
   // luminance-clamped for local mist and reads too dark at the horizon line,
   // so the useful range sits high.
-  vistaSkyBlend: 0.4,
+  vistaSkyBlend: 0.36,
   // What distance does to the surface itself, before haze is mixed over it.
   // Saturation is how much colour survives at full haze; contrast is the value
   // multiplier there, which is the direct control on how hard a distant ridge
   // reads as a silhouette rather than as a wash.
-  vistaSaturation: 1,
+  vistaSaturation: 0.96,
   vistaContrast: 1,
   // Near-field surface grain on the apron. Was hardcoded.
   vistaGrain: 1.8,
   // Valley haze — pools low, thins toward ridgelines. Feathers the hard line
   // where a distant layer meets the ground in front of it.
-  vistaValleyHaze: 0.55,
+  vistaValleyHaze: 0.5,
   vistaValleyHeight: 44,
   // --- distance softening (far-field depth of field) ------------------------
   // Distant landform is low-frequency by nature, but it is drawn with hard
@@ -61,11 +61,11 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // as visible blocks. Bringing this in gives the mid-ground an actual kernel,
   // which is both the look we want and what hides the sampling.
   softeningRange: 220,
-  softeningBokeh: 3,
-  // Full resolution by default. The downsample is only free when the blur is
-  // wide enough to cover it; below ~0.7 the grid shows anywhere the CoC is
-  // small. Trade this down only as far as the pixelation stays invisible.
-  softeningResolution: 0.45,
+  softeningBokeh: 2.8,
+  // The downsample is only free when the blur is wide enough to cover it;
+  // below ~0.7 the grid can show anywhere the CoC is small. 0.55 is the
+  // screenshot-tuned balance point (2026-07-30 bake).
+  softeningResolution: 0.55,
   // Diagnostic tint for the direct apron.
   debugLayerTint: false,
 
@@ -85,8 +85,8 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
 
   // --- neighbour apron -----------------------------------------------------
   neighborApronVisible: true,
-  neighborApronRelief: 0.8,
-  neighborApronVertical: -2.6,
+  neighborApronRelief: 0.75,
+  neighborApronVertical: -2.5,
   neighborApronHazeStart: 0.58,
   neighborApronNearHaze: 0,
   neighborApronFarHaze: 0.55,

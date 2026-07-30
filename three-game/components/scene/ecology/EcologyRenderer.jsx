@@ -6,6 +6,7 @@ import { useGLTF } from '@react-three/drei';
 import { GLTFLoader } from 'three-stdlib';
 import { peek } from 'suspend-react';
 import { getRuntimePlayerPose } from '../../../store';
+import { recentFrameMs } from '../../../frameTiming';
 import { getModelAsset } from '../../../modelAssets';
 import { getWildlifeAssetId } from '../../../wildlife/wildlifeCatalog';
 import { updateFoliageUniforms } from './foliageMotion';
@@ -96,6 +97,16 @@ const queuedEcologyPreloads = new Set();
 let ecologyPreloadHandle = null;
 let ecologyPrefetchPaused = false;
 let ecologyPreloadInFlightPath = null;
+// Backpressure: useGLTF.preload only starts the fetch — GLTFLoader's parse
+// lands on the main thread whenever the response arrives, a 30-150ms hitch
+// per file. When frames are already over budget, defer starting the next
+// parse instead of stacking a hitch onto a struggling frame. The deferral
+// count is capped so a persistently slow session still finishes its warmup
+// (at worst ~PRELOAD_BUSY_RETRY_MS * cap extra latency per file).
+const PRELOAD_BUSY_FRAME_MS = 25;
+const PRELOAD_BUSY_RETRY_MS = 250;
+const PRELOAD_MAX_BUSY_DEFERRALS = 20;
+let ecologyPreloadBusyDeferrals = 0;
 const EMPTY_LAYER_PLAN = {
   flora: [],
   proceduralFlora: [],
@@ -172,7 +183,7 @@ function planProps(props, zoneId) {
     const key = [
       prop.path,
       prop.castShadow === true ? 'casts' : 'no-cast',
-      prop.receiveShadow === true ? 'receives' : 'no-receive',
+      prop.receiveShadow !== false ? 'receives' : 'no-receive',
     ].join('|');
     const bucket = byPath.get(key);
     if (bucket) bucket.push(prop);
@@ -188,7 +199,7 @@ function planProps(props, zoneId) {
       path: group[0].path,
       items: group.map(prop => propToItem(prop, zoneId)),
       castShadow: group.some(prop => prop.castShadow === true),
-      receiveShadow: group.some(prop => prop.receiveShadow === true),
+      receiveShadow: group.some(prop => prop.receiveShadow !== false),
       maxVisibleDistance: Math.max(...group.map(prop => drawDistanceFor(prop, 85))),
     });
   });
@@ -215,6 +226,18 @@ function scheduleEcologyPreloadPump() {
   const run = () => {
     ecologyPreloadHandle = null;
     if (ecologyPrefetchPaused) return;
+    // Frames already over budget: hold the next fetch+parse back rather than
+    // landing another main-thread hitch on top of a struggling loop.
+    if (recentFrameMs() > PRELOAD_BUSY_FRAME_MS
+      && ecologyPreloadBusyDeferrals < PRELOAD_MAX_BUSY_DEFERRALS) {
+      ecologyPreloadBusyDeferrals += 1;
+      ecologyPreloadHandle = window.setTimeout(() => {
+        ecologyPreloadHandle = null;
+        scheduleEcologyPreloadPump();
+      }, PRELOAD_BUSY_RETRY_MS);
+      return;
+    }
+    ecologyPreloadBusyDeferrals = 0;
     const path = ecologyPreloadQueue.shift();
     if (!path) return;
     ecologyPreloadInFlightPath = path;
@@ -228,10 +251,13 @@ function scheduleEcologyPreloadPump() {
       const parsed = peek([GLTFLoader, path]);
       if (parsed || performance.now() - startedAt >= 12000) {
         ecologyPreloadInFlightPath = null;
+        // Longer breather between parses while frames are slow; the queue is
+        // a warmup, not a deadline.
+        const gapMs = recentFrameMs() > PRELOAD_BUSY_FRAME_MS ? 400 : 120;
         ecologyPreloadHandle = window.setTimeout(() => {
           ecologyPreloadHandle = null;
           scheduleEcologyPreloadPump();
-        }, 120);
+        }, gapMs);
         return;
       }
       ecologyPreloadHandle = window.setTimeout(waitForParsedAsset, 80);
@@ -520,7 +546,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
             rotation={prop.rotation}
             scale={prop.scale}
             castShadow={prop.castShadow === true}
-            receiveShadow={prop.receiveShadow === true}
+            receiveShadow={prop.receiveShadow !== false}
             maxVisibleDistance={drawDistanceFor(prop, 85)}
             sourceId={`ecology:${ecology.zoneId}:${prop.id}`}
             sourceLabel={prop.id}

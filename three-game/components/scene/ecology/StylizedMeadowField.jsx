@@ -7,6 +7,7 @@ import { getRuntimePlayerPose } from '../../../store';
 import { getRegionTerrainConfig, terrainHeight, terrainSlopeAt } from '../../../world/terrain';
 import { seededRandom } from '../../../world/scatter';
 import { weatherEnv, resolveLayerWindDir } from '../../../world/weatherEnvRuntime';
+import { groundCoverFogUniforms } from '../../../world/groundCoverLight';
 
 const OFFSCREEN_Y = -999;
 const TWO_PI = Math.PI * 2;
@@ -148,6 +149,7 @@ function makeStylizedMeadowMaterial(layer) {
       uInteractionAmp: { value: layer.interactionAmp ?? 0.12 },
       uInteractionRadius: { value: layer.interactionRadius ?? 0.75 },
       uTipLight: { value: layer.tipLight ?? 0.18 },
+      ...groundCoverFogUniforms(),
     },
     vertexShader: /* glsl */`
       uniform float uTime;
@@ -173,6 +175,7 @@ function makeStylizedMeadowMaterial(layer) {
       varying vec3 vColor;
       varying float vTip;
       varying float vShade;
+      #include <fog_pars_vertex>
       float distanceFade(float d) {
         float nearFade = 1.0;
         if (uFadeNearEnd > uFadeNearStart + 0.001) nearFade = smoothstep(uFadeNearStart, uFadeNearEnd, d);
@@ -224,26 +227,34 @@ function makeStylizedMeadowMaterial(layer) {
         vColor = color;
         vTip = tip;
         vShade = shade * mix(0.72, 1.08, tip) * mix(0.88, 1.04, fade);
-        gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
+        vec4 mvPosition = viewMatrix * vec4(worldPosition, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
       }
     `,
     fragmentShader: /* glsl */`
+      uniform vec3 uGroundCoverTint;
       varying vec3 vColor;
       varying float vTip;
       varying float vShade;
+      #include <fog_pars_fragment>
       void main() {
         float band = floor(clamp(vShade, 0.0, 1.2) * 3.0) / 3.0;
         vec3 color = vColor * mix(0.72, 1.08, band);
         color = mix(color * vec3(0.82, 0.9, 0.72), color, smoothstep(0.08, 0.38, vTip));
-        gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+        color *= uGroundCoverTint;
+        gl_FragColor = vec4(clamp(color, 0.0, 1.4), 1.0);
+        #include <cloud_shade_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
+        #include <fog_fragment>
       }
     `,
     side: THREE.DoubleSide,
     depthWrite: true,
     depthTest: true,
     dithering: true,
+    fog: true,
   });
 }
 

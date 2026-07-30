@@ -6,9 +6,11 @@ import { useGLTF } from '@react-three/drei';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { getModelAsset, modelAssets } from '../../modelAssets';
+import { notePerfEvent } from '../../perfCapture';
 import { modelAnimationDebugEnabled } from '../../runtimeDebug';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
+import { markReflectionSceneDirty } from '../../world/waterReflectionRuntime';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
@@ -374,7 +376,12 @@ function ensurePaddedSkinnedBounds(mesh) {
 function prepareImportedScene(scene, assetId, asset, shadowOverrides = null) {
   if (asset.cloneMaterials || asset.materialColorGrade) cloneImportedMaterials(scene);
   const castShadow = shadowOverrides?.castShadow ?? importedAssetCastsShadow(assetId, asset);
-  const receiveShadow = shadowOverrides?.receiveShadow ?? (asset.receiveShadow === true);
+  // Receiving shadows is nearly free (one texture fetch already compiled into
+  // every lit material; it adds no shadow-map draw calls), and defaulting it
+  // off was why a hut's shadow never fell on a barrel and cacti never
+  // self-shadowed. Casting stays conservative; receiving defaults on, with
+  // `receiveShadow: false` in the manifest as the per-asset opt-out.
+  const receiveShadow = shadowOverrides?.receiveShadow ?? (asset.receiveShadow !== false);
   const cullStaticMeshes = asset.frustumCulled !== false;
   // Skinned fauna/specimens cull by default now (opt out per-asset if a model
   // needs to stay always-drawn). The player/companion stay uncensored: they
@@ -1263,9 +1270,21 @@ const NO_ANIMATION_BANKS = Object.freeze([]);
 // locomotion clip keeps walking underneath the shouldered pose.
 const OVERLAY_UPPER_BODY_RE = /spine|neck|head|shoulder|clavicle|arm|hand/i;
 
+// First suspense-resolve per asset id, forwarded to the perf-capture timeline.
+// A fresh GLB resolving mid-session is the prime suspect for one-off frame
+// stalls (parse + first-use shader compile), so captures need the timestamps;
+// the Set keeps repeat mounts of cached assets silent.
+const perfNotedAssetIds = new Set();
+function notePerfAssetReady(id, kind) {
+  if (!id || perfNotedAssetIds.has(id)) return;
+  perfNotedAssetIds.add(id);
+  notePerfEvent('glb-ready', { id, kind });
+}
+
 function AnimationBankLoader({ bank, onLoad }) {
   const { animations } = useGLTF(assetLoadUrl(bank));
   useEffect(() => {
+    notePerfAssetReady(bank.id, 'animation-bank');
     onLoad(bank.id, animations);
   }, [animations, bank.id, onLoad]);
   return null;
@@ -1323,6 +1342,9 @@ function GLBPrimitive({
     };
   }, [animationPhase, animationRate, asset.animationVariation, instanceSeed]);
   const { scene, animations: ownAnimations } = useGLTF(assetUrl);
+  useEffect(() => {
+    notePerfAssetReady(assetId, 'model');
+  }, [assetId]);
   const animationBanks = asset.animationBanks || NO_ANIMATION_BANKS;
   const [bankAnimations, setBankAnimations] = useState(NO_ANIMATION_BANKS);
   const [animationBanksReady, setAnimationBanksReady] = useState(animationBanks.length === 0);
@@ -1541,6 +1563,13 @@ function GLBPrimitive({
     renderKind: 'model-asset',
     renderPath: asset.path || null,
   }), [asset.path, assetId, reflect]);
+  // Reflect-flagged models (the player) belong to the water mirror's layer
+  // whitelist; re-sync when the model or its GLB scene changes so a freshly
+  // mounted or swapped model appears in the reflection immediately instead of
+  // waiting out the periodic re-sync.
+  useEffect(() => {
+    if (reflect) markReflectionSceneDirty();
+  }, [reflect, importedScene]);
 
   const getAction = useCallback((name) => {
     return lazyActions.get(name);

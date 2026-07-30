@@ -117,7 +117,9 @@ function StaticGLBPrimitive({
   doubleSide = false,
   forceTint = false,
   castShadow = false,
-  receiveShadow = false,
+  // Receiving is nearly free (no extra shadow-map draw calls) and grounds
+  // props in the world's light — casting stays opt-in per prop.
+  receiveShadow = true,
   preserveMaterials = false,
   frustumCulled = true,
   motion = null,

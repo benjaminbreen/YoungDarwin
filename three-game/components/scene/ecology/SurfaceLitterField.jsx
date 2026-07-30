@@ -422,9 +422,12 @@ export function SurfaceLitterField({ layer, zoneId }) {
     ...items.map(item => (VARIANT_DEFS[item.variant] ? item.variant : 'limestone-chip')),
   ])).sort(), [items]);
   const resources = useMemo(() => makeVariantResources(variantKeys), [variantKeys]);
+  // The perf panel's foliage draw-distance slider reaches this layer too, not
+  // just the instanced GLB ecology.
+  const foliageDrawScale = useThreeGameStore(state => state.foliageDrawScale);
   const buckets = useMemo(
-    () => buildBuckets(items, layer.maxVisibleDistance ?? 42),
-    [items, layer.maxVisibleDistance],
+    () => buildBuckets(items, (layer.maxVisibleDistance ?? 42) * (foliageDrawScale || 1)),
+    [foliageDrawScale, items, layer.maxVisibleDistance],
   );
   const renderUserData = useMemo(() => ({
     noReflect: true,

@@ -10,6 +10,7 @@ import React, {
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
@@ -274,19 +275,67 @@ export function InstancedGLBLayer({
   const primitives = useMemo(() => {
     scene.updateMatrixWorld(true);
     const list = [];
-    scene.traverse(object => {
-      if (!object.isMesh) return;
-      const geometry = object.geometry.clone();
-      geometry.applyMatrix4(object.matrixWorld);
-      const material = object.material.clone();
+    const finalizeEntry = (geometry, sourceMaterial, name) => {
+      const material = sourceMaterial.clone();
       if (tint && !hasItemTints) material.color = material.color.clone().lerp(new THREE.Color(tint), tintStrength);
       const shaded = cheapMaterials ? toMattePhong(material) : material;
       stabilizeFoliageMaterial(shaded, { doubleSide: true });
       if (motion) applyFoliageMotion(shaded, geometry, motion);
-      list.push({ geometry, material: shaded, name: object.name || object.parent?.name || `mesh-${list.length}` });
+      list.push({ geometry, material: shaded, name });
+    };
+    const bakedGeometry = object => {
+      const geometry = object.geometry.clone();
+      geometry.applyMatrix4(object.matrixWorld);
+      return geometry;
+    };
+    const sourceMeshes = [];
+    scene.traverse(object => {
+      if (object.isMesh) sourceMeshes.push(object);
+    });
+    if (variantMode === 'mesh') {
+      // Variant packs pick one complete source mesh per scattered item, so
+      // the original node granularity and order must be preserved.
+      sourceMeshes.forEach(object => {
+        finalizeEntry(bakedGeometry(object), object.material,
+          object.name || object.parent?.name || `mesh-${list.length}`);
+      });
+      return list;
+    }
+    // Every node draws at every scatter transform here, so nodes that share a
+    // source material are one draw call pretending to be many: sesuvium ships
+    // as 33 primitives on a single material, which multiplied through the
+    // spatial buckets into hundreds of InstancedMeshes for one ground-cover
+    // species. Merge each material group into one geometry (node transforms
+    // are already baked, so the merge is a pure concatenation).
+    const materialGroups = new Map();
+    sourceMeshes.forEach(object => {
+      const group = materialGroups.get(object.material);
+      if (group) group.push(object);
+      else materialGroups.set(object.material, [object]);
+    });
+    materialGroups.forEach((nodes, sourceMaterial) => {
+      const groupName = sourceMaterial.name
+        || nodes[0].name || nodes[0].parent?.name || `mesh-${list.length}`;
+      if (nodes.length === 1) {
+        finalizeEntry(bakedGeometry(nodes[0]), sourceMaterial, groupName);
+        return;
+      }
+      const baked = nodes.map(bakedGeometry);
+      const merged = mergeGeometries(baked, false);
+      if (merged) {
+        baked.forEach(geometry => geometry.dispose());
+        finalizeEntry(merged, sourceMaterial, groupName);
+      } else {
+        // Attribute layouts differ between the nodes (mergeGeometries refuses
+        // rather than corrupting) — keep that group unmerged.
+        nodes.forEach((object, index) => {
+          finalizeEntry(baked[index], sourceMaterial,
+            object.name || object.parent?.name || `mesh-${list.length}`);
+        });
+      }
     });
     return list;
-  }, [scene, tint, tintStrength, motion, hasItemTints, cheapMaterials]);
+  }, [scene, tint, tintStrength, motion, hasItemTints, cheapMaterials, variantMode]);
 
   useLayoutEffect(() => () => {
     primitives.forEach(({ geometry, material }) => {

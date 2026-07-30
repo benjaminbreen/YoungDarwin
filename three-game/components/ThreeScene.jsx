@@ -44,7 +44,8 @@ export function ThreeScene({
       {outdoors && (
         <SkyController
           stars={settings.atmosphere !== false}
-          shadowQuality={settings.shadowQuality || 'ultra'}
+          shadowQuality={settings.shadowQuality || 'standard'}
+          shadowsEnabled={settings.shadows !== false}
           shadowUpdatesPaused={settings.shadowUpdatesPaused === true}
           solarEffects={{
             halo: settings.solarSunHalo !== false,
@@ -84,7 +85,19 @@ export function ThreeScene({
           broad phase/character queries and poisons the WASM borrow state.
           Travel is already covered by the chart, so rebuild the small physics
           container with the destination while renderer/assets stay cached. */}
-      <PhysicsProvider key={`region-physics:${currentZoneId}`} debug={settings.physicsDebug === true}>
+      {/* Never pause this world while content stages in: the player becomes
+          walkable before the final content phase, and a fresh Rapier world
+          serves NO character-controller queries until its first step — the
+          controller reports grounded:false with zero collisions against
+          colliders that exist but were never stepped in (verified against
+          rapier3d-compat directly). Pausing during staging therefore made
+          players fall fatally through fully "solid" ground. The per-frame
+          delta cap inside PhysicsProvider is what protects arrival frames
+          from catch-up substep bursts instead. */}
+      <PhysicsProvider
+        key={`region-physics:${currentZoneId}`}
+        debug={settings.physicsDebug === true}
+      >
         <FaunaFrameScheduler />
         {/* World and player stream independently. A late prop/specimen GLB can
             no longer blank Darwin, and a deferred animation bank can no

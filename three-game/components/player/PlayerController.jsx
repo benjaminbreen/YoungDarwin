@@ -6,6 +6,7 @@ import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
+import { clampFrameDelta } from '../../frameTiming';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
@@ -859,7 +860,14 @@ export function PlayerController({
     const now = performance.now() / 1000;
     const activeFinchDroppingCamera = finchDroppingCamera.current.until > now ? finchDroppingCamera.current : null;
     const timeScale = finchDroppingSlowMotionScale(activeFinchDroppingCamera, now);
-    const delta = rawDelta * timeScale;
+    // Clamp before integrating anything (frameTiming.js documents 0.05s as
+    // this controller's ceiling). Unclamped, a single long frame — a GLB
+    // parse, a tab restore — integrates gravity in one bite: ~1.5s of stall
+    // while momentarily airborne pushes |velocity.y| past the catastrophic-
+    // fall threshold and Darwin dies on flat ground. Below the clamp the
+    // player briefly moves in slow motion instead, which is the documented
+    // policy for every other integrator in the game.
+    const delta = clampFrameDelta(rawDelta) * timeScale;
     stateRef.current.timeScale = timeScale;
     updatePlayerFrameFeedback({
       group,
