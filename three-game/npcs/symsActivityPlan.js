@@ -33,6 +33,13 @@ export const SYMS_FIELD_CASE_PLACEMENT = Object.freeze({
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';
 const BASE_POSITION = Object.freeze({ x: 4, z: 7.4 });
+// Darwin opens facing east from the central rise. Syms begins on the west fork,
+// behind that view, then follows the authored trail to his shore field base.
+export const SYMS_OPENING_SPAWN_POSITION = Object.freeze({
+  x: -9,
+  z: 28,
+  yaw: Math.atan2(10, -8),
+});
 const ROUTES = Object.freeze([
   POST_OFFICE_BAY_TRAIL,
   POST_OFFICE_BAY_NORTH_SHORE_TRAIL,

@@ -152,11 +152,18 @@ function specimenMaterial(id) {
   return addRimLight(toonMaterial(specimenColor(id)), { color: '#fff0b0', intensity: id === 'basalt' ? 0.16 : 0.28 });
 }
 
-function assetIdForSpecimen(specimen) {
+export function getSpecimenModelAssetId(specimen) {
   const wildlifeAssetId = getWildlifeAssetId(specimen);
   if (wildlifeAssetId) return wildlifeAssetId;
   if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
   return specimen.id;
+}
+
+export function getSpecimenPreloadAssetId(specimen) {
+  if (specimen.pollinator || specimen.id === 'basalt' || specimen.id === 'lavalizard') return null;
+  const renderProfile = getWildlifeRenderProfile(specimen);
+  if (String(renderProfile?.type || '').startsWith('procedural')) return null;
+  return getSpecimenModelAssetId(specimen);
 }
 
 function foliageMotionForSpecimen(specimen) {
@@ -314,7 +321,11 @@ function MeasuredProceduralShape({ children, onSceneReady }) {
     onSceneReady(measuredGroup.current);
   }, [onSceneReady]);
 
-  return <group ref={measuredGroup}>{children}</group>;
+  return (
+    <group ref={measuredGroup} userData={{ renderKind: 'specimen-visual' }}>
+      {children}
+    </group>
+  );
 }
 
 export function SpecimenShape({
@@ -369,7 +380,7 @@ export function SpecimenShape({
       </MeasuredProceduralShape>
     );
   }
-  const assetId = assetIdForSpecimen(specimen);
+  const assetId = getSpecimenModelAssetId(specimen);
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
   if (assetId === 'lavalizard') {

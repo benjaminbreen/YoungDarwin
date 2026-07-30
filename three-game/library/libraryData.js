@@ -1,6 +1,6 @@
 'use client';
 
-import { searchLibraryCorpus } from './searchCore';
+import { searchLibraryCorpusDetailed } from './searchCore';
 
 let libraryPromise = null;
 
@@ -37,13 +37,16 @@ export function loadLibraryData() {
   return libraryPromise;
 }
 
-export function searchLoadedLibrary(library, query, limit = 6) {
-  if (!library) return [];
-  return searchLibraryCorpus({
+// Returns { results, total } so the reader can say "6 of 148" rather than
+// leaving the player unable to tell a trimmed result set from a thin one.
+export function searchLoadedLibrary(library, query, { limit = 6, bookId = null } = {}) {
+  if (!library) return { results: [], total: 0 };
+  return searchLibraryCorpusDetailed({
     passages: library.passages,
     index: library.lexicalIndex,
     query,
     limit,
+    bookId,
   });
 }
 

@@ -62,7 +62,8 @@ import {
   getNpcEncounter,
   getNpcEncounterPresentation,
 } from './encounters/npcEncounters';
-import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from './ai/generativePolicy';
+import { generativeRequestsAllowed } from './ai/generativePolicy';
+import { cameraFocusPoint } from './camera/focusPoint';
 import {
   DEFAULT_SYMS_DIRECTIVE,
   SYMS_DIRECTIVES,
@@ -186,6 +187,7 @@ export const threeRuntimeState = {
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
+
 
 function resetThreeRuntimeState() {
   threeRuntimeState.playerPose.position = { ...INITIAL_PLAYER_POSE.position };
@@ -1117,7 +1119,7 @@ export const useThreeGameStore = create((set, get) => ({
       return completed;
     }
 
-    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+    if (!generativeRequestsAllowed()) {
       const completed = {
         ...record,
         phase: 'ready',
@@ -1567,7 +1569,7 @@ export const useThreeGameStore = create((set, get) => ({
     // reply text: repeated questions are valid new turns with new trust effects.
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     const idempotencyKey = [requestState.seed || 'three', npcId, 'encounter-turn', turnId].join(':');
-    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+    if (!generativeRequestsAllowed()) {
       const data = getAuthoredNpcReply(npcId, playerInput, {
         specimenCount: new Set([
           ...(requestState.collectedSpecimenIds || []),
@@ -1802,7 +1804,9 @@ export const useThreeGameStore = create((set, get) => ({
         query: options.query || '',
         resultIds: Array.isArray(options.resultIds) ? options.resultIds : [],
         drawerOpen: options.drawerOpen !== false,
-        focus: options.focus || null,
+        focus: cameraFocusPoint(options.focus),
+        // Why the library opened, kept separate from where the camera looks.
+        focusIntent: typeof options.focus === 'string' ? options.focus : (options.focusIntent || null),
         openedAt: Date.now(),
       },
       consultedBookIds: firstConsultation
@@ -1828,12 +1832,15 @@ export const useThreeGameStore = create((set, get) => ({
       [bookId]: Math.max(1, Math.round(Number(page) || 1)),
     },
   })),
-  saveReadableBookNote: ({ bookId, page, content }) => set(state => {
+  saveReadableBookNote: ({ bookId, page, content, printedPage = null, citation = null }) => set(state => {
     const book = getReadableBook(bookId);
     const trimmed = String(content || '').trim();
     if (!book || !trimmed) return {};
     const location = getThreeIslandLocation(state.currentZoneId);
     const pageNumber = Math.max(1, Math.round(Number(page) || 1));
+    // The scan number and the printed number differ by the front matter, so a
+    // note titled with the scan misfiles the citation the player would quote.
+    const pageLabel = printedPage ? `p. ${printedPage}` : `scan p. ${pageNumber}`;
     return {
       curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
       journal: [...state.journal, {
@@ -1844,9 +1851,15 @@ export const useThreeGameStore = create((set, get) => ({
         method: 'reading and comparison',
         kind: 'reading',
         authorship: 'player',
-        title: `${book.shortTitle}, page ${pageNumber}`,
+        title: `${book.shortTitle}, ${pageLabel}`,
         content: trimmed,
-        source: { type: 'book', bookId: book.id, page: pageNumber },
+        source: {
+          type: 'book',
+          bookId: book.id,
+          page: pageNumber,
+          printedPage: printedPage || null,
+          citation: citation || `${book.author}, ${book.shortTitle}, ${pageLabel}`,
+        },
         createdAt: new Date().toISOString(),
       }],
       message: `You add a note from ${book.shortTitle} to the field journal.`,
@@ -2803,7 +2816,7 @@ export const useThreeGameStore = create((set, get) => ({
       };
     });
 
-    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+    if (!generativeRequestsAllowed()) {
       const payload = localExamineFallback(trimmed, session);
       applyReply({ ...payload, fallback: false, source: 'authored' });
       return payload;
@@ -3537,7 +3550,7 @@ export const useThreeGameStore = create((set, get) => ({
       textHash(trimmed),
     ].join(':');
 
-    if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) {
+    if (!generativeRequestsAllowed()) {
       if (state.activeConstraint?.type === 'snare_immobilized') {
         const resolved = localSnareEscapeResolution(trimmed);
         get().applySnareEscapeResolution(resolved, { playerInput: trimmed });

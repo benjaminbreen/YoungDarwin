@@ -138,6 +138,7 @@ export async function generateLLMText({
   temperature,
   route = 'llmProvider',
   sessionId = 'anonymous',
+  clientId = null,
   idempotencyKey,
   background = false,
 } = {}) {
@@ -154,6 +155,7 @@ export async function generateLLMText({
     provider: config.provider,
     model: config.apiModel,
     sessionId,
+    clientId,
     idempotencyKey,
     prompt: `${systemPrompt || ''}\n${userPrompt || ''}`,
     background,

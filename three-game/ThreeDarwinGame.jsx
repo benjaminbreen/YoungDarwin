@@ -44,7 +44,12 @@ import {
   subscribeSolarLook,
 } from './world/solarLook';
 import { setCoverageAASupport } from './components/assets/materialStability';
-import { SceneEnvironment } from './components/assets/ModelAsset';
+import {
+  preloadModelAssets,
+  SceneEnvironment,
+} from './components/assets/ModelAsset';
+import { getSpecimenPreloadAssetId } from './components/world/SpecimenActor';
+import { getThreeSpecimens } from './data';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
 import { getRegionMap } from '../game-core/regionMaps';
 import {
@@ -352,6 +357,8 @@ const HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550;
 const HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS = 80;
 const HISTORICAL_PROLOGUE_EXIT_MS = 2300;
 const BOOT_DEGRADED_READY_TIMEOUT_MS = 10000;
+const OPENING_ENSEMBLE_READY_TIMEOUT_MS = 6500;
+const HUD_POST_REVEAL_QUIET_MS = 320;
 const STARTUP_FULL_CONTENT_PHASE = 6;
 const TRANSITION_REVEAL_CONTENT_PHASE = STARTUP_FULL_CONTENT_PHASE;
 // Terrain, vistas, authored ecology, movement collision, and Darwin establish a
@@ -387,8 +394,10 @@ const INTRO_LOADING_STEPS = Object.freeze([1, ...CONTENT_MOUNT_STEPS]);
 const INTRO_LOADING_PHASE_TIMINGS_MS = Object.freeze(
   INTRO_LOADING_STEPS.map((_, index) => Math.round(index * 155)),
 );
-const STARTUP_STREAM_FIRST_STEP_MS = 1200;
-const STARTUP_STREAM_STEP_MS = 260;
+const STARTUP_STREAM_FIRST_STEP_MS = 180;
+const STARTUP_STREAM_STEP_MS = 380;
+const STARTUP_STREAM_IDLE_TIMEOUT_MS = 650;
+const STARTUP_STREAM_FRAME_BUDGET_MS = 28;
 // The deadline is a degraded fallback, not the normal transition clock. Full
 // destination content now mounts and compiles beneath the opaque chart first.
 const TRANSITION_READY_DEADLINE_MS = 8000;
@@ -1236,6 +1245,7 @@ function OpeningVisualReadySignal({
   sequenceId,
   contentReady,
   segmentCap,
+  verifyOpeningActors = false,
   onReady,
 }) {
   const { gl, scene, camera } = useThree();
@@ -1246,7 +1256,7 @@ function OpeningVisualReadySignal({
   const compiledSequenceRef = useRef(null);
   const compilingSequenceRef = useRef(null);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!active || !sequenceId) {
       activeSequenceRef.current = null;
       quietSinceRef.current = 0;
@@ -1268,6 +1278,74 @@ function OpeningVisualReadySignal({
       quietSinceRef.current = 0;
       stableFramesRef.current = 0;
       return;
+    }
+
+    if (verifyOpeningActors) {
+      let symsActorCount = 0;
+      let symsVisualCount = 0;
+      let specimenActorCount = 0;
+      let specimenVisualCount = 0;
+      let importedModelCount = 0;
+      scene.traverse(object => {
+        if (object.visible === false) return;
+        if (object.userData?.renderSource === 'npc:syms') {
+          symsActorCount += 1;
+          object.traverse(descendant => {
+            const kind = descendant.userData?.renderKind;
+            if (
+              descendant.visible !== false
+              && (kind === 'model-asset' || kind === 'npc-visual-fallback')
+            ) symsVisualCount += 1;
+          });
+        }
+        if (object.userData?.renderKind === 'specimen-actor') {
+          specimenActorCount += 1;
+          object.traverse(descendant => {
+            const kind = descendant.userData?.renderKind;
+            if (
+              descendant.visible !== false
+              && (kind === 'model-asset' || kind === 'specimen-visual')
+            ) specimenVisualCount += 1;
+          });
+        }
+        if (String(object.userData?.renderSource || '').startsWith('model:')) importedModelCount += 1;
+      });
+      const state = useThreeGameStore.getState();
+      const expectsSyms = state.symsZoneId === zoneId;
+      const collectedActors = new Set(state.collectedSpecimenActorIds || []);
+      const expectedSpecimenCount = getThreeSpecimens(zoneId).filter(specimen => {
+        const actorId = specimen.instanceId || specimen.id;
+        return actorId !== state.playableHiddenActorId && !collectedActors.has(actorId);
+      }).length;
+      const expectsSpecimens = expectedSpecimenCount > 0;
+      if (
+        (expectsSyms && (symsActorCount === 0 || symsVisualCount === 0))
+        || (
+          expectsSpecimens
+          && (
+            specimenActorCount < expectedSpecimenCount
+            || specimenVisualCount < expectedSpecimenCount
+          )
+        )
+      ) {
+        quietSinceRef.current = 0;
+        stableFramesRef.current = 0;
+        return;
+      }
+      if (typeof window !== 'undefined') {
+        window.__threeOpeningEnsemble = {
+          zoneId,
+          expectsSyms,
+          expectsSpecimens,
+          expectedSpecimenCount,
+          symsActorCount,
+          symsVisualCount,
+          specimenActorCount,
+          specimenVisualCount,
+          importedModelCount,
+          contentReady: true,
+        };
+      }
     }
 
     // Read loader state imperatively. Subscribing this R3F component lets a
@@ -1315,6 +1393,10 @@ function OpeningVisualReadySignal({
       return;
     }
 
+    if (delta * 1000 > STARTUP_STREAM_FRAME_BUDGET_MS) {
+      stableFramesRef.current = 0;
+      return;
+    }
     stableFramesRef.current += 1;
     if (stableFramesRef.current < 3 || announcedSequenceRef.current === sequenceId) return;
     announcedSequenceRef.current = sequenceId;
@@ -1750,6 +1832,28 @@ function scheduleStagedContentPhases({ steps, timings, commitPhase, idleTimeoutM
   };
 }
 
+function recordLaunchHandoffEvent(label, detail = null) {
+  if (typeof window === 'undefined') return;
+  const now = performance.now();
+  const existing = window.__threeLaunchHandoff;
+  const state = existing && Array.isArray(existing.events)
+    ? existing
+    : { startedAt: now, events: [] };
+  state.events.push({
+    label,
+    at: now,
+    elapsedMs: Math.max(0, now - state.startedAt),
+    ...(detail ? { detail } : null),
+  });
+  state.lastEvent = label;
+  window.__threeLaunchHandoff = state;
+  try {
+    performance.mark(`three:launch-handoff:${label}`);
+  } catch {
+    // User-agent mark limits or an unusual label must never affect launch.
+  }
+}
+
 // Selective bloom so the sun (and bright speculars) genuinely radiate. A high
 // luminance threshold keeps the sky/terrain crisp and only blooms near-white
 // highlights, which is why the sun core is pushed white-hot in SkyController.
@@ -2081,6 +2185,10 @@ function UnderwaterCameraTracker({ onChange }) {
     const belowSurface = WATER_LEVEL - camera.position.y;
     const raw = Math.min(1, Math.max(0, (belowSurface + 0.03) / 0.95));
     const amount = raw * raw * (3 - raw * 2);
+    // Math.min/max pass NaN straight through, and the change test below compares
+    // false for NaN, so a non-finite camera used to publish NaN to the store and
+    // to the glare overlay's inline opacity. Hold the last good value instead.
+    if (!Number.isFinite(amount)) return;
     if (Math.abs(amount - lastAmount.current) < 0.025) return;
     lastAmount.current = amount;
     onChange(amount);
@@ -2164,7 +2272,11 @@ function SolarScreenGlare({ enabled, wash = true, lensGhostsEnabled = true, supp
   );
   const glare = useThreeGameStore(state => state.solarGlare);
   if (!enabled || (!wash && !lensGhostsEnabled)) return null;
-  const strength = Math.min(1, Math.max(0, glare?.strength || 0)) * (1 - Math.min(1, Math.max(0, suppression)));
+  // Every alpha below derives from these two, and Math.min/max do not filter NaN
+  // — one bad input became `opacity: NaN` on nine layers at once.
+  const safeSuppression = Number.isFinite(suppression) ? suppression : 0;
+  const safeGlareStrength = Number.isFinite(glare?.strength) ? glare.strength : 0;
+  const strength = Math.min(1, Math.max(0, safeGlareStrength)) * (1 - Math.min(1, Math.max(0, safeSuppression)));
 
   const x = Math.max(-18, Math.min(118, (glare.x ?? 0.5) * 100));
   const y = Math.max(-18, Math.min(118, (glare.y ?? 0.42) * 100));
@@ -2856,10 +2968,13 @@ export default function ThreeDarwinGame({
   const [startupContentPhase, setStartupContentPhase] = useState(0);
   const [transitionContentPhase, setTransitionContentPhase] = useState(STARTUP_FULL_CONTENT_PHASE);
   const [openingIntroStartedAt, setOpeningIntroStartedAt] = useState(0);
+  const [openingEnsembleReady, setOpeningEnsembleReady] = useState(false);
   const [playerAnimationBanksReady, setPlayerAnimationBanksReady] = useState(false);
   const [playerVisualReady, setPlayerVisualReady] = useState(false);
   const [launchOverlayDeparting, setLaunchOverlayDeparting] = useState(false);
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
+  const [hudEntranceComplete, setHudEntranceComplete] = useState(false);
+  const [launchRevealSettled, setLaunchRevealSettled] = useState(false);
   const [historicalPrologueVisible, setHistoricalPrologueVisible] = useState(false);
   const [historicalPrologueAccepted, setHistoricalPrologueAccepted] = useState(false);
   const [historicalPrologueSkipRequested, setHistoricalPrologueSkipRequested] = useState(false);
@@ -2897,7 +3012,12 @@ export default function ThreeDarwinGame({
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const initialModeAppliedRef = useRef(false);
+  const launchHeavyWorkAllowedRef = useRef(true);
+  const openingPreloadKeyRef = useRef(null);
+  const openingEnsembleReportedRef = useRef(false);
+  const hudEntranceReportedRef = useRef(false);
   const weather = useThreeGameStore(state => state.weather);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const physicsDebug = useThreeGameStore(state => state.physicsDebug);
   const transition = useThreeGameStore(state => state.transition);
@@ -2911,10 +3031,11 @@ export default function ThreeDarwinGame({
     && !resumedFromSave
     && ['darwin', 'finch', 'tortoise'].includes(playableModeId);
   // Aerial framing exposes much more water and terrain than ordinary play.
-  // Skip the scene-doubling reflection pass through the opening, and hold
-  // shadow/reflection refreshes while a transition is covered. The settled
-  // gameplay frame restores the selected quality without remounting scenery.
-  const openingRenderBudgetActive = launchPrologueEligible && launchState !== 'playing';
+  // Keep the scene-doubling reflection pass, adaptive DPR, and shadow refreshes
+  // quiet until the HUD's last entrance transition has painted. Restoring the
+  // selected quality on the same frame as the UI reveal was another source of
+  // visible hitching even when all network requests were already cached.
+  const openingRenderBudgetActive = gameStarted && !launchRevealSettled;
   const transitionRenderBudgetActive = Boolean(transition);
   const transitionReflectionPaused = Boolean(
     transition && transition.phase !== 'settling',
@@ -2941,6 +3062,7 @@ export default function ThreeDarwinGame({
     || !launchOverlayDismissed;
   const runtimeAudioEnabled = audioEnabled && !e2eMode && !screenshotMode;
   const gameUiVisible = gameStarted && !showLaunchOverlay && !openingIntroActive;
+  const gameUiMounted = gameStarted && sceneReady;
   // Automation lanes must not leave a save behind that changes the next run.
   useSessionAutosave(gameStarted && sceneReady && !e2eMode && !screenshotMode);
   const transitionMountingDestination = Boolean(
@@ -2955,6 +3077,21 @@ export default function ThreeDarwinGame({
       || (transition.phase === 'mounting' && transitionContentPhase < STARTUP_FULL_CONTENT_PHASE)
     )
   );
+  // The library is a full-screen opaque reader, so every frame drawn behind it
+  // is spent on pixels nobody sees — and it was competing with pdf.js for the
+  // main thread, which is what made page turns feel sticky. The delay lets the
+  // book-focus camera move finish under the panel's fade-in before the freeze.
+  const libraryOpen = useThreeGameStore(state => Boolean(state.readableBookSession));
+  const [libraryCanvasPaused, setLibraryCanvasPaused] = useState(false);
+  useEffect(() => {
+    if (!libraryOpen) {
+      setLibraryCanvasPaused(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setLibraryCanvasPaused(true), 420);
+    return () => window.clearTimeout(timer);
+  }, [libraryOpen]);
+  const canvasPaused = transitionCanvasPaused || libraryCanvasPaused;
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
@@ -3049,6 +3186,14 @@ export default function ThreeDarwinGame({
     }
     bootStartedAt.current = performance.now();
     loaderQuietSince.current = 0;
+    window.__threeLaunchHandoff = {
+      startedAt: bootStartedAt.current,
+      events: [],
+    };
+    recordLaunchHandoffEvent('expedition-start', {
+      modeId: initialModeId,
+      resumed: restored,
+    });
     setInitialModeReady(true);
     if (restored) setResumedFromSave(true);
   }, [initialModeId, multiplayerSession, resumeSnapshot]);
@@ -3363,6 +3508,7 @@ export default function ThreeDarwinGame({
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
+    setOpeningEnsembleReady(false);
     setHistoricalPrologueVisible(false);
     setHistoricalPrologueAccepted(false);
     setHistoricalPrologueSkipRequested(false);
@@ -3372,6 +3518,19 @@ export default function ThreeDarwinGame({
     if (!gameStarted) setPlayerVisualReady(false);
     setLaunchOverlayDeparting(false);
     setLaunchOverlayDismissed(false);
+    setHudEntranceComplete(false);
+    setLaunchRevealSettled(false);
+    launchHeavyWorkAllowedRef.current = true;
+    openingPreloadKeyRef.current = null;
+    openingEnsembleReportedRef.current = false;
+    hudEntranceReportedRef.current = false;
+    if (typeof window !== 'undefined') {
+      window.__threeLaunchHandoff = {
+        startedAt: performance.now(),
+        events: [],
+      };
+      recordLaunchHandoffEvent('expedition-start', { modeId });
+    }
     setLaunchState('loading');
   };
 
@@ -3424,6 +3583,7 @@ export default function ThreeDarwinGame({
     setSceneReady(false);
     setStartupContentPhase(0);
     setOpeningIntroStartedAt(0);
+    setOpeningEnsembleReady(false);
     setHistoricalPrologueVisible(false);
     setHistoricalPrologueAccepted(false);
     setHistoricalPrologueSkipRequested(false);
@@ -3431,6 +3591,12 @@ export default function ThreeDarwinGame({
     setPlayerVisualReady(false);
     setLaunchOverlayDeparting(false);
     setLaunchOverlayDismissed(false);
+    setHudEntranceComplete(false);
+    setLaunchRevealSettled(false);
+    launchHeavyWorkAllowedRef.current = true;
+    openingPreloadKeyRef.current = null;
+    openingEnsembleReportedRef.current = false;
+    hudEntranceReportedRef.current = false;
     setLaunchState('menu');
   };
 
@@ -3441,6 +3607,7 @@ export default function ThreeDarwinGame({
     const skipIntro = skipOpeningIntro || resumedFromSave || skipOpeningIntroFromParams(params);
     setSceneReady(true);
     setDisplayedProgress(100);
+    recordLaunchHandoffEvent('essential-scene-ready');
     if (skipIntro) {
       setOpeningIntroStartedAt(0);
       setLaunchState('playing');
@@ -3452,25 +3619,48 @@ export default function ThreeDarwinGame({
     }
   }, [resumedFromSave, skipOpeningIntro]);
 
-  const acceptHistoricalPrologue = useCallback(() => {
-    if (!sceneReady) return;
+  const markOpeningEnsembleReady = useCallback(() => {
+    if (openingEnsembleReportedRef.current) return;
+    openingEnsembleReportedRef.current = true;
+    setOpeningEnsembleReady(true);
+    recordLaunchHandoffEvent('opening-ensemble-ready');
+  }, []);
+
+  const markHudEntranceComplete = useCallback(() => {
+    if (hudEntranceReportedRef.current) return;
+    hudEntranceReportedRef.current = true;
+    setHudEntranceComplete(true);
+    recordLaunchHandoffEvent('hud-entrance-complete');
+  }, []);
+
+  const recordHudEntranceStage = useCallback(stage => {
+    if (stage > 0) recordLaunchHandoffEvent(`hud-stage-${stage}`);
+  }, []);
+
+  const commitHistoricalPrologueAcceptance = useCallback(() => {
+    launchHeavyWorkAllowedRef.current = false;
+    recordLaunchHandoffEvent('prologue-accepted');
     setHistoricalPrologueAccepted(true);
-  }, [sceneReady]);
+  }, []);
+
+  const acceptHistoricalPrologue = useCallback(() => {
+    if (!sceneReady || !openingEnsembleReady) return;
+    commitHistoricalPrologueAcceptance();
+  }, [commitHistoricalPrologueAcceptance, openingEnsembleReady, sceneReady]);
 
   const skipHistoricalPrologue = useCallback(() => {
     setHistoricalPrologueSkipRequested(true);
-    if (sceneReady) setHistoricalPrologueAccepted(true);
-  }, [sceneReady]);
+    recordLaunchHandoffEvent('prologue-skip-requested');
+    if (sceneReady && openingEnsembleReady) commitHistoricalPrologueAcceptance();
+  }, [commitHistoricalPrologueAcceptance, openingEnsembleReady, sceneReady]);
 
   useEffect(() => {
     if (!automationReadyMode || !gameStarted || sceneReady) return undefined;
     const handle = window.setInterval(() => {
       const startedAt = bootStartedAt.current || performance.now();
-      const minimumWait = e2eMode
-        ? 20000
-        : screenshotMode
-          ? SCREENSHOT_MIN_LOADING_MS
-          : Math.max(BOOT_MIN_LOADING_MS, 2500);
+      const minimumWait = screenshotMode && !e2eMode
+        ? SCREENSHOT_MIN_LOADING_MS
+        : Math.max(BOOT_MIN_LOADING_MS, 2500);
       const waitedLongEnough = performance.now() - startedAt >= minimumWait;
       const stagedContentReady = startupContentPhase >= loadingContentTarget
         && (playableModeId !== 'darwin' || playerVisualReady)
@@ -3545,9 +3735,30 @@ export default function ThreeDarwinGame({
   ]);
 
   useEffect(() => {
-    if (!sceneReady || !historicalPrologueSkipRequested) return;
-    setHistoricalPrologueAccepted(true);
-  }, [historicalPrologueSkipRequested, sceneReady]);
+    if (
+      !sceneReady
+      || !openingEnsembleReady
+      || !historicalPrologueSkipRequested
+      || historicalPrologueAccepted
+    ) return;
+    commitHistoricalPrologueAcceptance();
+  }, [
+    commitHistoricalPrologueAcceptance,
+    historicalPrologueAccepted,
+    historicalPrologueSkipRequested,
+    openingEnsembleReady,
+    sceneReady,
+  ]);
+
+  useEffect(() => {
+    if (!sceneReady || !launchPrologueEligible || openingEnsembleReady) return undefined;
+    const handle = window.setTimeout(() => {
+      openingEnsembleReportedRef.current = true;
+      recordLaunchHandoffEvent('opening-ensemble-degraded-ready');
+      setOpeningEnsembleReady(true);
+    }, OPENING_ENSEMBLE_READY_TIMEOUT_MS);
+    return () => window.clearTimeout(handle);
+  }, [launchPrologueEligible, openingEnsembleReady, sceneReady]);
 
   useEffect(() => {
     if (
@@ -3559,6 +3770,8 @@ export default function ThreeDarwinGame({
       ? HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS
       : LAUNCH_COMPLETION_HOLD_MS;
     const departHandle = window.setTimeout(() => {
+      launchHeavyWorkAllowedRef.current = false;
+      recordLaunchHandoffEvent('overlay-departing');
       setLaunchOverlayDeparting(true);
     }, completionHold);
     const exitDuration = historicalPrologueAccepted
@@ -3573,6 +3786,7 @@ export default function ThreeDarwinGame({
       } else if (openingIntroActive) {
         setOpeningIntroStartedAt(performance.now());
       }
+      recordLaunchHandoffEvent('overlay-dismissed');
       setLaunchOverlayDismissed(true);
     }, completionHold + exitDuration);
     return () => {
@@ -3601,27 +3815,104 @@ export default function ThreeDarwinGame({
     });
   }, [gameStarted, launchState, loadingContentTarget]);
 
-  // Once the essential phase-three scene is visible and has had a short quiet
-  // window, mount the remaining props, plant fields, structures, specimens,
-  // ship, and NPC actors in small idle-window steps. Deferring the first heavy
-  // mount until after overlay dismissal guarantees that loader/parser work
-  // cannot delay the veil's own exit or the first interactive frames.
+  // Start current-zone actor requests one at a time once the essential
+  // phase-three scene is stable. The historical prologue supplies several
+  // seconds of opaque cover; skip-intro launches use the same reveal guard to
+  // pause this queue until the HUD has finished.
   useEffect(() => {
-    if (!gameStarted || !sceneReady || !launchOverlayDismissed) return undefined;
-    const steps = CONTENT_MOUNT_STEPS.filter(phase => phase > loadingContentTarget);
+    if (!gameStarted || !sceneReady) return undefined;
+    const preloadKey = `${bootStartedAt.current}:${currentZoneId}`;
+    if (openingPreloadKeyRef.current === preloadKey) return undefined;
+    openingPreloadKeyRef.current = preloadKey;
+    let cancelled = false;
+    let idleHandle = null;
+    let timeoutHandle = null;
+    const specimenAssetIds = getThreeSpecimens(currentZoneId)
+      .map(getSpecimenPreloadAssetId)
+      .filter(Boolean);
+    const ids = Array.from(new Set(['syms', ...specimenAssetIds]));
+    let index = 0;
+
+    const scheduleNext = delay => {
+      if (cancelled || index >= ids.length) return;
+      timeoutHandle = window.setTimeout(() => {
+        timeoutHandle = null;
+        if (cancelled) return;
+        if (typeof window.requestIdleCallback === 'function') {
+          idleHandle = window.requestIdleCallback(beginPreload, { timeout: 800 });
+        } else {
+          beginPreload();
+        }
+      }, delay);
+    };
+    const beginPreload = () => {
+      idleHandle = null;
+      if (cancelled) return;
+      if (!launchHeavyWorkAllowedRef.current) {
+        scheduleNext(90);
+        return;
+      }
+      const id = ids[index];
+      preloadModelAssets([id]);
+      index += 1;
+      recordLaunchHandoffEvent('opening-asset-preload', { zoneId: currentZoneId, id });
+      scheduleNext(280);
+    };
+    scheduleNext(0);
+    return () => {
+      cancelled = true;
+      if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
+      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
+    };
+  }, [currentZoneId, gameStarted, sceneReady]);
+
+  // Mount one remaining content family per bounded idle window. The scheduler
+  // pauses while the launch veil and HUD reveal are animating, then resumes
+  // with requestIdleCallback timeouts so a continuously-rendering WebGL page
+  // can never starve the specimen/NPC phases.
+  useEffect(() => {
+    if (!gameStarted || !sceneReady) return undefined;
+    const revealProtected = historicalPrologueAccepted
+      || launchOverlayDeparting
+      || launchOverlayDismissed;
+    if (revealProtected && !launchRevealSettled) return undefined;
+    const steps = CONTENT_MOUNT_STEPS.filter(
+      phase => phase > Math.max(loadingContentTarget, startupContentPhase),
+    );
     if (!steps.length) return undefined;
     return scheduleStagedContentPhases({
       steps,
       timings: steps.map(
-        (_, index) => STARTUP_STREAM_FIRST_STEP_MS + STARTUP_STREAM_STEP_MS * index,
+        (_, index) => STARTUP_STREAM_FIRST_STEP_MS + index * STARTUP_STREAM_STEP_MS,
       ),
-      idleTimeoutMs: 140,
-      commitPhase: phase => setStartupContentPhase(current => Math.max(current, phase)),
+      idleTimeoutMs: STARTUP_STREAM_IDLE_TIMEOUT_MS,
+      commitPhase: phase => {
+        recordLaunchHandoffEvent(`content-phase-${phase}`);
+        setStartupContentPhase(current => Math.max(current, phase));
+      },
     });
-  }, [gameStarted, launchOverlayDismissed, loadingContentTarget, sceneReady]);
+  }, [
+    gameStarted,
+    historicalPrologueAccepted,
+    launchOverlayDeparting,
+    launchOverlayDismissed,
+    launchRevealSettled,
+    loadingContentTarget,
+    sceneReady,
+  ]);
 
   useEffect(() => {
-    if (!runtimeAudioEnabled || launchState !== 'playing') return undefined;
+    if (!hudEntranceComplete || launchRevealSettled) return undefined;
+    const handle = window.setTimeout(() => {
+      launchHeavyWorkAllowedRef.current = true;
+      setLaunchRevealSettled(true);
+      recordLaunchHandoffEvent('launch-reveal-settled');
+    }, HUD_POST_REVEAL_QUIET_MS);
+    return () => window.clearTimeout(handle);
+  }, [hudEntranceComplete, launchRevealSettled]);
+
+  useEffect(() => {
+    if (!runtimeAudioEnabled || launchState !== 'playing' || !launchRevealSettled) return undefined;
     let cancelled = false;
     let idleHandle = null;
     let timeoutHandle = null;
@@ -3642,15 +3933,20 @@ export default function ThreeDarwinGame({
       if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
       if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
     };
-  }, [launchState, runtimeAudioEnabled]);
+  }, [launchRevealSettled, launchState, runtimeAudioEnabled]);
 
   return (
     <MultiplayerProvider session={multiplayerSession}>
     <main className="three-game-shell fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-stone-950 text-amber-50">
       <OpeningPerformanceProbe
         enabled={DEV_TOOLS_ENABLED || perfProbe}
-        active={openingIntroActive && openingIntroStartedAt > 0}
-        sequenceId={openingIntroStartedAt}
+        active={(
+          (openingIntroActive && openingIntroStartedAt > 0)
+          || historicalPrologueAccepted
+          || launchOverlayDeparting
+          || launchOverlayDismissed
+        ) && !launchRevealSettled}
+        sequenceId={bootStartedAt.current || openingIntroStartedAt}
         loadStartedAt={bootStartedAt.current}
         contentPhase={startupContentPhase}
       />
@@ -3681,7 +3977,7 @@ export default function ThreeDarwinGame({
              the apparent mountain silhouette. */
           <Canvas
             className="absolute inset-0 h-full w-full"
-            frameloop={transitionCanvasPaused ? 'never' : 'always'}
+            frameloop={canvasPaused ? 'never' : 'always'}
             shadows={scenePerfSettings.shadows}
             dpr={renderDpr}
             camera={{ position: [0, 2.6, 4.8], fov: 50, near: 0.1, far: 560 }}
@@ -3718,6 +4014,7 @@ export default function ThreeDarwinGame({
                 contentPhase={activeContentPhase}
                 openingCamera={openingCamera}
                 inputLocked={openingIntroActive || Boolean(transition)}
+                actorMotionPaused={!gameUiVisible || Boolean(transition)}
                 onPlayerAnimationBanksReady={markPlayerAnimationBanksReady}
                 onPlayerVisualReady={markPlayerVisualReady}
               />
@@ -3731,6 +4028,16 @@ export default function ThreeDarwinGame({
                 && (playableModeId !== 'darwin' || playerAnimationBanksReady)}
               segmentCap={scenePerfSettings.terrainSegmentCap}
               onReady={markSceneReady}
+            />
+            <OpeningVisualReadySignal
+              active={gameStarted
+                && sceneReady
+                && !openingEnsembleReady}
+              sequenceId={`opening-ensemble:${bootStartedAt.current || 'opening-load'}`}
+              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              segmentCap={scenePerfSettings.terrainSegmentCap}
+              verifyOpeningActors
+              onReady={markOpeningEnsembleReady}
             />
             <ZoneTransitionReadySignal
               segmentCap={scenePerfSettings.terrainSegmentCap}
@@ -3748,7 +4055,10 @@ export default function ThreeDarwinGame({
               underwaterAmount={underwaterAmount}
             />
             <AdaptiveResolution
-              enabled={sceneReady && !openingIntroActive && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              enabled={sceneReady
+                && launchRevealSettled
+                && !openingIntroActive
+                && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
               maxDpr={configuredDpr[1]}
             />
             <OpeningIntroCompletion
@@ -3808,7 +4118,7 @@ export default function ThreeDarwinGame({
           durationMs={OPENING_DURATION_MS}
         />
         {gameStarted && <ZoneTransitionOverlay />}
-        {gameUiVisible && (
+        {gameUiMounted && (
           <ThreeHUD
             onTogglePerf={() => setShowPerf(value => !value)}
             onRestartExpedition={restartExpedition}
@@ -3818,6 +4128,9 @@ export default function ThreeDarwinGame({
             quality={qualityPreference}
             onQualityChange={handleQualityPreferenceChange}
             openJournalOnLaunch={openJournalOnLaunch}
+            entranceActive={gameUiVisible}
+            onEntranceStageChange={recordHudEntranceStage}
+            onEntranceComplete={markHudEntranceComplete}
           />
         )}
         {gameUiVisible && multiplayerSession && <MultiplayerHud />}
@@ -3855,7 +4168,7 @@ export default function ThreeDarwinGame({
             historicalPrologue={{
               active: launchPrologueEligible && historicalPrologueVisible,
               modeId: playableModeId,
-              sceneReady,
+              sceneReady: sceneReady && openingEnsembleReady,
               departing: gameStarted && launchOverlayDeparting,
               skipRequested: historicalPrologueSkipRequested,
               onBeginExploring: acceptHistoricalPrologue,

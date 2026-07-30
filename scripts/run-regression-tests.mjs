@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import ts from 'typescript';
 
 const projectRequire = createRequire(import.meta.url);
@@ -107,6 +108,8 @@ const {
 const {
   beginLLMRequest,
   finishLLMRequest,
+  getClientId,
+  getRequestIdentity,
 } = loadModule('utils/server/llmSafety.js');
 const {
   clampNpcEncounterEffects,
@@ -257,6 +260,7 @@ const {
   getRegionTerrainConfig,
   isWalkableTerrain,
   movementTerrainHeight,
+  regionSpawnFacing,
   regionSpawnPoint,
   terrainSlopeAt,
   terrainHeight,
@@ -629,6 +633,7 @@ const {
   SYMS_FIELD_CASE_ID,
   SYMS_FIELD_CASE_PLACEMENT,
   SYMS_FIELD_CASE_PROMPT_MODE,
+  SYMS_OPENING_SPAWN_POSITION,
   buildSymsPostOfficeBayPlan,
   findSymsRoute,
   nextSymsActivity,
@@ -698,25 +703,18 @@ test('Syms builds a connected north-bay fieldwork circuit with calculated activi
   assert.equal(nextSymsActivity(plan, plan.activitySites.length), plan.activitySites[0]);
 });
 
-test('Syms field orders normalize safely and his base uses shared prop definitions', () => {
+test('Syms field orders normalize safely and his decluttered base uses shared prop definitions', () => {
   assert.equal(normalizeSymsDirective(SYMS_DIRECTIVES.FOLLOW), 'follow');
   assert.equal(normalizeSymsDirective(SYMS_DIRECTIVES.WAIT), 'wait');
   assert.equal(normalizeSymsDirective('invent-a-command'), DEFAULT_SYMS_DIRECTIVE);
 
   const props = getZoneProps('POST_OFFICE_BAY');
-  const fieldKit = props.find(prop => prop.id === 'syms-field-kit');
   const fieldCase = props.find(prop => prop.id === SYMS_FIELD_CASE_ID);
-  const bottle = props.find(prop => prop.id === 'syms-field-bottle');
-  assert.equal(fieldKit.visualAsset, 'cratesAndBags');
-  assert.equal(fieldKit.fixed, true);
   assert.equal(fieldCase.visual, 'symsFieldCase');
   assert.equal(fieldCase.behaviors.mobility.mode, 'push');
   assert.equal(fieldCase.behaviors.strikeable.tool, 'hammer');
   assert.equal(fieldCase.x, SYMS_FIELD_CASE_PLACEMENT.x);
   assert.equal(fieldCase.z, SYMS_FIELD_CASE_PLACEMENT.z);
-  assert.equal(bottle.visual, 'symsFieldBottle');
-  assert.equal(bottle.behaviors.mobility.mode, 'push');
-  assert.equal(bottle.behaviors.breakable.debris, 'glass');
 
   assert.equal(SYMS_FIELD_CASE_ID, 'syms-field-case');
   assert.equal(SYMS_FIELD_CASE_PROMPT_MODE, 'toggle-syms-field-case');
@@ -725,6 +723,30 @@ test('Syms field orders normalize safely and his base uses shared prop definitio
     SYMS_FIELD_CASE_PLACEMENT.x - base.x,
     SYMS_FIELD_CASE_PLACEMENT.z - base.z,
   ) < 4, 'collecting case should remain at Syms’s authored shore base');
+});
+
+test('Syms opens behind Darwin’s east-facing view and has a connected approach to camp', () => {
+  const plan = buildSymsPostOfficeBayPlan();
+  const darwinStart = regionSpawnPoint('POST_OFFICE_BAY');
+  const darwinFacing = regionSpawnFacing('POST_OFFICE_BAY');
+  const toSyms = {
+    x: SYMS_OPENING_SPAWN_POSITION.x - darwinStart.x,
+    z: SYMS_OPENING_SPAWN_POSITION.z - darwinStart.z,
+  };
+  const forwardDot = toSyms.x * darwinFacing.x + toSyms.z * darwinFacing.z;
+  assert.ok(forwardDot < 0, 'Syms should begin behind Darwin’s opening view');
+  assert.equal(
+    isWalkableTerrain(
+      SYMS_OPENING_SPAWN_POSITION.x,
+      SYMS_OPENING_SPAWN_POSITION.z,
+      'POST_OFFICE_BAY',
+    ),
+    true,
+  );
+  const approach = findSymsRoute(plan, SYMS_OPENING_SPAWN_POSITION, plan.baseSite);
+  assert.ok(approach.length >= 2, 'Syms should follow the west trail toward his field base');
+  const end = approach.at(-1);
+  assert.ok(Math.hypot(end.x - plan.baseSite.x, end.z - plan.baseSite.z) < 0.01);
 });
 
 test('Syms follow state crosses exterior maps while wait and interiors preserve his location', () => {
@@ -806,31 +828,46 @@ test('Syms companion arrival is walkable, separated, and encounter-enabled off t
   }
 });
 
-test('Post Office Bay arrival props begin in settled configurations', () => {
+test('Post Office Bay opens with only the mail barrel, one crate, and Syms’s case', () => {
   const props = getZoneProps('POST_OFFICE_BAY');
-  const barrel = props.find(prop => prop.id === 'post-office-rollable-barrel');
-  const arrivalBoulders = ['bay-path-stone-a', 'bay-path-stone-b', 'bay-path-stone-c']
-    .map(id => props.find(prop => prop.id === id));
+  assert.deepEqual(
+    props.map(prop => prop.id),
+    ['post-office-bay-large-barrel', 'shore-supply-crate', SYMS_FIELD_CASE_ID],
+  );
+  assert.equal(props[0].visualAsset, 'postOfficeBayBarrel');
+  assert.equal(props[1].visual, 'crate');
+  assert.equal(props[2].visual, 'symsFieldCase');
+});
 
-  assert.deepEqual(barrel.rotation, [0, 0.72, 0]);
-  assert.ok(
-    terrainSlopeAt(barrel.x, barrel.z, 'POST_OFFICE_BAY', 0.5).grade < 0.15,
-    'loose barrel should start upright on the flatter eastern supply shelf',
-  );
-  assert.ok(arrivalBoulders.every(Boolean));
-  for (const boulder of arrivalBoulders) {
-    assert.equal(boulder.type, 'settledBasaltBoulder');
-    assert.equal(boulder.collider.shape, 'cuboid');
-    assert.deepEqual(boulder.enabledRotations, [false, true, false]);
-    assert.equal(boulder.behaviors.mobility.mode, 'push');
-    assert.equal(boulder.behaviors.carryable, undefined);
-    assert.deepEqual([boulder.rotation[0], boulder.rotation[2]], [0, 0]);
+test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barnacle at its edges', () => {
+  const specimens = getThreeSpecimens('POST_OFFICE_BAY');
+  const counts = specimens.reduce((result, specimen) => {
+    result[specimen.id] = (result[specimen.id] || 0) + 1;
+    return result;
+  }, {});
+  assert.deepEqual(counts, {
+    lavalizard: 2,
+    barnacle: 1,
+    lavagull: 1,
+    galapagoscarpenterbee: 1,
+    galapagossulphur: 1,
+    galapagosgulffritillary: 1,
+    galapagospaintedlocust: 1,
+  });
+
+  const darwinStart = regionSpawnPoint('POST_OFFICE_BAY');
+  const edgeSpecimens = specimens.filter(specimen => (
+    specimen.id === 'lavalizard' || specimen.id === 'barnacle'
+  ));
+  assert.equal(edgeSpecimens.length, 3);
+  for (const specimen of edgeSpecimens) {
+    const [x, , z] = specimen.spawnPoint;
+    assert.equal(isWalkableTerrain(x, z, 'POST_OFFICE_BAY'), true);
+    assert.ok(
+      Math.hypot(x - darwinStart.x, z - darwinStart.z) > 40,
+      `${specimen.instanceId} should stay far from the opening`,
+    );
   }
-  const shoulderBoulder = arrivalBoulders.find(prop => prop.id === 'bay-path-stone-c');
-  assert.ok(
-    terrainSlopeAt(shoulderBoulder.x, shoulderBoulder.z, 'POST_OFFICE_BAY', 0.5).grade < 0.08,
-    'nearest launch boulder should start on the level trail shoulder',
-  );
 });
 
 test('published NPC capsules separate Darwin and emit reusable contact events', () => {
@@ -1508,6 +1545,9 @@ test('launch shell leaves Rapier WASM initialization to the Physics boundary', (
 test('Darwin launch uses its historical prologue as scene-loading cover', () => {
   const overlaySource = fs.readFileSync(path.resolve('three-game/ui/LaunchOverlay.jsx'), 'utf8');
   const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  const zoneContentSource = fs.readFileSync(path.resolve('three-game/zones/ActiveZoneContent.jsx'), 'utf8');
+  const symsSource = fs.readFileSync(path.resolve('three-game/components/world/SymsCovington.jsx'), 'utf8');
   const cssSource = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
   assert.match(overlaySource, /data-testid="three-historical-prologue"/);
   assert.match(overlaySource, /24 September 1835/);
@@ -1523,7 +1563,7 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   assert.match(
     gameSource,
     /STARTUP_OPENING_CONTENT_PHASE = 3/,
-    'optional props, specimens, ships, and NPCs must not gate launch readiness',
+    'the opening keeps a bounded phase-three readiness boundary',
   );
   assert.match(gameSource, /BOOT_DEGRADED_READY_TIMEOUT_MS = 10000/);
   assert.match(
@@ -1533,13 +1573,83 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   );
   assert.match(
     gameSource,
-    /CONTENT_MOUNT_STEPS\.filter\(phase => phase > loadingContentTarget\)/,
+    /CONTENT_MOUNT_STEPS\.filter\(\s*phase => phase > Math\.max\(loadingContentTarget, startupContentPhase\)/,
     'late startup content should stream after the essential scene is ready',
   );
   assert.match(
     gameSource,
-    /!gameStarted \|\| !sceneReady \|\| !launchOverlayDismissed/,
-    'late asset mounts must not compete with the launch veil exit',
+    /scheduleStagedContentPhases\(\{[\s\S]*idleTimeoutMs:\s*STARTUP_STREAM_IDLE_TIMEOUT_MS/,
+    'late startup content should use separated idle windows with a bounded fallback',
+  );
+  assert.match(
+    gameSource,
+    /if \(revealProtected && !launchRevealSettled\) return undefined/,
+    'the veil and HUD should pause unfinished scene commits during their reveal',
+  );
+  assert.doesNotMatch(
+    gameSource,
+    /scheduleFrameBudgetedContentPhases/,
+    'continuous WebGL rendering must not be able to starve late actor phases',
+  );
+  assert.match(
+    gameSource,
+    /launchHeavyWorkAllowedRef\.current = false;[\s\S]*setHistoricalPrologueAccepted\(true\)/,
+    'accepting the prologue must close the heavy-work gate synchronously',
+  );
+  assert.match(
+    gameSource,
+    /launchHeavyWorkAllowedRef\.current = true;[\s\S]*setLaunchRevealSettled\(true\)/,
+    'heavy streaming should resume only after the launch reveal settles',
+  );
+  assert.match(
+    gameSource,
+    /new Set\(\['syms', \.\.\.specimenAssetIds\]\)[\s\S]*preloadModelAssets\(\[id\]\)/,
+    'the current opening ensemble should preload beneath the prologue',
+  );
+  assert.match(
+    gameSource,
+    /sceneReady:\s*sceneReady && openingEnsembleReady/,
+    'the prologue action should wait for the mounted, shader-warmed opening ensemble',
+  );
+  assert.match(
+    gameSource,
+    /\{gameUiMounted && \([\s\S]*entranceActive=\{gameUiVisible\}/,
+    'the HUD should mount behind the overlay and start its entrance only at reveal',
+  );
+  assert.match(
+    hudSource,
+    /HUD_ENTRANCE_TIMINGS_MS = Object\.freeze\(\[650, 1120, 1540, 2200\]\)/,
+    'the authored HUD entrance sequence should remain staged',
+  );
+  assert.match(
+    hudSource,
+    /HUD_ENTRANCE_TRANSITION_MS = 700/,
+    'HUD completion must include the final opacity transition, not just its timer',
+  );
+  assert.match(hudSource, /data-entrance-stage=\{hudEntranceStage\}/);
+  assert.match(
+    zoneContentSource,
+    /const specimensReady = reaches\(5\.6, 3\)/,
+    'initial specimen shells should begin loading beneath the opaque launch treatment',
+  );
+  assert.match(
+    zoneContentSource,
+    /const actorsReady = reaches\(6, 3\)/,
+    'initial NPC shells should begin loading beneath the opaque launch treatment',
+  );
+  assert.match(gameSource, /specimenVisualCount < expectedSpecimenCount/);
+  assert.match(gameSource, /symsActorCount === 0 \|\| symsVisualCount === 0/);
+  assert.match(gameSource, /actorMotionPaused=\{!gameUiVisible \|\| Boolean\(transition\)\}/);
+  assert.match(zoneContentSource, /<SymsCovington motionPaused=\{actorMotionPaused\}/);
+  assert.match(
+    symsSource,
+    /if \(motionPaused\) \{[\s\S]*animationRef\.current = 'idle'/,
+    'Syms should wait at his off-camera spawn until the gameplay reveal finishes',
+  );
+  assert.match(
+    gameSource,
+    /openingRenderBudgetActive = gameStarted && !launchRevealSettled/,
+    'reflections, adaptive DPR, and shadow refreshes must stay quiet through the HUD reveal',
   );
   assert.match(cssSource, /launch-prologue-veil/);
   assert.doesNotMatch(cssSource, /launch-prologue-part-left/);
@@ -4151,10 +4261,14 @@ test('Galapagos painted locusts hop among plants and rocks and spring away from 
   let totalActors = 0;
   for (const zoneId of habitatZones) {
     const actors = getThreeSpecimens(zoneId).filter(specimen => specimen.id === 'galapagospaintedlocust');
-    assert.ok(actors.length >= 2, `${zoneId} should contain a small painted-locust population`);
+    const expectedMinimum = zoneId === 'POST_OFFICE_BAY' ? 1 : 2;
+    assert.ok(
+      actors.length >= expectedMinimum,
+      `${zoneId} should contain its authored painted-locust population`,
+    );
     totalActors += actors.length;
   }
-  assert.ok(totalActors >= 16);
+  assert.ok(totalActors >= 15);
 
   const actor = getThreeSpecimens('LAVA_FLATS').find(specimen => specimen.id === 'galapagospaintedlocust');
   const base = new Vector3(...actor.spawnPoint);
@@ -4684,6 +4798,137 @@ test('LLM safety guard blocks pending duplicates and caches completed idempotent
   assert.equal(completedDuplicate.allowed, false);
   assert.equal(completedDuplicate.cached, true);
   assert.deepEqual(completedDuplicate.cachedResponse, response);
+});
+
+const { cameraFocusPoint } = loadModule('three-game/camera/focusPoint.js');
+
+test('a camera focus must be three finite numbers or nothing', () => {
+  assert.deepEqual(cameraFocusPoint({ x: 1, y: 2, z: 3 }), { x: 1, y: 2, z: 3 });
+  // The reported bug: MemoryLinkedText opened the library with focus: 'memory',
+  // so focus.y was undefined, every camera coordinate went NaN, and the glare
+  // overlay rendered `opacity: NaN` while the player body tripped the watchdog.
+  assert.equal(cameraFocusPoint('memory'), null);
+  assert.equal(cameraFocusPoint({ x: 1, z: 3 }), null);
+  assert.equal(cameraFocusPoint({ x: 1, y: Number.NaN, z: 3 }), null);
+  assert.equal(cameraFocusPoint({ x: 1, y: Infinity, z: 3 }), null);
+  assert.equal(cameraFocusPoint(null), null);
+  assert.equal(cameraFocusPoint(undefined), null);
+});
+
+test('the library camera focus is validated where the session is created', () => {
+  // Guarding only inside the rig would leave the bad value in the store for
+  // anything else that reads it, so openLibrary sanitizes on the way in and
+  // keeps the caller's intent in a separate field.
+  const source = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  assert.ok(/focus: cameraFocusPoint\(options\.focus\)/.test(source));
+  assert.ok(/focusIntent:/.test(source));
+  const rig = fs.readFileSync(path.resolve('three-game/components/player/usePlayerCameraRig.js'), 'utf8');
+  assert.ok(/cameraFocusPoint\(rigStoreState\.examineSession\?\.focus\)/.test(rig));
+  assert.ok(/cameraFocusPoint\(rigStoreState\.readableBookSession\?\.focus\)/.test(rig));
+  // `NaN < 0.001` is false, so the zero-length guard has to be spelled negated.
+  assert.ok(/if \(!\(dirLength > 0\.001\)\)/.test(rig));
+});
+
+test('LLM per-client cap holds when the caller rotates its session header', () => {
+  // Every other cap keys on a client-supplied session id, so this is the one
+  // that survives a script cycling that header on each request.
+  const previous = process.env.LLM_MAX_CALLS_PER_CLIENT_PER_MINUTE;
+  process.env.LLM_MAX_CALLS_PER_CLIENT_PER_MINUTE = '4';
+  const clientId = `attacker-${Date.now()}-${Math.random()}`;
+  try {
+    const attempts = [0, 1, 2, 3, 4, 5].map(index => {
+      const result = beginLLMRequest({
+        route: '/api/test-client-cap',
+        provider: 'openai',
+        model: 'gpt-5.4-nano',
+        sessionId: `rotated-session-${index}`, // a fresh identity every call
+        clientId,
+        idempotencyKey: `client-cap-${index}`,
+        prompt: `prompt ${index}`,
+      });
+      if (result.allowed) {
+        finishLLMRequest({ key: result.key, entryId: result.entryId, response: { text: 'ok' }, estimatedOutputTokens: 1 });
+      }
+      return result;
+    });
+
+    assert.equal(attempts.filter(attempt => attempt.allowed).length, 4);
+    assert.equal(attempts[4].allowed, false);
+    assert.equal(attempts[4].reason, 'client_minute_cap');
+
+    // A different origin is unaffected by the blocked one.
+    const other = beginLLMRequest({
+      route: '/api/test-client-cap',
+      provider: 'openai',
+      model: 'gpt-5.4-nano',
+      sessionId: 'rotated-session-0',
+      clientId: `${clientId}-elsewhere`,
+      idempotencyKey: 'client-cap-other',
+      prompt: 'prompt other',
+    });
+    assert.equal(other.allowed, true);
+    finishLLMRequest({ key: other.key, entryId: other.entryId, response: { text: 'ok' }, estimatedOutputTokens: 1 });
+  } finally {
+    if (previous === undefined) delete process.env.LLM_MAX_CALLS_PER_CLIENT_PER_MINUTE;
+    else process.env.LLM_MAX_CALLS_PER_CLIENT_PER_MINUTE = previous;
+  }
+});
+
+test('client identity comes from the proxy hop, never the caller\'s own forwarded-for claim', () => {
+  const spoofed = getClientId({
+    headers: { 'x-forwarded-for': '10.0.0.1, 203.0.113.7' },
+    socket: { remoteAddress: '127.0.0.1' },
+  });
+  const sameProxyDifferentClaim = getClientId({
+    headers: { 'x-forwarded-for': '10.9.9.9, 203.0.113.7' },
+    socket: { remoteAddress: '127.0.0.1' },
+  });
+  // Only the last hop is trusted, so rewriting the leading entry cannot mint a
+  // new identity and reset the counter.
+  assert.equal(spoofed, sameProxyDifferentClaim);
+
+  const elsewhere = getClientId({
+    headers: { 'x-forwarded-for': '10.0.0.1, 198.51.100.4' },
+    socket: { remoteAddress: '127.0.0.1' },
+  });
+  assert.notEqual(spoofed, elsewhere);
+  // Addresses are hashed rather than stored.
+  assert.equal(/203\.0\.113\.7/.test(spoofed), false);
+  assert.equal(getClientId({ headers: {}, socket: {} }), 'unknown-client');
+});
+
+test('a missing session header falls back to the client identity, not one shared budget', () => {
+  const identity = getRequestIdentity({
+    req: { headers: { 'x-forwarded-for': '203.0.113.9' }, socket: {} },
+    route: '/api/three-narrate',
+    prompt: 'prompt',
+  });
+  const other = getRequestIdentity({
+    req: { headers: { 'x-forwarded-for': '198.51.100.9' }, socket: {} },
+    route: '/api/three-narrate',
+    prompt: 'prompt',
+  });
+  assert.notEqual(identity.sessionId, 'anonymous');
+  assert.notEqual(identity.sessionId, other.sessionId);
+  assert.equal(identity.sessionId.includes(identity.clientId), true);
+});
+
+test('generative prompts keep a cacheable static prefix ahead of per-turn state', () => {
+  // Prompt caching only pays out on an identical leading run of at least 1,024
+  // tokens. Both routes therefore carry their rules and output contract in the
+  // system prompt, ahead of anything that varies by turn or by NPC.
+  for (const file of ['pages/api/three-narrate.js', 'pages/api/three-encounter.js']) {
+    const source = fs.readFileSync(path.resolve(file), 'utf8');
+    const systemPrompt = source.match(/const SYSTEM_PROMPT = `([\s\S]*?)`;/)?.[1] || '';
+    const tokens = Math.ceil(systemPrompt.length / 4);
+    assert.ok(tokens >= 1024, `${file} static prefix is only ~${tokens} tokens; below the cache minimum`);
+    assert.equal(/\$\{/.test(systemPrompt), false, `${file} static prefix interpolates per-request values`);
+  }
+  // The JSON contract must not also sit at the tail of the volatile prompt,
+  // where it would drift out of step with the cached copy.
+  const encounter = fs.readFileSync(path.resolve('pages/api/three-encounter.js'), 'utf8');
+  const userPrompt = encounter.match(/const prompt = `([\s\S]*?)`;\n/)[1];
+  assert.equal(userPrompt.includes('"trustDelta"'), false);
 });
 
 test('LLM safety guard blocks excessive concurrent unique requests', () => {
@@ -5696,7 +5941,7 @@ test('star sphere advances on a sidereal rather than solar clock', () => {
 const { BOOK_CATALOG } = loadModule('three-game/books/bookCatalog.js');
 const { LIBRARY_MEMORY_TERMS } = loadModule('three-game/library/memoryTerms.js');
 const { findMemoryLinks } = loadModule('three-game/library/memoryLinking.js');
-const { searchLibraryCorpus } = loadModule('three-game/library/searchCore.js');
+const { searchLibraryCorpus, searchLibraryCorpusDetailed } = loadModule('three-game/library/searchCore.js');
 const libraryPassages = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/passages.json'), 'utf8')).passages;
 const libraryIndex = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/lexical-index.json'), 'utf8'));
 const generatedMemoryTerms = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/memory-terms.json'), 'utf8')).terms;
@@ -5738,14 +5983,92 @@ test('lexical library search returns anchored scan passages without generated pr
   assert.equal(results.length, 6);
   assert.ok(results[0].searchText.includes('coral'));
   for (const passage of results) {
-    assert.ok(passage.rawText);
     assert.ok(passage.displayText);
     assert.ok(passage.anchor?.highlightRects?.length);
     assert.equal(passage.anchor.pdfPage, passage.pdfPage);
+    // Rects ship as flat [x, y, width, height] tuples: keyed objects repeated
+    // across ~39,000 line rects cost about a mebibyte of the shipped payload.
+    for (const rect of passage.anchor.highlightRects) {
+      assert.equal(rect.length, 4);
+      assert.ok(rect.every(value => Number.isFinite(value)));
+    }
   }
 });
 
-test('library package remains below its 120 MiB hard budget', () => {
+test('the shipped corpus carries no runtime-dead prose', () => {
+  // rawText and a per-passage provenance copy were 4 MiB of the payload the
+  // player waits on when the library opens, and nothing at runtime read either.
+  for (const passage of libraryPassages.slice(0, 200)) {
+    assert.equal(passage.rawText, undefined);
+    assert.equal(passage.provenance, undefined);
+    assert.ok(passage.displayText.length <= 400);
+  }
+  assert.ok(fs.statSync(path.resolve('public/assets/library/passages.json')).size < 10 * 1024 * 1024);
+});
+
+test('library search reports its total match count and can scope to one volume', () => {
+  // A subject several volumes discuss, so scoping has something to exclude.
+  // ("coral reef" is nearly all Lyell, which made the scoped and shelf-wide
+  // totals identical and told us nothing about the filter.)
+  const query = 'volcanic';
+  const shelf = searchLibraryCorpusDetailed({
+    passages: libraryPassages,
+    index: libraryIndex,
+    query,
+    limit: 6,
+  });
+  assert.equal(shelf.results.length, 6);
+  assert.ok(shelf.total > shelf.results.length);
+  assert.ok(new Set(shelf.results.map(passage => passage.bookId)).size > 1);
+
+  const scoped = searchLibraryCorpusDetailed({
+    passages: libraryPassages,
+    index: libraryIndex,
+    query,
+    limit: 6,
+    bookId: 'lyell-principles-vol1',
+  });
+  assert.ok(scoped.total > 0);
+  assert.ok(scoped.total < shelf.total);
+  assert.ok(scoped.results.every(passage => passage.bookId === 'lyell-principles-vol1'));
+});
+
+test('search results keep at most three passages per volume while other books still rank', () => {
+  const results = searchLibraryCorpus({
+    passages: libraryPassages,
+    index: libraryIndex,
+    query: 'observation of nature',
+    limit: 6,
+  });
+  const perBook = new Map();
+  for (const passage of results) perBook.set(passage.bookId, (perBook.get(passage.bookId) || 0) + 1);
+  assert.ok(Math.max(...perBook.values()) <= 3, `one volume took ${Math.max(...perBook.values())} of six slots`);
+});
+
+test('every volume with printed page numbers exposes a jump index and a spread parity', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/manifest.json'), 'utf8'));
+  const labelled = manifest.books.filter(book => Object.keys(book.printedPageMap || {}).length > 0);
+  assert.ok(labelled.length >= 3);
+  for (const book of labelled) {
+    assert.ok(Number.isInteger(book.spreadLeftParity), `${book.id} has no spread parity`);
+    for (const scan of Object.values(book.printedPageMap)) {
+      assert.ok(Number.isInteger(scan) && scan >= 1 && scan <= book.pageCount);
+    }
+  }
+});
+
+test('library package remains below the hard budget declared by its build script', () => {
+  // Read the ceiling from the builder rather than restating it, so raising one
+  // and forgetting the other cannot happen. It went to 160 MiB when the 72 ppi
+  // Humboldt and the Word-processor Ulloa were replaced with real period scans.
+  const builder = fs.readFileSync(path.resolve('scripts/build-library-corpus.mjs'), 'utf8');
+  const declared = /const budgetBytes = (\d+) \* 1024 \* 1024;/.exec(builder);
+  assert.ok(declared, 'build-library-corpus.mjs no longer declares budgetBytes in MiB');
+  const budgetMiB = Number(declared[1]);
+  assert.ok(budgetMiB <= 200, `library budget of ${budgetMiB} MiB is larger than this repo should carry`);
+});
+
+test('library package fits the budget', () => {
   const manifest = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/manifest.json'), 'utf8'));
   const artifactPaths = [
     'public/assets/library/passages.json',
@@ -5756,7 +6079,27 @@ test('library package remains below its 120 MiB hard budget', () => {
     ...(manifest.artifacts.pdfDecoderRuntime || []).map(assetPath => path.join('public', assetPath)),
   ];
   const bytes = artifactPaths.reduce((sum, filePath) => sum + fs.statSync(path.resolve(filePath)).size, 0);
-  assert.ok(bytes <= 120 * 1024 * 1024, `Library package is ${(bytes / 1024 / 1024).toFixed(2)} MiB`);
+  const builder = fs.readFileSync(path.resolve('scripts/build-library-corpus.mjs'), 'utf8');
+  const budgetMiB = Number(/const budgetBytes = (\d+) \* 1024 \* 1024;/.exec(builder)[1]);
+  assert.ok(
+    bytes <= budgetMiB * 1024 * 1024,
+    `Library package is ${(bytes / 1024 / 1024).toFixed(2)} MiB against a ${budgetMiB} MiB budget`,
+  );
+});
+
+test('every readable book ships a real period scan, not a modern transcription', () => {
+  // Both of these shipped as unusable files: Humboldt as a 72 ppi Ghostscript
+  // re-encode (316 pixels across a five-inch page) and Ulloa as a Microsoft Word
+  // document with no scan in it at all. A page-image-free PDF is the tell.
+  const manifest = JSON.parse(fs.readFileSync(path.resolve('public/assets/library/manifest.json'), 'utf8'));
+  for (const book of manifest.books) {
+    const pdfPath = path.resolve(path.join('public', book.pdfPath));
+    const listing = execFileSync('pdfimages', ['-list', '-f', '40', '-l', '41', pdfPath], { encoding: 'utf8' });
+    const rows = listing.trim().split('\n').slice(2).filter(Boolean);
+    assert.ok(rows.length > 0, `${book.id} has no page images: it is a transcription, not a scan`);
+    const bestPpi = Math.max(...rows.map(row => Number(row.trim().split(/\s+/)[12]) || 0));
+    assert.ok(bestPpi >= 250, `${book.id} tops out at ${bestPpi} ppi, too coarse to read`);
+  }
 });
 
 // --- UI palette mirrors --------------------------------------------------

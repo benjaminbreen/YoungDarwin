@@ -1,5 +1,5 @@
-import { chromium } from '@playwright/test';
 import path from 'node:path';
+import { launchChromium } from './playwright-launch.mjs';
 
 const origin = process.env.SKY_ORIGIN || 'http://localhost:3002';
 const outDir = path.join(process.cwd(), 'test-results', 'sky');
@@ -12,13 +12,7 @@ const shots = [
   { name: 'night', t: 22.5 },
 ];
 
-const launches = [
-  () => chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] }),
-  () => chromium.launch({ headless: true }),
-];
-let browser;
-for (const l of launches) { try { browser = await l(); break; } catch {} }
-if (!browser) { console.error('no browser'); process.exit(1); }
+const browser = await launchChromium();
 
 const results = [];
 for (const shot of shots) {

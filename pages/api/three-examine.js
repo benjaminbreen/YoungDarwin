@@ -133,7 +133,7 @@ Return JSON only:
   "uncertainty": "one short honest limit of the observation, or empty string"
 }`;
 
-    const { sessionId, idempotencyKey } = getRequestIdentity({
+    const { sessionId, clientId, idempotencyKey } = getRequestIdentity({
       req,
       route: '/api/three-examine',
       prompt,
@@ -143,6 +143,7 @@ Return JSON only:
     const result = await generateLLMText({
       route: '/api/three-examine',
       sessionId,
+      clientId,
       idempotencyKey,
       model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
       systemPrompt: SYSTEM_PROMPT,

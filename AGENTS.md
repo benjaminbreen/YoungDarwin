@@ -162,6 +162,10 @@ docs with `npm run docs:generate`.
   `npm run three:screenshot:fast -- --zone=BEAGLE --quality=performance`.
 - Launch flow, controls, HUD actions, specimen examination/collection, or animal
   toolbar behavior: `npm run three:e2e:smoke`.
+- Local 3D Playwright commands default to hardware WebGL and print the active
+  renderer. On macOS this uses headful Chromium. Use
+  `npm run three:e2e:smoke -- --renderer=software` only for an intentional
+  SwiftShader compatibility check, never as a performance substitute.
 - Production readiness or broad integration claim: also run `npm run build`.
 
 ## Visual And Animation QA
@@ -186,3 +190,6 @@ docs with `npm run docs:generate`.
   crashes before page load. Retry once with the exact npm screenshot command,
   e.g. `npm run three:screenshot:fast -- --zone=BEAGLE --quality=performance`;
   do not loop on browser setup.
+- The same sandbox rule applies to gameplay and other 3D browser tests: retry
+  the exact command once with escalation. Do not switch to SwiftShader to work
+  around a `SIGTRAP`, `ThermalStateObserverMac`, or pre-page-load browser crash.

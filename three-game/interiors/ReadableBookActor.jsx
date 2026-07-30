@@ -5,6 +5,7 @@ import { useCursor } from '@react-three/drei';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { getReadableBook } from '../books/bookCatalog';
+import { loadLibraryData } from '../library/libraryData';
 
 function makeCoverTexture(book) {
   if (typeof document === 'undefined') return null;
@@ -53,6 +54,35 @@ export function ReadableBookActor({ placement }) {
   useCursor(hovered && playableModeId === 'darwin');
 
   useEffect(() => () => coverTexture?.dispose(), [coverTexture]);
+
+  // Standing in a room with a readable book is the earliest honest signal that
+  // the searchable corpus will be wanted. Fetching it on idle here moves the
+  // parse off the click that opens the reader; loadLibraryData memoizes, so the
+  // reader reuses whatever this warmed. Deliberately late so it never competes
+  // with the interior's own assets.
+  useEffect(() => {
+    if (!book) return undefined;
+    let cancelled = false;
+    const warm = () => {
+      if (cancelled) return;
+      loadLibraryData().catch(() => {});
+      // The scans are JPEG 2000 with JBIG2 text masks, so the first page decoded
+      // in a session blocks on ~450 KB of wasm decoders. Fetching them now turns
+      // a visible wait on the first leaf into a warm cache hit.
+      for (const asset of ['/vendor/openjpeg.wasm', '/vendor/jbig2.wasm']) {
+        fetch(asset, { cache: 'force-cache' }).catch(() => {});
+      }
+    };
+    const timer = window.setTimeout(() => {
+      if (window.requestIdleCallback) window.requestIdleCallback(warm, { timeout: 4000 });
+      else warm();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [book]);
+
   if (!book) return null;
 
   const canOpen = () => {

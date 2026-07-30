@@ -245,8 +245,12 @@ Expected baseline:
 - Gameplay interaction change: `npm run three:e2e:smoke`.
 - Broad readiness claim: also run `npm run build`.
 
-Playwright/Chromium screenshot scripts may require sandbox escalation in Codex
-on macOS if Chromium crashes before page load.
+Local 3D Playwright scripts default to hardware WebGL and report the active
+renderer before loading the game. On macOS that means headful Chromium. If
+Chromium crashes before page load in the Codex seatbelt, retry the exact same
+command once with sandbox escalation. Use
+`npm run three:e2e:smoke -- --renderer=software` only for an intentional
+SwiftShader compatibility check, never for performance conclusions.
 
 ## Current Architectural Risks
 

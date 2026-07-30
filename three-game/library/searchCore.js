@@ -51,7 +51,9 @@ function postingsForToken(index, token) {
     .map(candidate => ({ token: candidate, postings: index.postings[candidate], weight: 0.72 }));
 }
 
-export function searchLibraryCorpus({ passages = [], index = null, query, limit = 6 } = {}) {
+// Ranks the whole corpus for a query. Returns every scoring passage, so callers
+// can report how many matches exist before the display limit trims them.
+function rankLibraryCorpus({ passages = [], index = null, query, bookId = null } = {}) {
   if (!index || !passages.length) return [];
   const normalizedQuery = normalizeLibraryText(query).slice(0, 160);
   const queryTokens = [...new Set(tokenizeLibraryText(normalizedQuery))];
@@ -88,25 +90,42 @@ export function searchLibraryCorpus({ passages = [], index = null, query, limit 
     scores.set(documentIndex, score + phraseBonus + coverage * 0.35);
   }
 
-  const ranked = [...scores.entries()]
+  return [...scores.entries()]
     .map(([documentIndex, score]) => ({ ...passages[documentIndex], score }))
+    .filter(passage => !bookId || passage.bookId === bookId)
     .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+}
 
+// At most three hits per volume while there is still ranked material from other
+// books to show; the second pass backfills from the same book rather than
+// returning fewer results than asked for.
+function selectDiverseResults(ranked, limit) {
   const selected = [];
   const perBook = new Map();
   for (const result of ranked) {
     const count = perBook.get(result.bookId) || 0;
-    if (count >= 3 && selected.length < Math.min(limit, 4)) continue;
+    if (count >= 3) continue;
     selected.push(result);
     perBook.set(result.bookId, count + 1);
     if (selected.length >= limit) break;
   }
   if (selected.length < limit) {
+    const chosen = new Set(selected.map(result => result.id));
     for (const result of ranked) {
-      if (selected.some(item => item.id === result.id)) continue;
+      if (chosen.has(result.id)) continue;
       selected.push(result);
       if (selected.length >= limit) break;
     }
   }
   return selected;
+}
+
+export function searchLibraryCorpus({ passages = [], index = null, query, limit = 6, bookId = null } = {}) {
+  return selectDiverseResults(rankLibraryCorpus({ passages, index, query, bookId }), limit);
+}
+
+// Same ranking, plus the total match count the reader shows above its results.
+export function searchLibraryCorpusDetailed({ passages = [], index = null, query, limit = 6, bookId = null } = {}) {
+  const ranked = rankLibraryCorpus({ passages, index, query, bookId });
+  return { results: selectDiverseResults(ranked, limit), total: ranked.length };
 }

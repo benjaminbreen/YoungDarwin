@@ -19,17 +19,8 @@ export const ZONE_PROPS = {
       scale: 2.33,
       visualOffsetY: -0.86,
     },
-    // Landing-party supplies are spread across the central beach instead of
-    // reading as one tight prop pile beside the spawn.
-    {
-      id: 'post-office-rollable-barrel',
-      type: 'barrel',
-      // Start upright on the flatter eastern supply shelf. It remains fully
-      // pushable/breakable, but no longer rolls into the cove during arrival.
-      x: 27.0,
-      z: 3.0,
-      rotation: [0, 0.72, 0],
-    },
+    // Keep the landing readable: one supply crate and Covington's collecting
+    // case are the only loose fieldwork props around the historic mail barrel.
     {
       id: 'shore-supply-crate',
       type: 'crate',
@@ -38,81 +29,12 @@ export const ZONE_PROPS = {
       rotation: [0, 0.18, 0],
     },
     {
-      id: 'shore-supply-crate-b',
-      type: 'crate',
-      x: 15.05,
-      z: 4.95,
-      rotation: [0.02, -0.65, -0.01],
-    },
-    // Covington's field base. The collecting case and bottle are ordinary
-    // shared physics props: they collide, move under pressure or weapon impact,
-    // and the bottle can shatter without a bespoke world-interaction path.
-    {
-      id: 'syms-field-kit',
-      type: 'cratesAndBags',
-      x: 6.9,
-      z: 5.7,
-      rotation: [0, -0.38, 0],
-      scale: 0.62,
-    },
-    {
       id: SYMS_FIELD_CASE_ID,
       type: 'symsCollectingCase',
       x: SYMS_FIELD_CASE_PLACEMENT.x,
       z: SYMS_FIELD_CASE_PLACEMENT.z,
       rotation: [0.015, SYMS_FIELD_CASE_PLACEMENT.yaw, SYMS_FIELD_CASE_PLACEMENT.lean],
       scale: SYMS_FIELD_CASE_PLACEMENT.scale,
-    },
-    {
-      id: 'syms-field-bottle',
-      type: 'symsFieldBottle',
-      x: 4.35,
-      z: 6.15,
-      rotation: [0.02, 0.74, -0.015],
-    },
-    {
-      id: 'upper-slope-broken-crate',
-      type: 'brokenWoodenCrate',
-      x: 20.6,
-      z: -6.4,
-      rotation: [0.04, -0.45, -0.02],
-    },
-    {
-      id: 'loose-basalt-stone',
-      type: 'stone',
-      x: 16.2,
-      z: -17.8,
-      rotation: [0.2, -0.5, 0.12],
-    },
-    {
-      id: 'bay-path-stone-a',
-      type: 'settledBasaltBoulder',
-      x: 18.8,
-      z: 8.2,
-      rotation: [0, 0.85, 0],
-    },
-    {
-      id: 'bay-path-stone-b',
-      type: 'settledBasaltBoulder',
-      x: 6.2,
-      z: 9.8,
-      rotation: [0, -0.25, 0],
-    },
-    {
-      id: 'bay-path-stone-c',
-      type: 'settledBasaltBoulder',
-      // Move off the steep centreline to the naturally level shoulder east of
-      // Darwin's approach, outside the immediate launch silhouette.
-      x: 9.0,
-      z: 18.0,
-      rotation: [0, 0.3, 0],
-    },
-    {
-      id: 'south-trail-stone',
-      type: 'stone',
-      x: 7.2,
-      z: 31.4,
-      rotation: [-0.16, 1.1, 0.1],
     },
   ],
   // Western Lowlands whaling-era camp remains. Unlike ecology decoration,

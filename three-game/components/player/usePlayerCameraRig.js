@@ -12,6 +12,7 @@ import {
   resolveSpecimenFrameHint,
 } from '../../world/specimenRuntime';
 import { examineOrbitActive } from '../../examine/examinables';
+import { cameraFocusPoint } from '../../camera/focusPoint';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 
@@ -517,10 +518,15 @@ export function usePlayerCameraRig() {
     }
     const rigStoreState = useThreeGameStore.getState();
     const statusViewOpen = rigStoreState.statusViewOpen;
-    const examineSession = rigStoreState.examineSession?.focus ? rigStoreState.examineSession : null;
-    const readableBookSession = rigStoreState.readableBookSession?.focus
+    // A truthy `focus` is not enough: anything without three finite coordinates
+    // makes every camera position below NaN, and a NaN camera propagates to the
+    // glare overlay and the player body before anything reports it.
+    const examineFocus = cameraFocusPoint(rigStoreState.examineSession?.focus);
+    const examineSession = examineFocus ? rigStoreState.examineSession : null;
+    const bookFocus = cameraFocusPoint(rigStoreState.readableBookSession?.focus);
+    const readableBookSession = bookFocus
       ? {
-          focus: rigStoreState.readableBookSession.focus,
+          focus: bookFocus,
           frameHint: { height: 0.2, radius: 0.34 },
         }
       : null;
@@ -766,7 +772,9 @@ export function usePlayerCameraRig() {
       let dirX = playerPosition.x - focus.x;
       let dirZ = playerPosition.z - focus.z;
       const dirLength = Math.hypot(dirX, dirZ);
-      if (dirLength < 0.001) {
+      // Negated deliberately: `NaN < 0.001` is false, so the original spelling
+      // let a non-finite direction fall through to the divide below.
+      if (!(dirLength > 0.001)) {
         dirX = 0;
         dirZ = 1;
       } else {

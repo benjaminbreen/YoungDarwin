@@ -21,7 +21,37 @@ For direct questions, prioritize useful information over atmosphere. For actions
 You may gracefully refuse impossible, anachronistic, unsafe, or out-of-scope actions in-world. Do this with charm, not scolding.
 Do not speak direct dialogue for NPCs. If the player tries to converse with a person, say that a direct conversation would require engaging them separately with E when nearby.
 Do not claim Darwin understands natural selection in 1835, and do not mention his later theory by name.
-Darwin's stray thoughts, when useful, must be present tense, impressionistic, and brief. Do not preface them with "he thinks" or name Darwin. Prefer silence unless the scene strongly suggests one.`;
+Darwin's stray thoughts, when useful, must be present tense, impressionistic, and brief. Do not preface them with "he thinks" or name Darwin. Prefer silence unless the scene strongly suggests one.
+
+The player is always Charles Darwin, age 26, newly landed in the Galapagos during the Beagle voyage in September 1835.
+
+OUTPUT CONTRACT
+
+Return a single JSON object and nothing else. No prose outside it, no code fence, no trailing commentary.
+
+{
+  "narration": "1-3 concise sentences responding to the typed action",
+  "darwinThought": "optional brief present-tense impressionistic thought, or empty string",
+  "actionDisposition": "observed | impossible | needs_modal | unsafe | ignored",
+  "targetType": "specimen | npc | setting | self | tool | none",
+  "weather": "optional weather state from: sunny, cloudy, sunshower, overcast, misty, drizzle, rain, storm, or empty string",
+  "sounds": ["optional short sound cue 1", "optional short sound cue 2"]
+}
+
+actionDisposition means:
+- "observed": the action happened as typed, or happened with a plain, visible result.
+- "impossible": the world does not permit it — nothing of that kind is here, or the body cannot do it.
+- "needs_modal": the action belongs to a dedicated interface the player must open instead (collecting a specimen, examining under the lens, conversing with a person, reading a book).
+- "unsafe": physically dangerous or self-harming as typed; narrate the recoil or the refusal, not the injury.
+- "ignored": addressed to nothing, or so vague that no cause and effect follows.
+
+targetType names what the action was actually aimed at, not what was merely nearby. Use "setting" for the landscape, weather, or scene at large; "self" for Darwin's own body, mood, or memory; "none" when the action has no object.
+
+Set "weather" only when the narration itself describes weather changing. An unchanged sky must be an empty string — the field drives the game's weather, so a decorative value silently alters play.
+
+Sounds are one to three words each, diegetic and present in the scene: "gull cry", "surf on lava", "hammer on basalt". At most two. Omit rather than invent.
+
+Leave any optional field empty rather than filling it to be thorough.`;
 
 const IDENTITY_RESPONSES = [
   'Who do you think?',
@@ -389,7 +419,7 @@ Return JSON only with:
   "sounds": ["optional short sound cue"]
 }`;
 
-      const { sessionId, idempotencyKey } = getRequestIdentity({
+      const { sessionId, clientId, idempotencyKey } = getRequestIdentity({
         req,
         route: '/api/three-narrate',
         prompt: escapePrompt,
@@ -399,6 +429,7 @@ Return JSON only with:
       const result = await generateLLMText({
         route: '/api/three-narrate',
         sessionId,
+        clientId,
         idempotencyKey,
         model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
         systemPrompt: SYSTEM_PROMPT,
@@ -461,7 +492,7 @@ Return JSON only with:
   "sounds": ["optional short sound cue"]
 }`;
 
-      const { sessionId, idempotencyKey } = getRequestIdentity({
+      const { sessionId, clientId, idempotencyKey } = getRequestIdentity({
         req,
         route: '/api/three-narrate',
         prompt: dilemmaPrompt,
@@ -471,6 +502,7 @@ Return JSON only with:
       const result = await generateLLMText({
         route: '/api/three-narrate',
         sessionId,
+        clientId,
         idempotencyKey,
         model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
         systemPrompt: SYSTEM_PROMPT,
@@ -515,8 +547,7 @@ Return JSON only with:
         })
       : `Event: ${eventType}
 Player typed action: ${safeString(playerInput, '(empty)')}
-${responseGuidance ? `Response guidance: ${responseGuidance}\n` : ''}Player role: Charles Darwin, age 26, newly landed in the Galapagos during the Beagle voyage in September 1835.
-Current objective: ${safeString(objective, 'Collect or document one animal, plant, or mineral sample.')}
+${responseGuidance ? `Response guidance: ${responseGuidance}\n` : ''}Current objective: ${safeString(objective, 'Collect or document one animal, plant, or mineral sample.')}
 Location: ${safeString(location)} (${safeString(locationContext.historicalName || locationContext.island)})
 Map cell/region id: ${safeString(locationContext.id || locationContext.localCellId, 'unknown')}
 Location type: ${safeString(locationContext.biome || locationContext.type, 'unknown')}
@@ -535,20 +566,12 @@ Player position/facing: x ${playerPose.x ?? 'unknown'}, z ${playerPose.z ?? 'unk
 Recent field log: ${clampArray(recentNarration, 5).join(' | ') || 'none'}
 Journal context: ${safeString(journalContext, 'none')}
 
-Return JSON only with:
-{
-  "narration": "1-3 concise sentences responding to the typed action",
-  "darwinThought": "optional brief present-tense impressionistic thought, or empty string",
-  "actionDisposition": "observed | impossible | needs_modal | unsafe | ignored",
-  "targetType": "specimen | npc | setting | self | tool | none",
-  "weather": "optional weather state from: sunny, cloudy, sunshower, overcast, misty, drizzle, rain, storm, or empty string",
-  "sounds": ["optional short sound cue 1", "optional short sound cue 2"]
-}`;
+Return the JSON object described in your instructions, and nothing else.`;
     const systemPrompt = animalNarrator
       ? buildAnimalNarratorSystemPrompt(narratorProfile)
       : SYSTEM_PROMPT;
 
-    const { sessionId, idempotencyKey } = getRequestIdentity({
+    const { sessionId, clientId, idempotencyKey } = getRequestIdentity({
       req,
       route: '/api/three-narrate',
       prompt,
@@ -558,6 +581,7 @@ Return JSON only with:
     const result = await generateLLMText({
       route: '/api/three-narrate',
       sessionId,
+      clientId,
       idempotencyKey,
       model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
       systemPrompt,
@@ -565,6 +589,26 @@ Return JSON only with:
       temperature: animalNarrator ? 0.38 : 0.24,
       maxTokens: animalNarrator ? 120 : 200,
     });
+
+    // A guard refusal is not narration. Its text explains a budget to the player
+    // in the middle of 1835, and passing it through as prose also labels it
+    // source: 'llm', which hides throttling from the usage figures.
+    if (result.blocked) {
+      return res.status(200).json({
+        narration: animalNarrator
+          ? narratorProfile.fallbackNarration
+          : 'The island offers nothing further just now; the moment passes and the field log keeps only what you did.',
+        darwinThought: '',
+        actionDisposition: 'unavailable',
+        targetType: 'none',
+        weather: '',
+        sounds: [],
+        source: 'guard',
+        guardReason: result.reason || 'blocked',
+        guardNotice: result.text || '',
+        fallback: true,
+      });
+    }
 
     const text = result.text || '';
     const parsed = parseNarratorJSON(text);

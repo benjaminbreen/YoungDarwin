@@ -25,6 +25,7 @@ export function ThreeScene({
   contentPhase = 6,
   openingCamera = null,
   inputLocked = false,
+  actorMotionPaused = false,
   onPlayerAnimationBanksReady = null,
   onPlayerVisualReady = null,
 }) {
@@ -89,7 +90,11 @@ export function ThreeScene({
             no longer blank Darwin, and a deferred animation bank can no
             longer blank the island. */}
         <Suspense fallback={null}>
-          <ActiveZoneContent settings={settings} contentPhase={stagedPhase} />
+          <ActiveZoneContent
+            settings={settings}
+            contentPhase={stagedPhase}
+            actorMotionPaused={actorMotionPaused}
+          />
         </Suspense>
         <Suspense fallback={null}>
           <PlayerController

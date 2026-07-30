@@ -223,6 +223,7 @@ export default async function handler(req, res) {
       model: process.env.YOUNG_DARWIN_ASSESSMENT_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
       route: '/api/end-game-assessment',
       sessionId: identity.sessionId,
+      clientId: identity.clientId,
       idempotencyKey: identity.idempotencyKey,
       systemPrompt,
       userPrompt: userMessage,

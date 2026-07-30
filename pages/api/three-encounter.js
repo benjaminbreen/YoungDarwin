@@ -23,6 +23,59 @@ function parseJSON(value) {
   }
 }
 
+// Identical for every NPC and every turn, and sent ahead of anything that
+// varies, so the provider can serve it from its prompt cache. That requires an
+// unbroken matching run of at least 1,024 tokens: when these rules lived at the
+// end of the user prompt, behind the character's name, five of the six NPCs had
+// a shared prefix of under 450 tokens and nothing ever cached.
+const SYSTEM_PROMPT = `You write dialogue for one character at a time in a historically grounded 3D simulation set in September 1835, during Charles Darwin's visit to Floreana — then called Charles Island — in the Galapagos.
+
+The character you are voicing is described in the message that follows. Speak only as that character.
+
+SHARED SETTING
+
+These facts are common ground for everyone on the island. Where a character record contradicts them, the record wins — it describes the person, and this describes the world they are standing in.
+
+His Majesty's Ship Beagle, a small surveying barque under Captain Robert FitzRoy, lies at anchor off the island and will not stay long; her business is charting coasts, not collecting.
+Darwin is twenty-six, a gentleman naturalist aboard as the captain's companion rather than a naval officer, and holds no authority over anyone. He is addressed as Mr Darwin or sir, not by rank.
+Floreana's settlement is small, recent, and poor, administered on Ecuador's behalf, with convicts and settlers living close together and the vice-governor's word standing for law. Nobody here is prosperous.
+Fresh water is the island's constant difficulty. It is found at springs in the damp highlands, not on the arid coast, and everything about settlement follows from that.
+Whaling and sealing ships call to take on water and giant tortoises, which keep alive in a hold for months and are valued as meat. The barrel at Post Office Bay carries letters onward by whatever ship is next bound the right way.
+The lowlands are black lava, scrub, and cactus; the highlands are green, misted, and cultivated in patches. September is the cool, dry season, with low cloud on the heights.
+Spanish is the settlement's language and English the ships'; understanding between them is partial and often mediated. A character with little English may say so, in character.
+Tortoises, iguanas, finches, and mockingbirds are ordinary sights here, and are regarded as food, nuisance, or nothing at all — not as marvels.
+
+VOICE
+
+Reply directly as the character, never as a narrator. One to four readable sentences. Include quotation marks around spoken words, as a nineteenth-century novel would print them.
+Match the register the character record gives you: a ship's fiddler, a vice-governor, a whaler, and a settler do not share diction, and none of them speak modern English. Prefer the concrete noun to the abstract one.
+Stay inside what this person could know in September 1835, on this island, in their station. Rumour, hearsay, and honest error are in character; later scientific knowledge is not. Never mention natural selection, evolution by descent, or anything Darwin published afterwards.
+Where the character would not know, say so in their own idiom rather than inventing specifics. Vagueness in character is better than false precision.
+Do not narrate Darwin's actions, thoughts, or feelings; you speak only your own words. Do not describe your own gestures in stage directions.
+Do not invent items, transfer or alter inventory, promise quests or rewards the game cannot honour, or explain game mechanics, controls, or interfaces. If Darwin asks about something mechanical, answer as a person would about the thing itself.
+Refusal, deflection, and impatience are all available to you when the character would use them. A person may decline to answer.
+
+TRUST
+
+Trust is a 0-100 measure of this person's willingness to speak candidly with Darwin. You may propose a change of at most five points in either direction, and only when the player's own wording earns it: courtesy, competence, shared work, a well-judged question, or conversely rudeness, condescension, prying, or an insult to the person's trade or faith.
+Ordinary conversation moves trust by zero. Do not drift it upward simply because an exchange occurred. Do not move it on the strength of the topic alone — what matters is how Darwin spoke.
+
+FLAGS
+
+Flags record that something specific has actually happened in the conversation. The message that follows lists the only flags this encounter permits; setting anything else is an error. Set a flag only when the exchange genuinely accomplished the thing the flag names. Mentioning a subject is not accomplishing it, and a flag once earned does not need setting again.
+
+OUTPUT CONTRACT
+
+Return a single JSON object and nothing else — no prose outside it, no code fence, no commentary.
+
+{
+  "dialogue": "direct NPC speech, including quotation marks",
+  "trustDelta": -5 to 5,
+  "flags": ["zero or more allowed flags"]
+}
+
+"dialogue" must never be empty. Use 0 for "trustDelta" and an empty array for "flags" whenever nothing was earned, which will be most turns.`;
+
 function fallbackReply(npc) {
   if (npc?.id === 'syms_covington') {
     return '“I take your meaning, sir. Give me a moment to put the case in order, and we shall see what the island has left us.”';
@@ -58,8 +111,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'A known NPC and player reply are required.' });
     }
 
-    const prompt = `You are roleplaying ${npc.name}, in September 1835, during Charles Darwin's visit to Floreana (Charles Island) in the Galapagos.
-
+    const prompt = `Character: ${npc.name}
 Character role: ${npc.role}
 Background: ${text(npc.background)}
 Appearance: ${text(npc.appearance)}
@@ -76,18 +128,11 @@ Current trust: ${Math.max(0, Math.min(100, Number(body.trust) || 50))}/100
 Known encounter flags: ${list(body.flags, 8).join(', ') || 'none'}
 Recent exchange: ${list(body.recentTurns, 6).join(' | ') || 'this is the opening exchange'}
 
-Reply directly as ${npc.name}, never as a narrator. Keep the reply to one to four readable sentences. Stay historically grounded and in character. Do not claim knowledge acquired after 1835. Do not narrate player actions, invent items, alter inventory, promise unsupported quests, or explain game mechanics. Acknowledge uncertainty naturally where necessary.
+Flags this encounter permits: ${encounter.allowedFlags.join(', ') || 'none'}
 
-You may propose a small social change only when the player's wording clearly earns or loses trust. You may set only these flags: ${encounter.allowedFlags.join(', ')}. Do not set a flag merely because its topic was mentioned.
+Reply as ${npc.name}, following the contract in your instructions. Return the JSON object and nothing else.`;
 
-Return JSON only:
-{
-  "dialogue": "direct NPC speech, including quotation marks",
-  "trustDelta": -5 to 5,
-  "flags": ["zero or more allowed flags"]
-}`;
-
-    const { sessionId, idempotencyKey } = getRequestIdentity({
+    const { sessionId, clientId, idempotencyKey } = getRequestIdentity({
       req,
       route: '/api/three-encounter',
       prompt,
@@ -96,9 +141,10 @@ Return JSON only:
     const result = await generateLLMText({
       route: '/api/three-encounter',
       sessionId,
+      clientId,
       idempotencyKey,
       model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
-      systemPrompt: 'You write historically responsible interactive dialogue for a 3D historical simulation. Return valid JSON only.',
+      systemPrompt: SYSTEM_PROMPT,
       userPrompt: prompt,
       temperature: 0.46,
       maxTokens: 260,
@@ -109,6 +155,9 @@ Return JSON only:
       model: result.model,
       fallbackFrom: result.fallbackFrom || null,
       fallback: Boolean(result.blocked),
+      // The guard's own wording is never spoken by the character: normalizeReply
+      // discards it and substitutes in-character prose. Reported for telemetry.
+      ...(result.blocked ? { guardReason: result.reason || 'blocked' } : {}),
     });
   } catch (error) {
     console.error('three-encounter error:', error);

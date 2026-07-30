@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
-import { launchChromium } from './playwright-launch.mjs';
+import { getBrowserRendererInfo, launchChromium } from './playwright-launch.mjs';
 
 const requestedLane = process.argv.find(argument => argument.startsWith('--lane='))?.split('=')[1] || 'functional';
 const PERFORMANCE_LANE = requestedLane === 'performance';
@@ -26,13 +26,12 @@ const CPU_PROFILE_TRANSITION = process.env.THREE_E2E_CPU_PROFILE === '1';
 const CPU_PROFILE_MAX_MS = positiveNumber(process.env.THREE_E2E_CPU_PROFILE_MAX_MS, 15000);
 const CPU_PROFILE_COMMAND_TIMEOUT_MS = positiveNumber(process.env.THREE_E2E_CPU_PROFILE_COMMAND_TIMEOUT_MS, 5000);
 const CPU_PROFILE_SAMPLE_INTERVAL_US = positiveNumber(process.env.THREE_E2E_CPU_PROFILE_SAMPLE_INTERVAL_US, 1000);
-const HARDWARE_GPU_REQUESTED = PERFORMANCE_LANE || process.env.THREE_PLAYWRIGHT_GPU === '1';
 const requestedScenario = process.argv.find(argument => argument.startsWith('--scenario='))?.split('=')[1]
   || (PERFORMANCE_LANE ? 'transition' : 'all');
-const SCENARIO_TIMEOUT_MS = positiveNumber(
+const SCENARIO_TIMEOUT_OVERRIDE_MS = positiveNumber(
   process.argv.find(argument => argument.startsWith('--scenario-timeout='))?.split('=')[1]
     || process.env.THREE_E2E_SCENARIO_TIMEOUT_MS,
-  GAMEPLAY_TIMEOUT_MS + 30000,
+  null,
 );
 
 function positiveNumber(value, fallback) {
@@ -323,6 +322,7 @@ async function waitForHarnessState(page, predicate, timeoutMs, label) {
   const startedAt = Date.now();
   let lastState = null;
   let lastReadError = null;
+  let lastProgressLogAt = 0;
   while (Date.now() - startedAt < timeoutMs) {
     const remaining = Math.max(250, timeoutMs - (Date.now() - startedAt));
     try {
@@ -340,6 +340,10 @@ async function waitForHarnessState(page, predicate, timeoutMs, label) {
       continue;
     }
     if (lastState && predicate(lastState)) return lastState;
+    if (Date.now() - lastProgressLogAt >= 5000) {
+      lastProgressLogAt = Date.now();
+      console.log(`[three:e2e] ${label}: ${JSON.stringify(lastState?.readiness || lastState)}`);
+    }
     await delay(250);
   }
   assertCondition(false, `Timed out after ${timeoutMs}ms waiting for ${label}.`, { lastState, lastReadError });
@@ -360,13 +364,19 @@ async function evaluateWithTimeout(page, label, pageFunction, arg = undefined, t
 }
 
 async function waitForHarnessReadiness(page, requirements, timeoutMs, label) {
-  return evaluateWithTimeout(
+  const state = await waitForHarnessState(
     page,
+    snapshot => {
+      const readiness = snapshot?.readiness;
+      if (!readiness) return false;
+      return Object.entries(requirements).every(([key, expected]) => (
+        readiness[key] === expected
+      ));
+    },
+    timeoutMs,
     label,
-    ({ requirements: requested, timeout }) => window.__darwinE2E.waitForReadiness(requested, timeout),
-    { requirements, timeout: timeoutMs },
-    timeoutMs + 2000,
   );
+  return { readiness: state.readiness, state };
 }
 
 async function scheduleHarnessAction(page, label, actionName, arg = undefined) {
@@ -579,33 +589,6 @@ async function installSlowProgramLinkProbe(page) {
   });
 }
 
-async function probeBrowserRenderer(browser) {
-  const page = await browser.newPage({ viewport: { width: 64, height: 64 } });
-  try {
-    return await page.evaluate(() => {
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('webgl2', { powerPreference: 'high-performance' })
-        || canvas.getContext('webgl', { powerPreference: 'high-performance' });
-      if (!context) return { available: false, vendor: null, name: null, software: true };
-      const debugInfo = context.getExtension('WEBGL_debug_renderer_info');
-      const vendor = debugInfo
-        ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
-        : context.getParameter(context.VENDOR);
-      const name = debugInfo
-        ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
-        : context.getParameter(context.RENDERER);
-      return {
-        available: true,
-        vendor: vendor || null,
-        name: name || null,
-        software: /swiftshader|llvmpipe|software rasterizer/i.test(`${vendor} ${name}`),
-      };
-    });
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
 function summarizeCpuProfile(profile) {
   if (!profile?.nodes?.length) return [];
   const nodes = new Map(profile.nodes.map(node => [node.id, node]));
@@ -710,54 +693,27 @@ async function startTransitionCpuProfiler(page) {
 }
 
 async function runAssessmentScenario(browser, baseUrl) {
-  let assessmentRequest = null;
   const { page, errors } = await openE2EPage(browser, baseUrl, {
     zone: 'POST_OFFICE_BAY',
     quality: 'performance',
-  }, async assessmentPage => {
-    await assessmentPage.route('**/api/three-narrate', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        narration: 'The remark hangs in the air. Syms looks away toward the specimen case.',
-        actionDisposition: 'observed',
-        targetType: 'self',
-        source: 'e2e-fixture',
-      }),
-    }));
-    await assessmentPage.route('**/api/end-game-assessment', route => {
-      assessmentRequest = route.request().postDataJSON();
-      return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        assessment: [
-          'My dear Darwin,—',
-          'Mr. Covington reports that, when confronted with the demands of serious fieldwork, your considered contribution was “this sucks lol.” I had thought the voyage intended to enlarge your habits of mind, not reduce them to the dimensions of a sulky schoolboy.',
-          'You have submitted no adequate field observation of your own. The reference entry already present in the book is not your labour, and I shall not pretend otherwise. This is not a scientific return; it is an accusation against the use you made of your time.',
-          'After such long and strenuous efforts on the part of the ship and her officers, I must advise you to take up some other line of work—preferably one in which incuriosity is less immediately fatal to the enterprise.',
-          'J. S. Henslow',
-        ].join('\n\n'),
-        transcriptEvaluation: {
-          adjustment: -2.5,
-          classification: 'egregious',
-          conductCap: 1,
-          summary: 'Darwin answered extraordinary scientific opportunity with childish contempt.',
-          quotedEvidence: ['this sucks lol'],
-        },
-      }),
-      });
-    });
   });
   try {
-    console.log('[three:e2e] Assessment: type end game, inspect judgment, review journal');
+    console.log('[three:e2e] Assessment: record authored command, end expedition, inspect judgment');
     await launchMode(page, errors, 'Darwin');
-    const composer = page.getByPlaceholder(/Ask the narrator or describe an action/i);
-    await composer.fill('this sucks lol');
-    await composer.press('Enter');
+    await evaluateWithTimeout(
+      page,
+      'record authored assessment transcript',
+      command => window.__darwinE2E.submitNarratorCommand(command),
+      'this sucks lol',
+      UI_STEP_TIMEOUT_MS,
+    );
     await waitForHarnessState(page, state => state.assessmentTranscriptCount === 1, UI_STEP_TIMEOUT_MS, 'player narrator transcript capture');
-    await composer.fill('end game');
-    await composer.press('Enter');
+    await page.getByTestId('end-game-button').click({ timeout: UI_STEP_TIMEOUT_MS });
+    const endGameConfirmation = page.getByTestId('end-game-confirmation-modal');
+    await endGameConfirmation.waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+    await endGameConfirmation.getByRole('button', { name: /^End game$/i }).click({
+      timeout: UI_STEP_TIMEOUT_MS,
+    });
 
     await page.locator('[data-testid="final-assessment-modal"]').waitFor({
       state: 'visible',
@@ -765,20 +721,12 @@ async function runAssessmentScenario(browser, baseUrl) {
     });
     const assessed = await waitForHarnessState(page, state => (
       state.finalAssessment?.phase === 'ready'
-      && state.finalAssessment?.source === 'remote'
-      && state.finalAssessment?.transcriptClassification === 'egregious'
+      && state.finalAssessment?.source === 'canonical'
     ), UI_STEP_TIMEOUT_MS, 'final Henslow assessment');
     assertCondition(
       assessed.finalAssessment.overall >= 0 && assessed.finalAssessment.overall <= 10,
       'Final assessment score was not bounded to the ten-point ledger.',
       assessed,
-    );
-    assertCondition(assessed.finalAssessment.overall <= 1, 'Egregious narrator conduct did not impose the mocked conduct ceiling.', assessed);
-    assertCondition(assessed.finalAssessment.conductCap === 1, 'Transcript conduct ceiling was not retained.', assessed);
-    assertCondition(
-      assessmentRequest?.narratorTranscript?.text?.includes('this sucks lol'),
-      'The end-game assessment request did not include the verbatim player narrator transcript.',
-      assessmentRequest,
     );
     await page.getByRole('heading', { name: /Professor Henslow’s assessment/i }).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
     await page.getByAltText(/Portrait of Professor John Stevens Henslow/i).waitFor({ timeout: UI_STEP_TIMEOUT_MS });
@@ -808,9 +756,11 @@ async function launchMode(page, errors, modeName, { waitForSettledContent = fals
   await withFailureArtifacts(page, `open ${modeName} launch menu`, errors, async () => {
     await page.getByRole('button', { name: /^New Expedition$/i }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
+  console.log(`[three:e2e] ${modeName}: launch menu opened`);
   await withFailureArtifacts(page, `choose ${modeName} mode`, errors, async () => {
     await page.getByRole('button', { name: new RegExp(`^${modeName}\\b`, 'i') }).click({ timeout: UI_STEP_TIMEOUT_MS });
   });
+  console.log(`[three:e2e] ${modeName}: mode selected`);
   const introExplicitlyEnabled = new URL(page.url()).searchParams.get('skipIntro') === '0';
   if (modeName === 'Darwin' && introExplicitlyEnabled) {
     await withFailureArtifacts(page, 'begin Darwin historical prologue', errors, async () => {
@@ -825,22 +775,37 @@ async function launchMode(page, errors, modeName, { waitForSettledContent = fals
   }
   return withFailureArtifacts(page, `wait for ${modeName} gameplay`, errors, async () => {
     await page.waitForSelector('canvas', { state: 'attached', timeout: GAMEPLAY_TIMEOUT_MS });
+    console.log(`[three:e2e] ${modeName}: canvas attached`);
     await page.waitForFunction(
       () => window.__darwinE2EReady === true
         && typeof window.__darwinE2E?.waitForReadiness === 'function',
       null,
       { timeout: GAMEPLAY_TIMEOUT_MS },
     );
+    console.log(`[three:e2e] ${modeName}: harness ready`);
     const result = await waitForHarnessReadiness(
       page,
       {
         gameplayReady: true,
-        ...(waitForSettledContent ? { contentPhaseAtLeast: 6 } : {}),
       },
       GAMEPLAY_TIMEOUT_MS,
       `${modeName} gameplay readiness`,
     );
-    return result.state;
+    await page.locator(
+      '[data-desktop-hud][data-entrance-active="true"][data-entrance-stage="4"]'
+    ).waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
+    console.log(`[three:e2e] ${modeName}: HUD ready`);
+    if (waitForSettledContent) {
+      console.log(`[three:e2e] ${modeName} base readiness: ${JSON.stringify(result.readiness || result.state?.readiness || result.state || result)}`);
+    }
+    if (!waitForSettledContent) return result.state;
+    return waitForHarnessState(
+      page,
+      state => state.readiness?.gameplayReady === true
+        && state.readiness?.contentPhase >= 6,
+      GAMEPLAY_TIMEOUT_MS,
+      `${modeName} settled content`,
+    );
   });
 }
 
@@ -887,7 +852,7 @@ async function runTransitionScenario(browser, baseUrl) {
   let profileLogged = false;
   try {
     console.log('[three:e2e] Transition: prepared travel Post Office Bay → Post Office Scrub Rise');
-    const launchReady = await launchMode(page, errors, 'Darwin', { waitForSettledContent: PERFORMANCE_LANE });
+    const launchReady = await launchMode(page, errors, 'Darwin', { waitForSettledContent: true });
     if (PERFORMANCE_LANE) {
       assertCondition(
         launchReady.renderer && !launchReady.renderer.software,
@@ -896,6 +861,24 @@ async function runTransitionScenario(browser, baseUrl) {
       );
     }
     console.log('[three:e2e] Transition: launch settled');
+    await page.waitForFunction(
+      () => window.__threeOpeningEnsemble?.symsActorCount > 0
+        && window.__threeOpeningEnsemble?.symsVisualCount > 0
+        && window.__threeOpeningEnsemble?.specimenActorCount
+          >= window.__threeOpeningEnsemble?.expectedSpecimenCount
+        && window.__threeOpeningEnsemble?.specimenVisualCount
+          >= window.__threeOpeningEnsemble?.expectedSpecimenCount,
+      null,
+      { timeout: GAMEPLAY_TIMEOUT_MS },
+    );
+    const openingEnsemble = await page.evaluate(() => window.__threeOpeningEnsemble);
+    assertCondition(
+      openingEnsemble.symsVisualCount > 0
+        && openingEnsemble.specimenVisualCount >= openingEnsemble.expectedSpecimenCount,
+      'Opening scene markers must be backed by rendered Syms and specimen visuals.',
+      openingEnsemble,
+    );
+    console.log(`[three:e2e] Opening ensemble: ${JSON.stringify(openingEnsemble)}`);
     const following = await evaluateWithTimeout(
       page,
       'ask Syms to follow before transition',
@@ -916,6 +899,11 @@ async function runTransitionScenario(browser, baseUrl) {
       GAMEPLAY_TIMEOUT_MS,
     );
     console.log(`[three:e2e] Transition preparation: ${JSON.stringify(preparation)}`);
+    assertCondition(
+      preparation?.ecologyPreparation?.mode === 'worker',
+      'Transition ecology preparation used the main-thread fallback.',
+      preparation,
+    );
     console.log('[three:e2e] Transition: starting prepared transition');
     profiler = await startTransitionCpuProfiler(page);
     if (CPU_PROFILE_TRANSITION) {
@@ -1030,37 +1018,6 @@ async function runTransitionScenario(browser, baseUrl) {
   }
 }
 
-async function runTransitionPreparationScenario(browser, baseUrl) {
-  const { page, errors } = await openE2EPage(browser, baseUrl, {
-    zone: 'POST_OFFICE_BAY',
-    quality: 'performance',
-  });
-  try {
-    await launchMode(page, errors, 'Darwin', { waitForSettledContent: true });
-    const startedAt = Date.now();
-    const preparation = await evaluateWithTimeout(
-      page,
-      'prepare transition resources without scene',
-      () => window.__darwinE2E.prepareTravel('POST_SCRUB_RISE'),
-      undefined,
-      GAMEPLAY_TIMEOUT_MS,
-    );
-    const durationMs = Date.now() - startedAt;
-    console.log(`[three:e2e] Transition preparation: ${durationMs}ms ${JSON.stringify(preparation)}`);
-    assertCondition(
-      preparation?.ecologyPreparation?.mode === 'worker',
-      'Transition ecology preparation used the main-thread fallback.',
-      preparation,
-    );
-    await page.close();
-    return { name: 'transition-prepare', durationMs, preparation, errors };
-  } catch (error) {
-    console.error(`[three:e2e] Transition preparation browser errors: ${JSON.stringify(errors)}`);
-    await page.close().catch(() => {});
-    throw error;
-  }
-}
-
 async function runCabinScenario(browser, baseUrl) {
   const { page, errors } = await openE2EPage(browser, baseUrl, {
     zone: 'BEAGLE_CABIN',
@@ -1078,9 +1035,11 @@ async function runCabinScenario(browser, baseUrl) {
 
     await withFailureArtifacts(page, 'render Lyell book scan', errors, async () => {
       await page.getByRole('region', { name: /Reading Principles of Geology/i }).waitFor({ timeout: GAMEPLAY_TIMEOUT_MS });
+      // Leaf canvases are cached and re-attached across page turns, so the reader
+      // builds them imperatively and reports readiness on the wrapper.
       await page.waitForFunction(() => {
-        const canvas = document.querySelector('canvas[aria-label^="Scanned page"]');
-        return canvas && canvas.className.includes('opacity-100') && canvas.width > 100;
+        const canvas = document.querySelector('[data-scan-status="ready"] canvas[aria-label^="Scanned page"]');
+        return Boolean(canvas) && canvas.width > 100;
       }, null, { timeout: GAMEPLAY_TIMEOUT_MS });
       await page.screenshot({ path: path.join(outDir, 'beagle-cabin-book-reader.png'), fullPage: false });
       await page.getByRole('button', { name: 'Next page' }).click({ force: true, timeout: UI_STEP_TIMEOUT_MS });
@@ -1098,7 +1057,7 @@ async function runCabinScenario(browser, baseUrl) {
     const afterNote = await page.evaluate(() => window.__darwinE2E.getState());
     assertCondition(afterNote.journalCount === initial.journalCount + 1, 'Reading note was not added to the field journal.', { initial, afterNote });
     assertCondition(afterNote.curiosity === initial.curiosity + 2, 'Reading note did not add exactly one curiosity.', { initial, afterNote });
-    await page.getByRole('button', { name: 'Close book' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.getByRole('button', { name: 'Close library' }).click({ timeout: UI_STEP_TIMEOUT_MS });
     const reopen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
     assertCondition(reopen.curiosity === afterNote.curiosity, 'Repeated consultation awarded duplicate curiosity.', { afterNote, reopen });
     await page.evaluate(() => window.__darwinE2E.closeBook());
@@ -1133,7 +1092,13 @@ async function run() {
   console.log(`[three:e2e] using ${e2eUrl(baseUrl)}`);
 
   console.log(`[three:e2e] lane: ${requestedLane}`);
-  let browser = await launchChromium({ useHardwareGpu: HARDWARE_GPU_REQUESTED });
+  let browser = await launchChromium(PERFORMANCE_LANE ? { renderer: 'hardware' } : {});
+  const rendererProbe = getBrowserRendererInfo(browser);
+  const scenarioTimeoutMs = SCENARIO_TIMEOUT_OVERRIDE_MS
+    || Math.max(
+      GAMEPLAY_TIMEOUT_MS + 30000,
+      rendererProbe?.software ? SOFTWARE_TRANSITION_TIMEOUT_MS + 30000 : 0,
+    );
   const closeBrowser = async () => {
     if (!browser) return;
     const openBrowser = browser;
@@ -1154,7 +1119,6 @@ async function run() {
   let results;
   try {
     if (PERFORMANCE_LANE) {
-      const rendererProbe = await probeBrowserRenderer(browser);
       console.log(`[three:e2e] performance renderer probe: ${JSON.stringify(rendererProbe)}`);
       assertCondition(
         rendererProbe.available && !rendererProbe.software,
@@ -1168,7 +1132,6 @@ async function run() {
     // Darwin mode uncertified. Order here is "most important first".
     const scenarios = {
       transition: runTransitionScenario,
-      'transition-prepare': runTransitionPreparationScenario,
       cabin: runCabinScenario,
       assessment: runAssessmentScenario,
       finch: runFinchScenario,
@@ -1191,11 +1154,11 @@ async function run() {
     // lane looked like a single broken test when in fact most of the suite had
     // not executed at all. Failures are recorded and re-raised after the loop.
     for (const [scenarioName, scenario] of selected) {
-      console.log(`[three:e2e] ${scenarioName}: wall-clock budget ${SCENARIO_TIMEOUT_MS}ms`);
+      console.log(`[three:e2e] ${scenarioName}: wall-clock budget ${scenarioTimeoutMs}ms`);
       try {
         const result = await promiseWithTimeout(
           scenario(browser, baseUrl),
-          SCENARIO_TIMEOUT_MS,
+          scenarioTimeoutMs,
           `${scenarioName} scenario wall-clock budget`,
         );
         results.push({ ...result, name: result.name || scenarioName, status: 'passed' });

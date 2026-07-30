@@ -37,7 +37,11 @@ import { getDeliliaSites } from '../physics/props/delilia/deliliaSites';
 import { getLecocarpusSites } from '../physics/props/lecocarpus/lecocarpusSites';
 import { useMultiplayerOccupiedSpecimenActorIds } from '../multiplayer/MultiplayerContext';
 
-export function ActiveZoneContent({ settings, contentPhase = 6 }) {
+export function ActiveZoneContent({
+  settings,
+  contentPhase = 6,
+  actorMotionPaused = false,
+}) {
   const stagedPhase = Number.isFinite(contentPhase) ? contentPhase : 6;
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
@@ -67,8 +71,11 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
   const waterSplashesReady = reaches(4.5);
   const interactablesReady = reaches(5.2);
   const beagleReady = reaches(5.4);
-  const specimensReady = reaches(5.6);
-  const actorsReady = reaches(6);
+  // On initial launch, actor shells mount under the opaque loading treatment at
+  // phase three so their Suspense boundaries start real model requests before
+  // the HUD reveal. Travel still defers them to the late 5.6/6 phases.
+  const specimensReady = reaches(5.6, 3);
+  const actorsReady = reaches(6, 3);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
   const multiplayerHiddenActorIds = useMultiplayerOccupiedSpecimenActorIds();
@@ -176,7 +183,7 @@ export function ActiveZoneContent({ settings, contentPhase = 6 }) {
       {interactablesReady && settings.worldDetails !== false && <ExaminableItems />}
       {actorsReady && settings.syms !== false && (
         <Suspense fallback={null}>
-          <SymsCovington />
+          <SymsCovington motionPaused={actorMotionPaused} />
         </Suspense>
       )}
       {actorsReady && settings.npcDarwin !== false && (

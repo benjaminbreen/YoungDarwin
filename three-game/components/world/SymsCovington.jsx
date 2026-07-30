@@ -22,6 +22,7 @@ import { SNARE_ARM_SECONDS, SNARE_CHARACTER_TRIGGER_RADIUS } from '../../snareTr
 import {
   DEFAULT_SYMS_DIRECTIVE,
   SYMS_DIRECTIVES,
+  SYMS_OPENING_SPAWN_POSITION,
   buildSymsPostOfficeBayPlan,
   findSymsRoute,
   nextSymsActivity,
@@ -48,13 +49,27 @@ function finiteOr(value, fallback) {
 function spawnForZone(zoneId, entryEdge, directive, obstacles = []) {
   if (zoneId === SYMS_HOME_ZONE_ID && normalizeSymsDirective(directive) === SYMS_DIRECTIVES.RANGE) {
     return {
-      x: 4,
-      y: movementTerrainHeight(4, 7.4, zoneId) + SYMS_GROUND_CLEARANCE,
-      z: 7.4,
-      yaw: Math.PI * 0.82,
+      x: SYMS_OPENING_SPAWN_POSITION.x,
+      y: movementTerrainHeight(
+        SYMS_OPENING_SPAWN_POSITION.x,
+        SYMS_OPENING_SPAWN_POSITION.z,
+        zoneId,
+      ) + SYMS_GROUND_CLEARANCE,
+      z: SYMS_OPENING_SPAWN_POSITION.z,
+      yaw: SYMS_OPENING_SPAWN_POSITION.yaw,
     };
   }
   return findSymsCompanionArrival({ zoneId, entryEdge, obstacles });
+}
+
+function openingApproachFor(plan, spawn, zoneId, directive) {
+  const shouldApproach = zoneId === SYMS_HOME_ZONE_ID
+    && normalizeSymsDirective(directive) === SYMS_DIRECTIVES.RANGE;
+  if (!shouldApproach) return { targetSite: null, route: [] };
+  return {
+    targetSite: plan.baseSite,
+    route: findSymsRoute(plan, spawn, plan.baseSite),
+  };
 }
 
 function publishSymsPose(zoneId, position) {
@@ -110,7 +125,10 @@ function ProceduralCrewFigure({ motion = 0 }) {
   const bag = useMemo(() => toonMaterial('#9a6a36'), []);
 
   return (
-    <group rotation={[0, Math.PI * 0.86 + motion * 0.08, 0]}>
+    <group
+      rotation={[0, Math.PI * 0.86 + motion * 0.08, 0]}
+      userData={{ renderKind: 'npc-visual-fallback' }}
+    >
       <mesh castShadow position={[0, 1.48, 0]} material={skin}>
         <sphereGeometry args={[0.23, 16, 16]} />
       </mesh>
@@ -133,7 +151,7 @@ function ProceduralCrewFigure({ motion = 0 }) {
   );
 }
 
-export function SymsCovington() {
+export function SymsCovington({ motionPaused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const directive = useThreeGameStore(state => state.symsDirective || DEFAULT_SYMS_DIRECTIVE);
   const symsZoneId = useThreeGameStore(state => state.symsZoneId || SYMS_HOME_ZONE_ID);
@@ -161,14 +179,18 @@ export function SymsCovington() {
     () => spawnForZone(currentZoneId, playerSpawnId, directive, obstacles),
     [currentZoneId, directive, obstacles, playerSpawnId],
   );
+  const initialApproach = useMemo(
+    () => openingApproachFor(activityPlan, initialSpawn, currentZoneId, directive),
+    [activityPlan, currentZoneId, directive, initialSpawn],
+  );
   const initialY = initialSpawn.y;
   const clockRef = useRef(0);
   const motionRef = useRef({
     zoneId: currentZoneId,
     position: new THREE.Vector3(initialSpawn.x, initialY, initialSpawn.z),
-    route: [],
+    route: initialApproach.route,
     routeIndex: 0,
-    targetSite: null,
+    targetSite: initialApproach.targetSite,
     visitIndex: 0,
     dwellUntil: 0,
     lastDirective: normalizeSymsDirective(directive),
@@ -211,9 +233,10 @@ export function SymsCovington() {
       spawn.y,
       spawn.z,
     );
-    motion.route = [];
+    const openingApproach = openingApproachFor(activityPlan, spawn, currentZoneId, directive);
+    motion.route = openingApproach.route;
     motion.routeIndex = 0;
-    motion.targetSite = null;
+    motion.targetSite = openingApproach.targetSite;
     motion.visitIndex = 0;
     motion.dwellUntil = 0;
     motion.nextTrapCheckAt = 0;
@@ -223,7 +246,7 @@ export function SymsCovington() {
     reactionRef.current.snareTrapId = null;
     reactionRef.current.pending = [];
     footstepRef.current.phase = 0;
-  }, [currentZoneId, directive, playerSpawnId, visible]);
+  }, [activityPlan, currentZoneId, directive, playerSpawnId, visible]);
 
   useEffect(() => onPropEvent('tool-swing', event => {
     if (event.tool !== 'hammer') return;
@@ -301,6 +324,15 @@ export function SymsCovington() {
     const playerPose = getRuntimePlayerPose();
     const player = playerPose?.position || {};
     const collisionProps = getZonePropCollisionProps(currentZoneId, propCollisionDefinitions);
+
+    if (motionPaused) {
+      group.current.position.set(position.x, position.y, position.z);
+      group.current.rotation.y = motion.desiredYaw;
+      animationRef.current = 'idle';
+      footstepRef.current.phase = 0;
+      publishSymsPose(currentZoneId, position);
+      return;
+    }
 
     const moveToward = (targetX, targetZ, speed) => {
       const dx = targetX - position.x;

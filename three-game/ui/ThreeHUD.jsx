@@ -4616,6 +4616,9 @@ function CameraCycleButton({ className }) {
   return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
 }
 
+const HUD_ENTRANCE_TIMINGS_MS = Object.freeze([650, 1120, 1540, 2200]);
+const HUD_ENTRANCE_TRANSITION_MS = 700;
+
 export function ThreeHUD({
   onRestartExpedition,
   onReturnToMainMenu,
@@ -4624,6 +4627,9 @@ export function ThreeHUD({
   quality = 'auto',
   onQualityChange,
   openJournalOnLaunch = false,
+  entranceActive = true,
+  onEntranceStageChange = null,
+  onEntranceComplete = null,
 }) {
   const [desktopHudLayout] = useState(resolveDesktopHudLayout);
   const [hudHidden, setHudHidden] = useState(false);
@@ -4631,7 +4637,8 @@ export function ThreeHUD({
   const [pauseOpen, setPauseOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const polishedDesktopHud = desktopHudLayout === 'polished';
-  const [hudEntranceStage, setHudEntranceStage] = useState(polishedDesktopHud ? 0 : 4);
+  const [hudEntranceStage, setHudEntranceStage] = useState(0);
+  const entranceCompleteReportedRef = useRef(false);
   // Load → "Read journal" resumes the saved session with the notebook open.
   const [panel, setPanel] = useState(openJournalOnLaunch ? 'journal' : null);
   const [mapOpen, setMapOpen] = useState(() => hasDevelopmentQueryFlag('islandMap'));
@@ -4677,6 +4684,7 @@ export function ThreeHUD({
     || npcEncounterOpen || outcomeOpen || assessmentOpen || endGameConfirmationOpen);
 
   useEffect(() => {
+    if (!entranceActive) return undefined;
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat) return;
@@ -4702,9 +4710,14 @@ export function ThreeHUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [controlsOpen, otherOverlayOpen, pauseOpen]);
+  }, [controlsOpen, entranceActive, otherOverlayOpen, pauseOpen]);
 
   useEffect(() => {
+    if (!entranceActive) {
+      entranceCompleteReportedRef.current = false;
+      setHudEntranceStage(0);
+      return undefined;
+    }
     if (!polishedDesktopHud) {
       setHudEntranceStage(4);
       return undefined;
@@ -4714,20 +4727,40 @@ export function ThreeHUD({
       return undefined;
     }
 
-    const timings = [650, 1120, 1540, 2200];
-    const handles = timings.map((delay, index) => (
+    const handles = HUD_ENTRANCE_TIMINGS_MS.map((delay, index) => (
       window.setTimeout(() => setHudEntranceStage(index + 1), delay)
     ));
     return () => handles.forEach(handle => window.clearTimeout(handle));
-  }, [polishedDesktopHud]);
+  }, [entranceActive, polishedDesktopHud]);
 
   useEffect(() => {
-    const toggleCompass = () => setCompassOpen(value => !value);
+    if (!entranceActive) return;
+    onEntranceStageChange?.(hudEntranceStage);
+  }, [entranceActive, hudEntranceStage, onEntranceStageChange]);
+
+  useEffect(() => {
+    if (!entranceActive || hudEntranceStage < 4 || entranceCompleteReportedRef.current) return undefined;
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const completionDelay = polishedDesktopHud && !reducedMotion
+      ? HUD_ENTRANCE_TRANSITION_MS
+      : 0;
+    const handle = window.setTimeout(() => {
+      entranceCompleteReportedRef.current = true;
+      onEntranceComplete?.();
+    }, completionDelay);
+    return () => window.clearTimeout(handle);
+  }, [entranceActive, hudEntranceStage, onEntranceComplete, polishedDesktopHud]);
+
+  useEffect(() => {
+    const toggleCompass = () => {
+      if (entranceActive) setCompassOpen(value => !value);
+    };
     window.addEventListener(TOGGLE_COMPASS_EVENT, toggleCompass);
     return () => window.removeEventListener(TOGGLE_COMPASS_EVENT, toggleCompass);
-  }, []);
+  }, [entranceActive]);
 
   useEffect(() => {
+    if (!entranceActive) return undefined;
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -4751,9 +4784,9 @@ export function ThreeHUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [inventoryOpen]);
+  }, [entranceActive, inventoryOpen]);
   useEffect(() => {
-    if (!polishedDesktopHud) return undefined;
+    if (!entranceActive || !polishedDesktopHud) return undefined;
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -4764,7 +4797,7 @@ export function ThreeHUD({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [polishedDesktopHud]);
+  }, [entranceActive, polishedDesktopHud]);
   useEffect(() => {
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
@@ -4834,7 +4867,16 @@ export function ThreeHUD({
   const stagedHudTransition = 'transition-[opacity,transform,visibility] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transform-none motion-reduce:transition-none';
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 font-expedition" data-desktop-hud={desktopHudLayout}>
+    <div
+      aria-hidden={entranceActive ? undefined : 'true'}
+      className={`pointer-events-none absolute inset-0 z-10 font-expedition transition-opacity duration-200 ${
+        entranceActive ? 'visible opacity-100' : 'invisible opacity-0'
+      }`}
+      data-desktop-hud={desktopHudLayout}
+      data-entrance-active={entranceActive ? 'true' : 'false'}
+      data-entrance-stage={hudEntranceStage}
+      inert={entranceActive ? undefined : true}
+    >
       {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
       <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || hudHidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer className={`${stagedHudTransition} ${stagedHudClass(1)}`} />

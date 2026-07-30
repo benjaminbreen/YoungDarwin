@@ -717,7 +717,7 @@ async function run() {
     console.warn('[three:screenshot] --allow-loading-canvas is deprecated and ignored; captures now require harness visual readiness.');
   }
 
-  let browser = await launchChromium({ useHardwareGpu: true });
+  let browser = await launchChromium({ renderer: 'hardware' });
   const results = [];
   let runWatchdog = null;
   const closeBrowser = async () => {

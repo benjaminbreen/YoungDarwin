@@ -108,6 +108,24 @@ npm run three:contact-sheet -- --asset darwin5 --clip <clip> --preset review --v
   `npm run three:e2e:smoke`.
 - Broad readiness: add `npm run build`.
 
+### Running 3D Browser Tests
+
+- Routine local 3D tests use hardware WebGL. On macOS the shared launcher opens
+  headful Chromium because Playwright's headless shell selects SwiftShader even
+  when `--disable-gpu` is absent.
+- Run `npm run three:e2e:smoke` for gameplay behavior and
+  `npm run three:screenshot:fast` for visual output. Both print the active WebGL
+  renderer before loading the game.
+- If Chromium crashes before page load in the Codex macOS seatbelt, retry the
+  exact same npm command once with `sandbox_permissions=require_escalated`.
+  Do not change renderer modes to work around the sandbox crash.
+- SwiftShader is an explicit compatibility check:
+  `npm run three:e2e:smoke -- --renderer=software`. It is expected to be much
+  slower and must not be used for performance conclusions.
+- CI defaults to software rendering unless a command explicitly requires
+  hardware. A hardware-required command fails immediately if Chromium reports
+  SwiftShader instead of silently running a misleading benchmark.
+
 ## Known Legacy Traps
 
 - Current default Darwin is `darwin5`. Some legacy scripts still mention

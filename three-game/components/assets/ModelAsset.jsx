@@ -865,6 +865,31 @@ function assetLoadUrl(asset) {
   return `${asset.path}?v=${encodeURIComponent(asset.cacheKey)}`;
 }
 
+export function preloadModelAsset(id) {
+  const asset = getModelAsset(id);
+  if (!asset?.enabled) return false;
+  const resources = [
+    asset,
+    ...(asset.animationBanks || []),
+  ];
+  if (asset.animationSource) {
+    const sourceAsset = getModelAsset(asset.animationSource);
+    if (sourceAsset?.enabled) resources.push(sourceAsset);
+  }
+  const seen = new Set();
+  resources.forEach(resource => {
+    const url = assetLoadUrl(resource);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    useGLTF.preload(url);
+  });
+  return true;
+}
+
+export function preloadModelAssets(ids = []) {
+  return Array.from(new Set(ids)).filter(preloadModelAsset);
+}
+
 const ONE_SHOT_CLIPS = new Set([
   'startWalking',
   'stopWalking',
@@ -2261,8 +2286,8 @@ export function ModelAsset({
 
 // Eager-preload only explicit boot-critical assets. Zone-specific GLBs load
 // behind their Suspense fallbacks after the first playable frame.
-Object.values(modelAssets)
-  .filter(asset => asset.enabled && asset.preload === true)
-  .forEach(asset => {
-    useGLTF.preload(assetLoadUrl(asset));
+Object.entries(modelAssets)
+  .filter(([, asset]) => asset.enabled && asset.preload === true)
+  .forEach(([id]) => {
+    preloadModelAsset(id);
   });

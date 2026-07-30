@@ -629,6 +629,10 @@ function createHarnessApi() {
       useThreeGameStore.getState().closeStatusView();
       return makeSnapshot();
     },
+    submitNarratorCommand: async command => {
+      await useThreeGameStore.getState().submitNarratorCommand(command);
+      return makeSnapshot();
+    },
     triggerIncrementalCollapse: () => {
       useThreeGameStore.getState().applyCactusDamage(1000);
       return makeSnapshot();
