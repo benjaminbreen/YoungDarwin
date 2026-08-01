@@ -71,7 +71,10 @@ module.exports = {
     // controls, `coarsepointer:` for anything that should appear only when
     // there is no mouse. CSS-only, so it also follows a device that gains or
     // loses a pointer mid-session.
-    ({ addVariant }) => {
+    // Annotated inline: this is a .ts config under noImplicitAny, so an
+    // untyped destructured plugin argument fails the production type check
+    // (which `npm run check` does not run — use check:full or typecheck).
+    ({ addVariant }: { addVariant: (name: string, definition: string) => void }) => {
       addVariant('coarsepointer', '@media (pointer: coarse)');
       addVariant('finepointer', '@media (pointer: fine)');
     },
