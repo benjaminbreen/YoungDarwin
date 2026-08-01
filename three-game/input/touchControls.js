@@ -14,6 +14,10 @@ const touchState = {
   dodge: false,
   interact: false,
   crouch: false,
+  // playerInputState already reads `touch.climb`, but the field was missing
+  // here — so setTouchControl('climb') hit the hasOwnProperty guard and did
+  // nothing, and mantling/climbing was unreachable on touch devices entirely.
+  climb: false,
   rifle: false,
   net: false,
   snare: false,
@@ -71,6 +75,7 @@ export function consumeTouchControls() {
   touchState.dodge = false;
   touchState.interact = false;
   touchState.crouch = false;
+  touchState.climb = false;
   touchState.rifle = false;
   touchState.net = false;
   touchState.snare = false;

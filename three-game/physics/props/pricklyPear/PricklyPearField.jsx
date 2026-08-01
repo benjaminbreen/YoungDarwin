@@ -295,7 +295,10 @@ const PRICKLY_PEAR_SPEC = {
     pushBreakAngle: 0.27,
     pushBreakDelay: 0.16,
     bendStiffness: 24,
-    bendDamping: 5.8,
+    // Water-filled pads on a fibrous joint: zeta 0.48. Heavy enough to lag,
+    // springy enough to nod back.
+    bendDamping: 4.7,
+    pushDrag: 0.3,
     contactBendBase: 0.18,
     contactBendSpeed: 0.022,
     windSway: 0.022,

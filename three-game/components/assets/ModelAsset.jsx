@@ -354,7 +354,7 @@ function normalizeImportedMaterials(scene, asset, motion = null, instanceSeed = 
         material.emissiveIntensity = asset.materialEmissiveIntensity ?? 0.22;
       }
       applyImportedMaterialColorGrade(material, asset.materialColorGrade, instanceSeed);
-      if (motion) applyFoliageMotion(material, object.geometry, motion);
+      if (motion) applyFoliageMotion(material, object.geometry, motion, { id: asset.id, path: asset.path, label: asset.label });
       material.needsUpdate = true;
     });
   });

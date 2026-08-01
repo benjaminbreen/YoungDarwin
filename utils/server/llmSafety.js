@@ -307,12 +307,15 @@ function recordBlocked({ route, provider, model, sessionId, clientId = null, bac
   trimState();
 }
 
-export function finishLLMRequest({ key, entryId, response, error, estimatedOutputTokens = 0 } = {}) {
+export function finishLLMRequest({ key, entryId, response, error, estimatedOutputTokens = 0, reasoningTokens = 0 } = {}) {
   const entry = globalState.ledger.find(item => item.id === entryId);
   if (entry) {
     entry.finishedAt = now();
     entry.durationMs = entry.finishedAt - entry.startedAt;
     entry.estimatedOutputTokens = estimatedOutputTokens;
+    // Billed as output tokens. Should stay 0 while effort is `none`; a nonzero
+    // total here means something is silently costing more than it looks.
+    entry.reasoningTokens = reasoningTokens;
     entry.status = error ? 'error' : 'complete';
     if (error) entry.error = String(error.message || error);
   }
@@ -339,6 +342,7 @@ export function getLLMUsageSnapshot(sessionId = null) {
   const estimatedInputTokens = completed.reduce((sum, entry) => sum + (entry.estimatedInputTokens || 0), 0);
   const estimatedOutputTokens = completed.reduce((sum, entry) => sum + (entry.estimatedOutputTokens || 0), 0);
   const estimatedTotalTokens = estimatedInputTokens + estimatedOutputTokens;
+  const reasoningTokens = completed.reduce((sum, entry) => sum + (entry.reasoningTokens || 0), 0);
   const sessionEstimatedTokens = sessionId ? estimatedSessionTokens(sessionId) : estimatedTotalTokens;
 
   return {
@@ -348,6 +352,7 @@ export function getLLMUsageSnapshot(sessionId = null) {
     estimatedInputTokens,
     estimatedOutputTokens,
     estimatedTotalTokens,
+    reasoningTokens,
     sessionEstimatedTokens,
     recent: ledger.slice(-40).reverse(),
     limits: {

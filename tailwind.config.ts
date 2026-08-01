@@ -62,5 +62,18 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Touch affordances (virtual stick, action cluster, bottom nav) were gated
+    // on viewport WIDTH via `md:hidden`, which is not what they are actually
+    // about: a tablet in landscape is >=768px, so it received the keyboard HUD
+    // and had no way to move, jump, collect, or open the menu. These variants
+    // gate on the INPUT DEVICE instead — `finepointer:hidden` for touch-only
+    // controls, `coarsepointer:` for anything that should appear only when
+    // there is no mouse. CSS-only, so it also follows a device that gains or
+    // loses a pointer mid-session.
+    ({ addVariant }) => {
+      addVariant('coarsepointer', '@media (pointer: coarse)');
+      addVariant('finepointer', '@media (pointer: fine)');
+    },
+  ],
 };

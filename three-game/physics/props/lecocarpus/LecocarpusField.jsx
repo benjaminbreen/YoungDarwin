@@ -120,7 +120,9 @@ const LECOCARPUS_SPEC = {
     pushBreakDelay: 0.2,
     pushBreakKick: 0.48,
     bendStiffness: 25,
-    bendDamping: 7,
+    // Woody-based shrub: zeta 0.5, one clear give and one swing back.
+    bendDamping: 5,
+    pushDrag: 0.4,
     contactBendBase: 0.1,
     contactBendSpeed: 0.012,
     windSway: 0.02,

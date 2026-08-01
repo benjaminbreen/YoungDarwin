@@ -6,7 +6,27 @@ import {
   finishLLMRequest,
 } from './llmSafety';
 
+// Single default across every route. Luna matches gpt-5.4-nano on input price
+// ($0.20/1M) and undercuts it on output ($1.20 vs $1.25) while being a full
+// generation stronger, so there is no reason to keep a cheaper/weaker tier.
+export const OPENAI_DEFAULT_MODEL = process.env.OPENAI_DEFAULT_MODEL || 'gpt-5.6-luna';
+
+// Every route here is short-form prose (120-220 tokens of narration), not a
+// reasoning task. `none` buys three things: zero reasoning tokens billed as
+// output, lower latency, and — the reason it matters most — it is the only
+// effort level that still accepts `temperature`, which each route sets
+// deliberately (0.18 escapes, 0.24 standard, 0.38 animal narrator).
+export const DEFAULT_REASONING_EFFORT = 'none';
+
 export const LLM_MODELS = [
+  {
+    id: 'openai-luna',
+    provider: 'openai',
+    apiModel: OPENAI_DEFAULT_MODEL,
+    maxTokens: 700,
+    temperature: 0.35,
+    reasoningEffort: DEFAULT_REASONING_EFFORT,
+  },
   {
     id: 'gemini-flash-lite',
     provider: 'google',
@@ -17,16 +37,18 @@ export const LLM_MODELS = [
   {
     id: 'openai-fast',
     provider: 'openai',
-    apiModel: process.env.OPENAI_FAST_MODEL || 'gpt-5.4-mini',
+    apiModel: process.env.OPENAI_FAST_MODEL || OPENAI_DEFAULT_MODEL,
     maxTokens: 900,
     temperature: 0.4,
+    reasoningEffort: DEFAULT_REASONING_EFFORT,
   },
   {
     id: 'openai-small',
     provider: 'openai',
-    apiModel: process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+    apiModel: process.env.OPENAI_SMALL_MODEL || OPENAI_DEFAULT_MODEL,
     maxTokens: 500,
     temperature: 0.25,
+    reasoningEffort: DEFAULT_REASONING_EFFORT,
   },
   {
     id: 'gemini-fast',
@@ -44,7 +66,7 @@ export const LLM_MODELS = [
   },
 ];
 
-export const DEFAULT_LLM_MODEL = process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gemini-flash-lite';
+export const DEFAULT_LLM_MODEL = process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'openai-luna';
 
 let openaiClient = null;
 
@@ -76,26 +98,95 @@ function extractOpenAIResponseText(response) {
   return parts.join('').trim();
 }
 
-async function createOpenAIText({
+function isUnsupportedParamError(error, param) {
+  const message = String(error?.message || '');
+  return error?.status === 400 && message.includes(param);
+}
+
+// OpenAI documents `none | minimal | low | medium | high | xhigh | max` but
+// notes that models support only a subset, and Luna's subset is undocumented.
+// Rather than guess, degrade once on rejection and remember the verdict per
+// model so we never pay a failed roundtrip twice.
+const REASONING_FALLBACK = { none: 'minimal', minimal: 'low', low: null };
+const modelCapabilities = new Map();
+
+function capabilitiesFor(model) {
+  if (!modelCapabilities.has(model)) {
+    modelCapabilities.set(model, { effort: undefined, temperature: true });
+  }
+  return modelCapabilities.get(model);
+}
+
+function truncatedByReasoning(response) {
+  return response?.status === 'incomplete'
+    && response?.incomplete_details?.reason === 'max_output_tokens';
+}
+
+export async function createOpenAIText({
   client,
   model,
   systemPrompt,
   userPrompt,
   maxTokens,
   temperature,
+  reasoningEffort,
 }) {
   if (shouldUseResponsesAPI(model) && client.responses?.create) {
-    const response = await client.responses.create({
-      model,
-      instructions: systemPrompt || 'You are a concise historical simulation assistant.',
-      input: userPrompt || '',
-      max_output_tokens: maxTokens,
-      temperature,
-      text: {
-        format: { type: 'text' },
-      },
-    });
-    return extractOpenAIResponseText(response);
+    const caps = capabilitiesFor(model);
+    let effort = caps.effort !== undefined ? caps.effort : (reasoningEffort || null);
+
+    const build = (tokens) => {
+      const payload = {
+        model,
+        instructions: systemPrompt || 'You are a concise historical simulation assistant.',
+        input: userPrompt || '',
+        max_output_tokens: tokens,
+        text: { format: { type: 'text' } },
+      };
+      // Sampling params are only accepted alongside effort `none`; sending them
+      // with any other effort is a 400.
+      if (caps.temperature && (!effort || effort === 'none')) payload.temperature = temperature;
+      if (effort) payload.reasoning = { effort };
+      return payload;
+    };
+
+    const send = async (tokens) => {
+      for (;;) {
+        try {
+          return await client.responses.create(build(tokens));
+        } catch (error) {
+          if (effort && isUnsupportedParamError(error, 'effort')) {
+            effort = REASONING_FALLBACK[effort] ?? null;
+            caps.effort = effort;
+            console.warn(`[llmProvider] ${model} rejected reasoning effort; falling back to ${effort || 'unset'}.`);
+            continue;
+          }
+          if (caps.temperature && isUnsupportedParamError(error, 'temperature')) {
+            caps.temperature = false;
+            console.warn(`[llmProvider] ${model} rejected temperature; dropping sampling params.`);
+            continue;
+          }
+          throw error;
+        }
+      }
+    };
+
+    let response = await send(maxTokens);
+
+    // With effort `none` this should never fire. If it does, reasoning ate the
+    // budget before emitting prose — retry once with real headroom rather than
+    // handing the caller an empty string it will happily render as narration.
+    if (truncatedByReasoning(response) && !extractOpenAIResponseText(response)) {
+      const used = response?.usage?.output_tokens_details?.reasoning_tokens ?? 0;
+      console.warn(`[llmProvider] ${model} spent ${used} reasoning tokens and emitted no text; retrying with headroom.`);
+      response = await send(Math.max(maxTokens * 4, maxTokens + 4000));
+    }
+
+    const text = extractOpenAIResponseText(response);
+    if (!text && truncatedByReasoning(response)) {
+      throw new Error(`${model} returned no text: output budget exhausted by reasoning tokens.`);
+    }
+    return { text, usage: response?.usage || null };
   }
 
   const completion = await client.chat.completions.create({
@@ -107,7 +198,10 @@ async function createOpenAIText({
     max_tokens: maxTokens,
     temperature,
   });
-  return completion.choices?.[0]?.message?.content || '';
+  return {
+    text: completion.choices?.[0]?.message?.content || '',
+    usage: completion?.usage || null,
+  };
 }
 
 export function resolveModelConfig(modelId = DEFAULT_LLM_MODEL) {
@@ -176,13 +270,14 @@ export async function generateLLMText({
   if (config.provider === 'openai') {
     try {
       const client = getOpenAIClient();
-      const text = await createOpenAIText({
+      const { text, usage } = await createOpenAIText({
         client,
         model: config.apiModel,
         systemPrompt,
         userPrompt,
         maxTokens: effectiveMaxTokens,
         temperature: effectiveTemperature,
+        reasoningEffort: config.reasoningEffort,
       });
       const response = {
         text,
@@ -193,7 +288,10 @@ export async function generateLLMText({
         key: guard.key,
         entryId: guard.entryId,
         response,
-        estimatedOutputTokens: estimateTokens(response.text),
+        // Prefer billed counts over the estimate when the API reports them —
+        // reasoning tokens bill as output, so this is the only honest number.
+        estimatedOutputTokens: usage?.output_tokens ?? estimateTokens(response.text),
+        reasoningTokens: usage?.output_tokens_details?.reasoning_tokens ?? 0,
       });
       return response;
     } catch (error) {
@@ -260,13 +358,14 @@ export async function generateLLMText({
 
     try {
       const client = getOpenAIClient();
-      const text = await createOpenAIText({
+      const { text, usage } = await createOpenAIText({
         client,
         model: fallback.apiModel,
         systemPrompt,
         userPrompt,
         maxTokens: effectiveMaxTokens,
         temperature: effectiveTemperature,
+        reasoningEffort: fallback.reasoningEffort,
       });
       const response = {
         text,
@@ -278,7 +377,8 @@ export async function generateLLMText({
         key: guard.key,
         entryId: guard.entryId,
         response,
-        estimatedOutputTokens: estimateTokens(response.text),
+        estimatedOutputTokens: usage?.output_tokens ?? estimateTokens(response.text),
+        reasoningTokens: usage?.output_tokens_details?.reasoning_tokens ?? 0,
       });
       return response;
     } catch (fallbackError) {

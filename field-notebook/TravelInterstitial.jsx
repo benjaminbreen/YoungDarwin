@@ -12,19 +12,32 @@ import {
 // Destination preparation starts at travel intent, so the chart can keep the
 // same visual sequence at a brisker tempo. The commit timer is only a fallback;
 // the normal path commits from the cover's opacity transitionend event.
-const DEPARTURE_CRANE_MS = 900;
-const BLACK_FADE_IN_MS = 320;
-const ISLAND_CHART_HOLD_MS = 1100;
-const ISLAND_MAP_CHART_HOLD_MS = 1000;
+// 2026-07-31 tempo pass. A measured travel (Post Office Bay -> Post Scrub
+// Rise) spent 4.7s of its 11.1s inside these scripted beats alone, which no
+// amount of mount optimization can recover. Every value below is trimmed
+// roughly a third while keeping the sequence readable: the crane still reads
+// as a lift-away, the route still draws rather than snapping, and the chart
+// still holds long enough to be looked at. The route/camera pair and the
+// chart hold are trimmed together — the hold must outlast
+// CHART_ROUTE_START_MS + CHART_ROUTE_MOVE_MS or the chart cuts away
+// mid-draw.
+const DEPARTURE_CRANE_MS = 300;
+const BLACK_FADE_IN_MS = 240;
+const ISLAND_CHART_HOLD_MS = 520;
+const ISLAND_MAP_CHART_HOLD_MS = 500;
 const THRESHOLD_COMMIT_MS = 250;
-const COVER_CONFIRM_GRACE_MS = 120;
-const CHART_FADE_IN_MS = 340;
-const CHART_FADE_OUT_MS = 300;
-const WORLD_FADE_IN_MS = 520;
-const CAMERA_SETTLE_MS = 700;
-const CHART_ROUTE_START_MS = 100;
-const CHART_CAMERA_MOVE_MS = 900;
-const CHART_ROUTE_MOVE_MS = 840;
+const COVER_CONFIRM_GRACE_MS = 90;
+const CHART_FADE_IN_MS = 240;
+// Deliberately NOT trimmed: this is the window in which the newly un-paused
+// shadow map and water reflection render their first frames (see
+// TRANSITION_RENDER_WARM_PHASES). The chart is still ≥50% opaque for its
+// first half, which is where that work now lands.
+const CHART_FADE_OUT_MS = 270;
+const WORLD_FADE_IN_MS = 360;
+const CAMERA_SETTLE_MS = 340;
+const CHART_ROUTE_START_MS = 50;
+const CHART_CAMERA_MOVE_MS = 500;
+const CHART_ROUTE_MOVE_MS = 440;
 const MAP_LAYER_WIDTH_PERCENT = 116;
 
 function clamp(value, min, max) {
@@ -581,9 +594,15 @@ export function TravelInterstitial() {
           : revealing
             ? WORLD_FADE_IN_MS
             : BLACK_FADE_IN_MS}ms`,
+        // Both arms used to carry the same standard ease, which made the
+        // reveal hold black through its first third and then rush — the
+        // opposite of how a shot opens. Covering now eases IN (the departing
+        // world lingers, then commits to black); revealing eases OUT (the
+        // destination arrives promptly, then settles), which reads as both
+        // more filmic and subjectively faster at the same duration.
         transitionTimingFunction: revealing
-          ? 'cubic-bezier(0.4, 0, 0.2, 1)'
-          : 'cubic-bezier(0.4, 0, 0.2, 1)',
+          ? 'cubic-bezier(0.16, 0.84, 0.3, 1)'
+          : 'cubic-bezier(0.55, 0, 0.85, 0.45)',
       }}
       onTransitionEnd={event => {
         if (event.target !== event.currentTarget

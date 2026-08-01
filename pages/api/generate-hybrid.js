@@ -97,7 +97,7 @@ export default async function handler(req, res) {
     });
 
     const llmResult = await generateLLMText({
-      model: process.env.YOUNG_DARWIN_HYBRID_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.4-nano',
+      model: process.env.YOUNG_DARWIN_HYBRID_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.6-luna',
       route: '/api/generate-hybrid',
       sessionId: identity.sessionId,
       idempotencyKey: identity.idempotencyKey,

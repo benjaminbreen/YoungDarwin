@@ -15,6 +15,7 @@ import {
   WILDLIFE_FIELDWORK_AUDIO,
   WILDLIFE_FIELDWORK_AUDIO_URLS,
 } from './audioAssets';
+import { getPlayerPreferences } from '../playerPreferences';
 
 const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'surf', label: 'Ocean surf', group: 'Environment loops', kind: 'ambient', url: ISLAND_AMBIENCE_AUDIO.surf, diagnosticGain: 0.55 },
@@ -264,8 +265,11 @@ function effectiveContinuousGain(key, target) {
 
 function effectiveMasterGain() {
   hydrateMixSettings();
+  // The player's volume slider rides on top of the authored dB trim, so the
+  // mix balance the sound design assumes is preserved at every setting.
+  const playerVolume = getPlayerPreferences().masterVolume;
   return audioState.enabled || audioState.debugControl.forceEnabled
-    ? BASE_MASTER_GAIN * dbToGain(audioState.mix.masterDb)
+    ? BASE_MASTER_GAIN * dbToGain(audioState.mix.masterDb) * playerVolume
     : 0;
 }
 
@@ -540,6 +544,13 @@ export function setSoundscapeAudioEnabled(enabled) {
   audioState.enabled = Boolean(enabled);
   if (audioState.master) rampGain(audioState.master.gain, effectiveMasterGain(), 0.16);
   exposeDebugState();
+}
+
+// Re-applies the player's volume preference to the live graph. Called while a
+// volume slider is being dragged so the change is audible immediately rather
+// than at the next ambient retarget.
+export function refreshPlayerAudioVolume() {
+  if (audioState.master) rampGain(audioState.master.gain, effectiveMasterGain(), 0.05);
 }
 
 export function setSoundscapeEnvironmentDebug(environment = null) {

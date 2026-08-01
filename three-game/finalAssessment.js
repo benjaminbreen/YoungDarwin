@@ -208,8 +208,19 @@ export function applyTranscriptEvaluation(profile, evaluation = null) {
   };
 }
 
+// Everything Darwin has collected this expedition: the case he is carrying
+// plus everything already struck below deck on the Beagle. Landing the
+// collection empties `inventory`, so reading it alone would silently discount
+// the work of every day but the last.
+function fullCollection(state) {
+  return uniqueSpecimens([
+    ...(Array.isArray(state.shipCollection) ? state.shipCollection : []),
+    ...(Array.isArray(state.inventory) ? state.inventory : []),
+  ]);
+}
+
 export function evaluateFinalAssessment(state = {}) {
-  const inventory = uniqueSpecimens(Array.isArray(state.inventory) ? state.inventory : []);
+  const inventory = fullCollection(state);
   const allNotes = Array.isArray(state.journal) ? state.journal : [];
   const notes = allNotes.filter(isAssessableJournalEntry);
   const playerNotes = notes.filter(note => journalAuthorship(note) === 'player');
@@ -424,7 +435,7 @@ export function buildFinalAssessmentRecord(state = {}, options = {}) {
       truncated: transcript.truncated,
     },
   };
-  const inventory = uniqueSpecimens(Array.isArray(state.inventory) ? state.inventory : []).map(specimen => ({
+  const inventory = fullCollection(state).map(specimen => ({
     id: specimen.id || specimen.specimenId || specimen.name,
     name: specimen.name || specimen.specimenName || 'Unnamed specimen',
     latin: specimen.latin || '',

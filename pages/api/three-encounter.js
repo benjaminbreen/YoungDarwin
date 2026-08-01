@@ -143,7 +143,7 @@ Reply as ${npc.name}, following the contract in your instructions. Return the JS
       sessionId,
       clientId,
       idempotencyKey,
-      model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+      model: process.env.YOUNG_DARWIN_3D_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.6-luna',
       systemPrompt: SYSTEM_PROMPT,
       userPrompt: prompt,
       temperature: 0.46,

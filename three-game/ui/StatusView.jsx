@@ -7,6 +7,7 @@ import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
 import { GoldDivider } from './expedition/ExpeditionPanel';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { animalAwarenessValue, animalRisk, clampPercent } from './animalVitals';
 import { VITALS, vitalsGradient } from './theme';
 import {
   ButterflyIcon,
@@ -122,9 +123,6 @@ function standingLabel(value) {
   return 'Esteemed';
 }
 
-function clampPercent(value) {
-  return Math.max(0, Math.min(100, Number(value) || 0));
-}
 
 function hashText(text) {
   let hash = 2166136261;
@@ -169,15 +167,6 @@ function animalLifeHistory(modeId, seed, zone, actorId) {
   };
 }
 
-function animalRisk(encounter, modeId) {
-  if (!encounter || encounter.modeId !== modeId || !encounter.at) {
-    return { label: 'Unseen for now', value: 28, detail: 'Darwin has not pressed close recently.' };
-  }
-  const seconds = Math.max(0, (Date.now() - encounter.at) / 1000);
-  if (seconds < 10) return { label: 'Very close', value: 92, detail: 'Darwin is close enough to change the next move.' };
-  if (seconds < 35) return { label: 'Nearby', value: 68, detail: 'His attention has only just passed.' };
-  return { label: 'Fading', value: 42, detail: 'His last approach is becoming background danger.' };
-}
 
 function SectionHeading({ children, className = '' }) {
   return (
@@ -348,9 +337,7 @@ export function StatusView() {
   const risk = animalMode ? animalRisk(animalModeNpcEncounter, playableMode.id) : null;
   const lifeHistory = animalMode ? animalLifeHistory(playableMode.id, seed, zone, playableHiddenActorId) : null;
   const animalEnergy = clampPercent(100 - fatigue);
-  const animalAwareness = playableMode.id === 'tortoise'
-    ? clampPercent(100 - (risk?.value || 0) * 0.55)
-    : clampPercent(42 + (risk?.value || 0) * 0.58);
+  const animalAwareness = animalAwarenessValue(playableMode.id, risk);
   const animalFoodLabel = actionStats.eat?.foodLabel || (playableMode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots');
 
   return (

@@ -154,7 +154,9 @@ const SICYOS_SPEC = {
     pushBreakDelay: 0.2,
     pushBreakKick: 0.7,
     bendStiffness: 18,
-    bendDamping: 5.2,
+    // Trailing vine: the loosest spring in the set (zeta 0.38).
+    bendDamping: 3.2,
+    pushDrag: 0.6,
     contactBendBase: 0.13,
     contactBendSpeed: 0.018,
     windSway: 0.032,

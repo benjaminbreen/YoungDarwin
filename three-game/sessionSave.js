@@ -50,11 +50,16 @@ export function buildSessionSnapshot(state) {
     darwinToolbarOrder: stringArray(state.darwinToolbarOrder),
     supplies: state.supplies && typeof state.supplies === 'object' ? { ...state.supplies } : null,
     inventory: Array.isArray(state.inventory) ? state.inventory : [],
+    // Specimens already landed aboard the Beagle. Persisted separately from
+    // `inventory` (the case Darwin carries) because it is the durable record
+    // of expedition progress.
+    shipCollection: Array.isArray(state.shipCollection) ? state.shipCollection : [],
     items: Array.isArray(state.items) ? state.items : [],
     journal: Array.isArray(state.journal) ? state.journal : [],
     bookLastPages: state.bookLastPages && typeof state.bookLastPages === 'object'
       ? { ...state.bookLastPages }
       : {},
+    activeDirectiveId: typeof state.activeDirectiveId === 'string' ? state.activeDirectiveId : null,
     symsDirective: typeof state.symsDirective === 'string' ? state.symsDirective : null,
     symsZoneId: typeof state.symsZoneId === 'string' ? state.symsZoneId : null,
   };

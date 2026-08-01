@@ -145,7 +145,10 @@ const DELILIA_SPEC = {
     pushBreakDelay: 0.2,
     pushBreakKick: 0.55,
     bendStiffness: 20,
-    bendDamping: 5.6,
+    // A soft annual herb: zeta 0.38, so it flops aside and springs back with
+    // two visible swings.
+    bendDamping: 3.4,
+    pushDrag: 0.55,
     contactBendBase: 0.12,
     contactBendSpeed: 0.014,
     windSway: 0.025,

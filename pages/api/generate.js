@@ -9,7 +9,7 @@ import {
   finishLLMRequest,
   getRequestIdentity,
 } from '../../utils/server/llmSafety';
-import { getGeminiApiKey } from '../../utils/server/llmProvider';
+import { getGeminiApiKey, createOpenAIText, OPENAI_DEFAULT_MODEL } from '../../utils/server/llmProvider';
 import { deterministicChoice } from '../../utils/deterministicChoice';
 
 const DEBUG_GENERATE_API = process.env.YOUNG_DARWIN_DEBUG_LLM === '1';
@@ -137,10 +137,20 @@ const darwinContext = {
 
 // --- Model Configuration (JavaScript Array of Objects) ---
 // *** UPDATED DEFAULT MODEL ID ***
-const DEFAULT_MODEL_ID = process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gemini-flash-lite';
+const DEFAULT_MODEL_ID = process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'openai-luna';
 
 const models = [
    // OpenAI Models
+   {
+    id: 'openai-luna',
+    name: 'GPT-5.6 Luna',
+    provider: 'openai',
+    apiModel: OPENAI_DEFAULT_MODEL,
+    description: 'Default narrator — cheapest frontier tier',
+    maxTokens: 2000,
+    temperature: 0.4,
+    reasoningEffort: 'low',
+  },
    {
     id: 'gpt-4.1-mini',
     name: 'GPT-4.1 Mini',
@@ -337,7 +347,7 @@ export default async function handler(req, res) {
           (selectedModelConfig.provider === 'google' && !geminiApiKey)) {
         console.error(`[${new Date().toISOString()}] Default model '${DEFAULT_MODEL_ID}' or its client is also unavailable.`);
         // Attempt hardcoded fallback (e.g., lite model if default was flash)
-         const fallbackCandidates = ['gpt-4.1-nano', 'gpt-4.1-mini', 'gemini-flash-lite', 'gemini-flash'];
+         const fallbackCandidates = ['openai-luna', 'gemini-flash-lite', 'gpt-4.1-nano', 'gpt-4.1-mini', 'gemini-flash'];
          const hardFallback = fallbackCandidates
            .map(getModelConfig)
            .find(candidate => candidate && ((candidate.provider === 'google' && geminiApiKey) || (candidate.provider === 'openai' && openai)));
@@ -601,16 +611,16 @@ Generate the next part of the narrative based on this action and context, follow
          const fallbackConfig = getModelConfig('gpt-4.1-nano') || getModelConfig('gpt-4.1-mini');
          try {
            console.warn(`[${new Date().toISOString()}] Falling back to OpenAI after Gemini failure.`);
-           const completion = await openai.chat.completions.create({
+           const { text } = await createOpenAIText({
+             client: openai,
              model: fallbackConfig.apiModel,
-             messages: [
-               { role: 'system', content: systemPromptContent },
-               { role: 'user', content: finalUserPrompt }
-             ],
+             systemPrompt: systemPromptContent,
+             userPrompt: finalUserPrompt,
              temperature: fallbackConfig.temperature || 0.3,
-             max_tokens: fallbackConfig.maxTokens || 450,
+             maxTokens: fallbackConfig.maxTokens || 450,
+             reasoningEffort: fallbackConfig.reasoningEffort,
            });
-           responseContent = completion.choices[0]?.message?.content || '[OpenAI fallback response was empty or incomplete.]';
+           responseContent = text || '[OpenAI fallback response was empty or incomplete.]';
          } catch (fallbackError) {
            console.error(`[${new Date().toISOString()}] OpenAI fallback after Gemini failure also failed:`, fallbackError);
            finishLLMRequest({ key: guard.key, entryId: guard.entryId, error: fallbackError });
@@ -626,16 +636,16 @@ Generate the next part of the narrative based on this action and context, follow
        if (!openai) throw new Error("OpenAI Client not initialized.");
        apiLog(`[${new Date().toISOString()}] Sending request to OpenAI API (${modelName})...`);
        try {
-            const completion = await openai.chat.completions.create({
+            const { text } = await createOpenAIText({
+                client: openai,
                 model: modelName,
-                messages: [
-                  { role: 'system', content: systemPromptContent },
-                  { role: 'user', content: finalUserPrompt }
-                ],
+                systemPrompt: systemPromptContent,
+                userPrompt: finalUserPrompt,
                 temperature: selectedModelConfig.temperature || 0.3,
-                max_tokens: selectedModelConfig.maxTokens || 450,
+                maxTokens: selectedModelConfig.maxTokens || 450,
+                reasoningEffort: selectedModelConfig.reasoningEffort,
             });
-            responseContent = completion.choices[0]?.message?.content || '[OpenAI response was empty or incomplete.]';
+            responseContent = text || '[OpenAI response was empty or incomplete.]';
             apiLog(`[${new Date().toISOString()}] Received OpenAI response (${Date.now() - apiStartTime}ms).`);
        } catch(openaiError) {
            console.error(`[${new Date().toISOString()}] OpenAI API Error:`, openaiError);

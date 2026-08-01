@@ -90,6 +90,11 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
         releaseWithParent: branch.generation >= 2,
         breakOnLanding: !trunk,
         pushable: branch.generation >= 2,
+        // Only outer twigs snap off in the hand, but the trunk and main limbs
+        // still register a shoulder. Without this the piece nearest Darwin
+        // when he leans on the bole was never a push candidate at all, so the
+        // tree simply ignored him.
+        pushContact: true,
         unbreakable: trunk,
         // The shared site-level sway moves the whole tree coherently. Segment-
         // local wind would pull adjoining meshes apart and expose bright seams.
@@ -251,16 +256,23 @@ const PALO_SANTO_SPEC = {
     shotgunDamage: 2,
     contactBreakDamage: 1,
     propBreakContactForce: 760,
-    pushMaxBend: 0.065,
+    // A slender dry-zone trunk. It should not sway like a shrub, but the old
+    // 0.065 rad (3.7 deg) cap with near-critical damping meant shouldering a
+    // palo santo produced no readable movement at all. 0.11 rad is about 6
+    // degrees at the trunk — roughly what a young Bursera gives to a walking
+    // adult — and the looser damping lets the crown swing back once.
+    pushMaxBend: 0.11,
     pushBreakSpeed: 6.15,
     pushBreakReach: 0.5,
-    pushBreakAngle: 0.052,
+    pushBreakAngle: 0.085,
     pushBreakDelay: 0.12,
     pushBreakKick: 1.3,
     bendStiffness: 42,
-    bendDamping: 11,
-    contactBendBase: 0.035,
-    contactBendSpeed: 0.006,
+    bendDamping: 7.1,
+    pushDrag: 0.16,
+    pushRecoilRatio: 0.42,
+    contactBendBase: 0.062,
+    contactBendSpeed: 0.009,
     windSway: 0.0025,
   },
 };

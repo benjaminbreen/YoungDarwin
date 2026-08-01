@@ -1,3 +1,8 @@
+import {
+  FOLIAGE_PUSH_PROFILES,
+  classifyFoliagePushProfile,
+} from './foliagePushProfiles';
+
 const CELL_SIZE = 3;
 
 function itemPosition(item = {}) {
@@ -6,9 +11,13 @@ function itemPosition(item = {}) {
   return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
 }
 
+// Same classification the push shader uses, so what you hear matches what you
+// see bend.
 function contactKindForLayer(layer = {}) {
-  const text = `${layer.id || ''} ${layer.path || ''} ${layer.label || ''}`.toLowerCase();
-  return /grass|sedge|fern|meadow|ground.plant|crop|reed/.test(text) ? 'grass' : 'shrub';
+  const name = FOLIAGE_PUSH_PROFILES[layer.motion?.profile]
+    ? layer.motion.profile
+    : classifyFoliagePushProfile(layer);
+  return FOLIAGE_PUSH_PROFILES[name].contactKind;
 }
 
 function cellKey(x, z) {

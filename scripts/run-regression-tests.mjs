@@ -201,6 +201,11 @@ const {
   selectMatureCactusShotgunHits,
 } = loadModule('three-game/world/ecology/matureCactusInteractions.js');
 const {
+  FOLIAGE_PUSH_PROFILES,
+  classifyFoliagePushProfile,
+  resolveFoliagePush,
+} = loadModule('three-game/world/ecology/foliagePushProfiles.js');
+const {
   carryGripForProp,
   carryPlacementCandidates,
   propHorizontalRadius,
@@ -661,6 +666,11 @@ const {
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
 } = loadModule('three-game/expeditionOutcomes.js');
+const { DIRECTIVES, resolveDirective } = loadModule('three-game/directives.js');
+const {
+  distanceToWalkableBoundary,
+  regionUsesRadialBounds,
+} = loadModule('three-game/world/terrain.js');
 const {
   applyTranscriptEvaluation,
   buildFinalAssessmentRecord,
@@ -1114,6 +1124,117 @@ test('structured transcript judgments adjust but do not rewrite canonical catego
   assert.equal(outraged.overall, 1);
   assert.equal(outraged.verdict, 'A mortifying failure of fieldwork');
   assert.match(outraged.gaps[0], /childish contempt/);
+});
+
+test('map-edge distance follows the real movement boundary, not the terrain rectangle', () => {
+  // Post Office Bay confines the player to a CIRCLE (clampToWalkable), but the
+  // edge-travel prompt used to measure distance to the terrain RECTANGLE.
+  // Pinned against the circle at 45 degrees the player sits ~42m from the
+  // rectangle corner — outside the 16m prompt threshold entirely — so corners
+  // offered no "continue to..." prompt at all, and an off-axis approach fell
+  // outside auto-travel range and demanded a keypress.
+  assert.equal(regionUsesRadialBounds('POST_OFFICE_BAY'), true);
+  const bounds = distanceToWalkableBoundary({ x: 0, z: 0 }, 'POST_OFFICE_BAY');
+  assert.ok(bounds > 0, 'the cove has a radial boundary');
+
+  const pinnedAtCorner = { x: bounds * Math.SQRT1_2, z: bounds * Math.SQRT1_2 };
+  assert.ok(
+    distanceToWalkableBoundary(pinnedAtCorner, 'POST_OFFICE_BAY') < 0.001,
+    'a player on the circle at 45 degrees is AT the walkable boundary',
+  );
+  // The rectangle measure that caused the bug is still far away — which is
+  // exactly why the prompt must not use it.
+  const rectangleDistance = bounds - pinnedAtCorner.x;
+  assert.ok(rectangleDistance > 16, 'rectangle distance at a corner exceeds the prompt threshold');
+
+  // Rectangular regions keep measuring to their own clamped rectangle.
+  assert.equal(regionUsesRadialBounds('NORTHERN_HIGHLANDS'), false);
+  const inland = distanceToWalkableBoundary({ x: 0, z: 0 }, 'NORTHERN_HIGHLANDS');
+  assert.ok(inland > 0);
+});
+
+test('objectives advance in order from real gameplay state', () => {
+  const base = {
+    visitedLocalCellIds: [], activeToolId: 'hands', examinedTypeIds: [],
+    collectedSpecimenIds: [], collectedSpecimenActorIds: [], npcEncounterState: {},
+    visitedZoneIds: ['POST_OFFICE_BAY'], shipCollection: [], journal: [],
+  };
+  assert.equal(resolveDirective(base), 'explore', 'a fresh expedition starts on the first objective');
+  const walked = { ...base, visitedLocalCellIds: ['a', 'b', 'c'] };
+  assert.equal(resolveDirective(walked, 'explore'), 'tool');
+  const armed = { ...walked, activeToolId: 'insect_net' };
+  assert.equal(resolveDirective(armed, 'tool'), 'examine');
+
+  // Objectives already satisfied are skipped, never re-issued.
+  const ahead = {
+    ...base,
+    visitedLocalCellIds: ['a', 'b', 'c'],
+    activeToolId: 'insect_net',
+    examinedTypeIds: ['lavalizard'],
+    collectedSpecimenIds: ['lavalizard'],
+  };
+  assert.equal(resolveDirective(ahead, 'explore'), 'syms', 'satisfied objectives are skipped');
+
+  // The keystone comparison reads zone-prefixed actor ids, so the same species
+  // taken at two landings satisfies it and one landing does not.
+  const oneLanding = { ...base, collectedSpecimenActorIds: ['POST_OFFICE_BAY:lavalizard-0'] };
+  const twoLandings = {
+    ...base,
+    collectedSpecimenActorIds: ['POST_OFFICE_BAY:lavalizard-0', 'N_SHORE:lavalizard-2'],
+  };
+  const twoLandingsDirective = DIRECTIVES.find(entry => entry.id === 'two-landings');
+  assert.equal(twoLandingsDirective.isDone(oneLanding), false);
+  assert.equal(twoLandingsDirective.isDone(twoLandings), true);
+
+  // Recorded uncertainty is satisfied by the same hedging the final
+  // assessment scores as rigor.
+  const uncertain = DIRECTIVES.find(entry => entry.id === 'uncertain');
+  assert.equal(uncertain.isDone({ journal: [{ authorship: 'player', content: 'A finch.' }] }), false);
+  assert.equal(
+    uncertain.isDone({ journal: [{ authorship: 'player', content: 'Perhaps a distinct variety; I cannot determine.' }] }),
+    true,
+  );
+});
+
+test('landing the collection at the Beagle keeps specimens on the expedition record', () => {
+  // Landing empties `inventory` into `shipCollection`, which is what lets a
+  // 12-slot case pace the expedition instead of ending it. The assessment
+  // must therefore count both, or every day but the last silently vanishes.
+  const landedState = {
+    health: 100,
+    fatigue: 0,
+    localStanding: 50,
+    currentZoneId: 'BEAGLE',
+    visitedZoneIds: ['POST_OFFICE_BAY', 'BEAGLE'],
+    inventory: [],
+    shipCollection: [
+      { id: 'mediumgroundfinch', name: 'Medium ground finch', condition: 'clean_specimen' },
+      { id: 'marineiguana', name: 'Marine iguana', condition: 'clean_specimen' },
+    ],
+    journal: [],
+    collectedSpecimenIds: [],
+    documentedSpecimenIds: [],
+    examinedTypeIds: [],
+  };
+  // The score counts landed specimens as collected evidence...
+  const landed = evaluateFinalAssessment(landedState);
+  assert.equal(landed.stats.collected, 2, 'landed specimens must count as collected');
+  // ...and the packet sent to Henslow lists them.
+  const landedRecord = buildFinalAssessmentRecord(landedState, { createdAt: 1 });
+  assert.equal(landedRecord.request.inventory.length, 2, 'landed specimens must reach the packet');
+  assert.ok(
+    landedRecord.request.inventory.some(entry => entry.id === 'marineiguana'),
+    'a specimen struck below deck is still part of the collection',
+  );
+
+  // And the snapshot must carry it, or resuming a save loses everything
+  // landed before the last visit to the ship.
+  const snapshot = buildSessionSnapshot({
+    currentZoneId: 'BEAGLE',
+    inventory: [],
+    shipCollection: [{ id: 'mediumgroundfinch', name: 'Medium ground finch' }],
+  });
+  assert.equal(snapshot.shipCollection.length, 1);
 });
 
 test('final assessment scores reflect the expedition record and remain bounded', () => {
@@ -2431,6 +2552,66 @@ test('mature cactus spine risk stays low while walking and reaches 25 percent wh
   assert.equal(walking, 0.04);
   assert.equal(running, 0.25);
   assert.ok(cactusSpineInjuryChance({ running: false, impactSpeed: 1 }) < walking);
+});
+
+// The push field is a three-tap difference of a lagged player position. If the
+// weights stop satisfying lead - mid + trail === 1, a plant you simply stand
+// inside drifts away from (or short of) its authored deflection forever, which
+// is invisible in a screenshot and obvious in play.
+test('every foliage push profile settles a sustained lean at exactly the authored bend', () => {
+  for (const [name, profile] of Object.entries(FOLIAGE_PUSH_PROFILES)) {
+    const [lead, mid, trail] = profile.spring;
+    assert.ok(
+      Math.abs(lead - mid + trail - 1) < 1e-9,
+      `${name} spring weights settle at ${lead - mid + trail}, not 1`,
+    );
+    // The spread is the transient. Collapse it and the spring is a static field.
+    assert.ok(lead > 1, `${name} has no contact overshoot`);
+  }
+});
+
+test('foliage push profiles bound tip travel by growth form, hardest wood least', () => {
+  const order = ['grass', 'herb', 'shrub', 'woodyShrub', 'sapling', 'tree'];
+  for (let index = 1; index < order.length; index += 1) {
+    assert.ok(
+      FOLIAGE_PUSH_PROFILES[order[index]].maxTipTravel
+        < FOLIAGE_PUSH_PROFILES[order[index - 1]].maxTipTravel,
+      `${order[index]} should bend less than ${order[index - 1]}`,
+    );
+  }
+  // A cactus is not a soft plant with a small number; it is nearly rigid.
+  assert.ok(FOLIAGE_PUSH_PROFILES.succulent.maxTipTravel <= 0.05);
+});
+
+test('foliage push classification separates island species by growth form', () => {
+  assert.equal(classifyFoliagePushProfile({ id: 'saltbush-1' }), 'shrub');
+  assert.equal(classifyFoliagePushProfile({ id: 'post-office-bay-galapagos-cotton' }), 'herb');
+  assert.equal(classifyFoliagePushProfile({ path: 'runtime-croton.glb' }), 'woodyShrub');
+  assert.equal(classifyFoliagePushProfile({ id: 'post-office-bay-path-dry-grass' }), 'grass');
+  assert.equal(classifyFoliagePushProfile({ id: 'palo-santo-overlay' }), 'tree');
+  // Cactus patterns run first so a lava cactus never falls through to a tree.
+  assert.equal(classifyFoliagePushProfile({ id: 'lava-cactus' }), 'succulent');
+  assert.equal(classifyFoliagePushProfile({ path: 'runtime-candelabra-cactus.glb' }), 'succulent');
+  assert.equal(classifyFoliagePushProfile({}), 'shrub');
+});
+
+test('foliage push keeps the authored bend as a relative trim, not the absolute limit', () => {
+  const normal = resolveFoliagePush({ bend: 0.3 }, { id: 'saltbush-1' });
+  const timid = resolveFoliagePush({ bend: 0.15 }, { id: 'saltbush-1' });
+  assert.equal(normal.name, 'shrub');
+  assert.ok(timid.amp < normal.amp);
+  // Whatever a layer asks for, the growth form owns the deflection ceiling.
+  assert.equal(timid.maxBendHeightRatio, normal.maxBendHeightRatio);
+  // An absurd authored bend cannot turn a cactus into a shrub.
+  const cactus = resolveFoliagePush({ bend: 4 }, { id: 'opuntia' });
+  assert.equal(cactus.name, 'succulent');
+  assert.ok(cactus.maxBendHeightRatio <= 0.05);
+  // An explicit profile overrides the name heuristic.
+  assert.equal(resolveFoliagePush({ profile: 'grass' }, { id: 'opuntia' }).name, 'grass');
+  // Generated-tree leaves read as a crown, not as trunk wood.
+  const bark = resolveFoliagePush({ bend: 0.035 }, { id: 'tree', part: 'trunk' });
+  const leaves = resolveFoliagePush({ bend: 0.035 }, { id: 'tree', part: 'leaf' });
+  assert.ok(leaves.maxBendHeightRatio > bark.maxBendHeightRatio);
 });
 
 test('Coastal Scrubland mature cacti participate in shared movement collision', () => {

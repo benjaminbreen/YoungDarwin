@@ -75,7 +75,7 @@ Darwin was alert to the evocative imagery such a tale of privation and isolation
     });
 
     const llmResult = await generateLLMText({
-      model: process.env.YOUNG_DARWIN_CRITIQUE_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.4-nano',
+      model: process.env.YOUNG_DARWIN_CRITIQUE_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || 'gpt-5.6-luna',
       route: '/api/historian-critique',
       sessionId: identity.sessionId,
       idempotencyKey: identity.idempotencyKey,

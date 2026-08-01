@@ -1,4 +1,8 @@
-import { getRegionTerrainConfig } from '../../world/terrain';
+import {
+  distanceToWalkableBoundary,
+  getRegionTerrainConfig,
+  regionUsesRadialBounds,
+} from '../../world/terrain';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
 import { useThreeGameStore } from '../../store';
@@ -40,13 +44,23 @@ export function shouldRunInPlaceAtTravelEdge(storeState, { moving = false, isDar
 export function nearestRegionEdgePrompt(regionId, position, facing) {
   const config = getRegionTerrainConfig(regionId);
   const threshold = 16;
+  // How much room is actually left before movement stops. In radial regions
+  // (Post Office Bay's cove) this is nothing like the distance to the terrain
+  // rectangle: pinned against the circle at 45 degrees the player sits ~42m
+  // from the rectangle corner, which used to put them outside every edge
+  // threshold — so corners produced no travel prompt at all, and even a
+  // slightly off-axis approach fell outside the auto-travel range.
+  const boundaryDistance = distanceToWalkableBoundary(position, regionId);
+  const radial = regionUsesRadialBounds(regionId);
   const distEast = config.width / 2 - position.x;
   const distWest = position.x + config.width / 2;
   const distSouth = config.depth / 2 - position.z;
   const distNorth = position.z + config.depth / 2;
-  // Fast path: in the zone interior, far from every edge. This runs every frame
-  // from the player loop, so bail before fetching hints or allocating anything.
-  if (distEast > threshold && distWest > threshold && distSouth > threshold && distNorth > threshold) {
+  // Fast path: still in the interior. Runs every frame from the player loop,
+  // so bail before fetching hints or allocating anything.
+  if (boundaryDistance > threshold
+    && distEast > threshold && distWest > threshold
+    && distSouth > threshold && distNorth > threshold) {
     return null;
   }
   const hints = getRegionEdgeHints(regionId);
@@ -54,20 +68,27 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
   const facingZ = facing?.z || 0;
   const facingLength = Math.hypot(facingX, facingZ);
 
-  // Track the single best candidate with scalars (ordering identical to the old
-  // sort: nearest distance wins, ties break toward the edge we face most) so we
-  // never build/sort a candidates array or spread a hint until the winner.
+  // Track the single best candidate with scalars so we never build/sort a
+  // candidates array or spread a hint until the winner is known.
   let bestHint = null;
   let bestDistance = Infinity;
   let bestFacingWeight = -Infinity;
+  let bestOpen = false;
   for (const hint of hints) {
     const edge = hint.edge;
-    if (edge.includes('north') && distNorth > threshold) continue;
-    if (edge.includes('south') && distSouth > threshold) continue;
-    if (edge.includes('east') && distEast > threshold) continue;
-    if (edge.includes('west') && distWest > threshold) continue;
     const edgeDirection = EDGE_DIRECTIONS[edge];
     if (!edgeDirection) continue;
+    // On a circle every edge is equally far from the boundary, so the edge is
+    // chosen by which way the player is heading rather than by rectangle
+    // distance — which is what makes corners work.
+    const rectDistance = Math.min(
+      edge.includes('north') ? distNorth : Infinity,
+      edge.includes('south') ? distSouth : Infinity,
+      edge.includes('east') ? distEast : Infinity,
+      edge.includes('west') ? distWest : Infinity,
+    );
+    const distance = radial ? boundaryDistance : Math.min(rectDistance, boundaryDistance);
+    if (distance > threshold) continue;
     const directionLength = Math.hypot(edgeDirection.dx, edgeDirection.dy) || 1;
     const directionX = edgeDirection.dx / directionLength;
     const directionZ = edgeDirection.dy / directionLength;
@@ -75,21 +96,27 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
       ? (directionX * facingX + directionZ * facingZ) / facingLength
       : 0;
     if (facingWeight < -0.15) continue;
-    const distance = Math.min(
-      edge.includes('north') ? distNorth : Infinity,
-      edge.includes('south') ? distSouth : Infinity,
-      edge.includes('east') ? distEast : Infinity,
-      edge.includes('west') ? distWest : Infinity,
-    );
-    if (distance < bestDistance || (distance === bestDistance && facingWeight > bestFacingWeight)) {
+    // An open route beats a blocked one at the same distance: standing in a
+    // corner where one edge continues and the other is a wall should offer
+    // the way through, not the wall.
+    const isOpen = hint.kind === 'open' && Boolean(hint.toRegionId);
+    const better = bestHint === null
+      || (isOpen !== bestOpen ? isOpen : (
+        radial
+          ? facingWeight > bestFacingWeight
+          : (distance < bestDistance || (distance === bestDistance && facingWeight > bestFacingWeight))
+      ));
+    if (better) {
       bestHint = hint;
       bestDistance = distance;
       bestFacingWeight = facingWeight;
+      bestOpen = isOpen;
     }
   }
   return bestHint ? {
     ...bestHint,
     distance: bestDistance,
+    boundaryDistance,
     facingWeight: bestFacingWeight,
     visible: bestDistance <= 8,
   } : null;
@@ -298,9 +325,22 @@ export function updatePlayerInteractions({
     && promptPayload?.kind === 'open'
     && promptPayload?.toRegionId
     && !promptPayload.localTransition
-    && promptPayload.distance <= 2.5
+    // Measured against the boundary the player can actually reach, not the
+    // terrain rectangle. 3.5 (was 2.5) leaves room for the last step being
+    // clamped short of the wall.
+    && (promptPayload.boundaryDistance ?? promptPayload.distance) <= 3.5
     && promptPayload.facingWeight > 0.18;
-  const pushingForward = Boolean(keys.forward || touch.forward);
+  // Once pinned against the boundary the player stops moving, so outward
+  // travel goes to zero and only the input can say "I am still trying to go
+  // this way". Any movement key counts: gating on `forward` alone meant
+  // arriving at an angle, or strafing along the shore into a corner, left the
+  // toast sitting there waiting for a keypress the player had no reason to
+  // expect.
+  const pushingForward = Boolean(
+    keys.forward || keys.backward || keys.left || keys.right
+    || touch.forward || touch.backward || touch.left || touch.right
+    || Math.hypot(touch.moveX || 0, touch.moveY || 0) > 0.15,
+  );
   if (autoCandidate && (outwardDelta > 0.0005 || pushingForward)) {
     const intent = stateRef.current.edgeTravelIntent;
     if (!intent || intent.id !== promptPayload.id) {

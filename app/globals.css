@@ -919,3 +919,15 @@ button.submit-button:disabled {
 .timeline-dot {
   animation: dot-pulse 2s infinite;
 }
+
+/* Objective completion: a single gold rule sweeps the width of the finished
+   line once and stops. Deliberately one stroke — the tick and the strike-
+   through carry the moment; this only underlines it. */
+@keyframes objective-rule {
+  from { transform: scaleX(0); opacity: 0; }
+  35%  { opacity: 1; }
+  to   { transform: scaleX(1); opacity: 0; }
+}
+.animate-objective-rule {
+  animation: objective-rule 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}

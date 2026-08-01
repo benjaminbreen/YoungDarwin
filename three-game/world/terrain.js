@@ -166,6 +166,33 @@ export function terrainSlopeAt(x, z, regionId = 'POST_OFFICE_BAY', step = 0.85) 
   };
 }
 
+// True when the region confines the player to a circle rather than the
+// terrain rectangle. Post Office Bay's cove is bounded radially (see
+// clampToWalkable), which means the rectangle edges are NOT where movement
+// actually stops — at 45 degrees the circle cuts the corner off by ~29% of the
+// half-width. Anything reasoning about "how close am I to leaving the map"
+// must ask this rather than measure to the rectangle.
+export function regionUsesRadialBounds(regionId = 'POST_OFFICE_BAY') {
+  return authoredRegion(regionId)?.id === 'POST_OFFICE_BAY';
+}
+
+// Remaining travel, in metres, before the player reaches the edge of the
+// walkable area. Mirrors clampToWalkable's own branch so the two cannot drift:
+// radial regions measure to the circle, rectangular ones to the clamped
+// rectangle (which keeps the same 1.2 margin clampToWalkable applies).
+export function distanceToWalkableBoundary(position, regionId = 'POST_OFFICE_BAY') {
+  const config = getRegionTerrainConfig(regionId);
+  const x = Number(position?.x) || 0;
+  const z = Number(position?.z) || 0;
+  if (regionUsesRadialBounds(regionId)) {
+    return Math.max(0, config.bounds - Math.hypot(x, z));
+  }
+  return Math.max(0, Math.min(
+    config.width * 0.5 - 1.2 - Math.abs(x),
+    config.depth * 0.5 - 1.2 - Math.abs(z),
+  ));
+}
+
 export function isWalkableTerrain(x, z, regionId = 'POST_OFFICE_BAY') {
   const config = getRegionTerrainConfig(regionId);
   const definition = authoredRegion(regionId);

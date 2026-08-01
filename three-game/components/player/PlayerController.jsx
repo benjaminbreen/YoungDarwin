@@ -303,7 +303,16 @@ export function PlayerController({
   const pendingSnareTrip = useRef(null);
   const pendingAnimalDropping = useRef(null);
   const lastConstraintReactionKey = useRef(null);
-  const sustainedObstaclePush = useRef({ id: null, startedAt: -10, lastAt: -10 });
+  // pendingX/pendingZ accumulate sub-quantum push travel between store
+  // commits — see the commit gate at the push site for why.
+  const sustainedObstaclePush = useRef({
+    id: null,
+    startedAt: -10,
+    lastAt: -10,
+    pendingX: 0,
+    pendingZ: 0,
+    committedAt: -10,
+  });
   const lastCactusHitAt = useRef(-10);
   const cactusHazardStreak = useRef({ count: 0, lastAt: -10 });
   const lastStepUpDustAt = useRef(-10);
@@ -380,6 +389,7 @@ export function PlayerController({
     pushDirection: new THREE.Vector3(),
     pushObstaclePosition: new THREE.Vector3(),
     pushCandidate: new THREE.Vector3(),
+    pushCommit: new THREE.Vector3(),
     cactusHorizontalVelocity: new THREE.Vector3(),
     correction: new THREE.Vector3(),
     footstepPosition: new THREE.Vector3(),
@@ -2849,6 +2859,9 @@ export function PlayerController({
         if (pushState.id !== pushKey || now - pushState.lastAt > 0.45) {
           pushState.id = pushKey;
           pushState.startedAt = now;
+          pushState.pendingX = 0;
+          pushState.pendingZ = 0;
+          pushState.committedAt = now;
         }
         pushState.lastAt = now;
         startPushFeedback(mobilityPushAnimationTarget(pushable));
@@ -2874,12 +2887,34 @@ export function PlayerController({
             mobility: pushable.mobility,
           })
           && clamped.distanceTo(candidate) < 0.08) {
-          movePushableObstacle(
-            pushable.id,
-            pushDelta,
-            pushable.zoneId,
-            pushable.mobility?.maxOffset ?? pushable.maxPushOffset ?? null,
-          );
+          // Committing every frame of a sustained push was a per-frame world
+          // rebuild: each call produced a fresh pushableObstacleOffsets
+          // identity, which busted the runtime-obstacle cache (and its spatial
+          // index) for FIVE independent consumers — physics colliders, the
+          // player's own collision adapter, world details, droppings, and the
+          // rock sampler — and re-rendered every static RigidBody so
+          // react-three-rapier re-issued setTranslation across hundreds of
+          // colliders, from a synchronous React flush inside useFrame.
+          //
+          // Push travel is accumulated here and committed on ~1.5cm quanta
+          // (or 12Hz, whichever comes first), which is well under the
+          // resolution at which a shoved boulder reads as moving smoothly —
+          // the visual is driven by the same store value either way.
+          pushState.pendingX += pushDelta.x;
+          pushState.pendingZ += pushDelta.z;
+          const pendingDistance = Math.hypot(pushState.pendingX, pushState.pendingZ);
+          if (pendingDistance >= 0.015 || now - pushState.committedAt >= 1 / 12) {
+            frameScratch.pushCommit.set(pushState.pendingX, 0, pushState.pendingZ);
+            pushState.pendingX = 0;
+            pushState.pendingZ = 0;
+            pushState.committedAt = now;
+            movePushableObstacle(
+              pushable.id,
+              frameScratch.pushCommit,
+              pushable.zoneId,
+              pushable.mobility?.maxOffset ?? pushable.maxPushOffset ?? null,
+            );
+          }
           velocity.current.x *= 0.78;
           velocity.current.z *= 0.78;
         }

@@ -220,7 +220,7 @@ export default async function handler(req, res) {
     });
 
     const llmResult = await generateLLMText({
-      model: process.env.YOUNG_DARWIN_ASSESSMENT_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.4-nano',
+      model: process.env.YOUNG_DARWIN_ASSESSMENT_MODEL || process.env.YOUNG_DARWIN_DEFAULT_MODEL || process.env.OPENAI_SMALL_MODEL || 'gpt-5.6-luna',
       route: '/api/end-game-assessment',
       sessionId: identity.sessionId,
       clientId: identity.clientId,

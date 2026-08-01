@@ -119,7 +119,9 @@ function cloneMaterial(material, geometry, variant, motion, isLeaf, cheap) {
   }
   if (cheap) cloned = toMattePhong(cloned);
   stabilizeFoliageMaterial(cloned, { doubleSide: isLeaf, forceCutout: isLeaf });
-  if (motion) applyFoliageMotion(cloned, geometry, motion);
+  // Bark and leaves come off the same generated tree; the push profile treats
+  // the leaf pass as a crown so the canopy stirs while the trunk holds.
+  if (motion) applyFoliageMotion(cloned, geometry, motion, { id: 'tree', part: isLeaf ? 'leaf' : 'trunk' });
   return cloned;
 }
 

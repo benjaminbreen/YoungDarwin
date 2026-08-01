@@ -33,9 +33,16 @@ const staticRuntimeObstacleCache = new Map();
 // drives the matching visuals. Filtering happens at the broad-phase exit so
 // movement, support, camera, and climb queries all agree the rock is gone.
 const destroyedObstacleIds = new Set();
+// Bumped whenever the destroyed set changes. Filtered broad-phase results are
+// memoized against it (see withoutDestroyedObstacles) so breaking a rock costs
+// one filter per candidate array rather than one per query, forever after.
+let destroyedObstacleVersion = 0;
+const destroyedFilterCache = new WeakMap();
 
 export function markObstacleDestroyed(obstacleId) {
-  if (obstacleId) destroyedObstacleIds.add(obstacleId);
+  if (!obstacleId || destroyedObstacleIds.has(obstacleId)) return;
+  destroyedObstacleIds.add(obstacleId);
+  destroyedObstacleVersion += 1;
 }
 
 // Replaces the registry with the store's current broken set, so store resets
@@ -45,16 +52,30 @@ export function syncDestroyedObstacles(obstacleIds = []) {
   for (const id of obstacleIds) {
     if (id) destroyedObstacleIds.add(id);
   }
+  destroyedObstacleVersion += 1;
 }
 
 export function isObstacleDestroyed(obstacleId) {
   return destroyedObstacleIds.size > 0 && destroyedObstacleIds.has(obstacleId);
 }
 
+// Broad-phase results pass through here on every return path, including the
+// cached ones. The filter used to run per query as soon as ANY obstacle was
+// destroyed — allocating a fresh array several times per frame for the rest of
+// the session even when nothing was actually filtered out, because the
+// "nothing changed" check happened after the allocation. Breaking a single
+// rock therefore turned every movement, support, camera, and fauna query into
+// garbage. Results are now memoized per candidate array against the destroyed
+// set's version, so a destruction costs one filter per array and steady-state
+// queries allocate nothing.
 function withoutDestroyedObstacles(obstacles) {
   if (!destroyedObstacleIds.size || !Array.isArray(obstacles) || !obstacles.length) return obstacles;
+  const cached = destroyedFilterCache.get(obstacles);
+  if (cached && cached.version === destroyedObstacleVersion) return cached.result;
   const filtered = obstacles.filter(obstacle => !destroyedObstacleIds.has(obstacle.id));
-  return filtered.length === obstacles.length ? obstacles : filtered;
+  const result = filtered.length === obstacles.length ? obstacles : filtered;
+  destroyedFilterCache.set(obstacles, { version: destroyedObstacleVersion, result });
+  return result;
 }
 
 function obstacleCellCoordinate(value, cellSize = OBSTACLE_INDEX_CELL_SIZE) {

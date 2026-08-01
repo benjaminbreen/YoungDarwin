@@ -97,7 +97,7 @@ function prepareScene(scene, options = {}) {
       } else {
         stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
       }
-      if (options.motion) applyFoliageMotion(material, object.geometry, options.motion);
+      if (options.motion) applyFoliageMotion(material, object.geometry, options.motion, { path: options.path });
       material.needsUpdate = true;
     });
     object.material = Array.isArray(object.material) ? materials : materials[0];
@@ -146,8 +146,8 @@ function StaticGLBPrimitive({
   }), [path, sourceId, sourceKind, sourceLabel]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy });
-  }, [clone, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy]);
+    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy, path });
+  }, [clone, path, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy]);
 
   return (
     <group

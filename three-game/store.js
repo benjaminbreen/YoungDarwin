@@ -38,6 +38,7 @@ import {
   getExaminableItem,
 } from './examine/examinables';
 import { sameFieldAction } from './fieldActions';
+import { FIRST_DIRECTIVE_ID, resolveDirective } from './directives';
 import { currentZoneId, getTravelCardForRoute, getZone } from './world/floreanaZones';
 import { getRegionWeather, tickWeatherSim } from './world/weatherDirector';
 import { normalizeWeatherState } from './world/weatherStates';
@@ -116,6 +117,9 @@ import {
 } from './sessionSave';
 
 const MAX_HEALTH = 100;
+// A night aboard ends at first light rather than advancing a fixed span, so
+// the player always resumes the expedition at a workable hour.
+const BEAGLE_MORNING_HOUR = 6.5;
 const MAX_FATIGUE = 100;
 const MAX_CURIOSITY = 100;
 const HOURS_PER_DAY = 24;
@@ -401,7 +405,9 @@ function recentNarrationContext(log) {
       return `${speaker}: ${text}`;
     })
     .filter(Boolean)
-    .slice(-4);
+    // Eight turns, not four: a conversation that stays in 1835 needs enough
+    // room for the narrator to still see what "they" referred to.
+    .slice(-8);
 }
 
 function ambientThoughtPatch(state, { weather = state.weather, timeOfDay = state.timeOfDay, trigger = 'ambient' } = {}) {
@@ -810,6 +816,9 @@ function createExpeditionSlice() {
     caseCapacity: CASE_CAPACITY,
     favoriteSpecimenIds: [],
     inventory: expedition.inventory,
+    // Specimens struck below deck on the Beagle. `inventory` is only what is
+    // in the case Darwin carries; this is everything already landed.
+    shipCollection: [],
     journal: expedition.journal,
     // In-progress journal entry text; lives in the store so an accidental
     // close of the notebook doesn't lose writing.
@@ -832,6 +841,11 @@ function createExpeditionSlice() {
     timeOfDay: expedition.timeMinutes / 60,
     day: expedition.day,
     questComplete: false,
+    // Current game objective (see directives.js). Advances silently whenever
+    // the active one is satisfied; `directiveCompletedId` briefly names the
+    // one just finished so the HUD can play its tick-off before swapping.
+    activeDirectiveId: FIRST_DIRECTIVE_ID,
+    directiveCompletedId: null,
     // 0-100 social meter: 0 = distrusted by settlers/crew, 100 = respected.
     // Nothing moves it yet; quest and dialogue outcomes call adjustLocalStanding.
     localStanding: 50,
@@ -1001,10 +1015,18 @@ export const useThreeGameStore = create((set, get) => ({
     patch.questComplete = Boolean(snapshot.questComplete);
     assign('activeToolId', snapshot.activeToolId, initial.activeToolId);
     assign('supplies', snapshot.supplies, initial.supplies);
+    // A resumed save keeps its objective; a snapshot from before objectives
+    // existed falls back to re-resolving from the first.
+    patch.activeDirectiveId = typeof snapshot.activeDirectiveId === 'string'
+      ? snapshot.activeDirectiveId
+      : FIRST_DIRECTIVE_ID;
     assign('symsDirective', snapshot.symsDirective, initial.symsDirective);
     assign('symsZoneId', snapshot.symsZoneId, initial.symsZoneId);
     patch.weather = normalizeWeatherState(snapshot.weather, initial.weather);
     patch.inventory = Array.isArray(snapshot.inventory) ? snapshot.inventory : initial.inventory;
+    patch.shipCollection = Array.isArray(snapshot.shipCollection)
+      ? snapshot.shipCollection
+      : initial.shipCollection;
     patch.items = Array.isArray(snapshot.items) ? snapshot.items : initial.items;
     patch.journal = Array.isArray(snapshot.journal) && snapshot.journal.length > 0
       ? snapshot.journal
@@ -1925,6 +1947,69 @@ export const useThreeGameStore = create((set, get) => ({
     inspectedScreenPosition: null,
   }),
   closeBeagleTravelPrompt: () => set({ beagleTravelPrompt: null }),
+
+  // Re-evaluates the active objective against current state. Cheap enough to
+  // call after any action that could satisfy one; a no-op when nothing
+  // changed, so callers never need to know which objective is active.
+  refreshDirective: () => set(state => {
+    if (!state.activeDirectiveId) return {};
+    const next = resolveDirective(state, state.activeDirectiveId);
+    if (next === state.activeDirectiveId) return {};
+    return {
+      activeDirectiveId: next,
+      // Named for the HUD's completion beat; cleared by clearCompletedDirective
+      // once that has played.
+      directiveCompletedId: state.activeDirectiveId,
+    };
+  }),
+
+  clearCompletedDirective: () => set(state => (
+    state.directiveCompletedId ? { directiveCompletedId: null } : {}
+  )),
+
+  // The loop's heartbeat. Aboard the Beagle, Darwin hands the case down to be
+  // stowed, draws fresh supplies from the ship's stores, and sleeps — which is
+  // what makes a 12-slot case a pacing device rather than a hard ceiling on
+  // the whole expedition.
+  //
+  // Specimens move to `shipCollection` rather than being discarded:
+  // `collectedSpecimenIds` remains the record of WHAT has been found (and
+  // still gates re-collection), while `inventory` is only what is physically
+  // in the case Darwin is carrying. The final assessment reads the union.
+  landCollectionAtBeagle: () => set(state => {
+    if (state.currentZoneId !== 'BEAGLE') return {};
+    const landed = state.inventory.length;
+    const restocked = { ...INITIAL_SUPPLIES, spareJars: (INITIAL_SUPPLIES.spareJars || 0) + SYMS_BONUS_JARS };
+    // Sleeping aboard: advance to the next morning rather than adding a fixed
+    // number of hours, so the player always resumes at a workable hour.
+    const nextDay = state.day + 1;
+    const location = getZone(state.currentZoneId);
+    const summary = landed > 0
+      ? `${landed} specimen${landed === 1 ? '' : 's'} struck below and the case made ready again`
+      : 'The case was already empty; stores drawn and the night passed aboard';
+    const entry = {
+      id: `${Date.now()}-beagle-landing`,
+      day: state.day,
+      timeOfDay: state.timeOfDay,
+      location: location.name,
+      method: 'ship duties',
+      kind: 'logistics',
+      authorship: 'system',
+      title: `Collection landed — day ${state.day}`,
+      content: `${summary}. Fresh labels, jars, twine, and provisions drawn from the ship's stores.`,
+    };
+    return {
+      shipCollection: [...state.shipCollection, ...state.inventory],
+      inventory: [],
+      supplies: restocked,
+      day: nextDay,
+      timeOfDay: BEAGLE_MORNING_HOUR,
+      fatigue: 0,
+      health: clamp(state.health + 12, 0, MAX_HEALTH),
+      journal: [...state.journal, entry],
+      beagleTravelPrompt: null,
+    };
+  }),
   setSolarGlare: solarGlare => set(state => {
     const nextStrength = clamp(Number(solarGlare?.strength) || 0, 0, 1);
     const nextRawStrength = clamp(Number(solarGlare?.rawStrength) || 0, 0, 1);

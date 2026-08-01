@@ -4,12 +4,58 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Water as ThreeWater2 } from 'three/examples/jsm/objects/Water2.js';
-import { getRuntimePlayerPose } from '../../../store';
+import { getRuntimePlayerPose, useThreeGameStore } from '../../../store';
 import { onPropEvent } from '../../../physics/props/propEvents';
 import { getRegionDefinition } from '../../../world/regions';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
+import { skyState } from '../../../world/celestial';
 
 const STEP_RIPPLE_COUNT = 18;
+
+// --- lagoon optics defaults -------------------------------------------------
+// Standing water reads as painted teal unless the shader knows how deep the
+// sheet is at each pixel. Depth is baked once into a vertex attribute (the bed
+// never moves), then the fragment stage runs Beer-Lambert over the slant path
+// so the same body of water goes from "wet sand showing through" at the
+// waterline to opaque reflection at the far bank. Every number below is a
+// per-surface override key on the ecology `lagoonSurfaces` entry.
+const LAGOON_DEFAULTS = {
+  // Metres of water per normal-map tile. The Water2 stock shader tiles in UV
+  // space, which stretches one tile across the whole bounds (35 m x 20 m at
+  // Punta Cormorant) and turns wind chop into slow smears. World-space tiling
+  // is the same two texture fetches at a physical wavelength.
+  rippleTileMeters: 1.7,
+  // Metres/second the chop drifts downwind. Independent of Water2's flowSpeed,
+  // which only sets the cadence of the two-map crossfade.
+  rippleDriftSpeed: 0.075,
+  // Distance band (metres) over which chop flattens toward a mirror. Centimetre
+  // ripples are not resolvable across a bay, and keeping them alive there is
+  // what makes tiled normals crawl and alias under camera motion.
+  rippleFadeNear: 15,
+  rippleFadeFar: 55,
+  // Depth clamp for the baked attribute, metres.
+  depthRange: 1.4,
+  // Per-channel extinction, 1/metre. Brackish lagoon water is far more turbid
+  // than open ocean; red dies first, which is what makes the deep centre teal.
+  extinction: [1.35, 0.72, 0.6],
+  // In-scattered colour of a fully opaque column. Defaults to a dimmed
+  // `waterColor` so existing surfaces stay in their own palette.
+  scatterFromWaterColor: 0.55,
+  sunGlint: 0.5,
+  glintSharpness: 210,
+  moonGlint: 0.22,
+  // Depth (m) over which the wet/foamed waterline band fades out, its strength,
+  // and the depth over which the sheet ramps from shore alpha to body alpha.
+  foamDepth: 0.13,
+  foamStrength: 0.16,
+  alphaDepth: 0.2,
+  foamColor: '#cdd8cf',
+};
+
+function lagoonNumber(surface, key) {
+  const value = surface[key];
+  return Number.isFinite(value) ? value : LAGOON_DEFAULTS[key];
+}
 
 function clampByte(value) {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -96,6 +142,11 @@ function createStandingWaterNormalTexture(size = 256, seed = 1) {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
+  // World-space tiling means this map is viewed at extreme grazing angles
+  // across the far half of a lagoon. Isotropic mips collapse the chop into
+  // grey mush there; 4x anisotropy keeps a readable streak for one small
+  // 256px map. (The renderer clamps this to its own maximum.)
+  texture.anisotropy = 4;
   texture.colorSpace = THREE.NoColorSpace;
   texture.needsUpdate = true;
   return texture;
@@ -264,14 +315,58 @@ function createEllipseLagoonGeometry(surface) {
   };
 }
 
+// Bakes metres-of-water-above-the-bed into a `lagoonDepth` vertex attribute.
+// The bed is static, so this is a one-off cost at region load and the fragment
+// stage gets real depth for free — no depth pre-pass, no second render target.
+// The lagoon mesh carries its own transform, so vertices are pushed through the
+// same matrix the renderer will use rather than re-deriving world space.
+const lagoonDepthMatrix = new THREE.Matrix4();
+const lagoonDepthPosition = new THREE.Vector3();
+const lagoonDepthScale = new THREE.Vector3();
+const lagoonDepthQuaternion = new THREE.Quaternion();
+const lagoonDepthEuler = new THREE.Euler();
+const lagoonDepthVertex = new THREE.Vector3();
+
+function bakeLagoonDepth(layout, surface, heightFn) {
+  const positions = layout?.geometry?.getAttribute?.('position');
+  if (!positions) return layout;
+  const depthRange = lagoonNumber(surface, 'depthRange');
+  const surfaceY = layout.position[1];
+  const depths = new Float32Array(positions.count);
+
+  if (typeof heightFn !== 'function') {
+    // No bed to sample (a region without a height function, or a decorative
+    // surface). Fill with a mid-depth so the shader still has a sane column
+    // instead of reading the WebGL default of 0 and erasing the water.
+    depths.fill(depthRange * 0.55);
+  } else {
+    lagoonDepthEuler.set(layout.rotation[0], layout.rotation[1], layout.rotation[2]);
+    lagoonDepthMatrix.compose(
+      lagoonDepthPosition.set(layout.position[0], layout.position[1], layout.position[2]),
+      lagoonDepthQuaternion.setFromEuler(lagoonDepthEuler),
+      lagoonDepthScale.set(layout.scale[0], layout.scale[1], layout.scale[2]),
+    );
+    for (let i = 0; i < positions.count; i += 1) {
+      lagoonDepthVertex.fromBufferAttribute(positions, i).applyMatrix4(lagoonDepthMatrix);
+      const bed = heightFn(lagoonDepthVertex.x, lagoonDepthVertex.z);
+      const depth = Number.isFinite(bed) ? surfaceY - bed : depthRange * 0.55;
+      depths[i] = THREE.MathUtils.clamp(depth, 0, depthRange);
+    }
+  }
+
+  layout.geometry.setAttribute('lagoonDepth', new THREE.BufferAttribute(depths, 1));
+  return layout;
+}
+
 function createLagoonLayout(surface) {
   const zoneId = surface.zoneId;
-  const maskFn = zoneId ? getRegionDefinition(zoneId)?.terrain?.standingWaterMask : null;
+  const terrain = zoneId ? getRegionDefinition(zoneId)?.terrain : null;
+  const maskFn = terrain?.standingWaterMask || null;
   if (maskFn && surface.bounds) {
     const layout = createMaskedLagoonGeometry(surface, maskFn, normalizeBounds(surface.bounds, surface.position, surface.scale));
-    if (layout.geometry) return layout;
+    if (layout.geometry) return bakeLagoonDepth(layout, surface, terrain?.height);
   }
-  return createEllipseLagoonGeometry(surface);
+  return bakeLagoonDepth(createEllipseLagoonGeometry(surface), surface, terrain?.height);
 }
 
 function createStandingWaterOverlayMaterial(surface) {
@@ -342,10 +437,14 @@ function createStandingWaterOverlayMaterial(surface) {
         );
       }
 
+      // Three octaves, sampled once per pixel. The bed mottling this drives is
+      // low-frequency and reaches the frame through a few percent of alpha, so
+      // the old three-call/twelve-octave version was paying full fragment cost
+      // for detail that never survived the blend.
       float fbm(vec2 p) {
         float v = 0.0;
         float a = 0.5;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 3; i++) {
           v += noise(p) * a;
           p = p * 2.03 + 7.13;
           a *= 0.5;
@@ -364,8 +463,13 @@ function createStandingWaterOverlayMaterial(surface) {
         float slow = sin(dot(w, windDir * 1.55) - uTime * (0.28 + uWindStrength * 0.48)) * 0.5 + 0.5;
         float crossRipple = sin(dot(w, (windDir * 0.34 + windSide) * 1.18) - uTime * (0.2 + uWindStrength * 0.32)) * 0.5 + 0.5;
         float ripple = (slow * 0.68 + crossRipple * 0.32 - 0.5) * (0.18 + uWindStrength * 0.38);
-        float algae = smoothstep(0.55, 0.88, fbm(w * 0.16 + vec2(uTime * 0.006, -uTime * 0.004)));
-        float mud = smoothstep(0.68, 0.95, fbm(w * 0.11 + vec2(4.2, -2.8)));
+        // One bed field drives algae, mud and the broad colour drift. They
+        // were three independent fbm calls at nearly the same scale; reading
+        // them off opposite ends of one field also stops algae and mud from
+        // sitting on top of each other.
+        float bed = fbm(w * 0.13 + vec2(uTime * 0.005, -uTime * 0.0035));
+        float algae = smoothstep(0.52, 0.86, bed);
+        float mud = smoothstep(0.60, 0.90, 1.0 - bed);
 
         vec2 rainCell = w * 1.7 + vec2(uTime * 0.28, -uTime * 0.21);
         float rainPock = smoothstep(0.82, 0.98, noise(floor(rainCell) + floor(uTime * 7.0)))
@@ -379,7 +483,7 @@ function createStandingWaterOverlayMaterial(surface) {
           + sin(dot(w, vec2(-4.1, 8.6)) - uTime * 3.4)
         ) * 0.5 * playerEnvelope * uRippleStrength;
 
-        vec3 color = mix(uDeepColor, uShallowColor, 0.34 + fbm(w * 0.07) * 0.28 + ripple * 0.12);
+        vec3 color = mix(uDeepColor, uShallowColor, 0.34 + bed * 0.28 + ripple * 0.12);
         color = mix(color, uMudColor, mud * 0.08);
         color = mix(color, uAlgaeColor, algae * 0.08);
         color = mix(color, uMudColor, meniscus * 0.22);
@@ -449,6 +553,50 @@ function tuneWater2Shader(material, surface) {
   // Scales the pale shore-band tint/glow. Lagoons keep the default; narrow
   // streams set it low so the shoreline seam doesn't read as a bright edge.
   const shoreBrighten = Number.isFinite(surface.shoreBrighten) ? surface.shoreBrighten : 1;
+  const depthRange = lagoonNumber(surface, 'depthRange');
+  const extinction = Array.isArray(surface.extinction) && surface.extinction.length >= 3
+    ? surface.extinction
+    : LAGOON_DEFAULTS.extinction;
+  // The scatter colour is what a fully opaque column of this water looks like.
+  // Deriving it from the surface's own `waterColor` keeps every existing lagoon
+  // inside its authored palette without a new required key.
+  const scatterColor = surface.scatterColor
+    ? new THREE.Color(surface.scatterColor)
+    : new THREE.Color(surface.waterColor || surface.reflectColor || '#8fb5ad')
+      .multiplyScalar(lagoonNumber(surface, 'scatterFromWaterColor'));
+
+  material.uniforms.uLagoonDepthRange = { value: depthRange };
+  material.uniforms.uLagoonExtinction = {
+    value: new THREE.Vector3(extinction[0], extinction[1], extinction[2]),
+  };
+  material.uniforms.uLagoonScatter = { value: scatterColor };
+  material.uniforms.uLagoonRippleTileInv = { value: 1 / Math.max(0.05, lagoonNumber(surface, 'rippleTileMeters')) };
+  material.uniforms.uLagoonRippleScroll = { value: new THREE.Vector2(0, 0) };
+  material.uniforms.uLagoonRippleFade = {
+    value: new THREE.Vector2(lagoonNumber(surface, 'rippleFadeNear'), lagoonNumber(surface, 'rippleFadeFar')),
+  };
+  material.uniforms.uLagoonSunDir = { value: new THREE.Vector3(0, 1, 0) };
+  material.uniforms.uLagoonMoonDir = { value: new THREE.Vector3(0, -1, 0) };
+  material.uniforms.uLagoonSunColor = { value: new THREE.Color('#fff2dc') };
+  // x: sun glint gain, y: glint sharpness, z: moon glint gain.
+  material.uniforms.uLagoonGlint = {
+    value: new THREE.Vector3(
+      lagoonNumber(surface, 'sunGlint'),
+      Math.max(4, lagoonNumber(surface, 'glintSharpness')),
+      lagoonNumber(surface, 'moonGlint'),
+    ),
+  };
+  // x: foam band depth (m), y: foam gain, z: depth over which alpha ramps in.
+  material.uniforms.uLagoonShoreBand = {
+    value: new THREE.Vector3(
+      Math.max(0.01, lagoonNumber(surface, 'foamDepth')),
+      lagoonNumber(surface, 'foamStrength'),
+      Math.max(0.01, lagoonNumber(surface, 'alphaDepth')),
+    ),
+  };
+  material.uniforms.uLagoonFoamColor = {
+    value: new THREE.Color(surface.foamColor || LAGOON_DEFAULTS.foamColor),
+  };
   material.uniforms.uStepRippleTime = { value: 0 };
   material.uniforms.uStepRippleStrength = { value: surface.stepRippleStrength ?? 0.38 };
   material.uniforms.uStepRippleDisplacement = { value: surface.stepRippleDisplacement ?? 0.028 };
@@ -475,7 +623,9 @@ function tuneWater2Shader(material, surface) {
       uniform float uPlayerWaterRipple;
       uniform vec4 uStepRipples[${STEP_RIPPLE_COUNT}];
       attribute float lagoonShore;
+      attribute float lagoonDepth;
       varying float vLagoonShore;
+      varying float vLagoonDepth;
       varying vec3 vWaterWorld;`,
     )
     .replace(
@@ -514,7 +664,8 @@ function tuneWater2Shader(material, surface) {
     .replace(
       'void main() {',
       `void main() {
-        vLagoonShore = lagoonShore;`,
+        vLagoonShore = lagoonShore;
+        vLagoonDepth = lagoonDepth;`,
     );
   material.fragmentShader = material.fragmentShader
     .replace(
@@ -529,12 +680,37 @@ function tuneWater2Shader(material, surface) {
       uniform vec2 uPlayerWaterWorld;
       uniform float uPlayerWaterRipple;
       uniform vec4 uStepRipples[${STEP_RIPPLE_COUNT}];
+      uniform float uLagoonDepthRange;
+      uniform vec3 uLagoonExtinction;
+      uniform vec3 uLagoonScatter;
+      uniform float uLagoonRippleTileInv;
+      uniform vec2 uLagoonRippleScroll;
+      uniform vec2 uLagoonRippleFade;
+      uniform vec3 uLagoonSunDir;
+      uniform vec3 uLagoonMoonDir;
+      uniform vec3 uLagoonSunColor;
+      uniform vec3 uLagoonGlint;
+      uniform vec3 uLagoonShoreBand;
+      uniform vec3 uLagoonFoamColor;
       varying float vLagoonShore;
-      varying vec3 vWaterWorld;`,
+      varying float vLagoonDepth;
+      varying vec3 vWaterWorld;
+
+      // Stock Water2 tiles its normal maps in UV space, so one tile stretches
+      // across the whole surface bounds and wind chop becomes metre-wide
+      // smears. Tiling in world space instead costs nothing (the same two
+      // fetches) and gives the ripples a real wavelength. The low-frequency
+      // warp breaks up the grid: a 1.7 m tile repeats ~60x across a bay, and
+      // without it that repeat reads straight through the reflection.
+      vec2 standingRippleUv() {
+        vec2 w = vWaterWorld.xz;
+        vec2 warp = vec2(sin(w.y * 0.13 + 1.7), sin(w.x * 0.11 - 0.9)) * 0.35;
+        return (w + warp) * uLagoonRippleTileInv + uLagoonRippleScroll;
+      }`,
     )
     .replace(
       'coord.z * normal.xz * 0.05',
-      `coord.z * normal.xz * ${distortionScale.toFixed(4)}`,
+      `coord.z * normal.xz * ${distortionScale.toFixed(4)} * lagoonRefractScale`,
     )
     .replace(
       'vec3 normal = normalize( vec3( normalColor.r * 2.0 - 1.0, normalColor.b,  normalColor.g * 2.0 - 1.0 ) );',
@@ -593,19 +769,77 @@ function tuneWater2Shader(material, surface) {
         normal.x + stepSlope.x * uStepRippleStrength,
         normal.y,
         normal.z + stepSlope.y * uStepRippleStrength
-      ));`,
+      ));
+      // Centimetre chop is not resolvable across a bay. Flattening the far
+      // field toward a mirror is both what the eye expects and what stops the
+      // tiled normal map from crawling and aliasing under camera motion.
+      float lagoonViewDist = length(vToEye);
+      float lagoonRippleFade = 1.0 - smoothstep(uLagoonRippleFade.x, uLagoonRippleFade.y, lagoonViewDist);
+      normal = normalize(mix(vec3(0.0, 1.0, 0.0), normal, 0.26 + 0.74 * lagoonRippleFade));
+      float lagoonDepthM = clamp(vLagoonDepth, 0.0, uLagoonDepthRange);
+      // Ankle-deep water barely bends the bed. Scaling refraction by depth
+      // stops the distortion from dragging bank pixels out over the waterline.
+      float lagoonRefractScale = smoothstep(0.0, uLagoonDepthRange * 0.5, lagoonDepthM);`,
     )
     .replace(
       'gl_FragColor = vec4( color, 1.0 ) * mix( refractColor, reflectColor, reflectance );',
-      `vec4 lagoonOptics = vec4( color, 1.0 ) * mix( refractColor, reflectColor, reflectance );
-      float lagoonShore = clamp(vLagoonShore, 0.0, 1.0);
+      `float lagoonShore = clamp(vLagoonShore, 0.0, 1.0);
       float lagoonEdge = smoothstep(0.18, 0.95, lagoonShore);
+
+      // --- through-water path ------------------------------------------------
+      // Beer-Lambert over the slant path: down through the sheet, off the bed,
+      // back to the eye. The 1/NdotV term is what makes the far half of a
+      // lagoon go opaque while the same depth underfoot still shows sand — a
+      // grazing view looks through metres of water where it is ankle deep.
+      float lagoonNdotV = max(dot(toEye, normal), 0.08);
+      float lagoonPath = lagoonDepthM * min(1.0 + 1.0 / lagoonNdotV, 6.0);
+      vec3 lagoonTransmit = exp(-uLagoonExtinction * lagoonPath);
+      // The bed is not tinted on its own account — absorption is what colours
+      // it, and the body's own colour now lives in the scatter term, which
+      // defaults to waterColor so a surface keeps its authored palette.
+      // Tinting the bed as well as absorbing through it double-counted.
+      vec3 lagoonThrough = mix(uLagoonScatter, refractColor.rgb, lagoonTransmit);
+
+      // --- sky path ----------------------------------------------------------
+      // Reflected sky bounces off the surface instead of travelling through
+      // the water, so it keeps its own colour rather than being multiplied by
+      // the body tint the way stock Water2 does.
+      vec4 lagoonOptics = vec4(mix(lagoonThrough, reflectColor.rgb, reflectance), 1.0);
+
+      // Specular sun/moon path. The perturbed normal already carries the wind
+      // chop, so this lands as a broken glitter track rather than a disc.
+      vec3 lagoonSunHalf = normalize(uLagoonSunDir + toEye);
+      float lagoonSunSpec = pow(max(dot(normal, lagoonSunHalf), 0.0), uLagoonGlint.y) * uLagoonGlint.x;
+      vec3 lagoonMoonHalf = normalize(uLagoonMoonDir + toEye);
+      float lagoonMoonSpec = pow(max(dot(normal, lagoonMoonHalf), 0.0), uLagoonGlint.y * 1.6) * uLagoonGlint.z;
+      lagoonOptics.rgb += uLagoonSunColor * lagoonSunSpec + vec3(0.5, 0.62, 0.86) * lagoonMoonSpec;
+
+      // Waterline: the wet, faintly foamed band where the sheet thins out.
+      // Driven by depth so it follows the bed contour instead of the mesh
+      // edge, and broken up so it does not read as a drawn outline.
+      float lagoonShallow = 1.0 - smoothstep(0.0, uLagoonShoreBand.x, lagoonDepthM);
+      float lagoonWaterline = 0.62 + 0.38 * sin(dot(vWaterWorld.xz, vec2(2.3, -1.7)) + standingWindPhaseA * 0.17);
+      float lagoonFoam = lagoonShallow * lagoonShallow * lagoonWaterline * uLagoonShoreBand.y;
+      lagoonOptics.rgb += lagoonFoam * uLagoonFoamColor;
+
       lagoonOptics.rgb = mix(lagoonOptics.rgb, lagoonOptics.rgb * vec3(0.78, 0.88, 0.82), lagoonEdge * ${(0.28 * shoreBrighten).toFixed(3)});
       lagoonOptics.rgb += lagoonEdge * vec3(0.035, 0.052, 0.044) * ${shoreBrighten.toFixed(3)};
       lagoonOptics.rgb += stepRippleBright * vec3(0.10, 0.155, 0.135);
-      lagoonOptics.a = mix(${alphaDeep.toFixed(3)}, ${alphaShore.toFixed(3)}, lagoonEdge);
+
+      // Thin water is barely there. Ramping alpha off depth as well as the
+      // mesh edge lets the sheet die out along the real bed contour, which is
+      // what turns a cut-out edge into a waterline.
+      float lagoonThin = 1.0 - smoothstep(0.0, uLagoonShoreBand.z, lagoonDepthM);
+      lagoonOptics.a = mix(${alphaDeep.toFixed(3)}, ${alphaShore.toFixed(3)}, max(lagoonEdge, lagoonThin));
+      // The waterline sits where alpha is lowest, so without this the foam is
+      // multiplied away by the very fade that puts it there.
+      lagoonOptics.a = min(1.0, lagoonOptics.a + lagoonFoam * 1.4);
       gl_FragColor = lagoonOptics;`,
     );
+  // Two fetches, so the world-space UV has to land in both.
+  material.fragmentShader = material.fragmentShader
+    .split('( vUv * scale )')
+    .join('standingRippleUv()');
 }
 
 export function StandingWaterSurface({ surface }) {
@@ -623,6 +857,13 @@ export function StandingWaterSurface({ surface }) {
   ), [flowFn, surface]);
   const playerVeilRef = useRef(null);
   const stepRippleCursor = useRef(0);
+  // Sun/moon direction only needs recomputing when the game clock actually
+  // moves; the frame loop reads this instead of running skyState every frame.
+  const skyCache = useRef({ hour: -1, day: -1, sky: null });
+  const driftSpeed = lagoonNumber(surface, 'rippleDriftSpeed');
+  const tileInv = 1 / Math.max(0.05, lagoonNumber(surface, 'rippleTileMeters'));
+  const sunGlint = lagoonNumber(surface, 'sunGlint');
+  const moonGlint = lagoonNumber(surface, 'moonGlint');
   const normalMap0 = useMemo(
     () => createStandingWaterNormalTexture(surface.normalTextureSize || 256, surface.normalSeed || 7),
     [surface.normalSeed, surface.normalTextureSize],
@@ -726,7 +967,7 @@ export function StandingWaterSurface({ surface }) {
     water,
   ]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const time = clock.elapsedTime;
     const rain = weatherEnv.rainIntensity || 0;
     if (water.material?.uniforms?.uStepRippleTime) {
@@ -741,6 +982,39 @@ export function StandingWaterSurface({ surface }) {
       waterUniforms.uStandingTime.value = time;
       waterUniforms.uStandingWindDir.value.set(windX, windZ);
       waterUniforms.uStandingWindStrength.value = windStrength;
+    }
+    if (waterUniforms?.uLagoonRippleScroll) {
+      // Chop drifts downwind in metres/second, converted into tile units.
+      // Water2's own flowSpeed only paces the two-map crossfade, so the
+      // visible drift needs its own clock.
+      const drift = driftSpeed * (0.45 + windStrength * 0.75)
+        * Math.min(delta || 0, 0.1) * tileInv;
+      waterUniforms.uLagoonRippleScroll.value.x -= windX * drift;
+      waterUniforms.uLagoonRippleScroll.value.y -= windZ * drift;
+      // The map wraps, so keep the offset small enough to stay precise.
+      waterUniforms.uLagoonRippleScroll.value.x %= 1;
+      waterUniforms.uLagoonRippleScroll.value.y %= 1;
+
+      // Sky state only matters at the resolution the eye can see a glint move.
+      const store = useThreeGameStore.getState();
+      const timeOfDay = ((store.timeOfDay % 24) + 24) % 24;
+      if (Math.abs(timeOfDay - skyCache.current.hour) > 0.004 || store.day !== skyCache.current.day) {
+        skyCache.current.hour = timeOfDay;
+        skyCache.current.day = store.day;
+        skyCache.current.sky = skyState(timeOfDay, store.day || 1);
+      }
+      const sky = skyCache.current.sky;
+      if (sky) {
+        const weatherDim = (1 - (weatherEnv.overcast || 0) * 0.8)
+          * (1 - (weatherEnv.rainIntensity || 0) * 0.6);
+        waterUniforms.uLagoonSunDir.value.set(sky.sun[0], sky.sun[1], sky.sun[2]);
+        waterUniforms.uLagoonMoonDir.value.set(sky.moon[0], sky.moon[1], sky.moon[2]);
+        // Low sun reddens the glitter track; a high sun keeps it near white.
+        const golden = sky.golden || 0;
+        waterUniforms.uLagoonSunColor.value.setRGB(1, 1 - golden * 0.22, 1 - golden * 0.5);
+        waterUniforms.uLagoonGlint.value.x = sunGlint * sky.daylight * weatherDim;
+        waterUniforms.uLagoonGlint.value.z = moonGlint * (sky.moonlight || 0) * weatherDim;
+      }
     }
     overlayMaterial.uniforms.uTime.value = time;
     overlayMaterial.uniforms.uRain.value = rain;

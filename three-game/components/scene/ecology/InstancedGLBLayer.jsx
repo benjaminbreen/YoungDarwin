@@ -280,7 +280,7 @@ export function InstancedGLBLayer({
       if (tint && !hasItemTints) material.color = material.color.clone().lerp(new THREE.Color(tint), tintStrength);
       const shaded = cheapMaterials ? toMattePhong(material) : material;
       stabilizeFoliageMaterial(shaded, { doubleSide: true });
-      if (motion) applyFoliageMotion(shaded, geometry, motion);
+      if (motion) applyFoliageMotion(shaded, geometry, motion, { id: sourceId, path, label: sourceLabel });
       list.push({ geometry, material: shaded, name });
     };
     const bakedGeometry = object => {
@@ -335,7 +335,7 @@ export function InstancedGLBLayer({
       }
     });
     return list;
-  }, [scene, tint, tintStrength, motion, hasItemTints, cheapMaterials, variantMode]);
+  }, [scene, path, sourceId, sourceLabel, tint, tintStrength, motion, hasItemTints, cheapMaterials, variantMode]);
 
   useLayoutEffect(() => () => {
     primitives.forEach(({ geometry, material }) => {

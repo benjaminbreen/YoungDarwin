@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import { GLTFLoader } from 'three-stdlib';
 import { peek } from 'suspend-react';
-import { getRuntimePlayerPose } from '../../../store';
+import { getRuntimePlayerMotion, getRuntimePlayerPose } from '../../../store';
 import { recentFrameMs } from '../../../frameTiming';
 import { getModelAsset } from '../../../modelAssets';
 import { getWildlifeAssetId } from '../../../wildlife/wildlifeCatalog';
@@ -54,11 +54,12 @@ function FoliageMotionDriver({ contactIndex, zoneId }) {
   const lastRustleAt = React.useRef(-Infinity);
   useFrame(({ clock }, delta) => {
     const pose = getRuntimePlayerPose();
-    updateFoliageUniforms(clock.elapsedTime, pose?.position, delta);
+    const intended = getRuntimePlayerMotion()?.intendedPlanarVelocity;
+    updateFoliageUniforms(clock.elapsedTime, pose?.position, delta, intended);
     const position = pose?.position;
     if (!position) return;
     const previous = previousPosition.current;
-    const speed = previous
+    const measuredSpeed = previous
       ? Math.hypot(position.x - previous.x, position.z - previous.z) / Math.max(0.001, delta)
       : 0;
     if (previous) {
@@ -68,7 +69,12 @@ function FoliageMotionDriver({ contactIndex, zoneId }) {
     } else {
       previousPosition.current = { x: position.x, y: position.y, z: position.z };
     }
-    if (speed < 0.65) return;
+    // Intended speed, not just measured: leaning into a shrub that a fixed
+    // collider already stopped him against still rustles, which is the whole
+    // point of a push you can feel.
+    const intendedSpeed = Math.hypot(Number(intended?.x) || 0, Number(intended?.z) || 0);
+    const speed = Math.max(measuredSpeed, intendedSpeed);
+    if (speed < 0.45) return;
     const contact = findFoliageContact(contactIndex, position);
     if (!contact) {
       activeContactId.current = null;

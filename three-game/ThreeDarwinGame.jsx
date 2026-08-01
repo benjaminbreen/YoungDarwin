@@ -210,10 +210,6 @@ const KEYBOARD_MAP = [
   { name: 'tool5', keys: ['Digit5'] },
   { name: 'tool6', keys: ['Digit6'] },
 ];
-const LEGACY_KEYBOARD_MAP = KEYBOARD_MAP.map(binding => (
-  binding.name === 'hammer' ? { ...binding, keys: ['KeyH'] } : binding
-));
-
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
 // SMAAPreset.ULTRA from the 'postprocessing' package. That package is only a
@@ -435,6 +431,10 @@ const STARTUP_STREAM_IDLE_TIMEOUT_MS = 650;
 const STARTUP_STREAM_FRAME_BUDGET_MS = 28;
 // The deadline is a degraded fallback, not the normal transition clock. Full
 // destination content now mounts and compiles beneath the opaque chart first.
+// Transition phases in which shadows and the water reflection are live again.
+// 'ready' is still fully behind the opaque chart, so their first renders warm
+// up out of sight instead of stalling the reveal frame.
+const TRANSITION_RENDER_WARM_PHASES = new Set(['ready', 'arriving', 'settling']);
 const TRANSITION_READY_DEADLINE_MS = 8000;
 const TRANSITION_COMPILE_TIMEOUT_MS = 1500;
 const TRANSITION_OPTIONAL_LOADER_GRACE_MS = 900;
@@ -1656,9 +1656,15 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           blockerRef.current = 'settle';
           window.__recordThreeTransitionEvent?.('ready-wait:settle');
         }
+        // Quiet window before revealing. 220ms was chosen when the reveal
+        // itself still carried a ~2s shadow/reflection stall, so it was
+        // guarding against a hitch it could not actually prevent. With that
+        // work now warmed behind the chart (TRANSITION_RENDER_WARM_PHASES),
+        // measured long-task time after the reveal is zero, and the three
+        // stable frames below already prove the frame loop is settled.
         const now = performance.now();
         if (!quietSinceRef.current) quietSinceRef.current = now;
-        if (now - quietSinceRef.current < 220) return;
+        if (now - quietSinceRef.current < 140) return;
         stableFramesRef.current += 1;
         if (stableFramesRef.current < 3) return;
         stableFramesRef.current = 0;
@@ -3257,13 +3263,10 @@ export default function ThreeDarwinGame({
   openJournalOnLaunch = false,
   onExitToMenu = null,
 }) {
-  const [keyboardMap] = useState(() => {
-    if (typeof window === 'undefined') return KEYBOARD_MAP;
-    const requestedHud = new URLSearchParams(window.location.search).get('hud');
-    const legacyHud = requestedHud === 'legacy'
-      || (requestedHud !== 'polished' && process.env.NEXT_PUBLIC_THREE_HUD_LAYOUT === 'legacy');
-    return legacyHud ? LEGACY_KEYBOARD_MAP : KEYBOARD_MAP;
-  });
+  // The legacy desktop HUD and its alternate keyboard map were retired in
+  // 2026-08 — the polished layout had been the shipping default for long
+  // enough that `?hud=legacy` was only maintenance drag.
+  const keyboardMap = KEYBOARD_MAP;
   const [launchState, setLaunchState] = useState(initialModeId ? 'loading' : 'menu');
   const [initialModeReady, setInitialModeReady] = useState(!initialModeId);
   const [sceneReady, setSceneReady] = useState(false);
@@ -3358,10 +3361,20 @@ export default function ThreeDarwinGame({
   // selected quality on the same frame as the UI reveal was another source of
   // visible hitching even when all network requests were already cached.
   const openingRenderBudgetActive = gameStarted && !launchRevealSettled;
-  const transitionRenderBudgetActive = Boolean(transition);
-  const transitionReflectionPaused = Boolean(
-    transition && transition.phase !== 'settling',
+  // Shadows and the planar reflection stay quiet only while the destination is
+  // being built (departing/chart/mounting). They resume at 'ready' — which is
+  // still behind the opaque chart, before the fade-out starts — so their very
+  // first (expensive) renders happen where nobody can see them.
+  //
+  // Previously shadows stayed paused until `transition` cleared and
+  // reflections until 'settling', which put a full shadow-map pass over every
+  // caster AND a whole-scene reflection render on the exact frame the world
+  // became visible: measured as a single 1998ms long task at reveal, the
+  // worst frame in the game and the reason arrivals lurched instead of faded.
+  const transitionRenderBudgetActive = Boolean(
+    transition && !TRANSITION_RENDER_WARM_PHASES.has(transition.phase),
   );
+  const transitionReflectionPaused = transitionRenderBudgetActive;
   const scenePerfSettings = useMemo(
     () => ({
       ...perfSettings,
@@ -3563,39 +3576,43 @@ export default function ThreeDarwinGame({
   useEffect(() => {
     if (!transition?.id || !transition.committedAt) return undefined;
     let cancelled = false;
-    let timeoutHandle = null;
     let idleHandle = null;
     let frameHandle = null;
 
+    // The requestIdleCallback yield here is load-bearing and must stay: it is
+    // what lets the browser retire the previous family's work (GLB parses,
+    // texture uploads, React's own scheduling) before the next commit lands.
+    // A 2026-07-31 experiment replaced it with a bare per-frame commit on the
+    // theory that staggering behind an opaque chart was wasted time; the
+    // ladder got 1.8s SLOWER, because commits piled up faster than the
+    // browser could drain them and the first family's mount ballooned from a
+    // 1.2s frame into a 2.8s one. Measure before touching this.
+    //
+    // The second animation frame, however, was pure latency: ~66ms per step
+    // across 14 steps at 30fps. One frame is enough for React to land the
+    // commit before the next idle window is requested.
     const schedulePhase = index => {
       if (cancelled || index >= CONTENT_MOUNT_STEPS.length) return;
       const phase = CONTENT_MOUNT_STEPS[index];
-      const delay = 0;
-      timeoutHandle = window.setTimeout(() => {
-        timeoutHandle = null;
-        const commitPhase = () => {
-          idleHandle = null;
-          if (cancelled) return;
-          setTransitionContentPhase(current => Math.max(current, phase));
-          frameHandle = window.requestAnimationFrame(() => {
-            frameHandle = window.requestAnimationFrame(() => {
-              frameHandle = null;
-              schedulePhase(index + 1);
-            });
-          });
-        };
-        if (typeof window.requestIdleCallback === 'function') {
-          idleHandle = window.requestIdleCallback(commitPhase, { timeout: 180 });
-        } else {
-          commitPhase();
-        }
-      }, delay);
+      const commitPhase = () => {
+        idleHandle = null;
+        if (cancelled) return;
+        setTransitionContentPhase(current => Math.max(current, phase));
+        frameHandle = window.requestAnimationFrame(() => {
+          frameHandle = null;
+          schedulePhase(index + 1);
+        });
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(commitPhase, { timeout: 180 });
+      } else {
+        commitPhase();
+      }
     };
 
     schedulePhase(0);
     return () => {
       cancelled = true;
-      if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
       if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
       if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
     };

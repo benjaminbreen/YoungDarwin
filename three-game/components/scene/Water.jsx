@@ -742,20 +742,32 @@ function createStylizedWaterMaterial(
         vec3 a = texture2D(uRippleNormal, uvA).rgb * 2.0 - 1.0;
         vec3 b = texture2D(uRippleNormal, uvB).rgb * 2.0 - 1.0;
         vec3 c = texture2D(uRippleNormal, uvC).rgb * 2.0 - 1.0;
-        vec2 slope = a.xy * uRippleOctaves.x * coarseLod
-          + b.xy * uRippleOctaves.y * coarseLod
-          + c.xy * uRippleOctaves.z * fineLod;
+        // Wind response. Only cinematic's vertex chop rode the shared wind
+        // before this, so on every other tier a dead-calm dawn and a
+        // trade-wind afternoon had an identical surface — and even on
+        // cinematic the per-pixel ripple that shapes every highlight,
+        // reflection distortion and glint was a constant. Wind raises the
+        // short waves first, so the fine octaves swing much further than the
+        // long sheen bands; uChopWind runs ~0.22 (sunny calm) to ~0.78
+        // (storm), and the gains are centred so trade-wind conditions
+        // reproduce the authored look.
+        float windChop01 = clamp((uChopWind - 0.22) / 0.56, 0.0, 1.0);
+        float coarseWind = coarseLod * (0.94 + 0.17 * windChop01);
+        float fineWind = fineLod * (0.78 + 0.62 * windChop01);
+        vec2 slope = a.xy * uRippleOctaves.x * coarseWind
+          + b.xy * uRippleOctaves.y * coarseWind
+          + c.xy * uRippleOctaves.z * fineWind;
         #ifdef ENHANCED_WATER
           // Polished adds one short-wave octave; cinematic adds a second.
           vec2 uvD = vec2(wxz.x * 0.91 + wxz.y * 0.41, -wxz.x * 0.41 + wxz.y * 0.91) * 0.46
             + warp * 0.08 + vec2(-t * 0.034, t * 0.026);
           vec3 d = texture2D(uRippleNormal, uvD).rgb * 2.0 - 1.0;
-          slope += d.xy * 0.085 * fineLod;
+          slope += d.xy * 0.085 * fineWind;
           #ifdef CINEMATIC_WATER
             vec2 uvE = vec2(wxz.x * 0.18 - wxz.y * 0.98, wxz.x * 0.98 + wxz.y * 0.18) * 0.82
               + vec2(t * 0.061, t * 0.047);
             vec3 e = texture2D(uRippleNormal, uvE).rgb * 2.0 - 1.0;
-            slope += d.xy * 0.035 * fineLod + e.xy * 0.055 * fineLod;
+            slope += d.xy * 0.035 * fineWind + e.xy * 0.055 * fineWind;
           #endif
         #endif
         return slope;
@@ -1319,20 +1331,30 @@ function createStylizedWaterMaterial(
         float pathDistance = smoothstep(8.0, 30.0, pathCamDist) * (1.0 - smoothstep(138.0, 180.0, pathCamDist));
         float pathGrain = 0.5 + 0.58 * smoothstep(0.38, 0.86, noise(vWorld.xz * 2.0 + vec2(uTime * 0.12, -uTime * 0.075)));
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
-        float microGlitter = microSparkleMask(vWorld.xz, uTime) * pathCore * pathDistance * uSunPathStrength;
         // Peaks are allowed past 1.0 so ACES rolls them off and the brightest
         // glints cross the bloom threshold (the sparkle is a bloom customer).
         color += glintWhite * min(spec * glint * 1.55, 1.45) * (0.72 + uSunPathStrength * 0.42);
         color += glintWhite * pathGlitter * 0.16 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
-        color += glintWhite * microGlitter * 1.6 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
-        #ifdef CINEMATIC_WATER
-          // A second, faster fleck field creates the many tiny independently
-          // blinking sun points that sell scale in cinematic water.
-          float cinematicFlecks = microSparkleMask(vWorld.xz * 1.43 + vec2(5.7, -9.1), uTime * 1.37)
-            * path * pathDistance * uSunPathStrength;
-          color += glintWhite * cinematicFlecks * 0.92
-            * (1.0 - uRain * 0.9) * (1.0 - underwaterView * 0.9);
-        #endif
+        // The fleck fields below are the only microSparkleMask callers, and
+        // every term they feed is multiplied by uSunPathStrength. That is
+        // exactly zero whenever the sun is above ~46 degrees, which on
+        // Floreana is roughly 09:30-14:30 — so the stock path spent two
+        // texture fetches per ocean pixel (four on cinematic) computing zero
+        // through the brightest hours of the day. uSunPathStrength is a
+        // uniform, so this branch is fully coherent: no divergence, and the
+        // low-sun look is untouched.
+        if (uSunPathStrength > 0.002) {
+          float microGlitter = microSparkleMask(vWorld.xz, uTime) * pathCore * pathDistance * uSunPathStrength;
+          color += glintWhite * microGlitter * 1.6 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+          #ifdef CINEMATIC_WATER
+            // A second, faster fleck field creates the many tiny independently
+            // blinking sun points that sell scale in cinematic water.
+            float cinematicFlecks = microSparkleMask(vWorld.xz * 1.43 + vec2(5.7, -9.1), uTime * 1.37)
+              * path * pathDistance * uSunPathStrength;
+            color += glintWhite * cinematicFlecks * 0.92
+              * (1.0 - uRain * 0.9) * (1.0 - underwaterView * 0.9);
+          #endif
+        }
         color += glintWhite
           * (eventRippleGlint + playerRippleGlint + interactionGlint)
           * uDaylight
@@ -2001,18 +2023,25 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
         float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
         float path = smoothstep(0.28 * glintWidth, 0.025, crossSun) * alongSun;
         float pathCore = smoothstep(0.19 * glintWidth, 0.018, crossSun) * alongSun;
+        // pathSparkle is shared with the moon path below, so it stays out of
+        // the sun gate; the fleck fields are sun-only.
         float pathSparkle = 0.48 + 0.52 * rippleSparkle(vWorld.xz, time);
-        float pathFlecks = microSparkle(vWorld.xz, time);
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
         color += sunGlintColor * min(spec * 1.36, 1.05) * (0.66 + sunPathStrength * 0.48) * (1.0 - fog * 0.85);
         color += sunGlintColor * path * pathSparkle * sunPathStrength * 0.09 * (1.0 - fog * 0.92);
-        color += sunGlintColor * pathCore * pathFlecks * sunPathStrength * 0.52 * (1.0 - fog * 0.9);
-        #ifdef CINEMATIC_WATER
-          float finePathFlecks = microSparkle(vWorld.xz * 1.51 + vec2(-7.3, 4.8), time * 1.43);
-          color += sunGlintColor * path * finePathFlecks * sunPathStrength * 0.34 * (1.0 - fog * 0.92);
-        #endif
+        // Same zero-work skip as the detailed plane, and it matters more here:
+        // the horizon disc is the largest surface on screen, and sunPathStrength
+        // is exactly 0 whenever the sun is high.
+        if (sunPathStrength > 0.002) {
+          float pathFlecks = microSparkle(vWorld.xz, time);
+          color += sunGlintColor * pathCore * pathFlecks * sunPathStrength * 0.52 * (1.0 - fog * 0.9);
+          #ifdef CINEMATIC_WATER
+            float finePathFlecks = microSparkle(vWorld.xz * 1.51 + vec2(-7.3, 4.8), time * 1.43);
+            color += sunGlintColor * path * finePathFlecks * sunPathStrength * 0.34 * (1.0 - fog * 0.92);
+          #endif
+        }
         // Moon glitter continues the silver path out to the horizon disc.
         if (moonGlitter > 0.005) {
           vec3 moonHv = normalize(normalize(moon) + viewDir);

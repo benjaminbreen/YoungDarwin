@@ -311,7 +311,26 @@ export const DEFAULT_PLANT_TUNING = {
   pushDamageCooldown: 0.9,
   pushReleaseVelocityCap: 0.9,
   bendStiffness: 26,
-  bendDamping: 8,
+  // Damping ratio, not an absolute: zeta = bendDamping / (2 * sqrt(stiffness)).
+  // 5.1 against stiffness 26 is zeta 0.5 — one clear overshoot on contact and
+  // one swing back through upright on release. The old 8 (zeta 0.78) was so
+  // close to critically damped that the plant crept back instead of springing,
+  // which is what made brushing through vegetation read as nothing at all.
+  bendDamping: 5.1,
+  // How far the release swing may carry past upright, as a fraction of
+  // pushMaxBend. This is the whip-back, so it has to be allowed to show.
+  pushRecoilRatio: 0.55,
+  // Brushing past drags a plant downrange rather than only shoving it
+  // radially outward, and sideways speed loads the spring too. Without these
+  // a graze produced almost no response, because only the component of travel
+  // straight into the plant counted.
+  pushDrag: 0.34,
+  pushLateralGain: 0.55,
+  pushFullSpeed: 6,
+  // Rustle when the bend crosses this fraction of the plant's own limit.
+  rustleAngleRatio: 0.35,
+  rustleCooldown: 0.55,
+  rustleKind: 'shrub',
   windSway: 0.018,
   contactBendBase: 0.14,
   contactBendSpeed: 0.02,
@@ -383,6 +402,7 @@ function createSiteFlexes(sitePivots) {
       phase,
       pendingBreak: null,
       lastDamageAt: -Infinity,
+      lastRustleAt: -Infinity,
     });
   }
   return flexes;
@@ -1288,7 +1308,13 @@ export function BreakablePlantField({ spec }) {
         tuning.pushReach + pieceSpatialIndex.maxHalfWidth,
       );
       for (const piece of nearbyPieces) {
-        if (!piece.pushable || runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
+        // `pushable` means "a shove can snap this off". `pushContact` means
+        // "leaning on this loads the plant's spring", which is a strictly
+        // wider set: a palo santo trunk is unbreakable by hand but shouldering
+        // it must still move the tree. Defaults to pushable so specs that only
+        // care about breaking keep their existing behaviour.
+        const pushContact = piece.pushContact ?? piece.pushable;
+        if (!pushContact || runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
         if (playerPos.y <= piece.spawn[1] - 1.6 || playerPos.y >= piece.topY + 0.4) continue;
         const dx = piece.center.x - playerPos.x;
         const dz = piece.center.z - playerPos.z;
@@ -1341,16 +1367,42 @@ export function BreakablePlantField({ spec }) {
         const dirX = distance > 0.001 ? dx / directionLength : 1;
         const dirZ = distance > 0.001 ? dz / directionLength : 0;
         const approach = Math.max(0, velocityX * dirX + velocityZ * dirZ);
+        // Sideways travel loads the spring too. Walking along a hedge used to
+        // register as nothing, because only the component straight into the
+        // plant counted — but a shoulder dragging past a branch is exactly the
+        // contact the player is most likely to make.
+        const lateral = Math.abs(velocityX * dirZ - velocityZ * dirX);
         const hardReach = piece.width * 0.5 + tuning.pushBreakReach;
         const contactBand = Math.max(0.08, reach - hardReach);
         const contactLoad = THREE.MathUtils.clamp((reach - distance) / contactBand, 0, 1);
         targetBend = Math.min(
           tuning.pushMaxBend,
-          contactLoad * (tuning.contactBendBase + Math.min(approach, 7) * tuning.contactBendSpeed),
+          contactLoad * (
+            tuning.contactBendBase
+            + Math.min(approach, 7) * tuning.contactBendSpeed
+            + Math.min(lateral, 7) * tuning.contactBendSpeed * tuning.pushLateralGain
+          ),
         );
-        flex.axisWorld.set(dirZ, 0, -dirX).normalize();
+        // Bend away from the body, swung toward his heading as he picks up
+        // speed, so a plant he brushes past is carried downrange instead of
+        // being shoved out at a right angle to his path.
+        const speed = Math.hypot(velocityX, velocityZ);
+        const drag = speed > 0.05
+          ? tuning.pushDrag * Math.min(1, speed / tuning.pushFullSpeed)
+          : 0;
+        let pushX = dirX;
+        let pushZ = dirZ;
+        if (drag > 0.0001) {
+          pushX += (velocityX / speed - dirX) * drag;
+          pushZ += (velocityZ / speed - dirZ) * drag;
+          const pushLength = Math.hypot(pushX, pushZ) || 1;
+          pushX /= pushLength;
+          pushZ /= pushLength;
+        }
+        flex.axisWorld.set(pushZ, 0, -pushX).normalize();
         if (
-          approach > tuning.pushBreakSpeed
+          piece.pushable === true
+          && approach > tuning.pushBreakSpeed
           && distance < hardReach
           && runtime.clock - flex.lastDamageAt > tuning.pushDamageCooldown
         ) {
@@ -1378,9 +1430,29 @@ export function BreakablePlantField({ spec }) {
       flex.angle += flex.angularVelocity * dt;
       flex.angle = THREE.MathUtils.clamp(
         flex.angle,
-        -tuning.pushMaxBend * 0.3,
-        tuning.pushMaxBend * 1.08,
+        -tuning.pushMaxBend * tuning.pushRecoilRatio,
+        tuning.pushMaxBend * 1.35,
       );
+
+      // A rustle the moment the plant actually loads up, so the push has a
+      // sound as well as a silhouette. Physics plants are not in the ecology
+      // contact index, so without this they were pushed in silence.
+      const rustleThreshold = tuning.pushMaxBend * tuning.rustleAngleRatio;
+      const loading = flex.angle >= rustleThreshold && flex.angularVelocity > 0.02;
+      if (loading && runtime.clock - flex.lastRustleAt > tuning.rustleCooldown) {
+        flex.lastRustleAt = runtime.clock;
+        emitPropEvent('foliage-contact', {
+          sourceId: `${spec.id}:${siteId}`,
+          zoneId: currentZoneId,
+          kind: tuning.rustleKind,
+          position: { x: flex.pivot.x, y: flex.pivot.y, z: flex.pivot.z },
+          intensity: THREE.MathUtils.clamp(
+            0.3 + (flex.angle / Math.max(tuning.pushMaxBend, 0.001)) * 0.5,
+            0,
+            1,
+          ),
+        });
+      }
 
       const pendingBreak = flex.pendingBreak;
       const breakAngle = Math.min(tuning.pushMaxBend, tuning.pushBreakAngle);

@@ -15,6 +15,7 @@ import { examineOrbitActive } from '../../examine/examinables';
 import { cameraFocusPoint } from '../../camera/focusPoint';
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { getPlayerPreferences } from '../../playerPreferences';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -178,9 +179,14 @@ export function usePlayerCameraRig() {
   useEffect(() => {
     const element = gl.domElement;
     const ads = SHOTGUN.ads;
+    // Aiming honours the same comfort preferences as free look — a player who
+    // needs inverted Y needs it down the sights too.
     const aimLook = (dx, dy, speed) => {
-      yawRef.current -= dx * speed;
-      pitchRef.current = THREE.MathUtils.clamp(pitchRef.current + dy * speed, ads.minPitch, ads.maxPitch);
+      const look = getPlayerPreferences();
+      const scaled = speed * look.lookSensitivity;
+      yawRef.current -= dx * scaled;
+      const pitchDelta = dy * scaled * (look.invertY ? -1 : 1);
+      pitchRef.current = THREE.MathUtils.clamp(pitchRef.current + pitchDelta, ads.minPitch, ads.maxPitch);
     };
     const onPointerDown = event => {
       if (openingCameraActiveRef.current) {
@@ -281,8 +287,10 @@ export function usePlayerCameraRig() {
           .add(scratch.panVertical.set(0, dy * CAMERA.panSpeed * dist, 0));
         if (panOffsetRef.current.length() > CAMERA.maxPan) panOffsetRef.current.setLength(CAMERA.maxPan);
       } else {
-        yawRef.current -= dx * CAMERA.rotateSpeed;
-        pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * CAMERA.pitchSpeed, CAMERA.minPitch, CAMERA.maxPitch);
+        const look = getPlayerPreferences();
+        const pitchDelta = dy * CAMERA.pitchSpeed * look.lookSensitivity * (look.invertY ? -1 : 1);
+        yawRef.current -= dx * CAMERA.rotateSpeed * look.lookSensitivity;
+        pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - pitchDelta, CAMERA.minPitch, CAMERA.maxPitch);
         manualOrbitUntilRef.current = performance.now() / 1000 + 3.2;
       }
     };

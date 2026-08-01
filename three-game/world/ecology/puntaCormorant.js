@@ -91,8 +91,8 @@ export function buildPuntaCormorantEcology() {
         waterColor: '#7fa79e',
         opacity: 0.052,
         reflectivity: 0.072,
-        waterAlpha: 0.76,
-        waterShoreAlpha: 0.32,
+        waterAlpha: 0.9,
+        waterShoreAlpha: 0.08,
         flowSpeed: 0.0014,
         flowScale: 2.9,
         flowDirection: [0.08, 0.04],
@@ -100,6 +100,20 @@ export function buildPuntaCormorantEcology() {
         maskThreshold: 0.28,
         rippleStrength: 0.52,
         distortionScale: 0.008,
+        // The bed runs ~5 cm at the rim to ~65 cm in the feeding basin, so the
+        // whole readable depth range is inside the first two-thirds of a metre.
+        // Extinction is set for brackish, algae-carrying water: red is gone
+        // within a hand's depth, which is what leaves the centre flat teal
+        // while the rim still shows olivine sand.
+        depthRange: 0.8,
+        extinction: [2.1, 1.05, 0.85],
+        scatterColor: '#4d7a70',
+        // Trade-wind chop on a sheltered lagoon: short, fine, slow-moving.
+        rippleTileMeters: 1.45,
+        rippleDriftSpeed: 0.06,
+        alphaDepth: 0.13,
+        foamDepth: 0.1,
+        foamStrength: 0.13,
         stepRippleStrength: 0.86,
         stepRippleDisplacement: 0.022,
         stepRippleEventScale: 1.26,

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CompassRoseIcon } from './expedition/icons';
 import { controlsSections } from './controlsReference';
 import { QUALITY_CHOICES } from '../qualityPreference';
+import { ComfortSettings } from './ComfortSettings';
 
 const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
 export const INITIAL_LAUNCH_PROGRESS = 8;
@@ -678,6 +679,7 @@ export function LaunchOverlay({
                   ))}
                 </div>
               </div>
+              <ComfortSettings className="mt-2" />
               <div className="mt-2 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 px-4">
                 <div className="flex items-center justify-between gap-4 py-3">
                   <span className="text-[16px] text-expedition-parchment">Audio</span>

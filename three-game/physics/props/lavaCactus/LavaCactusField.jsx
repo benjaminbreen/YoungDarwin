@@ -279,7 +279,11 @@ const LAVA_CACTUS_SPEC = {
     pushMaxBend: 0.14,
     pushBreakSpeed: 5.0,
     bendStiffness: 34,
-    bendDamping: 9,
+    // Rigid succulent column: zeta 0.62, a short stiff nod with barely any
+    // ring. A cactus that wobbled would read as rubber.
+    bendDamping: 7.2,
+    pushDrag: 0.1,
+    pushRecoilRatio: 0.3,
     contactBendBase: 0.085,
     contactBendSpeed: 0.012,
     windSway: 0.007,

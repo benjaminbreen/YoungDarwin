@@ -340,7 +340,12 @@ export function DryGrassPatchField({
     // faces makes the depth pass self-occlude into acne, so only front faces
     // render into the shadow map.
     grassMaterial.shadowSide = THREE.FrontSide;
-    const motionMaterial = applyFoliageMotion(grassMaterial, geometry, layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 });
+    const motionMaterial = applyFoliageMotion(
+      grassMaterial,
+      geometry,
+      layer.motion || { wind: 0.95, bend: 0.22, bendRadius: 1.12 },
+      { id: layer.id, profile: 'grass' },
+    );
     const tintedMaterial = applyBladeAtlasTint(motionMaterial, bladeTexture, layer.bladeTextureStrength ?? 0.26);
     const rootedMaterial = applyRootShading(tintedMaterial, geometry, layer.rootShading);
     return applyForageVision(rootedMaterial, geometry);
