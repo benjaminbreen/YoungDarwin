@@ -162,6 +162,11 @@ docs with `npm run docs:generate`.
   `npm run three:screenshot:fast -- --zone=BEAGLE --quality=performance`.
 - Launch flow, controls, HUD actions, specimen examination/collection, or animal
   toolbar behavior: `npm run three:e2e:smoke`.
+- Frame rate, stutter, draw calls, or any claim that a change is cheap or free:
+  `npm run perf:lab` (per-frame trace with hitch attribution) and
+  `npm run perf:sweep -- --repeat=3` (what each renderer feature costs). Read
+  `docs/perf-lab.md` first — it lists the measurement traps. Never claim a perf
+  outcome from reasoning about op counts or draw calls alone.
 - Local 3D Playwright commands default to hardware WebGL and print the active
   renderer. On macOS this uses headful Chromium. Use
   `npm run three:e2e:smoke -- --renderer=software` only for an intentional

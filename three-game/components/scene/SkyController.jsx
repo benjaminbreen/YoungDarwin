@@ -5,7 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { getRuntimePlayerMotion, getRuntimePlayerPose, useThreeGameStore } from '../../store';
-import { lightingDebugEnabled } from '../../runtimeDebug';
+import { lightingDebugEnabled, sceneHandleEnabled } from '../../runtimeDebug';
 import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
@@ -1756,12 +1756,15 @@ export function SkyController({
   const solarSunFacingGradeEnabled = solarEffects?.sunFacingGrade !== false;
   const solarScreenGlareEnabled = solarEffects?.screenGlare !== false;
   const debugEnabled = useRef(lightingDebugEnabled());
-  // Dev-only scene handle. Attributing a suspect pixel to a mesh is otherwise
-  // guesswork — the vista layers, the carry strip and the terrain all resolve
-  // to similar colours exactly where their seams misbehave. With this, a
-  // console raycast reports the offending mesh's `userData.renderSource`.
+  // Scene handle for dev tools and automation. Attributing a suspect pixel to a
+  // mesh is otherwise guesswork — the vista layers, the carry strip and the
+  // terrain all resolve to similar colours exactly where their seams misbehave.
+  // With this, a console raycast reports the offending mesh's
+  // `userData.renderSource`, and the perf lab can read renderer.info. Always on
+  // in dev; in production only when the URL asks for automation, so a perf run
+  // can profile the build players actually get.
   useEffect(() => {
-    if (process.env.NODE_ENV === 'production' || typeof window === 'undefined') return undefined;
+    if (typeof window === 'undefined' || !sceneHandleEnabled()) return undefined;
     window.__darwinScene = { scene, camera, gl, THREE };
     return () => { delete window.__darwinScene; };
   }, [scene, camera, gl]);

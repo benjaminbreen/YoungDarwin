@@ -10,6 +10,8 @@ set.
 - Current default Darwin model: `darwin5` from
   `public/assets/models/darwin5.glb`.
 - Authorial/design intent: `docs/design-intent.md`.
+- Performance measurement and screenshot loop: `docs/perf-lab.md`
+  (`npm run perf:lab`, `npm run perf:sweep`, `npm run look`).
 - Current source-of-truth inventory: `docs/generated/repo-inventory.md`.
 - Regenerate volatile docs with `npm run docs:generate`; verify with
   `npm run docs:check`.

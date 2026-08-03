@@ -88,6 +88,7 @@ export async function launchChromium(options = {}) {
       args: [
         ...(!useHardwareGpu ? ['--disable-gpu'] : []),
         '--disable-dev-shm-usage',
+        ...(options.args || []),
       ],
     });
     const rendererInfo = await probeBrowserRenderer(browser);

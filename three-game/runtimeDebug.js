@@ -63,3 +63,15 @@ export function faunaDebugEnabled() {
       || urlDebugFlagEnabled(['faunaDebug'])
     );
 }
+
+// Whether `window.__darwinScene` (scene/camera/renderer handle) should be
+// published. Dev builds always get it. Automation runs get it too, including
+// against a production build: the perf lab reads renderer.info and wraps
+// render() through this handle, and profiling a dev build measures React's
+// development overhead as much as the game's. The handle is read-only plumbing
+// and only appears when the URL asks for automation.
+export function sceneHandleEnabled() {
+  if (typeof window === 'undefined') return false;
+  if (process.env.NODE_ENV !== 'production') return true;
+  return urlDebugFlagEnabled(['e2e', 'screenshot', 'perfProbe', 'costProbe']);
+}
