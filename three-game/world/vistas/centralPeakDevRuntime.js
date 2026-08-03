@@ -13,13 +13,13 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // fog is a local-terrain curve borrowed by the backdrop; vistaAir is the
   // backdrop's own. Lowering this and raising vistaAirMax moves ownership of
   // the distance falloff from the former to the latter.
-  aerialPerspective: 0.54,
+  aerialPerspective: 0.52,
 
   // --- shared aerial perspective (vistaAtmosphere.js) -----------------------
   // One curve by true camera distance for the apron and central backdrop.
-  vistaAirStart: 115,
+  vistaAirStart: 105,
   vistaAirScale: 320,
-  vistaAirCurve: 2.5,
+  vistaAirCurve: 2.4,
   vistaAirMax: 0.98,
   // Post-fog dissolve toward the sky's own horizon colour. This is what stops
   // a fully hazed ridge from reading as a flat plate of fog colour cut out

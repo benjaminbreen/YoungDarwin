@@ -132,10 +132,20 @@ export function buildSeafloorBytes(zoneId, bakeRes) {
     const softShore = 1 - THREE.MathUtils.smoothstep(Math.hypot(sx, sz), 0.035, 0.22);
     const x = (i / (bakeRes - 1) - 0.5) * WATER_BAKE_SIZE;
     const z = (j / (bakeRes - 1) - 0.5) * WATER_BAKE_SIZE;
-    const edgeInside = Math.min(
-      playable.width * 0.5 - Math.abs(x),
-      playable.depth * 0.5 - Math.abs(z),
-    );
+    // Distance inside the authored region, used to ease the water toward open
+    // ocean past the playable bounds. A plain min() of the two axis distances
+    // has axis-aligned rectangular contours meeting at a hard crease on the
+    // diagonal, and since the shader turns a narrow slice of this into a
+    // strong push toward uDeep, that crease showed up in open water as a thin
+    // straight line with a visible right-angle corner. A polynomial smooth
+    // minimum rounds the corner over ~18m while leaving the straight sections
+    // and the overall extent unchanged.
+    const insideX = playable.width * 0.5 - Math.abs(x);
+    const insideZ = playable.depth * 0.5 - Math.abs(z);
+    const cornerRound = 18;
+    const blend = THREE.MathUtils.clamp(0.5 + 0.5 * (insideZ - insideX) / cornerRound, 0, 1);
+    const edgeInside = insideX * blend + insideZ * (1 - blend)
+      - cornerRound * blend * (1 - blend);
     const playableFade = THREE.MathUtils.smoothstep(edgeInside, -7, 22);
     const packedHeight = Math.round(THREE.MathUtils.clamp((heights[index] - HMIN) / HSPAN, 0, 1) * 255);
     const metres = Math.min(dist[index] * cellSize, SHORE_DIST_RANGE);

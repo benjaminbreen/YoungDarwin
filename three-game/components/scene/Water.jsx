@@ -31,6 +31,7 @@ import {
   cliffCalmEllipseForZone,
   cliffSwellForZone,
 } from '../../world/cliffSurfProfiles';
+import { seaStateForZone } from '../../world/seaState';
 
 // ---------------------------------------------------------------------------
 // Stylized tropical water.
@@ -80,8 +81,19 @@ const ENABLE_OCEAN_PLAYER_RIPPLES = true;
 const OCEAN_RING_COUNT = 28;
 const oceanRingQueue = [];
 const oceanRingWaveTime = { value: 0 };
-const oceanRingCliffSwell = { value: 0 };
-const oceanRingCliffCalmEllipse = { value: new THREE.Vector4() };
+// The rings ride the same wave bank as the surface plane, so they need the
+// live sea-state values. WaterSurface owns them; this is the hand-off, since
+// OceanContactRipples is a sibling with no access to the zone config.
+const oceanRingBank = {
+  cliffSwell: 0,
+  cliffCalmEllipse: new THREE.Vector4(),
+  swell: 1,
+  swellLen: 1,
+  chopSea: 1,
+  breakers: 1,
+  crestNorm: 1,
+  chopWind: 0.2,
+};
 const dummy = new THREE.Object3D();
 const OCEAN_PLAYER_RIPPLE_COUNT = 14;
 const WATER_BODY_INFLUENCE_COUNT = 8;
@@ -205,15 +217,23 @@ const WAVE_GLSL = /* glsl */`
   uniform float uCliffSwell;
   uniform vec4 uCliffCalmEllipse;
   uniform float uChopWind;
-  const float STEEPNESS = 0.52;
-  // The q normalization divides by WAVE_COUNT so the summed horizontal pinch
-  // stays at STEEPNESS with no crest self-intersection; cinematic adds three
-  // chop waves in gerstner() below, so its divisor must match.
-  #ifdef CINEMATIC_WATER
-    const float WAVE_COUNT = 6.0;
-  #else
-    const float WAVE_COUNT = 3.0;
-  #endif
+  // Sea state (three-game/world/seaState.js): per-zone ocean energy. Before
+  // this the ocean had two settings — one hard-coded bank shared by every
+  // zone, plus an additive long swell on the ten zones in cliffSurfProfiles.
+  // Nothing could be calmer than the shared bank, and "bigger waves" was only
+  // reachable by opting into cliff-shaped breakers. All default to 1, which
+  // reproduces the historical bank exactly.
+  uniform float uSwell;
+  uniform float uSwellLen;
+  uniform float uChopSea;
+  uniform float uBreakers;
+  // Trochoid pinch, 0 = plain sine, 1 = cusped Gerstner crest.
+  uniform float uSteepness;
+  // 1 / (peak amplitude of the whole bank, including the cliff swell), raised
+  // to a partial exponent on the CPU. Without it every crest-gated effect
+  // saturates solid on a heavy sea and never fires on a calm one; with it at
+  // full strength the shading response to sea state would be exactly zero.
+  uniform float uCrestNorm;
 
   float cliffSwellAt(vec2 pos) {
     if (uCliffCalmEllipse.z < 0.001) return uCliffSwell;
@@ -228,7 +248,15 @@ const WAVE_GLSL = /* glsl */`
     float phase = w * dot(dir, pos) + t * sqrt(9.8 * w);
     float c = cos(phase);
     float s = sin(phase);
-    float q = STEEPNESS / (w * amp * WAVE_COUNT + 1e-4);
+    // A deep-water Gerstner orbit is circular: the horizontal radius IS the
+    // amplitude, scaled by a steepness factor in [0,1]. The previous q
+    // normalised STEEPNESS by (w * amp * WAVE_COUNT), which cancelled the
+    // amplitude out of the horizontal term entirely — the 7cm/13m wave slid
+    // 36cm sideways while rising 7cm, and the ratio changed with every wave in
+    // the bank. Decoupled that way, crest shape could not follow sea state at
+    // all. Summed steepness stays far below the 1.0 self-intersection limit
+    // across the authored 0.4..1.8 swell range (max ~0.40 at Punta Sur).
+    float q = uSteepness;
     disp.x += q * amp * dir.x * c;
     disp.z += q * amp * dir.y * c;
     disp.y += amp * s;
@@ -243,9 +271,15 @@ const WAVE_GLSL = /* glsl */`
   vec3 gerstner(vec2 pos, float t, float atten, out vec3 normal) {
     vec3 disp = vec3(0.0);
     vec3 n = vec3(0.0, 0.0, 0.0);
-    addWave(pos, t, vec2( 0.86,  0.51), 0.07, 13.0, disp, n);
-    addWave(pos, t, vec2(-0.62,  0.78), 0.045, 8.5, disp, n);
-    addWave(pos, t, vec2( 0.34, -0.94), 0.028, 5.0, disp, n);
+    // Sea state scales amplitude and stretches wavelength together, so a
+    // heavier sea reads as longer and slower rather than as the same chop
+    // turned up (the phase term carries sqrt(9.8 * w), so a longer wave
+    // automatically travels faster and takes longer to pass).
+    float aS = uSwell;
+    float lS = uSwellLen;
+    addWave(pos, t, vec2( 0.86,  0.51), 0.07 * aS, 13.0 * lS, disp, n);
+    addWave(pos, t, vec2(-0.62,  0.78), 0.045 * aS, 8.5 * lS, disp, n);
+    addWave(pos, t, vec2( 0.34, -0.94), 0.028 * aS, 5.0 * lS, disp, n);
     #ifdef CINEMATIC_WATER
       // Wind sea: three short chop waves spread around the swell heading.
       // Amplitude rides the shared weather wind (uChopWind, from weatherEnv)
@@ -254,7 +288,11 @@ const WAVE_GLSL = /* glsl */`
       // deep-disc seam crossfade and the surf/ring overlay meshes (which ride
       // this same bank at fixed attenuation) remain inside their existing
       // height tolerance.
-      float chop = 0.5 + 0.5 * clamp(uChopWind, 0.0, 1.0);
+      // Wind sea scaled by the zone's own exposure, so a calm morning stays
+      // glassy everywhere while a trade-wind afternoon is much rougher off a
+      // windward headland than inside a cove. Chop keeps its own short
+      // wavelengths — wind sea does not lengthen with swell.
+      float chop = (0.5 + 0.5 * clamp(uChopWind, 0.0, 1.0)) * uChopSea;
       addWave(pos, t, vec2( 0.97,  0.26), 0.022 * chop, 6.3, disp, n);
       addWave(pos, t, vec2( 0.60,  0.80), 0.013 * chop, 4.1, disp, n);
       addWave(pos, t, vec2( 0.92, -0.40), 0.008 * chop, 2.7, disp, n);
@@ -310,7 +348,14 @@ const WAVE_GLSL = /* glsl */`
   // with SWELL_DIR. Without this gate the fronts (lines of constant shore
   // distance) collapse concentrically onto islets from every side.
   float shoreExposure(sampler2D seafloor, float size, vec2 wxz, float sd) {
-    float e = 1.75;
+    // This is evaluated per vertex and interpolated, and it multiplies the
+    // breaker envelope directly. At 1.75m on a 0.39m cliff-map quad the
+    // gradient swung noticeably between neighbouring vertices, so the
+    // interpolation faceted the foam envelope along triangle edges. Exposure
+    // is a broad "which way does this shore face" term — sampling it over a
+    // wider baseline costs the same two fetches and varies smoothly enough
+    // that linear interpolation is no longer visible.
+    float e = 5.0;
     float gx = texture2D(seafloor, (wxz + vec2(e, 0.0)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
     float gz = texture2D(seafloor, (wxz + vec2(0.0, e)) / size + 0.5).g * ${SHORE_DIST_RANGE.toFixed(1)} - sd;
     vec2 grad = vec2(gx, gz);
@@ -324,20 +369,37 @@ const WAVE_GLSL = /* glsl */`
   // feel uneven; the envelope confines surf to the breaker band.
   float breakerField(vec2 wxz, float t, float sd, float depth, float exposure, out float f, out float strength) {
     float localCliffSwell = cliffSwellAt(wxz);
+    // Distance along the crest line. Needed by the peel mask below as well as
+    // the enhanced folding, so it is hoisted out of the ifdef — one dot
+    // product, and it replaces a fixed diagonal that was not the crest axis.
+    float alongCrest = dot(wxz, vec2(-SWELL_DIR.y, SWELL_DIR.x));
     float u = sd / BREAKER_WAVELENGTH + t * (BREAKER_SPEED / BREAKER_WAVELENGTH)
       + bnNoise(wxz * 0.05) * 0.45; // wobble the lines so they aren't ruler-straight
     #ifdef ENHANCED_WATER
       // Sections of one crest advance and stall independently. The motion is
       // slow enough to read as a wave folding, not noise sliding over water.
-      float alongCrest = dot(wxz, vec2(-SWELL_DIR.y, SWELL_DIR.x));
       u += sin(alongCrest * 0.28 + t * 0.21) * 0.045;
       u += (bnNoise(vec2(alongCrest * 0.12 - t * 0.035, sd * 0.08)) - 0.5) * 0.16;
     #endif
     f = fract(u);
-    float id = floor(u);
-    strength = 0.5 + 0.5 * bnNoise(vec2(id * 3.7, (wxz.x + wxz.y) * 0.025 + id));
+    // A crest does not break evenly along its length: it peels, and long
+    // sections never break at all. The old mapping was 0.5 + 0.5 * noise,
+    // which never reaches zero — so every front drew one unbroken band from
+    // one end of the bay to the other. That is the single biggest reason the
+    // surf read as a painted ribbon rather than as water. Same single noise
+    // fetch, remapped to open real gaps, and sampled along the true crest
+    // axis (~22m segments) instead of a 40m diagonal.
+    // Sampled on u, not floor(u). Keying this to the front index made it
+    // piecewise constant, so it snapped at every wrap — and the wrap lands at
+    // f ~ 0, which is exactly where the foam is brightest. With the peel mask
+    // spanning the full 0..1 range that snap became a visible pop once per
+    // wavelength. Sampling the same single noise on the continuous coordinate
+    // removes the discontinuity outright and reads better besides: a front now
+    // builds and fades as it shoals instead of holding one flat value.
+    strength = smoothstep(0.26, 0.74, bnNoise(vec2(u * 0.7, alongCrest * 0.045)));
     #ifdef ENHANCED_WATER
-      float setPulse = 0.82 + 0.18 * sin(t * 0.43 + id * 2.17 + alongCrest * 0.035);
+      // Same reason: id made this jump at the wrap too.
+      float setPulse = 0.82 + 0.18 * sin(t * 0.43 + u * 2.17 + alongCrest * 0.035);
       strength *= setPulse;
     #endif
     // Beaches keep their tight shallow band. Windward cliff maps use the
@@ -393,7 +455,7 @@ const WAVE_GLSL = /* glsl */`
       + 0.08 * sin(alongCrest * 0.34 + t * 0.18)
       + 0.04 * sin(alongCrest * 0.79 - t * 0.11);
     float cliffLift = env * s * scallop * (cliffLip * 1.38 + cliffShoulder * 0.38);
-    return mix(lift, cliffLift, localCliffSwell);
+    return mix(lift, cliffLift, localCliffSwell) * uBreakers;
   }
 
   // Push the crest shoreward as it rises. The horizontal displacement makes
@@ -431,6 +493,57 @@ const WAVE_GLSL = /* glsl */`
   }
 `;
 
+// Trochoid pinch for the shared bank. 1.0 is a fully cusped Gerstner crest;
+// pulled back a little because the island's swell should read as rolling
+// rather than about to break everywhere.
+const DEFAULT_STEEPNESS = 0.85;
+// Peak amplitude of the historical (sea state 1.0) base bank, and of the
+// cliff-profile bank at full swell. Used to derive uCrestNorm on the CPU so
+// the shader does not re-sum the bank per pixel.
+const BASE_BANK_AMPLITUDE = 0.07 + 0.045 + 0.028;
+const CLIFF_BANK_AMPLITUDE = 0.48 + 0.24 + 0.12;
+
+// Every material that compiles WAVE_GLSL must declare the whole sea-state
+// uniform set, so they are minted and written in one place. These are plain
+// uniform multiplies inside shader code that already runs — they add no
+// texture fetches and no per-pixel branching.
+function waveBankUniforms() {
+  return {
+    uCliffSwell: { value: 0 },
+    uCliffCalmEllipse: { value: new THREE.Vector4() },
+    uChopWind: { value: 0.2 },
+    uSwell: { value: 1 },
+    uSwellLen: { value: 1 },
+    uChopSea: { value: 1 },
+    uBreakers: { value: 1 },
+    uSteepness: { value: DEFAULT_STEEPNESS },
+    uCrestNorm: { value: 1 },
+  };
+}
+
+// Static (per-zone) half of the bank: everything that only changes on travel.
+function applyWaveBankZone(uniforms, { seaState, cliffSwell, cliffCalmEllipse }) {
+  if (!uniforms?.uSwell) return;
+  uniforms.uCliffSwell.value = cliffSwell;
+  uniforms.uCliffCalmEllipse.value.set(...(cliffCalmEllipse || [0, 0, 0, 0]));
+  uniforms.uSwell.value = seaState.swell;
+  uniforms.uSwellLen.value = seaState.lengthScale;
+  uniforms.uChopSea.value = seaState.chop;
+  uniforms.uBreakers.value = seaState.breakers;
+  // Partial, not full, normalisation. Normalising all the way keeps every
+  // authored threshold exactly valid but makes the shading response to sea
+  // state precisely zero by construction — a heavier sea then displaces more
+  // without looking any rougher. The 0.7 exponent keeps thresholds near where
+  // they were tuned while letting crest bands, whitecap ignition and the
+  // subsurface glow open up on an exposed coast and close down inside a cove.
+  const bankAmplitude = BASE_BANK_AMPLITUDE * seaState.swell
+    + CLIFF_BANK_AMPLITUDE * cliffSwell;
+  uniforms.uCrestNorm.value = Math.pow(
+    BASE_BANK_AMPLITUDE / Math.max(1e-3, bankAmplitude),
+    0.7,
+  );
+}
+
 function createStylizedWaterMaterial(
   seafloorTexture,
   standingWaterMaskTexture,
@@ -446,9 +559,8 @@ function createStylizedWaterMaterial(
     extensions: { derivatives: true },
     defines: waterShaderDefines(qualityConfig),
     uniforms: {
+      ...waveBankUniforms(),
       uTime: { value: 0 },
-      uCliffSwell: { value: 0 },
-      uCliffCalmEllipse: { value: new THREE.Vector4() },
       uWaterOnlyShelf: { value: 0 },
       uSeafloor: { value: seafloorTexture },
       uStandingWaterMask: { value: standingWaterMaskTexture },
@@ -518,10 +630,6 @@ function createStylizedWaterMaterial(
       uCapWindGate: { value: 0.2 },
       uGlintElongation: { value: 4 },
       uGlintWidth: { value: 1 },
-      // Cinematic wind-sea chop amplitude, driven from weatherEnv each frame
-      // (shared wind bus). Inactive on lower tiers (the chop waves compile
-      // out without CINEMATIC_WATER).
-      uChopWind: { value: 0.2 },
     },
     side: THREE.DoubleSide,
     vertexShader: /* glsl */`
@@ -534,6 +642,7 @@ function createStylizedWaterMaterial(
       varying vec3 vWorld;
       varying float vDepth;
       varying float vExposure;
+      varying vec2 vFlatXZ;
       varying vec4 vReflCoord;
 
       float seafloorAt(vec2 wxz) {
@@ -549,17 +658,33 @@ function createStylizedWaterMaterial(
 
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
-        float floorH = seafloorAt(world.xz);
+        // The seabed does not move. Every lookup into the static shore field
+        // — depth, shore distance, exposure, breaker phase — is taken at the
+        // undisplaced position and handed to the fragment stage as vFlatXZ.
+        //
+        // Previously they were taken at the displaced position, and the
+        // fragment then re-sampled the seafloor at vWorld.xz. Since vWorld is
+        // interpolated linearly across a triangle while the displacement is
+        // not, the shore-distance field that defines where the fronts sit came
+        // out piecewise-linear per triangle. On a cliff map breakerPush moves
+        // vertices up to 0.72m on a 0.39m quad and drops to zero across the
+        // lip in about 2m, so the sampling domain is compressed ~45% within a
+        // single quad exactly where the crest breaks — which is what made the
+        // foam edge read as a row of triangles.
+        vec2 flatXZ = world.xz;
+        vFlatXZ = flatXZ;
+        float floorH = seafloorAt(flatXZ);
         float depth = uWaterLevel - floorH;
         vDepth = depth;
         vec3 normal; // unused: shading normal is per-pixel in the fragment
-        vec3 disp = gerstner(world.xz, uTime, swellAtten(depth), normal);
+        vec3 disp = gerstner(flatXZ, uTime, swellAtten(depth), normal);
+        float sd = shoreDistAt(flatXZ);
+        vExposure = shoreExposure(uSeafloor, uSize, flatXZ, sd);
+        float breakerY = breakerLift(flatXZ, uTime, sd, depth, vExposure);
+        vec2 push = breakerPush(uSeafloor, uSize, flatXZ, uTime, sd, depth, vExposure);
         world.xyz += disp;
-        world.y += swashLift(world.xz, uTime, depth);
-        float sd = shoreDistAt(world.xz);
-        vExposure = shoreExposure(uSeafloor, uSize, world.xz, sd);
-        float breakerY = breakerLift(world.xz, uTime, sd, depth, vExposure);
-        world.xz += breakerPush(uSeafloor, uSize, world.xz, uTime, sd, depth, vExposure);
+        world.y += swashLift(flatXZ, uTime, depth);
+        world.xz += push;
         world.y += breakerY;
         vWorld = world.xyz;
         vReflCoord = uReflMatrix * vec4(world.xyz, 1.0);
@@ -625,6 +750,7 @@ function createStylizedWaterMaterial(
       varying vec3 vWorld;
       varying float vDepth;
       varying float vExposure;
+      varying vec2 vFlatXZ;
       varying vec4 vReflCoord;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
@@ -700,7 +826,25 @@ function createStylizedWaterMaterial(
         float trail = step(0.0, foamPhase)
           * (1.0 - smoothstep(lipWidth * 0.72, trailWidth, foamDistance))
           * (1.0 - lip);
-        float foam = core * 0.35 + lip * (0.7 + 0.3 * lace) + trail * lace * 0.45;
+        // Weighting, not width, is what made these read as painted ribbons.
+        // The lip is the widest bright part of a front, and it was 70%
+        // constant (0.7 + 0.3 * lace) — a flat band with a slight texture
+        // wash over it. Real surf is the opposite: a narrow genuinely solid
+        // breaking edge, then everything behind it torn into structure.
+        // So the core goes brighter and stays solid, the lip becomes mostly
+        // lace-driven, and the trail is squared for contrast so it reads as
+        // dense patches with holes instead of an even grey smear.
+        // Spray haze. Whitewater throws mist with no hard edge, and without a
+        // term for it the foam is a cut-out however well the lace tears its
+        // interior — which is what made the first pass read as torn paper.
+        // Broad, soft, low amplitude, and only weakly lace-modulated so it
+        // stays a halo rather than more structure.
+        float haze = (1.0 - smoothstep(0.0, trailWidth * 1.9, foamDistance))
+          * (0.55 + 0.45 * lace);
+        float foam = core * 0.55
+          + lip * (0.45 + 0.55 * lace)
+          + trail * lace * lace * 0.85
+          + haze * 0.26;
         #ifdef ENHANCED_WATER
           // Let a crest progress through a compact white curl, boiling
           // whitewater, torn streaks, and finally detached bubble islands.
@@ -712,16 +856,24 @@ function createStylizedWaterMaterial(
           ));
           float boiling = collapse * (0.34 + lace * 0.66);
           float tornWake = wake * lace * (0.18 + streaks * 0.3);
+          // Same correction as the base profile: these branches ran the lip at
+          // 82% and 77% constant, which overrode the tearing above and put the
+          // flat band back on the tiers that pay most for detail.
           #ifdef CINEMATIC_WATER
-            foam = max(foam * 1.12, core * 0.5 + lip * (0.82 + lace * 0.18) + boiling + tornWake);
+            foam = max(foam * 1.12,
+              core * 0.72 + lip * (0.48 + lace * 0.52) + boiling + tornWake + haze * 0.24);
           #else
             foam = max(
               foam * 1.06,
-              core * 0.43 + lip * (0.77 + lace * 0.18) + boiling * 0.78 + tornWake * 0.62
+              core * 0.62 + lip * (0.46 + lace * 0.54)
+                + boiling * 0.78 + tornWake * 0.62 + haze * 0.20
             );
           #endif
         #endif
-        return min(foam, 1.0) * env * s;
+        // Softened rather than linear: a small wave still breaks white, it
+        // just breaks over less water. Scaling foam brightness straight off
+        // uBreakers left sheltered coves with no readable waterline at all.
+        return min(foam, 1.0) * env * s * mix(1.0, uBreakers, 0.7);
       }
 
       vec2 rippleNormalSlope(vec2 wxz, float t, float coarseLod, float fineLod) {
@@ -798,18 +950,23 @@ function createStylizedWaterMaterial(
 
       void main() {
         // --- per-pixel surface normal: analytic swell + scrolling ripples ----
-        vec4 floorSample = texture2D(uSeafloor, vWorld.xz / uSize + 0.5);
-        float standingWater = texture2D(uStandingWaterMask, vWorld.xz / uSize + 0.5).r;
+        vec4 floorSample = texture2D(uSeafloor, vFlatXZ / uSize + 0.5);
+        float standingWater = texture2D(uStandingWaterMask, vFlatXZ / uSize + 0.5).r;
         float dRaw = uWaterLevel - (floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)})); // signed: <0 just inland of the line
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         float shoreSoftness = floorSample.b;
         float playableFade = floorSample.a;
-        float edgeOcean = 1.0 - smoothstep(0.08, 0.5, playableFade);
-        float dEff = dRaw + swashLift(vWorld.xz, uTime, dRaw);
+        // Spread across the whole playableFade ramp rather than a narrow slice
+        // of it. The old 0.08..0.5 window compressed a 70% shift toward uDeep
+        // into roughly an 11m band, which read as an edge; over the full ramp
+        // the same handoff is a gradient. Belt and braces with the rounded
+        // corner in the bake: this one also softens the straight sections.
+        float edgeOcean = 1.0 - smoothstep(0.02, 0.88, playableFade);
+        float dEff = dRaw + swashLift(vFlatXZ, uTime, dRaw);
         float depth = max(0.0, dEff);
 
         vec3 normal;
-        vec3 waveDisp = gerstner(vWorld.xz, uTime, swellAtten(max(dRaw, 0.0)), normal);
+        vec3 waveDisp = gerstner(vFlatXZ, uTime, swellAtten(max(dRaw, 0.0)), normal);
         // Gerstner's analytic normal does not know about the cliff breaker
         // displacement. Blend in the resolved surface derivative only where
         // that breaker is active, so its face catches light as a moving mass
@@ -817,7 +974,7 @@ function createStylizedWaterMaterial(
         float breakerNormalPhase;
         float breakerNormalStrength;
         float breakerNormalMask = breakerField(
-          vWorld.xz,
+          vFlatXZ,
           uTime,
           shoreDist,
           depth,
@@ -827,14 +984,16 @@ function createStylizedWaterMaterial(
         );
         vec3 resolvedNormal = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
         if (resolvedNormal.y < 0.0) resolvedNormal *= -1.0;
-        float localCliffSwell = cliffSwellAt(vWorld.xz);
+        float localCliffSwell = cliffSwellAt(vFlatXZ);
         float resolvedNormalShare = clamp(
           breakerNormalMask * breakerNormalStrength * localCliffSwell * 0.88,
           0.0,
           0.88
         );
         normal = normalize(mix(normal, resolvedNormal, resolvedNormalShare));
-        float crestHeight = waveDisp.y;
+        // Partially normalised so the crest-gated thresholds below stay near
+        // where they were authored while still responding to sea state.
+        float crestHeight = waveDisp.y * uCrestNorm;
         vec3 waveNormal = normal;
         float waveSlope = length(waveNormal.xz);
         float footprint = max(fwidth(vWorld.x), fwidth(vWorld.z));
@@ -1277,8 +1436,13 @@ function createStylizedWaterMaterial(
         // glassy. Shallows are kept a touch clearer than physics for the
         // stylized lagoon read.
         float fres = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
-        float reflectance = 0.02 + 0.98 * fres;
-        float reflStrength = mix(0.85, 0.22, shallowFactor) * (1.0 - underwaterView * 0.72);
+        // Water's true F0 is ~0.02, and from a cliff-top camera looking almost
+        // straight down that is what you get: a 2% mirror, which is correct
+        // and reads as flat paint. Lifting the floor is a deliberate stylised
+        // departure so the sea keeps some sky in it at steep angles; grazing
+        // angles are unchanged because fres dominates there.
+        float reflectance = 0.055 + 0.945 * fres;
+        float reflStrength = mix(0.85, 0.34, shallowFactor) * (1.0 - underwaterView * 0.72);
         float mirrorMix = clamp(reflectance * reflStrength, 0.0, 0.8);
         color = mix(color, reflColor, mirrorMix);
         // Reflected scene objects (Darwin, ship, shore) stay visible past the
@@ -1311,8 +1475,16 @@ function createStylizedWaterMaterial(
         // Keep specular mostly white-gold. The sky can be rose; the sun flecks
         // should bloom as small hot points instead of broad pink patches.
         glintWhite = mix(glintWhite, vec3(1.12, 1.035, 0.82), uSunPathStrength * 0.38);
-        float glintVisibility = (0.36 + 0.64 * uSunPathStrength) * (1.0 - uRain * 0.78) * (1.0 - underwaterView * 0.88);
-        float spec = pow(max(dot(normal, hv), 0.0), mix(260.0, 175.0, uSunPathStrength)) * uDaylight * glintVisibility;
+        // uSunPathStrength is zero whenever the sun is above ~46 degrees,
+        // which on Floreana is most of the day. It should gate only the long
+        // low-sun glitter *column* — but it was also scaling visibility down
+        // to 36% and tightening the specular lobe to an exponent of 260, so
+        // the sea had almost no sparkle at exactly the hours the sun is
+        // brightest. High sun does still glitter; the patch is compact and
+        // sits near the sun's own reflection rather than stretching into a
+        // path, so the lobe wants to be broader at noon, not tighter.
+        float glintVisibility = (0.72 + 0.28 * uSunPathStrength) * (1.0 - uRain * 0.78) * (1.0 - underwaterView * 0.88);
+        float spec = pow(max(dot(normal, hv), 0.0), mix(150.0, 175.0, uSunPathStrength)) * uDaylight * glintVisibility;
         #ifdef ENHANCED_WATER
           #ifdef CINEMATIC_WATER
             spec *= 1.22;
@@ -1363,12 +1535,15 @@ function createStylizedWaterMaterial(
         // Sparse mid-water twinkle that survives high sun: a handful of tight
         // glints in the 10-90 m band. This is the "alive" signal the sun-path
         // glitter can't give outside its low-sun window.
+        // The only glitter that survives high sun, so its reach matters: the
+        // old 10-90m band left most of the visible sea outside it entirely,
+        // including everything below a cliff-top camera.
         float sparkleGate = uDaylight * (1.0 - uRain * 0.8) * (1.0 - underwaterView)
-          * smoothstep(10.0, 22.0, pathCamDist) * (1.0 - smoothstep(60.0, 90.0, pathCamDist));
+          * smoothstep(5.0, 16.0, pathCamDist) * (1.0 - smoothstep(120.0, 175.0, pathCamDist));
         if (sparkleGate > 0.01) {
           float sparkle = rippleSparkleMask(vWorld.xz, uTime);
           float sparkleFacing = pow(max(dot(normal, hv), 0.0), 38.0);
-          color += glintWhite * sparkle * sparkleFacing * sparkleGate * 1.38;
+          color += glintWhite * sparkle * sparkleFacing * sparkleGate * 1.9;
         }
         // --- moon glitter: the sun's math on the night sea, silver, quieter.
         // uMoonGlitter carries phase, altitude and weather gating from JS.
@@ -1458,7 +1633,7 @@ function createStylizedWaterMaterial(
         );
         shoreFoam = max(shoreFoam, contactRim * (0.74 + 0.26 * lace));
         shoreFoam *= mix(1.0, 0.08, localCliffSwell);
-        float surf = breakerFoam(vWorld.xz, uTime, shoreDist, depth, lace, vExposure)
+        float surf = breakerFoam(vFlatXZ, uTime, shoreDist, depth, lace, vExposure)
           * smoothstep(0.05, 0.24, depth)
           * mix(0.68, 1.0, beachGate)
           * mix(1.0, 1.32, localCliffSwell);
@@ -1561,9 +1736,11 @@ function createSurfRibbonMaterial(
     defines: waterShaderDefines(qualityConfig),
     depthTest: true,
     uniforms: {
+      // The ribbons ride the same Gerstner bank as the main plane, so they
+      // must be handed the identical sea-state set every frame or the two
+      // layers separate vertically.
+      ...waveBankUniforms(),
       uTime: { value: 0 },
-      uCliffSwell: { value: 0 },
-      uCliffCalmEllipse: { value: new THREE.Vector4() },
       uSeafloor: { value: seafloorTexture },
       uStandingWaterMask: { value: standingWaterMaskTexture },
       uStandingWaterFadeStart: { value: suppression.fadeStart },
@@ -1576,9 +1753,6 @@ function createSurfRibbonMaterial(
       uMoonGlitter: { value: 0 },
       uRain: { value: 0 },
       uUnderwaterAmount: { value: 0 },
-      // Must track the main plane's value: the ribbons ride the same Gerstner
-      // bank, and on cinematic that bank includes the wind-scaled chop waves.
-      uChopWind: { value: 0.2 },
     },
     vertexShader: /* glsl */`
       ${WAVE_GLSL}
@@ -1588,6 +1762,7 @@ function createSurfRibbonMaterial(
       uniform float uSize;
       varying vec3 vWorld;
       varying float vExposure;
+      varying vec2 vFlatXZ;
 
       vec4 seafloorSample(vec2 wxz) {
         return texture2D(uSeafloor, wxz / uSize + 0.5);
@@ -1595,17 +1770,22 @@ function createSurfRibbonMaterial(
 
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
-        vec4 floorSample = seafloorSample(world.xz);
+        // Same static-domain rule as the main plane, and it must match it
+        // exactly or the two foam layers stop tracing the same front.
+        vec2 flatXZ = world.xz;
+        vFlatXZ = flatXZ;
+        vec4 floorSample = seafloorSample(flatXZ);
         float floorH = floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)});
         float depth = uWaterLevel - floorH;
         vec3 waveNormal;
-        vec3 disp = gerstner(world.xz, uTime, swellAtten(max(depth, 0.0)), waveNormal);
+        vec3 disp = gerstner(flatXZ, uTime, swellAtten(max(depth, 0.0)), waveNormal);
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
+        vExposure = shoreExposure(uSeafloor, uSize, flatXZ, shoreDist);
+        float breakerY = breakerLift(flatXZ, uTime, shoreDist, depth, vExposure);
+        vec2 push = breakerPush(uSeafloor, uSize, flatXZ, uTime, shoreDist, depth, vExposure);
         world.xyz += disp;
-        world.y += swashLift(world.xz, uTime, depth);
-        vExposure = shoreExposure(uSeafloor, uSize, world.xz, shoreDist);
-        float breakerY = breakerLift(world.xz, uTime, shoreDist, depth, vExposure);
-        world.xz += breakerPush(uSeafloor, uSize, world.xz, uTime, shoreDist, depth, vExposure);
+        world.y += swashLift(flatXZ, uTime, depth);
+        world.xz += push;
         world.y += breakerY;
         world.y += 0.035;
         vWorld = world.xyz;
@@ -1629,6 +1809,7 @@ function createSurfRibbonMaterial(
       uniform float uStandingWaterFadeEnd;
       varying vec3 vWorld;
       varying float vExposure;
+      varying vec2 vFlatXZ;
 
       float srHash(vec2 p) { return fract(sin(dot(p, vec2(127.4, 311.7))) * 43758.5453); }
       float srNoise(vec2 p) {
@@ -1686,7 +1867,7 @@ function createSurfRibbonMaterial(
         // The ribbon used to interpolate these fields from the ~1 m water
         // mesh vertices. Bright contours made that triangulation visible as
         // blocky shoreline segments even though the bake itself was smooth.
-        vec2 shoreUv = vWorld.xz / uSize + 0.5;
+        vec2 shoreUv = vFlatXZ / uSize + 0.5;
         vec4 floorSample = texture2D(uSeafloor, shoreUv);
         float depth = max(0.0, uWaterLevel - (floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)})));
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
@@ -1696,7 +1877,7 @@ function createSurfRibbonMaterial(
         float realCoast = smoothstep(0.02, 0.24, playableFade);
         float beachShallow = smoothstep(0.035, 0.19, depth) * (1.0 - smoothstep(2.25, 3.9, depth));
         float cliffShallow = smoothstep(0.08, 0.42, depth) * (1.0 - smoothstep(5.4, 8.0, depth));
-        float localCliffSwell = cliffSwellAt(vWorld.xz);
+        float localCliffSwell = cliffSwellAt(vFlatXZ);
         float shallow = mix(beachShallow, cliffShallow, localCliffSwell);
         float shoreWindow = smoothstep(15.5, 0.45, shoreDist);
         float beach = mix(0.78, 1.18, smoothstep(0.08, 0.78, shoreSoftness));
@@ -1725,7 +1906,7 @@ function createSurfRibbonMaterial(
 
         float f;
         float s;
-        float breakerEnv = breakerField(vWorld.xz, uTime, shoreDist, depth, vExposure, f, s);
+        float breakerEnv = breakerField(vFlatXZ, uTime, shoreDist, depth, vExposure, f, s);
         // Lip/trail widths match the main plane's breakerFoam exactly, so the
         // two layers reinforce one line instead of splitting into a pair.
         float lipWidth = mix(0.075, 0.19, localCliffSwell);
@@ -1737,7 +1918,12 @@ function createSurfRibbonMaterial(
         float breakerTrail = step(0.0, foamPhase)
           * (1.0 - smoothstep(lipWidth * 0.72, trailWidth, foamDistance))
           * (1.0 - breakerLip);
-        float breaker = breakerEnv * s * (breakerLip * (0.85 + 0.15 * lace) + breakerTrail * lace * 0.45);
+        // This layer draws the same fronts directly over the plane's, so a
+        // near-constant lip here (it was 85%) doubled the flat band rather
+        // than reinforcing a line. Matching the plane's lace weighting keeps
+        // the two layers building one torn front.
+        float breaker = breakerEnv * s
+          * (breakerLip * (0.40 + 0.60 * lace) + breakerTrail * lace * lace * 0.7);
         #ifdef ENHANCED_WATER
           float breakerCollapse = smoothstep(0.045, 0.1, f) * (1.0 - smoothstep(0.24, 0.4, f));
           float breakerWake = smoothstep(0.12, 0.25, f) * (1.0 - smoothstep(0.5, 0.74, f));
@@ -1745,11 +1931,15 @@ function createSurfRibbonMaterial(
             dot(vWorld.xz, SWELL_DIR) * 0.22 - uTime * 0.18,
             dot(vWorld.xz, vec2(-SWELL_DIR.y, SWELL_DIR.x)) * 0.66
           )));
+          // These branches max() over everything above, so their fully
+          // constant lip terms (0.94 and 0.88) were overriding the tearing
+          // outright — whatever the base profile did, the enhanced tiers put
+          // a solid band straight back on top of it.
           #ifdef CINEMATIC_WATER
             breaker = max(
               breaker * 1.14,
               breakerEnv * s * (
-                breakerLip * 0.94
+                breakerLip * (0.42 + lace * 0.58)
                 + breakerCollapse * (0.32 + lace * 0.68)
                 + breakerWake * lace * (0.2 + wakeStreaks * 0.32)
               )
@@ -1758,7 +1948,7 @@ function createSurfRibbonMaterial(
             breaker = max(
               breaker * 1.07,
               breakerEnv * s * (
-                breakerLip * 0.88
+                breakerLip * (0.40 + lace * 0.52)
                 + breakerCollapse * (0.25 + lace * 0.54)
                 + breakerWake * lace * (0.12 + wakeStreaks * 0.2)
               )
@@ -1910,12 +2100,17 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
           + vec2(-t * 0.011, t * 0.008);
         vec3 a = texture2D(rippleNormal, uvA).rgb * 2.0 - 1.0;
         vec3 b = texture2D(rippleNormal, uvB).rgb * 2.0 - 1.0;
-        vec2 slope = (a.xy * 0.82 + b.xy * 0.44) * 1.65;
+        // Open water was reading as a smooth sheet: the disc has no vertex
+        // displacement at all, so this slope is the only thing giving it
+        // surface. Raising the gain (same taps, no new fetches) puts enough
+        // tilt variation into the normal for the specular to break up into
+        // actual glitter instead of a broad even sheen.
+        vec2 slope = (a.xy * 0.82 + b.xy * 0.44) * 2.35;
         #ifdef CINEMATIC_WATER
           vec2 uvC = vec2(wxz.x * 0.26 + wxz.y * 0.97, -wxz.x * 0.97 + wxz.y * 0.26) * 0.31
             + vec2(t * 0.026, t * 0.021);
           vec3 c = texture2D(rippleNormal, uvC).rgb * 2.0 - 1.0;
-          slope += c.xy * 0.26;
+          slope += c.xy * 0.42;
         #endif
         return normalize(vec3(slope.x, 1.0, slope.y));
       }
@@ -2114,10 +2309,9 @@ function OceanContactRipples() {
       transparent: true,
       depthWrite: false,
       uniforms: {
+        ...waveBankUniforms(),
         uTime: { value: 0 },
         uWaveTime: { value: 0 },
-        uCliffSwell: { value: 0 },
-        uCliffCalmEllipse: { value: new THREE.Vector4() },
         uColor: { value: new THREE.Color('#eefaf8') },
       },
       vertexShader: /* glsl */`
@@ -2167,8 +2361,15 @@ function OceanContactRipples() {
     const now = performance.now() / 1000;
     material.uniforms.uTime.value = now;
     material.uniforms.uWaveTime.value = oceanRingWaveTime.value;
-    material.uniforms.uCliffSwell.value = oceanRingCliffSwell.value;
-    material.uniforms.uCliffCalmEllipse.value.copy(oceanRingCliffCalmEllipse.value);
+    const ru = material.uniforms;
+    ru.uCliffSwell.value = oceanRingBank.cliffSwell;
+    ru.uCliffCalmEllipse.value.copy(oceanRingBank.cliffCalmEllipse);
+    ru.uSwell.value = oceanRingBank.swell;
+    ru.uSwellLen.value = oceanRingBank.swellLen;
+    ru.uChopSea.value = oceanRingBank.chopSea;
+    ru.uBreakers.value = oceanRingBank.breakers;
+    ru.uCrestNorm.value = oceanRingBank.crestNorm;
+    ru.uChopWind.value = oceanRingBank.chopWind;
     const mesh = meshRef.current;
     if (!mesh) {
       oceanRingQueue.length = 0;
@@ -2418,6 +2619,7 @@ function WaterSurface({
   const qualityConfig = waterQualityConfig(quality);
   const cliffSwell = cliffSwellForZone(currentZoneId);
   const cliffCalmEllipse = cliffCalmEllipseForZone(currentZoneId);
+  const seaState = seaStateForZone(currentZoneId);
 
   // Zone change replaces most of the scene graph: re-sync reflection layer
   // membership immediately rather than waiting out the refresh counter.
@@ -2487,10 +2689,13 @@ function WaterSurface({
   // the destination textures current before the first revealed frame.
   useLayoutEffect(() => {
     const suppression = standingWaterRendering.globalWaterSuppression;
+    // The plane, the surf ribbons and the contact rings all compile the same
+    // wave bank. If any one of them misses a sea-state value it renders a
+    // different ocean and the layers separate vertically.
+    const zoneBank = { seaState, cliffSwell, cliffCalmEllipse };
     const waterUniforms = waterMaterial.uniforms;
+    applyWaveBankZone(waterUniforms, zoneBank);
     waterUniforms.uSeafloor.value = seafloor;
-    waterUniforms.uCliffSwell.value = cliffSwell;
-    waterUniforms.uCliffCalmEllipse.value.set(...(cliffCalmEllipse || [0, 0, 0, 0]));
     waterUniforms.uWaterOnlyShelf.value = currentZoneId === 'BLACK_BEACH_SURF' ? 1 : 0;
     waterUniforms.uStandingWaterMask.value = standingWaterMask;
     waterUniforms.uWaterContact.value = waterContact;
@@ -2499,16 +2704,25 @@ function WaterSurface({
     waterUniforms.uStandingWaterFadeEnd.value = suppression.fadeEnd;
 
     const surfUniforms = surfMaterial.uniforms;
+    applyWaveBankZone(surfUniforms, zoneBank);
     surfUniforms.uSeafloor.value = seafloor;
-    surfUniforms.uCliffSwell.value = cliffSwell;
-    surfUniforms.uCliffCalmEllipse.value.set(...(cliffCalmEllipse || [0, 0, 0, 0]));
     surfUniforms.uStandingWaterMask.value = standingWaterMask;
     surfUniforms.uStandingWaterFadeStart.value = suppression.fadeStart;
     surfUniforms.uStandingWaterFadeEnd.value = suppression.fadeEnd;
     deepMaterial.uniforms.rippleNormal.value = rippleNormal;
+
+    oceanRingBank.cliffSwell = cliffSwell;
+    oceanRingBank.cliffCalmEllipse.set(...(cliffCalmEllipse || [0, 0, 0, 0]));
+    oceanRingBank.swell = seaState.swell;
+    oceanRingBank.swellLen = seaState.lengthScale;
+    oceanRingBank.chopSea = seaState.chop;
+    oceanRingBank.breakers = seaState.breakers;
+    oceanRingBank.crestNorm = waterUniforms.uCrestNorm.value;
   }, [
     deepMaterial,
     cliffSwell,
+    cliffCalmEllipse,
+    seaState,
     currentZoneId,
     rippleNormal,
     seafloor,
@@ -2682,8 +2896,6 @@ function WaterSurface({
 
     const store = useThreeGameStore.getState();
     const t = clock.elapsedTime;
-    oceanRingCliffSwell.value = cliffSwell;
-    oceanRingCliffCalmEllipse.value.set(...(cliffCalmEllipse || [0, 0, 0, 0]));
     const time = ((store.timeOfDay % 24) + 24) % 24;
     const sun = sunDirection(time, store.day || 1);
     _sun.set(sun[0], sun[1], sun[2]);
@@ -2799,8 +3011,14 @@ function WaterSurface({
     // Live dev knobs (waterDevRuntime) + the weather-wind whitecap gate.
     // windSpeed idles around 1; caps stay sparse in calm air and populate as
     // weather picks up. capWindMult lets the dev panel force either extreme.
+    // Sea state scales the whitecap population, not the ignition threshold:
+    // uCapCrest stays authored against the normalised crest height, so an
+    // exposed coast gets more of its crests breaking rather than a different
+    // definition of what counts as a crest.
     const capWindGate = THREE.MathUtils.clamp(
-      (0.12 + Math.max(0, weatherEnv.windSpeed - 0.95) * 0.75) * waterDev.capWindMult,
+      (0.12 + Math.max(0, weatherEnv.windSpeed - 0.95) * 0.75)
+        * waterDev.capWindMult
+        * seaState.chop,
       0,
       1,
     );
@@ -2822,6 +3040,7 @@ function WaterSurface({
       0,
       1,
     );
+    oceanRingBank.chopWind = wu.uChopWind.value;
     wu.uGlintElongation.value = waterDev.glintElongation;
     wu.uGlintWidth.value = waterDev.glintWidth;
     const su = surfMaterial.uniforms;
@@ -2907,17 +3126,33 @@ function WaterSurface({
     }
   });
 
-  useEffect(() => {
-    return () => {
-      waterGeometry.dispose();
-      waterMaterial.dispose();
-      surfMaterial.dispose();
-      deepMaterial.dispose();
-      grabRef.current?.dispose();
-      grabRef.current = null;
-      reflectionRT.dispose();
-    };
-  }, [waterGeometry, waterMaterial, surfMaterial, deepMaterial, reflectionRT]);
+  // These were one effect keyed on all five resources at once, which meant a
+  // change to any of them tore down the rest. waterGeometry is rebuilt per
+  // zone (waterSegments follows cliffSwell: 384 on a cliff map, 160 on a
+  // cove), so travelling between a cliff zone and anything else disposed all
+  // three materials — while their useMemo, keyed only on qualityConfig, kept
+  // handing back the same now-disposed instances.
+  //
+  // That defeated the deliberate "keep these three very large programs alive
+  // across travel" behaviour documented above, forcing a full relink of the
+  // biggest shaders in the game on those transitions. It also crashed:
+  // dispose() drops the material from three's `properties` WeakMap, so an
+  // in-flight compileAsync from the same transition then read
+  // `properties.get(material).currentProgram` as undefined and threw inside
+  // checkMaterialsReady. Each resource now owns its own lifetime.
+  useEffect(() => () => waterGeometry.dispose(), [waterGeometry]);
+
+  useEffect(() => () => {
+    waterMaterial.dispose();
+    surfMaterial.dispose();
+    deepMaterial.dispose();
+  }, [waterMaterial, surfMaterial, deepMaterial]);
+
+  useEffect(() => () => {
+    grabRef.current?.dispose();
+    grabRef.current = null;
+    reflectionRT.dispose();
+  }, [reflectionRT]);
 
   return (
     <group userData={{
