@@ -46,6 +46,7 @@
     events: [],
     longTasks: [],
     loaf: [],
+    programEvents: [],
     observer: null,
     loafObserver: null,
     rafId: 0,
@@ -160,6 +161,41 @@
     };
   }
 
+  // Which shader programs compiled, and when.
+  //
+  // "+15 programs during the first camera sweep" is a symptom; the fix depends
+  // entirely on *which* programs, because the launch path already runs
+  // compileAsync over the whole scene. A program that still compiles late is
+  // either on an object that mounted after the prewarm, or a second variant of
+  // an already-compiled material (a different clipping/fog/lights state — the
+  // planar reflection pass is the usual source of those). The name and cache
+  // key tell those apart.
+  const seenPrograms = new Set();
+  let lastProgramCount = -1;
+
+  function notePrograms() {
+    const gl = sceneHandle()?.gl;
+    const programs = gl?.info?.programs;
+    if (!programs || programs.length === lastProgramCount) return;
+    lastProgramCount = programs.length;
+    for (const program of programs) {
+      const key = program.cacheKey || program.id;
+      if (!key || seenPrograms.has(key)) continue;
+      seenPrograms.add(key);
+      // The first pass populates the baseline; only compiles that happen once
+      // a trace is running are interesting.
+      if (!state.running || state.programEvents.length >= 400) continue;
+      state.programEvents.push({
+        atMs: Math.round(performance.now() - state.startedAt),
+        phase: state.phase,
+        name: program.name || 'unknown',
+        // Cache keys are enormous; the tail carries the defines that
+        // distinguish two variants of the same material.
+        keyTail: String(key).slice(-90),
+      });
+    }
+  }
+
   function resetFrameCounters() {
     const gl = sceneHandle()?.gl;
     if (gl?.info && gl.info.autoReset === false) gl.info.reset();
@@ -220,6 +256,7 @@
     cols.yaw.push(readYaw());
     cols.dpr.push(info ? Math.round(info.dpr * 100) / 100 : 0);
     cols.phase.push(state.phase);
+    notePrograms();
     state.prev = info;
     state.prevRafTs = rafTs;
     resetFrameCounters();
@@ -423,6 +460,7 @@
       state.events = [];
       state.longTasks = [];
       state.loaf = [];
+      state.programEvents = [];
       quadPassTally.clear();
       state.phase = 'boot';
       state.phases.push({ label: 'boot', startMs: 0, endMs: null });
@@ -520,6 +558,7 @@
         events: state.events,
         longTasks: state.longTasks,
         longAnimationFrames: state.loaf,
+        programEvents: state.programEvents,
         quadPassTally: [...quadPassTally.entries()]
           .sort((a, b) => b[1] - a[1])
           .map(([label, count]) => ({ label, count })),

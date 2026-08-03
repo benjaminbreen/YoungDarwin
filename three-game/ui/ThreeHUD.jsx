@@ -4127,7 +4127,21 @@ function CameraCycleButton({ className }) {
   return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
 }
 
-const HUD_ENTRANCE_TIMINGS_MS = Object.freeze([650, 1120, 1540, 2200]);
+// Staggered reveal of the interface after the landing.
+//
+// The first stage used to land at 650ms, which is not long enough to register
+// as anything but "the HUD is already there". Holding the first panel until
+// two seconds gives the player a beat of unobstructed vista — the ship, the
+// bay, the shoreline — before four chrome panels claim the corners, so the
+// landing reads as arriving somewhere rather than opening a screen.
+//
+// Nothing input-critical waits on this: the stages drive opacity only (the
+// elements stay mounted), and the completion callback gates telemetry, the
+// audio start and the resumption of heavy background work. Letting those last
+// two land a second later is a bonus rather than a cost, since it keeps the
+// first seconds after load quieter. Reduced-motion users still skip straight
+// to the finished state.
+const HUD_ENTRANCE_TIMINGS_MS = Object.freeze([2000, 2500, 2950, 3400]);
 const HUD_ENTRANCE_TRANSITION_MS = 700;
 
 export function ThreeHUD({

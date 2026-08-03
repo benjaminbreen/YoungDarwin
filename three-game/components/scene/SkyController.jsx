@@ -54,6 +54,10 @@ const C = {
   // (cooler fill) while the ground bounce goes honeyed — the graded morning
   // look, driven entirely by these two lerp targets.
   hemiSkyGolden: new THREE.Color('#9cc4ea'),
+  // Sky fill for a low sun. Shadowed surfaces at that hour are lit almost
+  // entirely by blue sky, so the fill goes bluer as the sun drops — this is
+  // what makes lit sand read as lit rather than as slightly brighter sand.
+  hemiSkyLowSun: new THREE.Color('#8ab3e6'),
   hemiGroundNight: new THREE.Color('#0a0d12'),
   hemiGroundDay: new THREE.Color('#987d5c'), // restrained sand/rock bounce, not orange fill
   hemiGroundGolden: new THREE.Color('#c2915d'),
@@ -2422,18 +2426,32 @@ export function SkyController({
         shadowProjectionChanged = true;
       }
     }
+    // How low the sun is, as a 0..1 ramp: full below ~8 degrees of altitude,
+    // gone by ~30. Expressed in sin(altitude) because that is what `elevation`
+    // already is. Drives warm/cool separation only — see `lowSunContrast` in
+    // world/solarLook.js for why this is separate from `golden`.
+    const lowSun = daylight
+      * (1 - THREE.MathUtils.smoothstep(s.elevation, 0.139, 0.5))
+      * THREE.MathUtils.clamp(solarLookTuning.lowSunContrast ?? 0, 0, 2);
     if (hemiRef.current) {
-      hemiRef.current.color.copy(C.hemiSkyNight).lerp(C.hemiSkyDay, daylight).lerp(C.hemiSkyGolden, golden * 0.6);
+      hemiRef.current.color
+        .copy(C.hemiSkyNight)
+        .lerp(C.hemiSkyDay, daylight)
+        .lerp(C.hemiSkyGolden, golden * 0.6)
+        .lerp(C.hemiSkyLowSun, lowSun * 0.45);
       hemiRef.current.groundColor
         .copy(C.hemiGroundNight)
         .lerp(C.hemiGroundDay, daylight)
         .lerp(C.hemiGroundGolden, golden * 0.6)
         .lerp(C.hemiGroundSunlit, lightRig.groundBounce * 0.8);
-      hemiRef.current.intensity = lightRig.hemiIntensity;
+      // Less sky fill at a low sun, so the key light carries more of the frame.
+      hemiRef.current.intensity = lightRig.hemiIntensity * (1 - lowSun * 0.25);
     }
     if (ambientRef.current) {
       ambientRef.current.color.copy(C.ambNight).lerp(C.ambDay, daylight);
-      ambientRef.current.intensity = lightRig.ambientIntensity;
+      // Easing the flat ambient floor is what actually deepens the shadows;
+      // the hemisphere still fills them, just with directional, cooler light.
+      ambientRef.current.intensity = lightRig.ambientIntensity * (1 - lowSun * 0.35);
     }
 
     // --- fog + background + exposure -----------------------------------------

@@ -70,6 +70,24 @@ export function faunaDebugEnabled() {
 // render() through this handle, and profiling a dev build measures React's
 // development overhead as much as the game's. The handle is read-only plumbing
 // and only appears when the URL asks for automation.
+// Whether the frame-rate readout may be opened in this build.
+//
+// The full developer panel stays out of production: it carries the asset
+// browser, the animation lab, every tuning slider, and a per-source cost probe
+// that walks the whole scene graph. But "is the deployed build slower than my
+// local one?" is a real question that cannot be answered without a readout in
+// the deployed build, and a lightweight monitor costs nothing a player would
+// notice — it reads counters the renderer already maintains.
+//
+// Opt-in by URL so a player can never reach it by pressing a key. In
+// production `?perfHud` (or the automation flags) enables the backtick toggle;
+// in development the panel behaves as it always has.
+export function perfHudEnabled() {
+  if (typeof window === 'undefined') return false;
+  if (process.env.NODE_ENV !== 'production') return true;
+  return urlDebugFlagEnabled(['perfHud', 'perfProbe', 'e2e']);
+}
+
 export function sceneHandleEnabled() {
   if (typeof window === 'undefined') return false;
   if (process.env.NODE_ENV !== 'production') return true;

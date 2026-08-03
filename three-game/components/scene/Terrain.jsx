@@ -34,6 +34,7 @@ import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { terrainLookTuning } from '../../world/terrainLook';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = TERRAIN_WATER_SURFACE_Y;
@@ -157,6 +158,56 @@ const TERRAIN_TEXTURE_CARRY_APPLY = /* glsl */`
   }
 `;
 
+// Global terrain grade. uTerrainGrade is (brightness, saturation, contrast,
+// warmth); uTerrainGradeExtra is (macroVariation, roughnessOffset,
+// normalStrength). Pure arithmetic on values the shader already holds — no
+// added samplers, which matters because this runs on every terrain fragment
+// and the renderer is fill-bound.
+const TERRAIN_GRADE_APPLY = /* glsl */`
+  {
+    vec3 graded = diffuseColor.rgb * uTerrainGrade.x;
+    float gradeLuma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+    graded = mix(vec3(gradeLuma), graded, uTerrainGrade.y);
+    // Contrast pivots on mid grey so brightness and contrast stay independent.
+    graded = (graded - 0.5) * uTerrainGrade.z + 0.5;
+    // Warmth trades blue against red at constant luminance, so the ground
+    // shifts in hue without also changing how bright it reads.
+    graded *= vec3(1.0 + uTerrainGrade.w * 0.16, 1.0, 1.0 - uTerrainGrade.w * 0.16);
+
+    // Steep faces toward exposed rock. The geometric normal is rebuilt from
+    // world-position derivatives rather than read from vNormal, matching what
+    // the shared lighting block already does and avoiding any assumption
+    // about which normal varyings a region's material left in scope.
+    if (uTerrainGradeShape.x > 0.001) {
+      vec3 gradeFaceNormal = normalize(cross(dFdx(vCausticsW), dFdy(vCausticsW)));
+      float gradeSlope = 1.0 - clamp(abs(gradeFaceNormal.y), 0.0, 1.0);
+      float slopeAmount = smoothstep(0.12, 0.62, gradeSlope) * uTerrainGradeShape.x;
+      float slopeLuma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+      graded = mix(graded, mix(vec3(slopeLuma), graded, 0.5) * 0.88, slopeAmount);
+    }
+
+    // Elevation tint over roughly the first 25 metres.
+    if (abs(uTerrainGradeShape.y) > 0.001) {
+      float gradeHeight = clamp(vCausticsW.y / 25.0, -1.0, 1.0);
+      float heightAmount = gradeHeight * uTerrainGradeShape.y * 0.12;
+      graded *= vec3(1.0 + heightAmount, 1.0, 1.0 - heightAmount);
+    }
+
+    // Aerial perspective for the ground plane. Distance comes from the world
+    // position against cameraPosition, which is a built-in uniform, so this
+    // does not depend on vViewPosition being declared.
+    if (uTerrainGradeShape.z > 0.001) {
+      float gradeDistance = length(vCausticsW - cameraPosition);
+      float farAmount = smoothstep(22.0, 150.0, gradeDistance) * uTerrainGradeShape.z;
+      float farLuma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+      graded = mix(graded, mix(vec3(farLuma), graded, 0.45) * 1.05, farAmount);
+    }
+
+    diffuseColor.rgb = clamp(graded, 0.0, 1.0);
+    roughnessFactor = clamp(roughnessFactor + uTerrainGradeExtra.y, 0.04, 1.0);
+  }
+`;
+
 // Composes shared lighting and apron-handoff behavior with each authored
 // region material's existing onBeforeCompile hook.
 function injectTerrainRenderingExtensions(material) {
@@ -178,6 +229,12 @@ function injectTerrainRenderingExtensions(material) {
     shader.uniforms.uTerrainWetShine = { value: 0 };
     shader.uniforms.uLocalApronTexture = terrainSeamUniforms.uLocalApronTexture;
     shader.uniforms.uTextureCarrySeam = terrainSeamUniforms.uTextureCarrySeam;
+    // Global terrain grade (world/terrainLook.js). Packed into two vectors so
+    // the whole panel costs two uniform slots rather than seven.
+    shader.uniforms.uTerrainGrade = { value: new THREE.Vector4(1, 1, 1, 0) };
+    shader.uniforms.uTerrainGradeExtra = { value: new THREE.Vector3(1, 0, 1) };
+    // (slopeTint, heightTint, distanceFade, detailTiling)
+    shader.uniforms.uTerrainGradeShape = { value: new THREE.Vector4(0, 0, 0, 1) };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -199,9 +256,34 @@ function injectTerrainRenderingExtensions(material) {
         `#include <common>
         uniform vec4 uLocalApronTexture;
         uniform vec4 uTextureCarrySeam;
+        uniform vec4 uTerrainGrade;
+        uniform vec3 uTerrainGradeExtra;
+        uniform vec4 uTerrainGradeShape;
         varying float vTerrainCarryDepth;
         ${TERRAIN_TEXTURE_CARRY_GLSL}
         ${CAUSTICS_GLSL}`,
+      )
+      // Applied at metalnessmap_fragment: every authored region writes its
+      // albedo at color_fragment and its roughness at roughnessmap_fragment,
+      // both of which run earlier, and physical lighting consumes them later.
+      // So this is the one point where the grade sees each region's finished
+      // surface and can still affect how it lights.
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+        ${TERRAIN_GRADE_APPLY}`,
+      )
+      // Normal strength has to land after each region's own normal work, which
+      // happens at normal_fragment_begin. Anchoring here — the last chunk
+      // before physical lighting reads the normal — is the only place that is
+      // reliably downstream of every region.
+      // `nonPerturbedNormal` is three r182's name for the pre-normal-map
+      // normal (older releases called it geometryNormal — using that name
+      // fails to compile here, silently blanking every terrain material).
+      .replace(
+        '#include <lights_physical_fragment>',
+        `normal = normalize(mix(nonPerturbedNormal, normal, uTerrainGradeExtra.z));
+        #include <lights_physical_fragment>`,
       )
       .replace(
         '#include <opaque_fragment>',
@@ -289,6 +371,29 @@ export function Terrain({ segmentCap = null }) {
       if (shader.uniforms.uTerrainWeatherSoftness) shader.uniforms.uTerrainWeatherSoftness.value = lightRig.weatherSoftness;
       if (shader.uniforms.uTerrainSunWarmth) shader.uniforms.uTerrainSunWarmth.value = lightRig.terrainSunWarmth;
       if (shader.uniforms.uTerrainCoolShade) shader.uniforms.uTerrainCoolShade.value = lightRig.terrainCoolShade;
+      if (shader.uniforms.uTerrainGrade) {
+        shader.uniforms.uTerrainGrade.value.set(
+          terrainLookTuning.brightness,
+          terrainLookTuning.saturation,
+          terrainLookTuning.contrast,
+          terrainLookTuning.warmth,
+        );
+      }
+      if (shader.uniforms.uTerrainGradeExtra) {
+        shader.uniforms.uTerrainGradeExtra.value.set(
+          terrainLookTuning.macroVariation,
+          terrainLookTuning.roughness,
+          terrainLookTuning.normalStrength,
+        );
+      }
+      if (shader.uniforms.uTerrainGradeShape) {
+        shader.uniforms.uTerrainGradeShape.value.set(
+          terrainLookTuning.slopeTint,
+          terrainLookTuning.heightTint,
+          terrainLookTuning.distanceFade,
+          terrainLookTuning.detailTiling,
+        );
+      }
       if (shader.uniforms.uTerrainWetShine) {
         // The shore-wet glint band is tuned for surf beaches (~1-2 m of wet
         // sand). On gently-sloped inland banks the same vertical band spans

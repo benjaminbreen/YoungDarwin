@@ -127,8 +127,13 @@ function postOfficeFragmentCommon() {
         float pobClearingMask(vec2 p) {
           return 1.0 - smoothstep(2.45, 4.8, length(p - vec2(0.0, 8.5)));
         }
-        float pobWetMask(float height) {
-          float exposedWet = (1.0 - smoothstep(-0.86, -0.24, height)) * step(-0.9, height);
+        // Damp sand near the waterline. The upper edge reaches further up the
+        // beach than the strict tide height and is broken by a long noise
+        // wobble, because a wet band that ends on a perfectly level contour
+        // reads as a drawn line rather than as the reach of the last wave.
+        float pobWetMask(float height, vec2 p) {
+          float wobble = (pobNoise(p * 0.09 + vec2(3.7, -6.2)) - 0.5) * 0.16;
+          float exposedWet = (1.0 - smoothstep(-0.88, -0.02 + wobble, height)) * step(-0.9, height);
           float submergedWet = (1.0 - smoothstep(-1.42, -0.86, height)) * step(height, -0.9);
           return clamp(max(exposedWet, submergedWet), 0.0, 1.0);
         }
@@ -147,12 +152,15 @@ function postOfficeFragmentCommon() {
           out vec2 basaltUv,
           out vec2 cinderUv
         ) {
-          groundUv = p * ${f(POST_OFFICE_LAYERS.ground.scale)} + vec2(-0.23, 0.29);
-          sandUv = p * ${f(POST_OFFICE_LAYERS.sand.scale)} + vec2(0.13, -0.19);
-          basaltUv = p * ${f(POST_OFFICE_LAYERS.basalt.scale)} + vec2(-0.27, 0.31);
+          // Detail tiling rides the shared terrain-look panel so the grain can
+          // be judged at playing distance instead of guessed from a constant.
+          float pobTiling = clamp(uTerrainGradeShape.w, 0.25, 4.0);
+          groundUv = p * (${f(POST_OFFICE_LAYERS.ground.scale)} * pobTiling) + vec2(-0.23, 0.29);
+          sandUv = p * (${f(POST_OFFICE_LAYERS.sand.scale)} * pobTiling) + vec2(0.13, -0.19);
+          basaltUv = p * (${f(POST_OFFICE_LAYERS.basalt.scale)} * pobTiling) + vec2(-0.27, 0.31);
           // Cinder is granular and does not need the old per-fragment path
           // frame calculation; world-space UVs remove all route-segment math.
-          cinderUv = p * ${f(POST_OFFICE_LAYERS.cinder.scale)} + vec2(-0.11, -0.37);
+          cinderUv = p * (${f(POST_OFFICE_LAYERS.cinder.scale)} * pobTiling) + vec2(-0.11, -0.37);
         }
         vec4 pobLayerWeights(vec2 p, float height, float slope) {
           vec4 path = pobPathSplat(p);
@@ -217,8 +225,37 @@ function postOfficeColorFragment() {
           + pobSand * pobWeights.y
           + pobBasalt * pobWeights.z
           + pobCinder * pobWeights.w;
+        // Macro breakup at two wavelengths.
+        //
+        // A single ~24m octave at +/-8% brightness was invisible on open sand:
+        // at this key, a pure value multiply that small disappears into tone
+        // mapping, and the dunes in the landing shot are wider than one
+        // wavelength anyway, so the whole foreground came out as one flat tan
+        // sheet. The broad octave (~77m) gives structure at the scale of a
+        // dune, and the tint tilt does the work the brightness could not:
+        // patches lean either shell-pale or iron-warm, and a hue difference
+        // survives bright light where a value difference does not.
+        //
+        // Both are value noise — hashes and mixes, no new texture samplers.
+        // The renderer is fill/bandwidth-bound with ALU to spare, so this is
+        // the cheap direction to buy detail in (see docs/perf-lab.md).
+        // Strength rides the shared terrain-look panel (world/terrainLook.js),
+        // so the amount of breakup can be judged live against the rest of the
+        // map instead of guessed in source.
+        float pobMacroAmount = clamp(uTerrainGradeExtra.x, 0.0, 3.0);
         float pobMacro = pobMacroNoise(pobPosition * 0.042 + vec2(7.0, -5.0));
-        pobSurface *= mix(0.91, 1.08, pobMacro);
+        float pobMacroBroad = pobNoise(pobPosition * 0.013 + vec2(-11.0, 4.0));
+        float pobMacroMix = pobMacro * 0.55 + pobMacroBroad * 0.45;
+        pobSurface *= mix(1.0, mix(0.88, 1.11, pobMacroMix), pobMacroAmount);
+        pobSurface *= mix(
+          vec3(1.0),
+          mix(
+            vec3(0.982, 0.992, 1.022),
+            vec3(1.032, 1.002, 0.952),
+            smoothstep(0.25, 0.75, pobMacroBroad)
+          ),
+          pobMacroAmount
+        );
         float pobInlandLitter = smoothstep(5.0, 30.0, pobPosition.y)
           * smoothstep(0.34, 0.74, pobNoise(pobPosition * 0.07 + vec2(-3.0, 6.0)));
         pobSurface *= mix(vec3(1.0), vec3(0.88, 0.91, 0.74), pobInlandLitter * 0.15);
@@ -234,7 +271,7 @@ function postOfficeColorFragment() {
         // centre; its contribution increases naturally through feathered edges.
         pobSurface = mix(pobSurface, pobWhiteSandColor, pobWhiteSand * 0.9);
 
-        float pobWet = pobWetMask(pobHeight);
+        float pobWet = pobWetMask(pobHeight, pobPosition);
         pobSurface = mix(pobSurface, pobSurface * vec3(0.48, 0.57, 0.55), pobWet * 0.7);
         float pobSubmerged = pobSubmergedMask(pobHeight);
         float pobDepth = clamp((-0.9 - pobHeight) / 2.7, 0.0, 1.0);
@@ -282,7 +319,7 @@ function postOfficeRoughnessFragment() {
           whiteSandBeachRoughness(pobRoughPosition),
           pobRoughWhiteSand
         );
-        float pobRoughWet = pobWetMask(pobRoughHeight);
+        float pobRoughWet = pobWetMask(pobRoughHeight, pobRoughPosition);
         pobMappedRoughness = mix(pobMappedRoughness, max(0.5, pobMappedRoughness - 0.3), pobRoughWet);
         pobMappedRoughness = mix(pobMappedRoughness, 0.68, pobSubmergedMask(pobRoughHeight) * 0.72);
         roughnessFactor = mix(roughnessFactor, pobMappedRoughness, 0.95);`;
@@ -334,7 +371,7 @@ function postOfficeNormalFragment() {
           whiteSandBeachNormalSlope(pobNormalPosition),
           pobNormalWhiteSand
         );
-        pobMappedSlope *= mix(1.0, 0.72, pobWetMask(pobNormalHeight));
+        pobMappedSlope *= mix(1.0, 0.72, pobWetMask(pobNormalHeight, pobNormalPosition));
 
         vec3 pobWorldNormal = inverseTransformDirection(normal, viewMatrix);
         vec3 pobWorldX = normalize(vec3(1.0, 0.0, 0.0) - pobWorldNormal * pobWorldNormal.x);

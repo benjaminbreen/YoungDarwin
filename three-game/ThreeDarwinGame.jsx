@@ -51,6 +51,15 @@ import {
   solarLookTuning,
   subscribeSolarLook,
 } from './world/solarLook';
+import { perfHudEnabled } from './runtimeDebug';
+import {
+  isTerrainLookDefault,
+  resetTerrainLookTuning,
+  setTerrainLookTuning,
+  subscribeTerrainLook,
+  terrainLookJson,
+  terrainLookTuning,
+} from './world/terrainLook';
 import { setCoverageAASupport } from './components/assets/materialStability';
 import {
   getPostGradeRevision,
@@ -133,6 +142,12 @@ import {
 } from './world/vistas/distanceSceneryRuntime';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
+// Resolved once at module load: the deployed build only offers the readout
+// when the URL asked for it, so a player cannot open it by pressing a key.
+const PERF_HUD_ENABLED = perfHudEnabled();
+// In production the panel is the monitor and nothing else — no asset browser,
+// no tuning sliders, and no per-source cost probe walking the scene graph.
+const PERF_HUD_LIGHTWEIGHT = !DEV_TOOLS_ENABLED;
 const AssetBrowserPanel = dynamic(
   () => import('./ui/dev/AssetBrowserPanel').then(module => module.AssetBrowserPanel),
   { ssr: false },
@@ -760,8 +775,40 @@ function collectSceneRenderStats(root, options = {}) {
   return stats;
 }
 
-function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
+// `sceneStats` walks the whole scene graph to attribute draw calls and
+// triangles per object. That is the expensive half of this component — a few
+// thousand objects inspected several times a second — and it is what keeps the
+// full panel out of production builds. With it off the sampler reports only
+// counters WebGLRenderer already maintains, which is free.
+function PerformanceSampler({ enabled, includeCosts = false, sceneStats = true, onSample }) {
   const { gl, scene } = useThree();
+
+  // three resets renderer.info at the top of every render() call, and with a
+  // post chain the last render of a frame is a fullscreen quad — so reading
+  // info.render.calls afterwards reports 1, not the frame's real draw count.
+  // (That is why the panel's "raw calls" always read 1 next to a scene-walked
+  // 700.) Taking ownership of the reset makes the counters accumulate across
+  // every pass, which is both correct and what lets the lightweight readout
+  // drop the scene walk entirely.
+  // Only one thing may own the reset. The perf lab's injected tracer takes it
+  // when present (it needs the counters at its own frame boundary), and two
+  // owners clearing the same counters race to zero — which is exactly what
+  // "raw calls: 0" next to a scene-walked 710 means.
+  const ownsInfoReset = useRef(false);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (typeof window !== 'undefined' && window.__perfLab) {
+      ownsInfoReset.current = false;
+      return undefined;
+    }
+    const previous = gl.info.autoReset;
+    gl.info.autoReset = false;
+    ownsInfoReset.current = true;
+    return () => {
+      gl.info.autoReset = previous;
+      ownsInfoReset.current = false;
+    };
+  }, [enabled, gl]);
   const samples = useRef({
     frames: 0,
     elapsed: 0,
@@ -779,6 +826,19 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
   useFrame((_, delta) => {
     if (!enabled) return;
     const state = samples.current;
+    // Read the counters the finished frame accumulated, then clear them for
+    // the frame about to be drawn. Reading before the reset is what makes
+    // these whole-frame totals rather than whatever the last pass happened to
+    // draw. r3f renders after every useFrame, so this is the frame boundary.
+    const frameInfo = gl.info;
+    state.rawCalls = frameInfo.render.calls;
+    state.rawTriangles = frameInfo.render.triangles;
+    state.rawPoints = frameInfo.render.points;
+    state.rawLines = frameInfo.render.lines;
+    // Clear only if we own the boundary. When the perf lab is attached these
+    // raw counters belong to its clock, not ours — read its trace instead of
+    // the panel's raw row in that case.
+    if (ownsInfoReset.current) frameInfo.reset();
     state.frames += 1;
     state.elapsed += delta;
     state.lastPublish += delta;
@@ -797,9 +857,12 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
     const info = gl.info;
     const sceneStatsInterval = includeCosts ? 1.25 : 0.75;
     if (
-      !state.sceneStats
-      || state.sceneStatsIncludeCosts !== includeCosts
-      || state.sceneElapsed >= sceneStatsInterval
+      sceneStats
+      && (
+        !state.sceneStats
+        || state.sceneStatsIncludeCosts !== includeCosts
+        || state.sceneElapsed >= sceneStatsInterval
+      )
     ) {
       state.sceneStats = collectSceneRenderStats(scene, { includeCosts });
       state.sceneStatsIncludeCosts = includeCosts;
@@ -812,14 +875,20 @@ function PerformanceSampler({ enabled, includeCosts = false, onSample }) {
       worstFrameRawMs: state.worstFrameRawMs,
       framesOver32Ms: state.framesOver32Ms,
       framesOver50Ms: state.framesOver50Ms,
-      rawCalls: info.render.calls,
-      rawTriangles: info.render.triangles,
-      points: info.render.points,
-      lines: info.render.lines,
+      rawCalls: state.rawCalls,
+      rawTriangles: state.rawTriangles,
+      points: state.rawPoints,
+      lines: state.rawLines,
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       pixelRatio: gl.getPixelRatio(),
-      ...state.sceneStats,
+      // Without the scene walk there is no per-object attribution, but the
+      // headline numbers still need to resolve, so the renderer's own totals
+      // stand in for them.
+      ...(sceneStats ? state.sceneStats : {
+        sceneDrawCalls: state.rawCalls,
+        sceneTriangles: state.rawTriangles,
+      }),
     });
     state.frames = 0;
     state.elapsed = 0;
@@ -1487,6 +1556,144 @@ function OpeningVisualReadySignal({
     if (stableFramesRef.current < 3 || announcedSequenceRef.current === sequenceId) return;
     announcedSequenceRef.current = sequenceId;
     onReady();
+  });
+
+  return null;
+}
+
+// How many textures to force onto the GPU per frame during the settled
+// prewarm. The whole point is to avoid trading one long stall for another, so
+// this stays small enough to disappear into a frame's slack.
+const PREWARM_TEXTURE_BUDGET_PER_FRAME = 4;
+
+// Every texture reachable from the scene's materials. Walked once per zone.
+function collectSceneTextures(root) {
+  const textures = new Set();
+  const consider = value => {
+    if (value?.isTexture && !value.isRenderTargetTexture) textures.add(value);
+  };
+  root.traverse(object => {
+    const material = object.material;
+    if (!material) return;
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      if (!entry) continue;
+      for (const value of Object.values(entry)) consider(value);
+      // Custom/`onBeforeCompile` materials keep their maps in uniforms, where
+      // a plain property sweep never finds them — the water, the vistas and
+      // the terrain are all in this category.
+      if (entry.uniforms) {
+        for (const uniform of Object.values(entry.uniforms)) consider(uniform?.value);
+      }
+    }
+  });
+  return [...textures];
+}
+
+// Wait this long after the scene stops growing before prewarming it, and never
+// prewarm more often than the cooldown. Content arrives in bursts; recompiling
+// on every single mount would spend more time traversing than it saves.
+const PREWARM_QUIET_MS = 700;
+const PREWARM_COOLDOWN_MS = 1500;
+
+// GPU prewarm that follows the scene instead of a single milestone.
+//
+// OpeningVisualReadySignal compiles the scene while the launch overlay is still
+// opaque, and that covers the landing shot. The problem is everything that
+// mounts afterwards — wildlife, imported GLB props, the ship's rigging. Those
+// materials pay for their shader link *and* their first texture upload on the
+// frame they are first drawn, and that frame is whichever one the camera first
+// turns toward them. It is precisely why rotating hitches when standing still
+// does not.
+//
+// Measured at Post Office Bay before this existed (npm run perf:lab
+// --scenario=stutter): the first camera sweep compiled 15 programs —
+// M_SeagullBody, M_SeagullWings, two Tripo GLB materials, sail and beam
+// textures — and uploaded 25 textures and 32 geometries inside single frames,
+// taking the 1% low to 6.3fps against 19.6fps standing.
+//
+// Two earlier guesses were wrong and are worth not repeating. It is not the
+// water planar reflection compiling a second material variant: the same
+// programs still compile late with ?noReflections. And it is not fixed by
+// prewarming once at the full content phase: these objects mount roughly
+// twelve seconds after that milestone, so a one-shot trigger runs too early.
+// Hence a growth-driven trigger — renderer.info.memory.geometries is the
+// cheapest honest proxy for "the scene gained something drawable".
+//
+// compile() alone is not enough either: it acquires programs but never sets
+// uniforms, so textures stay on the CPU. initTexture forces those, drained a
+// few per frame so this does not simply relocate the stall. Geometry upload
+// has no equivalent public API in three and still lands on first draw.
+function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
+  const { gl, scene, camera } = useThree();
+  const seenGeometriesRef = useRef(-1);
+  const dirtySinceRef = useRef(0);
+  const lastRunAtRef = useRef(0);
+  const runningRef = useRef(false);
+  const queueRef = useRef(null);
+  const zoneRef = useRef(null);
+
+  useFrame(() => {
+    if (!zoneId || !contentPhase || contentPhase < contentTarget) return;
+    if (zoneRef.current !== zoneId) {
+      zoneRef.current = zoneId;
+      seenGeometriesRef.current = -1;
+      dirtySinceRef.current = 0;
+      lastRunAtRef.current = 0;
+      queueRef.current = null;
+    }
+
+    const now = performance.now();
+    const geometries = gl.info.memory.geometries;
+    if (geometries !== seenGeometriesRef.current) {
+      seenGeometriesRef.current = geometries;
+      dirtySinceRef.current = now;
+    }
+
+    // Drain any queued texture uploads first; they are the cheap half and the
+    // one that must not land in a single frame.
+    const queue = queueRef.current;
+    if (queue?.length) {
+      for (let budget = 0; budget < PREWARM_TEXTURE_BUDGET_PER_FRAME && queue.length; budget += 1) {
+        const texture = queue.pop();
+        if (!texture?.image) continue;
+        try {
+          gl.initTexture(texture);
+        } catch {
+          // A texture whose source is not decodable yet simply uploads later.
+        }
+      }
+      return;
+    }
+
+    if (
+      runningRef.current
+      || !dirtySinceRef.current
+      || now - dirtySinceRef.current < PREWARM_QUIET_MS
+      || now - lastRunAtRef.current < PREWARM_COOLDOWN_MS
+    ) return;
+
+    dirtySinceRef.current = 0;
+    lastRunAtRef.current = now;
+    runningRef.current = true;
+    let timeoutId = null;
+    Promise.resolve()
+      .then(() => Promise.race([
+        typeof gl.compileAsync === 'function'
+          ? gl.compileAsync(scene, camera)
+          : Promise.resolve(gl.compile(scene, camera)),
+        new Promise(resolve => {
+          timeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
+        }),
+      ]))
+      .catch(() => {
+        // The renderer reports shader errors itself. A driver that cannot
+        // precompile must not wedge gameplay.
+      })
+      .then(() => {
+        if (timeoutId != null) window.clearTimeout(timeoutId);
+        queueRef.current = collectSceneTextures(scene);
+        runningRef.current = false;
+      });
   });
 
   return null;
@@ -2616,6 +2823,7 @@ function SolarDiagnostics({ settings, set }) {
       {/* These affect sun-on-screen optics; face the sun to judge them. */}
       <div className="grid grid-cols-1 gap-1.5">
         <DevSlider label="Golden hour" value={solarLookTuning.goldenBoost} min={0} max={1.8} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ goldenBoost: value })} />
+        <DevSlider label="Low-sun contrast" value={solarLookTuning.lowSunContrast} min={0} max={1.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ lowSunContrast: value })} />
         <DevSlider label="Sun optics" value={solarLookTuning.opticsIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ opticsIntensity: value })} />
         <DevSlider label="Screen glare" value={solarLookTuning.glareIntensity} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ glareIntensity: value })} />
         <DevSlider label="Exposure" value={solarLookTuning.exposureScale} min={0.7} max={1.3} step={0.01} format={v => `${v.toFixed(2)}x`} onChange={value => setSolarLookTuning({ exposureScale: value })} />
@@ -2653,6 +2861,70 @@ function DevSlider({ label, value, min, max, step, format, onChange }) {
   );
 }
 
+// Live grade over every authored terrain material, so ground can be judged and
+// adjusted across the map without a shader edit and reload. Values persist to
+// localStorage and "Copy JSON" hands the tuned set back for baking into
+// TERRAIN_LOOK_DEFAULTS.
+function TerrainLookSection() {
+  const [, setRevision] = useState(0);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => subscribeTerrainLook(() => setRevision(value => value + 1)), []);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const id = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const set = patch => setTerrainLookTuning(patch);
+  return (
+    <div className="mb-3 rounded border border-amber-200/20 bg-black/20 p-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Terrain textures</h3>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard?.writeText(terrainLookJson()).then(() => setCopied(true)).catch(() => {});
+            }}
+            className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-100/60 hover:bg-white/10"
+          >
+            {copied ? 'copied' : 'copy json'}
+          </button>
+          <button
+            type="button"
+            onClick={() => resetTerrainLookTuning()}
+            className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-100/60 hover:bg-white/10"
+          >
+            reset
+          </button>
+        </div>
+      </div>
+      <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
+        Applies to every region&apos;s ground after its own layer blend, so one setting reads the
+        same everywhere. Persists across reloads; Copy JSON gives the tuned values back for baking in.
+        {isTerrainLookDefault() ? '' : ' Currently overriding the shipped defaults.'}
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Brightness" value={terrainLookTuning.brightness} min={0.6} max={1.5} step={0.01} format={v => `${v.toFixed(2)}×`} onChange={value => set({ brightness: value })} />
+        <DevSlider label="Saturation" value={terrainLookTuning.saturation} min={0} max={2} step={0.02} format={v => `${v.toFixed(2)}×`} onChange={value => set({ saturation: value })} />
+        <DevSlider label="Contrast" value={terrainLookTuning.contrast} min={0.6} max={1.6} step={0.02} format={v => `${v.toFixed(2)}×`} onChange={value => set({ contrast: value })} />
+        <DevSlider label="Warm / cool" value={terrainLookTuning.warmth} min={-1} max={1} step={0.02} format={v => (v === 0 ? 'neutral' : `${v > 0 ? '+' : ''}${v.toFixed(2)}`)} onChange={value => set({ warmth: value })} />
+        <DevSlider label="Macro variation" value={terrainLookTuning.macroVariation} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}×`} onChange={value => set({ macroVariation: value })} />
+        <DevSlider label="Roughness" value={terrainLookTuning.roughness} min={-0.3} max={0.3} step={0.01} format={v => (v === 0 ? 'authored' : `${v > 0 ? '+' : ''}${v.toFixed(2)}`)} onChange={value => set({ roughness: value })} />
+        <DevSlider label="Bump strength" value={terrainLookTuning.normalStrength} min={0} max={2} step={0.05} format={v => `${v.toFixed(2)}×`} onChange={value => set({ normalStrength: value })} />
+        <DevSlider label="Detail tiling" value={terrainLookTuning.detailTiling} min={0.3} max={2.5} step={0.05} format={v => `${v.toFixed(2)}×`} onChange={value => set({ detailTiling: value })} />
+      </div>
+      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+        Shaping · neutral by default
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Slope → rock" value={terrainLookTuning.slopeTint} min={0} max={1} step={0.02} format={v => (v === 0 ? 'off' : v.toFixed(2))} onChange={value => set({ slopeTint: value })} />
+        <DevSlider label="Height tint" value={terrainLookTuning.heightTint} min={-1} max={1} step={0.02} format={v => (v === 0 ? 'off' : `${v > 0 ? '+' : ''}${v.toFixed(2)}`)} onChange={value => set({ heightTint: value })} />
+        <DevSlider label="Distance fade" value={terrainLookTuning.distanceFade} min={0} max={1} step={0.02} format={v => (v === 0 ? 'off' : v.toFixed(2))} onChange={value => set({ distanceFade: value })} />
+      </div>
+    </div>
+  );
+}
+
 function CentralPeakDiagnostics() {
   const [, setRevision] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -2680,7 +2952,7 @@ function CentralPeakDiagnostics() {
   return (
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Island Distance Scenery</h3>
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Distant islands (horizon)</h3>
         <div className="flex gap-1">
           <button
             type="button"
@@ -2752,7 +3024,7 @@ function CentralPeakDiagnostics() {
           </div>
           <div className="grid grid-cols-1 gap-1.5">
             <DevSlider label="Relief" value={distanceSceneryRuntime.shellRelief} min={0.35} max={1.8} step={0.05} format={value => `${value.toFixed(2)}×`} onChange={value => shellSet({ shellRelief: value })} />
-            <DevSlider label="Vertical" value={distanceSceneryRuntime.shellVertical} min={-6} max={8} step={0.25} format={value => `${value.toFixed(2)} m`} onChange={value => shellSet({ shellVertical: value })} />
+            <DevSlider label="Height" value={distanceSceneryRuntime.shellVertical} min={-14} max={8} step={0.25} format={value => `${value.toFixed(2)} m`} onChange={value => shellSet({ shellVertical: value })} />
             <DevSlider label="Radial scale" value={distanceSceneryRuntime.shellRadiusScale} min={0.7} max={1.4} step={0.02} format={value => `${value.toFixed(2)}×`} onChange={value => shellSet({ shellRadiusScale: value })} />
             <DevSlider label="Haze starts" value={distanceSceneryRuntime.shellHazeStart} min={50} max={300} step={5} format={value => `${value.toFixed(0)} m`} onChange={value => shellSet({ shellHazeStart: value })} />
             <DevSlider label="Haze full" value={distanceSceneryRuntime.shellHazeEnd} min={180} max={700} step={10} format={value => `${value.toFixed(0)} m`} onChange={value => shellSet({ shellHazeEnd: value })} />
@@ -3019,9 +3291,14 @@ function PerformancePanel({
   onCostProbeChange,
   onChange,
   onClose,
+  // Deployed builds get the monitor only. The other tabs are authoring tools —
+  // asset browser, tuning sliders, a cost probe that walks the scene graph —
+  // and none of them belong in front of a player or in a frame-rate comparison.
+  lightweight = false,
 }) {
   const [tab, setTab] = useState('monitor');
   if (!open) return null;
+  const activeTab = lightweight ? 'monitor' : tab;
   // Every change is also dropped on the perf-capture timeline, so an exported
   // JSON can attribute a frame-time step to the exact knob that moved.
   const set = patch => {
@@ -3042,7 +3319,7 @@ function PerformancePanel({
         <h2 className="text-sm font-bold uppercase tracking-wide">Performance</h2>
         <button type="button" onClick={onClose} className="rounded border border-white/10 px-2 py-1 text-xs hover:bg-white/10">Close</button>
       </div>
-      <div className="mb-3 grid grid-cols-5 gap-1 rounded border border-amber-100/15 bg-black/20 p-1">
+      <div className={`mb-3 grid-cols-5 gap-1 rounded border border-amber-100/15 bg-black/20 p-1 ${lightweight ? 'hidden' : 'grid'}`}>
         {PERF_PANEL_TABS.map(([id, label]) => (
           <button
             key={id}
@@ -3054,7 +3331,7 @@ function PerformancePanel({
           </button>
         ))}
       </div>
-      {tab === 'monitor' && (
+      {activeTab === 'monitor' && (
         <>
           <div className="mb-3 grid grid-cols-3 gap-1.5">
             <Metric label="FPS" value={metrics.fps ? Math.round(metrics.fps) : '--'} />
@@ -3073,7 +3350,7 @@ function PerformancePanel({
           <PerfMonitorSection settings={settings} />
         </>
       )}
-      {tab === 'quality' && (
+      {activeTab === 'quality' && (
         <>
           <PerfOptionRow
             label="Quality"
@@ -3149,14 +3426,19 @@ function PerformancePanel({
           </p>
         </>
       )}
-      {tab === 'visuals' && (
+      {activeTab === 'visuals' && (
         <>
-          <SolarDiagnostics settings={settings} set={set} />
+          {/* Ground first, then the horizon, then sun and cloud. The two
+              sections people reach for most often used to sit below several
+              screens of backdrop sliders, which made them effectively
+              undiscoverable. */}
+          <TerrainLookSection />
           <CentralPeakDiagnostics />
+          <SolarDiagnostics settings={settings} set={set} />
           <CloudShadeDiagnostics />
         </>
       )}
-      {tab === 'systems' && (
+      {activeTab === 'systems' && (
         <>
           <p className="mb-2 text-[10px] leading-snug text-amber-100/45">
             Isolation toggles: bisect a frame-time problem by switching whole systems off while
@@ -3183,7 +3465,7 @@ function PerformancePanel({
           <SceneCostBreakdown enabled={costProbe} onEnabledChange={onCostProbeChange} metrics={metrics} />
         </>
       )}
-      {tab === 'physics' && (
+      {activeTab === 'physics' && (
         <>
           <div className="mb-2">
             <Toggle label="Physics Debug" checked={settings.physicsDebug} onChange={value => set({ physicsDebug: value })} />
@@ -3733,7 +4015,7 @@ export default function ThreeDarwinGame({
         toggleEcologyDebug();
         return;
       }
-      if (event.code !== 'Backquote' || !DEV_TOOLS_ENABLED) return;
+      if (event.code !== 'Backquote' || !(DEV_TOOLS_ENABLED || PERF_HUD_ENABLED)) return;
       event.preventDefault();
       if (event.repeat) return;
       if (event.shiftKey) {
@@ -4403,6 +4685,11 @@ export default function ThreeDarwinGame({
               transition={transition}
               waterQuality={scenePerfSettings.waterQuality || 'polished'}
             />
+            <SettledContentPrewarm
+              zoneId={currentZoneId}
+              contentPhase={activeContentPhase}
+              contentTarget={STARTUP_FULL_CONTENT_PHASE}
+            />
             <ThreeE2EFrameSignal enabled={automationReadyMode} />
             <TravelCameraRig />
             <PostFX
@@ -4433,6 +4720,7 @@ export default function ThreeDarwinGame({
             <PerformanceSampler
               enabled={showPerf || perfProbe || perfCaptureRecording}
               includeCosts={costProbe}
+              sceneStats={!PERF_HUD_LIGHTWEIGHT}
               onSample={sample => {
                 notePerfSample(sample);
                 if (typeof window !== 'undefined') {
@@ -4511,8 +4799,9 @@ export default function ThreeDarwinGame({
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <WaterDevPanel />}
         {gameUiVisible && <AudioDebugPanel open={showAudioDebug} onClose={closeAudioDebug} />}
-        {DEV_TOOLS_ENABLED && (
+        {(DEV_TOOLS_ENABLED || PERF_HUD_ENABLED) && (
           <PerformancePanel
+            lightweight={PERF_HUD_LIGHTWEIGHT}
             open={gameUiVisible && showPerf}
             settings={perfSettings}
             metrics={metrics}

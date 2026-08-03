@@ -15,6 +15,16 @@ export const SOLAR_LOOK_DEFAULTS = Object.freeze({
   glareIntensity: 1.1,
   // Multiplies outdoor tone-mapping exposure.
   exposureScale: 0.87,
+  // Warm/cool separation at low sun, deliberately independent of goldenBoost.
+  //
+  // goldenBoost damps the golden *tint* — the fully saturated version read as
+  // too much, hence 0.55. But what the early-morning frame actually lacks is
+  // separation, not orange: with the hemisphere at ~0.9 and ambient at ~0.22,
+  // shadowed sand sits nearly as bright and nearly as warm as lit sand, so a
+  // 17-degree sun still reads flat. This cools the sky fill and eases the
+  // ambient floor as the sun drops, deepening shadow without adding a drop of
+  // extra saturation. 0 restores the previous behaviour exactly.
+  lowSunContrast: 0.6,
 });
 
 export const solarLookTuning = { ...SOLAR_LOOK_DEFAULTS };

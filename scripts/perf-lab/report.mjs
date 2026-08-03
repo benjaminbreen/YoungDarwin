@@ -227,11 +227,25 @@ export function analyseTrace(trace) {
     }
   }
 
+  // Compiles that happened after the scene settled, grouped by phase and
+  // material name. Boot and settle compiles are expected — the launch path is
+  // deliberately compiling then, behind the overlay.
+  const lateCompiles = new Map();
+  for (const event of trace.programEvents || []) {
+    if (event.phase === 'boot' || event.phase === 'settle') continue;
+    const key = `${event.phase}::${event.name}`;
+    const entry = lateCompiles.get(key)
+      || { phase: event.phase, name: event.name, count: 0, firstAtMs: event.atMs, keyTail: event.keyTail };
+    entry.count += 1;
+    lateCompiles.set(key, entry);
+  }
+
   return {
     environment: trace.environment,
     durationMs: trace.durationMs,
     totalFrames: columns.t.length,
     phases,
+    lateProgramCompiles: [...lateCompiles.values()].sort((a, b) => b.count - a.count),
     quadPassTally: trace.quadPassTally || [],
     topBlockers: [...blockers.values()].sort((a, b) => b.totalMs - a.totalMs).slice(0, 12),
     spikeCauses: [...causeTally.entries()]
@@ -336,6 +350,14 @@ export function formatDigest(analysis, meta = {}) {
     lines.push(
       `  shader programs compiled during: ${compiling.map(p => `${p.name} +${p.programsCompiled}`).join(', ')}`,
     );
+  }
+  // Late compiles by name. The launch path already prewarms the whole scene, so
+  // anything compiling after `settle` is the actionable set.
+  if (analysis.lateProgramCompiles?.length) {
+    lines.push('  programs compiled after settle (these are the prewarm misses)');
+    for (const entry of analysis.lateProgramCompiles.slice(0, 12)) {
+      lines.push(`    ${pad(entry.phase, 22)}${pad(entry.name, 26)}x${entry.count}`);
+    }
   }
   const extraPasses = analysis.phases.filter(phase => phase.avgScenePasses > 1.05);
   if (extraPasses.length) {
