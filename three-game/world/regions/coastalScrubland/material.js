@@ -52,16 +52,19 @@ const COASTAL_SCRUBLAND_WEIGHTS_GLSL = /* glsl */`
   weights.w += csrDrySeep * 0.08;
 `;
 
+export const COASTAL_SCRUBLAND_SPLAT_BOUNDS = {
+  originX: -56,
+  originZ: -52,
+  width: 112,
+  depth: 104,
+  size: 768,
+};
+
 export function createCoastalScrublandTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: COASTAL_SCRUBLAND_PATH_POINTS,
-    pathSplatBounds: {
-      originX: -56,
-      originZ: -52,
-      width: 112,
-      depth: 104,
-      size: 768,
-    },
+    pathSplatBake: 'coastal-scrubland',
+    pathSplatBounds: COASTAL_SCRUBLAND_SPLAT_BOUNDS,
     pathMinimumWidth: 1.65,
     layerConfig: COASTAL_SCRUBLAND_LAYERS,
     surfaceMaskGLSL: COASTAL_SCRUBLAND_MASK_GLSL,

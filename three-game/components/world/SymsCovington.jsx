@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
@@ -34,6 +34,11 @@ import {
   SYMS_HOME_ZONE_ID,
   findSymsCompanionArrival,
 } from '../../npcs/symsCompanion';
+import { NPC_STATUS, npcStatusStyle } from '../../npcs/npcStatus';
+import { resolveSymsStatus } from '../../npcs/symsStatus';
+import { getThreeSpecimens } from '../../data';
+import { NpcStatusOrb } from './NpcStatusOrb';
+import { TerrainRingMarker } from './TerrainRingMarker';
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';
 const SYMS_GROUND_CLEARANCE = 0.04;
@@ -167,6 +172,15 @@ export function SymsCovington({ motionPaused = false }) {
   const footstepRef = useRef({ phase: 0, side: 'left' });
   const visible = currentZoneId === symsZoneId;
   const activityPlan = useMemo(() => buildSymsPostOfficeBayPlan(), []);
+  // Status drives the orb colour and the plate text. It is written from the
+  // frame loop but only when the pair actually changes — a directive flip or a
+  // site arrival, not every frame.
+  const [statusState, setStatusState] = useState({
+    status: NPC_STATUS.NEUTRAL,
+    activity: 'Casting about for work',
+  });
+  const statusRef = useRef(statusState);
+  const zoneSpecimens = useMemo(() => getThreeSpecimens(currentZoneId), [currentZoneId]);
   const obstacles = useMemo(() => (
     getRuntimeObstacles(currentZoneId, pushableObstacleOffsets)
   ), [currentZoneId, pushableObstacleOffsets]);
@@ -325,6 +339,19 @@ export function SymsCovington({ motionPaused = false }) {
     const player = playerPose?.position || {};
     const collisionProps = getZonePropCollisionProps(currentZoneId, propCollisionDefinitions);
 
+    const applyStatus = input => {
+      const next = resolveSymsStatus({
+        position,
+        specimens: zoneSpecimens,
+        runtimePositions: useThreeGameStore.getState().specimenRuntimePositions?.[currentZoneId],
+        ...input,
+      });
+      const current = statusRef.current;
+      if (current.status === next.status && current.activity === next.activity) return;
+      statusRef.current = next;
+      setStatusState(next);
+    };
+
     if (motionPaused) {
       group.current.position.set(position.x, position.y, position.z);
       group.current.rotation.y = motion.desiredYaw;
@@ -465,6 +492,8 @@ export function SymsCovington({ motionPaused = false }) {
 
     let movementSpeed = 0;
     let stationaryAnimation = 'idle';
+    let activeDirective = SYMS_DIRECTIVES.RANGE;
+    let atSite = false;
     if (reaction.mode === 'snared') {
       group.current.position.set(position.x, position.y + 0.04, position.z);
       group.current.rotation.set(0, reaction.snareYaw, 0);
@@ -475,6 +504,7 @@ export function SymsCovington({ motionPaused = false }) {
       animationRef.current = 'idle';
       footstepRef.current.phase = 0;
       publishSymsPose(currentZoneId, position);
+      applyStatus({ reactionMode: 'snared' });
       return;
     }
 
@@ -500,6 +530,7 @@ export function SymsCovington({ motionPaused = false }) {
       const nextDirective = playableModeId === 'darwin'
         ? normalizeSymsDirective(directive)
         : SYMS_DIRECTIVES.RANGE;
+      activeDirective = nextDirective;
       if (motion.lastDirective !== nextDirective) {
         motion.lastDirective = nextDirective;
         motion.route = [];
@@ -555,6 +586,7 @@ export function SymsCovington({ motionPaused = false }) {
             const result = moveToward(site.x, site.z, 1.15);
             movementSpeed = Math.max(movementSpeed, result.moved / dt);
           } else {
+            atSite = true;
             stationaryAnimation = site.animation || 'idle';
             if (motion.dwellUntil <= 0) {
               motion.dwellUntil = time + symsActivityDwellSeconds(site, motion.visitIndex);
@@ -576,6 +608,16 @@ export function SymsCovington({ motionPaused = false }) {
     else if (movementSpeed > 1.8) animationRef.current = 'jog';
     else if (movementSpeed > 0.12) animationRef.current = 'walk';
     else animationRef.current = stationaryAnimation;
+
+    applyStatus({
+      reactionMode: activeReaction ? reaction.mode : 'idle',
+      conversationOpen,
+      directive: activeDirective,
+      inHomeZone: currentZoneId === POST_OFFICE_BAY,
+      moving: movementSpeed > 0.12,
+      targetSite: motion.targetSite,
+      atSite,
+    });
 
     if (movementSpeed > 0.12) {
       const stepsPerSecond = movementSpeed > 3 ? 3.6 : movementSpeed > 1.8 ? 2.85 : 1.95;
@@ -610,18 +652,19 @@ export function SymsCovington({ motionPaused = false }) {
       <group ref={body}>
         <ModelAsset id="syms" animationSelector={() => animationRef.current} reflect fallback={<ProceduralCrewFigure motion={0.16} />} />
       </group>
-      <mesh position={[0, 0.04, 0]} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.72, 0.82, 36]} />
-        <meshBasicMaterial color="#d9e6ba" transparent opacity={0.42} />
-      </mesh>
-      <mesh position={[0, 2.22, 0]}>
-        <sphereGeometry args={[0.08, 12, 8]} />
-        <meshBasicMaterial color="#d9e6ba" transparent opacity={0.9} />
-      </mesh>
-      <mesh position={[0, 2.43, 0]}>
-        <sphereGeometry args={[0.055, 12, 8]} />
-        <meshBasicMaterial color="#d9e6ba" transparent opacity={0.68} />
-      </mesh>
+      <TerrainRingMarker
+        radius={0.82}
+        innerRadius={0.72 / 0.82}
+        color={npcStatusStyle(statusState.status).ring}
+        opacity={0.42}
+        zoneId={currentZoneId}
+      />
+      <NpcStatusOrb
+        status={statusState.status}
+        activity={statusState.activity}
+        name="Syms Covington"
+        height={2.3}
+      />
     </group>
   );
 }

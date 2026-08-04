@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
-  loadStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
@@ -238,7 +237,7 @@ function normalFragment(layerConfig) {
 export function createLayeredDryPbrTerrainMaterial({
   pathPoints,
   pathSplatBounds,
-  pathSplatPath = null,
+  pathSplatBake = null,
   pathMinimumWidth = 1.62,
   layerConfig,
   surfaceMaskGLSL = '',
@@ -255,14 +254,13 @@ export function createLayeredDryPbrTerrainMaterial({
     throw new Error(`createLayeredDryPbrTerrainMaterial requires ${requiredLayers.join(', ')} layers.`);
   }
 
-  const pathSplat = pathSplatPath
-    ? loadStandardFootPathSplatTexture(pathSplatPath)
-    : createStandardFootPathSplatTexture({
-      pathPoints,
-      bounds: pathSplatBounds,
-      size: pathSplatBounds?.size,
-      minimumWidth: pathMinimumWidth,
-    });
+  const pathSplat = resolveStandardFootPathSplatTexture({
+    bake: pathSplatBake,
+    pathPoints,
+    bounds: pathSplatBounds,
+    size: pathSplatBounds?.size,
+    minimumWidth: pathMinimumWidth,
+  });
   const layers = Object.fromEntries(
     Object.entries(layerConfig).map(([name, layer]) => [name, loadPackedPbrTerrainSet(layer.texture)]),
   );

@@ -8,20 +8,30 @@ import { ComfortSettings } from './ComfortSettings';
 
 const SPLASH_BACKGROUND = '/assets/ui/splash-background-1672.webp';
 export const INITIAL_LAUNCH_PROGRESS = 8;
-const PROLOGUE_REVEAL_MS = 7900;
-const ANIMAL_PROLOGUE_REVEAL_MS = 4400;
-const PROLOGUE_AUTO_BEGIN_MS = 15000;
+// The whole card lands inside ~3s. The previous 6.55s schedule was written when
+// the prologue doubled as cover for a slow tail of scene work; that tail is now
+// short enough that holding the reader for twice as long only reads as a wait.
+// Ends a short breath after the last block, which is what the sequence always
+// had — just proportioned to three seconds instead of six and a half.
+const PROLOGUE_REVEAL_MS = 3400;
+const ANIMAL_PROLOGUE_REVEAL_MS = 2900;
+const PROLOGUE_AUTO_BEGIN_MS = 10000;
+// The scene usually becomes ready well after the card has been on screen, and
+// counting only from mount meant the auto-advance had already expired by then
+// and fired on the same beat the Begin button appeared — the card vanished as
+// soon as it became possible to read it. The reader gets this long after the
+// button turns up, whatever the load did.
+const PROLOGUE_MIN_READ_AFTER_READY_MS = 4000;
 const PROLOGUE_BLOCK_DELAYS_MS = Object.freeze({
-  header: 1050,
-  introduction: 2200,
-  quotation: 3350,
-  // The quotation gets a full breath after it settles. Without this pause the
+  header: 200,
+  introduction: 850,
+  quotation: 1500,
+  // The quotation still gets the longest gap after it. Without that pause the
   // explanatory copy reads as a continuation of Darwin's sentence rather than
   // a return to the present-day framing.
-  reflection: 5250,
-  invitation: 6600,
+  reflection: 2250,
 });
-const ANIMAL_PROLOGUE_LINE_DELAYS_MS = Object.freeze([1250, 1850, 2450, 3050]);
+const ANIMAL_PROLOGUE_LINE_DELAYS_MS = Object.freeze([300, 800, 1300, 1800]);
 const ANIMAL_PROLOGUES = Object.freeze({
   finch: {
     eyebrow: 'Floreana · Galápagos Archipelago',
@@ -207,10 +217,11 @@ function usePrologueSequence({
   sceneReady,
   departing,
   onBeginExploring,
-  onSkip,
 }) {
   const [narrativeComplete, setNarrativeComplete] = useState(false);
   const [mountedAt] = useState(() => performance.now());
+  const readyAtRef = useRef(0);
+  if (sceneReady && !readyAtRef.current) readyAtRef.current = performance.now();
 
   useEffect(() => {
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -221,15 +232,22 @@ function usePrologueSequence({
     return () => window.clearTimeout(timer);
   }, [revealMs]);
 
+  // Auto-advance only once the card can actually be left. This used to fall
+  // through to onSkip when the scene was not ready, which blanked the finished
+  // text and replaced it with a waiting line for as long as the load still had
+  // to run — the reader watched the card they were reading get taken away.
   useEffect(() => {
-    if (departing) return undefined;
-    const remaining = Math.max(0, mountedAt + PROLOGUE_AUTO_BEGIN_MS - performance.now());
-    const timer = window.setTimeout(() => {
-      if (sceneReady) onBeginExploring();
-      else onSkip();
-    }, remaining);
+    if (departing || !sceneReady) return undefined;
+    const dismissAt = Math.max(
+      mountedAt + PROLOGUE_AUTO_BEGIN_MS,
+      readyAtRef.current + PROLOGUE_MIN_READ_AFTER_READY_MS,
+    );
+    const timer = window.setTimeout(
+      onBeginExploring,
+      Math.max(0, dismissAt - performance.now()),
+    );
     return () => window.clearTimeout(timer);
-  }, [departing, mountedAt, onBeginExploring, onSkip, sceneReady]);
+  }, [departing, mountedAt, onBeginExploring, sceneReady]);
 
   return narrativeComplete;
 }
@@ -248,7 +266,6 @@ function AnimalPrologue({
     sceneReady,
     departing,
     onBeginExploring,
-    onSkip,
   });
   const lineStyle = delay => ({ '--prologue-delay': `${delay}ms` });
   const canBegin = sceneReady && narrativeComplete && !skipRequested;
@@ -260,6 +277,13 @@ function AnimalPrologue({
       data-departing={departing ? 'true' : 'false'}
       className="launch-historical-prologue absolute inset-0 z-30 overflow-x-hidden overflow-y-auto text-left"
     >
+      {/* Starts near-opaque and lifts over the same few seconds the text takes
+          to arrive, so the staged content phases build behind black instead of
+          in front of the reader. Pure opacity, so it runs on the compositor. */}
+      <div
+        aria-hidden="true"
+        className="launch-prologue-dim pointer-events-none fixed inset-0"
+      />
       <div
         aria-hidden="true"
         className="launch-prologue-veil pointer-events-none fixed inset-0"
@@ -338,7 +362,6 @@ function HistoricalPrologue({
     sceneReady,
     departing,
     onBeginExploring,
-    onSkip,
   });
   const lineStyle = delay => ({ '--prologue-delay': `${delay}ms` });
   const canBegin = sceneReady && narrativeComplete && !skipRequested;
@@ -349,6 +372,13 @@ function HistoricalPrologue({
       data-departing={departing ? 'true' : 'false'}
       className="launch-historical-prologue absolute inset-0 z-30 overflow-x-hidden overflow-y-auto text-left"
     >
+      {/* Starts near-opaque and lifts over the same few seconds the text takes
+          to arrive, so the staged content phases build behind black instead of
+          in front of the reader. Pure opacity, so it runs on the compositor. */}
+      <div
+        aria-hidden="true"
+        className="launch-prologue-dim pointer-events-none fixed inset-0"
+      />
       <div
         aria-hidden="true"
         className="launch-prologue-veil pointer-events-none fixed inset-0"
@@ -374,7 +404,7 @@ function HistoricalPrologue({
           className="launch-prologue-block"
           style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.header)}
         >
-          <p className="font-expedition text-[10px] font-semibold uppercase tracking-[0.3em] text-expedition-gold/80 sm:text-[12px]">
+          <p className="font-expedition text-[13px] font-semibold uppercase tracking-[0.3em] text-expedition-gold/80 sm:text-[17px]">
             24 September 1835
           </p>
           <div className="mt-3 font-handwriting text-[clamp(1.25rem,3vw,2rem)] leading-relaxed text-expedition-goldbright/90">
@@ -382,58 +412,65 @@ function HistoricalPrologue({
           </div>
         </header>
 
+        {/* The header above already gives the date and the place. This block
+            used to repeat both in its first clause, which is why the card read
+            as three openings stacked on each other. */}
         <div
-          className="launch-prologue-block mt-[clamp(1.5rem,4vh,3rem)] w-full max-w-[64rem] text-left"
+          className="launch-prologue-block mt-[clamp(1.5rem,4vh,3rem)] w-full max-w-[46rem]"
           style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.introduction)}
         >
           <p className="font-expedition text-[clamp(1rem,2.1vw,1.35rem)] leading-[1.62] tracking-[0.012em] text-expedition-parchment/88">
-            On September 24, 1835, the real Charles Darwin—then a 26-year-old
-            naturalist aboard HMS <em>Beagle</em>—reached Isla Floreana
-            (Charles Island) in the Galapagos Archipelago. He wrote the
-            following entry in his diary:
+            On this day, a 26-year-old naturalist named Charles Darwin wrote in
+            his diary of his visit to Isla Floreana:
           </p>
         </div>
 
+        {/* Italic, lighter, and set as verse already read as a quotation; the
+            two gold rules that used to bracket this were a fourth marking of
+            the same boundary.
+
+            The authored line breaks are an inscription setting and only hold
+            while each line fits. Below `sm` they wrap into ragged pairs and the
+            shape collapses, so the phone gets the first sentence alone. */}
+        {/* Wider than the prose blocks around it: the first authored line is
+            the longest, and at 46rem it wrapped, which broke the inscription
+            setting the rest of the quotation depends on. */}
         <div
-          className="launch-prologue-block my-[clamp(1.6rem,4.5vh,3.2rem)] w-full max-w-[64rem] text-center"
+          className="launch-prologue-block my-[clamp(1.6rem,4.5vh,3.2rem)] w-full max-w-[60rem]"
           style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.quotation)}
         >
-          <span className="mx-auto mb-[clamp(1.1rem,2.6vh,1.8rem)] block h-px w-24 bg-gradient-to-r from-transparent via-expedition-gold/65 to-transparent" />
-          <blockquote className="font-expedition text-[clamp(1.08rem,1.75vw,1.58rem)] italic leading-[1.58] tracking-[0.006em] text-[#eee2c8]">
+          {/* Warmer than the parchment around it so the diary voice reads as a
+              different register, not just italics. */}
+          <blockquote className="font-expedition text-[clamp(1.08rem,1.75vw,1.58rem)] italic leading-[1.58] tracking-[0.006em] text-[#e8cf9c]">
             <span className="block">
-              “The dry Volcanic soil affording a congenial habitation only to the Lizard tribe.
+              “The dry Volcanic soil afford[s] a congenial habitation only to
+              the Lizard tribe<span className="sm:hidden">.”</span>
+              <span className="hidden sm:inline">.</span>
             </span>
-            <span className="block">
+            <span className="hidden sm:block">
               The wood gradually becomes greener during the ascent.
             </span>
-            <span className="block">
+            <span className="hidden sm:block">
               Passing round the side of the highest hill,
             </span>
-            <span className="block">
+            <span className="hidden sm:block">
               the body is cooled by the fine Southerly trade wind…”
             </span>
           </blockquote>
-          <span className="mx-auto mt-[clamp(1.1rem,2.6vh,1.8rem)] block h-px w-24 bg-gradient-to-r from-transparent via-expedition-gold/65 to-transparent" />
         </div>
 
+        {/* The "this game lets you re-experience…" line that used to close the
+            card was a second ending in a present-day marketing voice, after
+            everything above it had stayed in 1835. The button carries the
+            invitation. */}
         <div
-          className="launch-prologue-block w-full max-w-[64rem] text-left"
+          className="launch-prologue-block w-full max-w-[46rem]"
           style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.reflection)}
         >
-          <p className="font-expedition text-[clamp(0.98rem,1.9vw,1.25rem)] leading-[1.58] text-expedition-parchment/78">
-            Darwin&apos;s notes of walking amid finches, tortoises, and other
-            species known only in the Galápagos became foundational to his later
-            work on natural selection.
-          </p>
-        </div>
-
-        <div
-          className="launch-prologue-block mt-3 w-full max-w-[64rem] text-left"
-          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.invitation)}
-        >
-          <p className="font-expedition text-[clamp(1.05rem,2vw,1.34rem)] italic leading-[1.55] text-expedition-goldbright/90">
-            This game lets you re-experience that quietly momentous encounter
-            with the island—and perhaps do things differently.
+          <p className="font-expedition text-[clamp(1.08rem,2.1vw,1.4rem)] leading-[1.58] text-expedition-parchment/82">
+            Darwin&rsquo;s notes on the finches, tortoises, and other species
+            found only here became foundational to his work on natural
+            selection.
           </p>
         </div>
 
@@ -552,7 +589,7 @@ export function LaunchOverlay({
     >
       <div
         aria-hidden="true"
-        className={`${blackout ? 'opacity-0' : 'opacity-100'} pointer-events-none absolute inset-0 transition-opacity duration-[1500ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[opacity]`}
+        className={`${blackout ? 'opacity-0' : 'opacity-100'} pointer-events-none absolute inset-0 transition-opacity duration-[380ms] ease-[cubic-bezier(0.4,0,1,1)] will-change-[opacity]`}
       >
         <img
           src={SPLASH_BACKGROUND}
@@ -570,12 +607,12 @@ export function LaunchOverlay({
       </div>
 
       <div
-        className={`${blackout ? 'opacity-0' : 'opacity-100'} relative flex min-h-full flex-col items-center px-4 py-8 text-center transition-opacity duration-[850ms] ease-[cubic-bezier(0.4,0,1,1)] will-change-[opacity] sm:py-10`}
+        className={`${blackout ? 'opacity-0' : 'opacity-100'} relative flex min-h-full flex-col items-center px-4 py-8 text-center transition-opacity duration-[380ms] ease-[cubic-bezier(0.4,0,1,1)] will-change-[opacity] sm:py-10`}
       >
         {/* The title recedes only for the tall panels. Settings and Controls at
             the full hero size pushed their own Back button off the bottom of the
             viewport; giving them this space back is what lets them fit. */}
-        <div className={`${blackout ? 'opacity-0' : 'opacity-100'} flex flex-col items-center transition-opacity duration-[1100ms] ease-out will-change-[opacity]`}>
+        <div className={`${blackout ? 'opacity-0' : 'opacity-100'} flex flex-col items-center transition-opacity duration-[380ms] ease-out will-change-[opacity]`}>
           {!tallPanel && (
             <CompassRoseIcon
               className={`mt-4 h-10 w-10 text-expedition-brass/75 sm:mt-8 ${yieldsWhenShort ? '[@media(max-height:820px)]:hidden' : ''}`}
@@ -715,7 +752,7 @@ export function LaunchOverlay({
               <p className="mx-auto mt-2 max-w-md text-center text-[13px] italic leading-relaxed text-expedition-parchment/72">
                 Press <span className="not-italic text-expedition-gold">?</span> in the field to bring this back.
               </p>
-              <div className="mt-4 max-h-[46vh] overflow-y-auto pr-1">
+              <div className="mt-4 max-h-[46dvh] overflow-y-auto overscroll-contain pr-1">
                 <div className="grid gap-4 sm:grid-cols-2">
                   {controlsSections({ polished: true, includeNarratorCommands: false }).map(([title, lines]) => (
                     <section key={title} className="min-w-0">
@@ -827,7 +864,7 @@ export function LaunchOverlay({
           </div>
         )}
 
-        <div className={`${blackout ? 'opacity-0' : 'opacity-100'} mt-auto flex w-[min(28rem,70vw)] items-center justify-center gap-2 pb-2 pt-8 text-expedition-brass/80 transition-opacity duration-[1100ms] ease-out will-change-[opacity]`}>
+        <div className={`${blackout ? 'opacity-0' : 'opacity-100'} mt-auto flex w-[min(28rem,70vw)] items-center justify-center gap-2 pb-2 pt-8 text-expedition-brass/80 transition-opacity duration-[380ms] ease-out will-change-[opacity]`}>
           <span className="h-px flex-1 bg-gradient-to-r from-transparent to-expedition-brass/80" />
           <span className="text-lg">HMS</span>
           <span className="h-px flex-1 bg-gradient-to-l from-transparent to-expedition-brass/80" />

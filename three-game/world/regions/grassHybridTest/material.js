@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { HYBRID_GRASS_PATH_POINTS } from './path';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
 } from '../../paths/standardPath';
 
 export function createGrassHybridTestTerrainMaterial() {
-  const pathSplatTexture = createStandardFootPathSplatTexture({ pathPoints: HYBRID_GRASS_PATH_POINTS });
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: 'grass-hybrid-test',
+    pathPoints: HYBRID_GRASS_PATH_POINTS,
+  });
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,

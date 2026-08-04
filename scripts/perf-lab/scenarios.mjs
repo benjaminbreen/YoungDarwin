@@ -110,6 +110,19 @@ export const SCENARIOS = {
     ],
   },
 
+  // Zone travel. The interstitial is where players report the worst of it —
+  // frame rate collapsing to single digits while the destination builds — and
+  // none of the other scenarios touch that code path at all.
+  travel: {
+    description: 'Settle, travel to a neighbouring zone, settle again. Measures the transition itself.',
+    steps: [
+      { label: 'before-travel', ms: 6000 },
+      { label: 'transition', travelTo: 'N_SHORE', ms: 3000 },
+      { shot: 'arrived' },
+      { label: 'after-arrival', ms: 12000 },
+    ],
+  },
+
   // Cheapest possible signal: is the standing frame rate what we think it is.
   quick: {
     description: 'Ten seconds of standing plus one rotation. Use while iterating on a fix.',

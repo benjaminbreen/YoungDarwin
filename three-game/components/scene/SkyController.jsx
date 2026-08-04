@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky } from '@react-three/drei';
 import * as THREE from 'three';
@@ -13,6 +13,10 @@ import { fogAtmosphereUniforms, driveCloudShadeUniforms } from '../../world/fogA
 import { driveGroundCoverLight } from '../../world/groundCoverLight';
 import { vistaAtmosphereUniforms } from '../../world/vistas/vistaAtmosphere';
 import { centralPeakDev } from '../../world/vistas/centralPeakDevRuntime';
+import {
+  horizonIslandPlacements,
+  horizonIslands,
+} from '../../world/vistas/horizonIslandsRuntime';
 import { solarLookTuning } from '../../world/solarLook';
 import { CentralPeakBackdrop } from './CentralPeakBackdrop';
 
@@ -148,16 +152,9 @@ function islandSilhouetteTexture(profile = 'shield') {
   return texture;
 }
 
-// Bearing (radians from north), distance, width, height, base-below-horizon.
-const DISTANT_ISLANDS = [
-  { bearing: -0.62, width: 105, height: 11, profile: 'shield' },    // Isabela, NNW
-  { bearing: 0.74, width: 58, height: 6.5, profile: 'low-cones' },  // Santa Cruz, NNE
-];
-const ISLAND_DISTANCE = 150;
-// The sky rig follows the camera, so this is an eye-relative angular
-// placement. Sink the translucent card far enough below eye level that its
-// texture-owned base haze meets the sea instead of ending above the horizon.
-const DISTANT_ISLAND_BASE_Y = -6.4;
+// Placement, size and grade now live in horizonIslandsRuntime so they can be
+// tuned from the dev panel. The sky rig follows the camera, so it is an
+// eye-relative angular placement, not a world position.
 
 // Reusable scratch objects — no per-frame allocation in the render loop.
 const _sun = new THREE.Vector3();
@@ -662,18 +659,22 @@ function crateredMoonTexture(size = 256) {
   const data = image.data;
   const c = size / 2;
   const radius = size * 0.43;
+  // Rotations are per-mare constants, not per-pixel ones. Left inline they cost
+  // two trig calls per mare per pixel — 2.6M of them at 512px.
   const maria = [
     [0.58, 0.38, 0.16, 0.095, -0.6, 0.22],
     [0.42, 0.48, 0.13, 0.09, 0.45, 0.18],
     [0.57, 0.6, 0.11, 0.075, 0.2, 0.15],
     [0.39, 0.31, 0.08, 0.055, -0.2, 0.12],
     [0.69, 0.51, 0.055, 0.04, 0.6, 0.1],
-  ];
+  ].map(([mx, my, rx, ry, rot, strength]) => ({
+    mx, my, rx, ry, strength, cs: Math.cos(rot), sn: Math.sin(rot),
+  }));
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const nx = (x + 0.5 - c) / radius;
       const ny = (y + 0.5 - c) / radius;
-      const r = Math.hypot(nx, ny);
+      const r = Math.sqrt(nx * nx + ny * ny);
       const i = (y * size + x) * 4;
       if (r > 1.02) {
         data[i + 3] = 0;
@@ -684,11 +685,9 @@ function crateredMoonTexture(size = 256) {
         + canvasSmoothNoise(x * 0.18, y * 0.18, 22) * 0.42
         + canvasSmoothNoise(x * 0.42, y * 0.42, 23) * 0.18;
       let shade = 0.76 + (highland - 0.78) * 0.13 + limb * 0.14;
-      for (const [mx, my, rx, ry, rot, strength] of maria) {
+      for (const { mx, my, rx, ry, cs, sn, strength } of maria) {
         const px = x / size - mx;
         const py = y / size - my;
-        const cs = Math.cos(rot);
-        const sn = Math.sin(rot);
         const ex = (px * cs - py * sn) / rx;
         const ey = (px * sn + py * cs) / ry;
         const d = ex * ex + ey * ey;
@@ -1731,6 +1730,51 @@ function computeDarwinShadowCoverage(lightDirection, daylight, golden) {
   };
 }
 
+// Every sky texture is static — the same pixels for a whole session, and
+// identical between mounts. SkyController unmounts whenever the player steps
+// indoors, so building them per-mount charged the full generation cost to every
+// interior exit as well as to boot. Cached at module scope and deliberately
+// never disposed: the set is a few MB and outlives any single mount.
+const skyTextureCache = new Map();
+
+function cachedSkyTexture(key, build) {
+  let texture = skyTextureCache.get(key);
+  if (!texture) {
+    texture = build();
+    skyTextureCache.set(key, texture);
+  }
+  return texture;
+}
+
+// The moon set is two per-pixel loops and profiled at ~1.3s of uninterrupted
+// main thread during boot — spent on a body that is invisible on any daylight
+// launch. Built off the critical path instead, and on demand if the sky is
+// already dark. `buildMoonTextures` is idempotent through the cache.
+function buildMoonTextures() {
+  return {
+    disc: cachedSkyTexture('moon:disc', () => crateredMoonTexture(512)),
+    glow: cachedSkyTexture('moon:glow', () => radialTexture([
+      [0.0, 'rgba(242, 247, 255, 0.58)'],
+      [0.2, 'rgba(208, 224, 255, 0.26)'],
+      [0.5, 'rgba(158, 190, 250, 0.09)'],
+      [1.0, 'rgba(182, 202, 240, 0)'],
+    ])),
+    // 22°-style ice halo: a thin luminous ring that appears around the moon on
+    // humid garúa nights — the classic sign of weather on the way.
+    halo: cachedSkyTexture('moon:halo', () => radialTexture([
+      [0.0, 'rgba(0, 0, 0, 0)'],
+      [0.58, 'rgba(0, 0, 0, 0)'],
+      [0.66, 'rgba(206, 220, 252, 0.16)'],
+      [0.72, 'rgba(178, 198, 240, 0.07)'],
+      [0.8, 'rgba(0, 0, 0, 0)'],
+    ])),
+  };
+}
+
+function moonTexturesAlreadyBuilt() {
+  return skyTextureCache.has('moon:disc');
+}
+
 export function SkyController({
   stars = true,
   tuning = null,
@@ -1792,47 +1836,40 @@ export function SkyController({
   const lensFlareRefs = useRef([]);
   const lensRingRef = useRef(null);
   const islandMatRefs = useRef([]);
+  // Placement and size are read during render, so panel edits need a re-render;
+  // colour and opacity are driven per frame and do not.
+  const islandMeshRefs = useRef([]);
   const islandTextures = useMemo(() => ({
-    shield: islandSilhouetteTexture('shield'),
-    'low-cones': islandSilhouetteTexture('low-cones'),
+    shield: cachedSkyTexture('island:shield', () => islandSilhouetteTexture('shield')),
+    'low-cones': cachedSkyTexture('island:low-cones', () => islandSilhouetteTexture('low-cones')),
   }), []);
-  const moonDiscTexture = useMemo(() => crateredMoonTexture(512), []);
-  const moonGlowTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(242, 247, 255, 0.58)'],
-    [0.2, 'rgba(208, 224, 255, 0.26)'],
-    [0.5, 'rgba(158, 190, 250, 0.09)'],
-    [1.0, 'rgba(182, 202, 240, 0)'],
-  ]), []);
-  // 22°-style ice halo: a thin luminous ring that appears around the moon on
-  // humid garúa nights — the classic sign of weather on the way.
-  const moonHaloTexture = useMemo(() => radialTexture([
-    [0.0, 'rgba(0, 0, 0, 0)'],
-    [0.58, 'rgba(0, 0, 0, 0)'],
-    [0.66, 'rgba(206, 220, 252, 0.16)'],
-    [0.72, 'rgba(178, 198, 240, 0.07)'],
-    [0.8, 'rgba(0, 0, 0, 0)'],
-  ]), []);
+  // Null until the moon set has been built; see the deferral effect below.
+  const [moonTextures, setMoonTextures] = useState(
+    () => (moonTexturesAlreadyBuilt() ? buildMoonTextures() : null),
+  );
+  const moonReadyRef = useRef(Boolean(moonTextures));
+  moonReadyRef.current = Boolean(moonTextures);
   // Warm sun disc with a white-hot core. The separate glare overlay carries
   // the big camera-facing wash, so the sprite can stay readable as a body.
-  const sunDiscTexture = useMemo(() => createSunDiscTexture(512), []);
+  const sunDiscTexture = cachedSkyTexture('sun:disc', () => createSunDiscTexture(512));
   // Radiant corona: warm, soft, and deliberately low opacity so the sky keeps
   // color around the sun.
-  const sunGlowTexture = useMemo(() => radialTexture([
+  const sunGlowTexture = cachedSkyTexture('sun:glow', () => radialTexture([
     [0.0, 'rgba(255, 250, 214, 0.58)'],
     [0.16, 'rgba(255, 226, 132, 0.32)'],
     [0.38, 'rgba(255, 196, 92, 0.12)'],
     [0.7, 'rgba(146, 196, 255, 0.024)'],
     [1.0, 'rgba(146, 196, 255, 0)'],
-  ], 512), []);
-  const sunAureoleTexture = useMemo(() => radialTexture([
+  ], 512));
+  const sunAureoleTexture = cachedSkyTexture('sun:aureole', () => radialTexture([
     [0.0, 'rgba(255, 255, 255, 0)'],
     [0.05, 'rgba(255, 255, 255, 0.12)'],
     [0.16, 'rgba(255, 232, 158, 0.12)'],
     [0.34, 'rgba(255, 185, 86, 0.055)'],
     [0.58, 'rgba(118, 190, 255, 0.03)'],
     [1.0, 'rgba(118, 190, 255, 0)'],
-  ], 512), []);
-  const sunWeatherHaloTexture = useMemo(() => radialTexture([
+  ], 512));
+  const sunWeatherHaloTexture = cachedSkyTexture('sun:weather-halo', () => radialTexture([
     [0.0, 'rgba(255, 244, 210, 0.08)'],
     [0.24, 'rgba(255, 235, 176, 0.034)'],
     [0.42, 'rgba(255, 255, 255, 0)'],
@@ -1840,16 +1877,16 @@ export function SkyController({
     [0.64, 'rgba(255, 236, 180, 0.045)'],
     [0.74, 'rgba(255, 255, 255, 0.018)'],
     [1.0, 'rgba(255, 255, 255, 0)'],
-  ], 512), []);
-  const lensFlareTexture = useMemo(() => radialTexture([
+  ], 512));
+  const lensFlareTexture = cachedSkyTexture('sun:lens-flare', () => radialTexture([
     [0.0, 'rgba(255, 248, 204, 0.82)'],
     [0.16, 'rgba(255, 213, 118, 0.34)'],
     [0.42, 'rgba(255, 148, 82, 0.09)'],
     [1.0, 'rgba(255, 148, 82, 0)'],
-  ], 192), []);
-  const lensRingTexture = useMemo(() => ringTexture(256), []);
-  const sunStreakTexture = useMemo(() => streakTexture(), []);
-  const sunStarburstTexture = useMemo(() => starburstTexture(), []);
+  ], 192));
+  const lensRingTexture = cachedSkyTexture('sun:lens-ring', () => ringTexture(256));
+  const sunStreakTexture = cachedSkyTexture('sun:streak', () => streakTexture());
+  const sunStarburstTexture = cachedSkyTexture('sun:starburst', () => starburstTexture());
   const sunVeilMaterial = useMemo(() => createSunVeilMaterial(), []);
   const moonVeilMaterial = useMemo(() => createSunVeilMaterial({ moon: true }), []);
 
@@ -1894,22 +1931,33 @@ export function SkyController({
   // Cloud cover is the smoothed 0..1 weatherEnv.overcast, read per frame
   // inside useFrame, so a weather change rolls in instead of cutting.
 
+  // Only the veil materials are per-mount. The textures live in the module
+  // cache and are shared with the next mount, so disposing them here would make
+  // every interior exit rebuild the whole set.
   useLayoutEffect(() => () => {
-    moonDiscTexture.dispose();
-    moonGlowTexture.dispose();
-    sunDiscTexture.dispose();
-    sunAureoleTexture.dispose();
-    sunGlowTexture.dispose();
-    sunWeatherHaloTexture.dispose();
-    lensFlareTexture.dispose();
-    lensRingTexture.dispose();
-    sunStreakTexture.dispose();
-    sunStarburstTexture.dispose();
-    Object.values(islandTextures).forEach(texture => texture.dispose());
-    moonHaloTexture.dispose();
     sunVeilMaterial.dispose();
     moonVeilMaterial.dispose();
-  }, [moonDiscTexture, moonGlowTexture, sunDiscTexture, sunAureoleTexture, sunGlowTexture, sunWeatherHaloTexture, lensFlareTexture, lensRingTexture, sunStreakTexture, sunStarburstTexture, islandTextures, moonHaloTexture, sunVeilMaterial, moonVeilMaterial]);
+  }, [sunVeilMaterial, moonVeilMaterial]);
+
+  // Build the moon off the boot critical path. `ensureMoonTextures` is also
+  // called from the frame loop the moment the moon would become visible, so a
+  // launch that starts after dark still gets it — a beat late at worst, rather
+  // than charging every daylight launch for it.
+  const ensureMoonTextures = useCallback(() => {
+    if (moonReadyRef.current) return;
+    moonReadyRef.current = true;
+    setMoonTextures(buildMoonTextures());
+  }, []);
+
+  useEffect(() => {
+    if (moonTextures) return undefined;
+    if (typeof window.requestIdleCallback !== 'function') {
+      const handle = window.setTimeout(ensureMoonTextures, 4000);
+      return () => window.clearTimeout(handle);
+    }
+    const handle = window.requestIdleCallback(ensureMoonTextures, { timeout: 8000 });
+    return () => window.cancelIdleCallback?.(handle);
+  }, [ensureMoonTextures, moonTextures]);
 
   useLayoutEffect(() => {
     patchMoonPhaseMaterial(moonRef.current?.material);
@@ -2095,7 +2143,10 @@ export function SkyController({
         * (1 - smoothstep(0.14, 0.34, _moon.y))
         * (1 - overcast * 0.62)
         * (1 - weatherEnv.rainIntensity * 0.66);
-      moonRef.current.visible = celestialBodies && moonVis > 0.02;
+      // A moon that is about to be seen forces its textures now rather than
+      // waiting for the next idle window; an untextured sprite is a white square.
+      if (moonVis > 0.02 && !moonReadyRef.current) ensureMoonTextures();
+      moonRef.current.visible = celestialBodies && moonVis > 0.02 && moonReadyRef.current;
       const moonScale = 7.1 + moonIllumination * 0.6 + moonHorizon * 0.7;
       moonRef.current.scale.set(moonScale, moonScale * (1 - moonHorizon * 0.12), 1);
       _color.set('#f4f7ff').lerp(_moonHorizonWarm, moonHorizon * 0.34).lerp(_white, moonIllumination * 0.12);
@@ -2136,7 +2187,7 @@ export function SkyController({
         moonHaloRef.current.quaternion.copy(camera.quaternion);
         moonHaloRef.current.scale.setScalar(25 + humidity * 12 + thinCloud * 6 + moonHorizon * 5);
         const haloOpacity = moonVis * (0.28 + moonIllumination * 0.5) * (humidity * 0.48 + thinCloud * 0.2 + moonHorizon * 0.12) * (1 - weatherEnv.rainIntensity * 0.85);
-        moonHaloRef.current.visible = celestialBodies && haloOpacity > 0.015;
+        moonHaloRef.current.visible = celestialBodies && haloOpacity > 0.015 && moonReadyRef.current;
         moonHaloRef.current.material.opacity = haloOpacity;
         moonHaloRef.current.material.color.set(overcast > 0.45 ? '#d8e8ff' : (moonHorizon > 0.1 ? '#ffe0aa' : '#cdd8f0'));
       }
@@ -2544,9 +2595,29 @@ export function SkyController({
     _vistaHorizon.lerp(_color, 1 - THREE.MathUtils.clamp(centralPeakDev.vistaSkyBlend, 0, 1));
     vistaAtmosphereUniforms.uVistaHorizonColor.value.copy(_vistaHorizon);
     // Distant islands sit barely darker than the haze that swallows them.
-    _islandColor.copy(_color).multiplyScalar(0.95);
-    islandMatRefs.current.forEach(mat => {
-      if (mat) mat.color.copy(_islandColor);
+    // Placement is driven here rather than through a store subscription so a
+    // slider drag updates without re-rendering the whole sky rig.
+    _islandColor.copy(_color).multiplyScalar(horizonIslands.darkness);
+    const islandPlacements = horizonIslandPlacements();
+    islandPlacements.forEach((island, index) => {
+      const mesh = islandMeshRefs.current[index];
+      if (mesh) {
+        mesh.visible = horizonIslands.visible;
+        const islandX = Math.sin(island.bearing) * horizonIslands.distance;
+        const islandZ = -Math.cos(island.bearing) * horizonIslands.distance;
+        mesh.position.set(
+          islandX,
+          horizonIslands.baseY + island.lift + island.height * 0.5,
+          islandZ,
+        );
+        mesh.rotation.set(0, Math.atan2(-islandX, -islandZ), 0);
+        mesh.scale.set(island.width, island.height, 1);
+      }
+      const mat = islandMatRefs.current[index];
+      if (mat) {
+        mat.color.copy(_islandColor);
+        mat.opacity = horizonIslands.opacity;
+      }
     });
     const solarExposureLift = solarSunFacingGradeEnabled
       ? narrowSunFacing * daylight * (1 - overcast * 0.75) * (0.01 + golden * 0.008)
@@ -2680,29 +2751,37 @@ export function SkyController({
             (Isabela and Santa Cruz are visible from Floreana on clear days).
             Color tracks the fog per-frame, slightly darker, so they always
             sit naturally inside the atmosphere. */}
-        {DISTANT_ISLANDS.map((island, index) => {
-          const x = Math.sin(island.bearing) * ISLAND_DISTANCE;
-          const z = -Math.cos(island.bearing) * ISLAND_DISTANCE;
-          return (
-            <mesh
-              key={index}
-              position={[x, DISTANT_ISLAND_BASE_Y + island.height * 0.5, z]}
-              rotation={[0, Math.atan2(-x, -z), 0]}
-              scale={[island.width, island.height, 1]}
-              renderOrder={-6}
-            >
-              <planeGeometry args={[1, 1]} />
-              <meshBasicMaterial
-                ref={mat => { islandMatRefs.current[index] = mat; }}
-                map={islandTextures[island.profile]}
-                transparent
-                opacity={0.65}
-                depthWrite={false}
-                fog={false}
-              />
-            </mesh>
-          );
-        })}
+        {horizonIslandPlacements().map((island, index) => (
+          <mesh
+            key={island.id}
+            ref={node => { islandMeshRefs.current[index] = node; }}
+            /* Placed again every frame; this only keeps the first one right. */
+            position={[
+              Math.sin(island.bearing) * horizonIslands.distance,
+              horizonIslands.baseY + island.lift + island.height * 0.5,
+              -Math.cos(island.bearing) * horizonIslands.distance,
+            ]}
+            scale={[island.width, island.height, 1]}
+            visible={horizonIslands.visible}
+            renderOrder={-6}
+            userData={{
+              renderSource: `horizon-island:${island.id}`,
+              renderLabel: `${island.label} horizon silhouette`,
+              renderKind: 'horizon-island',
+              renderPath: null,
+            }}
+          >
+            <planeGeometry args={[1, 1]} />
+            <meshBasicMaterial
+              ref={mat => { islandMatRefs.current[index] = mat; }}
+              map={islandTextures[island.profile]}
+              transparent
+              opacity={horizonIslands.opacity}
+              depthWrite={false}
+              fog={false}
+            />
+          </mesh>
+        ))}
         {[0, 1, 2, 3, 4, 5].map(index => (
           <sprite
             key={`lens-flare-${index}`}
@@ -2719,18 +2798,18 @@ export function SkyController({
           <spriteMaterial map={lensRingTexture} transparent opacity={0} depthWrite={false} depthTest={false} blending={THREE.NormalBlending} fog={false} />
         </sprite>
         {/* Moon: phase-lit cratered disc, earthshine, and layered atmospheric glow. */}
-        <sprite ref={moonRef} renderOrder={-7.1} scale={[7.3, 7.3, 1]}>
-          <spriteMaterial map={moonDiscTexture} color="#edf3ff" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} fog={false} />
+        <sprite ref={moonRef} renderOrder={-7.1} scale={[7.3, 7.3, 1]} visible={false}>
+          <spriteMaterial map={moonTextures?.disc || null} color="#edf3ff" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} fog={false} />
         </sprite>
         <mesh ref={moonVeilRef} renderOrder={-7.15} scale={[10, 6, 1]} visible={false} frustumCulled={false}>
           <planeGeometry args={[1, 1, 1, 1]} />
           <primitive object={moonVeilMaterial} attach="material" />
         </mesh>
-        <sprite ref={moonGlowRef} renderOrder={-7.25} scale={[20, 20, 1]}>
-          <spriteMaterial map={moonGlowTexture} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
+        <sprite ref={moonGlowRef} renderOrder={-7.25} scale={[20, 20, 1]} visible={false}>
+          <spriteMaterial map={moonTextures?.glow || null} color="#cdd8f0" transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <sprite ref={moonHaloRef} renderOrder={-7.3} scale={[24, 24, 1]} visible={false}>
-          <spriteMaterial map={moonHaloTexture} transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
+          <spriteMaterial map={moonTextures?.halo || null} transparent opacity={0} depthWrite={false} depthTest toneMapped={false} blending={THREE.AdditiveBlending} fog={false} />
         </sprite>
         <RainbowDome celestialRef={celestialRef} />
         {stars && <StarField celestialRef={celestialRef} />}

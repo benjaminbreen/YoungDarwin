@@ -199,13 +199,13 @@ function SummaryTab({ specimen, entry }) {
   return (
     <div>
       {/* Meta grid */}
-      <div className="grid grid-cols-2 border-b border-expedition-brass/30 pb-3">
-        <div className="grid content-start divide-y divide-expedition-brass/20 pr-5">
+      <div className="grid border-b border-expedition-brass/30 pb-3 sm:grid-cols-2">
+        <div className="grid content-start divide-y divide-expedition-brass/20 sm:pr-5">
           <MetaRow icon="calendar" label="Collected" value={formatExpeditionDate(entry?.day)} sub={timeOfDayWord(entry?.timeOfDay)} />
           <MetaRow icon="pin" label="Location" value={entry?.location || 'Unrecorded'} sub="Isla Floreana" />
           <MetaRow icon="waves" label="Habitat" value={habitat[0] || 'Unrecorded'} sub={habitat[1]} />
         </div>
-        <div className="grid content-start divide-y divide-expedition-brass/20 border-l border-expedition-brass/25 pl-5">
+        <div className="grid content-start divide-y divide-expedition-brass/20 border-t border-expedition-brass/25 sm:border-l sm:border-t-0 sm:pl-5">
           <MetaRow icon="person" label={hasRecord ? 'Collected by' : 'Observer'} value="Charles Darwin" />
           <MetaRow icon="person" label={hasRecord ? 'Assisted by' : 'Assistant'} value="Syms Covington" />
           <MetaRow icon="case" label="Condition" value={condition} />
@@ -271,7 +271,7 @@ function SummaryTab({ specimen, entry }) {
           <MetaIcon kind="box" />
           <span className={SECTION}>Collection Info</span>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           {[
             ['Catalogue Number', catalogueNumber(entry?.day, entry?.caseIndex ?? 0)],
             ['Method', hasRecord && entry?.method ? `Captured with ${entry.method.toLowerCase()}` : 'Not yet collected'],
@@ -412,7 +412,10 @@ export function SpecimenDetailModal() {
 
   return (
     <div
-      className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-[#070604]/80 p-2 backdrop-blur-[3px] sm:p-5"
+      // h-[100dvh] rather than inset-0 alone: mobile Safari lays fixed elements
+      // out against the large viewport, so a vh-sized panel centred in it hangs
+      // above and below the visible fold.
+      className="pointer-events-auto fixed inset-x-0 top-0 z-40 flex h-[100dvh] items-center justify-center bg-[#070604]/80 p-2 backdrop-blur-[3px] sm:p-5"
       onClick={onClose}
     >
       <div
@@ -422,7 +425,7 @@ export function SpecimenDetailModal() {
         aria-label={`${specimen.name} specimen record`}
         tabIndex={-1}
         onClick={event => event.stopPropagation()}
-        className="focus:outline-none relative grid h-[min(58rem,94vh)] w-[min(96rem,97vw)] overflow-hidden rounded-[4px] border border-expedition-brass/70 font-expedition text-expedition-parchment shadow-[0_30px_90px_rgba(0,0,0,0.8)] lg:grid-cols-[minmax(0,46%)_1fr]"
+        className="focus:outline-none relative grid h-[min(58rem,100%)] max-h-full w-[min(96rem,97vw)] overflow-hidden rounded-[4px] border border-expedition-brass/70 font-expedition text-expedition-parchment shadow-[0_30px_90px_rgba(0,0,0,0.8)] lg:grid-cols-[minmax(0,46%)_1fr]"
         style={{ background: 'linear-gradient(150deg, #11100e, #0a0908 55%, #060505)' }}
       >
         <div className="pointer-events-none absolute inset-[5px] z-30 rounded-[2px] border border-expedition-gold/18" />
@@ -505,23 +508,28 @@ export function SpecimenDetailModal() {
         </div>
 
         {/* ------------------------------------------------ Right: the record */}
-        <div className="relative z-20 flex min-h-0 flex-col lg:border-l lg:border-expedition-brass/40">
+        {/* min-w-0: without it this grid item's min-content width — set by the
+            un-wrapping tab strip below — is wider than the panel on a phone, so
+            every row inside it ran off the right edge under overflow-hidden. */}
+        <div className="relative z-20 flex min-h-0 min-w-0 flex-col lg:border-l lg:border-expedition-brass/40">
           <div className="flex shrink-0 items-stretch border-b border-expedition-brass/40">
-            {TABS.map(item => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className={`relative px-7 py-4 text-[12.5px] font-semibold uppercase tracking-[0.22em] transition ${
-                  tab === item.id
-                    ? 'bg-[#1a1814] text-[#efe6d2] before:absolute before:inset-x-0 before:bottom-0 before:h-[2px] before:bg-expedition-gold/85'
-                    : 'text-expedition-faded hover:text-expedition-parchment'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-            <div className="flex flex-1 items-center justify-end pr-3">
+            <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {TABS.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setTab(item.id)}
+                  className={`relative shrink-0 whitespace-nowrap px-4 py-3.5 text-[11.5px] font-semibold uppercase tracking-[0.14em] transition sm:px-7 sm:py-4 sm:text-[12.5px] sm:tracking-[0.22em] ${
+                    tab === item.id
+                      ? 'bg-[#1a1814] text-[#efe6d2] before:absolute before:inset-x-0 before:bottom-0 before:h-[2px] before:bg-expedition-gold/85'
+                      : 'text-expedition-faded hover:text-expedition-parchment'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex shrink-0 items-center justify-end px-2 sm:pr-3">
               <button
                 type="button"
                 onClick={onClose}
@@ -539,7 +547,7 @@ export function SpecimenDetailModal() {
             <div className="text-[13px] italic text-expedition-faded">{specimen.latin}</div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)] sm:px-8">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [scrollbar-width:thin] [scrollbar-color:rgba(201,163,95,0.65)_rgba(0,0,0,0.18)] sm:px-8 sm:py-5">
             {tab === 'summary' && <SummaryTab specimen={specimen} entry={entry} />}
             {tab === 'sketches' && <SketchesTab specimen={specimen} />}
             {tab === 'notes' && <NotesTab specimen={specimen} entries={entries} />}

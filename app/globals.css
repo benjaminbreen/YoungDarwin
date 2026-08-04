@@ -371,6 +371,36 @@ h1, h2, h3, h4, h5, h6 {
   background-attachment: local;
 }
 
+/* Journal page proportions. Aspect floats between ~portrait (tall containers)
+   and ~4:3 landscape (wide ones); the slack vs 100cq* leaves room for the
+   page-stack shadows on the right/bottom edges. */
+.journal-page-size {
+  width: min(98cqw, 136cqh);
+  height: min(96cqh, 140cqw);
+}
+
+/* The specimen sketch floats beside the journal prose. On a phone the page is
+   only ~350px wide, so a floated figure leaves a 120px gutter and the
+   handwriting breaks to one or two words a line. Below that width the sketch
+   becomes a centred block above the text and the prose gets the full measure.
+   The query resolves against the page wrapper's `container-type: size`. */
+@container (max-width: 30rem) {
+  /* A 1.4 page on a phone leaves ~110px of dead panel above and below it. With
+     the sketch no longer floated there is nothing to lose by running the page
+     taller. */
+  .journal-page-size {
+    height: min(96cqh, 158cqw);
+  }
+
+  .journal-figure {
+    float: none;
+    width: min(62%, 14rem);
+    max-width: none;
+    margin: 0 auto 1.5cqh;
+    rotate: 0deg;
+  }
+}
+
 .opening-black-fade {
   position: absolute;
   inset: 0;
@@ -393,32 +423,48 @@ h1, h2, h3, h4, h5, h6 {
   to { opacity: 0; }
 }
 
-@keyframes launch-prologue-veil-lift {
-  0% {
-    opacity: 1;
-  }
-  16% {
-    opacity: 0.96;
-  }
-  58% {
-    opacity: 0.48;
-  }
-  to {
-    opacity: 0;
-  }
+/* The veil holds at full while the runtime restores DPR and unpauses shadows
+   and the water reflection — their first renders are the most expensive frames
+   of the launch — then dissolves onto the finished island. Timed against
+   HISTORICAL_PROLOGUE_EXIT_MS; the hold must outlast
+   HISTORICAL_PROLOGUE_COVER_HOLD_MS. */
+@keyframes launch-prologue-cover-lift {
+  0% { opacity: 1; }
+  30% { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .launch-historical-prologue {
   isolation: isolate;
 }
 
-.launch-prologue-veil {
+/* Covers the scene almost entirely when the card arrives and lifts over the
+   same window the text takes to land, so the staged content phases mount behind
+   black rather than in front of the reader. Sits under the veil, so what it
+   settles to is the veil's own weight. */
+@keyframes launch-prologue-dim-lift {
+  0% { opacity: 0.95; }
+  18% { opacity: 0.92; }
+  to { opacity: 0; }
+}
+
+.launch-prologue-dim {
   z-index: 0;
+  background: #000;
+  opacity: 0.95;
+  will-change: opacity;
+  animation: launch-prologue-dim-lift 6000ms cubic-bezier(0.33, 0, 0.5, 1) both;
+}
+
+/* The card sits on the live scene, which is bright and pale early in the load,
+   so the veil carries the legibility. */
+.launch-prologue-veil {
+  z-index: 1;
   opacity: 1;
   will-change: opacity;
   background:
-    radial-gradient(ellipse 82% 76% at 50% 42%, rgba(7, 13, 13, 0.68), rgba(1, 3, 3, 0.88) 76%),
-    linear-gradient(180deg, rgba(5, 8, 8, 0.22), rgba(0, 2, 2, 0.34));
+    radial-gradient(ellipse 82% 76% at 50% 42%, rgba(4, 9, 9, 0.82), rgba(1, 3, 3, 0.88) 76%),
+    linear-gradient(180deg, rgba(5, 8, 8, 0.3), rgba(0, 2, 2, 0.4));
 }
 
 .launch-prologue-block,
@@ -426,19 +472,20 @@ h1, h2, h3, h4, h5, h6 {
 .launch-prologue-wait {
   opacity: 0;
   will-change: opacity;
-  animation: launch-prologue-block 1100ms cubic-bezier(0.45, 0, 0.55, 1) var(--prologue-delay, 0ms) both;
+  animation: launch-prologue-block 900ms cubic-bezier(0.45, 0, 0.55, 1) var(--prologue-delay, 0ms) both;
 }
 
 .launch-historical-prologue[data-departing='true'] .launch-prologue-foreground {
-  animation: launch-prologue-foreground-exit 540ms cubic-bezier(0.4, 0, 1, 1) both !important;
+  animation: launch-prologue-foreground-exit 380ms cubic-bezier(0.4, 0, 1, 1) both !important;
   transition: none;
 }
 
 .launch-historical-prologue[data-departing='true'] .launch-prologue-veil {
-  animation: launch-prologue-veil-lift 2180ms cubic-bezier(0.3, 0.05, 0.16, 1) 100ms both;
+  animation: launch-prologue-cover-lift 1650ms cubic-bezier(0.4, 0, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .launch-prologue-dim,
   .launch-prologue-veil,
   .launch-prologue-foreground,
   .launch-prologue-block,
@@ -930,4 +977,10 @@ button.submit-button:disabled {
 }
 .animate-objective-rule {
   animation: objective-rule 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+/* Travel interstitial caption: each line settles up a few pixels in order. */
+@keyframes travel-caption-rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

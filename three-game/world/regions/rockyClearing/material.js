@@ -74,6 +74,7 @@ function rockyClearingOverlayGLSL() {
 export function createRockyClearingTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: ROCKY_CLEARING_PATH_POINTS,
+    pathSplatBake: 'rocky-clearing',
     pathMinimumWidth: 2.5,
     layerConfig: ROCKY_CLEARING_PBR_LAYERS,
     colorOverlayGLSL: rockyClearingOverlayGLSL(),

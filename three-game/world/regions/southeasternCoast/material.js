@@ -25,16 +25,19 @@ const LAYERS = {
   },
 };
 
+export const SOUTHEASTERN_COAST_SPLAT_BOUNDS = {
+  originX: -54,
+  originZ: -48,
+  width: 108,
+  depth: 96,
+  size: 768,
+};
+
 export function createSoutheasternCoastTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: SOUTHEASTERN_COAST_PATH_POINTS,
-    pathSplatBounds: {
-      originX: -54,
-      originZ: -48,
-      width: 108,
-      depth: 96,
-      size: 768,
-    },
+    pathSplatBake: 'southeastern-coast',
+    pathSplatBounds: SOUTHEASTERN_COAST_SPLAT_BOUNDS,
     pathMinimumWidth: 1.55,
     layerConfig: LAYERS,
     cacheKey: 'southeastern-coast-layered-dry-pbr-v1',

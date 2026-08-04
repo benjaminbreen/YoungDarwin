@@ -13,7 +13,7 @@ export function createPostScrubRiseTerrainMaterial() {
   return createPostScrubRisePbrMaterial({
     pathPoints: POST_SCRUB_RISE_PATH_POINTS,
     pathSplatBounds: POST_SCRUB_RISE_SPLAT_BOUNDS,
-    pathSplatPath: '/assets/textures/world/floreana-generated/post-scrub-rise-path-splat.png',
+    pathSplatBake: 'post-scrub-rise',
     pathMinimumWidth: 1.62,
   });
 }

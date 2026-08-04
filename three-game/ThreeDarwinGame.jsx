@@ -140,6 +140,14 @@ import {
   setDistanceSceneryShellTuning,
   subscribeDistanceScenery,
 } from './world/vistas/distanceSceneryRuntime';
+import {
+  horizonIslands,
+  horizonIslandsDiffSource,
+  horizonIslandsDirty,
+  resetHorizonIslands,
+  setHorizonIslands,
+  subscribeHorizonIslands,
+} from './world/vistas/horizonIslandsRuntime';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
 // Resolved once at module load: the deployed build only offers the readout
@@ -245,10 +253,18 @@ const DEFAULT_PERF_SETTINGS = {
   waterQuality: 'polished',
   // Mirrors QUALITY_PRESETS.performance (the default tier) so any fallback path
   // that reads these base values lands on the same image as the shipped preset.
-  // Native-resolution default since the 2026-07-30 capture proved the scene
-  // draw-call bound (resolution near-free), with the adaptive ladder as the
-  // safety net on fillrate-bound machines.
-  dprMode: '2x',
+  //
+  // Was '2x' on the strength of a 2026-07-30 capture read as "draw-call bound,
+  // resolution near-free". A measured ablation on 2026-08-04 (interleaved, 3
+  // repeats, quiet machine) says otherwise: at Post Office Bay, disabling the
+  // entire post chain, the water reflection, or shadows each changed nothing,
+  // while dropping to 1x moved the rotating frame rate from 27.5 to 47.4 fps
+  // with non-overlapping ranges. The scene is fillrate bound on its main pass,
+  // and resolution is the only lever that measurably moves it.
+  //
+  // 1.5x is the compromise: ~2.25x the pixels of 1x rather than 4x, and the HUD
+  // is DOM rather than canvas so none of the interface softens.
+  dprMode: '1.5x',
   // The adaptive-DPR controller stays on for players; the perf panel toggle
   // exists so measurements can pin resolution while isolating another cost.
   adaptiveDpr: true,
@@ -327,13 +343,18 @@ const QUALITY_PRESETS = {
     terrainSegmentCap: 160,
   },
   performance: {
-    // Full native resolution. The 2026-07-30 Post Office Bay capture proved
-    // this scene CPU/draw-call bound, not fillrate bound: the adaptive-DPR
-    // controller measured a resolution drop to 0.75x gaining zero fps (its
-    // fillBound=false verdict), and 2x was screenshot-confirmed near-free on
-    // the reference Mac. Machines that ARE fillrate-bound are protected by
-    // the adaptive ladder, which steps down only when a drop actually helps.
-    dprMode: '2x',
+    // The 2026-07-30 capture read this scene as CPU/draw-call bound and set
+    // native resolution on that basis. A controlled ablation on 2026-08-04
+    // reversed it: three repeats per variant, interleaved, on a quiet machine,
+    // at Post Office Bay. Turning off the whole post chain (all 31.7 fullscreen
+    // passes), the water planar reflection (which draws the scene a second
+    // time), or shadows (87 draw calls) each landed within noise of baseline.
+    // Only resolution moved: 27.5 -> 47.4 fps rotating at 1x, ranges not
+    // overlapping. Fillrate on the main pass is the constraint.
+    //
+    // 1.5x keeps most of the sharpness at roughly half the pixels of 2x. The
+    // adaptive ladder still protects slower machines from here.
+    dprMode: '1.5x',
     // 2x MSAA on top of SMAA — the multisampled composer target is what gives
     // cutout foliage alpha-to-coverage real samples to work with.
     msaaSamples: 2,
@@ -398,10 +419,22 @@ const SCREENSHOT_MIN_LOADING_MS = 5200;
 const OPENING_DURATION_MS = 6200;
 const LAUNCH_OVERLAY_FADE_MS = 720;
 const LAUNCH_COMPLETION_HOLD_MS = 420;
-const HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 3000;
-const HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550;
+// The splash is now a handover, not a presentation beat: it holds only long
+// enough for the scene behind it to have Darwin and the sea in frame, then the
+// prologue takes over and the rest of the island builds behind the card.
+const HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 900;
+const HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 200;
 const HISTORICAL_PROLOGUE_ACCEPT_HOLD_MS = 80;
-const HISTORICAL_PROLOGUE_EXIT_MS = 2300;
+// Matches the launch-prologue-still keyframes in globals.css. Changing one
+// without the other either clips the crossfade or unmounts the overlay while
+// the still is still on screen.
+const HISTORICAL_PROLOGUE_EXIT_MS = 1650;
+// How long the frozen backdrop stays fully opaque after Begin is pressed. Full
+// render quality is restored at the end of it, so the first shadow pass, the
+// first water reflection and the render-target reallocation happen while the
+// still image is still covering the canvas rather than on the frame the island
+// appears. Must stay below the still's hold in the CSS keyframes.
+const HISTORICAL_PROLOGUE_COVER_HOLD_MS = 380;
 const BOOT_DEGRADED_READY_TIMEOUT_MS = 10000;
 const OPENING_ENSEMBLE_READY_TIMEOUT_MS = 6500;
 const HUD_POST_REVEAL_QUIET_MS = 320;
@@ -441,7 +474,12 @@ const INTRO_LOADING_PHASE_TIMINGS_MS = Object.freeze(
   INTRO_LOADING_STEPS.map((_, index) => Math.round(index * 155)),
 );
 const STARTUP_STREAM_FIRST_STEP_MS = 180;
-const STARTUP_STREAM_STEP_MS = 380;
+// Twelve remaining steps fire at FIRST + index * STEP, so this constant alone
+// sets ~4.4s of the startup ladder's wall time — measured 2026-08-04 as
+// 10.2s -> 14.8s of content-settled, against a 4.36s prediction. It was sized
+// when each step also carried up to 4s of foot-path splat generation; that work
+// is baked now (see pathSplatBakes.js), so the step no longer needs the room.
+const STARTUP_STREAM_STEP_MS = 220;
 const STARTUP_STREAM_IDLE_TIMEOUT_MS = 650;
 const STARTUP_STREAM_FRAME_BUDGET_MS = 28;
 // The deadline is a degraded fallback, not the normal transition clock. Full
@@ -1138,10 +1176,24 @@ function TransitionPerformanceProbe({ enabled, transition, contentPhase }) {
 // a number the scene cannot reach just makes it blurry for nothing. The old 25
 // fps floor sat at the very bottom of that band, so a session hovering at 26
 // never got help; 30 keeps the middle of the band defended.
-const ADAPTIVE_DPR_FLOOR_FPS = 30;      // sustained fps below this -> drop a rung
-const ADAPTIVE_DPR_CEIL_FPS = 42;       // sustained fps above this -> restore a rung
+// Changing a rung is NOT free, and that turned out to be the thing that matters
+// most about this controller. setPixelRatio reallocates the drawing buffer and
+// every render target hanging off it — the composer pair, the bloom mip chain,
+// the DoF targets, SMAA, the reflection buffer. Measured on 2026-08-04 at Post
+// Office Bay, the frame containing a 1.5x -> 1.25x step took 201ms (135ms of it
+// on the CPU) and the following frame took another 133ms. Roughly a third of a
+// second of freeze, from surrounding frames of 33-41ms.
+//
+// So the controller must be reluctant. The old floor of 30 sat exactly where
+// this scene now runs, which invited a step — and therefore a freeze — every
+// time the frame rate wobbled across it. The band is now wide enough that a
+// steady ~30fps sits comfortably inside it and nothing happens, and a step
+// requires several consecutive bad windows rather than one.
+const ADAPTIVE_DPR_FLOOR_FPS = 24;      // sustained fps below this -> drop a rung
+const ADAPTIVE_DPR_CEIL_FPS = 52;       // sustained fps above this -> restore a rung
 const ADAPTIVE_DPR_WINDOW_S = 1.0;      // averaging window per decision
-const ADAPTIVE_DPR_UPSCALE_WINDOWS = 3; // consecutive good windows before restoring
+const ADAPTIVE_DPR_DOWNSCALE_WINDOWS = 3; // consecutive bad windows before dropping
+const ADAPTIVE_DPR_UPSCALE_WINDOWS = 5; // consecutive good windows before restoring
 const ADAPTIVE_DPR_COOLDOWN_S = 2.0;    // settle time after a change / scene ready
 // A rung must earn its blur. When the scene is draw-call or CPU bound, shrinking
 // the framebuffer changes nothing, and the old controller would happily walk all
@@ -1149,6 +1201,13 @@ const ADAPTIVE_DPR_COOLDOWN_S = 2.0;    // settle time after a change / scene re
 // Require a measurable gain from the previous drop or give the pixels back and
 // stop adapting for this scene.
 const ADAPTIVE_DPR_MIN_GAIN_FPS = 2.5;
+// ...but one window is not enough evidence to give up on. The judge window is a
+// single second, and a texture upload, a shader link or a GC inside it can hide
+// a real gain — all three have been measured here at 200-400ms. Latching the
+// verdict off a single sample meant one unlucky second disabled the safety net
+// for the whole session, which is the worst outcome on exactly the slow machines
+// it exists to protect.
+const ADAPTIVE_DPR_NO_GAIN_STRIKES = 2;
 
 function buildDprLadder(maxDpr) {
   const rungs = [];
@@ -1172,6 +1231,8 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
     elapsed: 0,
     cooldown: ADAPTIVE_DPR_COOLDOWN_S,
     goodWindows: 0,
+    badWindows: 0,
+    noGainStrikes: 0,
     deviceDpr: 1,
     fpsBeforeDrop: 0,
     fillBound: true,
@@ -1188,6 +1249,8 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
     s.elapsed = 0;
     s.cooldown = ADAPTIVE_DPR_COOLDOWN_S;
     s.goodWindows = 0;
+    s.badWindows = 0;
+    s.noGainStrikes = 0;
     s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
     s.fpsBeforeDrop = 0;
     s.fillBound = true;
@@ -1239,26 +1302,41 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
       const gained = fps - s.fpsBeforeDrop;
       s.fpsBeforeDrop = 0;
       if (gained < ADAPTIVE_DPR_MIN_GAIN_FPS) {
-        s.fillBound = false;
-        notePerfEvent('adaptive-dpr-verdict', {
-          fillBound: false,
+        s.noGainStrikes += 1;
+        notePerfEvent('adaptive-dpr-no-gain', {
+          strikes: s.noGainStrikes,
           gainedFps: Math.round(gained * 10) / 10,
         });
-        if (s.level > 0) {
-          s.level -= 1;
-          applyAdaptiveDpr(s, setDpr, gl, onApplied);
+        // Only give up once the drop has failed to pay repeatedly. A single
+        // window can be spoiled by one upload or compile.
+        if (s.noGainStrikes >= ADAPTIVE_DPR_NO_GAIN_STRIKES) {
+          s.fillBound = false;
+          notePerfEvent('adaptive-dpr-verdict', { fillBound: false });
+          if (s.level > 0) {
+            s.level -= 1;
+            applyAdaptiveDpr(s, setDpr, gl, onApplied);
+          }
         }
         return;
       }
+      // A drop that paid clears the doubt it was accumulating.
+      s.noGainStrikes = 0;
     }
 
     if (fps < ADAPTIVE_DPR_FLOOR_FPS && s.level < s.ladder.length - 1 && s.fillBound) {
-      s.level += 1;
+      s.badWindows += 1;
       s.goodWindows = 0;
-      s.fpsBeforeDrop = fps;
-      applyAdaptiveDpr(s, setDpr, gl, onApplied);
+      // A step costs about a third of a second of freeze, so it has to be worth
+      // it: several consecutive bad windows, not one dip.
+      if (s.badWindows >= ADAPTIVE_DPR_DOWNSCALE_WINDOWS) {
+        s.level += 1;
+        s.badWindows = 0;
+        s.fpsBeforeDrop = fps;
+        applyAdaptiveDpr(s, setDpr, gl, onApplied);
+      }
     } else if (fps > ADAPTIVE_DPR_CEIL_FPS && s.level > 0) {
       s.goodWindows += 1;
+      s.badWindows = 0;
       if (s.goodWindows >= ADAPTIVE_DPR_UPSCALE_WINDOWS) {
         s.level -= 1;
         s.goodWindows = 0;
@@ -1266,6 +1344,7 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
       }
     } else {
       s.goodWindows = 0;
+      s.badWindows = 0;
     }
   });
 
@@ -1467,22 +1546,18 @@ function OpeningVisualReadySignal({
       });
       const state = useThreeGameStore.getState();
       const expectsSyms = state.symsZoneId === zoneId;
+      // The opening ensemble is the cast of the landing shot, which is Syms.
+      // Waiting for every uncollected specimen as well pinned this signal to
+      // the last streaming content phase and left the prologue card sitting
+      // finished on screen for about eleven seconds. Specimens are scattered
+      // collectables that arrive behind the reveal; they are counted here for
+      // diagnostics but no longer hold the opening.
       const collectedActors = new Set(state.collectedSpecimenActorIds || []);
       const expectedSpecimenCount = getThreeSpecimens(zoneId).filter(specimen => {
         const actorId = specimen.instanceId || specimen.id;
         return actorId !== state.playableHiddenActorId && !collectedActors.has(actorId);
       }).length;
-      const expectsSpecimens = expectedSpecimenCount > 0;
-      if (
-        (expectsSyms && (symsActorCount === 0 || symsVisualCount === 0))
-        || (
-          expectsSpecimens
-          && (
-            specimenActorCount < expectedSpecimenCount
-            || specimenVisualCount < expectedSpecimenCount
-          )
-        )
-      ) {
+      if (expectsSyms && (symsActorCount === 0 || symsVisualCount === 0)) {
         quietSinceRef.current = 0;
         stableFramesRef.current = 0;
         return;
@@ -1491,7 +1566,6 @@ function OpeningVisualReadySignal({
         window.__threeOpeningEnsemble = {
           zoneId,
           expectsSyms,
-          expectsSpecimens,
           expectedSpecimenCount,
           symsActorCount,
           symsVisualCount,
@@ -2931,6 +3005,7 @@ function CentralPeakDiagnostics() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   useEffect(() => subscribeCentralPeakDev(() => setRevision(value => value + 1)), []);
   useEffect(() => subscribeDistanceScenery(() => setRevision(value => value + 1)), []);
+  useEffect(() => subscribeHorizonIslands(() => setRevision(value => value + 1)), []);
   useEffect(() => {
     if (!copied) return undefined;
     const id = setTimeout(() => setCopied(false), 1400);
@@ -2949,6 +3024,29 @@ function CentralPeakDiagnostics() {
       distanceSceneryRuntime[key] !== DISTANCE_SCENERY_SHELL_DEFAULTS[key]
     ));
   const shellSet = patch => setDistanceSceneryShellTuning(patch);
+  const islandSet = patch => {
+    setCopied(false);
+    setHorizonIslands(patch);
+  };
+  const islandsDirty = horizonIslandsDirty();
+  const anyDirty = dirty || shellDirty || islandsDirty;
+  // One header for three runtimes: copy hands back whichever of them the
+  // session actually touched, and reset clears all of it. The old buttons acted
+  // on one runtime chosen by the current mode, so tuning done in Combined could
+  // be neither copied nor reset.
+  const copyEverything = () => {
+    const blocks = [];
+    if (dirty) blocks.push(`// CENTRAL_PEAK_DEV_DEFAULTS\n${centralPeakDevDiffSource()}`);
+    if (islandsDirty) blocks.push(`// HORIZON_ISLAND_DEFAULTS\n${horizonIslandsDiffSource()}`);
+    if (shellDirty) {
+      const lines = Object.keys(DISTANCE_SCENERY_SHELL_DEFAULTS)
+        .filter(key => distanceSceneryRuntime[key] !== DISTANCE_SCENERY_SHELL_DEFAULTS[key])
+        .map(key => `  ${key}: ${String(distanceSceneryRuntime[key])},`);
+      blocks.push(`// DISTANCE_SCENERY_SHELL_DEFAULTS\n${lines.join('\n')}`);
+    }
+    navigator.clipboard?.writeText(blocks.join('\n\n') || '// matches defaults');
+    setCopied(true);
+  };
   return (
     <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -2956,12 +3054,8 @@ function CentralPeakDiagnostics() {
         <div className="flex gap-1">
           <button
             type="button"
-            onClick={() => {
-              const source = centralPeakDevDiffSource();
-              navigator.clipboard?.writeText(source);
-              setCopied(true);
-            }}
-            disabled={!dirty}
+            onClick={copyEverything}
+            disabled={!anyDirty}
             className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15 disabled:opacity-35"
           >
             {copied ? 'copied' : 'copy values'}
@@ -2969,12 +3063,13 @@ function CentralPeakDiagnostics() {
           <button
             type="button"
             onClick={() => {
-              if (distanceSceneryRuntime.mode !== 'layered') resetDistanceSceneryShellTuning();
-              else resetCentralPeakDev();
+              resetCentralPeakDev();
+              resetDistanceSceneryShellTuning();
+              resetHorizonIslands();
             }}
             className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
           >
-            {(distanceSceneryRuntime.mode !== 'layered' ? shellDirty : dirty) ? 'reset' : 'defaults'}
+            {anyDirty ? 'reset' : 'defaults'}
           </button>
         </div>
       </div>
@@ -3007,6 +3102,43 @@ function CentralPeakDiagnostics() {
         continuation. Combined keeps the apron close and uses only the shell&apos;s far horizon.
         The URL records the choice for repeatable screenshots.
       </p>
+      <div className="mb-2 rounded border border-indigo-200/25 bg-indigo-300/5 p-1.5">
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-indigo-100/75">
+          Horizon islands · Isabela &amp; Santa Cruz
+        </div>
+        <p className="mb-1.5 text-[10px] leading-snug text-amber-100/45">
+          The two hazy landmasses out at sea. They ride the sky rig, not the chart, so nothing in
+          the shell or apron sections below reaches them — bearing and size are angular, and
+          distance only sets how big the card reads.
+        </p>
+        <div className="mb-1.5">
+          <Toggle label="Visible" checked={horizonIslands.visible} onChange={value => islandSet({ visible: value })} />
+        </div>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Opacity" value={horizonIslands.opacity} min={0} max={1} step={0.01} format={value => value.toFixed(2)} onChange={value => islandSet({ opacity: value })} />
+          <DevSlider label="Darkness" value={horizonIslands.darkness} min={0.6} max={1.2} step={0.01} format={value => `${value.toFixed(2)}×`} onChange={value => islandSet({ darkness: value })} />
+          <DevSlider label="Sea line" value={horizonIslands.baseY} min={-14} max={2} step={0.1} format={value => `${value.toFixed(1)} m`} onChange={value => islandSet({ baseY: value })} />
+          <DevSlider label="Card distance" value={horizonIslands.distance} min={80} max={170} step={2} format={value => `${value.toFixed(0)} m`} onChange={value => islandSet({ distance: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+          Isabela · NNW
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Bearing" value={horizonIslands.isabelaBearing} min={-180} max={180} step={0.5} format={value => `${value.toFixed(1)}°`} onChange={value => islandSet({ isabelaBearing: value })} />
+          <DevSlider label="Width" value={horizonIslands.isabelaWidth} min={20} max={220} step={1} format={value => `${value.toFixed(0)} m`} onChange={value => islandSet({ isabelaWidth: value })} />
+          <DevSlider label="Height" value={horizonIslands.isabelaHeight} min={2} max={40} step={0.25} format={value => `${value.toFixed(2)} m`} onChange={value => islandSet({ isabelaHeight: value })} />
+          <DevSlider label="Lift" value={horizonIslands.isabelaLift} min={-6} max={6} step={0.1} format={value => `${value.toFixed(1)} m`} onChange={value => islandSet({ isabelaLift: value })} />
+        </div>
+        <p className="mt-2 mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+          Santa Cruz · NNE
+        </p>
+        <div className="grid grid-cols-1 gap-1.5">
+          <DevSlider label="Bearing" value={horizonIslands.santaCruzBearing} min={-180} max={180} step={0.5} format={value => `${value.toFixed(1)}°`} onChange={value => islandSet({ santaCruzBearing: value })} />
+          <DevSlider label="Width" value={horizonIslands.santaCruzWidth} min={20} max={220} step={1} format={value => `${value.toFixed(0)} m`} onChange={value => islandSet({ santaCruzWidth: value })} />
+          <DevSlider label="Height" value={horizonIslands.santaCruzHeight} min={2} max={40} step={0.25} format={value => `${value.toFixed(2)} m`} onChange={value => islandSet({ santaCruzHeight: value })} />
+          <DevSlider label="Lift" value={horizonIslands.santaCruzLift} min={-6} max={6} step={0.1} format={value => `${value.toFixed(1)} m`} onChange={value => islandSet({ santaCruzLift: value })} />
+        </div>
+      </div>
       {distanceSceneryRuntime.mode !== 'layered' && (
         <div className="mb-2 rounded border border-emerald-200/20 bg-emerald-300/5 p-1.5">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100/75">
@@ -3108,6 +3240,13 @@ function CentralPeakDiagnostics() {
             Tints the direct apron red so its handoff to local terrain can be inspected.
           </p>
         </div>
+      </div>
+      <div className="my-2 border-t border-amber-100/10 pt-2">
+        <h4 className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-100/65">Cerro Pajas backdrop</h4>
+        <p className="mb-2 text-[10px] leading-snug text-amber-100/45">
+          Floreana&apos;s own summit, seen from wherever you are standing. Bearing and distance come
+          from the map, so they are readouts, not sliders; vertical moves it against the horizon.
+        </p>
       </div>
       <div className="mb-2 grid grid-cols-3 gap-1.5">
         <Metric label="Map distance" value={view ? `${view.distanceKm.toFixed(2)} km` : '--'} />
@@ -3566,6 +3705,7 @@ export default function ThreeDarwinGame({
   const [launchOverlayDismissed, setLaunchOverlayDismissed] = useState(false);
   const [hudEntranceComplete, setHudEntranceComplete] = useState(false);
   const [launchRevealSettled, setLaunchRevealSettled] = useState(false);
+  const [openingQualityRestored, setOpeningQualityRestored] = useState(false);
   const [historicalPrologueVisible, setHistoricalPrologueVisible] = useState(false);
   const [historicalPrologueAccepted, setHistoricalPrologueAccepted] = useState(false);
   const [historicalPrologueSkipRequested, setHistoricalPrologueSkipRequested] = useState(false);
@@ -3642,7 +3782,13 @@ export default function ThreeDarwinGame({
   // quiet until the HUD's last entrance transition has painted. Restoring the
   // selected quality on the same frame as the UI reveal was another source of
   // visible hitching even when all network requests were already cached.
-  const openingRenderBudgetActive = gameStarted && !launchRevealSettled;
+  //
+  // `openingQualityRestored` is the earlier exit: once the prologue's blackout
+  // is opaque there is nothing to protect, and the expensive first renders are
+  // better spent there than after the island is already on screen.
+  const openingRenderBudgetActive = gameStarted
+    && !launchRevealSettled
+    && !openingQualityRestored;
   // Shadows and the planar reflection stay quiet only while the destination is
   // being built (departing/chart/mounting). They resume at 'ready' — which is
   // still behind the opaque chart, before the fade-out starts — so their very
@@ -4058,7 +4204,10 @@ export default function ThreeDarwinGame({
         setLoadersStable(quietFor >= BOOT_LOADER_STABLE_MS && elapsed >= BOOT_MIN_LOADING_MS);
       }
 
-      const progressTime = Math.min(1, elapsed / 2200);
+      // The floor the bar fills over regardless of real load. It exists so a
+      // warm cache does not flash the bar; it is not a measurement, so it is
+      // matched to the splash's own minimum rather than set well beyond it.
+      const progressTime = Math.min(1, elapsed / HISTORICAL_PROLOGUE_SPLASH_MIN_MS);
       const elapsedEase = progressTime * progressTime * (3 - 2 * progressTime);
       const assetTarget = loaderBusy
         ? 14 + rawProgress * 0.62
@@ -4148,6 +4297,7 @@ export default function ThreeDarwinGame({
     setLaunchOverlayDismissed(false);
     setHudEntranceComplete(false);
     setLaunchRevealSettled(false);
+    setOpeningQualityRestored(false);
     launchHeavyWorkAllowedRef.current = true;
     openingPreloadKeyRef.current = null;
     openingEnsembleReportedRef.current = false;
@@ -4221,6 +4371,7 @@ export default function ThreeDarwinGame({
     setLaunchOverlayDismissed(false);
     setHudEntranceComplete(false);
     setLaunchRevealSettled(false);
+    setOpeningQualityRestored(false);
     launchHeavyWorkAllowedRef.current = true;
     openingPreloadKeyRef.current = null;
     openingEnsembleReportedRef.current = false;
@@ -4343,12 +4494,16 @@ export default function ThreeDarwinGame({
     startupContentPhase,
   ]);
 
-  // The splash remains fully visible through a real 100% bar and a short
-  // completion hold. The prologue then becomes useful cover for the expensive
-  // tail of scene preparation without making the opening bar look abandoned.
+  // Hands over as soon as there is a view worth showing behind the card: the
+  // player committed and the first content group mounted, which is the sea and
+  // Darwin with the island still building. Waiting for a full progress bar cost
+  // ~2.5s of splash for no information, since the bar's own ramp is a
+  // presentation, not a measurement.
+  const prologueBackdropReady = startupContentPhase >= 1
+    && (playableModeId !== 'darwin' || playerVisualReady);
   useEffect(() => {
     if (!gameStarted || !launchPrologueEligible || historicalPrologueVisible) return undefined;
-    if (displayedProgress < 100) return undefined;
+    if (!prologueBackdropReady) return undefined;
     const elapsed = performance.now() - (bootStartedAt.current || performance.now());
     const timer = window.setTimeout(() => setHistoricalPrologueVisible(true),
       Math.max(0, HISTORICAL_PROLOGUE_SPLASH_MIN_MS - elapsed)
@@ -4356,10 +4511,10 @@ export default function ThreeDarwinGame({
     );
     return () => window.clearTimeout(timer);
   }, [
-    displayedProgress,
     gameStarted,
     historicalPrologueVisible,
     launchPrologueEligible,
+    prologueBackdropReady,
   ]);
 
   useEffect(() => {
@@ -4443,12 +4598,19 @@ export default function ThreeDarwinGame({
     });
   }, [gameStarted, launchState, loadingContentTarget]);
 
-  // Start current-zone actor requests one at a time once the essential
-  // phase-three scene is stable. The historical prologue supplies several
-  // seconds of opaque cover; skip-intro launches use the same reveal guard to
-  // pause this queue until the HUD has finished.
+  // Start current-zone actor requests one at a time once the essential content
+  // groups exist. This used to wait for `sceneReady`, which serialized the one
+  // request the opening actually blocks on: Syms is first in this queue and the
+  // opening-ensemble check cannot pass until he is in the scene, so the reveal
+  // waited for a fetch that had not been allowed to start yet. Running from the
+  // phase boundary instead puts it under the prologue text.
+  //
+  // Skip-intro launches still hold the queue behind `launchHeavyWorkAllowedRef`
+  // once the reveal begins.
+  const openingPreloadAllowed = gameStarted
+    && startupContentPhase >= STARTUP_OPENING_CONTENT_PHASE;
   useEffect(() => {
-    if (!gameStarted || !sceneReady) return undefined;
+    if (!openingPreloadAllowed) return undefined;
     const preloadKey = `${bootStartedAt.current}:${currentZoneId}`;
     if (openingPreloadKeyRef.current === preloadKey) return undefined;
     openingPreloadKeyRef.current = preloadKey;
@@ -4492,18 +4654,30 @@ export default function ThreeDarwinGame({
       if (idleHandle != null) window.cancelIdleCallback?.(idleHandle);
       if (timeoutHandle != null) window.clearTimeout(timeoutHandle);
     };
-  }, [currentZoneId, gameStarted, sceneReady]);
+  }, [currentZoneId, openingPreloadAllowed]);
 
-  // Mount one remaining content family per bounded idle window. The scheduler
-  // pauses while the launch veil and HUD reveal are animating, then resumes
-  // with requestIdleCallback timeouts so a continuously-rendering WebGL page
-  // can never starve the specimen/NPC phases.
+  // Mount one remaining content family per bounded idle window, starting when
+  // the reveal begins rather than when it finishes.
+  //
+  // This used to wait for `launchRevealSettled` — HUD entrance complete plus a
+  // 320ms quiet — which parked the ladder for 3.7s after the veil lifted. That
+  // wait is not what protects the reveal; the requestIdleCallback pacing below
+  // is, and it stays. The landing shot deliberately holds its first HUD panel
+  // until 2s (604cb62), so the opening of the reveal is idle by construction
+  // and is exactly when this work should land. Measured 2026-08-04, production
+  // build: content settled 13.7s -> 9.0s, and the first 12s of the trace kept
+  // 16-20 frames over 50ms either way — the same spread the unchanged runs
+  // show, with the worst frame 1400ms against 1433ms. Landing work earlier did
+  // not cost reveal smoothness.
+  //
+  // `gameUiVisible` is the same signal the HUD entrance starts on, so the two
+  // begin together instead of in series.
   useEffect(() => {
     if (!gameStarted || !sceneReady) return undefined;
     const revealProtected = historicalPrologueAccepted
       || launchOverlayDeparting
       || launchOverlayDismissed;
-    if (revealProtected && !launchRevealSettled) return undefined;
+    if (revealProtected && !gameUiVisible) return undefined;
     const steps = CONTENT_MOUNT_STEPS.filter(
       phase => phase > Math.max(loadingContentTarget, startupContentPhase),
     );
@@ -4521,13 +4695,25 @@ export default function ThreeDarwinGame({
     });
   }, [
     gameStarted,
+    gameUiVisible,
     historicalPrologueAccepted,
     launchOverlayDeparting,
     launchOverlayDismissed,
-    launchRevealSettled,
     loadingContentTarget,
     sceneReady,
   ]);
+
+  // Hand the render budget back while the blackout still covers the screen.
+  useEffect(() => {
+    if (!launchOverlayDeparting || !historicalPrologueAccepted || openingQualityRestored) {
+      return undefined;
+    }
+    const handle = window.setTimeout(() => {
+      recordLaunchHandoffEvent('opening-quality-restored');
+      setOpeningQualityRestored(true);
+    }, HISTORICAL_PROLOGUE_COVER_HOLD_MS);
+    return () => window.clearTimeout(handle);
+  }, [historicalPrologueAccepted, launchOverlayDeparting, openingQualityRestored]);
 
   useEffect(() => {
     if (!hudEntranceComplete || launchRevealSettled) return undefined;
@@ -4674,7 +4860,10 @@ export default function ThreeDarwinGame({
                 && sceneReady
                 && !openingEnsembleReady}
               sequenceId={`opening-ensemble:${bootStartedAt.current || 'opening-load'}`}
-              contentReady={startupContentPhase >= STARTUP_FULL_CONTENT_PHASE}
+              // The essential boundary, not the last streaming phase. Holding
+              // the Begin button until every content family had mounted was the
+              // whole of the opening's dead time.
+              contentReady={startupContentPhase >= STARTUP_OPENING_CONTENT_PHASE}
               segmentCap={scenePerfSettings.terrainSegmentCap}
               verifyOpeningActors
               onReady={markOpeningEnsembleReady}
@@ -4700,9 +4889,20 @@ export default function ThreeDarwinGame({
               underwaterAmount={underwaterAmount}
             />
             <AdaptiveResolution
+              // Zone travel has to be excluded explicitly. This gate reads
+              // `startupContentPhase`, which is long since complete by the time
+              // a player travels, so the controller stayed live right through a
+              // transition — measuring the destination's load frames (1 fps
+              // windows were observed in the panel) as though they were steady
+              // state, and stepping the ladder down in response. Each step
+              // costs about a third of a second of freeze, so it made the
+              // transition feel slower AND left the player at a reduced
+              // resolution afterwards for no reason. Frame times during a
+              // transition are load, not a verdict on the machine.
               enabled={sceneReady
                 && launchRevealSettled
                 && !openingIntroActive
+                && !transition
                 && startupContentPhase >= STARTUP_FULL_CONTENT_PHASE
                 && perfSettings.adaptiveDpr !== false}
               maxDpr={configuredDpr[1]}

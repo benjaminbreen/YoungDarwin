@@ -88,16 +88,19 @@ const EL_MIRADOR_COLOR_GLSL = /* glsl */`
   diffuseColor.rgb *= 1.0 - emColorRim * 0.08;
 `;
 
+export const EL_MIRADOR_SPLAT_BOUNDS = {
+  originX: -52,
+  originZ: -48,
+  width: 104,
+  depth: 96,
+  size: 768,
+};
+
 export function createElMiradorTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: EL_MIRADOR_PATH_POINTS,
-    pathSplatBounds: {
-      originX: -52,
-      originZ: -48,
-      width: 104,
-      depth: 96,
-      size: 768,
-    },
+    pathSplatBake: 'el-mirador',
+    pathSplatBounds: EL_MIRADOR_SPLAT_BOUNDS,
     pathMinimumWidth: 1.58,
     layerConfig: EL_MIRADOR_PBR_LAYERS,
     surfaceMaskGLSL: EL_MIRADOR_MASK_GLSL,

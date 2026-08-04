@@ -6,7 +6,15 @@
 //
 //   node scripts/three-perf-lab.mjs --scenario=stutter
 //   node scripts/three-perf-lab.mjs --scenario=quick --tag=after-fix --compare=last
+//   node scripts/three-perf-lab.mjs --scenario=travel --profile
+//   node scripts/three-perf-lab.mjs --scenario=boot --profile=boot
 //   node scripts/three-perf-lab.mjs --list
+//
+// `--profile[=steps|boot|all]` attaches Chromium's sampling profiler and prints
+// which functions owned the main thread, including the frames that were on the
+// stack for the whole of the longest block. Use it instead of guessing which
+// subsystem a hitch belongs to; the raw capture is written to cpu.cpuprofile
+// for DevTools.
 //
 // Requires a dev server (default http://localhost:3000/three). Refuses to run
 // on a software renderer, because a SwiftShader frame time is not evidence
@@ -30,6 +38,12 @@ import {
   formatCostDigest,
   formatDigest,
 } from './perf-lab/report.mjs';
+import {
+  analyseCpuProfile,
+  formatCpuProfile,
+  startCpuProfile,
+  stopCpuProfile,
+} from './perf-lab/cpu-profile.mjs';
 
 const OUT_ROOT = path.join(process.cwd(), 'test-results', 'perf-lab');
 
@@ -121,8 +135,20 @@ async function main() {
   let trace = null;
   let boot = null;
   let cost = null;
+  let cpuProfile = null;
+
+  // Which stretch to sample. `boot` covers load and settle, `steps` covers the
+  // scenario, `all` covers both. Boot and steps are separate because a boot
+  // profile is dominated by module evaluation and would bury a 4s hitch that
+  // happens 30 seconds later.
+  const profileScope = options.profile === true ? 'steps' : String(options.profile || '');
+  const profileBoot = profileScope === 'boot' || profileScope === 'all';
+  const profileSteps = profileScope === 'steps' || profileScope === 'all';
+  const profileIntervalUs = Number(options.profileInterval) || 200;
+  let cdp = null;
 
   try {
+    if (profileBoot) cdp = await startCpuProfile(session.page, { intervalUs: profileIntervalUs });
     boot = await bootToGameplay(session.page, sessionOptions);
     console.log(
       `[perf-lab] gameplay ready in ${(boot.timings.gameplayReadyMs / 1000).toFixed(1)}s`
@@ -136,9 +162,22 @@ async function main() {
       + (settled.stable ? '' : ' (never reached a quiet window — see the settle phase)'),
     );
 
+    if (profileBoot && !profileSteps) {
+      cpuProfile = await stopCpuProfile(cdp);
+      cdp = null;
+    }
+    if (profileSteps && !cdp) {
+      cdp = await startCpuProfile(session.page, { intervalUs: profileIntervalUs });
+    }
+
     const repeat = Math.max(1, Number(options.repeat) || 1);
     for (let pass = 0; pass < repeat; pass += 1) {
       await runSteps(session.page, scenario.steps, { shotDir, fullPage: options.fullPage === 'true' });
+    }
+
+    if (cdp) {
+      cpuProfile = await stopCpuProfile(cdp);
+      cdp = null;
     }
 
     // Walked after the trace's work is done, so the traversal cost is not
@@ -167,8 +206,16 @@ async function main() {
     consoleErrors: session.consoleErrors.slice(0, 40),
   };
 
-  const digest = formatDigest(analysis, meta) + formatCostDigest(cost);
+  const profileAnalysis = cpuProfile ? analyseCpuProfile(cpuProfile) : null;
+  const digest = formatDigest(analysis, meta)
+    + formatCostDigest(cost)
+    + (profileAnalysis ? formatCpuProfile(profileAnalysis) : '');
   console.log(digest);
+  if (cpuProfile) {
+    // The raw capture loads straight into DevTools' Performance panel, so a
+    // surprising digest can be opened rather than argued about.
+    await fs.writeFile(path.join(outDir, 'cpu.cpuprofile'), JSON.stringify(cpuProfile));
+  }
   if (session.consoleErrors.length) {
     console.log(`  ${session.consoleErrors.length} console error(s); first: ${session.consoleErrors[0].slice(0, 160)}`);
   }

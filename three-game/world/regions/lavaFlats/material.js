@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
 } from '../../paths/standardPath';
@@ -11,7 +11,7 @@ import {
 } from '../materials/pbrTerrainTextures';
 import { LAVA_FLATS_PATH_POINTS } from './path';
 
-const LAVA_FLATS_SPLAT_BOUNDS = {
+export const LAVA_FLATS_SPLAT_BOUNDS = {
   originX: -56,
   originZ: -52,
   width: 112,
@@ -130,7 +130,8 @@ export function createLavaFlatsTerrainMaterial() {
   const dark = loadPackedPbrTerrainSet(FLOREANA_PBR_TEXTURES.darkBasaltGravel);
   const weathered = loadPackedPbrTerrainSet(FLOREANA_PBR_TEXTURES.weatheredHighlandBasalt);
   const scoria = loadPackedPbrTerrainSet(FLOREANA_PBR_TEXTURES.oxidizedScoriaceousBasalt);
-  const pathSplat = createStandardFootPathSplatTexture({
+  const pathSplat = resolveStandardFootPathSplatTexture({
+    bake: 'lava-flats',
     pathPoints: LAVA_FLATS_PATH_POINTS,
     bounds: LAVA_FLATS_SPLAT_BOUNDS,
     size: LAVA_FLATS_SPLAT_BOUNDS.size,

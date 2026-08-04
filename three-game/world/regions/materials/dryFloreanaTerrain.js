@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
@@ -424,6 +424,7 @@ export function createDryFloreanaTerrainMaterial({
   highFadeEnd = 9.6,
   pathSplatSize,
   pathSplatBounds,
+  pathSplatBake = null,
   pathMinimumWidth = 2.35,
   pathOnly = false,
   earthFloorStrength = 0,
@@ -432,7 +433,8 @@ export function createDryFloreanaTerrainMaterial({
     throw new Error('createDryFloreanaTerrainMaterial requires pathPoints.');
   }
   const fallbacks = textureSet.fallbacks || {};
-  const pathSplatTexture = createStandardFootPathSplatTexture({
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: pathSplatBake,
     pathPoints,
     ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
     ...(pathSplatSize ? { size: pathSplatSize } : {}),

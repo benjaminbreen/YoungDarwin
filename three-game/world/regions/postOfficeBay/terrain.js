@@ -46,6 +46,9 @@ function postOfficeLandContinuity(x, z) {
   return THREE.MathUtils.clamp(Math.max(inland, sideShelf), 0, 1);
 }
 
+// Math.sqrt rather than Math.hypot: hypot's overflow guard costs several times
+// a plain sqrt, and these are metres of island, nowhere near the range where it
+// buys anything. This runs once per terrain sample per polygon edge.
 function pointSegmentDistance(px, pz, ax, az, bx, bz) {
   const abx = bx - ax;
   const abz = bz - az;
@@ -53,7 +56,7 @@ function pointSegmentDistance(px, pz, ax, az, bx, bz) {
   const t = THREE.MathUtils.clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
   const dx = px - (ax + abx * t);
   const dz = pz - (az + abz * t);
-  return Math.hypot(dx, dz);
+  return Math.sqrt(dx * dx + dz * dz);
 }
 
 function pointInPolygon(x, z, points) {
@@ -78,11 +81,34 @@ function polygonEdgeDistance(x, z, points) {
   return d;
 }
 
+// Bounds are the same for every sample, so they are measured once per polygon
+// rather than re-walked. Most of the heightfield lies outside the cove, and a
+// sample that fails this test cannot be inside the polygon either.
+const polygonBoundsCache = new WeakMap();
+
+function polygonBounds(points) {
+  let bounds = polygonBoundsCache.get(points);
+  if (!bounds) {
+    bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+    for (const [px, pz] of points) {
+      if (px < bounds.minX) bounds.minX = px;
+      if (px > bounds.maxX) bounds.maxX = px;
+      if (pz < bounds.minZ) bounds.minZ = pz;
+      if (pz > bounds.maxZ) bounds.maxZ = pz;
+    }
+    polygonBoundsCache.set(points, bounds);
+  }
+  return bounds;
+}
+
+// The edge distance is only read when the sample is inside the polygon, and
+// most of the heightfield is not. Computing it first walked every edge of the
+// cove for every land vertex and threw the answer away.
 function polygonWaterMask(x, z, points, feather = 3.2) {
-  const inside = pointInPolygon(x, z, points);
-  const d = polygonEdgeDistance(x, z, points);
-  if (inside) return THREE.MathUtils.smoothstep(d, 0, feather);
-  return 0;
+  const { minX, maxX, minZ, maxZ } = polygonBounds(points);
+  if (x < minX || x > maxX || z < minZ || z > maxZ) return 0;
+  if (!pointInPolygon(x, z, points)) return 0;
+  return THREE.MathUtils.smoothstep(polygonEdgeDistance(x, z, points), 0, feather);
 }
 
 const POST_OFFICE_BAY_WATER_POLYGON = [
@@ -137,11 +163,11 @@ export function postOfficeBayCoastZ(x) {
 }
 
 export function postOfficeLandingBeachMask(x, z) {
-  const alongshore = 1 - THREE.MathUtils.smoothstep(
-    Math.abs(x - POST_OFFICE_BAY_LANDING_BEACH.x),
-    12,
-    20,
-  );
+  // Beyond 20m alongshore the mask is exactly zero, so the shore-line walk and
+  // the two remaining smoothsteps are wasted on most of the heightfield.
+  const alongshoreDistance = Math.abs(x - POST_OFFICE_BAY_LANDING_BEACH.x);
+  if (alongshoreDistance >= 20) return 0;
+  const alongshore = 1 - THREE.MathUtils.smoothstep(alongshoreDistance, 12, 20);
   const shoreDistance = z - postOfficeBayCoastZ(x);
   const seaward = THREE.MathUtils.smoothstep(shoreDistance, -10, -5.5);
   const inland = 1 - THREE.MathUtils.smoothstep(shoreDistance, 11, 18);
@@ -452,10 +478,16 @@ export const postOfficeBayRegion = {
     isWalkable: isPostOfficeWalkable,
     // Opening shot: Darwin stands on the crest of the central rise looking east
     // along the ridge, with the cove and the Beagle off his left shoulder,
-    // rather than down on the landing facing the beach and Syms.
-    defaultSpawn: [-3.5, 0, 22],
-    defaultFacing: [0.92, 0, 0.39],
-    defaultCameraFacing: [0.92, 0, 0.39],
+    // rather than down on the landing facing the beach and Syms. Framing was
+    // set in-game and read off the live pose, so these are measured rather than
+    // dialled in — re-capture them the same way rather than nudging by hand.
+    //
+    // The camera is deliberately not parallel to the body: both look east and a
+    // little south, with the shot pulled slightly further south than Darwin
+    // faces, which keeps the beach, the barrel and Syms in frame off his left.
+    defaultSpawn: [-8.43, 0, 25.02],
+    defaultFacing: [0.97, 0, -0.22],
+    defaultCameraFacing: [0.96, 0, -0.29],
     entrySpawns: {
       south: [-7, 0, 53],
     },

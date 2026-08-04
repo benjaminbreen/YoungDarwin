@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
 } from '../../paths/standardPath';
@@ -19,7 +19,7 @@ import { POST_OFFICE_BAY_PATH_POINTS } from './terrain';
 // The path network continues through the carry strips at the south/east map
 // edges. At 512px this is still roughly 30cm/texel, enough for a two-metre
 // footpath while requiring one quarter of the old 1024px runtime splat work.
-const POST_OFFICE_PATH_SPLAT_BOUNDS = {
+export const POST_OFFICE_PATH_SPLAT_BOUNDS = {
   originX: -84,
   originZ: -66,
   width: 168,
@@ -383,7 +383,8 @@ function postOfficeNormalFragment() {
 }
 
 export function createPostOfficeBayTerrainMaterial() {
-  const pathSplatTexture = createStandardFootPathSplatTexture({
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: 'post-office-bay',
     pathPoints: POST_OFFICE_BAY_PATH_POINTS,
     bounds: POST_OFFICE_PATH_SPLAT_BOUNDS,
     size: POST_OFFICE_PATH_SPLAT_BOUNDS.size,

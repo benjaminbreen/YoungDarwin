@@ -197,7 +197,7 @@ function PageButton({ icon, onClick, disabled, children }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-2 rounded-[3px] border border-[#6d542f] bg-[#2a2117] px-4 py-2 text-[13px] tracking-[0.06em] text-[#ead3ae] shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:border-[#8a6d3f] hover:bg-[#3a2c1c] disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[3px] border border-[#6d542f] bg-[#2a2117] px-2.5 py-2 text-[12px] tracking-[0.04em] text-[#ead3ae] shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:border-[#8a6d3f] hover:bg-[#3a2c1c] disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2 sm:px-4 sm:text-[13px] sm:tracking-[0.06em]"
     >
       <svg viewBox="0 0 24 24" className="h-[1.1em] w-[1.1em]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {PAGE_BUTTON_ICONS[icon]}
@@ -268,11 +268,10 @@ function JournalPage({ entry, draft, onDraftChange }) {
   return (
     <section
       key={entry.key}
-      className="journal-page-turn journal-parchment text-[#3c2f1e]"
-      // Aspect floats between ~portrait (tall screens) and ~4:3 landscape
-      // (wide screens); the slack vs 100cq* leaves room for the page-stack
-      // shadows on the right/bottom edges.
-      style={{ width: 'min(98cqw, 136cqh)', height: 'min(96cqh, 140cqw)' }}
+      // Sizing lives in .journal-page-size (globals.css) so a container query
+      // can run the page taller on a phone, where an inline style could not be
+      // overridden.
+      className="journal-page-turn journal-parchment journal-page-size text-[#3c2f1e]"
     >
       <div
         className="relative flex h-full min-h-0 flex-col"
@@ -319,7 +318,7 @@ function JournalPage({ entry, draft, onDraftChange }) {
                 <div className="w-full whitespace-pre-wrap break-words pb-3 font-journal text-[clamp(19px,3cqh,24px)] font-medium leading-[1.55] tracking-[0.008em] text-[#302616] [overflow-wrap:anywhere]">
                   {specimen && (
                     <figure
-                      className="float-right mb-[2.5cqh] ml-[clamp(1.5rem,4cqw,3rem)] flex h-[clamp(11rem,38cqh,18rem)] w-[clamp(18rem,44cqw,34rem)] max-w-[55%] rotate-[0.7deg] flex-col items-center mix-blend-multiply"
+                      className="journal-figure float-right mb-[2.5cqh] ml-[clamp(1.5rem,4cqw,3rem)] flex h-[clamp(11rem,38cqh,18rem)] w-[clamp(18rem,44cqw,34rem)] max-w-[55%] rotate-[0.7deg] flex-col items-center mix-blend-multiply"
                       style={{ filter: 'sepia(0.5) contrast(1.04)' }}
                     >
                       <SketchPortrait specimen={specimen} className="min-h-0 w-full flex-1 object-contain object-right" />
@@ -353,8 +352,7 @@ function DevSpecimenCataloguePage({ entry }) {
   return (
     <section
       key={entry.key}
-      className="journal-page-turn journal-parchment text-[#3c2f1e]"
-      style={{ width: 'min(98cqw, 136cqh)', height: 'min(96cqh, 140cqw)' }}
+      className="journal-page-turn journal-parchment journal-page-size text-[#3c2f1e]"
     >
       <div className="relative flex h-full min-h-0 flex-col px-[clamp(1.8rem,6cqw,4rem)] py-[clamp(1.25rem,4.5cqh,2.8rem)]">
         <div className="flex shrink-0 items-center justify-between border-b border-[#59462c]/35 pb-[1.5cqh] font-expedition text-[clamp(9px,1.5cqh,12px)] font-semibold uppercase tracking-[0.2em] text-[#765e3b]">
@@ -542,7 +540,7 @@ function JournalPanel({ onClose, onOpenMap }) {
 
   return (
     <ExpeditionModal title="Journal" subtitle="My observations and notes" onClose={onClose} width="min(100rem, 98vw)">
-      <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 px-4 pb-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+      <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 px-2.5 pb-2.5 sm:px-4 sm:pb-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <EntryList
           className={mobileView === 'page' ? 'hidden lg:flex' : 'flex'}
           entries={entries}
@@ -568,7 +566,12 @@ function JournalPanel({ onClose, onOpenMap }) {
                 : <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
             )}
           </div>
-          <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2.5">
+          {/* Four control groups do not fit one phone row, and letting them wrap
+              produces a ragged three-row block. Below lg they become two tidy
+              rows (back + pager, then the page actions); `lg:contents` dissolves
+              the extra wrapper so the desktop rail keeps its single row. */}
+          <div className="mt-2.5 flex shrink-0 flex-col gap-2 sm:mt-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2.5">
+            <div className="flex items-center justify-between gap-2 lg:contents">
             <button
               type="button"
               onClick={() => setMobileView('list')}
@@ -579,6 +582,14 @@ function JournalPanel({ onClose, onOpenMap }) {
               </svg>
               Entries
             </button>
+            <div className="flex items-center justify-end gap-1.5 lg:order-last lg:w-36">
+              <PagerButton direction="prev" onClick={() => goToPage(pageIndex - 1)} disabled={pageIndex === 0} />
+              <span className="min-w-[3.4rem] text-center text-[12px] tracking-[0.1em] text-[#bea47c]">
+                {pageIndex + 1} / {pageKeys.length}
+              </span>
+              <PagerButton direction="next" onClick={() => goToPage(pageIndex + 1)} disabled={pageIndex === pageKeys.length - 1} />
+            </div>
+            </div>
             <div className="hidden w-40 items-center lg:flex">
               {JOURNAL_DEV_CATALOGUE_AVAILABLE && (
                 <button
@@ -595,13 +606,13 @@ function JournalPanel({ onClose, onOpenMap }) {
                 </button>
               )}
             </div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-2.5">
+            <div className="flex min-w-0 flex-1 items-center justify-center gap-2 lg:flex-wrap lg:gap-2.5">
               {isDraft && (
                 <button
                   type="button"
                   onClick={handleSaveDraft}
                   disabled={!draft.trim()}
-                  className="flex items-center gap-2 rounded-[3px] border border-expedition-gold bg-expedition-gold px-5 py-2 text-[13px] font-bold tracking-[0.06em] text-expedition-ink shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:bg-expedition-goldbright disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex items-center gap-2 rounded-[3px] border border-expedition-gold bg-expedition-gold px-4 py-2 text-[13px] font-bold tracking-[0.06em] text-expedition-ink shadow-[0_3px_8px_rgba(0,0,0,0.4)] transition hover:bg-expedition-goldbright disabled:cursor-not-allowed disabled:opacity-40 lg:px-5"
                 >
                   Save Entry
                 </button>
@@ -610,13 +621,6 @@ function JournalPanel({ onClose, onOpenMap }) {
                 View Specimen
               </PageButton>
               <PageButton icon="pin" onClick={onOpenMap} disabled={devCatalogue}>View Location</PageButton>
-            </div>
-            <div className="flex w-36 items-center justify-end gap-1.5">
-              <PagerButton direction="prev" onClick={() => goToPage(pageIndex - 1)} disabled={pageIndex === 0} />
-              <span className="min-w-[3.4rem] text-center text-[12px] tracking-[0.1em] text-[#bea47c]">
-                {pageIndex + 1} / {pageKeys.length}
-              </span>
-              <PagerButton direction="next" onClick={() => goToPage(pageIndex + 1)} disabled={pageIndex === pageKeys.length - 1} />
             </div>
           </div>
         </div>

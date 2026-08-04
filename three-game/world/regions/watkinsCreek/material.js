@@ -7,7 +7,7 @@ import {
   WATKINS_CREEK_PATH_POINTS,
 } from './path';
 
-const WATKINS_CREEK_SPLAT_BOUNDS = {
+export const WATKINS_CREEK_SPLAT_BOUNDS = {
   originX: -56,
   originZ: -49,
   width: 112,
@@ -162,6 +162,7 @@ const CREEK_ROUGHNESS_OVERLAY_GLSL = /* glsl */`
 export function createWatkinsCreekTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: WATKINS_CREEK_PATH_POINTS,
+    pathSplatBake: 'watkins-creek',
     pathSplatBounds: WATKINS_CREEK_SPLAT_BOUNDS,
     pathMinimumWidth: 1.62,
     layerConfig: WATKINS_CREEK_LAYERS,

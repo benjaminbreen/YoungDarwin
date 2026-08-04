@@ -630,6 +630,20 @@ function createStylizedWaterMaterial(
       uCapWindGate: { value: 0.2 },
       uGlintElongation: { value: 4 },
       uGlintWidth: { value: 1 },
+      // x strength, y reach, z sun-disc gain
+      uGlintTune: { value: new THREE.Vector3(1, 1, 1) },
+      // x crossfade width (m), y seam noise amplitude (m)
+      uSeamTune: { value: new THREE.Vector2(22, 0) },
+      // Travel to the disc's deep colour: x how far back from the rim it
+      // starts (m), y how far toward uDeep it goes, z how much its onset
+      // wanders (m).
+      uRimTravel: { value: new THREE.Vector3(39, 0.85, 0) },
+      // Depth ramp, mirrored from waterDevRuntime. Packed so the whole ramp
+      // costs four uniform slots.
+      uRampMix: { value: new THREE.Vector4(0.12, 0.5, 0.42, 0.14) },
+      uRampDepths: { value: new THREE.Vector4(0.16, 0.85, 2.4, 7.2) },
+      uRampOpacity: { value: new THREE.Vector4(0.4, 1, 6, 0) },
+      uRampBias: { value: new THREE.Vector4(3.5, 2.6, 1, 1) },
     },
     side: THREE.DoubleSide,
     vertexShader: /* glsl */`
@@ -747,6 +761,13 @@ function createStylizedWaterMaterial(
       uniform float uCapWindGate;
       uniform float uGlintElongation;
       uniform float uGlintWidth;
+      uniform vec3 uGlintTune;
+      uniform vec2 uSeamTune;
+      uniform vec3 uRimTravel;
+      uniform vec4 uRampMix;
+      uniform vec4 uRampDepths;
+      uniform vec4 uRampOpacity;
+      uniform vec4 uRampBias;
       varying vec3 vWorld;
       varying float vDepth;
       varying float vExposure;
@@ -946,6 +967,16 @@ function createStylizedWaterMaterial(
         float ridge = max(abs(a.x), abs(a.y)) * 0.55 + max(abs(b.x), abs(b.y)) * 0.45;
         float fleck = smoothstep(0.46, 0.82, ridge);
         return fleck * fleck;
+      }
+
+      // Slow world-space wobble on the seam radius. Two octaves of the
+      // value noise already compiled into this shader — no extra texture
+      // fetches — at wavelengths long enough to read as a soft irregular
+      // boundary rather than as fringing.
+      float seamRadialNoise(vec2 wxz, float amp) {
+        if (amp < 0.01) return 0.0;
+        float n = noise(wxz * 0.021) * 0.68 + noise(wxz * 0.052) * 0.32;
+        return (n - 0.5) * 2.0 * amp;
       }
 
       void main() {
@@ -1268,20 +1299,45 @@ function createStylizedWaterMaterial(
         // Trimmed vs the first pass: the ramp is a thin glaze over the
         // refracted scene now, not a paint layer (the mockup body is glassy).
         float rampVisibility = playableFade * (0.40 + nearShelf * 0.16) * (1.0 - edgeOcean * 0.35);
-        vec3 paleAqua = mix(uSand, uFoam, 0.12);
-        vec3 seafoamShelf = mix(uSand, uScatter, 0.5);
+        vec3 paleAqua = mix(uSand, uFoam, uRampMix.x);
+        vec3 seafoamShelf = mix(uSand, uScatter, uRampMix.y);
         seafoamShelf = mix(
           seafoamShelf,
           vec3(seafoamShelf.r * 0.86, max(seafoamShelf.g, seafoamShelf.b * 1.04), seafoamShelf.b * 0.94),
-          0.42
+          uRampMix.z
         );
-        vec3 midTurquoise = mix(uScatter, uDeep, 0.14);
+        vec3 midTurquoise = mix(uScatter, uDeep, uRampMix.w);
+
+        // Distance deepening biases the ramp's *input depth* instead of adding
+        // another mix toward blue. A wide shallow bay still travels turquoise
+        // to deep with distance from the beach — it just travels along the one
+        // authored ramp rather than past it.
+        float offshoreTravel = smoothstep(18.0, 50.0, shoreDist) * playableFade;
+        float rampDepth = depth
+          + edgeOcean * uRampBias.x
+          + offshoreTravel * uRampBias.y;
+
         vec3 depthRamp = paleAqua;
-        depthRamp = mix(depthRamp, seafoamShelf, smoothstep(0.16, 0.85, depth));
-        depthRamp = mix(depthRamp, midTurquoise, smoothstep(0.9, 2.4, depth));
-        depthRamp = mix(depthRamp, uDeep, smoothstep(2.8, 7.2, depth));
-        float shelfMask = smoothstep(0.025, 0.16, depth) * (1.0 - smoothstep(2.7, 6.5, depth));
-        color = mix(color, depthRamp, shelfMask * rampVisibility);
+        depthRamp = mix(depthRamp, seafoamShelf, smoothstep(uRampDepths.x, uRampDepths.y, rampDepth));
+        depthRamp = mix(depthRamp, midTurquoise, smoothstep(uRampDepths.y, uRampDepths.z, rampDepth));
+        depthRamp = mix(depthRamp, uDeep, smoothstep(uRampDepths.z, uRampDepths.w, rampDepth));
+        // Whole-body grade, applied to the ramp rather than to the composited
+        // colour so it cannot fight the reflection, foam or glitter terms.
+        float rampLuma = dot(depthRamp, vec3(0.2126, 0.7152, 0.0722));
+        depthRamp = mix(vec3(rampLuma), depthRamp, uRampBias.z) * uRampBias.w;
+
+        // Opacity follows optical depth: a hand's breadth of water over sand is
+        // a glaze you see straight through, and eight metres is not. The old
+        // shader held this constant and faked the drop-off with extra colour
+        // mixes, which is precisely what made deep water read as paint.
+        float rampOpacity = mix(
+          rampVisibility,
+          uRampOpacity.y,
+          smoothstep(uRampDepths.z, max(uRampOpacity.z, uRampDepths.z + 0.1), rampDepth)
+        );
+        // Keep the waterline fade: the ramp must arrive, not start, at the sand.
+        float shoreFade = smoothstep(0.025, uRampDepths.x, depth);
+        color = mix(color, depthRamp, clamp(shoreFade * rampOpacity, 0.0, 1.0));
         #ifdef ENHANCED_WATER
           // A restrained blue-green extinction pass makes the shallow shelf
           // feel transparent while the drop-off gains actual optical depth.
@@ -1293,25 +1349,56 @@ function createStylizedWaterMaterial(
           #endif
         #endif
 
-        // Ease into open-ocean blue past the drop-off.
-        color = mix(color, uDeep, smoothstep(2.8, 9.5, depth) * 0.62);
-        color = mix(color, uDeep, edgeOcean * (0.42 + 0.28 * smoothstep(0.6, 4.0, depth)));
-
-        // Postcard gradient: colour keeps travelling turquoise -> deep with
-        // distance from the beach even where the bed stays shallow for tens
-        // of metres (wide shelf bays give depth no signal to work with).
-        // Gated off where real depth already runs the deep ramps above.
-        float offshoreTravel = smoothstep(18.0, 50.0, shoreDist) * playableFade
-          * (1.0 - smoothstep(2.8, 7.0, depth));
-        color = mix(color, mix(uScatter, uDeep, 0.78), offshoreTravel * 0.52);
+        // The three separate mixes toward uDeep that used to live here — an
+        // open-ocean ease, an edge-of-map deepening and an offshore-travel
+        // gradient — are gone. Each was a colour mix on its own mask, layered
+        // over a ramp that had already been windowed out, so the deep half of
+        // the bay was the sum of overlapping washes rather than an authored
+        // colour. Their intent now feeds the ramp as depth bias above.
 
         // Seam continuity with the open-ocean disc: by the time the plane's
         // alpha feather hands off (last ~14m before the rim), the body colour
         // must have arrived at uDeep — the disc's inner colour — or the
         // crossfade reads as a hard cyan/navy arc around the bay.
+        //
+        // This used to be a fixed 36..66m ramp on the raw radius: a perfect
+        // circle centred on the world origin, with no noise on it and no panel
+        // knob. That circle — not the alpha seam, not the depth ramp — is what
+        // read as a drawn line between the bay and the open sea, because it
+        // takes the body 85% of the way to deep blue over 30m of a shape
+        // nothing else in the scene shares. It now starts where uRimTravel.x
+        // says, and its onset wanders on two noise fields so the bay hands off
+        // along a broken, patchy front instead of an arc.
         float rimRadius = uSize * 0.5;
-        float rimTravel = smoothstep(rimRadius - 39.0, rimRadius - 9.0, length(vWorld.xz));
-        color = mix(color, uDeep, rimTravel * 0.85);
+        float rimDist = length(vWorld.xz);
+        // The wander has to die out before the crossfade begins, or a patch of
+        // bay colour survives into the handoff and puts the arc straight back.
+        float rimNoiseFade = 1.0 - smoothstep(rimRadius - 26.0, rimRadius - 11.0, rimDist);
+        // Same field the alpha seam rides, plus a slower one at a larger
+        // amplitude. A colour boundary tolerates far more wander than an alpha
+        // crossfade does, which is why this gets its own knob rather than
+        // reusing seamNoise.
+        float rimWander = (seamRadialNoise(vWorld.xz, uRimTravel.z)
+          + (noise(vWorld.xz * 0.011 + vec2(11.3, -4.7)) - 0.5) * 2.6 * uRimTravel.z)
+          * rimNoiseFade;
+        float rimTravel = smoothstep(
+          rimRadius - max(uRimTravel.x, 12.0),
+          rimRadius - 9.0,
+          rimDist + rimWander
+        );
+        color = mix(color, uDeep, rimTravel * uRimTravel.y);
+
+        // Detail handoff to the open-ocean disc.
+        //
+        // The disc has no vertex displacement at all — its surface is a normal
+        // map and nothing else. The plane has Gerstner crests, whitecaps and
+        // crest banding. Crossfading one into the other over the old 12m alpha
+        // ramp meant wave structure simply stopped along a line, which is what
+        // reads as a seam out in the bay. Damping the plane's *detail* over a
+        // much longer approach lets the two surfaces agree before the alpha
+        // crossfade begins, so there is nothing left to notice at the join.
+        float seamWidth = max(uRampOpacity.w, 8.0);
+        float seamDetail = 1.0 - smoothstep(rimRadius - seamWidth, rimRadius - 4.0, length(vWorld.xz));
 
         // Wind texture: let the wave normals we already compute tint the body
         // slightly, so the surface reads as rippled water (not a smooth
@@ -1340,20 +1427,35 @@ function createStylizedWaterMaterial(
           float capSeed = noise(capUV + vec2(uTime * 0.06, uTime * 0.013));
           float capLip = smoothstep(uCapCrest * 0.85, uCapCrest * 1.45, crestHeight);
           float capTrail = smoothstep(uCapCrest * 0.35, uCapCrest * 0.85, crestHeight) * (1.0 - capLip);
-          float caps = (capLip + capTrail * 0.4) * smoothstep(0.62, 0.86, capSeed) * capGate;
+          // The seed threshold width follows the pixel footprint, around the
+          // same 0.74 centre the fixed 0.62..0.86 window had — so the mean
+          // population is unchanged, but up close a narrow window cuts crisp
+          // torn caps out of the noise, and far away it opens until the field
+          // is a smooth density. A fixed window does one or the other: at this
+          // plane's grazing distances the old one crawled.
+          float capLod = clamp(length(fwidth(capUV)) * 1.6, 0.0, 1.0);
+          float capSoft = mix(0.045, 0.30, capLod);
+          float caps = (capLip + capTrail * 0.4)
+            * smoothstep(0.74 - capSoft, 0.74 + capSoft, capSeed) * capGate;
           #ifdef ENHANCED_WATER
+            // The tearing noise is 2.9x finer than the seed, so it goes
+            // sub-pixel first. Fade it toward its own mean rather than letting
+            // it keep adding contrast a pixel can no longer resolve.
             float capFine = noise(capUV * 2.9 + vec2(-uTime * 0.11, uTime * 0.037));
+            float capDetail = 1.0 - capLod;
             #ifdef CINEMATIC_WATER
-              float tornCap = 0.7 + 0.55 * smoothstep(0.38, 0.8, capFine);
+              float tornCap = mix(0.975, 0.7 + 0.55 * smoothstep(0.38, 0.8, capFine), capDetail);
               caps = caps * tornCap
-                + capTrail * smoothstep(0.72, 0.9, capSeed) * smoothstep(0.48, 0.76, capFine) * capGate * 0.24;
+                + capTrail * smoothstep(0.72, 0.9, capSeed) * smoothstep(0.48, 0.76, capFine)
+                  * capGate * 0.24 * capDetail;
             #else
-              float tornCap = 0.78 + 0.34 * smoothstep(0.4, 0.8, capFine);
+              float tornCap = mix(0.95, 0.78 + 0.34 * smoothstep(0.4, 0.8, capFine), capDetail);
               caps = caps * tornCap
-                + capTrail * smoothstep(0.75, 0.9, capSeed) * smoothstep(0.52, 0.78, capFine) * capGate * 0.12;
+                + capTrail * smoothstep(0.75, 0.9, capSeed) * smoothstep(0.52, 0.78, capFine)
+                  * capGate * 0.12 * capDetail;
             #endif
           #endif
-          color = mix(color, uFoam, min(caps, 1.0) * 0.55);
+          color = mix(color, uFoam, min(caps, 1.0) * 0.55 * seamDetail);
         }
 
         // Mostly-opaque body (it *shows* the refracted scene), but genuinely
@@ -1429,7 +1531,7 @@ function createStylizedWaterMaterial(
           + sunDevCross * sunDevCross * glintElong;
         float sunDiscExp = mix(700.0, 55.0, uSunPathStrength);
         float sunDisc = pow(max(1.0 - 0.5 * sunAngleSq, 0.0), sunDiscExp);
-        reflColor += uSunColor * sunDisc * (0.6 + uSunPathStrength * 1.6) * uDaylight
+        reflColor += uSunColor * sunDisc * (0.6 + uSunPathStrength * 1.6) * uGlintTune.z * uDaylight
           * (1.0 - underwaterView * 0.8) * (1.0 - uRain * 0.8);
         // Schlick fresnel with water's real F0: looking down, the surface is
         // ~2% mirror (the bed shows through); at grazing angles it goes
@@ -1500,13 +1602,19 @@ function createStylizedWaterMaterial(
         float path = smoothstep(0.34 * uGlintWidth, 0.035, crossSun) * alongSun;
         float pathCore = smoothstep(0.24 * uGlintWidth, 0.018, crossSun) * alongSun;
         float pathCamDist = length(vWorld.xz - cameraPosition.xz);
-        float pathDistance = smoothstep(8.0, 30.0, pathCamDist) * (1.0 - smoothstep(138.0, 180.0, pathCamDist));
+        // uGlintTune.y stretches the far end of the column toward the
+        // horizon; a real low sun lays a bright sheet most of the way out,
+        // not a patch that stops at 180m.
+        float pathFar = 138.0 * uGlintTune.y;
+        float pathDistance = smoothstep(8.0, 30.0, pathCamDist)
+          * (1.0 - smoothstep(pathFar, pathFar * 1.3, pathCamDist));
         float pathGrain = 0.5 + 0.58 * smoothstep(0.38, 0.86, noise(vWorld.xz * 2.0 + vec2(uTime * 0.12, -uTime * 0.075)));
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
         // Peaks are allowed past 1.0 so ACES rolls them off and the brightest
         // glints cross the bloom threshold (the sparkle is a bloom customer).
-        color += glintWhite * min(spec * glint * 1.55, 1.45) * (0.72 + uSunPathStrength * 0.42);
-        color += glintWhite * pathGlitter * 0.16 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+        color += glintWhite * min(spec * glint * 1.55 * uGlintTune.x, 1.45 * max(uGlintTune.x, 1.0))
+          * (0.72 + uSunPathStrength * 0.42);
+        color += glintWhite * pathGlitter * 0.16 * uGlintTune.x * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
         // The fleck fields below are the only microSparkleMask callers, and
         // every term they feed is multiplied by uSunPathStrength. That is
         // exactly zero whenever the sun is above ~46 degrees, which on
@@ -1517,13 +1625,13 @@ function createStylizedWaterMaterial(
         // low-sun look is untouched.
         if (uSunPathStrength > 0.002) {
           float microGlitter = microSparkleMask(vWorld.xz, uTime) * pathCore * pathDistance * uSunPathStrength;
-          color += glintWhite * microGlitter * 1.6 * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
+          color += glintWhite * microGlitter * 1.6 * uGlintTune.x * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
           #ifdef CINEMATIC_WATER
             // A second, faster fleck field creates the many tiny independently
             // blinking sun points that sell scale in cinematic water.
             float cinematicFlecks = microSparkleMask(vWorld.xz * 1.43 + vec2(5.7, -9.1), uTime * 1.37)
               * path * pathDistance * uSunPathStrength;
-            color += glintWhite * cinematicFlecks * 0.92
+            color += glintWhite * cinematicFlecks * 0.92 * uGlintTune.x
               * (1.0 - uRain * 0.9) * (1.0 - underwaterView * 0.9);
           #endif
         }
@@ -1543,7 +1651,7 @@ function createStylizedWaterMaterial(
         if (sparkleGate > 0.01) {
           float sparkle = rippleSparkleMask(vWorld.xz, uTime);
           float sparkleFacing = pow(max(dot(normal, hv), 0.0), 38.0);
-          color += glintWhite * sparkle * sparkleFacing * sparkleGate * 1.9;
+          color += glintWhite * sparkle * sparkleFacing * sparkleGate * 1.9 * uGlintTune.x;
         }
         // --- moon glitter: the sun's math on the night sea, silver, quieter.
         // uMoonGlitter carries phase, altitude and weather gating from JS.
@@ -1584,6 +1692,9 @@ function createStylizedWaterMaterial(
         troughBand *= 1.0 - rollerZone * 0.72;
         float bandBreakup = 0.68 + 0.32 * noise(vWorld.xz * 0.18 + vec2(uTime * 0.018, -uTime * 0.012));
         vec3 crestTint = mix(uScatter, uFoam, 0.14);
+        // Crest/trough banding rides this mask; folding the seam ramp in here
+        // damps every band term at once as the plane approaches the disc.
+        waterSurfaceMask *= seamDetail;
         color += crestTint * crestBand * bandBreakup * waterSurfaceMask * (0.08 + uDaylight * 0.07);
         color = mix(color, color * vec3(0.76, 0.90, 0.96), troughBand * waterSurfaceMask * 0.18);
         color = mix(color, uFoam, crestBand * bandBreakup * waterSurfaceMask * 0.075);
@@ -1710,7 +1821,15 @@ function createStylizedWaterMaterial(
         color = mix(color, uHaze, haze * hazeByDepth);
 
         // --- fade the plane edge into the open-ocean disc beyond ----------------
-        float edgeFade = 1.0 - smoothstep(rim - 14.0, rim - 2.0, length(vWorld.xz));
+        // Same width as the detail ramp above; a short alpha fade under a long
+        // detail fade just moves the visible edge rather than removing it.
+        // Seam handoff. Both this and the open-ocean disc read the same
+        // noisy radius, so they dissolve into each other along one wobbly
+        // boundary instead of two concentric circles that never quite
+        // agreed — the disc's side of this used to be hardcoded.
+        float seamR = length(vWorld.xz) + seamRadialNoise(vWorld.xz, uSeamTune.y);
+        float seamBlend = max(uSeamTune.x, 4.0);
+        float edgeFade = 1.0 - smoothstep(rim - seamBlend, rim - 2.0, seamR);
         alpha *= edgeFade;
         alpha *= 1.0 - smoothstep(uStandingWaterFadeStart, uStandingWaterFadeEnd, standingWater);
 
@@ -1873,8 +1992,24 @@ function createSurfRibbonMaterial(
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         float shoreSoftness = floorSample.b;
         float playableFade = floorSample.a;
-        float standingWater = texture2D(uStandingWaterMask, shoreUv).r;
         float realCoast = smoothstep(0.02, 0.24, playableFade);
+
+        // Early out. This layer draws the SAME 150x150m geometry as the water
+        // plane, but everything it can produce is bounded near the shore: the
+        // swash lines die at shoreDist 15.5 (shoreWindow), the breaker envelope
+        // at 20 (breakerField's beach and cliff bands both close by then), the
+        // wash remnant at 9.5, and every term is multiplied by realCoast and by
+        // a depth gate that is shut by 8m (cliffShallow; beaches by 3.9).
+        //
+        // The two discards below are correct but late — they threw the result
+        // away only after running two lace fields, the breaker field and
+        // several noise octaves across the whole bay. On a fill-bound renderer
+        // that was most of a second full pass spent on pixels that cannot draw
+        // anything. Both texture reads that matter have already happened above,
+        // so no mip derivative depends on the fragments killed here.
+        if (shoreDist > 21.0 || depth > 8.5 || realCoast < 0.001) discard;
+
+        float standingWater = texture2D(uStandingWaterMask, shoreUv).r;
         float beachShallow = smoothstep(0.035, 0.19, depth) * (1.0 - smoothstep(2.25, 3.9, depth));
         float cliffShallow = smoothstep(0.08, 0.42, depth) * (1.0 - smoothstep(5.4, 8.0, depth));
         float localCliffSwell = cliffSwellAt(vFlatXZ);
@@ -2037,6 +2172,16 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
       shallow: { value: WATER_DAY.deep.clone() },
       deep: { value: WATER_DAY.openDeep.clone() },
       fogColor: { value: new THREE.Color('#cfe6f4') },
+      // Sky reflection. Mirrored from the plane's uSky/uSkyHorizon/uScatter and
+      // its two reflection knobs, because the disc's sky term has to be built
+      // the same way the plane's is or the crossfade between them shows a step.
+      sky: { value: new THREE.Color('#bfe6ff') },
+      skyHorizon: { value: new THREE.Color('#eaf6ff') },
+      scatter: { value: WATER_DAY.scatter.clone() },
+      skyReflCurve: { value: 6.6 },
+      reflNeutralGrade: { value: 0.24 },
+      discSky: { value: 1 },
+      rain: { value: 0 },
       // Haze onset sits past most of the visible disc so the open sea keeps
       // its saturated blue (mockup horizon); the rimSeal still lands the last
       // metres exactly on the haze color for a clean sea/sky seam.
@@ -2049,6 +2194,8 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
       capDensity: { value: 2.1 },
       capWindGate: { value: 0.2 },
       glintWidth: { value: 1 },
+      glintTune: { value: new THREE.Vector3(1, 1, 1) },
+      seamTune: { value: new THREE.Vector2(22, 0) },
       camPos: { value: new THREE.Vector3() },
       sun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
       sunColor: { value: new THREE.Color('#fff3da') },
@@ -2076,6 +2223,13 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
       uniform vec3 fogColor;
       uniform float fogNear;
       uniform float fogFar;
+      uniform vec3 sky;
+      uniform vec3 skyHorizon;
+      uniform vec3 scatter;
+      uniform float skyReflCurve;
+      uniform float reflNeutralGrade;
+      uniform float discSky;
+      uniform float rain;
       uniform vec3 camPos;
       uniform vec3 sun;
       uniform vec3 sunColor;
@@ -2091,8 +2245,25 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
       uniform float capDensity;
       uniform float capWindGate;
       uniform float glintWidth;
+      uniform vec3 glintTune;
+      uniform vec2 seamTune;
       varying vec3 vWorld;
       varying float vDiscRadius;
+
+      // Must reproduce the plane's seamRadialNoise exactly, or the two
+      // sides of the crossfade wobble differently and the seam reappears.
+      float dHash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.3))) * 19341.13); }
+      float dNoise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(dHash(i), dHash(i + vec2(1.0, 0.0)), u.x),
+                   mix(dHash(i + vec2(0.0, 1.0)), dHash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float seamRadialNoise(vec2 wxz, float amp) {
+        if (amp < 0.01) return 0.0;
+        float n = dNoise(wxz * 0.021) * 0.68 + dNoise(wxz * 0.052) * 0.32;
+        return (n - 0.5) * 2.0 * amp;
+      }
 
       vec3 rippleNormalAt(vec2 wxz, float t) {
         vec2 uvA = wxz * 0.042 + vec2(t * 0.006, -t * 0.004);
@@ -2142,16 +2313,21 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
         // follows the camera. Keep the shoreline handoff in zone space, but
         // measure horizon fading from the disc's own centre so every edge lands
         // on the haze color even after the camera moves away from world origin.
-        float fromDetailedCentre = length(vWorld.xz);
+        // Same noisy radius the plane uses, so the two dissolve along one
+        // shared boundary. The plane's rim is uSize * 0.5 = 75m.
+        float fromDetailedCentre = length(vWorld.xz) + seamRadialNoise(vWorld.xz, seamTune.y);
+        float seamBlend = max(seamTune.x, 4.0);
         // Keep the horizon disc out of the detailed-water area entirely: the
         // refraction grab must see the real seabed there, not helper blue.
-        if (fromDetailedCentre < 56.0) discard;
+        if (fromDetailedCentre < 75.0 - seamBlend - 6.0) discard;
         // The detailed plane fades itself out radially over ~61..73m
         // (edgeFade). The disc must fade IN across that same ring — at full
         // opacity it pops beneath the still-visible plane as a hard
         // camera-crossing navy arc. The continued seabed renders under the
         // feather, so the crossfade reads as the shelf dropping away.
-        float edgeFeather = smoothstep(58.0, 74.0, fromDetailedCentre);
+        // Mirrors the plane's edgeFade (1 - smoothstep(rim - blend, rim - 2))
+        // so the pair sums to full coverage across the whole handoff.
+        float edgeFeather = smoothstep(75.0 - seamBlend, 73.0, fromDetailedCentre);
         float depthMix = smoothstep(60.0, 150.0, fromDetailedCentre);
         vec3 color = mix(shallow, deep, depthMix);
         float shimmer = sin(vWorld.x * 0.06 + time * 0.4) * cos(vWorld.z * 0.05 - time * 0.32);
@@ -2170,37 +2346,136 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
         // they survive mip averaging at horizon distances; cells are mapped
         // anisotropically so each cap stretches along the crest line
         // (perpendicular to the swell), and wind gates the population.
+        //
+        // The field used to be a grid of round dots sliding rigidly across the
+        // sea: every cap the same brightness, none ever born or dying, and at
+        // horizon distances the cells went sub-pixel and crawled. Three
+        // changes, all ALU — this shader is fill-bound, so new texture taps are
+        // the one currency not worth spending here:
+        //
+        //  - each cap runs its own life cycle, phase-offset by its cell hash,
+        //    so the population breathes instead of translating;
+        //  - the head is dense and the tail is torn and dragged downwind, so a
+        //    cap reads as a breaking lip with lace behind it;
+        //  - once a cell is smaller than a pixel the resolved dots dissolve
+        //    into the average coverage they integrate to, so the horizon
+        //    carries a soft density instead of a shimmering dot screen.
         vec2 discSwell = vec2(0.86024, 0.50979);
         vec2 discPerp = vec2(-discSwell.y, discSwell.x);
         vec2 capP = vec2(dot(vWorld.xz, discSwell) * 0.3, dot(vWorld.xz, discPerp) * 0.08)
           + vec2(time * 0.045, -time * 0.018);
+        // One screen pixel measured in cap cells. Past ~1 a cell is not a shape
+        // any more, only a probability.
+        float capLod = clamp(length(fwidth(capP)), 0.0, 2.0);
         vec2 capCell = floor(capP);
         float capHash = fract(sin(dot(capCell, vec2(127.1, 311.7))) * 43758.5453);
+        // ~7.5s from ignition to nothing, then the cell rests until its turn
+        // comes round again. The hash sets the phase, so neighbours are never
+        // in step and the sea never pulses as a whole.
+        float capAge = fract(time * 0.132 + capHash * 7.31);
+        float capLife = smoothstep(0.0, 0.12, capAge) * (1.0 - smoothstep(0.55, 1.0, capAge));
         vec2 capLocal = fract(capP) - 0.5;
-        float capDot = 1.0 - smoothstep(0.04, 0.24 + capHash * 0.16, length(capLocal));
+        // Foam is dragged downwind as it ages. The dot is clipped at the cell
+        // border, so drift plus radius plus edge has to stay under 0.5 or caps
+        // grow square shoulders.
+        capLocal.x += (capAge - 0.3) * 0.17;
+        float capRadius = (0.155 + capHash * 0.115) * (0.55 + capLife * 0.65);
+        float capDot = 1.0 - smoothstep(capRadius * 0.3, capRadius + 0.05, length(capLocal));
+        // Eat the trailing half with a noise field so the tail is lace rather
+        // than the back of an ellipse.
+        float capTear = 0.5 + 0.5 * dNoise(vWorld.xz * 0.85 + vec2(time * 0.31, -time * 0.19));
+        capDot *= mix(1.0, capTear, smoothstep(-0.04, 0.3, capLocal.x));
         float capClump = 0.5 + 0.5 * sin(vWorld.x * 0.041 + time * 0.07)
           * sin(vWorld.z * 0.053 - time * 0.05);
-        float caps = capDot * step(0.68, capHash) * smoothstep(0.45, 0.85, capClump)
-          * daylight * capWindGate * capDensity;
+        float capField = daylight * capWindGate * capDensity;
+        // 0.58 rather than the old 0.68: the life cycle costs about a third of
+        // the standing population, and this puts it back, so capDensity still
+        // means on the panel what it meant before.
+        float caps = capDot * step(0.58, capHash) * capLife
+          * smoothstep(0.45, 0.85, capClump) * capField;
         #ifdef ENHANCED_WATER
           vec2 fineCapP = capP * vec2(2.4, 2.8) + vec2(-time * 0.08, time * 0.029);
           vec2 fineCell = floor(fineCapP);
           float fineHash = fract(sin(dot(fineCell, vec2(269.5, 183.3))) * 43758.5453);
+          float fineAge = fract(time * 0.21 + fineHash * 3.77);
+          float fineLife = smoothstep(0.0, 0.14, fineAge) * (1.0 - smoothstep(0.4, 0.95, fineAge));
           float fineDot = 1.0 - smoothstep(0.035, 0.2, length(fract(fineCapP) - 0.5));
           #ifdef CINEMATIC_WATER
-            caps += fineDot * step(0.76, fineHash) * smoothstep(0.52, 0.9, capClump)
-              * daylight * capWindGate * capDensity * 0.34;
+            caps += fineDot * step(0.7, fineHash) * fineLife * smoothstep(0.52, 0.9, capClump)
+              * capField * 0.34;
           #else
-            caps += fineDot * step(0.82, fineHash) * smoothstep(0.56, 0.9, capClump)
-              * daylight * capWindGate * capDensity * 0.18;
+            caps += fineDot * step(0.78, fineHash) * fineLife * smoothstep(0.56, 0.9, capClump)
+              * capField * 0.18;
           #endif
         #endif
-        color = mix(color, vec3(0.9, 0.96, 0.99), min(caps, 1.0) * 0.4);
+        // Analytic average of the dot field above (dot area x population x duty
+        // cycle, eyeballed against the resolved field at the crossover). It
+        // keeps the large-scale clump, so the horizon still has patches of
+        // rough and smooth sea after the individual caps stop resolving.
+        float capWash = 0.06 * smoothstep(0.45, 0.85, capClump) * capField;
+        caps = mix(caps, capWash, smoothstep(0.4, 1.2, capLod));
+        // Caps are lit foam, not paint: let them take a little of the sun.
+        vec3 capColor = mix(vec3(0.9, 0.96, 0.99), sunColor, 0.16 * daylight);
+        color = mix(color, capColor, min(caps, 1.0) * 0.4);
 
         // Sun glitter shares the detailed water's tiled normal source so the
         // horizon does not fall back to blocky procedural cells.
         vec3 normal = rippleNormalAt(vWorld.xz, time);
         vec3 viewDir = normalize(camPos - vWorld);
+        vec2 sunPathDir = normalize(sun.xz + vec2(0.0001, 0.0001));
+
+        // --- sky reflection ----------------------------------------------------
+        // The disc used to carry no view-dependent body term at all: its colour
+        // was a radial shallow->deep ramp, so the only way the far sea could
+        // brighten toward the horizon was to be melted into fog. Real sea
+        // brightens because grazing angles turn it into a mirror — and that is
+        // exactly what the detailed plane does inside 75m, so without this the
+        // seam handed a reflective surface off to a matte one.
+        //
+        // Deliberately the same construction as the plane's, so the crossfade
+        // stays continuous: sky gradient across reflection tilt, pulled toward
+        // a water sheen, de-violeted, with a sunward lift in the horizon band.
+        //
+        // Same zero-work skip the glitter path below uses, for the same
+        // reason: this disc is the largest surface on screen, so anything it
+        // can be told not to do is worth a branch.
+        if (discSky > 0.002) {
+        // Fresnel reads a heavily flattened normal, not the glitter normal
+        // above. rippleNormalAt runs at 2.35x gain because the specular needs
+        // facets to break up; reflectance is a broad term, so handing it that
+        // gain paints the ripple tile's own cell structure straight into the
+        // body colour — the open sea comes out looking like cobbles. Keep only
+        // the large tilt, and take even that away as the pixel footprint grows
+        // past one ripple. Footprints out here run ~0.1m at the seam to ~1m
+        // near the horizon, because the sea is seen at a few degrees of
+        // incidence.
+        float slopeLod = 1.0 - smoothstep(0.1, 0.9, length(fwidth(vWorld.xz)));
+        float bodySlope = 0.16 * (0.2 + 0.8 * slopeLod);
+        vec3 bodyNormal = normalize(vec3(normal.x * bodySlope, normal.y, normal.z * bodySlope));
+        vec3 refl = reflect(-viewDir, bodyNormal);
+        vec3 skyRefl = mix(skyHorizon, sky, clamp(refl.y * skyReflCurve, 0.0, 1.0));
+        skyRefl = mix(skyRefl, mix(scatter, skyHorizon, 0.36), 0.12);
+        skyRefl = mix(skyRefl, skyRefl * vec3(0.96, 1.035, 0.90), 0.22);
+        vec2 reflAz = normalize(refl.xz + vec2(1e-4, 0.0));
+        float sheenSunward = smoothstep(-0.25, 1.0, dot(reflAz, sunPathDir));
+        float sheenHorizon = 1.0 - clamp(refl.y * 2.4, 0.0, 1.0);
+        skyRefl += sunColor * sheenSunward * sheenHorizon * daylight
+          * (0.035 + sunPathStrength * 0.045) * (1.0 - rain * 0.8);
+        float skyReflLuma = dot(skyRefl, vec3(0.299, 0.587, 0.114));
+        skyRefl = mix(skyRefl, vec3(skyReflLuma), sunPathStrength * 0.10);
+        // Broad drifting luminance patches. The disc has no vertex displacement
+        // at all, so this is the only thing keeping large areas of it from
+        // reading as one flat swatch.
+        skyRefl *= 0.95 + 0.10 * dNoise(vWorld.xz * 0.05 + vec2(time * 0.013, -time * 0.009));
+        skyRefl = mix(skyRefl, skyRefl * vec3(0.97, 1.025, 0.90), reflNeutralGrade);
+        // Schlick, with the plane's stylised F0 floor (0.055 rather than
+        // water's true 0.02, so a steep look-down keeps some sky in the sea)
+        // and the plane's deep-water reflStrength — the disc is always deep.
+        float fres = pow(1.0 - max(dot(bodyNormal, viewDir), 0.0), 5.0);
+        float mirrorMix = clamp((0.055 + 0.945 * fres) * 0.85 * discSky, 0.0, 0.8);
+        color = mix(color, skyRefl, mirrorMix);
+        }
+
         vec3 hv = normalize(normalize(sun) + viewDir);
         float glintVisibility = 0.22 + 0.78 * sunPathStrength;
         float spec = pow(max(dot(normal, hv), 0.0), mix(260.0, 150.0, sunPathStrength)) * daylight * glintVisibility;
@@ -2212,7 +2487,6 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
           #endif
         #endif
         vec3 sunGlintColor = mix(vec3(1.05, 1.02, 0.94), vec3(1.12, 1.04, 0.82), sunPathStrength * 0.5);
-        vec2 sunPathDir = normalize(sun.xz + vec2(0.0001, 0.0001));
         vec2 toWater = normalize(vWorld.xz - camPos.xz + vec2(0.0001, 0.0001));
         float alongSun = smoothstep(0.03, 0.42, dot(toWater, sunPathDir));
         float crossSun = abs(toWater.x * sunPathDir.y - toWater.y * sunPathDir.x);
@@ -2224,8 +2498,9 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
         // Sparkle survives partway into the haze, then hands off to fog.
         float fromCam = length(vWorld.xz - camPos.xz);
         float fog = smoothstep(fogNear, fogFar, fromCam);
-        color += sunGlintColor * min(spec * 1.36, 1.05) * (0.66 + sunPathStrength * 0.48) * (1.0 - fog * 0.85);
-        color += sunGlintColor * path * pathSparkle * sunPathStrength * 0.09 * (1.0 - fog * 0.92);
+        color += sunGlintColor * min(spec * 1.36 * glintTune.x, 1.05 * max(glintTune.x, 1.0))
+          * (0.66 + sunPathStrength * 0.48) * (1.0 - fog * 0.85);
+        color += sunGlintColor * path * pathSparkle * sunPathStrength * 0.09 * glintTune.x * (1.0 - fog * 0.92);
         // Same zero-work skip as the detailed plane, and it matters more here:
         // the horizon disc is the largest surface on screen, and sunPathStrength
         // is exactly 0 whenever the sun is high.
@@ -2272,7 +2547,13 @@ function createDeepOceanMaterial(rippleNormalTexture, qualityConfig) {
 // Adapted from THREE.Reflector: reflect the camera across the water plane,
 // render the scene into a texture, and hand back a world->uv matrix. Kept as
 // module scratch so the per-frame render allocates nothing.
-const REFLECT_CLIP_BIAS = 0.06;
+// Oblique near-plane bias, in the same units THREE.Reflector uses (its default
+// is 0.003). The bias offsets the clip plane by roughly bias * distance from
+// the mirror camera, so it is not a small constant nudge: at 0.06 a swimmer
+// ten metres out kept about a metre of *below-water* geometry in the mirror.
+// That leak is what painted Darwin's dangling legs into the water below him,
+// boots deepest — a real reflection of an upright swimmer is head-down.
+const REFLECT_CLIP_BIAS = 0.006;
 const _reflNormal = new THREE.Vector3(0, 1, 0);
 const _reflWorldPos = new THREE.Vector3(0, WATER_LEVEL, 0);
 const _camWorldPos = new THREE.Vector3();
@@ -3043,6 +3324,41 @@ function WaterSurface({
     oceanRingBank.chopWind = wu.uChopWind.value;
     wu.uGlintElongation.value = waterDev.glintElongation;
     wu.uGlintWidth.value = waterDev.glintWidth;
+    wu.uGlintTune.value.set(waterDev.glintStrength, waterDev.glintReach, waterDev.sunDiscGain);
+    wu.uSeamTune.value.set(waterDev.seamBlend, waterDev.seamNoise);
+    wu.uRimTravel.value.set(
+      waterDev.deepTravelWidth,
+      waterDev.deepTravelAmount,
+      waterDev.deepTravelNoise,
+    );
+    wu.uRampMix.value.set(
+      waterDev.rampPaleMix,
+      waterDev.rampShelfMix,
+      waterDev.rampShelfGreen,
+      waterDev.rampMidMix,
+    );
+    // Stops must ascend or the smoothsteps invert and the ramp reads backwards;
+    // the panel can put them in any order.
+    const rampShelfDepth = Math.max(waterDev.rampDepthShelf, waterDev.rampDepthPale + 0.05);
+    const rampMidDepth = Math.max(waterDev.rampDepthMid, rampShelfDepth + 0.05);
+    wu.uRampDepths.value.set(
+      waterDev.rampDepthPale,
+      rampShelfDepth,
+      rampMidDepth,
+      Math.max(waterDev.rampDepthDeep, rampMidDepth + 0.05),
+    );
+    wu.uRampOpacity.value.set(
+      waterDev.rampGlaze,
+      waterDev.rampOpaque,
+      waterDev.rampOpaqueDepth,
+      waterDev.seamFadeWidth,
+    );
+    wu.uRampBias.value.set(
+      waterDev.rampEdgeBias,
+      waterDev.rampOffshoreBias,
+      waterDev.rampSaturation,
+      waterDev.rampBrightness,
+    );
     const su = surfMaterial.uniforms;
     su.uTime.value = t;
     su.uRain.value = weatherEnv.rainIntensity;
@@ -3087,12 +3403,23 @@ function WaterSurface({
       du.shallow.value.lerp(WATER_CLEAR_MORNING.deep, clearMorningWaterCalm * 0.34);
       du.deep.value.lerp(WATER_CLEAR_MORNING.openDeep, clearMorningWaterCalm * 0.46);
       if (scene.fog) du.fogColor.value.copy(wu.uHaze.value);
+      // Sky reflection reads the plane's own sky/sheen colours and reflection
+      // knobs, so the two surfaces cannot drift apart across the seam.
+      du.sky.value.copy(wu.uSky.value);
+      du.skyHorizon.value.copy(wu.uSkyHorizon.value);
+      du.scatter.value.copy(wu.uScatter.value);
+      du.skyReflCurve.value = waterDev.skyReflCurve;
+      du.reflNeutralGrade.value = waterDev.reflNeutralGrade;
+      du.discSky.value = waterDev.discSky;
+      du.rain.value = wu.uRain.value;
       du.hazeStage1.value = waterDev.hazeStage1;
       du.hazeStage2.value = waterDev.hazeStage2;
       du.hazeBandStart.value = waterDev.hazeBandStart;
       du.capDensity.value = waterDev.capDensity;
       du.capWindGate.value = capWindGate;
       du.glintWidth.value = waterDev.glintWidth;
+      du.glintTune.value.set(waterDev.glintStrength, waterDev.glintReach, waterDev.sunDiscGain);
+      du.seamTune.value.set(waterDev.seamBlend, waterDev.seamNoise);
     }
 
     // Planar reflection pass (hide our own water so it isn't captured). The

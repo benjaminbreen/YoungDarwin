@@ -12,10 +12,10 @@ export const DISTANCE_SCENERY_MODES = Object.freeze({
 
 export const DISTANCE_SCENERY_SHELL_DEFAULTS = Object.freeze({
   shellVisible: true,
-  shellRelief: 0.95,
-  shellVertical: -1,
-  shellRadiusScale: 0.86,
-  shellHazeStart: 120,
+  shellRelief: 1,
+  shellVertical: -2,
+  shellRadiusScale: 0.88,
+  shellHazeStart: 115,
   shellHazeEnd: 260,
   shellHazeStrength: 0.76,
   shellSaturation: 0.38,

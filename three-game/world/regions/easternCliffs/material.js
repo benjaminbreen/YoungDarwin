@@ -131,16 +131,19 @@ const EASTERN_CLIFFS_ROUGHNESS_GLSL = /* glsl */`
   roughnessFactor = mix(roughnessFactor, 0.62, ecRoughWaveWash * 0.72);
 `;
 
+export const EASTERN_CLIFFS_SPLAT_BOUNDS = {
+  originX: -50,
+  originZ: -46,
+  width: 100,
+  depth: 92,
+  size: 768,
+};
+
 export function createEasternCliffsTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: EASTERN_CLIFFS_PATH_POINTS,
-    pathSplatBounds: {
-      originX: -50,
-      originZ: -46,
-      width: 100,
-      depth: 92,
-      size: 768,
-    },
+    pathSplatBake: 'eastern-cliffs',
+    pathSplatBounds: EASTERN_CLIFFS_SPLAT_BOUNDS,
     pathMinimumWidth: 1.48,
     layerConfig: EASTERN_CLIFFS_LAYERS,
     surfaceMaskGLSL: EASTERN_CLIFFS_MASK_GLSL,

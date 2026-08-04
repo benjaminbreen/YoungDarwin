@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pathSplatBakeFile } from './pathSplatBakes';
 
 export const STANDARD_FOOT_PATH_SPLAT_BOUNDS = {
   originX: -42,
@@ -240,8 +241,14 @@ export function loadStandardFootPathSplatTexture(path) {
   if (typeof window === 'undefined' || !path) return texture;
 
   const loader = new THREE.ImageBitmapLoader();
+  // No flip at either stage. The bake writes PNG row r from mask row r, and the
+  // generator this replaces is a DataTexture — which uploads row 0 to v=0
+  // rather than following the top-row-first convention of an image. Decoding
+  // as-is and uploading with flipY=false is the only combination that puts the
+  // baked mask on the same texels the generated one occupied; pre-flipping at
+  // decode (the usual advice for ImageBitmap) lands the path mirrored in z.
   loader.setOptions({
-    imageOrientation: 'flipY',
+    imageOrientation: 'none',
     premultiplyAlpha: 'none',
     colorSpaceConversion: 'none',
   });
@@ -260,6 +267,23 @@ export function loadStandardFootPathSplatTexture(path) {
   );
   texture.addEventListener('dispose', () => texture.image?.close?.());
   return texture;
+}
+
+// What terrain materials should call. `bake` names an entry in
+// pathSplatBakes.js; when one exists the mask streams in as a PNG instead of
+// being computed on the main thread. The generator stays as the fallback so a
+// newly authored region is playable before its bake exists — but it is a
+// four-second stall, so it warns rather than failing silently.
+export function resolveStandardFootPathSplatTexture({ bake = null, ...options } = {}) {
+  const file = pathSplatBakeFile(bake);
+  if (file) return loadStandardFootPathSplatTexture(file);
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn(
+      `[terrain-path-splat] ${bake || 'unkeyed region'}: generating the path mask on the main thread`
+      + ' (~4s stall). Add a recipe to scripts/build-path-splat-textures.mjs and run `npm run asset:path-splats`.',
+    );
+  }
+  return createStandardFootPathSplatTexture(options);
 }
 
 export function standardFootPathSplatUniforms(texture, {

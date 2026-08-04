@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
 } from '../../paths/standardPath';
@@ -11,7 +11,7 @@ import {
 } from '../materials/pbrTerrainTextures';
 import { N_SHORE_PATH_POINTS } from './terrain';
 
-const N_SHORE_PATH_SPLAT_BOUNDS = {
+export const N_SHORE_PATH_SPLAT_BOUNDS = {
   originX: -54,
   originZ: -46,
   width: 108,
@@ -244,7 +244,8 @@ function northShoreNormalFragment() {
 }
 
 export function createNorthShoreTerrainMaterial() {
-  const pathSplatTexture = createStandardFootPathSplatTexture({
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: 'n-shore',
     pathPoints: N_SHORE_PATH_POINTS[0],
     bounds: N_SHORE_PATH_SPLAT_BOUNDS,
     minimumWidth: 1.76,

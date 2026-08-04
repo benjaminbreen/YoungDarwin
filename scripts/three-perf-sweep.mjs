@@ -42,6 +42,13 @@ export const VARIANTS = {
   'no-reflections': { params: { noReflections: '1' }, note: 'water planar reflection off' },
   'dpr-1': { params: { dpr: '1x' }, note: 'render at 1x instead of native' },
   'dpr-1.25': { params: { dpr: '1.25x' }, note: 'render at 1.25x' },
+  'dpr-1.5': { params: { dpr: '1.5x' }, note: 'render at 1.5x' },
+  // Every other variant pins resolution so a comparison is not secretly a
+  // comparison of two different resolutions. But players run with the
+  // adaptive ladder ON, so a controller that hunts up and down would never
+  // appear in a pinned run — which is exactly what a bimodal frame rate
+  // looks like from the outside.
+  'adaptive-dpr': { session: { adaptiveDpr: true }, note: 'adaptive DPR ladder live, as players get it' },
   'no-ao': { params: { noAO: '1' }, note: 'ambient occlusion off (already default off)' },
   'no-hdr-post': { params: { noHdrPost: '1' }, note: '8-bit composer targets' },
   'water-performance': { params: { waterQuality: 'performance' }, note: 'cheapest water tier' },
@@ -157,7 +164,8 @@ async function main() {
         zone,
         quality: options.quality,
         settleMs: options.settle !== undefined ? Number(options.settle) : DEFAULTS.settleMs,
-        params: variant.params,
+        params: variant.params || {},
+        ...(variant.session || {}),
       };
       process.stdout.write(`[sweep] ${name}${repeat > 1 ? ` (${pass + 1}/${repeat})` : ''} ... `);
       try {

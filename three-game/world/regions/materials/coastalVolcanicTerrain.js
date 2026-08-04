@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
@@ -459,12 +459,14 @@ export function createCoastalVolcanicTerrainMaterial({
   sandNormalStrength = 0.42,
   pathSplatSize,
   pathSplatBounds,
+  pathSplatBake = null,
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
     throw new Error('createCoastalVolcanicTerrainMaterial requires pathPoints.');
   }
   const fallbacks = textureSet.fallbacks || {};
-  const pathSplatTexture = createStandardFootPathSplatTexture({
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: pathSplatBake,
     pathPoints,
     ...(pathSplatBounds ? { bounds: pathSplatBounds } : {}),
     ...(pathSplatSize ? { size: pathSplatSize } : {}),

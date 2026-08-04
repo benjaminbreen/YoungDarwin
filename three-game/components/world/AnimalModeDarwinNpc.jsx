@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { terrainHeight, clampToWalkable } from '../../world/terrain';
 import { useThreeGameStore } from '../../store';
 import { getPlayableMode } from '../../playable/playableModes';
 import { ModelAsset } from '../assets/ModelAsset';
 import { useMultiplayerRolePresent } from '../../multiplayer/MultiplayerContext';
+import { NPC_STATUS, npcStatusStyle } from '../../npcs/npcStatus';
+import { NpcStatusOrb } from './NpcStatusOrb';
+import { TerrainRingMarker } from './TerrainRingMarker';
 
 function ProceduralDarwinNpc() {
   return (
@@ -68,6 +71,30 @@ function darwinNpcReactionForDropping(dropping, time) {
     clipUntil: time + 1.45,
     doneAt: time + 1.65,
   };
+}
+
+// Darwin-as-NPC has no disposition toward an animal player, so the colour never
+// leaves neutral except while he is picking himself up.
+function darwinNpcStatus({ reaction, moving, investigating, animation }) {
+  if (reaction?.kind === 'fall') {
+    return { status: NPC_STATUS.ALERT, activity: 'Flat on his back' };
+  }
+  if (reaction) {
+    return { status: NPC_STATUS.ALERT, activity: 'Brushing off his coat' };
+  }
+  if (moving && investigating) {
+    return { status: NPC_STATUS.NEUTRAL, activity: 'Coming over for a closer look' };
+  }
+  if (moving) {
+    return { status: NPC_STATUS.NEUTRAL, activity: 'Working his way along the shore' };
+  }
+  if (animation === 'kneelInspect') {
+    return { status: NPC_STATUS.NEUTRAL, activity: 'Crouched over something' };
+  }
+  if (animation === 'lookAroundShort') {
+    return { status: NPC_STATUS.NEUTRAL, activity: 'Casting around for specimens' };
+  }
+  return { status: NPC_STATUS.NEUTRAL, activity: 'Standing and thinking' };
 }
 
 function reactionClipAt(reaction, time) {
@@ -133,6 +160,8 @@ export function AnimalModeDarwinNpc() {
   ), [currentZoneId, droppings]);
   const group = useRef(null);
   const animationRef = useRef('idle');
+  const [statusState, setStatusState] = useState(() => darwinNpcStatus({ animation: 'idle' }));
+  const statusRef = useRef(statusState);
   const stuckDroppingsRef = useRef(stuckDroppings);
   const reactedDroppingIds = useRef(new Set());
   const npc = useRef({
@@ -191,6 +220,13 @@ export function AnimalModeDarwinNpc() {
     const state = npc.current;
     if (!state.initialized) return;
     const store = useThreeGameStore.getState();
+    const applyStatus = input => {
+      const next = darwinNpcStatus(input);
+      const current = statusRef.current;
+      if (current.status === next.status && current.activity === next.activity) return;
+      statusRef.current = next;
+      setStatusState(next);
+    };
     if (store.statusViewOpen) {
       const groundY = terrainHeight(state.x, state.z, currentZoneId) + 0.04;
       group.current.position.set(state.x, groundY, state.z);
@@ -227,6 +263,7 @@ export function AnimalModeDarwinNpc() {
         z: state.z,
         yaw: group.current.rotation.y || 0,
       });
+      applyStatus({ reaction: state.reaction });
       return;
     }
     if (state.reaction && time >= state.reaction.doneAt) {
@@ -276,6 +313,7 @@ export function AnimalModeDarwinNpc() {
         && distanceToPlayer < (mode.id === 'finch' ? 9.5 : 7.5)
         && verticalGap < (mode.id === 'finch' ? 4.2 : 1.8)
         && Math.sin(time * 0.34 + state.seed) > -0.15;
+      state.investigating = shouldInvestigate;
       if (shouldInvestigate) {
         const length = Math.max(0.001, distanceToPlayer);
         const standOff = mode.id === 'finch' ? 1.8 : blockRadius + 0.22;
@@ -330,6 +368,11 @@ export function AnimalModeDarwinNpc() {
       z: state.z,
       yaw: group.current.rotation.y || 0,
     });
+    applyStatus({
+      moving: distance > 0.04,
+      investigating: Boolean(state.investigating),
+      animation: animationRef.current,
+    });
   });
 
   if (!visible) return null;
@@ -347,10 +390,19 @@ export function AnimalModeDarwinNpc() {
       {stuckDroppings.map(dropping => (
         <DarwinPoopSplat key={dropping.id} dropping={dropping} />
       ))}
-      <mesh position={[0, 0.045, 0]} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.62, 0.72, 36]} />
-        <meshBasicMaterial color="#e1c47a" transparent opacity={0.34} />
-      </mesh>
+      <TerrainRingMarker
+        radius={0.72}
+        innerRadius={0.62 / 0.72}
+        color={npcStatusStyle(statusState.status).ring}
+        opacity={0.34}
+        zoneId={currentZoneId}
+      />
+      <NpcStatusOrb
+        status={statusState.status}
+        activity={statusState.activity}
+        name="Charles Darwin"
+        height={2.28}
+      />
     </group>
   );
 }

@@ -10,6 +10,18 @@
       ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "darwin-prod",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "start",
+        "--",
+        "-p",
+        "3100"
+      ],
+      "port": 3100
     }
   ]
 }

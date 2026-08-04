@@ -148,6 +148,23 @@
   pointer-events: none;
 }
 
+.viewHintTouch {
+  display: none;
+}
+
+/* Touch devices get the gesture wording, and lose the mouse glyph that goes
+   with the pointer copy. */
+@media (hover: none) {
+  .viewHintPointer,
+  .mouseIcon {
+    display: none;
+  }
+
+  .viewHintTouch {
+    display: inline;
+  }
+}
+
 .mouseIcon {
   position: relative;
   width: 11px;
@@ -302,6 +319,21 @@
   box-shadow: 0 -16px 45px rgba(0, 0, 0, 0.18);
 }
 
+/* The bottom sheet leaves the scroll panel only a few lines tall on a phone, so
+   inquiry text routinely clips mid-heading. Fade the last strip into the note
+   area to read as "more below" rather than as a broken cut. */
+.noteArea::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 26px;
+  background: linear-gradient(rgba(9, 13, 15, 0), rgba(9, 13, 15, 0.92));
+  pointer-events: none;
+}
+
 .collectionDecision {
   position: absolute;
   z-index: 50;
@@ -416,12 +448,14 @@
     inset: 27% 7% 11%;
   }
 
+  /* Landscape phones have no room beside the stage for the long pointer copy;
+     the short touch line still fits. */
   .viewHint {
     left: 12px;
     bottom: 10px;
   }
 
-  .viewHint span:last-child {
+  .viewHintPointer {
     display: none;
   }
 
@@ -475,9 +509,6 @@
     left: 17px;
   }
 
-  .viewHint span:last-child {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

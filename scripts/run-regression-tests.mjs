@@ -1672,15 +1672,34 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   const cssSource = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
   assert.match(overlaySource, /data-testid="three-historical-prologue"/);
   assert.match(overlaySource, /24 September 1835/);
-  assert.match(overlaySource, /The dry Volcanic soil affording a congenial habitation/);
-  assert.match(overlaySource, /reached Isla Floreana\s*\(Charles Island\) in the Galapagos Archipelago/);
+  // Bracketed because the diary reads "affording"; the card silently regularises
+  // it to fit the sentence it is quoted into.
+  assert.match(overlaySource, /The dry Volcanic soil afford\[s\] a congenial habitation/);
+  // The place is named once, in the header. It used to be repeated in the body
+  // copy's opening clause as well.
+  assert.match(overlaySource, /Charles Island · Galápagos Archipelago/);
   assert.match(overlaySource, /sceneReady && narrativeComplete/);
   assert.match(overlaySource, /Begin exploring/);
   assert.match(overlaySource, /Skip introduction/);
-  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_MIN_MS = 3000/);
-  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = 550/);
-  assert.match(gameSource, /displayedProgress < 100/);
-  assert.match(overlaySource, /PROLOGUE_AUTO_BEGIN_MS = 15000/);
+  // Shape, not values: the splash holds for a bounded floor and then hands over
+  // to the prologue. The exact millisecond counts are tuning Ben moves.
+  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_MIN_MS = \d+/);
+  assert.match(gameSource, /HISTORICAL_PROLOGUE_SPLASH_COMPLETE_HOLD_MS = \d+/);
+  assert.match(overlaySource, /PROLOGUE_AUTO_BEGIN_MS = \d+/);
+  // The handover waits for something worth looking at behind the card, not for
+  // a progress bar that fills on a timer whatever the real load is doing.
+  assert.match(
+    gameSource,
+    /prologueBackdropReady = startupContentPhase >= 1/,
+    'the prologue should appear over a committed scene, not a cosmetic 100%',
+  );
+  // Full render quality is restored while the exit blackout is opaque, so the
+  // first shadow pass and reflection never land on a visible frame.
+  assert.match(gameSource, /HISTORICAL_PROLOGUE_COVER_HOLD_MS = \d+/);
+  assert.match(gameSource, /!openingQualityRestored/);
+  assert.match(cssSource, /@keyframes launch-prologue-cover-lift/);
+  // The reveal crossfades the veil off the live scene; it never cuts to black.
+  assert.doesNotMatch(cssSource, /launch-prologue-blackout/, "the reveal crossfades, it does not cut to black");
   assert.match(
     gameSource,
     /STARTUP_OPENING_CONTENT_PHASE = 3/,
@@ -1702,10 +1721,16 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
     /scheduleStagedContentPhases\(\{[\s\S]*idleTimeoutMs:\s*STARTUP_STREAM_IDLE_TIMEOUT_MS/,
     'late startup content should use separated idle windows with a bounded fallback',
   );
+  // The ladder must not run before the reveal begins — content committing
+  // behind the veil is what the staging exists to avoid. It deliberately does
+  // NOT wait for the reveal to *finish*: gating on `launchRevealSettled`
+  // parked it for 3.7s after the veil lifted and cost 4.7s of content-settled
+  // time, while the requestIdleCallback pacing asserted above (not the gate)
+  // is what actually keeps the reveal smooth. Measured 2026-08-04.
   assert.match(
     gameSource,
-    /if \(revealProtected && !launchRevealSettled\) return undefined/,
-    'the veil and HUD should pause unfinished scene commits during their reveal',
+    /if \(revealProtected && !gameUiVisible\) return undefined/,
+    'unfinished scene commits should wait for the reveal to begin, not to finish',
   );
   assert.doesNotMatch(
     gameSource,
@@ -1737,10 +1762,24 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
     /\{gameUiMounted && \([\s\S]*entranceActive=\{gameUiVisible\}/,
     'the HUD should mount behind the overlay and start its entrance only at reveal',
   );
-  assert.match(
-    hudSource,
-    /HUD_ENTRANCE_TIMINGS_MS = Object\.freeze\(\[650, 1120, 1540, 2200\]\)/,
-    'the authored HUD entrance sequence should remain staged',
+  // The landing shot holds the first panel until two seconds so the arrival
+  // reads as a place rather than a screen (604cb62). Assert the shape — four
+  // ascending stages, first one held back — rather than the literal numbers,
+  // so tuning the look does not turn this into a false failure. Content
+  // mounting must not be paced off these; see the startup ladder's gate.
+  const hudEntranceTimings = hudSource.match(
+    /HUD_ENTRANCE_TIMINGS_MS = Object\.freeze\(\[([\d,\s]+)\]\)/,
+  );
+  assert.ok(hudEntranceTimings, 'the authored HUD entrance sequence should remain staged');
+  const hudEntranceStages = hudEntranceTimings[1].split(',').map(value => Number(value.trim()));
+  assert.equal(hudEntranceStages.length, 4, 'the HUD entrance should keep four stages');
+  assert.ok(
+    hudEntranceStages.every((value, index) => index === 0 || value > hudEntranceStages[index - 1]),
+    'HUD entrance stages should ascend',
+  );
+  assert.ok(
+    hudEntranceStages[0] >= 650,
+    'the HUD entrance should hold its first panel for the landing shot',
   );
   assert.match(
     hudSource,
@@ -1758,8 +1797,16 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
     /const actorsReady = reaches\(6, 3\)/,
     'initial NPC shells should begin loading beneath the opaque launch treatment',
   );
-  assert.match(gameSource, /specimenVisualCount < expectedSpecimenCount/);
+  // Syms is the opening cast and still holds the reveal. Scattered specimens do
+  // not: waiting for all of them pinned the Begin button to the last streaming
+  // content phase, which is what left the finished prologue card on screen for
+  // about eleven seconds.
   assert.match(gameSource, /symsActorCount === 0 \|\| symsVisualCount === 0/);
+  assert.doesNotMatch(
+    gameSource,
+    /specimenVisualCount < expectedSpecimenCount/,
+    'specimen streaming must not gate the opening',
+  );
   assert.match(gameSource, /actorMotionPaused=\{!gameUiVisible \|\| Boolean\(transition\)\}/);
   assert.match(zoneContentSource, /<SymsCovington motionPaused=\{actorMotionPaused\}/);
   assert.match(
@@ -1769,8 +1816,8 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   );
   assert.match(
     gameSource,
-    /openingRenderBudgetActive = gameStarted && !launchRevealSettled/,
-    'reflections, adaptive DPR, and shadow refreshes must stay quiet through the HUD reveal',
+    /openingRenderBudgetActive = gameStarted\s*\n\s*&& !launchRevealSettled\s*\n\s*&& !openingQualityRestored/,
+    'reflections, adaptive DPR, and shadow refreshes must stay quiet until either the HUD reveal finishes or the exit blackout covers the screen',
   );
   assert.match(cssSource, /launch-prologue-veil/);
   assert.doesNotMatch(cssSource, /launch-prologue-part-left/);
@@ -1791,7 +1838,14 @@ test('finch and tortoise launches use succinct embodied prologues', () => {
   assert.match(overlaySource, /You are a tortoise\./);
   assert.match(overlaySource, /There is no need to hurry\./);
   assert.match(overlaySource, /Be a tortoise\./);
-  assert.match(overlaySource, /ANIMAL_PROLOGUE_REVEAL_MS = 4400/);
+  // Succinct means shorter than the Darwin card, not one fixed duration.
+  assert.match(overlaySource, /ANIMAL_PROLOGUE_REVEAL_MS = (\d+)/);
+  const animalRevealMs = Number(overlaySource.match(/ANIMAL_PROLOGUE_REVEAL_MS = (\d+)/)[1]);
+  const darwinRevealMs = Number(overlaySource.match(/\nconst PROLOGUE_REVEAL_MS = (\d+)/)[1]);
+  assert.ok(
+    animalRevealMs < darwinRevealMs,
+    `animal prologue (${animalRevealMs}ms) should be shorter than Darwin's (${darwinRevealMs}ms)`,
+  );
   assert.match(gameSource, /\['darwin', 'finch', 'tortoise'\]\.includes\(playableModeId\)/);
 });
 

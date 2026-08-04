@@ -75,6 +75,11 @@
       geometries: [],
       yaw: [],
       dpr: [],
+      // Staged content-mount phase, published by TransitionPerformanceProbe.
+      // Zone travel mounts the destination across fourteen steps; without this
+      // a multi-second block during a transition can be seen but not pinned to
+      // the step that caused it.
+      contentPhase: [],
       phase: [],
     };
   }
@@ -255,6 +260,7 @@
     cols.geometries.push(info ? info.geometries : 0);
     cols.yaw.push(readYaw());
     cols.dpr.push(info ? Math.round(info.dpr * 100) / 100 : 0);
+    cols.contentPhase.push(Number(window.__threeActiveContentPhase) || 0);
     cols.phase.push(state.phase);
     notePrograms();
     state.prev = info;

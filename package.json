@@ -65,7 +65,8 @@
     "multiplayer:deploy": "wrangler deploy --config multiplayer-worker/wrangler.jsonc",
     "multiplayer:test": "node scripts/multiplayer-room-smoke.mjs",
     "multiplayer:test:live": "node scripts/multiplayer-live-smoke.mjs",
-    "multiplayer:test:browser": "node scripts/multiplayer-browser-smoke.mjs"
+    "multiplayer:test:browser": "node scripts/multiplayer-browser-smoke.mjs",
+    "intro:timing": "node scripts/three-intro-timing.mjs"
   },
   "dependencies": {
     "@dgreenheck/ez-tree": "^1.1.0",

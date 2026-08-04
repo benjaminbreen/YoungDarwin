@@ -13,46 +13,43 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // fog is a local-terrain curve borrowed by the backdrop; vistaAir is the
   // backdrop's own. Lowering this and raising vistaAirMax moves ownership of
   // the distance falloff from the former to the latter.
-  aerialPerspective: 0.52,
+  aerialPerspective: 0.18,
 
   // --- shared aerial perspective (vistaAtmosphere.js) -----------------------
   // One curve by true camera distance for the apron and central backdrop.
   vistaAirStart: 105,
-  vistaAirScale: 320,
-  vistaAirCurve: 2.4,
-  vistaAirMax: 0.98,
+  vistaAirScale: 360,
+  vistaAirCurve: 2.3,
+  vistaAirMax: 1,
   // Post-fog dissolve toward the sky's own horizon colour. This is what stops
   // a fully hazed ridge from reading as a flat plate of fog colour cut out
   // against a differently coloured sky. 0 restores the old behaviour.
-  vistaSkyMatch: 0.2,
+  vistaSkyMatch: 0.24,
   vistaSkyLift: 1.42,
   vistaSkyFull: 220,
   // Horizon colour construction, driven by SkyController. 0 uses the graded
   // fog colour verbatim; 1 uses the sky dome's horizon band. The fog colour is
   // luminance-clamped for local mist and reads too dark at the horizon line,
   // so the useful range sits high.
-  vistaSkyBlend: 0.36,
+  vistaSkyBlend: 0.68,
   // What distance does to the surface itself, before haze is mixed over it.
   // Saturation is how much colour survives at full haze; contrast is the value
   // multiplier there, which is the direct control on how hard a distant ridge
   // reads as a silhouette rather than as a wash.
-  vistaSaturation: 0.96,
-  vistaContrast: 1,
+  vistaSaturation: 0.94,
+  vistaContrast: 0.62,
   // Near-field surface grain on the apron. Was hardcoded.
   vistaGrain: 1.8,
   // Valley haze — pools low, thins toward ridgelines. Feathers the hard line
   // where a distant layer meets the ground in front of it.
-  vistaValleyHaze: 0.5,
-  vistaValleyHeight: 44,
+  vistaValleyHaze: 0.92,
+  vistaValleyHeight: 74,
   // --- distance softening (far-field depth of field) ------------------------
-  // Distant landform is low-frequency by nature, but it is drawn with hard
-  // polygon silhouettes and per-vertex colour steps, and those high-frequency
-  // edges are what read as "glitchy" at range. A real lens resolves distance
-  // softly; matching that dissolves aliased ridgelines and layer seams into
-  // organic shapes for a fraction of the cost of building geometry fine enough
-  // to survive being sharp. Focus stays near the player so the foreground is
-  // untouched — this only softens what is already far away.
-  distanceSoftening: true,
+  // Defocuses everything past the player to dissolve aliased ridgelines and
+  // layer seams. Off since the 2026-08-04 bake: the stronger valley haze and
+  // lower vista contrast now do that work, and the blur cost nothing but the
+  // frame budget. The knobs below still drive it when it is switched back on.
+  distanceSoftening: false,
   softeningFocus: 5,
   // Range controls how quickly defocus builds. At 400 m the circle of confusion
   // stayed near zero out to ~250 m, and a near-zero CoC is the worst case for a
@@ -60,7 +57,7 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
   // no blur to disguise the low-res buffer and the mid-distance just resolves
   // as visible blocks. Bringing this in gives the mid-ground an actual kernel,
   // which is both the look we want and what hides the sampling.
-  softeningRange: 220,
+  softeningRange: 260,
   softeningBokeh: 2.8,
   // The downsample is only free when the blur is wide enough to cover it;
   // below ~0.7 the grid can show anywhere the CoC is small. 0.55 is the
@@ -85,10 +82,10 @@ export const CENTRAL_PEAK_DEV_DEFAULTS = Object.freeze({
 
   // --- neighbour apron -----------------------------------------------------
   neighborApronVisible: true,
-  neighborApronRelief: 0.75,
-  neighborApronVertical: -2.5,
-  neighborApronHazeStart: 0.58,
-  neighborApronNearHaze: 0,
+  neighborApronRelief: 1,
+  neighborApronVertical: -2.2,
+  neighborApronHazeStart: 0.64,
+  neighborApronNearHaze: 0.1,
   neighborApronFarHaze: 0.55,
   neighborApronSoftFocus: 0,
 

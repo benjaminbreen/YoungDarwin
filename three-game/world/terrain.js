@@ -358,7 +358,10 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
       : Array.isArray(defaultSpawn)
       ? defaultSpawn
       : null;
-  const margin = 5.2;
+  // Arriving a few metres inside the map reads as "stepped into the new place";
+  // arriving on the boundary reads as standing on a wall. Scaled so small
+  // regions do not spawn you near their centre.
+  const margin = THREE.MathUtils.clamp(Math.min(config.width, config.depth) * 0.11, 5.2, 15);
   let x = Number.isFinite(start?.[0]) ? start[0] : 0;
   let z = Number.isFinite(start?.[2]) ? start[2] : 0;
   if (Array.isArray(entrySpawn)) {
@@ -394,10 +397,26 @@ export function regionSpawnPoint(regionId, entryEdge = null) {
   return clamped;
 }
 
+// Arriving at an edge means the rest of the map is behind you: face inward so
+// the first frame shows the new region, not the one you just left.
+const EDGE_INWARD_FACING = {
+  east: [-1, 0, 0],
+  west: [1, 0, 0],
+  north: [0, 0, 1],
+  south: [0, 0, -1],
+  northeast: [-1, 0, 1],
+  northwest: [1, 0, 1],
+  southeast: [-1, 0, -1],
+  southwest: [1, 0, -1],
+};
+
 export function regionSpawnFacing(regionId, entryId = null) {
   const definition = authoredRegion(regionId);
   const authored = entryId ? definition?.terrain?.entryFacings?.[entryId] : null;
-  const source = Array.isArray(authored) ? authored : definition?.terrain?.defaultFacing;
+  const inward = entryId ? EDGE_INWARD_FACING[entryId] : null;
+  const source = Array.isArray(authored)
+    ? authored
+    : inward || definition?.terrain?.defaultFacing;
   const facing = Array.isArray(source)
     ? new THREE.Vector3(source[0] || 0, source[1] || 0, source[2] ?? -1)
     : new THREE.Vector3(0, 0, -1);
@@ -410,7 +429,9 @@ export function regionSpawnCameraFacing(regionId, entryId = null) {
   const definition = authoredRegion(regionId);
   const authored = entryId ? definition?.terrain?.entryCameraFacings?.[entryId] : null;
   const source = Array.isArray(authored) ? authored : definition?.terrain?.defaultCameraFacing;
-  if (!Array.isArray(source)) return null;
+  // No authored camera: sit behind the spawn facing rather than keeping the
+  // previous region's yaw.
+  if (!Array.isArray(source)) return regionSpawnFacing(regionId, entryId);
   const facing = new THREE.Vector3(source[0] || 0, 0, source[2] ?? -1);
   if (facing.lengthSq() < 0.0001) return null;
   return facing.normalize();

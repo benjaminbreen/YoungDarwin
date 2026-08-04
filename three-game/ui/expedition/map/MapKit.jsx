@@ -18,6 +18,10 @@ export function ZoomablePane({
   aspect = 1,
   minZoom = 1,
   maxZoom = 4,
+  // A CSS length. Capping height alone would fight `aspect-ratio` and squash the
+  // chart (badly, in phone landscape), so the cap is applied to width instead
+  // and the pane centres itself in whatever room is left.
+  maxHeight = null,
   className = '',
   onBackgroundClick,
   overlay,
@@ -25,14 +29,16 @@ export function ZoomablePane({
 }) {
   const viewportRef = useRef(null);
   const [view, setView] = useState({ zoom: 1, cx: 0.5, cy: 0.5 });
-  const [paneWidth, setPaneWidth] = useState(0);
+  const [pane, setPane] = useState({ width: 0, height: 0 });
+  const paneWidth = pane.width;
   const dragRef = useRef(null);
 
   useEffect(() => {
     const node = viewportRef.current;
     if (!node) return undefined;
     const observer = new ResizeObserver(entries => {
-      setPaneWidth(entries[0]?.contentRect?.width || 0);
+      const rect = entries[0]?.contentRect;
+      setPane({ width: rect?.width || 0, height: rect?.height || 0 });
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -136,8 +142,11 @@ export function ZoomablePane({
   return (
     <div
       ref={viewportRef}
-      className={`relative touch-none select-none overflow-hidden ${dragRef.current ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
-      style={{ aspectRatio: `${aspect}` }}
+      className={`relative mx-auto touch-none select-none overflow-hidden ${dragRef.current ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
+      style={{
+        aspectRatio: `${aspect}`,
+        ...(maxHeight ? { maxHeight, maxWidth: `calc(${maxHeight} * ${aspect})` } : null),
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -159,7 +168,7 @@ export function ZoomablePane({
           draggable={false}
           className="absolute inset-0 h-full w-full object-fill"
         />
-        {typeof children === 'function' ? children(view.zoom) : children}
+        {typeof children === 'function' ? children(view.zoom, pane) : children}
       </div>
       {/* aged-chart wash + vignette, matching the HUD minimap */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_60%,rgba(10,8,5,0.40)_100%)]" />
@@ -192,12 +201,34 @@ const MARKER_GLYPHS = {
   ),
 };
 
-export function MapMarker({ location, zoom = 1, selected = false, isCurrent = false, onSelect }) {
+// Label offsets are hand-tuned in screen pixels against a desktop-sized chart.
+// On a phone the same pane is less than half as tall, so a marker sitting near
+// the coast (H.M.S. Beagle at y=0.056, label 18px above it) pushes its label
+// off the top edge. Flip the offset inward when the pane is too short to hold
+// it; desktop panes keep the authored placement untouched.
+const LABEL_MARGIN = 13;
+
+function clampLabelOffset(location, pane) {
+  const offset = location.labelOffset || { x: 0, y: 20 };
+  const height = pane?.height || 0;
+  const width = pane?.width || 0;
+  if (!height || !width) return offset;
+  const y = location.at.y * height;
+  const x = location.at.x * width;
+  let { x: dx, y: dy } = offset;
+  if (dy < 0 && y + dy < LABEL_MARGIN) dy = -dy;
+  else if (dy > 0 && y + dy > height - LABEL_MARGIN) dy = -dy;
+  if (dx < 0 && x + dx < LABEL_MARGIN) dx = -dx;
+  else if (dx > 0 && x + dx > width - LABEL_MARGIN) dx = -dx;
+  return dx === offset.x && dy === offset.y ? offset : { x: dx, y: dy };
+}
+
+export function MapMarker({ location, zoom = 1, pane = null, selected = false, isCurrent = false, onSelect }) {
   const { kind, status, name } = location;
   const live = status === 'available';
   const glyph = MARKER_GLYPHS[kind];
   const markerSizeClass = kind === 'anchorage' ? 'h-5 w-5' : 'h-6 w-6';
-  const labelOffset = location.labelOffset || { x: 0, y: 20 };
+  const labelOffset = clampLabelOffset(location, pane);
   const labelDistance = Math.hypot(labelOffset.x, labelOffset.y);
   const leaderLength = Math.max(0, labelDistance - 13);
   const leaderAngle = Math.atan2(labelOffset.y, labelOffset.x) * (180 / Math.PI);
@@ -291,11 +322,15 @@ export function MapMarker({ location, zoom = 1, selected = false, isCurrent = fa
 // ---------------------------------------------------------------------------
 // Legend
 
+// Below `lg` the legend is a wrapped row of chips: a full-width row on a phone
+// strands the toggle dot half a screen away from the label it belongs to.
+const LEGEND_ROW = 'flex items-center gap-2 rounded-sm border border-expedition-brass/40 bg-black/25 px-2 py-1.5 lg:w-full lg:gap-2.5 lg:border-0 lg:bg-transparent lg:px-1.5 lg:py-1';
+
 export function LegendRow({ icon, label, active = true, onToggle }) {
   const body = (
     <>
       <span className="flex h-5 w-5 shrink-0 items-center justify-center text-expedition-gold">{icon}</span>
-      <span className="min-w-0 flex-1 truncate font-expedition text-[12.5px] text-expedition-parchment">{label}</span>
+      <span className="min-w-0 truncate font-expedition text-[12.5px] text-expedition-parchment lg:flex-1">{label}</span>
       {onToggle && (
         <span className={`relative h-3.5 w-3.5 shrink-0 rounded-full border transition ${
           active
@@ -308,16 +343,14 @@ export function LegendRow({ icon, label, active = true, onToggle }) {
     </>
   );
   if (!onToggle) {
-    return <div className="flex w-full items-center gap-2.5 px-1.5 py-1">{body}</div>;
+    return <div className={LEGEND_ROW}>{body}</div>;
   }
   return (
     <button
       type="button"
       onClick={onToggle}
       title={active ? `Hide ${label}` : `Show ${label}`}
-      className={`flex w-full items-center gap-2.5 rounded-sm px-1.5 py-1 text-left transition hover:bg-expedition-gold/8 ${
-        active ? '' : 'opacity-45'
-      }`}
+      className={`${LEGEND_ROW} text-left transition hover:bg-expedition-gold/8 ${active ? '' : 'opacity-45'}`}
     >
       {body}
     </button>
@@ -328,7 +361,7 @@ export function LegendList({ title = 'Map Legend', children }) {
   return (
     <div>
       <div className={`${GOLD_LABEL} mb-1.5`}>{title}</div>
-      <div className="grid gap-0.5">{children}</div>
+      <div className="flex flex-wrap gap-1.5 lg:grid lg:gap-0.5">{children}</div>
     </div>
   );
 }

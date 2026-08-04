@@ -257,6 +257,24 @@ export async function runSteps(page, steps, context = {}) {
           await page.waitForTimeout(60);
         }
         if (step.ms) await page.waitForTimeout(step.ms);
+      } else if (step.travelTo) {
+        // Zone travel through the same store path the edge-of-map trigger uses.
+        // The frames here are load, not steady state, which is exactly why they
+        // are worth recording separately.
+        await page.evaluate(zone => window.__darwinE2E?.travelTo(zone), step.travelTo);
+        const deadline = Date.now() + (step.timeoutMs || 90_000);
+        while (Date.now() < deadline) {
+          await page.waitForTimeout(250);
+          const arrived = await page.evaluate(
+            zone => {
+              const snapshot = window.__darwinE2E?.getState();
+              return snapshot?.currentZoneId === zone && !snapshot?.transition;
+            },
+            step.travelTo,
+          );
+          if (arrived) break;
+        }
+        if (step.ms) await page.waitForTimeout(step.ms);
       } else if (step.yawTo !== undefined) {
         const result = await yawTo(page, step.yawTo);
         await page.evaluate(r => window.__perfLab?.mark('yawTo', r), result);

@@ -143,7 +143,12 @@ export const locations = [
     // Upper shoulder of the central rise: starts Darwin above the landing
     // looking east-southeast along the slope, with the cove, sandbar, and
     // Beagle off his left shoulder.
-    playerStart: [-3.5, 0, 22],
+    //
+    // This is the value that actually spawns him. `regionSpawnPoint` in
+    // world/terrain.js checks `playerStart` BEFORE the region's own
+    // `defaultSpawn`, so editing postOfficeBay/terrain.js alone does nothing —
+    // the two must be kept in step.
+    playerStart: [-8.43, 0, 25.02],
     specimens: ['barnacle','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
     specimenPlacements: [
       {

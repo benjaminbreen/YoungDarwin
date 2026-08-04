@@ -369,7 +369,8 @@ export function ExamineView() {
 
         <div className={styles.viewHint}>
           <span className={styles.mouseIcon} aria-hidden="true" />
-          <span>Drag in any direction to orbit · scroll to zoom</span>
+          <span className={styles.viewHintPointer}>Drag in any direction to orbit · scroll to zoom</span>
+          <span className={styles.viewHintTouch}>Drag to orbit · pinch to zoom</span>
         </div>
       </section>
 

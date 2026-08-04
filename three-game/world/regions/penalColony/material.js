@@ -11,14 +11,14 @@ import {
   PENAL_COLONY_PLAZA,
 } from './path';
 import {
-  createStandardFootPathSplatTexture,
+  resolveStandardFootPathSplatTexture,
   standardFootPathFrameGLSL,
   standardFootPathSplatGLSL,
   standardFootPathSplatUniforms,
 } from '../../paths/standardPath';
 
 // The settlement region (94 x 82) is wider than the default splat bounds.
-const PENAL_COLONY_SPLAT_BOUNDS = { originX: -50, originZ: -44, width: 100, depth: 88, size: 1024 };
+export const PENAL_COLONY_SPLAT_BOUNDS = { originX: -50, originZ: -44, width: 100, depth: 88, size: 1024 };
 
 function f(value) {
   return Number(value).toFixed(3);
@@ -78,7 +78,8 @@ export function createPenalColonyTerrainMaterial() {
   const loamAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.loam);
   const redDirtAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.redCinderDirt);
   const dryGrassAlbedo = loadTerrainAlbedo(FLOREANA_PBR_TEXTURES.dryGrassLitter);
-  const pathSplatTexture = createStandardFootPathSplatTexture({
+  const pathSplatTexture = resolveStandardFootPathSplatTexture({
+    bake: 'penal-colony',
     pathPoints: PENAL_COLONY_PATHS,
     bounds: PENAL_COLONY_SPLAT_BOUNDS,
   });

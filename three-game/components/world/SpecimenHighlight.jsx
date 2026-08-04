@@ -4,7 +4,8 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { inferSpecimenRarity } from '../../world/inspectables';
-import { terrainHeight } from '../../world/terrain';
+import { createDrapedRingGeometry, projectDrapedGeometry } from '../../world/drapedRingGeometry';
+import { getRadialGlowTexture } from '../../world/glowTexture';
 
 const NO_RAYCAST = () => null;
 const TAU = Math.PI * 2;
@@ -12,9 +13,6 @@ const MARKER_FADE_NEAR = 8;
 const MARKER_FADE_FAR = 18;
 const GLOW_FADE_NEAR = 5;
 const GLOW_FADE_FAR = 11.5;
-const PROJECTION_MATRIX = new THREE.Matrix4();
-const PROJECTION_INVERSE = new THREE.Matrix4();
-const PROJECTION_POINT = new THREE.Vector3();
 const SCHEDULER_POSITION = new THREE.Vector3();
 const HIGHLIGHT_WORLD_ORIGIN = new THREE.Vector3();
 const HIGHLIGHT_WORLD_TARGET = new THREE.Vector3();
@@ -22,7 +20,6 @@ const HIGHLIGHT_WORLD_SCALE = new THREE.Vector3();
 const HIGHLIGHT_PARENT_QUATERNION = new THREE.Quaternion();
 const HIGHLIGHT_TARGET_QUATERNION = new THREE.Quaternion();
 const HIGHLIGHT_TARGET_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
-let diamondAuraTexture = null;
 
 const VISUAL_TIER_BY_RARITY = Object.freeze({
   abundant: 'common',
@@ -72,29 +69,6 @@ const TIER_STYLES = Object.freeze({
   },
 });
 
-function getDiamondAuraTexture() {
-  if (diamondAuraTexture || typeof document === 'undefined') return diamondAuraTexture;
-  const size = 64;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-  const half = size / 2;
-  const gradient = context.createRadialGradient(half, half, 0, half, half, half);
-  gradient.addColorStop(0, 'rgba(255,255,255,0.72)');
-  gradient.addColorStop(0.28, 'rgba(255,255,255,0.24)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-  diamondAuraTexture = new THREE.CanvasTexture(canvas);
-  diamondAuraTexture.colorSpace = THREE.NoColorSpace;
-  diamondAuraTexture.minFilter = THREE.LinearFilter;
-  diamondAuraTexture.magFilter = THREE.LinearFilter;
-  diamondAuraTexture.generateMipmaps = false;
-  diamondAuraTexture.needsUpdate = true;
-  return diamondAuraTexture;
-}
-
 const GLOW_VERTEX_SHADER = /* glsl */`
   varying vec2 vUv;
 
@@ -127,67 +101,6 @@ function phaseForSpecimen(specimen) {
     hash = ((hash << 5) - hash + id.charCodeAt(index)) | 0;
   }
   return (Math.abs(hash) % 1000) / 1000 * TAU;
-}
-
-function createTerrainGlowGeometry(radialSegments = 96, radialSteps = 5) {
-  const positions = [];
-  const uvs = [];
-  const indices = [];
-  const innerRadius = 0.44;
-
-  for (let ring = 0; ring <= radialSteps; ring += 1) {
-    const radius = THREE.MathUtils.lerp(innerRadius, 1, ring / radialSteps);
-    for (let segment = 0; segment < radialSegments; segment += 1) {
-      const angle = (segment / radialSegments) * TAU;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      positions.push(x, 0, z);
-      uvs.push(0.5 + x * 0.5, 0.5 + z * 0.5);
-    }
-  }
-
-  for (let ring = 0; ring < radialSteps; ring += 1) {
-    const current = ring * radialSegments;
-    const next = (ring + 1) * radialSegments;
-    for (let segment = 0; segment < radialSegments; segment += 1) {
-      const following = (segment + 1) % radialSegments;
-      // Winding faces upward so the terrain glow is visible from gameplay.
-      indices.push(
-        current + segment,
-        current + following,
-        next + segment,
-        current + following,
-        next + following,
-        next + segment,
-      );
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function projectGlowGeometry(mesh, zoneId) {
-  const position = mesh?.geometry?.attributes?.position;
-  if (!mesh || !position) return;
-  mesh.updateWorldMatrix(true, false);
-  PROJECTION_MATRIX.copy(mesh.matrixWorld);
-  PROJECTION_INVERSE.copy(mesh.matrixWorld).invert();
-
-  for (let index = 0; index < position.count; index += 1) {
-    PROJECTION_POINT
-      .set(position.getX(index), 0, position.getZ(index))
-      .applyMatrix4(PROJECTION_MATRIX);
-    PROJECTION_POINT.y = terrainHeight(PROJECTION_POINT.x, PROJECTION_POINT.z, zoneId) + 0.035;
-    PROJECTION_POINT.applyMatrix4(PROJECTION_INVERSE);
-    position.setY(index, PROJECTION_POINT.y);
-  }
-  position.needsUpdate = true;
 }
 
 function distanceVisibility(distance, near, far) {
@@ -230,8 +143,8 @@ export function SpecimenHighlight({
   const phase = useMemo(() => phaseForSpecimen(specimen), [specimen]);
   const glowRadius = THREE.MathUtils.clamp(footprintRadius * 1.5, 0.46, 1.55);
   const markerScale = THREE.MathUtils.clamp(0.69 + footprintRadius * 0.14, 0.72, 0.92);
-  const glowGeometry = useMemo(() => createTerrainGlowGeometry(), []);
-  const auraTexture = useMemo(() => getDiamondAuraTexture(), []);
+  const glowGeometry = useMemo(() => createDrapedRingGeometry({ innerRadius: 0.44 }), []);
+  const auraTexture = useMemo(() => getRadialGlowTexture(), []);
   const glowUniforms = useMemo(() => ({
     uColor: { value: new THREE.Color(style.color).multiplyScalar(style.ringGain) },
     uOpacity: { value: 0 },
@@ -326,7 +239,7 @@ export function SpecimenHighlight({
           projectedAt.zoneId !== zoneId
           || Math.hypot(world[12] - projectedAt.x, world[14] - projectedAt.z) > 0.035
         ) {
-          projectGlowGeometry(glowMeshRef.current, zoneId);
+          projectDrapedGeometry(glowMeshRef.current, zoneId);
           projectedAtRef.current = { x: world[12], z: world[14], zoneId };
         }
       }

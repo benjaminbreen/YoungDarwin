@@ -17,10 +17,9 @@ import {
 // amount of mount optimization can recover. Every value below is trimmed
 // roughly a third while keeping the sequence readable: the crane still reads
 // as a lift-away, the route still draws rather than snapping, and the chart
-// still holds long enough to be looked at. The route/camera pair and the
-// chart hold are trimmed together — the hold must outlast
-// CHART_ROUTE_START_MS + CHART_ROUTE_MOVE_MS or the chart cuts away
-// mid-draw.
+// still holds long enough to be looked at. The hold only gates the commit;
+// CHART_MIN_VISIBLE_MS is what keeps the chart on screen until the route has
+// finished drawing.
 const DEPARTURE_CRANE_MS = 300;
 const BLACK_FADE_IN_MS = 240;
 const ISLAND_CHART_HOLD_MS = 520;
@@ -35,9 +34,14 @@ const CHART_FADE_IN_MS = 240;
 const CHART_FADE_OUT_MS = 270;
 const WORLD_FADE_IN_MS = 360;
 const CAMERA_SETTLE_MS = 340;
-const CHART_ROUTE_START_MS = 50;
-const CHART_CAMERA_MOVE_MS = 500;
-const CHART_ROUTE_MOVE_MS = 440;
+// The draw and the pan are deliberately slower than the hold above. They cost
+// no travel time: the destination commits after ISLAND_CHART_HOLD_MS and loads
+// underneath while the pen is still moving. CHART_MIN_VISIBLE_MS is what stops
+// a fast load from cutting the chart away mid-stroke.
+const CHART_ROUTE_START_MS = 150;
+const CHART_CAMERA_MOVE_MS = 1500;
+const CHART_ROUTE_MOVE_MS = 1250;
+const CHART_MIN_VISIBLE_MS = CHART_ROUTE_START_MS + CHART_ROUTE_MOVE_MS + 260;
 const MAP_LAYER_WIDTH_PERCENT = 116;
 
 function clamp(value, min, max) {
@@ -127,7 +131,30 @@ function buildChartRoute(fromLocation, toLocation) {
   };
 }
 
-function routeCameraViews(route, fromLocation, toLocation) {
+// The chart frame's size in px. Kept in JS rather than as a CSS min() string so
+// the camera constraints below can reason about how much of the frame the map
+// layer actually covers — the two used to disagree, which is what let the frame
+// pan off the top of the painting on a portrait phone.
+const CHART_MAX_WIDTH = 1680;
+const CHART_MAX_HEIGHT = 920;
+
+function chartFrameSize(viewportWidth, viewportHeight) {
+  const width = Math.min(viewportWidth * 0.84, CHART_MAX_WIDTH);
+  const height = Math.min(
+    viewportHeight * 0.78,
+    CHART_MAX_HEIGHT,
+    // Never letterbox: the map layer is MAP_LAYER_WIDTH_PERCENT of the frame's
+    // width at the chart's own aspect, so a taller frame is dead space.
+    (width * MAP_LAYER_WIDTH_PERCENT) / 100 / ISLAND_MAP_ASPECT,
+    // The frame is centred at 43% and the destination caption sits ~6dvh off
+    // the bottom; on a short viewport the frame gives way rather than swallow
+    // the caption.
+    viewportHeight * 1.02 - 220,
+  );
+  return { width: Math.max(200, width), height: Math.max(120, height) };
+}
+
+function routeCameraViews(route, fromLocation, toLocation, frame) {
   if (!route || !fromLocation || !toLocation) return null;
   const xs = route.points.map(point => point.x / 100);
   const ys = route.points.map(point => point.y / 100);
@@ -141,9 +168,17 @@ function routeCameraViews(route, fromLocation, toLocation) {
     0.86 / (maxY - minY + 0.15),
   ), 1.12, 2.18);
   const focus = 0.16;
+  // How many frame-heights the map layer covers at zoom 1. On a wide desktop
+  // frame this is ~1.8 and the authored 0.34 inset is the binding one; on a
+  // portrait phone the frame is exactly the layer's height, so the inset has to
+  // rise to 0.5 or the pan exposes bare panel above the coastline.
+  const layerCoverY = frame
+    ? ((frame.width * MAP_LAYER_WIDTH_PERCENT) / 100 / ISLAND_MAP_ASPECT) / frame.height
+    : 1;
+  const verticalInsetAtZoom1 = Math.max(0.34, 0.5 / Math.max(0.001, layerCoverY));
   const constrainView = view => {
     const horizontalInset = clamp(0.44 / view.zoom, 0, 0.49);
-    const verticalInset = clamp(0.34 / view.zoom, 0, 0.49);
+    const verticalInset = clamp(verticalInsetAtZoom1 / view.zoom, 0, 0.49);
     return {
       ...view,
       cx: clamp(view.cx, horizontalInset, 1 - horizontalInset),
@@ -172,6 +207,7 @@ function ChartMarker({
   destination = false,
   label = false,
   routeActive = false,
+  compact = false,
 }) {
   if (!location) return null;
   const dx = location.at.x - (otherLocation?.at.x ?? location.at.x);
@@ -181,10 +217,19 @@ function ChartMarker({
     top: 'calc(100% + 5px)',
     transform: 'translateX(-50%)',
   };
-  if (Math.abs(dx) >= Math.abs(dy)) {
+  if (!compact && Math.abs(dx) >= Math.abs(dy)) {
     labelStyle = dx >= 0
       ? { left: 'calc(100% + 6px)', top: '50%', transform: 'translateY(-50%)' }
       : { right: 'calc(100% + 6px)', top: '50%', transform: 'translateY(-50%)' };
+  } else if (compact) {
+    // On a phone-width frame a centred label runs off whichever edge its marker
+    // sits near, and the outboard placement above pushes both ends of a
+    // horizontal route outward at once. Stack the label off the marker and let
+    // it grow back toward the other end of the route, where the room is.
+    const vertical = dy < 0 ? { bottom: 'calc(100% + 5px)' } : { top: 'calc(100% + 5px)' };
+    labelStyle = dx >= 0
+      ? { ...vertical, right: '50%', textAlign: 'right' }
+      : { ...vertical, left: '50%', textAlign: 'left' };
   } else if (dy < 0) {
     labelStyle = { bottom: 'calc(100% + 5px)', left: '50%', transform: 'translateX(-50%)' };
   }
@@ -205,7 +250,11 @@ function ChartMarker({
       </span>
       {label && (
         <span
-          className="block whitespace-nowrap text-[7px] font-semibold uppercase tracking-[0.16em] text-expedition-parchment"
+          className={`block text-[9px] uppercase leading-[1.35] tracking-[0.2em] ${
+            destination
+              ? 'font-semibold text-expedition-goldbright'
+              : 'font-medium text-expedition-parchment/85'
+          } ${compact ? 'w-max max-w-[7.5rem]' : 'whitespace-nowrap'}`}
           style={{
             ...labelStyle,
             position: 'absolute',
@@ -219,16 +268,61 @@ function ChartMarker({
   );
 }
 
+// One gold frame, marked at the corners: the chart should read as a mounted
+// plate rather than a cropped photograph.
+function ChartCorners() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20">
+      {[
+        'left-0 top-0 border-l border-t',
+        'right-0 top-0 border-r border-t',
+        'left-0 bottom-0 border-l border-b',
+        'right-0 bottom-0 border-r border-b',
+      ].map(position => (
+        <span
+          key={position}
+          className={`absolute h-6 w-6 border-expedition-goldbright/55 ${position}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useChartFrame() {
+  const [frame, setFrame] = useState(() => (
+    typeof window === 'undefined'
+      ? chartFrameSize(1280, 800)
+      : chartFrameSize(window.innerWidth, window.innerHeight)
+  ));
+  useEffect(() => {
+    const update = () => setFrame(prev => {
+      const next = chartFrameSize(window.innerWidth, window.innerHeight);
+      return Math.abs(next.width - prev.width) < 0.5 && Math.abs(next.height - prev.height) < 0.5
+        ? prev
+        : next;
+    });
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+  return frame;
+}
+
 function IslandChart({ transition, reducedMotion, active }) {
   const fromLocation = getIslandMapLocation(transition.fromZoneId);
   const toLocation = getIslandMapLocation(transition.zoneId);
+  const frame = useChartFrame();
   const route = useMemo(
     () => buildChartRoute(fromLocation, toLocation),
     [fromLocation, toLocation],
   );
   const cameraViews = useMemo(
-    () => routeCameraViews(route, fromLocation, toLocation),
-    [fromLocation, route, toLocation],
+    () => routeCameraViews(route, fromLocation, toLocation, frame),
+    [frame, fromLocation, route, toLocation],
   );
   const startView = useMemo(() => cameraViews?.start || ({
     cx: fromLocation?.at.x || 0.5,
@@ -249,7 +343,8 @@ function IslandChart({ transition, reducedMotion, active }) {
     return () => window.clearTimeout(routeTimer);
   }, [active, cameraViews, reducedMotion, startView, transition.id]);
 
-  const chartWidth = 'min(84vw, 1680px)';
+  // Below this the outboard marker labels have nowhere to go — see ChartMarker.
+  const compactLabels = frame.width < 520;
   const panX = (0.5 - view.cx) * 100 * view.zoom;
   const panY = (0.5 - view.cy) * 100 * view.zoom;
   const mapLayerStyle = {
@@ -269,8 +364,8 @@ function IslandChart({ transition, reducedMotion, active }) {
       <div
         className="absolute left-1/2 top-[43%] z-10 overflow-hidden rounded-[3px] border border-expedition-gold/35 bg-[radial-gradient(ellipse_at_center,#17212a_0%,#101419_70%,#090a0b_100%)] shadow-[0_30px_100px_rgba(0,0,0,0.8),0_0_0_1px_rgba(230,204,143,0.09)]"
         style={{
-          width: chartWidth,
-          height: 'min(78vh, 920px)',
+          width: `${frame.width}px`,
+          height: `${frame.height}px`,
           transform: 'translate(-50%, -50%)',
         }}
       >
@@ -286,7 +381,7 @@ function IslandChart({ transition, reducedMotion, active }) {
             fill
             priority
             unoptimized
-            sizes={chartWidth}
+            sizes={`${Math.round(frame.width * MAP_LAYER_WIDTH_PERCENT / 100)}px`}
           />
         </div>
         <div
@@ -366,16 +461,17 @@ function IslandChart({ transition, reducedMotion, active }) {
               </g>
             </svg>
           )}
-          <ChartMarker location={fromLocation} otherLocation={toLocation} label />
+          <ChartMarker location={fromLocation} otherLocation={toLocation} label compact={compactLabels} />
           <ChartMarker
             location={toLocation}
             otherLocation={fromLocation}
             destination
             label
+            compact={compactLabels}
             routeActive={routeActive}
           />
         </div>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-expedition-goldbright/30 to-transparent" />
+        <ChartCorners />
       </div>
       <div
         className="pointer-events-none absolute inset-0 z-0"
@@ -408,6 +504,7 @@ export function TravelInterstitial() {
   const [reducedMotion, setReducedMotion] = useState(false);
   const coverConfirmedRef = useRef(false);
   const preparedTransitionIdRef = useRef(null);
+  const chartShownAtRef = useRef(0);
   const transitionId = transition?.id || null;
   const transitionMode = transition?.mode || null;
   const transitionSource = transition?.source || null;
@@ -443,6 +540,7 @@ export function TravelInterstitial() {
       setRevealing(false);
       coverConfirmedRef.current = false;
       preparedTransitionIdRef.current = null;
+      chartShownAtRef.current = 0;
       return undefined;
     }
     setCovered(false);
@@ -452,6 +550,7 @@ export function TravelInterstitial() {
     setRevealing(false);
     coverConfirmedRef.current = false;
     preparedTransitionIdRef.current = null;
+    chartShownAtRef.current = 0;
     const immediateCover = reducedMotion || transitionSource === 'island-map';
     const departureDelay = immediateCover || transitionMode === 'threshold'
       ? 0
@@ -492,6 +591,7 @@ export function TravelInterstitial() {
       || preparedTransitionIdRef.current === transitionId) return undefined;
     preparedTransitionIdRef.current = transitionId;
     setZoneTransitionPhase('chart', transitionId);
+    chartShownAtRef.current = Date.now();
     setChartVisible(true);
     const holdTimer = window.setTimeout(
       () => setChartBeatComplete(true),
@@ -538,7 +638,14 @@ export function TravelInterstitial() {
     if (!transitionId || transitionPhase !== 'ready') return undefined;
     if (transitionMode !== 'threshold' && !reducedMotion && !chartBeatComplete) return undefined;
     const minimum = transitionMode === 'threshold' || reducedMotion ? 300 : 0;
-    const wait = Math.max(0, minimum - (Date.now() - transitionStartedAt));
+    const drawRemaining = transitionMode === 'threshold' || reducedMotion || !chartShownAtRef.current
+      ? 0
+      : CHART_MIN_VISIBLE_MS - (Date.now() - chartShownAtRef.current);
+    const wait = Math.max(
+      0,
+      minimum - (Date.now() - transitionStartedAt),
+      drawRemaining,
+    );
     let handoffTimer = null;
     const timer = window.setTimeout(() => {
       setChartVisible(false);
@@ -582,6 +689,13 @@ export function TravelInterstitial() {
     ? `about ${Math.round(displayedTransition.minutes)} minutes`
     : null;
   const fatigue = fatigueLabel(Number(displayedTransition.fatigue));
+  // Caption lines settle in order rather than arriving as one block. Keyed on
+  // the transition id below so each travel replays the stagger.
+  const captionStagger = reducedMotion
+    ? () => undefined
+    : delay => ({
+      animation: `travel-caption-rise 560ms cubic-bezier(0.16, 0.84, 0.3, 1) ${delay}ms both`,
+    });
 
   return (
     <div
@@ -630,21 +744,49 @@ export function TravelInterstitial() {
         ) : (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(67,58,38,0.5),rgba(12,11,9,0.98)_72%)]" />
         )}
-        <div className="absolute inset-x-0 bottom-[max(2rem,6vh)] flex justify-center px-5">
-          <section className="max-w-xl text-center text-shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-expedition-gold/85">
+        {/* z-20: the chart frame is z-10 inside the same stacking context, and
+            without this it paints over the destination name on short screens. */}
+        <div className="absolute inset-x-0 bottom-[max(1.25rem,6dvh)] z-20 flex justify-center px-5">
+          <section
+            key={`${displayedTransition.id}-caption`}
+            className="max-w-xl text-center"
+            style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}
+          >
+            <p
+              className="text-[9px] font-medium uppercase tracking-[0.42em] text-expedition-gold/80 sm:text-[10px]"
+              style={captionStagger(0)}
+            >
               {isIsland ? 'Across Charles Island' : 'Crossing the threshold'}
             </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[0.035em] text-expedition-parchment sm:text-3xl">
+            <h2
+              className="mt-2.5 text-[1.7rem] font-normal leading-[1.1] tracking-[0.01em] text-expedition-parchment sm:mt-3 sm:text-[2.6rem]"
+              style={captionStagger(90)}
+            >
               {displayedTransition.to}
             </h2>
+            {/* Ruled off like a plate caption; the diamond keeps the rule from
+                reading as a second frame edge. */}
+            <span
+              className="mx-auto mt-3 flex w-40 items-center justify-center gap-2 sm:w-52"
+              style={captionStagger(160)}
+            >
+              <span className="h-px flex-1 bg-gradient-to-r from-transparent to-expedition-gold/45" />
+              <span className="h-[3px] w-[3px] rotate-45 bg-expedition-goldbright/70" />
+              <span className="h-px flex-1 bg-gradient-to-l from-transparent to-expedition-gold/45" />
+            </span>
             {displayedTransition.note && (
-              <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-expedition-parchment/82">
+              <p
+                className="mx-auto mt-3 hidden max-w-lg text-[0.95rem] italic leading-relaxed text-expedition-parchment/78 sm:block"
+                style={captionStagger(220)}
+              >
                 {displayedTransition.note}
               </p>
             )}
             {(minutes || fatigue) && (
-              <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-expedition-gold/75">
+              <p
+                className="mt-2 text-[9px] uppercase tracking-[0.24em] text-expedition-gold/70 sm:mt-2.5 sm:text-[10px]"
+                style={captionStagger(280)}
+              >
                 {[minutes, fatigue].filter(Boolean).join(' · ')}
               </p>
             )}

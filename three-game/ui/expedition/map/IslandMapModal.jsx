@@ -111,7 +111,8 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
           imageUrl={ISLAND_MAP_IMAGE}
           aspect={ISLAND_MAP_ASPECT}
           maxZoom={4.5}
-          className="max-h-[62vh] w-full"
+          className="w-full"
+          maxHeight="min(62dvh, 40rem)"
           onBackgroundClick={handleBackgroundClick}
           overlay={({ zoom, paneWidth, zoomIn, zoomOut }) => (
             <>
@@ -125,11 +126,12 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
             </>
           )}
         >
-          {zoom => visibleLocations.map(location => (
+          {(zoom, pane) => visibleLocations.map(location => (
             <MapMarker
               key={location.id}
               location={location}
               zoom={zoom}
+              pane={pane}
               selected={selectedId === location.id}
               isCurrent={currentZoneId === location.id}
               onSelect={loc => onSelectLocation(loc.id)}
@@ -207,27 +209,34 @@ function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, onSelectL
   const selected = getIslandMapLocation(selectedId) || getIslandMapLocation(currentZoneId);
 
   return (
-    <div className="grid content-start gap-3">
-      <LegendList>
-        <LegendRow icon={LEGEND_ICONS.current} label="Current Location" active />
-        <LegendRow icon={LEGEND_ICONS.surveyed} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
-        <LegendRow icon={LEGEND_ICONS.anchorage} label="Anchorages" active={filters.anchorage} onToggle={() => onToggle('anchorage')} />
-        <LegendRow icon={LEGEND_ICONS.water} label="Surf & offshore" active={filters.water} onToggle={() => onToggle('water')} />
-        <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
-      </LegendList>
-      <GoldDivider />
-      {selected ? (
-        <SelectedLocationCard location={selected} isCurrent={selected.id === currentZoneId} onRequestClose={onRequestClose} />
-      ) : (
-        <p className="px-1 font-expedition text-[12px] italic text-expedition-faded">
-          Select a marker to read the survey notes for that ground.
-        </p>
-      )}
+    // Phone order puts the selected place (and its Set as Destination button)
+    // directly under the chart; the legend filters follow. On lg the authored
+    // legend-first sidebar order returns.
+    <div className="flex flex-col content-start gap-3 lg:grid">
+      <div className="order-2 lg:order-none">
+        <LegendList>
+          <LegendRow icon={LEGEND_ICONS.current} label="Current Location" active />
+          <LegendRow icon={LEGEND_ICONS.surveyed} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
+          <LegendRow icon={LEGEND_ICONS.anchorage} label="Anchorages" active={filters.anchorage} onToggle={() => onToggle('anchorage')} />
+          <LegendRow icon={LEGEND_ICONS.water} label="Surf & offshore" active={filters.water} onToggle={() => onToggle('water')} />
+          <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
+        </LegendList>
+      </div>
+      <GoldDivider className="order-1 lg:order-none" />
+      <div className="order-none">
+        {selected ? (
+          <SelectedLocationCard location={selected} isCurrent={selected.id === currentZoneId} onRequestClose={onRequestClose} />
+        ) : (
+          <p className="px-1 font-expedition text-[12px] italic text-expedition-faded">
+            Select a marker to read the survey notes for that ground.
+          </p>
+        )}
+      </div>
       {selectedId && selectedId !== currentZoneId && (
         <button
           type="button"
           onClick={() => onSelectLocation(null)}
-          className="justify-self-start text-[10px] uppercase tracking-[0.14em] text-expedition-faded transition hover:text-expedition-gold"
+          className="order-3 self-start text-[10px] uppercase tracking-[0.14em] text-expedition-faded transition hover:text-expedition-gold lg:order-none lg:justify-self-start"
         >
           Clear selection
         </button>
@@ -261,7 +270,8 @@ function LocalTab() {
             imageUrl={chartUrl}
             aspect={1}
             maxZoom={3}
-            className="max-h-[62vh] w-full"
+            className="w-full"
+            maxHeight="min(62dvh, 40rem)"
             overlay={({ zoom, paneWidth, zoomIn, zoomOut }) => (
               <>
                 <MapScaleBar zoom={zoom} paneWidth={paneWidth} mapWidthKm={width / 1000} className="absolute bottom-3 left-3" />
@@ -347,13 +357,13 @@ export function IslandMapModal({ open, onClose }) {
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-expedition-ink/60 p-3 backdrop-blur-[2px] sm:p-6"
+      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-expedition-ink/60 p-2 backdrop-blur-[2px] sm:p-6"
       onClick={onClose}
     >
       <ExpeditionPanel
         variant="modal"
-        className="max-h-full w-[min(64rem,100%)] overflow-y-auto"
-        innerClassName="p-3 sm:p-4"
+        className="max-h-full w-[min(64rem,100%)] overflow-y-auto overscroll-contain"
+        innerClassName="p-2.5 sm:p-4"
       >
         <div
           ref={panelRef}

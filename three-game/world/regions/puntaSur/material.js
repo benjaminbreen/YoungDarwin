@@ -95,10 +95,13 @@ const PUNTA_SUR_ROUGHNESS_GLSL = /* glsl */`
   roughnessFactor = mix(roughnessFactor, 0.58, psRoughWet * 0.75);
 `;
 
+export const PUNTA_SUR_SPLAT_BOUNDS = { originX: -48, originZ: -45, width: 96, depth: 90, size: 768 };
+
 export function createPuntaSurTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
     pathPoints: PUNTA_SUR_PATH_POINTS,
-    pathSplatBounds: { originX: -48, originZ: -45, width: 96, depth: 90, size: 768 },
+    pathSplatBake: 'punta-sur',
+    pathSplatBounds: PUNTA_SUR_SPLAT_BOUNDS,
     pathMinimumWidth: 1.5,
     layerConfig: PUNTA_SUR_LAYERS,
     surfaceMaskGLSL: PUNTA_SUR_MASK_GLSL,

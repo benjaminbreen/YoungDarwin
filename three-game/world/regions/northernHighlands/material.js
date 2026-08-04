@@ -13,7 +13,7 @@ export function createNorthernHighlandsTerrainMaterial() {
   return createNorthernHighlandsPbrMaterial({
     pathPoints: NORTHERN_HIGHLANDS_PATH_POINTS,
     pathSplatBounds: NORTHERN_HIGHLANDS_SPLAT_BOUNDS,
-    pathSplatPath: '/assets/textures/world/floreana-generated/northern-highlands-path-splat.png',
+    pathSplatBake: 'northern-highlands',
     pathMinimumWidth: 1.58,
   });
 }
