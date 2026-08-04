@@ -10,6 +10,7 @@ import {
   specimenNeedsJar,
 } from '../data/inventoryItems';
 import { baseSpecimens } from '../data/specimens';
+import { travelFlavorLine } from '../data/travelFlavor';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
@@ -2978,7 +2979,10 @@ export const useThreeGameStore = create((set, get) => ({
         travelCard,
         subtitle: zone.subtitle,
         island: zone.island,
-        note: options.note || travelCard?.description || zone.loadingNote,
+        note: options.note
+          || travelFlavorLine(currentZone.id, zone.id)
+          || travelCard?.description
+          || zone.loadingNote,
         educationalNote: options.educationalNote || travelCard?.educationalNote || zone.educationalNote,
         minutes,
         fatigue,

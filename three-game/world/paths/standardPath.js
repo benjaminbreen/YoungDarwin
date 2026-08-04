@@ -240,31 +240,45 @@ export function loadStandardFootPathSplatTexture(path) {
   texture.needsUpdate = true;
   if (typeof window === 'undefined' || !path) return texture;
 
-  const loader = new THREE.ImageBitmapLoader();
-  // No flip at either stage. The bake writes PNG row r from mask row r, and the
-  // generator this replaces is a DataTexture — which uploads row 0 to v=0
-  // rather than following the top-row-first convention of an image. Decoding
-  // as-is and uploading with flipY=false is the only combination that puts the
-  // baked mask on the same texels the generated one occupied; pre-flipping at
-  // decode (the usual advice for ImageBitmap) lands the path mirrored in z.
-  loader.setOptions({
-    imageOrientation: 'none',
-    premultiplyAlpha: 'none',
-    colorSpaceConversion: 'none',
-  });
-  loader.load(
-    path,
-    bitmap => {
-      texture.image?.close?.();
-      texture.image = bitmap;
-      texture.flipY = false;
-      texture.needsUpdate = true;
-    },
-    undefined,
-    error => {
-      console.error(`[terrain-path-splat] ${path}: ${error?.message || error}`);
-    },
-  );
+  const adopt = image => {
+    texture.image?.close?.();
+    texture.image = image;
+    // No flip at either stage. The bake writes PNG row r from mask row r, and
+    // the generator this replaces is a DataTexture — which uploads row 0 to
+    // v=0 rather than following the top-row-first convention of an image.
+    // Decoding as-is and uploading with flipY=false is the only combination
+    // that puts the baked mask on the same texels the generated one occupied;
+    // pre-flipping at decode (the usual advice for ImageBitmap) lands the path
+    // mirrored in z. An HTMLImageElement uploads top-row-first too, so the
+    // fallback below needs the same flipY.
+    texture.flipY = false;
+    texture.needsUpdate = true;
+  };
+
+  // Safari rejects createImageBitmap with this options dict, which left the
+  // splat on its transparent placeholder and erased every path in the zone.
+  const loadViaImageElement = () => {
+    new THREE.TextureLoader().load(
+      path,
+      loaded => adopt(loaded.image),
+      undefined,
+      error => {
+        console.error(`[terrain-path-splat] ${path}: ${error?.message || error}`);
+      },
+    );
+  };
+
+  if (typeof createImageBitmap === 'undefined') {
+    loadViaImageElement();
+  } else {
+    const loader = new THREE.ImageBitmapLoader();
+    loader.setOptions({
+      imageOrientation: 'none',
+      premultiplyAlpha: 'none',
+      colorSpaceConversion: 'none',
+    });
+    loader.load(path, adopt, undefined, loadViaImageElement);
+  }
   texture.addEventListener('dispose', () => texture.image?.close?.());
   return texture;
 }

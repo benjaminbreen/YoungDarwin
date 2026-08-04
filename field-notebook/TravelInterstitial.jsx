@@ -137,19 +137,26 @@ function buildChartRoute(fromLocation, toLocation) {
 // pan off the top of the painting on a portrait phone.
 const CHART_MAX_WIDTH = 1680;
 const CHART_MAX_HEIGHT = 920;
+// Where the plate's centre sits, and how much room the caption block below it
+// needs. The old pair let the eyebrow line print over the chart's bottom edge
+// on a 1200px-tall window; the height cap is now derived from these two rather
+// than from a hand-fitted constant.
+const CHART_CENTER_Y = 0.41;
+const CAPTION_RESERVE_PX = 236;
+const CAPTION_RESERVE_COMPACT_PX = 176;
 
 function chartFrameSize(viewportWidth, viewportHeight) {
-  const width = Math.min(viewportWidth * 0.84, CHART_MAX_WIDTH);
+  const compact = viewportWidth < 640;
+  // A phone has no room to spare either side; a desktop wants the margin.
+  const width = Math.min(viewportWidth * (compact ? 0.93 : 0.84), CHART_MAX_WIDTH);
+  const reserve = compact ? CAPTION_RESERVE_COMPACT_PX : CAPTION_RESERVE_PX;
   const height = Math.min(
     viewportHeight * 0.78,
     CHART_MAX_HEIGHT,
     // Never letterbox: the map layer is MAP_LAYER_WIDTH_PERCENT of the frame's
     // width at the chart's own aspect, so a taller frame is dead space.
     (width * MAP_LAYER_WIDTH_PERCENT) / 100 / ISLAND_MAP_ASPECT,
-    // The frame is centred at 43% and the destination caption sits ~6dvh off
-    // the bottom; on a short viewport the frame gives way rather than swallow
-    // the caption.
-    viewportHeight * 1.02 - 220,
+    2 * ((1 - CHART_CENTER_Y) * viewportHeight - reserve),
   );
   return { width: Math.max(200, width), height: Math.max(120, height) };
 }
@@ -235,8 +242,14 @@ function ChartMarker({
   }
   return (
     <div
-      className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 text-center"
-      style={{ left: `${location.at.x * 100}%`, top: `${location.at.y * 100}%` }}
+      className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 text-center transition-opacity duration-700"
+      style={{
+        left: `${location.at.x * 100}%`,
+        top: `${location.at.y * 100}%`,
+        // The origin recedes once the pen leaves it, so the eye follows the
+        // stroke to where you are going.
+        opacity: !destination && routeActive ? 0.6 : 1,
+      }}
     >
       <span className="relative block h-4 w-4">
         {destination && routeActive && (
@@ -362,8 +375,9 @@ function IslandChart({ transition, reducedMotion, active }) {
   return (
     <div className="absolute inset-0 overflow-hidden bg-[#100f0c]">
       <div
-        className="absolute left-1/2 top-[43%] z-10 overflow-hidden rounded-[3px] border border-expedition-gold/35 bg-[radial-gradient(ellipse_at_center,#17212a_0%,#101419_70%,#090a0b_100%)] shadow-[0_30px_100px_rgba(0,0,0,0.8),0_0_0_1px_rgba(230,204,143,0.09)]"
+        className="absolute left-1/2 z-10 overflow-hidden rounded-[3px] border border-expedition-gold/35 bg-[radial-gradient(ellipse_at_center,#17212a_0%,#101419_70%,#090a0b_100%)] shadow-[0_30px_100px_rgba(0,0,0,0.8),0_0_0_1px_rgba(230,204,143,0.09)]"
         style={{
+          top: `${CHART_CENTER_Y * 100}%`,
           width: `${frame.width}px`,
           height: `${frame.height}px`,
           transform: 'translate(-50%, -50%)',
@@ -461,7 +475,13 @@ function IslandChart({ transition, reducedMotion, active }) {
               </g>
             </svg>
           )}
-          <ChartMarker location={fromLocation} otherLocation={toLocation} label compact={compactLabels} />
+          <ChartMarker
+            location={fromLocation}
+            otherLocation={toLocation}
+            label
+            compact={compactLabels}
+            routeActive={routeActive}
+          />
           <ChartMarker
             location={toLocation}
             otherLocation={fromLocation}
