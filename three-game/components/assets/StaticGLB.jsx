@@ -10,6 +10,7 @@ import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import { ContactShadow } from '../scene/ContactShadow';
 import { stabilizeFoliageMaterial } from './materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../scene/cameraCull';
+import { cachedGpuResource } from '../../world/gpuResourceCache';
 
 const scratchWorldPosition = new THREE.Vector3();
 
@@ -47,7 +48,27 @@ function makeGoatCoatTexture(base = '#c8b99b', patch = '#5a4735', seed = 1) {
   return texture;
 }
 
+// Everything prepareMaterial reads. Two props built from the same GLB with the
+// same options get the same material instance, so they share one compiled
+// program and it survives the zone change that unmounts them.
+function materialOptionsKey(options) {
+  return JSON.stringify([
+    options.path || null,
+    options.tint || null,
+    options.tintStrength ?? null,
+    options.patchTint || null,
+    options.textureSeed ?? null,
+    options.textureStyle || null,
+    Boolean(options.doubleSide),
+    Boolean(options.forceTint),
+    Boolean(options.preserveMaterials),
+    options.motion || null,
+    options.anisotropy || null,
+  ]);
+}
+
 function prepareScene(scene, options = {}) {
+  const optionsKey = materialOptionsKey(options);
   const tint = options.tint ? new THREE.Color(options.tint) : null;
   const proceduralMap = options.textureStyle === 'goatCoat'
     ? makeGoatCoatTexture(options.tint || '#c8b99b', options.patchTint || '#5a4735', options.textureSeed || 1)
@@ -58,50 +79,64 @@ function prepareScene(scene, options = {}) {
     object.castShadow = Boolean(options.castShadow);
     object.receiveShadow = Boolean(options.receiveShadow);
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
-    const materials = sourceMaterials.map(material => (material ? material.clone() : new THREE.MeshStandardMaterial()));
+    // scene.clone(true) shares material and geometry references with the
+    // source, so these uuids identify the authored pair, not this instance.
+    const materials = sourceMaterials.map(source => cachedGpuResource(
+      `static-glb-material:${optionsKey}:${source?.uuid || 'none'}:${object.geometry?.uuid || 'none'}`,
+      () => prepareMaterial(source, object, { options, tint, proceduralMap }),
+      { dispose: material => material.dispose() },
+    ));
     materials.forEach(material => {
       if (!material) return;
-      material.side = options.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      if (!options.preserveMaterials) {
-        if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.04);
-        if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.76);
+      // Object-level consequences of the material stay per-object: two props
+      // may share a glass material and still want their own shadow flags.
+      if (options.preserveMaterials
+        && (material.transparent || material.opacity < 0.98
+          || material.name?.toLowerCase().includes('glass'))) {
+        object.castShadow = false;
       }
-      if (proceduralMap) {
-        material.map = proceduralMap;
-        if (material.color) material.color.set('#ffffff');
-      } else if (material.color && tint) {
-        if (options.forceTint) material.color.copy(tint);
-        else material.color.lerp(tint, options.tintStrength ?? 0.18);
-      }
-      if (options.preserveMaterials) {
-        for (const texture of [material.map, material.normalMap, material.roughnessMap, material.metalnessMap, material.aoMap]) {
-          if (!texture) continue;
-          texture.minFilter = THREE.LinearMipmapLinearFilter;
-          texture.magFilter = THREE.LinearFilter;
-          texture.anisotropy = Math.max(texture.anisotropy || 1, options.anisotropy || 6);
-          texture.generateMipmaps = texture.generateMipmaps !== false;
-        }
-        if (material.transparent || material.opacity < 0.98) {
-          material.depthWrite = false;
-          object.castShadow = false;
-        }
-        if (material.name?.toLowerCase().includes('glass')) {
-          material.transparent = true;
-          material.opacity = Math.min(material.opacity ?? 1, 0.09);
-          material.depthWrite = false;
-          material.roughness = Math.min(material.roughness ?? 0.1, 0.055);
-          material.metalness = 0;
-          material.color?.set('#e5efec');
-          object.castShadow = false;
-        }
-      } else {
-        stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
-      }
-      if (options.motion) applyFoliageMotion(material, object.geometry, options.motion, { path: options.path });
-      material.needsUpdate = true;
     });
     object.material = Array.isArray(object.material) ? materials : materials[0];
   });
+}
+
+function prepareMaterial(source, object, { options, tint, proceduralMap }) {
+  const material = source ? source.clone() : new THREE.MeshStandardMaterial();
+  material.side = options.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+  if (!options.preserveMaterials) {
+    if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.04);
+    if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.76);
+  }
+  if (proceduralMap) {
+    material.map = proceduralMap;
+    if (material.color) material.color.set('#ffffff');
+  } else if (material.color && tint) {
+    if (options.forceTint) material.color.copy(tint);
+    else material.color.lerp(tint, options.tintStrength ?? 0.18);
+  }
+  if (options.preserveMaterials) {
+    for (const texture of [material.map, material.normalMap, material.roughnessMap, material.metalnessMap, material.aoMap]) {
+      if (!texture) continue;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.anisotropy = Math.max(texture.anisotropy || 1, options.anisotropy || 6);
+      texture.generateMipmaps = texture.generateMipmaps !== false;
+    }
+    if (material.transparent || material.opacity < 0.98) material.depthWrite = false;
+    if (material.name?.toLowerCase().includes('glass')) {
+      material.transparent = true;
+      material.opacity = Math.min(material.opacity ?? 1, 0.09);
+      material.depthWrite = false;
+      material.roughness = Math.min(material.roughness ?? 0.1, 0.055);
+      material.metalness = 0;
+      material.color?.set('#e5efec');
+    }
+  } else {
+    stabilizeFoliageMaterial(material, { doubleSide: options.doubleSide });
+  }
+  if (options.motion) applyFoliageMotion(material, object.geometry, options.motion, { path: options.path });
+  material.needsUpdate = true;
+  return material;
 }
 
 function StaticGLBPrimitive({

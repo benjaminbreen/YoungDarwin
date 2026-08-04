@@ -830,6 +830,9 @@ function createExpeditionSlice() {
     // Type-level examination record: examining one finch of a species unlocks
     // collecting that species everywhere. Gates both collection and sketching.
     examinedTypeIds: expedition.examinedTypeIds || [],
+    // One-time teaching lines already shown (see HINT_IDS in ThreeHUD). Kept
+    // in the save so a returning player is not taught the same verb twice.
+    seenHints: expedition.seenHints || [],
     // Collected non-specimen examinables (letters, books) — sorted as items.
     items: [],
     consultedBookIds: expedition.consultedBookIds || [],
@@ -1038,6 +1041,7 @@ export const useThreeGameStore = create((set, get) => ({
       'collectedSpecimenActorIds',
       'documentedSpecimenIds',
       'examinedTypeIds',
+      'seenHints',
       'consultedBookIds',
       'visitedZoneIds',
       'visitedLocalCellIds',
@@ -1771,6 +1775,9 @@ export const useThreeGameStore = create((set, get) => ({
   publishContextPrompt: (source, prompt) => set(state => publishContextPromptState(state, source, prompt)),
   clearContextPrompt: source => set(state => clearContextPromptState(state, source)),
   acknowledgeContextPrompt: source => set(state => acknowledgeContextPromptState(state, source)),
+  markHintSeen: hintId => set(state => (!hintId || state.seenHints.includes(hintId)
+    ? {}
+    : { seenHints: [...state.seenHints, hintId] })),
   clearArrivalEdgeBlock: () => set({ arrivalEdgeBlock: null }),
   setPlayerPose: playerPose => {
     updateRuntimePlayerPose(playerPose);
@@ -1916,13 +1923,14 @@ export const useThreeGameStore = create((set, get) => ({
         id: inspectedObject.sourceId || inspectedObject.id,
         actorId: inspectedObject.sourceId || inspectedObject.id,
         typeId: inspectedObject.id,
+        specimenId: inspectedObject.specimenId || null,
         kind: inspectedObject.kind,
         category: inspectedObject.category,
         name: inspectedObject.englishName,
         latin: inspectedObject.latinName,
         focus: inspectedObject.worldPosition,
         inspectable: inspectedObject,
-      });
+      }, { zoneId: state.currentZoneId });
       return examinable ? {
         observationMode: false,
         inspectedObject: null,
@@ -2726,7 +2734,7 @@ export const useThreeGameStore = create((set, get) => ({
     let examinable = null;
     let focus = target?.focus || null;
     if (target?.fieldTarget) {
-      examinable = examinableFromFieldTarget(target.fieldTarget);
+      examinable = examinableFromFieldTarget(target.fieldTarget, { zoneId: state.currentZoneId });
       focus = target.fieldTarget.focus || focus;
     } else if (target?.itemTypeId) {
       examinable = examinableFromItem(getExaminableItem(target.itemTypeId), target.actorId);
@@ -2835,6 +2843,11 @@ export const useThreeGameStore = create((set, get) => ({
         }, current, 'item-collect')),
       }));
       return { success: true, item };
+    }
+    if (session.sample) {
+      const collected = get().collectRockSample(session.sample);
+      set({ examineSession: null });
+      return { success: collected };
     }
     set({ selectedSpecimenId: session.actorId });
     const result = await get().collectNearby(session.actorId);

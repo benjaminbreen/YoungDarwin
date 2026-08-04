@@ -3,7 +3,6 @@
 import React, {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
 } from 'react';
@@ -17,6 +16,7 @@ import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 import { onPropEvent } from '../../../physics/props/propEvents';
+import { cachedGpuResource } from '../../../world/gpuResourceCache';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
 // per source primitive, so 30 bushes cost 1-2 draw calls instead of 30+.
@@ -272,7 +272,34 @@ export function InstancedGLBLayer({
   const hasItemTints = items.some(item => item.tint);
   const itemIds = useMemo(() => new Set(items.map(item => item.id)), [items]);
 
-  const primitives = useMemo(() => {
+  // Everything the build below reads. Held across zone changes by the GPU
+  // resource cache, so returning to a region reuses the same materials — and
+  // therefore the same compiled shader programs — instead of re-linking them.
+  const primitivesKey = useMemo(() => JSON.stringify([
+    path,
+    sourceId || null,
+    tint || null,
+    tintStrength,
+    motion || null,
+    hasItemTints,
+    cheapMaterials,
+    variantMode || null,
+  ]), [cheapMaterials, hasItemTints, motion, path, sourceId, tint, tintStrength, variantMode]);
+
+  const primitives = useMemo(() => cachedGpuResource(
+    `instanced-glb:${primitivesKey}`,
+    () => buildPrimitives(),
+    {
+      dispose: list => list.forEach(({ geometry, material }) => {
+        geometry.dispose();
+        material.dispose();
+      }),
+    },
+  // buildPrimitives closes over the same values primitivesKey encodes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [primitivesKey]);
+
+  function buildPrimitives() {
     scene.updateMatrixWorld(true);
     const list = [];
     const finalizeEntry = (geometry, sourceMaterial, name) => {
@@ -335,14 +362,7 @@ export function InstancedGLBLayer({
       }
     });
     return list;
-  }, [scene, path, sourceId, sourceLabel, tint, tintStrength, motion, hasItemTints, cheapMaterials, variantMode]);
-
-  useLayoutEffect(() => () => {
-    primitives.forEach(({ geometry, material }) => {
-      geometry.dispose();
-      material.dispose();
-    });
-  }, [primitives]);
+  }
 
   // Spatial buckets (with per-bucket distance-cull bounds) for wide layers.
   // Variant packs opt into one complete source mesh per ecology item instead

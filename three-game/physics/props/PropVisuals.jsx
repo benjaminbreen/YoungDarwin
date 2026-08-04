@@ -14,6 +14,7 @@ import {
 } from '../../world/regions/materials/pbrTerrainTextures';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { cachedGpuResource } from '../../world/gpuResourceCache';
 import { onPropEvent } from './propEvents';
 import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
@@ -22,6 +23,23 @@ function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => material.dispose(), [material]);
   return material;
+}
+
+// Props of the same kind are visually identical, so one material serves all of
+// them — and outlives the zone change that unmounts them, which is what keeps
+// its compiled program in three's cache.
+//
+// The factory's own source is the cache key: every factory below builds from
+// literals, so identical source means an identical material. A factory that
+// closed over per-instance state would break that, so anything animated or
+// mutated per instance (the lantern flame, the strikeable stone) must keep
+// using useDisposableMaterial.
+function useSharedMaterial(factory) {
+  const key = factory.toString();
+  return useMemo(
+    () => cachedGpuResource(`prop-material:${key}`, factory, { dispose: material => material.dispose() }),
+    [key], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 }
 
 function useSingleMaterialGeometry(factory) {
@@ -47,9 +65,9 @@ export const PROP_PALETTE = {
 };
 
 function BarrelVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelWood, roughness: 0.86, metalness: 0.02 }));
-  const band = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelBand, roughness: 0.72, metalness: 0.18 }));
-  const end = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelEnd, roughness: 0.9, metalness: 0.01 }));
+  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelWood, roughness: 0.86, metalness: 0.02 }));
+  const band = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelBand, roughness: 0.72, metalness: 0.18 }));
+  const end = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelEnd, roughness: 0.9, metalness: 0.01 }));
   const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.48, 0.48, 0.9, 14, 1));
   const bandGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.505, 0.505, 0.055, 14, 1, true));
   const endGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.43, 0.43, 0.035, 14));
@@ -68,13 +86,13 @@ function BarrelVisual() {
 }
 
 function CrateVisual() {
-  const wood = useDisposableMaterial(() => createTimberMaterial({
+  const wood = useSharedMaterial(() => createTimberMaterial({
     tint: '#b7aa93',
     repeat: [1.35, 1.1],
     normalScale: 0.72,
     roughness: 0.96,
   }));
-  const frame = useDisposableMaterial(() => createTimberMaterial({
+  const frame = useSharedMaterial(() => createTimberMaterial({
     tint: '#8f7b60',
     repeat: [1.0, 0.42],
     normalScale: 0.82,
@@ -156,8 +174,8 @@ function StoneVisual({ propId = 'stone' }) {
 }
 
 function ToothVisual() {
-  const ivory = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#e7dcc2', roughness: 0.55, metalness: 0.02 }));
-  const scrimshaw = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#4a3f33', roughness: 0.7, metalness: 0 }));
+  const ivory = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#e7dcc2', roughness: 0.55, metalness: 0.02 }));
+  const scrimshaw = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#4a3f33', roughness: 0.7, metalness: 0 }));
   const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.045, 0.1, 0.26, 10));
   const tipGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.045, 10, 8));
   const baseGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.1, 10, 8));
@@ -174,8 +192,8 @@ function ToothVisual() {
 }
 
 function BookVisual() {
-  const leather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#4c3623', roughness: 0.85, metalness: 0.01 }));
-  const pages = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#c9bd9c', roughness: 0.95, metalness: 0 }));
+  const leather = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#4c3623', roughness: 0.85, metalness: 0.01 }));
+  const pages = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#c9bd9c', roughness: 0.95, metalness: 0 }));
   const coverGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.32, 0.09, 0.24));
   const pageGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.295, 0.06, 0.215));
   return (
@@ -187,7 +205,7 @@ function BookVisual() {
 }
 
 function ShellFragmentVisual() {
-  const charred = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+  const charred = useSharedMaterial(() => new THREE.MeshStandardMaterial({
     color: '#241f1a',
     roughness: 0.92,
     metalness: 0.02,
@@ -203,8 +221,8 @@ function ShellFragmentVisual() {
 }
 
 function JugVisual() {
-  const clay = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#8a6a4b', roughness: 0.78, metalness: 0.01 }));
-  const glaze = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5b4530', roughness: 0.5, metalness: 0.04 }));
+  const clay = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#8a6a4b', roughness: 0.78, metalness: 0.01 }));
+  const glaze = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#5b4530', roughness: 0.5, metalness: 0.04 }));
   const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.13, 0.17, 0.36, 12));
   const shoulderGeometry = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.135, 12, 8));
   const neckGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.05, 0.07, 0.1, 10));
@@ -218,7 +236,7 @@ function JugVisual() {
 }
 
 function SymsFieldBottleVisual() {
-  const glass = useDisposableMaterial(() => new THREE.MeshPhysicalMaterial({
+  const glass = useSharedMaterial(() => new THREE.MeshPhysicalMaterial({
     color: '#477768',
     roughness: 0.12,
     metalness: 0,
@@ -229,7 +247,7 @@ function SymsFieldBottleVisual() {
     clearcoatRoughness: 0.06,
     envMapIntensity: 2.2,
   }));
-  const liquid = useDisposableMaterial(() => new THREE.MeshPhysicalMaterial({
+  const liquid = useSharedMaterial(() => new THREE.MeshPhysicalMaterial({
     color: '#6e3d1f',
     roughness: 0.26,
     metalness: 0,
@@ -238,12 +256,12 @@ function SymsFieldBottleVisual() {
     clearcoat: 0.45,
     clearcoatRoughness: 0.1,
   }));
-  const cork = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+  const cork = useSharedMaterial(() => new THREE.MeshStandardMaterial({
     color: '#8b6841',
     roughness: 0.96,
     metalness: 0,
   }));
-  const paper = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+  const paper = useSharedMaterial(() => new THREE.MeshStandardMaterial({
     color: '#c7b98d',
     roughness: 0.94,
     metalness: 0,
@@ -270,7 +288,7 @@ function SymsFieldBottleVisual() {
 }
 
 function LooseBoardVisual() {
-  const wood = useDisposableMaterial(() => createTimberMaterial({
+  const wood = useSharedMaterial(() => createTimberMaterial({
     tint: '#9b9080',
     repeat: [0.7, 0.24],
     normalScale: 0.85,
@@ -280,7 +298,7 @@ function LooseBoardVisual() {
 }
 
 function CabinChairVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a321c', roughness: 0.76 }));
+  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a321c', roughness: 0.76 }));
   const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.82, 0.12, 0.78));
   const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.1, 0.72, 0.1));
   const rail = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.72, 0.1, 0.1));
@@ -298,8 +316,8 @@ function CabinChairVisual() {
 }
 
 function CabinStoolVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#704727', roughness: 0.82 }));
-  const canvas = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#b6aa88', roughness: 0.94 }));
+  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#704727', roughness: 0.82 }));
+  const canvas = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#b6aa88', roughness: 0.94 }));
   const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.64, 0.1, 0.55));
   const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.09, 0.72, 0.09));
   return (
@@ -312,8 +330,8 @@ function CabinStoolVisual() {
 }
 
 function SeaChestVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a3922', roughness: 0.83 }));
-  const iron = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#2a2925', roughness: 0.62, metalness: 0.35 }));
+  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a3922', roughness: 0.83 }));
+  const iron = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#2a2925', roughness: 0.62, metalness: 0.35 }));
   const body = useSingleMaterialGeometry(() => new THREE.BoxGeometry(1.38, 0.74, 0.86));
   const lid = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.43, 0.43, 1.38, 12, 1, false, 0, Math.PI));
   const band = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.08, 0.82, 0.92));
@@ -328,8 +346,8 @@ function SeaChestVisual() {
 }
 
 function CabinBucketVisual() {
-  const wood = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#765035', roughness: 0.88 }));
-  const iron = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#35332e', roughness: 0.58, metalness: 0.42 }));
+  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#765035', roughness: 0.88 }));
+  const iron = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#35332e', roughness: 0.58, metalness: 0.42 }));
   const body = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.3, 0.24, 0.56, 14, 1, true));
   const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.24, 0.24, 0.05, 14));
   const band = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.285, 0.018, 6, 16));
@@ -345,8 +363,8 @@ function CabinBucketVisual() {
 }
 
 function RolledChartVisual() {
-  const paper = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#d3c49d', roughness: 0.96 }));
-  const tie = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#76543a', roughness: 0.86 }));
+  const paper = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#d3c49d', roughness: 0.96 }));
+  const tie = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#76543a', roughness: 0.86 }));
   const roll = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.07, 0.07, 0.75, 14));
   const band = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.076, 0.076, 0.045, 14, 1, true));
   return (
@@ -358,14 +376,14 @@ function RolledChartVisual() {
 }
 
 function ChartWeightVisual() {
-  const brass = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#9e7b35', roughness: 0.42, metalness: 0.64 }));
+  const brass = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#9e7b35', roughness: 0.42, metalness: 0.64 }));
   const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.13, 0.15, 0.12, 14));
   const knob = useSingleMaterialGeometry(() => new THREE.SphereGeometry(0.055, 10, 8));
   return <group><mesh castShadow material={brass} geometry={base} /><mesh castShadow material={brass} geometry={knob} position={[0, 0.09, 0]} /></group>;
 }
 
 function CabinMugVisual() {
-  const tin = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#85877f', roughness: 0.58, metalness: 0.46 }));
+  const tin = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#85877f', roughness: 0.58, metalness: 0.46 }));
   const cup = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.1, 0.09, 0.23, 14, 1, true));
   const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.09, 0.09, 0.025, 14));
   const handle = useSingleMaterialGeometry(() => new THREE.TorusGeometry(0.075, 0.018, 6, 12, Math.PI * 1.55));
@@ -373,8 +391,8 @@ function CabinMugVisual() {
 }
 
 function CandlestickVisual() {
-  const brass = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#a88642', roughness: 0.4, metalness: 0.62 }));
-  const wax = useDisposableMaterial(() => new THREE.MeshStandardMaterial({ color: '#d9cfaa', roughness: 0.92 }));
+  const brass = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#a88642', roughness: 0.4, metalness: 0.62 }));
+  const wax = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#d9cfaa', roughness: 0.92 }));
   const base = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.14, 0.16, 0.06, 14));
   const stem = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.035, 0.055, 0.28, 12));
   const candle = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.035, 0.038, 0.17, 12));
@@ -475,7 +493,7 @@ export function PropVisual({ visual, assetId, offsetY = 0, propId }) {
 }
 
 export function HighlightRing({ visible }) {
-  const material = useDisposableMaterial(() => new THREE.MeshBasicMaterial({
+  const material = useSharedMaterial(() => new THREE.MeshBasicMaterial({
     color: '#f8df8a',
     transparent: true,
     opacity: 0.48,

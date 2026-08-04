@@ -4,6 +4,8 @@
 // `typeId` — examining one medium ground finch unlocks collecting the species
 // on every map, not just the individual that was studied.
 
+import { baseSpecimens } from '../../data/specimens';
+import { fieldSampleFor } from '../fieldActions';
 import { specimenInteractionHeight } from '../components/player/playerInteractions';
 
 // Non-specimen examinables. Collected entries land in `items`, not the
@@ -112,8 +114,35 @@ export function examinableFromItem(item, actorId = null) {
   };
 }
 
-export function examinableFromFieldTarget(target) {
+export function examinableFromFieldTarget(target, { zoneId = null } = {}) {
   if (!target) return null;
+  // A target that names a specimen — a released pear pad, a standing opuntia,
+  // a basalt block — should read as that plant or mineral rather than as "an
+  // ordinary object", and it shares the species-level examined gate with
+  // every other route to the same specimen.
+  const namedSpecimen = target.specimenId
+    ? baseSpecimens.find(specimen => specimen.id === target.specimenId)
+    : null;
+  if (namedSpecimen) {
+    const loosePiece = Boolean(target.sample);
+    const sample = target.sample || fieldSampleFor(target, zoneId);
+    return {
+      ...examinableFromSpecimen(namedSpecimen),
+      actorId: target.actorId || target.id,
+      kind: 'sample',
+      name: target.name || namedSpecimen.name,
+      subtitle: loosePiece
+        ? 'broken free and lying within reach'
+        : 'an unmarked individual in the field',
+      collectable: Boolean(sample),
+      collectVerb: 'Take sample',
+      frameHint: loosePiece
+        ? { height: 0.4, radius: Math.max(0.24, target.radius || 0.4) }
+        : { height: 0.75, radius: Math.max(0.28, target.radius || 0.5) },
+      sample,
+      fieldTarget: target,
+    };
+  }
   const category = target.category || (target.kind === 'ecology' ? 'Plant' : 'Object');
   const geology = category === 'Geology' || /rock|boulder|basalt|scoria/i.test(target.name || '');
   const plant = category === 'Plant';
@@ -168,6 +197,7 @@ export function createExamineSession(examinable, { focus = null, day = 1, timeOf
     details: examinable.details || [],
     collectVerb: examinable.collectVerb || 'Collect sample',
     collectable: examinable.collectable !== false,
+    sample: examinable.sample || null,
     focus,
     frameHint: examinable.frameHint,
     chat: [],

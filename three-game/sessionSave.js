@@ -17,6 +17,7 @@ const STRING_ARRAY_FIELDS = [
   'collectedSpecimenActorIds',
   'documentedSpecimenIds',
   'examinedTypeIds',
+  'seenHints',
   'consultedBookIds',
   'visitedZoneIds',
   'visitedLocalCellIds',

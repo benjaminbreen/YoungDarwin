@@ -29,53 +29,25 @@ const BILLBOARD_VERTEX = /* glsl */`
   }
 `;
 
-// Lantern halo: a tight core that the bloom pass picks up, a wide soft falloff
-// for the light-in-air feel, and a faint corona so the edge is not a plain blur.
+// Lantern halo. Three stacked falloffs rather than one: a tight core the bloom
+// pass picks up, a body term that keeps the mid-band from going hollow, and a
+// wide skirt for light-in-air. No banded term — any ring here reads as a donut.
 const GLOW_FRAGMENT = /* glsl */`
   uniform vec3 uColor;
   uniform float uOpacity;
-  uniform float uCorona;
   varying vec2 vUv;
 
   void main() {
     float d = length(vUv - 0.5) * 2.0;
     if (d > 1.0) discard;
     float falloff = 1.0 - d;
-    float core = pow(falloff, 5.0);
-    float halo = pow(falloff, 1.7) * 0.34;
-    float corona = smoothstep(0.16, 0.0, abs(d - 0.46)) * 0.14 * uCorona;
-    float alpha = (core + halo + corona) * uOpacity;
+    // No bright white centre: the crystal in front carries the colour, and a
+    // hot core here just washes out against a pale sea or sky.
+    float body = pow(falloff, 2.0) * 0.88;
+    float skirt = pow(falloff, 0.85) * 0.22;
+    float alpha = (body + skirt) * uOpacity;
     if (alpha < 0.002) discard;
-    gl_FragColor = vec4(uColor * (1.0 + core * 0.7), alpha);
-  }
-`;
-
-// Glass shell: bright at the limb, near-clear through the middle, so the orb
-// reads as a held light rather than a painted dot.
-const SHELL_VERTEX = /* glsl */`
-  varying vec3 vNormal;
-  varying vec3 vView;
-  void main() {
-    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-    vNormal = normalMatrix * normal;
-    vView = -viewPosition.xyz;
-    gl_Position = projectionMatrix * viewPosition;
-  }
-`;
-
-const SHELL_FRAGMENT = /* glsl */`
-  uniform vec3 uCore;
-  uniform vec3 uGlow;
-  uniform float uOpacity;
-  varying vec3 vNormal;
-  varying vec3 vView;
-
-  void main() {
-    float facing = abs(dot(normalize(vNormal), normalize(vView)));
-    float rim = pow(1.0 - facing, 2.4);
-    vec3 color = mix(uGlow, uCore, rim * 0.65);
-    float alpha = (0.16 + rim * 0.84) * uOpacity;
-    gl_FragColor = vec4(color, alpha);
+    gl_FragColor = vec4(uColor, alpha);
   }
 `;
 
@@ -88,7 +60,7 @@ const PING_FRAGMENT = /* glsl */`
 
   void main() {
     float d = length(vUv - 0.5) * 2.0;
-    float width = mix(0.16, 0.035, uProgress);
+    float width = mix(0.2, 0.04, uProgress);
     float ring = smoothstep(width, 0.0, abs(d - 0.82));
     float alpha = ring * uOpacity;
     if (alpha < 0.002) discard;
@@ -143,6 +115,8 @@ export function NpcStatusOrb({
 }) {
   const style = npcStatusStyle(status);
   const groupRef = useRef(null);
+  const crystalRef = useRef(null);
+  const crystalMaterialRef = useRef(null);
   const glowRef = useRef(null);
   const pingRef = useRef(null);
   const lightRef = useRef(null);
@@ -160,24 +134,12 @@ export function NpcStatusOrb({
   const glowUniforms = useMemo(() => ({
     uColor: { value: new THREE.Color(style.glow) },
     uOpacity: { value: 0 },
-    uCorona: { value: 0 },
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const shellUniforms = useMemo(() => ({
-    uCore: { value: new THREE.Color(style.core) },
-    uGlow: { value: new THREE.Color(style.glow) },
-    uOpacity: { value: 0.85 },
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const coreMaterial = useMemo(() => new THREE.MeshBasicMaterial({
-    color: new THREE.Color(style.core),
-    toneMapped: false,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const pingUniforms = useMemo(() => ({
     uColor: { value: new THREE.Color(style.glow) },
     uOpacity: { value: 0 },
     uProgress: { value: 0 },
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => () => coreMaterial.dispose(), [coreMaterial]);
 
   // Let the plate mount at its closed transform, then flip the attribute on the
   // next frame so the CSS transition actually runs.
@@ -246,18 +208,20 @@ export function NpcStatusOrb({
     }
     if (glowRef.current) glowRef.current.quaternion.copy(BILLBOARD_QUATERNION);
 
-    coreMaterial.color.lerp(targetCore, blend);
-    shellUniforms.uCore.value.lerp(targetCore, blend);
-    shellUniforms.uGlow.value.lerp(targetGlow, blend);
-    shellUniforms.uOpacity.value = 0.72 + breath * 0.1 + emphasis * 0.2;
+    if (crystalRef.current) {
+      // The slow spin is the whole trick: facets catch the sky one at a time,
+      // so a solid object reads as a cut stone without any extra shading work.
+      crystalRef.current.rotation.y = time * 0.62;
+      crystalRef.current.rotation.z = Math.sin(time * 0.38) * 0.08;
+    }
+    if (crystalMaterialRef.current) {
+      const material = crystalMaterialRef.current;
+      material.color.lerp(targetCore, blend);
+      material.emissive.lerp(targetGlow, blend);
+      material.emissiveIntensity = 0.62 + breath * 0.16 + emphasis * 0.75;
+    }
     glowUniforms.uColor.value.lerp(targetGlow, blend);
-    glowUniforms.uOpacity.value = 0.62 + breath * 0.16 + emphasis * 0.5;
-    glowUniforms.uCorona.value = THREE.MathUtils.damp(
-      glowUniforms.uCorona.value,
-      0.35 + emphasis * 1.4,
-      6,
-      dt,
-    );
+    glowUniforms.uOpacity.value = 0.6 + breath * 0.14 + emphasis * 0.5;
 
     if (lightRef.current) {
       lightRef.current.color.lerp(targetGlow, blend);
@@ -272,9 +236,9 @@ export function NpcStatusOrb({
       if (alive) {
         const eased = 1 - (1 - pingAge) * (1 - pingAge) * (1 - pingAge);
         pingRef.current.quaternion.copy(BILLBOARD_QUATERNION);
-        pingRef.current.scale.setScalar(0.5 + eased * 2.9);
+        pingRef.current.scale.setScalar(0.34 + eased * 2.5);
         pingUniforms.uProgress.value = pingAge;
-        pingUniforms.uOpacity.value = (1 - pingAge) * (1 - pingAge) * 0.85;
+        pingUniforms.uOpacity.value = (1 - pingAge) * (1 - pingAge);
         pingUniforms.uColor.value.copy(targetGlow);
       }
     }
@@ -309,7 +273,7 @@ export function NpcStatusOrb({
       </mesh>
 
       <mesh ref={glowRef} raycast={NO_RAYCAST} renderOrder={4}>
-        <planeGeometry args={[1.15, 1.15]} />
+        <planeGeometry args={[0.95, 0.95]} />
         <shaderMaterial
           uniforms={glowUniforms}
           vertexShader={BILLBOARD_VERTEX}
@@ -321,21 +285,22 @@ export function NpcStatusOrb({
         />
       </mesh>
 
-      <mesh raycast={NO_RAYCAST} renderOrder={5}>
-        <sphereGeometry args={[0.105, 20, 14]} />
-        <shaderMaterial
-          uniforms={shellUniforms}
-          vertexShader={SHELL_VERTEX}
-          fragmentShader={SHELL_FRAGMENT}
-          transparent
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          toneMapped={false}
+      {/* Solid cut stone rather than a glowing sprite: an opaque body keeps its
+          own colour against a pale sea, and the emissive keeps it lit at night. */}
+      <mesh ref={crystalRef} raycast={NO_RAYCAST} renderOrder={5} rotation={[0.16, 0, 0]}>
+        <octahedronGeometry args={[0.115, 0]} />
+        <meshPhysicalMaterial
+          ref={crystalMaterialRef}
+          color={style.core}
+          emissive={style.glow}
+          emissiveIntensity={0.62}
+          roughness={0.16}
+          metalness={0.02}
+          clearcoat={0.9}
+          clearcoatRoughness={0.09}
+          envMapIntensity={1.6}
+          flatShading
         />
-      </mesh>
-
-      <mesh raycast={NO_RAYCAST} material={coreMaterial} renderOrder={6}>
-        <sphereGeometry args={[0.05, 16, 12]} />
       </mesh>
 
       <mesh ref={pingRef} raycast={NO_RAYCAST} renderOrder={4} visible={false}>
@@ -356,10 +321,10 @@ export function NpcStatusOrb({
       )}
 
       {open && activity && (
-        <Html position={[0, 0.46, 0]} center distanceFactor={11} zIndexRange={[8, 0]}>
+        <Html position={[0, 0.34, 0]} center distanceFactor={6.5} zIndexRange={[8, 0]}>
           <style>{PLATE_CSS}</style>
           <div className="npc-plate pointer-events-none relative flex flex-col items-center" data-shown={plateShown}>
-            <div className="relative min-w-[9.5rem] rounded-[3px] border border-expedition-brass/75 bg-[rgba(9,15,22,0.88)] px-3 py-1.5 text-center font-expedition text-expedition-parchment shadow-[0_6px_18px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+            <div className="relative min-w-[9rem] rounded-[3px] border border-expedition-brass/75 bg-[rgba(13,22,38,0.86)] px-3 py-1.5 text-center font-expedition text-expedition-parchment shadow-[0_6px_18px_rgba(0,0,0,0.45)] backdrop-blur-sm">
               <PlateCorner className="-left-px -top-px border-l border-t" />
               <PlateCorner className="-right-px -top-px border-r border-t" />
               <PlateCorner className="-bottom-px -left-px border-b border-l" />

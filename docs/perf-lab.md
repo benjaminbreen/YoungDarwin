@@ -205,3 +205,25 @@ always published in dev, and in production only when the URL carries `e2e`,
 - **PhysicsWatchdog** distorts dev-mode frames badly and is off by default. Do
   not turn it on during a measurement (`three-game/runtimeDebug.js` explains).
 - **The first run after a server restart** pays Next's route compile. Discard it.
+
+## Zone travel
+
+Two scripts attribute the travel interstitial's wall time. Neither needs app
+changes; both drive the same store path the edge prompt uses.
+
+```bash
+node scripts/perf-lab/travel-timeline.mjs POST_SCRUB_RISE POST_OFFICE_BAY 3
+```
+
+Timestamps every transition phase and every `ready-wait:<blocker>` event, so you
+can see whether a travel is waiting on terrain, ecology, the content ladder, or
+shader compilation.
+
+```bash
+node scripts/perf-lab/shader-probe.mjs POST_SCRUB_RISE POST_OFFICE_BAY 3
+```
+
+Counts programs linked and deleted per travel and how many were byte-identical
+to programs compiled earlier in the same session. `alreadySeenThisSession` is
+the number to watch: it is the cost of throwing away three's program cache, and
+`three-game/world/gpuResourceCache.js` exists to keep it near zero.

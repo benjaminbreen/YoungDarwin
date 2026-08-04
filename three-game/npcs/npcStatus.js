@@ -13,11 +13,13 @@ export const NPC_STATUS = Object.freeze({
   HOSTILE: 'hostile',
 });
 
+// `core` is the crystal's own body colour, so it has to stay tinted — a
+// near-white body reads as a white blob against a pale sea or sky.
 export const NPC_STATUS_STYLES = Object.freeze({
-  [NPC_STATUS.FRIENDLY]: { core: '#e8fff0', glow: '#74d8a2', ring: '#9fe3bd', light: 0.85 },
-  [NPC_STATUS.NEUTRAL]: { core: '#fff6dd', glow: '#e1c47a', ring: '#d9e6ba', light: 0.7 },
-  [NPC_STATUS.ALERT]: { core: '#ffeedd', glow: '#e8965a', ring: '#efb489', light: 1.05 },
-  [NPC_STATUS.HOSTILE]: { core: '#ffe4e0', glow: '#d95f52', ring: '#e08e83', light: 1.2 },
+  [NPC_STATUS.FRIENDLY]: { core: '#a9e9c6', glow: '#4fc98c', ring: '#9fe3bd', light: 0.85 },
+  [NPC_STATUS.NEUTRAL]: { core: '#f0dda6', glow: '#d9b45f', ring: '#d9e6ba', light: 0.7 },
+  [NPC_STATUS.ALERT]: { core: '#f4bb92', glow: '#e2833f', ring: '#efb489', light: 1.05 },
+  [NPC_STATUS.HOSTILE]: { core: '#eda093', glow: '#d24a3c', ring: '#e08e83', light: 1.2 },
 });
 
 export function npcStatusStyle(status) {

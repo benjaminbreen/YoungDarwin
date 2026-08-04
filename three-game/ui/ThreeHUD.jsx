@@ -3010,6 +3010,15 @@ function CompactAction({ keyLabel, children, primary = false, locked = false, on
   return <div className={className}>{content}</div>;
 }
 
+// Each of the two field verbs is explained once, on the first prompt that
+// uses it, and never again — the flag lives in the save.
+const HINT_TAKE = 'verb-take';
+const HINT_STUDY = 'verb-study';
+const HINT_TEXT = {
+  [HINT_TAKE]: 'E takes what is already loose.',
+  [HINT_STUDY]: 'Enter studies a subject first; study it once and you may take a sample.',
+};
+
 function promptActionText(value) {
   const stripped = String(value || '').replace(/^press\s+e\s+(?:to\s+)?/i, '').trim();
   return stripped ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : 'Interact';
@@ -3368,6 +3377,8 @@ function InteractionPrompt() {
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const openExamine = useThreeGameStore(state => state.openExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
+  const seenHints = useThreeGameStore(state => state.seenHints);
+  const markHintSeen = useThreeGameStore(state => state.markHintSeen);
   const fieldAction = useThreeGameStore(state => state.fieldAction);
   const observationMode = useThreeGameStore(state => state.observationMode);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
@@ -3401,25 +3412,33 @@ function InteractionPrompt() {
     id: `carry:${carryPrompt.id || carryPrompt.mode || carryPrompt.text}`,
     label: promptActionText(carryPrompt.text),
     keyLabel: 'E',
+    hintId: seenHints.includes(HINT_TAKE) ? null : HINT_TAKE,
     priority: CONTEXT_PROMPT_PRIORITY.carry,
     dwellMs: 120,
     repeatCooldownMs: 500,
-  }) : null, [carryPrompt]);
-  const fieldContextCandidate = useMemo(() => (
-    !observationMode
-    && !nearby
-    && fieldAction
-    && !(fieldAction.kind === 'observe' && ['ecology', 'obstacle', 'prop'].includes(fieldAction.target?.kind)) ? ({
+  }) : null, [carryPrompt, seenHints]);
+  // Ambient subjects (an unmarked croton, a basalt block, a fallen pad) get a
+  // prompt only until their kind has been examined once. That teaches the
+  // Enter verb on whatever the player happens to walk past, then goes quiet
+  // instead of ringing every shrub on the island.
+  const fieldContextCandidate = useMemo(() => {
+    if (observationMode || nearby || !fieldAction) return null;
+    const ambient = ['ecology', 'obstacle', 'prop'].includes(fieldAction.target?.kind);
+    const known = Boolean(fieldAction.target?.typeId
+      && examinedTypeIds.includes(fieldAction.target.typeId));
+    if (fieldAction.kind === 'observe' && ambient && known) return null;
+    return {
       id: fieldAction.id,
       label: fieldAction.label,
       keyLabel: 'Enter',
+      hintId: fieldAction.kind === 'observe' && !seenHints.includes(HINT_STUDY) ? HINT_STUDY : null,
       priority: fieldAction.kind === 'observe'
         ? CONTEXT_PROMPT_PRIORITY.fieldObserve
         : CONTEXT_PROMPT_PRIORITY.fieldTool,
       dwellMs: fieldAction.kind === 'observe' ? 210 : 130,
       repeatCooldownMs: 650,
-    }) : null
-  ), [fieldAction, nearby, observationMode]);
+    };
+  }, [examinedTypeIds, fieldAction, nearby, observationMode, seenHints]);
   useContextPromptCandidate('npc', npcContextCandidate);
   useContextPromptCandidate('interior', interiorContextCandidate);
   useContextPromptCandidate('carry', carryContextCandidate);
@@ -3484,13 +3503,16 @@ function InteractionPrompt() {
     if (contextPrompt) {
       setRenderedContextPrompt(contextPrompt);
       setContextPromptVisible(false);
+      // Marked on display, not on use: the line has done its teaching once the
+      // player has seen it, whether or not they pressed the key.
+      if (contextPrompt.hintId) markHintSeen(contextPrompt.hintId);
       timer = window.setTimeout(() => setContextPromptVisible(true), 20);
     } else {
       setContextPromptVisible(false);
       timer = window.setTimeout(() => setRenderedContextPrompt(null), PROMPT_EXIT_MS);
     }
     return () => window.clearTimeout(timer);
-  }, [contextPrompt]);
+  }, [contextPrompt, markHintSeen]);
 
   if (outcomeToast) {
     return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
@@ -3510,6 +3532,11 @@ function InteractionPrompt() {
         <CompactAction keyLabel={renderedContextPrompt.keyLabel} primary onClick={onClick}>
           {renderedContextPrompt.label}
         </CompactAction>
+        {HINT_TEXT[renderedContextPrompt.hintId] && (
+          <span className="w-full px-1 pb-0.5 text-center text-[10px] leading-snug text-expedition-faded/85">
+            {HINT_TEXT[renderedContextPrompt.hintId]}
+          </span>
+        )}
       </CompactPrompt>
     );
   }

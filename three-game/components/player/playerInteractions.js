@@ -15,11 +15,18 @@ import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
 import { emitPropEvent, nextSwingId } from '../../physics/props/propEvents';
 import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
-import { findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
+import { fieldSampleFor, findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
 import { getRuntimeObstacles } from '../../world/obstacles';
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
+}
+
+function propTypeSlug(label) {
+  return String(label || 'field object')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'field-object';
 }
 
 export function shouldRunInPlaceAtTravelEdge(storeState, { moving = false, isDarwinMode = true } = {}) {
@@ -488,14 +495,22 @@ export function updatePlayerInteractions({
     }
     if (!fieldTarget && currentState.carryPrompt && currentState.carryPrompt.mode !== 'drop') {
       const reach = Math.max(0.7, Number(currentState.carryPrompt?.distance) || 0.8);
+      const prompt = currentState.carryPrompt;
+      const sample = prompt.sample || null;
+      const label = prompt.label || 'field object';
       fieldTarget = {
-        id: `prop:${currentState.carryPrompt.id}`,
-        actorId: currentState.carryPrompt.id,
-        typeId: `ambient-prop:${currentState.carryPrompt.id}`,
+        id: `prop:${prompt.id}`,
+        actorId: prompt.id,
+        // Never key off the piece id: it is unique per pear pad and per rock
+        // chip, so a per-piece typeId enters examinedTypeIds once per pad and
+        // the final assessment counts each one as a separate subject studied.
+        typeId: sample?.specimenId || `field-object:${propTypeSlug(label)}`,
         kind: 'prop',
         category: 'Object',
-        name: currentState.carryPrompt.label || 'field object',
+        name: label,
         radius: 0.45,
+        specimenId: sample?.specimenId || null,
+        sample,
         focus: {
           x: position.x + facing.x * reach,
           y: position.y + 0.55,
@@ -512,8 +527,10 @@ export function updatePlayerInteractions({
       });
     }
     const examined = Boolean(fieldTarget?.typeId && currentState.examinedTypeIds?.includes(fieldTarget.typeId));
+    const sampled = Boolean(fieldTarget?.id
+      && currentState.sampledRockIds?.includes(`field:${fieldTarget.id}`));
     currentState.setFieldAction?.(allowSpecimenInteractions
-      ? resolveFieldAction({ toolId: currentState.activeToolId, target: fieldTarget, examined })
+      ? resolveFieldAction({ toolId: currentState.activeToolId, target: fieldTarget, examined, sampled })
       : null);
   }
 
@@ -617,6 +634,12 @@ export function updatePlayerInteractions({
       currentState.toggleObservationMode?.();
     } else if (fieldAction.kind === 'collect' && specimen) {
       startSpecimenCollection(currentState, specimen);
+    } else if (fieldAction.kind === 'collect' && target?.specimenId) {
+      const sample = fieldSampleFor(target, currentZoneId);
+      if (sample) {
+        startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
+        currentState.collectRockSample?.(sample);
+      }
     } else if (fieldAction.kind === 'observe' && !currentState.examineSession) {
       if (target.kind === 'specimen') openExamine(target.actorId);
       else if (target.itemTypeId) {

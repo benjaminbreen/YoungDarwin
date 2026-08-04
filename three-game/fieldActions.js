@@ -4,6 +4,13 @@ import {
   inspectableTypeForEcologyLayer,
 } from './world/inspectables';
 
+const OBSTACLE_TYPE_IDS = Object.freeze({
+  cactus: 'opuntia',
+  rock: 'basalt_block',
+  boulder: 'basalt_block',
+  scree: 'scree',
+});
+
 const TARGET_REACH = 3.35;
 const MIN_FACING_DOT = 0.2;
 const ecologyTargetCache = new WeakMap();
@@ -75,6 +82,7 @@ function ecologyTargets(ecology) {
         category: identity.category || 'Plant',
         name: identity.englishName || layer.label || 'plant',
         latin: identity.latinName || '',
+        specimenId: identity.specimenId || null,
         radius: Math.max(0.32, scale * 0.5),
         focus: {
           x: finite(item.x),
@@ -96,10 +104,15 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
   let bestScore = Infinity;
 
   for (const obstacle of obstacles || []) {
+    // Only kinds whose identity is certain earn a catalog typeId, and with it
+    // a collectable sample. Everything else keeps a kind-level id so it stays
+    // examinable — a bitterbush must not hand over a chip of basalt.
+    const typeId = OBSTACLE_TYPE_IDS[obstacle.kind] || `obstacle:${obstacle.kind || 'object'}`;
     const target = {
       id: `obstacle:${zoneId}:${obstacle.id}`,
       actorId: obstacle.id,
-      typeId: obstacle.kind === 'cactus' ? 'opuntia' : 'basalt_block',
+      typeId,
+      specimenId: inspectableCatalog[typeId]?.specimenId || null,
       kind: 'obstacle',
       category: obstacleCategory(obstacle),
       name: obstacleLabel(obstacle),
@@ -129,7 +142,24 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
   return best ? { ...best, distance: bestScore } : null;
 }
 
-export function resolveFieldAction({ toolId = 'hands', target, examined = false }) {
+// A field sample is what an examined ambient subject yields: a pad off an
+// opuntia, a chip off a basalt block. It reuses the rock-sample path in the
+// store, so case capacity, labels, journal entry, and inventory shape are
+// identical to a curated collection.
+export function fieldSampleFor(target, zoneId) {
+  if (!target?.specimenId) return null;
+  const key = `field:${target.id}`;
+  return {
+    sampleId: key,
+    sourceRockKey: key,
+    zoneId,
+    specimenId: target.specimenId,
+    sampleLabel: String(target.name || 'sample').toLowerCase(),
+    position: target.focus || null,
+  };
+}
+
+export function resolveFieldAction({ toolId = 'hands', target, examined = false, sampled = false }) {
   if (!target) return null;
   if (target.kind === 'specimen' && examined) {
     return {
@@ -139,6 +169,19 @@ export function resolveFieldAction({ toolId = 'hands', target, examined = false 
       target,
       label: toolId === 'hands' ? `Collect ${target.name}` : `Collect ${target.name} with ${TOOL_ACTIONS[toolId]?.shortLabel?.toLowerCase() || 'field notes'}`,
       shortLabel: 'Collect',
+    };
+  }
+  // Ambient subjects the player has already studied become collectable by
+  // hand. Pieces released by a breakable plant are excluded: they already
+  // carry an E prompt, and two collect verbs on one object read as a bug.
+  if (examined && !sampled && target.specimenId && target.kind !== 'prop' && toolId === 'hands') {
+    return {
+      id: `collect:${target.id}`,
+      kind: 'collect',
+      toolId,
+      target,
+      label: `Take a sample of ${target.name}`,
+      shortLabel: 'Take',
     };
   }
   if (toolId === 'hands') {
