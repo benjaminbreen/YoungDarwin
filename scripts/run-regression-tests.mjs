@@ -859,11 +859,21 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
     lavalizard: 2,
     barnacle: 1,
     lavagull: 1,
+    parrotfish: 1,
+    mantaRay: 1,
     galapagoscarpenterbee: 1,
     galapagossulphur: 1,
     galapagosgulffritillary: 1,
     galapagospaintedlocust: 1,
   });
+
+  // The marine pair does not count against the quiet opening: both sit
+  // offshore in water Darwin cannot walk on.
+  for (const id of ['parrotfish', 'mantaRay']) {
+    const marine = specimens.find(specimen => specimen.id === id);
+    const [x, , z] = marine.spawnPoint;
+    assert.equal(isWalkableTerrain(x, z, 'POST_OFFICE_BAY'), false, `${id} should spawn offshore`);
+  }
 
   const darwinStart = regionSpawnPoint('POST_OFFICE_BAY');
   const edgeSpecimens = specimens.filter(specimen => (

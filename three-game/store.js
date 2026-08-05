@@ -898,7 +898,9 @@ function createSceneSlice() {
     // simulation resumes authority once untilMinutes passes.
     weatherOverride: null,
     sounds: initialNarration.sounds,
-    viewMode: 'shoulder',
+    // Hero is the default: it steers itself as he moves, so an expedition never
+    // starts needing a manual orbit to see where you are going.
+    viewMode: 'hero',
     transition: null,
     edgePrompt: null,
     contextPrompt: null,

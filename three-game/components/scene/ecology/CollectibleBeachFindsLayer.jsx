@@ -2,6 +2,7 @@
 
 import React, { Suspense } from 'react';
 import { StaticGLB } from '../../assets/StaticGLB';
+import { StrandedParrotfish } from '../../../wildlife/fish/StrandedParrotfish';
 
 export function CollectibleBeachFindsLayer({ layer }) {
   if (!layer?.items?.length) return null;
@@ -13,7 +14,23 @@ export function CollectibleBeachFindsLayer({ layer }) {
       renderLabel: layer.id,
       renderKind: 'ecology-collectible-beach-finds',
     }}>
-      {layer.items.map(item => (
+      {layer.items.map(item => (item.procedural === 'strandedParrotfish' ? (
+        <StrandedParrotfish
+          key={item.id}
+          position={[item.x, item.y, item.z]}
+          rotation={item.rotation}
+          scale={item.scale}
+          contactShadow={item.contactShadow}
+          maxVisibleDistance={item.maxVisibleDistance || fallbackDistance}
+          inspectableType={item.inspectableType}
+          sourceId={item.id}
+          inspectableOverrides={{
+            sourceId: item.id,
+            sourceKind: 'ecology-collectible-beach-find',
+            variantId: item.variantId,
+          }}
+        />
+      ) : (
         <Suspense key={item.id} fallback={null}>
           <StaticGLB
             path={item.path}
@@ -35,7 +52,7 @@ export function CollectibleBeachFindsLayer({ layer }) {
             }}
           />
         </Suspense>
-      ))}
+      )))}
     </group>
   );
 }

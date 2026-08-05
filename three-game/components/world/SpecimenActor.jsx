@@ -17,8 +17,10 @@ import {
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
-import { getWildlifeAssetId, getWildlifeRenderProfile } from '../../wildlife/wildlifeCatalog';
+import { getWildlifeAssetId, getWildlifeRenderProfile, isAquaticWildlife } from '../../wildlife/wildlifeCatalog';
 import { LavaLizardShape } from '../../wildlife/reptiles/LavaLizardShape';
+import { ParrotfishShape } from '../../wildlife/fish/ParrotfishShape';
+import { MantaRayShape } from '../../wildlife/fish/MantaRayShape';
 import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSpecimenShape';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
@@ -360,6 +362,20 @@ export function SpecimenShape({
       </MeasuredProceduralShape>
     );
   }
+  if (renderProfile?.type === 'proceduralManta') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <MantaRayShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (renderProfile?.type === 'proceduralParrotfish') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <ParrotfishShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
   if (renderProfile?.type === 'proceduralSnake') {
     return (
       <MeasuredProceduralShape onSceneReady={onSceneReady}>
@@ -523,10 +539,17 @@ export function SpecimenActor({ specimen }) {
   const behaviorBaseRef = useRef(null);
   const position = useMemo(() => {
     const [x, , z] = specimen.spawnPoint;
-    // Auto-generated spawn points can land in the surf; pull them onto land.
-    const safe = clampToWalkable(new THREE.Vector3(x, 0, z), null, currentZoneId);
+    // Auto-generated spawn points can land in the surf; pull them onto land —
+    // except for fish, where the same clamp is what beached them in the first
+    // place, so the test is inverted to "must be under water".
+    const safe = clampToWalkable(
+      new THREE.Vector3(x, 0, z),
+      null,
+      currentZoneId,
+      isAquaticWildlife(specimen) ? { aquatic: true } : null,
+    );
     return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
-  }, [currentZoneId, specimen.spawnPoint]);
+  }, [currentZoneId, specimen, specimen.spawnPoint]);
   const faunaBehavior = useFaunaBehavior({
     specimen,
     basePositionRef: behaviorBaseRef,

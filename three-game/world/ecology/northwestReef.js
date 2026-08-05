@@ -4,6 +4,8 @@ import { getNorthwestReefRocks, NW_REEF } from '../nwReefLayout';
 import { getModelAsset } from '../../modelAssets';
 import { buildBeachFindLayer } from './beachFinds';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
+import { parrotfishSchool } from './parrotfishSchools';
+import { mantaCruiser } from './mantaCruisers';
 
 // Northwest Reef (NW_REEF) ecology — a bright coral-sand strand on Floreana's
 // northwest corner. Vegetation is deliberately minimal: a salt-pruned fringe
@@ -390,49 +392,69 @@ function buildSwimmers() {
         verticalWander: 0.02,
         timeScale: 0.46,
       },
+      // Parrotfish on the inner shelf, where a wader can actually see them.
+      // The shelf floor here runs about -1.36, so the school swims in the last
+      // 30cm of water; anything deeper is inside the sand.
+      parrotfishSchool('reef-parrotfish-heads', {
+        count: 12,
+        center: [2, -12],
+        radius: 5,
+        pathRadiusX: 16,
+        pathRadiusZ: 4,
+        y: [-1.26, -1.12],
+        speed: 0.2,
+        scale: [0.55, 0.78],
+        verticalWander: 0.015,
+      }),
+      parrotfishSchool('reef-parrotfish-garden', {
+        variant: 'initial',
+        count: 10,
+        center: [20, -24],
+        radius: 4.2,
+        pathRadiusX: 14,
+        pathRadiusZ: 4,
+        y: [-1.24, -1.1],
+        speed: 0.18,
+        scale: [0.5, 0.7],
+        verticalWander: 0.015,
+      }),
     ],
     cruisers: [
-      {
-        id: 'manta-north',
-        path: `${ANIMALS}manta-ray.glb`,
-        orbit: { cx: -2, cz: -46, rx: 30, rz: 6 },
-        y: -2.3,
-        bob: 0.12,
+      // Adults keep to the drop-off: the shelf inshore of z=-40 is under a
+      // metre deep and the old orbit had them clipping through it.
+      mantaCruiser('manta-north', {
+        orbit: { cx: 0, cz: -50, rx: 30, rz: 5 },
+        y: -2.4,
+        bob: 0.16,
         speed: 0.62,
-        scale: 0.32,
-        baseRotation: [Math.PI / 2, 0, 0],
-        doubleSide: true,
-        bank: 0.07,
-        maxPitch: 0.055,
-        avoidRadius: 10,
-        avoidPush: 5.4,
-        avoidDive: 0.28,
-        avoidBank: 0.1,
-        avoidSpeedBoost: 0.22,
+        scale: 0.95,
         direction: 1,
-        timeScale: 0.5,
-      },
-      {
-        id: 'manta-west',
-        path: `${ANIMALS}manta-ray.glb`,
-        orbit: { cx: -53, cz: -18, rx: 4, rz: 20 },
-        y: -2.0,
-        bob: 0.1,
+      }),
+      mantaCruiser('manta-west', {
+        orbit: { cx: -30, cz: -37, rx: 8, rz: 3 },
+        y: -1.55,
+        bob: 0.08,
         speed: 0.5,
-        scale: 0.27,
-        baseRotation: [Math.PI / 2, 0, 0],
-        doubleSide: true,
-        bank: 0.06,
-        maxPitch: 0.05,
-        avoidRadius: 9,
-        avoidPush: 4.8,
-        avoidDive: 0.24,
-        avoidBank: 0.09,
-        avoidSpeedBoost: 0.18,
+        scale: 0.5,
         direction: -1,
         phase: 2.4,
-        timeScale: 0.46,
-      },
+        cruiseEnergy: 0.22,
+        variant: 'melanistic',
+      }),
+      // One juvenile works the reef flat in front of the beach, beating
+      // gently so its wingtips stay between the sand and the surface.
+      mantaCruiser('manta-flat', {
+        orbit: { cx: 2, cz: -16, rx: 14, rz: 4 },
+        y: -1.14,
+        bob: 0.04,
+        speed: 0.42,
+        scale: 0.42,
+        direction: 1,
+        phase: 1.1,
+        cruiseEnergy: 0.2,
+        avoidRadius: 8,
+        avoidDive: 0.06,
+      }),
     ],
   };
 }

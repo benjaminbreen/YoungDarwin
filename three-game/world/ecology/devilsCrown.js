@@ -9,6 +9,8 @@ import {
 import { makeZoneScatter, seededRandom } from '../scatter';
 import { getDevilsCrownRocks } from '../devilsCrownLayout';
 import { getModelAsset } from '../../modelAssets';
+import { parrotfishSchool } from './parrotfishSchools';
+import { mantaCruiser } from './mantaCruisers';
 import { coastalBirds, flamingoFlyoverLayer } from './flyingBirds';
 import { getCliffSurfProfile } from '../cliffSurfProfiles';
 
@@ -174,27 +176,41 @@ function buildSwimmers() {
         baseRotation: [0, 0, 0],
         bank: 0.035,
       },
+      // Parrotfish over the crater's coral shoulder.
+      parrotfishSchool('crown-parrotfish', {
+        count: 13,
+        center: [2, -6],
+        radius: 6.5,
+        pathRadiusX: 20,
+        pathRadiusZ: 6,
+        y: [-1.5, -1.16],
+        speed: 0.24,
+        scale: [0.62, 0.95],
+        verticalWander: 0.028,
+      }),
+      parrotfishSchool('crown-channel-parrotfish', {
+        variant: 'initial',
+        count: 10,
+        center: [0, 20],
+        radius: 4.8,
+        pathRadiusX: 14,
+        pathRadiusZ: 4,
+        y: [-1.78, -1.3],
+        speed: 0.26,
+        scale: [0.5, 0.8],
+        verticalWander: 0.03,
+      }),
     ],
     cruisers: [
-      {
-        id: 'manta-deep-north',
-        path: `${ANIMALS}manta-ray.glb`,
+      mantaCruiser('manta-deep-north', {
         orbit: { cx: 0, cz: -39, rx: 29, rz: 7 },
         y: -2.55,
-        bob: 0.28,
-        speed: 1.8,
-        scale: 0.32,
-        baseRotation: [Math.PI / 2, 0, 0],
-        doubleSide: true,
-        bank: 0.18,
-        avoidRadius: 10,
-        avoidPush: 5.2,
-        avoidDive: 0.26,
-        avoidBank: 0.22,
-        avoidSpeedBoost: 0.22,
+        bob: 0.3,
+        speed: 1.4,
+        scale: 0.92,
         direction: 1,
-        timeScale: 0.82,
-      },
+        bank: 0.22,
+      }),
     ],
   };
 }

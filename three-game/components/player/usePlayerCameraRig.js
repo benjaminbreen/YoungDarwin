@@ -13,6 +13,28 @@ import {
 } from '../../world/specimenRuntime';
 import { examineOrbitActive } from '../../examine/examinables';
 import { cameraFocusPoint } from '../../camera/focusPoint';
+import { CAMERA_DEV_DEFAULTS, cameraDev } from '../../camera/cameraDevRuntime';
+
+const CAMERA_DEV_INITIAL_HERO_DISTANCE = CAMERA_DEV_DEFAULTS.heroDistance;
+const TWO_PI = Math.PI * 2;
+
+// Metre-denominated camera knobs are authored for Darwin. Scaling them by the
+// embodiment's pivot height is what stops a tortoise inheriting a man's dolly
+// distance and head bob.
+// Cursor-steering response: nothing inside the dead centre, then a squared ramp
+// to full rate at the screen edge, so small corrections stay gentle.
+function cursorRate(axis, deadzone) {
+  const magnitude = Math.abs(axis);
+  if (magnitude <= deadzone) return 0;
+  const t = (magnitude - deadzone) / (1 - deadzone);
+  return Math.sign(axis) * t * t;
+}
+
+function embodimentScale(cameraProfile) {
+  const pivotY = cameraProfile?.pivotY;
+  if (!Number.isFinite(pivotY) || pivotY <= 0) return 1;
+  return THREE.MathUtils.clamp(pivotY / 1.22, 0.3, 2.2);
+}
 import { shotgunAimState } from '../../shooting/aimState';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { getPlayerPreferences } from '../../playerPreferences';
@@ -54,6 +76,10 @@ export function usePlayerCameraRig() {
   const yawRef = useRef(0);
   const pitchRef = useRef(CAMERA.defaultPitch);
   const zoomRef = useRef(CAMERA.defaultZoom);
+  // Hero owns its dolly distance in metres rather than sharing the one wheel
+  // value with shoulder/overhead/ADS. One shared value forced hero to rescale
+  // a 2.8-22 range into a 2m band, so the wheel barely did anything.
+  const heroZoomRef = useRef(CAMERA_DEV_INITIAL_HERO_DISTANCE);
   const cameraProfileRef = useRef(null);
   const draggingRef = useRef(false);
   const panningRef = useRef(false);
@@ -91,10 +117,22 @@ export function usePlayerCameraRig() {
   // firePulseRef so the controller can fire. While aimActiveRef is true the
   // ordinary click-drag orbit is superseded.
   const pointerNdcRef = useRef(new THREE.Vector2(0, 0));
+  // First-person cursor steering only runs while the pointer is actually over
+  // the canvas; a cursor parked on the HUD or off-window must not keep turning
+  // the head.
+  const pointerInsideRef = useRef(false);
   const aimActiveRef = useRef(false);
   const wasAimingRef = useRef(false);
   const adsBlendRef = useRef(0);
   const sprintBlendRef = useRef(0);
+  // First-person head bob: a phase that only advances while he is actually
+  // walking, and an amplitude that fades in and out so stopping does not cut
+  // the bob off mid-step.
+  const bobPhaseRef = useRef(0);
+  const bobAmpRef = useRef(0);
+  // Smoothed occlusion distance, so the chase camera returns from behind a
+  // boulder at its own pace instead of the boulder's.
+  const occlusionRef = useRef(null);
   const sprintSurgeAtRef = useRef(-10);
   const prevSprintTRef = useRef(0);
   const skidRollRef = useRef(0);
@@ -148,9 +186,18 @@ export function usePlayerCameraRig() {
   const updatePointerNdc = useCallback(event => {
     const rect = gl.domElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
+    const rawX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const rawY = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+    // Clamped: a captured pointer keeps reporting positions far outside the
+    // canvas, and first-person cursor steering squares this value — an
+    // unclamped -3 would spin the view at twenty times the intended rate the
+    // moment the drag ended. The raw value decides whether the pointer counts
+    // as over the canvas at all, which pointerenter alone gets wrong when the
+    // cursor is already inside as the scene mounts.
+    pointerInsideRef.current = Math.abs(rawX) <= 1 && Math.abs(rawY) <= 1;
     pointerNdcRef.current.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+      THREE.MathUtils.clamp(rawX, -1, 1),
+      THREE.MathUtils.clamp(rawY, -1, 1),
     );
   }, [gl]);
 
@@ -288,10 +335,10 @@ export function usePlayerCameraRig() {
         if (panOffsetRef.current.length() > CAMERA.maxPan) panOffsetRef.current.setLength(CAMERA.maxPan);
       } else {
         const look = getPlayerPreferences();
-        const pitchDelta = dy * CAMERA.pitchSpeed * look.lookSensitivity * (look.invertY ? -1 : 1);
-        yawRef.current -= dx * CAMERA.rotateSpeed * look.lookSensitivity;
+        const pitchDelta = dy * CAMERA.pitchSpeed * cameraDev.dragPitchScale * look.lookSensitivity * (look.invertY ? -1 : 1);
+        yawRef.current -= dx * CAMERA.rotateSpeed * cameraDev.dragRotateScale * look.lookSensitivity;
         pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - pitchDelta, CAMERA.minPitch, CAMERA.maxPitch);
-        manualOrbitUntilRef.current = performance.now() / 1000 + 3.2;
+        manualOrbitUntilRef.current = performance.now() / 1000 + cameraDev.manualHold;
       }
     };
     const stopDrag = event => {
@@ -316,9 +363,18 @@ export function usePlayerCameraRig() {
         return;
       }
       if (examineSession) return;
-      const maxZoom = useThreeGameStore.getState().viewMode === 'top'
-        ? CAMERA.topMaxZoom
-        : CAMERA.maxZoom;
+      const wheelViewMode = useThreeGameStore.getState().viewMode;
+      // Hero dollies in metres on its own value; every other mode shares the
+      // historical zoom scalar (which ADS and the opening shot also read).
+      if (wheelViewMode === 'hero') {
+        heroZoomRef.current = THREE.MathUtils.clamp(
+          heroZoomRef.current + normalizedDelta * cameraDev.heroZoomStep,
+          cameraDev.heroMinDistance,
+          cameraDev.heroMaxDistance,
+        );
+        return;
+      }
+      const maxZoom = wheelViewMode === 'top' ? CAMERA.topMaxZoom : CAMERA.maxZoom;
       zoomRef.current = THREE.MathUtils.clamp(
         zoomRef.current + normalizedDelta * 0.9,
         CAMERA.minZoom,
@@ -327,9 +383,13 @@ export function usePlayerCameraRig() {
     };
     // Right mouse is the aim button; the browser menu would swallow it.
     const onContextMenu = event => event.preventDefault();
+    const onPointerEnter = () => { pointerInsideRef.current = true; };
+    const onPointerLeave = () => { pointerInsideRef.current = false; };
     element.style.cursor = 'grab';
     element.style.touchAction = 'none';
     element.addEventListener('pointerdown', onPointerDown);
+    element.addEventListener('pointerenter', onPointerEnter);
+    element.addEventListener('pointerleave', onPointerLeave);
     element.addEventListener('pointermove', onPointerMove);
     element.addEventListener('pointerup', stopDrag);
     element.addEventListener('pointercancel', stopDrag);
@@ -337,6 +397,8 @@ export function usePlayerCameraRig() {
     element.addEventListener('contextmenu', onContextMenu);
     return () => {
       element.removeEventListener('pointerdown', onPointerDown);
+      element.removeEventListener('pointerenter', onPointerEnter);
+      element.removeEventListener('pointerleave', onPointerLeave);
       element.removeEventListener('pointermove', onPointerMove);
       element.removeEventListener('pointerup', stopDrag);
       element.removeEventListener('pointercancel', stopDrag);
@@ -352,6 +414,13 @@ export function usePlayerCameraRig() {
     cameraFollowYRef.current = groundY;
     statusLookRef.current = null;
     shoulderPivotRef.current = null;
+    // A spawn teleports the camera, so anything carrying state about where it
+    // just was has to go with it: a stale occlusion distance holds the new
+    // camera pulled in for a second, and a stale bob phase starts the new scene
+    // mid-step.
+    occlusionRef.current = null;
+    bobPhaseRef.current = 0;
+    bobAmpRef.current = 0;
     if (cameraFacing) {
       const forward = scratch.recenterForward.set(cameraFacing.x || 0, 0, cameraFacing.z || -1);
       if (forward.lengthSq() > 0.0001) {
@@ -414,6 +483,20 @@ export function usePlayerCameraRig() {
       if (Number.isFinite(cameraProfile?.defaultPitch)) {
         pitchRef.current = THREE.MathUtils.clamp(cameraProfile.defaultPitch, CAMERA.minPitch, CAMERA.maxPitch);
       }
+      // Hero's dolly stays in authored (Darwin-sized) metres; the embodiment
+      // scale is applied where the distance is used, so the wheel's clamp band
+      // is the same number the panel shows whichever body is worn.
+      heroZoomRef.current = cameraDev.heroDistance;
+      occlusionRef.current = null;
+    }
+    const embodiment = embodimentScale(cameraProfile);
+    // Keep yaw in ±π. It only ever accumulates, and cursor steering can spin
+    // continuously — a session that ends up thousands of radians out is the
+    // same orientation with visibly less precision left in it. Every consumer
+    // either wraps its own error (dampAngle, the flight align) or goes through
+    // lookAt, so the wrap is invisible.
+    if (yawRef.current > Math.PI || yawRef.current < -Math.PI) {
+      yawRef.current = Math.atan2(Math.sin(yawRef.current), Math.cos(yawRef.current));
     }
     // Sprint FOV widen eases in over ~0.4s and back out a touch quicker.
     sprintBlendRef.current = THREE.MathUtils.damp(
@@ -828,19 +911,93 @@ export function usePlayerCameraRig() {
       statusLookRef.current.lerp(chest, ease);
       camera.lookAt(statusLookRef.current);
     } else if (viewMode === 'first') {
+      // Cursor steering: the pointer's distance from screen centre turns the
+      // head at a rate, with a dead middle so the frame stays clickable and no
+      // pointer lock is needed. Squared falloff keeps small corrections gentle
+      // and the screen edge fast.
+      if (cameraDev.fpCursorLook > 0.5 && !aiming && !draggingRef.current && pointerInsideRef.current) {
+        const dead = THREE.MathUtils.clamp(cameraDev.fpCursorDeadzone, 0, 0.95);
+        const look = getPlayerPreferences();
+        const speed = cameraDev.fpCursorSpeed * look.lookSensitivity * delta;
+        yawRef.current -= cursorRate(pointerNdcRef.current.x, dead) * speed;
+        // pitchRef is an orbit pitch: larger looks DOWN (see lookPitch below),
+        // so a cursor above centre has to decrease it.
+        const pitchSign = look.invertY ? 1 : -1;
+        pitchRef.current = THREE.MathUtils.clamp(
+          pitchRef.current
+            + cursorRate(pointerNdcRef.current.y, dead) * speed * cameraDev.fpCursorPitch * pitchSign,
+          CAMERA.minPitch,
+          CAMERA.maxPitch,
+        );
+      }
       // Eye sits slightly forward of head center so the camera never ends up
       // inside the skull geometry; vertical motion is snapped, not lerped,
       // because positional lag is what caused the camera to fall behind into
       // the model while moving.
-      const eyeForward = scratch.eyeForward.set(0, 0, -0.22).applyAxisAngle(UP, yawRef.current);
-      desired.copy(playerPosition).add(scratch.panVertical.set(0, cameraProfile?.firstPersonEyeY ?? 1.66, 0)).add(eyeForward);
+      const eyeForward = scratch.eyeForward.set(0, 0, -cameraDev.fpEyeForward * embodiment)
+        .applyAxisAngle(UP, yawRef.current);
+      desired.copy(playerPosition)
+        .add(scratch.panVertical.set(0, cameraProfile?.firstPersonEyeY ?? 1.66, 0))
+        .add(eyeForward);
+      // Head bob. The phase advances only while he is on his feet and moving,
+      // and the amplitude fades, so stopping settles the head instead of
+      // cutting the cycle off mid-step. Vertical runs at twice the stride rate
+      // against lateral and roll at once — that ratio is what reads as walking
+      // rather than as a shaken camera.
+      const gaitT = (wasAirborne || swimming) ? 0 : THREE.MathUtils.clamp(moveSpeedT, 0, 1);
+      bobAmpRef.current = THREE.MathUtils.damp(bobAmpRef.current, gaitT, 6, delta);
+      bobPhaseRef.current = (bobPhaseRef.current + delta * TWO_PI * cameraDev.fpBobStride * gaitT) % TWO_PI;
+      const bobAmp = bobAmpRef.current * (1 + sprintBlendRef.current * 0.35) * embodiment;
+      const bobPhase = bobPhaseRef.current;
+      const bobY = Math.sin(bobPhase * 2) * cameraDev.fpBobVertical * bobAmp;
+      const bobSide = Math.sin(bobPhase) * cameraDev.fpBobLateral * bobAmp;
+      // Standing still the head keeps a slow breath, so a held first-person
+      // frame is never perfectly dead.
+      const breathe = Math.sin(now * 1.6) * cameraDev.fpBreathe * (1 - bobAmpRef.current) * embodiment;
+      const bobRight = scratch.cameraRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
+      desired.addScaledVector(bobRight, bobSide);
+      // Impacts duck the head; recoil throws the muzzle up instead. Both ride
+      // the impulse envelope the chase camera already shakes on, so neither
+      // needs its own timer.
+      const recoilImpulse = cameraImpulse.kind === 'recoil';
+      const impactFade = recoilImpulse ? 0 : impulseFade;
+      const recoilFade = recoilImpulse ? impulseFade : 0;
+      desired.y += bobY + breathe - impactFade * cameraDev.fpLandingDip * embodiment;
+      // Swimming, the eye belongs at the waterline rather than a head's height
+      // above a body that is floating in it.
+      if (swimCamera > 0.001) {
+        desired.y = THREE.MathUtils.lerp(
+          desired.y,
+          WATER_LEVEL + cameraDev.fpSwimEyeAbove,
+          swimCamera,
+        );
+      }
       camera.position.copy(desired);
-      const lookPitch = THREE.MathUtils.clamp((CAMERA.defaultPitch - pitchRef.current) * 1.5, -1.3, 1.3);
+      const pitchLimit = Math.max(0.2, cameraDev.fpPitchLimit);
+      // The recoil kick is deliberately a view offset, not a write to pitchRef:
+      // the muzzle rises and settles on its own without the shot permanently
+      // moving where the player was aiming.
+      const lookPitch = THREE.MathUtils.clamp(
+        (CAMERA.defaultPitch - pitchRef.current) * cameraDev.fpPitchScale
+          + recoilFade * cameraDev.fpRecoilKick,
+        -pitchLimit,
+        pitchLimit,
+      );
+      const lookRoll = skidRollRef.current * cameraDev.fpRollScale
+        + Math.sin(bobPhase) * cameraDev.fpBobRoll * bobAmp;
       camera.rotation.order = 'YXZ';
-      camera.rotation.set(lookPitch, yawRef.current, 0);
+      if (cameraDev.fpYawDamping > 0.01) {
+        camera.rotation.set(
+          dampAngle(camera.rotation.x, lookPitch, cameraDev.fpYawDamping, delta),
+          dampAngle(camera.rotation.y, yawRef.current, cameraDev.fpYawDamping, delta),
+          lookRoll,
+        );
+      } else {
+        camera.rotation.set(lookPitch, yawRef.current, lookRoll);
+      }
     } else if (viewMode === 'top') {
       const height = cameraProfile?.topHeight
-        ?? THREE.MathUtils.clamp(zoomRef.current * 4.2, 10, CAMERA.topMaxHeight);
+        ?? THREE.MathUtils.clamp(zoomRef.current * cameraDev.topHeightScale, 10, CAMERA.topMaxHeight);
       const top = scratch.top.copy(cameraAnchor).add(scratch.panVertical.set(0, height, 0));
       camera.position.lerp(top.add(cameraShake), 1 - Math.exp(-8 * delta));
       // Fixed straight-down orientation: lookAt near the vertical pole made
@@ -856,14 +1013,37 @@ export function usePlayerCameraRig() {
         const followT = THREE.MathUtils.clamp(moveSpeedT, 0, 1);
         const fx = facing.x;
         const fz = facing.z;
-        if (followT > 0.04 && fx * fx + fz * fz > 0.0001) {
+        if (followT > cameraDev.heroFollowGate && fx * fx + fz * fz > 0.0001) {
           const targetYaw = Math.atan2(-fx, -fz);
           const yawError = Math.atan2(Math.sin(targetYaw - yawRef.current), Math.cos(targetYaw - yawRef.current));
-          const followRate = 1.2 + followT * 2.2 + sprintBlendRef.current * 0.8;
+          // Deadzone plus a soft knee: small steering corrections move the
+          // camera not at all, a real turn moves it at full rate, and nothing
+          // in between changes abruptly.
+          const dead = cameraDev.heroFollowDeadzone;
+          const authority = THREE.MathUtils.smoothstep(
+            Math.abs(yawError),
+            dead,
+            dead + Math.max(0.02, cameraDev.heroFollowKnee),
+          );
+          // And ease follow back in after a manual drag expires, so releasing
+          // the mouse does not hand the camera straight to a full-rate swing.
+          const resume = cameraDev.heroFollowResume > 0.01
+            ? THREE.MathUtils.smoothstep(now - manualOrbitUntilRef.current, 0, cameraDev.heroFollowResume)
+            : 1;
+          const followRate = (cameraDev.heroFollowBase
+            + followT * cameraDev.heroFollowSpeed
+            + sprintBlendRef.current * cameraDev.heroFollowSprint) * authority * resume;
           yawRef.current += yawError * (1 - Math.exp(-followRate * delta));
           // Pitch settles toward the hero default while moving, so a glance
           // at the sky or the ground recovers on its own once he runs.
-          pitchRef.current = THREE.MathUtils.damp(pitchRef.current, 0.3, followT, delta);
+          // Pitch rides the same resume ramp as yaw: a deliberate tilt should
+          // not start unwinding at full rate the instant the hold expires.
+          pitchRef.current = THREE.MathUtils.damp(
+            pitchRef.current,
+            cameraDev.heroPitchTarget,
+            followT * cameraDev.heroPitchSettle * resume,
+            delta,
+          );
         }
       }
       const cameraForward = scratch.cameraForward.set(0, 0, -1).applyAxisAngle(UP, yawRef.current);
@@ -907,12 +1087,19 @@ export function usePlayerCameraRig() {
       let frameDistance = cameraDistance;
       let frameSide = side;
       if (heroMode) {
-        frameDistance = THREE.MathUtils.clamp(zoomRef.current * 0.55, 2.3, 4.4)
-          + sprintBlendRef.current * 0.55
+        frameDistance = (THREE.MathUtils.clamp(
+          heroZoomRef.current,
+          cameraDev.heroMinDistance,
+          cameraDev.heroMaxDistance,
+        ) + sprintBlendRef.current * cameraDev.heroSprintPull) * embodiment
           + swimDistanceBias * 0.6;
-        frameSide = 0.5;
+        frameSide = cameraDev.heroSide * embodiment;
         effectivePitch = THREE.MathUtils.lerp(
-          THREE.MathUtils.clamp(pitchA * 0.82 - 0.02, -0.36, 1.0),
+          THREE.MathUtils.clamp(
+            pitchA * cameraDev.heroPitchScale + cameraDev.heroPitchOffset,
+            cameraDev.heroPitchMin,
+            cameraDev.heroPitchMax,
+          ),
           -0.12,
           swimCamera * swimPitchBias,
         );
@@ -921,7 +1108,22 @@ export function usePlayerCameraRig() {
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
       const rawPivot = scratch.rawPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, flightCamera?.pivotY ?? pivotY, 0)).add(panOffsetRef.current);
-      if (heroMode) rawPivot.y += 0.2;
+      if (heroMode) {
+        rawPivot.y += (cameraDev.heroPivotLift + sprintBlendRef.current * cameraDev.heroSprintLift) * embodiment;
+        // Lead the subject: push the look pivot along his facing with speed, so
+        // a run frames the ground he is about to cross rather than the ground
+        // behind him. Speed-gated, and smoothed by the pivot damping below.
+        if (facing && cameraDev.heroLookAhead > 0.001) {
+          const leadX = facing.x;
+          const leadZ = facing.z;
+          const leadLength = Math.hypot(leadX, leadZ);
+          if (leadLength > 0.0001) {
+            const lead = cameraDev.heroLookAhead * THREE.MathUtils.clamp(moveSpeedT, 0, 1) * embodiment;
+            rawPivot.x += (leadX / leadLength) * lead;
+            rawPivot.z += (leadZ / leadLength) * lead;
+          }
+        }
+      }
       if (swimCamera > 0.001) {
         rawPivot.y = THREE.MathUtils.lerp(
           rawPivot.y,
@@ -933,9 +1135,12 @@ export function usePlayerCameraRig() {
         shoulderPivotRef.current = rawPivot.clone();
       }
       const pivot = shoulderPivotRef.current;
-      const pivotDamp = heroMode ? 13 : 9;
+      const pivotDamp = heroMode ? cameraDev.heroPivotDamping : cameraDev.shoulderPivotDamping;
+      // Vertical gets its own, softer rate. Broken ground moves the player up
+      // and down constantly; a camera that tracks that exactly bounces.
+      const pivotDampY = heroMode ? cameraDev.heroPivotDampingY : cameraDev.shoulderPivotDampingY;
       pivot.x = THREE.MathUtils.damp(pivot.x, rawPivot.x, pivotDamp, delta);
-      pivot.y = THREE.MathUtils.damp(pivot.y, rawPivot.y, pivotDamp, delta);
+      pivot.y = THREE.MathUtils.damp(pivot.y, rawPivot.y, pivotDampY, delta);
       pivot.z = THREE.MathUtils.damp(pivot.z, rawPivot.z, pivotDamp, delta);
       const horiz = Math.cos(effectivePitch) * frameDistance;
       const vert = Math.sin(effectivePitch) * frameDistance;
@@ -987,7 +1192,8 @@ export function usePlayerCameraRig() {
         }
       }
       const adsBlend = adsBlendRef.current;
-      let positionDamping = flightCamera?.positionDamping ?? (heroMode ? 12 : 6.5);
+      let positionDamping = flightCamera?.positionDamping
+        ?? (heroMode ? cameraDev.heroPositionDamping : cameraDev.shoulderPositionDamping);
       if (adsBlend > 0.001) {
         // Over-the-shoulder aim framing: close, offset to the right, pitched
         // with the aim. Deterministic from yaw/pitch, so a high damping keeps
@@ -1033,20 +1239,45 @@ export function usePlayerCameraRig() {
       if (cameraCollision?.enabled && collisionAdapter.cameraDistanceLimit) {
         const limitedDistance = collisionAdapter.cameraDistanceLimit(pivot, eye, cameraCollision);
         const requestedDistance = eye.distanceTo(pivot);
-        if (limitedDistance < requestedDistance - 0.001) {
-          eye.sub(pivot).setLength(limitedDistance).add(pivot);
+        const allowed = Math.min(limitedDistance, requestedDistance);
+        // Asymmetric: duck in at the speed the obstacle demands, come back out
+        // slowly. Equal rates make the return read as the world shoving the
+        // camera, and a rock clipped in passing snaps the whole frame.
+        if (occlusionRef.current === null) {
+          occlusionRef.current = allowed;
+        } else {
+          occlusionRef.current = THREE.MathUtils.damp(
+            occlusionRef.current,
+            allowed,
+            allowed < occlusionRef.current ? cameraDev.occlusionPullIn : cameraDev.occlusionReturn,
+            delta,
+          );
+        }
+        const occluded = Math.min(occlusionRef.current, requestedDistance);
+        if (occluded < requestedDistance - 0.001) {
+          eye.sub(pivot).setLength(occluded).add(pivot);
           positionDamping = Math.max(positionDamping, 12);
         }
+      } else {
+        occlusionRef.current = null;
       }
       camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-positionDamping * delta));
       camera.lookAt(lookTarget);
       if (Math.abs(skidRollRef.current) > 0.0005) camera.rotateZ(skidRollRef.current);
     }
     if (!statusViewOpen && !focusSession && statusLookRef.current) {
-      const ease = 1 - Math.exp(-3.2 * delta);
-      statusLookRef.current.lerp(statusPivot, ease);
-      camera.lookAt(statusLookRef.current);
-      if (statusLookRef.current.distanceToSquared(statusPivot) < 0.02) statusLookRef.current = null;
+      if (viewMode === 'first' || viewMode === 'top') {
+        // These two set an exact rotation of their own. Easing a lookAt on top
+        // of it fights them, and in first person the eye sits on the pivot
+        // being looked at, so the direction is degenerate — closing the journal
+        // threw the view somewhere arbitrary for a second.
+        statusLookRef.current = null;
+      } else {
+        const ease = 1 - Math.exp(-3.2 * delta);
+        statusLookRef.current.lerp(statusPivot, ease);
+        camera.lookAt(statusLookRef.current);
+        if (statusLookRef.current.distanceToSquared(statusPivot) < 0.02) statusLookRef.current = null;
+      }
     }
     // ADS field-of-view tighten (wins over the sprint widen), plus the
     // crosshair ray for the resolver.
@@ -1059,8 +1290,13 @@ export function usePlayerCameraRig() {
       ? (flightCamera.fov ?? baseFovRef.current)
         + (flightCamera.speedFovBonus ?? 0) * THREE.MathUtils.clamp(flightSpeedT, 0, 1)
       : baseFovRef.current;
+    // First person wants a wider lens than a chase view at the same number:
+    // the same FOV that frames a body well is claustrophobic behind the eyes.
+    const firstPersonFov = viewMode === 'first' && !flightCamera && !statusViewOpen && !focusSession
+      ? cameraDev.fpFovBonus
+      : 0;
     const targetFov = THREE.MathUtils.lerp(embodiedFov, SHOTGUN.ads.fov, adsBlendRef.current)
-      + (sprintBlendRef.current * SPRINT.fovBonus + surgePop) * (1 - adsBlendRef.current);
+      + (sprintBlendRef.current * SPRINT.fovBonus + surgePop + firstPersonFov) * (1 - adsBlendRef.current);
     if (Math.abs(camera.fov - targetFov) > 0.02) {
       camera.fov = targetFov;
       camera.updateProjectionMatrix();

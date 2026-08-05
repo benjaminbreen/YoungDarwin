@@ -32,7 +32,7 @@ import {
 import { controlsSections } from './controlsReference';
 import { useDismissableOverlay } from './useDismissableOverlay';
 import { animalAwarenessValue, animalRisk } from './animalVitals';
-import { getDirective } from '../directives';
+import { getDirective, getDirectivePosition } from '../directives';
 import { ComfortSettings } from './ComfortSettings';
 import { vitalsGradient } from './theme';
 import { QUALITY_CHOICES } from '../qualityPreference';
@@ -57,11 +57,13 @@ import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { CompassDial } from './expedition/CompassDial';
 import {
+  ISLAND_MAP_ASPECT,
   ISLAND_MAP_IMAGE,
   getIslandMapLocation,
   islandMapLocations,
 } from './expedition/map/islandLocations';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
+import { getNpcPoses } from '../world/npcRuntime';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
@@ -723,6 +725,46 @@ function FieldConditionBadge({ condition }) {
 // never feels like a modal.
 const OBJECTIVE_COMPLETE_HOLD_MS = 1900;
 
+// Whether the player left the banner open. Persisted so the choice survives
+// the next objective and the next session.
+const OBJECTIVE_EXPANDED_KEY = 'darwin.hud.objectiveExpanded';
+
+function readObjectiveExpanded() {
+  try {
+    return window.localStorage?.getItem(OBJECTIVE_EXPANDED_KEY) === 'open';
+  } catch {
+    return false;
+  }
+}
+
+function writeObjectiveExpanded(expanded) {
+  try {
+    window.localStorage?.setItem(OBJECTIVE_EXPANDED_KEY, expanded ? 'open' : 'shut');
+  } catch {
+    // A blocked preference store should not block the control itself.
+  }
+}
+
+// True while the collapsed headline is clipping its text. The chevron on its
+// own does not tell the player there is more to read.
+function useTextClipped(ref, text, active) {
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !active) {
+      setClipped(false);
+      return undefined;
+    }
+    const measure = () => setClipped(node.scrollWidth > node.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active, ref, text]);
+  return clipped;
+}
+
 // Watches the state an objective could depend on and re-resolves when it
 // changes. One watcher rather than a refreshDirective() call sprinkled through
 // every action, so a new objective cannot silently fail to advance.
@@ -748,11 +790,28 @@ function DirectiveTracker() {
 
 function PolishedTopObjective({ objective, className = '' }) {
   const [expanded, setExpanded] = useState(false);
-  const activeDirectiveId = useThreeGameStore(state => state.activeDirectiveId);
-  const activeHint = getDirective(activeDirectiveId)?.hint || null;
+  const headlineRef = useRef(null);
   const directiveCompletedId = useThreeGameStore(state => state.directiveCompletedId);
   const clearCompletedDirective = useThreeGameStore(state => state.clearCompletedDirective);
   const completedDirective = getDirective(directiveCompletedId);
+
+  // While a finished objective holds the banner, show its own hint and detail.
+  // Otherwise the body describes the next objective under a struck-through
+  // line.
+  const shown = completedDirective || objective;
+  const position = getDirectivePosition(shown.id);
+  const clipped = useTextClipped(headlineRef, shown.text, !expanded);
+
+  useEffect(() => {
+    setExpanded(readObjectiveExpanded());
+  }, []);
+
+  const toggleExpanded = useCallback(() => {
+    setExpanded(value => {
+      writeObjectiveExpanded(!value);
+      return !value;
+    });
+  }, []);
 
   // Hold the struck-through line long enough to read, then hand the banner
   // back to the new objective.
@@ -775,13 +834,21 @@ function PolishedTopObjective({ objective, className = '' }) {
   const condition = fieldConditionFor({ weather: normalizedWeather, timeOfDay, zone });
 
   return (
-    <div className={`absolute left-1/2 top-3 hidden w-[min(32rem,calc(100vw-42rem))] min-w-[23rem] -translate-x-1/2 animate-hud-rise [animation-delay:75ms] motion-reduce:animate-none xl:block ${className}`}>
+    // Below xl the chronometer owns the top centre and the gap left beside it
+    // is too narrow for a sentence, so the banner docks under the status panel.
+    // The 6.6rem offset clears the touch-only vitals panel and map button;
+    // with a mouse those are hidden and the top edge is free.
+    <div
+      className={`pointer-events-none absolute top-3 left-[max(0.9rem,env(safe-area-inset-left))] right-[max(0.9rem,env(safe-area-inset-right))] max-md:coarsepointer:top-[calc(env(safe-area-inset-top)+6.6rem)] animate-hud-rise [animation-delay:75ms] motion-reduce:animate-none md:left-3 md:right-auto md:top-[10.75rem] md:w-[24rem] xl:left-1/2 xl:top-3 xl:w-[min(32rem,calc(100vw-42rem))] xl:min-w-[23rem] xl:-translate-x-1/2 ${className}`}
+    >
       <ExpeditionPanel variant="objective" innerClassName="overflow-hidden">
         <button
           type="button"
-          onClick={() => setExpanded(value => !value)}
+          onClick={toggleExpanded}
           aria-expanded={expanded}
-          className="grid w-full grid-cols-[2.35rem_minmax(0,1fr)_auto] items-center gap-2.5 px-3.5 py-2 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+          title={expanded ? undefined : shown.text}
+          aria-label={expanded ? 'Hide objective detail' : `Objective: ${shown.text}. Show detail.`}
+          className="pointer-events-auto grid w-full grid-cols-[2.35rem_minmax(0,1fr)_auto] items-center gap-2.5 px-3.5 py-2 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-full border border-expedition-gold/65 bg-expedition-gold/10 shadow-[inset_0_0_8px_rgba(0,0,0,0.35)]">
             <CompassRoseIcon className="h-6 w-6 text-expedition-gold" />
@@ -789,12 +856,14 @@ function PolishedTopObjective({ objective, className = '' }) {
           <span className="min-w-0">
             <span className="flex min-w-0 items-baseline gap-2 leading-none">
               <span className="shrink-0 text-[9.5px] font-semibold uppercase tracking-[0.2em] text-expedition-gold">Objective</span>
-              <span className="h-1 w-1 shrink-0 rotate-45 bg-expedition-brass/85" />
-              <span className="min-w-0 truncate text-[12.5px] font-semibold tracking-[0.035em] text-expedition-parchment/95">
+              {/* Zone and time only where the banner replaces the chronometer.
+                  Below xl both are already in the pill above it. */}
+              <span className="hidden h-1 w-1 shrink-0 rotate-45 bg-expedition-brass/85 xl:block" />
+              <span className="hidden min-w-0 truncate text-[12.5px] font-semibold tracking-[0.035em] text-expedition-parchment/95 xl:inline">
                 {zone.shortName || zone.name}
               </span>
-              <span className="shrink-0 text-expedition-brass/70">·</span>
-              <span className="shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90">
+              <span className="hidden shrink-0 text-expedition-brass/70 xl:inline">·</span>
+              <span className="hidden shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90 xl:inline">
                 {formatExpeditionTime(timeOfDay)}
               </span>
               {/* Pushed to the right edge of the meta line, just inside the
@@ -809,21 +878,25 @@ function PolishedTopObjective({ objective, className = '' }) {
                 naturalist ruling off a line in a notebook. */}
             <span className="relative mt-1 block">
               <span
-                key={completedDirective ? `done:${completedDirective.id}` : `active:${objective}`}
-                className={`block truncate text-[15.5px] font-semibold leading-tight tracking-wide transition-colors duration-500 ${
+                ref={headlineRef}
+                data-hud="objective-line"
+                key={completedDirective ? `done:${completedDirective.id}` : `active:${shown.text}`}
+                className={`block text-[15.5px] font-semibold leading-tight tracking-wide transition-colors duration-500 ${
+                  expanded ? 'whitespace-normal' : 'truncate'
+                } ${
                   completedDirective
                     ? 'text-expedition-goldbright'
                     : 'animate-hud-fade text-expedition-parchment motion-reduce:animate-none'
                 }`}
               >
                 {completedDirective ? (
-                  <span className="inline-flex min-w-0 items-baseline gap-1.5">
+                  <span className={`inline-flex min-w-0 items-baseline gap-1.5 ${expanded ? '' : 'max-w-full'}`}>
                     <span className="shrink-0 not-italic text-expedition-goldbright">&#10003;</span>
-                    <span className="min-w-0 truncate line-through decoration-expedition-gold/70 decoration-[1.5px]">
+                    <span className={`min-w-0 line-through decoration-expedition-gold/70 decoration-[1.5px] ${expanded ? '' : 'truncate'}`}>
                       {formatBannerObjective(completedDirective.text)}
                     </span>
                   </span>
-                ) : formatBannerObjective(objective)}
+                ) : formatBannerObjective(shown.text)}
               </span>
               {/* A single gold rule sweeps the width once, then stops. */}
               {completedDirective && (
@@ -834,39 +907,59 @@ function PolishedTopObjective({ objective, className = '' }) {
               )}
             </span>
           </span>
-          <svg
-            viewBox="0 0 16 16"
-            aria-hidden="true"
-            className={`h-4 w-4 text-expedition-gold transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
+          {/* Boxed so it reads as a control rather than ornament, and filled
+              when the headline is being clipped. */}
+          <span
+            className={`flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-[3px] border transition-colors duration-300 ${
+              expanded || clipped
+                ? 'border-expedition-gold/60 bg-expedition-gold/10 text-expedition-goldbright'
+                : 'border-expedition-brass/45 bg-black/15 text-expedition-gold/75'
+            }`}
           >
-            <path d="M3.5 6 L8 10.5 L12.5 6" />
-          </svg>
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              className={`h-4 w-4 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            >
+              <path d="M3.5 6 L8 10.5 L12.5 6" />
+            </svg>
+          </span>
         </button>
         <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? 'grid-rows-[1fr] border-t border-expedition-brass/40 opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
           <div className="overflow-hidden">
-            <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5">
-              <div>
-                <p className="m-0 text-[12px] italic leading-snug text-expedition-faded">
-                  {activeHint || 'Approach carefully, examine the evidence, then choose whether to document or collect.'}
+            <div className="px-4 pb-2.5 pt-2">
+              {/* Hint is how, detail is why. Both are authored per objective in
+                  directives.js; the fallbacks cover the exhausted list. */}
+              <p className="m-0 text-[12px] italic leading-snug text-expedition-faded">
+                {shown.hint || 'Approach carefully, examine the evidence, then choose whether to document or collect.'}
+              </p>
+              {shown.detail && (
+                <p className="m-0 mt-1.5 text-[12px] leading-relaxed text-expedition-parchment/80">
+                  {shown.detail}
                 </p>
-                {/* The badge is a glance; this is where it explains itself. */}
-                {condition && (
-                  <p className="m-0 mt-1 text-[11.5px] leading-snug text-expedition-goldbright/85">
-                    <span className="font-semibold uppercase tracking-[0.14em]">{condition.label}</span>
-                    <span className="text-expedition-brass/70"> · </span>
-                    <span className="italic text-expedition-faded">{condition.note}</span>
-                  </p>
+              )}
+              {/* The badge is a glance; this is where it explains itself. */}
+              {condition && (
+                <p className="m-0 mt-1.5 text-[11.5px] leading-snug text-expedition-goldbright/85">
+                  <span className="font-semibold uppercase tracking-[0.14em]">{condition.label}</span>
+                  <span className="text-expedition-brass/70"> · </span>
+                  <span className="italic text-expedition-faded">{condition.note}</span>
+                </p>
+              )}
+              <div className="mt-2 flex items-center gap-2 border-t border-expedition-brass/25 pt-1.5 text-[10.5px] text-expedition-faded">
+                <WeatherGlyph weather={normalizedWeather} className="h-5 w-5 shrink-0 text-expedition-gold" />
+                <span className="truncate">{weatherCopy.title}</span>
+                <span className="shrink-0 text-expedition-brass/70">·</span>
+                <span className="shrink-0">{formatExpeditionDate(day)}</span>
+                {position && (
+                  <span className="ml-auto shrink-0 pl-2 tracking-[0.12em] text-expedition-faded/70">
+                    {position.position} / {position.total}
+                  </span>
                 )}
-              </div>
-              <div className="flex items-center gap-2 whitespace-nowrap text-[10.5px] text-expedition-faded">
-                <WeatherGlyph weather={normalizedWeather} className="h-5 w-5 text-expedition-gold" />
-                <span>{weatherCopy.title}</span>
-                <span className="text-expedition-brass/70">·</span>
-                <span>{formatExpeditionDate(day)}</span>
               </div>
             </div>
           </div>
@@ -932,29 +1025,60 @@ function PolishedVitalStatusPanel() {
     ? animalAwarenessValue(playableMode.id, animalRisk(animalModeNpcEncounter, playableMode.id))
     : curiosity;
   const displayName = animalMode ? playableMode.label : 'Charles Darwin';
-  const condition = health < 35 ? 'Injured' : fatigue > 70 ? 'Winded' : 'Steady';
+  // Only worth a word when it is not the default: "Steady" is the state the
+  // three bars underneath already describe.
+  const condition = health < 35 ? 'Injured' : fatigue > 70 ? 'Winded' : null;
+  const statusProps = {
+    onClick: openStatusView,
+    title: `View ${displayName}'s status`,
+    'aria-label': `View ${displayName}'s status`,
+  };
 
+  return (
+    <div className="pointer-events-auto">
+      <ExpeditionPanel className="w-[17.5rem]" innerClassName="px-3.5 pb-3 pt-2.5">
+        <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-expedition-brass/30 pb-2">
+          <button
+            type="button"
+            {...statusProps}
+            className="min-w-0 flex-1 truncate text-left font-expedition text-[14px] font-semibold tracking-wide text-expedition-parchment transition hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+          >
+            {displayName}
+          </button>
+          {condition && (
+            <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-[0.15em] ${condition === 'Injured' ? 'text-rose-300' : 'text-amber-200'}`}>
+              {condition}
+            </span>
+          )}
+          <CameraModeButton />
+        </div>
+        <button type="button" {...statusProps} className="block w-full text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70">
+          <div className="grid gap-2">
+            <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
+            <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
+            <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={awareness} fill={vitalsGradient('curiosity')} />
+          </div>
+        </button>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
+// Camera mode lives here rather than in the field record, where its label was
+// the widest thing in a three-button row.
+function CameraModeButton() {
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
   return (
     <button
       type="button"
-      onClick={openStatusView}
-      title={`View ${displayName}'s status`}
-      aria-label={`View ${displayName}'s status`}
-      className="pointer-events-auto block text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+      onClick={cycleViewMode}
+      title={`Camera: ${CAMERA_MODE_LABELS[viewMode] || viewMode} — click to cycle`}
+      aria-label={`Camera: ${CAMERA_MODE_LABELS[viewMode] || viewMode}. Click to cycle.`}
+      className="flex shrink-0 items-center gap-1 rounded-sm border border-expedition-brass/45 bg-black/14 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-expedition-faded transition hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
     >
-      <ExpeditionPanel className="w-[17.5rem]" innerClassName="px-3.5 pb-3 pt-2.5">
-        <div className="mb-2.5 flex items-center justify-between border-b border-expedition-brass/30 pb-2">
-          <span className="font-expedition text-[14px] font-semibold tracking-wide text-expedition-parchment">{displayName}</span>
-          <span className={`text-[9px] font-semibold uppercase tracking-[0.15em] ${condition === 'Injured' ? 'text-rose-300' : condition === 'Winded' ? 'text-amber-200' : 'text-emerald-200'}`}>
-            {condition}
-          </span>
-        </div>
-        <div className="grid gap-2">
-          <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
-          <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
-          <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={awareness} fill={vitalsGradient('curiosity')} />
-        </div>
-      </ExpeditionPanel>
+      <CompassRoseIcon className="h-3 w-3 text-expedition-gold/85" />
+      {CAMERA_MODE_SHORT_LABELS[viewMode] || viewMode}
     </button>
   );
 }
@@ -983,13 +1107,16 @@ function IslandOverview({ zoneId, zoneName, polished = false }) {
     const bendY = start && end ? Math.max(start.y, end.y) + 8 : 0;
     return (
       <div className="relative h-full w-full bg-[#17252b]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* Location markers are percentages of the chart image, so the image
+            must not be cropped to the panel — a covered image slides its own
+            coastline out from under them. */}
+        <ChartField
           src={ISLAND_MAP_IMAGE}
+          width={ISLAND_MAP_ASPECT * 1000}
+          depth={1000}
           alt="Floreana island chart"
-          className="absolute inset-0 h-full w-full object-cover saturate-[0.78] brightness-[0.78] contrast-[1.06]"
-          draggable={false}
-        />
+          imageClassName="saturate-[0.78] brightness-[0.78] contrast-[1.06]"
+        >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_48%,rgba(5,12,17,0.58)_100%)]" />
         {start && end && (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
@@ -1019,6 +1146,7 @@ function IslandOverview({ zoneId, zoneName, polished = false }) {
             <span className="h-2.5 w-2.5 rotate-45 border border-expedition-goldbright bg-expedition-ink" />
           </span>
         )}
+        </ChartField>
         <div className="absolute bottom-2 left-2 flex items-center gap-3 rounded-sm border border-expedition-brass/35 bg-expedition-ink/72 px-2 py-1 font-expedition text-[8.5px] uppercase tracking-[0.1em] text-expedition-parchment shadow-sm backdrop-blur-sm">
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-expedition-goldbright" />You</span>
           {nextLocation && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-300" />New</span>}
@@ -1055,6 +1183,35 @@ function IslandOverview({ zoneId, zoneName, polished = false }) {
 // One marker per specimen, each subscribing only to its own runtime position
 // (plus its own collected/documented/selected flags). Memoised so that when one
 // animal moves, only that animal's marker re-renders — not the whole minimap.
+// Hover label for map furniture, in place of the OS tooltip. The chart box
+// clips its own overflow, so a tip near an edge flips to the inside rather than
+// being cut in half. Anchors must carry `group`.
+function MapTip({ label, below = false, align = 'center' }) {
+  const side = below ? 'top-full mt-1.5' : 'bottom-full mb-1.5';
+  const anchor = align === 'start'
+    ? 'left-0'
+    : align === 'end'
+      ? 'right-0'
+      : 'left-1/2 -translate-x-1/2';
+  return (
+    <span
+      aria-hidden="true"
+      className={`pointer-events-none absolute z-30 ${side} ${anchor} whitespace-nowrap rounded-sm border border-expedition-brass/55 bg-expedition-ink/80 px-1.5 py-0.5 font-expedition text-[9px] font-semibold uppercase tracking-[0.07em] text-expedition-parchment opacity-0 shadow-[0_2px_10px_rgba(0,0,0,0.55)] backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// Where a tip has to sit so it stays inside the chart, given the anchor's
+// position on the map in percent.
+function mapTipPlacement(point) {
+  return {
+    below: point.y < 26,
+    align: point.x < 22 ? 'start' : point.x > 78 ? 'end' : 'center',
+  };
+}
+
 const SpecimenMarker = memo(function SpecimenMarker({
   specimen, zone, surveyStyle, showKnown, showNew, active, onToggle,
 }) {
@@ -1088,7 +1245,7 @@ const SpecimenMarker = memo(function SpecimenMarker({
       // which is the single most common colorblind failure. Shape now carries
       // the same information: recorded specimens are square, unrecorded ones
       // round. Colour is kept as a redundant second channel.
-      className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 border shadow transition hover:scale-125 ${
+      className={`group absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 border shadow transition hover:scale-125 ${
         isKnown ? 'rounded-[1px]' : 'rounded-full'
       } ${
         isSelected
@@ -1102,8 +1259,9 @@ const SpecimenMarker = memo(function SpecimenMarker({
               : 'border-expedition-ink/80 bg-rose-300/95'
       }`}
       style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
-      title={specimen.name}
     >
+      {/* Name on hover; the click card below carries the rest. */}
+      {!active && <MapTip label={specimen.name} {...mapTipPlacement(point)} />}
       {active && (
         <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-36 -translate-x-1/2 rounded-sm border border-expedition-brass/70 bg-expedition-ink/92 px-2 py-1.5 text-left font-expedition text-[10.5px] leading-tight text-expedition-parchment shadow-lg">
           <span className="block truncate font-semibold text-expedition-goldbright">{specimen.name}</span>
@@ -1174,27 +1332,27 @@ function MinimapPlayerArrow({ zone, surveyStyle, playerPose }) {
   const heading = Number.isFinite(playerPose.heading) ? playerPose.heading : 180;
   return (
     <>
+      {/* View cone: apex on Darwin, spreading away along his heading, brightest
+          at the eye. It was built the other way round — widest at the player and
+          tapering into the distance, with the gradient inverted to match. */}
       <span
-        className="pointer-events-none absolute h-14 w-14 -translate-x-1/2 -translate-y-full opacity-45"
+        className="pointer-events-none absolute h-14 w-14 opacity-50"
         style={{
           left: percentStyle(player.x),
           top: percentStyle(player.y),
-          transform: `translate(-50%, -86%) rotate(${heading}deg)`,
-          transformOrigin: '50% 86%',
-          clipPath: 'polygon(50% 0%, 86% 100%, 14% 100%)',
+          transform: `translate(-50%, -100%) rotate(${heading}deg)`,
+          transformOrigin: '50% 100%',
+          clipPath: 'polygon(50% 100%, 96% 0%, 4% 0%)',
           background: surveyStyle
-            ? 'linear-gradient(180deg, rgba(65,112,116,0.38), rgba(65,112,116,0))'
-            : 'linear-gradient(180deg, rgba(227,197,133,0.42), rgba(227,197,133,0))',
-          filter: surveyStyle
-            ? 'drop-shadow(0 0 5px rgba(55,91,94,0.35))'
-            : 'drop-shadow(0 0 5px rgba(227,197,133,0.35))',
+            ? 'linear-gradient(0deg, rgba(65,112,116,0.46), rgba(65,112,116,0))'
+            : 'linear-gradient(0deg, rgba(227,197,133,0.5), rgba(227,197,133,0))',
         }}
       />
       <span
-        className={`absolute flex h-6 w-6 items-center justify-center rounded-full border shadow-lg ${
+        className={`absolute flex h-[22px] w-[22px] items-center justify-center rounded-full border ${
           surveyStyle
-            ? 'border-[#f1dca3]/90 bg-[#346f72]/78 shadow-[0_2px_8px_rgba(39,68,70,0.48),inset_0_1px_0_rgba(255,255,255,0.24)]'
-            : 'border-expedition-goldbright/90 bg-expedition-ink/68'
+            ? 'border-[#f1dca3]/95 bg-[#2f6568]/85 shadow-[0_2px_7px_rgba(20,38,40,0.55),inset_0_1px_0_rgba(255,255,255,0.22)]'
+            : 'border-expedition-goldbright bg-expedition-ink/82 shadow-[0_2px_7px_rgba(4,9,16,0.6),inset_0_1px_0_rgba(255,236,186,0.18)]'
         }`}
         style={{
           left: percentStyle(player.x),
@@ -1203,8 +1361,22 @@ function MinimapPlayerArrow({ zone, surveyStyle, playerPose }) {
         }}
         title="Darwin"
       >
-        <span className={`absolute h-4 w-4 rounded-full border ${surveyStyle ? 'border-[#f6e7b6]/35' : 'border-expedition-gold/30'}`} />
-        <span className={`h-0 w-0 border-b-[8px] border-l-[4px] border-r-[4px] border-l-transparent border-r-transparent ${surveyStyle ? 'border-b-[#f6e7b6]' : 'border-b-expedition-goldbright'}`} />
+        {/* A surveyor's needle rather than a plain triangle: bright blade
+            forward, dark counterweight behind, so heading reads at a glance. */}
+        <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true">
+          <path
+            d="M12 1.8 L15.9 14.4 L12 12.2 L8.1 14.4 Z"
+            fill={surveyStyle ? '#fdf3d2' : '#ffe6ae'}
+            stroke={surveyStyle ? 'rgba(30,54,56,0.5)' : 'rgba(5,10,18,0.5)'}
+            strokeWidth="0.45"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 12.2 L15.9 14.4 L12 18.4 L8.1 14.4 Z"
+            fill={surveyStyle ? 'rgba(96,132,120,0.9)' : 'rgba(150,116,64,0.92)'}
+            strokeWidth="0"
+          />
+        </svg>
       </span>
     </>
   );
@@ -1238,6 +1410,44 @@ function BeagleMinimapMarker({ zone, surveyStyle }) {
   );
 }
 
+// Syms' live position, when he is working in this region. His pose lives in the
+// npc runtime rather than the store, so it is polled on the same cadence as the
+// player arrow instead of driving a re-render per step.
+function SymsMinimapMarker({ zone }) {
+  const symsZoneId = useThreeGameStore(state => state.symsZoneId);
+  const [point, setPoint] = useState(null);
+
+  useEffect(() => {
+    if (symsZoneId !== zone.id) {
+      setPoint(null);
+      return undefined;
+    }
+    const read = () => {
+      const pose = getNpcPoses(zone.id)?.get('syms');
+      setPoint(current => {
+        if (!pose || !Number.isFinite(pose.x) || !Number.isFinite(pose.z)) return null;
+        const next = worldToMapPercent({ x: pose.x, z: pose.z }, zone, 3);
+        if (current && Math.abs(current.x - next.x) < 0.4 && Math.abs(current.y - next.y) < 0.4) return current;
+        return next;
+      });
+    };
+    read();
+    const timer = window.setInterval(read, MINIMAP_RUNTIME_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [symsZoneId, zone]);
+
+  if (!point) return null;
+  return (
+    <span
+      role="img"
+      aria-label="Syms Covington"
+      title="Syms Covington"
+      className="pointer-events-none absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-ink/85 bg-sky-200 shadow-[0_0_7px_rgba(186,230,253,0.75)]"
+      style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
+    />
+  );
+}
+
 function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = false }) {
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const [activeMarkerId, setActiveMarkerId] = useState(null);
@@ -1258,20 +1468,21 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
             key={route.zoneId}
             type="button"
             onClick={() => beginZoneTransition(route.zoneId, { entryEdge: ROUTE_ENTRY_EDGES[edge] || null })}
-            className={`absolute flex h-5 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-1 font-expedition text-[9px] font-bold leading-none shadow transition hover:scale-105 ${
+            className={`group absolute flex h-5 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-1 font-expedition text-[9px] font-bold leading-none shadow transition hover:scale-105 ${
               surveyStyle
                 ? 'border-[#6f4f24]/65 bg-[#d7b86d]/82 text-[#3b2812] shadow-[0_1px_5px_rgba(63,42,18,0.32),inset_0_1px_0_rgba(255,240,178,0.48)]'
                 : 'border-expedition-goldbright bg-expedition-gold/90 text-expedition-ink shadow-[0_0_10px_rgba(227,197,133,0.5)] hover:bg-expedition-goldbright'
             }`}
             style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
-            title={route.label}
             aria-label={`Travel ${edgeLabel}: ${route.label}`}
           >
             {edgeLabel}
+            <MapTip label={route.label} {...mapTipPlacement(point)} />
           </button>
         );
       })}
       <BeagleMinimapMarker zone={zone} surveyStyle={surveyStyle} />
+      <SymsMinimapMarker zone={zone} />
       <MinimapTrail zone={zone} playerPose={playerPose} />
       {specimens.map((specimen, index) => (
         <SpecimenMarker
@@ -1290,16 +1501,57 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
   );
 }
 
+const BLANK_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+// Letterboxes a map inside whatever box the panel gives it, with the markers
+// riding along so their percentages stay in map space. The image sizes the
+// field: `aspect-ratio` on a flex item does not reliably transfer to a width,
+// but a replaced element's own ratio always does.
+function ChartField({ src, width, depth, alt, imageClassName = '', fill = false, children }) {
+  // `fill` accepts a small deliberate squash rather than spend vertical space
+  // on a mat — only sound while the box stays close to the map's own shape.
+  if (fill) {
+    return (
+      <div className="absolute inset-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src || BLANK_PIXEL}
+          alt={alt}
+          draggable={false}
+          className={`absolute inset-0 h-full w-full ${imageClassName}`}
+        />
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="absolute inset-0 flex items-center justify-center">
+      <div className="relative h-full">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src || BLANK_PIXEL}
+          width={width}
+          height={depth}
+          alt={alt}
+          draggable={false}
+          className={`block h-full w-auto ${imageClassName}`}
+        />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function LocalMapDecoration({ surveyStyle, zoneName }) {
   return (
     <>
-      <div
-        className={`pointer-events-none absolute inset-[6px] rounded-[2px] ${
-          surveyStyle
-            ? 'border border-[#6c4a24]/35 shadow-[inset_0_0_0_1px_rgba(247,224,166,0.2),inset_0_0_22px_rgba(80,49,22,0.14)]'
-            : 'border border-expedition-gold/20 shadow-[inset_0_0_18px_rgba(4,9,13,0.22)]'
-        }`}
-      />
+      {/* Survey charts are drawn inside a ruled border; the terrain view is not,
+          and an inset hairline there just doubles the panel's own frame. */}
+      {surveyStyle ? (
+        <div className="pointer-events-none absolute inset-[6px] rounded-[2px] border border-[#6c4a24]/35 shadow-[inset_0_0_0_1px_rgba(247,224,166,0.2),inset_0_0_22px_rgba(80,49,22,0.14)]" />
+      ) : (
+        <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_18px_rgba(4,9,13,0.24)]" />
+      )}
       {surveyStyle && (
         <>
           <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-35 mix-blend-multiply" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -1336,6 +1588,8 @@ function MinimapBody({
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const chartUrl = useTerrainChart(zone, mapStyle);
+  const chartWidth = zone.terrainWidth || zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
+  const chartDepth = zone.terrainDepth || zone.terrainSize || chartWidth;
   const toggleKnown = () => setShowKnown(value => (value && !showNew ? value : !value));
   const toggleNew = () => setShowNew(value => (value && !showKnown ? value : !value));
   const surveyStyle = mapStyle === 'survey';
@@ -1406,7 +1660,7 @@ function MinimapBody({
           if (event.key === 'Enter' || event.key === ' ') onOpenMap();
         }}
         title="Open island map"
-        className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#27505d] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-square'}`}
+        className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-gold/65 bg-[rgba(9,16,30,0.72)] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-[100/85]'}`}
         style={mapHeight ? { height: `${mapHeight}px` } : undefined}
       >
         {view === 'globe' ? (
@@ -1415,68 +1669,37 @@ function MinimapBody({
           <IslandOverview zoneId={currentZoneId} zoneName={zone.shortName || zone.name} polished={polishedIsland} />
         ) : (
           <>
-            <div className="absolute left-1.5 top-1.5 z-10 flex overflow-hidden rounded-sm border border-expedition-brass/45 bg-expedition-ink/62 shadow-[0_2px_8px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={event => {
-                  event.stopPropagation();
-                  toggleKnown();
-                }}
-                className={`flex items-center gap-1 border-r border-expedition-brass/30 px-1.5 py-0.5 font-expedition text-[8.5px] font-semibold uppercase tracking-[0.08em] transition ${
-                  showKnown
-                    ? 'bg-[rgba(210,238,197,0.78)] text-[#17361f]'
-                    : 'bg-transparent text-expedition-faded'
-                }`}
-                title="Toggle documented and collected specimen markers"
-              >
-                {/* Square swatch mirrors the square map marker, so the legend
-                    teaches the shape convention and not just the colour. */}
-                <span className="h-1.5 w-1.5 rounded-[1px] bg-emerald-300 shadow-[0_0_4px_rgba(110,231,183,0.7)]" />
-                Known
-              </button>
-              <button
-                type="button"
-                onClick={event => {
-                  event.stopPropagation();
-                  toggleNew();
-                }}
-                className={`flex items-center gap-1 px-1.5 py-0.5 font-expedition text-[8.5px] font-semibold uppercase tracking-[0.08em] transition ${
-                  showNew
-                    ? 'bg-[rgba(245,188,191,0.78)] text-[#4b171d]'
-                    : 'bg-transparent text-expedition-faded'
-                }`}
-                title="Toggle unrecorded specimen markers"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-300 shadow-[0_0_4px_rgba(253,164,175,0.7)]" />
-                New
-              </button>
-            </div>
-            {chartUrl ? (
-              <div
-                className="absolute inset-0"
-                style={{
-                  backgroundImage: `url(${chartUrl})`,
-                  backgroundSize: '100% 100%',
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'center',
-                  imageRendering: 'auto',
-                }}
-              />
-            ) : (
-              <div className={`absolute inset-0 ${surveyStyle ? 'bg-[#cdbb8b]' : 'bg-[#27505d]'}`} />
-            )}
-            {surveyStyle && (
-              <>
-                <div className="pointer-events-none absolute inset-[8px] border border-[rgba(62,39,21,0.28)] shadow-[inset_0_0_0_1px_rgba(232,210,157,0.18)]" />
-                <div className="pointer-events-none absolute bottom-2 left-2 rounded-sm border border-[rgba(69,45,26,0.38)] bg-[rgba(238,218,165,0.54)] px-1.5 py-1 font-expedition text-[8px] font-semibold uppercase leading-none tracking-[0.12em] text-[rgba(55,35,20,0.82)] shadow-sm">
-                  100 ft
-                </div>
-              </>
-            )}
-            <LocalMapDecoration surveyStyle={surveyStyle} zoneName={zone.shortName || zone.name} />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_62%,rgba(10,8,5,0.28)_100%)]" />
-            <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(227,197,133,0.05),transparent_45%,rgba(10,8,5,0.10))]" />
-            <MapOverlays zone={zone} showKnown={showKnown} showNew={showNew} surveyStyle={surveyStyle} />
+            {/* The bake covers the zone footprint, so the chart and every
+                percent-positioned marker have to share a box of that shape —
+                stretching either one to a wider panel puts the markers off the
+                coast they belong to. */}
+            <ChartField
+              src={chartUrl}
+              width={chartWidth}
+              depth={chartDepth}
+              alt={`Chart of ${zone.shortName || zone.name}`}
+              imageClassName={chartUrl ? '' : surveyStyle ? 'bg-[#cdbb8b]' : 'bg-[#27505d]'}
+              fill
+            >
+              {surveyStyle && (
+                <>
+                  <div className="pointer-events-none absolute inset-[8px] border border-[rgba(62,39,21,0.28)] shadow-[inset_0_0_0_1px_rgba(232,210,157,0.18)]" />
+                  <div className="pointer-events-none absolute bottom-2 left-2 rounded-sm border border-[rgba(69,45,26,0.38)] bg-[rgba(238,218,165,0.54)] px-1.5 py-1 font-expedition text-[8px] font-semibold uppercase leading-none tracking-[0.12em] text-[rgba(55,35,20,0.82)] shadow-sm">
+                    100 ft
+                  </div>
+                </>
+              )}
+              <LocalMapDecoration surveyStyle={surveyStyle} zoneName={zone.shortName || zone.name} />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_62%,rgba(10,8,5,0.28)_100%)]" />
+              <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(227,197,133,0.05),transparent_45%,rgba(10,8,5,0.10))]" />
+              <MapOverlays zone={zone} showKnown={showKnown} showNew={showNew} surveyStyle={surveyStyle} />
+            </ChartField>
+            <MarkerLegend
+              showKnown={showKnown}
+              showNew={showNew}
+              onToggleKnown={toggleKnown}
+              onToggleNew={toggleNew}
+            />
           </>
         )}
         <span className="absolute bottom-1 right-1.5 flex items-center text-expedition-parchment/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
@@ -1485,6 +1708,42 @@ function MinimapBody({
         </span>
       </div>
     </>
+  );
+}
+
+// Swatches only, no words: the shapes and colours are the same ones on the map,
+// and at this size a labelled legend reaches the southern route badge.
+function MarkerLegend({ showKnown, showNew, onToggleKnown, onToggleNew }) {
+  const chip = 'group relative flex h-4 w-4 items-center justify-center transition';
+  return (
+    <div className="absolute bottom-1 left-1 z-10 flex rounded-sm border border-expedition-brass/50 bg-expedition-ink/70 shadow-[0_2px_8px_rgba(0,0,0,0.3)] backdrop-blur-sm">
+      <button
+        type="button"
+        onClick={event => {
+          event.stopPropagation();
+          onToggleKnown();
+        }}
+        className={`${chip} rounded-l-sm border-r border-expedition-brass/35 ${showKnown ? 'bg-emerald-300/20' : ''}`}
+        aria-label={`Toggle recorded specimen markers, currently ${showKnown ? 'shown' : 'hidden'}`}
+        aria-pressed={showKnown}
+      >
+        <span className={`h-1.5 w-1.5 rounded-[1px] ${showKnown ? 'bg-emerald-300 shadow-[0_0_4px_rgba(110,231,183,0.7)]' : 'bg-expedition-faded/50'}`} />
+        <MapTip label={showKnown ? 'Recorded specimen' : 'Recorded specimen — hidden'} align="start" />
+      </button>
+      <button
+        type="button"
+        onClick={event => {
+          event.stopPropagation();
+          onToggleNew();
+        }}
+        className={`${chip} rounded-r-sm ${showNew ? 'bg-rose-300/20' : ''}`}
+        aria-label={`Toggle unrecorded specimen markers, currently ${showNew ? 'shown' : 'hidden'}`}
+        aria-pressed={showNew}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${showNew ? 'bg-rose-300 shadow-[0_0_4px_rgba(253,164,175,0.7)]' : 'bg-expedition-faded/50'}`} />
+        <MapTip label={showNew ? 'Unrecorded specimen' : 'Unrecorded specimen — hidden'} align="start" />
+      </button>
+    </div>
   );
 }
 
@@ -2080,13 +2339,15 @@ function useSymsStatus() {
     if (symsZoneId === currentZoneId) {
       return symsDirective === SYMS_DIRECTIVES.FOLLOW
         ? { tone: 'region', label: 'Following', detail: 'Keeping pace behind you.' }
-        : { tone: 'region', label: 'In this region', detail: 'Working somewhere close.' };
+        : { tone: 'region', label: 'In region', detail: 'Working somewhere close.' };
     }
+    // Labels sit in a 15.5rem column, so the place name goes in the tooltip
+    // rather than truncating in the row.
     const where = getIslandMapLocation(symsZoneId)?.name;
     return {
       tone: 'away',
-      label: where ? `At ${where}` : 'Elsewhere on the island',
-      detail: 'Out of earshot.',
+      label: 'Away',
+      detail: where ? `At ${where}. Out of earshot.` : 'Elsewhere on the island.',
     };
   }, [currentZoneId, nearbyNpcId, symsDirective, symsZoneId]);
 }
@@ -2255,8 +2516,6 @@ function PolishedFieldRail({
   const [mapCollapsed, setMapCollapsed] = useState(false);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const journalCount = useThreeGameStore(state => state.journal.length);
-  const viewMode = useThreeGameStore(state => state.viewMode);
-  const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
   const rest = useThreeGameStore(state => state.rest);
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
@@ -2266,16 +2525,18 @@ function PolishedFieldRail({
     ? Math.min(100, (zoneProgress.recorded / zoneProgress.total) * 100)
     : 0;
 
-  const compactAction = 'group inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/40 bg-black/14 px-1.5 py-2 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-expedition-faded transition duration-200 hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
-  const railIconButton = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-expedition-brass/45 bg-black/12 text-expedition-gold/75 transition hover:border-expedition-gold/75 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
+  const compactAction = 'group inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/40 bg-black/14 px-1.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.09em] text-expedition-faded transition duration-200 hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
+  const railIconButton = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border border-expedition-brass/45 bg-black/12 text-expedition-gold/75 transition hover:border-expedition-gold/75 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
 
+  // Column width is set by the chart: narrow enough that a square map fills it
+  // edge to edge, since a wider one would either stretch it or sit it on a mat.
   return (
-    <div className="hidden w-[19rem] flex-col gap-2.5 xl:flex">
-      <ExpeditionPanel variant="quiet" innerClassName="p-2.5">
-        <div className="flex items-start justify-between gap-3 px-1 pb-2">
+    <div className="hidden w-[15.5rem] flex-col gap-2.5 xl:flex">
+      <ExpeditionPanel variant="quiet" innerClassName="p-2">
+        <div className="flex items-start justify-between gap-2 px-0.5 pb-1.5">
           <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.21em] text-expedition-gold">Local chart</div>
-            <div className="mt-0.5 truncate text-[17px] font-semibold leading-tight tracking-[0.01em] text-expedition-parchment">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Local chart</div>
+            <div className="mt-0.5 truncate text-[15px] font-semibold leading-tight tracking-[0.01em] text-expedition-parchment">
               {interior?.label || zone.shortName || zone.name}
             </div>
           </div>
@@ -2299,11 +2560,6 @@ function PolishedFieldRail({
             >
               <SoundIcon muted={!audioEnabled} className="h-4 w-4" />
             </button>
-            <button type="button" onClick={onOpenMap} title="Open full island chart" aria-label="Open full island chart" className={railIconButton}>
-              <svg viewBox="0 0 18 18" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
-                <path d="M3 7V3h4M11 3h4v4M15 11v4h-4M7 15H3v-4" />
-              </svg>
-            </button>
             <button
               type="button"
               onClick={() => setMapCollapsed(value => !value)}
@@ -2322,9 +2578,8 @@ function PolishedFieldRail({
             <MinimapBody
               onOpenMap={onOpenMap}
               tabsClassName="flex"
-              mapHeight={194}
               views={['local', 'island']}
-              initialView="island"
+              initialView="local"
               showLocationHeader={false}
               showMapStyleToggle={false}
               quietTabs
@@ -2334,60 +2589,56 @@ function PolishedFieldRail({
         </div>
       </ExpeditionPanel>
 
-      <ExpeditionPanel variant="quiet" innerClassName="px-3.5 pb-3 pt-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-expedition-gold">Field record</span>
-          <span className="text-[15px] font-semibold text-expedition-parchment">
-            <span className="text-expedition-goldbright">{zoneProgress.recorded}</span> / {zoneProgress.total} recorded here
+      <ExpeditionPanel variant="quiet" innerClassName="px-2.5 pb-2.5 pt-2.5">
+        <div className="flex items-baseline justify-between gap-2 whitespace-nowrap">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-expedition-gold">Field record</span>
+          <span className="text-[13px] font-semibold text-expedition-parchment">
+            <span className="text-expedition-goldbright">{zoneProgress.recorded}</span> / {zoneProgress.total} recorded
           </span>
         </div>
-        <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-2.5">
+        <div className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2">
           <div className="h-1.5 overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
             <div className="h-full rounded-full bg-gradient-to-r from-expedition-brass to-expedition-goldbright transition-[width] duration-700" style={{ width: `${Math.max(progress, zoneProgress.recorded ? 4 : 0)}%` }} />
           </div>
           <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-expedition-faded">{journalCount} {journalCount === 1 ? 'note' : 'notes'}</span>
         </div>
 
-        <div className="mt-2.5 flex items-center gap-2 border-t border-expedition-brass/30 pt-2.5">
+        <div className="mt-2 flex items-center gap-1.5 border-t border-expedition-brass/30 pt-2">
           {!interior ? (
             <>
-              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
+              <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold text-expedition-parchment">Syms Covington</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[9px] uppercase tracking-[0.11em] text-expedition-faded">
+                <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">Syms</div>
+                <div className="mt-0.5 flex items-center gap-1 text-[8.5px] uppercase tracking-[0.08em] text-expedition-faded">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${SYMS_STATUS_DOT[syms.tone]}`} />
-                  <span className="min-w-0 truncate">{syms.label}</span>
+                  <span className="min-w-0 truncate" title={syms.detail}>{syms.label}</span>
                 </div>
               </div>
             </>
           ) : (
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-semibold text-expedition-parchment">{interior.label}</div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.11em] text-expedition-faded">Interior field station</div>
+              <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">{interior.label}</div>
+              <div className="mt-0.5 text-[8.5px] uppercase tracking-[0.08em] text-expedition-faded">Field station</div>
             </div>
           )}
           <button type="button" onClick={onOpenInventory} className={railIconButton} title="Open specimens" aria-label="Open specimens">
-            <ButterflyIcon className="h-[1.125rem] w-[1.125rem]" />
+            <ButterflyIcon className="h-4 w-4" />
           </button>
           <button type="button" onClick={onOpenJournal} className={railIconButton} title="Open field notebook" aria-label="Open field notebook">
-            <OpenBookIcon className="h-[1.125rem] w-[1.125rem]" />
+            <OpenBookIcon className="h-4 w-4" />
           </button>
           <button type="button" onClick={onOpenLibrary} className={railIconButton} title="Open Darwin's library" aria-label="Open Darwin's library">
-            <span className="text-[11px] font-semibold">LIB</span>
+            <span className="text-[10px] font-semibold">LIB</span>
           </button>
         </div>
 
-        <div className="mt-2 grid grid-cols-[0.72fr_1.14fr_1.14fr] gap-1.5 border-t border-expedition-brass/30 pt-2">
+        <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-expedition-brass/30 pt-2">
           <button type="button" onClick={rest} className={compactAction}>
             <FatigueIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
             <span>Rest</span>
-          </button>
-          <button type="button" onClick={cycleViewMode} className={compactAction} title="Cycle camera mode">
-            <CompassRoseIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
-            <span className="truncate">{CAMERA_MODE_SHORT_LABELS[viewMode] || viewMode}</span>
           </button>
           <button
             type="button"
@@ -4369,14 +4620,19 @@ export function ThreeHUD({
   }, [assessmentOpen]);
 
   const activeDirectiveId = useThreeGameStore(state => state.activeDirectiveId);
+  // { text, hint, detail } — the shape a directive already has, so a mode
+  // objective and the exhausted-list fallback render through the same banner.
   const objective = useMemo(() => {
     const mode = getPlayableMode(playableModeId);
-    if (mode.id === 'finch') return 'Finch mode: W/S climb and sink, A/D carve, Space takes off and lands. Feed when you can and keep clear of Darwin.';
-    if (mode.id === 'tortoise') return 'Tortoise mode: graze, rest, and move slowly through the highland shade.';
+    if (mode.objective) return mode.objective;
     const directive = getDirective(activeDirectiveId);
-    if (directive) return directive.text;
+    if (directive) return directive;
     // Objectives exhausted: the expedition is the player's to shape.
-    return 'Fill the remaining days as you judge best.';
+    return {
+      text: 'Fill the remaining days as you judge best',
+      hint: 'No objective remains. The chart, the case, and the journal stay open.',
+      detail: 'You have seen everything the voyage is assessed on. What is left is how you spend the remaining days: more landings, or more care with what you already have.',
+    };
   }, [activeDirectiveId, playableModeId]);
 
   const openInventoryTab = useCallback(tab => {

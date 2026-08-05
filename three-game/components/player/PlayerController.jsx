@@ -292,7 +292,10 @@ export function PlayerController({
   const flightState = useRef({ active: false, phase: 'grounded', phaseUntil: 0, lastFlapAt: -10, bankYaw: null });
   // Accumulates drowning damage so the store isn't hit every frame.
   const drownDamage = useRef(0);
-  const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1 });
+  // `kind` separates impacts (the camera should duck) from recoil (it should
+  // kick up). Everything that hits the ground or takes a blow is an impact, so
+  // that is the default and only the exceptions carry a kind.
+  const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1, kind: 'impact' });
   const finchDroppingCamera = useRef({ startedAt: -10, until: -10, sequence: 0 });
   const lastTeeterAt = useRef(0);
   const lastWallRunAt = useRef(0);
@@ -1426,6 +1429,7 @@ export function PlayerController({
         intensity: SHOTGUN.recoil.intensity,
         duration: SHOTGUN.recoil.duration,
         seed: cameraImpulse.current.seed + 1,
+        kind: 'recoil',
       };
     }
     // A blast into his own feet: Darwin goes down, health follows.

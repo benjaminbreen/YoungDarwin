@@ -267,10 +267,17 @@ export function getTerrainEdgeRisk(x, z, facing = null, regionId = 'POST_OFFICE_
   return best;
 }
 
+// `aquatic` inverts the usual test: fish must end up in water, and the
+// ordinary walkable clamp is exactly what strands them on the beach.
 export function clampToWalkable(position, previousPosition = null, regionId = 'POST_OFFICE_BAY', options = null) {
-  const allowed = options?.wade
-    ? (x, z) => isWadeableTerrain(x, z, regionId, options)
-    : (x, z) => isWalkableTerrain(x, z, regionId);
+  let allowed;
+  if (options?.aquatic) {
+    allowed = (x, z) => movementTerrainHeight(x, z, regionId) < WATER_LEVEL - 0.12;
+  } else if (options?.wade) {
+    allowed = (x, z) => isWadeableTerrain(x, z, regionId, options);
+  } else {
+    allowed = (x, z) => isWalkableTerrain(x, z, regionId);
+  }
   const p = position.clone ? position.clone() : new THREE.Vector3(position.x, position.y || 0, position.z);
   const config = getRegionTerrainConfig(regionId);
   const definition = authoredRegion(regionId);

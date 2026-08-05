@@ -117,10 +117,18 @@ export function northwestReefHeight(x, z, { movementSurface = false } = {}) {
   // Deep ocean falloff toward the blocked north/west edges; the coral ring
   // shelters its own lagoon from the drop.
   const shelter = 1 - THREE.MathUtils.smoothstep(di, 2.0, 2.8);
-  const deepN = THREE.MathUtils.smoothstep(-z, 34, 44);
-  const deepW = THREE.MathUtils.smoothstep(-x, 42, 54);
   const seaward = 1 - THREE.MathUtils.smoothstep(d, -3, 0);
-  y -= Math.max(deepN, deepW) * (1 - 0.85 * shelter) * seaward * 2.6;
+  // Distance past the shelf lip, as a rounded-box field so the north and west
+  // drops meet in a curve instead of a right angle, and warped by noise so the
+  // turquoise-to-blue line wanders like a reef edge rather than a ruler.
+  const lipWarp = elevationNoise(x * 0.028 + 17, z * 0.028 - 9) * 5.2
+    + elevationNoise(x * 0.071 - 4, z * 0.071 + 21) * 2.4;
+  const pastNorth = -z - 32 + lipWarp;
+  const pastWest = -x - 42 + lipWarp;
+  const pastLip = Math.hypot(Math.max(pastWest, 0), Math.max(pastNorth, 0))
+    + Math.min(Math.max(pastWest, pastNorth), 0);
+  const deep = THREE.MathUtils.smoothstep(pastLip, 0, 11);
+  y -= deep * (1 - 0.85 * shelter) * seaward * 2.6;
 
   // Surface grit on dry ground only; the sand shelf stays smooth for wading.
   const dry = THREE.MathUtils.smoothstep(y, -0.4, 0.1);

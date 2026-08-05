@@ -6,6 +6,8 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getRuntimePlayerPose } from '../../../store';
+import { createParrotfishSchoolMesh } from '../../../wildlife/fish/parrotfishModel';
+import { createMantaMesh } from '../../../wildlife/fish/mantaRayModel';
 
 // Reef life is underwater scenery the player is usually far from. Beyond this
 // radius from the school/cruiser anchor, skinning + movement update at
@@ -269,13 +271,8 @@ function SwimmerIndividual({ source, spec, animations, phase, timeScale, mixerSt
   );
 }
 
-function FishSchool({ spec }) {
-  const { scene, animations } = useGLTF(spec.path);
-  const groupRefs = useRef([]);
-  const mixerStore = useRef([]);
-  const farAccum = useRef(0);
-  const startleRef = useRef(0);
-  const fishes = useMemo(() => Array.from({ length: spec.count }, (_, i) => ({
+function makeSchoolMembers(spec) {
+  return Array.from({ length: spec.count }, (_, i) => ({
     orbitRadius: spec.radius * (0.35 + seeded(i, 1) * 0.65),
     angularSpeed: (spec.speed || 0.5) * (0.7 + seeded(i, 2) * 0.6) * (seeded(i, 3) > 0.5 ? 1 : -1),
     phase: seeded(i, 4) * Math.PI * 2,
@@ -285,13 +282,25 @@ function FishSchool({ spec }) {
     forwardOffset: (seeded(i, 8) - 0.5) * spec.radius * 1.5,
     lateralOffset: (seeded(i, 9) - 0.5) * spec.radius * 0.82,
     depth: THREE.MathUtils.lerp(spec.y[0], spec.y[1], seeded(i, 10)),
-  })), [spec]);
+  }));
+}
 
-  const runtime = useMemo(() => ({
+function makeSchoolRuntime(spec) {
+  return {
     ...spec,
     seed: seeded(spec.count, 11) * Math.PI * 2,
     squash: spec.squash ?? 0.8,
-  }), [spec]);
+  };
+}
+
+function FishSchool({ spec }) {
+  const { scene, animations } = useGLTF(spec.path);
+  const groupRefs = useRef([]);
+  const mixerStore = useRef([]);
+  const farAccum = useRef(0);
+  const startleRef = useRef(0);
+  const fishes = useMemo(() => makeSchoolMembers(spec), [spec]);
+  const runtime = useMemo(() => makeSchoolRuntime(spec), [spec]);
 
   useFrame(({ clock }, delta) => {
     const t = clock.elapsedTime;
@@ -364,6 +373,167 @@ function FishSchool({ spec }) {
           />
         </group>
       ))}
+    </group>
+  );
+}
+
+// Procedural schools travel the same authored routes as the GLB ones but draw
+// as a single InstancedMesh, so a reef can carry ten times the fish for one
+// draw call. The whole swim cycle lives in the vertex shader; the CPU only
+// writes a transform and a swimming-effort value per fish.
+const FLIP_Q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+const _instanceQuat = new THREE.Quaternion();
+const _instanceScale = new THREE.Vector3();
+const _instanceMatrix = new THREE.Matrix4();
+
+function ProceduralParrotfishSchool({ spec }) {
+  const fishes = useMemo(() => makeSchoolMembers(spec), [spec]);
+  const runtime = useMemo(() => makeSchoolRuntime(spec), [spec]);
+  const rig = useMemo(
+    () => createParrotfishSchoolMesh({ variant: spec.variant || 'terminal', count: spec.count }),
+    [spec.count, spec.variant],
+  );
+  const carriers = useMemo(
+    () => fishes.map(() => new THREE.Object3D()),
+    [fishes],
+  );
+  const farAccum = useRef(0);
+  const startleRef = useRef(0);
+
+  useEffect(() => {
+    // A few percent of hue drift per fish keeps a school from looking stamped.
+    const color = new THREE.Color();
+    const spread = spec.tintSpread ?? 0.1;
+    fishes.forEach((fish, i) => {
+      const shift = (seeded(i, 12) - 0.5) * spread;
+      color.setRGB(1 + shift, 1 + shift * 0.35, 1 - shift * 0.7);
+      rig.setTint(i, color);
+    });
+    return () => rig.dispose();
+  }, [fishes, rig, spec.tintSpread]);
+
+  useFrame(({ clock }, delta) => {
+    const t = clock.elapsedTime;
+    const player = getRuntimePlayerPose()?.position;
+    let stepDelta = delta;
+    let targetStartle = 0;
+    if (player) {
+      schoolAnchorPosition(_schoolAnchor, runtime, t);
+      const dx = player.x - _schoolAnchor.x;
+      const dz = player.z - _schoolAnchor.z;
+      const centerDistance = Math.hypot(dx, dz);
+      const startleBand = (runtime.startleRadius || 7.5) + runtime.radius * 0.9;
+      targetStartle = THREE.MathUtils.clamp(1 - (centerDistance - runtime.radius * 0.55) / startleBand, 0, 1);
+      if (dx * dx + dz * dz > FAR_REEF_RADIUS_SQ) {
+        farAccum.current += delta;
+        if (farAccum.current < FAR_REEF_INTERVAL) return;
+        stepDelta = farAccum.current;
+        farAccum.current = 0;
+      } else {
+        farAccum.current = 0;
+      }
+    }
+    const response = targetStartle > startleRef.current ? 5.5 : 2.4;
+    startleRef.current += (targetStartle - startleRef.current) * Math.min(1, stepDelta * response);
+    const startle = startleRef.current;
+    const cruise = runtime.cruiseEnergy ?? 0.3;
+
+    for (let i = 0; i < fishes.length; i += 1) {
+      const carrier = carriers[i];
+      schoolPosition(_pos, runtime, fishes[i], t, player, startle);
+      const lookAhead = runtime.lookAhead ?? (runtime.motion === 'shoal' ? 1.2 : 0.35);
+      schoolPosition(_ahead, runtime, fishes[i], t + lookAhead, player, startle);
+      const turnSign = runtime.motion === 'shoal'
+        ? 1
+        : Math.sign(fishes[i].angularSpeed) || 1;
+      const cruiseBank = (runtime.bank ?? 0.055) * turnSign
+        * (0.65 + Math.sin(t * 0.33 + fishes[i].phase) * 0.35);
+      aimAlongPath(carrier, _pos, _ahead, {
+        roll: cruiseBank + startle * (runtime.startleBank ?? 0.2) * turnSign,
+        maxPitch: runtime.maxPitch ?? 0.1,
+        response: runtime.turnResponse ?? 0.1,
+      });
+      // The rig is authored head-at--z; the path controller drives +z.
+      _instanceQuat.copy(carrier.quaternion).multiply(FLIP_Q);
+      _instanceScale.setScalar(fishes[i].scaleValue);
+      _instanceMatrix.compose(carrier.position, _instanceQuat, _instanceScale);
+      rig.mesh.setMatrixAt(i, _instanceMatrix);
+      rig.energy[i] = THREE.MathUtils.clamp(cruise + startle * 0.65, 0, 1);
+    }
+    rig.mesh.instanceMatrix.needsUpdate = true;
+    rig.advance(stepDelta);
+  });
+
+  return (
+    <group userData={{ noReflect: true }}>
+      <primitive object={rig.mesh} />
+    </group>
+  );
+}
+
+// Mantas ride the same orbit-and-avoid controller as the GLB cruisers; only
+// the mesh and its wing animation are procedural.
+function ProceduralMantaCruiser({ spec }) {
+  const rig = useMemo(
+    () => createMantaMesh({ variant: spec.variant || 'chevron', count: 1 }),
+    [spec.variant],
+  );
+  useEffect(() => () => rig.dispose(), [rig]);
+  const carrier = useMemo(() => new THREE.Object3D(), []);
+  const farAccum = useRef(0);
+  const avoidRef = useRef(0);
+  const runtime = useMemo(() => ({
+    direction: spec.direction || 1,
+    phase: spec.phase || 0,
+    ...spec,
+  }), [spec]);
+
+  useFrame(({ clock }, delta) => {
+    const t = clock.elapsedTime;
+    const player = getRuntimePlayerPose()?.position;
+    let stepDelta = delta;
+    if (player) {
+      const dx = player.x - runtime.orbit.cx;
+      const dz = player.z - runtime.orbit.cz;
+      if (dx * dx + dz * dz > FAR_REEF_RADIUS_SQ) {
+        farAccum.current += delta;
+        if (farAccum.current < FAR_REEF_INTERVAL) return;
+        stepDelta = farAccum.current;
+        farAccum.current = 0;
+      } else {
+        farAccum.current = 0;
+      }
+    }
+    cruiserPosition(_pos, runtime, t);
+    let targetAvoid = 0;
+    if (player && runtime.avoidRadius) {
+      const dist = Math.hypot(player.x - _pos.x, player.z - _pos.z);
+      targetAvoid = THREE.MathUtils.clamp(1 - dist / runtime.avoidRadius, 0, 1);
+    }
+    const response = targetAvoid > avoidRef.current ? 2.6 : 1.15;
+    avoidRef.current += (targetAvoid - avoidRef.current) * Math.min(1, stepDelta * response);
+    const avoid = avoidRef.current;
+    applyPlayerAvoidance(_pos, runtime, player, avoid);
+    cruiserPosition(_ahead, runtime, t + 1.6);
+    applyPlayerAvoidance(_ahead, runtime, player, avoid);
+    aimAlongPath(carrier, _pos, _ahead, {
+      roll: ((spec.bank ?? 0.2) + avoid * (spec.avoidBank ?? 0.24)) * runtime.direction,
+      maxPitch: runtime.maxPitch ?? 0.07,
+      response: runtime.turnResponse ?? 0.05,
+    });
+    _instanceQuat.copy(carrier.quaternion).multiply(FLIP_Q);
+    _instanceScale.setScalar(spec.scale ?? 1);
+    _instanceMatrix.compose(carrier.position, _instanceQuat, _instanceScale);
+    rig.mesh.setMatrixAt(0, _instanceMatrix);
+    rig.mesh.instanceMatrix.needsUpdate = true;
+    // A startled manta beats harder rather than fleeing outright.
+    rig.energy[0] = THREE.MathUtils.clamp((spec.cruiseEnergy ?? 0.4) + avoid * 0.5, 0, 1);
+    rig.advance(stepDelta);
+  });
+
+  return (
+    <group userData={{ noReflect: true }}>
+      <primitive object={rig.mesh} />
     </group>
   );
 }
@@ -449,16 +619,20 @@ export function ReefSwimmers({ swimmers }) {
   // in without holding up the rest of the zone.
   return (
     <group>
-      {swimmers.schools?.map(spec => (
+      {swimmers.schools?.map(spec => (spec.kind === 'parrotfish' ? (
+        <ProceduralParrotfishSchool key={spec.id} spec={spec} />
+      ) : (
         <Suspense key={spec.id} fallback={null}>
           <FishSchool spec={spec} />
         </Suspense>
-      ))}
-      {swimmers.cruisers?.map(spec => (
+      )))}
+      {swimmers.cruisers?.map(spec => (spec.kind === 'manta' ? (
+        <ProceduralMantaCruiser key={spec.id} spec={spec} />
+      ) : (
         <Suspense key={spec.id} fallback={null}>
           <Cruiser spec={spec} />
         </Suspense>
-      ))}
+      )))}
     </group>
   );
 }

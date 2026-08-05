@@ -1,4 +1,5 @@
 import { getEcology } from './world/ecology';
+import { terrainHeight } from './world/terrain';
 import {
   inspectableCatalog,
   inspectableTypeForEcologyLayer,
@@ -84,9 +85,10 @@ function ecologyTargets(ecology) {
         latin: identity.latinName || '',
         specimenId: identity.specimenId || null,
         radius: Math.max(0.32, scale * 0.5),
+        height: Math.max(0.6, scale * 1.3),
         focus: {
           x: finite(item.x),
-          y: finite(item.y) + Math.max(0.3, scale * 0.65),
+          y: finite(item.y),
           z: finite(item.z),
         },
         inspectable: identity,
@@ -108,6 +110,9 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
     // a collectable sample. Everything else keeps a kind-level id so it stays
     // examinable — a bitterbush must not hand over a chip of basalt.
     const typeId = OBSTACLE_TYPE_IDS[obstacle.kind] || `obstacle:${obstacle.kind || 'object'}`;
+    const x = finite(obstacle.x);
+    const z = finite(obstacle.z);
+    const baseY = finite(terrainHeight(x, z, zoneId), position.y);
     const target = {
       id: `obstacle:${zoneId}:${obstacle.id}`,
       actorId: obstacle.id,
@@ -117,11 +122,12 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
       category: obstacleCategory(obstacle),
       name: obstacleLabel(obstacle),
       radius: Math.max(0.25, finite(obstacle.radius, 0.5)),
-      focus: {
-        x: finite(obstacle.x),
-        y: position.y + Math.min(1.2, Math.max(0.25, finite(obstacle.colliderTop ?? obstacle.height, 0.6) * 0.45)),
-        z: finite(obstacle.z),
-      },
+      height: Math.max(0.2, finite(obstacle.colliderTop ?? obstacle.height, 0.6)),
+      // Focus is the subject's base, as it is for specimens; the examine camera
+      // raises it by half the frame hint. Anchoring to the player's own y and
+      // pre-adding half a height aimed the shot a whole boulder too high, and
+      // drifted with whatever slope Darwin happened to be standing on.
+      focus: { x, y: baseY, z },
       obstacleId: obstacle.id,
     };
     const score = targetScore(target, position, forward);

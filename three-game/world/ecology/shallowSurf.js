@@ -6,6 +6,7 @@ import {
   shallowSurfRockMask,
 } from '../regions/shallowSurf/terrain';
 import { coastalBirds } from './flyingBirds';
+import { parrotfishSchool } from './parrotfishSchools';
 
 const NATURE = '/assets/models/nature/';
 const ANIMALS = '/assets/models/animals/runtime/';
@@ -72,6 +73,30 @@ function buildSwimmers() {
         maxPitch: 0.065, verticalWander: 0.035, startleRadius: 5.5,
         startlePush: 1.9, startleSpeedBoost: 0.56, startleBank: 0.09,
       },
+      // Parrotfish grazing the algae mats between the rock heads.
+      parrotfishSchool('shallow-surf-parrotfish', {
+        variant: 'initial',
+        count: 9,
+        center: [-2, -6],
+        radius: 4.4,
+        pathRadiusX: 15,
+        pathRadiusZ: 4,
+        y: [-2.0, -1.7],
+        speed: 0.2,
+        scale: [0.5, 0.78],
+        verticalWander: 0.025,
+      }),
+      parrotfishSchool('shallow-surf-parrotfish-outer', {
+        count: 7,
+        center: [20, 12],
+        radius: 4,
+        pathRadiusX: 12,
+        pathRadiusZ: 3.6,
+        y: [-2.6, -2.16],
+        speed: 0.24,
+        scale: [0.66, 0.98],
+        verticalWander: 0.03,
+      }),
     ],
     cruisers: [],
   };

@@ -1,4 +1,6 @@
 import { northShoreCoastZ } from '../regions/northShore/terrain';
+import { parrotfishSchool } from './parrotfishSchools';
+import { mantaCruiser } from './mantaCruisers';
 import { makeZoneScatter, nearAnyCluster, varyScatterTransforms } from '../scatter';
 import { getNorthShoreRocks, N_SHORE } from '../northShoreLayout';
 import { generatedTreePresets } from '../generatedTreePresets';
@@ -390,6 +392,58 @@ function buildAmbientWildlife() {
   ];
 }
 
+// The black-sand shelf falls away fast: past z=-30 there is three metres of
+// water, which is the only place on this coast a full-grown manta fits.
+function buildSwimmers() {
+  return {
+    schools: [
+      parrotfishSchool('north-shore-parrotfish-east', {
+        count: 11,
+        center: [22, -27],
+        radius: 4.4,
+        pathRadiusX: 14,
+        pathRadiusZ: 3,
+        y: [-1.62, -1.42],
+        speed: 0.2,
+        scale: [0.6, 0.85],
+        verticalWander: 0.02,
+      }),
+      parrotfishSchool('north-shore-parrotfish-west', {
+        variant: 'initial',
+        count: 9,
+        center: [-14, -27],
+        radius: 3.8,
+        pathRadiusX: 10,
+        pathRadiusZ: 3,
+        y: [-1.32, -1.18],
+        speed: 0.18,
+        scale: [0.5, 0.72],
+        verticalWander: 0.015,
+      }),
+    ],
+    cruisers: [
+      mantaCruiser('north-shore-manta', {
+        orbit: { cx: 0, cz: -33, rx: 24, rz: 4 },
+        y: -2.1,
+        bob: 0.18,
+        speed: 0.6,
+        scale: 1,
+        direction: 1,
+      }),
+      mantaCruiser('north-shore-manta-deep', {
+        orbit: { cx: 0, cz: -37, rx: 26, rz: 5 },
+        y: -2.5,
+        bob: 0.22,
+        speed: 0.5,
+        scale: 1.15,
+        direction: -1,
+        phase: 2.2,
+        variant: 'melanistic',
+      }),
+    ],
+  };
+}
+
 export function buildNorthShoreEcology() {
   const rocks = getNorthShoreRocks();
   const interactiveFlora = buildInteractiveFlora(rocks);
@@ -398,6 +452,7 @@ export function buildNorthShoreEcology() {
     return d > -2.5 && d < 1.8 && rock.radiusY > 0.25;
   });
   return {
+    swimmers: buildSwimmers(),
     zoneId: N_SHORE,
     flora: buildFlora(),
     proceduralFlora: buildProceduralFlora(rocks, interactiveFlora),

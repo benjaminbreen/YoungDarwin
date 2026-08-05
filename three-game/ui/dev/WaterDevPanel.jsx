@@ -1,7 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { WATER_DEV_DEFAULTS, resetWaterDev, waterDev } from '../../world/waterDevRuntime';
+import {
+  WATER_DEV_DEFAULTS,
+  resetWaterDev,
+  waterDev,
+  waterZoneBaseline,
+} from '../../world/waterDevRuntime';
 import { useThreeGameStore } from '../../store';
 
 // Live water-tuning overlay, enabled via /three?waterdev. Sliders mutate the
@@ -107,8 +112,12 @@ export function WaterDevPanel() {
   const [copied, setCopied] = useState(false);
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
   const setTimeOfDay = useThreeGameStore(state => state.setTimeOfDay);
+  // Measured against what this zone ships with, so an authored per-zone look
+  // does not read as a screen full of unsaved edits.
+  const shipped = waterZoneBaseline();
   const dirtyKeys = useMemo(
-    () => Object.keys(WATER_DEV_DEFAULTS).filter(key => values[key] !== WATER_DEV_DEFAULTS[key]),
+    () => Object.keys(WATER_DEV_DEFAULTS).filter(key => values[key] !== shipped[key]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [values],
   );
 
@@ -191,7 +200,7 @@ export function WaterDevPanel() {
         <label key={entry.key} className="mb-1 block">
           <span className="flex justify-between text-slate-400">
             <span>{entry.label}</span>
-            <span className={values[entry.key] !== WATER_DEV_DEFAULTS[entry.key] ? 'text-amber-200' : ''}>
+            <span className={values[entry.key] !== shipped[entry.key] ? 'text-amber-200' : ''}>
               {Number(values[entry.key]).toFixed(entry.step >= 1 ? 0 : 3)}
             </span>
           </span>

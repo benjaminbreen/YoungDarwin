@@ -149,12 +149,76 @@ export const WATER_DEV_DEFAULTS = {
   deepTravelNoise: 8,
 };
 
+// Per-zone overrides on the defaults above, in the same spirit as seaState:
+// a map that is absent from this table gets the shipped water byte for byte.
+// Only the keys that actually differ are listed, so the intent of each zone's
+// look stays readable next to the baseline.
+//
+// zoneId -> partial WATER_DEV_DEFAULTS.
+const WATER_ZONE_LOOKS = Object.freeze({
+  // Shallow reef read: the sunlit shelf holds much further out and much
+  // deeper (mid at 12.8m rather than 3.6m), so the turquoise body is the
+  // subject rather than a fringe. Deep travel and the edge/offshore biases
+  // are pulled right down to stop distance dragging it toward navy, and the
+  // seam is widened and roughened to hide the much larger colour difference
+  // it now has to cross. Saturation and brightness carry the rest.
+  //
+  // rampDepthMid deliberately sits above rampDepthDeep; Water.jsx enforces
+  // the ascending order, which lands the deep stop just past the mid one.
+  NW_REEF: Object.freeze({
+    windTone: 0.24,
+    capCrest: 0.145,
+    capWindMult: 4,
+    hazeBandStart: 85,
+    rampShelfMix: 0.72,
+    rampDepthPale: 0.41,
+    rampDepthShelf: 3.4,
+    rampDepthMid: 12.8,
+    rampGlaze: 0.48,
+    rampOpaque: 0.78,
+    rampOpaqueDepth: 18.75,
+    rampEdgeBias: 1.6,
+    rampOffshoreBias: 1.1,
+    rampSaturation: 1.8,
+    rampBrightness: 1.53,
+    seamFadeWidth: 26,
+    seamBlend: 47,
+    seamNoise: 21.5,
+    deepTravelWidth: 12,
+    deepTravelAmount: 0.26,
+    deepTravelNoise: 13.5,
+  }),
+});
+
 export const waterDev = { ...WATER_DEV_DEFAULTS };
 
 // Same object the ?waterdev panel writes, reachable from an automated browser
 // session so a screenshot harness can A/B a knob without a rebuild.
 if (typeof window !== 'undefined') window.__waterDev = waterDev;
 
+let activeZoneId = null;
+
+export function waterZoneLook(zoneId) {
+  return WATER_ZONE_LOOKS[zoneId] || null;
+}
+
+// What the current zone ships with. The panel measures "dirty" against this,
+// not against the baseline — in an overridden zone every one of its authored
+// keys would otherwise read as an unsaved edit.
+export function waterZoneBaseline() {
+  return { ...WATER_DEV_DEFAULTS, ...(WATER_ZONE_LOOKS[activeZoneId] || {}) };
+}
+
+// Called on every zone change. Panel edits are deliberately discarded on
+// travel: the knobs describe one map's water, not a global session state.
+export function applyWaterZoneLook(zoneId) {
+  activeZoneId = zoneId;
+  Object.assign(waterDev, WATER_DEV_DEFAULTS, WATER_ZONE_LOOKS[zoneId] || {});
+}
+
+// "Reset" in the panel means back to what this zone ships with, not back to
+// the baseline — otherwise resetting in an overridden zone would silently
+// change which water you are looking at.
 export function resetWaterDev() {
-  Object.assign(waterDev, WATER_DEV_DEFAULTS);
+  Object.assign(waterDev, WATER_DEV_DEFAULTS, WATER_ZONE_LOOKS[activeZoneId] || {});
 }

@@ -30,7 +30,7 @@
 
 .stage {
   position: absolute;
-  inset: 0 0 56dvh;
+  inset: 0 0 58dvh;
   min-height: 0;
   pointer-events: none;
 }
@@ -140,10 +140,11 @@
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
   color: rgba(238, 227, 202, 0.72);
   font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
   backdrop-filter: blur(9px);
   pointer-events: none;
 }
@@ -228,7 +229,7 @@
   inset: auto 0 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  height: 56dvh;
+  height: 58dvh;
   min-height: 0;
   overflow: hidden;
   border-top: 1px solid rgba(191, 152, 81, 0.48);
@@ -270,15 +271,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 59px;
-  padding: 13px 19px 10px;
+  gap: 12px;
+  min-height: 54px;
+  padding: 11px 18px 10px;
   border-bottom: 1px solid rgba(191, 152, 81, 0.24);
+}
+
+/* The bottom sheet has ~250px to spend on everything that is not the inquiry
+   log, so the header ornament and eyebrow only earn their space beside a
+   full-height notebook. */
+.notebookMark,
+.notebookEyebrow {
+  display: none;
 }
 
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 42px;
+  min-height: 46px;
   padding: 0 18px;
   border-bottom: 1px solid rgba(191, 152, 81, 0.24);
 }
@@ -339,7 +349,13 @@
   z-index: 50;
   right: 16px;
   bottom: 112px;
-  width: min(350px, calc(100% - 32px));
+  width: min(360px, calc(100% - 32px));
+  /* The dialog is anchored inside the note area but is taller than it; the sheet
+     clips overflow, so cap it against the sheet rather than let the title vanish
+     off the top. */
+  max-height: 44dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 17px;
   border: 1px solid rgba(191, 152, 81, 0.58);
   background: linear-gradient(145deg, rgba(27, 31, 28, 0.99), rgba(9, 13, 14, 0.995));
@@ -392,6 +408,7 @@
   .viewHint {
     left: clamp(25px, 3vw, 48px);
     bottom: clamp(22px, 3vw, 39px);
+    font-size: 11px;
   }
 
   .closeButton {
@@ -415,6 +432,14 @@
     padding: 22px 27px 17px;
   }
 
+  .notebookMark {
+    display: contents;
+  }
+
+  .notebookEyebrow {
+    display: block;
+  }
+
   .tabs {
     min-height: 51px;
     padding: 0 27px;
@@ -427,6 +452,7 @@
   .collectionDecision {
     right: 18px;
     bottom: 124px;
+    max-height: calc(100dvh - 180px);
   }
 }
 
@@ -487,21 +513,26 @@
     padding: 9px 14px max(9px, env(safe-area-inset-bottom));
   }
 
+  .noteHint {
+    display: none;
+  }
+
   .collectionDecision {
     right: 12px;
     bottom: 92px;
     width: calc(100% - 24px);
+    max-height: calc(100dvh - 104px);
     padding: 13px;
   }
 }
 
 @media (max-width: 520px) and (orientation: portrait) {
   .notebook {
-    height: 58dvh;
+    height: 61dvh;
   }
 
   .stage {
-    bottom: 58dvh;
+    bottom: 61dvh;
   }
 
   .stageHeader {
@@ -509,6 +540,15 @@
     left: 17px;
   }
 
+  /* The placeholder in the note field already says this; on a phone the line
+     costs two rows of the inquiry log. */
+  .noteHint {
+    display: none;
+  }
+
+  .noteArea {
+    padding: 10px 16px max(10px, env(safe-area-inset-bottom));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

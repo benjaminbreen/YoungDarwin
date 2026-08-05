@@ -114,6 +114,18 @@ export function examinableFromItem(item, actorId = null) {
   };
 }
 
+// Ambient subjects have no rendered bounds for the camera to measure, so the
+// frame hint is the only size it ever sees. Read the target's own bulk instead
+// of framing a knee-high rock and a standing cactus from the same distance.
+function fieldFrameHint(target) {
+  const height = Number(target?.height);
+  const radius = Number(target?.radius);
+  return {
+    height: Math.max(0.2, Number.isFinite(height) ? height : 0.75),
+    radius: Math.max(0.28, Number.isFinite(radius) ? radius : 0.5),
+  };
+}
+
 export function examinableFromFieldTarget(target, { zoneId = null } = {}) {
   if (!target) return null;
   // A target that names a specimen — a released pear pad, a standing opuntia,
@@ -138,7 +150,7 @@ export function examinableFromFieldTarget(target, { zoneId = null } = {}) {
       collectVerb: 'Take sample',
       frameHint: loosePiece
         ? { height: 0.4, radius: Math.max(0.24, target.radius || 0.4) }
-        : { height: 0.75, radius: Math.max(0.28, target.radius || 0.5) },
+        : fieldFrameHint(target),
       sample,
       fieldTarget: target,
     };
@@ -164,7 +176,7 @@ export function examinableFromFieldTarget(target, { zoneId = null } = {}) {
     uncertainties: ['This is a field observation rather than a curated specimen identification.'],
     collectable: false,
     collectVerb: 'Collect sample',
-    frameHint: { height: 0.75, radius: Math.max(0.28, target.radius || 0.5) },
+    frameHint: fieldFrameHint(target),
     fieldTarget: target,
   };
 }

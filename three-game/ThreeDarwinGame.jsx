@@ -60,6 +60,7 @@ import {
   terrainLookJson,
   terrainLookTuning,
 } from './world/terrainLook';
+import { CAMERA_DEV_DEFAULTS, cameraDev, resetCameraDev } from './camera/cameraDevRuntime';
 import { setCoverageAASupport } from './components/assets/materialStability';
 import {
   getPostGradeRevision,
@@ -3336,11 +3337,138 @@ function CloudShadeDiagnostics() {
   );
 }
 
+// Camera framing knobs, grouped by the mode they belong to. Sliders write the
+// shared cameraDev object, which usePlayerCameraRig reads every frame, so a
+// drag is visible in the same breath. Switch mode with the buttons at the top
+// (or C) and tune while watching.
+const CAMERA_TUNING_GROUPS = [
+  ['Hero · follow', [
+    ['heroFollowBase', 'Turn rate, standing', 0, 4, 0.05],
+    ['heroFollowSpeed', 'Turn rate, walking', 0, 6, 0.05],
+    ['heroFollowSprint', 'Turn rate, sprint', 0, 4, 0.05],
+    ['heroFollowDeadzone', 'Ignored error (rad)', 0, 0.6, 0.01],
+    ['heroFollowKnee', 'Knee width (rad)', 0.02, 1.2, 0.01],
+    ['heroFollowResume', 'Resume ramp (s)', 0, 4, 0.05],
+    ['heroFollowGate', 'Follow gate', 0, 0.5, 0.01],
+    ['heroPitchTarget', 'Resting pitch', -0.3, 1, 0.01],
+    ['heroPitchSettle', 'Pitch recentre', 0, 4, 0.05],
+  ]],
+  ['Hero · framing', [
+    ['heroDistance', 'Default distance (m)', 1, 12, 0.05],
+    ['heroMinDistance', 'Closest (m)', 0.8, 6, 0.05],
+    ['heroMaxDistance', 'Furthest (m)', 2, 18, 0.1],
+    ['heroZoomStep', 'Wheel step (m)', 0.05, 2, 0.01],
+    ['heroLookAhead', 'Lead the run (m)', 0, 4, 0.05],
+    ['heroSprintPull', 'Sprint pull-back', 0, 2.5, 0.05],
+    ['heroSprintLift', 'Sprint lift', 0, 1, 0.01],
+    ['heroSide', 'Shoulder offset', -1.5, 1.5, 0.02],
+    ['heroPivotLift', 'Pivot lift', -0.5, 1.2, 0.02],
+    ['heroPitchScale', 'Pitch range', 0.2, 1.4, 0.02],
+    ['heroPitchOffset', 'Pitch bias', -0.5, 0.5, 0.01],
+    ['heroPitchMin', 'Pitch floor', -1, 0.5, 0.02],
+    ['heroPitchMax', 'Pitch ceiling', 0.2, 1.45, 0.02],
+    ['heroPositionDamping', 'Eye damping', 2, 25, 0.5],
+    ['heroPivotDamping', 'Pivot damping', 2, 25, 0.5],
+    ['heroPivotDampingY', 'Pivot damping, up', 2, 25, 0.5],
+  ]],
+  ['Shoulder', [
+    ['shoulderPositionDamping', 'Eye damping', 2, 25, 0.5],
+    ['shoulderPivotDamping', 'Pivot damping', 2, 25, 0.5],
+    ['shoulderPivotDampingY', 'Pivot damping, up', 2, 25, 0.5],
+  ]],
+  ['First person · look', [
+    ['fpCursorLook', 'Cursor steering', 0, 1, 1],
+    ['fpCursorSpeed', 'Cursor speed', 0.2, 5, 0.05],
+    ['fpCursorDeadzone', 'Dead centre', 0, 0.9, 0.02],
+    ['fpCursorPitch', 'Vertical share', 0, 1.5, 0.05],
+    ['fpPitchScale', 'Pitch gain', 0.5, 3, 0.05],
+    ['fpPitchLimit', 'Pitch limit (rad)', 0.3, 1.5, 0.02],
+    ['fpYawDamping', 'Head smoothing', 0, 30, 0.5],
+    ['fpFovBonus', 'FOV bonus', 0, 15, 0.5],
+    ['fpEyeForward', 'Eye forward (m)', 0, 0.6, 0.01],
+  ]],
+  ['First person · motion', [
+    ['fpBobStride', 'Bob rate (Hz)', 0.2, 3, 0.05],
+    ['fpBobVertical', 'Bob vertical (m)', 0, 0.12, 0.002],
+    ['fpBobLateral', 'Bob lateral (m)', 0, 0.12, 0.002],
+    ['fpBobRoll', 'Bob roll (rad)', 0, 0.05, 0.001],
+    ['fpBreathe', 'Idle breath (m)', 0, 0.05, 0.001],
+    ['fpLandingDip', 'Landing dip (m)', 0, 0.8, 0.01],
+    ['fpRecoilKick', 'Recoil kick (rad)', 0, 0.5, 0.01],
+    ['fpRollScale', 'Turn lean', 0, 5, 0.1],
+    ['fpSwimEyeAbove', 'Swim eye above (m)', -0.2, 0.6, 0.01],
+  ]],
+  ['Shared', [
+    ['occlusionPullIn', 'Occlusion duck-in', 4, 40, 0.5],
+    ['occlusionReturn', 'Occlusion return', 0.5, 20, 0.1],
+    ['dragRotateScale', 'Drag yaw', 0.2, 3, 0.05],
+    ['dragPitchScale', 'Drag pitch', 0.2, 3, 0.05],
+    ['manualHold', 'Manual hold (s)', 0, 10, 0.1],
+    ['topHeightScale', 'Overhead height', 1, 10, 0.1],
+  ]],
+];
+
+const CAMERA_TUNING_MODES = ['shoulder', 'hero', 'first', 'top'];
+
+function CameraTuningSection() {
+  const [, setRevision] = useState(0);
+  const viewMode = useThreeGameStore(state => state.viewMode);
+  const bump = () => setRevision(value => value + 1);
+  return (
+    <>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Camera Tuning</h3>
+        <div className="flex items-center gap-1">
+          <CopyTuningButton pairs={[[cameraDev, CAMERA_DEV_DEFAULTS]]} />
+          <button
+            type="button"
+            onClick={() => { resetCameraDev(); bump(); }}
+            className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
+          >
+            reset
+          </button>
+        </div>
+      </div>
+      <PerfOptionRow
+        label="Mode"
+        options={CAMERA_TUNING_MODES}
+        value={viewMode}
+        onSelect={mode => useThreeGameStore.setState({ viewMode: mode })}
+      />
+      <p className="mb-2 text-[10px] leading-snug text-amber-100/45">
+        Hero and Shoulder share the wheel zoom; hero rescales it into its own band. Cursor steering
+        turns first-person look over to pointer position, with a dead centre so the frame stays
+        clickable.
+      </p>
+      {CAMERA_TUNING_GROUPS.map(([group, knobs]) => (
+        <div key={group} className="mb-2">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-100/60">{group}</div>
+          <div className="grid grid-cols-1 gap-1.5">
+            {knobs.map(([key, label, min, max, step]) => (
+              <DevSlider
+                key={key}
+                label={label}
+                value={cameraDev[key]}
+                min={min}
+                max={max}
+                step={step}
+                format={value => (step >= 1 ? String(value) : value.toFixed(step >= 0.05 ? 2 : 3))}
+                onChange={value => { cameraDev[key] = value; bump(); }}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 const PERF_PANEL_TABS = [
   ['monitor', 'Monitor'],
   ['quality', 'Quality'],
   ['systems', 'Systems'],
   ['visuals', 'Visuals'],
+  ['camera', 'Camera'],
   ['physics', 'Physics'],
 ];
 
@@ -3458,7 +3586,7 @@ function PerformancePanel({
         <h2 className="text-sm font-bold uppercase tracking-wide">Performance</h2>
         <button type="button" onClick={onClose} className="rounded border border-white/10 px-2 py-1 text-xs hover:bg-white/10">Close</button>
       </div>
-      <div className={`mb-3 grid-cols-5 gap-1 rounded border border-amber-100/15 bg-black/20 p-1 ${lightweight ? 'hidden' : 'grid'}`}>
+      <div className={`mb-3 grid-cols-6 gap-1 rounded border border-amber-100/15 bg-black/20 p-1 ${lightweight ? 'hidden' : 'grid'}`}>
         {PERF_PANEL_TABS.map(([id, label]) => (
           <button
             key={id}
@@ -3604,6 +3732,7 @@ function PerformancePanel({
           <SceneCostBreakdown enabled={costProbe} onEnabledChange={onCostProbeChange} metrics={metrics} />
         </>
       )}
+      {activeTab === 'camera' && <CameraTuningSection />}
       {activeTab === 'physics' && (
         <>
           <div className="mb-2">

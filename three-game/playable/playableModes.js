@@ -299,6 +299,22 @@ export const playerControllerProfiles = {
   },
 };
 
+// An animal mode replaces the objective banner: the directive list is Darwin's
+// and means nothing to a tortoise. Same three fields as a directive (see
+// directives.js) — text is the banner line, hint is the controls, detail says
+// what the mode is for.
+const TORTOISE_OBJECTIVE = {
+  text: 'Graze, rest, and cross the highlands as a tortoise',
+  hint: 'Move with WASD. Press 1-3 to eat, sleep, or leave a trace.',
+  detail: 'Nothing is timed and nothing hunts you. The mode is here so you can cross the highlands slowly, low to the ground, and see them in a tortoise\'s colour range.',
+};
+
+const FINCH_OBJECTIVE = {
+  text: 'Fly the island as a finch: feed, perch, keep clear of Darwin',
+  hint: 'W/S climb and sink, A/D carve, Space takes off and lands.',
+  detail: 'From the air the separate landings join up into one island. Feeding is your only need, and Darwin below is the only danger.',
+};
+
 export const playableModes = {
   darwin: {
     id: 'darwin',
@@ -320,6 +336,7 @@ export const playableModes = {
     narrator: PLAYABLE_NARRATOR_PROFILES.tortoise,
     toolbar: ANIMAL_TOOLBAR,
     abilities: [],
+    objective: TORTOISE_OBJECTIVE,
     // Deliberately heightened, interpretive RGB approximation of chelonian
     // spectral discrimination. The screen and source textures contain no
     // ultraviolet reflectance, so violet remains a legible short-wave proxy
@@ -359,6 +376,7 @@ export const playableModes = {
     narrator: PLAYABLE_NARRATOR_PROFILES.finch,
     toolbar: ANIMAL_TOOLBAR,
     abilities: ['fly'],
+    objective: FINCH_OBJECTIVE,
     // A flier shouldn't start pinned to whichever map edge the specimen
     // actor happens to perch on — spawn at the region's centre instead.
     spawnAtCenter: true,

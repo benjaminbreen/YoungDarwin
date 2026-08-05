@@ -45,6 +45,22 @@ export const BEACH_FIND_VARIANTS = {
     rollJitter: 0.08,
     contactShadow: 0.28,
   },
+  // Procedural rather than a GLB: the same rig as the reef schools, posed and
+  // bleached. Low weight — a dead fish on the strandline should be a find, not
+  // furniture.
+  strandedParrotfish: {
+    id: 'stranded-parrotfish',
+    procedural: 'strandedParrotfish',
+    inspectableType: 'stranded_parrotfish',
+    weight: 0.12,
+    scale: [0.92, 1.35],
+    lift: 0.012,
+    // Authored swimming upright; roll it onto its flank on the sand.
+    baseRotation: [0, 0, Math.PI / 2],
+    pitchJitter: 0.1,
+    rollJitter: 0.22,
+    contactShadow: 0.26,
+  },
   lowPolyStarfish: {
     id: 'low-poly-starfish',
     assetId: 'shoreLowPolyStarfish',
@@ -81,7 +97,8 @@ function decorateBeachFind(item, variant, layerId, seed, index) {
     id: `${layerId}-${variant.id}-${index}`,
     variantId: variant.id,
     assetId: variant.assetId,
-    path: assetPath(variant.assetId),
+    procedural: variant.procedural || null,
+    path: variant.assetId ? assetPath(variant.assetId) : null,
     inspectableType: variant.inspectableType,
     x: item.x,
     y: item.y + (variant.lift || 0),
@@ -97,8 +114,8 @@ function decorateBeachFind(item, variant, layerId, seed, index) {
   };
 }
 
-export function isBeachFindBiome(biome) {
-  return BEACH_BIOMES.has(biome);
+export function isBeachFindBiome(biome, biomes = BEACH_BIOMES) {
+  return biomes.has(biome);
 }
 
 export function buildBeachFindLayer(zoneId, {
@@ -108,13 +125,17 @@ export function buildBeachFindLayer(zoneId, {
   bounds,
   accept = null,
   variants = BEACH_FIND_VARIANTS,
+  // Zones whose sand carries its own biome names (the white-sand reefs) pass
+  // their own set rather than being forced into the default four.
+  biomes = BEACH_BIOMES,
   maxGrade = 0.42,
   maxVisibleDistance = 58,
   loadTier = 1,
 } = {}) {
+  const biomeSet = biomes instanceof Set ? biomes : new Set(biomes);
   const variantList = Object.values(variants)
-    .map(variant => ({ ...variant, path: assetPath(variant.assetId) }))
-    .filter(variant => variant.path);
+    .map(variant => ({ ...variant, path: variant.assetId ? assetPath(variant.assetId) : null }))
+    .filter(variant => variant.path || variant.procedural);
   if (!bounds || !variantList.length || count <= 0) {
     return { id, zoneId, items: [], maxVisibleDistance, loadTier };
   }
@@ -123,7 +144,7 @@ export function buildBeachFindLayer(zoneId, {
     scale: [1, 1],
     maxGrade,
     accept: (biome, x, z, y) => {
-      if (!isBeachFindBiome(biome)) return false;
+      if (!isBeachFindBiome(biome, biomeSet)) return false;
       return accept ? accept(biome, x, z, y) : true;
     },
   });
@@ -132,6 +153,6 @@ export function buildBeachFindLayer(zoneId, {
       const variant = weightedPick(variantList, seededRandom(seed * 1000 + index, 41));
       return decorateBeachFind(item, variant, id, seed, index);
     })
-    .filter(item => item.path);
+    .filter(item => item.path || item.procedural);
   return { id, zoneId, items, maxVisibleDistance, loadTier };
 }

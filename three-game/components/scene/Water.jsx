@@ -24,7 +24,7 @@ import {
 import { sunDirection, skyState } from '../../world/celestial';
 import { WATER_LEVEL } from '../../world/water';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
-import { waterDev } from '../../world/waterDevRuntime';
+import { applyWaterZoneLook, waterDev } from '../../world/waterDevRuntime';
 import { onPropEvent } from '../../physics/props/propEvents';
 import { getZonePropWaterInfluences } from '../../physics/props/propRuntime';
 import {
@@ -2906,6 +2906,12 @@ function WaterSurface({
   // membership immediately rather than waiting out the refresh counter.
   useEffect(() => {
     markReflectionSceneDirty();
+  }, [currentZoneId]);
+
+  // Layout, not effect: the uniform drive reads waterDev on the next frame, and
+  // a zone with an authored look must not render one frame of the baseline.
+  useLayoutEffect(() => {
+    applyWaterZoneLook(currentZoneId);
   }, [currentZoneId]);
 
   // In zones whose terrain sits entirely above sea level across the detailed

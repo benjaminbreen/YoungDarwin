@@ -149,8 +149,24 @@ export const locations = [
     // `defaultSpawn`, so editing postOfficeBay/terrain.js alone does nothing —
     // the two must be kept in step.
     playerStart: [-8.43, 0, 25.02],
-    specimens: ['barnacle','lavalizard','lavagull','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
+    specimens: ['barnacle','lavalizard','lavagull','parrotfish','mantaRay','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
     specimenPlacements: [
+      {
+        // Shallowest submerged spot in the cove: the seabed here is -1.35,
+        // so the fish sits in the last half-metre of water.
+        instanceId: 'post-office-parrotfish-cove',
+        specimenId: 'parrotfish',
+        position: [-16, 0, -11],
+        behavior: 'still',
+        sceneScale: 0.85,
+      },
+      {
+        instanceId: 'post-office-manta-anchorage',
+        specimenId: 'mantaRay',
+        position: [4, 0, -28],
+        behavior: 'still',
+        sceneScale: 0.9,
+      },
       {
         instanceId: 'post-office-lava-lizard-west',
         specimenId: 'lavalizard',
@@ -404,8 +420,24 @@ export const locations = [
     color: '#5f9ea0',
     type: 'beach',
     validMoves: ['W','E','SW','S'],
-    specimens: ['frigatebird','booby','seaLion','lavagull','scalesiavillosa','candelabracactus','manzanillo'],
+    specimens: ['frigatebird','booby','seaLion','lavagull','parrotfish','mantaRay','scalesiavillosa','candelabracactus','manzanillo'],
     specimenPlacements: [
+      {
+        instanceId: 'north-shore-parrotfish',
+        specimenId: 'parrotfish',
+        position: [-8, 0, -20],
+        behavior: 'still',
+        sceneScale: 0.9,
+      },
+      {
+        // Out where the black-sand shelf drops away and there is room
+        // for a three-metre animal to turn.
+        instanceId: 'north-shore-manta',
+        specimenId: 'mantaRay',
+        position: [0, 0, -34],
+        behavior: 'still',
+        sceneScale: 1,
+      },
       {
         specimenId: 'frigatebird',
         position: [-30, 0, -13.5],
@@ -2503,6 +2535,32 @@ export const locations = [
     validMoves: ['N','W'],
     playerStart: [0, 0, -8],
     specimens: ['greenTurtle','mantaRay','parrotfish'],
+    specimenPlacements: [
+      {
+        // Out past the waterline, in wadeable water — the fallback spawn put
+        // this fish on dry sand a few paces from the player.
+        instanceId: 'southern-reefs-parrotfish-trough',
+        specimenId: 'parrotfish',
+        position: [-4, 0, 36],
+        behavior: 'still',
+        sceneScale: 1.05,
+      },
+      {
+        instanceId: 'southern-reefs-parrotfish-outer',
+        specimenId: 'parrotfish',
+        position: [11, 0, 33],
+        behavior: 'still',
+        sceneScale: 0.92,
+      },
+      {
+        // Over the drop-off: a manta needs depth under it and room to turn.
+        instanceId: 'southern-reefs-manta',
+        specimenId: 'mantaRay',
+        position: [-2, 0, 42],
+        behavior: 'still',
+        sceneScale: 1,
+      },
+    ],
     npcs: [],
     boundaries: { south: 'ocean' },
     discoveries: [

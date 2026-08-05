@@ -12,6 +12,10 @@ import { getRegionDisplayName } from '../../game-core/regionMaps';
 // runtime read and write the same stored choice.
 const AUDIO_PREFERENCE_KEY = 'darwin-soundscape-enabled';
 
+// Kept as literals rather than read from playableModes: the launch menu must not
+// pull the runtime module graph into the splash bundle.
+const DEEP_LINKABLE_MODE_IDS = new Set(['darwin', 'finch', 'tortoise']);
+
 // The saved-session read has to happen after mount (localStorage is unavailable
 // during the server render, and reading it in a state initializer would desync
 // hydration) but before the browser paints, or the menu visibly reflows as the
@@ -42,9 +46,13 @@ const ThreeDarwinGame = dynamic(loadThreeRuntime, {
   ),
 });
 
-export function ThreeLaunchShell() {
+export function ThreeLaunchShell({ initialModeId = null }) {
   const [launchState, setLaunchState] = useState('menu');
-  const [runtimeModeId, setRuntimeModeId] = useState(null);
+  // A deep link (/darwin, /finch, /tortoise) skips the menu and drops straight
+  // into that mode's loading screen. Exiting still lands on the menu.
+  const [runtimeModeId, setRuntimeModeId] = useState(
+    DEEP_LINKABLE_MODE_IDS.has(initialModeId) ? initialModeId : null,
+  );
   const [multiplayerSession, setMultiplayerSession] = useState(null);
   const [interactiveReady, setInteractiveReady] = useState(false);
   // Read lazily on mount rather than during render so the server-rendered shell

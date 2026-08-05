@@ -1092,6 +1092,33 @@ export const wildlifeCatalog = {
       startleCooldown: 2.6,
     },
   },
+  parrotfish: {
+    id: 'parrotfish',
+    englishName: 'Parrotfish',
+    latinName: 'Scarus sp.',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    render: { type: 'proceduralParrotfish' },
+    // Every fauna controller walks on land, so the collectible fish holds
+    // station like the turtle and the sea lion and gets its life from the rig
+    // instead. `aquatic` keeps the spawn clamp from marching it up the beach.
+    aquatic: true,
+    collisionRadius: 0.3,
+    interactionHeight: 0.3,
+  },
+  mantaray: {
+    id: 'mantaray',
+    englishName: 'Giant manta',
+    latinName: 'Mobula birostris',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    render: { type: 'proceduralManta' },
+    // Flies rather than walks, so like the parrotfish it holds its own station
+    // and no fauna controller touches it.
+    aquatic: true,
+    collisionRadius: 1.6,
+    interactionHeight: 1.1,
+  },
   greenturtle: {
     id: 'greenturtle',
     assetId: 'greenTurtle',
@@ -1145,6 +1172,10 @@ export function getWildlifeAssetId(input) {
 
 export function getWildlifeRenderProfile(input) {
   return getWildlifeSpecies(input)?.render || null;
+}
+
+export function isAquaticWildlife(input) {
+  return Boolean(getWildlifeSpecies(input)?.aquatic);
 }
 
 export function getWildlifeCollisionRadius(input) {

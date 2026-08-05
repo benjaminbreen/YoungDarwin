@@ -1,4 +1,6 @@
 import { getModelAsset } from '../../modelAssets';
+import { parrotfishSchool } from './parrotfishSchools';
+import { mantaCruiser } from './mantaCruisers';
 import {
   getPostOfficeBayBasaltBlocks,
   getPostOfficeBayOpuntiaHazards,
@@ -601,10 +603,63 @@ function buildSurfaceLitter() {
   ];
 }
 
+// Cove life. The bay floor drops to -4 beyond the sandbar, so the adults
+// cruise the outer anchorage and the parrotfish stay in the shallow inner
+// cove where a wader can see them.
+function buildSwimmers() {
+  return {
+    schools: [
+      parrotfishSchool('post-office-cove-parrotfish', {
+        variant: 'initial',
+        count: 12,
+        center: [0, -9],
+        radius: 4.6,
+        pathRadiusX: 13,
+        pathRadiusZ: 4,
+        y: [-1.45, -1.28],
+        speed: 0.2,
+        scale: [0.6, 0.85],
+        verticalWander: 0.02,
+      }),
+      parrotfishSchool('post-office-east-parrotfish', {
+        count: 8,
+        center: [16, -12],
+        radius: 3.6,
+        pathRadiusX: 7,
+        pathRadiusZ: 4,
+        y: [-1.55, -1.35],
+        speed: 0.18,
+        scale: [0.55, 0.8],
+        verticalWander: 0.02,
+      }),
+    ],
+    cruisers: [
+      mantaCruiser('post-office-manta', {
+        orbit: { cx: 0, cz: -30, rx: 22, rz: 4 },
+        y: -1.95,
+        bob: 0.16,
+        speed: 0.6,
+        scale: 0.9,
+        direction: 1,
+      }),
+      mantaCruiser('post-office-manta-west', {
+        orbit: { cx: -30, cz: -22, rx: 8, rz: 10 },
+        y: -1.7,
+        bob: 0.12,
+        speed: 0.48,
+        scale: 0.7,
+        direction: -1,
+        phase: 2.6,
+      }),
+    ],
+  };
+}
+
 export function buildPostOfficeBayEcology() {
   const flora = buildFlora();
   const interactiveFlora = buildInteractiveFlora(flora);
   return {
+    swimmers: buildSwimmers(),
     zoneId: POST_OFFICE_BAY,
     // Stage GLB decoding after the terrain and collidable hero rocks are ready.
     // Procedural litter is lightweight and appears in the first detail tier.

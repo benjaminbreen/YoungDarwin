@@ -1,10 +1,17 @@
+import { canonicalSpecimenId } from '../utils/canonicalIds';
 import { baseSpecimens } from '../data/specimens';
 import { getRegionMap, getRegionSpecimenSpawns, regionMaps } from './regionMaps';
 import { currentZoneId, getZone, getZoneSpecimenSpawns } from './zones';
 import type { SpecimenId, ZoneId, ZoneSpecimenSpawn } from './types';
 
+// Spawn ids arrive canonicalised (lower-cased, punctuation stripped) while a
+// few catalogue entries are still authored in camelCase, so an exact match
+// silently dropped those species from their zones.
 export function getSpecimenById(specimenId: SpecimenId) {
-  return baseSpecimens.find(specimen => specimen.id === specimenId) || null;
+  const exact = baseSpecimens.find(specimen => specimen.id === specimenId);
+  if (exact) return exact;
+  const canonical = canonicalSpecimenId(specimenId);
+  return baseSpecimens.find(specimen => canonicalSpecimenId(specimen.id) === canonical) || null;
 }
 
 export function specimenActorId(zoneId: ZoneId, localActorId: string) {

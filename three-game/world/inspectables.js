@@ -42,6 +42,7 @@ export const inspectableCatalog = {
   turret_shell: { id: 'turret_shell', kind: 'specimen', englishName: 'Turret shell', latinName: 'Turritellidae / Cerithioidea shore shell', category: 'Marine invertebrate sign', rarity: 'uncommon' },
   junonia_shell: { id: 'junonia_shell', kind: 'specimen', englishName: 'Spotted volute shell', latinName: 'Volutidae shell', category: 'Marine invertebrate sign', rarity: 'rare' },
   shore_starfish: { id: 'shore_starfish', kind: 'specimen', englishName: 'Sea star', latinName: 'Asteroidea', category: 'Animal', rarity: 'uncommon' },
+  stranded_parrotfish: { id: 'stranded_parrotfish', specimenId: 'parrotfish', kind: 'specimen', englishName: 'Stranded parrotfish', latinName: 'Scarus sp., beached on the falling tide', category: 'Animal', rarity: 'uncommon' },
   manzanillo: { id: 'manzanillo', specimenId: 'manzanillo', kind: 'plant', englishName: 'Manzanillo', latinName: 'Hippomane mancinella', category: 'Plant', rarity: 'rare' },
   crab_prop: { id: 'crab_prop', kind: 'specimen', englishName: 'Sally Lightfoot crab', latinName: 'Grapsus grapsus', category: 'Animal', rarity: 'common' },
   // Watkins Camp artifacts — relics of Patrick Watkins's 1807-1810 homestead.
