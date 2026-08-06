@@ -479,7 +479,7 @@ export function PropVisual({ visual, assetId, offsetY = 0, propId }) {
   if (visual === 'shellFragment') return <ShellFragmentVisual />;
   if (visual === 'jug') return <JugVisual />;
   if (visual === 'symsFieldBottle') return <SymsFieldBottleVisual />;
-  if (visual === 'symsFieldCase') return <SymsFieldCaseVisual propId={propId} />;
+  if (visual === 'symsFieldCase') return <SymsFieldCaseVisual propId={propId} offsetY={offsetY} />;
   if (visual === 'looseBoard') return <LooseBoardVisual />;
   if (visual === 'cabinChair') return <CabinChairVisual />;
   if (visual === 'cabinStool') return <CabinStoolVisual />;

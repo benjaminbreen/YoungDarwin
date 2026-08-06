@@ -412,6 +412,8 @@ export const baseSpecimens = [
 
   {
     id: 'galapagoscotton',
+    examineHeight: 3.6,
+    examineRadius: 1.9,
     name: 'Galapagos Cotton',
     latin: 'Gossypium darwinii',
     ontology: 'Plant',
@@ -558,6 +560,8 @@ export const baseSpecimens = [
 
   {
     id: 'scalesiavillosa',
+    examineHeight: 1.4,
+    examineRadius: 0.9,
     name: 'Longhaired Scalesia',
     latin: 'Scalesia villosa',
     ontology: 'Plant',
@@ -586,6 +590,8 @@ export const baseSpecimens = [
 
   {
     id: 'galapagosjusticia',
+    examineHeight: 0.8,
+    examineRadius: 0.6,
     name: 'Galápagos Justicia',
     latin: 'Justicia galapagana',
     ontology: 'Plant',
@@ -614,6 +620,8 @@ export const baseSpecimens = [
 
   {
     id: 'crotonscouleri',
+    examineHeight: 1.75,
+    examineRadius: 1.2,
     name: 'Chala',
     latin: 'Croton scouleri',
     ontology: 'Plant',
@@ -642,6 +650,8 @@ export const baseSpecimens = [
 
   {
     id: 'resurrectionfern',
+    examineHeight: 0.42,
+    examineRadius: 0.32,
     name: 'Resurrection Fern',
     latin: 'Pleopeltis polypodioides',
     ontology: 'Plant',
@@ -670,6 +680,8 @@ export const baseSpecimens = [
 
   {
     id: 'sesuviumportulacastrum',
+    examineHeight: 0.38,
+    examineRadius: 0.18,
     name: 'Galápagos Carpetweed',
     latin: 'Sesuvium portulacastrum',
     ontology: 'Plant',
@@ -698,6 +710,8 @@ export const baseSpecimens = [
 
   {
     id: 'candelabracactus',
+    examineHeight: 3.2,
+    examineRadius: 1.05,
     name: 'Candelabra Cactus',
     latin: 'Jasminocereus thouarsii var. thouarsii',
     ontology: 'Plant',
@@ -726,6 +740,8 @@ export const baseSpecimens = [
 
   {
     id: 'manzanillo',
+    examineHeight: 4.6,
+    examineRadius: 1.6,
     name: 'Manzanillo / Poison Apple',
     latin: 'Hippomane mancinella',
     ontology: 'Plant',
@@ -1124,6 +1140,7 @@ export const baseSpecimens = [
 
   {
   id: 'seaurchin',
+  examineRadius: 0.24,
   name: 'Slate-pencil Urchin',
   latin: 'Eucidaris galapagensis',
   ontology: 'Animal',
@@ -1155,6 +1172,7 @@ export const baseSpecimens = [
 
   {
     id: 'basalt',
+    examineRadius: 0.62,
     name: 'Vesicular Basalt Exposure',
     latin: 'Lava basaltica',
     ontology: 'Mineral',
@@ -1184,6 +1202,7 @@ export const baseSpecimens = [
 
   {
     id: 'scoria',
+    examineRadius: 0.32,
     name: 'Red Scoria',
     latin: 'Scoria rubra',
     ontology: 'Mineral',
@@ -1213,6 +1232,7 @@ export const baseSpecimens = [
 
   {
     id: 'tuff',
+    examineRadius: 0.32,
     name: 'Volcanic Tuff',
     latin: 'Tufum volcanicum',
     ontology: 'Mineral',
@@ -1242,6 +1262,7 @@ export const baseSpecimens = [
 
   {
     id: 'ironoxidecrust',
+    examineRadius: 0.26,
     name: 'Iron-stained Crust',
     latin: 'Ferrugo oxidata',
     ontology: 'Mineral',
@@ -1300,6 +1321,8 @@ export const baseSpecimens = [
 
   {
     id: 'mangrove',
+    examineHeight: 9,
+    examineRadius: 4.5,
     name: 'Island Mangrove Seedling',
     latin: 'Rhizophora sp.',
     ontology: 'Plant',
@@ -1391,6 +1414,7 @@ export const baseSpecimens = [
 
   {
     id: 'hammerhead',
+    examineRadius: 1.15,
     name: 'Scalloped Hammerhead Shark',
     latin: 'Sphyrna lewini',
     ontology: 'Animal',
@@ -1478,6 +1502,7 @@ export const baseSpecimens = [
 
   {
     id: 'olivine',
+    examineRadius: 0.22,
     name: 'Olivine',
     latin: 'Chrysolite',
     ontology: 'Mineral',
@@ -1977,6 +2002,7 @@ export const baseSpecimens = [
 
 {
   id: 'meteoriron',
+  examineRadius: 0.08,
   name: 'Meteoric Iron Fragment',
   latin: 'Ferrum Meteoriticum',
   ontology: 'Object',
@@ -2006,6 +2032,7 @@ export const baseSpecimens = [
 
 {
   id: 'solidifiedsulphur',
+  examineRadius: 0.24,
   name: 'Solidified Sulphur',
   latin: 'Sulphuris Depositum',
   ontology: 'Object',

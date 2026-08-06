@@ -43,6 +43,8 @@ import { skyState } from './world/celestial';
 import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
 import { WATER_LEVEL } from './world/water';
+import { waterDev } from './world/waterDevRuntime';
+import { dprCapForZone } from './world/zoneRenderBudget';
 import { CLOUD_SHADE_DEFAULTS, cloudShadeTuning, fogAtmosphereUniforms } from './world/fogAtmosphere'; // patches the shared fog chunks; must run before first shader compile
 import {
   getSolarLookRevision,
@@ -1215,7 +1217,9 @@ function buildDprLadder(maxDpr) {
   // Sub-1x rungs matter most on the tiers that already cap at 1.25x: without
   // them the ladder held only two steps and the controller ran out of room
   // before it could recover a frame budget.
-  for (const candidate of [2, 1.5, 1.25, 1, 0.85, 0.75]) {
+  // 0.85 is the floor. Below that the image is soft enough to read as a
+  // rendering fault rather than as a frame-rate trade.
+  for (const candidate of [2, 1.5, 1.25, 1, 0.85]) {
     if (candidate <= maxDpr + 1e-3) rungs.push(candidate);
   }
   if (!rungs.length || rungs[0] < maxDpr - 1e-3) rungs.unshift(maxDpr);
@@ -2437,7 +2441,10 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
       night: s.night,
       overcast: weatherEnv.overcast,
       mist: weatherEnv.mistAmount,
-      underwaterAmount: store.underwaterCamera?.amount || 0,
+      // Sea air: the trace of the underwater grade that reads well on land.
+      // Taking it here rather than through uwForce keeps the underwater post
+      // effect on its early-out and the water shader out of its Snell branch.
+      underwaterAmount: Math.max(store.underwaterCamera?.amount || 0, waterDev.seaAir),
     });
     const grade = gradeRef.current || (gradeRef.current = { ...target });
     grade.saturation = MathUtils.damp(grade.saturation, target.saturation, 2.5, delta);
@@ -2523,7 +2530,7 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
         />
       )}
       {enabled && <HeatHazePostEffect enabled={!interiorDefinition} underwaterAmount={underwater} />}
-      {enabled && <UnderwaterPostEffect amount={underwater} clarity={34 - underwater * 8} />}
+      {enabled && <UnderwaterPostEffect amount={underwater} />}
       <ExaminationDepthOfField />
       {/* Only when nothing is being examined — two DoF passes would fight over
           the same circle-of-confusion buffer and double the cost. */}
@@ -2579,7 +2586,10 @@ function UnderwaterCameraTracker({ onChange }) {
   useFrame(() => {
     const belowSurface = WATER_LEVEL - camera.position.y;
     const raw = Math.min(1, Math.max(0, (belowSurface + 0.03) / 0.95));
-    const amount = raw * raw * (3 - raw * 2);
+    // Swimming keeps the camera within a few centimetres ABOVE the waterline,
+    // so every underwater knob reads as dead in normal play. The ?waterdev
+    // override forces the treatment on from dry land.
+    const amount = Math.max(raw * raw * (3 - raw * 2), waterDev.uwForce || 0);
     // Math.min/max pass NaN straight through, and the change test below compares
     // false for NaN, so a non-finite camera used to publish NaN to the store and
     // to the glare overlay's inline opacity. Hold the last good value instead.
@@ -3946,7 +3956,12 @@ export default function ThreeDarwinGame({
       transitionRenderBudgetActive,
     ],
   );
-  const configuredDpr = useMemo(() => dprForMode(perfSettings.dprMode), [perfSettings.dprMode]);
+  const configuredDpr = useMemo(() => {
+    const [min, max] = dprForMode(perfSettings.dprMode);
+    // Ocean-heavy maps spend their budget on a surface that hides softness;
+    // inland maps keep the full cap for vegetation and distant silhouettes.
+    return [min, dprCapForZone(currentZoneId, max)];
+  }, [currentZoneId, perfSettings.dprMode]);
   // When the adaptive controller has stepped resolution, pin the Canvas dpr
   // prop to exactly that value so R3F's per-render configure() re-asserts the
   // adaptive choice instead of reverting to the configured cap.

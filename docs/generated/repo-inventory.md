@@ -266,6 +266,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `manzanillo` | true | false | `/assets/models/nature/runtime-manzanillo.glb` | _none_ | 3000 |
 | `darwiniothamnusShrub` | true | false | `/assets/models/nature/runtime-darwiniothamnus.glb` | _none_ | 18000 |
 | `scalesiaPedunculataTree` | true | false | `/assets/models/nature/runtime-scalesia-pedunculata-tree.glb` | _none_ | 8000 |
+| `coral` | true | false | `/assets/models/nature/runtime-coral-cluster.glb` | _none_ | 4000 |
 | `mangroveTree` | true | false | `/assets/models/nature/runtime-mangrove-tree.glb` | _none_ | 19037 |
 | `candelabracactus` | true | false | `/assets/models/nature/runtime-candelabra-cactus.glb` | _none_ | 11321 |
 | `barnacle` | true | false | `/assets/models/nature/runtime-barnacle-cluster.glb` | _none_ | 5000 |

@@ -3,6 +3,7 @@ import {
   WATER_LEVEL,
   crackNoise,
   elevationNoise,
+  oceanEdgeFalloff,
   terrainFineDetail,
   terrainSurfaceNoise,
 } from '../../terrainShared';
@@ -200,10 +201,9 @@ export function desolateOutcropHeight(x, z, { movementSurface = false } = {}) {
   );
   y += northSlab * (movementSurface ? 0.08 : 0.16);
 
-  const deepN = THREE.MathUtils.smoothstep(-z, 33, 47);
-  const deepE = THREE.MathUtils.smoothstep(x, 36, 50);
-  const deepW = THREE.MathUtils.smoothstep(-x, 35, 49);
-  const exposedDrop = Math.max(deepN, deepE, deepW) * (1 - terrain * 0.82);
+  const exposedDrop = oceanEdgeFalloff(x, z, {
+    north: 32, east: 35, west: 34, ramp: 14, warp: 8.5,
+  }) * (1 - terrain * 0.82);
   y -= exposedDrop * 2.85;
 
   const seamA = 1 - THREE.MathUtils.smoothstep(Math.abs(crackNoise(x * 0.16 + 12, z * 0.54 - 4)), 0.015, 0.13);

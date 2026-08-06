@@ -8,6 +8,8 @@ import { getRuntimePlayerMotion, getRuntimePlayerPose, useThreeGameStore } from 
 import { lightingDebugEnabled, sceneHandleEnabled } from '../../runtimeDebug';
 import { siderealAngle, skyState, shortestHourDelta, smoothstep } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { stirUnderwaterClarity } from '../../world/seaState';
+import { waterDev } from '../../world/waterDevRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { fogAtmosphereUniforms, driveCloudShadeUniforms } from '../../world/fogAtmosphere';
 import { driveGroundCoverLight } from '../../world/groundCoverLight';
@@ -2549,14 +2551,27 @@ export function SkyController({
       const lum = _color.r * 0.2126 + _color.g * 0.7152 + _color.b * 0.0722;
       if (lum > maxLum) _color.multiplyScalar(maxLum / lum);
     }
-    if (underwaterAmount > 0.001) {
+    // Sea air: a trace of the submerged fog colour survives above the
+    // waterline. This is the cheap half of what uwForce used to buy — colour
+    // and density only, with no full-screen pass behind it.
+    const airBlend = Math.max(underwaterAmount, waterDev.seaAir);
+    if (airBlend > 0.001) {
       _color
-        .lerp(C.fogUnderwater, underwaterAmount * (0.74 + daylight * 0.12))
-        .lerp(C.fogUnderwaterDeep, underwaterAmount * underwaterAmount * 0.22);
+        .lerp(C.fogUnderwater, airBlend * (0.74 + daylight * 0.12))
+        .lerp(C.fogUnderwaterDeep, airBlend * airBlend * 0.22);
     }
     if (scene.fog) scene.fog.color.copy(_color);
     if (scene.fog?.isFogExp2) {
-      scene.fog.density = THREE.MathUtils.lerp(weatherEnv.fogDensity, 0.056, underwaterAmount);
+      // FogExp2 e-folds at 1/density, so the zone's authored visibility drives
+      // it directly and the scene fog cannot disagree with the underwater post
+      // effect about how far a swimmer can see.
+      // Held a little longer than the authored range because the post effect
+      // fogs the same pixels again; the two together land near the number.
+      const underwaterDensity = 1 / (stirUnderwaterClarity(waterDev.uwClarity, {
+        rain: weatherEnv.rainIntensity,
+        overcast,
+      }) * 1.4);
+      scene.fog.density = THREE.MathUtils.lerp(weatherEnv.fogDensity, underwaterDensity, airBlend);
     }
     // Drive the shared height-fog/in-scatter uniforms (see fogAtmosphere.js).
     {

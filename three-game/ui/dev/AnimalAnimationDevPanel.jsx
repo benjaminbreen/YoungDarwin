@@ -12,6 +12,10 @@ import { createLavaLizardRig, LAVA_LIZARD_GAIT } from '../../wildlife/reptiles/l
 import { ProceduralFinchPlayer } from '../../components/player/ProceduralFinchPlayer';
 import { ProceduralRacerSnake } from '../../components/player/ProceduralRacerSnake';
 import { PaintedLocustShape } from '../../wildlife/insects/PaintedLocustShape';
+import { SeaUrchinShape } from '../../wildlife/invertebrates/SeaUrchinShape';
+import { ParrotfishShape } from '../../wildlife/fish/ParrotfishShape';
+import { MantaRayShape } from '../../wildlife/fish/MantaRayShape';
+import { HammerheadShape } from '../../wildlife/fish/HammerheadShape';
 import { ExpeditionPanel, GOLD_BUTTON, GOLD_LABEL } from '../expedition/ExpeditionPanel';
 
 const DIRECT_ANIMAL_ASSETS = {
@@ -233,6 +237,59 @@ const PROCEDURAL_ANIMALS = [
     path: 'three-game/wildlife/insects/PaintedLocustShape.jsx',
     modes: PROCEDURAL_LOCUST_MODES,
     previewScale: 1.78,
+  },
+  {
+    // Specimen shapes drive themselves (surge sway, swim rig, drift), so the
+    // lab just mounts the exact component SpecimenActor ships and lets it run.
+    id: 'seaUrchinProcedural',
+    kind: 'procedural',
+    proceduralType: 'shape',
+    ShapeComponent: SeaUrchinShape,
+    specimenId: 'seaurchin',
+    label: 'New Slate-pencil Urchin',
+    source: 'Hand-authored procedural shape',
+    path: 'three-game/wildlife/invertebrates/urchinModel.js',
+    modes: ['live'],
+    previewScale: 5.4,
+  },
+  {
+    id: 'parrotfishProcedural',
+    kind: 'procedural',
+    proceduralType: 'shape',
+    ShapeComponent: ParrotfishShape,
+    specimenId: 'parrotfish',
+    label: 'New Parrotfish',
+    source: 'Hand-authored procedural swim rig',
+    path: 'three-game/wildlife/fish/parrotfishModel.js',
+    modes: ['live'],
+    previewScale: 3.4,
+    previewLift: 0.5,
+  },
+  {
+    id: 'hammerheadProcedural',
+    kind: 'procedural',
+    proceduralType: 'shape',
+    ShapeComponent: HammerheadShape,
+    specimenId: 'hammerhead',
+    label: 'New Scalloped Hammerhead',
+    source: 'Hand-authored procedural swim rig',
+    path: 'three-game/wildlife/fish/hammerheadModel.js',
+    modes: ['live'],
+    previewScale: 1.5,
+    previewLift: 1.0,
+  },
+  {
+    id: 'mantaRayProcedural',
+    kind: 'procedural',
+    proceduralType: 'shape',
+    ShapeComponent: MantaRayShape,
+    specimenId: 'mantaray',
+    label: 'New Giant Manta',
+    source: 'Hand-authored procedural swim rig',
+    path: 'three-game/wildlife/fish/mantaRayModel.js',
+    modes: ['live'],
+    previewScale: 0.42,
+    previewLift: 0.4,
   },
   {
     id: 'lavaLizardProceduralMale',
@@ -478,6 +535,19 @@ function ProceduralReptilePreview({ animal, mode, paused, timeScale }) {
   return (
     <group position={[0, 0.03, 0]} scale={5.2}>
       <primitive object={rig.group} />
+    </group>
+  );
+}
+
+function ProceduralShapePreview({ animal }) {
+  const Shape = animal.ShapeComponent;
+  const specimen = useMemo(
+    () => ({ id: animal.specimenId, instanceId: `lab-${animal.id}`, previewStationary: true }),
+    [animal.id, animal.specimenId],
+  );
+  return (
+    <group position={[0, animal.previewLift ?? 0.03, 0]} scale={animal.previewScale ?? 1}>
+      <Shape specimen={specimen} />
     </group>
   );
 }
@@ -969,6 +1039,11 @@ export function AnimalAnimationDevPanel({ open, onClose }) {
                         mode={selectedClip}
                         paused={paused}
                         timeScale={timeScale}
+                      />
+                    ) : selectedAnimal.proceduralType === 'shape' ? (
+                      <ProceduralShapePreview
+                        key={selectedAnimal.id}
+                        animal={selectedAnimal}
                       />
                     ) : selectedAnimal.proceduralType === 'locust' ? (
                       <ProceduralLocustPreview

@@ -832,6 +832,22 @@ export const modelAssets = {
     targetTriangles: 8000,
     prompt: 'Stylized Galapagos Scalesia pedunculata tree, broad clustered leaves and humid highland canopy form, used sparsely in Floreana highland forest.',
   },
+  // Reuses the reef-garden cluster the Northwest Reef ecology already scatters;
+  // at this scale it reads as a single head a wader can stoop over.
+  coral: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/nature/runtime-coral-cluster.glb',
+    scale: 0.55,
+    rotation: [0, 0, 0],
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.04,
+    materialEmissive: '#0f1d1c',
+    materialEmissiveIntensity: 0.05,
+    targetTriangles: 4000,
+    prompt: 'Optimized stony coral cluster for shallow Floreana reef scenes, used both as scattered reef garden and as a single collectable head.',
+  },
   mangroveTree: {
     enabled: true,
     preload: false,

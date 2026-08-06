@@ -149,7 +149,7 @@ export const locations = [
     // `defaultSpawn`, so editing postOfficeBay/terrain.js alone does nothing —
     // the two must be kept in step.
     playerStart: [-8.43, 0, 25.02],
-    specimens: ['barnacle','lavalizard','lavagull','parrotfish','mantaRay','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
+    specimens: ['barnacle','seaurchin','lavalizard','lavagull','parrotfish','mantaRay','hammerhead','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
     specimenPlacements: [
       {
         // Shallowest submerged spot in the cove: the seabed here is -1.35,
@@ -159,6 +159,16 @@ export const locations = [
         position: [-16, 0, -11],
         behavior: 'still',
         sceneScale: 0.85,
+      },
+      {
+        // Outer anchorage, west of the manta: the floor is flat at -4 here, so
+        // the shark's own circuit keeps it about 1.7 m under the surface —
+        // deep enough to read as a shape in the blue rather than a prop.
+        instanceId: 'post-office-hammerhead-anchorage',
+        specimenId: 'hammerhead',
+        position: [-14, 0, -31],
+        behavior: 'still',
+        sceneScale: 1,
       },
       {
         instanceId: 'post-office-manta-anchorage',
@@ -184,6 +194,18 @@ export const locations = [
         sceneScale: 1.08,
         habitatRadiusX: 3,
         habitatRadiusZ: 2,
+      },
+      {
+        // Knee-deep water just off the landing beach — the seabed here is
+        // -1.66 against a water level of -0.9 — so it is the first thing in
+        // the cove a wader can look down at.
+        instanceId: 'post-office-urchin-landing-shallows',
+        specimenId: 'seaurchin',
+        position: [9.5, 0, -2.2],
+        behavior: 'still',
+        sceneScale: 1,
+        habitatRadiusX: 0.4,
+        habitatRadiusZ: 0.4,
       },
       {
         instanceId: 'post-office-barnacle-east-shore',
@@ -234,6 +256,13 @@ export const locations = [
     specimens: ['crab','basalt','barnacle','galapagoscotton'],
     specimenPlacements: [
       {
+        instanceId: 'alt-post-office-barnacle-shelf',
+        specimenId: 'barnacle',
+        position: [27.9, 0, -4.7],
+        behavior: 'still',
+        sceneScale: 1,
+      },
+      {
         specimenId: 'lavalizard',
         position: [34, 0, -6],
         behavior: 'bask',
@@ -243,7 +272,7 @@ export const locations = [
       },
       {
         specimenId: 'crab',
-        position: [6, 0, 2],
+        position: [6.8, 0, 8.4],
         behavior: 'skitter',
         sceneScale: 1.45,
       },
@@ -290,6 +319,19 @@ export const locations = [
     specimens: ['crab','basalt','galapagoscotton','cactus'],
     specimenPlacements: [
       {
+        // Was a seeded fallback that landed off walkable ground.
+        instanceId: 'post-office-3-basalt',
+        specimenId: 'basalt',
+        position: [-14, 0, 14],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 22,
+          radiusZ: 18,
+          bounds: { minX: -34, maxX: 34, minZ: -28, maxZ: 34 },
+        },
+      },
+      {
         specimenId: 'lavalizard',
         position: [40, 0, -8],
         behavior: 'bask',
@@ -299,7 +341,7 @@ export const locations = [
       },
       {
         specimenId: 'crab',
-        position: [8, 0, -1],
+        position: [10.2, 0, 2.3],
         behavior: 'skitter',
         sceneScale: 1.4,
       },
@@ -545,8 +587,26 @@ export const locations = [
     type: 'wetland',
     playerStart: [-30, 0, 24],
     validMoves: ['W','S','E'],
-    specimens: ['flamingo','frigatebird','booby','lavalizard','sesuviumportulacastrum'],
+    specimens: ['flamingo','frigatebird','booby','lavalizard','flightlesscormorant','sesuviumportulacastrum'],
     specimenPlacements: [
+      {
+        instanceId: 'cormorant-bay-cormorant-west',
+        specimenId: 'flightlesscormorant',
+        position: [-19.5, 0, -12],
+        behavior: 'wary',
+        sceneScale: 1,
+        habitatRadiusX: 6.5,
+        habitatRadiusZ: 3.4,
+      },
+      {
+        instanceId: 'cormorant-bay-cormorant-east',
+        specimenId: 'flightlesscormorant',
+        position: [20.5, 0, -2],
+        behavior: 'still',
+        sceneScale: 0.94,
+        habitatRadiusX: 5.5,
+        habitatRadiusZ: 3,
+      },
       {
         specimenId: 'flamingo',
         position: [-8, 0, -2.5],
@@ -1129,8 +1189,20 @@ export const locations = [
     color: '#bdb76b',
     type: 'coastallava',
     validMoves: ['E','SE','S'],
-    specimens: ['seaLion','marineIguana','feralgoat'],
+    specimens: ['seaLion','marineIguana','feralgoat','solidifiedsulphur'],
     specimenPlacements: [
+      {
+        instanceId: 'black-beach-sulphur-crust',
+        specimenId: 'solidifiedsulphur',
+        position: [20, 0, 0],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 18,
+          radiusZ: 28,
+          bounds: { minX: -4, maxX: 42, minZ: -36, maxZ: 36 },
+        },
+      },
       {
         instanceId: 'black-beach-feral-goat-dune-scrub-1',
         specimenId: 'feralgoat',
@@ -1163,8 +1235,56 @@ export const locations = [
     color: '#696969',
     type: 'lavafield',
     validMoves: ['W','E','SW','S','SE','NW','NE','N'],
-    specimens: ['lavaLizard','basalt','cactus','short_eared_owl','galapagos_racer','galapagospaintedlocust'],
+    specimens: ['lavaLizard','basalt','cactus','short_eared_owl','galapagos_racer','galapagospaintedlocust','olivine','scoria','ironoxidecrust','solidifiedsulphur'],
     specimenPlacements: [
+      {
+        instanceId: 'lava-flats-sulphur',
+        specimenId: 'solidifiedsulphur',
+        position: [4, 0, 22],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 20,
+          radiusZ: 14,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'lava-flats-iron-crust',
+        specimenId: 'ironoxidecrust',
+        position: [18, 0, -4],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 20,
+          radiusZ: 20,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'lava-flats-scoria',
+        specimenId: 'scoria',
+        position: [-14, 0, 10],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 24,
+          radiusZ: 20,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'lava-flats-olivine',
+        specimenId: 'olivine',
+        position: [0, 0, -18],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 26,
+          radiusZ: 20,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
       {
         instanceId: 'lava-flats-lava-lizard-basking-slab-1',
         specimenId: 'lavalizard',
@@ -1267,21 +1387,21 @@ export const locations = [
       {
         instanceId: 'northern-highlands-sicyos-villosus-reconstruction',
         specimenId: 'sicyosvillosus',
-        position: [0, 0, 0],
+        position: [-23.4, 0, 32.4],
         behavior: 'still',
         sceneScale: 1,
       },
       {
         instanceId: 'northern-highlands-delilia-inelegans-reconstruction',
         specimenId: 'deliliainelegans',
-        position: [0, 0, 0],
+        position: [5.7, 0, 38.1],
         behavior: 'still',
         sceneScale: 1,
       },
       {
         instanceId: 'northern-highlands-lecocarpus-pinnatifidus',
         specimenId: 'lecocarpuspinnatifidus',
-        position: [0, 0, 0],
+        position: [-31.1, 0, 13.1],
         behavior: 'still',
         sceneScale: 1,
       },
@@ -1355,8 +1475,32 @@ export const locations = [
     color: '#8fbc8f',
     type: 'cliff',
     validMoves: ['N','W','SW','S'],
-    specimens: ['frigatebird','floreana_mockingbird'],
+    specimens: ['frigatebird','floreana_mockingbird','tuff','ironoxidecrust'],
     specimenPlacements: [
+      {
+        instanceId: 'eastern-cliffs-iron-crust',
+        specimenId: 'ironoxidecrust',
+        position: [4, 0, -4],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 18,
+          radiusZ: 14,
+          bounds: { minX: -36, maxX: 18, minZ: -16, maxZ: 34 },
+        },
+      },
+      {
+        instanceId: 'eastern-cliffs-tuff-bench',
+        specimenId: 'tuff',
+        position: [-8, 0, 8],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 24,
+          radiusZ: 20,
+          bounds: { minX: -36, maxX: 18, minZ: -16, maxZ: 34 },
+        },
+      },
       {
         instanceId: 'eastern-cliffs-frigatebird-rim',
         specimenId: 'frigatebird',
@@ -1425,7 +1569,7 @@ export const locations = [
       {
         instanceId: 'coastal-scrub-lecocarpus-pinnatifidus',
         specimenId: 'lecocarpuspinnatifidus',
-        position: [0, 0, 0],
+        position: [-3.8, 0, 8.9],
         behavior: 'still',
         sceneScale: 1,
       },
@@ -1507,8 +1651,38 @@ export const locations = [
         description: 'Travel north along the lagoon rim toward Devil\'s Crown.',
       },
     },
-    specimens: ['flamingo','frigatebird'],
+    specimens: ['flamingo','frigatebird','flightlesscormorant'],
     specimenPlacements: [
+      {
+        instanceId: 'punta-cormorant-cormorant-west',
+        specimenId: 'flightlesscormorant',
+        position: [-7.5, 0, -24],
+        behavior: 'wary',
+        sceneScale: 1.02,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 3.2,
+      },
+      {
+        instanceId: 'punta-cormorant-cormorant-east',
+        specimenId: 'flightlesscormorant',
+        position: [35, 0, -24],
+        behavior: 'still',
+        sceneScale: 0.96,
+        habitatRadiusX: 5,
+        habitatRadiusZ: 2.8,
+      },
+      {
+        // Pinned rather than left to the seeded fallback, which moves every
+        // time the zone's specimen list changes length. This is the driest
+        // walkable ground in the zone — the rest is lagoon.
+        instanceId: 'punta-cormorant-frigatebird-rim',
+        specimenId: 'frigatebird',
+        position: [-30, 0, 28],
+        behavior: 'wary',
+        sceneScale: 1,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 3.5,
+      },
       {
         specimenId: 'flamingo',
         position: [-28, 0, -7],
@@ -1582,8 +1756,20 @@ export const locations = [
     // Starts on the southern approach, facing north toward the camp bench and
     // lagoon instead of outward toward the map edge.
     playerStart: [23, 0, 25],
-    specimens: ['floreana_giant_tortoise','crab','barnacle','basalt'],
+    specimens: ['floreana_giant_tortoise','crab','barnacle','basalt','olivine'],
     specimenPlacements: [
+      {
+        instanceId: 'western-lava-olivine-seam',
+        specimenId: 'olivine',
+        position: [6, 0, 2],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 28,
+          radiusZ: 26,
+          bounds: { minX: -36, maxX: 38, minZ: -34, maxZ: 34 },
+        },
+      },
       {
         instanceId: 'western-lowlands-tortoise-near-pen',
         specimenId: 'floreana_giant_tortoise',
@@ -1653,14 +1839,14 @@ export const locations = [
       {
         instanceId: 'western-highlands-sicyos-villosus-reconstruction',
         specimenId: 'sicyosvillosus',
-        position: [0, 0, 0],
+        position: [-5.7, 0, -35.9],
         behavior: 'still',
         sceneScale: 1,
       },
       {
         instanceId: 'western-highlands-delilia-inelegans-reconstruction',
         specimenId: 'deliliainelegans',
-        position: [0, 0, 0],
+        position: [11.4, 0, -1.2],
         behavior: 'still',
         sceneScale: 1,
       },
@@ -1688,7 +1874,21 @@ export const locations = [
     color: 'black',
     type: 'highland',
     validMoves: ['N','E','S','W'],
-    specimens: ['floreana_mockingbird'],
+    specimens: ['floreana_mockingbird','tuff'],
+    specimenPlacements: [
+      {
+        instanceId: 'central-highland-tuff-outcrop',
+        specimenId: 'tuff',
+        position: [0, 0, 0],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 30,
+          radiusZ: 28,
+          bounds: { minX: -36, maxX: 36, minZ: -34, maxZ: 34 },
+        },
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -1819,6 +2019,18 @@ export const locations = [
     npcs: [],
     boundaries: {},
     specimenPlacements: [
+      {
+        instanceId: 'rocky-clearing-scoria',
+        specimenId: 'scoria',
+        position: [0, 0, 4],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 28,
+          radiusZ: 22,
+          bounds: { minX: -34, maxX: 34, minZ: -26, maxZ: 30 },
+        },
+      },
       {
         instanceId: 'rocky-clearing-lava-lizard-warm-rocks-1',
         specimenId: 'lavalizard',
@@ -2129,7 +2341,7 @@ export const locations = [
     specimenPlacements: [
       {
         specimenId: 'mangrove',
-        position: [-11.5, 0, -11.8],
+        position: [-10.7, 0, -12.4],
         behavior: 'still',
         sceneScale: 1,
         habitatRadiusX: 5,
@@ -2137,7 +2349,7 @@ export const locations = [
       },
       {
         specimenId: 'floreana_giant_tortoise',
-        position: [10.8, 0, 18.6],
+        position: [10.8, 0, 23.6],
         behavior: 'grazing',
         sceneScale: 1.08,
         habitatRadiusX: 7,
@@ -2173,7 +2385,57 @@ export const locations = [
     color: '#696969',
     type: 'lavafield',
     validMoves: ['N','E','W','S'],
-    specimens: ['lavaLizard'],
+    specimens: ['lavaLizard','ironoxidecrust','solidifiedsulphur','scoria','olivine'],
+    specimenPlacements: [
+      {
+        instanceId: 'southern-volcanic-olivine',
+        specimenId: 'olivine',
+        position: [20, 0, 18],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 18,
+          radiusZ: 16,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'southern-volcanic-scoria',
+        specimenId: 'scoria',
+        position: [-18, 0, -12],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 20,
+          radiusZ: 18,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'southern-volcanic-sulphur-vent',
+        specimenId: 'solidifiedsulphur',
+        position: [-6, 0, 14],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 22,
+          radiusZ: 18,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+      {
+        instanceId: 'southern-volcanic-iron-crust',
+        specimenId: 'ironoxidecrust',
+        position: [12, 0, -6],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 24,
+          radiusZ: 20,
+          bounds: { minX: -38, maxX: 38, minZ: -36, maxZ: 36 },
+        },
+      },
+    ],
     npcs: [],
     boundaries: {},
     discoveries: [
@@ -2205,7 +2467,21 @@ export const locations = [
         description: 'Descend the ravine northwest into the stream hollow at Watkins Camp.',
       },
     },
-    specimens: ['frigatebird'],
+    specimens: ['frigatebird','meteoriron'],
+    specimenPlacements: [
+      {
+        instanceId: 'southeast-promontory-meteoric-iron',
+        specimenId: 'meteoriron',
+        position: [0, 0, 0],
+        behavior: 'still',
+        sceneScale: 1,
+        spawnScatter: {
+          radiusX: 28,
+          radiusZ: 24,
+          bounds: { minX: -34, maxX: 34, minZ: -30, maxZ: 30 },
+        },
+      },
+    ],
     npcs: [],
     boundaries: { east: 'cliff' },
     discoveries: [
@@ -2875,7 +3151,7 @@ const finalRouteExtraLocations = [
       {
         instanceId: 'post-scrub-rise-lecocarpus-pinnatifidus',
         specimenId: 'lecocarpuspinnatifidus',
-        position: [0, 0, 0],
+        position: [46.3, 0, 27.7],
         behavior: 'still',
         sceneScale: 1,
       },
@@ -3032,7 +3308,7 @@ const finalRouteExtraLocations = [
       {
         instanceId: 'watkins-creek-sicyos-villosus-reconstruction',
         specimenId: 'sicyosvillosus',
-        position: [0, 0, 0],
+        position: [47, 0, 0.6],
         behavior: 'still',
         sceneScale: 1,
       },

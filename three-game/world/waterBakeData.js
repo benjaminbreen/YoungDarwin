@@ -10,8 +10,10 @@ import {
   WATER_RIPPLE_NORMAL_SIZE,
 } from './waterTextureManifest';
 
+// Must stay identical to the decode in Water.jsx; see the note there on why
+// the span is tight.
 const HMIN = -6;
-const HSPAN = 9;
+const HSPAN = 7;
 const SHORE_DIST_RANGE = 60;
 const WATER_CONTACT_DISTANCE_RANGE = 3.2;
 

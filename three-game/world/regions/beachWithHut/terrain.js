@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { elevationNoise, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { elevationNoise, oceanEdgeFalloff, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 import { MARINE_IGUANA_COLONY_BEACH_HUT_SEAM } from '../../routeSeams';
 
 // ---------------------------------------------------------------------------
@@ -199,9 +199,8 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
   y += rock * (0.46 + rockBroad * 0.2 + rockKnob * (movementSurface ? 0.06 : 0.14));
 
   const seaward = 1 - smoothstep01(d, -2.5, 0.0);
-  const deepWest = smoothstep01(-x, 34, 40);
-  const deepSouth = smoothstep01(z, 28, 35);
-  y -= Math.max(deepWest, deepSouth) * seaward * 2.4;
+  const deep = oceanEdgeFalloff(x, z, { west: 33, south: 27, ramp: 7, warp: 4.4 });
+  y -= deep * seaward * 2.4;
 
   // The canonical south route joins the marine-iguana beach across a narrow
   // shell-sand spit. Keep the surrounding cove submerged, but lift this broad

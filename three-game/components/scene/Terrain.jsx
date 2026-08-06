@@ -32,6 +32,7 @@ import {
 import { getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
+import { waterDev } from '../../world/waterDevRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { terrainLookTuning } from '../../world/terrainLook';
@@ -361,7 +362,8 @@ export function Terrain({ segmentCap = null }) {
         underwaterAmount: store.underwaterCamera?.amount || 0,
       });
       shader.uniforms.uCausticsTime.value = clock.elapsedTime;
-      shader.uniforms.uCausticsStrength.value = sky.daylight * 0.5 * (1 - rainWetness * 0.85);
+      shader.uniforms.uCausticsStrength.value = sky.daylight * 0.5 * (1 - rainWetness * 0.85)
+        * waterDev.uwCaustics;
       if (shader.uniforms.uUnderwaterAmount) shader.uniforms.uUnderwaterAmount.value = store.underwaterCamera?.amount || 0;
       if (shader.uniforms.uRainWetness) shader.uniforms.uRainWetness.value = rainWetness;
       if (shader.uniforms.uTerrainSunDirection) shader.uniforms.uTerrainSunDirection.value.set(sky.sun[0], sky.sun[1], sky.sun[2]);

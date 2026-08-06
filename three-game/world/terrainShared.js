@@ -18,6 +18,42 @@ export function ellipseDistance(x, z, sx, sz, ox = 0, oz = 0) {
   return Math.sqrt(nx * nx + nz * nz);
 }
 
+// Open-ocean falloff at the map's blocked sea edges.
+//
+// The obvious spelling — `max(smoothstep(-z, a, b), smoothstep(-x, a, b))` —
+// draws the shelf edge as two ruler-straight lines meeting at a right angle,
+// which is the one shape a reef never has. This takes the same per-edge lips
+// and returns a rounded-box distance past them, warped by low-frequency noise,
+// so the turquoise-to-blue line wanders and the corners curve.
+//
+// `edges` gives the lip position for each side in world units, measured from
+// the origin outward; omit a side that stays shallow. `ramp` is the width of
+// the drop, `warp` the peak wander of the lip.
+export function oceanEdgeFalloff(x, z, { north, south, east, west, ramp = 11, warp = 6 } = {}) {
+  const wander = warp > 0
+    ? (elevationNoise(x * 0.028 + 17, z * 0.028 - 9) * 0.68
+      + elevationNoise(x * 0.071 - 4, z * 0.071 + 21) * 0.32) * warp
+    : 0;
+  // Signed distance past each lip: positive once outside it.
+  const past = [
+    north == null ? null : -z - north + wander,
+    south == null ? null : z - south + wander,
+    east == null ? null : x - east + wander,
+    west == null ? null : -x - west + wander,
+  ].filter(v => v != null);
+  if (!past.length) return 0;
+  // Rounded-box exterior distance: hypot of the positive parts rounds the
+  // corner where two edges meet; the max of the negatives handles the inside.
+  let sq = 0;
+  let inside = -Infinity;
+  for (const v of past) {
+    if (v > 0) sq += v * v;
+    inside = Math.max(inside, v);
+  }
+  const distance = Math.sqrt(sq) + Math.min(inside, 0);
+  return THREE.MathUtils.smoothstep(distance, 0, ramp);
+}
+
 export function smoothMin(a, b, k = 0.28) {
   const h = Math.max(0, Math.min(1, 0.5 + 0.5 * (b - a) / k));
   return THREE.MathUtils.lerp(b, a, h) - k * h * (1 - h);

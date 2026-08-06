@@ -4,6 +4,7 @@ import {
   WADE_DEPTH,
   crackNoise,
   elevationNoise,
+  oceanEdgeFalloff,
   surfaceNoise,
   terrainFineDetail,
   terrainSurfaceNoise,
@@ -151,10 +152,10 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   y -= coral * (movementSurface ? 0.05 : 0.12);
 
   // Open-ocean falloff at the exposed north/east/west edges.
-  const deepN = THREE.MathUtils.smoothstep(-z, 32, 45);
-  const deepE = THREE.MathUtils.smoothstep(x, 42, 54);
-  const deepW = THREE.MathUtils.smoothstep(-x, 42, 54);
-  y -= Math.max(deepN, deepE, deepW) * (1 - land * 0.88) * 1.75;
+  const deep = oceanEdgeFalloff(x, z, {
+    north: 31, east: 41, west: 41, ramp: 13, warp: 7.5,
+  });
+  y -= deep * (1 - land * 0.88) * 1.75;
 
   const dry = THREE.MathUtils.smoothstep(y, WATER_LEVEL + 0.02, WATER_LEVEL + 0.55);
   // Reserve only a shallow layer of high-frequency relief for rendering. The

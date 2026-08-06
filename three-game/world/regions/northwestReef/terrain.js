@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WATER_LEVEL, crackNoise, elevationNoise, ellipseDistance, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
+import { WATER_LEVEL, crackNoise, elevationNoise, ellipseDistance, oceanEdgeFalloff, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 
 const MAX_RENDER_ONLY_OUTCROP_DETAIL = 0.075;
 
@@ -65,10 +65,29 @@ export function northwestReefHeight(x, z, { movementSurface = false } = {}) {
   const d = z - coast; // >0 beach, <0 seaward
 
   let y;
+  let shelfY = 0;
   if (d < 0) {
-    // Wadeable sand shelf: slopes off the swash line, levels at armpit depth.
-    y = -0.2 + Math.max(d * 0.11, -1.18);
+    // Sand shelf, in two slopes rather than a slope and a flat.
+    //
+    // It used to level off hard at -1.38 — 48cm of water — and hold that for
+    // thirty metres before the ocean falloff dropped it off a step. Everything
+    // on the reef therefore sat in ankle-deep water, which is why the fish read
+    // as unrealistically visible and why the depth-driven half of the water
+    // shader had nothing to work with: no pixel on the map ever reached the
+    // ramp's second colour stop.
+    //
+    // Now the near shelf keeps its original gradient (the inner reef, the
+    // parrotfish heads and the wading line are all unchanged to within a few
+    // centimetres) and then continues seaward on a third of that slope instead
+    // of stopping. Waist-deep around 25m out, chest-deep by 40m, and about two
+    // metres at the outer shelf, so the swim threshold (1.12m) lands naturally
+    // partway out: wade the inner reef, swim the outer.
+    const seawardM = -d;
+    const drop = 0.11 * Math.min(seawardM, 9.5)
+      + 0.035 * Math.max(0, seawardM - 9.5);
+    y = -0.2 - Math.min(drop, 2.7);
     y += surfaceNoise(x * 0.18 + 4, z * 0.18 - 6) * 0.07;
+    shelfY = y;
   } else {
     // White-sand beach climbing onto a low berm, soft dunes inland.
     y = -0.2 + 1.35 * (1 - Math.exp(-d * 0.095));
@@ -86,7 +105,10 @@ export function northwestReefHeight(x, z, { movementSurface = false } = {}) {
     y -= basin * 0.65;
     if (coral > 0.01) {
       const knob = Math.pow(Math.abs(crackNoise(x * 0.55 + 2, z * 0.5 - 5)), 1.4);
-      y = Math.max(y, -1.83 + coral * (0.2 + knob * (movementSurface ? 0.16 : 0.38)));
+      // Knobs rise from the local shelf, not from a fixed -1.83. That constant
+      // was the old flat floor minus 45cm; against a shelf that now keeps
+      // descending it would have left coral standing on mesas further out.
+      y = Math.max(y, shelfY - 0.45 + coral * (0.2 + knob * (movementSurface ? 0.16 : 0.38)));
     }
   }
 
@@ -118,28 +140,26 @@ export function northwestReefHeight(x, z, { movementSurface = false } = {}) {
   // shelters its own lagoon from the drop.
   const shelter = 1 - THREE.MathUtils.smoothstep(di, 2.0, 2.8);
   const seaward = 1 - THREE.MathUtils.smoothstep(d, -3, 0);
-  // Distance past the shelf lip, as a rounded-box field so the north and west
-  // drops meet in a curve instead of a right angle, and warped by noise so the
-  // turquoise-to-blue line wanders like a reef edge rather than a ruler.
-  const lipWarp = elevationNoise(x * 0.028 + 17, z * 0.028 - 9) * 5.2
-    + elevationNoise(x * 0.071 - 4, z * 0.071 + 21) * 2.4;
-  const pastNorth = -z - 32 + lipWarp;
-  const pastWest = -x - 42 + lipWarp;
-  const pastLip = Math.hypot(Math.max(pastWest, 0), Math.max(pastNorth, 0))
-    + Math.min(Math.max(pastWest, pastNorth), 0);
-  const deep = THREE.MathUtils.smoothstep(pastLip, 0, 11);
-  y -= deep * (1 - 0.85 * shelter) * seaward * 2.6;
+  // A 26m ramp rather than 11m. The old one fell 2.6m over eleven metres
+  // straight off a flat shelf, which is the step you could see from the beach;
+  // the shelf now arrives at the edge already 2m down, so the same open-ocean
+  // depth is reached without a wall.
+  const deep = oceanEdgeFalloff(x, z, { north: 32, west: 42, ramp: 26, warp: 7.6 });
+  y -= deep * (1 - 0.85 * shelter) * seaward * 3.1;
 
   // Surface grit on dry ground only; the sand shelf stays smooth for wading.
   const dry = THREE.MathUtils.smoothstep(y, -0.4, 0.1);
   y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.18 : 0.5);
-  return Math.max(-4.2, y);
+  return Math.max(-5.8, y);
 }
 
 export function northwestReefBiomeAt(x, z, y = northwestReefHeight(x, z)) {
   const d = z - nwReefCoastZ(x);
   const di = nwReefIsletField(x, z);
-  if (y < -2.0) return 'water';
+  // Only the true drop-off is open water. This was -2.0, which the reshaped
+  // shelf now reaches partway out — the outer reef would have flipped to the
+  // dark ocean-floor colour instead of staying sand.
+  if (y < -3.4) return 'water';
   if (nwReefOutcrop(x, z) > 0.42 || (di < 0.5 && y > 0.55)) return 'basalt';
   if (y < WATER_LEVEL) {
     if (nwReefCoralMask(x, z) > 0.22) return 'coral';
@@ -166,8 +186,10 @@ export function northwestReefColor(x, z, y) {
   else if (biome === 'shallow-sand') {
     // Bright sand seabed; the water shader's depth tint does the turquoise.
     color.set('#d7ead7');
-    const depth = THREE.MathUtils.clamp((WATER_LEVEL - y) / 1.2, 0, 1);
-    color.lerp(new THREE.Color('#72c7ba'), depth * 0.58);
+    // Sand darkens and cools a little with depth; the turquoise itself is the
+    // water shader's job, not the seabed's.
+    const depth = THREE.MathUtils.clamp((WATER_LEVEL - y) / 2.0, 0, 1);
+    color.lerp(new THREE.Color('#a8c4b8'), depth * 0.5);
     color.lerp(new THREE.Color('#ede6c6'), Math.max(0, noise) * 0.16);
     color.lerp(new THREE.Color('#94c7b2'), garden * 0.18);
   } else if (biome === 'coral') {

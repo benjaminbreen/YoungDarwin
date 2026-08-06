@@ -15,7 +15,7 @@ const HOVER_LIFT = 0.95;
 // The fauna convention travels toward +z; the rig is authored head-at--z.
 const FORWARD_FLIP = Math.PI;
 
-export function MantaRayShape({ specimen }) {
+export function MantaRayShape({ specimen, motionRef = null }) {
   const actorId = specimen.instanceId || specimen.id;
   const variant = useMemo(
     () => specimen.mantaVariant || pickMantaVariant(actorId),
@@ -48,12 +48,26 @@ export function MantaRayShape({ specimen }) {
     const node = drift.current;
     const body = carry.current;
     if (!node || !body) return;
-    node.position.set(x, 0, z);
-    node.rotation.y = heading;
+    // The animation lab wants the rig, not the patrol: hold station there so
+    // the manta does not simply swim out of the preview frame.
+    const lift = specimen.previewStationary ? 0 : HOVER_LIFT * size;
+    if (specimen.previewStationary) {
+      node.position.set(0, 0, 0);
+      node.rotation.y = 0;
+    } else if (motionRef) {
+      // Hand the drift to SpecimenActor so the published pose follows the
+      // animal rather than staying pinned to the spawn point.
+      node.position.set(0, 0, 0);
+      node.rotation.y = 0;
+      motionRef.current.cruise = { x, y: lift, z, yaw: heading };
+    } else {
+      node.position.set(x, 0, z);
+      node.rotation.y = heading;
+    }
     // Bank into the turn, and rise and fall on the long axis of the loop.
     body.rotation.z = -Math.cos(t) * 0.26;
     body.rotation.x = Math.sin(t * 2) * 0.07;
-    body.position.y = HOVER_LIFT * size + Math.sin(t * 1.6 + 0.7) * 0.22 * size;
+    body.position.y = (motionRef ? 0 : lift) + Math.sin(t * 1.6 + 0.7) * 0.22 * size;
 
     rig.energy[0] = 0.42 + Math.abs(Math.cos(t)) * 0.2;
     rig.advance(dt);

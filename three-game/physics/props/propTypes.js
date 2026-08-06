@@ -342,9 +342,11 @@ export const PROP_TYPES = {
     label: 'Covington’s collecting case',
     visual: 'symsFieldCase',
     interactionRing: false,
-    visualOffsetY: -0.34,
-    collider: { shape: 'cuboid', halfExtents: [0.6, 0.29, 0.32] },
-    restOffset: 0.29,
+    // The model's origin is the underside of its skids, so this must stay equal
+    // to -halfExtents[1] or the case hovers above (or sinks into) the sand.
+    visualOffsetY: -0.3,
+    collider: { shape: 'cuboid', halfExtents: [0.61, 0.3, 0.33] },
+    restOffset: 0.3,
     mass: 24,
     friction: 0.92,
     restitution: 0.025,

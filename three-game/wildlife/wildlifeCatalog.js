@@ -51,6 +51,11 @@ const SPECIES_ALIASES = {
   feral_horse: 'feralhorse',
   horse: 'feralhorse',
   equus: 'feralhorse',
+  hammerhead_shark: 'hammerhead',
+  scalloped_hammerhead: 'hammerhead',
+  sea_urchin: 'seaurchin',
+  slate_pencil_urchin: 'seaurchin',
+  urchin: 'seaurchin',
   jacko: 'jackothemonkey',
   jacko_the_monkey: 'jackothemonkey',
   jackothemonkey: 'jackothemonkey',
@@ -1118,6 +1123,32 @@ export const wildlifeCatalog = {
     aquatic: true,
     collisionRadius: 1.6,
     interactionHeight: 1.1,
+  },
+  seaurchin: {
+    id: 'seaurchin',
+    englishName: 'Slate-pencil urchin',
+    latinName: 'Eucidaris galapagensis',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    render: { type: 'proceduralUrchin' },
+    // Wedged in a crevice on the bottom: no controller drives it, and the
+    // spawn clamp must leave it in the water rather than walking it ashore.
+    aquatic: true,
+    collisionRadius: 0.22,
+    interactionHeight: 0.16,
+  },
+  hammerhead: {
+    id: 'hammerhead',
+    englishName: 'Scalloped hammerhead',
+    latinName: 'Sphyrna lewini',
+    category: 'Animal',
+    roleDefault: 'specimen',
+    render: { type: 'proceduralHammerhead' },
+    // Cruises its own circuit like the manta; no controller touches it, and
+    // the spawn clamp must leave it in deep water.
+    aquatic: true,
+    collisionRadius: 1.4,
+    interactionHeight: 1.2,
   },
   greenturtle: {
     id: 'greenturtle',

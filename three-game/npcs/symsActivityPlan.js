@@ -28,7 +28,7 @@ export const SYMS_FIELD_CASE_PLACEMENT = Object.freeze({
   z: 6.55,
   yaw: -0.42,
   lean: -0.035,
-  scale: 1,
+  scale: 1.28,
 });
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';

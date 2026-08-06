@@ -858,18 +858,20 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
   assert.deepEqual(counts, {
     lavalizard: 2,
     barnacle: 1,
+    seaurchin: 1,
     lavagull: 1,
     parrotfish: 1,
     mantaRay: 1,
+    hammerhead: 1,
     galapagoscarpenterbee: 1,
     galapagossulphur: 1,
     galapagosgulffritillary: 1,
     galapagospaintedlocust: 1,
   });
 
-  // The marine pair does not count against the quiet opening: both sit
+  // The marine set does not count against the quiet opening: all of it sits
   // offshore in water Darwin cannot walk on.
-  for (const id of ['parrotfish', 'mantaRay']) {
+  for (const id of ['parrotfish', 'mantaRay', 'hammerhead', 'seaurchin']) {
     const marine = specimens.find(specimen => specimen.id === id);
     const [x, , z] = marine.spawnPoint;
     assert.equal(isWalkableTerrain(x, z, 'POST_OFFICE_BAY'), false, `${id} should spawn offshore`);

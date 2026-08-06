@@ -15,6 +15,15 @@ const INTERACTION_DISTANCE = 2.35;
 const PROMPT_POLL_SECONDS = 0.12;
 const OPEN_ANGLE = -1.72;
 
+// Local y = 0 is the underside of the skids, so the prop's visualOffsetY is
+// simply -(collider half height) and the case cannot drift off the ground.
+// Anything moved here must stay inside CASE_HEIGHT or it pokes through the
+// collider; propTypes.symsCollectingCase depends on both numbers.
+const SKID_TOP = 0.06;
+const WELL_FLOOR = 0.34;
+const BODY_TOP = 0.48;
+const LID_PIVOT_Z = -0.31;
+
 function useDisposableGeometry(factory) {
   const geometry = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -28,17 +37,22 @@ function useDisposableMaterial(factory) {
 }
 
 function makeCanvasTexture() {
-  const size = 64;
+  const size = 128;
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const index = (y * size + x) * 4;
       const hash = (x * 37 + y * 61 + ((x * y) % 29) * 7) % 23;
-      const weave = ((x % 4 === 0) ? 7 : 0) + ((y % 5 === 0) ? 5 : 0);
-      const lowerStain = Math.max(0, y - 45) * 0.48;
-      data[index] = Math.max(0, 139 + hash - weave - lowerStain);
-      data[index + 1] = Math.max(0, 98 + hash * 0.62 - weave - lowerStain);
-      data[index + 2] = Math.max(0, 55 + hash * 0.32 - weave - lowerStain * 0.7);
+      // Two interleaved thread runs read as woven cloth rather than a grid:
+      // warp is darker in its troughs, weft brighter on its crowns.
+      const warp = Math.cos((x / size) * Math.PI * 2 * 32) * 5.5;
+      const weft = Math.cos((y / size) * Math.PI * 2 * 26) * 4.2;
+      const slub = ((x * 7 + y * 13) % 97) < 3 ? -9 : 0;
+      const lowerStain = Math.max(0, y - 92) * 0.42;
+      const shade = warp + weft + slub - lowerStain + hash * 0.5;
+      data[index] = Math.max(0, Math.min(255, 152 + shade));
+      data[index + 1] = Math.max(0, Math.min(255, 112 + shade * 0.86));
+      data[index + 2] = Math.max(0, Math.min(255, 68 + shade * 0.6));
       data[index + 3] = 255;
     }
   }
@@ -46,6 +60,33 @@ function makeCanvasTexture() {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3.4, 2.2);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// A grain-only map for the leather straps and corner caps: the same tint as the
+// base colour, so it adds relief without shifting hue.
+function makeLeatherTexture() {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4;
+      const grain = ((x * 29 + y * 53 + ((x + y) % 17) * 11) % 31) - 15;
+      const crease = Math.abs(Math.sin((x * 0.21) + (y * 0.13))) > 0.94 ? -12 : 0;
+      const shade = grain * 0.55 + crease;
+      data[index] = Math.max(0, Math.min(255, 96 + shade));
+      data[index + 1] = Math.max(0, Math.min(255, 60 + shade * 0.8));
+      data[index + 2] = Math.max(0, Math.min(255, 38 + shade * 0.6));
+      data[index + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.4, 2.4);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
@@ -65,7 +106,18 @@ function makeBuckleGeometry() {
   hole.lineTo(0.052, -0.038);
   hole.closePath();
   shape.holes.push(hole);
-  return new THREE.ShapeGeometry(shape, 1);
+  // Extruded rather than flat: a plane buckle reads as a painted yellow square
+  // from any angle off head-on, which is most of them.
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.022,
+    bevelEnabled: true,
+    bevelThickness: 0.005,
+    bevelSize: 0.005,
+    bevelSegments: 1,
+    curveSegments: 1,
+  });
+  geometry.translate(0, 0, -0.011);
+  return geometry;
 }
 
 function applyDirectSpecularGlint(material) {
@@ -110,18 +162,35 @@ void main() {`,
   return material;
 }
 
-function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef }) {
+function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, offsetY = 0 }) {
   const canvasTexture = useMemo(makeCanvasTexture, []);
   useEffect(() => () => canvasTexture.dispose(), [canvasTexture]);
+  const leatherTexture = useMemo(makeLeatherTexture, []);
+  useEffect(() => () => leatherTexture.dispose(), [leatherTexture]);
   const canvas = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
     map: canvasTexture,
     color: '#c6a47b',
     roughness: 0.96,
     metalness: 0,
   }));
+  // The lid reads as a separate panel only if it is not the identical tone as
+  // the body; a shade darker is enough at gameplay distance.
+  const canvasLid = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    map: canvasTexture,
+    color: '#bb9770',
+    roughness: 0.95,
+    metalness: 0,
+  }));
   const leather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    color: '#4d2f1d',
-    roughness: 0.79,
+    map: leatherTexture,
+    color: '#7c5535',
+    roughness: 0.72,
+    metalness: 0.01,
+  }));
+  const darkLeather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
+    map: leatherTexture,
+    color: '#573620',
+    roughness: 0.8,
     metalness: 0.01,
   }));
   const brass = useDisposableMaterial(() => applyDirectSpecularGlint(new THREE.MeshPhysicalMaterial({
@@ -153,19 +222,27 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef }) {
     metalness: 0.04,
   }));
 
-  const body = useDisposableGeometry(() => new RoundedBoxGeometry(1.18, 0.44, 0.6, 3, 0.075));
-  const lid = useDisposableGeometry(() => new RoundedBoxGeometry(1.2, 0.1, 0.6, 2, 0.045));
-  const sidePatch = useDisposableGeometry(() => new RoundedBoxGeometry(0.075, 0.34, 0.54, 2, 0.025));
-  const frontStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.42, 0.035, 2, 0.018));
-  const lidStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.035, 0.58, 2, 0.015));
+  const skid = useDisposableGeometry(() => new RoundedBoxGeometry(1.12, SKID_TOP, 0.1, 2, 0.02));
+  const body = useDisposableGeometry(() => new RoundedBoxGeometry(1.18, WELL_FLOOR - SKID_TOP, 0.6, 3, 0.055));
+  const wellWallLong = useDisposableGeometry(() => new RoundedBoxGeometry(1.18, BODY_TOP - WELL_FLOOR, 0.06, 2, 0.02));
+  const wellWallEnd = useDisposableGeometry(() => new RoundedBoxGeometry(0.06, BODY_TOP - WELL_FLOOR, 0.6, 2, 0.02));
+  const lid = useDisposableGeometry(() => new RoundedBoxGeometry(1.2, 0.1, 0.62, 2, 0.042));
+  const sidePatch = useDisposableGeometry(() => new RoundedBoxGeometry(0.075, 0.3, 0.54, 2, 0.025));
+  const cornerCap = useDisposableGeometry(() => new RoundedBoxGeometry(0.12, 0.13, 0.12, 2, 0.03));
+  const edgeBand = useDisposableGeometry(() => new RoundedBoxGeometry(1.19, 0.045, 0.045, 2, 0.018));
+  const frontStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.4, 0.035, 2, 0.018));
+  const lidStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.035, 0.6, 2, 0.015));
   const buckle = useDisposableGeometry(makeBuckleGeometry);
+  const hinge = useDisposableGeometry(() => new RoundedBoxGeometry(0.11, 0.025, 0.13, 2, 0.01));
+  const plaque = useDisposableGeometry(() => new RoundedBoxGeometry(0.2, 0.012, 0.09, 2, 0.006));
   const tag = useDisposableGeometry(() => new RoundedBoxGeometry(0.25, 0.13, 0.018, 2, 0.012));
   const inkLine = useDisposableGeometry(() => new THREE.BoxGeometry(0.16, 0.008, 0.006));
-  const caseLining = useDisposableGeometry(() => new RoundedBoxGeometry(1.04, 0.035, 0.46, 2, 0.035));
-  const paperPacket = useDisposableGeometry(() => new RoundedBoxGeometry(0.31, 0.045, 0.22, 2, 0.018));
-  const pillBox = useDisposableGeometry(() => new THREE.CylinderGeometry(0.082, 0.082, 0.055, 12));
-  const bottle = useDisposableGeometry(() => new THREE.CylinderGeometry(0.045, 0.065, 0.29, 10));
-  const clothBundle = useDisposableGeometry(() => new RoundedBoxGeometry(0.3, 0.11, 0.2, 2, 0.04));
+  const caseLining = useDisposableGeometry(() => new RoundedBoxGeometry(1.06, 0.025, 0.48, 2, 0.02));
+  const divider = useDisposableGeometry(() => new THREE.BoxGeometry(0.016, 0.1, 0.48));
+  const paperPacket = useDisposableGeometry(() => new RoundedBoxGeometry(0.29, 0.05, 0.21, 2, 0.016));
+  const pillBox = useDisposableGeometry(() => new THREE.CylinderGeometry(0.078, 0.078, 0.075, 12));
+  const bottle = useDisposableGeometry(() => new THREE.CylinderGeometry(0.048, 0.058, 0.24, 10));
+  const clothBundle = useDisposableGeometry(() => new RoundedBoxGeometry(0.28, 0.1, 0.19, 2, 0.038));
   const handle = useDisposableGeometry(() => {
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(-0.18, 0, 0),
@@ -177,47 +254,100 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef }) {
     return new THREE.TubeGeometry(curve, 18, 0.024, 7, false);
   });
 
+  const bodyCentre = (SKID_TOP + WELL_FLOOR) * 0.5;
+  const wellCentre = (WELL_FLOOR + BODY_TOP) * 0.5;
+
   return (
-    <group ref={worldRootRef} onClick={onToggle}>
-      <mesh castShadow receiveShadow geometry={body} material={canvas} position={[0, 0.25, 0]} />
-      <mesh receiveShadow geometry={caseLining} material={interior} position={[0, 0.478, 0]} />
-      {[-0.58, 0.58].map(x => (
-        <mesh key={`side-${x}`} castShadow receiveShadow geometry={sidePatch} material={leather} position={[x, 0.25, 0]} />
+    <group ref={worldRootRef} position={[0, offsetY, 0]} onClick={onToggle}>
+      {/* Skids: a chest of this weight sits on runners, and they also give the
+          silhouette a shadow line where it meets the sand. */}
+      {[-0.2, 0.2].map(z => (
+        <mesh key={`skid-${z}`} castShadow receiveShadow geometry={skid} material={darkLeather} position={[0, SKID_TOP * 0.5, z]} />
+      ))}
+      <mesh castShadow receiveShadow geometry={body} material={canvas} position={[0, bodyCentre, 0]} />
+
+      {/* Open well: four walls above the solid body so the contents read as
+          packed inside rather than balanced on a lid. */}
+      {[-0.27, 0.27].map(z => (
+        <mesh key={`well-long-${z}`} castShadow receiveShadow geometry={wellWallLong} material={canvas} position={[0, wellCentre, z]} />
+      ))}
+      {[-0.56, 0.56].map(x => (
+        <mesh key={`well-end-${x}`} castShadow receiveShadow geometry={wellWallEnd} material={canvas} position={[x, wellCentre, 0]} />
+      ))}
+      <mesh receiveShadow geometry={caseLining} material={interior} position={[0, WELL_FLOOR + 0.012, 0]} />
+
+      {[-0.585, 0.585].map(x => (
+        <mesh key={`side-${x}`} castShadow receiveShadow geometry={sidePatch} material={leather} position={[x, bodyCentre + 0.02, 0]} />
+      ))}
+      {[-0.545, 0.545].flatMap(x => [-0.245, 0.245].map(z => (
+        <mesh key={`cap-${x}-${z}`} castShadow receiveShadow geometry={cornerCap} material={darkLeather} position={[x, BODY_TOP - 0.05, z]} />
+      )))}
+      {[-0.28, 0.28].map(z => (
+        <mesh key={`band-${z}`} castShadow receiveShadow geometry={edgeBand} material={darkLeather} position={[0, SKID_TOP + 0.03, z]} />
       ))}
       {[-0.29, 0.29].map(x => (
         <React.Fragment key={`closure-${x}`}>
-          <mesh castShadow geometry={frontStrap} material={leather} position={[x, 0.25, 0.315]} />
-          <mesh castShadow geometry={buckle} material={brass} position={[x, 0.285, 0.338]} />
+          <mesh castShadow geometry={frontStrap} material={leather} position={[x, bodyCentre + 0.06, 0.315]} />
+          <mesh castShadow geometry={buckle} material={brass} position={[x, bodyCentre + 0.06, 0.338]} />
         </React.Fragment>
       ))}
-      <mesh castShadow geometry={handle} material={leather} position={[0, 0.29, 0.335]} />
+      <mesh castShadow geometry={handle} material={leather} position={[0, BODY_TOP - 0.03, 0.325]} />
+      {[-1, 1].map(side => (
+        <mesh
+          key={`end-handle-${side}`}
+          castShadow
+          geometry={handle}
+          material={leather}
+          position={[side * 0.625, BODY_TOP - 0.06, 0]}
+          rotation={[0, side * Math.PI * 0.5, 0]}
+          scale={[0.62, 0.9, 0.9]}
+        />
+      ))}
 
       {/* Contents stay inert and are revealed only by the authored lid motion. */}
       <group ref={contentsRef} visible={false}>
-        <mesh castShadow geometry={paperPacket} material={labelPaper} position={[-0.31, 0.515, 0.08]} rotation={[0, 0.18, 0]} />
-        <mesh castShadow geometry={paperPacket} material={labelPaper} position={[-0.24, 0.54, 0.02]} rotation={[0, -0.08, 0.03]} scale={[0.82, 1, 0.86]} />
-        <mesh castShadow geometry={pillBox} material={labelPaper} position={[0.08, 0.515, 0.08]} />
-        <mesh castShadow geometry={pillBox} material={leather} position={[0.25, 0.515, 0.1]} scale={[0.82, 0.85, 0.82]} />
-        <mesh castShadow geometry={bottle} material={bottleGlass} position={[0.37, 0.55, -0.08]} rotation={[0, 0, Math.PI / 2]} />
-        <mesh castShadow geometry={clothBundle} material={canvas} position={[0.03, 0.535, -0.12]} rotation={[0, -0.22, 0]} />
+        {[-0.19, 0.19].map(x => (
+          <mesh key={`divider-${x}`} geometry={divider} material={interior} position={[x, WELL_FLOOR + 0.05, 0]} />
+        ))}
+        <mesh castShadow geometry={paperPacket} material={labelPaper} position={[-0.35, WELL_FLOOR + 0.05, 0.07]} rotation={[0, 0.16, 0]} />
+        <mesh castShadow geometry={paperPacket} material={labelPaper} position={[-0.31, WELL_FLOOR + 0.095, 0.01]} rotation={[0, -0.09, 0.02]} scale={[0.84, 0.9, 0.88]} />
+        <mesh castShadow geometry={pillBox} material={labelPaper} position={[-0.06, WELL_FLOOR + 0.038, 0.09]} />
+        <mesh castShadow geometry={pillBox} material={darkLeather} position={[0.08, WELL_FLOOR + 0.038, -0.09]} scale={[0.82, 0.9, 0.82]} />
+        <mesh castShadow geometry={clothBundle} material={canvas} position={[0.02, WELL_FLOOR + 0.05, 0.06]} rotation={[0, -0.2, 0]} />
+        {[-0.08, 0.03, 0.14].map((z, index) => (
+          <mesh
+            key={`bottle-${z}`}
+            castShadow
+            geometry={bottle}
+            material={bottleGlass}
+            position={[0.4 + (index % 2) * 0.02, WELL_FLOOR + 0.05, z]}
+            rotation={[Math.PI / 2, 0, 0]}
+            scale={[0.9, 0.86, 0.9]}
+          />
+        ))}
       </group>
 
-      <group ref={lidRef} position={[0, 0.49, -0.3]}>
-        <mesh castShadow receiveShadow geometry={lid} material={canvas} position={[0, 0.02, 0.3]} />
+      <group ref={lidRef} position={[0, BODY_TOP + 0.005, LID_PIVOT_Z]}>
+        <mesh castShadow receiveShadow geometry={lid} material={canvasLid} position={[0, 0.05, 0.31]} />
         {[-0.29, 0.29].map(x => (
-          <mesh key={`lid-strap-${x}`} castShadow geometry={lidStrap} material={leather} position={[x, 0.082, 0.3]} />
+          <mesh key={`lid-strap-${x}`} castShadow geometry={lidStrap} material={leather} position={[x, 0.104, 0.31]} />
         ))}
-        <group position={[0.05, 0.085, 0.32]} rotation={[-Math.PI / 2, 0, -0.045]}>
+        {[-0.36, 0.36].map(x => (
+          <mesh key={`hinge-${x}`} castShadow geometry={hinge} material={brass} position={[x, 0.052, 0.045]} />
+        ))}
+        <mesh castShadow geometry={plaque} material={brass} position={[0, 0.106, 0.31]} />
+        {/* The label hangs under the lid, so it faces the player once open. */}
+        <group position={[0.05, -0.008, 0.34]} rotation={[-Math.PI / 2, 0, -0.045]}>
           <mesh geometry={tag} material={labelPaper} />
-          <mesh geometry={inkLine} material={ink} position={[-0.012, 0.023, 0.013]} />
-          <mesh geometry={inkLine} material={ink} position={[0.018, -0.018, 0.013]} scale={[0.7, 1, 1]} />
+          <mesh geometry={inkLine} material={ink} position={[-0.012, 0.023, -0.013]} />
+          <mesh geometry={inkLine} material={ink} position={[0.018, -0.018, -0.013]} scale={[0.7, 1, 1]} />
         </group>
       </group>
     </group>
   );
 }
 
-export function SymsFieldCaseVisual({ propId = SYMS_FIELD_CASE_ID }) {
+export function SymsFieldCaseVisual({ propId = SYMS_FIELD_CASE_ID, offsetY = 0 }) {
   const lidRef = useRef(null);
   const contentsRef = useRef(null);
   const worldRootRef = useRef(null);
@@ -286,5 +416,13 @@ export function SymsFieldCaseVisual({ propId = SYMS_FIELD_CASE_ID }) {
     }
   });
 
-  return <CollectingCaseVisual contentsRef={contentsRef} lidRef={lidRef} onToggle={toggle} worldRootRef={worldRootRef} />;
+  return (
+    <CollectingCaseVisual
+      contentsRef={contentsRef}
+      lidRef={lidRef}
+      onToggle={toggle}
+      worldRootRef={worldRootRef}
+      offsetY={offsetY}
+    />
+  );
 }

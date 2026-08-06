@@ -100,8 +100,14 @@ const WATER_BODY_INFLUENCE_COUNT = 8;
 const WATER_CONTACT_DISTANCE_RANGE = 3.2;
 const WATER_CONTACT_RES = 256;
 // Height range packed into the depth texture's red byte: [HMIN, HMIN + HSPAN].
+// One byte over the range, so the step is HSPAN/255 — 27mm here. That matters
+// because the horizontal width of a step is the step divided by the seabed
+// slope: on a 1-in-29 shelf a 35mm step (the old 9m span) terraced every metre,
+// wider than a bake texel, and every depth-keyed term drew a contour on each
+// tread. The span only has to cover seabed and the shoreline, not dry land.
+// Must stay identical to waterBakeData.js or every shipped bake decodes wrong.
 const HMIN = -6.0;
-const HSPAN = 9.0;
+const HSPAN = 7.0;
 
 const WATER_QUALITY = {
   // Polished/cinematic refresh the mirror every frame while it is dynamic and
@@ -128,7 +134,12 @@ const WATER_QUALITY = {
     // trims the costliest fine-normal, foam, refraction, and glitter samples.
     bakeRes: 384,
     segments: WATER_SEGMENTS,
-    reflectionRes: REFLECTION_RES,
+    // Do NOT raise reflectionMinInterval here. The mirror is a full second
+    // render of the world and halving its cadence is the obvious saving, but
+    // a mirror that updates on alternate frames reads as a glitchy stutter on
+    // the water surface however much the ripple distorts it. Resolution is
+    // the safe axis; frequency is not.
+    reflectionRes: 384,
     reflectionSamples: 2,
     reflectionMinInterval: 1,
     reflectionStaticInterval: 4,
@@ -234,6 +245,12 @@ const WAVE_GLSL = /* glsl */`
   // saturates solid on a heavy sea and never fires on a calm one; with it at
   // full strength the shading response to sea state would be exactly zero.
   uniform float uCrestNorm;
+  // Live wave-shape tuning (?waterdev). These multiply the authored bank
+  // rather than replacing it, so 1 everywhere is the shipped sea.
+  // (amplitude, wavelength, phase speed, chop amplitude)
+  uniform vec4 uWaveShape;
+  // (chop wavelength, swash height, shallow-swell floor, unused)
+  uniform vec4 uWaveShape2;
 
   float cliffSwellAt(vec2 pos) {
     if (uCliffCalmEllipse.z < 0.001) return uCliffSwell;
@@ -245,7 +262,7 @@ const WAVE_GLSL = /* glsl */`
   void addWave(vec2 pos, float t, vec2 d, float amp, float wl, inout vec3 disp, inout vec3 n) {
     vec2 dir = normalize(d);
     float w = 6.28318530718 / wl;
-    float phase = w * dot(dir, pos) + t * sqrt(9.8 * w);
+    float phase = w * dot(dir, pos) + t * sqrt(9.8 * w) * uWaveShape.z;
     float c = cos(phase);
     float s = sin(phase);
     // A deep-water Gerstner orbit is circular: the horizontal radius IS the
@@ -275,8 +292,8 @@ const WAVE_GLSL = /* glsl */`
     // heavier sea reads as longer and slower rather than as the same chop
     // turned up (the phase term carries sqrt(9.8 * w), so a longer wave
     // automatically travels faster and takes longer to pass).
-    float aS = uSwell;
-    float lS = uSwellLen;
+    float aS = uSwell * uWaveShape.x;
+    float lS = uSwellLen * uWaveShape.y;
     addWave(pos, t, vec2( 0.86,  0.51), 0.07 * aS, 13.0 * lS, disp, n);
     addWave(pos, t, vec2(-0.62,  0.78), 0.045 * aS, 8.5 * lS, disp, n);
     addWave(pos, t, vec2( 0.34, -0.94), 0.028 * aS, 5.0 * lS, disp, n);
@@ -292,10 +309,11 @@ const WAVE_GLSL = /* glsl */`
       // glassy everywhere while a trade-wind afternoon is much rougher off a
       // windward headland than inside a cove. Chop keeps its own short
       // wavelengths — wind sea does not lengthen with swell.
-      float chop = (0.5 + 0.5 * clamp(uChopWind, 0.0, 1.0)) * uChopSea;
-      addWave(pos, t, vec2( 0.97,  0.26), 0.022 * chop, 6.3, disp, n);
-      addWave(pos, t, vec2( 0.60,  0.80), 0.013 * chop, 4.1, disp, n);
-      addWave(pos, t, vec2( 0.92, -0.40), 0.008 * chop, 2.7, disp, n);
+      float chop = (0.5 + 0.5 * clamp(uChopWind, 0.0, 1.0)) * uChopSea * uWaveShape.w;
+      float chopLen = uWaveShape2.x;
+      addWave(pos, t, vec2( 0.97,  0.26), 0.022 * chop, 6.3 * chopLen, disp, n);
+      addWave(pos, t, vec2( 0.60,  0.80), 0.013 * chop, 4.1 * chopLen, disp, n);
+      addWave(pos, t, vec2( 0.92, -0.40), 0.008 * chop, 2.7 * chopLen, disp, n);
     #endif
     // Windward cliff maps add a long Pacific swell beneath the shared calm
     // surface. Zero everywhere else, so beaches and coves retain their
@@ -312,14 +330,18 @@ const WAVE_GLSL = /* glsl */`
   // Swell attenuation over the shallows: gentle ramp (a steep one shows the
   // vertex grid), with a floor so the surface keeps rolling at the shore.
   float swellAtten(float depth) {
-    return smoothstep(0.0, 0.3, depth) * (0.35 + 0.65 * smoothstep(0.35, 1.6, depth));
+    float floorAmt = uWaveShape2.z;
+    return smoothstep(0.0, 0.3, depth) * (floorAmt + (1.0 - floorAmt) * smoothstep(0.35, 1.6, depth));
   }
 
   // Rhythmic swash: the waterline rides up and down the beach face in sync
   // with the terrain shader's foam band (same clock, same 0.5984 rad/s cycle).
   float swashLift(vec2 wxz, float t, float depthRaw) {
     float cyc = sin(t * 0.5984) * 0.5 + 0.5;
-    float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.30) * 0.3) * 0.115;
+    // The 0.5984 rad/s clock is shared with every region's terrain foam band
+    // and with the ecology splash periods, so only the height is tunable here;
+    // changing the rate would desync the waterline from the sand.
+    float lift = ((cyc - 0.5) * 1.7 + sin(wxz.x * 0.17 + t * 0.30) * 0.3) * uWaveShape2.y;
     return lift * smoothstep(1.3, 0.05, max(depthRaw, 0.0));
   }
 
@@ -518,7 +540,29 @@ function waveBankUniforms() {
     uBreakers: { value: 1 },
     uSteepness: { value: DEFAULT_STEEPNESS },
     uCrestNorm: { value: 1 },
+    uWaveShape: { value: new THREE.Vector4(1, 1, 1, 1) },
+    uWaveShape2: { value: new THREE.Vector4(1, 0.115, 0.35, 0) },
   };
+}
+
+// Live half of the bank: the ?waterdev shape knobs, which every material
+// compiling WAVE_GLSL has to receive or its surface drifts out of step with
+// the others (the surf ribbon and the ocean rings ride this same bank).
+function applyWaveBankTuning(uniforms) {
+  if (!uniforms?.uWaveShape) return;
+  uniforms.uSteepness.value = waterDev.waveSteepness;
+  uniforms.uWaveShape.value.set(
+    waterDev.waveAmp,
+    waterDev.waveLength,
+    waterDev.waveSpeed,
+    waterDev.chopAmp,
+  );
+  uniforms.uWaveShape2.value.set(
+    waterDev.chopLength,
+    waterDev.swashHeight,
+    waterDev.swellShoreFloor,
+    0,
+  );
 }
 
 // Static (per-zone) half of the bank: everything that only changes on travel.
@@ -611,6 +655,10 @@ function createStylizedWaterMaterial(
       // the water mesh draws — one copy, no scene re-render).
       uRefraction: { value: null },
       uHasRefraction: { value: 0 },
+      // 1 when the grab holds output-encoded sRGB (the raw framebuffer), 0 when
+      // it is the composer's working buffer, which is already linear. Decoding
+      // a linear grab would drag the whole seabed dark.
+      uRefractionEncoded: { value: 1 },
       uResolution: { value: new THREE.Vector2(1, 1) },
       // Planar reflection (filled when reflections are enabled).
       uReflection: { value: null },
@@ -644,6 +692,25 @@ function createStylizedWaterMaterial(
       uRampDepths: { value: new THREE.Vector4(0.16, 0.85, 2.4, 7.2) },
       uRampOpacity: { value: new THREE.Vector4(0.4, 1, 6, 0) },
       uRampBias: { value: new THREE.Vector4(3.5, 2.6, 1, 1) },
+      // Clarity, mirrored from waterDevRuntime: how much of the pixel is the
+      // real seabed rather than painted water body.
+      // (glazeAngle, pathBlend, captureShallow, captureDeep)
+      uClarity: { value: new THREE.Vector4(0.7, 1, 0.94, 0.4) },
+      // (captureDepth, reflShallow, reflDeep, unused)
+      uClarity2: { value: new THREE.Vector4(5.2, 0.62, 0.88, 0) },
+      // Snell's window: (criticalCos, softness, windowAlpha, mirrorAlpha)
+      uSnell: { value: new THREE.Vector4(0.661, 0.085, 0.3, 0.95) },
+      // (mirrorGrab, mirrorOffset, wobble, unused)
+      uSnell2: { value: new THREE.Vector4(0.6, 0.13, 0.05, 0) },
+      // Body model: (physicalBlend, scatterAdd, scatterSat, scatterSun)
+      uBody: { value: new THREE.Vector4(0, 1, 1, 0) },
+      // (darkLift, unused, unused, unused)
+      uBody2: { value: new THREE.Vector4(0.4, 0, 0, 0) },
+      uRippleShape: { value: new THREE.Vector4(1, 1, 0.85, 0.085) },
+      uFoamShape: { value: new THREE.Vector4(0.8, 1, 0.38, 0.52) },
+      uFoamMix: { value: new THREE.Vector4(0.55, 0.55, 0.85, 0.26) },
+      uFoamWidth: { value: new THREE.Vector4(1, 1, 1, 1) },
+      uFoamShoreGain: { value: 1 },
     },
     side: THREE.DoubleSide,
     vertexShader: /* glsl */`
@@ -743,6 +810,7 @@ function createStylizedWaterMaterial(
       uniform float uWaterLevel;
       uniform sampler2D uRefraction;
       uniform float uHasRefraction;
+      uniform float uRefractionEncoded;
       uniform vec2 uResolution;
       uniform sampler2D uReflection;
       uniform float uHasReflection;
@@ -768,6 +836,21 @@ function createStylizedWaterMaterial(
       uniform vec4 uRampDepths;
       uniform vec4 uRampOpacity;
       uniform vec4 uRampBias;
+      uniform vec4 uClarity;
+      uniform vec4 uClarity2;
+      uniform vec4 uSnell;
+      uniform vec4 uSnell2;
+      uniform vec4 uBody;
+      uniform vec4 uBody2;
+      // Ripple detail: (uv scale, drift speed, domain warp, short-octave gain)
+      uniform vec4 uRippleShape;
+      // Foam noise: (feature scale, drift speed, contrast window, detail mix)
+      uniform vec4 uFoamShape;
+      // Surf profile weights: (core, lip, trail, spray haze)
+      uniform vec4 uFoamMix;
+      // Surf profile widths: (core, lip, trail, shore-foam gain)
+      uniform vec4 uFoamWidth;
+      uniform float uFoamShoreGain;
       varying vec3 vWorld;
       varying float vDepth;
       varying float vExposure;
@@ -801,27 +884,31 @@ function createStylizedWaterMaterial(
       // Two octaves of advected Worley lace, shared by every foam source.
       // Features are ~1.5m (mockup foam texture reads as streaks, not speckle).
       float foamLace(vec2 wxz, float t) {
-        vec2 p = wxz * 0.8 + vec2(t * 0.13, -t * 0.09);
+        float drift = t * uFoamShape.y;
+        vec2 p = wxz * uFoamShape.x + vec2(drift * 0.13, -drift * 0.09);
         float a = 1.0 - worley(p);
         float b = 1.0 - worley(p * 2.4 + 7.3);
-        // High contrast: real holes and filaments, not grey mist.
-        float lace = smoothstep(0.5, 0.88, a * 0.62 + b * 0.38);
+        // High contrast: real holes and filaments, not grey mist. A narrow
+        // window is lattice; a wide one is mist.
+        float laceMid = 0.69;
+        float laceHalf = max(uFoamShape.z, 0.01) * 0.5;
+        float lace = smoothstep(laceMid - laceHalf, laceMid + laceHalf, a * 0.62 + b * 0.38);
         #ifdef ENHANCED_WATER
           // Polished gets animated torn cells from the two existing Worley
           // reads. Cinematic alone pays for a third, finer bubble scale.
-          float torn = smoothstep(0.28, 0.78, noise(p * 0.43 + vec2(-t * 0.025, t * 0.019)));
+          float torn = smoothstep(0.28, 0.78, noise(p * 0.43 + vec2(-drift * 0.025, drift * 0.019)));
           float bubbleWeb = 1.0 - smoothstep(0.05, 0.16, abs(b - 0.43));
-          bubbleWeb *= smoothstep(0.24, 0.74, noise(p * 1.17 + vec2(t * 0.028, -t * 0.019)));
+          bubbleWeb *= smoothstep(0.24, 0.74, noise(p * 1.17 + vec2(drift * 0.028, -drift * 0.019)));
           float detailedLace = max(lace * (0.68 + 0.32 * torn), bubbleWeb * 0.52);
           #ifdef CINEMATIC_WATER
             float c = 1.0 - worley(p * 5.6 + vec2(-11.3, 8.7));
             float filaments = smoothstep(0.46, 0.86, a * 0.46 + b * 0.34 + c * 0.2);
             float fineWeb = 1.0 - smoothstep(0.045, 0.15, abs(c - 0.43));
-            fineWeb *= smoothstep(0.22, 0.74, noise(p * 1.17 + vec2(t * 0.028, -t * 0.019)));
+            fineWeb *= smoothstep(0.22, 0.74, noise(p * 1.17 + vec2(drift * 0.028, -drift * 0.019)));
             detailedLace = max(filaments * (0.62 + 0.38 * torn), fineWeb * 0.72);
-            lace = mix(lace, detailedLace, 0.68);
+            lace = mix(lace, detailedLace, uFoamShape.w * 1.31);
           #else
-            lace = mix(lace, detailedLace, 0.52);
+            lace = mix(lace, detailedLace, uFoamShape.w);
           #endif
         #endif
         return lace;
@@ -836,9 +923,9 @@ function createStylizedWaterMaterial(
         float env = breakerField(wxz, t, sd, depth, exposure, f, s);
         // Narrow lip with a bright solid core at the leading edge; the trail
         // dissolves through the lace instead of smearing grey.
-        float coreWidth = mix(0.035, 0.095, localCliffSwell);
-        float lipWidth = mix(0.075, 0.19, localCliffSwell);
-        float trailWidth = mix(0.34, 0.62, localCliffSwell);
+        float coreWidth = mix(0.035, 0.095, localCliffSwell) * uFoamWidth.x;
+        float lipWidth = mix(0.075, 0.19, localCliffSwell) * uFoamWidth.y;
+        float trailWidth = mix(0.34, 0.62, localCliffSwell) * uFoamWidth.z;
         float foamPhase = mod(f + 0.5, 1.0) - 0.5;
         float foamDistance = localCliffSwell > 0.001 ? abs(foamPhase) : f;
         float preFoamScale = foamPhase < 0.0 ? 0.72 : 1.0;
@@ -862,10 +949,10 @@ function createStylizedWaterMaterial(
         // stays a halo rather than more structure.
         float haze = (1.0 - smoothstep(0.0, trailWidth * 1.9, foamDistance))
           * (0.55 + 0.45 * lace);
-        float foam = core * 0.55
-          + lip * (0.45 + 0.55 * lace)
-          + trail * lace * lace * 0.85
-          + haze * 0.26;
+        float foam = core * uFoamMix.x
+          + lip * (1.0 - uFoamMix.y + uFoamMix.y * lace)
+          + trail * lace * lace * uFoamMix.z
+          + haze * uFoamMix.w;
         #ifdef ENHANCED_WATER
           // Let a crest progress through a compact white curl, boiling
           // whitewater, torn streaks, and finally detached bubble islands.
@@ -882,12 +969,13 @@ function createStylizedWaterMaterial(
           // flat band back on the tiers that pay most for detail.
           #ifdef CINEMATIC_WATER
             foam = max(foam * 1.12,
-              core * 0.72 + lip * (0.48 + lace * 0.52) + boiling + tornWake + haze * 0.24);
+              core * uFoamMix.x * 1.31 + lip * (1.0 - uFoamMix.y + uFoamMix.y * lace)
+                + (boiling + tornWake) * uFoamWidth.w + haze * uFoamMix.w * 0.92);
           #else
             foam = max(
               foam * 1.06,
-              core * 0.62 + lip * (0.46 + lace * 0.54)
-                + boiling * 0.78 + tornWake * 0.62 + haze * 0.20
+              core * uFoamMix.x * 1.13 + lip * (1.0 - uFoamMix.y + uFoamMix.y * lace)
+                + (boiling * 0.78 + tornWake * 0.62) * uFoamWidth.w + haze * uFoamMix.w * 0.77
             );
           #endif
         #endif
@@ -903,15 +991,17 @@ function createStylizedWaterMaterial(
         // marching across the bay. The warp de-correlates repeats for free;
         // weight shifts toward the finer octaves so no single patch scale
         // dominates the highlight.
+        float rScale = uRippleShape.x;
+        float rt = t * uRippleShape.y;
         vec2 warp = (vec2(
-          noise(wxz * 0.021 + vec2(t * 0.004, 0.0)),
-          noise(wxz * 0.017 + vec2(0.0, -t * 0.003))
-        ) - 0.5) * 0.85;
-        vec2 uvA = wxz * 0.048 + warp * 0.5 + vec2(t * 0.008, -t * 0.006);
-        vec2 uvB = vec2(wxz.x * 0.78 - wxz.y * 0.62, wxz.x * 0.62 + wxz.y * 0.78) * 0.135
-          + warp * 0.22 + vec2(-t * 0.014, t * 0.01);
-        vec2 uvC = vec2(wxz.x * 0.36 + wxz.y * 0.93, -wxz.x * 0.93 + wxz.y * 0.36) * 0.27
-          + vec2(t * 0.022, t * 0.017);
+          noise(wxz * 0.021 + vec2(rt * 0.004, 0.0)),
+          noise(wxz * 0.017 + vec2(0.0, -rt * 0.003))
+        ) - 0.5) * uRippleShape.z;
+        vec2 uvA = wxz * 0.048 * rScale + warp * 0.5 + vec2(rt * 0.008, -rt * 0.006);
+        vec2 uvB = vec2(wxz.x * 0.78 - wxz.y * 0.62, wxz.x * 0.62 + wxz.y * 0.78) * 0.135 * rScale
+          + warp * 0.22 + vec2(-rt * 0.014, rt * 0.01);
+        vec2 uvC = vec2(wxz.x * 0.36 + wxz.y * 0.93, -wxz.x * 0.93 + wxz.y * 0.36) * 0.27 * rScale
+          + vec2(rt * 0.022, rt * 0.017);
         vec3 a = texture2D(uRippleNormal, uvA).rgb * 2.0 - 1.0;
         vec3 b = texture2D(uRippleNormal, uvB).rgb * 2.0 - 1.0;
         vec3 c = texture2D(uRippleNormal, uvC).rgb * 2.0 - 1.0;
@@ -932,15 +1022,15 @@ function createStylizedWaterMaterial(
           + c.xy * uRippleOctaves.z * fineWind;
         #ifdef ENHANCED_WATER
           // Polished adds one short-wave octave; cinematic adds a second.
-          vec2 uvD = vec2(wxz.x * 0.91 + wxz.y * 0.41, -wxz.x * 0.41 + wxz.y * 0.91) * 0.46
-            + warp * 0.08 + vec2(-t * 0.034, t * 0.026);
+          vec2 uvD = vec2(wxz.x * 0.91 + wxz.y * 0.41, -wxz.x * 0.41 + wxz.y * 0.91) * 0.46 * rScale
+            + warp * 0.08 + vec2(-rt * 0.034, rt * 0.026);
           vec3 d = texture2D(uRippleNormal, uvD).rgb * 2.0 - 1.0;
-          slope += d.xy * 0.085 * fineWind;
+          slope += d.xy * uRippleShape.w * fineWind;
           #ifdef CINEMATIC_WATER
-            vec2 uvE = vec2(wxz.x * 0.18 - wxz.y * 0.98, wxz.x * 0.98 + wxz.y * 0.18) * 0.82
-              + vec2(t * 0.061, t * 0.047);
+            vec2 uvE = vec2(wxz.x * 0.18 - wxz.y * 0.98, wxz.x * 0.98 + wxz.y * 0.18) * 0.82 * rScale
+              + vec2(rt * 0.061, rt * 0.047);
             vec3 e = texture2D(uRippleNormal, uvE).rgb * 2.0 - 1.0;
-            slope += d.xy * 0.035 * fineWind + e.xy * 0.055 * fineWind;
+            slope += d.xy * uRippleShape.w * 0.41 * fineWind + e.xy * uRippleShape.w * 0.65 * fineWind;
           #endif
         #endif
         return slope;
@@ -984,6 +1074,13 @@ function createStylizedWaterMaterial(
         vec4 floorSample = texture2D(uSeafloor, vFlatXZ / uSize + 0.5);
         float standingWater = texture2D(uStandingWaterMask, vFlatXZ / uSize + 0.5).r;
         float dRaw = uWaterLevel - (floorSample.r * ${HSPAN.toFixed(1)} + (${HMIN.toFixed(1)})); // signed: <0 just inland of the line
+        // Break up the byte quantisation of the packed height. One step is
+        // HSPAN/255; on a gentle shelf that is metres wide horizontally, so
+        // every depth-keyed term draws a hard contour along each tread. A
+        // half-step of world-space noise turns the staircase into a grain the
+        // eye reads as seabed texture instead of as a seam. The offset is far
+        // too small to disturb the shoreline or the foam gates.
+        dRaw += (noise(vFlatXZ * 3.7) + noise(vFlatXZ * 11.3) - 1.0) * ${(7.0 / 255 * 0.6).toFixed(4)};
         float shoreDist = floorSample.g * ${SHORE_DIST_RANGE.toFixed(1)};
         float shoreSoftness = floorSample.b;
         float playableFade = floorSample.a;
@@ -1221,14 +1318,33 @@ function createStylizedWaterMaterial(
 
         vec3 viewDir = normalize(cameraPosition - vWorld);
         float underwaterView = clamp(uUnderwaterAmount, 0.0, 1.0);
-        float underside = gl_FrontFacing ? 0.0 : 1.0;
-        float surfaceLook = smoothstep(0.02, 0.58, -viewDir.y);
+        // How much water the eye ray actually crosses, as a multiple of the
+        // vertical drop. Snell bends the ray toward the vertical once it is
+        // below the surface, so the stretch tops out at ~1.51x even at grazing
+        // incidence. That bound is the reason real shallows stay legible from
+        // every angle: what hides the bed from a beach-level camera is the
+        // reflection term, not absorption.
+        float cosAir = clamp(abs(viewDir.y), 0.0, 1.0);
+        float cosWater = sqrt(max(0.06, 1.0 - (1.0 - cosAir * cosAir) / 1.777));
+        float pathScale = mix(1.0, 1.0 / cosWater, uClarity.y);
+        // Steep look-down should see the sand. The painted ramp is a stylising
+        // glaze, so it fades out exactly where honest transparency is expected.
+        float glazeByAngle = mix(1.0, 1.0 - uClarity.x, smoothstep(0.28, 0.78, cosAir));
 
         // --- the water body: art-directed turquoise first, refraction second -
         float shallowFactor = exp(-depth * 0.30); // ~1 at the shore, 0 deep
+        // What gets added back as in-scatter. Desaturating it and tying it to
+        // the sun are the two knobs that stop a flat add from reading as milk.
+        float scatterLuma = dot(uScatter, vec3(0.2126, 0.7152, 0.0722));
+        vec3 scatterTint = mix(vec3(scatterLuma), uScatter, uBody.z)
+          * uBody.y * mix(1.0, uDaylight, uBody.w);
         vec3 baseAbsorb = exp(-uAbsorb * depth);
-        vec3 baseWater = uSand * baseAbsorb + uScatter * (1.0 - baseAbsorb);
+        vec3 baseWater = uSand * baseAbsorb + scatterTint * (1.0 - baseAbsorb);
         vec3 color = baseWater;
+        // Kept for the single-blend body below: the seabed as sampled, and how
+        // much of it survives the water column.
+        vec3 bedSample = uSand;
+        vec3 bedTrans = vec3(1.0);
         if (uHasRefraction > 0.5) {
           // Distort harder where the water is deeper; nearly straight at the
           // swash line so the beach doesn't smear.
@@ -1254,9 +1370,9 @@ function createStylizedWaterMaterial(
             vec3 crossedGrab = texture2D(uRefraction, clamp(ruv + crossed, vec2(0.001), vec2(0.999))).rgb;
             grab = mix(grab, crossedGrab, 0.1);
           #endif
-          // The grab is tone-mapped sRGB; decode so the Beer-Lambert tint and
-          // the final tone-mapping pass operate on plausible linear values.
-          grab = pow(grab, vec3(2.2));
+          // Decode only when the grab is output-encoded (see uRefractionEncoded)
+          // so the Beer-Lambert tint operates on plausible linear values.
+          grab = mix(grab, pow(grab, vec3(2.2)), uRefractionEncoded);
 
           // Keep the captured scene honest. Only dark basalt in very shallow
           // water gets a mild lift toward submerged turquoise so it doesn't
@@ -1264,9 +1380,9 @@ function createStylizedWaterMaterial(
           float grabLum = dot(grab, vec3(0.299, 0.587, 0.114));
           vec3 liftColor = mix(uScatter, uSand, 0.62);
           float darkLift = shallowClarity * smoothstep(0.3, 0.06, grabLum);
-          vec3 gradedGrab = mix(grab, max(grab, liftColor * 0.8), darkLift * 0.4);
+          vec3 gradedGrab = mix(grab, max(grab, liftColor * 0.8), darkLift * uBody2.x);
 
-          float opticalDepth = depth * mix(0.3, 0.9, smoothstep(0.55, 2.8, depth)) + 0.018;
+          float opticalDepth = depth * pathScale + 0.018;
           #ifdef ENHANCED_WATER
             #ifdef CINEMATIC_WATER
               opticalDepth *= 1.12;
@@ -1274,12 +1390,18 @@ function createStylizedWaterMaterial(
               opticalDepth *= 1.06;
             #endif
           #endif
-          vec3 bed = gradedGrab * exp(-uAbsorb * opticalDepth);
+          bedTrans = exp(-uAbsorb * opticalDepth);
+          bedSample = gradedGrab;
+          vec3 bed = gradedGrab * bedTrans;
           float scatterStrength = mix(0.08, 0.5, smoothstep(0.5, 2.8, depth));
-          vec3 refractedDetail = bed + uScatter * (1.0 - exp(-depth * 0.30)) * scatterStrength;
+          vec3 refractedDetail = bed + scatterTint * (1.0 - exp(-depth * 0.30)) * scatterStrength;
           // Shallow water IS the refracted scene; the painted body takes over
-          // only as real depth accumulates.
-          float captureMix = mix(0.92, 0.36, smoothstep(0.45, 2.8, depth)) * (1.0 - smoothstep(3.5, 7.5, depth));
+          // only as real depth accumulates. The handover used to be most of the
+          // way done by chest depth, which is what made a knee-deep shelf read
+          // as paint from above.
+          float captureFar = max(uClarity2.x, 0.4);
+          float captureMix = mix(uClarity.z, uClarity.w, smoothstep(captureFar * 0.23, captureFar, depth))
+            * (1.0 - smoothstep(captureFar * 1.06, captureFar * 1.83, depth));
           #ifdef ENHANCED_WATER
             #ifdef CINEMATIC_WATER
               captureMix = min(0.98, captureMix * 1.09);
@@ -1298,7 +1420,11 @@ function createStylizedWaterMaterial(
         float nearShelf = 1.0 - smoothstep(18.0, 52.0, shoreDist);
         // Trimmed vs the first pass: the ramp is a thin glaze over the
         // refracted scene now, not a paint layer (the mockup body is glassy).
-        float rampVisibility = playableFade * (0.40 + nearShelf * 0.16) * (1.0 - edgeOcean * 0.35);
+        // The panel's "shallow glaze" knob used to be written into a uniform
+        // nothing read: the floor here was a hardcoded 0.40 and no amount of
+        // dragging the slider changed the water.
+        float rampVisibility = playableFade * (uRampOpacity.x + nearShelf * 0.16)
+          * (1.0 - edgeOcean * 0.35) * glazeByAngle;
         vec3 paleAqua = mix(uSand, uFoam, uRampMix.x);
         vec3 seafoamShelf = mix(uSand, uScatter, uRampMix.y);
         seafoamShelf = mix(
@@ -1336,8 +1462,20 @@ function createStylizedWaterMaterial(
           smoothstep(uRampDepths.z, max(uRampOpacity.z, uRampDepths.z + 0.1), rampDepth)
         );
         // Keep the waterline fade: the ramp must arrive, not start, at the sand.
-        float shoreFade = smoothstep(0.025, uRampDepths.x, depth);
+        // It used to be fully on by 16cm, so the first stride into the sea hit
+        // half a screen of flat colour. Give it most of a metre to arrive.
+        float shoreFade = smoothstep(0.03, max(uRampDepths.y, 0.85), depth);
         color = mix(color, depthRamp, clamp(shoreFade * rampOpacity, 0.0, 1.0));
+        // One-blend body. Everything above stacks five washes on the same
+        // pixel — bed, in-scatter, ramp, and later the mirror and the haze —
+        // and five washes average out to flat bright colour whatever each one
+        // is worth on its own. This is the same water expressed as a single
+        // Beer-Lambert mix: the seabed, dimmed by the column, over the
+        // authored ramp colour. Drag uBody.x to compare them directly.
+        if (uBody.x > 0.001 && uHasRefraction > 0.5) {
+          vec3 oneBlend = bedSample * bedTrans + depthRamp * (1.0 - bedTrans);
+          color = mix(color, oneBlend, uBody.x);
+        }
         #ifdef ENHANCED_WATER
           // A restrained blue-green extinction pass makes the shallow shelf
           // feel transparent while the drop-off gains actual optical depth.
@@ -1544,7 +1682,11 @@ function createStylizedWaterMaterial(
         // departure so the sea keeps some sky in it at steep angles; grazing
         // angles are unchanged because fres dominates there.
         float reflectance = 0.055 + 0.945 * fres;
-        float reflStrength = mix(0.85, 0.34, shallowFactor) * (1.0 - underwaterView * 0.72);
+        // Shallows used to be held down to a third of the deep-water mirror,
+        // which removed the one term that legitimately hides a sandbar from a
+        // beach-level camera. fres is ~0.055 looking down, so raising this
+        // costs nothing overhead and buys back the grazing silver.
+        float reflStrength = mix(uClarity2.z, uClarity2.y, shallowFactor) * (1.0 - underwaterView * 0.72);
         float mirrorMix = clamp(reflectance * reflStrength, 0.0, 0.8);
         color = mix(color, reflColor, mirrorMix);
         // Reflected scene objects (Darwin, ship, shore) stay visible past the
@@ -1612,7 +1754,14 @@ function createStylizedWaterMaterial(
         float pathGlitter = path * pathDistance * pathGrain * uSunPathStrength;
         // Peaks are allowed past 1.0 so ACES rolls them off and the brightest
         // glints cross the bloom threshold (the sparkle is a bloom customer).
-        color += glintWhite * min(spec * glint * 1.55 * uGlintTune.x, 1.45 * max(uGlintTune.x, 1.0))
+        // Glint strength is authored for the sheet a low sun lays across the
+        // water. Near the zenith that headroom has nowhere to go but through
+        // the bloom threshold, and ACES turns clipped warm highlights yellow
+        // then white — which is the blown-out surf at noon. Ease the peak back
+        // to the authored ceiling as the sun climbs; golden hour is untouched.
+        float noonEase = mix(1.0, 0.62, smoothstep(0.45, 0.88, uSun.y));
+        float glintGain = uGlintTune.x * noonEase;
+        color += glintWhite * min(spec * glint * 1.55 * glintGain, 1.45 * max(glintGain, 1.0))
           * (0.72 + uSunPathStrength * 0.42);
         color += glintWhite * pathGlitter * 0.16 * uGlintTune.x * (1.0 - uRain * 0.86) * (1.0 - underwaterView * 0.86);
         // The fleck fields below are the only microSparkleMask callers, and
@@ -1743,6 +1892,7 @@ function createStylizedWaterMaterial(
           + waterlineTrace * (0.5 + 0.34 * lace)
         );
         shoreFoam = max(shoreFoam, contactRim * (0.74 + 0.26 * lace));
+        shoreFoam *= uFoamShoreGain;
         shoreFoam *= mix(1.0, 0.08, localCliffSwell);
         float surf = breakerFoam(vFlatXZ, uTime, shoreDist, depth, lace, vExposure)
           * smoothstep(0.05, 0.24, depth)
@@ -1792,16 +1942,40 @@ function createStylizedWaterMaterial(
         alpha = max(alpha, foam * 0.86 * foamVisibility);
 
         if (underwaterView > 0.001) {
+          // Snell's window. Everything above the surface reaches a submerged
+          // eye inside a 96-degree cone about the vertical; past the
+          // 48.6-degree critical angle the surface is a total-internal mirror
+          // of the seabed. The old model ran the other way round — most opaque
+          // straight up, near-clear toward the horizon — so the shore read
+          // through the waterline like aquarium glass.
           float underwaterBlend = smoothstep(0.08, 0.48, underwaterView);
+          float cosTheta = clamp(dot(normal, viewDir), 0.0, 1.0);
+          // Soft band around cos(48.6deg) = 0.661. Wave normals scramble the
+          // rim on their own, so this only has to avoid an aliased edge.
+          float snellSoft = max(uSnell.y, 0.005);
+          float snellWindow = smoothstep(uSnell.x - snellSoft, uSnell.x + snellSoft, cosTheta);
           float ceilingNoise = 0.5 + 0.5 * noise(vWorld.xz * 1.75 + vec2(uTime * 0.12, -uTime * 0.09));
-          float faceWeight = mix(0.82, 1.08, underside);
-          float ceiling = underwaterBlend * faceWeight * mix(0.08, 0.46, surfaceLook);
           vec3 ceilingTint = mix(uDeep, uScatter, 0.62 + ceilingNoise * 0.16);
-          ceilingTint = mix(ceilingTint, uSkyHorizon, smoothstep(0.18, 0.82, reflectance) * 0.24);
-          color = mix(color, ceilingTint + uFoam * foam * 0.16, ceiling);
-          float underwaterAlpha = 0.095 + surfaceLook * 0.27 + underside * 0.045 + reflectance * 0.06;
-          underwaterAlpha += foam * (0.2 + surfaceLook * 0.22);
-          alpha = mix(alpha, clamp(underwaterAlpha, 0.08, 0.58), underwaterBlend);
+          vec3 mirrorBed = ceilingTint;
+          vec3 windowLight = mix(ceilingTint, uSkyHorizon, 0.5);
+          if (uHasRefraction > 0.5) {
+            vec2 uwUV = gl_FragCoord.xy / uResolution;
+            vec2 wobble = normal.xz * uSnell2.z;
+            // The mirror shows the bed, which is down-screen from here; the
+            // wave normal breaks the copy up so it does not read as a smear.
+            vec2 mirrorUV = clamp(uwUV + wobble * 1.7 - vec2(0.0, uSnell2.y), vec2(0.002), vec2(0.998));
+            mirrorBed = mix(ceilingTint, pow(texture2D(uRefraction, mirrorUV).rgb, vec3(2.2)), uSnell2.x);
+            // Inside the window the sky is still drawn behind this surface, so
+            // the paint only has to ripple it. The true compression of the
+            // whole hemisphere into the cone is not modelled.
+            vec2 windowUV = clamp(uwUV + wobble * 0.9, vec2(0.002), vec2(0.998));
+            windowLight = pow(texture2D(uRefraction, windowUV).rgb, vec3(2.2));
+          }
+          vec3 underwaterColor = mix(mirrorBed, windowLight, snellWindow) + uFoam * foam * 0.18;
+          color = mix(color, underwaterColor, underwaterBlend);
+          float underwaterAlpha = mix(uSnell.w, uSnell.z, snellWindow);
+          underwaterAlpha = max(underwaterAlpha, foam * 0.82);
+          alpha = mix(alpha, clamp(underwaterAlpha, 0.0, 1.0), underwaterBlend);
         }
 
         // A fully submerged playable map can remain shallow right through its
@@ -1872,6 +2046,10 @@ function createSurfRibbonMaterial(
       uMoonGlitter: { value: 0 },
       uRain: { value: 0 },
       uUnderwaterAmount: { value: 0 },
+      // (swash gain, swash width, wash-sheet gain, wash-sheet reach)
+      uRibbon: { value: new THREE.Vector4(1, 1, 1, 9.5) },
+      // (contact gain, overall alpha, unused, unused)
+      uRibbon2: { value: new THREE.Vector4(1, 1, 0, 0) },
     },
     vertexShader: /* glsl */`
       ${WAVE_GLSL}
@@ -1926,6 +2104,8 @@ function createSurfRibbonMaterial(
       uniform float uSize;
       uniform float uStandingWaterFadeStart;
       uniform float uStandingWaterFadeEnd;
+      uniform vec4 uRibbon;
+      uniform vec4 uRibbon2;
       varying vec3 vWorld;
       varying float vExposure;
       varying vec2 vFlatXZ;
@@ -2024,17 +2204,17 @@ function createSurfRibbonMaterial(
         float front = 0.65 + cycle * 2.65 + wobble;
         // Swash lip with a solid core, plus one weak fully-laced outer set
         // line: the only foam between the swash and the breaker fronts.
-        float inner = srLine(shoreDist, front, 0.6) * 0.72 * (0.6 + 0.4 * lace);
+        float inner = srLine(shoreDist, front, 0.6 * uRibbon.y) * 0.72 * (0.6 + 0.4 * lace);
         // The outer set line marches like the breakers, so it obeys the same
         // swell-exposure gate (the immediate swash lip stays omnidirectional —
         // water laps every shore, but sets arrive from the swell).
-        float outerSet = srLine(shoreDist, front + 5.1, 1.35) * 0.3 * lace
+        float outerSet = srLine(shoreDist, front + 5.1, 1.35 * uRibbon.y) * 0.3 * lace
           * mix(0.22, 1.0, smoothstep(-0.15, 0.6, vExposure));
-        float bands = inner + outerSet;
+        float bands = (inner + outerSet) * uRibbon.x;
         #ifdef ENHANCED_WATER
           // A faint broken echo behind each swash line gives the foam a
           // receding, layered edge instead of one mathematically clean band.
-          float receding = srLine(shoreDist, front - 1.15, 0.92)
+          float receding = srLine(shoreDist, front - 1.15, 0.92 * uRibbon.y)
             * lace * (0.09 + 0.12 * (1.0 - cycle));
           bands += receding;
         #endif
@@ -2091,7 +2271,8 @@ function createSurfRibbonMaterial(
           #endif
         #endif
 
-        float contact = smoothstep(0.2, 0.018, abs(depth)) * smoothstep(2.65, 0.0, shoreDist) * (0.5 + lace * 0.5);
+        float contact = smoothstep(0.2, 0.018, abs(depth)) * smoothstep(2.65, 0.0, shoreDist)
+          * (0.5 + lace * 0.5) * uRibbon2.x;
 
         // shoreWindow gates only the swash-anchored lines; the breaker fronts
         // carry their own envelope out past it.
@@ -2107,10 +2288,10 @@ function createSurfRibbonMaterial(
           #ifdef CINEMATIC_WATER
             foamIslands = srLace(vWorld.xz * 1.31 + vec2(3.6, -5.2), uTime * 0.79);
           #endif
-          float washRemnant = smoothstep(9.5, 1.2, shoreDist)
+          float washRemnant = smoothstep(max(uRibbon.w, 1.4), 1.2, shoreDist)
             * smoothstep(0.04, 0.24, depth)
             * (1.0 - smoothstep(0.9, 1.75, depth))
-            * foamIslands * (0.06 + 0.14 * (1.0 - cycle));
+            * foamIslands * (0.06 + 0.14 * (1.0 - cycle)) * uRibbon.z;
           float rivulets = smoothstep(0.46, 0.92, 0.5 + 0.5 * sin(
             shoreDist * 2.25 - uTime * 0.78
             + srNoise(vWorld.xz * 0.28 + vec2(-uTime * 0.04, uTime * 0.025)) * 3.2
@@ -2147,7 +2328,7 @@ function createSurfRibbonMaterial(
         // foam survived everywhere in the shallow depth field.
         float rim = uSize * 0.5;
         float edgeFade = 1.0 - smoothstep(rim - 14.0, rim - 2.0, length(vWorld.xz));
-        alpha *= edgeFade;
+        alpha *= edgeFade * uRibbon2.y;
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -2651,6 +2832,7 @@ function OceanContactRipples() {
     ru.uBreakers.value = oceanRingBank.breakers;
     ru.uCrestNorm.value = oceanRingBank.crestNorm;
     ru.uChopWind.value = oceanRingBank.chopWind;
+    applyWaveBankTuning(ru);
     const mesh = meshRef.current;
     if (!mesh) {
       oceanRingQueue.length = 0;
@@ -2798,6 +2980,53 @@ function renderReflection(gl, scene, camera, rt, outMatrix) {
 
 const _prevClearColor = new THREE.Color();
 const _drawSize = new THREE.Vector2();
+
+// Draw framebuffer for the MSAA resolve, and a latch so a driver that rejects
+// the blit degrades to painted water instead of erroring once per frame.
+let _blitFbo = null;
+let _blitUnavailable = false;
+
+// Copy whatever is currently in the colour buffer into `texture`.
+//
+// copyFramebufferToTexture cannot read a multisampled framebuffer, and the
+// composer renders the scene into one whenever MSAA is on. blitFramebuffer is
+// the resolve path: same rectangle, NEAREST, colour only.
+function copyFramebufferIntoTexture(renderer, texture, width, height) {
+  const target = renderer.getRenderTarget();
+  if (!(target?.samples > 0)) {
+    renderer.copyFramebufferToTexture(texture);
+    return true;
+  }
+  if (_blitUnavailable) return false;
+  const gl = renderer.getContext();
+  if (typeof gl.blitFramebuffer !== 'function') {
+    _blitUnavailable = true;
+    return false;
+  }
+  try {
+    renderer.initTexture(texture);
+    const glTexture = renderer.properties.get(texture)?.__webglTexture;
+    const state = renderer.state;
+    if (!glTexture || !state?.bindFramebuffer) {
+      _blitUnavailable = true;
+      return false;
+    }
+    if (!_blitFbo) _blitFbo = gl.createFramebuffer();
+    // Whatever three has bound is the read side; put it back on both targets
+    // afterwards so three's binding cache stays true.
+    const bound = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, _blitFbo);
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glTexture, 0);
+    state.bindFramebuffer(gl.READ_FRAMEBUFFER, bound);
+    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    state.bindFramebuffer(gl.READ_FRAMEBUFFER, bound);
+    state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, bound);
+    return true;
+  } catch {
+    _blitUnavailable = true;
+    return false;
+  }
+}
 
 export function Water(props) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -3073,32 +3302,48 @@ function WaterSurface({
   // Refraction grab: runs in the middle of the render, right before the water
   // mesh draws (transparent pass, after all opaque geometry). One framebuffer
   // copy — no scene re-render.
+  //
+  // This used to bail on every offscreen target, which was meant to skip the
+  // planar mirror pass. But the EffectComposer renders the whole scene into a
+  // target too, so with post-processing on — the default — the grab never ran
+  // once and every refraction term in the shader was dead: no seabed, no
+  // swimmer, no fish. The water was pure painted body colour.
   const handleBeforeRender = useCallback(renderer => {
-    // Skip when rendering into an offscreen target (the planar mirror pass):
-    // the grab must come from the main framebuffer only.
-    if (renderer.getRenderTarget() !== null) return;
+    const target = renderer.getRenderTarget();
+    // The mirror pass renders the world reflected; grabbing that as the
+    // refraction source would put the sky under the water.
+    if (target === reflectionRT) return;
     renderer.getDrawingBufferSize(_drawSize);
-    const width = Math.floor(_drawSize.x);
-    const height = Math.floor(_drawSize.y);
+    const width = target ? target.width : Math.floor(_drawSize.x);
+    const height = target ? target.height : Math.floor(_drawSize.y);
     if (width < 1 || height < 1) {
       waterMaterial.uniforms.uHasRefraction.value = 0;
       return;
     }
+    // Match the source buffer's format: the cinematic tier composites in
+    // RGBA16F, and WebGL2 refuses a resolve blit between float and fixed point.
+    const sourceType = target?.texture?.type ?? THREE.UnsignedByteType;
     let grab = grabRef.current;
-    if (!grab || grab.image.width !== width || grab.image.height !== height) {
+    if (!grab || grab.image.width !== width || grab.image.height !== height || grab.type !== sourceType) {
       grab?.dispose();
       grab = new THREE.FramebufferTexture(width, height);
+      grab.type = sourceType;
+      grab.colorSpace = target?.texture?.colorSpace ?? THREE.NoColorSpace;
       grab.minFilter = THREE.LinearFilter;
       grab.magFilter = THREE.LinearFilter;
       grab.generateMipmaps = false;
       grabRef.current = grab;
     }
-    renderer.copyFramebufferToTexture(grab);
+    if (!copyFramebufferIntoTexture(renderer, grab, width, height)) {
+      waterMaterial.uniforms.uHasRefraction.value = 0;
+      return;
+    }
     const wu = waterMaterial.uniforms;
     wu.uRefraction.value = grab;
     wu.uHasRefraction.value = 1;
+    wu.uRefractionEncoded.value = !target || target.texture?.colorSpace === THREE.SRGBColorSpace ? 1 : 0;
     wu.uResolution.value.set(width, height);
-  }, [waterMaterial]);
+  }, [reflectionRT, waterMaterial]);
 
   const bindWaterMesh = useCallback(mesh => {
     waterRef.current = mesh;
@@ -3283,10 +3528,14 @@ function WaterSurface({
       * (1 - weatherEnv.rainIntensity * 0.85)
       * (1 - weatherEnv.mistAmount * 0.6);
     wu.uMoonGlitter.value = moonGlitter;
+    // Per-metre extinction, from the panel. The shader now walks the true
+    // refracted path instead of a fraction of the vertical drop, so green and
+    // blue sit near their real seawater coefficients — otherwise a two-metre
+    // shelf goes muddy. Weather stirs all three up by the same third.
     wu.uAbsorb.value.set(
-      THREE.MathUtils.lerp(0.42, 0.56, weatherMood),
-      THREE.MathUtils.lerp(0.20, 0.28, weatherMood),
-      THREE.MathUtils.lerp(0.10, 0.16, weatherMood),
+      waterDev.absorbRed * (1 + weatherMood * 0.33),
+      waterDev.absorbGreen * (1 + weatherMood * 0.7),
+      waterDev.absorbBlue * (1 + weatherMood * 1.2),
     );
     wu.uSand.value.copy(WATER_NIGHT.sand).lerp(WATER_DAY.sand, daylight).lerp(WATER_STORM.sand, stormBlend);
     wu.uScatter.value.copy(WATER_NIGHT.scatter).lerp(WATER_DAY.scatter, daylight).lerp(WATER_STORM.scatter, stormBlend);
@@ -3316,6 +3565,7 @@ function WaterSurface({
     wu.uSkyReflCurve.value = waterDev.skyReflCurve;
     wu.uRippleOctaves.value.set(waterDev.octaveCoarse, waterDev.octaveMid, waterDev.octaveFine);
     wu.uWindToneWeight.value = waterDev.windTone;
+    applyWaveBankTuning(wu);
     wu.uCapDensity.value = waterDev.capDensity;
     wu.uCapCrest.value = waterDev.capCrest;
     wu.uCapWindGate.value = capWindGate;
@@ -3365,6 +3615,52 @@ function WaterSurface({
       waterDev.rampSaturation,
       waterDev.rampBrightness,
     );
+    wu.uClarity.value.set(
+      waterDev.clarityGlazeAngle,
+      waterDev.clarityPath,
+      waterDev.captureShallow,
+      waterDev.captureDeep,
+    );
+    wu.uClarity2.value.set(waterDev.captureDepth, waterDev.reflShallow, waterDev.reflDeep, 0);
+    wu.uSnell.value.set(
+      waterDev.uwCritical,
+      waterDev.uwSoft,
+      waterDev.uwWindowAlpha,
+      waterDev.uwMirrorAlpha,
+    );
+    wu.uSnell2.value.set(waterDev.uwMirrorGrab, waterDev.uwMirrorOffset, waterDev.uwWobble, 0);
+    wu.uBody.value.set(
+      waterDev.bodyPhysical,
+      waterDev.scatterAdd,
+      waterDev.scatterSat,
+      waterDev.scatterSun,
+    );
+    wu.uBody2.value.set(waterDev.darkLift, 0, 0, 0);
+    wu.uRippleShape.value.set(
+      waterDev.rippleScale,
+      waterDev.rippleSpeed,
+      waterDev.rippleWarp,
+      waterDev.rippleShort,
+    );
+    wu.uFoamShape.value.set(
+      waterDev.foamScale,
+      waterDev.foamDrift,
+      waterDev.foamContrast,
+      waterDev.foamDetail,
+    );
+    wu.uFoamMix.value.set(
+      waterDev.foamCore,
+      waterDev.foamLipLace,
+      waterDev.foamTrail,
+      waterDev.foamHaze,
+    );
+    wu.uFoamWidth.value.set(
+      waterDev.foamCoreWidth,
+      waterDev.foamLipWidth,
+      waterDev.foamTrailWidth,
+      waterDev.foamBoil,
+    );
+    wu.uFoamShoreGain.value = waterDev.foamShore;
     const su = surfMaterial.uniforms;
     su.uTime.value = t;
     su.uRain.value = weatherEnv.rainIntensity;
@@ -3374,6 +3670,14 @@ function WaterSurface({
     su.uFoam.value.copy(wu.uFoam.value);
     su.uScatter.value.copy(wu.uScatter.value);
     su.uChopWind.value = wu.uChopWind.value;
+    applyWaveBankTuning(su);
+    su.uRibbon.value.set(
+      waterDev.ribbonSwash,
+      waterDev.ribbonSwashWidth,
+      waterDev.ribbonWash,
+      waterDev.ribbonWashReach,
+    );
+    su.uRibbon2.value.set(waterDev.ribbonContact, waterDev.ribbonAlpha, 0, 0);
     if (scene.fog) {
       // The toward-white lift is sunlit haze; under a closed sky the sea
       // horizon must stay no brighter than the cloud deck feeding it.

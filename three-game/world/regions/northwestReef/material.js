@@ -193,20 +193,28 @@ export function createNorthwestReefTerrainMaterial() {
         // The water material supplies foam and glints. Terrain only darkens the
         // saturated edge and provides a restrained turquoise shelf underneath.
         float nwrSubmerged = 1.0 - smoothstep(-1.08, -0.84, nwrHeight);
-        float nwrDepth = clamp((-0.45 - nwrHeight) / 1.55, 0.0, 1.0);
+        float nwrDepth = clamp((-0.45 - nwrHeight) / 1.6, 0.0, 1.0);
         vec3 nwrWetPearl = nwrWhiteSand * mix(
           vec3(0.55, 0.59, 0.61),
           vec3(0.7, 0.72, 0.7),
           nwrVariation
         );
+        // Coral sand, not teal. The water shader is now colouring this seabed
+        // with its own depth ramp and absorption; painting the sand teal as
+        // well put two desaturated teals on the same pixel, and the average of
+        // two washes is the flat milky shelf. A bright cream bed under a
+        // saturated column is what actually reads as electric tropical water.
+        // Coral sand sits near 0.55-0.65 linear. The first pass at this put it
+        // at 0.82 — brighter than rendered snow — which clipped under a noon
+        // sun and took the surf over the bloom threshold with it.
         vec3 nwrShallowTeal = mix(
-          vec3(0.32, 0.57, 0.58),
-          vec3(0.46, 0.69, 0.65),
+          vec3(0.58, 0.61, 0.56),
+          vec3(0.66, 0.67, 0.6),
           nwrVariation
         );
         vec3 nwrDeeperTeal = mix(
-          vec3(0.22, 0.5, 0.55),
-          vec3(0.35, 0.64, 0.6),
+          vec3(0.44, 0.51, 0.5),
+          vec3(0.54, 0.59, 0.55),
           nwrVariation
         );
         vec3 nwrSeabed = mix(nwrWetPearl, nwrShallowTeal, smoothstep(0.08, 0.34, nwrDepth));

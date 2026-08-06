@@ -20,7 +20,16 @@ import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/fauna
 import { getWildlifeAssetId, getWildlifeRenderProfile, isAquaticWildlife } from '../../wildlife/wildlifeCatalog';
 import { LavaLizardShape } from '../../wildlife/reptiles/LavaLizardShape';
 import { ParrotfishShape } from '../../wildlife/fish/ParrotfishShape';
+import {
+  ProceduralPlantSpecimenShape,
+  isProceduralPlantSpecimen,
+} from '../../wildlife/plants/ProceduralPlantSpecimenShape';
+import { PaperSpecimenShape, isPaperSpecimen } from '../../wildlife/paper/PaperSpecimenShape';
+import { MineralSpecimenShape } from '../../wildlife/minerals/MineralSpecimenShape';
+import { isMineralSpecimen } from '../../wildlife/minerals/mineralSpecimenModels';
 import { MantaRayShape } from '../../wildlife/fish/MantaRayShape';
+import { SeaUrchinShape } from '../../wildlife/invertebrates/SeaUrchinShape';
+import { HammerheadShape } from '../../wildlife/fish/HammerheadShape';
 import { PollinatorSpecimenShape } from '../../wildlife/pollinators/PollinatorSpecimenShape';
 import { addRimLight, toonMaterial } from '../scene/materials';
 import { ModelAsset } from '../assets/ModelAsset';
@@ -155,11 +164,19 @@ function specimenMaterial(id) {
   return addRimLight(toonMaterial(specimenColor(id)), { color: '#fff0b0', intensity: id === 'basalt' ? 0.16 : 0.28 });
 }
 
+// Specimen ids that do not match their manifest key. Without an entry here the
+// lookup misses and the actor silently falls through to the placeholder shape.
+const SPECIMEN_ASSET_ALIASES = Object.freeze({
+  dry_grass: 'dryGrassPatch',
+  drygrass: 'dryGrassPatch',
+  poaceae: 'dryGrassPatch',
+  mangrove: 'mangroveTree',
+});
+
 export function getSpecimenModelAssetId(specimen) {
   const wildlifeAssetId = getWildlifeAssetId(specimen);
   if (wildlifeAssetId) return wildlifeAssetId;
-  if (specimen.id === 'dry_grass' || specimen.id === 'drygrass' || specimen.id === 'poaceae') return 'dryGrassPatch';
-  return specimen.id;
+  return SPECIMEN_ASSET_ALIASES[specimen.id] || specimen.id;
 }
 
 export function getSpecimenPreloadAssetId(specimen) {
@@ -344,6 +361,27 @@ export function SpecimenShape({
       </MeasuredProceduralShape>
     );
   }
+  if (isProceduralPlantSpecimen(specimen.id)) {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <ProceduralPlantSpecimenShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (isPaperSpecimen(specimen.id)) {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <PaperSpecimenShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (isMineralSpecimen(specimen.id)) {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <MineralSpecimenShape specimen={specimen} />
+      </MeasuredProceduralShape>
+    );
+  }
   if (specimen.id === 'basalt') {
     return (
       <MeasuredProceduralShape onSceneReady={onSceneReady}>
@@ -365,7 +403,21 @@ export function SpecimenShape({
   if (renderProfile?.type === 'proceduralManta') {
     return (
       <MeasuredProceduralShape onSceneReady={onSceneReady}>
-        <MantaRayShape specimen={specimen} />
+        <MantaRayShape specimen={specimen} motionRef={proceduralMotionRef} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (renderProfile?.type === 'proceduralHammerhead') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <HammerheadShape specimen={specimen} motionRef={proceduralMotionRef} />
+      </MeasuredProceduralShape>
+    );
+  }
+  if (renderProfile?.type === 'proceduralUrchin') {
+    return (
+      <MeasuredProceduralShape onSceneReady={onSceneReady}>
+        <SeaUrchinShape specimen={specimen} />
       </MeasuredProceduralShape>
     );
   }
@@ -549,7 +601,7 @@ export function SpecimenActor({ specimen }) {
       isAquaticWildlife(specimen) ? { aquatic: true } : null,
     );
     return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
-  }, [currentZoneId, specimen, specimen.spawnPoint]);
+  }, [currentZoneId, specimen]);
   const faunaBehavior = useFaunaBehavior({
     specimen,
     basePositionRef: behaviorBaseRef,
@@ -968,6 +1020,31 @@ export function SpecimenActor({ specimen }) {
     // Idle behaviour fallback for specimens without fauna AI.
     const base = behaviorBaseRef.current || position;
     const t = realElapsed;
+    // Big swimmers steer themselves — no fauna controller can drive an animal
+    // that never touches the bottom — but the actor still owns the transform,
+    // so the marker, the interaction radius and the examine camera follow the
+    // animal instead of staying pinned to its spawn point.
+    const cruise = proceduralMotionRef.current.cruise;
+    if (cruise) {
+      // Under examination the camera is composing a shot; hold the animal on
+      // its station so the subject does not swim out of frame. Its swim rig
+      // keeps running, so it still reads as alive.
+      if (!isUnderExamination) {
+        group.current.position.set(base.x + cruise.x, base.y + cruise.y, base.z + cruise.z);
+        group.current.rotation.set(0, cruise.yaw || 0, 0);
+      }
+      highlightGroundedRef.current = false;
+      publishActorRuntimePosition({
+        publisher: setSpecimenRuntimePosition,
+        ref: runtimePublishRef,
+        actorId,
+        zoneId: currentZoneId,
+        position: group.current.position,
+        now: t,
+        debug: { motionStatus: 'cruising' },
+      });
+      return;
+    }
     if (specimen.behavior === 'skitter') {
       const burst = Math.max(0, Math.sin(t * 2.2));
       group.current.position.x = base.x + Math.sin(t * 1.9) * 0.38 * burst;
@@ -1004,6 +1081,8 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'cactus' ? 2.15
     : specimen.id === 'basalt' ? 0.88
     : specimen.id === 'barnacle' ? 0.85
+    : specimen.id === 'seaurchin' ? 0.46
+    : specimen.id === 'hammerhead' ? 2.6
     : specimen.id === 'lavalizard' ? 0.72
     : specimen.id === 'galapagosracer' ? 0.42
     : specimen.id === 'galapagospaintedlocust' ? 0.38
@@ -1023,6 +1102,8 @@ export function SpecimenActor({ specimen }) {
     : specimen.id === 'cactus' ? 0.6
     : specimen.id === 'galapagoscotton' ? 0.9
     : specimen.id === 'barnacle' ? 0.38
+    : specimen.id === 'seaurchin' ? 0.26
+    : specimen.id === 'hammerhead' ? 1.35
     : specimen.id === 'lavalizard' ? 0.27
     : specimen.id === 'galapagosracer' ? 0.48
     : specimen.id === 'galapagospaintedlocust' ? 0.2

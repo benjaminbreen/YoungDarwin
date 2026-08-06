@@ -61,7 +61,14 @@ function specimenCategory(specimen) {
 }
 
 export function specimenFrameHint(specimen) {
-  const height = specimenInteractionHeight(specimen);
+  // Interaction height is where the world marker sits — usually chest-high on
+  // the plant, not its full stature. `examineHeight` lets a species declare how
+  // tall it actually stands so the examine camera frames the whole thing.
+  const scaleFactor = specimen?.sceneScale || 1;
+  const authoredHeight = Number(specimen?.examineHeight);
+  const height = Number.isFinite(authoredHeight)
+    ? Math.max(0.04, authoredHeight * scaleFactor)
+    : specimenInteractionHeight(specimen);
   // Radius approximates the subject's visual bulk for camera framing; wide
   // low creatures (tortoise) read larger than their interaction height.
   const scale = specimen?.sceneScale || 1;
@@ -148,9 +155,15 @@ export function examinableFromFieldTarget(target, { zoneId = null } = {}) {
         : 'an unmarked individual in the field',
       collectable: Boolean(sample),
       collectVerb: 'Take sample',
+      // A target that measured itself (a standing cactus placement) knows its
+      // own bulk; one built from an inspectable click carries none, and
+      // fieldFrameHint's 0.75 m default would frame a four-metre plant at the
+      // base of its trunk. Fall back to the species hint in that case.
       frameHint: loosePiece
         ? { height: 0.4, radius: Math.max(0.24, target.radius || 0.4) }
-        : fieldFrameHint(target),
+        : (Number.isFinite(Number(target.height)) || Number.isFinite(Number(target.radius)))
+          ? fieldFrameHint(target)
+          : specimenFrameHint(namedSpecimen),
       sample,
       fieldTarget: target,
     };

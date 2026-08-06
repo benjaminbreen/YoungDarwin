@@ -71,7 +71,15 @@ function makeMappedMaterial(textures, {
   });
 }
 
-export function BasaltSpecimenShape() {
+// Scoria is the same eruption, further up the cone: lighter, rustier, and full
+// of gas bubbles, so it gets a warmer tint and a smaller, more broken pile.
+const ROCK_VARIANTS = {
+  basalt: { warm: '#ffffff', dark: '#c2beb2', scale: 1, roughness: 0 },
+  scoria: { warm: '#c98a63', dark: '#a55f42', scale: 0.78, roughness: 0.06 },
+};
+
+export function BasaltSpecimenShape({ variant = 'basalt' }) {
+  const rock = ROCK_VARIANTS[variant] || ROCK_VARIANTS.basalt;
   const olivineTextures = useMemo(() => {
     const textures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES.galapagosOlivineBasalt);
     configureTexture(textures.albedo, 1.08);
@@ -89,13 +97,14 @@ export function BasaltSpecimenShape() {
   const geometry = useMemo(() => makeBasaltGeometry(), []);
   const olivineMaterial = useMemo(() => makeMappedMaterial(olivineTextures, {
     normalStrength: 0.54,
-    roughness: 0.82,
-  }), [olivineTextures]);
+    roughness: 0.82 + rock.roughness,
+    color: rock.warm,
+  }), [olivineTextures, rock]);
   const darkBasaltMaterial = useMemo(() => makeMappedMaterial(darkBasaltTextures, {
     normalStrength: 0.38,
-    roughness: 0.91,
-    color: '#c2beb2',
-  }), [darkBasaltTextures]);
+    roughness: 0.91 + rock.roughness,
+    color: rock.dark,
+  }), [darkBasaltTextures, rock]);
 
   useLayoutEffect(() => () => {
     geometry.dispose();
@@ -106,7 +115,7 @@ export function BasaltSpecimenShape() {
   }, [darkBasaltMaterial, darkBasaltTextures, geometry, olivineMaterial, olivineTextures]);
 
   return (
-    <group>
+    <group scale={rock.scale}>
       <mesh
         geometry={geometry}
         material={olivineMaterial}
