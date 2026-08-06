@@ -51,6 +51,10 @@ export const VARIANTS = {
   'adaptive-dpr': { session: { adaptiveDpr: true }, note: 'adaptive DPR ladder live, as players get it' },
   'no-ao': { params: { noAO: '1' }, note: 'ambient occlusion off (already default off)' },
   'no-hdr-post': { params: { noHdrPost: '1' }, note: '8-bit composer targets' },
+  // MSAA lives on the MAIN pass, not the post chain, so the 2026-08-04
+  // "post is within noise" result says nothing about it. SMAA still runs.
+  'msaa-0': { params: { msaa: '0' }, note: 'composer MSAA off, SMAA only' },
+  'msaa-0-dpr-1.25': { params: { msaa: '0', dpr: '1.25x' }, note: 'MSAA off at 1.25x' },
   'water-performance': { params: { waterQuality: 'performance' }, note: 'cheapest water tier' },
   'no-water': { params: { noWater: '1' }, note: 'water surface removed entirely' },
   'no-details': { params: { noDetails: '1' }, note: 'world detail props off' },
