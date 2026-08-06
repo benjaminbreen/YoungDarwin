@@ -42,9 +42,13 @@ export const inspectableCatalog = {
   turret_shell: { id: 'turret_shell', kind: 'specimen', englishName: 'Turret shell', latinName: 'Turritellidae / Cerithioidea shore shell', category: 'Marine invertebrate sign', rarity: 'uncommon' },
   junonia_shell: { id: 'junonia_shell', kind: 'specimen', englishName: 'Spotted volute shell', latinName: 'Volutidae shell', category: 'Marine invertebrate sign', rarity: 'rare' },
   shore_starfish: { id: 'shore_starfish', kind: 'specimen', englishName: 'Sea star', latinName: 'Asteroidea', category: 'Animal', rarity: 'uncommon' },
+  chocolate_chip_star: { id: 'chocolate_chip_star', kind: 'specimen', englishName: 'Chocolate chip sea star', latinName: 'Nidorellia armata', category: 'Animal', rarity: 'uncommon' },
+  pencil_urchin_cast: { id: 'pencil_urchin_cast', kind: 'specimen', englishName: 'Slate-pencil urchin cast', latinName: 'Eucidaris galapagensis, spines shed on the strandline', category: 'Marine invertebrate sign', rarity: 'uncommon' },
+  sand_dollar_test: { id: 'sand_dollar_test', kind: 'specimen', englishName: 'Sand dollar test', latinName: 'Encope micropora, sun-bleached', category: 'Marine invertebrate sign', rarity: 'common' },
   stranded_parrotfish: { id: 'stranded_parrotfish', specimenId: 'parrotfish', kind: 'specimen', englishName: 'Stranded parrotfish', latinName: 'Scarus sp., beached on the falling tide', category: 'Animal', rarity: 'uncommon' },
   manzanillo: { id: 'manzanillo', specimenId: 'manzanillo', kind: 'plant', englishName: 'Manzanillo', latinName: 'Hippomane mancinella', category: 'Plant', rarity: 'rare' },
   crab_prop: { id: 'crab_prop', kind: 'specimen', englishName: 'Sally Lightfoot crab', latinName: 'Grapsus grapsus', category: 'Animal', rarity: 'common' },
+  ships_boat: { id: 'ships_boat', kind: 'artifact', englishName: "Ship's boat", latinName: "clinker-built whaleboat of HMS Beagle, hauled out on the landing", category: 'Expedition equipment', rarity: 'unique' },
   // Watkins Camp artifacts — relics of Patrick Watkins's 1807-1810 homestead.
   scrimshaw_tooth: { id: 'scrimshaw_tooth', kind: 'artifact', englishName: 'Scrimshaw whale tooth', latinName: 'Physeter macrocephalus, worked ivory', category: 'Historical artifact', rarity: 'rare' },
   watkins_diary: { id: 'watkins_diary', kind: 'artifact', englishName: 'Weather-stained diary', latinName: 'manuscript, hand of P. Watkins', category: 'Historical artifact', rarity: 'rare' },

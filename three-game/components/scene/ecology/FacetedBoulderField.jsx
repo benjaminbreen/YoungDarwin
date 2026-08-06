@@ -148,14 +148,16 @@ function appendTriangle(buffers, a, b, c, desiredNormal, shadeSeed) {
     normal.negate();
   }
 
+  // Up faces used to get the biggest light bonus and the least weathering,
+  // which painted the whole crown a uniform pale cream.
   const light = THREE.MathUtils.clamp(
-    0.9 + Math.max(0, normal.y) * 0.055 + seededUnit(shadeSeed) * 0.04,
+    0.9 + Math.max(0, normal.y) * 0.03 + seededUnit(shadeSeed) * 0.04,
     0.9,
-    0.995,
+    0.985,
   );
   const weathering = THREE.MathUtils.clamp(
-    0.08 + (1 - Math.max(0, normal.y)) * 0.12 + seededUnit(shadeSeed + 7) * 0.06,
-    0.06,
+    0.1 + (1 - Math.max(0, normal.y)) * 0.1 + seededUnit(shadeSeed + 7) * 0.08,
+    0.08,
     0.25,
   );
   const faceColor = new THREE.Color('#f1eee7')
@@ -184,6 +186,75 @@ function appendRingBand(buffers, lower, upper, seed) {
       appendTriangle(buffers, lower[index], lower[next], upper[next], desired, seed + index * 31);
       appendTriangle(buffers, lower[index], upper[next], upper[index], desired, seed + index * 31 + 11);
     }
+  }
+}
+
+// Interpolated sample of a closed ring at fractional index u (in ring units).
+function sampleRing(ring, u) {
+  const count = ring.length;
+  const wrapped = ((u % count) + count) % count;
+  const i0 = Math.floor(wrapped) % count;
+  const i1 = (i0 + 1) % count;
+  return ring[i0].clone().lerp(ring[i1], wrapped - i0);
+}
+
+// Band between two closed rings of different vertex counts: walk both by
+// angular parameter, emitting a triangle per step. Used by the crown cap so
+// inner rings can drop vertices instead of funnelling every edge to a point.
+function appendReducingBand(buffers, lower, upper, seed) {
+  const n = lower.length;
+  const m = upper.length;
+  let i = 0;
+  let j = 0;
+  let step = 0;
+  while (i < n || j < m) {
+    step += 1;
+    if (i < n && ((i + 1) / n <= (j + 1) / m || j >= m)) {
+      appendTriangle(buffers, lower[i % n], lower[(i + 1) % n], upper[j % m], UP, seed + step * 29);
+      i += 1;
+    } else {
+      appendTriangle(buffers, upper[j % m], lower[i % n], upper[(j + 1) % m], UP, seed + step * 29 + 11);
+      j += 1;
+    }
+  }
+}
+
+// The cap is built like the flanks: staggered rings with progressively fewer
+// vertices, each placed at a jittered angle and pulled a jittered fraction
+// toward the summit. No facet edge runs center-outward, so the top reads as
+// random contours instead of a starburst pucker. Height noise stays inside the
+// flank ring tolerance so the traversal cone in facetedBoulders.js holds.
+function appendCrownCap(buffers, crown, summit, top, seed) {
+  const ringSpecs = [
+    { count: 16, toward: 0.42, angular: 0.9, height: 0.032 },
+    { count: 7, toward: 0.74, angular: 1.4, height: 0.024 },
+  ];
+  let lower = crown;
+  ringSpecs.forEach((spec, level) => {
+    const upper = Array.from({ length: spec.count }, (_, j) => {
+      const angleJitter = (seededUnit(seed + 1100 + level * 211 + j * 47) - 0.5) * spec.angular;
+      const u = ((j + level * 0.5 + angleJitter) / spec.count) * crown.length;
+      const vertex = sampleRing(crown, u);
+      const toward = spec.toward + (seededUnit(seed + 1200 + level * 97 + j * 31) - 0.5) * 0.14;
+      vertex.lerp(summit, THREE.MathUtils.clamp(toward, 0.1, 0.92));
+      // Biased downward: a facet dipping below the walk cone reads fine, one
+      // poking above it clips the player's feet.
+      vertex.y += (seededUnit(seed + 1300 + level * 131 + j * 17) - 0.62) * top * spec.height;
+      vertex.y = Math.min(vertex.y, top * 0.995);
+      return vertex;
+    });
+    appendReducingBand(buffers, lower, upper, seed + 900 + level * 53);
+    lower = upper;
+  });
+  for (let index = 0; index < lower.length; index += 1) {
+    appendTriangle(
+      buffers,
+      lower[index],
+      summit,
+      lower[(index + 1) % lower.length],
+      UP,
+      seed + 601 + index * 37,
+    );
   }
 }
 
@@ -293,7 +364,13 @@ function makeFacetedBoulderGeometry(obstacle, bites = []) {
   const crown = upperRings[upperRings.length - 1];
   const centroid = footprint.reduce((sum, point) => sum.add(point), new THREE.Vector2())
     .multiplyScalar(1 / footprint.length);
-  const summit = new THREE.Vector3(centroid.x * 0.2, top, centroid.y * 0.2);
+  // Off-center summit: a perfectly centered apex is where the eye finds the
+  // pucker even with jittered rings.
+  const summit = new THREE.Vector3(
+    centroid.x * 0.2 + (seededUnit(seed + 41) - 0.5) * 0.24,
+    top,
+    centroid.y * 0.2 + (seededUnit(seed + 43) - 0.5) * 0.24,
+  );
 
   const buffers = { positions: [], uvs: [], colors: [] };
   appendRingBand(buffers, ground, toe, seed + 301);
@@ -302,16 +379,7 @@ function makeFacetedBoulderGeometry(obstacle, bites = []) {
     appendRingBand(buffers, previousRing, ring, seed + 351 + level * 53);
     previousRing = ring;
   });
-  for (let index = 0; index < crown.length; index += 1) {
-    appendTriangle(
-      buffers,
-      crown[index],
-      summit,
-      crown[(index + 1) % crown.length],
-      UP,
-      seed + 601 + index * 37,
-    );
-  }
+  appendCrownCap(buffers, crown, summit, top, seed);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(buffers.positions, 3));

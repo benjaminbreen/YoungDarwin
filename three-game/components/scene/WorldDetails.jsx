@@ -11,6 +11,7 @@ import { readRegionEcologyResource } from '../../world/ecology/ecologyResource';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
 import { FacetedBoulderField } from './ecology/FacetedBoulderField';
 import { usesFacetedBoulderSurface } from '../../world/facetedBoulders';
+import { BeachedWhaleboatField } from '../world/BeachedWhaleboat';
 import { onPropEvent } from '../../physics/props/propEvents';
 
 const TREE_MOTION = { wind: 0.62, bend: 0.28, bendRadius: 2.15 };
@@ -122,6 +123,10 @@ function ObstacleProps() {
     () => obstacles.filter(usesFacetedBoulderSurface),
     [obstacles],
   );
+  const boats = useMemo(
+    () => obstacles.filter(obstacle => obstacle.kind === 'boat' && !obstacle.path),
+    [obstacles],
+  );
   const otherObstacles = useMemo(() => obstacles.filter(obstacle => (
     obstacle.path && !usesFacetedBoulderSurface(obstacle)
   )), [obstacles]);
@@ -156,6 +161,9 @@ function ObstacleProps() {
       ))}
       {texturedBoulders.length ? (
         <FacetedBoulderField obstacles={texturedBoulders} currentZoneId={currentZoneId} />
+      ) : null}
+      {boats.length ? (
+        <BeachedWhaleboatField obstacles={boats} currentZoneId={currentZoneId} />
       ) : null}
     </group>
   );

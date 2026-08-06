@@ -16,6 +16,9 @@ import {
   postOfficePathInfo,
 } from '../regions/postOfficeBay/terrain';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
+import { buildBeachFindLayer } from './beachFinds';
+import { modelAssetProp } from './ecologyAssetTransforms';
+import { getZoneObstacles } from '../../../game-core/obstacles';
 import {
   buildStandardDryGrassPatchItems,
   createStandardDryGrassPatchLayer,
@@ -597,9 +600,43 @@ function buildSurfaceLitter() {
     },
   });
 
+  // Gravel skirts at the base of the authored faceted boulders, so the hero
+  // rocks read as embedded in the ground rather than set down on it.
+  const boulderAnchors = getZoneObstacles(POST_OFFICE_BAY)
+    .filter(obstacle => obstacle.kind === 'boulder')
+    .map(obstacle => {
+      const scale = obstacle.render?.scale || 1;
+      const [x = 0, , z = 0] = obstacle.render?.position || [0, 0, 0];
+      const footprint = obstacle.collider?.type === 'convex'
+        ? Math.max(...obstacle.collider.points.map(([px, pz]) => Math.hypot(px, pz))) * scale
+        : (obstacle.collider?.radius || 1) * scale;
+      return { x, z, inner: footprint * 0.66, outer: footprint * 1.7 };
+    });
+  const boulderSkirts = buildDryVolcanicLitterLayer({
+    zoneId: POST_OFFICE_BAY,
+    id: 'post-office-bay-boulder-skirts',
+    itemIdPrefix: 'post-office-bay-boulder-skirt',
+    count: 64,
+    seed: 6389,
+    bounds: { minX: -22, maxX: 26, minZ: -12, maxZ: 28 },
+    scale: [0.62, 1.7],
+    maxVisibleDistance: 46,
+    variantOptions: [
+      { variant: 'basalt-pebble', weight: 0.55, colors: ['#4a463e', '#3a3833', '#575046'] },
+      { variant: 'weathered-basalt-chip', weight: 0.45, colors: ['#8d867a', '#a1937b', '#786f60'] },
+    ],
+    accept: (biome, x, z) => (
+      biome !== 'water' && boulderAnchors.some(anchor => {
+        const distance = Math.hypot(x - anchor.x, z - anchor.z);
+        return distance > anchor.inner && distance < anchor.outer;
+      })
+    ),
+  });
+
   return [
     { ...basalt, loadTier: 1 },
     { ...strandline, loadTier: 1 },
+    { ...boulderSkirts, loadTier: 1 },
   ];
 }
 
@@ -673,7 +710,38 @@ export function buildPostOfficeBayEcology() {
     // This is the same deterministic block set used to derive collision in
     // floreanaCoveLayout, so visual rocks and traversal remain aligned.
     rocks: getPostOfficeBayBasaltBlocks(),
-    props: [],
+    rockDust: { color: '#c4b590', strength: 0.35 },
+    collectibleBeachFinds: [buildBeachFindLayer(POST_OFFICE_BAY, {
+      id: 'post-office-bay-beach-finds',
+      count: 10,
+      seed: 6421,
+      bounds: { minX: -8, maxX: 30, minZ: -2, maxZ: 14 },
+      biomes: ['ash-slope', 'tuff-ridge', 'wet-basalt', 'dry-scrub'],
+      maxVisibleDistance: 56,
+      accept: (biome, x, z) => {
+        const shoreDistance = z - postOfficeBayCoastZ(x);
+        return coveWaterMask(x, z) < 0.42
+          && postOfficePathInfo(x, z).tread < 0.2
+          && shoreDistance > 0.8
+          && shoreDistance < 7.5
+          && postOfficeLandingBeachMask(x, z) > 0.12;
+      },
+    })],
+    // Landing clutter at the barrel clearing's edge.
+    props: [
+      {
+        ...modelAssetProp('brokenWoodenCrate', { yaw: 2.1 }),
+        id: 'landing-broken-crate',
+        position: [-2.4, 0, 9.8],
+        terrainY: true,
+      },
+      {
+        ...modelAssetProp('cratesAndBags', { yaw: -0.7 }),
+        id: 'landing-crates-and-bags',
+        position: [2.1, 0, 10.6],
+        terrainY: true,
+      },
+    ],
     footprintBiomes: ['ash-slope', 'dry-scrub', 'palo-santo', 'tuff-ridge'],
   };
 }

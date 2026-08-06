@@ -74,6 +74,27 @@ const postOfficeBayObstacles = [
     gameplay: { jumpable: true, climbable: true, edgeRisk: true, climbLabel: 'climb onto ridge boulder' },
   },
   {
+    // The ship's boat Darwin and Syms came ashore in, hauled up at the east
+    // end of the landing beach with its stern still in the swash. Rendered
+    // procedurally by BeachedWhaleboat (no GLB); the hull outline below is the
+    // gunwale footprint of that model, so collision matches the planking.
+    id: 'landing-whaleboat',
+    kind: 'boat',
+    render: {
+      position: [24, 0, -0.3],
+      rotation: [0, -1.22, 0],
+      scale: 1,
+    },
+    collider: {
+      type: 'convex',
+      points: [[-3.2, 0], [-2.7, -0.5], [-1.7, -0.75], [-0.5, -0.86], [0.8, -0.84], [2.0, -0.68], [2.85, -0.4], [3.2, 0], [2.85, 0.4], [2.0, 0.68], [0.8, 0.84], [-0.5, 0.86], [-1.7, 0.75], [-2.7, 0.5]],
+      height: 0.55,
+      yMin: -0.05,
+      yMax: 0.5,
+    },
+    gameplay: { jumpable: true, climbable: true, climbLabel: 'climb into the whaleboat' },
+  },
+  {
     id: 'galapagos-bitterbush-landing',
     kind: 'tree',
     render: {

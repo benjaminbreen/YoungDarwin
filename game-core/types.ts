@@ -40,7 +40,9 @@ export type ZoneSpecimenSpawn = {
 };
 
 export type ModelPlacement = {
-  path: string;
+  // Omitted for obstacles drawn by a procedural renderer (faceted boulders,
+  // the beached whaleboat) instead of a GLB.
+  path?: string;
   position: Vec3Tuple;
   rotation?: Vec3Tuple;
   scale?: number | Vec3Tuple;
@@ -73,7 +75,7 @@ export type ColliderDefinition =
 
 export type ObstacleDefinition = {
   id: string;
-  kind: 'boulder' | 'rock' | 'tree' | 'log' | 'ledge' | 'prop';
+  kind: 'boulder' | 'rock' | 'tree' | 'log' | 'ledge' | 'prop' | 'boat';
   render: ModelPlacement;
   collider: ColliderDefinition;
   gameplay?: {

@@ -7,43 +7,44 @@ function assetPath(assetId) {
   return getModelAsset(assetId)?.path || null;
 }
 
+// No contactShadow on any variant: the soft discs read as artificial halos on
+// bright sand, and these pieces are flat enough not to need them. The two
+// bright orange cushion stars are kept as rare accents; the everyday mix is
+// the muted authored casts (chocolate chip star, pencil urchin, sand dollar).
 export const BEACH_FIND_VARIANTS = {
   turretShell: {
     id: 'turret-shell',
     assetId: 'shoreTurretShell',
     inspectableType: 'turret_shell',
-    weight: 0.34,
+    weight: 0.28,
     scale: [2.45, 3.35],
     lift: 0.022,
     baseRotation: [0, 0, 0],
     pitchJitter: 0.18,
     rollJitter: 0.2,
-    contactShadow: 0.24,
   },
   junoniaShell: {
     id: 'junonia-shell',
     assetId: 'shoreJunoniaShell',
     inspectableType: 'junonia_shell',
-    weight: 0.16,
+    weight: 0.13,
     scale: [2.15, 3.1],
     lift: 0.026,
     // This shell is authored upright; rotate its long axis onto the beach.
     baseRotation: [Math.PI / 2, 0, 0],
     pitchJitter: 0.12,
     rollJitter: 0.16,
-    contactShadow: 0.22,
   },
   starfish: {
     id: 'starfish',
     assetId: 'shoreStarfish',
     inspectableType: 'shore_starfish',
-    weight: 0.24,
+    weight: 0.05,
     scale: [0.0032, 0.0049],
     lift: 0.028,
     baseRotation: [0, 0, 0],
     pitchJitter: 0.08,
     rollJitter: 0.08,
-    contactShadow: 0.28,
   },
   // Procedural rather than a GLB: the same rig as the reef schools, posed and
   // bleached. Low weight — a dead fish on the strandline should be a find, not
@@ -52,27 +53,58 @@ export const BEACH_FIND_VARIANTS = {
     id: 'stranded-parrotfish',
     procedural: 'strandedParrotfish',
     inspectableType: 'stranded_parrotfish',
-    weight: 0.12,
+    weight: 0.09,
     scale: [0.92, 1.35],
     lift: 0.012,
     // Authored swimming upright; roll it onto its flank on the sand.
     baseRotation: [0, 0, Math.PI / 2],
     pitchJitter: 0.1,
     rollJitter: 0.22,
-    contactShadow: 0.26,
   },
   lowPolyStarfish: {
     id: 'low-poly-starfish',
     assetId: 'shoreLowPolyStarfish',
     inspectableType: 'shore_starfish',
-    weight: 0.26,
+    weight: 0.04,
     scale: [0.34, 0.52],
     lift: 0.02,
     // This model is authored flat in XY, with local Z as thickness/up.
     baseRotation: [-Math.PI / 2, 0, 0],
     pitchJitter: 0.08,
     rollJitter: 0.08,
-    contactShadow: 0.3,
+  },
+  chocolateChipStar: {
+    id: 'chocolate-chip-star',
+    procedural: 'chocolateChipStar',
+    inspectableType: 'chocolate_chip_star',
+    weight: 0.16,
+    scale: [0.85, 1.25],
+    lift: 0.006,
+    baseRotation: [0, 0, 0],
+    pitchJitter: 0.06,
+    rollJitter: 0.06,
+  },
+  pencilUrchinCast: {
+    id: 'pencil-urchin-cast',
+    procedural: 'pencilUrchinCast',
+    inspectableType: 'pencil_urchin_cast',
+    weight: 0.14,
+    scale: [0.9, 1.3],
+    lift: 0.004,
+    baseRotation: [0, 0, 0],
+    pitchJitter: 0.05,
+    rollJitter: 0.05,
+  },
+  sandDollarTest: {
+    id: 'sand-dollar-test',
+    procedural: 'sandDollarTest',
+    inspectableType: 'sand_dollar_test',
+    weight: 0.11,
+    scale: [0.85, 1.2],
+    lift: 0.005,
+    baseRotation: [0, 0, 0],
+    pitchJitter: 0.04,
+    rollJitter: 0.08,
   },
 };
 

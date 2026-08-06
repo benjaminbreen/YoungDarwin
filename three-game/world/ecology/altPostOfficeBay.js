@@ -1,7 +1,9 @@
 import { altPostOfficeCoastZ, altPostOfficeTrailInfluence, ALT_POST_OFFICE_TRAIL } from '../regions/altPostOfficeBay/terrain';
-import { makeZoneScatter, nearAnyCluster } from '../scatter';
+import { makeZoneScatter, makeZonePatchScatter, nearAnyCluster } from '../scatter';
 import { getAltPostOfficeBayRocks, ALT_POST_OFFICE_BAY } from '../altPostOfficeBayLayout';
 import { modelAssetProp } from './ecologyAssetTransforms';
+import { buildBeachFindLayer } from './beachFinds';
+import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 import { buildStandardDryGrassPatchItems, createStandardDryGrassPatchLayer } from './standardGrass';
 import {
   DARWINIOTHAMNUS_PATH,
@@ -57,8 +59,9 @@ function buildFlora() {
       sink: 0.06,
       castShadow: false,
       motion: { wind: 0.9, bend: 0.2, bendRadius: 1.6 },
-      items: scatter('bush-clump', 12, 71, {
+      items: makeZonePatchScatter(ALT_POST_OFFICE_BAY, 'bush-clump', 12, 71, {
         minX: -40, maxX: 44, minZ: 2, maxZ: 40, scale: [0.012, 0.022],
+        patchCount: 3, patchRadius: [3, 6.5],
         accept: (biome, x, z) => inland(x, z) > 5
           && (biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'ash-slope'),
       }),
@@ -88,8 +91,9 @@ function buildFlora() {
       label: 'Galapagos bitterbush / Castela galapageia',
       path: `${NATURE}runtime-palo-santo.glb`,
       sink: 0.05,
-      items: scatter('castela', 12, 119, {
+      items: makeZonePatchScatter(ALT_POST_OFFICE_BAY, 'castela', 12, 119, {
         minX: -38, maxX: 42, minZ: 26, maxZ: 52, scale: [0.18, 0.32],
+        patchCount: 3, patchRadius: [3.5, 7],
         accept: biome => biome === 'palo-santo' || biome === 'dry-scrub',
       }),
     },
@@ -139,8 +143,8 @@ function buildFlora() {
       sink: 0.02,
       tint: '#b9b3a4',
       tintStrength: 0.6,
-      items: scatter('driftwood', 5, 97, {
-        minX: -24, maxX: 34, minZ: -16, maxZ: 4, scale: [1.6, 2.8],
+      items: scatter('driftwood', 8, 97, {
+        minX: -34, maxX: 40, minZ: -16, maxZ: 4, scale: [1.6, 2.8],
         accept: (biome, x, z) => {
           const d = inland(x, z);
           return d > 0.6 && d < 6;
@@ -197,6 +201,85 @@ function buildDryGrassPatches() {
   });
 }
 
+// Gravel skirts around the boulders: chips and pebbles in an annulus at each
+// large rock's base, so the basalt reads as embedded rather than set down.
+function buildGravelSkirts(rocks) {
+  const anchors = rocks
+    .filter(rock => Math.max(rock.radiusX, rock.radiusZ) > 0.85)
+    .map(rock => ({
+      x: rock.x,
+      z: rock.z,
+      inner: Math.max(rock.radiusX, rock.radiusZ) * 0.7,
+      outer: Math.max(rock.radiusX, rock.radiusZ) * 1.9,
+    }));
+  if (!anchors.length) return [];
+  return [buildDryVolcanicLitterLayer({
+    zoneId: ALT_POST_OFFICE_BAY,
+    id: 'alt-post-office-gravel-skirts',
+    itemIdPrefix: 'alt-post-office-gravel',
+    count: 120,
+    seed: 8317,
+    bounds: { minX: -44, maxX: 56, minZ: -34, maxZ: 40 },
+    scale: [0.7, 1.9],
+    maxGrade: 1.6,
+    maxVisibleDistance: 52,
+    variantOptions: [
+      { variant: 'basalt-pebble', weight: 0.6, colors: ['#514840', '#453e33', '#5c5245'] },
+      { variant: 'weathered-basalt-chip', weight: 0.4, colors: ['#8a8172', '#79705f', '#968c7a'] },
+    ],
+    wetnessAt: (x, z) => clamp01((1.4 - (z - altPostOfficeCoastZ(x))) / 2.8),
+    accept: (biome, x, z) => {
+      if (biome === 'water') return false;
+      if (z - altPostOfficeCoastZ(x) < -1.2) return false;
+      return anchors.some(anchor => {
+        const distance = Math.hypot(x - anchor.x, z - anchor.z);
+        return distance > anchor.inner && distance < anchor.outer;
+      });
+    },
+  })];
+}
+
+// A thin salting of chips across the inland scrub so the dunes are not naked
+// sand between plants. Banded by a smooth spatial noise so it reads as drifts.
+function buildInlandPebbleSprinkle() {
+  return [buildDryVolcanicLitterLayer({
+    zoneId: ALT_POST_OFFICE_BAY,
+    id: 'alt-post-office-pebble-sprinkle',
+    itemIdPrefix: 'alt-post-office-pebble',
+    count: 260,
+    seed: 8461,
+    bounds: { minX: -44, maxX: 52, minZ: 2, maxZ: 52 },
+    scale: [0.4, 1.1],
+    maxVisibleDistance: 44,
+    variantOptions: [
+      { variant: 'basalt-pebble', weight: 0.72, colors: ['#4c443a', '#57503f', '#403a31'] },
+      { variant: 'weathered-basalt-chip', weight: 0.28, colors: ['#847b6b', '#948a77', '#6f675a'] },
+    ],
+    accept: (biome, x, z) => {
+      if (!(biome === 'dry-scrub' || biome === 'palo-santo' || biome === 'ash-slope')) return false;
+      if (altPostOfficeTrailInfluence(x, z, 3.2, 8.4) > 0.55) return false;
+      return Math.sin(x * 0.13 + z * 0.09) + Math.sin(x * 0.05 - z * 0.11) > 0.25;
+    },
+  })];
+}
+
+// Shells and strandline finds on the landing beach.
+function buildCollectibleBeachFinds() {
+  return [buildBeachFindLayer(ALT_POST_OFFICE_BAY, {
+    id: 'alt-post-office-beach-finds',
+    count: 14,
+    seed: 977,
+    bounds: { minX: -40, maxX: 46, minZ: -18, maxZ: 8 },
+    biomes: ['sand-beach', 'wet-sand'],
+    maxVisibleDistance: 58,
+    accept: (biome, x, z) => {
+      const d = z - altPostOfficeCoastZ(x);
+      if (d < -0.8 || d > 7) return false;
+      return altPostOfficeTrailInfluence(x, z, 3.2, 8.4) < 0.35;
+    },
+  })];
+}
+
 // The post barrel and a short line of weathered fence posts above the landing.
 function buildProps() {
   const props = [
@@ -207,6 +290,19 @@ function buildProps() {
       terrainY: true,
       rotation: [0, 0.7, 0],
       scale: 7.5,
+    },
+    // Landing clutter flanking the post barrel: the shore-camp crates.
+    {
+      ...modelAssetProp('brokenWoodenCrate', { yaw: 2.2 }),
+      id: 'landing-broken-crate',
+      position: [24.6, 0, 1.6],
+      terrainY: true,
+    },
+    {
+      ...modelAssetProp('cratesAndBags', { yaw: -0.6 }),
+      id: 'landing-crates-and-bags',
+      position: [30.4, 0, 2.4],
+      terrainY: true,
     },
   ];
   for (let index = 0; index < ALT_POST_OFFICE_TRAIL.length - 2; index += 1) {
@@ -236,7 +332,10 @@ export function buildAltPostOfficeBayEcology() {
     zoneId: ALT_POST_OFFICE_BAY,
     flora: buildFlora(),
     rocks,
+    rockDust: { color: '#c6ae87', strength: 0.4 },
     splashes: { anchors: swashRocks.slice(0, 10), period: (Math.PI * 2) / 0.5984 },
+    surfaceLitter: [...buildGravelSkirts(rocks), ...buildInlandPebbleSprinkle()],
+    collectibleBeachFinds: buildCollectibleBeachFinds(),
     dryGrassPatches: [buildDryGrassPatches()],
     footprintBiomes: ['sand-beach', 'wet-sand', 'dry-scrub', 'trail', 'ash-slope'],
     birds: [

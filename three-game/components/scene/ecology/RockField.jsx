@@ -86,12 +86,40 @@ function makeCraggyRockGeometry(seed) {
   return geo;
 }
 
+// Boulder-scale rocks get their own denser geometry: the unit-scale crag noise
+// above stretches featureless at 2-3m, which is why the big rocks read as
+// smooth blobs. Finer facets, horizontal stratification, and raised ridge
+// creases keep them craggy at hero size.
+function makeHeroCraggyRockGeometry(seed) {
+  const geo = new THREE.IcosahedronGeometry(1, 4);
+  const position = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i);
+    const lobe = Math.sin(v.x * 2.1 + seed) * Math.cos(v.y * 1.8 + seed * 1.7) * Math.sin(v.z * 2.4 + seed * 0.6);
+    const shelf = Math.sin(v.y * 5.2 + seed * 2.3 + Math.sin(v.x * 2.6 + seed) * 1.8);
+    const ridge = 1 - Math.abs(Math.sin(v.x * 4.6 + v.y * 3.4 + v.z * 3.9 + seed * 1.3));
+    const chip = Math.sin(v.x * 11.4 + v.z * 9.2 + v.y * 7.7 + seed * 3.1) * 0.045;
+    v.normalize().multiplyScalar(1 + lobe * 0.16 + shelf * 0.07 + ridge * ridge * 0.14 + chip);
+    position.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// Geometry pool indices: 0-2 standard crag variants, 3-4 hero variants.
+const HERO_FOOTPRINT = 1.1;
+
+function rockGeometryIndex(rock, index) {
+  return rockFootprint(rock) >= HERO_FOOTPRINT ? 3 + (index % 2) : index % 3;
+}
+
 function configureRockTexture(texture, repeat = 2.6) {
   if (!texture) return;
   texture.repeat.set(repeat, repeat);
 }
 
-function createProceduralRockMaterial(materialKey) {
+function createProceduralRockMaterial(materialKey, dust = null) {
   const profile = ROCK_MATERIAL_PROFILES[materialKey] || ROCK_MATERIAL_PROFILES.darkBasaltGravel;
   const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES[profile.textureKey]);
   configureRockTexture(basalt.albedo, 2.2);
@@ -108,6 +136,24 @@ function createProceduralRockMaterial(materialKey) {
     metalness: 0,
     flatShading: true,
   });
+  if (dust?.color) {
+    // Blown-sand band at the terrain contact so rocks read as embedded. Band
+    // is in local unit-sphere space: rocks only yaw, so local y is vertical,
+    // and the band scales with the rock.
+    const dustColor = new THREE.Color(dust.color);
+    const dustStrength = dust.strength ?? 0.4;
+    material.onBeforeCompile = shader => {
+      shader.uniforms.rockDustColor = { value: dustColor };
+      shader.uniforms.rockDustStrength = { value: dustStrength };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vRockDust;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvRockDust = 1.0 - smoothstep(-0.92, -0.18, position.y);');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vRockDust;\nuniform vec3 rockDustColor;\nuniform float rockDustStrength;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb = mix(diffuseColor.rgb, rockDustColor, vRockDust * rockDustStrength);');
+    };
+    material.customProgramCacheKey = () => `rock-dust:${dust.color}:${dustStrength}`;
+  }
   material.userData.pbrTextures = basalt;
   return material;
 }
@@ -269,7 +315,7 @@ function RockContactShadows({ rocks }) {
   return <ContactShadowField shadows={contactShadows} yOffset={0.026} strength={0.62} />;
 }
 
-export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
+export function RockField({ rocks, dust = null, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const rockDamage = useThreeGameStore(state => state.rockDamage);
   const { brokenIds, damagedById } = useMemo(
@@ -287,7 +333,7 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
     const grouped = new Map();
     rocks.forEach((rock, index) => {
       if (brokenIds.has(rock.id) || damagedById.has(rock.id)) return;
-      const geometryIndex = index % 3;
+      const geometryIndex = rockGeometryIndex(rock, index);
       const materialKey = rockMaterialKey(rock);
       const castShadow = rockCastsRealShadow(rock);
       const key = `${geometryIndex}:${materialKey}:${castShadow ? 'shadow' : 'contact'}`;
@@ -300,7 +346,7 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
   const damagedRocks = useMemo(() => (
     damagedById.size
       ? rocks
-        .map((rock, index) => ({ rock, variant: index % 3, damage: damagedById.get(rock.id) }))
+        .map((rock, index) => ({ rock, variant: rockGeometryIndex(rock, index), damage: damagedById.get(rock.id) }))
         .filter(entry => entry.damage)
       : []
   ), [rocks, damagedById]);
@@ -311,15 +357,21 @@ export function RockField({ rocks, sourceId = 'ecology-rocks', sourceLabel = 'Ec
     renderPath: null,
   }), [sourceId, sourceKind, sourceLabel]);
   const geometries = useMemo(
-    () => [makeCraggyRockGeometry(1.7), makeCraggyRockGeometry(4.2), makeCraggyRockGeometry(8.9)],
+    () => [
+      makeCraggyRockGeometry(1.7),
+      makeCraggyRockGeometry(4.2),
+      makeCraggyRockGeometry(8.9),
+      makeHeroCraggyRockGeometry(2.9),
+      makeHeroCraggyRockGeometry(6.1),
+    ],
     [],
   );
   const usedMaterialKeys = useMemo(() => Array.from(new Set(
     rocks.map(rockMaterialKey),
   )).sort(), [rocks]);
-  const materialKeySignature = usedMaterialKeys.join('|');
+  const materialKeySignature = `${usedMaterialKeys.join('|')}${dust?.color ? `|dust:${dust.color}:${dust.strength ?? ''}` : ''}`;
   const materials = useMemo(() => Object.fromEntries(
-    usedMaterialKeys.map(materialKey => [materialKey, createProceduralRockMaterial(materialKey)]),
+    usedMaterialKeys.map(materialKey => [materialKey, createProceduralRockMaterial(materialKey, dust)]),
   // The signature is the stable semantic dependency; the array is recreated
   // only when the ecology source itself changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps

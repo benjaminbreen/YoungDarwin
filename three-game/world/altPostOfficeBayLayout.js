@@ -38,11 +38,13 @@ export function getAltPostOfficeBayRocks() {
   });
   rockCache = [...westRocks, ...eastRocks, ...erratics].map(item => ({
     ...item,
-    color: item.tone > 0.62 ? '#26241f' : item.tone > 0.3 ? '#3a352d' : '#2f2b25',
+    // Sun-baked warm basalt: near-black cool grays read as pasted-on against
+    // the lit sand.
+    color: item.tone > 0.62 ? '#3b3429' : item.tone > 0.3 ? '#4f463a' : '#443c30',
     radiusX: item.scale * (1.05 + item.tone * 0.5),
     radiusY: item.scale * (0.55 + item.tone * 0.45),
     radiusZ: item.scale * (0.8 + item.tone * 0.35),
-    sink: item.scale * 0.18,
+    sink: item.scale * 0.22,
   }));
   return rockCache;
 }

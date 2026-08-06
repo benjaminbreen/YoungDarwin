@@ -426,6 +426,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       {rocks.length > 0 && (
         <RockField
           rocks={rocks}
+          dust={ecology.rockDust || null}
           sourceId={`ecology:${ecology.zoneId}:rocks`}
           sourceLabel={`${ecology.zoneId} rocks`}
         />
