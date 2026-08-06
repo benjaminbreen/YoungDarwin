@@ -2,6 +2,25 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "darwin-attach",
+      "url": "http://localhost:3000",
+      "port": 3000
+    },
+    {
+      "name": "character-lab",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/Users/benjaminbreen/code/Ghosts of the Machine Age Game",
+        "run",
+        "lab",
+        "--",
+        "--port",
+        "5273"
+      ],
+      "port": 5273
+    },
+    {
       "name": "darwin-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

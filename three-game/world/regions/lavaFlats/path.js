@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import {
   crackNoise,
   terrainSurfaceNoise,
@@ -88,8 +88,7 @@ export function lavaFlatsPathInfo(x, z) {
   const width = Math.max(1.28, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.14, width * 0.4);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.32, width * 0.84);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.5, width * 1.0)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.92, width * 1.55));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.55, width * 1.1);
   return {
     ...frame,

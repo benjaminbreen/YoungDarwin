@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { terrainSurfaceNoise } from '../../terrainShared';
 import {
   PUNTA_SUR_SOUTHERN_REEFS_SEAM,
@@ -155,8 +155,7 @@ export function puntaSurPathInfo(x, z) {
   const width = Math.max(1.5, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.16, width * 0.44);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.35, width * 0.82);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.45, width * 1.02)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.95, width * 1.58));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.56, width * 1.12);
   return { ...frame, tangentX, tangentZ, width, center: clamp01(center), tread: clamp01(tread), shoulder: clamp01(shoulder), path: clamp01(path) };
 }

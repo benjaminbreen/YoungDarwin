@@ -1368,7 +1368,7 @@ test('incremental injuries collapse Darwin while catastrophic causes are fatal',
     resolveExpeditionDamage({ health: 100, amount: 1, fatalOnZero: true, forceZero: true }),
     { previousHealth: 100, health: 0, damage: 1, outcomeType: 'death' },
   );
-  assert.equal(CATASTROPHIC_FALL_SPEED, 22);
+  assert.equal(CATASTROPHIC_FALL_SPEED, 26.5);
 });
 
 test('collapse recovery advances to 7 AM without erasing the current expedition day unnecessarily', () => {
@@ -2295,7 +2295,7 @@ test('foot-contact probes never translate skeleton bones', () => {
   assert.doesNotMatch(source, /VISUAL_GROUNDING_MIN\s*=\s*-/);
 });
 
-test('Darwin5 stays the default while extended waits retain the varied idle pool', () => {
+test('Darwin5 locomotion-preview build is the default while extended waits retain the varied idle pool', () => {
   const controllerSource = fs.readFileSync(
     path.resolve('three-game/components/player/PlayerController.jsx'),
     'utf8',
@@ -2309,9 +2309,12 @@ test('Darwin5 stays the default while extended waits retain the varied idle pool
     'utf8',
   );
 
-  assert.equal(DEFAULT_PLAYER_MODEL_ASSET_ID, 'darwin5');
+  assert.equal(DEFAULT_PLAYER_MODEL_ASSET_ID, 'darwin5LocomotionPreview');
   assert.match(playableModesSource, /darwin:\s*\{[^}]*assetId:\s*'darwin5'/s);
-  assert.equal(modelAssets[DEFAULT_PLAYER_MODEL_ASSET_ID].path, '/assets/models/darwin5.glb');
+  assert.equal(
+    modelAssets[DEFAULT_PLAYER_MODEL_ASSET_ID].path,
+    '/assets/models/darwin5-locomotion-preview.glb',
+  );
   assert.deepEqual(
     Object.entries(modelAssets)
       .filter(([id, asset]) => id === 'darwin5' || asset.playerProfile === 'darwin5')
@@ -2324,7 +2327,7 @@ test('Darwin5 stays the default while extended waits retain the varied idle pool
   );
   assert.match(
     modelSource,
-    /const PLAYER_MODEL_CYCLE = Array\.from\(new Set\(\[\s*DEFAULT_PLAYER_MODEL_ASSET_ID,\s*'darwin5LocomotionPreview',\s*\]\)\);/s,
+    /const PLAYER_MODEL_CYCLE = Array\.from\(new Set\(\[\s*DEFAULT_PLAYER_MODEL_ASSET_ID,\s*'darwin5',\s*\]\)\);/s,
   );
   for (const retiredAsset of [
     'darwin-final-animated.glb',

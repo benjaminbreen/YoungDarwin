@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { terrainSurfaceNoise } from '../../terrainShared';
+import { pathShoulderMask } from '../../paths/standardPath';
 
 export const GRASS_TEST_PATH_POINTS = [
   [-29, 28, 4.8],
@@ -45,8 +46,7 @@ export function grassTestPathInfo(x, z) {
   const width = Math.max(2.2, nearest.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.28, width * 0.58);
   const tread = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.48, width * 0.86);
-  const shoulder = THREE.MathUtils.smoothstep(nearest.distance, width * 0.38, width * 1.25)
-    * (1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.9, width * 1.55));
+  const shoulder = pathShoulderMask(nearest, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.55, width * 1.12);
 
   return {

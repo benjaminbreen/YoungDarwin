@@ -1,4 +1,6 @@
-export const CATASTROPHIC_FALL_SPEED = 22;
+// Impact speed, m/s. Retuned with the arcade jump gravity (16.5 x 1.28): the
+// same lethal drop height as the old 22 under 10.8 x 1.34 gravity.
+export const CATASTROPHIC_FALL_SPEED = 26.5;
 export const INCAPACITATION_RECOVERY_ZONE_ID = 'BEAGLE_CABIN';
 export const INCAPACITATION_RECOVERY_HOUR = 7;
 export const INCAPACITATION_RECOVERY_HEALTH = 60;

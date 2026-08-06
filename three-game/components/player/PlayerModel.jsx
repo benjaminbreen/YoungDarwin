@@ -569,7 +569,7 @@ const HAND_TOOLS = [
 
 const PLAYER_MODEL_CYCLE = Array.from(new Set([
   DEFAULT_PLAYER_MODEL_ASSET_ID,
-  'darwin5LocomotionPreview',
+  'darwin5',
 ]));
 
 function darwin5StandingJumpRequest(charge, jumpPhase) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { terrainSurfaceNoise } from '../../terrainShared';
 import {
   EL_MIRADOR_SOUTHEASTERN_COAST_SEAM,
@@ -109,8 +109,7 @@ export function southeasternCoastPathInfo(x, z) {
   );
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.18, width * 0.44);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.36, width * 0.8);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.45, width * 1.02)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.92, width * 1.55));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.55, width * 1.12);
   return {
     ...frame,

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { terrainSurfaceNoise } from '../../terrainShared';
+import { pathShoulderMask } from '../../paths/standardPath';
 
 export const PENAL_COLONY = 'PENAL_COLONY';
 
@@ -114,8 +115,7 @@ export function penalColonyPathInfo(x, z) {
   const width = Math.max(2.6, nearest.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.24, width * 0.52);
   const tread = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.42, width * 0.78);
-  const shoulder = THREE.MathUtils.smoothstep(nearest.distance, width * 0.36, width * 1.1)
-    * (1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.86, width * 1.5));
+  const shoulder = pathShoulderMask(nearest, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.56, width * 1.08);
   return {
     ...nearest,

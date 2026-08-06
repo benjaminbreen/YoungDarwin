@@ -7,7 +7,12 @@ import {
   getVisualSoleOffset,
 } from './gaitProfiles';
 
-const VISUAL_GROUNDING_MAX_UP = 0.1;
+const VISUAL_GROUNDING_MAX_UP = 0.14;
+// Whole-body drop allowance for convex crests, where the movement surface sits
+// above the drawn mesh and both feet hover. Group translate only — never
+// per-foot bone forcing, which deformed the rig when tried.
+const VISUAL_GROUNDING_MAX_DOWN = 0.16;
+const VISUAL_GROUNDING_DOWN_DEADZONE = 0.05;
 const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.9;
 const VISUAL_GROUNDING_FAST_OBSTACLE_MAX_UP = 0.58;
 const VISUAL_GROUNDING_SPEED_REFERENCE = 8.6;
@@ -88,6 +93,8 @@ export function createFootContactRig({
     if (canGround) {
       const deltas = [];
       let obstacleProbeCount = 0;
+      let probedFeet = 0;
+      let minClearance = Infinity;
       Object.entries(footGrounding).forEach(([side, entry]) => {
         if (side === 'stepId' || !entry.bone) return;
         entry.bone.getWorldPosition(probeWorld);
@@ -103,6 +110,11 @@ export function createFootContactRig({
           phaseContact,
           contact: proximity * (0.34 + phaseContact * 0.66),
         };
+        probedFeet += 1;
+        minClearance = Math.min(
+          minClearance,
+          probeWorld.y - (contactY - getVisualSoleOffset(assetId, side)),
+        );
         const plantedWeight = profile
           ? phaseContact
           : ((motionState?.speed || 0) < 0.6 ? 1 : 0);
@@ -124,6 +136,24 @@ export function createFootContactRig({
           visualGroundOffset + averageDelta,
           0,
           maxUp,
+        );
+      }
+      // Crest float: only when the LOWEST foot still hovers does the whole
+      // body sink to meet the drawn mesh. A weighted average would sink during
+      // ordinary strides (the swing foot is legitimately airborne), which
+      // buried the feet. Terrain-only, capped, and dead-zoned so flat-ground
+      // walking never triggers it; a cliff-lip stance keeps one foot near the
+      // ground and stays put.
+      if (
+        targetOffset === 0
+        && obstacleProbeCount === 0
+        && probedFeet === 2
+        && minClearance > VISUAL_GROUNDING_DOWN_DEADZONE
+        && minClearance < VISUAL_GROUNDING_PROBE_RANGE
+      ) {
+        targetOffset = -Math.min(
+          minClearance - VISUAL_GROUNDING_DOWN_DEADZONE,
+          VISUAL_GROUNDING_MAX_DOWN,
         );
       }
     }

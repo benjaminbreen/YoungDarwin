@@ -3200,7 +3200,7 @@ export const useThreeGameStore = create((set, get) => ({
         + (airborne ? MOVEMENT_FATIGUE.airbornePerFrame60 : 0)
       )), 0, MAX_FATIGUE),
       ...healthDamagePatch(state, {
-        amount: catastrophicFall ? MAX_HEALTH : Math.max(0, falling - 7.5) * 1.25,
+        amount: catastrophicFall ? MAX_HEALTH : Math.max(0, falling - 9.1) * 1.05,
         source: catastrophicFall ? 'catastrophic_fall' : 'fall_injury',
         fatalOnZero: catastrophicFall,
         forceZero: catastrophicFall,

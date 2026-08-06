@@ -7,8 +7,9 @@ set.
 ## Critical Defaults
 
 - Primary route: `/three`.
-- Current default Darwin model: `darwin5` from
-  `public/assets/models/darwin5.glb`.
+- Current default Darwin model: `darwin5LocomotionPreview` from
+  `public/assets/models/darwin5-locomotion-preview.glb` (profile `darwin5`;
+  plain `darwin5` remains the Shift+9 review alternate).
 - Authorial/design intent: `docs/design-intent.md`.
 - Performance measurement and screenshot loop: `docs/perf-lab.md`
   (`npm run perf:lab`, `npm run perf:sweep`, `npm run look`).

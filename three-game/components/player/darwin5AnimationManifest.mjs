@@ -224,9 +224,23 @@ export function darwin5ClipSettings(clip) {
   return settings;
 }
 
+// Forward-gait pairs that swap mid-motion (walk<->run and their tool/tired
+// variants). ModelAsset phase-locks the outgoing cycle during these fades, so
+// a long crossfade reads as easing between gaits rather than sliding feet.
+const GAIT_BLEND_CLIP_KEYS = new Set([
+  'walk', 'run', 'jog', 'sprint', 'grassrun', 'tiredwalk',
+  'holdwalk', 'holdtoolwalk', 'holdtoolrun', 'torchwalk', 'torchrun',
+  'walkrifle', 'runrifle', 'walkcarry',
+]);
+
 export function darwin5TransitionFade(fromClip, toClip) {
   const to = darwin5AnimationMeta(toClip);
   const from = darwin5AnimationMeta(fromClip);
+  const fromKey = normalizeClipKey(fromClip);
+  const toKey = normalizeClipKey(toClip);
+  if (fromKey !== toKey && GAIT_BLEND_CLIP_KEYS.has(fromKey) && GAIT_BLEND_CLIP_KEYS.has(toKey)) {
+    return 0.26;
+  }
   if (to?.fade !== undefined) return to.fade;
   if (to?.category === 'impact') return 0.04;
   if (to?.category === 'landing' || to?.category === 'jump') return 0.05;

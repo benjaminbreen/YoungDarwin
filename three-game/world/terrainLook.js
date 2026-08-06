@@ -17,7 +17,9 @@
 // No knob adds a texture sampler — the renderer is fill/bandwidth-bound and
 // samplers are the expensive direction (see docs/perf-lab.md).
 
-const STORAGE_KEY = 'darwin.terrainLook.v1';
+// v2: the stored v1 set predates the shaping knobs shipping non-zero, and a
+// persisted 0 would silently mask the new defaults.
+const STORAGE_KEY = 'darwin.terrainLook.v2';
 
 // Baked from Ben's tuning pass at Post Office Bay, 2026-08-03: slightly deeper
 // and cooler ground, a little more colour and contrast, much stronger macro
@@ -44,20 +46,21 @@ export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // maps. Low values flatten the surface; high values exaggerate grain.
   normalStrength: 1.75,
 
-  // --- shaping knobs, neutral by default ------------------------------------
+  // --- shaping knobs ---------------------------------------------------------
   // These change how the grade varies across a region rather than shifting it
-  // uniformly, so they ship at 0 (or 1) and only do something once dialled.
+  // uniformly. First-pass values from 2026-08-06, deliberately shy of
+  // obvious — judge them in screenshots before pushing further.
 
   // Pushes steep faces toward exposed rock: desaturated and a little darker.
   // Sells cut banks and dune shoulders without authoring a separate layer.
-  slopeTint: 0,
+  slopeTint: 0.28,
   // Tints with elevation over roughly the first 25m — negative cools the high
   // ground, positive warms it. A cheap way to separate shore from upland.
-  heightTint: 0,
+  heightTint: -0.22,
   // Aerial perspective for the ground plane itself: distant ground
   // desaturates and lifts slightly, so a long beach stops reading as one
   // continuous sheet of the same tan.
-  distanceFade: 0,
+  distanceFade: 0.25,
   // Scales the tiled detail UVs. Below 1 makes the grain larger and calmer,
   // above 1 finer and busier. Currently read by Post Office Bay; other regions
   // opt in by multiplying their layer scales by uTerrainGradeShape.w.

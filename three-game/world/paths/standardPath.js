@@ -121,6 +121,28 @@ export function pathFrameAt(pathPoints, x, z) {
   return nearest;
 }
 
+// Patchy path verge. The old shoulder was a fixed-offset annulus
+// (width * 0.52..1.42) that reads as a drawn outline from overhead. Instead,
+// verge growth gathers in stretches along the path with real gaps between
+// them, and each stretch fingers outward before fading into the dry ground.
+// The splat bake, region masks, and ecology must all read this one field so
+// the ground texture and the plants agree about where the verge is.
+export function pathShoulderMask(frame, x, z, width = frame.width) {
+  const tangentX = frame.tangentX ?? Math.cos(frame.yaw);
+  const tangentZ = frame.tangentZ ?? Math.sin(frame.yaw);
+  const along = frame.centerX * tangentX + frame.centerZ * tangentZ;
+  // Stretches roughly 8-25m long; the gate has soft edges so a stretch tails
+  // off along the path rather than stopping on a noise contour.
+  const patch = smoothstep(0.4, 0.56, fbm(along, 7.3, 0.052, 211));
+  // Outer reach wanders between ~1.05x and ~2.4x the path width.
+  const outer = width * (1.05 + fbm(along, -3.1, 0.07, 223) * 1.35);
+  const inner = smoothstep(width * 0.46, width * 0.9, frame.distance);
+  const fade = 1 - smoothstep(outer * 0.55, outer, frame.distance);
+  // Cross-path breakup keeps finger edges ragged rather than contour-like.
+  const ragged = 0.62 + fbm(x, z, 0.24, 229) * 0.6;
+  return clamp01(inner * fade * patch * ragged);
+}
+
 function elongatedSplat(along, across, scale, softness, threshold, stretchX = 1, stretchY = 1, salt = 0) {
   const cellX = Math.floor(along * scale);
   const cellY = Math.floor(across * scale);
@@ -178,8 +200,7 @@ export function createStandardFootPathSplatTexture({
       const distance = Math.hypot(dx, dz);
       const path = 1 - smoothstep(width * 0.58, width * 1.1, distance);
       const tread = 1 - smoothstep(width * 0.28, width * 0.76, distance);
-      const shoulder = smoothstep(width * 0.52, width * 1.02, distance)
-        * (1 - smoothstep(width * 0.92, width * 1.42, distance));
+      const shoulder = pathShoulderMask(frame, x, z, width);
       const brokenEdge = path * (0.76 + fbm(along, across, 0.16, 73) * 0.35);
       const broadScuff = elongatedSplat(along, across, 0.44, 0.78, 0.34, 1.6, 0.72, 101);
       const footScuff = elongatedSplat(along + 3.4, across - 0.2, 0.9, 0.5, 0.54, 1.9, 0.64, 139);

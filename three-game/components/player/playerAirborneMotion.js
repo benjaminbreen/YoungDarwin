@@ -272,7 +272,9 @@ export function resolvePlayerLanding({
     const landedAirTime = wasAirborne.current && jumpState.current.launchedAt > 0
       ? now - jumpState.current.launchedAt
       : 0;
-    const ordinaryStandingJumpLanding = standingPlayerJump && falling < 9.5;
+    // Fall-speed thresholds below are tuned for gravity 16.5 x 1.28: the same
+    // drop heights as the old 10.8 x 1.34 tuning hit ~1.21x the impact speed.
+    const ordinaryStandingJumpLanding = standingPlayerJump && falling < 11.5;
 
     if (groundDistance <= PLAYER.groundSnapDistance || belowTerrainFloor) {
       group.current.position.y = nextGroundY;
@@ -345,7 +347,7 @@ export function resolvePlayerLanding({
       });
       const dustIntensity = THREE.MathUtils.clamp(
         0.44
-          + falling / 12
+          + falling / 14.5
           + landingSpeed / 11
           + landedJumpTravelDistance / 13
           + landedJumpCharge * 0.18
@@ -403,35 +405,35 @@ export function resolvePlayerLanding({
       // squash in playerFrameFeedback reads impactLandedAt/impactIntensity.
       stateRef.current.impactLandedAt = now;
       stateRef.current.impactIntensity = THREE.MathUtils.clamp(
-        (falling - 1.2) / 9 + landedJumpCharge * 0.14,
+        (falling - 1.5) / 11 + landedJumpCharge * 0.14,
         intentionalPlayerJump ? 0.22 : 0,
         1,
       );
-      if (falling > 3.2) {
+      if (falling > 3.9) {
         cameraImpulse.current = {
           startedAt: now,
-          intensity: THREE.MathUtils.clamp((falling - 2.2) / 20 + landingSpeed / 34, 0.07, 0.68),
+          intensity: THREE.MathUtils.clamp((falling - 2.7) / 24 + landingSpeed / 34, 0.07, 0.68),
           duration: 0.3,
           seed: cameraImpulse.current.seed + 1,
         };
       }
       // A beat of world freeze on genuinely big drops (player/camera run on
       // real time, so this reads as weight, not lag).
-      if (falling > 8.5) triggerHitstop(0.06);
+      if (falling > 10.3) triggerHitstop(0.06);
     }
 
     // A hard fall knocks the wind out: bump run effort so the recovery idle
     // reads winded (heavy breathing) once Darwin is back on his feet.
-    if (falling > 8) {
+    if (falling > 9.7) {
       stateRef.current.runEffort = Math.max(stateRef.current.runEffort || 0, 7);
     }
-    if (intentionalPlayerJump && falling > 19.5 && !stateRef.current.action) {
+    if (intentionalPlayerJump && falling > 23.5 && !stateRef.current.action) {
       startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
-    } else if (intentionalPlayerJump && falling > 16.5 && !stateRef.current.action) {
+    } else if (intentionalPlayerJump && falling > 20 && !stateRef.current.action) {
       startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
-    } else if (falling > 13.5 && !stateRef.current.action) {
+    } else if (falling > 16.3 && !stateRef.current.action) {
       startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
-    } else if (falling > 9.5 && landingSpeed > 3.6 && !stateRef.current.action) {
+    } else if (falling > 11.5 && landingSpeed > 3.6 && !stateRef.current.action) {
       const rollDirection = frameScratch.landingRollDirection.set(velocity.current.x, 0, velocity.current.z);
       if (rollDirection.lengthSq() < 0.0001) rollDirection.copy(facing.current);
       rollDirection.setY(0).normalize();
@@ -446,15 +448,15 @@ export function resolvePlayerLanding({
         targetYaw: Math.atan2(rollDirection.x, rollDirection.z),
         exitSpeed: Math.min(landingSpeed * 0.62, PLAYER.runSpeed * 0.78),
       };
-    } else if (falling > 9.5 && !stateRef.current.action) {
+    } else if (falling > 11.5 && !stateRef.current.action) {
       startAction('hardLanding', ACTION_DURATION.hardLanding, { lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.25 });
-    } else if (!intentionalPlayerJump && falling > 6.8 && !stateRef.current.action) {
+    } else if (!intentionalPlayerJump && falling > 8.2 && !stateRef.current.action) {
       startAction('bigJumpDown', durationFor('bigJumpDown'), { lockMovement: 0.38 });
-    } else if (!intentionalPlayerJump && falling > 3.8 && !stateRef.current.action) {
+    } else if (!intentionalPlayerJump && falling > 4.6 && !stateRef.current.action) {
       startAction('jumpDown', durationFor('jumpDown'), { lockMovement: 0.28 });
-    } else if (!ordinaryStandingJumpLanding && falling > 2.4 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
+    } else if (!ordinaryStandingJumpLanding && falling > 2.9 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
       startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
-    } else if (!ordinaryStandingJumpLanding && falling > 2.4 && !stateRef.current.action) {
+    } else if (!ordinaryStandingJumpLanding && falling > 2.9 && !stateRef.current.action) {
       startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
     }
     // Walking off an obstacle: the character controller snap-follows steep
@@ -555,7 +557,9 @@ export function resolvePlayerLanding({
       jumpState.current.phase = 'airborne';
       stateRef.current.jumpPhase = 'airborne';
     }
-    if (jumpState.current.phase !== 'takeoff' && velocity.current.y < -1.2 && groundDistance < 1.35) {
+    // 1.6m at the new fall speeds gives roughly the same anticipation time the
+    // old 1.35m window did.
+    if (jumpState.current.phase !== 'takeoff' && velocity.current.y < -1.2 && groundDistance < 1.6) {
       stateRef.current.jumpPhase = 'prelanding';
     } else if (jumpState.current.phase !== 'takeoff') {
       stateRef.current.jumpPhase = 'airborne';

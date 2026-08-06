@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { crackNoise, terrainSurfaceNoise } from '../../terrainShared';
 import {
   ALT_POST_OFFICE_BAY_EASTERN_CLIFFS_SEAM,
@@ -91,8 +91,7 @@ export function easternCliffsPathInfo(x, z) {
   const width = Math.max(1.48, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.16, width * 0.46);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.34, width * 0.82);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.44, width * 1.08)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.94, width * 1.58));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.54, width * 1.12);
   return {
     ...frame,

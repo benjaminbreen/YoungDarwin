@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { terrainSurfaceNoise } from '../../terrainShared';
 import {
   COASTAL_SCRUBLAND_EL_MIRADOR_SEAM,
@@ -46,8 +46,7 @@ export function coastalScrubPathInfo(x, z) {
   const width = Math.max(1.65, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.18, width * 0.48);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.36, width * 0.84);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.46, width * 1.08)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.94, width * 1.58));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.56, width * 1.12);
   return {
     ...frame,

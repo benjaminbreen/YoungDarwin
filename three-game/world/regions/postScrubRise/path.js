@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { terrainSurfaceNoise } from '../../terrainShared';
 import { POST_OFFICE_SCRUB_RISE_SEAM } from '../../routeSeams';
 
@@ -70,8 +70,7 @@ export function scrubRisePathInfo(x, z) {
   const width = Math.max(1.72, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.18, width * 0.48);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.38, width * 0.86);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.48, width * 1.12)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.94, width * 1.6));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.56, width * 1.14);
   return {
     ...frame,

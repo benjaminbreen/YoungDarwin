@@ -20,13 +20,17 @@
  * }} ModelAssetConfig
  */
 
-export const DEFAULT_PLAYER_MODEL_ASSET_ID = 'darwin5';
+// The locomotion-preview build (eased start/stop transitions, calm idle) is
+// the shipping Darwin; plain darwin5 stays on the Shift+9 cycle for review.
+export const DEFAULT_PLAYER_MODEL_ASSET_ID = 'darwin5LocomotionPreview';
 
 /** @type {Record<string, ModelAssetConfig>} */
 export const modelAssets = {
   darwin5: {
     enabled: true,
-    preload: true,
+    // Review alternate on the Shift+9 cycle; the locomotion-preview build is
+    // the boot-critical default, so this GLB loads on demand.
+    preload: false,
     path: '/assets/models/darwin5.glb',
     cacheKey: 'darwin5-blink-hair-default-20260720a',
     // The boot GLB contains the skinned model plus dependable idle/locomotion
@@ -226,7 +230,7 @@ export const modelAssets = {
   // stays identical while asset inventory tools can still see and audit it.
   darwin5LocomotionPreview: {
     enabled: true,
-    preload: false,
+    preload: true,
     path: '/assets/models/darwin5-locomotion-preview.glb',
     cacheKey: 'darwin5-locomotion-preview-20260720c',
     animationBanks: [

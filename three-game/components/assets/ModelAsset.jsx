@@ -1313,6 +1313,9 @@ function GLBPrimitive({
   const gl = useThree(state => state.gl);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
+  // Live gait crossfade: while set, the outgoing cycle's phase rate is slaved
+  // to the incoming one so feet stay in step through long walk<->run fades.
+  const gaitBlend = useRef(null);
   const animationSelectorRef = useRef(animationSelector);
   const overlaySelectorRef = useRef(overlaySelector);
   const overlayStateRef = useRef({ action: null, clip: null, weight: 0 });
@@ -1665,9 +1668,13 @@ function GLBPrimitive({
     if (previous && previous !== next) {
       if (!oneShot && isGaitLoopClip(resolvedClip) && isGaitLoopClip(previousName)) {
         syncGaitPhase(previous, next, animationProfileId, resolvedClip);
+        gaitBlend.current = { from: previous, to: next };
+      } else {
+        gaitBlend.current = null;
       }
       previous.crossFadeTo(next, transitionFade, false);
     } else {
+      gaitBlend.current = null;
       next.fadeIn(transitionFade);
     }
     next.play();
@@ -2152,6 +2159,21 @@ function GLBPrimitive({
         breathing.setEffectiveTimeScale(breathScale);
       } else if (breathing.isRunning()) {
         breathing.stop();
+      }
+    }
+    const blend = gaitBlend.current;
+    if (blend) {
+      const { from, to } = blend;
+      if (!from.isRunning() || from.getEffectiveWeight() <= 0.01 || activeAction.current !== to) {
+        gaitBlend.current = null;
+      } else {
+        const fromDuration = from.getClip()?.duration || 0;
+        const toDuration = to.getClip()?.duration || 0;
+        if (fromDuration > 0.05 && toDuration > 0.05) {
+          // syncGaitPhase aligned the cycles at the handoff; matching phase
+          // rates keeps them aligned for the rest of the fade.
+          from.setEffectiveTimeScale(to.getEffectiveTimeScale() * (fromDuration / toDuration));
+        }
       }
     }
     mixer.update(mixerDelta);

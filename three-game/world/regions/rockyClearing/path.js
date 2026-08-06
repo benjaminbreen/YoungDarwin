@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { terrainSurfaceNoise } from '../../terrainShared';
+import { pathShoulderMask } from '../../paths/standardPath';
 
 export const ROCKY_CLEARING = 'E_MID';
 
@@ -60,8 +61,7 @@ export function rockyClearingPathInfo(x, z) {
   const width = Math.max(2.5, nearest.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.16, width * 0.44);
   const tread = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.34, width * 0.82);
-  const shoulder = THREE.MathUtils.smoothstep(nearest.distance, width * 0.46, width * 1.08)
-    * (1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.96, width * 1.58));
+  const shoulder = pathShoulderMask(nearest, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(nearest.distance, width * 0.56, width * 1.12);
 
   return {

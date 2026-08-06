@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathFrameAt } from '../../paths/standardPath';
+import { pathFrameAt, pathShoulderMask } from '../../paths/standardPath';
 import { crackNoise, terrainSurfaceNoise } from '../../terrainShared';
 import {
   MARINE_IGUANA_COLONY_BEACH_HUT_SEAM,
@@ -166,8 +166,7 @@ export function marineIguanaColonyPathInfo(x, z) {
   const width = Math.max(1.55, frame.width + edgeNoise);
   const center = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.17, width * 0.46);
   const tread = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.36, width * 0.82);
-  const shoulder = THREE.MathUtils.smoothstep(frame.distance, width * 0.44, width * 1.05)
-    * (1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.94, width * 1.56));
+  const shoulder = pathShoulderMask(frame, x, z, width);
   const path = 1 - THREE.MathUtils.smoothstep(frame.distance, width * 0.55, width * 1.12);
   return { ...frame, tangentX, tangentZ, width, center: clamp01(center), tread: clamp01(tread), shoulder: clamp01(shoulder), path: clamp01(path) };
 }

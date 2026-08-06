@@ -9,7 +9,7 @@ import { updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
 import { clampFrameDelta } from '../../frameTiming';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { getThreeSpecimens } from '../../data';
-import { DEFAULT_PLAYER_MODEL_ASSET_ID } from '../../modelAssets';
+import { DEFAULT_PLAYER_MODEL_ASSET_ID, getModelAsset } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
 import {
@@ -363,6 +363,7 @@ export function PlayerController({
     source: 'pending',
   });
   const previousMotion = useRef({ moving: false, running: false, yaw: Math.PI });
+  const lastMovingAt = useRef(-10);
   const pendingMovementCost = useRef({ fatigue: 0, falling: 0, lastFlushAt: 0 });
   const arcadeLocomotion = useRef(createArcadeLocomotionState());
   const visualLocomotion = useRef({
@@ -409,7 +410,9 @@ export function PlayerController({
     droppingPosition: new THREE.Vector3(),
   }), []);
   const stateRef = useRef({
-    modelAssetId: DEFAULT_PLAYER_MODEL_ASSET_ID,
+    // modelAssetId carries the animation/profile id ('darwin5' for both build
+    // variants); modelVariantId carries the actual asset id.
+    modelAssetId: getModelAsset(DEFAULT_PLAYER_MODEL_ASSET_ID)?.playerProfile || DEFAULT_PLAYER_MODEL_ASSET_ID,
     modelVariantId: DEFAULT_PLAYER_MODEL_ASSET_ID,
     playableModeId: 'darwin',
     playableKind: 'human',
@@ -1509,7 +1512,9 @@ export function PlayerController({
       ? (running ? swimConfig.sprintSpeed : swimConfig.speed)
       : (stateRef.current.crouching
         ? playerConfig.walkSpeed * (crouchRunIntent ? 0.92 : 0.45)
-        : running ? rawRunSpeed : playerConfig.walkSpeed) * carrySpeedScale * wadeSpeedScale * braceSpeedScale * constraintSpeedScale;
+        // Preview variant walks a touch brisker; stride timeScale follows
+        // speed/walkSpeed, so the cadence keeps up without foot slide.
+        : running ? rawRunSpeed : playerConfig.walkSpeed * (locomotionPreview ? 1.06 : 1)) * carrySpeedScale * wadeSpeedScale * braceSpeedScale * constraintSpeedScale;
     const slope = collisionAdapter.terrainSlopeAt(group.current.position.x, group.current.position.z);
     const rawInputDirection = frameScratch.rawInputDirection;
     if (flightActive) {
@@ -1565,9 +1570,9 @@ export function PlayerController({
     );
     const easedTransitionProgress = transitionProgress * transitionProgress * (3 - 2 * transitionProgress);
     const locomotionStartSpeedScale = locomotionPreview && stateRef.current.action === 'startWalking'
-      ? THREE.MathUtils.lerp(0.3, 1, easedTransitionProgress)
+      ? THREE.MathUtils.lerp(0.42, 1, easedTransitionProgress)
       : locomotionPreview && stateRef.current.action === 'startRunning'
-        ? THREE.MathUtils.lerp(0.36, 1, easedTransitionProgress)
+        ? THREE.MathUtils.lerp(0.45, 1, easedTransitionProgress)
         : 1;
     const movementSpeed = rawMovementSpeed * slopeSpeedScale * arcadeSpeedScale
       * (flightActive ? 1 : analogSpeedScale) * locomotionStartSpeedScale;
@@ -1583,6 +1588,9 @@ export function PlayerController({
       && isDarwinMode
       && moving
       && !previousMotion.current.moving
+      // Genuine standing starts only: stutter-steps and direction taps resume
+      // within this window and would churn the wind-up clip.
+      && now - lastMovingAt.current > 0.3
       && !wasAirborne.current
       && !swimState.current.active
       && !flightActive
@@ -1592,6 +1600,7 @@ export function PlayerController({
       const startClip = running ? 'startRunning' : 'startWalking';
       startAction(startClip, durationFor(startClip), { lockMovement: false });
     }
+    if (moving) lastMovingAt.current = now;
     const canTurnInPlace = isDarwinMode && !moving && !movementLocked && !stateRef.current.action && !stateRef.current.crouching && !stateRef.current.aiming;
     if (rotateLeftPressed && !lastButtons.current.rotateLeft && canTurnInPlace) {
       const targetYaw = group.current.rotation.y + Math.PI / 2;

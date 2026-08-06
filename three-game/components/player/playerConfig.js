@@ -6,8 +6,11 @@ export const EMPTY_KEYS = {};
 export const PLAYER = {
   walkSpeed: 4.45,
   runSpeed: 7.45,
-  jumpVelocity: 7.05,
-  gravity: 10.8,
+  // Jump ballistics are arcade-tuned: high gravity kills the old float while
+  // the launch speeds keep generous arcs (~1.4m standing, ~1.7m running,
+  // ~2.9m charged). Full-sprint jump covers ~7m instead of the old ~11m.
+  jumpVelocity: 6.8,
+  gravity: 16.5,
   groundAcceleration: 38,
   groundDeceleration: 22,
   lowSpeedTurnBoost: 2.15,
@@ -16,11 +19,11 @@ export const PLAYER = {
   turnDamping: 20,
   coyoteTime: 0.2,
   jumpBufferTime: 0.16,
-  runningJumpVerticalBonus: 0.82,
-  chargedJumpBonus: 2.25,
+  runningJumpVerticalBonus: 0.6,
+  chargedJumpBonus: 2.9,
   jumpChargeStartDelay: 0.16,
   jumpChargeMaxDuration: 0.58,
-  fallGravityMultiplier: 1.34,
+  fallGravityMultiplier: 1.28,
   jumpReleaseGravityMultiplier: 2.05,
   groundContactEpsilon: 0.11,
   groundSnapDistance: 0.62,
