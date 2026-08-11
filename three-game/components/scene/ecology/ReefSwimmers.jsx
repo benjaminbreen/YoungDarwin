@@ -2,12 +2,12 @@
 
 import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getRuntimePlayerPose } from '../../../store';
 import { createParrotfishSchoolMesh } from '../../../wildlife/fish/parrotfishModel';
 import { createMantaMesh } from '../../../wildlife/fish/mantaRayModel';
+import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
 
 // Reef life is underwater scenery the player is usually far from. Beyond this
 // radius from the school/cruiser anchor, skinning + movement update at
@@ -294,7 +294,7 @@ function makeSchoolRuntime(spec) {
 }
 
 function FishSchool({ spec }) {
-  const { scene, animations } = useGLTF(spec.path);
+  const { scene, animations } = useTrackedGLTF(spec.path);
   const groupRefs = useRef([]);
   const mixerStore = useRef([]);
   const farAccum = useRef(0);
@@ -539,7 +539,7 @@ function ProceduralMantaCruiser({ spec }) {
 }
 
 function Cruiser({ spec }) {
-  const { scene, animations } = useGLTF(spec.path);
+  const { scene, animations } = useTrackedGLTF(spec.path);
   const group = useRef(null);
   const mixerStore = useRef([]);
   const farAccum = useRef(0);

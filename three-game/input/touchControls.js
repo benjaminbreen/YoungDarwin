@@ -55,11 +55,15 @@ const TOOL_USE_CONTROLS = {
 };
 
 export const TOGGLE_COMPASS_EVENT = 'young-darwin:toggle-compass';
+export const TOOL_USE_EVENT = 'young-darwin:tool-use';
 
 export function triggerToolUse(toolId) {
   if (toolId === 'compass') {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(TOGGLE_COMPASS_EVENT));
     return;
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(TOOL_USE_EVENT, { detail: { toolId } }));
   }
   setTouchControl(TOOL_USE_CONTROLS[toolId] || 'gather', true);
 }

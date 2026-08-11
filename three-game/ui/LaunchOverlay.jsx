@@ -754,7 +754,11 @@ export function LaunchOverlay({
               </p>
               <div className="mt-4 max-h-[46dvh] overflow-y-auto overscroll-contain pr-1">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {controlsSections({ polished: true, includeNarratorCommands: false }).map(([title, lines]) => (
+                  {controlsSections({
+                    polished: true,
+                    includeNarratorCommands: false,
+                    playableModeId: selectedModeId,
+                  }).map(([title, lines]) => (
                     <section key={title} className="min-w-0">
                       <h3 className="text-[11px] uppercase tracking-[0.16em] text-expedition-gold">{title}</h3>
                       <div className="mt-1.5 grid gap-1">

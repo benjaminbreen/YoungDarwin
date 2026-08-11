@@ -2,7 +2,6 @@
 
 import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { catalogToInspectable } from '../../world/inspectables';
@@ -11,6 +10,7 @@ import { ContactShadow } from '../scene/ContactShadow';
 import { stabilizeFoliageMaterial } from './materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../scene/cameraCull';
 import { cachedGpuResource } from '../../world/gpuResourceCache';
+import { useTrackedGLTF } from './gltfCachePolicy';
 
 const scratchWorldPosition = new THREE.Vector3();
 
@@ -170,7 +170,7 @@ function StaticGLBPrimitive({
   const group = groupRef || localGroupRef;
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const gl = useThree(state => state.gl);
-  const { scene } = useGLTF(path);
+  const { scene } = useTrackedGLTF(path);
   const clone = useMemo(() => scene.clone(true), [scene]);
   const anisotropy = useMemo(() => Math.min(16, gl.capabilities.getMaxAnisotropy?.() || 8), [gl]);
   const renderUserData = useMemo(() => ({

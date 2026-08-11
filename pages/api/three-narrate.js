@@ -2,6 +2,7 @@ import { baseSpecimens } from '../../data/specimens';
 import { npcs } from '../../data/npcs';
 import { generateLLMText } from '../../utils/server/llmProvider';
 import { getRequestIdentity } from '../../utils/server/llmSafety';
+import { narratorGenerationEnabled } from '../../utils/generativePolicy';
 import {
   animalDirectQuestionGuidance,
   buildAnimalNarratorPrompt,
@@ -372,7 +373,10 @@ function fieldDilemmaFallback(eventType, input = '') {
 }
 
 export default async function handler(req, res) {
-  if (process.env.YOUNG_DARWIN_ENABLE_GENERATIVE !== '1') {
+  if (!narratorGenerationEnabled(
+    process.env.YOUNG_DARWIN_ENABLE_NARRATOR,
+    process.env.YOUNG_DARWIN_ENABLE_GENERATIVE,
+  )) {
     return res.status(404).json({ error: 'Player-visible generative narration is not enabled.' });
   }
   if (req.method !== 'POST') {

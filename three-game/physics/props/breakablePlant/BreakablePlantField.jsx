@@ -56,14 +56,15 @@ import {
   selectHammerImpactTargets,
   selectKnifeCutTargets,
 } from './breakablePhysics';
+import { selectPlantInteractionSiteIds } from './breakablePlantLod';
 
 // Released pieces still collide with terrain, Darwin, and ordinary props, but
 // not with other breakable pieces. Adjacent pads/branches begin in contact;
 // asking Rapier to solve those contacts the instant a subtree detaches makes
 // the solver separate them like an explosion.
 const BREAKABLE_PIECE_COLLISION_GROUPS = interactionGroups(1, 0);
-const PLANT_INTERACTION_ACTIVATE_RADIUS = 30;
-const PLANT_INTERACTION_DEACTIVATE_RADIUS = 38;
+const PLANT_INTERACTION_ACTIVATE_RADIUS = 10;
+const PLANT_INTERACTION_DEACTIVATE_RADIUS = 14;
 const PLANT_INTERACTION_REFRESH_SECONDS = 0.24;
 const HIDDEN_INSTANCE_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -812,12 +813,12 @@ export function BreakablePlantField({ spec }) {
   const [activeSiteIds, setActiveSiteIds] = useState(() => {
     if (!usesDormantPlantLod) return new Set(sites.map(site => site.id));
     const player = getRuntimePlayerPose()?.position;
-    if (!player) return new Set();
-    return new Set(
-      sites
-        .filter(site => Math.hypot(player.x - site.x, player.z - site.z) <= PLANT_INTERACTION_ACTIVATE_RADIUS)
-        .map(site => site.id),
-    );
+    return selectPlantInteractionSiteIds({
+      sites,
+      playerPosition: player,
+      activationRadius: PLANT_INTERACTION_ACTIVATE_RADIUS,
+      deactivationRadius: PLANT_INTERACTION_DEACTIVATE_RADIUS,
+    });
   });
   const interactionRefreshRef = useRef(0);
   const pieceSpatialIndex = useMemo(
@@ -953,13 +954,12 @@ export function BreakablePlantField({ spec }) {
       return;
     }
     const player = getRuntimePlayerPose()?.position;
-    setActiveSiteIds(new Set(
-      player
-        ? sites
-          .filter(site => Math.hypot(player.x - site.x, player.z - site.z) <= PLANT_INTERACTION_ACTIVATE_RADIUS)
-          .map(site => site.id)
-        : [],
-    ));
+    setActiveSiteIds(selectPlantInteractionSiteIds({
+      sites,
+      playerPosition: player,
+      activationRadius: PLANT_INTERACTION_ACTIVATE_RADIUS,
+      deactivationRadius: PLANT_INTERACTION_DEACTIVATE_RADIUS,
+    }));
   }, [
     currentZoneId,
     pieces,
@@ -1232,26 +1232,31 @@ export function BreakablePlantField({ spec }) {
       if (interactionRefreshRef.current <= 0) {
         interactionRefreshRef.current = PLANT_INTERACTION_REFRESH_SECONDS;
         const collectedKeys = new Set(sampledRockIds || []);
-        const changedSiteIds = new Set();
+        const persistentSiteIds = new Set();
         for (const piece of pieces) {
+          const releasedAndVisible = runtime.released.has(piece.key)
+            && !runtime.culled.has(piece.key)
+            && !collectedKeys.has(piece.key);
           if (
-            runtime.released.has(piece.key)
-            || runtime.culled.has(piece.key)
+            releasedAndVisible
             || runtime.damage.has(piece.key)
-            || collectedKeys.has(piece.key)
+            || (
+              spec.dormantLodStrategy === 'merged-per-site'
+              && (runtime.culled.has(piece.key) || collectedKeys.has(piece.key))
+            )
           ) {
-            changedSiteIds.add(piece.siteId);
+            persistentSiteIds.add(piece.siteId);
           }
         }
         setActiveSiteIds(previous => {
-          const next = new Set(changedSiteIds);
-          for (const site of sites) {
-            const distance = Math.hypot(playerPos.x - site.x, playerPos.z - site.z);
-            const radius = previous.has(site.id)
-              ? PLANT_INTERACTION_DEACTIVATE_RADIUS
-              : PLANT_INTERACTION_ACTIVATE_RADIUS;
-            if (distance <= radius) next.add(site.id);
-          }
+          const next = selectPlantInteractionSiteIds({
+            sites,
+            playerPosition: playerPos,
+            persistentSiteIds,
+            previousActiveSiteIds: previous,
+            activationRadius: PLANT_INTERACTION_ACTIVATE_RADIUS,
+            deactivationRadius: PLANT_INTERACTION_DEACTIVATE_RADIUS,
+          });
           if (
             next.size === previous.size
             && [...next].every(siteId => previous.has(siteId))

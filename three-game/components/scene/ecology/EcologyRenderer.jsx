@@ -20,6 +20,11 @@ import { BirdFlock } from './BirdFlock';
 import { FlyingModelFlock } from './FlyingModelFlock';
 import { ReefSwimmers } from './ReefSwimmers';
 import { StaticGLB } from '../../assets/StaticGLB';
+import {
+  noteGLTFLoadAbandoned,
+  noteGLTFLoadSettled,
+  noteGLTFLoadStarted,
+} from '../../assets/gltfCachePolicy';
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 import { terrainHeight } from '../../../world/terrain';
 import { CanopySilhouetteLayer } from './CanopySilhouetteLayer';
@@ -256,6 +261,9 @@ function scheduleEcologyPreloadPump() {
       // converge on the main thread in the same frame.
       const parsed = peek([GLTFLoader, path]);
       if (parsed || performance.now() - startedAt >= 12000) {
+        queuedEcologyPreloads.delete(path);
+        if (parsed) noteGLTFLoadSettled(path);
+        else noteGLTFLoadAbandoned(path);
         ecologyPreloadInFlightPath = null;
         // Longer breather between parses while frames are slow; the queue is
         // a warmup, not a deadline.
@@ -282,8 +290,13 @@ function scheduleEcologyPreloadPump() {
 // with a second parallel decode loop.
 export function preloadGLBPath(path) {
   if (typeof window === 'undefined' || typeof path !== 'string' || !GLB_PATH_RE.test(path)) return;
+  if (peek([GLTFLoader, path])) {
+    noteGLTFLoadSettled(path);
+    return;
+  }
   if (queuedEcologyPreloads.has(path)) return;
   queuedEcologyPreloads.add(path);
+  noteGLTFLoadStarted(path);
   ecologyPreloadQueue.push(path);
   scheduleEcologyPreloadPump();
 }

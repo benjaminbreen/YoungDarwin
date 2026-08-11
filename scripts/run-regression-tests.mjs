@@ -112,6 +112,19 @@ const {
   getRequestIdentity,
 } = loadModule('utils/server/llmSafety.js');
 const {
+  enabledUnlessExplicitlyDisabled,
+  narratorGenerationEnabled,
+} = loadModule('utils/generativePolicy.js');
+
+test('the narrator is default-on with explicit client and server kill switches', () => {
+  assert.equal(narratorGenerationEnabled(undefined, undefined), true);
+  assert.equal(narratorGenerationEnabled(undefined, '1'), true);
+  assert.equal(narratorGenerationEnabled(undefined, '0'), false);
+  assert.equal(narratorGenerationEnabled('off', '1'), false);
+  assert.equal(narratorGenerationEnabled('1', '0'), true);
+  assert.equal(enabledUnlessExplicitlyDisabled('false'), false);
+});
+const {
   clampNpcEncounterEffects,
   getNpcEncounterPresentation,
   getNearestNpcEncounter,
@@ -192,6 +205,9 @@ const {
   selectHammerImpactTargets,
   selectKnifeCutTargets,
 } = loadModule('three-game/physics/props/breakablePlant/breakablePhysics.js');
+const {
+  selectPlantInteractionSiteIds,
+} = loadModule('three-game/physics/props/breakablePlant/breakablePlantLod.js');
 const {
   buildMatureCactusObstacles,
   buildMatureCactusTargets,
@@ -693,6 +709,77 @@ const {
   consumeTouchControls,
   triggerToolUse,
 } = loadModule('three-game/input/touchControls.js');
+const {
+  CONTROL_HINT_INACTIVITY_MS,
+  controlsSections,
+  nextControlHintPhase,
+} = loadModule('three-game/ui/controlsReference.js');
+
+test('control reference follows the selected playable mode', () => {
+  const darwin = controlsSections({ playableModeId: 'darwin', includeNarratorCommands: false });
+  const finch = controlsSections({ playableModeId: 'finch', includeNarratorCommands: false });
+  const tortoise = controlsSections({ playableModeId: 'tortoise', includeNarratorCommands: false });
+  assert.ok(darwin.flat(2).includes('Shift: run'));
+  assert.ok(finch.flat(2).includes('Space: land or take off'));
+  assert.ok(finch.flat(2).includes('Shift: fly faster and dive'));
+  assert.ok(tortoise.flat(2).includes('Space: brace on steep slopes'));
+  assert.equal(finch.some(([title]) => title === 'Fieldwork'), false);
+  assert.equal(tortoise.some(([title]) => title === 'Direct Actions'), false);
+});
+
+test('staged control hints advance through each mode-specific control loop', () => {
+  assert.equal(CONTROL_HINT_INACTIVITY_MS, 20000);
+  const basics = { moved: false, ran: false, jumped: false, animalAction: false, camera: false, fieldAction: false, worldAction: false };
+  assert.equal(nextControlHintPhase('finch', basics), 'move');
+  assert.equal(nextControlHintPhase('finch', { ...basics, moved: true }), 'faster');
+  assert.equal(nextControlHintPhase('finch', { ...basics, moved: true, ran: true }), 'land');
+  assert.equal(nextControlHintPhase('finch', { ...basics, moved: true, ran: true, jumped: true }), 'animalActions');
+  assert.equal(nextControlHintPhase('finch', { ...basics, moved: true, ran: true, jumped: true, animalAction: true }), 'camera');
+  assert.equal(nextControlHintPhase('tortoise', { ...basics, moved: true, ran: true }), 'brace');
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true }), 'camera');
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true }), 'fieldAction');
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true, fieldAction: true }), 'worldAction');
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true, fieldAction: true, worldAction: true }), 'complete');
+});
+
+test('control onboarding pauses behind blocking UI without losing completed steps', () => {
+  const source = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  const hintSource = source.slice(
+    source.indexOf('function PolishedControlHint'),
+    source.indexOf('function PromptCard'),
+  );
+  assert.match(hintSource, /const progressRef = useRef\(null\)/);
+  assert.match(hintSource, /if \(!ready \|\| disabled\) return undefined/);
+  assert.match(hintSource, /\}, \[disabled, playableModeId, ready\]\)/);
+  assert.match(hintSource, /if \(Object\.keys\(patch\)\.length === 0\) return/);
+});
+
+test('boot model preloads leave phased animation banks deferred', () => {
+  const source = fs.readFileSync(path.resolve('three-game/components/assets/ModelAsset.jsx'), 'utf8');
+  const preloadSource = source.slice(
+    source.indexOf('export function preloadModelAsset'),
+    source.indexOf('const ONE_SHOT_CLIPS'),
+  );
+  assert.match(preloadSource, /includeAnimationBanks = false/);
+  assert.match(preloadSource, /if \(includeAnimationBanks\) resources\.push/);
+  assert.doesNotMatch(preloadSource, /const resources = \[\s*asset,\s*\.\.\.\(asset\.animationBanks/);
+});
+
+test('travel resource caches are bounded and release evicted payloads', () => {
+  const ecologySource = fs.readFileSync(path.resolve('three-game/world/ecology/ecologyResource.js'), 'utf8');
+  const ecologyIndexSource = fs.readFileSync(path.resolve('three-game/world/ecology/index.js'), 'utf8');
+  const waterSource = fs.readFileSync(path.resolve('three-game/world/waterTextureResource.js'), 'utf8');
+  const gltfSource = fs.readFileSync(path.resolve('three-game/components/assets/gltfCachePolicy.js'), 'utf8');
+  assert.match(ecologySource, /ECOLOGY_RESOURCE_CACHE_LIMIT = 4/);
+  assert.match(ecologySource, /entry\.status === 'ready'/);
+  assert.match(ecologyIndexSource, /ECOLOGY_CACHE_LIMIT = 16/);
+  assert.match(waterSource, /WATER_RESOURCE_CACHE_LIMIT = 6/);
+  assert.match(waterSource, /releaseEntryTextures\(entry\)/);
+  assert.match(waterSource, /record\.texture\.dispose\(\)/);
+  assert.match(gltfSource, /GLTF_RECENT_CACHE_LIMIT = 24/);
+  assert.match(gltfSource, /!activePathRefs\.has\(path\) && !pendingPaths\.has\(path\)/);
+  assert.match(gltfSource, /useGLTF\.clear\(candidate\)/);
+});
 
 test('Syms builds a connected north-bay fieldwork circuit with calculated activity sites', () => {
   const plan = buildSymsPostOfficeBayPlan();
@@ -2505,12 +2592,54 @@ test('manual breakable-plant colliders own authored mass instead of the rigid bo
   assert.match(source, /clampReleaseLinearVelocity/);
 });
 
-test('distant breakable plants stay instanced until Darwin enters interaction range', () => {
+test('breakable plants materialize only one nearby intact interaction site', () => {
+  const sites = [
+    { id: 'a', x: 0, z: 0 },
+    { id: 'b', x: 5, z: 0 },
+    { id: 'c', x: 8, z: 2 },
+  ];
+  const nearby = selectPlantInteractionSiteIds({
+    sites,
+    playerPosition: { x: 1, z: 0 },
+    activationRadius: 10,
+    deactivationRadius: 14,
+  });
+  assert.deepEqual([...nearby], ['a']);
+
+  const withDamagedSite = selectPlantInteractionSiteIds({
+    sites,
+    playerPosition: { x: 1, z: 0 },
+    persistentSiteIds: new Set(['c']),
+    activationRadius: 10,
+    deactivationRadius: 14,
+  });
+  assert.deepEqual([...withDamagedSite], ['c', 'a']);
+
+  const stableMidpoint = selectPlantInteractionSiteIds({
+    sites,
+    playerPosition: { x: 2, z: 0 },
+    previousActiveSiteIds: new Set(['b']),
+    activationRadius: 10,
+    deactivationRadius: 14,
+  });
+  assert.deepEqual([...stableMidpoint], ['b']);
+
+  const switchedAtCloseRange = selectPlantInteractionSiteIds({
+    sites,
+    playerPosition: { x: 0, z: 0 },
+    previousActiveSiteIds: new Set(['b']),
+    activationRadius: 10,
+    deactivationRadius: 14,
+  });
+  assert.deepEqual([...switchedAtCloseRange], ['a']);
+
   const source = fs.readFileSync(
     path.resolve('three-game/physics/props/breakablePlant/BreakablePlantField.jsx'),
     'utf8',
   );
-  assert.match(source, /const PLANT_INTERACTION_ACTIVATE_RADIUS = 30/);
+  assert.match(source, /const PLANT_INTERACTION_ACTIVATE_RADIUS = 10/);
+  assert.match(source, /selectPlantInteractionSiteIds/);
+  assert.match(source, /const releasedAndVisible = runtime\.released\.has/);
   assert.match(source, /function DormantPlantField/);
   assert.match(source, /<instancedMesh/);
   assert.match(

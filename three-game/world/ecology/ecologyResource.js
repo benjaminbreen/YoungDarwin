@@ -3,8 +3,25 @@ import { getBorderVistas } from '../vistas';
 
 const resources = new Map();
 const pending = new Map();
+const ECOLOGY_RESOURCE_CACHE_LIMIT = 4;
 let worker = null;
 let requestCounter = 0;
+
+function touchResource(regionId, entry) {
+  resources.delete(regionId);
+  resources.set(regionId, entry);
+  return entry;
+}
+
+function pruneResources(protectedRegionId = null) {
+  while (resources.size > ECOLOGY_RESOURCE_CACHE_LIMIT) {
+    const candidate = Array.from(resources.entries()).find(([regionId, entry]) => (
+      regionId !== protectedRegionId && entry.status === 'ready'
+    ));
+    if (!candidate) return;
+    resources.delete(candidate[0]);
+  }
+}
 
 function regionIds(regionId) {
   return [...new Set([
@@ -65,6 +82,8 @@ function recoverRequest(request, entry, reason = 'unknown worker error') {
   };
   entry.status = 'ready';
   entry.value = value;
+  touchResource(request.regionId, entry);
+  pruneResources(request.regionId);
   request.resolveDestination(value);
   request.resolveComplete(value);
 }
@@ -87,6 +106,7 @@ function ensureWorker() {
     if (stage === 'destination') {
       entry.status = 'destination-ready';
       entry.value = hydrated;
+      touchResource(request.regionId, entry);
       request.resolveDestination(hydrated);
       return;
     }
@@ -103,6 +123,8 @@ function ensureWorker() {
     pending.delete(requestId);
     entry.status = 'ready';
     entry.value = value;
+    touchResource(request.regionId, entry);
+    pruneResources(request.regionId);
     request.resolveDestination(value);
     request.resolveComplete(value);
   };
@@ -120,7 +142,10 @@ function ensureWorker() {
 
 export function prepareRegionEcologyResource(regionId) {
   const existing = resources.get(regionId);
-  if (existing) return existing.promise;
+  if (existing) {
+    touchResource(regionId, existing);
+    return existing.promise;
+  }
   const activeWorker = ensureWorker();
   if (!activeWorker) {
     const value = {
@@ -142,6 +167,7 @@ export function prepareRegionEcologyResource(regionId) {
       completePromise: Promise.resolve(value),
     };
     resources.set(regionId, entry);
+    pruneResources(regionId);
     return entry.promise;
   }
   const requestId = ++requestCounter;
@@ -159,6 +185,7 @@ export function prepareRegionEcologyResource(regionId) {
     promise,
     completePromise,
   });
+  pruneResources(regionId);
   pending.set(requestId, {
     regionId,
     resolveDestination,
@@ -176,6 +203,7 @@ export function readRegionEcologyResource(regionId) {
     if (created?.status === 'ready') return created.value;
     throw promise;
   }
+  touchResource(regionId, entry);
   if (entry.status === 'destination-ready' || entry.status === 'ready') return entry.value;
   throw entry.promise;
 }
@@ -188,10 +216,14 @@ export function readRegionNeighborEcologyResource(regionId) {
     if (created?.status === 'ready') return created.value;
     throw created.completePromise;
   }
+  touchResource(regionId, entry);
   if (entry.status === 'ready') return entry.value;
   throw entry.completePromise;
 }
 
 export function regionEcologyResourceIsReady(regionId) {
-  return resources.get(regionId)?.status === 'ready';
+  const entry = resources.get(regionId);
+  if (!entry) return false;
+  touchResource(regionId, entry);
+  return entry.status === 'ready';
 }

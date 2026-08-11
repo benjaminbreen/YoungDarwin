@@ -53,12 +53,23 @@ module.exports = {
           from: { opacity: '0', translate: '0 3px' },
           to: { opacity: '1', translate: '0 0' },
         },
+        // A short, compositor-only nudge after an onboarding step has sat
+        // unanswered for 20 seconds. It finishes enlarged instead of looping,
+        // so the hint asks for attention without becoming ambient motion.
+        'control-hint-attention': {
+          '0%': { transform: 'scale(1)' },
+          '18%': { transform: 'scale(1.14)' },
+          '36%': { transform: 'scale(1.055)' },
+          '54%': { transform: 'scale(1.12)' },
+          '72%, 100%': { transform: 'scale(1.08)' },
+        },
       },
       animation: {
         // 'backwards' (not 'both') so class-driven transforms/opacity take over
         // cleanly once the entrance finishes.
         'hud-rise': 'hud-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards',
         'hud-fade': 'hud-fade 0.3s ease-out backwards',
+        'control-hint-attention': 'control-hint-attention 1.8s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
     },
   },

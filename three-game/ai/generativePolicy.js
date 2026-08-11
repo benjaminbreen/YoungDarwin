@@ -1,6 +1,14 @@
-// Player-visible generative prose is opt-in for private development only.
-// Public builds remain deterministic unless this value is explicitly exposed
-// at build time as "1".
+import { narratorGenerationEnabled } from '../../utils/generativePolicy';
+
+// The deployed narrator demonstration is available by default. Either the
+// narrator-specific setting or the legacy all-generation setting can still
+// explicitly disable it at build time.
+export const PLAYER_VISIBLE_NARRATOR_ENABLED = narratorGenerationEnabled(
+  process.env.NEXT_PUBLIC_YOUNG_DARWIN_ENABLE_NARRATOR,
+  process.env.NEXT_PUBLIC_YOUNG_DARWIN_ENABLE_GENERATIVE,
+);
+
+// The other player-visible generation surfaces remain opt-in.
 export const PLAYER_VISIBLE_GENERATIVE_ENABLED = (
   process.env.NEXT_PUBLIC_YOUNG_DARWIN_ENABLE_GENERATIVE === '1'
 );
@@ -16,11 +24,19 @@ export const PLAYER_VISIBLE_GENERATIVE_ENABLED = (
 // Callers that only decide what to *render* should keep using the build constant
 // above: reading the URL during render would disagree with the server-rendered
 // markup and trip hydration. This is for the call sites that reach the network.
-export function generativeRequestsAllowed() {
-  if (!PLAYER_VISIBLE_GENERATIVE_ENABLED) return false;
+function pageAllowsGenerativeRequests(featureEnabled) {
+  if (!featureEnabled) return false;
   if (typeof window === 'undefined') return true;
   const params = new URLSearchParams(window.location.search);
   const explicit = params.get('generative');
   if (explicit === '0' || explicit === 'off') return false;
   return !(params.has('e2e') || params.has('screenshot'));
+}
+
+export function narratorRequestsAllowed() {
+  return pageAllowsGenerativeRequests(PLAYER_VISIBLE_NARRATOR_ENABLED);
+}
+
+export function generativeRequestsAllowed() {
+  return pageAllowsGenerativeRequests(PLAYER_VISIBLE_GENERATIVE_ENABLED);
 }

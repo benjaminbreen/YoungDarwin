@@ -64,7 +64,7 @@ import {
   getNpcEncounter,
   getNpcEncounterPresentation,
 } from './encounters/npcEncounters';
-import { generativeRequestsAllowed } from './ai/generativePolicy';
+import { generativeRequestsAllowed, narratorRequestsAllowed } from './ai/generativePolicy';
 import { cameraFocusPoint } from './camera/focusPoint';
 import {
   DEFAULT_SYMS_DIRECTIVE,
@@ -3654,7 +3654,7 @@ export const useThreeGameStore = create((set, get) => ({
       textHash(trimmed),
     ].join(':');
 
-    if (!generativeRequestsAllowed()) {
+    if (!narratorRequestsAllowed()) {
       if (state.activeConstraint?.type === 'snare_immobilized') {
         const resolved = localSnareEscapeResolution(trimmed);
         get().applySnareEscapeResolution(resolved, { playerInput: trimmed });

@@ -4,12 +4,17 @@ import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useSt
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
-import { TOGGLE_COMPASS_EVENT, setTouchControl, triggerToolUse } from '../input/touchControls';
+import {
+  TOGGLE_COMPASS_EVENT,
+  TOOL_USE_EVENT,
+  setTouchControl,
+  triggerToolUse,
+} from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { isEndGameNarratorCommand } from '../finalAssessment';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
-import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
+import { PLAYER_VISIBLE_NARRATOR_ENABLED } from '../ai/generativePolicy';
 import { SHOTGUN } from '../shooting/shotgunConfig';
 import { emitPropEvent } from '../physics/props/propEvents';
 import { shotgunAimState } from '../shooting/aimState';
@@ -29,7 +34,11 @@ import {
   GOLD_BUTTON,
   GoldDivider,
 } from './expedition/ExpeditionPanel';
-import { controlsSections } from './controlsReference';
+import {
+  CONTROL_HINT_INACTIVITY_MS,
+  controlsSections,
+  nextControlHintPhase,
+} from './controlsReference';
 import { useDismissableOverlay } from './useDismissableOverlay';
 import { animalAwarenessValue, animalRisk } from './animalVitals';
 import { getDirective, getDirectivePosition } from '../directives';
@@ -1871,7 +1880,11 @@ const LOG_MIN_HEIGHT = 104;
 const LOG_DEFAULT_HEIGHT = 232;
 
 function HotkeysResponse({ polished = false }) {
-  const sections = useMemo(() => controlsSections({ polished }), [polished]);
+  const playableModeId = useThreeGameStore(state => state.playableModeId);
+  const sections = useMemo(
+    () => controlsSections({ polished, playableModeId }),
+    [playableModeId, polished],
+  );
 
   return (
     <div className="space-y-2">
@@ -1902,11 +1915,11 @@ function ControlLine({ line }) {
   );
 }
 
-function ControlsOverlay({ open, onClose, polished = true }) {
+function ControlsOverlay({ open, onClose, polished = true, playableModeId = 'darwin' }) {
   const panelRef = useDismissableOverlay(open, onClose);
   const sections = useMemo(
-    () => controlsSections({ polished, includeNarratorCommands: true }),
-    [polished],
+    () => controlsSections({ polished, includeNarratorCommands: true, playableModeId }),
+    [playableModeId, polished],
   );
   if (!open) return null;
 
@@ -2257,7 +2270,7 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
           </>
         )}
       </div>
-      {(!polished || expanded) && (PLAYER_VISIBLE_GENERATIVE_ENABLED ? (
+      {(!polished || expanded) && (PLAYER_VISIBLE_NARRATOR_ENABLED ? (
         <NarratorComposer
           expanded={expanded}
           pending={narratorPending}
@@ -2978,113 +2991,253 @@ function PromptAction({ keyLabel, children, primary = false, onClick = null }) {
 }
 
 
-function PolishedControlHint({ hudHidden, disabled = false }) {
-  const [phase, setPhase] = useState('hud');
+function ControlHintDivider() {
+  return <span className="h-3.5 w-px bg-expedition-brass/30" />;
+}
+
+function controlHintContent(playableModeId, phase) {
+  if (phase === 'showHud') {
+    return <><ControlHintKey>H</ControlHintKey><span>Show interface</span></>;
+  }
+  if (phase === 'complete' || phase === 'reminder') {
+    return (
+      <>
+        <ControlHintKey>?</ControlHintKey><span>All controls</span>
+        <ControlHintDivider />
+        <ControlHintKey>H</ControlHintKey><span>Hide interface</span>
+      </>
+    );
+  }
+  if (phase === 'move') {
+    return (
+      <>
+        <ControlHintKey>WASD</ControlHintKey><ControlHintKey>Arrows</ControlHintKey>
+        <span>{playableModeId === 'finch' ? 'Fly' : 'Move'}</span>
+      </>
+    );
+  }
+  if (phase === 'faster') {
+    return (
+      <><ControlHintKey>Shift</ControlHintKey><span>{playableModeId === 'finch' ? 'Fly faster / dive' : playableModeId === 'tortoise' ? 'Walk faster' : 'Run'}</span></>
+    );
+  }
+  if (phase === 'jump') return <><ControlHintKey>Space</ControlHintKey><span>Jump</span></>;
+  if (phase === 'land') return <><ControlHintKey>Space</ControlHintKey><span>Land / take off</span></>;
+  if (phase === 'brace') return <><ControlHintKey>Space</ControlHintKey><span>Brace on slopes</span></>;
+  if (phase === 'animalActions') {
+    return (
+      <>
+        <ControlHintKey>1</ControlHintKey><span>Eat</span>
+        <ControlHintDivider />
+        <ControlHintKey>2</ControlHintKey><span>Sleep</span>
+        <ControlHintDivider />
+        <ControlHintKey>3</ControlHintKey><span>Defecate</span>
+        <span className="normal-case tracking-normal text-expedition-faded">or click an action</span>
+      </>
+    );
+  }
+  if (phase === 'camera') {
+    return (
+      <>
+        <ControlHintKey>Drag</ControlHintKey><span>Look</span>
+        <ControlHintDivider />
+        <ControlHintKey>Scroll</ControlHintKey><span>Zoom</span>
+      </>
+    );
+  }
+  if (phase === 'fieldAction') {
+    return <><ControlHintKey>Enter</ControlHintKey><span>Observe / act on a subject</span></>;
+  }
+  if (phase === 'worldAction') {
+    return (
+      <>
+        <ControlHintKey>1–6</ControlHintKey><span>Choose tool</span>
+        <ControlHintDivider />
+        <ControlHintKey>E</ControlHintKey><span>Speak / carry / travel</span>
+      </>
+    );
+  }
+  return null;
+}
+
+function PolishedControlHint({ playableModeId = 'darwin', hudHidden, disabled = false, ready = true }) {
+  const [phase, setPhase] = useState('move');
   const [visible, setVisible] = useState(false);
-  const progressRef = React.useRef({ introComplete: false, moved: false, ran: false, jumped: false, complete: false });
+  const [attention, setAttention] = useState(false);
+  const progressRef = useRef(null);
+  const phaseRef = useRef('move');
+  const visibleRef = useRef(false);
+
+  useEffect(() => {
+    progressRef.current = {
+      moved: false,
+      ran: false,
+      jumped: false,
+      animalAction: false,
+      camera: false,
+      fieldAction: false,
+      worldAction: false,
+      complete: false,
+    };
+    phaseRef.current = 'move';
+    visibleRef.current = false;
+    setPhase('move');
+    setVisible(false);
+    setAttention(false);
+  }, [playableModeId, ready]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
+    if (!ready || disabled) return undefined;
+    const progress = progressRef.current;
+    if (!progress) return undefined;
+    let pointerStart = null;
     let revealTimer = 0;
-    let introFadeTimer = 0;
-    let introNextTimer = 0;
-    let phaseFadeTimer = 0;
-    let idleTimer = 0;
+    let completionFadeTimer = 0;
+    let reminderTimer = 0;
+    let reminderFadeTimer = 0;
+    let inactivityTimer = 0;
+    const updatePhase = next => {
+      phaseRef.current = next;
+      setPhase(next);
+    };
+    const updateVisible = next => {
+      visibleRef.current = next;
+      setVisible(next);
+    };
 
-    const clearPhaseFade = () => window.clearTimeout(phaseFadeTimer);
-    const scheduleIdleHint = () => {
-      window.clearTimeout(idleTimer);
-      if (!progressRef.current.complete) return;
-      idleTimer = window.setTimeout(() => {
-        setPhase('idle');
-        setVisible(true);
-      }, 10000);
+    setAttention(false);
+
+    const scheduleAttentionNudge = () => {
+      window.clearTimeout(inactivityTimer);
+      inactivityTimer = window.setTimeout(() => {
+        updateVisible(true);
+        setAttention(true);
+      }, CONTROL_HINT_INACTIVITY_MS);
     };
+
     const finishBasics = () => {
-      if (progressRef.current.complete) {
-        scheduleIdleHint();
-        return;
-      }
-      progressRef.current.complete = true;
-      clearPhaseFade();
-      setPhase('essentials');
-      setVisible(true);
-      phaseFadeTimer = window.setTimeout(() => setVisible(false), 6500);
-      scheduleIdleHint();
+      if (progress.complete) return;
+      progress.complete = true;
+      window.clearTimeout(inactivityTimer);
+      setAttention(false);
+      updatePhase('complete');
+      updateVisible(true);
+      completionFadeTimer = window.setTimeout(() => updateVisible(false), 7000);
+      reminderTimer = window.setTimeout(() => {
+        updatePhase('reminder');
+        updateVisible(true);
+        reminderFadeTimer = window.setTimeout(() => updateVisible(false), 5000);
+      }, 30000);
     };
-    const revealPostIntroPhase = () => {
-      const progress = progressRef.current;
-      progress.introComplete = true;
-      if (progress.moved && progress.ran && progress.jumped) {
+
+    const publishProgress = patch => {
+      if (progress.complete) return;
+      const previousPhase = nextControlHintPhase(playableModeId, progress);
+      Object.assign(progress, patch);
+      const nextPhase = nextControlHintPhase(playableModeId, progress);
+      if (nextPhase === 'complete') {
         finishBasics();
         return;
       }
-      setPhase(progress.moved ? 'advanced' : 'move');
-      setVisible(true);
+      if (nextPhase !== previousPhase) {
+        setAttention(false);
+        scheduleAttentionNudge();
+      }
+      updatePhase(nextPhase);
+      updateVisible(true);
     };
 
-    revealTimer = window.setTimeout(() => setVisible(true), 500);
-    introFadeTimer = window.setTimeout(() => setVisible(false), 3800);
-    introNextTimer = window.setTimeout(revealPostIntroPhase, 4200);
+    if (progress.complete) {
+      if (phaseRef.current === 'complete') {
+        completionFadeTimer = window.setTimeout(() => updateVisible(false), 7000);
+        reminderTimer = window.setTimeout(() => {
+          updatePhase('reminder');
+          updateVisible(true);
+          reminderFadeTimer = window.setTimeout(() => updateVisible(false), 5000);
+        }, 30000);
+      } else if (phaseRef.current === 'reminder') {
+        reminderFadeTimer = window.setTimeout(() => updateVisible(false), 5000);
+      }
+    } else {
+      if (!visibleRef.current) revealTimer = window.setTimeout(() => updateVisible(true), 650);
+      scheduleAttentionNudge();
+    }
 
     const handleKeyDown = event => {
       const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      const progress = progressRef.current;
-      const movementKey = MOVEMENT_HINT_MOVE_KEYS.has(event.code);
-      if (movementKey) {
-        progress.moved = true;
-        if (progress.introComplete && !progress.complete) {
-          setPhase('advanced');
-          setVisible(true);
-        }
-        if (progress.complete) {
-          setVisible(false);
-          scheduleIdleHint();
-        }
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat) return;
+      const patch = {};
+      if (MOVEMENT_HINT_MOVE_KEYS.has(event.code)) patch.moved = true;
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') patch.ran = true;
+      if (event.code === 'Space') patch.jumped = true;
+      if (event.code === 'Enter' || event.code === 'NumpadEnter') patch.fieldAction = true;
+      if (event.code === 'KeyE' || /^Digit[1-6]$/.test(event.code)) patch.worldAction = true;
+      if ((playableModeId === 'finch' || playableModeId === 'tortoise') && /^Digit[1-3]$/.test(event.code)) {
+        patch.animalAction = true;
       }
-      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') progress.ran = true;
-      if (event.code === 'Space') progress.jumped = true;
-      if (progress.introComplete && progress.moved && progress.ran && progress.jumped) finishBasics();
+      if (Object.keys(patch).length === 0) return;
+      publishProgress(patch);
     };
+    const handleToolUse = event => {
+      if (['eat', 'sleep', 'defecate'].includes(event.detail?.toolId)) publishProgress({ animalAction: true });
+    };
+    const handlePointerDown = event => {
+      if (event.button !== 0) return;
+      pointerStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    };
+    const handlePointerMove = event => {
+      if (!pointerStart || pointerStart.pointerId !== event.pointerId || !(event.buttons & 1)) return;
+      if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) >= 8) {
+        pointerStart = null;
+        publishProgress({ camera: true });
+      }
+    };
+    const clearPointer = () => {
+      pointerStart = null;
+    };
+    const handleWheel = () => publishProgress({ camera: true });
 
-    window.addEventListener('keydown', handleKeyDown);
+    if (!progress.complete) {
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener(TOOL_USE_EVENT, handleToolUse);
+      window.addEventListener('pointerdown', handlePointerDown);
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', clearPointer);
+      window.addEventListener('pointercancel', clearPointer);
+      window.addEventListener('wheel', handleWheel, { passive: true });
+    }
     return () => {
       window.clearTimeout(revealTimer);
-      window.clearTimeout(introFadeTimer);
-      window.clearTimeout(introNextTimer);
-      window.clearTimeout(phaseFadeTimer);
-      window.clearTimeout(idleTimer);
+      window.clearTimeout(completionFadeTimer);
+      window.clearTimeout(reminderTimer);
+      window.clearTimeout(reminderFadeTimer);
+      window.clearTimeout(inactivityTimer);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(TOOL_USE_EVENT, handleToolUse);
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', clearPointer);
+      window.removeEventListener('pointercancel', clearPointer);
+      window.removeEventListener('wheel', handleWheel);
     };
-  }, []);
+  }, [disabled, playableModeId, ready]);
 
   const activePhase = hudHidden ? 'showHud' : phase;
   const shown = !disabled && (hudHidden || visible);
-  const content = {
-    hud: (
-      <><ControlHintKey>H</ControlHintKey><span>Hide interface</span></>
-    ),
-    showHud: (
-      <><ControlHintKey>H</ControlHintKey><span>Show interface</span></>
-    ),
-    move: (
-      <><ControlHintKey>WASD</ControlHintKey><ControlHintKey>Arrows</ControlHintKey><span>Walk</span></>
-    ),
-    advanced: (
-      <><ControlHintKey>Shift</ControlHintKey><span>Run</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Space</ControlHintKey><span>Jump</span></>
-    ),
-    essentials: (
-      <><ControlHintKey>Drag</ControlHintKey><span>Look</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Scroll</ControlHintKey><span>Zoom</span><span className="h-3.5 w-px bg-expedition-brass/20" /><ControlHintKey>Enter</ControlHintKey><span>Field action</span></>
-    ),
-    idle: (
-      <><ControlHintKey>H</ControlHintKey><span>Hide interface</span></>
-    ),
-  }[activePhase];
+  const content = controlHintContent(playableModeId, activePhase);
 
   return (
     <div
-      className={`pointer-events-none absolute bottom-4 right-5 z-20 hidden items-center gap-1.5 rounded-[2px] bg-[rgba(7,14,27,0.24)] px-2 py-1 font-expedition text-[9.5px] uppercase tracking-[0.1em] text-expedition-parchment/55 backdrop-blur-sm transition-all duration-500 md:flex ${shown ? 'translate-y-0 opacity-80' : 'translate-y-1 opacity-0'}`}
+      data-testid="control-onboarding-hint"
+      data-mode={playableModeId}
+      data-phase={activePhase}
+      data-attention={attention ? 'true' : 'false'}
+      className={`pointer-events-none absolute bottom-4 right-5 z-30 hidden max-w-[min(34rem,calc(100vw-2.5rem))] origin-bottom-right flex-wrap items-center justify-end gap-1.5 rounded-[3px] border font-expedition uppercase tracking-[0.1em] backdrop-blur-sm transition-[opacity,transform,padding,font-size,background-color,border-color] duration-500 md:flex xl:right-[17rem] ${
+        attention
+          ? 'border-expedition-gold/75 bg-[rgba(7,14,27,0.86)] px-3.5 py-2 text-[11px] text-expedition-parchment shadow-[0_8px_24px_rgba(0,0,0,0.34),0_0_0_1px_rgba(227,197,133,0.16)] motion-safe:scale-[1.08] motion-safe:animate-control-hint-attention motion-safe:will-change-transform'
+          : 'border-expedition-brass/30 bg-[rgba(7,14,27,0.62)] px-2.5 py-1.5 text-[9.5px] text-expedition-parchment/80 shadow-[0_6px_18px_rgba(0,0,0,0.24)]'
+      } ${shown ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
       aria-live="polite"
     >
       {content}
@@ -4772,7 +4925,9 @@ export function ThreeHUD({
       </div>
 
       <PolishedControlHint
+        playableModeId={playableModeId}
         hudHidden={hudHidden}
+        ready={hudEntranceStage >= 4}
         disabled={hudEntranceStage < 4 || blockingUiOpen || statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen}
       />
 
@@ -4792,6 +4947,7 @@ export function ThreeHUD({
         open={controlsOpen}
         onClose={() => setControlsOpen(false)}
         polished
+        playableModeId={playableModeId}
       />
 
       <EndGameConfirmationModal

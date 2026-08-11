@@ -8,8 +8,66 @@
 // Keep in sync with KEYBOARD_MAP in three-game/ThreeDarwinGame.jsx.
 
 const DEV_TOOLS_VISIBLE = process.env.NODE_ENV !== 'production';
+export const CONTROL_HINT_INACTIVITY_MS = 20000;
 
-export function controlsSections({ polished = true, includeNarratorCommands = true } = {}) {
+const CAMERA_CONTROLS = [
+  'Mouse drag: rotate camera',
+  'Scroll: zoom',
+  'Z / X: rotate left / right',
+  'Tab: recentre the camera behind your character',
+  'M: cycle camera mode',
+];
+
+const INTERFACE_CONTROLS = polished => [
+  'Esc: pause — settings, controls, end expedition',
+  '? or F1: show this list',
+  ...(polished ? ['H: hide or show the expedition interface'] : []),
+];
+
+function animalControlsSections(modeId, polished) {
+  const finch = modeId === 'finch';
+  return [
+    ['Movement', finch ? [
+      'WASD / arrows: fly — W climbs, S descends, A / D steer',
+      'Shift: fly faster and dive',
+      'Space: land or take off',
+    ] : [
+      'WASD / arrows: walk',
+      'Shift: walk faster',
+      'Space: brace on steep slopes',
+    ]],
+    ['Camera', CAMERA_CONTROLS],
+    ['Animal Actions', [
+      '1 / Eat button: eat',
+      '2 / Sleep button: sleep',
+      '3 / Defecate button: defecate',
+      'J: repeat the selected action',
+      ...(finch ? ['Eat / sleep: land before using these actions'] : []),
+    ]],
+    ['Interface', INTERFACE_CONTROLS(polished)],
+  ];
+}
+
+export function nextControlHintPhase(playableModeId, progress) {
+  if (!progress.moved) return 'move';
+  if (!progress.ran) return 'faster';
+  if (!progress.jumped) return playableModeId === 'finch' ? 'land' : playableModeId === 'tortoise' ? 'brace' : 'jump';
+  if (playableModeId === 'finch' || playableModeId === 'tortoise') {
+    if (!progress.animalAction) return 'animalActions';
+    if (!progress.camera) return 'camera';
+    return 'complete';
+  }
+  if (!progress.camera) return 'camera';
+  if (!progress.fieldAction) return 'fieldAction';
+  if (!progress.worldAction) return 'worldAction';
+  return 'complete';
+}
+
+export function controlsSections({ polished = true, includeNarratorCommands = true, playableModeId = 'darwin' } = {}) {
+  if (playableModeId === 'finch' || playableModeId === 'tortoise') {
+    return animalControlsSections(playableModeId, polished);
+  }
+
   const sections = [
     ['Movement', [
       'WASD / arrows: move',
@@ -19,13 +77,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'B: dodge roll',
       'Q or V: climb / mantle / descend',
     ]],
-    ['Camera', [
-      'Mouse drag: rotate camera',
-      'Scroll: zoom',
-      'Z / X: rotate left / right',
-      'Tab: recentre the camera behind Darwin',
-      'M: cycle camera mode',
-    ]],
+    ['Camera', CAMERA_CONTROLS],
     ['Fieldwork', [
       'Enter: use the equipped field tool on the attended subject; with no subject, enter observation mode',
       'Tab: cycle collection method while the collection card is open',
@@ -36,9 +88,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'Left click while aiming: fire rifle',
     ]],
     ['Interface', [
-      'Esc: pause — settings, controls, end expedition',
-      '? or F1: show this list',
-      ...(polished ? ['H: hide or show the expedition interface'] : []),
+      ...INTERFACE_CONTROLS(polished),
       'Cmd/Ctrl+I: open the specimen case',
       ...(polished ? ['4 then J: equip and swing the geological hammer'] : []),
     ]],

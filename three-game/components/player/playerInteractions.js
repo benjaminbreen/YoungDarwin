@@ -797,7 +797,11 @@ export function updatePlayerInteractions({
       if (toolId === 'compass') {
         setActiveTool(toolId);
         triggerToolUse(toolId);
-      } else if (useThreeGameStore.getState().activeToolId === toolId) {
+      } else if (useThreeGameStore.getState().activeToolId === toolId || getAnimalAction(toolId)) {
+        // Animal slots are direct actions, matching their large HUD buttons:
+        // the first press eats/sleeps/defecates instead of merely selecting a
+        // verb and requiring a second, unexplained press.
+        setActiveTool(toolId);
         triggerToolUse(toolId);
       } else {
         setActiveTool(toolId);

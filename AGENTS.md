@@ -18,8 +18,10 @@ route volatile facts to source files or generated docs.
   lexical-search milestone and store passage highlight geometry from the first
   corpus build; Grant and semantic retrieval must not block the foundation.
 - Do not add new player-visible generative prose or production generative-model
-  calls. Embeddings may retrieve passages but may not write, summarize, translate,
-  or interpret them.
+  calls beyond the existing default-on narrator demonstration requested on
+  2026-08-11. Keep NPC, examination, and assessment generation opt-in.
+  Embeddings may retrieve passages but may not write, summarize, translate, or
+  interpret them.
 
 ## Read First
 

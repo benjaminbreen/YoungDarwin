@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID, getModelAsset } from '../../modelAssets';
 import { ModelAsset } from '../assets/ModelAsset';
+import { useTrackedGLTF } from '../assets/gltfCachePolicy';
 import { PLAYER, SPRINT, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
 import { calibratedStrideTimeScale } from './gaitProfiles';
@@ -676,7 +677,7 @@ function lampNightFactor(hour) {
 // visible only at night. Scale is normalised against the bone's world scale so
 // the lamp is a predictable size regardless of how the rig was exported.
 function HandLamp({ scene, modelAssetId }) {
-  const { scene: lampSource } = useGLTF(LAMP_MODEL_PATH);
+  const { scene: lampSource } = useTrackedGLTF(LAMP_MODEL_PATH);
   const groupRef = useRef(null);
   const lightRef = useRef(null);
   const flameMatsRef = useRef([]);
@@ -788,7 +789,7 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     const override = config.modelOverrides?.[modelAssetId];
     return override ? { ...config, ...override } : config;
   }, [config, modelAssetId]);
-  const { scene: source } = useGLTF(resolvedConfig.path);
+  const { scene: source } = useTrackedGLTF(resolvedConfig.path);
   const groupRef = useRef(null);
   const visualRef = useRef(null);
   const offHandBoneRef = useRef(null);

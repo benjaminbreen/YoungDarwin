@@ -6,7 +6,8 @@ import {
 
 const ASSET_ROOT = '/assets/textures/world/water-bakes';
 const resourceCache = new Map();
-const textureLoadCache = new Map();
+const textureRecords = new Map();
+const WATER_RESOURCE_CACHE_LIMIT = 6;
 let placeholder = null;
 let contactPlaceholder = null;
 
@@ -35,16 +36,59 @@ async function loadTextureUncached(url, kind) {
   return configureTexture(texture, kind);
 }
 
-function loadTexture(url, kind) {
+function retainTexture(url, kind) {
   const key = `${kind}:${url}`;
-  const cached = textureLoadCache.get(key);
-  if (cached) return cached;
-  const promise = loadTextureUncached(url, kind).catch(error => {
-    textureLoadCache.delete(key);
-    throw error;
-  });
-  textureLoadCache.set(key, promise);
-  return promise;
+  let record = textureRecords.get(key);
+  if (!record) {
+    record = { refs: 0, texture: null, promise: null };
+    record.promise = loadTextureUncached(url, kind).then(texture => {
+      record.texture = texture;
+      return texture;
+    }).catch(error => {
+      if (textureRecords.get(key) === record) textureRecords.delete(key);
+      throw error;
+    });
+    textureRecords.set(key, record);
+  }
+  record.refs += 1;
+  return { key, promise: record.promise };
+}
+
+function releaseTexture(key) {
+  const record = textureRecords.get(key);
+  if (!record) return;
+  record.refs = Math.max(0, record.refs - 1);
+  if (record.refs > 0) return;
+  textureRecords.delete(key);
+  if (record.texture) {
+    record.texture.dispose();
+  } else {
+    record.promise.then(texture => texture.dispose()).catch(() => {});
+  }
+}
+
+function releaseEntryTextures(entry) {
+  if (entry.resourcesReleased) return;
+  entry.resourcesReleased = true;
+  entry.textureKeys.forEach(releaseTexture);
+}
+
+function touchResource(key, entry) {
+  resourceCache.delete(key);
+  resourceCache.set(key, entry);
+  return entry;
+}
+
+function pruneResourceCache(protectedKey = null) {
+  while (resourceCache.size > WATER_RESOURCE_CACHE_LIMIT) {
+    const candidate = Array.from(resourceCache.entries()).find(([key, entry]) => (
+      key !== protectedKey && entry.status !== 'pending'
+    ));
+    if (!candidate) return;
+    const [key, entry] = candidate;
+    resourceCache.delete(key);
+    releaseEntryTextures(entry);
+  }
 }
 
 function placeholderTexture() {
@@ -76,38 +120,61 @@ function contactPlaceholderTexture() {
 function startWaterTextureResource(zoneId, bakeRes, openOceanOnly, contactRes) {
   const key = openOceanOnly ? 'open-ocean' : `${zoneId}:${bakeRes}:${contactRes}`;
   const cached = resourceCache.get(key);
-  if (cached) return cached;
+  if (cached) return touchResource(key, cached);
 
   const stem = waterBakeAssetStem(zoneId);
   const rippleUrl = `${ASSET_ROOT}/ripple-normal-${WATER_RIPPLE_NORMAL_SIZE}.png`;
-  const entry = { status: 'pending', promise: null, value: null, error: null };
+  const retained = [];
+  const loadRetained = (url, kind) => {
+    const resource = retainTexture(url, kind);
+    retained.push(resource);
+    return resource.promise;
+  };
+  const entry = {
+    status: 'pending',
+    promise: null,
+    value: null,
+    error: null,
+    textureKeys: retained.map(resource => resource.key),
+    resourcesReleased: false,
+  };
   entry.promise = Promise.all([
     openOceanOnly
       ? Promise.resolve(placeholderTexture())
-      : loadTexture(`${ASSET_ROOT}/${stem}-seafloor-${bakeRes}.png`, 'packed'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-seafloor-${bakeRes}.png`, 'packed'),
     openOceanOnly
       ? Promise.resolve(placeholderTexture())
-      : loadTexture(`${ASSET_ROOT}/${stem}-standing-water-${bakeRes}.png`, 'packed'),
-    loadTexture(rippleUrl, 'ripple'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-standing-water-${bakeRes}.png`, 'packed'),
+    loadRetained(rippleUrl, 'ripple'),
     openOceanOnly || contactRes <= 1
       ? Promise.resolve(contactPlaceholderTexture())
-      : loadTexture(`${ASSET_ROOT}/${stem}-water-contact-${contactRes}.png`, 'packed'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-water-contact-${contactRes}.png`, 'packed'),
   ]).then(([seafloor, standingWaterMask, rippleNormal, waterContact]) => {
     entry.status = 'ready';
     entry.value = { seafloor, standingWaterMask, rippleNormal, waterContact };
+    entry.textureKeys = retained.map(resource => resource.key);
+    touchResource(key, entry);
+    pruneResourceCache(key);
     return entry.value;
   }).catch(error => {
     entry.status = 'error';
     entry.error = error;
+    entry.textureKeys = retained.map(resource => resource.key);
+    releaseEntryTextures(entry);
     throw error;
   });
+  entry.textureKeys = retained.map(resource => resource.key);
   resourceCache.set(key, entry);
+  pruneResourceCache(key);
   return entry;
 }
 
 export function waterTextureResourceIsReady(zoneId, bakeRes, { openOceanOnly = false, contactRes = 1 } = {}) {
   const key = openOceanOnly ? 'open-ocean' : `${zoneId}:${bakeRes}:${contactRes}`;
-  return resourceCache.get(key)?.status === 'ready';
+  const entry = resourceCache.get(key);
+  if (!entry) return false;
+  touchResource(key, entry);
+  return entry.status === 'ready';
 }
 
 export function prepareWaterTextureResource(zoneId, bakeRes, { openOceanOnly = false, contactRes = 1 } = {}) {

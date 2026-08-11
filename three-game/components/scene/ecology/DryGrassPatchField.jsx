@@ -16,6 +16,7 @@ import {
   mergeForageConfig,
 } from '../../../world/forageables';
 import { getPlayableMode } from '../../../playable/playableModes';
+import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
 
 const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
 const FORAGE_CELL_SIZE = 4.5;
@@ -299,7 +300,7 @@ export function DryGrassPatchField({
   const groupRef = useRef(null);
   const meshRef = useRef(null);
   const path = layer.path || DEFAULT_PATH;
-  const { scene } = useGLTF(path);
+  const { scene } = useTrackedGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const foragedObjectIds = useThreeGameStore(state => state.foragedObjectIds);

@@ -7,7 +7,6 @@ import React, {
   useRef,
 } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { applyFoliageMotion } from './foliageMotion';
@@ -17,6 +16,7 @@ import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialSta
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 import { onPropEvent } from '../../../physics/props/propEvents';
 import { cachedGpuResource } from '../../../world/gpuResourceCache';
+import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
 // per source primitive, so 30 bushes cost 1-2 draw calls instead of 30+.
@@ -255,7 +255,7 @@ export function InstancedGLBLayer({
   const bucketRefs = useRef([]);
   const cullStateRef = useRef(createCameraCullState());
   const reactionStateRef = useRef(new Map());
-  const { scene } = useGLTF(path);
+  const { scene } = useTrackedGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const qualityCheapMaterials = useThreeGameStore(state => state.cheapMaterials);
   const cheapMaterials = forceCheapMaterials || qualityCheapMaterials;

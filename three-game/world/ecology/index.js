@@ -97,6 +97,18 @@ export const ECOLOGY_ZONE_IDS = Object.freeze(Object.keys(regionMaps));
 
 /** @type {Map<string, EcologyDefinition>} */
 const cache = new Map();
+const ECOLOGY_CACHE_LIMIT = 16;
+
+function touchCachedEcology(zoneId, ecology) {
+  cache.delete(zoneId);
+  cache.set(zoneId, ecology);
+  while (cache.size > ECOLOGY_CACHE_LIMIT) {
+    const oldestZoneId = cache.keys().next().value;
+    if (oldestZoneId === undefined) break;
+    cache.delete(oldestZoneId);
+  }
+  return ecology;
+}
 
 /**
  * @param {string} zoneId
@@ -106,9 +118,9 @@ export function getEcology(zoneId) {
   if (!regionMaps[zoneId]) return null;
   if (!cache.has(zoneId)) {
     const authored = builders[zoneId]?.() || { zoneId };
-    cache.set(zoneId, applyUniversalProceduralFlora(zoneId, authored));
+    return touchCachedEcology(zoneId, applyUniversalProceduralFlora(zoneId, authored));
   }
-  return cache.get(zoneId) ?? null;
+  return touchCachedEcology(zoneId, cache.get(zoneId)) ?? null;
 }
 
 // Destination preparation builds deterministic layouts in a worker, then
@@ -122,8 +134,7 @@ export function getEcology(zoneId) {
  */
 export function cacheEcology(zoneId, ecology) {
   if (!regionMaps[zoneId] || !ecology) return null;
-  if (!cache.has(zoneId)) cache.set(zoneId, ecology);
-  return cache.get(zoneId) ?? null;
+  return touchCachedEcology(zoneId, cache.get(zoneId) || ecology) ?? null;
 }
 
 /** @param {string} zoneId */

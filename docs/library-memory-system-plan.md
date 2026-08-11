@@ -17,9 +17,10 @@ system.
   optional enhancement with lexical fallback, not a dependency of the reader.
 - Scan anchoring is part of the corpus schema from the first build. No published
   result may drop the player onto an unlocated wall of text.
-- Public mode uses authored narrator choices, Syms replies, examination
-  procedures, and the deterministic Henslow assessment. Private-development
-  generation requires explicit client and server flags.
+- Public mode uses authored Syms replies, examination procedures, and the
+  deterministic Henslow assessment. The deployed narrator demonstration is the
+  one temporary exception: its composer and route are default-on but retain
+  explicit client and server kill switches.
 
 ## Implemented Foundation
 
@@ -36,10 +37,11 @@ system.
   links, saved pages, and page-specific field notes.
 - Authored narrator lines receive conservative memory links. Player writing and
   player dialogue are never modified.
-- Public `/three` performs no player-visible generative calls. The old prose
-  endpoints deny access before provider work unless
-  `YOUNG_DARWIN_ENABLE_GENERATIVE=1`, while client generation separately
-  requires `NEXT_PUBLIC_YOUNG_DARWIN_ENABLE_GENERATIVE=1`.
+- Public `/three` exposes the narrator composer and permits user-initiated calls
+  to `three-narrate`. `YOUNG_DARWIN_ENABLE_NARRATOR=0` and
+  `NEXT_PUBLIC_YOUNG_DARWIN_ENABLE_NARRATOR=0` restore the authored-only path.
+  The other old prose endpoints remain unavailable unless the matching legacy
+  generation flags are explicitly enabled.
 
 The generated term rankings truthfully carry
 `machine-ranked-needs-editor-review`. Ben's review of the 150 primary passages

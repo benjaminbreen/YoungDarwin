@@ -22,6 +22,7 @@ import {
 import { createFootContactRig } from '../player/footContactRig';
 import { getFootContactProfile } from '../player/gaitProfiles';
 import { createLazyAnimationActions } from './lazyAnimationActions';
+import { useTrackedGLTF } from './gltfCachePolicy';
 import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
 import { shotgunAimState } from '../../shooting/aimState';
 
@@ -872,13 +873,11 @@ function assetLoadUrl(asset) {
   return `${asset.path}?v=${encodeURIComponent(asset.cacheKey)}`;
 }
 
-export function preloadModelAsset(id) {
+export function preloadModelAsset(id, { includeAnimationBanks = false } = {}) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return false;
-  const resources = [
-    asset,
-    ...(asset.animationBanks || []),
-  ];
+  const resources = [asset];
+  if (includeAnimationBanks) resources.push(...(asset.animationBanks || []));
   if (asset.animationSource) {
     const sourceAsset = getModelAsset(asset.animationSource);
     if (sourceAsset?.enabled) resources.push(sourceAsset);
@@ -893,8 +892,8 @@ export function preloadModelAsset(id) {
   return true;
 }
 
-export function preloadModelAssets(ids = []) {
-  return Array.from(new Set(ids)).filter(preloadModelAsset);
+export function preloadModelAssets(ids = [], options) {
+  return Array.from(new Set(ids)).filter(id => preloadModelAsset(id, options));
 }
 
 const ONE_SHOT_CLIPS = new Set([
@@ -1282,7 +1281,7 @@ function notePerfAssetReady(id, kind) {
 }
 
 function AnimationBankLoader({ bank, onLoad }) {
-  const { animations } = useGLTF(assetLoadUrl(bank));
+  const { animations } = useTrackedGLTF(assetLoadUrl(bank));
   useEffect(() => {
     notePerfAssetReady(bank.id, 'animation-bank');
     onLoad(bank.id, animations);
@@ -1344,7 +1343,7 @@ function GLBPrimitive({
       motionPhase: stableUnitFromSeed(instanceSeed, 'creature-motion') * Math.PI * 2,
     };
   }, [animationPhase, animationRate, asset.animationVariation, instanceSeed]);
-  const { scene, animations: ownAnimations } = useGLTF(assetUrl);
+  const { scene, animations: ownAnimations } = useTrackedGLTF(assetUrl);
   useEffect(() => {
     notePerfAssetReady(assetId, 'model');
   }, [assetId]);
@@ -1378,7 +1377,7 @@ function GLBPrimitive({
   // load is unconditional (falls back to this asset's own path, which is cached
   // and free) so hook order stays stable.
   const sourceAsset = asset.animationSource ? getModelAsset(asset.animationSource) : null;
-  const { animations: sourceAnimations } = useGLTF(assetLoadUrl(sourceAsset) || assetUrl);
+  const { animations: sourceAnimations } = useTrackedGLTF(assetLoadUrl(sourceAsset) || assetUrl);
   const animations = useMemo(() => {
     if (!sourceAsset || sourceAnimations === ownAnimations) return nativeAnimations;
     const have = new Set(nativeAnimations.map(clip => normalizeClipName(clip.name)));
