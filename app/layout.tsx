@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Caveat, EB_Garamond, Geist, Geist_Mono, Lora, Meddon } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -77,6 +78,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${ebGaramond.variable} ${lora.variable} ${caveat.variable} ${meddon.variable} antialiased`}
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );
