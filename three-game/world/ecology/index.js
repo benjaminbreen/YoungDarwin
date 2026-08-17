@@ -99,6 +99,11 @@ export const ECOLOGY_ZONE_IDS = Object.freeze(Object.keys(regionMaps));
 const cache = new Map();
 const ECOLOGY_CACHE_LIMIT = 16;
 
+/**
+ * @param {string} zoneId
+ * @param {EcologyDefinition} ecology
+ * @returns {EcologyDefinition}
+ */
 function touchCachedEcology(zoneId, ecology) {
   cache.delete(zoneId);
   cache.set(zoneId, ecology);
@@ -120,7 +125,8 @@ export function getEcology(zoneId) {
     const authored = builders[zoneId]?.() || { zoneId };
     return touchCachedEcology(zoneId, applyUniversalProceduralFlora(zoneId, authored));
   }
-  return touchCachedEcology(zoneId, cache.get(zoneId)) ?? null;
+  const cached = cache.get(zoneId);
+  return cached ? touchCachedEcology(zoneId, cached) : null;
 }
 
 // Destination preparation builds deterministic layouts in a worker, then

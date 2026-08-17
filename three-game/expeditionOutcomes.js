@@ -7,8 +7,25 @@ export const INCAPACITATION_RECOVERY_HEALTH = 60;
 export const INCAPACITATION_RECOVERY_FATIGUE = 12;
 export const INCAPACITATION_CURIOSITY_COST = 5;
 
+// The survey of Charles Island runs three field days; the Beagle weighs anchor
+// at first light after the last. Nothing else in the game bounds the clock, so
+// without this the 12-slot case, the supplies and the choice of where to land
+// cost nothing — there is always another day to fix a bad one.
+export const EXPEDITION_DAYS = 3;
+// 23:59 on the last day. The clock stops here rather than rolling into a fourth
+// day that does not exist.
+export const LAST_MINUTE_OF_DAY = 24 - 1 / 60;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+export function isFinalExpeditionDay(day) {
+  return (Number(day) || 1) >= EXPEDITION_DAYS;
+}
+
+export function expeditionDayLabel(day) {
+  return `Day ${clamp(Math.round(Number(day) || 1), 1, EXPEDITION_DAYS)} of ${EXPEDITION_DAYS}`;
 }
 
 export function resolveExpeditionDamage({

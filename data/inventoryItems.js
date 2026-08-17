@@ -135,16 +135,36 @@ export function getInventoryItem(id) {
 
 export const inventoryItems = EQUIPPED_ORDER.map(getInventoryItem).filter(Boolean);
 
+// `initial` is what the first landing carries and also the most that can be
+// carried. `nightly` is what the hold gives up each evening, added to whatever
+// came back unused — so a frugal day is worth something on the next one and a
+// wasteful day is not simply forgiven. Both are per-day figures for a survey of
+// three days; a nightly draw equal to `initial` would make the case cap the
+// only limit that ever bound.
 export const SUPPLY_DEFS = [
-  { id: 'labels', name: 'Labels', image: '/inventory/labels.png', initial: 12, description: 'Gummed specimen labels. One is spent per specimen cased.' },
-  { id: 'pins', name: 'Pins', image: null, initial: 24, description: 'Entomological pins for setting insects. Two per insect.' },
-  { id: 'spareJars', name: 'Spare Jars', image: '/inventory/sample_jar.png', initial: 3, description: 'Stoppered jars of spirits for wet specimens.' },
-  { id: 'twine', name: 'Twine', image: '/inventory/twine.png', initial: 4, description: 'Waxed twine for snares and bundling. One length per snare set.' },
-  { id: 'food', name: 'Food', image: null, initial: 4, description: 'Ship’s biscuit and salt pork. Eaten when resting in the field.' },
-  { id: 'water', name: 'Water', image: null, initial: 5, description: 'Fresh water in a canvas-wrapped flask. Drunk when resting.' },
+  { id: 'labels', name: 'Labels', image: '/inventory/labels.png', initial: 12, nightly: 8, description: 'Gummed specimen labels. One is spent per specimen cased.' },
+  { id: 'pins', name: 'Pins', image: null, initial: 24, nightly: 16, description: 'Entomological pins for setting insects. Two per insect.' },
+  { id: 'spareJars', name: 'Spare Jars', image: '/inventory/sample_jar.png', initial: 3, nightly: 2, description: 'Stoppered jars of spirits for wet specimens.' },
+  { id: 'twine', name: 'Twine', image: '/inventory/twine.png', initial: 4, nightly: 3, description: 'Waxed twine for snares and bundling. One length per snare set.' },
+  { id: 'food', name: 'Food', image: null, initial: 4, nightly: 3, description: 'Ship’s biscuit and salt pork. Eaten when resting in the field.' },
+  { id: 'water', name: 'Water', image: null, initial: 5, nightly: 3, description: 'Fresh water in a canvas-wrapped flask. Drunk when resting.' },
 ];
 
 export const INITIAL_SUPPLIES = Object.fromEntries(SUPPLY_DEFS.map(def => [def.id, def.initial]));
+export const NIGHTLY_SUPPLY_DRAW = Object.fromEntries(SUPPLY_DEFS.map(def => [def.id, def.nightly]));
+
+// A night aboard: add the ration to what came back, never past what the case
+// and pockets hold. `bonus` covers Syms's extra jars, which are carried on his
+// person and so raise the ceiling too.
+export function drawNightlySupplies(current = {}, bonus = {}) {
+  const drawn = {};
+  for (const def of SUPPLY_DEFS) {
+    const ceiling = def.initial + (bonus[def.id] || 0);
+    const held = Math.max(0, Number(current[def.id]) || 0);
+    drawn[def.id] = Math.min(ceiling, held + def.nightly);
+  }
+  return drawn;
+}
 
 // Wet specimens occupy a jar of spirits rather than a dry case slot label alone.
 export function specimenNeedsJar(specimen, toolId) {

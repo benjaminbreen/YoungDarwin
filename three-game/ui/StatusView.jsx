@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { baseSpecimens } from '../../data/specimens';
 import { getPlayableMode } from '../playable/playableModes';
 import { useThreeGameStore } from '../store';
+import { expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { getZone } from '../world/floreanaZones';
 import { GoldDivider } from './expedition/ExpeditionPanel';
 import { useDismissableOverlay } from './useDismissableOverlay';
@@ -27,7 +28,9 @@ const EXPEDITION_START = Date.UTC(1835, 8, 17); // day 1 = Sep 17, 1835
 const VOYAGE_DEPARTURE = Date.UTC(1831, 11, 27); // Beagle leaves Plymouth
 const VOYAGE_RETURN = Date.UTC(1836, 9, 2); // Falmouth, Oct 2, 1836
 const MS_PER_DAY = 86400000;
-const NOTES_GOAL = 60;
+// A creditable field book for three days ashore, not a lifetime's. 60 was set
+// when the expedition had no end and read as a bar nobody could clear.
+const NOTES_GOAL = 18;
 
 const ISLAND_COORDINATES = {
   Floreana: '1° 17′ S, 90° 26′ W',
@@ -377,6 +380,10 @@ export function StatusView() {
         </div>
         <div className="mt-2 text-[14px] tracking-[0.04em] text-expedition-parchment [text-shadow:0_1px_8px_rgba(0,0,0,0.9)] lg:mt-2.5 lg:text-[16px]">
           Age {animalMode ? lifeHistory.age.label : age} <span className="mx-1.5 text-expedition-gold">•</span> {formatted}
+          <span className="mx-1.5 text-expedition-gold">•</span>
+          <span className={isFinalExpeditionDay(day) ? 'text-expedition-goldbright' : undefined}>
+            {expeditionDayLabel(day)}
+          </span>
         </div>
       </div>
 

@@ -678,10 +678,23 @@ const {
 } = loadModule('three-game/physics/props/propRuntime.js');
 const {
   CATASTROPHIC_FALL_SPEED,
+  EXPEDITION_DAYS,
+  expeditionDayLabel,
   expeditionOutcomeCause,
+  isFinalExpeditionDay,
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
 } = loadModule('three-game/expeditionOutcomes.js');
+const {
+  INITIAL_SUPPLIES,
+  drawNightlySupplies,
+} = loadModule('data/inventoryItems.js');
+const { restFlavor, restPeriod } = loadModule('three-game/restFlavor.js');
+const {
+  NPC_ENCOUNTERS,
+  getAuthoredNpcReply,
+} = loadModule('three-game/encounters/npcEncounters.js');
+const { getNpcPlacement, getStationaryNpcsForZone } = loadModule('three-game/npcs/npcPlacements.js');
 const { DIRECTIVES, resolveDirective } = loadModule('three-game/directives.js');
 const {
   distanceToWalkableBoundary,
@@ -1456,6 +1469,94 @@ test('incremental injuries collapse Darwin while catastrophic causes are fatal',
     { previousHealth: 100, health: 0, damage: 1, outcomeType: 'death' },
   );
   assert.equal(CATASTROPHIC_FALL_SPEED, 26.5);
+});
+
+test('the survey runs three days and the last one is named as such', () => {
+  assert.equal(EXPEDITION_DAYS, 3);
+  assert.equal(expeditionDayLabel(1), 'Day 1 of 3');
+  assert.equal(isFinalExpeditionDay(2), false);
+  assert.equal(isFinalExpeditionDay(3), true);
+  // A day past the end still reads as the last one rather than "Day 4 of 3".
+  assert.equal(expeditionDayLabel(9), 'Day 3 of 3');
+});
+
+test('the nightly draw is a ration on top of what came back, capped at what can be carried', () => {
+  const spent = drawNightlySupplies({ labels: 0, spareJars: 0, twine: 0, food: 0, water: 0, pins: 0 });
+  assert.equal(spent.labels, 8, 'a day that used every label does not start the next one full');
+  assert.ok(spent.labels < INITIAL_SUPPLIES.labels);
+  const frugal = drawNightlySupplies({ ...INITIAL_SUPPLIES, labels: 9 });
+  assert.equal(frugal.labels, INITIAL_SUPPLIES.labels, 'the ration tops up but never overfills the case');
+  // Syms's jars raise the ceiling as well as the count.
+  assert.equal(drawNightlySupplies({ spareJars: 3 }, { spareJars: 2 }).spareJars, 5);
+});
+
+test('rest copy is keyed to the place and the hour', () => {
+  assert.equal(restPeriod(12).id, 'midday');
+  assert.equal(restPeriod(21).id, 'night');
+  assert.equal(restPeriod(5).id, 'dawn');
+  const bay = restFlavor({ zoneId: 'POST_OFFICE_BAY', zoneType: 'bay', timeOfDay: 12 });
+  assert.match(bay.line, /mail barrel/, 'a place with its own line uses it over the terrain default');
+  assert.match(bay.line, /overhead/, 'the hour is appended to the place');
+  assert.equal(bay.title, 'Midday halt');
+  const anywhere = restFlavor({ zoneId: 'NOT_A_ZONE', zoneType: 'cliff', timeOfDay: 12 });
+  assert.match(anywhere.line, /edge/, 'an unlisted zone falls back to its terrain type');
+  assert.match(
+    restFlavor({ zoneType: 'cliff', timeOfDay: 12, provisioned: false }).provision,
+    /nothing left to eat/,
+  );
+});
+
+test('Lawson answers the tortoise question with the claim the survey exists to test', () => {
+  const reply = getAuthoredNpcReply('nicolas_lawson', 'what can you tell me of the tortoises?');
+  assert.match(reply.dialogue, /name you the island/i);
+  assert.match(reply.dialogue, /differ/i);
+  assert.deepEqual(reply.flags, ['named_the_tortoise_difference']);
+  assert.ok(reply.trustDelta > 0);
+  // The shell wording has to reach the same branch: this is the question a
+  // player is most likely to type after handling one.
+  assert.deepEqual(
+    getAuthoredNpcReply('nicolas_lawson', 'the shell of this one is domed').flags,
+    ['named_the_tortoise_difference'],
+  );
+});
+
+test('Lawson closes on the settlers and stays closed', () => {
+  const reply = getAuthoredNpcReply('nicolas_lawson', 'what of the prisoners kept here?');
+  assert.ok(reply.trustDelta < 0);
+  assert.deepEqual(reply.flags, ['offended_by_politics']);
+  const offended = getNpcEncounterPresentation('nicolas_lawson', { trust: 47, flags: ['offended_by_politics'] });
+  assert.match(offended.opener, /do not care to discuss the settlers/i);
+  // Offence outranks the tortoise opener rather than being overwritten by it.
+  const both = getNpcEncounterPresentation('nicolas_lawson', {
+    trust: 47,
+    flags: ['named_the_tortoise_difference', 'offended_by_politics'],
+  });
+  assert.equal(both.opener, offended.opener);
+});
+
+test('every Lawson reply survives the effect clamp', () => {
+  for (const input of ['tortoise', 'prisoners', 'what do you eat', 'the finches', 'good day to you']) {
+    const reply = getAuthoredNpcReply('nicolas_lawson', input);
+    const clamped = clampNpcEncounterEffects('nicolas_lawson', reply);
+    assert.deepEqual(clamped.flags, reply.flags, `"${input}" flags must be declared in allowedFlags`);
+    assert.equal(clamped.trustDelta, reply.trustDelta);
+  }
+});
+
+test('Lawson stands on authored colony geometry, in a zone his encounter lists', () => {
+  const placement = getNpcPlacement('nicolas_lawson', 'PENAL_COLONY');
+  assert.ok(placement, 'the Vice-Governor needs a spot or he can never be spoken to');
+  assert.equal(NPC_ENCOUNTERS.nicolas_lawson.modelAssetId, 'lawson');
+  assert.equal(placement.runtimeNpcId, NPC_ENCOUNTERS.nicolas_lawson.runtimeNpcId);
+  assert.ok(Number.isFinite(placement.x) && Number.isFinite(placement.z));
+  // Inside the settlement's walkable ground rather than out on the terrain edge.
+  assert.ok(Math.hypot(placement.x, placement.z) < 39, 'placement must sit inside the region bounds');
+  assert.deepEqual(getStationaryNpcsForZone('PENAL_COLONY').map(n => n.npcId), ['nicolas_lawson']);
+  assert.deepEqual(getStationaryNpcsForZone('POST_OFFICE_BAY'), []);
+  // A zone listed on the encounter with no placement is an NPC nobody can find.
+  for (const zoneId of NPC_ENCOUNTERS.nicolas_lawson.zones) {
+    assert.ok(getNpcPlacement('nicolas_lawson', zoneId), `${zoneId} lists Lawson but places nobody there`);
+  }
 });
 
 test('collapse recovery advances to 7 AM without erasing the current expedition day unnecessarily', () => {

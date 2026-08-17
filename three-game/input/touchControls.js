@@ -27,6 +27,9 @@ const touchState = {
   fireRifle: false,
   write: false,
   inspect: false,
+  // The HUD's Rest button sets this so the button and the R key run the same
+  // path — lie down, then the store spends the two hours.
+  rest: false,
   fieldAction: false,
   animalEat: false,
   animalSleep: false,
@@ -89,6 +92,7 @@ export function consumeTouchControls() {
   touchState.fireRifle = false;
   touchState.write = false;
   touchState.inspect = false;
+  touchState.rest = false;
   touchState.fieldAction = false;
   touchState.animalEat = false;
   touchState.animalSleep = false;

@@ -24,6 +24,7 @@ import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
+import { StationaryNpcs } from '../components/world/StationaryNpc';
 import { AnimalModeDarwinNpc } from '../components/world/AnimalModeDarwinNpc';
 import { getThreeSpecimens } from '../data';
 import { PhysicsObstacles } from '../physics/PhysicsObstacles';
@@ -184,6 +185,11 @@ export function ActiveZoneContent({
       {actorsReady && settings.syms !== false && (
         <Suspense fallback={null}>
           <SymsCovington motionPaused={actorMotionPaused} />
+        </Suspense>
+      )}
+      {actorsReady && settings.syms !== false && (
+        <Suspense fallback={null}>
+          <StationaryNpcs />
         </Suspense>
       )}
       {actorsReady && settings.npcDarwin !== false && (

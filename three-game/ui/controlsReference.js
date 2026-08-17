@@ -104,7 +104,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'T: trip',
       'U: teeter',
       'K: sit',
-      'R: rest / lie down',
+      'R: halt and rest — two hours, one ration, one flask',
     ].filter(Boolean)],
   ];
 

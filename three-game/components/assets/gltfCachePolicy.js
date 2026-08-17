@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useGLTF } from '@react-three/drei';
+import { shareTextureSources } from './sharedTextureSources';
 
 // Parsed GLTF scenes and animation clips are large CPU-side objects. Keep the
 // currently mounted set plus a modest recent-history window; zone revisits can
@@ -46,7 +47,9 @@ export function noteGLTFLoadAbandoned(path) {
 }
 
 export function useTrackedGLTF(path) {
-  const gltf = useGLTF(path);
+  // Every runtime GLB arrives through here, which makes it the one place that
+  // can see a pack piece re-embedding an image another piece already loaded.
+  const gltf = shareTextureSources(useGLTF(path));
   useEffect(() => {
     pendingPaths.delete(path);
     activePathRefs.set(path, (activePathRefs.get(path) || 0) + 1);

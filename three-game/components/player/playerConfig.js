@@ -33,8 +33,13 @@ export const PLAYER = {
   ledgeReleaseDrop: 1.25,
   uphillSpeedPenalty: 0.14,
   downhillSpeedBoost: 0.05,
+  // Running slows from `tiredRunFatigue` and is refused at `exhaustedRunFatigue`.
+  // 92 was effectively unreachable inside one field day, so the only real cost
+  // of exhaustion was a speed the player could not see. 80 is reached by roughly
+  // two minutes of sustained running and cleared by a single two-hour halt,
+  // which is the trade the three-day clock is meant to pose.
   tiredRunFatigue: 68,
-  exhaustedRunFatigue: 92,
+  exhaustedRunFatigue: 80,
   bounds: TERRAIN_BOUNDS,
 };
 

@@ -375,6 +375,13 @@ function makeSnapshot() {
     health: finiteNumber(state.health),
     curiosity: finiteNumber(state.curiosity),
     fatigue: finiteNumber(state.fatigue),
+    day: finiteNumber(state.day),
+    timeOfDay: finiteNumber(state.timeOfDay),
+    expeditionDeparted: Boolean(state.expeditionDeparted),
+    finalAssessmentPhase: state.finalAssessment?.phase || null,
+    restSession: state.restSession
+      ? { phase: state.restSession.phase, title: state.restSession.title || null }
+      : null,
     consultedBookIds: Array.isArray(state.consultedBookIds) ? [...state.consultedBookIds] : [],
     readableBookSession: state.readableBookSession
       ? {
@@ -645,6 +652,22 @@ function createHarnessApi() {
       const store = useThreeGameStore.getState();
       store.beginIncapacitationRecovery();
       useThreeGameStore.getState().completeZoneTransition();
+      return makeSnapshot();
+    },
+    // The expedition is three days long and travel costs under two hours, so
+    // reaching the departure any other way takes dozens of moves.
+    advanceExpeditionClock: (minutes = 60) => {
+      useThreeGameStore.getState().advanceTime(Number(minutes) || 0);
+      return makeSnapshot();
+    },
+    beginRest: () => ({
+      started: useThreeGameStore.getState().beginRest(),
+      state: makeSnapshot(),
+    }),
+    // Reaching the exhaustion threshold honestly costs two minutes of holding
+    // Shift, which no automated check can afford.
+    setFatigue: value => {
+      useThreeGameStore.setState({ fatigue: Math.max(0, Math.min(100, Number(value) || 0)) });
       return makeSnapshot();
     },
     selectNearestSpecimen: () => {

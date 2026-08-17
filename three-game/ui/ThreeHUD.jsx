@@ -3,7 +3,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
-import { getThreeSpecimens, threeTools } from '../data';
+import { getThreeSpecimens, threeTools, zoneSpecimenProgress } from '../data';
 import {
   TOGGLE_COMPASS_EVENT,
   TOOL_USE_EVENT,
@@ -12,10 +12,12 @@ import {
 } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
 import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { EXPEDITION_DAYS, expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { isEndGameNarratorCommand } from '../finalAssessment';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { PLAYER_VISIBLE_NARRATOR_ENABLED } from '../ai/generativePolicy';
 import { SHOTGUN } from '../shooting/shotgunConfig';
+import { PLAYER } from '../components/player/playerConfig';
 import { emitPropEvent } from '../physics/props/propEvents';
 import { shotgunAimState } from '../shooting/aimState';
 import { getZone } from '../world/floreanaZones';
@@ -283,6 +285,32 @@ function formatExpeditionTime(timeOfDay) {
   return `${hours12}:${String(minutes).padStart(2, '0')} ${period}`;
 }
 
+// Floreana is on the equator, so the working day is close enough to 6-to-18
+// every day of the year that a constant pair is more honest than a solar model.
+const FIELD_DAY_START_HOUR = 6;
+const FIELD_DAY_END_HOUR = 18;
+
+// A two-hour halt against a three-day survey is the largest single expense in
+// the game. The button has to say what it costs before it is pressed.
+function restCostHint(timeOfDay, supplies = {}) {
+  const hour = ((Number(timeOfDay) || 0) % 24 + 24) % 24;
+  const provisioned = (supplies.food || 0) > 0 && (supplies.water || 0) > 0;
+  let remaining;
+  if (hour < FIELD_DAY_START_HOUR) {
+    remaining = 'It is not light yet.';
+  } else if (hour >= FIELD_DAY_END_HOUR) {
+    remaining = 'The light has gone for the day.';
+  } else {
+    const daylight = FIELD_DAY_END_HOUR - hour;
+    remaining = daylight < 1
+      ? 'Under an hour of light left.'
+      : `About ${Math.round(daylight)} hour${Math.round(daylight) === 1 ? '' : 's'} of light left.`;
+  }
+  return provisioned
+    ? `Rest two hours. ${remaining} Costs one ration and one flask.`
+    : `Rest two hours. ${remaining} No food or water left — the halt will do little good.`;
+}
+
 // Banner shows the objective sentence itself; the "Quest:" prefix is implied
 // by the compass chrome (per mockup).
 function formatBannerObjective(objective) {
@@ -507,6 +535,60 @@ function BeagleTravelPrompt() {
   );
 }
 
+// The card that closes a halt in the field. Deliberately a panel and not an
+// overlay: the line describes the ground Darwin is lying on, so the ground has
+// to stay visible behind it. Copy comes from restFlavor, keyed on the region
+// and the hour. Suppressed when the halt ran the clock past the last day —
+// Henslow's judgment is already opening over the top of it.
+function RestCard() {
+  const restSession = useThreeGameStore(state => state.restSession);
+  const dismissRest = useThreeGameStore(state => state.dismissRest);
+  const complete = restSession?.phase === 'complete' && !restSession.departed;
+
+  // Auto-clears so a halt never leaves the player a dialog to close, but stays
+  // long enough to read two sentences.
+  useEffect(() => {
+    if (!complete) return undefined;
+    const timer = window.setTimeout(dismissRest, 9000);
+    return () => window.clearTimeout(timer);
+  }, [complete, dismissRest, restSession?.id]);
+
+  if (!complete) return null;
+
+  return (
+    <div className="pointer-events-auto absolute bottom-[7.5rem] left-1/2 z-30 w-[min(25rem,calc(100vw-1.5rem))] -translate-x-1/2 animate-hud-rise motion-reduce:animate-none">
+      <ExpeditionPanel variant="modal" className="w-full" innerClassName="p-3.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <div className={GOLD_LABEL}>{restSession.title}</div>
+          <div className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-expedition-faded">
+            {restSession.placeName} · {formatExpeditionTime(restSession.endedAt)}
+          </div>
+        </div>
+        <p className="mt-2 text-[13px] leading-relaxed text-expedition-parchment/90">{restSession.line}</p>
+        <p className="mt-1.5 text-[12px] italic leading-snug text-expedition-faded">{restSession.provision}</p>
+        <dl className="mt-2.5 grid grid-cols-3 gap-2 border-t border-expedition-brass/30 pt-2 text-center">
+          <div>
+            <dt className="text-[8.5px] uppercase tracking-[0.14em] text-expedition-brass">Time spent</dt>
+            <dd className="mt-0.5 font-expedition text-[15px] text-expedition-goldbright">2h</dd>
+          </div>
+          <div>
+            <dt className="text-[8.5px] uppercase tracking-[0.14em] text-expedition-brass">Fatigue</dt>
+            <dd className="mt-0.5 font-expedition text-[15px] text-expedition-goldbright">
+              −{Math.round(restSession.fatigueRecovered || 0)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[8.5px] uppercase tracking-[0.14em] text-expedition-brass">Stores</dt>
+            <dd className="mt-0.5 font-expedition text-[15px] text-expedition-goldbright">
+              {restSession.provisioned ? '−1 / −1' : '—'}
+            </dd>
+          </div>
+        </dl>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
 // Aboard the Beagle: land the case, draw fresh stores, and sleep. This is the
 // loop's turn — a 12-slot case is a day's carrying capacity rather than a cap
 // on the whole voyage, and the day only advances here, so time is spent
@@ -528,6 +610,9 @@ function ShipDutiesPrompt() {
 
   const cased = inventory.length;
   const landed = shipCollection.length;
+  // On the last field day the same button ends the expedition, so the panel has
+  // to say so before it is pressed.
+  const departing = isFinalExpeditionDay(day);
 
   return (
     <div className="pointer-events-auto absolute left-1/2 top-20 z-30 w-[min(23rem,calc(100vw-1.5rem))] -translate-x-1/2 animate-hud-rise motion-reduce:animate-none md:top-[16%]">
@@ -535,7 +620,9 @@ function ShipDutiesPrompt() {
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className={GOLD_LABEL}>Ship&apos;s Duties</div>
-            <h2 className="mt-1 text-[21px] font-bold leading-tight text-expedition-parchment">Land the collection</h2>
+            <h2 className="mt-1 text-[21px] font-bold leading-tight text-expedition-parchment">
+              {departing ? 'Weigh anchor' : 'Land the collection'}
+            </h2>
           </div>
           <button
             type="button"
@@ -548,9 +635,13 @@ function ShipDutiesPrompt() {
         </div>
 
         <p className="mt-3 text-[13px] leading-relaxed text-expedition-parchment/86">
-          {cased > 0
-            ? `Hand down ${cased} specimen${cased === 1 ? '' : 's'} to be struck below, draw fresh labels, jars, twine and provisions, and pass the night aboard.`
-            : 'The case is empty. Draw fresh stores from the hold and pass the night aboard.'}
+          {departing
+            ? (cased > 0
+              ? `This is the last day of the survey. Hand down ${cased} specimen${cased === 1 ? '' : 's'} and the Beagle sails for the next island.`
+              : 'This is the last day of the survey. The case is empty, and the Beagle sails for the next island.')
+            : (cased > 0
+              ? `Hand down ${cased} specimen${cased === 1 ? '' : 's'} to be struck below, draw fresh labels, jars, twine and provisions, and pass the night aboard.`
+              : 'The case is empty. Draw fresh stores from the hold and pass the night aboard.')}
         </p>
 
         <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-expedition-brass/30 pt-3 text-center">
@@ -564,7 +655,7 @@ function ShipDutiesPrompt() {
           </div>
           <div>
             <dt className="text-[9px] uppercase tracking-[0.14em] text-expedition-brass">Day</dt>
-            <dd className="mt-0.5 font-expedition text-[17px] text-expedition-goldbright">{day}</dd>
+            <dd className="mt-0.5 font-expedition text-[17px] text-expedition-goldbright">{day} / {EXPEDITION_DAYS}</dd>
           </div>
         </dl>
 
@@ -574,10 +665,12 @@ function ShipDutiesPrompt() {
           data-testid="beagle-land-collection"
           className="mt-4 w-full rounded-sm border border-expedition-gold/70 bg-expedition-gold/12 px-3 py-2.5 font-expedition text-[13px] font-semibold uppercase tracking-[0.12em] text-expedition-goldbright transition hover:border-expedition-goldbright hover:bg-expedition-gold/20 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright"
         >
-          Stow the case &amp; turn in
+          {departing ? 'Stow the case & sail' : 'Stow the case & turn in'}
         </button>
         <p className="mt-2 text-center text-[11px] italic leading-snug text-expedition-faded">
-          The expedition resumes at first light on day {day + 1}.
+          {departing
+            ? 'This ends the expedition. Anything still unwritten stays unwritten.'
+            : `The expedition resumes at first light on day ${day + 1}.`}
         </p>
       </ExpeditionPanel>
     </div>
@@ -587,6 +680,20 @@ function ShipDutiesPrompt() {
 
 // ---------------------------------------------------------------------------
 // Top banner
+
+// The survey is three days long and every clock in the HUD has to say so — a
+// deadline the player cannot see is not a deadline. Goes gold on the last day.
+function ExpeditionDayCount({ day, className = '' }) {
+  const last = isFinalExpeditionDay(day);
+  return (
+    <span
+      className={`${last ? 'font-semibold text-expedition-goldbright' : 'text-expedition-faded'} ${className}`}
+      title={last ? 'The Beagle sails at the end of this day' : undefined}
+    >
+      {last ? `Last day of ${EXPEDITION_DAYS}` : expeditionDayLabel(day)}
+    </span>
+  );
+}
 
 function TopChronometer({ className = '' }) {
   const day = useThreeGameStore(state => state.day);
@@ -605,6 +712,8 @@ function TopChronometer({ className = '' }) {
         <span className="whitespace-nowrap text-[11px] text-expedition-faded sm:text-xs">
           {formatExpeditionTime(timeOfDay)}
         </span>
+        <span className="text-expedition-brass">|</span>
+        <ExpeditionDayCount day={day} className="whitespace-nowrap text-[11px] sm:text-xs" />
         <span className="hidden text-expedition-brass sm:inline">|</span>
         <span className="hidden truncate text-[11px] text-expedition-gold sm:inline">
           {zone.shortName || zone.name}
@@ -875,6 +984,8 @@ function PolishedTopObjective({ objective, className = '' }) {
               <span className="hidden shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90 xl:inline">
                 {formatExpeditionTime(timeOfDay)}
               </span>
+              <span className="hidden shrink-0 text-expedition-brass/70 xl:inline">·</span>
+              <ExpeditionDayCount day={day} className="hidden shrink-0 text-[11.5px] font-medium tracking-[0.04em] xl:inline" />
               {/* Pushed to the right edge of the meta line, just inside the
                   chevron. The zone name truncates before this does. */}
               <span className="ml-auto flex shrink-0 items-center pl-2">
@@ -1035,8 +1146,16 @@ function PolishedVitalStatusPanel() {
     : curiosity;
   const displayName = animalMode ? playableMode.label : 'Charles Darwin';
   // Only worth a word when it is not the default: "Steady" is the state the
-  // three bars underneath already describe.
-  const condition = health < 35 ? 'Injured' : fatigue > 70 ? 'Winded' : null;
+  // three bars underneath already describe. The two fatigue words are the
+  // player's only notice of thresholds the controller already enforces, so
+  // they read off PLAYER rather than round numbers of their own.
+  const condition = health < 35
+    ? { label: 'Injured', tone: 'text-rose-300', note: 'Injured. Rest or return to the ship.' }
+    : fatigue >= PLAYER.exhaustedRunFatigue
+      ? { label: 'Exhausted', tone: 'text-rose-300', note: 'Too tired to run. A two-hour halt will clear it.' }
+      : fatigue >= PLAYER.tiredRunFatigue
+        ? { label: 'Winded', tone: 'text-amber-200', note: 'Tiring. Running is slower than it was.' }
+        : null;
   const statusProps = {
     onClick: openStatusView,
     title: `View ${displayName}'s status`,
@@ -1055,8 +1174,11 @@ function PolishedVitalStatusPanel() {
             {displayName}
           </button>
           {condition && (
-            <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-[0.15em] ${condition === 'Injured' ? 'text-rose-300' : 'text-amber-200'}`}>
-              {condition}
+            <span
+              title={condition.note}
+              className={`shrink-0 text-[9px] font-semibold uppercase tracking-[0.15em] ${condition.tone}`}
+            >
+              {condition.label}
             </span>
           )}
           <CameraModeButton />
@@ -2318,17 +2440,10 @@ function useZoneSpecimenProgress() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
   const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
-  return useMemo(() => {
-    const zoneSpecimens = getThreeSpecimens(currentZoneId) || [];
-    const recorded = new Set([
-      ...(collectedSpecimenIds || []),
-      ...(documentedSpecimenIds || []),
-    ]);
-    return {
-      total: zoneSpecimens.length,
-      recorded: zoneSpecimens.filter(specimen => recorded.has(specimen.id)).length,
-    };
-  }, [currentZoneId, collectedSpecimenIds, documentedSpecimenIds]);
+  return useMemo(
+    () => zoneSpecimenProgress(currentZoneId, collectedSpecimenIds, documentedSpecimenIds),
+    [currentZoneId, collectedSpecimenIds, documentedSpecimenIds],
+  );
 }
 
 const SYMS_STATUS_DOT = {
@@ -2529,7 +2644,9 @@ function PolishedFieldRail({
   const [mapCollapsed, setMapCollapsed] = useState(false);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const journalCount = useThreeGameStore(state => state.journal.length);
-  const rest = useThreeGameStore(state => state.rest);
+  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
+  const supplies = useThreeGameStore(state => state.supplies);
+  const restBusy = useThreeGameStore(state => Boolean(state.restSession));
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const zoneProgress = useZoneSpecimenProgress();
@@ -2649,9 +2766,17 @@ function PolishedFieldRail({
         </div>
 
         <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-expedition-brass/30 pt-2">
-          <button type="button" onClick={rest} className={compactAction}>
+          <button
+            type="button"
+            onClick={() => setTouchControl('rest', true)}
+            disabled={restBusy}
+            title={restCostHint(timeOfDay, supplies)}
+            className={`${compactAction} disabled:opacity-50`}
+          >
             <FatigueIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
             <span>Rest</span>
+            {/* The cost is the point now that the survey has an end date. */}
+            <span className="shrink-0 rounded-[2px] border border-expedition-brass/50 px-1 text-[8px] tracking-normal text-expedition-gold/85">2h</span>
           </button>
           <button
             type="button"
@@ -4613,7 +4738,16 @@ export function ThreeHUD({
   const outcomeOpen = Boolean(expeditionOutcome && expeditionOutcome.phase !== 'recovering');
   const finalAssessment = useThreeGameStore(state => state.finalAssessment);
   const beginFinalAssessment = useThreeGameStore(state => state.beginFinalAssessment);
+  const expeditionDeparted = useThreeGameStore(state => state.expeditionDeparted);
   const assessmentOpen = Boolean(finalAssessment);
+
+  // The Beagle sails after the third field day. Whichever way the clock got
+  // there — stowing the case aboard, or the night catching Darwin ashore —
+  // Henslow's judgment runs without asking.
+  useEffect(() => {
+    if (expeditionDeparted && !finalAssessment) void beginFinalAssessment();
+  }, [expeditionDeparted, finalAssessment, beginFinalAssessment]);
+
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
   const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);
   const confirmEndGame = useCallback(() => {
@@ -4881,6 +5015,7 @@ export function ThreeHUD({
       <InspectableTooltip />
       <BeagleTravelPrompt />
       <ShipDutiesPrompt />
+      <RestCard />
 
       <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">
         <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />

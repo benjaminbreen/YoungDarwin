@@ -103,5 +103,16 @@ export function triggerDirectPlayerActions({
   triggerAction('trip', 'trip', ACTION_DURATION.trip, { ...actionOptions, lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.45 });
   triggerAction('teeter', 'teeter', ACTION_DURATION.teeter, { ...actionOptions, lockMovement: false });
   triggerAction('sit', 'standToSit', ACTION_DURATION.standToSit, { ...actionOptions, lockMovement: true });
-  triggerAction('rest', 'lyingDown', ACTION_DURATION.lyingDown, { ...actionOptions, lockMovement: true });
+  // R and the HUD's Rest button both land here. The store decides whether the
+  // halt is allowed and spends the two hours; the clip is the same either way,
+  // so a refused rest still reads as Darwin lying down and getting back up.
+  triggerAction('rest', 'lyingDown', ACTION_DURATION.lyingDown, {
+    ...actionOptions,
+    lockMovement: true,
+    recoverAction: 'gettingUp',
+    recoverDuration: ACTION_DURATION.gettingUp,
+    onStart: () => {
+      useThreeGameStore.getState().beginRest?.();
+    },
+  });
 }

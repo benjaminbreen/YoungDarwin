@@ -5,12 +5,14 @@ import {
   CASE_CAPACITY,
   INITIAL_SUPPLIES,
   SYMS_BONUS_JARS,
+  drawNightlySupplies,
   inventoryItems,
   specimenIsInsect,
   specimenNeedsJar,
 } from '../data/inventoryItems';
 import { baseSpecimens } from '../data/specimens';
 import { travelFlavorLine } from '../data/travelFlavor';
+import { restFlavor } from './restFlavor';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
@@ -92,11 +94,14 @@ import {
 } from './ui/contextPromptService';
 import {
   CATASTROPHIC_FALL_SPEED,
+  EXPEDITION_DAYS,
   INCAPACITATION_CURIOSITY_COST,
   INCAPACITATION_RECOVERY_FATIGUE,
   INCAPACITATION_RECOVERY_HEALTH,
   INCAPACITATION_RECOVERY_ZONE_ID,
+  LAST_MINUTE_OF_DAY,
   expeditionOutcomeCause,
+  isFinalExpeditionDay,
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
 } from './expeditionOutcomes';
@@ -121,6 +126,10 @@ const MAX_HEALTH = 100;
 // A night aboard ends at first light rather than advancing a fixed span, so
 // the player always resumes the expedition at a workable hour.
 const BEAGLE_MORNING_HOUR = 6.5;
+const REST_MINUTES = 120;
+// Long enough for `lyingDown` to reach the ground, short enough that the card
+// lands before the player wonders whether the button worked.
+const REST_ANIMATION_MS = 2400;
 const MAX_FATIGUE = 100;
 const MAX_CURIOSITY = 100;
 const HOURS_PER_DAY = 24;
@@ -288,12 +297,19 @@ function specimenById(specimenId) {
   return baseSpecimens.find(specimen => specimen.id === specimenId) || null;
 }
 
+// The one chokepoint for clock-driven day advance: travel, resting in an
+// interior and incapacitation recovery all route through here. Running out of
+// days ashore ends the expedition exactly as returning to the ship does.
 function advanceTimeState(state, minutes) {
   const totalHours = state.timeOfDay + minutes / 60;
   const dayDelta = Math.floor(totalHours / HOURS_PER_DAY);
+  const nextDay = state.day + dayDelta;
+  if (nextDay > EXPEDITION_DAYS) {
+    return { timeOfDay: LAST_MINUTE_OF_DAY, day: EXPEDITION_DAYS, expeditionDeparted: true };
+  }
   return {
     timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
-    day: state.day + dayDelta,
+    day: nextDay,
   };
 }
 
@@ -844,6 +860,13 @@ function createExpeditionSlice() {
     visitedLocalCellIds: expedition.visitedLocalCellIds,
     timeOfDay: expedition.timeMinutes / 60,
     day: expedition.day,
+    // Set once the Beagle has sailed. The HUD watches it and opens Henslow's
+    // judgment; nothing else reads it, so it is not persisted — a resumed save
+    // always resumes playable and ends again on its own terms.
+    expeditionDeparted: false,
+    // The two-hour halt in the field: 'resting' while the clip plays, then
+    // 'complete' with the authored card copy. See beginRest.
+    restSession: null,
     questComplete: false,
     // Current game objective (see directives.js). Advances silently whenever
     // the active one is satisfied; `directiveCompletedId` briefly names the
@@ -1990,14 +2013,23 @@ export const useThreeGameStore = create((set, get) => ({
   landCollectionAtBeagle: () => set(state => {
     if (state.currentZoneId !== 'BEAGLE') return {};
     const landed = state.inventory.length;
-    const restocked = { ...INITIAL_SUPPLIES, spareJars: (INITIAL_SUPPLIES.spareJars || 0) + SYMS_BONUS_JARS };
+    // A ration on top of what came back unused, not a refill to full: see
+    // drawNightlySupplies. Running the case dry on day one is felt on day two.
+    const restocked = drawNightlySupplies(state.supplies, { spareJars: SYMS_BONUS_JARS });
     // Sleeping aboard: advance to the next morning rather than adding a fixed
     // number of hours, so the player always resumes at a workable hour.
     const nextDay = state.day + 1;
     const location = getZone(state.currentZoneId);
+    // Stowing on the last field day is the same act, but the ship sails on it
+    // instead of anchoring for another night. The case still lands first, so
+    // the day's work counts toward the assessment.
+    const departing = isFinalExpeditionDay(state.day);
     const summary = landed > 0
       ? `${landed} specimen${landed === 1 ? '' : 's'} struck below and the case made ready again`
       : 'The case was already empty; stores drawn and the night passed aboard';
+    const departureSummary = landed > 0
+      ? `${landed} specimen${landed === 1 ? '' : 's'} struck below as the anchor came up`
+      : 'The case came aboard empty as the anchor came up';
     const entry = {
       id: `${Date.now()}-beagle-landing`,
       day: state.day,
@@ -2006,19 +2038,25 @@ export const useThreeGameStore = create((set, get) => ({
       method: 'ship duties',
       kind: 'logistics',
       authorship: 'system',
-      title: `Collection landed — day ${state.day}`,
-      content: `${summary}. Fresh labels, jars, twine, and provisions drawn from the ship's stores.`,
+      title: departing
+        ? `Charles Island astern — day ${state.day}`
+        : `Collection landed — day ${state.day}`,
+      content: departing
+        ? `${departureSummary}. The Beagle stands out of Post Office Bay; whatever was not collected on Charles Island stays there.`
+        : `${summary}. A night's ration of labels, jars, twine and provisions drawn from the hold — the purser measures what he gives out.`,
     };
     return {
       shipCollection: [...state.shipCollection, ...state.inventory],
       inventory: [],
-      supplies: restocked,
-      day: nextDay,
-      timeOfDay: BEAGLE_MORNING_HOUR,
-      fatigue: 0,
-      health: clamp(state.health + 12, 0, MAX_HEALTH),
       journal: [...state.journal, entry],
       beagleTravelPrompt: null,
+      ...(departing ? { expeditionDeparted: true } : {
+        supplies: restocked,
+        day: nextDay,
+        timeOfDay: BEAGLE_MORNING_HOUR,
+        fatigue: 0,
+        health: clamp(state.health + 12, 0, MAX_HEALTH),
+      }),
     };
   }),
   setSolarGlare: solarGlare => set(state => {
@@ -3421,20 +3459,60 @@ export const useThreeGameStore = create((set, get) => ({
     return { majorEvent: null };
   }),
 
-  rest: () => set(state => {
+  // Resting is a two-beat action: Darwin lies down, then two hours are gone.
+  // `beginRest` opens the beat and lets the player controller play the clip;
+  // `completeRest` spends the time and raises the card. Both the R key and the
+  // HUD button route through the input path (see playerActionTriggers) so the
+  // animation can never be skipped by one of them.
+  beginRest: () => {
+    const state = get();
+    if (state.restSession || state.playableModeId !== 'darwin') return false;
+    // Interiors have their own berth-and-bunk rest with authored narration.
+    if (getInteriorDefinition(state.currentZoneId) || state.currentZoneId === 'BEAGLE') return false;
+    if (state.expeditionDeparted || state.finalAssessment || state.expeditionOutcome) return false;
+    if (state.activeConstraint || state.transition) return false;
+    const id = `rest-${Date.now()}`;
+    set({ restSession: { id, phase: 'resting' } });
+    setTimeout(() => get().completeRest(id), REST_ANIMATION_MS);
+    return true;
+  },
+
+  completeRest: (sessionId = null) => set(state => {
+    if (!state.restSession || state.restSession.phase !== 'resting') return {};
+    if (sessionId && state.restSession.id !== sessionId) return {};
     const provisioned = state.supplies.food > 0 && state.supplies.water > 0;
-    const message = provisioned
-      ? 'You rest for two hours in a strip of shade, sharing biscuit and water while Syms reorders the collecting case.'
-      : 'You rest for two hours in a strip of shade, but the provisions are gone — the rest does little good.';
+    const zone = getZone(state.currentZoneId);
+    const flavor = restFlavor({
+      zoneId: state.currentZoneId,
+      zoneType: zone.biome || zone.type,
+      timeOfDay: state.timeOfDay,
+      provisioned,
+    });
+    const advanced = advanceTimeState(state, REST_MINUTES);
+    const fatigueBefore = state.fatigue;
+    const fatigueAfter = clamp(state.fatigue - (provisioned ? 26 : 12), 0, MAX_FATIGUE);
+    const message = `${flavor.line} ${flavor.provision}`;
     const educationalNote = 'Fieldwork depended on pacing: heat, daylight, and fatigue changed what a naturalist could safely collect.';
     return {
-      ...advanceTimeState(state, 120),
-      fatigue: clamp(state.fatigue - (provisioned ? 26 : 12), 0, MAX_FATIGUE),
+      ...advanced,
+      fatigue: fatigueAfter,
       health: clamp(state.health + (provisioned ? 10 : 4), 0, MAX_HEALTH),
       supplies: {
         ...state.supplies,
         food: Math.max(0, state.supplies.food - 1),
         water: Math.max(0, state.supplies.water - 1),
+      },
+      restSession: {
+        ...state.restSession,
+        phase: 'complete',
+        ...flavor,
+        placeName: zone.shortName || zone.name,
+        provisioned,
+        fatigueRecovered: fatigueBefore - fatigueAfter,
+        endedAt: advanced.timeOfDay,
+        // A rest that runs the clock past the last day ends the survey instead
+        // of raising a card nobody can read.
+        departed: Boolean(advanced.expeditionDeparted),
       },
       message,
       educationalNote,
@@ -3443,6 +3521,16 @@ export const useThreeGameStore = create((set, get) => ({
       }, state, 'rest')),
     };
   }),
+
+  dismissRest: () => set(state => (state.restSession ? { restSession: null } : {})),
+
+  // Kept for automation and the e2e harness, which want the effect without the
+  // animation beat.
+  rest: () => {
+    if (!get().beginRest()) return false;
+    get().completeRest();
+    return true;
+  },
 
   applySnareEscapeResolution: (data, options = {}) => set(state => {
     const constraint = state.activeConstraint;

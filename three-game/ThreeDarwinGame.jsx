@@ -6,7 +6,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
-import { ACESFilmicToneMapping, HalfFloatType, MathUtils, PCFShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
+import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
 import { clampFrameDelta } from './frameTiming';
 import {
   isPerfCaptureRecording,
@@ -1645,17 +1645,40 @@ function OpeningVisualReadySignal({
 // this stays small enough to disappear into a frame's slack.
 const PREWARM_TEXTURE_BUDGET_PER_FRAME = 4;
 
-// Every texture reachable from the scene's materials. Walked once per zone.
-function collectSceneTextures(root) {
-  const textures = new Set();
+// One walk per prewarm run: the objects carrying a material this zone has not
+// prewarmed yet, and the textures those materials reach.
+//
+// Both sets are the point. `compileAsync(scene, camera)` prepares *every*
+// material in the scene and then polls all of them once a frame until their
+// programs report ready, so passing the whole scene on every settle re-does
+// the entire zone to pick up the handful of objects that just mounted. Same
+// for the texture sweep: without the seen set it re-queues every texture in
+// the zone and drips them all back through initTexture four at a time.
+//
+// A material is prewarmed once. One that later flips `needsUpdate` recompiles
+// on its own first draw as it always has; this pass exists for content that
+// mounts late, not for materials that change under it.
+function collectPrewarmWork(root, seenMaterials, seenTextures) {
+  const objects = [];
+  const textures = [];
+  // three prepares an object's whole subtree, so anything under one already on
+  // the list comes along free. Pre-order traversal means a parent is always
+  // decided before its children, which is what makes the parent lookup enough.
+  const covered = new Set();
   const consider = value => {
-    if (value?.isTexture && !value.isRenderTargetTexture) textures.add(value);
+    if (!value?.isTexture || value.isRenderTargetTexture || seenTextures.has(value)) return;
+    seenTextures.add(value);
+    textures.push(value);
   };
   root.traverse(object => {
+    if (covered.has(object.parent)) covered.add(object);
     const material = object.material;
     if (!material) return;
+    let fresh = false;
     for (const entry of Array.isArray(material) ? material : [material]) {
-      if (!entry) continue;
+      if (!entry || seenMaterials.has(entry)) continue;
+      seenMaterials.add(entry);
+      fresh = true;
       for (const value of Object.values(entry)) consider(value);
       // Custom/`onBeforeCompile` materials keep their maps in uniforms, where
       // a plain property sweep never finds them — the water, the vistas and
@@ -1664,8 +1687,11 @@ function collectSceneTextures(root) {
         for (const uniform of Object.values(entry.uniforms)) consider(uniform?.value);
       }
     }
+    if (!fresh || covered.has(object)) return;
+    objects.push(object);
+    covered.add(object);
   });
-  return [...textures];
+  return { objects, textures };
 }
 
 // Wait this long after the scene stops growing before prewarming it, and never
@@ -1710,6 +1736,8 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
   const runningRef = useRef(false);
   const queueRef = useRef(null);
   const zoneRef = useRef(null);
+  const seenMaterialsRef = useRef(new Set());
+  const seenTexturesRef = useRef(new Set());
 
   useFrame(() => {
     if (!zoneId || !contentPhase || contentPhase < contentTarget) return;
@@ -1719,6 +1747,10 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
       dirtySinceRef.current = 0;
       lastRunAtRef.current = 0;
       queueRef.current = null;
+      // Fresh sets per zone: the departing zone's materials and textures are
+      // on their way out, and holding them here would keep them alive.
+      seenMaterialsRef.current = new Set();
+      seenTexturesRef.current = new Set();
     }
 
     const now = performance.now();
@@ -1753,13 +1785,34 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
 
     dirtySinceRef.current = 0;
     lastRunAtRef.current = now;
+
+    const { objects, textures } = collectPrewarmWork(
+      scene,
+      seenMaterialsRef.current,
+      seenTexturesRef.current,
+    );
+    queueRef.current = textures;
+    // The geometry count moves for reasons that add no material — an instanced
+    // field regrown, a prop swapped for one already on screen. Nothing new to
+    // compile, so skip the round trip.
+    if (!objects.length) return;
+
+    // Compile only the new objects, against the live scene. three reads the
+    // first argument as the thing to prepare and the third as the scene
+    // supplying lights and environment; passing `scene` alone makes it both,
+    // which prepares every material in the zone again and then polls the whole
+    // set once a frame until they all report ready. `subject` is a bare
+    // Object3D standing in for that list — traverse() only reads `children`,
+    // so borrowing the objects here does not touch the real graph.
+    const subject = new Object3D();
+    subject.children = objects;
     runningRef.current = true;
     let timeoutId = null;
     Promise.resolve()
       .then(() => Promise.race([
         typeof gl.compileAsync === 'function'
-          ? gl.compileAsync(scene, camera)
-          : Promise.resolve(gl.compile(scene, camera)),
+          ? gl.compileAsync(subject, camera, scene)
+          : Promise.resolve(gl.compile(subject, camera, scene)),
         new Promise(resolve => {
           timeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
         }),
@@ -1770,7 +1823,7 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
       })
       .then(() => {
         if (timeoutId != null) window.clearTimeout(timeoutId);
-        queueRef.current = collectSceneTextures(scene);
+        subject.children = [];
         runningRef.current = false;
       });
   });

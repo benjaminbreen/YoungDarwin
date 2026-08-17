@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useThreeGameStore } from '../../../store';
+import { zoneSpecimenProgress } from '../../../data';
 import { getZone } from '../../../world/floreanaZones';
 import { prepareRegionEcologyResource } from '../../../world/ecology/ecologyResource';
 import { prepareBorderVistaResource } from '../../../world/vistas/borderVistaResource';
@@ -68,6 +69,8 @@ const LEGEND_ICONS = {
     </span>
   ),
   surveyed: <span className="h-2.5 w-2.5 rounded-full border border-expedition-ink bg-expedition-goldbright shadow-[0_0_6px_rgba(227,197,133,0.6)]" />,
+  unvisited: <span className="h-2.5 w-2.5 rounded-full border border-expedition-gold/70 bg-expedition-ink/60" />,
+  land: <span className="h-2.5 w-2.5 rounded-[1px] border border-expedition-gold/80 bg-expedition-gold/25" />,
   uncharted: <span className="h-2 w-2 rotate-45 border border-expedition-gold/85 bg-transparent" />,
   anchorage: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3.5 w-3.5">
@@ -81,8 +84,38 @@ const LEGEND_ICONS = {
 
 // ---------------------------------------------------------------------------
 
+// What the chart knows about each landing: whether Darwin has set foot on it and
+// how much of its natural history is in the record. Without this the chart is
+// thirty identical gold dots and gives no answer to "where have I not been".
+function useIslandSurvey() {
+  const visitedZoneIds = useThreeGameStore(state => state.visitedZoneIds);
+  const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
+  const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
+
+  return useMemo(() => {
+    const visited = new Set(visitedZoneIds || []);
+    const byZone = new Map();
+    let surveyed = 0;
+    let landings = 0;
+    for (const location of islandMapLocations) {
+      if (location.isTest) continue;
+      const entry = {
+        ...zoneSpecimenProgress(location.id, collectedSpecimenIds, documentedSpecimenIds),
+        visited: visited.has(location.id),
+      };
+      byZone.set(location.id, entry);
+      landings += 1;
+      if (entry.visited) surveyed += 1;
+    }
+    return { byZone, surveyed, landings };
+  }, [visitedZoneIds, collectedSpecimenIds, documentedSpecimenIds]);
+}
+
+const EMPTY_SURVEY = Object.freeze({ visited: false, recorded: 0, total: 0 });
+
 function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const survey = useIslandSurvey();
   const [filters, setFilters] = useState({ land: true, anchorage: true, water: true, test: false });
 
   const toggle = key => setFilters(prev => ({ ...prev, [key]: !prev[key] }));
@@ -134,6 +167,7 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
               pane={pane}
               selected={selectedId === location.id}
               isCurrent={currentZoneId === location.id}
+              visited={survey.byZone.get(location.id)?.visited ?? false}
               onSelect={loc => onSelectLocation(loc.id)}
             />
           ))}
@@ -145,6 +179,7 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
         onToggle={toggle}
         selectedId={selectedId}
         currentZoneId={currentZoneId}
+        survey={survey}
         onSelectLocation={onSelectLocation}
         onRequestClose={onRequestClose}
       />
@@ -152,7 +187,40 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   );
 }
 
-function SelectedLocationCard({ location, isCurrent, onRequestClose }) {
+// The record for one landing, under its survey notes. "Not yet visited" is the
+// point of the line: it is the only place the chart says where the work is left.
+function LocationSurveyLine({ survey }) {
+  const { visited, recorded, total } = survey;
+  if (!visited) {
+    return (
+      <div className="flex items-center gap-2 rounded-sm border border-expedition-brass/40 bg-black/25 px-2.5 py-1.5">
+        <span className="h-2 w-2 shrink-0 rounded-full border border-expedition-gold/70" />
+        <span className="font-expedition text-[11px] uppercase tracking-[0.14em] text-expedition-faded">Not yet visited</span>
+      </div>
+    );
+  }
+  const complete = total > 0 && recorded >= total;
+  return (
+    <div className="rounded-sm border border-expedition-brass/40 bg-black/25 px-2.5 py-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-expedition text-[10px] uppercase tracking-[0.14em] text-expedition-brass">Field record</span>
+        <span className={`font-expedition text-[12px] font-semibold ${complete ? 'text-expedition-goldbright' : 'text-expedition-parchment'}`}>
+          {total > 0 ? `${recorded} of ${total} recorded` : 'Nothing to record'}
+        </span>
+      </div>
+      {total > 0 && (
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-expedition-ink/70">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-expedition-gold to-expedition-goldbright"
+            style={{ width: `${Math.round((recorded / total) * 100)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectedLocationCard({ location, isCurrent, survey, onRequestClose }) {
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const live = location.status === 'available';
 
@@ -200,12 +268,17 @@ function SelectedLocationCard({ location, isCurrent, onRequestClose }) {
       )}
       lines={[location.description].filter(Boolean)}
       note={location.notableFeatures.length > 0 ? location.notableFeatures.join(' · ') : null}
-      action={action}
+      action={(
+        <>
+          <LocationSurveyLine survey={survey} />
+          {action}
+        </>
+      )}
     />
   );
 }
 
-function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, onSelectLocation, onRequestClose }) {
+function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, survey, onSelectLocation, onRequestClose }) {
   const selected = getIslandMapLocation(selectedId) || getIslandMapLocation(currentZoneId);
 
   return (
@@ -214,18 +287,31 @@ function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, onSelectL
     // legend-first sidebar order returns.
     <div className="flex flex-col content-start gap-3 lg:grid">
       <div className="order-2 lg:order-none">
+        {/* Top three rows are a key to the marker faces; the rest are filters.
+            Only the filters carry a toggle dot. */}
         <LegendList>
           <LegendRow icon={LEGEND_ICONS.current} label="Current Location" active />
-          <LegendRow icon={LEGEND_ICONS.surveyed} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
+          <LegendRow icon={LEGEND_ICONS.surveyed} label="Visited" active />
+          <LegendRow icon={LEGEND_ICONS.unvisited} label="Not yet visited" active />
+          <LegendRow icon={LEGEND_ICONS.land} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
           <LegendRow icon={LEGEND_ICONS.anchorage} label="Anchorages" active={filters.anchorage} onToggle={() => onToggle('anchorage')} />
           <LegendRow icon={LEGEND_ICONS.water} label="Surf & offshore" active={filters.water} onToggle={() => onToggle('water')} />
           <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
         </LegendList>
+        <p className="mt-2 px-1.5 font-expedition text-[11px] text-expedition-faded">
+          <span className="font-semibold text-expedition-goldbright">{survey.surveyed}</span>
+          {` of ${survey.landings} places visited.`}
+        </p>
       </div>
       <GoldDivider className="order-1 lg:order-none" />
       <div className="order-none">
         {selected ? (
-          <SelectedLocationCard location={selected} isCurrent={selected.id === currentZoneId} onRequestClose={onRequestClose} />
+          <SelectedLocationCard
+            location={selected}
+            isCurrent={selected.id === currentZoneId}
+            survey={survey.byZone.get(selected.id) || EMPTY_SURVEY}
+            onRequestClose={onRequestClose}
+          />
         ) : (
           <p className="px-1 font-expedition text-[12px] italic text-expedition-faded">
             Select a marker to read the survey notes for that ground.

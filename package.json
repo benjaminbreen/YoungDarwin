@@ -38,6 +38,7 @@
     "asset:darwin:holds": "node scripts/create-darwin-jump-holds.mjs",
     "asset:darwin5:split": "node scripts/split-darwin5-runtime.mjs",
     "asset:syms": "node scripts/optimize-syms-runtime.mjs",
+    "asset:lawson": "/Applications/Blender.app/Contents/MacOS/Blender -b --python scripts/blender_build_lawson_npc.py -- --fbx assets-src/darwin/characters/lawson-skinned-idle.fbx --out public/assets/models/npc-nicolas-lawson.glb --decimate 15000 --report assets-src/darwin/characters/lawson-build-report.json && node scripts/optimize-npc-runtime-glb.mjs public/assets/models/npc-nicolas-lawson.glb --size 1024 --quality 88 && node scripts/validate-animated-glb-bounds.mjs public/assets/models/npc-nicolas-lawson.glb --clip idle --scale 1.93093 --y-offset 0.00133 --target-height 1.88 --height-tolerance 0.01 --ground-tolerance 0.005 --min-vertical-ratio 2.4 --max-triangles 15000 --report assets-src/darwin/characters/lawson-build-report.json",
     "asset:darwiniothamnus": "node scripts/prepare-darwiniothamnus.mjs",
     "asset:terrain-detail": "node scripts/build-terrain-sand-detail.mjs",
     "asset:white-sand": "node scripts/build-white-sand-beach-textures.mjs",

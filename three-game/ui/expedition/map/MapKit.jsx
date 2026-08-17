@@ -223,7 +223,7 @@ function clampLabelOffset(location, pane) {
   return dx === offset.x && dy === offset.y ? offset : { x: dx, y: dy };
 }
 
-export function MapMarker({ location, zoom = 1, pane = null, selected = false, isCurrent = false, onSelect }) {
+export function MapMarker({ location, zoom = 1, pane = null, selected = false, isCurrent = false, visited = false, onSelect }) {
   const { kind, status, name } = location;
   const live = status === 'available';
   const glyph = MARKER_GLYPHS[kind];
@@ -245,8 +245,13 @@ export function MapMarker({ location, zoom = 1, pane = null, selected = false, i
       </span>
     );
   } else if (live) {
-    face = (
+    // Filled once Darwin has stood there, hollow until then — a surveyor inking
+    // in the stations he has actually occupied. Every marker used to be filled,
+    // so the chart could not say where the work was left.
+    face = visited ? (
       <span className="block h-4 w-4 rounded-full border-2 border-expedition-ink bg-expedition-goldbright shadow-[0_0_9px_rgba(227,197,133,0.72)]" />
+    ) : (
+      <span className="block h-3.5 w-3.5 rounded-full border-2 border-expedition-gold/75 bg-expedition-ink/70 shadow-[0_1px_3px_rgba(0,0,0,0.6)]" />
     );
   } else {
     // Uncharted stub: hollow diamond, water locations fainter.

@@ -114,7 +114,11 @@ export function NpcEncounterModal() {
                   featured={turn.role === 'npc' && index === visibleTurns.length - 1}
                 />
               ))}
-              {pending && <p className="font-expedition text-[1.05rem] italic text-expedition-faded">Syms considers the matter…</p>}
+              {pending && (
+                <p className="font-expedition text-[1.05rem] italic text-expedition-faded">
+                  {encounter.name} considers the matter…
+                </p>
+              )}
               {error && !pending && <p className="text-[0.82rem] italic text-expedition-faded">{error}</p>}
             </div>
           </div>

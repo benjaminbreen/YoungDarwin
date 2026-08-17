@@ -276,6 +276,30 @@ export const modelAssets = {
     targetTriangles: 10000,
     prompt: 'Stylized low-poly Syms Covington, young 1830s ship assistant and naturalist helper, practical sailor clothing, small leather utility pouch, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, neutral pose, clean topology, GLB.',
   },
+  // Vice-Governor Lawson, standing outside his house at the penal colony.
+  // Built from a Tripo mesh on a 65-bone Mixamo rig carrying one baked idle:
+  //   npm run asset:lawson
+  //
+  // Preserve the imported root translation and rotation together: they are the
+  // FBX's valid axis conversion, not mismatched channels. The asset build samples
+  // the complete posed skin through Three.js and fails on orientation, height,
+  // grounding, skin, clip, or triangle-budget regressions.
+  lawson: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-nicolas-lawson.glb',
+    cacheKey: 'lawson-tripo-idle-1k-webp-20260817e',
+    scale: 1.93093,
+    rotation: [0, 0, 0],
+    yOffset: 0.00133,
+    normalizeMaterials: true,
+    materialLift: 0.1,
+    materialEmissive: '#191b14',
+    materialEmissiveIntensity: 0.18,
+    materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
+    targetTriangles: 15000,
+    prompt: 'Stylized low-poly Nicolás Lawson, Vice-Governor of the Galápagos 1835, heavy-set weathered Norwegian-born administrator in an unbuttoned dark navy officer’s frock coat over cream waistcoat, no hat, strict T-pose, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, clean topology, GLB.',
+  },
   crab: {
     enabled: true,
     path: '/assets/models/animals/runtime/bundle-sally-lightfoot-crab.glb',
