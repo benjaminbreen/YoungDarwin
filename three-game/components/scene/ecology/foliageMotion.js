@@ -292,22 +292,12 @@ export function applyFoliageMotion(material, geometry, motion = {}, descriptor =
         gl_Position = projectionMatrix * mvPosition;`,
       );
   };
-  // Distinct programs per (wind, push profile, geometry bounds) bucket.
-  material.customProgramCacheKey = () => [
-    'foliage-motion',
-    wind,
-    bend,
-    bendRadius,
-    push.name,
-    push.amp.toFixed(3),
-    push.maxBendHeightRatio.toFixed(3),
-    push.bendDown.toFixed(3),
-    push.drag.toFixed(2),
-    push.tipWhip.toFixed(2),
-    push.recoilRatio.toFixed(2),
-    baseY.toFixed(2),
-    refHeight.toFixed(2),
-  ].join('|');
+  // One shared program: the injected GLSL is byte-identical for every
+  // foliage material — wind, push profile, and geometry bounds all travel as
+  // uniforms. Keying the cache on those numbers linked a separate identical
+  // program per (species x geometry) bucket, ~80 of the ~365 programs a zone
+  // boot paid for. Bump the suffix when the injected source changes.
+  material.customProgramCacheKey = () => 'foliage-motion-v2';
   material.needsUpdate = true;
   return material;
 }

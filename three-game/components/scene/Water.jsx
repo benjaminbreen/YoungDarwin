@@ -3278,7 +3278,14 @@ function WaterSurface({
       // stencil formats for the MSAA and resolve targets.
       resolveDepthBuffer: false,
     });
-    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    // Linear storage, like the composer's scene target. sRGB here made
+    // parameters.outputColorSpace differ between the mirror pass and the main
+    // pass, so every mirrored material (player, Beagle, NPCs) linked a second
+    // byte-equivalent-but-sRGB program — and linked it mid-gameplay, on the
+    // first frame the mirror saw it. The shader consumes linear either way;
+    // only 8-bit storage precision changes, invisible in a rippled 384-640px
+    // reflection.
+    rt.texture.colorSpace = THREE.NoColorSpace;
     return rt;
   }, [qualityConfig.reflectionRes, qualityConfig.reflectionSamples, reflections]);
 

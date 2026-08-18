@@ -1623,9 +1623,9 @@ function OpeningVisualReadySignal({
         let compileTimeoutId = null;
         Promise.resolve()
           .then(() => Promise.race([
-            typeof gl.compileAsync === 'function'
+            withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
               ? gl.compileAsync(scene, camera)
-              : Promise.resolve(gl.compile(scene, camera)),
+              : Promise.resolve(gl.compile(scene, camera)))),
             new Promise(resolve => {
               compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
             }),
@@ -1771,6 +1771,25 @@ const WARM_RENDER_SIZE = 64;
 const WARM_RENDER_HEADINGS = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
 const _warmYaw = new Quaternion();
 const _warmUp = new Vector3(0, 1, 0);
+
+// compile()/compileAsync() capture program parameters against the renderer's
+// CURRENT target. With none bound that means canvas output ('srgb'), but the
+// scene only ever draws into the composer's linear target — so every prewarm
+// compiled throwaway srgb variants and the real programs still linked on
+// first draw (measured: 61 orphaned srgb programs, and settle re-linking
+// +154). Binding any linear target during the synchronous prepare makes the
+// prewarmed programs the ones gameplay actually uses.
+let _compileColorTarget = null;
+function withLinearCompileTarget(gl, run) {
+  if (!_compileColorTarget) _compileColorTarget = new WebGLRenderTarget(1, 1);
+  const previous = gl.getRenderTarget();
+  gl.setRenderTarget(_compileColorTarget);
+  try {
+    return run();
+  } finally {
+    gl.setRenderTarget(previous);
+  }
+}
 
 function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, heading) {
   let warmTarget = warmTargetRef.current;
@@ -1918,9 +1937,9 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     let timeoutId = null;
     Promise.resolve()
       .then(() => Promise.race([
-        typeof gl.compileAsync === 'function'
+        withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
           ? gl.compileAsync(subject, camera, scene)
-          : Promise.resolve(gl.compile(subject, camera, scene)),
+          : Promise.resolve(gl.compile(subject, camera, scene)))),
         new Promise(resolve => {
           timeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
         }),
@@ -2064,9 +2083,9 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
             let compileTimeoutId = null;
             Promise.resolve()
               .then(() => Promise.race([
-                typeof gl.compileAsync === 'function'
+                withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
                   ? gl.compileAsync(scene, camera)
-                  : Promise.resolve(gl.compile(scene, camera)),
+                  : Promise.resolve(gl.compile(scene, camera)))),
                 new Promise(resolve => {
                   compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
                 }),
