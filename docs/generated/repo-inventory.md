@@ -297,7 +297,6 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `beagleCabinCandlestick` | true | false | `/assets/models/props/interiors/period-brass-candlestick.glb` | _none_ | 6000 |
 | `lawsonHouseInterior` | true | false | `/assets/models/structures/lawson-house-interior.glb` | _none_ | 135000 |
 | `lawsonDiningChair` | true | false | `/assets/models/props/lawson-house/dining-chair.glb` | _none_ | 5000 |
-| `lawsonCampaignStool` | true | false | `/assets/models/props/lawson-house/campaign-stool.glb` | _none_ | 3500 |
 | `lawsonRumBottle` | true | false | `/assets/models/props/lawson-house/rum-bottle.glb` | _none_ | 2500 |
 | `lawsonTinMug` | true | false | `/assets/models/props/lawson-house/tin-mug.glb` | _none_ | 1800 |
 | `lawsonServingBowl` | true | false | `/assets/models/props/lawson-house/serving-bowl.glb` | _none_ | 3500 |

@@ -740,24 +740,6 @@ export const PROP_TYPES = {
     mass: 19, friction: 2.3, restitution: 0, linearDamping: 4, angularDamping: 4.2,
     behaviors: { mobility: { mode: 'push', assistSpeed: 0.17, maxSpeed: 0.28, contactMaxSpeed: 0.28, rotationPolicy: 'resistTipping', angularMax: 0.34, groundedExtraDamping: 0.82 } },
   },
-  lawsonCampaignStool: {
-    label: 'campaign stool', visual: 'cabinStool', visualAsset: 'lawsonCampaignStool',
-    interactionRing: false,
-    visualOffsetY: -0.3,
-    collider: { shape: 'cuboid', halfExtents: [0.345, 0.303, 0.29] }, restOffset: 0.303,
-    mass: 8, friction: 1.9, restitution: 0, linearDamping: 3, angularDamping: 3,
-    behaviors: {
-      mobility: { mode: 'pickup-push', assistSpeed: 0.2, maxSpeed: 0.34, rotationPolicy: 'resistTipping', angularMax: 0.45 },
-      carryable: {
-        release: 0.28,
-        holdOffset: [0.2, 0.92, 0.16],
-        holdRotation: [0.08, -0.08, -0.18],
-        grip: 'rightHand',
-        gripOffset: [0.13, 0, 0.02],
-        animationStyle: 'freeHand',
-      },
-    },
-  },
   lawsonRumBottle: {
     label: 'rum bottle', visual: 'jug', visualAsset: 'lawsonRumBottle',
     interactionRing: false,
