@@ -11,6 +11,7 @@ import { modelAnimationDebugEnabled } from '../../runtimeDebug';
 import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { markReflectionSceneDirty } from '../../world/waterReflectionRuntime';
+import { warmGateRuntime } from '../../world/warmGateRuntime';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
@@ -1307,11 +1308,23 @@ function GLBPrimitive({
   animationRate = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
+  warmGate = true,
 }) {
   const group = useRef(null);
+  const gateRef = useRef(null);
   const gl = useThree(state => state.gl);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
+
+  // This component mounts when its GLB resolves — exactly the moment whose
+  // first draw used to land as a main-thread block mid-gameplay. Hold the
+  // model in the warm gate until an offscreen pass has paid that cost. The
+  // player opts out: an invisible Darwin after a possession swap is worse
+  // than the hitch.
+  React.useLayoutEffect(() => {
+    if (!warmGate) return undefined;
+    return warmGateRuntime.register(gateRef.current);
+  }, [warmGate]);
   // Live gait crossfade: while set, the outgoing cycle's phase rate is slaved
   // to the incoming one so feet stay in step through long walk<->run fades.
   const gaitBlend = useRef(null);
@@ -2273,14 +2286,16 @@ function GLBPrimitive({
           <AnimationBankLoader bank={bank} onLoad={handleAnimationBankLoad} />
         </Suspense>
       ))}
-      <group
-        ref={group}
-        scale={asset.scale || 1}
-        rotation={asset.rotation || [0, 0, 0]}
-        position={[0, asset.yOffset || 0, 0]}
-        userData={renderUserData}
-      >
-        <primitive object={importedScene} />
+      <group ref={gateRef}>
+        <group
+          ref={group}
+          scale={asset.scale || 1}
+          rotation={asset.rotation || [0, 0, 0]}
+          position={[0, asset.yOffset || 0, 0]}
+          userData={renderUserData}
+        >
+          <primitive object={importedScene} />
+        </group>
       </group>
     </>
   );
@@ -2304,6 +2319,7 @@ export function ModelAsset({
   animationRate = null,
   animationBankPhase = Number.POSITIVE_INFINITY,
   onAnimationBanksReady = null,
+  warmGate = true,
 }) {
   const asset = getModelAsset(id);
   if (!asset?.enabled) return fallback;
@@ -2329,6 +2345,7 @@ export function ModelAsset({
         animationRate={animationRate}
         animationBankPhase={animationBankPhase}
         onAnimationBanksReady={onAnimationBanksReady}
+        warmGate={warmGate}
       />
     </Suspense>
   );

@@ -8,6 +8,7 @@ import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA 
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, Quaternion, SRGBColorSpace, Texture, UnsignedByteType, Vector3, WebGLRenderTarget } from 'three';
 import { clampFrameDelta } from './frameTiming';
+import { warmGateRuntime } from './world/warmGateRuntime';
 import {
   isPerfCaptureRecording,
   notePerfAdaptiveDprState,
@@ -478,13 +479,18 @@ const INTRO_LOADING_STEPS = Object.freeze([1, ...CONTENT_MOUNT_STEPS]);
 const INTRO_LOADING_PHASE_TIMINGS_MS = Object.freeze(
   INTRO_LOADING_STEPS.map((_, index) => Math.round(index * 155)),
 );
-const STARTUP_STREAM_FIRST_STEP_MS = 180;
+// Hold the first stream step until the overlay dismissal transition has
+// finished. At 180ms the tighter step spacing below stacked two or three
+// family commits onto the dismissal frame itself — measured as a 1s block
+// exactly at overlay-dismissed.
+const STARTUP_STREAM_FIRST_STEP_MS = 700;
 // Twelve remaining steps fire at FIRST + index * STEP, so this constant alone
-// sets ~4.4s of the startup ladder's wall time — measured 2026-08-04 as
-// 10.2s -> 14.8s of content-settled, against a 4.36s prediction. It was sized
-// when each step also carried up to 4s of foot-path splat generation; that work
-// is baked now (see pathSplatBakes.js), so the step no longer needs the room.
-const STARTUP_STREAM_STEP_MS = 220;
+// sets a multi-second share of the startup ladder's wall time. 220 was sized
+// when each step also carried up to 4s of foot-path splat generation; that
+// work is baked now (pathSplatBakes.js) and the heavy families are further
+// split (progressive props, merged dressing), so the steps need less room.
+// Net of the later first step this still finishes ~0.7s sooner than 180/220.
+const STARTUP_STREAM_STEP_MS = 120;
 const STARTUP_STREAM_IDLE_TIMEOUT_MS = 650;
 const STARTUP_STREAM_FRAME_BUDGET_MS = 28;
 // The deadline is a degraded fallback, not the normal transition clock. Full
@@ -1657,6 +1663,9 @@ function OpeningVisualReadySignal({
       }
       warmedSequenceRef.current = sequenceId;
       warmHeadingsRef.current = null;
+      // Anything gated during the loading phases is warmed now; the reveal
+      // must not open onto a scene with held-back content.
+      warmGateRuntime.release();
     }
 
     if (delta * 1000 > STARTUP_STREAM_FRAME_BUDGET_MS) {
@@ -1813,12 +1822,15 @@ function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, head
   warmCamera.updateProjectionMatrix();
   const previousTarget = gl.getRenderTarget();
   gl.__darwinWarmRender = true;
+  // Gated content exists to be drawn HERE and nowhere else yet.
+  warmGateRuntime.showForWarmPass();
   try {
     gl.setRenderTarget(warmTarget);
     gl.render(scene, warmCamera);
   } catch {
     // A warm pass must never take gameplay down with it.
   } finally {
+    warmGateRuntime.hideAfterWarmPass();
     gl.__darwinWarmRender = false;
     gl.setRenderTarget(previousTarget);
   }
@@ -1838,6 +1850,7 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
   const warmTargetRef = useRef(null);
   const warmCameraRef = useRef(null);
   const lastCameraQuatRef = useRef(null);
+  const seenGateVersionRef = useRef(-1);
 
   useEffect(() => () => {
     warmTargetRef.current?.dispose();
@@ -1876,6 +1889,14 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
       seenGeometriesRef.current = geometries;
       dirtySinceRef.current = now;
     }
+    // Gated content never draws, so it cannot move the geometry counter;
+    // its registrations are the growth signal instead. The deadline pass is
+    // the safety net for a wedged prewarm.
+    if (warmGateRuntime.version !== seenGateVersionRef.current) {
+      seenGateVersionRef.current = warmGateRuntime.version;
+      dirtySinceRef.current = now;
+    }
+    warmGateRuntime.releaseExpired(now);
 
     // Drain any queued texture uploads first; they are the cheap half and the
     // one that must not land in a single frame.
@@ -1899,6 +1920,9 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     if (warmHeadings?.length) {
       if (cameraStill) {
         renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, warmHeadings.pop());
+        // Every heading has now drawn the gated content offscreen; let it
+        // join the visible frame.
+        if (!warmHeadings.length) warmGateRuntime.release();
       }
       return;
     }

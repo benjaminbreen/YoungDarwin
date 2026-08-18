@@ -1450,6 +1450,7 @@ export function NaturalistModel({
         animationBankPhase={animationBankPhase}
         onAnimationBanksReady={onAnimationBanksReady}
         fallback={<ProceduralNaturalistModel motionRef={motionRef} />}
+        warmGate={false /* the player must never be held invisible: a possession swap remounts this */}
       />
       {modelScene && <HandLamp scene={modelScene} modelAssetId={modelAssetId} />}
       {modelScene && HAND_TOOLS.map(tool => (

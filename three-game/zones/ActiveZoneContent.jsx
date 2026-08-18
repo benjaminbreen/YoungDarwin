@@ -29,6 +29,7 @@ import { AnimalModeDarwinNpc } from '../components/world/AnimalModeDarwinNpc';
 import { getThreeSpecimens } from '../data';
 import { PhysicsObstacles } from '../physics/PhysicsObstacles';
 import { PhysicsTerrain } from '../physics/PhysicsTerrain';
+import { WarmGate } from '../components/scene/WarmGate';
 import { useThreeGameStore } from '../store';
 import { InteriorZone } from '../interiors/InteriorZone';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
@@ -152,17 +153,20 @@ export function ActiveZoneContent({
         </Suspense>
       )}
       {bordersReady && settings.physicsObstacles !== false && <PhysicsObstacles />}
-      {ordinaryPropsReady && settings.physicsProps !== false && <PhysicsProps />}
-      {pricklyPearReady && settings.physicsProps !== false && <PricklyPearField />}
-      {lavaCactusReady && settings.physicsProps !== false && <LavaCactusField />}
-      {paloSantoReady && settings.physicsProps !== false && <PaloSantoField />}
-      {latePlantFieldsReady && settings.physicsProps !== false && <SicyosField />}
-      {latePlantFieldsReady && settings.physicsProps !== false && <DeliliaField />}
-      {latePlantFieldsReady && settings.physicsProps !== false && <LecocarpusField />}
-      {structuresReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WatkinsCabin />}
-      {structuresReady && settings.physicsProps !== false && currentZoneId === 'W_LAVA' && <WesternLowlandsCampRuins />}
-      {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalInmateCabin />}
-      {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <PenalWorkGangCabin />}
+      {/* Post-reveal families mount inside warm gates: invisible until an
+          offscreen warm pass has paid their first-draw cost, then released
+          together. See warmGateRuntime.js. */}
+      {ordinaryPropsReady && settings.physicsProps !== false && <WarmGate><PhysicsProps /></WarmGate>}
+      {pricklyPearReady && settings.physicsProps !== false && <WarmGate><PricklyPearField /></WarmGate>}
+      {lavaCactusReady && settings.physicsProps !== false && <WarmGate><LavaCactusField /></WarmGate>}
+      {paloSantoReady && settings.physicsProps !== false && <WarmGate><PaloSantoField /></WarmGate>}
+      {latePlantFieldsReady && settings.physicsProps !== false && <WarmGate><SicyosField /></WarmGate>}
+      {latePlantFieldsReady && settings.physicsProps !== false && <WarmGate><DeliliaField /></WarmGate>}
+      {latePlantFieldsReady && settings.physicsProps !== false && <WarmGate><LecocarpusField /></WarmGate>}
+      {structuresReady && settings.physicsProps !== false && currentZoneId === 'WATKINS' && <WarmGate><WatkinsCabin /></WarmGate>}
+      {structuresReady && settings.physicsProps !== false && currentZoneId === 'W_LAVA' && <WarmGate><WesternLowlandsCampRuins /></WarmGate>}
+      {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalInmateCabin /></WarmGate>}
+      {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalWorkGangCabin /></WarmGate>}
       {waterSplashesReady && settings.waterSplashes !== false && <WaterSplashes />}
       {interactablesReady && <SnareTraps />}
       {interactablesReady && <AnimalDroppings />}
