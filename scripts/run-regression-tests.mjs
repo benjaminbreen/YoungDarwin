@@ -1986,7 +1986,10 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
     /HUD_ENTRANCE_TRANSITION_MS = 700/,
     'HUD completion must include the final opacity transition, not just its timer',
   );
-  assert.match(hudSource, /data-entrance-stage=\{hudEntranceStage\}/);
+  // Stages 1-3 drive CSS through an imperatively-written attribute (state
+  // flips re-rendered the whole HUD four times per reveal); the smoke test's
+  // stage-4 selector depends on this write reaching the root element.
+  assert.match(hudSource, /setAttribute\('data-entrance-stage', String\(stage\)\)/);
   assert.match(
     zoneContentSource,
     /const specimensReady = reaches\(5\.6, 3\)/,

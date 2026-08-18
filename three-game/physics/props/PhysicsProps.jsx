@@ -15,6 +15,31 @@ import SplatTextFX from '../../shooting/SplatTextFX';
 import AimReticle from '../../shooting/AimReticle';
 import WorldTimeTicker from '../../world/WorldTimeTicker';
 
+// Reveal a mounting list a few entries per frame. Mounting a zone's full
+// prop family in one commit measured ~1s of main-thread block (each prop is
+// a Rapier body plus a procedural visual); three per frame turns that into
+// sub-frame commits. Collapses to "all at once" whenever the list shrinks
+// (a break/collect must never remount survivors).
+function useProgressiveMountCount(length, perFrame = 3) {
+  const [mounted, setMounted] = useState(0);
+  useEffect(() => {
+    if (mounted >= length) {
+      if (mounted > length) setMounted(length);
+      return undefined;
+    }
+    let frameHandle = null;
+    const advance = () => {
+      setMounted(current => Math.min(length, current + perFrame));
+      frameHandle = null;
+    };
+    frameHandle = requestAnimationFrame(advance);
+    return () => {
+      if (frameHandle != null) cancelAnimationFrame(frameHandle);
+    };
+  }, [length, mounted, perFrame]);
+  return Math.min(mounted, length);
+}
+
 // Mounts every physics prop registered for the current zone, owns the E-key
 // carry input, and swaps broken props for tumbling debris + loot.
 export function PhysicsProps() {
@@ -29,6 +54,8 @@ export function PhysicsProps() {
     () => getZoneProps(currentZoneId).filter(prop => !brokenPropIds.includes(prop.id)),
     [brokenPropIds, currentZoneId],
   );
+  const mountedCount = useProgressiveMountCount(props.length);
+  const mountedProps = mountedCount >= props.length ? props : props.slice(0, mountedCount);
 
   const handleBreak = useCallback((prop, impact) => {
     const state = useThreeGameStore.getState();
@@ -77,7 +104,7 @@ export function PhysicsProps() {
       <ShotgunFX />
       <SplatTextFX />
       <AimReticle />
-      {props.map(prop => (
+      {mountedProps.map(prop => (
         <PhysicsProp key={prop.id} prop={prop} onBreak={handleBreak} />
       ))}
       {debrisEvents.map(event => (

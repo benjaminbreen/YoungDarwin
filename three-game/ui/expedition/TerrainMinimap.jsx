@@ -331,7 +331,7 @@ function bakeSurveyChartPixels(samples, heights, n, step) {
   ctx.fillRect(0, 0, n, n);
   ctx.restore();
 
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 // Sampling the heightfield costs about 7µs a point, so a full field is well
@@ -918,18 +918,21 @@ function paintChartField(field, variant) {
   drawBiomeWash(ctx, samples, heights, n);
   drawEcologyWash(ctx, field.zone, n, field.width, field.depth);
   drawBoulders(ctx, field.zone, n, field.width, field.depth);
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 export function bakeTerrainChart(zone, variant = 'terrain', resolution = BAKE_RESOLUTION) {
   if (typeof document === 'undefined') return null;
   const field = createChartField(zone, resolution);
   while (!field.sampleChunk(Number.MAX_SAFE_INTEGER)) { /* sample it all */ }
-  return paintChartField(field, variant);
+  return paintChartField(field, variant).toDataURL('image/png');
 }
 
 const chartCache = new Map();
 const chartBakes = new Map();
+// Object URL each key currently exposes, so a finished sharp pass can revoke
+// the draft it replaces once every mounted <img> has swapped over.
+const chartObjectUrls = new Map();
 
 // Coarse pass first: a soft chart on screen within a few hundred milliseconds
 // beats a correct one that arrives after the player has walked off the beach.
@@ -973,16 +976,37 @@ function subscribeToChartBake(key, zone, variant, onReady) {
         scheduleSlice(pump);
         return;
       }
-      const url = paintChartField(field, variant);
-      chartCache.set(key, url);
-      bake.listeners.forEach(listener => listener(url));
-      pass += 1;
-      if (pass >= BAKE_PASSES.length) {
-        chartBakes.delete(key);
-        return;
+      const canvas = paintChartField(field, variant);
+      const finishPass = url => {
+        chartCache.set(key, url);
+        bake.listeners.forEach(listener => listener(url));
+        pass += 1;
+        if (pass >= BAKE_PASSES.length) {
+          chartBakes.delete(key);
+          return;
+        }
+        field = createChartField(zone, BAKE_PASSES[pass]);
+        setTimeout(() => scheduleSlice(pump), SHARPEN_DELAY_MS);
+      };
+      // PNG-encode off the main thread. toDataURL here was a synchronous
+      // 100-200ms encode landing right after the reveal — the largest
+      // remaining settle-phase block. The superseded pass's object URL is
+      // revoked on a grace timer, after every mounted chart has swapped.
+      if (typeof canvas.toBlob === 'function') {
+        canvas.toBlob(blob => {
+          if (!blob) {
+            finishPass(canvas.toDataURL('image/png'));
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          const previous = chartObjectUrls.get(key);
+          chartObjectUrls.set(key, url);
+          if (previous) setTimeout(() => URL.revokeObjectURL(previous), 8000);
+          finishPass(url);
+        }, 'image/png');
+      } else {
+        finishPass(canvas.toDataURL('image/png'));
       }
-      field = createChartField(zone, BAKE_PASSES[pass]);
-      setTimeout(() => scheduleSlice(pump), SHARPEN_DELAY_MS);
     };
     scheduleSlice(pump);
   }

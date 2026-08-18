@@ -4758,6 +4758,7 @@ export function ThreeHUD({
   const [pauseOpen, setPauseOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [hudEntranceStage, setHudEntranceStage] = useState(0);
+  const hudRootRef = useRef(null);
   const entranceCompleteReportedRef = useRef(false);
   // Load → "Read journal" resumes the saved session with the notebook open.
   const [panel, setPanel] = useState(openJournalOnLaunch ? 'journal' : null);
@@ -4842,26 +4843,38 @@ export function ThreeHUD({
   }, [controlsOpen, entranceActive, otherOverlayOpen, pauseOpen]);
 
   useEffect(() => {
+    // Stages 1-3 bypass React entirely: the attribute drives the CSS in
+    // globals.css (.hud-stage-gate), because routing each stage through state
+    // re-rendered the whole HUD four times during the reveal — measured as
+    // ~300-400ms of main-thread block per flip. Only stage 4 becomes state:
+    // it gates the interaction prompts' ready/disabled props below.
+    const setStageAttribute = stage => {
+      hudRootRef.current?.setAttribute('data-entrance-stage', String(stage));
+    };
     if (!entranceActive) {
       entranceCompleteReportedRef.current = false;
       setHudEntranceStage(0);
+      setStageAttribute(0);
       return undefined;
     }
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setStageAttribute(4);
       setHudEntranceStage(4);
       return undefined;
     }
 
+    setStageAttribute(0);
+    onEntranceStageChange?.(0);
     const handles = HUD_ENTRANCE_TIMINGS_MS.map((delay, index) => (
-      window.setTimeout(() => setHudEntranceStage(index + 1), delay)
+      window.setTimeout(() => {
+        const stage = index + 1;
+        setStageAttribute(stage);
+        onEntranceStageChange?.(stage);
+        if (stage >= 4) setHudEntranceStage(4);
+      }, delay)
     ));
     return () => handles.forEach(handle => window.clearTimeout(handle));
-  }, [entranceActive]);
-
-  useEffect(() => {
-    if (!entranceActive) return;
-    onEntranceStageChange?.(hudEntranceStage);
-  }, [entranceActive, hudEntranceStage, onEntranceStageChange]);
+  }, [entranceActive, onEntranceStageChange]);
 
   useEffect(() => {
     if (!entranceActive || hudEntranceStage < 4 || entranceCompleteReportedRef.current) return undefined;
@@ -4991,42 +5004,38 @@ export function ThreeHUD({
     setMobileNarrativeOpen(false);
     setMapOpen(true);
   }, []);
-  const stagedHudClass = stage => (
-    hudEntranceStage >= stage
-      ? 'visible translate-y-0 opacity-100'
-      : 'invisible translate-y-1.5 opacity-0'
-  );
-  const stagedHudTransition = 'transition-[opacity,transform,visibility] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transform-none motion-reduce:transition-none';
-
+  // data-entrance-stage is deliberately NOT rendered by React: the entrance
+  // effect writes it imperatively so stage flips cannot re-render this whole
+  // tree. See .hud-stage-gate in globals.css.
   return (
     <div
+      ref={hudRootRef}
       aria-hidden={entranceActive ? undefined : 'true'}
       className={`pointer-events-none absolute inset-0 z-10 font-expedition transition-opacity duration-200 ${
         entranceActive ? 'visible opacity-100' : 'invisible opacity-0'
       }`}
       data-desktop-hud="polished"
       data-entrance-active={entranceActive ? 'true' : 'false'}
-      data-entrance-stage={hudEntranceStage}
       inert={entranceActive ? undefined : true}
     >
       {/* Regular HUD fades out while a diegetic view (status/examine) owns the screen */}
       <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || hudHidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
-      <TopChronometer className={`${stagedHudTransition} ${stagedHudClass(1)}`} />
+      <TopChronometer className="hud-stage-gate hud-stage-1" />
       <DirectiveTracker />
-      <PolishedTopObjective objective={objective} className={`${stagedHudTransition} ${stagedHudClass(1)}`} />
+      <PolishedTopObjective objective={objective} className="hud-stage-gate hud-stage-1" />
 
       <MobileVitalsPanel />
       <MobileMapButton onOpenMap={openMapModal} />
 
-      <div className={`absolute left-3 top-3 hidden animate-hud-rise motion-reduce:animate-none md:block ${stagedHudTransition} ${stagedHudClass(2)}`}>
+      <div className="absolute left-3 top-3 hidden animate-hud-rise motion-reduce:animate-none md:block hud-stage-gate hud-stage-2">
         <PolishedVitalStatusPanel />
       </div>
 
-      <div className={`absolute right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none md:block xl:hidden ${stagedHudTransition} ${stagedHudClass(2)}`}>
+      <div className="absolute right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none md:block xl:hidden hud-stage-gate hud-stage-2">
         <GameplayMinimap onOpenMap={openMapModal} />
       </div>
 
-      <div className={`absolute hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block ${stagedHudTransition} ${stagedHudClass(2)} bottom-5 right-5 top-5`}>
+      <div className="absolute hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block hud-stage-gate hud-stage-2 bottom-5 right-5 top-5">
         <PolishedFieldRail
             onOpenInventory={() => openInventoryTab('case')}
             onOpenMap={openMapModal}
@@ -5070,11 +5079,11 @@ export function ThreeHUD({
         lockedOpen={Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized')}
       />
 
-      <div className={`absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex ${stagedHudTransition} ${stagedHudClass(3)} md:w-[29rem]`}>
+      <div className="absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex hud-stage-gate hud-stage-3 md:w-[29rem]">
         <NarrativePanel polished />
       </div>
 
-      <div className={`absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise flex-col items-center gap-1.5 [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3 ${stagedHudTransition} ${stagedHudClass(3)}`}>
+      <div className="absolute bottom-[5.25rem] left-1/2 hidden -translate-x-1/2 animate-hud-rise flex-col items-center gap-1.5 [animation-delay:300ms] motion-reduce:animate-none md:flex lg:bottom-3 hud-stage-gate hud-stage-3">
         <ShotgunStatusChip />
         <ToolBelt onOpenJournal={openJournalPanel} compact />
       </div>
