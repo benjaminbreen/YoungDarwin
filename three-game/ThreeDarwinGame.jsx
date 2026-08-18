@@ -6,7 +6,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
-import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, SRGBColorSpace, Texture, UnsignedByteType, Vector3 } from 'three';
+import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, Quaternion, SRGBColorSpace, Texture, UnsignedByteType, Vector3, WebGLRenderTarget } from 'three';
 import { clampFrameDelta } from './frameTiming';
 import {
   isPerfCaptureRecording,
@@ -329,7 +329,9 @@ const QUALITY_PRESETS = {
     msaaSamples: 0,
     postprocessing: true,
     contextAntialias: true,
-    shadowQuality: 'standard',
+    // 'mobile' = standard cadence at 2048: the map-size saving this comment
+    // block promises, which previously wasn't wired (mobile got the full 4096).
+    shadowQuality: 'mobile',
     ao: false,
     postHalfFloat: false,
     reflections: false,
@@ -495,7 +497,7 @@ const TRANSITION_READY_DEADLINE_MS = 8000;
 const TRANSITION_COMPILE_TIMEOUT_MS = 1500;
 const TRANSITION_OPTIONAL_LOADER_GRACE_MS = 900;
 const SCENE_COST_BUCKET_LIMIT = 40;
-const SHADOW_QUALITY_MODES = ['low', 'standard', 'high', 'ultra'];
+const SHADOW_QUALITY_MODES = ['low', 'mobile', 'standard', 'high', 'ultra'];
 const OPENING_RENDER_DPR = [1, 1];
 // three r182 dropped PCFSoftShadowMap from the shader define table, so
 // requesting it silently compiles unfiltered BASIC (1-tap) shadows.
@@ -665,8 +667,11 @@ function geometryTriangleCount(geometry) {
 
 function materialDrawCallCount(geometry, material) {
   if (!geometry || !material) return 0;
+  // three only splits a draw per geometry group when the material is an array;
+  // a single material renders grouped geometry (Box: 6, Cylinder: 3) in one
+  // call. Charging groups unconditionally inflated hand-built props ~5x.
   if (Array.isArray(material)) return Math.max(1, geometry.groups?.length || material.length);
-  return Math.max(1, geometry.groups?.length || 1);
+  return 1;
 }
 
 function renderSourceFor(object) {
@@ -1494,6 +1499,15 @@ function OpeningVisualReadySignal({
   const announcedSequenceRef = useRef(null);
   const compiledSequenceRef = useRef(null);
   const compilingSequenceRef = useRef(null);
+  const warmedSequenceRef = useRef(null);
+  const warmHeadingsRef = useRef(null);
+  const warmTargetRef = useRef(null);
+  const warmCameraRef = useRef(null);
+
+  useEffect(() => () => {
+    warmTargetRef.current?.dispose();
+    warmTargetRef.current = null;
+  }, []);
 
   useFrame((_, delta) => {
     if (!active || !sequenceId) {
@@ -1509,6 +1523,8 @@ function OpeningVisualReadySignal({
       announcedSequenceRef.current = null;
       compiledSequenceRef.current = null;
       compilingSequenceRef.current = null;
+      warmedSequenceRef.current = null;
+      warmHeadingsRef.current = null;
     }
     if (!contentReady) return;
 
@@ -1627,6 +1643,22 @@ function OpeningVisualReadySignal({
       return;
     }
 
+    // The overlay is still opaque here, so this is the one place the heavy
+    // half of warming — first-draw uniform fetch, geometry upload, driver
+    // pipeline builds for every compass heading — is completely invisible.
+    // Without it that cost surfaced later as a >1s freeze during settle (or,
+    // before the warm passes existed, as the first-swivel stutter).
+    if (warmedSequenceRef.current !== sequenceId) {
+      if (!warmHeadingsRef.current) warmHeadingsRef.current = [...WARM_RENDER_HEADINGS];
+      const warmHeadings = warmHeadingsRef.current;
+      if (warmHeadings.length) {
+        renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, warmHeadings.pop());
+        return;
+      }
+      warmedSequenceRef.current = sequenceId;
+      warmHeadingsRef.current = null;
+    }
+
     if (delta * 1000 > STARTUP_STREAM_FRAME_BUDGET_MS) {
       stableFramesRef.current = 0;
       return;
@@ -1728,6 +1760,51 @@ const PREWARM_COOLDOWN_MS = 1500;
 // uniforms, so textures stay on the CPU. initTexture forces those, drained a
 // few per frame so this does not simply relocate the stall. Geometry upload
 // has no equivalent public API in three and still lands on first draw.
+// Compiling a program does not touch its uniform locations: three fetches
+// those lazily on the program's first real draw (`onFirstUse`), which forces
+// the driver to finish linking — measured as seconds of boot/first-sweep CPU.
+// After each prewarm compile, render the scene once per compass heading into
+// this small throwaway target, one heading per frame. Every program a swivel
+// could reach gets its first draw here, behind the settle, instead of inside
+// the player's first look around.
+const WARM_RENDER_SIZE = 64;
+const WARM_RENDER_HEADINGS = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+const _warmYaw = new Quaternion();
+const _warmUp = new Vector3(0, 1, 0);
+
+function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, heading) {
+  let warmTarget = warmTargetRef.current;
+  if (!warmTarget) {
+    warmTarget = new WebGLRenderTarget(WARM_RENDER_SIZE, WARM_RENDER_SIZE);
+    warmTargetRef.current = warmTarget;
+  }
+  let warmCamera = warmCameraRef.current;
+  if (!warmCamera) {
+    warmCamera = camera.clone();
+    warmCameraRef.current = warmCamera;
+  }
+  warmCamera.position.copy(camera.position);
+  warmCamera.fov = camera.fov;
+  warmCamera.near = camera.near;
+  warmCamera.far = camera.far;
+  // Keep the rig's pitch, spin the heading: yaw-first quaternion product.
+  _warmYaw.setFromAxisAngle(_warmUp, heading);
+  warmCamera.quaternion.copy(_warmYaw).multiply(camera.quaternion);
+  warmCamera.updateMatrixWorld();
+  warmCamera.updateProjectionMatrix();
+  const previousTarget = gl.getRenderTarget();
+  gl.__darwinWarmRender = true;
+  try {
+    gl.setRenderTarget(warmTarget);
+    gl.render(scene, warmCamera);
+  } catch {
+    // A warm pass must never take gameplay down with it.
+  } finally {
+    gl.__darwinWarmRender = false;
+    gl.setRenderTarget(previousTarget);
+  }
+}
+
 function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
   const { gl, scene, camera } = useThree();
   const seenGeometriesRef = useRef(-1);
@@ -1738,15 +1815,36 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
   const zoneRef = useRef(null);
   const seenMaterialsRef = useRef(new Set());
   const seenTexturesRef = useRef(new Set());
+  const warmHeadingsRef = useRef(null);
+  const warmTargetRef = useRef(null);
+  const warmCameraRef = useRef(null);
+  const lastCameraQuatRef = useRef(null);
+
+  useEffect(() => () => {
+    warmTargetRef.current?.dispose();
+    warmTargetRef.current = null;
+  }, []);
 
   useFrame(() => {
     if (!zoneId || !contentPhase || contentPhase < contentTarget) return;
+    // A warm pass is a full extra scene render; stacking one onto a frame
+    // where the camera is already sweeping is precisely the stutter this
+    // system exists to remove. Drain only while the view is still.
+    let cameraStill = true;
+    const lastQuat = lastCameraQuatRef.current;
+    if (!lastQuat) {
+      lastCameraQuatRef.current = camera.quaternion.clone();
+    } else {
+      cameraStill = 1 - Math.abs(lastQuat.dot(camera.quaternion)) < 3e-6;
+      lastQuat.copy(camera.quaternion);
+    }
     if (zoneRef.current !== zoneId) {
       zoneRef.current = zoneId;
       seenGeometriesRef.current = -1;
       dirtySinceRef.current = 0;
       lastRunAtRef.current = 0;
       queueRef.current = null;
+      warmHeadingsRef.current = null;
       // Fresh sets per zone: the departing zone's materials and textures are
       // on their way out, and holding them here would keep them alive.
       seenMaterialsRef.current = new Set();
@@ -1772,6 +1870,16 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
         } catch {
           // A texture whose source is not decodable yet simply uploads later.
         }
+      }
+      return;
+    }
+
+    // Then drain warm renders, one heading per frame. Runs after the compile
+    // and texture queues so a warm frame never stacks on top of an upload.
+    const warmHeadings = warmHeadingsRef.current;
+    if (warmHeadings?.length) {
+      if (cameraStill) {
+        renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, warmHeadings.pop());
       }
       return;
     }
@@ -1825,6 +1933,9 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
         if (timeoutId != null) window.clearTimeout(timeoutId);
         subject.children = [];
         runningRef.current = false;
+        // The compiled programs still owe their first draw (uniform-location
+        // fetch). Pay it now, one heading per frame, while nothing is moving.
+        warmHeadingsRef.current = [...WARM_RENDER_HEADINGS];
       });
   });
 
@@ -2599,6 +2710,11 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
           luminanceThreshold={MathUtils.clamp(bloomThreshold + postGradeTuning.bloomThresholdShift, 0, 1)}
           luminanceSmoothing={interiorFx?.bloomSmoothing ?? 0.18}
           mipmapBlur
+          // At radius 0.4 each deeper mip's share falls 0.4x per upsample, so
+          // levels 6-8 carry <3% of the halo — but each is a fullscreen pass
+          // (6 of the frame's ~20), and pass switches are the expensive unit
+          // on mobile tile GPUs.
+          levels={5}
           radius={interiorFx?.bloomRadius ?? 0.4}
         />
       )}

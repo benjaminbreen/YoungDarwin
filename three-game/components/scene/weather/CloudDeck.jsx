@@ -163,8 +163,6 @@ export function CloudDeck() {
         vec2 q = p + warp * 1.15;
 
         float shape = fbm5(q);
-        float detail = fbm5(q * 3.1 - drift * 0.7);
-        float field = shape + detail * 0.28;
 
         // Macro mass: a very low-frequency field clusters the puffs. Where
         // mass runs high the carve threshold drops and neighbouring puffs
@@ -179,30 +177,50 @@ export function CloudDeck() {
         // bank there — the trade-wind look, and a depth cue for the skyline.
         float horizonBank = (1.0 - smoothstep(0.05, 0.32, dir.y)) * smoothstep(0.08, 0.45, uCumulus);
         float cumulusThreshold = clamp(mix(0.86, 0.52, uCumulus) - massBias * 0.3 - horizonBank * 0.15, 0.2, 0.95);
-        float puff = smoothstep(cumulusThreshold, cumulusThreshold + 0.16, field);
-        float interior = smoothstep(cumulusThreshold + 0.06, cumulusThreshold + 0.5, field);
         float fairWeather = 1.0 - smoothstep(0.3, 0.55, uCover);
+
+        // --- Overcast deck: coverage moves the carve threshold; horizon murk
+        // reads as solid distance haze so a closed sky has zero blue gap.
+        float deckThreshold = mix(0.74, 0.1, uCover);
+        float murk = (1.0 - smoothstep(0.04, 0.38, dir.y)) * smoothstep(0.18, 0.6, uCover);
+
+        // Early rejection before the expensive octave banks. field can exceed
+        // shape by at most 0.28 (detail's amplitude), so a pixel whose upper
+        // bound clears neither carve threshold provably has puff == deck == 0
+        // and skips the detail fbm5 and every lighting probe. The final
+        // coverage discard below is unchanged; this only fast-paths pixels it
+        // would have rejected anyway, so output is identical.
+        float fieldMax = shape + 0.28;
+        bool puffPossible = fieldMax > cumulusThreshold;
+        bool deckPossible = uCover > 0.04 && fieldMax > deckThreshold;
 
         // --- Near scud layer: the same field projected onto a lower, closer
         // ceiling, drifting ~2.3x faster. The parallax between the two layers
         // is what makes puffs read as passing overhead rather than painted on
         // the dome. Fair-weather only, and kept off the horizon band where the
-        // main layer's bank owns the look.
-        vec2 p2 = dir.xz / (max(dir.y, 0.0) + 0.34) * 2.1 * puffFreq + drift * 2.3 + vec2(47.3, -13.1);
-        vec2 warp2 = vec2(fbm3(p2 * 0.7 + 3.7), fbm3(p2 * 0.7 - 15.2)) - 0.5;
-        float shape2 = fbm5(p2 + warp2 * 0.9);
-        float scudThreshold = clamp(mix(0.94, 0.7, uCumulus), 0.3, 0.97);
-        float scud = smoothstep(scudThreshold, scudThreshold + 0.16, shape2)
-          * fairWeather * smoothstep(0.1, 0.36, dir.y);
-        // Thick wisp cores shade like bellies; without this a big overhead
-        // wisp reads as flat glowing fog and bloom eats the layers below.
-        float scudInterior = smoothstep(scudThreshold + 0.05, scudThreshold + 0.34, shape2);
+        // main layer's bank owns the look — both gates are plain multipliers,
+        // so when either is zero the whole bank can be skipped exactly.
+        float scudBand = fairWeather * smoothstep(0.1, 0.36, dir.y);
+        float scud = 0.0;
+        float scudInterior = 0.0;
+        if (scudBand > 0.0) {
+          vec2 p2 = dir.xz / (max(dir.y, 0.0) + 0.34) * 2.1 * puffFreq + drift * 2.3 + vec2(47.3, -13.1);
+          vec2 warp2 = vec2(fbm3(p2 * 0.7 + 3.7), fbm3(p2 * 0.7 - 15.2)) - 0.5;
+          float shape2 = fbm5(p2 + warp2 * 0.9);
+          float scudThreshold = clamp(mix(0.94, 0.7, uCumulus), 0.3, 0.97);
+          scud = smoothstep(scudThreshold, scudThreshold + 0.16, shape2) * scudBand;
+          // Thick wisp cores shade like bellies; without this a big overhead
+          // wisp reads as flat glowing fog and bloom eats the layers below.
+          scudInterior = smoothstep(scudThreshold + 0.05, scudThreshold + 0.34, shape2);
+        }
 
-        // --- Overcast deck: coverage moves the carve threshold; horizon murk
-        // reads as solid distance haze so a closed sky has zero blue gap.
-        float deckThreshold = mix(0.74, 0.1, uCover);
+        if (!puffPossible && !deckPossible && murk < 0.01 && scud * 0.85 < 0.01) discard;
+
+        float detail = fbm5(q * 3.1 - drift * 0.7);
+        float field = shape + detail * 0.28;
+        float puff = smoothstep(cumulusThreshold, cumulusThreshold + 0.16, field);
+        float interior = smoothstep(cumulusThreshold + 0.06, cumulusThreshold + 0.5, field);
         float deck = smoothstep(deckThreshold, deckThreshold + 0.3, field) * smoothstep(0.04, 0.3, uCover);
-        float murk = (1.0 - smoothstep(0.04, 0.38, dir.y)) * smoothstep(0.18, 0.6, uCover);
 
         float coverage = max(max(max(puff, deck), murk), scud * 0.85);
         if (coverage < 0.01) discard;

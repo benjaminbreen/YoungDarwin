@@ -359,10 +359,19 @@ function applyRuntimeObstacleOffset(obstacle, zoneId = currentZoneId, offsets = 
   };
 }
 
+// The store replaces pushableObstacleOffsets immutably on every push commit,
+// so object identity is a valid cache key. Without this, the first pushed
+// crate disabled obstacle caching for the rest of the session and every
+// 0.14s interaction probe rebuilt the full obstacle list.
+const offsetRuntimeObstacleCache = new WeakMap();
+
 export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const hasRuntimeOffsets = offsets && Object.keys(offsets).length > 0;
   if (!hasRuntimeOffsets) {
     const cached = staticRuntimeObstacleCache.get(zoneId);
+    if (cached) return cached;
+  } else {
+    const cached = offsetRuntimeObstacleCache.get(offsets)?.get(zoneId);
     if (cached) return cached;
   }
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
@@ -375,7 +384,16 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   // wildlife avoidance, camera queries, and spine hazards all agree.
   const matureCacti = buildMatureCactusObstacles(getEcology(zoneId), zoneId);
   const runtimeObstacles = withMobility([...mapped, ...regional, ...matureCacti]);
-  if (!hasRuntimeOffsets) staticRuntimeObstacleCache.set(zoneId, runtimeObstacles);
+  if (!hasRuntimeOffsets) {
+    staticRuntimeObstacleCache.set(zoneId, runtimeObstacles);
+  } else {
+    let byZone = offsetRuntimeObstacleCache.get(offsets);
+    if (!byZone) {
+      byZone = new Map();
+      offsetRuntimeObstacleCache.set(offsets, byZone);
+    }
+    byZone.set(zoneId, runtimeObstacles);
+  }
   return runtimeObstacles;
 }
 

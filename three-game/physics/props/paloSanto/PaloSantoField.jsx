@@ -4,8 +4,9 @@
 // fixed obstacles; reachable outer branches can flex, snap into dynamic rigid
 // bodies, collide with the terrain, and be collected as aromatic twig samples.
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
 import {
   BreakablePlantField,
@@ -120,28 +121,56 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
   return pieces;
 }
 
-function SiteDressing({ site, zoneId }) {
-  const roots = useMemo(() => {
-    const dressing = buildPaloSantoDressing(site);
-    const siteQuat = new THREE.Quaternion().setFromAxisAngle(UP, site.yaw || 0);
-    return dressing.roots.map(root => {
-      const quaternion = siteQuat.clone().multiply(root.quaternion);
-      return { ...root, rotation: new THREE.Euler().setFromQuaternion(quaternion) };
-    });
-  }, [site]);
+// Surface roots for every site, merged into one static mesh per bark tint —
+// this was one mesh per root (23 draw calls at Post Office Bay).
+function ZoneDressing({ sites, zoneId }) {
   const materials = getPaloSantoMaterials();
-  const groundY = terrainHeight(site.x, site.z, zoneId);
+  const merged = useMemo(() => {
+    const byBark = new Map();
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const siteQuat = new THREE.Quaternion();
+    for (const site of sites) {
+      const dressing = buildPaloSantoDressing(site);
+      siteQuat.setFromAxisAngle(UP, site.yaw || 0);
+      const groundY = terrainHeight(site.x, site.z, zoneId);
+      position.set(site.x, groundY - 0.045, site.z);
+      for (const root of dressing.roots) {
+        quaternion.copy(siteQuat).multiply(root.quaternion);
+        scale.set(root.radius, root.length, root.radius);
+        const geometry = getPaloSantoBranchGeometry(root.variant).clone();
+        geometry.applyMatrix4(matrix.compose(position, quaternion, scale));
+        const barkIndex = root.barkIndex % materials.bark.length;
+        if (!byBark.has(barkIndex)) byBark.set(barkIndex, []);
+        byBark.get(barkIndex).push(geometry);
+      }
+    }
+    const buckets = [];
+    for (const [barkIndex, list] of byBark) {
+      const geometry = mergeGeometries(list, false);
+      if (!geometry) continue;
+      geometry.computeBoundingSphere();
+      for (const part of list) part.dispose();
+      buckets.push({ barkIndex, geometry });
+    }
+    return buckets;
+  }, [materials, sites, zoneId]);
+
+  useEffect(() => () => {
+    for (const bucket of merged) bucket.geometry.dispose();
+  }, [merged]);
+
   return (
-    <group position={[site.x, groundY - 0.045, site.z]}>
-      {roots.map((root, index) => (
+    <group>
+      {merged.map(bucket => (
         <mesh
-          key={`root-${index}`}
+          key={`roots-${bucket.barkIndex}`}
           castShadow
           receiveShadow
-          geometry={getPaloSantoBranchGeometry(root.variant)}
-          material={materials.bark[root.barkIndex % materials.bark.length]}
-          rotation={[root.rotation.x, root.rotation.y, root.rotation.z]}
-          scale={[root.radius, root.length, root.radius]}
+          geometry={bucket.geometry}
+          material={materials.bark[bucket.barkIndex]}
         />
       ))}
     </group>
@@ -238,7 +267,7 @@ const PALO_SANTO_SPEC = {
   getSites: getPaloSantoSites,
   inspectableType: 'palo_santo',
   buildZonePieces,
-  SiteDressing,
+  ZoneDressing,
   renderPiece,
   dormantVisualParts,
   // Every limb's geometry is procedurally unique, so instanced batching

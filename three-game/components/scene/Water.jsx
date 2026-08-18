@@ -3263,6 +3263,9 @@ function WaterSurface({
   );
 
   const reflectionRT = useMemo(() => {
+    // Mobile disables the mirror pass outright; don't hold a multisampled
+    // render target for a pass that never runs.
+    if (!reflections) return null;
     const rt = new THREE.WebGLRenderTarget(qualityConfig.reflectionRes, qualityConfig.reflectionRes, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
@@ -3277,7 +3280,7 @@ function WaterSurface({
     });
     rt.texture.colorSpace = THREE.SRGBColorSpace;
     return rt;
-  }, [qualityConfig.reflectionRes, qualityConfig.reflectionSamples]);
+  }, [qualityConfig.reflectionRes, qualityConfig.reflectionSamples, reflections]);
 
   const deepRef = useRef(null);
   const waterRef = useRef(null);
@@ -3311,8 +3314,12 @@ function WaterSurface({
   const handleBeforeRender = useCallback(renderer => {
     const target = renderer.getRenderTarget();
     // The mirror pass renders the world reflected; grabbing that as the
-    // refraction source would put the sky under the water.
-    if (target === reflectionRT) return;
+    // refraction source would put the sky under the water. (Null-check both:
+    // with reflections off the RT is null, and so is the canvas target.)
+    if (reflectionRT && target === reflectionRT) return;
+    // Shader-warming passes render the scene into a throwaway 64px target;
+    // grabbing there would resize the refraction texture twice per warm frame.
+    if (renderer.__darwinWarmRender) return;
     renderer.getDrawingBufferSize(_drawSize);
     const width = target ? target.width : Math.floor(_drawSize.x);
     const height = target ? target.height : Math.floor(_drawSize.y);
@@ -3788,7 +3795,7 @@ function WaterSurface({
   useEffect(() => () => {
     grabRef.current?.dispose();
     grabRef.current = null;
-    reflectionRT.dispose();
+    reflectionRT?.dispose();
   }, [reflectionRT]);
 
   return (

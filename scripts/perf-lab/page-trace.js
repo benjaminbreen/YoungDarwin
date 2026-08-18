@@ -375,8 +375,11 @@
 
   function drawCallCount(geometry, material) {
     if (!geometry || !material) return 0;
+    // three only splits a draw per geometry group when the material is an
+    // array; single-material grouped geometry (Box: 6, Cylinder: 3) is one
+    // call. Charging groups unconditionally inflated hand-built props ~5x.
     if (Array.isArray(material)) return Math.max(1, geometry.groups?.length || material.length);
-    return Math.max(1, geometry.groups?.length || 1);
+    return 1;
   }
 
   function triangleCount(geometry) {

@@ -6,8 +6,9 @@
 // This module only supplies the opuntia-specific plant spec: piece graph,
 // geometry/materials, site dressing, and narrator copy.
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { movementTerrainHeight, terrainHeight } from '../../../world/terrain';
 import {
   BreakablePlantField,
@@ -139,63 +140,95 @@ function buildZonePieces(zoneId, sites = getPricklyPearSites(zoneId)) {
   return pieces;
 }
 
-// Static, non-physics dressing that seats a plant in the ground: basalt
+// Static, non-physics dressing that seats each plant in the ground: basalt
 // pebbles, dry tufts, and usually one dried fallen pad. Grounded on the
-// visual terrain function (not the movement surface).
-function SiteDressing({ site, zoneId }) {
-  const dressing = useMemo(() => buildSiteDressing(site), [site]);
+// visual terrain function (not the movement surface). Merged across every
+// site into one mesh per material — this was one mesh per scrap (73 draw
+// calls at Post Office Bay) for geometry that never moves.
+function ZoneDressing({ sites, zoneId }) {
   const materials = getPricklyPearMaterials();
+  const merged = useMemo(() => {
+    const pebbles = [];
+    const tufts = [];
+    const driedPads = [];
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const euler = new THREE.Euler();
+    for (const site of sites) {
+      const dressing = buildSiteDressing(site);
+      for (const pebble of dressing.pebbles) {
+        position.set(
+          site.x + pebble.x,
+          terrainHeight(site.x + pebble.x, site.z + pebble.z, zoneId) + pebble.scale * (1 - pebble.sink),
+          site.z + pebble.z,
+        );
+        quaternion.setFromAxisAngle(UP, pebble.yaw);
+        scale.set(
+          pebble.scale * pebble.stretch[0],
+          pebble.scale * pebble.stretch[1],
+          pebble.scale * pebble.stretch[2],
+        );
+        const geometry = new THREE.DodecahedronGeometry(1, 0);
+        geometry.applyMatrix4(matrix.compose(position, quaternion, scale));
+        pebbles.push(geometry);
+      }
+      for (const tuft of dressing.tufts) {
+        position.set(
+          site.x + tuft.x,
+          terrainHeight(site.x + tuft.x, site.z + tuft.z, zoneId) - 0.01,
+          site.z + tuft.z,
+        );
+        quaternion.setFromAxisAngle(UP, tuft.yaw);
+        scale.setScalar(tuft.scale);
+        const geometry = getTuftGeometry().clone();
+        geometry.applyMatrix4(matrix.compose(position, quaternion, scale));
+        tufts.push(geometry);
+      }
+      if (dressing.fallenPad) {
+        position.set(
+          site.x + dressing.fallenPad.x,
+          terrainHeight(site.x + dressing.fallenPad.x, site.z + dressing.fallenPad.z, zoneId) + 0.008,
+          site.z + dressing.fallenPad.z,
+        );
+        quaternion.setFromEuler(euler.set(Math.PI / 2 * 0.94, dressing.fallenPad.yaw, 0));
+        scale.set(dressing.fallenPad.width, dressing.fallenPad.height, dressing.fallenPad.width);
+        const geometry = getPadGeometry(1).clone();
+        geometry.applyMatrix4(matrix.compose(position, quaternion, scale));
+        driedPads.push(geometry);
+      }
+    }
+    const mergeBucket = list => {
+      if (!list.length) return null;
+      const bucket = mergeGeometries(list, false);
+      bucket?.computeBoundingSphere();
+      for (const geometry of list) geometry.dispose();
+      return bucket;
+    };
+    return {
+      pebbles: mergeBucket(pebbles),
+      tufts: mergeBucket(tufts),
+      driedPads: mergeBucket(driedPads),
+    };
+  }, [sites, zoneId]);
+
+  useEffect(() => () => {
+    merged.pebbles?.dispose();
+    merged.tufts?.dispose();
+    merged.driedPads?.dispose();
+  }, [merged]);
+
   return (
     <group>
-      {dressing.pebbles.map((pebble, index) => (
-        <mesh
-          key={`pebble-${index}`}
-          castShadow
-          receiveShadow
-          position={[
-            site.x + pebble.x,
-            terrainHeight(site.x + pebble.x, site.z + pebble.z, zoneId) + pebble.scale * (1 - pebble.sink),
-            site.z + pebble.z,
-          ]}
-          rotation={[0, pebble.yaw, 0]}
-          scale={[
-            pebble.scale * pebble.stretch[0],
-            pebble.scale * pebble.stretch[1],
-            pebble.scale * pebble.stretch[2],
-          ]}
-          material={materials.pebble}
-        >
-          <dodecahedronGeometry args={[1, 0]} />
-        </mesh>
-      ))}
-      {dressing.tufts.map((tuft, index) => (
-        <mesh
-          key={`tuft-${index}`}
-          position={[
-            site.x + tuft.x,
-            terrainHeight(site.x + tuft.x, site.z + tuft.z, zoneId) - 0.01,
-            site.z + tuft.z,
-          ]}
-          rotation={[0, tuft.yaw, 0]}
-          scale={tuft.scale}
-          geometry={getTuftGeometry()}
-          material={materials.tuft}
-        />
-      ))}
-      {dressing.fallenPad && (
-        <mesh
-          castShadow
-          receiveShadow
-          position={[
-            site.x + dressing.fallenPad.x,
-            terrainHeight(site.x + dressing.fallenPad.x, site.z + dressing.fallenPad.z, zoneId) + 0.008,
-            site.z + dressing.fallenPad.z,
-          ]}
-          rotation={[Math.PI / 2 * 0.94, dressing.fallenPad.yaw, 0]}
-          scale={[dressing.fallenPad.width, dressing.fallenPad.height, dressing.fallenPad.width]}
-          geometry={getPadGeometry(1)}
-          material={materials.driedPad}
-        />
+      {merged.pebbles && (
+        <mesh castShadow receiveShadow geometry={merged.pebbles} material={materials.pebble} />
+      )}
+      {merged.tufts && (
+        <mesh geometry={merged.tufts} material={materials.tuft} />
+      )}
+      {merged.driedPads && (
+        <mesh castShadow receiveShadow geometry={merged.driedPads} material={materials.driedPad} />
       )}
     </group>
   );
@@ -279,7 +312,7 @@ const PRICKLY_PEAR_SPEC = {
   getSites: getPricklyPearSites,
   inspectableType: 'opuntia',
   buildZonePieces,
-  SiteDressing,
+  ZoneDressing,
   renderPiece,
   // Beyond interaction range, keep the authored plant silhouette in a handful
   // of instanced draws. Tiny studs and buds return with the near-field bodies.

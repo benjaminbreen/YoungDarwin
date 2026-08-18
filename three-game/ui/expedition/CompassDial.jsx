@@ -33,14 +33,49 @@ function bearingDirection(bearing) {
   return directions[Math.round(bearing / 45) % directions.length];
 }
 
-export function CompassDial({ className = '' }) {
-  const heading = useThreeGameStore(state => state.minimapPlayerPose.heading);
+function bearingReadout(bearing, direction) {
+  return `${Math.round(bearing).toString().padStart(3, '0')}° ${direction}`;
+}
+
+// The rose is ~90 SVG nodes. Subscribing it to heading as React state cost a
+// full re-render + commit at every 1.5° step while moving; the dial now
+// renders once and the needle is steered imperatively, AimCrosshair-style.
+export const CompassDial = React.memo(function CompassDial({ className = '' }) {
+  const rootRef = React.useRef(null);
+  const roseRef = React.useRef(null);
+  const readoutRef = React.useRef(null);
+  const heading = useThreeGameStore.getState().minimapPlayerPose.heading;
   const bearing = normalizedBearing(heading);
   const direction = bearingDirection(bearing);
   const roseAngle = -bearing;
 
+  React.useEffect(() => {
+    let lastHeading = null;
+    const apply = nextHeading => {
+      if (nextHeading === lastHeading) return;
+      lastHeading = nextHeading;
+      const nextBearing = normalizedBearing(nextHeading);
+      const nextDirection = bearingDirection(nextBearing);
+      const rose = roseRef.current;
+      if (rose) {
+        // Both writes: the mount settle animation in globals.css reads the
+        // CSS var, the steady state reads the inline transform.
+        rose.style.setProperty('--compass-rose-angle', `${-nextBearing}deg`);
+        rose.style.transform = `rotate(${-nextBearing}deg)`;
+      }
+      if (readoutRef.current) readoutRef.current.textContent = bearingReadout(nextBearing, nextDirection);
+      rootRef.current?.setAttribute(
+        'aria-label',
+        `Pocket compass bearing ${Math.round(nextBearing).toString().padStart(3, '0')} degrees ${nextDirection}`,
+      );
+    };
+    apply(useThreeGameStore.getState().minimapPlayerPose.heading);
+    return useThreeGameStore.subscribe(state => apply(state.minimapPlayerPose.heading));
+  }, []);
+
   return (
     <div
+      ref={rootRef}
       data-testid="gameplay-compass"
       role="img"
       aria-label={`Pocket compass bearing ${Math.round(bearing).toString().padStart(3, '0')} degrees ${direction}`}
@@ -79,6 +114,7 @@ export function CompassDial({ className = '' }) {
                 ))}
               </g>
               <g
+                ref={roseRef}
                 className="expedition-compass-rose"
                 style={{
                   '--compass-rose-angle': `${roseAngle}deg`,
@@ -134,13 +170,16 @@ export function CompassDial({ className = '' }) {
               <circle cx="60" cy="60" r="55.7" fill="none" stroke="#fff0bd" strokeWidth="0.65" opacity="0.36" />
         </svg>
         <span className="expedition-compass-glint absolute -inset-[45%] rotate-[24deg] bg-[linear-gradient(90deg,transparent_42%,rgba(255,247,215,0.24)_50%,transparent_58%)]" />
-        <span className="absolute bottom-[8%] left-1/2 -translate-x-1/2 rounded-full border border-[#5f411d]/55 bg-[rgba(242,222,173,0.88)] px-[9%] py-[1.5%] font-expedition text-[9px] font-bold tabular-nums tracking-[0.08em] text-[#4a3118] shadow-[0_1px_4px_rgba(42,25,10,0.42)]">
-          {Math.round(bearing).toString().padStart(3, '0')}° {direction}
+        <span
+          ref={readoutRef}
+          className="absolute bottom-[8%] left-1/2 -translate-x-1/2 rounded-full border border-[#5f411d]/55 bg-[rgba(242,222,173,0.88)] px-[9%] py-[1.5%] font-expedition text-[9px] font-bold tabular-nums tracking-[0.08em] text-[#4a3118] shadow-[0_1px_4px_rgba(42,25,10,0.42)]"
+        >
+          {bearingReadout(bearing, direction)}
         </span>
       </div>
     </div>
   );
-}
+});
 
 export function compassBearingFromHeading(heading) {
   return normalizedBearing(heading);

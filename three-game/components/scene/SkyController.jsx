@@ -224,6 +224,19 @@ const SHADOW_QUALITY = {
     activeRefreshEveryNFrames: 2,
     idleRefreshEveryNFrames: 4,
   },
+  // Phones: standard's cadence (the 'low' tier's skipped refreshes ghost), a
+  // quarter of its texels. At mobile's ~0.5MP drawing buffer the shadow pass
+  // was 32x the main pass's pixel count; 2048 is still 8x and PCF hides the
+  // difference on a phone screen.
+  mobile: {
+    name: 'mobile',
+    mapSize: 2048,
+    extentScale: 1,
+    radiusBoost: 0,
+    anchorMinTexelSize: 0.024,
+    activeRefreshEveryNFrames: 1,
+    idleRefreshEveryNFrames: 3,
+  },
   standard: {
     name: 'standard',
     mapSize: 4096,

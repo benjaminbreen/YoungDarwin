@@ -1564,9 +1564,16 @@ export function BreakablePlantField({ spec }) {
       renderKind: `physics-${spec.id}`,
       renderPath: null,
     }}>
-      {sites.map(site => (
-        <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
-      ))}
+      {spec.ZoneDressing ? (
+        // One component for the whole zone's dressing, so a spec can merge
+        // its pebbles/tufts/roots into a handful of static draws instead of
+        // one mesh per scrap (prickly pear alone was 73 draw calls of it).
+        <spec.ZoneDressing sites={sites} zoneId={currentZoneId} />
+      ) : (
+        sites.map(site => (
+          <SiteDressing key={`dressing-${site.id}`} site={site} zoneId={currentZoneId} />
+        ))
+      )}
       {usesDormantPlantLod && (
         spec.dormantLodStrategy === 'merged-per-site' ? (
           // The stable zone `pieces` array keeps the merge memo from re-running
