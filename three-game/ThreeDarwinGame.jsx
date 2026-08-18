@@ -8,6 +8,7 @@ import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA 
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, Quaternion, SRGBColorSpace, Texture, UnsignedByteType, Vector3, WebGLRenderTarget } from 'three';
 import { clampFrameDelta } from './frameTiming';
+import { sweepInactiveGltfGpu } from './components/assets/gltfCachePolicy';
 import { warmGateRuntime } from './world/warmGateRuntime';
 import {
   isPerfCaptureRecording,
@@ -4401,6 +4402,23 @@ export default function ThreeDarwinGame({
       if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
     };
   }, [transition?.committedAt, transition?.id]);
+
+  // Travel is where GPU memory peaked: the origin zone's models kept their
+  // textures and geometries resident after unmounting, so each travel added
+  // a zone's worth of orphaned GPU allocations — measured 234 orphaned
+  // textures after one round trip, and the mechanism behind iOS Safari's
+  // out-of-memory tab kill mid-travel. Sweep once as soon as the origin has
+  // unmounted behind the opaque chart (that removes the two-zone peak), and
+  // again after arrival as a catch-all for late unmounts.
+  useEffect(() => {
+    const phase = transition?.phase;
+    if (phase !== 'mounting' && phase !== undefined) return undefined;
+    const delay = phase === 'mounting' ? 500 : 2500;
+    const handle = window.setTimeout(() => {
+      sweepInactiveGltfGpu();
+    }, delay);
+    return () => window.clearTimeout(handle);
+  }, [transition?.phase, transition?.id]);
 
   // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
   // the buffer it draws into: the composer target when postprocessing is on,
