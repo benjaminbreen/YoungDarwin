@@ -2549,10 +2549,11 @@ test('Post Office Bay uses compact verified terrain textures for its two hero gr
     'galapagos-sand_albedo-lossless-v1.webp',
     'galapagos-sand_nrh-512-lossless-v1.webp',
   ];
+  // The full-size sources are WebP since 2026-08-18 (optimize-world-textures).
   const sourceFiles = [
-    'sandy-tuff_nrh.png',
-    'galapagos-sand_albedo.png',
-    'galapagos-sand_nrh.png',
+    'sandy-tuff_nrh.webp',
+    'galapagos-sand_albedo.webp',
+    'galapagos-sand_nrh.webp',
   ];
   for (const filename of optimizedFiles) {
     assert.match(materialSource, new RegExp(filename.replaceAll('.', '\\.')));
@@ -2568,7 +2569,9 @@ test('Post Office Bay uses compact verified terrain textures for its two hero gr
     ).size,
     0,
   );
-  assert.ok(optimizedBytes < sourceBytes * 0.4);
+  // The 0.4 margin dated from PNG sources; the sources are WebP now, so the
+  // compact 512 variants only need to stay genuinely smaller.
+  assert.ok(optimizedBytes < sourceBytes * 0.85);
 });
 
 test('landing on loose props creates a mass-sensitive downward settle without launch', () => {
@@ -2933,14 +2936,32 @@ test('Coastal Scrubland mature cacti participate in shared movement collision', 
   ) >= cactus.radius + 0.42 - 0.000001);
 });
 
-test('campaign stools use a responsive one-hand skeletal grip at authored scale', () => {
-  const stool = PROP_TYPES.lawsonCampaignStool;
-  const grip = carryGripForProp(stool);
+// A local fixture with the removed campaign stool's authored shape: these
+// tests cover the carry-grip and placement math, which must not depend on
+// which furniture happens to ship.
+const WIDE_ONE_HAND_CARRY_FIXTURE = {
+  collider: { shape: 'cuboid', halfExtents: [0.345, 0.303, 0.29] },
+  restOffset: 0.303,
+  behaviors: {
+    carryable: {
+      release: 0.28,
+      holdOffset: [0.2, 0.92, 0.16],
+      holdRotation: [0.08, -0.08, -0.18],
+      grip: 'rightHand',
+      gripOffset: [0.13, 0, 0.02],
+      animationStyle: 'freeHand',
+    },
+  },
+};
+
+test('wide one-hand props use a responsive skeletal grip at authored scale', () => {
+  const prop = WIDE_ONE_HAND_CARRY_FIXTURE;
+  const grip = carryGripForProp(prop);
   assert.equal(grip.mode, 'rightHand');
   assert.equal(grip.animationStyle, 'freeHand');
   assert.deepEqual(grip.offset, [0.13, 0, 0.02]);
   assert.equal(grip.scale, 1);
-  assert.ok(propHorizontalRadius(stool) > 0.4);
+  assert.ok(propHorizontalRadius(prop) > 0.4);
 });
 
 test('default skeletal carry grips stay centered on Darwin\'s hands', () => {
@@ -2953,7 +2974,7 @@ test('default skeletal carry grips stay centered on Darwin\'s hands', () => {
 });
 
 test('carry drop candidates start grounded beyond the player collider', () => {
-  const stool = PROP_TYPES.lawsonCampaignStool;
+  const stool = WIDE_ONE_HAND_CARRY_FIXTURE;
   const playerRadius = 0.36;
   const candidates = carryPlacementCandidates({
     prop: stool,
