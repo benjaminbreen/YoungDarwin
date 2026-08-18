@@ -18,6 +18,9 @@ export const PLAYER_PREFERENCE_DEFAULTS = Object.freeze({
   invertY: false,
   // Linear 0..1 scale applied on top of the existing dB master trim.
   masterVolume: 1,
+  // Multiplayer is unfinished; the menu entry is opt-in from Settings so
+  // players don't wander into a lobby that cannot connect.
+  showMultiplayer: false,
 });
 
 const RANGES = {
@@ -48,6 +51,7 @@ function hydrate() {
         preferences.lookSensitivity = clampPreference('lookSensitivity', stored.lookSensitivity);
       }
       if (stored.invertY !== undefined) preferences.invertY = stored.invertY === true;
+      if (stored.showMultiplayer !== undefined) preferences.showMultiplayer = stored.showMultiplayer === true;
       if (stored.masterVolume !== undefined) {
         preferences.masterVolume = clampPreference('masterVolume', stored.masterVolume);
       }
@@ -68,7 +72,9 @@ export function setPlayerPreferences(patch = {}) {
   let changed = false;
   for (const key of Object.keys(PLAYER_PREFERENCE_DEFAULTS)) {
     if (!(key in patch)) continue;
-    const value = key === 'invertY' ? patch[key] === true : clampPreference(key, patch[key]);
+    const value = (key === 'invertY' || key === 'showMultiplayer')
+      ? patch[key] === true
+      : clampPreference(key, patch[key]);
     if (preferences[key] === value) continue;
     preferences[key] = value;
     changed = true;

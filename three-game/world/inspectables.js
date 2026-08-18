@@ -18,6 +18,7 @@ export const inspectableCatalog = {
   dry_scrub: { id: 'dry_scrub', kind: 'plant', englishName: 'Dry-zone shrub', latinName: 'arid littoral scrub', category: 'Plant', rarity: 'common' },
   dry_grass: { id: 'dry_grass', kind: 'plant', englishName: 'Dry coastal grass', latinName: 'Poaceae', category: 'Plant', rarity: 'common' },
   opuntia: { id: 'opuntia', specimenId: 'pricklypearpad', kind: 'plant', englishName: 'Large Opuntia', latinName: 'Opuntia megasperma group', category: 'Plant', rarity: 'uncommon' },
+  lava_cactus: { id: 'lava_cactus', specimenId: 'cactus', kind: 'plant', englishName: 'Lava cactus', latinName: 'Brachycereus nesioticus', category: 'Plant', rarity: 'endemic' },
   candelabra_cactus: { id: 'candelabra_cactus', specimenId: 'candelabracactus', kind: 'plant', englishName: 'Candelabra cactus', latinName: 'Jasminocereus thouarsii group', category: 'Plant', rarity: 'uncommon' },
   galapagos_cotton: { id: 'galapagos_cotton', specimenId: 'galapagoscotton', kind: 'plant', englishName: 'Galapagos cotton', latinName: 'Gossypium darwinii', category: 'Plant', rarity: 'endemic' },
   shrub: { id: 'shrub', kind: 'plant', englishName: 'Coastal shrub', latinName: 'dry-zone shrub', category: 'Plant', rarity: 'common' },

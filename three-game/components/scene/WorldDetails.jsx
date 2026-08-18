@@ -21,6 +21,14 @@ const TREE_CONTACT_BEND = {
   damping: 11,
 };
 
+// Rocks read as geology subjects in observation mode; other obstacle kinds
+// stay inert unless the authored spec names a catalog entry.
+function obstacleInspectableType(obstacle) {
+  if (obstacle.inspectableType) return obstacle.inspectableType;
+  if (obstacle.kind === 'rock' || obstacle.kind === 'boulder') return 'basalt_block';
+  return null;
+}
+
 // Obstacles with a real vertical silhouette cast into the (small, throttled,
 // player-following) shadow map; low scatter keeps contact shadows only.
 // Authored specs can still force either way with an explicit castShadow.
@@ -106,6 +114,7 @@ function BendableObstacleGLB({ obstacle, currentZoneId }) {
       sourceId={`obstacle:${currentZoneId}:${obstacle.id}`}
       sourceLabel={obstacle.id}
       sourceKind={`obstacle-${obstacle.kind || 'prop'}`}
+      inspectableType={obstacleInspectableType(obstacle)}
       motion={obstacle.kind === 'tree' ? TREE_MOTION : null}
       contactShadow={obstacle.contactShadow ?? ((obstacle.kind === 'tree' ? 1.1 : 0.85) * (typeof obstacle.scale === 'number' ? obstacle.scale : 1))}
     />
@@ -154,6 +163,7 @@ function ObstacleProps() {
             sourceId={`obstacle:${currentZoneId}:${obstacle.id}`}
             sourceLabel={obstacle.id}
             sourceKind={`obstacle-${obstacle.kind || 'prop'}`}
+            inspectableType={obstacleInspectableType(obstacle)}
             motion={obstacle.kind === 'tree' ? TREE_MOTION : null}
             contactShadow={obstacle.contactShadow ?? ((obstacle.kind === 'tree' ? 1.1 : 0.85) * (typeof obstacle.scale === 'number' ? obstacle.scale : 1))}
           />

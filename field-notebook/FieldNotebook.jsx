@@ -6,6 +6,7 @@ import { getThreeIslandLocation } from '../three-game/data';
 import { setTypingMode } from '../three-game/input/typingMode';
 import { useThreeGameStore } from '../three-game/store';
 import { PanelTabs } from '../three-game/ui/expedition/ExpeditionPanel';
+import { downloadExpeditionText, openExpeditionPrintReport } from '../three-game/ui/expeditionExport';
 import { ExpeditionModal } from '../three-game/ui/expedition/ExpeditionModal';
 import { SketchPortrait } from '../three-game/ui/expedition/SketchPortrait';
 
@@ -134,14 +135,34 @@ function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, o
             <span className="text-[11px] text-[#c9aa76]">All {entries.length} specimens</span>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={onNew}
-            className="flex w-full items-center justify-center gap-2 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2 text-[15px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
-          >
-            <span className="text-[18px] leading-none">+</span>
-            New Journal Entry
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onNew}
+              className="flex w-full items-center justify-center gap-2 rounded-[2px] border border-[#5a4327] bg-black/25 px-4 py-2 text-[15px] tracking-wide text-[#e0c79e] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
+            >
+              <span className="text-[18px] leading-none">+</span>
+              New Journal Entry
+            </button>
+            {/* Export covers the whole expedition record, not just the journal:
+                places, specimens, and (once written) Henslow's assessment. */}
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => openExpeditionPrintReport(useThreeGameStore.getState())}
+                className="rounded-[2px] border border-[#5a4327] bg-black/25 px-2 py-1.5 text-[11px] tracking-wide text-[#c9aa76] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
+              >
+                Save as PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadExpeditionText(useThreeGameStore.getState())}
+                className="rounded-[2px] border border-[#5a4327] bg-black/25 px-2 py-1.5 text-[11px] tracking-wide text-[#c9aa76] transition hover:border-[#8a6d3f] hover:bg-[#2a2117]"
+              >
+                Download .txt
+              </button>
+            </div>
+          </>
         )}
       </div>
       <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="mx-2.5 mt-2" />

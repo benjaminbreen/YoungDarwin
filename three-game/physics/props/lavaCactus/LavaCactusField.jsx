@@ -263,6 +263,7 @@ const LAVA_CACTUS_SPEC = {
   sitesByZone: LAVA_CACTUS_SITES,
   getSites: getLavaCactusSites,
   examinableSpecimenId: 'cactus',
+  inspectableType: 'lava_cactus',
   buildZonePieces,
   SiteDressing,
   renderPiece,

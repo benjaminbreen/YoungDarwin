@@ -1682,7 +1682,16 @@ export const useThreeGameStore = create((set, get) => ({
           idempotencyKey,
         }),
       });
-      const data = response.ok ? await response.json() : null;
+      const remote = response.ok ? await response.json() : null;
+      // A failed or empty reply falls back to the authored branch rather than
+      // a stock apology: the apology carried no flags, so the "speak with
+      // Syms" objective could never complete while the API was erroring.
+      const data = remote?.dialogue ? remote : getAuthoredNpcReply(npcId, playerInput, {
+        specimenCount: new Set([
+          ...(requestState.collectedSpecimenIds || []),
+          ...(requestState.documentedSpecimenIds || []),
+        ]).size,
+      });
       const dialogue = String(data?.dialogue || '“I beg your pardon, sir; I have lost the thread of it.”').trim();
       const { trustDelta, flags } = clampNpcEncounterEffects(npcId, data);
       set(current => {
@@ -1708,14 +1717,46 @@ export const useThreeGameStore = create((set, get) => ({
       });
       return data;
     } catch {
-      set(current => ({
-        activeNpcEncounter: current.activeNpcEncounter?.npcId === npcId
-          ? { ...current.activeNpcEncounter, turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: '“The wind has made a muddle of the moment, sir. Try me again.”' }].slice(-8) }
-          : current.activeNpcEncounter,
-        npcEncounterPending: false,
-        npcEncounterError: 'Conversation is temporarily unavailable.',
-      }));
-      return null;
+      // Same reasoning as the failed-response path above: answer from the
+      // authored branch so the turn still lands and still grants flags.
+      const data = getAuthoredNpcReply(npcId, playerInput, {
+        specimenCount: new Set([
+          ...(requestState.collectedSpecimenIds || []),
+          ...(requestState.documentedSpecimenIds || []),
+        ]).size,
+      });
+      if (!data) {
+        set(current => ({
+          activeNpcEncounter: current.activeNpcEncounter?.npcId === npcId
+            ? { ...current.activeNpcEncounter, turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: '“The wind has made a muddle of the moment, sir. Try me again.”' }].slice(-8) }
+            : current.activeNpcEncounter,
+          npcEncounterPending: false,
+          npcEncounterError: 'Conversation is temporarily unavailable.',
+        }));
+        return null;
+      }
+      const { trustDelta, flags } = clampNpcEncounterEffects(npcId, data);
+      set(current => {
+        if (current.activeNpcEncounter?.npcId !== npcId) return { npcEncounterPending: false };
+        const previous = current.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
+        const nextTrust = Math.max(0, Math.min(100, previous.trust + trustDelta));
+        const nextFlags = [...new Set([...(previous.flags || []), ...flags])];
+        return {
+          activeNpcEncounter: {
+            ...current.activeNpcEncounter,
+            turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: data.dialogue }].slice(-8),
+            trust: nextTrust,
+            flags: nextFlags,
+          },
+          npcEncounterState: {
+            ...current.npcEncounterState,
+            [npcId]: { trust: nextTrust, flags: nextFlags },
+          },
+          npcEncounterPending: false,
+          npcEncounterError: null,
+        };
+      });
+      return { ...data, source: 'authored' };
     }
   },
   setNearbySpecimen: nearbySpecimenId => set(state => {
@@ -2556,7 +2597,24 @@ export const useThreeGameStore = create((set, get) => ({
       ? (payload.foodLabel || previous.foodLabel || (mode.id === 'tortoise' ? 'low leaves and ground herbs' : 'dry seeds and small shoots'))
       : previous.foodLabel;
     const forage = payload.forage || null;
+    // The HUD's Energy bar is 100 - fatigue, and movement drains it for
+    // animals just as for Darwin — so sleep and food must refill it or the
+    // mode has a resource with no recovery. Real forage (which is finite and
+    // per-patch) restores much more than idle grazing.
+    const clampStat = value => Math.max(0, Math.min(100, value));
+    let statPatch = {};
+    if (actionId === 'sleep') {
+      statPatch = { fatigue: clampStat((state.fatigue || 0) - 25) };
+    } else if (actionId === 'eat') {
+      const nutrition = forage ? Number(forage.nutrition) || 0 : 0;
+      const recovered = forage ? 6 + nutrition * 6 : 3;
+      statPatch = {
+        fatigue: clampStat((state.fatigue || 0) - recovered),
+        ...(forage ? { health: clampStat((state.health || 0) + 2) } : {}),
+      };
+    }
     return {
+      ...statPatch,
       animalModeStats: {
         ...(state.animalModeStats || {}),
         [mode.id]: {

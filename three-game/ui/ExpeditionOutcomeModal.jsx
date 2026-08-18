@@ -5,6 +5,7 @@ import { formatExpeditionDate } from '../expeditionOutcomes';
 import { useThreeGameStore } from '../store';
 import { ExpeditionPanel } from './expedition/ExpeditionPanel';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { downloadExpeditionText, openExpeditionPrintReport } from './expeditionExport';
 import {
   ButterflyIcon,
   CompassRoseIcon,
@@ -134,7 +135,11 @@ function DeathModal({ outcome, onOpenJournal, onRestartExpedition, onReturnToMai
         <DeathRecapRow icon={NoteIcon} label="Notes recorded" value={stats.notesRecorded || 0} />
         <DeathRecapRow icon={CuriosityIcon} label="Final curiosity" value={stats.curiosity || 0} />
       </section>
-      <div className="mt-4 grid gap-1.5 sm:grid-cols-3">
+      <div className="mt-4 grid gap-1.5 sm:grid-cols-2">
+        <button type="button" onClick={() => openExpeditionPrintReport(useThreeGameStore.getState())} className={DEATH_BUTTON}>Save record as PDF</button>
+        <button type="button" onClick={() => downloadExpeditionText(useThreeGameStore.getState())} className={DEATH_BUTTON}>Download record (.txt)</button>
+      </div>
+      <div className="mt-1.5 grid gap-1.5 sm:grid-cols-3">
         <button type="button" onClick={onRestartExpedition} className={`${DEATH_BUTTON} border-expedition-gold bg-expedition-gold/12 text-expedition-goldbright shadow-[0_0_16px_rgba(201,163,95,0.12)]`}>Restart expedition</button>
         <button type="button" onClick={onOpenJournal} className={DEATH_BUTTON}>Return to journal</button>
         <button type="button" onClick={onReturnToMainMenu} className={DEATH_BUTTON}>Main menu</button>

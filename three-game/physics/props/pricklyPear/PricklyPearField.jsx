@@ -277,6 +277,7 @@ const PRICKLY_PEAR_SPEC = {
   id: 'prickly-pear',
   sitesByZone: PRICKLY_PEAR_SITES,
   getSites: getPricklyPearSites,
+  inspectableType: 'opuntia',
   buildZonePieces,
   SiteDressing,
   renderPiece,

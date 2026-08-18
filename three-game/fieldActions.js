@@ -168,6 +168,18 @@ export function fieldSampleFor(target, zoneId) {
 export function resolveFieldAction({ toolId = 'hands', target, examined = false, sampled = false }) {
   if (!target) return null;
   if (target.kind === 'specimen' && examined) {
+    // The sketchbook documents without taking; calling that "Collect" told
+    // players the opposite of what the tool does.
+    if (toolId === 'sketch') {
+      return {
+        id: `collect:${target.id}:${toolId}`,
+        kind: 'collect',
+        toolId,
+        target,
+        label: `Sketch ${target.name} — record it without taking it`,
+        shortLabel: 'Sketch',
+      };
+    }
     return {
       id: `collect:${target.id}:${toolId}`,
       kind: 'collect',

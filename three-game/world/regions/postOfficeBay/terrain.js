@@ -464,7 +464,13 @@ export function isPostOfficeWalkable(x, z) {
   const continuity = postOfficeLandContinuity(x, z);
   const landShelf = mask < 1.02 || continuity > 0.45;
   const forgivingDryShelf = mask < 1.1 && continuity > 0.12 && y > -0.55 && cove < 0.25;
-  return (landShelf || forgivingDryShelf) && y > -0.82 && cove < 0.76;
+  // The cove mask marks an offshore bar as water even where its movement
+  // surface stands dry above the waterline, which built an invisible wall on
+  // visible sand between the landing and the manta/hammerhead spawns. Ground
+  // above the wade cutoff (-0.45) is walkable regardless of the mask; below
+  // it, the wadeable/swim path takes over, so there is no dead band.
+  const emergentBar = y > -0.45;
+  return (landShelf || forgivingDryShelf || emergentBar) && y > -0.82 && (cove < 0.76 || emergentBar);
 }
 
 export const postOfficeBayRegion = {

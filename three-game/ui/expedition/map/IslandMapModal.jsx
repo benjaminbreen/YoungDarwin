@@ -296,7 +296,9 @@ function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, survey, o
           <LegendRow icon={LEGEND_ICONS.land} label="Map areas" active={filters.land} onToggle={() => onToggle('land')} />
           <LegendRow icon={LEGEND_ICONS.anchorage} label="Anchorages" active={filters.anchorage} onToggle={() => onToggle('anchorage')} />
           <LegendRow icon={LEGEND_ICONS.water} label="Surf & offshore" active={filters.water} onToggle={() => onToggle('water')} />
-          <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
+          {islandMapLocations.some(location => location.isTest) && (
+            <LegendRow icon={LEGEND_ICONS.test} label="Test maps" active={filters.test} onToggle={() => onToggle('test')} />
+          )}
         </LegendList>
         <p className="mt-2 px-1.5 font-expedition text-[11px] text-expedition-faded">
           <span className="font-semibold text-expedition-goldbright">{survey.surveyed}</span>

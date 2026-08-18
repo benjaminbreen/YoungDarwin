@@ -3543,9 +3543,15 @@ function CompactAction({ keyLabel, children, primary = false, locked = false, on
 // uses it, and never again — the flag lives in the save.
 const HINT_TAKE = 'verb-take';
 const HINT_STUDY = 'verb-study';
+const HINT_NPC = 'npc-converse';
+const HINT_SKETCH = 'verb-sketch';
+const HINT_EXAMINE = 'first-examine';
 const HINT_TEXT = {
   [HINT_TAKE]: 'E takes what is already loose.',
   [HINT_STUDY]: 'Enter studies a subject first; study it once and you may take a sample.',
+  [HINT_NPC]: 'You speak in your own words. What you ask shapes the reply.',
+  [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
+  [HINT_EXAMINE]: 'Examine it first — only examined creatures can be written up, sketched, or taken.',
 };
 
 function promptActionText(value) {
@@ -3775,6 +3781,7 @@ function SpecimenInteractionCard({
   collectNearby,
   openExamine,
   visible,
+  hint = null,
 }) {
   const methodId = currentCollectionMethodId(activeToolId);
   const methodName = collectionMethodName(methodId);
@@ -3886,6 +3893,9 @@ function SpecimenInteractionCard({
               </div>
             </div>
           )}
+          {hint && (
+            <div className="mt-1.5 text-center text-[10px] leading-snug text-expedition-faded/85">{hint}</div>
+          )}
         </div>
       </section>
     </div>
@@ -3925,10 +3935,11 @@ function InteractionPrompt() {
     id: `npc:${nearbyNpcEncounter.npcId}`,
     label: `Speak with ${nearbyNpcEncounter.name}`,
     keyLabel: 'E',
+    hintId: seenHints.includes(HINT_NPC) ? null : HINT_NPC,
     priority: CONTEXT_PROMPT_PRIORITY.npc,
     dwellMs: 140,
     repeatCooldownMs: 650,
-  }) : null, [nearbyNpcEncounter]);
+  }) : null, [nearbyNpcEncounter, seenHints]);
   const interiorContextCandidate = useMemo(() => interiorPrompt ? ({
     id: `interior:${interiorPrompt.id || interiorPrompt.mode || interiorPrompt.text}`,
     label: promptActionText(interiorPrompt.text),
@@ -3972,6 +3983,28 @@ function InteractionPrompt() {
   useContextPromptCandidate('interior', interiorContextCandidate);
   useContextPromptCandidate('carry', carryContextCandidate);
   useContextPromptCandidate('field', fieldContextCandidate);
+  // Offered once, at the moment it lands: the player is standing over an
+  // examined specimen, has been collecting steadily, and has never used the
+  // sketchbook — the point of the documented-vs-collected distinction.
+  const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
+  const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
+  const showSketchHint = Boolean(nearby)
+    && examinedTypeIds.includes(nearby?.id)
+    && !seenHints.includes(HINT_SKETCH)
+    && (collectedSpecimenIds?.length || 0) >= 2
+    && (documentedSpecimenIds?.length || 0) === 0;
+  // The very first specimen the player stands over teaches the loop's first
+  // verb; after one examination it never appears again.
+  const showExamineHint = Boolean(nearby)
+    && !examinedTypeIds.includes(nearby?.id)
+    && (examinedTypeIds?.length || 0) === 0
+    && !seenHints.includes(HINT_EXAMINE);
+  const specimenCardHintId = showExamineHint ? HINT_EXAMINE : showSketchHint ? HINT_SKETCH : null;
+  useEffect(() => {
+    if (!specimenCardHintId) return undefined;
+    const timer = window.setTimeout(() => markHintSeen(specimenCardHintId), 1600);
+    return () => window.clearTimeout(timer);
+  }, [markHintSeen, specimenCardHintId]);
   const [renderedSpecimen, setRenderedSpecimen] = useState(null);
   const [specimenPromptVisible, setSpecimenPromptVisible] = useState(false);
   const [renderedContextPrompt, setRenderedContextPrompt] = useState(null);
@@ -4029,18 +4062,25 @@ function InteractionPrompt() {
 
   useEffect(() => {
     let timer = 0;
+    let hintTimer = 0;
     if (contextPrompt) {
       setRenderedContextPrompt(contextPrompt);
       setContextPromptVisible(false);
-      // Marked on display, not on use: the line has done its teaching once the
-      // player has seen it, whether or not they pressed the key.
-      if (contextPrompt.hintId) markHintSeen(contextPrompt.hintId);
+      // Marked on display, not on use — but only after the prompt has held
+      // the screen long enough to be read. A one-frame flash during a
+      // walk-by used to burn the hint permanently.
+      if (contextPrompt.hintId) {
+        hintTimer = window.setTimeout(() => markHintSeen(contextPrompt.hintId), 1400);
+      }
       timer = window.setTimeout(() => setContextPromptVisible(true), 20);
     } else {
       setContextPromptVisible(false);
       timer = window.setTimeout(() => setRenderedContextPrompt(null), PROMPT_EXIT_MS);
     }
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(hintTimer);
+    };
   }, [contextPrompt, markHintSeen]);
 
   if (outcomeToast) {
@@ -4163,6 +4203,7 @@ function InteractionPrompt() {
       collectNearby={collectNearby}
       openExamine={openExamine}
       visible={specimenPromptVisible}
+      hint={specimenCardHintId ? HINT_TEXT[specimenCardHintId] : null}
     />
   );
 }

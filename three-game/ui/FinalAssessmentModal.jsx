@@ -5,6 +5,7 @@ import { formatExpeditionDate } from '../expeditionOutcomes';
 import { useThreeGameStore } from '../store';
 import { ExpeditionPanel } from './expedition/ExpeditionPanel';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { downloadExpeditionText, openExpeditionPrintReport } from './expeditionExport';
 import {
   ButterflyIcon,
   CompassRoseIcon,
@@ -315,7 +316,23 @@ export function FinalAssessmentModal({
           <p className="mt-3 text-center text-[9px] italic tracking-wide text-expedition-faded">{assessment.error}</p>
         )}
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-3 lg:shrink-0">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:shrink-0">
+          <button
+            type="button"
+            onClick={() => openExpeditionPrintReport(useThreeGameStore.getState())}
+            className={SECONDARY_BUTTON}
+          >
+            Save record as PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadExpeditionText(useThreeGameStore.getState())}
+            className={SECONDARY_BUTTON}
+          >
+            Download record (.txt)
+          </button>
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:shrink-0">
           <button ref={primaryActionRef} type="button" onClick={onOpenJournal} className={PRIMARY_BUTTON}>
             <OpenBookIcon className="h-4 w-4" /> Review field journal
           </button>

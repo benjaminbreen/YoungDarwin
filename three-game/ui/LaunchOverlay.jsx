@@ -498,6 +498,154 @@ function HistoricalPrologue({
   );
 }
 
+const FEEDBACK_ADDRESS = 'breen85@gmail.com';
+
+// Feedback and bug reports. Posts to /api/feedback (email relay); if that is
+// not configured or fails, falls back to a mailto: link and clipboard copy so
+// the message still reaches the same inbox.
+function FeedbackPanel({ onBack }) {
+  const [category, setCategory] = useState('bug');
+  const [message, setMessage] = useState('');
+  const [contact, setContact] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | sending | sent | fallback
+  const [copied, setCopied] = useState(false);
+
+  const setTyping = value => {
+    // Dynamic import keeps the input module out of the splash bundle; the
+    // pause-menu instance is the only one where gameplay keys are live.
+    import('../input/typingMode').then(mod => mod.setTypingMode(value)).catch(() => {});
+  };
+
+  const composed = `${category === 'bug' ? 'Bug report' : 'Feedback'}:\n\n${message}${contact ? `\n\nContact: ${contact}` : ''}`;
+
+  const submit = async () => {
+    if (!message.trim() || status === 'sending') return;
+    setStatus('sending');
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category,
+          message: message.trim(),
+          contact: contact.trim(),
+          context: {
+            url: window.location.href,
+            userAgent: navigator.userAgent,
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+          },
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      setStatus(result.ok ? 'sent' : 'fallback');
+    } catch {
+      setStatus('fallback');
+    }
+  };
+
+  const mailtoHref = `mailto:${FEEDBACK_ADDRESS}?subject=${encodeURIComponent('[Darwin Game] ' + (category === 'bug' ? 'Bug report' : 'Feedback'))}&body=${encodeURIComponent(composed.slice(0, 1500))}`;
+
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(`To: ${FEEDBACK_ADDRESS}\n\n${composed}`);
+      setCopied(true);
+    } catch {
+      // Clipboard can be blocked; the mailto link remains.
+    }
+  };
+
+  const fieldClass = 'w-full rounded-sm border border-expedition-brass/50 px-3 py-2 text-[14px] placeholder:text-expedition-faded/70 focus:border-expedition-gold/70 focus:outline-none';
+  // globals.css paints bare inputs parchment; inline styles win that fight.
+  const fieldStyle = { background: 'rgba(0,0,0,0.3)', color: '#e8dcbe' };
+
+  return (
+    <div className="relative px-3 py-2 text-left">
+      <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Feedback</h2>
+      {status === 'sent' ? (
+        <p className="mt-6 text-center text-[15px] leading-relaxed text-expedition-parchment">
+          Thank you — your message is on its way.
+        </p>
+      ) : (
+        <>
+          <p className="mt-2 text-center text-[13px] italic leading-relaxed text-expedition-parchment/72">
+            Found a bug, or have a thought about the game? It goes straight to the developer.
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-1.5">
+            {[['bug', 'Bug report'], ['feedback', 'Suggestion']].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={category === id}
+                onClick={() => setCategory(id)}
+                className={`rounded-sm border px-3 py-2 text-[13px] tracking-[0.06em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+                  category === id
+                    ? 'border-expedition-gold/70 bg-expedition-gold/12 text-expedition-goldbright'
+                    : 'border-expedition-brass/40 bg-black/20 text-expedition-faded hover:border-expedition-brass/70'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={message}
+            onChange={event => setMessage(event.target.value)}
+            onFocus={() => setTyping(true)}
+            onBlur={() => setTyping(false)}
+            rows={5}
+            maxLength={6000}
+            placeholder={category === 'bug'
+              ? 'What happened, and what were you doing when it happened?'
+              : 'What would you change, add, or keep?'}
+            className={`${fieldClass} mt-2 resize-none leading-relaxed`}
+            style={fieldStyle}
+          />
+          <input
+            type="text"
+            value={contact}
+            onChange={event => setContact(event.target.value)}
+            onFocus={() => setTyping(true)}
+            onBlur={() => setTyping(false)}
+            maxLength={200}
+            placeholder="Your name or email (optional)"
+            className={`${fieldClass} mt-2`}
+            style={fieldStyle}
+          />
+          {status === 'fallback' && (
+            <div className="mt-3 rounded-sm border border-expedition-brass/50 bg-black/25 px-3 py-2.5">
+              <p className="text-[12.5px] leading-snug text-expedition-parchment/85">
+                Sending from the game didn&apos;t work. You can email the same message directly:
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <a href={mailtoHref} className="rounded-sm border border-expedition-gold/70 bg-expedition-gold/12 px-3 py-1.5 text-[12px] tracking-[0.06em] text-expedition-goldbright transition hover:bg-expedition-gold/20">
+                  Open email app
+                </a>
+                <button type="button" onClick={copyMessage} className="rounded-sm border border-expedition-brass/50 bg-black/25 px-3 py-1.5 text-[12px] tracking-[0.06em] text-expedition-parchment transition hover:border-expedition-gold/70">
+                  {copied ? 'Copied' : `Copy message + address`}
+                </button>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!message.trim() || status === 'sending'}
+            className={`mt-3 w-full rounded-sm border px-4 py-2 text-[14px] tracking-[0.08em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+              message.trim() && status !== 'sending'
+                ? 'border-expedition-gold/70 bg-expedition-gold/12 text-expedition-goldbright hover:bg-expedition-gold/20'
+                : 'cursor-default border-expedition-brass/30 bg-black/15 text-expedition-faded/60'
+            }`}
+          >
+            {status === 'sending' ? 'Sending…' : 'Send'}
+          </button>
+        </>
+      )}
+      <BackButton onClick={onBack} />
+    </div>
+  );
+}
+
 export function LaunchOverlay({
   mode = 'menu',
   progress = 0,
@@ -517,6 +665,8 @@ export function LaunchOverlay({
   onAbout,
   audioEnabled = true,
   onAudioEnabledChange,
+  showMultiplayer = false,
+  onShowMultiplayerChange,
   quality = 'auto',
   onQualityChange,
   onRuntimeIntent,
@@ -550,6 +700,7 @@ export function LaunchOverlay({
     return 'Taking the first bearings ashore.';
   }, [progress, selectedModeId]);
   const loading = mode === 'loading';
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const choosingCharacter = mode === 'character';
   const showingSettings = mode === 'settings';
   const showingControls = mode === 'controls';
@@ -657,6 +808,8 @@ export function LaunchOverlay({
               <LoadingPhaseLine>{loadingLine}</LoadingPhaseLine>
               <ProgressBar value={progress} />
             </div>
+          ) : feedbackOpen ? (
+            <FeedbackPanel onBack={() => setFeedbackOpen(false)} />
           ) : showingMultiplayer ? (
             multiplayerPanel
           ) : choosingCharacter ? (
@@ -734,6 +887,29 @@ export function LaunchOverlay({
                     {audioEnabled ? 'On' : 'Off'}
                   </button>
                 </div>
+                {onShowMultiplayerChange && (
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <span className="min-w-0">
+                      <span className="block text-[16px] text-expedition-parchment">Multiplayer</span>
+                      <span className="mt-0.5 block text-[13px] leading-snug text-expedition-faded">
+                        In progress and not yet working. Turning this on adds it to the main menu.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={showMultiplayer}
+                      onClick={() => onShowMultiplayerChange(!showMultiplayer)}
+                      className={`min-w-16 shrink-0 rounded-sm border px-3 py-1 text-[13px] tracking-[0.08em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright ${
+                        showMultiplayer
+                          ? 'border-expedition-gold/70 bg-expedition-gold/12 text-expedition-goldbright'
+                          : 'border-expedition-brass/40 bg-black/20 text-expedition-faded'
+                      }`}
+                    >
+                      {showMultiplayer ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={onControls}
@@ -784,7 +960,6 @@ export function LaunchOverlay({
           ) : showingAbout ? (
             <div className="relative px-4 py-2 text-left">
               <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">About</h2>
-              <p className="mt-4 text-center text-[17px] tracking-[0.06em] text-expedition-parchment">Work in progress</p>
               <p className="mt-4 text-[15px] leading-relaxed text-expedition-parchment/82">
                 Darwin is a playable historical simulation set on Floreana—then called Charles Island—in September 1835. It explores observation, collection, travel, uncertainty, and ecological change, with future classroom use in the history of science in mind.
               </p>
@@ -851,6 +1026,7 @@ export function LaunchOverlay({
                   same list only lengthened the menu. */}
               <MenuButton onClick={onSettings}>Settings</MenuButton>
               <MenuButton onClick={onAbout}>About</MenuButton>
+              <MenuButton onClick={() => setFeedbackOpen(true)}>Feedback</MenuButton>
             </nav>
           )}
         </div>

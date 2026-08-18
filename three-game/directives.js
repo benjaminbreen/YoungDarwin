@@ -26,17 +26,17 @@ function playerNotes(state) {
   return (state.journal || []).filter(entry => entry?.authorship === 'player');
 }
 
-// Collected actor ids are zone-prefixed ("POST_OFFICE_BAY:lavalizard-0"), so
-// the zone a specimen came from is recoverable without extra tracking.
+// The journal's field-record entries carry both the species id and the place
+// name. Parsing actor ids instead broke on hand-placed spawns, whose authored
+// instanceIds are place-named ("post-office-lava-lizard-west"), so the same
+// species at two landings never matched.
 function collectedByZone(state) {
   const pairs = [];
-  for (const actorId of state.collectedSpecimenActorIds || []) {
-    const separator = String(actorId).indexOf(':');
-    if (separator <= 0) continue;
-    const zoneId = actorId.slice(0, separator);
-    // "lavalizard-0" / "lavalizard-fallback-2" -> "lavalizard"
-    const species = actorId.slice(separator + 1).replace(/-(?:fallback-)?\d+$/, '');
-    pairs.push({ zoneId, species });
+  for (const entry of state.journal || []) {
+    if (entry?.authorship !== 'field-record') continue;
+    if (!entry.specimenId || !entry.location) continue;
+    if (entry.condition === 'documented in field') continue;
+    pairs.push({ zoneId: entry.location, species: entry.specimenId });
   }
   return pairs;
 }

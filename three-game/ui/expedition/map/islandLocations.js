@@ -1,4 +1,5 @@
 import { regionMaps } from '../../../../game-core/regionMaps';
+import { devRoutesEnabled } from '../../../../app/devRoutes';
 import {
   FLOREANA_CHART_ASPECT,
   FLOREANA_CHART_WIDTH_KM,
@@ -52,6 +53,10 @@ export function prefetchIslandMapImage() {
 export const islandMapLocations = FLOREANA_MAP_PLACEMENTS.map(place => {
   const region = regionMaps[place.id];
   if (!region) return null;
+  // Test maps are authoring scenes, not content: in a production build they are
+  // dropped entirely (the legend's test filter only hid them, so any player who
+  // flipped it could travel into them). URL access via ?zone= is unaffected.
+  if (place.test && !devRoutesEnabled()) return null;
   return {
     id: place.id,
     kind: place.kind,

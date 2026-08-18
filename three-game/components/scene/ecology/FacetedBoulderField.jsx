@@ -12,6 +12,7 @@ import {
   facetedBoulderRingScale,
 } from '../../../world/facetedBoulders';
 import { rockSampleKey } from '../../../physics/props/rockSampling';
+import { catalogToInspectable } from '../../../world/inspectables';
 import {
   FLOREANA_PBR_TEXTURES,
   disposePbrTerrainSet,
@@ -413,6 +414,7 @@ function makeBoulderMaterial() {
 }
 
 function FacetedBoulder({ obstacle, material, currentZoneId, bites }) {
+  const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const geometry = useMemo(() => makeFacetedBoulderGeometry(obstacle, bites), [bites, obstacle]);
   const position = useMemo(() => [
     obstacle.x,
@@ -437,6 +439,12 @@ function FacetedBoulder({ obstacle, material, currentZoneId, bites }) {
       castShadow
       receiveShadow
       userData={userData}
+      onClick={event => {
+        event.stopPropagation();
+        setInspectedObject(catalogToInspectable(obstacle.inspectableType || 'basalt_block', event.point, {
+          sourceId: obstacle.id || 'faceted-boulder',
+        }));
+      }}
     />
   );
 }

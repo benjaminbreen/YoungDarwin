@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { INITIAL_LAUNCH_PROGRESS, LaunchOverlay } from './LaunchOverlay';
 import { MultiplayerLobby } from './multiplayer/MultiplayerLobby';
 import { readQualityPreference, writeQualityPreference } from '../qualityPreference';
+import { getPlayerPreferences, setPlayerPreferences } from '../playerPreferences';
 import { readSessionSnapshot, summarizeSessionSnapshot } from '../sessionSave';
 import { getRegionDisplayName } from '../../game-core/regionMaps';
 
@@ -59,6 +60,7 @@ export function ThreeLaunchShell({ initialModeId = null }) {
   // and the first client render agree.
   const [quality, setQuality] = useState('auto');
   const [audioEnabled, setAudioEnabled] = useState(true);
+  const [showMultiplayer, setShowMultiplayer] = useState(false);
   const [savedSession, setSavedSession] = useState(null);
   // Distinguishes "no save" from "not looked yet" so the menu can withhold
   // save-dependent chrome rather than guessing and correcting itself.
@@ -93,6 +95,12 @@ export function ThreeLaunchShell({ initialModeId = null }) {
     setQuality(writeQualityPreference(choice));
   }, []);
 
+  const changeShowMultiplayer = useCallback(next => {
+    const enabled = Boolean(next);
+    setShowMultiplayer(enabled);
+    setPlayerPreferences({ showMultiplayer: enabled });
+  }, []);
+
   const changeAudioEnabled = useCallback(next => {
     const enabled = Boolean(next);
     setAudioEnabled(enabled);
@@ -111,6 +119,7 @@ export function ThreeLaunchShell({ initialModeId = null }) {
   useEffect(() => {
     setInteractiveReady(true);
     setQuality(readQualityPreference());
+    setShowMultiplayer(getPlayerPreferences().showMultiplayer === true);
     try {
       const stored = window.localStorage?.getItem(AUDIO_PREFERENCE_KEY);
       if (stored === 'off') setAudioEnabled(false);
@@ -152,7 +161,7 @@ export function ThreeLaunchShell({ initialModeId = null }) {
         mode={launchState}
         interactive={interactiveReady}
         onNewExpedition={() => setLaunchState('character')}
-        onMultiplayer={() => setLaunchState('multiplayer')}
+        onMultiplayer={showMultiplayer ? () => setLaunchState('multiplayer') : undefined}
         onModeSelect={modeId => {
           // A fresh expedition must not inherit the resume snapshot.
           setResumeSnapshot(null);
@@ -172,6 +181,8 @@ export function ThreeLaunchShell({ initialModeId = null }) {
         onAbout={() => setLaunchState('about')}
         audioEnabled={audioEnabled}
         onAudioEnabledChange={changeAudioEnabled}
+        showMultiplayer={showMultiplayer}
+        onShowMultiplayerChange={changeShowMultiplayer}
         quality={quality}
         onQualityChange={changeQuality}
         onRuntimeIntent={preloadRuntime}
