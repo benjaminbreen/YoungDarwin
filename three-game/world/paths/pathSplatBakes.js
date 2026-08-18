@@ -15,21 +15,21 @@
 const GENERATED = '/assets/textures/world/floreana-generated';
 
 export const PATH_SPLAT_BAKES = Object.freeze({
-  'n-shore': `${GENERATED}/n-shore-path-splat.png`,
-  'post-office-bay': `${GENERATED}/post-office-bay-path-splat.png`,
-  'lava-flats': `${GENERATED}/lava-flats-path-splat.png`,
-  'penal-colony': `${GENERATED}/penal-colony-path-splat.png`,
-  'watkins-creek': `${GENERATED}/watkins-creek-path-splat.png`,
-  'coastal-scrubland': `${GENERATED}/coastal-scrubland-path-splat.png`,
-  'punta-sur': `${GENERATED}/punta-sur-path-splat.png`,
-  'southeastern-coast': `${GENERATED}/southeastern-coast-path-splat.png`,
-  'el-mirador': `${GENERATED}/el-mirador-path-splat.png`,
-  'rocky-clearing': `${GENERATED}/rocky-clearing-path-splat.png`,
-  'eastern-cliffs': `${GENERATED}/eastern-cliffs-path-splat.png`,
-  'grass-test': `${GENERATED}/grass-test-path-splat.png`,
-  'grass-hybrid-test': `${GENERATED}/grass-hybrid-test-path-splat.png`,
-  'post-scrub-rise': `${GENERATED}/post-scrub-rise-path-splat.png`,
-  'northern-highlands': `${GENERATED}/northern-highlands-path-splat.png`,
+  'n-shore': `${GENERATED}/n-shore-path-splat.webp`,
+  'post-office-bay': `${GENERATED}/post-office-bay-path-splat.webp`,
+  'lava-flats': `${GENERATED}/lava-flats-path-splat.webp`,
+  'penal-colony': `${GENERATED}/penal-colony-path-splat.webp`,
+  'watkins-creek': `${GENERATED}/watkins-creek-path-splat.webp`,
+  'coastal-scrubland': `${GENERATED}/coastal-scrubland-path-splat.webp`,
+  'punta-sur': `${GENERATED}/punta-sur-path-splat.webp`,
+  'southeastern-coast': `${GENERATED}/southeastern-coast-path-splat.webp`,
+  'el-mirador': `${GENERATED}/el-mirador-path-splat.webp`,
+  'rocky-clearing': `${GENERATED}/rocky-clearing-path-splat.webp`,
+  'eastern-cliffs': `${GENERATED}/eastern-cliffs-path-splat.webp`,
+  'grass-test': `${GENERATED}/grass-test-path-splat.webp`,
+  'grass-hybrid-test': `${GENERATED}/grass-hybrid-test-path-splat.webp`,
+  'post-scrub-rise': `${GENERATED}/post-scrub-rise-path-splat.webp`,
+  'northern-highlands': `${GENERATED}/northern-highlands-path-splat.webp`,
 });
 
 export function pathSplatBakeFile(key) {
