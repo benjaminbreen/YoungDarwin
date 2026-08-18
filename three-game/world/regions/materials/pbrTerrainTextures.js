@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CONSTRAINED_TEXTURE_MAX_DIM, isConstrainedMemoryDevice } from '../../constrainedDevice';
 
 const FLOREANA_PBR_BASE = '/assets/textures/world/floreana-pbr';
 
@@ -376,6 +377,35 @@ function browserFallbackCanvas(rgba) {
   return canvas;
 }
 
+// On memory-ceiling devices, cap decoded terrain textures at 1024: a 2048
+// RGBA set member costs ~22MB with mips and the full family is ~440MB — the
+// bulk of an iPhone tab's entire allowance. Quarter the residency, keep the
+// look at phone DPI.
+function applyTerrainBitmap(texture, bitmap) {
+  const assign = image => {
+    texture.image?.close?.();
+    texture.image = image;
+    // ImageBitmap orientation was resolved during off-main decode.
+    texture.flipY = false;
+    texture.needsUpdate = true;
+  };
+  const cap = isConstrainedMemoryDevice() ? CONSTRAINED_TEXTURE_MAX_DIM : Infinity;
+  const largest = Math.max(bitmap.width || 0, bitmap.height || 0);
+  if (largest <= cap || typeof createImageBitmap !== 'function') {
+    assign(bitmap);
+    return;
+  }
+  const scale = cap / largest;
+  createImageBitmap(bitmap, {
+    resizeWidth: Math.max(1, Math.round(bitmap.width * scale)),
+    resizeHeight: Math.max(1, Math.round(bitmap.height * scale)),
+    resizeQuality: 'high',
+  }).then(resized => {
+    bitmap.close?.();
+    assign(resized);
+  }).catch(() => assign(bitmap));
+}
+
 function loadBrowserTerrainTexture(path, rgba) {
   const texture = new THREE.Texture(browserFallbackCanvas(rgba));
   const loader = new THREE.ImageBitmapLoader();
@@ -386,13 +416,7 @@ function loadBrowserTerrainTexture(path, rgba) {
   });
   loader.load(
     path,
-    bitmap => {
-      texture.image?.close?.();
-      texture.image = bitmap;
-      // ImageBitmap orientation was resolved during off-main decode.
-      texture.flipY = false;
-      texture.needsUpdate = true;
-    },
+    bitmap => applyTerrainBitmap(texture, bitmap),
     undefined,
     () => {
       // Some older Safari/WebView builds expose ImageBitmapLoader but reject

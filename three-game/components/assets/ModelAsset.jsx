@@ -12,6 +12,8 @@ import { useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { markReflectionSceneDirty } from '../../world/waterReflectionRuntime';
 import { warmGateRuntime } from '../../world/warmGateRuntime';
+import { constrainSourceResolution } from './sharedTextureSources';
+import { CONSTRAINED_HERO_TEXTURE_MAX_DIM, isConstrainedMemoryDevice } from '../../world/constrainedDevice';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
@@ -628,7 +630,14 @@ function getPlayerDataTexture(url, srgb = false) {
   const key = (srgb ? 's:' : 'd:') + url;
   let tex = playerDataTextures.get(key);
   if (tex) return tex;
-  tex = new THREE.TextureLoader().load(url, t => { t.needsUpdate = true; });
+  tex = new THREE.TextureLoader().load(url, t => {
+    // These 2048 sidecars are the largest textures in the scene; on
+    // memory-ceiling devices hold them to the hero cap like the GLB embeds.
+    if (isConstrainedMemoryDevice()) {
+      constrainSourceResolution(t, CONSTRAINED_HERO_TEXTURE_MAX_DIM);
+    }
+    t.needsUpdate = true;
+  });
   tex.flipY = false;
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.wrapS = THREE.RepeatWrapping;

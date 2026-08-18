@@ -1,5 +1,7 @@
 'use client';
 
+import { CONSTRAINED_TEXTURE_MAX_DIM, isConstrainedMemoryDevice } from '../../world/constrainedDevice';
+
 // Point every repeat copy of an embedded image at the first Source seen for it.
 //
 // Authored packs ship one GLB per piece, and each piece embeds its own copy of
@@ -27,6 +29,37 @@ const HASHED_NAME = /-[0-9a-f]{8}$/;
 // bitmap resident for the rest of the session.
 const sources = new Map();
 const shared = new WeakSet();
+const constrainedSources = new WeakSet();
+
+// On memory-ceiling devices, cap every GLB-embedded texture's decoded size.
+// A 2048 RGBA image is ~21MB with mips; a zone's models carry dozens. The
+// swap is async (createImageBitmap resize) and re-fires the texture upload,
+// which the warm-gate passes absorb offscreen.
+export function constrainSourceResolution(texture, maxDim = CONSTRAINED_TEXTURE_MAX_DIM) {
+  const source = texture?.source;
+  const image = source?.data;
+  if (!source || constrainedSources.has(source)) return;
+  const isResizable = (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap)
+    || (typeof HTMLImageElement !== 'undefined' && image instanceof HTMLImageElement);
+  if (!isResizable || typeof createImageBitmap !== 'function') return;
+  const largest = Math.max(image.width || 0, image.height || 0);
+  if (largest <= maxDim) return;
+  constrainedSources.add(source);
+  const scale = maxDim / largest;
+  createImageBitmap(image, {
+    resizeWidth: Math.max(1, Math.round(image.width * scale)),
+    resizeHeight: Math.max(1, Math.round(image.height * scale)),
+    resizeQuality: 'high',
+  }).then(resized => {
+    if (source.data === image) {
+      source.data = resized;
+      image.close?.();
+      texture.needsUpdate = true;
+    } else {
+      resized.close?.();
+    }
+  }).catch(() => {});
+}
 
 function adopt(texture) {
   if (!texture?.isTexture || texture.isRenderTargetTexture) return;
@@ -45,16 +78,20 @@ function adopt(texture) {
 // Runs once per parsed GLTF. Called from useTrackedGLTF during render rather
 // than an effect, so the first consumer of the scene already sees the shared
 // sources instead of uploading its own copy on the way past.
-export function shareTextureSources(gltf) {
+export function shareTextureSources(gltf, constrainedMaxDim = CONSTRAINED_TEXTURE_MAX_DIM) {
   const scene = gltf?.scene;
   if (!scene || shared.has(gltf)) return gltf;
   shared.add(gltf);
+  const constrain = isConstrainedMemoryDevice();
   scene.traverse(object => {
     const material = object.material;
     if (!material) return;
     for (const entry of Array.isArray(material) ? material : [material]) {
       if (!entry) continue;
-      for (const value of Object.values(entry)) adopt(value);
+      for (const value of Object.values(entry)) {
+        adopt(value);
+        if (constrain && value?.isTexture) constrainSourceResolution(value, constrainedMaxDim);
+      }
     }
   });
   return gltf;

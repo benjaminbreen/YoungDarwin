@@ -3,6 +3,11 @@
 import { useEffect } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { shareTextureSources } from './sharedTextureSources';
+import {
+  CONSTRAINED_HERO_TEXTURE_MAX_DIM,
+  CONSTRAINED_TEXTURE_MAX_DIM,
+  isConstrainedMemoryDevice,
+} from '../../world/constrainedDevice';
 
 // Parsed GLTF scenes and animation clips are large CPU-side objects. Keep the
 // currently mounted set plus a modest recent-history window; zone revisits can
@@ -72,7 +77,10 @@ function touchPath(path) {
 }
 
 function pruneParsedCache() {
-  while (recentPaths.size > GLTF_RECENT_CACHE_LIMIT) {
+  // A parsed GLB holds decoded bitmaps and typed arrays; two dozen of them
+  // are fine on a laptop and a meaningful share of an iPhone tab's budget.
+  const limit = isConstrainedMemoryDevice() ? 6 : GLTF_RECENT_CACHE_LIMIT;
+  while (recentPaths.size > limit) {
     const candidate = Array.from(recentPaths.keys()).find(path => (
       !activePathRefs.has(path) && !pendingPaths.has(path)
     ));
@@ -104,7 +112,13 @@ export function noteGLTFLoadAbandoned(path) {
 export function useTrackedGLTF(path) {
   // Every runtime GLB arrives through here, which makes it the one place that
   // can see a pack piece re-embedding an image another piece already loaded.
-  const gltf = shareTextureSources(useGLTF(path));
+  // Hero characters are the only models inspected at portrait distance; on
+  // constrained devices everything else caps at the lower texture dim.
+  const heroModel = /darwin5|syms/.test(path || '');
+  const gltf = shareTextureSources(
+    useGLTF(path),
+    heroModel ? CONSTRAINED_HERO_TEXTURE_MAX_DIM : CONSTRAINED_TEXTURE_MAX_DIM,
+  );
   parsedByPath.set(path, gltf);
   useEffect(() => {
     pendingPaths.delete(path);

@@ -7,8 +7,10 @@
 //   node scripts/perf-lab/memory-probe.mjs POST_OFFICE_BAY PENAL_COLONY
 import { openSession, bootToGameplay } from './driver.mjs';
 
-const FROM = process.argv[2] || 'POST_OFFICE_BAY';
-const TO = process.argv[3] || 'PENAL_COLONY';
+const FROM = process.argv.filter(value => !value.startsWith('--'))[2] || 'POST_OFFICE_BAY';
+const TO = process.argv.filter(value => !value.startsWith('--'))[3] || 'PENAL_COLONY';
+// --constrained exercises the memory-ceiling device path on desktop.
+const PARAMS = process.argv.includes('--constrained') ? { constrainedMemory: '1' } : {};
 
 const session = await openSession({ width: 1440, height: 900, deviceScaleFactor: 2 });
 const { page, browser } = session;
@@ -82,7 +84,7 @@ async function travelTo(zone) {
 }
 
 try {
-  await bootToGameplay(page, { zone: FROM, settleMs: 10000 });
+  await bootToGameplay(page, { zone: FROM, settleMs: 10000, params: PARAMS });
   await snapshot(`after boot ${FROM}:`);
   await travelTo(TO);
   await snapshot(`after travel ${TO}:`);
