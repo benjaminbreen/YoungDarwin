@@ -114,7 +114,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/placeholder.jpg',
+    image: '/specimens/galapagosdove.jpg',
     memoryText: 'Near the island well, doves came down within reach to drink—an unsettling measure of how little they feared people.',
     contents: 'The crop would likely contain small seeds and fruit fragments, with grit and occasional insect remains in the gizzard.',
     keywords: ['galapagos dove', 'dove', 'bird', 'zenaida', 'blue eye ring', 'spotted wing', 'island tameness', 'ground forager', 'floreana']
@@ -143,7 +143,7 @@ export const baseSpecimens = [
     danger: 3,
     timeofday: 'Diurnal',
     quote: '',
-    image: '/specimens/placeholder.jpg',
+    image: '/specimens/galapagoshawk.jpg',
     memoryText: 'An island hawk allowed an observer to approach its branch with almost no alarm—a predator displaying the same unfamiliar tameness as its prey.',
     contents: 'The crop and stomach might contain lizard scales, insect fragments, fur, feathers, or carrion, revealing an opportunistic island diet.',
     keywords: ['galapagos hawk', 'hawk', 'raptor', 'buteo', 'soaring', 'hooked bill', 'island tameness', 'predator', 'floreana']
@@ -435,6 +435,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/galapagoscotton.jpg',
     memoryText: '“A cotton-like shrub grows here despite the dry heat and black lava. Its place on this island may prove as important as its form.”',
     contents: 'Pressed leaves, flowers, and seed fibers would preserve the useful characters better than a bulky branch.',
     keywords: ['galapagos cotton', 'plant', 'gossypium', 'darwinii', 'shrub', 'flora', 'dry scrub']
@@ -463,6 +464,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/palosantotwig.jpg',
     memoryText: '“The low crooked tree is nearly bare, yet a broken twig gives a surprisingly strong balsamic odour.”',
     contents: 'A cut section shows pale fibrous wood with aromatic resin concentrated beneath the bark.',
     keywords: ['palo santo', 'bursera', 'graveolens', 'tree', 'plant', 'resin', 'aromatic', 'dry zone']
@@ -493,6 +495,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/sicyosvillosus.jpg',
     memoryText: '“A scandent plant spreading in great beds, its divided tendrils catching upon every neighboring stem; I have preserved leaf, flower, and the curious bristled fruit together.”',
     contents: 'A pressed cutting preserves the cordate leaf, glandular pubescence, branching tendril, flower arrangement, and one-seeded bristly fruit used to distinguish the species.',
     keywords: ['sicyos', 'villosus', 'lost plant', 'extinct plant', 'vine', 'cucurbit', 'charles island', 'floreana', 'darwin']
@@ -523,6 +526,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/deliliainelegans.jpg',
     memoryText: 'A low annual herb divides neatly into three ascending axes. Its paired leaves and crowded axillary heads are plain at first glance, but unusually exact in arrangement.',
     contents: 'A carefully pressed flowering sprig preserves the trichotomous branching, opposite doubly-serrate leaves, pubescence, and depressed axillary heads used to distinguish the species.',
     keywords: ['delilia', 'inelegans', 'desmocephalum', 'lost plant', 'extinct plant', 'annual herb', 'asteraceae', 'charles island', 'floreana', 'darwin']
@@ -553,6 +557,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/lecocarpuspinnatifidus.jpg',
     memoryText: 'The cut of the leaves varies markedly even upon one shrub, while the yellow heads and flat-winged fruits give firmer characters for comparison.',
     contents: 'A terminal sprig preserves a sequence of pinnatifid leaves, a composite head, and the diagnostic winged fruit without sacrificing the woody rootstock.',
     keywords: ['lecocarpus', 'pinnatifidus', 'floreana daisy', 'winged fruit', 'yellow flower', 'asteraceae', 'charles island', 'floreana', 'darwin', 'critically endangered']
@@ -583,6 +588,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/scalesiavillosa.jpg',
     memoryText: '“A daisy in affinity, yet grown woody upon the lava: the islands repeatedly give familiar families an unfamiliar stature.”',
     contents: 'A pressed shoot preserves the woolly leaf surface, the leaf margins, and any flower heads; a locality note distinguishes the observation from other island Scalesia.',
     keywords: ['scalesia', 'villosa', 'longhaired scalesia', 'lechoso', 'woody daisy', 'asteraceae', 'floreana', 'endemic']
@@ -613,6 +619,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/galapagosjusticia.jpg',
     memoryText: '“The purple flowers are the first character to seize the eye, but the form of the corolla will prove the sounder character once pressed.”',
     contents: 'A flowering sprig pressed at once would retain the paired leaves and the arrangement of its purple corollas, though much of their colour may fade.',
     keywords: ['justicia', 'galapagana', 'galapagos justicia', 'purple flower', 'lilac', 'acanthaceae', 'floreana', 'endemic']
@@ -643,6 +650,7 @@ export const baseSpecimens = [
     danger: 2,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/crotonscouleri.jpg',
     memoryText: '“The same chala alters greatly from one thicket to the next; several shoots and exact stations will be more useful than a single handsome branch.”',
     contents: 'A pressed leafy shoot and separate flowering spike preserve the variable leaf proportions and the tiny unisexual flowers.',
     keywords: ['chala', 'croton', 'scouleri', 'galapagos croton', 'euphorbiaceae', 'shrub', 'blue green leaves', 'floreana']
@@ -673,6 +681,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Any',
     quote: '',
+    image: '/specimens/resurrectionfern.jpg',
     memoryText: '“What seemed a dead and brittle fern has opened in the mist. A specimen should be kept with a note of both states.”',
     contents: 'A complete frond with its rhizome and fertile underside would preserve the scale pattern and rows of sori used for comparison.',
     keywords: ['fern', 'resurrection fern', 'pleopeltis', 'polypodioides', 'polypodium', 'frond', 'sori', 'highland']
@@ -703,6 +712,7 @@ export const baseSpecimens = [
     danger: 1,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/sesuviumportulacastrum.jpg',
     memoryText: '“The fleshy mat lies where ordinary shrubs would be burned by salt. Its station may tell as much as its small pink flower.”',
     contents: 'Several connected stem nodes, leaves, and a flower can be pressed together to preserve the creeping habit rather than only an isolated leaf.',
     keywords: ['sesuvium', 'portulacastrum', 'carpetweed', 'sea purslane', 'shoreline seapurslane', 'succulent', 'salt tolerant', 'lagoon']
@@ -733,6 +743,7 @@ export const baseSpecimens = [
     danger: 3,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/candelabracactus.jpg',
     memoryText: '“The columns divide like the arms of a candlestick and stand well above the scrub; a fallen flower will serve better than cutting the living stem.”',
     contents: 'A fallen flower, fruit, or carefully clipped spine cluster can be labeled without removing a large section of the slow-growing stem.',
     keywords: ['candelabra cactus', 'jasminocereus', 'thouarsii', 'cactus', 'cactaceae', 'columnar', 'yellow flower', 'floreana']
@@ -763,6 +774,7 @@ export const baseSpecimens = [
     danger: 9,
     timeofday: 'Diurnal',
     quote: '',
+    image: '/specimens/manzanillo.jpg',
     memoryText: '“The innocent-looking fruit and shining leaf invite a dangerous mistake. I shall sketch the whole tree before deciding whether any fragment can be safely taken.”',
     contents: 'A safely dried leaf or fallen fruit, isolated from skin and eyes and marked poisonous, would preserve useful characters; fresh cuts exude caustic white latex.',
     keywords: ['manzanillo', 'manchineel', 'poison apple', 'hippomane', 'mancinella', 'toxic', 'latex', 'tree', 'floreana']
@@ -924,7 +936,7 @@ export const baseSpecimens = [
     details: ['Large native bee with a dark metallic sheen', 'Visits cactus, cotton, and other island flowers', 'Females excavate nesting tunnels in dry wood', 'An important pollinator on the arid island'],
     habitat: 'scrubland, flowers, cactus',
     collected: false, observations: [], scientificValue: 4, hybrid_ease: 4, hybrid_temperature: 5, danger: 1,
-    timeofday: 'Diurnal', quote: '', image: '', memoryText: '', contents: '',
+    timeofday: 'Diurnal', quote: '', image: '/specimens/galapagoscarpenterbee.jpg', memoryText: '', contents: '',
     keywords: ['bee', 'carpenter bee', 'pollinator', 'xylocopa'],
     pollinator: true, worldMarker: false, collisionRadius: 0, interactionHeight: 0.06, examineRadius: 0.07,
   },
@@ -939,7 +951,7 @@ export const baseSpecimens = [
     details: ['Warm yellow wings catch the sun in flight', 'Flight is wandering and buoyant', 'Frequently visits low flowers in dry country', 'Closes its wings upright when resting'],
     habitat: 'dry scrub, flowers, cactus',
     collected: false, observations: [], scientificValue: 3, hybrid_ease: 5, hybrid_temperature: 5, danger: 0,
-    timeofday: 'Diurnal', quote: '', image: '', memoryText: '', contents: '',
+    timeofday: 'Diurnal', quote: '', image: '/specimens/galapagossulphur.jpg', memoryText: '', contents: '',
     keywords: ['butterfly', 'sulphur', 'yellow', 'pollinator', 'phoebis'],
     pollinator: true, worldMarker: false, collisionRadius: 0, interactionHeight: 0.1, examineRadius: 0.11,
   },
@@ -954,7 +966,7 @@ export const baseSpecimens = [
     details: ['Long orange forewings carry dark markings', 'Silvery spots flash on the wing undersides', 'Flies more directly than the yellow sulphur', 'Basks with its wings spread in strong sun'],
     habitat: 'grass, scrub margins, flowers',
     collected: false, observations: [], scientificValue: 4, hybrid_ease: 5, hybrid_temperature: 5, danger: 0,
-    timeofday: 'Diurnal', quote: '', image: '', memoryText: '', contents: '',
+    timeofday: 'Diurnal', quote: '', image: '/specimens/galapagosgulffritillary.jpg', memoryText: '', contents: '',
     keywords: ['butterfly', 'fritillary', 'orange', 'pollinator', 'agraulis'],
     pollinator: true, worldMarker: false, collisionRadius: 0, interactionHeight: 0.1, examineRadius: 0.11,
   },
@@ -982,7 +994,7 @@ export const baseSpecimens = [
     danger: 0,
     timeofday: 'Diurnal',
     quote: '',
-    image: '',
+    image: '/specimens/galapagospaintedlocust.jpg',
     memoryText: 'A brilliantly marked locust held still on a sunlit stem until the next footfall sent it flashing onto the basalt.',
     contents: 'The crop would contain finely chewed leaves and grass; the pinned wings and banded hind legs preserve its most useful identifying marks.',
     keywords: ['painted locust', 'grasshopper', 'orthoptera', 'schistocerca', 'melanocera', 'endemic', 'insect', 'hopper'],

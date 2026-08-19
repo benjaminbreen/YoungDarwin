@@ -63,6 +63,51 @@ module.exports = {
           '54%': { transform: 'scale(1.12)' },
           '72%, 100%': { transform: 'scale(1.08)' },
         },
+        // Collection celebration. Standalone scale/rotate properties (not
+        // transform) so these compose with Tailwind translate centering.
+        'collect-pop': {
+          '0%': { opacity: '0', scale: '0.62' },
+          '55%': { opacity: '1', scale: '1.045' },
+          '100%': { opacity: '1', scale: '1' },
+        },
+        'collect-ring': {
+          '0%': { opacity: '0.85', scale: '0.45' },
+          '100%': { opacity: '0', scale: '1.9' },
+        },
+        // Rays hold for the card's whole stay — fading them early read as
+        // "no rays at all" in practice. The wrapper's exit fade takes them out.
+        'collect-rays': {
+          '0%': { opacity: '0', rotate: '0deg' },
+          '14%': { opacity: '1' },
+          '100%': { opacity: '0.85', rotate: '32deg' },
+        },
+        'collect-glow': {
+          '0%, 100%': { opacity: '0.32' },
+          '50%': { opacity: '0.55' },
+        },
+        'collect-chip': {
+          '0%': { opacity: '0', scale: '0.5' },
+          '70%': { opacity: '1', scale: '1.12' },
+          '100%': { opacity: '1', scale: '1' },
+        },
+        // Case button feedback when a specimen lands: one glow pulse plus a
+        // small settle-shake. Color comes from --pulse-color so rarity tints it.
+        'case-pulse': {
+          '0%': { boxShadow: '0 0 0 0 var(--pulse-color, rgba(227,197,133,0.6))' },
+          '55%': { boxShadow: '0 0 14px 5px var(--pulse-color, rgba(227,197,133,0.6))' },
+          '100%': { boxShadow: '0 0 0 0 rgba(227,197,133,0)' },
+        },
+        'case-shake': {
+          '0%, 100%': { rotate: '0deg', translate: '0 0' },
+          '18%': { rotate: '-5deg', translate: '0 -2px' },
+          '38%': { rotate: '4deg' },
+          '58%': { rotate: '-2.5deg' },
+          '78%': { rotate: '1.5deg' },
+        },
+        'slot-shimmer': {
+          '0%': { translate: '-130% 0' },
+          '100%': { translate: '130% 0' },
+        },
       },
       animation: {
         // 'backwards' (not 'both') so class-driven transforms/opacity take over
@@ -70,6 +115,14 @@ module.exports = {
         'hud-rise': 'hud-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards',
         'hud-fade': 'hud-fade 0.3s ease-out backwards',
         'control-hint-attention': 'control-hint-attention 1.8s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'collect-pop': 'collect-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards',
+        'collect-ring': 'collect-ring 0.9s cubic-bezier(0.16, 0.8, 0.4, 1) forwards',
+        'collect-rays': 'collect-rays 5.2s linear forwards',
+        'collect-glow': 'collect-glow 1.8s ease-in-out 0.4s infinite',
+        'collect-chip': 'collect-chip 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.28s backwards',
+        'case-pulse': 'case-pulse 1.1s ease-out',
+        'case-shake': 'case-shake 0.7s cubic-bezier(0.36, 0.07, 0.19, 0.97)',
+        'slot-shimmer': 'slot-shimmer 1.2s cubic-bezier(0.4, 0, 0.2, 1) 0.15s both',
       },
     },
   },

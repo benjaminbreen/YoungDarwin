@@ -665,6 +665,98 @@ export function playAudioSprite(sprite, {
   return true;
 }
 
+// Synthesized reward chime for the collection celebration — no sample asset,
+// so it rides the shared context/master and obeys the mute toggle like every
+// other sound. Higher rarities earn a longer arpeggio and a shimmer tail.
+const COLLECTION_CHIME_TIERS = Object.freeze({
+  common: { notes: [523.25, 783.99], spacing: 0.085, peak: 0.1, decay: 0.85 },
+  notable: { notes: [587.33, 880.0], spacing: 0.085, peak: 0.11, decay: 0.95 },
+  remarkable: { notes: [523.25, 659.25, 987.77], spacing: 0.105, peak: 0.12, decay: 1.15, shimmer: 0.02 },
+  singular: { notes: [523.25, 659.25, 783.99, 1046.5], spacing: 0.125, peak: 0.13, decay: 1.5, shimmer: 0.03 },
+});
+
+// Sighting sting: shorter and quieter than the collect chime.
+const SIGHTING_STING_TIERS = Object.freeze({
+  common: { notes: [659.25, 880.0], spacing: 0.09, peak: 0.05, decay: 0.55 },
+  notable: { notes: [698.46, 932.33], spacing: 0.09, peak: 0.055, decay: 0.6 },
+  remarkable: { notes: [783.99, 1046.5], spacing: 0.1, peak: 0.06, decay: 0.7 },
+  singular: { notes: [783.99, 987.77, 1318.5], spacing: 0.11, peak: 0.065, decay: 0.85 },
+});
+
+export function playSightingSting(tierId = 'common') {
+  return playBellPhrase(SIGHTING_STING_TIERS[tierId] || SIGHTING_STING_TIERS.common);
+}
+
+export function playCollectionChime(tierId = 'common') {
+  return playBellPhrase(COLLECTION_CHIME_TIERS[tierId] || COLLECTION_CHIME_TIERS.common);
+}
+
+function playBellPhrase(tier) {
+  const context = audioState.context;
+  if ((!audioState.enabled && !audioState.debugControl.forceEnabled)
+    || !context
+    || context.state !== 'running'
+    || !audioState.master) return false;
+  const now = context.currentTime + 0.02;
+
+  const bell = (frequency, start, peak, decay) => {
+    // Fundamental plus a quieter octave partial reads as a small glass bell.
+    [[frequency, 1], [frequency * 2, 0.32]].forEach(([hz, weight]) => {
+      const osc = context.createOscillator();
+      const env = context.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      env.gain.setValueAtTime(0.0001, start);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.001, peak * weight), start + 0.014);
+      env.gain.exponentialRampToValueAtTime(0.0001, start + decay);
+      osc.connect(env);
+      env.connect(audioState.master);
+      osc.start(start);
+      osc.stop(start + decay + 0.05);
+      osc.onended = () => {
+        osc.disconnect();
+        env.disconnect();
+      };
+    });
+  };
+
+  tier.notes.forEach((frequency, index) => {
+    const last = index === tier.notes.length - 1;
+    bell(frequency, now + index * tier.spacing, tier.peak, tier.decay * (last ? 1.35 : 1));
+  });
+
+  if (tier.shimmer) {
+    // A quiet tremolo sparkle two octaves up, over the final note's tail.
+    const start = now + (tier.notes.length - 1) * tier.spacing + 0.05;
+    const osc = context.createOscillator();
+    const env = context.createGain();
+    const lfo = context.createOscillator();
+    const lfoDepth = context.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = tier.notes[tier.notes.length - 1] * 3;
+    env.gain.setValueAtTime(0.0001, start);
+    env.gain.exponentialRampToValueAtTime(tier.shimmer, start + 0.08);
+    env.gain.exponentialRampToValueAtTime(0.0001, start + 1.4);
+    lfo.frequency.value = 9;
+    lfoDepth.gain.value = tier.shimmer * 0.6;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(env.gain);
+    osc.connect(env);
+    env.connect(audioState.master);
+    osc.start(start);
+    lfo.start(start);
+    osc.stop(start + 1.5);
+    lfo.stop(start + 1.5);
+    osc.onended = () => {
+      osc.disconnect();
+      env.disconnect();
+      lfo.disconnect();
+      lfoDepth.disconnect();
+    };
+  }
+  return true;
+}
+
 export function soundscapeAudioIsRunning() {
   return audioState.context?.state === 'running';
 }

@@ -102,7 +102,7 @@ export function examinableFromSpecimen(specimen) {
       'Further observation or collection may revise it.',
     ],
     collectable: true,
-    collectVerb: 'Collect sample',
+    collectVerb: 'Collect specimen',
     frameHint: specimenFrameHint(specimen),
     specimen,
   };
@@ -223,6 +223,7 @@ export function createExamineSession(examinable, { focus = null, day = 1, timeOf
     collectVerb: examinable.collectVerb || 'Collect sample',
     collectable: examinable.collectable !== false,
     sample: examinable.sample || null,
+    specimen: examinable.specimen || null,
     focus,
     frameHint: examinable.frameHint,
     chat: [],

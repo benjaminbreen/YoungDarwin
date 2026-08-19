@@ -1266,37 +1266,57 @@ test('map-edge distance follows the real movement boundary, not the terrain rect
 });
 
 test('objectives advance in order from real gameplay state', () => {
+  const fieldRecord = (specimenId, location = 'Post Office Bay', condition = 'clean specimen') => ({
+    authorship: 'field-record', specimenId, location, condition,
+  });
   const base = {
     visitedLocalCellIds: [], activeToolId: 'hands', examinedTypeIds: [],
     collectedSpecimenIds: [], collectedSpecimenActorIds: [], npcEncounterState: {},
-    visitedZoneIds: ['POST_OFFICE_BAY'], shipCollection: [], journal: [],
+    documentedSpecimenIds: [], visitedZoneIds: ['POST_OFFICE_BAY'], shipCollection: [], journal: [],
   };
   assert.equal(resolveDirective(base), 'explore', 'a fresh expedition starts on the first objective');
-  const walked = { ...base, visitedLocalCellIds: ['a', 'b', 'c'] };
-  assert.equal(resolveDirective(walked, 'explore'), 'tool');
-  const armed = { ...walked, activeToolId: 'insect_net' };
+  const duplicateRecords = {
+    ...base,
+    journal: [fieldRecord('lavalizard'), fieldRecord('lavalizard'), fieldRecord('seaurchin')],
+  };
+  assert.equal(resolveDirective(duplicateRecords, 'explore'), 'explore', 'the landing survey counts distinct specimen types');
+  const surveyed = {
+    ...base,
+    journal: [fieldRecord('lavalizard'), fieldRecord('seaurchin'), fieldRecord('barnacle')],
+  };
+  assert.equal(resolveDirective(surveyed, 'explore'), 'tool');
+  const armed = { ...surveyed, activeToolId: 'insect_net' };
   assert.equal(resolveDirective(armed, 'tool'), 'examine');
 
   // Objectives already satisfied are skipped, never re-issued.
   const ahead = {
-    ...base,
-    visitedLocalCellIds: ['a', 'b', 'c'],
+    ...surveyed,
     activeToolId: 'insect_net',
     examinedTypeIds: ['lavalizard'],
     collectedSpecimenIds: ['lavalizard'],
   };
   assert.equal(resolveDirective(ahead, 'explore'), 'syms', 'satisfied objectives are skipped');
 
-  // The keystone comparison reads zone-prefixed actor ids, so the same species
-  // taken at two landings satisfies it and one landing does not.
-  const oneLanding = { ...base, collectedSpecimenActorIds: ['POST_OFFICE_BAY:lavalizard-0'] };
+  // The keystone comparison reads the journal's field-record entries (actor
+  // ids broke on place-named authored spawns), so the same species collected
+  // at two landings satisfies it and one landing does not.
+  const landingRecord = (location, condition = 'clean_specimen') => ({
+    authorship: 'field-record', specimenId: 'lavalizard', location, condition,
+  });
+  const oneLanding = { ...base, journal: [landingRecord('Post Office Bay')] };
   const twoLandings = {
     ...base,
-    collectedSpecimenActorIds: ['POST_OFFICE_BAY:lavalizard-0', 'N_SHORE:lavalizard-2'],
+    journal: [landingRecord('Post Office Bay'), landingRecord('Northern Shore')],
   };
   const twoLandingsDirective = DIRECTIVES.find(entry => entry.id === 'two-landings');
   assert.equal(twoLandingsDirective.isDone(oneLanding), false);
   assert.equal(twoLandingsDirective.isDone(twoLandings), true);
+  // Documenting at the second landing is not the same as collecting there.
+  const documentedSecond = {
+    ...base,
+    journal: [landingRecord('Post Office Bay'), landingRecord('Northern Shore', 'documented in field')],
+  };
+  assert.equal(twoLandingsDirective.isDone(documentedSecond), false);
 
   // Recorded uncertainty is satisfied by the same hedging the final
   // assessment scores as rigor.

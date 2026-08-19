@@ -2,7 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 import { useThreeGameStore } from '../../store';
+import { getSpecimenRarity } from '../../rarity';
 import { notePerfEvent } from '../../perfCapture';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
@@ -507,6 +509,37 @@ function AnimatedSpecimenShape({
         proceduralMotionRef={proceduralMotionRef}
       />
     </CrabWiggle>
+  );
+}
+
+// A quiet tier-colored twinkle over uncollected Remarkable/Singular specimens,
+// so a rare find reads as an event from across a clearing. Mounted for the
+// handful of rare actors per zone only, so its per-frame cost stays trivial.
+function RareSpecimenGlint({ rarity, height }) {
+  const groupRef = useRef(null);
+  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  useFrame(state => {
+    const group = groupRef.current;
+    if (!group) return;
+    const t = state.clock.elapsedTime;
+    group.position.y = height + Math.sin(t * 1.25 + phase) * 0.055;
+    group.rotation.y = t * 0.85 + phase;
+    const pulse = 0.5 + Math.sin(t * 2.2 + phase) * 0.3;
+    group.children.forEach((child, index) => {
+      if (child.material) child.material.opacity = Math.max(0.14, pulse - index * 0.16);
+    });
+  });
+  return (
+    <group ref={groupRef} position={[0, height, 0]}>
+      <mesh raycast={NO_RAYCAST} scale={0.055} renderOrder={6}>
+        <octahedronGeometry args={[1, 0]} />
+        <meshBasicMaterial color={rarity.color} transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      <mesh raycast={NO_RAYCAST} position={[0.11, -0.08, 0.02]} scale={0.03} renderOrder={6}>
+        <octahedronGeometry args={[1, 0]} />
+        <meshBasicMaterial color={rarity.color} transparent opacity={0.45} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+    </group>
   );
 }
 
@@ -1125,6 +1158,14 @@ export function SpecimenActor({ specimen }) {
   );
   const hideGroundAffordances = standingWater.active;
   const showWorldMarker = specimen.worldMarker !== false && !specimen.pollinator;
+  const rarity = getSpecimenRarity(specimen);
+  const speciesCollected = useThreeGameStore(state => state.collectedSpecimenIds?.includes(specimen.id) || false);
+  const showRareGlint = (rarity.id === 'remarkable' || rarity.id === 'singular')
+    && !speciesCollected
+    && !examineOpen
+    && !isCarried
+    && !snareTrap
+    && !downedInfo;
   const showWadingWaterline = standingWater.active
     && (behaviorProfile?.movementStyle === 'wade' || specimen.id === 'flamingo');
   const specimenContent = (
@@ -1151,6 +1192,7 @@ export function SpecimenActor({ specimen }) {
           depth={standingWater.depth}
         />
       )}
+      {showRareGlint && <RareSpecimenGlint rarity={rarity} height={markerY * 0.82} />}
       <AnimatedSpecimenShape
         specimen={specimen}
         animationSelector={selectSpecimenAnimation}

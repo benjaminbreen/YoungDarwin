@@ -3,7 +3,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
-import { getThreeSpecimens, threeTools, zoneSpecimenProgress } from '../data';
+import { getThreeSpecimens, threeTools } from '../data';
 import {
   TOGGLE_COMPASS_EVENT,
   TOOL_USE_EVENT,
@@ -43,7 +43,12 @@ import {
 } from './controlsReference';
 import { useDismissableOverlay } from './useDismissableOverlay';
 import { animalAwarenessValue, animalRisk } from './animalVitals';
-import { getDirective, getDirectivePosition } from '../directives';
+import {
+  getDirective,
+  getDirectivePosition,
+  postOfficeBaySurveyProgress,
+  POST_OFFICE_BAY_SURVEY_TARGET,
+} from '../directives';
 import { ComfortSettings } from './ComfortSettings';
 import { vitalsGradient } from './theme';
 import { QUALITY_CHOICES } from '../qualityPreference';
@@ -64,6 +69,12 @@ import {
 import { useTerrainChart } from './expedition/TerrainMinimap';
 import { GalapagosGlobe } from './expedition/GalapagosGlobe';
 import { InventoryModal } from './expedition/InventoryModal';
+import { CollectionCelebration, celebrationVisibleMs } from './CollectionCelebration';
+import { NightlyDebriefModal } from './NightlyDebriefModal';
+import { rarityForValue } from '../rarity';
+import { RarityBadge } from './RarityBadge';
+import { playSightingSting } from '../audio/audioRuntime';
+import { useZoneSpecimenProgress } from './useZoneSpecimenProgress';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
 import { CompassDial } from './expedition/CompassDial';
@@ -911,12 +922,19 @@ function PolishedTopObjective({ objective, className = '' }) {
   const headlineRef = useRef(null);
   const directiveCompletedId = useThreeGameStore(state => state.directiveCompletedId);
   const clearCompletedDirective = useThreeGameStore(state => state.clearCompletedDirective);
+  const landingSurveyProgress = useThreeGameStore(postOfficeBaySurveyProgress);
   const completedDirective = getDirective(directiveCompletedId);
 
   // While a finished objective holds the banner, show its own hint and detail.
   // Otherwise the body describes the next objective under a struck-through
   // line.
-  const shown = completedDirective || objective;
+  const shownBase = completedDirective || objective;
+  const shown = shownBase?.id === 'explore'
+    ? {
+        ...shownBase,
+        text: `${shownBase.text} · ${Math.min(landingSurveyProgress, POST_OFFICE_BAY_SURVEY_TARGET)}/${POST_OFFICE_BAY_SURVEY_TARGET}`,
+      }
+    : shownBase;
   const position = getDirectivePosition(shown.id);
   const clipped = useTextClipped(headlineRef, shown.text, !expanded);
 
@@ -1344,7 +1362,7 @@ function mapTipPlacement(point) {
 }
 
 const SpecimenMarker = memo(function SpecimenMarker({
-  specimen, zone, surveyStyle, showKnown, showNew, active, onToggle,
+  specimen, zone, surveyStyle, showKnown, showNew, active, nearestUnrecorded, onToggle,
 }) {
   const actorId = specimen.instanceId || specimen.id;
   const runtime = useThreeGameStore(state => state.specimenRuntimePositions?.[zone.id]?.[actorId]);
@@ -1371,26 +1389,34 @@ const SpecimenMarker = memo(function SpecimenMarker({
         event.stopPropagation();
         onToggle(actorId);
       }}
-      aria-label={`${specimen.name}: ${status}`}
+      aria-label={`${specimen.name}: ${status}${nearestUnrecorded ? ', nearest unrecorded specimen' : ''}`}
       // Recorded vs unrecorded was distinguished by hue alone (green vs rose),
       // which is the single most common colorblind failure. Shape now carries
       // the same information: recorded specimens are square, unrecorded ones
       // round. Colour is kept as a redundant second channel.
-      className={`group absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 border shadow transition hover:scale-125 ${
+      className={`group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center border shadow transition hover:scale-125 ${
+        nearestUnrecorded ? 'z-10 h-3 w-3' : 'h-2.5 w-2.5'
+      } ${
         isKnown ? 'rounded-[1px]' : 'rounded-full'
       } ${
         isSelected
           ? 'border-expedition-ink bg-expedition-goldbright ring-2 ring-expedition-goldbright/60'
           : isCollected || isDocumented
             ? surveyStyle
-              ? 'border-[#24422c] bg-[#99c98c]/90 ring-1 ring-[#e6d69c]/70'
-              : 'border-emerald-950 bg-emerald-300/90'
+              ? 'border-[#49584b] bg-[#7f8b78]/80 ring-1 ring-[#e6d69c]/45'
+              : 'border-[#33423d] bg-[#7e9188]/75'
             : surveyStyle
-              ? 'border-[#5c2e2e] bg-[#e5a5a6]/92 ring-1 ring-[#f3dcac]/70'
-              : 'border-expedition-ink/80 bg-rose-300/95'
+              ? `border-[#5c2e2e] bg-[#e5a5a6]/92 ring-1 ${nearestUnrecorded ? 'ring-[#fff0bc] shadow-[0_0_10px_rgba(248,180,181,0.92)]' : 'ring-[#f3dcac]/70'}`
+              : `border-expedition-ink/80 bg-rose-300/95 ${nearestUnrecorded ? 'ring-2 ring-rose-100/80 shadow-[0_0_11px_rgba(253,164,175,0.9)]' : ''}`
       }`}
       style={{ left: percentStyle(point.x), top: percentStyle(point.y) }}
     >
+      {nearestUnrecorded && !isSelected && (
+        <span className="pointer-events-none absolute -inset-1 rounded-full border border-rose-100/75 animate-ping motion-reduce:animate-none" />
+      )}
+      {isKnown && !isSelected && (
+        <span aria-hidden="true" className="pointer-events-none text-[7px] font-black leading-none text-[#edf2dc] [text-shadow:0_1px_1px_rgba(0,0,0,0.7)]">✓</span>
+      )}
       {/* Name on hover; the click card below carries the rest. */}
       {!active && <MapTip label={specimen.name} {...mapTipPlacement(point)} />}
       {active && (
@@ -1584,6 +1610,30 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
   const [activeMarkerId, setActiveMarkerId] = useState(null);
   const specimens = getThreeSpecimens(zone.id);
   const playerPose = useLiveMinimapPose();
+  const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
+  const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
+  const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
+  const nearestUnrecordedActorId = useMemo(() => {
+    const recordedTypes = new Set([...(collectedSpecimenIds || []), ...(documentedSpecimenIds || [])]);
+    const collectedActors = new Set(collectedSpecimenActorIds || []);
+    const runtimePositions = useThreeGameStore.getState().specimenRuntimePositions?.[zone.id] || {};
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const specimen of specimens) {
+      const actorId = specimen.instanceId || specimen.id;
+      if (recordedTypes.has(specimen.id) || collectedActors.has(actorId)) continue;
+      const [spawnX, , spawnZ] = specimen.spawnPoint || [0, 0, 0];
+      const runtime = runtimePositions[actorId];
+      const specimenX = Number.isFinite(runtime?.x) ? runtime.x : spawnX;
+      const specimenZ = Number.isFinite(runtime?.z) ? runtime.z : spawnZ;
+      const distance = Math.hypot(specimenX - playerPose.x, specimenZ - playerPose.z);
+      if (distance < nearestDistance) {
+        nearest = actorId;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }, [collectedSpecimenActorIds, collectedSpecimenIds, documentedSpecimenIds, playerPose.x, playerPose.z, specimens, zone.id]);
   const handleToggleMarker = useCallback(id => {
     setActiveMarkerId(current => (current === id ? null : id));
   }, []);
@@ -1615,18 +1665,22 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
       <BeagleMinimapMarker zone={zone} surveyStyle={surveyStyle} />
       <SymsMinimapMarker zone={zone} />
       <MinimapTrail zone={zone} playerPose={playerPose} />
-      {specimens.map((specimen, index) => (
-        <SpecimenMarker
-          key={`${specimen.id}-${index}`}
-          specimen={specimen}
-          zone={zone}
-          surveyStyle={surveyStyle}
-          showKnown={showKnown}
-          showNew={showNew}
-          active={activeMarkerId === specimen.id}
-          onToggle={handleToggleMarker}
-        />
-      ))}
+      {specimens.map((specimen, index) => {
+        const actorId = specimen.instanceId || specimen.id;
+        return (
+          <SpecimenMarker
+            key={`${specimen.id}-${index}`}
+            specimen={specimen}
+            zone={zone}
+            surveyStyle={surveyStyle}
+            showKnown={showKnown}
+            showNew={showNew}
+            active={activeMarkerId === actorId}
+            nearestUnrecorded={nearestUnrecordedActorId === actorId}
+            onToggle={handleToggleMarker}
+          />
+        );
+      })}
       <MinimapPlayerArrow zone={zone} surveyStyle={surveyStyle} playerPose={playerPose} />
     </>
   );
@@ -2436,16 +2490,6 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
 // it by the zone's specimen count produced ratios like "3 / 2 specimens".
 // Documented specimens count toward progress because the objective and
 // `questComplete` treat collecting and documenting as equivalent fieldwork.
-function useZoneSpecimenProgress() {
-  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
-  const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
-  return useMemo(
-    () => zoneSpecimenProgress(currentZoneId, collectedSpecimenIds, documentedSpecimenIds),
-    [currentZoneId, collectedSpecimenIds, documentedSpecimenIds],
-  );
-}
-
 const SYMS_STATUS_DOT = {
   nearby: 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]',
   region: 'bg-expedition-gold shadow-[0_0_5px_rgba(201,163,95,0.6)]',
@@ -2647,6 +2691,7 @@ function PolishedFieldRail({
   const timeOfDay = useThreeGameStore(state => state.timeOfDay);
   const supplies = useThreeGameStore(state => state.supplies);
   const restBusy = useThreeGameStore(state => Boolean(state.restSession));
+  const casePulse = useCaseAddedPulse();
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const zoneProgress = useZoneSpecimenProgress();
@@ -2754,8 +2799,11 @@ function PolishedFieldRail({
               <div className="mt-0.5 text-[8.5px] uppercase tracking-[0.08em] text-expedition-faded">Field station</div>
             </div>
           )}
-          <button type="button" onClick={onOpenInventory} className={railIconButton} title="Open specimens" aria-label="Open specimens">
-            <ButterflyIcon className="h-4 w-4" />
+          <button type="button" onClick={onOpenInventory} className={`${railIconButton} relative`} title="Open specimens" aria-label="Open specimens">
+            <CasePulseGlow pulse={casePulse} />
+            <span key={casePulse ? `case-shake-${casePulse.key}` : 'case-idle'} className={casePulse ? 'animate-case-shake motion-reduce:animate-none' : ''}>
+              <ButterflyIcon className="h-4 w-4" />
+            </span>
           </button>
           <button type="button" onClick={onOpenJournal} className={railIconButton} title="Open field notebook" aria-label="Open field notebook">
             <OpenBookIcon className="h-4 w-4" />
@@ -3070,7 +3118,6 @@ const MOVEMENT_HINT_MOVE_KEYS = new Set([
 const COLLECTION_METHOD_IDS = ['hands', 'hammer', 'snare', 'insect_net', 'shotgun'];
 const COLLECTION_METHOD_SET = new Set(COLLECTION_METHOD_IDS);
 const PROMPT_EXIT_MS = 220;
-const RESULT_TOAST_VISIBLE_MS = 5000;
 const RESULT_TOAST_EXIT_MS = 280;
 
 function PromptKey({ children, active = false }) {
@@ -3551,7 +3598,7 @@ const HINT_TEXT = {
   [HINT_STUDY]: 'Enter studies a subject first; study it once and you may take a sample.',
   [HINT_NPC]: 'You speak in your own words. What you ask shapes the reply.',
   [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
-  [HINT_EXAMINE]: 'Examine it first — only examined creatures can be written up, sketched, or taken.',
+  [HINT_EXAMINE]: 'Enter examines a creature. What you observe and write is what Henslow judges at the end.',
 };
 
 function promptActionText(value) {
@@ -3641,99 +3688,142 @@ function CollectionMethodIcon({ toolId, active = false, compact = false, onSelec
   );
 }
 
-function CollectionOutcomeIcon({ tone }) {
-  if (tone === 'failure') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M8.8 8.8 L15.2 15.2 M15.2 8.8 L8.8 15.2" />
-      </svg>
-    );
-  }
-  if (tone === 'documented') {
-    return <NoteIcon className="h-5 w-5" />;
-  }
+// Case buttons glow and shake in the newest specimen's rarity color. Derived
+// from the store's lastCased* primitives rather than the inventory array:
+// an array-identity subscription here re-rendered the whole HUD tree twice
+// per collect. The staleness check keeps a remount from replaying an old
+// pulse after the afterglow window has passed.
+function useCaseAddedPulse() {
+  const lastCasedAt = useThreeGameStore(state => state.lastCasedAt);
+  const lastCasedValue = useThreeGameStore(state => state.lastCasedValue);
+  return useMemo(() => {
+    if (!lastCasedAt || Date.now() - lastCasedAt > CASE_AFTERGLOW_HOLD_MS) return null;
+    return { key: lastCasedAt, color: rarityForValue(lastCasedValue).glow };
+  }, [lastCasedAt, lastCasedValue]);
+}
+
+// How long a case button holds the last specimen's rarity color before fading.
+const CASE_AFTERGLOW_HOLD_MS = 20000;
+
+function CasePulseGlow({ pulse, className = 'rounded-sm' }) {
+  const [sustained, setSustained] = useState(false);
+  useEffect(() => {
+    if (!pulse?.key) return undefined;
+    setSustained(true);
+    const timer = window.setTimeout(() => setSustained(false), CASE_AFTERGLOW_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [pulse?.key]);
+  if (!pulse) return null;
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="8" />
-      <path d="M8.2 12.3 L10.7 14.8 L16 9.3" />
-    </svg>
+    <>
+      <span
+        key={pulse.key}
+        aria-hidden="true"
+        className={`pointer-events-none absolute -inset-px animate-case-pulse motion-reduce:animate-none ${className}`}
+        style={{ '--pulse-color': pulse.color }}
+      />
+      {/* Sustained afterglow: the attention pulse hands off to a steady glow
+          in the specimen's rarity color, which lets go a slow fade later. */}
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute -inset-px transition-opacity ${className} ${sustained ? 'opacity-100 duration-300' : 'opacity-0 duration-[2500ms]'}`}
+        style={{ boxShadow: `0 0 10px 2px ${pulse.color}, inset 0 0 6px ${pulse.color}` }}
+      />
+    </>
   );
 }
 
-function collectionPercent(value) {
-  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : null;
+// One-shot toast for a species' first close encounter; kept much quieter
+// than the collection celebration.
+function SpecimenSightingToast() {
+  const sighting = useThreeGameStore(state => state.specimenSighting);
+  const [rendered, setRendered] = useState(null);
+  const [visible, setVisible] = useState(false);
+  const seenAtRef = React.useRef(0);
+
+  useEffect(() => {
+    if (!sighting?.at || sighting.at === seenAtRef.current) return undefined;
+    seenAtRef.current = sighting.at;
+    setRendered(sighting);
+    setVisible(false);
+    playSightingSting(rarityForValue(sighting.scientificValue).id);
+    const showTimer = window.setTimeout(() => setVisible(true), 20);
+    const hideTimer = window.setTimeout(() => setVisible(false), 3600);
+    const clearTimer = window.setTimeout(() => setRendered(null), 3950);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [sighting]);
+
+  if (!rendered) return null;
+  const rarity = rarityForValue(rendered.scientificValue);
+  return (
+    <div className={`pointer-events-none absolute left-1/2 top-[7.2rem] z-20 -translate-x-1/2 font-expedition transition-all duration-300 ${visible ? 'translate-y-0 opacity-100' : '-translate-y-1.5 opacity-0'}`}>
+      <div
+        className="flex items-center gap-2.5 rounded-full border bg-[rgba(11,19,35,0.88)] py-1.5 pl-3 pr-4 shadow-[0_12px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(227,197,133,0.14)] backdrop-blur-md"
+        style={{ borderColor: rarity.ring }}
+      >
+        <span className="h-2 w-2 rotate-45 animate-collect-chip motion-reduce:animate-none" style={{ background: rarity.color, boxShadow: `0 0 8px ${rarity.glow}` }} />
+        <div className="min-w-0">
+          <div className="font-sans text-[8.5px] font-bold uppercase tracking-[0.22em]" style={{ color: rarity.color }}>
+            New species sighted
+          </div>
+          <div className="truncate text-[14px] font-semibold leading-tight text-expedition-parchment">
+            {rendered.name}
+            {rendered.latin && <span className="ml-1.5 text-[11.5px] font-normal italic text-expedition-faded">{rendered.latin}</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function CollectionOutcomeCard({ toast, onClose }) {
-  const outcome = toast?.outcome;
-  if (!outcome) return null;
-  const { specimen, tool, result, documented } = outcome;
-  const tone = documented || result?.outcomeType === 'documented'
-    ? 'documented'
-    : result?.success
-      ? 'success'
-      : 'failure';
-  const title = tone === 'documented'
-    ? 'Field note added'
-    : tone === 'success'
-      ? 'Specimen collected'
-      : 'Collection failed';
-  const methodName = getInventoryItem(tool?.id)?.name || tool?.name || 'Bare Hands';
-  const detail = result?.evidence
-    ? `Evidence: ${result.evidence}.`
-    : result?.reason || 'The attempt is recorded in the field log.';
-  const chance = collectionPercent(result?.threshold);
-  const roll = collectionPercent(result?.roll);
-  const fit = collectionPercent(result?.methodFit);
-  const toneClass = tone === 'failure'
-    ? 'border-rose-300/45 bg-rose-300/10 text-rose-200'
-    : tone === 'documented'
-      ? 'border-sky-200/35 bg-sky-200/10 text-sky-100'
-      : 'border-emerald-200/45 bg-emerald-200/10 text-emerald-100';
+function DayTitleCard() {
+  const card = useThreeGameStore(state => state.dayTitleCard);
+  const [rendered, setRendered] = useState(null);
+  const [visible, setVisible] = useState(false);
+  const seenAtRef = React.useRef(0);
 
+  // `card` is the only dependency: an extra dep re-running this effect
+  // mid-display would clear the timers in cleanup, early-return on the
+  // seenAtRef guard, and leave the card stuck on screen.
+  useEffect(() => {
+    if (!card?.at || card.at === seenAtRef.current) return undefined;
+    seenAtRef.current = card.at;
+    setRendered(card);
+    setVisible(false);
+    const showTimer = window.setTimeout(() => setVisible(true), 60);
+    const hideTimer = window.setTimeout(() => setVisible(false), 4200);
+    const clearTimer = window.setTimeout(() => setRendered(null), 4900);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [card]);
+
+  if (!rendered) return null;
+  const dayWord = ['One', 'Two', 'Three'][rendered.day - 1] || String(rendered.day);
   return (
-    <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
-      <section
-        aria-live="polite"
-        className={`pointer-events-auto overflow-hidden rounded-[7px] border border-expedition-gold/30 bg-[rgba(12,20,38,0.88)] text-expedition-parchment shadow-[0_16px_40px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md transition-[opacity,transform,filter] duration-[280ms] ease-out ${
-          toast.visible ? 'translate-y-0 scale-100 opacity-100 blur-0' : 'pointer-events-none translate-y-2 scale-[0.975] opacity-0 blur-[1px]'
-        }`}
-      >
-        <div className="mx-4 h-px bg-gradient-to-r from-transparent via-expedition-gold/45 to-transparent" />
-        <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2.5 px-3 py-2.5">
-          <div className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full border ${toneClass}`}>
-            <CollectionOutcomeIcon tone={tone} />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[15px] font-semibold leading-tight tracking-wide text-expedition-parchment">{title}</div>
-            <div className="mt-0.5 truncate text-[12px] italic text-expedition-faded">
-              {specimen?.name || 'Specimen'} · {methodName}
-            </div>
-            <p
-              className="mt-1.5 overflow-hidden text-[12px] leading-snug text-expedition-parchment/82"
-              style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }}
-            >
-              {detail}
-            </p>
-            {chance && roll && (
-              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10.5px] uppercase tracking-[0.12em] text-expedition-faded">
-                <span>Chance {chance}</span>
-                <span>Roll {roll}</span>
-                {fit && <span>Fit {fit}</span>}
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close result"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-expedition-brass/45 bg-black/18 text-[15px] leading-none text-expedition-faded transition hover:border-expedition-gold hover:bg-expedition-gold/12 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
-          >
-            ×
-          </button>
+    // z-50 with its own cinematic band: the morning aboard opens with the
+    // ship's-duties prompt in the same screen region, and a bare text card
+    // disappeared behind that opaque panel.
+    <div data-testid="day-title-card" className={`pointer-events-none absolute left-1/2 top-[24%] z-50 w-full -translate-x-1/2 text-center font-expedition transition-all duration-700 ${visible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'}`}>
+      <div className="bg-[linear-gradient(90deg,transparent,rgba(5,10,20,0.82)_18%,rgba(5,10,20,0.82)_82%,transparent)] py-5">
+        <div className="mx-auto mb-3 h-px w-24 bg-gradient-to-r from-transparent via-expedition-goldbright/70 to-transparent" />
+        <div className="font-sans text-[11px] font-bold uppercase tracking-[0.3em] text-expedition-goldbright [text-shadow:0_2px_14px_rgba(0,0,0,0.85)]">
+          {rendered.finalDay ? 'The last day ashore' : 'The survey continues'}
         </div>
-      </section>
+        <div className="mt-1.5 text-[clamp(30px,4vw,44px)] font-normal leading-tight text-[#f4e9d0] [text-shadow:0_3px_22px_rgba(0,0,0,0.9)]">
+          Day {dayWord}
+        </div>
+        {rendered.zoneName && (
+          <div className="mt-1 text-[15px] italic text-expedition-parchment/85 [text-shadow:0_2px_12px_rgba(0,0,0,0.85)]">{rendered.zoneName}</div>
+        )}
+        <div className="mx-auto mt-3 h-px w-24 bg-gradient-to-r from-transparent via-expedition-goldbright/70 to-transparent" />
+      </div>
     </div>
   );
 }
@@ -3786,6 +3876,9 @@ function SpecimenInteractionCard({
   const methodId = currentCollectionMethodId(activeToolId);
   const methodName = collectionMethodName(methodId);
   const otherMethods = COLLECTION_METHOD_IDS.filter(id => id !== methodId);
+  // Mirrors resolveFieldAction: an equipped tool collects an unstudied
+  // species outright, so the card must offer Collect in that state too.
+  const canCollect = examined || (COLLECTION_METHOD_SET.has(activeToolId) && activeToolId !== 'hands');
 
   const selectMethod = useCallback(toolId => {
     if (COLLECTION_METHOD_SET.has(toolId)) setActiveTool(toolId);
@@ -3807,7 +3900,7 @@ function SpecimenInteractionCard({
   }, [activeToolId, examined, setActiveTool, visible]);
 
   useEffect(() => {
-    if (!visible || !examined) return undefined;
+    if (!visible || !canCollect) return undefined;
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
@@ -3819,7 +3912,7 @@ function SpecimenInteractionCard({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [cycleMethod, examined, visible]);
+  }, [canCollect, cycleMethod, visible]);
 
   return (
     <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
@@ -3831,12 +3924,13 @@ function SpecimenInteractionCard({
         <div className="mx-4 h-px bg-gradient-to-r from-transparent via-expedition-gold/45 to-transparent" />
         <div className="px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
               <div className="truncate text-[15.5px] font-semibold leading-tight tracking-wide text-expedition-parchment">
                 {specimen.name}
               </div>
+              <RarityBadge specimen={specimen} />
             </div>
-            {examined ? (
+            {canCollect ? (
               <button
                 type="button"
                 onClick={collectWithCurrentMethod}
@@ -3861,7 +3955,7 @@ function SpecimenInteractionCard({
             )}
           </div>
 
-          {examined && (
+          {canCollect && (
             <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-expedition-brass/25 pt-2">
               <button
                 type="button"
@@ -4034,16 +4128,17 @@ function InteractionPrompt() {
     seenOutcomeRef.current = lastOutcome;
     clearOutcomeTimers();
     const id = `${lastOutcome.specimen?.id || 'specimen'}:${lastOutcome.tool?.id || 'tool'}:${Date.now()}`;
+    const visibleMs = celebrationVisibleMs(lastOutcome);
     setOutcomeToast({ id, outcome: lastOutcome, visible: false });
     outcomeTimersRef.current.push(window.setTimeout(() => {
       setOutcomeToast(current => current?.id === id ? { ...current, visible: true } : current);
     }, 20));
     outcomeTimersRef.current.push(window.setTimeout(() => {
       setOutcomeToast(current => current?.id === id ? { ...current, visible: false } : current);
-    }, RESULT_TOAST_VISIBLE_MS));
+    }, visibleMs));
     outcomeTimersRef.current.push(window.setTimeout(() => {
       setOutcomeToast(current => current?.id === id ? null : current);
-    }, RESULT_TOAST_VISIBLE_MS + RESULT_TOAST_EXIT_MS));
+    }, visibleMs + RESULT_TOAST_EXIT_MS));
     return undefined;
   }, [clearOutcomeTimers, lastOutcome]);
 
@@ -4084,7 +4179,7 @@ function InteractionPrompt() {
   }, [contextPrompt, markHintSeen]);
 
   if (outcomeToast) {
-    return <CollectionOutcomeCard toast={outcomeToast} onClose={dismissOutcomeToast} />;
+    return <CollectionCelebration toast={outcomeToast} onClose={dismissOutcomeToast} />;
   }
 
   if (renderedContextPrompt && renderedContextPrompt.source !== 'traversal') {
@@ -4651,11 +4746,12 @@ function PauseIcon({ className = '' }) {
 }
 
 function MobileBottomNav({ onOpenJournal, onOpenLibrary, onToggleNarrative, onOpenCasebook, onOpenInventory, onOpenPause, narrativeOpen }) {
+  const casePulse = useCaseAddedPulse();
   const items = [
     { id: 'journal', label: 'Journal', icon: <OpenBookIcon className="h-6 w-6" />, onClick: onOpenJournal },
     { id: 'library', label: 'Library', icon: <span className="grid h-6 w-6 place-items-center text-[11px] font-semibold">LIB</span>, onClick: onOpenLibrary },
     { id: 'narrative', label: 'Narrative', icon: <NoteIcon className="h-6 w-6" />, onClick: onToggleNarrative, active: narrativeOpen },
-    { id: 'casebook', label: 'Casebook', icon: <ButterflyIcon className="h-6 w-6" />, onClick: onOpenCasebook },
+    { id: 'casebook', label: 'Casebook', icon: <ButterflyIcon className="h-6 w-6" />, onClick: onOpenCasebook, pulse: true },
     { id: 'inventory', label: 'Inventory', icon: <KitIcon className="h-6 w-6" />, onClick: onOpenInventory },
     // Mobile's only route to settings, controls and ending the expedition.
     { id: 'menu', label: 'Menu', icon: <PauseIcon className="h-6 w-6" />, onClick: onOpenPause },
@@ -4677,9 +4773,12 @@ function MobileBottomNav({ onOpenJournal, onOpenLibrary, onToggleNarrative, onOp
             key={item.id}
             type="button"
             onClick={item.onClick}
-            className={`flex min-w-0 flex-col items-center justify-center gap-1 border-expedition-brass/45 px-0.5 py-1.5 transition active:scale-95 ${index > 0 ? 'border-l' : ''} ${item.active ? 'text-expedition-goldbright' : 'text-expedition-gold'}`}
+            className={`relative flex min-w-0 flex-col items-center justify-center gap-1 border-expedition-brass/45 px-0.5 py-1.5 transition active:scale-95 ${index > 0 ? 'border-l' : ''} ${item.active ? 'text-expedition-goldbright' : 'text-expedition-gold'}`}
           >
-            {item.icon}
+            {item.pulse && <CasePulseGlow pulse={casePulse} className="rounded-[5px]" />}
+            <span key={item.pulse && casePulse ? `shake-${casePulse.key}` : `icon-${item.id}`} className={item.pulse && casePulse ? 'animate-case-shake motion-reduce:animate-none' : ''}>
+              {item.icon}
+            </span>
             <span className="whitespace-nowrap text-[9px] font-semibold uppercase tracking-[0.06em]">{item.label}</span>
           </button>
         ))}
@@ -4766,6 +4865,7 @@ export function ThreeHUD({
   const [compassOpen, setCompassOpen] = useState(() => hasDevelopmentQueryFlag('compass'));
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [inventoryInitialTab, setInventoryInitialTab] = useState('tools');
+  const casePulse = useCaseAddedPulse();
   const [mobileNarrativeOpen, setMobileNarrativeOpen] = useState(false);
   const specimenDetailOpen = useThreeGameStore(state => Boolean(state.specimenDetail));
   const statusViewOpen = useThreeGameStore(state => state.statusViewOpen);
@@ -4782,6 +4882,7 @@ export function ThreeHUD({
   const beginFinalAssessment = useThreeGameStore(state => state.beginFinalAssessment);
   const expeditionDeparted = useThreeGameStore(state => state.expeditionDeparted);
   const assessmentOpen = Boolean(finalAssessment);
+  const nightlyDebriefOpen = useThreeGameStore(state => Boolean(state.nightlyDebrief));
 
   // The Beagle sails after the third field day. Whichever way the clock got
   // there — stowing the case aboard, or the night catching Darwin ashore —
@@ -4790,7 +4891,7 @@ export function ThreeHUD({
     if (expeditionDeparted && !finalAssessment) void beginFinalAssessment();
   }, [expeditionDeparted, finalAssessment, beginFinalAssessment]);
 
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
   const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);
   const confirmEndGame = useCallback(() => {
     setEndGameConfirmationOpen(false);
@@ -4811,7 +4912,8 @@ export function ThreeHUD({
   // handles its own Escape.
   const otherOverlayOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen
     || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen
-    || npcEncounterOpen || outcomeOpen || assessmentOpen || endGameConfirmationOpen);
+    || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen
+    || endGameConfirmationOpen);
 
   useEffect(() => {
     if (!entranceActive) return undefined;
@@ -5061,6 +5163,8 @@ export function ThreeHUD({
       <InteractionPrompt />
       <ObservationModeGuide />
       <MajorEventToast />
+      <SpecimenSightingToast />
+      <DayTitleCard />
       <CameraModeToast />
       <InspectableTooltip />
       <BeagleTravelPrompt />
@@ -5091,7 +5195,10 @@ export function ThreeHUD({
       <div className="pointer-events-auto absolute right-3 bottom-[14.25rem] hidden gap-1.5 md:flex xl:hidden">
         <button type="button" onClick={() => openLibrary?.({ drawerOpen: true })} className={GOLD_BUTTON}>Library</button>
         <button type="button" onClick={openJournalPanel} className={GOLD_BUTTON}>Journal</button>
-        <button type="button" onClick={() => openInventoryTab('case')} className={GOLD_BUTTON}>Case</button>
+        <button type="button" onClick={() => openInventoryTab('case')} className={`${GOLD_BUTTON} relative`}>
+          <CasePulseGlow pulse={casePulse} />
+          <span key={casePulse ? `case-md-${casePulse.key}` : 'case-md'} className={casePulse ? 'inline-block animate-case-shake motion-reduce:animate-none' : ''}>Case</span>
+        </button>
         <CameraCycleButton className={GOLD_BUTTON} />
         <button type="button" onClick={() => setPauseOpen(true)} className={GOLD_BUTTON}>Menu</button>
       </div>
@@ -5149,6 +5256,7 @@ export function ThreeHUD({
       <InventoryModal open={inventoryOpen} onClose={closeInventory} initialTab={inventoryInitialTab} />
       <SpecimenDetailModal />
       <NpcEncounterModal />
+      <NightlyDebriefModal />
 
       <FieldNotebook
         panel={panel}

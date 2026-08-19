@@ -15,6 +15,7 @@ import { travelFlavorLine } from '../data/travelFlavor';
 import { restFlavor } from './restFlavor';
 import { createInitialExpeditionState } from '../game-core/save';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
+import { getSpecimenRarity } from './rarity';
 import { getThreeInitialNarration, getThreeIslandLocation, getThreeSpecimens, threeTools } from './data';
 import {
   darwinThought,
@@ -565,6 +566,20 @@ function makeJournalEntry({ specimen, tool, result, documented = false, location
   };
 }
 
+// A sighting requires the animal to be genuinely near. Falls open when either
+// position is unknown so headless and e2e flows still record sightings.
+const SIGHTING_RANGE_M = 15;
+function specimenWithinSightingRange(state, specimen) {
+  const player = state.playerPose?.position;
+  const actorId = specimen.instanceId || specimen.id;
+  const runtime = state.specimenRuntimePositions?.[state.currentZoneId]?.[actorId];
+  const spawn = Array.isArray(specimen.spawnPoint) ? specimen.spawnPoint : null;
+  const x = runtime?.x ?? spawn?.[0];
+  const z = runtime?.z ?? spawn?.[2];
+  if (!Number.isFinite(player?.x) || !Number.isFinite(x) || !Number.isFinite(z)) return true;
+  return Math.hypot(x - player.x, z - player.z) <= SIGHTING_RANGE_M;
+}
+
 function gameMinutesForState(state) {
   return Math.round((state.timeOfDay || 0) * 60);
 }
@@ -843,8 +858,13 @@ function createExpeditionSlice() {
     collectedSpecimenIds: expedition.collectedSpecimenIds,
     collectedSpecimenActorIds: expedition.collectedSpecimenActorIds || [],
     documentedSpecimenIds: expedition.documentedSpecimenIds,
-    // Type-level examination record: examining one finch of a species unlocks
-    // collecting that species everywhere. Gates both collection and sketching.
+    // Species whose first nearby encounter has already fired the "new species
+    // sighted" discovery beat, so each species announces itself once.
+    sightedSpecimenIds: expedition.sightedSpecimenIds || [],
+    specimenSighting: null,
+    // Type-level examination record: a saved note on one finch marks the
+    // species examined everywhere. No longer gates collection; it feeds the
+    // final assessment's restraint ratio and the bare-hands Examine prompt.
     examinedTypeIds: expedition.examinedTypeIds || [],
     // One-time teaching lines already shown (see HINT_IDS in ThreeHUD). Kept
     // in the save so a returning player is not taught the same verb twice.
@@ -936,6 +956,11 @@ function createSceneSlice() {
     animalModeStats: {},
     lastOutcome: null,
     lastHealthDamage: null,
+    lastCasedActorId: null,
+    lastCasedAt: 0,
+    lastCasedValue: 0,
+    nightlyDebrief: null,
+    dayTitleCard: null,
     expeditionOutcome: null,
     finalAssessment: null,
     activeConstraint: null,
@@ -1065,6 +1090,7 @@ export const useThreeGameStore = create((set, get) => ({
       'collectedSpecimenIds',
       'collectedSpecimenActorIds',
       'documentedSpecimenIds',
+      'sightedSpecimenIds',
       'examinedTypeIds',
       'seenHints',
       'consultedBookIds',
@@ -1765,6 +1791,29 @@ export const useThreeGameStore = create((set, get) => ({
     if (!nearbySpecimenId) return patch;
 
     const specimen = findRuntimeSpecimen(state, nearbySpecimenId);
+    // First close encounter with a species is a discovery beat: record it and
+    // hand the HUD a sighting to celebrate. Species the player has already
+    // studied or taken enter the record silently. The range gate matters
+    // because SpecimenActor's onClick also routes here from a camera raycast
+    // with no distance limit: a click on a speck across the clearing must not
+    // burn the once-per-save beat.
+    if (specimen?.id
+      && !(state.sightedSpecimenIds || []).includes(specimen.id)
+      && specimenWithinSightingRange(state, specimen)) {
+      patch.sightedSpecimenIds = [...(state.sightedSpecimenIds || []), specimen.id];
+      const alreadyKnown = state.collectedSpecimenIds.includes(specimen.id)
+        || state.documentedSpecimenIds.includes(specimen.id)
+        || state.examinedTypeIds.includes(specimen.id);
+      if (!alreadyKnown) {
+        patch.specimenSighting = {
+          id: specimen.id,
+          name: specimen.name,
+          latin: specimen.latin || '',
+          scientificValue: specimen.scientificValue,
+          at: Date.now(),
+        };
+      }
+    }
     const scripted = specimenNarration(specimen, { zoneId: state.currentZoneId });
     const key = `specimen:${state.currentZoneId}:${nearbySpecimenId}`;
     const nowMinutes = gameClockMinutes(state);
@@ -2086,6 +2135,10 @@ export const useThreeGameStore = create((set, get) => ({
         ? `${departureSummary}. The Beagle stands out of Post Office Bay; whatever was not collected on Charles Island stays there.`
         : `${summary}. A night's ration of labels, jars, twine and provisions drawn from the hold — the purser measures what he gives out.`,
     };
+    const suppliesDrawn = Object.entries(restocked)
+      .map(([key, value]) => ({ id: key, gained: value - (state.supplies[key] || 0) }))
+      .filter(item => item.gained > 0);
+    const notesToday = state.journal.filter(item => item.day === state.day && item.authorship === 'player').length;
     return {
       shipCollection: [...state.shipCollection, ...state.inventory],
       inventory: [],
@@ -2097,9 +2150,41 @@ export const useThreeGameStore = create((set, get) => ({
         timeOfDay: BEAGLE_MORNING_HOUR,
         fatigue: 0,
         health: clamp(state.health + 12, 0, MAX_HEALTH),
+        nightlyDebrief: {
+          endedDay: state.day,
+          nextDay,
+          finalDay: isFinalExpeditionDay(nextDay),
+          stowed: state.inventory.map(specimen => ({
+            id: specimen.id,
+            name: specimen.name,
+            latin: specimen.latin || '',
+            image: specimen.image || null,
+            scientificValue: specimen.scientificValue,
+            condition: specimen.condition,
+          })),
+          shipTotal: state.shipCollection.length + state.inventory.length,
+          notesToday,
+          suppliesDrawn,
+          // Collected without an examine note; the assessment's restraint
+          // ratio scores these down, so the debrief warns about them.
+          unexaminedCount: state.inventory.filter(specimen => !state.examinedTypeIds.includes(specimen.id)).length,
+        },
       }),
     };
   }),
+  // The zone name is stamped here so the title card has no live store
+  // dependencies while it displays.
+  dismissNightlyDebrief: () => set(state => (state.nightlyDebrief
+    ? {
+        nightlyDebrief: null,
+        dayTitleCard: {
+          day: state.nightlyDebrief.nextDay,
+          finalDay: state.nightlyDebrief.finalDay,
+          zoneName: getZone(state.currentZoneId)?.name || '',
+          at: Date.now(),
+        },
+      }
+    : { nightlyDebrief: null })),
   setSolarGlare: solarGlare => set(state => {
     const nextStrength = clamp(Number(solarGlare?.strength) || 0, 0, 1);
     const nextRawStrength = clamp(Number(solarGlare?.rawStrength) || 0, 0, 1);
@@ -2903,7 +2988,7 @@ export const useThreeGameStore = create((set, get) => ({
         createdAt: new Date().toISOString(),
       };
       const message = firstExamination
-        ? `Your notes on the ${session.name.toLowerCase()} enter the field book. You may now collect one when the chance offers.`
+        ? `Your notes on the ${session.name.toLowerCase()} enter the field book. Henslow will weigh such observations when the packet reaches him.`
         : `You add a further note on the ${session.name.toLowerCase()} to the field book.`;
       return {
         journal: [...state.journal, entry],
@@ -2927,7 +3012,7 @@ export const useThreeGameStore = create((set, get) => ({
   collectFromExamine: async () => {
     const state = get();
     const session = state.examineSession;
-    if (!session || !state.examinedTypeIds.includes(session.typeId)) return null;
+    if (!session) return null;
     if (session.kind === 'item') {
       const item = getExaminableItem(session.typeId);
       if (!item || state.items.some(entry => entry.typeId === session.typeId)) return null;
@@ -4414,24 +4499,6 @@ export const useThreeGameStore = create((set, get) => ({
     if (!specimen) return null;
     const actorId = specimen.instanceId || specimen.id;
 
-    // Examination gates collection and sketching alike: the player must have
-    // studied one individual of this type (any map) before taking or
-    // documenting one. The gate is on types, not individuals.
-    if (!state.examinedTypeIds.includes(specimen.id)) {
-      const message = `You cannot yet say what this ${specimen.name.toLowerCase()} truly is. Examine it first — observation before acquisition.`;
-      const symsLine = 'Syms holds the case shut. "Have a proper look before it goes in the case, sir."';
-      set(current => ({
-        message,
-        symsLine,
-        lastOutcome: null,
-        narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
-          narration: message,
-          symsLine,
-        }, current, 'blocked-action')),
-      }));
-      return null;
-    }
-
     const islandLocation = getThreeIslandLocation(state.currentZoneId);
     const alreadyCollected = state.collectedSpecimenIds.includes(specimen.id);
     const documented = tool.id === 'sketch' || alreadyCollected;
@@ -4499,8 +4566,13 @@ export const useThreeGameStore = create((set, get) => ({
       const educationalNote = documented
         ? 'Observation without collection was often the least damaging way to preserve locality and behavior evidence.'
         : 'Specimen condition, collection method, and locality determine scientific usefulness.';
+      const rarityTier = getSpecimenRarity(specimen).id;
       const symsLine = collected
-        ? `Syms wraps the ${specimen.name} label twice. "That one will travel, sir."`
+        ? rarityTier === 'singular'
+          ? `Syms stares into the case a long moment. "Lord, sir — look at him. They will talk of this one in London."`
+          : rarityTier === 'remarkable'
+            ? `Syms whistles low as he wraps the label. "A proper fine one, sir."`
+            : `Syms wraps the ${specimen.name} label twice. "That one will travel, sir."`
         : `Syms peers over your shoulder. "A note is better than a ruined specimen, sir."`;
       const source = documented ? 'documentation' : 'collection';
       return {
@@ -4525,6 +4597,15 @@ export const useThreeGameStore = create((set, get) => ({
         selectedSpecimenId: collected && current.selectedSpecimenId === actorId ? null : current.selectedSpecimenId,
         questComplete: current.questComplete || collected || documented,
         lastOutcome: { specimen, tool, result, documented, collectedActorId: collected ? actorId : null },
+        // The case tab's shimmer and the case-button glow need markers that
+        // survive the per-frame actions that clear lastOutcome after a collect.
+        ...(collected ? { lastCasedActorId: actorId, lastCasedAt: Date.now(), lastCasedValue: specimen.scientificValue || 0 } : {}),
+        // The species enters the sighted record on collect regardless of how
+        // it was met, so a later close approach cannot replay the discovery
+        // beat for an animal already in the case.
+        ...(!current.sightedSpecimenIds.includes(specimen.id)
+          ? { sightedSpecimenIds: [...current.sightedSpecimenIds, specimen.id] }
+          : {}),
         message: result.reason,
         educationalNote,
         symsLine,

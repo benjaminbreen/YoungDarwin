@@ -833,7 +833,24 @@ export function usePlayerCameraRig() {
       // hillside as the automatic orbit crosses the uphill side.
       const eyeGroundY = collisionAdapter.terrainHeight(eye.x, eye.z);
       eye.y = Math.max(eye.y, eyeGroundY + groundClearance, focusY + groundClearance);
-      const verticalBias = distance * (sideNotebookLayout ? 0 : 0.08);
+      // Compact portrait puts the notebook in a bottom sheet; center the
+      // subject in the visible band above it, not the canvas the sheet hides.
+      // The sheet's height is measured from the rendered notebook so a
+      // stylesheet change cannot silently desync the framing; the constants
+      // only cover the frame before the overlay mounts. Lowering the look
+      // target by sheetRatio of the frustum half-height raises the subject
+      // by half the sheet's screen share.
+      if (!orbit.notebookEl || !orbit.notebookEl.isConnected) {
+        orbit.notebookEl = typeof document !== 'undefined'
+          ? document.querySelector('[data-examine-notebook]')
+          : null;
+      }
+      const notebookRect = orbit.notebookEl?.getBoundingClientRect() || null;
+      const measuredSheet = notebookRect && notebookRect.width >= viewportWidth * 0.9
+        ? THREE.MathUtils.clamp((viewportHeight - notebookRect.top) / Math.max(1, viewportHeight), 0, 0.7)
+        : 0;
+      const sheetRatio = sideNotebookLayout ? 0 : measuredSheet || (viewportWidth <= 520 ? 0.56 : 0.52);
+      const verticalBias = distance * Math.tan(verticalFov / 2) * sheetRatio;
       const horizontalBias = sideNotebookLayout
         // Place the subject at the center of the visible stage rather than
         // the center of the full canvas hidden beneath the notebook.

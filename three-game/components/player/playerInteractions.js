@@ -559,13 +559,6 @@ export function updatePlayerInteractions({
       collectNearby();
       return true;
     }
-    if (!currentState.examinedTypeIds?.includes(specimen.id)) {
-      // Collection is gated by examination. The store emits the explanatory
-      // narration and leaves the player free to press Enter to examine.
-      collectNearby();
-      return true;
-    }
-
     const alreadyCollected = currentState.collectedSpecimenIds?.includes(specimen.id) || false;
     const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
     const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
@@ -780,7 +773,13 @@ export function updatePlayerInteractions({
         message: currentState.edgePrompt.description,
       });
     } else if (allowSpecimenInteractions && specimen) {
-      startSpecimenCollection(currentState, specimen);
+      // Match resolveFieldAction: bare hands lead with Examine on an
+      // unstudied species; an equipped tool takes it outright.
+      if (currentState.activeToolId === 'hands' && !currentState.examinedTypeIds?.includes(specimen.id)) {
+        if (!currentState.examineSession) openExamine(specimen.instanceId || specimen.id);
+      } else {
+        startSpecimenCollection(currentState, specimen);
+      }
     } else if (currentState.activeToolId === 'snare' && !stateRef.current.action) {
       startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
       currentState.placeSnareTrap?.({ position, facing });

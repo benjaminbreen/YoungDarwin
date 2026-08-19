@@ -8,6 +8,7 @@ import { useDismissableOverlay } from './useDismissableOverlay';
 import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
+import { RarityBadge } from './RarityBadge';
 
 // A live specimen stage with one coherent notebook. The camera continues to
 // own the subject view; this layer owns inquiry, evidence, authorship, and the
@@ -193,17 +194,16 @@ export function ExamineView() {
   const [note, setNote] = useState('');
   const [noteSavedFlash, setNoteSavedFlash] = useState(false);
   const [activePanel, setActivePanel] = useState('inquiry');
-  const [collectionOpen, setCollectionOpen] = useState(false);
   const [collecting, setCollecting] = useState(false);
 
   const scrollRef = useRef(null);
   const noteRef = useRef(null);
-  const collectionCancelRef = useRef(null);
   const noteFlashTimerRef = useRef(null);
 
   const open = Boolean(session);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
-  const collectReady = Boolean(examined && session?.collectable);
+  // Collection is one click: no note prerequisite, no confirmation step.
+  const collectReady = Boolean(session?.collectable);
 
   useEffect(() => {
     if (!open) {
@@ -212,7 +212,6 @@ export function ExamineView() {
       setNote('');
       setNoteSavedFlash(false);
       setActivePanel('inquiry');
-      setCollectionOpen(false);
       setCollecting(false);
       window.clearTimeout(noteFlashTimerRef.current);
       return undefined;
@@ -235,10 +234,6 @@ export function ExamineView() {
     }
   }, [chatLength, factsLength, activePanel]);
 
-  useEffect(() => {
-    if (collectionOpen) collectionCancelRef.current?.focus();
-  }, [collectionOpen]);
-
   const submitQuestion = useCallback(() => {
     const trimmed = question.trim();
     if (!trimmed || session?.pending) return;
@@ -257,7 +252,6 @@ export function ExamineView() {
     if (saveExamineNote(trimmed)) {
       setNote('');
       setNoteSavedFlash(true);
-      setCollectionOpen(false);
       window.clearTimeout(noteFlashTimerRef.current);
       noteFlashTimerRef.current = window.setTimeout(() => setNoteSavedFlash(false), 2800);
       noteRef.current?.blur();
@@ -271,16 +265,10 @@ export function ExamineView() {
     setCollecting(false);
   }, [collectFromExamine, collectReady, collecting]);
 
-  // Escape closes the collection decision first and the examination second, so
-  // the shared overlay hook is handed whichever dismissal is currently on top.
-  const dismiss = useCallback(() => {
-    if (collectionOpen) setCollectionOpen(false);
-    else closeExamine();
-  }, [closeExamine, collectionOpen]);
   // Focus starts on the notebook rather than being yanked to the close button:
   // the inquiry field is the point of the screen, and stealing focus from it
   // would fight the player mid-sentence.
-  const overlayRef = useDismissableOverlay(open, dismiss, { autoFocus: false });
+  const overlayRef = useDismissableOverlay(open, closeExamine, { autoFocus: false });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -289,12 +277,12 @@ export function ExamineView() {
       const typing = tag === 'INPUT' || tag === 'TEXTAREA';
       if (!typing && event.code === 'KeyC' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
         event.preventDefault();
-        setCollectionOpen(true);
+        confirmCollection();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, collectReady]);
+  }, [open, collectReady, confirmCollection]);
 
   const zone = useMemo(() => (open ? getZone(currentZoneId) : null), [open, currentZoneId]);
   const procedures = useMemo(() => PROCEDURES[session?.category] || PROCEDURES.Item, [session?.category]);
@@ -315,11 +303,6 @@ export function ExamineView() {
       : note.trim()
         ? 'Ready to record'
         : 'Write in your own words';
-  const collectionDescription = session.kind === 'item'
-    ? 'Taking this object adds it to the expedition collection and removes it from this place.'
-    : session.living
-      ? 'Collecting removes this individual from the field. The active tool, case capacity, labels, and preservation supplies still govern the attempt.'
-      : 'Collecting removes this specimen from the field. Case capacity, labels, and preservation supplies still govern the attempt.';
 
   return (
     <div
@@ -342,9 +325,14 @@ export function ExamineView() {
             {session.name}
           </h1>
           <div className="mt-2 flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-[13px] lg:max-w-[80%] text-expedition-parchment/85 [text-shadow:0_2px_10px_#000] sm:text-[14px] lg:mt-2.5 lg:text-[16px]">
+            {session.kind === 'specimen' && session.specimen && (
+              <RarityBadge specimen={session.specimen} className="pointer-events-none" />
+            )}
             {headerSubtitle.map((part, index) => (
               <React.Fragment key={`${part}-${index}`}>
-                {index > 0 && <span aria-hidden="true" className="h-1 w-1 rotate-45 bg-expedition-gold" />}
+                {(index > 0 || (session.kind === 'specimen' && session.specimen)) && (
+                  <span aria-hidden="true" className="h-1 w-1 rotate-45 bg-expedition-gold" />
+                )}
                 <span>{part}</span>
               </React.Fragment>
             ))}
@@ -376,7 +364,7 @@ export function ExamineView() {
 
       <button type="button" onClick={closeExamine} aria-label="Return to exploration" className={styles.closeButton} />
 
-      <aside className={styles.notebook} aria-label="Examination field notebook">
+      <aside className={styles.notebook} data-examine-notebook aria-label="Examination field notebook">
         <header className={styles.notebookHeader}>
           <div className="flex items-center gap-3">
             <span className={styles.notebookMark}><NotebookMark /></span>
@@ -403,7 +391,7 @@ export function ExamineView() {
         <div ref={scrollRef} className={styles.scrollPanel}>
           {activePanel === 'inquiry' ? (
             <section id="examine-inquiry-panel" role="tabpanel" className="px-[18px] py-4 lg:px-[27px] lg:py-[22px]">
-              <p className="m-0 mb-4 border-b border-expedition-brass/20 pb-4 text-[16px] leading-relaxed text-expedition-parchment/90 lg:text-[17px]">
+              <p className={`${styles.inquiryIntro} m-0 mb-4 border-b border-expedition-brass/20 pb-4 text-[16px] leading-relaxed text-expedition-parchment/90 lg:text-[17px]`}>
                 Observe freely, or attempt a procedure. Findings remain provisional until you record them.
               </p>
 
@@ -564,54 +552,24 @@ export function ExamineView() {
               data-testid="examine-record-note"
               disabled={!note.trim()}
               onClick={submitNote}
-              className="min-h-[46px] border border-expedition-goldbright/65 bg-[linear-gradient(135deg,rgba(191,152,81,0.24),rgba(191,152,81,0.1))] px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-[#f5e5bd] transition hover:-translate-y-px hover:border-expedition-goldbright disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35"
+              className="min-h-[46px] rounded-[3px] border border-expedition-goldbright/60 bg-[linear-gradient(135deg,rgba(191,152,81,0.22),rgba(191,152,81,0.08))] px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-[#f5e5bd] transition hover:border-expedition-goldbright hover:bg-expedition-gold/20 hover:shadow-[0_0_14px_rgba(227,197,133,0.25)] disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35 disabled:shadow-none"
             >
               Record note
             </button>
             <button
               type="button"
-              data-testid="examine-collection-options"
-              disabled={!collectReady}
-              onClick={() => setCollectionOpen(true)}
-              className="min-h-[46px] border border-expedition-brass/40 bg-expedition-gold/[0.035] px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.06em] text-expedition-parchment/80 transition hover:-translate-y-px hover:border-expedition-goldbright disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35"
+              data-testid="examine-collect"
+              disabled={!collectReady || collecting}
+              onClick={confirmCollection}
+              className="min-h-[46px] rounded-[3px] border border-[#f0d9a2] bg-[linear-gradient(160deg,#e8cf94,#c9a35f_48%,#96723d)] px-2 font-sans text-[12.5px] font-bold uppercase tracking-[0.08em] text-[#231a09] shadow-[0_0_16px_rgba(227,197,133,0.32),inset_0_1px_0_rgba(255,241,205,0.75),inset_0_-1px_0_rgba(90,64,28,0.55)] transition hover:shadow-[0_0_26px_rgba(227,197,133,0.55),inset_0_1px_0_rgba(255,241,205,0.85),inset_0_-1px_0_rgba(90,64,28,0.55)] disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-none disabled:bg-transparent disabled:text-expedition-faded/35 disabled:shadow-none"
             >
-              {session.kind === 'item' ? session.collectVerb : 'Collection options'}
+              {collecting ? 'Attempting…' : session.collectVerb}
             </button>
           </div>
 
           <p className={`${styles.noteHint} mb-0 mt-1.5 text-right text-[12px] italic text-expedition-faded/65`}>
-            {collectReady ? 'Observation complete. Collection remains a separate decision.' : 'Record an observation before deciding whether to collect.'}
+            {collectReady ? 'Press C to collect. A written note deepens the record.' : 'This subject stays where it is; the note is the record.'}
           </p>
-
-          {collectionOpen && (
-            <div className={styles.collectionDecision} role="dialog" aria-modal="false" aria-labelledby="examine-collection-title">
-              <MicroLabel>Collection decision</MicroLabel>
-              <h3 id="examine-collection-title" className="mb-2 mt-2 text-[20px] font-normal text-[#f0e1c0] lg:text-[22px]">{session.name}</h3>
-              <p className="m-0 text-[14px] leading-relaxed text-expedition-parchment/80 lg:text-[15px]">{collectionDescription}</p>
-              <div className="my-3 grid grid-cols-2 gap-2">
-                <span className="border border-expedition-brass/25 px-2 py-2 text-center font-sans text-[10px] font-semibold uppercase tracking-[0.06em] text-expedition-parchment/70">Rules checked</span>
-                <span className="border border-expedition-brass/25 px-2 py-2 text-center font-sans text-[10px] font-semibold uppercase tracking-[0.06em] text-expedition-parchment/70">Field state changes</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  ref={collectionCancelRef}
-                  type="button"
-                  onClick={() => setCollectionOpen(false)}
-                  className="min-h-[46px] border border-expedition-brass/40 bg-transparent px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.06em] text-expedition-parchment/75 transition hover:border-expedition-goldbright"
-                >
-                  Leave for now
-                </button>
-                <button
-                  type="button"
-                  disabled={collecting}
-                  onClick={confirmCollection}
-                  className="min-h-[46px] border border-expedition-goldbright/65 bg-expedition-gold/15 px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.06em] text-expedition-goldbright transition hover:border-expedition-goldbright hover:bg-expedition-gold/25 disabled:cursor-wait disabled:opacity-50"
-                >
-                  {collecting ? 'Attempting…' : session.collectVerb}
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       </aside>
     </div>

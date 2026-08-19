@@ -167,7 +167,10 @@ export function fieldSampleFor(target, zoneId) {
 
 export function resolveFieldAction({ toolId = 'hands', target, examined = false, sampled = false }) {
   if (!target) return null;
-  if (target.kind === 'specimen' && examined) {
+  // Collection no longer waits on a written note. Bare hands still lead with
+  // Examine on a first encounter (the specimen stage is the observation path);
+  // an equipped tool collects outright, and studied specimens collect by hand.
+  if (target.kind === 'specimen' && (examined || toolId !== 'hands')) {
     // The sketchbook documents without taking; calling that "Collect" told
     // players the opposite of what the tool does.
     if (toolId === 'sketch') {

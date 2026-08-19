@@ -16,6 +16,8 @@ import {
 } from './ExpeditionPanel';
 import { TOOL_ICONS } from './icons';
 import { useDismissableOverlay } from '../useDismissableOverlay';
+import { getSpecimenRarity, specimenImageSrc } from '../../rarity';
+import { RarityBadge } from '../RarityBadge';
 
 // ---------------------------------------------------------------------------
 // Small line icons for the supplies ledger (mockup uses fine glyphs, not art).
@@ -341,49 +343,88 @@ function SuppliesTab() {
 // ---------------------------------------------------------------------------
 // Specimen case tab
 
-const CONDITION_STYLES = {
-  pristine: 'border-emerald-300/45 bg-emerald-300/10 text-emerald-200',
-  documented: 'border-sky-300/45 bg-sky-300/10 text-sky-200',
-};
-
 function SpecimenCaseTab() {
   const inventory = useThreeGameStore(state => state.inventory);
   const caseCapacity = useThreeGameStore(state => state.caseCapacity);
   const items = useThreeGameStore(state => state.items);
   const openSpecimenDetail = useThreeGameStore(state => state.openSpecimenDetail);
+  const lastCasedActorId = useThreeGameStore(state => state.lastCasedActorId);
+  const lastCasedAt = useThreeGameStore(state => state.lastCasedAt);
+  const recentlyCased = Boolean(lastCasedActorId) && Date.now() - lastCasedAt < 60000;
   const slots = Array.from({ length: Math.max(caseCapacity, inventory.length) }, (_, index) => inventory[index] || null);
+  const fillPercent = Math.min(100, (inventory.length / Math.max(1, caseCapacity)) * 100);
 
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className={GOLD_LABEL}>Specimen Case</div>
-        <div className="font-expedition text-[12px] text-expedition-faded">{inventory.length} of {caseCapacity} slots filled</div>
+        <div className="flex flex-1 items-center justify-end gap-2.5">
+          <div className="h-1.5 w-28 overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-expedition-brass to-expedition-goldbright transition-[width] duration-700"
+              style={{ width: `${Math.max(fillPercent, inventory.length ? 4 : 0)}%` }}
+            />
+          </div>
+          <div className="font-expedition text-[12px] text-expedition-faded">
+            <span className="font-semibold text-expedition-goldbright">{inventory.length}</span> of {caseCapacity}
+          </div>
+        </div>
       </div>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-        {slots.map((specimen, index) => specimen ? (
-          <button
-            key={`${specimen.id}-${index}`}
-            type="button"
-            onClick={() => openSpecimenDetail(inventory, index)}
-            className="overflow-hidden rounded-sm border border-expedition-brass/50 bg-black/25 text-left transition hover:border-expedition-gold hover:shadow-[0_0_12px_rgba(227,197,133,0.25)] focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
-          >
-            <div className="aspect-square w-full overflow-hidden border-b border-expedition-brass/40 bg-black/30">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={specimen.image || `/specimens/${specimen.id}.jpg`} alt={specimen.name} className="h-full w-full object-cover sepia-[0.25]" draggable={false} />
-            </div>
-            <div className="p-1.5">
-              <div className="truncate font-expedition text-[11.5px] font-medium text-expedition-parchment">{specimen.name}</div>
-              <div className="truncate font-expedition text-[10px] italic text-expedition-faded">{specimen.latin}</div>
-              <span className={`mt-1 inline-block rounded-full border px-1.5 py-0.5 text-[7.5px] uppercase tracking-[0.1em] ${CONDITION_STYLES[specimen.condition] || 'border-expedition-brass/40 text-expedition-gold/85'}`}>
-                {(specimen.condition || 'cased').replace(/_/g, ' ')}
-              </span>
-            </div>
-          </button>
-        ) : (
-          <div key={`empty-${index}`} className="flex aspect-[3/4] items-center justify-center rounded-sm border border-dashed border-expedition-brass/30 bg-black/10">
-            <span className="font-expedition text-[10px] uppercase tracking-[0.14em] text-expedition-faded/60">Empty</span>
-          </div>
-        ))}
+        {slots.map((specimen, index) => {
+          if (!specimen) {
+            return (
+              <div key={`empty-${index}`} className="flex aspect-[3/4] flex-col items-center justify-center gap-1.5 rounded-sm border border-dashed border-expedition-brass/25 bg-black/10">
+                <span className="h-1.5 w-1.5 rotate-45 border border-expedition-brass/40" />
+                <span className="font-expedition text-[9px] uppercase tracking-[0.16em] text-expedition-faded/50">Empty</span>
+              </div>
+            );
+          }
+          const rarity = getSpecimenRarity(specimen);
+          const isNew = recentlyCased && (specimen.instanceId || specimen.id) === lastCasedActorId;
+          return (
+            <button
+              key={`${specimen.id}-${index}`}
+              type="button"
+              onClick={() => openSpecimenDetail(inventory, index)}
+              className="group relative overflow-hidden rounded-sm border bg-black/25 text-left transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+              style={{
+                borderColor: rarity.ring,
+                boxShadow: isNew ? `0 0 16px ${rarity.glow}` : `0 0 0 rgba(0,0,0,0)`,
+              }}
+            >
+              <div
+                className="relative aspect-square w-full overflow-hidden border-b bg-black/30"
+                style={{ borderColor: `${rarity.color}55` }}
+              >
+                <span className="absolute inset-0 grid place-items-center" style={{ background: `radial-gradient(circle, ${rarity.color}24 0%, transparent 72%)` }}>
+                  <span className="h-2.5 w-2.5 rotate-45" style={{ background: rarity.ring }} />
+                </span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={specimenImageSrc(specimen)}
+                  alt={specimen.name}
+                  onError={event => { event.currentTarget.style.display = 'none'; }}
+                  className="relative h-full w-full object-cover sepia-[0.25] transition group-hover:sepia-0"
+                  draggable={false}
+                />
+              </div>
+              <div className="p-1.5">
+                <div className="truncate font-expedition text-[11.5px] font-medium text-expedition-parchment">{specimen.name}</div>
+                <div className="truncate font-expedition text-[10px] italic text-expedition-faded">{specimen.latin}</div>
+                <RarityBadge rarity={rarity} className="mt-1 scale-90" />
+              </div>
+              {isNew && (
+                <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-full overflow-hidden">
+                  <span
+                    className="absolute inset-y-[-20%] left-[10%] w-[45%] rotate-[18deg] animate-slot-shimmer motion-reduce:animate-none"
+                    style={{ background: `linear-gradient(90deg, transparent, ${rarity.color}3d, transparent)` }}
+                  />
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       {inventory.length === 0 && (
         <p className="mt-3 text-center font-expedition text-[12px] italic text-expedition-faded">

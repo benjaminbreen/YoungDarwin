@@ -2459,14 +2459,18 @@ function recordLaunchHandoffEvent(label, detail = null) {
 // cheap and can be disabled independently of the rest of the stack.
 
 // How far in front of the subject's centre the plane of focus sits, as a
-// fraction of its radius: roughly the front third of the bulk.
-const NEAR_SURFACE_FOCUS_BIAS = 0.55;
+// fraction of its radius. Diffuse subjects (bushes, grasses) have no solid
+// near surface at their radius, so a large bias parks the sharp plane in the
+// air in front of them and the subject itself renders soft.
+const NEAR_SURFACE_FOCUS_BIAS = 0.3;
 
 // The sharp band has to be at least as deep as the subject, or its own far
 // side falls out of focus. Shared by the initial prop and the frame loop so a
 // re-memo of the effect cannot snap focusRange back to a stale authored value.
 function subjectFocusRange(radius) {
-  return MathUtils.clamp((Number(radius) || 0.6) * 1.05, 0.22, 1.8);
+  // The sharp band must swallow the subject's whole depth with margin, or the
+  // far half of a bushy subject sits in the blur while "in focus".
+  return MathUtils.clamp((Number(radius) || 0.6) * 1.7 + 0.18, 0.4, 2.8);
 }
 
 function ExaminationDepthOfField() {
@@ -2532,7 +2536,7 @@ function ExaminationDepthOfField() {
       ref={effectRef}
       target={target}
       focusRange={initialFocusRange}
-      bokehScale={3.8}
+      bokehScale={2.7}
       resolutionScale={0.5}
     />
   );

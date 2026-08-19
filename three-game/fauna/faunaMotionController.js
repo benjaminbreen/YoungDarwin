@@ -13,6 +13,12 @@ import { getOwlRoosts } from '../wildlife/owlRoosts';
 import { getRacerShelters } from '../wildlife/racerShelters';
 import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../world/specimenRuntime';
 import { getEcology } from '../world/ecology';
+import { PLAYER } from '../components/player/playerConfig';
+
+// The flush boost engages above walking pace and saturates at a full run,
+// tied to the player's own movement config so speed retunes carry over.
+const SPRINT_FLUSH_START = PLAYER.walkSpeed * 1.15;
+const SPRINT_FLUSH_FULL = PLAYER.runSpeed;
 
 const ecologyForageTargetCache = new Map();
 const FORAGE_EXCLUDED_PATTERN = /cactus|opuntia|manzanillo|mangrove|palo-santo|scalesia|sicyos|delilia|lecocarpus|resurrection|fern/i;
@@ -308,6 +314,14 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     dirZ: 0,
     intensity: 0,
   };
+  // Frame-to-frame player speed estimate, so a sprinting player flushes
+  // animals sooner without any new plumbing from the player systems.
+  const playerMotion = {
+    x: NaN,
+    z: NaN,
+    t: NaN,
+    speed: 0,
+  };
 
   function reset(next = {}) {
     const base = next.basePosition || basePosition;
@@ -445,6 +459,10 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
     startleThreat.dirX = 1;
     startleThreat.dirZ = 0;
     startleThreat.intensity = 0;
+    playerMotion.x = NaN;
+    playerMotion.z = NaN;
+    playerMotion.t = NaN;
+    playerMotion.speed = 0;
   }
 
   reset({ basePosition, zoneId });
@@ -3129,10 +3147,27 @@ export function createFaunaMotionController({ profile, habitat, seed, zoneId, ba
         }
       }
 
-      const playerPanic = distanceToPlayer < profile.alertRadius
-        ? THREE.MathUtils.clamp((profile.alertRadius - distanceToPlayer) / Math.max(0.01, profile.alertRadius - profile.panicRadius), 0, 1)
+      // A player charging at an animal is a bigger threat than one strolling
+      // past: estimate speed from position deltas (teleports are discarded)
+      // and widen the alert and startle rings up to ~1.6x at a full run.
+      if (Number.isFinite(playerMotion.t) && t > playerMotion.t) {
+        const rawSpeed = Math.hypot(player.x - playerMotion.x, player.z - playerMotion.z)
+          / Math.max(0.001, t - playerMotion.t);
+        if (rawSpeed < 12) playerMotion.speed += (rawSpeed - playerMotion.speed) * Math.min(1, dt * 6);
+      }
+      playerMotion.x = player.x;
+      playerMotion.z = player.z;
+      playerMotion.t = t;
+      const sprintBoost = 1 + THREE.MathUtils.clamp(
+        (playerMotion.speed - SPRINT_FLUSH_START) / Math.max(0.5, SPRINT_FLUSH_FULL - SPRINT_FLUSH_START),
+        0,
+        1,
+      ) * 0.6;
+      const alertRadius = (profile.alertRadius || 0) * sprintBoost;
+      const playerPanic = distanceToPlayer < alertRadius
+        ? THREE.MathUtils.clamp((alertRadius - distanceToPlayer) / Math.max(0.01, alertRadius - profile.panicRadius), 0, 1)
         : 0;
-      const startleRadius = profile.startleRadius || profile.alertRadius;
+      const startleRadius = (profile.startleRadius || profile.alertRadius) * sprintBoost;
       if (
         playerPanic > 0.02
         && distanceToPlayer < startleRadius

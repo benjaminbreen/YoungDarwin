@@ -733,6 +733,18 @@ function createHarnessApi() {
       const state = useThreeGameStore.getState();
       return state.collectNearby(state.selectedSpecimenId || state.nearbySpecimenId || null);
     },
+    // Stowing aboard is the day-turn chokepoint; walking there costs a real
+    // transit no automated check can afford.
+    landCollection: () => {
+      useThreeGameStore.getState().landCollectionAtBeagle();
+      return makeSnapshot();
+    },
+    // landCollection leaves the debrief modal up, which blocks gameplay
+    // input; multi-day flows must dismiss it before continuing.
+    dismissNightlyDebrief: () => {
+      useThreeGameStore.getState().dismissNightlyDebrief();
+      return makeSnapshot();
+    },
     recordAnimalAction: (actionId, payload = {}) => {
       const store = useThreeGameStore.getState();
       store.recordAnimalModeAction({ ...payload, actionId });

@@ -26,6 +26,26 @@ function playerNotes(state) {
   return (state.journal || []).filter(entry => entry?.authorship === 'player');
 }
 
+export const POST_OFFICE_BAY_SURVEY_TARGET = 3;
+
+// The opening survey counts work actually recorded at Post Office Bay. Journal
+// entries carry the collection locality, so travelling elsewhere and finding a
+// species that also occurs at the landing cannot silently finish this goal.
+export function postOfficeBaySurveyProgress(state) {
+  const recorded = new Set();
+  for (const entry of state.journal || []) {
+    if (entry?.authorship !== 'field-record' || !entry.specimenId) continue;
+    // Failed and partial attempts also write field-record entries; only a
+    // successful take or a documentation counts as a record.
+    if (entry.condition === 'failed' || entry.condition === 'partial evidence' || entry.condition === 'partial_evidence') continue;
+    const atPostOfficeBay = entry.location === 'Post Office Bay'
+      || entry.location?.id === 'POST_OFFICE_BAY'
+      || entry.zoneId === 'POST_OFFICE_BAY';
+    if (atPostOfficeBay) recorded.add(entry.specimenId);
+  }
+  return recorded.size;
+}
+
 // The journal's field-record entries carry both the species id and the place
 // name. Parsing actor ids instead broke on hand-placed spawns, whose authored
 // instanceIds are place-named ("post-office-lava-lizard-west"), so the same
@@ -44,10 +64,10 @@ function collectedByZone(state) {
 export const DIRECTIVES = [
   {
     id: 'explore',
-    text: 'Explore the landing area',
-    hint: 'Move with WASD. The chart fills in as you walk.',
-    detail: 'Your chart shows the coast and nothing inland. It fills in only where you walk.',
-    isDone: state => (state.visitedLocalCellIds || []).length >= 3,
+    text: 'Record 3 different Post Office Bay specimens',
+    hint: 'Examine nearby specimens, then collect or document three different kinds.',
+    detail: 'Three distinct records make a useful first survey of the landing. The full regional record remains available for a more complete search.',
+    isDone: state => postOfficeBaySurveyProgress(state) >= POST_OFFICE_BAY_SURVEY_TARGET,
   },
   {
     id: 'tool',
@@ -59,14 +79,14 @@ export const DIRECTIVES = [
   {
     id: 'examine',
     text: 'Examine something closely',
-    hint: 'Approach a specimen and examine it before deciding what to do with it.',
-    detail: 'Examining is what puts an animal in your record. Until you have done it you cannot write about it, collect it, or compare it with anything you find later.',
+    hint: 'Approach a specimen with bare hands and press Enter.',
+    detail: 'Examining is what puts an animal in your record, and the written note is what Henslow weighs at the end. A specimen taken unexamined fills the case but says nothing.',
     isDone: state => (state.examinedTypeIds || []).length >= 1,
   },
   {
     id: 'collect',
     text: 'Collect your first specimen',
-    hint: 'A specimen must be examined before it can be taken.',
+    hint: 'Equip a tool and press E, or collect from the examine view.',
     detail: 'A collected specimen goes back to England for other naturalists to study. It is also dead and gone from the island. The case holds very little, so choose what is worth taking.',
     isDone: state => (state.collectedSpecimenIds || []).length >= 1,
   },

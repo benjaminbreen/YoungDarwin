@@ -28,9 +28,11 @@
   background: linear-gradient(180deg, rgba(5, 7, 8, 0.58), transparent 20%, transparent 68%, rgba(4, 6, 7, 0.62));
 }
 
+/* The examine camera measures the rendered sheet ([data-examine-notebook]),
+   so these heights can change freely. */
 .stage {
   position: absolute;
-  inset: 0 0 58dvh;
+  inset: 0 0 52dvh;
   min-height: 0;
   pointer-events: none;
 }
@@ -229,7 +231,7 @@
   inset: auto 0 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  height: 58dvh;
+  height: 52dvh;
   min-height: 0;
   overflow: hidden;
   border-top: 1px solid rgba(191, 152, 81, 0.48);
@@ -272,8 +274,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 54px;
-  padding: 11px 18px 10px;
+  min-height: 42px;
+  padding: 8px 18px 7px;
   border-bottom: 1px solid rgba(191, 152, 81, 0.24);
 }
 
@@ -288,9 +290,15 @@
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 46px;
+  min-height: 38px;
   padding: 0 18px;
   border-bottom: 1px solid rgba(191, 152, 81, 0.24);
+}
+
+/* The compact sheet has a few hundred pixels for the whole notebook; the
+   standing intro line is the first thing to give back. Desktop restores it. */
+.inquiryIntro {
+  display: none;
 }
 
 .scrollPanel {
@@ -323,7 +331,7 @@
 
 .noteArea {
   position: relative;
-  padding: 12px 18px max(12px, env(safe-area-inset-bottom));
+  padding: 9px 18px max(9px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(191, 152, 81, 0.43);
   background: rgba(7, 11, 12, 0.8);
   box-shadow: 0 -16px 45px rgba(0, 0, 0, 0.18);
@@ -344,27 +352,13 @@
   pointer-events: none;
 }
 
-.collectionDecision {
-  position: absolute;
-  z-index: 50;
-  right: 16px;
-  bottom: 112px;
-  width: min(360px, calc(100% - 32px));
-  /* The dialog is anchored inside the note area but is taller than it; the sheet
-     clips overflow, so cap it against the sheet rather than let the title vanish
-     off the top. */
-  max-height: 44dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 17px;
-  border: 1px solid rgba(191, 152, 81, 0.58);
-  background: linear-gradient(145deg, rgba(27, 31, 28, 0.99), rgba(9, 13, 14, 0.995));
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68);
-}
-
 @media (min-width: 1024px) {
   .vignette {
     background: radial-gradient(ellipse 64% 69% at 35% 48%, transparent 38%, rgba(5, 7, 8, 0.22) 72%, rgba(3, 5, 6, 0.74) 100%);
+  }
+
+  .inquiryIntro {
+    display: block;
   }
 
   .stage {
@@ -432,6 +426,10 @@
     padding: 22px 27px 17px;
   }
 
+  .tabs {
+    min-height: 51px;
+  }
+
   .notebookMark {
     display: contents;
   }
@@ -447,12 +445,6 @@
 
   .noteArea {
     padding: 17px 27px 20px;
-  }
-
-  .collectionDecision {
-    right: 18px;
-    bottom: 124px;
-    max-height: calc(100dvh - 180px);
   }
 }
 
@@ -516,23 +508,15 @@
   .noteHint {
     display: none;
   }
-
-  .collectionDecision {
-    right: 12px;
-    bottom: 92px;
-    width: calc(100% - 24px);
-    max-height: calc(100dvh - 104px);
-    padding: 13px;
-  }
 }
 
 @media (max-width: 520px) and (orientation: portrait) {
   .notebook {
-    height: 61dvh;
+    height: 56dvh;
   }
 
   .stage {
-    bottom: 61dvh;
+    bottom: 56dvh;
   }
 
   .stageHeader {
