@@ -15,7 +15,7 @@ import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
 import { onPropEvent } from '../../../physics/props/propEvents';
-import { cachedGpuResource } from '../../../world/gpuResourceCache';
+import { cachedGpuResource, retainGpuResource } from '../../../world/gpuResourceCache';
 import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
 
 // Renders a scattered GLB species as true GPU instancing: one InstancedMesh
@@ -286,8 +286,9 @@ export function InstancedGLBLayer({
     variantMode || null,
   ]), [cheapMaterials, hasItemTints, motion, path, sourceId, tint, tintStrength, variantMode]);
 
+  const primitivesCacheKey = `instanced-glb:${primitivesKey}`;
   const primitives = useMemo(() => cachedGpuResource(
-    `instanced-glb:${primitivesKey}`,
+    primitivesCacheKey,
     () => buildPrimitives(),
     {
       dispose: list => list.forEach(({ geometry, material }) => {
@@ -297,7 +298,8 @@ export function InstancedGLBLayer({
     },
   // buildPrimitives closes over the same values primitivesKey encodes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [primitivesKey]);
+  ), [primitivesCacheKey]);
+  useEffect(() => retainGpuResource(primitivesCacheKey), [primitivesCacheKey]);
 
   function buildPrimitives() {
     scene.updateMatrixWorld(true);

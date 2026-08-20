@@ -9,6 +9,13 @@ import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { RarityBadge } from './RarityBadge';
+import {
+  cameraDirectiveForProcedure,
+  requestExamineCameraDirective,
+  requestExamineCameraImpulse,
+  requestExamineStrike,
+  clearExamineCameraDirectives,
+} from '../examine/examineCameraDirectives';
 
 // A live specimen stage with one coherent notebook. The camera continues to
 // own the subject view; this layer owns inquiry, evidence, authorship, and the
@@ -199,6 +206,7 @@ export function ExamineView() {
   const scrollRef = useRef(null);
   const noteRef = useRef(null);
   const noteFlashTimerRef = useRef(null);
+  const strikeTimerRef = useRef(null);
 
   const open = Boolean(session);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
@@ -214,6 +222,8 @@ export function ExamineView() {
       setActivePanel('inquiry');
       setCollecting(false);
       window.clearTimeout(noteFlashTimerRef.current);
+      window.clearTimeout(strikeTimerRef.current);
+      clearExamineCameraDirectives();
       return undefined;
     }
     return () => {
@@ -241,10 +251,38 @@ export function ExamineView() {
     sendExamineMessage(trimmed);
   }, [question, sendExamineMessage, session?.pending]);
 
-  const submitProcedure = useCallback(prompt => {
+  const submitProcedure = useCallback((label, prompt) => {
     if (!prompt || session?.pending) return;
     sendExamineMessage(prompt);
-  }, [sendExamineMessage, session?.pending]);
+    // The camera move plays during the pending beat: choosing a procedure is
+    // the act of looking, so the framing shifts while the observation forms.
+    const directive = cameraDirectiveForProcedure(session?.category, label);
+    if (!directive || !session?.focus) return;
+    requestExamineCameraDirective(directive);
+    if (directive.strike) {
+      // A surface test lands a visible tap: the shared hammer dust burst on
+      // the camera-facing surface (placed by the rig), plus a small camera
+      // nudge, timed for after the dolly-in.
+      const actorId = session.actorId;
+      window.clearTimeout(strikeTimerRef.current);
+      strikeTimerRef.current = window.setTimeout(() => {
+        const live = useThreeGameStore.getState().examineSession;
+        if (!live || live.actorId !== actorId) return;
+        requestExamineStrike({
+          propId: `examine:${actorId}`,
+          material: 'stone',
+          dustCount: 10,
+          sparkCount: 3,
+          dustColor: '#6b6258',
+          dustSize: 0.035,
+          // No impact flash: a careful field tap is dust and a couple of
+          // spark streaks, not a hammer blow.
+          flashScale: 0,
+        });
+        requestExamineCameraImpulse(1);
+      }, 750);
+    }
+  }, [sendExamineMessage, session]);
 
   const submitNote = useCallback(() => {
     const trimmed = note.trim();
@@ -441,7 +479,7 @@ export function ExamineView() {
                       key={label}
                       type="button"
                       disabled={session.pending}
-                      onClick={() => submitProcedure(prompt)}
+                      onClick={() => submitProcedure(label, prompt)}
                       className="min-h-10 shrink-0 snap-start rounded-sm border border-expedition-brass/35 bg-expedition-gold/[0.04] px-3 font-sans text-[12px] font-medium tracking-[0.02em] text-expedition-parchment/85 transition hover:border-expedition-goldbright/60 hover:bg-expedition-gold/10 hover:text-expedition-goldbright disabled:cursor-wait disabled:opacity-40 lg:min-h-9"
                     >
                       {label}

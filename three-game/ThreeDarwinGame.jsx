@@ -8,8 +8,17 @@ import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA 
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, Quaternion, SRGBColorSpace, Texture, UnsignedByteType, Vector3, WebGLRenderTarget } from 'three';
 import { clampFrameDelta } from './frameTiming';
-import { sweepInactiveGltfGpu } from './components/assets/gltfCachePolicy';
+import { gltfCachePolicyStats, sweepInactiveGltfGpu } from './components/assets/gltfCachePolicy';
+import {
+  CONSTRAINED_GPU_RESOURCE_CACHE_LIMIT,
+  DEFAULT_GPU_RESOURCE_CACHE_LIMIT,
+  gpuResourceCacheStats,
+  setGpuResourceCacheLimit,
+  sweepInactiveGpuResources,
+} from './world/gpuResourceCache';
+import { isConstrainedMemoryDevice } from './world/constrainedDevice';
 import { warmGateRuntime } from './world/warmGateRuntime';
+import { settledPrewarmRuntime } from './world/settledPrewarmRuntime';
 import {
   isPerfCaptureRecording,
   notePerfAdaptiveDprState,
@@ -22,6 +31,11 @@ import {
   resolveQualityPreference,
   writeQualityPreference,
 } from './qualityPreference';
+import {
+  buildEffectiveDprLadder,
+  classifyAutomaticGraphicsQuality,
+  probeWebGLRendererName,
+} from './automaticQuality';
 import { clearSessionSnapshot } from './sessionSave';
 import { isExpeditionPaused, isGameplayInputBlocked } from './input/typingMode';
 import { ThreeScene } from './components/ThreeScene';
@@ -494,15 +508,16 @@ const STARTUP_STREAM_FIRST_STEP_MS = 700;
 const STARTUP_STREAM_STEP_MS = 120;
 const STARTUP_STREAM_IDLE_TIMEOUT_MS = 650;
 const STARTUP_STREAM_FRAME_BUDGET_MS = 28;
-// The deadline is a degraded fallback, not the normal transition clock. Full
-// destination content now mounts and compiles beneath the opaque chart first.
 // Transition phases in which shadows and the water reflection are live again.
 // 'ready' is still fully behind the opaque chart, so their first renders warm
 // up out of sight instead of stalling the reveal frame.
 const TRANSITION_RENDER_WARM_PHASES = new Set(['ready', 'arriving', 'settling']);
-const TRANSITION_READY_DEADLINE_MS = 8000;
+// A slow device may abandon *optional offscreen prewarming* after twenty
+// seconds, but it may never bypass terrain/ecology/water readiness or an active
+// loader. The former eight-second timer set the transition ready unconditionally
+// and exposed exactly the mount storm the chart exists to cover.
+const TRANSITION_PREWARM_DEGRADED_TIMEOUT_MS = 20000;
 const TRANSITION_COMPILE_TIMEOUT_MS = 1500;
-const TRANSITION_OPTIONAL_LOADER_GRACE_MS = 900;
 const SCENE_COST_BUCKET_LIMIT = 40;
 const SHADOW_QUALITY_MODES = ['low', 'mobile', 'standard', 'high', 'ultra'];
 const OPENING_RENDER_DPR = [1, 1];
@@ -533,15 +548,21 @@ function getInitialPerfSettings() {
   };
 }
 
+let cachedAutomaticQualityRecommendation = null;
 function recommendedQualityFromDevice() {
   if (typeof window === 'undefined') return 'performance';
+  if (cachedAutomaticQualityRecommendation) return cachedAutomaticQualityRecommendation;
   const memory = Number(window.navigator?.deviceMemory);
   const cores = Number(window.navigator?.hardwareConcurrency);
   const compactTouch = window.matchMedia?.('(pointer: coarse)').matches
     && Math.min(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight) <= 1024;
-  const constrainedMemory = Number.isFinite(memory) && memory > 0 && memory <= 4;
-  const constrainedCpu = Number.isFinite(cores) && cores > 0 && cores <= 4;
-  return compactTouch || constrainedMemory || constrainedCpu ? 'mobile' : 'performance';
+  cachedAutomaticQualityRecommendation = classifyAutomaticGraphicsQuality({
+    deviceMemory: memory,
+    hardwareConcurrency: cores,
+    compactTouch,
+    renderer: probeWebGLRendererName(window.document),
+  });
+  return cachedAutomaticQualityRecommendation;
 }
 
 function settingEnabled(params, baseValue, enabledNames, disabledNames) {
@@ -1224,20 +1245,6 @@ const ADAPTIVE_DPR_MIN_GAIN_FPS = 2.5;
 // it exists to protect.
 const ADAPTIVE_DPR_NO_GAIN_STRIKES = 2;
 
-function buildDprLadder(maxDpr) {
-  const rungs = [];
-  // Sub-1x rungs matter most on the tiers that already cap at 1.25x: without
-  // them the ladder held only two steps and the controller ran out of room
-  // before it could recover a frame budget.
-  // 0.85 is the floor. Below that the image is soft enough to read as a
-  // rendering fault rather than as a frame-rate trade.
-  for (const candidate of [2, 1.5, 1.25, 1, 0.85]) {
-    if (candidate <= maxDpr + 1e-3) rungs.push(candidate);
-  }
-  if (!rungs.length || rungs[0] < maxDpr - 1e-3) rungs.unshift(maxDpr);
-  return rungs.filter((value, i) => i === 0 || value < rungs[i - 1] - 1e-3);
-}
-
 function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
   const setDpr = useThree(state => state.setDpr);
   const gl = useThree(state => state.gl);
@@ -1260,7 +1267,8 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
   // controller never fights the new baseline R3F just applied from the prop.
   useEffect(() => {
     const s = state.current;
-    s.ladder = buildDprLadder(maxDpr);
+    s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    s.ladder = buildEffectiveDprLadder(maxDpr, s.deviceDpr);
     s.level = 0;
     s.frames = 0;
     s.elapsed = 0;
@@ -1268,7 +1276,6 @@ function AdaptiveResolution({ enabled, maxDpr, onApplied = null }) {
     s.goodWindows = 0;
     s.badWindows = 0;
     s.noGainStrikes = 0;
-    s.deviceDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
     s.fpsBeforeDrop = 0;
     s.fillBound = true;
     onApplied?.(null);
@@ -1392,6 +1399,8 @@ function useSessionAutosave(active) {
   const collectedCount = useThreeGameStore(state => state.collectedSpecimenIds.length);
   const documentedCount = useThreeGameStore(state => state.documentedSpecimenIds.length);
   const journalCount = useThreeGameStore(state => state.journal.length);
+  const assessmentTurnCount = useThreeGameStore(state => state.assessmentPlayerTranscript.length);
+  const npcEncounterState = useThreeGameStore(state => state.npcEncounterState);
   const questComplete = useThreeGameStore(state => state.questComplete);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
 
@@ -1400,11 +1409,13 @@ function useSessionAutosave(active) {
     useThreeGameStore.getState().saveSession();
   }, [
     active,
+    assessmentTurnCount,
     collectedCount,
     currentZoneId,
     day,
     documentedCount,
     journalCount,
+    npcEncounterState,
     playableModeId,
     questComplete,
   ]);
@@ -1487,6 +1498,30 @@ function InspectionAnchorProjector() {
     last.current = { key, x, y, visible };
     setInspectedScreenPosition({ x, y, visible, width: size.width, height: size.height });
   });
+
+  return null;
+}
+
+function WebGLContextRecoverySignal({ onLost, onRestored }) {
+  const gl = useThree(state => state.gl);
+
+  useEffect(() => {
+    const canvas = gl?.domElement;
+    if (!canvas) return undefined;
+    const handleLost = event => {
+      // Opt into browser restoration. Without preventDefault a lost context is
+      // terminal and the player is left looking at a permanently blank canvas.
+      event.preventDefault();
+      onLost?.();
+    };
+    const handleRestored = () => onRestored?.();
+    canvas.addEventListener('webglcontextlost', handleLost, false);
+    canvas.addEventListener('webglcontextrestored', handleRestored, false);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', handleLost, false);
+      canvas.removeEventListener('webglcontextrestored', handleRestored, false);
+    };
+  }, [gl, onLost, onRestored]);
 
   return null;
 }
@@ -1686,6 +1721,10 @@ function OpeningVisualReadySignal({
 // prewarm. The whole point is to avoid trading one long stall for another, so
 // this stays small enough to disappear into a frame's slack.
 const PREWARM_TEXTURE_BUDGET_PER_FRAME = 4;
+// Travel is fully covered by the opaque chart. Upload a larger batch there so
+// readiness does not turn safe background work into a ten-second wait; startup
+// and ordinary play retain the gentler four-texture budget.
+const TRANSITION_PREWARM_TEXTURE_BUDGET_PER_FRAME = 16;
 
 // One walk per prewarm run: the objects carrying a material this zone has not
 // prewarmed yet, and the textures those materials reach.
@@ -1700,7 +1739,7 @@ const PREWARM_TEXTURE_BUDGET_PER_FRAME = 4;
 // A material is prewarmed once. One that later flips `needsUpdate` recompiles
 // on its own first draw as it always has; this pass exists for content that
 // mounts late, not for materials that change under it.
-function collectPrewarmWork(root, seenMaterials, seenTextures) {
+function collectPrewarmWork(root, seenMaterials, seenTextures, seenGeometries) {
   const objects = [];
   const textures = [];
   // three prepares an object's whole subtree, so anything under one already on
@@ -1717,6 +1756,10 @@ function collectPrewarmWork(root, seenMaterials, seenTextures) {
     const material = object.material;
     if (!material) return;
     let fresh = false;
+    if (object.geometry && !seenGeometries.has(object.geometry)) {
+      seenGeometries.add(object.geometry);
+      fresh = true;
+    }
     for (const entry of Array.isArray(material) ? material : [material]) {
       if (!entry || seenMaterials.has(entry)) continue;
       seenMaterials.add(entry);
@@ -1773,12 +1816,12 @@ const PREWARM_COOLDOWN_MS = 1500;
 // Compiling a program does not touch its uniform locations: three fetches
 // those lazily on the program's first real draw (`onFirstUse`), which forces
 // the driver to finish linking — measured as seconds of boot/first-sweep CPU.
-// After each prewarm compile, render the scene once per compass heading into
-// this small throwaway target, one heading per frame. Every program a swivel
-// could reach gets its first draw here, behind the settle, instead of inside
-// the player's first look around.
+// After each prewarm compile, render targeted object batches into this small
+// throwaway target. Every program and geometry gets its first draw here,
+// behind the settle, instead of inside the player's first look around.
 const WARM_RENDER_SIZE = 64;
 const WARM_RENDER_HEADINGS = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+const WARM_OBJECTS_PER_PASS = 48;
 const _warmYaw = new Quaternion();
 const _warmUp = new Vector3(0, 1, 0);
 
@@ -1801,7 +1844,50 @@ function withLinearCompileTarget(gl, run) {
   }
 }
 
-function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, heading) {
+function withForcedWarmVisibility(objects, run) {
+  if (!objects?.length) return run();
+  const prior = new Map();
+  const remember = object => {
+    if (!object || prior.has(object)) return;
+    prior.set(object, {
+      visible: object.visible,
+      frustumCulled: object.frustumCulled,
+    });
+  };
+  for (const object of objects) {
+    let current = object;
+    while (current) {
+      remember(current);
+      current.visible = true;
+      current = current.parent;
+    }
+    // Distance buckets and ordinary camera frustum culling are the main source
+    // of shaders that escaped the old four-heading pass. Draw the targeted
+    // mesh regardless of where it sits in the active zone.
+    object.frustumCulled = false;
+  }
+  try {
+    return run();
+  } finally {
+    for (const [object, state] of prior) {
+      object.visible = state.visible;
+      object.frustumCulled = state.frustumCulled;
+    }
+  }
+}
+
+function targetedWarmPasses(objects) {
+  const passes = [];
+  for (let index = 0; index < objects.length; index += WARM_OBJECTS_PER_PASS) {
+    passes.push({
+      heading: WARM_RENDER_HEADINGS[passes.length % WARM_RENDER_HEADINGS.length],
+      objects: objects.slice(index, index + WARM_OBJECTS_PER_PASS),
+    });
+  }
+  return passes;
+}
+
+function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, heading, objects = null) {
   let warmTarget = warmTargetRef.current;
   if (!warmTarget) {
     warmTarget = new WebGLRenderTarget(WARM_RENDER_SIZE, WARM_RENDER_SIZE);
@@ -1827,7 +1913,7 @@ function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, head
   warmGateRuntime.showForWarmPass();
   try {
     gl.setRenderTarget(warmTarget);
-    gl.render(scene, warmCamera);
+    withForcedWarmVisibility(objects, () => gl.render(scene, warmCamera));
   } catch {
     // A warm pass must never take gameplay down with it.
   } finally {
@@ -1837,9 +1923,9 @@ function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, head
   }
 }
 
-function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
+function SettledContentPrewarm({ zoneId, contentPhase, contentTarget, sequenceKey }) {
   const { gl, scene, camera } = useThree();
-  const seenGeometriesRef = useRef(-1);
+  const rendererGeometryCountRef = useRef(-1);
   const dirtySinceRef = useRef(0);
   const lastRunAtRef = useRef(0);
   const runningRef = useRef(false);
@@ -1847,11 +1933,13 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
   const zoneRef = useRef(null);
   const seenMaterialsRef = useRef(new Set());
   const seenTexturesRef = useRef(new Set());
-  const warmHeadingsRef = useRef(null);
+  const seenGeometryResourcesRef = useRef(new Set());
+  const warmPassesRef = useRef(null);
   const warmTargetRef = useRef(null);
   const warmCameraRef = useRef(null);
   const lastCameraQuatRef = useRef(null);
   const seenGateVersionRef = useRef(-1);
+  const completionSweptRef = useRef(false);
 
   useEffect(() => () => {
     warmTargetRef.current?.dispose();
@@ -1860,6 +1948,8 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
 
   useFrame(() => {
     if (!zoneId || !contentPhase || contentPhase < contentTarget) return;
+    const readinessKey = sequenceKey || `zone:${zoneId}`;
+    const transitionPrewarm = Boolean(useThreeGameStore.getState().transition);
     // A warm pass is a full extra scene render; stacking one onto a frame
     // where the camera is already sweeping is precisely the stutter this
     // system exists to remove. Drain only while the view is still.
@@ -1873,22 +1963,27 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     }
     if (zoneRef.current !== zoneId) {
       zoneRef.current = zoneId;
-      seenGeometriesRef.current = -1;
+      rendererGeometryCountRef.current = -1;
       dirtySinceRef.current = 0;
       lastRunAtRef.current = 0;
       queueRef.current = null;
-      warmHeadingsRef.current = null;
+      warmPassesRef.current = null;
       // Fresh sets per zone: the departing zone's materials and textures are
       // on their way out, and holding them here would keep them alive.
       seenMaterialsRef.current = new Set();
       seenTexturesRef.current = new Set();
+      seenGeometryResourcesRef.current = new Set();
+      completionSweptRef.current = false;
+      settledPrewarmRuntime.invalidate(readinessKey);
     }
 
     const now = performance.now();
     const geometries = gl.info.memory.geometries;
-    if (geometries !== seenGeometriesRef.current) {
-      seenGeometriesRef.current = geometries;
+    if (geometries !== rendererGeometryCountRef.current) {
+      rendererGeometryCountRef.current = geometries;
       dirtySinceRef.current = now;
+      completionSweptRef.current = false;
+      settledPrewarmRuntime.invalidate(readinessKey);
     }
     // Gated content never draws, so it cannot move the geometry counter;
     // its registrations are the growth signal instead. The deadline pass is
@@ -1896,6 +1991,8 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     if (warmGateRuntime.version !== seenGateVersionRef.current) {
       seenGateVersionRef.current = warmGateRuntime.version;
       dirtySinceRef.current = now;
+      completionSweptRef.current = false;
+      settledPrewarmRuntime.invalidate(readinessKey);
     }
     warmGateRuntime.releaseExpired(now);
 
@@ -1903,7 +2000,10 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     // one that must not land in a single frame.
     const queue = queueRef.current;
     if (queue?.length) {
-      for (let budget = 0; budget < PREWARM_TEXTURE_BUDGET_PER_FRAME && queue.length; budget += 1) {
+      const textureBudget = transitionPrewarm
+        ? TRANSITION_PREWARM_TEXTURE_BUDGET_PER_FRAME
+        : PREWARM_TEXTURE_BUDGET_PER_FRAME;
+      for (let budget = 0; budget < textureBudget && queue.length; budget += 1) {
         const texture = queue.pop();
         if (!texture?.image) continue;
         try {
@@ -1912,26 +2012,58 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
           // A texture whose source is not decodable yet simply uploads later.
         }
       }
+      if (queue.length) return;
+    }
+
+    // Then drain targeted warm renders, one bounded batch per frame. Runs after
+    // the compile and texture queues so a warm frame never stacks on an upload.
+    const warmPasses = warmPassesRef.current;
+    if (warmPasses?.length) {
+      if (cameraStill) {
+        const pass = warmPasses.pop();
+        renderWarmHeading(
+          gl,
+          scene,
+          camera,
+          warmTargetRef,
+          warmCameraRef,
+          pass.heading,
+          pass.objects,
+        );
+        // Every targeted batch has now drawn the gated content offscreen; let it
+        // join the visible frame.
+        if (!warmPasses.length) {
+          warmGateRuntime.release();
+          seenGateVersionRef.current = warmGateRuntime.version;
+          // The warm renders themselves upload geometry. Record their final
+          // count so that self-generated growth does not invalidate an already
+          // complete warm cycle and add another quiet-window delay.
+          rendererGeometryCountRef.current = gl.info.memory.geometries;
+          if (!completionSweptRef.current) {
+            sweepInactiveGpuResources();
+            completionSweptRef.current = true;
+            rendererGeometryCountRef.current = gl.info.memory.geometries;
+          }
+          settledPrewarmRuntime.complete(readinessKey);
+        }
+      }
       return;
     }
 
-    // Then drain warm renders, one heading per frame. Runs after the compile
-    // and texture queues so a warm frame never stacks on top of an upload.
-    const warmHeadings = warmHeadingsRef.current;
-    if (warmHeadings?.length) {
-      if (cameraStill) {
-        renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, warmHeadings.pop());
-        // Every heading has now drawn the gated content offscreen; let it
-        // join the visible frame.
-        if (!warmHeadings.length) warmGateRuntime.release();
+    if (!runningRef.current && !dirtySinceRef.current) {
+      if (!completionSweptRef.current) {
+        sweepInactiveGpuResources();
+        completionSweptRef.current = true;
+        rendererGeometryCountRef.current = gl.info.memory.geometries;
       }
+      settledPrewarmRuntime.complete(readinessKey);
       return;
     }
 
     if (
       runningRef.current
       || !dirtySinceRef.current
-      || now - dirtySinceRef.current < PREWARM_QUIET_MS
+      || now - dirtySinceRef.current < (transitionPrewarm ? 350 : PREWARM_QUIET_MS)
       || now - lastRunAtRef.current < PREWARM_COOLDOWN_MS
     ) return;
 
@@ -1942,11 +2074,13 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
       scene,
       seenMaterialsRef.current,
       seenTexturesRef.current,
+      seenGeometryResourcesRef.current,
     );
     queueRef.current = textures;
-    // The geometry count moves for reasons that add no material — an instanced
-    // field regrown, a prop swapped for one already on screen. Nothing new to
-    // compile, so skip the round trip.
+    // Geometry is tracked separately from material. A far distance bucket can
+    // reuse a material that was warmed near spawn but still owe its own first
+    // GPU upload; it must enter the targeted warm pass even when no shader is
+    // new.
     if (!objects.length) return;
 
     // Compile only the new objects, against the live scene. three reads the
@@ -1960,11 +2094,14 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
     subject.children = objects;
     runningRef.current = true;
     let timeoutId = null;
+    const prewarmZoneId = zoneId;
     Promise.resolve()
       .then(() => Promise.race([
-        withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
-          ? gl.compileAsync(subject, camera, scene)
-          : Promise.resolve(gl.compile(subject, camera, scene)))),
+        withForcedWarmVisibility(objects, () => (
+          withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
+            ? gl.compileAsync(subject, camera, scene)
+            : Promise.resolve(gl.compile(subject, camera, scene))))
+        )),
         new Promise(resolve => {
           timeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
         }),
@@ -1977,9 +2114,11 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
         if (timeoutId != null) window.clearTimeout(timeoutId);
         subject.children = [];
         runningRef.current = false;
-        // The compiled programs still owe their first draw (uniform-location
-        // fetch). Pay it now, one heading per frame, while nothing is moving.
-        warmHeadingsRef.current = [...WARM_RENDER_HEADINGS];
+        if (zoneRef.current !== prewarmZoneId) return;
+        // The compiled programs and geometries still owe their first draw.
+        // Pay it in bounded targeted batches; forcing visibility means distant
+        // buckets, birds, glass and dormant LODs cannot escape the pass.
+        warmPassesRef.current = targetedWarmPasses(objects);
       });
   });
 
@@ -1987,10 +2126,6 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget }) {
 }
 
 function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, waterQuality }) {
-  const { gl, scene, camera } = useThree();
-  const compiledIdRef = useRef(null);
-  const compiledAtRef = useRef(0);
-  const compilingIdRef = useRef(null);
   const quietSinceRef = useRef(0);
   const stableFramesRef = useRef(0);
   const resourceStableFramesRef = useRef(0);
@@ -2002,17 +2137,6 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
   useEffect(() => () => {
     if (readyTimeoutRef.current != null) window.clearTimeout(readyTimeoutRef.current);
   }, []);
-
-  useEffect(() => {
-    if (!transition?.id || transition.phase !== 'mounting' || !transition.committedAt) return undefined;
-    const wait = Math.max(0, TRANSITION_READY_DEADLINE_MS - (Date.now() - transition.committedAt));
-    const timer = window.setTimeout(() => {
-      const current = useThreeGameStore.getState();
-      if (current.transition?.id !== transition.id || current.transition.phase !== 'mounting') return;
-      current.setZoneTransitionPhase('ready', transition.id);
-    }, wait);
-    return () => window.clearTimeout(timer);
-  }, [transition?.committedAt, transition?.id, transition?.phase]);
 
   // Zustand updates are normally safe from a frame callback, but this signal
   // can coincide with React committing destination Suspense children. Deferring
@@ -2042,7 +2166,6 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           resourceStableFramesRef.current = 0;
           activeIdRef.current = null;
           blockerRef.current = null;
-          compiledAtRef.current = 0;
           return;
         }
         if (activeIdRef.current !== active.id) {
@@ -2050,14 +2173,6 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
           quietSinceRef.current = 0;
           stableFramesRef.current = 0;
           resourceStableFramesRef.current = 0;
-          compiledAtRef.current = 0;
-        }
-        // Compilation is a polish step, not a gate that may permanently strand
-        // the player. This also covers a failed terrain promise or a loader that
-        // never reports its final progress event on a particular WebGL driver.
-        if (active.committedAt && Date.now() - active.committedAt >= TRANSITION_READY_DEADLINE_MS) {
-          queueReady(active.id);
-          return;
         }
         if (!terrainResourceIsReady(active.zoneId, segmentCap)) {
           if (blockerRef.current !== 'terrain') {
@@ -2097,47 +2212,30 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
         // promise resolves before compiling the destination scene.
         resourceStableFramesRef.current += 1;
         if (resourceStableFramesRef.current < 3) return;
-        if (compiledIdRef.current !== active.id) {
-          if (blockerRef.current !== 'compile') {
-            blockerRef.current = 'compile';
-            window.__recordThreeTransitionEvent?.('ready-wait:compile');
+        const prewarmKey = `zone:${active.zoneId}`;
+        const prewarmComplete = settledPrewarmRuntime.isComplete(prewarmKey);
+        const degradedPrewarm = !prewarmComplete
+          && active.committedAt
+          && Date.now() - active.committedAt >= TRANSITION_PREWARM_DEGRADED_TIMEOUT_MS;
+        if (!prewarmComplete && !degradedPrewarm) {
+          if (blockerRef.current !== 'prewarm') {
+            blockerRef.current = 'prewarm';
+            window.__recordThreeTransitionEvent?.('ready-wait:prewarm');
           }
-          if (compilingIdRef.current !== active.id) {
-            const transitionId = active.id;
-            compilingIdRef.current = transitionId;
-            let compileTimeoutId = null;
-            Promise.resolve()
-              .then(() => Promise.race([
-                withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
-                  ? gl.compileAsync(scene, camera)
-                  : Promise.resolve(gl.compile(scene, camera)))),
-                new Promise(resolve => {
-                  compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
-                }),
-              ]))
-              .catch(() => {
-                // The renderer will surface shader errors. Readiness must still
-                // settle onto authored fallbacks on unusual WebGL drivers.
-              })
-              .then(() => {
-                if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
-                if (useThreeGameStore.getState().transition?.id === transitionId) {
-                  compiledIdRef.current = transitionId;
-                  compiledAtRef.current = performance.now();
-                }
-                if (compilingIdRef.current === transitionId) compilingIdRef.current = null;
-              });
-          }
+          quietSinceRef.current = 0;
+          stableFramesRef.current = 0;
           return;
+        }
+        if (degradedPrewarm && blockerRef.current !== 'prewarm-degraded') {
+          blockerRef.current = 'prewarm-degraded';
+          window.__recordThreeTransitionEvent?.('ready-degraded:prewarm');
         }
         // Read the loader store without subscribing this component. Texture
         // loaders may start synchronously while destination actors render; a
         // subscription here can cause a cross-component React update.
         const assetProgress = useProgress.getState();
         const loaderBusy = loadingManagerIsBusy(assetProgress);
-        const optionalLoaderGraceElapsed = compiledAtRef.current > 0
-          && performance.now() - compiledAtRef.current >= TRANSITION_OPTIONAL_LOADER_GRACE_MS;
-        if ((loaderBusy && !optionalLoaderGraceElapsed) || compiledIdRef.current !== active.id) {
+        if (loaderBusy) {
           if (blockerRef.current !== 'loader') {
             blockerRef.current = 'loader';
             window.__recordThreeTransitionEvent?.('ready-wait:loader');
@@ -2173,10 +2271,7 @@ function ZoneTransitionReadySignal({ segmentCap, contentPhase, transition, water
       if (frameHandle != null) window.cancelAnimationFrame(frameHandle);
     };
   }, [
-    camera,
     contentPhase,
-    gl,
-    scene,
     segmentCap,
     transition?.id,
     transition?.phase,
@@ -4065,6 +4160,7 @@ export default function ThreeDarwinGame({
   const [historicalPrologueVisible, setHistoricalPrologueVisible] = useState(false);
   const [historicalPrologueAccepted, setHistoricalPrologueAccepted] = useState(false);
   const [historicalPrologueSkipRequested, setHistoricalPrologueSkipRequested] = useState(false);
+  const [webglContextLost, setWebglContextLost] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [showAssetBrowser, setShowAssetBrowser] = useState(false);
   const [showAnimalAnimationLab, setShowAnimalAnimationLab] = useState(false);
@@ -4101,6 +4197,24 @@ export default function ThreeDarwinGame({
   const [underwaterAmount, setUnderwaterAmount] = useState(0);
   const [rendererInfo, setRendererInfo] = useState(null);
   const closeAudioDebug = useCallback(() => setShowAudioDebug(false), []);
+  const handleWebGLContextLost = useCallback(() => {
+    try {
+      useThreeGameStore.getState().saveSession();
+    } catch {
+      // Recovery UI still matters if storage is unavailable.
+    }
+    setWebglContextLost(true);
+  }, []);
+  const handleWebGLContextRestored = useCallback(() => {
+    setWebglContextLost(false);
+  }, []);
+  const reloadAfterWebGLFailure = useCallback(() => {
+    try {
+      useThreeGameStore.getState().saveSession();
+    } finally {
+      window.location.reload();
+    }
+  }, []);
   // Loading progress only drives the launch overlay. Once the initial scene is
   // ready, keep this subscriber's snapshot stable so render-time texture starts
   // in newly mounted regions cannot schedule a parent React update.
@@ -4226,10 +4340,12 @@ export default function ThreeDarwinGame({
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
-  // Captures intentionally wait for the fully settled scene. Real players and
-  // functional smoke unlock at the essential phase-three boundary; smoke tests
-  // that need late actors can request phase six explicitly after gameplay starts.
-  const loadingContentTarget = screenshotMode
+  // Darwin waits for the complete staged scene. Unlocking him at phase three
+  // handed the remaining props, wildlife, structures, texture uploads, and
+  // shader links to ordinary movement frames — the source of the measured
+  // half- to one-second walking hitches. Other playable modes retain their
+  // existing essential-content boundary; the classroom route is Darwin.
+  const loadingContentTarget = screenshotMode || playableModeId === 'darwin'
     ? STARTUP_FULL_CONTENT_PHASE
     : STARTUP_OPENING_CONTENT_PHASE;
   useEffect(() => {
@@ -4294,9 +4410,19 @@ export default function ThreeDarwinGame({
     // object, and setPlayableMode then resolves the toolbar/spawn for the
     // restored region. A snapshot that fails validation falls through to a
     // normal fresh start rather than half-applying.
-    const restored = resumeSnapshot
-      ? useThreeGameStore.getState().restoreSession(resumeSnapshot)
-      : false;
+    let restored = false;
+    if (resumeSnapshot) {
+      try {
+        restored = useThreeGameStore.getState().restoreSession(resumeSnapshot);
+      } catch (error) {
+        // A drifted or unexpectedly malformed local snapshot must never turn
+        // Continue into a white screen. Remove the bad retry loop and fall back
+        // to the same fresh-start path used by an invalid schema.
+        console.error('[session] restore failed; starting a fresh expedition', error);
+        clearSessionSnapshot();
+        restored = false;
+      }
+    }
     useThreeGameStore.getState().setPlayableMode(initialModeId);
     if (multiplayerSession) {
       useThreeGameStore.setState(state => ({
@@ -4353,6 +4479,26 @@ export default function ThreeDarwinGame({
   }, [scenePerfSettings.cheapMaterials, scenePerfSettings.foliageDrawScale]);
 
   useEffect(() => {
+    setGpuResourceCacheLimit(
+      isConstrainedMemoryDevice()
+        ? CONSTRAINED_GPU_RESOURCE_CACHE_LIMIT
+        : DEFAULT_GPU_RESOURCE_CACHE_LIMIT,
+    );
+    if (DEV_TOOLS_ENABLED) {
+      window.__darwinGltfCacheStats = gltfCachePolicyStats;
+      window.__darwinGpuResourceCacheStats = gpuResourceCacheStats;
+    }
+    return () => {
+      if (window.__darwinGltfCacheStats === gltfCachePolicyStats) {
+        delete window.__darwinGltfCacheStats;
+      }
+      if (window.__darwinGpuResourceCacheStats === gpuResourceCacheStats) {
+        delete window.__darwinGpuResourceCacheStats;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!transition?.id) {
       setTransitionContentPhase(STARTUP_FULL_CONTENT_PHASE);
       return;
@@ -4407,22 +4553,33 @@ export default function ThreeDarwinGame({
     };
   }, [transition?.committedAt, transition?.id]);
 
-  // Travel is where GPU memory peaked: the origin zone's models kept their
-  // textures and geometries resident after unmounting, so each travel added
-  // a zone's worth of orphaned GPU allocations — measured 234 orphaned
-  // textures after one round trip, and the mechanism behind iOS Safari's
-  // out-of-memory tab kill mid-travel. Sweep once as soon as the origin has
-  // unmounted behind the opaque chart (that removes the two-zone peak), and
-  // again after arrival as a catch-all for late unmounts.
+  // Travel is where GPU memory peaked. Sweep both caches once the origin has
+  // unmounted behind the opaque chart, then again after arrival. GPU-resource
+  // leases pin every destination material/geometry still mounted, so this can
+  // now discard departed-region entries without invalidating the live scene.
   useEffect(() => {
     const phase = transition?.phase;
     if (phase !== 'mounting' && phase !== undefined) return undefined;
     const delay = phase === 'mounting' ? 500 : 2500;
     const handle = window.setTimeout(() => {
       sweepInactiveGltfGpu();
+      sweepInactiveGpuResources();
     }, delay);
     return () => window.clearTimeout(handle);
   }, [transition?.phase, transition?.id]);
+
+  // Startup has no transition phase change to schedule the arrival catch-all.
+  // A few clone/material effects commit just after readiness, so sweep once
+  // more after the fully staged Darwin scene has had time to finish those
+  // effects. Mounted leases remain pinned.
+  useEffect(() => {
+    if (!sceneReady || startupContentPhase < STARTUP_FULL_CONTENT_PHASE) return undefined;
+    const handle = window.setTimeout(() => {
+      sweepInactiveGltfGpu();
+      sweepInactiveGpuResources();
+    }, 3000);
+    return () => window.clearTimeout(handle);
+  }, [sceneReady, startupContentPhase]);
 
   // Cutout foliage may only use alpha-to-coverage when real MSAA samples back
   // the buffer it draws into: the composer target when postprocessing is on,
@@ -4821,7 +4978,10 @@ export default function ThreeDarwinGame({
       const waitedLongEnough = performance.now() - startedAt >= minimumWait;
       const stagedContentReady = startupContentPhase >= loadingContentTarget
         && (playableModeId !== 'darwin' || playerVisualReady)
-        && (playableModeId !== 'darwin' || playerAnimationBanksReady);
+        && (playableModeId !== 'darwin' || playerAnimationBanksReady)
+        && (playableModeId !== 'darwin'
+          || (loadersStable
+            && settledPrewarmRuntime.isComplete(`zone:${currentZoneId}`)));
       if (waitedLongEnough && stagedContentReady && document.querySelector('canvas')) markSceneReady();
     }, 250);
     return () => window.clearInterval(handle);
@@ -4829,7 +4989,9 @@ export default function ThreeDarwinGame({
     automationReadyMode,
     e2eMode,
     gameStarted,
+    currentZoneId,
     loadingContentTarget,
+    loadersStable,
     markSceneReady,
     playableModeId,
     playerAnimationBanksReady,
@@ -5217,12 +5379,16 @@ export default function ThreeDarwinGame({
                 perfSettings={scenePerfSettings}
                 contentPhase={activeContentPhase}
                 openingCamera={openingCamera}
-                inputLocked={openingIntroActive || Boolean(transition)}
-                actorMotionPaused={!gameUiVisible || Boolean(transition)}
+                inputLocked={openingIntroActive || Boolean(transition) || webglContextLost}
+                actorMotionPaused={!gameUiVisible || Boolean(transition) || webglContextLost}
                 onPlayerAnimationBanksReady={markPlayerAnimationBanksReady}
                 onPlayerVisualReady={markPlayerVisualReady}
               />
             </Suspense>
+            <WebGLContextRecoverySignal
+              onLost={handleWebGLContextLost}
+              onRestored={handleWebGLContextRestored}
+            />
             <OpeningVisualReadySignal
               active={gameStarted && launchState === 'loading'}
               sequenceId={bootStartedAt.current || 'opening-load'}
@@ -5256,6 +5422,7 @@ export default function ThreeDarwinGame({
               zoneId={currentZoneId}
               contentPhase={activeContentPhase}
               contentTarget={STARTUP_FULL_CONTENT_PHASE}
+              sequenceKey={`zone:${currentZoneId}`}
             />
             <ThreeE2EFrameSignal enabled={automationReadyMode} />
             <TravelCameraRig />
@@ -5345,6 +5512,26 @@ export default function ThreeDarwinGame({
           durationMs={OPENING_DURATION_MS}
         />
         {gameStarted && <ZoneTransitionOverlay />}
+        {webglContextLost && (
+          <div
+            className="absolute inset-0 z-[120] flex items-center justify-center bg-[#07100f]/92 px-6 text-center text-amber-50"
+            role="alert"
+          >
+            <div className="max-w-md rounded-xl border border-amber-100/25 bg-black/45 p-6 shadow-2xl backdrop-blur">
+              <h2 className="font-serif text-2xl">Graphics paused</h2>
+              <p className="mt-3 text-sm leading-relaxed text-amber-50/80">
+                The browser ran out of graphics resources. Your expedition was saved and the game is trying to restore the view.
+              </p>
+              <button
+                type="button"
+                className="mt-5 rounded border border-amber-100/40 bg-amber-100/10 px-4 py-2 text-sm font-semibold hover:bg-amber-100/20"
+                onClick={reloadAfterWebGLFailure}
+              >
+                Reload and continue
+              </button>
+            </div>
+          </div>
+        )}
         {gameUiMounted && (
           <ThreeHUD
             onTogglePerf={() => setShowPerf(value => !value)}

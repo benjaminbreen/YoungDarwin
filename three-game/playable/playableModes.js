@@ -91,7 +91,7 @@ export const ANIMAL_ACTIONS = {
   },
 };
 
-const DARWIN_TOOLBAR = ['shotgun', 'insect_net', 'snare', 'hammer', 'hands', 'sketch'];
+const DARWIN_TOOLBAR = ['shotgun', 'insect_net', 'pocket_knife', 'hammer', 'hands', 'sketch'];
 const ANIMAL_TOOLBAR = ['eat', 'sleep', 'defecate'];
 
 const basePlayerController = {

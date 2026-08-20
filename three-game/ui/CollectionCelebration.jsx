@@ -34,6 +34,9 @@ export function CollectionCelebration({ toast, onClose }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const inventoryCount = useThreeGameStore(state => state.inventory.length);
   const caseCapacity = useThreeGameStore(state => state.caseCapacity);
+  const lightweightEffects = useThreeGameStore(
+    state => Number(state.foliageDrawScale) <= 0.76,
+  );
   const progress = useZoneSpecimenProgress();
 
   // One chime per toast, on the toast's first frame — the toast object itself
@@ -91,7 +94,7 @@ export function CollectionCelebration({ toast, onClose }) {
           type="button"
           onClick={onClose}
           aria-live="polite"
-          className="pointer-events-auto block w-full animate-collect-pop motion-reduce:animate-none cursor-default rounded-[9px] border border-rose-300/40 bg-[rgba(30,14,20,0.92)] px-4 py-3 text-left shadow-[0_18px_44px_rgba(0,0,0,0.45)] backdrop-blur-md"
+          className={`pointer-events-auto block w-full animate-collect-pop motion-reduce:animate-none cursor-default rounded-[9px] border border-rose-300/40 bg-[rgba(30,14,20,0.94)] px-4 py-3 text-left shadow-[0_18px_44px_rgba(0,0,0,0.45)] ${lightweightEffects ? '' : 'backdrop-blur-md'}`}
         >
           <span className="block font-sans text-[10px] font-bold uppercase tracking-[0.24em] text-rose-200/90">It slips away</span>
           <span className="mt-1 block text-[17px] leading-tight text-expedition-parchment">{specimen?.name || 'The specimen'}</span>
@@ -104,7 +107,7 @@ export function CollectionCelebration({ toast, onClose }) {
   const isSuccess = tone === 'success';
   return (
     <div data-testid="collection-celebration" className={`pointer-events-none absolute left-1/2 top-[37%] z-40 w-[22rem] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 -translate-y-1/2 font-expedition transition-all duration-300 ${exitClass}`}>
-      {isSuccess && (
+      {isSuccess && !lightweightEffects && (
         <>
           {/* Burst layers must overshoot the card, or they animate invisibly
               behind it: the card is ~22rem wide and taller than that. Each
@@ -144,13 +147,20 @@ export function CollectionCelebration({ toast, onClose }) {
           </div>
         </>
       )}
+      {isSuccess && lightweightEffects && (
+        <div
+          aria-hidden="true"
+          className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-50"
+          style={{ background: `radial-gradient(circle, ${rarity.glow} 0%, transparent 66%)` }}
+        />
+      )}
 
       <button
         ref={cardRef}
         type="button"
         onClick={onClose}
         aria-live="polite"
-        className="pointer-events-auto relative block w-full animate-collect-pop motion-reduce:animate-none cursor-default rounded-[10px] border bg-[rgba(11,19,35,0.92)] px-5 pb-4 pt-4 text-center shadow-[0_22px_60px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(227,197,133,0.14)] backdrop-blur-md"
+        className={`pointer-events-auto relative block w-full animate-collect-pop motion-reduce:animate-none cursor-default rounded-[10px] border bg-[rgba(11,19,35,0.94)] px-5 pb-4 pt-4 text-center shadow-[0_22px_60px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(227,197,133,0.14)] ${lightweightEffects ? '' : 'backdrop-blur-md'}`}
         style={{ borderColor: isSuccess ? rarity.ring : 'rgba(138,109,63,0.55)' }}
       >
         <span className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-expedition-goldbright/60 to-transparent" />

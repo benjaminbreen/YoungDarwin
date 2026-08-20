@@ -22,6 +22,9 @@ import {
 // travel. sweepInactiveGltfGpu() drops GPU copies for cached-but-unmounted
 // models; the parse survives, so a revisit re-uploads instead of refetching.
 const GLTF_RECENT_CACHE_LIMIT = 24;
+// Six keeps Darwin's phased animation banks from thrashing between preload and
+// mount while still bounding inactive parsed scenes tightly on mobile.
+const CONSTRAINED_GLTF_RECENT_CACHE_LIMIT = 6;
 const activePathRefs = new Map();
 const recentPaths = new Map();
 const pendingPaths = new Set();
@@ -79,7 +82,9 @@ function touchPath(path) {
 function pruneParsedCache() {
   // A parsed GLB holds decoded bitmaps and typed arrays; two dozen of them
   // are fine on a laptop and a meaningful share of an iPhone tab's budget.
-  const limit = isConstrainedMemoryDevice() ? 6 : GLTF_RECENT_CACHE_LIMIT;
+  const limit = isConstrainedMemoryDevice()
+    ? CONSTRAINED_GLTF_RECENT_CACHE_LIMIT
+    : GLTF_RECENT_CACHE_LIMIT;
   while (recentPaths.size > limit) {
     const candidate = Array.from(recentPaths.keys()).find(path => (
       !activePathRefs.has(path) && !pendingPaths.has(path)
@@ -136,10 +141,12 @@ export function useTrackedGLTF(path) {
 }
 
 export function gltfCachePolicyStats() {
+  const constrained = isConstrainedMemoryDevice();
   return {
     active: activePathRefs.size,
     pending: pendingPaths.size,
     recent: recentPaths.size,
-    limit: GLTF_RECENT_CACHE_LIMIT,
+    parsed: parsedByPath.size,
+    limit: constrained ? CONSTRAINED_GLTF_RECENT_CACHE_LIMIT : GLTF_RECENT_CACHE_LIMIT,
   };
 }

@@ -28,9 +28,6 @@ const EXPEDITION_START = Date.UTC(1835, 8, 17); // day 1 = Sep 17, 1835
 const VOYAGE_DEPARTURE = Date.UTC(1831, 11, 27); // Beagle leaves Plymouth
 const VOYAGE_RETURN = Date.UTC(1836, 9, 2); // Falmouth, Oct 2, 1836
 const MS_PER_DAY = 86400000;
-// A creditable field book for three days ashore, not a lifetime's. 60 was set
-// when the expedition had no end and read as a bar nobody could clear.
-const NOTES_GOAL = 18;
 
 const ISLAND_COORDINATES = {
   Floreana: '1° 17′ S, 90° 26′ W',
@@ -118,13 +115,6 @@ function locationFlavor(zone) {
   return 'Rocky shoreline and scrubland.';
 }
 
-function standingLabel(value) {
-  if (value < 20) return 'Distrusted';
-  if (value < 40) return 'Wary';
-  if (value < 60) return 'Neutral';
-  if (value < 80) return 'Respected';
-  return 'Esteemed';
-}
 
 
 function hashText(text) {
@@ -279,8 +269,6 @@ export function StatusView() {
   const close = useThreeGameStore(state => state.closeStatusView);
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
-  const curiosity = useThreeGameStore(state => state.curiosity);
-  const localStanding = useThreeGameStore(state => state.localStanding);
   const day = useThreeGameStore(state => state.day);
   const journal = useThreeGameStore(state => state.journal);
   const inventory = useThreeGameStore(state => state.inventory);
@@ -332,7 +320,6 @@ export function StatusView() {
   const { formatted, age, daysAtSea, voyagePercent } = expeditionDateParts(day);
   const coordinates = ISLAND_COORDINATES[zone.island] || ISLAND_COORDINATES.Floreana;
   const quote = QUOTES[(day - 1) % QUOTES.length];
-  const standing = standingLabel(localStanding);
   const playableMode = getPlayableMode(playableModeId);
   const animalMode = playableMode.kind === 'animal';
   const modeStats = animalModeStats?.[playableMode.id] || {};
@@ -428,7 +415,6 @@ export function StatusView() {
               <div className="mt-4 grid gap-5 lg:mt-5">
                 <ConditionRow icon={HeartIcon} label="Health" value={health} fill={vitalsGradient('health')} />
                 <ConditionRow icon={FatigueIcon} label="Fatigue" value={fatigue} fill={vitalsGradient('fatigue')} />
-                <ConditionRow icon={CuriosityIcon} label="Curiosity" value={curiosity} fill={vitalsGradient('curiosity')} />
               </div>
             </div>
 
@@ -437,32 +423,9 @@ export function StatusView() {
               <div className="mt-4 grid gap-5 lg:mt-5">
                 <JournalRow icon={ButterflyIcon} label="Species Observed" count={speciesObserved} total={totals.speciesTotal} color={VITALS.health.bright} />
                 <JournalRow icon={VialIcon} label="Geological Samples" count={geologicalSamples} total={totals.mineralTotal} color={VITALS.curiosity.bright} />
-                <JournalRow icon={NoteIcon} label="Notes Written" count={journal.length} total={NOTES_GOAL} color={VITALS.fatigue.bright} />
               </div>
             </div>
 
-            <div>
-              <SectionHeading>Reputation</SectionHeading>
-              <div className={`mt-4 ${ROW_GRID} items-start lg:mt-5`}>
-                <CompassRoseIcon className={`mt-1 ${ROW_ICON}`} />
-                <div>
-                  <div className="flex items-baseline justify-between">
-                    <span className={ROW_LABEL}>Local Standing</span>
-                    <span className="text-[16px] text-expedition-goldbright lg:text-[18px]">{standing}</span>
-                  </div>
-                  <div className="relative mt-3.5 h-[5px] rounded-full bg-gradient-to-r from-expedition-gold/70 via-white/15 to-white/15">
-                    <span
-                      className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-expedition-ink/60 bg-expedition-goldbright shadow-[0_0_10px_rgba(227,197,133,0.7)]"
-                      style={{ left: `${100 - localStanding}%` }}
-                    />
-                  </div>
-                  <div className="mt-2.5 flex justify-between text-[13px] tracking-[0.04em] text-expedition-faded lg:text-[15px]">
-                    <span>Respected</span>
-                    <span>Distrusted</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </>
         )}
       </div>
@@ -528,8 +491,7 @@ export function StatusView() {
               <div className="mt-4 flex justify-between gap-2 px-1 lg:mt-5">
                 <EquipmentSlot image="/inventory/butterfly_net.png" label="Specimen case" detail={`${inventory.length} / ${caseCapacity}`} />
                 <EquipmentSlot image="/inventory/field_notebook.png" label="Field journal" detail={`${journal.length} ${journal.length === 1 ? 'entry' : 'entries'}`} />
-                <EquipmentSlot image="/inventory/labels.png" label="Labels" detail={`× ${supplies.labels}`} />
-                <EquipmentSlot image="/inventory/sample_jar.png" label="Spirit jars" detail={`× ${supplies.spareJars}`} />
+                <EquipmentSlot image="/inventory/sample_jar.png" label="Provisions" detail={`× ${supplies.provisions || 0}`} />
               </div>
             </div>
 

@@ -18,7 +18,7 @@ export const QUALITY_CHOICES = Object.freeze([
   {
     id: 'auto',
     label: 'Automatic',
-    note: 'Choose for me based on this device.',
+    note: 'Use Lightest unless a discrete graphics card is detected.',
   },
   {
     id: 'mobile',
@@ -28,7 +28,7 @@ export const QUALITY_CHOICES = Object.freeze([
   {
     id: 'performance',
     label: 'Balanced',
-    note: 'The default. Full effects at a moderate render resolution.',
+    note: 'Full effects at a moderate render resolution.',
   },
   {
     id: 'cinematic',

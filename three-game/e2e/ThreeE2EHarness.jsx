@@ -31,6 +31,8 @@ import {
 import { ecologyIsCached } from '../world/ecology';
 import { prefetchIslandMapImage } from '../ui/expedition/map/islandLocations';
 import { emitPropEvent } from '../physics/props/propEvents';
+import { getRuntimeObstacles, obstacleBaseY } from '../world/obstacles';
+import { findAmbientFieldTarget } from '../fieldActions';
 import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
 
 const HARNESS_VERSION = 3;
@@ -677,6 +679,27 @@ function createHarnessApi() {
       store.setNearbySpecimen(nearest.actorId);
       store.setSelectedSpecimen(nearest.actorId);
       return nearest;
+    },
+    // Ambient examination without walking into interaction range: builds the
+    // same fieldTarget the E-key path produces for the chosen (default:
+    // largest) rock obstacle in the zone, so procedure/camera flows over
+    // Mineral sessions are drivable headlessly.
+    openExamineFieldRock: (obstacleId = null) => {
+      const state = useThreeGameStore.getState();
+      const rocks = getRuntimeObstacles(state.currentZoneId)
+        .filter(obstacle => /rock|boulder|basalt|scoria|outcrop|lava/i.test(`${obstacle.kind || ''} ${obstacle.id || ''}`));
+      const rock = (obstacleId && rocks.find(item => item.id === obstacleId))
+        || rocks.reduce((best, item) => ((item.radius || 0) > (best?.radius || 0) ? item : best), null);
+      if (!rock) return null;
+      const target = findAmbientFieldTarget({
+        zoneId: state.currentZoneId,
+        position: { x: rock.x + (rock.radius || 1) + 0.6, y: obstacleBaseY(rock), z: rock.z },
+        facing: { x: -1, y: 0, z: 0 },
+        obstacles: [rock],
+      });
+      if (!target) return null;
+      state.openExamine({ fieldTarget: target });
+      return makeSnapshot().examineSession;
     },
     openExamineNearestSpecimen: () => {
       const nearest = api.selectNearestSpecimen();

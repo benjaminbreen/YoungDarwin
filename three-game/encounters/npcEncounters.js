@@ -9,7 +9,7 @@ export const NPC_ENCOUNTERS = {
     travelsWithPlayer: true,
     radius: 2.45,
     portrait: '/portraits/syms_covington.jpg',
-    opener: '“I have the labels and twine ready, sir. What is wanted?”',
+    opener: '“I have the collecting case ready, sir. What is wanted?”',
     suggestedReplies: [
       'What have you noticed here?',
       'Let us review the specimens we have gathered.',
@@ -93,14 +93,14 @@ export function getNpcEncounterPresentation(npcId, relation = {}) {
   if (flags.has('offered_practical_help')) {
     return {
       ...encounter,
-      opener: '“I have put the labels, twine, and spare paper where you can reach them, sir. What shall we make of the day?”',
+      opener: '“I have put the collecting things where you can reach them, sir. What shall we make of the day?”',
       suggestedReplies: ['What work needs doing next?', 'Let us review the specimens we have gathered.'],
     };
   }
   if (flags.has('discussed_specimens') || trust >= 60) {
     return {
       ...encounter,
-      opener: '“The specimen case is in better order than yesterday, sir. I have been thinking about the labels.”',
+      opener: '“The specimen case is in better order than yesterday, sir. I have been thinking about the specimens.”',
       suggestedReplies: ['What have you noticed about the specimens?', 'What work needs doing next?'],
     };
   }
@@ -141,7 +141,7 @@ export function getNearestNpcEncounter(zoneId, position) {
 export function encounterAmbientLine(npcId, event = 'nearby', relation = {}) {
   const encounter = getNpcEncounter(npcId);
   if (npcId === 'syms_covington' && event === 'nearby' && (relation.flags || []).includes('offered_practical_help')) {
-    return 'Syms has already laid out twine and labels beside the collecting case, anticipating the next task.';
+    return 'Syms has already made the collecting case ready, anticipating the next task.';
   }
   return encounter?.ambient?.[event] || null;
 }
@@ -202,7 +202,7 @@ export function getAuthoredNpcReply(npcId, playerInput, context = {}) {
   }
   if (input.includes('work') || input.includes('next')) {
     return {
-      dialogue: '“The labels and collecting paper are ready. I should take the higher ground slowly and mark the place of anything unfamiliar before disturbing it.”',
+      dialogue: '“The collecting case is ready. I should take the higher ground slowly and mark the place of anything unfamiliar before disturbing it.”',
       trustDelta: 1,
       flags: ['offered_practical_help'],
     };

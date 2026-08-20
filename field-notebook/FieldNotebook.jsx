@@ -668,7 +668,20 @@ function InventoryPanel({ onClose }) {
 }
 
 export function FieldNotebook({ panel, onClose, onOpenMap }) {
-  if (panel === 'journal') return <JournalPanel onClose={onClose} onOpenMap={onOpenMap} />;
-  if (panel === 'inventory') return <InventoryPanel onClose={onClose} />;
+  // Escape is handled in capture phase by the shared modal hook. If that
+  // closes a focused journal textarea, the DOM node is removed without a blur
+  // event and the module-level typing flag would otherwise stay true forever.
+  // Clear synchronously on every close path and defensively whenever the panel
+  // becomes inactive.
+  useEffect(() => {
+    if (!panel) setTypingMode(false);
+    return () => setTypingMode(false);
+  }, [panel]);
+  const close = () => {
+    setTypingMode(false);
+    onClose?.();
+  };
+  if (panel === 'journal') return <JournalPanel onClose={close} onOpenMap={onOpenMap} />;
+  if (panel === 'inventory') return <InventoryPanel onClose={close} />;
   return null;
 }

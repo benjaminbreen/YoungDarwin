@@ -9,7 +9,7 @@ import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import { ContactShadow } from '../scene/ContactShadow';
 import { stabilizeFoliageMaterial } from './materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../scene/cameraCull';
-import { cachedGpuResource } from '../../world/gpuResourceCache';
+import { cachedGpuResource, retainGpuResource } from '../../world/gpuResourceCache';
 import { useTrackedGLTF } from './gltfCachePolicy';
 
 const scratchWorldPosition = new THREE.Vector3();
@@ -73,6 +73,7 @@ function prepareScene(scene, options = {}) {
   const proceduralMap = options.textureStyle === 'goatCoat'
     ? makeGoatCoatTexture(options.tint || '#c8b99b', options.patchTint || '#5a4735', options.textureSeed || 1)
     : null;
+  const releases = [];
   scene.traverse(object => {
     if (!object.isMesh) return;
     object.frustumCulled = options.frustumCulled !== false;
@@ -81,11 +82,16 @@ function prepareScene(scene, options = {}) {
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
     // scene.clone(true) shares material and geometry references with the
     // source, so these uuids identify the authored pair, not this instance.
-    const materials = sourceMaterials.map(source => cachedGpuResource(
-      `static-glb-material:${optionsKey}:${source?.uuid || 'none'}:${object.geometry?.uuid || 'none'}`,
-      () => prepareMaterial(source, object, { options, tint, proceduralMap }),
-      { dispose: material => material.dispose() },
-    ));
+    const materials = sourceMaterials.map(source => {
+      const key = `static-glb-material:${optionsKey}:${source?.uuid || 'none'}:${object.geometry?.uuid || 'none'}`;
+      const material = cachedGpuResource(
+        key,
+        () => prepareMaterial(source, object, { options, tint, proceduralMap }),
+        { dispose: value => value.dispose() },
+      );
+      releases.push(retainGpuResource(key));
+      return material;
+    });
     materials.forEach(material => {
       if (!material) return;
       // Object-level consequences of the material stay per-object: two props
@@ -98,6 +104,7 @@ function prepareScene(scene, options = {}) {
     });
     object.material = Array.isArray(object.material) ? materials : materials[0];
   });
+  return () => releases.forEach(release => release());
 }
 
 function prepareMaterial(source, object, { options, tint, proceduralMap }) {
@@ -181,7 +188,7 @@ function StaticGLBPrimitive({
   }), [path, sourceId, sourceKind, sourceLabel]);
 
   useEffect(() => {
-    prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy, path });
+    return prepareScene(clone, { tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy, path });
   }, [clone, path, tint, tintStrength, patchTint, textureSeed, textureStyle, doubleSide, forceTint, castShadow, receiveShadow, preserveMaterials, frustumCulled, motion, anisotropy]);
 
   return (

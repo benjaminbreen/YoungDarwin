@@ -78,16 +78,6 @@ export const collectionTools = [
     usage: 'Essential for capturing delicate flying insects without damage'
   },
   { 
-    id: 'snare', 
-    name: 'Snare', 
-    description: 'A looped snare used to catch lizards and other small reptiles.', 
-    detailedDescription: 'A simple but effective trap with a loop that tightens when triggered.',
-    action: 'snared', 
-    icon: '🔗',
-    image: '/tools/snare.jpg',
-    usage: 'Best for capturing elusive reptiles and small mammals without injury'
-  },
-  { 
     id: 'hammer', 
     name: 'Geologist’s Hammer & Chisel', 
     description: 'A hammer and chisel for breaking rocks and extracting fossils.', 

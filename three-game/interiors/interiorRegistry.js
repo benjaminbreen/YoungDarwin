@@ -192,8 +192,11 @@ const INTERIORS = {
         },
       ],
       lamps: [
-        { id: 'captain-port', position: [-3.8, 2.4, -5.8], color: '#ff9142', dayIntensity: 0.3, nightIntensity: 8.2, distance: 5.2, decay: 2, castShadow: true },
-        { id: 'captain-starboard', position: [3.25, 2.4, -3.6], color: '#ffad58', dayIntensity: 0.27, nightIntensity: 7.55, distance: 5.0, decay: 2, castShadow: true },
+        // Point-light shadows render six cubemap faces each. The cabin already
+        // has two authored shadow-casting portal lights, so these practicals
+        // keep their warmth without adding twelve full cabin shadow passes.
+        { id: 'captain-port', position: [-3.8, 2.4, -5.8], color: '#ff9142', dayIntensity: 0.3, nightIntensity: 8.2, distance: 5.2, decay: 2, castShadow: false },
+        { id: 'captain-starboard', position: [3.25, 2.4, -3.6], color: '#ffad58', dayIntensity: 0.27, nightIntensity: 7.55, distance: 5.0, decay: 2, castShadow: false },
         { id: 'library-port', position: [-3.4, 2.4, 6.2], color: '#ff9546', dayIntensity: 0.29, nightIntensity: 7.8, distance: 5.0, decay: 2.05, castShadow: false },
         { id: 'library-starboard', position: [2.2, 2.4, 5.4], color: '#ffb05d', dayIntensity: 0.25, nightIntensity: 7.35, distance: 4.8, decay: 2.05, castShadow: false },
       ],

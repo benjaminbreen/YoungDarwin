@@ -8,6 +8,7 @@ import { readQualityPreference, writeQualityPreference } from '../qualityPrefere
 import { getPlayerPreferences, setPlayerPreferences } from '../playerPreferences';
 import { readSessionSnapshot, summarizeSessionSnapshot } from '../sessionSave';
 import { getRegionDisplayName } from '../../game-core/regionMaps';
+import { ThreeGameErrorBoundary } from './ThreeGameErrorBoundary';
 
 // Mirrors AUDIO_PREFERENCE_KEY in ThreeDarwinGame so the launch menu and the
 // runtime read and write the same stored choice.
@@ -140,14 +141,16 @@ export function ThreeLaunchShell({ initialModeId = null }) {
 
   if (runtimeModeId) {
     return (
-      <ThreeDarwinGame
-        key={`${multiplayerSession?.roomCode || 'solo'}:${runtimeModeId}`}
-        initialModeId={runtimeModeId}
-        multiplayerSession={multiplayerSession}
-        resumeSnapshot={resumeSnapshot}
-        openJournalOnLaunch={openJournalOnLaunch}
-        onExitToMenu={exitToMenu}
-      />
+      <ThreeGameErrorBoundary onReturnToMenu={exitToMenu}>
+        <ThreeDarwinGame
+          key={`${multiplayerSession?.roomCode || 'solo'}:${runtimeModeId}`}
+          initialModeId={runtimeModeId}
+          multiplayerSession={multiplayerSession}
+          resumeSnapshot={resumeSnapshot}
+          openJournalOnLaunch={openJournalOnLaunch}
+          onExitToMenu={exitToMenu}
+        />
+      </ThreeGameErrorBoundary>
     );
   }
 

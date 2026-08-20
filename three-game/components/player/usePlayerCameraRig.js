@@ -12,6 +12,13 @@ import {
   resolveSpecimenFrameHint,
 } from '../../world/specimenRuntime';
 import { examineOrbitActive } from '../../examine/examinables';
+import { sunDirection } from '../../world/celestial';
+import {
+  consumeExamineCameraDirective,
+  consumeExamineCameraImpulse,
+  consumeExamineStrike,
+} from '../../examine/examineCameraDirectives';
+import { emitPropEvent } from '../../physics/props/propEvents';
 import { cameraFocusPoint } from '../../camera/focusPoint';
 import { CAMERA_DEV_DEFAULTS, cameraDev } from '../../camera/cameraDevRuntime';
 
@@ -95,6 +102,8 @@ export function usePlayerCameraRig() {
     zoom: 1,
     manualUntil: 0,
     openingYawPending: false,
+    directive: null,
+    impulse: 0,
   });
   const shoulderPivotRef = useRef(null);
   const swimCameraRef = useRef(0);
@@ -249,6 +258,7 @@ export function usePlayerCameraRig() {
         lastPointerXRef.current = event.clientX;
         lastPointerYRef.current = event.clientY;
         examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
+        examineOrbitRef.current.directive = null;
         element.setPointerCapture?.(event.pointerId);
         element.style.cursor = 'grabbing';
         return;
@@ -354,12 +364,16 @@ export function usePlayerCameraRig() {
       const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
       const examineSession = useThreeGameStore.getState().examineSession;
       if (examineOrbitActive(examineSession)) {
+        // A procedure move may park the zoom below the manual floor (macro
+        // texture inspection); let the wheel back out of it continuously
+        // instead of snapping up to the floor on the first notch.
         examineOrbitRef.current.zoom = THREE.MathUtils.clamp(
           examineOrbitRef.current.zoom + normalizedDelta * 0.1,
-          0.72,
+          Math.min(0.72, examineOrbitRef.current.zoom),
           1.7,
         );
         examineOrbitRef.current.manualUntil = performance.now() / 1000 + 6;
+        examineOrbitRef.current.directive = null;
         return;
       }
       if (examineSession) return;
@@ -770,6 +784,54 @@ export function usePlayerCameraRig() {
         orbit.zoom = 1;
         orbit.manualUntil = now + 1.8;
         orbit.openingYawPending = true;
+        orbit.directive = null;
+        orbit.impulse = 0;
+      }
+      const requestedDirective = consumeExamineCameraDirective();
+      if (requestedDirective && !draggingRef.current) {
+        let yawTarget = Number.isFinite(requestedDirective.yawDelta)
+          ? orbit.yaw + requestedDirective.yawDelta
+          : null;
+        if (requestedDirective.faceSun) {
+          // Swing toward the sun-lit face so a texture macro lands on legible
+          // surface, capped so the move never disorients by circling the
+          // subject. At night keep the plain yawDelta.
+          const sun = sunDirection(examineSession.timeOfDay, examineSession.day);
+          if (sun[1] > 0.08) {
+            const sunYaw = Math.atan2(sun[0], sun[2]);
+            const wrapped = Math.atan2(Math.sin(sunYaw - orbit.yaw), Math.cos(sunYaw - orbit.yaw));
+            yawTarget = orbit.yaw + THREE.MathUtils.clamp(wrapped, -1.2, 1.2);
+          }
+        }
+        orbit.directive = {
+          zoom: Number.isFinite(requestedDirective.zoom) ? requestedDirective.zoom : null,
+          pitch: Number.isFinite(requestedDirective.pitch)
+            ? THREE.MathUtils.clamp(requestedDirective.pitch, -0.85, 1.32)
+            : null,
+          yawTarget,
+        };
+        // Hold the idle drift at the new framing; a drag or wheel cancels
+        // both the move and the hold through the input handlers above.
+        orbit.manualUntil = now + (requestedDirective.holdSeconds || 4);
+      }
+      orbit.impulse = Math.max(orbit.impulse || 0, consumeExamineCameraImpulse());
+      if (orbit.directive) {
+        const directiveEase = 1 - Math.exp(-2.6 * delta);
+        const move = orbit.directive;
+        let remaining = 0;
+        if (move.zoom !== null) {
+          orbit.zoom += (move.zoom - orbit.zoom) * directiveEase;
+          remaining = Math.max(remaining, Math.abs(move.zoom - orbit.zoom));
+        }
+        if (move.pitch !== null) {
+          orbit.pitch += (move.pitch - orbit.pitch) * directiveEase;
+          remaining = Math.max(remaining, Math.abs(move.pitch - orbit.pitch));
+        }
+        if (move.yawTarget !== null) {
+          orbit.yaw += (move.yawTarget - orbit.yaw) * directiveEase;
+          remaining = Math.max(remaining, Math.abs(move.yawTarget - orbit.yaw));
+        }
+        if (remaining < 0.004) orbit.directive = null;
       }
       if (!draggingRef.current && now >= orbit.manualUntil) {
         orbit.yaw += delta * 0.045;
@@ -800,7 +862,11 @@ export function usePlayerCameraRig() {
         halfWidth / Math.max(0.08, Math.tan(horizontalFov / 2)),
         halfHeight / Math.max(0.08, Math.tan(verticalFov / 2)),
       ) * frameMultiplier;
-      const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, 0.16, 14);
+      // The zoom floor is the subject's own bulk: a procedure macro (or any
+      // future zoom source) must stop at the surface, not dolly through a
+      // boulder and frame whatever stood behind it.
+      const minSurfaceDistance = Math.max(0.16, halfWidth * 1.15 + 0.1);
+      const distance = THREE.MathUtils.clamp(fitDistance * orbit.zoom, minSurfaceDistance, 14);
       const groundClearance = THREE.MathUtils.clamp(halfHeight * 0.55, 0.055, 0.34);
       if (orbit.openingYawPending) {
         const preferredYaw = orbit.yaw;
@@ -833,6 +899,34 @@ export function usePlayerCameraRig() {
       // hillside as the automatic orbit crosses the uphill side.
       const eyeGroundY = collisionAdapter.terrainHeight(eye.x, eye.z);
       eye.y = Math.max(eye.y, eyeGroundY + groundClearance, focusY + groundClearance);
+      const strike = consumeExamineStrike();
+      if (strike) {
+        // Place the burst on the camera-facing surface (subject center pushed
+        // out along the eye ray by the framing radius); at the center itself
+        // it would spawn inside the mesh and never be seen.
+        const toEye = scratch.worldDirection.copy(eye).sub(center).normalize();
+        emitPropEvent('prop-struck', {
+          dustCount: 12,
+          sparkCount: 3,
+          ...strike,
+          position: {
+            x: center.x + toEye.x * halfWidth * 0.92,
+            y: center.y + toEye.y * halfWidth * 0.92,
+            z: center.z + toEye.z * halfWidth * 0.92,
+          },
+          impactDir: { x: toEye.x, y: 0.2, z: toEye.z },
+        });
+      }
+      // Strike nudge: a small decaying wobble when a surface test lands.
+      // Distance-scaled so a macro shot and a boulder-wide shot read alike.
+      if (orbit.impulse > 0.001) {
+        const wobble = Math.sin(orbit.impulse * 24) * orbit.impulse * orbit.impulse;
+        const shakeAmp = Math.min(0.05, 0.014 * distance);
+        eye.y += wobble * shakeAmp;
+        eye.x += Math.cos(orbit.impulse * 31) * orbit.impulse * shakeAmp * 0.5 * Math.cos(orbit.yaw);
+        eye.z -= Math.cos(orbit.impulse * 31) * orbit.impulse * shakeAmp * 0.5 * Math.sin(orbit.yaw);
+        orbit.impulse = Math.max(0, orbit.impulse - delta * 2.6);
+      }
       // Compact portrait puts the notebook in a bottom sheet; center the
       // subject in the visible band above it, not the canvas the sheet hides.
       // The sheet's height is measured from the rendered notebook so a

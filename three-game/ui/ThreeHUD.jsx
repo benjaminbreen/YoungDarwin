@@ -11,7 +11,7 @@ import {
   triggerToolUse,
 } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
-import { getRuntimePlayerPose, useThreeGameStore } from '../store';
+import { getFieldDilemma, getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { EXPEDITION_DAYS, expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { isEndGameNarratorCommand } from '../finalAssessment';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
@@ -70,9 +70,12 @@ import { useTerrainChart } from './expedition/TerrainMinimap';
 import { GalapagosGlobe } from './expedition/GalapagosGlobe';
 import { InventoryModal } from './expedition/InventoryModal';
 import { CollectionCelebration, celebrationVisibleMs } from './CollectionCelebration';
+import { FieldDilemmaModal } from './FieldDilemmaModal';
+import { CaseFullModal } from './CaseFullModal';
 import { NightlyDebriefModal } from './NightlyDebriefModal';
-import { rarityForValue } from '../rarity';
+import { getSpecimenRarity, rarityForValue } from '../rarity';
 import { RarityBadge } from './RarityBadge';
+import { SpecimenPortrait } from './SpecimenPortrait';
 import { playSightingSting } from '../audio/audioRuntime';
 import { useZoneSpecimenProgress } from './useZoneSpecimenProgress';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
@@ -86,7 +89,7 @@ import {
 } from './expedition/map/islandLocations';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { getNpcPoses } from '../world/npcRuntime';
-import { getInteriorDefinition } from '../interiors/interiorRegistry';
+import { getInteriorDefinition, getInteriorTransitions } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
 import { normalizeWeatherState } from '../world/weatherStates';
@@ -97,6 +100,22 @@ import {
   getPlayableActionItem,
   getPlayableMode,
 } from '../playable/playableModes';
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    if (media.addEventListener) media.addEventListener('change', update);
+    else media.addListener?.(update);
+    return () => {
+      if (media.removeEventListener) media.removeEventListener('change', update);
+      else media.removeListener?.(update);
+    };
+  }, [query]);
+  return matches;
+}
 
 const MINIMAP_TRAIL_MS = 15000;
 const MINIMAP_TRAIL_MAX_POINTS = 34;
@@ -303,23 +322,10 @@ const FIELD_DAY_END_HOUR = 18;
 
 // A two-hour halt against a three-day survey is the largest single expense in
 // the game. The button has to say what it costs before it is pressed.
-function restCostHint(timeOfDay, supplies = {}) {
-  const hour = ((Number(timeOfDay) || 0) % 24 + 24) % 24;
-  const provisioned = (supplies.food || 0) > 0 && (supplies.water || 0) > 0;
-  let remaining;
-  if (hour < FIELD_DAY_START_HOUR) {
-    remaining = 'It is not light yet.';
-  } else if (hour >= FIELD_DAY_END_HOUR) {
-    remaining = 'The light has gone for the day.';
-  } else {
-    const daylight = FIELD_DAY_END_HOUR - hour;
-    remaining = daylight < 1
-      ? 'Under an hour of light left.'
-      : `About ${Math.round(daylight)} hour${Math.round(daylight) === 1 ? '' : 's'} of light left.`;
-  }
-  return provisioned
-    ? `Rest two hours. ${remaining} Costs one ration and one flask.`
-    : `Rest two hours. ${remaining} No food or water left — the halt will do little good.`;
+function restCostHint(supplies) {
+  return (supplies?.provisions || 0) > 0
+    ? 'Costs one provision.'
+    : 'No provisions left — the halt will do little good.';
 }
 
 // Banner shows the objective sentence itself; the "Quest:" prefix is implied
@@ -651,7 +657,7 @@ function ShipDutiesPrompt() {
               ? `This is the last day of the survey. Hand down ${cased} specimen${cased === 1 ? '' : 's'} and the Beagle sails for the next island.`
               : 'This is the last day of the survey. The case is empty, and the Beagle sails for the next island.')
             : (cased > 0
-              ? `Hand down ${cased} specimen${cased === 1 ? '' : 's'} to be struck below, draw fresh labels, jars, twine and provisions, and pass the night aboard.`
+              ? `Hand down ${cased} specimen${cased === 1 ? '' : 's'} to be struck below, draw fresh provisions, and pass the night aboard.`
               : 'The case is empty. Draw fresh stores from the hold and pass the night aboard.')}
         </p>
 
@@ -1149,10 +1155,179 @@ function PolishedStatRow({ icon: Icon, label, value, fill }) {
   );
 }
 
-function PolishedVitalStatusPanel() {
+const CASE_TOOLTIP_RARITY_INK = Object.freeze({
+  common: '#526840',
+  notable: '#246f7d',
+  remarkable: '#76529a',
+  singular: '#845d12',
+});
+
+const CASE_TALLY_SPARKS = Object.freeze([
+  ['-11px', '-10px'],
+  ['0px', '-15px'],
+  ['11px', '-10px'],
+  ['14px', '1px'],
+  ['-14px', '2px'],
+  ['7px', '12px'],
+  ['-7px', '12px'],
+]);
+
+function specimenCollectionArea(specimen, journal) {
+  if (specimen?.sourceZoneId) {
+    const zone = getZone(specimen.sourceZoneId);
+    if (zone?.id === specimen.sourceZoneId) return zone.shortName || zone.name;
+  }
+  if (specimen?.sourceZoneName) return specimen.sourceZoneName;
+  for (let index = (journal?.length || 0) - 1; index >= 0; index -= 1) {
+    const entry = journal[index];
+    if (entry?.specimenId === specimen?.id && entry.method !== 'released' && entry.location) {
+      return entry.location;
+    }
+  }
+  return 'Locality not recorded';
+}
+
+function SpecimenCaseTally({ inventory, caseCapacity, onOpenCase }) {
+  const journal = useThreeGameStore(state => state.journal);
+  const openSpecimenDetail = useThreeGameStore(state => state.openSpecimenDetail);
+  const lightweightEffects = useThreeGameStore(state => Number(state.foliageDrawScale) <= 0.76);
+  const previousCountRef = useRef(inventory.length);
+  const [arrival, setArrival] = useState(null);
+
+  useEffect(() => {
+    const previousCount = previousCountRef.current;
+    previousCountRef.current = inventory.length;
+    if (inventory.length <= previousCount) return undefined;
+    const nextArrival = { index: inventory.length - 1, key: Date.now() };
+    setArrival(nextArrival);
+    const timer = window.setTimeout(() => setArrival(current => (
+      current?.key === nextArrival.key ? null : current
+    )), 1350);
+    return () => window.clearTimeout(timer);
+  }, [inventory.length]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onOpenCase}
+        aria-label={`Open specimen case, ${inventory.length} of ${caseCapacity} slots filled`}
+        className="group mb-1 flex w-full items-center justify-between gap-2 rounded-[3px] text-left transition hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+      >
+        <span className="flex items-center gap-1 text-[8.5px] font-semibold uppercase tracking-[0.16em] text-expedition-faded transition-colors group-hover:text-expedition-goldbright">
+          <ButterflyIcon className="h-3 w-3 text-expedition-gold/85" />
+          Specimen case
+        </span>
+        <span className="text-[10px] font-semibold tabular-nums text-expedition-parchment/90">
+          {inventory.length}<span className="text-expedition-brass/70"> / </span>{caseCapacity}
+        </span>
+      </button>
+      <div
+        className="flex items-center justify-end gap-[3px]"
+        aria-label={`Specimen case: ${inventory.length} of ${caseCapacity} slots filled`}
+      >
+        {Array.from({ length: caseCapacity }, (_, slotIndex) => {
+          const specimen = inventory[slotIndex] || null;
+          if (!specimen) {
+            return (
+              <span key={`empty-${slotIndex}`} aria-hidden="true" className="grid h-[14px] w-[14px] place-items-center">
+                <span className="h-[8px] w-[8px] rotate-45 border border-expedition-brass/55 bg-black/10 shadow-[inset_0_0_3px_rgba(0,0,0,0.5)]" />
+              </span>
+            );
+          }
+          const rarity = getSpecimenRarity(specimen);
+          const locality = specimenCollectionArea(specimen, journal);
+          const isNew = arrival?.index === slotIndex;
+          const tooltipOnLeft = slotIndex < Math.ceil(caseCapacity / 2);
+          const tooltipId = `case-specimen-${slotIndex}`;
+          return (
+            <button
+              key={`${specimen.instanceId || specimen.id}-${slotIndex}`}
+              type="button"
+              onClick={() => openSpecimenDetail(inventory, slotIndex)}
+              aria-label={`${specimen.name}, ${rarity.label.toLowerCase()} specimen, collected at ${locality}`}
+              aria-describedby={tooltipId}
+              className="group/specimen relative z-10 grid h-[14px] w-[14px] place-items-center rounded-sm focus:outline-none focus-visible:z-50 focus-visible:ring-1 focus-visible:ring-expedition-goldbright/90 hover:z-50"
+            >
+              <span
+                key={isNew ? `new-${arrival.key}` : 'settled'}
+                aria-hidden="true"
+                className={`h-[8px] w-[8px] rotate-45 border ${isNew ? 'animate-case-tally-fill motion-reduce:animate-none' : ''}`}
+                style={{
+                  background: rarity.color,
+                  borderColor: rarity.ring,
+                  boxShadow: `0 0 5px ${rarity.glow}, inset 0 1px 0 rgba(255,255,255,0.32)`,
+                  '--case-tally-color': rarity.color,
+                  '--case-tally-glow': rarity.glow,
+                }}
+              />
+              {isNew && !lightweightEffects && CASE_TALLY_SPARKS.map(([x, y], sparkIndex) => (
+                <span
+                  key={`${arrival.key}-${sparkIndex}`}
+                  aria-hidden="true"
+                  className="case-tally-spark motion-reduce:hidden"
+                  style={{
+                    '--case-spark-x': x,
+                    '--case-spark-y': y,
+                    '--case-spark-color': rarity.color,
+                    animationDelay: `${sparkIndex * 28}ms`,
+                  }}
+                />
+              ))}
+              <span
+                id={tooltipId}
+                role="tooltip"
+                className={`pointer-events-none invisible absolute top-[calc(100%+0.65rem)] z-[100] w-[15.5rem] translate-y-1 rounded-[5px] border border-[#8f7040]/75 bg-[linear-gradient(145deg,#f3e7c9,#dfcda8)] p-2.5 text-left text-[#2d2114] opacity-0 shadow-[0_16px_34px_rgba(4,8,14,0.42),inset_0_1px_0_rgba(255,255,255,0.7)] transition duration-150 group-hover/specimen:visible group-hover/specimen:translate-y-0 group-hover/specimen:opacity-100 group-focus-visible/specimen:visible group-focus-visible/specimen:translate-y-0 group-focus-visible/specimen:opacity-100 ${tooltipOnLeft ? 'left-[-0.35rem]' : 'right-[-0.35rem]'}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`absolute -top-[5px] h-[9px] w-[9px] rotate-45 border-l border-t border-[#8f7040]/75 bg-[#f1e4c5] ${tooltipOnLeft ? 'left-[0.45rem]' : 'right-[0.45rem]'}`}
+                />
+                <span className="flex items-center gap-2.5">
+                  <SpecimenPortrait specimen={specimen} rarity={rarity} size="h-12 w-12" glow={7} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-expedition text-[13px] font-bold leading-tight tracking-[0.02em] text-[#241a10]">
+                      {specimen.name}
+                    </span>
+                    {specimen.latin && (
+                      <span className="mt-0.5 block truncate font-expedition text-[10.5px] italic text-[#675238]">
+                        {specimen.latin}
+                      </span>
+                    )}
+                    <span
+                      className="mt-1 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-sans text-[8px] font-bold uppercase tracking-[0.13em]"
+                      style={{
+                        color: CASE_TOOLTIP_RARITY_INK[rarity.id] || '#604b2e',
+                        borderColor: rarity.ring,
+                        background: `${rarity.color}1f`,
+                      }}
+                    >
+                      <span className="h-1 w-1 rotate-45" style={{ background: rarity.color }} />
+                      {rarity.label}
+                    </span>
+                  </span>
+                </span>
+                <span className="mt-2 flex items-center gap-1.5 border-t border-[#8f7040]/30 pt-1.5 font-sans text-[9px] leading-tight text-[#57442d]">
+                  <MapIcon className="h-3 w-3 shrink-0 text-[#806331]" />
+                  <span className="font-bold uppercase tracking-[0.12em] text-[#74592d]">Locality</span>
+                  <span className="text-[#9b7d4d]">·</span>
+                  <span className="min-w-0 truncate font-semibold">{locality}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PolishedVitalStatusPanel({ onOpenCase }) {
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
-  const curiosity = useThreeGameStore(state => state.curiosity);
+  const provisions = useThreeGameStore(state => state.supplies?.provisions || 0);
+  const inventory = useThreeGameStore(state => state.inventory);
+  const caseCapacity = useThreeGameStore(state => state.caseCapacity);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const animalModeNpcEncounter = useThreeGameStore(state => state.animalModeNpcEncounter);
   const openStatusView = useThreeGameStore(state => state.openStatusView);
@@ -1161,7 +1336,7 @@ function PolishedVitalStatusPanel() {
   const energy = Math.max(0, Math.min(100, 100 - fatigue));
   const awareness = animalMode
     ? animalAwarenessValue(playableMode.id, animalRisk(animalModeNpcEncounter, playableMode.id))
-    : curiosity;
+    : 0;
   const displayName = animalMode ? playableMode.label : 'Charles Darwin';
   // Only worth a word when it is not the default: "Steady" is the state the
   // three bars underneath already describe. The two fatigue words are the
@@ -1182,7 +1357,7 @@ function PolishedVitalStatusPanel() {
 
   return (
     <div className="pointer-events-auto">
-      <ExpeditionPanel className="w-[17.5rem]" innerClassName="px-3.5 pb-3 pt-2.5">
+      <ExpeditionPanel className="w-[18rem]" innerClassName="px-3.5 pb-3 pt-2.5">
         <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-expedition-brass/30 pb-2">
           <button
             type="button"
@@ -1201,13 +1376,30 @@ function PolishedVitalStatusPanel() {
           )}
           <CameraModeButton />
         </div>
-        <button type="button" {...statusProps} className="block w-full text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70">
-          <div className="grid gap-2">
+        <div className="grid gap-2">
+          <button type="button" {...statusProps} className="block w-full text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70">
+            <span className="grid gap-2">
             <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
             <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
-            <PolishedStatRow icon={CuriosityIcon} label={animalMode ? (playableMode.id === 'tortoise' ? 'Composure' : 'Alertness') : 'Curiosity'} value={awareness} fill={vitalsGradient('curiosity')} />
-          </div>
-        </button>
+            {animalMode && (
+              <PolishedStatRow icon={CuriosityIcon} label={playableMode.id === 'tortoise' ? 'Composure' : 'Alertness'} value={awareness} fill={vitalsGradient('curiosity')} />
+            )}
+            </span>
+          </button>
+          {!animalMode && (
+            <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-end gap-2 border-t border-expedition-brass/25 pt-2">
+              <button
+                type="button"
+                {...statusProps}
+                className="rounded-[3px] pb-px text-left transition hover:bg-expedition-gold/8 hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+              >
+                <span className="block text-[8.5px] font-semibold uppercase tracking-[0.16em] text-expedition-faded">Provisions</span>
+                <span className="mt-0.5 block font-expedition text-[14px] font-semibold leading-none text-expedition-goldbright">×{provisions}</span>
+              </button>
+              <SpecimenCaseTally inventory={inventory} caseCapacity={caseCapacity} onOpenCase={onOpenCase} />
+            </div>
+          )}
+        </div>
       </ExpeditionPanel>
     </div>
   );
@@ -1770,8 +1962,15 @@ function MinimapBody({
   const [showKnown, setShowKnown] = useState(true);
   const [showNew, setShowNew] = useState(true);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const transitionActive = useThreeGameStore(state => Boolean(state.transition));
+  const interiorExitBlocked = useThreeGameStore(state => Boolean(
+    state.activeConstraint?.movementLock
+    || state.activeConstraint?.type === 'snare_immobilized'
+  ));
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
+  const interiorExit = interior ? getInteriorTransitions(currentZoneId)[0] || null : null;
   const chartUrl = useTerrainChart(zone, mapStyle);
   const chartWidth = zone.terrainWidth || zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
   const chartDepth = zone.terrainDepth || zone.terrainSize || chartWidth;
@@ -1780,20 +1979,91 @@ function MinimapBody({
   const surveyStyle = mapStyle === 'survey';
 
   if (interior) {
+    const quickExitLabel = interior.kind === 'ship-interior'
+      ? 'Go up to the weather deck'
+      : 'Leave the house';
+    const quickExitDisabled = transitionActive || interiorExitBlocked;
+    const beginInteriorExit = () => {
+      if (!interiorExit || quickExitDisabled) return;
+      beginZoneTransition(interiorExit.toRegionId, {
+        entryEdge: interiorExit.entryEdge || null,
+        note: interiorExit.description,
+        source: 'interior-chart',
+        mode: 'threshold',
+        localTransition: true,
+        minutes: 0,
+        fatigue: 0,
+      });
+    };
     return (
       <>
+        <PanelTabs
+          className={tabsClassName}
+          tabs={views.map(id => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }))}
+          active={view}
+          onSelect={setView}
+          quiet={quietTabs}
+        />
         {showLocationHeader && (
           <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-1.5">
             <div className="min-w-0 truncate font-expedition text-[13px] font-medium tracking-wide text-expedition-parchment">{interior.label}</div>
-            <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-expedition-gold/75">{interior.blueprint?.map?.planLabel || 'Interior plan'}</span>
+            <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-expedition-gold/75">
+              {view === 'local'
+                ? interior.blueprint?.map?.planLabel || 'Interior plan'
+                : view === 'globe' ? 'Galápagos' : 'Island chart'}
+            </span>
           </div>
         )}
-        <div
-          className={`relative overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#d8c89e] shadow-[inset_0_0_18px_rgba(0,0,0,0.4)] ${mapHeight ? '' : 'aspect-square'}`}
-          style={mapHeight ? { height: `${mapHeight}px` } : undefined}
-        >
-          <InteriorFloorPlan definition={interior} />
-        </div>
+        {view === 'local' ? (
+          <div
+            className={`relative overflow-hidden rounded-sm border border-expedition-gold/65 bg-[#d8c89e] shadow-[inset_0_0_18px_rgba(0,0,0,0.4)] ${mapHeight ? '' : 'aspect-square'}`}
+            style={mapHeight ? { height: `${mapHeight}px` } : undefined}
+          >
+            <InteriorFloorPlan definition={interior} />
+          </div>
+        ) : (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={onOpenMap}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') onOpenMap();
+            }}
+            title="Open full island map"
+            aria-label="Open full island map"
+            className={`relative cursor-pointer overflow-hidden rounded-sm border border-expedition-gold/65 bg-[rgba(9,16,30,0.72)] shadow-[inset_0_0_18px_rgba(0,0,0,0.55)] transition hover:border-expedition-goldbright focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${mapHeight ? '' : 'aspect-square'}`}
+            style={mapHeight ? { height: `${mapHeight}px` } : undefined}
+          >
+            {view === 'globe' ? (
+              <GalapagosGlobe />
+            ) : (
+              <IslandOverview
+                zoneId={currentZoneId}
+                zoneName={interior.label}
+                polished={polishedIsland}
+              />
+            )}
+          </div>
+        )}
+        {interiorExit && (
+          <button
+            type="button"
+            data-testid="interior-quick-exit"
+            onClick={beginInteriorExit}
+            disabled={quickExitDisabled}
+            title={interiorExitBlocked ? 'Resolve the current situation before leaving' : interiorExit.description}
+            className="mt-1.5 flex w-full items-center justify-between gap-2 rounded-sm border border-expedition-gold/65 bg-expedition-gold/12 px-2.5 py-2 text-left font-expedition text-expedition-parchment shadow-[inset_0_1px_0_rgba(227,197,133,0.12)] transition hover:border-expedition-goldbright hover:bg-expedition-gold/20 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <span className="min-w-0">
+              <span className="block text-[8px] font-semibold uppercase tracking-[0.16em] text-expedition-gold/80">Quick exit</span>
+              <span className="mt-0.5 block truncate text-[11px] font-semibold">{transitionActive ? 'Leaving…' : quickExitLabel}</span>
+            </span>
+            <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 shrink-0 text-expedition-goldbright" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3.5 3.5h7v13h-7z" />
+              <path d="M8.5 10h8M13.5 7l3 3-3 3" />
+            </svg>
+          </button>
+        )}
       </>
     );
   }
@@ -2274,7 +2544,6 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
   const narratorLog = useThreeGameStore(state => state.narratorLog);
   const narratorPending = useThreeGameStore(state => state.narratorPending);
   const narratorError = useThreeGameStore(state => state.narratorError);
-  const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const submitNarratorCommand = useThreeGameStore(state => state.submitNarratorCommand);
   const openLibrary = useThreeGameStore(state => state.openLibrary);
   // Minute-resolution clock shown on un-stamped lines. Subscribing to the
@@ -2298,18 +2567,9 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const nearby = getThreeSpecimens(currentZoneId).find(specimen => (specimen.instanceId || specimen.id) === nearbySpecimenId || specimen.id === nearbySpecimenId);
   const tool = threeTools.find(item => item.id === activeToolId);
-  const dilemmaPromptActive = Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized');
-  const composerPlaceholder = activeConstraint?.composerPlaceholder || (
-    activeConstraint?.type === 'snare_immobilized'
-      ? 'Describe how Darwin gets free...'
-      : null
-  );
-  const authoredDilemmaChoices = activeConstraint?.type === 'snare_immobilized'
-    ? ['Loosen the loop before moving.', 'Cut the cord with a field knife.', 'Call Covington for help.']
-    : ['Proceed slowly and protect the specimen.', 'Withdraw and try a safer method.'];
   const expanded = polished
-    ? forceExpanded || dilemmaPromptActive || pinned || hovered || focused || composerHasText || narratorPending
-    : forceExpanded || dilemmaPromptActive || !manualCollapsed || focused || composerHasText || narratorPending;
+    ? forceExpanded || pinned || hovered || focused || composerHasText || narratorPending
+    : forceExpanded || !manualCollapsed || focused || composerHasText || narratorPending;
   const visibleLogHeight = expanded ? logHeight : polished ? 58 : 88;
   const previewMessage = displayEntries.at(-1)?.text || '';
 
@@ -2452,18 +2712,8 @@ function NarrativePanel({ forceExpanded = false, polished = false }) {
           pending={narratorPending}
           submitNarratorCommand={submitNarratorCommand}
           onDraftActiveChange={setComposerHasText}
-          emphasized={dilemmaPromptActive}
-          placeholder={composerPlaceholder}
           polished={polished}
         />
-      ) : dilemmaPromptActive ? (
-        <div className="mt-3 grid gap-1.5 border-t border-expedition-brass/30 pt-3">
-          {authoredDilemmaChoices.map(choice => (
-            <button key={choice} type="button" onClick={() => submitNarratorCommand(choice)} className={`${GOLD_BUTTON} min-h-9 text-left normal-case tracking-normal`}>
-              {choice}
-            </button>
-          ))}
-        </div>
       ) : (
         <button type="button" onClick={() => openLibrary?.({ drawerOpen: true })} className="mt-3 flex w-full items-center justify-between border-t border-expedition-brass/30 pt-3 text-left text-[12px] uppercase tracking-[0.11em] text-expedition-gold hover:text-expedition-goldbright">
           <span>Search Darwin’s library</span><span aria-hidden="true">→</span>
@@ -2506,7 +2756,7 @@ function useSymsStatus() {
   const nearbyNpcId = useThreeGameStore(state => state.nearbyNpcEncounter?.npcId || null);
   return useMemo(() => {
     if (nearbyNpcId === 'syms_covington') {
-      return { tone: 'nearby', label: 'Nearby', detail: 'Labels and twine ready.' };
+      return { tone: 'nearby', label: 'Nearby', detail: 'The collecting case is ready.' };
     }
     if (symsZoneId === currentZoneId) {
       return symsDirective === SYMS_DIRECTIVES.FOLLOW
@@ -3115,7 +3365,7 @@ const MOVEMENT_HINT_MOVE_KEYS = new Set([
   'ArrowDown',
   'ArrowRight',
 ]);
-const COLLECTION_METHOD_IDS = ['hands', 'hammer', 'snare', 'insect_net', 'shotgun'];
+const COLLECTION_METHOD_IDS = ['hands', 'hammer', 'insect_net', 'shotgun'];
 const COLLECTION_METHOD_SET = new Set(COLLECTION_METHOD_IDS);
 const PROMPT_EXIT_MS = 220;
 const RESULT_TOAST_EXIT_MS = 280;
@@ -3134,7 +3384,7 @@ function PromptKey({ children, active = false }) {
 
 function ControlHintKey({ children }) {
   return (
-    <span className="inline-flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-[2px] border border-expedition-brass/45 bg-black/12 px-1.5 font-expedition text-[9px] font-semibold leading-none text-expedition-parchment/75">
+    <span className="inline-flex h-[1.35rem] min-w-[1.35rem] items-center justify-center rounded-[3px] border border-expedition-brass/55 bg-black/18 px-1.5 font-sans text-[11px] font-bold leading-none text-expedition-parchment/90">
       {children}
     </span>
   );
@@ -3162,83 +3412,95 @@ function PromptAction({ keyLabel, children, primary = false, onClick = null }) {
   return <div className={className}>{content}</div>;
 }
 
-
-function ControlHintDivider() {
-  return <span className="h-3.5 w-px bg-expedition-brass/30" />;
-}
-
 function controlHintContent(playableModeId, phase) {
   if (phase === 'showHud') {
-    return <><ControlHintKey>H</ControlHintKey><span>Show interface</span></>;
+    return <span>Press <ControlHintKey>H</ControlHintKey> to show the interface.</span>;
+  }
+  if (phase === 'studySubject') {
+    return (
+      <span>
+        Press <ControlHintKey>Enter</ControlHintKey> to examine this subject. After you examine it, you can collect a sample.
+      </span>
+    );
   }
   if (phase === 'complete' || phase === 'reminder') {
     return (
-      <>
-        <ControlHintKey>?</ControlHintKey><span>All controls</span>
-        <ControlHintDivider />
-        <ControlHintKey>H</ControlHintKey><span>Hide interface</span>
-      </>
+      <span>
+        Press <ControlHintKey>?</ControlHintKey> to see all controls, or <ControlHintKey>H</ControlHintKey> to hide the interface.
+      </span>
     );
   }
   if (phase === 'move') {
     return (
-      <>
-        <ControlHintKey>WASD</ControlHintKey><ControlHintKey>Arrows</ControlHintKey>
-        <span>{playableModeId === 'finch' ? 'Fly' : 'Move'}</span>
-      </>
+      <span>
+        Use <ControlHintKey>WASD</ControlHintKey> or the <ControlHintKey>Arrow keys</ControlHintKey> to {playableModeId === 'finch' ? 'fly' : 'move'}.
+      </span>
     );
   }
   if (phase === 'faster') {
     return (
-      <><ControlHintKey>Shift</ControlHintKey><span>{playableModeId === 'finch' ? 'Fly faster / dive' : playableModeId === 'tortoise' ? 'Walk faster' : 'Run'}</span></>
+      <span>
+        Hold <ControlHintKey>Shift</ControlHintKey> to {playableModeId === 'finch' ? 'fly faster or dive' : playableModeId === 'tortoise' ? 'walk faster' : 'run'}.
+      </span>
     );
   }
-  if (phase === 'jump') return <><ControlHintKey>Space</ControlHintKey><span>Jump</span></>;
-  if (phase === 'land') return <><ControlHintKey>Space</ControlHintKey><span>Land / take off</span></>;
-  if (phase === 'brace') return <><ControlHintKey>Space</ControlHintKey><span>Brace on slopes</span></>;
+  if (phase === 'jump') return <span>Press the <ControlHintKey>Space bar</ControlHintKey> to jump.</span>;
+  if (phase === 'land') return <span>Press the <ControlHintKey>Space bar</ControlHintKey> to land or take off.</span>;
+  if (phase === 'brace') return <span>Hold the <ControlHintKey>Space bar</ControlHintKey> to brace on steep slopes.</span>;
   if (phase === 'animalActions') {
     return (
-      <>
-        <ControlHintKey>1</ControlHintKey><span>Eat</span>
-        <ControlHintDivider />
-        <ControlHintKey>2</ControlHintKey><span>Sleep</span>
-        <ControlHintDivider />
-        <ControlHintKey>3</ControlHintKey><span>Defecate</span>
-        <span className="normal-case tracking-normal text-expedition-faded">or click an action</span>
-      </>
+      <span>
+        Press <ControlHintKey>1</ControlHintKey> to eat, <ControlHintKey>2</ControlHintKey> to sleep, or <ControlHintKey>3</ControlHintKey> to defecate. You can also click an action.
+      </span>
     );
   }
   if (phase === 'camera') {
     return (
-      <>
-        <ControlHintKey>Drag</ControlHintKey><span>Look</span>
-        <ControlHintDivider />
-        <ControlHintKey>Scroll</ControlHintKey><span>Zoom</span>
-      </>
+      <span>
+        <ControlHintKey>Drag</ControlHintKey> to look around, and <ControlHintKey>Scroll</ControlHintKey> to zoom.
+      </span>
     );
   }
   if (phase === 'fieldAction') {
-    return <><ControlHintKey>Enter</ControlHintKey><span>Observe / act on a subject</span></>;
+    return <span>Press <ControlHintKey>Enter</ControlHintKey> to observe or act on a subject.</span>;
   }
   if (phase === 'worldAction') {
     return (
-      <>
-        <ControlHintKey>1–6</ControlHintKey><span>Choose tool</span>
-        <ControlHintDivider />
-        <ControlHintKey>E</ControlHintKey><span>Speak / carry / travel</span>
-      </>
+      <span>
+        Press <ControlHintKey>1–6</ControlHintKey> to choose a tool. Press <ControlHintKey>E</ControlHintKey> to speak, carry, or travel.
+      </span>
     );
   }
   return null;
 }
 
-function PolishedControlHint({ playableModeId = 'darwin', hudHidden, disabled = false, ready = true }) {
+function PolishedControlHint({
+  playableModeId = 'darwin',
+  hudHidden,
+  disabled = false,
+  ready = true,
+  contextHintId = null,
+}) {
   const [phase, setPhase] = useState('move');
   const [visible, setVisible] = useState(false);
   const [attention, setAttention] = useState(false);
+  const [retainedContextHintId, setRetainedContextHintId] = useState(null);
   const progressRef = useRef(null);
   const phaseRef = useRef('move');
   const visibleRef = useRef(false);
+  const contextualHintTimerRef = useRef(0);
+
+  useEffect(() => {
+    if (contextHintId !== HINT_STUDY) return;
+    window.clearTimeout(contextualHintTimerRef.current);
+    setRetainedContextHintId(HINT_STUDY);
+    contextualHintTimerRef.current = window.setTimeout(() => {
+      setRetainedContextHintId(null);
+      contextualHintTimerRef.current = 0;
+    }, 12000);
+  }, [contextHintId]);
+
+  useEffect(() => () => window.clearTimeout(contextualHintTimerRef.current), []);
 
   useEffect(() => {
     progressRef.current = {
@@ -3395,8 +3657,12 @@ function PolishedControlHint({ playableModeId = 'darwin', hudHidden, disabled = 
     };
   }, [disabled, playableModeId, ready]);
 
-  const activePhase = hudHidden ? 'showHud' : phase;
-  const shown = !disabled && (hudHidden || visible);
+  const activePhase = hudHidden
+    ? 'showHud'
+    : retainedContextHintId === HINT_STUDY
+      ? 'studySubject'
+      : phase;
+  const shown = !disabled && (hudHidden || visible || Boolean(retainedContextHintId));
   const content = controlHintContent(playableModeId, activePhase);
 
   return (
@@ -3405,14 +3671,16 @@ function PolishedControlHint({ playableModeId = 'darwin', hudHidden, disabled = 
       data-mode={playableModeId}
       data-phase={activePhase}
       data-attention={attention ? 'true' : 'false'}
-      className={`pointer-events-none absolute bottom-4 right-5 z-30 hidden max-w-[min(34rem,calc(100vw-2.5rem))] origin-bottom-right flex-wrap items-center justify-end gap-1.5 rounded-[3px] border font-expedition uppercase tracking-[0.1em] backdrop-blur-sm transition-[opacity,transform,padding,font-size,background-color,border-color] duration-500 md:flex xl:right-[17rem] ${
+      className={`pointer-events-none absolute bottom-4 right-5 z-30 hidden w-max max-w-[min(30rem,calc(100vw-2.5rem))] flex-wrap items-center justify-end gap-1.5 rounded-[4px] border text-right font-expedition normal-case tracking-normal backdrop-blur-sm transition-[opacity,transform,padding,font-size,background-color,border-color] duration-500 md:flex lg:max-w-[min(30rem,calc(50vw-11.75rem))] xl:right-[17rem] xl:max-w-[min(30rem,calc(50vw-27.5rem))] ${
         attention
-          ? 'border-expedition-gold/75 bg-[rgba(7,14,27,0.86)] px-3.5 py-2 text-[11px] text-expedition-parchment shadow-[0_8px_24px_rgba(0,0,0,0.34),0_0_0_1px_rgba(227,197,133,0.16)] motion-safe:scale-[1.08] motion-safe:animate-control-hint-attention motion-safe:will-change-transform'
-          : 'border-expedition-brass/30 bg-[rgba(7,14,27,0.62)] px-2.5 py-1.5 text-[9.5px] text-expedition-parchment/80 shadow-[0_6px_18px_rgba(0,0,0,0.24)]'
+          ? 'border-expedition-gold/75 bg-[rgba(7,14,27,0.9)] px-3 py-2 text-[13px] leading-relaxed text-expedition-parchment shadow-[0_8px_24px_rgba(0,0,0,0.34),0_0_0_1px_rgba(227,197,133,0.16)]'
+          : 'border-expedition-brass/40 bg-[rgba(7,14,27,0.78)] px-2.5 py-1.5 text-[12px] leading-relaxed text-expedition-parchment/90 shadow-[0_6px_18px_rgba(0,0,0,0.28)]'
       } ${shown ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
       aria-live="polite"
     >
-      {content}
+      <div className="min-w-0 text-right">
+        {content}
+      </div>
     </div>
   );
 }
@@ -3595,7 +3863,6 @@ const HINT_SKETCH = 'verb-sketch';
 const HINT_EXAMINE = 'first-examine';
 const HINT_TEXT = {
   [HINT_TAKE]: 'E takes what is already loose.',
-  [HINT_STUDY]: 'Enter studies a subject first; study it once and you may take a sample.',
   [HINT_NPC]: 'You speak in your own words. What you ask shapes the reply.',
   [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
   [HINT_EXAMINE]: 'Enter examines a creature. What you observe and write is what Henslow judges at the end.',
@@ -4196,7 +4463,7 @@ function InteractionPrompt() {
         <CompactAction keyLabel={renderedContextPrompt.keyLabel} primary onClick={onClick}>
           {renderedContextPrompt.label}
         </CompactAction>
-        {HINT_TEXT[renderedContextPrompt.hintId] && (
+        {HINT_TEXT[renderedContextPrompt.hintId] && renderedContextPrompt.hintId !== HINT_STUDY && (
           <span className="w-full px-1 pb-0.5 text-center text-[10px] leading-snug text-expedition-faded/85">
             {HINT_TEXT[renderedContextPrompt.hintId]}
           </span>
@@ -4857,6 +5124,11 @@ export function ThreeHUD({
   const [pauseOpen, setPauseOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [hudEntranceStage, setHudEntranceStage] = useState(0);
+  // CSS `hidden` does not unmount React. The old responsive layout kept both
+  // the compact minimap and the field-rail minimap subscribed and rendering at
+  // every desktop width. Mount exactly the one the current breakpoint uses.
+  const compactDesktopMapMounted = useMediaQuery('(min-width: 768px) and (max-width: 1279px)');
+  const wideFieldRailMounted = useMediaQuery('(min-width: 1280px)');
   const hudRootRef = useRef(null);
   const entranceCompleteReportedRef = useRef(false);
   // Load → "Read journal" resumes the saved session with the notebook open.
@@ -4874,6 +5146,7 @@ export function ThreeHUD({
   const openLibrary = useThreeGameStore(state => state.openLibrary);
   const beagleTravelPromptOpen = useThreeGameStore(state => Boolean(state.beagleTravelPrompt));
   const npcEncounterOpen = useThreeGameStore(state => Boolean(state.activeNpcEncounter));
+  const contextualControlHintId = useThreeGameStore(state => state.contextPrompt?.hintId || null);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
   const expeditionOutcome = useThreeGameStore(state => state.expeditionOutcome);
@@ -4883,6 +5156,9 @@ export function ThreeHUD({
   const expeditionDeparted = useThreeGameStore(state => state.expeditionDeparted);
   const assessmentOpen = Boolean(finalAssessment);
   const nightlyDebriefOpen = useThreeGameStore(state => Boolean(state.nightlyDebrief));
+  const fieldDilemmaOpen = useThreeGameStore(state => Boolean(state.activeConstraint && getFieldDilemma(state.activeConstraint.type)));
+  const caseFullOpen = useThreeGameStore(state => Boolean(state.caseFullChoice));
+  const caseReleaseMode = useThreeGameStore(state => state.caseReleaseMode);
 
   // The Beagle sails after the third field day. Whichever way the clock got
   // there — stowing the case aboard, or the night catching Darwin ashore —
@@ -4891,7 +5167,7 @@ export function ThreeHUD({
     if (expeditionDeparted && !finalAssessment) void beginFinalAssessment();
   }, [expeditionDeparted, finalAssessment, beginFinalAssessment]);
 
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || fieldDilemmaOpen || caseFullOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
   const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);
   const confirmEndGame = useCallback(() => {
     setEndGameConfirmationOpen(false);
@@ -4913,7 +5189,7 @@ export function ThreeHUD({
   const otherOverlayOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen
     || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen
     || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen
-    || endGameConfirmationOpen);
+    || fieldDilemmaOpen || caseFullOpen || endGameConfirmationOpen);
 
   useEffect(() => {
     if (!entranceActive) return undefined;
@@ -5049,11 +5325,6 @@ export function ThreeHUD({
     return () => setExpeditionPaused(false);
   }, [pauseOpen]);
   useEffect(() => {
-    if (activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized') {
-      setMobileNarrativeOpen(true);
-    }
-  }, [activeConstraint?.requiresNarratorInput, activeConstraint?.type]);
-  useEffect(() => {
     if (!assessmentOpen) return;
     setEndGameConfirmationOpen(false);
     setMapOpen(false);
@@ -5089,6 +5360,9 @@ export function ThreeHUD({
     }
     setInventoryOpen(true);
   }, [inventoryOpen]);
+  useEffect(() => {
+    if (caseReleaseMode) openInventoryTab('case');
+  }, [caseReleaseMode, openInventoryTab]);
   const closeInventory = useCallback(() => {
     if (inventoryOpen) {
       emitPropEvent('equipment-foley', {
@@ -5130,15 +5404,18 @@ export function ThreeHUD({
       <MobileMapButton onOpenMap={openMapModal} />
 
       <div className="absolute left-3 top-3 hidden animate-hud-rise motion-reduce:animate-none md:block hud-stage-gate hud-stage-2">
-        <PolishedVitalStatusPanel />
+        <PolishedVitalStatusPanel onOpenCase={() => openInventoryTab('case')} />
       </div>
 
-      <div className="absolute right-3 top-3 hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none md:block xl:hidden hud-stage-gate hud-stage-2">
-        <GameplayMinimap onOpenMap={openMapModal} />
-      </div>
+      {compactDesktopMapMounted && (
+        <div className="absolute right-3 top-3 animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none hud-stage-gate hud-stage-2">
+          <GameplayMinimap onOpenMap={openMapModal} />
+        </div>
+      )}
 
-      <div className="absolute hidden animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none xl:block hud-stage-gate hud-stage-2 bottom-5 right-5 top-5">
-        <PolishedFieldRail
+      {wideFieldRailMounted && (
+        <div className="absolute animate-hud-rise [animation-delay:150ms] motion-reduce:animate-none hud-stage-gate hud-stage-2 bottom-5 right-5 top-5">
+          <PolishedFieldRail
             onOpenInventory={() => openInventoryTab('case')}
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
@@ -5149,8 +5426,9 @@ export function ThreeHUD({
             onAudioEnabledChange={onAudioEnabledChange}
             compassOpen={compassOpen}
             onCloseCompass={() => setCompassOpen(false)}
-        />
-      </div>
+          />
+        </div>
+      )}
 
       {compassOpen && (
         <div className="absolute inset-0 z-20 xl:hidden">
@@ -5180,7 +5458,6 @@ export function ThreeHUD({
       <MobileNarrativeDrawer
         open={mobileNarrativeOpen}
         onClose={() => setMobileNarrativeOpen(false)}
-        lockedOpen={Boolean(activeConstraint?.requiresNarratorInput || activeConstraint?.type === 'snare_immobilized')}
       />
 
       <div className="absolute bottom-3 left-3 right-3 hidden animate-hud-rise flex-col gap-2 [animation-delay:225ms] motion-reduce:animate-none md:right-auto md:flex hud-stage-gate hud-stage-3 md:w-[29rem]">
@@ -5219,6 +5496,7 @@ export function ThreeHUD({
       <PolishedControlHint
         playableModeId={playableModeId}
         hudHidden={hudHidden}
+        contextHintId={contextualControlHintId}
         ready={hudEntranceStage >= 4}
         disabled={hudEntranceStage < 4 || blockingUiOpen || statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen}
       />
@@ -5257,6 +5535,8 @@ export function ThreeHUD({
       <SpecimenDetailModal />
       <NpcEncounterModal />
       <NightlyDebriefModal />
+      <FieldDilemmaModal />
+      <CaseFullModal />
 
       <FieldNotebook
         panel={panel}

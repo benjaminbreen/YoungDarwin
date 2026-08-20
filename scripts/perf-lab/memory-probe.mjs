@@ -64,6 +64,7 @@ async function snapshot(label) {
       sceneTextureMB: Math.round(textureBytes / 1048576),
       maxTextureDim: maxDim,
       gltfCache: window.__darwinGltfCacheStats?.() || null,
+      gpuResourceCache: window.__darwinGpuResourceCacheStats?.() || null,
     };
   });
   console.log(label, JSON.stringify(data));

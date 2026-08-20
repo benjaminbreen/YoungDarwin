@@ -24,12 +24,7 @@ import { RarityBadge } from '../RarityBadge';
 
 function supplyGlyph(id) {
   const paths = {
-    labels: <path d="M4 8 L12 8 L20 12 L12 16 L4 16 Z M7 12 h0.01" />,
-    pins: <path d="M12 4 L12 16 M9 7 a3 3 0 1 1 6 0 M10 20 L12 16 L14 20" />,
-    spareJars: <path d="M8 4 h8 M9 4 v2 a5 5 0 0 1 -2 4 v8 a2 2 0 0 0 2 2 h6 a2 2 0 0 0 2 -2 v-8 a5 5 0 0 1 -2 -4 v-2" />,
-    twine: <path d="M12 5 a7 7 0 1 0 0 14 a7 7 0 1 0 0 -14 M12 8 a4 4 0 1 0 0 8 a4 4 0 1 0 0 -8" />,
-    food: <path d="M5 14 a7 4 0 0 1 14 0 Z M4 17 h16 M8 11 v-1 M12 10 v-1 M16 11 v-1" />,
-    water: <path d="M12 4 C8 10 6 12.5 6 15.5 a6 6 0 0 0 12 0 C18 12.5 16 10 12 4 Z" />,
+    provisions: <path d="M5 14 a7 4 0 0 1 14 0 Z M4 17 h16 M8 11 v-1 M12 10 v-1 M16 11 v-1" />,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
@@ -89,7 +84,7 @@ function SuppliesLedger() {
 function CaseStatus() {
   const inventoryCount = useThreeGameStore(state => state.inventory.length);
   const caseCapacity = useThreeGameStore(state => state.caseCapacity);
-  const spareJars = useThreeGameStore(state => state.supplies.spareJars);
+  const provisions = useThreeGameStore(state => state.supplies.provisions || 0);
   return (
     <div>
       <div className={`${GOLD_LABEL} mb-1.5 text-center`}>Case Status</div>
@@ -103,8 +98,8 @@ function CaseStatus() {
             <span className="font-semibold text-expedition-gold">{inventoryCount} / {caseCapacity}</span>
           </div>
           <div className="flex items-baseline justify-between">
-            <span>Jar Space</span>
-            <span className="font-semibold text-expedition-gold">{spareJars}</span>
+            <span>Provisions</span>
+            <span className="font-semibold text-expedition-gold">{provisions}</span>
           </div>
         </div>
       </div>
@@ -124,7 +119,7 @@ function SymsCard() {
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Syms Covington</div>
           <div className="font-expedition text-[11.5px] italic text-expedition-faded">Nearby</div>
           <p className="mt-1 font-expedition text-[11.5px] leading-snug text-expedition-parchment/90">
-            Carrying spare labels and one empty jar.
+            Keeping the collecting case ready.
           </p>
         </div>
       </div>
@@ -311,36 +306,6 @@ function ToolsTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Supplies tab
-
-function SuppliesTab() {
-  const supplies = useThreeGameStore(state => state.supplies);
-  return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      {SUPPLY_DEFS.map(def => (
-        <div key={def.id} className="flex gap-3 rounded-sm border border-expedition-brass/40 bg-black/20 p-3">
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border border-expedition-brass/40 bg-black/25 p-1.5">
-            {def.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={def.image} alt={def.name} className="h-full w-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]" draggable={false} />
-            ) : (
-              <span className="text-expedition-gold [&>svg]:h-7 [&>svg]:w-7">{supplyGlyph(def.id)}</span>
-            )}
-          </span>
-          <div className="min-w-0">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate font-expedition text-[13.5px] font-semibold text-expedition-parchment">{def.name}</span>
-              <span className={`font-expedition text-[13px] font-semibold ${supplies[def.id] === 0 ? 'text-rose-300/90' : 'text-expedition-gold'}`}>× {supplies[def.id]}</span>
-            </div>
-            <p className="mt-0.5 font-expedition text-[11.5px] leading-snug text-expedition-faded">{def.description}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Specimen case tab
 
 function SpecimenCaseTab() {
@@ -348,6 +313,8 @@ function SpecimenCaseTab() {
   const caseCapacity = useThreeGameStore(state => state.caseCapacity);
   const items = useThreeGameStore(state => state.items);
   const openSpecimenDetail = useThreeGameStore(state => state.openSpecimenDetail);
+  const releaseMode = useThreeGameStore(state => state.caseReleaseMode);
+  const releaseSpecimen = useThreeGameStore(state => state.releaseSpecimen);
   const lastCasedActorId = useThreeGameStore(state => state.lastCasedActorId);
   const lastCasedAt = useThreeGameStore(state => state.lastCasedAt);
   const recentlyCased = Boolean(lastCasedActorId) && Date.now() - lastCasedAt < 60000;
@@ -356,6 +323,11 @@ function SpecimenCaseTab() {
 
   return (
     <div>
+      {releaseMode && (
+        <div className="mb-3 rounded-sm border border-[#d9a05a]/55 bg-[#d9a05a]/10 px-3 py-2 text-center font-expedition text-[13px] text-[#e8c9a0]">
+          Choose a specimen to release. It returns to the island, and its slot opens.
+        </div>
+      )}
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className={GOLD_LABEL}>Specimen Case</div>
         <div className="flex flex-1 items-center justify-end gap-2.5">
@@ -386,8 +358,8 @@ function SpecimenCaseTab() {
             <button
               key={`${specimen.id}-${index}`}
               type="button"
-              onClick={() => openSpecimenDetail(inventory, index)}
-              className="group relative overflow-hidden rounded-sm border bg-black/25 text-left transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60"
+              onClick={() => (releaseMode ? releaseSpecimen(index) : openSpecimenDetail(inventory, index))}
+              className={`group relative overflow-hidden rounded-sm border bg-black/25 text-left transition focus:outline-none focus:ring-1 focus:ring-expedition-gold/60 ${releaseMode ? "hover:border-[#d9a05a] hover:shadow-[0_0_14px_rgba(217,160,90,0.4)]" : ""}`}
               style={{
                 borderColor: rarity.ring,
                 boxShadow: isNew ? `0 0 16px ${rarity.glow}` : `0 0 0 rgba(0,0,0,0)`,
@@ -456,10 +428,12 @@ function SpecimenCaseTab() {
 export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
   const [tab, setTab] = useState(initialTab);
   const panelRef = useDismissableOverlay(open, onClose);
+  const closeCaseReleaseMode = useThreeGameStore(state => state.closeCaseReleaseMode);
 
   useEffect(() => {
     if (open) setTab(initialTab);
-  }, [initialTab, open]);
+    else closeCaseReleaseMode();
+  }, [closeCaseReleaseMode, initialTab, open]);
 
   if (!open) return null;
 
@@ -497,7 +471,6 @@ export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
             className="mx-auto mt-3 w-[22rem] max-w-full"
             tabs={[
               { id: 'tools', label: 'Tools' },
-              { id: 'supplies', label: 'Supplies' },
               { id: 'case', label: 'Specimen Case' },
             ]}
             active={tab}
@@ -506,7 +479,6 @@ export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
 
           <div className="pt-3.5">
             {tab === 'tools' && <ToolsTab />}
-            {tab === 'supplies' && <SuppliesTab />}
             {tab === 'case' && <SpecimenCaseTab />}
           </div>
 

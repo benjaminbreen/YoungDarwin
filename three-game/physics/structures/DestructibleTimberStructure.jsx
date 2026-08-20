@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   CuboidCollider,
   CylinderCollider,
@@ -65,6 +65,64 @@ function pieceRadius(piece) {
   return Math.hypot(piece.size[0], piece.size[1], piece.size[2]) * 0.5;
 }
 
+function timberMaterialForPiece(piece, timberTones, materialOverrides) {
+  const materials = getTimberMaterials(timberTones);
+  return materialOverrides?.[piece.materialKey]
+    || materials[Math.floor(piece.tone * materials.length) % materials.length];
+}
+
+function buildIntactTimberBatches(pieces, spawns, released, timberTones, materialOverrides) {
+  const batches = new Map();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const euler = new THREE.Euler();
+  const scale = new THREE.Vector3();
+  for (const piece of pieces) {
+    if (piece.dynamic || released.has(piece.id)) continue;
+    const spawn = spawns.get(piece.id);
+    if (!spawn) continue;
+    const material = timberMaterialForPiece(piece, timberTones, materialOverrides);
+    const shape = piece.shape === 'cylinder' ? 'cylinder' : 'cuboid';
+    const key = `${shape}:${material.uuid}`;
+    if (!batches.has(key)) {
+      batches.set(key, {
+        key,
+        geometry: shape === 'cylinder' ? unitCylinder : unitBox,
+        material,
+        matrices: [],
+      });
+    }
+    position.set(spawn.x, spawn.y, spawn.z);
+    euler.set(piece.rotation[0], piece.rotation[1], piece.rotation[2], 'XYZ');
+    rotation.setFromEuler(euler);
+    if (shape === 'cylinder') scale.set(piece.radius, piece.halfHeight * 2, piece.radius);
+    else scale.set(piece.size[0], piece.size[1], piece.size[2]);
+    batches.get(key).matrices.push(new THREE.Matrix4().compose(position, rotation, scale));
+  }
+  return [...batches.values()];
+}
+
+function IntactTimberBatch({ batch }) {
+  const meshRef = useRef(null);
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    batch.matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+  }, [batch]);
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[batch.geometry, batch.material, batch.matrices.length]}
+      castShadow
+      receiveShadow
+      userData={{ renderSource: 'intact-timber-batch' }}
+    />
+  );
+}
+
 function TimberPiece({
   piece,
   released,
@@ -77,6 +135,7 @@ function TimberPiece({
   timberTones,
   materialOverrides,
   waterPhysics,
+  renderVisual,
 }) {
   const bodyRef = useRef(null);
   const impulseApplied = useRef(false);
@@ -203,9 +262,7 @@ function TimberPiece({
     }, true);
   });
 
-  const materials = getTimberMaterials(timberTones);
-  const timberMaterial = materials[Math.floor(piece.tone * materials.length) % materials.length];
-  const material = materialOverrides?.[piece.materialKey] || timberMaterial;
+  const material = timberMaterialForPiece(piece, timberTones, materialOverrides);
 
   return (
     <RigidBody
@@ -236,23 +293,23 @@ function TimberPiece({
           collisionGroups={BREAKABLE_PIECE_COLLISION_GROUPS}
         />
       )}
-      {piece.shape === 'cylinder' ? (
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={unitCylinder}
-          material={material}
-          scale={[piece.radius, piece.halfHeight * 2, piece.radius]}
-        />
-      ) : (
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={unitBox}
-          material={material}
-          scale={piece.size}
-        />
-      )}
+      {renderVisual && (piece.shape === 'cylinder' ? (
+          <mesh
+            castShadow
+            receiveShadow
+            geometry={unitCylinder}
+            material={material}
+            scale={[piece.radius, piece.halfHeight * 2, piece.radius]}
+          />
+        ) : (
+          <mesh
+            castShadow
+            receiveShadow
+            geometry={unitBox}
+            material={material}
+            scale={piece.size}
+          />
+        ))}
     </RigidBody>
   );
 }
@@ -274,7 +331,7 @@ export function DestructibleTimberStructure({
   spawnLift = 0.02,
   waterPhysics = null,
 }) {
-  const [, bumpVersion] = useState(0);
+  const [visualVersion, bumpVersion] = useState(0);
 
   const runtime = useRef({
     released: new Set(),
@@ -317,6 +374,22 @@ export function DestructibleTimberStructure({
       : [piece.size[0] / 2, piece.size[1] / 2, piece.size[2] / 2],
     impactRotation: piece.rotation,
   })), [pieces, spawns]);
+
+  // Intact cabins used to draw one mesh per fixed board: 233 calls across the
+  // two Penal Colony huts. Keep the per-piece fixed colliders and release graph,
+  // but render all still-intact boards in material/shape instanced batches.
+  // Once a piece releases it leaves its batch and its existing RigidBody owns
+  // the individual dynamic visual below.
+  const intactVisualBatches = useMemo(
+    () => buildIntactTimberBatches(
+      pieces,
+      spawns,
+      runtime.current.released,
+      timberTones,
+      materialOverrides,
+    ),
+    [materialOverrides, pieces, spawns, timberTones, visualVersion],
+  );
 
   const registerBody = useCallback((id, ref) => {
     if (ref) runtime.current.bodies.set(id, ref);
@@ -453,6 +526,12 @@ export function DestructibleTimberStructure({
       renderKind: 'structure',
       renderPath: null,
     }}>
+      {intactVisualBatches.map(batch => (
+        <IntactTimberBatch
+          key={`${batch.key}:${batch.matrices.length}`}
+          batch={batch}
+        />
+      ))}
       {pieces.map(piece => (
         <TimberPiece
           key={piece.id}
@@ -467,6 +546,7 @@ export function DestructibleTimberStructure({
           timberTones={timberTones}
           materialOverrides={materialOverrides}
           waterPhysics={waterPhysics}
+          renderVisual={piece.dynamic || runtime.current.released.has(piece.id)}
         />
       ))}
     </group>

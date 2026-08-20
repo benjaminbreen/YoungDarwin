@@ -10,7 +10,8 @@
 // rebuild deterministically from the region seed when the zone mounts.
 
 export const SESSION_SAVE_KEY = 'darwin-expedition-session-v1';
-export const SESSION_SAVE_VERSION = 1;
+export const SESSION_SAVE_VERSION = 2;
+const LEGACY_SESSION_SAVE_VERSION = 1;
 
 const STRING_ARRAY_FIELDS = [
   'collectedSpecimenIds',
@@ -25,10 +26,52 @@ const STRING_ARRAY_FIELDS = [
   'favoriteSpecimenIds',
 ];
 
-const NUMBER_FIELDS = ['health', 'fatigue', 'curiosity', 'timeOfDay', 'day', 'localStanding'];
+const NUMBER_FIELDS = ['health', 'fatigue', 'curiosity', 'timeOfDay', 'day', 'localStanding', 'minutesSinceMeal'];
 
 function stringArray(value) {
   return Array.isArray(value) ? value.filter(entry => typeof entry === 'string') : [];
+}
+
+export function sanitizeAssessmentTranscript(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-64).flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const text = String(entry.text || '').trim().slice(0, 2000);
+    if (!text) return [];
+    const finite = number => {
+      const parsed = Number(number);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    return [{
+      id: typeof entry.id === 'string' ? entry.id.slice(0, 160) : `restored-turn-${index}`,
+      text,
+      day: finite(entry.day),
+      timeOfDay: finite(entry.timeOfDay),
+      zoneId: typeof entry.zoneId === 'string' ? entry.zoneId.slice(0, 80) : null,
+      locationName: typeof entry.locationName === 'string' ? entry.locationName.slice(0, 160) : '',
+      specimenId: typeof entry.specimenId === 'string' ? entry.specimenId.slice(0, 120) : null,
+      specimenName: typeof entry.specimenName === 'string' ? entry.specimenName.slice(0, 160) : null,
+      activeToolId: typeof entry.activeToolId === 'string' ? entry.activeToolId.slice(0, 80) : null,
+      symsNearby: entry.symsNearby === true,
+      createdAt: finite(entry.createdAt),
+    }];
+  });
+}
+
+export function sanitizeNpcEncounterState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const output = {};
+  for (const [rawId, relation] of Object.entries(value).slice(0, 16)) {
+    if (!relation || typeof relation !== 'object' || Array.isArray(relation)) continue;
+    const npcId = String(rawId || '').trim().slice(0, 80);
+    if (!npcId) continue;
+    const rawTrust = Number(relation.trust);
+    output[npcId] = {
+      trust: Number.isFinite(rawTrust) ? Math.max(0, Math.min(100, rawTrust)) : 50,
+      flags: stringArray(relation.flags).slice(-24).map(flag => flag.slice(0, 120)),
+    };
+  }
+  return output;
 }
 
 /**
@@ -64,6 +107,11 @@ export function buildSessionSnapshot(state) {
     activeDirectiveId: typeof state.activeDirectiveId === 'string' ? state.activeDirectiveId : null,
     symsDirective: typeof state.symsDirective === 'string' ? state.symsDirective : null,
     symsZoneId: typeof state.symsZoneId === 'string' ? state.symsZoneId : null,
+    // These two bounded records feed the final assessment. Omitting them made a
+    // resumed day-three expedition look as though Darwin had never spoken or
+    // engaged with anyone during the earlier sittings.
+    assessmentPlayerTranscript: sanitizeAssessmentTranscript(state.assessmentPlayerTranscript),
+    npcEncounterState: sanitizeNpcEncounterState(state.npcEncounterState),
   };
   for (const field of STRING_ARRAY_FIELDS) snapshot[field] = stringArray(state[field]);
   for (const field of NUMBER_FIELDS) {
@@ -78,7 +126,7 @@ export function isUsableSessionSnapshot(snapshot) {
   return Boolean(
     snapshot
     && typeof snapshot === 'object'
-    && snapshot.version === SESSION_SAVE_VERSION
+    && (snapshot.version === SESSION_SAVE_VERSION || snapshot.version === LEGACY_SESSION_SAVE_VERSION)
     && typeof snapshot.currentZoneId === 'string'
     && snapshot.currentZoneId.length > 0,
   );

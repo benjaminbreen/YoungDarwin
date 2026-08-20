@@ -1429,6 +1429,26 @@ function GLBPrimitive({
     const cloned = cloneSkeleton(scene);
     return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
   }, [scene, assetId, asset, castShadow, receiveShadow]);
+  useEffect(() => () => {
+    // SkeletonUtils creates a distinct Skeleton (and therefore a distinct GPU
+    // bone texture after first draw) for every actor clone. `<primitive>` roots
+    // are not auto-disposed by R3F, so region travel previously left one bone
+    // texture per departed skinned actor behind. Materials explicitly cloned
+    // for per-instance grading are owned here as well; geometries and ordinary
+    // materials remain owned by the tracked source GLTF.
+    const skeletons = new Set();
+    const ownedMaterials = new Set();
+    importedScene.traverse(object => {
+      if (object.skeleton) skeletons.add(object.skeleton);
+      if (!asset.cloneMaterials && !asset.materialColorGrade) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach(material => {
+        if (material) ownedMaterials.add(material);
+      });
+    });
+    skeletons.forEach(skeleton => skeleton.dispose());
+    ownedMaterials.forEach(material => material.dispose());
+  }, [asset.cloneMaterials, asset.materialColorGrade, importedScene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   const creatureMotionTargets = useMemo(() => {
     const config = asset.proceduralCreatureMotion;

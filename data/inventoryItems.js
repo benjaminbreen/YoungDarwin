@@ -2,9 +2,9 @@
 // museum-card copy (use / best for / note), supplies, and capacity rules.
 import { tools as analysisTools, collectionTools } from './tools';
 
-export const CASE_CAPACITY = 12;
-// Syms carries one spare jar beyond what Darwin packs himself.
-export const SYMS_BONUS_JARS = 1;
+// Ten slots: tight enough that every take is a decision, and a full case
+// forces the choice between retiring to the Beagle and releasing something.
+export const CASE_CAPACITY = 10;
 
 const ITEM_DETAILS = {
   magnifier: {
@@ -38,14 +38,6 @@ const ITEM_DETAILS = {
     use: 'Break & Extract',
     bestFor: 'Rock samples, fossils, embedded minerals',
     note: 'Strike along the grain. Wrap sharp-edged samples before casing them.',
-  },
-  snare: {
-    displayName: 'Twine Snare',
-    image: '/inventory/twine.png',
-    flavor: 'A looped cord snare, knotted from waxed twine, for wary small creatures.',
-    use: 'Snare & Restrain',
-    bestFor: 'Lizards, small reptiles, ground birds',
-    note: 'Consumes a length of twine per use. Patience matters more than speed.',
   },
   sample: {
     displayName: 'Sample Jar',
@@ -112,7 +104,7 @@ const EXTRA_TOOLS = [
 
 // Order matches the mockup's equipped-tools list, kit extras after.
 const EQUIPPED_ORDER = [
-  'magnifier', 'insect_net', 'sketch', 'hammer', 'snare', 'sample',
+  'magnifier', 'insect_net', 'sketch', 'hammer', 'sample',
   'hands', 'shotgun', 'compass', 'pocket_knife',
 ];
 
@@ -137,17 +129,9 @@ export const inventoryItems = EQUIPPED_ORDER.map(getInventoryItem).filter(Boolea
 
 // `initial` is what the first landing carries and also the most that can be
 // carried. `nightly` is what the hold gives up each evening, added to whatever
-// came back unused — so a frugal day is worth something on the next one and a
-// wasteful day is not simply forgiven. Both are per-day figures for a survey of
-// three days; a nightly draw equal to `initial` would make the case cap the
-// only limit that ever bound.
+// came back unused — a frugal day is worth something on the next one.
 export const SUPPLY_DEFS = [
-  { id: 'labels', name: 'Labels', image: '/inventory/labels.png', initial: 12, nightly: 8, description: 'Gummed specimen labels. One is spent per specimen cased.' },
-  { id: 'pins', name: 'Pins', image: null, initial: 24, nightly: 16, description: 'Entomological pins for setting insects. Two per insect.' },
-  { id: 'spareJars', name: 'Spare Jars', image: '/inventory/sample_jar.png', initial: 3, nightly: 2, description: 'Stoppered jars of spirits for wet specimens.' },
-  { id: 'twine', name: 'Twine', image: '/inventory/twine.png', initial: 4, nightly: 3, description: 'Waxed twine for snares and bundling. One length per snare set.' },
-  { id: 'food', name: 'Food', image: null, initial: 4, nightly: 3, description: 'Ship’s biscuit and salt pork. Eaten when resting in the field.' },
-  { id: 'water', name: 'Water', image: null, initial: 5, nightly: 3, description: 'Fresh water in a canvas-wrapped flask. Drunk when resting.' },
+  { id: 'provisions', name: 'Provisions', image: null, initial: 4, nightly: 3, description: 'Meals of ship’s biscuit, salt pork, and water. Darwin eats one every six hours in the field; go without and he weakens until the crew carries him back.' },
 ];
 
 export const INITIAL_SUPPLIES = Object.fromEntries(SUPPLY_DEFS.map(def => [def.id, def.initial]));
@@ -164,14 +148,4 @@ export function drawNightlySupplies(current = {}, bonus = {}) {
     drawn[def.id] = Math.min(ceiling, held + def.nightly);
   }
   return drawn;
-}
-
-// Wet specimens occupy a jar of spirits rather than a dry case slot label alone.
-export function specimenNeedsJar(specimen, toolId) {
-  if (toolId === 'sample') return true;
-  return ['Amphibian', 'Fish', 'Marine'].includes(specimen?.order);
-}
-
-export function specimenIsInsect(specimen) {
-  return specimen?.order === 'Insect';
 }

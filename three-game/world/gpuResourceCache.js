@@ -13,26 +13,39 @@
 // Measure with scripts/perf-lab/shader-probe.mjs: programsLinked and
 // programsDeleted per travel are the numbers this exists to drive down.
 
-// Sized to hold several regions' worth of entries at once. Too small is worse
-// than no cache at all: a limit of 96 thrashed across three consumers and drove
-// linked programs per travel from 49 back up to 137, because eviction disposes
-// and disposal is exactly what releases the program.
-const DEFAULT_LIMIT = 640;
+// The cache used to retain 640 entries without knowing whether any were still
+// mounted. That made eviction unsafe and allowed every visited region to remain
+// GPU-resident. Entries now carry leases: mounted consumers are pinned, while
+// travel can discard everything belonging only to the departed region.
+export const DEFAULT_GPU_RESOURCE_CACHE_LIMIT = 384;
+export const CONSTRAINED_GPU_RESOURCE_CACHE_LIMIT = 160;
 
 const entries = new Map();
-let limit = DEFAULT_LIMIT;
+let limit = DEFAULT_GPU_RESOURCE_CACHE_LIMIT;
 
-function evictOldest() {
-  // Map preserves insertion order and every hit re-inserts, so the first key is
-  // the least recently used.
-  const oldestKey = entries.keys().next().value;
-  if (oldestKey === undefined) return;
-  const entry = entries.get(oldestKey);
-  entries.delete(oldestKey);
+function disposeEntry(key, entry) {
+  entries.delete(key);
   try {
     entry?.dispose?.(entry.value);
   } catch {
     // A disposer that throws must not strand the cache above its limit.
+  }
+}
+
+function evictOldestInactive() {
+  // Map preserves insertion order and every hit re-inserts, so the first key is
+  // the least recently used.
+  for (const [key, entry] of entries) {
+    if (entry.activeRefs > 0) continue;
+    disposeEntry(key, entry);
+    return true;
+  }
+  return false;
+}
+
+function trimToLimit() {
+  while (entries.size > limit && evictOldestInactive()) {
+    // Keep trimming until only live entries remain or the limit is met.
   }
 }
 
@@ -45,14 +58,56 @@ export function cachedGpuResource(key, factory, options = {}) {
     return existing.value;
   }
   const value = factory();
-  entries.set(key, { value, dispose: options.dispose, hits: 0 });
-  while (entries.size > limit) evictOldest();
+  entries.set(key, {
+    value,
+    dispose: options.dispose,
+    hits: 0,
+    activeRefs: 0,
+  });
+  // Consumers acquire their lease in a React effect. Trimming synchronously
+  // here could dispose the just-created value between render and that effect.
+  // Release, travel sweep, and explicit limit changes are the safe trim points.
   return value;
 }
 
+// Pin a cached resource for as long as its scene consumer is mounted. Returns
+// an idempotent release callback suitable for a React effect cleanup.
+export function retainGpuResource(key) {
+  const entry = entries.get(key);
+  if (!entry) return () => {};
+  entry.activeRefs += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = entries.get(key);
+    if (!current) return;
+    current.activeRefs = Math.max(0, current.activeRefs - 1);
+    trimToLimit();
+  };
+}
+
+// Dispose cache entries no mounted scene still references. `retainRecent` is
+// available for desktop experiments, but travel deliberately passes zero: the
+// destination is already mounted and leased, so every inactive entry belongs
+// to a departed/abandoned scene and is safe to release.
+export function sweepInactiveGpuResources({ retainRecent = 0 } = {}) {
+  const inactive = Array.from(entries.entries())
+    .filter(([, entry]) => entry.activeRefs === 0);
+  const keep = Math.max(0, Math.floor(retainRecent) || 0);
+  const disposable = keep > 0 ? inactive.slice(0, -keep) : inactive;
+  let disposed = 0;
+  for (const [key, entry] of disposable) {
+    disposeEntry(key, entry);
+    disposed += 1;
+  }
+  trimToLimit();
+  return disposed;
+}
+
 export function setGpuResourceCacheLimit(next) {
-  limit = Math.max(1, Math.floor(next) || DEFAULT_LIMIT);
-  while (entries.size > limit) evictOldest();
+  limit = Math.max(1, Math.floor(next) || DEFAULT_GPU_RESOURCE_CACHE_LIMIT);
+  trimToLimit();
 }
 
 export function clearGpuResourceCache() {
@@ -68,6 +123,18 @@ export function clearGpuResourceCache() {
 
 export function gpuResourceCacheStats() {
   let hits = 0;
-  for (const entry of entries.values()) hits += entry.hits;
-  return { size: entries.size, limit, hits };
+  let activeEntries = 0;
+  let activeRefs = 0;
+  for (const entry of entries.values()) {
+    hits += entry.hits;
+    activeRefs += entry.activeRefs;
+    if (entry.activeRefs > 0) activeEntries += 1;
+  }
+  return {
+    size: entries.size,
+    limit,
+    hits,
+    activeEntries,
+    activeRefs,
+  };
 }

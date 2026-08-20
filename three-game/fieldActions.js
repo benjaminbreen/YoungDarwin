@@ -11,6 +11,10 @@ const OBSTACLE_TYPE_IDS = Object.freeze({
   boulder: 'basalt_block',
   scree: 'scree',
 });
+const AMBIENT_NATURAL_OBSTACLE_KINDS = new Set([
+  ...Object.keys(OBSTACLE_TYPE_IDS),
+  'tree',
+]);
 
 const TARGET_REACH = 3.35;
 const MIN_FACING_DOT = 0.2;
@@ -60,6 +64,29 @@ function obstacleCategory(obstacle) {
   return 'Object';
 }
 
+function authoredObstacleExamination(obstacle) {
+  const authored = obstacle?.fieldExaminable
+    ?? obstacle?.gameplay?.fieldExaminable
+    ?? obstacle?.definition?.fieldExaminable
+    ?? obstacle?.definition?.gameplay?.fieldExaminable;
+  if (!authored) return null;
+  if (typeof authored === 'string') return { label: authored };
+  return typeof authored === 'object' ? authored : {};
+}
+
+// Buildings, furniture, railings, hull bounds, and broad lava ledges are
+// collision obstacles too. Treating every one as a field subject produced
+// constant generic prompts such as "Examine structure" and "Examine
+// furniture". Built objects now opt in with `fieldExaminable` (optionally
+// carrying label/type/category metadata); identifiable natural subjects retain
+// the existing discovery behavior.
+export function isAmbientObstacleExaminable(obstacle) {
+  return Boolean(obstacle) && (
+    AMBIENT_NATURAL_OBSTACLE_KINDS.has(obstacle.kind)
+    || Boolean(authoredObstacleExamination(obstacle))
+  );
+}
+
 function ecologyTargets(ecology) {
   if (!ecology) return [];
   const cached = ecologyTargetCache.get(ecology);
@@ -106,10 +133,14 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
   let bestScore = Infinity;
 
   for (const obstacle of obstacles || []) {
+    if (!isAmbientObstacleExaminable(obstacle)) continue;
+    const authoredExamination = authoredObstacleExamination(obstacle);
     // Only kinds whose identity is certain earn a catalog typeId, and with it
     // a collectable sample. Everything else keeps a kind-level id so it stays
     // examinable — a bitterbush must not hand over a chip of basalt.
-    const typeId = OBSTACLE_TYPE_IDS[obstacle.kind] || `obstacle:${obstacle.kind || 'object'}`;
+    const typeId = authoredExamination?.typeId
+      || OBSTACLE_TYPE_IDS[obstacle.kind]
+      || `obstacle:${obstacle.kind || 'object'}`;
     const x = finite(obstacle.x);
     const z = finite(obstacle.z);
     const baseY = finite(terrainHeight(x, z, zoneId), position.y);
@@ -119,8 +150,8 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
       typeId,
       specimenId: inspectableCatalog[typeId]?.specimenId || null,
       kind: 'obstacle',
-      category: obstacleCategory(obstacle),
-      name: obstacleLabel(obstacle),
+      category: authoredExamination?.category || obstacleCategory(obstacle),
+      name: authoredExamination?.label || obstacleLabel(obstacle),
       radius: Math.max(0.25, finite(obstacle.radius, 0.5)),
       height: Math.max(0.2, finite(obstacle.colliderTop ?? obstacle.height, 0.6)),
       // Focus is the subject's base, as it is for specimens; the examine camera

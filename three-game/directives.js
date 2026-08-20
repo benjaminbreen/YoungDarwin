@@ -37,7 +37,7 @@ export function postOfficeBaySurveyProgress(state) {
     if (entry?.authorship !== 'field-record' || !entry.specimenId) continue;
     // Failed and partial attempts also write field-record entries; only a
     // successful take or a documentation counts as a record.
-    if (entry.condition === 'failed' || entry.condition === 'partial evidence' || entry.condition === 'partial_evidence') continue;
+    if (entry.condition === 'failed' || entry.condition === 'partial evidence' || entry.condition === 'partial_evidence' || entry.condition === 'released') continue;
     const atPostOfficeBay = entry.location === 'Post Office Bay'
       || entry.location?.id === 'POST_OFFICE_BAY'
       || entry.zoneId === 'POST_OFFICE_BAY';
@@ -55,7 +55,7 @@ function collectedByZone(state) {
   for (const entry of state.journal || []) {
     if (entry?.authorship !== 'field-record') continue;
     if (!entry.specimenId || !entry.location) continue;
-    if (entry.condition === 'documented in field') continue;
+    if (entry.condition === 'documented in field' || entry.condition === 'released') continue;
     pairs.push({ zoneId: entry.location, species: entry.specimenId });
   }
   return pairs;
@@ -73,7 +73,7 @@ export const DIRECTIVES = [
     id: 'tool',
     text: 'Take a tool in hand',
     hint: 'Press 1-6, or click a slot on the toolbelt.',
-    detail: 'The tool in your hand sets what you can do with an animal. The net, snare, and gun each give a different result, and the sketchbook takes nothing.',
+    detail: 'The tool in your hand sets what you can do with an animal. The net and the gun each give a different result, and the sketchbook takes nothing.',
     isDone: state => Boolean(state.activeToolId) && state.activeToolId !== 'hands',
   },
   {

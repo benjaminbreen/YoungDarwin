@@ -14,7 +14,7 @@ import {
 } from '../../world/regions/materials/pbrTerrainTextures';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
-import { cachedGpuResource } from '../../world/gpuResourceCache';
+import { cachedGpuResource, retainGpuResource } from '../../world/gpuResourceCache';
 import { onPropEvent } from './propEvents';
 import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
@@ -36,10 +36,13 @@ function useDisposableMaterial(factory) {
 // using useDisposableMaterial.
 function useSharedMaterial(factory) {
   const key = factory.toString();
-  return useMemo(
-    () => cachedGpuResource(`prop-material:${key}`, factory, { dispose: material => material.dispose() }),
-    [key], // eslint-disable-line react-hooks/exhaustive-deps
+  const cacheKey = `prop-material:${key}`;
+  const material = useMemo(
+    () => cachedGpuResource(cacheKey, factory, { dispose: value => value.dispose() }),
+    [cacheKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  useEffect(() => retainGpuResource(cacheKey), [cacheKey]);
+  return material;
 }
 
 function useSingleMaterialGeometry(factory) {

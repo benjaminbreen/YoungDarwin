@@ -9,7 +9,6 @@ import { downloadExpeditionText, openExpeditionPrintReport } from './expeditionE
 import {
   ButterflyIcon,
   CompassRoseIcon,
-  CuriosityIcon,
   FatigueIcon,
   HeartIcon,
   MapIcon,
@@ -133,7 +132,6 @@ function DeathModal({ outcome, onOpenJournal, onRestartExpedition, onReturnToMai
         <DeathRecapRow icon={LocationPinIcon} label="Location" value={stats.locationName || 'Floreana Island'} />
         <DeathRecapRow icon={ButterflyIcon} label="Specimens documented" value={`${stats.specimensDocumented || 0}/${stats.specimensAvailable || 0}`} />
         <DeathRecapRow icon={NoteIcon} label="Notes recorded" value={stats.notesRecorded || 0} />
-        <DeathRecapRow icon={CuriosityIcon} label="Final curiosity" value={stats.curiosity || 0} />
       </section>
       <div className="mt-4 grid gap-1.5 sm:grid-cols-2">
         <button type="button" onClick={() => openExpeditionPrintReport(useThreeGameStore.getState())} className={DEATH_BUTTON}>Save record as PDF</button>
@@ -222,7 +220,6 @@ function RecoveryModal({ outcome, onOpenJournal, onReturnToMainMenu, onRecover, 
               <RecapRow icon={CompassRoseIcon} label="Date & time advanced" value={formatExpeditionDate(recoveryDay)} detail="7:00 AM" />
               <RecapRow icon={NoteIcon} label="Notes retained" value={stats.notesRecorded || 0} detail="All notes preserved" />
               <RecapRow icon={ButterflyIcon} label="Specimens retained" value={stats.specimensDocumented || 0} detail="All specimens secured" />
-              <RecapRow icon={CuriosityIcon} label="Curiosity / momentum" value="−5" detail="Due to the early return" valueClassName="text-rose-300" />
             </section>
           </div>
         </div>

@@ -4,11 +4,8 @@ import { create } from 'zustand';
 import {
   CASE_CAPACITY,
   INITIAL_SUPPLIES,
-  SYMS_BONUS_JARS,
   drawNightlySupplies,
   inventoryItems,
-  specimenIsInsect,
-  specimenNeedsJar,
 } from '../data/inventoryItems';
 import { baseSpecimens } from '../data/specimens';
 import { travelFlavorLine } from '../data/travelFlavor';
@@ -96,7 +93,6 @@ import {
 import {
   CATASTROPHIC_FALL_SPEED,
   EXPEDITION_DAYS,
-  INCAPACITATION_CURIOSITY_COST,
   INCAPACITATION_RECOVERY_FATIGUE,
   INCAPACITATION_RECOVERY_HEALTH,
   INCAPACITATION_RECOVERY_ZONE_ID,
@@ -120,6 +116,8 @@ import {
 import {
   buildSessionSnapshot,
   isUsableSessionSnapshot,
+  sanitizeAssessmentTranscript,
+  sanitizeNpcEncounterState,
   writeSessionSnapshot,
 } from './sessionSave';
 
@@ -230,7 +228,6 @@ function expeditionOutcomeStats(state) {
     specimensDocumented: documented.size,
     specimensAvailable: availableSpecimenTypes.size,
     notesRecorded: (state.journal || []).length,
-    curiosity: state.curiosity || 0,
   };
 }
 
@@ -301,17 +298,70 @@ function specimenById(specimenId) {
 // The one chokepoint for clock-driven day advance: travel, resting in an
 // interior and incapacitation recovery all route through here. Running out of
 // days ashore ends the expedition exactly as returning to the ship does.
+// Old saves carried labels/pins/jars/twine/food/water; fold the edible pair
+// into the single provisions count so a resumed expedition keeps eating.
+function normalizeSupplies(saved, fallback = INITIAL_SUPPLIES) {
+  if (!saved || typeof saved !== 'object') return { ...fallback };
+  if (Number.isFinite(saved.provisions)) return { provisions: Math.max(0, saved.provisions) };
+  const food = Number.isFinite(saved.food) ? saved.food : fallback.provisions;
+  const water = Number.isFinite(saved.water) ? saved.water : fallback.provisions;
+  return { provisions: Math.max(0, Math.min(food, water)) };
+}
+
+// Darwin eats one provision every six field hours, automatically. With the
+// bag empty he starves: health drains in 15-minute steps until the ordinary
+// collapse path carries him back to the Beagle for the night.
+const MEAL_INTERVAL_MINUTES = 360;
+const STARVATION_DRAIN_PER_STEP = 4;
+const STARVATION_STEP_MINUTES = 15;
+
+function hungerPatch(state, minutes) {
+  if (state.playableModeId !== 'darwin' || !(minutes > 0)) return {};
+  if (state.expeditionOutcome || state.expeditionDeparted) return {};
+  const before = Math.max(0, state.minutesSinceMeal || 0);
+  let since = before + minutes;
+  let provisions = Math.max(0, state.supplies?.provisions || 0);
+  let ate = 0;
+  while (since >= MEAL_INTERVAL_MINUTES && provisions > 0) {
+    provisions -= 1;
+    ate += 1;
+    since -= MEAL_INTERVAL_MINUTES;
+  }
+  const patch = { minutesSinceMeal: since };
+  if (ate > 0) {
+    patch.supplies = { ...state.supplies, provisions };
+    patch.message = provisions > 0
+      ? 'Darwin pauses for biscuit and water from the provision bag.'
+      : 'Darwin eats the last of the provisions. The bag is empty now.';
+    return patch;
+  }
+  const starvedBefore = Math.max(0, before - MEAL_INTERVAL_MINUTES);
+  const starvedNow = Math.max(0, since - MEAL_INTERVAL_MINUTES);
+  const drainSteps = Math.floor(starvedNow / STARVATION_STEP_MINUTES)
+    - Math.floor(starvedBefore / STARVATION_STEP_MINUTES);
+  if (starvedNow > 0 && starvedBefore === 0) {
+    patch.message = 'The provision bag is empty and Darwin is famished. Find food or make for the Beagle before the island decides for him.';
+  }
+  if (drainSteps > 0) {
+    Object.assign(patch, healthDamagePatch(state, {
+      amount: drainSteps * STARVATION_DRAIN_PER_STEP,
+      source: 'hunger',
+    }));
+  }
+  return patch;
+}
+
 function advanceTimeState(state, minutes) {
   const totalHours = state.timeOfDay + minutes / 60;
   const dayDelta = Math.floor(totalHours / HOURS_PER_DAY);
   const nextDay = state.day + dayDelta;
-  if (nextDay > EXPEDITION_DAYS) {
-    return { timeOfDay: LAST_MINUTE_OF_DAY, day: EXPEDITION_DAYS, expeditionDeparted: true };
-  }
-  return {
-    timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
-    day: nextDay,
-  };
+  const timePatch = nextDay > EXPEDITION_DAYS
+    ? { timeOfDay: LAST_MINUTE_OF_DAY, day: EXPEDITION_DAYS, expeditionDeparted: true }
+    : {
+        timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
+        day: nextDay,
+      };
+  return { ...timePatch, ...hungerPatch(state, minutes) };
 }
 
 function findRuntimeSpecimen(state, specimenId) {
@@ -401,7 +451,7 @@ function nearbyPeopleContext(state, zone) {
     const caseContext = state.currentZoneId === 'POST_OFFICE_BAY'
       ? 'the large collecting case remains at his shore base'
       : 'the large collecting case remains with the expedition stores';
-    people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`} and ${activity}; he keeps labels and twine on his person, while ${caseContext}.`);
+    people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`} and ${activity}; he keeps the collecting case supplied and ready, while ${caseContext}.`);
   }
   for (const npcId of zone?.npcs || []) {
     if (npcId !== 'syms_covington') people.push(`regional NPC present: ${npcId}`);
@@ -630,23 +680,11 @@ function findSnareSpecimen(state, trap) {
   return bestDistance <= 5.5 ? best : null;
 }
 
-function collectionBlockForSpecimen(state, specimen, tool) {
+function collectionBlockForSpecimen(state) {
   if (state.inventory.length >= state.caseCapacity) {
     return {
-      message: 'The specimen case is full. The snare can hold for now, but there is no room to case the animal properly.',
+      message: 'The specimen case is full.',
       syms: 'Syms taps the case lid. "Not an inch of room left, sir."',
-    };
-  }
-  if (state.supplies.labels <= 0) {
-    return {
-      message: 'No labels remain. Leave the snare undisturbed until the animal can be recorded properly.',
-      syms: 'Syms turns out his pockets. "Last label went on the finch, sir."',
-    };
-  }
-  if (specimenNeedsJar(specimen, tool.id) && state.supplies.spareJars <= 0) {
-    return {
-      message: 'No spirit jars remain for a wet specimen. The snare is holding, but the collection must wait.',
-      syms: 'Syms checks the bottle slots in the collecting case. "Glass is all spoken for, sir."',
     };
   }
   return null;
@@ -717,49 +755,88 @@ function localSnareEscapeResolution(input = '') {
   };
 }
 
+// Each dilemma resolves through one of two authored choices: quick with a
+// cost, or careful with a delay. Deterministic — no typing, no model call.
 const FIELD_DILEMMA_CONFIG = {
   net_snagged: {
-    eventType: 'net_snag_attempt',
-    objective: 'Free the insect net from cactus or scrub without tearing the mesh.',
-    title: 'The insect net is snagged.',
-    retryTitle: 'The net is still caught.',
-    body: 'The mesh has caught on cactus spines; yanking may tear it.',
-    retryBody: 'The net remains hooked and the mesh is under tension.',
-    helper: 'Describe a careful way to back it out, cut only the caught fibers, or get Syms to help.',
-    placeholder: 'Describe how Darwin frees the net...',
-    failureFallback: 'The net remains caught. You need a more careful plan before it tears.',
-    resolvedFallback: 'You free the net without tearing the useful mesh.',
-    targetType: 'tool',
+    title: 'The insect net is snagged',
+    body: 'The mesh has caught on cactus spines. A hard pull would tear it, and the spines are close around your hand.',
+    choices: [
+      {
+        id: 'quick',
+        label: 'Rip it free',
+        detail: 'Fast — but the spines rake your hand. Costs a little health.',
+        minutes: 2,
+        healthCost: 4,
+        narration: 'You wrench the net clear in one motion. The mesh survives; your knuckles do not entirely.',
+        symsLine: '"Effective, sir. Bloody, but effective."',
+      },
+      {
+        id: 'careful',
+        label: 'Work it loose, spine by spine',
+        detail: 'Careful and clean. Costs half an hour of daylight.',
+        minutes: 30,
+        healthCost: 0,
+        narration: 'You back the caught edge out along each spine in turn. The net comes away whole, and the morning is a little older.',
+        symsLine: '"Patience saves the mesh, sir."',
+      },
+    ],
   },
   cactus_spines: {
-    eventType: 'cactus_spine_treatment',
-    objective: 'Treat embedded cactus spines with field tools before continuing.',
-    title: 'Cactus spines are embedded.',
-    retryTitle: 'The spines still hurt.',
-    body: 'Several cactus spines have gone in deeply enough to make careless movement costly.',
-    retryBody: 'The spines remain in place and every movement reminds you of them.',
-    helper: 'Describe a concrete treatment: knife point, lens, water, cloth, or Syms helping.',
-    placeholder: 'Describe how Darwin treats the spines...',
-    failureFallback: 'The spines remain embedded. A vague intention is no treatment.',
-    resolvedFallback: 'You work the spines out carefully and can continue.',
-    targetType: 'self',
+    title: 'Cactus spines are embedded',
+    body: 'Several spines have gone in deep enough that careless movement will be costly.',
+    choices: [
+      {
+        id: 'quick',
+        label: 'Pull them out now',
+        detail: 'Immediate — but rough on the hand. Costs a little health.',
+        minutes: 2,
+        healthCost: 5,
+        narration: 'You grip each spine and pull. It is quick, and it is not painless.',
+        symsLine: '"A steadier hand would have hurt less, sir."',
+      },
+      {
+        id: 'careful',
+        label: 'Extract them with the knife point',
+        detail: 'Slow and clean. Costs twenty minutes.',
+        minutes: 20,
+        healthCost: 0,
+        narration: 'You treat the spines as objects, not insults: inspect, lift, and draw each one out whole.',
+        symsLine: '"Neat work, sir. The lens helps."',
+      },
+    ],
   },
   hammer_shard: {
-    eventType: 'hammer_shard_treatment',
-    objective: 'Deal with a flying rock shard or grit from hammering before continuing fieldwork.',
-    title: 'A hammer chip has struck you.',
-    retryTitle: 'The shard is still a problem.',
-    body: 'A hard rock flake has caught your hand or eye after the hammer blow.',
-    retryBody: 'The shard or grit has not been dealt with safely.',
-    helper: 'Describe a concrete remedy: rinse with water, wrap the hand, remove the shard, or ask Syms.',
-    placeholder: 'Describe how Darwin deals with the shard...',
-    failureFallback: 'The injury is no better, and continuing to hammer would be foolish.',
-    resolvedFallback: 'You treat the chip injury and regain the use of your hand and tools.',
-    targetType: 'self',
+    title: 'A hammer chip has struck you',
+    body: 'A hard rock flake has caught your hand after the blow. It needs dealing with before more hammering.',
+    choices: [
+      {
+        id: 'quick',
+        label: 'Rinse it and press on',
+        detail: 'Quick — but the cut stays angry. Costs a little health.',
+        minutes: 2,
+        healthCost: 4,
+        narration: 'A splash of water, a strip of cloth, and back to work. The hand complains for the rest of the day.',
+        symsLine: '"If it festers, sir, we both regret it."',
+      },
+      {
+        id: 'careful',
+        label: 'Sit down and treat it properly',
+        detail: 'Thorough. Costs twenty minutes.',
+        minutes: 20,
+        healthCost: 0,
+        narration: 'You stop, clean the cut, and bind it as it deserves. The hand will serve for the rest of the survey.',
+        symsLine: '"Better twenty minutes now than a bad hand for three days, sir."',
+      },
+    ],
   },
 };
 
 const FIELD_DILEMMA_TYPES = new Set(Object.keys(FIELD_DILEMMA_CONFIG));
+
+export function getFieldDilemma(type) {
+  return FIELD_DILEMMA_CONFIG[type] || null;
+}
 
 function constraintBlocksTool(constraint, toolId) {
   if (!constraint || !toolId) return false;
@@ -785,51 +862,6 @@ function blockedToolMessage(constraint, toolId) {
   };
 }
 
-function localFieldDilemmaResolution(type, input = '') {
-  const text = String(input || '').toLowerCase();
-  const reckless = /\b(?:yank|pull\s+hard|thrash|run|ignore|keep\s+going|continue\s+hammering|hammer\s+again|rub\s+(?:my\s+)?eye|rub\s+it|kick|tear)\b/.test(text);
-  const sensibleByType = {
-    net_snagged: /\b(?:knife|blade|cut|trim|untangle|unhook|back\s+(?:it|the\s+net)\s+out|reverse|loosen|free|mesh|fiber|fibre|twine|syms|assistant|hold\s+(?:the\s+)?cactus|careful|slowly)\b/,
-    cactus_spines: /\b(?:knife|blade|point|needle|tweezer|magnifier|lens|inspect|spine|pull\s+(?:out|them)|remove|wash|rinse|water|cloth|bandage|wrap|syms|assistant|careful|slowly)\b/,
-    hammer_shard: /\b(?:wash|rinse|water|blink|eye|shard|splinter|chip|remove|knife|blade|tweezer|wrap|cloth|bandage|hand|syms|assistant|stop\s+hammering|careful|slowly)\b/,
-  };
-  const sensible = sensibleByType[type]?.test(text) || false;
-  const config = FIELD_DILEMMA_CONFIG[type] || FIELD_DILEMMA_CONFIG.cactus_spines;
-  if (sensible && !reckless) {
-    const narration = type === 'net_snagged'
-      ? 'You stop pulling against the mesh and work the caught edge back along the spines. The net comes free with only a few fibers frayed.'
-      : type === 'cactus_spines'
-        ? 'You treat the spines as objects, not insults: inspect, lift, and draw them out one by one. The pain becomes manageable.'
-        : 'You stop hammering and attend to the small injury before it becomes a large one. Water, cloth, and patience restore the use of your hand and eye.';
-    return {
-      narration,
-      resolved: true,
-      consequence: 'resolved',
-      healthDelta: 0,
-      actionDisposition: 'observed',
-      targetType: config.targetType,
-      sounds: type === 'net_snagged' ? ['mesh slipping free of spines'] : ['field kit being opened'],
-      source: 'local-field-dilemma',
-      fallback: true,
-    };
-  }
-  return {
-    narration: reckless
-      ? (type === 'net_snagged'
-          ? 'The harder you pull, the more firmly the cactus keeps the net. A few threads part with an unhappy little snap.'
-          : 'Force makes the injury worse, and the island offers no sympathy for haste.')
-      : config.failureFallback,
-    resolved: false,
-    consequence: reckless ? 'worse' : 'still_pending',
-    healthDelta: reckless ? -3 : 0,
-    actionDisposition: reckless ? 'unsafe' : 'needs_modal',
-    targetType: config.targetType,
-    sounds: type === 'net_snagged' ? ['taut mesh scraping over spines'] : ['a sharp breath'],
-    source: 'local-field-dilemma',
-    fallback: true,
-  };
-}
-
 function createExpeditionSlice() {
   const expedition = createInitialExpeditionState();
   return {
@@ -844,7 +876,10 @@ function createExpeditionSlice() {
     activeToolId: 'hands',
     toolbarOrder: [...DEFAULT_DARWIN_TOOLBAR],
     darwinToolbarOrder: [...DEFAULT_DARWIN_TOOLBAR],
-    supplies: { ...INITIAL_SUPPLIES, spareJars: (INITIAL_SUPPLIES.spareJars || 0) + SYMS_BONUS_JARS },
+    supplies: { ...INITIAL_SUPPLIES },
+    minutesSinceMeal: 0,
+    caseFullChoice: null,
+    caseReleaseMode: false,
     caseCapacity: CASE_CAPACITY,
     favoriteSpecimenIds: [],
     inventory: expedition.inventory,
@@ -928,8 +963,8 @@ function createSceneSlice() {
     activeNpcEncounter: null,
     npcEncounterPending: false,
     npcEncounterError: null,
-    // The current /three runtime has no save/load bridge. Keep encounter
-    // consequences stable for this play session without implying persistence.
+    // Encounter consequences persist in the bounded classroom resume snapshot
+    // because the final assessment counts whom Darwin actually engaged.
     npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
     symsDirective: DEFAULT_SYMS_DIRECTIVE,
     symsZoneId: SYMS_HOME_ZONE_ID,
@@ -1019,7 +1054,7 @@ function createSceneSlice() {
     // rather than storing permanent trampling only inside a React component.
     cropDamageById: {},
     foragedObjectIds: [],
-    symsLine: 'Syms waits with labels and twine ready; the collecting case rests at his shore base.',
+    symsLine: 'Syms waits with the collecting case ready at his shore base.',
   };
 }
 
@@ -1068,7 +1103,8 @@ export const useThreeGameStore = create((set, get) => ({
     assign('localStanding', snapshot.localStanding, initial.localStanding);
     patch.questComplete = Boolean(snapshot.questComplete);
     assign('activeToolId', snapshot.activeToolId, initial.activeToolId);
-    assign('supplies', snapshot.supplies, initial.supplies);
+    patch.supplies = normalizeSupplies(snapshot.supplies, initial.supplies);
+    assign('minutesSinceMeal', snapshot.minutesSinceMeal, 0);
     // A resumed save keeps its objective; a snapshot from before objectives
     // existed falls back to re-resolving from the first.
     patch.activeDirectiveId = typeof snapshot.activeDirectiveId === 'string'
@@ -1086,6 +1122,11 @@ export const useThreeGameStore = create((set, get) => ({
       ? snapshot.journal
       : initial.journal;
     patch.bookLastPages = snapshot.bookLastPages || initial.bookLastPages;
+    patch.assessmentPlayerTranscript = sanitizeAssessmentTranscript(snapshot.assessmentPlayerTranscript);
+    patch.npcEncounterState = {
+      ...initial.npcEncounterState,
+      ...sanitizeNpcEncounterState(snapshot.npcEncounterState),
+    };
     for (const key of [
       'collectedSpecimenIds',
       'collectedSpecimenActorIds',
@@ -1102,6 +1143,13 @@ export const useThreeGameStore = create((set, get) => ({
     ]) {
       if (Array.isArray(snapshot[key]) && snapshot[key].length > 0) patch[key] = snapshot[key];
     }
+    // The snare tool was retired; older saves may still carry it on the belt.
+    for (const key of ['toolbarOrder', 'darwinToolbarOrder']) {
+      if (Array.isArray(patch[key])) {
+        patch[key] = patch[key].map(id => (id === 'snare' ? 'pocket_knife' : id));
+      }
+    }
+    if (patch.activeToolId === 'snare') patch.activeToolId = 'hands';
     // Visited regions must always include where the player actually is.
     if (!patch.visitedZoneIds.includes(patch.currentZoneId)) {
       patch.visitedZoneIds = [...patch.visitedZoneIds, patch.currentZoneId];
@@ -1486,7 +1534,6 @@ export const useThreeGameStore = create((set, get) => ({
     if (!trimmed) return {};
     const location = getThreeIslandLocation(state.currentZoneId);
     return {
-      curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
       journal: [
         ...state.journal,
         {
@@ -1957,7 +2004,6 @@ export const useThreeGameStore = create((set, get) => ({
       consultedBookIds: firstConsultation
         ? [...state.consultedBookIds, book.id]
         : state.consultedBookIds,
-      curiosity: firstConsultation ? clamp(state.curiosity + 1, 0, MAX_CURIOSITY) : state.curiosity,
       inspectedObject: null,
       inspectedScreenPosition: null,
     };
@@ -1987,7 +2033,6 @@ export const useThreeGameStore = create((set, get) => ({
     // note titled with the scan misfiles the citation the player would quote.
     const pageLabel = printedPage ? `p. ${printedPage}` : `scan p. ${pageNumber}`;
     return {
-      curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
       journal: [...state.journal, {
         id: `${Date.now()}-reading-${book.id}-${pageNumber}`,
         day: state.day,
@@ -2105,7 +2150,7 @@ export const useThreeGameStore = create((set, get) => ({
     const landed = state.inventory.length;
     // A ration on top of what came back unused, not a refill to full: see
     // drawNightlySupplies. Running the case dry on day one is felt on day two.
-    const restocked = drawNightlySupplies(state.supplies, { spareJars: SYMS_BONUS_JARS });
+    const restocked = drawNightlySupplies(state.supplies);
     // Sleeping aboard: advance to the next morning rather than adding a fixed
     // number of hours, so the player always resumes at a workable hour.
     const nextDay = state.day + 1;
@@ -2133,7 +2178,7 @@ export const useThreeGameStore = create((set, get) => ({
         : `Collection landed — day ${state.day}`,
       content: departing
         ? `${departureSummary}. The Beagle stands out of Post Office Bay; whatever was not collected on Charles Island stays there.`
-        : `${summary}. A night's ration of labels, jars, twine and provisions drawn from the hold — the purser measures what he gives out.`,
+        : `${summary}. A night's ration of provisions drawn from the hold — the purser measures what he gives out.`,
     };
     const suppliesDrawn = Object.entries(restocked)
       .map(([key, value]) => ({ id: key, gained: value - (state.supplies[key] || 0) }))
@@ -2146,6 +2191,7 @@ export const useThreeGameStore = create((set, get) => ({
       beagleTravelPrompt: null,
       ...(departing ? { expeditionDeparted: true } : {
         supplies: restocked,
+        minutesSinceMeal: 0,
         day: nextDay,
         timeOfDay: BEAGLE_MORNING_HOUR,
         fatigue: 0,
@@ -2174,6 +2220,59 @@ export const useThreeGameStore = create((set, get) => ({
   }),
   // The zone name is stamped here so the title card has no live store
   // dependencies while it displays.
+  dismissCaseFullChoice: () => set({ caseFullChoice: null }),
+  // 'beagle' begins the standard island travel home to retire for the night;
+  // 'release' opens the case in release mode to free a slot.
+  resolveCaseFullChoice: choice => {
+    const state = get();
+    if (!state.caseFullChoice) return;
+    if (choice === 'beagle') {
+      set({ caseFullChoice: null });
+      if (state.currentZoneId !== 'BEAGLE' && !state.transition) {
+        get().beginZoneTransition('BEAGLE', {
+          source: 'case-full',
+          mode: 'island',
+          minutes: 35,
+          fatigue: 4,
+          note: 'The case is full; Darwin turns back for the ship.',
+        });
+      }
+      return;
+    }
+    if (choice === 'release') set({ caseFullChoice: null, caseReleaseMode: true });
+  },
+  closeCaseReleaseMode: () => set({ caseReleaseMode: false }),
+  releaseSpecimen: index => set(state => {
+    const specimen = state.inventory[index];
+    if (!specimen) return {};
+    const location = getThreeIslandLocation(state.currentZoneId);
+    const message = `You lift the ${specimen.name.toLowerCase()} from the case and let the island have it back.`;
+    const entry = {
+      id: `${Date.now()}-release-${specimen.id}`,
+      day: state.day,
+      timeOfDay: state.timeOfDay,
+      specimenId: specimen.id,
+      specimenName: specimen.name,
+      latin: specimen.latin,
+      location: location.name,
+      method: 'released',
+      authorship: 'field-record',
+      condition: 'released',
+      content: `${specimen.name}: released to make room in the case.`,
+      createdAt: new Date().toISOString(),
+    };
+    return {
+      inventory: state.inventory.filter((item, itemIndex) => itemIndex !== index),
+      collectedSpecimenIds: state.collectedSpecimenIds.filter(id => id !== specimen.id),
+      caseReleaseMode: false,
+      journal: [...state.journal, entry],
+      message,
+      symsLine: '"Room made, sir. Choose its successor well."',
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+      }, state, 'release')),
+    };
+  }),
   dismissNightlyDebrief: () => set(state => (state.nightlyDebrief
     ? {
         nightlyDebrief: null,
@@ -2341,29 +2440,10 @@ export const useThreeGameStore = create((set, get) => ({
         return promptBelongsToSample ? { carryPrompt: null } : {};
       }
       if (state.inventory.length >= state.caseCapacity) {
-        const message = 'The specimen case is full. The basalt chip will have to wait.';
-        const symsLine = 'Syms taps the case lid. "Not an inch of room left, sir."';
         return {
-          message,
-          symsLine,
+          caseFullChoice: { actorId: null, specimenName: sample?.sampleLabel || 'the sample', at: Date.now() },
+          message: 'The specimen case is full.',
           lastOutcome: null,
-          narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
-            narration: message,
-            symsLine,
-          }, state, 'blocked-action')),
-        };
-      }
-      if (state.supplies.labels <= 0) {
-        const message = 'No labels remain. An unlabeled rock chip would be nearly useless back aboard the Beagle.';
-        const symsLine = 'Syms turns out his pockets. "A clean chip needs a clean label, sir."';
-        return {
-          message,
-          symsLine,
-          lastOutcome: null,
-          narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
-            narration: message,
-            symsLine,
-          }, state, 'blocked-action')),
         };
       }
 
@@ -2396,12 +2476,7 @@ export const useThreeGameStore = create((set, get) => ({
       const symsLine = outcome.symsLine || sample?.symsLine || `Syms wraps the ${sampleLabel}. "Best keep the locality clear on the label, sir."`;
 
       return {
-        supplies: {
-          ...state.supplies,
-          labels: Math.max(0, state.supplies.labels - 1),
-        },
         fatigue: clamp(state.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
-        curiosity: clamp(state.curiosity + result.scoreDelta * 5, 0, MAX_CURIOSITY),
         inventory: [
           ...state.inventory,
           {
@@ -2479,7 +2554,7 @@ export const useThreeGameStore = create((set, get) => ({
         harvestedCropIds: [...state.harvestedCropIds, cropKey],
         supplies: {
           ...state.supplies,
-          food: (state.supplies.food || 0) + 1,
+          provisions: (state.supplies.provisions || 0) + 1,
         },
         fatigue: clamp(state.fatigue + 1, 0, MAX_FATIGUE),
         message: reason,
@@ -2523,7 +2598,6 @@ export const useThreeGameStore = create((set, get) => ({
         ];
         patch.journal = [...state.journal, entry];
         patch.collectedSpecimenIds = [...state.collectedSpecimenIds, specimen.id];
-        patch.curiosity = clamp(state.curiosity + result.scoreDelta * 5, 0, MAX_CURIOSITY);
         patch.questComplete = true;
         patch.lastOutcome = { specimen, tool: HANDS_TOOL, result, documented: false };
       }
@@ -2995,7 +3069,6 @@ export const useThreeGameStore = create((set, get) => ({
         examinedTypeIds: firstExamination
           ? [...state.examinedTypeIds, session.typeId]
           : state.examinedTypeIds,
-        curiosity: clamp(state.curiosity + 1, 0, MAX_CURIOSITY),
         message,
         examineSession: { ...state.examineSession, noteSaved: true },
         narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
@@ -3313,7 +3386,7 @@ export const useThreeGameStore = create((set, get) => ({
       ...(recovering ? {
         health: INCAPACITATION_RECOVERY_HEALTH,
         fatigue: INCAPACITATION_RECOVERY_FATIGUE,
-        curiosity: clamp(state.curiosity - INCAPACITATION_CURIOSITY_COST, 0, MAX_CURIOSITY),
+        minutesSinceMeal: 0,
         expeditionOutcome: null,
         activeConstraint: null,
         majorEvent: null,
@@ -3442,36 +3515,23 @@ export const useThreeGameStore = create((set, get) => ({
   triggerNetSnagDilemma: (details = {}) => set(state => {
     if (state.activeConstraint) return {};
     const config = FIELD_DILEMMA_CONFIG.net_snagged;
-    const eventId = `major-net-snag-${Date.now()}`;
     const hazardLabel = details.hazardLabel || 'cactus spines';
     const message = `The insect net catches on ${hazardLabel}. The mesh is under tension, and a hard pull would tear it.`;
     return {
       activeConstraint: {
         type: 'net_snagged',
-        requiresNarratorInput: true,
         movementLock: true,
         blockedTools: ['insect_net'],
         toolId: 'insect_net',
         startedAt: Date.now(),
         attempts: 0,
         details,
-        composerPlaceholder: config.placeholder,
         reaction: {
           clip: 'stumble',
           duration: ACTION_DURATION.stumble,
           lockMovement: 0.28,
           interrupt: true,
         },
-      },
-      majorEvent: {
-        id: eventId,
-        type: 'net_snagged',
-        severity: 'warning',
-        title: config.title,
-        body: config.body,
-        helper: config.helper,
-        requiresNarratorInput: true,
-        createdAt: Date.now(),
       },
       message,
       symsLine: '"Steady, sir. The mesh will not thank us for brute force."',
@@ -3486,13 +3546,11 @@ export const useThreeGameStore = create((set, get) => ({
   triggerHammerShardDilemma: (details = {}) => set(state => {
     if (state.activeConstraint) return {};
     const config = FIELD_DILEMMA_CONFIG.hammer_shard;
-    const eventId = `major-hammer-shard-${Date.now()}`;
     const sampleLabel = details.sampleLabel || details.material || 'rock';
     const message = `A sharp ${sampleLabel} chip snaps back from the hammer strike and catches you before it falls into the dust.`;
     return {
       activeConstraint: {
         type: 'hammer_shard',
-        requiresNarratorInput: true,
         movementLock: false,
         movementSpeedScale: 0.88,
         blockedTools: ['hammer'],
@@ -3501,23 +3559,12 @@ export const useThreeGameStore = create((set, get) => ({
         attempts: 0,
         healthPenalty: 6,
         details,
-        composerPlaceholder: config.placeholder,
         reaction: {
           clip: 'hitReaction',
           duration: ACTION_DURATION.hitReaction,
           lockMovement: 0.38,
           interrupt: true,
         },
-      },
-      majorEvent: {
-        id: eventId,
-        type: 'hammer_shard',
-        severity: 'danger',
-        title: config.title,
-        body: config.body,
-        helper: config.helper,
-        requiresNarratorInput: true,
-        createdAt: Date.now(),
       },
       message,
       symsLine: '"Best look to your hand before the stone, sir."',
@@ -3538,12 +3585,10 @@ export const useThreeGameStore = create((set, get) => ({
     const symsLine = '"Mind the cactus, sir. Those spines will write their own field note."';
     const embedSpines = Boolean(options.embedSpines && !state.activeConstraint);
     const config = FIELD_DILEMMA_CONFIG.cactus_spines;
-    const eventId = `major-cactus-spines-${Date.now()}`;
     return {
       ...(embedSpines ? {
         activeConstraint: {
           type: 'cactus_spines',
-          requiresNarratorInput: true,
           movementLock: false,
           movementSpeedScale: 0.72,
           disableRun: true,
@@ -3557,7 +3602,6 @@ export const useThreeGameStore = create((set, get) => ({
             injuryChance: Number.isFinite(Number(options.injuryChance)) ? Number(options.injuryChance) : null,
             severeFall: Boolean(options.severeFall),
           },
-          composerPlaceholder: config.placeholder,
           reaction: options.severeFall
             ? {
                 clip: 'shoulderHitAndFall',
@@ -3573,16 +3617,6 @@ export const useThreeGameStore = create((set, get) => ({
                 lockMovement: 0.36,
                 interrupt: true,
               },
-        },
-        majorEvent: {
-          id: eventId,
-          type: 'cactus_spines',
-          severity: 'danger',
-          title: config.title,
-          body: config.body,
-          helper: config.helper,
-          requiresNarratorInput: true,
-          createdAt: Date.now(),
         },
       } : {}),
       message,
@@ -3623,7 +3657,7 @@ export const useThreeGameStore = create((set, get) => ({
   completeRest: (sessionId = null) => set(state => {
     if (!state.restSession || state.restSession.phase !== 'resting') return {};
     if (sessionId && state.restSession.id !== sessionId) return {};
-    const provisioned = state.supplies.food > 0 && state.supplies.water > 0;
+    const provisioned = (state.supplies.provisions || 0) > 0;
     const zone = getZone(state.currentZoneId);
     const flavor = restFlavor({
       zoneId: state.currentZoneId,
@@ -3636,14 +3670,15 @@ export const useThreeGameStore = create((set, get) => ({
     const fatigueAfter = clamp(state.fatigue - (provisioned ? 26 : 12), 0, MAX_FATIGUE);
     const message = `${flavor.line} ${flavor.provision}`;
     const educationalNote = 'Fieldwork depended on pacing: heat, daylight, and fatigue changed what a naturalist could safely collect.';
+    const suppliesAfter = advanced.supplies || state.supplies;
     return {
       ...advanced,
+      minutesSinceMeal: 0,
       fatigue: fatigueAfter,
-      health: clamp(state.health + (provisioned ? 10 : 4), 0, MAX_HEALTH),
+      health: clamp((advanced.health ?? state.health) + (provisioned ? 10 : 4), 0, MAX_HEALTH),
       supplies: {
-        ...state.supplies,
-        food: Math.max(0, state.supplies.food - 1),
-        water: Math.max(0, state.supplies.water - 1),
+        ...suppliesAfter,
+        provisions: Math.max(0, (suppliesAfter.provisions || 0) - 1),
       },
       restSession: {
         ...state.restSession,
@@ -3736,55 +3771,28 @@ export const useThreeGameStore = create((set, get) => ({
     };
   }),
 
-  applyFieldDilemmaResolution: (data, options = {}) => set(state => {
+  // The one exit from a field dilemma: an authored choice with a
+  // deterministic cost in time or health. Clearing the constraint restores
+  // movement and unblocks the tool.
+  resolveFieldDilemmaChoice: choiceId => set(state => {
     const constraint = state.activeConstraint;
     const config = FIELD_DILEMMA_CONFIG[constraint?.type];
-    if (!constraint || !config) return { narratorPending: false };
-    const consequence = String(data?.consequence || '').trim() || (data?.resolved ? 'resolved' : 'still_pending');
-    const resolved = data?.resolved === true || consequence === 'resolved' || consequence === 'freed';
-    const rawHealthDelta = Number(data?.healthDelta);
-    const healthDelta = Number.isFinite(rawHealthDelta)
-      ? clamp(rawHealthDelta, -8, 4)
-      : (consequence === 'worse' ? -3 : 0);
-    const nextAttempts = (constraint.attempts || 0) + 1;
-    const narration = data?.narration || (resolved ? config.resolvedFallback : config.failureFallback);
-    const nextConstraint = resolved
-      ? null
-      : {
-          ...constraint,
-          attempts: nextAttempts,
-          lastAttempt: options.playerInput || '',
-          lastAttemptAt: Date.now(),
-        };
-    const nextMajorEvent = resolved
-      ? null
-      : {
-          id: `major-${constraint.type}-${nextAttempts}-${Date.now()}`,
-          type: constraint.type,
-          severity: consequence === 'worse' ? 'danger' : 'warning',
-          title: consequence === 'worse' ? config.retryTitle : config.retryTitle,
-          body: consequence === 'worse'
-            ? 'The attempted remedy has made the problem worse.'
-            : config.retryBody,
-          helper: config.helper,
-          requiresNarratorInput: true,
-          createdAt: Date.now(),
-        };
+    const choice = config?.choices?.find(item => item.id === choiceId);
+    if (!constraint || !choice) return {};
+    const advanced = choice.minutes > 0 ? advanceTimeState(state, choice.minutes) : {};
     return {
-      activeConstraint: nextConstraint,
-      majorEvent: nextMajorEvent,
-      message: narration,
-      narratorPending: false,
-      narratorError: data?.fallback ? 'Narration fell back to a local field ruling.' : null,
+      ...advanced,
+      activeConstraint: null,
+      majorEvent: null,
+      message: choice.narration,
+      symsLine: choice.symsLine,
       narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
-        ...data,
-        narration,
-      }, state, resolved ? `${constraint.type}-resolved` : `${constraint.type}-failed`, {
-        allowThought: false,
-      })),
-      ...(healthDelta < 0
-        ? healthDamagePatch(state, { amount: -healthDelta, source: constraint.type || 'field_injury' })
-        : { health: clamp(state.health + healthDelta, 0, MAX_HEALTH) }),
+        narration: choice.narration,
+        symsLine: choice.symsLine,
+      }, state, `${constraint.type}-resolved`)),
+      ...(choice.healthCost > 0
+        ? healthDamagePatch(state, { amount: choice.healthCost, source: constraint.type })
+        : {}),
     };
   }),
 
@@ -3886,16 +3894,6 @@ export const useThreeGameStore = create((set, get) => ({
     ].join(':');
 
     if (!narratorRequestsAllowed()) {
-      if (state.activeConstraint?.type === 'snare_immobilized') {
-        const resolved = localSnareEscapeResolution(trimmed);
-        get().applySnareEscapeResolution(resolved, { playerInput: trimmed });
-        return resolved;
-      }
-      if (FIELD_DILEMMA_TYPES.has(state.activeConstraint?.type)) {
-        const resolved = localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
-        get().applyFieldDilemmaResolution(resolved, { playerInput: trimmed });
-        return resolved;
-      }
       const data = localNarratorFallback({
         input: trimmed,
         nearbySpecimen,
@@ -3907,117 +3905,6 @@ export const useThreeGameStore = create((set, get) => ({
         allowThought: false,
       });
       return data;
-    }
-
-    if (state.activeConstraint?.type === 'snare_immobilized') {
-      try {
-        const response = await fetchWithTimeout('/api/three-narrate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-young-darwin-session': narratorSessionId(state.seed),
-            'x-idempotency-key': idempotencyKey,
-          },
-          body: JSON.stringify({
-            eventType: 'snare_escape_attempt',
-            playableModeId: state.playableModeId,
-            playerInput: trimmed,
-            objective: 'Escape the snare before resuming fieldwork.',
-            location: islandLocation.name || zone.name,
-            locationContext: {
-              id: zone.id,
-              localCellId: state.currentLocalCellId,
-              island: zone.island,
-              historicalName: zone.historicalName,
-              biome: zone.biome,
-              description: zone.loadingNote || zone.description || islandLocation.subtitle || '',
-              discoveries: zone.discoveries || [],
-              notableFeatures: zone.notableFeatures || [],
-            },
-            weather: state.weather,
-            timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
-            day: state.day,
-            stats: {
-              health: state.health,
-              fatigue: state.fatigue,
-              curiosity: state.curiosity,
-            },
-            playerPose: {
-              x: Number.isFinite(Number(pose?.position?.x)) ? Number(pose.position.x).toFixed(1) : null,
-              z: Number.isFinite(Number(pose?.position?.z)) ? Number(pose.position.z).toFixed(1) : null,
-              heading: playerHeading(pose),
-            },
-            recentNarration,
-            constraint: state.activeConstraint,
-            idempotencyKey,
-          }),
-        });
-        const data = response.ok ? await response.json() : localSnareEscapeResolution(trimmed);
-        const resolved = data?.escapeSucceeded === undefined ? localSnareEscapeResolution(trimmed) : data;
-        get().applySnareEscapeResolution(resolved, { playerInput: trimmed });
-        return resolved;
-      } catch {
-        const fallback = localSnareEscapeResolution(trimmed);
-        get().applySnareEscapeResolution(fallback, { playerInput: trimmed });
-        return fallback;
-      }
-    }
-
-    if (FIELD_DILEMMA_TYPES.has(state.activeConstraint?.type)) {
-      const config = FIELD_DILEMMA_CONFIG[state.activeConstraint.type];
-      try {
-        const response = await fetchWithTimeout('/api/three-narrate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-young-darwin-session': narratorSessionId(state.seed),
-            'x-idempotency-key': idempotencyKey,
-          },
-          body: JSON.stringify({
-            eventType: config.eventType,
-            playableModeId: state.playableModeId,
-            playerInput: trimmed,
-            objective: config.objective,
-            location: islandLocation.name || zone.name,
-            locationContext: {
-              id: zone.id,
-              localCellId: state.currentLocalCellId,
-              island: zone.island,
-              historicalName: zone.historicalName,
-              biome: zone.biome,
-              description: zone.loadingNote || zone.description || islandLocation.subtitle || '',
-              discoveries: zone.discoveries || [],
-              notableFeatures: zone.notableFeatures || [],
-            },
-            toolId: state.activeConstraint.toolId || tool?.id || state.activeToolId || 'hands',
-            weather: state.weather,
-            timeOfDay: `${Math.floor(state.timeOfDay || 0)}:${String(Math.floor(((state.timeOfDay || 0) % 1) * 60)).padStart(2, '0')}`,
-            day: state.day,
-            stats: {
-              health: state.health,
-              fatigue: state.fatigue,
-              curiosity: state.curiosity,
-            },
-            playerPose: {
-              x: Number.isFinite(Number(pose?.position?.x)) ? Number(pose.position.x).toFixed(1) : null,
-              z: Number.isFinite(Number(pose?.position?.z)) ? Number(pose.position.z).toFixed(1) : null,
-              heading: playerHeading(pose),
-            },
-            recentNarration,
-            nearbyPeople,
-            constraint: state.activeConstraint,
-            idempotencyKey,
-          }),
-        });
-        const data = response.ok ? await response.json() : localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
-        const resolved = data?.resolved === undefined ? localFieldDilemmaResolution(state.activeConstraint.type, trimmed) : data;
-        get().applyFieldDilemmaResolution(resolved, { playerInput: trimmed });
-        return resolved;
-      } catch {
-        const fallback = localFieldDilemmaResolution(state.activeConstraint.type, trimmed);
-        get().applyFieldDilemmaResolution(fallback, { playerInput: trimmed });
-        return fallback;
-      }
     }
 
     try {
@@ -4435,7 +4322,6 @@ export const useThreeGameStore = create((set, get) => ({
             : item
         )),
         fatigue: clamp(current.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
-        curiosity: clamp(current.curiosity + (collected ? result.scoreDelta * 5 : 4), 0, MAX_CURIOSITY),
         supplies: collected
           ? {
               ...current.supplies,
@@ -4445,7 +4331,12 @@ export const useThreeGameStore = create((set, get) => ({
                 : current.supplies.spareJars,
             }
           : current.supplies,
-        inventory: collected ? [...current.inventory, { ...resolvedSpecimen, condition: result.outcomeType }] : current.inventory,
+        inventory: collected ? [...current.inventory, {
+          ...resolvedSpecimen,
+          condition: result.outcomeType,
+          sourceZoneId: current.currentZoneId,
+          sourceZoneName: islandLocation.name,
+        }] : current.inventory,
         journal: entry ? [...current.journal, entry] : current.journal,
         examinedTypeIds: resolvedSpecimen && !current.examinedTypeIds.includes(resolvedSpecimen.id)
           ? [...current.examinedTypeIds, resolvedSpecimen.id]
@@ -4490,12 +4381,6 @@ export const useThreeGameStore = create((set, get) => ({
       const actorId = item.instanceId || item.id;
       return !collectedActorIds.has(actorId) && (actorId === specimenId || item.id === specimenId);
     });
-    if (tool.id === 'snare') {
-      return get().placeSnareTrap({
-        targetSpecimenId: specimen?.id || null,
-        targetActorId: specimen ? snareActorId(specimen) : null,
-      });
-    }
     if (!specimen) return null;
     const actorId = specimen.instanceId || specimen.id;
 
@@ -4503,30 +4388,15 @@ export const useThreeGameStore = create((set, get) => ({
     const alreadyCollected = state.collectedSpecimenIds.includes(specimen.id);
     const documented = tool.id === 'sketch' || alreadyCollected;
 
-    // Supplies and case space gate physical collection (documenting is always free).
-    if (!documented) {
-      const needsJar = specimenNeedsJar(specimen, tool.id);
-      const blocked = state.inventory.length >= state.caseCapacity
-        ? { message: 'The specimen case is full. Something must be documented and released, or carried loose at its peril.', syms: 'Syms taps the case lid. "Not an inch of room left, sir."' }
-        : state.supplies.labels <= 0
-          ? { message: 'No labels remain. An unlabeled specimen is a scientific orphan — better to document it instead.', syms: 'Syms turns out his pockets. "Last label went on the finch, sir."' }
-          : needsJar && state.supplies.spareJars <= 0
-            ? { message: 'No spirit jars remain for a wet specimen. Document it, or come back provisioned.', syms: 'Syms checks the bottle slots in the collecting case. "Glass is all spoken for, sir."' }
-            : tool.id === 'snare' && state.supplies.twine <= 0
-              ? { message: 'No twine left to set a snare. The lizards remain at liberty.', syms: '"Used the last of the twine on the case lashings, sir."' }
-	              : null;
-      if (blocked) {
-        set(current => ({
-          message: blocked.message,
-          symsLine: blocked.syms,
-          lastOutcome: null,
-          narratorLog: appendNarratorEvents(current.narratorLog, narrationPayloadToEvents({
-            narration: blocked.message,
-            symsLine: blocked.syms,
-          }, current, 'blocked-action')),
-        }));
-        return null;
-      }
+    // The case is the only limit on taking specimens. Full case: the player
+    // chooses between retiring to the Beagle and releasing something.
+    if (!documented && state.inventory.length >= state.caseCapacity) {
+      set({
+        caseFullChoice: { actorId, specimenName: specimen.name, at: Date.now() },
+        message: 'The specimen case is full.',
+        lastOutcome: null,
+      });
+      return null;
     }
     const result = documented
       ? {
@@ -4552,15 +4422,6 @@ export const useThreeGameStore = create((set, get) => ({
 
     const entry = makeJournalEntry({ specimen, tool, result, documented, location: islandLocation, day: state.day, timeOfDay: state.timeOfDay });
     const collected = result.success && !documented;
-    const spendSupplies = current => {
-      const supplies = { ...current.supplies };
-      if (tool.id === 'snare') supplies.twine = Math.max(0, supplies.twine - 1);
-      if (!collected) return supplies;
-      supplies.labels = Math.max(0, supplies.labels - 1);
-      if (specimenNeedsJar(specimen, tool.id)) supplies.spareJars = Math.max(0, supplies.spareJars - 1);
-      if (specimenIsInsect(specimen)) supplies.pins = Math.max(0, supplies.pins - 2);
-      return supplies;
-    };
 
     set(current => {
       const educationalNote = documented
@@ -4576,10 +4437,13 @@ export const useThreeGameStore = create((set, get) => ({
         : `Syms peers over your shoulder. "A note is better than a ruined specimen, sir."`;
       const source = documented ? 'documentation' : 'collection';
       return {
-        supplies: spendSupplies(current),
         fatigue: clamp(current.fatigue + result.fatigueDelta, 0, MAX_FATIGUE),
-        curiosity: clamp(current.curiosity + (documented ? 10 : result.scoreDelta * 5), 0, MAX_CURIOSITY),
-        inventory: collected ? [...current.inventory, { ...specimen, condition: result.outcomeType }] : current.inventory,
+        inventory: collected ? [...current.inventory, {
+          ...specimen,
+          condition: result.outcomeType,
+          sourceZoneId: current.currentZoneId,
+          sourceZoneName: islandLocation.name,
+        }] : current.inventory,
         journal: [...current.journal, entry],
         collectedSpecimenIds: collected && !current.collectedSpecimenIds.includes(specimen.id)
           ? [...current.collectedSpecimenIds, specimen.id]
@@ -4636,7 +4500,7 @@ export const useThreeGameStore = create((set, get) => ({
       emitPropEvent('fieldwork-foley', {
         kind: 'container',
         specimenId: specimen.id,
-        needsJar: specimenNeedsJar(specimen, tool.id),
+        needsJar: false,
         position: state.playerPose?.position || threeRuntimeState.playerPose.position,
       });
     }

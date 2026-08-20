@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 
 const gradientCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+let toonGradient = null;
 
 export function getToonGradient() {
   if (!gradientCanvas) return null;
+  if (toonGradient) return toonGradient;
   gradientCanvas.width = 4;
   gradientCanvas.height = 1;
   const context = gradientCanvas.getContext('2d');
@@ -15,11 +17,11 @@ export function getToonGradient() {
   context.fillRect(2, 0, 1, 1);
   context.fillStyle = '#ffffff';
   context.fillRect(3, 0, 1, 1);
-  const texture = new THREE.CanvasTexture(gradientCanvas);
-  texture.minFilter = THREE.NearestFilter;
-  texture.magFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  return texture;
+  toonGradient = new THREE.CanvasTexture(gradientCanvas);
+  toonGradient.minFilter = THREE.NearestFilter;
+  toonGradient.magFilter = THREE.NearestFilter;
+  toonGradient.generateMipmaps = false;
+  return toonGradient;
 }
 
 export function toonMaterial(color, options = {}) {

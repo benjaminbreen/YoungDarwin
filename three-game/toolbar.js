@@ -3,7 +3,7 @@ export const DARWIN_TOOLBAR_SLOT_COUNT = 6;
 export const DEFAULT_DARWIN_TOOLBAR = Object.freeze([
   'shotgun',
   'insect_net',
-  'snare',
+  'pocket_knife',
   'hammer',
   'hands',
   'sketch',

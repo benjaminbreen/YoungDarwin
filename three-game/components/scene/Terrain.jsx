@@ -2,6 +2,7 @@
 
 import React, {
   Suspense,
+  useEffect,
   useMemo,
   useSyncExternalStore,
 } from 'react';
@@ -13,6 +14,7 @@ import {
 } from '../../world/terrainGeometry';
 import { readTerrainResource } from '../../world/terrainResource';
 import { getRegionDefinition } from '../../world/regions';
+import { isConstrainedMemoryDevice } from '../../world/constrainedDevice';
 import { createPlaceholderPbrTerrainMaterial } from '../../world/regions/materials/placeholderPbrTerrain';
 import { readBorderVistaResource } from '../../world/vistas/borderVistaResource';
 import {
@@ -300,6 +302,19 @@ function injectTerrainRenderingExtensions(material) {
 }
 
 const terrainMaterialCache = new Map();
+let terrainMaterialUseCounter = 0;
+
+function pruneTerrainMaterialCache(protectedRegionId = null) {
+  const limit = isConstrainedMemoryDevice() ? 1 : 4;
+  const candidates = Array.from(terrainMaterialCache.entries())
+    .filter(([regionId, entry]) => regionId !== protectedRegionId && entry.references === 0)
+    .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+  while (terrainMaterialCache.size > limit && candidates.length) {
+    const [regionId, entry] = candidates.shift();
+    entry.material.dispose();
+    terrainMaterialCache.delete(regionId);
+  }
+}
 
 function ensureTerrainApronDepthAttribute(geometry, value = -1) {
   if (!geometry || geometry.getAttribute('aApronDepth')) return geometry;
@@ -319,15 +334,38 @@ function ensureTerrainApronDepthAttribute(geometry, value = -1) {
 // large authored shader while the island chart is on screen.
 export function getTerrainRenderMaterial(regionId) {
   const cached = terrainMaterialCache.get(regionId);
-  if (cached) return cached;
+  if (cached) {
+    cached.lastUsed = ++terrainMaterialUseCounter;
+    return cached.material;
+  }
   const regionDefinition = getRegionDefinition(regionId);
   const config = getRegionTerrainConfig(regionId);
   const baseMaterial = regionDefinition?.createTerrainMaterial
     ? regionDefinition.createTerrainMaterial()
     : createPlaceholderPbrTerrainMaterial({ regionType: config.type });
   const material = injectTerrainRenderingExtensions(baseMaterial);
-  terrainMaterialCache.set(regionId, material);
+  terrainMaterialCache.set(regionId, {
+    material,
+    references: 0,
+    lastUsed: ++terrainMaterialUseCounter,
+  });
+  pruneTerrainMaterialCache(regionId);
   return material;
+}
+
+function retainTerrainRenderMaterial(regionId) {
+  const entry = terrainMaterialCache.get(regionId);
+  if (!entry) return () => {};
+  entry.references += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = terrainMaterialCache.get(regionId);
+    if (!current) return;
+    current.references = Math.max(0, current.references - 1);
+    pruneTerrainMaterialCache();
+  };
 }
 
 export function Terrain({ segmentCap = null }) {
@@ -339,6 +377,7 @@ export function Terrain({ segmentCap = null }) {
     () => getTerrainRenderMaterial(currentZoneId),
     [currentZoneId],
   );
+  useEffect(() => retainTerrainRenderMaterial(currentZoneId), [currentZoneId]);
 
   // Drives the rhythmic swash line and the underwater caustics.
   useFrame(({ clock }) => {

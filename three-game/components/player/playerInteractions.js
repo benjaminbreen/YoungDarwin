@@ -623,7 +623,24 @@ export function updatePlayerInteractions({
     const specimen = target?.kind === 'specimen'
       ? zoneSpecimens.find(item => item && ((item.instanceId || item.id) === target.actorId || item.id === target.typeId))
       : null;
-    if (!fieldAction) {
+    // A shot animal owns the field action outright. The ambient probe can
+    // otherwise resolve to the scrub the carcass is lying in, so Enter took a
+    // sample of the grass instead of opening the specimen.
+    const downedActorId = currentState.nearbySpecimenId
+      && currentState.downedSpecimenActors?.[currentState.nearbySpecimenId]
+      ? currentState.nearbySpecimenId
+      : null;
+    const downedSpecimen = downedActorId
+      ? zoneSpecimens.find(item => item && (item.instanceId || item.id) === downedActorId)
+      : null;
+    if (downedSpecimen) {
+      if (currentState.activeToolId === 'hands'
+        && !currentState.examinedTypeIds?.includes(downedSpecimen.id)) {
+        if (!currentState.examineSession) openExamine(downedActorId);
+      } else {
+        startSpecimenCollection(currentState, downedSpecimen);
+      }
+    } else if (!fieldAction) {
       currentState.toggleObservationMode?.();
     } else if (fieldAction.kind === 'collect' && specimen) {
       startSpecimenCollection(currentState, specimen);

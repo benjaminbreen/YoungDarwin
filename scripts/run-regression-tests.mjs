@@ -141,12 +141,25 @@ const {
 const {
   buildSessionSnapshot,
   isUsableSessionSnapshot,
+  SESSION_SAVE_VERSION,
   summarizeSessionSnapshot,
 } = loadModule('three-game/sessionSave.js');
 const {
   normalizeQualityPreference,
   resolveQualityPreference,
 } = loadModule('three-game/qualityPreference.js');
+const {
+  buildEffectiveDprLadder,
+  classifyAutomaticGraphicsQuality,
+} = loadModule('three-game/automaticQuality.js');
+const {
+  cachedGpuResource,
+  clearGpuResourceCache,
+  gpuResourceCacheStats,
+  retainGpuResource,
+  setGpuResourceCacheLimit,
+  sweepInactiveGpuResources,
+} = loadModule('three-game/world/gpuResourceCache.js');
 const { clampFrameDelta } = loadModule('three-game/frameTiming.js');
 const {
   buildSpecimenDocumentationNote,
@@ -267,6 +280,7 @@ const {
   publishContextPromptState,
 } = loadModule('three-game/ui/contextPromptService.js');
 const {
+  isAmbientObstacleExaminable,
   resolveFieldAction,
   sameFieldAction,
 } = loadModule('three-game/fieldActions.js');
@@ -524,6 +538,7 @@ const {
 const {
   getInteriorDefinition,
   getInteriorPropSpawns,
+  getInteriorTransitions,
 } = loadModule('three-game/interiors/interiorRegistry.js');
 const {
   beagleCabinRegion,
@@ -1928,13 +1943,13 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
   assert.match(gameSource, /BOOT_DEGRADED_READY_TIMEOUT_MS = 10000/);
   assert.match(
     gameSource,
-    /loadingContentTarget = screenshotMode\s*\?\s*STARTUP_FULL_CONTENT_PHASE\s*:\s*STARTUP_OPENING_CONTENT_PHASE/,
-    'functional smoke should exercise the same essential readiness boundary as players',
+    /loadingContentTarget = screenshotMode \|\| playableModeId === 'darwin'\s*\?\s*STARTUP_FULL_CONTENT_PHASE\s*:\s*STARTUP_OPENING_CONTENT_PHASE/,
+    'Darwin should keep bulk scene work behind the launch cover',
   );
   assert.match(
     gameSource,
     /CONTENT_MOUNT_STEPS\.filter\(\s*phase => phase > Math\.max\(loadingContentTarget, startupContentPhase\)/,
-    'late startup content should stream after the essential scene is ready',
+    'non-Darwin modes may still stream late content after their essential scene is ready',
   );
   assert.match(
     gameSource,
@@ -2030,7 +2045,11 @@ test('Darwin launch uses its historical prologue as scene-loading cover', () => 
     /specimenVisualCount < expectedSpecimenCount/,
     'specimen streaming must not gate the opening',
   );
-  assert.match(gameSource, /actorMotionPaused=\{!gameUiVisible \|\| Boolean\(transition\)\}/);
+  assert.match(
+    gameSource,
+    /actorMotionPaused=\{!gameUiVisible \|\| Boolean\(transition\) \|\| webglContextLost\}/,
+    'actors should remain paused through launch, travel, and graphics-context recovery',
+  );
   assert.match(zoneContentSource, /<SymsCovington motionPaused=\{actorMotionPaused\}/);
   assert.match(
     symsSource,
@@ -3177,6 +3196,25 @@ test('field actions use the equipped modality while hands remain the observation
   assert.equal(collect.label, 'Collect Galapagos cotton with hammer');
   assert.equal(sameFieldAction(hammerPlant, { ...hammerPlant }), true);
   assert.equal(sameFieldAction(hammerPlant, hammerBottle), false);
+});
+
+test('ambient field targets ignore generic structure collision shells', () => {
+  assert.equal(isAmbientObstacleExaminable({ kind: 'structure', id: 'interior-wall' }), false);
+  assert.equal(isAmbientObstacleExaminable({ kind: 'furniture', id: 'dining-table' }), false);
+  assert.equal(isAmbientObstacleExaminable({ kind: 'ledge', id: 'broad-collider' }), false);
+  assert.equal(isAmbientObstacleExaminable({ kind: 'boat', id: 'hull-collider' }), false);
+  assert.equal(isAmbientObstacleExaminable({ kind: 'rock', id: 'basalt-block' }), true);
+  assert.equal(isAmbientObstacleExaminable({ kind: 'tree', id: 'palo-santo' }), true);
+  assert.equal(isAmbientObstacleExaminable({
+    kind: 'structure',
+    id: 'mail-barrel',
+    fieldExaminable: { label: 'Post Office barrel', typeId: 'post-office-barrel' },
+  }), true);
+  assert.equal(isAmbientObstacleExaminable({
+    kind: 'structure',
+    id: 'authored-shell',
+    definition: { gameplay: { fieldExaminable: 'weathered cabin wall' } },
+  }), true);
 });
 
 test('Lava Flats movement terrain contains all collision-scale relief', () => {
@@ -5080,6 +5118,106 @@ test('island travel covers the source before commit and renders the hidden desti
   );
 });
 
+test('travel readiness never bypasses critical resources on a fixed timer', () => {
+  const source = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  assert.equal(source.includes('TRANSITION_READY_DEADLINE_MS'), false);
+  assert.match(source, /TRANSITION_PREWARM_DEGRADED_TIMEOUT_MS/);
+  assert.match(source, /if \(!terrainResourceIsReady\(active\.zoneId, segmentCap\)\)/);
+  assert.match(source, /if \(loaderBusy\)/);
+  assert.match(source, /if \(!prewarmComplete && !degradedPrewarm\)/);
+});
+
+test('intact destructible timber batches visuals and Beagle practicals avoid cubemap shadows', () => {
+  const structureSource = fs.readFileSync(
+    path.resolve('three-game/physics/structures/DestructibleTimberStructure.jsx'),
+    'utf8',
+  );
+  const interiorSource = fs.readFileSync(
+    path.resolve('three-game/interiors/interiorRegistry.js'),
+    'utf8',
+  );
+  assert.match(structureSource, /function IntactTimberBatch/);
+  assert.match(structureSource, /<instancedMesh/);
+  assert.match(structureSource, /renderVisual=\{piece\.dynamic \|\| runtime\.current\.released\.has\(piece\.id\)\}/);
+  assert.match(structureSource, /\{piece\.shape === 'cylinder' \? \(\s*<CylinderCollider/);
+  assert.match(structureSource, /\{renderVisual && \(piece\.shape === 'cylinder'/);
+  assert.match(interiorSource, /id: 'captain-port'[^\n]+castShadow: false/);
+  assert.match(interiorSource, /id: 'captain-starboard'[^\n]+castShadow: false/);
+});
+
+test('movement-locking dilemmas expose authored exits and weak-GPU HUD avoids duplicate heavy work', () => {
+  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  const celebrationSource = fs.readFileSync(
+    path.resolve('three-game/ui/CollectionCelebration.jsx'),
+    'utf8',
+  );
+  assert.match(storeSource, /resolveActiveConstraintChoice: input =>/);
+  assert.match(hudSource, /net_snagged: \['Work the mesh carefully backward/);
+  assert.match(hudSource, /onClick=\{\(\) => resolveActiveConstraintChoice\(choice\)\}/);
+  assert.match(hudSource, /compactDesktopMapMounted &&/);
+  assert.match(hudSource, /wideFieldRailMounted &&/);
+  assert.match(celebrationSource, /isSuccess && !lightweightEffects/);
+});
+
+test('field teaching copy stays readable in the persistent control guidance', () => {
+  const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  assert.match(hudSource, /Press the <ControlHintKey>Space bar<\/ControlHintKey> to jump\./);
+  assert.match(hudSource, /After you examine it, you can collect a sample\./);
+  assert.match(hudSource, /setRetainedContextHintId\(HINT_STUDY\)/);
+  assert.match(hudSource, /\}, 12000\)/);
+  assert.match(hudSource, /renderedContextPrompt\.hintId !== HINT_STUDY/);
+  assert.equal(hudSource.includes('Enter studies a subject first'), false);
+  assert.ok(hudSource.includes('lg:max-w-[min(30rem,calc(50vw-11.75rem))]'));
+  assert.ok(hudSource.includes('xl:max-w-[min(30rem,calc(50vw-27.5rem))]'));
+  assert.ok(hudSource.includes('<div className="min-w-0 text-right">'));
+  assert.equal(hudSource.includes('lg:w-[min(38rem'), false);
+  assert.equal(hudSource.includes('lg:bottom-[4.75rem]'), false);
+  assert.equal(hudSource.includes('motion-safe:animate-control-hint-attention'), false);
+});
+
+test('status-panel specimen tally exposes rarity, locality, and precise case navigation', () => {
+  const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const globalStyles = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
+  assert.match(hudSource, /function SpecimenCaseTally/);
+  assert.match(hudSource, /onClick=\{onOpenCase\}/);
+  assert.match(hudSource, /openSpecimenDetail\(inventory, slotIndex\)/);
+  assert.match(hudSource, /role="tooltip"/);
+  assert.match(hudSource, /<SpecimenPortrait specimen=\{specimen\}/);
+  assert.match(hudSource, />Locality</);
+  assert.match(hudSource, /PolishedVitalStatusPanel onOpenCase=\{\(\) => openInventoryTab\('case'\)\}/);
+  assert.match(storeSource, /sourceZoneId: current\.currentZoneId/);
+  assert.match(storeSource, /sourceZoneName: islandLocation\.name/);
+  assert.match(globalStyles, /@keyframes case-tally-fill/);
+  assert.match(globalStyles, /@keyframes case-tally-spark/);
+});
+
+test('interior charts retain island orientation and expose their authored quick exits', () => {
+  const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  for (const interiorId of ['LAWSON_HOUSE', 'BEAGLE_CABIN']) {
+    const exits = getInteriorTransitions(interiorId);
+    assert.equal(exits.length, 1, `${interiorId} should have one unambiguous quick exit`);
+    assert.ok(exits[0].toRegionId);
+    assert.ok(exits[0].entryEdge);
+  }
+  assert.match(hudSource, /data-testid="interior-quick-exit"/);
+  assert.match(hudSource, /source: 'interior-chart'/);
+  assert.match(hudSource, /<PanelTabs[\s\S]*views\.map\(id =>/);
+  assert.match(hudSource, /<IslandOverview[\s\S]*zoneId=\{currentZoneId\}/);
+});
+
+test('journal dismissal clears typing mode and runtime failures retain player recovery actions', () => {
+  const notebookSource = fs.readFileSync(path.resolve('field-notebook/FieldNotebook.jsx'), 'utf8');
+  const launchSource = fs.readFileSync(path.resolve('three-game/ui/ThreeLaunchShell.jsx'), 'utf8');
+  const errorSource = fs.readFileSync(path.resolve('three-game/ui/ThreeGameErrorBoundary.jsx'), 'utf8');
+  assert.match(notebookSource, /if \(!panel\) setTypingMode\(false\)/);
+  assert.match(notebookSource, /const close = \(\) => \{\s*setTypingMode\(false\);/);
+  assert.match(launchSource, /<ThreeGameErrorBoundary onReturnToMenu=\{exitToMenu\}>/);
+  assert.match(errorSource, /Reload and continue/);
+  assert.match(errorSource, /Return to main menu/);
+});
+
 test('island chart reserves persistent labels for major landmarks', () => {
   assert.equal(getIslandMapLocation('POST_OFFICE_BAY').labelAlways, true);
   assert.equal(getIslandMapLocation('N_SHORE').labelAlways, false);
@@ -5639,6 +5777,16 @@ test('session snapshots carry resumable expedition progress only', () => {
     visitedZoneIds: ['POST_OFFICE_BAY', 'E_MID'],
     journal: [{ content: 'a note' }, { content: 'another' }],
     supplies: { twine: 4 },
+    assessmentPlayerTranscript: [{
+      id: 'turn-1',
+      text: 'I compared the finches feeding on hard seeds with those near the shore.',
+      day: 1,
+      zoneId: 'POST_OFFICE_BAY',
+      symsNearby: true,
+    }],
+    npcEncounterState: {
+      syms_covington: { trust: 64, flags: ['discussed_shells'] },
+    },
     // Must not be persisted: transient/world state rebuilt on mount.
     examineSession: { id: 'x' },
     animalDroppings: [{ id: 'd1' }],
@@ -5651,6 +5799,13 @@ test('session snapshots carry resumable expedition progress only', () => {
   assert.equal(snapshot.questComplete, true);
   assert.deepEqual(snapshot.collectedSpecimenIds, ['basalt', 'marineiguana']);
   assert.equal(snapshot.journal.length, 2);
+  assert.equal(snapshot.version, SESSION_SAVE_VERSION);
+  assert.equal(snapshot.assessmentPlayerTranscript.length, 1);
+  assert.equal(snapshot.assessmentPlayerTranscript[0].symsNearby, true);
+  assert.deepEqual(snapshot.npcEncounterState.syms_covington, {
+    trust: 64,
+    flags: ['discussed_shells'],
+  });
   assert.equal(snapshot.examineSession, undefined);
   assert.equal(snapshot.animalDroppings, undefined);
   assert.equal(snapshot.transition, undefined);
@@ -5669,6 +5824,7 @@ test('session snapshots from an unknown schema are rejected rather than half-app
   assert.equal(isUsableSessionSnapshot({ currentZoneId: 'E_MID' }), false);
   assert.equal(isUsableSessionSnapshot({ version: 999, currentZoneId: 'E_MID' }), false);
   assert.equal(isUsableSessionSnapshot({ version: 1, currentZoneId: '' }), false);
+  assert.equal(isUsableSessionSnapshot({ version: 1, currentZoneId: 'E_MID' }), true);
   assert.equal(summarizeSessionSnapshot({ version: 999 }), null);
 });
 
@@ -5679,6 +5835,71 @@ test('graphics quality preference falls back to device detection only when autom
   assert.equal(normalizeQualityPreference('CINEMATIC'), 'cinematic');
   assert.equal(resolveQualityPreference('auto', 'mobile'), 'mobile');
   assert.equal(resolveQualityPreference('cinematic', 'mobile'), 'cinematic');
+});
+
+test('automatic graphics quality is conservative for unknown and integrated GPUs', () => {
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: undefined,
+    hardwareConcurrency: 8,
+    renderer: '',
+  }), 'mobile');
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 8,
+    hardwareConcurrency: 10,
+    renderer: 'ANGLE Metal Renderer: Apple M1 Pro',
+  }), 'mobile');
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 8,
+    hardwareConcurrency: 8,
+    renderer: 'Intel(R) Iris(R) Xe Graphics',
+  }), 'mobile');
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 8,
+    hardwareConcurrency: 16,
+    renderer: 'NVIDIA GeForce RTX 4070',
+  }), 'performance');
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 16,
+    hardwareConcurrency: 12,
+    renderer: 'AMD Radeon Pro 5500M OpenGL Engine',
+  }), 'performance');
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 16,
+    hardwareConcurrency: 12,
+    renderer: 'SwiftShader Device (Subzero)',
+  }), 'mobile');
+});
+
+test('adaptive DPR ladder removes device-clamped no-op rungs', () => {
+  assert.deepEqual(buildEffectiveDprLadder(1.5, 1), [1, 0.85]);
+  assert.deepEqual(buildEffectiveDprLadder(1.5, 1.25), [1.25, 1, 0.85]);
+  assert.deepEqual(buildEffectiveDprLadder(2, 2), [2, 1.5, 1.25, 1, 0.85]);
+  assert.deepEqual(buildEffectiveDprLadder(1.4, 2), [1.4, 1.25, 1, 0.85]);
+});
+
+test('GPU resource cache sweeps only resources without mounted leases', () => {
+  clearGpuResourceCache();
+  setGpuResourceCacheLimit(1);
+  const disposed = [];
+  const first = cachedGpuResource('leased', () => ({ id: 'leased' }), {
+    dispose: value => disposed.push(value.id),
+  });
+  const release = retainGpuResource('leased');
+  cachedGpuResource('inactive', () => ({ id: 'inactive' }), {
+    dispose: value => disposed.push(value.id),
+  });
+
+  assert.equal(first.id, 'leased');
+  assert.equal(sweepInactiveGpuResources(), 1);
+  assert.deepEqual(disposed, ['inactive']);
+  assert.equal(gpuResourceCacheStats().activeEntries, 1);
+
+  release();
+  assert.deepEqual(disposed, ['inactive']);
+  assert.equal(sweepInactiveGpuResources(), 1);
+  assert.deepEqual(disposed, ['inactive', 'leased']);
+  clearGpuResourceCache();
+  setGpuResourceCacheLimit(384);
 });
 
 test('shadow quality tiers stay filtered, throttled, and sanely sized', () => {

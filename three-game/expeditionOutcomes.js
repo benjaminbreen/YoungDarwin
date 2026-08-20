@@ -59,6 +59,7 @@ export function expeditionOutcomeCause({ type, source, locationName } = {}) {
   }
   if (source === 'cactus') return `Accumulated injuries and exposure among the cactus at ${place}.`;
   if (source === 'snare') return `Exhaustion and injuries sustained in the field at ${place}.`;
+  if (source === 'hunger') return `Hunger and exhaustion in the field at ${place}. The provision bag was empty.`;
   return `Exhaustion and accumulated injuries at ${place}.`;
 }
 

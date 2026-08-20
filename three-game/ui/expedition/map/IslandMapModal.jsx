@@ -128,6 +128,12 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
     return filters.land;
   }), [filters, currentZoneId]);
 
+  // Ease the chart toward a marker when it is selected, zooming in if needed.
+  const focusTarget = useMemo(() => {
+    const location = getIslandMapLocation(selectedId);
+    return location ? { x: location.at.x, y: location.at.y, zoom: 2.1 } : null;
+  }, [selectedId]);
+
   const handleBackgroundClick = (point, event) => {
     if (event.shiftKey && process.env.NODE_ENV !== 'production') {
       // Dev affordance for tuning marker placement in islandLocations.js.
@@ -138,15 +144,16 @@ function IslandTab({ selectedId, onSelectLocation, onRequestClose }) {
   };
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[1fr_15.5rem]">
-      <div className="relative overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]">
+    <div className="grid items-start gap-3 lg:grid-cols-[1fr_15.5rem]">
+      <div className="relative overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#1a2842] shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]">
         <ZoomablePane
           imageUrl={ISLAND_MAP_IMAGE}
           aspect={ISLAND_MAP_ASPECT}
           maxZoom={4.5}
           className="w-full"
-          maxHeight="min(62dvh, 40rem)"
+          maxHeight="min(68dvh, 42rem)"
           onBackgroundClick={handleBackgroundClick}
+          focus={focusTarget}
           overlay={({ zoom, paneWidth, zoomIn, zoomOut }) => (
             <>
               <CompassRoseIcon className="pointer-events-none absolute left-4 top-4 h-14 w-14 text-expedition-parchment/70 drop-shadow-[0_2px_3px_rgba(0,0,0,0.7)]" />
@@ -351,15 +358,15 @@ function LocalTab() {
   };
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[1fr_15.5rem]">
-      <div className="relative overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#27505d] shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]">
+    <div className="grid items-start gap-3 lg:grid-cols-[1fr_15.5rem]">
+      <div className="relative overflow-hidden rounded-sm border border-expedition-brass/60 bg-[#1a2842] shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]">
         {chartUrl ? (
           <ZoomablePane
             imageUrl={chartUrl}
             aspect={1}
             maxZoom={3}
             className="w-full"
-            maxHeight="min(62dvh, 40rem)"
+            maxHeight="min(68dvh, 42rem)"
             overlay={({ zoom, paneWidth, zoomIn, zoomOut }) => (
               <>
                 <MapScaleBar zoom={zoom} paneWidth={paneWidth} mapWidthKm={width / 1000} className="absolute bottom-3 left-3" />
@@ -371,13 +378,13 @@ function LocalTab() {
               </>
             )}
           >
-            {zoom => (
+            {() => (
               <span
                 className="absolute flex h-5 w-5 items-center justify-center rounded-full border border-expedition-goldbright/90 bg-expedition-ink/68 shadow-lg"
                 style={{
                   left: `${player.x * 100}%`,
                   top: `${player.y * 100}%`,
-                  transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+                  transform: 'translate(-50%, -50%)',
                 }}
                 title="Darwin"
               >
@@ -445,13 +452,13 @@ export function IslandMapModal({ open, onClose }) {
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-expedition-ink/60 p-2 backdrop-blur-[2px] sm:p-6"
+      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-expedition-ink/60 p-1 backdrop-blur-[2px] sm:p-4 lg:p-6"
       onClick={onClose}
     >
       <ExpeditionPanel
         variant="modal"
         className="max-h-full w-[min(64rem,100%)] overflow-y-auto overscroll-contain"
-        innerClassName="p-2.5 sm:p-4"
+        innerClassName="p-2 sm:p-3 lg:p-4"
       >
         <div
           ref={panelRef}
@@ -482,11 +489,11 @@ export function IslandMapModal({ open, onClose }) {
             </button>
           </div>
 
-          <div className="my-3 text-center">
-            <h2 className="font-expedition text-[22px] font-semibold tracking-wide text-expedition-parchment">
+          <div className="my-2 text-center sm:my-3">
+            <h2 className="font-expedition text-[18px] font-semibold tracking-wide text-expedition-parchment sm:text-[22px]">
               Charles Island <span className="italic text-expedition-gold">(Floreana)</span>
             </h2>
-            <p className="mt-0.5 text-[11px] uppercase tracking-[0.2em] text-expedition-faded">
+            <p className="mt-0.5 hidden text-[11px] uppercase tracking-[0.2em] text-expedition-faded sm:block">
               also called Santa Maria · {formatExpeditionDate(day)}
             </p>
           </div>
@@ -497,8 +504,8 @@ export function IslandMapModal({ open, onClose }) {
             <LocalTab />
           )}
 
-          <GoldDivider className="mt-3" />
-          <p className="mt-2 text-center font-expedition text-[11px] italic text-expedition-faded">
+          <GoldDivider className="mt-2 hidden sm:block lg:mt-3" />
+          <p className="mt-1.5 hidden text-center font-expedition text-[11px] italic text-expedition-faded sm:block">
             Visited by HMS Beagle, September 1835 — soundings and interior detail after the Admiralty survey.
           </p>
         </div>

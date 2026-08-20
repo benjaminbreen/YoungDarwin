@@ -24,14 +24,23 @@ export function ZoomablePane({
   maxHeight = null,
   className = '',
   onBackgroundClick,
+  // {x, y, zoom} in normalized map coords: eases the view to centre that point,
+  // zooming in to `zoom` if the current zoom is below it. Re-eases on identity change.
+  focus = null,
   overlay,
   children,
 }) {
   const viewportRef = useRef(null);
   const [view, setView] = useState({ zoom: 1, cx: 0.5, cy: 0.5 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [pane, setPane] = useState({ width: 0, height: 0 });
+  const [dragging, setDragging] = useState(false);
   const paneWidth = pane.width;
   const dragRef = useRef(null);
+  const pointersRef = useRef(new Map());
+  const pinchRef = useRef(null);
+  const focusAnimRef = useRef(0);
 
   useEffect(() => {
     const node = viewportRef.current;
@@ -54,7 +63,15 @@ export function ZoomablePane({
     };
   }, [minZoom, maxZoom]);
 
+  const cancelFocusEase = useCallback(() => {
+    if (focusAnimRef.current) {
+      cancelAnimationFrame(focusAnimRef.current);
+      focusAnimRef.current = 0;
+    }
+  }, []);
+
   const zoomBy = useCallback((factor, anchor) => {
+    cancelFocusEase();
     setView(prev => {
       const zoom = Math.max(minZoom, Math.min(maxZoom, prev.zoom * factor));
       if (zoom === prev.zoom) return prev;
@@ -65,7 +82,29 @@ export function ZoomablePane({
       const cy = ay - (ay - prev.cy) * (prev.zoom / zoom);
       return clampView(zoom, cx, cy);
     });
-  }, [clampView, minZoom, maxZoom]);
+  }, [clampView, minZoom, maxZoom, cancelFocusEase]);
+
+  useEffect(() => {
+    if (!focus) return undefined;
+    const from = { ...viewRef.current };
+    const zoom = Math.max(minZoom, Math.min(maxZoom, Math.max(from.zoom, focus.zoom || 2.1)));
+    const target = clampView(zoom, focus.x, focus.y);
+    const start = performance.now();
+    const DURATION = 380;
+    cancelFocusEase();
+    const step = now => {
+      const t = Math.min(1, (now - start) / DURATION);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      setView(clampView(
+        from.zoom + (target.zoom - from.zoom) * e,
+        from.cx + (target.cx - from.cx) * e,
+        from.cy + (target.cy - from.cy) * e,
+      ));
+      focusAnimRef.current = t < 1 ? requestAnimationFrame(step) : 0;
+    };
+    focusAnimRef.current = requestAnimationFrame(step);
+    return cancelFocusEase;
+  }, [focus, clampView, minZoom, maxZoom, cancelFocusEase]);
 
   const toMapCoords = useCallback(event => {
     const rect = viewportRef.current?.getBoundingClientRect();
@@ -83,6 +122,7 @@ export function ZoomablePane({
     if (!node) return undefined;
     const onWheel = event => {
       event.preventDefault();
+      cancelFocusEase();
       const rect = node.getBoundingClientRect();
       const px = (event.clientX - rect.left) / rect.width;
       const py = (event.clientY - rect.top) / rect.height;
@@ -99,12 +139,27 @@ export function ZoomablePane({
     };
     node.addEventListener('wheel', onWheel, { passive: false });
     return () => node.removeEventListener('wheel', onWheel);
-  }, [clampView, minZoom, maxZoom]);
+  }, [clampView, minZoom, maxZoom, cancelFocusEase]);
 
   const onPointerDown = event => {
-    if (event.button !== 0) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    cancelFocusEase();
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (pointersRef.current.size === 2) {
+      // Second finger: the drag becomes a pinch.
+      dragRef.current = null;
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y),
+        midX: (a.x + b.x) / 2,
+        midY: (a.y + b.y) / 2,
+      };
+      return;
+    }
+    if (pointersRef.current.size > 2) return;
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -114,10 +169,36 @@ export function ZoomablePane({
       rect,
       moved: false,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
   };
 
   const onPointerMove = event => {
+    const pointers = pointersRef.current;
+    if (pointers.has(event.pointerId)) pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const pinch = pinchRef.current;
+    if (pinch && pointers.size >= 2) {
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect || pinch.dist <= 0) return;
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
+      const factor = dist / pinch.dist;
+      const prevPx = (pinch.midX - rect.left) / rect.width;
+      const prevPy = (pinch.midY - rect.top) / rect.height;
+      const px = (midX - rect.left) / rect.width;
+      const py = (midY - rect.top) / rect.height;
+      setView(prev => {
+        const zoom = Math.max(minZoom, Math.min(maxZoom, prev.zoom * factor));
+        // The map point under the old midpoint follows the new midpoint, so
+        // one gesture both pans and zooms.
+        const ax = prev.cx + (prevPx - 0.5) / prev.zoom;
+        const ay = prev.cy + (prevPy - 0.5) / prev.zoom;
+        return clampView(zoom, ax - (px - 0.5) / zoom, ay - (py - 0.5) / zoom);
+      });
+      pinchRef.current = { dist, midX, midY };
+      return;
+    }
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
@@ -130,19 +211,56 @@ export function ZoomablePane({
     ));
   };
 
+  const releasePointer = event => {
+    pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 1) {
+      // Pinch ended with a finger still down: resume panning from it. moved:true
+      // so lifting it never counts as a background click.
+      const [[pointerId, position]] = [...pointersRef.current.entries()];
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (rect) {
+        dragRef.current = {
+          pointerId,
+          startX: position.x,
+          startY: position.y,
+          cx: viewRef.current.cx,
+          cy: viewRef.current.cy,
+          rect,
+          moved: true,
+        };
+      }
+    }
+    if (pointersRef.current.size === 0) setDragging(false);
+  };
+
   const onPointerUp = event => {
     const drag = dragRef.current;
-    dragRef.current = null;
-    if (drag && !drag.moved && onBackgroundClick) {
-      const point = toMapCoords(event);
-      if (point) onBackgroundClick(point, event);
+    releasePointer(event);
+    if (drag && drag.pointerId === event.pointerId) {
+      dragRef.current = null;
+      if (!drag.moved && onBackgroundClick) {
+        const point = toMapCoords(event);
+        if (point) onBackgroundClick(point, event);
+      }
     }
+  };
+
+  const onPointerCancel = event => {
+    releasePointer(event);
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  };
+
+  const onDoubleClick = event => {
+    // Markers and zoom buttons handle their own clicks.
+    if (event.target.closest?.('button')) return;
+    zoomBy(1.9, toMapCoords(event) || undefined);
   };
 
   return (
     <div
       ref={viewportRef}
-      className={`relative mx-auto touch-none select-none overflow-hidden ${dragRef.current ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
+      className={`relative mx-auto touch-none select-none overflow-hidden ${dragging ? 'cursor-grabbing' : 'cursor-grab'} ${className}`}
       style={{
         aspectRatio: `${aspect}`,
         ...(maxHeight ? { maxHeight, maxWidth: `calc(${maxHeight} * ${aspect})` } : null),
@@ -150,7 +268,8 @@ export function ZoomablePane({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={() => { dragRef.current = null; }}
+      onPointerCancel={onPointerCancel}
+      onDoubleClick={onDoubleClick}
     >
       <div
         className="absolute"
@@ -262,7 +381,12 @@ export function MapMarker({ location, zoom = 1, pane = null, selected = false, i
     );
   }
 
-  const showLabel = location.labelAlways || selected;
+  // Once zoomed in the chart has room: reveal every visible marker's label.
+  const showLabel = location.labelAlways || selected || zoom >= 1.9;
+  // The zoom layer is percentage-sized, not CSS-scaled, so px markers already
+  // hold their screen size. Only a gentle taper here — never 1/zoom, which
+  // halves them — and only on the face: label and hit area stay full size.
+  const faceTaper = Math.max(0.7, 1 / Math.cbrt(zoom));
 
   return (
     <button
@@ -270,23 +394,25 @@ export function MapMarker({ location, zoom = 1, pane = null, selected = false, i
       aria-label={name}
       onPointerDown={event => event.stopPropagation()}
       onClick={event => { event.stopPropagation(); onSelect?.(location); }}
-      className="group absolute z-10 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full focus:outline-none hover:z-30 focus-visible:z-30"
+      className="group absolute z-10 h-9 w-9 rounded-full focus:outline-none hover:z-30 focus-visible:z-30"
       style={{
         left: `${location.at.x * 100}%`,
         top: `${location.at.y * 100}%`,
-        transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+        transform: 'translate(-50%, -50%)',
       }}
     >
-      <span className={`absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-transform duration-150 group-hover:scale-150 group-focus-visible:scale-150 ${selected ? 'scale-125' : ''}`}>
-        {(selected || isCurrent) && (
-          <span className={`absolute h-8 w-8 rounded-full border ${
-            isCurrent
-              ? 'animate-ping border-expedition-goldbright/70'
-              : 'border-expedition-goldbright/80 shadow-[0_0_10px_rgba(227,197,133,0.5)]'
-          }`} />
-        )}
-        {isCurrent && <span className="absolute h-8 w-8 rounded-full border border-expedition-goldbright/80" />}
-        {face}
+      <span className="absolute left-1/2 top-1/2" style={{ transform: `translate(-50%, -50%) scale(${faceTaper})` }}>
+        <span className={`flex items-center justify-center transition-transform duration-150 group-hover:scale-150 group-focus-visible:scale-150 ${selected ? 'scale-125' : ''}`}>
+          {(selected || isCurrent) && (
+            <span className={`absolute h-8 w-8 rounded-full border ${
+              isCurrent
+                ? 'animate-ping border-expedition-goldbright/70'
+                : 'border-expedition-goldbright/80 shadow-[0_0_10px_rgba(227,197,133,0.5)]'
+            }`} />
+          )}
+          {isCurrent && <span className="absolute h-8 w-8 rounded-full border border-expedition-goldbright/80" />}
+          {face}
+        </span>
       </span>
       {leaderLength > 4 && (
         <span
@@ -424,7 +550,9 @@ export function ZoomControls({ zoomIn, zoomOut, className = '' }) {
   const buttonClass =
     'flex h-7 w-7 items-center justify-center rounded-sm border border-expedition-brass/70 bg-expedition-ink/80 font-expedition text-sm font-bold text-expedition-gold transition hover:border-expedition-gold hover:text-expedition-goldbright';
   return (
-    <div className={`flex flex-col gap-1 ${className}`}>
+    // stopPropagation: otherwise the pane's pointerdown captures the pointer
+    // and the buttons never receive their click.
+    <div className={`flex flex-col gap-1 ${className}`} onPointerDown={event => event.stopPropagation()}>
       <button type="button" onClick={zoomIn} className={buttonClass} aria-label="Zoom in">+</button>
       <button type="button" onClick={zoomOut} className={buttonClass} aria-label="Zoom out">−</button>
     </div>

@@ -203,6 +203,11 @@ function ProceduralSpecimenShape({ specimen }) {
   const material = useMemo(() => specimenMaterial(specimen.id), [specimen.id]);
   const warm = useMemo(() => addRimLight(toonMaterial('#d7b66f'), { intensity: 0.2 }), []);
   const dark = useMemo(() => addRimLight(toonMaterial('#292b28'), { intensity: 0.18 }), []);
+  useEffect(() => () => {
+    material.dispose();
+    warm.dispose();
+    dark.dispose();
+  }, [dark, material, warm]);
   if (specimen.id === 'cactus') {
     return (
       <group>

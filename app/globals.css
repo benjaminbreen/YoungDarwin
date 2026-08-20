@@ -1019,6 +1019,43 @@ button.submit-button:disabled {
   animation: objective-rule 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
+/* A specimen arriving in the compact case tally gets one crisp field-mark
+   flourish. The particles exist only for the newly filled slot and are
+   omitted entirely by the HUD on lightweight graphics settings. */
+@keyframes case-tally-fill {
+  0% { opacity: 0.25; scale: 0.25; box-shadow: 0 0 0 0 var(--case-tally-glow); }
+  48% { opacity: 1; scale: 1.55; box-shadow: 0 0 13px 5px var(--case-tally-glow); }
+  72% { scale: 0.88; }
+  100% { opacity: 1; scale: 1; box-shadow: 0 0 5px var(--case-tally-glow); }
+}
+.animate-case-tally-fill {
+  animation: case-tally-fill 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes case-tally-spark {
+  0% { opacity: 0; translate: 0 0; scale: 0.25; }
+  22% { opacity: 1; }
+  100% { opacity: 0; translate: var(--case-spark-x) var(--case-spark-y); scale: 0; }
+}
+.case-tally-spark {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--case-spark-color);
+  box-shadow: 0 0 5px var(--case-spark-color);
+  animation: case-tally-spark 0.72s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-case-tally-fill,
+  .case-tally-spark {
+    animation: none;
+  }
+}
+
 /* Travel interstitial caption: each line settles up a few pixels in order. */
 @keyframes travel-caption-rise {
   from { opacity: 0; transform: translateY(9px); }

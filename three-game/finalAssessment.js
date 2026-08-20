@@ -270,14 +270,12 @@ export function evaluateFinalAssessment(state = {}) {
       + (locatedNotes / playerNotes.length) * 0.5
       + Math.min(0.8, playerMethods.length * 0.2);
   const coverage = Math.min(10, Math.max(0.4, (visitedIds.length - 1) * 1.4));
-  const standing = clamp(state.localStanding ?? 50, 0, 100);
   const health = clamp(state.health ?? 100, 0, 100);
   const fatigue = clamp(state.fatigue ?? 0, 0, 100);
   const evidenceRestraint = collectedIds.length
     ? Math.min(1, documentedOrObserved / collectedIds.length)
     : (documentedIds.length ? 1 : 0);
   const judgment = 1
-    + (standing - 50) / 20
     + health / 200
     + (100 - fatigue) / 200
     + (evidenceIds.length ? evidenceRestraint * 1.5 : 0)
@@ -325,7 +323,6 @@ export function evaluateFinalAssessment(state = {}) {
   if (locatedNotes < playerNotes.length) gaps.push('Some player-authored observations lack an explicit locality.');
   if (!playerMethods.length && playerNotes.length) gaps.push('Methods are not named consistently in the player’s field record.');
   if (visitedIds.length < 3) gaps.push('The island comparison rests on very limited geographic coverage.');
-  if ((state.localStanding ?? 50) < 35) gaps.push('The expedition record suggests poor judgment in dealings with companions or residents.');
   if (!gaps.length) gaps.push('The strongest claims should still distinguish direct observation from inference.');
 
   const evidenceSummaries = evidenceIds.map(id => {

@@ -39,11 +39,14 @@ function HammerImpactBurst({ event, onExpired }) {
   const sparks = useMemo(() => makeParticles(`${event.id}:sparks`, dir, event.sparkCount || 4), [dir, event.id, event.sparkCount]);
   const dustMaterial = useMemo(() => new THREE.PointsMaterial({
     color: event.dustColor || '#8f7352',
-    size: 0.11,
+    // dustSize lets close-camera emitters (the examine strike) shrink the
+    // points; the default reads right at gameplay distance but fills the
+    // screen with soft squares at macro range.
+    size: event.dustSize || 0.11,
     transparent: true,
     opacity: 0.58,
     depthWrite: false,
-  }), [event.dustColor]);
+  }), [event.dustColor, event.dustSize]);
   const sparkMaterial = useMemo(() => new THREE.LineBasicMaterial({
     color: event.sparkColor || '#ffd36a',
     transparent: true,
@@ -121,7 +124,8 @@ function HammerImpactBurst({ event, onExpired }) {
     const flashT = THREE.MathUtils.clamp(age / FLASH_LIFETIME, 0, 1);
     if (flashRef.current) {
       flashRef.current.visible = flashT < 1;
-      flashRef.current.scale.setScalar(0.18 + flashT * 0.62);
+      const flashScale = Number.isFinite(event.flashScale) ? event.flashScale : 1;
+      flashRef.current.scale.setScalar((0.18 + flashT * 0.62) * flashScale);
     }
     flashMaterial.opacity = 0.9 * Math.pow(1 - flashT, 2.4);
   });
