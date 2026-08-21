@@ -77,6 +77,58 @@ const {
   examinationDepthOfFieldActive,
   postprocessingComposerActive,
 } = loadModule('three-game/examine/examinationPostFx.js');
+const {
+  EXAMINE_FALLBACK_REPLY,
+  EXAMINE_RESPONSE_FORMAT,
+  examinationResponseFromModel,
+} = loadModule('utils/server/examineResponse.js');
+
+test('field examination requests strict structured output', () => {
+  assert.equal(EXAMINE_RESPONSE_FORMAT.type, 'json_schema');
+  assert.equal(EXAMINE_RESPONSE_FORMAT.strict, true);
+  assert.deepEqual(EXAMINE_RESPONSE_FORMAT.schema.required, [
+    'reply',
+    'fact',
+    'behavior',
+    'uncertainty',
+  ]);
+  assert.equal(EXAMINE_RESPONSE_FORMAT.schema.additionalProperties, false);
+});
+
+test('malformed examination JSON never becomes a player-visible reply', () => {
+  const raw = '{"reply":"You look closely.","fact":null,"behavior":"","uncertainty":"", }';
+  const response = examinationResponseFromModel({
+    text: raw,
+    provider: 'openai',
+    model: 'gpt-5.6-luna',
+  });
+  assert.equal(response.reply, EXAMINE_FALLBACK_REPLY);
+  assert.equal(response.source, 'authored');
+  assert.equal(response.fallback, true);
+  assert.equal(response.reply.includes('"fact"'), false);
+});
+
+test('valid examination JSON is normalized into the player-facing fields', () => {
+  const response = examinationResponseFromModel({
+    text: JSON.stringify({
+      reply: 'You see brown fur parted over the hindquarters.',
+      fact: {
+        label: 'Hindquarters',
+        value: 'Brown fur; no clear mark',
+        confidence: 'moderate',
+        measurement: false,
+      },
+      behavior: 'Jacko reaches toward the instruments.',
+      uncertainty: 'You cannot inspect more closely without disturbing him.',
+    }),
+    provider: 'openai',
+    model: 'gpt-5.6-luna',
+  });
+  assert.equal(response.reply, 'You see brown fur parted over the hindquarters.');
+  assert.equal(response.fact.label, 'Hindquarters');
+  assert.equal(response.source, 'llm');
+  assert.equal(response.fallback, false);
+});
 
 test('examination depth of field covers every focused examinable kind', () => {
   for (const kind of ['specimen', 'ambient', 'item']) {
@@ -126,6 +178,7 @@ test('the narrator is default-on with explicit client and server kill switches',
 });
 const {
   clampNpcEncounterEffects,
+  getNpcEncounter,
   getNpcEncounterPresentation,
   getNearestNpcEncounter,
 } = loadModule('three-game/encounters/npcEncounters.js');
@@ -561,6 +614,45 @@ const {
 const {
   baseSpecimens,
 } = loadModule('data/specimens.js');
+const {
+  getSpecimenRarity,
+  SPECIMEN_RARITY_TIER_BY_ID,
+} = loadModule('three-game/rarity.js');
+const {
+  catalogToInspectable,
+  specimenToInspectable,
+} = loadModule('three-game/world/inspectables.js');
+
+test('specimen encounter tiers are curated independently of scientific score', () => {
+  assert.equal(getSpecimenRarity({ id: 'candelabracactus', scientificValue: 10 }).id, 'common');
+  assert.equal(getSpecimenRarity({ id: 'mediumgroundfinch', scientificValue: 10 }).id, 'common');
+  assert.equal(getSpecimenRarity({ id: 'flamingo', scientificValue: 1 }).id, 'notable');
+  assert.equal(getSpecimenRarity({ id: 'floreanagianttortoise', scientificValue: 1 }).id, 'remarkable');
+  assert.equal(getSpecimenRarity({ id: 'memoirsofautopian', scientificValue: 1 }).id, 'singular');
+  assert.equal(getSpecimenRarity({ id: 'captainsskull', scientificValue: 1 }).id, 'singular');
+  assert.equal(getSpecimenRarity({ id: 'unlisted-specimen', scientificValue: 10 }).id, 'common');
+});
+
+test('curated specimen tiers reference catalog ids and agree with inspection labels', () => {
+  const specimenIds = new Set(baseSpecimens.map(specimen => specimen.id.toLowerCase()));
+  for (const specimenId of Object.keys(SPECIMEN_RARITY_TIER_BY_ID)) {
+    assert.ok(specimenIds.has(specimenId), `${specimenId} rarity tier should reference a catalog specimen`);
+  }
+  const candelabra = baseSpecimens.find(specimen => specimen.id === 'candelabracactus');
+  assert.equal(specimenToInspectable(candelabra).rarity, 'common');
+  assert.equal(catalogToInspectable('candelabra_cactus').rarity, 'common');
+  assert.equal(catalogToInspectable('scalesia').rarity, 'notable');
+});
+
+test('Floreana region maps do not spawn flightless cormorants', () => {
+  for (const region of Object.values(regionMaps)) {
+    assert.equal(
+      region.specimens.some(specimen => specimen.specimenId === 'flightlesscormorant'),
+      false,
+      `${region.id} should not contain a flightless cormorant`,
+    );
+  }
+});
 const {
   getWildlifeBehaviorProfile,
   getWildlifeRenderProfile,
@@ -1515,14 +1607,14 @@ test('the survey runs three days and the last one is named as such', () => {
   assert.equal(expeditionDayLabel(9), 'Day 3 of 3');
 });
 
-test('the nightly draw is a ration on top of what came back, capped at what can be carried', () => {
-  const spent = drawNightlySupplies({ labels: 0, spareJars: 0, twine: 0, food: 0, water: 0, pins: 0 });
-  assert.equal(spent.labels, 8, 'a day that used every label does not start the next one full');
-  assert.ok(spent.labels < INITIAL_SUPPLIES.labels);
-  const frugal = drawNightlySupplies({ ...INITIAL_SUPPLIES, labels: 9 });
-  assert.equal(frugal.labels, INITIAL_SUPPLIES.labels, 'the ration tops up but never overfills the case');
-  // Syms's jars raise the ceiling as well as the count.
-  assert.equal(drawNightlySupplies({ spareJars: 3 }, { spareJars: 2 }).spareJars, 5);
+test('the nightly provisions draw rewards a frugal day without overfilling the bag', () => {
+  const spent = drawNightlySupplies({ provisions: 0 });
+  assert.equal(spent.provisions, 3, 'an empty bag receives one nightly ration, not a full reset');
+  assert.ok(spent.provisions < INITIAL_SUPPLIES.provisions);
+  const partlyUsed = drawNightlySupplies({ provisions: 2 });
+  assert.equal(partlyUsed.provisions, INITIAL_SUPPLIES.provisions, 'the ration tops up but never overfills the bag');
+  const frugal = drawNightlySupplies(INITIAL_SUPPLIES);
+  assert.equal(frugal.provisions, INITIAL_SUPPLIES.provisions);
 });
 
 test('rest copy is keyed to the place and the hour', () => {
@@ -5148,13 +5240,17 @@ test('intact destructible timber batches visuals and Beagle practicals avoid cub
 test('movement-locking dilemmas expose authored exits and weak-GPU HUD avoids duplicate heavy work', () => {
   const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
   const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
+  const dilemmaSource = fs.readFileSync(path.resolve('three-game/ui/FieldDilemmaModal.jsx'), 'utf8');
   const celebrationSource = fs.readFileSync(
     path.resolve('three-game/ui/CollectionCelebration.jsx'),
     'utf8',
   );
-  assert.match(storeSource, /resolveActiveConstraintChoice: input =>/);
-  assert.match(hudSource, /net_snagged: \['Work the mesh carefully backward/);
-  assert.match(hudSource, /onClick=\{\(\) => resolveActiveConstraintChoice\(choice\)\}/);
+  assert.match(storeSource, /resolveFieldDilemmaChoice: choiceId =>/);
+  assert.match(storeSource, /label: 'Rip it free'/);
+  assert.match(storeSource, /label: 'Work it loose, spine by spine'/);
+  assert.match(storeSource, /config\?\.choices\?\.find\(item => item\.id === choiceId\)/);
+  assert.match(dilemmaSource, /onClick=\{\(\) => onChoose\(choice\.id\)\}/);
+  assert.match(dilemmaSource, /onChoose=\{resolveFieldDilemmaChoice\}/);
   assert.match(hudSource, /compactDesktopMapMounted &&/);
   assert.match(hudSource, /wideFieldRailMounted &&/);
   assert.match(celebrationSource, /isSuccess && !lightweightEffects/);
@@ -5715,12 +5811,17 @@ test('NPC encounter effects are bounded and flags stay allowlisted', () => {
 });
 
 test('Syms encounter presentation reflects session flags without mutating the base encounter', () => {
+  const base = getNpcEncounter('syms_covington');
+  const baseOpener = base.opener;
   const presentation = getNpcEncounterPresentation('syms_covington', {
     trust: 50,
     flags: ['offered_practical_help'],
   });
-  assert.match(presentation.opener, /labels, twine, and spare paper/i);
+  assert.match(presentation.opener, /collecting things/i);
+  assert.doesNotMatch(presentation.opener, /labels, twine, and spare paper/i);
   assert.equal(presentation.suggestedReplies.length, 2);
+  assert.equal(getNpcEncounter('syms_covington').opener, baseOpener);
+  assert.notEqual(presentation.opener, baseOpener);
 });
 
 test('interior entry detection is shared by typed commands and map dispatch', () => {

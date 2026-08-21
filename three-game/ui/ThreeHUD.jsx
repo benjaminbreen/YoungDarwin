@@ -73,7 +73,7 @@ import { CollectionCelebration, celebrationVisibleMs } from './CollectionCelebra
 import { FieldDilemmaModal } from './FieldDilemmaModal';
 import { CaseFullModal } from './CaseFullModal';
 import { NightlyDebriefModal } from './NightlyDebriefModal';
-import { getSpecimenRarity, rarityForValue } from '../rarity';
+import { getSpecimenRarity, rarityForTier } from '../rarity';
 import { RarityBadge } from './RarityBadge';
 import { SpecimenPortrait } from './SpecimenPortrait';
 import { playSightingSting } from '../audio/audioRuntime';
@@ -3962,11 +3962,11 @@ function CollectionMethodIcon({ toolId, active = false, compact = false, onSelec
 // pulse after the afterglow window has passed.
 function useCaseAddedPulse() {
   const lastCasedAt = useThreeGameStore(state => state.lastCasedAt);
-  const lastCasedValue = useThreeGameStore(state => state.lastCasedValue);
+  const lastCasedRarityTier = useThreeGameStore(state => state.lastCasedRarityTier);
   return useMemo(() => {
     if (!lastCasedAt || Date.now() - lastCasedAt > CASE_AFTERGLOW_HOLD_MS) return null;
-    return { key: lastCasedAt, color: rarityForValue(lastCasedValue).glow };
-  }, [lastCasedAt, lastCasedValue]);
+    return { key: lastCasedAt, color: rarityForTier(lastCasedRarityTier).glow };
+  }, [lastCasedAt, lastCasedRarityTier]);
 }
 
 // How long a case button holds the last specimen's rarity color before fading.
@@ -4013,7 +4013,7 @@ function SpecimenSightingToast() {
     seenAtRef.current = sighting.at;
     setRendered(sighting);
     setVisible(false);
-    playSightingSting(rarityForValue(sighting.scientificValue).id);
+    playSightingSting(getSpecimenRarity(sighting).id);
     const showTimer = window.setTimeout(() => setVisible(true), 20);
     const hideTimer = window.setTimeout(() => setVisible(false), 3600);
     const clearTimer = window.setTimeout(() => setRendered(null), 3950);
@@ -4025,7 +4025,7 @@ function SpecimenSightingToast() {
   }, [sighting]);
 
   if (!rendered) return null;
-  const rarity = rarityForValue(rendered.scientificValue);
+  const rarity = getSpecimenRarity(rendered);
   return (
     <div className={`pointer-events-none absolute left-1/2 top-[7.2rem] z-20 -translate-x-1/2 font-expedition transition-all duration-300 ${visible ? 'translate-y-0 opacity-100' : '-translate-y-1.5 opacity-0'}`}>
       <div

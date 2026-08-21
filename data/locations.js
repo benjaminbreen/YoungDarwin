@@ -587,26 +587,8 @@ export const locations = [
     type: 'wetland',
     playerStart: [-30, 0, 24],
     validMoves: ['W','S','E'],
-    specimens: ['flamingo','frigatebird','booby','lavalizard','flightlesscormorant','sesuviumportulacastrum'],
+    specimens: ['flamingo','frigatebird','booby','lavalizard','sesuviumportulacastrum'],
     specimenPlacements: [
-      {
-        instanceId: 'cormorant-bay-cormorant-west',
-        specimenId: 'flightlesscormorant',
-        position: [-19.5, 0, -12],
-        behavior: 'wary',
-        sceneScale: 1,
-        habitatRadiusX: 6.5,
-        habitatRadiusZ: 3.4,
-      },
-      {
-        instanceId: 'cormorant-bay-cormorant-east',
-        specimenId: 'flightlesscormorant',
-        position: [20.5, 0, -2],
-        behavior: 'still',
-        sceneScale: 0.94,
-        habitatRadiusX: 5.5,
-        habitatRadiusZ: 3,
-      },
       {
         specimenId: 'flamingo',
         position: [-8, 0, -2.5],
@@ -1651,26 +1633,8 @@ export const locations = [
         description: 'Travel north along the lagoon rim toward Devil\'s Crown.',
       },
     },
-    specimens: ['flamingo','frigatebird','flightlesscormorant'],
+    specimens: ['flamingo','frigatebird'],
     specimenPlacements: [
-      {
-        instanceId: 'punta-cormorant-cormorant-west',
-        specimenId: 'flightlesscormorant',
-        position: [-7.5, 0, -24],
-        behavior: 'wary',
-        sceneScale: 1.02,
-        habitatRadiusX: 7,
-        habitatRadiusZ: 3.2,
-      },
-      {
-        instanceId: 'punta-cormorant-cormorant-east',
-        specimenId: 'flightlesscormorant',
-        position: [35, 0, -24],
-        behavior: 'still',
-        sceneScale: 0.96,
-        habitatRadiusX: 5,
-        habitatRadiusZ: 2.8,
-      },
       {
         // Pinned rather than left to the seeded fallback, which moves every
         // time the zone's specimen list changes length. This is the driest

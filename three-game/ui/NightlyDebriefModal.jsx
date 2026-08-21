@@ -3,7 +3,7 @@
 import React from 'react';
 import { useThreeGameStore } from '../store';
 import { SUPPLY_DEFS } from '../../data/inventoryItems';
-import { rarityForValue } from '../rarity';
+import { getSpecimenRarity } from '../rarity';
 import { RarityBadge } from './RarityBadge';
 import { SpecimenPortrait } from './SpecimenPortrait';
 import { useDismissableOverlay } from './useDismissableOverlay';
@@ -12,7 +12,7 @@ import { useDismissableOverlay } from './useDismissableOverlay';
 // day turns.
 
 function StowedSpecimen({ specimen, index }) {
-  const rarity = rarityForValue(specimen.scientificValue);
+  const rarity = getSpecimenRarity(specimen);
   return (
     <div
       className="flex animate-collect-chip motion-reduce:animate-none flex-col items-center gap-1.5"

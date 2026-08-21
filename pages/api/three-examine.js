@@ -1,4 +1,9 @@
 import { baseSpecimens } from '../../data/specimens';
+import {
+  EXAMINE_FALLBACK_REPLY,
+  EXAMINE_RESPONSE_FORMAT,
+  examinationResponseFromModel,
+} from '../../utils/server/examineResponse';
 import { generateLLMText } from '../../utils/server/llmProvider';
 import { getRequestIdentity } from '../../utils/server/llmSafety';
 
@@ -27,43 +32,6 @@ function clampArray(value, limit = 6) {
   return Array.isArray(value)
     ? value.map(item => String(item || '').trim()).filter(Boolean).slice(0, limit)
     : [];
-}
-
-function parseExamineJSON(text) {
-  const match = String(text || '').match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeFact(fact) {
-  if (!fact || typeof fact !== 'object') return null;
-  const label = safeString(fact.label);
-  const value = safeString(fact.value);
-  if (!label || !value) return null;
-  const confidence = ['high', 'moderate', 'low'].includes(String(fact.confidence || '').toLowerCase())
-    ? String(fact.confidence).toLowerCase()
-    : 'moderate';
-  return {
-    label: label.slice(0, 28),
-    value: value.slice(0, 48),
-    confidence,
-    measurement: Boolean(fact.measurement),
-  };
-}
-
-function normalizeExaminePayload(payload, fallbackText = '') {
-  const normalized = payload && typeof payload === 'object' ? payload : {};
-  return {
-    reply: safeString(normalized.reply, safeString(fallbackText, 'You look closely, but the light gives nothing further away.')),
-    fact: normalizeFact(normalized.fact),
-    behavior: safeString(normalized.behavior),
-    uncertainty: safeString(normalized.uncertainty),
-    source: 'llm',
-  };
 }
 
 function subjectContext(examinable) {
@@ -150,23 +118,18 @@ Return JSON only:
       userPrompt: prompt,
       temperature: 0.3,
       maxTokens: 220,
+      responseFormat: EXAMINE_RESPONSE_FORMAT,
     });
 
-    const text = result.text || '';
-    const parsed = parseExamineJSON(text);
-    return res.status(200).json({
-      ...normalizeExaminePayload(parsed, text),
-      provider: result.provider,
-      model: result.model,
-      fallbackFrom: result.fallbackFrom || null,
-    });
+    return res.status(200).json(examinationResponseFromModel(result));
   } catch (error) {
     console.error('three-examine error:', error);
     return res.status(200).json({
-      reply: 'You look long at the subject, but your notes must wait — the observation refuses to resolve just now.',
+      reply: EXAMINE_FALLBACK_REPLY,
       fact: null,
       behavior: '',
       uncertainty: '',
+      source: 'authored',
       fallback: true,
     });
   }

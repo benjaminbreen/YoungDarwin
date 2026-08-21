@@ -993,7 +993,7 @@ function createSceneSlice() {
     lastHealthDamage: null,
     lastCasedActorId: null,
     lastCasedAt: 0,
-    lastCasedValue: 0,
+    lastCasedRarityTier: 'common',
     nightlyDebrief: null,
     dayTitleCard: null,
     expeditionOutcome: null,
@@ -1856,7 +1856,6 @@ export const useThreeGameStore = create((set, get) => ({
           id: specimen.id,
           name: specimen.name,
           latin: specimen.latin || '',
-          scientificValue: specimen.scientificValue,
           at: Date.now(),
         };
       }
@@ -4463,7 +4462,7 @@ export const useThreeGameStore = create((set, get) => ({
         lastOutcome: { specimen, tool, result, documented, collectedActorId: collected ? actorId : null },
         // The case tab's shimmer and the case-button glow need markers that
         // survive the per-frame actions that clear lastOutcome after a collect.
-        ...(collected ? { lastCasedActorId: actorId, lastCasedAt: Date.now(), lastCasedValue: specimen.scientificValue || 0 } : {}),
+        ...(collected ? { lastCasedActorId: actorId, lastCasedAt: Date.now(), lastCasedRarityTier: rarityTier } : {}),
         // The species enters the sighted record on collect regardless of how
         // it was met, so a later close approach cannot replay the discovery
         // beat for an animal already in the case.

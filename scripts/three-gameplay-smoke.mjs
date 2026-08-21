@@ -1030,7 +1030,9 @@ async function runCabinScenario(browser, baseUrl) {
     assertCondition(initial.currentZoneId === 'BEAGLE_CABIN', 'Cabin scenario launched in the wrong zone.', initial);
 
     const firstOpen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
-    assertCondition(firstOpen.curiosity === initial.curiosity + 1, 'First book consultation did not add exactly one curiosity.', { initial, firstOpen });
+    const initialConsultations = initial.consultedBookIds.filter(bookId => bookId === 'lyell-principles-vol1').length;
+    const firstOpenConsultations = firstOpen.consultedBookIds.filter(bookId => bookId === 'lyell-principles-vol1').length;
+    assertCondition(firstOpenConsultations === initialConsultations + 1, 'First book consultation was not recorded exactly once.', { initial, firstOpen });
     assertCondition(firstOpen.consultedBookIds.includes('lyell-principles-vol1'), 'Book consultation was not persisted.', firstOpen);
 
     await withFailureArtifacts(page, 'render Lyell book scan', errors, async () => {
@@ -1056,10 +1058,10 @@ async function runCabinScenario(browser, baseUrl) {
     });
     const afterNote = await page.evaluate(() => window.__darwinE2E.getState());
     assertCondition(afterNote.journalCount === initial.journalCount + 1, 'Reading note was not added to the field journal.', { initial, afterNote });
-    assertCondition(afterNote.curiosity === initial.curiosity + 2, 'Reading note did not add exactly one curiosity.', { initial, afterNote });
     await page.getByRole('button', { name: 'Close library' }).click({ timeout: UI_STEP_TIMEOUT_MS });
     const reopen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
-    assertCondition(reopen.curiosity === afterNote.curiosity, 'Repeated consultation awarded duplicate curiosity.', { afterNote, reopen });
+    const reopenConsultations = reopen.consultedBookIds.filter(bookId => bookId === 'lyell-principles-vol1').length;
+    assertCondition(reopenConsultations === firstOpenConsultations, 'Repeated consultation created a duplicate record.', { firstOpen, reopen });
     await page.evaluate(() => window.__darwinE2E.closeBook());
 
     const rested = await page.evaluate(() => window.__darwinE2E.restInInterior("captain's berth"));
@@ -1070,7 +1072,7 @@ async function runCabinScenario(browser, baseUrl) {
     return {
       name: 'beagle-cabin',
       bookPage: afterTurn.readableBookSession?.page,
-      curiosityGained: afterNote.curiosity - initial.curiosity,
+      consultationsAdded: firstOpenConsultations - initialConsultations,
       journalEntriesAdded: afterNote.journalCount - initial.journalCount,
       restedFatigue: rested.fatigue,
       finalState: rested,
@@ -1205,7 +1207,7 @@ async function run() {
     defecateCount: result.defecateCount,
     animalDroppingsCount: result.animalDroppingsCount,
     bookPage: result.bookPage,
-    curiosityGained: result.curiosityGained,
+    consultationsAdded: result.consultationsAdded,
     journalEntriesAdded: result.journalEntriesAdded,
   })), null, 2));
 }

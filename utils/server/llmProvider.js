@@ -130,6 +130,7 @@ export async function createOpenAIText({
   maxTokens,
   temperature,
   reasoningEffort,
+  responseFormat,
 }) {
   if (shouldUseResponsesAPI(model) && client.responses?.create) {
     const caps = capabilitiesFor(model);
@@ -141,7 +142,7 @@ export async function createOpenAIText({
         instructions: systemPrompt || 'You are a concise historical simulation assistant.',
         input: userPrompt || '',
         max_output_tokens: tokens,
-        text: { format: { type: 'text' } },
+        text: { format: responseFormat || { type: 'text' } },
       };
       // Sampling params are only accepted alongside effort `none`; sending them
       // with any other effort is a 400.
@@ -189,6 +190,17 @@ export async function createOpenAIText({
     return { text, usage: response?.usage || null };
   }
 
+  const chatResponseFormat = responseFormat?.type === 'json_schema'
+    ? {
+        type: 'json_schema',
+        json_schema: {
+          name: responseFormat.name,
+          description: responseFormat.description,
+          schema: responseFormat.schema,
+          strict: responseFormat.strict,
+        },
+      }
+    : responseFormat;
   const completion = await client.chat.completions.create({
     model,
     messages: [
@@ -197,6 +209,7 @@ export async function createOpenAIText({
     ],
     max_tokens: maxTokens,
     temperature,
+    ...(chatResponseFormat ? { response_format: chatResponseFormat } : {}),
   });
   return {
     text: completion.choices?.[0]?.message?.content || '',
@@ -235,6 +248,7 @@ export async function generateLLMText({
   clientId = null,
   idempotencyKey,
   background = false,
+  responseFormat,
 } = {}) {
   const requested = resolveModelConfig(model);
   const config = getAvailableFallback(requested);
@@ -278,6 +292,7 @@ export async function generateLLMText({
         maxTokens: effectiveMaxTokens,
         temperature: effectiveTemperature,
         reasoningEffort: config.reasoningEffort,
+        responseFormat,
       });
       const response = {
         text,

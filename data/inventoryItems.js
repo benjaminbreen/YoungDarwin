@@ -137,15 +137,14 @@ export const SUPPLY_DEFS = [
 export const INITIAL_SUPPLIES = Object.fromEntries(SUPPLY_DEFS.map(def => [def.id, def.initial]));
 export const NIGHTLY_SUPPLY_DRAW = Object.fromEntries(SUPPLY_DEFS.map(def => [def.id, def.nightly]));
 
-// A night aboard: add the ration to what came back, never past what the case
-// and pockets hold. `bonus` covers Syms's extra jars, which are carried on his
-// person and so raise the ceiling too.
-export function drawNightlySupplies(current = {}, bonus = {}) {
+// A night aboard: add the ration to what came back, never past what Darwin can
+// carry. Supplies are now one provisions resource; case capacity separately
+// governs specimens.
+export function drawNightlySupplies(current = {}) {
   const drawn = {};
   for (const def of SUPPLY_DEFS) {
-    const ceiling = def.initial + (bonus[def.id] || 0);
     const held = Math.max(0, Number(current[def.id]) || 0);
-    drawn[def.id] = Math.min(ceiling, held + def.nightly);
+    drawn[def.id] = Math.min(def.initial, held + def.nightly);
   }
   return drawn;
 }

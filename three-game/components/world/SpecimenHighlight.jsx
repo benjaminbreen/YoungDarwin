@@ -3,7 +3,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
-import { inferSpecimenRarity } from '../../world/inspectables';
+import { getSpecimenRarity } from '../../rarity';
 import { createDrapedRingGeometry, projectDrapedGeometry } from '../../world/drapedRingGeometry';
 import { getRadialGlowTexture } from '../../world/glowTexture';
 
@@ -22,17 +22,13 @@ const HIGHLIGHT_TARGET_QUATERNION = new THREE.Quaternion();
 const HIGHLIGHT_TARGET_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 
 const VISUAL_TIER_BY_RARITY = Object.freeze({
-  abundant: 'common',
   common: 'common',
-  uncommon: 'scarce',
-  scarce: 'scarce',
-  rare: 'rare',
-  endemic: 'rare',
-  historical: 'rare',
-  ultra_rare: 'ultraRare',
+  notable: 'scarce',
+  remarkable: 'rare',
+  singular: 'ultraRare',
 });
 
-// Three deliberately simple visual tiers. The source rarity remains available
+// Four deliberately simple visual tiers. The source rarity remains available
 // to the field-note UI, but the world language stays immediately readable.
 const TIER_STYLES = Object.freeze({
   common: {
@@ -137,7 +133,7 @@ export function SpecimenHighlight({
   const lastUpdateAtRef = useRef(null);
   const projectedAtRef = useRef({ x: Infinity, z: Infinity, zoneId: null });
 
-  const rarity = inferSpecimenRarity(specimen);
+  const rarity = getSpecimenRarity(specimen).id;
   const visualTier = VISUAL_TIER_BY_RARITY[rarity] || 'common';
   const style = TIER_STYLES[visualTier];
   const phase = useMemo(() => phaseForSpecimen(specimen), [specimen]);
