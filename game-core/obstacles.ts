@@ -106,7 +106,15 @@ const postOfficeBayObstacles = [
       scale: 0.26,
     },
     collider: { type: 'cylinder', radius: 2.55, height: 7.5 },
-    gameplay: { jumpable: false, climbable: false },
+    gameplay: {
+      jumpable: false,
+      climbable: false,
+      fieldExaminable: {
+        label: 'Galápagos bitterbush',
+        typeId: 'castela',
+        category: 'Plant',
+      },
+    },
   },
   {
     id: 'galapagos-bitterbush-ridge',
@@ -118,7 +126,15 @@ const postOfficeBayObstacles = [
       scale: 0.24,
     },
     collider: { type: 'cylinder', radius: 2.55, height: 7.5 },
-    gameplay: { jumpable: false, climbable: false },
+    gameplay: {
+      jumpable: false,
+      climbable: false,
+      fieldExaminable: {
+        label: 'Galápagos bitterbush',
+        typeId: 'castela',
+        category: 'Plant',
+      },
+    },
   },
   {
     id: 'twisted-tree-scrub',

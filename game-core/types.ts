@@ -95,6 +95,11 @@ export type ObstacleDefinition = {
       stiffness?: number;
       damping?: number;
     };
+    fieldExaminable?: string | {
+      label?: string;
+      typeId?: string;
+      category?: string;
+    };
   };
 };
 

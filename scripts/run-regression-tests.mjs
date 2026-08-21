@@ -333,6 +333,7 @@ const {
   publishContextPromptState,
 } = loadModule('three-game/ui/contextPromptService.js');
 const {
+  findAmbientFieldTarget,
   isAmbientObstacleExaminable,
   resolveFieldAction,
   sameFieldAction,
@@ -3307,6 +3308,31 @@ test('ambient field targets ignore generic structure collision shells', () => {
     id: 'authored-shell',
     definition: { gameplay: { fieldExaminable: 'weathered cabin wall' } },
   }), true);
+});
+
+test('Post Office Bay proximity prompts distinguish bitterbush from prickly pear', () => {
+  const obstacles = getRuntimeObstacles('POST_OFFICE_BAY');
+  const bitterbushObstacle = obstacles.find(obstacle => obstacle.id === 'galapagos-bitterbush-ridge');
+  assert.ok(bitterbushObstacle);
+
+  const bitterbush = findAmbientFieldTarget({
+    zoneId: 'POST_OFFICE_BAY',
+    position: { x: 2.5, y: 0, z: 25.5 },
+    facing: { x: 1, z: 0 },
+    obstacles: [bitterbushObstacle],
+  });
+  assert.equal(bitterbush?.name, 'Galápagos bitterbush');
+  assert.equal(resolveFieldAction({ toolId: 'hands', target: bitterbush })?.label, 'Examine Galápagos bitterbush');
+
+  const pricklyPear = findAmbientFieldTarget({
+    zoneId: 'POST_OFFICE_BAY',
+    position: { x: 9.2, y: 0, z: 26.5 },
+    facing: { x: -1, z: 0 },
+    obstacles,
+  });
+  assert.equal(pricklyPear?.actorId, 'pob-4');
+  assert.equal(pricklyPear?.specimenId, 'pricklypearpad');
+  assert.equal(resolveFieldAction({ toolId: 'hands', target: pricklyPear })?.label, 'Examine prickly pear');
 });
 
 test('Lava Flats movement terrain contains all collision-scale relief', () => {

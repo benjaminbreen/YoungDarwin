@@ -4,6 +4,7 @@ import {
   inspectableCatalog,
   inspectableTypeForEcologyLayer,
 } from './world/inspectables';
+import { getPricklyPearSites } from './physics/props/pricklyPear/pricklyPearSites';
 
 const OBSTACLE_TYPE_IDS = Object.freeze({
   cactus: 'opuntia',
@@ -19,6 +20,7 @@ const AMBIENT_NATURAL_OBSTACLE_KINDS = new Set([
 const TARGET_REACH = 3.35;
 const MIN_FACING_DOT = 0.2;
 const ecologyTargetCache = new WeakMap();
+const pricklyPearTargetCache = new Map();
 
 const TOOL_ACTIONS = Object.freeze({
   hammer: { verb: 'Strike', shortLabel: 'Hammer' },
@@ -126,6 +128,41 @@ function ecologyTargets(ecology) {
   return targets;
 }
 
+function pricklyPearTargets(zoneId) {
+  if (!zoneId) return [];
+  const cached = pricklyPearTargetCache.get(zoneId);
+  if (cached) return cached;
+  const identity = inspectableCatalog.opuntia;
+  const sourceId = `interactive:${zoneId}:prickly-pear`;
+  const targets = getPricklyPearSites(zoneId).map(site => {
+    const scale = Math.max(0.1, finite(site.size ?? site.scale, 1));
+    const x = finite(site.x);
+    const z = finite(site.z);
+    return {
+      id: `${sourceId}:${site.id}`,
+      actorId: site.id,
+      typeId: identity.id,
+      sourceId,
+      itemId: site.id,
+      kind: 'ecology',
+      category: identity.category,
+      name: 'prickly pear',
+      latin: identity.latinName,
+      specimenId: identity.specimenId,
+      radius: Math.max(0.45, scale * 0.62),
+      height: Math.max(0.8, scale * 1.5),
+      focus: {
+        x,
+        y: finite(site.y, terrainHeight(x, z, zoneId)),
+        z,
+      },
+      inspectable: identity,
+    };
+  });
+  pricklyPearTargetCache.set(zoneId, targets);
+  return targets;
+}
+
 export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [] }) {
   if (!zoneId || !position) return null;
   const forward = normalizedFacing(facing);
@@ -141,6 +178,7 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
     const typeId = authoredExamination?.typeId
       || OBSTACLE_TYPE_IDS[obstacle.kind]
       || `obstacle:${obstacle.kind || 'object'}`;
+    const identity = inspectableCatalog[typeId] || null;
     const x = finite(obstacle.x);
     const z = finite(obstacle.z);
     const baseY = finite(terrainHeight(x, z, zoneId), position.y);
@@ -148,10 +186,11 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
       id: `obstacle:${zoneId}:${obstacle.id}`,
       actorId: obstacle.id,
       typeId,
-      specimenId: inspectableCatalog[typeId]?.specimenId || null,
+      specimenId: identity?.specimenId || null,
       kind: 'obstacle',
       category: authoredExamination?.category || obstacleCategory(obstacle),
-      name: authoredExamination?.label || obstacleLabel(obstacle),
+      name: authoredExamination?.label || identity?.englishName || obstacleLabel(obstacle),
+      latin: identity?.latinName || '',
       radius: Math.max(0.25, finite(obstacle.radius, 0.5)),
       height: Math.max(0.2, finite(obstacle.colliderTop ?? obstacle.height, 0.6)),
       // Focus is the subject's base, as it is for specimens; the examine camera
@@ -160,7 +199,16 @@ export function findAmbientFieldTarget({ zoneId, position, facing, obstacles = [
       // drifted with whatever slope Darwin happened to be standing on.
       focus: { x, y: baseY, z },
       obstacleId: obstacle.id,
+      inspectable: identity,
     };
+    const score = targetScore(target, position, forward);
+    if (score !== null && score < bestScore) {
+      best = target;
+      bestScore = score;
+    }
+  }
+
+  for (const target of pricklyPearTargets(zoneId)) {
     const score = targetScore(target, position, forward);
     if (score !== null && score < bestScore) {
       best = target;
