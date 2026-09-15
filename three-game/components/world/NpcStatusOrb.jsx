@@ -6,6 +6,7 @@ import { useFrame } from '@react-three/fiber';
 import { Html, useCursor } from '@react-three/drei';
 import { getRuntimePlayerPose } from '../../store';
 import { npcStatusStyle } from '../../npcs/npcStatus';
+import { usePointLightSlot } from '../../world/pointLightPool';
 
 const NO_RAYCAST = () => null;
 const ORB_WORLD_POSITION = new THREE.Vector3();
@@ -110,7 +111,8 @@ export function NpcStatusOrb({
   name,
   height = 2.3,
   // The point light is the only part with a scene-wide cost: adding or removing
-  // one relights every material. Mount it for the whole life of the NPC.
+  // one relinks every material. It comes from the shared pool, which mounts the
+  // zone's whole budget up front so the count never moves.
   castsLight = true,
 }) {
   const style = npcStatusStyle(status);
@@ -119,7 +121,7 @@ export function NpcStatusOrb({
   const crystalMaterialRef = useRef(null);
   const glowRef = useRef(null);
   const pingRef = useRef(null);
-  const lightRef = useRef(null);
+  const lightRef = usePointLightSlot(castsLight);
   const opennessRef = useRef(0);
   const pingStartRef = useRef(-Infinity);
   const elapsedRef = useRef(0);
@@ -224,8 +226,14 @@ export function NpcStatusOrb({
     glowUniforms.uOpacity.value = 0.6 + breath * 0.14 + emphasis * 0.5;
 
     if (lightRef.current) {
-      lightRef.current.color.lerp(targetGlow, blend);
-      lightRef.current.intensity = style.light * (0.78 + breath * 0.22 + emphasis * 0.95);
+      const light = lightRef.current;
+      // The slot lives at the scene root, so the orb's own transform does not
+      // carry it: write the world position the group just computed.
+      light.position.copy(ORB_WORLD_POSITION);
+      light.distance = 4.6;
+      light.decay = 2;
+      light.color.lerp(targetGlow, blend);
+      light.intensity = style.light * (0.78 + breath * 0.22 + emphasis * 0.95);
     }
 
     // Click ping.
@@ -315,10 +323,6 @@ export function NpcStatusOrb({
           toneMapped={false}
         />
       </mesh>
-
-      {castsLight && (
-        <pointLight ref={lightRef} color={style.glow} intensity={style.light} distance={4.6} decay={2} />
-      )}
 
       {open && activity && (
         <Html position={[0, 0.34, 0]} center distanceFactor={6.5} zIndexRange={[8, 0]}>

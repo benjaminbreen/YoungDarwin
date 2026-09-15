@@ -15,6 +15,7 @@ import { darwin5ClipDuration } from './darwin5AnimationManifest.mjs';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
 import { isInteriorZone } from '../../interiors/interiorRegistry';
+import { trackPointLightTo, usePointLightSlot } from '../../world/pointLightPool';
 import { CarriedPropAttachment } from './CarriedPropAttachment';
 import { getZoneProps } from '../../physics/props/propRegistry';
 import { carryGripForProp } from './carryProfiles';
@@ -679,7 +680,8 @@ function lampNightFactor(hour) {
 function HandLamp({ scene, modelAssetId }) {
   const { scene: lampSource } = useTrackedGLTF(LAMP_MODEL_PATH);
   const groupRef = useRef(null);
-  const lightRef = useRef(null);
+  const lightRef = usePointLightSlot(true);
+  const flameAnchorRef = useRef(null);
   const flameMatsRef = useRef([]);
   const boneQuat = useMemo(() => new THREE.Quaternion(), []);
   const swingQuat = useMemo(() => new THREE.Quaternion(), []);
@@ -724,22 +726,20 @@ function HandLamp({ scene, modelAssetId }) {
     handle.group.name = 'darwinHandLamp';
     handle.group.visible = false;
 
-    // decay 1.4 (not the physical 2): the flame sits ~0.3 m from the torso, so
-    // inverse-square falloff slammed the near body to clipping while the far side
-    // crushed to black. A softer decay flattens that near-field gradient.
-    const light = new THREE.PointLight(LAMP_LIGHT_COLOR, 0, LAMP_LIGHT_DISTANCE, 1.4);
-    light.castShadow = false;
-    // Sit the light at the flame, in lamp-native units (group scale handles the rest).
-    light.position.set(0, nativeHeight * 0.55 - box.max.y, 0);
-    handle.group.add(light);
+    // The light itself comes from the shared pool, so all that mounts here is
+    // a marker at the flame, in lamp-native units (group scale handles the
+    // rest). The pool slot follows its world position each frame.
+    const flameAnchor = new THREE.Object3D();
+    flameAnchor.position.set(0, nativeHeight * 0.55 - box.max.y, 0);
+    handle.group.add(flameAnchor);
 
     groupRef.current = handle.group;
-    lightRef.current = light;
+    flameAnchorRef.current = flameAnchor;
 
     return () => {
       handle.dispose();
       groupRef.current = null;
-      lightRef.current = null;
+      flameAnchorRef.current = null;
       flameMatsRef.current = [];
     };
   }, [scene, lampSource, modelAssetId]);
@@ -769,8 +769,13 @@ function HandLamp({ scene, modelAssetId }) {
     const flicker = 0.82 + 0.12 * Math.sin(t * 11.3) + 0.06 * Math.sin(t * 24.7 + 1.3);
     if (lightRef.current) {
       const indoors = isInteriorZone(state.currentZoneId);
+      trackPointLightTo(lightRef.current, flameAnchorRef.current);
+      lightRef.current.color.set(LAMP_LIGHT_COLOR);
       lightRef.current.intensity = night * LAMP_LIGHT_INTENSITY * flicker * (indoors ? 0.62 : 1);
       lightRef.current.distance = indoors ? 5.2 : LAMP_LIGHT_DISTANCE;
+      // decay 1.4 (not the physical 2): the flame sits ~0.3 m from the torso, so
+      // inverse-square falloff slammed the near body to clipping while the far
+      // side crushed to black. A softer decay flattens that near-field gradient.
       lightRef.current.decay = indoors ? 1.9 : 1.4;
     }
     for (let i = 0; i < flameMatsRef.current.length; i += 1) {

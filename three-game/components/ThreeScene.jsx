@@ -4,6 +4,8 @@ import React, { Suspense } from 'react';
 import { PlayerController } from './player/PlayerController';
 import { Atmosphere } from './scene/Atmosphere';
 import { Lighting } from './scene/Lighting';
+import { PointLightPool } from './scene/PointLightPool';
+import { pointLightBudgetForZone } from '../world/pointLightPool';
 import { SkyController } from './scene/SkyController';
 import { Water } from './scene/Water';
 import { GroundedWorldFX } from './scene/GroundedWorldFX';
@@ -36,6 +38,7 @@ export function ThreeScene({
   const interior = getInteriorDefinition(currentZoneId);
   const outdoors = !interior;
   const exteriorAtmosphere = outdoors || interior?.scene?.exteriorAtmosphere === true;
+  const pointLightBudget = pointLightBudgetForZone(currentZoneId);
   return (
     <>
       {/* Always mounted: ticks the island weather sim and smooths the shared
@@ -56,6 +59,10 @@ export function ThreeScene({
         />
       )}
       {outdoors && <Lighting />}
+      {/* Mounts for every zone, interiors included, and before any content:
+          the point-light budget must be complete before the first material
+          draws. */}
+      <PointLightPool budget={pointLightBudget} />
       {exteriorAtmosphere && environmentReady && (
         <Suspense fallback={null}>
           {settings.atmosphere !== false && <Atmosphere />}

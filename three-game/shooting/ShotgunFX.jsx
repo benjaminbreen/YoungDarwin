@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { onPropEvent } from '../physics/props/propEvents';
 import { dustPaletteForBiome } from '../components/player/playerFeedback';
+import { usePointLightSlot } from '../world/pointLightPool';
 
 const MAX_IMPACTS = 8;
 const MAX_SMOKE = 3;
@@ -113,7 +114,7 @@ function floorCount(base, intensity, min = 2) {
 
 function MuzzleFlash({ texture }) {
   const spriteRef = useRef(null);
-  const lightRef = useRef(null);
+  const lightRef = usePointLightSlot(true);
   const state = useRef({ active: false, age: 0 });
   const colorStart = useMemo(() => new THREE.Color('#ffd9a0'), []);
   const colorEnd = useMemo(() => new THREE.Color('#ff9a4a'), []);
@@ -139,6 +140,9 @@ function MuzzleFlash({ texture }) {
     }
     if (lightRef.current) {
       lightRef.current.position.set(position.x, position.y, position.z);
+      lightRef.current.color.set('#ffc878');
+      lightRef.current.distance = 7;
+      lightRef.current.decay = 2;
     }
     state.current.active = true;
     state.current.age = 0;
@@ -177,14 +181,6 @@ function MuzzleFlash({ texture }) {
   return (
     <group>
       <sprite ref={spriteRef} visible={false} material={spriteMaterial} renderOrder={6} />
-      <pointLight
-        ref={lightRef}
-        color="#ffc878"
-        intensity={0}
-        distance={7}
-        decay={2}
-        castShadow={false}
-      />
     </group>
   );
 }

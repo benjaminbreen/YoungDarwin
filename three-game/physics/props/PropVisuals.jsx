@@ -16,6 +16,7 @@ import { createTimberMaterial } from '../../world/regions/materials/timberMateri
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { cachedGpuResource, retainGpuResource } from '../../world/gpuResourceCache';
 import { onPropEvent } from './propEvents';
+import { trackPointLightTo, usePointLightSlot } from '../../world/pointLightPool';
 import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
 
@@ -403,7 +404,7 @@ function CandlestickVisual() {
 }
 
 function CandlestickFlame({ offsetY = 0 }) {
-  const lightRef = useRef(null);
+  const lightRef = usePointLightSlot(true);
   const flameRef = useRef(null);
   const phaseOffset = useMemo(() => Math.random() * Math.PI * 2, []);
   const flame = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
@@ -419,7 +420,9 @@ function CandlestickFlame({ offsetY = 0 }) {
   useFrame(({ clock }) => {
     const light = lightRef.current;
     const flameMesh = flameRef.current;
-    if (!light || !flameMesh) return;
+    // The flame must keep burning when the zone's light budget is already
+    // spent: only the glow is optional.
+    if (!flameMesh) return;
     const store = useThreeGameStore.getState();
     const celestial = skyState(store.timeOfDay, store.day || 1);
     const daylightHouse = store.currentZoneId === 'LAWSON_HOUSE';
@@ -431,7 +434,13 @@ function CandlestickFlame({ offsetY = 0 }) {
     const activation = THREE.MathUtils.smoothstep(darkness, 0.08, 0.92);
     const phase = clock.elapsedTime * 13.4 + phaseOffset;
     const flicker = 0.96 + Math.sin(phase) * 0.026 + Math.sin(phase * 1.87) * 0.014;
-    light.intensity = THREE.MathUtils.lerp(daylightHouse ? 0.005 : 0.14, 3.25, activation) * flicker;
+    if (light) {
+      trackPointLightTo(light, flameMesh);
+      light.color.set('#ff9a48');
+      light.distance = 2.5;
+      light.decay = 2;
+      light.intensity = THREE.MathUtils.lerp(daylightHouse ? 0.005 : 0.14, 3.25, activation) * flicker;
+    }
     flame.emissiveIntensity = THREE.MathUtils.lerp(daylightHouse ? 0.035 : 2.45, 4.4, activation) * flicker;
     flameMesh.visible = !daylightHouse || activation > 0.075;
     flameMesh.scale.set(0.74, 1.28 + Math.sin(phase * 0.83) * 0.06, 0.74);
@@ -440,14 +449,6 @@ function CandlestickFlame({ offsetY = 0 }) {
   return (
     <group position={[0, offsetY + 0.275, 0]}>
       <mesh ref={flameRef} material={flame} geometry={flameGeometry} />
-      <pointLight
-        ref={lightRef}
-        position={[0, 0.025, 0]}
-        color="#ff9a48"
-        intensity={0.14}
-        distance={2.5}
-        decay={2}
-      />
     </group>
   );
 }
