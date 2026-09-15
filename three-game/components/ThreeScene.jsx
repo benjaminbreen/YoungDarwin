@@ -5,6 +5,7 @@ import { PlayerController } from './player/PlayerController';
 import { Atmosphere } from './scene/Atmosphere';
 import { Lighting } from './scene/Lighting';
 import { PointLightPool } from './scene/PointLightPool';
+import { Ktx2Warmup } from './scene/Ktx2Warmup';
 import { pointLightBudgetForZone } from '../world/pointLightPool';
 import { SkyController } from './scene/SkyController';
 import { Water } from './scene/Water';
@@ -63,6 +64,7 @@ export function ThreeScene({
           the point-light budget must be complete before the first material
           draws. */}
       <PointLightPool budget={pointLightBudget} />
+      <Ktx2Warmup />
       {exteriorAtmosphere && environmentReady && (
         <Suspense fallback={null}>
           {settings.atmosphere !== false && <Atmosphere />}

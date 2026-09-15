@@ -60,7 +60,14 @@ function pruneResources(protectedKey = null) {
   }
 }
 
+// A worker that fails to load is permanent for the session. Without this flag
+// every later request posts into a dead worker and waits forever, because
+// onerror can only recover requests that were already pending — and a module
+// that throws at import fails before the first request is registered.
+let workerFailed = false;
+
 function ensureWorker() {
+  if (workerFailed) return null;
   if (worker || typeof window === 'undefined' || typeof Worker === 'undefined') return worker;
   worker = new Worker(new URL('./terrainWorker.js', import.meta.url), { type: 'module' });
   worker.onmessage = event => {
@@ -99,6 +106,7 @@ function ensureWorker() {
     pruneResources(request.key);
   };
   worker.onerror = event => {
+    workerFailed = true;
     for (const [requestId, request] of pending) {
       pending.delete(requestId);
       const entry = resources.get(request.key);

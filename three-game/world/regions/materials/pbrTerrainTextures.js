@@ -1,6 +1,18 @@
 import * as THREE from 'three';
 import { CONSTRAINED_TEXTURE_MAX_DIM, isConstrainedMemoryDevice } from '../../constrainedDevice';
 
+// Deliberately NOT a static import of ../../ktx2Textures: this module is in the
+// terrain worker's graph (terrainWorker -> terrain -> regions -> a region
+// material -> here), and KTX2Loader is main-thread only. Importing it here
+// killed the worker at load, and terrain hung forever because the worker died
+// before any request was pending. The main thread installs the provider
+// instead.
+let compressedTextureProvider = null;
+
+export function setCompressedTextureProvider(provider) {
+  compressedTextureProvider = typeof provider === 'function' ? provider : null;
+}
+
 const FLOREANA_PBR_BASE = '/assets/textures/world/floreana-pbr';
 
 export const FLOREANA_PBR_TEXTURES = {
@@ -434,6 +446,21 @@ function loadBrowserTerrainTexture(path, rgba) {
   return texture;
 }
 
+// A transcoded KTX2 already carries its own mip chain, so generateMipmaps must
+// stay off — leaving it on makes three build an uncompressed chain and both
+// the upload and the memory saving evaporate.
+function configureKtx2Texture(texture, colorSpace, anisotropy) {
+  texture.colorSpace = colorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.anisotropy = anisotropy;
+  texture.flipY = false;
+  return texture;
+}
+
 export function loadRepeatingTerrainTexture(path, {
   fallback = [255, 255, 255, 255],
   colorSpace = THREE.NoColorSpace,
@@ -441,6 +468,14 @@ export function loadRepeatingTerrainTexture(path, {
 } = {}) {
   const rgba = typeof fallback === 'string' ? rgbaFromHex(fallback) : fallback;
   const isFallback = typeof window === 'undefined' || !path;
+
+  // A prefetched KTX2 skips the decode and the runtime mip build entirely.
+  // A miss is not a failure — it just means this session pays the WebP cost.
+  const compressed = !isFallback && compressedTextureProvider
+    ? compressedTextureProvider(path)
+    : null;
+  if (compressed) return configureKtx2Texture(compressed, colorSpace, anisotropy);
+
   const texture = isFallback
     ? fallbackTexture(rgba, colorSpace)
     : loadBrowserTerrainTexture(path, rgba);
