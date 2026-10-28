@@ -678,6 +678,9 @@ export function LaunchOverlay({
   // vanish a frame later. Save-dependent chrome waits for this instead.
   saveStateKnown = true,
   hasSavedExpedition = false,
+  // The in-runtime menu has no Load row, but the run it was opened from is
+  // the save that a new expedition would replace.
+  expeditionInProgress = false,
   hasSavedJournalEntries = false,
   lastJournalLabel = 'Floreana - September 1835',
 }) {
@@ -816,6 +819,13 @@ export function LaunchOverlay({
             <nav className="relative grid gap-2 p-1">
               <div className="px-2 pb-1 pt-1 text-center">
                 <h2 className="text-[24px] tracking-[0.08em] text-expedition-goldbright">Choose Expedition Mode</h2>
+                {/* There is one save slot and the new run autosaves over it as
+                    soon as the island is ready, so say so before the choice. */}
+                {(hasSavedExpedition || expeditionInProgress) && (
+                  <p className="mt-1 text-[13px] tracking-[0.03em] text-expedition-parchment/75">
+                    Starting anew replaces your saved expedition.
+                  </p>
+                )}
               </div>
               <div className="grid gap-2 sm:grid-cols-3">
                 <CharacterChoiceButton

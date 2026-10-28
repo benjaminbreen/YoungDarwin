@@ -1088,6 +1088,10 @@ export function NaturalistModel({
       if (event.code !== 'Digit9' && event.key !== '9') return;
       if (!event.shiftKey) return;
       if (event.repeat) return;
+      // Shift+9 is "(" on US layouts; typing one in the narrator box or the
+      // journal must not swap Darwin's body.
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
       setSelectedModelAssetId(current => {
         const idx = cycle.indexOf(current);
         const next = cycle[(idx + 1) % cycle.length];

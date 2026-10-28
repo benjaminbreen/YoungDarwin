@@ -5594,6 +5594,7 @@ export default function ThreeDarwinGame({
             progress={displayedProgress}
             selectedModeId={initialModeId || playableModeId}
             onNewExpedition={openCharacterSelect}
+            expeditionInProgress={gameStarted}
             onModeSelect={beginNewExpedition}
             onBack={() => setLaunchState('menu')}
             onSettings={() => setLaunchState('settings')}
