@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useThreeGameStore } from '../../../store';
+import { expeditionDateForDay } from '../../../expeditionOutcomes';
 import { zoneSpecimenProgress } from '../../../data';
 import { getZone } from '../../../world/floreanaZones';
 import { prepareRegionEcologyResource } from '../../../world/ecology/ecologyResource';
@@ -32,9 +33,8 @@ import {
 } from './islandLocations';
 
 function formatExpeditionDate(day) {
-  const start = new Date(Date.UTC(1835, 8, 17));
-  start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
-  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(start);
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(expeditionDateForDay(day));
 }
 
 const TYPE_LABELS = {
@@ -91,6 +91,7 @@ function useIslandSurvey() {
   const visitedZoneIds = useThreeGameStore(state => state.visitedZoneIds);
   const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
   const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
+  const journal = useThreeGameStore(state => state.journal);
 
   return useMemo(() => {
     const visited = new Set(visitedZoneIds || []);
@@ -100,7 +101,7 @@ function useIslandSurvey() {
     for (const location of islandMapLocations) {
       if (location.isTest) continue;
       const entry = {
-        ...zoneSpecimenProgress(location.id, collectedSpecimenIds, documentedSpecimenIds),
+        ...zoneSpecimenProgress(location.id, collectedSpecimenIds, documentedSpecimenIds, journal),
         visited: visited.has(location.id),
       };
       byZone.set(location.id, entry);
@@ -108,7 +109,7 @@ function useIslandSurvey() {
       if (entry.visited) surveyed += 1;
     }
     return { byZone, surveyed, landings };
-  }, [visitedZoneIds, collectedSpecimenIds, documentedSpecimenIds]);
+  }, [visitedZoneIds, collectedSpecimenIds, documentedSpecimenIds, journal]);
 }
 
 const EMPTY_SURVEY = Object.freeze({ visited: false, recorded: 0, total: 0 });

@@ -6,20 +6,15 @@ import { useThreeGameStore } from '../../store';
 import { SpecimenShape } from '../../components/world/SpecimenActor';
 import { SketchPortrait } from './SketchPortrait';
 import { useDismissableOverlay } from '../useDismissableOverlay';
+import { expeditionDateForDay } from '../../expeditionOutcomes';
 
 // ---------------------------------------------------------------------------
 // Derivations — the mockup shows fields the data doesn't store directly.
 
-function expeditionDate(day) {
-  const start = new Date(Date.UTC(1835, 8, 17));
-  start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
-  return start;
-}
-
 function formatExpeditionDate(day) {
   if (!day) return 'Not yet collected';
   return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-    .format(expeditionDate(day));
+    .format(expeditionDateForDay(day));
 }
 
 function timeOfDayWord(timeOfDay) {
@@ -33,7 +28,7 @@ function timeOfDayWord(timeOfDay) {
 }
 
 function catalogueNumber(day, index) {
-  const date = expeditionDate(day);
+  const date = expeditionDateForDay(day);
   const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(date.getUTCDate()).padStart(2, '0');
   return `FLO‑1835‑${mm}‑${dd}‑${String(index + 1).padStart(2, '0')}`;

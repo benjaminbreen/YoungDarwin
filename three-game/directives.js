@@ -28,16 +28,24 @@ function playerNotes(state) {
 
 export const POST_OFFICE_BAY_SURVEY_TARGET = 3;
 
+// Failed and partial attempts also write field-record entries; only a
+// successful take or a documentation counts as a record. Shared with the HUD's
+// field-record count so the opening objective and that panel agree.
+export function isRecordedFieldEntry(entry) {
+  if (entry?.authorship !== 'field-record' || !entry.specimenId) return false;
+  return entry.condition !== 'failed'
+    && entry.condition !== 'partial evidence'
+    && entry.condition !== 'partial_evidence'
+    && entry.condition !== 'released';
+}
+
 // The opening survey counts work actually recorded at Post Office Bay. Journal
 // entries carry the collection locality, so travelling elsewhere and finding a
 // species that also occurs at the landing cannot silently finish this goal.
 export function postOfficeBaySurveyProgress(state) {
   const recorded = new Set();
   for (const entry of state.journal || []) {
-    if (entry?.authorship !== 'field-record' || !entry.specimenId) continue;
-    // Failed and partial attempts also write field-record entries; only a
-    // successful take or a documentation counts as a record.
-    if (entry.condition === 'failed' || entry.condition === 'partial evidence' || entry.condition === 'partial_evidence' || entry.condition === 'released') continue;
+    if (!isRecordedFieldEntry(entry)) continue;
     const atPostOfficeBay = entry.location === 'Post Office Bay'
       || entry.location?.id === 'POST_OFFICE_BAY'
       || entry.zoneId === 'POST_OFFICE_BAY';

@@ -70,13 +70,22 @@ export function minutesUntilRecoveryMorning(timeOfDay, recoveryHour = INCAPACITA
   return Math.max(1, Math.round((hours || 24) * 60));
 }
 
+// Day 1 is 24 September 1835, the date of Darwin's diary entry on Charles
+// Island that the launch overlay quotes; the Beagle weighs anchor at first
+// light on the 27th, after the last field day.
+export const EXPEDITION_START_UTC = Date.UTC(1835, 8, 24);
+
+export function expeditionDateForDay(day) {
+  const date = new Date(EXPEDITION_START_UTC);
+  date.setUTCDate(date.getUTCDate() + Math.max(0, (Number(day) || 1) - 1));
+  return date;
+}
+
 export function formatExpeditionDate(day) {
-  const start = new Date(Date.UTC(1835, 8, 17));
-  start.setUTCDate(start.getUTCDate() + Math.max(0, (Number(day) || 1) - 1));
   return new Intl.DateTimeFormat('en-US', {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(start);
+  }).format(expeditionDateForDay(day));
 }

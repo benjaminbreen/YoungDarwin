@@ -611,6 +611,8 @@ const {
 } = loadModule('three-game/ui/expedition/map/islandLocations.js');
 const {
   getThreeSpecimens,
+  getThreeSpecimenTypeIds,
+  zoneSpecimenProgress,
 } = loadModule('three-game/data.js');
 const {
   baseSpecimens,
@@ -789,6 +791,7 @@ const {
   EXPEDITION_DAYS,
   expeditionDayLabel,
   expeditionOutcomeCause,
+  formatExpeditionDate,
   isFinalExpeditionDay,
   minutesUntilRecoveryMorning,
   resolveExpeditionDamage,
@@ -7061,6 +7064,45 @@ test('alpha() reproduces the rgba spellings already used in gradients and shadow
   assert.equal(alpha('#e8dcc0', 0.85), 'rgba(232,220,192,0.85)');
 });
 
+test('expedition day 1 is the 24 September the launch card quotes', () => {
+  assert.equal(formatExpeditionDate(1), 'September 24, 1835');
+  // The Beagle weighs anchor on the 27th, the morning after the last field day.
+  assert.equal(formatExpeditionDate(EXPEDITION_DAYS + 1), 'September 27, 1835');
+  const overlaySource = fs.readFileSync(path.resolve('three-game/ui/LaunchOverlay.jsx'), 'utf8');
+  assert.match(overlaySource, /weighs anchor at first light on 27 September/);
+  for (const file of [
+    'three-game/ui/ThreeHUD.jsx',
+    'three-game/ui/ExamineView.jsx',
+    'three-game/ui/StatusView.jsx',
+    'three-game/ui/expedition/SpecimenDetailModal.jsx',
+    'three-game/ui/expedition/map/IslandMapModal.jsx',
+    'field-notebook/FieldNotebook.jsx',
+  ]) {
+    assert.doesNotMatch(fs.readFileSync(path.resolve(file), 'utf8'), /Date\.UTC\(1835/, `${file} keeps its own start date`);
+  }
+});
+
+test('field record counts kinds recorded here that the species list does not name', () => {
+  const types = getThreeSpecimenTypeIds('POST_OFFICE_BAY');
+  assert.ok(!types.includes('pricklypearpad'));
+  const entry = condition => ({
+    authorship: 'field-record',
+    specimenId: 'pricklypearpad',
+    location: 'Post Office Bay',
+    condition,
+  });
+  const before = zoneSpecimenProgress('POST_OFFICE_BAY', [], [], []);
+  const after = zoneSpecimenProgress('POST_OFFICE_BAY', ['pricklypearpad'], [], [entry('collected')]);
+  assert.equal(after.recorded, before.recorded + 1);
+  assert.equal(after.total, before.total + 1);
+  // A failed attempt, or one recorded at another landing, adds nothing here.
+  assert.deepEqual(zoneSpecimenProgress('POST_OFFICE_BAY', [], [], [entry('failed')]), before);
+  assert.deepEqual(
+    zoneSpecimenProgress('POST_OFFICE_BAY', [], [], [{ ...entry('collected'), location: 'Black Beach' }]),
+    before,
+  );
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {
@@ -7077,3 +7119,4 @@ for (const { name, fn } of tests) {
 if (failed) process.exit(1);
 
 console.log(`Regression tests passed: ${tests.length}`);
+

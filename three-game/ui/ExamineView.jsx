@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
+import { expeditionDateForDay } from '../expeditionOutcomes';
 import { useDismissableOverlay } from './useDismissableOverlay';
 import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
@@ -21,8 +22,6 @@ import {
 // own the subject view; this layer owns inquiry, evidence, authorship, and the
 // explicit decision to collect after an observation has been recorded.
 
-const EXPEDITION_START = Date.UTC(1835, 8, 17);
-const MS_PER_DAY = 86400000;
 
 const PROCEDURES = {
   Animal: [
@@ -53,7 +52,7 @@ function expeditionDate(day) {
     day: 'numeric',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(new Date(EXPEDITION_START + Math.max(0, (day || 1) - 1) * MS_PER_DAY));
+  }).format(expeditionDateForDay(day));
 }
 
 function factKind(fact) {

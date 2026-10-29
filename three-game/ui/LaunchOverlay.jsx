@@ -30,6 +30,9 @@ const PROLOGUE_BLOCK_DELAYS_MS = Object.freeze({
   // explanatory copy reads as a continuation of Darwin's sentence rather than
   // a return to the present-day framing.
   reflection: 2250,
+  // The one rule the player needs before landing: the clock is finite. The
+  // HUD says "Day 1 of 3" but nothing said what happens after day 3.
+  stakes: 2900,
 });
 const ANIMAL_PROLOGUE_LINE_DELAYS_MS = Object.freeze([300, 800, 1300, 1800]);
 const ANIMAL_PROLOGUES = Object.freeze({
@@ -471,6 +474,16 @@ function HistoricalPrologue({
             Darwin&rsquo;s notes on the finches, tortoises, and other species
             found only here became foundational to his work on natural
             selection.
+          </p>
+        </div>
+
+        <div
+          className="launch-prologue-block mt-[clamp(1.2rem,3vh,2.2rem)] w-full max-w-[46rem]"
+          style={lineStyle(PROLOGUE_BLOCK_DELAYS_MS.stakes)}
+        >
+          <p className="font-expedition text-[13px] font-semibold uppercase tracking-[0.22em] text-expedition-gold/85 sm:text-[15px]">
+            The Beagle weighs anchor at first light on 27 September.
+            <span className="mt-1 block">You have three days ashore.</span>
           </p>
         </div>
 

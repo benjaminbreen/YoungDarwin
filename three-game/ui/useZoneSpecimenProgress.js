@@ -11,8 +11,9 @@ export function useZoneSpecimenProgress() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
   const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
+  const journal = useThreeGameStore(state => state.journal);
   return useMemo(
-    () => zoneSpecimenProgress(currentZoneId, collectedSpecimenIds, documentedSpecimenIds),
-    [currentZoneId, collectedSpecimenIds, documentedSpecimenIds],
+    () => zoneSpecimenProgress(currentZoneId, collectedSpecimenIds, documentedSpecimenIds, journal),
+    [currentZoneId, collectedSpecimenIds, documentedSpecimenIds, journal],
   );
 }

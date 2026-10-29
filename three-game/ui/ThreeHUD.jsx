@@ -12,7 +12,7 @@ import {
 } from '../input/touchControls';
 import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
 import { getFieldDilemma, getRuntimePlayerPose, useThreeGameStore } from '../store';
-import { EXPEDITION_DAYS, expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
+import { EXPEDITION_DAYS, expeditionDayLabel, formatExpeditionDate, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { isEndGameNarratorCommand } from '../finalAssessment';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { PLAYER_VISIBLE_NARRATOR_ENABLED } from '../ai/generativePolicy';
@@ -293,17 +293,6 @@ function routePosition(edge) {
 function routeEdgeLabel(route) {
   const edge = route.edge || route.exit;
   return ROUTE_EDGE_ABBR[edge] || String(edge || '').slice(0, 2).toUpperCase();
-}
-
-function formatExpeditionDate(day) {
-  const start = new Date(Date.UTC(1835, 8, 17));
-  start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(start);
 }
 
 function formatExpeditionTime(timeOfDay) {

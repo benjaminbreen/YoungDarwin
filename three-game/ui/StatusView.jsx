@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { baseSpecimens } from '../../data/specimens';
 import { getPlayableMode } from '../playable/playableModes';
 import { useThreeGameStore } from '../store';
-import { expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
+import { expeditionDateForDay, expeditionDayLabel, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { getZone } from '../world/floreanaZones';
 import { GoldDivider } from './expedition/ExpeditionPanel';
 import { useDismissableOverlay } from './useDismissableOverlay';
@@ -24,7 +24,6 @@ import {
 // paused, and this overlay frames the live 3D shot — no modal backdrop.
 
 const DARWIN_BORN = Date.UTC(1809, 1, 12);
-const EXPEDITION_START = Date.UTC(1835, 8, 17); // day 1 = Sep 17, 1835
 const VOYAGE_DEPARTURE = Date.UTC(1831, 11, 27); // Beagle leaves Plymouth
 const VOYAGE_RETURN = Date.UTC(1836, 9, 2); // Falmouth, Oct 2, 1836
 const MS_PER_DAY = 86400000;
@@ -84,7 +83,7 @@ const ANIMAL_FOOTER_LINES = {
 };
 
 function expeditionDateParts(day) {
-  const date = new Date(EXPEDITION_START + Math.max(0, (day || 1) - 1) * MS_PER_DAY);
+  const date = expeditionDateForDay(day);
   const formatted = new Intl.DateTimeFormat('en-US', {
     month: 'long',
     day: 'numeric',

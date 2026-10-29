@@ -9,12 +9,7 @@ import { PanelTabs } from '../three-game/ui/expedition/ExpeditionPanel';
 import { downloadExpeditionText, openExpeditionPrintReport } from '../three-game/ui/expeditionExport';
 import { ExpeditionModal } from '../three-game/ui/expedition/ExpeditionModal';
 import { SketchPortrait } from '../three-game/ui/expedition/SketchPortrait';
-
-function expeditionDate(day) {
-  const start = new Date(Date.UTC(1835, 8, 17));
-  start.setUTCDate(start.getUTCDate() + Math.max(0, (day || 1) - 1));
-  return start;
-}
+import { expeditionDateForDay } from '../three-game/expeditionOutcomes';
 
 function formatJournalDate(day, short = false) {
   return new Intl.DateTimeFormat('en-US', {
@@ -22,7 +17,7 @@ function formatJournalDate(day, short = false) {
     day: 'numeric',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(expeditionDate(day));
+  }).format(expeditionDateForDay(day));
 }
 
 function dayOrdinal(n) {
@@ -32,7 +27,7 @@ function dayOrdinal(n) {
 
 // "September 24th, 1835" with a superscript ordinal, as in the mockup.
 function OrnateDate({ day }) {
-  const date = expeditionDate(day);
+  const date = expeditionDateForDay(day);
   const month = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(date);
   const dayNum = date.getUTCDate();
   return (

@@ -1,6 +1,7 @@
 import { currentRegionId as currentZoneId } from '../game-core/regionMaps';
 import { getInitialNarration, getIslandLocation, getZoneSpecimens } from '../game-core/specimens';
 import { expeditionTools } from '../game-core/tools';
+import { isRecordedFieldEntry } from './directives';
 
 const zoneSpecimenCache = new Map();
 const zoneSpecimenTypeCache = new Map();
@@ -26,15 +27,30 @@ export function getThreeSpecimenTypeIds(zoneId = currentZoneId) {
 // Fieldwork done in one region, shared by the HUD's field-record panel and the
 // island chart so the two never disagree. Documented specimens count alongside
 // collected ones: the objectives and `questComplete` treat them as equivalent.
-export function zoneSpecimenProgress(zoneId, collectedSpecimenIds, documentedSpecimenIds) {
+//
+// The region's species list names its fauna, but plants examined from the
+// ecology (the prickly pear the opening hint points at) are recorded too, and
+// the opening objective counts them. Kinds recorded here that the list does not
+// name join both sides of the count, so collecting one never leaves the panel
+// at "0 recorded" while the objective reads 1/3.
+export function zoneSpecimenProgress(zoneId, collectedSpecimenIds, documentedSpecimenIds, journal = null) {
   const types = getThreeSpecimenTypeIds(zoneId) || [];
   const recorded = new Set([
     ...(collectedSpecimenIds || []),
     ...(documentedSpecimenIds || []),
   ]);
+  const listed = new Set(types);
+  const locationName = journal?.length ? getThreeIslandLocation(zoneId)?.name : null;
+  const unlisted = new Set();
+  if (locationName) {
+    for (const entry of journal) {
+      if (entry.location !== locationName || listed.has(entry.specimenId)) continue;
+      if (isRecordedFieldEntry(entry)) unlisted.add(entry.specimenId);
+    }
+  }
   return {
-    total: types.length,
-    recorded: types.filter(id => recorded.has(id)).length,
+    total: types.length + unlisted.size,
+    recorded: types.filter(id => recorded.has(id)).length + unlisted.size,
   };
 }
 
