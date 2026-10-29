@@ -795,6 +795,7 @@ const {
   formatExpeditionDate,
   isFinalExpeditionDay,
   minutesUntilRecoveryMorning,
+  nightfallMessage,
   resolveExpeditionDamage,
 } = loadModule('three-game/expeditionOutcomes.js');
 const {
@@ -7120,6 +7121,22 @@ test('an ended expedition leaves no resume point', () => {
   assert.equal(isExpeditionFinished({ expeditionOutcome: null }), false);
   const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
   assert.match(storeSource, /saveSession: \(\) => \{[\s\S]{0,240}isExpeditionFinished\(get\(\)\)[\s\S]{0,60}clearSessionSnapshot\(\)/);
+});
+
+test('the clock warns before midnight turns the day in the field', () => {
+  const darwin = { playableModeId: 'darwin', day: 1 };
+  assert.equal(nightfallMessage({ ...darwin, timeOfDay: 18 }, 60), null);
+  assert.match(nightfallMessage({ ...darwin, timeOfDay: 19.9 }, 12), /Dusk over Charles Island/);
+  assert.match(nightfallMessage({ ...darwin, timeOfDay: 22.95 }, 6), /An hour to midnight\. Make for the Beagle/);
+  // A long action spanning both thresholds gives the later, more urgent one.
+  assert.match(nightfallMessage({ ...darwin, timeOfDay: 19 }, 250), /An hour to midnight/);
+  // Crossing midnight itself is the rollover, not a warning.
+  assert.equal(nightfallMessage({ ...darwin, timeOfDay: 23.5 }, 60), null);
+  assert.match(nightfallMessage({ ...darwin, day: EXPEDITION_DAYS, timeOfDay: 19.9 }, 12), /Dusk on the last day/);
+  assert.equal(nightfallMessage({ playableModeId: 'finch', day: 1, timeOfDay: 19.9 }, 12), null);
+  assert.equal(nightfallMessage({ ...darwin, expeditionDeparted: true, timeOfDay: 19.9 }, 12), null);
+  const directivesSource = fs.readFileSync(path.resolve('three-game/directives.js'), 'utf8');
+  assert.doesNotMatch(directivesSource, /day only turns there/);
 });
 
 let failed = false;

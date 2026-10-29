@@ -100,6 +100,7 @@ import {
   expeditionOutcomeCause,
   isFinalExpeditionDay,
   minutesUntilRecoveryMorning,
+  nightfallMessage,
   resolveExpeditionDamage,
 } from './expeditionOutcomes';
 import {
@@ -363,7 +364,14 @@ function advanceTimeState(state, minutes) {
         timeOfDay: ((totalHours % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY,
         day: nextDay,
       };
-  return { ...timePatch, ...hungerPatch(state, minutes) };
+  const hunger = hungerPatch(state, minutes);
+  const nightfall = nightfallMessage(state, minutes);
+  if (!nightfall) return { ...timePatch, ...hunger };
+  return {
+    ...timePatch,
+    ...hunger,
+    message: hunger.message ? `${nightfall} ${hunger.message}` : nightfall,
+  };
 }
 
 function findRuntimeSpecimen(state, specimenId) {

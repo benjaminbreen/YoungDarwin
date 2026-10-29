@@ -28,6 +28,30 @@ export function expeditionDayLabel(day) {
   return `Day ${clamp(Math.round(Number(day) || 1), 1, EXPEDITION_DAYS)} of ${EXPEDITION_DAYS}`;
 }
 
+// The clock rolls the day at midnight wherever Darwin is: ashore on days 1-2
+// that skips the night aboard (fresh provisions, a cleared case, rest), and on
+// the last day it ends the expedition. Nothing else in the field says so, so
+// the clock warns once at dusk and once with an hour left.
+const NIGHT_WARNING_HOURS = [20, 23];
+
+export function nightfallMessage(state, minutes) {
+  if (state.playableModeId !== 'darwin' || !(minutes > 0)) return null;
+  if (state.expeditionOutcome || state.expeditionDeparted) return null;
+  const before = Number(state.timeOfDay) || 0;
+  const after = before + minutes / 60;
+  const crossed = NIGHT_WARNING_HOURS.filter(hour => before < hour && after >= hour && after < 24);
+  if (!crossed.length) return null;
+  const lastHour = crossed.at(-1) >= 23;
+  if (isFinalExpeditionDay(state.day)) {
+    return lastHour
+      ? 'An hour to midnight on the last day. When it strikes, the survey of Charles Island is over, wherever Darwin stands.'
+      : 'Dusk on the last day. The Beagle weighs anchor at first light; at midnight the survey ends, so make for the ship to stow the case.';
+  }
+  return lastHour
+    ? 'An hour to midnight. Make for the Beagle, or the day turns here, without a night aboard or fresh provisions.'
+    : 'Dusk over Charles Island. The day turns at midnight, ashore or aboard; the Beagle is where the case is emptied and stores are drawn.';
+}
+
 export function resolveExpeditionDamage({
   health,
   amount,

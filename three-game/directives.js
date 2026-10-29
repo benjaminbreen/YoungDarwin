@@ -118,7 +118,7 @@ export const DIRECTIVES = [
   {
     id: 'stow',
     text: 'Return to the Beagle and stow your case',
-    hint: 'The case only empties aboard ship — and the day only turns there.',
+    hint: 'Click the Beagle from Post Office Bay, or open the island chart. The case only empties aboard ship.',
     detail: 'The field case is small and does not empty itself. Stowing it makes room for the next landing, but you cannot reach those specimens again until England, so write up anything you still want to say about them first.',
     isDone: state => (state.shipCollection || []).length >= 1,
   },

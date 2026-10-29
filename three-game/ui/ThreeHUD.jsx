@@ -596,9 +596,9 @@ function RestCard() {
 }
 
 // Aboard the Beagle: land the case, draw fresh stores, and sleep. This is the
-// loop's turn — a 12-slot case is a day's carrying capacity rather than a cap
-// on the whole voyage, and the day only advances here, so time is spent
-// deliberately rather than bleeding away.
+// loop's turn: the case is a day's carrying capacity rather than a cap on the
+// whole voyage. The clock also turns the day at midnight ashore, but without
+// the restock, so sleeping aboard is the deliberate way to end a day.
 function ShipDutiesPrompt() {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const inventory = useThreeGameStore(state => state.inventory);
