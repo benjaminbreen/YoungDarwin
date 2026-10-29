@@ -18,11 +18,16 @@ export const QUALITY_CHOICES = Object.freeze([
   {
     id: 'auto',
     label: 'Automatic',
-    note: 'Use Lightest unless a discrete graphics card is detected.',
+    note: 'Low-power on modest hardware, Light on most laptops, Balanced with a discrete graphics card.',
+  },
+  {
+    id: 'low',
+    label: 'Low-power',
+    note: 'For Chromebooks and older laptops. No screen effects or water reflections.',
   },
   {
     id: 'mobile',
-    label: 'Lightest',
+    label: 'Light',
     note: 'Best frame rate. Softer shadows, no water reflections.',
   },
   {
@@ -41,8 +46,6 @@ const VALID_IDS = new Set(QUALITY_CHOICES.map(choice => choice.id));
 
 export function normalizeQualityPreference(value) {
   const id = String(value || '').toLowerCase();
-  // `?quality=low` has long been an alias for the mobile tier; keep it working.
-  if (id === 'low') return 'mobile';
   return VALID_IDS.has(id) ? id : 'auto';
 }
 

@@ -200,6 +200,7 @@ const {
 } = loadModule('three-game/sessionSave.js');
 const {
   normalizeQualityPreference,
+  QUALITY_CHOICES,
   resolveQualityPreference,
 } = loadModule('three-game/qualityPreference.js');
 const {
@@ -5970,7 +5971,8 @@ test('session snapshots from an unknown schema are rejected rather than half-app
 test('graphics quality preference falls back to device detection only when automatic', () => {
   assert.equal(normalizeQualityPreference(undefined), 'auto');
   assert.equal(normalizeQualityPreference('nonsense'), 'auto');
-  assert.equal(normalizeQualityPreference('low'), 'mobile');
+  assert.equal(normalizeQualityPreference('low'), 'low');
+  assert.equal(normalizeQualityPreference('LOW'), 'low');
   assert.equal(normalizeQualityPreference('CINEMATIC'), 'cinematic');
   assert.equal(resolveQualityPreference('auto', 'mobile'), 'mobile');
   assert.equal(resolveQualityPreference('cinematic', 'mobile'), 'cinematic');
@@ -6006,7 +6008,34 @@ test('automatic graphics quality is conservative for unknown and integrated GPUs
     deviceMemory: 16,
     hardwareConcurrency: 12,
     renderer: 'SwiftShader Device (Subzero)',
+  }), 'low');
+  // The classroom Chromebook: 4 GB, 4 cores, integrated graphics.
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 4,
+    hardwareConcurrency: 4,
+    renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 600)',
+  }), 'low');
+  // Phones keep the tuned mobile tier even with little memory.
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: 4,
+    hardwareConcurrency: 6,
+    compactTouch: true,
+    renderer: 'Apple GPU',
   }), 'mobile');
+});
+
+test('every graphics choice maps onto a preset and the low tier cuts real work', () => {
+  const source = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  const presetsBlock = source.slice(source.indexOf('const QUALITY_PRESETS = {'), source.indexOf('const BOOT_LOADER_STABLE_MS'));
+  for (const choice of QUALITY_CHOICES) {
+    if (choice.id === 'auto') continue;
+    assert.match(presetsBlock, new RegExp(`\\n  ${choice.id}: \\{`), `${choice.id} has no QUALITY_PRESETS entry`);
+  }
+  const low = presetsBlock.slice(presetsBlock.indexOf('\n  low: {'), presetsBlock.indexOf('\n  mobile: {'));
+  assert.match(low, /postprocessing: false/);
+  assert.match(low, /reflections: false/);
+  assert.match(low, /shadowQuality: 'low'/);
+  assert.match(low, /dprMode: '1x'/);
 });
 
 test('adaptive DPR ladder removes device-clamped no-op rungs', () => {

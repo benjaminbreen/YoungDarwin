@@ -3,7 +3,7 @@
 // `navigator.deviceMemory` is missing in Safari/Firefox and is capped at 8 GB
 // in Chromium, while CPU core count says almost nothing about the GPU. The old
 // heuristic therefore put many integrated and unknown GPUs on the same tier as
-// a desktop graphics card. Prefer the Lightest tier unless the WebGL renderer
+// a desktop graphics card. Prefer the Light tier unless the WebGL renderer
 // identifies hardware that is very likely discrete.
 
 const SOFTWARE_RENDERER_PATTERN = /swiftshader|llvmpipe|software|mesa offscreen|microsoft basic render/i;
@@ -40,10 +40,15 @@ export function classifyAutomaticGraphicsQuality({
   const cores = Number(hardwareConcurrency);
   const rendererName = String(renderer || '').trim();
 
+  // Phones keep the tuned mobile tier: its SMAA and 1.25x were chosen because
+  // 1x with no screen-space AA read as jagged at phone viewing distance.
   if (compactTouch) return 'mobile';
-  if (Number.isFinite(memory) && memory > 0 && memory <= 4) return 'mobile';
-  if (Number.isFinite(cores) && cores > 0 && cores <= 4) return 'mobile';
-  if (!rendererName || SOFTWARE_RENDERER_PATTERN.test(rendererName)) return 'mobile';
+  // A 4 GB / 4-core machine is the classroom Chromebook; a software renderer
+  // runs every pixel on the CPU. Both need the work cut, not just resolution.
+  if (Number.isFinite(memory) && memory > 0 && memory <= 4) return 'low';
+  if (Number.isFinite(cores) && cores > 0 && cores <= 4) return 'low';
+  if (rendererName && SOFTWARE_RENDERER_PATTERN.test(rendererName)) return 'low';
+  if (!rendererName) return 'mobile';
   if (INTEGRATED_RENDERER_PATTERN.test(rendererName)) return 'mobile';
   return DISCRETE_RENDERER_PATTERN.test(rendererName) ? 'performance' : 'mobile';
 }

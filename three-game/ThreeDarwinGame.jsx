@@ -335,6 +335,37 @@ const DEFAULT_PERF_SETTINGS = {
 };
 
 const QUALITY_PRESETS = {
+  // Classroom hardware: 4 GB Chromebooks and anything on a software renderer.
+  // Every other tier keeps the full composer chain (SMAA, a 5-level bloom,
+  // grades: ~14 fullscreen passes), per-frame shadow refresh while moving, and
+  // the planar water reflection, and the adaptive controller can only lower
+  // resolution, which does nothing for a frame that is CPU bound. This tier
+  // cuts the work itself. Tone mapping lives on the renderer, so the direct-to-
+  // canvas path keeps the same exposure; context MSAA replaces SMAA.
+  low: {
+    dprMode: '1x',
+    msaaSamples: 0,
+    postprocessing: false,
+    contextAntialias: true,
+    // 2048 map, refreshed every 2nd frame while moving and every 4th at rest.
+    shadowQuality: 'low',
+    ao: false,
+    postHalfFloat: false,
+    reflections: false,
+    waterQuality: 'performance',
+    waterSplashes: false,
+    // Rain and mist are part of the island, not decoration; they stay.
+    weatherFX: true,
+    splatBackdrop: false,
+    solarScreenGlare: false,
+    solarLensGhosts: false,
+    solarSunHalo: true,
+    solarSceneFlares: false,
+    solarSunFacingGrade: false,
+    cheapMaterials: true,
+    foliageDrawScale: 0.6,
+    terrainSegmentCap: 128,
+  },
   // Mobile is a *slight* step down from performance, not a scorched-earth tier:
   // dropping to 1x DPR with no AA of any kind read as pixelated/jagged, and the
   // 'low' shadow tier's 12–24Hz refresh made shadows visibly ghost behind the
@@ -573,16 +604,14 @@ function settingEnabled(params, baseValue, enabledNames, disabledNames) {
 function settingsFromUrlSearch(search, automaticQuality = 'performance') {
   const params = new URLSearchParams(search);
   const requestedQuality = String(params.get('quality') || '').toLowerCase();
-  const quality = requestedQuality === 'low'
-    ? 'mobile'
-    : Object.prototype.hasOwnProperty.call(QUALITY_PRESETS, requestedQuality)
-      ? requestedQuality
-      : automaticQuality;
+  const quality = Object.prototype.hasOwnProperty.call(QUALITY_PRESETS, requestedQuality)
+    ? requestedQuality
+    : automaticQuality;
   const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
   const defaultWaterQuality = requestedQuality
     ? base.waterQuality
-    : quality === 'mobile'
-      ? QUALITY_PRESETS.mobile.waterQuality
+    : quality === 'mobile' || quality === 'low'
+      ? QUALITY_PRESETS[quality].waterQuality
       : DEFAULT_PERF_SETTINGS.waterQuality;
   const postprocessing = params.has('post')
     || params.has('postprocessing')
@@ -1832,11 +1861,36 @@ const _warmUp = new Vector3(0, 1, 0);
 // first draw (measured: 61 orphaned srgb programs, and settle re-linking
 // +154). Binding any linear target during the synchronous prepare makes the
 // prewarmed programs the ones gameplay actually uses.
+//
+// With the composer off (the low tier, ?noPost) the opposite holds: the scene
+// draws straight to the canvas, so the linear prewarm compiled a whole set of
+// programs gameplay never used and every real one linked on first draw (+77 at
+// boot and a 358ms swivel hitch on the low tier). three builds canvas-output
+// programs for an XR-flagged target with an sRGB texture (tone mapping and
+// output encoding both key off that flag), which gives an offscreen stand-in
+// for the canvas that warm renders can draw into invisibly.
+let prewarmDirectToCanvas = false;
 let _compileColorTarget = null;
-function withLinearCompileTarget(gl, run) {
+let _compileCanvasTarget = null;
+function createCanvasEquivalentTarget(size) {
+  const target = new WebGLRenderTarget(size, size);
+  target.texture.colorSpace = SRGBColorSpace;
+  target.isXRRenderTarget = true;
+  // RenderTarget has no userData; tag it directly.
+  target.darwinCanvasEquivalent = true;
+  return target;
+}
+function prewarmCompileTarget() {
+  if (prewarmDirectToCanvas) {
+    if (!_compileCanvasTarget) _compileCanvasTarget = createCanvasEquivalentTarget(1);
+    return _compileCanvasTarget;
+  }
   if (!_compileColorTarget) _compileColorTarget = new WebGLRenderTarget(1, 1);
+  return _compileColorTarget;
+}
+function withLinearCompileTarget(gl, run) {
   const previous = gl.getRenderTarget();
-  gl.setRenderTarget(_compileColorTarget);
+  gl.setRenderTarget(prewarmCompileTarget());
   try {
     return run();
   } finally {
@@ -1889,8 +1943,14 @@ function targetedWarmPasses(objects) {
 
 function renderWarmHeading(gl, scene, camera, warmTargetRef, warmCameraRef, heading, objects = null) {
   let warmTarget = warmTargetRef.current;
+  if (warmTarget && Boolean(warmTarget.darwinCanvasEquivalent) !== prewarmDirectToCanvas) {
+    warmTarget.dispose();
+    warmTarget = null;
+  }
   if (!warmTarget) {
-    warmTarget = new WebGLRenderTarget(WARM_RENDER_SIZE, WARM_RENDER_SIZE);
+    warmTarget = prewarmDirectToCanvas
+      ? createCanvasEquivalentTarget(WARM_RENDER_SIZE)
+      : new WebGLRenderTarget(WARM_RENDER_SIZE, WARM_RENDER_SIZE);
     warmTargetRef.current = warmTarget;
   }
   let warmCamera = warmCameraRef.current;
@@ -3943,7 +4003,7 @@ function PerformancePanel({
         <>
           <PerfOptionRow
             label="Quality"
-            options={['mobile', 'performance', 'cinematic']}
+            options={['low', 'mobile', 'performance', 'cinematic']}
             value={settings.quality}
             onSelect={setQuality}
           />
@@ -4181,7 +4241,19 @@ export default function ThreeDarwinGame({
   // A resumed session skips the arrival cinematic — the player has already seen
   // it, and the opening shot is written as a first landing.
   const [resumedFromSave, setResumedFromSave] = useState(false);
-  const [perfSettings, setPerfSettings] = useState(getInitialPerfSettings);
+  // Resolved on the first render (the runtime is ssr:false), not only in the
+  // mount effect below. Starting on the default tier meant the opening's first
+  // compileAsync ran against the composer's linear target and then the chosen
+  // tier swapped in: on the low tier, which draws straight to the canvas, the
+  // early content compiled every material twice.
+  const [perfSettings, setPerfSettings] = useState(() => (
+    typeof window === 'undefined'
+      ? getInitialPerfSettings()
+      : settingsFromUrlSearch(
+        window.location.search,
+        resolveQualityPreference(readQualityPreference(), recommendedQualityFromDevice()),
+      )
+  ));
   const [metrics, setMetrics] = useState({});
   // Keeps the sampler running while a perf capture is recording even if the
   // panel itself is closed, so a capture can cover uninterrupted gameplay. The
@@ -4287,6 +4359,11 @@ export default function ThreeDarwinGame({
       transitionRenderBudgetActive,
     ],
   );
+  // Before paint, so the prewarm effects that run after this commit already
+  // compile for the output the scene will really draw into.
+  useLayoutEffect(() => {
+    prewarmDirectToCanvas = !scenePerfSettings.postprocessing;
+  }, [scenePerfSettings.postprocessing]);
   const configuredDpr = useMemo(() => {
     const [min, max] = dprForMode(perfSettings.dprMode);
     // Ocean-heavy maps spend their budget on a surface that hides softness;
