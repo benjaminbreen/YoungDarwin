@@ -1423,12 +1423,19 @@ test('objectives advance in order from real gameplay state', () => {
   const twoLandingsDirective = DIRECTIVES.find(entry => entry.id === 'two-landings');
   assert.equal(twoLandingsDirective.isDone(oneLanding), false);
   assert.equal(twoLandingsDirective.isDone(twoLandings), true);
-  // Documenting at the second landing is not the same as collecting there.
+  // A kind already in the case is always documented on the second encounter,
+  // so documenting at the second landing has to count.
   const documentedSecond = {
     ...base,
     journal: [landingRecord('Post Office Bay'), landingRecord('Northern Shore', 'documented in field')],
   };
-  assert.equal(twoLandingsDirective.isDone(documentedSecond), false);
+  assert.equal(twoLandingsDirective.isDone(documentedSecond), true);
+  // A failed attempt is not a record of the animal at that landing.
+  const failedSecond = {
+    ...base,
+    journal: [landingRecord('Post Office Bay'), landingRecord('Northern Shore', 'failed')],
+  };
+  assert.equal(twoLandingsDirective.isDone(failedSecond), false);
 
   // Recorded uncertainty is satisfied by the same hedging the final
   // assessment scores as rigor.

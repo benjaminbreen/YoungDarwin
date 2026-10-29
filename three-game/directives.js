@@ -58,12 +58,15 @@ export function postOfficeBaySurveyProgress(state) {
 // name. Parsing actor ids instead broke on hand-placed spawns, whose authored
 // instanceIds are place-named ("post-office-lava-lizard-west"), so the same
 // species at two landings never matched.
-function collectedByZone(state) {
+//
+// Documented entries count. The case takes one specimen per species, so a
+// second encounter with a kind already collected is always written up as a
+// documentation (collectNearby); counting only takes made this objective
+// reachable through nothing but a failed attempt.
+function recordedByZone(state) {
   const pairs = [];
   for (const entry of state.journal || []) {
-    if (entry?.authorship !== 'field-record') continue;
-    if (!entry.specimenId || !entry.location) continue;
-    if (entry.condition === 'documented in field' || entry.condition === 'released') continue;
+    if (!isRecordedFieldEntry(entry) || !entry.location) continue;
     pairs.push({ zoneId: entry.location, species: entry.specimenId });
   }
   return pairs;
@@ -130,12 +133,12 @@ export const DIRECTIVES = [
   },
   {
     id: 'two-landings',
-    text: 'Collect the same creature at two different landings',
+    text: 'Record the same creature at two different landings',
     hint: 'Several species occur across the island. Whether they differ is the question.',
-    detail: 'You need two of the same animal from different places before you can compare them. That comparison is what the survey is for.',
+    detail: 'You need the same animal recorded in two places before you can compare them. Collect it once; at the second landing, document it. That comparison is what the survey is for.',
     isDone: state => {
       const bySpecies = new Map();
-      for (const { zoneId, species } of collectedByZone(state)) {
+      for (const { zoneId, species } of recordedByZone(state)) {
         if (!bySpecies.has(species)) bySpecies.set(species, new Set());
         bySpecies.get(species).add(zoneId);
       }
