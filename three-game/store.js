@@ -115,6 +115,8 @@ import {
 } from './toolbar';
 import {
   buildSessionSnapshot,
+  clearSessionSnapshot,
+  isExpeditionFinished,
   isUsableSessionSnapshot,
   sanitizeAssessmentTranscript,
   sanitizeNpcEncounterState,
@@ -1071,6 +1073,12 @@ export const useThreeGameStore = create((set, get) => ({
   // useSessionAutosave); `restoreSession` replays a snapshot over a fresh
   // initial state so any field the snapshot does not carry keeps its default.
   saveSession: () => {
+    // Every save path (autosave, page hide, Main menu) lands here, so an ended
+    // run is caught once: drop the stale resume point rather than write one.
+    if (isExpeditionFinished(get())) {
+      clearSessionSnapshot();
+      return null;
+    }
     const snapshot = buildSessionSnapshot(get());
     return writeSessionSnapshot(snapshot) ? snapshot : null;
   },

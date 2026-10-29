@@ -193,6 +193,7 @@ const {
 } = loadModule('utils/localSave.js');
 const {
   buildSessionSnapshot,
+  isExpeditionFinished,
   isUsableSessionSnapshot,
   SESSION_SAVE_VERSION,
   summarizeSessionSnapshot,
@@ -7101,6 +7102,17 @@ test('field record counts kinds recorded here that the species list does not nam
     zoneSpecimenProgress('POST_OFFICE_BAY', [], [], [{ ...entry('collected'), location: 'Black Beach' }]),
     before,
   );
+});
+
+test('an ended expedition leaves no resume point', () => {
+  assert.equal(isExpeditionFinished({ expeditionOutcome: { type: 'death' } }), true);
+  assert.equal(isExpeditionFinished({ expeditionDeparted: true }), true);
+  assert.equal(isExpeditionFinished({ finalAssessment: { score: 1 } }), true);
+  // Incapacitation is recoverable, so that run is still worth resuming.
+  assert.equal(isExpeditionFinished({ expeditionOutcome: { type: 'incapacitated' } }), false);
+  assert.equal(isExpeditionFinished({ expeditionOutcome: null }), false);
+  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  assert.match(storeSource, /saveSession: \(\) => \{[\s\S]{0,240}isExpeditionFinished\(get\(\)\)[\s\S]{0,60}clearSessionSnapshot\(\)/);
 });
 
 let failed = false;

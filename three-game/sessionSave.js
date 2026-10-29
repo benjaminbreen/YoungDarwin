@@ -75,6 +75,20 @@ export function sanitizeNpcEncounterState(value) {
 }
 
 /**
+ * A run that has ended (death, the Beagle sailing, or Henslow's verdict) has
+ * no resume point. The snapshot does not carry those end states, so saving one
+ * would load as a live game: a 0-health Darwin who can no longer die, or a
+ * day 3 that replays the ending.
+ */
+export function isExpeditionFinished(state) {
+  return Boolean(
+    state?.expeditionOutcome?.type === 'death'
+    || state?.expeditionDeparted
+    || state?.finalAssessment,
+  );
+}
+
+/**
  * Extracts the resumable slice of store state. Pure so it can be unit tested
  * without a browser.
  */
