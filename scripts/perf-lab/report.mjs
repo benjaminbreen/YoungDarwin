@@ -356,7 +356,10 @@ export function formatDigest(analysis, meta = {}) {
   if (analysis.lateProgramCompiles?.length) {
     lines.push('  programs compiled after settle (these are the prewarm misses)');
     for (const entry of analysis.lateProgramCompiles.slice(0, 12)) {
-      lines.push(`    ${pad(entry.phase, 22)}${pad(entry.name, 26)}x${entry.count}`);
+      lines.push(`    ${pad(entry.phase, 22)}${pad(entry.name, 52)}x${entry.count}`);
+      // Not owned by any scene material: shadow depth, post passes, and
+      // other renderer-internal programs. The key tail says which.
+      if (entry.name === 'unknown' && entry.keyTail) lines.push(`      key …${entry.keyTail}`);
     }
   }
   const extraPasses = analysis.phases.filter(phase => phase.avgScenePasses > 1.05);

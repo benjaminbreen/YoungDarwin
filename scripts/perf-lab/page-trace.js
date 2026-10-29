@@ -178,6 +178,27 @@
   const seenPrograms = new Set();
   let lastProgramCount = -1;
 
+  // Built-in materials name their program after material.name, which most of
+  // ours leave empty. For a late compile, find the material that owns the
+  // program and the tagged object drawing it. Only runs when a new program
+  // appears after settle, which should be rare.
+  function programOwner(gl, program) {
+    const scene = sceneHandle()?.scene;
+    if (!scene || !gl.properties) return null;
+    let found = null;
+    scene.traverse(object => {
+      if (found || !object.material) return;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        const programs = material && gl.properties.get(material).programs;
+        if (!programs || ![...programs.values()].includes(program)) continue;
+        const variant = object.isSkinnedMesh ? ' skinned' : object.isInstancedMesh ? ' instanced' : '';
+        found = `${material.type}${variant} @ ${renderSourceFor(object).label}`;
+        return;
+      }
+    });
+    return found;
+  }
+
   function notePrograms() {
     const gl = sceneHandle()?.gl;
     const programs = gl?.info?.programs;
@@ -193,7 +214,7 @@
       state.programEvents.push({
         atMs: Math.round(performance.now() - state.startedAt),
         phase: state.phase,
-        name: program.name || 'unknown',
+        name: program.name || programOwner(gl, program) || 'unknown',
         // Cache keys are enormous; the tail carries the defines that
         // distinguish two variants of the same material.
         keyTail: String(key).slice(-90),
