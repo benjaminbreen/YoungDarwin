@@ -244,9 +244,6 @@ function SymsFieldBottleVisual() {
     color: '#477768',
     roughness: 0.12,
     metalness: 0,
-    transmission: 0.16,
-    thickness: 0.18,
-    ior: 1.48,
     clearcoat: 1,
     clearcoatRoughness: 0.06,
     envMapIntensity: 2.2,
@@ -255,8 +252,6 @@ function SymsFieldBottleVisual() {
     color: '#6e3d1f',
     roughness: 0.26,
     metalness: 0,
-    transmission: 0.05,
-    thickness: 0.12,
     clearcoat: 0.45,
     clearcoatRoughness: 0.1,
   }));

@@ -75,6 +75,19 @@ function adopt(texture) {
   texture.needsUpdate = true;
 }
 
+// GLBs exported with KHR_materials_transmission (the hand lamp's chimney,
+// bottles) make three re-render every opaque object into a transmission target
+// each frame, and compile a second linear-space copy of every shader for it.
+// Plain alpha reads the same at gameplay distance.
+function flattenTransmission(material) {
+  if (!(material.transmission > 0)) return;
+  material.opacity = Math.min(material.opacity ?? 1, 1 - 0.65 * material.transmission);
+  material.transmission = 0;
+  material.transparent = true;
+  material.depthWrite = false;
+  material.needsUpdate = true;
+}
+
 // Runs once per parsed GLTF. Called from useTrackedGLTF during render rather
 // than an effect, so the first consumer of the scene already sees the shared
 // sources instead of uploading its own copy on the way past.
@@ -88,6 +101,7 @@ export function shareTextureSources(gltf, constrainedMaxDim = CONSTRAINED_TEXTUR
     if (!material) return;
     for (const entry of Array.isArray(material) ? material : [material]) {
       if (!entry) continue;
+      flattenTransmission(entry);
       for (const value of Object.values(entry)) {
         adopt(value);
         if (constrain && value?.isTexture) constrainSourceResolution(value, constrainedMaxDim);

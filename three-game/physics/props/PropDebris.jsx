@@ -105,8 +105,6 @@ function DebrisPiece({ piece, origin, impactDir, seed }) {
         color: piece.color,
         roughness: 0.12,
         metalness: 0,
-        transmission: 0.16,
-        thickness: 0.04,
         clearcoat: 1,
         clearcoatRoughness: 0.06,
         envMapIntensity: 1.8,

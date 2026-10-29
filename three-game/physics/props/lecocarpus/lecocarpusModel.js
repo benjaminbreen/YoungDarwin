@@ -249,7 +249,7 @@ export function getLecocarpusMaterials() {
     petal: new THREE.MeshPhysicalMaterial({ color: '#e4b933', roughness: 0.52, clearcoat: 0.16, clearcoatRoughness: 0.62 }),
     disk: new THREE.MeshStandardMaterial({ color: '#79572c', roughness: 0.74, metalness: 0 }),
     fruit: new THREE.MeshStandardMaterial({ color: '#715739', roughness: 0.84, metalness: 0 }),
-    wing: new THREE.MeshPhysicalMaterial({ color: '#c8a96a', roughness: 0.62, transmission: 0.08, transparent: true, opacity: 0.88, side: THREE.DoubleSide }),
+    wing: new THREE.MeshPhysicalMaterial({ color: '#c8a96a', roughness: 0.62, transparent: true, opacity: 0.88, side: THREE.DoubleSide }),
     litter: new THREE.MeshStandardMaterial({ color: '#604d38', roughness: 0.97, metalness: 0, flatShading: true }),
   };
   return materialsCache;

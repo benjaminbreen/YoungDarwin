@@ -305,9 +305,10 @@ export function SpecimenHighlight({
             clearcoat={0.92}
             clearcoatRoughness={0.11}
             envMapIntensity={1.45}
-            transmission={0.015}
-            thickness={0.08}
-            ior={1.42}
+            // No transmission. Any visible transmissive material makes three
+            // render every opaque object a second time into a transmission
+            // buffer, each frame, even at opacity 0. At 0.015 the glass was
+            // invisible on a 15cm marker; the pass was not.
             transparent
             opacity={0}
             depthWrite={false}

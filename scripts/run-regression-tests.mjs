@@ -7146,6 +7146,22 @@ test('New Expedition asks before replacing a saved expedition', () => {
   assert.match(overlaySource, /Replace saved expedition\?/);
 });
 
+test('no runtime material uses transmission, which re-renders the scene each frame', () => {
+  const offenders = [];
+  const walk = dir => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(jsx?|mjs)$/.test(entry.name)) {
+        const source = fs.readFileSync(full, 'utf8');
+        if (/\btransmission(=\{|\s*:\s*)(?!0(?![.\d]))[0-9.]/.test(source)) offenders.push(full);
+      }
+    }
+  };
+  walk(path.resolve('three-game'));
+  assert.deepEqual(offenders, []);
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {
