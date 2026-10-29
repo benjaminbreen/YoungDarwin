@@ -2,6 +2,10 @@
 
 import React from 'react';
 import { getFieldDilemma, useThreeGameStore } from '../store';
+import { useDismissableOverlay } from './useDismissableOverlay';
+
+// A dilemma has no cancel: Escape does nothing and the choice must be made.
+const KEEP_OPEN = () => {};
 
 // A field accident resolves through one of two authored choices — quick with
 // a cost, or careful with a delay. One click, deterministic, impossible to
@@ -28,11 +32,16 @@ export function FieldDilemmaModal() {
   const constraint = useThreeGameStore(state => state.activeConstraint);
   const resolveFieldDilemmaChoice = useThreeGameStore(state => state.resolveFieldDilemmaChoice);
   const dilemma = getFieldDilemma(constraint?.type);
+  // On the overlay stack so focus lands on the first choice, Tab stays inside,
+  // and nothing else (pause, controls) can open over it.
+  const panelRef = useDismissableOverlay(Boolean(dilemma), KEEP_OPEN);
   if (!dilemma) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-expedition-night/60 p-4 backdrop-blur-[2px]">
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={dilemma.title}

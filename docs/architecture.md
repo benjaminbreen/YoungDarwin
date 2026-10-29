@@ -41,8 +41,8 @@ app/three/page.js
         -> GroundedWorldFX
 ```
 
-Development/test routes include `app/altpostoffice/page.js`,
-`app/postofficebay3/page.js`, and `app/sky-test/page.js`.
+Development/test routes include `app/altpostoffice/page.js` and
+`app/sky-test/page.js`.
 
 ## State And Data
 

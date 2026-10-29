@@ -375,7 +375,6 @@ function makeSnapshot() {
     journalCount: Array.isArray(state.journal) ? state.journal.length : 0,
     assessmentTranscriptCount: Array.isArray(state.assessmentPlayerTranscript) ? state.assessmentPlayerTranscript.length : 0,
     health: finiteNumber(state.health),
-    curiosity: finiteNumber(state.curiosity),
     fatigue: finiteNumber(state.fatigue),
     day: finiteNumber(state.day),
     timeOfDay: finiteNumber(state.timeOfDay),

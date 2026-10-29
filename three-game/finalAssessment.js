@@ -355,7 +355,6 @@ export function evaluateFinalAssessment(state = {}) {
       locations: visitedIds.length,
       methods: methods.length,
       day: Math.max(1, Number(state.day) || 1),
-      curiosity: clamp(state.curiosity ?? 0, 0, 100),
       health: clamp(state.health ?? 0, 0, 100),
       fatigue: clamp(state.fatigue ?? 0, 0, 100),
       locationName: String(state.currentLocationName || state.locationName || 'Floreana Island'),

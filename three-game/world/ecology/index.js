@@ -21,13 +21,9 @@ import { buildRockyClearingEcology } from './rockyClearing';
 import { buildPenalColonyEcology } from './penalColony';
 import { buildMangroveEcology } from './mangroves';
 import { buildAltPostOfficeBayEcology } from './altPostOfficeBay';
-import { buildPostOfficeBay3Ecology } from './postOfficeBay3';
-import { buildGrassTestEcology } from './grassTest';
-import { buildGrassHybridTestEcology } from './grassHybridTest';
 import { buildCormorantBayEcology } from './cormorantBay';
-import { buildCormorantBaySplatTestEcology } from './cormorantBaySplatTest';
-import { buildCormorantBayTest2Ecology } from './cormorantBayTest2';
-import { buildCormorantBayTest3Ecology } from './cormorantBayTest3';
+import { buildCerroPajasEcology } from './cerroPajas';
+import { buildAsiloSpringEcology } from './asiloSpring';
 import { buildPuntaCormorantEcology } from './puntaCormorant';
 import { buildWatkinsCampEcology } from './watkinsCamp';
 import { buildPostScrubRiseEcology } from './postScrubRise';
@@ -67,13 +63,9 @@ const builders = {
   PENAL_COLONY: buildPenalColonyEcology,
   MANGROVES: buildMangroveEcology,
   ALT_POST_OFFICE_BAY: buildAltPostOfficeBayEcology,
-  POST_OFFICE_BAY_3: buildPostOfficeBay3Ecology,
-  GRASS_TEST: buildGrassTestEcology,
-  GRASS_HYBRID_TEST: buildGrassHybridTestEcology,
   CORMORANT_BAY: buildCormorantBayEcology,
-  CORMORANT_BAY_SPLAT_TEST: buildCormorantBaySplatTestEcology,
-  CORMORANT_BAY_TEST_2: buildCormorantBayTest2Ecology,
-  CORMORANT_BAY_TEST_3: buildCormorantBayTest3Ecology,
+  C_HIGH: buildCerroPajasEcology,
+  ASILO_SPRING: buildAsiloSpringEcology,
   PUNTA_CORMORANT: buildPuntaCormorantEcology,
   WATKINS: buildWatkinsCampEcology,
   POST_SCRUB_RISE: buildPostScrubRiseEcology,

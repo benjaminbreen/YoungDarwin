@@ -604,9 +604,6 @@ export function SpecimenActor({ specimen }) {
   const setNearbySpecimen = useThreeGameStore(state => state.setNearbySpecimen);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const snareTrap = useThreeGameStore(state => (
-    state.snareTraps?.find(trap => trap.status === 'sprung' && trap.caughtActorId === actorId) || null
-  ));
   const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
   const setCarryPrompt = useThreeGameStore(state => state.setCarryPrompt);
   const setCarriedObject = useThreeGameStore(state => state.setCarriedObject);
@@ -627,24 +624,27 @@ export function SpecimenActor({ specimen }) {
   const carriedRef = useRef(false);
   // Where the animal currently lives; moving fauna patrol around this base.
   const behaviorBaseRef = useRef(null);
+  // Keyed on the spawn coordinates rather than the specimen object so an
+  // identical record with a new identity doesn't re-home (and reset) fauna.
+  const [spawnX, , spawnZ] = specimen.spawnPoint;
+  const spawnAquatic = isAquaticWildlife(specimen);
   const position = useMemo(() => {
-    const [x, , z] = specimen.spawnPoint;
     // Auto-generated spawn points can land in the surf; pull them onto land —
     // except for fish, where the same clamp is what beached them in the first
     // place, so the test is inverted to "must be under water".
     const safe = clampToWalkable(
-      new THREE.Vector3(x, 0, z),
+      new THREE.Vector3(spawnX, 0, spawnZ),
       null,
       currentZoneId,
-      isAquaticWildlife(specimen) ? { aquatic: true } : null,
+      spawnAquatic ? { aquatic: true } : null,
     );
     return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
-  }, [currentZoneId, specimen]);
+  }, [currentZoneId, spawnAquatic, spawnX, spawnZ]);
   const faunaBehavior = useFaunaBehavior({
     specimen,
     basePositionRef: behaviorBaseRef,
     basePosition: position,
-    paused: isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo),
+    paused: isCarried || isUnderExamination || Boolean(downedInfo),
   });
   const selectSpecimenAnimation = () => {
     if (!isUnderExamination) return faunaBehavior.animationRef?.current || null;
@@ -746,7 +746,7 @@ export function SpecimenActor({ specimen }) {
     },
     shouldRunEveryFrame: () => {
       const state = useThreeGameStore.getState();
-      return Boolean(downedInfo || snareTrap || state.carriedObjectId === actorId);
+      return Boolean(downedInfo || state.carriedObjectId === actorId);
     },
     update: ({ realElapsed, worldElapsed, delta, playerPose }) => {
     if (isCollectedActor) return;
@@ -762,7 +762,7 @@ export function SpecimenActor({ specimen }) {
       : animationRequest?.clip || '';
     const behaviorDebug = faunaBehavior.debugRef?.current || {};
     const behaviorMode = behaviorDebug.mode || '';
-    const behaviorPaused = isCarried || isUnderExamination || Boolean(snareTrap) || Boolean(downedInfo);
+    const behaviorPaused = isCarried || isUnderExamination || Boolean(downedInfo);
     const proceduralMoving = !behaviorPaused && behaviorDebug.moving === true;
     const proceduralRunning = proceduralMoving && (behaviorDebug.panic || 0) > 0.18;
     const proceduralFlying = !behaviorPaused && faunaBehavior.airborneRef?.current === true;
@@ -823,7 +823,6 @@ export function SpecimenActor({ specimen }) {
     const state = useThreeGameStore.getState();
     const carriedHere = state.carriedObjectId === actorId;
     highlightGroundedRef.current = !carriedHere
-      && !snareTrap
       && !downedInfo
       && faunaBehavior.airborneRef?.current !== true;
     if (crabWiggleRef.current) {
@@ -912,27 +911,6 @@ export function SpecimenActor({ specimen }) {
         now: realElapsed,
         force: true,
         debug: { motionStatus: 'downed' },
-      });
-      return;
-    }
-
-    if (snareTrap) {
-      const t = realElapsed;
-      group.current.position.set(
-        snareTrap.position.x,
-        snareTrap.position.y + 0.045 + Math.sin(t * 8.5 + actorId.length) * 0.008,
-        snareTrap.position.z,
-      );
-      group.current.rotation.set(0, (snareTrap.yaw || 0) + Math.sin(t * 6.2) * 0.12, Math.sin(t * 9.1) * 0.05);
-      publishActorRuntimePosition({
-        publisher: setSpecimenRuntimePosition,
-        ref: runtimePublishRef,
-        actorId,
-        zoneId: currentZoneId,
-        position: group.current.position,
-        now: t,
-        force: true,
-        debug: { motionStatus: 'snared', trapId: snareTrap.id },
       });
       return;
     }
@@ -1169,7 +1147,6 @@ export function SpecimenActor({ specimen }) {
     && !speciesCollected
     && !examineOpen
     && !isCarried
-    && !snareTrap
     && !downedInfo;
   const showWadingWaterline = standingWater.active
     && (behaviorProfile?.movementStyle === 'wade' || specimen.id === 'flamingo');
@@ -1178,7 +1155,7 @@ export function SpecimenActor({ specimen }) {
       <group>
         {/* Selection rings/marker are HUD affordances — they'd pollute the
             composed examine shot, so they hide while a session is open. */}
-        {showWorldMarker && !examineOpen && !isCarried && !snareTrap && !hideGroundAffordances && (
+        {showWorldMarker && !examineOpen && !isCarried && !hideGroundAffordances && (
           <SpecimenHighlight
             specimen={specimen}
             zoneId={currentZoneId}

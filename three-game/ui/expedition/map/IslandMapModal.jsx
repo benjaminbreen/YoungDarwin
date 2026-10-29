@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useThreeGameStore } from '../../../store';
 import { expeditionDateForDay } from '../../../expeditionOutcomes';
 import { zoneSpecimenProgress } from '../../../data';
-import { getZone } from '../../../world/floreanaZones';
+import { getTravelCardForRoute, getZone } from '../../../world/floreanaZones';
 import { prepareRegionEcologyResource } from '../../../world/ecology/ecologyResource';
 import { prepareBorderVistaResource } from '../../../world/vistas/borderVistaResource';
 import { prefetchRegionTerrainTextures } from '../../../world/terrainPrefetch';
@@ -54,7 +54,6 @@ const TYPE_LABELS = {
   promontory: 'Promontory',
   settlement: 'Settlement',
   clearing: 'Clearing',
-  grassland: 'Grass test field',
   camp: 'Camp',
   shipwreck: 'Wreck site',
   hut: 'Dwelling',
@@ -228,9 +227,50 @@ function LocationSurveyLine({ survey }) {
   );
 }
 
-function SelectedLocationCard({ location, isCurrent, survey, onRequestClose }) {
+function formatTravelMinutes(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} min`;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+// What the chart journey will cost. The store charges the same card when the
+// transition begins, so the numbers shown here are the numbers paid.
+function ChartRouteLine({ travelCard }) {
+  if (!travelCard) {
+    return (
+      <div className="mb-2 font-expedition text-[11px] italic text-expedition-faded">
+        No overland route charted from here.
+      </div>
+    );
+  }
+  const via = travelCard.via || [];
+  return (
+    <div className="mb-2 rounded-sm border border-expedition-brass/40 bg-black/20 px-2.5 py-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={GOLD_LABEL}>{via.length ? `Route · ${via.length + 1} legs` : 'Direct route'}</span>
+        <span className="font-expedition text-[12px] font-semibold text-expedition-parchment">
+          {formatTravelMinutes(travelCard.estimatedMinutes)}
+          <span className="ml-1.5 text-[10.5px] font-normal text-expedition-faded">+{travelCard.fatigueDelta || 0} fatigue</span>
+        </span>
+      </div>
+      {via.length > 0 && (
+        <div className="mt-0.5 font-expedition text-[11px] leading-snug text-expedition-faded">
+          via {via.map(stop => stop.name).join(', ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectedLocationCard({ location, isCurrent, currentZoneId, survey, onRequestClose }) {
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const live = location.status === 'available';
+  const travelCard = useMemo(
+    () => (isCurrent || !live ? null : getTravelCardForRoute(currentZoneId, location.id)),
+    [currentZoneId, isCurrent, live, location.id],
+  );
 
   const action = isCurrent ? (
     <div className="flex items-center justify-center gap-1.5 py-0.5 text-[10px] uppercase tracking-[0.2em] text-expedition-gold/90">
@@ -238,20 +278,23 @@ function SelectedLocationCard({ location, isCurrent, survey, onRequestClose }) {
       You are here
     </div>
   ) : live ? (
-    <button
-      type="button"
-      onClick={() => {
-        beginZoneTransition(location.id, {
-          entryEdge: null,
-          source: 'island-map',
-          mode: 'island',
-        });
-        onRequestClose?.();
-      }}
-      className={`${GOLD_BUTTON_SOLID} w-full uppercase`}
-    >
-      Set as Destination
-    </button>
+    <>
+      <ChartRouteLine travelCard={travelCard} />
+      <button
+        type="button"
+        onClick={() => {
+          beginZoneTransition(location.id, {
+            entryEdge: null,
+            source: 'island-map',
+            mode: 'island',
+          });
+          onRequestClose?.();
+        }}
+        className={`${GOLD_BUTTON_SOLID} w-full uppercase`}
+      >
+        Set as Destination
+      </button>
+    </>
   ) : (
     <div className="rounded-sm border border-expedition-brass/50 bg-black/30 px-2.5 py-1.5 text-center text-[10.5px] uppercase tracking-[0.16em] text-expedition-faded">
       Uncharted — travel not yet possible
@@ -319,6 +362,7 @@ function IslandSidebar({ filters, onToggle, selectedId, currentZoneId, survey, o
           <SelectedLocationCard
             location={selected}
             isCurrent={selected.id === currentZoneId}
+            currentZoneId={currentZoneId}
             survey={survey.byZone.get(selected.id) || EMPTY_SURVEY}
             onRequestClose={onRequestClose}
           />

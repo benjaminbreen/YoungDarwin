@@ -7,7 +7,7 @@
     },
     "ASILO_SPRING": {
       "file": "asilo_spring.bin",
-      "bytes": 944196
+      "bytes": 945804
     },
     "BLACK_BEACH": {
       "file": "black_beach.bin",
@@ -27,7 +27,7 @@
     },
     "C_HIGH": {
       "file": "c_high.bin",
-      "bytes": 973872
+      "bytes": 979676
     },
     "DEVILS_CROWN": {
       "file": "devils_crown.bin",
@@ -43,7 +43,7 @@
     },
     "E_MID": {
       "file": "e_mid.bin",
-      "bytes": 1008068
+      "bytes": 1007304
     },
     "LAVA_FLATS": {
       "file": "lava_flats.bin",
@@ -51,7 +51,7 @@
     },
     "MANGROVES": {
       "file": "mangroves.bin",
-      "bytes": 974680
+      "bytes": 974672
     },
     "NORTHERN_HIGHLANDS": {
       "file": "northern_highlands.bin",
@@ -67,7 +67,7 @@
     },
     "PENAL_COLONY": {
       "file": "penal_colony.bin",
-      "bytes": 1015024
+      "bytes": 1015028
     },
     "POST_OFFICE_BAY": {
       "file": "post_office_bay.bin",
@@ -75,7 +75,7 @@
     },
     "POST_SCRUB_RISE": {
       "file": "post_scrub_rise.bin",
-      "bytes": 948972
+      "bytes": 950580
     },
     "PUNTA_CORMORANT": {
       "file": "punta_cormorant.bin",
@@ -135,7 +135,7 @@
     },
     "W_HIGH": {
       "file": "w_high.bin",
-      "bytes": 978912
+      "bytes": 980588
     },
     "W_LAVA": {
       "file": "w_lava.bin",

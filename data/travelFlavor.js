@@ -14,7 +14,7 @@ import {
 const ZONE_TRAVEL = {
   BEAGLE: { level: 0, from: "from the Beagle's side", to: "back to the Beagle's side" },
   POST_OFFICE_BAY: { level: 0, from: 'from the mail barrel at Post Office Bay', to: 'to the mail barrel above the strand' },
-  ALT_POST_OFFICE_BAY: { level: 0, from: 'from the bay landing', to: 'to the bay landing' },
+  ALT_POST_OFFICE_BAY: { level: 0, from: 'from the pocket beach below Punta Cormorant', to: 'to the pocket beach below Punta Cormorant' },
   NW_REEF: { level: 0, from: 'from the reef shallows', to: 'onto the reef shallows' },
   N_SHORE: { level: 0, from: 'from the northern strand', to: 'onto the northern strand' },
   N_OUTCROP: { level: 0, from: 'from the bare outcrop', to: 'to a bare outcrop in open water' },

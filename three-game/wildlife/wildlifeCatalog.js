@@ -74,6 +74,8 @@ export const wildlifeCatalog = {
     id: 'largegroundfinch',
     englishName: 'Large ground finch',
     latinName: 'Geospiza magnirostris',
+    // Player finches are kin: NPC ground finches don't flee their approach.
+    kinGroup: 'groundFinch',
     category: 'Animal',
     roleDefault: 'specimen',
     render: { type: 'proceduralFinch', variant: 'largeGround' },
@@ -103,6 +105,8 @@ export const wildlifeCatalog = {
       startleDuration: 0.9,
       startleSpeedMultiplier: 0.9,
       startleCooldown: 2.9,
+      // Occasional flight up to a real authored tree perch between ground bouts.
+      treePerchChance: 0.22,
     },
   },
   mediumgroundfinch: {
@@ -110,6 +114,8 @@ export const wildlifeCatalog = {
     assetId: 'mediumGroundFinch',
     englishName: 'Medium ground finch',
     latinName: 'Geospiza fortis',
+    // Player finches are kin: NPC ground finches don't flee their approach.
+    kinGroup: 'groundFinch',
     category: 'Animal',
     roleDefault: 'specimen',
     render: { type: 'proceduralFinch', variant: 'mediumGround' },
@@ -139,6 +145,8 @@ export const wildlifeCatalog = {
       startleDuration: 0.85,
       startleSpeedMultiplier: 0.95,
       startleCooldown: 2.8,
+      // Occasional flight up to a real authored tree perch between ground bouts.
+      treePerchChance: 0.22,
     },
   },
   floreanamockingbird: {
@@ -174,6 +182,8 @@ export const wildlifeCatalog = {
       startleDuration: 0.8,
       startleSpeedMultiplier: 1,
       startleCooldown: 2.6,
+      // Occasional flight up to a real authored tree perch between ground bouts.
+      treePerchChance: 0.22,
     },
   },
   galapagosdove: {

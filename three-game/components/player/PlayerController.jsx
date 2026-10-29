@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useKeyboardControls } from '@react-three/drei';
 import { CapsuleCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
@@ -12,6 +11,7 @@ import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID, getModelAsset } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
 import { isGameplayInputBlocked } from '../../input/typingMode';
+import { getGameKeys } from '../../input/gameKeys';
 import {
   regionSpawnCameraFacing,
   regionSpawnFacing,
@@ -57,7 +57,7 @@ import { usePlayerCameraRig } from './usePlayerCameraRig';
 import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
-import { pulseEquippedToolOnUse, readPlayerInput, sanitizeShortcutKeys } from './playerInputState';
+import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
 import {
   cactusSpineInjuryChance,
   findCactusHazardContact,
@@ -97,6 +97,8 @@ import {
 import { getInteriorCameraProfile } from '../../interiors/interiorRegistry';
 
 const PUSH_ANIMATION_COOLDOWN = 0.34;
+// Tallest step Darwin climbs just by walking into it (metres).
+const AUTO_TRAVERSE_MAX_HEIGHT = 0.75;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
 const PUSH_ANIMATION_MIN_FORWARD = 0.42;
 const PUSH_FEEDBACK_DURATION = {
@@ -303,7 +305,6 @@ export function PlayerController({
   const lastAutoClimbAt = useRef(0);
   const lastPushAnimationAt = useRef(-10);
   const latestPropPushContact = useRef(null);
-  const pendingSnareTrip = useRef(null);
   const pendingAnimalDropping = useRef(null);
   const lastConstraintReactionKey = useRef(null);
   // pendingX/pendingZ accumulate sub-quantum push travel between store
@@ -324,7 +325,6 @@ export function PlayerController({
   const prevSprintingRef = useRef(false);
   const prevRunningIntentRef = useRef(false);
   const lastDownhillSprintCameraAt = useRef(-10);
-  const lastArcadeStumbleAt = useRef(-10);
   const lastDroppingSmushAt = useRef(-10);
   const lastPhysicsDebugAt = useRef(0);
   const lastNpcContact = useRef({ npcId: null, at: -10 });
@@ -475,7 +475,6 @@ export function PlayerController({
     wadeDepth: 0,
     jumpFromHeight: false,
   });
-  const [, getKeys] = useKeyboardControls();
   const rapierContext = useRapier();
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const openExamine = useThreeGameStore(state => state.openExamine);
@@ -626,13 +625,6 @@ export function PlayerController({
   useEffect(() => onPropEvent('player-push-contact', contact => {
     latestPropPushContact.current = {
       ...contact,
-      receivedAt: performance.now() / 1000,
-    };
-  }), []);
-
-  useEffect(() => onPropEvent('snare-player-trigger', event => {
-    pendingSnareTrip.current = {
-      ...event,
       receivedAt: performance.now() / 1000,
     };
   }), []);
@@ -870,9 +862,10 @@ export function PlayerController({
       visualActive: shadowAnimationActive(stateRef.current),
     });
     collisionAdapter.beginFrame?.();
-    const keys = inputLocked || isGameplayInputBlocked() ? EMPTY_KEYS : sanitizeShortcutKeys(getKeys());
+    const inputBlocked = inputLocked || isGameplayInputBlocked();
+    const keys = inputBlocked ? EMPTY_KEYS : getGameKeys();
     const rawTouch = consumeTouchControls();
-    const touch = inputLocked ? EMPTY_KEYS : rawTouch;
+    const touch = inputBlocked ? EMPTY_KEYS : rawTouch;
     const now = performance.now() / 1000;
     const activeFinchDroppingCamera = finchDroppingCamera.current.until > now ? finchDroppingCamera.current : null;
     const timeScale = finchDroppingSlowMotionScale(activeFinchDroppingCamera, now);
@@ -1176,10 +1169,7 @@ export function PlayerController({
         pendingAnimalDropping.current = null;
       }
     }
-    const movementConstraintActive = Boolean(
-      activeConstraint?.type === 'snare_immobilized'
-      || activeConstraint?.movementLock
-    );
+    const movementConstraintActive = Boolean(activeConstraint?.movementLock);
     if (movementConstraintActive) {
       stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, now + 0.35);
     }
@@ -1216,32 +1206,6 @@ export function PlayerController({
         seed: cameraImpulse.current.seed + 1,
       };
     }
-    const snareTrip = pendingSnareTrip.current;
-    if (snareTrip && isDarwinMode) {
-      if (now - (snareTrip.receivedAt || now) > 1.2) {
-        pendingSnareTrip.current = null;
-      } else if (!stateRef.current.lying && stateRef.current.action !== 'shoulderHitAndFall' && stateRef.current.action !== 'lyingDown') {
-        pendingSnareTrip.current = null;
-        velocity.current.set(0, 0, 0);
-        stateRef.current.rollMotion = null;
-        stateRef.current.traverseMotion = null;
-        stateRef.current.climbMotion = null;
-        stateRef.current.sitting = false;
-        stateRef.current.lying = false;
-        stateRef.current.lockMovementUntil = Math.max(stateRef.current.lockMovementUntil, now + 8.2);
-        cameraImpulse.current = {
-          startedAt: now,
-          intensity: 0.22,
-          duration: 0.34,
-          seed: cameraImpulse.current.seed + 1,
-        };
-        startAction('shoulderHitAndFall', ACTION_DURATION.shoulderHitAndFall, {
-          lockMovement: 8.2,
-          recoverAction: 'lyingDown',
-          recoverDuration: ACTION_DURATION.lyingDown,
-        });
-      }
-    }
     if (updatePlayerActionMotion({
       group,
       stateRef,
@@ -1276,7 +1240,6 @@ export function PlayerController({
       anyDirectActionPressed,
       lateralOnlyInput,
     } = readPlayerInput(keys, touch, frameScratch.input);
-    const snareImmobilized = movementConstraintActive;
     pulseEquippedToolOnUse(keys, lastButtons);
     const propPushContact = latestPropPushContact.current;
     if (
@@ -1293,7 +1256,7 @@ export function PlayerController({
     }
     const preInputMovementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
     if (playableMode.id === 'tortoise') {
-      const braceHeld = Boolean(jumpPressed && spawnDrop.current.phase === 'complete' && !snareImmobilized);
+      const braceHeld = Boolean(jumpPressed && spawnDrop.current.phase === 'complete' && !movementConstraintActive);
       const currentBraceAction = stateRef.current.action;
       const braceCanInterruptAction = Boolean(
         currentBraceAction
@@ -1450,7 +1413,7 @@ export function PlayerController({
     if (rotateLeftPressed) yawRef.current += CAMERA.keyRotateSpeed * delta;
     if (rotateRightPressed) yawRef.current -= CAMERA.keyRotateSpeed * delta;
     if (keys.recenterCamera && !lastButtons.current.recenterCamera) {
-      recenterCamera(facing.current, { behind: Boolean(stateRef.current.flying) });
+      recenterCamera(facing.current);
     }
     lastButtons.current.recenterCamera = Boolean(keys.recenterCamera);
     if (moving) {
@@ -1461,7 +1424,7 @@ export function PlayerController({
     }
     // Any movement or control input ends the seated/lying rest pose.
     if ((stateRef.current.sitting || stateRef.current.lying)
-      && !snareImmobilized
+      && !movementConstraintActive
       && (moving || climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed)) {
       stateRef.current.sitting = false;
       stateRef.current.lying = false;
@@ -1734,7 +1697,7 @@ export function PlayerController({
           id: `climb:${currentZoneId}:${opportunity.kind}`,
           kind: opportunity.kind,
           label,
-          keyLabel: 'V',
+          keyLabel: 'Q',
           priority: 40,
           dwellMs: 280,
           repeatCooldownMs: 1250,
@@ -2009,32 +1972,10 @@ export function PlayerController({
           };
         }
       }
-      if (
-        running
-        && !airborneForControl
-        && !stateRef.current.action
-        && !stateRef.current.crouching
-        && !stateRef.current.aiming
-        && now - lastArcadeStumbleAt.current > 1.65
-        && (
-          (arcade.pivotBurst > 0.48 && currentSpeed > playerConfig.runSpeed * 0.74)
-          || (arcade.downhill > 0.6 && arcade.skid > 0.5 && currentSpeed > playerConfig.runSpeed * 0.78)
-        )
-      ) {
-        lastArcadeStumbleAt.current = now;
-        const tripping = arcade.downhill > 0.7 && arcade.skid > 0.62;
-        startAction(tripping ? 'trip' : 'stumble', tripping ? durationFor('trip') : durationFor('stumble'), {
-          lockMovement: tripping ? 0.28 : false,
-        });
-        velocity.current.x *= tripping ? 0.58 : 0.82;
-        velocity.current.z *= tripping ? 0.58 : 0.82;
-        cameraImpulse.current = {
-          startedAt: now,
-          intensity: tripping ? 0.18 : 0.11,
-          duration: tripping ? 0.24 : 0.16,
-          seed: cameraImpulse.current.seed + 1,
-        };
-      }
+      // Running stumbles and downhill trips used to fire on their own here,
+      // locking movement for up to 0.28s. Darwin should only fall when the
+      // player did something to make him; the skid dust and camera kick above
+      // still sell a hard pivot.
       if (
         running
         && arcade.downhill > 0.52
@@ -2469,7 +2410,10 @@ export function PlayerController({
     if (canAutoTraverse) {
       const approachSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       const traversalTarget = collisionAdapter.findTraversalTarget(group.current.position, desiredDelta, facing.current);
-      if (traversalTarget) {
+      // Walking into something only climbs it when it is knee-high. Anything
+      // taller waits for Q (or a running jump), so brushing a boulder no
+      // longer hijacks the controls into a mantle the player did not ask for.
+      if (traversalTarget && traversalTarget.heightDelta <= AUTO_TRAVERSE_MAX_HEIGHT) {
         characterController.sync(group.current.position);
         // Pick the traversal motion by approach speed and obstacle height:
         // Darwin5 uses small-wall climb clips for boulders so ordinary rocks

@@ -242,3 +242,63 @@ export const PUNTA_SUR_SOUTHERN_REEFS_SEAM = createRouteSeam(
   'east',
   18,
 );
+
+// Cerro Pajas (C_HIGH) trailheads reuse each neighbour's existing trail
+// endpoint so the four summit approaches meet the adjacent maps' paths.
+export const POST_SCRUB_RISE_CERRO_PAJAS_SEAM = createRouteSeam(
+  'POST_SCRUB_RISE',
+  'C_HIGH',
+  'south',
+  10,
+);
+
+export const CERRO_PAJAS_ROCKY_CLEARING_SEAM = createRouteSeam(
+  'E_MID',
+  'C_HIGH',
+  'west',
+  2.3,
+);
+
+export const CERRO_PAJAS_PENAL_COLONY_SEAM = createRouteSeam(
+  'PENAL_COLONY',
+  'C_HIGH',
+  'north',
+  6,
+);
+
+export const WESTERN_HIGHLANDS_CERRO_PAJAS_SEAM = createRouteSeam(
+  'W_HIGH',
+  'C_HIGH',
+  'east',
+  0,
+);
+
+// Highland Spring (ASILO_SPRING) trailheads, likewise matched to the
+// neighbouring maps' trail ends.
+export const WESTERN_HIGHLANDS_ASILO_SPRING_SEAM = createRouteSeam(
+  'W_HIGH',
+  'ASILO_SPRING',
+  'south',
+  2.5,
+);
+
+export const ASILO_SPRING_PENAL_COLONY_SEAM = createRouteSeam(
+  'PENAL_COLONY',
+  'ASILO_SPRING',
+  'west',
+  2,
+);
+
+export const ASILO_SPRING_MANGROVES_SEAM = createRouteSeam(
+  'MANGROVES',
+  'ASILO_SPRING',
+  'north',
+  -4,
+);
+
+export const ASILO_SPRING_BEACH_HUT_SEAM = createRouteSeam(
+  'S_HUT',
+  'ASILO_SPRING',
+  'east',
+  -25,
+);

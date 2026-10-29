@@ -20,13 +20,17 @@ const touchState = {
   climb: false,
   rifle: false,
   net: false,
-  snare: false,
   hammer: false,
   knife: false,
   gather: false,
   fireRifle: false,
   write: false,
   inspect: false,
+  // Gesture wheel choices. Each pulses for one frame like a tool use.
+  sit: false,
+  pray: false,
+  point: false,
+  lookAround: false,
   // The HUD's Rest button sets this so the button and the R key run the same
   // path — lie down, then the store spends the two hours.
   rest: false,
@@ -45,7 +49,6 @@ const TOOL_USE_CONTROLS = {
   hammer: 'hammer',
   insect_net: 'net',
   shotgun: 'fireRifle',
-  snare: 'snare',
   pocket_knife: 'knife',
   sketch: 'write',
   eat: 'animalEat',
@@ -85,13 +88,16 @@ export function consumeTouchControls() {
   touchState.climb = false;
   touchState.rifle = false;
   touchState.net = false;
-  touchState.snare = false;
   touchState.hammer = false;
   touchState.knife = false;
   touchState.gather = false;
   touchState.fireRifle = false;
   touchState.write = false;
   touchState.inspect = false;
+  touchState.sit = false;
+  touchState.pray = false;
+  touchState.point = false;
+  touchState.lookAround = false;
   touchState.rest = false;
   touchState.fieldAction = false;
   touchState.animalEat = false;

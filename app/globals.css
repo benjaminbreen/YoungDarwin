@@ -1061,3 +1061,19 @@ button.submit-button:disabled {
   from { opacity: 0; transform: translateY(9px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Gesture wheel: opens with a short scale-and-fade from the centre. */
+@keyframes gesture-wheel-in {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.gesture-wheel-in {
+  animation: gesture-wheel-in 0.14s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gesture-wheel-in {
+    animation: none;
+  }
+}

@@ -2,40 +2,6 @@ import * as THREE from 'three';
 import { triggerToolUse } from '../../input/touchControls';
 import { useThreeGameStore } from '../../store';
 
-const SHORTCUT_SENSITIVE_BUTTONS = [
-  'pray',
-  'fireRifle',
-  'hammer',
-  'knife',
-  'net',
-  'snare',
-  'gather',
-  'write',
-  'inspect',
-  'lookAround',
-  'point',
-  'trip',
-  'teeter',
-  'sit',
-  'rest',
-  'useTool',
-  'tool1',
-  'tool2',
-  'tool3',
-  'tool4',
-  'tool5',
-  'tool6',
-];
-
-export function sanitizeShortcutKeys(keys) {
-  if (typeof window === 'undefined' || window.__darwinShortcutModifierActive !== true) return keys;
-  const sanitized = { ...keys };
-  SHORTCUT_SENSITIVE_BUTTONS.forEach(button => {
-    sanitized[button] = false;
-  });
-  return sanitized;
-}
-
 export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   // The on-screen joystick publishes an analog vector (touch.moveX/moveY);
   // when it's live it supersedes the touch direction booleans so the two
@@ -67,9 +33,9 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   const dodgePressed = Boolean(keys.dodge || touch.dodge);
   const jumpPressed = Boolean(keys.jump || touch.jump);
   const anyDirectActionPressed = Boolean(
-    keys.pray || keys.fireRifle || keys.hammer || keys.knife || keys.net || keys.gather || keys.write || keys.inspect
-    || keys.lookAround || keys.point || keys.trip || keys.teeter || keys.sit || keys.rest
-    || touch.net || touch.snare || touch.hammer || touch.knife || touch.gather || touch.fireRifle || touch.write || touch.inspect
+    keys.rest
+    || touch.rest || touch.net || touch.hammer || touch.knife || touch.gather || touch.fireRifle || touch.write || touch.inspect
+    || touch.pray || touch.lookAround || touch.point || touch.sit
     || touch.animalEat || touch.animalSleep || touch.animalDefecate
   );
 
@@ -90,7 +56,7 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
 }
 
 export function pulseEquippedToolOnUse(keys, lastButtonsRef) {
-  // "Use tool" command (J key / clicking the equipped tool): pulse the
+  // "Use tool" command (F key / clicking the equipped tool): pulse the
   // control mapped to the active tool; triggerAction picks it up next frame.
   const useToolPressed = Boolean(keys.useTool);
   if (useToolPressed && !lastButtonsRef.current.useTool) {

@@ -103,7 +103,6 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `LAWSON_HOUSE` | `lawson-house-interior` | 72 |
 | `POST_OFFICE_BAY` | `floreana-cove` | 288 |
 | `ALT_POST_OFFICE_BAY` | `floreana-cove-alt` | 420 |
-| `POST_OFFICE_BAY_3` | `floreana-cove-3` | 300 |
 | `POST_SCRUB_RISE` | `post-office-scrub-rise` | 280 |
 | `COASTAL_SCRUBLAND` | `eastern-coastal-scrubland` | 248 |
 | `EASTERN_CLIFFS` | `eastern-frigatebird-cliffs` | 288 |
@@ -124,12 +123,9 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `E_MID` | `rocky-clearing-cave-path` | 320 |
 | `PENAL_COLONY` | `penal-colony-settlement` | 192 |
 | `MANGROVES` | `southern-mangrove-forest` | 240 |
-| `GRASS_TEST` | `grass-test-field` | 300 |
-| `GRASS_HYBRID_TEST` | `grass-hybrid-test-field` | 240 |
 | `CORMORANT_BAY` | `cormorant-bay` | 300 |
-| `CORMORANT_BAY_SPLAT_TEST` | `cormorant-bay-splat-test` | 300 |
-| `CORMORANT_BAY_TEST_2` | `cormorant-bay-test-2` | 300 |
-| `CORMORANT_BAY_TEST_3` | `cormorant-bay-test-3` | 300 |
+| `C_HIGH` | `cerro-pajas-summit-crater` | 240 |
+| `ASILO_SPRING` | `asilo-highland-spring` | 248 |
 | `PUNTA_CORMORANT` | `punta-cormorant-lagoon` | 320 |
 | `WATKINS` | `watkins-camp-stream-hollow` | 320 |
 | `PUNTA_SUR` | `punta-sur-rainbow-headland` | 288 |
@@ -145,7 +141,6 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | --- | --- | --- |
 | `postOfficeBay` | `POST_OFFICE_BAY` | `post-office-bay-anchorage` |
 | `altPostOfficeBay` | `ALT_POST_OFFICE_BAY` | `alt-post-office-bay`, `altpostoffice` |
-| `postOfficeBay3` | `POST_OFFICE_BAY_3` | `post-office-bay-3`, `postofficebay3` |
 | `northShore` | `N_SHORE` | _none_ |
 | `desolateOutcrop` | `N_OUTCROP` | _none_ |
 | `devilsCrown` | `DEVILS_CROWN` | _none_ |
@@ -161,12 +156,9 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `rockyClearing` | `E_MID` | `rocky-clearing`, `gabriels-cave-clearing` |
 | `penalColony` | `PENAL_COLONY` | `penal-colony`, `asilo-de-la-paz` |
 | `mangroves` | `MANGROVES` | _none_ |
-| `grassTest` | `GRASS_TEST` | `grass-test`, `grass-test-field` |
-| `grassHybridTest` | `GRASS_HYBRID_TEST` | `grass-hybrid-test`, `hybrid-grass-test` |
+| `cerroPajas` | `C_HIGH` | `cerro-pajas`, `central-highlands-summit` |
+| `asiloSpring` | `ASILO_SPRING` | `asilo-spring`, `highland-spring` |
 | `cormorantBay` | `CORMORANT_BAY` | `cormorant-bay` |
-| `cormorantBaySplatTest` | `CORMORANT_BAY_SPLAT_TEST` | `cormorant-bay-splat-test` |
-| `cormorantBayTest2` | `CORMORANT_BAY_TEST_2` | `cormorant-bay-test-2` |
-| `cormorantBayTest3` | `CORMORANT_BAY_TEST_3` | `cormorant-bay-test-3` |
 | `puntaCormorant` | `PUNTA_CORMORANT` | `punta-cormorant` |
 | `beagleDeck` | `BEAGLE` | `hms-beagle-deck`, `beagle-deck` |
 | `beagleCabin` | _unknown_ | `hms_beagle_interior`, `beagle-cabin`, `beagle-aft-cabins` |
@@ -205,13 +197,9 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `PENAL_COLONY` | `buildPenalColonyEcology` |
 | `MANGROVES` | `buildMangroveEcology` |
 | `ALT_POST_OFFICE_BAY` | `buildAltPostOfficeBayEcology` |
-| `POST_OFFICE_BAY_3` | `buildPostOfficeBay3Ecology` |
-| `GRASS_TEST` | `buildGrassTestEcology` |
-| `GRASS_HYBRID_TEST` | `buildGrassHybridTestEcology` |
 | `CORMORANT_BAY` | `buildCormorantBayEcology` |
-| `CORMORANT_BAY_SPLAT_TEST` | `buildCormorantBaySplatTestEcology` |
-| `CORMORANT_BAY_TEST_2` | `buildCormorantBayTest2Ecology` |
-| `CORMORANT_BAY_TEST_3` | `buildCormorantBayTest3Ecology` |
+| `C_HIGH` | `buildCerroPajasEcology` |
+| `ASILO_SPRING` | `buildAsiloSpringEcology` |
 | `PUNTA_CORMORANT` | `buildPuntaCormorantEcology` |
 | `WATKINS` | `buildWatkinsCampEcology` |
 | `POST_SCRUB_RISE` | `buildPostScrubRiseEcology` |

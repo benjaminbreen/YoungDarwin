@@ -69,6 +69,17 @@ function loadModule(filePath) {
 
 const tests = [];
 
+// store.js spreads its action slices in from three-game/storeSlices/, so
+// source-level assertions read the store as one text.
+function readStoreSource() {
+  const sliceDir = path.resolve('three-game/storeSlices');
+  return [
+    fs.readFileSync(path.resolve('three-game/store.js'), 'utf8'),
+    ...fs.readdirSync(sliceDir).filter(name => name.endsWith('.js')).sort()
+      .map(name => fs.readFileSync(path.join(sliceDir, name), 'utf8')),
+  ].join('\n');
+}
+
 function test(name, fn) {
   tests.push({ name, fn });
 }
@@ -405,8 +416,10 @@ const {
   locations,
 } = loadModule('data/locations.js');
 const {
+  findRegionRoute,
   getRegionDeveloperLabel,
   getRegionDisplayName,
+  getRegionTravelCard,
   regionMaps,
 } = loadModule('game-core/regionMaps.js');
 const {
@@ -546,7 +559,7 @@ const {
 } = loadModule('three-game/world/watkinsCreekLayout.js');
 const {
   buildCormorantBayEcology,
-} = loadModule('three-game/world/ecology/cormorantBayTest3.js');
+} = loadModule('three-game/world/ecology/cormorantBay.js');
 const {
   cormorantLagoonField,
   cormorantTrailDistance,
@@ -1273,10 +1286,10 @@ test('playable animal narrator profiles stay embodied, brief, and mode-specific'
     nearbySpecimen: 'A low prickly pear stands nearby.',
     weather: 'sunny',
     timeOfDay: '7:42',
-    stats: { health: 100, fatigue: 12, curiosity: 68 },
+    stats: { health: 100, fatigue: 12 },
   });
   assert.match(userPrompt, /Embodied role: a Floreana giant tortoise/);
-  assert.match(userPrompt, /vitality 100, energy 88, composure 68/);
+  assert.match(userPrompt, /vitality 100, energy 88/);
   assert.doesNotMatch(userPrompt, /Charles Darwin|Current objective|Equipped tool|Nearby NPC|Journal context/);
 });
 
@@ -3139,7 +3152,7 @@ test('carry drop candidates start grounded beyond the player collider', () => {
 });
 
 test('procedural rock obstacles share visual bounds and traversal support', () => {
-  const zoneIds = ['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'POST_OFFICE_BAY_3', 'N_SHORE', 'NW_REEF', 'W_HIGH'];
+  const zoneIds = ['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'N_SHORE', 'NW_REEF', 'W_HIGH'];
   for (const zoneId of zoneIds) {
     const obstacles = getRuntimeObstacles(zoneId);
     const rockObstacles = obstacles.filter(obstacle => obstacle.kind === 'rock' && obstacle.visualBounds);
@@ -3295,13 +3308,18 @@ test('field actions use the equipped modality while hands remain the observation
 
   assert.equal(observe.kind, 'observe');
   assert.equal(observe.label, 'Examine Galapagos cotton');
-  assert.equal(hammerPlant.kind, 'tool');
-  assert.equal(hammerPlant.label, 'Strike Galapagos cotton');
+  // An unstudied natural subject leads with Examine whatever is in hand.
+  assert.equal(hammerPlant.kind, 'observe');
+  assert.equal(hammerPlant.label, 'Examine Galapagos cotton');
+  const hammerStudiedPlant = resolveFieldAction({ toolId: 'hammer', target: plant, examined: true });
+  assert.equal(hammerStudiedPlant.kind, 'tool');
+  assert.equal(hammerStudiedPlant.label, 'Strike Galapagos cotton');
+  assert.equal(resolveFieldAction({ toolId: 'insect_net', target: { ...plant, kind: 'specimen' } }).kind, 'observe');
   assert.equal(hammerBottle.label, 'Strike glass bottle');
   assert.equal(collect.kind, 'collect');
   assert.equal(collect.label, 'Collect Galapagos cotton with hammer');
-  assert.equal(sameFieldAction(hammerPlant, { ...hammerPlant }), true);
-  assert.equal(sameFieldAction(hammerPlant, hammerBottle), false);
+  assert.equal(sameFieldAction(hammerStudiedPlant, { ...hammerStudiedPlant }), true);
+  assert.equal(sameFieldAction(hammerStudiedPlant, hammerBottle), false);
 });
 
 test('ambient field targets ignore generic structure collision shells', () => {
@@ -3401,7 +3419,6 @@ test('collision-scale relief stays inside the authored movement surface', () => 
   const regions = [
     'DEVILS_CROWN',
     'ALT_POST_OFFICE_BAY',
-    'POST_OFFICE_BAY_3',
     'NW_REEF',
   ];
 
@@ -4137,7 +4154,6 @@ test('central peak gets larger and clearer as regional chart distance closes', (
 test('central peak is omitted only where an island-scale backdrop is invalid', () => {
   assert.equal(getCentralPeakView('C_HIGH'), null);
   assert.equal(getCentralPeakView('BEAGLE_CABIN'), null);
-  assert.equal(getCentralPeakView('POST_OFFICE_BAY_3'), null);
   assert.ok(getCentralPeakView('BEAGLE'), 'offshore exterior maps retain the island landmark');
   assert.ok(getCentralPeakView('NW_REEF'), 'reef maps retain the island landmark');
   const expectedExteriorPlacements = FLOREANA_MAP_PLACEMENTS.filter(placement => (
@@ -4514,6 +4530,32 @@ test('Galapagos doves forage, take off, fly, land, and retain authored field ide
   for (const clip of ['peck', 'walk', 'takeoff', 'fly', 'landing']) {
     assert.equal(clips.has(clip), true, `dove should request ${clip}`);
   }
+});
+
+test('fauna yaw damps the short way across ±π and stays wrapped', () => {
+  const { dampAngle } = loadModule('three-game/fauna/motion/steering.js');
+  let yaw = 3.1;
+  for (let i = 0; i < 30; i += 1) {
+    const next = dampAngle(yaw, -3.1, 8, 1 / 60);
+    // Each step moves through π (outward from 3.1), never back through 0.
+    assert.ok(Math.abs(next) >= 3.09, `yaw ${next} swung the long way`);
+    assert.ok(next > -Math.PI - 1e-9 && next <= Math.PI + 1e-9);
+    yaw = next;
+  }
+  assert.ok(Math.abs(Math.atan2(Math.sin(yaw + 3.1), Math.cos(yaw + 3.1))) < 0.02);
+});
+
+test('fauna ignore a player far overhead and a player of their own kind', () => {
+  const { createThreatField } = loadModule('three-game/fauna/motion/threatField.js');
+  const profile = getWildlifeBehaviorProfile({ id: 'medium_ground_finch' });
+  const panicFor = (player, playerIsKin = false) => {
+    const state = { position: { x: 0, y: 0, z: 0 } };
+    const field = createThreatField({ profile, habitat: { radiusX: 4, radiusZ: 4 }, state, getClock: () => 0 });
+    return field.evaluate({ player, t: 1, dt: 0.1, playerIsKin }).panic;
+  };
+  assert.ok(panicFor({ x: 1, y: 0, z: 0 }) > 0.5, 'a player beside the finch should alarm it');
+  assert.equal(panicFor({ x: 1, y: 8, z: 0 }), 0);
+  assert.equal(panicFor({ x: 1, y: 0, z: 0 }, true), 0);
 });
 
 test('Galapagos hawks soar and return only to real authored tree perches', () => {
@@ -5277,7 +5319,7 @@ test('intact destructible timber batches visuals and Beagle practicals avoid cub
 });
 
 test('movement-locking dilemmas expose authored exits and weak-GPU HUD avoids duplicate heavy work', () => {
-  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const storeSource = readStoreSource();
   const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
   const dilemmaSource = fs.readFileSync(path.resolve('three-game/ui/FieldDilemmaModal.jsx'), 'utf8');
   const celebrationSource = fs.readFileSync(
@@ -5298,7 +5340,7 @@ test('movement-locking dilemmas expose authored exits and weak-GPU HUD avoids du
 test('field teaching copy stays readable in the persistent control guidance', () => {
   const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
   assert.match(hudSource, /Press the <ControlHintKey>Space bar<\/ControlHintKey> to jump\./);
-  assert.match(hudSource, /After you examine it, you can collect a sample\./);
+  assert.match(hudSource, /Once you have examined it, you can collect it\./);
   assert.match(hudSource, /setRetainedContextHintId\(HINT_STUDY\)/);
   assert.match(hudSource, /\}, 12000\)/);
   assert.match(hudSource, /renderedContextPrompt\.hintId !== HINT_STUDY/);
@@ -5313,7 +5355,7 @@ test('field teaching copy stays readable in the persistent control guidance', ()
 
 test('status-panel specimen tally exposes rarity, locality, and precise case navigation', () => {
   const hudSource = fs.readFileSync(path.resolve('three-game/ui/ThreeHUD.jsx'), 'utf8');
-  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const storeSource = readStoreSource();
   const globalStyles = fs.readFileSync(path.resolve('app/globals.css'), 'utf8');
   assert.match(hudSource, /function SpecimenCaseTally/);
   assert.match(hudSource, /onClick=\{onOpenCase\}/);
@@ -5394,7 +5436,7 @@ test('hammer material profiles infer geology from authored hints and terrain bio
     zoneId: 'TEST_ZONE',
     biome: 'dry-scrub',
   }), 'scoria');
-  assert.equal(groundHammerMaterial({ zoneId: 'CORMORANT_BAY_TEST_3', biome: 'green-beach' }), 'olivine');
+  assert.equal(groundHammerMaterial({ zoneId: 'CORMORANT_BAY', biome: 'green-beach' }), 'olivine');
   assert.equal(groundHammerMaterial({ zoneId: 'NW_REEF', biome: 'white-sand' }), 'coral_limestone');
   assert.equal(groundHammerMaterial({ zoneId: 'POST_OFFICE_BAY', biome: 'dry-scrub' }), null);
 });
@@ -5616,7 +5658,7 @@ test('the library camera focus is validated where the session is created', () =>
   // Guarding only inside the rig would leave the bad value in the store for
   // anything else that reads it, so openLibrary sanitizes on the way in and
   // keeps the caller's intent in a separate field.
-  const source = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const source = readStoreSource();
   assert.ok(/focus: cameraFocusPoint\(options\.focus\)/.test(source));
   assert.ok(/focusIntent:/.test(source));
   const rig = fs.readFileSync(path.resolve('three-game/components/player/usePlayerCameraRig.js'), 'utf8');
@@ -6276,12 +6318,34 @@ test('universal shrubs and ferns fill suitable gaps but defer to detailed region
     ))) universalFernMaps.push(zoneId);
   }
   assert.ok(universalDarwiniothamnusMaps.length >= 4);
-  assert.ok(universalFernMaps.length >= 4);
+  // C_HIGH and ASILO_SPRING now author their own Pleopeltis fern layers, so
+  // the universal fern defers there like it does on Watkins and W_HIGH.
+  assert.ok(universalFernMaps.length >= 3);
+  assert.equal(universalFernMaps.includes('C_HIGH'), false);
+  assert.equal(universalFernMaps.includes('ASILO_SPRING'), false);
   assert.equal(universalDarwiniothamnusMaps.includes('POST_SCRUB_RISE'), false);
   assert.equal(universalDarwiniothamnusMaps.includes('POST_OFFICE_BAY'), false);
   assert.equal(universalFernMaps.includes('WATKINS'), false);
   assert.equal(universalFernMaps.includes('W_HIGH'), false);
   assert.equal(universalFernMaps.includes('N_OUTCROP'), false);
+});
+
+test('chart travel to a distant region costs the summed shortest route', () => {
+  const route = findRegionRoute('POST_OFFICE_BAY', 'PUNTA_SUR');
+  assert.ok(route && route.length > 1);
+  const card = getRegionTravelCard('POST_OFFICE_BAY', 'PUNTA_SUR');
+  assert.equal(card.legs.length, route.length);
+  assert.equal(card.via.length, route.length - 1);
+  assert.equal(card.estimatedMinutes, card.legs.reduce((sum, leg) => sum + leg.minutes, 0));
+  assert.equal(card.fatigueDelta, card.legs.reduce((sum, leg) => sum + leg.fatigue, 0));
+  assert.ok(card.estimatedMinutes > 0 && card.fatigueDelta > 0);
+  assert.equal(card.legs.at(-1).toZoneId, 'PUNTA_SUR');
+  for (let i = 1; i < card.legs.length; i += 1) {
+    assert.equal(card.legs[i].fromZoneId, card.legs[i - 1].toZoneId);
+  }
+  const direct = getRegionTravelCard('POST_OFFICE_BAY', card.legs[0].toZoneId);
+  assert.equal(direct.legs.length, 1);
+  assert.equal(direct.via.length, 0);
 });
 
 test('Desolate Outcrop is an explicit candelabra exclusion', () => {
@@ -6684,7 +6748,6 @@ test('lava cactus ecology feeds the destructible runtime across exposed volcanic
   }
 
   assert.equal(getLavaCactusSites('NORTHERN_HIGHLANDS').length, 16);
-  assert.equal(getLavaCactusSites('POST_OFFICE_BAY_3').length, 1);
   assert.equal(getLavaCactusSites('COASTAL_SCRUBLAND').length, 3);
 });
 
@@ -7148,7 +7211,7 @@ test('an ended expedition leaves no resume point', () => {
   // Incapacitation is recoverable, so that run is still worth resuming.
   assert.equal(isExpeditionFinished({ expeditionOutcome: { type: 'incapacitated' } }), false);
   assert.equal(isExpeditionFinished({ expeditionOutcome: null }), false);
-  const storeSource = fs.readFileSync(path.resolve('three-game/store.js'), 'utf8');
+  const storeSource = readStoreSource();
   assert.match(storeSource, /saveSession: \(\) => \{[\s\S]{0,240}isExpeditionFinished\(get\(\)\)[\s\S]{0,60}clearSessionSnapshot\(\)/);
 });
 

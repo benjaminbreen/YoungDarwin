@@ -106,6 +106,19 @@ export function OpenBookIcon({ className = '' }) {
   );
 }
 
+export function LibraryIcon({ className = '' }) {
+  // Three spines on a shelf, the last one leaning.
+  return (
+    <Svg className={className} strokeWidth={1.4}>
+      <path d="M3.5 20 H20.5" />
+      <path d="M5 19.5 V6 H8.5 V19.5" />
+      <path d="M9.5 19.5 V4.5 H13 V19.5" />
+      <path d="M14.2 19.2 L17.3 6.2 L20.6 7 L17.5 20" />
+      <path d="M5 9 H8.5 M9.5 8 H13 M5 16 H8.5 M9.5 16.5 H13" opacity="0.55" />
+    </Svg>
+  );
+}
+
 export function MapIcon({ className = '' }) {
   return (
     <Svg className={className} strokeWidth={1.4}>

@@ -12,8 +12,6 @@ import { postOfficeBayRegion } from './postOfficeBay/terrain';
 import { createPostOfficeBayTerrainMaterial } from './postOfficeBay/material';
 import { altPostOfficeBayRegion } from './altPostOfficeBay/terrain';
 import { createAltPostOfficeBayTerrainMaterial } from './altPostOfficeBay/material';
-import { postOfficeBay3Region } from './postOfficeBay3/terrain';
-import { createPostOfficeBay3TerrainMaterial } from './postOfficeBay3/material';
 import { northShoreRegion } from './northShore/terrain';
 import { createNorthShoreTerrainMaterial } from './northShore/material';
 import { desolateOutcropRegion } from './desolateOutcrop/terrain';
@@ -44,18 +42,12 @@ import { penalColonyRegion } from './penalColony/terrain';
 import { createPenalColonyTerrainMaterial } from './penalColony/material';
 import { mangroveRegion } from './mangroves/terrain';
 import { createMangroveTerrainMaterial } from './mangroves/material';
-import { grassTestRegion } from './grassTest/terrain';
-import { createGrassTestTerrainMaterial } from './grassTest/material';
-import { grassHybridTestRegion } from './grassHybridTest/terrain';
-import { createGrassHybridTestTerrainMaterial } from './grassHybridTest/material';
+import { cerroPajasRegion } from './cerroPajas/terrain';
+import { createCerroPajasTerrainMaterial } from './cerroPajas/material';
+import { asiloSpringRegion } from './asiloSpring/terrain';
+import { createAsiloSpringTerrainMaterial } from './asiloSpring/material';
 import { cormorantBayRegion } from './cormorantBay/terrain';
 import { createCormorantBayTerrainMaterial } from './cormorantBay/material';
-import { cormorantBaySplatTestRegion } from './cormorantBaySplatTest/terrain';
-import { createCormorantBaySplatTestTerrainMaterial } from './cormorantBaySplatTest/material';
-import { cormorantBayTest2Region } from './cormorantBayTest2/terrain';
-import { createCormorantBayTest2TerrainMaterial } from './cormorantBayTest2/material';
-import { cormorantBayTest3Region } from './cormorantBayTest3/terrain';
-import { createCormorantBayTest3TerrainMaterial } from './cormorantBayTest3/material';
 import { puntaCormorantRegion } from './puntaCormorant/terrain';
 import { createPuntaCormorantTerrainMaterial } from './puntaCormorant/material';
 import { beagleDeckRegion } from './beagleDeck/terrain';
@@ -93,7 +85,6 @@ import { createSouthernWetlandsTerrainMaterial } from './southernWetlands/materi
 const authoredRegions = [
   { ...postOfficeBayRegion, createTerrainMaterial: createPostOfficeBayTerrainMaterial },
   { ...altPostOfficeBayRegion, createTerrainMaterial: createAltPostOfficeBayTerrainMaterial },
-  { ...postOfficeBay3Region, createTerrainMaterial: createPostOfficeBay3TerrainMaterial },
   { ...northShoreRegion, createTerrainMaterial: createNorthShoreTerrainMaterial },
   { ...desolateOutcropRegion, createTerrainMaterial: createDesolateOutcropTerrainMaterial },
   { ...devilsCrownRegion, createTerrainMaterial: createDevilsCrownTerrainMaterial },
@@ -109,12 +100,9 @@ const authoredRegions = [
   { ...rockyClearingRegion, createTerrainMaterial: createRockyClearingTerrainMaterial },
   { ...penalColonyRegion, createTerrainMaterial: createPenalColonyTerrainMaterial },
   { ...mangroveRegion, createTerrainMaterial: createMangroveTerrainMaterial },
-  { ...grassTestRegion, createTerrainMaterial: createGrassTestTerrainMaterial },
-  { ...grassHybridTestRegion, createTerrainMaterial: createGrassHybridTestTerrainMaterial },
+  { ...cerroPajasRegion, createTerrainMaterial: createCerroPajasTerrainMaterial },
+  { ...asiloSpringRegion, createTerrainMaterial: createAsiloSpringTerrainMaterial },
   { ...cormorantBayRegion, createTerrainMaterial: createCormorantBayTerrainMaterial },
-  { ...cormorantBaySplatTestRegion, createTerrainMaterial: createCormorantBaySplatTestTerrainMaterial },
-  { ...cormorantBayTest2Region, createTerrainMaterial: createCormorantBayTest2TerrainMaterial },
-  { ...cormorantBayTest3Region, createTerrainMaterial: createCormorantBayTest3TerrainMaterial },
   { ...puntaCormorantRegion, createTerrainMaterial: createPuntaCormorantTerrainMaterial },
   { ...beagleDeckRegion, createTerrainMaterial: createBeagleDeckTerrainMaterial },
   { ...beagleCabinRegion, createTerrainMaterial: createBeagleCabinTerrainMaterial },

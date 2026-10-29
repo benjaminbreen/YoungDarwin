@@ -13,7 +13,9 @@ export const SESSION_SAVE_KEY = 'darwin-expedition-session-v1';
 export const SESSION_SAVE_VERSION = 2;
 const LEGACY_SESSION_SAVE_VERSION = 1;
 
-const STRING_ARRAY_FIELDS = [
+// The fields a resume carries, declared once. buildSessionSnapshot writes them
+// and the store's restoreSession reads the same lists, so the two cannot drift.
+export const PERSISTED_STRING_ARRAY_FIELDS = [
   'collectedSpecimenIds',
   'collectedSpecimenActorIds',
   'documentedSpecimenIds',
@@ -24,9 +26,26 @@ const STRING_ARRAY_FIELDS = [
   'visitedZoneIds',
   'visitedLocalCellIds',
   'favoriteSpecimenIds',
+  // What has been used up in the world. Without these a resume regrew every
+  // crop, refilled every broken crate, and let each rock be chipped again.
+  'brokenPropIds',
+  'sampledRockIds',
+  'collectedSampleIds',
+  'harvestedCropIds',
+  'foragedObjectIds',
 ];
 
-const NUMBER_FIELDS = ['health', 'fatigue', 'curiosity', 'timeOfDay', 'day', 'localStanding', 'minutesSinceMeal'];
+export const PERSISTED_TOOLBAR_FIELDS = ['toolbarOrder', 'darwinToolbarOrder'];
+
+const NUMBER_FIELDS = ['health', 'fatigue', 'timeOfDay', 'day', 'localStanding', 'minutesSinceMeal'];
+const JOURNAL_DRAFT_MAX_CHARS = 8000;
+
+function sanitizeDownedSpecimenActors(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).slice(0, 32).filter(([key, entry]) => (
+    typeof key === 'string' && entry && typeof entry === 'object'
+  )));
+}
 
 function stringArray(value) {
   return Array.isArray(value) ? value.filter(entry => typeof entry === 'string') : [];
@@ -105,8 +124,10 @@ export function buildSessionSnapshot(state) {
     questComplete: Boolean(state.questComplete),
     weather: typeof state.weather === 'string' ? state.weather : null,
     activeToolId: typeof state.activeToolId === 'string' ? state.activeToolId : 'hands',
-    toolbarOrder: stringArray(state.toolbarOrder),
-    darwinToolbarOrder: stringArray(state.darwinToolbarOrder),
+    // The journal draft is kept so writing in progress survives a reload, and
+    // shot specimens still lying where they fell stay there.
+    journalDraft: typeof state.journalDraft === 'string' ? state.journalDraft.slice(0, JOURNAL_DRAFT_MAX_CHARS) : '',
+    downedSpecimenActors: sanitizeDownedSpecimenActors(state.downedSpecimenActors),
     supplies: state.supplies && typeof state.supplies === 'object' ? { ...state.supplies } : null,
     inventory: Array.isArray(state.inventory) ? state.inventory : [],
     // Specimens already landed aboard the Beagle. Persisted separately from
@@ -127,7 +148,8 @@ export function buildSessionSnapshot(state) {
     assessmentPlayerTranscript: sanitizeAssessmentTranscript(state.assessmentPlayerTranscript),
     npcEncounterState: sanitizeNpcEncounterState(state.npcEncounterState),
   };
-  for (const field of STRING_ARRAY_FIELDS) snapshot[field] = stringArray(state[field]);
+  for (const field of PERSISTED_STRING_ARRAY_FIELDS) snapshot[field] = stringArray(state[field]);
+  for (const field of PERSISTED_TOOLBAR_FIELDS) snapshot[field] = stringArray(state[field]);
   for (const field of NUMBER_FIELDS) {
     const value = Number(state[field]);
     snapshot[field] = Number.isFinite(value) ? value : null;

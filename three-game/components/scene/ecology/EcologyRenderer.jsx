@@ -28,8 +28,6 @@ import {
 import { inspectableTypeForEcologyLayer } from '../../../world/inspectables';
 import { terrainHeight } from '../../../world/terrain';
 import { CanopySilhouetteLayer } from './CanopySilhouetteLayer';
-import { DenseGrassField } from './DenseGrassField';
-import { HybridGrassTuftField } from './HybridGrassTuftField';
 import { StylizedMeadowField } from './StylizedMeadowField';
 import { DryGrassPatchField } from './DryGrassPatchField';
 import { SurfaceLitterField } from './SurfaceLitterField';
@@ -121,8 +119,6 @@ let ecologyPreloadBusyDeferrals = 0;
 const EMPTY_LAYER_PLAN = {
   flora: [],
   proceduralFlora: [],
-  denseGrass: [],
-  hybridGrassTufts: [],
   stylizedMeadows: [],
   dryGrassPatches: [],
   surfaceLitter: [],
@@ -370,8 +366,6 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
         tierVisible(item) && preparationVisible(index < earlyFloraCount ? 5 : 6)
       )),
       proceduralFlora: (ecology.proceduralFlora || []).filter(item => tierVisible(item) && preparationVisible(6)),
-      denseGrass: (ecology.denseGrass || []).filter(item => tierVisible(item) && preparationVisible(4)),
-      hybridGrassTufts: (ecology.hybridGrassTufts || []).filter(item => tierVisible(item) && preparationVisible(4)),
       stylizedMeadows: (ecology.stylizedMeadows || []).filter(item => tierVisible(item) && preparationVisible(4)),
       dryGrassPatches: (ecology.dryGrassPatches || []).filter(item => tierVisible(item) && preparationVisible(4)),
       surfaceLitter: (ecology.surfaceLitter || []).filter(item => tierVisible(item) && preparationVisible(3)),
@@ -399,11 +393,9 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
     flora: visibleLayers.flora,
     proceduralFlora: visibleLayers.proceduralFlora,
     dryGrassPatches: visibleLayers.dryGrassPatches,
-    hybridGrassTufts: visibleLayers.hybridGrassTufts,
   }), [
     visibleLayers.dryGrassPatches,
     visibleLayers.flora,
-    visibleLayers.hybridGrassTufts,
     visibleLayers.proceduralFlora,
   ]);
 
@@ -411,8 +403,6 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
   const {
     flora,
     proceduralFlora,
-    denseGrass,
-    hybridGrassTufts,
     stylizedMeadows,
     dryGrassPatches,
     surfaceLitter,
@@ -465,12 +455,6 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       <OptionalSplatBackdrop backdrop={ecology.splatBackdrop} enabled={settings.splatBackdrop !== false} />
       {lagoonSurfaces.map(surface => (
         <StandingWaterSurface key={surface.id} surface={surface} />
-      ))}
-      {denseGrass.map(layer => (
-        <DenseGrassField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
-      ))}
-      {hybridGrassTufts.map(layer => (
-        <HybridGrassTuftField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />
       ))}
       {stylizedMeadows.map(layer => (
         <StylizedMeadowField key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />

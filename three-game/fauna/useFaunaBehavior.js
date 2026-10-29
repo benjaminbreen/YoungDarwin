@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useThreeGameStore } from '../store';
 import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
-import { createFaunaMotionController, habitatFor, seedFromSpecimen } from './faunaMotionController';
+import { createFaunaMotionController, habitatFor, seedFromKey, specimenSeedKey } from './faunaMotionController';
+import { specimenCollisionRadius } from './specimenCollision';
+import { getPlayableMode } from '../playable/playableModes';
+import { getWildlifeSpecies, normalizeWildlifeId } from '../wildlife/wildlifeCatalog';
 import { onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 import { faunaDebugEnabled } from '../runtimeDebug';
@@ -11,11 +14,36 @@ import { faunaDebugEnabled } from '../runtimeDebug';
 const MAX_FAUNA_SIMULATION_STEP = 0.2;
 const MAX_FAUNA_CATCHUP = 0.6;
 
+// Is the player currently playing as this animal's own kind (same species, or
+// the same catalog kin group, e.g. a player finch among ground finches)?
+function isPlayerKin(playableModeId, specimenId) {
+  const mode = getPlayableMode(playableModeId);
+  if (mode?.kind !== 'animal' || !mode.specimenId || !specimenId) return false;
+  const playerSpecies = normalizeWildlifeId(mode.specimenId);
+  const actorSpecies = normalizeWildlifeId(specimenId);
+  if (playerSpecies && playerSpecies === actorSpecies) return true;
+  const playerGroup = getWildlifeSpecies(playerSpecies)?.kinGroup;
+  return Boolean(playerGroup && playerGroup === getWildlifeSpecies(actorSpecies)?.kinGroup);
+}
+
 export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const profile = useMemo(() => getFaunaBehaviorProfile(specimen), [specimen]);
-  const seed = useMemo(() => seedFromSpecimen(specimen), [specimen]);
-  const habitat = useMemo(() => (profile ? habitatFor(specimen, profile) : null), [profile, specimen]);
+  // Key every derived value on stable primitives, not the specimen object:
+  // parents may hand over a fresh but identical record on re-render, and
+  // rebuilding the controller then reset the animal back to its spawn.
+  const specimenId = specimen?.id || specimen?.specimenId || null;
+  const actorKey = specimen?.instanceId || specimen?.id || null;
+  const seedKey = specimenSeedKey(specimen);
+  const habitatRadiusX = specimen?.habitatRadiusX;
+  const habitatRadiusZ = specimen?.habitatRadiusZ;
+  const sceneScale = specimen?.sceneScale || 1;
+  const bodyRadius = specimenCollisionRadius(specimen);
+  const profile = useMemo(() => getFaunaBehaviorProfile({ id: specimenId }), [specimenId]);
+  const seed = useMemo(() => seedFromKey(seedKey), [seedKey]);
+  const habitat = useMemo(
+    () => (profile ? habitatFor({ habitatRadiusX, habitatRadiusZ }, profile) : null),
+    [habitatRadiusX, habitatRadiusZ, profile],
+  );
   const debugEnabled = useMemo(faunaDebugEnabled, []);
   const controller = useMemo(() => {
     if (!profile || !habitat) return null;
@@ -26,10 +54,11 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       seed,
       zoneId: currentZoneId,
       basePosition: base,
-      actorScale: specimen?.sceneScale || 1,
-      actorId: specimen?.instanceId || specimen?.id,
+      actorScale: sceneScale,
+      actorId: actorKey,
+      bodyRadius,
     });
-  }, [basePosition, basePositionRef, currentZoneId, habitat, profile, seed, specimen.id, specimen.instanceId, specimen.sceneScale]);
+  }, [actorKey, basePosition, basePositionRef, bodyRadius, currentZoneId, habitat, profile, sceneScale, seed]);
   const positionRef = useRef(basePosition?.clone?.() || null);
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
@@ -76,16 +105,17 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     delta = 0,
   } = {}) => {
     if (!controller || !profile) return statusRef.current;
-    const timeOfDay = useThreeGameStore.getState().timeOfDay;
+    const { timeOfDay, playableModeId } = useThreeGameStore.getState();
+    const playerIsKin = isPlayerKin(playableModeId, specimenId);
     const base = basePositionRef?.current || basePosition;
-    const actorId = specimen.instanceId || specimen.id;
+    const actorId = actorKey;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
     if (debugEnabled && stimuli.length && typeof window !== 'undefined') {
       window.__faunaStimulusDebug = {
         ...(window.__faunaStimulusDebug || {}),
         [actorId]: {
           zoneId: currentZoneId,
-          specimenId: specimen.id,
+          specimenId,
           count: stimuli.length,
           last: stimuli[stimuli.length - 1],
           at: globalThis.performance?.now?.() / 1000 || 0,
@@ -111,6 +141,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         delta: 0,
         timeOfDay,
         paused,
+        playerIsKin,
       });
     } else {
       while (remaining > 0.000001) {
@@ -124,6 +155,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           delta: step,
           timeOfDay,
           paused,
+          playerIsKin,
         });
         remaining -= step;
       }
@@ -138,6 +170,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     debugRef.current = controller.state.debug;
     return status;
   }, [
+    actorKey,
     basePosition,
     basePositionRef,
     controller,
@@ -145,8 +178,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     debugEnabled,
     paused,
     profile,
-    specimen.id,
-    specimen.instanceId,
+    specimenId,
   ]);
 
   return useMemo(() => ({

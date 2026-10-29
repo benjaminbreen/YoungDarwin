@@ -483,6 +483,10 @@ function loadBrowserTerrainTexture(path, rgba) {
   const texture = new THREE.Texture();
   texture.source = entry.source;
   texture.flipY = entry.flipY;
+  // A cache hit gets a source that may already hold the decoded bitmap, and
+  // no load callback will fire for it again: without this the texture stays
+  // at version 0, three never uploads it, and the mesh draws untextured.
+  texture.needsUpdate = true;
   entry.textures.add(texture);
   texture.addEventListener('dispose', () => {
     entry.textures.delete(texture);

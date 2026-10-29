@@ -1,7 +1,6 @@
 const AUTHORED_COASTAL_ZONE_IDS = new Set([
   'post-office-bay-anchorage',
   'POST_OFFICE_BAY',
-  'POST_OFFICE_BAY_3',
   'ALT_POST_OFFICE_BAY',
   'CORMORANT_BAY',
   'BLACK_BEACH',

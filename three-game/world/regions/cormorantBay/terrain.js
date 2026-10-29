@@ -2,15 +2,10 @@ import * as THREE from 'three';
 import {
   WATER_LEVEL,
   elevationNoise,
+  ellipseDistance,
   terrainFineDetail,
   terrainSurfaceNoise,
 } from '../../terrainShared';
-import {
-  cormorantLagoonField,
-  cormorantRimMask as prototypeCormorantRimMask,
-  cormorantStandingWaterMask,
-  cormorantTrailDistance,
-} from '../cormorantBayTest3/terrain';
 
 export const CORMORANT_BAY = 'CORMORANT_BAY';
 
@@ -20,6 +15,44 @@ export function cormorantCoastZ(x) {
   return -22
     + Math.sin(x * 0.052 + 0.6) * 3.6
     + Math.sin(x * 0.021 - 1.4) * 2.4;
+}
+
+// Two brackish basins behind the strand. Keep aligned with cbLagoonField() in
+// material.js.
+export function cormorantLagoonField(x, z) {
+  const north = ellipseDistance(x, z, 28, 14, -8, -1);
+  const south = ellipseDistance(x, z, 20, 10, 14, 7);
+  return Math.min(north, south);
+}
+
+export function cormorantStandingWaterMask(x, z) {
+  const lagoon = cormorantLagoonField(x, z);
+  return 1 - THREE.MathUtils.smoothstep(lagoon, 0.98, 1.16);
+}
+
+const CORMORANT_TRAIL_POINTS = [[-38, 25], [-24, 14], [-8, 10], [10, 15], [31, 27]];
+
+export function cormorantTrailDistance(x, z) {
+  let best = Infinity;
+  for (let i = 0; i < CORMORANT_TRAIL_POINTS.length - 1; i += 1) {
+    const [ax, az] = CORMORANT_TRAIL_POINTS[i];
+    const [bx, bz] = CORMORANT_TRAIL_POINTS[i + 1];
+    const abx = bx - ax;
+    const abz = bz - az;
+    const lenSq = abx * abx + abz * abz || 1;
+    const t = THREE.MathUtils.clamp(((x - ax) * abx + (z - az) * abz) / lenSq, 0, 1);
+    best = Math.min(best, Math.hypot(x - (ax + abx * t), z - (az + abz * t)));
+  }
+  return best + terrainSurfaceNoise(x * 0.55 + 4, z * 0.55 - 7) * 0.32;
+}
+
+// Broken tuff rim on the north/east/west margins, before the beach fade below.
+function prototypeCormorantRimMask(x, z) {
+  const north = THREE.MathUtils.smoothstep(-z, 17, 41);
+  const east = THREE.MathUtils.smoothstep(x, 31, 51);
+  const west = THREE.MathUtils.smoothstep(-x, 42, 55);
+  const broken = 0.78 + terrainSurfaceNoise(x * 0.22 - 9, z * 0.24 + 3) * 0.22;
+  return THREE.MathUtils.clamp(Math.max(north, Math.max(east * 0.75, west * 0.62)) * broken, 0, 1);
 }
 
 // Cormorant's prototype rim crossed the ocean strandline, then the seabed was
@@ -144,12 +177,6 @@ export function isCormorantBayWalkable(x, z, config) {
   if (cormorantLagoonField(x, z) < 1.16 && y < WATER_LEVEL - 0.05) return false;
   return y > WATER_LEVEL - 0.28;
 }
-
-export {
-  cormorantLagoonField,
-  cormorantStandingWaterMask,
-  cormorantTrailDistance,
-};
 
 export const cormorantBayRegion = {
   id: CORMORANT_BAY,

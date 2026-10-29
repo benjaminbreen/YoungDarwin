@@ -27,9 +27,6 @@ export const AUTHORED_LAVA_CACTUS_SITES = {
   ],
   // Compatibility anchors replace the same specimen placeholder on older
   // maps that do not yet own a full authored ecology definition.
-  POST_OFFICE_BAY_3: [
-    { id: 'post-office-bay-3-inland-lava', x: 30, z: 18, yaw: -0.42, seed: 'post-office-bay-3-inland-lava', size: 1.18, flowerCount: 1 },
-  ],
   COASTAL_SCRUBLAND: [
     { id: 'coastal-scrub-lava-a', x: -18, z: 8, yaw: 0.36, seed: 'coastal-scrub-lava-a', size: 1.05, flowerCount: 0 },
     { id: 'coastal-scrub-lava-b', x: 9, z: -14, yaw: -1.1, seed: 'coastal-scrub-lava-b', size: 0.9, flowerCount: 1 },

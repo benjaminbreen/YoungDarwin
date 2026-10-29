@@ -14,6 +14,7 @@ const desiredSurface = {
   N_OUTCROP: 'water',
   CORMORANT_BAY: 'coast',
   PUNTA_CORMORANT: 'coast',
+  ALT_POST_OFFICE_BAY: 'coast',
   DEVILS_CROWN: 'water',
   BLACK_BEACH_SURF: 'water',
   BLACK_BEACH: 'coast',

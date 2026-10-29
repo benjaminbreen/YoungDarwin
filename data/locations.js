@@ -241,19 +241,22 @@ export const locations = [
     ]
   },
 
-  // 3b) ALT_POST_OFFICE_BAY — experimental rework of the anchorage shaped
-  // from the real satellite contour. Reached from Post Office Bay (north
-  // edge), the island map, or /three?zone=ALT_POST_OFFICE_BAY.
+  // 3b) ALT_POST_OFFICE_BAY — North Cormorant Beach. The id is an opaque
+  // persistence key kept from when this terrain was an alternate Post Office
+  // Bay prototype; the map now stands for the north-facing pocket beach on the
+  // northeast coast below Punta Cormorant (see docs/floreana-route-plan-mockup.html).
+  // Reached from Punta Cormorant (N), Eastern Cliffs (E), Rocky Clearing (S),
+  // Northern Highlands (W), the island chart, or /three?zone=ALT_POST_OFFICE_BAY.
   {
     id: 'ALT_POST_OFFICE_BAY',
-    name: 'Post Office Bay (New)',
-    description: 'The sheltered crescent anchorage: pale sand, a mangrove headland, and the sailors’ barrel above the landing.',
-    x: 1,
-    y: -1,
-    color: 'beige',
-    type: 'bay',
+    name: 'North Cormorant Beach',
+    description: 'A north-facing pocket beach below Punta Cormorant, with pale sand, lava shelves, and a direct climb toward the eastern cliffs.',
+    x: 4,
+    y: 2,
+    color: '#d8c27c',
+    type: 'beach',
     validMoves: ['S'],
-    specimens: ['crab','basalt','barnacle','galapagoscotton'],
+    specimens: ['crab', 'barnacle', 'galapagoscotton', 'lavalizard'],
     specimenPlacements: [
       {
         instanceId: 'alt-post-office-barnacle-shelf',
@@ -293,162 +296,21 @@ export const locations = [
         habitatRadiusZ: 0.48,
       },
     ],
-    npcs: ['lascar_joe'],
-    boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
-    discoveries: [
-      'You notice a weathered barrel filled with letters. If you were nosy, you might read some...'
-    ],
-    notableFeatures: [
-      'A crescent of pale sand curves between a green mangrove headland and a low basalt point.',
-      'The old sailors’ barrel stands on a white shell-sand flat above the landing.',
-      'A worn trail, lined with weathered posts, climbs inland through the dry scrub.'
-    ]
-  },
-
-  // 3c) POST_OFFICE_BAY_3 — isolated visual prototype for the anchorage.
-  // Reached directly at /postofficebay3 or /three?zone=POST_OFFICE_BAY_3.
-  {
-    id: 'POST_OFFICE_BAY_3',
-    name: 'Post Office Bay III',
-    description: 'A ground-first reconstruction of the sheltered anchorage: shallow northern water, a compacted post trail, and dense dry scrub massing behind the landing.',
-    x: 1,
-    y: -2,
-    color: 'beige',
-    type: 'bay',
-    validMoves: ['S'],
-    specimens: ['crab','basalt','galapagoscotton','cactus'],
-    specimenPlacements: [
-      {
-        // Was a seeded fallback that landed off walkable ground.
-        instanceId: 'post-office-3-basalt',
-        specimenId: 'basalt',
-        position: [-14, 0, 14],
-        behavior: 'still',
-        sceneScale: 1,
-        spawnScatter: {
-          radiusX: 22,
-          radiusZ: 18,
-          bounds: { minX: -34, maxX: 34, minZ: -28, maxZ: 34 },
-        },
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [40, 0, -8],
-        behavior: 'bask',
-        sceneScale: 1.1,
-        habitatRadiusX: 2.4,
-        habitatRadiusZ: 1.2,
-      },
-      {
-        specimenId: 'crab',
-        position: [10.2, 0, 2.3],
-        behavior: 'skitter',
-        sceneScale: 1.4,
-      },
-      {
-        specimenId: 'galapagoscotton',
-        position: [18, 0, 28],
-        behavior: 'still',
-        sceneScale: 0.86,
-        habitatRadiusX: 0.72,
-        habitatRadiusZ: 0.5,
-      },
-      {
-        specimenId: 'cactus',
-        position: [30, 0, 18],
-        behavior: 'still',
-        sceneScale: 1.08,
-        habitatRadiusX: 0.68,
-        habitatRadiusZ: 0.5,
-      },
-    ],
-    npcs: ['lascar_joe'],
-    boundaries: { north: 'ocean', east: 'ocean', west: 'ocean' },
-    discoveries: [
-      'The sailors’ barrel stands above a pale landing flat, with a worn track leading inland through close dry scrub.'
-    ],
-    notableFeatures: [
-      'The path is the main landmark: compacted sand and ash run from the post barrel toward the inland scrub.',
-      'Dense salt-pruned shrubs crowd the track edges instead of spreading evenly across the beach.',
-      'Basalt frames the bay mouth, but the landing remains open and readable.'
-    ]
-  },
-
-  // 3d) GRASS_TEST — textured coastal grass/path material test.
-  // Reachable from the island map; keep as the current art-direction proving ground.
-  {
-    id: 'GRASS_TEST',
-    name: 'Grass Test',
-    description: 'A playable coastal grass path test for tuning reusable sandy track textures, dry grass clumps, and shoulder transitions before the setup is folded back into Floreana.',
-    x: 2,
-    y: -2,
-    color: '#79a84c',
-    type: 'grassland',
-    validMoves: [],
-    specimens: [],
     npcs: [],
     boundaries: {},
     discoveries: [
-      'A sandy footpath cuts through salt-pruned coastal grass, with dry stems crowding the shoulders.'
+      'The beach faces north into a sheltered pocket of water, separated from Punta Cormorant by low lava and scrub.',
     ],
     notableFeatures: [
-      'The ground uses repeated path and shoulder textures blended by splat masks instead of a flat procedural color.',
-      'The grass uses the reusable dry-grass GLB clumps with per-instance scale, tint, and wind variation.',
-      'This map is the current standardization test for reusable coastal grass and footpath assets.'
+      'A narrow sand shelf tucks into the coast below Punta Cormorant.',
+      'Lava benches and salt-tolerant plants mark the route inland.',
+      'The eastern cliffs rise beyond the beach path.',
     ],
     narration: {
       weather: 'sunny',
-      sounds: ['wind through dry grass', 'soft sand footfalls', 'distant surf'],
-      loadingNote: 'A textured coastal grass path test for reusable Floreana terrain assets.',
-      educationalNote: 'This test map isolates path, shoulder, and dry-grass rendering so the materials can be reused consistently in authored regions.',
-    },
-  },
-
-  // 3e) GRASS_HYBRID_TEST — renderer lab for hybrid grass LOD.
-  // Keeps GRASS_TEST intact while testing terrain splats + near blades + mid impostors.
-  {
-    id: 'GRASS_HYBRID_TEST',
-    name: 'Hybrid Grass Test',
-    description: 'A second temporary grass field for testing a cheaper hybrid rendering stack: splatted underbrush terrain, near interactive blades, and mid-distance tuft impostors.',
-    x: 3,
-    y: -2,
-    color: '#5f8d47',
-    type: 'grassland',
-    validMoves: [],
-    specimens: ['lavalizard','booby'],
-    specimenPlacements: [
-      {
-        specimenId: 'lavalizard',
-        position: [-6, 0, -2],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 5.2,
-        habitatRadiusZ: 3.0,
-      },
-      {
-        specimenId: 'booby',
-        position: [6, 0, -1.5],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 6.5,
-        habitatRadiusZ: 3.5,
-      },
-    ],
-    npcs: [],
-    boundaries: {},
-    discoveries: [
-      'The field is built in layers: painted undergrowth at distance, clustered tufts in the middle ground, and interactive blades near Darwin.'
-    ],
-    notableFeatures: [
-      'A red dirt path cuts through the field to make grass edges, ruts, and far-field texture easy to judge.',
-      'Near grass should visibly part around Darwin, while distant grass should resolve into terrain splats instead of sparkling hairlines.',
-      'This map is a renderer experiment and should not be treated as final Floreana content.'
-    ],
-    narration: {
-      weather: 'sunny',
-      sounds: ['wind through uneven grass', 'dry seed heads', 'boots on red dirt'],
-      loadingNote: 'A hybrid renderer test field for grass LOD and path readability.',
-      educationalNote: 'This test isolates a cheaper grass stack: terrain underbrush, clustered impostors, and near interactive blades.',
+      sounds: ['small surf on pale sand', 'lizards in the dry scrub', 'wind moving across lava shelves'],
+      loadingNote: 'A north-facing pocket beach opens below Punta Cormorant.',
+      educationalNote: 'Separating the Cormorant Bay lagoon from this nearby north-facing beach makes the coast easier to read as a chain of adjacent habitats.',
     },
   },
 
@@ -652,331 +514,6 @@ export const locations = [
       sounds: ['coherent wind through dry grass', 'distant seabirds', 'lagoon shallows'],
       loadingNote: 'A brackish Cormorant Bay lagoon sits east of the northern shore and west of Punta Cormorant.',
       educationalNote: 'Cormorant Bay is a distinct wetland waypoint on Floreana, with lagoon birds, salt-tolerant plants, and dry coastal grass before the route continues toward Punta Cormorant.',
-    },
-  },
-
-  // 5b) CORMORANT_BAY_SPLAT_TEST — side-by-side authored wetland prototype.
-  {
-    id: 'CORMORANT_BAY_SPLAT_TEST',
-    name: 'Cormorant Bay Splat Test',
-    description: 'A renderer-focused reconstruction of the olivine beach and brackish flamingo lagoon at Punta Cormorant.',
-    x: 3,
-    y: -1,
-    color: '#6f8f4e',
-    type: 'wetland',
-    validMoves: ['S'],
-    specimens: ['flamingo','frigatebird','booby','lavalizard'],
-    specimenPlacements: [
-      {
-        specimenId: 'flamingo',
-        position: [-8, 0, -2.5],
-        behavior: 'still',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.4,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [3.5, 0, 1.2],
-        behavior: 'still',
-        sceneScale: 0.96,
-        habitatRadiusX: 4.2,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [14, 0, 6.6],
-        behavior: 'still',
-        sceneScale: 0.9,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-18, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 4.6,
-        habitatRadiusZ: 2.5,
-      },
-      {
-        specimenId: 'booby',
-        position: [-6, 0, 14],
-        behavior: 'curious',
-        sceneScale: 1.02,
-        habitatRadiusX: 7.2,
-        habitatRadiusZ: 3.6,
-      },
-    ],
-    npcs: [],
-    boundaries: {},
-    discoveries: [
-      'A pink line of flamingos feeds in the brackish water while olivine crystals tint the beach a muted green.'
-    ],
-    notableFeatures: [
-      'The lagoon edge is the focus: wet mud, salt crust, algae, and sparse saltgrass should read clearly before any splat backdrop is enabled.',
-      'A walkable olivine path skirts the lagoon and frames the flamingos rather than cutting through them.',
-      'Optional static splats may later enrich the distant reed and scrub shell, but gameplay remains mesh-based.'
-    ],
-    narration: {
-      weather: 'sunny',
-      sounds: ['soft lagoon wind', 'distant seabirds', 'mud sucking underfoot'],
-      loadingNote: 'A side-by-side Cormorant Bay prototype for lagoon, olivine beach, and optional splat backdrop rendering.',
-      educationalNote: 'Punta Cormorant is known for a brackish flamingo lagoon and greenish olivine sand, making it ideal for testing wetland rendering.',
-    },
-  },
-
-  // 5c) CORMORANT_BAY_TEST_2 — stable grass LOD prototype.
-  {
-    id: 'CORMORANT_BAY_TEST_2',
-    name: 'Cormorant Bay Test 2',
-    description: 'A renderer-focused Cormorant Bay variant testing near blades, mid grass clumps, and far terrain meadow detail.',
-    x: 4,
-    y: -1,
-    color: '#758c4a',
-    type: 'wetland',
-    validMoves: ['SW'],
-    specimens: ['flamingo','frigatebird','booby','lavalizard'],
-    specimenPlacements: [
-      {
-        specimenId: 'flamingo',
-        position: [-8, 0, -2.5],
-        behavior: 'still',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.4,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [3.5, 0, 1.2],
-        behavior: 'still',
-        sceneScale: 0.96,
-        habitatRadiusX: 4.2,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [14, 0, 6.6],
-        behavior: 'still',
-        sceneScale: 0.9,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-24, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-18, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-12, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-6, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [0, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [8, 0, 14.2],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [16, 0, 10],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [24, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'booby',
-        position: [-27, 0, 10],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [-20, 0, 10],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [-13, 0, 10],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [-4, 0, 12],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [6, 0, 14.2],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [15, 0, 8],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [22, 0, 14],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-      {
-        specimenId: 'booby',
-        position: [28, 0, -2],
-        behavior: 'curious',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.8,
-      },
-    ],
-    npcs: [],
-    boundaries: {},
-    discoveries: [
-      'Dry beach grass resolves into real blades near Darwin, clumps at middle distance, and a stable meadow texture toward the horizon.'
-    ],
-    notableFeatures: [
-      'Near grass keeps the close-up blade quality from the first Cormorant prototype.',
-      'Mid-distance vegetation is card-based and muted to avoid single-pixel shimmer.',
-      'Far meadow detail is carried by the terrain shader rather than thousands of visible straw lines.'
-    ],
-    narration: {
-      weather: 'sunny',
-      sounds: ['soft lagoon wind', 'distant seabirds', 'dry beach grass'],
-      loadingNote: 'A second Cormorant Bay prototype focused on professional grass LOD stability.',
-      educationalNote: 'Punta Cormorant combines brackish lagoon habitat with dry coastal grasses and olivine sand, making it a useful scene for testing vegetation LOD.',
-    },
-  },
-
-  // 5d) CORMORANT_BAY_TEST_3 — opaque stylized grass LOD prototype.
-  {
-    id: 'CORMORANT_BAY_TEST_3',
-    name: 'Cormorant Bay Test 3',
-    description: 'A stylized Cormorant Bay grass prototype using opaque ribbon tufts and a matching terrain meadow atlas.',
-    x: 5,
-    y: -1,
-    color: '#788d4c',
-    type: 'wetland',
-    validMoves: ['W','SW'],
-    specimens: ['flamingo','frigatebird','booby'],
-    specimenPlacements: [
-      {
-        specimenId: 'flamingo',
-        position: [-8, 0, -2.5],
-        behavior: 'still',
-        sceneScale: 1.05,
-        habitatRadiusX: 4.8,
-        habitatRadiusZ: 2.4,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [3.5, 0, 1.2],
-        behavior: 'still',
-        sceneScale: 0.96,
-        habitatRadiusX: 4.2,
-        habitatRadiusZ: 2.2,
-      },
-      {
-        specimenId: 'flamingo',
-        position: [14, 0, 6.6],
-        behavior: 'still',
-        sceneScale: 0.9,
-        habitatRadiusX: 3.8,
-        habitatRadiusZ: 2,
-      },
-      {
-        specimenId: 'lavalizard',
-        position: [-18, 0, 14],
-        behavior: 'scurry',
-        sceneScale: 1.2,
-        habitatRadiusX: 4.6,
-        habitatRadiusZ: 2.5,
-      },
-      {
-        specimenId: 'booby',
-        position: [-6, 0, 14],
-        behavior: 'curious',
-        sceneScale: 1.02,
-        habitatRadiusX: 7.2,
-        habitatRadiusZ: 3.6,
-      },
-    ],
-    npcs: [],
-    boundaries: {},
-    discoveries: [
-      'The beach grass resolves as stylized ribbon tufts nearby and a filtered meadow mass toward the horizon.'
-    ],
-    notableFeatures: [
-      'Opaque toon-shaded grass avoids black alpha-card clumps.',
-      'Near and mid grass share the same meadow density, dryness, and direction fields.',
-      'The distant meadow is carried by a filtered terrain atlas instead of sub-pixel blade geometry.'
-    ],
-    narration: {
-      weather: 'sunny',
-      sounds: ['coherent wind through dry grass', 'distant seabirds', 'lagoon shallows'],
-      loadingNote: 'A third Cormorant Bay prototype focused on unified stylized grass LOD.',
-      educationalNote: 'Punta Cormorant combines brackish lagoon habitat with dry coastal grasses and olivine sand, making it a useful scene for testing readable vegetation at several distances.',
     },
   },
 
@@ -1828,41 +1365,92 @@ export const locations = [
     ]
   },
 
-  // 17) C_HIGH
+  // 17) C_HIGH — Cerro Pajas, the island's central summit. Authored terrain:
+  // three-game/world/regions/cerroPajas/ (crater cone, crown outcrop, four
+  // trails meeting on the south-east shoulder).
   {
     id: 'C_HIGH',
     name: 'Cerro Pajas',
-    description: 'The highest point of the island.',
+    description: 'The island\u2019s highest ground: a broken crater cone under straw-coloured grass, with a weathered tuff crown on its north-west rim and misty Scalesia on the lee slopes.',
     x: 1,
     y: 2,
     color: 'black',
     type: 'highland',
     validMoves: ['N','E','S','W'],
-    specimens: ['floreana_mockingbird','tuff'],
+    specimens: ['floreana_giant_tortoise', 'medium_ground_finch', 'large_ground_finch', 'galapagos_hawk', 'resurrectionfern', 'galapagospaintedlocust', 'tuff'],
     specimenPlacements: [
+      {
+        instanceId: 'cerro-pajas-tortoise-crater-floor',
+        specimenId: 'floreana_giant_tortoise',
+        position: [-8.5, 0, -12],
+        behavior: 'wander',
+        sceneScale: 1.1,
+        habitatRadiusX: 5.5,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'cerro-pajas-tortoise-lee-meadow',
+        specimenId: 'floreana_giant_tortoise',
+        position: [-22, 0, 24],
+        behavior: 'grazing',
+        sceneScale: 1.04,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+      {
+        instanceId: 'cerro-pajas-medium-finch-junction-seeds',
+        specimenId: 'medium_ground_finch',
+        position: [14.5, 0, 15],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6.5,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'cerro-pajas-large-finch-west-shoulder',
+        specimenId: 'large_ground_finch',
+        position: [-30, 0, 9],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'cerro-pajas-hawk-summit',
+        specimenId: 'galapagos_hawk',
+        position: [-15, 0, -16],
+        behavior: 'soar-and-tree-perch',
+        sceneScale: 1,
+        habitatRadiusX: 36,
+        habitatRadiusZ: 32,
+      },
+      { instanceId: 'cerro-pajas-resurrection-fern-lee-slope', specimenId: 'resurrectionfern', position: [-34, 0, 21], behavior: 'still', sceneScale: 1.2 },
+      { instanceId: 'cerro-pajas-painted-locust-straw-grass', specimenId: 'galapagospaintedlocust', position: [21, 0, -12], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.4, habitatRadiusZ: 3.3 },
       {
         instanceId: 'central-highland-tuff-outcrop',
         specimenId: 'tuff',
-        position: [0, 0, 0],
+        position: [-11.4, 0, -17.6],
         behavior: 'still',
         sceneScale: 1,
-        spawnScatter: {
-          radiusX: 30,
-          radiusZ: 28,
-          bounds: { minX: -36, maxX: 36, minZ: -34, maxZ: 34 },
-        },
       },
     ],
     npcs: [],
     boundaries: {},
     discoveries: [
-      'From here, the entire coastline can be seen—ridges of ancient lava flows stretch below.'
+      'From the crown of the rim the whole coast lies below: the anchorage to the north, black lava to the west, the colony\u2019s clearings to the south.',
+      'The crater floor holds damp sedge and the trampled hollows where tortoises rest out of the wind.',
     ],
     notableFeatures: [
-      'Winds swirl around the summit, bringing a refreshing chill.',
-      'Tangles of brush yield to rocky outcrops near the peak.',
-      'A vantage that reveals the stark contrasts of shoreline, plains, and forest.'
-    ]
+      'A weathered tuff crown marks the highest point of the rim.',
+      'A low notch in the south-east rim lets the trail down onto the crater floor.',
+      'Straw-coloured summit grass gives way to Scalesia and ferns on the misty lee slopes.',
+    ],
+    narration: {
+      weather: 'misty',
+      sounds: ['wind combing the summit grass', 'finches in the seed heads', 'water dripping from Scalesia leaves'],
+      loadingNote: 'The trails from four directions meet below the crater rim of Cerro Pajas.',
+      educationalNote: 'The summit catches the garua mist that keeps the highlands green while the coast stays dry; standing here, the island\u2019s rainfall gradient is something you can see.',
+    },
   },
 
   // 18) PENAL COLONY
@@ -3203,49 +2791,92 @@ const finalRouteExtraLocations = [
     },
   },
   {
+    // Highland Spring. Authored terrain: three-game/world/regions/asiloSpring/
+    // (spring pool under a crescent of seeping tuff, brook east to the colony
+    // and south toward the southern forest, stepping-stone ford).
     id: 'ASILO_SPRING',
     name: 'Highland Spring',
-    description: 'A small spring and cave-side seep west of Asilo de la Paz, feeding the greener highland corridor.',
+    description: 'A clear pool welling up at the foot of a seeping tuff face west of the colony, the island\u2019s one dependable highland water, draining east and south as a small brook.',
     x: 1,
     y: 4,
     color: '#7cc9bd',
     type: 'wetland',
     validMoves: [],
-    specimens: ['mangrove', 'medium_ground_finch', 'galapagos_dove', 'floreana_giant_tortoise'],
+    specimens: ['floreana_giant_tortoise', 'galapagos_dove', 'medium_ground_finch', 'gray_warbler_finch', 'resurrectionfern', 'galapagospaintedlocust', 'tuff'],
     npcs: [],
     boundaries: {},
     specimenPlacements: [
       {
+        instanceId: 'asilo-spring-tortoise-pool-wallow',
+        specimenId: 'floreana_giant_tortoise',
+        position: [-16, 0, 5.5],
+        behavior: 'wander',
+        sceneScale: 1.08,
+        habitatRadiusX: 5,
+        habitatRadiusZ: 3.6,
+      },
+      {
+        instanceId: 'asilo-spring-tortoise-brook-meadow',
+        specimenId: 'floreana_giant_tortoise',
+        position: [24, 0, 13],
+        behavior: 'grazing',
+        sceneScale: 1.02,
+        habitatRadiusX: 7,
+        habitatRadiusZ: 5,
+      },
+      {
         instanceId: 'asilo-spring-galapagos-dove-water-edge-1',
         specimenId: 'galapagos_dove',
-        position: [3.8, 0, 2.4],
+        position: [-3.5, 0, 6.8],
         behavior: 'forage-and-fly',
         sceneScale: 1.04,
-        habitatRadiusX: 7.2,
-        habitatRadiusZ: 4.8,
+        habitatRadiusX: 6.4,
+        habitatRadiusZ: 4.2,
       },
       {
         instanceId: 'asilo-spring-galapagos-dove-water-edge-2',
         specimenId: 'galapagos_dove',
-        position: [-4.6, 0, -1.8],
+        position: [11, 0, -2.2],
         behavior: 'forage-and-fly',
         sceneScale: 0.96,
         habitatRadiusX: 6.6,
         habitatRadiusZ: 4.4,
       },
+      {
+        instanceId: 'asilo-spring-medium-finch-south-trail',
+        specimenId: 'medium_ground_finch',
+        position: [2.5, 0, 17],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'asilo-spring-warbler-finch-fern-bank',
+        specimenId: 'gray_warbler_finch',
+        position: [-24, 0, -8],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4.5,
+      },
+      { instanceId: 'asilo-spring-resurrection-fern-seep', specimenId: 'resurrectionfern', position: [-12.5, 0, -11.2], behavior: 'still', sceneScale: 1.2 },
+      { instanceId: 'asilo-spring-painted-locust-meadow', specimenId: 'galapagospaintedlocust', position: [28, 0, -12], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.2, habitatRadiusZ: 3.2 },
+      { instanceId: 'asilo-spring-tuff-face', specimenId: 'tuff', position: [-4.6, 0, -12.6], behavior: 'still', sceneScale: 1 },
     ],
     discoveries: [
-      'Water beads out of porous rock and disappears into a narrow channel running toward cultivated ground.',
+      'Water beads out of the porous tuff, runs down dark streaks in the rock, and gathers in a clear pool before slipping away east over gravel.',
+      'Tortoise tracks and wallows press into the mud at the pool\u2019s edge.',
     ],
     notableFeatures: [
-      'A shaded seep marks the beginning of the highland creek system.',
-      'Tortoise tracks press into the damp soil near the spring.',
-      'The penal colony lies east across a short green corridor.',
+      'A crescent of seeping tuff shelters the pool on the north.',
+      'The trail from the western highlands drops through a narrow cleft in the tuff.',
+      'Stepping stones cross the brook just below the pool.',
     ],
     narration: {
       weather: 'misty',
-      sounds: ['water dripping from porous rock', 'finches calling from wet shrubs', 'distant voices from the colony'],
-      loadingNote: 'The trail reaches a small highland spring near the caves above Asilo de la Paz.',
+      sounds: ['water dripping from porous rock', 'the brook running over gravel', 'finches calling from wet shrubs'],
+      loadingNote: 'The trail reaches the spring that waters the highlands west of the colony.',
       educationalNote: 'Fresh water made the highlands strategically important to settlers, prisoners, tortoises, and visiting ships alike.',
     },
   },
@@ -3331,30 +2962,7 @@ const finalRouteLocationUpdates = {
   DEVILS_CROWN: { x: 3, y: -2 },
   CORMORANT_BAY: { x: 3, y: 1 },
   PUNTA_CORMORANT: { x: 4, y: 1 },
-  ALT_POST_OFFICE_BAY: {
-    name: 'North Cormorant Beach',
-    description: 'A north-facing pocket beach below Punta Cormorant, with pale sand, lava shelves, and a direct climb toward the eastern cliffs.',
-    x: 4,
-    y: 2,
-    color: '#d8c27c',
-    type: 'beach',
-    specimens: ['crab', 'barnacle', 'galapagoscotton', 'lavalizard'],
-    npcs: [],
-    discoveries: [
-      'The beach faces north into a sheltered pocket of water, separated from Punta Cormorant by low lava and scrub.',
-    ],
-    notableFeatures: [
-      'A narrow sand shelf tucks into the coast below Punta Cormorant.',
-      'Lava benches and salt-tolerant plants mark the route inland.',
-      'The eastern cliffs rise beyond the beach path.',
-    ],
-    narration: {
-      weather: 'sunny',
-      sounds: ['small surf on pale sand', 'lizards in the dry scrub', 'wind moving across lava shelves'],
-      loadingNote: 'A north-facing pocket beach opens below Punta Cormorant.',
-      educationalNote: 'Separating the Cormorant Bay lagoon from this nearby north-facing beach makes the coast easier to read as a chain of adjacent habitats.',
-    },
-  },
+  ALT_POST_OFFICE_BAY: { x: 4, y: 2 },
   EASTERN_CLIFFS: { x: 5, y: 2 },
   COASTAL_SCRUBLAND: { x: 6, y: 2 },
   BLACK_BEACH_SURF: { x: -1, y: 1 },
@@ -3388,14 +2996,6 @@ const finalRouteLocationUpdates = {
   PUNTA_SUR: { x: 2, y: 6 },
   S_REEFS: { x: 2, y: 7 },
   S_WETLANDS: { x: 3, y: 6 },
-
-  // Keep development/test maps out of the playable topology coordinate space.
-  POST_OFFICE_BAY_3: { x: 700, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
-  GRASS_TEST: { x: 701, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
-  GRASS_HYBRID_TEST: { x: 702, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
-  CORMORANT_BAY_SPLAT_TEST: { x: 703, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
-  CORMORANT_BAY_TEST_2: { x: 704, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
-  CORMORANT_BAY_TEST_3: { x: 705, y: 700, validMoves: [], routeOverrides: {}, routeOverrideTravel: {} },
 };
 
 const finalRouteKindLabel = {

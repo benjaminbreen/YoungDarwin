@@ -98,11 +98,11 @@
       "id": "ALT_POST_OFFICE_BAY",
       "kind": "land",
       "at": [
-        0.7003,
-        0.2835
+        0.72,
+        0.22
       ],
-      "eastKm": 10.154,
-      "southKm": 3.29,
+      "eastKm": 10.44,
+      "southKm": 2.553,
       "onLand": true
     },
     {

@@ -22,10 +22,9 @@ const MIN_FACING_DOT = 0.2;
 const ecologyTargetCache = new WeakMap();
 const pricklyPearTargetCache = new Map();
 
-const TOOL_ACTIONS = Object.freeze({
+export const TOOL_ACTIONS = Object.freeze({
   hammer: { verb: 'Strike', shortLabel: 'Hammer' },
   insect_net: { verb: 'Sweep net over', shortLabel: 'Net' },
-  snare: { verb: 'Set snare beside', shortLabel: 'Snare' },
   pocket_knife: { verb: 'Cut', shortLabel: 'Cut' },
   shotgun: { verb: 'Fire at', shortLabel: 'Fire' },
 });
@@ -246,6 +245,20 @@ export function fieldSampleFor(target, zoneId) {
 
 export function resolveFieldAction({ toolId = 'hands', target, examined = false, sampled = false }) {
   if (!target) return null;
+  // Whatever is in hand, a first meeting with a natural subject leads with
+  // Examine: the examine view is the heart of fieldwork, and a hammer or knife
+  // left equipped used to skip straight past it. F still swings the tool.
+  // Placed props have nothing to examine, and the sketchbook studies itself.
+  if (!examined && toolId !== 'hands' && toolId !== 'sketch' && target.kind !== 'prop') {
+    return {
+      id: `observe:${target.id}`,
+      kind: 'observe',
+      toolId,
+      target,
+      label: `Examine ${target.name}`,
+      shortLabel: 'Examine',
+    };
+  }
   // Collection no longer waits on a written note. Bare hands still lead with
   // Examine on a first encounter (the specimen stage is the observation path);
   // an equipped tool collects outright, and studied specimens collect by hand.

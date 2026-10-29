@@ -7,7 +7,6 @@ import { getNorthwestReefRockObstacles } from './nwReefLayout';
 import { getBeachWithHutObstacles } from './beachWithHutLayout';
 import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
-import { getPostOfficeBay3RockObstacles } from './postOfficeBay3Layout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
 import { getPenalColonyObstacles } from './penalColonyLayout';
@@ -19,6 +18,8 @@ import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
 import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
 import { getNorthernHighlandsRockObstacles } from './northernHighlandsLayout';
 import { getWatkinsCreekRockObstacles } from './watkinsCreekLayout';
+import { getCerroPajasRockObstacles } from './cerroPajasLayout';
+import { getAsiloSpringRockObstacles } from './asiloSpringLayout';
 import { getEasternCliffsRockObstacles } from './easternCliffsLayout';
 import { getPuntaSurRockObstacles } from './puntaSurLayout';
 import { getSouthernIntertidalRockObstacles } from './southernIntertidalLayout';
@@ -37,7 +38,6 @@ import { getWesternLowlandsObstacles } from './westernLowlandsLayout';
 export const REGION_OBSTACLE_SOURCES = Object.freeze({
   POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
   ALT_POST_OFFICE_BAY: [getAltPostOfficeBayRockObstacles],
-  POST_OFFICE_BAY_3: [getPostOfficeBay3RockObstacles],
   N_SHORE: [getNorthShoreRockObstacles],
   N_OUTCROP: [getDesolateOutcropRockObstacles],
   DEVILS_CROWN: [getDevilsCrownRockObstacles],
@@ -55,6 +55,8 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   LAVA_FLATS: [getLavaFlatsRockObstacles],
   NORTHERN_HIGHLANDS: [getNorthernHighlandsRockObstacles],
   WATKINS_CREEK: [getWatkinsCreekRockObstacles],
+  C_HIGH: [getCerroPajasRockObstacles],
+  ASILO_SPRING: [getAsiloSpringRockObstacles],
   EASTERN_CLIFFS: [getEasternCliffsRockObstacles],
   PUNTA_SUR: [getPuntaSurRockObstacles],
   S_INTERTIDAL: [getSouthernIntertidalRockObstacles],

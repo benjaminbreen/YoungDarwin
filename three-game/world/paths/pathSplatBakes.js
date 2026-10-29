@@ -26,10 +26,10 @@ export const PATH_SPLAT_BAKES = Object.freeze({
   'el-mirador': `${GENERATED}/el-mirador-path-splat.webp`,
   'rocky-clearing': `${GENERATED}/rocky-clearing-path-splat.webp`,
   'eastern-cliffs': `${GENERATED}/eastern-cliffs-path-splat.webp`,
-  'grass-test': `${GENERATED}/grass-test-path-splat.webp`,
-  'grass-hybrid-test': `${GENERATED}/grass-hybrid-test-path-splat.webp`,
   'post-scrub-rise': `${GENERATED}/post-scrub-rise-path-splat.webp`,
   'northern-highlands': `${GENERATED}/northern-highlands-path-splat.webp`,
+  'cerro-pajas': `${GENERATED}/cerro-pajas-path-splat.webp`,
+  'asilo-spring': `${GENERATED}/asilo-spring-path-splat.webp`,
 });
 
 export function pathSplatBakeFile(key) {

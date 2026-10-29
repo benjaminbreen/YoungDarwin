@@ -1,4 +1,4 @@
-import { altPostOfficeCoastZ, altPostOfficeTrailInfluence, ALT_POST_OFFICE_TRAIL } from '../regions/altPostOfficeBay/terrain';
+import { altPostOfficeCoastZ, altPostOfficeTrailInfluence } from '../regions/altPostOfficeBay/terrain';
 import { makeZoneScatter, makeZonePatchScatter, nearAnyCluster } from '../scatter';
 import { getAltPostOfficeBayRocks, ALT_POST_OFFICE_BAY } from '../altPostOfficeBayLayout';
 import { modelAssetProp } from './ecologyAssetTransforms';
@@ -13,9 +13,11 @@ import {
   makeDarwiniothamnusPatchScatter,
 } from './floraAssets';
 
-// Alternate Post Office Bay ecology: a clean pale beach with driftwood, sparse
-// dry-zone shrubs and cacti inland, detailed mangroves at the brackish edges,
-// and the sailors' barrel with a few weathered fence posts above the landing.
+// North Cormorant Beach ecology (region id ALT_POST_OFFICE_BAY, kept as an
+// opaque persistence key): a clean pale pocket beach with driftwood, sparse
+// dry-zone shrubs and cacti inland, and mangroves at the brackish edges. The
+// map began as an alternate Post Office Bay; its mail barrel, landing crates,
+// and fence posts were removed so the island has one Post Office Bay.
 
 const NATURE = '/assets/models/nature/';
 
@@ -280,48 +282,6 @@ function buildCollectibleBeachFinds() {
   })];
 }
 
-// The post barrel and a short line of weathered fence posts above the landing.
-function buildProps() {
-  const props = [
-    {
-      id: 'post-office-barrel',
-      path: `${NATURE}runtime-post-barrel.glb`,
-      position: [27.5, 0, 0.6],
-      terrainY: true,
-      rotation: [0, 0.7, 0],
-      scale: 7.5,
-    },
-    // Landing clutter flanking the post barrel: the shore-camp crates.
-    {
-      ...modelAssetProp('brokenWoodenCrate', { yaw: 2.2 }),
-      id: 'landing-broken-crate',
-      position: [24.6, 0, 1.6],
-      terrainY: true,
-    },
-    {
-      ...modelAssetProp('cratesAndBags', { yaw: -0.6 }),
-      id: 'landing-crates-and-bags',
-      position: [30.4, 0, 2.4],
-      terrainY: true,
-    },
-  ];
-  for (let index = 0; index < ALT_POST_OFFICE_TRAIL.length - 2; index += 1) {
-    const [ax, az] = ALT_POST_OFFICE_TRAIL[index];
-    const [bx, bz] = ALT_POST_OFFICE_TRAIL[index + 1];
-    const t = index % 2 === 0 ? 0.42 : 0.62;
-    const side = index % 2 === 0 ? -1 : 1;
-    props.push({
-      id: `fence-post-${index}`,
-      path: `${NATURE}runtime-fence-post.glb`,
-      position: [ax + (bx - ax) * t + side * 2.4, 0, az + (bz - az) * t + side * 0.9],
-      terrainY: true,
-      rotation: [0, index * 1.3 + t * 4, 0],
-      scale: 38,
-    });
-  }
-  return props;
-}
-
 export function buildAltPostOfficeBayEcology() {
   const rocks = getAltPostOfficeBayRocks();
   const swashRocks = rocks.filter(rock => {
@@ -345,7 +305,6 @@ export function buildAltPostOfficeBayEcology() {
     ],
     // Sally Lightfoot crabs on the swash boulders.
     props: [
-      ...buildProps(),
       ...swashRocks
         .filter(rock => rock.radiusY > 0.32)
         .slice(0, 3)

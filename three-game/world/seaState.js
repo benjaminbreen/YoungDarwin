@@ -67,15 +67,11 @@ const SEA_STATES = Object.freeze({
   // still first-pass estimates.
   POST_OFFICE_BAY: { swell: 0.78, breakers: 0.9, clarity: 14 },
   ALT_POST_OFFICE_BAY: { swell: 0.78, breakers: 0.9, clarity: 14 },
-  POST_OFFICE_BAY_3: { swell: 0.78, breakers: 0.9, clarity: 14 },
   PUNTA_CORMORANT: { swell: 0.68, breakers: 0.85, clarity: 10 },
   W_LAVA: { swell: 0.65, breakers: 0.82, clarity: 11 },
   MANGROVES: { swell: 0.55, chop: 0.7, breakers: 0.7, clarity: 4 },
   S_WETLANDS: { swell: 0.58, chop: 0.72, breakers: 0.72, clarity: 4.5 },
   CORMORANT_BAY: { swell: 0.8, breakers: 0.92, clarity: 9 },
-  CORMORANT_BAY_SPLAT_TEST: { swell: 0.8, breakers: 0.92, clarity: 9 },
-  CORMORANT_BAY_TEST_2: { swell: 0.8, breakers: 0.92, clarity: 9 },
-  CORMORANT_BAY_TEST_3: { swell: 0.8, breakers: 0.92, clarity: 9 },
   WATKINS: { swell: 0.6, chop: 0.75, clarity: 7 },
   WATKINS_CREEK: { swell: 0.6, chop: 0.75, clarity: 5 },
 

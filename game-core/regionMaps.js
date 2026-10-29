@@ -61,7 +61,6 @@ const AUTHORED_REGION_TERRAIN = {
   // former 360 grid spent ~36% more terrain triangles on sub-texel detail.
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 288 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
-  POST_OFFICE_BAY_3: { preset: 'floreana-cove-3', segments: 300 },
   POST_SCRUB_RISE: { preset: 'post-office-scrub-rise', segments: 280 },
   COASTAL_SCRUBLAND: { preset: 'eastern-coastal-scrubland', segments: 248 },
   EASTERN_CLIFFS: { preset: 'eastern-frigatebird-cliffs', segments: 288 },
@@ -86,12 +85,11 @@ const AUTHORED_REGION_TERRAIN = {
   E_MID: { preset: 'rocky-clearing-cave-path', segments: 320 },
   PENAL_COLONY: { preset: 'penal-colony-settlement', segments: 192 },
   MANGROVES: { preset: 'southern-mangrove-forest', segments: 240 },
-  GRASS_TEST: { preset: 'grass-test-field', segments: 300 },
-  GRASS_HYBRID_TEST: { preset: 'grass-hybrid-test-field', segments: 240 },
   CORMORANT_BAY: { preset: 'cormorant-bay', segments: 300 },
-  CORMORANT_BAY_SPLAT_TEST: { preset: 'cormorant-bay-splat-test', segments: 300 },
-  CORMORANT_BAY_TEST_2: { preset: 'cormorant-bay-test-2', segments: 300 },
-  CORMORANT_BAY_TEST_3: { preset: 'cormorant-bay-test-3', segments: 300 },
+  // Packed PBR relief carries close detail; the crater cone and spring
+  // valley are broad forms that read at the Watkins Creek-class grid.
+  C_HIGH: { preset: 'cerro-pajas-summit-crater', segments: 240 },
+  ASILO_SPRING: { preset: 'asilo-highland-spring', segments: 248 },
   PUNTA_CORMORANT: { preset: 'punta-cormorant-lagoon', segments: 320 },
   WATKINS: { preset: 'watkins-camp-stream-hollow', segments: 320 },
   PUNTA_SUR: { preset: 'punta-sur-rainbow-headland', segments: 288 },
@@ -378,21 +376,94 @@ export function getRegionSpecimenSpawns(regionId = currentRegionId) {
   return getRegionMap(regionId).specimens || [];
 }
 
+function openRouteHints(regionId) {
+  return (regionMaps[regionId]?.edgeHints || []).filter(hint => hint.kind === 'open' && regionMaps[hint.toRegionId]);
+}
+
+const regionRouteCache = new Map();
+
+// Shortest chart journey between two regions over the authored cardinal route
+// graph, weighted by each leg's minutes (fatigue breaks ties). Returns the
+// ordered legs, or null when the destination is unreachable. A direct
+// neighbour is a one-leg route. The graph is static, so results are cached.
+export function findRegionRoute(fromRegionId, toRegionId) {
+  if (!regionMaps[fromRegionId] || !regionMaps[toRegionId] || fromRegionId === toRegionId) return null;
+  const key = `${fromRegionId}>${toRegionId}`;
+  if (regionRouteCache.has(key)) return regionRouteCache.get(key);
+
+  const best = new Map([[fromRegionId, { minutes: 0, fatigue: 0, legs: [] }]]);
+  const settled = new Set();
+  let result = null;
+  while (true) {
+    let currentId = null;
+    let current = null;
+    for (const [id, entry] of best) {
+      if (settled.has(id)) continue;
+      if (!current
+        || entry.minutes < current.minutes
+        || (entry.minutes === current.minutes && entry.fatigue < current.fatigue)) {
+        currentId = id;
+        current = entry;
+      }
+    }
+    if (!current) break;
+    if (currentId === toRegionId) {
+      result = current.legs;
+      break;
+    }
+    settled.add(currentId);
+    for (const hint of openRouteHints(currentId)) {
+      if (settled.has(hint.toRegionId)) continue;
+      const minutes = current.minutes + (Number(hint.minutes) || 0);
+      const fatigue = current.fatigue + (Number(hint.fatigue) || 0);
+      const known = best.get(hint.toRegionId);
+      if (known && (known.minutes < minutes || (known.minutes === minutes && known.fatigue <= fatigue))) continue;
+      best.set(hint.toRegionId, {
+        minutes,
+        fatigue,
+        legs: [...current.legs, { fromRegionId: currentId, ...hint }],
+      });
+    }
+  }
+  regionRouteCache.set(key, result);
+  return result;
+}
+
 export function getRegionTravelCard(fromRegionId, toRegionId) {
   const from = getRegionMap(fromRegionId);
   const to = getRegionMap(toRegionId);
-  const route = (from.edgeHints || []).find(hint => hint.kind === 'open' && hint.toRegionId === to.id);
-  if (!route) return null;
+  const legs = findRegionRoute(from.id, to.id);
+  if (!legs?.length) return null;
+  const direct = legs.length === 1 ? legs[0] : null;
+  const via = legs.slice(0, -1).map(leg => ({
+    zoneId: leg.toRegionId,
+    name: getRegionDisplayName(leg.toRegionId) || leg.toRegionId,
+  }));
+  const viaText = via.map(stop => stop.name).join(', ');
+  const description = direct
+    ? direct.description
+    : `Overland from ${from.name} to ${to.name} by way of ${viaText}.`;
   return {
     fromZoneId: from.id,
     toZoneId: to.id,
-    title: route.description,
+    title: direct ? direct.description : `To ${to.name} via ${viaText}`,
     terrainType: to.biome,
-    estimatedMinutes: route.minutes,
-    fatigueDelta: route.fatigue,
-    routeLabel: route.routeLabel,
+    estimatedMinutes: legs.reduce((sum, leg) => sum + (Number(leg.minutes) || 0), 0),
+    fatigueDelta: legs.reduce((sum, leg) => sum + (Number(leg.fatigue) || 0), 0),
+    routeLabel: direct ? direct.routeLabel : `${legs.length} legs`,
     bannerImage: '',
-    description: route.description,
+    description,
+    // Ordered intermediate stops (empty for a direct neighbour) and the full
+    // leg breakdown, so chart UI can show "via X, Y" and per-leg costs.
+    via,
+    legs: legs.map(leg => ({
+      fromZoneId: leg.fromRegionId,
+      toZoneId: leg.toRegionId,
+      edge: leg.edge,
+      routeKind: leg.routeKind,
+      minutes: Number(leg.minutes) || 0,
+      fatigue: Number(leg.fatigue) || 0,
+    })),
     specimens: to.specimens.map(spawn => spawn.specimenId),
     notableFeatures: to.notableFeatures.slice(0, 3),
     educationalNote: to.narration.educationalNote,

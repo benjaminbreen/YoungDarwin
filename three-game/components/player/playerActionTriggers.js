@@ -85,23 +85,11 @@ export function triggerDirectPlayerActions({
       });
     },
   });
-  triggerAction('snare', 'kneelInspect', ACTION_DURATION.kneelInspect, {
-    ...actionOptions,
-    lockMovement: true,
-    onStart: () => {
-      useThreeGameStore.getState().placeSnareTrap?.({
-        position: group.current?.position,
-        facing: facing.current,
-      });
-    },
-  });
   triggerAction('gather', 'gatherGround', ACTION_DURATION.gatherGround, actionOptions);
   triggerAction('write', 'write', ACTION_DURATION.write, { ...actionOptions, lockMovement: true });
   triggerAction('inspect', 'kneelInspect', ACTION_DURATION.kneelInspect, { ...actionOptions, lockMovement: true });
   triggerAction('lookAround', 'lookAround', ACTION_DURATION.lookAround, actionOptions);
   triggerAction('point', 'point', ACTION_DURATION.point, actionOptions);
-  triggerAction('trip', 'trip', ACTION_DURATION.trip, { ...actionOptions, lockMovement: true, recoverAction: 'gettingUp', recoverDuration: 1.45 });
-  triggerAction('teeter', 'teeter', ACTION_DURATION.teeter, { ...actionOptions, lockMovement: false });
   triggerAction('sit', 'standToSit', ACTION_DURATION.standToSit, { ...actionOptions, lockMovement: true });
   // R and the HUD's Rest button both land here. The store decides whether the
   // halt is allowed and spends the two hours; the clip is the same either way,

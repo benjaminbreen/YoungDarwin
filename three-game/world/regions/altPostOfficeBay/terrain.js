@@ -6,11 +6,13 @@ import {
   terrainSurfaceNoise,
 } from '../../terrainShared';
 
-// Alternate Post Office Bay, shaped from the satellite contour of the real
-// anchorage: a crescent of pale sand facing north, a green mangrove-capped
-// headland enclosing the bay on the west, a small white landing flat with the
-// barrel on the northeast arm, and dry brown scrub rolling inland to the
-// south with the old trail cutting through it.
+// North Cormorant Beach (opaque region id ALT_POST_OFFICE_BAY). The terrain
+// began as an alternate Post Office Bay shaped from that anchorage's satellite
+// contour and now stands for the north-facing pocket beach on the northeast
+// coast below Punta Cormorant: a crescent of pale sand facing north, a green
+// mangrove-capped headland on the west, a small white shell-sand flat on the
+// northeast arm, and dry brown scrub rolling inland to the south with a foot
+// trail climbing toward the highlands.
 
 const smoothstep = THREE.MathUtils.smoothstep;
 const clamp = THREE.MathUtils.clamp;
@@ -47,7 +49,7 @@ function eastPointMass(x, z) {
   return Math.exp(-Math.pow((x - 50) / 13, 2) - Math.pow((z + 18) / 11, 2));
 }
 
-// Flat white landing shelf where the barrel stands (northeast arm of beach).
+// Flat white shell-sand shelf on the northeast arm of the beach.
 function landingFlatMask(x, z) {
   const dx = (x - 26) / 8.5;
   const dz = (z + 1) / 5.5;
@@ -113,7 +115,7 @@ export function altPostOfficeTerrainHeight(x, z, { movementSurface = false } = {
   // Eastern basalt point: low dark shelf.
   y += eastPoint * 1.5 * smoothstep(d, -1, 3);
 
-  // Landing flat: level pale shelf for the post barrel.
+  // Landing flat: level pale shell-sand shelf on the northeast arm.
   const flat = landingFlatMask(x, z);
   y = lerp(y, 0.5 + terrainFineDetail(x, z) * 0.05, flat * 0.85);
 

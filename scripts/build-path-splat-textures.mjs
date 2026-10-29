@@ -48,8 +48,10 @@ import { EL_MIRADOR_SPLAT_BOUNDS } from '../three-game/world/regions/elMirador/m
 import { ROCKY_CLEARING_PATH_POINTS } from '../three-game/world/regions/rockyClearing/path.js';
 import { EASTERN_CLIFFS_PATH_POINTS } from '../three-game/world/regions/easternCliffs/path.js';
 import { EASTERN_CLIFFS_SPLAT_BOUNDS } from '../three-game/world/regions/easternCliffs/material.js';
-import { GRASS_TEST_PATH_POINTS } from '../three-game/world/regions/grassTest/path.js';
-import { HYBRID_GRASS_PATH_POINTS } from '../three-game/world/regions/grassHybridTest/path.js';
+import { CERRO_PAJAS_PATH_POINTS } from '../three-game/world/regions/cerroPajas/path.js';
+import { CERRO_PAJAS_SPLAT_BOUNDS } from '../three-game/world/regions/cerroPajas/material.js';
+import { ASILO_SPRING_PATH_POINTS } from '../three-game/world/regions/asiloSpring/path.js';
+import { ASILO_SPRING_SPLAT_BOUNDS } from '../three-game/world/regions/asiloSpring/material.js';
 
 // bounds and minimumWidth must match what the material passes to
 // standardFootPathSplatUniforms, or the mask samples offset from the terrain
@@ -109,15 +111,6 @@ const RECIPES = {
     bounds: EASTERN_CLIFFS_SPLAT_BOUNDS,
     minimumWidth: 1.48,
   },
-  'grass-test': {
-    pathPoints: GRASS_TEST_PATH_POINTS,
-    bounds: STANDARD_FOOT_PATH_SPLAT_BOUNDS,
-    minimumWidth: 2.35,
-  },
-  'grass-hybrid-test': {
-    pathPoints: HYBRID_GRASS_PATH_POINTS,
-    bounds: STANDARD_FOOT_PATH_SPLAT_BOUNDS,
-  },
   'post-scrub-rise': {
     pathPoints: POST_SCRUB_RISE_PATH_POINTS,
     bounds: POST_SCRUB_RISE_SPLAT_BOUNDS,
@@ -127,6 +120,16 @@ const RECIPES = {
     pathPoints: NORTHERN_HIGHLANDS_PATH_POINTS,
     bounds: NORTHERN_HIGHLANDS_SPLAT_BOUNDS,
     minimumWidth: 1.58,
+  },
+  'cerro-pajas': {
+    pathPoints: CERRO_PAJAS_PATH_POINTS,
+    bounds: CERRO_PAJAS_SPLAT_BOUNDS,
+    minimumWidth: 1.5,
+  },
+  'asilo-spring': {
+    pathPoints: ASILO_SPRING_PATH_POINTS,
+    bounds: ASILO_SPRING_SPLAT_BOUNDS,
+    minimumWidth: 1.55,
   },
 };
 

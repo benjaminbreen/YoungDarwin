@@ -25,7 +25,6 @@ const VISTA_BY_REGION_ID = {
   LAVA_FLATS: 'lava-flats',
   POST_OFFICE_BAY: 'post-office-bay',
   ALT_POST_OFFICE_BAY: 'post-office-bay',
-  POST_OFFICE_BAY_3: 'post-office-bay',
   N_SHORE: 'north-shore',
   NW_REEF: 'reef-shallows',
   S_HUT: 'reef-shallows',
@@ -60,7 +59,6 @@ const DEFAULT_SURFACE_PROFILE_BY_TYPE = {
 const SURFACE_PROFILE_BY_REGION_ID = {
   POST_OFFICE_BAY: 'volcanic-coast',
   ALT_POST_OFFICE_BAY: 'volcanic-coast',
-  POST_OFFICE_BAY_3: 'volcanic-coast',
   N_SHORE: 'black-sand-coast',
   NW_REEF: 'reef-shelf',
   S_HUT: 'reef-shelf',

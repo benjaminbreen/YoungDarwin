@@ -64,9 +64,6 @@ export function resolveSymsStatus({
   specimens,
   runtimePositions,
 }) {
-  if (reactionMode === 'snared') {
-    return { status: NPC_STATUS.ALERT, activity: 'Hanging by one ankle' };
-  }
   if (reactionMode === 'flee') {
     return { status: NPC_STATUS.ALERT, activity: 'Backing off in a hurry' };
   }

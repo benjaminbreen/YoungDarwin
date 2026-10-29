@@ -3,7 +3,8 @@
 import dynamic from 'next/dynamic';
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { KeyboardControls, Stats, useProgress } from '@react-three/drei';
+import { Stats, useProgress } from '@react-three/drei';
+import { isTextEntryTarget, startGameKeys } from './input/gameKeys';
 import { EffectComposer, EffectComposerContext, Bloom, DepthOfField, N8AO, SMAA } from '@react-three/postprocessing';
 import { BrightnessContrastEffect, HueSaturationEffect, VignetteEffect } from 'postprocessing';
 import { ACESFilmicToneMapping, HalfFloatType, MathUtils, Object3D, PCFShadowMap, Quaternion, SRGBColorSpace, Texture, UnsignedByteType, Vector3, WebGLRenderTarget } from 'three';
@@ -212,46 +213,6 @@ const AudioDebugPanel = dynamic(
   { ssr: false },
 );
 
-const KEYBOARD_MAP = [
-  { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
-  { name: 'backward', keys: ['KeyS', 'ArrowDown'] },
-  { name: 'left', keys: ['KeyA', 'ArrowLeft'] },
-  { name: 'right', keys: ['KeyD', 'ArrowRight'] },
-  { name: 'run', keys: ['ShiftLeft', 'ShiftRight'] },
-  { name: 'jump', keys: ['Space'] },
-  { name: 'dodge', keys: ['KeyB'] },
-  { name: 'interact', keys: ['KeyE'] },
-  { name: 'examine', keys: ['Enter', 'NumpadEnter'] },
-  { name: 'useTool', keys: ['KeyJ'] },
-  { name: 'camera', keys: ['KeyM'] },
-  { name: 'recenterCamera', keys: ['Tab'] },
-  { name: 'rotateLeft', keys: ['KeyZ'] },
-  { name: 'rotateRight', keys: ['KeyX'] },
-  { name: 'crouch', keys: ['KeyC'] },
-  { name: 'sit', keys: ['KeyK'] },
-  { name: 'rest', keys: ['KeyR'] },
-  { name: 'pray', keys: ['KeyP'] },
-  { name: 'rifle', keys: ['KeyF'] },
-  { name: 'fireRifle', keys: [] },
-  // H is reserved by the polished desktop HUD for hiding/showing interface
-  // chrome. Hammering remains available through slot 4 + the J tool action.
-  { name: 'hammer', keys: [] },
-  { name: 'net', keys: ['KeyN'] },
-  { name: 'gather', keys: ['KeyG'] },
-  { name: 'write', keys: ['KeyY'] },
-  { name: 'inspect', keys: ['KeyI'] },
-  { name: 'climb', keys: ['KeyQ', 'KeyV'] },
-  { name: 'lookAround', keys: ['KeyL'] },
-  { name: 'point', keys: ['KeyO'] },
-  { name: 'trip', keys: ['KeyT'] },
-  { name: 'teeter', keys: ['KeyU'] },
-  { name: 'tool1', keys: ['Digit1'] },
-  { name: 'tool2', keys: ['Digit2'] },
-  { name: 'tool3', keys: ['Digit3'] },
-  { name: 'tool4', keys: ['Digit4'] },
-  { name: 'tool5', keys: ['Digit5'] },
-  { name: 'tool6', keys: ['Digit6'] },
-];
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
 
 // SMAAPreset.ULTRA from the 'postprocessing' package. That package is only a
@@ -4200,7 +4161,6 @@ export default function ThreeDarwinGame({
   // The legacy desktop HUD and its alternate keyboard map were retired in
   // 2026-08 — the polished layout had been the shipping default for long
   // enough that `?hud=legacy` was only maintenance drag.
-  const keyboardMap = KEYBOARD_MAP;
   const [launchState, setLaunchState] = useState(initialModeId ? 'loading' : 'menu');
   const [initialModeReady, setInitialModeReady] = useState(!initialModeId);
   const [sceneReady, setSceneReady] = useState(false);
@@ -4717,13 +4677,9 @@ export default function ThreeDarwinGame({
       const requestedTime = Number(params.get('time'));
       if (Number.isFinite(requestedTime)) useThreeGameStore.getState().setTimeOfDay(requestedTime);
     }
-    const setShortcutModifierActive = active => {
-      window.__darwinShortcutModifierActive = active;
-    };
+    const stopGameKeys = startGameKeys();
     const onKeyDown = event => {
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      setShortcutModifierActive(event.metaKey || event.ctrlKey);
+      if (isTextEntryTarget(event.target)) return;
       // Tab recenters the camera during play, so swallow the browser's focus
       // move — but only while gameplay actually owns the keyboard and focus is
       // still on the page body/canvas. Once a modal is open or the player has
@@ -4738,38 +4694,38 @@ export default function ThreeDarwinGame({
         }
         return;
       }
-      if (event.code === 'Digit0' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      // Developer panels sit on Alt (Option) + a digit, so they never collide
+      // with the 1-6 toolbelt, and none of them exist in a production build.
+      const devChord = DEV_TOOLS_ENABLED && event.altKey && !event.metaKey && !event.ctrlKey;
+      if (event.code === 'Digit0' && devChord && event.shiftKey) {
         event.preventDefault();
         if (!event.repeat) setShowAudioDebug(value => !value);
         return;
       }
-      if (event.code === 'Digit0' && DEV_TOOLS_ENABLED) {
+      if (event.code === 'Digit0' && devChord) {
         event.preventDefault();
         setShowAssetBrowser(value => !value);
         return;
       }
-      if (event.code === 'Digit6' && DEV_TOOLS_ENABLED) {
+      if (event.code === 'Digit6' && devChord) {
         event.preventDefault();
         setShowMapGeographyDev(value => !value);
         return;
       }
-      if (event.code === 'Digit7' && DEV_TOOLS_ENABLED) {
+      if (event.code === 'Digit7' && devChord) {
         event.preventDefault();
         setShowAnimalAnimationLab(value => !value);
         return;
       }
-      if (event.code === 'Digit8' && DEV_TOOLS_ENABLED) {
+      if (event.code === 'Digit8' && devChord) {
         event.preventDefault();
         setShowDarwinAnimationLab(value => !value);
         return;
       }
       if (
         event.code === 'Digit9'
-        && DEV_TOOLS_ENABLED
+        && devChord
         && !event.shiftKey
-        && !event.metaKey
-        && !event.ctrlKey
-        && !event.altKey
       ) {
         event.preventDefault();
         toggleEcologyDebug();
@@ -4784,20 +4740,10 @@ export default function ThreeDarwinGame({
         setShowPerf(value => !value);
       }
     };
-    const onKeyUp = event => {
-      setShortcutModifierActive(event.metaKey || event.ctrlKey);
-    };
-    const clearShortcutModifier = () => setShortcutModifierActive(false);
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', clearShortcutModifier);
-    document.addEventListener('visibilitychange', clearShortcutModifier);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', clearShortcutModifier);
-      document.removeEventListener('visibilitychange', clearShortcutModifier);
-      clearShortcutModifier();
+      stopGameKeys();
     };
   }, []);
 
@@ -5394,7 +5340,6 @@ export default function ThreeDarwinGame({
           waterQuality={scenePerfSettings.waterQuality || 'polished'}
         />
       )}
-      <KeyboardControls map={keyboardMap}>
         {gameStarted && (
           <IslandSoundscape
             // Bring the island in by ear as the painted splash begins to
@@ -5699,7 +5644,6 @@ export default function ThreeDarwinGame({
           waterQuality={scenePerfSettings.waterQuality || 'polished'}
           worldDetailsEnabled={scenePerfSettings.worldDetails !== false}
         />
-      </KeyboardControls>
     </main>
     </MultiplayerProvider>
   );

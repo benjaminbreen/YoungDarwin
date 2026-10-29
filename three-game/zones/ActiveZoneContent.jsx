@@ -9,7 +9,6 @@ import { BorderVistas } from '../components/scene/BorderVistas';
 import { WorldDetails } from '../components/scene/WorldDetails';
 import { ExaminableItems } from '../components/world/ExaminableItemActor';
 import { SpecimenActor } from '../components/world/SpecimenActor';
-import { SnareTraps } from '../components/world/SnareTrapActor';
 import { AnimalDroppings } from '../components/world/AnimalDroppings';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { PricklyPearField } from '../physics/props/pricklyPear/PricklyPearField';
@@ -168,7 +167,6 @@ export function ActiveZoneContent({
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalInmateCabin /></WarmGate>}
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalWorkGangCabin /></WarmGate>}
       {waterSplashesReady && settings.waterSplashes !== false && <WaterSplashes />}
-      {interactablesReady && <SnareTraps />}
       {interactablesReady && <AnimalDroppings />}
       {beagleReady && settings.beagle !== false && (
         <Suspense fallback={null}>

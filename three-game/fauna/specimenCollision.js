@@ -20,6 +20,10 @@ const DEFAULT_SPECIMEN_RADIUS = {
   sealion: 0.95,
 };
 
+// How far above an animal's feet the player's feet must be before the animal
+// stops pushing the player aside; scaled up for large bodies below.
+const ANIMAL_OVERHEAD_CLEARANCE = 0.9;
+
 function normalizedId(specimen) {
   return String(specimen?.id || specimen?.specimenId || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
@@ -74,7 +78,14 @@ export function resolveSpecimenCollision(position, previousPosition, {
       const radius = specimenCollisionRadius(specimen);
       if (radius <= 0) continue;
       center.set(pose.x, pose.y || 0, pose.z);
-      if (specimen.ontology === 'Animal' && center.y - (position.y || 0) > 1.25) continue;
+      // Animals only block at roughly their own height: skip one perched or
+      // flying well above the player, and skip it when the player is the one
+      // well above (a flying player finch, Darwin up on a boulder).
+      if (specimen.ontology === 'Animal') {
+        const playerAbove = (position.y || 0) - center.y;
+        if (-playerAbove > 1.25) continue;
+        if (playerAbove > Math.max(ANIMAL_OVERHEAD_CLEARANCE, radius * 1.4)) continue;
+      }
       const minDistance = radius + playerRadius;
       const dx = resolved.x - center.x;
       const dz = resolved.z - center.z;

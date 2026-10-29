@@ -106,6 +106,7 @@ export function usePlayerCameraRig() {
     impulse: 0,
   });
   const shoulderPivotRef = useRef(null);
+  const activePointerIdRef = useRef(null);
   const swimCameraRef = useRef(0);
   // Flight chase camera yields to manual orbiting: dragging suspends the
   // auto-align for a grace period; Tab (recenter) hands control back.
@@ -289,8 +290,14 @@ export function usePlayerCameraRig() {
         return;
       }
       if (event.button !== 0 && event.button !== 1) return;
+      // One finger or button steers at a time; a second touch would otherwise
+      // read as a huge jump from the first one's last position.
+      if (draggingRef.current && activePointerIdRef.current !== event.pointerId) return;
+      activePointerIdRef.current = event.pointerId;
       draggingRef.current = true;
-      panningRef.current = event.button === 1 || event.shiftKey;
+      // Middle mouse pans. Shift no longer does: it is also run, and sprinting
+      // while steering the camera slid the pivot off Darwin.
+      panningRef.current = event.button === 1;
       dragPointerTypeRef.current = event.pointerType || 'mouse';
       lastPointerXRef.current = event.clientX;
       lastPointerYRef.current = event.clientY;
@@ -327,6 +334,7 @@ export function usePlayerCameraRig() {
         return;
       }
       if (!draggingRef.current) return;
+      if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) return;
       const dx = event.clientX - lastPointerXRef.current;
       const dy = event.clientY - lastPointerYRef.current;
       lastPointerXRef.current = event.clientX;
@@ -336,7 +344,7 @@ export function usePlayerCameraRig() {
         aimLook(dx, dy, dragPointerTypeRef.current === 'touch' ? ads.touchLookSpeed : ads.lookSpeed * 1.2);
         return;
       }
-      if (panningRef.current || event.shiftKey) {
+      if (panningRef.current) {
         const dist = THREE.MathUtils.clamp(zoomRef.current, 4, 14);
         const right = scratch.panRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
         panOffsetRef.current
@@ -352,7 +360,10 @@ export function usePlayerCameraRig() {
       }
     };
     const stopDrag = event => {
-      if (event?.button === 2) shotgunAimState.holdIntent = false;
+      if (event?.button === 2 || event?.type === 'lostpointercapture') shotgunAimState.holdIntent = false;
+      if (event?.pointerId !== undefined && activePointerIdRef.current !== null
+        && event.pointerId !== activePointerIdRef.current && event.button !== 2) return;
+      activePointerIdRef.current = null;
       draggingRef.current = false;
       panningRef.current = false;
       element.style.cursor = 'grab';
@@ -361,7 +372,10 @@ export function usePlayerCameraRig() {
     const onWheel = event => {
       event.preventDefault();
       if (openingCameraActiveRef.current) return;
-      const normalizedDelta = Math.sign(event.deltaY) * Math.min(1.8, Math.abs(event.deltaY) / 80);
+      // Firefox reports mouse wheels in lines (deltaMode 1) and some devices in
+      // pages (2); convert to pixels so one notch zooms the same everywhere.
+      const pixelDelta = event.deltaY * (event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? 400 : 1);
+      const normalizedDelta = Math.sign(pixelDelta) * Math.min(1.8, Math.abs(pixelDelta) / 80);
       const examineSession = useThreeGameStore.getState().examineSession;
       if (examineOrbitActive(examineSession)) {
         // A procedure move may park the zoom below the manual floor (macro
@@ -407,6 +421,15 @@ export function usePlayerCameraRig() {
     element.addEventListener('pointermove', onPointerMove);
     element.addEventListener('pointerup', stopDrag);
     element.addEventListener('pointercancel', stopDrag);
+    element.addEventListener('lostpointercapture', stopDrag);
+    // Releasing the aim button in another window never reaches the canvas.
+    const releaseAim = () => {
+      shotgunAimState.holdIntent = false;
+      activePointerIdRef.current = null;
+      draggingRef.current = false;
+      panningRef.current = false;
+    };
+    window.addEventListener('blur', releaseAim);
     element.addEventListener('wheel', onWheel, { passive: false });
     element.addEventListener('contextmenu', onContextMenu);
     return () => {
@@ -416,6 +439,8 @@ export function usePlayerCameraRig() {
       element.removeEventListener('pointermove', onPointerMove);
       element.removeEventListener('pointerup', stopDrag);
       element.removeEventListener('pointercancel', stopDrag);
+      element.removeEventListener('lostpointercapture', stopDrag);
+      window.removeEventListener('blur', releaseAim);
       element.removeEventListener('wheel', onWheel);
       element.removeEventListener('contextmenu', onContextMenu);
       element.style.cursor = '';
@@ -445,15 +470,14 @@ export function usePlayerCameraRig() {
     }
   }, [scratch]);
 
-  const recenterCamera = useCallback((facing, options = {}) => {
+  const recenterCamera = useCallback(facing => {
     const forward = scratch.recenterForward.set(facing?.x || 0, 0, facing?.z || -1);
     if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
     forward.normalize();
-    // behind: chase-view convention (camera look direction = facing), used by
-    // flight so Tab snaps to directly behind the bird.
-    yawRef.current = options.behind
-      ? Math.atan2(-forward.x, -forward.z)
-      : Math.atan2(forward.x, forward.z);
+    // The camera looks along (-sin yaw, -cos yaw), so this yaw puts it
+    // directly behind the character, looking the way they face — the same
+    // convention the spawn reset and hero follow use.
+    yawRef.current = Math.atan2(-forward.x, -forward.z);
     manualOrbitUntilRef.current = 0;
     panOffsetRef.current.set(0, 0, 0);
     shoulderPivotRef.current = null;

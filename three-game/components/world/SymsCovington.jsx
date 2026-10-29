@@ -18,7 +18,6 @@ import { getZoneProps } from '../../physics/props/propRegistry';
 import { getZonePropCollisionProps } from '../../physics/props/propRuntime';
 import { onNpcContact, publishNpcPose, removeNpcPose } from '../../world/npcRuntime';
 import { resolveNpcPlayerCollision } from '../../npcs/npcCollision';
-import { SNARE_ARM_SECONDS, SNARE_CHARACTER_TRIGGER_RADIUS } from '../../snareTraps';
 import {
   DEFAULT_SYMS_DIRECTIVE,
   SYMS_DIRECTIVES,
@@ -220,8 +219,6 @@ export function SymsCovington({ motionPaused = false }) {
     lastLineAt: -Infinity,
     lastPenaltyAt: -Infinity,
     lastPlayerContactAt: -Infinity,
-    snareYaw: Math.PI * 0.82,
-    snareTrapId: null,
   });
 
   useEffect(() => {
@@ -253,11 +250,9 @@ export function SymsCovington({ motionPaused = false }) {
     motion.targetSite = openingApproach.targetSite;
     motion.visitIndex = 0;
     motion.dwellUntil = 0;
-    motion.nextTrapCheckAt = 0;
     motion.desiredYaw = spawn.yaw;
     reactionRef.current.mode = 'idle';
     reactionRef.current.until = 0;
-    reactionRef.current.snareTrapId = null;
     reactionRef.current.pending = [];
     footstepRef.current.phase = 0;
   }, [activityPlan, currentZoneId, directive, playerSpawnId, visible]);
@@ -275,7 +270,6 @@ export function SymsCovington({ motionPaused = false }) {
   useEffect(() => onPropEvent('shotgun-npc-hit', event => {
     if (event.npcId !== 'syms') return;
     const reaction = reactionRef.current;
-    if (reaction.mode === 'snared') return;
     const position = motionRef.current.position;
     const safe = chooseEscapeTarget(position, event.origin, 8.5, currentZoneId, obstacles);
     reaction.mode = 'flee';
@@ -287,7 +281,7 @@ export function SymsCovington({ motionPaused = false }) {
   // Any nearby report makes him duck aside even when the shot misses.
   useEffect(() => onPropEvent('shotgun-fired', event => {
     const reaction = reactionRef.current;
-    if (reaction.mode === 'flee' || reaction.mode === 'snared') return;
+    if (reaction.mode === 'flee') return;
     const position = motionRef.current.position;
     const distance = Math.hypot(position.x - (event.position?.x || 0), position.z - (event.position?.z || 0));
     if (distance > 11) return;
@@ -301,7 +295,7 @@ export function SymsCovington({ motionPaused = false }) {
   useEffect(() => onNpcContact(event => {
     if (event.npcId !== 'syms' || event.zoneId !== currentZoneId) return;
     const reaction = reactionRef.current;
-    if (reaction.mode === 'snared' || reaction.mode === 'flee') return;
+    if (reaction.mode === 'flee') return;
     const now = clockRef.current;
     if (now - reaction.lastPlayerContactAt < 0.48) return;
     const position = motionRef.current.position;
@@ -462,52 +456,10 @@ export function SymsCovington({ motionPaused = false }) {
       }
     }
 
-    const store = useThreeGameStore.getState();
-    if (reaction.snareTrapId) {
-      const caughtTrap = (store.snareTraps || []).find(item => item.id === reaction.snareTrapId);
-      if (caughtTrap?.status === 'sprung-syms') reaction.mode = 'snared';
-      else {
-        reaction.snareTrapId = null;
-        reaction.mode = 'idle';
-        reaction.until = 0;
-      }
-    }
-
-    if (reaction.mode !== 'snared' && time >= motion.nextTrapCheckAt) {
-      motion.nextTrapCheckAt = time + 0.12;
-      const trap = (store.snareTraps || []).find(item => (
-        item.zoneId === currentZoneId
-        && item.status === 'set'
-        && Date.now() - (item.placedAtRealMs || Date.now()) >= SNARE_ARM_SECONDS * 1000
-        && Math.hypot(position.x - item.position.x, position.z - item.position.z) <= SNARE_CHARACTER_TRIGGER_RADIUS
-      ));
-      if (trap) {
-        store.springSnareTrapByCharacter?.(trap.id, 'syms');
-        reaction.mode = 'snared';
-        reaction.until = Infinity;
-        reaction.snareTrapId = trap.id;
-        reaction.snareYaw = Math.atan2(position.x - trap.position.x, position.z - trap.position.z) + Math.PI * 0.5;
-      }
-    }
-
     let movementSpeed = 0;
     let stationaryAnimation = 'idle';
     let activeDirective = SYMS_DIRECTIVES.RANGE;
     let atSite = false;
-    if (reaction.mode === 'snared') {
-      group.current.position.set(position.x, position.y + 0.04, position.z);
-      group.current.rotation.set(0, reaction.snareYaw, 0);
-      if (body.current) {
-        body.current.position.set(0, 0.14, 0);
-        body.current.rotation.set(-Math.PI / 2, 0, 0.08);
-      }
-      animationRef.current = 'idle';
-      footstepRef.current.phase = 0;
-      publishSymsPose(currentZoneId, position);
-      applyStatus({ reactionMode: 'snared' });
-      return;
-    }
-
     if (body.current) {
       body.current.position.lerp(BODY_HOME, 1 - Math.exp(-dt * 8));
       body.current.rotation.x = THREE.MathUtils.damp(body.current.rotation.x, 0, 8, dt);

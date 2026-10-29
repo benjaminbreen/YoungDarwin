@@ -99,7 +99,7 @@ Terrain and immediate setting: ${String(locationContext.biome || locationContext
 Nearby life: ${nearbySpecimen}
 Weather: ${weather || 'unknown'}
 Time: ${timeOfDay || 'unknown'}
-Body: vitality ${stats.health ?? 'unknown'}, energy ${energy}, composure ${stats.curiosity ?? 'unknown'}
+Body: vitality ${stats.health ?? 'unknown'}, energy ${energy}
 Recent translated experience: ${(Array.isArray(recentNarration) ? recentNarration : []).slice(-3).join(' | ') || 'none'}
 
 Return JSON only with:

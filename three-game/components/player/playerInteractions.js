@@ -15,8 +15,10 @@ import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
 import { emitPropEvent, nextSwingId } from '../../physics/props/propEvents';
 import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
-import { fieldSampleFor, findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
+import { TOOL_ACTIONS, fieldSampleFor, findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
 import { getRuntimeObstacles } from '../../world/obstacles';
+
+const EDGE_TRAVEL_HOLD_SECONDS = 0.55;
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -236,7 +238,6 @@ export function collectionAnimationForTool(toolId, specimen = null, options = {}
   }
   if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true, align: true };
   if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
-  if (toolId === 'snare') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true, align: true };
   if (toolId === 'hammer') return { clip: 'heavyToolSwing', duration: ACTION_DURATION.heavyToolSwing, lockMovement: true, align: true };
   if (toolId === 'sketch') {
     const clip = documentClipForSpecimen(specimen);
@@ -314,10 +315,7 @@ export function updatePlayerInteractions({
     storeState.setNearbyNpcEncounter?.(nearbyNpcEncounter);
     if (nearbyNpcEncounter) storeState.recordNpcActivity?.(nearbyNpcEncounter.npcId, 'nearby');
   }
-  const constraintLocksInteractions = Boolean(
-    storeState.activeConstraint?.movementLock
-    || storeState.activeConstraint?.type === 'snare_immobilized'
-  );
+  const constraintLocksInteractions = Boolean(storeState.activeConstraint?.movementLock);
   const currentPromptId = storeState.edgePrompt?.id || null;
   const dismissedPromptId = storeState.dismissedEdgePromptId || null;
   const arrivalSuppressed = arrivalEdgeSuppressesPrompt(storeState.arrivalEdgeBlock, currentZoneId, position, promptPayload);
@@ -327,6 +325,46 @@ export function updatePlayerInteractions({
     ? (position.x - previousSample.x) * edgeDirection.dx + (position.z - previousSample.z) * edgeDirection.dy
     : 0;
   stateRef.current.edgeTravelSample = { x: position.x, z: position.z, zoneId: currentZoneId };
+
+  // E and Enter are one action key. Which job a press does is decided when
+  // the key goes down and kept until it is released, so a target wandering
+  // into range mid-hold cannot turn "speak" into "collect".
+  const actHeld = Boolean(keys.interact);
+  if (actHeld && !stateRef.current.actRoute) {
+    const hasInteractTarget = Boolean(
+      storeState.carriedObjectId
+      || storeState.nearbyNpcEncounter
+      || storeState.interiorPrompt
+      || storeState.carryPrompt
+      || storeState.edgePrompt?.kind === 'blocked'
+    );
+    const hasFieldTarget = Boolean(
+      storeState.fieldAction
+      || (storeState.nearbySpecimenId && storeState.downedSpecimenActors?.[storeState.nearbySpecimenId])
+    );
+    const edgeOpen = Boolean(
+      storeState.edgePrompt?.visible !== false
+      && storeState.edgePrompt?.kind === 'open'
+      && storeState.edgePrompt.toRegionId
+    );
+    stateRef.current.actRoute = hasInteractTarget ? 'interact'
+      : hasFieldTarget ? 'field'
+        : storeState.edgePrompt?.requiresHold ? 'hold-return'
+          : edgeOpen ? 'edge'
+            : 'field';
+    stateRef.current.actStartedAt = interactionNow;
+  } else if (!actHeld) {
+    stateRef.current.actRoute = null;
+  }
+  const actRoute = stateRef.current.actRoute;
+  const examineHeld = Boolean(touch.fieldAction || (actHeld && actRoute === 'field'));
+  const interactHeld = Boolean(touch.interact || (actHeld && actRoute === 'interact'));
+  // Leaving a region on the action key takes a short hold, so pressing E to
+  // examine something near the shore cannot carry you off the map by mistake.
+  const edgeHoldProgress = actRoute === 'edge' && actHeld
+    ? Math.min(1, (interactionNow - (stateRef.current.actStartedAt || interactionNow)) / EDGE_TRAVEL_HOLD_SECONDS)
+    : 0;
+
   let autoTransitionStarted = false;
   const autoCandidate = !arrivalSuppressed
     && promptPayload?.kind === 'open'
@@ -364,6 +402,20 @@ export function updatePlayerInteractions({
         note: promptPayload.description,
         source: 'edge',
         mode: 'island',
+      });
+    }
+  } else if (edgeHoldProgress > 0 && promptPayload?.kind === 'open' && promptPayload.toRegionId && !arrivalSuppressed) {
+    stateRef.current.edgeTravelIntent = null;
+    promptPayload.commitProgress = edgeHoldProgress;
+    if (edgeHoldProgress >= 1 && !storeState.transition && !stateRef.current.action) {
+      autoTransitionStarted = true;
+      stateRef.current.actRoute = 'done';
+      setEdgePrompt(null);
+      beginZoneTransition(promptPayload.toRegionId, {
+        entryEdge: promptPayload.entryEdge || oppositeEdge(promptPayload.edge),
+        note: promptPayload.description,
+        mode: promptPayload.localTransition ? 'threshold' : 'island',
+        localTransition: promptPayload.localTransition === true,
       });
     }
   } else {
@@ -429,8 +481,8 @@ export function updatePlayerInteractions({
     setEdgePrompt(visiblePromptPayload);
   }
   if (autoTransitionStarted) {
-    lastInteractRef.current = keys.interact || touch.interact;
-    lastExamineRef.current = keys.examine || touch.fieldAction;
+    lastInteractRef.current = interactHeld;
+    lastExamineRef.current = examineHeld;
     lastCameraRef.current = keys.camera;
     return;
   }
@@ -540,25 +592,6 @@ export function updatePlayerInteractions({
       currentState.reportConstraintBlockedTool?.(currentState.activeToolId);
       return true;
     }
-    if (currentState.activeToolId === 'snare') {
-      const animation = collectionAnimationForTool('snare', specimen);
-      const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
-      if (animation.align && target) {
-        const dx = target.x - position.x;
-        const dz = target.z - position.z;
-        if (Math.hypot(dx, dz) > 0.08) {
-          const now = performance.now() / 1000;
-          stateRef.current.collectionFaceMotion = {
-            targetYaw: Math.atan2(dx, dz),
-            startedAt: now,
-            until: now + Math.min(0.58, Math.max(0.24, (animation.duration || 1) * 0.18)),
-          };
-        }
-      }
-      startAction(animation.clip, animation.duration, { lockMovement: animation.lockMovement });
-      collectNearby();
-      return true;
-    }
     const alreadyCollected = currentState.collectedSpecimenIds?.includes(specimen.id) || false;
     const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
     const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
@@ -606,16 +639,16 @@ export function updatePlayerInteractions({
     return true;
   };
 
-  // Enter is the contextual field-action command. Hands observe or collect;
-  // equipped tools act on the attended subject. With no nearby subject it
-  // enters the opt-in observation lens, where the player may click/tap any
-  // semantically tagged piece of scenery.
-  const examinePressed = keys.examine || touch.fieldAction;
+  // The field action. Hands observe or collect; equipped tools act on the
+  // attended subject. With no nearby subject it enters the opt-in observation
+  // lens, where the player may click/tap any semantically tagged piece of
+  // scenery.
+  const examinePressed = examineHeld;
   if (constraintLocksInteractions && examinePressed && !lastExamineRef.current) {
     useThreeGameStore.getState().reportConstraintBlockedAction?.();
   } else if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
     const currentState = useThreeGameStore.getState();
-    if (currentState.contextPrompt?.keyLabel === '⏎' || currentState.contextPrompt?.keyLabel === 'Enter') {
+    if (currentState.contextPrompt?.keyLabel === 'E') {
       currentState.acknowledgeContextPrompt?.(currentState.contextPrompt.source);
     }
     const fieldAction = currentState.fieldAction;
@@ -668,11 +701,31 @@ export function updatePlayerInteractions({
   }
   lastExamineRef.current = examinePressed;
 
-  if ((keys.interact || touch.interact) && !lastInteractRef.current) {
+  // F swings the tool in hand (playerInputState pulses the swing itself). When
+  // it is aimed at the attended subject, tell that subject too, so a struck
+  // plant still flinches while E is busy offering Examine.
+  const useToolPressed = Boolean(keys.useTool);
+  if (useToolPressed && !stateRef.current.lastUseTool && allowSpecimenInteractions && !constraintLocksInteractions) {
+    const currentState = useThreeGameStore.getState();
+    const target = currentState.fieldAction?.target;
+    const toolId = currentState.activeToolId;
+    if (target && TOOL_ACTIONS[toolId]) {
+      emitPropEvent('field-action-attempt', {
+        actionId: `${toolId}:${target.id}`,
+        tool: toolId,
+        target,
+        position: { x: position.x, y: position.y, z: position.z },
+        facing: { x: facing.x, y: 0, z: facing.z },
+      });
+    }
+  }
+  stateRef.current.lastUseTool = useToolPressed;
+
+  if (interactHeld && !lastInteractRef.current) {
     const currentState = useThreeGameStore.getState();
     if (constraintLocksInteractions) {
       currentState.reportConstraintBlockedAction?.();
-      lastInteractRef.current = keys.interact || touch.interact;
+      lastInteractRef.current = interactHeld;
       lastCameraRef.current = keys.camera;
       return;
     }
@@ -752,11 +805,6 @@ export function updatePlayerInteractions({
           }
           currentState.consumeForageable?.(forageable);
         }
-      } else if (currentState.carryPrompt.mode === 'check-snare') {
-        if (!stateRef.current.action) {
-          startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
-        }
-        currentState.checkSnareTrap?.(currentState.carryPrompt.id);
       } else if (currentState.carryPrompt.mode === SYMS_FIELD_CASE_PROMPT_MODE) {
         emitPropEvent('toggle-syms-field-case', { id: currentState.carryPrompt.id });
       } else if (currentState.carryPrompt.mode === 'pickup') {
@@ -772,34 +820,19 @@ export function updatePlayerInteractions({
       }
     } else if (specimen && currentState.collectedSpecimenActorIds?.includes(specimen.instanceId || specimen.id)) {
       setNearbySpecimen(null);
-    } else if (!specimen
-      && currentState.edgePrompt?.visible !== false
-      && currentState.edgePrompt?.requiresHold !== true
-      && currentState.edgePrompt?.kind === 'open'
-      && currentState.edgePrompt.toRegionId
-      && !stateRef.current.action) {
-      beginZoneTransition(currentState.edgePrompt.toRegionId, {
-        entryEdge: currentState.edgePrompt.entryEdge || oppositeEdge(currentState.edgePrompt.edge),
-        note: currentState.edgePrompt.description,
-        mode: currentState.edgePrompt.localTransition ? 'threshold' : 'island',
-        localTransition: currentState.edgePrompt.localTransition === true,
-      });
     } else if (currentState.edgePrompt?.kind === 'blocked' && !specimen) {
       setEdgePrompt({
         ...currentState.edgePrompt,
         message: currentState.edgePrompt.description,
       });
     } else if (allowSpecimenInteractions && specimen) {
-      // Match resolveFieldAction: bare hands lead with Examine on an
-      // unstudied species; an equipped tool takes it outright.
-      if (currentState.activeToolId === 'hands' && !currentState.examinedTypeIds?.includes(specimen.id)) {
+      // Match resolveFieldAction: an unstudied species leads with Examine
+      // whatever is in hand, except the sketchbook, which studies by drawing.
+      if (currentState.activeToolId !== 'sketch' && !currentState.examinedTypeIds?.includes(specimen.id)) {
         if (!currentState.examineSession) openExamine(specimen.instanceId || specimen.id);
       } else {
         startSpecimenCollection(currentState, specimen);
       }
-    } else if (currentState.activeToolId === 'snare' && !stateRef.current.action) {
-      startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
-      currentState.placeSnareTrap?.({ position, facing });
     }
   }
   if (keys.camera && !lastCameraRef.current) cycleViewMode();
@@ -826,6 +859,6 @@ export function updatePlayerInteractions({
     lastToolHotkeys[button] = pressed;
   }
   stateRef.current.lastToolHotkeys = lastToolHotkeys;
-  lastInteractRef.current = keys.interact || touch.interact;
+  lastInteractRef.current = interactHeld;
   lastCameraRef.current = keys.camera;
 }

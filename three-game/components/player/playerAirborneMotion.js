@@ -149,12 +149,10 @@ export function updatePlayerJumpInputAndGravity({
   }
   if ((jumpJustPressed || now <= jumpBufferedUntil.current) && canStartJumpInput && !swimState.current.active) {
     const launchRunning = moving || running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.05;
-    if (launchRunning) {
-      launchJump(true, 0);
-    } else {
-      pendingStandingJump.current = { active: true, startedAt: now };
-      jumpCharge.current = { active: false, startedAt: now, wasRunning: false, amount: 0 };
-    }
+    // Both jumps leave the ground on the press. The standing jump used to wait
+    // for the key to come up (so a hold could charge it), which made a tap
+    // feel late next to the running jump.
+    launchJump(launchRunning, 0);
   }
 
   stateRef.current.jumpCharging = false;

@@ -708,7 +708,9 @@ async function runAssessmentScenario(browser, baseUrl) {
       UI_STEP_TIMEOUT_MS,
     );
     await waitForHarnessState(page, state => state.assessmentTranscriptCount === 1, UI_STEP_TIMEOUT_MS, 'player narrator transcript capture');
-    await page.getByTestId('end-game-button').click({ timeout: UI_STEP_TIMEOUT_MS });
+    // Ending the expedition lives in the pause menu.
+    await page.getByRole('button', { name: 'Pause menu' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+    await page.getByTestId('pause-end-game').click({ timeout: UI_STEP_TIMEOUT_MS });
     const endGameConfirmation = page.getByTestId('end-game-confirmation-modal');
     await endGameConfirmation.waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
     await endGameConfirmation.getByRole('button', { name: /^End game$/i }).click({

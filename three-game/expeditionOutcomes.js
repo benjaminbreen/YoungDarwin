@@ -5,7 +5,6 @@ export const INCAPACITATION_RECOVERY_ZONE_ID = 'BEAGLE_CABIN';
 export const INCAPACITATION_RECOVERY_HOUR = 7;
 export const INCAPACITATION_RECOVERY_HEALTH = 60;
 export const INCAPACITATION_RECOVERY_FATIGUE = 12;
-export const INCAPACITATION_CURIOSITY_COST = 5;
 
 // The survey of Charles Island runs three field days; the Beagle weighs anchor
 // at first light after the last. Nothing else in the game bounds the clock, so
@@ -82,7 +81,6 @@ export function expeditionOutcomeCause({ type, source, locationName } = {}) {
     return `Fatal injuries sustained at ${place}.`;
   }
   if (source === 'cactus') return `Accumulated injuries and exposure among the cactus at ${place}.`;
-  if (source === 'snare') return `Exhaustion and injuries sustained in the field at ${place}.`;
   if (source === 'hunger') return `Hunger and exhaustion in the field at ${place}. The provision bag was empty.`;
   return `Exhaustion and accumulated injuries at ${place}.`;
 }

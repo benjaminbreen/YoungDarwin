@@ -10,7 +10,7 @@ import {
   setTouchControl,
   triggerToolUse,
 } from '../input/touchControls';
-import { isGameplayInputBlocked, setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
+import { setBlockingUiMode, setExpeditionPaused, setTypingMode } from '../input/typingMode';
 import { getFieldDilemma, getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { EXPEDITION_DAYS, expeditionDayLabel, formatExpeditionDate, isFinalExpeditionDay } from '../expeditionOutcomes';
 import { isEndGameNarratorCommand } from '../finalAssessment';
@@ -41,7 +41,9 @@ import {
   controlsSections,
   nextControlHintPhase,
 } from './controlsReference';
-import { useDismissableOverlay } from './useDismissableOverlay';
+import { isOverlayOpen, useDismissableOverlay } from './useDismissableOverlay';
+import { isTextEntryTarget } from '../input/gameKeys';
+import { GestureWheel } from './GestureWheel';
 import { animalAwarenessValue, animalRisk } from './animalVitals';
 import {
   getDirective,
@@ -60,6 +62,7 @@ import {
   ButterflyIcon,
   NoteIcon,
   OpenBookIcon,
+  LibraryIcon,
   MapIcon,
   SoundIcon,
   LensIcon,
@@ -1953,10 +1956,7 @@ function MinimapBody({
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const transitionActive = useThreeGameStore(state => Boolean(state.transition));
-  const interiorExitBlocked = useThreeGameStore(state => Boolean(
-    state.activeConstraint?.movementLock
-    || state.activeConstraint?.type === 'snare_immobilized'
-  ));
+  const interiorExitBlocked = useThreeGameStore(state => Boolean(state.activeConstraint?.movementLock));
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
   const interiorExit = interior ? getInteriorTransitions(currentZoneId)[0] || null : null;
@@ -2745,18 +2745,19 @@ function useSymsStatus() {
   const nearbyNpcId = useThreeGameStore(state => state.nearbyNpcEncounter?.npcId || null);
   return useMemo(() => {
     if (nearbyNpcId === 'syms_covington') {
-      return { tone: 'nearby', label: 'Nearby', detail: 'The collecting case is ready.' };
+      return { tone: 'nearby', present: true, label: 'Beside you', detail: 'The collecting case is ready.' };
     }
     if (symsZoneId === currentZoneId) {
       return symsDirective === SYMS_DIRECTIVES.FOLLOW
-        ? { tone: 'region', label: 'Following', detail: 'Keeping pace behind you.' }
-        : { tone: 'region', label: 'In region', detail: 'Working somewhere close.' };
+        ? { tone: 'region', present: true, label: 'Following you', detail: 'Keeping pace behind you.' }
+        : { tone: 'region', present: true, label: 'Working nearby', detail: 'Working somewhere close.' };
     }
     // Labels sit in a 15.5rem column, so the place name goes in the tooltip
     // rather than truncating in the row.
     const where = getIslandMapLocation(symsZoneId)?.name;
     return {
       tone: 'away',
+      present: false,
       label: 'Away',
       detail: where ? `At ${where}. Out of earshot.` : 'Elsewhere on the island.',
     };
@@ -2917,7 +2918,6 @@ function PolishedFieldRail({
   onOpenMap,
   onOpenJournal,
   onOpenLibrary,
-  onRequestEndGame,
   onOpenPause,
   audioEnabled = true,
   onAudioEnabledChange,
@@ -2927,9 +2927,6 @@ function PolishedFieldRail({
   const [mapCollapsed, setMapCollapsed] = useState(false);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const journalCount = useThreeGameStore(state => state.journal.length);
-  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
-  const supplies = useThreeGameStore(state => state.supplies);
-  const restBusy = useThreeGameStore(state => Boolean(state.restSession));
   const casePulse = useCaseAddedPulse();
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
@@ -2939,8 +2936,8 @@ function PolishedFieldRail({
     ? Math.min(100, (zoneProgress.recorded / zoneProgress.total) * 100)
     : 0;
 
-  const compactAction = 'group inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border border-expedition-brass/40 bg-black/14 px-1.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.09em] text-expedition-faded transition duration-200 hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
   const railIconButton = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border border-expedition-brass/45 bg-black/12 text-expedition-gold/75 transition hover:border-expedition-gold/75 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
+  const railBookButton = 'flex flex-col items-center justify-center gap-1 rounded-sm border border-expedition-brass/40 bg-black/14 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-expedition-faded transition hover:border-expedition-gold/70 hover:bg-expedition-gold/8 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60';
 
   // Column width is set by the chart: narrow enough that a square map fills it
   // edge to edge, since a wider one would either stretch it or sit it on a mat.
@@ -3005,79 +3002,62 @@ function PolishedFieldRail({
 
       <ExpeditionPanel variant="quiet" innerClassName="px-2.5 pb-2.5 pt-2.5">
         <div className="flex items-baseline justify-between gap-2 whitespace-nowrap">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-expedition-gold">Field record</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-expedition-gold">Field record</span>
           <span className="text-[13px] font-semibold text-expedition-parchment">
-            <span className="text-expedition-goldbright">{zoneProgress.recorded}</span> / {zoneProgress.total} recorded
+            <span className="text-expedition-goldbright">{zoneProgress.recorded}</span> / {zoneProgress.total} here
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2">
-          <div className="h-1.5 overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
-            <div className="h-full rounded-full bg-gradient-to-r from-expedition-brass to-expedition-goldbright transition-[width] duration-700" style={{ width: `${Math.max(progress, zoneProgress.recorded ? 4 : 0)}%` }} />
-          </div>
-          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-expedition-faded">{journalCount} {journalCount === 1 ? 'note' : 'notes'}</span>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full border border-expedition-gold/25 bg-black/45">
+          <div className="h-full rounded-full bg-gradient-to-r from-expedition-brass to-expedition-goldbright transition-[width] duration-700" style={{ width: `${Math.max(progress, zoneProgress.recorded ? 4 : 0)}%` }} />
         </div>
 
-        <div className="mt-2 flex items-center gap-1.5 border-t border-expedition-brass/30 pt-2">
-          {!interior ? (
-            <>
-              <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">Syms</div>
-                <div className="mt-0.5 flex items-center gap-1 text-[8.5px] uppercase tracking-[0.08em] text-expedition-faded">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${SYMS_STATUS_DOT[syms.tone]}`} />
-                  <span className="min-w-0 truncate" title={syms.detail}>{syms.label}</span>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">{interior.label}</div>
-              <div className="mt-0.5 text-[8.5px] uppercase tracking-[0.08em] text-expedition-faded">Field station</div>
-            </div>
-          )}
-          <button type="button" onClick={onOpenInventory} className={`${railIconButton} relative`} title="Open specimens" aria-label="Open specimens">
+        {/* The three books of the expedition, each labelled. One row, one
+            place: the case, the notebook, and the library. */}
+        <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+          <button type="button" onClick={onOpenInventory} className={`${railBookButton} relative`} title="Specimen case (Cmd/Ctrl+I)">
             <CasePulseGlow pulse={casePulse} />
             <span key={casePulse ? `case-shake-${casePulse.key}` : 'case-idle'} className={casePulse ? 'animate-case-shake motion-reduce:animate-none' : ''}>
-              <ButterflyIcon className="h-4 w-4" />
+              <ButterflyIcon className="h-[18px] w-[18px]" />
             </span>
+            <span>Case</span>
           </button>
-          <button type="button" onClick={onOpenJournal} className={railIconButton} title="Open field notebook" aria-label="Open field notebook">
-            <OpenBookIcon className="h-4 w-4" />
+          <button type="button" onClick={onOpenJournal} className={`${railBookButton} relative`} title="Field notebook">
+            <OpenBookIcon className="h-[18px] w-[18px]" />
+            <span>Journal</span>
+            {journalCount > 0 && (
+              <span className="absolute right-1 top-1 min-w-[1rem] rounded-full bg-expedition-gold/20 px-1 text-[9px] font-semibold leading-[1rem] text-expedition-goldbright">
+                {journalCount}
+              </span>
+            )}
           </button>
-          <button type="button" onClick={onOpenLibrary} className={railIconButton} title="Open Darwin's library" aria-label="Open Darwin's library">
-            <span className="text-[10px] font-semibold">LIB</span>
+          <button type="button" onClick={onOpenLibrary} className={railBookButton} title="Darwin’s library">
+            <LibraryIcon className="h-[18px] w-[18px]" />
+            <span>Library</span>
           </button>
         </div>
 
-        <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-expedition-brass/30 pt-2">
-          <button
-            type="button"
-            onClick={() => setTouchControl('rest', true)}
-            disabled={restBusy}
-            title={restCostHint(timeOfDay, supplies)}
-            className={`${compactAction} disabled:opacity-50`}
-          >
-            <FatigueIcon className="h-3.5 w-3.5 shrink-0 text-expedition-gold/85" />
-            <span>Rest</span>
-            {/* The cost is the point now that the survey has an end date. */}
-            <span className="shrink-0 rounded-[2px] border border-expedition-brass/50 px-1 text-[8px] tracking-normal text-expedition-gold/85">2h</span>
-          </button>
-          <button
-            type="button"
-            onClick={onRequestEndGame}
-            className={`${compactAction} hover:border-rose-400/80 hover:bg-rose-950/38 hover:text-rose-200 focus-visible:ring-rose-300/70`}
-            title="End the expedition"
-            data-testid="end-game-button"
-          >
-            <svg viewBox="0 0 18 18" aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-expedition-gold/75 transition group-hover:text-rose-300" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 2.5v13M4 3.5h8l-1.5 2L12 8H4" />
-            </svg>
-            <span className="truncate">End game</span>
-          </button>
-        </div>
+        {/* Syms appears only when there is something to say about him: on a
+            landing where he is working. Indoors the row names the station. */}
+        {interior ? (
+          <div className="mt-2.5 border-t border-expedition-brass/30 pt-2">
+            <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">{interior.label}</div>
+            <div className="mt-0.5 text-[10px] uppercase tracking-[0.08em] text-expedition-faded">Field station</div>
+          </div>
+        ) : syms.present && (
+          <div className="mt-2.5 flex items-center gap-2 border-t border-expedition-brass/30 pt-2">
+            <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-expedition-brass/70">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/portraits/syms_covington.jpg" alt="Syms Covington" className="h-full w-full object-cover sepia-[0.35]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-semibold leading-tight text-expedition-parchment">Syms Covington</div>
+              <div className="mt-0.5 flex items-center gap-1 text-[10px] tracking-[0.02em] text-expedition-faded">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${SYMS_STATUS_DOT[syms.tone]}`} />
+                <span className="min-w-0 truncate" title={syms.detail}>{syms.label}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </ExpeditionPanel>
 
       {compassOpen && (
@@ -3091,26 +3071,21 @@ function PolishedFieldRail({
 
 function EndGameConfirmationModal({ open, onCancel, onConfirm }) {
   const cancelRef = useRef(null);
+  // Autofocus is off so the safe choice, Cancel, takes focus instead of the
+  // first control.
+  const panelRef = useDismissableOverlay(open, onCancel, { autoFocus: false });
 
   useEffect(() => {
     if (!open) return undefined;
     const focusTimer = window.setTimeout(() => cancelRef.current?.focus({ preventScroll: true }), 80);
-    const onKeyDown = event => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [onCancel, open]);
+    return () => window.clearTimeout(focusTimer);
+  }, [open]);
 
   if (!open) return null;
 
   return (
     <div
+      ref={panelRef}
       className="pointer-events-auto fixed inset-0 z-[75] flex items-center justify-center bg-[#050b14]/76 p-4 backdrop-blur-[5px]"
       role="alertdialog"
       aria-modal="true"
@@ -3181,6 +3156,15 @@ function PauseMenu({
   const panelRef = useDismissableOverlay(open, onResume);
   const [showQuality, setShowQuality] = useState(false);
   const [showComfort, setShowComfort] = useState(false);
+  const supplies = useThreeGameStore(state => state.supplies);
+  const restBusy = useThreeGameStore(state => Boolean(state.restSession));
+  const animalMode = useThreeGameStore(state => getPlayableMode(state.playableModeId).kind === 'animal');
+  // Rest is the same path as the R key. It fires a beat after the menu closes,
+  // because the controller ignores every input while a menu is open.
+  const restFromMenu = useCallback(() => {
+    onResume();
+    window.setTimeout(() => setTouchControl('rest', true), 60);
+  }, [onResume]);
 
   useEffect(() => {
     if (!open) {
@@ -3229,6 +3213,24 @@ function PauseMenu({
               <span className={PAUSE_ROW_LABEL}>Resume expedition</span>
               <span className={PAUSE_ROW_VALUE}>Esc</span>
             </button>
+
+            {!animalMode && (
+              <button
+                type="button"
+                onClick={restFromMenu}
+                disabled={restBusy}
+                className={`${PAUSE_ROW} disabled:opacity-50`}
+                data-testid="pause-rest"
+              >
+                <span className={PAUSE_ROW_LABEL}>
+                  Halt and rest two hours
+                  <span className="mt-0.5 block text-[11px] font-normal normal-case italic tracking-normal text-expedition-faded">
+                    {restCostHint(supplies)}
+                  </span>
+                </span>
+                <span className={PAUSE_ROW_VALUE}>R</span>
+              </button>
+            )}
 
             <button type="button" onClick={onOpenControls} className={PAUSE_ROW}>
               <span className={PAUSE_ROW_LABEL}>Controls</span>
@@ -3332,14 +3334,14 @@ function PauseMenu({
 // Prompts + touch controls
 
 const CAMERA_MODE_LABELS = {
-  shoulder: 'Shoulder View',
-  hero: 'Hero View',
+  shoulder: 'Follow Camera',
+  hero: 'Follow Camera',
   first: 'First Person',
   top: 'Overhead Chart',
 };
 const CAMERA_MODE_SHORT_LABELS = {
-  shoulder: 'Shoulder',
-  hero: 'Hero',
+  shoulder: 'Follow',
+  hero: 'Follow',
   first: 'First person',
   top: 'Overhead',
 };
@@ -3408,7 +3410,7 @@ function controlHintContent(playableModeId, phase) {
   if (phase === 'studySubject') {
     return (
       <span>
-        Press <ControlHintKey>Enter</ControlHintKey> to examine this subject. After you examine it, you can collect a sample.
+        Press <ControlHintKey>E</ControlHintKey> to examine this subject. Once you have examined it, you can collect it.
       </span>
     );
   }
@@ -3451,12 +3453,12 @@ function controlHintContent(playableModeId, phase) {
     );
   }
   if (phase === 'fieldAction') {
-    return <span>Press <ControlHintKey>Enter</ControlHintKey> to observe or act on a subject.</span>;
+    return <span>Press <ControlHintKey>E</ControlHintKey> to examine whatever is in front of you.</span>;
   }
   if (phase === 'worldAction') {
     return (
       <span>
-        Press <ControlHintKey>1–6</ControlHintKey> to choose a tool. Press <ControlHintKey>E</ControlHintKey> to speak, carry, or travel.
+        Press <ControlHintKey>1–6</ControlHintKey> to take a tool in hand and <ControlHintKey>F</ControlHintKey> to use it. Hold <ControlHintKey>G</ControlHintKey> for gestures.
       </span>
     );
   }
@@ -3594,8 +3596,8 @@ function PolishedControlHint({
       if (MOVEMENT_HINT_MOVE_KEYS.has(event.code)) patch.moved = true;
       if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') patch.ran = true;
       if (event.code === 'Space') patch.jumped = true;
-      if (event.code === 'Enter' || event.code === 'NumpadEnter') patch.fieldAction = true;
-      if (event.code === 'KeyE' || /^Digit[1-6]$/.test(event.code)) patch.worldAction = true;
+      if (event.code === 'KeyE' || event.code === 'Enter' || event.code === 'NumpadEnter') patch.fieldAction = true;
+      if (event.code === 'KeyF' || event.code === 'KeyG' || /^Digit[1-6]$/.test(event.code)) patch.worldAction = true;
       if ((playableModeId === 'finch' || playableModeId === 'tortoise') && /^Digit[1-3]$/.test(event.code)) {
         patch.animalAction = true;
       }
@@ -3745,7 +3747,7 @@ function RouteEdgeBanner({ edgePrompt, toZone, onTravel }) {
           className="pointer-events-auto inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-expedition-gold/45 bg-expedition-gold/10 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-expedition-goldbright transition hover:bg-expedition-gold/20"
         >
           <PromptKey active>E</PromptKey>
-          {requiresHold ? 'Hold return' : 'Travel'}
+          {requiresHold ? 'Hold to return' : 'Hold to travel'}
         </button>
       </div>
       <div className="absolute inset-x-0 bottom-0 h-[2px] bg-black/35">
@@ -3854,7 +3856,7 @@ const HINT_TEXT = {
   [HINT_TAKE]: 'E takes what is already loose.',
   [HINT_NPC]: 'You speak in your own words. What you ask shapes the reply.',
   [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
-  [HINT_EXAMINE]: 'Enter examines a creature. What you observe and write is what Henslow judges at the end.',
+  [HINT_EXAMINE]: 'E examines a creature. What you observe and write is what Henslow judges at the end.',
 };
 
 function promptActionText(value) {
@@ -4155,21 +4157,6 @@ function SpecimenInteractionCard({
     }
   }, [activeToolId, examined, setActiveTool, visible]);
 
-  useEffect(() => {
-    if (!visible || !canCollect) return undefined;
-    const onKeyDown = event => {
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
-      if (event.key !== 'Tab') return;
-      if (isGameplayInputBlocked()) return;
-      event.preventDefault();
-      event.stopPropagation();
-      cycleMethod(event.shiftKey ? -1 : 1);
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [canCollect, cycleMethod, visible]);
-
   return (
     <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
       <section
@@ -4192,7 +4179,7 @@ function SpecimenInteractionCard({
                 onClick={collectWithCurrentMethod}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
               >
-                <PromptKey active>Enter</PromptKey>
+                <PromptKey active>E</PromptKey>
                 <span className="text-[14px] font-semibold leading-none text-expedition-parchment">Collect</span>
               </button>
             ) : (
@@ -4203,7 +4190,7 @@ function SpecimenInteractionCard({
                   : pulseTouchControl('fieldAction')}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
               >
-                <PromptKey active>Enter</PromptKey>
+                <PromptKey active>E</PromptKey>
                 <span className="text-[14px] font-semibold leading-none text-expedition-parchment">
                   {fieldAction?.shortLabel || 'Examine'}
                 </span>
@@ -4212,16 +4199,7 @@ function SpecimenInteractionCard({
           </div>
 
           {canCollect && (
-            <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-expedition-brass/25 pt-2">
-              <button
-                type="button"
-                onClick={() => cycleMethod(1)}
-                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[5px] border border-transparent py-0.5 pr-1 text-[11.5px] leading-none text-expedition-faded transition hover:border-expedition-brass/35 hover:bg-black/14 hover:text-expedition-gold focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
-              >
-                <PromptKey>Tab</PromptKey>
-                <span>Method</span>
-              </button>
-
+            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-expedition-brass/25 pt-2">
               <button
                 type="button"
                 onClick={() => cycleMethod(1)}
@@ -4320,7 +4298,7 @@ function InteractionPrompt() {
     return {
       id: fieldAction.id,
       label: fieldAction.label,
-      keyLabel: 'Enter',
+      keyLabel: 'E',
       hintId: fieldAction.kind === 'observe' && !seenHints.includes(HINT_STUDY) ? HINT_STUDY : null,
       priority: fieldAction.kind === 'observe'
         ? CONTEXT_PROMPT_PRIORITY.fieldObserve
@@ -4528,7 +4506,7 @@ function InteractionPrompt() {
     return (
       <CompactPrompt visible={contextPromptVisible} testId="context-action-prompt">
         <CompactAction
-          keyLabel={renderedContextPrompt.keyLabel || 'V'}
+          keyLabel={renderedContextPrompt.keyLabel || 'Q'}
           primary
           // One-shot: consumeTouchControls clears `climb` each frame after
           // playerInputState reads it.
@@ -5076,7 +5054,11 @@ function MobileTouchControls() {
 function CameraCycleButton({ className }) {
   const viewMode = useThreeGameStore(state => state.viewMode);
   const cycleViewMode = useThreeGameStore(state => state.cycleViewMode);
-  return <button type="button" onClick={cycleViewMode} className={className}>{viewMode}</button>;
+  return (
+    <button type="button" onClick={cycleViewMode} className={className} aria-label={`Camera: ${CAMERA_MODE_LABELS[viewMode] || viewMode}. Press V to switch.`}>
+      {CAMERA_MODE_SHORT_LABELS[viewMode] || viewMode}
+    </button>
+  );
 }
 
 // Staggered reveal of the interface after the landing.
@@ -5163,9 +5145,17 @@ export function ThreeHUD({
     void beginFinalAssessment();
   }, [beginFinalAssessment]);
   const closePause = useCallback(() => setPauseOpen(false), []);
+  // Controls opened from Pause hands back to Pause, so Esc steps out one level.
+  const controlsFromPauseRef = useRef(false);
   const openControlsFromPause = useCallback(() => {
+    controlsFromPauseRef.current = true;
     setPauseOpen(false);
     setControlsOpen(true);
+  }, []);
+  const closeControls = useCallback(() => {
+    setControlsOpen(false);
+    if (controlsFromPauseRef.current) setPauseOpen(true);
+    controlsFromPauseRef.current = false;
   }, []);
   const requestEndGameFromPause = useCallback(() => {
     setPauseOpen(false);
@@ -5183,31 +5173,27 @@ export function ThreeHUD({
   useEffect(() => {
     if (!entranceActive) return undefined;
     const onKeyDown = event => {
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat) return;
+      if (isTextEntryTarget(event.target) || event.repeat) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       // '?' is Shift+/ on most layouts; F1 is the conventional alternative.
+      // It toggles the controls card, but never opens it over another panel.
       if (event.key === '?' || event.code === 'F1') {
+        if (isOverlayOpen() && !controlsOpen) return;
         event.preventDefault();
-        setPauseOpen(false);
+        controlsFromPauseRef.current = false;
         setControlsOpen(value => !value);
         return;
       }
-      if (event.key !== 'Escape') return;
-      if (controlsOpen) return; // its own overlay hook closes it
-      if (pauseOpen) {
-        event.preventDefault();
-        setPauseOpen(false);
-        return;
-      }
-      if (otherOverlayOpen) return; // that surface owns Escape
+      // The overlay stack closes the topmost open layer itself; Escape only
+      // reaches here when nothing is open, and then it pauses.
+      if (event.key !== 'Escape' || isOverlayOpen() || otherOverlayOpen) return;
       event.preventDefault();
       setPauseOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [controlsOpen, entranceActive, otherOverlayOpen, pauseOpen]);
+  }, [controlsOpen, entranceActive, otherOverlayOpen]);
 
   useEffect(() => {
     // Stages 1-3 bypass React entirely: the attribute drives the CSS in
@@ -5267,8 +5253,9 @@ export function ThreeHUD({
   useEffect(() => {
     if (!entranceActive) return undefined;
     const onKeyDown = event => {
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (isTextEntryTarget(event.target)) return;
+      // Nothing here opens over another panel; Cmd+I may still close the case.
+      if (isOverlayOpen() && !inventoryOpen) return;
       if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && /^Digit[1-6]$/.test(event.code)) {
         const index = Number(event.code.replace('Digit', '')) - 1;
         // Read the order at keypress time so a reorder doesn't re-subscribe the
@@ -5293,9 +5280,8 @@ export function ThreeHUD({
   useEffect(() => {
     if (!entranceActive) return undefined;
     const onKeyDown = event => {
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.code !== 'KeyH') return;
+      if (isTextEntryTarget(event.target) || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.code !== 'KeyH' || isOverlayOpen()) return;
       event.preventDefault();
       event.stopPropagation();
       setHudHidden(value => !value);
@@ -5307,12 +5293,14 @@ export function ThreeHUD({
     setBlockingUiMode(blockingUiOpen);
     return () => setBlockingUiMode(false);
   }, [blockingUiOpen]);
-  // Only the pause menu stops the expedition clock; the chart, case, and journal
-  // deliberately let time keep running.
+  // The pause menu, and the controls card and end-game question reached from
+  // it, stop the expedition clock; the chart, case, and journal deliberately
+  // let time keep running.
+  const clockPaused = pauseOpen || controlsOpen || endGameConfirmationOpen;
   useEffect(() => {
-    setExpeditionPaused(pauseOpen);
+    setExpeditionPaused(clockPaused);
     return () => setExpeditionPaused(false);
-  }, [pauseOpen]);
+  }, [clockPaused]);
   useEffect(() => {
     if (!assessmentOpen) return;
     setEndGameConfirmationOpen(false);
@@ -5409,7 +5397,6 @@ export function ThreeHUD({
             onOpenMap={openMapModal}
             onOpenJournal={openJournalPanel}
             onOpenLibrary={() => openLibrary?.({ drawerOpen: true })}
-            onRequestEndGame={() => setEndGameConfirmationOpen(true)}
             onOpenPause={() => setPauseOpen(true)}
             audioEnabled={audioEnabled}
             onAudioEnabledChange={onAudioEnabledChange}
@@ -5438,11 +5425,8 @@ export function ThreeHUD({
       <ShipDutiesPrompt />
       <RestCard />
 
-      <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-expedition-goldbright/40 shadow-[0_0_10px_rgba(227,197,133,0.25)]">
-        <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-expedition-goldbright/70" />
-      </div>
-
       <AimCrosshair />
+      <GestureWheel />
 
       <MobileNarrativeDrawer
         open={mobileNarrativeOpen}
@@ -5504,7 +5488,7 @@ export function ThreeHUD({
 
       <ControlsOverlay
         open={controlsOpen}
-        onClose={() => setControlsOpen(false)}
+        onClose={closeControls}
         polished
         playableModeId={playableModeId}
       />

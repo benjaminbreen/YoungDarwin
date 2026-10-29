@@ -5,17 +5,17 @@
 // finds. The same data now backs that narrator response, the `?`/F1 overlay, and
 // the launch menu's Controls screen.
 //
-// Keep in sync with KEYBOARD_MAP in three-game/ThreeDarwinGame.jsx.
+// Keep in sync with KEYBOARD_MAP in three-game/input/gameKeys.js.
 
 const DEV_TOOLS_VISIBLE = process.env.NODE_ENV !== 'production';
 export const CONTROL_HINT_INACTIVITY_MS = 20000;
 
 const CAMERA_CONTROLS = [
-  'Mouse drag: rotate camera',
+  'Mouse drag: look around (middle-drag pans)',
   'Scroll: zoom',
-  'Z / X: rotate left / right',
-  'Tab: recentre the camera behind your character',
-  'M: cycle camera mode',
+  'Z / X: turn the camera left / right',
+  'Tab: put the camera back behind you',
+  'V: switch between the follow camera and first person',
 ];
 
 const INTERFACE_CONTROLS = polished => [
@@ -41,7 +41,7 @@ function animalControlsSections(modeId, polished) {
       '1 / Eat button: eat',
       '2 / Sleep button: sleep',
       '3 / Defecate button: defecate',
-      'J: repeat the selected action',
+      'F: repeat the selected action',
       ...(finch ? ['Eat / sleep: land before using these actions'] : []),
     ]],
     ['Interface', INTERFACE_CONTROLS(polished)],
@@ -73,39 +73,23 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'WASD / arrows: move',
       'Shift: run',
       'Space: jump',
-      'C: crouch or running slide',
-      'B: dodge roll',
-      'Q or V: climb / mantle / descend',
+      'C: crouch (while running: slide)',
+      'Q: climb up or down a wall or boulder',
     ]],
     ['Camera', CAMERA_CONTROLS],
     ['Fieldwork', [
-      'Enter: use the equipped field tool on the attended subject; with no subject, enter observation mode',
-      'Tab: cycle collection method while the collection card is open',
-      'E: speak, carry, open, or travel',
-      'J: use the equipped tool without a selected subject',
-      '1-6: equip toolbar slot',
-      'F: rifle aim when shotgun is equipped',
-      'Left click while aiming: fire rifle',
+      'E or Enter: the action on screen — examine, collect, speak, pick up, read',
+      'Hold E at a region’s edge: travel on',
+      '1-6: take a tool in hand',
+      'F: use the tool in hand (swing the net, fire, sketch)',
+      'Right mouse (hold): aim the shotgun; left click fires',
+      'R: halt and rest — two hours, one provision',
+      'Hold G: gestures — sit, point, look around, kneel, write, pray',
     ]],
     ['Interface', [
       ...INTERFACE_CONTROLS(polished),
       'Cmd/Ctrl+I: open the specimen case',
-      ...(polished ? ['4 then J: equip and swing the geological hammer'] : []),
     ]],
-    ['Direct Actions', [
-      polished ? null : 'H: hammer',
-      'N: net',
-      'G: gather',
-      'Y: write',
-      'I: kneel inspect',
-      'L: look around',
-      'O: point',
-      'P: pray',
-      'T: trip',
-      'U: teeter',
-      'K: sit',
-      'R: halt and rest — two hours, one ration, one flask',
-    ].filter(Boolean)],
   ];
 
   if (includeNarratorCommands) {
@@ -117,7 +101,6 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       '/use <tool> on <target>: use a tool on something',
       'survey site / look around: record the habitat',
       'document <specimen> / sketch <specimen>: make field notes',
-      'check traps / abandon trap: manage traps',
       'rest / sleep / make camp: rest',
       'journal / field book / open journal: open the journal',
       'end game: conclude the expedition and open Henslow’s assessment',
@@ -129,9 +112,11 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
   if (DEV_TOOLS_VISIBLE) {
     sections.push(['Dev / Debug', [
       '`: performance panel',
-      '0: asset browser',
-      '7: animal animation lab',
-      '8: Darwin animation lab',
+      'Alt+0: asset browser (Alt+Shift+0: audio debug)',
+      'Alt+6: map geography panel',
+      'Alt+7: animal animation lab',
+      'Alt+8: Darwin animation lab',
+      'Alt+9: ecology overlay',
       'Shift+9: toggle Darwin5 locomotion preview',
     ]]);
   }

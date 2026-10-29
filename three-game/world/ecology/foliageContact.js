@@ -28,10 +28,9 @@ export function buildFoliageContactIndex({
   flora = [],
   proceduralFlora = [],
   dryGrassPatches = [],
-  hybridGrassTufts = [],
 } = {}) {
   const cells = new Map();
-  const layers = [...flora, ...proceduralFlora, ...dryGrassPatches, ...hybridGrassTufts];
+  const layers = [...flora, ...proceduralFlora, ...dryGrassPatches];
   let count = 0;
   for (const layer of layers) {
     const motion = layer.motion || {};
