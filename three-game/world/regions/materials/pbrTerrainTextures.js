@@ -389,17 +389,36 @@ function browserFallbackCanvas(rgba) {
   return canvas;
 }
 
+// One decode per path. Several materials ask for the same file (the dark basalt
+// normal map was loaded four times at Post Office Bay: two placeholder profiles,
+// the volcanic formations, and again on the next region), and each call used to
+// make its own ImageBitmap and its own GPU upload with a runtime mip build.
+//
+// Callers still get their own THREE.Texture, so per-material repeat, offset and
+// colorSpace stay independent, but they share one THREE.Source. three keys GPU
+// textures by source plus sampling parameters, so identical parameters also
+// share a single upload. The bitmap is released when the last texture on it is
+// disposed.
+const terrainSourceCache = new Map();
+
 // On memory-ceiling devices, cap decoded terrain textures at 1024: a 2048
 // RGBA set member costs ~22MB with mips and the full family is ~440MB — the
 // bulk of an iPhone tab's entire allowance. Quarter the residency, keep the
 // look at phone DPI.
-function applyTerrainBitmap(texture, bitmap) {
+function applyTerrainBitmap(entry, bitmap) {
   const assign = image => {
-    texture.image?.close?.();
-    texture.image = image;
+    if (entry.released) {
+      image.close?.();
+      return;
+    }
+    entry.source.data?.close?.();
+    entry.source.data = image;
     // ImageBitmap orientation was resolved during off-main decode.
-    texture.flipY = false;
-    texture.needsUpdate = true;
+    entry.flipY = false;
+    entry.textures.forEach(texture => {
+      texture.flipY = false;
+      texture.needsUpdate = true;
+    });
   };
   const cap = isConstrainedMemoryDevice() ? CONSTRAINED_TEXTURE_MAX_DIM : Infinity;
   const largest = Math.max(bitmap.width || 0, bitmap.height || 0);
@@ -418,8 +437,13 @@ function applyTerrainBitmap(texture, bitmap) {
   }).catch(() => assign(bitmap));
 }
 
-function loadBrowserTerrainTexture(path, rgba) {
-  const texture = new THREE.Texture(browserFallbackCanvas(rgba));
+function createTerrainSourceEntry(path, rgba) {
+  const entry = {
+    source: new THREE.Source(browserFallbackCanvas(rgba)),
+    textures: new Set(),
+    flipY: true,
+    released: false,
+  };
   const loader = new THREE.ImageBitmapLoader();
   loader.setOptions({
     imageOrientation: 'flipY',
@@ -428,21 +452,45 @@ function loadBrowserTerrainTexture(path, rgba) {
   });
   loader.load(
     path,
-    bitmap => applyTerrainBitmap(texture, bitmap),
+    bitmap => applyTerrainBitmap(entry, bitmap),
     undefined,
     () => {
       // Some older Safari/WebView builds expose ImageBitmapLoader but reject
       // one of its decode options. Preserve the existing TextureLoader path as
       // a compatibility fallback without making it the normal transition path.
       new THREE.TextureLoader().load(path, imageTexture => {
-        texture.image = imageTexture.image;
-        texture.flipY = imageTexture.flipY;
-        texture.needsUpdate = true;
+        if (!entry.released) {
+          entry.source.data = imageTexture.image;
+          entry.flipY = imageTexture.flipY;
+          entry.textures.forEach(texture => {
+            texture.flipY = imageTexture.flipY;
+            texture.needsUpdate = true;
+          });
+        }
         imageTexture.dispose();
       });
     },
   );
-  texture.addEventListener('dispose', () => texture.image?.close?.());
+  return entry;
+}
+
+function loadBrowserTerrainTexture(path, rgba) {
+  let entry = terrainSourceCache.get(path);
+  if (!entry) {
+    entry = createTerrainSourceEntry(path, rgba);
+    terrainSourceCache.set(path, entry);
+  }
+  const texture = new THREE.Texture();
+  texture.source = entry.source;
+  texture.flipY = entry.flipY;
+  entry.textures.add(texture);
+  texture.addEventListener('dispose', () => {
+    entry.textures.delete(texture);
+    if (entry.textures.size > 0) return;
+    entry.released = true;
+    if (terrainSourceCache.get(path) === entry) terrainSourceCache.delete(path);
+    entry.source.data?.close?.();
+  });
   return texture;
 }
 
