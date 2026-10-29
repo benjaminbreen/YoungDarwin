@@ -7139,6 +7139,13 @@ test('the clock warns before midnight turns the day in the field', () => {
   assert.doesNotMatch(directivesSource, /day only turns there/);
 });
 
+test('New Expedition asks before replacing a saved expedition', () => {
+  const overlaySource = fs.readFileSync(path.resolve('three-game/ui/LaunchOverlay.jsx'), 'utf8');
+  assert.match(overlaySource, /if \(hasSavedExpedition\) setConfirmingNewExpedition\(true\);\s*else onNewExpedition\?\.\(\);/);
+  assert.match(overlaySource, /<MenuButton primary onClick=\{requestNewExpedition\}/);
+  assert.match(overlaySource, /Replace saved expedition\?/);
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {

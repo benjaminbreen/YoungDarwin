@@ -714,6 +714,13 @@ export function LaunchOverlay({
   }, [progress, selectedModeId]);
   const loading = mode === 'loading';
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // Starting a new expedition clears the resume point, and autosave writes the
+  // new run over it as soon as the landing loads. With a save present, ask first.
+  const [confirmingNewExpedition, setConfirmingNewExpedition] = useState(false);
+  const requestNewExpedition = () => {
+    if (hasSavedExpedition) setConfirmingNewExpedition(true);
+    else onNewExpedition?.();
+  };
   const choosingCharacter = mode === 'character';
   const showingSettings = mode === 'settings';
   const showingControls = mode === 'controls';
@@ -823,6 +830,34 @@ export function LaunchOverlay({
             </div>
           ) : feedbackOpen ? (
             <FeedbackPanel onBack={() => setFeedbackOpen(false)} />
+          ) : confirmingNewExpedition && mode === 'menu' ? (
+            <div className="relative px-3 py-2 text-left">
+              <h2 className="text-center text-[25px] tracking-[0.08em] text-expedition-goldbright">Replace saved expedition?</h2>
+              <p className="mt-3 text-center text-[15px] leading-relaxed text-expedition-parchment/85">
+                A new expedition overwrites the one in progress. Its journal and specimens will be lost.
+              </p>
+              <div className="mt-4 divide-y divide-expedition-brass/25 rounded-sm border border-expedition-brass/40 bg-black/20 p-1">
+                <LoadChoiceButton
+                  title="Resume expedition"
+                  subtitle={lastJournalLabel}
+                  onClick={() => {
+                    setConfirmingNewExpedition(false);
+                    onContinue?.();
+                  }}
+                  onIntent={onRuntimeIntent}
+                />
+                <LoadChoiceButton
+                  title="Start a new expedition"
+                  subtitle="Replaces the saved expedition."
+                  onClick={() => {
+                    setConfirmingNewExpedition(false);
+                    onNewExpedition?.();
+                  }}
+                  onIntent={onRuntimeIntent}
+                />
+              </div>
+              <BackButton onClick={() => setConfirmingNewExpedition(false)} />
+            </div>
           ) : showingMultiplayer ? (
             multiplayerPanel
           ) : choosingCharacter ? (
@@ -1025,7 +1060,7 @@ export function LaunchOverlay({
             </div>
           ) : (
             <nav className="relative grid gap-1">
-              <MenuButton primary onClick={onNewExpedition} onIntent={onRuntimeIntent}>New Expedition</MenuButton>
+              <MenuButton primary onClick={requestNewExpedition} onIntent={onRuntimeIntent}>New Expedition</MenuButton>
               {/* One door to the save. Resuming and opening the journal are the
                   same action underneath, so they sit together behind Load rather
                   than as two near-identical lines in the top-level menu. */}
