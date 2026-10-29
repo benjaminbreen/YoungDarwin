@@ -114,7 +114,8 @@ export function analyseTrace(trace) {
   for (const segment of segments) {
     const { from, to } = segment;
     const count = to - from + 1;
-    if (count < 3) continue;
+    // Screenshot stalls are the harness, not the game.
+    if (count < 3 || segment.label === 'screenshot') continue;
     const dts = [];
     const cpus = [];
     const calls = [];

@@ -287,14 +287,23 @@ export async function runSteps(page, steps, context = {}) {
   return shots;
 }
 
+export const SCREENSHOT_PHASE = 'screenshot';
+
 export async function captureShot(page, context = {}, name = 'shot') {
   const dir = context.shotDir;
   if (!dir) return null;
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${name}.png`);
   const target = context.fullPage ? page : page.locator('canvas').first();
+  // A capture stalls the compositor for ~300ms. Give it a phase of its own
+  // (which the report drops) and let two frames land before the next step,
+  // or the stall is charged to that step as a game hitch.
+  await page.evaluate(label => window.__perfLab?.phase(label), SCREENSHOT_PHASE);
   await target.screenshot({ path: file });
-  await page.evaluate(n => window.__perfLab?.mark('screenshot', { name: n }), name);
+  await page.evaluate(n => new Promise(resolve => {
+    window.__perfLab?.mark('screenshot', { name: n });
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }), name);
   return file;
 }
 
