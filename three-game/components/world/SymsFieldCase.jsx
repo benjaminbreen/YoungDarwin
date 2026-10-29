@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -10,6 +10,7 @@ import {
 } from '../../npcs/symsActivityPlan';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
+import { mergeStaticParts } from '../assets/mergeMeshParts';
 
 const INTERACTION_DISTANCE = 2.35;
 const PROMPT_POLL_SECONDS = 0.12;
@@ -257,6 +258,18 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, off
   const bodyCentre = (SKID_TOP + WELL_FLOOR) * 0.5;
   const wellCentre = (WELL_FLOOR + BODY_TOP) * 0.5;
 
+  // ~32 visible parts collapse to one draw per material: the body as one
+  // static set, the lid as another that still swings on its pivot. The hidden
+  // contents stay separate so they can be revealed.
+  useLayoutEffect(() => {
+    const restoreLid = mergeStaticParts(lidRef.current);
+    const restoreBody = mergeStaticParts(worldRootRef.current);
+    return () => {
+      restoreBody();
+      restoreLid();
+    };
+  }, [contentsRef, lidRef, worldRootRef]);
+
   return (
     <group ref={worldRootRef} position={[0, offsetY, 0]} onClick={onToggle}>
       {/* Skids: a chest of this weight sits on runners, and they also give the
@@ -305,7 +318,7 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, off
       ))}
 
       {/* Contents stay inert and are revealed only by the authored lid motion. */}
-      <group ref={contentsRef} visible={false}>
+      <group ref={contentsRef} visible={false} userData={{ keepSeparate: true }}>
         {[-0.19, 0.19].map(x => (
           <mesh key={`divider-${x}`} geometry={divider} material={interior} position={[x, WELL_FLOOR + 0.05, 0]} />
         ))}
@@ -327,7 +340,7 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, off
         ))}
       </group>
 
-      <group ref={lidRef} position={[0, BODY_TOP + 0.005, LID_PIVOT_Z]}>
+      <group ref={lidRef} position={[0, BODY_TOP + 0.005, LID_PIVOT_Z]} userData={{ keepSeparate: true }}>
         <mesh castShadow receiveShadow geometry={lid} material={canvasLid} position={[0, 0.05, 0.31]} />
         {[-0.29, 0.29].map(x => (
           <mesh key={`lid-strap-${x}`} castShadow geometry={lidStrap} material={leather} position={[x, 0.104, 0.31]} />

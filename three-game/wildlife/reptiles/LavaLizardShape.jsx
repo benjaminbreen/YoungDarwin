@@ -7,13 +7,14 @@
 // derive speed, so the same rig reads correctly patrolling, fleeing, held in
 // Darwin's hands, framed in an examine session, or lying downed.
 
-import React, { useMemo, useRef } from 'react';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { createReptileAnimator } from './reptileGaitRuntime';
+import { mergeRigidParts } from '../../components/assets/mergeMeshParts';
 import {
   createLavaLizardRig,
   pickLavaLizardSize,
@@ -53,6 +54,9 @@ export function LavaLizardShape({ specimen }) {
     }),
     [actorId, rig, size],
   );
+  // ~21 part meshes draw as one skinned mesh per material; the animator keeps
+  // posing the (hidden) parts, which act as its bones.
+  useLayoutEffect(() => mergeRigidParts(rig.group), [rig]);
   const downed = useThreeGameStore(state => Boolean(state.downedSpecimenActors?.[actorId]));
   const held = useThreeGameStore(state => state.carriedObjectId === actorId);
   const track = useRef({ has: false, x: 0, z: 0, speed: 0, throttle: 0, accum: 0 });

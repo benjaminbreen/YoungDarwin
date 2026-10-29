@@ -1783,7 +1783,9 @@ function collectPrewarmWork(root, seenMaterials, seenTextures, seenGeometries) {
   root.traverse(object => {
     if (covered.has(object.parent)) covered.add(object);
     const material = object.material;
-    if (!material) return;
+    // Parts folded into a merged mesh are never drawn; warming them would
+    // compile programs nothing uses.
+    if (!material || object.userData.mergedAway) return;
     let fresh = false;
     if (object.geometry && !seenGeometries.has(object.geometry)) {
       seenGeometries.add(object.geometry);

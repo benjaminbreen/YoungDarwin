@@ -7191,6 +7191,59 @@ test('no runtime material uses transmission, which re-renders the scene each fra
   assert.deepEqual(offenders, []);
 });
 
+test('merged mesh parts collapse to one draw per material and still follow their parts', () => {
+  const THREE = projectRequire('three');
+  const { mergeStaticParts, mergeRigidParts } = loadModule('three-game/components/assets/mergeMeshParts.js');
+  const build = () => {
+    const root = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial();
+    const brass = new THREE.MeshStandardMaterial();
+    const leg = new THREE.Group();
+    leg.position.set(0.5, 0, 0);
+    root.add(leg);
+    const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), wood);
+    legMesh.position.y = -0.2;
+    leg.add(legMesh);
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 1), wood));
+    root.add(new THREE.Mesh(new THREE.SphereGeometry(0.05), brass));
+    const hidden = new THREE.Group();
+    hidden.userData.keepSeparate = true;
+    hidden.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), wood));
+    root.add(hidden);
+    return { root, leg, legMesh, wood };
+  };
+  const drawn = root => {
+    const meshes = [];
+    root.traverseVisible(object => { if (object.isMesh) meshes.push(object); });
+    return meshes;
+  };
+
+  const flat = build();
+  const restore = mergeStaticParts(flat.root);
+  // The two wood parts merge; the lone brass part and kept-separate contents stay.
+  assert.equal(drawn(flat.root).length, 3);
+  restore();
+  assert.equal(drawn(flat.root).length, 4);
+
+  const rigid = build();
+  mergeRigidParts(rigid.root);
+  const skinned = drawn(rigid.root).find(object => object.isSkinnedMesh);
+  assert.ok(skinned, 'moving parts merge into a skinned mesh');
+  // Swing the leg: the merged mesh's leg vertices must land where the hidden
+  // part's own vertices now are.
+  rigid.leg.rotation.z = 0.9;
+  rigid.root.updateMatrixWorld(true);
+  skinned.skeleton.update();
+  const expected = new THREE.Vector3(0.05, -0.2, 0.05).applyMatrix4(rigid.legMesh.matrixWorld);
+  const vertex = new THREE.Vector3();
+  let nearest = Infinity;
+  for (let index = 0; index < skinned.geometry.attributes.position.count; index += 1) {
+    skinned.getVertexPosition(index, vertex);
+    nearest = Math.min(nearest, vertex.applyMatrix4(skinned.matrixWorld).distanceTo(expected));
+  }
+  assert.ok(nearest < 1e-5, `leg corner followed its part (off by ${nearest})`);
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { StaticGLB } from '../../components/assets/StaticGLB';
@@ -19,6 +19,7 @@ import { onPropEvent } from './propEvents';
 import { trackPointLightTo, usePointLightSlot } from '../../world/pointLightPool';
 import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
+import { mergeStaticParts } from '../../components/assets/mergeMeshParts';
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -44,6 +45,13 @@ function useSharedMaterial(factory) {
   );
   useEffect(() => retainGpuResource(cacheKey), [cacheKey]);
   return material;
+}
+
+// One draw call per material instead of one per plank, band and post.
+function useMergedStaticParts() {
+  const ref = useRef(null);
+  useLayoutEffect(() => mergeStaticParts(ref.current), []);
+  return ref;
 }
 
 function useSingleMaterialGeometry(factory) {
@@ -75,9 +83,10 @@ function BarrelVisual() {
   const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.48, 0.48, 0.9, 14, 1));
   const bandGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.505, 0.505, 0.055, 14, 1, true));
   const endGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.43, 0.43, 0.035, 14));
+  const partsRef = useMergedStaticParts();
 
   return (
-    <group>
+    <group ref={partsRef}>
       <mesh castShadow receiveShadow material={wood} geometry={bodyGeometry} />
       {[-0.34, 0, 0.34].map(y => (
         <mesh key={y} castShadow receiveShadow position={[0, y, 0]} material={band} geometry={bandGeometry} />
@@ -109,9 +118,10 @@ function CrateVisual() {
   const frontBraceGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.72, 0.075, 0.065));
   const sideBraceGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.065, 0.075, 0.72));
   const topPlankGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.9, 0.055, 0.18));
+  const partsRef = useMergedStaticParts();
 
   return (
-    <group>
+    <group ref={partsRef}>
       <mesh castShadow receiveShadow material={wood} geometry={bodyGeometry} />
       {[[-0.45, -0.45], [-0.45, 0.45], [0.45, -0.45], [0.45, 0.45]].map(([x, z], index) => (
         <mesh key={`corner-${index}`} castShadow receiveShadow position={[x, 0, z]} material={frame} geometry={cornerPostGeometry} />

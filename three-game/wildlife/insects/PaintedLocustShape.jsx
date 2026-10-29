@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeRigidParts } from '../../components/assets/mergeMeshParts';
 
 function seeded(index, salt = 0) {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453123;
@@ -228,6 +229,10 @@ export function PaintedLocustShape({ motionRef }) {
     wings.left.dispose();
     wings.right.dispose();
   }, [materials, textures, wings]);
+
+  // 32 part meshes draw as one skinned mesh per material; the refs below
+  // still animate the (hidden) parts, which act as its bones.
+  useLayoutEffect(() => mergeRigidParts(rootRef.current), [materials, wings]);
 
   useFrame(({ clock }, delta) => {
     const t = clock.elapsedTime;
