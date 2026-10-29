@@ -126,7 +126,36 @@ function watercolorWash(sample, h, slopeShade, i, j) {
 function sampleAt(samples, n, x, y) {
   const i = Math.max(0, Math.min(n - 1, Math.round(x)));
   const j = Math.max(0, Math.min(n - 1, Math.round(y)));
-  return samples[j * n + i];
+  return samples.read(j * n + i);
+}
+
+// The chart keeps only what painting reads — biome and colour — in flat
+// arrays. Holding the sampler's own result objects (one per pixel, ~147k at
+// the sharp pass) grew the old heap enough to force a major GC partway through
+// the bake, a 300ms pause landing a second or two into play. `read` fills one
+// shared scratch sample: every caller reads it before asking for the next.
+function createSampleStore(total) {
+  const biomes = new Array(total);
+  const colors = new Float32Array(total * 3);
+  const scratch = { biome: null, color: { r: 0, g: 0, b: 0 } };
+  return {
+    write(index, sample) {
+      biomes[index] = sample.biome;
+      colors[index * 3] = sample.color?.r ?? 0;
+      colors[index * 3 + 1] = sample.color?.g ?? 0;
+      colors[index * 3 + 2] = sample.color?.b ?? 0;
+    },
+    biome(index) {
+      return biomes[index];
+    },
+    read(index) {
+      scratch.biome = biomes[index];
+      scratch.color.r = colors[index * 3];
+      scratch.color.g = colors[index * 3 + 1];
+      scratch.color.b = colors[index * 3 + 2];
+      return scratch;
+    },
+  };
 }
 
 function heightAt(heights, n, x, y) {
@@ -245,14 +274,15 @@ function bakeSurveyChartPixels(samples, heights, n, step) {
   const canvas = document.createElement('canvas');
   canvas.width = n;
   canvas.height = n;
-  const ctx = canvas.getContext('2d');
+  // CPU-backed for the same toBlob readback reason as paintChartFieldSteps.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const image = ctx.createImageData(n, n);
   const data = image.data;
 
   for (let j = 0; j < n; j += 1) {
     for (let i = 0; i < n; i += 1) {
       const idx = j * n + i;
-      const sample = samples[idx];
+      const sample = samples.read(idx);
       const h = heights[idx];
       const hr = heights[j * n + Math.min(n - 1, i + 1)];
       const hd = heights[Math.min(n - 1, j + 1) * n + i];
@@ -351,7 +381,7 @@ function createChartField(zone, n) {
     n,
     step: Math.max(width, depth) / n,
     heights: new Float32Array(total),
-    samples: new Array(total),
+    samples: createSampleStore(total),
     get done() {
       return cursor >= total;
     },
@@ -363,7 +393,7 @@ function createChartField(zone, n) {
         const x = (i / (n - 1) - 0.5) * width;
         const z = (j / (n - 1) - 0.5) * depth;
         const sample = sampleRegionMap(zone.id, x, z);
-        this.samples[cursor] = sample;
+        this.samples.write(cursor, sample);
         this.heights[cursor] = sample.height;
         cursor += 1;
       }
@@ -522,7 +552,7 @@ function drawBiomeWash(ctx, samples, heights, n) {
     for (let i = BIOME_WASH_STRIDE >> 1; i < n; i += BIOME_WASH_STRIDE) {
       const idx = j * n + i;
       if (heights[idx] <= WATERLINE) continue;
-      const wash = BIOME_WASH[biomeKind(samples[idx].biome)];
+      const wash = BIOME_WASH[biomeKind(samples.biome(idx))];
       if (!wash) continue;
       stamp += 1;
       // Jitter keeps the stride off the grid it was sampled on; without it the
@@ -674,7 +704,7 @@ function coastDistanceField(samples, heights, n) {
   const distance = new Float32Array(total);
   let sawLand = false;
   for (let idx = 0; idx < total; idx += 1) {
-    const wet = samples[idx].biome === 'water' || heights[idx] < WATERLINE;
+    const wet = samples.biome(idx) === 'water' || heights[idx] < WATERLINE;
     if (!wet) sawLand = true;
     distance[idx] = wet ? Infinity : 0;
   }
@@ -719,14 +749,21 @@ const SEA_LINES = [
 ];
 const SEA_LINE_HALF_WIDTH = 0.44;
 
-function paintChartField(field, variant) {
+// Painting the sharp pass in one go was a ~200ms main-thread block a second
+// or two into play. As a generator it yields after each row and each overlay,
+// so the bake's idle slices can spread it out the way they spread sampling.
+function* paintChartFieldSteps(field, variant) {
   const { n, step, samples, heights } = field;
   if (variant === 'survey') return bakeSurveyChartPixels(samples, heights, n, step);
 
   const canvas = document.createElement('canvas');
   canvas.width = n;
   canvas.height = n;
-  const ctx = canvas.getContext('2d');
+  // CPU-backed: the chart is read back by toBlob, and on a GPU canvas that
+  // readback flushes every queued wash and boulder draw at once — a 50-150ms
+  // block a second or two into play. On the CPU each overlay is drawn in the
+  // step that issues it.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const image = ctx.createImageData(n, n);
   const data = image.data;
   // A contour is the line between two samples that straddle a band. Once a
@@ -736,11 +773,13 @@ function paintChartField(field, variant) {
   const drawMajorContours = step < MAJOR_CONTOUR_INTERVAL * 0.5;
   const relief = landHeightRange(heights);
   const coast = coastDistanceField(samples, heights, n);
+  yield;
 
   for (let j = 0; j < n; j += 1) {
+    if (j > 0) yield;
     for (let i = 0; i < n; i += 1) {
       const idx = j * n + i;
-      const sample = samples[idx];
+      const sample = samples.read(idx);
       const h = heights[idx];
       const hr = heights[j * n + Math.min(n - 1, i + 1)];
       const hd = heights[Math.min(n - 1, j + 1) * n + i];
@@ -915,10 +954,20 @@ function paintChartField(field, variant) {
   }
 
   ctx.putImageData(image, 0, 0);
+  yield;
   drawBiomeWash(ctx, samples, heights, n);
+  yield;
   drawEcologyWash(ctx, field.zone, n, field.width, field.depth);
+  yield;
   drawBoulders(ctx, field.zone, n, field.width, field.depth);
   return canvas;
+}
+
+function paintChartField(field, variant) {
+  const steps = paintChartFieldSteps(field, variant);
+  let result = steps.next();
+  while (!result.done) result = steps.next();
+  return result.value;
 }
 
 export function bakeTerrainChart(zone, variant = 'terrain', resolution = BAKE_RESOLUTION) {
@@ -966,17 +1015,25 @@ function subscribeToChartBake(key, zone, variant, onReady) {
     chartBakes.set(key, bake);
     let pass = 0;
     let field = createChartField(zone, BAKE_PASSES[0]);
+    let painter = null;
     const pump = budgetMs => {
       const until = performance.now() + budgetMs;
-      let done = false;
-      do {
-        done = field.sampleChunk(CHUNK_SAMPLES);
-      } while (!done && performance.now() < until);
-      if (!done) {
+      let sampled = Boolean(painter);
+      while (!sampled && performance.now() < until) sampled = field.sampleChunk(CHUNK_SAMPLES);
+      let painted = null;
+      if (sampled) {
+        painter ||= paintChartFieldSteps(field, variant);
+        while (!painted && performance.now() < until) {
+          const result = painter.next();
+          if (result.done) painted = result;
+        }
+      }
+      if (!painted) {
         scheduleSlice(pump);
         return;
       }
-      const canvas = paintChartField(field, variant);
+      painter = null;
+      const canvas = painted.value;
       const finishPass = url => {
         chartCache.set(key, url);
         bake.listeners.forEach(listener => listener(url));

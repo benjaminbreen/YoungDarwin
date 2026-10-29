@@ -7244,6 +7244,35 @@ test('merged mesh parts collapse to one draw per material and still follow their
   assert.ok(nearest < 1e-5, `leg corner followed its part (off by ${nearest})`);
 });
 
+test('perf lab leaves screenshot stalls out of the gameplay phases', () => {
+  const { analyseTrace } = loadModule('scripts/perf-lab/report.mjs');
+  const labels = [
+    ...Array(12).fill('idle-a'),
+    ...Array(3).fill('screenshot'),
+    ...Array(12).fill('idle-b'),
+  ];
+  const dt = labels.map((label, index) => (label === 'screenshot' && index === 13 ? 320 : 8));
+  let clock = 0;
+  const t = dt.map(value => (clock += value));
+  const zeros = labels.map(() => 0);
+  const analysis = analyseTrace({
+    columns: {
+      t, dt, phase: labels,
+      cpu: labels.map(() => 3), calls: labels.map(() => 200), tris: zeros,
+      passes: labels.map(() => 1), quadPasses: zeros, sceneRenderMs: zeros, quadRenderMs: zeros,
+      programs: zeros, textures: zeros, geometries: zeros, yaw: zeros, dpr: labels.map(() => 1),
+      contentPhase: zeros,
+    },
+    longTasks: [],
+    longAnimationFrames: [],
+    programEvents: [],
+    events: [],
+    phases: [],
+  });
+  assert.deepEqual(analysis.phases.map(phase => phase.name), ['idle-a', 'idle-b']);
+  assert.ok(analysis.phases.every(phase => phase.spikes.length === 0));
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {
