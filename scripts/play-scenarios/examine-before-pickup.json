@@ -1,0 +1,66 @@
+[
+ [
+  "zone",
+  "W_LAVA"
+ ],
+ [
+  "tool",
+  "hands"
+ ],
+ [
+  "near",
+  "W_LAVA:western-lowlands-tortoise-near-pen",
+  0.7
+ ],
+ [
+  "wait",
+  500
+ ],
+ [
+  "expect",
+  "api.getState().carryPrompt",
+  {
+   "equals": "null"
+  }
+ ],
+ [
+  "expect",
+  "api.getPrompt().fieldAction?.label",
+  {
+   "match": "^Examine .*Tortoise"
+  }
+ ],
+ [
+  "examine"
+ ],
+ [
+  "expect",
+  "api.getState().examineSession?.name",
+  {
+   "match": "Tortoise"
+  }
+ ],
+ [
+  "eval",
+  "api.saveExamineNote('Playtest note: carapace domed, moving slowly through the scrub.') && null"
+ ],
+ [
+  "close"
+ ],
+ [
+  "near",
+  "W_LAVA:western-lowlands-tortoise-near-pen",
+  0.7
+ ],
+ [
+  "wait",
+  800
+ ],
+ [
+  "expect",
+  "api.getState().carryPrompt?.mode",
+  {
+   "equals": "pickup"
+  }
+ ]
+]

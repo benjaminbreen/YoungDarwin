@@ -92,6 +92,22 @@ A scenario is an array of `[command, ...args]` rows, with an optional trailing
 options object: `["expect", "api.getPrompt().fieldAction?.label", { "match": "^Examine " }]`.
 Add one whenever you fix something you had to play to see.
 
+## Region sweep
+
+```bash
+npm run play -- start
+npm run play:sweep                 # every region (~15 minutes)
+npm run play:sweep -- E_MID W_LAVA
+```
+
+Visits each region by real travel and records render-audit counts, console
+errors, a frame-time sample, and a walk to the nearest unexamined specimen
+followed by an examine attempt. It writes `test-results/play/sweep/results.json`
+and a 2x2 contact sheet per region (`<ZONE>.jpg`, four camera headings) for
+visual review. The automated columns catch broken interactions and missing
+textures; the sheets are for the things only eyes catch (foam, seams, floating
+props), so read them or hand them to a reviewer.
+
 ## Things that will mislead you
 
 - **Edits to harness or player files need `reload`.** Fast Refresh does not

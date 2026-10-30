@@ -981,8 +981,11 @@ export function SpecimenActor({ specimen }) {
         return;
       }
 
-      // Animals are only grabbable bare-handed so E still collects with tools.
-      if (state.activeToolId !== 'hands') {
+      // Animals are only grabbable bare-handed so E still collects with tools,
+      // and only once their kind has been examined: E examines anything
+      // unstudied first, and "Pick up" used to outrank it, so an unexamined
+      // tortoise could never be examined at all.
+      if (state.activeToolId !== 'hands' || !state.examinedTypeIds?.includes(specimen.id)) {
         if (state.carryPrompt?.id === actorId) setCarryPrompt(null);
       } else {
         const distance = Math.hypot(group.current.position.x - player.x, group.current.position.z - player.z);
