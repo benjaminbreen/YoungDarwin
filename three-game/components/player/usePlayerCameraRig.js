@@ -1165,9 +1165,17 @@ export function usePlayerCameraRig() {
           const resume = cameraDev.heroFollowResume > 0.01
             ? THREE.MathUtils.smoothstep(now - manualOrbitUntilRef.current, 0, cameraDev.heroFollowResume)
             : 1;
+          // Only chase a heading that leads away from the camera. Movement
+          // keys are camera-relative, so following a sideways heading turns
+          // "hold right" into an endless tight circle, and following a heading
+          // toward the lens puts the error at ±π, where its sign flips frame to
+          // frame and camera and body wobble against each other. Sideways
+          // keeps a slow orbit so keyboard steering still comes round; running
+          // at the camera leaves it where it is.
+          const heading = THREE.MathUtils.smoothstep(Math.cos(yawError), -0.35, 0.75);
           const followRate = (cameraDev.heroFollowBase
             + followT * cameraDev.heroFollowSpeed
-            + sprintBlendRef.current * cameraDev.heroFollowSprint) * authority * resume;
+            + sprintBlendRef.current * cameraDev.heroFollowSprint) * authority * resume * heading;
           yawRef.current += yawError * (1 - Math.exp(-followRate * delta));
           // Pitch settles toward the hero default while moving, so a glance
           // at the sky or the ground recovers on its own once he runs.

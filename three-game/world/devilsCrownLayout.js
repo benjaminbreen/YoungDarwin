@@ -32,7 +32,8 @@ export function getDevilsCrownRocks() {
     minX: -16,
     maxX: 16,
     minZ: 32,
-    maxZ: 43,
+    // The landing shelves off into deep water past z 40.5 (see terrain.js).
+    maxZ: 40.5,
     scale: [0.22, 0.74],
     maxGrade: 1.4,
     accept: (biome, x, z, y) => y > -0.26 && devilsCrownLandingMask(x, z) > 0.28,

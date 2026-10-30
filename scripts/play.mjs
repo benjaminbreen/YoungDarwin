@@ -8,6 +8,7 @@
 //   npm run play -- near rock                    # stand beside the nearest rock, facing it
 //   npm run play -- key KeyE                     # real key press (hold with a second arg in ms)
 //   npm run play -- eval "api.getPrompt()"       # anything on window.__darwinE2E (bound as `api`)
+//   npm run play -- move run --film              # movement drill: per-frame trace + filmstrip
 //   npm run play -- stop
 //
 // `npm run play -- help` lists every command. See docs/agent-play.md.
@@ -19,6 +20,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildUrl, DEFAULTS, hideHud, openSession, yawTo } from './perf-lab/driver.mjs';
+import { MOVE_DRILLS } from './play-move-drills.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PLAY_DIR = path.join(ROOT, 'test-results/play');
@@ -164,6 +166,96 @@ async function runDaemon(options) {
     }), ms);
   }
 
+  // Films while the page records: the recorder runs on requestAnimationFrame
+  // inside the page, so the screenshots here only cost frame time, not
+  // timing accuracy. Frames are cropped to the middle of the view (Darwin)
+  // and laid out as a labelled contact sheet.
+  async function runMoveDrill(name, opts = {}) {
+    if (name === 'list') {
+      return Object.fromEntries(Object.entries(MOVE_DRILLS).map(([id, drill]) => [id, drill.about]));
+    }
+    const drill = MOVE_DRILLS[name];
+    if (!drill) throw new Error(`Unknown drill "${name}". Try: move list`);
+    if (opts.at) {
+      const [x, z] = String(opts.at).split(',').map(Number);
+      const heading = Number.isFinite(Number(opts.heading)) ? Number(opts.heading) : null;
+      // Right after boot the spawn sequence can still re-place the player and
+      // undo a teleport, so check it landed and try again if not.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await api(`api.teleport(${x}, ${z}${heading === null ? '' : `, { heading: { x: Math.sin(${heading}), z: Math.cos(${heading}) } }`})`);
+        await api('api.waitForSettled(4000)');
+        const at = await api('api.getMotionState().position');
+        if (Math.hypot(at.x - x, at.z - z) < 0.6) break;
+      }
+    }
+    await api('api.waitForSettled(4000)');
+    // Film through the DevTools screencast: it streams every composited frame
+    // with a timestamp, where a Playwright screenshot costs ~0.5s apiece and
+    // would miss a turn entirely.
+    const rawFrames = [];
+    let cdp = null;
+    if (opts.film) {
+      cdp = await page.context().newCDPSession(page);
+      cdp.on('Page.screencastFrame', ({ data, metadata, sessionId }) => {
+        rawFrames.push({ at: metadata.timestamp * 1000, buffer: Buffer.from(data, 'base64') });
+        cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
+      });
+      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, everyNthFrame: 1 });
+    }
+    const startedAt = await page.evaluate(([steps, durationMs]) => {
+      window.__playMoveRun = window.__darwinE2E.recordMotion(steps, { durationMs });
+      return Date.now();
+    }, [drill.steps, drill.durationMs]);
+    const result = await page.evaluate(() => window.__playMoveRun);
+    if (cdp) {
+      await cdp.send('Page.stopScreencast').catch(() => {});
+      await cdp.detach().catch(() => {});
+    }
+    const frames = rawFrames
+      .map(frame => ({ t: Math.round(frame.at - startedAt), buffer: frame.buffer }))
+      .filter(frame => frame.t >= 0 && frame.t <= drill.durationMs);
+    const moveDir = path.join(PLAY_DIR, 'move');
+    await fsp.mkdir(moveDir, { recursive: true });
+    const stem = `${name}-${Date.now().toString(36)}`;
+    const traceFile = path.join(moveDir, `${stem}.json`);
+    await fsp.writeFile(traceFile, JSON.stringify(result, null, 1));
+    let film = null;
+    if (frames.length) film = await writeFilmSheet(frames, path.join(moveDir, `${stem}.jpg`), opts);
+    return { drill: name, summary: result.summary, trace: traceFile, film };
+  }
+
+  async function writeFilmSheet(frames, file, opts = {}) {
+    const { default: sharp } = await import('sharp');
+    const maxFrames = Number(opts.frames || 16);
+    // --from/--to (ms) zoom the sheet onto one moment of the drill.
+    frames = frames.filter(({ t }) => t >= Number(opts.from || 0) && t <= Number(opts.to ?? Infinity));
+    if (!frames.length) return null;
+    const picked = frames.length <= maxFrames
+      ? frames
+      : Array.from({ length: maxFrames }, (_, i) => frames[Math.round(i * (frames.length - 1) / (maxFrames - 1))]);
+    const meta = await sharp(picked[0].buffer).metadata();
+    const crop = {
+      left: Math.round(meta.width * 0.3),
+      top: Math.round(meta.height * 0.28),
+      width: Math.round(meta.width * 0.4),
+      height: Math.round(meta.height * 0.62),
+    };
+    const tileW = 320;
+    const tileH = Math.round(tileW * crop.height / crop.width);
+    const cols = 4;
+    const rows = Math.ceil(picked.length / cols);
+    const tiles = await Promise.all(picked.map(async ({ t, buffer }) => {
+      const label = Buffer.from(`<svg width="${tileW}" height="24"><rect width="70" height="24" fill="black" opacity="0.6"/><text x="6" y="17" font-family="monospace" font-size="15" fill="white">${t}ms</text></svg>`);
+      return sharp(buffer).extract(crop).resize(tileW, tileH)
+        .composite([{ input: label, left: 0, top: 0 }]).toBuffer();
+    }));
+    await sharp({ create: { width: cols * tileW, height: rows * tileH, channels: 3, background: '#000' } })
+      .composite(tiles.map((input, i) => ({ input, left: (i % cols) * tileW, top: Math.floor(i / cols) * tileH })))
+      .jpeg({ quality: 80 })
+      .toFile(file);
+    return file;
+  }
+
   async function settled(result) {
     const ok = await api('api.waitForSettled(3000)');
     return { ...result, settled: ok, prompt: await api('api.getPrompt()') };
@@ -282,6 +374,10 @@ async function runDaemon(options) {
       return { count: list.length, errors: list.slice(-30).map(line => line.slice(0, 500)) };
     },
     fps: async ([ms = 2000]) => measureFps(Number(ms)),
+    // Movement feel: replay a named drill (scripts/play-move-drills.mjs) with
+    // real key presses, record every frame, optionally film it.
+    //   move list | move run [--at=x,z] [--heading=rad] [--film [--from=ms --to=ms --frames=16]]
+    move: async ([name = 'list'], opts) => runMoveDrill(name, opts),
     wait: async ([ms = 1000]) => {
       await page.waitForTimeout(Number(ms));
       return { waited: Number(ms) };

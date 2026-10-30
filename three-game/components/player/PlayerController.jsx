@@ -341,6 +341,8 @@ export function PlayerController({
     groundSource: 'terrain-function',
   });
   const spawnDrop = useRef({ phase: 'pending', zoneId: null, landingUntil: 0 });
+  // Which spawn the body was last placed at; see the spawn effect below.
+  const appliedSpawnKey = useRef(null);
   const lastPublishedPose = useRef({
     x: NaN,
     y: NaN,
@@ -365,6 +367,9 @@ export function PlayerController({
   });
   const previousMotion = useRef({ moving: false, running: false, yaw: Math.PI });
   const lastMovingAt = useRef(-10);
+  // When the current stretch of movement began; a stop flourish only plays
+  // after a real stride, not after a tap.
+  const movingSince = useRef(-10);
   const pendingMovementCost = useRef({ fatigue: 0, falling: 0, lastFlushAt: 0 });
   const arcadeLocomotion = useRef(createArcadeLocomotionState());
   const visualLocomotion = useRef({
@@ -568,6 +573,9 @@ export function PlayerController({
   );
   const startX = spawnPoint.x;
   const startZ = spawnPoint.z;
+  // Identity of the spawn the body belongs at. Only a change here may move
+  // Darwin to the spawn; see the spawn effect and spawnPosition below.
+  const spawnKey = `${currentZoneId}|${playerSpawnId ?? ''}|${playableMode.id}|${startX}|${startZ}`;
 
   useEffect(() => {
     stateRef.current.playableModeId = playableMode.id;
@@ -733,6 +741,19 @@ export function PlayerController({
   }, []);
 
   useEffect(() => {
+    // Most of this effect's inputs are object identities that change for
+    // reasons that have nothing to do with spawning: the collision adapter is
+    // rebuilt on every pushable-obstacle commit and once physics comes up,
+    // and several callbacks are recreated with it. Re-running the spawn on
+    // those put Darwin back at the region entry the moment he shoved a rock
+    // (and undid anything he did in the first seconds after load). Place him
+    // only when the spawn itself changes; otherwise keep where he stands and
+    // just re-sync the physics body to it.
+    if (appliedSpawnKey.current === spawnKey && group.current) {
+      characterController.sync(frameScratch.spawnSyncPosition.copy(group.current.position));
+      return;
+    }
+    appliedSpawnKey.current = spawnKey;
     spawnDrop.current = { phase: 'complete', zoneId: currentZoneId, landingUntil: 0 };
     const rawSpawnY = Number(spawnPoint.y);
     const sampledGroundY = collisionAdapter.groundInfo(frameScratch.spawnSyncPosition.set(startX, Number.isFinite(rawSpawnY) ? rawSpawnY : 0, startZ)).y;
@@ -847,6 +868,7 @@ export function PlayerController({
     setPlayerPose,
     spawnCameraFacing,
     spawnFacing,
+    spawnKey,
     spawnPoint.y,
     startX,
     startZ,
@@ -867,6 +889,17 @@ export function PlayerController({
       lying: Boolean(stateRef.current.lying),
       lockMovementUntil: stateRef.current.lockMovementUntil || 0,
       actRoute: stateRef.current.actRoute || null,
+      walking: Boolean(stateRef.current.walking),
+      running: Boolean(stateRef.current.running),
+      airborne: Boolean(stateRef.current.airborne),
+      crouching: Boolean(stateRef.current.crouching),
+      animationSpeed: stateRef.current.animationSpeed ?? null,
+      velocity: { x: velocity.current.x, y: velocity.current.y, z: velocity.current.z },
+      facingYaw: Math.atan2(facing.current.x, facing.current.z),
+      bodyYaw: group.current?.rotation.y ?? null,
+      position: group.current
+        ? { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z }
+        : null,
     }),
     setCameraYaw: yaw => {
       if (Number.isFinite(yaw)) yawRef.current = yaw;
@@ -1578,44 +1611,17 @@ export function PlayerController({
       swimming: swimState.current.active,
     });
     // Flight ignores stick deflection — W/S are altitude there, not throttle.
-    const transitionSpan = Math.max(0.001, (stateRef.current.actionUntil || now) - (stateRef.current.actionStartedAt || now));
-    const transitionProgress = THREE.MathUtils.clamp(
-      (now - (stateRef.current.actionStartedAt || now)) / transitionSpan,
-      0,
-      1,
-    );
-    const easedTransitionProgress = transitionProgress * transitionProgress * (3 - 2 * transitionProgress);
-    const locomotionStartSpeedScale = locomotionPreview && stateRef.current.action === 'startWalking'
-      ? THREE.MathUtils.lerp(0.42, 1, easedTransitionProgress)
-      : locomotionPreview && stateRef.current.action === 'startRunning'
-        ? THREE.MathUtils.lerp(0.45, 1, easedTransitionProgress)
-        : 1;
     const movementSpeed = rawMovementSpeed * slopeSpeedScale * arcadeSpeedScale
-      * (flightActive ? 1 : analogSpeedScale) * locomotionStartSpeedScale;
+      * (flightActive ? 1 : analogSpeedScale);
     terrainFeedback.current.grade = THREE.MathUtils.damp(terrainFeedback.current.grade, slope.grade, 8, delta);
     terrainFeedback.current.uphillDot = THREE.MathUtils.damp(terrainFeedback.current.uphillDot, uphillDot, 8, delta);
     terrainFeedback.current.downhillDot = THREE.MathUtils.damp(terrainFeedback.current.downhillDot, -uphillDot, 8, delta);
     const movementLocked = now < stateRef.current.lockMovementUntil || spawnDrop.current.phase !== 'complete';
-    const bareHandedLocomotion = useThreeGameStore.getState().activeToolId === 'hands'
-      && !carriedObjectId
-      && !stateRef.current.aiming
-      && !stateRef.current.crouching;
-    if (locomotionPreview
-      && isDarwinMode
-      && moving
-      && !previousMotion.current.moving
-      // Genuine standing starts only: stutter-steps and direction taps resume
-      // within this window and would churn the wind-up clip.
-      && now - lastMovingAt.current > 0.3
-      && !wasAirborne.current
-      && !swimState.current.active
-      && !flightActive
-      && !movementLocked
-      && !stateRef.current.action
-      && bareHandedLocomotion) {
-      const startClip = running ? 'startRunning' : 'startWalking';
-      startAction(startClip, durationFor(startClip), { lockMovement: false });
-    }
+    // Standing starts used to play a startWalking/startRunning wind-up that
+    // held ground speed at 42-45% and eased it up over the clip, so Darwin
+    // took 0.8-1s to reach pace after a key press. He now accelerates at
+    // groundAcceleration and the idle crossfades straight into the gait.
+    if (moving && !previousMotion.current.moving) movingSince.current = now;
     if (moving) lastMovingAt.current = now;
     const canTurnInPlace = isDarwinMode && !moving && !movementLocked && !stateRef.current.action && !stateRef.current.crouching && !stateRef.current.aiming;
     if (rotateLeftPressed && !lastButtons.current.rotateLeft && canTurnInPlace) {
@@ -1835,39 +1841,43 @@ export function PlayerController({
     if (!moving && LOCOMOTION_START_ACTIONS.has(stateRef.current.action)) {
       interruptAction(LOCOMOTION_START_ACTIONS);
     }
-    const canPlayLocomotionFlourish = isDarwinMode && !moving && !stateRef.current.action && !movementLocked;
-    if (isDarwinMode && !moving && previousMotion.current.moving && previousMotion.current.running && !stateRef.current.action && !movementLocked) {
-      const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
-      if (previousSpeed > playerConfig.walkSpeed * 1.28) {
-        const runStopDuration = stateRef.current.modelAssetId === 'darwin5'
-          ? durationFor('runToStop')
-          : Math.min(0.55, ACTION_DURATION.runToStop);
-        startAction('runToStop', runStopDuration, { lockMovement: false });
-        emitPropEvent('player-skid', {
-          position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
-          direction: { x: velocity.current.x, y: 0, z: velocity.current.z },
-          intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.68, 0.38, 0.72),
-          biome: surfaceBiome,
-          source: 'darwin',
+    // A tap or a stutter-step stops dead; the stop clips are for halting out
+    // of a real stride. Which clip follows the speed Darwin is carrying, not
+    // whether Shift was held: the default pace is a jog, and the walk-stop
+    // clip out of a jog read as a stumble.
+    const strideEstablished = now - movingSince.current > 0.35;
+    const canPlayLocomotionFlourish = isDarwinMode && !moving && !stateRef.current.action && !movementLocked && strideEstablished;
+    const haltSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+    if (canPlayLocomotionFlourish && previousMotion.current.moving && !wasAirborne.current && haltSpeed > 3.2) {
+      const previousSpeed = haltSpeed;
+      const runStopDuration = stateRef.current.modelAssetId === 'darwin5'
+        ? durationFor('runToStop')
+        : Math.min(0.55, ACTION_DURATION.runToStop);
+      startAction('runToStop', runStopDuration, { lockMovement: false });
+      emitPropEvent('player-skid', {
+        position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
+        direction: { x: velocity.current.x, y: 0, z: velocity.current.z },
+        intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.68, 0.38, 0.72),
+        biome: surfaceBiome,
+        source: 'darwin',
+      });
+      if (now - lastSkidDustAt.current > 0.22) {
+        lastSkidDustAt.current = now;
+        collisionDustTriggerRef.current?.({
+          intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.84, 0.5, 0.88),
+          position: frameScratch.footstepPosition.set(0, 0.06, -0.34),
+          kind: 'skid',
+          radiusScale: 1.08,
+          horizontalSpeed: previousSpeed,
         });
-        if (now - lastSkidDustAt.current > 0.22) {
-          lastSkidDustAt.current = now;
-          collisionDustTriggerRef.current?.({
-            intensity: THREE.MathUtils.clamp(previousSpeed / playerConfig.runSpeed * 0.84, 0.5, 0.88),
-            position: frameScratch.footstepPosition.set(0, 0.06, -0.34),
-            kind: 'skid',
-            radiusScale: 1.08,
-            horizontalSpeed: previousSpeed,
-          });
-          cameraImpulse.current = {
-            startedAt: now,
-            intensity: 0.13,
-            duration: 0.16,
-            seed: cameraImpulse.current.seed + 1,
-          };
-        }
+        cameraImpulse.current = {
+          startedAt: now,
+          intensity: 0.13,
+          duration: 0.16,
+          seed: cameraImpulse.current.seed + 1,
+        };
       }
-    } else if (canPlayLocomotionFlourish && previousMotion.current.moving && !previousMotion.current.running && !wasAirborne.current) {
+    } else if (canPlayLocomotionFlourish && previousMotion.current.moving && !wasAirborne.current) {
       const previousSpeed = Math.hypot(velocity.current.x, velocity.current.z);
       if (previousSpeed > 1.15) {
         const walkStopDuration = locomotionPreview
@@ -1955,8 +1965,11 @@ export function PlayerController({
         && currentSpeed > playerConfig.walkSpeed * 1.25
         && now - lastTurnFlourishAt.current > 0.75) {
         lastTurnFlourishAt.current = now;
+        // Positive crossY means the new heading is at a larger yaw, which is a
+        // left turn (turnLeft90 adds +π/2). The clips were wired the other way
+        // round, so Darwin leaned out of every corner.
         const crossY = normalizedFacing.z * input.x - normalizedFacing.x * input.z;
-        const turnClip = crossY >= 0 ? 'runningTurnRight' : 'runningTurnLeft';
+        const turnClip = crossY >= 0 ? 'runningTurnLeft' : 'runningTurnRight';
         const turnDuration = stateRef.current.modelAssetId === 'darwin5'
           ? durationFor(turnClip)
           : Math.min(durationFor(turnClip), 0.34);
@@ -2054,10 +2067,13 @@ export function PlayerController({
       );
       group.current.rotation.y = dampAngle(group.current.rotation.y, targetYaw, playerConfig.turnDamping * turnAssist * (1 - arcade.skid * 0.16), delta);
     } else {
+      // The stop clips plant and brake over their first half; a gentler
+      // envelope left a long sub-1 m/s creep after the pose had settled,
+      // which read as the feet sliding to a halt.
       const stopEnvelopeScale = locomotionPreview && stateRef.current.action === 'runToStop'
-        ? 0.2
+        ? 0.42
         : locomotionPreview && stateRef.current.action === 'stopWalking'
-          ? 0.25
+          ? 0.55
           : 1;
       const decel = (airborneForControl ? playerConfig.airDeceleration : playerConfig.groundDeceleration)
         * arcade.decelScale
@@ -2820,7 +2836,10 @@ export function PlayerController({
             duration: 0.18,
             seed: cameraImpulse.current.seed + 1,
           };
-          if (!stateRef.current.action && impactSpeed > playerConfig.walkSpeed * 1.05) {
+          // Walking into someone is a nudge; only running into them staggers.
+          // Walk pace on a slope already exceeds walkSpeed, so a bar just
+          // over it made Darwin stumble every time he strolled into Syms.
+          if (!stateRef.current.action && impactSpeed > playerConfig.runSpeed * 0.8) {
             startAction('stumble', ACTION_DURATION.stumble, { lockMovement: false });
           }
           lastContact.npcId = collision.npcId;
@@ -3526,8 +3545,19 @@ export function PlayerController({
     prevRunningIntentRef.current = runningBurstActive;
   }, -1);
 
+  // Mount position for the body and its physics twin. These are declarative
+  // props, so React re-applies them whenever the array's values change — and
+  // spawnY reads the collision adapter, which is rebuilt on every pushable
+  // commit. Computing it per render snapped Darwin back to the spawn whenever
+  // he pushed a rock. It only has to be right when the spawn changes.
+  const spawnPosition = useMemo(
+    () => [startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on the spawn, not the adapter
+    [spawnKey],
+  );
+
   return (
-    <group ref={group} position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]} rotation={[0, Math.PI, 0]} userData={{
+    <group ref={group} position={spawnPosition} rotation={[0, Math.PI, 0]} userData={{
       renderSource: 'player:darwin-controller',
       renderLabel: 'Darwin controller helpers',
       renderKind: 'player-controller',
@@ -3539,7 +3569,7 @@ export function PlayerController({
         type="kinematicPosition"
         colliders={false}
         enabledRotations={[false, false, false]}
-        position={[startX, collisionAdapter.spawnY(startX, startZ) + SPAWN_DROP.height, startZ]}
+        position={spawnPosition}
         userData={{ id: 'darwin', kind: 'player' }}
       >
         <PlayerPhysicsCollider colliderConfig={colliderConfig} colliderRef={characterColliderRef} />

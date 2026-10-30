@@ -29,6 +29,61 @@ const STRIDE_TIME_SCALE = {
   },
 };
 
+// Ground speed (m/s) at which each in-place gait clip keeps its planted foot
+// still when played at timeScale 1. Measured from the GLB by
+// scripts/measure-gait-strides.mjs; re-run it when a clip changes.
+//
+// These are what make the feet stick. Scaling a clip by speed / walkSpeed
+// assumed every clip matched its config speed, but the walk clip strides
+// 1.79 m/s against a 4.45 m/s walk, so Darwin skated about half his travel.
+const STRIDE_SPEED = {
+  darwin5: {
+    walk: 1.79,
+    tiredWalk: 1.8,
+    jog: 3.84,
+    run: 3.84,
+    grassRun: 5.83,
+    sprint: 6.3,
+    walkBackwards: 1.21,
+    runBackwards: 3.39,
+    jogBackwards: 3.15,
+    crouchWalk: 1.47,
+    crouchRun: 3.86,
+  },
+};
+
+// Forward gait bands for the free-handed default. Each clip only looks right
+// over a limited range of playback rates, so the clip is chosen by speed and
+// then played at the stride-matched rate. The overlap is hysteresis, so a
+// speed sitting on a boundary does not flicker between cycles.
+const FORWARD_GAITS = [
+  { clip: 'walk', below: 2.45, above: null },
+  { clip: 'jog', below: 5.2, above: 2.2 },
+  { clip: 'sprint', below: null, above: 4.9 },
+];
+
+export function strideMatchedTimeScale(modelAssetId, clip, speed, { min = 0.6, max = 1.4 } = {}) {
+  const strideSpeed = STRIDE_SPEED[modelAssetId]?.[clip];
+  if (!strideSpeed) return null;
+  return THREE.MathUtils.clamp(speed / strideSpeed, min, max);
+}
+
+// Picks the forward cycle for `speed`, staying in `previousClip` while the
+// speed is still inside its band.
+export function forwardGaitForSpeed(speed, previousClip = null) {
+  const current = FORWARD_GAITS.find(gait => gait.clip === previousClip);
+  if (current
+    && (current.below === null || speed < current.below)
+    && (current.above === null || speed > current.above)) {
+    return current.clip;
+  }
+  const index = FORWARD_GAITS.findIndex((gait, i) => {
+    const next = FORWARD_GAITS[i + 1];
+    return !next || speed < (gait.below + next.above) / 2;
+  });
+  return FORWARD_GAITS[Math.max(0, index)].clip;
+}
+
 const FOOT_CONTACT_PROFILES = {
   walk: { left: 0.12, right: 0.62, width: 0.18 },
   holdWalk: { left: 0.12, right: 0.62, width: 0.18 },

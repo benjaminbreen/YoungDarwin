@@ -36,6 +36,7 @@ import { findAmbientFieldTarget } from '../fieldActions';
 import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
 import { getPlayerHarnessBridge } from './playerHarnessBridge';
 import { auditRenderIntegrity } from './renderIntegrity';
+import { recordMotion } from './motionRecorder';
 
 const HARNESS_VERSION = 4;
 const FULL_CONTENT_PHASE = 6;
@@ -1048,6 +1049,9 @@ function createHarnessApi() {
       }, timeoutMs, 'player settled').then(() => true, () => false);
     },
     getMotionState: () => JSON.parse(JSON.stringify(getPlayerHarnessBridge()?.getMotionState?.() ?? null)),
+    // Replays timed key presses and samples the player every frame; see
+    // motionRecorder.js. Used by `play move` to measure movement feel.
+    recordMotion: (steps, options) => recordMotion(steps, options),
     nearby: (options = {}) => listNearbyTargets(options),
     // Records every change to the named store fields with a short stack, so
     // "what closed the examine view?" is a lookup instead of a guess.
@@ -1080,6 +1084,14 @@ function createHarnessApi() {
     },
     // Raw store fields by name, JSON-safe (functions and cycles dropped), for
     // questions the curated snapshot does not answer.
+    // Calls a store action by name, for reproducing a state change directly
+    // (e.g. `api.storeAction('movePushableObstacle', id, { x: 0.1, z: 0 })`).
+    storeAction: (name, ...args) => {
+      const action = useThreeGameStore.getState()[name];
+      if (typeof action !== 'function') return { error: `No store action "${name}".` };
+      const result = action(...args);
+      return result === undefined ? { called: name } : result;
+    },
     store: (...keys) => {
       const state = useThreeGameStore.getState();
       const picked = keys.length ? Object.fromEntries(keys.map(key => [key, state[key]])) : Object.fromEntries(

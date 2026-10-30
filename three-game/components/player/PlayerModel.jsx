@@ -10,7 +10,7 @@ import { ModelAsset } from '../assets/ModelAsset';
 import { useTrackedGLTF } from '../assets/gltfCachePolicy';
 import { PLAYER, SPRINT, SWIM } from './playerConfig';
 import { attachToBone } from './handAttachment';
-import { calibratedStrideTimeScale } from './gaitProfiles';
+import { calibratedStrideTimeScale, forwardGaitForSpeed, strideMatchedTimeScale } from './gaitProfiles';
 import { darwin5ClipDuration } from './darwin5AnimationManifest.mjs';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
@@ -1153,6 +1153,8 @@ export function NaturalistModel({
     };
   }, [motionRef]);
 
+  // Last forward gait cycle, for the hysteresis in forwardGaitForSpeed.
+  const forwardGaitRef = useRef(null);
   const selectAnimation = useCallback(() => {
     const status = statusRef.current;
     const speed = Number.isFinite(motionRef.current.animationSpeed)
@@ -1397,6 +1399,19 @@ export function NaturalistModel({
     // Carrying a handheld tool (net/snare/hammer/knife): held walk, paralleling the rifle set.
     if (holdingTool && (motionRef.current.walking || motionRef.current.running)) {
       return { clip: 'holdWalk', timeScale: stride('holdWalk', Math.max(0.7, walkScale)) };
+    }
+    // Free-handed forward travel: the cycle follows actual speed and plays at
+    // the stride-matched rate, so the planted foot stays planted. Stairs and
+    // shin-deep water keep their dedicated clips below.
+    if (modelAssetId === 'darwin5'
+      && (motionRef.current.running || motionRef.current.walking)
+      && Math.abs(groundPitch) <= STAIR_PITCH
+      && (motionRef.current.wadeDepth || 0) <= 0.16) {
+      const gait = forwardGaitForSpeed(speed, forwardGaitRef.current);
+      forwardGaitRef.current = gait;
+      const tired = motionRef.current.tiredRun || status.fatigue >= PLAYER.tiredRunFatigue;
+      const clip = tired ? (gait === 'walk' ? 'tiredWalk' : 'jog') : gait;
+      return { clip, timeScale: strideMatchedTimeScale(modelAssetId, clip, speed) };
     }
     if (motionRef.current.running) {
       if (groundPitch > STAIR_PITCH) return { clip: 'runUpStairs', timeScale: stride('run', runScale) };

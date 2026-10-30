@@ -59,6 +59,7 @@ requestAnimationFrame, so the game crawls and synthetic keys get lost.
 | `errors [all]` | console errors since the last call; other commands report `newConsoleErrors` |
 | `fps [ms]` | frame-time sample (fps, p50, p95, worst) |
 | `wait ms`, `run <file.json>`, `scenario <name|all>` | pause; script of `[command, ...args, {opts}]` rows; saved scenario from a fresh page |
+| `move [drill] [--at=x,z --heading=rad] [--film]` | timed key drill with per-frame motion record (see Movement drills); no name lists them |
 
 Targets (`near`, `face`, `walkto`) accept an exact id from `nearby`, a category
 (`rock`, `specimen`, `unexamined`, `npc`, `obstacle`), a substring of an id,
@@ -70,6 +71,7 @@ kind or name, or `{ "x": .., "z": .. }` through `eval`.
   every change to those store fields with a short stack. This found what was
   closing and not opening the examine view; use it instead of guessing.
 - `api.store('key', ...)`: raw store fields, JSON-safe.
+- `api.storeAction('name', ...args)`: call a store action directly.
 - `api.getMotionState()`: the player's current action (`stopWalking`,
   `jumpDown`, …), jump phase, speed and E-key route. An action that is playing
   swallows input, so check this when a key "does nothing".
@@ -91,6 +93,25 @@ npm run play -- scenario examine-with-tool
 A scenario is an array of `[command, ...args]` rows, with an optional trailing
 options object: `["expect", "api.getPrompt().fieldAction?.label", { "match": "^Examine " }]`.
 Add one whenever you fix something you had to play to see.
+
+## Movement drills
+
+```bash
+npm run play -- move                       # list drills
+npm run play -- move run --at=32.08,22.57 --heading=1.8136 --film
+```
+
+A drill (`scripts/play-move-drills.mjs`) is a timed list of key presses
+replayed through real keydown/keyup events while `api.recordMotion` samples
+every frame: ground speed, facing, camera yaw, action, clip and clip rate, and
+the toe bones. The summary in `test-results/play/move/<drill>-<id>.json` gives
+start latency, stop time and distance, time locked in an action, a clip
+timeline, and foot slide (how fast a planted toe moves in the world; under
+~1 m/s reads as planted). `--film` adds a contact sheet from a CDP screencast.
+Start the session with `--params={"modelAnimationDebug":"1"}` or the clip
+columns are empty. When a gait clip changes, re-measure its stride speed with
+`node scripts/measure-gait-strides.mjs` and update `STRIDE_SPEED` in
+`gaitProfiles.js`.
 
 ## Region sweep
 
